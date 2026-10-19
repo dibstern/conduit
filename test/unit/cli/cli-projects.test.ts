@@ -731,26 +731,19 @@ describe("showProjectDetail", () => {
 	it("back returns to project list", async () => {
 		const io = createMockIO();
 		const projects = [makeProject({ slug: "p1", path: "/a" })];
-		let callCount = 0;
-		const opts = defaultOpts(io, {
-			getProjects: () => {
-				callCount++;
-				if (callCount > 0) {
-					setTimeout(() => io.stdin.emit("data", "\x03"), 30);
-				}
-				return projects;
-			},
-		});
-
-		void showProjectDetail(opts, "p1", projects);
+		const onBack = vi.fn();
+		const opts = defaultOpts(io, { getProjects: () => projects, onBack });
+		const menuPromise = showProjectDetail(opts, "p1", projects);
 		await tick();
-
-		// Press Backspace for "Back"
+		const beforeBack = io.output.length;
 		await sendKeys(io.stdin, ["\x7f"]);
-		await tick();
-
-		// Should re-render project list (getProjects called again)
-		expect(callCount).toBeGreaterThanOrEqual(1);
+		const transcript = stripAnsi(io.output.slice(beforeBack).join(""));
+		expect(transcript).toContain("Projects");
+		expect(transcript).toContain("3 sessions");
+		expect(transcript).toContain("/a");
+		await sendKeys(io.stdin, ["\x1b"]);
+		await menuPromise;
+		expect(onBack).toHaveBeenCalledOnce();
 	});
 
 	it("shows 'Change title' when project has existing title", async () => {

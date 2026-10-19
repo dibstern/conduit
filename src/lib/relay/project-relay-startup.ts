@@ -1,19 +1,19 @@
-import { SqlClient } from "@effect/sql";
-import { Effect, Exit, Option, Runtime } from "effect";
+import { Effect, Exit, Option, Schedule } from "effect";
+import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
-import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
+import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
-import { backgroundOpenCodeAPI } from "../domain/relay/Layers/relay-core-layers.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import type { ProjectSettingsTag } from "../domain/relay/Services/project-settings.js";
+import { makeEventSinkFactory } from "../domain/relay/Services/provider-turn-dispatch.js";
 import { RelayStatusSnapshotTag } from "../domain/relay/Services/relay-status-snapshot.js";
 import { resolveOrphanedClaudePermissions } from "../domain/relay/Services/resolve-orphaned-claude-permissions.js";
 import { restoreClaudeQuestionsFromStore } from "../domain/relay/Services/restore-claude-questions.js";
 import {
-	ConfigTag,
+	type ConfigTag,
 	type LoggerTag,
 	type OrchestrationEngineTag,
 	PollerManagerTag,
@@ -39,15 +39,22 @@ import {
 	PollerPubSubTag,
 	PollerStateTag,
 } from "../domain/relay/Services/session-status-poller.js";
+import {
+	makeSessionOpenCodeClient,
+	SessionWorkspaceTag,
+} from "../domain/relay/Services/session-workspace.js";
 import { SSEStreamTag } from "../domain/relay/Services/sse-stream-service.js";
 import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
+import { makeFailTurn } from "../domain/relay/Services/turn-failure.js";
 import * as Failure from "../effect/failure-classification.js";
+import { ENV } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { getOrchestrationLayer } from "../provider/orchestration-wiring.js";
 import { RunnerProviderInstance } from "../provider/runner/runner-provider-instance.js";
+import { runningRunnerCommands } from "../provider/runner/runner-recovery.js";
 import { makeWsRpcWebSocketHandler } from "../server/ws-rpc-handler.js";
 import type { ProjectRelayConfig } from "../types.js";
 import { wireMonitoringEffect } from "./monitoring-wiring.js";
@@ -112,9 +119,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 		const translator = yield* TranslatorTag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const rpcWsHandler = yield* makeWsRpcWebSocketHandler({
-			context: Effect.suspend(() =>
-				Effect.map(relayManagedRuntime.runtimeEffect, (value) => value.context),
-			),
+			context: Effect.suspend(() => relayManagedRuntime.contextEffect),
 			runFork: relayManagedRuntime.runFork,
 		});
 		const statusSnapshot = yield* RelayStatusSnapshotTag;
@@ -142,7 +147,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 		if (!(yield* projectionRunner.isRecovered()))
 			yield* projectionRunner.recover();
 		const backfilled = yield* backfillSessionPicks().pipe(
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.sync(() => {
 					log.warn(
 						`Could not backfill session picks: ${formatErrorDetail(error)}`,
@@ -155,7 +160,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 			log.info(`Backfilled picks for ${backfilled} session(s)`);
 		// Restore only the durable pick; past turns never override it.
 		const restored = yield* restoreSessionSettings().pipe(
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.sync(() => {
 					log.warn(
 						`Could not restore session settings: ${formatErrorDetail(error)}`,
@@ -169,7 +174,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 				`Restored permission modes for ${restored.permissionModes} session(s)`,
 			);
 		const rejectedPermissions = yield* resolveOrphanedClaudePermissions.pipe(
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.sync(() => {
 					log.warn(
 						`Could not reject Claude permissions left pending by a crash: ${formatErrorDetail(error)}`,
@@ -186,51 +191,62 @@ function acquireStartupServices(inputs: StartupInputs) {
 			);
 		}
 		const sessionManagerService = yield* SessionManagerServiceTag;
-		const runFork = Runtime.runFork(
-			yield* Effect.runtime<
+		const runFork = Effect.runForkWith(
+			yield* Effect.context<
 				| SessionManagerServiceTag
-				| Effect.Effect.Context<ReturnType<typeof announceBackgroundWork>>
+				| Effect.Services<ReturnType<typeof announceBackgroundWork>>
 			>(),
 		);
 		// Read-model only: creating a first session could call OpenCode, so attach
 		// creates it instead (getDefaultSessionId).
 		const readQueryEffect = yield* ReadQueryEffectTag;
-		const sessionsResult = yield* Effect.either(readPersistedStartupSessions);
-		if (sessionsResult._tag === "Right" && sessionsResult.right.count > 0)
-			yield* statusSnapshot.setSessionCount(sessionsResult.right.count);
-		if (sessionsResult._tag === "Left")
+		const sessionsResult = yield* Effect.result(readPersistedStartupSessions);
+		if (sessionsResult._tag === "Success" && sessionsResult.success.count > 0)
+			yield* statusSnapshot.setSessionCount(sessionsResult.success.count);
+		if (sessionsResult._tag === "Failure")
 			yield* Effect.sync(() =>
 				log.warn(
-					`Session list unavailable at startup: ${formatErrorDetail(sessionsResult.left)}`,
+					`Session list unavailable at startup: ${formatErrorDetail(sessionsResult.failure)}`,
 				),
 			);
 		const sessionId =
-			(sessionsResult._tag === "Right"
-				? sessionsResult.right.sessionId
+			(sessionsResult._tag === "Success"
+				? sessionsResult.success.sessionId
 				: undefined) ?? "";
 		yield* PollerStateTag;
 		yield* PollerPubSubTag;
 		const statusPoller = yield* StatusPollerTag;
 		const pollerManager = yield* PollerManagerTag;
+		const sessionClient = yield* makeSessionOpenCodeClient;
 		const instances = yield* OpenCodeInstancesTag;
+		const workspace = yield* SessionWorkspaceTag;
+		const readOpenCodeMessages = (
+			sessionId: string,
+			instanceId?: string,
+			signal?: AbortSignal,
+			directory?: string,
+		) =>
+			Effect.gen(function* () {
+				const client = yield* sessionClient(sessionId, instanceId, directory);
+				if (Option.isNone(client))
+					return yield* Effect.fail(
+						new Error(`Session ${sessionId} has no OpenCode instance`),
+					);
+				return yield* Effect.tryPromise({
+					try: () =>
+						client.value.session.messages(
+							sessionId,
+							signal === undefined ? undefined : { signal },
+						),
+					catch: (cause) => cause,
+				});
+			}).pipe(Effect.scoped);
 		const pickContext = yield* Effect.context<
 			AccountDirectory | ConfigTag | LoggerTag | OrchestrationEngineTag
 		>();
 		const opencodeRuntimeIngress = yield* makeEffectOpenCodeRuntimeIngress(
 			log.child("opencode-runtime-ingress"),
-			(sessionId, instanceId, signal) =>
-				Effect.gen(function* () {
-					const client = yield* instances.ifRunning(instanceId);
-					if (Option.isNone(client)) {
-						// Empty history would incorrectly mark the backfill complete.
-						return yield* Effect.fail(
-							new Error(`OpenCode instance "${instanceId}" is not running`),
-						);
-					}
-					return yield* Effect.tryPromise(() =>
-						client.value.session.messages(sessionId, { signal }),
-					);
-				}).pipe(Effect.scoped),
+			readOpenCodeMessages,
 			(sessionId, messageId) =>
 				orchestration.openCodeInstance.inputIdForUserEcho(sessionId, messageId),
 			(instanceId, parentId) =>
@@ -243,7 +259,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 					});
 				}).pipe(
 					Effect.provide(pickContext),
-					Effect.catchAll((cause) =>
+					Effect.catch((cause) =>
 						Effect.sync(() => {
 							log.warn("Could not resolve native OpenCode session pick", {
 								instanceId,
@@ -254,6 +270,31 @@ function acquireStartupServices(inputs: StartupInputs) {
 						}),
 					),
 				),
+		);
+		const accounts = yield* (yield* AccountDirectory).snapshot;
+		const recoveryCommands = yield* runningRunnerCommands(
+			sql,
+			"opencode",
+			(id) => accounts.accounts.find((account) => account.id === id)?.driver,
+		);
+		const recoverOpenCodeCommands = opencodeRuntimeIngress.recoverCommands(
+			recoveryCommands,
+			(instanceId, sessionId) =>
+				Effect.gen(function* () {
+					const directory = yield* workspace.withLaunch(
+						workspace.get(sessionId),
+					);
+					const client = yield* instances.ifRunning(instanceId, directory);
+					if (Option.isNone(client))
+						return (yield* instances.isManagedStopped(instanceId))
+							? ("stopped" as const)
+							: undefined;
+					return yield* Effect.tryPromise({
+						try: () => client.value.session.statuses(),
+						catch: (cause) => cause,
+					});
+				}).pipe(Effect.scoped),
+			yield* makeFailTurn,
 		);
 		layers.setHistoryIngress(opencodeRuntimeIngress);
 		if (config.signal?.aborted) {
@@ -277,19 +318,24 @@ function acquireStartupServices(inputs: StartupInputs) {
 			sessionId,
 			orchestration,
 			statusPoller,
+			recoverOpenCodeCommands,
 			pollerManager,
 			opencodeRuntimeIngress,
+			readOpenCodeMessages,
 		};
 	});
 }
 
-type AcquiredStartupServices = Effect.Effect.Success<
+type AcquiredStartupServices = Effect.Success<
 	ReturnType<typeof acquireStartupServices>
 >;
 
 function wireStartupCallbacks(services: AcquiredStartupServices) {
 	const { orchestration, sseStream } = services;
 	return Effect.gen(function* () {
+		yield* services.statusPoller.on("changed", () => {
+			services.runFork(services.recoverOpenCodeCommands);
+		});
 		yield* Effect.sync(() => {
 			orchestration.wireSSEToInstance((event, handler) => {
 				sseStream.on(event, handler);
@@ -308,9 +354,7 @@ function startMonitoringAndPollers(
 	return Effect.gen(function* () {
 		const monitoring = yield* wireMonitoringEffect({
 			// Poller seeding is background work: it must not restart OpenCode.
-			client: yield* backgroundOpenCodeAPI.pipe(
-				Effect.provideService(ConfigTag, config),
-			),
+			readMessages: services.readOpenCodeMessages,
 			wsHandler,
 			pollerManager,
 			sseStream,
@@ -354,7 +398,7 @@ function startMonitoringAndPollers(
 	});
 }
 
-type StartupMonitoring = Effect.Effect.Success<
+type StartupMonitoring = Effect.Success<
 	ReturnType<typeof startMonitoringAndPollers>
 >;
 
@@ -365,7 +409,6 @@ function startSseConsumers(
 ) {
 	const { config, sseLog, pipelineLog } = inputs;
 	const {
-		api,
 		translator,
 		wsHandler,
 		statusPoller,
@@ -375,6 +418,18 @@ function startSseConsumers(
 	} = services;
 	return Effect.gen(function* () {
 		const terminal = yield* OpenCodeTerminalServiceTag;
+		const workspace = yield* SessionWorkspaceTag;
+		const instances = yield* OpenCodeInstancesTag;
+		const replyPermission =
+			(instanceId: string) =>
+			(sessionId: string, permissionId: string, response: "once") =>
+				Effect.gen(function* () {
+					const directory = yield* workspace.get(sessionId);
+					const client = yield* instances.use(instanceId, directory);
+					yield* Effect.tryPromise(() =>
+						client.permission.reply(sessionId, permissionId, response),
+					);
+				}).pipe(Effect.scoped);
 		const sseConsumerDeps = {
 			translator,
 			wsHandler,
@@ -383,11 +438,7 @@ function startSseConsumers(
 			}),
 			log: sseLog,
 			pipelineLog,
-			replyPermission: (
-				sessionId: string,
-				permissionId: string,
-				response: "once",
-			) => api.permission.reply(sessionId, permissionId, response),
+			replyPermission: replyPermission(MANAGED_OPENCODE_ACCOUNT_ID),
 			statusPoller,
 			slug: config.slug,
 			providerInstanceId: MANAGED_OPENCODE_ACCOUNT_ID,
@@ -414,6 +465,7 @@ function startSseConsumers(
 					{
 						...sseConsumerDeps,
 						providerInstanceId: instanceId,
+						replyPermission: replyPermission(instanceId),
 					},
 					stream,
 				);
@@ -439,7 +491,29 @@ export async function startProjectRelay(inputs: StartupInputs) {
 				const { stopMonitoring } = monitoring;
 				yield* Effect.gen(function* () {
 					yield* startSseConsumers(inputs, services, monitoring);
+					yield* services.recoverOpenCodeCommands;
 					yield* (yield* SessionSetupTag).recover;
+					const makeInteractions = yield* makeEventSinkFactory;
+					// Recovery must settle crashed turns before an outbox claim can
+					// resend them. The runtime scope stops this fiber before providers
+					// and persistence are released, including failed startup.
+					yield* Effect.forkIn(
+						services.orchestration.drainSideEffects(makeInteractions).pipe(
+							Effect.catchCause((cause) =>
+								Failure.isInterruptedOnly(cause)
+									? Effect.interrupt
+									: Effect.logError(
+											"Provider command outbox drain failed",
+											cause,
+										),
+							),
+							// A sweep may wait for whole turns. Keep scanning newly due
+							// sessions while the reactor holds each active session's lease.
+							Effect.forkIn(relayManagedRuntime.scope),
+							Effect.repeat(Schedule.spaced(ENV.outboxDrainIntervalMs)),
+						),
+						relayManagedRuntime.scope,
+					);
 					// Providers are registered and recovered; queued inputs may drain.
 					yield* (yield* SessionInboxTag).start;
 				}).pipe(
@@ -469,8 +543,20 @@ export async function startProjectRelay(inputs: StartupInputs) {
 					// The sidebar and open family feeds follow the stamped row.
 					announceBackgroundWork: (changedSessionId: string) => {
 						runFork(
-							announceBackgroundWork(changedSessionId).pipe(
-								Effect.catchAllCause((cause) =>
+							Effect.gen(function* () {
+								yield* announceBackgroundWork(changedSessionId);
+								if (
+									config.requestWorktreeCleanup &&
+									services.activity.background.backgroundOf(
+										changedSessionId,
+									) === undefined &&
+									(yield* sql<{ settled_at: number | null }>`
+										SELECT settled_at FROM sessions WHERE id = ${changedSessionId}
+									`)[0]?.settled_at != null
+								)
+									yield* config.requestWorktreeCleanup();
+							}).pipe(
+								Effect.catchCause((cause) =>
 									Effect.sync(() =>
 										log.warn(
 											`Failed to announce background work: ${Failure.renderCause(cause)}`,

@@ -10,21 +10,12 @@ import {
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Socket } from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect, Layer, Option, Queue, Stream } from "effect";
+import { RpcClient, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import { describe, expect, it, vi } from "vitest";
 import { run } from "../../../src/bin/cli-core.js";
-import {
-	AddInstance,
-	GetInstances,
-	GetProjects,
-	GetStatus,
-	SetDefaultModel,
-	Shutdown,
-	UpdateInstance,
-	WsRpcGroup,
-} from "../../../src/lib/contracts/ws-rpc.js";
+import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { makeDaemonRpcSocketLayer } from "../../../src/lib/daemon/daemon-rpc-server.js";
 import { startForegroundDaemon } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
@@ -57,8 +48,7 @@ describe("CLI and browser daemon RPC parity", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const context = yield* Effect.context<
-							| Layer.Layer.Context<typeof WsRpcServerLayer>
-							| RpcSubscriptionScopeTag
+							Layer.Services<typeof WsRpcServerLayer> | RpcSubscriptionScopeTag
 						>();
 						yield* Layer.build(
 							makeDaemonRpcSocketLayer(
@@ -73,14 +63,12 @@ describe("CLI and browser daemon RPC parity", () => {
 						).pipe(Effect.forkScoped);
 						yield* Queue.takeBetween(tab, 2, 2); // snapshot + synchronized
 						const result = yield* Effect.promise(() =>
-							sendRpcRequest(
-								socketPath,
-								new SetDefaultModel({
-									projectSlug: "project",
-									provider: "openai",
-									model: "gpt-4",
-								}),
-							),
+							sendRpcRequest(socketPath, {
+								_tag: "SetDefaultModel",
+								projectSlug: "project",
+								provider: "openai",
+								model: "gpt-4",
+							}),
 						);
 						expect(result).toMatchObject({
 							projectSlug: "project",
@@ -127,7 +115,7 @@ describe("CLI and browser daemon RPC parity", () => {
 						}).pipe(
 							Layer.provideMerge(RpcSubscriptionScopeLive),
 							Layer.provideMerge(
-								Layer.succeed(SessionDirectory, {
+								Layer.succeed(SessionDirectory)({
 									projectOf: () => Effect.succeed(Option.none()),
 								}),
 							),
@@ -159,11 +147,11 @@ describe("CLI and browser daemon RPC parity", () => {
 				keepAwake: false,
 				smartDefault: false,
 			});
-			const status = await sendRpcRequest(socketPath, new GetStatus({}));
+			const status = await sendRpcRequest(socketPath, { _tag: "GetStatus" });
 			expect(status.port).toBeGreaterThan(0);
-			// Only browser status feeds count; this CLI IPC request is not a client.
+			// CLI IPC has no browser status subscription.
 			expect(status.clientCount).toBe(0);
-			expect(await sendRpcRequest(socketPath, new Shutdown({}))).toEqual({
+			expect(await sendRpcRequest(socketPath, { _tag: "Shutdown" })).toEqual({
 				ok: true,
 			});
 			await daemon.stopped;
@@ -251,15 +239,16 @@ describe("CLI and browser daemon RPC parity", () => {
 			}
 			// Only the built-in Claude account; no invalid instance was registered.
 			expect(
-				(await sendRpcRequest(socketPath, new GetInstances({}))).instances.map(
-					({ id }) => id,
-				),
+				(
+					await sendRpcRequest(socketPath, { _tag: "GetInstances" })
+				).instances.map(({ id }) => id),
 			).toEqual(["claude"]);
 			await expect(
-				sendRpcRequest(
-					socketPath,
-					new UpdateInstance({ instanceId: "missing", name: "updated" }),
-				),
+				sendRpcRequest(socketPath, {
+					_tag: "UpdateInstance",
+					instanceId: "missing",
+					name: "updated",
+				}),
 			).rejects.toMatchObject({ message: 'Instance "missing" not found' });
 		} finally {
 			await daemon?.stop();
@@ -297,22 +286,19 @@ describe("CLI and browser daemon RPC parity", () => {
 				const address = server.address();
 				if (!address || typeof address === "string")
 					throw new Error("Expected HTTP test listener");
-				await sendRpcRequest(
-					socketPath,
-					new AddInstance({
-						name: index === 0 ? "unhealthy" : "healthy",
-						managed: false,
-						url: `http://127.0.0.1:${address.port}`,
-					}),
-				);
+				await sendRpcRequest(socketPath, {
+					_tag: "AddInstance",
+					name: index === 0 ? "unhealthy" : "healthy",
+					managed: false,
+					url: `http://127.0.0.1:${address.port}`,
+				});
 			}
 			await daemon.stop();
 			daemon = await startForegroundDaemon(options);
-			// Both persisted instances come back, unprobed: startup starts
-			// OpenCode on first use only.
+			// Restored OpenCode accounts remain stopped until first use.
 			expect(
-				(await sendRpcRequest(socketPath, new GetInstances({}))).instances
-					.filter((instance) => instance.driver === "opencode")
+				(await sendRpcRequest(socketPath, { _tag: "GetInstances" })).instances
+					.filter(({ driver }) => driver === "opencode")
 					.map(({ id, status }) => ({ id, status }))
 					.sort((left, right) => left.id.localeCompare(right.id)),
 			).toEqual([
@@ -340,8 +326,9 @@ describe("CLI and browser daemon RPC parity", () => {
 				isDaemonRunning: async () => true,
 				sendRPC: (request) => sendRpcRequest(socketPath, request),
 			});
-			const projects = (await sendRpcRequest(socketPath, new GetProjects({})))
-				.projects;
+			const projects = (
+				await sendRpcRequest(socketPath, { _tag: "GetProjects" })
+			).projects;
 			expect(projects).toHaveLength(1);
 			expect(projects[0]).not.toHaveProperty("instanceId");
 			expect(output).toBe(`Project added: ${projects[0]?.slug}\n`);
@@ -441,7 +428,7 @@ describe("CLI and browser daemon RPC parity", () => {
 			);
 			expect(browserResult.projects).toEqual([]);
 			expect(
-				(await sendRpcRequest(socketPath, new GetProjects({}))).projects,
+				(await sendRpcRequest(socketPath, { _tag: "GetProjects" })).projects,
 			).toEqual([]);
 			await daemon.stop();
 			daemon = undefined;
@@ -451,7 +438,7 @@ describe("CLI and browser daemon RPC parity", () => {
 			expect(persisted).toMatchObject({ projects: [] });
 			daemon = await startForegroundDaemon(options);
 			expect(
-				(await sendRpcRequest(socketPath, new GetProjects({}))).projects,
+				(await sendRpcRequest(socketPath, { _tag: "GetProjects" })).projects,
 			).toEqual([]);
 		} finally {
 			await daemon?.stop();

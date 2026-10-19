@@ -16,7 +16,7 @@
 // the stream socket carries — and the client acks — one frame per window
 // rather than one per write. Input is never coalesced (see PtyInput).
 
-import { type Chunk, Duration, Effect, Queue, Stream } from "effect";
+import { Duration, Effect, Queue, Stream } from "effect";
 import type { PtyEnvelope, PtyEvent } from "../../../contracts/ws-rpc.js";
 import {
 	OpenCodeTerminalServiceTag,
@@ -32,9 +32,7 @@ const PTY_COALESCE_MAX_EVENTS = 512;
  * for the same terminal when that envelope is output; a `replace` restarts it.
  * Each terminal keeps its own order; independent terminals may interleave.
  */
-export const coalescePtyEvents = (
-	events: Chunk.Chunk<PtyEvent>,
-): PtyEvent[] => {
+export const coalescePtyEvents = (events: readonly PtyEvent[]): PtyEvent[] => {
 	const merged: PtyEvent[] = [];
 	const latest = new Map<string, number>();
 	for (const event of events) {
@@ -67,7 +65,7 @@ export const subscribePtys = (): Stream.Stream<
 	TerminalServiceError,
 	OpenCodeTerminalServiceTag
 > =>
-	Stream.unwrapScoped(
+	Stream.unwrap(
 		Effect.gen(function* () {
 			const terminal = yield* OpenCodeTerminalServiceTag;
 			const discovered = yield* terminal.list();
@@ -76,7 +74,7 @@ export const subscribePtys = (): Stream.Stream<
 				Effect.sync(() => ({
 					rows: terminal.snapshot(),
 					unsubscribe: terminal.subscribe((event) =>
-						Queue.unsafeOffer(queue, event),
+						Queue.offerUnsafe(queue, event),
 					),
 				})),
 				({ unsubscribe }) => Effect.sync(unsubscribe),
@@ -95,7 +93,8 @@ export const subscribePtys = (): Stream.Stream<
 				Stream.make(snapshot, { _tag: "synchronized" } as const),
 				Stream.fromQueue(queue).pipe(
 					Stream.groupedWithin(PTY_COALESCE_MAX_EVENTS, PTY_COALESCE_WINDOW),
-					Stream.mapConcat(coalescePtyEvents),
+					Stream.map(coalescePtyEvents),
+					Stream.flattenIterable,
 				),
 			);
 		}),

@@ -18,11 +18,11 @@
 //   complete daemon output plus daemon.log contain no BUSY/LOCKED text.
 // - An RPC fails under load: every input.submit returns ok and every
 //   DeleteSession resolves; a rejected RPC throws and fails the test.
-// - A write is dropped or duplicated under contention: each
-//   session's persisted per-type event counts equal the baseline's, its
-//   thinking.delta and turn.completed counts equal the replayed trace's
-//   thinking_delta and result frames (the replay emits every committed frame
-//   once per session), and its stream versions have no gaps.
+// - A write is dropped, duplicated or reordered under contention: each
+//   session's non-delta event counts equal the baseline's, its ordered text
+//   and thinking parts contain every native byte, its turn.completed count
+//   equals the replayed result frames, and its stream versions have no gaps.
+//   Delta row counts vary with the runner's 50 ms per-part coalescing window.
 // - Foreign keys are not enforced on the daemon's connection. PRAGMA
 //   foreign_keys read here would describe this reader's connection, not the
 //   daemon's, so enforcement is observed by its effect instead: DeleteSession
@@ -104,15 +104,13 @@ test("measures writes across three projects during six streaming turns", async (
 			// Use the send RPC directly so history reads in browser.send are not timed.
 			const [submitted, { done, completedAt }] = await Promise.all([
 				Effect.runPromise(
-					browser.rpc.input
-						.submit({
-							sessionId,
-							originId: browser.originId,
-							inputId: randomUUID(),
-							delivery: "queue",
-							text: "Run the recorded streaming turn.",
-						})
-						.pipe(Effect.timeout(60_000)),
+					browser.rpc["input.submit"]({
+						sessionId,
+						originId: browser.originId,
+						inputId: randomUUID(),
+						delivery: "queue",
+						text: "Run the recorded streaming turn.",
+					}).pipe(Effect.timeout(60_000)),
 				),
 				completion,
 			]);
@@ -222,9 +220,63 @@ test.describe("write contention", () => {
 				(line) =>
 					JSON.parse(line) as {
 						type: string;
-						event?: { delta?: { type?: string } };
+						event?: {
+							type?: string;
+							index?: number;
+							content_block?: {
+								type?: string;
+								text?: string;
+								thinking?: string;
+							};
+							delta?: { type?: string; text?: string; thinking?: string };
+						};
 					},
 			);
+		const nativeParts: {
+			type: "text" | "thinking";
+			text: string;
+			fragments: number;
+		}[] = [];
+		const activeParts = new Map<number, (typeof nativeParts)[number]>();
+		for (const { event } of trace) {
+			if (event?.type === "message_start") activeParts.clear();
+			if (event?.index === undefined) continue;
+			const block = event.content_block;
+			if (
+				event.type === "content_block_start" &&
+				(block?.type === "text" || block?.type === "thinking")
+			) {
+				const text = block.type === "text" ? block.text : block.thinking;
+				const part: (typeof nativeParts)[number] = {
+					type: block.type,
+					text: text ?? "",
+					fragments: text ? 1 : 0,
+				};
+				nativeParts.push(part);
+				activeParts.set(event.index, part);
+			}
+			const delta = event.delta;
+			if (
+				event.type === "content_block_delta" &&
+				(delta?.type === "text_delta" || delta?.type === "thinking_delta")
+			) {
+				const part = activeParts.get(event.index);
+				if (!part || `${part.type}_delta` !== delta.type)
+					throw new Error("Trace delta has no matching text or thinking part");
+				part.text +=
+					(delta.type === "text_delta" ? delta.text : delta.thinking) ?? "";
+				part.fragments++;
+			}
+		}
+		const submittedText = "Run the recorded streaming turn.";
+		const expectedParts = [
+			{ role: "user", type: "text", text: submittedText },
+			...nativeParts.map(({ type, text }) => ({
+				role: "assistant",
+				type,
+				text,
+			})),
+		];
 		const emitted = {
 			"thinking.delta": trace.filter(
 				(frame) => frame.event?.delta?.type === "thinking_delta",
@@ -251,20 +303,67 @@ test.describe("write contention", () => {
 						.all(sessionId),
 				).map((row) => [String(row["type"]), Number(row["n"])]),
 			);
+		const nonDeltaCounts = (counts: Record<string, number>) =>
+			Object.fromEntries(
+				Object.entries(counts).filter(
+					([type]) => type !== "text.delta" && type !== "thinking.delta",
+				),
+			);
+		const contentParts = (sessionId: string) => {
+			const parts: {
+				role: "user" | "assistant";
+				type: "text" | "thinking";
+				text: string;
+				fragments: number;
+			}[] = [];
+			let previousKey: string | undefined;
+			for (const row of read((db) =>
+				db
+					.prepare(
+						`SELECT events.sequence, events.type, events.data, messages.role FROM events
+						LEFT JOIN messages ON messages.id = json_extract(events.data, '$.messageId')
+							AND messages.session_id = events.session_id
+						WHERE events.session_id = ?
+							AND events.type IN ('text.delta', 'thinking.delta')
+						ORDER BY events.sequence`,
+					)
+					.all(sessionId),
+			)) {
+				const data = JSON.parse(String(row["data"])) as {
+					messageId: string;
+					partId: string;
+					text: string;
+				};
+				const role = row["role"];
+				if (role !== "user" && role !== "assistant")
+					throw new Error(
+						`Delta at sequence ${row["sequence"]} has no user or assistant message`,
+					);
+				const type = row["type"] === "text.delta" ? "text" : "thinking";
+				const key = JSON.stringify([data.messageId, data.partId, type]);
+				let part = parts.at(-1);
+				if (previousKey !== key || !part) {
+					part = { role, type, text: "", fragments: 0 };
+					parts.push(part);
+					previousKey = key;
+				}
+				part.text += data.text;
+				part.fragments++;
+			}
+			return parts;
+		};
 		const runTurn = async (browser: ProcessBrowser, sessionId: string) => {
 			const cursor = browser.frames.length;
 			const started = performance.now();
 			const [submitted, done] = await Promise.all([
 				Effect.runPromise(
-					browser.rpc.input
-						.submit({
-							sessionId,
-							originId: browser.originId,
-							inputId: randomUUID(),
-							delivery: "queue",
-							text: "Run the recorded streaming turn.",
-						})
-						.pipe(Effect.timeout(90_000)),
+					browser.rpc["input.submit"]({
+						sessionId,
+						originId: browser.originId,
+						inputId: randomUUID(),
+						delivery: "queue",
+						text: submittedText,
+					}).pipe(Effect.timeout(90_000)),
 				),
 				browser.waitForTurnEnd(sessionId, cursor, 90_000),
 			]);
@@ -311,7 +410,20 @@ test.describe("write contention", () => {
 			expect(counts).toEqual(last);
 		}).toPass({ timeout: 30_000, intervals: [500] });
 		const baseline = eventCounts(baselineId);
-		expect(baseline).toMatchObject(emitted);
+		expect(baseline).toMatchObject({
+			"turn.completed": emitted["turn.completed"],
+			"thinking.start": nativeParts.filter(({ type }) => type === "thinking")
+				.length,
+			"thinking.end": nativeParts.filter(({ type }) => type === "thinking")
+				.length,
+		});
+		expect(
+			contentParts(baselineId).map(({ role, type, text }) => ({
+				role,
+				type,
+				text,
+			})),
+		).toEqual(expectedParts);
 
 		const sessions: { label: string; browser: ProcessBrowser; id: string }[] =
 			[];
@@ -329,10 +441,28 @@ test.describe("write contention", () => {
 		const waveMs = performance.now() - waveStartedAt;
 		for (const { id } of sessions)
 			await expect
-				.poll(() => eventCounts(id), { timeout: 30_000 })
-				.toEqual(baseline);
+				.poll(
+					() => ({
+						events: nonDeltaCounts(eventCounts(id)),
+						parts: contentParts(id).map(({ role, type, text }) => ({
+							role,
+							type,
+							text,
+						})),
+					}),
+					{ timeout: 30_000 },
+				)
+				.toEqual({ events: nonDeltaCounts(baseline), parts: expectedParts });
 		const settledMs = performance.now() - waveStartedAt;
 		for (const id of [baselineId, ...sessions.map((session) => session.id)]) {
+			for (const [index, part] of contentParts(id).entries()) {
+				expect(part.fragments).toBeGreaterThan(0);
+				if (part.role === "user") expect(part.fragments).toBe(1);
+				else
+					expect(part.fragments).toBeLessThanOrEqual(
+						nativeParts[index - 1]?.fragments ?? 0,
+					);
+			}
 			const versions = read((db) =>
 				db
 					.prepare(
@@ -342,6 +472,11 @@ test.describe("write contention", () => {
 			);
 			expect(versions?.["span"]).toBe(versions?.["n"]);
 		}
+		const persistedTextParts = Object.fromEntries(
+			[{ label: "baseline", id: baselineId }, ...sessions].map(
+				({ label, id }) => [label, contentParts(id)],
+			),
+		);
 
 		const orphans = () =>
 			read((db) => db.prepare("PRAGMA foreign_key_check").all());
@@ -430,6 +565,9 @@ test.describe("write contention", () => {
 					concurrentSessions: sessions.length,
 					fixture,
 					emitted,
+					nativeTextParts: nativeParts,
+					expectedContentParts: expectedParts,
+					persistedTextParts,
 					baselineEventCounts: baseline,
 					sessionEventCounts: Object.fromEntries(
 						sessions.map(({ label, id }) => [label, eventCounts(id)]),

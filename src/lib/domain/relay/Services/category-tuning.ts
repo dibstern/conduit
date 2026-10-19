@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
-import { Effect, Schema } from "effect";
+import { Effect, Schema, Semaphore } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	CategorySchema,
 	type CategorySetContents,
@@ -38,10 +38,12 @@ interface CategoryTuningService {
 		readonly avoid?: readonly CategoryTuningHunk[];
 	}) => Effect.Effect<CategoryTuningProposal, WsRpcError>;
 }
-const probabilitiesSchema = Schema.Record({
-	key: Schema.String,
-	value: Schema.Number.pipe(Schema.between(0, 1)),
-});
+const probabilitiesSchema = Schema.Record(
+	Schema.String,
+	Schema.Number.pipe(
+		Schema.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+	),
+);
 type Probabilities = typeof probabilitiesSchema.Type;
 const responseSchema = Schema.Struct({
 	answers: Schema.Struct({
@@ -52,7 +54,7 @@ const rawProposalSchema = Schema.Struct({
 	hunks: Schema.Array(CategoryTuningHunkSchema),
 	rationale: Schema.String,
 });
-const sameCategory = Schema.equivalence(Schema.NullOr(CategorySchema));
+const sameCategory = Schema.toEquivalence(Schema.NullOr(CategorySchema));
 const routine = {
 	what: "Says what the agent will do next, restates the plan, acknowledges, or reports progress with nothing new",
 	examples: [
@@ -81,7 +83,7 @@ export const makeCategoryTuning = (options: {
 		const sql = yield* SqlClient.SqlClient;
 		const categories = yield* CategorySet;
 		const settings = yield* MessageSurfacingSettings;
-		const lock = yield* Effect.makeSemaphore(1);
+		const lock = yield* Semaphore.make(1);
 		const cache = new Map<string, Probabilities>();
 		let sampleIds: readonly string[] = [];
 		let sampleMarks: string | undefined;
@@ -92,9 +94,9 @@ export const makeCategoryTuning = (options: {
 			lock.withPermits(1)(
 				Effect.gen(function* () {
 					const current = yield* categories.current();
-					const set = yield* Schema.decodeUnknown(CategorySetContentsSchema)(
-						input,
-					);
+					const set = yield* Schema.decodeUnknownEffect(
+						CategorySetContentsSchema,
+					)(input);
 					yield* Effect.try(() => validateCategories(set.categories, current));
 					const criteria = categoryCriteriaKey(set);
 					const savedCriteria = categoryCriteriaKey(current);
@@ -168,8 +170,8 @@ export const makeCategoryTuning = (options: {
 							(yield* categories.criteriaAtVersion(part.set_version)) ===
 								criteria &&
 							part.probabilities
-								? yield* Schema.decodeUnknown(
-										Schema.parseJson(probabilitiesSchema),
+								? yield* Schema.decodeUnknownEffect(
+										Schema.fromJsonString(probabilitiesSchema),
 									)(part.probabilities).pipe(
 										Effect.orElseSucceed(() => undefined),
 									)
@@ -227,7 +229,7 @@ export const makeCategoryTuning = (options: {
 														),
 													),
 										),
-										Effect.flatMap(Schema.decodeUnknown(responseSchema)),
+										Effect.flatMap(Schema.decodeUnknownEffect(responseSchema)),
 										Effect.map(({ answers }) => answers.category.probabilities),
 										Effect.filterOrFail(
 											(answer) =>
@@ -253,10 +255,10 @@ export const makeCategoryTuning = (options: {
 													"Jev returned an invalid probability distribution",
 												),
 										),
-										Effect.either,
+										Effect.result,
 									);
-								if (answer._tag === "Right") {
-									probabilities = answer.right;
+								if (answer._tag === "Success") {
+									probabilities = answer.success;
 									cache.set(key, probabilities);
 									requiredCalls--;
 								} else
@@ -308,7 +310,7 @@ export const makeCategoryTuning = (options: {
 					});
 				const preferences = yield* settings.get;
 				const config = yield* Effect.suspend(() =>
-					loadDaemonConfigResult(options.configDir),
+					Effect.fromResult(loadDaemonConfigResult(options.configDir)),
 				).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)));
 				const launch = yield* Effect.try(() =>
 					resolveClaudeLaunchConfig(config),
@@ -357,12 +359,16 @@ export const makeCategoryTuning = (options: {
 													: "Opus could not propose changes. Try again.",
 								}),
 						),
-						Effect.timeoutFail({
+						Effect.timeoutOrElse({
 							duration: "60 seconds",
-							onTimeout: () =>
-								new WsRpcError({
-									message: "Timed out waiting for an Opus proposal. Try again.",
-								}),
+							orElse: () =>
+								Effect.fail(
+									(() =>
+										new WsRpcError({
+											message:
+												"Timed out waiting for an Opus proposal. Try again.",
+										}))(),
+								),
 						}),
 					);
 				const ids = new Set<string>();

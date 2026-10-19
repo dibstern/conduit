@@ -4,20 +4,30 @@ const characters = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 const characterCount = (text: string) => [...characters.segment(text)].length;
 
 export const CategorySchema = Schema.Struct({
-	id: Schema.String.pipe(Schema.pattern(/^[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*$/u)),
-	origin: Schema.Literal("builtin", "custom"),
+	id: Schema.String.pipe(
+		Schema.check(Schema.isPattern(/^[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*$/u)),
+	),
+	origin: Schema.Literals(["builtin", "custom"]),
 	label: Schema.String.pipe(
-		Schema.filter(
-			(label) => label.trim().length > 0 && characterCount(label) <= 24,
+		Schema.check(
+			Schema.makeFilter(
+				(label) => label.trim().length > 0 && characterCount(label) <= 24,
+			),
 		),
 	),
 	glyph: Schema.String.pipe(
-		Schema.filter(
-			(glyph) => glyph.trim().length > 0 && characterCount(glyph) === 1,
+		Schema.check(
+			Schema.makeFilter(
+				(glyph) => glyph.trim().length > 0 && characterCount(glyph) === 1,
+			),
 		),
 	),
-	colour: Schema.String.pipe(Schema.pattern(/^#(?:[\da-f]{3}|[\da-f]{6})$/i)),
-	weight: Schema.Number.pipe(Schema.between(0, 100)),
+	colour: Schema.String.pipe(
+		Schema.check(Schema.isPattern(/^#(?:[\da-f]{3}|[\da-f]{6})$/i)),
+	),
+	weight: Schema.Number.pipe(
+		Schema.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
+	),
 	retired: Schema.Boolean,
 	criteria: Schema.Struct({
 		what: Schema.String,
@@ -46,8 +56,8 @@ export const categoryCriteriaKey = (set: CategorySetContents): string =>
 	);
 
 export const CategorySetSchema = Schema.Struct({
-	version: Schema.NonNegativeInt.pipe(
-		Schema.lessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
+	version: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
+		Schema.check(Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER)),
 	),
 	categories: Schema.Array(CategorySchema),
 });
@@ -172,24 +182,24 @@ export const DEFAULT_CATEGORY_SET: CategorySet = {
 export class CategorySetRejected extends Schema.TaggedError<CategorySetRejected>()(
 	"CategorySetRejected",
 	{
-		reason: Schema.Literal("stale_version", "invalid_set"),
+		reason: Schema.Literals(["stale_version", "invalid_set"]),
 		message: Schema.String,
-		currentVersion: Schema.NonNegativeInt,
+		currentVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 	},
 ) {}
 
-export const SurfacingLevelSchema = Schema.Literal(
+export const SurfacingLevelSchema = Schema.Literals([
 	"hidden",
 	"all",
 	"balanced",
 	"key",
-);
+]);
 export type SurfacingLevel = typeof SurfacingLevelSchema.Type;
 export const SurfacingMarkSchema = Schema.Struct({
 	level: SurfacingLevelSchema,
 	category: Schema.optional(Schema.String),
 	reason: Schema.optional(Schema.String),
-	direction: Schema.optional(Schema.Literal("raise", "lower", "retype")),
+	direction: Schema.optional(Schema.Literals(["raise", "lower", "retype"])),
 });
 export type SurfacingMark = typeof SurfacingMarkSchema.Type;
 
@@ -203,9 +213,7 @@ export const SurfacingFeedbackEntrySchema = Schema.Struct({
 	turnId: Schema.NullOr(Schema.String),
 	ordinal: Schema.NullOr(Schema.Number),
 	text: Schema.String,
-	probabilities: Schema.NullOr(
-		Schema.Record({ key: Schema.String, value: Schema.Number }),
-	),
+	probabilities: Schema.NullOr(Schema.Record(Schema.String, Schema.Number)),
 	mark: SurfacingMarkSchema,
 	createdAt: Schema.Number,
 });

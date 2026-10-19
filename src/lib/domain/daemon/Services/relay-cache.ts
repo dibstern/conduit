@@ -6,9 +6,8 @@
 // Replaces the old ProjectRegistry bridge with Effect-native primitives:
 //   - Ref<HashMap<string, CacheEntry>> for ready/in-flight relays
 //   - Semaphore(1) to prevent duplicate creation on concurrent gets
-//   - Layer.scoped ties all ScopedRefs to the layer scope
+//   - Layer.effect ties all ScopedRefs to the layer scope
 
-import type { SqlError } from "@effect/sql/SqlError";
 import {
 	Context,
 	Data,
@@ -22,7 +21,9 @@ import {
 	Ref,
 	Scope,
 	ScopedRef,
+	Semaphore,
 } from "effect";
+import type { SqlError } from "effect/sql/SqlError";
 import type {
 	GlobalSettingTag,
 	WsRpcError,
@@ -51,6 +52,10 @@ export interface Relay {
 	) => Effect.Effect<number, Error | SqlError | SessionManagerError>;
 	archiveIdleSessions?: (
 		idleWindowMs: number,
+		now: number,
+	) => Effect.Effect<number, Error | SqlError | SessionManagerError>;
+	deleteArchivedSessions?: (
+		windowMs: number,
 		now: number,
 	) => Effect.Effect<number, Error | SqlError | SessionManagerError>;
 	slug: string;
@@ -105,15 +110,14 @@ export interface RelayCache {
 	invalidate: (slug: string) => Effect.Effect<void>;
 }
 
-export class RelayCacheTag extends Context.Tag("RelayCache")<
-	RelayCacheTag,
-	RelayCache
->() {}
+export class RelayCacheTag extends Context.Service<RelayCacheTag, RelayCache>()(
+	"RelayCache",
+) {}
 
 interface CacheEntry {
 	readonly scopedRef: ScopedRef.ScopedRef<Relay | null>;
 	readonly ready: Deferred.Deferred<Relay, RelayCacheError>;
-	readonly creationFiber: Deferred.Deferred<Fiber.RuntimeFiber<void, never>>;
+	readonly creationFiber: Deferred.Deferred<Fiber.Fiber<void, never>>;
 }
 
 type CacheMap = HashMap.HashMap<string, CacheEntry>;
@@ -125,7 +129,7 @@ const stopRelayFinalizer = (relay: Relay) =>
 		},
 		catch: (cause) => new RelayStopError({ slug: relay.slug, cause }),
 	}).pipe(
-		Effect.catchAll((error) =>
+		Effect.catch((error) =>
 			Effect.logError("relay stop failed during cache finalization", error),
 		),
 	);
@@ -137,12 +141,12 @@ const stopRelayFinalizer = (relay: Relay) =>
  * - Relay creation runs in a cancellable fiber, then ScopedRef.set installs
  *   relay.stop() as a finalizer so it runs on invalidation or shutdown
  * - A Semaphore(1) serializes get operations to prevent duplicate creation
- * - Layer.scoped ties all ScopedRefs to the layer scope
+ * - Layer.effect ties all ScopedRefs to the layer scope
  */
 export const makeRelayCacheLive = (
 	factory: RelayFactory,
 ): Layer.Layer<RelayCacheTag> =>
-	Layer.scoped(RelayCacheTag, makeRelayCacheService(factory));
+	Layer.effect(RelayCacheTag, makeRelayCacheService(factory));
 
 export const makeRelayCacheService = (
 	factory: RelayFactory,
@@ -152,7 +156,7 @@ export const makeRelayCacheService = (
 		// (inside get) are tied to the layer lifecycle.
 		const layerScope = yield* Effect.scope;
 		const cacheRef = yield* Ref.make<CacheMap>(HashMap.empty());
-		const semaphore = yield* Effect.makeSemaphore(1);
+		const semaphore = yield* Semaphore.make(1);
 
 		const removeEntryIfCurrent = (slug: string, entry: CacheEntry) =>
 			Ref.update(cacheRef, (map) => {
@@ -188,7 +192,7 @@ export const makeRelayCacheService = (
 						Exit.isSuccess(exit)
 							? Deferred.succeed(entry.ready, exit.value).pipe(Effect.asVoid)
 							: removeEntryIfCurrent(slug, entry).pipe(
-									Effect.zipRight(Deferred.failCause(entry.ready, exit.cause)),
+									Effect.andThen(Deferred.failCause(entry.ready, exit.cause)),
 									Effect.asVoid,
 								),
 					),
@@ -213,7 +217,7 @@ export const makeRelayCacheService = (
 							).pipe(Effect.provideService(Scope.Scope, layerScope));
 							const ready = yield* Deferred.make<Relay, RelayCacheError>();
 							const creationFiber =
-								yield* Deferred.make<Fiber.RuntimeFiber<void, never>>();
+								yield* Deferred.make<Fiber.Fiber<void, never>>();
 							const newEntry: CacheEntry = {
 								scopedRef,
 								ready,

@@ -1,7 +1,6 @@
 // Manages the list of registered projects and the current project slug.
 
 import { Effect, Fiber, Stream } from "effect";
-import type { RuntimeFiber } from "effect/Fiber";
 import type { ShellEnvelope } from "../../contracts/ws-rpc.js";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
@@ -39,6 +38,7 @@ export function applyShellProjects(
 	const projects = toProjectInfoList(frame.projects);
 	projectState.projects = projects;
 	projectState.newSessionProject = frame.newSessionProject ?? null;
+	projectState.projectOrder = frame.projectOrder ?? [];
 
 	// Removing the attached project returns to the session list.
 	if (
@@ -93,6 +93,7 @@ const toProjectInfoList = (
 		slug: project.slug,
 		title: project.title,
 		folders: project.folders,
+		...(project.addedAt !== undefined ? { addedAt: project.addedAt } : {}),
 		...(project.setupScript !== undefined
 			? { setupScript: project.setupScript }
 			: {}),
@@ -114,7 +115,7 @@ const toProjectInfoList = (
 
 let following = false;
 let generation = 0;
-let fiber: RuntimeFiber<void, never> | null = null;
+let fiber: Fiber.Fiber<void, never> | null = null;
 
 /**
  * Follow the daemon-global instance, usage and status lists over the
@@ -167,7 +168,7 @@ export function followDaemonLists(on: boolean): void {
 															applyUsageLimitsSetting(usageLimits);
 													}),
 												),
-												Effect.catchAll(() => Effect.void),
+												Effect.catch(() => Effect.void),
 											);
 										}),
 								),

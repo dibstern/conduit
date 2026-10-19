@@ -6,7 +6,6 @@
 //
 // Uses replay fixture with MockOpenCodeServer — no real OpenCode needed.
 
-import { Effect } from "effect";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
@@ -247,114 +246,5 @@ test.describe("Unified Rendering: Scroll", () => {
 			return distFromBottom < 50;
 		});
 		expect(isAtBottom).toBe(true);
-	});
-});
-
-// Uses a recording with 26 multi-turn prompts (52 messages), exceeding the
-// default 50-message page size. The server returns hasMore:true on the first
-// REST history page, enabling pagination via the IntersectionObserver.
-
-test.describe("Unified Rendering: Paginated History", () => {
-	test.describe.configure({ timeout: 90_000 });
-	test.use({ recording: "chat-paginated-history" });
-
-	test("session with >50 messages loads all pages via REST pagination", async ({
-		page,
-		relayUrl,
-		harness,
-	}) => {
-		// TODO: The OOM fix (eef1d21) changed resolveSessionHistory to use
-		// getMessagesPage(limit=50) instead of getMessages(). The mock's
-		// FIFO queue can't simulate cursor-based pagination — it needs
-		// either a pagination-aware mock handler or live OpenCode. Restore
-		// when the mock supports ?limit=N&before=cursor query params.
-		test.skip(true, "Requires mock pagination support (see TODO)");
-		const viewport = page.viewportSize();
-		const isDesktop = viewport ? viewport.width >= 1440 : false;
-		test.skip(!isDesktop, "Unified rendering tests run on desktop only");
-
-		// The SSE consumer caches all events in memory. Stop it, then clear
-		// the events cache so client-init falls through to REST history.
-		// Inject pre-built paginated message responses into the mock so the
-		// relay's getMessagesPage(limit=50) gets the correct page sequence.
-		await Effect.runPromise(harness.stack.sseStream.disconnectEffect());
-		const sessions = await harness.stack.client.session.list();
-		const sessionId = sessions[0]?.id;
-		expect(sessionId).toBeDefined();
-		if (!sessionId) return; // TS narrowing (expect above catches test failures)
-
-		// Fetch messages from mock REST for pagination setup
-		const allMsgs = await harness.stack.client.session.messages(sessionId);
-		if (allMsgs.length > 50) {
-			const page1 = allMsgs.slice(-50); // most recent 50
-			const page2 = allMsgs.slice(0, allMsgs.length - 50);
-			harness.mock.setMessagePages(sessionId, page1, page2);
-		}
-
-		const app = new AppPage(page);
-		await app.goto(relayUrl);
-
-		// Wait for messages to fully load via REST pagination.
-		// Page 1: 50 messages (hasMore=true) → observer fires page 2 automatically
-		// Page 2: remaining messages (hasMore=false)
-		await page.waitForFunction(
-			() => document.querySelectorAll(".msg-user").length >= 26,
-			{ timeout: 15_000 },
-		);
-
-		const userCount = await page.locator(".msg-user").count();
-		expect(userCount).toBe(26);
-
-		// After all pages loaded, "Beginning of session" marker appears
-		await expect(page.locator(".history-beginning")).toBeVisible({
-			timeout: 5_000,
-		});
-	});
-
-	test("scrolling up loads more history and 'Beginning of session' appears", async ({
-		page,
-		relayUrl,
-	}) => {
-		// TODO: Same as above — requires mock pagination support.
-		test.skip(true, "Requires mock pagination support (see TODO)");
-		const viewport = page.viewportSize();
-		const isDesktop = viewport ? viewport.width >= 1440 : false;
-		test.skip(!isDesktop, "Unified rendering tests run on desktop only");
-
-		const app = new AppPage(page);
-		await app.goto(relayUrl);
-
-		// Wait for first page
-		await page.locator(".msg-user").first().waitFor({
-			state: "visible",
-			timeout: 15_000,
-		});
-
-		const msgsBefore = await page.locator(".msg-user").count();
-
-		// Scroll to the very top to trigger the IntersectionObserver on
-		// #history-sentinel, which requests older history.
-		const messagesEl = page.locator("#messages");
-		await messagesEl.evaluate((el) => {
-			el.scrollTop = 0;
-			el.dispatchEvent(new Event("scroll"));
-		});
-
-		// Wait for more messages to appear (history page loaded and prepended)
-		await page.waitForFunction(
-			(prevCount: number) =>
-				document.querySelectorAll(".msg-user").length > prevCount,
-			msgsBefore,
-			{ timeout: 15_000 },
-		);
-
-		const msgsAfter = await page.locator(".msg-user").count();
-		expect(msgsAfter).toBeGreaterThan(msgsBefore);
-
-		// After the second page loads (only 2 messages remaining beyond the first
-		// 50), "Beginning of session" should appear since hasMore becomes false
-		await expect(page.locator(".history-beginning")).toBeVisible({
-			timeout: 15_000,
-		});
 	});
 });

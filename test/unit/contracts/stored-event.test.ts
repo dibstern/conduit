@@ -10,12 +10,12 @@ import fixture from "../../fixtures/stored-event-compatibility.json" with {
 describe("stored event compatibility", () => {
 	it.each(fixture)("$label (accepted=$accepted)", ({ row, accepted }) => {
 		const result = Effect.runSync(
-			Effect.either(decodeStoredEventRow(row, (cause) => cause)),
+			Effect.result(decodeStoredEventRow(row, (cause) => cause)),
 		);
-		expect(result._tag === "Right").toBe(accepted);
-		if (result._tag === "Right") {
+		expect(result._tag === "Success").toBe(accepted);
+		if (result._tag === "Success") {
 			// Reads return the raw payload and metadata, including unknown fields.
-			expect(result.right).toEqual({
+			expect(result.success).toEqual({
 				projectId: row.project_id,
 				sequence: row.sequence,
 				eventId: row.event_id,

@@ -1,6 +1,6 @@
 import { describe, it } from "@effect/vitest";
-import { Effect, Exit } from "effect";
-import { expect } from "vitest";
+import { Cause, Effect, Exit } from "effect";
+import { expect, vi } from "vitest";
 
 import { fetchWithRetry } from "../../../src/lib/domain/relay/Services/retry-fetch.js";
 import { OpenCodeConnectionError } from "../../../src/lib/errors.js";
@@ -22,15 +22,9 @@ describe("Effect-based retry fetch", () => {
 			);
 			expect(Exit.isFailure(result)).toBe(true);
 			if (Exit.isFailure(result)) {
-				const cause = result.cause;
-				// Extract the error from the Cause
-				const errors: OpenCodeConnectionError[] = [];
-				const collectErrors = (c: typeof cause): void => {
-					if (c._tag === "Fail") {
-						errors.push(c.error as OpenCodeConnectionError);
-					}
-				};
-				collectErrors(cause);
+				const errors = result.cause.reasons
+					.filter(Cause.isFailReason)
+					.map((reason) => reason.error);
 				expect(errors.length).toBe(1);
 				expect(errors[0]).toBeInstanceOf(OpenCodeConnectionError);
 			}
@@ -39,19 +33,19 @@ describe("Effect-based retry fetch", () => {
 
 	it.live("does not retry on timeout errors", () =>
 		Effect.gen(function* () {
-			const start = Date.now();
+			const baseFetch = vi
+				.fn<typeof fetch>()
+				.mockRejectedValue(new DOMException("timed out", "AbortError"));
 			const result = yield* Effect.exit(
-				fetchWithRetry("http://10.255.255.1/timeout", undefined, {
+				fetchWithRetry("http://example.com/timeout", undefined, {
 					timeout: 500,
 					retries: 2,
-					retryDelay: 100,
+					retryDelay: 0,
+					baseFetch,
 				}),
 			);
-			const elapsed = Date.now() - start;
 			expect(Exit.isFailure(result)).toBe(true);
-			// Should not retry on timeout — total time should be close to 500ms,
-			// not 500 + retries * delay
-			expect(elapsed).toBeLessThan(2000);
+			expect(baseFetch).toHaveBeenCalledOnce();
 		}),
 	);
 

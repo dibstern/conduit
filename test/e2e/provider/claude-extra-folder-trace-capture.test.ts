@@ -18,7 +18,7 @@ import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { decodeClaudeSDKMessage } from "../../../src/lib/contracts/providers/claude-agent-sdk.js";
-import { SaveProject } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
@@ -62,10 +62,11 @@ describe.skipIf(!RUN_EXPENSIVE)(
 					await harness.restart();
 					const saved = await sendRpcRequest(
 						join(harness.configDir, "relay.sock"),
-						new SaveProject({
+						{
+							_tag: "SaveProject",
 							slug: "process-test",
 							folders: [harness.projectDir, extra],
-						}),
+						},
 					);
 					evidence["save"] = saved;
 					expect(saved.warnings).toEqual([]);

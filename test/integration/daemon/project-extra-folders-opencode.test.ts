@@ -6,7 +6,8 @@ import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SaveProject } from "../../../src/lib/contracts/ws-rpc.js";
+
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -42,7 +43,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 		harness = ProcessHarness.create({
 			rootPrefix: join(realpathSync(tmpdir()), "conduit-usg5-7-"),
 			opencodeRecording: recording,
-			opencodeInitiallyIdle: true,
+			opencodeInitiallyIdle: recording === "multi-folder-project",
 		});
 		evidence["main"] = harness.projectDir;
 		await harness.restart();
@@ -51,10 +52,10 @@ describe("OpenCode project extra folders through the daemon", () => {
 
 	async function save(fixture: ProcessHarness, folders: readonly string[]) {
 		const input = { slug: "process-test", folders };
-		const result = await sendRpcRequest(
-			join(fixture.configDir, "relay.sock"),
-			new SaveProject(input),
-		);
+		const result = await sendRpcRequest(join(fixture.configDir, "relay.sock"), {
+			_tag: "SaveProject",
+			...input,
+		});
 		evidence["save"] = { input, result };
 		expect(result.savedSlug).toBe("process-test");
 		expect(result.warnings).toEqual([]);
@@ -166,7 +167,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 			"Single folder",
 			undefined,
 			"opencode",
-			{ modelProviderId: "anthropic", modelId: "claude-opus-4-5-20251101" },
+			{ modelProviderId: "opencode", modelId: "big-pickle" },
 		);
 		evidence["sessionId"] = sessionId;
 		const first = await browser.send(
@@ -202,7 +203,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 			"Unchanged folder",
 			undefined,
 			"opencode",
-			{ modelProviderId: "anthropic", modelId: "claude-opus-4-5-20251101" },
+			{ modelProviderId: "opencode", modelId: "big-pickle" },
 		);
 		evidence["sessionId"] = sessionId;
 		const first = await browser.send(
@@ -254,7 +255,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 			"Folder removal",
 			undefined,
 			"opencode",
-			{ modelProviderId: "anthropic", modelId: "claude-opus-4-5-20251101" },
+			{ modelProviderId: "opencode", modelId: "big-pickle" },
 		);
 		evidence["sessionId"] = sessionId;
 		const first = await before.send(
@@ -275,6 +276,19 @@ describe("OpenCode project extra folders through the daemon", () => {
 		]);
 		await save(fixture, [fixture.projectDir]);
 		if (restart) {
+			// SIGKILL bypasses the debounced save and shutdown flush.
+			await vi.waitFor(
+				() => {
+					const config = loadDaemonConfigResult(fixture.configDir);
+					if (config._tag === "Failure") throw config.failure;
+					const folders = config.success?.projects.find(
+						({ slug }) => slug === "process-test",
+					)?.folders;
+					expect(folders).toEqual([fixture.projectDir]);
+					evidence["persistedFoldersBeforeKill"] = folders;
+				},
+				{ timeout: 15_000 },
+			);
 			await fixture.kill();
 			await fixture.restart();
 		}
@@ -311,7 +325,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 			"Missing main folder",
 			undefined,
 			"opencode",
-			{ modelProviderId: "anthropic", modelId: "claude-opus-4-5-20251101" },
+			{ modelProviderId: "opencode", modelId: "big-pickle" },
 		);
 		evidence["sessionId"] = sessionId;
 		rmSync(fixture.projectDir, { recursive: true });

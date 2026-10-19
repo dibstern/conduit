@@ -46,7 +46,7 @@ const meta = {
 		});
 		if (name.startsWith("Jev Off") || name.startsWith("No Key Summaries"))
 			fixture.stubs.UpdateMessageSurfacing(
-				new UpdateMessageSurfacing({ summariesEnabled: true }),
+				UpdateMessageSurfacing.payloadSchema.make({ summariesEnabled: true }),
 			);
 		const cleanup = [
 			connectedSocket(),
@@ -56,14 +56,14 @@ const meta = {
 			replyRpc("ScoreCategorySet", fixture.stubs.ScoreCategorySet),
 			replyRpc("UpdateMessageSurfacing", (payload) =>
 				fixture.stubs.UpdateMessageSurfacing(
-					new UpdateMessageSurfacing(
+					UpdateMessageSurfacing.payloadSchema.make(
 						Schema.decodeUnknownSync(MessageSurfacingPatchSchema)(payload),
 					),
 				),
 			),
 			replyRpc("ReplaceCategorySet", (payload) =>
 				fixture.stubs.ReplaceCategorySet(
-					new ReplaceCategorySet(
+					ReplaceCategorySet.payloadSchema.make(
 						Schema.decodeUnknownSync(
 							Schema.Struct({
 								expectedVersion: Schema.Number,

@@ -33,7 +33,7 @@ export function surfacingTuningFixture({
 		rejected: false,
 	});
 	settings.stubs.UpdateMessageSurfacing(
-		new UpdateMessageSurfacing({ enabled: true }),
+		UpdateMessageSurfacing.payloadSchema.make({ enabled: true }),
 	);
 	const examples = [
 		[

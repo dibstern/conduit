@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Fiber, Layer, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { DEFAULT_CATEGORY_SET } from "../../../src/lib/contracts/category-set.js";
 import type { MessageSurfacingStatus } from "../../../src/lib/contracts/message-surfacing.js";
@@ -121,7 +121,7 @@ const complete = Effect.gen(function* () {
 });
 
 describe("RecapService persisted versions", () => {
-	it.scoped(
+	it.effect(
 		"summarizes unclassified log messages with Jev off and no key",
 		() => {
 			const fixture = layer({ active: false });
@@ -157,7 +157,7 @@ describe("RecapService persisted versions", () => {
 	// prompt; later messages change the question's meaning; invalid citations
 	// survive; Off still calls Claude; an explanation overwrites a turn recap
 	// or drops automatic generation when the turn completes during Explain.
-	it.scoped("automatically recaps a turn that completes during Explain", () => {
+	it.effect("automatically recaps a turn that completes during Explain", () => {
 		const fixture = layer({ when: "turn-end" });
 		let releaseExplanation = () => {};
 		const held = new Promise<void>((resolve) => {
@@ -210,7 +210,7 @@ describe("RecapService persisted versions", () => {
 			Effect.provide(fixture.live),
 		);
 	});
-	it.scoped(
+	it.effect(
 		"explains an Ask with the summary model and only its preceding context",
 		() => {
 			// Explain is a summary feature, so it works with Jev off.
@@ -255,15 +255,15 @@ describe("RecapService persisted versions", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`UPDATE sessions SET project_id = 'other-project' WHERE id = 'session-1'`;
 				expect(
-					(yield* Effect.either(
+					(yield* Effect.result(
 						service.explainAsk({ ...target, partId: "part-2" }),
 					))._tag,
-				).toBe("Left");
+				).toBe("Failure");
 				expect(fixture.query).toHaveBeenCalledTimes(1);
 			}).pipe(Effect.provide(fixture.live));
 		},
 	);
-	it.scoped(
+	it.effect(
 		"rejects disabled summaries and unknown Ask parts without a paid call",
 		() => {
 			return Effect.forEach(
@@ -278,9 +278,9 @@ describe("RecapService persisted versions", () => {
 						yield* seed;
 						const service = yield* RecapServiceTag;
 						expect(
-							(yield* Effect.either(service.explainAsk({ ...target, partId })))
+							(yield* Effect.result(service.explainAsk({ ...target, partId })))
 								._tag,
-						).toBe("Left");
+						).toBe("Failure");
 						expect(fixture.query).not.toHaveBeenCalled();
 					}).pipe(Effect.provide(fixture.live));
 				},
@@ -288,7 +288,7 @@ describe("RecapService persisted versions", () => {
 			);
 		},
 	);
-	it.scoped("rejects overlapping requests before preparing a long turn", () => {
+	it.effect("rejects overlapping requests before preparing a long turn", () => {
 		const fixture = layer();
 		return Effect.gen(function* () {
 			yield* seed;
@@ -296,16 +296,16 @@ describe("RecapService persisted versions", () => {
 			const service = yield* RecapServiceTag;
 			const results = yield* Effect.all(
 				["whole", "whole"].map(() =>
-					Effect.either(service.generate({ ...target, scope: "whole" })),
+					Effect.result(service.generate({ ...target, scope: "whole" })),
 				),
 				{ concurrency: 2 },
 			);
-			expect(results.filter((result) => result._tag === "Right")).toHaveLength(
-				1,
-			);
-			expect(results.filter((result) => result._tag === "Left")).toEqual([
+			expect(
+				results.filter((result) => result._tag === "Success"),
+			).toHaveLength(1);
+			expect(results.filter((result) => result._tag === "Failure")).toEqual([
 				expect.objectContaining({
-					left: expect.objectContaining({
+					failure: expect.objectContaining({
 						message: "Summary is already generating",
 					}),
 				}),
@@ -318,7 +318,7 @@ describe("RecapService persisted versions", () => {
 			expect(yield* service.list(target)).toHaveLength(2);
 		}).pipe(Effect.provide(fixture.live));
 	});
-	it.scoped(
+	it.effect(
 		"releases a reservation interrupted during input preparation",
 		() => {
 			const fixture = layer();
@@ -329,7 +329,7 @@ describe("RecapService persisted versions", () => {
 				const pending = yield* service
 					.generate({ ...target, scope: "whole" })
 					.pipe(Effect.forkScoped);
-				yield* Effect.yieldNow();
+				yield* Effect.yieldNow;
 				yield* Fiber.interrupt(pending);
 				yield* service.generate({ ...target, scope: "whole" });
 				expect(fixture.query).toHaveBeenCalledTimes(1);
@@ -337,7 +337,7 @@ describe("RecapService persisted versions", () => {
 			}).pipe(Effect.provide(fixture.live));
 		},
 	);
-	it.scoped(
+	it.effect(
 		"lists without a call, appends Whole/New, validates citations, and regenerates an older scope",
 		() => {
 			const fixture = layer();
@@ -371,10 +371,10 @@ describe("RecapService persisted versions", () => {
 				expect(JSON.stringify(prompt)).not.toContain("Update 1");
 				expect(JSON.stringify(prompt)).toContain(whole.text);
 				expect(JSON.stringify(prompt)).toContain("Final response");
-				const emptyNew = yield* Effect.either(
+				const emptyNew = yield* Effect.result(
 					service.generate({ ...target, scope: "new" }),
 				);
-				expect(emptyNew._tag).toBe("Left");
+				expect(emptyNew._tag).toBe("Failure");
 				yield* service.generate({ ...target, scope: "new", sourceVersion: 2 });
 				yield* service.generate({ ...target, scope: "new", sourceVersion: 3 });
 				expect(fixture.query.mock.calls.at(-1)?.[0].prompt).toContain(
@@ -417,22 +417,22 @@ describe("RecapService persisted versions", () => {
 		{ summariesEnabled: false },
 		{ model: "off" as const },
 	])
-		it.scoped(`never calls Claude with ${JSON.stringify(options)}`, () => {
+		it.effect(`never calls Claude with ${JSON.stringify(options)}`, () => {
 			const fixture = layer(options);
 			return Effect.gen(function* () {
 				yield* seed;
 				const service = yield* RecapServiceTag;
 				expect(
-					(yield* Effect.either(
+					(yield* Effect.result(
 						service.generate({ ...target, scope: "whole" }),
 					))._tag,
-				).toBe("Left");
+				).toBe("Failure");
 				yield* complete;
-				yield* Effect.yieldNow();
+				yield* Effect.yieldNow;
 				expect(fixture.query).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(fixture.live));
 		});
-	it.scoped(
+	it.effect(
 		"on-request completion makes no call; short turns make no automatic call",
 		() => {
 			return Effect.forEach(
@@ -444,7 +444,7 @@ describe("RecapService persisted versions", () => {
 						if (when === "turn-end")
 							yield* (yield* SqlClient.SqlClient)`DELETE FROM message_parts WHERE surfacing_ordinal = 4`;
 						yield* complete;
-						yield* Effect.yieldNow();
+						yield* Effect.yieldNow;
 						expect(fixture.query).not.toHaveBeenCalled();
 					}).pipe(Effect.provide(fixture.live));
 				},
@@ -452,7 +452,7 @@ describe("RecapService persisted versions", () => {
 			);
 		},
 	);
-	it.scoped(
+	it.effect(
 		"a stale live recap gets New on completion and reaches its subscriber",
 		() => {
 			const fixture = layer({ when: "turn-end" });
@@ -470,9 +470,9 @@ describe("RecapService persisted versions", () => {
 					Stream.runCollect,
 					Effect.forkScoped,
 				);
-				yield* Effect.yieldNow();
+				yield* Effect.yieldNow;
 				yield* complete;
-				const snapshots = yield* versions.await;
+				const snapshots = yield* Fiber.await(versions);
 				expect(snapshots._tag).toBe("Success");
 				expect((yield* service.list(target)).map(({ scope }) => scope)).toEqual(
 					["whole", "new"],
@@ -494,19 +494,19 @@ describe("RecapService persisted versions", () => {
 					Stream.runHead,
 					Effect.forkScoped,
 				);
-				yield* Effect.yieldNow();
+				yield* Effect.yieldNow;
 				yield* complete;
-				expect((yield* generating.await)._tag).toBe("Success");
+				expect((yield* Fiber.await(generating))._tag).toBe("Success");
 				const failure = yield* service.subscribe(target).pipe(
 					Stream.filter((snapshot) => snapshot.error !== null),
 					Stream.take(1),
 					Stream.runHead,
 					Effect.forkScoped,
 				);
-				const duplicate = yield* Effect.either(
+				const duplicate = yield* Effect.result(
 					service.generate({ ...target, scope: "whole" }),
 				);
-				expect(duplicate._tag).toBe("Left");
+				expect(duplicate._tag).toBe("Failure");
 				releaseGeneration();
 				const failed = yield* Fiber.join(failure);
 				expect(failed._tag).toBe("Some");
@@ -521,7 +521,7 @@ describe("RecapService persisted versions", () => {
 			}).pipe(Effect.provide(fixture.live));
 		},
 	);
-	it.scoped(
+	it.effect(
 		"deletes recaps with their session and rejects another project's session",
 		() => {
 			const fixture = layer();
@@ -531,7 +531,9 @@ describe("RecapService persisted versions", () => {
 				yield* service.generate({ ...target, scope: "whole" });
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`UPDATE sessions SET project_id = 'other-project' WHERE id = 'session-1'`;
-				expect((yield* Effect.either(service.list(target)))._tag).toBe("Left");
+				expect((yield* Effect.result(service.list(target)))._tag).toBe(
+					"Failure",
+				);
 				yield* sql`DELETE FROM sessions WHERE id = 'session-1'`;
 				expect(yield* sql`SELECT * FROM turn_recaps`).toEqual([]);
 			}).pipe(Effect.provide(fixture.live));

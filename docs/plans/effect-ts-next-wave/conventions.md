@@ -1,6 +1,9 @@
 # Effect.ts Conventions
 
 > Shared reference for all phase documents. Read ONCE before starting any phase.
+>
+> Historical: written for Effect 3. The codebase now runs on Effect 4 (conduit-test-16c8), so the package names and
+> API notes below are out of date; see `docs/agent-guide/architecture.md`.
 
 ## Error Handling
 

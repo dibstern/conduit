@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
-import { Socket } from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect, Exit, Layer, Scope } from "effect";
+import { RpcClient, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { formatSnoozeTime } from "../../../src/lib/frontend/utils/format.js";
 import type { ReplayHarness } from "../helpers/e2e-harness.js";
@@ -28,7 +28,7 @@ async function connectRpc(relayPort: number) {
 			Effect.flatMap((context) =>
 				RpcClient.make(WsRpcGroup).pipe(Effect.provide(context)),
 			),
-			Scope.extend(scope),
+			Scope.provide(scope),
 		),
 	);
 	return {

@@ -2,16 +2,10 @@
 // disappear on daemon restart; category edits recalculate an absolute user level.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Effect, ManagedRuntime } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, it } from "vitest";
 import { surfacingLevel } from "../../../src/lib/contracts/category-set.js";
-import {
-	GetCategorySet,
-	GetSurfacingFeedback,
-	ReplaceCategorySet,
-	SetSurfacingMark,
-} from "../../../src/lib/contracts/ws-rpc.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -45,18 +39,17 @@ it(
 				await runtime.dispose();
 			}
 			await harness.restart();
-			await harness.requestRpc(
-				new SetSurfacingMark({
-					sessionId: "mark-session",
-					partId: "mark-part",
-					mark: {
-						level: "balanced",
-						direction: "raise",
-						reason: "changes the plan",
-					},
-				}),
-			);
-			const saved = await harness.requestRpc(new GetSurfacingFeedback({}));
+			await harness.requestRpc({
+				_tag: "SetSurfacingMark",
+				sessionId: "mark-session",
+				partId: "mark-part",
+				mark: {
+					level: "balanced",
+					direction: "raise",
+					reason: "changes the plan",
+				},
+			});
+			const saved = await harness.requestRpc({ _tag: "GetSurfacingFeedback" });
 			expect(saved).toHaveLength(1);
 			expect(saved[0]?.mark).toEqual({
 				level: "balanced",
@@ -65,23 +58,20 @@ it(
 			});
 			await harness.terminate();
 			await harness.restart();
-			expect(await harness.requestRpc(new GetSurfacingFeedback({}))).toEqual(
-				saved,
-			);
-			const initial = await harness.requestRpc(new GetCategorySet({}));
-			const changed = await harness.requestRpc(
-				new ReplaceCategorySet({
-					expectedVersion: initial.version,
-					nextSet: {
-						categories: initial.categories.map((category) =>
-							category.id === "finding"
-								? { ...category, weight: 100 }
-								: category,
-						),
-					},
-				}),
-			);
-			const after = await harness.requestRpc(new GetSurfacingFeedback({}));
+			expect(
+				await harness.requestRpc({ _tag: "GetSurfacingFeedback" }),
+			).toEqual(saved);
+			const initial = await harness.requestRpc({ _tag: "GetCategorySet" });
+			const changed = await harness.requestRpc({
+				_tag: "ReplaceCategorySet",
+				expectedVersion: initial.version,
+				nextSet: {
+					categories: initial.categories.map((category) =>
+						category.id === "finding" ? { ...category, weight: 100 } : category,
+					),
+				},
+			});
+			const after = await harness.requestRpc({ _tag: "GetSurfacingFeedback" });
 			const entry = after[0];
 			if (!entry) throw new Error("Feedback disappeared after a weight edit");
 			expect(
@@ -94,16 +84,15 @@ it(
 					entry.mark,
 				).level,
 			).toBe("balanced");
-			await harness.requestRpc(
-				new SetSurfacingMark({
-					sessionId: "mark-session",
-					partId: "mark-part",
-					mark: null,
-				}),
-			);
-			expect(await harness.requestRpc(new GetSurfacingFeedback({}))).toEqual(
-				[],
-			);
+			await harness.requestRpc({
+				_tag: "SetSurfacingMark",
+				sessionId: "mark-session",
+				partId: "mark-part",
+				mark: null,
+			});
+			expect(
+				await harness.requestRpc({ _tag: "GetSurfacingFeedback" }),
+			).toEqual([]);
 			Object.assign(observations, {
 				saved,
 				after,

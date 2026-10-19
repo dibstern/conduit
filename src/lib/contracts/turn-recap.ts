@@ -1,19 +1,19 @@
 import { Schema } from "effect";
 
-export const RecapScopeSchema = Schema.Literal("whole", "new");
+export const RecapScopeSchema = Schema.Literals(["whole", "new"]);
 export type RecapScope = typeof RecapScopeSchema.Type;
 
 export const TurnRecapSchema = Schema.Struct({
 	sessionId: Schema.String,
 	turnId: Schema.String,
-	version: Schema.Int.pipe(Schema.positive()),
+	version: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
 	scope: RecapScopeSchema,
-	firstOrdinal: Schema.Int.pipe(Schema.positive()),
-	lastOrdinal: Schema.Int.pipe(Schema.positive()),
+	firstOrdinal: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
+	lastOrdinal: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
 	text: Schema.String,
 	model: Schema.String,
-	durationMs: Schema.NonNegativeInt,
-	createdAt: Schema.NonNegativeInt,
+	durationMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+	createdAt: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 export type TurnRecap = typeof TurnRecapSchema.Type;
 
@@ -24,7 +24,9 @@ export const RecapSnapshotSchema = Schema.Struct({
 	retry: Schema.optional(
 		Schema.Struct({
 			scope: RecapScopeSchema,
-			sourceVersion: Schema.optional(Schema.Int.pipe(Schema.positive())),
+			sourceVersion: Schema.optional(
+				Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
+			),
 		}),
 	),
 });

@@ -86,6 +86,25 @@ createServer((request, response) => {
 			headers: request.headers,
 		},
 		(answer) => {
+			// Keep creation evidence before a later move can hide the initial cwd.
+			if (
+				request.method === "POST" &&
+				(path === "/session" || path === "/api/session")
+			) {
+				let body = "";
+				answer.on("data", (chunk) => {
+					body += String(chunk);
+				});
+				answer.once("end", () => {
+					if (answer.statusCode !== 200) return;
+					const parsed = JSON.parse(body);
+					const session = path === "/api/session" ? parsed.data : parsed;
+					log("real-opencode-session-creations.jsonl", {
+						id: session.id,
+						directory: session.directory ?? session.location?.directory,
+					});
+				});
+			}
 			response.writeHead(answer.statusCode ?? 502, answer.headers);
 			response.flushHeaders();
 			answer.once("end", () => {

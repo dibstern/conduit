@@ -119,7 +119,7 @@ export interface WorktreeService {
 	) => Effect.Effect<void, WorktreeCreationError>;
 }
 
-export class WorktreeServiceTag extends Context.Tag("WorktreeService")<
+export class WorktreeServiceTag extends Context.Service<
 	WorktreeServiceTag,
 	WorktreeService
->() {}
+>()("WorktreeService") {}

@@ -3,7 +3,6 @@
 // browser had not seen pending before.
 
 import { Effect, Fiber, Stream } from "effect";
-import type { RuntimeFiber } from "effect/Fiber";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
 import { supervise } from "../transport/supervise.js";
@@ -19,7 +18,7 @@ import { triggerNotifications } from "./ws-notifications.js";
 const ALERT_GRACE_MS = 1_000;
 
 let attachGeneration = 0;
-let approvalsFiber: RuntimeFiber<void, unknown> | null = null;
+let approvalsFiber: Fiber.Fiber<void, unknown> | null = null;
 let attachedProject: string | null = null;
 
 async function stopApprovals(): Promise<void> {

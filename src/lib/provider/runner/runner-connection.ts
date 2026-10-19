@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { appendFileSync } from "node:fs";
 import { createConnection } from "node:net";
-import { Deferred, Effect } from "effect";
+import { Deferred, Effect, Semaphore } from "effect";
 import { observeTurnTimelineFrame } from "../../domain/daemon/Services/turn-timeline.js";
 import * as Failure from "../../effect/failure-classification.js";
 import {
@@ -26,9 +26,7 @@ import type {
 	SessionOutputReply,
 } from "./session-runner.js";
 
-type ReceiptStore = Effect.Effect.Success<
-	ReturnType<typeof makeRunnerReceiptStore>
->;
+type ReceiptStore = Effect.Success<ReturnType<typeof makeRunnerReceiptStore>>;
 
 /** Verify a discovered runner's identity and protocol before attaching. */
 export const connectRunner = (options: {
@@ -70,12 +68,12 @@ export const connectRunner = (options: {
 	readonly onOutputCommitted?: (output: SessionOutput) => void;
 }) =>
 	Effect.gen(function* () {
-		const outputLock = yield* Effect.makeSemaphore(1);
+		const outputLock = yield* Semaphore.make(1);
 		const attachmentId = randomUUID();
 		let acknowledged = 0;
 		let lastReply: SessionOutputReply = {};
 		let heldAck = false;
-		return yield* Effect.async<RunnerSocket, SessionFailure>((resume) => {
+		return yield* Effect.callback<RunnerSocket, SessionFailure>((resume) => {
 			let settled = false;
 			let active = true;
 			let receivedSequence = 0;
@@ -93,7 +91,7 @@ export const connectRunner = (options: {
 			};
 			const beforeCommandFailure = () => {
 				const sequence = receivedSequence;
-				return Effect.async<void>((resume) => {
+				return Effect.callback<void>((resume) => {
 					if (!active || acknowledged >= sequence) {
 						resume(Effect.void);
 						return;
@@ -204,7 +202,7 @@ export const connectRunner = (options: {
 										{ ...message, acknowledgedSequence: acknowledged },
 										connection,
 									)
-									.pipe(Effect.locally(currentRunnerOutput, restored));
+									.pipe(Effect.provideService(currentRunnerOutput, restored));
 							}).pipe(
 								Effect.matchCauseEffect({
 									onFailure: (cause) =>
@@ -358,7 +356,7 @@ export const connectRunner = (options: {
 										const result = yield* options
 											.emit(message.output, options.sessionId)
 											.pipe(
-												Effect.locally(
+												Effect.provideService(
 													currentRunnerOutput,
 													options.receipts ? receipt : undefined,
 												),
@@ -408,7 +406,7 @@ export const connectRunner = (options: {
 													25 * 2 ** Math.min(resyncFailures++, 6),
 												);
 												return Effect.sleep(delay).pipe(
-													Effect.zipRight(
+													Effect.andThen(
 														Effect.sync(() => {
 															resyncScheduled = false;
 															if (active)

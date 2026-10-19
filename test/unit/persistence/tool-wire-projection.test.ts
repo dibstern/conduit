@@ -25,8 +25,8 @@
 //    same call id from another session, or nothing for a part stored without
 //    a call id, which the browser names by its part id.
 
-import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { describe, expect, it } from "vitest";
 import type {
 	EventPayloadMap,
@@ -205,8 +205,8 @@ describe("transcript query and detail read", () => {
 
 	const run = <A>(
 		body: (deps: {
-			readonly commit: Effect.Effect.Success<typeof makeCommitAndSignal>;
-			readonly readQuery: Effect.Effect.Success<typeof makeReadQueryEffect>;
+			readonly commit: Effect.Success<typeof makeCommitAndSignal>;
+			readonly readQuery: Effect.Success<typeof makeReadQueryEffect>;
 			readonly sql: SqlClient.SqlClient;
 		}) => Effect.Effect<A, unknown>,
 	) =>
@@ -222,9 +222,7 @@ describe("transcript query and detail read", () => {
 			),
 		);
 
-	const toolParts = (
-		readQuery: Effect.Effect.Success<typeof makeReadQueryEffect>,
-	) =>
+	const toolParts = (readQuery: Effect.Success<typeof makeReadQueryEffect>) =>
 		readQuery
 			.readSessionTranscriptPage(SESSION, { limit: 50, previewTools: true })
 			.pipe(

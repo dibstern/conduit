@@ -2,9 +2,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Option, PubSub } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { makePinoLoggerLive } from "../../../src/lib/domain/daemon/Layers/pino-logger-layer.js";
@@ -37,9 +37,12 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { MonitoringState } from "../../../src/lib/relay/monitoring-types.js";
@@ -56,6 +59,7 @@ import {
 	makeMockStatusPoller,
 	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
+import { partialFake } from "../../helpers/partial-fake.js";
 
 const waitForAssertion = (assertion: () => void) =>
 	Effect.promise(() => vi.waitFor(assertion));
@@ -123,14 +127,21 @@ function makeTestLayer(
 	});
 
 	const bridgeLayers = Layer.mergeAll(
-		Layer.succeed(
-			OpenCodeInstancesTag,
+		Layer.mock(SessionWorkspaceTag, {
+			get: () => Effect.succeed(tmpdir()),
+			withLaunch: (effect) => effect,
+		}),
+		Layer.mock(ReadQueryEffectTag, {
+			getSession: (id) =>
+				Effect.succeed(partialFake<SessionRow>({ id, provider: "opencode" })),
+		}),
+		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({ opencode: client }),
 		),
-		Layer.succeed(OpenCodeAPITag, services.client as any),
-		Layer.succeed(PollerManagerTag, services.pollerManager as any),
-		Layer.succeed(StatusPollerTag, services.statusPoller),
-		Layer.succeed(LoggerTag, services.log),
+		Layer.succeed(OpenCodeAPITag)(services.client as any),
+		Layer.succeed(PollerManagerTag)(services.pollerManager as any),
+		Layer.succeed(StatusPollerTag)(services.statusPoller),
+		Layer.succeed(LoggerTag)(services.log),
 		DaemonEventBusLive,
 	);
 
@@ -152,21 +163,24 @@ function makeServiceLifecycleLayers<ROut, E, RIn>(
 	});
 
 	const baseLayer = Layer.mergeAll(
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-		Layer.succeed(ConfigTag, makeMockConfig()),
+		Layer.mock(SessionWorkspaceTag, {
+			get: () => Effect.succeed(tmpdir()),
+			withLaunch: (effect) => effect,
+		}),
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+		Layer.succeed(ConfigTag)(makeMockConfig()),
 		Layer.effect(SessionActivityTag, makeSessionActivity),
 		makeOverridesStateLive(),
 		RelayStatusSnapshotLive,
-		Layer.succeed(OpenCodeInstancesTag, instances),
-		Layer.succeed(OpenCodeAPITag, api),
-		Layer.succeed(PollerManagerTag, services.pollerManager as any),
-		Layer.succeed(StatusPollerTag, services.statusPoller),
-		Layer.succeed(LoggerTag, services.log),
+		Layer.succeed(OpenCodeInstancesTag)(instances),
+		Layer.succeed(OpenCodeAPITag)(api),
+		Layer.succeed(PollerManagerTag)(services.pollerManager as any),
+		Layer.succeed(StatusPollerTag)(services.statusPoller),
+		Layer.succeed(LoggerTag)(services.log),
 		makeSessionManagerStateLive(),
 		DaemonEventBusLive,
 		persistenceLayer,
-		Layer.succeed(
-			OrchestrationEngineTag,
+		Layer.succeed(OrchestrationEngineTag)(
 			new OrchestrationEngine({ registry: new ProviderRegistry() }),
 		),
 	);
@@ -255,6 +269,11 @@ describe("SessionLifecycleWiringLive", () => {
 				ifRunning: vi.fn(() =>
 					Effect.sync(() => (running ? Option.some(api) : Option.none())),
 				),
+				useIfRunning: vi.fn(() =>
+					Effect.die(
+						new Error("Lifecycle history must not acquire an instance hold"),
+					),
+				),
 			} satisfies OpenCodeInstances;
 
 			return Effect.gen(function* () {
@@ -276,6 +295,7 @@ describe("SessionLifecycleWiringLive", () => {
 					expect(instances.ifRunning).toHaveBeenCalledOnce(),
 				);
 				expect(instances.use).not.toHaveBeenCalled();
+				expect(instances.useIfRunning).not.toHaveBeenCalled();
 				expect(api.session.create).not.toHaveBeenCalled();
 				expect(api.session.messages).not.toHaveBeenCalled();
 				expect(services.pollerManager.startPolling).not.toHaveBeenCalled();
@@ -301,6 +321,7 @@ describe("SessionLifecycleWiringLive", () => {
 					),
 				);
 				expect(instances.use).toHaveBeenCalledOnce();
+				expect(instances.useIfRunning).not.toHaveBeenCalled();
 				expect(api.session.create).toHaveBeenCalledOnce();
 				expect(api.session.messages).toHaveBeenCalledWith(session.id);
 			}).pipe(
@@ -327,7 +348,7 @@ describe("SessionLifecycleWiringLive", () => {
 			const cause = new Error("history unavailable");
 			services.client.session.messages.mockRejectedValue(cause);
 
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				handleSessionCreated("s-reject", {
 					translator: deps.translator as any,
 					client: services.client,
@@ -336,13 +357,15 @@ describe("SessionLifecycleWiringLive", () => {
 				}),
 			);
 
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expect(result.left).toBeInstanceOf(SessionLifecycleHistoryRebuildError);
-				expect(result.left._tag).toBe("SessionLifecycleHistoryRebuildError");
-				expect(result.left.sessionId).toBe("s-reject");
-				expect(result.left.operation).toBe("rebuildTranslatorFromHistory");
-				expect(result.left.cause).toBe(cause);
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure") {
+				expect(result.failure).toBeInstanceOf(
+					SessionLifecycleHistoryRebuildError,
+				);
+				expect(result.failure._tag).toBe("SessionLifecycleHistoryRebuildError");
+				expect(result.failure.sessionId).toBe("s-reject");
+				expect(result.failure.operation).toBe("rebuildTranslatorFromHistory");
+				expect(result.failure.cause).toBe(cause);
 			}
 			expect(deps.translator.reset).toHaveBeenCalledWith("s-reject");
 			expect(deps.translator.rebuildStateFromHistory).not.toHaveBeenCalled();
@@ -398,6 +421,7 @@ describe("SessionLifecycleWiringLive", () => {
 
 				expect(api.session.create).toHaveBeenCalledWith({
 					title: "Service Created",
+					directory: tmpdir(),
 				});
 				expect(api.session.messages).toHaveBeenCalledWith("service-created");
 				expect(deps.translator.reset).toHaveBeenCalledWith("service-created");

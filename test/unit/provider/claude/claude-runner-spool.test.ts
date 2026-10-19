@@ -27,7 +27,7 @@ vi.mock("effect", async (importOriginal) => {
 				effect.Deferred.make<A, E>().pipe(
 					effect.Effect.tap(() =>
 						scheduling.yieldDeferred
-							? effect.Effect.yieldNow()
+							? effect.Effect.yieldNow
 							: effect.Effect.void,
 					),
 				),
@@ -90,6 +90,44 @@ afterEach(() => {
 });
 
 describe("Claude runner output spool", () => {
+	it.each([
+		true,
+		false,
+	])("waits for a persisted transcript read across disconnect, initially attached=%s", async (attached) => {
+		const { spool, connection } = fixture();
+		if (attached) spool.attach(connection, 0);
+		const read = Effect.runFork(
+			spool.emit({
+				type: "read-subagent-transcript",
+				sinkId: "turn-1",
+				childSessionId: "child-1",
+			}),
+		);
+		try {
+			await Effect.runPromise(Effect.yieldNow);
+			if (attached) spool.disconnect(connection);
+			await Effect.runPromise(Effect.yieldNow);
+			expect(
+				Option.isNone(
+					await Effect.runPromise(
+						Effect.sync(() => Option.fromUndefinedOr(read.pollUnsafe())),
+					),
+				),
+			).toBe(true);
+			spool.attach(connection, 0);
+			const result = {
+				subagentTranscript: {
+					messages: [{ id: "message-1", role: "assistant" as const }],
+					parts: [],
+				},
+			};
+			spool.reply({ type: "output-reply", outputId: "1", sequence: 1, result });
+			expect(await Effect.runPromise(Fiber.join(read))).toEqual(result);
+		} finally {
+			await Effect.runPromise(Fiber.interrupt(read));
+		}
+	});
+
 	it("emits idle without waiting for ack while preserving replay and awaiting other statuses", async () => {
 		const { spool, filename, connection } = fixture();
 		spool.attach(connection, 0);
@@ -124,8 +162,14 @@ describe("Claude runner output spool", () => {
 		});
 		expect(readFileSync(filename).length).toBe(0);
 		const busy = Effect.runFork(spool.emit(statusOutput("busy")));
-		await Effect.runPromise(Effect.yieldNow());
-		expect(Option.isNone(await Effect.runPromise(Fiber.poll(busy)))).toBe(true);
+		await Effect.runPromise(Effect.yieldNow);
+		expect(
+			Option.isNone(
+				await Effect.runPromise(
+					Effect.sync(() => Option.fromUndefinedOr(busy.pollUnsafe())),
+				),
+			),
+		).toBe(true);
 		spool.reply({
 			type: "output-reply",
 			outputId: "2",
@@ -142,10 +186,14 @@ describe("Claude runner output spool", () => {
 			spool.emit({ type: "release-sink", sinkId: "turn-1" }),
 		);
 		const drain = Effect.runFork(spool.drainEffect());
-		await Effect.runPromise(Effect.yieldNow());
-		expect(Option.isNone(await Effect.runPromise(Fiber.poll(drain)))).toBe(
-			true,
-		);
+		await Effect.runPromise(Effect.yieldNow);
+		expect(
+			Option.isNone(
+				await Effect.runPromise(
+					Effect.sync(() => Option.fromUndefinedOr(drain.pollUnsafe())),
+				),
+			),
+		).toBe(true);
 		spool.reply({
 			type: "output-reply",
 			outputId: "1",
@@ -168,7 +216,7 @@ describe("Claude runner output spool", () => {
 		);
 		for (let index = 0; index < 20; index++) {
 			const drain = Effect.runFork(spool.drainEffect());
-			await Effect.runPromise(Effect.yieldNow());
+			await Effect.runPromise(Effect.yieldNow);
 			expect(Reflect.get(spool, "drainWaiters")).toHaveProperty("size", 1);
 			await Effect.runPromise(Fiber.interrupt(drain));
 			expect(Reflect.get(spool, "drainWaiters")).toHaveProperty("size", 0);

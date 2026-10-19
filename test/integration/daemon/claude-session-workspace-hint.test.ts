@@ -305,8 +305,10 @@ exec '${realGit}' "$@"
 		const browser = await fixture.connect();
 		const sessionId = await browser.createSession("Queued hint generations");
 		await browser.send(sessionId, toolTurn(threePaths(first)));
-		await vi.waitFor(() =>
-			expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBe(first),
+		await vi.waitFor(
+			() =>
+				expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBe(first),
+			{ timeout: 15_000 },
 		);
 		const beforeDismiss = browser.frames.length;
 		await Effect.runPromise(
@@ -346,9 +348,14 @@ exec '${realGit}' "$@"
 		} finally {
 			writeFileSync(join(fixture.root, "git-resolution-release"), "release\n");
 		}
-		await vi.waitFor(() =>
-			expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBe(first),
+		await browser.waitFor(
+			(message) =>
+				message["type"] === "session_row" &&
+				message["id"] === sessionId &&
+				message["workspaceHint"] === first,
+			beforeDismiss,
 		);
+		expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBe(first);
 		expect(
 			storedEvents(fixture)
 				.filter(({ type }) => type === "session.workspace_hint_changed")
@@ -459,7 +466,7 @@ exec '${realGit}' "$@"
 		);
 		await browser.followFamily(sessionId);
 		await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId,
 				originId: browser.originId,
 				inputId: randomUUID(),

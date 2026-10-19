@@ -3,16 +3,12 @@
 // corrupt startup data preventing the daemon from serving defaults.
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { Effect, Either } from "effect";
+import { Effect, Result as Either } from "effect";
 import { expect, it } from "vitest";
 import {
 	DEFAULT_CATEGORY_SET,
 	surfacingLevel,
 } from "../../../src/lib/contracts/category-set.js";
-import {
-	GetCategorySet,
-	ReplaceCategorySet,
-} from "../../../src/lib/contracts/ws-rpc.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 it(
@@ -45,16 +41,18 @@ it(
 			);
 			expect(surfacingLevel(verdict, initial).level).toBe("all");
 			expect(surfacingLevel(verdict, changed).level).toBe("key");
-			expect(await harness.requestRpc(new GetCategorySet({}))).toEqual(changed);
+			expect(await harness.requestRpc({ _tag: "GetCategorySet" })).toEqual(
+				changed,
+			);
 			const stale = await Effect.runPromise(
 				browser.rpc
 					.ReplaceCategorySet({
 						expectedVersion: initial.version,
 						nextSet: initial,
 					})
-					.pipe(Effect.either),
+					.pipe(Effect.result),
 			);
-			expect(Either.isLeft(stale) && stale.left).toMatchObject({
+			expect(Either.isFailure(stale) && stale.failure).toMatchObject({
 				reason: "stale_version",
 				currentVersion: changed.version,
 			});
@@ -80,24 +78,27 @@ it(
 			];
 			for (const categories of invalid) {
 				await expect(
-					harness.requestRpc(
-						new ReplaceCategorySet(
-							{ expectedVersion: changed.version, nextSet: { categories } },
-							{ disableValidation: true },
-						),
-					),
+					harness.requestRpc({
+						_tag: "ReplaceCategorySet",
+						expectedVersion: changed.version,
+						nextSet: { categories },
+					}),
 				).rejects.toBeDefined();
 			}
-			expect(await harness.requestRpc(new GetCategorySet({}))).toEqual(changed);
+			expect(await harness.requestRpc({ _tag: "GetCategorySet" })).toEqual(
+				changed,
+			);
 			await harness.terminate();
 			await harness.restart();
-			expect(await harness.requestRpc(new GetCategorySet({}))).toEqual(changed);
+			expect(await harness.requestRpc({ _tag: "GetCategorySet" })).toEqual(
+				changed,
+			);
 			const filename = join(harness.configDir, "surfacing/categories.json");
 			const corrupt = "{ damaged categories";
 			writeFileSync(filename, corrupt);
 			await harness.terminate();
 			await harness.restart();
-			expect(await harness.requestRpc(new GetCategorySet({}))).toEqual(
+			expect(await harness.requestRpc({ _tag: "GetCategorySet" })).toEqual(
 				DEFAULT_CATEGORY_SET,
 			);
 			const quarantines = readdirSync(

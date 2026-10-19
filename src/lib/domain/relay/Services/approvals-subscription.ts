@@ -19,8 +19,8 @@
 // envelopes it is sent, so the read stays pure and every device shares one
 // window read (y7eo.15).
 
-import type { SqlError } from "@effect/sql/SqlError";
 import { Effect, Option, Schema, Stream } from "effect";
+import type { SqlError } from "effect/sql/SqlError";
 import { advanceTouchesScope } from "../../../contracts/read-model-advance.js";
 import {
 	type ReadQueryEffectError,

@@ -6,8 +6,9 @@
 // ProviderRuntimeIngestion is present; the local translation branch here remains
 // for focused translator and compatibility tests.
 
-import { SqlError } from "@effect/sql/SqlError";
+import { randomUUID } from "node:crypto";
 import { Effect, Exit, Option } from "effect";
+import { SqlError } from "effect/sql/SqlError";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import {
 	PendingInteractionCancelled,
@@ -33,7 +34,10 @@ import {
 	translateProviderRuntimeEventToDomain,
 } from "./provider-runtime-event-to-domain.js";
 import { providerRefsFromRuntimeData } from "./provider-runtime-refs.js";
-import { currentRunnerPermissionReply } from "./runner/runner-receipts.js";
+import {
+	currentRunnerOutput,
+	currentRunnerPermissionReply,
+} from "./runner/runner-receipts.js";
 import type {
 	EventSink,
 	PermissionRequest,
@@ -122,6 +126,8 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 	const { sessionId, clearTimeout, resetTimeout, persist } = deps;
 	let mapperState = emptyProviderRuntimeDomainMapperState;
 	let detachingInteractions = false;
+	const localProcessId = randomUUID();
+	const promptIds = new Map<string, string>();
 
 	function reset(): void {
 		if (resetTimeout) resetTimeout();
@@ -148,10 +154,10 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			if (!apply) return;
 			const mode = (event.data as { mode?: unknown }).mode;
 			if (typeof mode !== "string") return;
-			const result = yield* Effect.either(apply(mode as SessionPermissionMode));
-			if (result._tag === "Left") {
+			const result = yield* Effect.result(apply(mode as SessionPermissionMode));
+			if (result._tag === "Failure") {
 				log.warn(
-					`Failed to apply SDK-reported permission mode ${mode} (session=${sessionId}): ${result.left instanceof Error ? result.left.message : result.left}`,
+					`Failed to apply SDK-reported permission mode ${mode} (session=${sessionId}): ${result.failure instanceof Error ? result.failure.message : result.failure}`,
 				);
 			}
 		});
@@ -159,19 +165,21 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 	// Persist a runtime event. Unlike push(),
 	// this is not activity: asks and their answers go through here so that a
 	// turn blocked on the human keeps its inactivity timeout stopped.
-	const deliver = (event: ProviderRuntimeEvent): Effect.Effect<void, unknown> =>
+	const deliver = (
+		event: ProviderRuntimeEvent,
+		onPrompt?: (id: string) => Effect.Effect<void>,
+	): Effect.Effect<void, unknown> =>
 		Effect.gen(function* () {
 			if (deps.ingestion) {
-				yield* deps.ingestion.ingest(event);
+				yield* deps.ingestion.ingest(event, onPrompt);
 				if (isTerminalRuntimeEvent(event)) {
 					yield* Effect.sync(finish);
 				}
 				return;
 			}
 			const result = translateProviderRuntimeEventToDomain(event, mapperState);
-			mapperState = result.state;
 
-			// Attempt persistence; failures are logged and timeout handling continues.
+			// Register a waiter only after its ask has been persisted.
 			// Real persistence implements persistEvents for atomic multi-event mappings;
 			// older tests and adapters can still provide persistEvent.
 			// A compaction's "started" notice and a retry are transient status (C1) on the
@@ -190,32 +198,20 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			);
 			if (persist && persistentEvents.length > 0) {
 				if (persist.persistEvents) {
-					const persistResult = yield* Effect.either(
-						persist.persistEvents(persistentEvents),
-					);
-					if (persistResult._tag === "Left") {
-						yield* Effect.sync(() => {
-							const err = persistResult.left;
-							log.error(
-								`Persist failed for runtime event ${event.type} (session=${sessionId}): ${err instanceof Error ? err.message : err}`,
-							);
-						});
-					}
+					yield* persist.persistEvents(persistentEvents);
 				} else {
 					for (const domainEvent of persistentEvents) {
-						const persistResult = yield* Effect.either(
-							persist.persistEvent(domainEvent),
-						);
-						if (persistResult._tag === "Left") {
-							yield* Effect.sync(() => {
-								const err = persistResult.left;
-								log.error(
-									`Persist failed for ${domainEvent.type} (session=${sessionId}): ${err instanceof Error ? err.message : err}`,
-								);
-							});
-						}
+						yield* persist.persistEvent(domainEvent);
 					}
 				}
+			}
+			mapperState = result.state;
+			for (const domain of result.events) {
+				if (
+					domain.type === "permission.asked" ||
+					domain.type === "question.asked"
+				)
+					yield* onPrompt?.(domain.data.id) ?? Effect.void;
 			}
 
 			if (isTerminalRuntimeEvent(event)) yield* Effect.sync(finish);
@@ -223,8 +219,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 
 	// Asks and their resolutions are canonical events, as they are for
 	// OpenCode: the store is what wakes a snoozed session and what the snooze
-	// guard reads. A failed write degrades that, so it is logged, not fatal to
-	// a prompt the user can still answer.
+	// guard reads. A failed ask is logged and leaves no waiter registered.
 	const recordInteraction = (
 		type:
 			| "permission.asked"
@@ -232,18 +227,28 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			| "question.asked"
 			| "question.resolved",
 		data: Record<string, unknown>,
+		onPrompt?: (id: string) => Effect.Effect<void>,
 	): Effect.Effect<void> =>
-		deliver({
-			eventId: createEventId(),
-			type,
-			providerId: deps.providerId ?? "claude",
-			sessionId,
-			providerRefs: providerRefsFromRuntimeData(type, data),
-			rawSource: { kind: "relay.event-sink" },
-			createdAt: Date.now(),
-			data,
+		Effect.gen(function* () {
+			const receipt = yield* currentRunnerOutput;
+			yield* deliver(
+				{
+					eventId: createEventId(),
+					type,
+					providerId: deps.providerId ?? "claude",
+					sessionId,
+					providerRefs: {
+						...providerRefsFromRuntimeData(type, data),
+						providerProcessId: receipt?.runnerId ?? localProcessId,
+					},
+					rawSource: { kind: "relay.event-sink" },
+					createdAt: Date.now(),
+					data,
+				},
+				onPrompt,
+			);
 		}).pipe(
-			Effect.catchAll((cause) =>
+			Effect.catch((cause) =>
 				Effect.sync(() => {
 					log.warn(
 						`Failed to record ${type} ${String(data["id"])} (session=${sessionId}): ${cause instanceof Error ? cause.message : cause}`,
@@ -304,12 +309,12 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				);
 				if (persist && persistentEvents.length > 0) {
 					if (persist.persistEvents) {
-						const persistResult = yield* Effect.either(
+						const persistResult = yield* Effect.result(
 							persist.persistEvents(persistentEvents),
 						);
-						if (persistResult._tag === "Left") {
+						if (persistResult._tag === "Failure") {
 							yield* Effect.sync(() => {
-								const err = persistResult.left;
+								const err = persistResult.failure;
 								log.error(
 									`Persist failed for runtime event ${event.type} (session=${sessionId}): ${err instanceof Error ? err.message : err}`,
 								);
@@ -317,12 +322,12 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 						}
 					} else {
 						for (const domainEvent of persistentEvents) {
-							const persistResult = yield* Effect.either(
+							const persistResult = yield* Effect.result(
 								persist.persistEvent(domainEvent),
 							);
-							if (persistResult._tag === "Left") {
+							if (persistResult._tag === "Failure") {
 								yield* Effect.sync(() => {
-									const err = persistResult.left;
+									const err = persistResult.failure;
 									log.error(
 										`Persist failed for ${domainEvent.type} (session=${sessionId}): ${err instanceof Error ? err.message : err}`,
 									);
@@ -359,54 +364,75 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 						missingPendingInteractions("requestPermission"),
 					);
 				}
-				const pending = yield* pendingInteractions.beginPermissionRequest({
-					requestId: request.requestId as PermissionId,
-					sessionId,
-					toolName: request.toolName,
-					toolInput: request.toolInput as Record<string, unknown>,
-					always: request.always ?? [],
-					...(request.permissionSuggestions != null
-						? { permissionSuggestions: request.permissionSuggestions }
-						: {}),
-					...(request.permissionTitle != null
-						? { permissionTitle: request.permissionTitle }
-						: {}),
-					...(request.permissionDisplayName != null
-						? { permissionDisplayName: request.permissionDisplayName }
-						: {}),
-					...(request.permissionDescription != null
-						? { permissionDescription: request.permissionDescription }
-						: {}),
-					...(request.permissionReason != null
-						? { permissionReason: request.permissionReason }
-						: {}),
-				});
+				let conduitId: string | undefined;
+				let awaitResponse: Effect.Effect<
+					PermissionResponse,
+					PendingInteractionCancelled
+				> = Effect.fail(
+					new PendingInteractionCancelled({
+						requestId: request.requestId,
+						sessionId,
+						reason: "Permission request was not persisted",
+					}),
+				);
 				const ask = Effect.gen(function* () {
 					// Browsers see the card through the approvals subscription, so
 					// the record carries everything the card shows.
-					yield* recordInteraction("permission.asked", {
-						id: request.requestId,
-						sessionId,
-						toolName: request.toolName,
-						input: request.toolInput,
-						always: request.always ?? [],
-						...(request.permissionSuggestions != null
-							? { permissionSuggestions: request.permissionSuggestions }
-							: {}),
-						...(request.permissionTitle != null
-							? { permissionTitle: request.permissionTitle }
-							: {}),
-						...(request.permissionDisplayName != null
-							? { permissionDisplayName: request.permissionDisplayName }
-							: {}),
-						...(request.permissionDescription != null
-							? { permissionDescription: request.permissionDescription }
-							: {}),
-						...(request.permissionReason != null
-							? { permissionReason: request.permissionReason }
-							: {}),
-					});
-					return yield* pending.awaitResponse;
+					yield* recordInteraction(
+						"permission.asked",
+						{
+							id: request.requestId,
+							sessionId,
+							toolName: request.toolName,
+							input: request.toolInput,
+							always: request.always ?? [],
+							...(request.permissionSuggestions != null
+								? { permissionSuggestions: request.permissionSuggestions }
+								: {}),
+							...(request.permissionTitle != null
+								? { permissionTitle: request.permissionTitle }
+								: {}),
+							...(request.permissionDisplayName != null
+								? { permissionDisplayName: request.permissionDisplayName }
+								: {}),
+							...(request.permissionDescription != null
+								? { permissionDescription: request.permissionDescription }
+								: {}),
+							...(request.permissionReason != null
+								? { permissionReason: request.permissionReason }
+								: {}),
+						},
+						(id) =>
+							Effect.gen(function* () {
+								conduitId = id;
+								promptIds.set(request.requestId, id);
+								const pending =
+									yield* pendingInteractions.beginPermissionRequest({
+										requestId: id as PermissionId,
+										sessionId,
+										toolName: request.toolName,
+										toolInput: request.toolInput as Record<string, unknown>,
+										always: request.always ?? [],
+										...(request.permissionSuggestions != null
+											? { permissionSuggestions: request.permissionSuggestions }
+											: {}),
+										...(request.permissionTitle != null
+											? { permissionTitle: request.permissionTitle }
+											: {}),
+										...(request.permissionDisplayName != null
+											? { permissionDisplayName: request.permissionDisplayName }
+											: {}),
+										...(request.permissionDescription != null
+											? { permissionDescription: request.permissionDescription }
+											: {}),
+										...(request.permissionReason != null
+											? { permissionReason: request.permissionReason }
+											: {}),
+									});
+								awaitResponse = pending.awaitResponse;
+							}),
+					);
+					return yield* awaitResponse;
 				});
 				// Relay disposal detaches its waiter. Cancellation or failure
 				// resolves the request as a rejection.
@@ -414,24 +440,21 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					Effect.onExit((exit) =>
 						Effect.gen(function* () {
 							if (detachingInteractions && Exit.isFailure(exit)) return;
-							if (Exit.isFailure(exit)) {
-								yield* pendingInteractions.resolvePermissionRequest(
-									request.requestId,
-									{
-										decision: "reject",
-									},
-								);
+							if (Exit.isFailure(exit) && conduitId) {
+								yield* pendingInteractions.resolvePermissionRequest(conduitId, {
+									decision: "reject",
+								});
 							}
 							yield* recordInteraction("permission.resolved", {
 								id: request.requestId,
 								decision: Exit.isSuccess(exit) ? exit.value.decision : "reject",
 							}).pipe(
-								Effect.locally(
+								Effect.provideService(
 									currentRunnerPermissionReply,
-									Exit.isSuccess(exit)
+									Exit.isSuccess(exit) && conduitId
 										? {
 												sessionId,
-												requestId: request.requestId,
+												requestId: conduitId,
 												response: exit.value,
 											}
 										: undefined,
@@ -464,15 +487,17 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					options: q.options,
 					multiSelect: q.multiSelect ?? false,
 				}));
-				const pending = yield* pendingInteractions.beginQuestionRequest({
-					requestId: request.requestId,
-					sessionId,
-					questions,
-					...(request.toolUseId != null
-						? { toolCallId: request.toolUseId }
-						: {}),
-					...(deps.providerId != null ? { providerId: deps.providerId } : {}),
-				});
+				let conduitId: string | undefined;
+				let awaitAnswers: Effect.Effect<
+					Record<string, unknown>,
+					PendingInteractionCancelled
+				> = Effect.fail(
+					new PendingInteractionCancelled({
+						requestId: request.requestId,
+						sessionId,
+						reason: "Question request was not persisted",
+					}),
+				);
 				const askedQuestions = request.questions.map((q) => ({
 					question: q.question,
 					header: q.header,
@@ -481,16 +506,40 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					custom: q.custom ?? true,
 				}));
 				const ask = Effect.gen(function* () {
-					yield* recordInteraction("question.asked", {
-						id: request.requestId,
-						sessionId,
-						questions: askedQuestions,
-						...(request.toolUseId != null
-							? { toolUseId: request.toolUseId }
-							: {}),
-						...(deps.providerId != null ? { providerId: deps.providerId } : {}),
-					});
-					return yield* pending.awaitAnswers;
+					yield* recordInteraction(
+						"question.asked",
+						{
+							id: request.requestId,
+							sessionId,
+							questions: askedQuestions,
+							...(request.toolUseId != null
+								? { toolUseId: request.toolUseId }
+								: {}),
+							...(deps.providerId != null
+								? { providerId: deps.providerId }
+								: {}),
+						},
+						(id) =>
+							Effect.gen(function* () {
+								conduitId = id;
+								promptIds.set(request.requestId, id);
+								const pending = yield* pendingInteractions.beginQuestionRequest(
+									{
+										requestId: id,
+										sessionId,
+										questions,
+										...(request.toolUseId != null
+											? { toolCallId: request.toolUseId }
+											: {}),
+										...(deps.providerId != null
+											? { providerId: deps.providerId }
+											: {}),
+									},
+								);
+								awaitAnswers = pending.awaitAnswers;
+							}),
+					);
+					return yield* awaitAnswers;
 				});
 				// Relay disposal and questions kept for recovery leave the ask pending.
 				// Other exits resolve it here.
@@ -510,10 +559,11 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 								failure.value instanceof PendingInteractionCancelled &&
 								failure.value.recovered === true;
 							if (keptForRecovery) return;
-							yield* pendingInteractions.resolveQuestionRequest(
-								request.requestId,
-								{},
-							);
+							if (conduitId)
+								yield* pendingInteractions.resolveQuestionRequest(
+									conduitId,
+									{},
+								);
 							return yield* recordInteraction("question.resolved", {
 								id: request.requestId,
 								answers: {},
@@ -538,7 +588,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					return;
 				}
 				yield* deps.pendingInteractions.resolvePermissionRequest(
-					requestId,
+					promptIds.get(requestId) ?? requestId,
 					response,
 				);
 			});
@@ -558,7 +608,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					return;
 				}
 				yield* deps.pendingInteractions.resolveQuestionRequest(
-					requestId,
+					promptIds.get(requestId) ?? requestId,
 					answers,
 				);
 			});

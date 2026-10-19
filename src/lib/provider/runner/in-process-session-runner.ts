@@ -37,6 +37,9 @@ export class InProcessSessionRunner implements SessionRunner {
 		private readonly sinks: RunnerSinkBindings,
 		private readonly scope: Scope.Scope,
 	) {}
+	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
+		return Effect.sync(() => this.sessions.has(sessionId));
+	}
 	hasPendingSubagentFinalizers(sessionId: string): boolean {
 		return this.payload.hasPendingSubagentFinalizers?.(sessionId) ?? false;
 	}
@@ -65,7 +68,7 @@ export class InProcessSessionRunner implements SessionRunner {
 	executeEffect(
 		command: SessionCommand,
 	): Effect.Effect<TurnResult | undefined, SessionFailure> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			switch (command.type) {
 				case "send-turn": {
 					this.sessions.add(command.input.sessionId);
@@ -79,7 +82,7 @@ export class InProcessSessionRunner implements SessionRunner {
 					if (!controller)
 						return yield* Effect.die("Missing runner sink binding");
 					if (command.aborted) controller.abort();
-					return yield* Effect.gen(this, function* () {
+					return yield* Effect.gen({ self: this }, function* () {
 						yield* this.payload.prepareTurn?.(command, sink) ?? Effect.void;
 						return yield* this.payload.sendTurn(
 							command.input,
@@ -147,11 +150,13 @@ export class InProcessSessionRunner implements SessionRunner {
 					this.sessions.add(command.sessionId);
 					return yield* this.payload.preWarm?.(command) ?? Effect.void;
 				case "shutdown":
-					if (this.payload.shutdown) return yield* this.payload.shutdown();
-					yield* Effect.forEach(
-						this.sessions,
-						(id) => this.payload.endSession(id),
-						{ discard: true },
+					yield* (
+						this.payload.shutdown?.() ??
+						Effect.forEach(this.sessions, (id) => this.payload.endSession(id), {
+							discard: true,
+						})
+					).pipe(
+						Effect.ensuring(this.sinks.flushAllEffect().pipe(Effect.orDie)),
 					);
 					this.sessions.clear();
 					return;

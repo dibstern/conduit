@@ -22,9 +22,9 @@ describe("standalone InstanceManagementServiceLive", () => {
 					["rename", service.rename("missing", "Renamed")],
 				] as const;
 				for (const [operation, effect] of operations) {
-					expect(yield* Effect.either(effect)).toMatchObject({
-						_tag: "Left",
-						left: {
+					expect(yield* Effect.result(effect)).toMatchObject({
+						_tag: "Failure",
+						failure: {
 							_tag: "InstanceManagementServiceError",
 							operation,
 							cause: expect.objectContaining({

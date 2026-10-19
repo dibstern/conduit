@@ -42,7 +42,7 @@ export const decodeStoredEventRow = <E>(
 			createdAt: row.created_at,
 		};
 
-		yield* Schema.decodeUnknown(StoredEventSchema)(event).pipe(
+		yield* Schema.decodeUnknownEffect(StoredEventSchema)(event).pipe(
 			Effect.mapError(mapCause),
 		);
 

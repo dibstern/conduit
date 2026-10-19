@@ -1,20 +1,12 @@
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { TLSSocket } from "node:tls";
-import { Socket, SocketServer } from "@effect/platform";
-import { RpcSerialization, RpcServer } from "@effect/rpc";
-import { Statement } from "@effect/sql";
 import type { ManagedRuntime } from "effect";
-import {
-	Context,
-	Effect,
-	FiberRef,
-	Layer,
-	Option,
-	Runtime,
-	Tracer,
-} from "effect";
-import type { RuntimeFiber } from "effect/Fiber";
+import { Context, Effect, type Fiber, Layer, Option, Tracer } from "effect";
+import { NetAddress } from "effect/net";
+import { type RpcMessage, RpcSerialization, RpcServer } from "effect/rpc";
+import { Socket, SocketServer } from "effect/socket";
+import { Statement } from "effect/sql";
 import type { WebSocket } from "ws";
 import {
 	type OnSuccessfulShutdownResponse,
@@ -53,7 +45,7 @@ const RPC_PIN_CHANGED_CLOSE_CODE = 4001;
 
 interface SlowRpcRequest {
 	readonly method: string;
-	readonly requestId: string;
+	readonly requestId: RpcMessage.RequestEncoded["id"];
 	readonly projectSlug?: string;
 	readonly sessionId?: string;
 	readonly receivedAt: number;
@@ -64,14 +56,15 @@ interface SlowRpcRequest {
 	finished: boolean;
 }
 
-const requestSqlStats = FiberRef.unsafeMake<SlowRpcRequest | undefined>(
-	undefined,
+const requestSqlStats = Context.Reference<SlowRpcRequest | undefined>(
+	"conduit/server/requestSqlStats",
+	{ defaultValue: () => undefined },
 );
 
 export const withSlowRpcLogging = (
-	protocol: RpcServer.Protocol["Type"],
+	protocol: RpcServer.Protocol["Service"],
 	thresholdMs = ENV.slowRpcMs,
-): RpcServer.Protocol["Type"] => {
+): RpcServer.Protocol["Service"] => {
 	if (thresholdMs === 0) return protocol;
 	const pending = new Map<string, SlowRpcRequest>();
 	const finish = (key: string, outcome: "success" | "failure" | "interrupt") =>
@@ -110,7 +103,7 @@ export const withSlowRpcLogging = (
 					if (
 						message._tag !== "Request" ||
 						typeof message.tag !== "string" ||
-						typeof message.id !== "string"
+						(typeof message.id !== "string" && typeof message.id !== "number")
 					)
 						return handle(clientId, message);
 					const payload = isRecord(message.payload) ? message.payload : {};
@@ -131,30 +124,37 @@ export const withSlowRpcLogging = (
 						sqlMs: 0,
 						finished: false,
 					};
-					pending.set(`${clientId}:${message.id}`, request);
+					pending.set(
+						`${clientId}:${typeof message.id}:${message.id}`,
+						request,
+					);
 					return Effect.gen(function* () {
-						const previous = yield* FiberRef.get(Statement.currentTransformer);
-						return yield* Effect.tracerWith((upstream) =>
-							handle(clientId, message).pipe(
-								Effect.withTracer(
-									Tracer.make({
-										span(...args) {
-											// RpcServer creates this span after acquiring its concurrency permit.
-											if (
-												args[0] === `RpcServer.${message.tag}` &&
-												request.startedAt === undefined
-											)
-												request.startedAt = performance.now();
-											return upstream.span(...args);
-										},
-										context: (f, fiber) => upstream.context(f, fiber),
+						const previous = yield* Statement.CurrentTransformer;
+						const upstream = yield* Effect.tracer;
+						return yield* handle(clientId, message).pipe(
+							Effect.withTracer(
+								Tracer.make({
+									span(...args) {
+										// RpcServer creates this span after acquiring its concurrency permit.
+										if (
+											args[0].name === `RpcServer.${message.tag}` &&
+											request.startedAt === undefined
+										)
+											request.startedAt = performance.now();
+										return upstream.span(...args);
+									},
+									...(upstream.context && {
+										context: upstream.context.bind(upstream),
 									}),
-								),
-								// A request-local FiberRef survives stream context replacement and shares counters only with child fibers.
-								Effect.locally(requestSqlStats, request),
-								Statement.withTransformer((statement, sql, refs, span) =>
+								}),
+							),
+							// Request context references carry the same counters into child fibers and routed streams.
+							Effect.provideService(requestSqlStats, request),
+							Effect.provideService(
+								Statement.CurrentTransformer,
+								(statement, sql, fiber, span) =>
 									Effect.gen(function* () {
-										const stats = yield* FiberRef.get(requestSqlStats);
+										const stats = yield* requestSqlStats;
 										if (stats && !stats.finished) {
 											const end = span.end.bind(span);
 											span.end = (endTime, exit) => {
@@ -167,11 +167,10 @@ export const withSlowRpcLogging = (
 												end(endTime, exit);
 											};
 										}
-										return Option.isSome(previous)
-											? yield* previous.value(statement, sql, refs, span)
+										return previous !== undefined
+											? yield* previous(statement, sql, fiber, span)
 											: statement;
 									}),
-								),
 							),
 						);
 					});
@@ -191,16 +190,19 @@ export const withSlowRpcLogging = (
 			protocol.send(clientId, response, transferables).pipe(
 				Effect.tap(() => {
 					if (response._tag === "Defect") {
-						return Effect.flatMap(FiberRef.get(requestSqlStats), (request) =>
+						return Effect.flatMap(requestSqlStats, (request) =>
 							request
-								? finish(`${clientId}:${request.requestId}`, "failure")
+								? finish(
+										`${clientId}:${typeof request.requestId}:${request.requestId}`,
+										"failure",
+									)
 								: Effect.void,
 						);
 					}
 					if (response._tag !== "Chunk" && response._tag !== "Exit")
 						return Effect.void;
 					return finish(
-						`${clientId}:${response.requestId}`,
+						`${clientId}:${typeof response.requestId}:${response.requestId}`,
 						response._tag === "Chunk" || response.exit._tag === "Success"
 							? "success"
 							: Failure.isEncodedInterrupted(response.exit.cause)
@@ -217,7 +219,7 @@ type RpcWebSocketHandlerOptions = (
 	| {
 			readonly context: Effect.Effect<
 				Context.Context<
-					Layer.Layer.Context<typeof WsRpcServerLayer> | RpcSubscriptionScopeTag
+					Layer.Services<typeof WsRpcServerLayer> | RpcSubscriptionScopeTag
 				>,
 				unknown
 			>;
@@ -225,7 +227,7 @@ type RpcWebSocketHandlerOptions = (
 				effect: Effect.Effect<
 					void,
 					never,
-					Layer.Layer.Context<typeof WsRpcServerLayer>
+					Layer.Services<typeof WsRpcServerLayer>
 				>,
 			) => void;
 	  }
@@ -233,7 +235,7 @@ type RpcWebSocketHandlerOptions = (
 
 type RpcTransportRunFork = <A, E>(
 	effect: Effect.Effect<A, E, WsTransportTag>,
-) => RuntimeFiber<A, E>;
+) => Fiber.Fiber<A, E>;
 
 interface RpcWebSocketHandlerRuntime {
 	readonly transport: WsTransport;
@@ -244,7 +246,7 @@ interface RpcWebSocketHandlerRuntime {
 export interface RpcWebSocketHandlerShape {
 	readonly context?: Effect.Effect<
 		Context.Context<
-			Layer.Layer.Context<typeof WsRpcServerLayer> | RpcSubscriptionScopeTag
+			Layer.Services<typeof WsRpcServerLayer> | RpcSubscriptionScopeTag
 		>,
 		unknown
 	>;
@@ -259,18 +261,17 @@ export interface RpcWebSocketHandlerShape {
 const runRpcWebSocketConnection = <R>(
 	ws: WebSocket,
 	ip: string,
-	serverLayer: Layer.Layer<
-		Layer.Layer.Success<typeof WsRpcServerLayer>,
-		never,
-		R
-	>,
+	serverLayer: Layer.Layer<Layer.Success<typeof WsRpcServerLayer>, never, R>,
 	onSuccessfulShutdownResponse?: OnSuccessfulShutdownResponse,
 	browserConnections?: Set<() => void>,
 	secure = false,
 ) =>
 	Effect.scoped(
 		Effect.gen(function* () {
-			const pendingPinChanges = new Map<string, () => void>();
+			const pendingPinChanges = new Map<
+				RpcMessage.RequestEncoded["id"],
+				() => void
+			>();
 			const invalidate = () =>
 				ws.close(RPC_PIN_CHANGED_CLOSE_CODE, "PIN changed");
 			browserConnections?.add(invalidate);
@@ -311,21 +312,17 @@ const runRpcWebSocketConnection = <R>(
 					ws.send = originalSend;
 				}),
 			);
-			// The `ws` package is EventTarget-compatible at runtime, but its
-			// types are narrower than the browser WebSocket type expected here.
-			const socket = yield* Socket.fromWebSocket(
-				Effect.succeed(ws as unknown as globalThis.WebSocket),
-			);
+			const socket = yield* Socket.fromWebSocket(Effect.succeed(ws));
 			const socketServer = SocketServer.SocketServer.of({
-				address: { _tag: "TcpAddress", hostname: "websocket", port: 0 },
+				address: NetAddress.inetAddressUnsafe(NetAddress.ipv4Unspecified, 0),
 				run: (handler) =>
-					handler(socket).pipe(Effect.orDie, Effect.zipRight(Effect.never)),
+					handler(socket).pipe(Effect.orDie, Effect.andThen(Effect.never)),
 			});
 			const protocol = yield* RpcServer.makeProtocolSocketServer.pipe(
 				Effect.provideService(SocketServer.SocketServer, socketServer),
 				Effect.provide(RpcSerialization.layerJson),
 			);
-			const pinChangeProtocol: RpcServer.Protocol["Type"] = {
+			const pinChangeProtocol: RpcServer.Protocol["Service"] = {
 				...protocol,
 				run: (handle) =>
 					protocol.run((clientId, message) => {
@@ -358,6 +355,7 @@ const runRpcWebSocketConnection = <R>(
 			// fiber lived forever and every reconnect leaked one.
 			yield* RpcServer.make(WsRpcGroup, {
 				concurrency: RPC_CONNECTION_CONCURRENCY,
+				spanPrefix: "RpcServer",
 			}).pipe(
 				Effect.provideService(
 					RpcServer.Protocol,
@@ -372,7 +370,7 @@ const runRpcWebSocketConnection = <R>(
 				Effect.interruptible,
 				Effect.forkScoped,
 			);
-			yield* Effect.async<void>((resume) => {
+			yield* Effect.callback<void>((resume) => {
 				if (ws.readyState === ws.CLOSED) {
 					resume(Effect.void);
 					return;
@@ -390,16 +388,14 @@ export const makeWsRpcWebSocketHandler = (
 		const browserConnections = yield* Effect.serviceOption(
 			BrowserRpcConnectionsTag,
 		);
-		const runtime = yield* Effect.runtime<WsTransportTag>();
+		const context = yield* Effect.context<WsTransportTag>();
 		return new WsRpcWebSocketHandler(
 			"runtime" in options
-				? Effect.suspend(() =>
-						Effect.map(options.runtime.runtimeEffect, (value) => value.context),
-					)
+				? Effect.suspend(() => options.runtime.contextEffect)
 				: options.context,
 			{
 				transport,
-				runTransportFork: Runtime.runFork(runtime),
+				runTransportFork: Effect.runForkWith(context),
 				runConnection: (ws, ip, secure) => {
 					const connection = runRpcWebSocketConnection(
 						ws,
@@ -416,9 +412,10 @@ export const makeWsRpcWebSocketHandler = (
 		);
 	});
 
-export class RoutedWsRpcWebSocketHandlerTag extends Context.Tag(
-	"RoutedWsRpcWebSocketHandler",
-)<RoutedWsRpcWebSocketHandlerTag, RpcWebSocketHandlerShape>() {}
+export class RoutedWsRpcWebSocketHandlerTag extends Context.Service<
+	RoutedWsRpcWebSocketHandlerTag,
+	RpcWebSocketHandlerShape
+>()("RoutedWsRpcWebSocketHandler") {}
 
 export const makeRoutedWsRpcWebSocketHandler = (
 	resolveContext: ResolveRpcContext,
@@ -434,7 +431,7 @@ export const makeRoutedWsRpcWebSocketHandler = (
 		const transportContext = yield* Layer.build(
 			makeWsTransportLive({ noServer: true }),
 		);
-		const runtime = yield* Effect.runtime<WsTransportTag>().pipe(
+		const context = yield* Effect.context<WsTransportTag>().pipe(
 			Effect.provide(transportContext),
 		);
 		const scope = yield* Effect.scope;
@@ -447,9 +444,9 @@ export const makeRoutedWsRpcWebSocketHandler = (
 		).pipe(Layer.provide(Layer.succeed(SessionDirectory, directory)));
 		const handler = new WsRpcWebSocketHandler(undefined, {
 			transport: Context.get(transportContext, WsTransportTag),
-			runTransportFork: Runtime.runFork(runtime),
+			runTransportFork: Effect.runForkWith(context),
 			runConnection: (ws, ip, secure) =>
-				Runtime.runFork(runtime)(
+				Effect.runForkWith(context)(
 					Effect.forkIn(
 						runRpcWebSocketConnection(
 							ws,
@@ -475,7 +472,7 @@ export const makeRoutedWsRpcWebSocketHandler = (
 export class WsRpcWebSocketHandler implements RpcWebSocketHandlerShape {
 	readonly context?: Effect.Effect<
 		Context.Context<
-			Layer.Layer.Context<typeof WsRpcServerLayer> | RpcSubscriptionScopeTag
+			Layer.Services<typeof WsRpcServerLayer> | RpcSubscriptionScopeTag
 		>,
 		unknown
 	>;
@@ -506,7 +503,7 @@ export class WsRpcWebSocketHandler implements RpcWebSocketHandlerShape {
 		this.forkTransport(
 			"handleUpgrade",
 			this.transport.handleUpgrade(req, socket, head).pipe(
-				Effect.catchAll((err) =>
+				Effect.catch((err) =>
 					Effect.sync(() => {
 						socket.destroy(err instanceof Error ? err : undefined);
 					}),
@@ -571,10 +568,10 @@ export class WsRpcWebSocketHandler implements RpcWebSocketHandlerShape {
 	private forkTransport<A, E>(
 		op: string,
 		effect: Effect.Effect<A, E, WsTransportTag>,
-	): RuntimeFiber<unknown, never> {
+	): Fiber.Fiber<unknown, never> {
 		return this.runTransportFork(
 			effect.pipe(
-				Effect.catchAllCause((cause) =>
+				Effect.catchCause((cause) =>
 					Effect.sync(() =>
 						console.error(
 							`[ws-rpc-bridge] ${op} failed:`,

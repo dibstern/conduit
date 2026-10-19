@@ -215,14 +215,26 @@ async function completed(
 						(mark) => mark.kind === "enqueue" && mark.prompt === prompt,
 					),
 				).toHaveLength(1);
-				for (const text of responseChunks(prompt))
-					expect(
-						events.filter(
-							(event) =>
-								event.type === "text.delta" && event.data["text"] === text,
-						),
-					).toHaveLength(1);
 			}
+			const assistantMessageIds = new Set(
+				events
+					.filter(
+						(event) =>
+							event.type === "message.created" &&
+							event.data["role"] === "assistant",
+					)
+					.map((event) => event.data["messageId"]),
+			);
+			expect(
+				events
+					.filter(
+						(event) =>
+							event.type === "text.delta" &&
+							assistantMessageIds.has(event.data["messageId"]),
+					)
+					.map((event) => event.data["text"])
+					.join(""),
+			).toBe(prompts.flatMap(responseChunks).join(""));
 		},
 		{ timeout: 10_000 },
 	);
@@ -1346,7 +1358,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		);
 		const rejected = "invalidated-resume-rejected-send";
 		await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId,
 				originId: browser.originId,
 				inputId: randomUUID(),

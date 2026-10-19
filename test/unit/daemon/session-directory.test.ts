@@ -2,12 +2,12 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { it } from "@effect/vitest";
 import { Effect, Layer, Option, Ref } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, expect, vi } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
-import { ResolveSession } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { makeDaemonSharedStoreLayer } from "../../../src/lib/domain/daemon/Layers/daemon-shared-store-layer.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
@@ -63,7 +63,7 @@ function fixture() {
 	return { root, projects };
 }
 
-it.scoped(
+it.effect(
 	"ResolveSession and AttachProject find the stored owner of a cold non-first project",
 	() => {
 		const { root, projects } = fixture();
@@ -80,15 +80,19 @@ it.scoped(
 				Effect.provide(context),
 			);
 			expect(
-				yield* handlers.ResolveSession(
-					new ResolveSession({ sessionId: "ses_b" }),
-				),
+				yield* handlers.ResolveSession({
+					_tag: "ResolveSession",
+					sessionId: "ses_b",
+				}),
 			).toEqual({ projectSlug: "b" });
 			expect(
-				yield* Effect.either(
-					handlers.ResolveSession(new ResolveSession({ sessionId: "missing" })),
+				yield* Effect.result(
+					handlers.ResolveSession({
+						_tag: "ResolveSession",
+						sessionId: "missing",
+					}),
 				),
-			).toMatchObject({ _tag: "Left", left: { _tag: "WsRpcError" } });
+			).toMatchObject({ _tag: "Failure", failure: { _tag: "WsRpcError" } });
 			yield* Layer.build(
 				WebSocketRoutingLive.pipe(
 					Layer.provide(
@@ -99,7 +103,7 @@ it.scoped(
 								Ref.make<import("node:http").Server | null>(createServer()),
 							),
 							makeAuthManagerLive(new AuthManager({ getPinHash: () => null })),
-							Layer.succeed(WebSocketRelayRouterTag, {
+							Layer.succeed(WebSocketRelayRouterTag)({
 								ensureRelayStarted: () => Effect.void,
 								waitForRelay: () => Effect.succeed({ rpcWsHandler: {} }),
 								touchLastUsed: () => Effect.void,
@@ -114,15 +118,15 @@ it.scoped(
 				yield* attach({ originId: "directory-test", sessionId: "ses_b" }),
 			).toEqual({ projectSlug: "b", sessionSlug: "b" });
 			expect(
-				yield* Effect.either(
+				yield* Effect.result(
 					attach({ originId: "directory-test", sessionId: "missing" }),
 				),
-			).toMatchObject({ _tag: "Left", left: { _tag: "WsRpcError" } });
+			).toMatchObject({ _tag: "Failure", failure: { _tag: "WsRpcError" } });
 		});
 	},
 );
 
-it.scoped(
+it.effect(
 	"shared lookups reflect committed creates, child stamps and cascaded deletes",
 	() =>
 		Effect.gen(function* () {
@@ -160,7 +164,7 @@ it.scoped(
 					),
 				);
 				expect(yield* directory.projectOf("child")).toEqual(Option.some("b"));
-				yield* Effect.either(
+				yield* Effect.result(
 					commit.write((_project, stamp) =>
 						stamp(() =>
 							Effect.gen(function* () {
@@ -188,17 +192,17 @@ it.scoped(
 		}),
 );
 
-it.scoped(
+it.effect(
 	"OpenCode adoption rejects two stored projects sharing the provider id",
 	() => {
 		const { root, projects } = fixture();
 		return Effect.gen(function* () {
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				resolveDaemonOpenCodeSession("opencode", "shared-provider-id"),
 			);
 			expect(result).toMatchObject({
-				_tag: "Left",
-				left: {
+				_tag: "Failure",
+				failure: {
 					message: expect.stringContaining("more than one Conduit project"),
 				},
 			});

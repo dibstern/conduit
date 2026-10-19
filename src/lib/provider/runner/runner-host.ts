@@ -378,7 +378,7 @@ export const runSessionRunner = (
 								});
 								initializing = false;
 							}).pipe(
-								Effect.catchAll((failure) =>
+								Effect.catch((failure) =>
 									Effect.sync(() => {
 										initializing = false;
 										peer.refuse(failure);
@@ -445,9 +445,7 @@ export const runSessionRunner = (
 								},
 								catch: (cause) => runnerFailure("prune runner sends", cause),
 							}).pipe(
-								Effect.catchAll((failure) =>
-									Effect.logWarning(failure.message),
-								),
+								Effect.catch((failure) => Effect.logWarning(failure.message)),
 							),
 						);
 					} else if (message.type === "upgrade-retire") {
@@ -621,6 +619,15 @@ export const runSessionRunner = (
 					if (connection === peer) {
 						attached = false;
 						connection = undefined;
+						const proof =
+							process.env["NODE_ENV"] === "test"
+								? process.env["CONDUIT_TEST_PROCESS_PROOF"]
+								: undefined;
+						if (proof)
+							appendFileSync(
+								proof,
+								`${JSON.stringify({ kind: "runner-detached", sessionId, pid: process.pid, at: process.hrtime.bigint().toString() })}\n`,
+							);
 						if (exiting) finishExit();
 					}
 				},

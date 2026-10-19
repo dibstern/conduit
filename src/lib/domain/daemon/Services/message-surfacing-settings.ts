@@ -9,7 +9,15 @@ import {
 } from "node:fs/promises";
 import { isIP } from "node:net";
 import { join } from "node:path";
-import { Context, Data, Effect, Option, Redacted, Schema } from "effect";
+import {
+	Context,
+	Data,
+	Effect,
+	Option,
+	Redacted,
+	Schema,
+	Semaphore,
+} from "effect";
 import {
 	DEFAULT_MESSAGE_SURFACING_SETTINGS,
 	type MessageSurfacingPatch,
@@ -34,9 +42,10 @@ export interface MessageSurfacingSettingsService {
 	) => Effect.Effect<Response, MessageSurfacingSettingsError>;
 }
 
-export class MessageSurfacingSettings extends Context.Tag(
-	"MessageSurfacingSettings",
-)<MessageSurfacingSettings, MessageSurfacingSettingsService>() {}
+export class MessageSurfacingSettings extends Context.Service<
+	MessageSurfacingSettings,
+	MessageSurfacingSettingsService
+>()("MessageSurfacingSettings") {}
 
 export interface MessageSurfacingSettingsOptions {
 	readonly env?: {
@@ -51,8 +60,8 @@ const SnapshotSchema = Schema.Struct({
 		...MessageSurfacingSettingsSchema.fields,
 		summariesEnabled: Schema.optional(Schema.Boolean),
 	}),
-	apiKey: Schema.OptionFromNullOr(Schema.Redacted(Schema.String)),
-	keyState: Schema.Literal("none", "valid", "invalid"),
+	apiKey: Schema.OptionFromNullOr(Schema.RedactedFromValue(Schema.String)),
+	keyState: Schema.Literals(["none", "valid", "invalid"]),
 	invalidEnvKeyHash: Schema.OptionFromNullOr(Schema.String),
 });
 type Snapshot = Omit<typeof SnapshotSchema.Type, "settings"> & {
@@ -77,7 +86,7 @@ export const makeMessageSurfacingSettings = (
 		const directory = join(configDir, "credentials");
 		const filename = join(directory, "typesafe");
 		const env = options.env ?? process.env;
-		const envKey = Option.fromNullable(
+		const envKey = Option.fromNullishOr(
 			env.TYPESAFE_API_KEY?.trim() || undefined,
 		).pipe(Option.map(Redacted.make));
 		const envKeyHash = Option.map(envKey, (key) =>
@@ -85,7 +94,7 @@ export const makeMessageSurfacingSettings = (
 		);
 		const baseUrl = env.TYPESAFE_BASE_URL ?? "https://api.typesafe.ai";
 		const transport = options.transport ?? fetch;
-		const lock = yield* Effect.makeSemaphore(1);
+		const lock = yield* Semaphore.make(1);
 		let current: Snapshot = yield* Effect.tryPromise({
 			try: async () => {
 				let content: string;
@@ -109,7 +118,7 @@ export const makeMessageSurfacingSettings = (
 				await chmod(directory, 0o700);
 				await chmod(filename, 0o600);
 				const saved = Schema.decodeUnknownSync(
-					Schema.parseJson(SnapshotSchema),
+					Schema.fromJsonString(SnapshotSchema),
 				)(content);
 				const rejected = Option.isSome(envKey)
 					? Option.isSome(saved.invalidEnvKeyHash) &&
@@ -146,7 +155,7 @@ export const makeMessageSurfacingSettings = (
 						await chmod(directory, 0o700);
 						await writeFile(
 							temporary,
-							Schema.encodeSync(Schema.parseJson(SnapshotSchema))(next),
+							Schema.encodeSync(Schema.fromJsonString(SnapshotSchema))(next),
 							{ encoding: "utf8", mode: 0o600, flag: "wx" },
 						);
 						await rename(temporary, filename);

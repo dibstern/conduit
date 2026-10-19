@@ -1,4 +1,4 @@
-import { Clock, Duration, Effect, Fiber, type Scope } from "effect";
+import { Clock, Duration, Effect, Fiber, type Scope, Semaphore } from "effect";
 import { createLogger } from "../../logger.js";
 import { ClaudeEventPersistEffectTag } from "../../persistence/effect/claude-event-persist-effect.js";
 import {
@@ -31,6 +31,7 @@ import {
 import type {
 	ClaudeSessionContext,
 	ClaudeSubagentLivePoller,
+	ClaudeSubagentTranscriptSnapshot,
 	SessionMessage,
 } from "./types.js";
 
@@ -48,19 +49,53 @@ type EnsureSubagentSession = (
 	>[0],
 ) => Effect.Effect<void, ClaudeAdapterError>;
 
-function subagentTranscript(ctx: ClaudeSessionContext, childSessionId: string) {
-	const transcripts = (ctx.subagentTranscripts ??= new Map());
-	const existing = transcripts.get(childSessionId);
-	if (existing) return existing;
-	const cursor: ClaudeSubagentTranscriptCursor = {
-		messageRoles: new Map(),
-		textOffsets: new Map(),
-		thinkingOffsets: new Map(),
-		toolStarts: new Set(),
-		toolCompletions: new Set(),
-	};
-	transcripts.set(childSessionId, cursor);
-	return cursor;
+type ReadSubagentTranscript = (
+	childSessionId: string,
+) => Effect.Effect<ClaudeSubagentTranscriptSnapshot, ClaudeAdapterError>;
+
+function subagentTranscript(
+	ctx: ClaudeSessionContext,
+	childSessionId: string,
+	readTranscript: ReadSubagentTranscript | undefined,
+): Effect.Effect<ClaudeSubagentTranscriptCursor, ClaudeAdapterError> {
+	return Effect.gen(function* () {
+		const transcripts = (ctx.subagentTranscripts ??= new Map());
+		const existing = transcripts.get(childSessionId);
+		if (existing) return existing;
+		const cursor: ClaudeSubagentTranscriptCursor = {
+			messageRoles: new Map(),
+			textOffsets: new Map(),
+			thinkingOffsets: new Map(),
+			toolStarts: new Set(),
+			toolCompletions: new Set(),
+			toolMessageIds: new Map(),
+		};
+		const read =
+			yield* resolveReadClaudeSubagentTranscriptEffect(readTranscript);
+		if (read) {
+			const snapshot = yield* read(childSessionId);
+			for (const message of snapshot.messages)
+				cursor.messageRoles.set(message.id, message.role);
+			for (const part of snapshot.parts) {
+				if (part.type === "tool") {
+					cursor.toolStarts.add(part.id);
+					if (part.status === "completed" || part.status === "error")
+						cursor.toolCompletions.add(part.id);
+					cursor.toolMessageIds?.set(part.id, part.messageId);
+				} else if (part.type === "text" || part.type === "thinking") {
+					const separator = part.id.lastIndexOf("-");
+					if (separator < 0 || part.id.slice(0, separator) !== part.messageId)
+						continue;
+					const offsetKey = `${part.messageId}:${part.id.slice(separator + 1)}`;
+					const offsets =
+						part.type === "text" ? cursor.textOffsets : cursor.thinkingOffsets;
+					offsets?.set(offsetKey, part.text?.length ?? 0);
+				}
+			}
+		}
+		transcripts.set(childSessionId, cursor);
+		return cursor;
+	});
 }
 
 /** Prefer the Task's human description ("Audit auth flow") — the raw
@@ -84,7 +119,7 @@ export function decideClaudeMessageOwnershipEffect(
 		decisions: readonly ClaudeOwnershipDecision[],
 	) => Effect.Effect<void, ClaudeAdapterError>,
 ): Effect.Effect<void, ClaudeAdapterError> {
-	const permit = (ctx.messageOwnershipPermit ??= Effect.unsafeMakeSemaphore(1));
+	const permit = (ctx.messageOwnershipPermit ??= Semaphore.makeUnsafe(1));
 	return Effect.gen(function* () {
 		const timedInput =
 			input.kind === "sdk"
@@ -133,7 +168,10 @@ export function applyClaudeOwnershipDecisionEffect(
 	ctx: ClaudeSessionContext,
 	decision: ClaudeOwnershipDecision,
 	parentClaudeSessionId?: string,
-	options: { readonly allowStopped?: boolean } = {},
+	options: {
+		readonly allowStopped?: boolean;
+		readonly readTranscript?: ReadSubagentTranscript;
+	} = {},
 ): Effect.Effect<Effect.Effect<void> | undefined, ClaudeAdapterError> {
 	return Effect.gen(function* () {
 		if (decision.kind === "hold" || decision.kind === "drop") {
@@ -178,7 +216,11 @@ export function applyClaudeOwnershipDecisionEffect(
 					];
 			}
 			if (messages) {
-				const cursor = subagentTranscript(ctx, childSessionId);
+				const cursor = yield* subagentTranscript(
+					ctx,
+					childSessionId,
+					options.readTranscript,
+				);
 				const stage = stageSessionMessagesToEvents({
 					childSessionId,
 					messages,
@@ -272,7 +314,7 @@ export function applyClaudeOwnershipDecisionEffect(
 				title: claudeSubagentTitle(task),
 			}).pipe(
 				Effect.as(true),
-				Effect.catchAll((err) =>
+				Effect.catch((err) =>
 					Effect.sync(() => {
 						log.warn(
 							`Failed to ensure Claude subagent session for ${ctx.sessionId}/${taskId}: ${err instanceof Error ? err.message : err}`,
@@ -332,7 +374,7 @@ export function applyClaudeOwnershipDecisionEffect(
 						),
 					)
 					.pipe(
-						Effect.catchAll((err) =>
+						Effect.catch((err) =>
 							Effect.sync(() => {
 								log.warn(
 									`Failed to push Claude subagent metadata for ${ctx.sessionId}/${taskId}: ${err instanceof Error ? err.message : err}`,
@@ -390,6 +432,27 @@ function resolveEnsureClaudeSubagentSessionEffect(
 	});
 }
 
+function resolveReadClaudeSubagentTranscriptEffect(
+	readTranscript: ReadSubagentTranscript | undefined,
+): Effect.Effect<ReadSubagentTranscript | undefined> {
+	return Effect.gen(function* () {
+		if (readTranscript) return readTranscript;
+		const persist = yield* Effect.serviceOption(ClaudeEventPersistEffectTag);
+		return persist._tag === "Some"
+			? (childSessionId: string) =>
+					persist.value.readClaudeSubagentTranscript(childSessionId).pipe(
+						Effect.mapError(
+							(cause) =>
+								new ClaudeBoundaryError({
+									operation: "readClaudeSubagentTranscript",
+									cause,
+								}),
+						),
+					)
+			: undefined;
+	});
+}
+
 export function startClaudeSubagentFeedEffect(
 	deps: SubagentDeps,
 	scope: Scope.Scope,
@@ -428,7 +491,7 @@ export function startClaudeSubagentFeedEffect(
 						sdk,
 						applyDecisions,
 					).pipe(
-						Effect.catchAll((err) =>
+						Effect.catch((err) =>
 							Effect.sync(() =>
 								log.warn(
 									`Claude subagent poll failed for ${ctx.sessionId}/${poller.sdkSubagentId}: ${err instanceof Error ? err.message : err}`,
@@ -478,7 +541,7 @@ export function finalReadClaudeSubagentFeedEffect(
 			{ allowInactive: true },
 		);
 	}).pipe(
-		Effect.catchAll((err) =>
+		Effect.catch((err) =>
 			Effect.sync(() =>
 				log.warn(
 					`Final Claude subagent poll failed for ${ctx.sessionId}/${decision.taskId}: ${err instanceof Error ? err.message : err}`,
@@ -495,8 +558,7 @@ export function endClaudeMessageOwnershipEffect(
 	return Effect.gen(function* () {
 		for (const poller of ctx.subagentPollers?.values() ?? [])
 			poller.active = false;
-		const permit = (ctx.messageOwnershipPermit ??=
-			Effect.unsafeMakeSemaphore(1));
+		const permit = (ctx.messageOwnershipPermit ??= Semaphore.makeUnsafe(1));
 		const decisions = yield* permit.withPermits(1)(
 			Effect.sync(() => ctx.messageOwnership?.decide({ kind: "end" }) ?? []),
 		);
@@ -549,14 +611,16 @@ export function endClaudeMessageOwnershipEffect(
 		Effect.interruptible,
 		// One budget covers the permit wait and every end-time read, regardless
 		// of how many agents remain. Callers fork this after foreground cleanup.
-		Effect.timeoutFail({
+		Effect.timeoutOrElse({
 			duration: Duration.millis(subagentPollTimeoutMs(deps)),
-			onTimeout: () =>
-				new ClaudeRuntimeError({
-					message: `Claude subagent finalization ${ctx.sessionId} timed out after ${subagentPollTimeoutMs(deps)}ms`,
-				}),
+			orElse: () =>
+				Effect.fail(
+					new ClaudeRuntimeError({
+						message: `Claude subagent finalization ${ctx.sessionId} timed out after ${subagentPollTimeoutMs(deps)}ms`,
+					}),
+				),
 		}),
-		Effect.catchAll((err) =>
+		Effect.catch((err) =>
 			Effect.sync(() =>
 				log.warn(
 					`Claude subagent finalization failed for ${ctx.sessionId}: ${err instanceof Error ? err.message : err}`,
@@ -570,7 +634,8 @@ export function endClaudeMessageOwnershipEffect(
 				for (const poller of remaining) poller.active = false;
 				ctx.subagentPollers?.clear();
 				for (const poller of remaining) {
-					if (poller.fiber) yield* Fiber.interruptFork(poller.fiber);
+					if (poller.fiber)
+						yield* Effect.sync(() => poller.fiber?.interruptUnsafe());
 				}
 			}),
 		),
@@ -604,12 +669,14 @@ function pollClaudeSubagentOnceEffect(
 				new ClaudeBoundaryError({ operation: "getSubagentMessages", cause }),
 		}).pipe(
 			Effect.interruptible,
-			Effect.timeoutFail({
+			Effect.timeoutOrElse({
 				duration: Duration.millis(subagentPollTimeoutMs(deps)),
-				onTimeout: () =>
-					new ClaudeRuntimeError({
-						message: `Claude subagent poll ${ctx.sessionId}/${poller.sdkSubagentId} timed out after ${subagentPollTimeoutMs(deps)}ms`,
-					}),
+				orElse: () =>
+					Effect.fail(
+						new ClaudeRuntimeError({
+							message: `Claude subagent poll ${ctx.sessionId}/${poller.sdkSubagentId} timed out after ${subagentPollTimeoutMs(deps)}ms`,
+						}),
+					),
 			}),
 		);
 		if (!canPollSubagent(ctx, poller, options)) return;

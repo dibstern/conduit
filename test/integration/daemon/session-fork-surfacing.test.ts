@@ -5,7 +5,6 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
-import { ForkSessionForSession } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
@@ -87,11 +86,12 @@ describe("Forked surfacing through the built daemon", () => {
 		for (const cutoff of [undefined, answers[0]?.id]) {
 			const { sessionId } = await sendRpcRequest(
 				join(fixture.configDir, "relay.sock"),
-				new ForkSessionForSession({
+				{
+					_tag: "ForkSession",
 					originId: browser.originId,
 					sessionId: parentId,
 					...(cutoff === undefined ? {} : { messageId: cutoff }),
-				}),
+				},
 			);
 			const history = await browser.history(sessionId);
 			const expected = parent.filter(

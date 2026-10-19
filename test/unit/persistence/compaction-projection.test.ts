@@ -144,6 +144,73 @@ describe("session.compaction projection (real ingestion path)", () => {
 		expect(await compactionParts()).toHaveLength(1);
 	});
 
+	it("keeps the OpenCode summary owner and replays like historical metadata", async () => {
+		await harness.ingestBatch([
+			providerRuntimeEvent("message.created", SESSION_ID, {
+				sessionId: SESSION_ID,
+				messageId: "summary",
+				role: "assistant",
+			}),
+			providerRuntimeEvent(
+				"message.created",
+				SESSION_ID,
+				{
+					sessionId: SESSION_ID,
+					messageId: "later-answer",
+					role: "assistant",
+				},
+				{ eventId: "evt_later_answer", createdAt: Date.now() + 1 },
+			),
+			{
+				...compaction("completed"),
+				providerId: "opencode",
+				providerRefs: {
+					providerMessageId: "summary",
+					providerSessionId: "sdk-session",
+					providerTurnId: "sdk-turn",
+					providerToolUseId: "sdk-tool",
+				},
+			},
+		]);
+		expect((await compactionParts())[0]?.message_id).toBe("summary");
+
+		const stored = await harness.storedEvents(SESSION_ID);
+		expect(
+			stored.find((event) => event.type === "session.compaction")?.metadata,
+		).toEqual({
+			providerRefs: { providerMessageId: "summary" },
+		});
+		const historical = makeEffectProjectionHarness();
+		const compact = makeEffectProjectionHarness();
+		try {
+			await historical.reproject(
+				stored.map((event) => ({
+					...event,
+					metadata: {
+						...event.metadata,
+						providerRuntimeEventId: event.eventId,
+						rawSource: "test.provider-runtime",
+						providerRefs: {
+							providerSessionId: "sdk-session",
+							providerTurnId: "sdk-turn",
+							providerToolUseId: "sdk-tool",
+							...event.metadata.providerRefs,
+						},
+					},
+				})),
+			);
+			await compact.reproject(stored);
+			for (const table of ["sessions", "messages", "message_parts", "turns"]) {
+				expect(
+					await compact.query(`SELECT * FROM ${table} ORDER BY id`),
+				).toEqual(await historical.query(`SELECT * FROM ${table} ORDER BY id`));
+			}
+		} finally {
+			await historical.dispose();
+			await compact.dispose();
+		}
+	});
+
 	it("records several compactions in one session separately", async () => {
 		await harness.ingest(
 			compaction("completed", { detail: "first", eventId: "evt_c1" }),

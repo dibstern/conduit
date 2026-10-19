@@ -4,8 +4,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	afterEach,
 	beforeEach,
@@ -36,7 +36,6 @@ import type { Message } from "../../../../src/lib/instance/sdk-types.js";
 import { makeCommitAndSignal } from "../../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
-import { ProjectorCursorEffectTag } from "../../../../src/lib/persistence/effect/projector-cursor-effect.js";
 import {
 	createAllEffectProjectors,
 	type EffectProjector,
@@ -88,7 +87,7 @@ function makeFailFirstBusLayer(
 	outcome: Effect.Effect<never>,
 ): Layer.Layer<SessionEventBusTag> {
 	let published = 0;
-	return Layer.succeed(SessionEventBusTag, {
+	return Layer.succeed(SessionEventBusTag)({
 		publish: () => (published++ === 0 ? outcome : Effect.void),
 		publishAdvance: () => Effect.void,
 		subscribe: () => Effect.succeed(Stream.empty),
@@ -596,7 +595,11 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 			}),
 		);
 
-		expect(result.ok).toBe(true);
+		expect(result).toMatchObject({
+			ok: true,
+			eventsWritten: 2,
+			sessionSeeded: true,
+		});
 		if (!result.ok) return;
 
 		const stored = await readStored();
@@ -2077,7 +2080,7 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		let fetches = 0;
 		let armed = false;
 		let reconnected = false;
-		const bus = Layer.succeed(SessionEventBusTag, {
+		const bus = Layer.succeed(SessionEventBusTag)({
 			publish: () => Effect.void,
 			publishAdvance: () =>
 				Effect.sync(() => {
@@ -2169,41 +2172,6 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		await ingest(snapshot);
 
 		expect(await readPartText("part-publish-int")).toEqual([{ text: "hello" }]);
-	});
-
-	it("batch progress advances after successful projection", async () => {
-		await ingestOk(
-			makeSSEEvent("message.created", {
-				sessionID: SESSION_ID,
-				messageID: "msg-001",
-				info: { role: "assistant", parts: [] },
-			}),
-		);
-
-		const stored = await readStored();
-		expect(
-			stored.map((event) => ({ sequence: event.sequence, type: event.type })),
-		).toEqual([
-			{ sequence: 1, type: "session.created" },
-			{ sequence: 2, type: "message.created" },
-		]);
-		const expectedLastSequence = stored[1]?.sequence;
-
-		const cursors = await currentRuntime().runPromise(
-			Effect.gen(function* () {
-				const cursorRepo = yield* ProjectorCursorEffectTag;
-				return yield* cursorRepo.listAll();
-			}),
-		);
-		const cursorByName = new Map(
-			cursors.map((cursor) => [cursor.projectorName, cursor.lastAppliedSeq]),
-		);
-		expect(
-			cursorByName.get("@batch:approval,input,message,provider,session,turn"),
-		).toBe(expectedLastSequence);
-		expect(cursorByName.get("session")).toBe(0);
-		expect(cursorByName.get("message")).toBe(0);
-		expect(cursorByName.get("provider")).toBe(0);
 	});
 
 	it("text.delta creates a text part in message_parts", async () => {

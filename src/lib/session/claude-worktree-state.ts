@@ -1,5 +1,5 @@
-import type { SqlClient } from "@effect/sql";
 import { Effect, Schema } from "effect";
+import type { SqlClient } from "effect/sql";
 import {
 	type ClaudeWorktreeState,
 	ClaudeWorktreeStateSchema,
@@ -26,10 +26,10 @@ const workspaceResult = Schema.Struct({
 	entered: Schema.Boolean,
 });
 export const decodeClaudeWorktreeState = Schema.decodeUnknownSync(
-	Schema.parseJson(ClaudeWorktreeStateSchema),
+	Schema.fromJsonString(ClaudeWorktreeStateSchema),
 );
 const decodeWorkspace = Schema.decodeUnknownSync(
-	Schema.parseJson(SessionWorkspaceSchema),
+	Schema.fromJsonString(SessionWorkspaceSchema),
 );
 
 /** Fold canonical facts during projection; no history inference or backfill. */

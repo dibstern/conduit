@@ -1,0 +1,6282 @@
+{
+	"name": "directory-s5-hung-session-isolation",
+	"recordedAt": "1970-01-01T00:00:00.000Z",
+	"opencodeVersion": "1.18.34",
+	"interactions": [
+		{
+			"kind": "sse",
+			"type": "server.connected",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.connected",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.connected",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.connected",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/session/ses_1/prompt_async",
+			"requestBody": {
+				"model": {
+					"providerID": "opencode",
+					"modelID": "mimo-v2.6-flash-free"
+				},
+				"agent": "build",
+				"parts": [
+					{
+						"type": "text",
+						"text": "Use the bash tool to run the command \"sleep 60 && echo hung-done\". Do not change directory. Then reply HUNG-FINISHED."
+					}
+				]
+			},
+			"status": 204,
+			"responseBody": ""
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"info": {
+					"id": "msg_28",
+					"role": "user",
+					"sessionID": "ses_1",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"part": {
+					"type": "text",
+					"text": "Use the bash tool to run the command \"sleep 60 && echo hung-done\". Do not change directory. Then reply HUNG-FINISHED.",
+					"messageID": "msg_28",
+					"sessionID": "ses_1",
+					"id": "prt_82"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"info": {
+					"id": "ses_1",
+					"slug": "swift-cabin",
+					"projectID": "project_1",
+					"directory": "<A>",
+					"path": "",
+					"title": "directory-A",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2148,
+						"output": 61,
+						"reasoning": 32,
+						"cache": {
+							"read": 14336,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"info": {
+					"id": "msg_28",
+					"role": "user",
+					"sessionID": "ses_1",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"part": {
+					"type": "text",
+					"text": "Use the bash tool to run the command \"sleep 60 && echo hung-done\". Do not change directory. Then reply HUNG-FINISHED.",
+					"messageID": "msg_28",
+					"sessionID": "ses_1",
+					"id": "prt_82"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"info": {
+					"id": "ses_1",
+					"slug": "swift-cabin",
+					"projectID": "project_1",
+					"directory": "<A>",
+					"path": "",
+					"title": "directory-A",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2148,
+						"output": 61,
+						"reasoning": 32,
+						"cache": {
+							"read": 14336,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_1",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"info": {
+					"id": "msg_29",
+					"parentID": "msg_28",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<A>",
+						"root": "<A>"
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_1"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_1",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"info": {
+					"id": "msg_29",
+					"parentID": "msg_28",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<A>",
+						"root": "<A>"
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_1"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"info": {
+					"id": "ses_1",
+					"slug": "swift-cabin",
+					"projectID": "project_1",
+					"directory": "<A>",
+					"path": "",
+					"title": "directory-A",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2148,
+						"output": 61,
+						"reasoning": 32,
+						"cache": {
+							"read": 14336,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_1",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"id": "msg_28",
+					"sessionID": "ses_1",
+					"summary": {
+						"diffs": []
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"info": {
+					"id": "ses_1",
+					"slug": "swift-cabin",
+					"projectID": "project_1",
+					"directory": "<A>",
+					"path": "",
+					"title": "directory-A",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2148,
+						"output": 61,
+						"reasoning": 32,
+						"cache": {
+							"read": 14336,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_1",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"id": "msg_28",
+					"sessionID": "ses_1",
+					"summary": {
+						"diffs": []
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_1",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_1",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"part": {
+					"id": "prt_83",
+					"messageID": "msg_29",
+					"sessionID": "ses_1",
+					"snapshot": "project_3",
+					"type": "step-start"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"part": {
+					"id": "prt_84",
+					"messageID": "msg_29",
+					"sessionID": "ses_1",
+					"type": "reasoning",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_1",
+				"messageID": "msg_29",
+				"partID": "prt_84",
+				"field": "text",
+				"delta": "The user wants me to run a"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"part": {
+					"id": "prt_83",
+					"messageID": "msg_29",
+					"sessionID": "ses_1",
+					"snapshot": "project_3",
+					"type": "step-start"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"part": {
+					"id": "prt_84",
+					"messageID": "msg_29",
+					"sessionID": "ses_1",
+					"type": "reasoning",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_1",
+				"messageID": "msg_29",
+				"partID": "prt_84",
+				"field": "text",
+				"delta": "The user wants me to run a"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_1",
+				"messageID": "msg_29",
+				"partID": "prt_84",
+				"field": "text",
+				"delta": " command that"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_1",
+				"messageID": "msg_29",
+				"partID": "prt_84",
+				"field": "text",
+				"delta": " command that"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_1",
+				"messageID": "msg_29",
+				"partID": "prt_84",
+				"field": "text",
+				"delta": " takes"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_1",
+				"messageID": "msg_29",
+				"partID": "prt_84",
+				"field": "text",
+				"delta": " takes"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_1",
+				"messageID": "msg_29",
+				"partID": "prt_84",
+				"field": "text",
+				"delta": " 60 seconds. I"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_1",
+				"messageID": "msg_29",
+				"partID": "prt_84",
+				"field": "text",
+				"delta": " 60 seconds. I"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_1",
+				"messageID": "msg_29",
+				"partID": "prt_84",
+				"field": "text",
+				"delta": " should run it with an"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_1",
+				"messageID": "msg_29",
+				"partID": "prt_84",
+				"field": "text",
+				"delta": " should run it with an"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_1",
+				"messageID": "msg_29",
+				"partID": "prt_84",
+				"field": "text",
+				"delta": " appropriate timeout."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_1",
+				"messageID": "msg_29",
+				"partID": "prt_84",
+				"field": "text",
+				"delta": " appropriate timeout."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"part": {
+					"id": "prt_84",
+					"messageID": "msg_29",
+					"sessionID": "ses_1",
+					"type": "reasoning",
+					"text": "The user wants me to run a command that takes 60 seconds. I should run it with an appropriate timeout.",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"part": {
+					"id": "prt_85",
+					"messageID": "msg_29",
+					"sessionID": "ses_1",
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call_8",
+					"state": {
+						"status": "pending",
+						"input": {},
+						"raw": ""
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"part": {
+					"id": "prt_84",
+					"messageID": "msg_29",
+					"sessionID": "ses_1",
+					"type": "reasoning",
+					"text": "The user wants me to run a command that takes 60 seconds. I should run it with an appropriate timeout.",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"part": {
+					"id": "prt_85",
+					"messageID": "msg_29",
+					"sessionID": "ses_1",
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call_8",
+					"state": {
+						"status": "pending",
+						"input": {},
+						"raw": ""
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"part": {
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call_8",
+					"state": {
+						"metadata": {
+							"output": ""
+						},
+						"status": "running",
+						"input": {
+							"command": "sleep 60 && echo hung-done",
+							"timeout": 120000
+						},
+						"time": {
+							"start": 0
+						}
+					},
+					"id": "prt_85",
+					"sessionID": "ses_1",
+					"messageID": "msg_29"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"part": {
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call_8",
+					"state": {
+						"metadata": {
+							"output": ""
+						},
+						"status": "running",
+						"input": {
+							"command": "sleep 60 && echo hung-done",
+							"timeout": 120000
+						},
+						"time": {
+							"start": 0
+						}
+					},
+					"id": "prt_85",
+					"sessionID": "ses_1",
+					"messageID": "msg_29"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"part": {
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call_8",
+					"state": {
+						"metadata": {
+							"output": ""
+						},
+						"status": "running",
+						"input": {
+							"command": "sleep 60 && echo hung-done",
+							"timeout": 120000
+						},
+						"time": {
+							"start": 0
+						}
+					},
+					"id": "prt_85",
+					"sessionID": "ses_1",
+					"messageID": "msg_29"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"part": {
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call_8",
+					"state": {
+						"metadata": {
+							"output": ""
+						},
+						"status": "running",
+						"input": {
+							"command": "sleep 60 && echo hung-done",
+							"timeout": 120000
+						},
+						"time": {
+							"start": 0
+						}
+					},
+					"id": "prt_85",
+					"sessionID": "ses_1",
+					"messageID": "msg_29"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/session/ses_2/prompt_async",
+			"requestBody": {
+				"model": {
+					"providerID": "opencode",
+					"modelID": "mimo-v2.6-flash-free"
+				},
+				"agent": "build",
+				"parts": [
+					{
+						"type": "text",
+						"text": "Reply with only ISOLATION-B."
+					}
+				]
+			},
+			"status": 204,
+			"responseBody": ""
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_30",
+					"role": "user",
+					"sessionID": "ses_2",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"type": "text",
+					"text": "Reply with only ISOLATION-B.",
+					"messageID": "msg_30",
+					"sessionID": "ses_2",
+					"id": "prt_86"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "ses_2",
+					"slug": "happy-planet",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2457,
+						"output": 122,
+						"reasoning": 51,
+						"cache": {
+							"read": 30848,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_30",
+					"role": "user",
+					"sessionID": "ses_2",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"type": "text",
+					"text": "Reply with only ISOLATION-B.",
+					"messageID": "msg_30",
+					"sessionID": "ses_2",
+					"id": "prt_86"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/session/ses_3/prompt_async",
+			"requestBody": {
+				"model": {
+					"providerID": "opencode",
+					"modelID": "mimo-v2.6-flash-free"
+				},
+				"agent": "build",
+				"parts": [
+					{
+						"type": "text",
+						"text": "Reply with only ISOLATION-C."
+					}
+				]
+			},
+			"status": 204,
+			"responseBody": ""
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "msg_31",
+					"role": "user",
+					"sessionID": "ses_3",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"type": "text",
+					"text": "Reply with only ISOLATION-C.",
+					"messageID": "msg_31",
+					"sessionID": "ses_3",
+					"id": "prt_87"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "ses_3",
+					"slug": "eager-meadow",
+					"projectID": "global",
+					"directory": "<C>",
+					"path": "<C>",
+					"title": "directory-C",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2440,
+						"output": 122,
+						"reasoning": 58,
+						"cache": {
+							"read": 30720,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "msg_31",
+					"role": "user",
+					"sessionID": "ses_3",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"type": "text",
+					"text": "Reply with only ISOLATION-C.",
+					"messageID": "msg_31",
+					"sessionID": "ses_3",
+					"id": "prt_87"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "ses_2",
+					"slug": "happy-planet",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2457,
+						"output": 122,
+						"reasoning": 51,
+						"cache": {
+							"read": 30848,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_32",
+					"parentID": "msg_30",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_2"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "ses_3",
+					"slug": "eager-meadow",
+					"projectID": "global",
+					"directory": "<C>",
+					"path": "<C>",
+					"title": "directory-C",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2440,
+						"output": 122,
+						"reasoning": 58,
+						"cache": {
+							"read": 30720,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_32",
+					"parentID": "msg_30",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_2"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_3",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "msg_33",
+					"parentID": "msg_31",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<C>",
+						"root": "/"
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_3"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_3",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "msg_33",
+					"parentID": "msg_31",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<C>",
+						"root": "/"
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_3"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "ses_3",
+					"slug": "eager-meadow",
+					"projectID": "global",
+					"directory": "<C>",
+					"path": "<C>",
+					"title": "directory-C",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2440,
+						"output": 122,
+						"reasoning": 58,
+						"cache": {
+							"read": 30720,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_3",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"id": "msg_31",
+					"sessionID": "ses_3",
+					"summary": {
+						"diffs": []
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "ses_3",
+					"slug": "eager-meadow",
+					"projectID": "global",
+					"directory": "<C>",
+					"path": "<C>",
+					"title": "directory-C",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2440,
+						"output": 122,
+						"reasoning": 58,
+						"cache": {
+							"read": 30720,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_3",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"id": "msg_31",
+					"sessionID": "ses_3",
+					"summary": {
+						"diffs": []
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_3",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_3",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "ses_2",
+					"slug": "happy-planet",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2457,
+						"output": 122,
+						"reasoning": 51,
+						"cache": {
+							"read": 30848,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_2",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"id": "msg_30",
+					"sessionID": "ses_2",
+					"summary": {
+						"diffs": []
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "ses_2",
+					"slug": "happy-planet",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2457,
+						"output": 122,
+						"reasoning": 51,
+						"cache": {
+							"read": 30848,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_2",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"id": "msg_30",
+					"sessionID": "ses_2",
+					"summary": {
+						"diffs": []
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_88",
+					"messageID": "msg_32",
+					"sessionID": "ses_2",
+					"snapshot": "project_4",
+					"type": "step-start"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_89",
+					"messageID": "msg_32",
+					"sessionID": "ses_2",
+					"type": "reasoning",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_32",
+				"partID": "prt_89",
+				"field": "text",
+				"delta": "The user wants a"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_88",
+					"messageID": "msg_32",
+					"sessionID": "ses_2",
+					"snapshot": "project_4",
+					"type": "step-start"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_89",
+					"messageID": "msg_32",
+					"sessionID": "ses_2",
+					"type": "reasoning",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_32",
+				"partID": "prt_89",
+				"field": "text",
+				"delta": "The user wants a"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_32",
+				"partID": "prt_89",
+				"field": "text",
+				"delta": " specific"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_32",
+				"partID": "prt_89",
+				"field": "text",
+				"delta": " specific"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_32",
+				"partID": "prt_89",
+				"field": "text",
+				"delta": " response"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_32",
+				"partID": "prt_89",
+				"field": "text",
+				"delta": " response"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_32",
+				"partID": "prt_89",
+				"field": "text",
+				"delta": "."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_32",
+				"partID": "prt_89",
+				"field": "text",
+				"delta": "."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_89",
+					"messageID": "msg_32",
+					"sessionID": "ses_2",
+					"type": "reasoning",
+					"text": "The user wants a specific response.",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_90",
+					"messageID": "msg_32",
+					"sessionID": "ses_2",
+					"type": "text",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_32",
+				"partID": "prt_90",
+				"field": "text",
+				"delta": "ISOLATION-B"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_89",
+					"messageID": "msg_32",
+					"sessionID": "ses_2",
+					"type": "reasoning",
+					"text": "The user wants a specific response.",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_90",
+					"messageID": "msg_32",
+					"sessionID": "ses_2",
+					"type": "text",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_32",
+				"partID": "prt_90",
+				"field": "text",
+				"delta": "ISOLATION-B"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_90",
+					"messageID": "msg_32",
+					"sessionID": "ses_2",
+					"type": "text",
+					"text": "ISOLATION-B",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_90",
+					"messageID": "msg_32",
+					"sessionID": "ses_2",
+					"type": "text",
+					"text": "ISOLATION-B",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_91",
+					"reason": "stop",
+					"snapshot": "project_4",
+					"messageID": "msg_32",
+					"sessionID": "ses_2",
+					"type": "step-finish",
+					"tokens": {
+						"total": 8535,
+						"input": 73,
+						"output": 6,
+						"reasoning": 8,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"cost": 0
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_32",
+					"parentID": "msg_30",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8535,
+						"input": 73,
+						"output": 6,
+						"reasoning": 8,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_2",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_91",
+					"reason": "stop",
+					"snapshot": "project_4",
+					"messageID": "msg_32",
+					"sessionID": "ses_2",
+					"type": "step-finish",
+					"tokens": {
+						"total": 8535,
+						"input": 73,
+						"output": 6,
+						"reasoning": 8,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"cost": 0
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_32",
+					"parentID": "msg_30",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8535,
+						"input": 73,
+						"output": 6,
+						"reasoning": 8,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_2",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_32",
+					"parentID": "msg_30",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8535,
+						"input": 73,
+						"output": 6,
+						"reasoning": 8,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"sessionID": "ses_2",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "idle"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.idle",
+			"properties": {
+				"sessionID": "ses_2"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "ses_2",
+					"slug": "happy-planet",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2530,
+						"output": 128,
+						"reasoning": 59,
+						"cache": {
+							"read": 39296,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_2",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_32",
+					"parentID": "msg_30",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8535,
+						"input": 73,
+						"output": 6,
+						"reasoning": 8,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"sessionID": "ses_2",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "idle"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.idle",
+			"properties": {
+				"sessionID": "ses_2"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "ses_2",
+					"slug": "happy-planet",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2530,
+						"output": 128,
+						"reasoning": 59,
+						"cache": {
+							"read": 39296,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_2",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"summary": {
+						"diffs": []
+					},
+					"id": "msg_30",
+					"sessionID": "ses_2"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"summary": {
+						"diffs": []
+					},
+					"id": "msg_30",
+					"sessionID": "ses_2"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_92",
+					"messageID": "msg_33",
+					"sessionID": "ses_3",
+					"type": "step-start"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_93",
+					"messageID": "msg_33",
+					"sessionID": "ses_3",
+					"type": "reasoning",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_3",
+				"messageID": "msg_33",
+				"partID": "prt_93",
+				"field": "text",
+				"delta": "The user wants a"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_92",
+					"messageID": "msg_33",
+					"sessionID": "ses_3",
+					"type": "step-start"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_93",
+					"messageID": "msg_33",
+					"sessionID": "ses_3",
+					"type": "reasoning",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_3",
+				"messageID": "msg_33",
+				"partID": "prt_93",
+				"field": "text",
+				"delta": "The user wants a"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_3",
+				"messageID": "msg_33",
+				"partID": "prt_93",
+				"field": "text",
+				"delta": " specific"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_3",
+				"messageID": "msg_33",
+				"partID": "prt_93",
+				"field": "text",
+				"delta": " specific"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_3",
+				"messageID": "msg_33",
+				"partID": "prt_93",
+				"field": "text",
+				"delta": " reply."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_93",
+					"messageID": "msg_33",
+					"sessionID": "ses_3",
+					"type": "reasoning",
+					"text": "The user wants a specific reply.",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_94",
+					"messageID": "msg_33",
+					"sessionID": "ses_3",
+					"type": "text",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_3",
+				"messageID": "msg_33",
+				"partID": "prt_94",
+				"field": "text",
+				"delta": "ISOLATION-C"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_3",
+				"messageID": "msg_33",
+				"partID": "prt_93",
+				"field": "text",
+				"delta": " reply."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_93",
+					"messageID": "msg_33",
+					"sessionID": "ses_3",
+					"type": "reasoning",
+					"text": "The user wants a specific reply.",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_94",
+					"messageID": "msg_33",
+					"sessionID": "ses_3",
+					"type": "text",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_3",
+				"messageID": "msg_33",
+				"partID": "prt_94",
+				"field": "text",
+				"delta": "ISOLATION-C"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_94",
+					"messageID": "msg_33",
+					"sessionID": "ses_3",
+					"type": "text",
+					"text": "ISOLATION-C",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_95",
+					"reason": "stop",
+					"messageID": "msg_33",
+					"sessionID": "ses_3",
+					"type": "step-finish",
+					"tokens": {
+						"total": 8501,
+						"input": 167,
+						"output": 6,
+						"reasoning": 8,
+						"cache": {
+							"write": 0,
+							"read": 8320
+						}
+					},
+					"cost": 0
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "msg_33",
+					"parentID": "msg_31",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<C>",
+						"root": "/"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8501,
+						"input": 167,
+						"output": 6,
+						"reasoning": 8,
+						"cache": {
+							"write": 0,
+							"read": 8320
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"sessionID": "ses_3",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "msg_33",
+					"parentID": "msg_31",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<C>",
+						"root": "/"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8501,
+						"input": 167,
+						"output": 6,
+						"reasoning": 8,
+						"cache": {
+							"write": 0,
+							"read": 8320
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"sessionID": "ses_3",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_3",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_3",
+				"status": {
+					"type": "idle"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.idle",
+			"properties": {
+				"sessionID": "ses_3"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_94",
+					"messageID": "msg_33",
+					"sessionID": "ses_3",
+					"type": "text",
+					"text": "ISOLATION-C",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_95",
+					"reason": "stop",
+					"messageID": "msg_33",
+					"sessionID": "ses_3",
+					"type": "step-finish",
+					"tokens": {
+						"total": 8501,
+						"input": 167,
+						"output": 6,
+						"reasoning": 8,
+						"cache": {
+							"write": 0,
+							"read": 8320
+						}
+					},
+					"cost": 0
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "msg_33",
+					"parentID": "msg_31",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<C>",
+						"root": "/"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8501,
+						"input": 167,
+						"output": 6,
+						"reasoning": 8,
+						"cache": {
+							"write": 0,
+							"read": 8320
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"sessionID": "ses_3",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "msg_33",
+					"parentID": "msg_31",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<C>",
+						"root": "/"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8501,
+						"input": 167,
+						"output": 6,
+						"reasoning": 8,
+						"cache": {
+							"write": 0,
+							"read": 8320
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"sessionID": "ses_3",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_3",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_3",
+				"status": {
+					"type": "idle"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.idle",
+			"properties": {
+				"sessionID": "ses_3"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "ses_3",
+					"slug": "eager-meadow",
+					"projectID": "global",
+					"directory": "<C>",
+					"path": "<C>",
+					"title": "directory-C",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2607,
+						"output": 128,
+						"reasoning": 66,
+						"cache": {
+							"read": 39040,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_3",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"summary": {
+						"diffs": []
+					},
+					"id": "msg_31",
+					"sessionID": "ses_3"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "ses_3",
+					"slug": "eager-meadow",
+					"projectID": "global",
+					"directory": "<C>",
+					"path": "<C>",
+					"title": "directory-C",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2607,
+						"output": 128,
+						"reasoning": 66,
+						"cache": {
+							"read": 39040,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_3",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"summary": {
+						"diffs": []
+					},
+					"id": "msg_31",
+					"sessionID": "ses_3"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.error",
+			"properties": {
+				"sessionID": "ses_1",
+				"error": {
+					"name": "MessageAbortedError",
+					"data": {
+						"message": "Aborted"
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_1",
+				"status": {
+					"type": "idle"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.idle",
+			"properties": {
+				"sessionID": "ses_1"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.error",
+			"properties": {
+				"sessionID": "ses_1",
+				"error": {
+					"name": "MessageAbortedError",
+					"data": {
+						"message": "Aborted"
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_1",
+				"status": {
+					"type": "idle"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.idle",
+			"properties": {
+				"sessionID": "ses_1"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"part": {
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call_8",
+					"state": {
+						"status": "completed",
+						"input": {
+							"command": "sleep 60 && echo hung-done",
+							"timeout": 120000
+						},
+						"output": "(no output)\n\n<shell_metadata>\nUser aborted the command\n</shell_metadata>",
+						"metadata": {
+							"output": "(no output)\n\n<shell_metadata>\nUser aborted the command\n</shell_metadata>",
+							"exit": null,
+							"truncated": false
+						},
+						"title": "sleep 60 && echo hung-done",
+						"time": {
+							"start": 0,
+							"end": 0
+						}
+					},
+					"id": "prt_85",
+					"sessionID": "ses_1",
+					"messageID": "msg_29"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"part": {
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call_8",
+					"state": {
+						"status": "completed",
+						"input": {
+							"command": "sleep 60 && echo hung-done",
+							"timeout": 120000
+						},
+						"output": "(no output)\n\n<shell_metadata>\nUser aborted the command\n</shell_metadata>",
+						"metadata": {
+							"output": "(no output)\n\n<shell_metadata>\nUser aborted the command\n</shell_metadata>",
+							"exit": null,
+							"truncated": false
+						},
+						"title": "sleep 60 && echo hung-done",
+						"time": {
+							"start": 0,
+							"end": 0
+						}
+					},
+					"id": "prt_85",
+					"sessionID": "ses_1",
+					"messageID": "msg_29"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/session/ses_1/abort",
+			"requestBody": {},
+			"status": 200,
+			"responseBody": true
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"info": {
+					"id": "msg_29",
+					"parentID": "msg_28",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<A>",
+						"root": "<A>"
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"sessionID": "ses_1",
+					"error": {
+						"name": "MessageAbortedError",
+						"data": {
+							"message": "Aborted"
+						}
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_1",
+				"status": {
+					"type": "idle"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.idle",
+			"properties": {
+				"sessionID": "ses_1"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_1",
+				"info": {
+					"id": "msg_29",
+					"parentID": "msg_28",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<A>",
+						"root": "<A>"
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"sessionID": "ses_1",
+					"error": {
+						"name": "MessageAbortedError",
+						"data": {
+							"message": "Aborted"
+						}
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_1",
+				"status": {
+					"type": "idle"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.idle",
+			"properties": {
+				"sessionID": "ses_1"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/session/ses_2/prompt_async",
+			"requestBody": {
+				"model": {
+					"providerID": "opencode",
+					"modelID": "mimo-v2.6-flash-free"
+				},
+				"agent": "build",
+				"parts": [
+					{
+						"type": "text",
+						"text": "Reply with only AFTER-ABORT-B."
+					}
+				]
+			},
+			"status": 204,
+			"responseBody": ""
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_34",
+					"role": "user",
+					"sessionID": "ses_2",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"type": "text",
+					"text": "Reply with only AFTER-ABORT-B.",
+					"messageID": "msg_34",
+					"sessionID": "ses_2",
+					"id": "prt_96"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "ses_2",
+					"slug": "happy-planet",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2530,
+						"output": 128,
+						"reasoning": 59,
+						"cache": {
+							"read": 39296,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_34",
+					"role": "user",
+					"sessionID": "ses_2",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"type": "text",
+					"text": "Reply with only AFTER-ABORT-B.",
+					"messageID": "msg_34",
+					"sessionID": "ses_2",
+					"id": "prt_96"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "ses_2",
+					"slug": "happy-planet",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2530,
+						"output": 128,
+						"reasoning": 59,
+						"cache": {
+							"read": 39296,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/session/ses_3/prompt_async",
+			"requestBody": {
+				"model": {
+					"providerID": "opencode",
+					"modelID": "mimo-v2.6-flash-free"
+				},
+				"agent": "build",
+				"parts": [
+					{
+						"type": "text",
+						"text": "Reply with only AFTER-ABORT-C."
+					}
+				]
+			},
+			"status": 204,
+			"responseBody": ""
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_35",
+					"parentID": "msg_34",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_2"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "msg_36",
+					"role": "user",
+					"sessionID": "ses_3",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"type": "text",
+					"text": "Reply with only AFTER-ABORT-C.",
+					"messageID": "msg_36",
+					"sessionID": "ses_3",
+					"id": "prt_97"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_35",
+					"parentID": "msg_34",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_2"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "msg_36",
+					"role": "user",
+					"sessionID": "ses_3",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"type": "text",
+					"text": "Reply with only AFTER-ABORT-C.",
+					"messageID": "msg_36",
+					"sessionID": "ses_3",
+					"id": "prt_97"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "ses_3",
+					"slug": "eager-meadow",
+					"projectID": "global",
+					"directory": "<C>",
+					"path": "<C>",
+					"title": "directory-C",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2607,
+						"output": 128,
+						"reasoning": 66,
+						"cache": {
+							"read": 39040,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "ses_3",
+					"slug": "eager-meadow",
+					"projectID": "global",
+					"directory": "<C>",
+					"path": "<C>",
+					"title": "directory-C",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2607,
+						"output": 128,
+						"reasoning": 66,
+						"cache": {
+							"read": 39040,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_3",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "msg_37",
+					"parentID": "msg_36",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<C>",
+						"root": "/"
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_3"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "ses_3",
+					"slug": "eager-meadow",
+					"projectID": "global",
+					"directory": "<C>",
+					"path": "<C>",
+					"title": "directory-C",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2607,
+						"output": 128,
+						"reasoning": 66,
+						"cache": {
+							"read": 39040,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_3",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"id": "msg_36",
+					"sessionID": "ses_3",
+					"summary": {
+						"diffs": []
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_3",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "msg_37",
+					"parentID": "msg_36",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<C>",
+						"root": "/"
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_3"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "ses_3",
+					"slug": "eager-meadow",
+					"projectID": "global",
+					"directory": "<C>",
+					"path": "<C>",
+					"title": "directory-C",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2607,
+						"output": 128,
+						"reasoning": 66,
+						"cache": {
+							"read": 39040,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_3",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"id": "msg_36",
+					"sessionID": "ses_3",
+					"summary": {
+						"diffs": []
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_3",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_3",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "ses_2",
+					"slug": "happy-planet",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2530,
+						"output": 128,
+						"reasoning": 59,
+						"cache": {
+							"read": 39296,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_2",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"id": "msg_34",
+					"sessionID": "ses_2",
+					"summary": {
+						"diffs": []
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "ses_2",
+					"slug": "happy-planet",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2530,
+						"output": 128,
+						"reasoning": 59,
+						"cache": {
+							"read": 39296,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_2",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"id": "msg_34",
+					"sessionID": "ses_2",
+					"summary": {
+						"diffs": []
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_98",
+					"messageID": "msg_35",
+					"sessionID": "ses_2",
+					"snapshot": "project_4",
+					"type": "step-start"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_99",
+					"messageID": "msg_35",
+					"sessionID": "ses_2",
+					"type": "reasoning",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_35",
+				"partID": "prt_99",
+				"field": "text",
+				"delta": "The user wants a"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_98",
+					"messageID": "msg_35",
+					"sessionID": "ses_2",
+					"snapshot": "project_4",
+					"type": "step-start"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_99",
+					"messageID": "msg_35",
+					"sessionID": "ses_2",
+					"type": "reasoning",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_35",
+				"partID": "prt_99",
+				"field": "text",
+				"delta": "The user wants a"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_35",
+				"partID": "prt_99",
+				"field": "text",
+				"delta": " specific reply."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_99",
+					"messageID": "msg_35",
+					"sessionID": "ses_2",
+					"type": "reasoning",
+					"text": "The user wants a specific reply.",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_100",
+					"messageID": "msg_35",
+					"sessionID": "ses_2",
+					"type": "text",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_35",
+				"partID": "prt_100",
+				"field": "text",
+				"delta": "AFTER-AB"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_35",
+				"partID": "prt_99",
+				"field": "text",
+				"delta": " specific reply."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_99",
+					"messageID": "msg_35",
+					"sessionID": "ses_2",
+					"type": "reasoning",
+					"text": "The user wants a specific reply.",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_100",
+					"messageID": "msg_35",
+					"sessionID": "ses_2",
+					"type": "text",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_35",
+				"partID": "prt_100",
+				"field": "text",
+				"delta": "AFTER-AB"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_35",
+				"partID": "prt_100",
+				"field": "text",
+				"delta": "ORT-B"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_100",
+					"messageID": "msg_35",
+					"sessionID": "ses_2",
+					"type": "text",
+					"text": "AFTER-ABORT-B",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_2",
+				"messageID": "msg_35",
+				"partID": "prt_100",
+				"field": "text",
+				"delta": "ORT-B"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_100",
+					"messageID": "msg_35",
+					"sessionID": "ses_2",
+					"type": "text",
+					"text": "AFTER-ABORT-B",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_101",
+					"reason": "stop",
+					"snapshot": "project_4",
+					"messageID": "msg_35",
+					"sessionID": "ses_2",
+					"type": "step-finish",
+					"tokens": {
+						"total": 8567,
+						"input": 359,
+						"output": 8,
+						"reasoning": 8,
+						"cache": {
+							"write": 0,
+							"read": 8192
+						}
+					},
+					"cost": 0
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_35",
+					"parentID": "msg_34",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8567,
+						"input": 359,
+						"output": 8,
+						"reasoning": 8,
+						"cache": {
+							"write": 0,
+							"read": 8192
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_2",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"part": {
+					"id": "prt_101",
+					"reason": "stop",
+					"snapshot": "project_4",
+					"messageID": "msg_35",
+					"sessionID": "ses_2",
+					"type": "step-finish",
+					"tokens": {
+						"total": 8567,
+						"input": 359,
+						"output": 8,
+						"reasoning": 8,
+						"cache": {
+							"write": 0,
+							"read": 8192
+						}
+					},
+					"cost": 0
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_35",
+					"parentID": "msg_34",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8567,
+						"input": 359,
+						"output": 8,
+						"reasoning": 8,
+						"cache": {
+							"write": 0,
+							"read": 8192
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_2",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_35",
+					"parentID": "msg_34",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8567,
+						"input": 359,
+						"output": 8,
+						"reasoning": 8,
+						"cache": {
+							"write": 0,
+							"read": 8192
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"sessionID": "ses_2",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "idle"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.idle",
+			"properties": {
+				"sessionID": "ses_2"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "ses_2",
+					"slug": "happy-planet",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2889,
+						"output": 136,
+						"reasoning": 67,
+						"cache": {
+							"read": 47488,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_2",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "msg_35",
+					"parentID": "msg_34",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8567,
+						"input": 359,
+						"output": 8,
+						"reasoning": 8,
+						"cache": {
+							"write": 0,
+							"read": 8192
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"sessionID": "ses_2",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_2",
+				"status": {
+					"type": "idle"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.idle",
+			"properties": {
+				"sessionID": "ses_2"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"id": "ses_2",
+					"slug": "happy-planet",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2889,
+						"output": 136,
+						"reasoning": 67,
+						"cache": {
+							"read": 47488,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_2",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"summary": {
+						"diffs": []
+					},
+					"id": "msg_34",
+					"sessionID": "ses_2"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_2",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"summary": {
+						"diffs": []
+					},
+					"id": "msg_34",
+					"sessionID": "ses_2"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.heartbeat",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_102",
+					"messageID": "msg_37",
+					"sessionID": "ses_3",
+					"type": "step-start"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_103",
+					"messageID": "msg_37",
+					"sessionID": "ses_3",
+					"type": "reasoning",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_3",
+				"messageID": "msg_37",
+				"partID": "prt_103",
+				"field": "text",
+				"delta": "The user wants me"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_102",
+					"messageID": "msg_37",
+					"sessionID": "ses_3",
+					"type": "step-start"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_103",
+					"messageID": "msg_37",
+					"sessionID": "ses_3",
+					"type": "reasoning",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_3",
+				"messageID": "msg_37",
+				"partID": "prt_103",
+				"field": "text",
+				"delta": "The user wants me"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_3",
+				"messageID": "msg_37",
+				"partID": "prt_103",
+				"field": "text",
+				"delta": " to reply with only"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_3",
+				"messageID": "msg_37",
+				"partID": "prt_103",
+				"field": "text",
+				"delta": " to reply with only"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_3",
+				"messageID": "msg_37",
+				"partID": "prt_103",
+				"field": "text",
+				"delta": " \"AFTER-ABORT-C\"."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_3",
+				"messageID": "msg_37",
+				"partID": "prt_103",
+				"field": "text",
+				"delta": " \"AFTER-ABORT-C\"."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_103",
+					"messageID": "msg_37",
+					"sessionID": "ses_3",
+					"type": "reasoning",
+					"text": "The user wants me to reply with only \"AFTER-ABORT-C\".",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_104",
+					"messageID": "msg_37",
+					"sessionID": "ses_3",
+					"type": "text",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_3",
+				"messageID": "msg_37",
+				"partID": "prt_104",
+				"field": "text",
+				"delta": "AFTER-ABORT-C"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_103",
+					"messageID": "msg_37",
+					"sessionID": "ses_3",
+					"type": "reasoning",
+					"text": "The user wants me to reply with only \"AFTER-ABORT-C\".",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_104",
+					"messageID": "msg_37",
+					"sessionID": "ses_3",
+					"type": "text",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_3",
+				"messageID": "msg_37",
+				"partID": "prt_104",
+				"field": "text",
+				"delta": "AFTER-ABORT-C"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_104",
+					"messageID": "msg_37",
+					"sessionID": "ses_3",
+					"type": "text",
+					"text": "AFTER-ABORT-C",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_105",
+					"reason": "stop",
+					"messageID": "msg_37",
+					"sessionID": "ses_3",
+					"type": "step-finish",
+					"tokens": {
+						"total": 8542,
+						"input": 69,
+						"output": 8,
+						"reasoning": 17,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"cost": 0
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "msg_37",
+					"parentID": "msg_36",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<C>",
+						"root": "/"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8542,
+						"input": 69,
+						"output": 8,
+						"reasoning": 17,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"sessionID": "ses_3",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "msg_37",
+					"parentID": "msg_36",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<C>",
+						"root": "/"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8542,
+						"input": 69,
+						"output": 8,
+						"reasoning": 17,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"sessionID": "ses_3",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_3",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_3",
+				"status": {
+					"type": "idle"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.idle",
+			"properties": {
+				"sessionID": "ses_3"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_104",
+					"messageID": "msg_37",
+					"sessionID": "ses_3",
+					"type": "text",
+					"text": "AFTER-ABORT-C",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"part": {
+					"id": "prt_105",
+					"reason": "stop",
+					"messageID": "msg_37",
+					"sessionID": "ses_3",
+					"type": "step-finish",
+					"tokens": {
+						"total": 8542,
+						"input": 69,
+						"output": 8,
+						"reasoning": 17,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"cost": 0
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "msg_37",
+					"parentID": "msg_36",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<C>",
+						"root": "/"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8542,
+						"input": 69,
+						"output": 8,
+						"reasoning": 17,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"sessionID": "ses_3",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "msg_37",
+					"parentID": "msg_36",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<C>",
+						"root": "/"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8542,
+						"input": 69,
+						"output": 8,
+						"reasoning": 17,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"sessionID": "ses_3",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_3",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_3",
+				"status": {
+					"type": "idle"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.idle",
+			"properties": {
+				"sessionID": "ses_3"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "ses_3",
+					"slug": "eager-meadow",
+					"projectID": "global",
+					"directory": "<C>",
+					"path": "<C>",
+					"title": "directory-C",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2676,
+						"output": 136,
+						"reasoning": 83,
+						"cache": {
+							"read": 47488,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_3",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"summary": {
+						"diffs": []
+					},
+					"id": "msg_36",
+					"sessionID": "ses_3"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"id": "ses_3",
+					"slug": "eager-meadow",
+					"projectID": "global",
+					"directory": "<C>",
+					"path": "<C>",
+					"title": "directory-C",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2676,
+						"output": 136,
+						"reasoning": 83,
+						"cache": {
+							"read": 47488,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_3",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_3",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"summary": {
+						"diffs": []
+					},
+					"id": "msg_36",
+					"sessionID": "ses_3"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/session/status?directory=<A>",
+			"status": 200,
+			"responseBody": {}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/session/status?directory=<C>",
+			"status": 200,
+			"responseBody": {}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/session/status?directory=<B>",
+			"status": 200,
+			"responseBody": {}
+		}
+	]
+}

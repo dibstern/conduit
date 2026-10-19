@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Effect } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { EventStoreError } from "./effect/event-store-effect.js";
 import {
 	decodeStoredEventRow,
@@ -378,10 +378,27 @@ function copyForkHistory(
 			sessionId: input.newSessionId,
 			type: event.type,
 			data,
-			metadata: event.metadata,
+			metadata: { ...event.metadata, inherited: true },
 			provider: event.provider,
 			createdAt: event.createdAt,
 		} as CanonicalEvent);
 	}
-	return events;
+	// A heartbeat with no payload only says the tool is still running, which
+	// any later event for that tool also says. Long tools emit thousands. Keyed
+	// by message too: a part whose row is gone falls back to the event's message.
+	const toolKey = (data: { messageId: string; partId: string }) =>
+		`${data.messageId}\0${data.partId}`;
+	const lastToolEvent = new Map<string, number>();
+	events.forEach((event, index) => {
+		if (event.type === "tool.running" || event.type === "tool.completed")
+			lastToolEvent.set(toolKey(event.data), index);
+	});
+	return events.filter(
+		(event, index) =>
+			event.type !== "tool.running" ||
+			lastToolEvent.get(toolKey(event.data)) === index ||
+			Object.keys(event.data).some(
+				(key) => key !== "messageId" && key !== "partId",
+			),
+	);
 }

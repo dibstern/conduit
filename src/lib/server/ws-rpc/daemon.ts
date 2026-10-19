@@ -9,6 +9,7 @@ export const daemonOnlyHandlers = {
 	GetMessageSurfacing: (_request) => daemonRequired("GetMessageSurfacing"),
 	UpdateMessageSurfacing: (_request) =>
 		daemonRequired("UpdateMessageSurfacing"),
+	SetProjectOrder: (_request) => daemonRequired("SetProjectOrder"),
 	GetStatus: (_request) => daemonRequired("GetStatus"),
 	SetPin: (_request): Effect.Effect<never, WsRpcError | SetPinRejected> =>
 		daemonRequired("SetPin"),
@@ -38,6 +39,7 @@ export const daemonOnlyHandlers = {
 	WsRpcHandlerMap,
 	| "GetMessageSurfacing"
 	| "UpdateMessageSurfacing"
+	| "SetProjectOrder"
 	| "GetStatus"
 	| "SetPin"
 	| "SetKeepAwake"

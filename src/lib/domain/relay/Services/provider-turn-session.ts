@@ -8,7 +8,7 @@ import { formatErrorDetail } from "../../../errors.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { createEventId } from "../../../persistence/events.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
-import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
+import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import {
 	PendingInteractionServiceTag,
 	type PendingQuestion,
@@ -26,6 +26,7 @@ import {
 } from "./services.js";
 import { SessionManagerServiceTag } from "./session-manager-service.js";
 import { clearProcessingTimeout } from "./session-overrides-state.js";
+import { SessionWorkspaceTag } from "./session-workspace.js";
 
 export const completeRecoveredQuestion = (
 	question: PendingQuestion,
@@ -74,7 +75,16 @@ export const completeRecoveredQuestion = (
 			...completedEvent,
 			eventId: createEventId(),
 			type: "question.resolved" as const,
-			data: { id: question.requestId, answers },
+			providerRefs: {
+				...completedEvent.providerRefs,
+				...(question.providerProcessId
+					? { providerProcessId: question.providerProcessId }
+					: {}),
+				...(question.providerRequestId
+					? { providerRequestId: question.providerRequestId }
+					: {}),
+			},
+			data: { id: question.providerRequestId ?? question.requestId, answers },
 		};
 		if (question.messageId) {
 			// A fresh mapper has not seen the stored tool start. Seed its identity
@@ -136,17 +146,17 @@ const materializeOpenCodeSession = (
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const readQuery = yield* ReadQueryEffectTag;
 
-		const rowResult = yield* Effect.either(
+		const rowResult = yield* Effect.result(
 			readQuery.getSession(input.sessionId),
 		);
-		if (rowResult._tag === "Left") {
+		if (rowResult._tag === "Failure") {
 			log.warn(
-				`Could not inspect session provider before OpenCode dispatch for ${input.sessionId}: ${formatErrorDetail(rowResult.left)}`,
+				`Could not inspect session provider before OpenCode dispatch for ${input.sessionId}: ${formatErrorDetail(rowResult.failure)}`,
 			);
 			return input.sessionId;
 		}
 
-		const row = rowResult.right;
+		const row = rowResult.success;
 		if (!row || row.provider === providerId) {
 			return input.sessionId;
 		}
@@ -209,17 +219,31 @@ export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
 
 const interruptLegacyTurn = (input: ProviderTurnServiceInterruptInput) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
 		const log = yield* LoggerTag;
-		const abortResult = yield* Effect.either(
-			Effect.tryPromise(() => client.session.abort(input.sessionId)),
+		const abortResult = yield* Effect.result(
+			Effect.gen(function* () {
+				const read = yield* ReadQueryEffectTag;
+				const row = yield* read.getSession(input.sessionId);
+				if (!row)
+					return yield* Effect.fail(
+						new Error(`Session ${input.sessionId} not found`),
+					);
+				const directory = yield* (yield* SessionWorkspaceTag).get(
+					input.sessionId,
+				);
+				const client = yield* (yield* OpenCodeInstancesTag).use(
+					row.provider,
+					directory,
+				);
+				yield* Effect.tryPromise(() => client.session.abort(input.sessionId));
+			}).pipe(Effect.scoped),
 		);
-		if (abortResult._tag === "Left") {
+		if (abortResult._tag === "Failure") {
 			log.warn(
 				`client=${input.clientId} session=${input.sessionId} Abort failed:`,
-				formatErrorDetail(abortResult.left),
+				formatErrorDetail(abortResult.failure),
 			);
-			return yield* Effect.fail(abortResult.left);
+			return yield* Effect.fail(abortResult.failure);
 		}
 	});
 
@@ -250,7 +274,7 @@ export const interruptTurn = (
 		}
 		if (!PROVIDER_DRIVERS[account.driver].interruptViaEngine) return;
 
-		const interruptResult = yield* Effect.either(
+		const interruptResult = yield* Effect.result(
 			engine.dispatchEffect({
 				type: "interrupt_turn",
 				commandId: input.commandId,
@@ -258,11 +282,11 @@ export const interruptTurn = (
 				...(turnIds ? { turnIds } : {}),
 			}),
 		);
-		if (interruptResult._tag === "Left") {
+		if (interruptResult._tag === "Failure") {
 			log.warn(
 				`client=${input.clientId} session=${input.sessionId} engine interrupt_turn failed:`,
-				formatErrorDetail(interruptResult.left),
+				formatErrorDetail(interruptResult.failure),
 			);
-			yield* Effect.fail(interruptResult.left);
+			yield* Effect.fail(interruptResult.failure);
 		}
 	});

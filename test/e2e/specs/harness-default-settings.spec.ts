@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Page, TestInfo } from "@playwright/test";
-import { Effect, Either, Schema } from "effect";
+import { Effect, Result as Either, Schema } from "effect";
 import {
 	ProjectSettingSchema,
 	WsRpcError,
@@ -289,7 +289,7 @@ test("RPC rejects the other harness and unoffered choices without writing", asyn
 		},
 	]) {
 		const result = await Effect.runPromise(
-			Effect.either(
+			Effect.result(
 				browser.rpc.SetHarnessDefault({
 					projectSlug: "process-test",
 					harness: "claude",
@@ -298,8 +298,8 @@ test("RPC rejects the other harness and unoffered choices without writing", asyn
 			),
 		);
 		const message =
-			Either.isLeft(result) && result.left instanceof WsRpcError
-				? result.left.message
+			Either.isFailure(result) && result.failure instanceof WsRpcError
+				? result.failure.message
 				: null;
 		const after = readFileSync(
 			join(harness.configDir, "settings.jsonc"),
@@ -315,7 +315,7 @@ test("RPC rejects the other harness and unoffered choices without writing", asyn
 		expect(after).toBe(before);
 	}
 	const result = await Effect.runPromise(
-		Effect.either(
+		Effect.result(
 			browser.rpc.SetDefaultModel({
 				projectSlug: "process-test",
 				provider: "claude",
@@ -324,8 +324,8 @@ test("RPC rejects the other harness and unoffered choices without writing", asyn
 		),
 	);
 	const message =
-		Either.isLeft(result) && result.left instanceof WsRpcError
-			? result.left.message
+		Either.isFailure(result) && result.failure instanceof WsRpcError
+			? result.failure.message
 			: null;
 	const after = readFileSync(join(harness.configDir, "settings.jsonc"), "utf8");
 	await artifact(testInfo, "3-star-rejection", page, harness, {

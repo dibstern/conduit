@@ -27,7 +27,7 @@
 			content: Schema.String,
 		})),
 		computerUse: Schema.optional(Schema.Struct({
-			actions: Schema.Array(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+			actions: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
 		})),
 		media: Schema.optional(Schema.Array(Schema.Struct({
 			path: Schema.optional(Schema.String),

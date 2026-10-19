@@ -393,6 +393,7 @@ export interface ProviderInstance {
 		sessionId: string,
 		requestId: string,
 		decision: PermissionDecision,
+		providerProcessId?: string,
 	): Effect.Effect<void, ProviderInstanceFailure>;
 
 	/** Resolve a pending question (from EventSink.requestQuestion) */

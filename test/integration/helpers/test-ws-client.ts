@@ -1,8 +1,6 @@
 // Typed browser RPC commands and subscription frames for integration tests.
 
 import { randomUUID } from "node:crypto";
-import { Socket } from "@effect/platform";
-import { RpcClient, type RpcClientError, RpcSerialization } from "@effect/rpc";
 import {
 	Cause,
 	Context,
@@ -13,6 +11,8 @@ import {
 	ManagedRuntime,
 	Stream,
 } from "effect";
+import { RpcClient, type RpcClientError, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import WebSocket from "ws";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
@@ -36,10 +36,10 @@ import type { SessionInfo } from "../../../src/lib/shared-types.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import { assembleDetailRows } from "../../helpers/detail-rows.js";
 
-class TestRpc extends Context.Tag("IntegrationTestBrowserRpc")<
+class TestRpc extends Context.Service<
 	TestRpc,
 	RpcClient.FromGroup<typeof WsRpcGroup, RpcClientError.RpcClientError>
->() {}
+>()("IntegrationTestBrowserRpc") {}
 
 type HistoryMessage = typeof HistoryMessageSchema.Type;
 
@@ -50,7 +50,7 @@ export interface ReceivedMessage {
 
 export class TestWsClient {
 	private readonly runtime: ManagedRuntime.ManagedRuntime<TestRpc, never>;
-	private readonly client: Promise<TestRpc["Type"]>;
+	private readonly client: Promise<TestRpc["Service"]>;
 	private readonly clientId = `test-${randomUUID()}`;
 	private received: ReceivedMessage[] = [];
 	private activeSessionId: string | undefined;
@@ -64,7 +64,7 @@ export class TestWsClient {
 	private readonly projectSlug: string;
 	private readonly subscriptions = new Map<
 		string,
-		Promise<Fiber.RuntimeFiber<void, unknown>>
+		Promise<Fiber.Fiber<void, unknown>>
 	>();
 	private detailSubscriptionKey: string | undefined;
 	private readonly sessionRows = new Map<string, SessionInfo>();
@@ -87,7 +87,7 @@ export class TestWsClient {
 				Socket.layerWebSocket(`${wsUrl.protocol}//${wsUrl.host}/rpc`),
 			),
 			Layer.provide(
-				Layer.succeed(Socket.WebSocketConstructor, (rpcUrl) => {
+				Layer.succeed(Socket.WebSocketConstructor)((rpcUrl) => {
 					const socket = new WebSocket(rpcUrl);
 					socket.once("error", (error) => this.fail(error));
 					socket.once("close", () =>
@@ -99,7 +99,7 @@ export class TestWsClient {
 			Layer.provide(RpcSerialization.layerJson),
 		);
 		this.runtime = ManagedRuntime.make(
-			Layer.scoped(TestRpc, RpcClient.make(WsRpcGroup)).pipe(
+			Layer.effect(TestRpc, RpcClient.make(WsRpcGroup)).pipe(
 				Layer.provide(protocol),
 			),
 		);
@@ -146,7 +146,7 @@ export class TestWsClient {
 	}
 
 	async rpcCall<A, E>(
-		invoke: (client: TestRpc["Type"]) => Effect.Effect<A, E>,
+		invoke: (client: TestRpc["Service"]) => Effect.Effect<A, E>,
 	): Promise<A> {
 		if (this.closed) throw new Error("Client closed");
 		if (this.failure) throw this.failure;
@@ -189,7 +189,7 @@ export class TestWsClient {
 		const cursor = this.received.length;
 		this.turnCursors.set(sessionId, cursor);
 		const result = await this.rpcCall((client) =>
-			client.input.submit({
+			client["input.submit"]({
 				sessionId,
 				text,
 				inputId: opts.commandId ?? randomUUID(),
@@ -746,7 +746,7 @@ export class TestWsClient {
 	/** Each feed records its typed envelopes and waits for synchronization. */
 	private async follow<A extends object>(
 		type: string,
-		open: (client: TestRpc["Type"]) => Stream.Stream<A, unknown>,
+		open: (client: TestRpc["Service"]) => Stream.Stream<A, unknown>,
 		scope: { projectSlug: string; familyOf?: string; sessionId?: string },
 		onEnvelope?: (envelope: A) => Promise<void> | void,
 	): Promise<void> {
@@ -777,7 +777,7 @@ export class TestWsClient {
 				).pipe(
 					Effect.onExit((exit) =>
 						Effect.sync(() => {
-							if (Exit.isFailure(exit) && Cause.isInterruptedOnly(exit.cause))
+							if (Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause))
 								return;
 							if (Exit.isFailure(exit)) this.fail(Cause.squash(exit.cause));
 							else this.fail(new Error("RPC subscription ended"));

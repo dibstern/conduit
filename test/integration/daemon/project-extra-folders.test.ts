@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SaveProject } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { ClaudeTraceName } from "../../e2e/helpers/claude-trace-replayer.js";
 import { readNativeThread } from "../../helpers/native-thread.js";
@@ -53,10 +53,10 @@ describe("Claude project extra folders through the built daemon", () => {
 
 	async function save(fixture: ProcessHarness, folders: readonly string[]) {
 		const input = { slug: "process-test", folders };
-		const saved = await sendRpcRequest(
-			join(fixture.configDir, "relay.sock"),
-			new SaveProject(input),
-		);
+		const saved = await sendRpcRequest(join(fixture.configDir, "relay.sock"), {
+			_tag: "SaveProject",
+			...input,
+		});
 		evidence["save"] = { input, result: saved };
 		expect(saved.savedSlug).toBe("process-test");
 		expect(saved.warnings).toEqual([]);
@@ -150,52 +150,6 @@ describe("Claude project extra folders through the built daemon", () => {
 		});
 	}, 60_000);
 
-	it("uses current folders on the next turn of an existing live runner", async () => {
-		const fixture = await start("live-runner", [
-			"pong-thinking-text-turn",
-			"pong-thinking-text-turn",
-		]);
-		await save(fixture, [fixture.projectDir]);
-		const before = await fixture.connect();
-		const sessionId = await before.createSession("Live runner folder change");
-		evidence["sessionId"] = sessionId;
-		const first = await before.send(sessionId, "Reply with pong.");
-		expect(first.done["status"]).toBe("idle");
-		expect(first.chunks.join("")).toBe("pong");
-		const original = runnerOptions(fixture, sessionId).at(-1);
-		if (!original) throw new Error("Missing live runner query options");
-		expect(original.options["cwd"]).toBe(fixture.projectDir);
-		expect(original.options).not.toHaveProperty("additionalDirectories");
-		expect(() => process.kill(original.pid, 0)).not.toThrow();
-		evidence["originalQuery"] = original;
-		const extra = join(fixture.root, "added-extra-folder");
-		mkdirSync(extra);
-		evidence["extra"] = extra;
-		await save(fixture, [fixture.projectDir, extra]);
-		const after = await fixture.connect(sessionId);
-		// Let relay adoption acknowledge the prior turn's remaining outputs.
-		await new Promise((resolve) => setTimeout(resolve, 2_000));
-		const second = await after.send(sessionId, "Reply with pong again.");
-		evidence["replies"] = [first, second];
-		expect(second.done["status"]).toBe("idle");
-		expect(second.chunks.join("")).toBe("pong");
-		const options = runnerOptions(fixture, sessionId);
-		evidence["sessionQueries"] = options;
-		expect(options.length).toBeGreaterThan(1);
-		expect(options.at(-1)?.options).toMatchObject({
-			cwd: fixture.projectDir,
-			additionalDirectories: [extra],
-		});
-		const history = await after.history(sessionId);
-		evidence["history"] = history;
-		expect(history.map(({ role }) => role)).toEqual([
-			"user",
-			"assistant",
-			"user",
-			"assistant",
-		]);
-	}, 60_000);
-
 	it("restarts an idle live runner on the next send after its folders change", async () => {
 		const fixture = await start("running-folder-change", [
 			"pong-thinking-text-turn",
@@ -210,6 +164,7 @@ describe("Claude project extra folders through the built daemon", () => {
 		expect(first.chunks.join("")).toBe("pong");
 		const original = runnerOptions(fixture, sessionId).at(-1);
 		if (!original) throw new Error("Missing live runner query options");
+		expect(original.options["cwd"]).toBe(fixture.projectDir);
 		expect(original.options).not.toHaveProperty("additionalDirectories");
 		expect(() => process.kill(original.pid, 0)).not.toThrow();
 		evidence["originalQuery"] = original;

@@ -1,14 +1,14 @@
-import { SqlClient } from "@effect/sql";
 import {
 	Deferred,
 	Effect,
-	Either,
 	Exit,
 	Fiber,
 	FiberMap,
 	Option,
+	Result,
 	type Scope,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	type AccountsState,
 	resolve as resolveAccount,
@@ -103,6 +103,7 @@ export interface RunnerProviderInstanceDeps {
 	readonly daemonConfigDir?: string;
 	readonly onBackgroundTask?: (input: BackgroundTaskTransition) => void;
 	readonly ensureChildSession?: ClaudeEventPersistEffect["ensureClaudeSubagentSession"];
+	readonly readSubagentTranscript?: ClaudeEventPersistEffect["readClaudeSubagentTranscript"];
 	readonly persistUserMessage?: ClaudeEventPersistEffect["persistUserMessage"];
 }
 
@@ -156,23 +157,25 @@ export class RunnerProviderInstance implements ProviderInstance {
 	/** Sends handed to the runner and not yet finished, per session. */
 	private readonly sendsInFlight = new Map<string, number>();
 	private detachingInteractions = false;
-	private recoveredSink: ((sessionId: string) => EventSink) | undefined;
+	private recoveredSink:
+		| ((sessionId: string, sinkId: string) => EventSink)
+		| undefined;
 	private readonly recoveredSinkIds = new Set<string>();
 	private readonly recoveredRequests = new Map<
 		string,
 		Deferred.Deferred<void>
 	>();
 
-	readonly recoverRunnerEffect = Effect.gen(this, function* () {
+	readonly recoverRunnerEffect = Effect.gen({ self: this }, function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const ingestion = yield* ProviderRuntimeIngestionTag;
 		const pending = yield* PendingInteractionServiceTag;
-		const timeoutRuntime = yield* Effect.runtime<OverridesStateTag>();
+		const timeoutRuntime = yield* Effect.context<OverridesStateTag>();
 		// An in-process runner's turns ended with the relay that ran them, so
 		// every running command is unclaimed. Runner processes may outlive it.
 		let claimed = new Set<string>();
 		if (this.runner.recoverEffect) {
-			this.recoveredSink = (sessionId) =>
+			this.recoveredSink = (sessionId, sinkId) =>
 				makeRecoveredEventSink({
 					driverKind: this.providerId,
 					sessionId,
@@ -181,7 +184,9 @@ export class RunnerProviderInstance implements ProviderInstance {
 					pending,
 					timeoutHooks: makeProcessingTimeoutHooks(timeoutRuntime, sessionId),
 					onRegistered: (id) => {
-						const ready = this.recoveredRequests.get(id);
+						const ready = this.recoveredRequests.get(
+							JSON.stringify([sinkId, id]),
+						);
 						return ready ? Deferred.succeed(ready, undefined) : Effect.void;
 					},
 				});
@@ -189,7 +194,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 			const registrations = yield* Effect.try(() =>
 				discoverRunners(this.deps.workspaceRoot, this.deps.daemonConfigDir),
 			).pipe(
-				Effect.catchAll((error) =>
+				Effect.catch((error) =>
 					Effect.logError("Could not verify runner ownership", error).pipe(
 						Effect.as(undefined),
 					),
@@ -209,10 +214,10 @@ export class RunnerProviderInstance implements ProviderInstance {
 			claimed,
 			this.providerId,
 			(id) =>
-				Either.getOrUndefined(resolveAccount(accounts, { _tag: "Id", id }))
+				Result.getOrUndefined(resolveAccount(accounts, { _tag: "Id", id }))
 					?.driver,
 			(sinkId, turn, failure) =>
-				Effect.gen(this, function* () {
+				Effect.gen({ self: this }, function* () {
 					let persistenceError: ProviderRuntimeIngestionError | undefined;
 					yield* failRunnerTurn(
 						(output) =>
@@ -302,6 +307,10 @@ export class RunnerProviderInstance implements ProviderInstance {
 		return this.driver.discoverEffect(workspaceRoot, account, options);
 	}
 
+	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
+		return this.runner.hasLiveProcessEffect(sessionId);
+	}
+
 	getNativeSessionEffect(
 		sessionId: string,
 	): Effect.Effect<ProviderNativeSession | undefined> {
@@ -315,7 +324,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 	sendTurnEffect(
 		input: SendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const { eventSink, abortSignal, ...payload } = input;
 			const prepared = yield* this.driver.prepareTurnEffect(payload);
 			const { sessionId } = input;
@@ -326,7 +335,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 					return inFlight;
 				}),
 				(inFlight) =>
-					Effect.gen(this, function* () {
+					Effect.gen({ self: this }, function* () {
 						// An idle send is placed before the runner hop, as fast as a
 						// local write; the runner places a held send when the SDK
 						// starts it (command_lifecycle: started). A continuation places
@@ -375,7 +384,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 							inputId: input.inputId,
 						});
 						this.reportSinkForTesting("allocated", sinkId, sessionId);
-						const aborted = Effect.async<void>((resume) => {
+						const aborted = Effect.callback<void>((resume) => {
 							const onAbort = () => resume(Effect.void);
 							if (abortSignal.aborted) onAbort();
 							else
@@ -418,7 +427,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 		readonly text: string;
 		readonly images?: readonly string[];
 	}): Effect.Effect<void, ClaudeEventPersistFailure> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const persist = yield* Effect.serviceOption(ClaudeEventPersistEffectTag);
 			const persistUserMessage =
 				this.deps.persistUserMessage ??
@@ -450,23 +459,34 @@ export class RunnerProviderInstance implements ProviderInstance {
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		const prepare = this.driver.preparePreWarmEffect;
 		if (!prepare) return Effect.void;
-		const preWarm = Effect.gen(this, function* () {
+		const preWarm = Effect.gen({ self: this }, function* () {
 			const command = yield* prepare(input, this.providerScope);
 			if (command) yield* this.commandEffect(command);
 		});
 		return Effect.uninterruptibleMask((restore) =>
-			Effect.gen(this, function* () {
+			Effect.gen({ self: this }, function* () {
 				const runPreWarm = yield* FiberMap.runtime(this.preWarmFibers)();
 				const fiber = yield* Effect.sync(() => {
-					const existing = FiberMap.unsafeGet(
+					const existing = FiberMap.getUnsafe(
 						this.preWarmFibers,
 						input.sessionId,
 					);
-					return Option.isSome(existing)
-						? existing.value
-						: runPreWarm(input.sessionId, Effect.interruptible(preWarm), {
-								onlyIfMissing: true,
+					if (Option.isSome(existing)) {
+						if (
+							process.env["NODE_ENV"] === "test" &&
+							process.env["CONDUIT_TEST_UPGRADE_SINK_PROOF"] === "1" &&
+							process.connected
+						)
+							process.send?.({
+								channel: "conduit-process-test",
+								kind: "pre-warm-joined",
+								sessionId: input.sessionId,
 							});
+						return existing.value;
+					}
+					return runPreWarm(input.sessionId, Effect.interruptible(preWarm), {
+						onlyIfMissing: true,
+					});
 				});
 				const exit = yield* restore(Fiber.await(fiber)).pipe(
 					Effect.onInterrupt(() => Fiber.interrupt(fiber)),
@@ -573,7 +593,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 
 	/** Shared by explicit shutdown and scope disposal through one cached Effect. */
 	disposeEffect(): Effect.Effect<void, ProviderInstanceFailure> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			this.detachingInteractions = true;
 			for (const sink of this.sinks.values()) {
 				yield* sink.detachInteractions?.() ?? Effect.void;
@@ -582,7 +602,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 			yield* this.commandEffect({ type: "shutdown" });
 		}).pipe(
 			Effect.ensuring(
-				Effect.gen(this, function* () {
+				Effect.gen({ self: this }, function* () {
 					this.sinks.clear();
 					yield* FiberMap.clear(this.abortFibers);
 					yield* FiberMap.clear(this.interactionFibers);
@@ -615,7 +635,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 		output: SessionOutput,
 		recoveredSessionId?: string,
 	): Effect.Effect<SessionOutputReply, SessionFailure> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			observeTurnTimelineFrame(output);
 			if (output.type === "background-task") {
 				this.deps.onBackgroundTask?.(output.transition);
@@ -623,7 +643,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 			}
 			let sink = this.sinks.get(output.sinkId);
 			if (!sink && recoveredSessionId && this.recoveredSink) {
-				sink = this.recoveredSink(recoveredSessionId);
+				sink = this.recoveredSink(recoveredSessionId, output.sinkId);
 				this.sinks.set(output.sinkId, sink);
 				this.recoveredSinkIds.add(output.sinkId);
 				this.reportSinkForTesting(
@@ -642,11 +662,14 @@ export class RunnerProviderInstance implements ProviderInstance {
 						.pipe(Effect.mapError((cause) => sessionFailure("push", cause)));
 				case "permission-request":
 				case "question-request": {
+					const requestKey = JSON.stringify([
+						output.sinkId,
+						output.request.requestId,
+					]);
 					const registered = this.recoveredSinkIds.has(output.sinkId)
 						? yield* Deferred.make<void>()
 						: undefined;
-					if (registered)
-						this.recoveredRequests.set(output.request.requestId, registered);
+					if (registered) this.recoveredRequests.set(requestKey, registered);
 					const request = Effect.suspend(() =>
 						output.type === "permission-request"
 							? sink.requestPermission(output.request).pipe(
@@ -675,7 +698,11 @@ export class RunnerProviderInstance implements ProviderInstance {
 						`${output.sinkId}:${output.request.requestId}`,
 						request.pipe(
 							Effect.onExit((exit) =>
-								Effect.gen(this, function* () {
+								Effect.gen({ self: this }, function* () {
+									// Failed asks never register a waiter. Release recovery's
+									// readiness barrier before reporting their cancellation.
+									if (registered)
+										yield* Deferred.succeed(registered, undefined);
 									if (
 										Exit.isFailure(exit) &&
 										!Failure.isInterruptedOnly(exit.cause)
@@ -698,12 +725,12 @@ export class RunnerProviderInstance implements ProviderInstance {
 									}
 								}),
 							),
-							Effect.catchAllCause(() => Effect.void),
+							Effect.catchCause(() => Effect.void),
 						),
 					);
 					if (registered) {
 						yield* Deferred.await(registered);
-						this.recoveredRequests.delete(output.request.requestId);
+						this.recoveredRequests.delete(requestKey);
 					}
 					return;
 				}
@@ -729,7 +756,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 							sink.cancelSessionInteractions?.(output.reason, {
 								recoverQuestions: output.recoverQuestions,
 							}) ?? Effect.void,
-					).pipe(Effect.catchAllCause(() => Effect.void));
+					).pipe(Effect.catchCause(() => Effect.void));
 				case "cancel-interaction":
 					return yield* FiberMap.remove(
 						this.interactionFibers,
@@ -754,6 +781,22 @@ export class RunnerProviderInstance implements ProviderInstance {
 					return yield* this.placeUserMessageEffect(output.input).pipe(
 						Effect.mapError((cause) => sessionFailure(output.type, cause)),
 					);
+				case "read-subagent-transcript": {
+					const persist = yield* Effect.serviceOption(
+						ClaudeEventPersistEffectTag,
+					);
+					const readTranscript =
+						this.deps.readSubagentTranscript ??
+						(persist._tag === "Some"
+							? persist.value.readClaudeSubagentTranscript
+							: undefined);
+					const subagentTranscript = yield* readTranscript?.(
+						output.childSessionId,
+					).pipe(
+						Effect.mapError((cause) => sessionFailure(output.type, cause)),
+					) ?? Effect.succeed({ messages: [], parts: [] });
+					return { subagentTranscript };
+				}
 				case "ensure-subagent-session": {
 					const persist = yield* Effect.serviceOption(
 						ClaudeEventPersistEffectTag,
@@ -772,8 +815,8 @@ export class RunnerProviderInstance implements ProviderInstance {
 				}
 			}
 		}).pipe(
-			Effect.as({}),
-			Effect.catchAllDefect((cause) =>
+			Effect.map((reply) => reply ?? {}),
+			Effect.catchDefect((cause) =>
 				Effect.fail(sessionFailure(output.type, cause)),
 			),
 		);

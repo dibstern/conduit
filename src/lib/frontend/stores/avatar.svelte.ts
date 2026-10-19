@@ -13,7 +13,7 @@ const STORAGE_KEY = "conduit-avatar";
 const stored = (): Avatar | undefined => {
 	try {
 		return Option.getOrUndefined(
-			Schema.decodeUnknownOption(Schema.parseJson(AvatarSchema))(
+			Schema.decodeUnknownOption(Schema.fromJsonString(AvatarSchema))(
 				localStorage.getItem(STORAGE_KEY),
 			),
 		);

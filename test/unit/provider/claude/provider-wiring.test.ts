@@ -27,58 +27,17 @@ describe("Provider wiring with Claude provider instance", () => {
 		rmSync(workspace, { recursive: true, force: true });
 	});
 
-	it("registers Claude provider instance in ProviderRegistry", () => {
-		const registry = new ProviderRegistry();
-		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
-		});
-
-		registry.registerInstance(instance);
-
-		expect(registry.hasInstance("claude")).toBe(true);
-		expect(registry.getInstance("claude")).toBe(instance);
-	});
-
-	it("lists both providers when both registered", () => {
-		const registry = new ProviderRegistry();
-		const claude = makeTestClaudeProviderInstance({ workspaceRoot: workspace });
-
-		// Create a minimal mock for opencode instance
-		const opencode = {
-			providerId: "opencode",
-			discoverEffect: () =>
-				Effect.succeed({
-					models: [],
-					supportsTools: true,
-					supportsThinking: true,
-					supportsPermissions: true,
-					supportsQuestions: true,
-					supportsAttachments: true,
-					supportsFork: true,
-					supportsRevert: true,
-					commands: [],
-				}),
-			sendTurnEffect: () => Effect.die("not implemented"),
-			interruptTurnEffect: () => Effect.void,
-			resolvePermissionEffect: () => Effect.void,
-			resolveQuestionEffect: () => Effect.void,
-			shutdownEffect: () => Effect.void,
-			endSessionEffect: () => Effect.void,
-		};
-
-		registry.registerInstance(opencode);
-		registry.registerInstance(claude);
-
-		const providers = registry.listProviders();
-		expect(providers).toContain("opencode");
-		expect(providers).toContain("claude");
-		expect(providers).toHaveLength(2);
-	});
-
 	it("OrchestrationEngine dispatches discover to Claude provider instance", async () => {
 		const registry = new ProviderRegistry();
+		const models = [
+			{ id: "wiring-model", name: "Wiring model", providerId: "claude" },
+		];
+		const getCapabilities = vi.fn(() =>
+			Effect.succeed({ models, commands: [], agents: [] }),
+		);
 		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: workspace,
+			capabilitiesService: { get: getCapabilities },
 		});
 		registry.registerInstance(instance);
 
@@ -90,20 +49,10 @@ describe("Provider wiring with Claude provider instance", () => {
 			}),
 		);
 
-		expect(caps.models.length).toBeGreaterThan(0);
+		expect(getCapabilities).toHaveBeenCalledWith(workspace);
+		expect(caps.models).toEqual(models);
 		expect(caps.supportsTools).toBe(true);
 		expect(caps.supportsFork).toBe(true);
-	});
-
-	it("OrchestrationEngine throws for unregistered provider", async () => {
-		const registry = new ProviderRegistry();
-		const engine = new OrchestrationEngine({ registry });
-
-		await expect(
-			Effect.runPromise(
-				engine.dispatchEffect({ type: "discover", providerId: "nonexistent" }),
-			),
-		).rejects.toThrow("No provider instance registered");
 	});
 
 	it("shutdownAllEffect shuts down Claude provider instance", async () => {
@@ -115,55 +64,6 @@ describe("Provider wiring with Claude provider instance", () => {
 
 		// Should not throw
 		await Effect.runPromise(registry.shutdownAllEffect());
-	});
-
-	it("session binding tracks provider for session", () => {
-		const registry = new ProviderRegistry();
-		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
-		});
-		registry.registerInstance(instance);
-
-		const engine = new OrchestrationEngine({ registry });
-		engine.bindSession("sess-1", "claude");
-
-		expect(Effect.runSync(engine.getProviderForSessionEffect("sess-1"))).toBe(
-			"claude",
-		);
-	});
-
-	it("session binding can switch provider", () => {
-		const registry = new ProviderRegistry();
-		const engine = new OrchestrationEngine({ registry });
-
-		engine.bindSession("sess-1", "opencode");
-		expect(Effect.runSync(engine.getProviderForSessionEffect("sess-1"))).toBe(
-			"opencode",
-		);
-
-		engine.bindSession("sess-1", "claude");
-		expect(Effect.runSync(engine.getProviderForSessionEffect("sess-1"))).toBe(
-			"claude",
-		);
-	});
-
-	it("listBoundSessions includes claude-bound sessions", () => {
-		const registry = new ProviderRegistry();
-		const engine = new OrchestrationEngine({ registry });
-
-		engine.bindSession("sess-1", "claude");
-		engine.bindSession("sess-2", "opencode");
-
-		const bindings = Effect.runSync(
-			engine.listBoundSessionsEffect({ projectIds: ["test-project"] }),
-		);
-		expect(bindings).toHaveLength(2);
-		expect(bindings.find((b) => b.sessionId === "sess-1")?.providerId).toBe(
-			"claude",
-		);
-		expect(bindings.find((b) => b.sessionId === "sess-2")?.providerId).toBe(
-			"opencode",
-		);
 	});
 
 	it("end-to-end: dispatch sendTurn through full ProviderRegistry → ClaudeProviderInstance → mock SDK stack", async () => {

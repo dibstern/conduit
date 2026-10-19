@@ -233,66 +233,66 @@ describe("browser WebSocket RPC contract", () => {
 
 	it("rejects an empty terminal id at the contract boundary", () => {
 		expect(
-			Schema.decodeUnknownEither(PtyInput)({
+			Schema.decodeUnknownExit(PtyInput.payloadSchema)({
 				_tag: "PtyInput",
 				projectSlug: "demo",
 				ptyId: "",
 				data: "x",
 			})._tag,
-		).toBe("Left");
+		).toBe("Failure");
 	});
 
 	it("rejects unknown browser RPC tags at the contract boundary", () => {
-		const decoded = Schema.decodeUnknownEither(WsRpcRequest)({
+		const decoded = Schema.decodeUnknownExit(WsRpcRequest)({
 			_tag: "UnknownBrowserRequest",
 			projectSlug: "demo",
 		});
 
-		expect(decoded._tag).toBe("Left");
+		expect(decoded._tag).toBe("Failure");
 	});
 
 	it("accepts session.mark_seen only with a non-negative integer upTo", () => {
 		const decode = (upTo: unknown) =>
-			Schema.decodeUnknownEither(WsRpcRequest)({
+			Schema.decodeUnknownExit(WsRpcRequest)({
 				_tag: "MarkSessionSeen",
 				projectSlug: "demo",
 				sessionId: "session-1",
 				upTo,
 			})._tag;
-		expect(decode(4)).toBe("Right");
-		expect(decode(0)).toBe("Right");
-		expect(decode(-1)).toBe("Left");
-		expect(decode(1.5)).toBe("Left");
-		expect(decode("4")).toBe("Left");
-		expect(decode(undefined)).toBe("Left");
+		expect(decode(4)).toBe("Success");
+		expect(decode(0)).toBe("Success");
+		expect(decode(-1)).toBe("Failure");
+		expect(decode(1.5)).toBe("Failure");
+		expect(decode("4")).toBe("Failure");
+		expect(decode(undefined)).toBe("Failure");
 	});
 
 	it("rejects unknown permission modes at the contract boundary", () => {
-		const decoded = Schema.decodeUnknownEither(WsRpcRequest)({
+		const decoded = Schema.decodeUnknownExit(WsRpcRequest)({
 			_tag: "SwitchPermissionMode",
 			projectSlug: "demo",
 			sessionId: "session-1",
 			mode: "yolo",
 		});
-		expect(decoded._tag).toBe("Left");
+		expect(decoded._tag).toBe("Failure");
 	});
 
 	it("requires commandId on mutating provider command RPCs", () => {
-		const sendWithoutCommandId = Schema.decodeUnknownEither(WsRpcRequest)({
+		const sendWithoutCommandId = Schema.decodeUnknownExit(WsRpcRequest)({
 			_tag: "input.submit",
 			projectSlug: "demo",
 			sessionId: "session-1",
 			text: "hello",
 			delivery: "queue",
 		});
-		const cancelWithoutCommandId = Schema.decodeUnknownEither(WsRpcRequest)({
+		const cancelWithoutCommandId = Schema.decodeUnknownExit(WsRpcRequest)({
 			_tag: "CancelSession",
 			projectSlug: "demo",
 			sessionId: "session-1",
 		});
 
-		expect(sendWithoutCommandId._tag).toBe("Left");
-		expect(cancelWithoutCommandId._tag).toBe("Left");
+		expect(sendWithoutCommandId._tag).toBe("Failure");
+		expect(cancelWithoutCommandId._tag).toBe("Failure");
 	});
 });
 

@@ -16,13 +16,13 @@ export type CategoryTuningHunk = typeof CategoryTuningHunkSchema.Type;
 export const CategoryTuningProposalSchema = Schema.Struct({
 	hunks: Schema.Array(CategoryTuningHunkSchema),
 	rationale: Schema.String,
-	baseVersion: Schema.NonNegativeInt,
+	baseVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 export type CategoryTuningProposal = typeof CategoryTuningProposalSchema.Type;
 
 export const CategoryTuningScoreSchema = Schema.Struct({
-	agree: Schema.NonNegativeInt,
-	total: Schema.NonNegativeInt,
+	agree: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+	total: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 	levels: Schema.Array(
 		Schema.Struct({
 			partId: Schema.String,
@@ -32,8 +32,8 @@ export const CategoryTuningScoreSchema = Schema.Struct({
 		}),
 	),
 	/** Calls still needed. Estimation never submits a Jev request. */
-	requiredCalls: Schema.NonNegativeInt,
-	jevCalls: Schema.NonNegativeInt,
+	requiredCalls: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+	jevCalls: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 	/** Partial/missing verdicts must never be displayed as accurate agreement. */
 	complete: Schema.Boolean,
 	canTest: Schema.Boolean,

@@ -74,7 +74,7 @@ export const migrateProjectStorage = (
 					filename,
 				});
 			}).pipe(
-				Effect.catchAllCause((cause) =>
+				Effect.catchCause((cause) =>
 					Failure.isInterruptedOnly(cause)
 						? Effect.failCause(cause)
 						: Effect.sync(() => {

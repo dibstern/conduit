@@ -1,11 +1,8 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcClientError } from "@effect/rpc/RpcClientError";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import {
-	Chunk,
 	Deferred,
 	Effect,
 	Exit,
@@ -16,6 +13,9 @@ import {
 	Scope,
 	Stream,
 } from "effect";
+import { RpcClientError } from "effect/rpc/RpcClientError";
+import { SocketCloseError } from "effect/socket/Socket";
+import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { accountsStateFromConfig } from "../../../src/lib/account-directory.js";
 import {
@@ -88,8 +88,7 @@ afterEach(() => {
 	rmSync(isolatedRoot, { recursive: true, force: true });
 });
 const detailAccountsLayer = () =>
-	Layer.succeed(
-		AccountDirectory,
+	Layer.succeed(AccountDirectory)(
 		makeAccountDirectory(
 			Effect.succeed(
 				accountsStateFromConfig(
@@ -118,7 +117,7 @@ const makeDetailTestLayer = (options?: {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-detail-sub-"));
 	const filename = join(dir, "events.db");
 	const busLayer = options?.busLayer ?? SessionEventBusLive;
-	const cleanup = Layer.scopedDiscard(
+	const cleanup = Layer.effectDiscard(
 		Effect.addFinalizer(() =>
 			Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 		),
@@ -343,7 +342,7 @@ const runtimeEvent = (event: Record<string, unknown>): ProviderRuntimeEvent =>
 	decodeProviderRuntimeEvent({ ...RUNTIME_BASE, ...event });
 
 describe("subscribeSessionDetail", () => {
-	it.scoped(
+	it.effect(
 		"cold start includes only the newest 50 messages and a paging cursor",
 		() =>
 			Effect.gen(function* () {
@@ -376,10 +375,10 @@ describe("subscribeSessionDetail", () => {
 				expect(snapshot.hasMore).toBe(true);
 				expect(snapshot.cursor).toBe("m05");
 				expect(yield* Queue.take(q)).toEqual({ _tag: "synchronized" });
-			}).pipe(Effect.provide(makeDetailTestLayer())),
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
-	it.scoped("cold start emits the transcript snapshot then synchronized", () =>
+	it.effect("cold start emits the transcript snapshot then synchronized", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([
@@ -405,10 +404,10 @@ describe("subscribeSessionDetail", () => {
 			expect(message.id).toBe("m1");
 			expect(message.role).toBe("assistant");
 			expect(textOf(message)).toBe("Hello world");
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
-	it.scoped(
+	it.effect(
 		"a live commit sends the message and only the parts that moved",
 		() =>
 			Effect.gen(function* () {
@@ -448,10 +447,10 @@ describe("subscribeSessionDetail", () => {
 				expect(namesOf(streamed)).toEqual(["m1/m1-0", "m1"]);
 				expect(textOf(expectMessage(streamed))).toBe("Hello world!");
 				expect(yield* Queue.size(q)).toBe(0);
-			}).pipe(Effect.provide(makeDetailTestLayer())),
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
-	it.scoped("the sequence on every envelope is the read-model version", () =>
+	it.effect("the sequence on every envelope is the read-model version", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([
@@ -478,10 +477,10 @@ describe("subscribeSessionDetail", () => {
 			expect(first.sequence).toBeGreaterThan(snapshot.sequence);
 			expect(second.sequence).toBeGreaterThan(first.sequence);
 			expect(second.sequence).toBe(yield* readModelVersion);
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
-	it.scoped(
+	it.effect(
 		"delivers what the REAL ingestion service committed, as projected messages",
 		() =>
 			// F4: driven through the ProviderRuntimeIngestion service — its own
@@ -545,10 +544,10 @@ describe("subscribeSessionDetail", () => {
 				// The transcript is durable, so what a subscriber receives outlives
 				// event eviction — it is the projection, not the log.
 				expect(yield* Queue.size(q)).toBe(0);
-			}).pipe(Effect.provide(makeDetailIngestionTestLayer())),
+			}).pipe(Effect.provide(makeDetailIngestionTestLayer(), { local: true })),
 	);
 
-	it.scoped(
+	it.effect(
 		"exactly-once across the base read: only messages past the base come back",
 		() =>
 			Effect.gen(function* () {
@@ -583,12 +582,12 @@ describe("subscribeSessionDetail", () => {
 				expect(message.id).toBe("m1");
 				expect(textOf(message)).toBe("Hello world");
 				expect(yield* Queue.size(q)).toBe(0);
-			}).pipe(Effect.provide(makeDetailTestLayer())),
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	// Over-limit resumes must choose a snapshot before reading bodies; exactly
 	// the limit must still catch up. Saved pages have the smaller ten-message cap.
-	it.scoped.each([
+	it.effect.each([
 		{ saved: false, messages: 50, snapshot: false },
 		{ saved: false, messages: 51, snapshot: true },
 		{ saved: true, messages: 10, snapshot: false },
@@ -602,7 +601,6 @@ describe("subscribeSessionDetail", () => {
 				const [base] = yield* subscribeSessionDetail({ sessionId: SID }).pipe(
 					Stream.take(2),
 					Stream.runCollect,
-					Effect.map(Chunk.toReadonlyArray),
 				);
 				if (base?._tag !== "snapshot") throw new Error("expected snapshot");
 				yield* commit(
@@ -620,16 +618,15 @@ describe("subscribeSessionDetail", () => {
 				}).pipe(
 					Stream.takeUntil((envelope) => envelope._tag === "synchronized"),
 					Stream.runCollect,
-					Effect.map(Chunk.toReadonlyArray),
 				);
 				expect(envelopes.some((envelope) => envelope._tag === "snapshot")).toBe(
 					scenario.snapshot,
 				);
 				expect(envelopes.at(-1)?._tag).toBe("synchronized");
-			}).pipe(Effect.provide(makeDetailTestLayer())),
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
-	it.scoped.each([
+	it.effect.each([
 		{ parts: 1, snapshot: false },
 		{ parts: 200, snapshot: true },
 	])(
@@ -651,10 +648,10 @@ describe("subscribeSessionDetail", () => {
 				const read = yield* ReadQueryEffectTag;
 				const result = yield* read.readSessionTranscriptCatchUp(SID, after, 50);
 				expect(result === "snapshot").toBe(scenario.snapshot);
-			}).pipe(Effect.provide(makeDetailTestLayer())),
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
-	it.scoped("resume catches up from the cursor with no base envelope", () =>
+	it.effect("resume catches up from the cursor with no base envelope", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([
@@ -703,10 +700,10 @@ describe("subscribeSessionDetail", () => {
 			// And live continues from there.
 			yield* commit([textDelta(SID, "m2", "m2-0", "!")]);
 			expect(textOf(expectMessage(yield* takeN(q, 2)))).toBe("also missed!");
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
-	it.scoped(
+	it.effect(
 		"resume reports a removed message and fresh transcript omits it",
 		() =>
 			Effect.gen(function* () {
@@ -734,10 +731,10 @@ describe("subscribeSessionDetail", () => {
 				expect((yield* readQuery.readSessionTranscript(SID)).messages).toEqual(
 					[],
 				);
-			}).pipe(Effect.provide(makeDetailTestLayer())),
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
-	it.scoped("live removal emits a remove at the committed version", () =>
+	it.effect("live removal emits a remove at the committed version", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([sessionCreated(SID), messageCreated(SID, "gone", "user")]);
@@ -752,10 +749,10 @@ describe("subscribeSessionDetail", () => {
 				id: "gone",
 				sequence: yield* readModelVersion,
 			});
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
-	it.scoped(
+	it.effect(
 		"a deleted part is removed live and on resume, and the browser drops it",
 		() =>
 			Effect.gen(function* () {
@@ -812,11 +809,11 @@ describe("subscribeSessionDetail", () => {
 					...removed,
 					{ _tag: "synchronized" },
 				]);
-			}).pipe(Effect.provide(makeDetailTestLayer())),
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	for (const separateBatches of [false, true]) {
-		it.scoped(
+		it.effect(
 			`real client resumes without repeating messages after ${separateBatches ? "multiple projection batches in one commit" : "an unrelated commit"}`,
 			() =>
 				Effect.gen(function* () {
@@ -844,8 +841,10 @@ describe("subscribeSessionDetail", () => {
 								Stream.concat(
 									Stream.fail(
 										new RpcClientError({
-											reason: "Protocol",
-											message: "socket dropped after m1",
+											reason: new SocketCloseError({
+												code: 1006,
+												closeReason: "socket dropped after m1",
+											}),
 										}),
 									),
 								),
@@ -922,12 +921,13 @@ describe("subscribeSessionDetail", () => {
 							SessionEventBusLive,
 							detailAccountsLayer(),
 						),
+						{ local: true },
 					),
 				),
 		);
 	}
 
-	it.scoped("never emits a remove envelope across a full turn", () =>
+	it.effect("never emits a remove envelope across a full turn", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([
@@ -950,10 +950,10 @@ describe("subscribeSessionDetail", () => {
 				// source's.
 				expect(envelope._tag).toBe("upsert");
 			}
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
-	it.scoped("delivers only the subscribed session's messages", () =>
+	it.effect("delivers only the subscribed session's messages", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([
@@ -975,10 +975,10 @@ describe("subscribeSessionDetail", () => {
 			expect(message.id).toBe("a1");
 			expect(textOf(message)).toBe("mine");
 			expect(yield* Queue.size(q)).toBe(0);
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
-	it.scoped("closing the scope tears down the advance subscription", () =>
+	it.effect("closing the scope tears down the advance subscription", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([
@@ -996,11 +996,11 @@ describe("subscribeSessionDetail", () => {
 			yield* takeN(q, 2); // running & subscribed
 			yield* Scope.close(scope, Exit.void);
 
-			expect(Exit.isInterrupted(yield* Fiber.await(fiber))).toBe(true);
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+			expect(Exit.hasInterrupts(yield* Fiber.await(fiber))).toBe(true);
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
-	it.scoped(
+	it.effect(
 		"producer fix: a persisted user message is delivered live to detail subscribers",
 		() =>
 			Effect.gen(function* () {
@@ -1032,10 +1032,10 @@ describe("subscribeSessionDetail", () => {
 						SUM(CASE WHEN type = 'session.created' THEN 1 ELSE 0 END) AS creation_count
 					FROM events WHERE session_id = ${SID}`;
 				expect(counts[0]).toEqual({ event_count: 3, creation_count: 1 });
-			}).pipe(Effect.provide(makeDetailTestLayer())),
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
-	it.scoped(
+	it.effect(
 		"publish:false persists silently, and the next advance heals it",
 		() =>
 			Effect.gen(function* () {
@@ -1062,10 +1062,10 @@ describe("subscribeSessionDetail", () => {
 						.sort(),
 				).toEqual(["SENTINEL", "silent"]);
 				expect(yield* Queue.size(q)).toBe(0);
-			}).pipe(Effect.provide(makeDetailTestLayer())),
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
-	it.scoped(
+	it.effect(
 		"a projector failure fails the persist and suppresses the bus signal",
 		() =>
 			// F2: the persist service is all-or-nothing — a projection failure rolls
@@ -1078,7 +1078,7 @@ describe("subscribeSessionDetail", () => {
 				const events = yield* bus.subscribe({ sessionId: SID });
 				const persist = yield* ClaudeEventPersistEffectTag;
 
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					persist.persistEvent(
 						canonicalEvent(
 							"session.renamed",
@@ -1088,14 +1088,14 @@ describe("subscribeSessionDetail", () => {
 						),
 					),
 				);
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 
 				// Sentinel: the next successful persist must be the FIRST bus signal —
 				// proving the failed persist published nothing.
 				yield* persist.persistEvent(messageCreated(SID, "m-ok", "user"));
-				const first = Chunk.toReadonlyArray(
-					yield* events.pipe(Stream.take(1), Stream.runCollect),
-				);
+				const first = [
+					...(yield* events.pipe(Stream.take(1), Stream.runCollect)),
+				];
 				expect(first[0]?.type).toBe("message.created");
 			}).pipe(
 				Effect.provide(
@@ -1116,11 +1116,12 @@ describe("subscribeSessionDetail", () => {
 							},
 						],
 					}),
+					{ local: true },
 				),
 			),
 	);
 
-	it.scoped(
+	it.effect(
 		"an interrupt cannot split the projection commit from its bus signal",
 		() =>
 			// F3: append → project → publish is one uninterruptible region. An
@@ -1138,8 +1139,8 @@ describe("subscribeSessionDetail", () => {
 							yield* Ref.update(published, (all) => [...all, ...events]);
 						}),
 					publishAdvance: () => Effect.void,
-					subscribe: () => Effect.dieMessage("unused in this test"),
-					subscribeAdvances: () => Effect.dieMessage("unused in this test"),
+					subscribe: () => Effect.die(new Error("unused in this test")),
+					subscribeAdvances: () => Effect.die(new Error("unused in this test")),
 				};
 
 				yield* Effect.gen(function* () {
@@ -1148,7 +1149,7 @@ describe("subscribeSessionDetail", () => {
 					const persist = yield* ClaudeEventPersistEffectTag;
 					const sql = yield* SqlClient.SqlClient;
 
-					const fiber = yield* Effect.fork(
+					const fiber = yield* Effect.forkChild(
 						persist.persistUserMessage(SID, "hello"),
 					);
 					yield* Deferred.await(publishStarted);
@@ -1158,7 +1159,7 @@ describe("subscribeSessionDetail", () => {
 					expect(rows).toHaveLength(1);
 
 					// Interrupt while the publish is held open at the gate…
-					yield* Fiber.interruptFork(fiber);
+					yield* Effect.sync(() => fiber.interruptUnsafe());
 					yield* Deferred.succeed(publishGate, undefined);
 					yield* Fiber.await(fiber);
 
@@ -1171,8 +1172,9 @@ describe("subscribeSessionDetail", () => {
 				}).pipe(
 					Effect.provide(
 						makeDetailTestLayer({
-							busLayer: Layer.succeed(SessionEventBusTag, probeBus),
+							busLayer: Layer.succeed(SessionEventBusTag)(probeBus),
 						}),
+						{ local: true },
 					),
 				);
 			}),
@@ -1208,7 +1210,7 @@ describe("transcript states carried by the detail feed alone", () => {
 	// Failure modes: a null verdict disappears; a part write never advances the
 	// feed; wire/history conversion loses provenance; replay changes the verdict;
 	// a late verdict changes activity timing or writes another message's part.
-	it.scoped.each([
+	it.effect.each([
 		{ probabilities: { ask: 0.8, routine: 0.2 } },
 		{ probabilities: null },
 	])(
@@ -1293,10 +1295,10 @@ describe("transcript states carried by the detail feed alone", () => {
 						(message) => message.type === "assistant",
 					),
 				).toMatchObject(expected);
-			}).pipe(Effect.provide(makeDetailTestLayer())),
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
-	it.scoped("text.surfaced targets only the named session's text part", () =>
+	it.effect("text.surfaced targets only the named session's text part", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([
@@ -1332,14 +1334,14 @@ describe("transcript states carried by the detail feed alone", () => {
 				{ id: "p2" },
 				{ id: "tool1" },
 			]);
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
 	// Failure modes: modern SSE parts arrive before the message header; thinking
 	// and tools reorder adjacent text; a late verdict loses its ordinal on the wire;
 	// REST reconciliation erases it, duplicates text, or judges the final reply.
 	// Verdicts are supplied explicitly: ahu8.4 deferred the judging service.
-	it.scoped.each([false, true])(
+	it.effect.each([false, true])(
 		"OpenCode adapter delivers supplied verdicts live and after REST reload (part first: %s)",
 		(partFirst) =>
 			Effect.gen(function* () {
@@ -1557,10 +1559,10 @@ describe("transcript states carried by the detail feed alone", () => {
 						),
 					);
 				});
-			}).pipe(Effect.provide(makeDetailIngestionTestLayer())),
+			}).pipe(Effect.provide(makeDetailIngestionTestLayer(), { local: true })),
 	);
 
-	it.scoped(
+	it.effect(
 		"OpenCode snapshots retain text.surfaced facts across reconciliation and history reads",
 		() =>
 			Effect.gen(function* () {
@@ -1640,10 +1642,10 @@ describe("transcript states carried by the detail feed alone", () => {
 					...surfacing,
 					time: { start: 20 },
 				});
-			}).pipe(Effect.provide(makeDetailTestLayer())),
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
-	it.scoped(
+	it.effect(
 		"thinking is in progress until thinking.end, which stamps its end",
 		() =>
 			Effect.gen(function* () {
@@ -1670,10 +1672,10 @@ describe("transcript states carried by the detail feed alone", () => {
 				expect(chatOf([...opening, ...ended])).toMatchObject([
 					{ type: "thinking", done: true, duration: endedAt - startedAt },
 				]);
-			}).pipe(Effect.provide(makeDetailTestLayer())),
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
-	it.scoped("an interrupted turn closes thinking that never ended", () =>
+	it.effect("an interrupted turn closes thinking that never ended", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([
@@ -1686,10 +1688,10 @@ describe("transcript states carried by the detail feed alone", () => {
 			expect(chatOf(yield* takeN(q, 2))).toMatchObject([
 				{ type: "thinking", done: true },
 			]);
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
-	it.scoped("a tool's input refreshed after tool.started reaches the row", () =>
+	it.effect("a tool's input refreshed after tool.started reaches the row", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([
@@ -1727,10 +1729,10 @@ describe("transcript states carried by the detail feed alone", () => {
 			expect(chatOf([...opening, ...running, ...completed])).toMatchObject([
 				{ type: "tool", input: { command: "ls -la" } },
 			]);
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
-	it.scoped("a turn error is transcript content and survives a reload", () =>
+	it.effect("a turn error is transcript content and survives a reload", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([
@@ -1770,10 +1772,10 @@ describe("transcript states carried by the detail feed alone", () => {
 			// A fresh subscriber (a reload) sees the same thing from the store.
 			const reload = yield* openDetail({ sessionId: SID });
 			expect(chatOf(yield* takeN(reload.q, 2))).toMatchObject(expected);
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 
-	it.scoped(
+	it.effect(
 		"ingestion keeps a compaction's outcome and drops its transient start",
 		() =>
 			Effect.gen(function* () {
@@ -1801,10 +1803,10 @@ describe("transcript states carried by the detail feed alone", () => {
 						text: "Compaction failed: too large",
 					}),
 				]);
-			}).pipe(Effect.provide(makeDetailIngestionTestLayer())),
+			}).pipe(Effect.provide(makeDetailIngestionTestLayer(), { local: true })),
 	);
 
-	it.scoped("a failed compaction is an error notice, not a boundary", () =>
+	it.effect("a failed compaction is an error notice, not a boundary", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([
@@ -1824,6 +1826,6 @@ describe("transcript states carried by the detail feed alone", () => {
 					text: "Compaction failed",
 				},
 			]);
-		}).pipe(Effect.provide(makeDetailTestLayer())),
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 });

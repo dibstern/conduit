@@ -14,29 +14,28 @@ export async function confirmSessionDeletion(
 	if (pending) return null;
 	pending = true;
 	try {
-		const [inspections, removeOnDelete] = await Promise.all([
-			Promise.all(
-				targets.map((target) => rpc("InspectSessionWorktrees", target)),
+		const inspections = await Promise.all(
+			targets.map((target) =>
+				rpc("InspectSessionWorktrees", { sessionId: target.sessionId }),
 			),
-			rpc("GetWorktreeCleanupSetting", {}).then(
-				({ worktreeCleanup }) => worktreeCleanup.onDelete,
-				() => false,
-			),
-		]);
-		const worktrees = inspections.flatMap((inspection) => inspection.worktrees);
+		);
+		const askInspections = inspections.filter(
+			(inspection) => inspection.onDelete === "ask",
+		);
+		const worktrees = askInspections.flatMap(
+			(inspection) => inspection.worktrees,
+		);
 		// Another action may have opened a dialog while inspection was in flight.
 		if (uiState.confirmDialog) return null;
 		// Removal still keeps worktrees in use or with uncommitted changes.
-		let removeWorktrees =
-			!removeOnDelete &&
-			inspections
-				.filter((inspection) => inspection.worktrees.length > 0)
-				.every((inspection) => inspection.removeWorktrees);
+		let removeWorktrees = askInspections
+			.filter((inspection) => inspection.worktrees.length > 0)
+			.every((inspection) => inspection.removeWorktrees);
 		const confirmed = await confirm(
 			text,
 			"Delete",
 			returnFocus,
-			!removeOnDelete && worktrees.length > 0
+			worktrees.length > 0
 				? {
 						worktrees,
 						removeWorktrees,
@@ -49,7 +48,12 @@ export async function confirmSessionDeletion(
 		if (!confirmed) return null;
 		return targets.map((target, index) => ({
 			...target,
-			...(inspections[index]?.worktrees.length ? { removeWorktrees } : {}),
+			...(inspections[index]?.worktrees.length
+				? {
+						removeWorktrees:
+							inspections[index]?.onDelete === "ask" && removeWorktrees,
+					}
+				: {}),
 		}));
 	} finally {
 		pending = false;

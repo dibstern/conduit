@@ -1,12 +1,11 @@
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
-//
-// Questions use a bridge-less design: the frontend receives the question's
-// `que_` ID from the approvals subscription and sends it back with the
-// answer. The handler calls the OpenCode REST API directly — no in-memory
-// bridge state is needed, so questions survive relay restarts.
 
-import { SqlClient } from "@effect/sql";
+//
+// Browser ids name Conduit's persisted prompts. OpenCode answers use the
+// provider reference on that row, so questions survive relay restarts.
+
 import { Data, Effect, Option } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	getProviderDriver,
 	MANAGED_OPENCODE_ACCOUNT_ID,
@@ -27,11 +26,13 @@ import {
 	PROCESSING_TIMEOUT_DURATION,
 	startProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
+import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 import { makeFailTurn } from "../domain/relay/Services/turn-failure.js";
 import { fixupConfigFile } from "../instance/opencode-config-fixup.js";
 import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
+import { retirePendingPrompts } from "../persistence/effect/retire-pending-prompts.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
@@ -92,6 +93,91 @@ interface QuestionRejectPayload {
 	readonly toolId: string;
 	readonly commandId?: string;
 }
+
+interface StoredPromptReference {
+	readonly id: string;
+	readonly session_id: string;
+	readonly type: "permission" | "question";
+	readonly status: "pending" | "resolved";
+	readonly tool_name: string | null;
+	readonly provider_process_id: string | null;
+	readonly provider_request_id: string | null;
+}
+
+const readPromptReference = (
+	id: string,
+	type: "permission" | "question",
+	sessionId?: string,
+) =>
+	Effect.gen(function* () {
+		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+		if (Option.isNone(sql)) return undefined;
+		const [stored] = yield* sql.value<StoredPromptReference>`
+			SELECT id, session_id, type, status, tool_name,
+				provider_process_id, provider_request_id
+			FROM pending_approvals WHERE id = ${id} AND type = ${type}`;
+		if (stored?.status === "resolved") {
+			const [expired] = yield* sql.value`
+				SELECT 1 FROM events WHERE session_id = ${stored.session_id}
+					AND type = ${`${type}.resolved`}
+					AND json_extract(data, '$.id') = ${stored.id}
+					AND json_extract(metadata, '$.source') = 'provider-process-expired'
+				LIMIT 1`;
+			if (expired)
+				return yield* new WsRpcError({
+					message:
+						"This prompt expired because its provider process is no longer running.",
+				});
+		}
+		if (!stored && sessionId) {
+			const [referenced] = yield* sql.value<{ id: string }>`
+				SELECT id FROM pending_approvals
+				WHERE session_id = ${sessionId} AND type = ${type} AND status = 'pending'
+					AND (provider_process_id IS NOT NULL OR provider_request_id IS NOT NULL)
+				LIMIT 1`;
+			if (referenced)
+				return yield* new WsRpcError({
+					message:
+						"This prompt is no longer available. Refresh the session before answering.",
+				});
+		}
+		return stored;
+	});
+
+const expirePrompt = (prompt: StoredPromptReference) =>
+	Effect.gen(function* () {
+		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+		const eventStore = yield* Effect.serviceOption(EventStoreEffectTag);
+		const projector = yield* Effect.serviceOption(ProjectionRunnerEffectTag);
+		if (
+			Option.isNone(sql) ||
+			Option.isNone(eventStore) ||
+			Option.isNone(projector)
+		)
+			return yield* new WsRpcError({
+				message:
+					"Could not expire this prompt because persistence is unavailable.",
+			});
+		yield* retirePendingPrompts([
+			{
+				id: prompt.id,
+				sessionId: prompt.session_id,
+				type: prompt.type,
+			},
+		]).pipe(
+			Effect.provideService(SqlClient.SqlClient, sql.value),
+			Effect.provideService(EventStoreEffectTag, eventStore.value),
+			Effect.provideService(ProjectionRunnerEffectTag, projector.value),
+		);
+		const log = yield* LoggerTag;
+		log.info(
+			`Expired ${prompt.type} ${prompt.id} from provider process ${prompt.provider_process_id}`,
+		);
+		return yield* new WsRpcError({
+			message:
+				"This prompt expired because its provider process is no longer running.",
+		});
+	});
 
 /**
  * Convert browser answer format `Record<string, string>` to OpenCode's
@@ -198,12 +284,12 @@ export const recordApprovalResolved = (
 			Effect.provideService(SqlClient.SqlClient, sql.value),
 			Effect.provideService(EventStoreEffectTag, eventStore.value),
 			Effect.provideService(ProjectionRunnerEffectTag, projectionRunner.value),
-			Effect.either,
+			Effect.result,
 		);
-		if (written._tag === "Left") {
+		if (written._tag === "Failure") {
 			log.error(
 				`${what} resolution not recorded for session=${sessionId}`,
-				written.left,
+				written.failure,
 			);
 		}
 	});
@@ -257,7 +343,7 @@ const persistPermissionRule = (
 		const config = yield* ConfigTag;
 		const log = yield* LoggerTag;
 
-		const persistResult = yield* Effect.either(
+		const persistResult = yield* Effect.result(
 			Effect.gen(function* () {
 				const configData = yield* Effect.tryPromise(() => client.config.get());
 				const rawPermission = configData["permission"];
@@ -300,8 +386,8 @@ const persistPermissionRule = (
 				log.info(`Persisted: ${toolName} ${scope}=${pattern ?? "*"}`);
 			}),
 		);
-		if (persistResult._tag === "Left") {
-			log.warn(`Config persist failed: ${persistResult.left}`);
+		if (persistResult._tag === "Failure") {
+			log.warn(`Config persist failed: ${persistResult.failure}`);
 		}
 	});
 
@@ -310,7 +396,6 @@ export const handlePermissionResponse = (
 	payload: PermissionResponsePayload,
 ) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
 		const pendingInteractions = yield* PendingInteractionServiceTag;
@@ -323,13 +408,40 @@ export const handlePermissionResponse = (
 			permissionDestination,
 		} = payload;
 		const visibleSessionId = wsHandler.getClientSession(clientId) ?? "";
+		const stored = yield* readPromptReference(requestId, "permission");
+		if (stored?.status === "resolved") return;
+		if (stored?.provider_process_id?.startsWith("opencode:")) {
+			yield* resolveOpenCodeQuestionTarget(stored.session_id, stored);
+		}
 		const resultOption =
 			yield* pendingInteractions.resolvePermissionFromBrowser(
 				requestId,
 				decision,
 				permissionDestination != null ? { permissionDestination } : undefined,
 			);
-		const result = Option.getOrUndefined(resultOption);
+		if (
+			Option.isNone(resultOption) &&
+			stored?.provider_process_id &&
+			!stored.provider_process_id.startsWith("opencode:")
+		)
+			return yield* expirePrompt(stored);
+		const mapped =
+			decision === "allow"
+				? ("once" as const)
+				: decision === "allow_always"
+					? ("always" as const)
+					: decision === "deny"
+						? ("reject" as const)
+						: undefined;
+		const result =
+			Option.getOrUndefined(resultOption) ??
+			(stored && mapped
+				? {
+						sessionId: stored.session_id,
+						toolName: stored.tool_name ?? "",
+						mapped,
+					}
+				: undefined);
 
 		if (result) {
 			const sessionId = result.sessionId || visibleSessionId || "?";
@@ -346,9 +458,26 @@ export const handlePermissionResponse = (
 				? (yield* ProviderRegistryTag).getInstance("opencode")
 				: undefined;
 			if (opencode) {
-				yield* Effect.either(
-					opencode.resolvePermissionEffect(sessionId, requestId, result.mapped),
+				const replied = yield* Effect.result(
+					opencode.resolvePermissionEffect(
+						sessionId,
+						stored?.provider_request_id ?? requestId,
+						result.mapped,
+						stored?.provider_process_id ?? undefined,
+					),
 				);
+				if (replied._tag === "Failure" && stored?.provider_process_id) {
+					yield* resolveOpenCodeQuestionTarget(sessionId, stored);
+					return yield* Effect.fail(replied.failure);
+				}
+				if (replied._tag === "Success" && stored) {
+					yield* recordApprovalResolved(
+						canonicalEvent("permission.resolved", sessionId, {
+							id: stored.id,
+							decision: result.mapped,
+						}),
+					);
+				}
 			}
 
 			// Persist to opencode.jsonc when the user chose "Always Allow"
@@ -364,25 +493,52 @@ export const handlePermissionResponse = (
 				);
 			}
 		}
-	});
+	}).pipe(Effect.scoped);
 
-const resolveOpenCodeQuestionTarget = (sessionId: string) =>
+const resolveOpenCodeQuestionTarget = (
+	sessionId: string,
+	prompt?: StoredPromptReference,
+) =>
 	Effect.gen(function* () {
+		const providerProcessId = prompt?.provider_process_id;
 		const defaultClient = yield* OpenCodeAPITag;
 		const engine = yield* Effect.serviceOption(OrchestrationEngineTag);
 		const instances = yield* Effect.serviceOption(OpenCodeInstancesTag);
+		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
+		const directory =
+			workspace._tag === "Some"
+				? yield* workspace.value.get(sessionId)
+				: undefined;
 		if (engine._tag === "None" || instances._tag === "None") {
-			return { client: defaultClient, directory: undefined };
+			if (
+				providerProcessId &&
+				defaultClient.promptProcessId !== providerProcessId
+			)
+				return yield* expirePrompt(prompt);
+			return { client: defaultClient, directory };
 		}
 		const instanceId =
 			yield* engine.value.getProviderForSessionEffect(sessionId);
-		const client = yield* instances.value.use(
-			instanceId ?? MANAGED_OPENCODE_ACCOUNT_ID,
-		);
+		const selectedId = instanceId ?? MANAGED_OPENCODE_ACCOUNT_ID;
+		const running = providerProcessId
+			? yield* instances.value.ifRunning(selectedId, directory)
+			: Option.some(yield* instances.value.use(selectedId, directory));
+		if (
+			Option.isNone(running) ||
+			(providerProcessId && running.value.promptProcessId !== providerProcessId)
+		)
+			return yield* prompt
+				? expirePrompt(prompt)
+				: Effect.fail(
+						new WsRpcError({
+							message: "The provider process is no longer running.",
+						}),
+					);
+		const client = running.value;
 		const session = yield* Effect.tryPromise(() =>
 			client.session.get(sessionId),
 		);
-		return { client, directory: session.directory };
+		return { client, directory: directory ?? session.directory };
 	});
 
 export const handleAskUserResponse = (
@@ -394,7 +550,15 @@ export const handleAskUserResponse = (
 		const log = yield* LoggerTag;
 
 		const { toolId, answers } = payload;
-		const sessionId = wsHandler.getClientSession(clientId) ?? "";
+		const stored = yield* readPromptReference(
+			toolId,
+			"question",
+			wsHandler.getClientSession(clientId),
+		);
+		if (stored?.status === "resolved") return;
+		const sessionId =
+			stored?.session_id ?? wsHandler.getClientSession(clientId) ?? "";
+		const providerRequestId = stored?.provider_request_id ?? toolId;
 
 		const formatted = formatAnswers(answers);
 
@@ -406,6 +570,19 @@ export const handleAskUserResponse = (
 			PendingInteractionServiceTag,
 		);
 		if (pendingInteractionsOption._tag === "Some") {
+			if (
+				stored?.provider_process_id &&
+				!stored.provider_process_id.startsWith("opencode:")
+			) {
+				const pendingQuestions =
+					yield* pendingInteractionsOption.value.listPendingQuestions();
+				if (
+					pendingQuestions.some(
+						(question) => question.requestId === toolId && question.recovered,
+					)
+				)
+					return yield* expirePrompt(stored);
+			}
 			const resolvedOption =
 				yield* pendingInteractionsOption.value.resolveQuestionFromBrowser(
 					toolId,
@@ -433,18 +610,18 @@ export const handleAskUserResponse = (
 							new Error("Recovered question turn service unavailable"),
 						);
 					}
-					const completed = yield* Effect.either(
+					const completed = yield* Effect.result(
 						turns.completeRecoveredQuestion(
 							resolved.question,
 							answerText,
 							answers,
 						),
 					);
-					if (completed._tag === "Left") {
+					if (completed._tag === "Failure") {
 						yield* pendingInteractionsOption.value.recoverPendingQuestions([
 							resolved.question,
 						]);
-						return yield* Effect.fail(completed.left);
+						return yield* Effect.fail(completed.failure);
 					}
 					yield* sendMessageToSession({
 						clientId,
@@ -477,25 +654,39 @@ export const handleAskUserResponse = (
 			}
 		}
 
-		// OpenCode REST API path with fallback (preserving recovery logic)
-		const { client, directory } =
-			yield* resolveOpenCodeQuestionTarget(sessionId);
-		const replyResult = yield* Effect.either(
+		if (
+			stored?.provider_process_id &&
+			!stored.provider_process_id.startsWith("opencode:")
+		)
+			return yield* expirePrompt(stored);
+		// OpenCode REST API path with fallback for legacy prompt rows.
+		const { client, directory } = yield* resolveOpenCodeQuestionTarget(
+			sessionId,
+			stored,
+		);
+		const replyResult = yield* Effect.result(
 			Effect.tryPromise(() =>
-				client.question.reply(toolId, formatted, directory),
+				client.question.reply(providerRequestId, formatted, directory),
 			),
 		);
-		if (replyResult._tag === "Right") {
+		if (replyResult._tag === "Success") {
 			yield* announceQuestionResolved(sessionId, toolId, answers);
 			return;
 		}
+		if (stored?.provider_request_id) {
+			if (stored.provider_process_id)
+				yield* resolveOpenCodeQuestionTarget(sessionId, stored);
+			return yield* new WsRpcError({
+				message: `OpenCode could not answer this question: ${String(replyResult.failure)}`,
+			});
+		}
 
 		log.warn(
-			`client=${clientId} session=${sessionId} replyQuestion failed for ${toolId}: ${replyResult.left}`,
+			`client=${clientId} session=${sessionId} replyQuestion failed for ${toolId}: ${replyResult.failure}`,
 		);
 
 		// Fallback: query pending questions and reply to the first match
-		const fallbackResult = yield* Effect.either(
+		const fallbackResult = yield* Effect.result(
 			Effect.gen(function* () {
 				const pendingQuestions = yield* Effect.tryPromise(() =>
 					client.question.list(directory),
@@ -515,18 +706,22 @@ export const handleAskUserResponse = (
 					yield* Effect.tryPromise(() =>
 						client.question.reply(queId, formatted, directory),
 					);
-					yield* announceQuestionResolved(sessionId, queId, answers);
+					yield* announceQuestionResolved(
+						sessionId,
+						stored?.id ?? queId,
+						answers,
+					);
 					return true;
 				}
 				return false;
 			}),
 		);
 
-		if (fallbackResult._tag === "Right" && fallbackResult.right) return;
+		if (fallbackResult._tag === "Success" && fallbackResult.success) return;
 
-		if (fallbackResult._tag === "Left") {
+		if (fallbackResult._tag === "Failure") {
 			log.warn(
-				`client=${clientId} session=${sessionId} API fallback also failed: ${fallbackResult.left}`,
+				`client=${clientId} session=${sessionId} API fallback also failed: ${fallbackResult.failure}`,
 			);
 		}
 
@@ -551,7 +746,15 @@ export const handleQuestionReject = (
 		const { toolId } = payload;
 		if (!toolId) return;
 
-		const sessionId = wsHandler.getClientSession(clientId) ?? "";
+		const stored = yield* readPromptReference(
+			toolId,
+			"question",
+			wsHandler.getClientSession(clientId),
+		);
+		if (stored?.status === "resolved") return;
+		const sessionId =
+			stored?.session_id ?? wsHandler.getClientSession(clientId) ?? "";
+		const providerRequestId = stored?.provider_request_id ?? toolId;
 
 		log.info(`client=${clientId} session=${sessionId} rejecting: ${toolId}`);
 
@@ -564,6 +767,12 @@ export const handleQuestionReject = (
 			const pendingQuestion = pendingQuestions.find(
 				(question) => question.requestId === toolId,
 			);
+			if (
+				stored?.provider_process_id &&
+				!stored.provider_process_id.startsWith("opencode:") &&
+				pendingQuestion?.recovered
+			)
+				return yield* expirePrompt(stored);
 			if (pendingQuestion) {
 				const questionSessionId = pendingQuestion.sessionId || sessionId;
 				const engineOption = yield* Effect.serviceOption(
@@ -624,23 +833,39 @@ export const handleQuestionReject = (
 			}
 		}
 
-		// OpenCode REST API path with fallback (preserving recovery logic)
-		const { client, directory } =
-			yield* resolveOpenCodeQuestionTarget(sessionId);
-		const rejectResult = yield* Effect.either(
-			Effect.tryPromise(() => client.question.reject(toolId, directory)),
+		if (
+			stored?.provider_process_id &&
+			!stored.provider_process_id.startsWith("opencode:")
+		)
+			return yield* expirePrompt(stored);
+		// OpenCode REST API path with fallback for legacy prompt rows.
+		const { client, directory } = yield* resolveOpenCodeQuestionTarget(
+			sessionId,
+			stored,
 		);
-		if (rejectResult._tag === "Right") {
+		const rejectResult = yield* Effect.result(
+			Effect.tryPromise(() =>
+				client.question.reject(providerRequestId, directory),
+			),
+		);
+		if (rejectResult._tag === "Success") {
 			yield* announceQuestionResolved(sessionId, toolId, {});
 			return;
 		}
+		if (stored?.provider_request_id) {
+			if (stored.provider_process_id)
+				yield* resolveOpenCodeQuestionTarget(sessionId, stored);
+			return yield* new WsRpcError({
+				message: `OpenCode could not reject this question: ${String(rejectResult.failure)}`,
+			});
+		}
 
 		log.warn(
-			`client=${clientId} session=${sessionId} rejectQuestion failed for ${toolId}: ${rejectResult.left}`,
+			`client=${clientId} session=${sessionId} rejectQuestion failed for ${toolId}: ${rejectResult.failure}`,
 		);
 
 		// Fallback: query pending questions
-		const fallbackResult = yield* Effect.either(
+		const fallbackResult = yield* Effect.result(
 			Effect.gen(function* () {
 				const pendingQuestions = yield* Effect.tryPromise(() =>
 					client.question.list(directory),
@@ -660,18 +885,18 @@ export const handleQuestionReject = (
 					yield* Effect.tryPromise(() =>
 						client.question.reject(queId, directory),
 					);
-					yield* announceQuestionResolved(sessionId, queId, {});
+					yield* announceQuestionResolved(sessionId, stored?.id ?? queId, {});
 					return true;
 				}
 				return false;
 			}),
 		);
 
-		if (fallbackResult._tag === "Right" && fallbackResult.right) return;
+		if (fallbackResult._tag === "Success" && fallbackResult.success) return;
 
-		if (fallbackResult._tag === "Left") {
+		if (fallbackResult._tag === "Failure") {
 			log.warn(
-				`client=${clientId} session=${sessionId} reject fallback also failed: ${fallbackResult.left}`,
+				`client=${clientId} session=${sessionId} reject fallback also failed: ${fallbackResult.failure}`,
 			);
 		}
 

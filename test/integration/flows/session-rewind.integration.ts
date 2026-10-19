@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { SqlClient } from "@effect/sql";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionDetailEnvelopeSchema } from "../../../src/lib/contracts/ws-rpc.js";
 import {
@@ -95,7 +95,8 @@ async function seedTurns(
 		providerId: "opencode",
 	});
 	const sessionId = String(created["id"]);
-	const createdAt = Date.now();
+	// Equal provider clocks must order by id regardless of ingestion timing.
+	const createdAt = Date.now() - 1000;
 	harness.mock.injectSSEEvents(
 		messageIds.flatMap((id, index) => [
 			{
@@ -181,8 +182,12 @@ describe("OpenCode pending rewind through the relay", () => {
 		try {
 			const writes = () => {
 				const { version } = db
-					.prepare("SELECT version FROM sessions WHERE id = ?")
+					.prepare(
+						"SELECT MAX(p.version) AS version FROM message_parts p JOIN messages m ON m.id = p.message_id WHERE m.session_id = ?",
+					)
 					.get(sessionId) as { version: number };
+				// Status reconciliation can move the session row after the rewind.
+				// Count the transcript writes at their own version instead.
 				return {
 					version,
 					messages: (
@@ -201,6 +206,7 @@ describe("OpenCode pending rewind through the relay", () => {
 					).n,
 				};
 			};
+			let previousVersion = writes().version;
 			for (const cut of [190, 196, 180]) {
 				const messageId = messageIds[cut];
 				if (!messageId) throw new Error("Missing large transcript cut");
@@ -211,6 +217,8 @@ describe("OpenCode pending rewind through the relay", () => {
 					}),
 				);
 				const projected = writes();
+				expect(projected.version).toBeGreaterThan(previousVersion);
+				previousVersion = projected.version;
 				evidence[`cut-${cut}`] = projected;
 				// At most the affected tail's headers and one 50-message page.
 				expect.soft(projected.messages).toBeLessThanOrEqual(70);
@@ -228,6 +236,7 @@ describe("OpenCode pending rewind through the relay", () => {
 			}
 			await client.rpcCall((rpc) => rpc.UndoRewind({ sessionId }));
 			const undone = writes();
+			expect(undone.version).toBeGreaterThan(previousVersion);
 			evidence["undo"] = undone;
 			expect.soft(undone.messages).toBeLessThanOrEqual(70);
 			expect.soft(undone.parts).toBe(50);

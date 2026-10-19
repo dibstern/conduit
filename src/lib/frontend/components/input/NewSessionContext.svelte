@@ -5,9 +5,11 @@
 	import type { WorktreeInfo } from "../../../shared-types.js";
 	import { getAvailableInstances, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
 	import { getInstanceById } from "../../stores/instance.svelte.js";
-	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
+	import { tick } from "svelte";
+	import { applyProjectList, getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { selection } from "../../stores/selection.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
+	import type { SaveProjectResponse } from "../../transport/ws-rpc.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { projectAccent } from "../session/session-list-project.js";
@@ -99,13 +101,26 @@
 		handOff();
 	}
 
-	function chooseProject(next: string) {
-		picked = true;
+	// The checkout belongs to the old project, so a new project starts from its defaults.
+	function startIn(next: string) {
 		worktree = null;
 		newWorktree = false;
 		worktreeBase = null;
 		modeChosen = false;
 		selection.openDraft(next);
+	}
+
+	let addProjectOpen = $state(false);
+
+	// The draft lands in the saved project, including one that already held the
+	// folder. The sidebar scope stays put: this only answers where the draft starts.
+	async function projectAdded(response: SaveProjectResponse) {
+		applyProjectList(response);
+		startIn(response.savedSlug);
+		addProjectOpen = false;
+		// Closing hands focus back to the chip; the prompt is what comes next.
+		await tick();
+		focusComposer?.();
 	}
 
 	async function openWorktrees() {
@@ -150,7 +165,7 @@
 			</Button>
 		{/snippet}
 		<MenuGroup label="Start in…">
-			<MenuRadioGroup value={slug ?? ""} onvaluechange={chooseProject}>
+			<MenuRadioGroup value={slug ?? ""} onvaluechange={(next) => { picked = true; startIn(next); }}>
 				{#each available as p (p.slug)}
 					<MenuRadioItem value={p.slug} class={rowClass}>
 						<span class="flex min-w-0 items-center gap-2">
@@ -178,6 +193,8 @@
 				{/each}
 			</MenuGroup>
 		{/if}
+		<MenuSeparator />
+		<MenuItem class={rowClass} data-testid="draft-new-project" onselect={() => { addProjectOpen = true; }}>New project…</MenuItem>
 	</Menu>
 
 	<Menu ariaLabel="Where the session starts" {presentation} onCloseAutoFocus={focusComposerAfterPick} onopenchange={(open) => { if (!open) showWorktrees = false; }}>
@@ -260,4 +277,16 @@
 
 {#if multiFolder && instance?.capabilities?.supportsMultiFolder === false}
 	<p id={explanationId} role="status" data-testid="draft-provider-explanation" class="px-1 pt-1 text-[11px] text-text-secondary">{providerName} works in the main folder only. Pick another provider to use every folder.</p>
+{/if}
+
+{#if addProjectOpen}
+	{#await import("../project/ProjectDialog.svelte") then { default: ProjectDialog }}
+		<ProjectDialog
+			open
+			projects={projectState.projects}
+			onclose={() => { addProjectOpen = false; }}
+			onsaved={(response) => void projectAdded(response)}
+			returnFocus={() => document.querySelector('[data-testid="draft-project-chip"]')}
+		/>
+	{/await}
 {/if}

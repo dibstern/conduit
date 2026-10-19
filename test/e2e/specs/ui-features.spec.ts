@@ -18,27 +18,6 @@ test.describe("Connection Overlay", () => {
 		const overlay = new OverlayPage(page);
 		await overlay.waitForOverlayHidden(15_000);
 	});
-
-	test("pixel canvas and connect verb are present initially", async ({
-		page,
-		relayUrl,
-	}) => {
-		// Use a fresh page to catch the overlay before it hides
-		const overlay = new OverlayPage(page);
-
-		// Go to the page — overlay is visible briefly
-		await page.goto(relayUrl);
-
-		// Try to catch overlay elements (they hide fast after connection)
-		// If we can't see them, that's OK — it means connection was instant
-		try {
-			await expect(overlay.connectOverlay).toBeVisible({ timeout: 1_000 });
-			await expect(overlay.pixelCanvas).toBeVisible({ timeout: 1_000 });
-			await expect(overlay.connectVerb).toBeVisible({ timeout: 1_000 });
-		} catch {
-			// Connection was too fast to see the overlay — that's fine
-		}
-	});
 });
 
 test.describe("Input Area", () => {

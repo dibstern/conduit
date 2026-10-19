@@ -1,15 +1,23 @@
 import { createConnection, type Socket as NetSocket } from "node:net";
-import { Socket } from "@effect/platform";
 import { NodeSocket } from "@effect/platform-node";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect, Exit, Option, Schedule } from "effect";
-import type { Request } from "effect/Request";
+import {
+	type Rpc,
+	RpcClient,
+	type RpcGroup,
+	RpcSerialization,
+} from "effect/rpc";
+import { Socket } from "effect/socket";
 import { WsRpcGroup, type WsRpcRequest } from "../contracts/ws-rpc.js";
 import * as Failure from "../effect/failure-classification.js";
 
+type RpcSuccess<R extends WsRpcRequest> = Rpc.Success<
+	Extract<RpcGroup.Rpcs<typeof WsRpcGroup>, { readonly _tag: R["_tag"] }>
+>;
+
 export type SendRPC = <R extends WsRpcRequest>(
 	request: R,
-) => Promise<Request.Success<R>>;
+) => Promise<RpcSuccess<R>>;
 
 export interface RpcRequestOptions {
 	readonly startupRetries?: number;
@@ -60,59 +68,64 @@ const connectWhenReady = async (
 };
 
 /** One connection and one request. Only pre-request connection failures are retried. */
-export const sendRpcRequest = <R extends WsRpcRequest>(
+export const sendRpcRequest = async <R extends WsRpcRequest>(
 	socketPath: string,
 	request: R,
 	options: RpcRequestOptions = {},
-): Promise<Request.Success<R>> =>
-	Effect.runPromise(
+): Promise<RpcSuccess<R>> => {
+	const exit = await Effect.runPromise(
 		Effect.exit(
 			Effect.scoped(
-				Effect.gen(function* () {
-					const connection = yield* Effect.acquireRelease(
-						Effect.tryPromise({
-							try: () =>
-								connectWhenReady(socketPath, options.startupRetries ?? 10),
-							catch: (cause) => cause,
-						}),
-						(socket) => Effect.sync(() => socket.destroy()),
-					);
-					const socket = yield* NodeSocket.fromDuplex(
-						Effect.succeed(connection),
-					);
-					return yield* Effect.gen(function* () {
-						const client = yield* RpcClient.make(WsRpcGroup, {
+				Effect.acquireRelease(
+					Effect.tryPromise({
+						try: () =>
+							connectWhenReady(socketPath, options.startupRetries ?? 10),
+						catch: (cause) => cause,
+					}),
+					(socket) => Effect.sync(() => socket.destroy()),
+				).pipe(
+					Effect.flatMap((connection) =>
+						NodeSocket.fromDuplex(Effect.succeed(connection)),
+					),
+					Effect.flatMap((socket) =>
+						RpcClient.make(WsRpcGroup, {
 							flatten: true,
-						});
-						// A generic request keeps its tag and payload correlated, while
-						// Flat models them as a union of overloads.
-						const call = client as <T extends WsRpcRequest>(
-							tag: T["_tag"],
-							payload: T,
-						) => Effect.Effect<Request.Success<T>, unknown>;
-						return yield* call(request._tag, request).pipe(
-							Effect.timeoutFail({
-								duration: options.requestTimeoutMs ?? 10_000,
-								onTimeout: () => new Error(`RPC ${request._tag} timed out`),
+							spanPrefix: "RpcClient",
+						}).pipe(
+							Effect.flatMap((client) => {
+								// A generic request keeps its tag and payload correlated, while
+								// Flat models them as a union of overloads.
+								const call = client as <T extends WsRpcRequest>(
+									tag: T["_tag"],
+									payload: T,
+								) => Effect.Effect<RpcSuccess<T>, unknown>;
+								return call(request._tag, request).pipe(
+									Effect.timeoutOrElse({
+										duration: options.requestTimeoutMs ?? 10_000,
+										orElse: () =>
+											Effect.fail(new Error(`RPC ${request._tag} timed out`)),
+									}),
+								);
 							}),
-						);
-					}).pipe(
-						Effect.provide(
-							RpcClient.layerProtocolSocket({ retrySchedule: Schedule.stop }),
+							Effect.provide(
+								RpcClient.layerProtocolSocket({
+									retryPolicy: Schedule.recurs(0),
+								}),
+							),
+							Effect.provideService(Socket.Socket, socket),
+							Effect.provide(RpcSerialization.layerNdjson),
 						),
-						Effect.provideService(Socket.Socket, socket),
-						Effect.provide(RpcSerialization.layerNdjson),
-					);
-				}),
+					),
+				),
 			),
 		),
-	).then((exit) =>
-		Exit.match(exit, {
-			onFailure: (cause) => {
-				throw Option.getOrElse(Failure.firstFailure(cause), () =>
-					Failure.squashCause(cause),
-				);
-			},
-			onSuccess: (value) => value,
-		}),
 	);
+	return Exit.match(exit, {
+		onFailure: (cause) => {
+			throw Option.getOrElse(Failure.firstFailure(cause), () =>
+				Failure.squashCause(cause),
+			);
+		},
+		onSuccess: (value) => value,
+	});
+};

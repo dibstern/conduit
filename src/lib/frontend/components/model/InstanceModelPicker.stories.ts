@@ -553,7 +553,7 @@ export const RoutingOptions: Story = {
 		expect(chips).toHaveLength(3);
 		// `getByRole` rather than indexing the array: it raises its own failure if
 		// the chip is missing, which keeps a hand-written plain-Error throw out of
-		// this file. test/unit/effect/runtime-boundary-grep.test.ts scans stories
+		// this file. test/unit/effect/runtime-boundary-grep.guard.test.ts scans stories
 		// too, and it matches source text -- including comments, which is how the
 		// first draft of THIS comment failed the suite.
 		await expect(

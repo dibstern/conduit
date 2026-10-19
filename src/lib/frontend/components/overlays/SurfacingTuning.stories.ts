@@ -50,11 +50,11 @@ const meta = {
 			replyRpc("GetSurfacingLedger", fixture.stubs.GetSurfacingLedger),
 			replyRpc("ScoreCategorySet", (payload) =>
 				fixture.stubs.ScoreCategorySet(
-					new ScoreCategorySet(
+					ScoreCategorySet.payloadSchema.make(
 						Schema.decodeUnknownSync(
 							Schema.Struct({
 								set: CategorySetContentsSchema,
-								estimateOnly: Schema.optional(Schema.Boolean),
+								estimateOnly: Schema.optionalKey(Schema.Boolean),
 							}),
 						)(payload),
 					),
@@ -62,10 +62,12 @@ const meta = {
 			),
 			replyRpc("ProposeCategoryTuning", (payload) =>
 				fixture.stubs.ProposeCategoryTuning(
-					new ProposeCategoryTuning(
+					ProposeCategoryTuning.payloadSchema.make(
 						Schema.decodeUnknownSync(
 							Schema.Struct({
-								avoid: Schema.optional(Schema.Array(CategoryTuningHunkSchema)),
+								avoid: Schema.optionalKey(
+									Schema.Array(CategoryTuningHunkSchema),
+								),
 							}),
 						)(payload),
 					),
@@ -73,7 +75,7 @@ const meta = {
 			),
 			replyRpc("ReplaceCategorySet", (payload) =>
 				fixture.stubs.ReplaceCategorySet(
-					new ReplaceCategorySet(
+					ReplaceCategorySet.payloadSchema.make(
 						Schema.decodeUnknownSync(
 							Schema.Struct({
 								expectedVersion: Schema.Number,

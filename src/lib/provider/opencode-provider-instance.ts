@@ -21,6 +21,10 @@ import { createLogger } from "../logger.js";
 import { createEventId } from "../persistence/events.js";
 import type { SessionPermissionMode } from "../shared-types.js";
 import { ProviderInstanceFailure } from "./errors.js";
+import {
+	inputIdFromOpenCodeMessageId,
+	openCodeInputMessageId,
+} from "./opencode/opencode-input-message-id.js";
 import type {
 	CommandInfo,
 	ModelInfo,
@@ -75,6 +79,7 @@ export interface OpenCodeProviderInstanceOptions {
 	readonly workspaceRoot?: string;
 	readonly clientForAccount?: (
 		account: OpenCodeAccount,
+		directory?: string,
 	) => Effect.Effect<OpenCodeAPI, Error, Scope.Scope>;
 	/**
 	 * Resolve the scoped API client for the OpenCode instance that owns a
@@ -117,8 +122,8 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			inFlight: number;
 		}
 	>();
-	/** Sends handed to OpenCode whose user echo is not yet seen, in handoff
-	 *  order. OpenCode picks its own message ids, so echoes match by order. */
+	/** Sends whose user echo is not yet seen, in handoff order. Compaction and
+	 *  legacy echoes can still carry an ID that OpenCode chose. */
 	private readonly unechoedInputs = new Map<string, string[]>();
 	/** Echo message id to send, so a retried translation tags the same send. */
 	private readonly echoInputIds = new Map<string, string>();
@@ -132,11 +137,14 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		this.hasWorktreeToolForSession = options.hasWorktreeToolForSession;
 	}
 
-	/** The send a new user message echo belongs to: the oldest unechoed one. */
+	/** Match reserved IDs exactly; legacy provider IDs retain their FIFO fallback. */
 	inputIdForUserEcho(sessionId: string, messageId: string): string | undefined {
 		const tagged = this.echoInputIds.get(messageId);
 		if (tagged) return tagged;
-		const inputId = this.unechoedInputs.get(sessionId)?.shift();
+		const queue = this.unechoedInputs.get(sessionId) ?? [];
+		const reserved = inputIdFromOpenCodeMessageId(messageId);
+		const index = reserved === undefined ? 0 : queue.indexOf(reserved);
+		const inputId = index < 0 ? undefined : queue.splice(index, 1)[0];
 		if (inputId) this.echoInputIds.set(messageId, inputId);
 		return inputId;
 	}
@@ -158,6 +166,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	private resolveClientEffect(
 		sessionId: string,
 		account?: Account,
+		directory?: string,
 	): Effect.Effect<OpenCodeAPI, Error, Scope.Scope> {
 		if (account) {
 			if (!PROVIDER_DRIVERS[account.driver].runsOpenCodeServer)
@@ -165,7 +174,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 					new Error("OpenCode turn requires an OpenCode account"),
 				);
 			if (this.clientForAccount && account.driver === "opencode")
-				return this.clientForAccount(account);
+				return this.clientForAccount(account, directory);
 			if (account.id === MANAGED_OPENCODE_ACCOUNT_ID)
 				return Effect.succeed(this.client);
 			return Effect.fail(
@@ -274,6 +283,9 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 		const promptOptions: PromptOptions = {
 			text: prompt,
+			...(!isCompaction
+				? { messageId: openCodeInputMessageId(input.inputId) }
+				: {}),
 			directory: input.workspaceRoot,
 			...(extraFolders.length > 0
 				? {
@@ -292,23 +304,23 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			...(variant ? { variant } : {}),
 		};
 
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			// Resolve the owning client first: a session bound to a NAMED
 			// OpenCode instance must be prompted on THAT instance's server. A
 			// resolution failure (unknown/unconfigured instance) becomes a clean
 			// send failure — never a hang or a silent fall-through to the
 			// default server.
-			const clientResult = yield* Effect.either(
-				this.resolveClientEffect(sessionId, input.account),
+			const clientResult = yield* Effect.result(
+				this.resolveClientEffect(sessionId, input.account, input.workspaceRoot),
 			);
-			if (clientResult._tag === "Left") {
-				const message = clientResult.left.message;
+			if (clientResult._tag === "Failure") {
+				const message = clientResult.failure.message;
 				log.error(
 					`sendTurn client resolution failed for session ${sessionId}: ${message}`,
 				);
 				return sendFailedTurnResult(message);
 			}
-			const client = clientResult.right;
+			const client = clientResult.success;
 			if (
 				!isCompaction &&
 				this.hasWorktreeToolForSession &&
@@ -354,7 +366,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 				}
 			});
 
-			return yield* Effect.gen(this, function* () {
+			return yield* Effect.gen({ self: this }, function* () {
 				if (abortSignal.aborted) return interruptedTurnResult();
 				if (isCompaction) {
 					yield* input.eventSink.push({
@@ -369,7 +381,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 					});
 				}
 
-				const promptResult = yield* Effect.either(
+				const promptResult = yield* Effect.result(
 					Effect.tryPromise({
 						try: async () => {
 							if (isCompaction) {
@@ -454,8 +466,8 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 						catch: (cause) => cause,
 					}),
 				);
-				if (promptResult._tag === "Left") {
-					const cause = promptResult.left;
+				if (promptResult._tag === "Failure") {
+					const cause = promptResult.failure;
 					const baseMessage =
 						cause instanceof Error ? cause.message : String(cause);
 					const boundInstanceId =
@@ -514,7 +526,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			this.pendingTurns.delete(sessionId);
 			// SSE callbacks are synchronous; complete the Effect Deferred directly
 			// instead of adding an app-internal runtime bridge.
-			Deferred.unsafeDone(pendingTurn.deferred, Effect.succeed(result));
+			Deferred.doneUnsafe(pendingTurn.deferred, Effect.succeed(result));
 		} else {
 			log.debug(
 				`notifyTurnCompleted: no pending turn for session ${sessionId} -- may have already completed`,
@@ -565,37 +577,42 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		sessionId: string,
 		requestId: string,
 		decision: PermissionDecision,
+		providerProcessId?: string,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.resolveClientEffect(sessionId).pipe(
 			Effect.flatMap((client) =>
-				Effect.tryPromise({
-					try: async () => {
-						if (decision === "always") {
-							// OpenCode's "always" approvals override rules in other sessions.
-							const session = await client.session.get(sessionId);
-							const request = (
-								await client.permission.list(
-									session.directory || this.workspaceRoot,
-								)
-							).find((pending) => pending.id === requestId);
-							if (request?.always?.length) {
-								await client.session.update(sessionId, {
-									permission: request.always.map((pattern) => ({
-										permission: request.permission,
-										pattern,
-										action: "allow",
-									})),
-								});
-							}
-						}
-						await client.permission.reply(
-							sessionId,
-							requestId,
-							decision === "always" ? "once" : decision,
-						);
-					},
-					catch: (cause) => cause,
-				}),
+				providerProcessId && client.promptProcessId !== providerProcessId
+					? Effect.fail(
+							"The provider process that asked this prompt is no longer running.",
+						)
+					: Effect.tryPromise({
+							try: async () => {
+								if (decision === "always") {
+									// OpenCode's "always" approvals override rules in other sessions.
+									const session = await client.session.get(sessionId);
+									const request = (
+										await client.permission.list(
+											session.directory || this.workspaceRoot,
+										)
+									).find((pending) => pending.id === requestId);
+									if (request?.always?.length) {
+										await client.session.update(sessionId, {
+											permission: request.always.map((pattern) => ({
+												permission: request.permission,
+												pattern,
+												action: "allow",
+											})),
+										});
+									}
+								}
+								await client.permission.reply(
+									sessionId,
+									requestId,
+									decision === "always" ? "once" : decision,
+								);
+							},
+							catch: (cause) => cause,
+						}),
 			),
 			Effect.mapError((cause) =>
 				this.providerFailure("resolvePermission", cause),
@@ -649,7 +666,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		const pendingTurn = this.pendingTurns.get(sessionId);
 		if (pendingTurn && this.pendingTurns.get(sessionId) === pendingTurn) {
 			this.pendingTurns.delete(sessionId);
-			Deferred.unsafeDone(
+			Deferred.doneUnsafe(
 				pendingTurn.deferred,
 				Effect.fail(new Error("Session ended (reload)")),
 			);
@@ -663,7 +680,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			for (const [sessionId, pendingTurn] of this.pendingTurns) {
 				if (this.pendingTurns.get(sessionId) !== pendingTurn) continue;
 				this.pendingTurns.delete(sessionId);
-				Deferred.unsafeDone(
+				Deferred.doneUnsafe(
 					pendingTurn.deferred,
 					Effect.fail(
 						new Error(

@@ -158,10 +158,12 @@ function fakeSocket(project: string | null, opensNow: boolean): () => void {
 							requestId: request.id,
 							exit: {
 								_tag: "Failure",
-								cause: {
-									_tag: "Fail",
-									error: { _tag: "WsRpcError", message: "Story failure" },
-								},
+								cause: [
+									{
+										_tag: "Fail",
+										error: { _tag: "WsRpcError", message: "Story failure" },
+									},
+								],
 							},
 						}),
 					}),
@@ -204,11 +206,11 @@ function fakeSocket(project: string | null, opensNow: boolean): () => void {
 						void value.then(
 							(result: unknown) => respond({ _tag: "Success", value: result }),
 							(error: unknown) =>
-								respond({ _tag: "Failure", cause: { _tag: "Fail", error } }),
+								respond({ _tag: "Failure", cause: [{ _tag: "Fail", error }] }),
 						);
 					else respond({ _tag: "Success", value });
 				} catch (error) {
-					respond({ _tag: "Failure", cause: { _tag: "Fail", error } });
+					respond({ _tag: "Failure", cause: [{ _tag: "Fail", error }] });
 				}
 				return;
 			}

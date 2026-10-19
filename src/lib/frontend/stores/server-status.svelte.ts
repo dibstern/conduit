@@ -153,7 +153,7 @@ export const serverStatusFeed = (
 			},
 		});
 	}).pipe(
-		Stream.catchAllCause((cause) => {
+		Stream.catchCause((cause) => {
 			if (!Failure.renderCause(cause).includes("Unknown request tag"))
 				return Stream.failCause(cause);
 			showStaleDaemonBanner();

@@ -16,16 +16,7 @@ import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
-import {
-	AddInstance,
-	GetInstances,
-	ListDaemonSessions,
-	QuotaForAccounts,
-	SetCursorUsageKeychain,
-	SetUsageLimitsSetting,
-	SubmitInput,
-	UpdateInstance,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 const TIMEOUT = 90_000;
@@ -206,28 +197,28 @@ describe("Cursor monthly usage through the built daemon", () => {
 			throw new Error("No isolated dashboard port");
 		endpoint = `http://127.0.0.1:${address.port}/aiserver.v1.DashboardService/GetCurrentPeriodUsage`;
 		await restart(options.daemonToken);
-		const added = await harness.requestRpc(
-			new AddInstance({
-				name: "Cursor monthly usage",
-				driver: "cursor",
-				...(options.accountToken
-					? { env: { CURSOR_AUTH_TOKEN: options.accountToken } }
-					: {}),
-			}),
-		);
+		const added = await harness.requestRpc({
+			_tag: "AddInstance",
+			name: "Cursor monthly usage",
+			driver: "cursor",
+			...(options.accountToken
+				? { env: { CURSOR_AUTH_TOKEN: options.accountToken } }
+				: {}),
+		});
 		if (!added.addedInstanceId) throw new Error("Missing Cursor account");
 		return { fixture: harness, accountId: added.addedInstanceId, token };
 	}
 
 	async function refresh(fixture: ProcessHarness, accountId: string) {
-		const readings = await fixture.requestRpc(
-			new QuotaForAccounts({ projectSlug: "process-test" }),
-		);
+		const readings = await fixture.requestRpc({
+			_tag: "QuotaForAccounts",
+			projectSlug: "process-test",
+		});
 		return readings.find((reading) => reading.accountId === accountId);
 	}
 
 	async function instance(fixture: ProcessHarness, accountId: string) {
-		return (await fixture.requestRpc(new GetInstances({}))).instances.find(
+		return (await fixture.requestRpc({ _tag: "GetInstances" })).instances.find(
 			(account) => account.id === accountId,
 		);
 	}
@@ -402,12 +393,16 @@ describe("Cursor monthly usage through the built daemon", () => {
 			const { fixture, accountId, token } = await start("enable-and-cache");
 			setKeychain({ token, delayMs: 750 });
 			const enabled = await Promise.all([
-				fixture.requestRpc(
-					new SetCursorUsageKeychain({ accountId, enabled: true }),
-				),
-				fixture.requestRpc(
-					new SetCursorUsageKeychain({ accountId, enabled: true }),
-				),
+				fixture.requestRpc({
+					_tag: "SetCursorUsageKeychain",
+					accountId,
+					enabled: true,
+				}),
+				fixture.requestRpc({
+					_tag: "SetCursorUsageKeychain",
+					accountId,
+					enabled: true,
+				}),
 			]);
 			expect(enabled).toEqual([{ enabled: true }, { enabled: true }]);
 			expect(keychain().reads).toBe(1);
@@ -450,7 +445,7 @@ describe("Cursor monthly usage through the built daemon", () => {
 				(await browser.send(sessionId, "Say hi.", TIMEOUT)).chunks.join(""),
 			).toBe(BASIC_TEXT);
 			const serialized = JSON.stringify({
-				instances: await fixture.requestRpc(new GetInstances({})),
+				instances: await fixture.requestRpc({ _tag: "GetInstances" }),
 				state: storedState(fixture, sessionId),
 				frames: fixture.proof().frames,
 				logs: fixture.logTail,
@@ -465,9 +460,11 @@ describe("Cursor monthly usage through the built daemon", () => {
 			};
 			record("c:enable-and-cache", reading);
 			expect(
-				await fixture.requestRpc(
-					new SetCursorUsageKeychain({ accountId, enabled: false }),
-				),
+				await fixture.requestRpc({
+					_tag: "SetCursorUsageKeychain",
+					accountId,
+					enabled: false,
+				}),
 			).toEqual({ enabled: false });
 			const disabledAccount = await instance(fixture, accountId);
 			expect(disabledAccount).toMatchObject({
@@ -493,9 +490,11 @@ describe("Cursor monthly usage through the built daemon", () => {
 		"leaves a background Keychain read alive after a brief unavailable reading",
 		async () => {
 			const { fixture, accountId, token } = await start("background-prompt");
-			await fixture.requestRpc(
-				new SetCursorUsageKeychain({ accountId, enabled: true }),
-			);
+			await fixture.requestRpc({
+				_tag: "SetCursorUsageKeychain",
+				accountId,
+				enabled: true,
+			});
 			await fixture.kill();
 			setKeychain({ token, delayMs: 2_000 });
 			await restart();
@@ -529,9 +528,11 @@ describe("Cursor monthly usage through the built daemon", () => {
 		"rejects a changed CLI subject after restart without sending its token to the dashboard",
 		async () => {
 			const { fixture, accountId } = await start("subject-mismatch");
-			await fixture.requestRpc(
-				new SetCursorUsageKeychain({ accountId, enabled: true }),
-			);
+			await fixture.requestRpc({
+				_tag: "SetCursorUsageKeychain",
+				accountId,
+				enabled: true,
+			});
 			expect((await refresh(fixture, accountId))?.status).toBe("available");
 			expect(dashboardCalls).toHaveLength(1);
 			await fixture.kill();
@@ -563,9 +564,11 @@ describe("Cursor monthly usage through the built daemon", () => {
 			const { fixture, accountId, token } = await start(
 				`auth-renewal-${httpStatus}`,
 			);
-			await fixture.requestRpc(
-				new SetCursorUsageKeychain({ accountId, enabled: true }),
-			);
+			await fixture.requestRpc({
+				_tag: "SetCursorUsageKeychain",
+				accountId,
+				enabled: true,
+			});
 			expect(keychain().reads).toBe(1);
 			const renewed = `${token}-renewed`;
 			credentials.set(renewed, "renewed-keychain");
@@ -596,9 +599,11 @@ describe("Cursor monthly usage through the built daemon", () => {
 			const { fixture, accountId, token } = await start(
 				`auth-mismatch-${httpStatus}`,
 			);
-			await fixture.requestRpc(
-				new SetCursorUsageKeychain({ accountId, enabled: true }),
-			);
+			await fixture.requestRpc({
+				_tag: "SetCursorUsageKeychain",
+				accountId,
+				enabled: true,
+			});
 			const changed = jwt("different-cli-account");
 			credentials.set(changed, "changed-keychain");
 			setKeychain({ token: changed });
@@ -631,17 +636,21 @@ describe("Cursor monthly usage through the built daemon", () => {
 				"disable-pending-enable",
 			);
 			setKeychain({ token, delayMs: 2_000 });
-			const enabling = fixture.requestRpc(
-				new SetCursorUsageKeychain({ accountId, enabled: true }),
-			);
+			const enabling = fixture.requestRpc({
+				_tag: "SetCursorUsageKeychain",
+				accountId,
+				enabled: true,
+			});
 			await vi.waitFor(() => expect(keychain().reads).toBe(1), {
 				timeout: 10_000,
 				interval: 50,
 			});
 			expect(
-				await fixture.requestRpc(
-					new SetCursorUsageKeychain({ accountId, enabled: false }),
-				),
+				await fixture.requestRpc({
+					_tag: "SetCursorUsageKeychain",
+					accountId,
+					enabled: false,
+				}),
 			).toEqual({ enabled: false });
 			const result = await enabling;
 			expect(result).toMatchObject({ enabled: false });
@@ -710,9 +719,11 @@ describe("Cursor monthly usage through the built daemon", () => {
 			const { fixture, accountId } = await start("enable-failures");
 			for (const outcome of ["missing", "denied"] as const) {
 				setKeychain({ outcome });
-				const result = await fixture.requestRpc(
-					new SetCursorUsageKeychain({ accountId, enabled: true }),
-				);
+				const result = await fixture.requestRpc({
+					_tag: "SetCursorUsageKeychain",
+					accountId,
+					enabled: true,
+				});
 				expect(result.enabled).toBe(false);
 				expect(result.reason).toEqual(
 					expect.stringMatching(
@@ -741,33 +752,30 @@ describe("Cursor monthly usage through the built daemon", () => {
 			const { fixture, accountId } = await start("same-harness-failover", {
 				accountToken: jwt("explicit-account"),
 			});
-			await fixture.requestRpc(
-				new UpdateInstance({
-					instanceId: "claude",
-					env: { ANTHROPIC_API_KEY: "fake-api-key" },
-				}),
-			);
+			await fixture.requestRpc({
+				_tag: "UpdateInstance",
+				instanceId: "claude",
+				env: { ANTHROPIC_API_KEY: "fake-api-key" },
+			});
 			expect((await instance(fixture, "claude"))?.usageEligible).toBe(false);
 			const fallbackFolder = join(fixture.root, "claude-fallback");
 			mkdirSync(fallbackFolder);
-			const fallback = await fixture.requestRpc(
-				new AddInstance({
-					name: "Claude fallback",
-					driver: "claude",
-					configDir: fallbackFolder,
-				}),
-			);
+			const fallback = await fixture.requestRpc({
+				_tag: "AddInstance",
+				name: "Claude fallback",
+				driver: "claude",
+				configDir: fallbackFolder,
+			});
 			if (!fallback.addedInstanceId) throw new Error("Missing Claude fallback");
-			await fixture.requestRpc(
-				new SetUsageLimitsSetting({
-					usageLimits: {
-						autoSwitch: true,
-						autoResume: false,
-						order: [accountId, fallback.addedInstanceId],
-						warnAt: 80,
-					},
-				}),
-			);
+			await fixture.requestRpc({
+				_tag: "SetUsageLimitsSetting",
+				usageLimits: {
+					autoSwitch: true,
+					autoResume: false,
+					order: [accountId, fallback.addedInstanceId],
+					warnAt: 80,
+				},
+			});
 			const reading = await refresh(fixture, accountId);
 			expect(reading?.status).toBe("available");
 			const browser = await fixture.connect();
@@ -775,19 +783,19 @@ describe("Cursor monthly usage through the built daemon", () => {
 				"Claude must stay on Claude",
 				"claude",
 			);
-			await fixture.requestRpc(
-				new SubmitInput({
-					sessionId,
-					inputId: randomUUID(),
-					delivery: "queue",
-					text: "usage-limit-account-1-no-reset",
-				}),
-			);
+			await fixture.requestRpc({
+				_tag: "input.submit",
+				sessionId,
+				inputId: randomUUID(),
+				delivery: "queue",
+				text: "usage-limit-account-1-no-reset",
+			});
 			await vi.waitFor(
 				async () => {
-					const sessions = await fixture.requestRpc(
-						new ListDaemonSessions({ projectSlug: "process-test" }),
-					);
+					const sessions = await fixture.requestRpc({
+						_tag: "ListDaemonSessions",
+						projectSlug: "process-test",
+					});
 					const session = sessions.sessions.find(({ id }) => id === sessionId);
 					expect(session?.resumes?.at(-1)).toMatchObject({
 						instanceId: fallback.addedInstanceId,

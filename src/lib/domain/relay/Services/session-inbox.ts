@@ -4,8 +4,6 @@
 // from read models on every call, serialises per session and commits the
 // decision. No queue state lives in memory, so a restart has nothing to rebuild.
 
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import {
 	Clock,
 	Context,
@@ -14,8 +12,11 @@ import {
 	Layer,
 	Option,
 	Schema,
+	Semaphore,
 	Stream,
 } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import type { Account } from "../../../contracts/account.js";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import { advanceTouchesScope } from "../../../contracts/read-model-advance.js";
@@ -324,15 +325,13 @@ export interface SessionInboxSubmitInput {
 	readonly request: InputRequest;
 }
 
-type SendTurnError = Effect.Effect.Error<
-	ReturnType<ProviderTurnService["sendTurn"]>
->;
+type SendTurnError = Effect.Error<ReturnType<ProviderTurnService["sendTurn"]>>;
 
 export type SessionInboxError =
 	| SqlError
 	| ClaudeEventPersistFailure
 	| SendTurnError
-	| Effect.Effect.Error<ReturnType<Continuation["requestContinuation"]>>;
+	| Effect.Error<ReturnType<Continuation["requestContinuation"]>>;
 
 export interface SessionInboxTarget {
 	readonly clientId: string;
@@ -374,19 +373,19 @@ export interface SessionInbox {
 	readonly start: Effect.Effect<void>;
 }
 
-export class SessionInboxTag extends Context.Tag("SessionInbox")<
+export class SessionInboxTag extends Context.Service<
 	SessionInboxTag,
 	SessionInbox
->() {}
+>()("SessionInbox") {}
 
 // A drained handoff has no requesting client.
 const DRAINED = { clientId: "" } as const;
 
-const decodeRequest = Schema.decodeUnknown(
-	Schema.parseJson(InputRequestSchema),
+const decodeRequest = Schema.decodeUnknownEffect(
+	Schema.fromJsonString(InputRequestSchema),
 );
 
-export const SessionInboxLive = Layer.scoped(
+export const SessionInboxLive = Layer.effect(
 	SessionInboxTag,
 	Effect.gen(function* () {
 		const accounts = yield* AccountDirectory;
@@ -401,13 +400,13 @@ export const SessionInboxLive = Layer.scoped(
 		const continuation = yield* ContinuationTag;
 		const continuationContext =
 			yield* Effect.context<
-				Effect.Effect.Context<ReturnType<Continuation["requestContinuation"]>>
+				Effect.Services<ReturnType<Continuation["requestContinuation"]>>
 			>();
-		const permits = new Map<string, Effect.Semaphore>();
+		const permits = new Map<string, Semaphore.Semaphore>();
 		const serialised = (sessionId: string) => {
 			let permit = permits.get(sessionId);
 			if (!permit) {
-				permit = Effect.unsafeMakeSemaphore(1);
+				permit = Semaphore.makeUnsafe(1);
 				permits.set(sessionId, permit);
 			}
 			return permit.withPermits(1);
@@ -601,7 +600,7 @@ export const SessionInboxLive = Layer.scoped(
 		const stopIssued = new Set<string>();
 		const stop = (sessionId: string, clientId: string, inputId: string) =>
 			Effect.sync(() => stopIssued.add(inputId)).pipe(
-				Effect.zipRight(
+				Effect.andThen(
 					providerTurnService.beginStop({
 						clientId,
 						sessionId,
@@ -795,7 +794,7 @@ export const SessionInboxLive = Layer.scoped(
 					);
 				}),
 			).pipe(
-				Effect.catchAllCause((cause) =>
+				Effect.catchCause((cause) =>
 					Effect.sync(() =>
 						log.warn(`session=${sessionId} inbox drain failed: ${cause}`),
 					),
@@ -815,7 +814,7 @@ export const SessionInboxLive = Layer.scoped(
 					{ discard: true },
 				);
 			}).pipe(
-				Effect.catchAllCause((cause) =>
+				Effect.catchCause((cause) =>
 					Effect.sync(() => log.warn(`inbox drain sweep failed: ${cause}`)),
 				),
 			);
@@ -830,15 +829,15 @@ export const SessionInboxLive = Layer.scoped(
 		const ready = yield* Deferred.make<void>();
 		yield* Effect.forkScoped(
 			Deferred.await(ready).pipe(
-				Effect.zipRight(
+				Effect.andThen(
 					requeueFailedSteers(sql, persist).pipe(
-						Effect.catchAllCause((cause) =>
+						Effect.catchCause((cause) =>
 							Effect.sync(() => log.warn(`inbox recovery failed: ${cause}`)),
 						),
 					),
 				),
-				Effect.zipRight(drainSessions()),
-				Effect.zipRight(
+				Effect.andThen(drainSessions()),
+				Effect.andThen(
 					Stream.runForEach(
 						Stream.merge(
 							Stream.map(advances, (advance) =>
@@ -856,6 +855,7 @@ export const SessionInboxLive = Layer.scoped(
 					),
 				),
 			),
+			{ uninterruptible: "inherit" },
 		);
 
 		return {

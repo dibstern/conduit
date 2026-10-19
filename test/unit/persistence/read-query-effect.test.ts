@@ -1,11 +1,11 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
 import Database from "better-sqlite3";
 import { Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import {
@@ -55,7 +55,7 @@ describe("typed session row derivations", () => {
 				lastTurnEndVersion: 3,
 				attention: "done-unread",
 			});
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -105,7 +105,7 @@ describe("typed session row derivations", () => {
 					attention: "needs-approval",
 					processing: true,
 				});
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -150,7 +150,7 @@ describe("typed session row derivations", () => {
 						"backgroundTasks",
 					);
 				}
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	// A background child's busy status must not turn its idle parent Working.
@@ -218,7 +218,7 @@ describe("typed session row derivations", () => {
 						processing: true,
 					});
 				}
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -281,7 +281,7 @@ describe("typed session row derivations", () => {
 				expect(sessionRowsToSessionInfoList([row])[0]).not.toHaveProperty(
 					"pendingQuestionCount",
 				);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -356,7 +356,7 @@ describe("typed session row derivations", () => {
 						pendingQuestionCounts: new Map(),
 					})[0]?.attention,
 				).toBe("error");
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -427,7 +427,7 @@ describe("typed session row derivations", () => {
 					(yield* readQuery.listSessionInfos(scope, { roots: true }))[0]
 						?.attention,
 				).toBe("idle");
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -485,7 +485,7 @@ describe("typed session row derivations", () => {
 				for (const id of ["root", "outer"]) {
 					expect(unread.find((row) => row.id === id)?.attention).toBe("idle");
 				}
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it("keeps a timed or indefinite snooze until its wake, and the wake until it is unsnoozed", () => {
@@ -539,7 +539,7 @@ describe("typed session row derivations", () => {
 			expect(converted.find((row) => row.id === "plain")).not.toHaveProperty(
 				"pinnedAt",
 			);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });
 
@@ -778,7 +778,7 @@ describe("ReadQueryEffect.listSessions", () => {
 					limit: 2,
 				})).map((row) => row.id),
 			).toEqual(["x", "a"]);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -810,7 +810,7 @@ describe("ReadQueryEffect.listSessions", () => {
 						titleQuery: "%_done\\",
 					})).map((row) => row.id),
 				).toEqual(["literal"]);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });
 
@@ -883,7 +883,9 @@ describe("ReadQueryEffect session lookups", () => {
 						],
 					},
 				]);
-			}).pipe(Effect.provide(Layer.mergeAll(testLayer, services)));
+			}).pipe(
+				Effect.provide(Layer.mergeAll(testLayer, services), { local: true }),
+			);
 		},
 	);
 	it.effect("reads one session's status and the status of every session", () =>
@@ -899,7 +901,7 @@ describe("ReadQueryEffect session lookups", () => {
 				s1: "idle",
 				s2: "busy",
 			});
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -926,7 +928,7 @@ describe("ReadQueryEffect session lookups", () => {
 					"claude-1": "busy",
 					"unknown-1": "idle",
 				});
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("lists nothing for an empty store", () =>
@@ -934,7 +936,7 @@ describe("ReadQueryEffect session lookups", () => {
 			yield* makeEffectSqlMigrator();
 			const readQuery = yield* makeReadQueryEffect;
 			expect(yield* readQuery.listSessions(scope)).toEqual([]);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });
 
@@ -967,7 +969,7 @@ describe("ReadQueryEffect session families", () => {
 						{ id: "grandchild", parent_id: "child", unread: 0, side_thread: 0 },
 					]),
 				);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -994,7 +996,7 @@ describe("ReadQueryEffect session families", () => {
 				expect(plan).toContain(
 					"SEARCH s USING INDEX sqlite_autoindex_sessions_1 (id=?)",
 				);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("returns an empty lineage snapshot for an empty store", () =>
@@ -1005,7 +1007,7 @@ describe("ReadQueryEffect session families", () => {
 				rows: [],
 				count: 0,
 			});
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });
 
@@ -1076,7 +1078,7 @@ describe("ReadQueryEffect.getStrandedChildren", () => {
 						owner_id: "root",
 					},
 				]);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });
 
@@ -1109,7 +1111,7 @@ describe("ReadQueryEffect.countPendingApprovalsBySession", () => {
 				{ session_id: "s1", type: "question", pending_count: 1 },
 				{ session_id: "s2", type: "question", pending_count: 1 },
 			]);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	// Guards the index, not the query: the SQL below is a copy, so this fails
@@ -1131,7 +1133,7 @@ describe("ReadQueryEffect.countPendingApprovalsBySession", () => {
 					row.detail.includes("idx_pending_approvals_pending"),
 				),
 			).toBe(true);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });
 
@@ -1153,7 +1155,7 @@ describe("startup restore reads", () => {
 				"SCAN mp USING INDEX idx_message_parts_open_questions",
 			);
 			expect(plan.join("\n")).not.toContain("idx_message_parts_message");
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });
 
@@ -1171,7 +1173,7 @@ describe("ReadQueryEffect.getLatestTurnModelExecution", () => {
 			const execution = yield* readQuery.getLatestTurnModelExecution("s1");
 
 			expect(execution).toBeUndefined();
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("returns one resolved turn", () =>
@@ -1194,7 +1196,7 @@ describe("ReadQueryEffect.getLatestTurnModelExecution", () => {
 				expected_model: "claude-sonnet-5[1m]",
 				actual_model: "claude-sonnet-5[1m]",
 			});
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -1221,7 +1223,7 @@ describe("ReadQueryEffect.getLatestTurnModelExecution", () => {
 					expected_model: "claude-sonnet-5",
 					actual_model: "claude-fable-4-0",
 				});
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("replaces an older drift with a newer matching resolved turn", () =>
@@ -1246,7 +1248,7 @@ describe("ReadQueryEffect.getLatestTurnModelExecution", () => {
 				expected_model: "claude-opus-4-6",
 				actual_model: "claude-opus-4-6",
 			});
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("isolates resolved turns by session", () =>
@@ -1272,7 +1274,7 @@ describe("ReadQueryEffect.getLatestTurnModelExecution", () => {
 				expected_model: "claude-sonnet-5",
 				actual_model: "claude-sonnet-5",
 			});
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });
 
@@ -1309,7 +1311,7 @@ describe("ReadQueryEffect.getSessionMessagesWithParts", () => {
 			});
 			expect(messages[1]?.modelExecution).toEqual(messages[0]?.modelExecution);
 			expect(messages[2]).not.toHaveProperty("modelExecution");
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -1336,7 +1338,7 @@ describe("ReadQueryEffect.getSessionMessagesWithParts", () => {
 				expect(
 					yield* readQuery.getSessionMessagesWithParts("nonexistent"),
 				).toEqual([]);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });
 
@@ -1375,7 +1377,7 @@ describe("ReadQueryEffect.readSessionTranscriptPage", () => {
 				"m-c",
 			]);
 			expect(second.hasMore).toBe(true);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("ends at the first message with its parts and turn model", () =>
@@ -1428,7 +1430,7 @@ describe("ReadQueryEffect.readSessionTranscriptPage", () => {
 					},
 				},
 			]);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("rejects a cursor absent from this session", () =>
@@ -1443,19 +1445,19 @@ describe("ReadQueryEffect.readSessionTranscriptPage", () => {
 				VALUES ('other-message', 's2', 'user', 'other', 1, 1)`;
 			const readQuery = yield* makeReadQueryEffect;
 			for (const before of ["missing", "other-message"]) {
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					readQuery.readSessionTranscriptPage("s1", { before, limit: 50 }),
 				);
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: {
+					_tag: "Failure",
+					failure: {
 						_tag: "TranscriptPageCursorNotFoundError",
 						sessionId: "s1",
 						before,
 					},
 				});
 			}
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("keeps older pages stable when newer messages arrive", () =>
@@ -1504,7 +1506,7 @@ describe("ReadQueryEffect.readSessionTranscriptPage", () => {
 				true,
 				false,
 			]);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -1543,7 +1545,7 @@ describe("ReadQueryEffect.readSessionTranscriptPage", () => {
 					"b",
 				]);
 				expect(first.hasMore).toBe(true);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });
 
@@ -1587,7 +1589,7 @@ describe("ReadQueryEffect session list reads", () => {
 					attention: "working",
 				},
 			]);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -1653,7 +1655,7 @@ describe("ReadQueryEffect session list reads", () => {
 					lastTurnEndVersion: 4,
 					attention: "done-unread",
 				});
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("a session with no turn end has no unread attention", () =>
@@ -1668,7 +1670,7 @@ describe("ReadQueryEffect session list reads", () => {
 			)?.item;
 			expect(entry?.unread).toBeUndefined();
 			expect(entry?.attention).toBe("idle");
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("serves the base read and the catch-up from one query", () =>
@@ -1723,7 +1725,7 @@ describe("ReadQueryEffect session list reads", () => {
 				removed: [],
 				removedSince: 0,
 			});
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 	it.effect("carries the same shape into the snapshot and the re-query", () =>
 		Effect.gen(function* () {
@@ -1738,6 +1740,6 @@ describe("ReadQueryEffect session list reads", () => {
 			expect(
 				queried.rows.find(({ item }) => item.id === "gone"),
 			).toBeUndefined();
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });

@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";

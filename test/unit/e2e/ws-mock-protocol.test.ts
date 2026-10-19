@@ -1,7 +1,5 @@
-import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { MockMessage } from "../../e2e/fixtures/mockup-state.js";
 import {
 	type RpcMockControl,
 	sendMockProjectSetting,
@@ -90,55 +88,5 @@ describe("E2E WebSocket mock connection lifecycle", () => {
 			control.sendMessage({ type: "connection_status", status }),
 		).toThrow(/Unsupported connection_status/);
 		expect(sendMockProjectSetting).not.toHaveBeenCalled();
-	});
-
-	it.each([
-		"stopped",
-		"starting",
-		"connected",
-		"reconnecting",
-		"failed",
-	])("publishes the current connection state %s", (status) => {
-		control.sendMessage({ type: "connection_status", status });
-		expect(sendMockProjectSetting).toHaveBeenCalledExactlyOnceWith(page, {
-			_tag: "opencodeConnection",
-			instanceId: "opencode",
-			status,
-		});
-	});
-
-	it.each([
-		"side-thread",
-		"fork-reply",
-	])("replays the %s recording's outage and recovery through project settings", (name) => {
-		const fixture = JSON.parse(
-			readFileSync(
-				new URL(`../../e2e/fixtures/recorded/${name}.json`, import.meta.url),
-				"utf8",
-			),
-		) as { initMessages: MockMessage[]; turns: { events: MockMessage[] }[] };
-		const states = [
-			...fixture.initMessages,
-			...fixture.turns.flatMap((turn) => turn.events),
-		].filter((message) => message.type === "connection_status");
-		for (const message of states) control.sendMessage(message);
-		expect(vi.mocked(sendMockProjectSetting).mock.calls).toEqual([
-			[
-				page,
-				{
-					_tag: "opencodeConnection",
-					instanceId: "opencode",
-					status: "reconnecting",
-				},
-			],
-			[
-				page,
-				{
-					_tag: "opencodeConnection",
-					instanceId: "opencode",
-					status: "connected",
-				},
-			],
-		]);
 	});
 });

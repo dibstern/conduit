@@ -7,9 +7,9 @@
 //    OpenCode providerId, the viewed family that follows must
 //    include the new session (read-model projection race).
 
-import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	afterAll,
 	beforeAll,

@@ -1,6 +1,7 @@
 import type { PermissionUpdate } from "@anthropic-ai/claude-agent-sdk";
 import { describe, it } from "@effect/vitest";
-import { Effect, Exit, Fiber, Option, TestClock } from "effect";
+import { Effect, Exit, Fiber, Option } from "effect";
+import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 import {
 	makePendingInteractionServiceLive,
@@ -37,7 +38,7 @@ describe("PendingInteractionService", () => {
 			expect(forSession).toHaveLength(1);
 			expect(all).toHaveLength(1);
 			expect(otherSession).toHaveLength(0);
-		}).pipe(Effect.provide(PendingInteractionServiceLive)),
+		}).pipe(Effect.provide(PendingInteractionServiceLive, { local: true })),
 	);
 
 	it.effect(
@@ -70,7 +71,7 @@ describe("PendingInteractionService", () => {
 				);
 				expect(Option.isNone(duplicate)).toBe(true);
 				expect(yield* service.listPendingPermissions()).toHaveLength(0);
-			}).pipe(Effect.provide(PendingInteractionServiceLive)),
+			}).pipe(Effect.provide(PendingInteractionServiceLive, { local: true })),
 	);
 
 	it.effect(
@@ -86,7 +87,7 @@ describe("PendingInteractionService", () => {
 					toolInput: { patterns: [], metadata: {} },
 					always: [],
 				});
-				const waiter = yield* Effect.fork(pending.awaitResponse);
+				const waiter = yield* Effect.forkChild(pending.awaitResponse);
 
 				const resolved = yield* service.resolvePermissionFromBrowser(
 					"perm-1",
@@ -107,7 +108,7 @@ describe("PendingInteractionService", () => {
 					"deny",
 				);
 				expect(Option.isNone(duplicate)).toBe(true);
-			}).pipe(Effect.provide(PendingInteractionServiceLive)),
+			}).pipe(Effect.provide(PendingInteractionServiceLive, { local: true })),
 	);
 
 	it.effect(
@@ -136,7 +137,7 @@ describe("PendingInteractionService", () => {
 					permissionSuggestions: [sessionSuggestion, localSuggestion],
 				};
 				const pending = yield* service.beginPermissionRequest(request);
-				const waiter = yield* Effect.fork(pending.awaitResponse);
+				const waiter = yield* Effect.forkChild(pending.awaitResponse);
 
 				const resolveWithDestination = service.resolvePermissionFromBrowser as (
 					requestId: string,
@@ -154,7 +155,7 @@ describe("PendingInteractionService", () => {
 					decision: "always",
 					permissionUpdates: [localSuggestion],
 				});
-			}).pipe(Effect.provide(PendingInteractionServiceLive)),
+			}).pipe(Effect.provide(PendingInteractionServiceLive, { local: true })),
 	);
 
 	it.effect("takes timed-out permissions and removes them from state", () =>
@@ -195,15 +196,17 @@ describe("PendingInteractionService", () => {
 				toolInput: { patterns: [], metadata: {} },
 				always: [],
 			});
-			const waiter = yield* Effect.fork(pending.awaitResponse);
+			const waiter = yield* Effect.forkChild(pending.awaitResponse);
 
 			yield* TestClock.adjust("1 seconds");
 
 			expect(yield* service.takeTimedOutPermissions()).toEqual([
 				{ id: "perm-1", sessionId: "session-1", awaited: true },
 			]);
-			yield* Effect.yieldNow();
-			const waiterExit = yield* Fiber.poll(waiter);
+			yield* Effect.yieldNow;
+			const waiterExit = yield* Effect.sync(() =>
+				Option.fromUndefinedOr(waiter.pollUnsafe()),
+			);
 			expect(Option.isSome(waiterExit)).toBe(true);
 			if (Option.isSome(waiterExit)) {
 				expect(Exit.isFailure(waiterExit.value)).toBe(true);
@@ -256,7 +259,7 @@ describe("PendingInteractionService", () => {
 			expect(yield* service.markQuestionResolved("question-1")).toBe(true);
 			expect(yield* service.markQuestionResolved("question-1")).toBe(false);
 			expect(yield* service.listPendingQuestions("session-1")).toHaveLength(0);
-		}).pipe(Effect.provide(PendingInteractionServiceLive)),
+		}).pipe(Effect.provide(PendingInteractionServiceLive, { local: true })),
 	);
 
 	it.effect("resolves active question waiters through the service owner", () =>
@@ -275,7 +278,7 @@ describe("PendingInteractionService", () => {
 					},
 				],
 			});
-			const waiter = yield* Effect.fork(pending.awaitAnswers);
+			const waiter = yield* Effect.forkChild(pending.awaitAnswers);
 
 			const resolved = yield* service.resolveQuestionFromBrowser("question-1", {
 				"0": "Yes",
@@ -293,7 +296,7 @@ describe("PendingInteractionService", () => {
 				},
 			);
 			expect(Option.isNone(duplicate)).toBe(true);
-		}).pipe(Effect.provide(PendingInteractionServiceLive)),
+		}).pipe(Effect.provide(PendingInteractionServiceLive, { local: true })),
 	);
 
 	it.effect("returns the owner session when resolving question waiters", () =>
@@ -327,7 +330,7 @@ describe("PendingInteractionService", () => {
 				},
 			);
 			expect(Option.isNone(duplicate)).toBe(true);
-		}).pipe(Effect.provide(PendingInteractionServiceLive)),
+		}).pipe(Effect.provide(PendingInteractionServiceLive, { local: true })),
 	);
 
 	it.effect("cancels active session interactions and clears replay state", () =>
@@ -346,8 +349,10 @@ describe("PendingInteractionService", () => {
 				sessionId: "session-1",
 				questions: [{ question: "Continue?" }],
 			});
-			const permissionWaiter = yield* Effect.fork(permission.awaitResponse);
-			const questionWaiter = yield* Effect.fork(question.awaitAnswers);
+			const permissionWaiter = yield* Effect.forkChild(
+				permission.awaitResponse,
+			);
+			const questionWaiter = yield* Effect.forkChild(question.awaitAnswers);
 
 			yield* service.cancelSessionInteractions("session-1", "Turn interrupted");
 
@@ -360,7 +365,7 @@ describe("PendingInteractionService", () => {
 				0,
 			);
 			expect(yield* service.listPendingQuestions("session-1")).toHaveLength(0);
-		}).pipe(Effect.provide(PendingInteractionServiceLive)),
+		}).pipe(Effect.provide(PendingInteractionServiceLive, { local: true })),
 	);
 
 	it.effect(
@@ -402,7 +407,7 @@ describe("PendingInteractionService", () => {
 				expect(yield* service.listPendingQuestions("session-1")).toHaveLength(
 					0,
 				);
-			}).pipe(Effect.provide(PendingInteractionServiceLive)),
+			}).pipe(Effect.provide(PendingInteractionServiceLive, { local: true })),
 	);
 
 	it.effect(
@@ -415,7 +420,7 @@ describe("PendingInteractionService", () => {
 					sessionId: "session-1",
 					questions: [{ question: "Continue?" }],
 				});
-				const waiter = yield* Effect.fork(pending.awaitAnswers);
+				const waiter = yield* Effect.forkChild(pending.awaitAnswers);
 				yield* service.cancelSessionInteractions("session-1", "disposed", {
 					recoverQuestions: true,
 				});
@@ -431,6 +436,6 @@ describe("PendingInteractionService", () => {
 					"0": "Yes",
 				});
 				expect(Option.isSome(resolved)).toBe(true);
-			}).pipe(Effect.provide(PendingInteractionServiceLive)),
+			}).pipe(Effect.provide(PendingInteractionServiceLive, { local: true })),
 	);
 });

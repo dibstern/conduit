@@ -7,8 +7,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, it } from "vitest";
 import {
 	DEFAULT_CATEGORY_SET,
@@ -139,7 +139,7 @@ it("persists absolute marks without changing verdicts, and stamps saves and clea
 		await runtime.runPromise(seed);
 		await runtime.runPromise(
 			sessionsHandlers.SetSurfacingMark(
-				new SetSurfacingMark({
+				SetSurfacingMark.payloadSchema.make({
 					sessionId: "s",
 					partId: "p",
 					mark: {
@@ -192,7 +192,7 @@ it("persists absolute marks without changing verdicts, and stamps saves and clea
 		).toBe("balanced");
 		await runtime.runPromise(
 			sessionsHandlers.SetSurfacingMark(
-				new SetSurfacingMark({
+				SetSurfacingMark.payloadSchema.make({
 					sessionId: "s",
 					partId: "p",
 					mark: null,
@@ -248,7 +248,7 @@ it("rejects unrelated parts and removes marks with their session", async () => {
 			await expect(
 				runtime.runPromise(
 					sessionsHandlers.SetSurfacingMark(
-						new SetSurfacingMark({
+						SetSurfacingMark.payloadSchema.make({
 							sessionId: "s",
 							partId,
 							mark: { level: "key" },
@@ -260,7 +260,7 @@ it("rejects unrelated parts and removes marks with their session", async () => {
 		await expect(
 			runtime.runPromise(
 				sessionsHandlers.SetSurfacingMark(
-					new SetSurfacingMark({
+					SetSurfacingMark.payloadSchema.make({
 						sessionId: "foreign",
 						partId: "p",
 						mark: { level: "key" },
@@ -270,7 +270,7 @@ it("rejects unrelated parts and removes marks with their session", async () => {
 		).rejects.toBeDefined();
 		await runtime.runPromise(
 			sessionsHandlers.SetSurfacingMark(
-				new SetSurfacingMark({
+				SetSurfacingMark.payloadSchema.make({
 					sessionId: "s",
 					partId: "p",
 					mark: { level: "key", direction: "retype", category: "ask" },
@@ -336,7 +336,9 @@ it("reads the daemon-wide feedback ledger without starting a project relay", asy
 	try {
 		const ledger = await daemon.runPromise(
 			Effect.flatMap(DaemonWsRpcHandlersTag, (handlers) =>
-				handlers.GetSurfacingFeedback(new GetSurfacingFeedback({})),
+				handlers.GetSurfacingFeedback(
+					GetSurfacingFeedback.payloadSchema.make({}),
+				),
 			),
 		);
 		expect(ledger).toMatchObject([

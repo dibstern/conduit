@@ -9,7 +9,6 @@ import {
 	type ReplyReference,
 	serializeReferences,
 } from "../../../src/lib/composer-references.js";
-import { SubmitInput } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -88,15 +87,13 @@ describe("Reply references through the built daemon", () => {
 		].join("\n");
 		const serialized = serializeReferences(draft);
 		expect(serialized).toBe(expected);
-		await sendRpcRequest(
-			join(fixture.configDir, "relay.sock"),
-			new SubmitInput({
-				sessionId,
-				inputId: `reply-${provider}`,
-				text: serialized,
-				delivery: "queue",
-			}),
-		);
+		await sendRpcRequest(join(fixture.configDir, "relay.sock"), {
+			_tag: "input.submit",
+			sessionId,
+			inputId: `reply-${provider}`,
+			text: serialized,
+			delivery: "queue",
+		});
 		let received: string | undefined;
 		await vi.waitFor(
 			() => {

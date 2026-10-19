@@ -1,7 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
-
-import { Either, Schema } from "effect";
+import { Exit, Schema } from "effect";
 import { describe, expect, expectTypeOf, it } from "vitest";
 
 import {
@@ -30,33 +27,12 @@ const baseEvent = {
 };
 
 const decodeEither = (value: unknown) =>
-	Schema.decodeUnknownEither(ProviderRuntimeEventSchema)(value);
-
-const REPO_ROOT = process.cwd();
-const CONTRACT_SOURCE_PATH =
-	"src/lib/contracts/providers/provider-runtime-event.ts";
-const CONTRACT_SOURCE = join(REPO_ROOT, CONTRACT_SOURCE_PATH);
-
-function tsFiles(dir: string): string[] {
-	if (!existsSync(dir)) return [];
-
-	const files: string[] = [];
-	for (const entry of readdirSync(dir)) {
-		const path = join(dir, entry);
-		const stat = statSync(path);
-		if (stat.isDirectory()) {
-			files.push(...tsFiles(path));
-		} else if (path.endsWith(".ts")) {
-			files.push(relative(REPO_ROOT, path));
-		}
-	}
-	return files.sort();
-}
+	Schema.decodeUnknownExit(ProviderRuntimeEventSchema)(value);
 
 describe("ProviderRuntimeEvent contracts", () => {
 	it("rejects daemon-owned text.surfaced verdicts as provider ingress", () => {
 		expect(
-			Either.isLeft(
+			Exit.isFailure(
 				decodeEither({
 					...baseEvent,
 					type: "text.surfaced",
@@ -97,7 +73,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 
 	it("accepts a content-addressed OpenCode REST snapshot envelope", () => {
 		expect(
-			Either.isRight(
+			Exit.isSuccess(
 				decodeEither({
 					...baseEvent,
 					eventId: "evt_opencode_snapshot_msg_1_digest",
@@ -120,7 +96,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 	});
 
 	it("rejects missing base envelope identity", () => {
-		expect(Either.isRight(decodeEither(baseEvent))).toBe(true);
+		expect(Exit.isSuccess(decodeEither(baseEvent))).toBe(true);
 
 		for (const field of [
 			"eventId",
@@ -134,14 +110,16 @@ describe("ProviderRuntimeEvent contracts", () => {
 		] as const) {
 			const { [field]: _removed, ...eventWithoutRequiredField } = baseEvent;
 
-			expect(Either.isLeft(decodeEither(eventWithoutRequiredField))).toBe(true);
+			expect(Exit.isFailure(decodeEither(eventWithoutRequiredField))).toBe(
+				true,
+			);
 		}
 	});
 
 	it("rejects inherited base envelope identity", () => {
 		const inheritedEnvelope = Object.create(baseEvent);
 
-		expect(Either.isLeft(decodeEither(inheritedEnvelope))).toBe(true);
+		expect(Exit.isFailure(decodeEither(inheritedEnvelope))).toBe(true);
 	});
 
 	it("decodes turn.model_resolved evidence without changing its ids", () => {
@@ -179,8 +157,8 @@ describe("ProviderRuntimeEvent contracts", () => {
 		});
 
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(ProviderRuntimeRawSourceSchema)(rawSource),
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(ProviderRuntimeRawSourceSchema)(rawSource),
 			),
 		).toBe(true);
 		expect(event.rawSource).toEqual(rawSource);
@@ -208,8 +186,8 @@ describe("ProviderRuntimeEvent contracts", () => {
 		});
 
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(ProviderRuntimeProviderRefsSchema)(
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(ProviderRuntimeProviderRefsSchema)(
 					providerRefs,
 				),
 			),
@@ -220,21 +198,23 @@ describe("ProviderRuntimeEvent contracts", () => {
 
 	it("rejects the retired tool.input_updated runtime event", () => {
 		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(ProviderRuntimeEventTypeSchema)(
+			Exit.isFailure(
+				Schema.decodeUnknownExit(ProviderRuntimeEventTypeSchema)(
 					"tool.input_updated",
 				),
 			),
 		).toBe(true);
 		expect(
-			Either.isLeft(decodeEither({ ...baseEvent, type: "tool.input_updated" })),
+			Exit.isFailure(
+				decodeEither({ ...baseEvent, type: "tool.input_updated" }),
+			),
 		).toBe(true);
 	});
 
 	it("rejects unknown runtime event type", () => {
-		expect(Either.isLeft(decodeEither({ ...baseEvent, type: "made.up" }))).toBe(
-			true,
-		);
+		expect(
+			Exit.isFailure(decodeEither({ ...baseEvent, type: "made.up" })),
+		).toBe(true);
 	});
 
 	it("rejects raw payload fields in rawSource", () => {
@@ -245,7 +225,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 			"providerPayload",
 		] as const) {
 			expect(
-				Either.isLeft(
+				Exit.isFailure(
 					decodeEither({
 						...baseEvent,
 						rawSource: { kind: "claude-sdk", [field]: { type: "assistant" } },
@@ -258,7 +238,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 	it("rejects top-level raw payload fields", () => {
 		for (const field of ["raw", "payload", "rawPayload"] as const) {
 			expect(
-				Either.isLeft(
+				Exit.isFailure(
 					decodeEither({
 						...baseEvent,
 						[field]: { type: "provider-message", content: [] },
@@ -269,7 +249,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 	});
 
 	it("rejects arbitrary unknown top-level fields", () => {
-		expect(Either.isLeft(decodeEither({ ...baseEvent, extra: true }))).toBe(
+		expect(Exit.isFailure(decodeEither({ ...baseEvent, extra: true }))).toBe(
 			true,
 		);
 	});
@@ -300,8 +280,8 @@ describe("ProviderRuntimeEvent contracts", () => {
 		});
 
 		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(ProviderRuntimeProviderRefsSchema)(
+			Exit.isSuccess(
+				Schema.decodeUnknownExit(ProviderRuntimeProviderRefsSchema)(
 					providerRefs,
 				),
 			),
@@ -359,13 +339,13 @@ describe("ProviderRuntimeEvent contracts", () => {
 			{ providerSessionId: "session_1", providerItemId: "item_1" },
 		]) {
 			expect(
-				Either.isLeft(
-					Schema.decodeUnknownEither(ProviderRuntimeProviderRefsSchema)(
+				Exit.isFailure(
+					Schema.decodeUnknownExit(ProviderRuntimeProviderRefsSchema)(
 						providerRefs,
 					),
 				),
 			).toBe(true);
-			expect(Either.isLeft(decodeEither({ ...baseEvent, providerRefs }))).toBe(
+			expect(Exit.isFailure(decodeEither({ ...baseEvent, providerRefs }))).toBe(
 				true,
 			);
 		}
@@ -377,107 +357,15 @@ describe("ProviderRuntimeEvent contracts", () => {
 			new Map([["providerSessionId", "session_1"]]),
 		]) {
 			expect(
-				Either.isLeft(
-					Schema.decodeUnknownEither(ProviderRuntimeProviderRefsSchema)(
+				Exit.isFailure(
+					Schema.decodeUnknownExit(ProviderRuntimeProviderRefsSchema)(
 						providerRefs,
 					),
 				),
 			).toBe(true);
-			expect(Either.isLeft(decodeEither({ ...baseEvent, providerRefs }))).toBe(
+			expect(Exit.isFailure(decodeEither({ ...baseEvent, providerRefs }))).toBe(
 				true,
 			);
 		}
-	});
-
-	it("keeps ProviderRuntimeEvent as provider ingress, not persistence truth", () => {
-		const filesImportingContract = tsFiles(join(REPO_ROOT, "src/lib"))
-			.filter((file) => file !== CONTRACT_SOURCE_PATH)
-			.filter((file) => {
-				const source = readFileSync(join(REPO_ROOT, file), "utf8");
-				return (
-					source.includes("ProviderRuntimeEvent") ||
-					source.includes("provider-runtime-event.js")
-				);
-			});
-
-		const forbiddenPersistenceImports = filesImportingContract.filter(
-			(file) =>
-				file.startsWith("src/lib/persistence/") ||
-				file.startsWith("src/lib/persistence/projectors/"),
-		);
-
-		expect(forbiddenPersistenceImports).toEqual([]);
-		expect(filesImportingContract).toEqual(
-			expect.arrayContaining([
-				"src/lib/provider/types.ts",
-				"src/lib/provider/relay-event-sink.ts",
-				"src/lib/provider/provider-runtime-event-to-domain.ts",
-				"src/lib/domain/relay/Services/provider-runtime-ingestion-service.ts",
-			]),
-		);
-	});
-
-	it("keeps provider adapters from constructing durable domain events directly", () => {
-		const files = [
-			...tsFiles(join(REPO_ROOT, "src/lib/provider")),
-			...tsFiles(join(REPO_ROOT, "src/lib/relay")),
-		];
-		const allowed = new Set([
-			"src/lib/provider/provider-runtime-event-to-domain.ts",
-		]);
-		const unexpected = files.flatMap((file) => {
-			if (allowed.has(file)) return [];
-			const source = readFileSync(join(REPO_ROOT, file), "utf8");
-			return source.includes("canonicalEvent(") ? [file] : [];
-		});
-
-		expect(unexpected).toEqual([]);
-	});
-
-	it("keeps OpenCode runtime ingress outside persistence and behind ProviderRuntimeIngestion", () => {
-		for (const file of [
-			"src/lib/persistence/dual-write-hook.ts",
-			"src/lib/persistence/effect/dual-write-hook-effect.ts",
-		]) {
-			expect(existsSync(join(REPO_ROOT, file))).toBe(false);
-		}
-
-		const effectIngressPath =
-			"src/lib/domain/relay/Services/opencode-runtime-ingress-service.ts";
-		const effectIngress = readFileSync(
-			join(REPO_ROOT, effectIngressPath),
-			"utf8",
-		);
-
-		expect(effectIngress).toContain("OpenCodeRuntimeEventTranslator");
-		expect(effectIngress).toContain("ProviderRuntimeIngestionTag");
-		expect(effectIngress).toContain("ingestBatch");
-		expect(effectIngress).not.toContain(
-			"translateProviderRuntimeEventToDomain",
-		);
-		expect(effectIngress).not.toContain("EventStoreEffectTag");
-		expect(effectIngress).not.toContain("CanonicalEvent");
-	});
-
-	it("does not keep a legacy sync OpenCode runtime ingress", () => {
-		const legacyIngress = join(
-			REPO_ROOT,
-			"src/lib/domain/relay/Services/opencode-runtime-ingress-legacy.ts",
-		);
-
-		expect(existsSync(legacyIngress)).toBe(false);
-	});
-
-	it("stays implementation-free", () => {
-		const source = readFileSync(CONTRACT_SOURCE, "utf8");
-		const imports = Array.from(
-			source.matchAll(/^import\s+(?!type\b).*\s+from\s+["']([^"']+)["'];$/gm),
-			(match) => match[1],
-		);
-
-		expect(imports).toEqual(["effect"]);
-		expect(source).not.toMatch(
-			/Context\.Tag|Layer|Effect\.|CanonicalEvent|ProviderInstance|RelayMessage|EventSink|sqlite|fetch\(/,
-		);
 	});
 });

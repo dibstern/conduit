@@ -11,16 +11,6 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-registry-state.js";
 
 describe("SessionRegistryState Effect", () => {
-	it.effect("setClientSession registers a client for a session", () =>
-		Effect.gen(function* () {
-			yield* setClientSession("c1", "s1");
-
-			const ref = yield* SessionRegistryStateTag;
-			const map = yield* Ref.get(ref);
-			expect(HashMap.get(map, "c1").pipe(Option.getOrNull)).toBe("s1");
-		}).pipe(Effect.provide(Layer.fresh(makeSessionRegistryStateLive()))),
-	);
-
 	it.effect("setClientSession is no-op when same session", () =>
 		Effect.gen(function* () {
 			yield* setClientSession("c1", "s1");
@@ -30,17 +20,6 @@ describe("SessionRegistryState Effect", () => {
 			const map = yield* Ref.get(ref);
 			expect(HashMap.size(map)).toBe(1);
 			expect(HashMap.get(map, "c1").pipe(Option.getOrNull)).toBe("s1");
-		}).pipe(Effect.provide(Layer.fresh(makeSessionRegistryStateLive()))),
-	);
-
-	it.effect("setClientSession switches session", () =>
-		Effect.gen(function* () {
-			yield* setClientSession("c1", "s1");
-			yield* setClientSession("c1", "s2");
-
-			const ref = yield* SessionRegistryStateTag;
-			const map = yield* Ref.get(ref);
-			expect(HashMap.get(map, "c1").pipe(Option.getOrNull)).toBe("s2");
 		}).pipe(Effect.provide(Layer.fresh(makeSessionRegistryStateLive()))),
 	);
 
@@ -56,6 +35,8 @@ describe("SessionRegistryState Effect", () => {
 		Effect.gen(function* () {
 			const result = yield* getClientSession("unknown");
 			expect(Option.isNone(result)).toBe(true);
+			const ref = yield* SessionRegistryStateTag;
+			expect(HashMap.size(yield* Ref.get(ref))).toBe(0);
 		}).pipe(Effect.provide(Layer.fresh(makeSessionRegistryStateLive()))),
 	);
 
@@ -108,6 +89,7 @@ describe("SessionRegistryState Effect", () => {
 
 			expect(s1Viewers).toEqual(["c2"]);
 			expect(s2Viewers).toEqual(["c1"]);
+			expect(Option.getOrNull(yield* getClientSession("c1"))).toBe("s2");
 		}).pipe(Effect.provide(Layer.fresh(makeSessionRegistryStateLive()))),
 	);
 
@@ -119,15 +101,6 @@ describe("SessionRegistryState Effect", () => {
 
 			const viewers = yield* getClientsForSession("s1");
 			expect(viewers).toEqual(["c2"]);
-		}).pipe(Effect.provide(Layer.fresh(makeSessionRegistryStateLive()))),
-	);
-
-	it.effect("Layer.fresh provides isolated state per test", () =>
-		Effect.gen(function* () {
-			// Starting from empty — no leaks from other tests
-			const ref = yield* SessionRegistryStateTag;
-			const map = yield* Ref.get(ref);
-			expect(HashMap.size(map)).toBe(0);
 		}).pipe(Effect.provide(Layer.fresh(makeSessionRegistryStateLive()))),
 	);
 });

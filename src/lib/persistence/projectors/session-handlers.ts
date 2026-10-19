@@ -24,7 +24,7 @@
 //     thing a statement can do.
 //   - The one remaining way to remove a session silently is to write a second
 //     delete statement. That is what fails loudly:
-//     test/unit/persistence/session-removal-boundary-grep.test.ts allows
+//     test/unit/persistence/session-removal-boundary-grep.guard.test.ts allows
 //     exactly one `DELETE FROM sessions` in the whole of src — the
 //     REMOVE_SESSION_SQL declaration below — and allows it to be executed only
 //     by the two projectors. Being inside this file buys nothing: a raw delete
@@ -52,6 +52,33 @@ import type {
 	LiveEventType,
 	StoredEvent,
 } from "../events.js";
+
+export function isHumanSentMessage(
+	message: {
+		role: string;
+		inherited: boolean;
+		inputId: string | null;
+		synthetic: boolean;
+		legacyText: string;
+	},
+	parts: readonly { type: unknown; synthetic?: unknown; ignored?: unknown }[],
+): boolean {
+	// Fork copies are context, even when they retain the original input id.
+	if (message.role !== "user" || message.inherited) return false;
+	// Conduit assigns an input id only when delivering a human's input.
+	if (message.inputId !== null) return true;
+	// OpenCode injects synthetic/ignored context alongside ordinary user parts.
+	if (message.synthetic) return false;
+	return (
+		parts.some(
+			(part) =>
+				(part.type === "text" || part.type === "file") &&
+				part.synthetic !== true &&
+				part.ignored !== true,
+		) ||
+		(parts.length === 0 && message.legacyText !== "")
+	);
+}
 
 /** A write against `sessions`, executed with `RETURNING id` appended. */
 export interface SessionWrite {

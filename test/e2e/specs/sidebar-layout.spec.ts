@@ -3,11 +3,11 @@
 // - Mobile: session list and session are separate routes
 // Uses real relay backed by MockOpenCodeServer.
 
+import { createSession } from "../helpers/e2e-harness.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 import { AppPage } from "../page-objects/app.page.js";
-import { SidebarPage } from "../page-objects/sidebar.page.js";
 
 test.use({ recording: "chat-simple" });
 
@@ -362,6 +362,7 @@ test.describe("Sidebar Layout — Desktop", () => {
 	test("desktop: sidebar chrome shows loaded groups and project identity", async ({
 		page,
 		relayUrl,
+		harness,
 	}) => {
 		const app = new AppPage(page);
 		await app.goto(relayUrl);
@@ -369,7 +370,8 @@ test.describe("Sidebar Layout — Desktop", () => {
 		await expect(rows.first()).toBeVisible();
 		await expect(app.sidebar).toHaveCSS("width", "300px");
 		await expect(page.locator("#sidebar-footer")).toHaveCount(0);
-		await new SidebarPage(page).createNewSession();
+		// The standalone replay relay has no daemon account feed for drafts.
+		await createSession(harness.relayPort, "opencode");
 		await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(2);
 		await expect(rows.first()).toHaveCSS("margin-bottom", "0px");
 
@@ -980,34 +982,46 @@ test.describe("Sidebar Layout — Mobile", () => {
 			'a, button, input, select, [role="button"], [role="checkbox"], [role="tab"], [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [tabindex="0"]';
 		const failures: string[] = [];
 		async function measure(scope: string) {
-			const controls = page.locator(scope).locator(selector);
-			for (const control of await controls.all()) {
-				if (!(await control.isVisible())) continue;
-				const label = (await control.innerText().catch(() => "")).trim();
-				const name =
-					((await control.getAttribute("data-testid")) ??
-						(await control.getAttribute("aria-label")) ??
-						(await control.getAttribute("title")) ??
-						(label || (await control.getAttribute("id")))) ||
-					"unnamed control";
-				const box = await control.boundingBox();
-				if (!box) {
+			// Read one DOM snapshot per state instead of making several browser
+			// round trips for every control in all fourteen states.
+			const measurements = await page
+				.locator(scope)
+				.locator(selector)
+				.filter({ visible: true })
+				.evaluateAll((controls) =>
+					controls.map((element) => {
+						const label =
+							element instanceof HTMLElement ? element.innerText.trim() : "";
+						const name =
+							(element.getAttribute("data-testid") ??
+								element.getAttribute("aria-label") ??
+								element.getAttribute("title") ??
+								(label || element.id)) ||
+							"unnamed control";
+						const box = element.getBoundingClientRect();
+						// A touchTarget control paints small and takes the tap on a
+						// transparent ::before, outside its own bounding box.
+						const before = getComputedStyle(element, "::before");
+						const hit =
+							before.position === "absolute" && before.content !== "none"
+								? {
+										width: Number.parseFloat(before.width),
+										height: Number.parseFloat(before.height),
+									}
+								: { width: 0, height: 0 };
+						return {
+							name,
+							hasBox: box.width > 0 && box.height > 0,
+							width: Math.max(box.width, hit.width),
+							height: Math.max(box.height, hit.height),
+						};
+					}),
+				);
+			for (const { name, hasBox, width, height } of measurements) {
+				if (!hasBox) {
 					failures.push(`${name}: visible without a bounding box (${scope})`);
 					continue;
 				}
-				// A touchTarget control paints small and takes the tap on a
-				// transparent ::before, which boundingBox() cannot see.
-				const hit = await control.evaluate((element) => {
-					const before = getComputedStyle(element, "::before");
-					return before.position === "absolute" && before.content !== "none"
-						? {
-								width: Number.parseFloat(before.width),
-								height: Number.parseFloat(before.height),
-							}
-						: { width: 0, height: 0 };
-				});
-				const width = Math.max(box.width, hit.width);
-				const height = Math.max(box.height, hit.height);
 				if (width < 44 || height < 44) {
 					failures.push(
 						`${name}: ${width.toFixed(1)}x${height.toFixed(1)} (${scope})`,

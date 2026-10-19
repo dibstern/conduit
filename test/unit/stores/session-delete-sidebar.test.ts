@@ -56,7 +56,7 @@ const VICTIM = {
 	id: "victim",
 	title: "Doomed Session",
 	status: "idle",
-	updatedAt: Date.now(),
+	updatedAt: 2_000,
 } satisfies SessionInfo;
 const KEEPER = {
 	projectSlug: "project-a",
@@ -64,7 +64,7 @@ const KEEPER = {
 	id: "keeper",
 	title: "Survivor",
 	status: "idle",
-	updatedAt: Date.now(),
+	updatedAt: 1_000,
 } satisfies SessionInfo;
 
 beforeEach(() => {
@@ -183,8 +183,6 @@ describe("root rows keep their subtree rollup", () => {
 				parentID: VICTIM.id,
 			},
 		]);
-		// By id: the fixtures' Date.now() stamps can differ by a millisecond,
-		// which reorders the newest-first sidebar.
 		expect(
 			getFilteredSessions().find((session) => session.id === VICTIM.id)
 				?.attention,

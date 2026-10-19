@@ -12,17 +12,28 @@ import {
 } from "../../stores/discovery.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
-import { mockClaudeAccount } from "../../stories/mocks.js";
 import { openSessionForSetup } from "../../stories/session-setup.js";
+import type { OpenCodeInstance } from "../../types.js";
 import ModelVariant from "./ModelVariant.svelte";
 
 const onOpen = fn();
 const fourLevels = ["low", "medium", "high", "max"];
 const fiveLevels = ["low", "medium", "high", "xhigh", "max"];
+const claudeAccount = {
+	id: "claude",
+	name: "Claude",
+	driver: "claude",
+	isDefault: true,
+	port: 0,
+	managed: false,
+	status: "healthy",
+	restartCount: 0,
+	createdAt: 0,
+} satisfies OpenCodeInstance;
 
 /** A draft reads its effort levels from its account's catalog, so the account must exist. */
 function seed(variant = "", variants = fourLevels) {
-	instanceState.instances = [mockClaudeAccount];
+	instanceState.instances = [claudeAccount];
 	handleModelList({
 		providers: [
 			{

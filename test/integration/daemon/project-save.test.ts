@@ -7,11 +7,8 @@ import Database from "better-sqlite3";
 import { Effect, Fiber, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-	GetProjects,
-	GetStatus,
 	type ProjectInfo,
 	ProjectSaveRejected,
-	SaveProject,
 	type SaveProjectInput,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
@@ -32,10 +29,9 @@ const readConfig = (harness: ProcessHarness): DaemonConfig =>
 	JSON.parse(readFileSync(join(harness.configDir, "daemon.json"), "utf8"));
 
 async function projectFolders(harness: ProcessHarness) {
-	const { projects } = await sendRpcRequest(
-		socket(harness),
-		new GetProjects({}),
-	);
+	const { projects } = await sendRpcRequest(socket(harness), {
+		_tag: "GetProjects",
+	});
 	return projects.map(({ slug, folders, title }) => ({
 		slug,
 		folders,
@@ -102,10 +98,10 @@ describe("SaveProject through the built daemon", () => {
 		for (const folder of input.folders)
 			folders.add(typeof folder === "string" ? folder : folder.path);
 		try {
-			const result = await sendRpcRequest(
-				socket(fixture),
-				new SaveProject(input),
-			);
+			const result = await sendRpcRequest(socket(fixture), {
+				_tag: "SaveProject",
+				...input,
+			});
 			operations.push({ input, result });
 			return result;
 		} catch (error) {
@@ -429,7 +425,7 @@ describe("SaveProject through the built daemon", () => {
 		evidence["sendInput"] = input;
 		const release = join(fixture.root, "release-upgrade-turn");
 		try {
-			await Effect.runPromise(before.rpc.input.submit(input));
+			await Effect.runPromise(before.rpc["input.submit"](input));
 			await before.waitFor(
 				(message) =>
 					message["type"] === "transcript_message" &&
@@ -453,10 +449,9 @@ describe("SaveProject through the built daemon", () => {
 			const runner = registrations[0];
 			if (!runner) throw new Error("Missing held runner");
 			const markCursor = fixture.marks.length;
-			evidence["readinessBefore"] = await sendRpcRequest(
-				socket(fixture),
-				new GetStatus({}),
-			);
+			evidence["readinessBefore"] = await sendRpcRequest(socket(fixture), {
+				_tag: "GetStatus",
+			});
 			const saved = await save(fixture, {
 				slug: "process-test",
 				folders: [fixture.projectDir, extra],
@@ -472,7 +467,9 @@ describe("SaveProject through the built daemon", () => {
 					expect.objectContaining({ sessionId, pid: runner.pid }),
 				);
 			});
-			const status = await sendRpcRequest(socket(fixture), new GetStatus({}));
+			const status = await sendRpcRequest(socket(fixture), {
+				_tag: "GetStatus",
+			});
 			evidence["readinessAfter"] = status;
 			expect(
 				status.projects.find(({ slug }) => slug === "process-test")?.status,
@@ -521,14 +518,32 @@ describe("SaveProject through the built daemon", () => {
 					({ type }) => type === "turn.error" || type === "turn.interrupted",
 				),
 			).toBe(false);
-			expect(
-				state.events
-					.filter(({ type }) => type === "text.delta")
-					.map(({ data }) => (JSON.parse(data) as { text: string }).text),
-			).toEqual([prompt, ...responseChunks(prompt)]);
+			const [submittedDelta, ...assistantDeltas] = state.events
+				.filter(({ type }) => type === "text.delta")
+				.map(
+					({ data }) =>
+						JSON.parse(data) as {
+							messageId: string;
+							partId: string;
+							text: string;
+						},
+				);
+			// Runner batching can combine adjacent chunks into one stored delta.
+			expect(assistantDeltas.map(({ text }) => text).join("")).toBe(
+				responseChunks(prompt).join(""),
+			);
 			const history = await after.history(sessionId);
 			evidence["history"] = history;
 			expect(history.map(({ role }) => role)).toEqual(["user", "assistant"]);
+			expect(submittedDelta).toEqual({
+				messageId: history[0]?.id,
+				partId: history[0]?.parts?.[0]?.id,
+				text: prompt,
+			});
+			for (const { messageId, partId } of assistantDeltas) {
+				expect(messageId).toBe(history[1]?.id);
+				expect(partId).toBe(history[1]?.parts?.[0]?.id);
+			}
 			expect(history[1]?.parts?.map((part) => part.text ?? "").join("")).toBe(
 				responseChunks(prompt).join(""),
 			);

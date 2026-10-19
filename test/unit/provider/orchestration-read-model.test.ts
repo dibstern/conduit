@@ -1,6 +1,6 @@
-import { SqlClient, Statement } from "@effect/sql";
 import { describe, expect, it } from "@effect/vitest";
 import { Effect } from "effect";
+import { SqlClient, Statement } from "effect/sql";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
 	CommandReadModelRepository,
@@ -29,7 +29,7 @@ describe("CommandReadModelRepository", () => {
 				)
 					.bootstrap()
 					.pipe(
-						Statement.withTransformer((statement) =>
+						Effect.provideService(Statement.CurrentTransformer, (statement) =>
 							Effect.sync(() => {
 								queries.push(statement.compile()[0]);
 								return statement;

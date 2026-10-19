@@ -1,9 +1,12 @@
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, TestClock } from "effect";
+import { Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
+import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
@@ -39,6 +42,7 @@ import {
 	makeMockOpenCodeModelService,
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
+	makeOpenCodeInstancesStub,
 	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
@@ -72,38 +76,35 @@ describe("prompt processing timeouts through Effect state", () => {
 		});
 		const persistence = makePersistenceEffectLayer(":memory:", "test-project");
 		const layer = Layer.provideMerge(
-			ProviderTurnServiceLive,
+			Layer.provideMerge(ProviderTurnServiceLive, SessionWorkspaceLive),
 			Layer.mergeAll(
 				AlertsLive,
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(
-					OpenCodeModelServiceTag,
+				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(OpenCodeInstancesTag)(
+					makeOpenCodeInstancesStub({ opencode: client }),
+				),
+				Layer.succeed(OpenCodeModelServiceTag)(
 					makeMockOpenCodeModelService(MOCK_OPENCODE_GPT4_CATALOG),
 				),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, createSilentLogger()),
-				Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-				Layer.succeed(ConfigTag, config as ProjectRelayConfig),
-				Layer.succeed(
-					SessionManagerServiceTag,
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(createSilentLogger()),
+				Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+				Layer.succeed(ConfigTag)(config as ProjectRelayConfig),
+				Layer.succeed(SessionManagerServiceTag)(
 					makeMockSessionManagerService(),
 				),
 				PendingInteractionServiceLive,
 				makeOverridesStateLive(),
 				persistence,
 				makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
-				Layer.succeed(AgentServiceTag, makeMockAgentService()),
-				Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
-				Layer.succeed(
-					OrchestrationEngineTag,
+				Layer.succeed(AgentServiceTag)(makeMockAgentService()),
+				Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
+				Layer.succeed(OrchestrationEngineTag)(
 					withDispatchEffect({
 						dispatchEffect: vi.fn(
 							(command: { onAccepted?: Effect.Effect<void> }) =>
 								// The engine commits the handoff, then the turn runs on.
-								Effect.zipRight(
-									command.onAccepted ?? Effect.void,
-									Effect.never,
-								),
+								Effect.andThen(command.onAccepted ?? Effect.void, Effect.never),
 						),
 					}),
 				),
@@ -124,7 +125,10 @@ describe("prompt processing timeouts through Effect state", () => {
 			expect(yield* hasActiveProcessingTimeout("session-1")).toBe(true);
 			yield* TestClock.adjust("120 seconds");
 			expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
-		}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
+		}).pipe(
+			Effect.provide(PassThroughSessionInbox, { local: true }),
+			Effect.provide(layer, { local: true }),
+		);
 	});
 
 	it.effect(
@@ -140,26 +144,34 @@ describe("prompt processing timeouts through Effect state", () => {
 			);
 			const baseLayer = Layer.mergeAll(
 				AlertsLive,
-				Layer.succeed(OpenCodeAPITag, client),
-				Layer.succeed(WebSocketHandlerTag, ws),
-				Layer.succeed(LoggerTag, createSilentLogger()),
-				Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-				Layer.succeed(ConfigTag, config as ProjectRelayConfig),
-				Layer.succeed(
-					SessionManagerServiceTag,
+				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(OpenCodeInstancesTag)(
+					makeOpenCodeInstancesStub({ opencode: client }),
+				),
+				Layer.succeed(WebSocketHandlerTag)(ws),
+				Layer.succeed(LoggerTag)(createSilentLogger()),
+				Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+				Layer.succeed(ConfigTag)(config as ProjectRelayConfig),
+				Layer.succeed(SessionManagerServiceTag)(
 					makeMockSessionManagerService(),
 				),
 				PendingInteractionServiceLive,
 				makeOverridesStateLive(),
 				persistence,
 				makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
-				Layer.succeed(AgentServiceTag, makeMockAgentService()),
-				Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
-				Layer.succeed(OrchestrationEngineTag, withDispatchEffect({})),
+				Layer.succeed(AgentServiceTag)(makeMockAgentService()),
+				Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
+				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({})),
 			);
-			const layer = Layer.provideMerge(ProviderTurnServiceLive, baseLayer);
+			const layer = Layer.provideMerge(
+				Layer.provideMerge(ProviderTurnServiceLive, SessionWorkspaceLive),
+				baseLayer,
+			);
 
 			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions (id, provider, title, created_at, updated_at)
+					VALUES ('session-1', 'opencode', 'Stored session', 1, 1)`;
 				yield* startProcessingTimeout(
 					"session-1",
 					"2 minutes",
@@ -168,7 +180,10 @@ describe("prompt processing timeouts through Effect state", () => {
 				yield* cancelSessionById("client-1", "session-1", "cmd-cancel-test");
 
 				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
-			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
+			}).pipe(
+				Effect.provide(PassThroughSessionInbox, { local: true }),
+				Effect.provide(layer, { local: true }),
+			);
 		},
 	);
 });

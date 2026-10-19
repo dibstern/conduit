@@ -78,7 +78,7 @@ describe("an unanswered OpenCode user message", () => {
 
 		const inputId = randomUUID();
 		const accepted = await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId,
 				text: "after the unanswered message",
 				inputId,

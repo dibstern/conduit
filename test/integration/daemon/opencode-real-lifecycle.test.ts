@@ -11,10 +11,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
-import { SaveProject } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
@@ -234,7 +234,7 @@ describe("Managed real OpenCode lifecycle", () => {
 		mkdirSync(directoryB);
 		const { savedSlug: slugB } = await sendRpcRequest(
 			join(fixture.configDir, "relay.sock"),
-			new SaveProject({ folders: [directoryB] }),
+			{ _tag: "SaveProject", folders: [directoryB] },
 		);
 		const a = await fixture.connect();
 		const b = await fixture.connect(undefined, undefined, slugB);

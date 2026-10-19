@@ -1,105 +1,4 @@
 {
-	"src/lib/frontend/components/ui/Tile.svelte :: text-text-dimmer": "conduit-test-aoqb.4: the tile sub-line lifts to text-muted; text-dimmer on the chip fill measured 2.52:1 over the dark popover, below even the quiet tier's 3:1.",
-	"src/lib/frontend/components/ui/button-recipes.ts :: bg-error/22": "conduit-test-aoqb.4: danger-soft's tint drops to bg-error/12, the lightest that keeps its error label at 4.5:1 on a dark popover and in the light theme (theme-contrast.test.ts).",
-	"src/lib/frontend/components/ui/button-recipes.ts :: hover:bg-error/30": "conduit-test-aoqb.4: danger-soft's hover tint drops to bg-error/20 to stay one step above the lowered /12 rest tint.",
-	"src/lib/frontend/components/layout/SessionBar.svelte :: bg-[rgba(var(--overlay-rgb),0.35)]": {
-		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
-		"requires": "variant={sessionViewState.compact ? \"scrim\" : \"scrim-clear\"}",
-		"reason": "conduit-test-aoqb.4 fix: Button owns the phone scrim fill; desktop keeps a clear dismissal target."
-	},
-	"src/lib/frontend/components/layout/SessionBar.svelte :: data-[state,open]:text-accent": {
-		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
-		"requires": "variant=\"menu-trigger\"",
-		"reason": "conduit-test-aoqb.4 fix: Button's menu-trigger variant owns the open state."
-	},
-	"src/lib/frontend/components/layout/SessionBar.svelte :: open]:bg-accent/16": "conduit-test-aoqb.4 fix: the menu trigger now uses the existing contrast-safe accent-bg token, owned by Button's menu-trigger variant.",
-	"src/lib/frontend/components/layout/SessionBar.svelte :: font-bold,h-[12px],min-w-[12px],px-[3px],text-[8px],text-bg": {
-		"movedTo": "src/lib/frontend/components/ui/Badge.svelte",
-		"requires": "variant=\"accent-solid\" size=\"indicator\"",
-		"reason": "conduit-test-aoqb.4 fix: Badge owns the tiny view-update count's fill and type."
-	},
-	"src/lib/frontend/components/layout/SessionBar.svelte :: group-active:bg-accent/15,group-data-[state,group-focus-visible:bg-accent/10,group-hover:bg-accent/10,open]:bg-accent/15": {
-		"movedTo": "src/lib/frontend/components/ui/Badge.svelte",
-		"requires": "interactive>",
-		"reason": "conduit-test-aoqb.4 fix: interactive Badge owns the unread chip's hover, focus and open fills."
-	},
-	"src/lib/frontend/components/layout/SessionBar.svelte :: justify-start,select-none,whitespace-nowrap": {
-		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
-		"requires": "layout=\"block\" align=\"start\"",
-		"reason": "conduit-test-aoqb.4 fix: Button's block layout preserves the subtitle's display and interaction."
-	},
-	"src/lib/frontend/components/layout/SessionBar.svelte :: min-w-[44px]": {
-		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
-		"requires": "size=\"touch-icon\"",
-		"reason": "conduit-test-aoqb.4 fix: Button's touch sizes retain 44px targets."
-	},
-	"src/lib/frontend/components/layout/SessionBar.svelte :: pl-1,pr-2,rounded-lg,text-base": {
-		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
-		"requires": "\"navigation\" : \"navigation-pill\"",
-		"reason": "conduit-test-aoqb.4 fix: Button owns the phone and desktop navigation sizes."
-	},
-	"src/lib/frontend/components/layout/SessionBar.svelte :: py-[6px],rounded-[9px]": {
-		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
-		"requires": "size=\"card-action\"",
-		"reason": "conduit-test-aoqb.4 fix: goal-card actions use Button's public card-action size."
-	},
-	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: bg-tool/13,inline-flex,pl-[5px],pr-1.5,py-0,rounded-[6px]": {
-		"movedTo": "src/lib/frontend/components/ui/Badge.svelte",
-		"requires": "variant=\"task\" size=\"task\"",
-		"reason": "conduit-test-aoqb.4 fix: Badge owns the existing phone task-chip recipe."
-	},
-	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: justify-start,leading-[1.5],select-none,text-[11px],text-tool,whitespace-nowrap": {
-		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
-		"requires": "variant=\"task-row\"",
-		"reason": "conduit-test-aoqb.4 fix: Button owns the phone task row's typography and interaction."
-	},
-	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: compact,min-w-full,w-0": "conduit-test-aoqb.4 fix: the phone-only branch always has compact=true, so its row uses w-full directly. Desktop command chips use the separate desktop branch.",
-	"src/lib/frontend/components/input/InputArea.svelte :: composer-task-dot,gap-1.5,justify-center,pt-[7px]": "conduit-test-aoqb.4: the approved 2026-10-16 audit removes composer task dots and their layout. Live tasks remain visible in the header row and its task panel.",
-	"src/lib/frontend/components/layout/SessionBar.svelte :: items-stretch,py-2,text-xs": "conduit-test-aoqb.4: the Final desktop capsule centers its segments; the state menu uses literal pixel padding and text sizes.",
-	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: border,left-4,mt-1,rounded-[14px]": "conduit-test-aoqb.4: desktop task details use the Final floating Surface with a border-chip ring, 16px corners, 20px inset and 8px anchor gap. The phone panel keeps its existing bottom border and geometry.",
-	"src/lib/frontend/components/session/SideThreadsPanel.svelte :: border,mt-1,right-4,rounded-[14px]": "conduit-test-aoqb.4: desktop side threads use the Final floating Surface with a border-chip ring, 16px corners, 16px right inset and 8px anchor gap. The phone panel keeps its existing bottom border and geometry.",
-	"src/lib/frontend/components/session/SessionContextMenu.svelte :: font-mono,grid,inline-flex,items-center,items-start,min-w-0,place-items-center,status.colour,text-text-secondary": {
-		"movedTo": "src/lib/frontend/components/session/SessionSheetBody.svelte",
-		"requires": "<SessionSheetBody",
-		"reason": "conduit-test-voxy.7 moves the phone session header into the body shared by overflow, chevron and long-press sheets. Desktop header styling stays in SessionContextMenu."
-	},
-	"src/lib/frontend/components/session/SessionContextMenu.svelte :: bg-bg,border,flex-1,flex-wrap,gap-1,gap-1.5,gap-3,leading-snug,mt-0.5,pb-[11px],pt-[8px],px-1.5,px-4,py-0.5,rounded,size-[20px],text-[11.5px],text-[15px]": "conduit-test-voxy.7 follows the Final session-menu header: 17px title, 13px metadata, 10px grid gaps, 18px attention glyph, one unwrapped meta line whose branch chip truncates, and no rule under the header. Literal padding replaces rem spacing, and the branch uses a filled chip without an outline. The grid reserves a 32px close circle with a 44px touch area.",
-	"src/lib/frontend/components/ui/LabelledGridGroup.svelte :: text-text-dimmer": "conduit-test-voxy.6: the phone sheet group labels (Triage, Session) move from text-dimmer to text-muted. The spec's --text3 measures 3.43:1 on the sheet and fails the gated SessionBar a11y check (WCAG AA needs 4.5:1 at 12.5px).",
-	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: h-[4px],h-full,whitespace-nowrap": {
-		"movedTo": "src/lib/frontend/components/ui/QuotaMeter.svelte",
-		"requires": "<QuotaMeter",
-		"reason": "conduit-test-aoqb.12: the existing usage meter owns the 4px track, fill and unbroken percentage caption in the Final account cards."
-	},
-	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: border": {
-		"movedTo": "src/lib/frontend/components/ui/Surface.svelte",
-		"requires": "<Surface",
-		"reason": "conduit-test-aoqb.12: Surface owns the popover border; the model lock notice becomes a borderless chip inset."
-	},
-	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: bg-[var(--account-color)],bg-border,border-dashed,gap-2.5,last:border-b-0,mb-[2px],mb-[5px],min-h-[46px],mt-[9px],pb-[4px],rounded-[2px],rounded-none,text-[10px],text-sm,tracking-[0.07em],tracking-[0.5px],uppercase,w-16": "conduit-test-aoqb.12: the approved Final model picker replaces the account-coloured full-width meter with QuotaMeter's neutral/semantic 26px usage meter, uppercase section captions with 12px sentence case, and ruled square rows with icon-led 36px rows (50px phone targets), 10px corners and intrinsic trailing values. The popover uses 6px outer padding and its shared primitives own control appearance.",
-	"src/lib/frontend/components/ui/segmented-styles.ts :: bg-border-subtle,bg-text,flex-wrap,font-semibold,gap-0.5,gap-[3px],px-0.5,py-0.5,py-1.5,rounded-[7px],text-bg": "conduit-test-aoqb.12: the picker and picker-context recipes lost their last consumer when the Final model picker moved to the joined segment, so they and their SegmentedControl stories are deleted.",
-	"src/lib/frontend/components/input/SkillHighlightBackdrop.svelte :: z-0": "conduit-test-ahu8.12: the mirror must not create a stacking context. Reference remove buttons use z-index 20 to receive clicks above the textarea at z-index 10; all other mirror content remains behind the textarea.",
-	"src/lib/frontend/components/overlays/ClaudeSettingsTab.svelte :: max-w-full": {
-		"movedTo": "src/lib/frontend/components/ui/SettingsPicker.svelte",
-		"requires": "<SettingsPicker",
-		"reason": "conduit-test-aoqb.10: the Final value picker owns its maximum width."
-	},
-	"src/lib/frontend/components/overlays/ClaudeSettingsTab.svelte :: w-[220px]": "conduit-test-aoqb.10: Final settings values use an intrinsic-width borderless picker instead of a fixed-width native field.",
-	"src/lib/frontend/components/overlays/VisibilitySettingsTab.svelte :: w-[100px],w-[220px]": "conduit-test-aoqb.10: Final model, effort and context values use intrinsic-width pickers. Model labels retain a 220px maximum and truncate instead of reserving a fixed field width.",
-	"src/lib/frontend/components/overlays/UsageSettingsTab.svelte :: leading-[1.45],rounded-[12px]": {
-		"movedTo": "src/lib/frontend/components/ui/SettingsBanner.svelte",
-		"requires": "<SettingsBanner",
-		"reason": "conduit-test-aoqb.10: the shared Final settings banner owns its corners and line height."
-	},
-	"src/lib/frontend/components/overlays/UsageSettingsTab.svelte :: bg-bg,bg-fill-amber/[0.05],bg-fill-red/[0.06],border-fill-amber/35,border-fill-red/40,headline.limited,headline.warning,px-[12px],py-[8px]": "conduit-test-aoqb.10: set-ban replaces the outlined fleet headline with an 11% semantic tint over settings-card, 11px/14px padding and neutral text. The existing limited/warning expressions now select SettingsBanner's tone; they are not removed classes.",
-	"src/lib/frontend/components/ui/SettingsGroup.svelte :: rotate-90,transition-transform,truncate": {
-		"movedTo": "src/lib/frontend/components/ui/SettingsRow.svelte",
-		"requires": "<SettingsRow",
-		"reason": "conduit-test-aoqb.10: collapsible headers reuse the Final navigation row's chevron and summary."
-	},
-	"src/lib/frontend/components/ui/SettingsGroup.svelte :: border-border-subtle,duration-200,font-normal,open,text-[11.5px],text-center,w-[10px]": "conduit-test-aoqb.10: Final cards are borderless with settings-separator hairlines. set-col uses a 13px chevron, 13.5px label and 12px summary, replacing the old tiny text chevron and typography. open is now a SettingsRow prop, not a removed class.",
-	"src/lib/frontend/components/ui/SettingsRow.svelte :: leading-[1.35],text-[11px],text-[12.5px]": "conduit-test-aoqb.10: Final settings rows use 13.5px labels (15px on phones) and 12px descriptions with 1.4 line height.",
-	"src/lib/frontend/components/ui/segmented-styles.ts :: bg-accent/10,gap-1.5": "conduit-test-aoqb.10: the `field` segmented variant is deleted; SegmentedControl now defaults to `joined` and nothing selected `field`.",
-	"src/lib/frontend/components/ui/segmented-styles.ts :: bg-accent-bg,border-l,first:border-l-0,max-md:min-w-[36px],px-[9px],py-[4px]": "conduit-test-aoqb.10: set-seg intentionally replaces the bordered accent segments with a chip track, raised neutral selection, 10px horizontal padding and 24px desktop height. Phone options retain a 44px touch target.",
 	"src/lib/frontend/components/layout/Sidebar.svelte :: bottom-[calc(11px+env(safe-area-inset-bottom))]": "conduit-test-fcsu.2 intentionally lifts the phone New session button above the toast sheet. Its bottom offset now uses the larger of the safe-area inset and --toast-clearance; the usage-docked rule clears the larger dock or toast height.",
 	"src/lib/frontend/components/layout/UsageFooterMeter.svelte :: font-semibold,gap-[8px],items-baseline,mb-[6px],mb-[8px],mx-[8px],pb-[calc(24px+env(safe-area-inset-bottom))],px-[8px],rounded-t-[18px],text-[11.5px],text-[14px],w-[36px]": "Approved peek-sheet redesign (concept A): the phone usage sheet is the dock pulled taller, so it takes the dock's corners, handle, padding and type size and drops its own Usage header row; Usage settings moves to a footer below the fold.",
 	"src/lib/frontend/components/input/InputArea.svelte :: mt-1.5,mx-1.5,px-1.5,py-1.5,rounded-3xl": "The composer becomes approved option D (soft square, roomy): 22px corners and 10px padding (20px/9px on phones) so its 10px-cornered buttons sit concentric. Literal px replace the rem tokens because the 12px root renders rem utilities at 0.75x; the status header's negative margins follow the new padding.",
@@ -168,9 +67,9 @@
 	"test/unit/server/ws-rpc-sessions.test.ts :: s,store": "Not classes: words from a deleted test.each title parameterised on whether a store was present. Persistence is now required.",
 	"test/unit/session/session-manager-effect.test.ts :: is,no-op,services,without": "Not classes: words from the title of a deleted test for permission-mode persistence without persistence services. Persistence is now required.",
 	"test/unit/domain/relay/provider-turn-service.test.ts :: abort,,back,falls,present": "Not classes: words from the title of a deleted test for the abort fallback when no orchestration engine is present. The engine is now required.",
-	"test/unit/provider/event-sink-effect-boundary.test.ts :: unknown": "Not a class: this was the error type in EventSink signature strings the test asserts on. The signatures now fail with EventSinkError instead of unknown.",
+	"test/unit/provider/event-sink-effect-boundary.guard.test.ts :: unknown": "Not a class: this was the error type in EventSink signature strings the test asserts on. The signatures now fail with EventSinkError instead of unknown.",
 	"test/e2e/specs/question-flow.spec.ts :: Submitting": "Not a class: this was the submit button's text in a Playwright toContainText assertion. The card is now marked answered on the server's acknowledgement of AnswerQuestion, so the test asserts the answered state instead.",
-	"test/unit/effect/runtime-boundary-grep.test.ts :: above,beforeEach,environment,guard,,same,stories/mocks.ts": "Not classes: these are words from the reason string of a deleted allow-list entry for NotifSettings.stories.ts, a file removed in wave 1.",
+	"test/unit/effect/runtime-boundary-grep.guard.test.ts :: above,beforeEach,environment,guard,,same,stories/mocks.ts": "Not classes: these are words from the reason string of a deleted allow-list entry for NotifSettings.stories.ts, a file removed in wave 1.",
 	"test/unit/components/Menu.test.ts :: data-dropdown-menu-content]": "Not a class: this was a DOM selector in a jsdom assertion that a menu opened inside a native dialog was portaled outside it. The assertion was replaced by a browser story that selects modal menu items by keyboard and pointer.",
 	"test/unit/components/Popover.test.ts :: data-popover-content]": "Not a class: this was a DOM selector in a jsdom assertion that a popover opened inside a native dialog was portaled outside it. The updated assertion checks that it is inside the dialog; the browser story checks its position.",
 	"test/unit/components/Tooltip.test.ts :: data-tooltip-content]": "Not a class: this was a DOM selector in a jsdom assertion that a tooltip opened inside a native dialog was portaled outside it. The updated assertion checks that it is inside the dialog; the browser story checks its position.",
@@ -239,17 +138,17 @@
 	"test/unit/effect/session-manager-service.test.ts :: immediately": "Not a class. The word came from a test name string for the removed roots:false background push; the checker matched it as a token.",
 	"test/unit/effect/session-manager-service.test.ts :: logs": "Not a class. The word came from a test name string for the removed roots:false background push; the checker matched it as a token.",
 	"test/unit/components/chat-layout-ws.test.ts :: daemon,sessions": "Not class tokens: the words of a \"Failed to load daemon sessions\" toast assertion. The daemon list's failure handling moved from ChatLayout into the session store's loadDaemonSessions, so the assertion moved to the store's tests.",
-	"test/unit/effect/runtime-boundary-grep.test.ts :: abort:,claim,invariant),live,outbox,refuses,rolls,runInTransaction,single-live-claim,supersede,transaction": "Not a class. The words came from the reason string of the removed orchestration-command-commit.ts plain-throw allowlist entry (the recommit refusal is now an Effect.fail inside sql.withTransaction); the checker matched the prose as tokens.",
+	"test/unit/effect/runtime-boundary-grep.guard.test.ts :: abort:,claim,invariant),live,outbox,refuses,rolls,runInTransaction,single-live-claim,supersede,transaction": "Not a class. The words came from the reason string of the removed orchestration-command-commit.ts plain-throw allowlist entry (the recommit refusal is now an Effect.fail inside sql.withTransaction); the checker matched the prose as tokens.",
 	"src/lib/frontend/components/layout/Sidebar.svelte :: backdrop-blur-[2px],bg-[rgba(var(--overlay-rgb),0.45)],bottom-0,cursor-col-resize,duration-[250ms],ease-linear,hover:bg-accent/15,inset-y-0,left-0.5,md:hidden,mobile-sidebar-resize,right-0.5,top-0,transition-colors,transition-opacity,w-3,z-[var(--z-drawer-scrim)],z-[var(--z-raised)]": "The phone drawer is gone (vik1.17.6): the session list is the `/` route and fills the screen, so its scrim overlay and mobile resize handle were deleted along with the elements these styled. The desktop resize handle lives in ChatLayout and is untouched.",
 	"src/lib/frontend/components/layout/Sidebar.svelte :: md:min-h-0,md:min-w-0,md:p-1": "The projects button now renders only in the pointer layout, so the phone 44px minimum and its md: reset collapse to plain `p-1`, which is what md: already produced. The phone touch target moved to the list bar's overflow trigger (`min-h-[44px] min-w-[44px]`).",
 	"test/e2e/specs/multi-instance.spec.ts :: hamburger-btn": "A selector string in a test helper, not a class. The hamburger went with the drawer (vik1.17.6).",
 	"src/lib/frontend/components/layout/Sidebar.svelte :: bg-[rgba(var(--overlay-rgb),0.45)]": "The phone drawer's scrim fill, deleted with the drawer (vik1.17.6). Its own key because the token contains a comma.",
 	"test/unit/visual-baseline-uniqueness.test.ts :: desktop,expand,hamburger,hidden,mobile,plus:,sidebar,states": "Prose in a removed test string describing the drawer-open sidebar story, not classes. That story and its baselines were deleted with the drawer (vik1.17.6).",
 	"test/unit/visual-baseline-uniqueness.test.ts :: above,": "Same removed drawer-story prose as the entry above; its own key because the word carries a trailing comma.",
-	"test/unit/effect/runtime-boundary-grep.test.ts :: play(),query": "Not a call site: an allowlist entry for ProjectSwitcher.stories.ts, removed because the file was deleted in conduit-test-vik1.7.",
+	"test/unit/effect/runtime-boundary-grep.guard.test.ts :: play(),query": "Not a call site: an allowlist entry for ProjectSwitcher.stories.ts, removed because the file was deleted in conduit-test-vik1.7.",
 	"src/lib/frontend/components/layout/Sidebar.svelte :: px-1": "The wrapper that padded the project rail, deleted with the rail (conduit-test-vik1.7). The session nav below takes the freed space.",
 	"test/e2e/specs/multi-instance.spec.ts :: project-switcher-dropdown": "Not a call site: a Playwright locator for the switcher dropdown deleted in conduit-test-vik1.7. The spec now drives the sidebar projects panel.",
-	"test/unit/persistence/session-removal-boundary-grep.test.ts :: src/lib/persistence/eviction.ts": "Not a class token: removed a stale guard exception for the already-deleted eviction module.",
+	"test/unit/persistence/session-removal-boundary-grep.guard.test.ts :: src/lib/persistence/eviction.ts": "Not a class token: removed a stale guard exception for the already-deleted eviction module.",
 	"test/unit/persistence/effect-migrations.test.ts :: from,updated_at": "Not class tokens: SQL and test-name words from cases conduit-test-v6co.10 rewrote when these tests moved off the retired node:sqlite migration runner onto the Effect migrator.",
 	"test/unit/persistence/schema.test.ts :: ESCAPE,Session": "Not class tokens: SQL and test-name words from cases conduit-test-v6co.10 rewrote when these tests moved off the retired node:sqlite migration runner onto the Effect migrator.",
 	"vitest.config.ts :: test/unit/effect/sqlite-transactions.test.ts": "Not a class. It is the path of test/unit/effect/sqlite-transactions.test.ts, which tested only the retired node:sqlite wrapper and was deleted in conduit-test-v6co.10; the unit-sqlite include and unit exclude no longer name it.",
@@ -529,6 +428,113 @@
 	"src/lib/frontend/components/ui/SettingsRow.svelte :: gap-3,gap-x-3": "conduit-test-96d9 A: settings rows use the mockup's literal 12px gaps (rem utilities render at 0.75x on the 12px root).",
 	"src/lib/frontend/components/ui/segmented-styles.ts :: bg-border-chip,px-[7px],py-[2px],rounded-[8px],text-[10.5px]": "conduit-test-96d9 D: the `compact` segmented variant is deleted; its last users (Usage's warning and forecast switches) now wear `joined` like the rest of Settings.",
 	"src/lib/frontend/components/ui/field-styles.ts :: h-9,rounded-md": "conduit-test-96d9 G/H: bordered fields follow the mockup's `.inp`/`.sel`: 7px radius and min-height literal px sizes so consumer heights and touch targets win without a collision.",
+	"src/lib/frontend/components/chat/MessageList.svelte :: left-1/2,translate-x-1/2": "The jump-to-latest button moved onto a zero-height sticky rail (so showing or hiding it never changes the scroll range); the rail's justify-center now centres it, so the button's own left-1/2 -translate-x-1/2 centring is gone.",
+	"src/lib/frontend/components/ui/Tile.svelte :: text-text-dimmer": "conduit-test-aoqb.4: the tile sub-line lifts to text-muted; text-dimmer on the chip fill measured 2.52:1 over the dark popover, below even the quiet tier's 3:1.",
+	"src/lib/frontend/components/ui/button-recipes.ts :: bg-error/22": "conduit-test-aoqb.4: danger-soft's tint drops to bg-error/12, the lightest that keeps its error label at 4.5:1 on a dark popover and in the light theme (theme-contrast.test.ts).",
+	"src/lib/frontend/components/ui/button-recipes.ts :: hover:bg-error/30": "conduit-test-aoqb.4: danger-soft's hover tint drops to bg-error/20 to stay one step above the lowered /12 rest tint.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: bg-[rgba(var(--overlay-rgb),0.35)]": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "variant={sessionViewState.compact ? \"scrim\" : \"scrim-clear\"}",
+		"reason": "conduit-test-aoqb.4 fix: Button owns the phone scrim fill; desktop keeps a clear dismissal target."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: data-[state,open]:text-accent": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "variant=\"menu-trigger\"",
+		"reason": "conduit-test-aoqb.4 fix: Button's menu-trigger variant owns the open state."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: open]:bg-accent/16": "conduit-test-aoqb.4 fix: the menu trigger now uses the existing contrast-safe accent-bg token, owned by Button's menu-trigger variant.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: font-bold,h-[12px],min-w-[12px],px-[3px],text-[8px],text-bg": {
+		"movedTo": "src/lib/frontend/components/ui/Badge.svelte",
+		"requires": "variant=\"accent-solid\" size=\"indicator\"",
+		"reason": "conduit-test-aoqb.4 fix: Badge owns the tiny view-update count's fill and type."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: group-active:bg-accent/15,group-data-[state,group-focus-visible:bg-accent/10,group-hover:bg-accent/10,open]:bg-accent/15": {
+		"movedTo": "src/lib/frontend/components/ui/Badge.svelte",
+		"requires": "interactive>",
+		"reason": "conduit-test-aoqb.4 fix: interactive Badge owns the unread chip's hover, focus and open fills."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: justify-start,select-none,whitespace-nowrap": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "layout=\"block\" align=\"start\"",
+		"reason": "conduit-test-aoqb.4 fix: Button's block layout preserves the subtitle's display and interaction."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: min-w-[44px]": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "size=\"touch-icon\"",
+		"reason": "conduit-test-aoqb.4 fix: Button's touch sizes retain 44px targets."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: pl-1,pr-2,rounded-lg,text-base": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "\"navigation\" : \"navigation-pill\"",
+		"reason": "conduit-test-aoqb.4 fix: Button owns the phone and desktop navigation sizes."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: py-[6px],rounded-[9px]": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "size=\"card-action\"",
+		"reason": "conduit-test-aoqb.4 fix: goal-card actions use Button's public card-action size."
+	},
+	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: bg-tool/13,inline-flex,pl-[5px],pr-1.5,py-0,rounded-[6px]": {
+		"movedTo": "src/lib/frontend/components/ui/Badge.svelte",
+		"requires": "variant=\"task\" size=\"task\"",
+		"reason": "conduit-test-aoqb.4 fix: Badge owns the existing phone task-chip recipe."
+	},
+	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: justify-start,leading-[1.5],select-none,text-[11px],text-tool,whitespace-nowrap": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "variant=\"task-row\"",
+		"reason": "conduit-test-aoqb.4 fix: Button owns the phone task row's typography and interaction."
+	},
+	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: compact,min-w-full,w-0": "conduit-test-aoqb.4 fix: the phone-only branch always has compact=true, so its row uses w-full directly. Desktop command chips use the separate desktop branch.",
+	"src/lib/frontend/components/input/InputArea.svelte :: composer-task-dot,gap-1.5,justify-center,pt-[7px]": "conduit-test-aoqb.4: the approved 2026-10-16 audit removes composer task dots and their layout. Live tasks remain visible in the header row and its task panel.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: items-stretch,py-2,text-xs": "conduit-test-aoqb.4: the Final desktop capsule centers its segments; the state menu uses literal pixel padding and text sizes.",
+	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: border,left-4,mt-1,rounded-[14px]": "conduit-test-aoqb.4: desktop task details use the Final floating Surface with a border-chip ring, 16px corners, 20px inset and 8px anchor gap. The phone panel keeps its existing bottom border and geometry.",
+	"src/lib/frontend/components/session/SideThreadsPanel.svelte :: border,mt-1,right-4,rounded-[14px]": "conduit-test-aoqb.4: desktop side threads use the Final floating Surface with a border-chip ring, 16px corners, 16px right inset and 8px anchor gap. The phone panel keeps its existing bottom border and geometry.",
+	"src/lib/frontend/components/session/SessionContextMenu.svelte :: font-mono,grid,inline-flex,items-center,items-start,min-w-0,place-items-center,status.colour,text-text-secondary": {
+		"movedTo": "src/lib/frontend/components/session/SessionSheetBody.svelte",
+		"requires": "<SessionSheetBody",
+		"reason": "conduit-test-voxy.7 moves the phone session header into the body shared by overflow, chevron and long-press sheets. Desktop header styling stays in SessionContextMenu."
+	},
+	"src/lib/frontend/components/session/SessionContextMenu.svelte :: bg-bg,border,flex-1,flex-wrap,gap-1,gap-1.5,gap-3,leading-snug,mt-0.5,pb-[11px],pt-[8px],px-1.5,px-4,py-0.5,rounded,size-[20px],text-[11.5px],text-[15px]": "conduit-test-voxy.7 follows the Final session-menu header: 17px title, 13px metadata, 10px grid gaps, 18px attention glyph, one unwrapped meta line whose branch chip truncates, and no rule under the header. Literal padding replaces rem spacing, and the branch uses a filled chip without an outline. The grid reserves a 32px close circle with a 44px touch area.",
+	"src/lib/frontend/components/ui/LabelledGridGroup.svelte :: text-text-dimmer": "conduit-test-voxy.6: the phone sheet group labels (Triage, Session) move from text-dimmer to text-muted. The spec's --text3 measures 3.43:1 on the sheet and fails the gated SessionBar a11y check (WCAG AA needs 4.5:1 at 12.5px).",
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: h-[4px],h-full,whitespace-nowrap": {
+		"movedTo": "src/lib/frontend/components/ui/QuotaMeter.svelte",
+		"requires": "<QuotaMeter",
+		"reason": "conduit-test-aoqb.12: the existing usage meter owns the 4px track, fill and unbroken percentage caption in the Final account cards."
+	},
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: border": {
+		"movedTo": "src/lib/frontend/components/ui/Surface.svelte",
+		"requires": "<Surface",
+		"reason": "conduit-test-aoqb.12: Surface owns the popover border; the model lock notice becomes a borderless chip inset."
+	},
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: bg-[var(--account-color)],bg-border,border-dashed,gap-2.5,last:border-b-0,mb-[2px],mb-[5px],min-h-[46px],mt-[9px],pb-[4px],rounded-[2px],rounded-none,text-[10px],text-sm,tracking-[0.07em],tracking-[0.5px],uppercase,w-16": "conduit-test-aoqb.12: the approved Final model picker replaces the account-coloured full-width meter with QuotaMeter's neutral/semantic 26px usage meter, uppercase section captions with 12px sentence case, and ruled square rows with icon-led 36px rows (50px phone targets), 10px corners and intrinsic trailing values. The popover uses 6px outer padding and its shared primitives own control appearance.",
+	"src/lib/frontend/components/ui/segmented-styles.ts :: bg-border-subtle,bg-text,flex-wrap,font-semibold,gap-0.5,gap-[3px],px-0.5,py-0.5,py-1.5,rounded-[7px],text-bg": "conduit-test-aoqb.12: the picker and picker-context recipes lost their last consumer when the Final model picker moved to the joined segment, so they and their SegmentedControl stories are deleted.",
+	"src/lib/frontend/components/input/SkillHighlightBackdrop.svelte :: z-0": "conduit-test-ahu8.12: the mirror must not create a stacking context. Reference remove buttons use z-index 20 to receive clicks above the textarea at z-index 10; all other mirror content remains behind the textarea.",
+	"src/lib/frontend/components/overlays/ClaudeSettingsTab.svelte :: max-w-full": {
+		"movedTo": "src/lib/frontend/components/ui/SettingsPicker.svelte",
+		"requires": "<SettingsPicker",
+		"reason": "conduit-test-aoqb.10: the Final value picker owns its maximum width."
+	},
+	"src/lib/frontend/components/overlays/ClaudeSettingsTab.svelte :: w-[220px]": "conduit-test-aoqb.10: Final settings values use an intrinsic-width borderless picker instead of a fixed-width native field.",
+	"src/lib/frontend/components/overlays/VisibilitySettingsTab.svelte :: w-[100px],w-[220px]": "conduit-test-aoqb.10: Final model, effort and context values use intrinsic-width pickers. Model labels retain a 220px maximum and truncate instead of reserving a fixed field width.",
+	"src/lib/frontend/components/overlays/UsageSettingsTab.svelte :: leading-[1.45],rounded-[12px]": {
+		"movedTo": "src/lib/frontend/components/ui/SettingsBanner.svelte",
+		"requires": "<SettingsBanner",
+		"reason": "conduit-test-aoqb.10: the shared Final settings banner owns its corners and line height."
+	},
+	"src/lib/frontend/components/overlays/UsageSettingsTab.svelte :: bg-bg,bg-fill-amber/[0.05],bg-fill-red/[0.06],border-fill-amber/35,border-fill-red/40,headline.limited,headline.warning,px-[12px],py-[8px]": "conduit-test-aoqb.10: set-ban replaces the outlined fleet headline with an 11% semantic tint over settings-card, 11px/14px padding and neutral text. The existing limited/warning expressions now select SettingsBanner's tone; they are not removed classes.",
+	"src/lib/frontend/components/ui/SettingsGroup.svelte :: rotate-90,transition-transform,truncate": {
+		"movedTo": "src/lib/frontend/components/ui/SettingsRow.svelte",
+		"requires": "<SettingsRow",
+		"reason": "conduit-test-aoqb.10: collapsible headers reuse the Final navigation row's chevron and summary."
+	},
+	"src/lib/frontend/components/ui/SettingsGroup.svelte :: border-border-subtle,duration-200,font-normal,open,text-[11.5px],text-center,w-[10px]": "conduit-test-aoqb.10: Final cards are borderless with settings-separator hairlines. set-col uses a 13px chevron, 13.5px label and 12px summary, replacing the old tiny text chevron and typography. open is now a SettingsRow prop, not a removed class.",
+	"src/lib/frontend/components/ui/SettingsRow.svelte :: leading-[1.35],text-[11px],text-[12.5px]": "conduit-test-aoqb.10: Final settings rows use 13.5px labels (15px on phones) and 12px descriptions with 1.4 line height.",
+	"src/lib/frontend/components/ui/segmented-styles.ts :: bg-accent/10,gap-1.5": "conduit-test-aoqb.10: the `field` segmented variant is deleted; SegmentedControl now defaults to `joined` and nothing selected `field`.",
+	"src/lib/frontend/components/ui/segmented-styles.ts :: bg-accent-bg,border-l,first:border-l-0,max-md:min-w-[36px],px-[9px],py-[4px]": "conduit-test-aoqb.10: set-seg intentionally replaces the bordered accent segments with a chip track, raised neutral selection, 10px horizontal padding and 24px desktop height. Phone options retain a 44px touch target.",
+	"test/unit/provider/event-sink-effect-boundary.test.ts :: unknown": "Not a class: this was the error type in EventSink signature strings the test asserts on. The signatures now fail with EventSinkError instead of unknown.",
+	"test/unit/effect/runtime-boundary-grep.test.ts :: above,beforeEach,environment,guard,,same,stories/mocks.ts": "Not classes: these are words from the reason string of a deleted allow-list entry for NotifSettings.stories.ts, a file removed in wave 1.",
+	"test/unit/effect/runtime-boundary-grep.test.ts :: abort:,claim,invariant),live,outbox,refuses,rolls,runInTransaction,single-live-claim,supersede,transaction": "Not a class. The words came from the reason string of the removed orchestration-command-commit.ts plain-throw allowlist entry (the recommit refusal is now an Effect.fail inside sql.withTransaction); the checker matched the prose as tokens.",
+	"test/unit/effect/runtime-boundary-grep.test.ts :: play(),query": "Not a call site: an allowlist entry for ProjectSwitcher.stories.ts, removed because the file was deleted in conduit-test-vik1.7.",
+	"test/unit/persistence/session-removal-boundary-grep.test.ts :: src/lib/persistence/eviction.ts": "Not a class token: removed a stale guard exception for the already-deleted eviction module.",
 	"src/lib/frontend/components/overlays/InstancesSettingsTab.svelte :: whitespace-nowrap": "conduit-test-dc8k.4: the joined Type control overflowed the card at 393px because its labels could not wrap. max-w-full caps it at the card width and lets each option label wrap to two lines, keeping all three readable and selectable on phones; desktop is unchanged.",
 	"src/lib/frontend/components/chat/ActivityStrip.svelte :: focus-visible:ring-brand-b": {
 		"renamedTo": "focus-visible:ring-success",
@@ -959,7 +965,7 @@
 		"requires": "<ComposerToken ",
 		"reason": "conduit-test-aoqb.6 review moves recognized-token appearance, including the goal variant, into ui/ComposerToken. The feature supplies the token text and goal state."
 	},
-	"src/lib/frontend/components/input/InputArea.svelte :: pl-[4px]": "conduit-test-aoqb.6 review: the Words context percentage follows a literal middle-dot separator like the spec's `feat/typed-session-list ● · 38%`, so the dot supplies the spacing through the row gap and the left padding goes.",
+	"src/lib/frontend/components/input/InputArea.svelte :: pl-[4px]": "conduit-test-aoqb.6 review: the Words context percentage follows a literal middle-dot separator like the spec's `feat/typed-session-list \u25cf \u00b7 38%`, so the dot supplies the spacing through the row gap and the left padding goes.",
 	"src/lib/frontend/components/input/UsageLimitStrip.svelte :: gap-[5px],px-[10px]": "conduit-test-aoqb.6 review: Button has no class merging, so call-site gap and padding fought the composer-chip size recipe in stylesheet order. The composer-chip size now owns the 5px gap and 9px sides for every strip chip.",
 	"src/lib/frontend/components/input/UsageWarningStrip.svelte :: gap-[5px],justify-center": "conduit-test-aoqb.6 review: the composer-chip size recipe owns the 5px gap, and phone centring stays on the compact branch (flex-1 justify-center); the always-on justify-center duplicated it.",
 	"src/lib/frontend/components/input/UsageLimitStrip.svelte :: min-w-0": "conduit-test-aoqb.6: the limit copy keeps a readable minimum width (min-w-[min(100%,16em)]) so the recovery actions wrap below it instead of squeezing it to a sliver.",

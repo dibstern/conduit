@@ -1,7 +1,8 @@
 // Failure modes: a queued handoff without a provider/model leaves no message;
 // fallback placement consumes files without storing them; the queue fails to pause.
-import { SqlClient } from "@effect/sql";
+
 import { Effect, Layer, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
 import { Usage } from "../../../../src/lib/domain/daemon/Services/usage.js";
 import { ContinuationTag } from "../../../../src/lib/domain/relay/Services/continuation.js";

@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import type { SessionGoalChangedPayload } from "../../../src/lib/contracts/stored-event.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -60,7 +60,7 @@ describe("persisted goal details", () => {
 				turnCount: 0,
 				tokensSinceStart: 0,
 			});
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("excludes checks from a previous goal with a different setAt", () =>
@@ -79,7 +79,7 @@ describe("persisted goal details", () => {
 				checks: [],
 				tokensSinceStart: 0,
 			});
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -115,7 +115,7 @@ describe("persisted goal details", () => {
 						reason: "One failure remains",
 					},
 				]);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -147,7 +147,7 @@ describe("persisted goal details", () => {
 						reason: "Still failing",
 					},
 				]);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("retains met-goal checks using endedGoal.setAt", () =>
@@ -178,7 +178,7 @@ describe("persisted goal details", () => {
 				],
 				tokensSinceStart: 0,
 			});
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("returns null tokens and no stale checks without a goal", () =>
@@ -198,7 +198,7 @@ describe("persisted goal details", () => {
 				checks: [],
 				tokensSinceStart: null,
 			});
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect(
@@ -232,7 +232,7 @@ describe("persisted goal details", () => {
 				expect((yield* read.getGoalDetails("selected")).tokensSinceStart).toBe(
 					150,
 				);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("uses zero cumulative usage for empty history", () =>
@@ -241,6 +241,6 @@ describe("persisted goal details", () => {
 			yield* changeGoal({ sessionId: "selected", goal }, 100);
 			const read = yield* ReadQueryEffectTag;
 			expect((yield* read.getGoalDetails("selected")).tokensSinceStart).toBe(0);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });

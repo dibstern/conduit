@@ -215,11 +215,11 @@ describe("runner host at-most-once delivery through Claude's process seam", () =
 								},
 								command.attempt_count,
 							)
-							.pipe(Effect.either, Effect.timeout("15 seconds")),
+							.pipe(Effect.result, Effect.timeout("15 seconds")),
 					);
 					expect(result).toMatchObject({
-						_tag: "Left",
-						left: { code: "runner_send_uncertain", retryable: false },
+						_tag: "Failure",
+						failure: { code: "runner_send_uncertain", retryable: false },
 					});
 					failures.push(result);
 				}

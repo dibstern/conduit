@@ -44,12 +44,12 @@ describe("Claude one-shot", () => {
 				const client = makeClient(() =>
 					reply([{ type: "result", result: text }]),
 				);
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					client.ask("Answer in JSON", answerSchema, "opus"),
 				);
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: { _tag: "ClaudeOneShotFailure", reason: "schema" },
+					_tag: "Failure",
+					failure: { _tag: "ClaudeOneShotFailure", reason: "schema" },
 				});
 			}),
 	);
@@ -66,12 +66,12 @@ describe("Claude one-shot", () => {
 						throw cause;
 					})();
 				});
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					client.ask("Answer", Schema.String, "opus"),
 				);
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: { _tag: "ClaudeOneShotFailure", reason: "query", cause },
+					_tag: "Failure",
+					failure: { _tag: "ClaudeOneShotFailure", reason: "query", cause },
 				});
 			}),
 	);
@@ -100,12 +100,12 @@ describe("Claude one-shot", () => {
 						{ type: "result", ...result },
 					]),
 				);
-				const response = yield* Effect.either(
+				const response = yield* Effect.result(
 					client.ask("Answer", Schema.String, "sonnet"),
 				);
 				expect(response).toMatchObject({
-					_tag: "Left",
-					left: {
+					_tag: "Failure",
+					failure: {
 						_tag: "ClaudeOneShotFailure",
 						reason: "query",
 						cause: expect.objectContaining({
@@ -142,10 +142,10 @@ describe("Claude one-shot", () => {
 					reply([{ type: "result", result: "  " }]),
 				);
 				expect(
-					yield* Effect.either(client.ask("Answer", Schema.String, "opus")),
+					yield* Effect.result(client.ask("Answer", Schema.String, "opus")),
 				).toMatchObject({
-					_tag: "Left",
-					left: { _tag: "ClaudeOneShotFailure", reason: "empty" },
+					_tag: "Failure",
+					failure: { _tag: "ClaudeOneShotFailure", reason: "empty" },
 				});
 			}),
 	);
@@ -164,7 +164,7 @@ describe("Claude one-shot", () => {
 					yield { type: "result", result: "Cancelled" };
 				})();
 			});
-			const fiber = yield* Effect.fork(
+			const fiber = yield* Effect.forkChild(
 				client.ask("Answer", Schema.String, "opus"),
 			);
 			yield* Deferred.await(started);

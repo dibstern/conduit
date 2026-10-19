@@ -1,18 +1,9 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcTest } from "@effect/rpc";
-import { SqlClient } from "@effect/sql";
-import {
-	Context,
-	Effect,
-	Exit,
-	Fiber,
-	Layer,
-	Option,
-	Scope,
-	Stream,
-} from "effect";
+import { Context, Effect, Exit, Fiber, Layer, Scope, Stream } from "effect";
+import { RpcTest } from "effect/rpc";
+import { SqlClient } from "effect/sql";
 import { describe, expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
@@ -21,6 +12,7 @@ import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/accoun
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { Usage } from "../../../src/lib/domain/daemon/Services/usage.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import {
 	ContinuationTag,
 	makeContinuation,
@@ -32,6 +24,10 @@ import {
 	ProviderTurnServiceTag,
 	STOP_ABORT_WAIT_MS,
 } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
+import {
+	ConfigTag,
+	LoggerTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import {
 	SessionInboxLive,
@@ -395,6 +391,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 					});
 				},
 			}).pipe(
+				Layer.provideMerge(SessionWorkspaceLive),
 				Layer.provideMerge(
 					Layer.mergeAll(
 						persistence,
@@ -405,13 +402,18 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 						Layer.succeed(AccountDirectory, accounts),
 						Layer.succeed(OpenCodeAPITag, api),
 						Layer.succeed(
+							ConfigTag,
+							makeMockConfig({ projectDir: scratch, configDir: scratch }),
+						),
+						Layer.succeed(LoggerTag, makeMockLogger()),
+						Layer.succeed(
 							OpenCodeInstancesTag,
 							makeOpenCodeInstancesStub({ opencode: api }),
 						),
 					),
 				),
 			);
-			const layer = Layer.unwrapScoped(
+			const layer = Layer.unwrap(
 				Effect.gen(function* () {
 					const wired = yield* getOrchestrationLayer;
 					const dispatch = wired.engine.dispatchEffect.bind(wired.engine);
@@ -432,7 +434,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 								? Effect.promise(async () => {
 										started.resolve();
 										await release.promise;
-									}).pipe(Effect.zipRight(dispatch(command)))
+									}).pipe(Effect.andThen(dispatch(command)))
 								: dispatch(command),
 					);
 					const ingress = yield* makeEffectOpenCodeRuntimeIngress(
@@ -547,7 +549,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 																		event.type === "input.interrupt_requested",
 																)
 																	? cancelAtReservation.pipe(
-																			Effect.zipRight(Effect.yieldNow()),
+																			Effect.andThen(Effect.yieldNow),
 																		)
 																	: Effect.void,
 															),
@@ -613,7 +615,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 						].includes(scenario)
 							? ["running"]
 							: ["running", "first", "selected", "last"]) {
-							yield* client.input.submit({
+							yield* client["input.submit"]({
 								sessionId,
 								inputId,
 								text: `${inputId} plain message`,
@@ -626,7 +628,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 						}
 						const secondClient = yield* RpcTest.makeClient(WsRpcGroup);
 						const runNow = (rpc = client) =>
-							rpc.input.sendNow({
+							rpc["input.sendNow"]({
 								sessionId,
 								inputId: "selected",
 								interrupt: true,
@@ -656,7 +658,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 							if (scenario === "other-queue-during-continuation") {
 								const other = `${sessionId}-other`;
 								for (const inputId of ["other-running", "other-next"]) {
-									yield* client.input.submit({
+									yield* client["input.submit"]({
 										sessionId: other,
 										inputId,
 										text: `${inputId} plain message`,
@@ -673,7 +675,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 								yield* Effect.sync(() => releaseContinuation.resolve());
 								return;
 							}
-							const stopping = yield* Effect.fork(runNow());
+							const stopping = yield* Effect.forkChild(runNow());
 							yield* sql`SELECT 1 FROM events WHERE session_id = ${sessionId}
 									AND type = 'input.interrupt_requested'`.pipe(
 								Effect.delay("1 millis"),
@@ -682,9 +684,10 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 							);
 							// The switch's hold must not keep the inbox permit.
 							expect(
-								yield* client.input
-									.cancel({ sessionId, inputId: "last" })
-									.pipe(Effect.timeout("500 millis")),
+								yield* client["input.cancel"]({
+									sessionId,
+									inputId: "last",
+								}).pipe(Effect.timeout("500 millis")),
 							).toEqual({ ok: true });
 							yield* Effect.sync(() => releaseStop.resolve());
 							yield* Effect.sync(() => releaseContinuation.resolve());
@@ -726,14 +729,12 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 							if (scenario === "recover-registration-race") {
 								yield* Effect.promise(() => registrationStarted.promise);
 								yield* finish();
-								yield* client.input
-									.submit({
-										sessionId,
-										inputId: "concurrent",
-										text: "concurrent plain message",
-										delivery: "queue",
-									})
-									.pipe(Effect.timeout("500 millis"));
+								yield* client["input.submit"]({
+									sessionId,
+									inputId: "concurrent",
+									text: "concurrent plain message",
+									delivery: "queue",
+								}).pipe(Effect.timeout("500 millis"));
 								expect(sent).toEqual(["running"]);
 								yield* Effect.sync(() => releaseRegistration.resolve());
 							}
@@ -758,7 +759,10 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 							const owner = yield* Scope.make();
 							yield* Effect.addFinalizer(() => Scope.close(owner, Exit.void));
 							const first = Context.get(
-								yield* Layer.buildWithScope(ProviderTurnServiceLive, owner),
+								yield* Layer.buildWithScope(
+									Layer.fresh(ProviderTurnServiceLive),
+									owner,
+								),
 								ProviderTurnServiceTag,
 							);
 							yield* first.beginStop({
@@ -779,7 +783,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 							);
 							const rebuilt = Context.get(
 								yield* Layer.buildWithScope(
-									ProviderTurnServiceLive,
+									Layer.fresh(ProviderTurnServiceLive),
 									rebuiltOwner,
 								),
 								ProviderTurnServiceTag,
@@ -793,7 +797,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 									sessionId,
 								}),
 							).toBe(sessionId);
-							const dispatch = yield* Effect.either(
+							const dispatch = yield* Effect.result(
 								rebuilt.sendTurn({
 									clientId: "rebuilt-owner",
 									commandId: "replacement",
@@ -801,7 +805,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 									text: "replacement plain message",
 								}),
 							);
-							expect(dispatch._tag).toBe("Right");
+							expect(dispatch._tag).toBe("Success");
 							yield* awaitCondition(() => sent.includes("replacement"));
 							yield* Effect.sync(() => releaseStop.resolve());
 							yield* Effect.sleep("30 millis");
@@ -831,12 +835,14 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 												})),
 											)
 									: runNow();
-						const firstRequest = yield* Effect.fork(request);
+						const firstRequest = yield* Effect.forkChild(request);
 						if (scenario === "cancel-after-reservation")
-							cancelAtReservation = Fiber.interruptFork(firstRequest);
+							cancelAtReservation = Effect.sync(() =>
+								firstRequest.interruptUnsafe(),
+							);
 						const secondRequest =
 							scenario === "double-run-now"
-								? yield* Effect.fork(runNow(secondClient))
+								? yield* Effect.forkChild(runNow(secondClient))
 								: undefined;
 						yield* awaitCondition(() => stopRequests.length >= 1);
 						if (scenario === "never-settling") {
@@ -851,27 +857,23 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 								? ["first", "last"]
 								: ["selected", "first"])
 								expect(
-									yield* client.input
-										.cancel({ sessionId, inputId })
-										.pipe(Effect.timeout("500 millis")),
+									yield* client["input.cancel"]({ sessionId, inputId }).pipe(
+										Effect.timeout("500 millis"),
+									),
 								).toEqual({ ok: true });
-							yield* client.input
-								.submit({
-									sessionId,
-									inputId: "edited",
-									text: "edited plain message",
-									delivery: "queue",
-								})
-								.pipe(Effect.timeout("500 millis"));
+							yield* client["input.submit"]({
+								sessionId,
+								inputId: "edited",
+								text: "edited plain message",
+								delivery: "queue",
+							}).pipe(Effect.timeout("500 millis"));
 							for (const inputId of ["other-running", "other-next"])
-								yield* client.input
-									.submit({
-										sessionId: `${sessionId}-other`,
-										inputId,
-										text: `${inputId} plain message`,
-										delivery: "queue",
-									})
-									.pipe(Effect.timeout("500 millis"));
+								yield* client["input.submit"]({
+									sessionId: `${sessionId}-other`,
+									inputId,
+									text: `${inputId} plain message`,
+									delivery: "queue",
+								}).pipe(Effect.timeout("500 millis"));
 							yield* awaitCondition(() => sent.includes("other-running"));
 							yield* finish(`${sessionId}-other`);
 							yield* awaitCondition(() => sent.includes("other-next"));
@@ -899,7 +901,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 							yield* Effect.sync(() => releaseStop.resolve());
 							yield* Effect.sleep("30 millis");
 							expect(providerTurns.turnFences(sessionId).stopping).toBe(false);
-							yield* client.input.submit({
+							yield* client["input.submit"]({
 								sessionId,
 								inputId: "retry",
 								text: "retry plain message",
@@ -922,7 +924,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 								yield* finish();
 							if (provider === "opencode")
 								yield* Effect.sleep(STOP_ABORT_WAIT_MS + 100);
-							yield* client.input.submit({
+							yield* client["input.submit"]({
 								sessionId,
 								inputId: "retry",
 								text: "retry plain message",
@@ -942,16 +944,13 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 							return;
 						}
 						if (["manual-stop-send", "manual-stop-steer"].includes(scenario))
-							yield* client.input
-								.submit({
-									sessionId,
-									inputId: "selected",
-									text: "selected plain message",
-									images: [image],
-									delivery:
-										scenario === "manual-stop-steer" ? "steer" : "queue",
-								})
-								.pipe(Effect.timeout("500 millis"));
+							yield* client["input.submit"]({
+								sessionId,
+								inputId: "selected",
+								text: "selected plain message",
+								images: [image],
+								delivery: scenario === "manual-stop-steer" ? "steer" : "queue",
+							}).pipe(Effect.timeout("500 millis"));
 						if (
 							[
 								"natural-completion-race",
@@ -976,7 +975,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 						);
 						expect(stopRequests).toHaveLength(1);
 						if (manual && provider === "opencode")
-							expect(Option.isNone(yield* Fiber.poll(firstRequest))).toBe(true);
+							expect(firstRequest.pollUnsafe() === undefined).toBe(true);
 						else if (scenario === "cancel-after-reservation") {
 							expect((yield* Fiber.await(firstRequest))._tag).toBe("Failure");
 							expect(providerTurns.turnFences(sessionId).stopping).toBe(
@@ -989,9 +988,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 								),
 							).toEqual({ ok: true });
 						if (secondRequest)
-							expect(Option.isSome(yield* Fiber.poll(secondRequest))).toBe(
-								true,
-							);
+							expect(secondRequest.pollUnsafe() !== undefined).toBe(true);
 						yield* Effect.sync(() => releaseStop.resolve());
 						if (scenario !== "cancel-after-reservation")
 							expect(yield* Fiber.join(firstRequest)).toEqual({ ok: true });

@@ -6,6 +6,7 @@ import type {
 	LegacyRunnerPermissionMode as LegacyPermissionMode,
 	LegacyRunnerSettings as Settings,
 } from "../claude/claude-runner-snapshot.js";
+import type { ClaudeSubagentTranscriptSnapshot } from "../claude/types.js";
 import type {
 	PermissionDecision,
 	PermissionRequest,
@@ -144,6 +145,10 @@ export type SessionOutput =
 					};
 			  }
 			| {
+					readonly type: "read-subagent-transcript";
+					readonly childSessionId: string;
+			  }
+			| {
 					readonly type: "ensure-subagent-session";
 					readonly input: {
 						readonly childSessionId: string;
@@ -157,7 +162,9 @@ export type SessionOutput =
 	  ));
 
 /** Plain-data reply to an output operation; events and notifications return {}. */
-export type SessionOutputReply = Readonly<Record<string, never>>;
+export interface SessionOutputReply {
+	readonly subagentTranscript?: ClaudeSubagentTranscriptSnapshot;
+}
 
 /** Failure replies preserve the SDK fields used by the side-effect reactor. */
 export interface SessionFailure {
@@ -171,6 +178,8 @@ export interface SessionFailure {
 /** Effects are execution carriers; only command/output/reply data crosses here. */
 export interface SessionRunner {
 	readonly recoverEffect?: Effect.Effect<void, SessionFailure>;
+	/** Process ownership in every lifecycle state, even when no session is usable. */
+	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean>;
 	/** Local runner lifecycle state, including work outside the foreground turn. */
 	hasPendingSubagentFinalizers?(sessionId: string): boolean;
 	/** Undefined means no runtime session; null means its cursor is cleared. */

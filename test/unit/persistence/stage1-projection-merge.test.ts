@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { describe, expect, it } from "vitest";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
 import {
@@ -77,7 +77,7 @@ describe("merged Effect projection", () => {
 						version: 43,
 					},
 				]);
-			}).pipe(Effect.provide(database)),
+			}).pipe(Effect.provide(database, { local: true })),
 		);
 	});
 
@@ -110,7 +110,7 @@ describe("merged Effect projection", () => {
 				expect(
 					yield* sql`SELECT id, version FROM messages WHERE id = 'compaction-7'`,
 				).toEqual([{ id: "compaction-7", version: 42 }]);
-			}).pipe(Effect.provide(database)),
+			}).pipe(Effect.provide(database, { local: true })),
 		);
 	});
 
@@ -146,7 +146,7 @@ describe("merged Effect projection", () => {
 				expect(
 					yield* sql`SELECT woken_reason, version FROM sessions WHERE id = 'root'`,
 				).toEqual([{ woken_reason: "approval", version: 43 }]);
-			}).pipe(Effect.provide(database)),
+			}).pipe(Effect.provide(database, { local: true })),
 		);
 	});
 
@@ -183,7 +183,7 @@ describe("merged Effect projection", () => {
 				expect(
 					yield* sql`SELECT cost, tokens_in, tokens_out FROM turns WHERE id = 'turn'`,
 				).toEqual([{ cost: 3.5, tokens_in: 14, tokens_out: 2 }]);
-			}).pipe(Effect.provide(database)),
+			}).pipe(Effect.provide(database, { local: true })),
 		);
 	});
 });

@@ -4,9 +4,9 @@
 // process-wide, including across ledger instances sharing that store.
 
 import { randomUUID } from "node:crypto";
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 
 /** An immutable originating turn, message, question, or permission identity. */
 export interface SessionAlert {
@@ -31,10 +31,10 @@ export interface AlertLedger {
 	) => Effect.Effect<boolean, E | SqlError, R>;
 }
 
-export class AlertLedgerTag extends Context.Tag("AlertLedger")<
+export class AlertLedgerTag extends Context.Service<
 	AlertLedgerTag,
 	AlertLedger
->() {}
+>()("AlertLedger") {}
 
 export const makeAlertLedger: Effect.Effect<
 	AlertLedger,
@@ -93,14 +93,14 @@ export const makeAlertLedger: Effect.Effect<
 					yield* send.pipe(
 						Effect.onError(() =>
 							sql`DELETE FROM sent_alerts WHERE claim_id = ${claimId}`.pipe(
-								Effect.catchAll((cause) =>
+								Effect.catch((cause) =>
 									Effect.logError(
 										`Could not release pending alert; replay can retry: ${cause}`,
 									),
 								),
 							),
 						),
-						Effect.zipRight(
+						Effect.andThen(
 							sql`UPDATE sent_alerts SET state = 'delivered', sent_at = ${Date.now()}
 						WHERE claim_id = ${claimId}`,
 						),

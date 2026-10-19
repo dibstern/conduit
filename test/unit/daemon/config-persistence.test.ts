@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 
 import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
@@ -45,6 +45,7 @@ function makeSampleConfig(overrides?: Partial<DaemonConfig>): DaemonConfig {
 		keepAwake: false,
 		autoSettleAfterDays: 3,
 		autoArchiveAfterDays: 30,
+		autoDeleteArchivedAfterDays: 30,
 		projects: [],
 		...overrides,
 	};
@@ -82,6 +83,35 @@ describe("daemon config load errors", () => {
 });
 
 describe("loadDaemonConfigResult", () => {
+	it.each([
+		undefined,
+		null,
+		7,
+		90,
+	])("defaults or persists archived retention %s", async (days) => {
+		const { autoDeleteArchivedAfterDays: _days, ...legacy } =
+			makeSampleConfig();
+		await saveDaemonConfig(
+			days === undefined
+				? legacy
+				: makeSampleConfig({ autoDeleteArchivedAfterDays: days }),
+			tempDir,
+		);
+		const config = Either.getOrThrowWith(
+			loadDaemonConfigResult(tempDir),
+			(error) => error,
+		);
+		expect(config.autoDeleteArchivedAfterDays).toBe(
+			days === undefined ? 30 : days,
+		);
+	});
+	it.each([0, -1, 1.5, 91])("rejects invalid archived retention %s", (days) => {
+		writeFileSync(
+			join(tempDir, "daemon.json"),
+			JSON.stringify(makeSampleConfig({ autoDeleteArchivedAfterDays: days })),
+		);
+		expect(loadDaemonConfigResult(tempDir)._tag).toBe("Failure");
+	});
 	it("round-trips per-folder repository identities and accepts old projects without them", async () => {
 		const project = {
 			path: "/tmp/repo",
@@ -158,8 +188,8 @@ describe("loadDaemonConfigResult", () => {
 			tempDir,
 		);
 		expect(loadDaemonConfigResult(tempDir)).toMatchObject({
-			_tag: "Left",
-			left: { _tag: "Invalid", path: join(tempDir, "daemon.json") },
+			_tag: "Failure",
+			failure: { _tag: "Invalid", path: join(tempDir, "daemon.json") },
 		});
 	});
 	it("returns parsed config from valid JSON file", () => {
@@ -184,8 +214,8 @@ describe("loadDaemonConfigResult", () => {
 
 	it("returns NotFound when file doesn't exist", () => {
 		expect(loadDaemonConfigResult(tempDir)).toMatchObject({
-			_tag: "Left",
-			left: { _tag: "NotFound", path: join(tempDir, "daemon.json") },
+			_tag: "Failure",
+			failure: { _tag: "NotFound", path: join(tempDir, "daemon.json") },
 		});
 	});
 
@@ -194,16 +224,16 @@ describe("loadDaemonConfigResult", () => {
 		writeFileSync(join(tempDir, "daemon.json"), "{ not valid json !!!");
 
 		expect(loadDaemonConfigResult(tempDir)).toMatchObject({
-			_tag: "Left",
-			left: { _tag: "Invalid", path: join(tempDir, "daemon.json") },
+			_tag: "Failure",
+			failure: { _tag: "Invalid", path: join(tempDir, "daemon.json") },
 		});
 	});
 
 	it("handles missing configDir gracefully", () => {
 		const nonExistentDir = join(tempDir, "does", "not", "exist");
 		expect(loadDaemonConfigResult(nonExistentDir)).toMatchObject({
-			_tag: "Left",
-			left: { _tag: "NotFound", path: join(nonExistentDir, "daemon.json") },
+			_tag: "Failure",
+			failure: { _tag: "NotFound", path: join(nonExistentDir, "daemon.json") },
 		});
 	});
 });

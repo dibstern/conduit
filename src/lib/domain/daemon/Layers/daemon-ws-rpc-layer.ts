@@ -6,6 +6,7 @@ import {
 	PubSub,
 	Queue,
 	Ref,
+	Semaphore,
 	Stream,
 } from "effect";
 import { hashPin } from "../../../auth.js";
@@ -99,7 +100,7 @@ import {
 	allProjects,
 	broadcastProjectList,
 	type ProjectRegistryTag,
-	type ProjectSaveLockTag,
+	ProjectSaveLockTag,
 	projectInfos,
 	removeProjectFromEffectRegistry,
 	resolveSessionMode,
@@ -118,12 +119,12 @@ import {
 	type TailscaleCliTag,
 } from "./tailscale-serve-layer.js";
 
-export class DaemonWsRpcHandlersTag extends Context.Tag("DaemonWsRpcHandlers")<
+export class DaemonWsRpcHandlersTag extends Context.Service<
 	DaemonWsRpcHandlersTag,
 	DaemonRpcHandlers
->() {}
+>()("DaemonWsRpcHandlers") {}
 
-export const DaemonWsRpcHandlersLive = Layer.scoped(
+export const DaemonWsRpcHandlersLive = Layer.effect(
 	DaemonWsRpcHandlersTag,
 	Effect.gen(function* () {
 		const { configDir } = yield* Ref.get(yield* DaemonStateTag);
@@ -166,8 +167,8 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			cwd: configDir,
 		}).pipe(Effect.provide(yield* PersistenceStore));
 		// Serialize process changes together with their config/persistence updates.
-		const keepAwakeLock = yield* Effect.makeSemaphore(1);
-		const tailscaleServeLock = yield* Effect.makeSemaphore(1);
+		const keepAwakeLock = yield* Semaphore.make(1);
+		const tailscaleServeLock = yield* Semaphore.make(1);
 		const auth = yield* AuthManagerTag;
 		const browserConnections = yield* BrowserRpcConnectionsTag;
 		const invalidateBrowsers = () => {
@@ -184,7 +185,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		// them when it sees a new value (conduit-test-ni8.16.2).
 		let sessionsRevision = 0;
 		const subscription = yield* PubSub.subscribe(bus);
-		yield* Stream.fromQueue(subscription).pipe(
+		yield* Stream.fromSubscription(subscription).pipe(
 			Stream.runForEach((event) => {
 				if (event._tag === "GlobalSettingChanged")
 					return Effect.gen(function* () {
@@ -210,7 +211,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 					return Effect.sync(() => {
 						for (const subscriber of listSubscribers)
 							if (subscriber.list === list)
-								Queue.unsafeOffer(subscriber.changed, undefined);
+								Queue.offerUnsafe(subscriber.changed, undefined);
 					});
 				return Effect.void;
 			}),
@@ -327,7 +328,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				| DaemonConfigRefTag
 			>,
 		) =>
-			Stream.unwrapScoped(
+			Stream.unwrap(
 				Effect.gen(function* () {
 					const subscriber = { list, changed: yield* Queue.sliding<void>(1) };
 					yield* Effect.acquireRelease(
@@ -360,13 +361,14 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						"projects",
 						Effect.gen(function* () {
 							const projects = yield* projectInfos;
-							const { newSessionProject } = yield* Ref.get(
+							const { newSessionProject, projectOrder } = yield* Ref.get(
 								yield* DaemonConfigRefTag,
 							);
 							return {
 								_tag: "projects" as const,
 								projects,
 								...(newSessionProject !== undefined && { newSessionProject }),
+								...(projectOrder !== undefined && { projectOrder }),
 							};
 						}),
 					),
@@ -380,7 +382,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			sessionCreated: (projectSlug) =>
 				run(rememberNewSessionProject(projectSlug)).pipe(
-					Effect.catchAll((error) =>
+					Effect.catch((error) =>
 						Effect.logWarning(
 							`Could not remember the new-session project: ${error.message}`,
 						),
@@ -622,6 +624,27 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 							: new WsRpcError({ message: formatErrorDetail(error) }),
 					),
 				),
+			SetProjectOrder: (request) =>
+				run(
+					Effect.flatMap(ProjectSaveLockTag, (lock) =>
+						lock.withPermits(1)(
+							Effect.gen(function* () {
+								const registered = new Set(
+									(yield* allProjects).map(({ slug }) => slug),
+								);
+								const projectOrder = [...new Set(request.projectOrder)].filter(
+									(slug) => registered.has(slug),
+								);
+								yield* commitDaemonRuntimeConfig((current) => ({
+									...current,
+									projectOrder,
+								}));
+								yield* PubSub.publish(bus, DaemonEvent.ProjectsChanged());
+								yield* requestConfigSave;
+							}),
+						),
+					),
+				),
 			RemoveProject: (request) =>
 				run(
 					Effect.gen(function* () {
@@ -770,6 +793,10 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				}),
 			SetAutoSettleSetting: (request) =>
 				run(wsRpcHandlers.SetAutoSettleSetting(request)),
+			GetAutoDeleteArchivedSetting: (request) =>
+				run(wsRpcHandlers.GetAutoDeleteArchivedSetting(request)),
+			SetAutoDeleteArchivedSetting: (request) =>
+				run(wsRpcHandlers.SetAutoDeleteArchivedSetting(request)),
 			GetWorktreeCleanupSetting: (request) =>
 				run(wsRpcHandlers.GetWorktreeCleanupSetting(request)),
 			SetWorktreeCleanupSetting: (request) =>

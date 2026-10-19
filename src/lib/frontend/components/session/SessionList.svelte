@@ -47,6 +47,7 @@
 	import { runBulkChange, runBulkSnooze } from "./session-list-bulk-actions.js";
 	import { confirmSessionDeletion } from "./session-deletion.js";
 	import { getProjectAccent, getProjectLabel, projectDisplayName } from "./session-list-project.js";
+	import { buildProjectTree } from "../../stores/project-tree.svelte.js";
 
 	let { onaddproject }: { onaddproject?: (() => void) | undefined } = $props();
 
@@ -117,7 +118,8 @@
 		};
 		return {
 			pinned: take(fullArrangement.pinned),
-			sections: fullArrangement.sections
+			// The project tree bounds its own rows, per project.
+			sections: grouping === "project" ? fullArrangement.sections : fullArrangement.sections
 				.map((section) => ({ ...section, sessions: take(section.sessions) }))
 				.filter((section) => section.sessions.length > 0),
 			// The shelf previews two rows even when live rows fill the page.
@@ -132,9 +134,17 @@
 	const searching = $derived(sessionState.searchQuery.trim().length > 0);
 	const settledShelfOpen = $derived(searching || uiState.settledShelfOpen);
 	const snoozedShelfOpen = $derived(searching || uiState.snoozedShelfOpen);
+	const scope = $derived(getSessionScope());
+	const tree = $derived(grouping === "project" ? buildProjectTree({
+		projects: projectState.projects.filter((project) => scope === null || project.slug === scope),
+		sections: fullArrangement.sections,
+		sessions: filtered,
+		narrowed: searching || statusFilter !== null,
+		currentId: sessionState.currentId,
+	}) : null);
 	const visibleRowIds = $derived([
 		...arrangement.pinned.map((session) => session.id),
-		...arrangement.sections.flatMap((section) => section.sessions.map((session) => session.id)),
+		...(tree ? tree.flatMap((node) => node.shown) : arrangement.sections.flatMap((section) => section.sessions)).map((session) => session.id),
 		...(settledShelfOpen ? arrangement.settled.map((session) => session.id) : []),
 		...(snoozedShelfOpen ? arrangement.snoozed.map((session) => session.id) : []),
 	]);
@@ -143,7 +153,6 @@
 		return matching.filter((session) => shown.has(session.id));
 	});
 
-	const scope = $derived(getSessionScope());
 	const scopeLabel = $derived(getSessionScopeLabel(scope));
 	const emptyMessage = $derived.by(() => {
 		if (searching && filtered.length === 0) return "No matching sessions";
@@ -504,7 +513,7 @@
 			Pick sessions to act on, then choose an action below.
 		</div>
 	{/if}
-	<SessionListRows {arrangement} {fullArrangement} {settledCount} {isEmpty} {emptyMessage} {statusFilter} {searching} filteredLength={filtered.length} {snoozedShelfOpen} {settledShelfOpen} {pagerPending} {unavailableProjectLabels} {selectMode} {selectedSessionIds} menuOpenId={ctxMenuSession?.id} {renamingSessionId} {getProjectLabel} {getProjectAccent} oncontextmenu={handleContextMenu} ontoggleselection={handleToggleSelection} onrenamestart={handleCtxRename} onrenameend={handleRenameEnd} />
+	<SessionListRows {arrangement} {fullArrangement} {settledCount} {tree} reorderable={!searching && statusFilter === null && scope === null} {isEmpty} {emptyMessage} {statusFilter} {searching} filteredLength={filtered.length} {snoozedShelfOpen} {settledShelfOpen} {pagerPending} {unavailableProjectLabels} {selectMode} {selectedSessionIds} menuOpenId={ctxMenuSession?.id} {renamingSessionId} {getProjectLabel} {getProjectAccent} oncontextmenu={handleContextMenu} ontoggleselection={handleToggleSelection} onrenamestart={handleCtxRename} onrenameend={handleRenameEnd} />
 	{#if selectMode}
 		<SessionListBulkBar settleCount={settleEligible.length} snoozeCount={snoozeEligible.length} pinCount={pinEligible.length} {selectionCount} {unpinSelected} {bulkPending} onsettle={() => { void handleBulkChange("settle"); }} onsnooze={handleOpenBulkSnooze} onpin={() => { void handleBulkChange("pin"); }} ondelete={handleBulkDelete} />
 	{/if}

@@ -1,7 +1,7 @@
-import { SqlClient } from "@effect/sql";
-import * as Migrator from "@effect/sql/Migrator";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
+import * as Migrator from "effect/sql/Migrator";
+import type { SqlError } from "effect/sql/SqlError";
 import {
 	BACKFILL_COMPACTION_MESSAGES_MIGRATION,
 	COMPACT_REDUNDANT_EVENTS_MIGRATION,
@@ -31,7 +31,9 @@ import {
 	PENDING_APPROVALS_VERSION_MIGRATION,
 	PENDING_INPUTS_MIGRATION,
 	PROJECT_PROVENANCE_MIGRATION,
+	PROJECT_TREE_DATA_MIGRATION,
 	PROJECTION_FAILURES_MIGRATION,
+	PROMPT_PROVIDER_REFERENCE_MIGRATION,
 	READ_MODEL_COUNTER_MIGRATION,
 	READ_MODEL_VERSION_MIGRATION,
 	READ_STATE_TO_TURN_ENDS_MIGRATION,
@@ -70,9 +72,14 @@ import {
 	STORE_IDENTITY_MIGRATION,
 	SURFACING_MARKS_MIGRATION,
 	TOOL_CALL_INDEX_MIGRATION,
+	TOOL_RESULT_EVENT_REFS_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 	TURN_RECAPS_MIGRATION,
 } from "../schema.js";
+import {
+	NEVER_CUT_TOOL_NAMES,
+	PREVIEW_CODE_POINTS,
+} from "../tool-wire-projection.js";
 import { refreshSidebar, rerootSession } from "./sidebar-projection.js";
 
 export const EFFECT_SQL_MIGRATIONS_TABLE = "effect_sql_migrations";
@@ -446,7 +453,7 @@ const migrationKeyPattern = /^(\d+)_(.+)$/;
 
 function migrationRegistryError(message: string): Migrator.MigrationError {
 	return new Migrator.MigrationError({
-		reason: "bad-state",
+		kind: "BadState",
 		message,
 	});
 }
@@ -974,6 +981,59 @@ const runBackfillCompactionMessagesMigration: Effect.Effect<
 	yield* executeSqlStatements(backfillCompactionMessagesMigrationSql);
 });
 
+const runPurgeBackgroundShellSessionsMigration: Effect.Effect<
+	void,
+	SqlError,
+	SqlClient.SqlClient
+> = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	// Pre-da246483 local_bash tasks were incorrectly given child sessions. Freeze
+	// the cohort before deleting its references. Content and descendant guards
+	// must skip unsafe matches, never Effect.fail: see the Migrator transaction
+	// warning in runPurgeLegacySkeletonSessionsMigration.
+	yield* sql`CREATE TEMP TABLE background_shell_sessions (id TEXT PRIMARY KEY)`;
+	yield* sql`INSERT INTO background_shell_sessions (id)
+		WITH refs AS (
+			SELECT json_extract(metadata, '$.childSessionId') AS id FROM message_parts
+			WHERE type = 'tool' AND json_extract(metadata, '$.subagentType') = 'local_bash'
+			UNION
+			SELECT json_extract(data, '$.metadata.childSessionId') FROM events
+			WHERE type IN ('tool.started', 'tool.running', 'tool.completed')
+				AND json_extract(data, '$.metadata.subagentType') = 'local_bash'
+		)
+		SELECT s.id FROM sessions s JOIN refs ON refs.id = s.id
+		WHERE s.parent_id IS NOT NULL AND s.provider = 'claude'
+			AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.id)
+			AND NOT EXISTS (SELECT 1 FROM sessions c WHERE c.parent_id = s.id)`;
+	const [cohort] = yield* sql<{
+		count: number;
+	}>`SELECT COUNT(*) AS count FROM background_shell_sessions`;
+	if (cohort && cohort.count > 0) {
+		// Same FK-safe order as the skeleton purge. activities was dropped in 0056.
+		// messages and message_parts are INTENTIONALLY ABSENT: preserve the content
+		// backstop and leave the parents' Bash-card metadata untouched.
+		yield* sql`DELETE FROM pending_approvals WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM turns WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM session_providers WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM tool_content WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM provider_state WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM command_receipts WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM provider_command_outbox WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM provider_command_interactions WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM provider_command_turns WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM provider_command_tombstones WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM provider_command_sessions WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		// Sidebar rows no longer cascade; the remaining dependent tables do.
+		yield* sql`DELETE FROM session_sidebar WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM events WHERE session_id IN (SELECT id FROM background_shell_sessions)`;
+		yield* sql`DELETE FROM sessions WHERE id IN (SELECT id FROM background_shell_sessions)`;
+		yield* Effect.logWarning(
+			`Purged ${cohort.count} background shell session(s)`,
+		);
+	}
+	yield* sql`DROP TABLE background_shell_sessions`;
+});
+
 export const effectMigrationEntries = {
 	"0001_create_event_store_tables": runBaselineEventStoreMigration,
 	"0002_add_message_part_metadata": runMessagePartMetadataMigration,
@@ -1246,7 +1306,47 @@ export const effectMigrationEntries = {
 		"archived_at",
 		readMigrationSql(SESSIONS_ARCHIVED_MIGRATION),
 	),
-	"0064_goal_check_metadata": Effect.gen(function* () {
+	"0064_prompt_provider_reference": runAddColumnMigrationIfMissing(
+		"pending_approvals",
+		"provider_process_id",
+		readMigrationSql(PROMPT_PROVIDER_REFERENCE_MIGRATION),
+	),
+	"0065_tool_result_event_refs": runAddColumnMigrationIfMissing(
+		"message_parts",
+		"result_event_seq",
+		readMigrationSql(TOOL_RESULT_EVENT_REFS_MIGRATION)
+			.replaceAll("{{PREVIEW_CODE_POINTS}}", String(PREVIEW_CODE_POINTS))
+			.replaceAll(
+				"{{NEVER_CUT_TOOL_NAMES}}",
+				NEVER_CUT_TOOL_NAMES.map(
+					(name) => `'${name.replaceAll("'", "''")}'`,
+				).join(", "),
+			),
+	),
+	"0066_project_tree_data": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		// Ledger repairs can replay migrations against the final schema.
+		const columns = yield* sql.unsafe<{ name: string }>(
+			"PRAGMA table_info(messages)",
+		);
+		if (columns.some(({ name }) => name === "is_human_sent")) return;
+		yield* executeSqlStatements(readMigrationSql(PROJECT_TREE_DATA_MIGRATION));
+		const changed = yield* sql<{ id: string }>`
+			SELECT id FROM sessions WHERE last_user_message_at IS NOT NULL`;
+		if (changed.length === 0) return;
+		const [counter] = yield* sql<{ value: number }>`
+			UPDATE read_model_counter SET value = value + 1 WHERE id = 1 RETURNING value`;
+		const version = counter?.value ?? 0;
+		yield* sql`UPDATE sessions SET version = ${version}
+			WHERE last_user_message_at IS NOT NULL`;
+		yield* refreshSidebar(
+			changed.map(({ id }) => id),
+			version,
+		);
+	}),
+	"0067_purge_background_shell_sessions":
+		runPurgeBackgroundShellSessionsMigration,
+	"0068_goal_check_metadata": Effect.gen(function* () {
 		const statements = splitSqlStatements(
 			readMigrationSql(GOAL_CHECK_METADATA_MIGRATION),
 		);
@@ -1260,7 +1360,7 @@ export const effectMigrationEntries = {
 				);
 		}
 	}),
-	"0065_message_part_surfacing": Effect.gen(function* () {
+	"0069_message_part_surfacing": Effect.gen(function* () {
 		const statements = splitSqlStatements(
 			readMigrationSql(MESSAGE_PART_SURFACING_MIGRATION),
 		);
@@ -1279,16 +1379,16 @@ export const effectMigrationEntries = {
 				);
 		}
 	}),
-	"0066_sessions_settled_shelf_index": executeSqlStatements(
+	"0070_sessions_settled_shelf_index": executeSqlStatements(
 		readMigrationSql(SESSIONS_SETTLED_SHELF_INDEX_MIGRATION),
 	),
-	"0067_surfacing_marks": executeSqlStatements(
+	"0071_surfacing_marks": executeSqlStatements(
 		readMigrationSql(SURFACING_MARKS_MIGRATION),
 	),
-	"0068_message_part_read": executeSqlStatements(
+	"0072_message_part_read": executeSqlStatements(
 		readMigrationSql(MESSAGE_PART_READ_MIGRATION),
 	),
-	"0069_turn_recaps": executeSqlStatements(
+	"0073_turn_recaps": executeSqlStatements(
 		readMigrationSql(TURN_RECAPS_MIGRATION),
 	),
 } satisfies Record<
@@ -1425,7 +1525,7 @@ export function makeEffectSqlMigrator(
 								(cause) =>
 									new Migrator.MigrationError({
 										cause,
-										reason: "failed",
+										kind: "Failed",
 										message: `Migration "${id}_${name}" failed`,
 									}),
 							),

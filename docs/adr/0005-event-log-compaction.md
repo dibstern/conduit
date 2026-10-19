@@ -112,6 +112,16 @@ completed thinking block. This migration does not change that writer behavior.
 
 ## Consequences
 
+Archived-tree retention (conduit-test-iujk.7) is another exception to the permanent
+event log. After a root has been archived for the configured window (30 days by
+default; null disables), and no member of its parent/descendant tree is pinned
+or active, retention commits the canonical `session.deleted` command, then removes
+all events for that tree. A deleted tree replays to nothing. Trees referenced by
+any surviving fork are kept because fork history reads source events live.
+The window counts from the root's archive time; descendants need no archive stamp.
+Automatic deletion keeps checkouts and processes at most 50 roots per project
+per sweep; freed SQLite pages are reusable without a physical store rewrite.
+
 - This is a bounded exception to the append-only event-log policy. Future
   deletions require their own replay evidence and migration.
 - Existing read models remain unchanged. Fresh replay must preserve their

@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { Effect, Layer, ManagedRuntime } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	makePersistenceServiceLive,
 	PersistenceProjectTag,
@@ -303,8 +303,8 @@ export function writeEventStore(
 ): void {
 	Effect.runSync(
 		makeEffectSqlMigrator().pipe(
-			Effect.zipRight(seed),
-			Effect.provide(EffectSqliteClient.layer({ filename })),
+			Effect.andThen(seed),
+			Effect.provide(EffectSqliteClient.layer({ filename }), { local: true }),
 		),
 	);
 }
@@ -325,7 +325,7 @@ export function makeTestSqlLayer() {
 	const filename = join(dir, "events.db");
 	return EffectSqliteClient.layer({ filename }).pipe(
 		Layer.merge(
-			Layer.scopedDiscard(
+			Layer.effectDiscard(
 				Effect.addFinalizer(() =>
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 				),
@@ -350,6 +350,6 @@ export const makeTestPersistenceLayer = () =>
 		makePersistenceServiceLive,
 		Layer.merge(
 			makeTestSqlLayer(),
-			Layer.succeed(PersistenceProjectTag, { projectId: "test-project" }),
+			Layer.succeed(PersistenceProjectTag)({ projectId: "test-project" }),
 		),
 	);

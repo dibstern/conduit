@@ -1,13 +1,16 @@
 import { writeFile } from "node:fs/promises";
-import { RpcSchema } from "@effect/rpc";
 import { expect, test } from "@playwright/test";
-import { Arbitrary, Schema, Stream } from "effect";
-import fc from "fast-check";
-import { build } from "vite";
 import {
-	ProjectSaveRejected,
-	WsRpcGroup,
-} from "../../../src/lib/contracts/ws-rpc.js";
+	Arbitrary,
+	Effect,
+	Exit,
+	Schema,
+	type SchemaAST,
+	Stream,
+} from "effect";
+import { RpcSchema } from "effect/rpc";
+import { build } from "vite";
+import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { MOCK_SERVER_STATUS, mockWsRpc } from "../helpers/rpc-mock.js";
 
 let browserCode: string;
@@ -34,35 +37,6 @@ test.beforeAll(async () => {
 	browserCode = chunk.code;
 });
 
-test("prototype: a declared error reaches the browser as its class over Playwright", async ({
-	page,
-}, testInfo) => {
-	await mockWsRpc(page, {
-		stubs: {
-			SaveProject: () => {
-				throw new ProjectSaveRejected({ issues: [] });
-			},
-		},
-	});
-	await page.route("http://rpc.test/", (route) =>
-		route.fulfill({ contentType: "text/html", body: "<!doctype html>" }),
-	);
-	await page.goto("http://rpc.test/");
-	await page.addScriptTag({ type: "module", content: browserCode });
-	await page.waitForFunction(() => typeof window.callRpc === "function");
-	const result = await page.evaluate(() =>
-		window.callRpc("SaveProject", { folders: [] }),
-	);
-	expect(result).toEqual({
-		error: { _tag: "ProjectSaveRejected", issues: [] },
-		isInstance: true,
-	});
-	await testInfo.attach("declared-error-browser-result", {
-		body: JSON.stringify(result, null, 2),
-		contentType: "application/json",
-	});
-});
-
 async function openClient(page: import("@playwright/test").Page) {
 	await page.route("http://rpc.test/", (route) =>
 		route.fulfill({ contentType: "text/html", body: "<!doctype html>" }),
@@ -78,37 +52,52 @@ test("every declared error class reaches the browser", async ({
 	const checked = new Set<string>();
 	const results: unknown[] = [];
 	for (const rpc of WsRpcGroup.requests.values()) {
-		const stream = RpcSchema.getStreamSchemas(rpc.successSchema.ast);
-		const variants =
-			stream._tag === "Some"
-				? [rpc.errorSchema.ast, stream.value.failure.ast]
-				: [rpc.errorSchema.ast];
+		const streaming = RpcSchema.isStreamSchema(rpc.successSchema);
+		const variants: SchemaAST.AST[] = streaming
+			? [rpc.errorSchema.ast, rpc.successSchema.error.ast]
+			: [rpc.errorSchema.ast];
 		for (const ast of variants) {
 			if (ast._tag === "Union") {
 				variants.push(...ast.types);
 				continue;
 			}
 			if (ast._tag === "Suspend") {
-				variants.push(ast.f());
+				variants.push(ast.thunk());
 				continue;
 			}
-			if (ast._tag === "NeverKeyword") continue;
-			const error = fc.sample(Arbitrary.make(Schema.make(ast)), {
-				seed: 42,
-				numRuns: 1,
-			})[0];
+			if (ast._tag === "Never") continue;
+			const [error] = await Effect.runPromise(
+				Arbitrary.sampleEffect(Arbitrary.schema(Schema.make(ast)), {
+					seed: 42,
+					count: 1,
+				}),
+			);
 			if (typeof error !== "object" || error === null || !("_tag" in error))
 				throw new Error("Untagged declared error");
 			if (checked.has(String(error._tag))) continue;
 			checked.add(String(error._tag));
-			const payload = fc.sample(
-				Arbitrary.make(Schema.make(rpc.payloadSchema.ast)),
-				{ seed: 42, numRuns: 1 },
+			// Arbitrary cannot derive the decoded closedPayload declaration, so
+			// generate the JSON wire form and decode it, as the stub tests do.
+			const payloadSchema = Schema.toCodecJson(rpc.payloadSchema);
+			const payload: unknown = (
+				await Effect.runPromise(
+					Arbitrary.sampleEffect(
+						Arbitrary.schema(Schema.toEncoded(payloadSchema)).pipe(
+							Arbitrary.filter((payload) =>
+								Exit.isSuccess(
+									Schema.decodeUnknownExit(payloadSchema)(payload),
+								),
+							),
+							Arbitrary.map(Schema.decodeUnknownSync(payloadSchema)),
+						),
+						{ seed: 42, count: 1 },
+					),
+				)
 			)[0];
 			await mockWsRpc(page, {
 				stubs: {
 					[rpc._tag]: () => {
-						if (stream._tag === "Some") return Stream.fail(error);
+						if (streaming) return Stream.fail(error);
 						throw error;
 					},
 				},

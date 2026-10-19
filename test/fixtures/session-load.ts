@@ -4,8 +4,8 @@
 // read-query tests can seed it into any SQLite file. Everything but event ids
 // is deterministic, so byte counts are stable from run to run.
 
-import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import type {
 	CanonicalEvent,
 	EventPayloadMap,
@@ -247,9 +247,11 @@ export const seedSessionLoadFixture = async (
 			let count = 0;
 			const write = (batch: readonly CanonicalEvent[]) =>
 				commit(batch, { publish: false }).pipe(
-					Effect.tap(() => {
-						count += batch.length;
-					}),
+					Effect.tap(() =>
+						Effect.sync(() => {
+							count += batch.length;
+						}),
+					),
 				);
 			for (let first = 0; first < families; first += 500) {
 				yield* write(

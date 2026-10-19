@@ -1,26 +1,30 @@
-import { Schema } from "effect";
+import { Effect, Schema, Struct } from "effect";
 
-export const SurfacingLevelSchema = Schema.Literal(
+export const SurfacingLevelSchema = Schema.Literals([
 	"final",
 	"key",
 	"balanced",
 	"all",
-);
+]);
 export const RecapSettingsSchema = Schema.Struct({
-	model: Schema.Literal("sonnet", "opus", "off"),
-	when: Schema.Literal("turn-end", "on-request"),
+	model: Schema.Literals(["sonnet", "opus", "off"]),
+	when: Schema.Literals(["turn-end", "on-request"]),
 });
-export const TurnsOpenSchema = Schema.Literal("expanded", "auto", "minimised");
+export const TurnsOpenSchema = Schema.Literals([
+	"expanded",
+	"auto",
+	"minimised",
+]);
 export const MessageSurfacingSettingsSchema = Schema.Struct({
 	// Jev alone needs a TypeSafe key. Summaries use the Claude subscription.
 	enabled: Schema.Boolean,
 	summariesEnabled: Schema.Boolean,
 	defaultLevel: SurfacingLevelSchema,
-	turnsOpen: Schema.optionalWith(TurnsOpenSchema, {
-		default: () => "auto" as const,
-	}),
+	turnsOpen: TurnsOpenSchema.pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => "auto" as const)),
+	),
 	recap: RecapSettingsSchema,
-	tuningModel: Schema.NonEmptyTrimmedString,
+	tuningModel: Schema.Trimmed.check(Schema.isNonEmpty()),
 });
 export type MessageSurfacingPreferences =
 	typeof MessageSurfacingSettingsSchema.Type;
@@ -41,7 +45,7 @@ export const MessageSurfacingStatusSchema = Schema.Struct({
 	// Where the key comes from, and whether TypeSafe has refused it. A stored
 	// key is validated before it is kept; an environment key on its first 401.
 	key: Schema.Struct({
-		source: Schema.Literal("none", "stored", "env"),
+		source: Schema.Literals(["none", "stored", "env"]),
 		rejected: Schema.Boolean,
 	}),
 });
@@ -53,7 +57,9 @@ export const MessageSurfacingPatchSchema = Schema.Struct({
 	apiKey: Schema.optional(Schema.NullOr(Schema.String)),
 	defaultLevel: Schema.optional(SurfacingLevelSchema),
 	turnsOpen: Schema.optional(TurnsOpenSchema),
-	recap: Schema.optional(Schema.partial(RecapSettingsSchema)),
-	tuningModel: Schema.optional(Schema.NonEmptyTrimmedString),
+	recap: Schema.optional(
+		RecapSettingsSchema.mapFields(Struct.map(Schema.optional)),
+	),
+	tuningModel: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty())),
 });
 export type MessageSurfacingPatch = typeof MessageSurfacingPatchSchema.Type;

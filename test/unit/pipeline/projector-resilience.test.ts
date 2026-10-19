@@ -1,4 +1,4 @@
-import { Cause, Effect, Runtime } from "effect";
+import { Cause, Effect } from "effect";
 import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 import type {
 	AssistantMessage,
@@ -79,14 +79,7 @@ describe("MessageProjector resilience", () => {
 		try {
 			await harness.reproject([event]);
 		} catch (error) {
-			if (Runtime.isFiberFailure(error)) {
-				throw new Error(
-					Cause.pretty(error[Runtime.FiberFailureCauseId], {
-						renderErrorCause: true,
-					}),
-				);
-			}
-			throw error;
+			throw new Error(Cause.pretty(Cause.fail(error)));
 		}
 	}
 
@@ -1273,6 +1266,11 @@ describe("MessageProjector resilience", () => {
 				.map((m) => m.type);
 			// Expect: thinking → tool → thinking → assistant
 			expect(types).toEqual(["thinking", "tool", "thinking", "assistant"]);
+			expect(
+				chat
+					.filter((m): m is ThinkingMessage => m.type === "thinking")
+					.map((m) => m.text),
+			).toEqual(["pre-tool reasoning", "post-tool reasoning"]);
 		});
 	});
 

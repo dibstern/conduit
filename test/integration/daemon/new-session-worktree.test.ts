@@ -24,15 +24,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect, Exit } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
-import {
-	AddInstance,
-	CreateSession,
-	FindFolders,
-	ListBranches,
-	ListDaemonSessions,
-	SaveProject,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -126,31 +118,27 @@ process.exit(result.status ?? 1);
 		});
 		const socket = join(fixture.configDir, "relay.sock");
 		const sessions = () =>
-			sendRpcRequest(
-				socket,
-				new ListDaemonSessions({
-					projectSlug: "process-test",
-					scope: "process-test",
-				}),
-			);
+			sendRpcRequest(socket, {
+				_tag: "ListDaemonSessions",
+				projectSlug: "process-test",
+				scope: "process-test",
+			});
 		const create = async (
 			title: string,
 			newWorktree = true,
 			worktreeBase?: string,
 		) => {
-			const result = await sendRpcRequest(
-				socket,
-				new CreateSession({
-					permissionMode: "ask",
-					projectSlug: "process-test",
-					originId: "new-worktree-test",
-					providerId: "claude",
-					model: { providerId: "claude", modelId: "sonnet" },
-					title,
-					...(newWorktree ? { newWorktree: true } : {}),
-					...(worktreeBase === undefined ? {} : { worktreeBase }),
-				}),
-			);
+			const result = await sendRpcRequest(socket, {
+				_tag: "CreateSession",
+				permissionMode: "ask",
+				projectSlug: "process-test",
+				originId: "new-worktree-test",
+				providerId: "claude",
+				model: { providerId: "claude", modelId: "sonnet" },
+				title,
+				...(newWorktree ? { newWorktree: true } : {}),
+				...(worktreeBase === undefined ? {} : { worktreeBase }),
+			});
 			names.set(result.sessionId, title);
 			const session = (await sessions()).sessions.find(
 				({ id }) => id === result.sessionId,
@@ -320,10 +308,10 @@ process.exit(result.status ?? 1);
 		heads.set(currentHead, "current:main");
 		expect(currentHead).not.toBe(initialHead);
 		expect(
-			await sendRpcRequest(
-				socket,
-				new ListBranches({ projectSlug: "process-test" }),
-			),
+			await sendRpcRequest(socket, {
+				_tag: "ListBranches",
+				projectSlug: "process-test",
+			}),
 		).toEqual({
 			current: "main",
 			branches: ["feature/base", "main"],
@@ -342,10 +330,10 @@ process.exit(result.status ?? 1);
 			{ session: "default-base", base: "main", head: "current:main" },
 		];
 		git(fixture.projectDir, "checkout", "--detach", "main");
-		const detached = await sendRpcRequest(
-			socket,
-			new ListBranches({ projectSlug: "process-test" }),
-		);
+		const detached = await sendRpcRequest(socket, {
+			_tag: "ListBranches",
+			projectSlug: "process-test",
+		});
 		expect(detached).not.toHaveProperty("current");
 		expect(detached.branches).toEqual(
 			[
@@ -383,34 +371,31 @@ process.exit(result.status ?? 1);
 		];
 		for (const worktreeBase of invalid) {
 			await expect(
-				sendRpcRequest(
-					socket,
-					new CreateSession({
-						permissionMode: "ask",
-						projectSlug: "process-test",
-						originId: "base-test",
-						providerId: "claude",
-						model: { providerId: "claude", modelId: "sonnet" },
-						newWorktree: true,
-						worktreeBase,
-					}),
-				),
+				sendRpcRequest(socket, {
+					_tag: "CreateSession",
+					permissionMode: "ask",
+					projectSlug: "process-test",
+					originId: "base-test",
+					providerId: "claude",
+					model: { providerId: "claude", modelId: "sonnet" },
+					newWorktree: true,
+					worktreeBase,
+				}),
 			).rejects.toMatchObject({
 				_tag: "WorktreeCreationError",
 				reason: "invalid-branch",
 			});
 		}
 		await expect(
-			sendRpcRequest(
-				socket,
-				new CreateSession({
-					permissionMode: "ask",
-					projectSlug: "process-test",
-					originId: "base-test",
-					providerId: "claude",
-					worktreeBase: "main",
-				}),
-			),
+			sendRpcRequest(socket, {
+				_tag: "CreateSession",
+				permissionMode: "ask",
+				projectSlug: "process-test",
+				originId: "base-test",
+				providerId: "claude",
+				model: { providerId: "claude", modelId: "sonnet" },
+				worktreeBase: "main",
+			}),
 		).rejects.toMatchObject({
 			_tag: "WsRpcError",
 			message: expect.stringContaining("worktreeBase requires newWorktree"),
@@ -553,22 +538,21 @@ process.exit(result.status ?? 1);
 			"Add app folder",
 		);
 		initialHead = git(fixture.projectDir, "rev-parse", "HEAD");
-		await sendRpcRequest(
-			socket,
-			new SaveProject({ slug: "process-test", folders: [folder] }),
-		);
-		const { sessionId } = await sendRpcRequest(
-			socket,
-			new CreateSession({
-				permissionMode: "ask",
-				projectSlug: "process-test",
-				originId: "new-worktree-test",
-				providerId: "claude",
-				model: { providerId: "claude", modelId: "sonnet" },
-				title: "subfolder",
-				newWorktree: true,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [folder],
+		});
+		const { sessionId } = await sendRpcRequest(socket, {
+			_tag: "CreateSession",
+			permissionMode: "ask",
+			projectSlug: "process-test",
+			originId: "new-worktree-test",
+			providerId: "claude",
+			model: { providerId: "claude", modelId: "sonnet" },
+			title: "subfolder",
+			newWorktree: true,
+		});
 		names.set(sessionId, "subfolder");
 		const session = (await sessions()).sessions.find(
 			({ id }) => id === sessionId,
@@ -612,18 +596,16 @@ process.exit(result.status ?? 1);
 				).count;
 			const beforeCount = count();
 			await expect(
-				sendRpcRequest(
-					socket,
-					new CreateSession({
-						permissionMode: "ask",
-						projectSlug: "process-test",
-						originId: "new-worktree-test",
-						providerId: "claude",
-						model: { providerId: "claude", modelId: "sonnet" },
-						title: "failed",
-						newWorktree: true,
-					}),
-				),
+				sendRpcRequest(socket, {
+					_tag: "CreateSession",
+					permissionMode: "ask",
+					projectSlug: "process-test",
+					originId: "new-worktree-test",
+					providerId: "claude",
+					model: { providerId: "claude", modelId: "sonnet" },
+					title: "failed",
+					newWorktree: true,
+				}),
 			).rejects.toMatchObject({
 				_tag: "WorktreeCreationError",
 				reason: "git-failed",
@@ -664,41 +646,37 @@ process.exit(result.status ?? 1);
 		const { fixture, socket, sessions } = await start("unsupported-launches");
 		const before = (await sessions()).sessions.map(({ id }) => id);
 		// Cursor is the routable provider that cannot launch into a new worktree.
-		const { addedInstanceId } = await sendRpcRequest(
-			socket,
-			new AddInstance({ name: "Cursor", driver: "cursor" }),
-		);
+		const { addedInstanceId } = await sendRpcRequest(socket, {
+			_tag: "AddInstance",
+			name: "Cursor",
+			driver: "cursor",
+		});
 		if (!addedInstanceId) throw new Error("Missing registered Cursor account");
 		await expect(
-			sendRpcRequest(
-				socket,
-				new CreateSession({
-					permissionMode: "ask",
-					projectSlug: "process-test",
-					originId: "new-worktree-test",
-					instanceId: AccountIdSchema.make(addedInstanceId),
-					providerId: "cursor",
-					model: { providerId: "cursor", modelId: "composer-2.5" },
-					newWorktree: true,
-				}),
-			),
+			sendRpcRequest(socket, {
+				_tag: "CreateSession",
+				permissionMode: "ask",
+				projectSlug: "process-test",
+				originId: "new-worktree-test",
+				providerId: addedInstanceId,
+				model: { providerId: "claude", modelId: "sonnet" },
+				newWorktree: true,
+			}),
 		).rejects.toMatchObject({
 			_tag: "WorkspaceMoveError",
 			reason: "unsupported-provider",
 		});
 		await expect(
-			sendRpcRequest(
-				socket,
-				new CreateSession({
-					permissionMode: "ask",
-					projectSlug: "process-test",
-					originId: "new-worktree-test",
-					providerId: "claude",
-					model: { providerId: "claude", modelId: "sonnet" },
-					newWorktree: true,
-					worktreePath: fixture.projectDir,
-				}),
-			),
+			sendRpcRequest(socket, {
+				_tag: "CreateSession",
+				permissionMode: "ask",
+				projectSlug: "process-test",
+				originId: "new-worktree-test",
+				providerId: "claude",
+				model: { providerId: "claude", modelId: "sonnet" },
+				newWorktree: true,
+				worktreePath: fixture.projectDir,
+			}),
 		).rejects.toMatchObject({
 			_tag: "WsRpcError",
 			message: expect.stringContaining(
@@ -707,25 +685,21 @@ process.exit(result.status ?? 1);
 		});
 		const secondary = join(fixture.root, "secondary");
 		mkdirSync(secondary);
-		await sendRpcRequest(
-			socket,
-			new SaveProject({
-				slug: "process-test",
-				folders: [secondary],
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [secondary],
+		});
 		await expect(
-			sendRpcRequest(
-				socket,
-				new CreateSession({
-					permissionMode: "ask",
-					projectSlug: "process-test",
-					originId: "new-worktree-test",
-					providerId: "claude",
-					model: { providerId: "claude", modelId: "sonnet" },
-					newWorktree: true,
-				}),
-			),
+			sendRpcRequest(socket, {
+				_tag: "CreateSession",
+				permissionMode: "ask",
+				projectSlug: "process-test",
+				originId: "new-worktree-test",
+				providerId: "claude",
+				model: { providerId: "claude", modelId: "sonnet" },
+				newWorktree: true,
+			}),
 		).rejects.toMatchObject({
 			_tag: "WorktreeCreationError",
 			reason: "unsupported-project",
@@ -765,7 +739,7 @@ process.exit(result.status ?? 1);
 			join(outwardAlias, "missing"),
 		]) {
 			await expect(
-				sendRpcRequest(socket, new FindFolders({ query: path })),
+				sendRpcRequest(socket, { _tag: "FindFolders", query: path }),
 			).rejects.toMatchObject({
 				_tag: "ProjectSaveRejected",
 				issues: expect.arrayContaining([
@@ -774,13 +748,11 @@ process.exit(result.status ?? 1);
 			});
 			for (const folders of [[path], [fixture.projectDir, path]]) {
 				await expect(
-					sendRpcRequest(
-						socket,
-						new SaveProject({
-							...(folders.length > 1 ? { slug: "process-test" } : {}),
-							folders,
-						}),
-					),
+					sendRpcRequest(socket, {
+						_tag: "SaveProject",
+						...(folders.length > 1 ? { slug: "process-test" } : {}),
+						folders,
+					}),
 				).rejects.toMatchObject({
 					_tag: "ProjectSaveRejected",
 					issues: expect.arrayContaining([
@@ -789,10 +761,10 @@ process.exit(result.status ?? 1);
 				});
 			}
 		}
-		const suggestions = await sendRpcRequest(
-			socket,
-			new FindFolders({ query: `${fixture.configDir}/` }),
-		);
+		const suggestions = await sendRpcRequest(socket, {
+			_tag: "FindFolders",
+			query: `${fixture.configDir}/`,
+		});
 		expect(suggestions.entries.some(({ path }) => path === root)).toBe(false);
 		evidence["refused"] = [
 			"root",
@@ -858,10 +830,10 @@ process.exit(result.status ?? 1);
 		}
 		expect(
 			(
-				await sendRpcRequest(
-					socket,
-					new ListDaemonSessions({ projectSlug: "process-test" }),
-				)
+				await sendRpcRequest(socket, {
+					_tag: "ListDaemonSessions",
+					projectSlug: "process-test",
+				})
 			).sessions.some(({ title }) => title === "Interrupted new worktree"),
 		).toBe(false);
 	}, 300_000);

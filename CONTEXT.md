@@ -101,7 +101,40 @@ branch only after successful checkout removal and a merged check. Detached
 checkouts are kept unless their commits are known to be merged into the default
 branch.
 
-Worktree sessions use their own branch's merged signal to settle through the sidebar's automatic rule, keep their workspace and worktrees, and return to Active when messaged, with that merge ignored for the resumed work.
+Cleanup also keeps a checkout while its session's Claude runner owns a live
+process, including while stopping, exiting after idle, or being adopted after a
+daemon restart. Clean up now reports "Agent process is running". This guard is
+separate from quiescence and applies again at removal time, including immediate
+removal after deletion when ending the agent fails. It reads the relay's runner
+pool, never discovers runners from disk. OpenCode sessions have no Claude runner
+and are unaffected. Every cleanup run first stops live agents of quiescent
+settled sessions, even when cleanup is Off. The sweep can then remove eligible
+checkouts in the same run.
+
+Automatic worktree cleanup applies only after a session settles or is deleted.
+The default settle rule removes a checkout when nothing is missing: its inspected
+head is an ancestor of local main or master, or origin/HEAD when set, and it has
+no tracked changes or untracked, non-ignored files. This includes clean branches
+with no new commits; squash merges are kept. This rule always protects
+uncommitted and untracked files, even when the user's keep level protects only
+tracked changes.
+
+An optional settled-age rule removes checkouts after the configured number of
+days since settling, even with unmerged commits. Never disables it; Right away
+makes the next cleanup run eligible. This rule and the delete rule use the user's
+keep level. The settled-age rule takes precedence when due. Automatic cleanup
+keeps branches so a checkout can be recreated on the next message. Active
+sessions are never removed merely for inactivity, merging, or having no commits.
+
+Each project can use the global cleanup rules, turn cleanup Off, or supply a full
+Custom rules override in Settings. Overrides live in the project's daemon.json
+entry, never in conduit.json, and each cleanup run reads the current effective
+rules again before removal. Off projects still stop quiescent settled agents,
+but Clean up now neither removes nor reports their worktrees.
+
+Worktree sessions use their own branch's merged signal to settle through the
+sidebar's automatic rule and return to Active when messaged, with that merge
+ignored for the resumed work.
 
 Conduit's Worktree daemon service creates a checkout under
 `<configDir>/worktrees/<project>/<session>/<folder>` before the session exists,

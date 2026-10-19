@@ -1,4 +1,4 @@
-import { Deferred, Effect, Exit } from "effect";
+import { Deferred, Effect } from "effect";
 
 export class DurableCommandQueue<A = unknown, E = unknown> {
 	private readonly inFlightByCommandId = new Map<
@@ -11,7 +11,7 @@ export class DurableCommandQueue<A = unknown, E = unknown> {
 		commandId: string,
 		work: Effect.Effect<A, E, R>,
 	): Effect.Effect<A, E, R> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const completion = yield* Deferred.make<A, E>();
 			const releaseTail = yield* Deferred.make<void>();
 			const existing = this.inFlightByCommandId.get(commandId);
@@ -24,7 +24,7 @@ export class DurableCommandQueue<A = unknown, E = unknown> {
 
 			const exit = yield* (
 				previousTail
-					? Deferred.await(previousTail).pipe(Effect.zipRight(work))
+					? Deferred.await(previousTail).pipe(Effect.andThen(work))
 					: work
 			).pipe(Effect.exit);
 
@@ -39,7 +39,7 @@ export class DurableCommandQueue<A = unknown, E = unknown> {
 				}
 			});
 
-			return yield* Exit.matchEffect(exit, {
+			return yield* Effect.matchCauseEffectEager(exit, {
 				onFailure: Effect.failCause,
 				onSuccess: Effect.succeed,
 			});

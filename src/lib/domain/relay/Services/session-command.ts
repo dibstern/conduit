@@ -10,8 +10,9 @@
 // See docs/adr/0004-session-mutations-are-canonical-events.md.
 
 import { randomUUID } from "node:crypto";
-import { SqlClient } from "@effect/sql";
 import { type Cause, Data, Effect } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import type { Account } from "../../../contracts/account.js";
 import {
 	type KnownProviderDriverKind,
@@ -52,6 +53,7 @@ import {
 	PickRequired,
 	type TurnSettings,
 } from "../../../provider/turn-settings.js";
+import { storedWorkingDirectory } from "../../../session/session-workspace.js";
 import type { SessionPermissionMode } from "../../../shared-types.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
@@ -140,7 +142,7 @@ export interface SessionUpstreamAdapter {
 	readonly provider: KnownProviderDriverKind;
 	readonly sync: (
 		command: SessionCommand,
-	) => Effect.Effect<void, Cause.UnknownException>;
+	) => Effect.Effect<void, Cause.UnknownError>;
 }
 
 export interface ApplySessionCommandOptions {
@@ -148,6 +150,8 @@ export interface ApplySessionCommandOptions {
 	readonly source?: AutoTitleSource;
 	/** Join a caller's canonical commit, without publishing before that commit. */
 	readonly project?: CommitAndSignalProject;
+	/** A standalone commit may decline before append, under its write permit and transaction. */
+	readonly beforeWrite?: Effect.Effect<boolean, SqlError>;
 	/**
 	 * Override the provider adapter while retaining the canonical
 	 * append/project/sync pipeline. SessionManager uses this to fold its richer
@@ -283,6 +287,8 @@ export const applySessionCommand = (
 			command.type === "session.created"
 				? command.data.provider
 				: row?.provider;
+		if (appendProvider === undefined && options.beforeWrite !== undefined)
+			return;
 
 		if (appendProvider !== undefined) {
 			const events = [
@@ -295,10 +301,19 @@ export const applySessionCommand = (
 					? sessionPickEvents(sessionId, options.pick)
 					: []),
 			];
+			let applied = true;
 			yield* (
-				options.project
-					? Effect.flatMap(eventStore.appendBatch(events), options.project)
-					: commitAndSignal(events)
+				options.beforeWrite !== undefined
+					? commitAndSignal.write((project) =>
+							Effect.gen(function* () {
+								applied = yield* options.beforeWrite ?? Effect.succeed(true);
+								if (applied)
+									yield* project(yield* eventStore.appendBatch(events));
+							}),
+						)
+					: options.project
+						? Effect.flatMap(eventStore.appendBatch(events), options.project)
+						: commitAndSignal(events)
 			).pipe(
 				Effect.mapError(
 					(cause) =>
@@ -308,6 +323,7 @@ export const applySessionCommand = (
 						}),
 				),
 			);
+			if (!applied) return;
 		}
 
 		// ADR-0004: the local write is authoritative. A rejected rename must
@@ -355,6 +371,13 @@ export const applySessionCommand = (
 
 			if (adapter !== null) {
 				const instances = yield* Effect.serviceOption(OpenCodeInstancesTag);
+				const config = yield* Effect.serviceOption(ConfigTag);
+				// WorkspaceLive calls this command seam, so resolving through it here
+				// would create a service cycle. The captured row also survives deletion.
+				const directory =
+					config._tag === "Some"
+						? storedWorkingDirectory(config.value.projectDir, row?.workspace)
+						: undefined;
 				const sync =
 					options.upstreamAdapter === undefined &&
 					(command.type === "session.renamed" ||
@@ -363,15 +386,16 @@ export const applySessionCommand = (
 					PROVIDER_DRIVERS[account.driver].runsOpenCodeServer &&
 					instances._tag === "Some"
 						? Effect.scoped(
-								Effect.flatMap(instances.value.use(account.id), (client) =>
-									openCodeUpstreamAdapter(client).sync(command),
+								Effect.flatMap(
+									instances.value.use(account.id, directory),
+									(client) => openCodeUpstreamAdapter(client).sync(command),
 								),
 							)
 						: adapter.sync(command);
 				yield* sync;
 			}
 		}).pipe(
-			Effect.catchAll((cause) =>
+			Effect.catch((cause) =>
 				Effect.sync(() => {
 					log.warn("Upstream session sync failed", {
 						operation: command.type,
@@ -413,6 +437,7 @@ export const createOpenCodeSession = (
 	pick?: TurnSettings,
 	reservedSessionId?: string,
 	permissionMode?: SessionPermissionMode,
+	directory?: string,
 ) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
@@ -425,6 +450,7 @@ export const createOpenCodeSession = (
 				// "Untitled" keeps OpenCode's own titler off sessions Conduit titles.
 				api.session.create({
 					title: normalizeSessionTitle(title),
+					...(directory === undefined ? {} : { directory }),
 					...(reservedSessionId === undefined ? {} : { id: reservedSessionId }),
 				}),
 			).pipe(
@@ -570,7 +596,7 @@ export const forkOpenCodeSession = (
 			api.session.messagesPage(session.id, { limit: 1 }),
 		).pipe(
 			Effect.map((messages) => messages.at(-1)),
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.logWarning(
 					`Could not determine fork point for ${session.id}: ${String(error)}`,
 				).pipe(Effect.as(undefined)),
@@ -708,7 +734,10 @@ const forkSessionInWorkspace = (
 						)
 					: undefined);
 			const instances = yield* OpenCodeInstancesTag;
-			const api = yield* instances.use(account.id).pipe(
+			const directory = yield* (yield* SessionWorkspaceTag).get(
+				parentSessionId,
+			);
+			const api = yield* instances.use(account.id, directory).pipe(
 				Effect.mapError(
 					(cause) =>
 						new SessionCommandError({

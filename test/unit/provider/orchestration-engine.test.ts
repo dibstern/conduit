@@ -174,7 +174,7 @@ describe("OrchestrationEngine", () => {
 
 	describe("dispatch: send_turn", () => {
 		it("routes sendTurn to the correct instance", async () => {
-			const result = await dispatch(engine, {
+			const command: SendTurnCommand = {
 				type: "send_turn",
 				commandId: "cmd-route-send",
 				providerId: "opencode",
@@ -193,10 +193,16 @@ describe("OrchestrationEngine", () => {
 					eventSink: makeStubEventSink(),
 					abortSignal: new AbortController().signal,
 				},
-			});
+			};
+			const result = await dispatch(engine, command);
 
-			expect(opencode.sendTurnEffect).toHaveBeenCalledTimes(1);
+			expect(opencode.sendTurnEffect).toHaveBeenCalledExactlyOnceWith(
+				command.input,
+			);
 			expect(result).toMatchObject({ status: "completed" });
+			expect(Effect.runSync(engine.getProviderForSessionEffect("s1"))).toBe(
+				"opencode",
+			);
 		});
 
 		it("throws for unknown provider", async () => {
@@ -316,6 +322,18 @@ describe("OrchestrationEngine", () => {
 
 	describe("dispatch: discover", () => {
 		it("calls discover on the specified instance", async () => {
+			const capabilities = {
+				models: [{ id: "sonnet", name: "Sonnet", providerId: "claude" }],
+				supportsTools: true,
+				supportsThinking: true,
+				supportsPermissions: true,
+				supportsQuestions: true,
+				supportsAttachments: true,
+				supportsFork: false,
+				supportsRevert: false,
+				commands: [],
+			};
+			opencode.discoverEffect.mockReturnValue(Effect.succeed(capabilities));
 			const result = await dispatch(engine, {
 				type: "discover",
 				providerId: "opencode",
@@ -326,7 +344,7 @@ describe("OrchestrationEngine", () => {
 				undefined,
 				undefined,
 			);
-			expect(result).toMatchObject({ models: [] });
+			expect(result).toEqual(capabilities);
 		});
 
 		it("forwards an explicit catalog refresh to the provider instance", async () => {
@@ -549,15 +567,16 @@ describe("OrchestrationEngine", () => {
 
 		it("listBoundSessions returns all bound sessions", () => {
 			engine.bindSession("s1", "opencode");
-			engine.bindSession("s2", "opencode");
+			engine.bindSession("s2", "claude");
 
 			const sessions = Effect.runSync(
 				engine.listBoundSessionsEffect({ projectIds: ["test-project"] }),
 			);
+			expect(sessions).toHaveLength(2);
 			expect(sessions).toEqual(
 				expect.arrayContaining([
 					{ sessionId: "s1", providerId: "opencode" },
-					{ sessionId: "s2", providerId: "opencode" },
+					{ sessionId: "s2", providerId: "claude" },
 				]),
 			);
 		});

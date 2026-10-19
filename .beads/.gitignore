@@ -47,6 +47,13 @@ dolt-server.lock
 dolt-server.port
 dolt-server.activity
 
+# bd 1.3 runtime state (migration gate locks, pull marker, proxied-server mode)
+*.gate.lock*
+last_pull
+proxieddb/
+dolt-server-config.yaml
+proxied_server_client_info.json
+
 # Corrupt backup directories (created by bd doctor --fix recovery)
 *.corrupt.backup/
 

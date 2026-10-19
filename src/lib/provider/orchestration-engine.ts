@@ -1,13 +1,14 @@
 import { getProviderDriver } from "../contracts/provider-instance.js";
 import type { ClaudeLaunchConfig } from "./claude/claude-sdk-env.js";
+
 // src/lib/provider/orchestration-engine.ts
 // Central command processor for the provider instance layer (CQRS core loop).
 // Routes commands to the correct provider instance via ProviderRegistry.
 // Manages session-to-provider mapping.
 
-import type { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Deferred, Effect } from "effect";
+import type { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 
 import type { Account } from "../contracts/account.js";
 import type { SessionScope } from "../contracts/session-scope.js";
@@ -46,6 +47,7 @@ import {
 	isCommandScopeTombstoned,
 } from "./orchestration-read-model.js";
 import {
+	type ProviderCommandInteractionSinkFactory,
 	type ProviderCommandStoreFailure,
 	ProviderSideEffectReactor,
 } from "./orchestration-side-effect-reactor.js";
@@ -187,7 +189,7 @@ export interface OrchestrationEngineOptions {
 	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
 	readonly durableCommands?: DurableCommandStoreOptions;
 	readonly accountDirectory?: Pick<
-		AccountDirectory["Type"],
+		AccountDirectory["Service"],
 		"resolve" | "defaultFor"
 	>;
 }
@@ -321,7 +323,7 @@ export class OrchestrationEngine {
 	dispatchEffect(
 		command: OrchestrationCommand,
 	): Effect.Effect<OrchestrationResult, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			yield* this.ensureMutatingCommandHasId(command);
 			if (!command.commandId) {
 				return yield* this.runCommandEffect(command);
@@ -337,7 +339,12 @@ export class OrchestrationEngine {
 			>();
 			this.inFlightCommands.set(commandId, deferred);
 
-			return yield* this.runCommandEffect(command).pipe(
+			const run = this.runCommandEffect(command);
+			const owned =
+				command.type === "send_turn" && this.durable
+					? this.durable.reactor.withLiveCommand(commandId, run)
+					: run;
+			return yield* owned.pipe(
 				Effect.tap((result) => Deferred.succeed(deferred, result)),
 				Effect.tapError((error) => Deferred.fail(deferred, error)),
 				Effect.ensuring(
@@ -363,7 +370,7 @@ export class OrchestrationEngine {
 	private runCommandEffect(
 		command: OrchestrationCommand,
 	): Effect.Effect<OrchestrationResult, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			switch (command.type) {
 				case "send_turn":
 					return yield* this.handleSendTurnEffect(command);
@@ -408,7 +415,7 @@ export class OrchestrationEngine {
 		command: SendTurnCommand,
 		durable: DurableCommandRuntime,
 	): Effect.Effect<TurnResult, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const hash = fingerprintHash(effectiveDispatchFingerprint(command));
 
 			const existing = yield* durable.receipts
@@ -526,7 +533,11 @@ export class OrchestrationEngine {
 			// caller's real event sink is threaded through so provider-driven
 			// permission/question interactions resolve exactly as the inline path.
 			return yield* durable.reactor
-				.runCommand(command.commandId, command.input.eventSink)
+				.runCommand(
+					command.commandId,
+					command.input.eventSink,
+					command.input.abortSignal,
+				)
 				.pipe(
 					Effect.mapError((cause) =>
 						cause instanceof ProviderInstanceFailure
@@ -609,7 +620,7 @@ export class OrchestrationEngine {
 	private handleInlineSendTurnEffect(
 		command: SendTurnCommand,
 	): Effect.Effect<TurnResult, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const instance = yield* this.getProviderInstanceEffect(
 				command.providerId,
 				command.input.account,
@@ -624,7 +635,7 @@ export class OrchestrationEngine {
 		command: SendTurnCommand,
 		instance: ProviderInstance,
 	): Effect.Effect<TurnResult, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			yield* Effect.sync(() =>
 				log.info(
 					`Dispatching sendTurn: session=${command.input.sessionId} provider=${command.providerId}`,
@@ -670,7 +681,7 @@ export class OrchestrationEngine {
 	private handleInterruptTurnEffect(
 		command: InterruptTurnCommand,
 	): Effect.Effect<void, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const providerId = yield* this.requireProviderForSessionEffect(
 				command.sessionId,
 			);
@@ -699,7 +710,7 @@ export class OrchestrationEngine {
 	private handleResolvePermissionEffect(
 		command: ResolvePermissionCommand,
 	): Effect.Effect<void, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const providerId = yield* this.requireProviderForSessionEffect(
 				command.sessionId,
 			);
@@ -726,7 +737,7 @@ export class OrchestrationEngine {
 	private handleResolveQuestionEffect(
 		command: ResolveQuestionCommand,
 	): Effect.Effect<void, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const providerId = yield* this.requireProviderForSessionEffect(
 				command.sessionId,
 			);
@@ -753,7 +764,7 @@ export class OrchestrationEngine {
 	private handleDiscoverEffect(
 		command: DiscoverCommand,
 	): Effect.Effect<ProviderCapabilities, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const instance = yield* this.getProviderInstanceEffect(
 				command.providerId,
 				command.account,
@@ -778,7 +789,7 @@ export class OrchestrationEngine {
 	private handleEndSessionEffect(
 		command: EndSessionCommand,
 	): Effect.Effect<void, OrchestrationError> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			const targetBindingRevision =
 				yield* this.sessionBindingReadModel.getBindingRevision(
 					command.sessionId,
@@ -796,7 +807,7 @@ export class OrchestrationEngine {
 				);
 				return;
 			}
-			const endSession = Effect.gen(this, function* () {
+			const endSession = Effect.gen({ self: this }, function* () {
 				const instance = yield* this.getProviderInstanceEffect(
 					providerId,
 					command.account,
@@ -863,13 +874,17 @@ export class OrchestrationEngine {
 	 * already awaits its own execution; this is the deterministic quiescence
 	 * seam for tests and startup recovery. No-op when durable commands are off.
 	 */
-	drainSideEffects(): Effect.Effect<void, ProviderCommandStoreFailure> {
-		return this.durable ? this.durable.reactor.drain() : Effect.void;
+	drainSideEffects(
+		makeInteractions?: ProviderCommandInteractionSinkFactory,
+	): Effect.Effect<void, ProviderCommandStoreFailure> {
+		return this.durable
+			? this.durable.reactor.drain(makeInteractions)
+			: Effect.void;
 	}
 
 	/** Shutdown the engine and all provider instances. */
 	shutdownEffect(): Effect.Effect<void> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			yield* Effect.sync(() => log.info("OrchestrationEngine shutting down"));
 			yield* this.registry.shutdownAllEffect();
 			yield* Effect.sync(() => {

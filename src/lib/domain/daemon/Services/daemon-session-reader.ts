@@ -1,6 +1,6 @@
 import { statSync } from "node:fs";
-import { SqlClient } from "@effect/sql";
 import { Data, Effect, Exit, Layer, Option } from "effect";
+import { SqlClient } from "effect/sql";
 import * as Failure from "../../../effect/failure-classification.js";
 import {
 	type createSessionGitCache,
@@ -13,8 +13,12 @@ import {
 	ReadQueryEffectTag,
 	type SessionScope,
 } from "../../../persistence/effect/read-query-effect.js";
-import { shouldArchiveIdleSession } from "../../../session/auto-archive-policy.js";
+import {
+	shouldArchiveIdleSession,
+	shouldDeleteArchivedSessionTree,
+} from "../../../session/auto-archive-policy.js";
 import { readPersistedAutoArchiveFacts } from "../../../session/auto-archive-sweep.js";
+import { readPersistedAutoDeleteFacts } from "../../../session/auto-delete-archived-sweep.js";
 import { getAutoSettleOutlook } from "../../../session/auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "../../../session/auto-settle-reader.js";
 import type {
@@ -134,7 +138,8 @@ export const hasProviderRecoveryCandidate = (
 			const sql = yield* SqlClient.SqlClient;
 			const rows = yield* sql<{ needs_recovery: number }>`SELECT EXISTS (
 				SELECT 1 FROM provider_command_outbox
-				WHERE project_key = ${project.slug} AND provider_id = 'claude' AND effect_type = 'send_turn' AND status = 'running'
+				WHERE project_key = ${project.slug} AND (provider_id = 'claude' OR provider_id IN ${sql.in(openCodeInstanceIds)})
+					AND effect_type = 'send_turn' AND status = 'running'
 			) OR EXISTS (
 				SELECT 1 FROM sessions AS session
 				JOIN session_providers AS binding ON binding.session_id = session.id
@@ -144,6 +149,15 @@ export const hasProviderRecoveryCandidate = (
 					SELECT 1 FROM pending_approvals AS approval
 					WHERE approval.session_id = session.id AND approval.status = 'pending'
 				))
+				) OR EXISTS (
+					SELECT 1 FROM pending_inputs pending
+					JOIN sessions session ON session.id = pending.session_id
+					WHERE session.project_id = ${project.slug} AND pending.state = 'steering'
+					AND NOT EXISTS (SELECT 1 FROM messages WHERE input_id = pending.input_id)
+					AND (SELECT status FROM provider_command_outbox
+						WHERE project_key = ${project.slug} AND command_id = pending.input_id
+						AND session_id = pending.session_id AND effect_type = 'send_turn'
+						ORDER BY request_sequence DESC LIMIT 1) = 'failed'
 			) AS needs_recovery`;
 			return rows[0]?.needs_recovery === 1;
 		}).pipe(Effect.provide(database));
@@ -198,6 +212,21 @@ export const hasColdAutoArchiveCandidate = (
 		);
 		return [...facts.values()].some((item) =>
 			shouldArchiveIdleSession(item, now, idleWindowMs),
+		);
+	});
+
+export const hasColdAutoDeleteCandidate = (
+	project: Pick<StoredProject, "slug" | "folders">,
+	now: number,
+	windowMs: number,
+) =>
+	Effect.gen(function* () {
+		const database = yield* projectReadDatabase(project);
+		const trees = yield* readPersistedAutoDeleteFacts(project.slug).pipe(
+			Effect.provide(database),
+		);
+		return [...trees.values()].some(({ facts }) =>
+			shouldDeleteArchivedSessionTree(facts, now, windowMs),
 		);
 	});
 

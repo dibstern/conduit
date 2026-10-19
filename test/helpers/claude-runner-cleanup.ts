@@ -58,32 +58,50 @@ function registrations(
 }
 
 // Never signal a PID from a file until the process identifies itself on its socket.
-function requestShutdown(
+// A runner serves one client and hangs up on others until it has processed the
+// previous client's close, which a loaded machine can delay past cleanup.
+async function requestShutdown(
 	projectDir: string,
 	entry: RunnerRegistration,
 ): Promise<boolean> {
+	const deadline = Date.now() + 2000;
+	for (;;) {
+		const outcome = await attemptShutdown(projectDir, entry);
+		if (outcome !== "refused" || Date.now() >= deadline)
+			return outcome === true;
+		await new Promise<void>((done) => setTimeout(done, 25));
+	}
+}
+
+function attemptShutdown(
+	projectDir: string,
+	entry: RunnerRegistration,
+): Promise<boolean | "refused"> {
 	return new Promise((done) => {
 		const socket = createConnection(entry.socketPath);
 		let verified = false;
+		let heard = false;
 		let finished = false;
 		let buffered = "";
 		const commandId = randomUUID();
-		const finish = () => {
+		const finish = (refused = false) => {
 			if (finished) return;
 			finished = true;
 			clearTimeout(timer);
 			socket.destroy();
-			done(verified);
+			done(refused ? "refused" : verified);
 		};
-		const timer = setTimeout(finish, 2000);
-		socket.once("error", finish);
-		socket.once("close", finish);
+		const timer = setTimeout(() => finish(), 2000);
+		socket.once("error", () => finish());
+		// A hang-up before any reply means the runner is still busy with another client.
+		socket.once("close", () => finish(!heard));
 		socket.once("connect", () =>
 			socket.write(
 				`${JSON.stringify({ type: "hello", protocolVersion: RUNNER_PROTOCOL_VERSION, buildId: entry.buildId, driverKind: entry.driverKind, config: { workspaceRoot: projectDir } })}\n`,
 			),
 		);
 		socket.on("data", (chunk: Buffer) => {
+			heard = true;
 			buffered += chunk.toString();
 			let newline = buffered.indexOf("\n");
 			while (newline >= 0) {

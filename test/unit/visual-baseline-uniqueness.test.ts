@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 /**
  * Two baselines with identical bytes are two stories asserting one fact. That is
@@ -175,11 +175,11 @@ const BASELINE_DIRECTORY = resolve(
 const BASELINE_NAME = /^(.*)-(desktop|mobile)-(darwin|linux)\.png$/;
 
 describe("visual baseline uniqueness", () => {
-	it("has no undeclared byte-identical baselines across stories", () => {
-		// Keyed by viewport+platform+bytes: the same story legitimately differs
-		// between viewports and platforms, so only same-context images compare.
-		const byContent = new Map<string, Set<string>>();
+	// Keyed by viewport+platform+bytes: the same story legitimately differs
+	// between viewports and platforms, so only same-context images compare.
+	const byContent = new Map<string, Set<string>>();
 
+	beforeAll(() => {
 		for (const file of readdirSync(BASELINE_DIRECTORY)) {
 			const match = BASELINE_NAME.exec(file);
 			if (!match) continue;
@@ -192,7 +192,9 @@ describe("visual baseline uniqueness", () => {
 			stories.add(storyId as string);
 			byContent.set(key, stories);
 		}
+	});
 
+	it("has no undeclared byte-identical baselines across stories", () => {
 		const undeclared = new Set<string>();
 		for (const stories of byContent.values()) {
 			if (stories.size < 2) continue;
@@ -214,19 +216,6 @@ describe("visual baseline uniqueness", () => {
 		// A stale exemption is a hole that reopens silently the next time two
 		// baselines collide, so the allowlist has to shrink as the bugs are fixed.
 		const live = new Set<string>();
-		const byContent = new Map<string, Set<string>>();
-		for (const file of readdirSync(BASELINE_DIRECTORY)) {
-			const match = BASELINE_NAME.exec(file);
-			if (!match) continue;
-			const [, storyId, viewport, platform] = match;
-			const hash = createHash("sha1")
-				.update(readFileSync(resolve(BASELINE_DIRECTORY, file)))
-				.digest("hex");
-			const key = `${viewport}:${platform}:${hash}`;
-			const stories = byContent.get(key) ?? new Set<string>();
-			stories.add(storyId as string);
-			byContent.set(key, stories);
-		}
 		for (const stories of byContent.values()) {
 			if (stories.size > 1) live.add([...stories].sort().join(" | "));
 		}

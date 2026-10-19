@@ -54,7 +54,7 @@ it("runs the shared call against the process harness fake SDK and rejects schema
 				},
 			});
 			const text = await Effect.runPromise(client.ask("plain reply", Schema.String, "opus"));
-			const invalid = await Effect.runPromise(Effect.either(client.ask("structured reply", Schema.Struct({ answer: Schema.Number }), "sonnet")));
+			const invalid = await Effect.runPromise(Effect.result(client.ask("structured reply", Schema.Struct({ answer: Schema.Number }), "sonnet")));
 			console.log(JSON.stringify({ calls, text, invalid }));
 			`,
 			],
@@ -77,8 +77,8 @@ it("runs the shared call against the process harness fake SDK and rejects schema
 		);
 		expect(proof["text"]).toBe("Process harness session");
 		expect(proof["invalid"]).toMatchObject({
-			_tag: "Left",
-			left: { _tag: "ClaudeOneShotFailure", reason: "schema" },
+			_tag: "Failure",
+			failure: { _tag: "ClaudeOneShotFailure", reason: "schema" },
 		});
 		expect(received).toEqual([
 			{ prompt: "plain reply", cwd: scratch },

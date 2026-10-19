@@ -4,15 +4,15 @@ import { isAbsolute, resolve } from "node:path";
 import {
 	Deferred,
 	Effect,
-	Either,
 	Exit,
 	Fiber,
-	FiberId,
 	FiberMap,
 	Layer,
 	Option,
 	Queue,
+	Result,
 	Schema,
+	Semaphore,
 	Stream,
 } from "effect";
 import {
@@ -30,6 +30,7 @@ import { openCodeAuth } from "../../../instance/managed-opencode-process.js";
 import { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import { createSdkClient } from "../../../instance/sdk-factory.js";
 import { createLogger, type Logger } from "../../../logger.js";
+import { openCodePromptProcessId } from "../../../provider/opencode-process-identity.js";
 import { SSEStream } from "../../../relay/sse-stream.js";
 import type {
 	ConnectionHealth,
@@ -44,6 +45,7 @@ import {
 	getInstanceUrl,
 	getManagedOpenCodeProcessEnv,
 	getManagedOpenCodeProcessIdentity,
+	isManagedOpenCodeStopped,
 	scheduleRestart,
 	startInstance,
 	stopInstance,
@@ -60,20 +62,25 @@ import {
 
 // Pin the transport envelope, not the SDK's event vocabulary. `sync` frames
 // have syncEvent instead of properties; preserve the entire inner payload.
-const decodeEnvelope = Schema.decodeUnknownEither(
-	Schema.Struct({
-		directory: Schema.optional(Schema.String),
-		project: Schema.optional(Schema.String),
-		payload: Schema.Struct({
-			id: Schema.String,
-			type: Schema.String,
-			properties: Schema.optional(
-				Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+const decodeEnvelope = Schema.decodeUnknownResult(
+	Schema.StructWithRest(
+		Schema.Struct({
+			directory: Schema.optional(Schema.String),
+			project: Schema.optional(Schema.String),
+			payload: Schema.StructWithRest(
+				Schema.Struct({
+					id: Schema.String,
+					type: Schema.String,
+					properties: Schema.optional(
+						Schema.Record(Schema.String, Schema.Unknown),
+					),
+					syncEvent: Schema.optional(Schema.Unknown),
+				}),
+				[Schema.Record(Schema.String, Schema.Unknown)],
 			),
-			syncEvent: Schema.optional(Schema.Unknown),
 		}),
-	}),
-	{ onExcessProperty: "preserve" },
+		[Schema.Record(Schema.String, Schema.Unknown)],
+	),
 );
 
 export type OpenCodeEndpoint = {
@@ -89,6 +96,10 @@ export type OpenCodeEndpoint = {
 
 /** Process control for the instances behind the endpoints. */
 type OpenCodeProcessControl<Start, Stop> = {
+	/** Passive process proof, serialized with managed starts and stops. */
+	readonly isStopped?: (
+		instanceId: string,
+	) => Effect.Effect<boolean, never, Start>;
 	/** Spawns a managed instance; begins health checks of an external one. */
 	readonly start: (instanceId: string) => Effect.Effect<void, unknown, Start>;
 	/** True only when termination completed; cached manager status is not proof. */
@@ -114,12 +125,14 @@ type OpenCodeProcessControl<Start, Stop> = {
 const endpointKey = (endpoint: OpenCodeEndpoint | undefined) =>
 	JSON.stringify([
 		endpoint?.url,
+		endpoint?.processIdentity,
 		endpoint?.auth?.username,
 		endpoint?.auth?.password,
 	]);
 
 type InstanceStream = {
 	identity: string;
+	readonly promptProcessId: string;
 	readonly key: string;
 	readonly managed: boolean;
 	readonly source: SSEStream;
@@ -147,10 +160,14 @@ const borrowIdleTimeoutFromEnv = Effect.sync(() => {
 		? OPENCODE_BORROW_IDLE_TIMEOUT_MS
 		: Number(configured);
 }).pipe(
-	Effect.filterOrDieMessage(
+	Effect.filterOrFail(
 		(ms) => Number.isInteger(ms) && ms > 0 && ms <= 2_147_483_647,
-		"CONDUIT_TEST_OPENCODE_BORROW_IDLE_TIMEOUT_MS must be an integer from 1 to 2147483647",
+		() =>
+			new Error(
+				"CONDUIT_TEST_OPENCODE_BORROW_IDLE_TIMEOUT_MS must be an integer from 1 to 2147483647",
+			),
 	),
+	Effect.orDie,
 );
 
 /** Grace before an instance without demand stops, like the PTY host's idle timeout. */
@@ -158,10 +175,14 @@ const idleTimeoutFromEnv = Effect.sync(() => {
 	const configured = process.env["CONDUIT_OPENCODE_IDLE_TIMEOUT_MS"];
 	return configured === undefined ? 600_000 : Number(configured);
 }).pipe(
-	Effect.filterOrDieMessage(
+	Effect.filterOrFail(
 		(ms) => Number.isInteger(ms) && ms > 0 && ms <= 2_147_483_647,
-		"CONDUIT_OPENCODE_IDLE_TIMEOUT_MS must be an integer from 1 to 2147483647",
+		() =>
+			new Error(
+				"CONDUIT_OPENCODE_IDLE_TIMEOUT_MS must be an integer from 1 to 2147483647",
+			),
 	),
+	Effect.orDie,
 );
 
 export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
@@ -175,7 +196,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 		readonly idleTimeoutMs?: number;
 	} = {},
 ) =>
-	Layer.scoped(
+	Layer.effect(
 		OpenCodeInstancesTag,
 		Effect.gen(function* () {
 			const { log = createLogger("daemon").child("opencode"), control } =
@@ -185,7 +206,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 			const borrowIdleTimeoutMs = yield* borrowIdleTimeoutFromEnv;
 			const context = yield* Effect.context<R | Start | Stop>();
 			const scope = yield* Effect.scope;
-			const gate = yield* Effect.makeSemaphore(1);
+			const gate = yield* Semaphore.make(1);
 			// One in-flight start per instance, joined by every `use`.
 			const starts = new Map<
 				string,
@@ -205,7 +226,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 			const borrowedStarts = new Set<string>();
 			const graces = new Map<
 				string,
-				{ readonly token: number; readonly fiber: Fiber.RuntimeFiber<void> }
+				{ readonly token: number; readonly fiber: Fiber.Fiber<void> }
 			>();
 			let graceTokens = 0;
 			// Completes when an instance's stop finishes; `use` waits on it.
@@ -283,13 +304,17 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 				directory: string,
 				payload: OpenCodePayload,
 			) => {
+				const stream = streams.get(instanceId);
+				if (!stream || stream.source !== source) return false;
 				let delivered = false;
 				for (const subscriber of subscribers) {
 					if (!subscriber.directories().has(directory)) continue;
 					subscriber.send({
 						_tag: "event",
 						instanceId,
+						directory,
 						payload,
+						providerProcessId: stream.promptProcessId,
 						health: source.getHealth(),
 					});
 					delivered = true;
@@ -329,6 +354,12 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					});
 					const stream: InstanceStream = {
 						identity: randomUUID(),
+						// External OpenCode exposes no process token. Its endpoint keeps
+						// reconnects stable, but cannot distinguish a remote restart.
+						promptProcessId: openCodePromptProcessId(
+							instanceId,
+							endpoint?.processIdentity ?? endpoint?.url ?? instanceId,
+						),
 						key,
 						managed: endpoint?.managed === true,
 						source,
@@ -339,7 +370,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 							},
 							log,
 							onChange: () => {
-								Queue.unsafeOffer(demandChanged, instanceId);
+								Queue.offerUnsafe(demandChanged, instanceId);
 							},
 						}),
 						reconcileClient:
@@ -369,12 +400,14 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						else if (!stream.managed) setState(instanceId, "stopped");
 					};
 					source.on("connected", () => {
-						Deferred.unsafeDone(stream.connected, Exit.void);
+						Deferred.doneUnsafe(stream.connected, Exit.void);
 						if (!current()) return;
 						setState(instanceId, "connected");
 						broadcast({
 							_tag: "connected",
 							instanceId,
+							providerProcessId: stream.promptProcessId,
+							managed: stream.managed,
 							health: source.getHealth(),
 						});
 						if (stream.reconcileClient)
@@ -386,20 +419,20 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					source.on("disconnected", () => {
 						lost();
 						if (current() && stream.managed && control?.crashes?.checkHealth)
-							Queue.unsafeOffer(healthChecks, { instanceId, stream });
+							Queue.offerUnsafe(healthChecks, { instanceId, stream });
 					});
 					source.on("reconnecting", lost);
 					source.on("event", (raw) => {
 						const decoded = decodeEnvelope(raw);
-						if (Either.isLeft(decoded)) {
+						if (Result.isFailure(decoded)) {
 							log.warn("Skipping undecodable OpenCode global envelope", {
 								instanceId,
 								raw,
-								error: String(decoded.left),
+								error: String(decoded.failure),
 							});
 							return;
 						}
-						const { directory, payload } = decoded.right;
+						const { directory, payload } = decoded.success;
 						// Global keepalives have no directory. SSEStream already records
 						// every yielded frame as liveness and runs its stale watchdog.
 						if (
@@ -460,7 +493,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 				const grace = graces.get(instanceId);
 				if (!grace) return Effect.void;
 				graces.delete(instanceId);
-				return Fiber.interruptFork(grace.fiber);
+				return Effect.sync(() => grace.fiber.interruptUnsafe());
 			};
 
 			/**
@@ -490,7 +523,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					// `use` settles from acquire/release, which are uninterruptible;
 					// the timer must stay cancellable.
 					return Effect.sleep(timeoutMs).pipe(
-						Effect.zipRight(expire(instanceId, token)),
+						Effect.andThen(expire(instanceId, token)),
 						Effect.interruptible,
 						Effect.forkIn(scope),
 						Effect.flatMap((fiber) =>
@@ -546,7 +579,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 									);
 								}),
 							)
-							.pipe(Effect.zipRight(Deferred.done(done, Exit.void))),
+							.pipe(Effect.andThen(Deferred.done(done, Exit.void))),
 					),
 					Effect.asVoid,
 				);
@@ -645,6 +678,10 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					processIdentity:
 						endpoint.processIdentity ??
 						streams.get(endpoint.instanceId ?? instanceId)?.identity,
+					promptProcessId: openCodePromptProcessId(
+						endpoint.instanceId ?? instanceId,
+						endpoint.processIdentity ?? endpoint.url,
+					),
 				});
 			};
 
@@ -668,15 +705,13 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 				Effect.suspend(() => {
 					const running = starts.get(instanceId);
 					if (running) return Deferred.await(running);
-					const started = Deferred.unsafeMake<void, OpenCodeUnavailable>(
-						FiberId.none,
-					);
+					const started = Deferred.makeUnsafe<void, OpenCodeUnavailable>();
 					starts.set(instanceId, started);
 					setState(instanceId, pending);
 					return run.pipe(
 						Effect.provide(context),
 						Effect.mapError((cause) => spawnFailed(instanceId, cause)),
-						Effect.zipRight(resolveIn(instanceId)),
+						Effect.andThen(resolveIn(instanceId)),
 						Effect.filterOrFail(
 							(endpoint) => !endpoint?.managed || endpoint.status === "healthy",
 							(endpoint) =>
@@ -728,12 +763,12 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 										}),
 									)
 									.pipe(
-										Effect.zipRight(Deferred.done(started, Exit.asVoid(exit))),
+										Effect.andThen(Deferred.done(started, Exit.asVoid(exit))),
 									);
 							}),
 						),
 						Effect.forkIn(scope),
-						Effect.zipRight(Deferred.await(started)),
+						Effect.andThen(Deferred.await(started)),
 					);
 				});
 
@@ -763,7 +798,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						Effect.flatMap((stop) =>
 							stop
 								? Deferred.await(stop).pipe(
-										Effect.zipRight(hold(instanceId, borrow)),
+										Effect.andThen(hold(instanceId, borrow)),
 									)
 								: Effect.void,
 						),
@@ -821,16 +856,18 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						),
 						// A freshly opened stream must be live before the caller acts,
 						// or events for that action could be missed.
-						Effect.zipRight(
+						Effect.andThen(
 							stream
 								? Deferred.await(stream.connected).pipe(
-										Effect.timeoutFail({
+										Effect.timeoutOrElse({
 											duration: CONNECT_TIMEOUT,
-											onTimeout: () =>
-												unreachable(
-													instanceId,
-													endpoint.url,
-													"event stream did not connect",
+											orElse: () =>
+												Effect.fail(
+													unreachable(
+														instanceId,
+														endpoint.url,
+														"event stream did not connect",
+													),
 												),
 										}),
 									)
@@ -841,7 +878,9 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 							opened && streams.get(instanceId) === stream
 								? gate.withPermits(1)(
 										closeStream(instanceId).pipe(
-											Effect.tap(() => setState(instanceId, "failed")),
+											Effect.tap(() =>
+												Effect.sync(() => setState(instanceId, "failed")),
+											),
 										),
 									)
 								: Effect.void,
@@ -861,7 +900,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 							endpoint
 								? gate.withPermits(1)(
 										ensureStream(instanceId, endpoint).pipe(
-											Effect.zipRight(settle(instanceId)),
+											Effect.andThen(settle(instanceId)),
 										),
 									)
 								: Effect.void,
@@ -899,7 +938,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						gate.withPermits(1)(
 							Effect.suspend(() =>
 								cancelGrace(instanceId).pipe(
-									Effect.zipRight(closeStream(instanceId)),
+									Effect.andThen(closeStream(instanceId)),
 								),
 							),
 						),
@@ -935,14 +974,14 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 										"reconnecting",
 										crashes.restart(instanceId),
 									).pipe(
-										Effect.zipRight(resolveIn(instanceId)),
+										Effect.andThen(resolveIn(instanceId)),
 										Effect.flatMap((restarted) =>
 											gate.withPermits(1)(
 												Effect.suspend(() =>
 													stopping.has(instanceId)
 														? Effect.void
 														: ensureStream(instanceId, restarted).pipe(
-																Effect.zipRight(settle(instanceId)),
+																Effect.andThen(settle(instanceId)),
 															),
 												),
 											),
@@ -988,9 +1027,13 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					directories: readonly string[] | (() => readonly string[]),
 					instanceId: string = MANAGED_OPENCODE_ACCOUNT_ID,
 				) =>
-					Stream.asyncScoped<OpenCodeInstanceEvent>(
-						(emit) =>
-							gate
+					Stream.fromPull(
+						Effect.gen(function* () {
+							const emit = yield* Effect.acquireRelease(
+								Queue.unbounded<OpenCodeInstanceEvent>(),
+								Queue.shutdown,
+							);
+							yield* gate
 								.withPermits(1)(
 									Effect.gen(function* () {
 										const subscribedId = yield* resolveId(instanceId);
@@ -1005,7 +1048,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 															).map(normalize),
 														),
 													send: (event: OpenCodeInstanceEvent) => {
-														void emit.single(event).catch(() => {});
+														Queue.offerUnsafe(emit, event);
 													},
 												};
 												subscribers.add(member);
@@ -1041,11 +1084,24 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 											subscriber.send({
 												_tag: "connected",
 												instanceId: subscribedId,
+												providerProcessId: stream.promptProcessId,
+												managed: stream.managed,
 												health: stream.source.getHealth(),
 											});
 										// Recover every already-open instance, including sessions
 										// bound to a non-selected instance. This stays passive.
 										for (const [runningId, running] of streams) {
+											if (
+												runningId !== subscribedId &&
+												running.source.isConnected()
+											)
+												subscriber.send({
+													_tag: "connected",
+													instanceId: runningId,
+													providerProcessId: running.promptProcessId,
+													managed: running.managed,
+													health: running.source.getHealth(),
+												});
 											// A late subscriber gets its own replay; others never see it.
 											if (
 												running.source.isConnected() &&
@@ -1054,11 +1110,13 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 												void running.reconciler.reconcile(
 													running.reconcileClient,
 													subscriber.directories(),
-													(_directory, payload) =>
+													(directory, payload) =>
 														subscriber.send({
 															_tag: "event",
 															instanceId: runningId,
+															directory,
 															payload,
+															providerProcessId: running.promptProcessId,
 															health: running.source.getHealth(),
 														}),
 												);
@@ -1066,9 +1124,10 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 										return subscriber;
 									}),
 								)
-								.pipe(Effect.uninterruptible),
-						"unbounded",
-					),
+								.pipe(Effect.uninterruptible);
+							return Queue.takeAll(emit);
+						}),
+					).pipe(Stream.scoped),
 				use: (instanceId, directory) =>
 					Effect.flatMap(resolveId(instanceId), (id) => use(id, directory)),
 				borrow: (instanceId, directory) =>
@@ -1102,16 +1161,27 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						),
 					),
 				// Reads process state only: no request, no stream, never a start.
-				ifRunning: (instanceId: string, directory?: string) =>
+				ifRunning: (instanceId: string, directory?: string | null) =>
 					Effect.flatMap(resolveId(instanceId), (instanceId) =>
 						Effect.map(resolveIn(instanceId), (endpoint) =>
 							endpoint &&
 							endpoint.status !== "stopped" &&
 							!stopping.has(instanceId)
-								? Option.some(clientFor(endpoint, directory, instanceId))
+								? Option.some(
+										clientFor(endpoint, directory ?? undefined, instanceId),
+									)
 								: Option.none(),
 						),
 					),
+				isManagedStopped: (instanceId) =>
+					Effect.flatMap(resolveId(instanceId), (id) => {
+						if (starts.has(id) || stopping.has(id))
+							return Effect.succeed(false);
+						if (states.get(id)?.managedStopped) return Effect.succeed(true);
+						return control?.isStopped
+							? control.isStopped(id).pipe(Effect.provide(context))
+							: Effect.succeed(false);
+					}),
 				stop: (instanceId) => Effect.flatMap(resolveId(instanceId), stop),
 			};
 		}),
@@ -1147,14 +1217,15 @@ export const OpenCodeInstancesLive = makeOpenCodeInstancesLive(
 		}),
 	{
 		control: {
+			isStopped: isManagedOpenCodeStopped,
 			start: startInstance,
-			removed: Stream.unwrapScoped(
+			removed: Stream.unwrap(
 				Effect.map(subscribeToDaemonEvents, (events) =>
-					Stream.fromQueue(events).pipe(
+					Stream.fromSubscription(events).pipe(
 						Stream.filterMap((event) =>
 							event._tag === "ProviderInstanceRemoved"
-								? Option.some(event.instanceId)
-								: Option.none(),
+								? Result.succeed(event.instanceId)
+								: Result.fail(event),
 						),
 					),
 				),
@@ -1170,7 +1241,7 @@ export const OpenCodeInstancesLive = makeOpenCodeInstancesLive(
 			),
 			stop: (instanceId) =>
 				stopInstance(instanceId).pipe(
-					Effect.catchAllCause((cause) =>
+					Effect.catchCause((cause) =>
 						Effect.logWarning("OpenCode instance stop failed", cause).pipe(
 							Effect.as(false),
 						),
@@ -1178,13 +1249,13 @@ export const OpenCodeInstancesLive = makeOpenCodeInstancesLive(
 				),
 			crashes: {
 				checkHealth: checkInstanceHealth,
-				statusChanges: Stream.unwrapScoped(
+				statusChanges: Stream.unwrap(
 					Effect.map(subscribeToDaemonEvents, (events) =>
-						Stream.fromQueue(events).pipe(
+						Stream.fromSubscription(events).pipe(
 							Stream.filterMap((event) =>
 								event._tag === "InstanceStatusChanged"
-									? Option.some(event.instanceId)
-									: Option.none(),
+									? Result.succeed(event.instanceId)
+									: Result.fail(event),
 							),
 						),
 					),
@@ -1218,10 +1289,10 @@ export const makeStandaloneOpenCodeInstancesLive = (
 		"opencodeUrl" | "opencodeAuth" | "configDir" | "log"
 	>,
 ) =>
-	Layer.unwrapEffect(
+	Layer.unwrap(
 		Effect.gen(function* () {
 			const daemonConfig = yield* Effect.suspend(() =>
-				loadDaemonConfigResult(config.configDir),
+				Effect.fromResult(loadDaemonConfigResult(config.configDir)),
 			).pipe(
 				Effect.catchTag("NotFound", () =>
 					Effect.succeed(defaultDaemonConfig()),

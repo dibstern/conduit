@@ -57,14 +57,14 @@ Catch-up sources read a shared window through the newest queued advance, includi
 unrouted advances, and send row deltas plus durable tombstones. They replace the
 view with a snapshot only when tombstones cannot cover the cursor or the source
 requires a rebase. `CONDUIT_TEST_ADVANCE_BUS_CAPACITY` changes only the advances
-buffer capacity, and only with `NODE_ENV=test`. Both buffers hold at least two
-advances: Effect's 1-slot PubSub can hand one subscriber's share to another.
+buffer capacity, and only with `NODE_ENV=test`.
 Detail windows include message and part removals retained across message
 recreation, so overflowing open session views catch up with deltas. Ordinary
 detail resumes keep their existing policy.
 
 ## Effect Ownership Guardrails
 
+- The codebase runs on Effect 4, pinned to an exact `effect` version. RPC, SQL, HTTP and socket modules come from `effect/*` subpaths; only platform-node and opentelemetry remain separate `@effect/*` packages.
 - Daemon and relay internals should be owned by scoped Effect Layers and services. Do not add app-internal `Effect.runPromise`, `Effect.runSync`, `Runtime.runPromise`, `Runtime.runSync`, or object `.runPromise` / `.runSync` calls.
 - The surviving runtime boundaries are explicit compatibility edges: standalone HTTP handler construction, OpenCode SDK fetch, Claude SDK permission callback, frontend transport Promise API, and the public `createProjectRelay()` startup Promise API.
 - `relay-stack.ts` must not regain `Layer.succeed(Tag, alreadyConstructedInstance)` bridge composition. Relay state belongs in self-constructing domain Layers under `src/lib/domain/relay/*`.

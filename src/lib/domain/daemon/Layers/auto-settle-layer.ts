@@ -3,12 +3,14 @@ import { Clock, Effect, Layer, Option, PubSub, Ref, Schedule } from "effect";
 import {
 	autoSettleIdleWindowMs,
 	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
+	DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS,
 } from "../../../daemon/config-persistence.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {
 	hasColdAutoArchiveCandidate,
+	hasColdAutoDeleteCandidate,
 	hasColdAutoSettleCandidate,
 } from "../Services/daemon-session-reader.js";
 import { persistenceStoreContext } from "../Services/project-read-database.js";
@@ -19,7 +21,7 @@ import {
 import { RelayCacheTag } from "../Services/relay-cache.js";
 
 export const AutoSettleLive = () =>
-	Layer.scopedDiscard(
+	Layer.effectDiscard(
 		Effect.gen(function* () {
 			const configRef = yield* DaemonConfigRefTag;
 			const registry = yield* ProjectRegistryTag;
@@ -32,6 +34,9 @@ export const AutoSettleLive = () =>
 				const config = yield* Ref.get(configRef);
 				const archiveDays = config.autoArchiveAfterDays;
 				const idleWindowMs = autoSettleIdleWindowMs(config.autoSettleAfterDays);
+				const deleteDays = config.autoDeleteArchivedAfterDays;
+				const deleteWindowMs =
+					(deleteDays ?? DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS) * 86_400_000;
 				const archiveWindowMs =
 					(archiveDays ?? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS) * 86_400_000;
 				const now = yield* Clock.currentTimeMillis;
@@ -57,7 +62,12 @@ export const AutoSettleLive = () =>
 							return;
 						}
 						missingDirectories.delete(mainFolder);
-						if (idleWindowMs === null && archiveDays === null) return;
+						if (
+							idleWindowMs === null &&
+							archiveDays === null &&
+							deleteDays === null
+						)
+							return;
 						const running = yield* cache.peek(project.slug);
 						const relay = Option.isSome(running)
 							? running.value
@@ -72,6 +82,12 @@ export const AutoSettleLive = () =>
 											project,
 											now,
 											archiveWindowMs,
+										).pipe(Effect.provide(storeContext)))) ||
+									(deleteDays !== null &&
+										(yield* hasColdAutoDeleteCandidate(
+											project,
+											now,
+											deleteWindowMs,
 										).pipe(Effect.provide(storeContext))))
 								? yield* cache.get(project.slug)
 								: null;
@@ -84,11 +100,15 @@ export const AutoSettleLive = () =>
 							archiveDays === null || relay.archiveIdleSessions === undefined
 								? 0
 								: yield* relay.archiveIdleSessions(archiveWindowMs, now);
-						const count = settled + archived;
+						const deleted =
+							deleteDays === null || relay.deleteArchivedSessions === undefined
+								? 0
+								: yield* relay.deleteArchivedSessions(deleteWindowMs, now);
+						const count = settled + archived + deleted;
 						if (count > 0)
 							yield* PubSub.publish(bus, DaemonEvent.DaemonSessionsChanged());
 					}).pipe(
-						Effect.catchAllCause((cause) =>
+						Effect.catchCause((cause) =>
 							Failure.isInterruptedOnly(cause)
 								? Effect.failCause(cause)
 								: Effect.logWarning("automatic settlement failed for project", {
@@ -99,7 +119,7 @@ export const AutoSettleLive = () =>
 					);
 				}
 			}).pipe(
-				Effect.catchAllCause((cause) =>
+				Effect.catchCause((cause) =>
 					Failure.isInterruptedOnly(cause)
 						? Effect.failCause(cause)
 						: Effect.logWarning(

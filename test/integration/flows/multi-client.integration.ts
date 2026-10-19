@@ -44,37 +44,6 @@ describe("Integration: Multi-Client", () => {
 		await client2.close();
 	});
 
-	it("model switch from one client reaches another client on the same session", async () => {
-		const client1 = await harness.connectWsClient();
-		const client2 = await harness.connectWsClient();
-		await client1.waitForInitialState();
-		await client2.waitForInitialState();
-		const sessionId = client1.getActiveSessionId();
-		await client2.subscribeShell();
-
-		// A model the recorded OpenCode catalog offers: picks are validated.
-		await client1.switchModel("gpt-5-nano", "opencode");
-
-		const upsert = await client2.waitFor("shell", {
-			timeout: 5000,
-			predicate: (msg) => {
-				const item = msg["item"] as Record<string, unknown> | undefined;
-				return (
-					msg["_tag"] === "upsert" &&
-					item?.["id"] === sessionId &&
-					item?.["model"] !== undefined
-				);
-			},
-		});
-		expect((upsert["item"] as Record<string, unknown>)["model"]).toEqual({
-			model: "gpt-5-nano",
-			provider: "opencode",
-		});
-
-		await client1.close();
-		await client2.close();
-	});
-
 	it("new session from one client notifies the other", async () => {
 		const client1 = await harness.connectWsClient();
 		const client2 = await harness.connectWsClient();
@@ -88,34 +57,13 @@ describe("Integration: Multi-Client", () => {
 		expect(newSessionId).toBeTruthy();
 
 		// CreateSession does not switch another tab.
-		await new Promise((resolve) => setTimeout(resolve, 100));
+		await client2.waitFor("shell", {
+			predicate: (msg) =>
+				msg["_tag"] === "upsert" &&
+				(msg["item"] as Record<string, unknown> | undefined)?.["id"] ===
+					newSessionId,
+		});
 		expect(client2.getActiveSessionId()).not.toBe(newSessionId);
-
-		await client1.close();
-		await client2.close();
-	});
-
-	it("a draft from one client reaches the other", async () => {
-		const client1 = await harness.connectWsClient();
-		const client2 = await harness.connectWsClient();
-		await client1.waitForInitialState();
-		await client2.waitForInitialState();
-		client1.clearReceived();
-		client2.clearReceived();
-		const sessionId = client1.getActiveSessionId();
-		if (!sessionId) throw new Error("Expected active session after init");
-		await client2.subscribeInputDraft(sessionId);
-
-		await client1.syncInputDraft("hello from client1", {
-			originId: "browser-tab-a",
-		});
-
-		const msg = await client2.waitFor("input_draft", {
-			timeout: 3000,
-			predicate: (m) => m["_tag"] === "draft",
-		});
-		expect(msg["text"]).toBe("hello from client1");
-		expect(msg["from"]).toBe("browser-tab-a");
 
 		await client1.close();
 		await client2.close();

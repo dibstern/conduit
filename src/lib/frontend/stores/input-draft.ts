@@ -3,7 +3,6 @@
 // ViewSession response; this carries only what changes after.
 
 import { Effect, Fiber, Stream } from "effect";
-import type { RuntimeFiber } from "effect/Fiber";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
 import { supervise } from "../transport/supervise.js";
@@ -19,7 +18,7 @@ export const applyInputDraft = (envelope: InputDraftEnvelope): void => {
 
 let viewed: { project: string; sessionId: string | null } | null = null;
 let generation = 0;
-let fiber: RuntimeFiber<void, never> | null = null;
+let fiber: Fiber.Fiber<void, never> | null = null;
 
 /** Follow one session's draft; a `null` session stops. */
 export function viewInputDraft(

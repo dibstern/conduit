@@ -10,7 +10,7 @@
 //   });
 //   // Merge into your program's Layer composition.
 
-import { NodeSdk, Tracer as OtelEffectTracer } from "@effect/opentelemetry";
+import { NodeSdk } from "@effect/opentelemetry";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import type { SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import {
@@ -18,7 +18,7 @@ import {
 	ConsoleSpanExporter,
 	SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Tracer } from "effect";
 import type { TraceEnvConfig } from "../../../env.js";
 import {
 	makeCompositeTracer,
@@ -101,7 +101,7 @@ export const makeTracingLive = (
 
 	// NodeSdk.layer provides Resource.Resource — we discard it from the output
 	// type so callers get Layer<never, never, never> and can merge freely.
-	return sdkLayer as unknown as Layer.Layer<never, never, never>;
+	return sdkLayer;
 };
 
 export const makeDaemonTracingLive = (
@@ -133,25 +133,22 @@ export const makeDaemonTracingLive = (
 		return makeLocalTraceArtifactLive(localOptions);
 	}
 
-	const localFanoutLayer = Layer.unwrapScoped(
+	const localFanoutLayer = Layer.unwrap(
 		Effect.gen(function* () {
 			const sink = yield* makeTraceSink(localOptions);
-			const runtime = yield* Effect.runtime<never>();
-			const upstreamTracer = yield* OtelEffectTracer.make;
+			const upstreamTracer = yield* Tracer.Tracer;
 			const detachTimeline = attachTurnTimeline(sink);
 			yield* Effect.addFinalizer(() =>
 				Effect.sync(detachTimeline).pipe(Effect.andThen(sink.close())),
 			);
-			return Layer.setTracer(
+			return Layer.succeed(Tracer.Tracer)(
 				makeCompositeTracer(
-					makeLocalFileTracer({ ...localOptions, sink }, runtime),
+					makeLocalFileTracer({ ...localOptions, sink }),
 					upstreamTracer,
 				),
 			);
 		}),
 	);
 
-	return localFanoutLayer.pipe(
-		Layer.provideMerge(otelLayer),
-	) as unknown as Layer.Layer<never, never, never>;
+	return localFanoutLayer.pipe(Layer.provideMerge(otelLayer));
 };

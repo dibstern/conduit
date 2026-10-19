@@ -1,0 +1,3971 @@
+{
+	"name": "directory-s4-fork-other-directory",
+	"recordedAt": "1970-01-01T00:00:00.000Z",
+	"opencodeVersion": "1.18.34",
+	"interactions": [
+		{
+			"kind": "sse",
+			"type": "server.connected",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.connected",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.connected",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "server.connected",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.created",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "ses_5",
+					"slug": "misty-mountain",
+					"version": "1.18.34",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B (fork #1)",
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"summary": {
+						"diffs": []
+					},
+					"id": "msg_19",
+					"sessionID": "ses_5"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "text",
+					"text": "Use the bash tool exactly once to run the command \"pwd\". Do not set workdir or change directory. Reply with the tool's output, then stop.",
+					"id": "prt_55",
+					"sessionID": "ses_5",
+					"messageID": "msg_19"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.created",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "ses_5",
+					"slug": "misty-mountain",
+					"version": "1.18.34",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B (fork #1)",
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"summary": {
+						"diffs": []
+					},
+					"id": "msg_19",
+					"sessionID": "ses_5"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"parentID": "msg_19",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8234,
+						"input": 2054,
+						"output": 19,
+						"reasoning": 17,
+						"cache": {
+							"write": 0,
+							"read": 6144
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"finish": "tool-calls",
+					"id": "msg_20",
+					"sessionID": "ses_5"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"snapshot": "project_4",
+					"type": "step-start",
+					"id": "prt_56",
+					"sessionID": "ses_5",
+					"messageID": "msg_20"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "reasoning",
+					"text": "The user wants me to run `pwd` exactly once with the bash tool.",
+					"time": {
+						"start": 0,
+						"end": 0
+					},
+					"id": "prt_57",
+					"sessionID": "ses_5",
+					"messageID": "msg_20"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "text",
+					"text": "Use the bash tool exactly once to run the command \"pwd\". Do not set workdir or change directory. Reply with the tool's output, then stop.",
+					"id": "prt_55",
+					"sessionID": "ses_5",
+					"messageID": "msg_19"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"parentID": "msg_19",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8234,
+						"input": 2054,
+						"output": 19,
+						"reasoning": 17,
+						"cache": {
+							"write": 0,
+							"read": 6144
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"finish": "tool-calls",
+					"id": "msg_20",
+					"sessionID": "ses_5"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"snapshot": "project_4",
+					"type": "step-start",
+					"id": "prt_56",
+					"sessionID": "ses_5",
+					"messageID": "msg_20"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "reasoning",
+					"text": "The user wants me to run `pwd` exactly once with the bash tool.",
+					"time": {
+						"start": 0,
+						"end": 0
+					},
+					"id": "prt_57",
+					"sessionID": "ses_5",
+					"messageID": "msg_20"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call_2",
+					"state": {
+						"status": "completed",
+						"input": {
+							"command": "pwd"
+						},
+						"output": "<B>\n",
+						"metadata": {
+							"output": "<B>\n",
+							"exit": 0,
+							"truncated": false
+						},
+						"title": "pwd",
+						"time": {
+							"start": 0,
+							"end": 0
+						}
+					},
+					"id": "prt_58",
+					"sessionID": "ses_5",
+					"messageID": "msg_20"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"reason": "tool-calls",
+					"snapshot": "project_4",
+					"type": "step-finish",
+					"tokens": {
+						"total": 8234,
+						"input": 2054,
+						"output": 19,
+						"reasoning": 17,
+						"cache": {
+							"write": 0,
+							"read": 6144
+						}
+					},
+					"cost": 0,
+					"id": "prt_59",
+					"sessionID": "ses_5",
+					"messageID": "msg_20"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"parentID": "msg_19",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8334,
+						"input": 90,
+						"output": 42,
+						"reasoning": 10,
+						"cache": {
+							"write": 0,
+							"read": 8192
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"finish": "stop",
+					"id": "msg_21",
+					"sessionID": "ses_5"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call_2",
+					"state": {
+						"status": "completed",
+						"input": {
+							"command": "pwd"
+						},
+						"output": "<B>\n",
+						"metadata": {
+							"output": "<B>\n",
+							"exit": 0,
+							"truncated": false
+						},
+						"title": "pwd",
+						"time": {
+							"start": 0,
+							"end": 0
+						}
+					},
+					"id": "prt_58",
+					"sessionID": "ses_5",
+					"messageID": "msg_20"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"reason": "tool-calls",
+					"snapshot": "project_4",
+					"type": "step-finish",
+					"tokens": {
+						"total": 8234,
+						"input": 2054,
+						"output": 19,
+						"reasoning": 17,
+						"cache": {
+							"write": 0,
+							"read": 6144
+						}
+					},
+					"cost": 0,
+					"id": "prt_59",
+					"sessionID": "ses_5",
+					"messageID": "msg_20"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"parentID": "msg_19",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8334,
+						"input": 90,
+						"output": 42,
+						"reasoning": 10,
+						"cache": {
+							"write": 0,
+							"read": 8192
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"finish": "stop",
+					"id": "msg_21",
+					"sessionID": "ses_5"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"snapshot": "project_4",
+					"type": "step-start",
+					"id": "prt_60",
+					"sessionID": "ses_5",
+					"messageID": "msg_21"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "reasoning",
+					"text": "The user asked for the output of pwd.",
+					"time": {
+						"start": 0,
+						"end": 0
+					},
+					"id": "prt_61",
+					"sessionID": "ses_5",
+					"messageID": "msg_21"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "text",
+					"text": "<B>",
+					"time": {
+						"start": 0,
+						"end": 0
+					},
+					"id": "prt_62",
+					"sessionID": "ses_5",
+					"messageID": "msg_21"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"snapshot": "project_4",
+					"type": "step-start",
+					"id": "prt_60",
+					"sessionID": "ses_5",
+					"messageID": "msg_21"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "reasoning",
+					"text": "The user asked for the output of pwd.",
+					"time": {
+						"start": 0,
+						"end": 0
+					},
+					"id": "prt_61",
+					"sessionID": "ses_5",
+					"messageID": "msg_21"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "text",
+					"text": "<B>",
+					"time": {
+						"start": 0,
+						"end": 0
+					},
+					"id": "prt_62",
+					"sessionID": "ses_5",
+					"messageID": "msg_21"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"reason": "stop",
+					"snapshot": "project_4",
+					"type": "step-finish",
+					"tokens": {
+						"total": 8334,
+						"input": 90,
+						"output": 42,
+						"reasoning": 10,
+						"cache": {
+							"write": 0,
+							"read": 8192
+						}
+					},
+					"cost": 0,
+					"id": "prt_63",
+					"sessionID": "ses_5",
+					"messageID": "msg_21"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"summary": {
+						"diffs": []
+					},
+					"id": "msg_22",
+					"sessionID": "ses_5"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "text",
+					"text": "Use the bash tool exactly once to run the command \"pwd\". Do not set workdir or change directory. Reply with the tool's output, then stop.",
+					"id": "prt_64",
+					"sessionID": "ses_5",
+					"messageID": "msg_22"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"parentID": "msg_22",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8404,
+						"input": 181,
+						"output": 19,
+						"reasoning": 12,
+						"cache": {
+							"write": 0,
+							"read": 8192
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"finish": "tool-calls",
+					"id": "msg_23",
+					"sessionID": "ses_5"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"reason": "stop",
+					"snapshot": "project_4",
+					"type": "step-finish",
+					"tokens": {
+						"total": 8334,
+						"input": 90,
+						"output": 42,
+						"reasoning": 10,
+						"cache": {
+							"write": 0,
+							"read": 8192
+						}
+					},
+					"cost": 0,
+					"id": "prt_63",
+					"sessionID": "ses_5",
+					"messageID": "msg_21"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"summary": {
+						"diffs": []
+					},
+					"id": "msg_22",
+					"sessionID": "ses_5"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "text",
+					"text": "Use the bash tool exactly once to run the command \"pwd\". Do not set workdir or change directory. Reply with the tool's output, then stop.",
+					"id": "prt_64",
+					"sessionID": "ses_5",
+					"messageID": "msg_22"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"snapshot": "project_4",
+					"type": "step-start",
+					"id": "prt_65",
+					"sessionID": "ses_5",
+					"messageID": "msg_23"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "reasoning",
+					"text": "The user is asking again to run pwd exactly once.",
+					"time": {
+						"start": 0,
+						"end": 0
+					},
+					"id": "prt_66",
+					"sessionID": "ses_5",
+					"messageID": "msg_23"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call_5",
+					"state": {
+						"status": "completed",
+						"input": {
+							"command": "pwd"
+						},
+						"output": "<B>\n",
+						"metadata": {
+							"output": "<B>\n",
+							"exit": 0,
+							"truncated": false
+						},
+						"title": "pwd",
+						"time": {
+							"start": 0,
+							"end": 0
+						}
+					},
+					"id": "prt_67",
+					"sessionID": "ses_5",
+					"messageID": "msg_23"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"parentID": "msg_22",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8404,
+						"input": 181,
+						"output": 19,
+						"reasoning": 12,
+						"cache": {
+							"write": 0,
+							"read": 8192
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"finish": "tool-calls",
+					"id": "msg_23",
+					"sessionID": "ses_5"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"snapshot": "project_4",
+					"type": "step-start",
+					"id": "prt_65",
+					"sessionID": "ses_5",
+					"messageID": "msg_23"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "reasoning",
+					"text": "The user is asking again to run pwd exactly once.",
+					"time": {
+						"start": 0,
+						"end": 0
+					},
+					"id": "prt_66",
+					"sessionID": "ses_5",
+					"messageID": "msg_23"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"reason": "tool-calls",
+					"snapshot": "project_4",
+					"type": "step-finish",
+					"tokens": {
+						"total": 8404,
+						"input": 181,
+						"output": 19,
+						"reasoning": 12,
+						"cache": {
+							"write": 0,
+							"read": 8192
+						}
+					},
+					"cost": 0,
+					"id": "prt_68",
+					"sessionID": "ses_5",
+					"messageID": "msg_23"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"parentID": "msg_22",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8506,
+						"input": 132,
+						"output": 42,
+						"reasoning": 12,
+						"cache": {
+							"write": 0,
+							"read": 8320
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"finish": "stop",
+					"id": "msg_24",
+					"sessionID": "ses_5"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"snapshot": "project_4",
+					"type": "step-start",
+					"id": "prt_69",
+					"sessionID": "ses_5",
+					"messageID": "msg_24"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call_5",
+					"state": {
+						"status": "completed",
+						"input": {
+							"command": "pwd"
+						},
+						"output": "<B>\n",
+						"metadata": {
+							"output": "<B>\n",
+							"exit": 0,
+							"truncated": false
+						},
+						"title": "pwd",
+						"time": {
+							"start": 0,
+							"end": 0
+						}
+					},
+					"id": "prt_67",
+					"sessionID": "ses_5",
+					"messageID": "msg_23"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"reason": "tool-calls",
+					"snapshot": "project_4",
+					"type": "step-finish",
+					"tokens": {
+						"total": 8404,
+						"input": 181,
+						"output": 19,
+						"reasoning": 12,
+						"cache": {
+							"write": 0,
+							"read": 8192
+						}
+					},
+					"cost": 0,
+					"id": "prt_68",
+					"sessionID": "ses_5",
+					"messageID": "msg_23"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"parentID": "msg_22",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8506,
+						"input": 132,
+						"output": 42,
+						"reasoning": 12,
+						"cache": {
+							"write": 0,
+							"read": 8320
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"finish": "stop",
+					"id": "msg_24",
+					"sessionID": "ses_5"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "reasoning",
+					"text": "The user wants the tool's output, then stop.",
+					"time": {
+						"start": 0,
+						"end": 0
+					},
+					"id": "prt_70",
+					"sessionID": "ses_5",
+					"messageID": "msg_24"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "text",
+					"text": "<B>",
+					"time": {
+						"start": 0,
+						"end": 0
+					},
+					"id": "prt_71",
+					"sessionID": "ses_5",
+					"messageID": "msg_24"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"reason": "stop",
+					"snapshot": "project_4",
+					"type": "step-finish",
+					"tokens": {
+						"total": 8506,
+						"input": 132,
+						"output": 42,
+						"reasoning": 12,
+						"cache": {
+							"write": 0,
+							"read": 8320
+						}
+					},
+					"cost": 0,
+					"id": "prt_72",
+					"sessionID": "ses_5",
+					"messageID": "msg_24"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/session/ses_2/fork",
+			"requestBody": {},
+			"status": 200,
+			"responseBody": {
+				"id": "ses_5",
+				"slug": "misty-mountain",
+				"projectID": "project_2",
+				"directory": "<B>",
+				"path": "",
+				"cost": 0,
+				"tokens": {
+					"input": 0,
+					"output": 0,
+					"reasoning": 0,
+					"cache": {
+						"read": 0,
+						"write": 0
+					}
+				},
+				"title": "directory-B (fork #1)",
+				"version": "1.18.34",
+				"time": {
+					"created": 0,
+					"updated": 0
+				}
+			}
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"snapshot": "project_4",
+					"type": "step-start",
+					"id": "prt_69",
+					"sessionID": "ses_5",
+					"messageID": "msg_24"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "reasoning",
+					"text": "The user wants the tool's output, then stop.",
+					"time": {
+						"start": 0,
+						"end": 0
+					},
+					"id": "prt_70",
+					"sessionID": "ses_5",
+					"messageID": "msg_24"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "text",
+					"text": "<B>",
+					"time": {
+						"start": 0,
+						"end": 0
+					},
+					"id": "prt_71",
+					"sessionID": "ses_5",
+					"messageID": "msg_24"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"reason": "stop",
+					"snapshot": "project_4",
+					"type": "step-finish",
+					"tokens": {
+						"total": 8506,
+						"input": 132,
+						"output": 42,
+						"reasoning": 12,
+						"cache": {
+							"write": 0,
+							"read": 8320
+						}
+					},
+					"cost": 0,
+					"id": "prt_72",
+					"sessionID": "ses_5",
+					"messageID": "msg_24"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/session/ses_5/prompt_async",
+			"requestBody": {
+				"model": {
+					"providerID": "opencode",
+					"modelID": "mimo-v2.6-flash-free"
+				},
+				"agent": "build",
+				"parts": [
+					{
+						"type": "text",
+						"text": "Use the bash tool exactly once to run the command \"pwd\". Do not set workdir or change directory. Reply with the tool's output, then stop."
+					}
+				]
+			},
+			"status": 204,
+			"responseBody": ""
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "ses_5",
+					"slug": "misty-mountain",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B (fork #1)",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"cost": 0,
+					"tokens": {
+						"input": 2457,
+						"output": 122,
+						"reasoning": 51,
+						"cache": {
+							"read": 30848,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "msg_25",
+					"role": "user",
+					"sessionID": "ses_5",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "text",
+					"text": "Use the bash tool exactly once to run the command \"pwd\". Do not set workdir or change directory. Reply with the tool's output, then stop.",
+					"messageID": "msg_25",
+					"sessionID": "ses_5",
+					"id": "prt_73"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "ses_5",
+					"slug": "misty-mountain",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B (fork #1)",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"cost": 0,
+					"tokens": {
+						"input": 2457,
+						"output": 122,
+						"reasoning": 51,
+						"cache": {
+							"read": 30848,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "msg_25",
+					"role": "user",
+					"sessionID": "ses_5",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "ses_5",
+					"slug": "misty-mountain",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B (fork #1)",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"cost": 0,
+					"tokens": {
+						"input": 2457,
+						"output": 122,
+						"reasoning": 51,
+						"cache": {
+							"read": 30848,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "text",
+					"text": "Use the bash tool exactly once to run the command \"pwd\". Do not set workdir or change directory. Reply with the tool's output, then stop.",
+					"messageID": "msg_25",
+					"sessionID": "ses_5",
+					"id": "prt_73"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "ses_5",
+					"slug": "misty-mountain",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B (fork #1)",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"cost": 0,
+					"tokens": {
+						"input": 2457,
+						"output": 122,
+						"reasoning": 51,
+						"cache": {
+							"read": 30848,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_5",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "msg_26",
+					"parentID": "msg_25",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_5"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_5",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "msg_26",
+					"parentID": "msg_25",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_5"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "ses_5",
+					"slug": "misty-mountain",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B (fork #1)",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2457,
+						"output": 122,
+						"reasoning": 51,
+						"cache": {
+							"read": 30848,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_5",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"id": "msg_25",
+					"sessionID": "ses_5",
+					"summary": {
+						"diffs": []
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "ses_5",
+					"slug": "misty-mountain",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B (fork #1)",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2457,
+						"output": 122,
+						"reasoning": 51,
+						"cache": {
+							"read": 30848,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_5",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"id": "msg_25",
+					"sessionID": "ses_5",
+					"summary": {
+						"diffs": []
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_5",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_5",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"id": "prt_74",
+					"messageID": "msg_26",
+					"sessionID": "ses_5",
+					"snapshot": "project_4",
+					"type": "step-start"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"id": "prt_75",
+					"messageID": "msg_26",
+					"sessionID": "ses_5",
+					"type": "reasoning",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_5",
+				"messageID": "msg_26",
+				"partID": "prt_75",
+				"field": "text",
+				"delta": "The user wants me to run pwd"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"id": "prt_74",
+					"messageID": "msg_26",
+					"sessionID": "ses_5",
+					"snapshot": "project_4",
+					"type": "step-start"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"id": "prt_75",
+					"messageID": "msg_26",
+					"sessionID": "ses_5",
+					"type": "reasoning",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_5",
+				"messageID": "msg_26",
+				"partID": "prt_75",
+				"field": "text",
+				"delta": "The user wants me to run pwd"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_5",
+				"messageID": "msg_26",
+				"partID": "prt_75",
+				"field": "text",
+				"delta": " exactly once again"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_5",
+				"messageID": "msg_26",
+				"partID": "prt_75",
+				"field": "text",
+				"delta": " exactly once again"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_5",
+				"messageID": "msg_26",
+				"partID": "prt_75",
+				"field": "text",
+				"delta": "."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"id": "prt_75",
+					"messageID": "msg_26",
+					"sessionID": "ses_5",
+					"type": "reasoning",
+					"text": "The user wants me to run pwd exactly once again.",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"id": "prt_76",
+					"messageID": "msg_26",
+					"sessionID": "ses_5",
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call_7",
+					"state": {
+						"status": "pending",
+						"input": {},
+						"raw": ""
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_5",
+				"messageID": "msg_26",
+				"partID": "prt_75",
+				"field": "text",
+				"delta": "."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"id": "prt_75",
+					"messageID": "msg_26",
+					"sessionID": "ses_5",
+					"type": "reasoning",
+					"text": "The user wants me to run pwd exactly once again.",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"id": "prt_76",
+					"messageID": "msg_26",
+					"sessionID": "ses_5",
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call_7",
+					"state": {
+						"status": "pending",
+						"input": {},
+						"raw": ""
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call_7",
+					"state": {
+						"metadata": {
+							"output": ""
+						},
+						"status": "running",
+						"input": {
+							"command": "pwd"
+						},
+						"time": {
+							"start": 0
+						}
+					},
+					"id": "prt_76",
+					"sessionID": "ses_5",
+					"messageID": "msg_26"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call_7",
+					"state": {
+						"metadata": {
+							"output": ""
+						},
+						"status": "running",
+						"input": {
+							"command": "pwd"
+						},
+						"time": {
+							"start": 0
+						}
+					},
+					"id": "prt_76",
+					"sessionID": "ses_5",
+					"messageID": "msg_26"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call_7",
+					"state": {
+						"metadata": {
+							"output": ""
+						},
+						"status": "running",
+						"input": {
+							"command": "pwd"
+						},
+						"time": {
+							"start": 0
+						}
+					},
+					"id": "prt_76",
+					"sessionID": "ses_5",
+					"messageID": "msg_26"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call_7",
+					"state": {
+						"metadata": {
+							"output": ""
+						},
+						"status": "running",
+						"input": {
+							"command": "pwd"
+						},
+						"time": {
+							"start": 0
+						}
+					},
+					"id": "prt_76",
+					"sessionID": "ses_5",
+					"messageID": "msg_26"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call_7",
+					"state": {
+						"metadata": {
+							"output": "<B>\n"
+						},
+						"status": "running",
+						"input": {
+							"command": "pwd"
+						},
+						"time": {
+							"start": 0
+						}
+					},
+					"id": "prt_76",
+					"sessionID": "ses_5",
+					"messageID": "msg_26"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call_7",
+					"state": {
+						"metadata": {
+							"output": "<B>\n"
+						},
+						"status": "running",
+						"input": {
+							"command": "pwd"
+						},
+						"time": {
+							"start": 0
+						}
+					},
+					"id": "prt_76",
+					"sessionID": "ses_5",
+					"messageID": "msg_26"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call_7",
+					"state": {
+						"status": "completed",
+						"input": {
+							"command": "pwd"
+						},
+						"output": "<B>\n",
+						"metadata": {
+							"output": "<B>\n",
+							"exit": 0,
+							"truncated": false
+						},
+						"title": "pwd",
+						"time": {
+							"start": 0,
+							"end": 0
+						}
+					},
+					"id": "prt_76",
+					"sessionID": "ses_5",
+					"messageID": "msg_26"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"type": "tool",
+					"tool": "bash",
+					"callID": "call_7",
+					"state": {
+						"status": "completed",
+						"input": {
+							"command": "pwd"
+						},
+						"output": "<B>\n",
+						"metadata": {
+							"output": "<B>\n",
+							"exit": 0,
+							"truncated": false
+						},
+						"title": "pwd",
+						"time": {
+							"start": 0,
+							"end": 0
+						}
+					},
+					"id": "prt_76",
+					"sessionID": "ses_5",
+					"messageID": "msg_26"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"id": "prt_77",
+					"reason": "tool-calls",
+					"snapshot": "project_4",
+					"messageID": "msg_26",
+					"sessionID": "ses_5",
+					"type": "step-finish",
+					"tokens": {
+						"total": 8576,
+						"input": 97,
+						"output": 19,
+						"reasoning": 12,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"cost": 0
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "msg_26",
+					"parentID": "msg_25",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8576,
+						"input": 97,
+						"output": 19,
+						"reasoning": 12,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_5",
+					"finish": "tool-calls"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"id": "prt_77",
+					"reason": "tool-calls",
+					"snapshot": "project_4",
+					"messageID": "msg_26",
+					"sessionID": "ses_5",
+					"type": "step-finish",
+					"tokens": {
+						"total": 8576,
+						"input": 97,
+						"output": 19,
+						"reasoning": 12,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"cost": 0
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "msg_26",
+					"parentID": "msg_25",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8576,
+						"input": 97,
+						"output": 19,
+						"reasoning": 12,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_5",
+					"finish": "tool-calls"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "msg_26",
+					"parentID": "msg_25",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8576,
+						"input": 97,
+						"output": 19,
+						"reasoning": 12,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"sessionID": "ses_5",
+					"finish": "tool-calls"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_5",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "msg_27",
+					"parentID": "msg_25",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_5"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "ses_5",
+					"slug": "misty-mountain",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B (fork #1)",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2554,
+						"output": 141,
+						"reasoning": 63,
+						"cache": {
+							"read": 39296,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_5",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "msg_26",
+					"parentID": "msg_25",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8576,
+						"input": 97,
+						"output": 19,
+						"reasoning": 12,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"sessionID": "ses_5",
+					"finish": "tool-calls"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_5",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "msg_27",
+					"parentID": "msg_25",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_5"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "ses_5",
+					"slug": "misty-mountain",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B (fork #1)",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2554,
+						"output": 141,
+						"reasoning": 63,
+						"cache": {
+							"read": 39296,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_5",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_5",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_5",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"summary": {
+						"diffs": []
+					},
+					"id": "msg_25",
+					"sessionID": "ses_5"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"summary": {
+						"diffs": []
+					},
+					"id": "msg_25",
+					"sessionID": "ses_5"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"id": "prt_78",
+					"messageID": "msg_27",
+					"sessionID": "ses_5",
+					"snapshot": "project_4",
+					"type": "step-start"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"id": "prt_79",
+					"messageID": "msg_27",
+					"sessionID": "ses_5",
+					"type": "reasoning",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_5",
+				"messageID": "msg_27",
+				"partID": "prt_79",
+				"field": "text",
+				"delta": "Just"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"id": "prt_78",
+					"messageID": "msg_27",
+					"sessionID": "ses_5",
+					"snapshot": "project_4",
+					"type": "step-start"
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"id": "prt_79",
+					"messageID": "msg_27",
+					"sessionID": "ses_5",
+					"type": "reasoning",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_5",
+				"messageID": "msg_27",
+				"partID": "prt_79",
+				"field": "text",
+				"delta": "Just"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_5",
+				"messageID": "msg_27",
+				"partID": "prt_79",
+				"field": "text",
+				"delta": " reply with the output."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_5",
+				"messageID": "msg_27",
+				"partID": "prt_79",
+				"field": "text",
+				"delta": " reply with the output."
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"id": "prt_79",
+					"messageID": "msg_27",
+					"sessionID": "ses_5",
+					"type": "reasoning",
+					"text": "Just reply with the output.",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"id": "prt_80",
+					"messageID": "msg_27",
+					"sessionID": "ses_5",
+					"type": "text",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_5",
+				"messageID": "msg_27",
+				"partID": "prt_80",
+				"field": "text",
+				"delta": "/private/var/folders/w8/d"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"id": "prt_79",
+					"messageID": "msg_27",
+					"sessionID": "ses_5",
+					"type": "reasoning",
+					"text": "Just reply with the output.",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"id": "prt_80",
+					"messageID": "msg_27",
+					"sessionID": "ses_5",
+					"type": "text",
+					"text": "",
+					"time": {
+						"start": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_5",
+				"messageID": "msg_27",
+				"partID": "prt_80",
+				"field": "text",
+				"delta": "/private/var/folders/w8/d"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_5",
+				"messageID": "msg_27",
+				"partID": "prt_80",
+				"field": "text",
+				"delta": "y5dn1nx2pl4"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_5",
+				"messageID": "msg_27",
+				"partID": "prt_80",
+				"field": "text",
+				"delta": "y5dn1nx2pl4"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_5",
+				"messageID": "msg_27",
+				"partID": "prt_80",
+				"field": "text",
+				"delta": "xn0hhtlj4ybh"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_5",
+				"messageID": "msg_27",
+				"partID": "prt_80",
+				"field": "text",
+				"delta": "xn0hhtlj4ybh"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_5",
+				"messageID": "msg_27",
+				"partID": "prt_80",
+				"field": "text",
+				"delta": "0000gn/T/opencode"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_5",
+				"messageID": "msg_27",
+				"partID": "prt_80",
+				"field": "text",
+				"delta": "0000gn/T/opencode"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_5",
+				"messageID": "msg_27",
+				"partID": "prt_80",
+				"field": "text",
+				"delta": "-directory-spike-wm9szW"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_5",
+				"messageID": "msg_27",
+				"partID": "prt_80",
+				"field": "text",
+				"delta": "-directory-spike-wm9szW"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_5",
+				"messageID": "msg_27",
+				"partID": "prt_80",
+				"field": "text",
+				"delta": "/B"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.delta",
+			"properties": {
+				"sessionID": "ses_5",
+				"messageID": "msg_27",
+				"partID": "prt_80",
+				"field": "text",
+				"delta": "/B"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"id": "prt_80",
+					"messageID": "msg_27",
+					"sessionID": "ses_5",
+					"type": "text",
+					"text": "<B>",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"id": "prt_80",
+					"messageID": "msg_27",
+					"sessionID": "ses_5",
+					"type": "text",
+					"text": "<B>",
+					"time": {
+						"start": 0,
+						"end": 0
+					}
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"id": "prt_81",
+					"reason": "stop",
+					"snapshot": "project_4",
+					"messageID": "msg_27",
+					"sessionID": "ses_5",
+					"type": "step-finish",
+					"tokens": {
+						"total": 8673,
+						"input": 176,
+						"output": 42,
+						"reasoning": 7,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"cost": 0
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "msg_27",
+					"parentID": "msg_25",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8673,
+						"input": 176,
+						"output": 42,
+						"reasoning": 7,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_5",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.part.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"part": {
+					"id": "prt_81",
+					"reason": "stop",
+					"snapshot": "project_4",
+					"messageID": "msg_27",
+					"sessionID": "ses_5",
+					"type": "step-finish",
+					"tokens": {
+						"total": 8673,
+						"input": 176,
+						"output": 42,
+						"reasoning": 7,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"cost": 0
+				},
+				"time": 0
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "msg_27",
+					"parentID": "msg_25",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8673,
+						"input": 176,
+						"output": 42,
+						"reasoning": 7,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0
+					},
+					"sessionID": "ses_5",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "msg_27",
+					"parentID": "msg_25",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8673,
+						"input": 176,
+						"output": 42,
+						"reasoning": 7,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"sessionID": "ses_5",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_5",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_5",
+				"status": {
+					"type": "idle"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.idle",
+			"properties": {
+				"sessionID": "ses_5"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "ses_5",
+					"slug": "misty-mountain",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B (fork #1)",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2730,
+						"output": 183,
+						"reasoning": 70,
+						"cache": {
+							"read": 47744,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_5",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "msg_27",
+					"parentID": "msg_25",
+					"role": "assistant",
+					"mode": "build",
+					"agent": "build",
+					"path": {
+						"cwd": "<B>",
+						"root": "<B>"
+					},
+					"cost": 0,
+					"tokens": {
+						"total": 8673,
+						"input": 176,
+						"output": 42,
+						"reasoning": 7,
+						"cache": {
+							"write": 0,
+							"read": 8448
+						}
+					},
+					"modelID": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"time": {
+						"created": 0,
+						"completed": 0
+					},
+					"sessionID": "ses_5",
+					"finish": "stop"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_5",
+				"status": {
+					"type": "busy"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.status",
+			"properties": {
+				"sessionID": "ses_5",
+				"status": {
+					"type": "idle"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.idle",
+			"properties": {
+				"sessionID": "ses_5"
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"id": "ses_5",
+					"slug": "misty-mountain",
+					"projectID": "project_2",
+					"directory": "<B>",
+					"path": "",
+					"title": "directory-B (fork #1)",
+					"agent": "build",
+					"model": {
+						"id": "mimo-v2.6-flash-free",
+						"providerID": "opencode",
+						"variant": "default"
+					},
+					"version": "1.18.34",
+					"summary": {
+						"additions": 0,
+						"deletions": 0,
+						"files": 0
+					},
+					"cost": 0,
+					"tokens": {
+						"input": 2730,
+						"output": 183,
+						"reasoning": 70,
+						"cache": {
+							"read": 47744,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 0,
+						"updated": 0
+					}
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "session.diff",
+			"properties": {
+				"sessionID": "ses_5",
+				"diff": []
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"summary": {
+						"diffs": []
+					},
+					"id": "msg_25",
+					"sessionID": "ses_5"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "sync",
+			"properties": {},
+			"delayMs": 0
+		},
+		{
+			"kind": "sse",
+			"type": "message.updated",
+			"properties": {
+				"sessionID": "ses_5",
+				"info": {
+					"role": "user",
+					"time": {
+						"created": 0
+					},
+					"agent": "build",
+					"model": {
+						"providerID": "opencode",
+						"modelID": "mimo-v2.6-flash-free"
+					},
+					"summary": {
+						"diffs": []
+					},
+					"id": "msg_25",
+					"sessionID": "ses_5"
+				}
+			},
+			"delayMs": 0
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/session/ses_5?directory=<C>",
+			"status": 200,
+			"responseBody": {
+				"id": "ses_5",
+				"slug": "misty-mountain",
+				"projectID": "project_2",
+				"directory": "<B>",
+				"path": "",
+				"summary": {
+					"additions": 0,
+					"deletions": 0,
+					"files": 0
+				},
+				"cost": 0,
+				"tokens": {
+					"input": 2730,
+					"output": 183,
+					"reasoning": 70,
+					"cache": {
+						"read": 47744,
+						"write": 0
+					}
+				},
+				"title": "directory-B (fork #1)",
+				"agent": "build",
+				"model": {
+					"id": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"variant": "default"
+				},
+				"version": "1.18.34",
+				"time": {
+					"created": 0,
+					"updated": 0
+				}
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/session/ses_5?directory=<B>",
+			"status": 200,
+			"responseBody": {
+				"id": "ses_5",
+				"slug": "misty-mountain",
+				"projectID": "project_2",
+				"directory": "<B>",
+				"path": "",
+				"summary": {
+					"additions": 0,
+					"deletions": 0,
+					"files": 0
+				},
+				"cost": 0,
+				"tokens": {
+					"input": 2730,
+					"output": 183,
+					"reasoning": 70,
+					"cache": {
+						"read": 47744,
+						"write": 0
+					}
+				},
+				"title": "directory-B (fork #1)",
+				"agent": "build",
+				"model": {
+					"id": "mimo-v2.6-flash-free",
+					"providerID": "opencode",
+					"variant": "default"
+				},
+				"version": "1.18.34",
+				"time": {
+					"created": 0,
+					"updated": 0
+				}
+			}
+		}
+	]
+}

@@ -103,7 +103,7 @@ describe("turn-only Stop interactions", () => {
 						eventSink: sink,
 						model: { providerId: "claude", modelId: "sonnet" },
 					});
-					const turn = yield* Effect.fork(runtime.sendTurnEffect(input));
+					const turn = yield* Effect.forkChild(runtime.sendTurnEffect(input));
 					yield* Deferred.await(requested);
 					yield* runtime.interruptTurnEffect(input.sessionId);
 					expect((yield* Fiber.join(turn)).status).toBe("interrupted");

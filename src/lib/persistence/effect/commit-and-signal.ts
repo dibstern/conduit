@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
-import { Data, Effect, Option } from "effect";
+import { Data, Effect, Option, Ref, Semaphore } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
 import { observeTurnTimelineCommit } from "../../domain/daemon/Services/turn-timeline.js";
 import { SessionEventBusTag } from "../../domain/relay/Services/session-event-bus.js";
@@ -11,6 +11,7 @@ import { EventStoreEffectTag } from "./event-store-effect.js";
 import type { ProjectionRunnerError } from "./projection-runner-effect.js";
 import { ProjectionRunnerEffectTag } from "./projection-runner-effect.js";
 import { mergeTouches } from "./projectors-effect.js";
+import { SessionRollupProjects } from "./session-rollup-projects.js";
 import { SessionStateProjectionNotifierTag } from "./session-state-projection-notifier.js";
 import { refreshSidebar } from "./sidebar-projection.js";
 
@@ -120,13 +121,13 @@ export interface CommitAndSignal {
 
 // Factories are also created per command, so the permit belongs to the SQL
 // client, not an individual writer. Weak keys retain no closed persistence stack.
-const commitPermits = new WeakMap<SqlClient.SqlClient, Effect.Semaphore>();
+const commitPermits = new WeakMap<SqlClient.SqlClient, Semaphore.Semaphore>();
 
 export const makeCommitAndSignal = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	let permit = commitPermits.get(sql);
 	if (permit === undefined) {
-		permit = Effect.unsafeMakeSemaphore(1);
+		permit = Semaphore.makeUnsafe(1);
 		commitPermits.set(sql, permit);
 	}
 	const withPermit = permit.withPermits(1);
@@ -136,6 +137,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 			: withPermit(effect);
 	const eventStore = yield* EventStoreEffectTag;
 	const projectionRunner = yield* ProjectionRunnerEffectTag;
+	const projects = yield* SessionRollupProjects;
 	const sessionEventBus = yield* Effect.serviceOption(SessionEventBusTag);
 
 	const write = <A, E, R>(
@@ -150,9 +152,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 				// Refuse before any write: the seam publishes on the strength of
 				// owning the COMMIT, and inside someone else's transaction it does
 				// not own one.
-				const ambient = yield* Effect.serviceOption(
-					SqlClient.TransactionConnection,
-				);
+				const ambient = yield* Effect.serviceOption(sql.transactionService);
 				if (Option.isSome(ambient))
 					return yield* Effect.die(
 						new NestedCommitAndSignal({ depth: ambient.value[1] }),
@@ -177,7 +177,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 						const result = yield* sql.withTransaction(
 							Effect.gen(function* () {
 								const seam = Option.getOrUndefined(
-									yield* Effect.serviceOption(SqlClient.TransactionConnection),
+									yield* Effect.serviceOption(sql.transactionService),
 								);
 
 								// The test is not "is a transaction open" but "is it the
@@ -188,9 +188,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 								// its own, after these arrays have been fed.
 								const requireSeamTransaction = Effect.gen(function* () {
 									const here = Option.getOrUndefined(
-										yield* Effect.serviceOption(
-											SqlClient.TransactionConnection,
-										),
+										yield* Effect.serviceOption(sql.transactionService),
 									);
 									if (here?.[0] !== seam?.[0] || here?.[1] !== seam?.[1])
 										return yield* Effect.die(
@@ -247,6 +245,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 								yield* refreshSidebar(
 									stampedSessions,
 									Math.max(0, ...advances.map((advance) => advance.version)),
+									projects ? yield* Ref.get(projects) : undefined,
 								).pipe(Effect.provideService(SqlClient.SqlClient, sql));
 								return result;
 							}),

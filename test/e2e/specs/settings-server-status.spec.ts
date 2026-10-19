@@ -5,7 +5,6 @@ import { Schema } from "effect";
 import {
 	type GetStatusResponse,
 	GetStatusResponseSchema,
-	RemoveProject,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import { getVersion } from "../../../src/lib/version.js";
@@ -26,7 +25,10 @@ const test = base.extend<{ harness: ProcessHarness; supervised: boolean }>({
 					startupTimeoutMs: 60_000,
 					serviceEnvironment: { CONDUIT_SERVICE: supervised ? "1" : "0" },
 				});
-				await harness.requestRpc(new RemoveProject({ slug: "process-test" }));
+				await harness.requestRpc({
+					_tag: "RemoveProject",
+					slug: "process-test",
+				});
 				await use(harness);
 			} finally {
 				writeFileSync(testInfo.outputPath("daemon.log"), harness.logTail);
@@ -63,11 +65,12 @@ function observeStatus(page: Page) {
 			for (const message of Array.isArray(parsed) ? parsed : [parsed]) {
 				if (!isRecord(message) || message["_tag"] !== "Request") continue;
 				if (
-					typeof message["id"] !== "string" ||
+					(typeof message["id"] !== "string" &&
+						typeof message["id"] !== "number") ||
 					typeof message["tag"] !== "string"
 				)
 					continue;
-				requests.set(message["id"], message["tag"]);
+				requests.set(String(message["id"]), message["tag"]);
 				if (isRecord(message["payload"]))
 					calls.push({ tag: message["tag"], payload: message["payload"] });
 			}
@@ -78,10 +81,12 @@ function observeStatus(page: Page) {
 				if (
 					!isRecord(message) ||
 					message["_tag"] !== "Exit" ||
-					typeof message["requestId"] !== "string"
+					(typeof message["requestId"] !== "string" &&
+						typeof message["requestId"] !== "number")
 				)
 					continue;
-				if (requests.get(message["requestId"]) !== "GetStatus") continue;
+				if (requests.get(String(message["requestId"])) !== "GetStatus")
+					continue;
 				const exit = message["exit"];
 				if (isRecord(exit) && exit["_tag"] === "Success") {
 					reads.push(

@@ -1,4 +1,4 @@
-import type { Request } from "effect/Request";
+import type { Rpc } from "effect/rpc";
 import {
 	AddInstance,
 	GetInstanceStatus,
@@ -45,9 +45,11 @@ export async function handleInstance(ctx: CommandContext): Promise<void> {
 async function handleGetInstances(ctx: CommandContext): Promise<void> {
 	const { stdout, stderr, exit, rpcSend } = ctx;
 
-	let response: Request.Success<GetInstances>;
+	let response: Rpc.Success<typeof GetInstances>;
 	try {
-		response = await rpcSend(new GetInstances({}));
+		response = await rpcSend(
+			GetInstances.payloadSchema.make({ _tag: "GetInstances" }),
+		);
 	} catch (err) {
 		stderr.write(`Failed to list instances: ${formatErrorDetail(err)}\n`);
 		exit(1);
@@ -77,7 +79,8 @@ async function handleAddInstance(ctx: CommandContext): Promise<void> {
 	}
 	try {
 		const response = await rpcSend(
-			new AddInstance({
+			AddInstance.payloadSchema.make({
+				_tag: "AddInstance",
 				name: args.instanceName,
 				managed: args.instanceManaged ?? false,
 				...(args.instancePort != null && { port: args.instancePort }),
@@ -103,7 +106,12 @@ async function handleRemoveInstance(ctx: CommandContext): Promise<void> {
 		return;
 	}
 	try {
-		await rpcSend(new RemoveInstance({ instanceId: args.instanceName }));
+		await rpcSend(
+			RemoveInstance.payloadSchema.make({
+				_tag: "RemoveInstance",
+				instanceId: args.instanceName,
+			}),
+		);
 		stdout.write(`Instance removed: ${args.instanceName}\n`);
 	} catch (err) {
 		stderr.write(`Failed to remove instance: ${formatErrorDetail(err)}\n`);
@@ -121,7 +129,12 @@ async function handleStartInstance(ctx: CommandContext): Promise<void> {
 		return;
 	}
 	try {
-		await rpcSend(new StartInstance({ instanceId: args.instanceName }));
+		await rpcSend(
+			StartInstance.payloadSchema.make({
+				_tag: "StartInstance",
+				instanceId: args.instanceName,
+			}),
+		);
 		stdout.write(`Instance started: ${args.instanceName}\n`);
 	} catch (err) {
 		stderr.write(`Failed to start instance: ${formatErrorDetail(err)}\n`);
@@ -139,7 +152,12 @@ async function handleStopInstance(ctx: CommandContext): Promise<void> {
 		return;
 	}
 	try {
-		await rpcSend(new StopInstance({ instanceId: args.instanceName }));
+		await rpcSend(
+			StopInstance.payloadSchema.make({
+				_tag: "StopInstance",
+				instanceId: args.instanceName,
+			}),
+		);
 		stdout.write(`Instance stopped: ${args.instanceName}\n`);
 	} catch (err) {
 		stderr.write(`Failed to stop instance: ${formatErrorDetail(err)}\n`);
@@ -156,10 +174,13 @@ async function handleGetInstanceStatus(ctx: CommandContext): Promise<void> {
 		exit(1);
 		return;
 	}
-	let response: Request.Success<GetInstanceStatus>;
+	let response: Rpc.Success<typeof GetInstanceStatus>;
 	try {
 		response = await rpcSend(
-			new GetInstanceStatus({ instanceId: args.instanceName }),
+			GetInstanceStatus.payloadSchema.make({
+				_tag: "GetInstanceStatus",
+				instanceId: args.instanceName,
+			}),
 		);
 	} catch (err) {
 		stderr.write(`Failed to get instance status: ${formatErrorDetail(err)}\n`);

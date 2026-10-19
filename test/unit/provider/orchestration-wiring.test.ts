@@ -1,9 +1,10 @@
 // test/unit/provider/orchestration-wiring.test.ts
 import { tmpdir } from "node:os";
-import { SqlClient } from "@effect/sql";
 import { Effect, Layer, ManagedRuntime } from "effect";
+import { SqlClient } from "effect/sql";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	AccountDirectory,
 	makeAccountDirectory,
@@ -11,6 +12,7 @@ import {
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
@@ -26,14 +28,14 @@ import {
 } from "../../../src/lib/provider/orchestration-wiring.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
+import { makeBaseSendTurnInput } from "../../helpers/mock-sdk.js";
 
 function orchestrationDeps(
 	persistence: ReturnType<typeof makePersistenceEffectLayer>,
 	client: OpenCodeAPI,
 ) {
 	return Layer.mergeAll(
-		Layer.succeed(
-			AccountDirectory,
+		Layer.succeed(AccountDirectory)(
 			makeAccountDirectory(
 				Effect.succeed(
 					accountsStateFromInstances(
@@ -46,10 +48,21 @@ function orchestrationDeps(
 				),
 			),
 		),
-		Layer.succeed(OpenCodeAPITag, client),
+		Layer.succeed(OpenCodeAPITag)(client),
+		Layer.succeed(SessionWorkspaceTag)({
+			get: () => Effect.die("Unexpected workspace lookup"),
+			withLaunch: (effect) => effect,
+			preview: () => Effect.die("Unexpected workspace preview"),
+			renameBranch: () => Effect.die("Unexpected workspace rename"),
+			move: () => Effect.die("Unexpected workspace move"),
+			inherit: () => Effect.die("Unexpected workspace inheritance"),
+			resolve: () => Effect.die("Unexpected workspace resolution"),
+			record: () => Effect.die("Unexpected workspace recording"),
+			claudeWorktreeState: () =>
+				Effect.die("Unexpected Claude workspace lookup"),
+		}),
 		persistence,
-		Layer.succeed(
-			OpenCodeInstancesTag,
+		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({ opencode: client }),
 		),
 		makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
@@ -58,7 +71,12 @@ function orchestrationDeps(
 
 function makeStubClient(): OpenCodeAPI {
 	return {
-		session: { abort: vi.fn(async () => {}), prompt: vi.fn(async () => {}) },
+		session: {
+			get: vi.fn(async () => ({ permission: [] })),
+			update: vi.fn(async () => {}),
+			abort: vi.fn(async () => {}),
+			prompt: vi.fn(async () => {}),
+		},
 		permission: { reply: vi.fn(async () => {}), list: vi.fn(async () => []) },
 		question: {
 			reply: vi.fn(async () => {}),
@@ -267,123 +285,70 @@ describe("Orchestration wiring", () => {
 	});
 
 	describe("wireSSEToInstance", () => {
-		it("calls notifyTurnCompleted when session.status idle event arrives", async () => {
+		it.each([
+			"properties.sessionID",
+			"event.sessionId",
+		])("settles a pending turn only on idle, using %s", async (sessionIdField) => {
 			const client = makeStubClient();
 			const layer = await makeScopedOrchestrationView({ client });
-
-			const notifySpy = vi.spyOn(layer.openCodeInstance, "notifyTurnCompleted");
-
-			// Capture the handler registered via sseOn
-			type Handler = (e: unknown) => void;
-			const handlers: Handler[] = [];
-			const mockSseOn = (_event: "event", handler: Handler) => {
+			const sessionId = "sess-123";
+			const handlers: Array<(event: unknown) => void> = [];
+			layer.wireSSEToInstance((_event, handler) => {
 				handlers.push(handler);
-			};
-			layer.wireSSEToInstance(mockSseOn);
-			expect(handlers.length).toBe(1);
+			});
+			expect(handlers).toHaveLength(1);
 
-			// Fire a session.status idle event
+			let settled = false;
+			const pending = Effect.runPromise(
+				layer.openCodeInstance.sendTurnEffect(
+					makeBaseSendTurnInput({
+						sessionId,
+						account: {
+							id: MANAGED_OPENCODE_ACCOUNT_ID,
+							name: "OpenCode",
+							driver: "opencode",
+							usageEligible: false,
+						},
+					}),
+				),
+			).then((result) => {
+				settled = true;
+				return result;
+			});
+			await vi.waitFor(() => {
+				expect(client.session.prompt).toHaveBeenCalledOnce();
+			});
+
+			for (const event of [
+				{ type: "message.created", properties: { sessionID: sessionId } },
+				{
+					type: "session.status",
+					properties: { sessionID: sessionId, status: { type: "busy" } },
+				},
+				{ type: "session.status", properties: { status: { type: "idle" } } },
+			]) {
+				handlers[0]?.(event);
+				await new Promise<void>((resolve) => setImmediate(resolve));
+				expect(settled).toBe(false);
+			}
+
 			handlers[0]?.({
 				type: "session.status",
+				...(sessionIdField === "event.sessionId" ? { sessionId } : {}),
 				properties: {
-					sessionID: "sess-123",
+					...(sessionIdField === "properties.sessionID"
+						? { sessionID: sessionId }
+						: {}),
 					status: { type: "idle" },
 				},
 			});
-
-			expect(notifySpy).toHaveBeenCalledTimes(1);
-			expect(notifySpy).toHaveBeenCalledWith(
-				"sess-123",
-				expect.objectContaining({ status: "completed" }),
-			);
-		});
-
-		it("ignores non-session.status events", async () => {
-			const client = makeStubClient();
-			const layer = await makeScopedOrchestrationView({ client });
-			const notifySpy = vi.spyOn(layer.openCodeInstance, "notifyTurnCompleted");
-
-			type Handler = (e: unknown) => void;
-			const handlers: Handler[] = [];
-			layer.wireSSEToInstance((_event, handler) => {
-				handlers.push(handler);
+			await expect(pending).resolves.toEqual({
+				status: "completed",
+				cost: 0,
+				tokens: { input: 0, output: 0 },
+				durationMs: 0,
+				providerStateUpdates: [],
 			});
-
-			handlers[0]?.({
-				type: "message.created",
-				properties: { sessionID: "sess-123" },
-			});
-
-			expect(notifySpy).not.toHaveBeenCalled();
-		});
-
-		it("ignores session.status events with non-idle status", async () => {
-			const client = makeStubClient();
-			const layer = await makeScopedOrchestrationView({ client });
-			const notifySpy = vi.spyOn(layer.openCodeInstance, "notifyTurnCompleted");
-
-			type Handler = (e: unknown) => void;
-			const handlers: Handler[] = [];
-			layer.wireSSEToInstance((_event, handler) => {
-				handlers.push(handler);
-			});
-
-			handlers[0]?.({
-				type: "session.status",
-				properties: {
-					sessionID: "sess-123",
-					status: { type: "busy" },
-				},
-			});
-
-			expect(notifySpy).not.toHaveBeenCalled();
-		});
-
-		it("does nothing when sessionId is not present in event", async () => {
-			const client = makeStubClient();
-			const layer = await makeScopedOrchestrationView({ client });
-			const notifySpy = vi.spyOn(layer.openCodeInstance, "notifyTurnCompleted");
-
-			type Handler = (e: unknown) => void;
-			const handlers: Handler[] = [];
-			layer.wireSSEToInstance((_event, handler) => {
-				handlers.push(handler);
-			});
-
-			// No sessionID in properties
-			handlers[0]?.({
-				type: "session.status",
-				properties: {
-					status: { type: "idle" },
-				},
-			});
-
-			expect(notifySpy).not.toHaveBeenCalled();
-		});
-
-		it("falls back to event.sessionId when properties.sessionID is absent", async () => {
-			const client = makeStubClient();
-			const layer = await makeScopedOrchestrationView({ client });
-			const notifySpy = vi.spyOn(layer.openCodeInstance, "notifyTurnCompleted");
-
-			type Handler = (e: unknown) => void;
-			const handlers: Handler[] = [];
-			layer.wireSSEToInstance((_event, handler) => {
-				handlers.push(handler);
-			});
-
-			handlers[0]?.({
-				type: "session.status",
-				sessionId: "sess-fallback",
-				properties: {
-					status: { type: "idle" },
-				},
-			});
-
-			expect(notifySpy).toHaveBeenCalledWith(
-				"sess-fallback",
-				expect.objectContaining({ status: "completed" }),
-			);
 		});
 	});
 });

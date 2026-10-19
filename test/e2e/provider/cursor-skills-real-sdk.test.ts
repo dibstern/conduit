@@ -14,10 +14,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-	AddInstance,
-	GetCommandsForSession,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 const RUN_SMOKE =
@@ -140,12 +137,11 @@ describe.skipIf(!RUN_SMOKE)(
 						serviceEnvironment,
 					});
 					evidence.serverPid = harness.generations[0]?.pid ?? null;
-					const { addedInstanceId } = await harness.requestRpc(
-						new AddInstance({
-							name: "Cursor skills live smoke",
-							driver: "cursor",
-						}),
-					);
+					const { addedInstanceId } = await harness.requestRpc({
+						_tag: "AddInstance",
+						name: "Cursor skills live smoke",
+						driver: "cursor",
+					});
 					if (!addedInstanceId) throw new Error("Missing Cursor account");
 					const browser = await harness.connect();
 					const sessionId = await browser.createSession(
@@ -158,9 +154,10 @@ describe.skipIf(!RUN_SMOKE)(
 							permissionMode: "full",
 						},
 					);
-					const catalog = await harness.requestRpc(
-						new GetCommandsForSession({ sessionId }),
-					);
+					const catalog = await harness.requestRpc({
+						_tag: "GetCommands",
+						sessionId,
+					});
 					evidence.listedCommands = catalog.commands
 						.map(({ name }) => name)
 						.sort();

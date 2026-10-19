@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import type { Rpc } from "effect/rpc";
 import { expect, fn, userEvent, within } from "storybook/test";
 import {
 	type FindFolders,
@@ -18,7 +19,7 @@ const existing = [app, docs, site, `${app}/packages/sdk`];
 
 async function findFolders({
 	query,
-}: ConstructorParameters<typeof FindFolders>[0]): Promise<FindFoldersResponse> {
+}: Rpc.PayloadConstructor<typeof FindFolders>): Promise<FindFoldersResponse> {
 	if (!/^[/~]/.test(query)) return { home, entries: [] };
 	return {
 		home,
@@ -341,7 +342,7 @@ export const SuggestionsOpen: Story = {
 	args: {
 		findFolders: async ({
 			query,
-		}: ConstructorParameters<typeof FindFolders>[0]) => ({
+		}: Rpc.PayloadConstructor<typeof FindFolders>) => ({
 			home,
 			entries: suggestions.filter((entry) =>
 				entry.path.toLowerCase().includes(query.toLowerCase()),

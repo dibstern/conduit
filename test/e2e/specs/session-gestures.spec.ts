@@ -1,7 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
-import type { ReplayHarness } from "../helpers/e2e-harness.js";
+import { createSession, type ReplayHarness } from "../helpers/e2e-harness.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
-import { SidebarPage } from "../page-objects/sidebar.page.js";
 
 test.use({
 	recording: "chat-simple",
@@ -70,6 +69,7 @@ async function lift(row: Locator) {
 // finger is down, so its release must not reach the sheet. Synthetic events
 // skip the mousedown and click a browser derives from that release.
 async function longPress(page: Page, row: Locator, across = 0.5) {
+	await row.scrollIntoViewIfNeeded();
 	const box = await row.boundingBox();
 	if (!box) throw new Error("row is not rendered");
 	const point = { x: box.x + box.width * across, y: box.y + box.height / 2 };
@@ -78,7 +78,7 @@ async function longPress(page: Page, row: Locator, across = 0.5) {
 		type: "touchStart",
 		touchPoints: [point],
 	});
-	await page.waitForTimeout(700);
+	await expect(page.getByTestId("session-action-sheet")).toBeVisible();
 	await cdp.send("Input.dispatchTouchEvent", {
 		type: "touchEnd",
 		touchPoints: [],
@@ -112,19 +112,15 @@ async function setUp(page: Page, relayUrl: string, harness: ReplayHarness) {
 	});
 	await recorded.click();
 	await expect(recorded.getByTestId("session-unread-dot")).toHaveCount(0);
-	// The recording holds one session; the commands need a second to move around.
-	await new SidebarPage(page).createNewSession();
-	// Its title lands after the turn and re-sorts the list; let it land
-	// before rows are picked by position.
-	const created = new URL(page.url()).pathname.split("/").pop();
-	await expect(
-		page.locator(
-			`#session-list [data-session-id="${created}"] .session-title-inner`,
-		),
-	).not.toHaveText("Untitled");
+	// This standalone relay has no daemon account feed for the draft composer.
+	// Seed the other session through RPC, then leave the gesture target unselected.
+	const otherId = await createSession(harness.relayPort, "opencode");
+	await gotoRelay(page, new URL(`/s/${otherId}`, relayUrl).toString());
 	await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(2);
-	const id = await rows.nth(1).getAttribute("data-session-id");
-	const row = page.locator(`#session-list [data-session-id="${id}"]`);
+	// Status groups can reorder the new session while its final updates arrive.
+	// Keep exercising the completed, read session rather than picking by position:
+	// moving groups rebuilds a row and cancels a held pointer gesture.
+	const row = page.locator(`#session-list [data-session-id="${recordedId}"]`);
 	const title = (await row.locator(".session-title-inner").innerText()).trim();
 	return { row, title };
 }
@@ -241,7 +237,7 @@ test.describe("phone", () => {
 		const { row } = await setUp(page, relayUrl, harness);
 		const id = await row.getAttribute("data-session-id");
 		await page.setViewportSize({ width: 375, height: 740 });
-		await page.goto(new URL("/", page.url()).toString());
+		await gotoRelay(page, new URL("/", page.url()).toString());
 		await expect(row).toBeVisible();
 		const shelfRow = page.locator(
 			`#settled-shelf-rows [data-session-id="${id}"]`,
@@ -272,7 +268,7 @@ test.describe("phone", () => {
 	}) => {
 		const { row, title } = await setUp(page, relayUrl, harness);
 		await page.setViewportSize({ width: 375, height: 740 });
-		await page.goto(new URL("/", page.url()).toString());
+		await gotoRelay(page, new URL("/", page.url()).toString());
 		await expect(row).toBeVisible();
 		const onList = (url: URL) => url.pathname === "/";
 		const action = page.getByTestId("session-swipe-action");
@@ -364,7 +360,7 @@ test.describe("phone", () => {
 		// Short enough that the docked sheet rises under the first row, so the
 		// finger lifts over an item: the case the touchend guard exists for.
 		await page.setViewportSize({ width: 393, height: 480 });
-		await page.goto(new URL("/", page.url()).toString());
+		await gotoRelay(page, new URL("/", page.url()).toString());
 		await expect(row).toBeVisible();
 		const project = (
 			await row.locator(".session-item-context span:last-child").innerText()
@@ -447,7 +443,7 @@ test.describe("phone", () => {
 			});
 		});
 		await page.setViewportSize({ width: 375, height: 740 });
-		await page.goto(new URL("/", page.url()).toString());
+		await gotoRelay(page, new URL("/", page.url()).toString());
 		await expect(row).toBeVisible();
 
 		await drag(row, [0.4]);
@@ -485,9 +481,9 @@ test.describe("phone", () => {
 			page.getByRole("status").filter({ hasText: "Pinned" }),
 		).toBeVisible();
 		await page.setViewportSize({ width: 375, height: 740 });
-		await page.goto(new URL("/", page.url()).toString());
+		await gotoRelay(page, new URL("/", page.url()).toString());
 		await expect(row).toBeVisible();
-		await row.click({ button: "right" });
+		await longPress(page, row);
 		await expect(page.getByTestId("session-ctx-unpin")).toBeVisible();
 		await page.keyboard.press("Escape");
 
@@ -518,7 +514,7 @@ test.describe("phone", () => {
 			);
 		await page.keyboard.press("Escape");
 		const sessionId = await row.getAttribute("data-session-id");
-		await page.goto(new URL(`/s/${sessionId}`, relayUrl).toString());
+		await gotoRelay(page, new URL(`/s/${sessionId}`, relayUrl).toString());
 		await expect(page.locator("#sidebar")).toBeHidden();
 		const trigger = page.getByTestId("session-bar-title-menu");
 		await trigger.click();

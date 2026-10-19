@@ -356,7 +356,7 @@ test("a steering message survives Stop all and runs after the original result", 
 	const steps = recorder(page, harness, testInfo);
 	try {
 		const accepted = await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId,
 				originId: browser.originId,
 				inputId: randomUUID(),

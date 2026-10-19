@@ -50,6 +50,7 @@ describe("chat phase and transcript lifecycle", () => {
 		phaseToProcessing(activity);
 		followSessionBusy("phase-test", false);
 		expect(activity.phase).toBe("idle");
+		expect(chatState.phase).toBe("idle");
 		expect(activity.endedGeneration).toBe(activity.turnGeneration);
 	});
 

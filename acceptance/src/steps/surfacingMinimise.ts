@@ -84,17 +84,18 @@ export const surfacingMinimiseHandlers: StepHandler[] = [
 					parts: message.parts?.map((part) => ({
 						...part,
 						id: `${part.id}-${number}`,
-						time:
-							typeof part.time === "object" && part.time !== null
-								? Object.fromEntries(
+						...(typeof part.time === "object" && part.time !== null
+							? {
+									time: Object.fromEntries(
 										Object.entries(part.time).map(([key, value]) => [
 											key,
 											typeof value === "number"
 												? value + (number - 3) * 100_000
 												: value,
 										]),
-									)
-								: part.time,
+									),
+								}
+							: {}),
 						...(part.type === "text" && part.surfacingOrdinal !== undefined
 							? { surfacingRead: number !== 3 }
 							: {}),

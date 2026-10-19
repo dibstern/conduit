@@ -176,6 +176,7 @@ test.describe("Turn working clock", () => {
 		await chat.stopBtn.click();
 		const stoppedAt = Date.now();
 		await chat.waitForStreamingComplete();
+		await expect(app.sendBtn).toBeVisible();
 		await expect(page.getByTestId("composer-status-header")).toHaveCount(0);
 
 		const header = page

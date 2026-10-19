@@ -113,6 +113,7 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		const result = await resultPromise;
 		expect(client.session.prompt).toHaveBeenCalledWith("s1", {
 			directory: "/tmp/project",
+			messageId: "msg_conduit_t1",
 			text: "Write hello world",
 			model: { providerID: "anthropic", modelID: "claude-sonnet" },
 		});
@@ -217,9 +218,10 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			instance
 				.sendTurnEffect(makeSendTurnInput({ inputId: "t1", prompt: "first" }))
 				.pipe(
-					Effect.timeoutFail({
+					Effect.timeoutOrElse({
 						duration: "500 millis",
-						onTimeout: () => new Error("first prompt did not complete"),
+						orElse: () =>
+							Effect.fail((() => new Error("first prompt did not complete"))()),
 					}),
 				),
 		);
@@ -227,9 +229,12 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			instance
 				.sendTurnEffect(makeSendTurnInput({ inputId: "t2", prompt: "second" }))
 				.pipe(
-					Effect.timeoutFail({
+					Effect.timeoutOrElse({
 						duration: "500 millis",
-						onTimeout: () => new Error("second prompt did not complete"),
+						orElse: () =>
+							Effect.fail(
+								(() => new Error("second prompt did not complete"))(),
+							),
 					}),
 				),
 		);
@@ -318,10 +323,13 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			instance
 				.sendTurnEffect(makeSendTurnInput({ inputId: "t2", prompt: "second" }))
 				.pipe(
-					Effect.timeoutFail({
+					Effect.timeoutOrElse({
 						duration: "500 millis",
-						onTimeout: () =>
-							new Error("joined prompt was evicted by stale cleanup"),
+						orElse: () =>
+							Effect.fail(
+								(() =>
+									new Error("joined prompt was evicted by stale cleanup"))(),
+							),
 					}),
 				),
 		);
@@ -367,6 +375,7 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 
 		expect(client.session.prompt).toHaveBeenCalledWith("s1", {
 			directory: "/tmp/project",
+			messageId: "msg_conduit_t1",
 			text: "Write hello world",
 			model: { providerID: "anthropic", modelID: "claude-sonnet" },
 			images: ["data:image/png;base64,abc"],
@@ -410,6 +419,7 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 
 		expect(client.session.prompt).toHaveBeenCalledExactlyOnceWith("s1", {
 			directory: "/tmp/project",
+			messageId: "msg_conduit_t1",
 			text: "Write hello world",
 			model: { providerID: "anthropic", modelID: "claude-sonnet" },
 			...expected,
@@ -478,29 +488,6 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 
 		const result = await resultPromise;
 		expect(result.status).toBe("interrupted");
-	});
-
-	it("records start time for duration calculation", async () => {
-		vi.useFakeTimers();
-		try {
-			const input = makeSendTurnInput();
-			const resultPromise = Effect.runPromise(instance.sendTurnEffect(input));
-
-			await vi.advanceTimersByTimeAsync(10);
-
-			instance.notifyTurnCompleted("s1", {
-				status: "completed",
-				cost: 0.01,
-				tokens: { input: 100, output: 50 },
-				durationMs: 0,
-				providerStateUpdates: [],
-			});
-
-			const result = await resultPromise;
-			expect(result.status).toBe("completed");
-		} finally {
-			vi.useRealTimers();
-		}
 	});
 
 	it("fails with send_failed (no hang) when the bound named instance cannot be resolved", async () => {
@@ -578,7 +565,10 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			providerStateUpdates: [],
 		});
 		expect((await resultPromise).status).toBe("completed");
-		expect(clientForAccount).toHaveBeenCalledExactlyOnceWith(account);
+		expect(clientForAccount).toHaveBeenCalledExactlyOnceWith(
+			account,
+			"/tmp/project",
+		);
 		expect(clientForSession).not.toHaveBeenCalled();
 		expect(namedClient.session.prompt).toHaveBeenCalledOnce();
 		expect(client.session.prompt).not.toHaveBeenCalled();

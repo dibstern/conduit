@@ -54,7 +54,8 @@ describe("RelayEventSink lifecycle", () => {
 			}),
 		);
 
-		expect(trackedId).toBe("perm-1");
+		expect(trackedId).toEqual(expect.any(String));
+		expect(trackedId).not.toBe("perm-1");
 
 		await Effect.runPromise(
 			sink.resolvePermission("perm-1", { decision: "reject" }),
@@ -62,7 +63,7 @@ describe("RelayEventSink lifecycle", () => {
 
 		const result = await permissionPromise;
 		expect(result.decision).toBe("reject");
-		expect(repliedId).toBe("perm-1");
+		expect(repliedId).toBe(trackedId);
 	});
 
 	it("cancels service-owned pending interactions through the port", async () => {

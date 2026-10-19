@@ -18,6 +18,7 @@ import {
 	existsSync,
 	mkdirSync,
 	readFileSync,
+	rmSync,
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -25,11 +26,7 @@ import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
-import {
-	AddInstance,
-	ForkSessionForSession,
-	UpdateInstance,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import {
 	ProcessHarness,
 	responseChunks,
@@ -79,7 +76,7 @@ describe("Account folder changes without daemon restart", () => {
 					.all(),
 				events: db
 					.prepare(
-						"SELECT type, json_extract(data, '$.inputId') AS inputId, json_extract(data, '$.messageId') AS messageId, json_extract(data, '$.status') AS status FROM events WHERE project_id = 'process-test' AND type IN ('input.admitted', 'input.sent', 'input.started', 'turn.started', 'turn.end', 'turn.error', 'session.status') ORDER BY sequence",
+						"SELECT type, json_extract(data, '$.inputId') AS inputId, json_extract(data, '$.messageId') AS messageId, json_extract(data, '$.status') AS status, json_extract(data, '$.error') AS error FROM events WHERE project_id = 'process-test' AND type IN ('input.admitted', 'input.sent', 'input.started', 'turn.started', 'turn.end', 'turn.error', 'session.status') ORDER BY sequence",
 					)
 					.all(),
 				forkEvents: db
@@ -97,6 +94,17 @@ describe("Account folder changes without daemon restart", () => {
 			launches: launches(),
 			marks: [...harness.marks],
 			persisted,
+			...(task.result?.state === "fail"
+				? {
+						daemonLog: harness.logTail,
+						runnerLog: existsSync(join(harness.configDir, "runners.log"))
+							? readFileSync(
+									join(harness.configDir, "runners.log"),
+									"utf8",
+								).slice(-8000)
+							: "",
+					}
+				: {}),
 		};
 		await harness.dispose();
 		harness.assertNoRunners();
@@ -108,12 +116,12 @@ describe("Account folder changes without daemon restart", () => {
 		);
 		harness = undefined;
 	});
-	async function start(queryInitializationDelayMs = 0, helloDelayMs = 0) {
+	async function start(helloDelayMs = 0) {
 		harness = await ProcessHarness.start({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 			foregroundCli: true,
 			restartProof: true,
-			queryInitializationDelayMs,
+			upgradeSinkProof: true,
 			...(helloDelayMs ? { runnerLifecycle: { helloDelayMs } } : {}),
 		});
 		return { daemon: harness, browser: await harness.connect() };
@@ -134,9 +142,11 @@ describe("Account folder changes without daemon restart", () => {
 		const original = login(daemon, "original-fork");
 		const edited = login(daemon, "edited-fork");
 		const accountId = AccountIdSchema.make("claude");
-		await daemon.requestRpc(
-			new UpdateInstance({ instanceId: accountId, configDir: original }),
-		);
+		await daemon.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: accountId,
+			configDir: original,
+		});
 		const parentId = await browser.createSession(
 			"Fork after login edit",
 			accountId,
@@ -151,7 +161,9 @@ describe("Account folder changes without daemon restart", () => {
 		if (!boundary) throw new Error("Missing completed assistant fork boundary");
 		const excluded = "history-after-fork-boundary";
 		await browser.send(parentId, excluded);
-		const originalQuery = daemon.marks.find((mark) => mark.kind === "query");
+		const originalQuery = await daemon.waitForMark(
+			(mark) => mark.kind === "query",
+		);
 		if (originalQuery?.kind !== "query")
 			throw new Error("Missing original-folder query");
 		expect(
@@ -170,16 +182,17 @@ describe("Account folder changes without daemon restart", () => {
 				),
 			),
 		).toBe(false);
-		await daemon.requestRpc(
-			new UpdateInstance({ instanceId: accountId, configDir: edited }),
-		);
-		const fork = await daemon.requestRpc(
-			new ForkSessionForSession({
-				originId: browser.originId,
-				sessionId: parentId,
-				messageId: boundary.id,
-			}),
-		);
+		await daemon.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: accountId,
+			configDir: edited,
+		});
+		const fork = await daemon.requestRpc({
+			_tag: "ForkSession",
+			originId: browser.originId,
+			sessionId: parentId,
+			messageId: boundary.id,
+		});
 		expect(fork.sessionId).not.toBe(parentId);
 		expect(daemon.marks.filter((mark) => mark.kind === "native-fork")).toEqual(
 			[],
@@ -223,9 +236,11 @@ describe("Account folder changes without daemon restart", () => {
 		const edited = login(daemon, "edited");
 		const launchLogin = login(daemon, "claude");
 		const accountId = AccountIdSchema.make("claude");
-		await daemon.requestRpc(
-			new UpdateInstance({ instanceId: accountId, configDir: original }),
-		);
+		await daemon.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: accountId,
+			configDir: original,
+		});
 		const sessionId = await browser.createSession(
 			"Folder edits keep the conversation",
 			accountId,
@@ -235,22 +250,22 @@ describe("Account folder changes without daemon restart", () => {
 		expect((await browser.send(sessionId, first)).chunks.join("")).toBe(
 			responseChunks(first).join(""),
 		);
-		const initialQuery = daemon.marks.find((mark) => mark.kind === "query");
+		const initialQuery = await daemon.waitForMark(
+			(mark) => mark.kind === "query",
+		);
 		if (initialQuery?.kind !== "query")
 			throw new Error("Missing initial query");
 		const active = browser.send(sessionId, "local-work-turn");
-		await vi.waitFor(() =>
-			expect(
-				daemon.marks.some(
-					(mark) =>
-						mark.kind === "pre-assistant-held" &&
-						mark.queryId === initialQuery.queryId,
-				),
-			).toBe(true),
+		await daemon.waitForMark(
+			(mark) =>
+				mark.kind === "pre-assistant-held" &&
+				mark.queryId === initialQuery.queryId,
 		);
-		await daemon.requestRpc(
-			new UpdateInstance({ instanceId: accountId, configDir: edited }),
-		);
+		await daemon.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: accountId,
+			configDir: edited,
+		});
 		await browser.preWarmSession(sessionId);
 		expect(daemon.marks.filter((mark) => mark.kind === "query")).toHaveLength(
 			1,
@@ -303,9 +318,11 @@ describe("Account folder changes without daemon restart", () => {
 		if (editedQuery?.kind !== "query")
 			throw new Error("Missing edited-folder query");
 		relocateOrReject(editedQuery.sessionId, edited, launchLogin);
-		await daemon.requestRpc(
-			new UpdateInstance({ instanceId: accountId, configDir: "" }),
-		);
+		await daemon.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: accountId,
+			configDir: "",
+		});
 		const cleared = "turn-after-folder-clear";
 		expect((await browser.send(sessionId, cleared)).chunks.join("")).toBe(
 			responseChunks(cleared).join(""),
@@ -345,18 +362,17 @@ describe("Account folder changes without daemon restart", () => {
 		["send", true],
 		["pre-warm", true],
 	] as const)("replaces unused named-account queries after edit and clear before %s, initialization pending=%s", async (action, initializing) => {
-		const { daemon, browser } = await start(initializing ? 800 : 0);
+		const { daemon, browser } = await start();
 		const original = login(daemon, "original");
 		const edited = login(daemon, "edited");
 		const launchLogin = login(daemon, "claude");
-		const added = await daemon.requestRpc(
-			new AddInstance({
-				name: "Personal",
-				driver: "claude",
-				managed: false,
-				configDir: original,
-			}),
-		);
+		const added = await daemon.requestRpc({
+			_tag: "AddInstance",
+			name: "Personal",
+			driver: "claude",
+			managed: false,
+			configDir: original,
+		});
 		if (!added.addedInstanceId) throw new Error("Missing named account");
 		const accountId = AccountIdSchema.make(added.addedInstanceId);
 		for (const [configDir, resolvedFolder] of [
@@ -367,46 +383,82 @@ describe("Account folder changes without daemon restart", () => {
 				"Unused query folder",
 				accountId,
 			);
-			const queriesBefore = daemon.marks.filter(
-				(mark) => mark.kind === "query",
-			).length;
+			const marksBefore = daemon.marks.length;
+			if (initializing) {
+				rmSync(join(daemon.root, "release-held-initialization"), {
+					force: true,
+				});
+				writeFileSync(join(daemon.root, "hold-next-initialization"), "hold");
+			}
 			const warm = browser.preWarmSession(sessionId).then(
 				() => "ready",
 				() => "cancelled",
 			);
-			if (initializing) {
-				await vi.waitFor(
-					() =>
-						expect(
-							daemon.marks.filter((mark) => mark.kind === "query").length,
-						).toBeGreaterThan(queriesBefore),
-					{ timeout: 5000 },
+			if (initializing)
+				await daemon.waitForMark(
+					(mark) => mark.kind === "initialization-held",
+					marksBefore,
 				);
-			} else await warm;
-			const warmed = daemon.marks
-				.filter((mark) => mark.kind === "query")
-				.at(-1);
+			else await warm;
+			const warmed = await daemon.waitForMark(
+				(mark) => mark.kind === "query",
+				marksBefore,
+			);
 			if (warmed?.kind !== "query") throw new Error("Missing warmed query");
-			await daemon.requestRpc(
-				new UpdateInstance({ instanceId: accountId, configDir }),
-			);
-			if (action === "pre-warm") await browser.preWarmSession(sessionId);
+			await daemon.requestRpc({
+				_tag: "UpdateInstance",
+				instanceId: accountId,
+				configDir,
+			});
 			const text = `first-send-after-${configDir ? "edit" : "clear"}`;
-			expect((await browser.send(sessionId, text)).chunks.join("")).toBe(
-				responseChunks(text).join(""),
-			);
+			const requestCursor = browser.frames.length;
+			const sent = (async () => {
+				if (action === "pre-warm") {
+					await browser.preWarmSession(sessionId);
+					if (!initializing)
+						await daemon.waitForMark(
+							(mark) =>
+								mark.kind === "query" && mark.queryId !== warmed.queryId,
+							marksBefore,
+						);
+				}
+				return browser.send(sessionId, text);
+			})();
+			if (initializing) {
+				if (action === "pre-warm")
+					await daemon.waitForMark(
+						(mark) =>
+							mark.kind === "pre-warm-joined" && mark.sessionId === sessionId,
+						marksBefore,
+					);
+				else
+					await browser.waitFor(
+						(message) =>
+							message["type"] === "session_row" &&
+							message["id"] === sessionId &&
+							message["status"] === "busy",
+						requestCursor,
+					);
+				writeFileSync(
+					join(daemon.root, "release-held-initialization"),
+					"release",
+				);
+				expect(await warm).toBe("ready");
+			}
+			expect((await sent).chunks.join("")).toBe(responseChunks(text).join(""));
 			await warm;
 			expect(launches().at(-1)?.configDir).toBe(resolvedFolder);
-			const current = daemon.marks
-				.filter((mark) => mark.kind === "query")
-				.at(-1);
+			const current = await daemon.waitForMark(
+				(mark) => mark.kind === "query" && mark.queryId !== warmed.queryId,
+				marksBefore,
+			);
+			if (current.kind !== "query")
+				throw new Error("Missing replacement query");
 			expect(current?.queryId).not.toBe(warmed.queryId);
-			expect(
-				daemon.marks.some(
-					(mark) =>
-						mark.kind === "query-closed" && mark.queryId === warmed.queryId,
-				),
-			).toBe(true);
+			await daemon.waitForMark(
+				(mark) =>
+					mark.kind === "query-closed" && mark.queryId === warmed.queryId,
+			);
 		}
 		expect(daemon.generations).toHaveLength(1);
 	});
@@ -415,36 +467,28 @@ describe("Account folder changes without daemon restart", () => {
 		const { daemon, browser } = await start();
 		const original = login(daemon, "original");
 		const edited = login(daemon, "edited");
-		await daemon.requestRpc(
-			new UpdateInstance({
-				instanceId: AccountIdSchema.make("claude"),
-				configDir: original,
-			}),
-		);
+		await daemon.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: AccountIdSchema.make("claude"),
+			configDir: original,
+		});
 		const sessionId = await browser.createSession(
 			"Folder edits preserve steering",
 			"claude",
 		);
 		const active = browser.send(sessionId, "local-work-turn");
 		try {
-			await vi.waitFor(
-				() =>
-					expect(
-						daemon.marks.some((mark) => mark.kind === "pre-assistant-held"),
-					).toBe(true),
-				{ timeout: 5000 },
-			);
-			await daemon.requestRpc(
-				new UpdateInstance({
-					instanceId: AccountIdSchema.make("claude"),
-					configDir: edited,
-				}),
-			);
+			await daemon.waitForMark((mark) => mark.kind === "pre-assistant-held");
+			await daemon.requestRpc({
+				_tag: "UpdateInstance",
+				instanceId: AccountIdSchema.make("claude"),
+				configDir: edited,
+			});
 			const inputId = randomUUID();
 			// The fixture emits the SDK's command-start boundary for corrections.
 			const steerText = "correction-after-folder-edit";
 			const submitted = await Effect.runPromise(
-				browser.rpc.input.submit({
+				browser.rpc["input.submit"]({
 					sessionId,
 					inputId,
 					originId: browser.originId,
@@ -453,27 +497,19 @@ describe("Account folder changes without daemon restart", () => {
 				}),
 			);
 			expect(submitted.ok).toBe(true);
-			await vi.waitFor(() =>
-				expect(
-					daemon.marks.some(
-						(mark) =>
-							mark.kind === "runner-command" &&
-							mark.commandId === inputId &&
-							mark.type === "send-turn",
-					),
-				).toBe(true),
+			await daemon.waitForMark(
+				(mark) =>
+					mark.kind === "runner-command" &&
+					mark.commandId === inputId &&
+					mark.type === "send-turn",
 			);
 			expect(daemon.marks.filter((mark) => mark.kind === "query")).toHaveLength(
 				1,
 			);
 			writeFileSync(join(daemon.root, "release-local-work"), "release");
 			await active;
-			await vi.waitFor(() =>
-				expect(
-					daemon.marks.some(
-						(mark) => mark.kind === "emit" && mark.prompt.endsWith(steerText),
-					),
-				).toBe(true),
+			await daemon.waitForMark(
+				(mark) => mark.kind === "emit" && mark.prompt.endsWith(steerText),
 			);
 			expect(launches().at(-1)?.configDir).toBe(original);
 			await browser.send(sessionId, "next-turn-after-steering");
@@ -492,15 +528,14 @@ describe("Account folder changes without daemon restart", () => {
 	});
 
 	it("retains the original account for a steer before the runner publishes its launch snapshot", async () => {
-		const { daemon, browser } = await start(0, 4000);
+		const { daemon, browser } = await start(4000);
 		const original = login(daemon, "original");
 		const edited = login(daemon, "edited");
-		await daemon.requestRpc(
-			new UpdateInstance({
-				instanceId: AccountIdSchema.make("claude"),
-				configDir: original,
-			}),
-		);
+		await daemon.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: AccountIdSchema.make("claude"),
+			configDir: original,
+		});
 		const sessionId = await browser.createSession(
 			"Steer during runner startup",
 			"claude",
@@ -508,24 +543,17 @@ describe("Account folder changes without daemon restart", () => {
 		const first = "first-turn-before-startup-edit";
 		const active = browser.send(sessionId, first, 20_000);
 		try {
-			await vi.waitFor(
-				() =>
-					expect(
-						daemon.marks.some((mark) => mark.kind === "runner-hello-pending"),
-					).toBe(true),
-				{ timeout: 10_000 },
-			);
-			await daemon.requestRpc(
-				new UpdateInstance({
-					instanceId: AccountIdSchema.make("claude"),
-					configDir: edited,
-				}),
-			);
+			await daemon.waitForMark((mark) => mark.kind === "runner-hello-pending");
+			await daemon.requestRpc({
+				_tag: "UpdateInstance",
+				instanceId: AccountIdSchema.make("claude"),
+				configDir: edited,
+			});
 			const steerText = "correction-during-runner-startup";
 			expect(
 				(
 					await Effect.runPromise(
-						browser.rpc.input.submit({
+						browser.rpc["input.submit"]({
 							sessionId,
 							inputId: randomUUID(),
 							originId: browser.originId,
@@ -550,7 +578,7 @@ describe("Account folder changes without daemon restart", () => {
 			} finally {
 				db.close();
 			}
-			await active;
+			expect((await active).done["status"]).toBe("idle");
 			await vi.waitFor(
 				async () =>
 					expect(
@@ -561,6 +589,9 @@ describe("Account folder changes without daemon restart", () => {
 						),
 					).toBe(true),
 				{ timeout: 5000 },
+			);
+			await daemon.waitForMark(
+				(mark) => mark.kind === "enqueue" && mark.prompt.endsWith(steerText),
 			);
 			expect(launches().map((launch) => launch.configDir)).toEqual([
 				original,
@@ -601,16 +632,18 @@ describe("Account folder changes without daemon restart", () => {
 		const original = login(daemon, "original");
 		const target = login(daemon, change === "edit" ? "edited" : "claude");
 		const accountId = AccountIdSchema.make("claude");
-		await daemon.requestRpc(
-			new UpdateInstance({ instanceId: accountId, configDir: original }),
-		);
+		await daemon.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: accountId,
+			configDir: original,
+		});
 		const sessionId = await browser.createSession(
 			"Legacy receipt folder change",
 			accountId,
 		);
 		const first = "history-with-legacy-receipt";
 		await browser.send(sessionId, first);
-		const native = daemon.marks.find((mark) => mark.kind === "query");
+		const native = await daemon.waitForMark((mark) => mark.kind === "query");
 		if (native?.kind !== "query") throw new Error("Missing native receipt");
 		const db = new Database(daemon.daemonStorePath());
 		try {
@@ -635,12 +668,11 @@ describe("Account folder changes without daemon restart", () => {
 		} finally {
 			db.close();
 		}
-		await daemon.requestRpc(
-			new UpdateInstance({
-				instanceId: accountId,
-				configDir: change === "edit" ? target : "",
-			}),
-		);
+		await daemon.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: accountId,
+			configDir: change === "edit" ? target : "",
+		});
 		writeFileSync(
 			join(daemon.root, "rejected-resume-session-id"),
 			native.sessionId,
@@ -663,20 +695,18 @@ describe("Account folder changes without daemon restart", () => {
 		const original = login(daemon, "original");
 		const edited = login(daemon, "edited");
 		const spare = login(daemon, "spare");
-		await daemon.requestRpc(
-			new UpdateInstance({
-				instanceId: AccountIdSchema.make("claude"),
-				configDir: original,
-			}),
-		);
-		const added = await daemon.requestRpc(
-			new AddInstance({
-				name: "Spare",
-				driver: "claude",
-				managed: false,
-				configDir: spare,
-			}),
-		);
+		await daemon.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: AccountIdSchema.make("claude"),
+			configDir: original,
+		});
+		const added = await daemon.requestRpc({
+			_tag: "AddInstance",
+			name: "Spare",
+			driver: "claude",
+			managed: false,
+			configDir: spare,
+		});
 		if (!added.addedInstanceId) throw new Error("Missing spare account");
 		const sessionId = await browser.createSession(
 			"Receipt folder is historical",
@@ -702,12 +732,11 @@ describe("Account folder changes without daemon restart", () => {
 			);
 		await switchTo(added.addedInstanceId, "claude");
 		await browser.send(sessionId, "spare-account-history");
-		await daemon.requestRpc(
-			new UpdateInstance({
-				instanceId: AccountIdSchema.make("claude"),
-				configDir: edited,
-			}),
-		);
+		await daemon.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: AccountIdSchema.make("claude"),
+			configDir: edited,
+		});
 		await switchTo("claude", added.addedInstanceId);
 		await browser.send(sessionId, "return-to-edited-account");
 		expect(launches().at(-1)).toMatchObject({

@@ -1,5 +1,4 @@
 import { Effect, Fiber, Stream } from "effect";
-import type { RuntimeFiber } from "effect/Fiber";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import {
 	applySessionChange,
@@ -109,7 +108,7 @@ export const sessionList: SessionListView = {
 };
 
 let attachGeneration = 0;
-let shellFiber: RuntimeFiber<void, unknown> | null = null;
+let shellFiber: Fiber.Fiber<void, unknown> | null = null;
 let shellSaveTimer: ReturnType<typeof setTimeout> | undefined;
 let attachedProject: ProjectRef | null = null;
 accountSnapshotChangedListeners.add(({ firstList }) => {

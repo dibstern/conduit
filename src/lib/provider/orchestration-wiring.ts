@@ -5,8 +5,8 @@
 
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Context, Effect, Layer, Option, type Scope } from "effect";
+import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
 import {
@@ -20,6 +20,7 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 import { InstanceManagementServiceTag } from "../domain/relay/Services/instance-management-service.js";
 import { ProviderRuntimeIngestionTag } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
+import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger } from "../logger.js";
 import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-persist-effect.js";
@@ -40,7 +41,10 @@ import {
 } from "./opencode-provider-instance.js";
 import { OrchestrationEngine } from "./orchestration-engine.js";
 import { CommandReadModelRepository } from "./orchestration-read-model.js";
-import type { ProviderCommandStoreFailure } from "./orchestration-side-effect-reactor.js";
+import type {
+	ProviderCommandInteractionSinkFactory,
+	ProviderCommandStoreFailure,
+} from "./orchestration-side-effect-reactor.js";
 import { ProjectShellEnvResolver } from "./project-shell-env.js";
 import { ProviderRegistry, ProviderRegistryTag } from "./provider-registry.js";
 import {
@@ -105,7 +109,9 @@ export interface OrchestrationLayer {
 	 * side effects through the reactor (crash recovery / test flush). Same-process
 	 * dispatch already awaits its own execution.
 	 */
-	drainSideEffects(): Effect.Effect<void, ProviderCommandStoreFailure>;
+	drainSideEffects(
+		makeInteractions?: ProviderCommandInteractionSinkFactory,
+	): Effect.Effect<void, ProviderCommandStoreFailure>;
 }
 
 const TURN_COMPLETE_RESULT: TurnResult = {
@@ -125,10 +131,10 @@ interface OrchestrationComponents {
 	readonly openCodeInstance: OpenCodeProviderInstance;
 }
 
-class OrchestrationComponentsTag extends Context.Tag("OrchestrationComponents")<
+class OrchestrationComponentsTag extends Context.Service<
 	OrchestrationComponentsTag,
 	OrchestrationComponents
->() {}
+>()("OrchestrationComponents") {}
 
 const createOrchestrationComponentsEffect = (
 	options: OrchestrationLayerOptions,
@@ -140,6 +146,7 @@ const createOrchestrationComponentsEffect = (
 	| PersistenceProjectTag
 	| AccountDirectory
 	| OpenCodeInstancesTag
+	| SessionWorkspaceTag
 	| ClaudeEventPersistEffectTag
 	| ProviderRuntimeIngestionTag
 	| EventStoreEffectTag
@@ -161,26 +168,27 @@ const createOrchestrationComponentsEffect = (
 		// resolve the historical binding through the in-memory directory.
 		const instances = yield* OpenCodeInstancesTag;
 		const accountDirectory = yield* AccountDirectory;
+		const sessionWorkspace = yield* SessionWorkspaceTag;
 		const instanceManagement = Option.getOrUndefined(
 			yield* Effect.serviceOption(InstanceManagementServiceTag),
 		);
 		const clientForSession = (sessionId: string) =>
-			sessionBindingReadModel.getProviderForSession(sessionId).pipe(
-				Effect.flatMap((boundInstanceId) =>
-					accountDirectory.resolve(
-						boundInstanceId === undefined
-							? { _tag: "DriverDefault", driver: "opencode" }
-							: { _tag: "Id", id: boundInstanceId },
-					),
-				),
-				Effect.flatMap((account) =>
-					PROVIDER_DRIVERS[account.driver].runsOpenCodeServer
-						? instances.use(account.id)
-						: Effect.fail(
-								new Error("OpenCode session requires an OpenCode account"),
-							),
-				),
-			);
+			Effect.gen(function* () {
+				const boundInstanceId =
+					yield* sessionBindingReadModel.getProviderForSession(sessionId);
+				const account = yield* accountDirectory.resolve(
+					boundInstanceId === undefined
+						? { _tag: "DriverDefault", driver: "opencode" }
+						: { _tag: "Id", id: boundInstanceId },
+				);
+				if (!PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
+					return yield* Effect.fail(
+						new Error("OpenCode session requires an OpenCode account"),
+					);
+				}
+				const directory = yield* sessionWorkspace.get(sessionId);
+				return yield* instances.use(account.id, directory);
+			});
 
 		const openCodeInstance = (yield* OpenCodeDriver.create({
 			client: options.client,
@@ -188,7 +196,8 @@ const createOrchestrationComponentsEffect = (
 				? { workspaceRoot: options.workspaceRoot }
 				: {}),
 			clientForSession,
-			clientForAccount: (account) => instances.use(account.id),
+			clientForAccount: (account, directory) =>
+				instances.use(account.id, directory),
 			instanceIdForSession: (sessionId) =>
 				sessionBindingReadModel.getProviderForSession(sessionId),
 			hasWorktreeToolForSession: (sessionId, account) =>
@@ -225,7 +234,7 @@ const createOrchestrationComponentsEffect = (
 			);
 			const directory = options.workspaceRoot ?? process.cwd();
 			const daemonConfig = yield* Effect.suspend(() =>
-				loadDaemonConfigResult(options.configDir),
+				Effect.fromResult(loadDaemonConfigResult(options.configDir)),
 			).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)));
 			const config = daemonConfig?.projects.find(
 				(project) => resolve(project.path) === resolve(directory),
@@ -341,7 +350,8 @@ function createOrchestrationView(
 		registry,
 		openCodeInstance,
 		wireSSEToInstance,
-		drainSideEffects: () => engine.drainSideEffects(),
+		drainSideEffects: (makeInteractions) =>
+			engine.drainSideEffects(makeInteractions),
 	};
 }
 
@@ -355,12 +365,13 @@ export const makeOrchestrationRuntimeLayer = (
 	| PersistenceProjectTag
 	| AccountDirectory
 	| OpenCodeInstancesTag
+	| SessionWorkspaceTag
 	| ClaudeEventPersistEffectTag
 	| ProviderRuntimeIngestionTag
 	| EventStoreEffectTag
 	| ProjectionRunnerEffectTag
 > => {
-	const componentsLayer = Layer.scoped(
+	const componentsLayer = Layer.effect(
 		OrchestrationComponentsTag,
 		Effect.gen(function* () {
 			const client = yield* OpenCodeAPITag;
@@ -414,8 +425,8 @@ export const getOrchestrationLayer = Effect.gen(function* () {
 	const registry = yield* ProviderRegistryTag;
 	const openCodeInstance = yield* registry.getInstanceEffect("opencode");
 	if (!(openCodeInstance instanceof OpenCodeProviderInstance)) {
-		return yield* Effect.dieMessage(
-			"opencode provider is not an OpenCodeProviderInstance",
+		return yield* Effect.die(
+			new Error("opencode provider is not an OpenCodeProviderInstance"),
 		);
 	}
 	return createOrchestrationView({ engine, registry, openCodeInstance });

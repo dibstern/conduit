@@ -1,14 +1,7 @@
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
-import {
-	Deferred,
-	Duration,
-	Effect,
-	Fiber,
-	Layer,
-	Option,
-	TestClock,
-} from "effect";
+import { Deferred, Duration, Effect, Fiber, Layer, Option } from "effect";
+import { SqlClient } from "effect/sql";
+import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
@@ -74,6 +67,94 @@ function makeProvider(
 }
 
 describe("ProviderSideEffectReactor", () => {
+	// Separate sessions must make progress while a turn is held; overlapping
+	// drains must neither overtake that session's head nor duplicate any call.
+	it.effect(
+		"drains sessions concurrently and preserves each session's request order",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const started = yield* Deferred.make<void>();
+				const finish = yield* Deferred.make<void>();
+				const calls: string[] = [];
+				for (const [commandId, requestSequence, sessionId] of [
+					["first", 10, "session-a"],
+					["second", 20, "session-a"],
+					["other", 30, "session-b"],
+				] as const) {
+					yield* seedSendTurnOutbox(sql, { commandId, requestSequence });
+					yield* sql`UPDATE provider_command_outbox SET session_id = ${sessionId},
+					payload_json = json_set(payload_json, '$.sessionId', ${sessionId}, '$.prompt', ${commandId})
+					WHERE command_id = ${commandId}`;
+				}
+				yield* sql`UPDATE provider_command_outbox SET status = 'retryable_failed',
+				attempt_count = 1, next_attempt_at = 1000 WHERE command_id = 'other'`;
+				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
+					sql,
+					registry: new ProviderRegistry([
+						makeProvider((input) =>
+							Effect.gen(function* () {
+								calls.push(input.prompt);
+								if (input.prompt === "first") {
+									yield* Deferred.succeed(started, undefined);
+									yield* Deferred.await(finish);
+								}
+								return completedTurn;
+							}),
+						),
+					]),
+					ingestion: { ingest: () => Effect.succeed(1) },
+				});
+				const firstDrain = yield* Effect.forkChild(reactor.drain());
+				yield* Deferred.await(started);
+				yield* TestClock.adjust("1 second");
+				yield* Effect.all([reactor.drain(), reactor.drain()]);
+				expect(calls).toEqual(["first", "other"]);
+				yield* Deferred.succeed(finish, undefined);
+				yield* Fiber.join(firstDrain);
+				expect(calls).toEqual(["first", "other", "second"]);
+				expect(yield* readOutboxRetryState(sql, 30)).toMatchObject({
+					status: "completed",
+					attempt_count: 2,
+				});
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
+	);
+
+	it.effect("does not overtake an earlier retry that is not due", () =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			yield* seedSendTurnOutbox(sql, {
+				commandId: "first",
+				requestSequence: 10,
+			});
+			yield* seedSendTurnOutbox(sql, {
+				commandId: "second",
+				requestSequence: 20,
+			});
+			yield* sql`UPDATE provider_command_outbox SET status = 'retryable_failed',
+				attempt_count = 1, next_attempt_at = 1000 WHERE command_id = 'first'`;
+			const sendTurn = vi.fn((_input: SendTurnInput) =>
+				Effect.succeed(completedTurn),
+			);
+			const reactor = new ProviderSideEffectReactor({
+				projectId: "test-project",
+				sql,
+				registry: new ProviderRegistry([makeProvider(sendTurn)]),
+				ingestion: { ingest: () => Effect.succeed(1) },
+			});
+			yield* reactor.drain();
+			expect(sendTurn).not.toHaveBeenCalled();
+			yield* TestClock.adjust("1 second");
+			yield* reactor.drain();
+			expect(sendTurn).toHaveBeenCalledTimes(2);
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
+	);
+
 	// Replay must retain the admitted account snapshot when its old binding no
 	// longer resolves, and preparation/receipts must use the resolved account id.
 	it.effect(
@@ -459,6 +540,67 @@ describe("ProviderSideEffectReactor", () => {
 		),
 	);
 
+	// A direct waiter must not bypass backoff, and a failed claim must escape
+	// the drain so its scheduler can log and delay instead of hot-looping.
+	it.effect("does not let runCommand claim a retry before its deadline", () =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			yield* seedSendTurnOutbox(sql);
+			yield* sql`UPDATE provider_command_outbox SET status = 'retryable_failed',
+				attempt_count = 1, next_attempt_at = 1000`;
+			const sendTurn = vi.fn((_input: SendTurnInput) =>
+				Effect.succeed(completedTurn),
+			);
+			const reactor = new ProviderSideEffectReactor({
+				projectId: "test-project",
+				sql,
+				registry: new ProviderRegistry([makeProvider(sendTurn)]),
+				ingestion: { ingest: () => Effect.succeed(1) },
+				outcomePollTimeout: 0,
+			});
+			const result = yield* Effect.result(reactor.runCommand("cmd-1"));
+			expect(result._tag).toBe("Failure");
+			expect(sendTurn).not.toHaveBeenCalled();
+			expect(yield* readOutboxRetryState(sql, 10)).toMatchObject({
+				status: "retryable_failed",
+				attempt_count: 1,
+				next_attempt_at: 1000,
+			});
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
+	);
+
+	it.effect("surfaces a store failure while claiming an outbox row", () =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			yield* seedSendTurnOutbox(sql);
+			yield* sql.unsafe(`CREATE TRIGGER fail_claim BEFORE UPDATE OF status
+				ON provider_command_outbox WHEN NEW.status = 'running'
+				BEGIN SELECT RAISE(FAIL, 'claim failed'); END`);
+			const sendTurn = vi.fn((_input: SendTurnInput) =>
+				Effect.succeed(completedTurn),
+			);
+			const reactor = new ProviderSideEffectReactor({
+				projectId: "test-project",
+				sql,
+				registry: new ProviderRegistry([makeProvider(sendTurn)]),
+				ingestion: { ingest: () => Effect.succeed(1) },
+			});
+			const result = yield* Effect.result(reactor.runOnce());
+			expect(result).toMatchObject({
+				_tag: "Failure",
+				failure: {
+					_tag: "ProviderCommandStoreFailure",
+					operation: "markRunning",
+				},
+			});
+			expect(sendTurn).not.toHaveBeenCalled();
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
+	);
+
 	it.effect("backs off retryable provider failures without hot looping", () =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -632,12 +774,24 @@ describe("ProviderSideEffectReactor", () => {
 					outcomePollTimeout: "500 millis",
 				});
 
-				const loser = yield* Effect.fork(reactor.runCommand("cmd-1"));
-				yield* Effect.yieldNow();
-				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+				const loser = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
+				yield* Effect.yieldNow;
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(loser.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 
 				yield* TestClock.adjust("100 millis");
-				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(loser.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 
 				yield* sql.unsafe(
 					"UPDATE command_receipts SET status = 'side_effect_completed' WHERE command_id = ?",
@@ -683,9 +837,15 @@ describe("ProviderSideEffectReactor", () => {
 						[requestSequence],
 					);
 
-					const loser = yield* Effect.fork(reactor.runCommand(commandId));
-					yield* Effect.yieldNow();
-					expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+					const loser = yield* Effect.forkChild(reactor.runCommand(commandId));
+					yield* Effect.yieldNow;
+					expect(
+						Option.isNone(
+							yield* Effect.sync(() =>
+								Option.fromUndefinedOr(loser.pollUnsafe()),
+							),
+						),
+					).toBe(true);
 
 					yield* sql.withTransaction(
 						Effect.all([
@@ -740,10 +900,16 @@ describe("ProviderSideEffectReactor", () => {
 					errorCode: null,
 				});
 
-				const loser = yield* Effect.fork(reactor.runCommand("cmd-1"));
-				yield* Effect.yieldNow();
+				const loser = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
+				yield* Effect.yieldNow;
 				yield* TestClock.adjust("200 millis");
-				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(loser.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 
 				yield* TestClock.adjust("100 millis");
 				const error = yield* Effect.flip(Fiber.join(loser));
@@ -776,9 +942,15 @@ describe("ProviderSideEffectReactor", () => {
 					outcomePollTimeout: "100 millis",
 				});
 
-				const loser = yield* Effect.fork(reactor.runCommand("cmd-1"));
-				yield* Effect.yieldNow();
-				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+				const loser = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
+				yield* Effect.yieldNow;
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(loser.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 
 				yield* TestClock.adjust("100 millis");
 				const error = yield* Effect.flip(Fiber.join(loser));
@@ -825,15 +997,29 @@ describe("ProviderSideEffectReactor", () => {
 					outcomePollTimeout: "500 millis",
 				});
 
-				const winner = yield* Effect.fork(winnerReactor.runCommand("cmd-1"));
+				const winner = yield* Effect.forkChild(
+					winnerReactor.runCommand("cmd-1"),
+				);
 				yield* Deferred.await(winnerStarted);
-				const loser = yield* Effect.fork(loserReactor.runCommand("cmd-1"));
-				yield* Effect.yieldNow();
+				const loser = yield* Effect.forkChild(loserReactor.runCommand("cmd-1"));
+				yield* Effect.yieldNow;
 
-				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(loser.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 				yield* Deferred.succeed(releaseWinner, undefined);
 				expect((yield* Fiber.join(winner)).status).toBe("completed");
-				expect(Option.isNone(yield* Fiber.poll(loser))).toBe(true);
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(loser.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 
 				yield* TestClock.adjust("100 millis");
 				expect((yield* Fiber.join(loser)).status).toBe("completed");

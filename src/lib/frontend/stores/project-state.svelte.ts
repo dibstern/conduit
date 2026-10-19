@@ -19,12 +19,16 @@ export const projectState = $state({
 	terminalKeysRevision: 0,
 	/** The project the daemon says a new session prefills, on every client. */
 	newSessionProject: null as string | null,
+	/** The user's manual project order, synced through daemon config. */
+	projectOrder: [] as readonly string[],
 });
 
-/** The project a draft will be created in: its own pick, then the sidebar's
- *  project scope, then the remembered project, then the first available. A draft
- *  never inherits the project of whatever session happened to be open. */
-export function getDraftProject(): string | null {
+/** The project a draft will be created in (ADR-0011): its own pick, then the
+ *  open session's project, then the sidebar's project scope, then the
+ *  remembered project, then the first available. */
+export function getDraftProject(
+	openSessionProject: string | null = null,
+): string | null {
 	const params = getCurrentSearchParams();
 	const picked = params.get(DRAFT_PROJECT_PARAM);
 	const isAvailable = (p: ProjectInfo) => !p.missing && !p.unavailableReason;
@@ -32,11 +36,12 @@ export function getDraftProject(): string | null {
 	const pickedProject = projectState.projects.find((p) => p.slug === picked);
 	if (picked && (!pickedProject || isAvailable(pickedProject))) return picked;
 	const available = projectState.projects.filter(isAvailable);
-	const scope = params.get(SCOPE_PARAM);
-	const scopedProject = available.find((p) => p.slug === scope);
+	const find = (slug: string | null) =>
+		available.find((p) => p.slug === slug)?.slug;
 	return (
-		scopedProject?.slug ??
-		available.find((p) => p.slug === projectState.newSessionProject)?.slug ??
+		find(openSessionProject) ??
+		find(params.get(SCOPE_PARAM)) ??
+		find(projectState.newSessionProject) ??
 		available[0]?.slug ??
 		null
 	);

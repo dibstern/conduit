@@ -218,6 +218,12 @@ for (const mode of [
 				await expect(trigger.locator('[data-part="project"]')).toHaveCount(0);
 			await expect(trigger.locator('[data-part="branch"]')).toHaveText("main");
 			await expect(trigger.locator('[data-part="dirty"]')).toBeVisible();
+			await expect(trigger.locator('[data-part="dirty"]')).toHaveText(
+				"Uncommitted changes",
+			);
+			await expect(trigger.locator('[data-part="dirty"] .sr-only')).toHaveText(
+				"Uncommitted changes",
+			);
 			const dot = await trigger.locator('[data-part="dirty"]').boundingBox();
 			expect(dot?.width).toBe(6);
 			expect(dot?.height).toBe(6);
@@ -426,6 +432,9 @@ for (const mode of [
 			);
 			await expect(trigger.locator('[data-icon="folder"] svg')).toBeVisible();
 			await expect(trigger.locator('[data-part="branch"]')).toHaveCount(0);
+			await expect(
+				trigger.locator('[title="Uncommitted changes"]'),
+			).toHaveCount(0);
 			await trigger.click();
 			await expect(
 				page.getByRole("menuitem", { name: "Copy branch name" }),
@@ -564,25 +573,44 @@ for (const mode of [
 					"/workspace/spm-architecture-deepening-with-a-very-long-project-name",
 				git: { branch: "docs/architecture-deepening-design", dirty: true },
 			});
-			const project = trigger.locator('[data-part="project"]');
-			if (mode.hasTouch) {
-				await expect(project).toBeVisible();
-				expect((await project.boundingBox())?.width).toBeGreaterThan(10);
-			} else await expect(project).toHaveCount(0);
-			const branch = trigger.locator('[data-part="branch"]');
-			await expect(branch).toBeVisible();
-			expect((await branch.boundingBox())?.width).toBeGreaterThan(10);
-			const checkoutBox = await trigger.boundingBox();
-			const composerBox = await page.locator("#input-area").boundingBox();
-			expect(checkoutBox).not.toBeNull();
-			expect(composerBox).not.toBeNull();
-			if (!checkoutBox || !composerBox)
-				throw new Error("Composer checkout missing");
-			expect(checkoutBox.x).toBeGreaterThanOrEqual(composerBox.x);
-			expect(checkoutBox.x + checkoutBox.width).toBeLessThanOrEqual(
-				composerBox.x + composerBox.width,
-			);
-			await capture(page, testInfo, `${mode.name}-long-names`);
+			for (const viewport of [
+				mode.viewport,
+				...(mode.hasTouch ? [{ width: 320, height: 640 }] : []),
+			]) {
+				await page.setViewportSize(viewport);
+				const project = trigger.locator('[data-part="project"]');
+				if (mode.hasTouch) {
+					await expect(project).toBeVisible();
+					expect((await project.boundingBox())?.width).toBeGreaterThan(10);
+				} else await expect(project).toHaveCount(0);
+				const branch = trigger.locator('[data-part="branch"]');
+				await expect(branch).toBeVisible();
+				expect((await branch.boundingBox())?.width).toBeGreaterThan(10);
+				const checkoutBox = await trigger.boundingBox();
+				const composerBox = await page.locator("#input-area").boundingBox();
+				expect(checkoutBox).not.toBeNull();
+				expect(composerBox).not.toBeNull();
+				if (!checkoutBox || !composerBox)
+					throw new Error("Composer checkout missing");
+				expect(checkoutBox.x).toBeGreaterThanOrEqual(composerBox.x);
+				expect(checkoutBox.x + checkoutBox.width).toBeLessThanOrEqual(
+					composerBox.x + composerBox.width,
+				);
+				for (const part of mode.hasTouch ? ["project", "branch"] : ["branch"]) {
+					const height = await trigger
+						.locator(`[data-part="${part}"]`)
+						.evaluate((element) => ({
+							actual: element.getBoundingClientRect().height,
+							line: Number.parseFloat(getComputedStyle(element).lineHeight),
+						}));
+					expect(height.actual).toBeLessThanOrEqual(height.line + 1);
+				}
+				await capture(
+					page,
+					testInfo,
+					`${mode.name}-long-names-${viewport.width}px`,
+				);
+			}
 		});
 
 		test("detached HEAD shows the commit glyph and short SHA", async ({

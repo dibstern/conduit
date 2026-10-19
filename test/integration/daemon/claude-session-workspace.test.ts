@@ -12,14 +12,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	AddInstance,
-	ContinueSession,
-	ListDaemonSessions,
-	MoveSessionWorkspace,
-	SaveProject,
-	SubmitInput,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { SessionWorkspaceChangedPayloadSchema } from "../../../src/lib/persistence/events.js";
 import { SessionInfoSchema } from "../../../src/lib/shared-types.js";
@@ -163,13 +156,11 @@ describe("Claude declared workspace moves through the built daemon", () => {
 			user: realpathSync(user),
 			socket,
 			list: () =>
-				sendRpcRequest(
-					socket,
-					new ListDaemonSessions({
-						projectSlug: "process-test",
-						scope: "process-test",
-					}),
-				),
+				sendRpcRequest(socket, {
+					_tag: "ListDaemonSessions",
+					projectSlug: "process-test",
+					scope: "process-test",
+				}),
 		};
 	}
 
@@ -276,13 +267,11 @@ describe("Claude declared workspace moves through the built daemon", () => {
 			writeFileSync(join(entered, "dirty.txt"), "agent workspace\n");
 			projectFolder = realpathSync(extra);
 			entered = realpathSync(entered);
-			await sendRpcRequest(
-				socket,
-				new SaveProject({
-					slug: "process-test",
-					folders: [fixture.projectDir, extra],
-				}),
-			);
+			await sendRpcRequest(socket, {
+				_tag: "SaveProject",
+				slug: "process-test",
+				folders: [fixture.projectDir, extra],
+			});
 		}
 		const browser = await fixture.connect();
 		const sessionId = await browser.createSession("Declared moves");
@@ -465,13 +454,11 @@ exec '${realGit}' "$@"
 		writeFileSync(arm, "arm\n");
 		const move =
 			cause === "user"
-				? sendRpcRequest(
-						socket,
-						new MoveSessionWorkspace({
-							sessionId,
-							path: user,
-						}),
-					)
+				? sendRpcRequest(socket, {
+						_tag: "MoveSessionWorkspace",
+						sessionId,
+						path: user,
+					})
 				: moving.send(
 						sessionId,
 						"Enter the worktree while git resolution is slow.",
@@ -526,13 +513,11 @@ exec '${realGit}' "$@"
 		});
 		const extra = join(fixture.root, "extra-repo");
 		initRepo(extra);
-		await sendRpcRequest(
-			socket,
-			new SaveProject({
-				slug: "process-test",
-				folders: [fixture.projectDir, extra],
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [fixture.projectDir, extra],
+		});
 		const browser = await fixture.connect();
 		const sessionId = await browser.createSession("Configured replacement");
 		await browser.send(sessionId, "Enter a worktree.");
@@ -547,19 +532,25 @@ exec '${realGit}' "$@"
 				),
 			).size;
 		expect(runnerStarts()).toBe(1);
-		await sendRpcRequest(
-			socket,
-			new SaveProject({
-				slug: "process-test",
-				folders: [fixture.projectDir, entered],
-			}),
-		);
+		const markCursor = fixture.marks.length;
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [fixture.projectDir, entered],
+		});
 		const updated = await fixture.connect(sessionId);
 		await updated.send(sessionId, "Use the updated project folders.");
 		evidence["runnerStarts"] = runnerStarts();
 		evidence["additionalDirectories"] = fixture
 			.claudeOptions()
 			.map(({ options }) => options["additionalDirectories"]);
+		await fixture.waitForMark(
+			(mark) =>
+				mark.kind === "runner-started" &&
+				mark.sessionId === sessionId &&
+				runnerStarts() === 2,
+			markCursor,
+		);
 		expect(runnerStarts()).toBe(2);
 		expect(
 			fixture.claudeOptions().at(-1)?.options["additionalDirectories"],
@@ -575,23 +566,19 @@ exec '${realGit}' "$@"
 		const extraB = join(fixture.root, "extra-b");
 		initRepo(extraA);
 		initRepo(extraB);
-		await sendRpcRequest(
-			socket,
-			new SaveProject({
-				slug: "process-test",
-				folders: [fixture.projectDir, extraA, extraB],
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [fixture.projectDir, extraA, extraB],
+		});
 		const browser = await fixture.connect();
 		const sessionId = await browser.createSession("Reordered extra folders");
 		await browser.send(sessionId, "Enter a worktree.");
-		await sendRpcRequest(
-			socket,
-			new SaveProject({
-				slug: "process-test",
-				folders: [fixture.projectDir, extraB, extraA],
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [fixture.projectDir, extraB, extraA],
+		});
 		const reordered = await fixture.connect(sessionId);
 		await reordered.send(
 			sessionId,
@@ -627,13 +614,11 @@ exec '${realGit}' "$@"
 		initRepo(extra);
 		const entered = join(extra, ".claude", "worktrees", "contract");
 		git(extra, "worktree", "add", "-b", "worktree-contract", entered);
-		await sendRpcRequest(
-			socket,
-			new SaveProject({
-				slug: "process-test",
-				folders: [fixture.projectDir, extra],
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [fixture.projectDir, extra],
+		});
 		const browser = await fixture.connect();
 		const sessionId = await browser.createSession(
 			"Upgrade after declared move",
@@ -641,21 +626,19 @@ exec '${realGit}' "$@"
 		await browser.send(sessionId, "Enter the secondary worktree.");
 		if (state === "consumed")
 			await browser.send(sessionId, "Reply with pong in the worktree.");
-		const old = fixture.marks.find(
+		const old = await fixture.waitForMark(
 			(mark) => mark.kind === "runner-started" && mark.sessionId === sessionId,
 		);
 		if (old?.kind !== "runner-started")
 			throw new Error("Missing original runner");
 		await fixture.kill();
 		await fixture.restart({ buildId: "q5u6-14-upgraded" });
-		await vi.waitFor(
-			() =>
-				expect(fixture.logTail).toMatch(
-					new RegExp(
-						`Claude runner upgrade deferred for session ${sessionId}: (?:Changed Claude settings cannot be replayed without changing trust tiers or filesystem discovery|Original Claude file settings could not be captured); retaining the old runner`,
-					),
-				),
-			{ timeout: 15_000 },
+		await fixture.waitForMark(
+			(mark) =>
+				mark.kind === "runner-upgrade" &&
+				mark.phase === "failed" &&
+				mark.sessionId === sessionId &&
+				mark.oldPid === old.pid,
 		);
 		expect(() => process.kill(old.pid, 0)).not.toThrow();
 		const restored = await fixture.connect(sessionId);
@@ -719,13 +702,11 @@ exec '${realGit}' "$@"
 			worktrees: { [main]: entered },
 		});
 		const target = destination === "main" ? main : user;
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId,
-				path: target,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId,
+			path: target,
+		});
 		expect(
 			(await list()).sessions.find(({ id }) => id === sessionId)
 				?.workspaceMismatch,
@@ -780,13 +761,11 @@ exec '${realGit}' "$@"
 			"Workspace move with handoff",
 		);
 		await browser.send(sessionId, "Enter a worktree.");
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId,
-				path: user,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId,
+			path: user,
+		});
 		await browser.switchAgent(sessionId, "general-purpose");
 		await browser.send(sessionId, "Continue with the new agent.");
 		const prompt = fixture
@@ -820,10 +799,11 @@ exec '${realGit}' "$@"
 		const browser = await fixture.connect();
 		const sessionId = await browser.createSession("Wrong Exit result");
 		await browser.send(sessionId, "Enter a worktree.");
-		const request = new MoveSessionWorkspace({
+		const request = {
+			_tag: "MoveSessionWorkspace" as const,
 			sessionId,
 			path: user,
-		});
+		};
 		await sendRpcRequest(socket, request);
 		await browser.send(sessionId, "Move to the requested worktree.");
 		expect(
@@ -866,13 +846,11 @@ exec '${realGit}' "$@"
 		const browser = await fixture.connect();
 		const sessionId = await browser.createSession("Main checkout mismatch");
 		await browser.send(sessionId, "Enter a worktree.");
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId,
-				path: main,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId,
+			path: main,
+		});
 		expect(
 			(await list()).sessions.find(({ id }) => id === sessionId)
 				?.workspaceMismatch,
@@ -932,13 +910,11 @@ exec '${realGit}' "$@"
 		);
 		await browser.send(sessionId, "Enter a worktree.");
 		for (const path of [user, entered])
-			await sendRpcRequest(
-				socket,
-				new MoveSessionWorkspace({
-					sessionId,
-					path,
-				}),
-			);
+			await sendRpcRequest(socket, {
+				_tag: "MoveSessionWorkspace",
+				sessionId,
+				path,
+			});
 		expect(
 			(await list()).sessions.find(({ id }) => id === sessionId)
 				?.workspaceMismatch,
@@ -985,25 +961,21 @@ exec '${realGit}' "$@"
 			"Pick observed main checkout",
 		);
 		await browser.send(sessionId, "Enter a worktree.");
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId,
-				path: user,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId,
+			path: user,
+		});
 		await browser.send(sessionId, "Move to the requested worktree.");
 		expect(
 			(await list()).sessions.find(({ id }) => id === sessionId)
 				?.workspaceMismatch,
 		).toEqual({ actualPath: main });
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId,
-				path: main,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId,
+			path: main,
+		});
 		expect(
 			(await list()).sessions.find(({ id }) => id === sessionId)
 				?.workspaceMismatch,
@@ -1032,38 +1004,37 @@ exec '${realGit}' "$@"
 		const browser = await fixture.connect();
 		const configDir = join(fixture.root, "continuation-account");
 		mkdirSync(configDir);
-		const { addedInstanceId } = await sendRpcRequest(
-			socket,
-			new AddInstance({
-				name: "Continuation account",
-				driver: "claude",
-				configDir,
-			}),
-		);
+		const { addedInstanceId } = await sendRpcRequest(socket, {
+			_tag: "AddInstance",
+			name: "Continuation account",
+			driver: "claude",
+			configDir,
+		});
 		if (!addedInstanceId) throw new Error("Missing continuation account");
 		const sessionId = await browser.createSession(
 			"Workspace move on continuation",
 			addedInstanceId,
 		);
-		await sendRpcRequest(
-			socket,
-			new SubmitInput({
-				sessionId,
-				inputId: randomUUID(),
-				delivery: "queue",
-				text: "Enter a worktree.",
-			}),
+		await sendRpcRequest(socket, {
+			_tag: "input.submit",
+			sessionId,
+			inputId: randomUUID(),
+			delivery: "queue",
+			text: "Enter a worktree.",
+		});
+		await vi.waitFor(
+			async () =>
+				expect(
+					(await list()).sessions.find(({ id }) => id === sessionId)
+						?.limitRecovery?.cutOffMessageId,
+				).toBeDefined(),
+			{ timeout: 15_000 },
 		);
 		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		let nativeSessionId: unknown;
 		try {
 			await vi.waitFor(
-				async () => {
-					expect(
-						(await list()).sessions.find(({ id }) => id === sessionId)
-							?.limitRecovery?.cutOffMessageId,
-					).toBeDefined();
-					// The usage-limit event precedes the completed turn's native receipt.
+				() => {
 					nativeSessionId = db
 						.prepare(
 							"SELECT json_extract(value, '$.resumeSessionId') FROM provider_state WHERE session_id = ? AND key = ?",
@@ -1077,22 +1048,18 @@ exec '${realGit}' "$@"
 		} finally {
 			db.close();
 		}
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId,
-				path: user,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId,
+			path: user,
+		});
 		const cursor = browser.frames.length;
-		await sendRpcRequest(
-			socket,
-			new ContinueSession({
-				sessionId,
-				instanceId: addedInstanceId,
-				expectedInstanceId: addedInstanceId,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "ContinueSession",
+			sessionId,
+			instanceId: addedInstanceId,
+			expectedInstanceId: addedInstanceId,
+		});
 		await browser.waitForTurnEnd(sessionId, cursor);
 		const prompts = fixture
 			.claudeOptions()
@@ -1154,22 +1121,18 @@ exec '${realGit}' "$@"
 			).toHaveLength(2),
 		);
 		const inputId = randomUUID();
-		await sendRpcRequest(
-			socket,
-			new SubmitInput({
-				sessionId,
-				inputId,
-				delivery: "queue",
-				text: "Queued before moving.",
-			}),
-		);
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId,
-				path: user,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "input.submit",
+			sessionId,
+			inputId,
+			delivery: "queue",
+			text: "Queued before moving.",
+		});
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId,
+			path: user,
+		});
 		writeFileSync(release, "release\n");
 		await running;
 		await vi.waitFor(
@@ -1223,10 +1186,11 @@ exec '${realGit}' "$@"
 		const browser = await fixture.connect();
 		const sessionId = await browser.createSession("Ignored workspace move");
 		await browser.send(sessionId, "Enter a worktree.");
-		const request = new MoveSessionWorkspace({
+		const request = {
+			_tag: "MoveSessionWorkspace" as const,
 			sessionId,
 			path: user,
-		});
+		};
 		await sendRpcRequest(socket, request);
 		await browser.send(sessionId, "Continue without moving.");
 		const mismatch = (await list()).sessions.find(({ id }) => id === sessionId);
@@ -1308,13 +1272,11 @@ exec '${realGit}' "$@"
 		const sessionId = await browser.createSession("Ordinary cwd move");
 		await browser.send(sessionId, "Start the session.");
 		if (exited) await browser.send(sessionId, "Exit the worktree.");
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId,
-				path: user,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId,
+			path: user,
+		});
 		await browser.send(sessionId, "Continue in the new cwd.");
 		expect(
 			fixture
@@ -1375,13 +1337,11 @@ exec '${realGit}' "$@"
 		});
 		const browser = await fixture.connect();
 		const sessionId = await browser.createSession("User move wins");
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId,
-				path: user,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId,
+			path: user,
+		});
 		await browser.send(sessionId, "Reply with pong.");
 		expect(
 			(await list()).sessions.find(({ id }) => id === sessionId),
@@ -1410,21 +1370,17 @@ exec '${realGit}' "$@"
 		);
 		const browser = await fixture.connect();
 		const sessionId = await browser.createSession("Matching declaration");
-		await sendRpcRequest(
-			socket,
-			new MoveSessionWorkspace({
-				sessionId,
-				path: entered,
-			}),
-		);
+		await sendRpcRequest(socket, {
+			_tag: "MoveSessionWorkspace",
+			sessionId,
+			path: entered,
+		});
 		if (destination === "main")
-			await sendRpcRequest(
-				socket,
-				new MoveSessionWorkspace({
-					sessionId,
-					path: main,
-				}),
-			);
+			await sendRpcRequest(socket, {
+				_tag: "MoveSessionWorkspace",
+				sessionId,
+				path: main,
+			});
 		await browser.send(sessionId, "Declare the requested workspace.");
 		expect(moves(fixture, sessionId).at(-1)).toEqual({
 			sessionId,
@@ -1466,20 +1422,16 @@ exec '${realGit}' "$@"
 				"Durable user acknowledgment",
 			);
 			if (destination === "main")
-				await sendRpcRequest(
-					socket,
-					new MoveSessionWorkspace({
-						sessionId,
-						path: user,
-					}),
-				);
-			await sendRpcRequest(
-				socket,
-				new MoveSessionWorkspace({
+				await sendRpcRequest(socket, {
+					_tag: "MoveSessionWorkspace",
 					sessionId,
-					path: requested,
-				}),
-			);
+					path: user,
+				});
+			await sendRpcRequest(socket, {
+				_tag: "MoveSessionWorkspace",
+				sessionId,
+				path: requested,
+			});
 			await browser.send(
 				sessionId,
 				"Reply with pong in the requested worktree.",
@@ -1496,13 +1448,11 @@ exec '${realGit}' "$@"
 			await fixture.restart();
 			const extra = join(fixture.root, "extra-repo");
 			initRepo(extra);
-			await sendRpcRequest(
-				socket,
-				new SaveProject({
-					slug: "process-test",
-					folders: [fixture.projectDir, extra],
-				}),
-			);
+			await sendRpcRequest(socket, {
+				_tag: "SaveProject",
+				slug: "process-test",
+				folders: [fixture.projectDir, extra],
+			});
 			const restored = await fixture.connect(sessionId);
 			await restored.send(
 				sessionId,

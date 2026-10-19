@@ -33,9 +33,14 @@ export interface SSEStreamOptions {
 	log?: Logger;
 }
 
+export interface OpenCodeEventContext {
+	readonly directory?: string | undefined;
+	readonly providerProcessId?: string | undefined;
+}
+
 /** Callback signatures for each SSEStream broadcast event type. */
 export interface SSEStreamCallbacks {
-	event: (data: unknown) => void;
+	event: (data: unknown, context?: OpenCodeEventContext) => void;
 	connected: () => void;
 	disconnected: (error: Error | undefined) => void;
 	reconnecting: (info: { attempt: number; delay: number }) => void;
@@ -92,7 +97,7 @@ export class SSEStream implements SSEStreamPort {
 	private sseAbort: AbortController | null = null;
 
 	/** Effect fiber running the consume loop. */
-	private fiber: Fiber.RuntimeFiber<void, never> | null = null;
+	private fiber: Fiber.Fiber<void, never> | null = null;
 
 	private desiredRunning = false;
 	private lifecycleGeneration = 0;
@@ -176,7 +181,7 @@ export class SSEStream implements SSEStreamPort {
 
 	/** Kill SSE stream and drain tracked work. */
 	drainEffect(): Effect.Effect<void> {
-		return Effect.zipRight(
+		return Effect.andThen(
 			this.disconnectEffect(),
 			this.awaitPendingPromisesEffect(),
 		);
@@ -194,7 +199,7 @@ export class SSEStream implements SSEStreamPort {
 	private enqueueLifecycleEffect(
 		work: () => Effect.Effect<void>,
 	): Effect.Effect<void> {
-		return Effect.async<void>((resume) => {
+		return Effect.callback<void>((resume) => {
 			let release!: () => void;
 			const completion = new Promise<void>((resolve) => {
 				release = resolve;
@@ -225,7 +230,7 @@ export class SSEStream implements SSEStreamPort {
 	}
 
 	private awaitPendingPromisesEffect(): Effect.Effect<void> {
-		return Effect.async<void>((resume) => {
+		return Effect.callback<void>((resume) => {
 			Promise.allSettled([...this.pendingPromises]).then(
 				() => {
 					this.pendingPromises.clear();
@@ -246,21 +251,22 @@ export class SSEStream implements SSEStreamPort {
 		// explicitly interruptible: a fiber forked inside an uninterruptible
 		// region inherits that status, and disconnect relies on interruption.
 		return Effect.uninterruptible(
-			Effect.gen(this, function* () {
+			Effect.gen({ self: this }, function* () {
 				if (this.running) return;
 				this.running = true;
 				this.reconnectCount = 0;
 
-				// Launch the Effect-based consume loop as a daemon fiber.
-				this.fiber = yield* Effect.forkDaemon(
+				// Start before connect completes, including after queued teardown.
+				this.fiber = yield* Effect.forkDetach(
 					Effect.interruptible(this.consumeLoop()),
+					{ startImmediately: true, uninterruptible: "inherit" },
 				);
 			}),
 		);
 	}
 
 	private stopCurrentConnectionEffect(): Effect.Effect<void> {
-		return Effect.gen(this, function* () {
+		return Effect.gen({ self: this }, function* () {
 			this.running = false;
 			this.connected = false;
 
@@ -314,7 +320,7 @@ export class SSEStream implements SSEStreamPort {
 		const runId = ++this.runCounter;
 
 		// Single connection attempt — connects, consumes events, fails on error
-		const singleConnection: Effect.Effect<void, Error, never> = Effect.async<
+		const singleConnection: Effect.Effect<void, Error, never> = Effect.callback<
 			void,
 			Error
 		>((resume) => {
@@ -433,21 +439,21 @@ export class SSEStream implements SSEStreamPort {
 					await runPromise;
 				},
 				catch: () => undefined,
-			}).pipe(Effect.catchAll(() => Effect.void));
+			}).pipe(Effect.catch(() => Effect.void));
 		});
 
-		const loop = Effect.gen(this, function* () {
+		const loop = Effect.gen({ self: this }, function* () {
 			let attempt = 0;
 			while (this.running) {
 				this.connectedAt = null;
 				this.staleTeardown = false;
-				const result = yield* Effect.either(singleConnection);
+				const result = yield* Effect.result(singleConnection);
 				if (!this.running) return;
 				// The AbortError rejection path above can resume successfully without
 				// clearing running. Treat that Right as a retryable anomaly, not shutdown.
 				const failureReason =
-					result._tag === "Left"
-						? result.left.message
+					result._tag === "Failure"
+						? result.failure.message
 						: "connection ended without an error";
 
 				// Reset the backoff only after a connection that stayed healthy

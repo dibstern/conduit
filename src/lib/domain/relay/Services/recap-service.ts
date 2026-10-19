@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Context, Data, Effect, Layer, PubSub, Schema, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	type AskExplanation,
 	AskExplanationContentSchema,
@@ -44,7 +44,7 @@ interface GenerateRecapInput extends RecapTarget {
 	/** Reuse a selected version's scope and input range when regenerating. */
 	readonly sourceVersion?: number | undefined;
 }
-export class RecapServiceTag extends Context.Tag("RecapService")<
+export class RecapServiceTag extends Context.Service<
 	RecapServiceTag,
 	{
 		readonly explainAsk: (
@@ -60,13 +60,13 @@ export class RecapServiceTag extends Context.Tag("RecapService")<
 			target: RecapTarget,
 		) => Stream.Stream<RecapSnapshot, RecapFailure>;
 	}
->() {}
+>()("RecapService") {}
 
 const recapColumns = `session_id AS sessionId, turn_id AS turnId, version,
 	scope, first_ordinal AS firstOrdinal, last_ordinal AS lastOrdinal, text,
 	model, duration_ms AS durationMs, created_at AS createdAt`;
-const probabilitiesSchema = Schema.parseJson(
-	Schema.Record({ key: Schema.String, value: Schema.Number }),
+const probabilitiesSchema = Schema.fromJsonString(
+	Schema.Record(Schema.String, Schema.Number),
 );
 const sentenceSegments = new Intl.Segmenter("en", { granularity: "sentence" });
 function isCompletion(
@@ -78,7 +78,7 @@ function isCompletion(
 export const makeRecapServiceLive = (
 	options: { readonly queryFactory?: ClaudeOneShotQueryFactory } = {},
 ) =>
-	Layer.scoped(
+	Layer.effect(
 		RecapServiceTag,
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -265,17 +265,17 @@ export const makeRecapServiceLive = (
 				workspaceJson: string | null,
 				model: string,
 				prompt: string,
-				schema: Schema.Schema<A, I>,
+				schema: Schema.Codec<A, I>,
 			) =>
 				Effect.gen(function* () {
 					const daemonConfig = yield* Effect.suspend(() =>
-						loadDaemonConfigResult(config.configDir),
+						Effect.fromResult(loadDaemonConfigResult(config.configDir)),
 					).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)));
 					const workspace =
 						workspaceJson === null
 							? null
-							: yield* Schema.decodeUnknown(
-									Schema.parseJson(SessionWorkspaceSchema),
+							: yield* Schema.decodeUnknownEffect(
+									Schema.fromJsonString(SessionWorkspaceSchema),
 								)(workspaceJson);
 					return yield* makeClaudeOneShot({
 						...resolveClaudeLaunchConfig(daemonConfig),
@@ -299,12 +299,15 @@ export const makeRecapServiceLive = (
 													: String(error.cause ?? "Summary generation failed"),
 									}),
 							),
-							Effect.timeoutFail({
+							Effect.timeoutOrElse({
 								duration: "60 seconds",
-								onTimeout: () =>
-									new RecapFailure({
-										message: "Timed out waiting for Claude summary",
-									}),
+								orElse: () =>
+									Effect.fail(
+										(() =>
+											new RecapFailure({
+												message: "Timed out waiting for Claude summary",
+											}))(),
+									),
 							}),
 						);
 				});
@@ -389,7 +392,7 @@ export const makeRecapServiceLive = (
 						const nonRoutine = yield* Effect.forEach(allMessages, (message) =>
 							Effect.gen(function* () {
 								if (!message.probabilities) return !preferences.active;
-								const probabilities = yield* Schema.decodeUnknown(
+								const probabilities = yield* Schema.decodeUnknownEffect(
 									probabilitiesSchema,
 								)(message.probabilities);
 								return (
@@ -455,7 +458,7 @@ export const makeRecapServiceLive = (
 							const probabilities =
 								message.probabilities === null
 									? null
-									: yield* Schema.decodeUnknown(probabilitiesSchema)(
+									: yield* Schema.decodeUnknownEffect(probabilitiesSchema)(
 											message.probabilities,
 										);
 							const category =
@@ -585,7 +588,7 @@ export const makeRecapServiceLive = (
 						};
 						yield* withTurn(target, generateLocked(target, true));
 					}).pipe(
-						Effect.catchAllCause((cause) =>
+						Effect.catchCause((cause) =>
 							Failure.isInterruptedOnly(cause)
 								? Effect.interrupt
 								: Effect.sync(() =>
@@ -603,7 +606,7 @@ export const makeRecapServiceLive = (
 				explainAsk,
 				generate,
 				subscribe: (target: RecapTarget) =>
-					Stream.unwrapScoped(
+					Stream.unwrap(
 						Effect.gen(function* () {
 							const advances = yield* bus.subscribeAdvances();
 							const changes = yield* PubSub.subscribe(attemptChanges);
@@ -619,7 +622,7 @@ export const makeRecapServiceLive = (
 										),
 										Stream.mapEffect(() => snapshot(target)),
 									),
-									Stream.fromQueue(changes).pipe(
+									Stream.fromSubscription(changes).pipe(
 										Stream.filter(
 											(changed) =>
 												changed.turnId === target.turnId &&

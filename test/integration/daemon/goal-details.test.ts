@@ -1,9 +1,10 @@
 // Failure modes: judge metadata lost in SDK normalization or persistence,
 // checks confused with turns, final met checks dropped, and restart hydration
 // losing the model or allowing later turns to change completed-goal totals.
-import { SqlClient } from "@effect/sql";
+
 import { describe, it } from "@effect/vitest";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { decodeClaudeSDKMessage } from "../../../src/lib/contracts/providers/claude-agent-sdk.js";
 import {

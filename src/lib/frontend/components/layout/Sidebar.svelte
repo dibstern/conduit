@@ -55,9 +55,11 @@
 	);
 
 	// Opens a draft; the session is created by its first send. Pins the
-	// prefilled project in the URL so a reload keeps it.
+	// prefilled project in the URL so a reload, or a later change to the
+	// defaults, keeps it.
 	function handleNewSession() {
-		selection.openDraft(getDraftProject());
+		const shown = selection.shown;
+		selection.openDraft(getDraftProject(shown.kind === "placed" ? shown.project : null));
 	}
 
 	// Sidebar width: collapsed → 0, otherwise user-set width.

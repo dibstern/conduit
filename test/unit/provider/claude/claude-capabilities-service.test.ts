@@ -14,13 +14,13 @@ import { describe, it } from "@effect/vitest";
 import {
 	Deferred,
 	Effect,
-	Either,
+	Result as Either,
 	Fiber,
 	Layer,
 	Logger,
 	Option,
-	TestClock,
 } from "effect";
+import { TestClock } from "effect/testing";
 import { afterEach, expect, vi } from "vitest";
 import {
 	__setProbeOverrideForTesting,
@@ -45,9 +45,12 @@ const capabilities = (id: string): ProbeResult => ({
 	agents: [],
 });
 
+// Bounded by wall time, not turns: background cache writes are real fs I/O,
+// which can outlast any fixed turn count on a loaded machine.
 const waitUntil = <E, R>(check: Effect.Effect<boolean, E, R>) =>
 	Effect.gen(function* () {
-		for (let attempt = 0; attempt < 1000; attempt++) {
+		const deadline = Date.now() + 5_000;
+		while (Date.now() < deadline) {
 			if (yield* check) return;
 			yield* Effect.promise(() => setImmediate());
 		}
@@ -150,18 +153,24 @@ describe("ClaudeCapabilitiesService", () => {
 				if (inFlight === "background") yield* TestClock.adjust("6 minutes");
 
 				yield* Effect.gen(function* () {
-					const first = yield* Effect.fork(
+					const first = yield* Effect.forkChild(
 						service.get(
 							"/tmp/workspace",
 							inFlight === "refresh" ? { refresh: true } : undefined,
 						),
 					);
 					yield* waitUntil(Effect.sync(() => probe.mock.calls.length === 1));
-					const second = yield* Effect.fork(
+					const second = yield* Effect.forkChild(
 						service.get("/tmp/workspace", { refresh: true }),
 					);
-					yield* Effect.yieldNow();
-					expect(Option.isNone(yield* Fiber.poll(second))).toBe(true);
+					yield* Effect.yieldNow;
+					expect(
+						Option.isNone(
+							yield* Effect.sync(() =>
+								Option.fromUndefinedOr(second.pollUnsafe()),
+							),
+						),
+					).toBe(true);
 					expect(probe).toHaveBeenCalledTimes(1);
 					yield* Deferred.succeed(release, undefined);
 					expect(yield* Fiber.join(second)).toEqual(refreshed);
@@ -188,13 +197,13 @@ describe("ClaudeCapabilitiesService", () => {
 				const service = yield* makeClaudeCapabilitiesService({ launchConfig });
 				yield* service.get("/tmp/workspace");
 
-				const failed = yield* Effect.either(
+				const failed = yield* Effect.result(
 					service.get("/tmp/workspace", { refresh: true }),
 				);
-				expect(Either.isLeft(failed)).toBe(true);
-				if (Either.isLeft(failed)) {
-					expect(failed.left).toBeInstanceOf(ClaudeBoundaryError);
-					expect(failed.left.cause).toBe(cause);
+				expect(Either.isFailure(failed)).toBe(true);
+				if (Either.isFailure(failed)) {
+					expect(failed.failure).toBeInstanceOf(ClaudeBoundaryError);
+					expect(failed.failure.cause).toBe(cause);
 				}
 				expect(yield* service.get("/tmp/workspace")).toEqual(original);
 				expect(probe).toHaveBeenCalledTimes(2);
@@ -217,15 +226,25 @@ describe("ClaudeCapabilitiesService", () => {
 			yield* service.get("/tmp/workspace");
 
 			yield* Effect.gen(function* () {
-				const refresh = yield* Effect.fork(
+				const refresh = yield* Effect.forkChild(
 					service.get("/tmp/workspace", { refresh: true }),
 				);
-				yield* Effect.yieldNow();
+				yield* Effect.yieldNow;
 				expect(probe).toHaveBeenCalledTimes(2);
-				const plain = yield* Effect.fork(service.get("/tmp/workspace"));
-				yield* waitUntil(Fiber.poll(plain).pipe(Effect.map(Option.isSome)));
+				const plain = yield* Effect.forkChild(service.get("/tmp/workspace"));
+				yield* waitUntil(
+					Effect.sync(() => Option.fromUndefinedOr(plain.pollUnsafe())).pipe(
+						Effect.map(Option.isSome),
+					),
+				);
 				expect(yield* Fiber.join(plain)).toEqual(original);
-				expect(Option.isNone(yield* Fiber.poll(refresh))).toBe(true);
+				expect(
+					Option.isNone(
+						yield* Effect.sync(() =>
+							Option.fromUndefinedOr(refresh.pollUnsafe()),
+						),
+					),
+				).toBe(true);
 				expect(probe).toHaveBeenCalledTimes(2);
 				yield* Deferred.succeed(release, undefined);
 				expect(yield* Fiber.join(refresh)).toEqual(capabilities("new"));
@@ -255,13 +274,17 @@ describe("ClaudeCapabilitiesService", () => {
 
 			yield* Effect.gen(function* () {
 				yield* TestClock.adjust("2 minutes");
-				const reads = yield* Effect.fork(
+				const reads = yield* Effect.forkChild(
 					Effect.all(
 						Array.from({ length: 4 }, () => service.get("/tmp/workspace")),
 						{ concurrency: "unbounded" },
 					),
 				);
-				yield* waitUntil(Fiber.poll(reads).pipe(Effect.map(Option.isSome)));
+				yield* waitUntil(
+					Effect.sync(() => Option.fromUndefinedOr(reads.pollUnsafe())).pipe(
+						Effect.map(Option.isSome),
+					),
+				);
 				expect(yield* Fiber.join(reads)).toEqual(Array(4).fill(first));
 				yield* waitUntil(Effect.sync(() => probe.mock.calls.length === 2));
 				expect(yield* service.get("/tmp/workspace")).toEqual(first);
@@ -293,8 +316,8 @@ describe("ClaudeCapabilitiesService", () => {
 				}),
 			});
 
-			const first = yield* Effect.fork(service.get("/tmp/workspace"));
-			const second = yield* Effect.fork(service.get("/tmp/workspace"));
+			const first = yield* Effect.forkChild(service.get("/tmp/workspace"));
+			const second = yield* Effect.forkChild(service.get("/tmp/workspace"));
 			yield* Deferred.succeed(release, undefined);
 			yield* Fiber.join(first);
 			yield* Fiber.join(second);
@@ -371,8 +394,14 @@ describe("ClaudeCapabilitiesService", () => {
 					cacheDir,
 				});
 				yield* Effect.gen(function* () {
-					const stale = yield* Effect.fork(restarted.get("/tmp/workspace"));
-					yield* waitUntil(Fiber.poll(stale).pipe(Effect.map(Option.isSome)));
+					const stale = yield* Effect.forkChild(
+						restarted.get("/tmp/workspace"),
+					);
+					yield* waitUntil(
+						Effect.sync(() => Option.fromUndefinedOr(stale.pollUnsafe())).pipe(
+							Effect.map(Option.isSome),
+						),
+					);
 					expect(yield* Fiber.join(stale)).toEqual(original);
 					yield* waitUntil(Effect.sync(() => probe.mock.calls.length === 1));
 					expect(yield* restarted.get("/tmp/workspace")).toEqual(original);
@@ -409,7 +438,7 @@ describe("ClaudeCapabilitiesService", () => {
 					launchConfig,
 					cacheDir,
 				});
-				const reads = yield* Effect.fork(
+				const reads = yield* Effect.forkChild(
 					Effect.all(
 						Array.from({ length: 8 }, () => service.get("/tmp/workspace")),
 						{ concurrency: "unbounded" },
@@ -495,12 +524,11 @@ describe("ClaudeCapabilitiesService", () => {
 		() =>
 			Effect.gen(function* () {
 				let warned = false;
-				const refreshLogs = Logger.replace(
-					Logger.defaultLogger,
+				const refreshLogs = Logger.layer([
 					Logger.make(() => {
 						warned = true;
 					}),
-				);
+				]);
 				const release = yield* Deferred.make<void>();
 				const probe = vi
 					.fn()
@@ -515,10 +543,14 @@ describe("ClaudeCapabilitiesService", () => {
 				const original = yield* service.get("/tmp/workspace");
 				yield* Effect.gen(function* () {
 					yield* TestClock.adjust("6 minutes");
-					const stale = yield* Effect.fork(
+					const stale = yield* Effect.forkChild(
 						service.get("/tmp/workspace").pipe(Effect.provide(refreshLogs)),
 					);
-					yield* waitUntil(Fiber.poll(stale).pipe(Effect.map(Option.isSome)));
+					yield* waitUntil(
+						Effect.sync(() => Option.fromUndefinedOr(stale.pollUnsafe())).pipe(
+							Effect.map(Option.isSome),
+						),
+					);
 					expect(yield* Fiber.join(stale)).toEqual(original);
 					yield* waitUntil(Effect.sync(() => probe.mock.calls.length === 2));
 				}).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
@@ -626,12 +658,12 @@ describe("ClaudeCapabilitiesService", () => {
 				.mockResolvedValueOnce(capabilities("retry"));
 			__setProbeOverrideForTesting(probe);
 			const service = yield* makeClaudeCapabilitiesService({ launchConfig });
-			const failed = yield* Effect.either(service.get("/tmp/workspace"));
-			expect(Either.isLeft(failed)).toBe(true);
-			if (Either.isLeft(failed)) {
-				expect(failed.left).toBeInstanceOf(ClaudeBoundaryError);
-				expect(failed.left.operation).toBe("probeCapabilities");
-				expect(failed.left.cause).toBe(cause);
+			const failed = yield* Effect.result(service.get("/tmp/workspace"));
+			expect(Either.isFailure(failed)).toBe(true);
+			if (Either.isFailure(failed)) {
+				expect(failed.failure).toBeInstanceOf(ClaudeBoundaryError);
+				expect(failed.failure.operation).toBe("probeCapabilities");
+				expect(failed.failure.cause).toBe(cause);
 			}
 			expect((yield* service.get("/tmp/workspace")).models[0]?.id).toBe(
 				"retry",
@@ -653,21 +685,21 @@ describe("ClaudeCapabilitiesService", () => {
 				const service = yield* makeClaudeCapabilitiesService({
 					launchConfig: launch,
 				});
-				const failure = yield* Effect.either(service.get("/tmp/workspace"));
-				expect(Either.isLeft(failure)).toBe(true);
-				if (Either.isLeft(failure)) {
-					expect(failure.left).toBeInstanceOf(ClaudeBoundaryError);
-					expect(failure.left.cause).toBe(cause);
+				const failure = yield* Effect.result(service.get("/tmp/workspace"));
+				expect(Either.isFailure(failure)).toBe(true);
+				if (Either.isFailure(failure)) {
+					expect(failure.failure).toBeInstanceOf(ClaudeBoundaryError);
+					expect(failure.failure.cause).toBe(cause);
 				}
 				expect(probe).not.toHaveBeenCalled();
 				yield* service.get("/tmp/workspace");
 				launch.mockImplementationOnce(() => {
 					throw cause;
 				});
-				const cachedFailure = yield* Effect.either(
+				const cachedFailure = yield* Effect.result(
 					service.get("/tmp/workspace"),
 				);
-				expect(Either.isLeft(cachedFailure)).toBe(true);
+				expect(Either.isFailure(cachedFailure)).toBe(true);
 				expect(probe).toHaveBeenCalledTimes(1);
 			}),
 	);
@@ -684,7 +716,7 @@ describe("ClaudeCapabilitiesService", () => {
 				.mockResolvedValueOnce(capabilities("retry"));
 			__setProbeOverrideForTesting(probe);
 			const service = yield* makeClaudeCapabilitiesService({ launchConfig });
-			const first = yield* Effect.fork(service.get("/tmp/workspace"));
+			const first = yield* Effect.forkChild(service.get("/tmp/workspace"));
 			yield* waitUntil(Effect.sync(() => probe.mock.calls.length === 1));
 			yield* Fiber.interrupt(first);
 			yield* Deferred.succeed(release, undefined);

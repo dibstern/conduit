@@ -32,10 +32,10 @@ export const emptySessionManagerState = (): SessionManagerState => ({
 });
 
 /** Tag for the mutable SessionManagerState Ref in the Effect Context. */
-export class SessionManagerStateTag extends Context.Tag("SessionManagerState")<
+export class SessionManagerStateTag extends Context.Service<
 	SessionManagerStateTag,
 	Ref.Ref<SessionManagerState>
->() {}
+>()("SessionManagerState") {}
 
 /**
  * Create a Layer providing SessionManagerStateTag backed by a Ref.

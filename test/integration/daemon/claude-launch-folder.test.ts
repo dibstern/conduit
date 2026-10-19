@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
-import { Effect, Either } from "effect";
+import { Effect, Result as Either } from "effect";
 import { afterEach, expect, it, vi } from "vitest";
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
@@ -140,7 +140,8 @@ it.each([
 	if (invalid) {
 		const failure =
 			scenario === "missing-login-kind"
-				? '["_tag"]'
+				? // Effect 4 reports a missing union tag by listing the expected members.
+					'"_tag": "SdkDefault"'
 				: scenario === "invalid-default-path"
 					? "Claude SDK default folder must be a .claude directory"
 					: "Claude config directory must be non-empty";
