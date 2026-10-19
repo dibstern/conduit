@@ -11,6 +11,7 @@ import {
 	mergeTouches,
 	type ProjectionContext,
 	type ProjectionTouch,
+	stampMessage,
 } from "./projectors-effect.js";
 import { SessionRollupProjects } from "./session-rollup-projects.js";
 import { refreshSidebar } from "./sidebar-projection.js";
@@ -298,13 +299,31 @@ export const makeProjectionRunnerEffect = (
 				const { version, touched } = yield* sql.withTransaction(
 					Effect.gen(function* () {
 						const version = yield* nextVersion;
-						const ctx: ProjectionContext = { version, replaying };
+						const deferredMessageStamps = new Set<string>();
+						const ctx: ProjectionContext = {
+							version,
+							replaying,
+							deferredMessageStamps,
+						};
 						for (const event of events) {
+							// Stamping also syncs a fork point's clock, which needs the
+							// row: take a pending stamp before its message is deleted.
+							if (
+								event.type === "message.removed" &&
+								deferredMessageStamps.delete(event.data.messageId)
+							)
+								touches.push(
+									yield* stampMessage([event.data.messageId], { version }),
+								);
 							const matching = projectorsByEventType.get(event.type) ?? [];
 							for (const projector of matching) {
 								touches.push(yield* projector.project(event, ctx));
 							}
 						}
+						// Last, so each message is stamped once, as the batch left it.
+						touches.push(
+							yield* stampMessage([...deferredMessageStamps], { version }),
+						);
 
 						// Projection and this watermark commit together. Enrollment
 						// cursors stay fixed so a newly added projector still starts at 0.
