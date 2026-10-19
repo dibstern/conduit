@@ -88,12 +88,10 @@ for (const viewport of [
 					.filter({ hasText: project.title });
 				await expect(heading).toHaveCount(1);
 				await expect(
-					list
-						.locator(
-							`a[data-session-id="checkout-${project.slug}"] .session-item-context > span`,
-						)
-						.last(),
-				).toHaveText(project.title);
+					list.locator(
+						`#project-tree-rows-${project.slug} a[data-session-id="checkout-${project.slug}"]`,
+					),
+				).toHaveCount(1);
 			}
 			await page.getByTestId("session-scope-chip").click();
 			await expect(page.getByRole("menuitemradio")).toHaveCount(3);

@@ -16,6 +16,8 @@ export const projectState = $state({
 	currentSlug: null as string | null,
 	/** The project the daemon says a new session prefills, on every client. */
 	newSessionProject: null as string | null,
+	/** The user's manual project order, synced through daemon config. */
+	projectOrder: [] as readonly string[],
 });
 
 /** The project a draft will be created in (ADR-0011): its own pick, then the
