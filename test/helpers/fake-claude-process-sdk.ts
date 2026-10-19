@@ -64,6 +64,7 @@ function injectedResetAt(configDir: string | undefined): number | undefined {
 }
 
 export type ProcessMark =
+	| { kind: "pre-warm-joined"; sessionId: string }
 	| {
 			kind: "native-fork";
 			parentSessionId: string;
@@ -853,15 +854,14 @@ function query(params: {
 							.join("");
 			const request = currentRequest(prompt);
 			const userUuid = input.uuid ?? randomUUID();
-			// A held queued input is placed when the SDK reports its start.
-			if (request.includes("correction") || request === "after-mode-change")
-				yield {
-					type: "command_lifecycle",
-					state: "started",
-					command_uuid: userUuid,
-					uuid: randomUUID(),
-					session_id: sessionId,
-				};
+			// The SDK starts every consumed input, including overlapping sends.
+			yield {
+				type: "command_lifecycle",
+				state: "started",
+				command_uuid: userUuid,
+				uuid: randomUUID(),
+				session_id: sessionId,
+			};
 			recordNativeMessage(
 				{
 					type: "user",

@@ -110,10 +110,15 @@ describe("Managed OpenCode stops when idle", () => {
 		fixture: ProcessHarness,
 		browser: Awaited<ReturnType<ProcessHarness["connect"]>>,
 	) {
-		await vi.waitFor(() => expect(livePids(fixture)).toEqual([]), {
-			timeout: 30_000,
-			interval: 250,
-		});
+		await vi.waitFor(
+			async () => {
+				expect(livePids(fixture)).toEqual([]);
+				// Process exit precedes transport cleanup and the stopped broadcast.
+				expect(openStreams(fixture)).toEqual([]);
+				expect(await status(browser)).toBe("stopped");
+			},
+			{ timeout: 30_000, interval: 250 },
+		);
 		return {
 			at: Date.now(),
 			livePids: livePids(fixture),
