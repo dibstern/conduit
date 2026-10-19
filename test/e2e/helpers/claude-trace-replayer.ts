@@ -465,6 +465,15 @@ export function createClaudeTraceReplayer(
 					...(playedTurns.get(querySessionId) ?? []),
 					transcriptTurn,
 				]);
+				// Older captures omit the start signal for the input they consume.
+				if (trace.inputIds.length === 0)
+					yield decodeClaudeSDKMessage({
+						type: "command_lifecycle",
+						state: "started",
+						command_uuid: current.sentIds[0],
+						uuid: randomUUID(),
+						session_id: querySessionId,
+					});
 				for (const [index, line] of trace.lines.entries()) {
 					const hold = trace.holds.get(index);
 					if (hold?.kind === "input") {

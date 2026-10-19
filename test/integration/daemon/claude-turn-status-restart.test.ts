@@ -254,10 +254,10 @@ describe("Claude turn status before the model streams", () => {
 		const [previous] = persisted(harness, sessionId).turnRows;
 		// The fake SDK holds this prompt, then ends it with a bare result.
 		const sent = browser.send(sessionId, "local-work-turn");
+		await harness.waitForMark((mark) => mark.kind === "pre-assistant-held");
 		await vi.waitFor(() => {
-			expect(
-				harness?.marks.some((mark) => mark.kind === "pre-assistant-held"),
-			).toBe(true);
+			if (!harness) throw new Error("Missing harness");
+			expect(persisted(harness, sessionId).session.status).toBe("busy");
 		}, 15_000);
 		const held = persisted(harness, sessionId);
 		writeFileSync(join(harness.root, "release-local-work"), "release");
@@ -326,20 +326,18 @@ describe("Claude turn status before the model streams", () => {
 		const sent = browser
 			.send(sessionId, prompt, 30_000)
 			.catch((error: unknown) => ({ error: String(error) }));
+		await harness.waitForMark(
+			(mark) => mark.kind === "assistant-held" && mark.prompt === prompt,
+		);
 		await vi.waitFor(() => {
 			if (!harness) throw new Error("Missing harness");
 			expect(persisted(harness, sessionId).session.status).toBe("busy");
-			expect(
-				harness.marks.some(
-					(mark) => mark.kind === "emit" && mark.prompt === prompt,
-				),
-			).toBe(true);
 		}, 15_000);
 		await Effect.runPromise(
 			browser.rpc.SwitchPermissionMode({ ...payload, mode: "full" }),
 		);
-		// The SDK's own report of the change: its status message is the one
-		// that used to read as idle.
+		// The SDK's own report of the new mode, rather than the relay's request.
+		// Runtime-event conversion no longer stores the translator rawSource.
 		await vi.waitFor(() => {
 			if (!harness) throw new Error("Missing harness");
 			const db = new Database(harness.daemonStorePath(), { readonly: true });
@@ -347,7 +345,7 @@ describe("Claude turn status before the model streams", () => {
 				expect(
 					db
 						.prepare(
-							"SELECT 1 FROM events WHERE session_id = ? AND type = 'session.permission_mode_changed' AND metadata LIKE '%claude.sdk.translator%'",
+							"SELECT 1 FROM events WHERE session_id = ? AND type = 'session.permission_mode_changed' AND provider = 'claude' AND json_extract(data, '$.mode') = 'full' AND json_extract(metadata, '$.source') IS NOT 'relay'",
 						)
 						.get(sessionId),
 				).toBeDefined();
