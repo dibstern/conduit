@@ -2180,6 +2180,13 @@ export const DesktopSidebarCollapsed: Story = {
 		await expect(canvas.getByTestId("session-bar-attention")).toHaveTextContent(
 			"1",
 		);
+		const badgeStyle = getComputedStyle(
+			canvas.getByTestId("session-bar-attention"),
+		);
+		const expected = new Option().style;
+		expected.backgroundColor =
+			badgeStyle.getPropertyValue("--color-status-ask");
+		expect(badgeStyle.backgroundColor).toBe(expected.backgroundColor);
 	},
 };
 

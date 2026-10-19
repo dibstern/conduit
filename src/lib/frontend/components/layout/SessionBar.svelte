@@ -517,7 +517,7 @@
 		<span>Sessions</span>
 		{#if attentionCount > 0}
 			<Badge
-				variant={sessionViewState.compact ? "ask-solid" : "accent-solid"}
+				variant="ask-solid"
 				size={sessionViewState.compact ? "navigation-count" : "count"}
 				shape="pill"
 				data-testid="session-bar-attention"
