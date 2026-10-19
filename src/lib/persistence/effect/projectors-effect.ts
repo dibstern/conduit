@@ -1086,7 +1086,12 @@ export const makeMessageProjector = defineProjector(() => ({
 						result_bytes = ${rows[0]?.result_bytes ?? null},
 						duration = ${event.data.duration}, status = ${toolStatus}, metadata = ${metadata}, updated_at = ${event.createdAt}, version = ${ctx.version},
 						input = COALESCE(${event.data.input === undefined ? null : encodeJson(event.data.input)}, input)
-					WHERE id = ${event.data.partId}`;
+					WHERE id = ${event.data.partId}
+						-- A completion without a result (the turn-end settle) only closes
+						-- unfinished tools; on a finished one it would erase output that
+						-- already arrived, e.g. via a forked subagent's transcript.
+						AND (${event.data.result == null || event.data.result === "" ? 0 : 1} = 1
+							OR status NOT IN ('completed', 'error'))`;
 				return ids(
 					yield* sql<{
 						id: string;

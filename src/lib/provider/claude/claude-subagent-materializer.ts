@@ -149,12 +149,16 @@ function providerRuntimeEvent<K extends ProviderRuntimeEventType>(
 	type: K,
 	sessionId: string,
 	data: ProviderRuntimeEventPayloadMap[K],
-	options: { readonly provider?: typeof PROVIDER; readonly createdAt: number },
+	options: {
+		readonly provider?: typeof PROVIDER;
+		readonly createdAt: number;
+		readonly startOffset?: number;
+	},
 ) {
 	return {
 		eventId: `evt_${createHash("sha256")
 			.update(
-				`${sessionId}:${type}:${options.createdAt}:${JSON.stringify(data)}`,
+				JSON.stringify([sessionId, type, data, options.startOffset ?? null]),
 			)
 			.digest("hex")
 			.slice(0, 24)}`,
@@ -269,7 +273,7 @@ function appendContentBlockEvents(input: {
 						partId: `${input.messageId}-${input.index}`,
 						text: text.slice(previousOffset ?? 0),
 					},
-					input.eventOptions(),
+					{ ...input.eventOptions(), startOffset: previousOffset ?? 0 },
 				),
 			);
 		}
@@ -301,7 +305,7 @@ function appendContentBlockEvents(input: {
 						"thinking.delta",
 						input.sessionId,
 						{ messageId: input.messageId, partId, text },
-						input.eventOptions(),
+						{ ...input.eventOptions(), startOffset: 0 },
 					),
 				);
 			}
