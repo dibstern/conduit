@@ -38,7 +38,8 @@ describe("Schema Migration", () => {
 					[64, "prompt_provider_reference"],
 					[65, "tool_result_event_refs"],
 					[66, "project_tree_data"],
-					[67, "input_drafts"],
+					[67, "purge_background_shell_sessions"],
+					[68, "input_drafts"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`

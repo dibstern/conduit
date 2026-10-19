@@ -48,7 +48,7 @@ const makeEffectDeps = (
 		sessionId: string,
 		permissionId: string,
 		response: "once",
-	) => Promise<void>,
+	) => Effect.Effect<void, unknown>,
 ) => {
 	const deps = createMockSSEWiringDeps();
 	const effectDeps = {
@@ -152,7 +152,7 @@ describe("handleSSEEventEffect", () => {
 	});
 
 	it("full mode replies once without recording a pending permission", async () => {
-		const replyPermission = vi.fn(async () => {});
+		const replyPermission = vi.fn(() => Effect.void);
 		const { effectDeps } = makeEffectDeps(replyPermission);
 
 		await Effect.runPromise(
@@ -170,7 +170,7 @@ describe("handleSSEEventEffect", () => {
 	});
 
 	it("acceptEdits mode auto-replies to edit permissions", async () => {
-		const replyPermission = vi.fn(async () => {});
+		const replyPermission = vi.fn(() => Effect.void);
 		const { effectDeps } = makeEffectDeps(replyPermission);
 
 		await Effect.runPromise(
@@ -184,7 +184,7 @@ describe("handleSSEEventEffect", () => {
 	});
 
 	it("acceptEdits mode falls back to a card for bash permissions", async () => {
-		const replyPermission = vi.fn(async () => {});
+		const replyPermission = vi.fn(() => Effect.void);
 		const { effectDeps } = makeEffectDeps(replyPermission);
 
 		await Effect.runPromise(
@@ -202,7 +202,7 @@ describe("handleSSEEventEffect", () => {
 	});
 
 	it("auto mode falls back to a card for OpenCode permissions", async () => {
-		const replyPermission = vi.fn(async () => {});
+		const replyPermission = vi.fn(() => Effect.void);
 		const { effectDeps } = makeEffectDeps(replyPermission);
 
 		await Effect.runPromise(
@@ -220,7 +220,7 @@ describe("handleSSEEventEffect", () => {
 	});
 
 	it("defaults to ask mode and preserves the card path", async () => {
-		const replyPermission = vi.fn(async () => {});
+		const replyPermission = vi.fn(() => Effect.void);
 		const { effectDeps } = makeEffectDeps(replyPermission);
 
 		await Effect.runPromise(
@@ -237,9 +237,7 @@ describe("handleSSEEventEffect", () => {
 	});
 
 	it("falls back to a card when the auto-reply rejects", async () => {
-		const replyPermission = vi.fn(async () => {
-			throw new Error("reply failed");
-		});
+		const replyPermission = vi.fn(() => Effect.fail(new Error("reply failed")));
 		const { effectDeps } = makeEffectDeps(replyPermission);
 
 		await Effect.runPromise(
@@ -270,7 +268,7 @@ describe("handleSSEEventEffect", () => {
 	});
 
 	it("falls back to a card when the permission has no resolvable session", async () => {
-		const replyPermission = vi.fn(async () => {});
+		const replyPermission = vi.fn(() => Effect.void);
 		const { effectDeps } = makeEffectDeps(replyPermission);
 
 		await Effect.runPromise(

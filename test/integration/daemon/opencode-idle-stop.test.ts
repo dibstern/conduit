@@ -109,6 +109,7 @@ describe("Managed OpenCode stops when idle", () => {
 	async function idleStopped(
 		fixture: ProcessHarness,
 		browser: Awaited<ReturnType<ProcessHarness["connect"]>>,
+		timeout = 30_000,
 	) {
 		await vi.waitFor(
 			async () => {
@@ -117,7 +118,7 @@ describe("Managed OpenCode stops when idle", () => {
 				expect(openStreams(fixture)).toEqual([]);
 				expect(await status(browser)).toBe("stopped");
 			},
-			{ timeout: 30_000, interval: 250 },
+			{ timeout, interval: 250 },
 		);
 		return {
 			at: Date.now(),
@@ -233,6 +234,129 @@ describe("Managed OpenCode stops when idle", () => {
 		expect(restarted.idle["status"]).toBe("idle");
 		expect(restarted.spawned).toBe(2);
 		expect(restarted.status).toBe("healthy");
+	}, 120_000);
+
+	it("message fallback polling does not extend the managed instance's idle grace", async () => {
+		scenario = "82tn7-idle-message-polling";
+		evidence = { ticket: "conduit-test-82tn.7" };
+		harness = ProcessHarness.create({
+			managedOpenCode: true,
+			managedOpenCodeId: instanceId,
+			autoStartOpenCode: true,
+		});
+		const fixture = harness;
+		expect(fixture.proof().buildIdentity.server).toBe("source");
+		// Leave enough time for SSE suppression to expire before idle shutdown.
+		const pollingGraceMs = 6_000;
+		await fixture.restart({
+			opencodeIdleTimeoutMs: pollingGraceMs,
+			startupTimeoutMs: 60_000,
+		});
+		const browser = await fixture.connect();
+		const sessionId = await browser.createSession(
+			"Background message reads",
+			instanceId,
+			"opencode",
+		);
+		const cursor = fixture.opencodeRequests().length;
+		const idleSince = Date.now();
+		const backgroundRequests = () => fixture.opencodeRequests().slice(cursor);
+		const messageReads = () =>
+			backgroundRequests().filter(
+				({ method, url }) =>
+					method === "GET" &&
+					url.split("?")[0] === `/session/${sessionId}/message`,
+			);
+		const fallbackPollingObserved = () => {
+			const reads = messageReads();
+			const first = reads[0];
+			const last = reads.at(-1);
+			return (
+				reads.length >= 3 &&
+				first !== undefined &&
+				last !== undefined &&
+				last.at - first.at >= 2 * 750
+			);
+		};
+		const messageReadsUseSessionDirectory = () =>
+			messageReads().every(({ directory, url }) => {
+				const queryDirectory = new URL(
+					url,
+					"http://opencode.test",
+				).searchParams.get("directory");
+				return (
+					(queryDirectory ??
+						(directory ? decodeURIComponent(directory) : undefined)) ===
+					fixture.projectDir
+				);
+			});
+		let stopped: Awaited<ReturnType<typeof idleStopped>> | undefined;
+		let stayedStopped = false;
+		try {
+			// Keeping the session selected keeps the 750ms fallback poller alive.
+			// No user action follows creation, so these reads must not renew demand.
+			await vi.waitFor(() => expect(fallbackPollingObserved()).toBe(true), {
+				timeout: pollingGraceMs,
+				interval: 100,
+			});
+			stopped = await idleStopped(
+				fixture,
+				browser,
+				Math.max(1, 2 * pollingGraceMs + 1_000 - (Date.now() - idleSince)),
+			);
+			await vi.waitFor(
+				async () => expect(await status(browser)).toBe("stopped"),
+				{
+					timeout: Math.max(
+						1,
+						2 * pollingGraceMs + 1_000 - (Date.now() - idleSince),
+					),
+				},
+			);
+			stopped = { ...stopped, status: await status(browser) };
+			expect(stopped).toMatchObject({
+				livePids: [],
+				openStreams: [],
+				status: "stopped",
+				spawned: 1,
+			});
+			expect(messageReadsUseSessionDirectory()).toBe(true);
+			expect(backgroundRequests().every(({ method }) => method === "GET")).toBe(
+				true,
+			);
+			await sleep(2 * 750);
+			stayedStopped =
+				spawned(fixture).length === 1 &&
+				livePids(fixture).length === 0 &&
+				(await status(browser)) === "stopped";
+			expect(stayedStopped).toBe(true);
+		} finally {
+			evidence["backgroundRequests"] = backgroundRequests();
+			mkdirSync("test-results", { recursive: true });
+			writeFileSync(
+				"test-results/82tn7-idle-message-polling.json",
+				JSON.stringify(
+					{
+						ticket: "conduit-test-82tn.7",
+						server: fixture.proof().buildIdentity.server,
+						session: "<S1>",
+						project: "<ROOT>",
+						fallbackPollingObserved: fallbackPollingObserved(),
+						messageReadsUseSessionDirectory: messageReadsUseSessionDirectory(),
+						noNewUserDemand: backgroundRequests().every(
+							({ method }) => method === "GET",
+						),
+						stoppedWithinGraceWindow: stopped !== undefined,
+						noProcessesOrStreamsRemain:
+							stopped?.livePids.length === 0 &&
+							stopped.openStreams.length === 0,
+						stayedStoppedWhileViewed: stayedStopped,
+					},
+					null,
+					2,
+				),
+			);
+		}
 	}, 120_000);
 
 	it("is held up by a busy session, a pending permission and a pending question, each on its own", async () => {

@@ -65,10 +65,8 @@ run "E2E visual tests"         pnpm exec playwright test --config test/e2e/playw
 # --- Storybook ---
 run "Storybook build"          pnpm storybook:build
 run "Storybook interaction and a11y tests" pnpm test:storybook
-run "Storybook visual tests"   pnpm exec playwright test --config test/visual/playwright.config.ts
-
-# --- Strict Darwin visual fidelity (local pre-release gate) ---
-run "Strict Darwin Storybook visual tests" pnpm test:storybook-visual:strict
+# Strict only: the tolerant pass found almost nothing strict missed. Reuses the build above.
+run "Strict Darwin Storybook visual tests" env VISUAL_STRICT=1 pnpm exec playwright test --config test/visual/playwright.config.ts
 
 # --- Summary ---
 echo ""

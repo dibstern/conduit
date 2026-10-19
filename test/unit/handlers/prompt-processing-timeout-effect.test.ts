@@ -4,7 +4,9 @@ import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
@@ -41,6 +43,7 @@ import {
 	makeMockOpenCodeModelService,
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
+	makeOpenCodeInstancesStub,
 	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
@@ -74,10 +77,13 @@ describe("prompt processing timeouts through Effect state", () => {
 		});
 		const persistence = makePersistenceEffectLayer(":memory:", "test-project");
 		const layer = Layer.provideMerge(
-			ProviderTurnServiceLive,
+			Layer.provideMerge(ProviderTurnServiceLive, SessionWorkspaceLive),
 			Layer.mergeAll(
 				AlertsLive,
 				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(OpenCodeInstancesTag)(
+					makeOpenCodeInstancesStub({ opencode: client }),
+				),
 				Layer.succeed(OpenCodeModelServiceTag)(
 					makeMockOpenCodeModelService(MOCK_OPENCODE_GPT4_CATALOG),
 				),
@@ -141,6 +147,9 @@ describe("prompt processing timeouts through Effect state", () => {
 			const baseLayer = Layer.mergeAll(
 				AlertsLive,
 				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(OpenCodeInstancesTag)(
+					makeOpenCodeInstancesStub({ opencode: client }),
+				),
 				Layer.succeed(WebSocketHandlerTag)(ws),
 				Layer.succeed(LoggerTag)(createSilentLogger()),
 				Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
@@ -157,7 +166,10 @@ describe("prompt processing timeouts through Effect state", () => {
 				Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
 				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({})),
 			);
-			const layer = Layer.provideMerge(ProviderTurnServiceLive, baseLayer);
+			const layer = Layer.provideMerge(
+				Layer.provideMerge(ProviderTurnServiceLive, SessionWorkspaceLive),
+				baseLayer,
+			);
 
 			return Effect.gen(function* () {
 				yield* startProcessingTimeout(

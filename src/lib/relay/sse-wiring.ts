@@ -62,7 +62,7 @@ import {
 	isQuestionAskedEvent,
 	isSessionErrorEvent,
 } from "./opencode-events.js";
-import type { SSEStreamEvents } from "./sse-stream.js";
+import type { OpenCodeEventContext, SSEStreamEvents } from "./sse-stream.js";
 
 // Built once: envelope decoder for the fail-closed ingestion gate (see the
 // consumer "event" handler). Returns Result<OpenCodeEvent, SchemaError>.
@@ -111,14 +111,14 @@ export interface SSEWiringDeps {
 		sessionId: string,
 		permissionId: string,
 		response: "once",
-	) => Promise<void>;
+	) => Effect.Effect<void, unknown>;
 	/** Effect-native OpenCode runtime ingress owned by the relay runtime. */
 	opencodeRuntimeIngress?: {
 		onSSEEventEffect(
 			event: SSEEvent,
 			sessionId: string | undefined,
 			providerInstanceId: string,
-			providerProcessId?: string,
+			context?: OpenCodeEventContext,
 		): Effect.Effect<OpenCodeRuntimeIngressResult>;
 		onReconnect(providerInstanceId?: string): Effect.Effect<void, SqlError>;
 		onInstanceStopped?(
@@ -393,7 +393,7 @@ const recordSSEEventStartEffect = (
 	deps: SSEWiringDeps,
 	event: SSEEvent,
 	eventSessionId: string | undefined,
-	providerProcessId?: string,
+	context?: OpenCodeEventContext,
 ) =>
 	Effect.gen(function* () {
 		yield* Effect.sync(() =>
@@ -404,7 +404,7 @@ const recordSSEEventStartEffect = (
 					event,
 					eventSessionId,
 					deps.providerInstanceId,
-					providerProcessId,
+					context,
 				)
 			: undefined;
 
@@ -675,16 +675,17 @@ const handleSSEEventAfterPendingEffect = (
 export const handleSSEEventEffect = (
 	deps: SSEWiringDeps,
 	event: SSEEvent,
-	providerProcessId?: string,
+	context?: OpenCodeEventContext,
 ) =>
 	Effect.gen(function* () {
 		const pendingInteractions = yield* PendingInteractionServiceTag;
+		const { providerProcessId } = context ?? {};
 		const eventSessionId = extractSessionId(event);
 		const ingested = yield* recordSSEEventStartEffect(
 			deps,
 			event,
 			eventSessionId,
-			providerProcessId,
+			context,
 		);
 		const isPrompt =
 			event.type === "permission.asked" ||
@@ -722,11 +723,7 @@ export const handleSSEEventEffect = (
 								"once",
 								providerProcessId,
 							)
-						: reply
-							? Effect.tryPromise(() =>
-									reply(input.sessionId, input.requestId, "once"),
-								)
-							: undefined;
+						: reply?.(input.sessionId, input.requestId, "once");
 				const replied = response ? yield* Effect.result(response) : undefined;
 				if (replied?._tag === "Success") {
 					autoApproved = true;
@@ -783,7 +780,7 @@ export const handleSSEEventEffect = (
 	});
 
 interface SSEConsumerCallbacks {
-	handleEvent(event: SSEEvent, providerProcessId?: string): void;
+	handleEvent(event: SSEEvent, context?: OpenCodeEventContext): void;
 	onReconnect?(): void;
 	/** The instance's lifecycle state, for the banner on every tab. */
 	onConnectionStatus(
@@ -823,7 +820,7 @@ function wireSSEConsumerWithCallbacks(
 	// a warning but ALWAYS forward the raw event — a hard fail-closed drop would
 	// silently lose live traffic (e.g. a future server event) and regress today's
 	// pass-through behavior. Field-level consumption stays guarded per translator.
-	consumer.on("event", (event: unknown, providerProcessId?: string) => {
+	consumer.on("event", (event: unknown, context?: OpenCodeEventContext) => {
 		if (Result.isFailure(decodeOpenCodeEvent(event))) {
 			const type =
 				typeof (event as { type?: unknown } | null)?.type === "string"
@@ -833,7 +830,7 @@ function wireSSEConsumerWithCallbacks(
 				`SSE event failed OpenCodeEventSchema decode (forwarded raw): type=${type}`,
 			);
 		}
-		callbacks.handleEvent(event as SSEEvent, providerProcessId);
+		callbacks.handleEvent(event as SSEEvent, context);
 	});
 }
 
@@ -878,13 +875,13 @@ export const wireSSEConsumerEffect = (
 						}),
 					);
 				},
-				handleEvent: (event, providerProcessId) => {
+				handleEvent: (event, context) => {
 					if (isPtyEvent(event)) {
 						deps.onPtysChanged?.(deps.providerInstanceId);
 						return;
 					}
 					runFork(
-						handleSSEEventEffect(deps, event, providerProcessId).pipe(
+						handleSSEEventEffect(deps, event, context).pipe(
 							Effect.catchCause((cause) =>
 								Effect.sync(() =>
 									deps.log.warn(
