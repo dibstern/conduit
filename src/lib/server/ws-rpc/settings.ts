@@ -1,4 +1,4 @@
-import { Effect, Ref } from "effect";
+import { Effect, Option, Ref } from "effect";
 import {
 	ClaudeSettingsResolveError,
 	ClaudeSettingsTrustBoundaryError,
@@ -11,6 +11,7 @@ import { DEFAULT_WORKTREE_CLEANUP } from "../../contracts/worktree.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import {
 	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
+	DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 } from "../../daemon/config-persistence.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
@@ -19,7 +20,15 @@ import {
 	commitDaemonRuntimeConfig,
 	DaemonConfigRefTag,
 } from "../../domain/daemon/Services/daemon-config-ref.js";
-import { publishInstanceStatusChanged } from "../../domain/daemon/Services/daemon-pubsub.js";
+import {
+	DaemonEventBusTag,
+	publishInstanceStatusChanged,
+} from "../../domain/daemon/Services/daemon-pubsub.js";
+import {
+	getProject,
+	ProjectRegistryTag,
+	updateProject,
+} from "../../domain/daemon/Services/project-registry-service.js";
 import { Usage } from "../../domain/daemon/Services/usage.js";
 import {
 	cleanUpWorktreesNow,
@@ -40,24 +49,56 @@ import { saveRelaySettings } from "../../relay/relay-settings.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 export const settingsHandlers = {
-	GetWorktreeCleanupSetting: (_request) =>
+	GetWorktreeCleanupSetting: ({ projectSlug }) =>
 		Effect.gen(function* () {
 			const config = yield* Ref.get(yield* DaemonConfigRefTag);
+			if (projectSlug === undefined)
+				return { global: config.worktreeCleanup ?? DEFAULT_WORKTREE_CLEANUP };
+			const registry = yield* Effect.serviceOption(ProjectRegistryTag);
+			if (Option.isNone(registry))
+				return yield* new WsRpcError({
+					message: "Project worktree cleanup settings require the daemon",
+				});
+			const project = yield* getProject(projectSlug).pipe(
+				Effect.provideService(ProjectRegistryTag, registry.value),
+			);
 			return {
-				worktreeCleanup: config.worktreeCleanup ?? DEFAULT_WORKTREE_CLEANUP,
+				global: config.worktreeCleanup ?? DEFAULT_WORKTREE_CLEANUP,
+				project: project.worktreeCleanup ?? null,
 			};
-		}),
-	SetWorktreeCleanupSetting: ({ worktreeCleanup }) =>
+		}).pipe(Effect.catch(mapRpcFailure("GetWorktreeCleanupSetting"))),
+	SetWorktreeCleanupSetting: (request) =>
 		Effect.gen(function* () {
-			yield* commitDaemonRuntimeConfig((config) => ({
-				...config,
-				worktreeCleanup,
-			}));
+			if (request.scope === "global") {
+				yield* commitDaemonRuntimeConfig((config) => ({
+					...config,
+					worktreeCleanup: request.rules,
+				}));
+			} else {
+				const registry = yield* Effect.serviceOption(ProjectRegistryTag);
+				const bus = yield* Effect.serviceOption(DaemonEventBusTag);
+				if (Option.isNone(registry) || Option.isNone(bus))
+					return yield* new WsRpcError({
+						message: "Project worktree cleanup settings require the daemon",
+					});
+				yield* updateProject(request.projectSlug, {
+					worktreeCleanup: request.override ?? undefined,
+				}).pipe(
+					Effect.provideService(ProjectRegistryTag, registry.value),
+					Effect.provideService(DaemonEventBusTag, bus.value),
+				);
+			}
 			const persistence = yield* ConfigPersistenceTag;
 			yield* persistence.requestSave;
 			yield* persistence.flush;
-			yield* requestWorktreeCleanup();
-			return { worktreeCleanup };
+			yield* requestWorktreeCleanup(
+				request.scope === "project" ? request.projectSlug : undefined,
+			);
+			const config = yield* Ref.get(yield* DaemonConfigRefTag);
+			return {
+				global: config.worktreeCleanup ?? DEFAULT_WORKTREE_CLEANUP,
+				...(request.scope === "project" ? { project: request.override } : {}),
+			};
 		}).pipe(Effect.catch(mapRpcFailure("SetWorktreeCleanupSetting"))),
 	CleanUpWorktreesNow: ({ projectSlug }) => cleanUpWorktreesNow(projectSlug),
 	GetAutoSettleSetting: (_request) =>
@@ -96,6 +137,32 @@ export const settingsHandlers = {
 			yield* persistence.flush;
 			return { autoArchiveAfterDays: days };
 		}).pipe(Effect.catch(mapRpcFailure("SetAutoArchiveSetting"))),
+	GetAutoDeleteArchivedSetting: (_request) =>
+		Effect.gen(function* () {
+			const config = yield* Ref.get(yield* DaemonConfigRefTag);
+			return {
+				autoDeleteArchivedAfterDays:
+					config.autoDeleteArchivedAfterDays === undefined
+						? DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS
+						: config.autoDeleteArchivedAfterDays,
+			};
+		}),
+	SetAutoDeleteArchivedSetting: ({ autoDeleteArchivedAfterDays: days }) =>
+		Effect.gen(function* () {
+			if (days !== null && (!Number.isInteger(days) || days < 1 || days > 90))
+				return yield* new WsRpcError({
+					message:
+						"Archived retention days must be an integer from 1 to 90, or Never",
+				});
+			yield* commitDaemonRuntimeConfig((config) => ({
+				...config,
+				autoDeleteArchivedAfterDays: days,
+			}));
+			const persistence = yield* ConfigPersistenceTag;
+			yield* persistence.requestSave;
+			yield* persistence.flush;
+			return { autoDeleteArchivedAfterDays: days };
+		}).pipe(Effect.catch(mapRpcFailure("SetAutoDeleteArchivedSetting"))),
 	SetAutoSettleSetting: (request) =>
 		Effect.gen(function* () {
 			const days = request.autoSettleAfterDays;
@@ -252,6 +319,8 @@ export const settingsHandlers = {
 	| "SetAutoSettleSetting"
 	| "GetAutoArchiveSetting"
 	| "SetAutoArchiveSetting"
+	| "GetAutoDeleteArchivedSetting"
+	| "SetAutoDeleteArchivedSetting"
 	| "GetWorktreeCleanupSetting"
 	| "SetWorktreeCleanupSetting"
 	| "CleanUpWorktreesNow"

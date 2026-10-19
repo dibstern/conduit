@@ -362,6 +362,7 @@ process.exit(result.status ?? 1);
 				},
 			],
 			removeWorktrees: true,
+			onDelete: "ask",
 		});
 		await remove(session.id);
 		expect(existsSync(session.path)).toBe(false);
@@ -512,6 +513,7 @@ process.exit(result.status ?? 1);
 		expect(await inspect(fork.sessionId)).toEqual({
 			worktrees: [],
 			removeWorktrees: true,
+			onDelete: "ask",
 		});
 		await remove(parent.id, true);
 		expect(parent.path && existsSync(parent.path)).toBe(true);
@@ -560,6 +562,7 @@ process.exit(result.status ?? 1);
 		expect(await inspect(session.id)).toEqual({
 			worktrees: [],
 			removeWorktrees: true,
+			onDelete: "ask",
 		});
 		await remove(session.id, true);
 		expect(existsSync(existing)).toBe(true);
@@ -581,6 +584,7 @@ process.exit(result.status ?? 1);
 		expect(await inspect(session.id)).toEqual({
 			worktrees: [],
 			removeWorktrees: true,
+			onDelete: "ask",
 		});
 		await remove(session.id, true);
 		expect(existsSync(path)).toBe(true);

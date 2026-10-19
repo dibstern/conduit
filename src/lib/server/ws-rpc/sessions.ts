@@ -119,9 +119,18 @@ export const sessionsHandlers = {
 			if (!(yield* read.getSession(request.sessionId)))
 				return yield* new WsRpcError({ message: "Session not found." });
 			const plan = yield* prepareSessionWorktreeDeletion(request.sessionId);
+			const config = yield* ConfigTag;
+			// The daemon read resolves an unreadable project to "off", which asks.
+			const rules = config.getWorktreeCleanup
+				? yield* config.getWorktreeCleanup()
+				: "off";
 			return {
 				worktrees: plan.worktrees,
 				removeWorktrees: plan.removeWorktrees,
+				onDelete:
+					rules !== "off" && rules.onDelete
+						? ("remove" as const)
+						: ("ask" as const),
 			};
 		}).pipe(Effect.catch(mapRpcFailure("InspectSessionWorktrees"))),
 	RenameSessionBranch: (request) =>

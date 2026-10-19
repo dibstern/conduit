@@ -39,6 +39,7 @@ import { ProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Serv
 import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import { resolveOrphanedClaudePermissions } from "../../../src/lib/domain/relay/Services/resolve-orphaned-claude-permissions.js";
 import {
+	AgentLivenessTag,
 	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
@@ -619,7 +620,7 @@ describe("shared-store relay project scope", () => {
 		const rows = await store.runtime.runPromise(
 			readColdWorktreeCleanupCandidates(
 				{ slug: A, folders: [store.root] },
-				{ ...DEFAULT_WORKTREE_CLEANUP, whenMerged: true },
+				DEFAULT_WORKTREE_CLEANUP,
 				NOW,
 			),
 		);
@@ -682,7 +683,11 @@ describe("shared-store relay project scope", () => {
 		};
 		await store.runtime.runPromise(
 			cleanUpProjectWorktrees(
-				Effect.succeed({ ...DEFAULT_WORKTREE_CLEANUP, onSettle: "any" }),
+				Effect.succeed({
+					...DEFAULT_WORKTREE_CLEANUP,
+					onSettle: "keep",
+					settledAfterDays: 0,
+				}),
 				Effect.succeed([]),
 				NOW,
 			).pipe(
@@ -697,6 +702,7 @@ describe("shared-store relay project scope", () => {
 				),
 				Effect.provideService(WebSocketHandlerTag, makeMockWebSocketHandler()),
 				Effect.provideService(BackgroundLivenessTag, () => undefined),
+				Effect.provideService(AgentLivenessTag, () => Effect.succeed(false)),
 			),
 		);
 		record(

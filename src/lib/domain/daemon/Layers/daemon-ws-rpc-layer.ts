@@ -88,7 +88,7 @@ import {
 	allProjects,
 	broadcastProjectList,
 	type ProjectRegistryTag,
-	type ProjectSaveLockTag,
+	ProjectSaveLockTag,
 	projectInfos,
 	removeProjectFromEffectRegistry,
 	resolveSessionMode,
@@ -340,13 +340,14 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 						"projects",
 						Effect.gen(function* () {
 							const projects = yield* projectInfos;
-							const { newSessionProject } = yield* Ref.get(
+							const { newSessionProject, projectOrder } = yield* Ref.get(
 								yield* DaemonConfigRefTag,
 							);
 							return {
 								_tag: "projects" as const,
 								projects,
 								...(newSessionProject !== undefined && { newSessionProject }),
+								...(projectOrder !== undefined && { projectOrder }),
 							};
 						}),
 					),
@@ -602,6 +603,27 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 							: new WsRpcError({ message: formatErrorDetail(error) }),
 					),
 				),
+			SetProjectOrder: (request) =>
+				run(
+					Effect.flatMap(ProjectSaveLockTag, (lock) =>
+						lock.withPermits(1)(
+							Effect.gen(function* () {
+								const registered = new Set(
+									(yield* allProjects).map(({ slug }) => slug),
+								);
+								const projectOrder = [...new Set(request.projectOrder)].filter(
+									(slug) => registered.has(slug),
+								);
+								yield* commitDaemonRuntimeConfig((current) => ({
+									...current,
+									projectOrder,
+								}));
+								yield* PubSub.publish(bus, DaemonEvent.ProjectsChanged());
+								yield* requestConfigSave;
+							}),
+						),
+					),
+				),
 			RemoveProject: (request) =>
 				run(
 					Effect.gen(function* () {
@@ -725,6 +747,10 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				run(wsRpcHandlers.GetAutoSettleSetting(request)),
 			SetAutoSettleSetting: (request) =>
 				run(wsRpcHandlers.SetAutoSettleSetting(request)),
+			GetAutoDeleteArchivedSetting: (request) =>
+				run(wsRpcHandlers.GetAutoDeleteArchivedSetting(request)),
+			SetAutoDeleteArchivedSetting: (request) =>
+				run(wsRpcHandlers.SetAutoDeleteArchivedSetting(request)),
 			GetWorktreeCleanupSetting: (request) =>
 				run(wsRpcHandlers.GetWorktreeCleanupSetting(request)),
 			SetWorktreeCleanupSetting: (request) =>

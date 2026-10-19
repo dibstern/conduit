@@ -132,6 +132,10 @@ export function makePersistenceStoreLayer(
 			// WAL's NORMAL sync, explicit rather than better-sqlite3's build default.
 			yield* sql`PRAGMA synchronous = NORMAL`;
 			yield* sql`PRAGMA mmap_size = 1073741824`;
+			// Every INSERT ... RETURNING buffers its rows in a temp b-tree. On the
+			// default file temp store that opens a temp file per statement, which
+			// made event appends ~5x slower than the insert itself.
+			yield* sql`PRAGMA temp_store = MEMORY`;
 			yield* sql`PRAGMA analysis_limit = 400`;
 			yield* sql`PRAGMA optimize = 0x10002`;
 			const optimize = sql`PRAGMA optimize`.pipe(

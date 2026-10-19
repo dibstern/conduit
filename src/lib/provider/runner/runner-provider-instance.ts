@@ -103,6 +103,7 @@ export interface RunnerProviderInstanceDeps {
 	readonly daemonConfigDir?: string;
 	readonly onBackgroundTask?: (input: BackgroundTaskTransition) => void;
 	readonly ensureChildSession?: ClaudeEventPersistEffect["ensureClaudeSubagentSession"];
+	readonly readSubagentTranscript?: ClaudeEventPersistEffect["readClaudeSubagentTranscript"];
 	readonly persistUserMessage?: ClaudeEventPersistEffect["persistUserMessage"];
 }
 
@@ -306,6 +307,10 @@ export class RunnerProviderInstance implements ProviderInstance {
 		return this.driver.discoverEffect(workspaceRoot, account, options);
 	}
 
+	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
+		return this.runner.hasLiveProcessEffect(sessionId);
+	}
+
 	getNativeSessionEffect(
 		sessionId: string,
 	): Effect.Effect<ProviderNativeSession | undefined> {
@@ -463,11 +468,22 @@ export class RunnerProviderInstance implements ProviderInstance {
 						this.preWarmFibers,
 						input.sessionId,
 					);
-					return Option.isSome(existing)
-						? existing.value
-						: runPreWarm(input.sessionId, Effect.interruptible(preWarm), {
-								onlyIfMissing: true,
+					if (Option.isSome(existing)) {
+						if (
+							process.env["NODE_ENV"] === "test" &&
+							process.env["CONDUIT_TEST_UPGRADE_SINK_PROOF"] === "1" &&
+							process.connected
+						)
+							process.send?.({
+								channel: "conduit-process-test",
+								kind: "pre-warm-joined",
+								sessionId: input.sessionId,
 							});
+						return existing.value;
+					}
+					return runPreWarm(input.sessionId, Effect.interruptible(preWarm), {
+						onlyIfMissing: true,
+					});
 				});
 				const exit = yield* restore(Fiber.await(fiber)).pipe(
 					Effect.onInterrupt(() => Fiber.interrupt(fiber)),
@@ -750,6 +766,22 @@ export class RunnerProviderInstance implements ProviderInstance {
 					return yield* this.placeUserMessageEffect(output.input).pipe(
 						Effect.mapError((cause) => sessionFailure(output.type, cause)),
 					);
+				case "read-subagent-transcript": {
+					const persist = yield* Effect.serviceOption(
+						ClaudeEventPersistEffectTag,
+					);
+					const readTranscript =
+						this.deps.readSubagentTranscript ??
+						(persist._tag === "Some"
+							? persist.value.readClaudeSubagentTranscript
+							: undefined);
+					const subagentTranscript = yield* readTranscript?.(
+						output.childSessionId,
+					).pipe(
+						Effect.mapError((cause) => sessionFailure(output.type, cause)),
+					) ?? Effect.succeed({ messages: [], parts: [] });
+					return { subagentTranscript };
+				}
 				case "ensure-subagent-session": {
 					const persist = yield* Effect.serviceOption(
 						ClaudeEventPersistEffectTag,
@@ -768,7 +800,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 				}
 			}
 		}).pipe(
-			Effect.as({}),
+			Effect.map((reply) => reply ?? {}),
 			Effect.catchDefect((cause) =>
 				Effect.fail(sessionFailure(output.type, cause)),
 			),

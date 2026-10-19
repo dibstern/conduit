@@ -291,10 +291,7 @@ it("commits same-batch late hidden content and drops echoes after the upstream c
 					type: "message.removed",
 					provider: "opencode",
 					createdAt: targetRemoval.createdAt,
-					metadata: {
-						providerRuntimeEventId: targetRemoval.eventId,
-						rawSource: targetRemoval.rawSource.kind,
-					},
+					metadata: {},
 				});
 			for (const echo of staleEvents)
 				expect

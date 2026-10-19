@@ -271,19 +271,9 @@ describe("Cursor text turns through the built daemon and detached runner", () =>
 		expect(firstState.eventCounts["text.delta"]).toBeGreaterThan(0);
 		expect(firstState.eventCounts["turn.completed"]).toBe(1);
 		expect(firstState.interactions).toBe(0);
-		const capturedTerminal = traceRows(
-			resolve("test/fixtures/cursor-sdk-traces/basic.jsonl"),
-		).find(({ kind }) => kind === "wait.result")?.data as Record<
-			string,
-			unknown
-		>;
-		expect(
-			firstState.events.some(
-				({ metadata }) =>
-					metadata.providerRefs?.["providerRequestId"] ===
-					capturedTerminal["requestId"],
-			),
-		).toBe(true);
+		expect(firstState.events).toContainEqual(
+			expect.objectContaining({ type: "turn.completed", metadata: {} }),
+		);
 		const firstHistory = await browser.history(id);
 		expect(
 			firstHistory
@@ -765,7 +755,10 @@ describe("Cursor text turns through the built daemon and detached runner", () =>
 		);
 		await expectTurns(fixture, id, ["completed"]);
 		expect(snapshot(fixture, id).eventCounts["thinking.delta"]).toBe(1);
-		expect(fixture.logTail).toContain("Skipped malformed Cursor delta update");
+		// Detached runners write their diagnostics before completing the turn.
+		expect(
+			readFileSync(join(fixture.configDir, "runners.log"), "utf8"),
+		).toContain("Skipped malformed Cursor delta update");
 		record("decode-failure-skipped-reported", {
 			malformedUpdateSkipped: true,
 			laterTextPreserved: true,

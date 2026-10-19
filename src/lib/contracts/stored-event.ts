@@ -243,6 +243,8 @@ export interface EventMetadata {
 		readonly parentProviderTaskId?: string;
 	};
 	readonly synthetic?: boolean;
+	readonly inherited?: boolean;
+	readonly providerCreatedAt?: number;
 	readonly source?: string;
 	readonly sseBatchId?: string;
 	readonly sseBatchSize?: number;
@@ -279,6 +281,8 @@ export const EventMetadataSchema = Schema.Struct({
 		}),
 	),
 	synthetic: Schema.optionalKey(Schema.Boolean),
+	inherited: Schema.optionalKey(Schema.Boolean),
+	providerCreatedAt: Schema.optionalKey(Schema.Number),
 	source: Schema.optionalKey(Schema.String),
 	sseBatchId: Schema.optionalKey(Schema.String),
 	sseBatchSize: Schema.optionalKey(Schema.Number),

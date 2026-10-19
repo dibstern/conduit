@@ -765,11 +765,21 @@ function eventOptions(
 }
 
 function eventMetadata(event: ProviderRuntimeEvent): EventMetadata {
+	// OpenCode compaction has no message id in its payload. Replay uses this
+	// reference to attach the divider to the summary message.
+	const providerMessageId =
+		event.type === "session.compaction" && event.providerId === "opencode"
+			? event.providerRefs.providerMessageId
+			: undefined;
 	return {
 		...runtimeMetadata(event.metadata),
-		providerRuntimeEventId: event.eventId,
-		rawSource: event.rawSource.kind,
-		providerRefs: providerRefsMetadata(event.providerRefs),
+		// Only these two kinds have readers: projectors branch on opencode.rest,
+		// and subagent persistence and its verify script on the transcript kind.
+		...(event.rawSource.kind === "opencode.rest" ||
+		event.rawSource.kind === "claude.subagent.transcript"
+			? { rawSource: event.rawSource.kind }
+			: {}),
+		...(providerMessageId ? { providerRefs: { providerMessageId } } : {}),
 	};
 }
 
@@ -959,30 +969,6 @@ function stringField(value: unknown): string | undefined {
 
 function numberFieldValue(value: unknown): number | undefined {
 	return typeof value === "number" ? value : undefined;
-}
-
-function providerRefsMetadata(
-	refs: ProviderRuntimeEvent["providerRefs"],
-): NonNullable<EventMetadata["providerRefs"]> {
-	return {
-		...(refs.providerSessionId
-			? { providerSessionId: refs.providerSessionId }
-			: {}),
-		...(refs.providerMessageId
-			? { providerMessageId: refs.providerMessageId }
-			: {}),
-		...(refs.providerTurnId ? { providerTurnId: refs.providerTurnId } : {}),
-		...(refs.providerToolUseId
-			? { providerToolUseId: refs.providerToolUseId }
-			: {}),
-		...(refs.providerRequestId
-			? { providerRequestId: refs.providerRequestId }
-			: {}),
-		...(refs.providerTaskId ? { providerTaskId: refs.providerTaskId } : {}),
-		...(refs.parentProviderTaskId
-			? { parentProviderTaskId: refs.parentProviderTaskId }
-			: {}),
-	};
 }
 
 export function requestId(

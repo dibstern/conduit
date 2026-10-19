@@ -60,6 +60,7 @@ import type {
 } from "../../../src/lib/domain/relay/Services/services.js";
 // Batch 2 imports
 import {
+	AgentLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OpenCodeModelServiceLive,
@@ -343,6 +344,7 @@ const persistentHandlerPersistence = Layer.merge(
 		persistEvents: () => Effect.void,
 		persistUserMessage: () => Effect.void,
 		ensureClaudeSubagentSession: () => Effect.void,
+		readClaudeSubagentTranscript: () => Effect.succeed({ messages: [], parts: [] }),
 	} satisfies ClaudeEventPersistEffect),
 );
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
@@ -1438,6 +1440,7 @@ function makeSessionLifecycleLayer(options?: {
 			providers: [{ id: "openai", name: "OpenAI", models: [{ id: "gpt-4", name: "GPT-4" }] }],
 		}));
 	return Layer.mergeAll(
+		Layer.succeed(AgentLivenessTag)(() => Effect.succeed(false)),
 		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		openCodeModelLayer(client),
 		Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [{ id: "sonnet", name: "Sonnet", providerId: "claude" }] })) })),

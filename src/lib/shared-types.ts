@@ -265,6 +265,8 @@ export interface SessionGit {
 	merged?: boolean;
 	/** Full branch head incorporated into the default branch. */
 	mergedHead?: string;
+	/** Epoch milliseconds when the branch head reached the default branch. */
+	mergedAt?: number;
 	operation?: "rebase" | "merge" | "cherry-pick" | "revert" | "bisect";
 	/** Git and shared Effective Folders in Project Folder order. */
 	folders?: readonly SessionFolderGit[];
@@ -279,6 +281,7 @@ const GitStatusSchema = Schema.Struct({
 	behind: Schema.optionalKey(Schema.Number),
 	merged: Schema.optionalKey(Schema.Boolean),
 	mergedHead: Schema.optionalKey(Schema.String),
+	mergedAt: Schema.optionalKey(Schema.Number),
 	operation: Schema.optionalKey(
 		Schema.Literals(["rebase", "merge", "cherry-pick", "revert", "bisect"]),
 	),
@@ -310,6 +313,8 @@ export const SessionInfoSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	createdAt: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
 	updatedAt: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
+	/** Latest human-authored message in this session alone, in epoch milliseconds. */
+	lastUserMessageAt: Schema.optional(Schema.Number),
 	messageCount: Schema.optional(Schema.Number),
 	processing: Schema.optional(Schema.Boolean),
 	goalState: Schema.optional(SessionGoalChangedPayloadSchema),
@@ -570,6 +575,7 @@ export type RepositoryIdentity = typeof RepositoryIdentitySchema.Type;
 export interface ProjectInfo {
 	slug: string;
 	title: string;
+	addedAt?: number;
 	/** folders[0] is the main folder, where sessions run. */
 	folders: readonly [string, ...string[]];
 	setupScript?: string | undefined;

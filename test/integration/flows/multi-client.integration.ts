@@ -75,10 +75,14 @@ describe("Integration: Multi-Client", () => {
 			timeout: 5000,
 			predicate: (msg) => {
 				const item = msg["item"] as Record<string, unknown> | undefined;
+				const model = item?.["model"] as
+					| { model?: string; provider?: string }
+					| undefined;
 				return (
 					msg["_tag"] === "upsert" &&
 					item?.["id"] === sessionId &&
-					item?.["model"] !== undefined
+					model?.model === "multi-test-model" &&
+					model.provider === "multi-test-provider"
 				);
 			},
 		});
@@ -104,7 +108,12 @@ describe("Integration: Multi-Client", () => {
 		expect(newSessionId).toBeTruthy();
 
 		// CreateSession does not switch another tab.
-		await new Promise((resolve) => setTimeout(resolve, 100));
+		await client2.waitFor("shell", {
+			predicate: (msg) =>
+				msg["_tag"] === "upsert" &&
+				(msg["item"] as Record<string, unknown> | undefined)?.["id"] ===
+					newSessionId,
+		});
 		expect(client2.getActiveSessionId()).not.toBe(newSessionId);
 
 		await client1.close();

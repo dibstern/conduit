@@ -28,6 +28,7 @@ import {
 	PENDING_APPROVALS_VERSION_MIGRATION,
 	PENDING_INPUTS_MIGRATION,
 	PROJECT_PROVENANCE_MIGRATION,
+	PROJECT_TREE_DATA_MIGRATION,
 	PROJECTION_FAILURES_MIGRATION,
 	PROMPT_PROVIDER_REFERENCE_MIGRATION,
 	READ_MODEL_COUNTER_MIGRATION,
@@ -66,8 +67,13 @@ import {
 	STARTUP_RESTORE_INDEXES_MIGRATION,
 	STORE_IDENTITY_MIGRATION,
 	TOOL_CALL_INDEX_MIGRATION,
+	TOOL_RESULT_EVENT_REFS_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 } from "../schema.js";
+import {
+	NEVER_CUT_TOOL_NAMES,
+	PREVIEW_CODE_POINTS,
+} from "../tool-wire-projection.js";
 import { refreshSidebar, rerootSession } from "./sidebar-projection.js";
 
 export const EFFECT_SQL_MIGRATIONS_TABLE = "effect_sql_migrations";
@@ -1246,6 +1252,39 @@ export const effectMigrationEntries = {
 		"provider_process_id",
 		readMigrationSql(PROMPT_PROVIDER_REFERENCE_MIGRATION),
 	),
+	"0065_tool_result_event_refs": runAddColumnMigrationIfMissing(
+		"message_parts",
+		"result_event_seq",
+		readMigrationSql(TOOL_RESULT_EVENT_REFS_MIGRATION)
+			.replaceAll("{{PREVIEW_CODE_POINTS}}", String(PREVIEW_CODE_POINTS))
+			.replaceAll(
+				"{{NEVER_CUT_TOOL_NAMES}}",
+				NEVER_CUT_TOOL_NAMES.map(
+					(name) => `'${name.replaceAll("'", "''")}'`,
+				).join(", "),
+			),
+	),
+	"0066_project_tree_data": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		// Ledger repairs can replay migrations against the final schema.
+		const columns = yield* sql.unsafe<{ name: string }>(
+			"PRAGMA table_info(messages)",
+		);
+		if (columns.some(({ name }) => name === "is_human_sent")) return;
+		yield* executeSqlStatements(readMigrationSql(PROJECT_TREE_DATA_MIGRATION));
+		const changed = yield* sql<{ id: string }>`
+			SELECT id FROM sessions WHERE last_user_message_at IS NOT NULL`;
+		if (changed.length === 0) return;
+		const [counter] = yield* sql<{ value: number }>`
+			UPDATE read_model_counter SET value = value + 1 WHERE id = 1 RETURNING value`;
+		const version = counter?.value ?? 0;
+		yield* sql`UPDATE sessions SET version = ${version}
+			WHERE last_user_message_at IS NOT NULL`;
+		yield* refreshSidebar(
+			changed.map(({ id }) => id),
+			version,
+		);
+	}),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

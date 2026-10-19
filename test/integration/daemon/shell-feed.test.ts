@@ -31,6 +31,8 @@ import {
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { DaemonStoreAvailability } from "../../../src/lib/domain/daemon/Services/daemon-store-availability.js";
 import { ProjectRegistryTag } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
+import { ProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { markUnread } from "../../../src/lib/domain/relay/Services/session-attention.js";
 import { SessionEventBusTag } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -42,6 +44,9 @@ import {
 	type CanonicalEvent,
 	canonicalEvent,
 } from "../../../src/lib/persistence/events.js";
+import { snapshotPayload } from "../../../src/lib/provider/opencode/opencode-history-backfill.js";
+import { OpenCodeRuntimeEventTranslator } from "../../../src/lib/provider/opencode/opencode-runtime-event-translator.js";
+import { translateProviderRuntimeEventToDomain } from "../../../src/lib/provider/provider-runtime-event-to-domain.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 import { createRelayHarness } from "../helpers/relay-harness.js";
@@ -238,6 +243,283 @@ describe("daemon-wide shell feed", () => {
 		} finally {
 			await harness.stop();
 		}
+	});
+
+	it("marks native fork REST copies before the boundary has been projected", async () => {
+		const f = await fixture(["alpha"]);
+		await f.write("alpha", [
+			created("parent"),
+			canonicalEvent(
+				"session.created",
+				"native",
+				{
+					sessionId: "native",
+					title: "native",
+					provider: "opencode",
+					forkedFrom: "parent",
+					forkPointEvent: "boundary",
+				},
+				{ provider: "opencode" },
+			),
+		]);
+		const copied = {
+			id: "copy",
+			sessionID: "native",
+			role: "user",
+			time: { created: 100 },
+			parts: [{ id: "copy-text", type: "text", text: "parent prompt" }],
+		};
+		// A matching REST digest still needs its newly discovered provenance.
+		await f.write("alpha", [
+			canonicalEvent("message.snapshot", "native", snapshotPayload(copied), {
+				provider: "opencode",
+				metadata: { rawSource: "opencode.rest" },
+			}),
+		]);
+		const project = f.projectLayer("alpha");
+		const runtime = ManagedRuntime.make(
+			Layer.mergeAll(
+				project,
+				ProviderRuntimeIngestionLive.pipe(Layer.provide(project)),
+			),
+		);
+		const ingress = await runtime.runPromise(
+			makeEffectOpenCodeRuntimeIngress(
+				{
+					warn: () => {},
+					debug: () => {},
+					info: () => {},
+					verbose: () => {},
+				},
+				() =>
+					Effect.succeed([
+						copied,
+						{
+							id: "boundary",
+							sessionID: "native",
+							role: "assistant",
+							time: { created: 200, completed: 200 },
+							parts: [
+								{ id: "boundary-text", type: "text", text: "parent reply" },
+							],
+						},
+					]),
+			),
+		);
+		cleanup.push(async () => {
+			ingress.shutdown();
+			await runtime.dispose();
+		});
+		const result = await runtime.runPromise(
+			ingress.onSSEEventEffect(
+				{
+					type: "session.status",
+					properties: {
+						sessionID: "native",
+						status: { type: "idle" },
+					},
+				},
+				"native",
+				"opencode",
+			),
+		);
+		expect(result).toMatchObject({ ok: true });
+		await vi.waitFor(async () =>
+			expect(
+				await runtime.runPromise(
+					Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						return yield* sql<{
+							id: string;
+							is_inherited: number;
+						}>`SELECT id, is_inherited FROM messages
+				WHERE session_id = 'native' ORDER BY created_at`;
+					}),
+				),
+			).toEqual([
+				{ id: "copy", is_inherited: 1 },
+				{ id: "boundary", is_inherited: 1 },
+			]),
+		);
+		const feed = await f.open();
+		expect(
+			snapshot(feed.frames).rows.find(({ id }) => id === "native")
+				?.lastUserMessageAt,
+		).toBeUndefined();
+		await feed.close();
+	});
+
+	it("keeps native fork copies out of recency and retracts replaced provenance", async () => {
+		const f = await fixture(["alpha"]);
+		await f.write("alpha", [
+			created("parent"),
+			canonicalEvent(
+				"session.created",
+				"fork",
+				{
+					sessionId: "fork",
+					title: "fork",
+					provider: "opencode",
+					forkedFrom: "parent",
+					forkPointEvent: "native-boundary",
+					forkPointTimestamp: 200,
+				},
+				{ provider: "opencode" },
+			),
+		]);
+		await f.write("alpha", [
+			canonicalEvent(
+				"message.snapshot",
+				"fork",
+				{
+					messageId: "native-copy",
+					digest: "copied-history",
+					message: {
+						id: "native-copy",
+						sessionID: "fork",
+						role: "user",
+						time: { created: 100 },
+						parts: [{ id: "native-text", type: "text", text: "parent prompt" }],
+					},
+				},
+				{ provider: "opencode", metadata: { rawSource: "opencode.rest" } },
+			),
+		]);
+		// Native fork SSE reports copied provider clocks long before arrival.
+		const translator = new OpenCodeRuntimeEventTranslator();
+		const copied = [
+			translator.translate(
+				{
+					type: "message.updated",
+					properties: {
+						info: {
+							id: "native-live-copy",
+							sessionID: "fork",
+							role: "user",
+							time: { created: 150 },
+						},
+					},
+				},
+				"fork",
+			),
+			translator.translate(
+				{
+					type: "message.part.updated",
+					properties: {
+						part: {
+							id: "native-live-text",
+							messageID: "native-live-copy",
+							sessionID: "fork",
+							type: "text",
+							text: "copied live context",
+						},
+					},
+				},
+				"fork",
+			),
+		]
+			.flatMap((events) => events ?? [])
+			.flatMap((event) => translateProviderRuntimeEventToDomain(event).events);
+		expect(
+			copied.find(({ type }) => type === "message.created")?.createdAt,
+		).toBeGreaterThan(200);
+		expect(
+			copied.find(({ type }) => type === "message.created")?.metadata
+				.providerCreatedAt,
+		).toBe(150);
+		await f.write("alpha", copied);
+		const feed = await f.open();
+		expect(
+			snapshot(feed.frames).rows.find(({ id }) => id === "fork")
+				?.lastUserMessageAt,
+		).toBeUndefined();
+		await f.write("alpha", [
+			canonicalEvent(
+				"message.created",
+				"fork",
+				{
+					messageId: "own",
+					sessionId: "fork",
+					role: "user",
+				},
+				{ provider: "opencode", createdAt: 300 },
+			),
+			canonicalEvent(
+				"text.delta",
+				"fork",
+				{
+					messageId: "own",
+					partId: "own-text",
+					text: "own prompt",
+				},
+				{ provider: "opencode", createdAt: 300 },
+			),
+		]);
+		let after = 0;
+		expect(await waitUpsert(feed.frames, "fork", after)).toMatchObject({
+			item: { lastUserMessageAt: 300 },
+		});
+		after = feed.frames.length;
+		await f.write("alpha", [
+			canonicalEvent(
+				"message.created",
+				"fork",
+				{
+					messageId: "own",
+					sessionId: "fork",
+					role: "assistant",
+				},
+				{ provider: "opencode", createdAt: 300 },
+			),
+		]);
+		await waitUpsert(feed.frames, "fork", after);
+		expect(
+			upserts(feed.frames.slice(after)).at(-1)?.item.lastUserMessageAt,
+		).toBeUndefined();
+		after = feed.frames.length;
+		await f.write("alpha", [
+			canonicalEvent(
+				"message.created",
+				"fork",
+				{
+					messageId: "part-replaced",
+					sessionId: "fork",
+					role: "user",
+				},
+				{ provider: "opencode", createdAt: 400 },
+			),
+			canonicalEvent(
+				"text.delta",
+				"fork",
+				{
+					messageId: "part-replaced",
+					partId: "replaced-text",
+					text: "context",
+				},
+				{ provider: "opencode", createdAt: 400 },
+			),
+		]);
+		expect(await waitUpsert(feed.frames, "fork", after)).toMatchObject({
+			item: { lastUserMessageAt: 400 },
+		});
+		after = feed.frames.length;
+		await f.write("alpha", [
+			canonicalEvent(
+				"text.delta",
+				"fork",
+				{
+					messageId: "part-replaced",
+					partId: "replaced-text",
+					text: " injected",
+				},
+				{ provider: "opencode", createdAt: 400, metadata: { synthetic: true } },
+			),
+		]);
+		await waitUpsert(feed.frames, "fork", after);
+		expect(
+			upserts(feed.frames.slice(after)).at(-1)?.item.lastUserMessageAt,
+		).toBeUndefined();
+		await feed.close();
 	});
 
 	it("reads cold projects and orders interleaved project and child updates by row version", async () => {

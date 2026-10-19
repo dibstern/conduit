@@ -13,6 +13,7 @@ import {
 } from "../shared-types.js";
 import { AccountChangeRejected } from "./account.js";
 import {
+	ProjectWorktreeCleanupSchema,
 	WorktreeBranchRenameError,
 	WorktreeCleanupReportSchema,
 	WorktreeCleanupSchema,
@@ -273,6 +274,7 @@ export const CommandInfoSchema = Schema.Struct({
 export const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
+	addedAt: Schema.optional(Schema.Number),
 	folders: Schema.NonEmptyArray(Schema.String),
 	setupScript: Schema.optional(Schema.String),
 	sessionMode: Schema.optional(SessionModeSchema),
@@ -1246,6 +1248,14 @@ export const SaveProject = Rpc.make("SaveProject", {
 	error: Schema.Union([WsRpcError, ProjectSaveRejected]),
 });
 
+export const SetProjectOrder = Rpc.make("SetProjectOrder", {
+	payload: Schema.TaggedStruct("SetProjectOrder", {
+		projectOrder: Schema.Array(Schema.String),
+	}),
+	success: Schema.Void,
+	error: WsRpcError,
+});
+
 export const RemoveProject = Rpc.make("RemoveProject", {
 	payload: Schema.TaggedStruct("RemoveProject", {
 		projectSlug: Schema.optional(NonEmptyString),
@@ -1345,22 +1355,39 @@ export const SetDefault = Rpc.make("SetDefault", {
 });
 
 const WorktreeCleanupSettingResponseSchema = Schema.Struct({
-	worktreeCleanup: WorktreeCleanupSchema,
+	global: WorktreeCleanupSchema,
+	project: Schema.optional(Schema.NullOr(ProjectWorktreeCleanupSchema)),
 });
 
 export const GetWorktreeCleanupSetting = Rpc.make("GetWorktreeCleanupSetting", {
-	payload: Schema.TaggedStruct("GetWorktreeCleanupSetting", {}),
+	payload: Schema.TaggedStruct("GetWorktreeCleanupSetting", {
+		projectSlug: Schema.optional(NonEmptyString),
+	}),
 	success: WorktreeCleanupSettingResponseSchema,
 	error: WsRpcError,
 });
 
 export const SetWorktreeCleanupSetting = Rpc.make("SetWorktreeCleanupSetting", {
 	payload: Schema.TaggedStruct("SetWorktreeCleanupSetting", {
-		worktreeCleanup: WorktreeCleanupSchema,
+		scope: Schema.Literal("global"),
+		rules: WorktreeCleanupSchema,
 	}),
 	success: WorktreeCleanupSettingResponseSchema,
 	error: WsRpcError,
 });
+
+export const SetProjectWorktreeCleanupSetting = Rpc.make(
+	SetWorktreeCleanupSetting._tag,
+	{
+		payload: Schema.TaggedStruct(SetWorktreeCleanupSetting._tag, {
+			scope: Schema.Literal("project"),
+			projectSlug: NonEmptyString,
+			override: Schema.NullOr(ProjectWorktreeCleanupSchema),
+		}),
+		success: SetWorktreeCleanupSetting.successSchema,
+		error: SetWorktreeCleanupSetting.errorSchema,
+	},
+);
 
 export const CleanUpWorktreesNow = Rpc.make("CleanUpWorktreesNow", {
 	payload: Schema.TaggedStruct("CleanUpWorktreesNow", {
@@ -1409,6 +1436,30 @@ export const SetAutoArchiveSetting = Rpc.make("SetAutoArchiveSetting", {
 	success: AutoArchiveSettingResponseSchema,
 	error: WsRpcError,
 });
+
+const AutoDeleteArchivedSettingResponseSchema = Schema.Struct({
+	autoDeleteArchivedAfterDays: Schema.NullOr(Schema.Number),
+});
+
+export const GetAutoDeleteArchivedSetting = Rpc.make(
+	"GetAutoDeleteArchivedSetting",
+	{
+		payload: Schema.TaggedStruct("GetAutoDeleteArchivedSetting", {}),
+		success: AutoDeleteArchivedSettingResponseSchema,
+		error: WsRpcError,
+	},
+);
+
+export const SetAutoDeleteArchivedSetting = Rpc.make(
+	"SetAutoDeleteArchivedSetting",
+	{
+		payload: Schema.TaggedStruct("SetAutoDeleteArchivedSetting", {
+			autoDeleteArchivedAfterDays: Schema.NullOr(Schema.Number),
+		}),
+		success: AutoDeleteArchivedSettingResponseSchema,
+		error: WsRpcError,
+	},
+);
 
 export const GetUsageLimitsSetting = Rpc.make("GetUsageLimitsSetting", {
 	payload: Schema.TaggedStruct("GetUsageLimitsSetting", {}),
@@ -1759,6 +1810,7 @@ export const InspectSessionWorktrees = Rpc.make("InspectSessionWorktrees", {
 	success: Schema.Struct({
 		worktrees: Schema.Array(SessionWorktreeInspectionSchema),
 		removeWorktrees: Schema.Boolean,
+		onDelete: Schema.Literals(["ask", "remove"]),
 	}),
 	error: WsRpcError,
 });
@@ -2904,6 +2956,7 @@ const wsRpcRequests = [
 		}),
 	},
 	SaveProject,
+	SetProjectOrder,
 	RemoveProject,
 	StartInstance,
 	StopInstance,
@@ -2916,8 +2969,26 @@ const wsRpcRequests = [
 	SetAutoSettleSetting,
 	GetAutoArchiveSetting,
 	SetAutoArchiveSetting,
+	GetAutoDeleteArchivedSetting,
+	SetAutoDeleteArchivedSetting,
 	GetWorktreeCleanupSetting,
-	SetWorktreeCleanupSetting,
+	{
+		requests: [SetProjectWorktreeCleanupSetting, SetWorktreeCleanupSetting],
+		rpc: Rpc.make(SetWorktreeCleanupSetting._tag, {
+			payload: Schema.Union([
+				closedPayload({
+					...SetProjectWorktreeCleanupSetting.payloadSchema.fields,
+					_tag: wireTag(SetProjectWorktreeCleanupSetting._tag),
+				}),
+				closedPayload({
+					...SetWorktreeCleanupSetting.payloadSchema.fields,
+					_tag: wireTag(SetWorktreeCleanupSetting._tag),
+				}),
+			]),
+			success: SetWorktreeCleanupSetting.successSchema,
+			error: SetWorktreeCleanupSetting.errorSchema,
+		}),
+	},
 	CleanUpWorktreesNow,
 	GetUsageLimitsSetting,
 	SetUsageLimitsSetting,
@@ -3008,6 +3079,7 @@ export const ShellProjectsFrameSchema = Schema.Struct({
 	projects: Schema.Array(ProjectInfoSchema),
 	/** The project a new session prefills, on every client. */
 	newSessionProject: Schema.optional(Schema.String),
+	projectOrder: Schema.optional(Schema.Array(Schema.String)),
 });
 export type ShellProjectsFrame = typeof ShellProjectsFrameSchema.Type;
 

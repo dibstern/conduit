@@ -230,10 +230,7 @@ describe("createRelayEventSink — persistence", () => {
 				sessionId: event.sessionId,
 				provider: event.providerId,
 				data: event.data,
-				metadata: expect.objectContaining({
-					providerRuntimeEventId: event.eventId,
-					rawSource: event.rawSource.kind,
-				}),
+				metadata: {},
 			}),
 		);
 	});
