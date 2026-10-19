@@ -1,4 +1,4 @@
-import { Effect, Exit, Option } from "effect";
+import { Effect, Exit, Option, Schedule } from "effect";
 import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
@@ -8,6 +8,7 @@ import { PersistenceProjectTag } from "../domain/persistence/Services/persistenc
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import type { ProjectSettingsTag } from "../domain/relay/Services/project-settings.js";
+import { makeEventSinkFactory } from "../domain/relay/Services/provider-turn-dispatch.js";
 import { RelayStatusSnapshotTag } from "../domain/relay/Services/relay-status-snapshot.js";
 import { resolveOrphanedClaudePermissions } from "../domain/relay/Services/resolve-orphaned-claude-permissions.js";
 import { restoreClaudeQuestionsFromStore } from "../domain/relay/Services/restore-claude-questions.js";
@@ -46,6 +47,7 @@ import { SSEStreamTag } from "../domain/relay/Services/sse-stream-service.js";
 import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
 import { makeFailTurn } from "../domain/relay/Services/turn-failure.js";
 import * as Failure from "../effect/failure-classification.js";
+import { ENV } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
@@ -491,6 +493,27 @@ export async function startProjectRelay(inputs: StartupInputs) {
 					yield* startSseConsumers(inputs, services, monitoring);
 					yield* services.recoverOpenCodeCommands;
 					yield* (yield* SessionSetupTag).recover;
+					const makeInteractions = yield* makeEventSinkFactory;
+					// Recovery must settle crashed turns before an outbox claim can
+					// resend them. The runtime scope stops this fiber before providers
+					// and persistence are released, including failed startup.
+					yield* Effect.forkIn(
+						services.orchestration.drainSideEffects(makeInteractions).pipe(
+							Effect.catchCause((cause) =>
+								Failure.isInterruptedOnly(cause)
+									? Effect.interrupt
+									: Effect.logError(
+											"Provider command outbox drain failed",
+											cause,
+										),
+							),
+							// A sweep may wait for whole turns. Keep scanning newly due
+							// sessions while the reactor holds each active session's lease.
+							Effect.forkIn(relayManagedRuntime.scope),
+							Effect.repeat(Schedule.spaced(ENV.outboxDrainIntervalMs)),
+						),
+						relayManagedRuntime.scope,
+					);
 					// Providers are registered and recovered; queued inputs may drain.
 					yield* (yield* SessionInboxTag).start;
 				}).pipe(

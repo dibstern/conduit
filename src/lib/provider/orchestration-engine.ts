@@ -47,6 +47,7 @@ import {
 	isCommandScopeTombstoned,
 } from "./orchestration-read-model.js";
 import {
+	type ProviderCommandInteractionSinkFactory,
 	type ProviderCommandStoreFailure,
 	ProviderSideEffectReactor,
 } from "./orchestration-side-effect-reactor.js";
@@ -336,7 +337,12 @@ export class OrchestrationEngine {
 			>();
 			this.inFlightCommands.set(commandId, deferred);
 
-			return yield* this.runCommandEffect(command).pipe(
+			const run = this.runCommandEffect(command);
+			const owned =
+				command.type === "send_turn" && this.durable
+					? this.durable.reactor.withLiveCommand(commandId, run)
+					: run;
+			return yield* owned.pipe(
 				Effect.tap((result) => Deferred.succeed(deferred, result)),
 				Effect.tapError((error) => Deferred.fail(deferred, error)),
 				Effect.ensuring(
@@ -525,7 +531,11 @@ export class OrchestrationEngine {
 			// caller's real event sink is threaded through so provider-driven
 			// permission/question interactions resolve exactly as the inline path.
 			return yield* durable.reactor
-				.runCommand(command.commandId, command.input.eventSink)
+				.runCommand(
+					command.commandId,
+					command.input.eventSink,
+					command.input.abortSignal,
+				)
 				.pipe(
 					Effect.mapError((cause) =>
 						cause instanceof ProviderInstanceFailure
@@ -860,8 +870,12 @@ export class OrchestrationEngine {
 	 * already awaits its own execution; this is the deterministic quiescence
 	 * seam for tests and startup recovery. No-op when durable commands are off.
 	 */
-	drainSideEffects(): Effect.Effect<void, ProviderCommandStoreFailure> {
-		return this.durable ? this.durable.reactor.drain() : Effect.void;
+	drainSideEffects(
+		makeInteractions?: ProviderCommandInteractionSinkFactory,
+	): Effect.Effect<void, ProviderCommandStoreFailure> {
+		return this.durable
+			? this.durable.reactor.drain(makeInteractions)
+			: Effect.void;
 	}
 
 	/** Shutdown the engine and all provider instances. */

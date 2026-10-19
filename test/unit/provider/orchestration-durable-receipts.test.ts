@@ -1,7 +1,8 @@
 import { describe, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Deferred, Effect, Fiber } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
+import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import {
 	decodeProviderRuntimeEvent,
@@ -122,6 +123,61 @@ function receiptRow(sql: SqlClient.SqlClient, commandId: string) {
 }
 
 describe("OrchestrationEngine durable receipts", () => {
+	// A drain must not steal the commit-to-claim gap, replace the caller's
+	// result/sink/signal, or impose the receipt poll timeout on a long live turn.
+	it.effect("keeps a committed live command out of overlapping drains", () =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const committed = yield* Deferred.make<void>();
+			const allowClaim = yield* Deferred.make<void>();
+			const started = yield* Deferred.make<void>();
+			const finish = yield* Deferred.make<void>();
+			const registry = new ProviderRegistry();
+			const instance = makeStubInstance("opencode");
+			const command = sendTurnCommand();
+			let signal: AbortSignal | undefined;
+			const result: TurnResult = { ...COMPLETED, cost: 7 };
+			instance.sendTurnEffect.mockImplementation(
+				(input: SendTurnCommand["input"]) =>
+					Effect.gen(function* () {
+						signal = input.abortSignal;
+						yield* Deferred.succeed(started, undefined);
+						yield* Deferred.await(finish);
+						return result;
+					}),
+			);
+			registry.registerInstance(instance);
+			const engine = new OrchestrationEngine({
+				registry,
+				durableCommands: yield* makeDurableOptions({ sql }),
+			});
+			const live = yield* Effect.forkChild(
+				engine.dispatchEffect({
+					...command,
+					onAccepted: Deferred.succeed(committed, undefined).pipe(
+						Effect.andThen(Deferred.await(allowClaim)),
+					),
+				}),
+			);
+			yield* Deferred.await(committed);
+			const drain = yield* Effect.forkChild(engine.drainSideEffects());
+			yield* TestClock.adjust("16 minutes");
+			expect(instance.sendTurnEffect).not.toHaveBeenCalled();
+			yield* Fiber.join(drain);
+			yield* Deferred.succeed(allowClaim, undefined);
+			yield* Deferred.await(started);
+			expect(signal).toBe(command.input.abortSignal);
+			yield* TestClock.adjust("16 minutes");
+			expect(live.pollUnsafe()).toBeUndefined();
+			yield* Deferred.succeed(finish, undefined);
+			expect(yield* Fiber.join(live)).toEqual(result);
+			yield* engine.drainSideEffects();
+			expect(instance.sendTurnEffect).toHaveBeenCalledTimes(1);
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
+	);
+
 	// Caller-supplied command ids are globally unique keys, not ownership proof.
 	it.effect("rejects replay of another project's orphaned command", () =>
 		Effect.gen(function* () {

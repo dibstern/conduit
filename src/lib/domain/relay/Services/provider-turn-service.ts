@@ -23,7 +23,6 @@ import type {
 import type { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
 import {
 	ProviderTurnDispatchFibersTag,
-	ProviderTurnTimeoutRuntimeTag,
 	sendTurn,
 } from "./provider-turn-dispatch.js";
 import {
@@ -40,7 +39,7 @@ import type {
 import type { SessionManagerServiceTag } from "./session-manager-service.js";
 import {
 	clearProcessingTimeout,
-	OverridesStateTag,
+	type OverridesStateTag,
 } from "./session-overrides-state.js";
 import type { SessionTitleServiceTag } from "./session-title-service.js";
 import type { SessionWorkspaceTag } from "./session-workspace.js";
@@ -130,7 +129,7 @@ export class ProviderTurnServiceTag extends Context.Service<
 >()("ProviderTurnService") {}
 
 const makeProviderTurnService = Effect.gen(function* () {
-	const context = yield* Effect.context<
+	const providedContext = yield* Effect.context<
 		| AccountDirectory
 		| OpenCodeInstancesTag
 		| SessionWorkspaceTag
@@ -153,12 +152,6 @@ const makeProviderTurnService = Effect.gen(function* () {
 		| EventStoreEffectTag
 		| ProjectionRunnerEffectTag
 	>();
-	const runtime = yield* Effect.context<OverridesStateTag>();
-	const overridesRef = yield* OverridesStateTag;
-	const providedContext = Context.add(context, ProviderTurnTimeoutRuntimeTag, {
-		runtime,
-		overridesRef,
-	});
 	// A Stop ends with session-wide frames (idle status, done) that can trail
 	// the button press. A prompt sent before they go out would be ended by
 	// them, so a new prompt waits for the session's Stop to finish first.
