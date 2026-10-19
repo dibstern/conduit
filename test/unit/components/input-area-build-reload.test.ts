@@ -166,7 +166,11 @@ describe("InputArea build reload recovery", () => {
 		await expect(persistInputDraft()).resolves.toBe(true);
 		expect(
 			JSON.parse(sessionStorage.getItem(reloadDraftKey) ?? "null"),
-		).toContainEqual([sessionId, "draft with an image"]);
+		).toContainEqual({
+			key: sessionId,
+			text: "draft with an image",
+			acked: "draft with an image",
+		});
 	});
 
 	it("defers if an image is attached while the draft RPC is pending", async () => {
@@ -216,7 +220,7 @@ describe("InputArea build reload recovery", () => {
 		expect(textarea.value).toBe("newer draft from another tab");
 	});
 
-	it("protects a reload-restored draft only on its first restoration", async () => {
+	it("ignores a legacy reload backup without throwing", async () => {
 		sessionStorage.setItem(
 			reloadDraftKey,
 			JSON.stringify([[sessionId, "saved before reload"]]),
@@ -227,7 +231,7 @@ describe("InputArea build reload recovery", () => {
 			name: "Message",
 		}) as HTMLTextAreaElement;
 		await receiveDraft("older server draft", true);
-		expect(textarea.value).toBe("saved before reload");
+		expect(textarea.value).toBe("older server draft");
 		expect(sessionStorage.getItem(reloadDraftKey)).toBeNull();
 
 		openSessionForSetup("other-session", "test");

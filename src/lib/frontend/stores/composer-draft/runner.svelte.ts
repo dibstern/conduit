@@ -6,6 +6,7 @@ import {
 	type DraftCommand,
 	type DraftEvent,
 	initialState,
+	type ReloadDraft,
 	step,
 } from "./state.js";
 
@@ -153,9 +154,22 @@ export function createComposerDraft(options: {
 	try {
 		const saved = sessionStorage.getItem(RELOAD_DRAFT_KEY);
 		if (saved) {
-			for (const entry of JSON.parse(saved) as [string, string][]) {
-				dispatch({ _tag: "ReloadRestored", entries: [entry] });
-			}
+			const entries: unknown = JSON.parse(saved);
+			if (Array.isArray(entries))
+				dispatch({
+					_tag: "ReloadRestored",
+					entries: entries.filter(
+						(entry: unknown): entry is ReloadDraft =>
+							typeof entry === "object" &&
+							entry !== null &&
+							"key" in entry &&
+							typeof entry.key === "string" &&
+							"text" in entry &&
+							typeof entry.text === "string" &&
+							"acked" in entry &&
+							typeof entry.acked === "string",
+					),
+				});
 			sessionStorage.removeItem(RELOAD_DRAFT_KEY);
 		}
 	} catch {

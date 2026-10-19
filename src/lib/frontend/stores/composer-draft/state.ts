@@ -3,9 +3,14 @@ interface Draft {
 	acked: string;
 }
 
+export interface ReloadDraft extends Draft {
+	key: string;
+}
+
 export interface DraftState extends Draft {
 	sessionId: string | null | undefined;
 	drafts: ReadonlyMap<string, Draft>;
+	reloadBases: ReadonlyMap<string, string>;
 	throttled: boolean;
 	pending: boolean;
 	snapshot: "waiting" | "overlapped" | "ready";
@@ -56,7 +61,7 @@ export type DraftEvent =
 			text: string;
 			attachmentsUnchanged: boolean;
 	  }
-	| { _tag: "ReloadRestored"; entries: readonly (readonly [string, string])[] }
+	| { _tag: "ReloadRestored"; entries: readonly ReloadDraft[] }
 	| {
 			_tag: "PersistBeforeReload";
 			sessionId: string | null;
@@ -71,7 +76,7 @@ export type DraftCommand =
 	| { _tag: "ClearNewSessionDraft" }
 	| {
 			_tag: "SaveReloadBackup";
-			entries: readonly (readonly [string, string])[];
+			entries: readonly ReloadDraft[];
 	  };
 
 export function initialState(): DraftState {
@@ -80,6 +85,7 @@ export function initialState(): DraftState {
 		acked: "",
 		sessionId: undefined,
 		drafts: new Map(),
+		reloadBases: new Map(),
 		throttled: false,
 		pending: false,
 		snapshot: "waiting",
@@ -90,9 +96,12 @@ function clear(
 	state: DraftState,
 	sessionId: string | null,
 ): [DraftState, DraftCommand[]] {
+	const reloadBases = new Map(state.reloadBases);
+	if (sessionId) reloadBases.delete(sessionId);
 	return [
 		{
 			...state,
+			reloadBases,
 			text: "",
 			throttled: false,
 			pending: false,
@@ -114,7 +123,8 @@ function clear(
  * Failure rules: unknown snapshots do nothing; dirty text rejects server text;
  * failed writes keep acked; late acknowledgements name their session and text;
  * switching flushes the outgoing tail; send failures restore only an empty box.
- * Reload backups deliberately retain the existing [sessionId, text][] format.
+ * A reload's first snapshot compares against its saved acked text: an unchanged
+ * server preserves the local tail; a changed server replaces the stale backup.
  */
 export function step(
 	state: DraftState,
@@ -145,12 +155,22 @@ export function step(
 				: [state, []];
 		case "ServerTextReceived": {
 			if (event.sessionId !== state.sessionId) return [state, []];
-			const next =
+			const base = event.initial
+				? state.reloadBases.get(event.sessionId)
+				: undefined;
+			let next = state;
+			if (base !== undefined) {
+				const reloadBases = new Map(state.reloadBases);
+				reloadBases.delete(event.sessionId);
+				next = { ...state, reloadBases };
+				if (event.text !== undefined && event.text !== base)
+					next = { ...next, text: event.text, acked: event.text };
+			} else if (
 				!(event.initial && state.snapshot === "overlapped") &&
 				event.text !== undefined &&
 				(state.text === state.acked || state.text === "")
-					? { ...state, text: event.text, acked: event.text }
-					: state;
+			)
+				next = { ...state, text: event.text, acked: event.text };
 			// Consume the initial read before resending offline edits. Otherwise a
 			// fast ack could make an older, delayed snapshot look safe to apply.
 			// A forced hide/send flush also supersedes an initial read already in flight.
@@ -191,7 +211,9 @@ export function step(
 				},
 				[
 					{ _tag: "CancelSync" },
-					...(state.sessionId && state.text !== state.acked
+					...(state.sessionId &&
+					!state.reloadBases.has(state.sessionId) &&
+					state.text !== state.acked
 						? [
 								{
 									_tag: "SyncDraft" as const,
@@ -224,6 +246,9 @@ export function step(
 		case "Hidden":
 		case "Flush":
 			if (!state.sessionId && event._tag === "Hidden") return [state, []];
+			// Reconcile a restored backup before any write can replace a newer server draft.
+			if (state.sessionId && state.reloadBases.has(state.sessionId))
+				return [state, []];
 			return [
 				{
 					...state,
@@ -274,7 +299,9 @@ export function step(
 				return event.clear ? clear(state, event.sessionId) : [state, []];
 			const drafts = new Map(state.drafts);
 			if (event.sentTo) drafts.set(event.sentTo, { text: "", acked: "" });
-			return [{ ...state, drafts }, []];
+			const reloadBases = new Map(state.reloadBases);
+			if (event.sentTo) reloadBases.delete(event.sentTo);
+			return [{ ...state, drafts, reloadBases }, []];
 		}
 		case "SessionCreated":
 			return [state, [{ _tag: "ClearNewSessionDraft" }]];
@@ -287,10 +314,13 @@ export function step(
 				return [state, []];
 			const drafts = new Map(state.drafts);
 			drafts.set(event.parentSessionId, { text: "", acked: "" });
+			const reloadBases = new Map(state.reloadBases);
+			reloadBases.delete(event.parentSessionId);
 			return [
 				{
 					...state,
 					drafts,
+					reloadBases,
 					...(active
 						? {
 								text: "",
@@ -311,9 +341,12 @@ export function step(
 		}
 		case "ReloadRestored": {
 			const drafts = new Map(state.drafts);
-			for (const [id, text] of event.entries)
-				drafts.set(id, { text, acked: "" });
-			return [{ ...state, drafts }, []];
+			const reloadBases = new Map(state.reloadBases);
+			for (const { key, text, acked } of event.entries) {
+				drafts.set(key, { text, acked });
+				reloadBases.set(key, acked);
+			}
+			return [{ ...state, drafts, reloadBases }, []];
 		}
 		case "PersistBeforeReload": {
 			const commands: DraftCommand[] = event.sessionId
@@ -327,7 +360,7 @@ export function step(
 			});
 			commands.push({
 				_tag: "SaveReloadBackup",
-				entries: [...drafts].map(([id, draft]) => [id, draft.text]),
+				entries: [...drafts].map(([key, draft]) => ({ key, ...draft })),
 			});
 			return [{ ...state, drafts }, commands];
 		}

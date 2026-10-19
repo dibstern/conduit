@@ -626,6 +626,173 @@ async function saveDraftEvidence(
 }
 
 // These drive the real browser/daemon wire. No component or machine internals.
+for (const serverWins of [false, true]) {
+	test(`a build reload keeps the ${serverWins ? "server's newer edit" : "unsynced local tail"}`, async ({
+		page,
+		browser,
+		buildDaemon,
+	}, testInfo) => {
+		test.setTimeout(90_000);
+		const baseline = "The last acknowledged draft";
+		const localText = `${baseline}, plus an unsynced local tail`;
+		const serverText = "Device B edited this draft during A's reload";
+		let dropTail = true;
+		let reloadRequested = false;
+		let releaseReload = () => {};
+		const reloadGate = new Promise<void>((resolve) => {
+			releaseReload = resolve;
+		});
+		const routed: Array<{
+			document: string;
+			direction: string;
+			at: number;
+			data: string;
+			dropped?: boolean;
+		}> = [];
+		await page.routeWebSocket(/\/rpc$/, (ws) => {
+			const document = reloadRequested ? "reloaded" : "original";
+			const server = ws.connectToServer();
+			ws.onMessage((data) => {
+				const parsed = JSON.parse(String(data)) as unknown;
+				const frames = [parsed].flat() as Array<{
+					tag?: string;
+					payload?: { text?: string };
+				}>;
+				const forwarded = frames.filter((frame) => {
+					const dropped =
+						dropTail &&
+						frame.tag === "SyncInputDraft" &&
+						frame.payload?.text === localText;
+					routed.push({
+						document,
+						direction: "sent",
+						at: Date.now(),
+						data: JSON.stringify(frame),
+						dropped,
+					});
+					return !dropped;
+				});
+				if (forwarded.length === frames.length) server.send(data);
+				else if (forwarded.length)
+					server.send(
+						JSON.stringify(Array.isArray(parsed) ? forwarded : forwarded[0]),
+					);
+			});
+			server.onMessage((data) => {
+				routed.push({
+					document,
+					direction: "received",
+					at: Date.now(),
+					data: String(data),
+				});
+				ws.send(data);
+			});
+		});
+		const callsA = captureDraftCalls(page);
+		const contextB = await browser.newContext({
+			viewport: page.viewportSize(),
+			isMobile: testInfo.project.use.isMobile ?? false,
+			hasTouch: testInfo.project.use.hasTouch ?? false,
+		});
+		const pageB = await contextB.newPage();
+		const callsB = captureDraftCalls(pageB);
+		let sessionUrl = "";
+		try {
+			sessionUrl = await createDraftSession(page, buildDaemon.baseUrl);
+			const input = page.locator("#input");
+			await input.fill(baseline);
+			await expect.poll(() => syncCompleted(callsA, baseline)).toBe(true);
+			await input.fill(localText);
+			await expect.poll(() => routed.some((frame) => frame.dropped)).toBe(true);
+			await page.screenshot({
+				path: testInfo.outputPath("reload-unsynced-local-tail.png"),
+			});
+			// Pause after persistInputDraft saved the backup, before the new shell
+			// can subscribe. Dropped requests never receive a fabricated success.
+			await page.route(
+				(url) => url.href === sessionUrl,
+				async (route) => {
+					if (route.request().isNavigationRequest() && !reloadRequested) {
+						reloadRequested = true;
+						await reloadGate;
+					}
+					await route.continue();
+				},
+			);
+			await buildDaemon.restart(`${buildDaemon.buildId}-B`);
+			await expect.poll(() => reloadRequested).toBe(true);
+			dropTail = false;
+			if (serverWins) {
+				await pageB.goto(sessionUrl);
+				await expect(
+					pageB.locator(".banner-text", { hasText: "different builds" }),
+				).toBeVisible();
+				await expect(pageB.locator("#input")).toHaveValue(baseline);
+				await pageB.locator("#input").fill(serverText);
+				await expect.poll(() => syncCompleted(callsB, serverText)).toBe(true);
+				await pageB.screenshot({
+					path: testInfo.outputPath("reload-newer-server-draft-B.png"),
+				});
+			}
+			releaseReload();
+			const expected = serverWins ? serverText : localText;
+			await expect(
+				page.locator(".banner-text", { hasText: "different builds" }),
+			).toBeVisible();
+			await expect(input).toHaveValue(expected);
+			if (!serverWins) {
+				await expect.poll(() => syncCompleted(callsA, localText)).toBe(true);
+				await pageB.goto(sessionUrl);
+			}
+			await expect
+				.poll(() =>
+					(serverWins ? callsA : callsB).some(
+						({ request, replies }) =>
+							request.frame.tag === "SubscribeInputDraft" &&
+							replies.some(({ frame }) =>
+								frame.values?.some(
+									(value) =>
+										value._tag === "synchronized" && value.text === expected,
+								),
+							),
+					),
+				)
+				.toBe(true);
+			await expect(pageB.locator("#input")).toHaveValue(expected);
+			await page.waitForTimeout(600);
+			await expect(input).toHaveValue(expected);
+			if (serverWins)
+				expect(
+					routed.some((frame) => {
+						if (frame.document !== "reloaded" || frame.direction !== "sent")
+							return false;
+						const message = JSON.parse(frame.data) as {
+							tag?: string;
+							payload?: { text?: string };
+						};
+						return (
+							message.tag === "SyncInputDraft" &&
+							message.payload?.text === localText
+						);
+					}),
+				).toBe(false);
+		} finally {
+			releaseReload();
+			await saveDraftEvidence(testInfo, [page, pageB], {
+				sessionUrl,
+				serverWins,
+				baseline,
+				localText,
+				serverText,
+				A: callsA,
+				B: callsB,
+				routed,
+			});
+			await contextB.close();
+		}
+	});
+}
+
 test("offline typing survives a cut WebSocket and a delayed stored draft", async ({
 	page,
 	browser,
