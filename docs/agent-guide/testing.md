@@ -25,6 +25,9 @@ pnpm test:integration
 pnpm test:contract
 ```
 
+Integration files run in parallel in up to 4 fork workers. Set
+`CONDUIT_INTEGRATION_WORKERS=<positive integer>` to override the worker cap.
+
 ### Claude process runners
 
 The default server uses Claude runner processes. The process harness isolates
