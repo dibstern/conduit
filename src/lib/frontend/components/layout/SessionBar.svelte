@@ -446,7 +446,7 @@
 {#snippet goalLine(props: Record<string, unknown> = {})}
 	<Button variant="ghost" size={sessionViewState.compact ? "phone-subtitle" : "subtitle"} touchTarget={sessionViewState.compact ? "always" : false} layout="block" align="start" tone={goalButtonTone} hoverFill="none" bind:element={goalSubtitleEl} data-testid="session-goal-subtitle" aria-expanded={goalDetails.open} aria-controls="goal-details" title={goal.phase === "paused" ? `${goal.subtitle} · ${goalFacts?.pausedReason}` : goal.subtitle} class={sessionViewState.compact ? "" : "mt-[2px]"} onclick={() => { tasksPanel.open = false; sideThreadsPanel.open = false; goalDetails.open = !goalDetails.open; }} {...props}>
 		<Icon name={goal.icon === "spinner" ? "loader-circle" : goal.icon} size={12} class="shrink-0 {goal.icon === 'spinner' ? 'motion-safe:animate-spin' : ''}" />
-		<b class="shrink-0 font-medium">{desktopGoalLabel}</b><span class="min-w-0 truncate text-text-secondary">· {detailsGoal?.condition}</span>
+		<b class="shrink-0 font-medium">{desktopGoalLabel}</b>{" "}<span class="min-w-0 truncate text-text-secondary">· {detailsGoal?.condition}</span>
 	</Button>
 {/snippet}
 

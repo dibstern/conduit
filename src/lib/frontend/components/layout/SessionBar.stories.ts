@@ -338,7 +338,7 @@ async function assertGoalSubtitle(
 	token: string,
 ) {
 	const subtitle = within(canvasElement).getByTestId("session-goal-subtitle");
-	await expect(subtitle).toHaveTextContent(text);
+	await expect(subtitle.textContent?.trim()).toBe(text);
 	await expect(subtitle.querySelector("svg")).toBeVisible();
 	const style = getComputedStyle(subtitle);
 	const expected = new Option().style;
@@ -353,7 +353,7 @@ export const GoalChecking: Story = {
 	play: async ({ canvasElement }) => {
 		const subtitle = await assertGoalSubtitle(
 			canvasElement,
-			"Checking· All 38 scenarios pass",
+			"Checking · All 38 scenarios pass",
 			"--color-status-goal",
 		);
 		const spinner = subtitle.querySelector("svg");
@@ -367,7 +367,7 @@ export const GoalNotYet: Story = {
 	play: async ({ canvasElement }) => {
 		await assertGoalSubtitle(
 			canvasElement,
-			"Pursuing· All 38 scenarios pass",
+			"Pursuing · All 38 scenarios pass",
 			"--color-status-amber",
 		);
 	},
@@ -378,7 +378,7 @@ export const GoalPaused: Story = {
 	play: async ({ canvasElement }) => {
 		const subtitle = await assertGoalSubtitle(
 			canvasElement,
-			"Paused· All 38 scenarios pass",
+			"Paused · All 38 scenarios pass",
 			"--color-status-goal",
 		);
 		await expect(subtitle).toHaveAttribute(
@@ -393,7 +393,7 @@ export const GoalMet: Story = {
 	play: async ({ canvasElement }) => {
 		await assertGoalSubtitle(
 			canvasElement,
-			"Goal met· All 38 scenarios pass",
+			"Goal met · All 38 scenarios pass",
 			"--color-status-green",
 		);
 	},
@@ -2093,9 +2093,9 @@ export const DesktopGoalPursuing: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await expect(canvas.getByTestId("session-goal-subtitle")).toHaveTextContent(
-			/Pursuing\s*· All 38 scenarios pass/,
-		);
+		await expect(
+			canvas.getByTestId("session-goal-subtitle").textContent?.trim(),
+		).toBe("Pursuing · All 38 scenarios pass");
 		await expect(canvas.getByTestId("session-bar-settle")).toHaveTextContent(
 			"Pin to top",
 		);
@@ -2110,9 +2110,9 @@ export const DesktopGoalChecking: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await expect(canvas.getByTestId("session-goal-subtitle")).toHaveTextContent(
-			/Checking\s*· All 38 scenarios pass/,
-		);
+		await expect(
+			canvas.getByTestId("session-goal-subtitle").textContent?.trim(),
+		).toBe("Checking · All 38 scenarios pass");
 		expect(canvas.queryByTestId("session-bar-settle")).toBeNull();
 	},
 };
@@ -2125,9 +2125,9 @@ export const DesktopGoalMet: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await expect(canvas.getByTestId("session-goal-subtitle")).toHaveTextContent(
-			/Goal met\s*· All 38 scenarios pass/,
-		);
+		await expect(
+			canvas.getByTestId("session-goal-subtitle").textContent?.trim(),
+		).toBe("Goal met · All 38 scenarios pass");
 		await expect(canvas.getByTestId("session-bar-unread-chip")).toBeVisible();
 		await expect(canvas.getByTestId("session-bar-settle")).toHaveTextContent(
 			"Settle",
@@ -2143,9 +2143,9 @@ export const DesktopGoalMetRead: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await expect(canvas.getByTestId("session-goal-subtitle")).toHaveTextContent(
-			/Goal met\s*· All 38 scenarios pass/,
-		);
+		await expect(
+			canvas.getByTestId("session-goal-subtitle").textContent?.trim(),
+		).toBe("Goal met · All 38 scenarios pass");
 		expect(canvas.queryByTestId("session-bar-unread-chip")).toBeNull();
 		expect(canvas.queryByTestId("session-bar-unread-mark-read")).toBeNull();
 		await expect(canvas.getByTestId("session-bar-settle")).toHaveTextContent(
