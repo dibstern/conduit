@@ -1291,7 +1291,7 @@ export function makeTestHandlerLayer(
 		ProjectSettingsLive,
 		RpcSubscriptionScopeLive,
 		AlertsLive,
-		InputDraftsLive,
+		InputDraftsLive.pipe(Layer.provide(persistenceLayer)),
 		ptyManagerLayer,
 		configLayer,
 		accountDirectoryLayer,

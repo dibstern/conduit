@@ -146,6 +146,7 @@ describe("Persistence Effect", () => {
 					"command_receipts",
 					"daemon_store_imports",
 					"events",
+					"input_drafts",
 					"message_part_tombstones",
 					"message_parts",
 					"message_tombstones",
@@ -332,6 +333,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 64, name: "prompt_provider_reference" },
 				{ migration_id: 65, name: "tool_result_event_refs" },
 				{ migration_id: 66, name: "project_tree_data" },
+				{ migration_id: 67, name: "input_drafts" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

@@ -95,6 +95,7 @@ it.effect(
 			SELECT 'm-' || id, id, 'user', id, 100, 100 FROM sessions WHERE parent_id = 'root'`;
 			expect(yield* makeEffectSqlMigrator()).toEqual([
 				[66, "project_tree_data"],
+				[67, "input_drafts"],
 			]);
 			expect(
 				yield* sql`SELECT COUNT(*) AS count, COUNT(DISTINCT version) AS versions
@@ -138,6 +139,7 @@ it.effect(
 			VALUES ('late-header', 's', 1, 'message.created', '{"messageId":"late-synthetic"}', '{"synthetic":true}', 'opencode', 601)`;
 			expect(yield* makeEffectSqlMigrator()).toEqual([
 				[66, "project_tree_data"],
+				[67, "input_drafts"],
 			]);
 			expect(
 				yield* sql`SELECT id, is_human_sent FROM messages ORDER BY id`,
@@ -232,6 +234,7 @@ const expectedNames = [
 	"prompt_provider_reference",
 	"tool_result_event_refs",
 	"project_tree_data",
+	"input_drafts",
 ];
 const legacyNames = [
 	"create_event_store_tables",
@@ -264,6 +267,7 @@ it.effect(
 				[64, "prompt_provider_reference"],
 				[65, "tool_result_event_refs"],
 				[66, "project_tree_data"],
+				[67, "input_drafts"],
 			]);
 			yield* sql`UPDATE sessions SET forked_from = 'source' WHERE id = 'fork'`;
 			expect(yield* makeEffectSqlMigrator()).toEqual([]);
@@ -386,6 +390,7 @@ describe("Effect migration lineage", () => {
 					64,
 					65,
 					66,
+					67,
 				]);
 				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, workspace_hint, workspace_hint_sequence)
 					VALUES ('main-database', 'claude', 'Preserved', 'idle', 1, 1, '/repo/worktree', 123)`;
@@ -551,7 +556,7 @@ describe("Effect migration lineage", () => {
 	);
 
 	it("registers the contiguous production chain from 1 through 66", () => {
-		expect(migrationEntries).toHaveLength(66);
+		expect(migrationEntries).toHaveLength(67);
 		expect(migrationEntries.map(([key]) => key)).toEqual(
 			expectedNames.map(
 				(name, index) => `${String(index + 1).padStart(4, "0")}_${name}`,
@@ -734,6 +739,7 @@ describe("Effect migration lineage", () => {
 					[64, "prompt_provider_reference"],
 					[65, "tool_result_event_refs"],
 					[66, "project_tree_data"],
+					[67, "input_drafts"],
 				]);
 				expect(yield* sql`SELECT type FROM events WHERE sequence = 45`).toEqual(
 					[{ type: "thinking.end" }],
@@ -821,6 +827,7 @@ describe("Effect migration lineage", () => {
 					[64, "prompt_provider_reference"],
 					[65, "tool_result_event_refs"],
 					[66, "project_tree_data"],
+					[67, "input_drafts"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace_hint, workspace_hint_sequence
@@ -887,6 +894,7 @@ describe("Effect migration lineage", () => {
 					[64, "prompt_provider_reference"],
 					[65, "tool_result_event_refs"],
 					[66, "project_tree_data"],
+					[67, "input_drafts"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace, claude_worktree_state FROM sessions WHERE id = 'kept-workspace'`,
@@ -1487,6 +1495,7 @@ describe("Effect migration lineage", () => {
 				[64, "prompt_provider_reference"],
 				[65, "tool_result_event_refs"],
 				[66, "project_tree_data"],
+				[67, "input_drafts"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -1590,6 +1599,7 @@ describe("Effect migration lineage", () => {
 					[64, "prompt_provider_reference"],
 					[65, "tool_result_event_refs"],
 					[66, "project_tree_data"],
+					[67, "input_drafts"],
 				]);
 				const rows = yield* sql<{
 					id: string;

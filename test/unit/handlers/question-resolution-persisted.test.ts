@@ -18,6 +18,10 @@ import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-adv
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import {
+	InputDraftsLive,
+	type InputDraftsTag,
+} from "../../../src/lib/domain/relay/Services/input-drafts.js";
+import {
 	PendingInteractionServiceLive,
 	type PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
@@ -88,6 +92,7 @@ const makeWsHandler = () => ({
 /** Everything the handlers under test reach for; all of it is in `layer`. */
 type HandlerStack =
 	| PersistenceEffectContext
+	| InputDraftsTag
 	| SessionEventBusTag
 	| ConfigTag
 	| PendingInteractionServiceTag
@@ -128,6 +133,7 @@ const withHandlerStack = async (
 	);
 	const layer = Layer.mergeAll(
 		persistence,
+		InputDraftsLive.pipe(Layer.provide(persistence)),
 		bus,
 		Layer.succeed(ConfigTag)(makeMockConfig({ configDir: dir })),
 		PendingInteractionServiceLive,

@@ -52,6 +52,7 @@ import type { RelayMessage } from "../../../types.js";
 import { isRecord } from "../../../utils.js";
 import type { UsageService } from "../../daemon/Services/usage.js";
 import { ContinuationLive, ContinuationTag } from "./continuation.js";
+import { InputDraftsLive, InputDraftsTag } from "./input-drafts.js";
 import { announceBackgroundWork } from "./session-attention.js";
 import { sessionPickEvents } from "./session-pick.js";
 
@@ -146,6 +147,7 @@ export const makeProviderRuntimeIngestionLive = (
 			const commitAndSignal = yield* makeCommitAndSignal;
 			const appendEvents = yield* makeAppendEventsWithClaudeTurnCosts;
 			const sql = yield* SqlClient.SqlClient;
+			const drafts = yield* InputDraftsTag;
 			const eventStore = yield* EventStoreEffectTag;
 			const continuation = yield* ContinuationTag;
 			const services = yield* Effect.context<
@@ -318,6 +320,7 @@ export const makeProviderRuntimeIngestionLive = (
 							}
 
 							let appended = true;
+							const draftsToForget = new Set<string>();
 							const acceptedLimits: string[] = [];
 							const completedAccounts = new Set<string>();
 							let skippedLimits = 0;
@@ -355,6 +358,16 @@ export const makeProviderRuntimeIngestionLive = (
 							});
 							const afterCommit = Effect.gen(function* () {
 								if (appended) {
+									for (const id of draftsToForget)
+										yield* drafts
+											.forget(id)
+											.pipe(
+												Effect.catch((cause) =>
+													Effect.logError(
+														`Could not forget input draft ${id}: ${cause}`,
+													),
+												),
+											);
 									yield* Ref.set(mapperStateRef, nextState);
 									for (const id of promptIds)
 										yield* ingestOptions.onPrompt?.(id) ?? Effect.void;
@@ -456,18 +469,24 @@ export const makeProviderRuntimeIngestionLive = (
 													continue;
 												if (event.type === "session.deleted") {
 													deleted.add(event.sessionId);
+													draftsToForget.add(event.sessionId);
 													const subtree = yield* sql.unsafe<{ id: string }>(
 														SESSION_SUBTREE_SQL,
 														[event.sessionId],
 													);
-													for (const row of subtree) deleted.add(row.id);
+													for (const row of subtree) {
+														deleted.add(row.id);
+														draftsToForget.add(row.id);
+													}
 													for (const previous of accepted)
 														if (
 															previous.type === "session.created" &&
 															previous.data.parentId &&
 															deleted.has(previous.data.parentId)
-														)
+														) {
 															deleted.add(previous.sessionId);
+															draftsToForget.add(previous.sessionId);
+														}
 												}
 												accepted.push(event);
 												if (
@@ -645,6 +664,7 @@ export const makeProviderRuntimeIngestionLive = (
 			} satisfies ProviderRuntimeIngestion;
 		}),
 	).pipe(
+		Layer.provide(InputDraftsLive),
 		// Suspended: this module sits on an import cycle back through ContinuationLive, so the eager export below would read it before it is initialised.
 		Layer.provideMerge(Layer.suspend(() => ContinuationLive)),
 	);

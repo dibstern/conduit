@@ -6,8 +6,6 @@ export {
 	switchVariantForSession,
 } from "./model.js";
 export {
-	clearSessionInputDraft,
-	getSessionInputDraft,
 	handleMessage,
 	rewindSessionToMessage,
 	syncInputDraftForSession,

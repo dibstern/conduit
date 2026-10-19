@@ -18,6 +18,7 @@ import {
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
 	ConfigTag,
@@ -226,7 +227,7 @@ describe("SessionManager Effect", () => {
 			}));
 
 			// Delete
-			yield* deleteSession("s1");
+			yield* deleteSession("s1").pipe(Effect.provide(InputDraftsLive));
 
 			const state = yield* Ref.get(ref);
 			const result = {
@@ -911,7 +912,9 @@ describe("SessionManager Effect", () => {
 				});
 				expect(before.map((s) => s.id)).toContain("ses-doomed");
 
-				yield* deleteSession("ses-doomed");
+				yield* deleteSession("ses-doomed").pipe(
+					Effect.provide(InputDraftsLive),
+				);
 
 				const after = yield* listSessions("test-project", undefined, {
 					slug: "test-project",
@@ -945,7 +948,9 @@ describe("SessionManager Effect", () => {
 					('ses-parent', 'test-project', 'claude', 'Parent', 'idle', NULL, 1000, 1000),
 					('ses-child', 'test-project', 'claude', 'Subagent', 'idle', 'ses-parent', 1000, 1000)`;
 
-				yield* deleteSession("ses-parent");
+				yield* deleteSession("ses-parent").pipe(
+					Effect.provide(InputDraftsLive),
+				);
 
 				const after = yield* listSessions("test-project", undefined, {
 					slug: "test-project",

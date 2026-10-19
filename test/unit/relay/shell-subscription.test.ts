@@ -26,6 +26,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
 import {
 	makeProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionLive,
@@ -133,6 +134,7 @@ const makeShellTestLayer = (
 		RelayStatusSnapshotLive,
 		Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 		persistenceLayer,
+		InputDraftsLive.pipe(Layer.provide(persistenceLayer)),
 		...(handlerApi === undefined
 			? []
 			: [makeTestHandlerLayer({ api: handlerApi, persistenceLayer })]),

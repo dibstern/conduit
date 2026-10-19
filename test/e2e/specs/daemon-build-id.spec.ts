@@ -8,6 +8,7 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
+	type BrowserContext,
 	test as base,
 	expect,
 	type Page,
@@ -66,6 +67,55 @@ function captureBuildHandshakes(page: Page): string[] {
 		});
 	});
 	return handshakes;
+}
+
+/** Correlate requests with their replies across reconnects, keeping the wire evidence. */
+function captureDraftCalls(page: Page) {
+	type Frame = {
+		_tag: string;
+		id?: string | number;
+		requestId?: string | number;
+		tag?: string;
+		payload?: { sessionId?: string; text?: string };
+		exit?: { _tag: string; value?: { draft?: string } };
+	};
+	const calls: Array<{
+		socket: number;
+		request: { at: number; frame: Frame };
+		replies: Array<{ at: number; frame: Frame }>;
+	}> = [];
+	let sockets = 0;
+	page.on("websocket", (socket) => {
+		if (new URL(socket.url()).pathname !== "/rpc") return;
+		const socketId = sockets++;
+		const pending = new Map<string, (typeof calls)[number]>();
+		const frames = (payload: string | Buffer): Frame[] =>
+			[JSON.parse(String(payload))].flat();
+		socket.on("framesent", ({ payload }) => {
+			for (const frame of frames(payload)) {
+				if (
+					frame._tag !== "Request" ||
+					(frame.tag !== "SyncInputDraft" && frame.tag !== "ViewSession")
+				)
+					continue;
+				const call = {
+					socket: socketId,
+					request: { at: Date.now(), frame },
+					replies: [],
+				};
+				calls.push(call);
+				pending.set(String(frame.id), call);
+			}
+		});
+		socket.on("framereceived", ({ payload }) => {
+			for (const frame of frames(payload)) {
+				pending
+					.get(String(frame.requestId))
+					?.replies.push({ at: Date.now(), frame });
+			}
+		});
+	});
+	return calls;
 }
 
 async function readServerBuildId(baseUrl: string): Promise<string> {
@@ -298,6 +348,126 @@ test("matching built page and server IDs never reload on reconnect", async ({
 		handshakes,
 		reloads: navigations - 1,
 	});
+});
+
+test("a session draft reaches a new device after restart and stays cleared after sending", async ({
+	page,
+	browser,
+	buildDaemon,
+}, testInfo) => {
+	test.setTimeout(90_000);
+	const callsA = captureDraftCalls(page);
+	let contextB: BrowserContext | undefined;
+	let pageB: Page | undefined;
+	let callsB: ReturnType<typeof captureDraftCalls> = [];
+	let sessionUrl: string | undefined;
+	let sessionId: string | undefined;
+	const draft =
+		"Draft persisted for a device that has never opened this session";
+	const completed = (
+		calls: ReturnType<typeof captureDraftCalls>,
+		tag: "SyncInputDraft" | "ViewSession",
+		text: string,
+	) =>
+		calls.some(
+			({ request, replies }) =>
+				request.frame.tag === tag &&
+				request.frame.payload?.sessionId === sessionId &&
+				(tag !== "SyncInputDraft" || request.frame.payload?.text === text) &&
+				replies.some(
+					({ frame }) =>
+						frame._tag === "Exit" &&
+						frame.exit?._tag === "Success" &&
+						(tag !== "ViewSession" || frame.exit.value?.draft === text),
+				),
+		);
+	try {
+		await page.goto(`${buildDaemon.baseUrl}/?p=build-id-test`);
+		await page.locator(".connect-overlay").waitFor({ state: "detached" });
+		await page.locator("#new-session-btn:visible").click();
+		const inputA = page.locator("#input");
+		await inputA.fill("hello");
+		await page.locator("#send").click();
+		await expect(page).toHaveURL(/\/s\/ses_/);
+		sessionUrl = page.url();
+		sessionId = new URL(sessionUrl).pathname.split("/").at(-1);
+		await inputA.fill(draft);
+		await expect
+			.poll(() => completed(callsA, "SyncInputDraft", draft))
+			.toBe(true);
+		await page.screenshot({ path: testInfo.outputPath("draft-written-A.png") });
+
+		// Stop A's reconnect code so it cannot re-send a local draft after restart.
+		await page.goto("about:blank");
+		await buildDaemon.restart(buildDaemon.buildId);
+		contextB = await browser.newContext({
+			viewport: page.viewportSize(),
+			isMobile: testInfo.project.use.isMobile ?? false,
+			hasTouch: testInfo.project.use.hasTouch ?? false,
+		});
+		pageB = await contextB.newPage();
+		callsB = captureDraftCalls(pageB);
+		await pageB.goto(sessionUrl);
+		await expect.poll(() => completed(callsB, "ViewSession", draft)).toBe(true);
+		const inputB = pageB.locator("#input");
+		await expect(inputB).toHaveValue(draft);
+		await pageB.screenshot({
+			path: testInfo.outputPath("draft-restored-new-device-B.png"),
+		});
+
+		await page.goto(sessionUrl);
+		await expect(inputA).toHaveValue(draft);
+		await pageB.locator("#send").click();
+		await expect(inputA).toHaveValue("");
+		await expect(inputB).toHaveValue("");
+		const beforeClearA = callsA.length;
+		const beforeClearB = callsB.length;
+		await page.reload();
+		await pageB.reload();
+		await expect
+			.poll(() => completed(callsA.slice(beforeClearA), "ViewSession", ""))
+			.toBe(true);
+		await expect
+			.poll(() => completed(callsB.slice(beforeClearB), "ViewSession", ""))
+			.toBe(true);
+
+		await page.goto("about:blank");
+		await pageB.goto("about:blank");
+		await buildDaemon.restart(buildDaemon.buildId);
+		const beforeRestartA = callsA.length;
+		const beforeRestartB = callsB.length;
+		await page.goto(sessionUrl);
+		await pageB.goto(sessionUrl);
+		await expect
+			.poll(() => completed(callsA.slice(beforeRestartA), "ViewSession", ""))
+			.toBe(true);
+		await expect
+			.poll(() => completed(callsB.slice(beforeRestartB), "ViewSession", ""))
+			.toBe(true);
+		await expect(inputA).toHaveValue("");
+		await expect(inputB).toHaveValue("");
+	} finally {
+		await Promise.allSettled([
+			page.screenshot({ path: testInfo.outputPath("draft-final-A.png") }),
+			...(pageB
+				? [pageB.screenshot({ path: testInfo.outputPath("draft-final-B.png") })]
+				: []),
+		]);
+		const path = testInfo.outputPath("session-draft-rpc-frames.json");
+		writeFileSync(
+			path,
+			JSON.stringify(
+				{ sessionUrl, sessionId, draft, A: callsA, B: callsB },
+				null,
+				2,
+			),
+		);
+		await testInfo.attach("session-draft-rpc-frames", {
+			path,
+			contentType: "application/json",
+		});
+		await contextB?.close();
+	}
 });
 
 for (const sameBuild of [true, false]) {

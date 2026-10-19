@@ -337,6 +337,10 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO sessions
+				(id, project_id, provider, title, status, created_at, updated_at)
+				VALUES ('session-1', 'test-project', 'opencode', 'Session', 'idle', 1, 1)`;
 			yield* client.SyncInputDraft({
 				sessionId: "session-1",
 				text: "saved draft",

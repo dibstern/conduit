@@ -13,6 +13,7 @@ import {
 	EVENTS_SESSION_TYPE_INDEX_MIGRATION,
 	EVENTS_UNSTAMPED_INDEX_MIGRATION,
 	FORK_POINT_TIMESTAMP_MIGRATION,
+	INPUT_DRAFTS_MIGRATION,
 	LEGACY_FORKS_MIGRATION,
 	MESSAGE_PART_METADATA_MIGRATION,
 	MESSAGE_PART_VERSIONS_MIGRATION,
@@ -164,6 +165,14 @@ const expectedTableColumns = {
 		"provider",
 		"created_at",
 		"project_id",
+	],
+	input_drafts: [
+		"draft_key",
+		"project_id",
+		"kind",
+		"text",
+		"updated_at",
+		"promoted_session_id",
 	],
 	message_parts: [
 		"id",
@@ -368,7 +377,9 @@ const expectedTableColumns = {
 	],
 } as const;
 
-const expectedTableNames = Object.keys(expectedTableColumns).sort();
+const expectedTableNames = Object.keys(expectedTableColumns)
+	.filter((name) => name !== "input_drafts")
+	.sort();
 const durableProviderCommandTableNames = [
 	"provider_command_interactions",
 	"provider_command_meta",
@@ -399,6 +410,7 @@ const postBaselineTableNames = new Set<string>([
 	"message_tombstones", // 0029
 	"session_goal_checks", // 0030
 	"pending_inputs", // 0041
+	"input_drafts", // 0066
 ]);
 const preDurableCommandReceiptColumns =
 	expectedTableColumns.command_receipts.slice(0, 6);
@@ -573,7 +585,9 @@ const verifyExistingBaselineSchema: Effect.Effect<
 		SELECT name FROM sqlite_master
 		WHERE type='index' AND name NOT LIKE 'sqlite_%'
 		ORDER BY name`;
-	const actualIndexNames = indexes.map((row) => row.name);
+	const actualIndexNames = indexes
+		.map((row) => row.name)
+		.filter((name) => name !== "idx_input_drafts_project");
 	const knownIndexShape =
 		sameStrings(actualIndexNames, expectedIndexNames) ||
 		sameStrings(
@@ -596,7 +610,8 @@ const verifyExistingBaselineSchema: Effect.Effect<
 	)) {
 		if (
 			(durableProviderCommandTableNameSet.has(tableName) ||
-				tableName === "projection_failures") &&
+				tableName === "projection_failures" ||
+				postBaselineTableNames.has(tableName)) &&
 			!actualTableNames.includes(tableName)
 		) {
 			continue;
@@ -1284,6 +1299,13 @@ export const effectMigrationEntries = {
 			changed.map(({ id }) => id),
 			version,
 		);
+	}),
+	"0067_input_drafts": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const existing = yield* sql<{ name: string }>`
+			SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'input_drafts'`;
+		if (existing.length > 0) return;
+		yield* executeSqlStatements(readMigrationSql(INPUT_DRAFTS_MIGRATION));
 	}),
 } satisfies Record<
 	string,

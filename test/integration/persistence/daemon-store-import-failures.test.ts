@@ -443,6 +443,7 @@ it("C1 excludes a shared session from every populated scoped table and imports i
 		"provider_state",
 		"tool_content",
 		"sent_alerts",
+		"input_drafts",
 		"projection_failures",
 		"session_pick_backfill",
 		"claude_runner_permission_replies",

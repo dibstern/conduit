@@ -22,7 +22,7 @@ import {
 import { SessionDirectory } from "../domain/daemon/Services/session-directory.js";
 import { subscribeAlerts } from "../domain/relay/Services/alerts.js";
 import { subscribeApprovals } from "../domain/relay/Services/approvals-subscription.js";
-import { subscribeInputDraft } from "../domain/relay/Services/input-drafts.js";
+import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
 import { subscribeProjectSettings } from "../domain/relay/Services/project-settings.js";
 import { subscribePtys } from "../domain/relay/Services/pty-subscription.js";
 import { WebSocketHandlerTag } from "../domain/relay/Services/services.js";
@@ -138,7 +138,12 @@ const streamHandlers = {
 	SubscribeProjectSettings: () => subscribeProjectSettings(),
 	SubscribeDraftModels: (request) => subscribeDraftModels(request),
 	SubscribeAlerts: () => subscribeAlerts(),
-	SubscribeInputDraft: (request) => subscribeInputDraft(request.sessionId),
+	SubscribeInputDraft: (request) =>
+		Stream.unwrap(
+			Effect.map(InputDraftsTag, (drafts) =>
+				drafts.subscribe({ session: request.sessionId }),
+			),
+		),
 	...daemonOnlyStreamHandlers,
 } satisfies {
 	[K in WsRpcs as Rpc.IsStream<K, K["_tag"]> extends never

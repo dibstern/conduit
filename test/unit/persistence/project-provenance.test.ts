@@ -117,6 +117,7 @@ describe("Bound project provenance", () => {
 			"0064_prompt_provider_reference",
 			"0065_tool_result_event_refs",
 			"0066_project_tree_data",
+			"0067_input_drafts",
 		]);
 	});
 
