@@ -64,7 +64,11 @@ export const projectTreeState = $state({
 	collapsed: readCollapsed(),
 	/** Projects showing every loaded row. Not persisted: a reload starts short. */
 	showingAll: [] as string[],
+	/** A dragged order the daemon has not confirmed yet; it wins over the saved order. */
+	pendingOrder: null as readonly string[] | null,
 });
+
+let latestOrderRequest = 0;
 
 export function setProjectSort(sort: ProjectSort): void {
 	projectTreeState.sort = sort;
@@ -90,12 +94,22 @@ export function toggleProjectShowingAll(slug: string): void {
 
 /** Saves a dragged order. The shell feed echoes it back to every client. */
 export function setProjectOrder(projectOrder: string[]): void {
-	const previous = projectState.projectOrder;
-	projectState.projectOrder = projectOrder;
-	rpc("SetProjectOrder", { projectOrder }).catch((error: unknown) => {
-		projectState.projectOrder = previous;
-		toastFailure("Couldn't save the project order")(error);
-	});
+	const request = ++latestOrderRequest;
+	projectTreeState.pendingOrder = projectOrder;
+	// Only the newest drag settles the pending order, so an older reply can
+	// neither restore a superseded order nor drop a newer one. On failure the
+	// daemon's saved order, which the shell feed keeps current, shows again.
+	rpc("SetProjectOrder", { projectOrder }).then(
+		() => {
+			if (request !== latestOrderRequest) return;
+			projectState.projectOrder = projectOrder;
+			projectTreeState.pendingOrder = null;
+		},
+		(error: unknown) => {
+			if (request === latestOrderRequest) projectTreeState.pendingOrder = null;
+			toastFailure("Couldn't save the project order")(error);
+		},
+	);
 }
 
 export type ProjectTreeNode = {
@@ -110,6 +124,8 @@ export type ProjectTreeNode = {
 	more: "more" | "less" | null;
 	/** No loaded session at all, on a shelf or not. */
 	empty: boolean;
+	/** False for a missing or unavailable project, which cannot take a new session. */
+	available: boolean;
 };
 
 /**
@@ -125,7 +141,10 @@ export function buildProjectTree({
 	narrowed,
 	currentId,
 }: {
-	projects: readonly Pick<ProjectInfo, "slug" | "title" | "addedAt">[];
+	projects: readonly Pick<
+		ProjectInfo,
+		"slug" | "title" | "addedAt" | "missing" | "unavailableReason"
+	>[];
 	sections: readonly SessionSection[];
 	sessions: readonly SessionInfo[];
 	narrowed: boolean;
@@ -137,14 +156,19 @@ export function buildProjectTree({
 	);
 	// Rows can name a project the registry has not delivered yet; they still get a header.
 	const known = new Set(projects.map((project) => project.slug));
-	const headers = [
+	const headers: (typeof projects)[number][] = [
 		...projects,
 		...sections
 			.filter((section) => !known.has(section.key))
 			.map((section) => ({ slug: section.key, title: section.label })),
 	];
 	const loaded = new Set(sessions.map((session) => session.projectSlug));
-	return sortProjects(headers, sessions, sort, projectState.projectOrder)
+	return sortProjects(
+		headers,
+		sessions,
+		sort,
+		projectTreeState.pendingOrder ?? projectState.projectOrder,
+	)
 		.filter((project) => !narrowed || live.has(project.slug))
 		.map((project) => {
 			const projectSessions = live.get(project.slug) ?? [];
@@ -164,6 +188,7 @@ export function buildProjectTree({
 				collapsed: isCollapsed,
 				more: isCollapsed || !long ? null : showAll ? "less" : "more",
 				empty: !loaded.has(project.slug),
+				available: !project.missing && !project.unavailableReason,
 			};
 		});
 }

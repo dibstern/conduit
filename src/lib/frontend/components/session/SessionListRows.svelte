@@ -157,6 +157,7 @@
 				title="New session in {node.title}"
 				ariaLabel="New session in {node.title}"
 				data-testid="project-tree-new-session"
+				disabled={!node.available}
 				onclick={() => selection.openDraft(node.slug)}
 			/>
 		</div>
