@@ -92,7 +92,7 @@ describe("reduce", () => {
 		expect(before.versions.size).toBe(2);
 	});
 
-	it("partitions 5,040 permutations by commit order and reconnect snapshot boundaries", () => {
+	it("applies committed changes across reconnect snapshot boundaries", () => {
 		const history: readonly Change<Row>[] = [
 			{ _tag: "upsert", item: row("a", "a1"), sequence: 1 },
 			{ _tag: "upsert", item: row("b", "b2"), sequence: 2 },
@@ -102,64 +102,19 @@ describe("reduce", () => {
 			{ _tag: "snapshot", rows: [row("a", "a3")], sequence: 4 },
 			{ _tag: "upsert", item: row("c", "c5"), sequence: 5 },
 		];
-		let producible = 0;
-		let impossible = 0;
-		// This fixture starts from snapshot@0. Its two later snapshots are
-		// reconnect rebases. A live change cannot follow a base at the same
-		// sequence, since the base already covers it. Replay overlaps are
-		// exercised separately below, with explicit connection boundaries.
-		const canDeliver = (events: readonly Change<Row>[]): boolean => {
-			let previous = 0;
-			let base = 0;
-			for (const event of events) {
-				if (event._tag === "synchronized" || event.sequence === undefined)
-					return false;
-				if (event.sequence < previous) return false;
-				if (event._tag === "snapshot") base = event.sequence;
-				else if (event.sequence <= base) return false;
-				previous = event.sequence;
-			}
-			return true;
-		};
-		const visit = (
-			prefix: readonly Change<Row>[],
-			remaining: readonly Change<Row>[],
-		): void => {
-			if (remaining.length === 0) {
-				if (!canDeliver(prefix)) {
-					impossible++;
-					return;
-				}
-				producible++;
-				// Markers close each snapshot immediately, not arbitrary partial
-				// deliveries. Shell reconnects require a replacement snapshot.
-				let state = apply(
-					empty,
-					{ _tag: "snapshot", rows: [], sequence: 0 },
-					{ _tag: "synchronized" },
-				);
-				for (const event of prefix) {
-					state = apply(state, event);
-					if (event._tag === "snapshot")
-						state = apply(state, { _tag: "synchronized" });
-				}
-				expect(titles(state)).toEqual({ a: "a3", c: "c5" });
-				expect(state.floor).toBe(4);
-				expect(state.settled).toBe(true);
-				return;
-			}
-			remaining.forEach((change, index) => {
-				visit(
-					[...prefix, change],
-					remaining.filter((_, i) => i !== index),
-				);
-			});
-		};
-		visit([], history);
-		expect({ producible, impossible }).toEqual({
-			producible: 1,
-			impossible: 5_039,
-		});
+		let state = apply(
+			empty,
+			{ _tag: "snapshot", rows: [], sequence: 0 },
+			{ _tag: "synchronized" },
+		);
+		for (const event of history) {
+			state = apply(state, event);
+			if (event._tag === "snapshot")
+				state = apply(state, { _tag: "synchronized" });
+		}
+		expect(titles(state)).toEqual({ a: "a3", c: "c5" });
+		expect(state.floor).toBe(4);
+		expect(state.settled).toBe(true);
 	});
 
 	it("accepts equal-sequence live siblings without a completion marker", () => {

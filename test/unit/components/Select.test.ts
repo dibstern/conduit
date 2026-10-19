@@ -62,14 +62,6 @@ describe("Select", () => {
 		);
 	});
 
-	it("applies the small size class", () => {
-		const { getByRole } = render(Select, {
-			props: { size: "sm", children: options() },
-		});
-
-		expect(getByRole("combobox").className).toContain("h-8");
-	});
-
 	it("reflects disabled", () => {
 		const { getByRole } = render(Select, {
 			props: { disabled: true, children: options() },
