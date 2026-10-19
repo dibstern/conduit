@@ -103,6 +103,7 @@ export interface RunnerProviderInstanceDeps {
 	readonly daemonConfigDir?: string;
 	readonly onBackgroundTask?: (input: BackgroundTaskTransition) => void;
 	readonly ensureChildSession?: ClaudeEventPersistEffect["ensureClaudeSubagentSession"];
+	readonly readSubagentTranscript?: ClaudeEventPersistEffect["readClaudeSubagentTranscript"];
 	readonly persistUserMessage?: ClaudeEventPersistEffect["persistUserMessage"];
 }
 
@@ -765,6 +766,22 @@ export class RunnerProviderInstance implements ProviderInstance {
 					return yield* this.placeUserMessageEffect(output.input).pipe(
 						Effect.mapError((cause) => sessionFailure(output.type, cause)),
 					);
+				case "read-subagent-transcript": {
+					const persist = yield* Effect.serviceOption(
+						ClaudeEventPersistEffectTag,
+					);
+					const readTranscript =
+						this.deps.readSubagentTranscript ??
+						(persist._tag === "Some"
+							? persist.value.readClaudeSubagentTranscript
+							: undefined);
+					const subagentTranscript = yield* readTranscript?.(
+						output.childSessionId,
+					).pipe(
+						Effect.mapError((cause) => sessionFailure(output.type, cause)),
+					) ?? Effect.succeed({ messages: [], parts: [] });
+					return { subagentTranscript };
+				}
 				case "ensure-subagent-session": {
 					const persist = yield* Effect.serviceOption(
 						ClaudeEventPersistEffectTag,
@@ -783,7 +800,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 				}
 			}
 		}).pipe(
-			Effect.as({}),
+			Effect.map((reply) => reply ?? {}),
 			Effect.catchDefect((cause) =>
 				Effect.fail(sessionFailure(output.type, cause)),
 			),

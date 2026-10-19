@@ -229,6 +229,7 @@ export interface ClaudeProviderInstanceDeps {
 	readonly subagentSdk?: ClaudeSubagentSdk;
 	readonly sessionForkSdk?: ClaudeSessionForkSdk;
 	readonly ensureClaudeSubagentSession?: ClaudeEventPersistEffect["ensureClaudeSubagentSession"];
+	readonly readClaudeSubagentTranscript?: ClaudeEventPersistEffect["readClaudeSubagentTranscript"];
 	readonly persistUserMessage?: ClaudeEventPersistEffect["persistUserMessage"];
 	readonly persistHandoffDelivered?: ClaudeEventPersistEffect["persistHandoffDelivered"];
 	readonly subagentPollTimeoutMs?: number;
@@ -327,6 +328,9 @@ export const makeClaudeProviderRuntime = (
 				accounts,
 				...(deps.ensureClaudeSubagentSession
 					? { ensureChildSession: deps.ensureClaudeSubagentSession }
+					: {}),
+				...(deps.readClaudeSubagentTranscript
+					? { readSubagentTranscript: deps.readClaudeSubagentTranscript }
 					: {}),
 			},
 			driver,
@@ -772,6 +776,43 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				(cause) =>
 					new ClaudeBoundaryError({
 						operation: "ensureClaudeSubagentSession",
+						cause: new Error(cause.message),
+					}),
+			),
+		);
+	}
+
+	private readSubagentTranscriptEffect(
+		ctx: ClaudeSessionContext,
+		childSessionId: string,
+	) {
+		const sinkId = this.sinks.sinkId(ctx.eventSink);
+		return Effect.gen({ self: this }, function* () {
+			if (!sinkId)
+				return yield* Effect.fail({
+					operation: "read-subagent-transcript",
+					message: "Missing Claude transcript sink",
+				});
+			const output = {
+				type: "read-subagent-transcript" as const,
+				sinkId,
+				childSessionId,
+			};
+			let reply = yield* this.emit(output);
+			// A reconnect can replay a read older than the last acknowledged output.
+			// Its reply is no longer retained, so ask again with a new sequence.
+			if (!reply.subagentTranscript) reply = yield* this.emit(output);
+			if (!reply.subagentTranscript)
+				return yield* Effect.fail({
+					operation: output.type,
+					message: "Missing persisted Claude subagent transcript reply",
+				});
+			return reply.subagentTranscript;
+		}).pipe(
+			Effect.mapError(
+				(cause) =>
+					new ClaudeBoundaryError({
+						operation: "readClaudeSubagentTranscript",
 						cause: new Error(cause.message),
 					}),
 			),
@@ -1829,6 +1870,10 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						ctx,
 						decision,
 						parentClaudeSessionId,
+						{
+							readTranscript: (childSessionId) =>
+								this.readSubagentTranscriptEffect(ctx, childSessionId),
+						},
 					);
 					if (childLink) parentChildLink = childLink;
 					continue;
