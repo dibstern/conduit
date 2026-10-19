@@ -505,6 +505,14 @@ export const makeMessageProjector = defineProjector(() => ({
 	],
 	project: (event, ctx) => {
 		let replacesUserMessage = false;
+		let previousMessage:
+			| { created_at: number; is_human_sent: number }
+			| undefined;
+		let authorshipMessageId =
+			isEventType(event, "message.created") &&
+			(event.data.role === "user" || event.metadata.synthetic === true)
+				? event.data.messageId
+				: undefined;
 		return Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			if (isEventType(event, "session.setup_started")) {
@@ -596,17 +604,35 @@ export const makeMessageProjector = defineProjector(() => ({
 			// messageId can name the previous answer, whose usage and time stay put.
 			if (isEventType(event, "turn.completed") && event.data.userMessageId)
 				return [];
-			if (
-				"messageId" in event.data &&
-				event.type !== "message.part.removed" &&
-				event.metadata.rawSource !== "opencode.rest"
-			) {
+			if ("messageId" in event.data && event.type !== "message.snapshot") {
 				const rows = yield* sql<{
 					rest_digest: string | null;
 					session_id: string;
+					role: string;
+					is_human_sent: number;
+					created_at: number;
 				}>`
-						SELECT rest_digest, session_id FROM messages WHERE id = ${event.data.messageId}`;
-				if (rows[0]?.rest_digest != null) {
+						SELECT rest_digest, session_id, role, is_human_sent, created_at FROM messages WHERE id = ${event.data.messageId}`;
+				previousMessage = rows[0];
+				if (rows[0]?.role === "user" || rows[0]?.is_human_sent === 1) {
+					switch (event.type) {
+						case "message.created":
+						case "message.part.removed":
+						case "text.delta":
+						case "file.attached":
+						case "thinking.start":
+						case "thinking.delta":
+						case "tool.started":
+						case "tool.running":
+						case "tool.completed":
+							authorshipMessageId = event.data.messageId;
+					}
+				}
+				if (
+					event.type !== "message.part.removed" &&
+					event.metadata.rawSource !== "opencode.rest" &&
+					rows[0]?.rest_digest != null
+				) {
 					yield* sql`UPDATE sessions SET history_complete = 0 WHERE id = ${rows[0].session_id}`;
 					// A late header can add send identity or synthetic provenance
 					// without replacing the snapshot's authoritative content.
@@ -637,7 +663,7 @@ export const makeMessageProjector = defineProjector(() => ({
 					)
 					.map((part) => part["text"])
 					.join("");
-				// Only snapshots can change a stored message's ordering clock. Drive
+				// A snapshot can change a stored message's ordering clock. Drive
 				// the cut lookup from this message's primary key, never scan sessions
 				// on ordinary writes or restamp siblings when the clock is unchanged.
 				const existing = yield* sql<{
@@ -653,6 +679,8 @@ export const makeMessageProjector = defineProjector(() => ({
 				replacesUserMessage =
 					existing.length > 0 &&
 					(existing[0]?.role === "user" || message.role === "user");
+				if (message.role === "user" || existing[0]?.role === "user")
+					authorshipMessageId = message.id;
 				const previousPayload = jsonRecord(existing[0]?.rest_payload ?? null);
 				const synthetic =
 					event.metadata.synthetic ||
@@ -790,14 +818,19 @@ export const makeMessageProjector = defineProjector(() => ({
 				// A backfilled message is settled history: it never streams here.
 				const isBackfilled = event.data.backfilled ? 1 : 0;
 				const created = event.metadata.providerCreatedAt ?? event.createdAt;
+				if (
+					event.metadata.providerCreatedAt !== undefined &&
+					previousMessage?.is_human_sent === 1 &&
+					created < previousMessage.created_at
+				)
+					replacesUserMessage = true;
 				const isStreaming =
 					event.data.role === "assistant" && !isBackfilled ? 1 : 0;
 				// A live user message whose input was sent as a steer, landing while
 				// another turn is open, was read mid-turn; the turn projector closes
 				// that turn. A steer landing after the turn ended ran as its own.
 				const steers = event.data.role === "user" && !isBackfilled;
-				return ids(
-					yield* sql<{ id: string }>`
+				const written = yield* sql<{ id: string }>`
 						INSERT INTO messages
 						(id, session_id, role, text, is_streaming, is_backfilled, created_at, updated_at, parent_id, input_id, is_inherited, steered)
 						VALUES (${event.data.messageId}, ${event.data.sessionId}, ${event.data.role}, '', ${isStreaming}, ${isBackfilled}, ${created}, ${event.createdAt}, ${event.data.parentID ?? null}, ${event.data.inputId ?? null},
@@ -815,15 +848,39 @@ export const makeMessageProjector = defineProjector(() => ({
 									AND id != ${event.data.messageId}))
 						ON CONFLICT (id) DO UPDATE SET
 							role = excluded.role,
+							created_at = CASE WHEN ${event.metadata.providerCreatedAt !== undefined}
+								THEN excluded.created_at ELSE messages.created_at END,
 							is_streaming = CASE WHEN excluded.role = 'user' THEN 0 ELSE messages.is_streaming END,
 							input_id = COALESCE(messages.input_id, excluded.input_id),
 							is_inherited = MAX(messages.is_inherited, excluded.is_inherited)
 						WHERE messages.role <> excluded.role
 							OR ${event.metadata.synthetic === true}
 							OR messages.is_inherited < excluded.is_inherited
+							OR (${event.metadata.providerCreatedAt !== undefined} AND messages.created_at <> excluded.created_at)
 							OR (messages.input_id IS NULL AND excluded.input_id IS NOT NULL)
-						RETURNING id`,
-				);
+						RETURNING id`;
+				if (
+					!previousMessage ||
+					event.metadata.providerCreatedAt === undefined ||
+					previousMessage.created_at === created ||
+					written.length === 0
+				)
+					return ids(written);
+				const [rewind] = yield* sql<{ id: string }>`SELECT id FROM sessions
+					WHERE id = ${event.data.sessionId} AND pending_rewind_message_id = ${event.data.messageId}`;
+				if (!rewind) return ids(written);
+				return [
+					...ids(written),
+					...(yield* restampRewind(
+						rewind.id,
+						{
+							id: event.data.messageId,
+							created_at: previousMessage.created_at,
+						},
+						{ id: event.data.messageId, created_at: created },
+						ctx.version,
+					)),
+				];
 			}
 
 			if (isEventType(event, "text.delta")) {
@@ -1176,14 +1233,14 @@ export const makeMessageProjector = defineProjector(() => ({
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
 					for (const messageId of new Set(written)) {
+						if (messageId !== authorshipMessageId) continue;
 						const [row] = yield* sql<{
 							role: string;
 							input_id: string | null;
 							is_inherited: number;
 							is_human_sent: number;
-							text: string;
 							rest_payload: string | null;
-						}>`SELECT role, input_id, is_inherited, is_human_sent, text, rest_payload
+						}>`SELECT role, input_id, is_inherited, is_human_sent, rest_payload
 							FROM messages WHERE id = ${messageId}`;
 						if (!row) continue;
 						const snapshot = jsonRecord(row.rest_payload);
@@ -1195,6 +1252,7 @@ export const makeMessageProjector = defineProjector(() => ({
 							snapshot["isSynthetic"] = true;
 							yield* sql`UPDATE messages SET rest_payload = ${encodeJson(snapshot)} WHERE id = ${messageId}`;
 						}
+						if (row.role !== "user" && row.is_human_sent === 0) continue;
 						const storedParts =
 							row.role === "user"
 								? yield* sql<{
@@ -1222,6 +1280,16 @@ export const makeMessageProjector = defineProjector(() => ({
 											.filter(isRecord)
 											.map((part) => ({ ...part, type: part["type"] }))
 									: [];
+						const [legacy] =
+							row.role === "user" &&
+							row.is_inherited === 0 &&
+							row.rest_payload === null &&
+							row.input_id === null &&
+							ownParts.length === 0
+								? yield* sql<{
+										text: string;
+									}>`SELECT text FROM messages WHERE id = ${messageId}`
+								: [];
 						const humanSent = isHumanSentMessage(
 							{
 								role: row.role,
@@ -1230,7 +1298,7 @@ export const makeMessageProjector = defineProjector(() => ({
 								synthetic:
 									snapshot["isSynthetic"] === true ||
 									snapshot["isCompactSummary"] === true,
-								legacyText: row.rest_payload === null ? row.text : "",
+								legacyText: legacy?.text ?? "",
 							},
 							ownParts,
 						);

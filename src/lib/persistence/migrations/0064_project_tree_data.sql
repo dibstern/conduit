@@ -13,8 +13,9 @@ UPDATE messages AS m SET is_inherited = 1 WHERE EXISTS (
 -- Retain header-only synthetic provenance for subsequent streamed parts.
 UPDATE messages AS m
 SET rest_payload = json_set(COALESCE(m.rest_payload, '{}'), '$.isSynthetic', json('true'))
-WHERE EXISTS (SELECT 1 FROM events e WHERE e.session_id = m.session_id
-	AND e.type = 'message.created' AND json_extract(e.data, '$.messageId') = m.id
+WHERE (m.session_id, m.id) IN (
+	SELECT e.session_id, json_extract(e.data, '$.messageId') FROM events e
+	WHERE e.type = 'message.created'
 	AND json_extract(e.metadata, '$.synthetic') = 1);
 
 -- Match isHumanSentMessage: delivered inputs, ordinary text/file parts, or

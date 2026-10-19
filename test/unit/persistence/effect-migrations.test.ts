@@ -12,6 +12,10 @@ import {
 	makeEffectMigrationLoader,
 	makeEffectSqlMigrator,
 } from "../../../src/lib/persistence/effect/migrations.js";
+import {
+	PROJECT_TREE_DATA_MIGRATION,
+	readMigrationSql,
+} from "../../../src/lib/persistence/schema.js";
 import { seedLegacyEventStore } from "../../helpers/legacy-event-store.js";
 
 function makeFileSqlLayer(seed?: (filename: string) => void) {
@@ -32,6 +36,79 @@ function makeFileSqlLayer(seed?: (filename: string) => void) {
 const migrationEntries = Object.entries(effectMigrationEntries);
 const prefix = (count: number) =>
 	Object.fromEntries(migrationEntries.slice(0, count));
+
+it.effect(
+	"extracts synthetic message ids without a correlated event scan",
+	() =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator(prefix(64));
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at) VALUES ('s', 'opencode', 1, 1)`;
+			yield* sql`WITH RECURSIVE n(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM n WHERE value < 2000)
+			INSERT INTO messages (id, session_id, role, text, created_at, updated_at)
+			SELECT 'm-' || value, 's', 'user', 'prompt', value, value FROM n`;
+			yield* sql`INSERT INTO events (event_id, session_id, stream_version, type, data, metadata, provider, created_at)
+			SELECT id, session_id, created_at, 'message.created', json_object('messageId', id),
+				CASE WHEN created_at % 4 = 0 THEN '{"synthetic":true}' ELSE '{}' END, 'opencode', created_at FROM messages`;
+			const [query] = readMigrationSql(PROJECT_TREE_DATA_MIGRATION)
+				.split(";")
+				.filter((statement) => statement.includes("FROM events"));
+			expect(query).toBeDefined();
+			const plan = yield* sql.unsafe<{ detail: string }>(
+				`EXPLAIN QUERY PLAN ${query}`,
+			);
+			const samples: number[] = [];
+			for (let i = 0; i < 3; i++) {
+				yield* sql`UPDATE messages SET rest_payload = NULL`;
+				const started = performance.now();
+				yield* sql.unsafe(query ?? "");
+				samples.push(performance.now() - started);
+				expect(
+					yield* sql`SELECT COUNT(*) AS count FROM messages WHERE json_extract(rest_payload, '$.isSynthetic') = 1`,
+				).toEqual([{ count: 500 }]);
+			}
+			console.info(
+				`synthetic provenance: 2000 messages, 500 marked; median ${samples.sort((a, b) => a - b)[1]?.toFixed(2)} ms`,
+			);
+			expect(
+				plan
+					.map(({ detail }) => detail)
+					.filter((detail) => detail.includes("CORRELATED")),
+			).toEqual([]);
+		}).pipe(Effect.provide(makeFileSqlLayer())),
+	{ timeout: 30000 },
+);
+
+it.effect(
+	"backfills more changed sessions than SQLite's parameter limit",
+	() =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator(prefix(64));
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at, root_id)
+			VALUES ('root', 'opencode', 1, 1, 'root')`;
+			yield* sql`WITH RECURSIVE n(value) AS (
+			SELECT 1 UNION ALL SELECT value + 1 FROM n WHERE value < 32766
+		) INSERT INTO sessions (id, provider, parent_id, root_id, created_at, updated_at)
+			SELECT 's-' || value, 'opencode', 'root', 'root', 1, 1 FROM n`;
+			yield* sql`INSERT INTO messages (id, session_id, role, input_id, created_at, updated_at)
+			SELECT 'm-' || id, id, 'user', id, 100, 100 FROM sessions WHERE parent_id = 'root'`;
+			expect(yield* makeEffectSqlMigrator()).toEqual([
+				[65, "project_tree_data"],
+			]);
+			expect(
+				yield* sql`SELECT COUNT(*) AS count, COUNT(DISTINCT version) AS versions
+			FROM sessions WHERE last_user_message_at = 100 AND version > 0`,
+			).toEqual([{ count: 32766, versions: 1 }]);
+			expect(
+				yield* sql`SELECT session_id FROM session_sidebar WHERE row IS NOT NULL`,
+			).toEqual([{ session_id: "root" }]);
+			expect(
+				yield* sql`SELECT last_user_message_at FROM sessions WHERE id = 'root'`,
+			).toEqual([{ last_user_message_at: null }]);
+		}).pipe(Effect.provide(makeFileSqlLayer())),
+	{ timeout: 30000 },
+);
 
 it.effect(
 	"adds project tree data in one migration from main and preserves it on reopen",

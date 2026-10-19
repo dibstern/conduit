@@ -3,7 +3,7 @@
 // for the same tool supersedes; dropping a heartbeat that carries metadata or
 // is the tool's last word; a cheaper copy projecting a different transcript.
 import { Effect } from "effect";
-import { Statement } from "effect/sql";
+import { SqlClient, Statement } from "effect/sql";
 import { expect, it } from "vitest";
 import { AccountIdSchema } from "../../../../src/lib/contracts/provider-instance.js";
 import { AccountDirectory } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
@@ -120,14 +120,19 @@ const turn = (n: number): CanonicalEvent[] => {
 	];
 };
 
-// The copy is rekeyed under the child; strip that and the read-model counters.
+// Compare content independently of the copy's identity, counters and provenance.
 const transcript = (rows: readonly unknown[], sessionId: string) =>
 	JSON.parse(
 		JSON.stringify(rows)
 			.replaceAll(`_${sessionId}`, "")
 			.replaceAll(sessionId, "parent"),
 		(key, value) =>
-			key === "version" || key === "last_applied_seq" ? undefined : value,
+			key === "version" ||
+			key === "last_applied_seq" ||
+			key === "is_inherited" ||
+			key === "is_human_sent"
+				? undefined
+				: value,
 	);
 
 it("copies a long Side Thread history in bounded statements with the same transcript", async () => {
@@ -178,6 +183,30 @@ it("copies a long Side Thread history in bounded statements with the same transc
 					.reduce((sum, [, n]) => sum + n, 0);
 
 			const copied = yield* store.readAllBySession(child.id);
+			const sql = yield* SqlClient.SqlClient;
+			for (const [sessionId, inherited, userHumanSent] of [
+				["parent", 0, 1],
+				[child.id, 1, 0],
+			] as const) {
+				expect(
+					yield* sql`SELECT role, is_inherited, is_human_sent, COUNT(*) AS count
+					FROM messages WHERE session_id = ${sessionId}
+					GROUP BY role, is_inherited, is_human_sent ORDER BY role`,
+				).toEqual([
+					{
+						role: "assistant",
+						is_inherited: inherited,
+						is_human_sent: 0,
+						count: TURNS,
+					},
+					{
+						role: "user",
+						is_inherited: inherited,
+						is_human_sent: userHumanSent,
+						count: TURNS,
+					},
+				]);
+			}
 			const heartbeats = copied.filter(
 				(event) => event.type === "tool.running",
 			);

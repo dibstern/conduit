@@ -1262,7 +1262,7 @@ export const effectMigrationEntries = {
 			UPDATE read_model_counter SET value = value + 1 WHERE id = 1 RETURNING value`;
 		const version = counter?.value ?? 0;
 		yield* sql`UPDATE sessions SET version = ${version}
-			WHERE id IN ${sql.in(changed.map(({ id }) => id))}`;
+			WHERE last_user_message_at IS NOT NULL`;
 		yield* refreshSidebar(
 			changed.map(({ id }) => id),
 			version,
