@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
@@ -6,7 +7,12 @@ import {
 	type EventStoreError,
 	makeEventStoreEffect,
 } from "../persistence/effect/event-store-effect.js";
-import type { CanonicalEvent, StoredEvent } from "../persistence/events.js";
+import {
+	type CanonicalEvent,
+	canonicalEvent,
+	type StoredEvent,
+} from "../persistence/events.js";
+import { isRecord } from "../utils.js";
 import type {
 	DurableCommandCommitPlan,
 	DurableCommandOutboxRequest,
@@ -58,12 +64,73 @@ export class DurableCommandCommitRepository {
 						projectId: this.projectId,
 					}),
 				);
-				const storedEvents = yield* eventStore.appendBatch(input.events);
+				const events = [...input.events];
+				const requests: DurableCommandOutboxRequest[] = [];
+				for (const request of input.outboxRequests) {
+					if (request.effectType !== "send_turn") {
+						requests.push({ ...request, projectKey: this.projectId });
+						continue;
+					}
+					const payload = yield* Effect.try({
+						try: (): unknown => JSON.parse(request.payloadJson),
+						catch: (cause) =>
+							new Error("Invalid send_turn reservation payload", { cause }),
+					});
+					if (!isRecord(payload))
+						return yield* Effect.fail(
+							new Error("Invalid send_turn reservation payload"),
+						);
+					const superseded = yield* this.sql<{ id: string; input_id: string }>`
+						SELECT r.id, COALESCE(json_extract(o.payload_json, '$.inputId'), o.command_id) AS input_id
+						FROM provider_command_outbox o JOIN provider_runs r ON r.id = json_extract(o.payload_json, '$.runId')
+						WHERE o.command_id = ${request.commandId} AND o.project_key = ${this.projectId}
+							AND o.status IN ('pending', 'retryable_failed') AND r.status = 'pending'`;
+					for (const previous of superseded) {
+						events.push(
+							canonicalEvent(
+								"turn.interrupted",
+								request.sessionId,
+								{ messageId: previous.input_id },
+								{
+									provider: request.providerId,
+									createdAt: input.receipt.updatedAt,
+									metadata: { runId: previous.id },
+								},
+							),
+						);
+					}
+					const runId = randomUUID();
+					const inputId =
+						typeof payload["inputId"] === "string"
+							? payload["inputId"]
+							: request.commandId;
+					yield* this
+						.sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
+						VALUES (${runId}, ${request.sessionId}, 'pending', ${input.receipt.updatedAt})`;
+					events.push(
+						canonicalEvent(
+							"run.requested",
+							request.sessionId,
+							{ runId, inputId },
+							{
+								provider: request.providerId,
+								createdAt: input.receipt.updatedAt,
+								metadata: { runId },
+							},
+						),
+					);
+					requests.push({
+						...request,
+						projectKey: this.projectId,
+						payloadJson: JSON.stringify({ ...payload, runId }),
+					});
+				}
+				const storedEvents = yield* eventStore.appendBatch(events);
 				yield* this.recordReceipt({
 					...input.receipt,
 					projectKey: this.projectId,
 				});
-				for (const request of input.outboxRequests) {
+				for (const request of requests) {
 					yield* this.recordOutboxRequest(
 						{ ...request, projectKey: this.projectId },
 						input.receipt.updatedAt,
@@ -136,6 +203,12 @@ export class DurableCommandCommitRepository {
 					),
 				);
 			}
+			yield* this
+				.sql`UPDATE provider_runs SET status = 'interrupted', completed_at = ${updatedAt}
+				WHERE status = 'pending' AND id IN (
+					SELECT json_extract(payload_json, '$.runId') FROM provider_command_outbox
+					WHERE command_id = ${request.commandId} AND project_key = ${this.projectId}
+					AND status IN ('pending', 'retryable_failed'))`;
 			yield* this.sql`
 				DELETE FROM provider_command_outbox
 				WHERE command_id = ${request.commandId}

@@ -15,6 +15,7 @@
 
 import type { Effect, Fiber, Semaphore } from "effect";
 import type { ClaudeSDKCommandLifecycleMessage } from "../../contracts/providers/claude-agent-sdk.js";
+import type { ProviderRuntimeEventPayloadMap } from "../../contracts/providers/provider-runtime-event.js";
 import type { NativeThread } from "../../persistence/effect/provider-state-effect.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import type { ClaudeAdapterError } from "../event-sink-errors.js";
@@ -246,6 +247,18 @@ export interface ClaudeSessionContext {
 	/** EventSink for this session — updated on each turn (latest sink wins). */
 	eventSink: EventSink | undefined;
 	currentTurnId: string | undefined;
+	/** Set only when the SDK accepts an input, retained until its result. */
+	currentRunId?: string | undefined;
+	/** Init can report a model before the SDK accepts the first input. */
+	pendingRunModel?:
+		| {
+				readonly inputId: string;
+				readonly model: ProviderRuntimeEventPayloadMap["turn.model_resolved"];
+		  }
+		| undefined;
+	/** Explicit owners keep delayed message/tool updates out of newer runs. */
+	messageRunIds?: Map<string, string>;
+	toolRunIds?: Map<string, string>;
 	/** Canonical prompt identity, retained for late rejected background notices. */
 	currentUserMessageId?: string | undefined;
 	/** A returning account's failed resume is retried by the server gate. */

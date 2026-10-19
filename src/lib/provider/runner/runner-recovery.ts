@@ -1,9 +1,11 @@
 import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
+import { ProviderRuntimeIngestionTag } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ClaudeEventPersistEffectTag } from "../../persistence/effect/claude-event-persist-effect.js";
 import { requeueFailedSteers } from "../../persistence/effect/input-requeue-effect.js";
 import { makeProviderStateEffect } from "../../persistence/effect/provider-state-effect.js";
+import { createEventId } from "../../persistence/events.js";
 import type { TurnResult } from "../types.js";
 import { runnerSinkId } from "./runner-protocol.js";
 import type { SessionFailure, SessionTurn } from "./session-runner.js";
@@ -22,11 +24,16 @@ export const runningRunnerCommands = (
 			provider_id: string;
 			command_id: string;
 			payload_json: string;
+			run_id: string | null;
 			user_message_id: string | null;
 			attempt_count: number;
 			assistant_message_id: string | null;
 			state: string | null;
 		}>`SELECT outbox.project_key, outbox.session_id, outbox.provider_id, outbox.command_id, outbox.payload_json,
+		COALESCE((SELECT json_extract(accepted.metadata, '$.runId') FROM events accepted
+			WHERE accepted.type = 'run.started' AND accepted.session_id = outbox.session_id
+			AND json_extract(accepted.data, '$.requestedRunId') = json_extract(outbox.payload_json, '$.runId') LIMIT 1),
+			json_extract(outbox.payload_json, '$.runId')) AS run_id,
 		COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS user_message_id,
 		outbox.attempt_count, turns.assistant_message_id, turns.state
 		FROM provider_command_outbox outbox
@@ -95,6 +102,7 @@ export const recoverRunnerCommands = <T extends SessionTurn, E = never>(
 				sinkId,
 				input,
 				messageId: row.assistant_message_id ?? "",
+				...(row.run_id ? { runId: row.run_id } : {}),
 				terminal:
 					row.state !== null &&
 					row.state !== "pending" &&
@@ -112,6 +120,7 @@ export const recoverRunnerCommands = <T extends SessionTurn, E = never>(
 							row.attempt_count,
 							undefined,
 							execution.failure,
+							driverKind,
 						);
 					}
 					const result = execution.success;
@@ -124,6 +133,8 @@ export const recoverRunnerCommands = <T extends SessionTurn, E = never>(
 						row.command_id,
 						row.attempt_count,
 						result,
+						undefined,
+						driverKind,
 					);
 				}),
 			};
@@ -140,6 +151,7 @@ export const settleUnclaimedRunnerCommands = <E>(
 		sinkId: string,
 		turn: {
 			sessionId: string;
+			runId?: string;
 			userMessageId?: string;
 			messageId: string;
 			terminal: boolean;
@@ -169,6 +181,7 @@ export const settleUnclaimedRunnerCommands = <E>(
 				),
 				{
 					sessionId: row.session_id,
+					...(row.run_id ? { runId: row.run_id } : {}),
 					...(row.user_message_id
 						? { userMessageId: row.user_message_id }
 						: {}),
@@ -188,6 +201,7 @@ export const settleUnclaimedRunnerCommands = <E>(
 				row.attempt_count,
 				undefined,
 				failure,
+				driverKind,
 			);
 		}
 	});
@@ -254,34 +268,74 @@ export const settleRunnerCommand = (
 	sessionId: string,
 	commandId: string,
 	attempt: number,
-	result?: TurnResult,
-	failure?: SessionFailure,
+	result: TurnResult | undefined,
+	failure: SessionFailure | undefined,
+	driverKind: string,
 ) =>
-	sql
-		.withTransaction(
-			settleRunnerCommandState(
-				sql,
-				projectId,
-				sessionId,
-				commandId,
-				attempt,
-				result,
-				failure,
-			),
-		)
-		.pipe(
-			Effect.tap(() =>
-				Effect.gen(function* () {
-					const persist = yield* Effect.serviceOption(
-						ClaudeEventPersistEffectTag,
-					);
-					if (persist._tag === "Some")
-						yield* requeueFailedSteers(
-							sql,
-							persist.value,
-							sessionId,
-							commandId,
-						);
-				}),
-			),
+	Effect.gen(function* () {
+		const settle = settleRunnerCommandState(
+			sql,
+			projectId,
+			sessionId,
+			commandId,
+			attempt,
+			result,
+			failure,
 		);
+		const migratedReservations = sql<{ id: string }>`SELECT run.id
+			FROM provider_command_outbox command
+			JOIN provider_runs run ON run.id = json_extract(command.payload_json, '$.runId')
+				AND run.session_id = command.session_id
+			JOIN events requested ON requested.event_id = 'run-requested-migration:' || run.id
+				AND requested.session_id = command.session_id AND requested.type = 'run.requested'
+			WHERE command.project_key = ${projectId} AND command.command_id = ${commandId}
+				AND command.session_id = ${sessionId} AND command.status = 'running'
+				AND command.attempt_count = ${attempt} AND run.status IN ('pending', 'running')`;
+		const [migrated] =
+			!failure && result?.status === "completed"
+				? yield* migratedReservations
+				: [];
+		if (!migrated) return yield* sql.withTransaction(settle);
+		// A surviving old runner cannot know the reservation minted at upgrade.
+		// Its exact command result proves completion, but does not prove intake.
+		const ingestion = yield* Effect.serviceOption(ProviderRuntimeIngestionTag);
+		if (ingestion._tag === "None")
+			return yield* Effect.die(
+				new Error("Legacy runner completion requires runtime ingestion"),
+			);
+		yield* ingestion.value.ingestBatch(
+			[
+				{
+					eventId: createEventId(),
+					type: "turn.completed",
+					providerId: driverKind,
+					sessionId,
+					runId: migrated.id,
+					providerRefs: {},
+					rawSource: { kind: "conduit.runner-command-completion" },
+					createdAt: Date.now(),
+					data: { messageId: "", duration: result?.durationMs ?? 0 },
+				},
+			],
+			{
+				beforeProject: migratedReservations.pipe(
+					Effect.flatMap(([current]) =>
+						current?.id === migrated.id ? Effect.void : Effect.interrupt,
+					),
+				),
+				beforeCommit: settle.pipe(
+					Effect.catchTag("ProviderStateEffectError", Effect.die),
+				),
+			},
+		);
+	}).pipe(
+		Effect.tap(() =>
+			Effect.gen(function* () {
+				const persist = yield* Effect.serviceOption(
+					ClaudeEventPersistEffectTag,
+				);
+				if (persist._tag === "Some")
+					yield* requeueFailedSteers(sql, persist.value, sessionId, commandId);
+			}),
+		),
+	);

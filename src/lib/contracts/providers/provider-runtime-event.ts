@@ -25,6 +25,7 @@ const isPlainRecord = (value: unknown): value is Record<string, unknown> => {
 const hasOwnKey = (value: object, key: string) => Object.hasOwn(value, key);
 
 export const PROVIDER_RUNTIME_EVENT_TYPES = [
+	"run.started",
 	"message.created",
 	"message.removed",
 	"message.part.removed",
@@ -152,6 +153,7 @@ const REQUIRED_PROVIDER_RUNTIME_EVENT_KEYS = [
 const PROVIDER_RUNTIME_EVENT_ENVELOPE_KEYS = [
 	...REQUIRED_PROVIDER_RUNTIME_EVENT_KEYS,
 	"turnId",
+	"runId",
 	"metadata",
 ] as const;
 const providerRuntimeEventEnvelopeKeys = new Set<string>(
@@ -168,6 +170,7 @@ const ProviderRuntimeEventEnvelopeFields = {
 	providerId: NonBlankString,
 	sessionId: NonBlankString,
 	turnId: Schema.optional(NonBlankString),
+	runId: Schema.optional(NonBlankString),
 	providerRefs: ProviderRuntimeProviderRefsSchema,
 	rawSource: ProviderRuntimeRawSourceSchema,
 	createdAt: ProviderRuntimeCreatedAtSchema,

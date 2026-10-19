@@ -1381,20 +1381,22 @@ test.describe("Claude replay lane", () => {
 							e.sequence > bPlaced,
 					),
 				).toHaveLength(1);
-				// One result: one turn end, yet two turns — Alpha's
-				// closed by the steer's message, which is marked steered.
+				// Both inputs join one run and complete at its sole result.
 				expect(
 					proof.events
 						.filter((e) => turnsOf.includes(e.type))
 						.map((e) => e.type),
 				).toEqual(["turn.completed"]);
-				const bMessage = proof.userMessages.find((m) => m.id === b);
 				expect(proof.userMessages.map((m) => [m.id, m.steered])).toEqual([
 					[a, 0],
 					[b, 1],
 				]);
 				expect(proof.turns).toEqual([
-					{ id: a, state: "completed", completed_at: bMessage?.created_at },
+					{
+						id: a,
+						state: "completed",
+						completed_at: proof.turns[1]?.completed_at,
+					},
 					{ id: b, state: "completed", completed_at: expect.any(Number) },
 				]);
 			});
@@ -1594,11 +1596,11 @@ test.describe("Claude replay lane", () => {
 					[b, 1],
 					[c, 1],
 				]);
-				const placedAt = (id: string) =>
-					proof.userMessages.find((m) => m.id === id)?.created_at;
+				// All three join one run and complete at its sole result.
+				const runEnd = proof.turns[2]?.completed_at;
 				expect(proof.turns).toEqual([
-					{ id: a, state: "completed", completed_at: placedAt(b) },
-					{ id: b, state: "completed", completed_at: placedAt(c) },
+					{ id: a, state: "completed", completed_at: runEnd },
+					{ id: b, state: "completed", completed_at: runEnd },
 					{ id: c, state: "completed", completed_at: expect.any(Number) },
 				]);
 			});

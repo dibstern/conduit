@@ -15,6 +15,7 @@ import { WsRpcError } from "../contracts/ws-rpc.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
 import { publishGlobalProjectSetting } from "../domain/relay/Services/project-settings.js";
+import { ProviderRuntimeIngestionTag } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
@@ -23,6 +24,7 @@ import {
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import {
+	OverridesStateTag,
 	PROCESSING_TIMEOUT_DURATION,
 	startProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
@@ -102,6 +104,7 @@ interface StoredPromptReference {
 	readonly tool_name: string | null;
 	readonly provider_process_id: string | null;
 	readonly provider_request_id: string | null;
+	readonly run_id: string | null;
 }
 
 const readPromptReference = (
@@ -114,7 +117,11 @@ const readPromptReference = (
 		if (Option.isNone(sql)) return undefined;
 		const [stored] = yield* sql.value<StoredPromptReference>`
 			SELECT id, session_id, type, status, tool_name,
-				provider_process_id, provider_request_id
+				provider_process_id, provider_request_id,
+				(SELECT json_extract(metadata, '$.runId') FROM events
+				 WHERE session_id = pending_approvals.session_id AND type = ${`${type}.asked`}
+					AND json_extract(data, '$.id') = pending_approvals.id
+				 ORDER BY sequence LIMIT 1) AS run_id
 			FROM pending_approvals WHERE id = ${id} AND type = ${type}`;
 		if (stored?.status === "resolved") {
 			const [expired] = yield* sql.value`
@@ -202,11 +209,23 @@ function formatAnswers(rawAnswers: Record<string, string>): string[][] {
  * After a question is answered or rejected, the model resumes processing.
  * (The timeout was cleared when the question was asked — see event-pipeline.ts.)
  */
-const restartProcessingTimeout = (sessionId: string) =>
+const restartProcessingTimeout = (sessionId: string, runId?: string | null) =>
 	Effect.gen(function* () {
-		if (!sessionId) return;
+		if (!sessionId || !runId) return;
+		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+		if (Option.isNone(sql)) return;
+		const [active] = yield* sql.value`
+			SELECT 1 FROM provider_runs WHERE id = ${runId} AND session_id = ${sessionId}
+				AND status IN ('pending', 'running')`;
+		// A late answer must not replace a newer run's inactivity timer.
+		if (!active) return;
+		const overrides = yield* Effect.serviceOption(OverridesStateTag);
+		const ingestion = yield* Effect.serviceOption(ProviderRuntimeIngestionTag);
+		if (Option.isNone(overrides) || Option.isNone(ingestion)) return;
 		const log = yield* LoggerTag;
-		const failTurn = yield* makeFailTurn;
+		const failTurn = yield* makeFailTurn.pipe(
+			Effect.provideService(ProviderRuntimeIngestionTag, ingestion.value),
+		);
 
 		yield* startProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION, () =>
 			Effect.suspend(() => {
@@ -217,9 +236,10 @@ const restartProcessingTimeout = (sessionId: string) =>
 					sessionId,
 					"No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
 					"PROCESSING_TIMEOUT",
+					{ runId },
 				);
 			}),
-		);
+		).pipe(Effect.provideService(OverridesStateTag, overrides.value));
 	});
 
 /**
@@ -306,6 +326,7 @@ const announceQuestionResolved = (
 	sessionId: string,
 	questionId: string,
 	answers: Record<string, unknown>,
+	runId?: string | null,
 ) =>
 	Effect.gen(function* () {
 		yield* recordApprovalResolved(
@@ -314,7 +335,7 @@ const announceQuestionResolved = (
 				answers,
 			}),
 		);
-		yield* restartProcessingTimeout(sessionId);
+		yield* restartProcessingTimeout(sessionId, runId);
 	});
 
 /**
@@ -492,6 +513,7 @@ export const handlePermissionResponse = (
 					persistPattern,
 				);
 			}
+			yield* restartProcessingTimeout(sessionId, stored?.run_id);
 		}
 	}).pipe(Effect.scoped);
 
@@ -629,6 +651,8 @@ export const handleAskUserResponse = (
 						text: answerText,
 						commandId: payload.commandId ?? createCommandId(),
 					});
+					// The follow-up send owns its new timeout, not this recovered prompt.
+					return;
 				}
 				const engineOption = yield* Effect.serviceOption(
 					OrchestrationEngineTag,
@@ -649,7 +673,7 @@ export const handleAskUserResponse = (
 				}
 				// Not announceQuestionResolved: the event sink or the recovered turn
 				// records this resolution, not the handler.
-				yield* restartProcessingTimeout(questionSessionId);
+				yield* restartProcessingTimeout(questionSessionId, stored?.run_id);
 				return;
 			}
 		}
@@ -670,7 +694,12 @@ export const handleAskUserResponse = (
 			),
 		);
 		if (replyResult._tag === "Success") {
-			yield* announceQuestionResolved(sessionId, toolId, answers);
+			yield* announceQuestionResolved(
+				sessionId,
+				toolId,
+				answers,
+				stored?.run_id,
+			);
 			return;
 		}
 		if (stored?.provider_request_id) {
@@ -710,6 +739,7 @@ export const handleAskUserResponse = (
 						sessionId,
 						stored?.id ?? queId,
 						answers,
+						stored?.id === queId ? stored.run_id : undefined,
 					);
 					return true;
 				}
@@ -825,9 +855,14 @@ export const handleQuestionReject = (
 				// A live question's event sink records the resolution; a recovered
 				// one has no sink left, so it is recorded here.
 				if (resolved.question.recovered) {
-					yield* announceQuestionResolved(questionSessionId, toolId, {});
+					yield* announceQuestionResolved(
+						questionSessionId,
+						toolId,
+						{},
+						stored?.run_id,
+					);
 				} else {
-					yield* restartProcessingTimeout(questionSessionId);
+					yield* restartProcessingTimeout(questionSessionId, stored?.run_id);
 				}
 				return;
 			}
@@ -849,7 +884,7 @@ export const handleQuestionReject = (
 			),
 		);
 		if (rejectResult._tag === "Success") {
-			yield* announceQuestionResolved(sessionId, toolId, {});
+			yield* announceQuestionResolved(sessionId, toolId, {}, stored?.run_id);
 			return;
 		}
 		if (stored?.provider_request_id) {
@@ -885,7 +920,12 @@ export const handleQuestionReject = (
 					yield* Effect.tryPromise(() =>
 						client.question.reject(queId, directory),
 					);
-					yield* announceQuestionResolved(sessionId, stored?.id ?? queId, {});
+					yield* announceQuestionResolved(
+						sessionId,
+						stored?.id ?? queId,
+						{},
+						stored?.id === queId ? stored.run_id : undefined,
+					);
 					return true;
 				}
 				return false;

@@ -2,6 +2,14 @@ import type { LiveEventType } from "../../contracts/stored-event.js";
 
 /** Claude SDK translation coverage; other event owners are recorded as reasons. */
 export const CLAUDE_EVENT_CLASSIFICATION = {
+	"run.requested": {
+		produced: false,
+		reason: "Committed by the provider command outbox",
+	},
+	"run.started": {
+		produced: false,
+		reason: "Emitted at the runtime input acceptance boundary",
+	},
 	"message.created": { produced: true },
 	"text.delta": { produced: true },
 	"thinking.start": { produced: true },

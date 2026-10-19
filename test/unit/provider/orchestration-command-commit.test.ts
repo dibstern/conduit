@@ -61,6 +61,87 @@ const withRepository = <A, E>(
 	);
 
 describe("DurableCommandCommitRepository", () => {
+	it.effect(
+		"replaces an idle reservation with a fresh run and records its interruption",
+		() =>
+			withRepository((sql, repository) =>
+				Effect.gen(function* () {
+					yield* repository.commit(commitInput());
+					const [first] = yield* sql<{
+						id: string;
+					}>`SELECT id FROM provider_runs`;
+					const stored = yield* repository.commit(
+						commitInput({ events: [], requestSequence: 2, at: 2000 }),
+					);
+					const runs = yield* sql<{
+						id: string;
+						status: string;
+					}>`SELECT id, status FROM provider_runs ORDER BY requested_at`;
+					expect(runs[0]).toEqual({ id: first?.id, status: "interrupted" });
+					expect(runs[1]).toEqual({
+						id: expect.any(String),
+						status: "pending",
+					});
+					expect(runs[1]?.id).not.toBe(first?.id);
+					expect(stored).toContainEqual(
+						expect.objectContaining({
+							type: "turn.interrupted",
+							metadata: { runId: first?.id },
+						}),
+					);
+				}),
+			),
+	);
+	it.effect(
+		"reserves a run with its send and rolls it back with failed commits",
+		() =>
+			withRepository((sql, repository) =>
+				Effect.gen(function* () {
+					const stored = yield* repository.commit(commitInput());
+					const [request] = yield* sql<{ payload_json: string }>`
+					SELECT payload_json FROM provider_command_outbox WHERE command_id = 'cmd-1'`;
+					const payload: unknown = JSON.parse(request?.payload_json ?? "null");
+					expect(payload).toEqual({ runId: expect.any(String) });
+					const [run] = yield* sql<{
+						id: string;
+						status: string;
+						session_id: string;
+					}>`
+					SELECT id, status, session_id FROM provider_runs`;
+					expect(run).toEqual({
+						id: expect.any(String),
+						status: "pending",
+						session_id: "session-1",
+					});
+					expect(payload).toEqual({ runId: run?.id });
+					expect(stored).toContainEqual(
+						expect.objectContaining({
+							type: "run.requested",
+							metadata: { runId: run?.id },
+							data: { runId: run?.id, inputId: "cmd-1" },
+						}),
+					);
+					yield* sql`CREATE TRIGGER fail_receipt_write BEFORE INSERT ON command_receipts
+					BEGIN SELECT RAISE(ABORT, 'receipt write failed'); END`;
+					const input = commitInput({ requestSequence: 2 });
+					const failed = yield* Effect.result(
+						repository.commit({
+							...input,
+							events: [],
+							receipt: { ...input.receipt, commandId: "cmd-2" },
+							outboxRequests: input.outboxRequests.map((request) => ({
+								...request,
+								commandId: "cmd-2",
+							})),
+						}),
+					);
+					expect(failed._tag).toBe("Failure");
+					expect(yield* sql`SELECT id FROM provider_runs`).toEqual([
+						{ id: run?.id },
+					]);
+				}),
+			),
+	);
 	// A caller may reuse a command id across projects whose session ids differ.
 	// Neither the receipt upsert nor idle-claim replacement may move B's rows.
 	it.effect("rejects a command id already owned by another project", () =>
@@ -129,7 +210,7 @@ describe("DurableCommandCommitRepository", () => {
 				Effect.gen(function* () {
 					const stored = yield* repository.commit(commitInput());
 
-					expect(stored).toHaveLength(1);
+					expect(stored).toHaveLength(2);
 					expect(
 						yield* sql`SELECT status, fingerprint_hash FROM command_receipts WHERE command_id = ${"cmd-1"}`,
 					).toEqual([
@@ -140,7 +221,7 @@ describe("DurableCommandCommitRepository", () => {
 					).toEqual([{ effect_type: "send_turn" }]);
 					expect(
 						yield* sql`SELECT last_applied_sequence FROM provider_command_meta WHERE project_key = ${"test-project"}`,
-					).toEqual([{ last_applied_sequence: 1 }]);
+					).toEqual([{ last_applied_sequence: 2 }]);
 				}),
 			),
 	);

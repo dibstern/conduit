@@ -1169,7 +1169,7 @@ export async function createProjectStoreFixture(
 				const thread = (yield* state.getState(id))["nativeThread:opencode"];
 				const repository = new DurableCommandCommitRepository(sql, projectId);
 				const requestSequence = options.outboxSequence ?? 7;
-				yield* repository.commit({
+				const committed = yield* repository.commit({
 					events: [],
 					readModelRows: [],
 					receipt: {
@@ -1198,6 +1198,7 @@ export async function createProjectStoreFixture(
 						},
 					],
 				});
+				yield* runner.projectBatch(committed);
 				const receipts = yield* makeRunnerReceiptStore(sql);
 				yield* receipts.attach(`${projectId}_runner`, "fixture-attachment");
 				yield* receipts.acknowledge(

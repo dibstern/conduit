@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Layer } from "effect";
+import { Deferred, Effect, Layer, Ref, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, expect, vi } from "vitest";
 import {
@@ -15,8 +15,10 @@ import {
 	AccountDirectoryFromConfigLive,
 } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import { Usage } from "../../../../src/lib/domain/daemon/Services/usage.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { SessionWorkspaceLive } from "../../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
+import { AgentServiceTag } from "../../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../../src/lib/domain/relay/Services/alerts.js";
 import {
 	PendingInteractionServiceLive,
@@ -24,6 +26,7 @@ import {
 } from "../../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import {
 	type ProviderRuntimeIngestion,
+	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
 } from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import {
@@ -38,10 +41,16 @@ import {
 	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "../../../../src/lib/domain/relay/Services/services.js";
+import { SessionEventBusTag } from "../../../../src/lib/domain/relay/Services/session-event-bus.js";
+import {
+	SessionInboxLive,
+	SessionInboxTag,
+} from "../../../../src/lib/domain/relay/Services/session-inbox.js";
 import { SessionManagerServiceTag } from "../../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	hasActiveProcessingTimeout,
 	makeOverridesStateLive,
+	OverridesStateTag,
 	setPermissionMode,
 	startProcessingTimeout,
 } from "../../../../src/lib/domain/relay/Services/session-overrides-state.js";
@@ -51,7 +60,9 @@ import type { OpenCodeAPI } from "../../../../src/lib/instance/opencode-api.js";
 import {
 	type ClaudeEventPersistEffect,
 	ClaudeEventPersistEffectTag,
+	makeClaudeEventPersistEffect,
 } from "../../../../src/lib/persistence/effect/claude-event-persist-effect.js";
+import { makeCommitAndSignal } from "../../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import {
 	type ProviderStateEffect,
@@ -63,14 +74,19 @@ import {
 	ReadQueryEffectError,
 	ReadQueryEffectTag,
 } from "../../../../src/lib/persistence/effect/read-query-effect.js";
+import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
 import type { SessionRow } from "../../../../src/lib/persistence/read-model-types.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
+import { openCodeInputMessageId } from "../../../../src/lib/provider/opencode/opencode-input-message-id.js";
 import { OpenCodeProviderInstance } from "../../../../src/lib/provider/opencode-provider-instance.js";
 import {
 	OrchestrationEngine,
 	type SendTurnCommand,
 } from "../../../../src/lib/provider/orchestration-engine.js";
-import { ProviderRegistry } from "../../../../src/lib/provider/provider-registry.js";
+import {
+	ProviderRegistry,
+	ProviderRegistryTag,
+} from "../../../../src/lib/provider/provider-registry.js";
 import {
 	emptyProviderRuntimeDomainMapperState,
 	translateProviderRuntimeEventToDomain,
@@ -83,6 +99,7 @@ import type {
 import {
 	MOCK_PROJECT_DIR,
 	makeMockAccountDirectory,
+	makeMockAgentService,
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -411,6 +428,22 @@ const serviceLayer = (input: {
 			ProviderTurnServiceLive,
 			Layer.provideMerge(SessionWorkspaceLive, baseLayer),
 		),
+		liveLayer: Layer.provideMerge(
+			ProviderTurnServiceLive,
+			Layer.provideMerge(
+				SessionWorkspaceLive,
+				Layer.provideMerge(
+					ProviderRuntimeIngestionLive,
+					Layer.provideMerge(
+						Layer.effect(
+							ClaudeEventPersistEffectTag,
+							makeClaudeEventPersistEffect,
+						),
+						baseLayer,
+					),
+				),
+			),
+		),
 		wsHandler,
 		log,
 		sessionManagerService,
@@ -453,6 +486,261 @@ const interruptTurn = () =>
 	});
 
 describe("ProviderTurnService", () => {
+	// A failure can commit before cleanup places the user. Placement must retain
+	// that exact reservation's failed end without inventing intake. OpenCode must
+	// also retain its reserved message ID so a delayed native echo cannot duplicate it.
+	for (const driver of ["claude", "opencode"] as const) {
+		for (const mode of ["error", "interrupted", "pending"] as const) {
+			if (driver === "claude" && mode === "pending") continue;
+			const terminal = mode === "pending" ? "error" : mode;
+			it.effect(
+				`retains ${driver} ${terminal} when the user is placed ${mode === "pending" ? "before delivery failure" : "after the owned end"}`,
+				() => {
+					let dispatch: (
+						command: SendTurnCommand,
+					) => Effect.Effect<TurnResult> = () =>
+						Effect.die("uninitialized dispatch");
+					const dispatchEffect = vi.fn((command: SendTurnCommand) =>
+						dispatch(command),
+					) as unknown as OrchestrationEngine["dispatchEffect"];
+					const { liveLayer } = serviceLayer({
+						engine: makeEngine({ providerId: driver, dispatchEffect }),
+					});
+					return Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						const commit = yield* makeCommitAndSignal;
+						const ingestion = yield* ProviderRuntimeIngestionTag;
+						const inputId = "cmd-send-default";
+						const messageId =
+							driver === "opencode" ? openCodeInputMessageId(inputId) : inputId;
+						let endedAt = 0;
+						yield* commit([
+							canonicalEvent("session.created", "session-1", {
+								sessionId: "session-1",
+								provider: driver,
+								title: "Late placement",
+							}),
+							canonicalEvent("input.admitted", "session-1", {
+								sessionId: "session-1",
+								inputId: "queued-b",
+								delivery: "queue",
+								request: { text: "next" },
+							}),
+						]);
+						yield* sql`UPDATE sessions SET provider = ${driver}, model_provider = ${driver === "opencode" ? "openai" : "claude"},
+							model_id = ${driver === "opencode" ? "gpt-4.1" : "claude-sonnet-4-5"}, variant = '', context_window = '' WHERE id = 'session-1'`;
+						dispatch = (command) =>
+							Effect.gen(function* () {
+								yield* commit([
+									...(command.events ?? []),
+									canonicalEvent(
+										"run.requested",
+										"session-1",
+										{ inputId, runId: "reserved-run" },
+										{ metadata: { runId: "reserved-run" } },
+									),
+								]);
+								yield* sql`INSERT INTO provider_command_outbox
+							(request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, attempt_count, requested_at, updated_at)
+							VALUES (1, ${inputId}, 'test-project', 'session-1', ${driver}, 'send_turn',
+								'{"inputId":"cmd-send-default","runId":"reserved-run"}', 'running', 1, 1, 1)`;
+								yield* command.onAccepted ?? Effect.void;
+								endedAt = Date.now();
+								if (mode !== "pending")
+									yield* command.input.eventSink.push({
+										...providerRuntimeEvent(
+											terminal === "error" ? "turn.error" : "turn.interrupted",
+											"session-1",
+											{
+												messageId: "",
+												userMessageId: messageId,
+												...(terminal === "error"
+													? {
+															error: "Stopped before echo",
+															code: "provider_error",
+														}
+													: { reason: "Stopped before echo" }),
+											},
+											{ createdAt: endedAt },
+										),
+										runId: "reserved-run",
+									});
+								return completedTurn({
+									status: terminal,
+									error: {
+										code: "provider_error",
+										message: "Stopped before echo",
+									},
+								});
+							}).pipe(Effect.orDie);
+						yield* sendTurn();
+						expect(dispatchEffect).toHaveBeenCalledOnce();
+						expect(
+							yield* sql`SELECT id, input_id FROM messages WHERE role = 'user'`,
+						).toEqual([{ id: messageId, input_id: inputId }]);
+						expect(
+							yield* sql`SELECT state, run_id, started_at, completed_at FROM turns`,
+						).toEqual([
+							{
+								state: terminal,
+								run_id: null,
+								started_at: null,
+								completed_at: mode === "pending" ? expect.any(Number) : endedAt,
+							},
+						]);
+						expect(
+							yield* (yield* ReadQueryEffectTag).readInboxState("session-1"),
+						).toMatchObject({ paused: true });
+						expect(
+							yield* sql`SELECT input_id, state FROM pending_inputs`,
+						).toEqual([{ input_id: "queued-b", state: "queued" }]);
+						expect(
+							yield* sql`SELECT type FROM events WHERE type = 'run.started'`,
+						).toEqual([]);
+						if (driver === "opencode") {
+							yield* ingestion.ingest(
+								providerRuntimeEvent(
+									"message.created",
+									"session-1",
+									{ sessionId: "session-1", messageId, inputId, role: "user" },
+									{ eventId: "late-native-echo", providerId: driver },
+								),
+							);
+							expect(yield* sql`SELECT id, state FROM turns`).toEqual([
+								{ id: messageId, state: terminal },
+							]);
+						}
+					}).pipe(Effect.provide(liveLayer));
+				},
+			);
+		}
+	}
+	// Failures before native intake must close the placed input, without claiming
+	// it joined a run, and must leave subsequent queued inputs paused.
+	for (const continuation of [false, true]) {
+		it.effect(
+			`processing timeout pauses the queue before intake (${continuation ? "continuation" : "send"})`,
+			() => {
+				let accept: (command: SendTurnCommand) => Effect.Effect<TurnResult> =
+					() => Effect.die("uninitialized dispatch");
+				const dispatchEffect = vi.fn((command: SendTurnCommand) =>
+					accept(command),
+				) as unknown as OrchestrationEngine["dispatchEffect"];
+				const { liveLayer: layer } = serviceLayer({
+					engine: makeEngine({ providerId: "claude", dispatchEffect }),
+				});
+				const dependencies = Layer.mergeAll(
+					layer,
+					Layer.succeed(AgentServiceTag)(makeMockAgentService()),
+					Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()),
+					Layer.succeed(SessionEventBusTag)({
+						publish: () => Effect.void,
+						publishAdvance: () => Effect.void,
+						subscribe: () => Effect.succeed(Stream.empty),
+						subscribeAdvances: () => Effect.succeed(Stream.empty),
+					}),
+					Layer.succeed(Usage)({
+						readings: Stream.empty,
+						latest: () => Effect.succeed(undefined),
+						refresh: () => Effect.succeed([]),
+						turnEnded: () => Effect.void,
+						pickFailover: () => Effect.succeed(undefined),
+					}),
+				);
+				return Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const commit = yield* makeCommitAndSignal;
+					const ingestion = yield* ProviderRuntimeIngestionTag;
+					yield* commit([
+						canonicalEvent("session.created", "session-1", {
+							sessionId: "session-1",
+							provider: "claude",
+							title: "Timeout ownership",
+						}),
+					]);
+					yield* sql`UPDATE sessions SET provider = 'claude', model_provider = 'claude', model_id = 'claude-sonnet-4-5', variant = '', context_window = '' WHERE id = 'session-1'`;
+					const placed = yield* Deferred.make<void>();
+					const inputId = continuation ? "cut-off-input" : "cmd-send-default";
+					accept = (command) =>
+						Effect.gen(function* () {
+							yield* commit([
+								...(command.events ?? []),
+								canonicalEvent(
+									"run.requested",
+									"session-1",
+									{
+										runId: "reserved-run",
+										inputId: command.input.inputId,
+									},
+									{ metadata: { runId: "reserved-run" } },
+								),
+							]);
+							yield* ingestion.ingest(
+								providerRuntimeEvent("message.created", "session-1", {
+									messageId: inputId,
+									role: "user",
+									inputId,
+									sessionId: "session-1",
+								}),
+							);
+							yield* command.onAccepted ?? Effect.void;
+							yield* Deferred.succeed(placed, undefined);
+							return yield* Effect.never;
+						}).pipe(Effect.orDie);
+					yield* sendTurn({
+						...(continuation
+							? { continuation: { cutOffMessageId: inputId } }
+							: {}),
+					});
+					expect(dispatchEffect).toHaveBeenCalledOnce();
+					yield* Deferred.await(placed);
+					const inbox = yield* SessionInboxTag;
+					const queue = (id: string) =>
+						inbox.submit({
+							sessionId: "session-1",
+							clientId: "browser",
+							inputId: id,
+							delivery: "queue",
+							request: { text: id },
+						});
+					yield* queue("queued-b");
+					expect(
+						yield* sql`SELECT state, run_id, started_at FROM turns WHERE id = ${inputId}`,
+					).toEqual([{ state: "pending", run_id: null, started_at: null }]);
+					const state = yield* Ref.get(yield* OverridesStateTag);
+					const timeout = state.processingTimeouts.get("session-1");
+					expect(timeout).toBeDefined();
+					yield* timeout?.callback() ??
+						Effect.die("missing processing timeout");
+					expect(
+						yield* sql`SELECT state, run_id, started_at FROM turns WHERE id = ${inputId}`,
+					).toEqual([{ state: "error", run_id: null, started_at: null }]);
+					expect(
+						yield* sql`SELECT status FROM provider_runs WHERE id = 'reserved-run'`,
+					).toEqual([{ status: "error" }]);
+					expect(
+						yield* sql`SELECT json_extract(data, '$.userMessageId') AS input_id FROM events WHERE type = 'turn.error'`,
+					).toEqual([{ input_id: inputId }]);
+					expect(
+						yield* (yield* ReadQueryEffectTag).readInboxState("session-1"),
+					).toMatchObject({ paused: true });
+					yield* inbox.start;
+					yield* flushDispatch();
+					expect(
+						yield* sql`SELECT input_id, state FROM pending_inputs ORDER BY input_id`,
+					).toEqual([{ input_id: "queued-b", state: "queued" }]);
+					expect(dispatchEffect).toHaveBeenCalledTimes(1);
+					expect(
+						yield* sql`SELECT type FROM events WHERE type = 'run.started'`,
+					).toEqual([]);
+				}).pipe(
+					Effect.provide(
+						SessionInboxLive.pipe(Layer.provideMerge(dependencies)),
+					),
+				);
+			},
+		);
+	}
 	for (const driver of ["opencode", "claude"] as const) {
 		for (const sideThread of [0, 1]) {
 			it.effect(

@@ -12,7 +12,14 @@ import type {
 
 export function observeRunnerTurn(
 	output: SessionOutput,
-	turn: { sessionId: string; messageId: string; terminal: boolean } | undefined,
+	turn:
+		| {
+				sessionId: string;
+				runId?: string | undefined;
+				messageId: string;
+				terminal: boolean;
+		  }
+		| undefined,
 ): void {
 	if (
 		output.type !== "event" ||
@@ -20,6 +27,9 @@ export function observeRunnerTurn(
 		output.event.sessionId !== turn.sessionId
 	)
 		return;
+	if (output.event.type === "run.started" && output.event.runId)
+		turn.runId = output.event.runId;
+	if (turn.runId && output.event.runId !== turn.runId) return;
 	if (
 		output.event.type === "message.created" &&
 		isRecord(output.event.data) &&
@@ -43,6 +53,7 @@ export function failRunnerTurn(
 	sinkId: string,
 	turn: {
 		sessionId: string;
+		runId?: string | undefined;
 		userMessageId?: string;
 		placement?: { inputId: string; text: string };
 		messageId: string;
@@ -66,8 +77,17 @@ export function failRunnerTurn(
 			reason: failure.message,
 			recoverQuestions: false,
 		});
-		if (!turn.terminal) {
-			const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+		const [run] =
+			turn.runId && Option.isSome(sql)
+				? yield* sql.value<{
+						status: string;
+					}>`SELECT status FROM provider_runs WHERE id = ${turn.runId} AND session_id = ${turn.sessionId}`
+				: [];
+		const terminal = run
+			? !["pending", "running"].includes(run.status)
+			: turn.terminal;
+		if (!terminal) {
 			const inputId = turn.userMessageId ?? turn.placement?.inputId;
 			const pendingSteer =
 				inputId && Option.isSome(sql)
@@ -85,7 +105,7 @@ export function failRunnerTurn(
 					sinkId,
 					input: { sessionId: turn.sessionId, ...turn.placement },
 				});
-			if (!pendingSteer)
+			if (!pendingSteer || turn.runId)
 				yield* emit({
 					type: "event",
 					sinkId,
@@ -94,6 +114,7 @@ export function failRunnerTurn(
 						type: "turn.error",
 						providerId: driverKind,
 						sessionId: turn.sessionId,
+						...(turn.runId ? { runId: turn.runId } : {}),
 						providerRefs: providerRefsFromRuntimeData("turn.error", {
 							messageId: turn.messageId,
 						}),
@@ -120,6 +141,7 @@ export function failRunnerTurn(
 				type: "session.status",
 				providerId: driverKind,
 				sessionId: turn.sessionId,
+				...(turn.runId ? { runId: turn.runId } : {}),
 				providerRefs: providerRefsFromRuntimeData("session.status", {
 					sessionId: turn.sessionId,
 					status: "idle",

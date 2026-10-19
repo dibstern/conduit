@@ -37,6 +37,84 @@ const migrationEntries = Object.entries(effectMigrationEntries);
 const prefix = (count: number) =>
 	Object.fromEntries(migrationEntries.slice(0, count));
 
+it.effect(
+	"keeps executing legacy reservations running without guessing open turn owners",
+	() =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator(prefix(68));
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at) VALUES ('legacy', 'claude', 1, 1)`;
+			yield* sql`INSERT INTO turns (id, session_id, state, requested_at) VALUES
+			('old-open', 'legacy', 'running', 1), ('old-done', 'legacy', 'completed', 1)`;
+			yield* sql`INSERT INTO provider_command_outbox (
+			request_sequence, command_id, project_key, session_id, provider_id,
+			effect_type, payload_json, status, requested_at, updated_at
+		) VALUES (1, 'legacy-send', 'project', 'legacy', 'claude', 'send_turn',
+			'{"inputId":"next-input"}', 'running', 10, 10),
+			(2, 'pending-send', 'project', 'legacy', 'claude', 'send_turn',
+			'{"inputId":"pending-input"}', 'pending', 20, 20)`;
+			yield* makeEffectSqlMigrator();
+			const [outbox] = yield* sql<{
+				payload_json: string;
+			}>`SELECT payload_json FROM provider_command_outbox WHERE request_sequence = 1`;
+			const payload: unknown = JSON.parse(outbox?.payload_json ?? "null");
+			expect(payload).toEqual({
+				inputId: "next-input",
+				runId: expect.any(String),
+			});
+			expect(
+				yield* sql`SELECT status, requested_at, started_at, completed_at FROM provider_runs ORDER BY requested_at`,
+			).toEqual([
+				{
+					status: "running",
+					requested_at: 10,
+					started_at: 10,
+					completed_at: null,
+				},
+				{
+					status: "pending",
+					requested_at: 20,
+					started_at: null,
+					completed_at: null,
+				},
+			]);
+			expect(
+				yield* sql`SELECT status FROM provider_command_outbox WHERE request_sequence = 1`,
+			).toEqual([{ status: "running" }]);
+			expect(yield* sql`SELECT type FROM events ORDER BY sequence`).toEqual([
+				{ type: "run.requested" },
+				{ type: "run.requested" },
+			]);
+			expect(
+				yield* sql`SELECT id, state, run_id FROM turns ORDER BY id`,
+			).toEqual([
+				{ id: "old-done", state: "completed", run_id: null },
+				{ id: "old-open", state: "interrupted", run_id: null },
+			]);
+			yield* makeEffectSqlMigrator();
+			expect(
+				yield* sql`SELECT payload_json FROM provider_command_outbox WHERE request_sequence = 1`,
+			).toEqual([outbox]);
+			expect(yield* sql`SELECT COUNT(*) AS n FROM provider_runs`).toEqual([
+				{ n: 2 },
+			]);
+			yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('new-run', 'legacy', 'running', 30)`;
+			yield* sql`INSERT INTO provider_command_outbox (
+				request_sequence, command_id, project_key, session_id, provider_id,
+				effect_type, payload_json, status, requested_at, updated_at
+			) VALUES (3, 'owned-send', 'project', 'legacy', 'claude', 'send_turn',
+				'{"inputId":"owned-input","runId":"new-run"}', 'running', 30, 30)`;
+			yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 69`;
+			yield* makeEffectSqlMigrator();
+			expect(
+				yield* sql`SELECT status FROM provider_runs WHERE id = 'new-run'`,
+			).toEqual([{ status: "running" }]);
+			expect(yield* sql`SELECT COUNT(*) AS n FROM events`).toEqual([{ n: 2 }]);
+			yield* sql`DELETE FROM sessions WHERE id = 'legacy'`;
+			expect(yield* sql`SELECT id FROM provider_runs`).toEqual([]);
+		}).pipe(Effect.provide(makeFileSqlLayer())),
+);
+
 // Purge failure modes: either reference source is missed, duplicate references
 // multiply the cohort, content/descendants or non-Claude/root sessions are lost,
 // dependent rows survive, retained rows change, or reopening repeats the purge.
@@ -111,9 +189,8 @@ it.effect(
 					),
 				);
 			}
-			expect(yield* makeEffectSqlMigrator()).toEqual([
+			expect(yield* makeEffectSqlMigrator(prefix(67))).toEqual([
 				[67, "purge_background_shell_sessions"],
-				[68, "input_drafts"],
 			]);
 			for (const { name } of tables) {
 				expect(
@@ -125,7 +202,7 @@ it.effect(
 			expect(
 				yield* sql`SELECT name FROM sqlite_temp_master WHERE type = 'table'`,
 			).toEqual([]);
-			expect(yield* makeEffectSqlMigrator()).toEqual([]);
+			expect(yield* makeEffectSqlMigrator(prefix(67))).toEqual([]);
 		}).pipe(Effect.provide(makeFileSqlLayer())),
 );
 
@@ -189,6 +266,7 @@ it.effect(
 				[66, "project_tree_data"],
 				[67, "purge_background_shell_sessions"],
 				[68, "input_drafts"],
+				[69, "provider_run_ownership"],
 			]);
 			expect(
 				yield* sql`SELECT COUNT(*) AS count, COUNT(DISTINCT version) AS versions
@@ -234,6 +312,7 @@ it.effect(
 				[66, "project_tree_data"],
 				[67, "purge_background_shell_sessions"],
 				[68, "input_drafts"],
+				[69, "provider_run_ownership"],
 			]);
 			expect(
 				yield* sql`SELECT id, is_human_sent FROM messages ORDER BY id`,
@@ -330,6 +409,7 @@ const expectedNames = [
 	"project_tree_data",
 	"purge_background_shell_sessions",
 	"input_drafts",
+	"provider_run_ownership",
 ];
 const legacyNames = [
 	"create_event_store_tables",
@@ -364,6 +444,7 @@ it.effect(
 				[66, "project_tree_data"],
 				[67, "purge_background_shell_sessions"],
 				[68, "input_drafts"],
+				[69, "provider_run_ownership"],
 			]);
 			yield* sql`UPDATE sessions SET forked_from = 'source' WHERE id = 'fork'`;
 			expect(yield* makeEffectSqlMigrator()).toEqual([]);
@@ -488,6 +569,7 @@ describe("Effect migration lineage", () => {
 					66,
 					67,
 					68,
+					69,
 				]);
 				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, workspace_hint, workspace_hint_sequence)
 					VALUES ('main-database', 'claude', 'Preserved', 'idle', 1, 1, '/repo/worktree', 123)`;
@@ -652,8 +734,8 @@ describe("Effect migration lineage", () => {
 			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
-	it("registers the contiguous production chain from 1 through 68", () => {
-		expect(migrationEntries).toHaveLength(68);
+	it("registers the contiguous production chain from 1 through 69", () => {
+		expect(migrationEntries).toHaveLength(69);
 		expect(migrationEntries.map(([key]) => key)).toEqual(
 			expectedNames.map(
 				(name, index) => `${String(index + 1).padStart(4, "0")}_${name}`,
@@ -838,6 +920,7 @@ describe("Effect migration lineage", () => {
 					[66, "project_tree_data"],
 					[67, "purge_background_shell_sessions"],
 					[68, "input_drafts"],
+					[69, "provider_run_ownership"],
 				]);
 				expect(yield* sql`SELECT type FROM events WHERE sequence = 45`).toEqual(
 					[{ type: "thinking.end" }],
@@ -927,6 +1010,7 @@ describe("Effect migration lineage", () => {
 					[66, "project_tree_data"],
 					[67, "purge_background_shell_sessions"],
 					[68, "input_drafts"],
+					[69, "provider_run_ownership"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace_hint, workspace_hint_sequence
@@ -995,6 +1079,7 @@ describe("Effect migration lineage", () => {
 					[66, "project_tree_data"],
 					[67, "purge_background_shell_sessions"],
 					[68, "input_drafts"],
+					[69, "provider_run_ownership"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace, claude_worktree_state FROM sessions WHERE id = 'kept-workspace'`,
@@ -1597,6 +1682,7 @@ describe("Effect migration lineage", () => {
 				[66, "project_tree_data"],
 				[67, "purge_background_shell_sessions"],
 				[68, "input_drafts"],
+				[69, "provider_run_ownership"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -1702,6 +1788,7 @@ describe("Effect migration lineage", () => {
 					[66, "project_tree_data"],
 					[67, "purge_background_shell_sessions"],
 					[68, "input_drafts"],
+					[69, "provider_run_ownership"],
 				]);
 				const rows = yield* sql<{
 					id: string;

@@ -170,7 +170,7 @@ export interface DurableCommandStoreOptions {
 	 * shared ProviderRuntimeIngestion so streamed provider events are persisted
 	 * exactly as the inline path did. Absent in narrow unit tests (no-op sink).
 	 */
-	readonly ingestion?: Pick<ProviderRuntimeIngestion, "ingest">;
+	readonly ingestion?: Pick<ProviderRuntimeIngestion, "ingest" | "ingestBatch">;
 	/**
 	 * The commit-and-signal seam. When present, a send_turn's events are
 	 * projected and announced with the commit that records its outbox row.
@@ -272,7 +272,11 @@ export class OrchestrationEngine {
 					sql: durable.sql,
 					projectId: durable.projectKey,
 					registry: this.registry,
-					ingestion: durable.ingestion ?? { ingest: () => Effect.succeed(0) },
+					ingestion: durable.ingestion ?? {
+						ingest: () => Effect.succeed(0),
+						ingestBatch: (_events, options) =>
+							(options?.beforeCommit ?? Effect.void).pipe(Effect.as(0)),
+					},
 					...(durable.write ? { write: durable.write } : {}),
 					...(durable.persistHandoffDelivered
 						? { persistHandoffDelivered: durable.persistHandoffDelivered }

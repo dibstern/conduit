@@ -8,7 +8,10 @@ import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ProcessHarness } from "../../helpers/process-harness.js";
+import {
+	type ProcessBrowser,
+	ProcessHarness,
+} from "../../helpers/process-harness.js";
 
 interface TraceRow {
 	kind?: string;
@@ -56,8 +59,11 @@ function snapshot(fixture: ProcessHarness, sessionId: string) {
 				return counts;
 			}, {}),
 			turns: db
-				.prepare<[string], { state: string }>(
-					"SELECT state FROM turns WHERE session_id = ? ORDER BY requested_at, rowid",
+				.prepare<
+					[string],
+					{ state: string; run_id: string | null; started_at: number | null }
+				>(
+					"SELECT state, run_id, started_at FROM turns WHERE session_id = ? ORDER BY requested_at, rowid",
 				)
 				.all(sessionId),
 			interactions: db
@@ -65,6 +71,19 @@ function snapshot(fixture: ProcessHarness, sessionId: string) {
 					"SELECT COUNT(*) AS count FROM provider_command_interactions WHERE session_id = ?",
 				)
 				.get(sessionId)?.count,
+			runs: db
+				.prepare<[string], { id: string; status: string }>(
+					"SELECT id, status FROM provider_runs WHERE session_id = ? ORDER BY requested_at, rowid",
+				)
+				.all(sessionId),
+			commands: db
+				.prepare<
+					[string],
+					{ input_id: string; run_id: string; status: string }
+				>(
+					"SELECT json_extract(payload_json, '$.inputId') AS input_id, json_extract(payload_json, '$.runId') AS run_id, status FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
+				)
+				.all(sessionId),
 		};
 	} finally {
 		db.close();
@@ -200,6 +219,71 @@ describe("Cursor text turns through the built daemon and detached runner", () =>
 		);
 	}
 
+	async function rejectBeforeIntake(
+		fixture: ProcessHarness,
+		browser: ProcessBrowser,
+		id: string,
+	) {
+		const inputId = randomUUID();
+		expect(
+			await Effect.runPromise(
+				browser.rpc["input.submit"]({
+					sessionId: id,
+					originId: browser.originId,
+					inputId,
+					delivery: "queue",
+					text: "Say hi.",
+				}),
+			),
+		).toMatchObject({ ok: true });
+		await vi.waitFor(
+			() => {
+				const state = snapshot(fixture, id);
+				const command = state.commands.find((row) => row.input_id === inputId);
+				expect(command).toMatchObject({ status: "failed" });
+				expect(state.runs).toContainEqual({
+					id: command?.run_id,
+					status: "error",
+				});
+				expect(
+					state.runs.some(({ status }) =>
+						["pending", "running"].includes(status),
+					),
+				).toBe(false);
+				expect(state.events).toContainEqual(
+					expect.objectContaining({
+						type: "turn.error",
+						metadata: { runId: command?.run_id },
+						data: expect.objectContaining({ userMessageId: inputId }),
+					}),
+				);
+				expect(state.eventCounts["run.started"] ?? 0).toBe(0);
+				// Its exact terminal closes the input without inventing provider intake.
+				expect(state.turns).toEqual([
+					{ state: "error", run_id: null, started_at: null },
+				]);
+				diagnostics["preIntakeFailure"] = {
+					runStatus: state.runs.find(({ id }) => id === command?.run_id)
+						?.status,
+					commandStatus: command?.status,
+					errorCode: state.events.find(({ type }) => type === "turn.error")
+						?.data["code"],
+					errorOwnsReservation: state.events.some(
+						(event) =>
+							event.type === "turn.error" &&
+							event.metadata["runId"] === command?.run_id &&
+							event.data["userMessageId"] === inputId,
+					),
+					accepted: (state.eventCounts["run.started"] ?? 0) > 0,
+					inboxBusy: state.runs.some(({ status }) =>
+						["pending", "running"].includes(status),
+					),
+				};
+			},
+			{ timeout: TIMEOUT, interval: 100 },
+		);
+	}
+
 	afterEach(async ({ task }) => {
 		if (!harness) return;
 		const fixture = harness;
@@ -271,8 +355,15 @@ describe("Cursor text turns through the built daemon and detached runner", () =>
 		expect(firstState.eventCounts["text.delta"]).toBeGreaterThan(0);
 		expect(firstState.eventCounts["turn.completed"]).toBe(1);
 		expect(firstState.interactions).toBe(0);
+		const acceptedRunId = firstState.events.find(
+			({ type }) => type === "run.started",
+		)?.metadata["runId"];
+		expect(acceptedRunId).toEqual(expect.any(String));
 		expect(firstState.events).toContainEqual(
-			expect.objectContaining({ type: "turn.completed", metadata: {} }),
+			expect.objectContaining({
+				type: "turn.completed",
+				metadata: { runId: acceptedRunId },
+			}),
 		);
 		const firstHistory = await browser.history(id);
 		expect(
@@ -590,8 +681,7 @@ describe("Cursor text turns through the built daemon and detached runner", () =>
 		const { fixture, browser, id } = await start("sandbox-prime-failure");
 		sandboxFailure = true;
 		writeTrace();
-		await browser.send(id, "Say hi.", TIMEOUT);
-		await expectTurns(fixture, id, ["error"]);
+		await rejectBeforeIntake(fixture, browser, id);
 		const errors = snapshot(fixture, id).events.filter(
 			({ type }) => type === "turn.error",
 		);
@@ -672,7 +762,13 @@ describe("Cursor text turns through the built daemon and detached runner", () =>
 				).toBeGreaterThan(0),
 			{ timeout: TIMEOUT },
 		);
-		expect(snapshot(fixture, id).turns).toEqual([{ state: "running" }]);
+		expect(snapshot(fixture, id).turns).toEqual([
+			{
+				state: "running",
+				run_id: expect.any(String),
+				started_at: expect.any(Number),
+			},
+		]);
 		await Effect.runPromise(
 			browser.rpc.CancelSession({ sessionId: id, commandId: randomUUID() }),
 		);
@@ -688,8 +784,7 @@ describe("Cursor text turns through the built daemon and detached runner", () =>
 		const { fixture, browser, id } = await start("missing-auth");
 		credential = "missing";
 		writeTrace();
-		await browser.send(id, "Say hi.", TIMEOUT);
-		await expectTurns(fixture, id, ["error"]);
+		await rejectBeforeIntake(fixture, browser, id);
 		const errors = snapshot(fixture, id).events.filter(
 			({ type }) => type === "turn.error",
 		);

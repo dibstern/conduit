@@ -448,7 +448,11 @@ export class ClaudeEventTranslator {
 		messageId: string,
 	): Effect.Effect<void, EventSinkError> {
 		return Effect.suspend(() => {
-			if (messageId.length === 0 || this.announcedMessageIds.has(messageId)) {
+			if (
+				messageId.length === 0 ||
+				this.announcedMessageIds.has(messageId) ||
+				ctx.messageRunIds?.has(messageId)
+			) {
 				return Effect.void;
 			}
 			this.announcedMessageIds.add(messageId);
@@ -459,6 +463,9 @@ export class ClaudeEventTranslator {
 					messageId,
 					role: "assistant",
 					sessionId: ctx.sessionId,
+					...(ctx.currentRunId && ctx.currentUserMessageId
+						? { parentID: ctx.currentUserMessageId }
+						: {}),
 				}),
 			);
 		});
@@ -544,6 +551,7 @@ export class ClaudeEventTranslator {
 				}),
 			);
 			ctx.turnInFlight = false;
+			ctx.currentRunId = undefined;
 			ctx.activeAssistantMessageId = "";
 			this.resetInFlightState();
 		});
@@ -887,6 +895,12 @@ export class ClaudeEventTranslator {
 							: {}),
 						actualModel: message.model,
 					};
+					if (!ctx.currentRunId && ctx.currentTurnId) {
+						ctx.pendingRunModel = {
+							inputId: ctx.currentTurnId,
+							model: modelEvidence,
+						};
+					}
 					yield* this.push(
 						ctx,
 						makeProviderRuntimeEvent(
@@ -2033,7 +2047,33 @@ export class ClaudeEventTranslator {
 	): Effect.Effect<void, EventSinkError> {
 		const sink = this.deps.getSink(ctx);
 		if (!sink) return Effect.void;
-		const write = sink.push(event);
+		const messageId = isRecord(event.data)
+			? event.data["messageId"]
+			: undefined;
+		const partId = isRecord(event.data) ? event.data["partId"] : undefined;
+		if (
+			event.type === "message.created" &&
+			typeof messageId === "string" &&
+			ctx.currentRunId
+		) {
+			(ctx.messageRunIds ??= new Map()).set(messageId, ctx.currentRunId);
+		}
+		if (
+			event.type === "tool.started" &&
+			typeof partId === "string" &&
+			ctx.currentRunId &&
+			!ctx.toolRunIds?.has(partId)
+		) {
+			(ctx.toolRunIds ??= new Map()).set(partId, ctx.currentRunId);
+		}
+		const runId = event.type.startsWith("turn.")
+			? ctx.currentRunId
+			: event.type.startsWith("tool.") && typeof partId === "string"
+				? ctx.toolRunIds?.get(partId)
+				: typeof messageId === "string"
+					? ctx.messageRunIds?.get(messageId)
+					: ctx.currentRunId;
+		const write = sink.push(runId ? { ...event, runId } : event);
 		if (!this.bufferedWrites) return write;
 		this.bufferedWrites.push(write);
 		return Effect.void;

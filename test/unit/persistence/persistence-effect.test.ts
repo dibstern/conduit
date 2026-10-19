@@ -161,6 +161,7 @@ describe("Persistence Effect", () => {
 					"provider_command_sessions",
 					"provider_command_tombstones",
 					"provider_command_turns",
+					"provider_runs",
 					"provider_state",
 					"read_model_counter",
 					"sent_alerts",
@@ -335,6 +336,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 66, name: "project_tree_data" },
 				{ migration_id: 67, name: "purge_background_shell_sessions" },
 				{ migration_id: 68, name: "input_drafts" },
+				{ migration_id: 69, name: "provider_run_ownership" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

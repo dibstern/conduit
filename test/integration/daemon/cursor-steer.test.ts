@@ -20,6 +20,7 @@ interface StoredEvent {
 	type: string;
 	sessionId: string;
 	data: Record<string, unknown>;
+	metadata: Record<string, unknown>;
 }
 type Replay =
 	| "delivered"
@@ -54,9 +55,15 @@ function snapshot(harness: ProcessHarness, id: string) {
 			events: db
 				.prepare<
 					[],
-					{ sequence: number; type: string; session_id: string; data: string }
+					{
+						sequence: number;
+						type: string;
+						session_id: string;
+						data: string;
+						metadata: string;
+					}
 				>(
-					"SELECT sequence, type, session_id, data FROM events ORDER BY sequence",
+					"SELECT sequence, type, session_id, data, metadata FROM events ORDER BY sequence",
 				)
 				.all()
 				.map<StoredEvent>((row) => ({
@@ -64,6 +71,7 @@ function snapshot(harness: ProcessHarness, id: string) {
 					type: row.type,
 					sessionId: row.session_id,
 					data: JSON.parse(row.data) as Record<string, unknown>,
+					metadata: JSON.parse(row.metadata) as Record<string, unknown>,
 				})),
 			inputs: db
 				.prepare<[string], { input_id: string; state: string }>(
@@ -92,8 +100,11 @@ function snapshot(harness: ProcessHarness, id: string) {
 				)
 				.all(id),
 			turns: db
-				.prepare<[string], { id: string; state: string }>(
-					"SELECT id, state FROM turns WHERE session_id = ? ORDER BY requested_at, rowid",
+				.prepare<
+					[string],
+					{ id: string; state: string; run_id: string | null }
+				>(
+					"SELECT id, state, run_id FROM turns WHERE session_id = ? ORDER BY requested_at, rowid",
 				)
 				.all(id),
 			commands: db
@@ -121,8 +132,8 @@ function snapshot(harness: ProcessHarness, id: string) {
 	}
 }
 
-// Only operation wrappers and the public user-message/terminal fields are
-// edited. README.md records the source and exact edits for each replay case.
+// Only operation wrappers, native agent identity and public user-message/terminal
+// fields are edited. README.md records the source and exact edits for each replay case.
 function replay(kind: Replay): TraceRow[] {
 	let trace = capture(kind === "shell" ? "steer-shell" : "steer");
 	const steer = trace.find((row) => row.kind === "steer.call");
@@ -223,9 +234,20 @@ function replay(kind: Replay): TraceRow[] {
 		].includes(kind)
 	) {
 		const basic = capture("basic");
-		trace.push(
-			...basic.slice(basic.findIndex((row) => row.kind === "send.options")),
+		const agentId = trace.find((row) => row.kind === "run.handle")?.data?.[
+			"agentId"
+		];
+		if (typeof agentId !== "string") throw new Error("Missing resumed agent");
+		const followup = basic.slice(
+			basic.findIndex((row) => row.kind === "send.options"),
 		);
+		// This captured turn runs on the retained agent, whose identity must
+		// agree with the stream's actual intake acknowledgement.
+		for (const row of followup) {
+			if (row.kind === "run.handle" && row.data) row.data["agentId"] = agentId;
+			if (row.kind === "stream" && row.data) row.data["agent_id"] = agentId;
+		}
+		trace.push(...followup);
 	}
 	trace.splice(1, 0, {
 		kind: "credential.store",
@@ -581,8 +603,8 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 		observations["requeuedAheadOfExistingInput"] = true;
 	}, 240_000);
 
-	it("attributes an error after delivered steering to the latest user input", async () => {
-		const { fixture, browser, id } = await start("delivered-error");
+	it("ends both accepted inputs on their shared run's error and attributes the error to the delivered input", async () => {
+		const { fixture, browser, id, firstId } = await start("delivered-error");
 		const inputId = randomUUID();
 		expect(
 			await Effect.runPromise(
@@ -595,8 +617,34 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 				}),
 			),
 		).toMatchObject({ ok: true });
-		await turns(fixture, id, ["completed", "error"]);
+		await turns(fixture, id, ["error", "error"]);
 		const state = oneMessage(fixture, id, inputId);
+		const accepted = state.events.filter(
+			(event) => event.type === "run.started" && event.sessionId === id,
+		);
+		expect(accepted.map((event) => event.data["inputId"])).toEqual([
+			firstId,
+			inputId,
+		]);
+		const runId = accepted[0]?.metadata["runId"];
+		expect(runId).toEqual(expect.any(String));
+		expect(accepted.map((event) => event.metadata["runId"])).toEqual([
+			runId,
+			runId,
+		]);
+		expect(state.turns.map((turn) => turn.run_id)).toEqual([runId, runId]);
+		const terminals = state.events.filter(
+			(event) =>
+				event.sessionId === id &&
+				["turn.completed", "turn.error", "turn.interrupted"].includes(
+					event.type,
+				),
+		);
+		expect(terminals).toHaveLength(1);
+		expect(terminals[0]).toMatchObject({
+			type: "turn.error",
+			metadata: { runId },
+		});
 		const messageId = state.messages.find(
 			(row) => row.input_id === inputId,
 		)?.id;
@@ -621,7 +669,7 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 		expect(
 			state.sessions.find((session) => session.id === id)
 				?.last_turn_end_input_id,
-		).toBe(inputId);
+		).toBe(firstId);
 		expect(
 			state.events.filter(
 				(event) =>
@@ -635,6 +683,7 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 			rows(capturePath).filter((row) => row.kind === "steer.call"),
 		).toHaveLength(1);
 		observations["errorAttributedToLatestDeliveredSteer"] = true;
+		observations["acceptedInputsShareOneTerminalError"] = true;
 	}, 240_000);
 
 	it("interrupts a pending steer before a late delivered acknowledgement without duplicating it", async () => {

@@ -101,11 +101,11 @@ function snapshot(fixture: ProcessHarness, sessionId: string, prompt: string) {
 			.prepare(`SELECT id, state FROM turns WHERE session_id = ?
 			ORDER BY requested_at, rowid`)
 			.all(sessionId) as Array<{ id: string; state: string }>;
-		// readView is private. Read its durable facts and the same busy predicate
-		// from SessionInboxLive, including the handoff that has no echoed message.
+		// Read the inbox's durable run status, including an unacknowledged send.
 		const facts = db
 			.prepare(`SELECT status,
-			EXISTS (SELECT 1 FROM pending_approvals WHERE session_id = @id AND status = 'pending') AS prompt_open,
+			EXISTS (SELECT 1 FROM provider_runs WHERE session_id = @id
+				AND status IN ('pending', 'running')) AS run_busy,
 			EXISTS (SELECT 1 FROM provider_command_outbox outbox
 				JOIN pending_inputs pending ON pending.input_id = outbox.command_id
 				WHERE outbox.session_id = @id AND outbox.effect_type = 'send_turn'
@@ -114,7 +114,7 @@ function snapshot(fixture: ProcessHarness, sessionId: string, prompt: string) {
 			FROM sessions WHERE id = @id`)
 			.get({ id: sessionId }) as {
 			status: string;
-			prompt_open: number;
+			run_busy: number;
 			in_flight: number;
 		};
 		const provider = db
@@ -142,11 +142,7 @@ function snapshot(fixture: ProcessHarness, sessionId: string, prompt: string) {
 		return {
 			outbox,
 			inbox: {
-				busy:
-					["busy", "retry"].includes(facts.status) ||
-					facts.prompt_open === 1 ||
-					["pending", "running"].includes(turns.at(-1)?.state ?? "") ||
-					facts.in_flight === 1,
+				busy: facts.run_busy === 1,
 				in_flight: facts.in_flight === 1,
 			},
 			turns,
@@ -1534,18 +1530,54 @@ describe("a send claimed before daemon SIGKILL", () => {
 	}, 60_000);
 
 	it("does not assign a delayed reserved echo to a newer input", async () => {
-		const { fixture, browser, sessionId, userId, created, directory, prompt } =
-			await startOpenCodeTurn(false);
-		// Upstream ends before its user echo reaches the daemon. The next input
-		// is handed off before that delayed echo arrives.
+		const {
+			fixture,
+			browser,
+			sessionId,
+			inputId,
+			userId,
+			created,
+			directory,
+			prompt,
+		} = await startOpenCodeTurn(false);
+		// Idle cannot complete an input which upstream has not acknowledged.
+		// A confirmed process stop settles that exact reservation; its delayed
+		// echo must still keep its owner after the next input has been sent.
+		const idleCount = () => {
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				return (
+					db
+						.prepare(
+							"SELECT COUNT(*) AS count FROM events WHERE session_id = ? AND type = 'session.status' AND json_extract(data, '$.status') = 'idle'",
+						)
+						.get(sessionId) as { count: number }
+				).count;
+			} finally {
+				db.close();
+			}
+		};
+		const beforeIdle = idleCount();
 		await fixture.setOpenCodeStatus(directory, sessionId, { type: "idle" });
+		await vi.waitFor(() => expect(idleCount()).toBeGreaterThan(beforeIdle));
+		expect(snapshot(fixture, sessionId, prompt).outbox[0]?.status).toBe(
+			"running",
+		);
+		expect(snapshot(fixture, sessionId, prompt).inbox.busy).toBe(true);
+		await browser.stopInstance(MANAGED_OPENCODE_ACCOUNT_ID);
 		await vi.waitFor(
 			() =>
 				expect(snapshot(fixture, sessionId, prompt).outbox[0]?.status).toBe(
-					"completed",
+					"failed",
 				),
 			{ timeout: 15_000 },
 		);
+		await vi.waitFor(() =>
+			expect(snapshot(fixture, sessionId, prompt).turns).toEqual([
+				{ id: userId, state: "interrupted" },
+			]),
+		);
+		await browser.startInstance(MANAGED_OPENCODE_ACCOUNT_ID);
 		const nextInputId = randomUUID();
 		const nextPrompt = "send after delayed echo";
 		await Effect.runPromise(
@@ -1613,6 +1645,32 @@ describe("a send claimed before daemon SIGKILL", () => {
 								.prepare("SELECT id FROM messages WHERE input_id = ?")
 								.all(nextInputId),
 						).toEqual([{ id: nextUserId }]);
+						const reserved = db
+							.prepare(
+								"SELECT command_id, json_extract(payload_json, '$.runId') AS run_id FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
+							)
+							.all(sessionId) as Array<{ command_id: string; run_id: string }>;
+						expect(reserved.map(({ command_id }) => command_id)).toEqual([
+							inputId,
+							nextInputId,
+						]);
+						expect(
+							db
+								.prepare(
+									"SELECT turns.run_id, turns.state, provider_runs.status AS run_status, turns.completed_at = provider_runs.completed_at AS inherited_terminal FROM turns JOIN provider_runs ON provider_runs.id = turns.run_id WHERE turns.id = ?",
+								)
+								.get(userId),
+						).toEqual({
+							run_id: reserved[0]?.run_id,
+							state: "interrupted",
+							run_status: "interrupted",
+							inherited_terminal: 1,
+						});
+						expect(
+							db
+								.prepare("SELECT run_id, state FROM turns WHERE id = ?")
+								.get(nextUserId),
+						).toEqual({ run_id: reserved[1]?.run_id, state: "running" });
 					} finally {
 						db.close();
 					}
@@ -1632,11 +1690,12 @@ describe("a send claimed before daemon SIGKILL", () => {
 			await vi.waitFor(() => {
 				const state = snapshot(fixture, sessionId, nextPrompt);
 				expect(state.outbox.map(({ status }) => status)).toEqual([
-					"completed",
+					"failed",
 					"completed",
 				]);
 				expect(state.inbox.busy).toBe(false);
 				expect(state.providerPromptCount).toBe(1);
+				expect(state.turns).toHaveLength(2);
 			});
 		} finally {
 			proof["after"] = snapshot(fixture, sessionId, nextPrompt);

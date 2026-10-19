@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Context, Effect, type Fiber, References, Semaphore } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
@@ -21,7 +22,10 @@ import {
 	snapshotPayload,
 	synthesizeSnapshotEvent,
 } from "../../../provider/opencode/opencode-history-backfill.js";
-import { openCodeInputMessageId } from "../../../provider/opencode/opencode-input-message-id.js";
+import {
+	inputIdFromOpenCodeMessageId,
+	openCodeInputMessageId,
+} from "../../../provider/opencode/opencode-input-message-id.js";
 import {
 	OpenCodeRuntimeEventTranslator,
 	opencodeSessionCreatedRuntimeEvent,
@@ -30,9 +34,12 @@ import {
 	type runningRunnerCommands,
 	settleRunnerCommandState,
 } from "../../../provider/runner/runner-recovery.js";
+import { settleSessionRuns } from "../../../provider/session-run-settlement.js";
 import type { TurnSettings } from "../../../provider/turn-settings.js";
+import type { TurnResult } from "../../../provider/types.js";
 import type { SSEEvent } from "../../../relay/opencode-events.js";
 import type { OpenCodeEventContext } from "../../../relay/sse-stream.js";
+import { isRecord } from "../../../utils.js";
 import { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
 import {
 	canSeedSession,
@@ -41,6 +48,7 @@ import {
 	ProviderRuntimeIngestionTag,
 } from "./provider-runtime-ingestion-service.js";
 import { ConfigTag, SessionRetriesTag } from "./services.js";
+import type { TurnFailureOwner } from "./turn-failure.js";
 
 export interface OpenCodeRuntimeIngressLog {
 	warn(msg: string, context?: Record<string, unknown>): void;
@@ -127,6 +135,15 @@ export interface EffectOpenCodeRuntimeIngressOptions {
 		providerInstanceId: string,
 		parentId?: string,
 	) => Effect.Effect<TurnSettings | undefined>;
+	/** Pure exact-command snapshot; terminal publication completes only named tokens. */
+	readonly capturePendingTurns?: (sessionId: string) => {
+		readonly commands: readonly {
+			readonly inputId: string;
+			readonly runId: string | undefined;
+			readonly userMessageId: string;
+			readonly complete: (result: TurnResult) => Effect.Effect<void>;
+		}[];
+	};
 }
 
 const BACKFILL_TIMEOUT = "15 seconds";
@@ -178,6 +195,7 @@ export class EffectOpenCodeRuntimeIngress
 	private readonly resolveSessionPick:
 		| EffectOpenCodeRuntimeIngressOptions["resolveSessionPick"]
 		| undefined;
+	private readonly capturePendingTurns: EffectOpenCodeRuntimeIngressOptions["capturePendingTurns"];
 	private stopped = false;
 	private readonly fetchSessionMessages:
 		| EffectOpenCodeRuntimeIngressOptions["fetchSessionMessages"]
@@ -237,6 +255,7 @@ export class EffectOpenCodeRuntimeIngress
 		this.log = opts.log;
 		this.backfillRetryDelayMs = opts.backfillRetryDelayMs ?? 1_000;
 		this.resolveSessionPick = opts.resolveSessionPick;
+		this.capturePendingTurns = opts.capturePendingTurns;
 		this.selectedInstanceId =
 			opts.selectedInstanceId ?? MANAGED_OPENCODE_ACCOUNT_ID;
 		this.sessionCreationGate =
@@ -252,6 +271,144 @@ export class EffectOpenCodeRuntimeIngress
 		effect: Effect.Effect<A, E, SqlClient.SqlClient>,
 	): Effect.Effect<A, E> {
 		return effect.pipe(Effect.provideService(SqlClient.SqlClient, this.sql));
+	}
+
+	/** Resolve live OpenCode ownership from its accepted user echo and explicit message parents. */
+	private ownRunEvents(events: readonly ProviderRuntimeEvent[]) {
+		return Effect.gen({ self: this }, function* () {
+			const output: ProviderRuntimeEvent[] = [];
+			const active = new Map<string, string | undefined>();
+			const messageRuns = new Map<string, string>();
+			for (const event of events) {
+				if (event.runId || event.rawSource.kind === "opencode.rest") {
+					output.push(event);
+					continue;
+				}
+				const sessionId = event.sessionId;
+				if (!active.has(sessionId)) {
+					const rows = yield* this.sql<{
+						id: string;
+					}>`SELECT id FROM provider_runs
+						WHERE session_id = ${sessionId} AND status = 'running'`;
+					active.set(sessionId, rows.length === 1 ? rows[0]?.id : undefined);
+				}
+				const data = event.data as Record<string, unknown>;
+				const messageId =
+					typeof data["messageId"] === "string" ? data["messageId"] : undefined;
+				let runId: string | undefined;
+				let accepted: ProviderRuntimeEvent | undefined;
+				let acceptedInputId: string | undefined;
+				if (
+					event.type === "message.created" &&
+					data["role"] === "user" &&
+					messageId
+				) {
+					const inputId =
+						typeof data["inputId"] === "string"
+							? data["inputId"]
+							: inputIdFromOpenCodeMessageId(messageId);
+					if (inputId) {
+						const [request] = yield* this.sql<{
+							run_id: string;
+							status: string;
+							accepted_run_id: string | null;
+						}>`SELECT r.id AS run_id, r.status,
+							(SELECT json_extract(metadata, '$.runId') FROM events
+								WHERE session_id = ${sessionId} AND type = 'run.started'
+									AND json_extract(data, '$.requestedRunId') = r.id ORDER BY sequence LIMIT 1) AS accepted_run_id
+							FROM provider_command_outbox o JOIN provider_runs r ON r.id = json_extract(o.payload_json, '$.runId')
+							WHERE o.session_id = ${sessionId} AND o.command_id = ${inputId}
+							AND o.effect_type = 'send_turn' ORDER BY o.request_sequence DESC LIMIT 1`;
+						if (request?.run_id) {
+							acceptedInputId = inputId;
+							runId =
+								request.accepted_run_id ??
+								(request.status === "pending"
+									? (active.get(sessionId) ?? request.run_id)
+									: request.run_id);
+							if (!request.accepted_run_id && request.status !== "joined") {
+								if (
+									request.status === "pending" ||
+									request.status === "running"
+								)
+									active.set(sessionId, runId);
+								accepted = {
+									...event,
+									eventId: createEventId(),
+									type: "run.started",
+									runId,
+									data: { inputId, requestedRunId: request.run_id },
+								};
+							}
+						}
+					} else if (
+						inputId === undefined &&
+						event.rawSource.kind === "opencode.sse" &&
+						data["backfilled"] !== true
+					) {
+						const [prior] = yield* this.sql<{
+							run_id: string | null;
+						}>`SELECT json_extract(metadata, '$.runId') AS run_id FROM events
+							WHERE session_id = ${sessionId} AND type = 'run.started'
+								AND json_extract(data, '$.inputId') = ${messageId}
+							ORDER BY sequence LIMIT 1`;
+						runId = prior?.run_id ?? active.get(sessionId) ?? randomUUID();
+						if (!prior?.run_id) {
+							active.set(sessionId, runId);
+							accepted = {
+								...event,
+								eventId: createEventId(),
+								type: "run.started",
+								runId,
+								data: { inputId: messageId, requestedRunId: runId },
+							};
+						}
+					}
+				} else if (messageId) {
+					runId = messageRuns.get(messageId);
+					const parentId =
+						typeof data["parentID"] === "string" ? data["parentID"] : undefined;
+					if (!runId && parentId) runId = messageRuns.get(parentId);
+					if (!runId) {
+						const [owner] = yield* this.sql<{
+							run_id: string | null;
+						}>`SELECT turns.run_id FROM messages
+							JOIN turns ON turns.id = COALESCE(messages.turn_id, messages.id)
+							WHERE messages.session_id = ${sessionId} AND messages.id = ${parentId ?? messageId}`;
+						runId = owner?.run_id ?? undefined;
+					}
+				} else if (
+					event.type === "session.status" ||
+					event.type === "session.compaction" ||
+					event.type === "turn.error" ||
+					event.type.startsWith("permission.") ||
+					event.type.startsWith("question.")
+				) {
+					runId = active.get(sessionId);
+				}
+				// A session-level error may use a synthetic message id without a message owner.
+				if (!runId && event.type === "turn.error")
+					runId = active.get(sessionId);
+				if (runId && messageId) messageRuns.set(messageId, runId);
+				if (acceptedInputId && event.type === "message.created")
+					output.push({
+						...event,
+						...(runId ? { runId } : {}),
+						data: { ...data, inputId: acceptedInputId },
+					});
+				else output.push(runId ? { ...event, runId } : event);
+				if (accepted) output.push(accepted);
+				if (
+					runId &&
+					active.get(sessionId) === runId &&
+					(event.type === "turn.error" ||
+						(event.type === "session.status" &&
+							(data["status"] === "idle" || data["status"] === "error")))
+				)
+					active.set(sessionId, undefined);
+			}
+			return output;
+		});
 	}
 
 	private ingestBatch(
@@ -270,9 +427,101 @@ export class EffectOpenCodeRuntimeIngress
 				);
 				if (pick) picks.set(event.sessionId, pick);
 			}
-			return yield* this.ingestion.ingestBatch(events, {
+			const owned = yield* this.ownRunEvents(
+				events.map((event) => {
+					const directory = this.sessionDirectories.get(event.sessionId);
+					return event.type === "session.created" && directory
+						? {
+								...event,
+								metadata: {
+									...event.metadata,
+									nativeDirectory: directory.directory,
+								},
+							}
+						: event;
+				}),
+			);
+			return yield* this.ingestOwnedBatch(owned, {
 				...options,
 				sessionPicks: picks,
+			});
+		});
+	}
+
+	private ingestOwnedBatch(
+		events: readonly ProviderRuntimeEvent[],
+		options?: Parameters<ProviderRuntimeIngestion["ingestBatch"]>[1],
+		snapshots = new Map<
+			string,
+			ReturnType<
+				NonNullable<EffectOpenCodeRuntimeIngressOptions["capturePendingTurns"]>
+			>
+		>(),
+	): Effect.Effect<number, ProviderRuntimeIngestionError> {
+		return Effect.gen({ self: this }, function* () {
+			const completions: Effect.Effect<void>[] = [];
+			for (const event of events) {
+				if (!event.runId || !this.capturePendingTurns) continue;
+				const data = isRecord(event.data) ? event.data : {};
+				const status =
+					event.type === "turn.error"
+						? "error"
+						: event.type === "turn.interrupted"
+							? "interrupted"
+							: event.type === "turn.completed" ||
+									(event.type === "session.status" && data["status"] === "idle")
+								? "completed"
+								: undefined;
+				if (!status) continue;
+				const snapshot =
+					snapshots.get(event.sessionId) ??
+					this.capturePendingTurns(event.sessionId);
+				snapshots.set(event.sessionId, snapshot);
+				// Acceptance names the command, including joined commands and
+				// continuations which can reuse another input's message identity.
+				const inputs = yield* this.sql<{
+					input_id: string;
+					requested_run_id: string;
+				}>`
+					SELECT DISTINCT json_extract(data, '$.inputId') AS input_id,
+						json_extract(data, '$.requestedRunId') AS requested_run_id FROM events
+					WHERE session_id = ${event.sessionId} AND type = 'run.started'
+					AND json_extract(metadata, '$.runId') = ${event.runId}`;
+				const result: TurnResult = {
+					status,
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					providerStateUpdates: [],
+					...(status !== "completed"
+						? {
+								error: {
+									code: status === "error" ? "provider_error" : "interrupted",
+									message: String(
+										data["error"] ?? data["reason"] ?? "OpenCode session ended",
+									),
+									retryable: false,
+								},
+							}
+						: {}),
+				};
+				for (const command of snapshot.commands) {
+					if (
+						(status !== "completed" && command.runId === event.runId) ||
+						inputs.some(
+							({ input_id, requested_run_id }) =>
+								input_id === command.inputId &&
+								requested_run_id === command.runId,
+						)
+					)
+						completions.push(command.complete(result));
+				}
+			}
+			return yield* this.ingestion.ingestBatch(events, {
+				...options,
+				afterCommit: (options?.afterCommit ?? Effect.void).pipe(
+					Effect.ensuring(Effect.all(completions)),
+				),
 			});
 		});
 	}
@@ -728,6 +977,134 @@ export class EffectOpenCodeRuntimeIngress
 		return this.withSql(this.projectionRunner.recover()).pipe(Effect.asVoid);
 	}
 
+	/** Freeze outstanding accepted startup runs before probing. An outbox may
+	 * have completed just before its final owned idle event was committed. */
+	recoverObservedRuns(
+		readStatuses: (
+			instanceId: string,
+			sessionId: string,
+		) => Effect.Effect<
+			Record<string, SessionStatus> | "stopped" | undefined,
+			unknown
+		>,
+		instanceIds: readonly string[] = [
+			MANAGED_OPENCODE_ACCOUNT_ID,
+			this.selectedInstanceId,
+		],
+	): Effect.Effect<void> {
+		let pending:
+			| Map<string, { instanceId: string; runIds: string[] }>
+			| undefined;
+		const gate = Semaphore.makeUnsafe(1);
+		return gate
+			.withPermitsIfAvailable(1)(
+				Effect.gen({ self: this }, function* () {
+					if (this.stopped) return;
+					if (!pending) {
+						const observed = yield* this.sql<{
+							session_id: string;
+							provider: string;
+							id: string;
+						}>`
+					SELECT r.session_id, s.provider, r.id FROM provider_runs r JOIN sessions s ON s.id = r.session_id
+					WHERE s.project_id = ${this.projectId} AND s.provider IN ${this.sql.in(instanceIds)}
+					AND r.status IN ('pending', 'running') AND (r.status = 'running' OR NOT EXISTS (
+						SELECT 1 FROM events WHERE session_id = s.id AND type = 'run.requested'
+						AND json_extract(data, '$.runId') = r.id))`;
+						pending = new Map();
+						for (const row of observed) {
+							const session = pending.get(row.session_id) ?? {
+								instanceId: row.provider,
+								runIds: [],
+							};
+							session.runIds.push(row.id);
+							pending.set(row.session_id, session);
+						}
+					}
+					for (const [sessionId, { instanceId, runIds }] of pending) {
+						yield* Effect.gen({ self: this }, function* () {
+							const outstanding = yield* this
+								.sql`SELECT 1 FROM provider_runs WHERE session_id = ${sessionId}
+						AND id IN ${this.sql.in(runIds)} AND status IN ('pending', 'running')`;
+							if (!outstanding.length) {
+								pending?.delete(sessionId);
+								return;
+							}
+							const generation = this.reconnectGenerations.get(instanceId) ?? 0;
+							const revision = this.historyRevisions.get(sessionId) ?? 0;
+							const [snapshot] = yield* this.sql<{
+								sequence: number;
+							}>`SELECT COALESCE(MAX(sequence), 0) AS sequence FROM events WHERE session_id = ${sessionId}`;
+							const statuses = yield* readStatuses(instanceId, sessionId).pipe(
+								Effect.timeout(BACKFILL_TIMEOUT),
+							);
+							if (
+								!statuses ||
+								(statuses !== "stopped" && statuses[sessionId]?.type !== "idle")
+							)
+								return;
+							yield* this.sessionGate(sessionId).withPermits(1)(
+								Effect.gen({ self: this }, function* () {
+									const current = Effect.gen({ self: this }, function* () {
+										if (
+											this.stopped ||
+											revision !==
+												(this.historyRevisions.get(sessionId) ?? 0) ||
+											generation !==
+												(this.reconnectGenerations.get(instanceId) ?? 0)
+										)
+											return yield* Effect.interrupt;
+										const [binding] = yield* this
+											.sql`SELECT 1 FROM sessions s WHERE s.id = ${sessionId}
+								AND s.project_id = ${this.projectId} AND s.provider = ${instanceId}
+								AND (SELECT COALESCE(MAX(sequence), 0) FROM events WHERE session_id = s.id) = ${snapshot?.sequence ?? 0}`;
+										if (!binding) return yield* Effect.interrupt;
+									});
+									yield* current;
+									// The probe confirms the whole session stopped. Include all
+									// outstanding runs from this unchanged snapshot, not just the
+									// external input which made recovery necessary.
+									yield* settleSessionRuns(
+										this.sql,
+										sessionId,
+										statuses === "stopped"
+											? "OpenCode instance stopped during daemon downtime"
+											: "OpenCode session idle after daemon downtime",
+										(events) =>
+											this.ingestOwnedBatch(events, {
+												beforeProject: current,
+											}),
+									);
+									pending?.delete(sessionId);
+								}),
+							);
+						}).pipe(
+							Effect.catchCause((cause) =>
+								Failure.isInterruptedOnly(cause)
+									? Effect.void
+									: Effect.sync(() =>
+											this.log.warn("Observed OpenCode run recovery deferred", {
+												sessionId,
+												error: Failure.renderCause(cause),
+											}),
+										),
+							),
+						);
+					}
+				}),
+			)
+			.pipe(
+				Effect.asVoid,
+				Effect.catch((cause) =>
+					Effect.sync(() =>
+						this.log.warn("Observed OpenCode startup recovery deferred", {
+							error: formatErrorDetail(cause),
+						}),
+					),
+				),
+			);
+	}
+
 	/** Recover only startup claims, without executing their prompts again. The
 	 * existing status poller retries unavailable providers and stale REST reads. */
 	recoverCommands(
@@ -743,7 +1120,7 @@ export class EffectOpenCodeRuntimeIngress
 			sessionId: string,
 			error: string,
 			code: string,
-			userMessageId?: string,
+			owner: TurnFailureOwner,
 			options?: {
 				beforeCommit?: Effect.Effect<void, SqlError>;
 				beforeProject?: Effect.Effect<void, SqlError>;
@@ -780,7 +1157,12 @@ export class EffectOpenCodeRuntimeIngress
 								latest_active_sequence: number;
 								user_message_id: string;
 								provider: string;
+								run_id: string | null;
 							}>`SELECT outbox.request_sequence, sessions.provider,
+								COALESCE((SELECT json_extract(metadata, '$.runId') FROM events
+									WHERE session_id = outbox.session_id AND type = 'run.started'
+										AND json_extract(data, '$.requestedRunId') = json_extract(outbox.payload_json, '$.runId')
+									ORDER BY sequence LIMIT 1), json_extract(outbox.payload_json, '$.runId')) AS run_id,
 								(SELECT MAX(request_sequence) FROM provider_command_outbox WHERE session_id = ${sessionId} AND effect_type = 'send_turn') AS latest_sequence,
 								(SELECT MAX(request_sequence) FROM provider_command_outbox WHERE session_id = ${sessionId} AND effect_type = 'send_turn' AND status NOT IN ('completed', 'failed')) AS latest_active_sequence,
 								COALESCE(
@@ -806,8 +1188,7 @@ export class EffectOpenCodeRuntimeIngress
 							);
 							if (
 								!statuses ||
-								(statuses !== "stopped" &&
-									(statuses[sessionId]?.type ?? "idle") !== "idle")
+								(statuses !== "stopped" && statuses[sessionId]?.type !== "idle")
 							)
 								return;
 							// A result can have finished entirely while the daemon was down.
@@ -852,7 +1233,8 @@ export class EffectOpenCodeRuntimeIngress
 										AND (SELECT MAX(request_sequence) FROM provider_command_outbox WHERE session_id = ${sessionId} AND effect_type = 'send_turn') = ${claim.latest_sequence}
 										AND (SELECT MAX(request_sequence) FROM provider_command_outbox WHERE session_id = ${sessionId} AND effect_type = 'send_turn' AND status NOT IN ('completed', 'failed')) = ${claim.latest_active_sequence}
 										AND (${settleSession && checkOpenTurns ? 1 : 0} = 0 OR NOT EXISTS (SELECT 1 FROM turns WHERE session_id = ${sessionId}
-											AND state IN ('pending', 'running') AND user_message_id IS NOT ${claim.user_message_id}))`;
+											AND state IN ('pending', 'running') AND user_message_id IS NOT ${claim.user_message_id}
+											AND (${claim.run_id} IS NULL OR run_id IS NOT ${claim.run_id})))`;
 											if (!valid.length) return yield* Effect.interrupt;
 										});
 									yield* current(false);
@@ -949,16 +1331,25 @@ export class EffectOpenCodeRuntimeIngress
 										user_message_id: string;
 										completed_at: number | null;
 										error: string | null;
+										run_id: string | null;
 									}>`
-						SELECT turns.state, turns.user_message_id,
+						SELECT turns.state, turns.user_message_id, turns.run_id,
 						COALESCE(reply.completed_at, json_extract(reply.rest_payload, '$.time.completed')) AS completed_at,
 						reply.error FROM turns
 						LEFT JOIN messages reply ON reply.id = turns.assistant_message_id
 						WHERE turns.session_id = ${sessionId} AND turns.user_message_id = ${claim.user_message_id}`;
 									const completed =
-										turn?.state === "completed" &&
-										turn.completed_at !== null &&
-										turn.error === null;
+										(turn?.state === "completed" &&
+											turn.completed_at !== null &&
+											turn.error === null) ||
+										ownHistory.some(
+											(message) =>
+												message.role === "assistant" &&
+												message.parentID === claim.user_message_id &&
+												isSettled(message) &&
+												!message.error,
+										);
+									const runId = claim.run_id ?? undefined;
 									const userMessageId =
 										turn?.user_message_id ?? claim.user_message_id;
 									const failure = {
@@ -1000,7 +1391,9 @@ export class EffectOpenCodeRuntimeIngress
 											sessionId,
 											failure.message,
 											failure.code,
-											userMessageId,
+											runId
+												? { runId, inputId: userMessageId }
+												: { inputId: userMessageId },
 											{
 												beforeProject: current(),
 												beforeCommit: settle,
@@ -1009,13 +1402,14 @@ export class EffectOpenCodeRuntimeIngress
 										);
 									} else
 										yield* this.ingestBatch(
-											settleSession
+											settleSession || (completed && runId)
 												? [
 														{
 															eventId: createEventId(),
 															type: "session.status",
 															providerId: "opencode",
 															sessionId,
+															...(runId ? { runId } : {}),
 															providerRefs: {},
 															rawSource: {
 																kind: "conduit.opencode.orphan-recovery",
@@ -1314,7 +1708,7 @@ export class EffectOpenCodeRuntimeIngress
 			// everything after COMMIT (bus publish, relay publish) can die or be
 			// interrupted while the batch stays durable, and a retry then would
 			// translate the same event onto a store that already holds it.
-			const written = yield* this.ingestBatch(runtimeEvents, {
+			const ingestOptions = {
 				publishToRelay: false,
 				...(translation.droppedRewrite
 					? { beforeCommit: this.invalidateHistory(sessionId) }
@@ -1330,7 +1724,41 @@ export class EffectOpenCodeRuntimeIngress
 						this.parentIds.delete(sessionId);
 					}
 				}),
-			});
+			};
+			const sessionError =
+				event.type === "session.error"
+					? runtimeEvents.find((event) => event.type === "turn.error")
+					: undefined;
+			const sessionIdle =
+				event.type === "session.status" &&
+				runtimeEvents.some(
+					(event) =>
+						event.type === "session.status" &&
+						isRecord(event.data) &&
+						event.data["status"] === "idle",
+				);
+			const written =
+				sessionError && isRecord(sessionError.data)
+					? yield* settleSessionRuns(
+							this.sql,
+							sessionId,
+							String(sessionError.data["error"] ?? "OpenCode session failed"),
+							(events) => this.ingestOwnedBatch(events, ingestOptions),
+							{
+								errorCode: String(
+									sessionError.data["code"] ?? "provider_error",
+								),
+							},
+						)
+					: sessionIdle
+						? yield* settleSessionRuns(
+								this.sql,
+								sessionId,
+								"OpenCode reported session idle",
+								(events) => this.ingestOwnedBatch(events, ingestOptions),
+								{ knownEnds: yield* this.ownRunEvents(runtimeEvents) },
+							)
+						: yield* this.ingestBatch(runtimeEvents, ingestOptions);
 			const promptProperties: Record<string, unknown> = event.properties;
 			const providerRequestId =
 				typeof promptProperties["requestID"] === "string"
@@ -1377,7 +1805,7 @@ export class EffectOpenCodeRuntimeIngress
 		});
 	}
 
-	/** Settle interrupted work without turning a stop into a successful turn end. */
+	/** A stopped process confirms that none of its sessions can still execute. */
 	onInstanceStopped(
 		providerInstanceId: string,
 		isCurrent: () => boolean,
@@ -1385,86 +1813,71 @@ export class EffectOpenCodeRuntimeIngress
 		return this.withSql(
 			Effect.gen({ self: this }, function* () {
 				if (this.stopped || !isCurrent()) return;
-				const sql = yield* SqlClient.SqlClient;
 				const defaultId = MANAGED_OPENCODE_ACCOUNT_ID;
 				const instanceIds =
 					providerInstanceId === defaultId ||
 					providerInstanceId === this.selectedInstanceId
 						? [defaultId, this.selectedInstanceId]
 						: [providerInstanceId];
-				const candidates = yield* sql<{
-					id: string;
-					provider: string;
-					status: string;
-				}>`
-					SELECT id, provider, status FROM sessions
-					WHERE project_id = ${this.projectId} AND provider IN ${sql.in(instanceIds)}`;
-				for (const {
-					id: sessionId,
-					provider: boundInstanceId,
-					status,
-				} of candidates) {
-					if (
-						status !== "busy" &&
-						status !== "retry" &&
-						this.retryingOf?.(sessionId) === undefined
-					)
-						continue;
+				const candidates = yield* this.sql<{ id: string; provider: string }>`
+					SELECT id, provider FROM sessions WHERE project_id = ${this.projectId}
+					AND provider IN ${this.sql.in(instanceIds)}`;
+				for (const { id: sessionId, provider } of candidates) {
 					yield* this.sessionGate(sessionId).withPermits(1)(
 						Effect.gen({ self: this }, function* () {
-							if (this.stopped || !isCurrent()) return;
-							// Recheck the binding after waiting for the ingestion gate. A
-							// confirmed stopped process cannot keep processing, even if its
-							// prompts still await expiration when a replacement connects.
-							const rows = yield* sql<{
-								provider_sid: string | null;
-								status: string;
-							}>`
-								SELECT s.provider_sid, s.status FROM sessions s
-								WHERE s.id = ${sessionId} AND s.project_id = ${this.projectId}
-									AND s.provider = ${boundInstanceId}
-									AND EXISTS (
-										SELECT 1 FROM session_providers sp
-											WHERE sp.session_id = s.id AND sp.provider = ${boundInstanceId}
-											AND sp.status = 'active')`;
-							const row = rows[0];
-							if (
-								!row ||
-								this.stopped ||
-								!isCurrent() ||
-								(row.status !== "busy" &&
-									row.status !== "retry" &&
-									this.retryingOf?.(sessionId) === undefined)
-							)
-								return;
-							yield* this.ingestBatch(
-								[
-									{
-										eventId: createEventId(),
-										type: "session.status",
-										providerId: "opencode",
-										sessionId,
-										providerRefs: row.provider_sid
-											? { providerSessionId: row.provider_sid }
-											: {},
-										rawSource: { kind: "conduit.opencode.instance-stopped" },
-										createdAt: Date.now(),
-										data: { sessionId, status: "idle" },
-										metadata: {
-											synthetic: true,
-											source: "managed-instance-stop",
+							const current = Effect.gen({ self: this }, function* () {
+								if (this.stopped || !isCurrent())
+									return yield* Effect.interrupt;
+								const [binding] = yield* this.sql`SELECT 1 FROM sessions s
+									JOIN session_providers sp ON sp.session_id = s.id AND sp.provider = s.provider AND sp.status = 'active'
+									WHERE s.id = ${sessionId} AND s.project_id = ${this.projectId} AND s.provider = ${provider}`;
+								if (!binding) return yield* Effect.interrupt;
+							});
+							yield* current;
+							const snapshot = this.capturePendingTurns?.(sessionId);
+							const runs = yield* this.sql<{
+								id: string;
+							}>`SELECT r.id FROM provider_runs r
+								WHERE r.session_id = ${sessionId} AND r.status IN ('pending', 'running')
+								AND (r.status = 'running' OR NOT EXISTS (SELECT 1 FROM provider_command_outbox o
+									WHERE o.session_id = r.session_id AND o.effect_type = 'send_turn'
+									AND json_extract(o.payload_json, '$.runId') = r.id))`;
+							const owners = [
+								...(snapshot?.commands.flatMap(({ runId, userMessageId }) =>
+									runId ? [{ runId, userMessageId }] : [],
+								) ?? []),
+								...runs
+									.filter(
+										({ id }) =>
+											!snapshot?.commands.some(({ runId }) => runId === id),
+									)
+									.map(({ id: runId }) => ({ runId })),
+							];
+							yield* settleSessionRuns(
+								this.sql,
+								sessionId,
+								"OpenCode instance stopped",
+								(events) =>
+									this.ingestOwnedBatch(
+										events,
+										{
+											beforeProject: current,
+											beforeCommit: current,
 										},
-									},
-								],
-								{
-									beforeCommit: Effect.suspend(() =>
-										this.stopped || !isCurrent()
-											? Effect.interrupt
-											: Effect.void,
+										snapshot ? new Map([[sessionId, snapshot]]) : undefined,
 									),
-								},
+								{ owners },
 							);
-						}),
+						}).pipe(
+							Effect.catchCause((cause) =>
+								Failure.isInterruptedOnly(cause)
+									? Effect.void
+									: Effect.logWarning(
+											"Stopped OpenCode settlement deferred",
+											cause,
+										),
+							),
+						),
 					);
 				}
 			}),
@@ -1648,6 +2061,7 @@ export const makeEffectOpenCodeRuntimeIngress = (
 	inputIdForUserEcho?: EffectOpenCodeRuntimeIngressOptions["inputIdForUserEcho"],
 	resolveSessionPick?: EffectOpenCodeRuntimeIngressOptions["resolveSessionPick"],
 	backfillRetryDelayMs?: number,
+	capturePendingTurns?: EffectOpenCodeRuntimeIngressOptions["capturePendingTurns"],
 ): Effect.Effect<
 	EffectOpenCodeRuntimeIngress,
 	ProjectionRunnerError | SqlError,
@@ -1679,6 +2093,7 @@ export const makeEffectOpenCodeRuntimeIngress = (
 			...(fetchSessionMessages ? { fetchSessionMessages } : {}),
 			...(inputIdForUserEcho ? { inputIdForUserEcho } : {}),
 			...(resolveSessionPick ? { resolveSessionPick } : {}),
+			...(capturePendingTurns ? { capturePendingTurns } : {}),
 			...(retries._tag === "Some" ? { retryingOf: retries.value } : {}),
 			...(config._tag === "Some" && config.value.openCodeInstanceId
 				? { selectedInstanceId: config.value.openCodeInstanceId }

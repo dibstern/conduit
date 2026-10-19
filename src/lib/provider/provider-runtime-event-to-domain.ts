@@ -50,6 +50,19 @@ export function translateProviderRuntimeEventToDomain(
 	const data = dataRecord(event);
 
 	switch (event.type) {
+		case "run.started": {
+			const inputId = stringField(data["inputId"]);
+			const requestedRunId = stringField(data["requestedRunId"]);
+			const userMessageId = stringField(data["userMessageId"]);
+			if (!inputId || !requestedRunId || !event.runId) {
+				throw new TypeError("A run acceptance requires its input and run ids");
+			}
+			return singleEvent(event, state, "run.started", {
+				inputId,
+				requestedRunId,
+				...(userMessageId ? { userMessageId } : {}),
+			});
+		}
 		case "workspace.changed":
 			// Session Workspace validates moves and remains their only canonical writer.
 			return {
@@ -118,10 +131,11 @@ export function translateProviderRuntimeEventToDomain(
 		case "message.created": {
 			const messageId = messageIdFromData(event, data);
 			const role = messageRole(data["role"]);
-			const parentID = getProviderDriver(event.providerId)
-				?.emitsMessageParentIds
-				? stringField(data["parentID"])
-				: undefined;
+			const parentID =
+				event.runId ||
+				getProviderDriver(event.providerId)?.emitsMessageParentIds
+					? stringField(data["parentID"])
+					: undefined;
 			const inputId = stringField(data["inputId"]);
 			const nextState =
 				role === "assistant"
@@ -401,6 +415,12 @@ export function translateProviderRuntimeEventToDomain(
 					typeof data["messageId"] === "string"
 						? data["messageId"]
 						: messageIdFromDataOrState(event, data, state),
+				...(typeof data["reason"] === "string"
+					? { reason: data["reason"] }
+					: {}),
+				...(typeof data["userMessageId"] === "string"
+					? { userMessageId: data["userMessageId"] }
+					: {}),
 			});
 		}
 
@@ -773,6 +793,7 @@ function eventMetadata(event: ProviderRuntimeEvent): EventMetadata {
 			: undefined;
 	return {
 		...runtimeMetadata(event.metadata),
+		...(event.runId ? { runId: event.runId } : {}),
 		// Only these two kinds have readers: projectors branch on opencode.rest,
 		// and subagent persistence and its verify script on the transcript kind.
 		...(event.rawSource.kind === "opencode.rest" ||

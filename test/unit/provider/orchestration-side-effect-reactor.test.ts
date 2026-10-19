@@ -13,8 +13,10 @@ import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js
 import { makeAccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	makeProviderRuntimeIngestionLive,
+	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
 } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
@@ -104,7 +106,7 @@ describe("ProviderSideEffectReactor", () => {
 							}),
 						),
 					]),
-					ingestion: { ingest: () => Effect.succeed(1) },
+					ingestion: mockIngestion(),
 				});
 				const firstDrain = yield* Effect.forkChild(reactor.drain());
 				yield* Deferred.await(started);
@@ -143,7 +145,7 @@ describe("ProviderSideEffectReactor", () => {
 				projectId: "test-project",
 				sql,
 				registry: new ProviderRegistry([makeProvider(sendTurn)]),
-				ingestion: { ingest: () => Effect.succeed(1) },
+				ingestion: mockIngestion(),
 			});
 			yield* reactor.drain();
 			expect(sendTurn).not.toHaveBeenCalled();
@@ -200,7 +202,7 @@ describe("ProviderSideEffectReactor", () => {
 					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry([makeProvider(sendTurn)]),
-					ingestion: { ingest: () => Effect.succeed(0) },
+					ingestion: mockIngestion(() => Effect.succeed(0)),
 					accountDirectory,
 				});
 
@@ -248,7 +250,7 @@ describe("ProviderSideEffectReactor", () => {
 						getNativeSessionEffect: getNativeSession,
 					},
 				]),
-				ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+				ingestion: mockIngestion(),
 			});
 
 			expect(sendTurn).not.toHaveBeenCalled();
@@ -313,7 +315,7 @@ describe("ProviderSideEffectReactor", () => {
 					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry([makeProvider(sendTurn)]),
-					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+					ingestion: mockIngestion(),
 					accountDirectory: makeAccountDirectory(
 						Effect.succeed(
 							accountsStateFromInstances(
@@ -462,7 +464,7 @@ describe("ProviderSideEffectReactor", () => {
 				projectId: "test-project",
 				sql,
 				registry: new ProviderRegistry([makeProvider(sendTurn)]),
-				ingestion: { ingest },
+				ingestion: mockIngestion(ingest),
 			});
 
 			yield* reactor.drain();
@@ -526,7 +528,7 @@ describe("ProviderSideEffectReactor", () => {
 				projectId: "test-project",
 				sql,
 				registry: new ProviderRegistry([makeProvider(sendTurn)]),
-				ingestion: { ingest },
+				ingestion: mockIngestion(ingest),
 			});
 
 			yield* reactor.runCommand("cmd-1", interactions);
@@ -555,7 +557,7 @@ describe("ProviderSideEffectReactor", () => {
 				projectId: "test-project",
 				sql,
 				registry: new ProviderRegistry([makeProvider(sendTurn)]),
-				ingestion: { ingest: () => Effect.succeed(1) },
+				ingestion: mockIngestion(),
 				outcomePollTimeout: 0,
 			});
 			const result = yield* Effect.result(reactor.runCommand("cmd-1"));
@@ -569,6 +571,106 @@ describe("ProviderSideEffectReactor", () => {
 		}).pipe(
 			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
 		),
+	);
+
+	// Intake belongs to the provider: several foreground steer calls can be
+	// pending together before any of them acknowledges delivery.
+	it.effect(
+		"dispatches back-to-back foreground steers before the provider accepts either",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				for (const [commandId, requestSequence] of [
+					["old", 10],
+					["first-steer", 20],
+					["second-steer", 30],
+				] as const)
+					yield* seedSendTurnOutbox(sql, { commandId, requestSequence });
+				yield* sql`UPDATE provider_command_outbox SET payload_json = json_set(payload_json, '$.inputId', command_id)`;
+				yield* sql`UPDATE provider_command_outbox SET status = 'running' WHERE command_id = 'old'`;
+				const release = yield* Deferred.make<void>();
+				const sendTurn = vi.fn((_input: SendTurnInput) =>
+					Deferred.await(release).pipe(Effect.as(completedTurn)),
+				);
+				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
+					sql,
+					registry: new ProviderRegistry([makeProvider(sendTurn)]),
+					ingestion: mockIngestion(),
+					outcomePollTimeout: 0,
+				});
+				const calls = yield* Effect.forEach(
+					["first-steer", "second-steer"],
+					(commandId) =>
+						Effect.forkChild(
+							Effect.result(
+								reactor.withLiveCommand(
+									commandId,
+									reactor.runCommand(commandId),
+								),
+							),
+						),
+				);
+				yield* TestClock.adjust("10 millis");
+				expect(sendTurn).toHaveBeenCalledTimes(2);
+				expect(sendTurn.mock.calls.map(([input]) => input.inputId)).toEqual([
+					"first-steer",
+					"second-steer",
+				]);
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox ORDER BY request_sequence`,
+				).toEqual([
+					{ status: "running", attempt_count: 0 },
+					{ status: "running", attempt_count: 1 },
+					{ status: "running", attempt_count: 1 },
+				]);
+				yield* Deferred.succeed(release, undefined);
+				for (const call of calls)
+					expect((yield* Fiber.join(call))._tag).toBe("Success");
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
+	);
+
+	it.effect(
+		"keeps the background drain out of a live caller's pending command",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedSendTurnOutbox(sql);
+				const held = yield* Deferred.make<void>();
+				const release = yield* Deferred.make<void>();
+				const sendTurn = vi.fn((_input: SendTurnInput) =>
+					Effect.succeed(completedTurn),
+				);
+				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
+					sql,
+					registry: new ProviderRegistry([makeProvider(sendTurn)]),
+					ingestion: mockIngestion(),
+				});
+				const owner = yield* Effect.forkChild(
+					reactor.withLiveCommand(
+						"cmd-1",
+						Deferred.succeed(held, undefined).pipe(
+							Effect.andThen(Deferred.await(release)),
+						),
+					),
+				);
+				yield* Deferred.await(held);
+				expect(yield* reactor.runOnce()).toBe(0);
+				expect(sendTurn).not.toHaveBeenCalled();
+				expect(yield* readOutboxRetryState(sql, 10)).toMatchObject({
+					status: "pending",
+					attempt_count: 0,
+				});
+				yield* Deferred.succeed(release, undefined);
+				yield* Fiber.join(owner);
+				expect(yield* reactor.runOnce()).toBe(1);
+				expect(sendTurn).toHaveBeenCalledTimes(1);
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 	);
 
 	it.effect("surfaces a store failure while claiming an outbox row", () =>
@@ -585,7 +687,7 @@ describe("ProviderSideEffectReactor", () => {
 				projectId: "test-project",
 				sql,
 				registry: new ProviderRegistry([makeProvider(sendTurn)]),
-				ingestion: { ingest: () => Effect.succeed(1) },
+				ingestion: mockIngestion(),
 			});
 			const result = yield* Effect.result(reactor.runOnce());
 			expect(result).toMatchObject({
@@ -626,7 +728,7 @@ describe("ProviderSideEffectReactor", () => {
 				projectId: "test-project",
 				sql,
 				registry: new ProviderRegistry([makeProvider(sendTurn)]),
-				ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+				ingestion: mockIngestion(),
 				retryBackoff: (failureCount) =>
 					Duration.millis(Math.min(100 * 2 ** (failureCount - 1), 400)),
 			});
@@ -718,7 +820,7 @@ describe("ProviderSideEffectReactor", () => {
 					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry([makeProvider(sendTurn)]),
-					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+					ingestion: mockIngestion(),
 				});
 
 				// The row this fiber selected while it was still pending.
@@ -769,7 +871,7 @@ describe("ProviderSideEffectReactor", () => {
 					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry(),
-					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+					ingestion: mockIngestion(),
 					outcomePollInterval: "100 millis",
 					outcomePollTimeout: "500 millis",
 				});
@@ -821,7 +923,7 @@ describe("ProviderSideEffectReactor", () => {
 					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry(),
-					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+					ingestion: mockIngestion(),
 					outcomePollInterval: "100 millis",
 					outcomePollTimeout: "100 millis",
 				});
@@ -887,7 +989,7 @@ describe("ProviderSideEffectReactor", () => {
 					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry(),
-					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+					ingestion: mockIngestion(),
 					outcomePollInterval: "100 millis",
 					outcomePollTimeout: "250 millis",
 				});
@@ -937,7 +1039,7 @@ describe("ProviderSideEffectReactor", () => {
 					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry(),
-					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+					ingestion: mockIngestion(),
 					outcomePollInterval: 0,
 					outcomePollTimeout: "100 millis",
 				});
@@ -984,7 +1086,7 @@ describe("ProviderSideEffectReactor", () => {
 					projectId: "test-project",
 					sql,
 					registry,
-					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+					ingestion: mockIngestion(),
 					outcomePollInterval: "100 millis",
 					outcomePollTimeout: "500 millis",
 				});
@@ -992,7 +1094,7 @@ describe("ProviderSideEffectReactor", () => {
 					projectId: "test-project",
 					sql,
 					registry,
-					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+					ingestion: mockIngestion(),
 					outcomePollInterval: "100 millis",
 					outcomePollTimeout: "500 millis",
 				});
@@ -1029,17 +1131,84 @@ describe("ProviderSideEffectReactor", () => {
 			),
 	);
 
+	// Terminal append, run projection, and receipt writes can each fail. A failed
+	// transaction must retain the running claim for recovery, with no half-ended run.
+	for (const failureAt of [
+		"terminal",
+		"projection",
+		"receipt",
+		"none",
+	] as const) {
+		it.effect(`settles a failed run atomically when ${failureAt} fails`, () =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				const commit = yield* makeCommitAndSignal;
+				yield* seedSendTurnOutbox(sql);
+				yield* sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at)
+					VALUES ('session-1', 'test-project', 'claude', 1, 1)`;
+				yield* sql`UPDATE provider_command_outbox SET payload_json = json_set(payload_json, '$.runId', 'reserved-run')`;
+				yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
+					VALUES ('reserved-run', 'session-1', 'pending', 1000)`;
+				if (failureAt === "terminal")
+					yield* sql`CREATE TRIGGER fail_terminal BEFORE INSERT ON events
+						WHEN NEW.type = 'turn.error' BEGIN SELECT RAISE(ABORT, 'terminal failed'); END`;
+				if (failureAt === "projection")
+					yield* sql`CREATE TRIGGER fail_projection BEFORE UPDATE OF status ON provider_runs
+						WHEN NEW.status = 'error' BEGIN SELECT RAISE(ABORT, 'projection failed'); END`;
+				if (failureAt === "receipt")
+					yield* sql`CREATE TRIGGER fail_receipt BEFORE UPDATE OF status ON command_receipts
+						WHEN NEW.status = 'side_effect_failed' BEGIN SELECT RAISE(ABORT, 'receipt failed'); END`;
+				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
+					sql,
+					registry: new ProviderRegistry(),
+					ingestion,
+					write: commit.write,
+				});
+				const result = yield* Effect.result(reactor.runOnce());
+				const committed = failureAt === "none";
+				expect(result._tag).toBe(committed ? "Success" : "Failure");
+				expect(yield* sql`SELECT status FROM provider_command_outbox`).toEqual([
+					{ status: committed ? "failed" : "running" },
+				]);
+				expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
+					{
+						status: committed ? "side_effect_failed" : "side_effect_requested",
+					},
+				]);
+				expect(yield* sql`SELECT status FROM provider_runs`).toEqual([
+					{ status: committed ? "error" : "pending" },
+				]);
+				expect(
+					yield* sql`SELECT json_extract(metadata, '$.runId') AS run_id FROM events WHERE type = 'turn.error'`,
+				).toEqual(committed ? [{ run_id: "reserved-run" }] : []);
+			}).pipe(
+				Effect.provide(
+					Layer.provideMerge(
+						makeProviderRuntimeIngestionLive(),
+						makePersistenceEffectLayer(":memory:", "test-project"),
+					),
+				),
+			),
+		);
+	}
+
 	it.effect(
 		"marks provider lookup failures instead of leaving outbox rows running",
 		() =>
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				yield* seedSendTurnOutbox(sql);
+				yield* sql`UPDATE provider_command_outbox SET payload_json = json_set(payload_json, '$.runId', 'reserved-run')`;
+				yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
+					VALUES ('reserved-run', 'session-1', 'pending', 1000)`;
+				const ingest = vi.fn(() => Effect.succeed(1));
 				const reactor = new ProviderSideEffectReactor({
 					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry(),
-					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+					ingestion: mockIngestion(ingest),
 				});
 
 				yield* reactor.runOnce();
@@ -1059,6 +1228,14 @@ describe("ProviderSideEffectReactor", () => {
 					attempt_count: 1,
 					error_code: "provider_not_registered",
 				});
+				expect(ingest).toHaveBeenCalledWith(
+					expect.objectContaining({
+						type: "turn.error",
+						runId: "reserved-run",
+						sessionId: "session-1",
+						data: expect.objectContaining({ code: "provider_not_registered" }),
+					}),
+				);
 			}).pipe(
 				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
 			),
@@ -1075,7 +1252,7 @@ describe("ProviderSideEffectReactor", () => {
 				projectId: "test-project",
 				sql,
 				registry: new ProviderRegistry([makeProvider(sendTurn)]),
-				ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+				ingestion: mockIngestion(),
 			});
 
 			yield* reactor.runOnce();
@@ -1111,7 +1288,7 @@ describe("ProviderSideEffectReactor", () => {
 					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry([makeProvider(sendTurn)]),
-					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+					ingestion: mockIngestion(),
 				});
 
 				yield* reactor.runOnce();
@@ -1164,7 +1341,7 @@ describe("ProviderSideEffectReactor", () => {
 					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry([makeProvider(sendTurn)]),
-					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
+					ingestion: mockIngestion(),
 				});
 
 				yield* reactor.runOnce();
@@ -1184,6 +1361,21 @@ describe("ProviderSideEffectReactor", () => {
 			),
 	);
 });
+
+function mockIngestion(
+	ingest: ProviderRuntimeIngestion["ingest"] = () => Effect.succeed(1),
+): Pick<ProviderRuntimeIngestion, "ingest" | "ingestBatch"> {
+	return {
+		ingest,
+		ingestBatch: (events, options) =>
+			Effect.gen(function* () {
+				yield* options?.beforeProject ?? Effect.void;
+				yield* Effect.forEach(events, (event) => ingest(event));
+				yield* options?.beforeCommit ?? Effect.void;
+				return events.length;
+			}),
+	};
+}
 
 function seedSendTurnOutbox(
 	sql: SqlClient.SqlClient,

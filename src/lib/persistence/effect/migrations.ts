@@ -1362,6 +1362,65 @@ export const effectMigrationEntries = {
 		if (existing.length > 0) return;
 		yield* executeSqlStatements(readMigrationSql(INPUT_DRAFTS_MIGRATION));
 	}),
+	"0069_provider_run_ownership": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = yield* sql<{ name: string }>`PRAGMA table_info(turns)`;
+		const alreadyOwned = columns.some(({ name }) => name === "run_id");
+		yield* executeSqlStatements(`
+			CREATE TABLE IF NOT EXISTS provider_runs (
+				id TEXT PRIMARY KEY,
+				session_id TEXT NOT NULL,
+				status TEXT NOT NULL CHECK(status IN ('pending', 'running', 'completed', 'error', 'interrupted', 'joined')),
+				requested_at INTEGER NOT NULL,
+				started_at INTEGER,
+				completed_at INTEGER
+			);
+			CREATE INDEX IF NOT EXISTS idx_provider_runs_session_status ON provider_runs(session_id, status);
+			CREATE TRIGGER IF NOT EXISTS delete_session_provider_runs AFTER DELETE ON sessions
+			BEGIN DELETE FROM provider_runs WHERE session_id = OLD.id; END;
+		`);
+		yield* runAddColumnMigrationIfMissing(
+			"turns",
+			"run_id",
+			"ALTER TABLE turns ADD COLUMN run_id TEXT",
+		);
+		yield* executeSqlStatements(
+			"CREATE INDEX IF NOT EXISTS idx_turns_run ON turns(run_id)",
+		);
+		if (alreadyOwned) return;
+		// Reservations survive re-opening and migration-ledger repairs. They do
+		// not claim that the provider accepted the legacy input.
+		yield* sql`UPDATE provider_command_outbox
+			SET payload_json = json_set(payload_json, '$.runId', 'legacy-run:' || project_key || ':' || request_sequence)
+			WHERE effect_type = 'send_turn' AND status IN ('pending', 'running', 'retryable_failed')
+				AND json_valid(payload_json) AND json_type(payload_json) = 'object'
+				AND json_extract(payload_json, '$.runId') IS NULL`;
+		yield* sql`INSERT OR IGNORE INTO provider_runs (id, session_id, status, requested_at, started_at)
+			SELECT json_extract(payload_json, '$.runId'), session_id,
+				CASE WHEN status = 'running' THEN 'running' ELSE 'pending' END,
+				requested_at, CASE WHEN status = 'running' THEN updated_at END
+			FROM provider_command_outbox
+			WHERE effect_type = 'send_turn' AND status IN ('pending', 'running', 'retryable_failed')
+				AND json_valid(payload_json) AND json_type(payload_json) = 'object'
+				AND json_extract(payload_json, '$.runId') IS NOT NULL`;
+		yield* sql`INSERT OR IGNORE INTO events (event_id, session_id, stream_version, type, data, metadata, provider, created_at, project_id)
+			SELECT 'run-requested-migration:' || json_extract(o.payload_json, '$.runId'), o.session_id,
+				COALESCE((SELECT MAX(stream_version) FROM events WHERE session_id = o.session_id), 0)
+					+ ROW_NUMBER() OVER (PARTITION BY o.session_id ORDER BY o.request_sequence),
+				'run.requested', json_object('runId', json_extract(o.payload_json, '$.runId'),
+					'inputId', COALESCE(json_extract(o.payload_json, '$.inputId'), json_extract(o.payload_json, '$.userMessageId'), o.command_id)),
+				json_object('runId', json_extract(o.payload_json, '$.runId')), o.provider_id, o.requested_at,
+				(SELECT project_id FROM sessions WHERE id = o.session_id)
+			FROM provider_command_outbox o
+			WHERE o.effect_type = 'send_turn' AND o.status IN ('pending', 'running', 'retryable_failed')
+				AND json_valid(o.payload_json) AND json_type(o.payload_json) = 'object'
+				AND json_extract(o.payload_json, '$.runId') IS NOT NULL
+				AND NOT EXISTS (SELECT 1 FROM events WHERE event_id = 'run-requested-migration:' || json_extract(o.payload_json, '$.runId'))`;
+		// Keep an executing legacy reservation busy until its surviving runner
+		// or ordinary command recovery proves it ended. Acceptance stays unknown.
+		yield* sql`UPDATE turns SET state = 'interrupted', completed_at = COALESCE(completed_at, requested_at)
+			WHERE run_id IS NULL AND state IN ('pending', 'running')`;
+	}),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

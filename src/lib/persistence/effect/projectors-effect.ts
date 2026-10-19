@@ -3,8 +3,8 @@
 import { Data, Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
+import { getProviderDriver } from "../../contracts/provider-instance.js";
 import type { ReadModelCollection } from "../../contracts/read-model-advance.js";
-import { persistedTurnState } from "../../contracts/turn-phase.js";
 import { CLAUDE_WORKTREE_EVENTS } from "../../session/claude-worktree-state.js";
 import { isRecord } from "../../utils.js";
 import type { LiveEventType, StoredEvent } from "../events.js";
@@ -380,6 +380,49 @@ export const makeSessionProjector = defineProjector(() => ({
 	project: (event, ctx) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
+			const terminal =
+				event.type === "turn.completed" ||
+				event.type === "turn.error" ||
+				event.type === "turn.interrupted";
+			// Fork copies preserve historical attention without creating runs or settling live work.
+			if (terminal && event.metadata.inherited) {
+				const updated = yield* sql<{
+					id: string;
+				}>`UPDATE sessions SET last_turn_end_version = ${event.streamVersion}
+					WHERE id = ${event.sessionId} AND COALESCE(last_turn_end_version, -1) < ${event.streamVersion}
+					RETURNING id`;
+				return yield* stampSessions(ids(updated), ctx.version);
+			}
+			if (
+				terminal ||
+				(event.type === "session.status" && event.metadata.runId)
+			) {
+				const runId = event.metadata.runId;
+				if (!runId) return { stamped: [], removed: [], collections: [] };
+				const [run] = yield* sql<{
+					status: string;
+					completed_at: number | null;
+				}>`SELECT status, completed_at FROM provider_runs
+					WHERE id = ${runId} AND session_id = ${event.sessionId}`;
+				if (!run) return { stamped: [], removed: [], collections: [] };
+				const open = run.status === "pending" || run.status === "running";
+				if (
+					terminal &&
+					!open &&
+					!(ctx.replaying && run.completed_at === event.createdAt)
+				)
+					return { stamped: [], removed: [], collections: [] };
+				if (event.type === "session.status" && !open) {
+					if (event.data.status === "busy" || event.data.status === "retry")
+						return { stamped: [], removed: [], collections: [] };
+					const newer =
+						yield* sql`SELECT 1 FROM provider_runs WHERE session_id = ${event.sessionId}
+						AND id <> ${runId} AND status IN ('pending', 'running') LIMIT 1`;
+					if (newer.length)
+						return { stamped: [], removed: [], collections: [] };
+				}
+			}
+
 			const written: string[] = [];
 			// Families this event can take members from, which naming the
 			// sessions it wrote does not reach.
@@ -1378,6 +1421,8 @@ export const makeMessageProjector = defineProjector(() => ({
 export const makeTurnProjector = defineProjector(() => ({
 	name: "turn",
 	handles: [
+		"run.requested",
+		"run.started",
 		"message.created",
 		"message.snapshot",
 		"tool.started",
@@ -1390,6 +1435,55 @@ export const makeTurnProjector = defineProjector(() => ({
 	project: (event, ctx) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
+			if (isEventType(event, "run.requested")) {
+				yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
+					VALUES (${event.data.runId}, ${event.sessionId}, 'pending', ${event.createdAt})
+					ON CONFLICT (id) DO NOTHING`;
+				return { sessions: [event.sessionId], messages: [] };
+			}
+			const runId = event.metadata.runId;
+			if (isEventType(event, "run.started")) {
+				if (!runId) return { sessions: [], messages: [] };
+				if (event.data.requestedRunId === runId)
+					yield* sql`INSERT INTO provider_runs
+					(id, session_id, status, requested_at, started_at)
+					VALUES (${runId}, ${event.sessionId}, 'running', ${event.createdAt}, ${event.createdAt})
+					ON CONFLICT (id) DO NOTHING`;
+
+				const [resolved] = yield* sql<{
+					status: string;
+					started_at: number | null;
+					completed_at: number | null;
+				}>`
+					SELECT status, started_at, completed_at FROM provider_runs WHERE id = ${runId} AND session_id = ${event.sessionId}`;
+				if (!resolved || resolved.status === "joined")
+					return { sessions: [], messages: [] };
+				const open =
+					resolved.status === "pending" || resolved.status === "running";
+				const startedAt =
+					resolved.started_at ?? (open ? event.createdAt : null);
+				yield* sql`UPDATE provider_runs SET status = 'joined', completed_at = ${event.createdAt}
+					WHERE id = ${event.data.requestedRunId} AND session_id = ${event.sessionId}
+					AND id <> ${runId} AND status = 'pending'`;
+				if (open)
+					yield* sql`UPDATE provider_runs SET status = 'running', started_at = ${startedAt}
+					WHERE id = ${runId} AND session_id = ${event.sessionId}`;
+				const written = yield* sql<OwnedRow & { id: string }>`UPDATE turns
+					SET run_id = ${runId}, state = ${open ? "running" : resolved.status},
+						started_at = COALESCE(started_at, ${startedAt}), completed_at = ${open ? null : resolved.completed_at}
+					WHERE session_id = ${event.sessionId}
+					AND (id = ${event.data.userMessageId ?? event.data.inputId} OR user_message_id IN
+						(SELECT id FROM messages WHERE session_id = ${event.sessionId} AND input_id = ${event.data.inputId}))
+					AND (run_id IS NULL OR run_id = ${runId} OR (${event.data.userMessageId ?? null} IS NOT NULL
+						AND EXISTS (SELECT 1 FROM provider_runs prior WHERE prior.id = turns.run_id AND prior.status NOT IN ('pending', 'running'))))
+					RETURNING id, session_id`;
+				if (written.length)
+					yield* sql`UPDATE messages SET turn_id = id WHERE session_id = ${event.sessionId}
+					AND id IN ${sql.in(written.map(({ id }) => id))}`;
+
+				return { sessions: [event.sessionId], messages: ids(written) };
+			}
+
 			if (
 				event.metadata.rawSource !== "opencode.rest" &&
 				"messageId" in event.data &&
@@ -1481,7 +1575,7 @@ export const makeTurnProjector = defineProjector(() => ({
 							started_at = ${totals?.started_at ?? null},
 							completed_at = ${latest.is_streaming ? null : (totals?.completed_at ?? null)},
 							cost = ${totals?.cost ?? null}, tokens_in = ${totals?.tokens_in ?? null},
-							tokens_out = ${totals?.tokens_out ?? null} WHERE id = ${turnId}
+							tokens_out = ${totals?.tokens_out ?? null} WHERE id = ${turnId} AND run_id IS NULL
 							RETURNING id`;
 						messageIds.push(...ids(rows));
 					} else {
@@ -1490,7 +1584,7 @@ export const makeTurnProjector = defineProjector(() => ({
 						}>`UPDATE turns SET assistant_message_id = NULL, state = 'pending',
 							started_at = NULL, completed_at = NULL, cost = NULL,
 							tokens_in = NULL, tokens_out = NULL WHERE id = ${turnId}
-							AND assistant_message_id IS NOT NULL RETURNING id`;
+							AND assistant_message_id IS NOT NULL AND run_id IS NULL RETURNING id`;
 						messageIds.push(...ids(rows));
 					}
 				}
@@ -1500,239 +1594,106 @@ export const makeTurnProjector = defineProjector(() => ({
 				};
 			}
 
-			if (isEventType(event, "message.created")) {
-				if (event.data.role === "user") {
-					// A steer closes the turn it joined at its own start time, so a
-					// folded result splits into two turns; the result completes this one.
-					const closed = event.data.backfilled
-						? []
-						: yield* sql<
-								OwnedRow & { id: string }
-							>`UPDATE turns SET state = 'completed',
-							completed_at = ${event.createdAt}
-							WHERE session_id = ${event.data.sessionId}
-							AND state IN ('pending', 'running')
-							AND id != ${event.data.messageId}
-							RETURNING id, session_id`;
-					return {
-						sessions: owners([
-							...closed,
-							...(yield* sql<OwnedRow>`
-								INSERT OR REPLACE INTO turns
-								(id, session_id, state, user_message_id, requested_at)
-								VALUES (${event.data.messageId}, ${event.data.sessionId}, ${persistedTurnState("prompt")}, ${event.data.messageId}, ${event.createdAt})
-								RETURNING session_id`),
-						]),
-						messages: ids(closed),
-					};
-				}
-			}
-
-			// Idle means the provider has nothing in flight, so every turn it
-			// leaves open is over: one waiting for a reply never got it, and one
-			// whose result named no reply this turn owns will see no other close.
-			// The inbox reads an open turn as busy and would queue every later
-			// send. A turn the provider continues reopens on its next reply.
-			if (
-				isEventType(event, "session.status") &&
-				event.data.status === "idle"
-			) {
-				const written = yield* sql<OwnedRow & { id: string }>`
-						UPDATE turns SET state = 'completed', completed_at = ${event.createdAt}
-						WHERE session_id = ${event.sessionId}
-						AND state IN ('pending', 'running')
-						AND requested_at <= ${event.createdAt}
-						RETURNING id, session_id`;
-				return { sessions: owners(written), messages: ids(written) };
-			}
-
-			// A result may arrive before the provider continues the same turn.
-			if (
-				(isEventType(event, "session.status") &&
-					event.data.status === "busy") ||
-				(isEventType(event, "message.created") &&
-					event.data.role === "assistant") ||
-				isEventType(event, "tool.started")
-			) {
-				const parentTurn =
-					isEventType(event, "message.created") && event.data.parentID
-						? yield* sql<{
-								id: string;
-								state: string;
-								assistant_message_id: string | null;
-							}>`SELECT id, state, assistant_message_id FROM turns
-							WHERE id = ${event.data.parentID} AND session_id = ${event.sessionId}`
-						: isEventType(event, "tool.started")
-							? yield* sql<{
-									id: string;
-									state: string;
-									assistant_message_id: string | null;
-								}>`SELECT turns.id, turns.state, turns.assistant_message_id
-								FROM turns JOIN messages ON messages.turn_id = turns.id
-								WHERE messages.id = ${event.data.messageId}
-								AND turns.session_id = ${event.sessionId}`
-							: [];
-				// Without a key, a signal belongs to the newest turn, except that a
-				// newer turn not yet started must not take over a running turn's
-				// busy and tool signals; a new reply is what starts it. A turn still
-				// running from before a later one settled is a crash leftover, so it
-				// never wins.
-				const [turn] = parentTurn.length
-					? parentTurn
-					: yield* sql<{
-							id: string;
-							state: string;
-							assistant_message_id: string | null;
-						}>`
-					SELECT id, state, assistant_message_id FROM turns
-					WHERE session_id = ${event.sessionId}
-					AND requested_at <= ${event.createdAt}
-					ORDER BY (${isEventType(event, "message.created") ? 0 : 1}
-						AND state = 'running'
-						AND requested_at >= (SELECT COALESCE(MAX(requested_at), 0) FROM turns
-							WHERE session_id = ${event.sessionId}
-							AND state NOT IN ('pending', 'running'))) DESC,
-						requested_at DESC, rowid DESC LIMIT 1`;
-				if (!turn) return { sessions: [], messages: [] };
-				const reopening = turn.state !== "pending" && turn.state !== "running";
-				// A tool no message of ours owns (a background task restarting
-				// between turns) joins an open turn only. Reopened, a settled turn
-				// would run with no reply whose result could close it.
-				if (
-					reopening &&
-					isEventType(event, "tool.started") &&
-					!parentTurn.length
-				)
-					return { sessions: [], messages: [] };
-				// Turns run one at a time, so a reply starting ends every earlier
-				// turn still running.
-				const superseded = isEventType(event, "message.created")
-					? yield* sql<OwnedRow & { id: string }>`
-						UPDATE turns SET state = 'completed', completed_at = ${event.createdAt}
-						WHERE session_id = ${event.sessionId} AND state = 'running'
-						AND requested_at < (SELECT requested_at FROM turns WHERE id = ${turn.id})
-						RETURNING id, session_id`
+			if (isEventType(event, "message.created") && event.data.role === "user") {
+				// Failed delivery can settle before its user message is placed. Keep
+				// that exact reservation's end without claiming provider intake.
+				const [failed] = runId
+					? yield* sql<{
+							status: string;
+							completed_at: number | null;
+						}>`SELECT status, completed_at FROM provider_runs
+						WHERE id = ${runId} AND session_id = ${event.sessionId} AND status IN ('error', 'interrupted')`
 					: [];
-				if (isEventType(event, "message.created")) {
-					yield* sql`UPDATE messages SET turn_id = ${turn.id},
-						parent_id = COALESCE(parent_id, ${turn.id})
-						WHERE id = ${event.data.messageId}`;
-				}
-				const assistantMessageId = reopening ? null : turn.assistant_message_id;
-				const written = yield* sql<OwnedRow & { id: string }>`
-						UPDATE turns
-						SET state = ${persistedTurnState(event.type === "session.status" ? "busy" : "activity")},
-							started_at = COALESCE(started_at, ${event.createdAt}),
-							completed_at = NULL,
-							assistant_message_id = ${isEventType(event, "message.created") ? (assistantMessageId ?? event.data.messageId) : assistantMessageId}
-						WHERE id = ${turn.id}
-						RETURNING id, session_id`;
-				return {
-					sessions: owners([...written, ...superseded]),
-					messages: ids([...written, ...superseded]),
-				};
+				const written = yield* sql<OwnedRow>`INSERT INTO turns
+					(id, session_id, state, user_message_id, requested_at, completed_at)
+					VALUES (${event.data.messageId}, ${event.sessionId}, ${failed?.status ?? "pending"}, ${event.data.messageId}, ${event.createdAt}, ${failed?.completed_at ?? null})
+					ON CONFLICT (id) DO NOTHING RETURNING session_id`;
+				return { sessions: owners(written), messages: [] };
 			}
 
-			// These three find their turn by assistant message id, so the owning
-			// session is nowhere in the statement — `RETURNING session_id` is the
-			// only thing that knows which session row actually moved.
-			if (isEventType(event, "turn.completed")) {
-				// New Claude completions add their cost deltas, like per-execution tokens.
-				// Other providers and historical Claude events retain latest-wins cost.
-				// A result-only turn (Claude /compact) has no reply of its own,
-				// so it is keyed by its prompt instead of the previous turn's reply.
-				const tokens = event.data.tokens;
-				const written = yield* sql<OwnedRow & { id: string }>`
-						UPDATE turns
-						SET state = 'completed',
-							cost = CASE WHEN ${event.data.providerCostTotalUsd !== undefined ? 1 : 0}
-								THEN COALESCE(cost, 0) + ${event.data.cost ?? 0}
-								ELSE COALESCE(${event.data.cost ?? null}, cost) END,
-							tokens_in = COALESCE(tokens_in + ${tokens?.input ?? null}, tokens_in, ${tokens?.input ?? null}),
-							tokens_out = COALESCE(tokens_out + ${tokens?.output ?? null}, tokens_out, ${tokens?.output ?? null}),
-							completed_at = ${event.createdAt}
-						WHERE ${
-							event.data.userMessageId
-								? sql`id = ${event.data.userMessageId} AND session_id = ${event.sessionId}`
-								: // A turn can hold several replies (an input the SDK folds
-									// into it starts a new one), but its row names only the
-									// first, so the reply's own turn link settles it too.
-									sql`session_id = ${event.sessionId}
-									AND (assistant_message_id = ${event.data.messageId}
-										OR id = (SELECT turn_id FROM messages
-											WHERE id = ${event.data.messageId}))`
-						}
-						RETURNING id, session_id`;
-				return { sessions: owners(written), messages: ids(written) };
-			}
-
-			if (isEventType(event, "turn.error")) {
-				// Runner startup and queued sends can fail before an assistant
-				// message identifies the owning turn. Prefer the persisted user ID.
-				if (event.data.userMessageId) {
-					const written = yield* sql<OwnedRow & { id: string }>`UPDATE turns
-							SET state = 'error', completed_at = ${event.createdAt}
-							WHERE id = ${event.data.userMessageId}
-							AND session_id = ${event.sessionId}
-							RETURNING id, session_id`;
-					return { sessions: owners(written), messages: ids(written) };
-				}
-				// An error before the reply is named carries no id a turn owns, so
-				// it ends the running turn.
-				const written = yield* sql<OwnedRow & { id: string }>`
-						UPDATE turns
-						SET state = 'error', completed_at = ${event.createdAt}
-						WHERE session_id = ${event.sessionId}
-						AND (assistant_message_id = ${event.data.messageId}
-							OR state = 'running')
-						RETURNING id, session_id`;
-				return { sessions: owners(written), messages: ids(written) };
-			}
-
-			if (isEventType(event, "turn.interrupted")) {
-				// Stop ends the session's work, so whatever is still open stops with
-				// the named turn. That also covers an empty id (stopped before naming
-				// its reply) and an id no turn owns.
-				const written = yield* sql<OwnedRow & { id: string }>`
-						UPDATE turns
-						SET state = 'interrupted', completed_at = ${event.createdAt}
-						WHERE session_id = ${event.sessionId}
-						AND (assistant_message_id = ${event.data.messageId}
-							OR state IN ('running', 'pending'))
-						RETURNING id, session_id`;
-				return { sessions: owners(written), messages: ids(written) };
-			}
-
-			// Cursor reports its actual model at wait(), after the turn may have
-			// settled. Its assistant message identifies that turn exactly. Legacy
-			// Claude init events arrive before a reply and use the newest open turn.
-			if (isEventType(event, "turn.model_resolved")) {
-				const target = event.data.messageId
-					? sql`SELECT turn_id FROM messages
-						WHERE id = ${event.data.messageId} AND session_id = ${event.sessionId}`
-					: sql`SELECT id FROM turns
-						WHERE session_id = ${event.sessionId}
-							AND state IN ('pending', 'running')
-						ORDER BY requested_at DESC LIMIT 1`;
-				const written = yield* sql<OwnedRow & { id: string }>`
-					UPDATE turns
-					SET requested_model = ${event.data.requestedModel ?? null},
-						expected_model = ${event.data.expectedModel ?? null},
-						actual_model = ${event.data.actualModel}
-					WHERE session_id = ${event.sessionId} AND id = (${target})
+			if (
+				isEventType(event, "message.created") &&
+				event.data.role === "assistant" &&
+				event.data.parentID
+			) {
+				const written = yield* sql<OwnedRow & { id: string }>`UPDATE turns
+					SET assistant_message_id = COALESCE(assistant_message_id, ${event.data.messageId})
+					WHERE id = ${event.data.parentID} AND session_id = ${event.sessionId} AND (${runId ?? null} IS NULL OR run_id = ${runId ?? null})
 					RETURNING id, session_id`;
-				if (event.data.messageId && written.length) {
-					// Keyed resolution also associates its prompt with the resolved turn.
-					// The history adapter carries execution from that prompt to UserMessage.
-					yield* sql`UPDATE messages SET turn_id = id
-						WHERE session_id = ${event.sessionId}
-						AND id IN ${sql.in(written.map(({ id }) => id))}`;
-				}
-				return {
-					sessions: owners(written),
-					messages: event.data.messageId ? ids(written) : [],
-				};
+				if (written.length)
+					yield* sql`UPDATE messages SET turn_id = ${event.data.parentID}
+					WHERE id = ${event.data.messageId} AND session_id = ${event.sessionId}`;
+				return { sessions: owners(written), messages: ids(written) };
 			}
+
+			// Live ownership is resolved by the adapter. Unplaced events cannot change a turn.
+			if (!runId) return { sessions: [], messages: [] };
+			const [run] = yield* sql<{
+				status: string;
+			}>`SELECT status FROM provider_runs
+				WHERE id = ${runId} AND session_id = ${event.sessionId}`;
+			if (!run) return { sessions: [], messages: [] };
+
+			if (isEventType(event, "turn.model_resolved")) {
+				const written = yield* sql<OwnedRow & { id: string }>`UPDATE turns
+					SET requested_model = ${event.data.requestedModel ?? null},
+						expected_model = ${event.data.expectedModel ?? null}, actual_model = ${event.data.actualModel}
+					WHERE run_id = ${runId} AND session_id = ${event.sessionId}
+					RETURNING id, session_id`;
+				return { sessions: owners(written), messages: ids(written) };
+			}
+
+			if (isEventType(event, "turn.completed")) {
+				const tokens = event.data.tokens;
+				yield* sql`UPDATE turns SET
+					cost = CASE WHEN ${event.data.providerCostTotalUsd !== undefined ? 1 : 0}
+						THEN COALESCE(cost, 0) + ${event.data.cost ?? 0}
+						ELSE COALESCE(${event.data.cost ?? null}, cost) END,
+					tokens_in = COALESCE(tokens_in + ${tokens?.input ?? null}, tokens_in, ${tokens?.input ?? null}),
+					tokens_out = COALESCE(tokens_out + ${tokens?.output ?? null}, tokens_out, ${tokens?.output ?? null})
+					WHERE run_id = ${runId} AND session_id = ${event.sessionId}
+					AND id = COALESCE(${event.data.userMessageId ?? null},
+						(SELECT turn_id FROM messages WHERE id = ${event.data.messageId}
+						 AND session_id = ${event.sessionId}))`;
+			}
+			if (!["pending", "running"].includes(run.status))
+				return { sessions: [event.sessionId], messages: [] };
+
+			const terminal = isEventType(event, "turn.error")
+				? "error"
+				: isEventType(event, "turn.interrupted")
+					? "interrupted"
+					: isEventType(event, "turn.completed") &&
+							getProviderDriver(event.provider)?.streamsSessionLifecycle ===
+								true
+						? "completed"
+						: isEventType(event, "session.status") &&
+								event.provider === "opencode"
+							? event.data.status === "idle"
+								? "completed"
+								: event.data.status === "error"
+									? "error"
+									: undefined
+							: undefined;
+			if (terminal) {
+				// A failed delivery can close its named pending input without claiming
+				// that the provider accepted it. Successful ends still require intake.
+				const unacceptedInput =
+					run.status === "pending" &&
+					(isEventType(event, "turn.error") ||
+						isEventType(event, "turn.interrupted"))
+						? (event.data.userMessageId ?? null)
+						: null;
+				yield* sql`UPDATE provider_runs SET status = ${terminal}, completed_at = ${event.createdAt}
+					WHERE id = ${runId} AND session_id = ${event.sessionId} AND status IN ('pending', 'running')`;
+				const written = yield* sql<OwnedRow & { id: string }>`UPDATE turns
+					SET state = ${terminal}, completed_at = ${event.createdAt}
+					WHERE (run_id = ${runId} OR (run_id IS NULL AND id = ${unacceptedInput} AND state = 'pending'))
+					AND session_id = ${event.sessionId} AND state IN ('pending', 'running')
+					RETURNING id, session_id`;
+				return { sessions: [event.sessionId], messages: ids(written) };
+			}
+
 			return { sessions: [], messages: [] };
 		}).pipe(
 			Effect.mapError((e) =>

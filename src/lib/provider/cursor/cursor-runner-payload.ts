@@ -1,7 +1,10 @@
 import { isDeepStrictEqual } from "node:util";
 import { Deferred, Effect, Fiber, Queue, Result, Schema, Stream } from "effect";
 import { createEventId } from "../../persistence/events.js";
-import { EventSinkIngestionError } from "../event-sink-errors.js";
+import {
+	type EventSinkError,
+	EventSinkIngestionError,
+} from "../event-sink-errors.js";
 import { makeInProcessSessionRunner } from "../runner/in-process-session-runner.js";
 import type { LiveSettings, RunnerPayload } from "../runner/runner-payload.js";
 import { runnerPidAlive } from "../runner/runner-registry.js";
@@ -75,6 +78,18 @@ const decodeSteeredMessage = Schema.decodeUnknownResult(
 		type: Schema.Literal("user-message-appended"),
 		userMessage: Schema.Struct({ text: Schema.String }),
 	}),
+);
+
+const decodeRunning = Schema.decodeUnknownResult(
+	Schema.Struct({
+		type: Schema.Literal("status"),
+		agent_id: Schema.String,
+		run_id: Schema.String,
+		status: Schema.Literal("RUNNING"),
+	}),
+);
+const decodeStreamIdentity = Schema.decodeUnknownResult(
+	Schema.Struct({ agent_id: Schema.String, run_id: Schema.String }),
 );
 
 const decodeTerminal = Schema.decodeUnknownResult(
@@ -224,7 +239,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 			let settled = false;
 			let waitForRun: (() => Promise<unknown>) | undefined;
 			let cost: number | undefined;
-			let currentInputId = input.inputId;
+			let currentInputId = input.continuation?.cutOffMessageId ?? input.inputId;
 			const events = new CursorTurnEvents(
 				input.sessionId,
 				createEventId(),
@@ -260,6 +275,27 @@ export class CursorRunnerPayload implements RunnerPayload {
 					outcome?: boolean;
 				}
 			>();
+			let accepted = false;
+			const beforeIntake: Update[] = [];
+			const acceptInitial = () =>
+				Effect.gen(function* () {
+					if (accepted) return;
+					accepted = true;
+					events.runId = input.runId;
+					if (input.runId)
+						yield* events.push("run.started", {
+							inputId: input.inputId,
+							requestedRunId: input.runId,
+							...(input.continuation
+								? { userMessageId: input.continuation.cutOffMessageId }
+								: {}),
+						});
+					yield* events.push("session.status", {
+						sessionId: input.sessionId,
+						status: "busy",
+					});
+					yield* events.announceMessage(currentInputId);
+				});
 			let acceptingSteers = true;
 			// All receipts, turn end and cancellation use this one settle point.
 			// Retain settled receipts until turn end so an ack plus its user delta
@@ -282,6 +318,12 @@ export class CursorRunnerPayload implements RunnerPayload {
 								},
 							});
 							currentInputId = inputId;
+							events.currentUserMessageId = inputId;
+							if (events.runId && pending.input.runId)
+								yield* events.push("run.started", {
+									inputId,
+									requestedRunId: pending.input.runId,
+								});
 						}
 						return this.result(
 							session,
@@ -306,20 +348,51 @@ export class CursorRunnerPayload implements RunnerPayload {
 					for (const inputId of steers.keys())
 						yield* settleSteer(inputId, false);
 				});
-			const applyUpdate = (update: Update) =>
+			const applyUpdate = (
+				update: Update,
+			): Effect.Effect<void, SessionFailure | EventSinkError> =>
 				Effect.gen(function* () {
+					if (update.channel === "stream") {
+						const identity = decodeStreamIdentity(update.value);
+						if (
+							Result.isSuccess(identity) &&
+							(identity.success.run_id !== events.refs.providerTurnId ||
+								identity.success.agent_id !== session.agentId)
+						)
+							return;
+						const running = decodeRunning(update.value);
+						if (Result.isSuccess(running)) {
+							yield* acceptInitial();
+							for (const pending of beforeIntake.splice(0))
+								yield* applyUpdate(pending);
+						}
+					}
+					if (
+						!accepted &&
+						(update.channel === "delta" ||
+							update.channel === "stream" ||
+							update.channel === "steer-result")
+					) {
+						beforeIntake.push(update);
+						return;
+					}
 					if (update.channel === "steer-result") {
 						yield* settleSteer(update.inputId, update.delivered);
 					} else if (update.channel === "delta") {
 						const message = decodeSteeredMessage(update.value);
 						if (Result.isSuccess(message)) {
-							const pending = [...steers.values()].find(
+							const matching = [...steers.values()].filter(
 								(steer) =>
-									!steer.landed &&
-									steer.outcome !== false &&
 									steer.input.prompt === message.success.userMessage.text,
 							);
-							if (pending) {
+							// Appended-user deltas have no command id. Repeated text,
+							// including the initial prompt, must wait for its exact ack.
+							const pending =
+								matching.length === 1 &&
+								input.prompt !== message.success.userMessage.text
+									? matching[0]
+									: undefined;
+							if (pending && !pending.landed && pending.outcome !== false) {
 								pending.landed = true;
 								yield* settleSteer(pending.input.inputId, true);
 							}
@@ -376,15 +449,6 @@ export class CursorRunnerPayload implements RunnerPayload {
 								text: input.text ?? input.prompt,
 							},
 						});
-					yield* events.push("session.status", {
-						sessionId: input.sessionId,
-						status: "busy",
-					});
-					yield* events.push("message.created", {
-						messageId: events.messageId,
-						sessionId: input.sessionId,
-						role: "assistant",
-					});
 					const credential = yield* sdkCall("credential lookup", () =>
 						resolveCursorCredential(
 							this.sdk,
@@ -917,9 +981,12 @@ export class CursorRunnerPayload implements RunnerPayload {
 									: "error",
 						);
 						yield* events.endThinking();
+						// A terminal can settle an unaccepted reservation without claiming intake.
+						events.runId ??= input.runId;
 						if (result.status === "completed")
 							yield* events.push("turn.completed", {
 								messageId: events.messageId,
+								userMessageId: currentInputId,
 								...(session.agentId
 									? { providerSessionId: session.agentId }
 									: {}),

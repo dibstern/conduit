@@ -459,11 +459,17 @@ describe("shared-store relay project scope", () => {
 		const acted = await store.runtime.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				const options = {
+				const options: ConstructorParameters<
+					typeof ProviderSideEffectReactor
+				>[0] = {
 					sql,
 					projectId: A,
 					registry: new ProviderRegistry(),
-					ingestion: { ingest: () => Effect.succeed(0) },
+					ingestion: {
+						ingest: () => Effect.succeed(0),
+						ingestBatch: (_events, options) =>
+							(options?.beforeCommit ?? Effect.void).pipe(Effect.as(0)),
+					},
 					nowMs: () => NOW,
 				};
 				yield* new ProviderSideEffectReactor(options).drain();

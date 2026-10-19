@@ -225,6 +225,8 @@ export type QuestionAskedPayload = PayloadOf<"question.asked">;
 export type QuestionResolvedPayload = PayloadOf<"question.resolved">;
 
 export interface EventMetadata {
+	/** Conduit run ownership; only this run's terminal event can settle its turns. */
+	readonly runId?: string;
 	readonly commandId?: string;
 	readonly causationEventId?: string;
 	readonly correlationId?: string;
@@ -245,6 +247,8 @@ export interface EventMetadata {
 	readonly synthetic?: boolean;
 	readonly inherited?: boolean;
 	readonly providerCreatedAt?: number;
+	/** First observed OpenCode directory before an explicit workspace move. */
+	readonly nativeDirectory?: string;
 	readonly source?: string;
 	readonly sseBatchId?: string;
 	readonly sseBatchSize?: number;
@@ -261,6 +265,7 @@ export type StoredEvent = CanonicalEvent<CanonicalEventType> & {
 };
 
 export const EventMetadataSchema = Schema.Struct({
+	runId: Schema.optionalKey(Schema.String),
 	commandId: Schema.optionalKey(Schema.String),
 	causationEventId: Schema.optionalKey(Schema.String),
 	correlationId: Schema.optionalKey(Schema.String),
@@ -283,6 +288,7 @@ export const EventMetadataSchema = Schema.Struct({
 	synthetic: Schema.optionalKey(Schema.Boolean),
 	inherited: Schema.optionalKey(Schema.Boolean),
 	providerCreatedAt: Schema.optionalKey(Schema.Number),
+	nativeDirectory: Schema.optionalKey(Schema.String),
 	source: Schema.optionalKey(Schema.String),
 	sseBatchId: Schema.optionalKey(Schema.String),
 	sseBatchSize: Schema.optionalKey(Schema.Number),
@@ -591,6 +597,16 @@ export const CanonicalEvents = {
 			]),
 		),
 	),
+	"run.requested": live(
+		Schema.Struct({ runId: Schema.String, inputId: Schema.String }),
+	),
+	"run.started": live(
+		Schema.Struct({
+			inputId: Schema.String,
+			requestedRunId: Schema.String,
+			userMessageId: Schema.optionalKey(Schema.String),
+		}),
+	),
 	"turn.completed": live(
 		Schema.Struct({
 			messageId: Schema.String,
@@ -619,6 +635,9 @@ export const CanonicalEvents = {
 	"turn.interrupted": live(
 		Schema.Struct({
 			messageId: Schema.String,
+			/** Exact pending input when interruption precedes provider acceptance. */
+			userMessageId: Schema.optionalKey(Schema.String),
+			reason: Schema.optionalKey(Schema.String),
 		}),
 	),
 	"turn.model_resolved": live(

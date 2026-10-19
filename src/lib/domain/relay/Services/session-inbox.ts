@@ -399,18 +399,17 @@ export const SessionInboxLive = Layer.effect(
 				// A reset-only release restarts an input admitted after an earlier
 				// Stop, as an idle Submit would. A Stop after admission still wins.
 				const [facts] = yield* sql<{
-					status: string | null;
+					run_status: string | null;
 					provider: string | null;
 					limited: number;
 					scheduled: number;
 					open_prompts: number;
-					last_turn: string | null;
 					stopped: number;
 					interrupt_requested: string | null;
 					running: string | null;
-					in_flight: number;
 				}>`SELECT
-					(SELECT status FROM sessions WHERE id = ${sessionId}) AS status,
+					(SELECT status FROM provider_runs WHERE session_id = ${sessionId}
+						AND status IN ('pending', 'running') ORDER BY requested_at DESC, rowid DESC LIMIT 1) AS run_status,
 					(SELECT provider FROM sessions WHERE id = ${sessionId}) AS provider,
 					(SELECT json_extract(limit_recovery, '$.cutOffMessageId') IS NOT NULL
 						FROM sessions WHERE id = ${sessionId}) AS limited,
@@ -419,8 +418,6 @@ export const SessionInboxLive = Layer.effect(
 						FROM sessions WHERE id = ${sessionId}) AS scheduled,
 					(SELECT COUNT(*) FROM pending_approvals
 						WHERE session_id = ${sessionId} AND status = 'pending') AS open_prompts,
-					(SELECT state FROM turns WHERE session_id = ${sessionId}
-						ORDER BY requested_at DESC, rowid DESC LIMIT 1) AS last_turn,
 					(EXISTS (SELECT 1 FROM turns WHERE session_id = ${sessionId}
 						AND state IN ('interrupted', 'error')
 						AND completed_at >= COALESCE(
@@ -461,14 +458,7 @@ export const SessionInboxLive = Layer.effect(
 						JOIN pending_inputs pending ON pending.input_id = outbox.command_id
 						WHERE outbox.session_id = ${sessionId}
 						AND outbox.effect_type = 'send_turn'
-						ORDER BY outbox.request_sequence DESC LIMIT 1) AS running,
-					EXISTS (SELECT 1 FROM provider_command_outbox outbox
-						JOIN pending_inputs pending ON pending.input_id = outbox.command_id
-						WHERE outbox.session_id = ${sessionId}
-						AND outbox.effect_type = 'send_turn'
-						AND outbox.status IN ('pending', 'running', 'retryable_failed')
-						AND NOT EXISTS (SELECT 1 FROM messages
-							WHERE messages.input_id = outbox.command_id)) AS in_flight`;
+						ORDER BY outbox.request_sequence DESC LIMIT 1) AS running`;
 				const known =
 					inputId === undefined
 						? false
@@ -477,7 +467,6 @@ export const SessionInboxLive = Layer.effect(
 								OR EXISTS (SELECT 1 FROM messages
 									WHERE input_id = ${inputId} OR id = ${inputId}) AS n`)[0]
 								?.n === 1;
-				const lastTurn = facts?.last_turn ?? null;
 				const running =
 					facts?.running == null
 						? undefined
@@ -511,12 +500,7 @@ export const SessionInboxLive = Layer.effect(
 					),
 					steering: rows.some((row) => row.state === "steering"),
 					busy:
-						facts?.status === "busy" ||
-						facts?.status === "retry" ||
-						(facts?.open_prompts ?? 0) > 0 ||
-						lastTurn === "pending" ||
-						lastTurn === "running" ||
-						facts?.in_flight === 1,
+						facts?.run_status === "pending" || facts?.run_status === "running",
 					stoppedSinceHandoff: facts?.stopped === 1,
 					limited: facts?.limited === 1,
 					usageResetsAt: resets.length > 0 ? Math.max(...resets) : undefined,

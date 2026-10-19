@@ -396,19 +396,41 @@ describe("SessionManager read-your-writes parity", () => {
 							yield* projectionRunner
 								.projectEvent(stored)
 								.pipe(Effect.provideService(SqlClient.SqlClient, sql));
-							if (opts?.turnEnded)
-								yield* projectionRunner
-									.projectEvent(
-										yield* store.append(
-											canonicalEvent(
-												"turn.completed",
-												sessionId,
-												{ messageId: `${sessionId}-a` },
-												{ provider: "opencode", createdAt: 1_001 },
-											),
-										),
-									)
-									.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+							if (opts?.turnEnded) {
+								const runId = `${sessionId}-run`;
+								const inputId = `${sessionId}-u`;
+								for (const event of [
+									canonicalEvent("message.created", sessionId, {
+										sessionId,
+										messageId: inputId,
+										inputId,
+										role: "user",
+									}),
+									canonicalEvent("run.requested", sessionId, {
+										runId,
+										inputId,
+									}),
+									canonicalEvent(
+										"run.started",
+										sessionId,
+										{ inputId, requestedRunId: runId },
+										{ metadata: { runId } },
+									),
+									canonicalEvent(
+										"session.status",
+										sessionId,
+										{ sessionId, status: "idle" },
+										{
+											provider: "opencode",
+											createdAt: 1_001,
+											metadata: { runId },
+										},
+									),
+								])
+									yield* projectionRunner
+										.projectEvent(yield* store.append(event))
+										.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+							}
 						});
 
 					const context = { api, service, readQuery, seedSession };

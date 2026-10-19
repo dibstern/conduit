@@ -150,7 +150,7 @@ export interface ProviderSideEffectReactorOptions {
 	readonly projectId: string;
 	readonly sql: SqlClient.SqlClient;
 	readonly registry: ProviderRegistry;
-	readonly ingestion: Pick<ProviderRuntimeIngestion, "ingest">;
+	readonly ingestion: Pick<ProviderRuntimeIngestion, "ingest" | "ingestBatch">;
 	readonly write?: CommitAndSignal["write"];
 	readonly persistHandoffDelivered?: ClaudeEventPersistEffect["persistHandoffDelivered"];
 	readonly claudeSessionForkSdk?: ClaudeSessionForkSdk;
@@ -920,10 +920,8 @@ export class ProviderSideEffectReactor {
 			? updatedAt + Duration.toMillis(retryBackoff(row.attempt_count + 1))
 			: null;
 		const { sql } = this.options;
-		return this.writeSettlement(
-			row,
-			Effect.all([
-				sql`
+		const updates = Effect.all([
+			sql`
 					UPDATE provider_command_outbox
 					SET status = ${retryable ? "retryable_failed" : "failed"},
 					    error_code = ${errorCode},
@@ -931,17 +929,69 @@ export class ProviderSideEffectReactor {
 					    updated_at = ${updatedAt}
 					WHERE request_sequence = ${row.request_sequence}
 						AND project_key = ${this.options.projectId}`,
-				sql`
+			sql`
 					UPDATE command_receipts
 					SET status = 'side_effect_failed', error_code = ${errorCode}, updated_at = ${updatedAt}
 					WHERE command_id = ${row.command_id}
 						AND project_key = ${this.options.projectId}`,
-			]),
-		).pipe(Effect.mapError(storeFailure("markFailed")));
+		]).pipe(Effect.asVoid);
+		return retryable || row.effect_type !== "send_turn"
+			? this.writeSettlement(row, updates).pipe(
+					Effect.mapError(storeFailure("markFailed")),
+				)
+			: this.settleFailedRun(row, errorCode, updatedAt, updates);
 	}
 
-	// The inbox reads send_turn status; a slash command's turn can end before
-	// settlement, so the settle commit must announce its session.
+	private settleFailedRun(
+		row: ProviderCommandOutboxRow,
+		errorCode: string,
+		updatedAt: number,
+		updates: Effect.Effect<void, SqlError>,
+	): Effect.Effect<void, ProviderCommandStoreFailure> {
+		return Effect.gen({ self: this }, function* () {
+			const [run] = yield* this.options.sql<{ id: string; input_id: string }>`
+				SELECT r.id, COALESCE(json_extract(o.payload_json, '$.inputId'),
+					json_extract(o.payload_json, '$.userMessageId'), o.command_id) AS input_id
+				FROM provider_command_outbox o JOIN provider_runs r ON r.session_id = o.session_id
+					AND r.id = COALESCE((SELECT json_extract(metadata, '$.runId') FROM events
+						WHERE session_id = o.session_id AND type = 'run.started'
+							AND json_extract(data, '$.requestedRunId') = json_extract(o.payload_json, '$.runId')
+						ORDER BY sequence LIMIT 1), json_extract(o.payload_json, '$.runId'))
+				WHERE o.request_sequence = ${row.request_sequence} AND o.project_key = ${this.options.projectId}
+					AND json_valid(o.payload_json) AND r.status IN ('pending', 'running')
+				LIMIT 1`.pipe(Effect.mapError(storeFailure("failedRunOwner")));
+			if (!run)
+				return yield* this.writeSettlement(row, updates).pipe(
+					Effect.mapError(storeFailure("markFailed")),
+				);
+			yield* this.options.ingestion
+				.ingestBatch(
+					[
+						{
+							eventId: `provider-command-terminal:${row.request_sequence}:${row.attempt_count}`,
+							type:
+								errorCode === "interrupted" ? "turn.interrupted" : "turn.error",
+							providerId: row.provider_id,
+							sessionId: row.session_id,
+							runId: run.id,
+							providerRefs: {},
+							rawSource: { kind: "conduit.provider-command" },
+							createdAt: updatedAt,
+							data: {
+								messageId: run.input_id,
+								userMessageId: run.input_id,
+								error: errorCode,
+								code: errorCode,
+							},
+						},
+					],
+					{ beforeCommit: updates },
+				)
+				.pipe(Effect.mapError(storeFailure("settleFailedRun")));
+		});
+	}
+
+	// Announce settlement so command receipt and session readers can refresh.
 	private writeSettlement(
 		row: ProviderCommandOutboxRow,
 		updates: Effect.Effect<unknown, SqlError>,
@@ -1054,6 +1104,7 @@ function isSendTurnOutboxPayload(
 	if (!isRecord(value)) return false;
 	return (
 		typeof value["sessionId"] === "string" &&
+		(value["runId"] === undefined || typeof value["runId"] === "string") &&
 		typeof value["inputId"] === "string" &&
 		typeof value["prompt"] === "string" &&
 		(value["history"] === undefined || Array.isArray(value["history"])) &&

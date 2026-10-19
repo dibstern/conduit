@@ -38,6 +38,7 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
+import { openCodeInputMessageId } from "../../../provider/opencode/opencode-input-message-id.js";
 import { createRelayEventSink } from "../../../provider/relay-event-sink.js";
 import {
 	catalogFromProviderList,
@@ -345,6 +346,7 @@ const failUnfinishedSend = (
 	endedByProvider: boolean,
 	error: string,
 	code: string,
+	runId?: string,
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
@@ -364,6 +366,11 @@ const failUnfinishedSend = (
 		if (!input.steer && !(yield* hasNewerHandoff(input, sql)))
 			yield* clearProcessingTimeout(input.sessionId);
 		const inputId = input.continuation ? undefined : input.commandId;
+		const userMessageId =
+			input.continuation?.cutOffMessageId ??
+			(driver === "opencode" && runId
+				? openCodeInputMessageId(input.commandId)
+				: input.commandId);
 		const unplaced =
 			driver !== undefined &&
 			inputId !== undefined &&
@@ -390,9 +397,10 @@ const failUnfinishedSend = (
 			const persist = yield* ClaudeEventPersistEffectTag;
 			yield* persist
 				.persistUserMessage(input.sessionId, input.text, {
-					messageId: inputId,
+					messageId: userMessageId,
 					inputId,
 					provider: driver,
+					...(runId ? { runId } : {}),
 				})
 				.pipe(
 					Effect.catch((cause) =>
@@ -406,7 +414,17 @@ const failUnfinishedSend = (
 		}
 		// A provider's own turn end cannot have ended a turn placed only now.
 		if (endedByProvider && !unplaced) return;
-		yield* failTurn(input.sessionId, error, code, inputId);
+		yield* failTurn(
+			input.sessionId,
+			error,
+			code,
+			runId
+				? {
+						runId,
+						inputId: userMessageId,
+					}
+				: { inputId: input.commandId },
+		);
 	});
 
 export const makeEventSinkFactory = Effect.gen(function* () {
@@ -466,6 +484,7 @@ const handleDispatchFailure = (
 	sendErr: unknown,
 	driver: ProviderDriverKind | undefined,
 	endedByProvider = false,
+	runId?: string,
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
@@ -483,6 +502,7 @@ const handleDispatchFailure = (
 			endedByProvider,
 			error.message,
 			error.code,
+			runId,
 		);
 		if (missing) {
 			const ws = yield* Effect.serviceOption(WebSocketHandlerTag);
@@ -505,6 +525,7 @@ const handleDispatchResult = (
 	result: TurnResult,
 	driver: ProviderDriverKind,
 	endedByProvider: boolean,
+	runId?: string,
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
@@ -536,6 +557,7 @@ const handleDispatchResult = (
 				endedByProvider,
 				msg,
 				"SEND_FAILED",
+				runId,
 			);
 			return;
 		}
@@ -582,7 +604,7 @@ const prepareEngineTurnInput = (
 				resolvedInput.sessionId,
 				"A session model pick is required before sending a message.",
 				"PICK_REQUIRED",
-				resolvedInput.continuation ? undefined : resolvedInput.commandId,
+				{ inputId: resolvedInput.commandId },
 			);
 			return undefined;
 		}
@@ -636,7 +658,7 @@ const prepareEngineTurnInput = (
 				resolvedInput.sessionId,
 				resolved.failure.message,
 				"PICK_REJECTED",
-				resolvedInput.continuation ? undefined : resolvedInput.commandId,
+				{ inputId: resolvedInput.commandId },
 			);
 			return undefined;
 		}
@@ -833,24 +855,33 @@ const dispatchEngineTurn = (
 				? { ...event, data: { ...event.data, workspaceMoveSequence } }
 				: event,
 		);
-		// Continuations have no inbox admission, but handing their directive to
-		// Claude still consumes exactly this move, atomically with the outbox.
-		if (
-			workspaceMoveSequence !== undefined &&
-			!events.some((event) => event.type === "input.sent")
-		)
-			events.push(
-				canonicalEvent(
-					"input.sent",
-					resolvedInput.sessionId,
-					{
-						sessionId: resolvedInput.sessionId,
-						inputId: sendTurnInput.inputId,
-						workspaceMoveSequence,
-					},
-					{ provider: "claude" },
-				),
+		// A hidden continuation still has an exact handoff. Its event id pins
+		// the timeout to this reservation even if the same input is retried.
+		const existingHandoff = events.find((event) => event.type === "input.sent");
+		const handoff =
+			existingHandoff ??
+			canonicalEvent(
+				"input.sent",
+				resolvedInput.sessionId,
+				{
+					sessionId: resolvedInput.sessionId,
+					inputId: sendTurnInput.inputId,
+					...(workspaceMoveSequence !== undefined
+						? { workspaceMoveSequence }
+						: {}),
+				},
+				{ provider: driver },
 			);
+		if (!existingHandoff) events.push(handoff);
+		const handoffEventId = handoff.eventId;
+		const dispatchedInput = { ...resolvedInput, events };
+		let reservedRunId: string | undefined;
+		const timeoutRuntime = yield* Effect.context<
+			| SqlClient.SqlClient
+			| OverridesStateTag
+			| LoggerTag
+			| ProviderRuntimeIngestionTag
+		>();
 		const dispatchProgram = Effect.try({
 			try: () =>
 				orchestrationEngine.dispatchEffect({
@@ -859,22 +890,49 @@ const dispatchEngineTurn = (
 					providerId,
 					input: watchedInput,
 					...(events.length > 0 ? { events } : {}),
-					onAccepted: Deferred.succeed(accepted, undefined),
+					onAccepted: Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						const [reservation] = yield* sql<{ run_id: string | null }>`
+								SELECT json_extract(data, '$.runId') AS run_id FROM events
+								WHERE session_id = ${resolvedInput.sessionId} AND type = 'run.requested'
+									AND json_extract(data, '$.inputId') = ${sendTurnInput.inputId}
+									AND sequence > (SELECT sequence FROM events WHERE event_id = ${handoffEventId})
+								ORDER BY sequence LIMIT 1`;
+						reservedRunId = reservation?.run_id ?? undefined;
+						if (!resolvedInput.steer && reservedRunId) {
+							const [active] = yield* sql`
+									SELECT 1 FROM provider_runs WHERE session_id = ${resolvedInput.sessionId}
+										AND id = COALESCE((SELECT json_extract(metadata, '$.runId') FROM events
+											WHERE session_id = ${resolvedInput.sessionId} AND type = 'run.started'
+												AND json_extract(data, '$.requestedRunId') = ${reservedRunId}
+											ORDER BY sequence LIMIT 1), ${reservedRunId})
+										AND status IN ('pending', 'running')`;
+							if (active) yield* startProcessing(resolvedInput, reservedRunId);
+						}
+						yield* Deferred.succeed(accepted, undefined);
+					}).pipe(Effect.provide(timeoutRuntime), Effect.orDie),
 				}),
 			catch: (cause) => cause,
 		}).pipe(
 			Effect.flatten,
 			Effect.flatMap((result) =>
-				handleDispatchResult(resolvedInput, result, driver, endedByProvider),
+				handleDispatchResult(
+					dispatchedInput,
+					result,
+					driver,
+					endedByProvider,
+					reservedRunId,
+				),
 			),
 			Effect.catch((error) =>
 				restorePreviousBinding.pipe(
 					Effect.andThen(
 						handleDispatchFailure(
-							resolvedInput,
+							dispatchedInput,
 							error,
 							driver,
 							endedByProvider,
+							reservedRunId,
 						),
 					),
 				),
@@ -949,7 +1007,7 @@ const sendViaEngine = (
 
 /** The handoff is where a turn starts working: arm its timeout. The browser's
  *  processing phase follows the session's shell row (ni8.35). */
-const startProcessing = (input: ProviderTurnServiceSendInput) =>
+const startProcessing = (input: ProviderTurnServiceSendInput, runId: string) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
 		const failTurn = yield* makeFailTurn;
@@ -965,7 +1023,10 @@ const startProcessing = (input: ProviderTurnServiceSendInput) =>
 						? "The continuation received no response. Try again."
 						: "No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
 					"PROCESSING_TIMEOUT",
-					input.continuation ? undefined : input.commandId,
+					{
+						runId,
+						inputId: input.continuation?.cutOffMessageId ?? input.commandId,
+					},
 				);
 			}),
 		);
@@ -975,7 +1036,6 @@ export const sendTurn = (input: ProviderTurnServiceSendInput) =>
 	Effect.gen(function* () {
 		const setup = yield* Effect.serviceOption(SessionSetupTag);
 		if (setup._tag === "Some") yield* setup.value.wait(input.sessionId);
-		if (!input.steer) yield* startProcessing(input);
 		const engine = yield* OrchestrationEngineTag;
 		const boundProviderId =
 			(yield* (yield* ReadQueryEffectTag).getSession(input.sessionId))
@@ -988,7 +1048,7 @@ export const sendTurn = (input: ProviderTurnServiceSendInput) =>
 				input.sessionId,
 				"A session model pick is required before sending a message.",
 				"PICK_REQUIRED",
-				input.commandId,
+				{ inputId: input.commandId },
 			);
 			return;
 		}

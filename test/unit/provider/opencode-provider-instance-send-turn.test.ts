@@ -2,7 +2,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	AccountIdSchema,
@@ -16,6 +16,7 @@ import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-pro
 import type {
 	EventSink,
 	SendTurnInput,
+	TurnResult,
 } from "../../../src/lib/provider/types.js";
 
 function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
@@ -87,6 +88,18 @@ function makeSendTurnInput(overrides?: Partial<SendTurnInput>): SendTurnInput {
 	};
 }
 
+function completeInputs(
+	snapshot: ReturnType<OpenCodeProviderInstance["capturePendingTurns"]>,
+	result: TurnResult,
+	inputIds: readonly string[],
+) {
+	return Effect.all(
+		snapshot.commands
+			.filter(({ inputId }) => inputIds.includes(inputId))
+			.map((command) => command.complete(result)),
+	);
+}
+
 describe("OpenCodeProviderInstance.sendTurn()", () => {
 	let client: OpenCodeAPI;
 	let instance: OpenCodeProviderInstance;
@@ -94,6 +107,43 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 	beforeEach(() => {
 		client = makeStubClient();
 		instance = new OpenCodeProviderInstance({ client });
+	});
+
+	it("an accepted command completion leaves a later unaccepted send pending", async () => {
+		const completion = {
+			status: "completed",
+			cost: 0,
+			tokens: { input: 0, output: 0 },
+			durationMs: 0,
+			providerStateUpdates: [],
+		} as const;
+		const a = Effect.runPromise(
+			instance.sendTurnEffect(
+				makeSendTurnInput({ inputId: "a", runId: "run-a" }),
+			),
+		);
+		const bFiber = Effect.runFork(
+			instance.sendTurnEffect(
+				makeSendTurnInput({ inputId: "b", runId: "run-b" }),
+			),
+		);
+		try {
+			await vi.waitFor(() =>
+				expect(client.session.prompt).toHaveBeenCalledTimes(2),
+			);
+			Effect.runSync(
+				completeInputs(instance.capturePendingTurns("s1"), completion, ["a"]),
+			);
+			expect(await a).toBe(completion);
+			await Effect.runPromise(Effect.yieldNow);
+			expect(bFiber.pollUnsafe()).toBeUndefined();
+			Effect.runSync(
+				completeInputs(instance.capturePendingTurns("s1"), completion, ["b"]),
+			);
+			expect(await Effect.runPromise(Fiber.join(bFiber))).toBe(completion);
+		} finally {
+			await Effect.runPromise(Fiber.interrupt(bFiber));
+		}
 	});
 
 	it("preserves single-turn prompt and completion behavior", async () => {
@@ -108,7 +158,9 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			durationMs: 1500,
 			providerStateUpdates: [],
 		} as const;
-		instance.notifyTurnCompleted("s1", completion);
+		Effect.runSync(
+			completeInputs(instance.capturePendingTurns("s1"), completion, ["t1"]),
+		);
 
 		const result = await resultPromise;
 		expect(client.session.prompt).toHaveBeenCalledWith("s1", {
@@ -119,6 +171,144 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		});
 		expect(result).toBe(completion);
 		expect(client.session.update).not.toHaveBeenCalled();
+	});
+
+	it("keeps reservation identity when both same-input sends are already captured", async () => {
+		const completion = {
+			status: "completed",
+			cost: 0,
+			tokens: { input: 0, output: 0 },
+			durationMs: 0,
+			providerStateUpdates: [],
+		} as const;
+		const old = Effect.runPromise(
+			instance.sendTurnEffect(
+				makeSendTurnInput({ inputId: "same", runId: "old-run" }),
+			),
+		);
+		const replacement = Effect.runFork(
+			instance.sendTurnEffect(
+				makeSendTurnInput({ inputId: "same", runId: "new-run" }),
+			),
+		);
+		try {
+			await vi.waitFor(() =>
+				expect(client.session.prompt).toHaveBeenCalledTimes(2),
+			);
+			const snapshot = instance.capturePendingTurns("s1");
+			await Effect.runPromise(
+				Effect.all(
+					snapshot.commands
+						.filter(({ runId }) => runId === "old-run")
+						.map((command) => command.complete(completion)),
+				),
+			);
+			expect(await old).toBe(completion);
+			await Effect.runPromise(Effect.yieldNow);
+			expect(replacement.pollUnsafe()).toBeUndefined();
+			await Effect.runPromise(
+				Effect.all(
+					snapshot.commands
+						.filter(({ runId }) => runId === "new-run")
+						.map((command) => command.complete(completion)),
+				),
+			);
+			expect(await Effect.runPromise(Fiber.join(replacement))).toBe(completion);
+		} finally {
+			await Effect.runPromise(Fiber.interrupt(replacement));
+		}
+	});
+
+	it("a captured stopped cohort fails its exact send without resolving a replacement", async () => {
+		const failed = {
+			status: "interrupted",
+			error: {
+				message: "OpenCode instance stopped",
+				code: "interrupted",
+				retryable: false,
+			},
+			cost: 0,
+			tokens: { input: 0, output: 0 },
+			durationMs: 0,
+			providerStateUpdates: [],
+		} as const;
+		const old = Effect.runPromise(
+			instance.sendTurnEffect(makeSendTurnInput({ runId: "old-run" })),
+		);
+		await vi.waitFor(() =>
+			expect(client.session.prompt).toHaveBeenCalledTimes(1),
+		);
+		const completeOld = completeInputs(
+			instance.capturePendingTurns("s1"),
+			failed,
+			["t1"],
+		);
+		let replacementSettled = false;
+		const replacement = Effect.runPromise(
+			instance.sendTurnEffect(
+				makeSendTurnInput({ inputId: "t1", runId: "new-run" }),
+			),
+		).then((result) => {
+			replacementSettled = true;
+			return result;
+		});
+		await vi.waitFor(() =>
+			expect(client.session.prompt).toHaveBeenCalledTimes(2),
+		);
+		await Effect.runPromise(completeOld);
+		expect(await old).toBe(failed);
+		expect(replacementSettled).toBe(false);
+		Effect.runSync(
+			completeInputs(
+				instance.capturePendingTurns("s1"),
+				{ ...failed, status: "completed" },
+				["t1"],
+			),
+		);
+		expect((await replacement).status).toBe("completed");
+	});
+
+	it("retains captured send waiters when stop settlement must retry", async () => {
+		const failed = {
+			status: "interrupted",
+			error: {
+				message: "OpenCode instance stopped",
+				code: "interrupted",
+				retryable: false,
+			},
+			cost: 0,
+			tokens: { input: 0, output: 0 },
+			durationMs: 0,
+			providerStateUpdates: [],
+		} as const;
+		let settled = false;
+		const send = Effect.runPromise(
+			instance.sendTurnEffect(makeSendTurnInput()),
+		).then((result) => {
+			settled = true;
+			return result;
+		});
+		await vi.waitFor(() =>
+			expect(client.session.prompt).toHaveBeenCalledTimes(1),
+		);
+		const uncommitted = completeInputs(
+			instance.capturePendingTurns("s1"),
+			failed,
+			["t1"],
+		);
+		try {
+			await Effect.runPromise(
+				completeInputs(instance.capturePendingTurns("s1"), failed, ["t1"]),
+			);
+			await vi.waitFor(() => expect(settled).toBe(true), {
+				timeout: 250,
+				interval: 10,
+			});
+			expect(await send).toBe(failed);
+		} finally {
+			await Effect.runPromise(uncommitted);
+			await send;
+		}
 	});
 
 	// Cover duplicate history, last-rule precedence, global catch-alls, and
@@ -154,13 +344,19 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 					makeSendTurnInput({ extraFolders: desired ? [extra, extra] : [] }),
 				),
 			);
-			instance.notifyTurnCompleted("s1", {
-				status: "completed",
-				cost: 0,
-				tokens: { input: 0, output: 0 },
-				durationMs: 0,
-				providerStateUpdates: [],
-			});
+			Effect.runSync(
+				completeInputs(
+					instance.capturePendingTurns("s1"),
+					{
+						status: "completed",
+						cost: 0,
+						tokens: { input: 0, output: 0 },
+						durationMs: 0,
+						providerStateUpdates: [],
+					},
+					["t1"],
+				),
+			);
 			expect((await resultPromise).status).toBe("completed");
 			expect(client.session.get).toHaveBeenCalledWith("s1");
 			if (desired !== (action === "allow")) {
@@ -195,13 +391,19 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			const resultPromise = Effect.runPromise(
 				instance.sendTurnEffect(makeSendTurnInput({ extraFolders: [extra] })),
 			);
-			instance.notifyTurnCompleted("s1", {
-				status: "completed",
-				cost: 0,
-				tokens: { input: 0, output: 0 },
-				durationMs: 0,
-				providerStateUpdates: [],
-			});
+			Effect.runSync(
+				completeInputs(
+					instance.capturePendingTurns("s1"),
+					{
+						status: "completed",
+						cost: 0,
+						tokens: { input: 0, output: 0 },
+						durationMs: 0,
+						providerStateUpdates: [],
+					},
+					["t1"],
+				),
+			);
 			expect((await resultPromise).status).toBe("completed");
 			expect(client.session.update).not.toHaveBeenCalled();
 			expect(client.session.prompt).toHaveBeenCalledWith(
@@ -249,7 +451,12 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			durationMs: 1750,
 			providerStateUpdates: [],
 		} as const;
-		instance.notifyTurnCompleted("s1", completion);
+		await Effect.runPromise(
+			completeInputs(instance.capturePendingTurns("s1"), completion, [
+				"t1",
+				"t2",
+			]),
+		);
 
 		const [firstResult, secondResult] = await Promise.all([
 			firstResultPromise,
@@ -284,8 +491,15 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			durationMs: 0,
 			providerStateUpdates: [],
 		} as const;
-		instance.notifyTurnCompleted("s1", completion);
-		instance.notifyTurnCompleted("s2", completion);
+		await Effect.runPromise(
+			completeInputs(instance.capturePendingTurns("s1"), completion, [
+				"t1",
+				"t2",
+			]),
+		);
+		Effect.runSync(
+			completeInputs(instance.capturePendingTurns("s2"), completion, ["other"]),
+		);
 		await Promise.all(sends);
 		// A finished send no longer claims echoes.
 		expect(instance.inputIdForUserEcho("s1", "msg_a")).toBeUndefined();
@@ -351,7 +565,9 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			durationMs: 600,
 			providerStateUpdates: [],
 		} as const;
-		instance.notifyTurnCompleted("s1", completion);
+		Effect.runSync(
+			completeInputs(instance.capturePendingTurns("s1"), completion, ["t2"]),
+		);
 
 		await expect(secondResultPromise).resolves.toBe(completion);
 	});
@@ -363,13 +579,19 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		});
 
 		const resultPromise = Effect.runPromise(instance.sendTurnEffect(input));
-		instance.notifyTurnCompleted("s1", {
-			status: "completed",
-			cost: 0,
-			tokens: { input: 0, output: 0 },
-			durationMs: 0,
-			providerStateUpdates: [],
-		});
+		Effect.runSync(
+			completeInputs(
+				instance.capturePendingTurns("s1"),
+				{
+					status: "completed",
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					providerStateUpdates: [],
+				},
+				["t1"],
+			),
+		);
 
 		await resultPromise;
 
@@ -408,13 +630,19 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 				makeSendTurnInput({ permissionMode: "plan", ...input }),
 			),
 		);
-		instance.notifyTurnCompleted("s1", {
-			status: "completed",
-			cost: 0,
-			tokens: { input: 0, output: 0 },
-			durationMs: 0,
-			providerStateUpdates: [],
-		});
+		Effect.runSync(
+			completeInputs(
+				instance.capturePendingTurns("s1"),
+				{
+					status: "completed",
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					providerStateUpdates: [],
+				},
+				["t1"],
+			),
+		);
 		await resultPromise;
 
 		expect(client.session.prompt).toHaveBeenCalledExactlyOnceWith("s1", {
@@ -430,13 +658,19 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		const input = makeSendTurnInput({ variant: "thinking" });
 
 		const resultPromise = Effect.runPromise(instance.sendTurnEffect(input));
-		instance.notifyTurnCompleted("s1", {
-			status: "completed",
-			cost: 0,
-			tokens: { input: 0, output: 0 },
-			durationMs: 0,
-			providerStateUpdates: [],
-		});
+		Effect.runSync(
+			completeInputs(
+				instance.capturePendingTurns("s1"),
+				{
+					status: "completed",
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					providerStateUpdates: [],
+				},
+				["t1"],
+			),
+		);
 
 		await resultPromise;
 
@@ -478,13 +712,19 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		abortController.abort();
 
 		// Notify via the standard completion path
-		instance.notifyTurnCompleted("s1", {
-			status: "interrupted",
-			cost: 0,
-			tokens: { input: 100, output: 50 },
-			durationMs: 500,
-			providerStateUpdates: [],
-		});
+		Effect.runSync(
+			completeInputs(
+				instance.capturePendingTurns("s1"),
+				{
+					status: "interrupted",
+					cost: 0,
+					tokens: { input: 100, output: 50 },
+					durationMs: 500,
+					providerStateUpdates: [],
+				},
+				["t1"],
+			),
+		);
 
 		const result = await resultPromise;
 		expect(result.status).toBe("interrupted");
@@ -518,13 +758,19 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		const resultPromise = Effect.runPromise(
 			instance.sendTurnEffect(makeSendTurnInput()),
 		);
-		instance.notifyTurnCompleted("s1", {
-			status: "completed",
-			cost: 0,
-			tokens: { input: 0, output: 0 },
-			durationMs: 0,
-			providerStateUpdates: [],
-		});
+		Effect.runSync(
+			completeInputs(
+				instance.capturePendingTurns("s1"),
+				{
+					status: "completed",
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					providerStateUpdates: [],
+				},
+				["t1"],
+			),
+		);
 		await resultPromise;
 
 		expect(namedClient.session.prompt).toHaveBeenCalledWith(
@@ -557,13 +803,19 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		const resultPromise = Effect.runPromise(
 			instance.sendTurnEffect(makeSendTurnInput({ account })),
 		);
-		instance.notifyTurnCompleted("s1", {
-			status: "completed",
-			cost: 0,
-			tokens: { input: 0, output: 0 },
-			durationMs: 0,
-			providerStateUpdates: [],
-		});
+		Effect.runSync(
+			completeInputs(
+				instance.capturePendingTurns("s1"),
+				{
+					status: "completed",
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					providerStateUpdates: [],
+				},
+				["t1"],
+			),
+		);
 		expect((await resultPromise).status).toBe("completed");
 		expect(clientForAccount).toHaveBeenCalledExactlyOnceWith(
 			account,
@@ -675,13 +927,19 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		const resultPromise = Effect.runPromise(
 			instance.sendTurnEffect(makeSendTurnInput()),
 		);
-		instance.notifyTurnCompleted("s1", {
-			status: "completed",
-			cost: 0,
-			tokens: { input: 0, output: 0 },
-			durationMs: 0,
-			providerStateUpdates: [],
-		});
+		Effect.runSync(
+			completeInputs(
+				instance.capturePendingTurns("s1"),
+				{
+					status: "completed",
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					providerStateUpdates: [],
+				},
+				["t1"],
+			),
+		);
 		await resultPromise;
 
 		expect(client.session.prompt).toHaveBeenCalled();
@@ -692,13 +950,19 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		const resultPromise = Effect.runPromise(instance.sendTurnEffect(input));
 
 		// Notify a different session -- should not resolve s1
-		instance.notifyTurnCompleted("s2", {
-			status: "completed",
-			cost: 0,
-			tokens: { input: 0, output: 0 },
-			durationMs: 0,
-			providerStateUpdates: [],
-		});
+		Effect.runSync(
+			completeInputs(
+				instance.capturePendingTurns("s2"),
+				{
+					status: "completed",
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					providerStateUpdates: [],
+				},
+				["t1"],
+			),
+		);
 
 		// Verify it's still pending (race with a timeout)
 		const raceResult = await Promise.race([
@@ -708,13 +972,19 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		expect(raceResult).toBe("timeout");
 
 		// Now resolve the correct session
-		instance.notifyTurnCompleted("s1", {
-			status: "completed",
-			cost: 0,
-			tokens: { input: 0, output: 0 },
-			durationMs: 0,
-			providerStateUpdates: [],
-		});
+		Effect.runSync(
+			completeInputs(
+				instance.capturePendingTurns("s1"),
+				{
+					status: "completed",
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					providerStateUpdates: [],
+				},
+				["t1"],
+			),
+		);
 
 		const result = await resultPromise;
 		expect(result.status).toBe("completed");

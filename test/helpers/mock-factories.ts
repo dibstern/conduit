@@ -433,7 +433,6 @@ export function createMockProjectRelay(
 			},
 			registry: {} as OrchestrationLayer["registry"],
 			openCodeInstance: {} as OrchestrationLayer["openCodeInstance"],
-			wireSSEToInstance: vi.fn(),
 		} as unknown as OrchestrationLayer,
 		effectRuntime: {
 			runtime: {} as ProjectRelay["effectRuntime"]["runtime"],

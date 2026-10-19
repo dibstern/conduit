@@ -649,16 +649,48 @@ describe("subscribeSessionDetail", () => {
 				sessionCreated(SID),
 				messageCreated(SID, "m0", "user"),
 				textDelta(SID, "m0", "m0-0", "held by the client"),
+				canonicalEvent(
+					"run.requested",
+					SID,
+					{ inputId: "m0", runId: "resume-run" },
+					{ createdAt: at() },
+				),
+				canonicalEvent(
+					"run.started",
+					SID,
+					{ inputId: "m0", requestedRunId: "resume-run" },
+					{ createdAt: at(), metadata: { runId: "resume-run" } },
+				),
 			]);
 			const cursor = yield* readModelVersion;
 
 			// Two messages land while the client is away.
 			yield* commit([
-				messageCreated(SID, "m1", "assistant"),
+				canonicalEvent(
+					"message.created",
+					SID,
+					{
+						sessionId: SID,
+						messageId: "m1",
+						role: "assistant",
+						parentID: "m0",
+					},
+					{ createdAt: at(), metadata: { runId: "resume-run" } },
+				),
 				textDelta(SID, "m1", "m1-0", "missed"),
 			]);
 			yield* commit([
-				messageCreated(SID, "m2", "assistant"),
+				canonicalEvent(
+					"message.created",
+					SID,
+					{
+						sessionId: SID,
+						messageId: "m2",
+						role: "assistant",
+						parentID: "m0",
+					},
+					{ createdAt: at(), metadata: { runId: "resume-run" } },
+				),
 				textDelta(SID, "m2", "m2-0", "also missed"),
 			]);
 			const version = yield* readModelVersion;

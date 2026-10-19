@@ -796,9 +796,9 @@ describe("Claude runners survive server replacement through built dist", () => {
 		if (runner?.kind !== "runner-started")
 			throw new Error("Missing verified runner");
 		const admitted = persisted(harness, sessionId);
-		// Admission starts the turn before the runner receives the command.
+		// Admission reserves the run; the input waits for provider acceptance.
 		expect(admitted).toMatchObject({
-			turns: [{ state: "running", assistant_message_id: null }],
+			turns: [{ state: "pending", assistant_message_id: null }],
 			commands: [{ status: "running" }],
 		});
 		expect(
@@ -936,6 +936,12 @@ describe("Claude runners survive server replacement through built dist", () => {
 					).toEqual(["running", "running"]),
 				{ timeout: 15_000 },
 			);
+			// Both commands reached the runner before its environment was ready.
+			expect(
+				persisted(harness, sessionId).events.some(
+					(event) => event.type === "run.started",
+				),
+			).toBe(false);
 			expect(
 				sdkProof(harness).filter(
 					(mark) => mark["kind"] === "query" || mark["kind"] === "enqueue",
@@ -951,6 +957,20 @@ describe("Claude runners survive server replacement through built dist", () => {
 					).toEqual([expect.stringMatching(/approval-recovery-before-steer$/)]),
 				{ timeout: 15_000 },
 			);
+			const queries = sdkProof(harness).filter(
+				(mark) => mark["kind"] === "query",
+			);
+			expect(queries).toHaveLength(1);
+			expect(queries[0]).toMatchObject({
+				env: {
+					CONDUIT_ENV_PROOF: "server-cache",
+					PATH: expect.stringMatching(/^\/tmp\/conduit-cached-env-bin:/),
+					CLAUDE_AGENT_SDK_CLIENT_APP: "conduit",
+					ENABLE_CLAUDEAI_MCP_SERVERS: "false",
+				},
+			});
+			expect(queries[0]?.["env"]).not.toHaveProperty("ANTHROPIC_API_KEY");
+			expect(queries[0]?.["env"]).not.toHaveProperty("ANTHROPIC_MODEL");
 			const approval = await after.waitFor(
 				(message) => message["type"] === "permission_pending",
 			);

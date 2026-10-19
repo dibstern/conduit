@@ -98,8 +98,13 @@ describe("provider command outbox drain", () => {
 		return { fixture, sessionId, extraSessionId, inputId, prompt };
 	}
 
-	afterEach(async () => {
+	afterEach(async ({ task }) => {
 		try {
+			if (task.result?.errors?.length && harness)
+				writeFileSync(
+					`/tmp/82tn24-outbox-drain-${cases.length}.log`,
+					harness.logTail,
+				);
 			await harness?.dispose();
 			harness?.assertNoRunners();
 		} finally {

@@ -22,12 +22,10 @@ import { ProviderRuntimeIngestionTag } from "../domain/relay/Services/provider-r
 import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
 import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
-import { createLogger } from "../logger.js";
 import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
 import type { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
 import type { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
-import type { SSEEvent } from "../relay/opencode-events.js";
 import { loadRelaySettings } from "../relay/relay-settings.js";
 import { defaultClaudeSubagentSdk } from "./claude/claude-subagent-materializer.js";
 import {
@@ -51,9 +49,6 @@ import {
 	type ProviderSessionBindingReadModel,
 	SqliteProviderSessionBindingReadModel,
 } from "./provider-session-binding-read-model.js";
-import type { TurnResult } from "./types.js";
-
-const log = createLogger("orchestration-wiring");
 
 export interface OrchestrationLayerOptions {
 	readonly shellEnv?: ClaudeProviderInstanceDeps["shellEnv"];
@@ -96,15 +91,6 @@ export interface OrchestrationLayer {
 	readonly registry: ProviderRegistry;
 	readonly openCodeInstance: OpenCodeProviderInstance;
 	/**
-	 * Wire SSE session.status idle events to notifyTurnCompleted().
-	 * Must be called once after the SSEStream is created so that
-	 * OpenCodeProviderInstance.sendTurnEffect() deferred promises can resolve when
-	 * the session transitions to idle.
-	 */
-	wireSSEToInstance(
-		sseOn: (event: "event", handler: (e: unknown) => void) => void,
-	): void;
-	/**
 	 * Deterministic quiescence seam: drain committed-but-unexecuted provider
 	 * side effects through the reactor (crash recovery / test flush). Same-process
 	 * dispatch already awaits its own execution.
@@ -113,14 +99,6 @@ export interface OrchestrationLayer {
 		makeInteractions?: ProviderCommandInteractionSinkFactory,
 	): Effect.Effect<void, ProviderCommandStoreFailure>;
 }
-
-const TURN_COMPLETE_RESULT: TurnResult = {
-	status: "completed",
-	cost: 0,
-	tokens: { input: 0, output: 0 },
-	durationMs: 0,
-	providerStateUpdates: [],
-};
 
 /**
  * Scoped orchestration components built by the relay runtime layer.
@@ -320,36 +298,10 @@ function createOrchestrationView(
 ): OrchestrationLayer {
 	const { openCodeInstance, engine, registry } = components;
 
-	function wireSSEToInstance(
-		sseOn: (event: "event", handler: (e: unknown) => void) => void,
-	): void {
-		sseOn("event", (raw) => {
-			const event = raw as SSEEvent;
-			if (event.type !== "session.status") return;
-			const props = event.properties as Record<string, unknown> | undefined;
-			const statusType = (props?.["status"] as { type?: string } | undefined)
-				?.type;
-			if (statusType !== "idle") return;
-			const sessionId =
-				(props?.["sessionID"] as string | undefined) ??
-				(event as { sessionId?: string }).sessionId;
-			if (sessionId) {
-				try {
-					openCodeInstance.notifyTurnCompleted(sessionId, TURN_COMPLETE_RESULT);
-				} catch (err) {
-					log.error(
-						`notifyTurnCompleted failed for session ${sessionId}: ${err instanceof Error ? err.message : err}`,
-					);
-				}
-			}
-		});
-	}
-
 	return {
 		engine,
 		registry,
 		openCodeInstance,
-		wireSSEToInstance,
 		drainSideEffects: (makeInteractions) =>
 			engine.drainSideEffects(makeInteractions),
 	};

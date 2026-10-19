@@ -72,6 +72,8 @@ export interface ClaudeEventPersistEffect {
 			readonly messageId?: string;
 			/** The send that placed this message; an existing row for it wins. */
 			readonly inputId?: string;
+			/** The reservation this placement belongs to; this does not prove intake. */
+			readonly runId?: string;
 			readonly provider?: string;
 		},
 	) => Effect.Effect<void, ClaudeEventPersistFailure>;
@@ -401,6 +403,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 			readonly publish?: boolean;
 			readonly messageId?: string;
 			readonly inputId?: string;
+			readonly runId?: string;
 			readonly provider?: string;
 		},
 	): Effect.Effect<void, ClaudeEventPersistFailure> =>
@@ -437,7 +440,13 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 									sessionId,
 									...(inputId ? { inputId } : {}),
 								},
-								{ provider, createdAt: now },
+								{
+									provider,
+									createdAt: now,
+									...(options?.runId
+										? { metadata: { runId: options.runId } }
+										: {}),
+								},
 							),
 						];
 						if (text !== "") {

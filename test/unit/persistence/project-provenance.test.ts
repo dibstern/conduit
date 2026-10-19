@@ -119,6 +119,7 @@ describe("Bound project provenance", () => {
 			"0066_project_tree_data",
 			"0067_purge_background_shell_sessions",
 			"0068_input_drafts",
+			"0069_provider_run_ownership",
 		]);
 	});
 
@@ -239,7 +240,7 @@ describe("Bound project provenance", () => {
 				expect(
 					db
 						.prepare(
-							`SELECT ${table === "events" ? "project_id" : "project_key"} AS project FROM ${table}`,
+							`SELECT ${table === "events" ? "project_id" : "project_key"} AS project FROM ${table}${table === "events" ? " WHERE type <> 'run.requested'" : ""}`,
 						)
 						.all(),
 					table,
@@ -264,10 +265,15 @@ describe("Bound project provenance", () => {
 			expect(
 				db
 					.prepare(
-						"SELECT sequence, event_id, session_id, stream_version, type, data, metadata, provider, created_at FROM events ORDER BY sequence",
+						"SELECT sequence, event_id, session_id, stream_version, type, data, metadata, provider, created_at FROM events WHERE type <> 'run.requested' ORDER BY sequence",
 					)
 					.all(),
 			).toEqual(events);
+			expect(
+				db
+					.prepare("SELECT project_id FROM events WHERE type = 'run.requested'")
+					.all(),
+			).toEqual([{ project_id: "alpha" }]);
 			// A populated owner survives even when a caller supplies a different
 			// scope; the expand migration never relabels an already stamped row.
 			db.exec("UPDATE events SET project_id = 'existing-owner'");

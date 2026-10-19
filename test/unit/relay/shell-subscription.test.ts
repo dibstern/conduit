@@ -583,11 +583,25 @@ describe("subscribeShell", () => {
 			yield* commit([
 				...forkSourceEvents("claude-parent"),
 				messageCreated("claude-parent", "ui-tip", 1000),
+				canonicalEvent("run.requested", "claude-parent", {
+					runId: "parent-run",
+					inputId: "ui-tip",
+				}),
+				canonicalEvent(
+					"run.started",
+					"claude-parent",
+					{ inputId: "ui-tip", requestedRunId: "parent-run" },
+					{ metadata: { runId: "parent-run" } },
+				),
 				canonicalEvent(
 					"turn.completed",
 					"claude-parent",
 					{ messageId: "ui-tip" },
-					{ provider: "claude", createdAt: at() },
+					{
+						provider: "claude",
+						createdAt: at(),
+						metadata: { runId: "parent-run" },
+					},
 				),
 			]);
 			const state = yield* ProviderStateEffectTag;
@@ -1312,11 +1326,21 @@ describe("subscribeShell", () => {
 				yield* commitThroughSeam([
 					sessionCreated(SID),
 					messageCreated(SID, "m1"),
+					canonicalEvent("run.requested", SID, {
+						runId: "seen-run",
+						inputId: "m1",
+					}),
+					canonicalEvent(
+						"run.started",
+						SID,
+						{ inputId: "m1", requestedRunId: "seen-run" },
+						{ metadata: { runId: "seen-run" } },
+					),
 					canonicalEvent(
 						"turn.completed",
 						SID,
 						{ messageId: "m1" },
-						{ provider: "claude" },
+						{ provider: "claude", metadata: { runId: "seen-run" } },
 					),
 				]);
 

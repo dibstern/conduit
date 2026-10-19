@@ -14,11 +14,16 @@ import {
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
+import { ProviderRuntimeIngestionTag } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { createLogger } from "../../logger.js";
 import { makeRetireReplacedProcessPrompts } from "../../persistence/effect/retire-pending-prompts.js";
 import { isRecord } from "../../utils.js";
+import {
+	type RunSettlementOwner,
+	settleSessionRuns,
+} from "../session-run-settlement.js";
 import type { ProviderNativeSession, TurnResult } from "../types.js";
 import { connectRunner } from "./runner-connection.js";
 import {
@@ -76,6 +81,7 @@ interface RunnerChild {
 	candidate?: boolean;
 	commandsInFlight: number;
 	pendingSendCommands?: Map<string, number> | undefined;
+	ownedRunIds?: Set<string>;
 	readonly upgrade: RunnerUpgrade;
 }
 
@@ -343,6 +349,11 @@ export const makeProcessSessionRunner = (
 				: 10_000;
 		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
 		const sql = sqlOption._tag === "Some" ? sqlOption.value : undefined;
+		const ingestionOption = yield* Effect.serviceOption(
+			ProviderRuntimeIngestionTag,
+		);
+		const ingestion =
+			ingestionOption._tag === "Some" ? ingestionOption.value : undefined;
 		const project = yield* Effect.serviceOption(PersistenceProjectTag);
 		if (sql && project._tag === "None")
 			return yield* Effect.die(
@@ -374,6 +385,7 @@ export const makeProcessSessionRunner = (
 			string,
 			{
 				sessionId: string;
+				runId?: string | undefined;
 				/** The turn's user message: a continuation's is its cut-off message. */
 				userMessageId?: string;
 				/** What a failed send places when the SDK never started it. */
@@ -534,6 +546,81 @@ export const makeProcessSessionRunner = (
 			const bindings = [...sinks].filter(
 				([, binding]) => binding.sessionId === sessionId,
 			);
+			const commands = [...(entry.pendingSendCommands ?? [])];
+			const settleExitedRuns = Effect.gen(function* () {
+				const reservations = new Map<string, string>();
+				if (sql && ingestion)
+					for (const [commandId, attempt] of commands) {
+						const [owner] = yield* sql<{
+							run_id: string | null;
+							user_message_id: string;
+						}>`
+							SELECT json_extract(outbox.payload_json, '$.runId') AS run_id,
+								COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'),
+									json_extract(outbox.payload_json, '$.inputId'),
+									json_extract(outbox.payload_json, '$.userMessageId'),
+									json_extract(outbox.payload_json, '$.commandId'),
+									json_extract(outbox.payload_json, '$.turnId'), outbox.command_id) AS user_message_id
+							FROM provider_command_outbox outbox WHERE project_key = ${projectId}
+								AND session_id = ${sessionId} AND command_id = ${commandId} AND attempt_count = ${attempt}
+							ORDER BY request_sequence LIMIT 1`;
+						if (owner?.run_id)
+							reservations.set(owner.run_id, owner.user_message_id);
+					}
+				yield* Deferred.await(entry.stopped);
+				yield* entry.outputs.withPermits(1)(
+					lock.withPermits(1)(
+						Effect.gen(function* () {
+							const owners = new Map<string, RunSettlementOwner>();
+							for (const runId of entry.ownedRunIds ?? [])
+								owners.set(runId, { runId });
+							for (const [, binding] of bindings)
+								if (binding.accepted && binding.runId)
+									owners.set(binding.runId, { runId: binding.runId });
+							const pid = entry.pid ?? entry.child?.pid;
+							if (
+								!sql ||
+								!ingestion ||
+								(!owners.size && !reservations.size) ||
+								closing ||
+								entry.recovering ||
+								entry.candidate ||
+								children.get(sessionId) !== entry ||
+								pid === undefined ||
+								runnerPidAlive(pid)
+							)
+								return Effect.void;
+							for (const [reservation, userMessageId] of reservations) {
+								const [accepted] = yield* sql<{ run_id: string | null }>`
+									SELECT json_extract(metadata, '$.runId') AS run_id FROM events
+									WHERE session_id = ${sessionId} AND type = 'run.started'
+										AND json_extract(data, '$.requestedRunId') = ${reservation}
+									ORDER BY sequence LIMIT 1`;
+								if (accepted?.run_id)
+									owners.set(accepted.run_id, { runId: accepted.run_id });
+								// Idle retirement retries commands it never took in.
+								else if (!entry.idleExiting)
+									owners.set(reservation, {
+										runId: reservation,
+										userMessageId,
+									});
+							}
+							if (!owners.size) return;
+							return yield* settleSessionRuns(
+								sql,
+								sessionId,
+								failure.message,
+								(events) => ingestion.ingestBatch(events),
+								{ errorCode: "runner_stopped", owners: [...owners.values()] },
+							);
+						}),
+					),
+				);
+			}).pipe(
+				Effect.catch((cause) =>
+					Effect.logError("Could not settle exited runner runs", cause),
+				),
+			);
 			if (
 				!entry.idleExiting &&
 				(!wasReady ||
@@ -546,17 +633,21 @@ export const makeProcessSessionRunner = (
 			// Warm completed turns retain a sink for background output. A
 			// dead runner cannot release it, even when no send is waiting.
 			runFork(
-				entry.outputs
-					.withPermits(1)(
-						emit({
-							type: "background-task",
-							transition: { sessionId, kind: "session-ended" },
-						}).pipe(
-							Effect.andThen(
-								Effect.forEach(
-									bindings.filter(([, binding]) => !binding.pending),
-									([sinkId]) => emit({ type: "release-sink", sinkId }),
-									{ discard: true },
+				settleExitedRuns
+					.pipe(
+						Effect.andThen(
+							entry.outputs.withPermits(1)(
+								emit({
+									type: "background-task",
+									transition: { sessionId, kind: "session-ended" },
+								}).pipe(
+									Effect.andThen(
+										Effect.forEach(
+											bindings.filter(([, binding]) => !binding.pending),
+											([sinkId]) => emit({ type: "release-sink", sinkId }),
+											{ discard: true },
+										),
+									),
 								),
 							),
 						),
@@ -594,11 +685,18 @@ export const makeProcessSessionRunner = (
 				deps: { ...deps, daemonConfigDir: configDir },
 				...(receipts ? { receipts } : {}),
 				runFork,
-				onOutputCommitted: (output) =>
+				onOutputCommitted: (output) => {
+					if (
+						output.type === "event" &&
+						output.event.type === "run.started" &&
+						output.event.runId
+					)
+						(entry.ownedRunIds ??= new Set()).add(output.event.runId);
 					observeRunnerTurn(
 						output,
 						"sinkId" in output ? sinks.get(output.sinkId) : undefined,
-					),
+					);
+				},
 				emit: (received) => {
 					const operation = Effect.suspend(() => {
 						// A retired query's shutdown notices must not clear its replacement.
@@ -706,6 +804,7 @@ export const makeProcessSessionRunner = (
 							: (hello.bindings ?? [])) {
 							let inputId: string | undefined;
 							let userMessageId: string | undefined;
+							let runId: string | undefined;
 							let messageId = "";
 							let terminal = false;
 							let pending = false;
@@ -713,11 +812,16 @@ export const makeProcessSessionRunner = (
 								const rows = yield* sql<{
 									input_id: string | null;
 									user_message_id: string | null;
+									run_id: string | null;
 									status: string;
 									attempt_count: number;
 									assistant_message_id: string | null;
 									state: string | null;
 								}>`SELECT COALESCE(json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS input_id,
+									COALESCE((SELECT json_extract(accepted.metadata, '$.runId') FROM events accepted
+										WHERE accepted.type = 'run.started' AND accepted.session_id = outbox.session_id
+										AND json_extract(accepted.data, '$.requestedRunId') = json_extract(outbox.payload_json, '$.runId') LIMIT 1),
+										json_extract(outbox.payload_json, '$.runId')) AS run_id,
 									COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS user_message_id,
 									outbox.status, outbox.attempt_count, turns.assistant_message_id, turns.state
 									FROM provider_command_outbox outbox
@@ -733,6 +837,7 @@ export const makeProcessSessionRunner = (
 								if (row) {
 									inputId = row.input_id ?? undefined;
 									userMessageId = row.user_message_id ?? undefined;
+									runId = row.run_id ?? undefined;
 									// Acknowledged events will not replay after adoption.
 									messageId = row.assistant_message_id ?? "";
 									terminal =
@@ -757,6 +862,7 @@ export const makeProcessSessionRunner = (
 							yield* ensureAttached();
 							sinks.set(binding.sinkId, {
 								sessionId,
+								runId,
 								...(userMessageId ? { userMessageId } : {}),
 								messageId,
 								terminal,
@@ -1313,6 +1419,7 @@ export const makeProcessSessionRunner = (
 												command.input.continuation?.cutOffMessageId ??
 												command.input.inputId,
 											messageId: command.messageId,
+											...(command.runId ? { runId: command.runId } : {}),
 											terminal: command.terminal,
 											pending: true,
 											accepted: false,
@@ -1487,6 +1594,7 @@ export const makeProcessSessionRunner = (
 					command.type === "send-turn"
 						? {
 								sessionId: command.input.sessionId,
+								runId: command.input.runId,
 								userMessageId:
 									command.input.continuation?.cutOffMessageId ??
 									command.input.inputId,

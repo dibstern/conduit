@@ -350,7 +350,11 @@ describe("OrchestrationEngine durable receipts", () => {
 					registry,
 					durableCommands: {
 						...(yield* makeDurableOptions({ sql })),
-						ingestion: { ingest },
+						ingestion: {
+							ingest,
+							ingestBatch: (_events, options) =>
+								(options?.beforeCommit ?? Effect.void).pipe(Effect.as(0)),
+						},
 					},
 				});
 

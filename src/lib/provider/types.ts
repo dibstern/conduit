@@ -28,6 +28,7 @@ export type PermissionDecision = "once" | "always" | "reject";
 
 export interface PermissionRequest {
 	readonly requestId: string;
+	readonly runId?: string;
 	readonly toolName: string;
 	readonly toolInput: Record<string, unknown>;
 	readonly sessionId: string;
@@ -50,6 +51,7 @@ export interface PermissionResponse {
 
 export interface QuestionRequest {
 	readonly requestId: string;
+	readonly runId?: string;
 	readonly toolUseId?: string;
 	readonly questions: Array<{
 		question: string;
@@ -207,6 +209,8 @@ export interface HistoryMessage {
 }
 
 export interface SendTurnInput {
+	/** Durable run reservation created by the send_turn outbox transaction. */
+	readonly runId?: string;
 	/** Per-send identity, shared by the outbox command and Claude message/turn. */
 	readonly inputId: string;
 	/**

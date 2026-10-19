@@ -1,10 +1,15 @@
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
+import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { createEventId } from "../../../persistence/events.js";
 import { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
 import { LoggerTag } from "./services.js";
+
+export type TurnFailureOwner =
+	| { readonly runId: string; readonly inputId?: string }
+	| { readonly inputId: string; readonly runId?: undefined };
 
 /**
  * End a turn that Conduit itself failed: a send that never reached the
@@ -20,13 +25,13 @@ import { LoggerTag } from "./services.js";
  */
 export const makeFailTurn = Effect.gen(function* () {
 	const ingestion = yield* ProviderRuntimeIngestionTag;
+	const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
 	const log = yield* LoggerTag;
 	return (
 		sessionId: string,
 		error: string,
 		code: string,
-		/** The failed send's user message, so a turn that never ran ends too. */
-		userMessageId?: string,
+		owner: TurnFailureOwner,
 		{
 			beforeCommit,
 			beforeProject,
@@ -37,6 +42,7 @@ export const makeFailTurn = Effect.gen(function* () {
 			settleSession?: boolean;
 		} = {},
 	): Effect.Effect<void> => {
+		const { runId, inputId: userMessageId } = owner;
 		const errorId = createEventId();
 		const event = <K extends ProviderRuntimeEvent["type"]>(
 			eventId: string,
@@ -70,22 +76,46 @@ export const makeFailTurn = Effect.gen(function* () {
 					]
 				: []),
 		];
-		return (
-			beforeCommit || beforeProject
-				? ingestion.ingestBatch(events, {
-						...(beforeCommit ? { beforeCommit } : {}),
-						...(beforeProject ? { beforeProject } : {}),
-					})
-				: ingestion.ingestBatch(events)
-		).pipe(
-			Effect.asVoid,
-			Effect.catch((cause) =>
-				Effect.sync(() => {
-					log.warn(
-						`session=${sessionId} Could not record turn failure: ${formatErrorDetail(cause)}`,
-					);
-				}),
-			),
-		);
+		return Effect.gen(function* () {
+			const [reservation] =
+				!runId && userMessageId && Option.isSome(sql)
+					? yield* sql.value<{ run_id: string | null }>`SELECT COALESCE(
+				(SELECT json_extract(payload_json, '$.runId') FROM provider_command_outbox
+				 WHERE session_id = ${sessionId} AND effect_type = 'send_turn' AND command_id = ${userMessageId}
+				 ORDER BY request_sequence DESC LIMIT 1),
+				(SELECT run_id FROM turns WHERE session_id = ${sessionId} AND (id = ${userMessageId}
+				 OR user_message_id IN (SELECT id FROM messages WHERE session_id = ${sessionId} AND input_id = ${userMessageId})))) AS run_id`
+					: [];
+			const reservedRunId = runId ?? reservation?.run_id ?? undefined;
+			const [acceptance] =
+				reservedRunId && Option.isSome(sql)
+					? yield* sql.value<{
+							run_id: string;
+						}>`SELECT json_extract(metadata, '$.runId') AS run_id
+					FROM events WHERE session_id = ${sessionId} AND type = 'run.started'
+					AND json_extract(data, '$.requestedRunId') = ${reservedRunId} ORDER BY sequence LIMIT 1`
+					: [];
+			const effectiveRunId = acceptance?.run_id ?? reservedRunId;
+			const ownedEvents = events.map((event) =>
+				effectiveRunId ? { ...event, runId: effectiveRunId } : event,
+			);
+			return yield* (
+				beforeCommit || beforeProject
+					? ingestion.ingestBatch(ownedEvents, {
+							...(beforeCommit ? { beforeCommit } : {}),
+							...(beforeProject ? { beforeProject } : {}),
+						})
+					: ingestion.ingestBatch(ownedEvents)
+			).pipe(
+				Effect.asVoid,
+				Effect.catch((cause) =>
+					Effect.sync(() => {
+						log.warn(
+							`session=${sessionId} Could not record turn failure: ${formatErrorDetail(cause)}`,
+						);
+					}),
+				),
+			);
+		}).pipe(Effect.catch(() => Effect.void));
 	};
 });

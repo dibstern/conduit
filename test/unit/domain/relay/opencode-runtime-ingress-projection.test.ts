@@ -854,11 +854,20 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		expect(rows).toEqual([{ parent_id: SESSION_ID, unread: 0 }]);
 	});
 
-	it("turn.completed updates turn with cost/tokens", async () => {
+	it("an accepted run keeps message accounting and closes only on its idle boundary", async () => {
+		await persistSessionCreated(SESSION_ID, "opencode");
+		await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('owned-run', ${SESSION_ID}, 'pending', 1)`;
+				yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, requested_at, updated_at)
+				VALUES (1, 'owned-input', 'test-project', ${SESSION_ID}, 'opencode', 'send_turn', '{"runId":"owned-run"}', 'running', 1, 1)`;
+			}),
+		);
 		await ingestOk(
 			makeSSEEvent("message.created", {
 				sessionID: SESSION_ID,
-				messageID: "user-msg-001",
+				messageID: "msg_conduit_owned-input",
 				info: { role: "user", parts: [] },
 			}),
 		);
@@ -866,7 +875,11 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 			makeSSEEvent("message.created", {
 				sessionID: SESSION_ID,
 				messageID: "asst-msg-001",
-				info: { role: "assistant", parts: [] },
+				info: {
+					role: "assistant",
+					parentID: "msg_conduit_owned-input",
+					parts: [],
+				},
 			}),
 		);
 		await ingestOk(
@@ -891,6 +904,19 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 			}),
 		);
 
+		const beforeIdle = await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				return yield* sql`SELECT state FROM turns WHERE session_id = ${SESSION_ID}`;
+			}),
+		);
+		expect(beforeIdle).toEqual([{ state: "running" }]);
+		await ingestOk(
+			makeSSEEvent("session.status", {
+				sessionID: SESSION_ID,
+				status: { type: "idle" },
+			}),
+		);
 		const stored = await readStored();
 		expect(stored.some((event) => event.type === "turn.completed")).toBe(true);
 

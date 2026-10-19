@@ -372,6 +372,16 @@ for (const delivery of ["queue", "steer"] as const) {
 	});
 }
 
+const acceptRun = (sessionId: string, inputId: string, runId: string) => [
+	canonicalEvent("run.requested", sessionId, { inputId, runId }),
+	canonicalEvent(
+		"run.started",
+		sessionId,
+		{ inputId, requestedRunId: runId },
+		{ metadata: { runId } },
+	),
+];
+
 const resetInboxFixture = Effect.gen(function* () {
 	const commit = yield* makeCommitAndSignal;
 	const store = yield* EventStoreEffectTag;
@@ -380,6 +390,7 @@ const resetInboxFixture = Effect.gen(function* () {
 	const continuation = yield* makeContinuation;
 	const sent = yield* Queue.unbounded<string>();
 	const dispatches: string[] = [];
+	const runs = new Map<string, string>();
 	const turns: ProviderTurnServiceTag["Service"] = {
 		holdUserTurnsForAccountSwitch: () => Effect.void,
 		prepareTurnSession: (input) => Effect.succeed(input.sessionId),
@@ -387,6 +398,10 @@ const resetInboxFixture = Effect.gen(function* () {
 		sendTurn: (input) =>
 			Effect.gen(function* () {
 				dispatches.push(input.continuation ? "resume" : input.text);
+				const userMessageId =
+					input.continuation?.cutOffMessageId ?? input.commandId;
+				const runId = `run-${input.commandId}`;
+				runs.set(userMessageId, runId);
 				yield* commit([
 					...(input.events ?? []),
 					...(input.continuation
@@ -399,6 +414,7 @@ const resetInboxFixture = Effect.gen(function* () {
 									role: "user",
 								}),
 							]),
+					...acceptRun(input.sessionId, userMessageId, runId),
 					canonicalEvent("session.status", input.sessionId, {
 						sessionId: input.sessionId,
 						status: "busy",
@@ -441,19 +457,29 @@ const resetInboxFixture = Effect.gen(function* () {
 				request: { text: inputId },
 			}),
 		finish: (inputId: string) =>
-			commit([
-				canonicalEvent("message.created", "s1", {
-					sessionId: "s1",
-					messageId: `a-${inputId}`,
-					parentID: inputId,
-					role: "assistant",
-				}),
-				canonicalEvent("turn.completed", "s1", { messageId: `a-${inputId}` }),
-				canonicalEvent("session.status", "s1", {
-					sessionId: "s1",
-					status: "idle",
-				}),
-			]),
+			Effect.gen(function* () {
+				const runId = runs.get(inputId);
+				if (!runId)
+					return yield* Effect.die(new Error(`No accepted run for ${inputId}`));
+				yield* commit([
+					canonicalEvent("message.created", "s1", {
+						sessionId: "s1",
+						messageId: `a-${inputId}`,
+						parentID: inputId,
+						role: "assistant",
+					}),
+					canonicalEvent(
+						"turn.completed",
+						"s1",
+						{ messageId: `a-${inputId}` },
+						{ provider: "claude", metadata: { runId } },
+					),
+					canonicalEvent("session.status", "s1", {
+						sessionId: "s1",
+						status: "idle",
+					}),
+				]);
+			}),
 	};
 });
 
@@ -682,6 +708,12 @@ for (const schedule of [
 							]);
 						if (schedule === "busy")
 							yield* fixture.commit([
+								canonicalEvent("message.created", "s1", {
+									sessionId: "s1",
+									messageId: "busy-input",
+									role: "user",
+								}),
+								...acceptRun("s1", "busy-input", "busy-run"),
 								canonicalEvent("session.status", "s1", {
 									sessionId: "s1",
 									status: "busy",
@@ -694,13 +726,19 @@ for (const schedule of [
 									messageId: "u0",
 									role: "user",
 								}),
+								...acceptRun("s1", "u0", "stopped-run"),
 								canonicalEvent("message.created", "s1", {
 									sessionId: "s1",
 									messageId: "a0",
 									parentID: "u0",
 									role: "assistant",
 								}),
-								canonicalEvent("turn.interrupted", "s1", { messageId: "a0" }),
+								canonicalEvent(
+									"turn.interrupted",
+									"s1",
+									{ messageId: "a0" },
+									{ metadata: { runId: "stopped-run" } },
+								),
 							]);
 						yield* fixture.inbox.start;
 						expect(yield* fixture.submit("q1")).toEqual({ handedOff: false });
@@ -740,19 +778,31 @@ for (const schedule of [
 									messageId: "u0",
 									role: "user",
 								}),
+								...acceptRun("s1", "u0", "later-stopped-run"),
 								canonicalEvent("message.created", "s1", {
 									sessionId: "s1",
 									messageId: "a0",
 									parentID: "u0",
 									role: "assistant",
 								}),
-								canonicalEvent("turn.interrupted", "s1", { messageId: "a0" }),
+								canonicalEvent(
+									"turn.interrupted",
+									"s1",
+									{ messageId: "a0" },
+									{ metadata: { runId: "later-stopped-run" } },
+								),
 							]);
 						yield* TestClock.setTime(10_000);
 						if (schedule === "cut-off")
 							reading = usageReading("claude", { status: "available" });
 						if (schedule === "busy")
 							yield* fixture.commit([
+								canonicalEvent(
+									"turn.completed",
+									"s1",
+									{ messageId: "" },
+									{ provider: "claude", metadata: { runId: "busy-run" } },
+								),
 								canonicalEvent("session.status", "s1", {
 									sessionId: "s1",
 									status: "idle",

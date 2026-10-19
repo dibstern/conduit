@@ -44,7 +44,7 @@ import {
 const artifact = "test-results/82tn4-import-manifest.json";
 type Project = ProjectStoreFixture;
 
-it("remaps event-owned tool results when importing a project", async () => {
+it("preserves run ownership and remaps event-owned tool results when importing a project", async () => {
 	const root = mkdtempSync(join(tmpdir(), "conduit-tool-result-import-"));
 	try {
 		const configDir = join(root, "daemon");
@@ -60,6 +60,18 @@ it("remaps event-owned tool results when importing a project", async () => {
 				Effect.gen(function* () {
 					const commit = yield* makeCommitAndSignal;
 					yield* commit([
+						canonicalEvent(
+							"run.requested",
+							"ses_beta",
+							{ runId: "beta-run", inputId: "ses_beta_user_second" },
+							{ metadata: { runId: "beta-run" } },
+						),
+						canonicalEvent(
+							"run.started",
+							"ses_beta",
+							{ inputId: "ses_beta_user_second", requestedRunId: "beta-run" },
+							{ metadata: { runId: "beta-run" } },
+						),
 						canonicalEvent("tool.completed", "ses_beta", {
 							messageId: "ses_beta_assistant",
 							partId: "ses_beta_tool",
@@ -93,6 +105,31 @@ it("remaps event-owned tool results when importing a project", async () => {
 		const destination = daemonStorePath(configDir);
 		const db = new Database(destination, { readonly: true });
 		try {
+			expect(
+				db
+					.prepare(
+						"SELECT id, session_id, status FROM provider_runs WHERE id = 'beta-run'",
+					)
+					.get(),
+			).toEqual({
+				id: "beta-run",
+				session_id: "ses_beta",
+				status: "running",
+			});
+			expect(
+				db
+					.prepare(
+						"SELECT run_id, state FROM turns WHERE id = 'ses_beta_user_second'",
+					)
+					.get(),
+			).toEqual({ run_id: "beta-run", state: "running" });
+			expect(
+				db
+					.prepare(
+						"SELECT json_extract(metadata, '$.runId') AS run_id FROM events WHERE type = 'run.started' AND session_id = 'ses_beta'",
+					)
+					.get(),
+			).toEqual({ run_id: "beta-run" });
 			const stored = db
 				.prepare<
 					[],
