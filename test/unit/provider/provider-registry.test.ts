@@ -103,58 +103,65 @@ describe("ProviderRegistry", () => {
 		expect(registry.getInstanceOrThrow("opencode")).toBe(instance);
 	});
 
-	it("shutdownAllEffect calls shutdownEffect on all provider instances", async () => {
+	it("shutdownAllEffect executes cleanup on all provider instances", async () => {
 		const a1 = makeStubInstance("opencode");
 		const a2 = makeStubInstance("claude");
+		const cleanup1 = vi.fn<() => void>();
+		const cleanup2 = vi.fn<() => void>();
+		a1.shutdownEffect = () => Effect.sync(cleanup1);
+		a2.shutdownEffect = () => Effect.sync(cleanup2);
 		registry.registerInstance(a1);
 		registry.registerInstance(a2);
 
 		await Effect.runPromise(registry.shutdownAllEffect());
 
-		expect(a1.shutdownEffect).toHaveBeenCalledTimes(1);
-		expect(a2.shutdownEffect).toHaveBeenCalledTimes(1);
+		expect(cleanup1).toHaveBeenCalledTimes(1);
+		expect(cleanup2).toHaveBeenCalledTimes(1);
 	});
 
 	it("shutdownAllEffect uses the provider instance Effect boundary", async () => {
 		const shutdown = vi.fn(() => {
 			throw new Error("legacy Promise shutdown should not be called");
 		});
-		const shutdownEffect = vi.fn(() => Effect.void);
-		registry.registerInstance({
+		const cleanup = vi.fn<() => void>();
+		const instance = {
 			...makeStubInstance("claude"),
 			shutdown,
-			shutdownEffect,
-		} as ProviderInstance & {
-			shutdown: typeof shutdown;
-			shutdownEffect: typeof shutdownEffect;
-		});
+			shutdownEffect: () => Effect.sync(cleanup),
+		};
+		registry.registerInstance(instance);
 
 		await Effect.runPromise(registry.shutdownAllEffect());
 
 		expect(shutdown).not.toHaveBeenCalled();
-		expect(shutdownEffect).toHaveBeenCalledTimes(1);
+		expect(cleanup).toHaveBeenCalledTimes(1);
 	});
 
 	it("shutdownAllEffect continues even if one provider instance fails", async () => {
 		const a1 = makeStubInstance("opencode");
 		const a2 = makeStubInstance("claude");
-		(a1.shutdownEffect as ReturnType<typeof vi.fn>).mockReturnValue(
-			Effect.fail(
-				new ProviderInstanceFailure({
-					providerId: "opencode",
-					operation: "shutdown",
-					cause: new Error("boom"),
-				}),
-			),
-		);
+		const cleanup1 = vi.fn<() => void>();
+		const cleanup2 = vi.fn<() => void>();
+		a1.shutdownEffect = () =>
+			Effect.sync(cleanup1).pipe(
+				Effect.andThen(
+					Effect.fail(
+						new ProviderInstanceFailure({
+							providerId: "opencode",
+							operation: "shutdown",
+							cause: new Error("boom"),
+						}),
+					),
+				),
+			);
+		a2.shutdownEffect = () => Effect.sync(cleanup2);
 		registry.registerInstance(a1);
 		registry.registerInstance(a2);
 
-		// Should not throw
 		await Effect.runPromise(registry.shutdownAllEffect());
 
-		expect(a1.shutdownEffect).toHaveBeenCalledTimes(1);
-		expect(a2.shutdownEffect).toHaveBeenCalledTimes(1);
+		expect(cleanup1).toHaveBeenCalledTimes(1);
+		expect(cleanup2).toHaveBeenCalledTimes(1);
 	});
 
 	it("provides registered provider instances through the Effect service layer", async () => {
