@@ -13,6 +13,7 @@ import {
 import {
 	type DraftCommand,
 	type DraftEvent,
+	type DraftState,
 	draftKeyId,
 	initialState,
 	type ReloadDraft,
@@ -107,6 +108,7 @@ export function createComposerDraft(options: {
 }) {
 	let state = initialState();
 	let text = $state("");
+	let sendPick = $state<DraftState["sendPick"]>();
 	let syncTimer: ReturnType<typeof setTimeout> | null = null;
 	function cancelSync() {
 		if (syncTimer) clearTimeout(syncTimer);
@@ -223,6 +225,7 @@ export function createComposerDraft(options: {
 		const [next, commands] = step(state, event);
 		state = next;
 		text = state.text;
+		sendPick = state.sendPick;
 		// No key (the phone list) keeps the last draft; a session key ends it.
 		if (state.key)
 			noteDraftNavigation(
@@ -355,6 +358,12 @@ export function createComposerDraft(options: {
 		}),
 	);
 	return {
+		get sendPick() {
+			return sendPick;
+		},
+		set sendPick(pick: DraftState["sendPick"]) {
+			dispatch({ _tag: "SendPickChanged", pick });
+		},
 		get text() {
 			return text;
 		},

@@ -239,7 +239,6 @@
 	let switchingAccount = $state(false);
 	const hasOtherClaudeAccount = $derived(claudeAccounts.hasAlternative(accountId));
 	const sendAccounts = $derived(currentSession ? claudeAccounts.sendOptions(accountId) : []);
-	const switchTarget = $derived(sendAccounts[0]);
 	const sendsAt = $derived.by(() => {
 		if (usageReading?.status !== "limited") return undefined;
 		const resets = planUsageWindows(usageReading)
@@ -248,8 +247,21 @@
 			.filter((at) => at > clock.now);
 		return resets.length > 0 ? Math.max(...resets) : undefined;
 	});
+	const sendPick = $derived.by(() => {
+		const pick = composerDraft.sendPick;
+		if (settingsPending || sendsAt === undefined || !hasOtherClaudeAccount) return undefined;
+		if (pick?.mode === "at-reset" && pick.accountId === accountId) return pick;
+		if (pick?.mode === "switch" && sendAccounts.some((account) => account.id === pick.accountId)) return pick;
+		return undefined;
+	});
+	$effect(() => {
+		if (!settingsPending && composerDraft.sendPick && !sendPick) composerDraft.sendPick = undefined;
+	});
+	const switchTarget = $derived(sendPick?.mode === "switch"
+		? sendAccounts.find((account) => account.id === sendPick.accountId)
+		: sendAccounts[0]);
 	const sendMode = $derived.by(() => {
-		if (sendsAt !== undefined) return usageState.limits.autoSwitch && switchTarget ? "switch" : "at-reset";
+		if (sendsAt !== undefined) return sendPick?.mode ?? (usageState.limits.autoSwitch && switchTarget ? "switch" : "at-reset");
 		const warnAt = usageState.limits.warnAt;
 		return usageReading?.status === "available" && warnAt !== "off" &&
 			planUsageWindows(usageReading).some((window) => window.utilization >= warnAt && window.utilization < 100)
@@ -1442,13 +1454,13 @@
 							{#snippet trigger({ props })}
 								<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" iconOnly icon="chevron-down" iconSize={11} ariaLabel="Send options" data-testid="composer-send-menu-trigger" disabled={switchingAccount} class="h-full shrink-0 touch-manipulation" />
 							{/snippet}
-							<MenuItem density="compact" data-testid="composer-send-menu-reset" data-selected="true" disabled={!canSend || switchingAccount} class="rounded-[7px] bg-border-chip" onselect={() => void sendMessage()}>
+							<MenuItem density="compact" data-testid="composer-send-menu-reset" data-selected={sendMode === "at-reset" ? "true" : undefined} disabled={switchingAccount} class="rounded-[7px] {sendMode === 'at-reset' ? 'bg-border-chip' : ''}" onselect={() => { if (accountId) composerDraft.sendPick = { mode: "at-reset", accountId }; }}>
 								<Icon name="clock" size={13} class="shrink-0 text-status-red" />
 								<span class="flex-1">Send at {sendAtTime}</span>
 								<span class="font-mono text-[10.5px] text-text-dimmer">{claudeAccounts.nameOf(accountId)}</span>
 							</MenuItem>
 							{#each sendAccounts as option (option.id)}
-								<MenuItem density="compact" data-testid="composer-send-menu-account" data-account={option.id} disabled={!canSend || switchingAccount} class="rounded-[7px]" onselect={() => void sendOnAccount(option.id)}>
+								<MenuItem density="compact" data-testid="composer-send-menu-account" data-account={option.id} data-selected={sendMode === "switch" && switchTarget?.id === option.id ? "true" : undefined} disabled={switchingAccount} class="rounded-[7px] {sendMode === 'switch' && switchTarget?.id === option.id ? 'bg-border-chip' : ''}" onselect={() => { composerDraft.sendPick = { mode: "switch", accountId: option.id }; }}>
 									<AccountDot instanceId={option.id} size={7} />
 									<span class="flex-1">Send now on {option.name}</span>
 									<span class="font-mono text-[10.5px] text-text-dimmer">{option.fullest.kind === "five_hour" ? "5h" : "wk"} {Math.round(option.fullest.utilization)}%</span>
