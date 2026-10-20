@@ -1,5 +1,6 @@
 import type { Page, TestInfo } from "@playwright/test";
 import { WorkspaceMoveError } from "../../../src/lib/contracts/session-workspace.js";
+import { inspectTouchTarget } from "../../../src/lib/frontend/stories/touch-target.js";
 import type {
 	SessionGit,
 	SessionWorkspace,
@@ -710,6 +711,8 @@ for (const mode of [
 			expect(layout.branchWidth).toBeGreaterThan(10);
 			expect(layout.contained).toBe(true);
 			if (mode.hasTouch) {
+				await page.keyboard.press("Escape");
+				await expect(trigger).toBeHidden();
 				const back = page.getByTestId("session-bar-back");
 				await expect(back).toHaveAccessibleName("Sessions");
 				const backBox = await back.boundingBox();
@@ -724,13 +727,18 @@ for (const mode of [
 				expect(moreBox).not.toBeNull();
 				if (!backBox || !groupBox || !moreBox)
 					throw new Error("Header control missing");
-				expect(backBox.width).toBeGreaterThanOrEqual(44);
-				expect(backBox.height).toBeGreaterThanOrEqual(44);
+				// Final's phone header uses a compact pill with a larger touch area
+				// (4e611586, conduit-test-aoqb.5).
+				const target = await back.evaluate(inspectTouchTarget, 44);
+				expect(target.width).toBeGreaterThanOrEqual(44);
+				expect(target.height).toBeGreaterThanOrEqual(44);
+				expect(target.missing, JSON.stringify(target.failures)).toBe(0);
 				expect(backBox.x + backBox.width).toBeLessThanOrEqual(groupBox.x);
 				expect(groupBox.x + groupBox.width).toBeLessThanOrEqual(moreBox.x);
 				expect(moreBox.x + moreBox.width).toBeLessThanOrEqual(
 					mode.viewport.width,
 				);
+				await page.getByTestId("composer-words-sheet-trigger").tap();
 			}
 			await capture(page, testInfo, `${mode.name}-long-operation`);
 		});
