@@ -972,6 +972,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				return yield* this.createSessionAndSendTurnEffect(
 					input,
 					existingCtx.workspaceStartReported,
+					true,
 				);
 			} else if (
 				existingCtx &&
@@ -1018,6 +1019,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			return yield* this.createSessionAndSendTurnEffect(
 				input,
 				existingCtx?.workspaceStartReported,
+				existingCtx !== undefined,
 			);
 		});
 	}
@@ -1025,6 +1027,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	private createSessionAndSendTurnEffect(
 		input: ClaudeSendTurnInput,
 		workspaceStartReported = false,
+		replacingSession = false,
 	): Effect.Effect<TurnResult, ClaudeAdapterError> {
 		return Effect.gen({ self: this }, function* () {
 			const { sessionId } = input;
@@ -1078,14 +1081,17 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
 				yield* this.placeUserMessageEffect(input);
-				yield* input.eventSink
-					.push(
-						claudeRuntimeEvent("session.status", sessionId, {
-							sessionId,
-							status: "busy",
-						}),
-					)
-					.pipe(Effect.ignore);
+				// Initial admission already reports busy. A replacement may start
+				// after the prior turn idled but before its server send returned.
+				if (replacingSession)
+					yield* input.eventSink
+						.push(
+							claudeRuntimeEvent("session.status", sessionId, {
+								sessionId,
+								status: "busy",
+							}),
+						)
+						.pipe(Effect.ignore);
 				let resumeSessionAt = input.resumeSessionAt;
 				const rewindPoint = input.rewind?.resumeSessionAt;
 				if (
@@ -1719,6 +1725,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			return yield* this.createSessionAndSendTurnEffect(
 				input,
 				ctx.workspaceStartReported,
+				true,
 			);
 		});
 	}
