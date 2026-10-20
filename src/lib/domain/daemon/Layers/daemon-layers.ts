@@ -2,10 +2,8 @@
 // and leaf drainable services (KeepAwake, VersionChecker, StorageMonitor, PortScanner).
 // Finalizers remove process listeners / drain services to prevent leaks in tests.
 
-import {
-	NodeChildProcessSpawner as NodeCommandExecutor,
-	NodeFileSystem,
-} from "@effect/platform-node";
+import * as NodeCommandExecutor from "@effect/platform-node/NodeChildProcessSpawner";
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import {
 	Context,
 	Data,

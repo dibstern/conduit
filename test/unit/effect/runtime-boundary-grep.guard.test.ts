@@ -421,15 +421,19 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("keeps Claude runtime fibers session-owned instead of daemon-owned", () => {
-		const path = "src/lib/provider/claude/claude-provider-runtime.ts";
-		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		for (const path of [
+			"src/lib/provider/claude/claude-provider-runtime.ts",
+			"src/lib/provider/claude/claude-runner-payload.ts",
+		]) {
+			const source = readFileSync(join(REPO_ROOT, path), "utf8");
 
-		expect(source.match(/\bforkDaemon\b/g) ?? []).toEqual([]);
+			expect(source.match(/\bforkDaemon\b/g) ?? []).toEqual([]);
+		}
 	});
 
 	it("instruments Claude provider runtime Effect operations", () => {
-		const runtime = readFileSync(
-			join(REPO_ROOT, "src/lib/provider/claude/claude-provider-runtime.ts"),
+		const payload = readFileSync(
+			join(REPO_ROOT, "src/lib/provider/claude/claude-runner-payload.ts"),
 			"utf8",
 		);
 		const permission = readFileSync(
@@ -447,14 +451,14 @@ describe("Effect runtime boundary grep", () => {
 			"claude.interrupt",
 			"claude.shutdown",
 		]) {
-			expect(runtime).toContain(`Effect.withSpan("${span}"`);
+			expect(payload).toContain(`Effect.withSpan("${span}"`);
 		}
 		for (const field of [
 			"providerId: this.providerId",
 			"sessionId",
 			"turnId",
 		]) {
-			expect(runtime).toContain(field);
+			expect(payload).toContain(field);
 		}
 		expect(permission).toContain('Effect.withSpan("claude.permission"');
 		expect(permission).toContain('providerId: "claude"');

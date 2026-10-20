@@ -17,12 +17,7 @@ import type {
 	SessionMessage,
 	Settings,
 } from "@anthropic-ai/claude-agent-sdk";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import {
-	type CallToolResult,
-	CallToolResultSchema,
-} from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { Option, Schema } from "effect";
 import { CategorySetSchema } from "../../src/lib/contracts/category-set.js";
 import { CategoryTuningHunkSchema } from "../../src/lib/contracts/category-tuning.js";
@@ -966,6 +961,12 @@ function query(params: {
 				} as unknown as SDKMessage;
 			}
 			if (request === "thread-read-omitted-history") {
+				const [{ Client }, { InMemoryTransport }, { CallToolResultSchema }] =
+					await Promise.all([
+						import("@modelcontextprotocol/sdk/client/index.js"),
+						import("@modelcontextprotocol/sdk/inMemory.js"),
+						import("@modelcontextprotocol/sdk/types.js"),
+					]);
 				const serverKey = "conduit";
 				const server = params.options?.mcpServers?.[serverKey];
 				if (server?.type !== "sdk")
