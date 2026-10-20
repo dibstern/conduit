@@ -6,28 +6,28 @@
 			"kind": "fork",
 			"messages": 20,
 			"statements": 67,
-			"milliseconds": 170.16645900000003,
+			"milliseconds": 194.49512499998673,
 			"events": 5
 		},
 		{
 			"kind": "side-thread",
 			"messages": 20,
 			"statements": 67,
-			"milliseconds": 9.964334000000235,
+			"milliseconds": 10.11966699999175,
 			"events": 5
 		},
 		{
 			"kind": "fork",
 			"messages": 200,
 			"statements": 67,
-			"milliseconds": 322.2892090000023,
+			"milliseconds": 41.757582999998704,
 			"events": 5
 		},
 		{
 			"kind": "side-thread",
 			"messages": 200,
 			"statements": 67,
-			"milliseconds": 103.43512499999633,
+			"milliseconds": 251.3969170000055,
 			"events": 5
 		}
 	]

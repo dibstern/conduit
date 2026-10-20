@@ -45,7 +45,6 @@ import {
 } from "../../../persistence/fork-history.js";
 import { sameClaudeLogin } from "../../../provider/claude/claude-sdk-env.js";
 import { CLAUDE_FORK_SOURCE_KEY } from "../../../provider/claude/claude-session-fork.js";
-import { renderCursorForkDigest } from "../../../provider/cursor/cursor-fork-digest.js";
 import { cursorUpstreamAdapter } from "../../../provider/cursor/cursor-session-upstream.js";
 import { sideThreadPermissionRules } from "../../../provider/opencode-provider-instance.js";
 import {
@@ -61,7 +60,12 @@ import { OpenCodeSessionCreationGateTag } from "./opencode-runtime-ingress-servi
 import { ConfigTag, LoggerTag } from "./services.js";
 import { inheritRead, markSeen } from "./session-attention.js";
 import { setPermissionMode } from "./session-overrides-state.js";
-import { loadServerSessionPick, sessionPickEvents } from "./session-pick.js";
+import {
+	loadServerSessionPick,
+	resolveServerSessionPick,
+	sessionPickEvents,
+	storedSessionPick,
+} from "./session-pick.js";
 import { SessionWorkspaceTag } from "./session-workspace.js";
 import { inheritSurfacingMarks } from "./surfacing-feedback.js";
 
@@ -786,12 +790,10 @@ const forkSessionInWorkspace = (
 				cause: parentSessionId,
 				message: `Parent session ${parentSessionId} was not found`,
 			});
-		const stateOption = yield* Effect.serviceOption(ProviderStateEffectTag);
 		const projections = yield* Effect.serviceOption(ProjectionRunnerEffectTag);
 		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
 		if (
 			readOption._tag === "None" ||
-			stateOption._tag === "None" ||
 			eventStore._tag === "None" ||
 			projections._tag === "None" ||
 			sql._tag === "None"
@@ -805,10 +807,15 @@ const forkSessionInWorkspace = (
 					: "Claude fork requires provider state persistence",
 			});
 		}
-		const state = stateOption.value;
 		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 		const native = yield* Effect.gen(function* () {
 			if (digestFork) return undefined;
+			const state = yield* Effect.serviceOption(ProviderStateEffectTag);
+			if (state._tag === "None")
+				return yield* new SessionCommandError({
+					operation: "session.forked.claude",
+					cause: "Claude fork requires provider state persistence",
+				});
 			if (!("folder" in account))
 				return yield* new SessionCommandError({
 					operation: "session.forked.unsupported_account",
@@ -819,7 +826,12 @@ const forkSessionInWorkspace = (
 					operation: "session.forked.claude",
 					cause: "Claude fork requires project SDK configuration",
 				});
-			return { account, config: config.value, sdk: config.value.claudeSdk };
+			return {
+				account,
+				config: config.value,
+				sdk: config.value.claudeSdk,
+				state: state.value,
+			};
 		});
 		const commitAndSignal = yield* makeCommitAndSignal.pipe(
 			Effect.provideService(EventStoreEffectTag, eventStore.value),
@@ -840,10 +852,11 @@ const forkSessionInWorkspace = (
 		const fork = yield* Effect.gen(function* () {
 			if (!native) {
 				const id = randomUUID();
-				const pick = yield* loadServerSessionPick(
-					account.driver,
-					account.id,
-					parent,
+				const pick = yield* Effect.fromResult(
+					resolveServerSessionPick(
+						account.driver,
+						storedSessionPick(parent, account.driver),
+					),
 				);
 				return {
 					id,
@@ -851,20 +864,10 @@ const forkSessionInWorkspace = (
 					driver: account.driver,
 					pick,
 					providerSessionId: undefined,
-					saveProviderState: () =>
-						Effect.gen(function* () {
-							const messages =
-								yield* readOption.value.getSessionMessagesWithParts(id);
-							yield* state.saveUpdates(id, [
-								{
-									key: "cursor.forkDigest",
-									value: renderCursorForkDigest(messages),
-								},
-							]);
-						}),
+					saveProviderState: undefined,
 				};
 			}
-			const { account: nativeAccount, config } = native;
+			const { account: nativeAccount, config, state } = native;
 			const { lastRewindCommitSequence, instanceIds } = source;
 			let selected:
 				| {
@@ -998,7 +1001,7 @@ const forkSessionInWorkspace = (
 				yield* inheritRead(parentSessionId, id).pipe(
 					Effect.provideService(SqlClient.SqlClient, sql.value),
 				);
-				yield* fork.saveProviderState();
+				if (fork.saveProviderState) yield* fork.saveProviderState();
 				// Ask applies before the row is announced, so no send can reach the
 				// Side Thread first.
 				if (side) yield* setPermissionMode(id, "ask");
