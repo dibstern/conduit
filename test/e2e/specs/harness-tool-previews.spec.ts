@@ -18,6 +18,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Locator, Page } from "@playwright/test";
 import { Effect } from "effect";
+import type { ResponseExitEncoded } from "effect/rpc/RpcMessage";
 import type {
 	EventPayloadMap,
 	LiveEventType,
@@ -362,12 +363,14 @@ const watchRpc = async (page: Page) => {
 						requestId: request.id,
 						exit: {
 							_tag: "Failure",
-							cause: {
-								_tag: "Fail",
-								error: { _tag: "WsRpcError", message: "Injected failure" },
-							},
+							cause: [
+								{
+									_tag: "Fail",
+									error: { _tag: "WsRpcError", message: "Injected failure" },
+								},
+							],
 						},
-					}),
+					} satisfies ResponseExitEncoded),
 				);
 			});
 		},
