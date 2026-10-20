@@ -34,7 +34,7 @@ export const applyProjectSetting = (
 			handleHarnessDefaults(setting);
 			break;
 		case "titleGeneration":
-			applyTitleGeneration(setting.selection);
+			applyTitleGeneration(setting);
 			break;
 		case "visibility":
 			handleVisibilityInfo(setting);

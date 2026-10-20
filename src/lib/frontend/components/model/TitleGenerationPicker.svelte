@@ -40,7 +40,7 @@
 		>
 			<span class="truncate">{summary}</span>
 		</Button>
-		{#if discoveryState.titleGeneration}
+		{#if discoveryState.titleGeneration.selection}
 			<TextButton data-testid="settings-title-generation-reset" disabled={setting.saving} onclick={setting.reset}>Reset</TextButton>
 		{/if}
 	{/snippet}

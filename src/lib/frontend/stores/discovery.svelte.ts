@@ -12,7 +12,7 @@ import {
 	type ProviderDriverKind,
 	type ProviderSessionCapabilities,
 } from "../../contracts/provider-instance.js";
-import type { TitleGenerationSelection } from "../../contracts/title-generation.js";
+import type { TitleGenerationState } from "../../contracts/title-generation.js";
 import {
 	catalogFromProviderList,
 	findCatalogModel,
@@ -186,7 +186,10 @@ const serverDiscovery = $state({
 	defaultVariant: "" as string,
 	defaultsLoaded: false,
 	harnessDefaults: missingHarnessDefaults(),
-	titleGeneration: null as TitleGenerationSelection | null,
+	titleGeneration: {
+		selection: null,
+		status: "unverified",
+	} as TitleGenerationState,
 	currentVariant: "" as string,
 	availableVariants: [] as string[],
 	currentContextWindow: "" as string,
@@ -836,7 +839,7 @@ export const discoveryState = {
 	> {
 		return serverDiscovery.harnessDefaults;
 	},
-	get titleGeneration(): TitleGenerationSelection | null {
+	get titleGeneration(): TitleGenerationState {
 		return serverDiscovery.titleGeneration;
 	},
 	get availableVariants(): readonly string[] {
@@ -1638,10 +1641,8 @@ export function applyHarnessDefaultSet(
 	fillDraftDefault();
 }
 
-export function applyTitleGeneration(
-	selection: TitleGenerationSelection | null,
-): void {
-	serverDiscovery.titleGeneration = selection;
+export function applyTitleGeneration(state: TitleGenerationState): void {
+	serverDiscovery.titleGeneration = state;
 }
 
 /** Get the available variants for the currently active model. */
@@ -1957,7 +1958,7 @@ export function clearDiscoveryState(): void {
 	serverDiscovery.defaultVariant = "";
 	serverDiscovery.defaultsLoaded = false;
 	serverDiscovery.harnessDefaults = missingHarnessDefaults();
-	serverDiscovery.titleGeneration = null;
+	serverDiscovery.titleGeneration = { selection: null, status: "unverified" };
 	serverDiscovery.currentVariant = "";
 	serverDiscovery.availableVariants = [];
 	serverDiscovery.currentContextWindow = "";

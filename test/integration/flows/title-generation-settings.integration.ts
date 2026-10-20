@@ -116,23 +116,32 @@ describe("title generation settings through browser RPC", () => {
 						yield* origin.client.GetTitleGeneration({
 							projectSlug: "origin-project",
 						}),
-					).toEqual({ projectSlug: "origin-project", selection: null });
+					).toEqual({
+						projectSlug: "origin-project",
+						selection: null,
+						status: "ok",
+					});
 					expect(
 						yield* origin.client.SetTitleGeneration({
 							projectSlug: "origin-project",
 							selection,
 						}),
-					).toEqual({ projectSlug: "origin-project", selection });
+					).toEqual({ projectSlug: "origin-project", selection, status: "ok" });
 					expect(yield* Queue.take(changes)).toEqual({
 						_tag: "titleGeneration",
 						selection,
+						status: "unverified",
 					});
 					const reloaded = yield* makeProject(root, "reloaded-project");
 					expect(
 						yield* reloaded.client.GetTitleGeneration({
 							projectSlug: "reloaded-project",
 						}),
-					).toEqual({ projectSlug: "reloaded-project", selection });
+					).toEqual({
+						projectSlug: "reloaded-project",
+						selection,
+						status: "unverified",
+					});
 					expect(loadRelaySettings(root)).toMatchObject({
 						titleGeneration: selection,
 						hiddenModels: ["claude/opus"],
@@ -144,12 +153,17 @@ describe("title generation settings through browser RPC", () => {
 					expect(yield* Queue.take(changes)).toEqual({
 						_tag: "titleGeneration",
 						selection: null,
+						status: "unverified",
 					});
 					expect(
 						yield* other.client.GetTitleGeneration({
 							projectSlug: "other-project",
 						}),
-					).toEqual({ projectSlug: "other-project", selection: null });
+					).toEqual({
+						projectSlug: "other-project",
+						selection: null,
+						status: "unverified",
+					});
 					expect(
 						JSON.parse(readFileSync(join(root, "settings.jsonc"), "utf8")),
 					).toEqual({

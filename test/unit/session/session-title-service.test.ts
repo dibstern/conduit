@@ -11,6 +11,10 @@ import { isPlaceholderTitle } from "../../../src/lib/contracts/session-title.js"
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
+	ProjectSettingsLive,
+	publishProjectSetting,
+} from "../../../src/lib/domain/relay/Services/project-settings.js";
+import {
 	ConfigTag,
 	LoggerTag,
 	type WebSocketHandlerShape,
@@ -76,6 +80,7 @@ function makeTestLayer(input: {
 		Layer.succeed(ConfigTag)(
 			input.config ?? makeMockConfig({ projectDir: process.cwd() }),
 		),
+		ProjectSettingsLive,
 		makePersistenceEffectLayer(":memory:", "test-project"),
 	);
 	return Layer.provideMerge(
@@ -324,6 +329,120 @@ describe("session title helpers", () => {
 });
 
 describe("SessionTitleService", () => {
+	for (const scenario of [
+		{
+			name: "uses the built-in default when the saved account was removed",
+			accountPresent: false,
+			catalogAvailable: false,
+			problem: "Title generation account does not exist",
+		},
+		{
+			name: "uses the built-in default when the saved model left its catalog",
+			accountPresent: true,
+			catalogAvailable: true,
+			problem:
+				"ModelNotInCatalog: model claude/sonnet is not in the claude catalog",
+		},
+		{
+			name: "uses the saved account, model and effort while its catalog is unverified",
+			accountPresent: true,
+			catalogAvailable: false,
+			problem: undefined,
+		},
+	]) {
+		it.effect(scenario.name, () => {
+			const configDir = mkdtempSync(join(tmpdir(), "conduit-title-stale-"));
+			const queryFactory = vi.fn(
+				(_params: Parameters<ClaudeOneShotQueryFactory>[0]) =>
+					replayClaudeText(),
+			);
+			const log = makeMockLogger();
+			const layer = makeTestLayer({
+				queryFactory,
+				logger: log,
+				config: makeMockConfig({ configDir }),
+				accounts: makeMockAccountDirectory([
+					{
+						driver: "claude",
+						id: AccountIdSchema.make("claude-personal"),
+						name: "Personal",
+						folder: configuredClaudeConfigDir("/title-personal-login"),
+						usageEligible: true,
+					},
+					...(scenario.accountPresent
+						? [
+								{
+									driver: "claude" as const,
+									id: AccountIdSchema.make("claude-work"),
+									name: "Work",
+									folder: configuredClaudeConfigDir("/title-work-login"),
+									usageEligible: true,
+								},
+							]
+						: []),
+				]),
+			});
+			return Effect.gen(function* () {
+				yield* Effect.sync(() =>
+					saveRelaySettings(
+						{
+							titleGeneration: {
+								account: { _tag: "Id", id: "claude-work" },
+								providerId: "claude",
+								modelId: "sonnet",
+								effort: "high",
+							},
+						},
+						configDir,
+					),
+				);
+				if (scenario.catalogAvailable) {
+					yield* publishProjectSetting({
+						_tag: "providerModels",
+						accountId: "claude-work",
+						providers: [
+							{
+								id: "claude",
+								name: "Claude",
+								configured: true,
+								models: [{ id: "opus", name: "Opus", provider: "claude" }],
+							},
+						],
+					});
+				}
+				yield* seedSessionRow();
+				const service = yield* SessionTitleServiceTag;
+				yield* service.titleFromMessage({
+					sessionId: "session-1",
+					message: "Fix auth",
+				});
+				yield* waitForSessionProjectorToReachLatestRename();
+				expect(yield* getSessionTitle()).toBe("pong");
+				expect(queryFactory).toHaveBeenCalledTimes(1);
+				if (scenario.problem) {
+					expect(queryFactory.mock.calls[0]?.[0].options).toMatchObject({
+						env: { CLAUDE_CONFIG_DIR: "/title-personal-login" },
+						model: "opus",
+						thinking: { type: "disabled" },
+					});
+					expect(log.warn).toHaveBeenCalledTimes(1);
+					expect(log.warn).toHaveBeenCalledWith(
+						expect.stringContaining(
+							`SESSION_TITLE_GENERATION_FALLBACK sessionId=session-1 harness=claude account=claude-work model=claude/sonnet reason=${scenario.problem}`,
+						),
+					);
+				} else {
+					expect(queryFactory.mock.calls[0]?.[0].options).toMatchObject({
+						env: { CLAUDE_CONFIG_DIR: "/title-work-login" },
+						model: "sonnet",
+						effort: "high",
+					});
+					expect(log.warn).not.toHaveBeenCalled();
+				}
+			}).pipe(Effect.provide(layer), Effect.ensuring(removeTempDir(configDir)));
+		});
+	}
+
 	it.effect(
 		"reads account, model and effort again for the next title without restarting",
 		() => {

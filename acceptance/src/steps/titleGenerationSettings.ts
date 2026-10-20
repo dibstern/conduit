@@ -76,11 +76,40 @@ export const titleGenerationSettingsHandlers: StepHandler[] = [
 		match: /^title generation has the saved Work Claude Sonnet high selection$/,
 		run: ({ world }) => {
 			const rpc = requireRpcControl(world.page);
-			rpc.titleGeneration = savedSelection;
 			rpc.setProjectSetting({
 				_tag: "titleGeneration",
 				selection: savedSelection,
+				status: "unverified",
 			});
+		},
+	},
+	{
+		name: "seed title generation selection for removed account",
+		match: /^title generation has a saved selection for a removed account$/,
+		run: ({ world }) => {
+			const rpc = requireRpcControl(world.page);
+			expect(
+				mockInstances
+					.get(world.page)
+					?.some((account) => account["id"] === "claude-work"),
+			).not.toBe(true);
+			rpc.setProjectSetting({
+				_tag: "titleGeneration",
+				selection: savedSelection,
+				status: "missing",
+				problem: "Title generation account does not exist",
+			});
+		},
+	},
+	{
+		name: "assert removed title generation account notice",
+		match: /^title generation shows the removed-account notice$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("settings-title-generation-problem"),
+			).toHaveText(
+				"The saved account is gone. Titles use the default Claude account until you pick another.",
+			);
 		},
 	},
 	{
@@ -103,6 +132,9 @@ export const titleGenerationSettingsHandlers: StepHandler[] = [
 			await expect(row).toContainText(/opus/i);
 			await expect(
 				world.page.getByTestId("settings-title-generation-reset"),
+			).toHaveCount(0);
+			await expect(
+				world.page.getByTestId("settings-title-generation-problem"),
 			).toHaveCount(0);
 		},
 	},
@@ -171,6 +203,9 @@ export const titleGenerationSettingsHandlers: StepHandler[] = [
 			await expect(
 				world.page.getByTestId("settings-title-generation-reset"),
 			).toBeVisible();
+			await expect(
+				world.page.getByTestId("settings-title-generation-problem"),
+			).toHaveCount(0);
 		},
 	},
 	{

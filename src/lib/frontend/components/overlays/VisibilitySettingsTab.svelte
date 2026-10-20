@@ -232,6 +232,11 @@
 
 <SettingsGroup id="settings-title-generation-group" title="Session titles">
 	<TitleGenerationPicker />
+	{#if discoveryState.titleGeneration.status === "missing" || discoveryState.titleGeneration.status === "invalid"}
+		<p class="px-[14px] pb-[10px] text-[12px] leading-[1.4] text-text-muted" data-testid="settings-title-generation-problem" data-status={discoveryState.titleGeneration.status}>
+			{discoveryState.titleGeneration.status === "missing" ? "The saved account is gone." : "The saved model is no longer available."} Titles use the default Claude account until you pick another.
+		</p>
+	{/if}
 </SettingsGroup>
 
 <div class="mt-[16px] flex flex-col gap-[8px]">

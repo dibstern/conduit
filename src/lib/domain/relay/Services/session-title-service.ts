@@ -214,6 +214,16 @@ export const makeSessionTitleServiceLive = (
 						state,
 						catalogFor,
 					);
+					if (resolved.status === "missing" || resolved.status === "invalid") {
+						const ref = resolved.pick.account;
+						const accountId = ref._tag === "Id" ? ref.id : ref.driver;
+						const harness =
+							state.accounts.find((account) => account.id === accountId)
+								?.driver ?? resolved.pick.providerId;
+						log.warn(
+							`SESSION_TITLE_GENERATION_FALLBACK sessionId=${input.sessionId} harness=${harness} account=${accountId} model=${resolved.pick.providerId}/${resolved.pick.modelId} reason=${resolved.problem}`,
+						);
+					}
 					const pick =
 						resolved.status === "ok" || resolved.status === "unverified"
 							? resolved.pick

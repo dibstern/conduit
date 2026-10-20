@@ -21,7 +21,7 @@ export function createTitleModelSelectionTarget() {
 	let saving = $state(false);
 	let localSelection = $state<TitleGenerationSelection | null>(null);
 	const selection = $derived(
-		(saving ? localSelection : discoveryState.titleGeneration) ??
+		(saving ? localSelection : discoveryState.titleGeneration.selection) ??
 			BUILTIN_TITLE_GENERATION,
 	);
 	// Remove this filter when OpenCode and Cursor generation land in 9mbo.6/.7.
@@ -125,7 +125,7 @@ export function createTitleModelSelectionTarget() {
 				projectSlug,
 				selection: next,
 			});
-			applyTitleGeneration(response.selection);
+			applyTitleGeneration(response);
 		} catch (error) {
 			toastFailure("Failed to save title generation setting", "warn")(error);
 		} finally {
