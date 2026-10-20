@@ -139,15 +139,13 @@ export const titleGenerationSettingsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert title picker supports Claude accounts only",
-		match: /^the title generation picker offers only the Claude harness$/,
+		name: "assert title picker offers every account harness",
+		match:
+			/^the title generation picker offers the Claude and OpenCode harnesses$/,
 		run: async ({ world }) => {
 			const picker = world.page.getByTestId("title-generation-picker");
 			await expect(picker.getByTestId("picker-harness-claude")).toBeVisible();
-			await expect(picker.getByTestId("picker-harness-opencode")).toHaveCount(
-				0,
-			);
-			await expect(picker.getByTestId("picker-harness-cursor")).toHaveCount(0);
+			await expect(picker.getByTestId("picker-harness-opencode")).toBeVisible();
 		},
 	},
 	{

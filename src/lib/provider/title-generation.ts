@@ -36,13 +36,6 @@ export function resolveTitleGeneration(
 		...selection,
 		account: { _tag: "Id", id: account.id },
 	};
-	// driver-dispatch-ok: title generation is enabled as each adapter lands.
-	if (!["claude", "cursor"].includes(account.driver))
-		return {
-			pick,
-			status: "invalid",
-			problem: "Title generation is not available for this account",
-		};
 	const catalog = catalogFor(account);
 	const resolved = resolveTurnSettings(
 		{

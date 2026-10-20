@@ -262,6 +262,7 @@ class SessionNamespace {
 
 	async create(options?: {
 		title?: string;
+		permission?: PermissionRuleset;
 		parentID?: string;
 		id?: string;
 		directory?: string;
@@ -283,10 +284,15 @@ class SessionNamespace {
 							: { location: { directory: options.directory } }),
 					});
 					if (created.error !== undefined) return created;
-					return options.title
+					return options.title || options.permission
 						? this.api._sdk.session.update({
 								sessionID: id,
-								title: options.title,
+								...(options.title === undefined
+									? {}
+									: { title: options.title }),
+								...(options.permission === undefined
+									? {}
+									: { permission: options.permission }),
 								...scope,
 							})
 						: this.api._sdk.session.get({
@@ -430,6 +436,39 @@ class SessionNamespace {
 	async abort(sessionId: string): Promise<void> {
 		await this.api.sdk("session.abort", decodeOpenCodeBooleanResponse, () =>
 			this.api._sdk.session.abort({ sessionID: sessionId }),
+		);
+	}
+
+	/** Synchronous, cancellable prompt for ephemeral text generation. */
+	async promptText(
+		sessionId: string,
+		options: {
+			text: string;
+			system: string;
+			model: { providerID: string; modelID: string };
+			variant: string;
+			directory: string;
+			agent: string;
+			signal: AbortSignal;
+		},
+	): Promise<OpenCodeMessageWithParts> {
+		return this.api.sdk(
+			"session.promptText",
+			decodeOpenCodeMessageWithPartsResponse,
+			() =>
+				this.api._sdk.session.prompt(
+					{
+						sessionID: sessionId,
+						directory: options.directory,
+						model: options.model,
+						variant: options.variant,
+						agent: options.agent,
+						system: options.system,
+						tools: { "*": false },
+						parts: [{ type: "text", text: options.text }],
+					},
+					{ signal: options.signal },
+				),
 		);
 	}
 
@@ -783,7 +822,9 @@ class AppNamespace {
 		);
 	}
 
-	async path(directory?: string): Promise<{ cwd: string }> {
+	async path(
+		directory?: string,
+	): Promise<{ cwd: string; config: string; worktree: string }> {
 		const path = await this.api.sdk(
 			"app.path",
 			decodeOpenCodePathResponse,
@@ -795,7 +836,11 @@ class AppNamespace {
 							{ headers: { "x-opencode-directory": null } },
 						),
 		);
-		return { cwd: path.directory };
+		return {
+			cwd: path.directory,
+			config: path.config,
+			worktree: path.worktree,
+		};
 	}
 
 	async vcs(): Promise<{

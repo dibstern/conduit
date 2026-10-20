@@ -6,7 +6,10 @@ import { Context, Deferred, Effect, Exit, Layer, Scope } from "effect";
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
-import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
+import {
+	AccountIdSchema,
+	type OpenCodeAccount,
+} from "../../../src/lib/contracts/account.js";
 import { isPlaceholderTitle } from "../../../src/lib/contracts/session-title.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -36,6 +39,7 @@ import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { ClaudeOneShotQueryFactory } from "../../../src/lib/provider/claude/claude-provider-runtime.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { makeCursorProviderRuntime } from "../../../src/lib/provider/cursor/cursor-provider-runtime.js";
+import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
 import {
 	ProviderRegistry,
 	ProviderRegistryTag,
@@ -51,6 +55,7 @@ import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 } from "../../helpers/mock-factories.js";
+import { replayOpenCodeText } from "../../helpers/opencode-text-generation.js";
 
 function makeWebSocketHandler() {
 	const handler: WebSocketHandlerShape = {
@@ -449,6 +454,78 @@ describe("SessionTitleService", () => {
 			}).pipe(Effect.provide(layer), Effect.ensuring(removeTempDir(configDir)));
 		});
 	}
+
+	it.effect(
+		"generates with the saved OpenCode account without importing its scratch session",
+		() => {
+			const configDir = mkdtempSync("/tmp/conduit-opencode-title-service-");
+			const replay = replayOpenCodeText();
+			const account = {
+				driver: "opencode",
+				id: AccountIdSchema.make("opencode-titles"),
+				name: "OpenCode titles",
+				usageEligible: false,
+			} as const;
+			const accounts = makeMockAccountDirectory([account]);
+			const route = vi.fn((selected: OpenCodeAccount, directory?: string) => {
+				expect(selected).toEqual(account);
+				expect(directory).toContain(join(configDir, "text-generation"));
+				return Effect.succeed(replay.client(directory ?? ""));
+			});
+			const provider = new OpenCodeProviderInstance({
+				client: replay.client("/project"),
+				configDir,
+				clientForAccount: route,
+			});
+			saveRelaySettings(
+				{
+					titleGeneration: {
+						account: { _tag: "Id", id: account.id },
+						providerId: replay.model.providerId,
+						modelId: replay.model.modelId,
+						effort: "",
+					},
+				},
+				configDir,
+			);
+			const queryFactory = vi.fn(() => replayClaudeText());
+			return Effect.gen(function* () {
+				const service = yield* SessionTitleServiceTag;
+				yield* seedSessionRow("opencode-title");
+				yield* service.titleFromMessage({
+					sessionId: "opencode-title",
+					message: "Fix login redirect loop",
+				});
+				yield* waitForSessionProjectorToReachLatestRename("opencode-title");
+				expect(yield* getSessionTitle("opencode-title")).toBe(
+					sanitizeGeneratedTitle(replay.reply),
+				);
+				expect(yield* getRenameEvents("opencode-title")).toHaveLength(1);
+				const sql = yield* SqlClient.SqlClient;
+				expect(yield* sql`SELECT id FROM sessions`).toEqual([
+					{ id: "opencode-title" },
+				]);
+				expect(
+					yield* sql`SELECT sequence FROM events WHERE session_id = ${replay.sessionId}`,
+				).toEqual([]);
+				expect(queryFactory).not.toHaveBeenCalled();
+				expect(route).toHaveBeenCalledOnce();
+				expect(readdirSync(join(configDir, "text-generation"))).toEqual([]);
+			}).pipe(
+				Effect.provide(
+					makeTestLayer({
+						queryFactory,
+						accounts,
+						config: makeMockConfig({ configDir }),
+						providerLayer: Layer.succeed(ProviderRegistryTag)(
+							new ProviderRegistry([provider]),
+						),
+					}),
+				),
+				Effect.ensuring(removeTempDir(configDir)),
+			);
+		},
+	);
 
 	it.effect(
 		"generates the title with the selected Cursor account by replaying captured SDK traffic",

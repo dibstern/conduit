@@ -194,6 +194,9 @@ const createOrchestrationComponentsEffect = (
 
 		const openCodeInstance = (yield* OpenCodeDriver.create({
 			client: options.client,
+			...(options.configDir !== undefined
+				? { configDir: options.configDir }
+				: {}),
 			...(options.workspaceRoot != null
 				? { workspaceRoot: options.workspaceRoot }
 				: {}),
