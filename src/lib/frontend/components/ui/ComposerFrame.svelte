@@ -30,7 +30,7 @@
 	/* After the focus outline, so focusing never hides the goal. */
 	.composer-frame[data-goal="solid"] { outline: 1px solid var(--color-status-goal); }
 	.composer-frame[data-goal="dashed"] { outline: 1px dashed var(--color-status-goal); }
-	.composer-frame :global(.composer-text-metrics) { font-size: 15px; line-height: 24px; padding: 2px 0 10px; }
+	.composer-frame :global(.composer-text-metrics) { font-size: 15px; line-height: 22.5px; padding: 2px 0 14px; }
 	[data-words="true"] :global(.composer-text-metrics) { padding: 0 4px; }
 	[data-words="true"] :global(#image-preview) { padding-inline: 8px; }
 	.composer-frame[data-compact="true"][data-words="false"] { padding: 10px 8px 8px 14px; }

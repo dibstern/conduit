@@ -242,7 +242,7 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 		// Keyboard focus rings the summary words, not the full-width tap target.
 		chrome:
 			"group/composer-summary min-w-0 w-full gap-[5px] font-sans text-[12px] font-normal [&:focus-visible]:ring-0",
-		tone: "text-text-muted",
+		tone: "text-text-dimmer",
 		hoverFill: "hover:text-text",
 	},
 	"composer-row": {
@@ -268,15 +268,15 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 		hoverFill: "hover:bg-hover",
 	},
 	"composer-checkout": {
-		chrome: "min-w-0 bg-chip font-mono text-[11.5px] font-normal",
+		chrome: "min-w-0 h-[28px]! bg-chip font-mono text-[11.5px] font-normal",
 		tone: "text-text-secondary",
 		hoverFill: "hover:bg-hover",
 	},
 	"composer-word": {
 		// An offset outline, so focus clears the glyphs and the dotted underline.
 		chrome:
-			"min-w-0 gap-[5px] rounded-[4px] font-sans text-[12px] font-normal underline decoration-dotted decoration-border-chip underline-offset-[4px] [&:focus-visible]:ring-0 [&:focus-visible]:outline-2 [&:focus-visible]:outline-solid [&:focus-visible]:outline-offset-[3px] [&:focus-visible]:outline-text",
-		tone: "text-text-muted",
+			"min-w-0 gap-[5px] rounded-[4px] font-sans text-[12px] font-normal underline decoration-dotted decoration-1 decoration-border-chip underline-offset-[4px] [&:focus-visible]:ring-0 [&:focus-visible]:outline-2 [&:focus-visible]:outline-solid [&:focus-visible]:outline-offset-[3px] [&:focus-visible]:outline-text",
+		tone: "text-text-dimmer",
 		hoverFill: "hover:text-text",
 	},
 	goal: {

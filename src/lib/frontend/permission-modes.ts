@@ -1,5 +1,14 @@
 import type { SessionPermissionMode } from "./types.js";
 
+export const PERMISSION_MODE_COLOURS: Record<SessionPermissionMode, string> = {
+	dontAsk: "var(--color-p-never)",
+	plan: "var(--color-p-plan)",
+	ask: "var(--color-p-ask)",
+	acceptEdits: "var(--color-p-edits)",
+	auto: "var(--color-p-auto)",
+	full: "var(--color-error)",
+};
+
 /** `claudeOnly` marks modes backed by a Claude Agent SDK permission mode
  *  with no OpenCode equivalent. All six of the SDK's modes are offered; the
  *  session runs whichever one the SDK reports, which is what keeps the pill

@@ -1013,5 +1013,8 @@
 	"src/lib/frontend/components/ui/ViewCard.svelte :: leading-[1.5]": {
 		"renamedTo": "leading-[11.04px]",
 		"reason": "conduit-test-voxy.10: keep the Final preview's 8px times 0.92 times 1.5 line height when moving mono glyph scaling solely into the font face."
-	}
+	},
+	"src/lib/frontend/components/input/InputArea.svelte :: min-h-[36px],text-border-chip": "composer-03: the approved Words row is 27px tall, with 9px top padding and 18px text. Remove the 36px floor and use text-text-dimmer for visible separators.",
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: border-border-chip,border-dotted,text-border-chip": "composer-02 and composer-03: composer-word owns the shared dotted text underline at 4px offset. Remove the competing span border and use text-text-dimmer separators.",
+	"src/lib/frontend/components/model/ModelVariant.svelte :: border-b,border-border-chip,border-dotted": "composer-02: the shared composer-word recipe owns the dotted text underline, offset and thickness; the effort span must not draw another border underline."
 }
