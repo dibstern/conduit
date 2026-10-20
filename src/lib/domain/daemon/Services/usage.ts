@@ -2,6 +2,7 @@ import {
 	Clock,
 	Context,
 	Deferred,
+	Duration,
 	Effect,
 	Fiber,
 	FiberMap,
@@ -33,9 +34,10 @@ export interface UsageService {
 	readonly latest: (
 		accountId: string,
 	) => Effect.Effect<UsageReading | undefined>;
-	readonly refresh: (
-		accountIds?: readonly string[],
-	) => Effect.Effect<readonly UsageReading[]>;
+	readonly refresh: (options: {
+		readonly accountIds?: readonly string[];
+		readonly maxAge: Duration.Input;
+	}) => Effect.Effect<readonly UsageReading[]>;
 	readonly turnEnded: (accountId: string) => Effect.Effect<void>;
 	readonly pickFailover: (
 		excluding: string,
@@ -136,16 +138,31 @@ export const makeUsage = (options: {
 		let sampler: Fiber.Fiber<void> | undefined;
 		const inFlight = new Map<string, Deferred.Deferred<UsageReading>>();
 		const latest = new Map<string, UsageReading>();
-		const read = (accountId: string, accounts: readonly UsageAccount[]) =>
+		const attemptedAt = new Map<string, number>();
+		const read = (
+			accountId: string,
+			accounts: readonly UsageAccount[],
+			maxAge: Duration.Input,
+		) =>
 			Effect.gen(function* () {
 				const account = accounts.find((account) => account.id === accountId);
-				const pending = yield* lock.withPermits(1)(
+				const result = yield* lock.withPermits(1)(
 					Effect.uninterruptibleMask((restore) =>
 						Effect.gen(function* () {
 							const existing = inFlight.get(accountId);
-							if (existing) return existing;
+							if (existing) return Deferred.await(existing);
+							const now = yield* Clock.currentTimeMillis;
+							const cached = latest.get(accountId);
+							const lastAttempt = attemptedAt.get(accountId);
+							if (
+								cached &&
+								lastAttempt !== undefined &&
+								now - lastAttempt < Duration.toMillis(maxAge)
+							)
+								return Effect.succeed(cached);
 							const pending = yield* Deferred.make<UsageReading>();
 							inFlight.set(accountId, pending);
+							attemptedAt.set(accountId, now);
 							const reading = Effect.suspend(() => {
 								const reader = account && options.readers[account.harness];
 								return account && reader
@@ -257,8 +274,41 @@ export const makeUsage = (options: {
 											readAt,
 											stale: false,
 										};
-										// Decisions get the fresh result; only the published
-										// readings keep showing the last good one, marked stale.
+										const previous = latest.get(accountId);
+										if (
+											value.status === "available" ||
+											value.status === "limited"
+										) {
+											for (const window of value.windows) {
+												const prior = previous?.windows.find(
+													(candidate) =>
+														candidate.kind === window.kind &&
+														(candidate.kind !== "seven_day_model" ||
+															(window.kind === "seven_day_model" &&
+																candidate.model === window.model)),
+												);
+												if (
+													window.utilization < 100 &&
+													prior &&
+													prior.utilization >= 100 &&
+													prior.resetsAt &&
+													Date.parse(prior.resetsAt) > readAt
+												)
+													yield* Effect.logInfo(
+														"Usage window free before reset",
+														{
+															accountId,
+															window: window.kind,
+															...(window.kind === "seven_day_model"
+																? { model: window.model }
+																: {}),
+															resetsAt: prior.resetsAt,
+														},
+													);
+											}
+										}
+										// A failed attempt returns unknown to its caller. The cache
+										// and subscribers retain the last reading, marked stale.
 										yield* Effect.sync(() => {
 											const previous = latest.get(accountId);
 											latest.set(
@@ -280,18 +330,18 @@ export const makeUsage = (options: {
 								),
 							);
 							yield* Effect.forkIn(restore(reading), scope);
-							return pending;
+							return Deferred.await(pending);
 						}),
 					),
 				);
-				return yield* Deferred.await(pending);
+				return yield* result;
 			});
-		const refresh: UsageService["refresh"] = (accountIds) =>
+		const refresh: UsageService["refresh"] = ({ accountIds, maxAge }) =>
 			Effect.gen(function* () {
 				const accounts = yield* options.accounts;
 				const readings = yield* Effect.forEach(
 					[...new Set(accountIds ?? accounts.map((account) => account.id))],
-					(accountId) => read(accountId, accounts),
+					(accountId) => read(accountId, accounts, maxAge),
 					{ concurrency: 8 },
 				);
 				// Publish the latest completed reads, including a newer overlapping
@@ -300,7 +350,12 @@ export const makeUsage = (options: {
 				const liveIds = new Set(
 					(yield* options.accounts).map((account) => account.id),
 				);
-				for (const id of latest.keys()) if (!liveIds.has(id)) latest.delete(id);
+				for (const id of latest.keys()) {
+					if (!liveIds.has(id)) {
+						latest.delete(id);
+						attemptedAt.delete(id);
+					}
+				}
 				yield* SubscriptionRef.set(current, [...latest.values()]);
 				if (historyStore)
 					yield* historySaveLock.withPermits(1)(
@@ -335,7 +390,7 @@ export const makeUsage = (options: {
 							subscribers++;
 							if (subscribers === 1)
 								sampler = yield* Effect.forkIn(
-									refresh().pipe(
+									refresh({ maxAge: "5 minutes" }).pipe(
 										Effect.schedule(Schedule.fixed("5 minutes")),
 										Effect.asVoid,
 										Effect.interruptible,
@@ -362,25 +417,35 @@ export const makeUsage = (options: {
 						initial = false;
 						// changes has captured the snapshot and joined the update stream
 						// before this read can publish, so the snapshot always comes first.
-						return Effect.forkIn(refresh(), subscriptionScope).pipe(
-							Effect.asVoid,
-						);
+						return Effect.forkIn(
+							refresh({ maxAge: "5 minutes" }),
+							subscriptionScope,
+						).pipe(Effect.asVoid);
 					}),
 				);
 			}),
 		);
-		// Only a viewer needs the fresh numbers; its subscription reads on join.
+		// A successful turn can clear a full reading even without a viewer.
 		const turnEnded: UsageService["turnEnded"] = (accountId) =>
-			subscribers === 0
-				? Effect.void
-				: FiberMap.run(
-						turnRefreshes,
-						accountId,
-						Effect.sleep("10 seconds").pipe(
-							Effect.andThen(refresh([accountId])),
-							Effect.asVoid,
-						),
-					).pipe(Effect.asVoid);
+			Effect.suspend(() =>
+				subscribers === 0 &&
+				!latest
+					.get(accountId)
+					?.windows.some(
+						(window) =>
+							(window.kind === "five_hour" || window.kind === "seven_day") &&
+							window.utilization >= 100,
+					)
+					? Effect.void
+					: FiberMap.run(
+							turnRefreshes,
+							accountId,
+							Effect.sleep("10 seconds").pipe(
+								Effect.andThen(refresh({ accountIds: [accountId], maxAge: 0 })),
+								Effect.asVoid,
+							),
+						).pipe(Effect.asVoid),
+			);
 		const pickFailover: UsageService["pickFailover"] = (excluding) =>
 			Effect.gen(function* () {
 				const order: readonly string[] = yield* options.order ??
@@ -400,7 +465,10 @@ export const makeUsage = (options: {
 				if (harness === undefined) return undefined;
 				for (const account of accounts) {
 					if (account.id === excluding || account.harness !== harness) continue;
-					const [reading] = yield* refresh([account.id]);
+					const [reading] = yield* refresh({
+						accountIds: [account.id],
+						maxAge: "30 seconds",
+					});
 					if (
 						reading &&
 						reading.status !== "limited" &&

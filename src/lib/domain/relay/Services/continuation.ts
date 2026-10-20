@@ -381,7 +381,7 @@ export const makeContinuation = Effect.gen(function* () {
 									? yield* restore(
 											Effect.flatMap(Usage, (usage) =>
 												usage
-													.refresh([account.id])
+													.refresh({ accountIds: [account.id], maxAge: 0 })
 													.pipe(Effect.map((readings) => readings[0])),
 											),
 										)

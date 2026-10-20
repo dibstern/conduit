@@ -295,7 +295,7 @@ it("sweeps due continuations only for its own project in a shared store", async 
 					readings: Stream.empty,
 					latest: () => Effect.succeed(undefined),
 					turnEnded: () => Effect.void,
-					refresh: () =>
+					refresh: (_options) =>
 						Effect.sync(() => {
 							probes++;
 							return [usageReading("claude", { status: "available" })];
@@ -474,7 +474,7 @@ const withResetInbox = <A, E, R>(
 		Effect.provideService(Usage, {
 			readings: Stream.empty,
 			latest: () => Effect.sync(reading),
-			refresh: () => Effect.sync(() => [reading()]),
+			refresh: (_options) => Effect.sync(() => [reading()]),
 			turnEnded: () => Effect.void,
 			pickFailover: () => Effect.succeed(undefined),
 		}),
@@ -912,7 +912,7 @@ for (const scenario of [
 						readings: Stream.empty,
 						latest: () => Effect.succeed(undefined),
 						turnEnded: () => Effect.void,
-						refresh: () =>
+						refresh: (_options) =>
 							Effect.gen(function* () {
 								probes++;
 								switch (scenario) {
@@ -994,7 +994,7 @@ for (const scenario of [
 					readings: Stream.empty,
 					latest: () => Effect.succeed(undefined),
 					turnEnded: () => Effect.void,
-					refresh: () => Effect.succeed([usageReading("claude")]),
+					refresh: (_options) => Effect.succeed([usageReading("claude")]),
 					pickFailover: () => Effect.succeed(undefined),
 				}),
 				Effect.provideService(ProviderTurnServiceTag, {
@@ -1183,7 +1183,7 @@ for (const scenario of [
 								readings: Stream.empty,
 								latest: () => Effect.succeed(undefined),
 								turnEnded: () => Effect.void,
-								refresh: (accountIds) =>
+								refresh: ({ accountIds }) =>
 									Effect.gen(function* () {
 										const instanceId = accountIds?.[0] ?? "claude";
 										probed.push(instanceId);
@@ -1377,7 +1377,7 @@ it("a cancelled invalid due row does not prevent another due row from resuming",
 				readings: Stream.empty,
 				latest: () => Effect.succeed(undefined),
 				turnEnded: () => Effect.void,
-				refresh: () => Effect.succeed([usageReading("claude")]),
+				refresh: (_options) => Effect.succeed([usageReading("claude")]),
 				pickFailover: () => Effect.succeed(undefined),
 			}),
 			Effect.provideService(ProviderTurnServiceTag, {
@@ -1453,7 +1453,7 @@ for (const freshReset of [42, undefined]) {
 					readings: Stream.empty,
 					latest: () => Effect.succeed(undefined),
 					turnEnded: () => Effect.void,
-					refresh: () =>
+					refresh: (_options) =>
 						Effect.sync(() => {
 							probes++;
 							return [

@@ -473,9 +473,9 @@ export const sessionsHandlers = {
 			),
 		),
 	QuotaForAccounts: (_request) =>
-		Effect.flatMap(Usage, (usage) => usage.refresh()).pipe(
-			Effect.catch(mapRpcFailure("QuotaForAccounts")),
-		),
+		Effect.flatMap(Usage, (usage) =>
+			usage.refresh({ maxAge: "30 seconds" }),
+		).pipe(Effect.catch(mapRpcFailure("QuotaForAccounts"))),
 	GetContinuationHandoff: (request) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
