@@ -233,12 +233,17 @@ test("Server status reloads after two supervised restarts, with desktop and phon
 		animations: "disabled",
 	});
 	await page.setViewportSize({ width: 390, height: 844 });
-	const text = await page.getByTestId("server-status-details").boundingBox();
-	const actions = await page.getByTestId("server-status-actions").boundingBox();
-	if (!text || !actions) throw new Error("Status card layout is missing");
-	expect(actions.y).toBeGreaterThanOrEqual(text.y + text.height);
-	expect(actions.x).toBeCloseTo(text.x, 0);
-	expect(actions.width).toBeCloseTo(text.width, 0);
+	// Resizing can return before the browser applies the responsive layout.
+	await expect(async () => {
+		const text = await page.getByTestId("server-status-details").boundingBox();
+		const actions = await page
+			.getByTestId("server-status-actions")
+			.boundingBox();
+		if (!text || !actions) throw new Error("Status card layout is missing");
+		expect(actions.y).toBeGreaterThanOrEqual(text.y + text.height);
+		expect(actions.x).toBeCloseTo(text.x, 0);
+		expect(actions.width).toBeCloseTo(text.width, 0);
+	}).toPass({ timeout: 10_000 });
 	await card.screenshot({
 		path: resolve(artifacts, `${testInfo.project.name}-390px.png`),
 		animations: "disabled",

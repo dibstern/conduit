@@ -1,10 +1,12 @@
 import { subscribe } from "node:diagnostics_channel";
+import { once } from "node:events";
 import {
 	appendFileSync,
 	existsSync,
 	readFileSync,
 	renameSync,
 	statSync,
+	watch,
 	writeFileSync,
 } from "node:fs";
 import { Session } from "node:inspector/promises";
@@ -543,11 +545,12 @@ async function main(): Promise<void> {
 			),
 		).href
 	)) as typeof import("../../src/lib/domain/daemon/Layers/daemon-foreground.js");
+	const configDir =
+		process.env["CONDUIT_TEST_DAEMON_CONFIG_DIR"] ?? join(root, "config");
 	const activeDaemon = await startForegroundDaemon({
 		port: Number(process.env["CONDUIT_TEST_PORT"] ?? 0),
 		host: "127.0.0.1",
-		configDir:
-			process.env["CONDUIT_TEST_DAEMON_CONFIG_DIR"] ?? join(root, "config"),
+		configDir,
 		claudeConfigDir: process.env["CLAUDE_CONFIG_DIR"] ?? join(root, "claude"),
 		staticDir: dist ? join(dist, "frontend") : join(root, "static"),
 		smartDefault: false,
@@ -563,7 +566,29 @@ async function main(): Promise<void> {
 		await activeDaemon.stop();
 		process.exit(0);
 	}
-	await activeDaemon.addProject(join(root, "process-test"));
+	// Restarts must preserve a test's deliberate project removal.
+	const defaultProjectRegistered = join(root, "default-project-registered");
+	if (!existsSync(defaultProjectRegistered)) {
+		const changes = watch(configDir);
+		try {
+			await activeDaemon.addProject(join(root, "process-test"));
+			while (true) {
+				const stored = JSON.parse(
+					readFileSync(join(configDir, "daemon.json"), "utf8"),
+				) as { projects: { folders: string[] }[] };
+				if (
+					stored.projects.some((project) =>
+						project.folders.includes(join(root, "process-test")),
+					)
+				)
+					break;
+				await once(changes, "change");
+			}
+			writeFileSync(defaultProjectRegistered, "registered\n");
+		} finally {
+			changes.close();
+		}
+	}
 	process.send({
 		channel: "conduit-process-test",
 		kind: "ready",
