@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect, userEvent, within } from "storybook/test";
 import type { QuestionRequest } from "../../types.js";
 import QuestionCard from "./QuestionCard.svelte";
 
@@ -106,10 +107,51 @@ export const SingleSelect: Story = {
 
 export const MultiSelect: Story = {
 	args: { request: mockMultiSelect },
+	play: async ({ canvasElement }) => {
+		const checkbox = within(canvasElement).getAllByRole("checkbox")[0];
+		if (!checkbox) throw new Error("Missing question checkbox");
+		await expect(getComputedStyle(checkbox).appearance).toBe("none");
+		await userEvent.click(checkbox);
+		await expect(checkbox).toBeChecked();
+		await expect(getComputedStyle(checkbox).backgroundColor).not.toBe(
+			"rgba(0, 0, 0, 0)",
+		);
+	},
 };
 
 export const WithCustomInput: Story = {
 	args: { request: mockWithCustomInput },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		for (const button of [
+			canvas.getByRole("button", { name: "Submit" }),
+			canvas.getByRole("button", { name: "Skip" }),
+		]) {
+			const style = getComputedStyle(button);
+			await expect(button.getBoundingClientRect().height).toBe(28);
+			await expect(parseFloat(style.borderRadius)).toBeGreaterThanOrEqual(999);
+			await expect(style.borderTopWidth).toBe("0px");
+			const tap = getComputedStyle(button, "::before");
+			await expect(parseFloat(tap.minHeight)).toBeGreaterThanOrEqual(44);
+		}
+		const radio = canvas.getByRole("radio", { name: "Staging" });
+		await expect(getComputedStyle(radio).appearance).toBe("none");
+		for (const option of canvasElement.querySelectorAll(".question-option")) {
+			await expect(getComputedStyle(option).borderTopWidth).toBe("0px");
+		}
+	},
+};
+
+export const RadioSelection: Story = {
+	...WithCustomInput,
+	play: async (context) => {
+		await WithCustomInput.play?.(context);
+		const canvas = within(context.canvasElement);
+		const radio = canvas.getByRole("radio", { name: "Staging" });
+		await userEvent.click(radio);
+		await expect(radio).toBeChecked();
+		await expect(canvas.getByRole("button", { name: "Submit" })).toBeEnabled();
+	},
 };
 
 export const MultipleQuestions: Story = {
