@@ -1697,7 +1697,13 @@ function setupComposerStage(
 						accountId: "lab",
 						harness: "claude" as const,
 						status: "limited" as const,
-						windows: [],
+						windows: [
+							{
+								kind: "five_hour" as const,
+								utilization: 100,
+								resetsAt: new Date(reset).toISOString(),
+							},
+						],
 						readAt: now,
 						stale: false,
 					},
@@ -1722,6 +1728,7 @@ function setupComposerStage(
 						limitRecovery: {
 							instanceId: "claude",
 							rateLimitType: "five_hour",
+							limitedAt: now - 1,
 							resetsAt: reset / 1000,
 							cutOffMessageId: "composer-limit-turn",
 							rearms: 0,
@@ -1867,7 +1874,7 @@ export const WaitingForReset: Story = {
 	globals: { theme: "dark" },
 	beforeEach: ({ canvasElement }) =>
 		setupComposerStage(canvasElement, "waiting"),
-	play: async ({ canvasElement }) => {
+	play: async ({ canvasElement, parameters }) => {
 		const canvas = within(canvasElement);
 		await expect(canvas.getByTestId("pending-input-waiting")).toHaveTextContent(
 			"Waiting for lab's limit to reset",
@@ -1878,14 +1885,46 @@ export const WaitingForReset: Story = {
 		await expect(canvas.getByTestId("pending-input-send-now")).toBeVisible();
 		await expect(canvas.queryByTestId("usage-limit-strip")).toBeNull();
 		const cancel = canvas.getByTestId("usage-limit-cancel-resume");
-		const actions = cancel.parentElement;
-		if (!actions) throw new Error("Waiting tray actions are missing");
-		await expect(getComputedStyle(cancel).flexGrow).toBe("0");
+		const resetLink = canvas.getByTestId("usage-limit-reset-link");
+		await expect(resetLink).toBeVisible();
+		const actions = resetLink.parentElement;
+		const buttonRow = cancel.parentElement;
+		if (!actions || !buttonRow)
+			throw new Error("Waiting tray actions are missing");
 		const header = canvas.getByTestId("pending-input-waiting");
 		const headerRect = header.getBoundingClientRect();
-		await expect(cancel.getBoundingClientRect().width).toBeLessThan(
-			headerRect.width * 0.7,
-		);
+		if (parameters["phone"]) {
+			const rowRect = buttonRow.getBoundingClientRect();
+			const buttons = [
+				canvas.getByTestId("usage-limit-switch-account"),
+				cancel,
+				canvas.getByTestId("usage-limit-used-reset"),
+			];
+			for (const button of buttons) {
+				await expect(button).toBeVisible();
+				const rect = button.getBoundingClientRect();
+				await expect(rect.left).toBeGreaterThanOrEqual(rowRect.left - 1);
+				await expect(rect.right).toBeLessThanOrEqual(rowRect.right + 1);
+			}
+			await expect(
+				Math.abs(
+					rowRect.left -
+						headerRect.left -
+						Number.parseFloat(getComputedStyle(header).paddingLeft),
+				),
+			).toBeLessThanOrEqual(1);
+			await expect(
+				Math.abs(rowRect.width - actions.getBoundingClientRect().width),
+			).toBeLessThanOrEqual(1);
+			await expect(
+				resetLink.getBoundingClientRect().top,
+			).toBeGreaterThanOrEqual(rowRect.bottom);
+		} else {
+			await expect(getComputedStyle(cancel).flexGrow).toBe("0");
+			await expect(cancel.getBoundingClientRect().width).toBeLessThan(
+				headerRect.width * 0.7,
+			);
+		}
 		await expect(
 			Math.abs(
 				actions.getBoundingClientRect().right -

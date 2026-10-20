@@ -11,7 +11,7 @@ import { seedUsageLimits } from "./providerInstances.js";
 import { mockInstances, requireRpcControl } from "./shared.js";
 import { themeColour } from "./usageFooterMeter.js";
 
-const clockTimes = new WeakMap<Page, number>();
+export const clockTimes = new WeakMap<Page, number>();
 const usageValues = {
 	normal: [41, 22],
 	warn5: [86, 58],

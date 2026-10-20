@@ -12,6 +12,7 @@ import {
 	requireRpcControl,
 	setSessionRowStatus,
 } from "./shared.js";
+import { clockTimes } from "./usageSettings.js";
 
 const cutOffMessageId = "msg-cut-off";
 
@@ -168,7 +169,8 @@ export const usageLimitStripHandlers: StepHandler[] = [
 			const limitRecovery = {
 				instanceId: match[2],
 				rateLimitType: match[1],
-				limitedAt: PINNED_CLOCK_MS - 2_000,
+				// The limit lands just before the scenario's clock, after any reading it seeded.
+				limitedAt: (clockTimes.get(world.page) ?? PINNED_CLOCK_MS) - 2_000,
 				...(resets === "none" ? {} : { resetsAt: Date.parse(resets) / 1000 }),
 				cutOffMessageId,
 				rearms: 0,
@@ -387,12 +389,16 @@ export const usageLimitStripHandlers: StepHandler[] = [
 			const link = await strip
 				.getByTestId("usage-limit-reset-link")
 				.boundingBox();
+			const stripBox = await strip.boundingBox();
 			const first = boxes[0];
-			if (!first || !link || boxes.some((box) => !box))
+			if (!first || !link || !stripBox || boxes.some((box) => !box))
 				throw new Error("No reset action boxes");
 			for (const box of boxes) {
 				if (!box) continue;
-				expect(box.y).toBeCloseTo(first.y, 0);
+				expect(box.x).toBeGreaterThanOrEqual(stripBox.x - 1);
+				expect(box.x + box.width).toBeLessThanOrEqual(
+					stripBox.x + stripBox.width + 1,
+				);
 				expect(link.y).toBeGreaterThanOrEqual(box.y + box.height);
 			}
 		},

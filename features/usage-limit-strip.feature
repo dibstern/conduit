@@ -414,7 +414,7 @@ Scenario Outline: switching confirms what carries over, hands the session over a
   Then the PreviewContinuation RPC previews the current session on self
   And the handoff dialog asks Continue on personal?
   And the handoff dialog carries <messages>
-  And the swap card hands work2claude at limited to personal at 77% left
+  And the swap card hands work2claude at limited · Mon 9:00 AM to personal at 77% left
   And the handoff dialog shows claude with a blue dot
   And the handoff dialog shows self with a teal dot
   When I press Switch and continue

@@ -67,6 +67,7 @@
 		if (hours > 0) return `in ${hours}h ${minutes}m`;
 		return minutes > 0 ? `in ${minutes}m` : `in ${seconds}s`;
 	});
+	const waitingDetail = $derived(`${sessionViewState.compact ? `${account} · ` : ""}${countdown}${limitRecovery.auto ? " · auto-resume is on" : ""}`);
 	const detail = $derived.by(() => {
 		if (resetAt === undefined)
 			return "Reset time unavailable";
@@ -140,7 +141,12 @@
 		<Icon name="timer" size={13} class="shrink-0 text-warning" />
 		<span class="min-w-[min(100%,16em)] flex-1">
 			<b data-testid="usage-limit-title" class="font-semibold text-text">Waiting for {account}'s limit to reset</b>
-			{#if presentation === "strip"}<span data-testid="usage-limit-detail" class="text-text-dimmer"> {detail}</span>{/if}
+			{#if presentation === "strip"}
+				<span data-testid="usage-limit-detail" class="text-text-dimmer"> {detail}</span>
+			{:else if scheduledAt !== undefined}
+				<br />
+				<span data-testid="usage-limit-detail" class="text-text-dimmer">{waitingDetail}</span>
+			{/if}
 		</span>
 	{:else if scheduledAt === undefined}
 		<Icon name="gauge" size={13} class="shrink-0 text-error" />
@@ -152,12 +158,12 @@
 		<Icon name="timer" size={13} class="shrink-0 text-warning" />
 		<span class="min-w-[min(100%,16em)] flex-1">
 			<b data-testid="usage-limit-title" class="font-semibold text-text">{presentation === "tray" ? `Waiting for ${account}'s limit to reset` : sessionViewState.compact ? `Resumes ${resumesAt}` : `Resumes on ${account} at ${resumesAt}`}</b><br />
-			<span data-testid="usage-limit-detail" class="text-text-dimmer">{sessionViewState.compact ? `${account} · ${countdown}` : countdown}{limitRecovery.auto ? " · auto-resume is on" : ""}</span>
+			<span data-testid="usage-limit-detail" class="text-text-dimmer">{waitingDetail}</span>
 		</span>
 	{/if}
 	{#if !limitRecovery.continued}
 		<div class="flex flex-wrap items-center gap-[6px] {stretch ? 'mt-[6px] w-full' : 'ml-auto'}">
-			<div class={stretch ? "flex w-full gap-[6px]" : "contents"}>
+			<div class={stretch ? "flex w-full flex-wrap gap-[6px]" : "contents"}>
 				{#if canSwitch && accountId}
 					{@render switchAccount(scheduledAt === undefined && stripState !== "looks_reset", accountId)}
 				{/if}

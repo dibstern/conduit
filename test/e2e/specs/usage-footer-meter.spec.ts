@@ -153,20 +153,24 @@ test("real daemon usage controls reach the desktop sidebar footer per account", 
 			join(personal.configDir, "conduit-test-usage-response.json"),
 			JSON.stringify(response),
 		);
-		// This existing RPC refreshes the shared Usage service and publishes its
-		// readings to SubscribeUsage. Poll past any overlapping initial probe.
+		// QuotaForAccounts shares usage reads for 30 seconds after the last attempt.
+		// Poll past that age so SubscribeUsage receives the updated reading.
 		await expect
-			.poll(async () => {
-				const readings = await Effect.runPromise(
-					browser.rpc.QuotaForAccounts({
-						projectSlug: savedSlug,
-						originId: browser.originId,
-					}),
-				);
-				return readings
-					.find((reading) => reading.accountId === personal.id)
-					?.windows.find((window) => window.kind === "five_hour")?.utilization;
-			})
+			.poll(
+				async () => {
+					const readings = await Effect.runPromise(
+						browser.rpc.QuotaForAccounts({
+							projectSlug: savedSlug,
+							originId: browser.originId,
+						}),
+					);
+					return readings
+						.find((reading) => reading.accountId === personal.id)
+						?.windows.find((window) => window.kind === "five_hour")
+						?.utilization;
+				},
+				{ timeout: 45_000 },
+			)
 			.toBe(88);
 		await expect(
 			page.getByTestId(`usage-footer-value-${personal.id}-five_hour`),

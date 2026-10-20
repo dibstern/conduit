@@ -305,8 +305,6 @@ export const makeContinuation = Effect.gen(function* () {
 			const expectedSourceMatches =
 				options.expectedInstanceId === initialSession.provider ||
 				options.expectedInstanceId === source.id;
-			const sameAccountNow =
-				!due && options.at === undefined && source.id === account.id;
 			const checkSession = (ownRequest = false) =>
 				Effect.gen(function* () {
 					const session = yield* read.getSession(sessionId);
@@ -415,14 +413,6 @@ export const makeContinuation = Effect.gen(function* () {
 											),
 										)
 									: undefined;
-							const exhausted =
-								decision?.windows.filter(
-									(window) =>
-										(window.kind === "five_hour" ||
-											window.kind === "seven_day") &&
-										window.utilization >= 100,
-								) ?? [];
-							const limit = exhausted[0];
 							const turns = yield* ProviderTurnServiceTag;
 							// The inbox constructs this service's scheduling context before
 							// it exists. Actual resumes run in the completed relay context.
@@ -440,20 +430,6 @@ export const makeContinuation = Effect.gen(function* () {
 									// A probe can take five seconds; selection and turn state must
 									// still agree when the continuation is committed.
 									const session = yield* checkSession(true);
-									if (
-										!due &&
-										!sameAccountNow &&
-										decision &&
-										(decision.status === "limited" ||
-											decision.status === "unavailable")
-									)
-										return yield* new AccountUnavailable({
-											instanceId: account.id,
-											reason:
-												decision.status === "unavailable"
-													? (decision.reason ?? "Claude account is unavailable")
-													: `Account is still limited (${limit?.kind ?? "usage"}).`,
-										});
 									const recovery =
 										session.limit_recovery === null
 											? null
@@ -506,11 +482,11 @@ export const makeContinuation = Effect.gen(function* () {
 									}
 									// Dismiss or a reply may have closed it while the probe ran.
 									if (!switched && (!recovery || recovery.continued)) return;
-									if (sameAccountNow) {
+									if (!due) {
 										const answer = accountLimit({
 											asker: "user",
 											...(decision === undefined ? {} : { reading: decision }),
-											...(recovery === null ? {} : { recovery }),
+											...(switched || recovery === null ? {} : { recovery }),
 											now: yield* Clock.currentTimeMillis,
 										});
 										if (answer.kind === "wait-until")
