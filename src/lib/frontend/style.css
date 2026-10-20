@@ -52,6 +52,11 @@
 	--color-accent: #8e9bff;
 	--color-accent-hover: #9faaff;
 	--color-accent-bg: rgba(142, 155, 255, 0.12);
+	/* Ink for the stronger Final chip fills. Light needs a darker foreground. */
+	--color-accent-ink: #8e9bff;
+	--color-snoozed-ink: #b07cff;
+	--color-pinned-ink: #f2c14e;
+	--color-success-ink: #3ecf8e;
 	--color-code-bg: #141416;
 	--color-border: #2b2b31;
 	--color-border-subtle: #1f1f23;
@@ -261,6 +266,10 @@
 	--color-accent: #4352d2;
 	--color-accent-hover: #4c5bd4;
 	--color-accent-bg: rgba(76, 91, 212, 0.12);
+	--color-accent-ink: #3f4dc5;
+	--color-snoozed-ink: #6935f0;
+	--color-pinned-ink: #855e00;
+	--color-success-ink: #116a33;
 	--color-code-bg: #fafafa;
 	--color-border: #e3e3e7;
 	--color-border-subtle: #eeeef0;
@@ -874,8 +883,10 @@ body:has(dialog:modal) {
 /* Desktop keeps title and controls on one row. Only the title track yields;
    background tasks occupy their own track across the whole header. */
 #session-bar[data-compact="false"] {
+	--session-bar-padding-y: 3.5px;
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) auto auto auto;
+	grid-template-rows: minmax(44px, auto) auto;
 	grid-template-areas:
 		"title meta connection more"
 		"tasks tasks tasks tasks";
@@ -883,7 +894,7 @@ body:has(dialog:modal) {
 	min-height: 52px;
 	column-gap: 8px;
 	row-gap: 0;
-	padding: 4px 10px 4px 20px;
+	padding: var(--session-bar-padding-y) 10px var(--session-bar-padding-y) 20px;
 	white-space: nowrap;
 }
 #session-bar[data-compact="false"]:has(#session-bar-back) {
@@ -892,18 +903,13 @@ body:has(dialog:modal) {
 		"back title meta connection more"
 		"tasks tasks tasks tasks tasks";
 }
-/* Final's idle header is 52px: a 44px target, 7px padding and a 1px border.
-   Keep the existing room for the goal title's focus ring and the task row. */
-#session-bar[data-compact="false"]:not(
-		:has(
-				[data-testid="session-goal-subtitle"],
-				[data-testid="background-tasks-row"]
-			)
-	) {
-	padding-block: 3.5px;
-}
+/* Final's idle header is 52px: a 44px track, 7px padding and a 1px border. */
 #session-bar[data-compact="false"] [data-testid="background-tasks-row"] {
 	grid-area: tasks;
+	margin-inline: -20px -10px;
+	/* Continue below the complete header, through its padding and bottom border. */
+	margin-block: calc(var(--session-bar-padding-y) + 1px)
+		calc(-1 * (var(--session-bar-padding-y) + 1px));
 }
 #session-bar[data-compact="false"] #session-bar-title-row {
 	min-width: 0;
@@ -914,6 +920,7 @@ body:has(dialog:modal) {
 	flex: 0 1 auto;
 	font-size: 14.5px;
 	letter-spacing: -0.01em;
+	line-height: 1.5;
 }
 /* The markup's negative block margin stays: the target overhangs instead of
    making the title line taller than its text. */
@@ -929,15 +936,19 @@ body:has(dialog:modal) {
 	flex: none;
 }
 #session-bar[data-compact="false"] #session-bar-more {
-	min-width: 44px;
-	min-height: 44px;
+	min-width: 30px;
+	min-height: 30px;
+}
+#session-bar[data-compact="false"]:has([data-testid="session-goal-subtitle"]) {
+	--session-bar-padding-y: 6.5px;
+	grid-template-rows: auto auto;
 }
 #session-bar[data-compact="false"] [data-testid="session-goal-subtitle"] {
 	font-size: 12.5px;
+	line-height: 1.5;
 }
 #session-bar[data-compact="false"] #session-bar-connection {
 	grid-area: connection;
-	font-size: 12px;
 }
 @container session-bar (max-width: 600px) {
 	#session-bar-meta .segment-word {
@@ -985,15 +996,13 @@ body:has(dialog:modal) {
 	right: 0;
 	height: 12px;
 	z-index: 1;
-	background: var(--color-bg-surface);
+	background: var(--color-bg);
 	pointer-events: none;
 }
 
-/* The phone session list is bg-bg, not the session bar's bg-surface. #app is
-   hidden here, so stay under the list header's icon buttons (positioned), whose
+/* #app is hidden on the phone list, so stay under its icon buttons (positioned), whose
    pressed and focus states would lose their top 12px in a browser tab. */
 #layout.layout-compact.phone-list-screen #compact-top-edge {
-	background: var(--color-bg);
 	z-index: auto;
 }
 

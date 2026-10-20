@@ -208,9 +208,9 @@ type VariantRecipe = {
 
 export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 	"capsule-primary": {
-		chrome: "bg-accent-bg",
-		tone: "text-accent",
-		hoverFill: "hover:bg-accent-bg",
+		chrome: "bg-accent/18",
+		tone: "text-accent-ink",
+		hoverFill: "hover:bg-accent/18",
 	},
 	chip: {
 		chrome: "bg-chip",
@@ -449,6 +449,7 @@ export type ButtonSize =
 	| "touch-icon"
 	| "touch-pill"
 	| "navigation-pill"
+	| "session-navigation"
 	| "phone-navigation"
 	| "phone-header-icon"
 	| "phone-title-menu"
@@ -514,6 +515,8 @@ const SIZE_CLASSES: Record<
 	"touch-pill": "min-h-[44px] min-w-[44px] rounded-full",
 	"navigation-pill":
 		"min-h-[44px] gap-1.5 pl-1 pr-2 rounded-full text-[13px] font-medium",
+	"session-navigation":
+		"h-[28px] gap-[4px] pl-[4px] pr-[8px] rounded-full text-[13px] font-medium",
 	"phone-navigation":
 		"h-[28px] min-w-[44px] gap-[4px] pl-[4px] pr-[9px] rounded-full text-[13px] font-medium",
 	"phone-header-icon": "size-[30px] rounded-full",
@@ -527,7 +530,7 @@ const SIZE_CLASSES: Record<
 	"card-action": "gap-[6px] rounded-[9px] px-[10px] py-[6px] text-[11.5px]",
 	"phone-card-action":
 		"h-[28px] min-w-[44px] gap-[6px] rounded-full px-[12px] text-[13px]",
-	"command-chip": "h-[24px] rounded-full px-[8px] font-mono text-[11.5px]",
+	"command-chip": "h-[22px] rounded-full px-[8px] font-mono text-[11.5px]",
 	"capsule-segment":
 		"h-[24px] gap-[5px] rounded-full px-[10px] text-[12.5px] font-medium tabular-nums",
 	"phone-capsule-segment":

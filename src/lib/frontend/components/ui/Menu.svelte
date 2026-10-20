@@ -19,6 +19,7 @@
 	import { menuDensityContextKey, type MenuDensityContext } from "./menu-context.js";
 	import { getDialogTarget } from "./dialog-context.js";
 	import SheetChrome from "./SheetChrome.svelte";
+	import { themeColorScrim } from "../../stores/theme.svelte.js";
 
 	const SCRIM_ACTIVATION_DELAY_MS = 50;
 
@@ -242,7 +243,7 @@
 
 	<DropdownMenu.Portal {...portalProps}>
 		{#if presentation === "sheet"}
-			{#if open}<div aria-hidden="true" data-testid="menu-sheet-scrim" class="fixed inset-0 z-[var(--z-sheet)] bg-backdrop" class:pointer-events-none={!scrimInteractive} style:opacity={1 - scrimFade.progress} style:transition={scrimFade.settling ? "opacity 220ms linear" : undefined} use:exemptFromBackgroundInert></div>{/if}
+			{#if open}<div aria-hidden="true" data-testid="menu-sheet-scrim" class="fixed inset-0 z-[var(--z-sheet)] bg-backdrop" class:pointer-events-none={!scrimInteractive} style:opacity={1 - scrimFade.progress} style:transition={scrimFade.settling ? "opacity 220ms linear" : undefined} use:exemptFromBackgroundInert use:themeColorScrim></div>{/if}
 			<DropdownMenu.ContentStatic {...sheetContentProps}>
 				{#snippet child({ props })}
 					<!-- Keep the bits-ui focus target on the menu shell. SheetChrome gives the

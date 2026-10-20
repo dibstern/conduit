@@ -26,10 +26,23 @@
 	let anchorNode = $state<HTMLElement | null>(null);
 	let panelNode = $state<HTMLElement | null>(null);
 	let notchOffset = $state(0);
+	let holdSide = $state<"top" | "bottom">("bottom");
 	const panelId = $props.id();
 	const attachmentKey = createAttachmentKey();
 	const open = $derived(gestureState.phase === "open" || gestureState.phase === "following");
 	const following = $derived(gestureState.phase === "following");
+	$effect(() => {
+		if (open) measure();
+	});
+
+	function measure() {
+		if (!triggerNode || !anchorNode) return;
+		const trigger = triggerNode.getBoundingClientRect();
+		const anchor = anchorNode.getBoundingClientRect();
+		notchOffset = trigger.left + trigger.width / 2 - anchor.left + 4;
+		// Keep a heading and at least one 38px option below the finger.
+		holdSide = anchor.bottom + 12 + 44 + 38 <= window.innerHeight ? "bottom" : "top";
+	}
 
 	function itemAt(event: PointerEvent) {
 		const row = triggerNode?.ownerDocument.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-hold-menu-item]");
@@ -40,13 +53,17 @@
 		triggerNode = node;
 		menuNode = node.closest<HTMLElement>("[data-dropdown-menu-content]");
 		anchorNode = node.closest<HTMLElement>("[data-menu-grid]") ?? node;
-		const measure = () => {
-			notchOffset = node.getBoundingClientRect().left + node.getBoundingClientRect().width / 2 - (anchorNode?.getBoundingClientRect().left ?? 0) + 4;
-		};
 		const observer = new ResizeObserver(measure);
 		observer.observe(anchorNode);
+		window.addEventListener("resize", measure);
+		window.addEventListener("scroll", measure, true);
+		const cleanup = () => {
+			observer.disconnect();
+			window.removeEventListener("resize", measure);
+			window.removeEventListener("scroll", measure, true);
+		};
 		measure();
-		if (activation === "click") return () => observer.disconnect();
+		if (activation === "click") return cleanup;
 		const action = hold(node, {
 			followPointer: true,
 			keyboard: false,
@@ -75,7 +92,7 @@
 				gestureState = { phase: gestureState.phase === "following" || open ? "open" : "closed" };
 			},
 		});
-		return () => { observer.disconnect(); action.destroy(); };
+		return () => { cleanup(); action.destroy(); };
 	}
 
 	function closeList(event: Event) {
@@ -111,8 +128,8 @@
 			<DropdownMenu.SubContent
 				id={panelId}
 				aria-label={title}
-				side="bottom" align="start" sideOffset={12} alignOffset={-4}
-				customAnchor={anchorNode} strategy="fixed" avoidCollisions={following || activation === "click"} collisionPadding={activation === "click" ? 8 : 0}
+				side={activation === "click" ? "bottom" : holdSide} align="start" sideOffset={12} alignOffset={-4}
+				customAnchor={anchorNode} strategy="fixed" avoidCollisions={activation === "click"} collisionPadding={activation === "click" ? 8 : 0}
 				preventOverflowTextSelection={false}
 				onInteractOutside={(event) => {
 					if (activation === "hold" && event.target instanceof Node && menuNode?.contains(event.target)) event.preventDefault();

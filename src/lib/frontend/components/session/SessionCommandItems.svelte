@@ -26,8 +26,8 @@
 		now?: number;
 		settleShortcutTag?: string;
 	} = $props();
-	const triage = $derived(commands.filter((item) => item.section === "triage" && item.checked === undefined));
-	const management = $derived(commands.filter((item) => item.section === "manage" || item.section === "danger"));
+	const triage = $derived(commands.filter((item) => item.section === "triage" && item.checked === undefined && item.testId !== "session-ctx-archive"));
+	const management = $derived(commands.filter((item) => item.section === "manage" || item.section === "danger" || item.testId === "session-ctx-archive"));
 </script>
 
 {#snippet tile(item: SessionCommandEntry)}
@@ -68,11 +68,11 @@
 {/snippet}
 
 {#if presentation !== "menu"}
-	<LabelledGridGroup label="Triage" columns={triage.length > 4 ? 5 : 4} compact={presentation === "popover"}>
+	<LabelledGridGroup label="Triage" compact={presentation === "popover"}>
 		{#each triage as item (item.testId)}{@render tile(item)}{/each}
 	</LabelledGridGroup>
 	{#if session}<AutoSettleRow {session} {now} />{/if}
-	<LabelledGridGroup label="Session" columns={management.length > 4 ? 5 : 4}>
+	<LabelledGridGroup label="Session">
 		{#each management as item (item.testId)}{@render tile(item)}{/each}
 	</LabelledGridGroup>
 {:else}

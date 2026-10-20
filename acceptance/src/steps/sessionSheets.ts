@@ -190,7 +190,7 @@ export const sessionSheetsHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert shared session sheet layout",
-		match: /^the session sheet has the shared grids and (4|5) Session tiles$/,
+		match: /^the session sheet has the shared grids and (5|6) Session tiles$/,
 		run: async ({ world, match }) => {
 			const sheet = world.page.locator(sheetSelector);
 			await expect(sheet.getByTestId("session-sheet-header")).toBeVisible();
@@ -209,12 +209,13 @@ export const sessionSheetsHandlers: StepHandler[] = [
 			const tops = await tiles.evaluateAll((nodes) =>
 				nodes.map((node) => node.getBoundingClientRect().top),
 			);
-			expect(new Set(tops).size).toBe(1);
-			const triageTiles = triage.locator("[data-menu-tile]");
-			await expect(triageTiles.last()).toHaveAttribute(
+			expect(new Set(tops).size).toBe(2);
+			await expect(tiles.first()).toHaveAttribute(
 				"data-testid",
 				"session-ctx-archive",
 			);
+			const triageTiles = triage.locator("[data-menu-tile]");
+			await expect(triage.getByTestId("session-ctx-archive")).toHaveCount(0);
 			const triageTops = await triageTiles.evaluateAll((nodes) =>
 				nodes.map((node) => node.getBoundingClientRect().top),
 			);

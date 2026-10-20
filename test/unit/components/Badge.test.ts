@@ -36,13 +36,13 @@ describe("Badge", () => {
 		const badge = getByTestId("badge");
 
 		expect(badge.classList.contains("consumer-badge")).toBe(true);
-		expect(badge.classList.contains("bg-accent-bg")).toBe(true);
+		expect(badge.classList.contains("bg-accent/16")).toBe(true);
 	});
 
 	it.each([
 		["neutral", "bg-bg"],
 		["quiet", "bg-bg-alt"],
-		["accent", "bg-accent-bg"],
+		["accent", "bg-accent/16"],
 		["accent-solid", "bg-accent"],
 		["tag", "bg-[rgba(var(--overlay-rgb),0.05)]"],
 	] as const)("applies the %s variant", (variant, expectedClass) => {
