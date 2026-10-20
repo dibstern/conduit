@@ -194,24 +194,29 @@
 	<div id="session-list-scroller" class="flex-1 overflow-y-auto px-2 py-0.5" role="region" aria-label="Sessions" tabindex="0" onscroll={(event) => { heldSessionId = null; scrolled = event.currentTarget.scrollTop > 0; }}>
 		{#if drafts.length > 0}
 			<!-- Boxed so unsent drafts never read as sessions; collapsed, the header previews the newest. -->
-			<div class="my-1 rounded-[12px] border border-border bg-bg-surface p-[3px]" data-testid="drafts-tray">
-				<TextButton
-					tone="dimmer"
-					class="flex w-full items-center gap-1.5 min-h-[44px] md:min-h-0 rounded-[9px] px-2 py-1.5 text-xs font-semibold tracking-[0.3px] font-brand"
-					data-testid="drafts-tray-toggle"
-					aria-expanded={uiState.draftsTrayOpen}
-					aria-controls="drafts-tray-rows"
-					onclick={() => setDraftsTrayOpen(!uiState.draftsTrayOpen)}
-				>
-					<Icon name={uiState.draftsTrayOpen ? "chevron-down" : "chevron-right"} size={12} />
-					<Icon name="pencil-line" size={12} />
-					<span class="uppercase">Drafts</span>
-					<span class="font-medium tabular-nums">{drafts.length}</span>
-					{#if !uiState.draftsTrayOpen}
-						<span class="min-w-0 truncate font-normal tracking-normal">· {drafts[0]?.firstLine.trim() || "Untitled draft"}</span>
+			<div class="mt-[8px] mb-[2px] rounded-[12px] border border-border bg-[rgba(var(--overlay-rgb),0.02)] p-[3px]" data-testid="drafts-tray">
+				<div class="flex items-center rounded-[9px] hover:bg-sidebar-hover">
+					<TextButton
+						tone={uiState.draftsTrayOpen ? "inherit" : "muted"}
+						class="flex min-w-0 flex-1 items-center gap-[6px] min-h-[44px] md:min-h-0 px-[8px] py-[6px] text-[12.5px] leading-[1.4] font-brand {uiState.draftsTrayOpen ? 'font-semibold text-text' : 'font-medium'}"
+						data-testid="drafts-tray-toggle"
+						aria-expanded={uiState.draftsTrayOpen}
+						aria-controls="drafts-tray-rows"
+						onclick={() => setDraftsTrayOpen(!uiState.draftsTrayOpen)}
+					>
+						<Icon name={uiState.draftsTrayOpen ? "chevron-down" : "chevron-right"} size={12} />
+						<span class="flex text-text-dimmer"><Icon name="pencil-line" size={12} /></span>
+						<span>Drafts</span>
+						<span class="font-mono text-[10.5px] font-normal tabular-nums text-text-dimmer">{drafts.length}</span>
+						{#if !uiState.draftsTrayOpen}
+							<span class="min-w-0 truncate font-normal text-text-dimmer">· {drafts[0]?.firstLine.trim() || "Untitled draft"}</span>
+						{/if}
+					</TextButton>
+					{#if uiState.draftsTrayOpen}
+						<TextButton tone="dimmer" class="shrink-0 min-h-[44px] md:min-h-0 px-[8px] py-[6px] text-[11.5px] leading-[1.4] font-medium font-brand hover:text-error" data-testid="drafts-tray-clear" onclick={() => drafts.forEach(discardDraft)}>Clear all</TextButton>
 					{/if}
-				</TextButton>
-				<div id="drafts-tray-rows">
+				</div>
+				<div id="drafts-tray-rows" class={uiState.draftsTrayOpen ? "pb-px" : ""}>
 					{#if uiState.draftsTrayOpen}
 						{#each drafts as draft (draft.draftId)}
 							<DraftItem {draft} href={getDraftHref(draft.draftId, draft.projectSlug)} projectLabel={projectDisplayName(draft.projectSlug)} projectAccent={projectAccent(draft.projectSlug)} now={sessionState.now} active={route.page === "chat" && route.draftId === draft.draftId} onopen={() => navigate(getDraftHref(draft.draftId, draft.projectSlug))} ondiscard={() => discardDraft(draft)} />

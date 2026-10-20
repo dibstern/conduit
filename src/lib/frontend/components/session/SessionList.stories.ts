@@ -308,6 +308,9 @@ export const DraftsTrayOpen: Story = {
 			"true",
 		);
 		await expect(canvas.getAllByTestId("draft-row")).toHaveLength(3);
+		await expect(canvas.getByTestId("drafts-tray-clear")).toHaveTextContent(
+			"Clear all",
+		);
 	},
 };
 
@@ -320,6 +323,9 @@ export const DraftsTrayCollapsed: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(canvas.queryByTestId("draft-row")).not.toBeInTheDocument();
+		await expect(
+			canvas.queryByTestId("drafts-tray-clear"),
+		).not.toBeInTheDocument();
 		await expect(canvas.getByTestId("drafts-tray-toggle")).toHaveTextContent(
 			"Plan the next release",
 		);
