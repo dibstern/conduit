@@ -847,12 +847,26 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						return client;
 					}
 					yield* Effect.tryPromise({
-						try: () => client.app.path(),
+						// Reachability is global; directory requests own cold project initialization.
+						try: () =>
+							createSdkClient({
+								baseUrl: endpoint.url,
+								...(endpoint.auth ? { auth: endpoint.auth } : {}),
+							}).client.global.health({ throwOnError: true, parseAs: "json" }),
 						catch: (cause) => cause,
 					}).pipe(
 						Effect.timeout(CONNECT_TIMEOUT),
 						Effect.mapError((cause) =>
 							unreachable(instanceId, endpoint.url, cause),
+						),
+						Effect.filterOrFail(
+							({ data }) => data?.healthy === true,
+							() =>
+								unreachable(
+									instanceId,
+									endpoint.url,
+									"OpenCode did not report healthy",
+								),
 						),
 						// A freshly opened stream must be live before the caller acts,
 						// or events for that action could be missed.

@@ -58,7 +58,12 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 
 		res.setHeader("Content-Type", "application/json");
 
-		// Health check
+		if (req.method === "GET" && url.pathname === "/global/health") {
+			res.end(JSON.stringify({ healthy: true }));
+			return;
+		}
+
+		// Project paths
 		if (url.pathname === "/path") {
 			res.end(
 				JSON.stringify({

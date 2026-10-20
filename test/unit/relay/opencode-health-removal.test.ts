@@ -66,6 +66,7 @@ it.each([
 					headers: { "content-type": "text/event-stream" },
 				});
 			}
+			if (path === "/global/health") return Response.json({ healthy: true });
 			if (path === "/path")
 				return Response.json({
 					state: "/",
