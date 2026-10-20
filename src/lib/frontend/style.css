@@ -631,7 +631,6 @@ body:has(dialog:modal) {
 		#session-skills-chip,
 		#side-threads-control,
 		#session-bar-settle,
-		[data-testid="session-bar-title-menu"],
 		button[data-testid="session-bar-unread-chip"],
 		button[data-testid="session-bar-state-chip"],
 		[data-testid="session-goal-subtitle"],
@@ -660,14 +659,6 @@ body:has(dialog:modal) {
 	button {
 	clip-path: inset(
 		calc(50% - 18.375px) 0 calc(50% + 18.375px - var(--phone-title-hit-height))
-	);
-}
-#session-bar[data-compact="true"][data-collapsed="false"]
-	#session-bar-title-row
-	[data-testid="session-bar-title-menu"] {
-	clip-path: inset(
-		calc(50% - 18.375px) -2px
-			calc(50% + 18.375px - var(--phone-title-hit-height)) -22px
 	);
 }
 #session-bar[data-compact="true"][data-collapsed="false"]
@@ -704,11 +695,6 @@ body:has(dialog:modal) {
 }
 #session-bar[data-compact="true"][data-collapsed="false"] #session-bar-meta {
 	z-index: 1;
-}
-/* Expand towards the noninteractive title, leaving the adjacent badge its own target. */
-#session-bar[data-compact="true"]
-	[data-testid="session-bar-title-menu"]::before {
-	left: calc(50% - 10px);
 }
 /* At 320px, share the spare space between the pill and the viewport edge. */
 #session-bar[data-compact="true"][data-collapsed="false"]
@@ -909,18 +895,11 @@ body:has(dialog:modal) {
 	min-width: 0;
 }
 /* No width floor: in the grid the title track is the only one that yields, so a
-   floor would only overflow into the controls, and it parted short titles from ▾. */
+   floor would only overflow into the controls. */
 #session-bar[data-compact="false"] #session-bar-title {
 	flex: 0 1 auto;
 	font-size: 14.5px;
 	letter-spacing: -0.01em;
-}
-/* The markup's negative block margin stays: the target overhangs instead of
-   making the title line taller than its text. */
-#session-bar[data-compact="false"] [data-testid="session-bar-title-menu"] {
-	min-width: 24px;
-	min-height: 32px;
-	width: 24px;
 }
 #session-bar[data-compact="false"] #session-bar-meta {
 	min-width: auto;
