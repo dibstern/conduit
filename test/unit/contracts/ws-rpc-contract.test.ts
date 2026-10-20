@@ -4,9 +4,12 @@ import { expect } from "vitest";
 import { CLAUDE_DISPLAYABLE_SETTINGS_KEYS } from "../../../src/lib/contracts/claude-settings.js";
 import {
 	GoalDetailsSchema,
+	GoalStuckSchema,
+	GoalSummarySchema,
 	LoadMoreHistoryResponseSchema,
 	PtyInput,
 	QuotaForAccountsResponseSchema,
+	SessionInfoSchema,
 	SubmitInputResponseSchema,
 	WsRpcGroup,
 	WsRpcRequest,
@@ -18,6 +21,103 @@ import { WsRpcGroup as ServerWsRpcGroup } from "../../../src/lib/server/ws-rpc.j
 import { makeRpcWire } from "../../helpers/rpc-wire.js";
 
 describe("browser WebSocket RPC contract", () => {
+	// Failure modes: new fields stripped on the wire, old replies rejected,
+	// invalid stuck counts or blank summaries accepted, and the new RPC unregistered.
+	it.effect(
+		"round-trips session stuck runs, goal sheet metadata and generated summaries",
+		() =>
+			Effect.scoped(
+				Effect.gen(function* () {
+					const summary = {
+						text: "Waiting for credentials",
+						generatedAt: 300,
+						stale: false,
+					};
+					const details = {
+						checks: [],
+						tokensSinceStart: null,
+						summary,
+						summaryEnabled: true,
+					};
+					const session = {
+						id: "s1",
+						accountId: "claude",
+						title: "Goal",
+						status: "idle" as const,
+						projectSlug: "demo",
+						goalStuck: { since: 100, lastAt: 200, count: 2 },
+					};
+					const sessions = {
+						sessions: [session],
+						availability: [],
+						hasMore: false,
+						nextCursor: null,
+					};
+					const wire = makeRpcWire({
+						ListDaemonSessions: async () => sessions,
+						GetGoalDetails: async () => details,
+						GenerateGoalSummary: async () => summary,
+					});
+					const client = yield* wire.connect({
+						url: "ws://contract/rpc",
+						trafficClass: "control",
+					});
+					expect(yield* client("ListDaemonSessions", {})).toEqual(sessions);
+					expect(yield* client("GetGoalDetails", { sessionId: "s1" })).toEqual(
+						details,
+					);
+					expect(
+						yield* client("GenerateGoalSummary", { sessionId: "s1" }),
+					).toEqual(summary);
+				}),
+			),
+	);
+
+	it("accepts absent and null goal sheet metadata and rejects invalid values", () => {
+		const decode = Schema.decodeUnknownSync(GoalDetailsSchema);
+		const legacy = { checks: [], tokensSinceStart: null };
+		expect(decode(legacy)).toEqual(legacy);
+		const empty = {
+			...legacy,
+			summary: null,
+			summaryEnabled: false,
+		};
+		expect(decode(empty)).toEqual(empty);
+		const session = {
+			id: "s1",
+			accountId: null,
+			title: "Goal",
+			status: "idle",
+			projectSlug: "demo",
+		};
+		expect(Schema.decodeUnknownSync(SessionInfoSchema)(session)).toEqual(
+			session,
+		);
+		expect(Schema.is(SessionInfoSchema)({ ...session, goalStuck: null })).toBe(
+			false,
+		);
+		for (const count of [-1, 0, 1, 2.5]) {
+			expect(
+				Schema.is(GoalStuckSchema)({ since: 100, lastAt: 200, count }),
+			).toBe(false);
+		}
+		for (const text of ["", " ", " untrimmed "]) {
+			expect(
+				Schema.is(GoalSummarySchema)({ text, generatedAt: 300, stale: false }),
+			).toBe(false);
+		}
+		expect(
+			Schema.is(GoalSummarySchema)({
+				text: "Progress made",
+				generatedAt: 300,
+				stale: true,
+			}),
+		).toBe(true);
+		expect(
+			Schema.is(WsRpcRequest)({ _tag: "GenerateGoalSummary", sessionId: "" }),
+		).toBe(false);
+	});
+
 	// Failure modes: metadata stripped by encoding, guessed models, and invalid
 	// turn indices crossing the RPC boundary.
 	it.effect(

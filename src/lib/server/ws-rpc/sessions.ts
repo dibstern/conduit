@@ -264,6 +264,28 @@ export const sessionsHandlers = {
 			}
 			return yield* read.getGoalDetails(request.sessionId);
 		}).pipe(Effect.catchAll(mapRpcFailure("GetGoalDetails"))),
+	GenerateGoalSummary: (request) =>
+		Effect.gen(function* () {
+			const read = yield* ReadQueryEffectTag;
+			const session = yield* read.getSession(request.sessionId);
+			if (!session) {
+				return yield* new WsRpcError({
+					message: `Session ${request.sessionId} not found`,
+				});
+			}
+			const account = yield* (yield* AccountDirectory).resolve({
+				_tag: "Id",
+				id: session.provider,
+			});
+			if (!PROVIDER_DRIVERS[account.driver].supportsGoalState) {
+				return yield* new WsRpcError({
+					message: "Goal summaries are available only for Claude sessions",
+				});
+			}
+			return yield* new WsRpcError({
+				message: "Goal summaries are not implemented yet",
+			});
+		}).pipe(Effect.catchAll(mapRpcFailure("GenerateGoalSummary"))),
 	PreWarmSession: (request) =>
 		preWarmSession(request.sessionId).pipe(
 			Effect.catchAll(mapRpcFailure("PreWarmSession")),
@@ -914,6 +936,7 @@ export const sessionsHandlers = {
 } satisfies Pick<
 	WsRpcHandlerMap,
 	| "GetGoalDetails"
+	| "GenerateGoalSummary"
 	| "PreWarmSession"
 	| "PreWarmDraft"
 	| "ResolveSession"

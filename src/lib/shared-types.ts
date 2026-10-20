@@ -300,6 +300,17 @@ export const SessionGitSchema = Schema.Struct({
 	}),
 });
 
+/** A run of consecutive goal checks that report the same blocker, found by code without a model call. */
+export const GoalStuckSchema = Schema.Struct({
+	/** Time of the first check in the run. */
+	since: Schema.Number,
+	/** Time of the latest check in the run. */
+	lastAt: Schema.Number,
+	/** Checks in the run, including the first. */
+	count: Schema.Int.pipe(Schema.greaterThanOrEqualTo(2)),
+});
+export type GoalStuck = typeof GoalStuckSchema.Type;
+
 /** One wire shape for projected sessions and daemon-wide lists. */
 export const SessionInfoSchema = Schema.Struct({
 	id: Schema.String,
@@ -313,6 +324,8 @@ export const SessionInfoSchema = Schema.Struct({
 	messageCount: Schema.optional(Schema.Number),
 	processing: Schema.optional(Schema.Boolean),
 	goalState: Schema.optional(SessionGoalChangedPayloadSchema),
+	/** The current goal's stuck run, derived by code from its checks; absent when the latest checks are not repeating one blocker, and for met or cleared goals. */
+	goalStuck: Schema.optional(GoalStuckSchema),
 	limitRecovery: Schema.optional(Schema.NullOr(LimitRecoverySchema)),
 	resumes: Schema.optional(Schema.Array(SessionResumeSchema)),
 	/** The approval mode this session was last switched to; absent until one is. */
