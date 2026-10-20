@@ -938,13 +938,13 @@
 		{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={variant === "words" ? 15 : 18} surface="box" />{/if}
 		<span class="model-label min-w-0 truncate">{displayName}</span>
 		{#if phone && attention}<span data-testid="composer-more-attention" class="size-[6px] shrink-0 rounded-full bg-status-ask" aria-hidden="true"></span>{/if}
-		{#if contextLabel}<span data-testid="picker-selected-context" class="shrink-0 font-mono text-[11.5px] text-text-muted">{contextLabel}</span>{/if}
+		{#if contextLabel}<span data-testid="picker-selected-context" class="shrink-0 {variant === 'words' ? '' : 'font-mono text-[11.5px] text-text-muted'}">{contextLabel}</span>{/if}
 		{#if variant === "words"}
 			{@const effortWord = parameters ? parameterEffortWord : effort.current}
 			{#if effortWord}<span aria-hidden="true">·</span><span class="shrink-0">{effortWord}</span>{/if}
 			<span aria-hidden="true">·</span>{@render phoneMode?.()}
 		{/if}
-		<span data-testid="model-chip-chevron" class="inline-flex shrink-0 text-text-muted"><Icon name="chevron-down" size={12} /></span>
+		<span data-testid="model-chip-chevron" class="inline-flex shrink-0 {variant === 'words' ? 'text-text-dimmer' : 'text-text-muted'}"><Icon name="chevron-down" size={12} /></span>
 	{/snippet}
 	<Button
 		{...props}
@@ -1016,7 +1016,7 @@
 				aria-controls={pickerOpen ? "model-picker" : undefined}
 				onclick={(event) => togglePicker(event, "account")}
 			><span class="block min-w-0 truncate">{wordAccountName}{switchingTo ? "…" : ""}</span></Button>
-			<span aria-hidden="true" class="text-border-chip">·</span>
+			<span aria-hidden="true" class="text-text-dimmer">·</span>
 		{/if}
 		<Button
 			variant="composer-word"
@@ -1041,23 +1041,23 @@
 			<span class="block min-w-0 truncate">{displayName}</span>
 		</Button>
 		{#if showContextWord}
-			<span aria-hidden="true" class="text-border-chip">·</span>
+			<span aria-hidden="true" class="text-text-dimmer">·</span>
 			<Button
 				variant="composer-word"
 				size="content"
 				data-testid="composer-word-context"
-				class="shrink-0 text-[11.5px] font-normal font-sans"
+				class="shrink-0"
 				ariaLabel={`Context window: ${contextLabel}. Open harness and model options`}
 				aria-haspopup="dialog"
 				aria-expanded={pickerOpen}
 				aria-controls={pickerOpen ? "model-picker" : undefined}
 				onclick={(event) => togglePicker(event, "model")}
 			>
-				<span class="border-b border-dotted border-border-chip">{contextLabel}</span>
+				<span>{contextLabel}</span>
 			</Button>
 		{/if}
 		{#if effort.options.length > 0 || (sessionState.currentId && effort.current)}
-			<span aria-hidden="true" class="text-border-chip">·</span>
+			<span aria-hidden="true" class="text-text-dimmer">·</span>
 		{/if}
 	{:else if !phone || !phoneControls}
 		{@render modelTrigger({ props: {} })}
@@ -1105,18 +1105,18 @@
 		<ModelVariant bind:this={variantRef} onOpen={closePicker} variant={variant === "icons" ? "control" : variant} wordLabel={parameters ? parameterEffortWord : undefined} />
 	{/if}
 	{#if variant === "words" && !phone && selectedTraits?.composerModeControl === "agent"}
-		<span aria-hidden="true" class="text-border-chip">·</span>
+		<span aria-hidden="true" class="text-text-dimmer">·</span>
 		<Button
 			variant="composer-word"
 			size="content"
 			data-testid="composer-word-agent"
-			class="shrink-0 text-[11.5px] font-normal font-sans"
+			class="shrink-0"
 			ariaLabel={`Agent: ${activeAgent ? agentLabel(activeAgent) : "Default"}. Open agent options`}
 			aria-haspopup="dialog"
 			aria-expanded={pickerOpen}
 			aria-controls={pickerOpen ? "model-picker" : undefined}
 			onclick={(event) => togglePicker(event, "agent")}
-		><span class="border-b border-dotted border-border-chip">{activeAgent ? agentLabel(activeAgent).toLowerCase() : "default"}</span></Button>
+		><span>{activeAgent ? agentLabel(activeAgent).toLowerCase() : "default"}</span></Button>
 	{/if}
 
 	{#if pickerOpen}

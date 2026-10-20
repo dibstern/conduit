@@ -196,6 +196,41 @@ export const DropdownOpen: Story = {
 				claudeOnly,
 			);
 		}
+		const colours = ranked.map(([mode]) => {
+			const icon = within(menu)
+				.getByTestId(`permission-mode-option-${mode}`)
+				.querySelector("svg");
+			if (!icon) throw new Error(`Missing permission icon for ${mode}`);
+			return getComputedStyle(icon).color;
+		});
+		await expect(new Set(colours).size).toBe(6);
+		const selected = within(menu).getByTestId("permission-mode-option-ask");
+		await expect(getComputedStyle(menu).paddingTop).toBe("6px");
+		await expect(getComputedStyle(menu).borderRadius).toBe("16px");
+		await expect(getComputedStyle(selected).borderRadius).toBe("10px");
+		const probe = document.createElement("span");
+		probe.style.cssText =
+			"color:var(--color-text);background:color-mix(in oklab, var(--color-accent) 14%, transparent)";
+		menu.append(probe);
+		await expect(getComputedStyle(selected).color).toBe(
+			getComputedStyle(probe).color,
+		);
+		await expect(getComputedStyle(selected).backgroundColor).toBe(
+			getComputedStyle(probe).backgroundColor,
+		);
+		probe.remove();
+		const fullOutline = within(menu)
+			.getByTestId("permission-mode-option-full")
+			.querySelector("svg path");
+		if (!fullOutline) throw new Error("Full access shield is missing");
+		await expect(getComputedStyle(fullOutline).fill).toBe("none");
+		const plan = within(menu)
+			.getByTestId("permission-mode-option-plan")
+			.querySelector("svg path");
+		await expect(plan).toHaveAttribute(
+			"d",
+			"M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20",
+		);
 	},
 };
 

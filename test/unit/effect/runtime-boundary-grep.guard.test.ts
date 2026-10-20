@@ -123,9 +123,15 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 	{
 		path: "src/lib/frontend/components/input/InputArea.stories.ts",
 		snippetPattern:
-			/Claude driver traits are missing|Composer (story|stage) session is missing|Send is missing|Words summary focus target is missing|Waiting tray actions are missing/,
+			/Claude driver traits are missing|Composer (story|stage) session is missing|Composer controls? (is|are) missing|Words label is missing|Send is missing|Words summary focus target is missing|Waiting tray actions are missing/,
 		reason:
 			"storybook fixture and play() guards that narrow story state and the send query, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/input/PermissionModeSelector.stories.ts",
+		snippetPattern: /Missing permission icon|Full access shield is missing/,
+		reason:
+			"storybook play() guards that narrow the permission icon queries, not executable production code",
 	},
 	{
 		path: "src/lib/frontend/components/layout/SessionBar.stories.ts",

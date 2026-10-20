@@ -38,7 +38,7 @@
 	import PastePreview from "../chat/PastePreview.svelte";
 	import PendingInputTray from "./PendingInputTray.svelte";
 	import { openSideThreads } from "../session/side-threads.svelte.js";
-	import { currentChat, draftSend, isProcessing, registerInputDraft, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
+	import { currentChat, draftSend, getSessionPhase, isProcessing, registerInputDraft, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
 	import { send, stop, turn as readTurn } from "../../stores/turn.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { approvals } from "../../stores/composer-settings.svelte.js";
@@ -52,6 +52,7 @@
 		getAvailableInstances,
 		getEffectiveInstanceId,
 		getDraftPick,
+		getSessionPick,
 		getModelDisplayName,
 		toProviderCommands,
 	} from "../../stores/discovery.svelte.js";
@@ -185,6 +186,41 @@
 	});
 	const turnControl = $derived(readTurn());
 	const working = $derived(turnControl.working);
+	const turnSelections = $state<Record<string, { selection: string; agent: string | null | undefined }>>({});
+	const composerSelection = $derived(JSON.stringify([
+		discoveryState.currentProviderId,
+		discoveryState.currentModelId,
+		discoveryState.currentContextWindow,
+		discoveryState.currentVariant,
+		discoveryState.permissionMode,
+	]));
+	$effect.pre(() => {
+		const id = sessionState.currentId;
+		const running = working;
+		const selection = composerSelection;
+		const loaded = id !== null && getSessionPick(id) !== undefined;
+		const agentLoaded = discoveryState.agentProviderScope !== null;
+		const agent = discoveryState.activeAgentId;
+		const ended = untrack(() => Object.keys(turnSelections)).filter((saved) => saved !== id && getSessionPhase(saved) === "idle");
+		untrack(() => {
+			for (const saved of ended) delete turnSelections[saved];
+			if (!id) return;
+			if (!running) delete turnSelections[id];
+			else if (loaded) {
+				// Model and agent catalogues arrive independently. Their first read
+				// establishes the baseline; hydration is not a selection change.
+				const start = turnSelections[id];
+				if (!start) turnSelections[id] = { selection, agent: agentLoaded ? agent : undefined };
+				else if (start.agent === undefined && agentLoaded) start.agent = agent;
+			}
+		});
+	});
+	const nextTurnChanged = $derived(working && sessionState.currentId !== null &&
+		getSessionPick(sessionState.currentId) !== undefined &&
+		turnSelections[sessionState.currentId] !== undefined &&
+		(turnSelections[sessionState.currentId]?.selection !== composerSelection ||
+			(turnSelections[sessionState.currentId]?.agent !== undefined && discoveryState.agentProviderScope !== null &&
+				turnSelections[sessionState.currentId]?.agent !== discoveryState.activeAgentId)));
 	$effect(() => {
 		requestSessionPreWarm(readOnlySubagent ? null : sessionState.currentId);
 		return () => requestSessionPreWarm(null);
@@ -1259,7 +1295,7 @@
 						     longer size the row: pin the row to the cap and let the textarea
 						     scroll itself. Safe only because the mirror is blank in that mode,
 						     so there is still just one scroll position in play. -->
-						<div class="relative {plainText ? 'h-[120px]' : ''}" style:min-height={`max(${composerPreferences.controls === "words" ? 24 : sessionViewState.compact ? 34 : 36}px, var(--composer-placeholder-height, 0px))`}>
+						<div class="relative {plainText ? 'h-[120px]' : ''}" style:min-height="max(24px, var(--composer-placeholder-height, 0px))">
 							<SkillHighlightBackdrop
 								text={plainText ? "" : composerDraft.text}
 								onremove={referenceEditor.remove}
@@ -1295,7 +1331,7 @@
 								{placeholder}
 								autocomplete="off"
 								enterkeyhint={isMobile() ? "enter" : "send"}
-								class="composer-text-metrics absolute inset-0 z-10 caret-[var(--color-text)] resize-none placeholder:text-text-muted {plainText
+								class="composer-text-metrics absolute inset-0 z-10 caret-[var(--color-text)] resize-none placeholder:text-text-dimmer {plainText
 									? 'overflow-y-auto'
 									: 'overflow-hidden'} {composing || plainText
 									? 'text-text'
@@ -1467,7 +1503,7 @@
 					{:else if isGoalCommand}
 						<Button variant="goal" size="composer-action" icon="target" iconSize={16} id="send" data-goal="true" data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel="Set goal" onclick={handleSendClick} touchTarget class="send-btn">Set goal</Button>
 					{:else}
-						<Button variant="inverse" size="composer-action" iconOnly icon="arrow-up" iconSize={17} id="send" data-goal="false" data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel={sendButtonLabel} onclick={handleSendClick} touchTarget class="send-btn" />
+						<Button variant="inverse" size="composer-action" disabledStyle="undimmed" iconOnly icon="arrow-up" iconSize={17} id="send" data-goal="false" data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel={sendButtonLabel} onclick={handleSendClick} touchTarget class="send-btn" />
 					{/if}
 					{/if}
 					{/if}
@@ -1482,7 +1518,7 @@
 		{#if composerPreferences.controls === "words"}
 			<div
 				data-testid="composer-words-row"
-				class="flex min-h-[36px] items-center justify-between gap-[12px] px-[14px] pt-[9px] text-[12px] text-text-muted whitespace-nowrap"
+				class="flex items-center justify-between gap-[12px] px-[14px] pt-[9px] text-[12px] text-text-dimmer whitespace-nowrap"
 			>
 				{#if settingsPending}
 					{@render settingsStatus()}
@@ -1492,7 +1528,7 @@
 						{#snippet phoneMode()}<PermissionModeSelector variant="summary" />{/snippet}
 					</InstanceModelPicker>
 					{#if sessionViewState.composerTier !== "phone" && (composerTraits?.composerModeControl ?? "permission-mode") === "permission-mode"}
-						<span aria-hidden="true" class="text-border-chip">·</span>
+						<span aria-hidden="true" class="text-text-dimmer">·</span>
 						<PermissionModeSelector variant="words" />
 					{/if}
 				</div>
@@ -1519,7 +1555,7 @@
 							{/key}
 						{/if}
 						{#if currentChat().contextPercent > 0}
-							{#if composerDirectory && sessionViewState.composerTier !== "phone"}<span aria-hidden="true" class="text-border-chip">·</span>{/if}
+							{#if composerDirectory && sessionViewState.composerTier !== "phone"}<span aria-hidden="true" class="text-text-dimmer">·</span>{/if}
 							<span data-testid="composer-word-context-usage" data-warning={contextWarning ? "true" : undefined} class:text-status-amber={contextWarning} class="shrink-0">{Math.round(currentChat().contextPercent)}%</span>
 						{/if}
 					{/if}
@@ -1527,8 +1563,8 @@
 				{/if}
 			</div>
 		{/if}
-		{#if working}
-			<p data-testid="composer-next-turn-note" class="px-[16px] pt-[8px] text-[12px] text-text-muted">Model and mode changes apply from the <span class="font-medium text-text-secondary">next turn</span>.</p>
+		{#if nextTurnChanged}
+			<p data-testid="composer-next-turn-note" class="px-[16px] pt-[8px] text-[12px] text-text-dimmer">Model and mode changes apply from the <span class="font-medium text-text-secondary">next turn</span>.</p>
 		{/if}
 		{#if composerNotice}
 			<p data-testid="composer-provider-notice" class="px-[6px] pt-2 text-[11px] text-text-muted">{composerNotice}</p>

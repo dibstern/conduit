@@ -102,7 +102,7 @@
 			if (!textarea.value && textarea.placeholder) {
 				probe.style.width = `${Math.max(0, textarea.clientWidth - horizontalPadding)}px`;
 				probe.style.whiteSpace = "pre-wrap";
-				element.style.setProperty("--composer-placeholder-height", `${probe.scrollHeight + verticalPadding}px`);
+				element.style.setProperty("--composer-placeholder-height", `${probe.getBoundingClientRect().height + verticalPadding}px`);
 			} else {
 				element.style.removeProperty("--composer-placeholder-height");
 			}
@@ -157,6 +157,10 @@
 		min-width: 0;
 	}
 
+	[data-rows="1"] {
+		align-items: center;
+	}
+
 	[data-slot="field"] {
 		min-height: var(--composer-placeholder-height, 0px);
 	}
@@ -197,7 +201,7 @@
 		grid-template-columns: auto minmax(0, 1fr) auto;
 		align-items: center;
 		column-gap: 2px;
-		row-gap: 6px;
+		row-gap: 0;
 	}
 
 	.split-footer > [data-slot="controls"] {
@@ -206,6 +210,7 @@
 	}
 
 	.split-footer > [data-slot="send"] {
+		margin-left: 6px;
 		justify-content: flex-end;
 		gap: 2px;
 	}
