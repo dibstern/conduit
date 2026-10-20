@@ -1239,7 +1239,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			undefined,
 			undefined,
 			project.slug,
-			undefined,
+			false,
 			this.rpcDiagnostics,
 		);
 		try {
