@@ -124,15 +124,14 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"the Final badge is the same icon-only Ask shield at every width (aoqb.6); normalisation, the phone default and each breakpoint are asserted in play()",
 	"input-permissionmodeselector--light | input-permissionmodeselector--phone-default-light":
 		"the light pair of Default and PhoneDefault, identical for the same reason",
-	"layout-sessionbar--goal-cleared | layout-sessionbar--phone-claude-header | layout-sessionbar--phone-no-checkout | layout-sessionbar--phone-open-code-header":
-		"a cleared goal renders no subtitle and the Final phone header shows no checkout, account pill or instance badge for either harness, so these four end on the plain expanded bar; the header stories assert those absences in play()",
+	"layout-sessionbar--goal-cleared | layout-sessionbar--phone-no-checkout":
+		"a cleared goal renders no subtitle, so both end on the plain expanded phone bar; PhoneNoCheckout asserts the missing checkout in play()",
+	"layout-sessionbar--phone-busy-session | layout-sessionbar--phone-top":
+		"both use the populated header fixture; BusySession asserts no checkout or account identity, while PhoneTop checks touch-target ownership and control spacing",
+	"layout-sessionbar--phone-busy-session-narrowest | layout-sessionbar--phone-top-narrowest":
+		"the same identity and touch-target assertions at the minimum 320px phone width",
 	"layout-sessionbar--auto-settled-collapsed | layout-sessionbar--collapsed":
 		"the island hides state chips; AutoSettledCollapsed expands to assert the automatic state, then returns to the same island",
-
-	// Verified legitimate (conduit-test-dc8k.1). The A1 header is the same for
-	// every harness and has no checkout, so these stories now meet in one frame.
-	"layout-sessionbar--desktop-claude-header | layout-sessionbar--desktop-open-code-header":
-		"the A1 header is the same for Claude and OpenCode; each story asserts no account pill or instance badge in play()",
 
 	// Verified legitimate (conduit-test-dc8k.1). The composer checkout control
 	// looks the same at every tier; the phone tier only turns its menu into a
