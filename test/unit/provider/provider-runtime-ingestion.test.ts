@@ -371,12 +371,15 @@ describe("ProviderRuntimeIngestion", () => {
 
 		expect(result._tag).toBe("Failure");
 		expect(harness.projectBatch).toHaveBeenCalledTimes(1);
-		expect(harness.projectBatch).toHaveBeenCalledWith([
-			expect.objectContaining({
-				eventId: "single-event-projection-failure",
-				sequence: 1,
-			}),
-		]);
+		expect(harness.projectBatch).toHaveBeenCalledWith(
+			[
+				expect.objectContaining({
+					eventId: "single-event-projection-failure",
+					sequence: 1,
+				}),
+			],
+			expect.any(Function),
+		);
 		expect(harness.projectEvent).not.toHaveBeenCalled();
 		expect(busPublish).not.toHaveBeenCalled();
 		expect(relayPublish).not.toHaveBeenCalled();
