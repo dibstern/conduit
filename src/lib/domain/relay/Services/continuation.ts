@@ -209,15 +209,12 @@ export const makeContinuation = Effect.gen(function* () {
 		recovery?.scheduledAt === expected.scheduledAt &&
 		recovery?.instanceId === expected.instanceId &&
 		recovery?.cutOffMessageId === expected.cutOffMessageId;
-	const cancelledEvent = (sessionId: string, releaseQueue = false) =>
+	const cancelledEvent = (sessionId: string) =>
 		canonicalEvent(
 			"session.resume_cancelled",
 			sessionId,
 			{},
-			{
-				provider: "claude",
-				...(releaseQueue ? { metadata: { source: "inbox-reset" } } : {}),
-			},
+			{ provider: "claude" },
 		);
 	const cancelContinuation = (sessionId: string, expected?: LimitRecovery) =>
 		commit.write((project) =>
@@ -232,14 +229,7 @@ export const makeContinuation = Effect.gen(function* () {
 					(expected && !sameSchedule(recovery, expected))
 				)
 					return;
-				yield* project(
-					yield* store.appendBatch([
-						cancelledEvent(
-							sessionId,
-							expected !== undefined && expected.cutOffMessageId === undefined,
-						),
-					]),
-				);
+				yield* project(yield* store.appendBatch([cancelledEvent(sessionId)]));
 			}),
 		);
 	const stillCutOff = (sessionId: string, recovery: LimitRecovery) =>
@@ -360,7 +350,12 @@ export const makeContinuation = Effect.gen(function* () {
 						? null
 						: decodeRecovery(initial.limit_recovery);
 				if (!sameSchedule(recovery, due.recovery)) return;
-				if (!recovery || !(yield* stillCutOff(sessionId, recovery)))
+				if (
+					!recovery ||
+					recovery.continued ||
+					(recovery.cutOffMessageId !== undefined &&
+						!(yield* stillCutOff(sessionId, recovery)))
+				)
 					return yield* cancelContinuation(sessionId, due.recovery);
 			}
 			yield* Effect.acquireUseRelease(
@@ -372,12 +367,13 @@ export const makeContinuation = Effect.gen(function* () {
 				() =>
 					Effect.uninterruptibleMask((restore) =>
 						Effect.gen(function* () {
-							// Future quota cannot be checked now. Due and immediate resumes
-							// share the fresh probe and the recheck inside the commit.
+							// Future schedules and held-only resets need no Usage check.
+							// Cut-off and user Resumes check Usage before the commit.
 							// Shutdown may interrupt the probe, but an accepted resume must
 							// reach the existing turn dispatcher before this fiber stops.
 							const decision =
-								options.at === undefined
+								options.at === undefined &&
+								(!due || due.recovery.cutOffMessageId !== undefined)
 									? yield* restore(
 											Effect.flatMap(Usage, (usage) =>
 												usage
@@ -448,7 +444,9 @@ export const makeContinuation = Effect.gen(function* () {
 										if (!sameSchedule(recovery, due.recovery)) return;
 										if (
 											!recovery ||
-											!(yield* stillCutOff(sessionId, recovery))
+											recovery.continued ||
+											(recovery.cutOffMessageId !== undefined &&
+												!(yield* stillCutOff(sessionId, recovery)))
 										) {
 											yield* project(
 												yield* store.appendBatch([cancelledEvent(sessionId)]),
@@ -487,7 +485,7 @@ export const makeContinuation = Effect.gen(function* () {
 										return;
 									}
 									// Dismiss or a reply may have closed it while the probe ran.
-									if (!switched && !recovery?.cutOffMessageId) return;
+									if (!switched && (!recovery || recovery.continued)) return;
 									if (
 										due &&
 										recovery &&
@@ -646,7 +644,8 @@ export const makeContinuation = Effect.gen(function* () {
 						AccountUnroutable: cancel,
 						DriverMismatch: cancel,
 						StaleSwitch: cancel,
-						SessionBusy: cancel,
+						// A Held Message can wait for the next sweep without losing its Resume.
+						SessionBusy: recovery.cutOffMessageId ? cancel : () => Effect.void,
 					}),
 					Effect.catch((error) =>
 						Effect.logError("Scheduled continuation failed", row.id, error),

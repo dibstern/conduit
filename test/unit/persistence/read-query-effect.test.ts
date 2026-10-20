@@ -13,10 +13,12 @@ import {
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { restoreClaudeQuestionsFromStore } from "../../../src/lib/domain/relay/Services/restore-claude-questions.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import {
 	EventStoreEffectTag,
 	makeEventStoreEffect,
 } from "../../../src/lib/persistence/effect/event-store-effect.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
 import {
 	deriveSessionSnooze,
@@ -28,6 +30,7 @@ import {
 	refreshSidebar,
 	rerootSession,
 } from "../../../src/lib/persistence/effect/sidebar-projection.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
 import { sessionFamilyWindowQuery } from "../../../src/lib/persistence/session-family-query.js";
 import { pendingClaudeQuestionToolsQuery } from "../../../src/lib/persistence/startup-restore-queries.js";
@@ -1742,4 +1745,277 @@ describe("ReadQueryEffect session list reads", () => {
 			).toBeUndefined();
 		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
+});
+
+// A cancelled Resume must keep Held Messages paused. A recorded Resume lifts
+// an earlier Stop or failed handoff, while a later Stop still wins.
+describe("ReadQueryEffect.readInboxState", () => {
+	for (const rateLimitType of ["five_hour", "usage"] as const) {
+		it.effect(
+			`unpauses a dismissed ${rateLimitType} cut-off until a new Resume is scheduled`,
+			() =>
+				Effect.gen(function* () {
+					const commit = yield* makeCommitAndSignal;
+					const read = yield* ReadQueryEffectTag;
+					yield* commit([
+						canonicalEvent("session.created", "dismissed", {
+							sessionId: "dismissed",
+							title: "Dismissed",
+							provider: "claude",
+						}),
+						canonicalEvent("session.usage_limited", "dismissed", {
+							instanceId: "claude",
+							rateLimitType,
+							cutOffMessageId: "cut-off",
+							resetsAt: 10,
+						}),
+						canonicalEvent("input.admitted", "dismissed", {
+							sessionId: "dismissed",
+							inputId: "held-input",
+							delivery: "queue",
+							request: { text: "wait" },
+						}),
+						canonicalEvent("session.resume_scheduled", "dismissed", {
+							instanceId: "claude",
+							at: 10,
+							by: "user",
+						}),
+					]);
+					expect(yield* read.readInboxState("dismissed")).toMatchObject({
+						paused: true,
+					});
+					yield* commit([
+						canonicalEvent("session.cut_off_dismissed", "dismissed", {
+							cutOffMessageId: "cut-off",
+						}),
+						canonicalEvent("session.resume_cancelled", "dismissed", {}),
+					]);
+					expect(yield* read.readInboxState("dismissed")).toMatchObject({
+						paused: false,
+					});
+					yield* commit([
+						canonicalEvent("session.resume_scheduled", "dismissed", {
+							instanceId: "claude",
+							at: 20,
+							by: "user",
+						}),
+						canonicalEvent("session.resume_cancelled", "dismissed", {}),
+					]);
+					expect(yield* read.readInboxState("dismissed")).toMatchObject({
+						paused: true,
+					});
+				}).pipe(
+					Effect.provide(
+						makePersistenceEffectLayer(":memory:", "test-project"),
+					),
+				),
+		);
+	}
+
+	it.effect(
+		"keeps a held-only queue paused after cancellation until a Resume",
+		() =>
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				const read = yield* ReadQueryEffectTag;
+				yield* commit([
+					canonicalEvent("session.created", "held", {
+						sessionId: "held",
+						title: "Held",
+						provider: "claude",
+					}),
+					canonicalEvent("input.admitted", "held", {
+						sessionId: "held",
+						inputId: "held-input",
+						delivery: "queue",
+						request: { text: "wait" },
+					}),
+					canonicalEvent("session.resume_scheduled", "held", {
+						instanceId: "claude",
+						at: 10,
+						by: "user",
+					}),
+				]);
+				expect(yield* read.readInboxState("held")).toMatchObject({
+					paused: true,
+				});
+				yield* commit([canonicalEvent("session.resume_cancelled", "held", {})]);
+				expect(yield* read.readInboxState("held")).toMatchObject({
+					paused: true,
+				});
+				yield* commit([
+					canonicalEvent("session.resumed", "held", {
+						instanceId: "claude",
+						reason: "user",
+					}),
+				]);
+				expect(yield* read.readInboxState("held")).toMatchObject({
+					paused: false,
+				});
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
+	);
+
+	for (const resume of ["canonical", "legacy"] as const) {
+		it.effect(
+			`${resume} Resume lifts an earlier Stop but preserves a later Stop`,
+			() =>
+				Effect.gen(function* () {
+					const commit = yield* makeCommitAndSignal;
+					const read = yield* ReadQueryEffectTag;
+					yield* commit([
+						canonicalEvent(
+							"session.created",
+							"stopped",
+							{
+								sessionId: "stopped",
+								title: "Stopped",
+								provider: "claude",
+							},
+							{ createdAt: 1 },
+						),
+						canonicalEvent(
+							"message.created",
+							"stopped",
+							{
+								sessionId: "stopped",
+								messageId: "user",
+								role: "user",
+							},
+							{ createdAt: 2 },
+						),
+						canonicalEvent(
+							"message.created",
+							"stopped",
+							{
+								sessionId: "stopped",
+								messageId: "reply",
+								parentID: "user",
+								role: "assistant",
+							},
+							{ createdAt: 3 },
+						),
+						canonicalEvent(
+							"turn.interrupted",
+							"stopped",
+							{ messageId: "reply" },
+							{ createdAt: 4 },
+						),
+						canonicalEvent(
+							"input.admitted",
+							"stopped",
+							{
+								sessionId: "stopped",
+								inputId: "held-input",
+								delivery: "queue",
+								request: { text: "wait" },
+							},
+							{ createdAt: 5 },
+						),
+						canonicalEvent(
+							"session.resume_scheduled",
+							"stopped",
+							{ instanceId: "claude", at: 10, by: "user" },
+							{ createdAt: 6 },
+						),
+					]);
+					expect(yield* read.readInboxState("stopped")).toMatchObject({
+						paused: true,
+					});
+					yield* commit([
+						resume === "canonical"
+							? canonicalEvent(
+									"session.resumed",
+									"stopped",
+									{ instanceId: "claude", reason: "reset" },
+									{ createdAt: 7 },
+								)
+							: canonicalEvent(
+									"session.resume_cancelled",
+									"stopped",
+									{},
+									{ createdAt: 7, metadata: { source: "inbox-reset" } },
+								),
+					]);
+					expect(yield* read.readInboxState("stopped")).toMatchObject({
+						paused: false,
+					});
+					yield* commit([
+						canonicalEvent(
+							"turn.interrupted",
+							"stopped",
+							{ messageId: "reply" },
+							{ createdAt: 8 },
+						),
+					]);
+					expect(yield* read.readInboxState("stopped")).toMatchObject({
+						paused: true,
+					});
+				}).pipe(
+					Effect.provide(
+						makePersistenceEffectLayer(":memory:", "test-project"),
+					),
+				),
+		);
+
+		it.effect(`${resume} Resume lifts a failed handoff pause`, () =>
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				const read = yield* ReadQueryEffectTag;
+				const store = yield* EventStoreEffectTag;
+				yield* commit([
+					canonicalEvent("session.created", "failed", {
+						sessionId: "failed",
+						title: "Failed",
+						provider: "claude",
+					}),
+					canonicalEvent("input.admitted", "failed", {
+						sessionId: "failed",
+						inputId: "input",
+						delivery: "queue",
+						request: { text: "wait" },
+					}),
+					canonicalEvent("input.sent", "failed", {
+						sessionId: "failed",
+						inputId: "input",
+						steer: true,
+					}),
+				]);
+				const sent = (yield* store.readAllBySession("failed")).find(
+					(event) => event.type === "input.sent",
+				);
+				if (!sent) throw new Error("expected sent input");
+				yield* commit([
+					canonicalEvent("input.requeued", "failed", {
+						sessionId: "failed",
+						inputId: "input",
+						sentSequence: sent.sequence,
+						reason: "failed",
+					}),
+				]);
+				expect(yield* read.readInboxState("failed")).toMatchObject({
+					paused: true,
+				});
+				yield* commit([
+					resume === "canonical"
+						? canonicalEvent("session.resumed", "failed", {
+								instanceId: "claude",
+								reason: "user",
+							})
+						: canonicalEvent(
+								"session.resume_cancelled",
+								"failed",
+								{},
+								{ metadata: { source: "inbox-reset" } },
+							),
+				]);
+				expect(yield* read.readInboxState("failed")).toMatchObject({
+					paused: false,
+				});
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
+		);
+	}
 });
