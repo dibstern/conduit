@@ -21,7 +21,7 @@ import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-i
 import {
 	type ProjectSettingsTag,
 	publishProjectSetting,
-	refreshHarnessDefaults,
+	refreshModelSettings,
 } from "../domain/relay/Services/project-settings.js";
 import { OpenCodeModelServiceTag } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
@@ -866,7 +866,7 @@ export const wireSSEConsumerEffect = (
 								if (models._tag === "Some")
 									yield* models.value.listProviders().pipe(Effect.ignore);
 							}
-							yield* refreshHarnessDefaults;
+							yield* refreshModelSettings;
 							if (managedStopped)
 								yield* deps.opencodeRuntimeIngress?.onInstanceStopped?.(
 									deps.providerInstanceId,

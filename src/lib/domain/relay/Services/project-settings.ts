@@ -24,6 +24,7 @@ import {
 } from "effect";
 import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import { DEFAULT_TERMINAL_KEYS } from "../../../contracts/terminal-keys.js";
+import type { TitleGenerationState } from "../../../contracts/title-generation.js";
 import type {
 	GlobalProjectSetting,
 	GlobalSettingTag,
@@ -31,6 +32,7 @@ import type {
 	ProjectSetting,
 	ProjectSettingsEnvelope,
 } from "../../../contracts/ws-rpc.js";
+import { resolveTitleGeneration } from "../../../provider/title-generation.js";
 import {
 	catalogFromProviderList,
 	type Harness,
@@ -230,13 +232,42 @@ const readHarnessDefaults = Effect.gen(function* () {
 	} as const;
 });
 
-/** Catalog-dependent state is always recomputed on the receiving relay. */
-export const refreshHarnessDefaults: Effect.Effect<void> = Effect.gen(
+export const readTitleGenerationState = Effect.gen(function* () {
+	const config = yield* ConfigTag;
+	const selection = loadRelaySettings(config.configDir).titleGeneration ?? null;
+	const directory = yield* Effect.serviceOption(AccountDirectory);
+	if (Option.isNone(directory))
+		return { selection, status: "unverified" } satisfies TitleGenerationState;
+	const accounts = yield* directory.value.snapshot;
+	const facts = yield* Ref.get((yield* ProjectSettingsTag).live);
+	const { status, problem } = resolveTitleGeneration(
+		selection,
+		accounts,
+		(account) => {
+			const catalog = facts[`providerModels:${account.id}`];
+			return catalog ? catalogFromProviderList(catalog.providers) : undefined;
+		},
+	);
+	return {
+		selection,
+		status,
+		...(problem === undefined ? {} : { problem }),
+	} satisfies TitleGenerationState;
+});
+
+/** Catalog-dependent settings are recomputed on the receiving relay. */
+export const refreshModelSettings: Effect.Effect<void> = Effect.gen(
 	function* () {
 		const config = yield* Effect.serviceOption(ConfigTag);
 		const projectSettings = yield* Effect.serviceOption(ProjectSettingsTag);
 		if (config._tag === "None" || projectSettings._tag === "None") return;
-		yield* Effect.flatMap(readHarnessDefaults, publishProjectSetting).pipe(
+		yield* Effect.gen(function* () {
+			yield* publishProjectSetting(yield* readHarnessDefaults);
+			yield* publishProjectSetting({
+				_tag: "titleGeneration",
+				...(yield* readTitleGenerationState),
+			});
+		}).pipe(
 			Effect.provideService(ConfigTag, config.value),
 			Effect.provideService(ProjectSettingsTag, projectSettings.value),
 		);
@@ -246,6 +277,7 @@ export const refreshHarnessDefaults: Effect.Effect<void> = Effect.gen(
 const globalSettingRows = (
 	settings: RelaySettings,
 	defaults: OverridesState,
+	titleGeneration: TitleGenerationState,
 ) => {
 	const defaultModel = defaults.defaultModel ?? defaults.nativeDefaultModel;
 	return {
@@ -278,7 +310,7 @@ const globalSettingRows = (
 		},
 		titleGeneration: {
 			_tag: "titleGeneration",
-			selection: settings.titleGeneration ?? null,
+			...titleGeneration,
 		},
 		claudeSettings: {
 			_tag: "claudeSettings",
@@ -290,6 +322,7 @@ const globalSettingRows = (
 /** Reload and commit together so a delayed startup cannot restore old defaults. */
 export const refreshGlobalDefaults = Effect.gen(function* () {
 	const config = yield* ConfigTag;
+	const titleGeneration = yield* readTitleGenerationState;
 	return yield* Ref.modify(yield* OverridesStateTag, (state) => {
 		const settings = loadRelaySettings(config.configDir);
 		const defaultModel = parseDefaultModel(settings.defaultModel);
@@ -302,7 +335,7 @@ export const refreshGlobalDefaults = Effect.gen(function* () {
 					: "",
 			defaultPermissionMode: settings.defaultPermissionMode ?? "ask",
 		};
-		return [globalSettingRows(settings, next), next];
+		return [globalSettingRows(settings, next, titleGeneration), next];
 	});
 });
 
@@ -315,7 +348,7 @@ export const syncGlobalSetting = (tag: GlobalSettingTag) =>
 				const rows = yield* refreshGlobalDefaults;
 				if (tag !== "harnessDefaults") yield* publishProjectSetting(rows[tag]);
 				if (tag === "harnessDefaults" || tag === "defaultModel")
-					yield* refreshHarnessDefaults;
+					yield* refreshModelSettings;
 			}),
 		);
 	});
@@ -331,9 +364,14 @@ const readProjectSettings = Effect.gen(function* () {
 	const config = yield* ConfigTag;
 	const defaults = yield* Ref.get(yield* OverridesStateTag);
 	const harnessDefaults = yield* readHarnessDefaults;
+	const titleGeneration = yield* readTitleGenerationState;
 	return [
 		...Object.values(
-			globalSettingRows(loadRelaySettings(config.configDir), defaults),
+			globalSettingRows(
+				loadRelaySettings(config.configDir),
+				defaults,
+				titleGeneration,
+			),
 		),
 		...Object.values(yield* Ref.get((yield* ProjectSettingsTag).live)).filter(
 			(fact) => fact._tag !== "harnessDefaults",

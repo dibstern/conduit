@@ -83,7 +83,10 @@ import {
 	TextSurfacedPayloadSchema,
 } from "./stored-event.js";
 import { TerminalKeysSetting } from "./terminal-keys.js";
-import { TitleGenerationSelectionSchema } from "./title-generation.js";
+import {
+	TitleGenerationSelectionSchema,
+	TitleGenerationStateSchema,
+} from "./title-generation.js";
 import { ToolCallId, ToolDetail, ToolInput, ToolText } from "./tool-wire.js";
 import {
 	RecapScopeSchema,
@@ -574,7 +577,7 @@ export type SetHarnessDefaultResponse =
 
 export const TitleGenerationResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
-	selection: Schema.NullOr(TitleGenerationSelectionSchema),
+	...TitleGenerationStateSchema.fields,
 });
 export type TitleGenerationResponse = typeof TitleGenerationResponseSchema.Type;
 
@@ -3594,7 +3597,7 @@ export const ProjectSettingSchema = Schema.Union([
 		terminalKeys: TerminalKeysSetting,
 	}),
 	Schema.TaggedStruct("titleGeneration", {
-		selection: Schema.NullOr(TitleGenerationSelectionSchema),
+		...TitleGenerationStateSchema.fields,
 	}),
 	Schema.TaggedStruct("claudeSettings", {
 		overrides: ClaudeSettingsOverridesSchema,

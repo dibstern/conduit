@@ -166,16 +166,16 @@ export const modelsHandlers = {
 		),
 	GetTitleGeneration: (request) =>
 		getTitleGenerationForRelay.pipe(
-			Effect.map((selection) => ({
+			Effect.map((state) => ({
 				projectSlug: request.projectSlug,
-				selection,
+				...state,
 			})),
 		),
 	SetTitleGeneration: (request) =>
 		setTitleGenerationForRelay(request.selection).pipe(
-			Effect.map((selection) => ({
+			Effect.map((state) => ({
 				projectSlug: request.projectSlug,
-				selection,
+				...state,
 			})),
 			Effect.catch((error) =>
 				Effect.fail(new WsRpcError({ message: error.message })),

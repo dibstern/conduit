@@ -27,7 +27,8 @@ import {
 	ProjectSettingsTag,
 	publishGlobalProjectSetting,
 	publishProjectSetting,
-	refreshHarnessDefaults,
+	readTitleGenerationState,
+	refreshModelSettings,
 } from "../domain/relay/Services/project-settings.js";
 import {
 	ConfigTag,
@@ -339,7 +340,7 @@ export const getModelsResponse = (
 			);
 			if (openCodeProviderResult._tag === "Success") {
 				nativeDefaultModel = openCodeProviderResult.success.nativeDefaultModel;
-				yield* refreshHarnessDefaults;
+				yield* refreshModelSettings;
 				const nativeDefault = parseDefaultModel(
 					openCodeProviderResult.success.nativeDefaultModel,
 				);
@@ -793,10 +794,7 @@ export const setHarnessDefaultForRelay = (input: {
 		return { pick: { ...model, effort, contextWindow }, status: "ok" } as const;
 	});
 
-export const getTitleGenerationForRelay = Effect.gen(function* () {
-	const config = yield* ConfigTag;
-	return loadRelaySettings(config.configDir).titleGeneration ?? null;
-});
+export const getTitleGenerationForRelay = readTitleGenerationState;
 
 export const setTitleGenerationForRelay = (
 	selection: TitleGenerationSelection | null,
@@ -838,7 +836,7 @@ export const setTitleGenerationForRelay = (
 			config.configDir,
 		);
 		yield* publishGlobalProjectSetting("titleGeneration");
-		return saved;
+		return yield* readTitleGenerationState;
 	});
 
 export interface SwitchVariantInput {
