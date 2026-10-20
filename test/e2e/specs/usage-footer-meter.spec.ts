@@ -226,7 +226,7 @@ test.describe("send at an account's reset", () => {
 		page,
 		harness,
 	}, testInfo) => {
-		test.setTimeout(120_000);
+		test.setTimeout(180_000);
 		const artifacts = resolve(
 			"test-results/composer-send-at-reset",
 			`${testInfo.project.name}-${testInfo.retry}`,
@@ -283,7 +283,7 @@ test.describe("send at an account's reset", () => {
 				instanceId: Schema.decodeUnknownSync(
 					Schema.String.pipe(Schema.brand("AccountId")),
 				)(addedInstanceId),
-				model: { modelId: "sonnet", providerId: "claude" },
+				model: { modelId: "harness", providerId: "claude" },
 				originId: browser.originId,
 			}),
 		);
@@ -292,24 +292,29 @@ test.describe("send at an account's reset", () => {
 			`${harness.baseUrl}/s/${encodeURIComponent(sessionId)}?p=${encodeURIComponent(projectSlug)}`,
 		);
 		await expect(app.input).toBeVisible();
-		const resetAt = Date.now() + 8_000;
+		const resetAt = Date.now() + 45_000;
 		const resetAtMonotonic =
 			process.hrtime.bigint() + BigInt(resetAt - Date.now()) * 1_000_000n;
 		writeUsage(100, new Date(resetAt).toISOString());
 		// QuotaForAccounts refreshes the same shared feed used by the warning
 		// strip. No provider error or cut-off is needed to queue this input.
+		// QuotaForAccounts shares a reading for 30 seconds.
 		await expect
-			.poll(async () => {
-				const readings = await Effect.runPromise(
-					browser.rpc.QuotaForAccounts({
-						projectSlug,
-						originId: browser.originId,
-					}),
-				);
-				return readings
-					.find((reading) => reading.accountId === addedInstanceId)
-					?.windows.find((window) => window.kind === "five_hour")?.utilization;
-			})
+			.poll(
+				async () => {
+					const readings = await Effect.runPromise(
+						browser.rpc.QuotaForAccounts({
+							projectSlug,
+							originId: browser.originId,
+						}),
+					);
+					return readings
+						.find((reading) => reading.accountId === addedInstanceId)
+						?.windows.find((window) => window.kind === "five_hour")
+						?.utilization;
+				},
+				{ timeout: 40_000 },
+			)
 			.toBe(100);
 		await expect(app.sendBtn).toHaveAttribute("data-send-mode", "at-reset");
 		await expect(page.getByTestId("cut-off-tag")).toHaveCount(0);
@@ -346,21 +351,25 @@ test.describe("send at an account's reset", () => {
 
 		// The reset expires even while the cached reading remains limited.
 		await expect
-			.poll(() => Date.now(), { timeout: 15_000 })
+			.poll(() => Date.now(), { timeout: 50_000 })
 			.toBeGreaterThan(resetAt);
 		writeUsage(1, null);
 		await expect
-			.poll(async () => {
-				const readings = await Effect.runPromise(
-					browser.rpc.QuotaForAccounts({
-						projectSlug,
-						originId: browser.originId,
-					}),
-				);
-				return readings
-					.find((reading) => reading.accountId === addedInstanceId)
-					?.windows.find((window) => window.kind === "five_hour")?.utilization;
-			})
+			.poll(
+				async () => {
+					const readings = await Effect.runPromise(
+						browser.rpc.QuotaForAccounts({
+							projectSlug,
+							originId: browser.originId,
+						}),
+					);
+					return readings
+						.find((reading) => reading.accountId === addedInstanceId)
+						?.windows.find((window) => window.kind === "five_hour")
+						?.utilization;
+				},
+				{ timeout: 40_000 },
+			)
 			.toBe(1);
 		await expect
 			.poll(
