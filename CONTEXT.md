@@ -262,3 +262,31 @@ resets the dismissal. The hint works for writes back to the main checkout too.
 
 The checkout pill shows the folder suggestion with Move and Dismiss actions on
 desktop. Phones show an accessible icon and put both actions in the pill menu.
+
+## Usage Limits
+
+**Usage Reading** is one account's usage at a moment: how full each window is
+and when it resets, or that it couldn't be read. A reading ages; one taken
+before a limit was hit says nothing about whether that limit has cleared.
+_Avoid_: quota (for the reading itself), usage snapshot.
+
+**Limit Recovery** is a session's record that its account hit a limit: when,
+which limit, the reset time Claude reported, and any scheduled resume. A
+session with only held messages has one too.
+
+**Account Limit** is the single answer to "can this asker use this account
+now": go, wait until a time (naming the window), wait with no known time, or
+signed out. When a reading can't tell, the user's own actions go ahead and
+automatic ones wait. Model-only and overage limits are never judged free
+before their reset time.
+_Avoid_: quota check, blocked state, availability.
+
+**Held Message** is a queued message kept back because its account's Account
+Limit says wait. It goes on the session's Resume, or earlier if the user sends
+it now.
+_Avoid_: parked message.
+
+**Resume** is a session with a Limit Recovery continuing: cut-off work is sent
+again and Held Messages go. It happens because the reset arrived, the user
+asked, or the session moved to another account.
+_Avoid_: release, unpark.
