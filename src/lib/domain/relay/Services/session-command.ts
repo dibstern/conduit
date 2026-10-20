@@ -18,6 +18,7 @@ import {
 	type KnownProviderDriverKind,
 	PROVIDER_DRIVERS,
 } from "../../../contracts/provider-instance.js";
+import { sessionCreatedLineage } from "../../../contracts/session-ref.js";
 import {
 	type AutoTitleSource,
 	UNTITLED_SESSION_TITLE,
@@ -137,8 +138,8 @@ export type SessionCommand = {
 /** Called inside the creator's write transaction, before any seed or append. */
 const requireLiveCreationRefs = (data: EventPayloadMap["session.created"]) =>
 	Effect.gen(function* () {
-		for (const id of [data.sessionId, data.parentId, data.forkedFrom]) {
-			if (id !== undefined && (yield* isSessionDeleted(id)))
+		for (const id of [data.sessionId, ...sessionCreatedLineage(data)]) {
+			if (yield* isSessionDeleted(id))
 				return yield* new SessionCommandError({
 					operation: "session.created.deleted",
 					cause: `Session ${id} has been deleted`,

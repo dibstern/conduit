@@ -4,6 +4,7 @@ import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { parseAttachmentDataUrl } from "../../attachment-data-url.js";
 import type { KnownProviderDriverKind } from "../../contracts/provider-instance.js";
+import { sessionCreatedLineage } from "../../contracts/session-ref.js";
 import {
 	resolveServerSessionPick,
 	sessionPickEvents,
@@ -251,11 +252,9 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 			for (const id of [
 				event.sessionId,
 				event.data.sessionId,
-				event.data.parentId,
-				event.data.forkedFrom,
+				...sessionCreatedLineage(event.data),
 			])
-				if (id !== undefined)
-					yield* requireUndeletedSession(id, operation, "existing-session");
+				yield* requireUndeletedSession(id, operation, "existing-session");
 		});
 
 	const seedClaudeSubagentSession = (input: {
