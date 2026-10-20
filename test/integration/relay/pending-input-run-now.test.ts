@@ -280,24 +280,22 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 				configDir: scratch,
 				workspaceRoot: scratch,
 				shellEnv: () => ({}),
-				claudeRunnerFactory: (deps, emit) =>
-					makeClaudeSessionRunner(
-						{
-							...deps,
-							capabilitiesService: {
-								get: () =>
-									Effect.fail(
-										new ClaudeBoundaryError({
-											operation: "probeCapabilities",
-											cause: new Error(
-												"No live capability probe in this transport fixture",
-											),
-										}),
-									),
-							},
-						},
-						emit,
-					),
+				claudeRunnerFactory: (deps, emit) => {
+					if (!deps.capabilitiesService)
+						throw new Error("Expected the shared Claude capability service");
+					// Prewarm discovers models through the provider's shared service too.
+					vi.spyOn(deps.capabilitiesService, "get").mockImplementation(() =>
+						Effect.fail(
+							new ClaudeBoundaryError({
+								operation: "probeCapabilities",
+								cause: new Error(
+									"No live capability probe in this transport fixture",
+								),
+							}),
+						),
+					);
+					return makeClaudeSessionRunner(deps, emit);
+				},
 				claudeQueryFactory: ({ prompt }) => {
 					let closed = false;
 					let querySessionId = sessionId;
