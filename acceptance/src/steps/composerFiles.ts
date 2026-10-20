@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRpcControl } from "./shared.js";
@@ -48,12 +48,6 @@ export const composerFilesHandlers: StepHandler[] = [
 			await expect(
 				world.page.getByRole("button", { name: "Send", exact: true }),
 			).toBeEnabled();
-			await test.info().attach("restored-file-only-send.png", {
-				body: await world.page
-					.locator("#input-area")
-					.screenshot({ animations: "disabled" }),
-				contentType: "image/png",
-			});
 		},
 	},
 	{
