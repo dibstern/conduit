@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
+import { draftList } from "../../stores/draft-list.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
 import {
 	attachedProjectState,
@@ -50,6 +51,8 @@ function resetSessionState() {
 	uiState.selectMode = false;
 	uiState.settledShelfOpen = false;
 	uiState.snoozedShelfOpen = false;
+	uiState.draftsTrayOpen = true;
+	draftList.rows = [];
 	clearSessionState();
 	// Storybook shares module state across stories, and the scope lives in the
 	// router, so a scoped story would otherwise scope every story after it.
@@ -258,6 +261,68 @@ export const PinnedAndSettledShelfOpen: Story = {
 			"true",
 		);
 		await expect(canvas.getByText("Fix navigation")).toBeVisible();
+	},
+};
+
+const pinnedSession = {
+	projectSlug: "conduit",
+	accountId: null,
+	id: "pinned",
+	title: "Review authentication",
+	attention: "needs-approval",
+	pinnedAt: Date.now() - 300_000,
+} as const;
+
+function seedDrafts() {
+	draftList.rows = [
+		{
+			draftId: "d1",
+			projectSlug: "conduit",
+			firstLine: "Plan the next release, starting with the drafts work",
+			updatedAt: Date.now() - 120_000,
+		},
+		{
+			draftId: "d2",
+			projectSlug: "acme",
+			firstLine:
+				"Refactor the relay stack so each provider adapter owns its poller",
+			updatedAt: Date.now() - 3_600_000,
+		},
+		{
+			draftId: "d3",
+			projectSlug: "conduit",
+			firstLine: "Why does the replay suite flake on the second run?",
+			updatedAt: Date.now() - 86_400_000,
+		},
+	];
+	seedSessions([...mockSessionsAllGroups, pinnedSession]);
+}
+
+export const DraftsTrayOpen: Story = {
+	name: "Drafts tray open",
+	beforeEach: seedDrafts,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("drafts-tray-toggle")).toHaveAttribute(
+			"aria-expanded",
+			"true",
+		);
+		await expect(canvas.getAllByTestId("draft-row")).toHaveLength(3);
+	},
+};
+
+export const DraftsTrayCollapsed: Story = {
+	name: "Drafts tray collapsed",
+	beforeEach: () => {
+		uiState.draftsTrayOpen = false;
+		seedDrafts();
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.queryByTestId("draft-row")).not.toBeInTheDocument();
+		await expect(canvas.getByTestId("drafts-tray-toggle")).toHaveTextContent(
+			"Plan the next release",
+		);
 	},
 };
 
