@@ -144,5 +144,5 @@ Scenario: a five-hour limit without its reset time keeps a percentage
   And the usage footer has one Claude account in the limit state
   When the usage footer claude five_hour reading is 100% resetting at none
   Then the single usage footer shows 5h 100% and Week 71%
-  And the usage footer claude five_hour meter is danger at 100 percent
+  And the usage footer claude five_hour meter is warning at 100 percent
   And the usage footer has no horizontal clipping

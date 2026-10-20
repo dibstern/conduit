@@ -242,6 +242,8 @@
 	const sendAccounts = $derived(currentSession ? claudeAccounts.sendOptions(accountId) : []);
 	const sendsAt = $derived.by(() => {
 		const recovery = currentSession?.limitRecovery;
+		if (recovery && !recovery.switched && !recovery.continued && recovery.scheduledAt !== undefined)
+			return recovery.scheduledAt * 1000;
 		const limit = accountLimit({
 			asker: "user",
 			...(usageReading ? { reading: usageReading } : {}),
@@ -278,11 +280,6 @@
 		usageState.readings;
 		if (sendsAt === undefined || !hasOtherClaudeAccount) sendMenuOpen = false;
 		claudeAccounts.invalidateSendQuotas();
-	});
-	const pendingSendsAt = $derived.by(() => {
-		const recovery = currentSession?.limitRecovery;
-		const scheduledAt = recovery && !recovery.continued && !recovery.switched ? recovery.scheduledAt : undefined;
-		return scheduledAt === undefined ? sendsAt : scheduledAt * 1000;
 	});
 	const placeholder = $derived(
 		sendsAt !== undefined
@@ -1225,7 +1222,7 @@
 		<PendingInputTray
 			inputs={currentChat().transcript?.pending ?? []}
 			paused={currentChat().transcript?.paused ?? false}
-			sendsAt={pendingSendsAt}
+			{sendsAt}
 			limitRecovery={currentSession?.limitRecovery ?? undefined}
 			sessionId={currentSession?.id}
 			projectSlug={currentSession?.projectSlug}

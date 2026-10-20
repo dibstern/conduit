@@ -116,7 +116,7 @@ Examples:
   | desktop  | the keyboard | composer-send-at-reset-queued-keyboard-desktop | 98        |
   | phone    | the button   | composer-send-at-reset-queued-phone            | 98        |
 
-Scenario Outline: a queued caption follows the continuation's scheduled time
+Scenario Outline: tray strip and composer agree on the scheduled Resume time
   Given the viewport is a <viewport>
   And Usage settings have one Claude account in the limit state
   And the session has a scheduled reset continuation at 2026-01-01T15:37:00Z
@@ -124,6 +124,9 @@ Scenario Outline: a queued caption follows the continuation's scheduled time
   When I type Also run the provider tests afterwards into the composer
   And I send the reset-bound message with the button
   Then pending-input row 1 has the reset caption sends 3:37 pm
+  And the reset send control announces Send at 3:37 pm
+  And the composer placeholder reads Message Claude… sends at 3:37 pm
+  And the queued usage recovery detail reads <waiting_detail>
   And pending-input row 1 offers Edit and Remove
   And the usage limit strip is not visible
   And the queued usage recovery title reads Waiting for Personal's limit to reset
@@ -131,9 +134,9 @@ Scenario Outline: a queued caption follows the continuation's scheduled time
   And the composer region visually matches <baseline> at <threshold> percent
 
 Examples:
-  | viewport | baseline                                  | threshold |
-  | desktop  | composer-send-at-reset-scheduled-desktop    | 98        |
-  | phone    | composer-send-at-reset-scheduled-phone      | 98        |
+  | viewport | waiting_detail       | baseline                                  | threshold |
+  | desktop  | in 1h 12m            | composer-send-at-reset-scheduled-desktop    | 98        |
+  | phone    | Personal · in 1h 12m | composer-send-at-reset-scheduled-phone      | 98        |
 
 Scenario Outline: send options appear only for a limited account with another Claude account
   Given the viewport is a <viewport>

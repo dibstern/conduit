@@ -135,16 +135,16 @@ Scenario Outline: one account shows only its reported model weeks without reset 
   And the Usage account claude has model windows Fable <fable>% and Sonnet 6%
   When I open settings to the Usage section
   Then the Usage single-account windows show 5h 41% and Week 22%
-  And the Usage single-account model rows show Fable <fable>% and Sonnet 6% without reset lines
+  And the Usage single-account model rows show Fable <fable>% and Sonnet 6% without reset lines with Fable <level>
   And the Usage account claude remains available
   And the usage-settings region visually matches <baseline> at <threshold> percent
 
 Examples:
-  | viewport | fable | baseline                                   | threshold |
-  | desktop  | 12    | usage-settings-single-models-desktop       | 98        |
-  | phone    | 12    | usage-settings-single-models-phone         | 98        |
-  | desktop  | 100   | usage-settings-single-model-limit-desktop  | 98        |
-  | phone    | 100   | usage-settings-single-model-limit-phone    | 98        |
+  | viewport | fable | level | baseline                                   | threshold |
+  | desktop  | 12    | ok    | usage-settings-single-models-desktop       | 98        |
+  | phone    | 12    | ok    | usage-settings-single-models-phone         | 98        |
+  | desktop  | 100   | warn  | usage-settings-single-model-limit-desktop  | 98        |
+  | phone    | 100   | warn  | usage-settings-single-model-limit-phone    | 98        |
 
 Scenario Outline: an account without model windows shows no extra rows
   Given the viewport is a <viewport>
@@ -221,7 +221,7 @@ Scenario: a limit without a reset time does not invent a reset
   And Usage settings have one Claude account in the limit state
   When the usage footer claude five_hour reading is 100% resetting at none
   And I open settings to the Usage section
-  Then the Usage single-account five_hour reset reads limit reached
+  Then the Usage single-account five_hour reset reads reset time unavailable
 
 Scenario: the reached five-hour limit binds even when the weekly window warns
   Given the viewport is a desktop

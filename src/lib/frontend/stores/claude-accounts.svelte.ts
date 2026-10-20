@@ -11,7 +11,6 @@ import {
 } from "../utils/account-switch.js";
 import {
 	accountQuota,
-	limitedQuota,
 	type PlanUsageWindow,
 	planUsageWindows,
 	quotaReading,
@@ -146,7 +145,7 @@ class ClaudeAccounts {
 						? new Date(limit.until).toISOString()
 						: undefined,
 			};
-		const { used } = quotaReading(quota);
+		const { used } = quotaReading(quota, clock.now);
 		return {
 			kind: "selectable",
 			usagePct: !usageUnknown && typeof used === "number" ? used : null,
@@ -204,10 +203,10 @@ class ClaudeAccounts {
 			.reduce<(typeof this.configuredAccounts)[number] | undefined>(
 				(best, account) =>
 					best === undefined ||
-					(usageDisplay(this.quotaOf(account.id), "off").binding?.utilization ??
-						100) <
-						(usageDisplay(this.quotaOf(best.id), "off").binding?.utilization ??
-							100)
+					(usageDisplay(this.quotaOf(account.id), "off", clock.now).binding
+						?.utilization ?? 100) <
+						(usageDisplay(this.quotaOf(best.id), "off", clock.now).binding
+							?.utilization ?? 100)
 						? account
 						: best,
 				undefined,
@@ -270,14 +269,6 @@ class ClaudeAccounts {
 			this.handoff = { kind: "idle" };
 			showAccountSwitchRefusal(targetId, error);
 		}
-	}
-
-	fromQuota(
-		handoff: Pick<SwitchContext, "from" | "limit">,
-	): UsageReading | undefined {
-		return handoff.limit
-			? limitedQuota(handoff.limit)
-			: this.quotaOf(handoff.from);
 	}
 
 	cancel(): void {
