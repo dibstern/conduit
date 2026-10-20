@@ -493,6 +493,110 @@ const withResetInbox = <A, E, R>(
 		),
 	);
 
+// Resume provenance must survive the producing service, stored-event decoding,
+// and projection without scheduler tags in metadata.
+it("records Resume schedulers in the payload and projects policy, sweep, and user schedules", async () => {
+	writeFileSync(
+		join(isolatedRoot, "daemon.json"),
+		JSON.stringify({
+			...defaultDaemonConfig(),
+			usageLimits: { autoSwitch: false, autoResume: true, order: [] },
+		}),
+	);
+	let resetsAt = 10;
+	await Effect.runPromise(
+		withResetInbox(
+			() =>
+				usageReading("claude", {
+					status: "limited",
+					windows: [
+						{
+							kind: "five_hour",
+							utilization: 100,
+							resetsAt: new Date(resetsAt * 1000).toISOString(),
+						},
+					],
+				}),
+			(fixture) =>
+				Effect.gen(function* () {
+					yield* fixture.commit([
+						canonicalEvent("message.created", "s1", {
+							sessionId: "s1",
+							messageId: "cut",
+							role: "user",
+						}),
+						canonicalEvent("session.usage_limited", "s1", {
+							instanceId: "claude",
+							rateLimitType: "five_hour",
+							resetsAt,
+							cutOffMessageId: "cut",
+						}),
+					]);
+					yield* Effect.forkScoped(
+						fixture.continuation.runLimitPolicies.pipe(
+							Effect.provideService(ProviderTurnServiceTag, fixture.turns),
+						),
+					);
+					yield* fixture.continuation.queueLimitPolicy("s1");
+					const rows = yield* fixture.read
+						.listSessionInfos({ projectIds: ["test-project"] })
+						.pipe(
+							Effect.repeat({
+								schedule: Schedule.spaced("5 millis"),
+								until: (sessions) =>
+									sessions[0]?.limitRecovery?.scheduledAt === 10,
+							}),
+							Effect.timeout("2 seconds"),
+						);
+					expect(rows[0]?.limitRecovery).toMatchObject({
+						auto: true,
+						rearms: 0,
+						scheduledAt: 10,
+					});
+					resetsAt = 20;
+					yield* fixture.continuation
+						.sweepDueContinuations(10)
+						.pipe(Effect.provideService(ProviderTurnServiceTag, fixture.turns));
+					expect(
+						(yield* fixture.read.listSessionInfos({
+							projectIds: ["test-project"],
+						}))[0]?.limitRecovery,
+					).toMatchObject({ auto: true, rearms: 1, scheduledAt: 20 });
+					yield* fixture.continuation
+						.requestContinuation("s1", {
+							instanceId: "claude",
+							expectedInstanceId: "claude",
+							reason: "user",
+							at: 30,
+						})
+						.pipe(Effect.provideService(ProviderTurnServiceTag, fixture.turns));
+					const recovery = (yield* fixture.read.listSessionInfos({
+						projectIds: ["test-project"],
+					}))[0]?.limitRecovery;
+					expect(recovery).toMatchObject({ rearms: 1, scheduledAt: 30 });
+					expect(recovery?.auto).toBeUndefined();
+					const schedules = (yield* fixture.store.readAllBySession("s1"))
+						.filter((event) => event.type === "session.resume_scheduled")
+						.map((event) => ({ data: event.data, metadata: event.metadata }));
+					expect(schedules).toEqual([
+						{
+							data: { instanceId: "claude", at: 10, by: "policy" },
+							metadata: {},
+						},
+						{
+							data: { instanceId: "claude", at: 20, by: "sweep" },
+							metadata: {},
+						},
+						{
+							data: { instanceId: "claude", at: 30, by: "user" },
+							metadata: {},
+						},
+					]);
+				}),
+		).pipe(Effect.scoped),
+	);
+});
+
 // A continuation must wait for cleanup/admission's inbox permit before it
 // resolves a launch directory, then retain that permit until handoff commits.
 it("a due continuation waits for the session admission lock before dispatch", async () => {

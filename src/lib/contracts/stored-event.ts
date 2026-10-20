@@ -953,6 +953,7 @@ export const CanonicalEvents = {
 	"session.resume_scheduled": live(
 		Schema.Struct({
 			instanceId: Schema.String,
+			by: Schema.optionalKey(Schema.Literals(["user", "policy", "sweep"])),
 			/** Unix seconds, matching the SDK's reset time. */
 			at: Schema.Number.pipe(Schema.check(Schema.isFinite())),
 		}),

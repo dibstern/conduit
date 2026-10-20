@@ -636,16 +636,22 @@ export const sessionHandlers = {
 		},
 	],
 	"session.resume_scheduled": (event) => {
-		const source = event.metadata.source;
+		const by =
+			event.data.by ??
+			(event.metadata.source === "limit-policy"
+				? "policy"
+				: event.metadata.source === "continuation-sweep"
+					? "sweep"
+					: "user");
 		// A queue can wait for its account's reset without a cut-off turn.
 		const recovery =
 			"COALESCE(limit_recovery, json_object('instanceId', ?, 'rateLimitType', 'usage', 'resetsAt', ?, 'rearms', 0, 'continued', json('false')))";
 		// The limit policy marks its schedule, a user's schedule clears the mark,
 		// and a sweep re-arm keeps whichever one it re-arms.
 		const marked =
-			source === "limit-policy"
+			by === "policy"
 				? `json_set(${recovery}, '$.auto', json('true'))`
-				: source === "continuation-sweep"
+				: by === "sweep"
 					? recovery
 					: `json_remove(${recovery}, '$.auto')`;
 		return [
@@ -656,7 +662,7 @@ export const sessionHandlers = {
 					event.data.instanceId,
 					event.data.at,
 					event.data.at,
-					source === "continuation-sweep" ? 1 : 0,
+					by === "sweep" ? 1 : 0,
 					event.createdAt,
 					event.sessionId,
 					event.data.instanceId,

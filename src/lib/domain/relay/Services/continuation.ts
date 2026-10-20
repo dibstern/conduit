@@ -476,12 +476,10 @@ export const makeContinuation = Effect.gen(function* () {
 													{
 														instanceId: session.provider,
 														at: options.at,
+														by: policy ? "policy" : "user",
 													},
 													{
 														provider: "claude",
-														...(policy && {
-															metadata: { source: "limit-policy" },
-														}),
 													},
 												),
 											]),
@@ -504,10 +502,10 @@ export const makeContinuation = Effect.gen(function* () {
 														{
 															instanceId: recovery.instanceId,
 															at: resetsAt ?? due.now + 300,
+															by: "sweep",
 														},
 														{
 															provider: "claude",
-															metadata: { source: "continuation-sweep" },
 														},
 													)
 												: cancelledEvent(sessionId);
