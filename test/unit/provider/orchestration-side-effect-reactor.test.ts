@@ -56,6 +56,7 @@ function makeProvider(
 ): ProviderInstance {
 	return {
 		providerId: "claude",
+		generateTextEffect: () => Effect.die("not used"),
 		discoverEffect: () => Effect.succeed(emptyCapabilities),
 		sendTurnEffect,
 		interruptTurnEffect: () => Effect.void,

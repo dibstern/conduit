@@ -5,9 +5,9 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
+import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import type { ClaudeTitleQueryFactory } from "../../../src/lib/domain/relay/Services/claude-title-generator.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -23,6 +23,12 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import type { ClaudeOneShotQueryFactory } from "../../../src/lib/provider/claude/claude-provider-runtime.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import {
+	makeClaudeTextGenerationLayer,
+	replayClaudeText,
+} from "../../helpers/claude-text-generation.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,
@@ -35,17 +41,8 @@ import {
 const SESSION_ID = "claude-title-integration-session";
 const FIRST_MESSAGE =
 	"Please investigate why OAuth token refresh is failing after expiry.";
-const GENERATED_TITLE = "OAuth Token Refresh Bug Investigation";
+const GENERATED_TITLE = "pong";
 const DEFAULT_TITLE = "Claude Session";
-
-async function* makeTitleQuery(title: string): AsyncIterable<unknown> {
-	yield {
-		type: "assistant",
-		message: {
-			content: [{ type: "text", text: title }],
-		},
-	};
-}
 
 const makeSignal = () => {
 	let resolve: () => void = () => {};
@@ -55,7 +52,7 @@ const makeSignal = () => {
 	return { promise, resolve };
 };
 
-const makeGatedTitleQuery = (title: string) => {
+const makeGatedTitleQuery = () => {
 	const started = makeSignal();
 	const release = makeSignal();
 	const finished = makeSignal();
@@ -67,12 +64,7 @@ const makeGatedTitleQuery = (title: string) => {
 			started.resolve();
 			try {
 				await release.promise;
-				yield {
-					type: "assistant",
-					message: {
-						content: [{ type: "text", text: title }],
-					},
-				};
+				yield* replayClaudeText();
 			} finally {
 				finished.resolve();
 			}
@@ -90,12 +82,16 @@ const removeTempDir = (dir: string) =>
 
 const makeTitleServiceLayer = (input: {
 	readonly filename: string;
-	readonly queryFactory: ClaudeTitleQueryFactory;
+	readonly queryFactory: ClaudeOneShotQueryFactory;
+	readonly accounts?: ReturnType<typeof makeMockAccountDirectory>;
 }) =>
 	Layer.provideMerge(
-		makeSessionTitleServiceLive({ queryFactory: input.queryFactory }),
+		makeSessionTitleServiceLive(),
 		Layer.mergeAll(
-			Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+			Layer.succeed(AccountDirectory)(
+				input.accounts ?? makeMockAccountDirectory(),
+			),
+			makeClaudeTextGenerationLayer(input.queryFactory),
 			Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 			Layer.succeed(LoggerTag)(makeMockLogger()),
 			Layer.succeed(ConfigTag)(makeMockConfig({ projectDir: process.cwd() })),
@@ -266,10 +262,53 @@ const waitForQueryFactoryCalls = (
 
 describe("Integration: Claude Session Titles", () => {
 	it.effect(
+		"generates with the directory's selected default Claude account",
+		() => {
+			const { dir, filename } = makeTempDbPath();
+			const queryFactory = vi.fn(
+				(params: Parameters<ClaudeOneShotQueryFactory>[0]) => {
+					expect(params.options?.env?.["CLAUDE_CONFIG_DIR"]).toBe(
+						"/integration-work-login",
+					);
+					return replayClaudeText();
+				},
+			);
+			const layer = makeTitleServiceLayer({
+				filename,
+				queryFactory,
+				accounts: makeMockAccountDirectory([
+					{
+						driver: "claude",
+						id: AccountIdSchema.make("claude-work"),
+						name: "Work",
+						folder: configuredClaudeConfigDir("/integration-work-login"),
+						usageEligible: true,
+					},
+				]),
+			});
+			return Effect.gen(function* () {
+				yield* (yield* ProjectionRunnerEffectTag).markRecovered();
+				yield* seedSessionRow({
+					sessionId: SESSION_ID,
+					title: DEFAULT_TITLE,
+					createdAt: 1000,
+				});
+				const service = yield* SessionTitleServiceTag;
+				yield* service.titleFromMessage({
+					sessionId: SESSION_ID,
+					message: FIRST_MESSAGE,
+				});
+				yield* waitForSessionTitle(SESSION_ID, GENERATED_TITLE);
+				expect(queryFactory).toHaveBeenCalledTimes(1);
+			}).pipe(Effect.provide(layer), Effect.ensuring(removeTempDir(dir)));
+		},
+	);
+
+	it.effect(
 		"persists a generated title and keeps it after a duplicate session.created",
 		() => {
 			const { dir, filename } = makeTempDbPath();
-			const queryFactory = vi.fn(() => makeTitleQuery(GENERATED_TITLE));
+			const queryFactory = vi.fn(() => replayClaudeText());
 			const layer = makeTitleServiceLayer({ filename, queryFactory });
 
 			return Effect.gen(function* () {
@@ -319,12 +358,10 @@ describe("Integration: Claude Session Titles", () => {
 
 	it.effect("preserves a manual title when generation completes later", () => {
 		const { dir, filename } = makeTempDbPath();
-		const gatedTitle = makeGatedTitleQuery(GENERATED_TITLE);
+		const gatedTitle = makeGatedTitleQuery();
 		let titleQueryCalls = 0;
 		const queryFactory = vi.fn(() =>
-			titleQueryCalls++ === 0
-				? gatedTitle.query()
-				: makeTitleQuery("Second Generated Title"),
+			titleQueryCalls++ === 0 ? gatedTitle.query() : replayClaudeText(),
 		);
 		const layer = makeTitleServiceLayer({ filename, queryFactory });
 

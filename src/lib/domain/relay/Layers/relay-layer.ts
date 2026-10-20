@@ -8,7 +8,6 @@ import { Layer } from "effect";
 import { DaemonEventBusLive } from "../../daemon/Services/daemon-pubsub.js";
 import { makeOpenCodeRuntimeStateLive } from "../../daemon/Services/instance-manager-service.js";
 import { AlertsLive } from "../Services/alerts.js";
-import type { ClaudeTitleQueryFactory } from "../Services/claude-title-generator.js";
 import { InputDraftsLive } from "../Services/input-drafts.js";
 import { makePollerManagerStateLive } from "../Services/message-poller.js";
 import { ProjectSettingsLive } from "../Services/project-settings.js";
@@ -39,13 +38,9 @@ import { RateLimiterLive } from "./rate-limiter-layer.js";
  * Keep new relay state in self-constructing Layers here, or in a focused
  * service Layer merged here, so relay-stack does not regain prebuilt service
  * instance wiring.
- *
- * `titleQueryFactory` replaces the Claude SDK query used for session titles
- * (E2E replay passes one so no title request reaches a live model).
  */
 export const makeRelayStateLive = (
 	options: {
-		readonly titleQueryFactory?: ClaudeTitleQueryFactory;
 		/** Process-fake benchmark capacity; ordinary relays retain five sends/10s. */
 		readonly testSendLimit?: number;
 		/** Daemon relays borrow the daemon bus; standalone relays own a local bus. */
@@ -68,11 +63,7 @@ export const makeRelayStateLive = (
 		// Session state
 		makeSessionRegistryStateLive(),
 		Layer.provideMerge(
-			makeSessionTitleServiceLive(
-				options.titleQueryFactory != null
-					? { queryFactory: options.titleQueryFactory }
-					: {},
-			),
+			makeSessionTitleServiceLive(),
 			Layer.provideMerge(
 				sessionManagerStateAndServiceLive,
 				makeOverridesStateLive(),

@@ -68,6 +68,7 @@ export interface OrchestrationLayerOptions {
 	readonly configDir?: string;
 	/** Test seam: replaces the Claude SDK query() (E2E trace replay). */
 	readonly claudeQueryFactory?: ClaudeProviderInstanceDeps["queryFactory"];
+	readonly claudeGenerateTextQueryFactory?: ClaudeProviderInstanceDeps["generateTextQueryFactory"];
 	readonly claudeSessionForkSdk?: ClaudeProviderInstanceDeps["sessionForkSdk"];
 	/** Test seam: replaces the SDK's agent transcript reads (E2E trace replay). */
 	readonly claudeSubagentSdk?: ClaudeProviderInstanceDeps["subagentSdk"];
@@ -85,6 +86,7 @@ export interface OrchestrationRuntimeLayerOptions {
 	readonly configDir?: string;
 	/** Test seam: replaces the Claude SDK query() (E2E trace replay). */
 	readonly claudeQueryFactory?: ClaudeProviderInstanceDeps["queryFactory"];
+	readonly claudeGenerateTextQueryFactory?: ClaudeProviderInstanceDeps["generateTextQueryFactory"];
 	readonly claudeSessionForkSdk?: ClaudeProviderInstanceDeps["sessionForkSdk"];
 	/** Test seam: replaces the SDK's agent transcript reads (E2E trace replay). */
 	readonly claudeSubagentSdk?: ClaudeProviderInstanceDeps["subagentSdk"];
@@ -265,6 +267,9 @@ const createOrchestrationComponentsEffect = (
 			...(options.claudeQueryFactory
 				? { queryFactory: options.claudeQueryFactory }
 				: {}),
+			...(options.claudeGenerateTextQueryFactory
+				? { generateTextQueryFactory: options.claudeGenerateTextQueryFactory }
+				: {}),
 			...(options.claudeRunnerFactory
 				? { runnerFactory: options.claudeRunnerFactory }
 				: {}),
@@ -391,6 +396,12 @@ export const makeOrchestrationRuntimeLayer = (
 				...(options.configDir != null ? { configDir: options.configDir } : {}),
 				...(options.claudeQueryFactory
 					? { claudeQueryFactory: options.claudeQueryFactory }
+					: {}),
+				...(options.claudeGenerateTextQueryFactory
+					? {
+							claudeGenerateTextQueryFactory:
+								options.claudeGenerateTextQueryFactory,
+						}
 					: {}),
 				...(options.claudeSessionForkSdk
 					? { claudeSessionForkSdk: options.claudeSessionForkSdk }

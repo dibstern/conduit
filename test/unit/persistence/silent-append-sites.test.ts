@@ -53,12 +53,15 @@ import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/p
 import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/projectors-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { ProviderRegistryLive } from "../../../src/lib/provider/provider-registry.js";
+import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
+import { partialFake } from "../../helpers/partial-fake.js";
 
 const versionOf = (sessionId: string) =>
 	Effect.gen(function* () {
@@ -88,11 +91,6 @@ const announcedDuring = <A, E, R>(action: Effect.Effect<A, E, R>) =>
 		);
 		return [...seen].flatMap((advance) => [...advance.sessionIds]);
 	});
-
-/** One assistant message is all the title generator reads. */
-async function* assistantTitle(text: string): AsyncIterable<unknown> {
-	yield { type: "assistant", message: { content: [{ type: "text", text }] } };
-}
 
 /** The poller layer with real persistence behind it. */
 const makeStatusPollerLayer = (dbPath: string) => {
@@ -351,10 +349,15 @@ it("the auto-title rename advances the version of the session it renames", async
 	await withTempDb(async (dbPath) => {
 		const bus = makeSessionEventBusLive();
 		const layer = Layer.provideMerge(
-			makeSessionTitleServiceLive({
-				queryFactory: () => assistantTitle("Investigate The OAuth Loop"),
-			}),
+			makeSessionTitleServiceLive(),
 			Layer.mergeAll(
+				ProviderRegistryLive([
+					partialFake<ProviderInstance>({
+						providerId: "claude",
+						generateTextEffect: () =>
+							Effect.succeed("Investigate The OAuth Loop"),
+					}),
+				]),
 				Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 				bus,
 				makePersistenceEffectLayer(

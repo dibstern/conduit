@@ -12,6 +12,13 @@ import type {
 	Options as SDKOptions,
 } from "./types.js";
 
+/** Picker variants are the SDK's effort levels for both turns and one-shot calls. */
+export function claudeEffortOptions(
+	effort: string | undefined,
+): Pick<SDKOptions, "effort"> {
+	return effort ? { effort: effort as NonNullable<SDKOptions["effort"]> } : {};
+}
+
 /** The same launch options are used by idle pre-warming and the first send. */
 export function buildClaudeQueryOptions(
 	input: ClaudePreWarmSessionInput,
@@ -69,8 +76,6 @@ export function buildClaudeQueryOptions(
 			? { resumeSessionAt: input.resumeSessionAt }
 			: {}),
 		...(input.agent ? { agent: input.agent } : {}),
-		...(input.variant
-			? { effort: input.variant as NonNullable<SDKOptions["effort"]> }
-			: {}),
+		...claudeEffortOptions(input.variant),
 	});
 }

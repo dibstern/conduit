@@ -209,6 +209,15 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		});
 	}
 
+	generateTextEffect(): Effect.Effect<string, ProviderInstanceFailure> {
+		return Effect.fail(
+			this.providerFailure(
+				"generateText",
+				new Error("OpenCode text generation is not supported yet"),
+			),
+		);
+	}
+
 	private async discoverCapabilities(): Promise<ProviderCapabilities> {
 		const [providerResult, commandsRaw, skillsRaw] = await Promise.all([
 			this.client.provider.list(),

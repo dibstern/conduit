@@ -223,6 +223,14 @@ export const makeCursorRunnerDriver = (
 	driverKind: "cursor",
 	discoverEffect: (directory, account) =>
 		discoverCursorEffect(port, account, directory ?? workspaceRoot),
+	generateTextEffect: () =>
+		Effect.fail(
+			new ProviderInstanceFailure({
+				providerId: "cursor",
+				operation: "generateText",
+				cause: new Error("Cursor text generation is not supported yet"),
+			}),
+		),
 	prepareTurnEffect: (input) =>
 		Effect.gen(function* () {
 			const catalog = yield* discoverCursorEffect(port, input.account).pipe(
