@@ -5,7 +5,12 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect } from "effect";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import {
+	type ReplayParityReport,
+	verifyReplayParity,
+} from "../../../src/lib/persistence/replay-parity.js";
 import {
 	createRelayStack,
 	type RelayStack,
@@ -26,6 +31,9 @@ export interface RelayHarness {
 
 	/** Connect a typed browser RPC client to the relay */
 	connectWsClient(): Promise<TestWsClient>;
+
+	/** Replay the durable event log and compare its live read model. */
+	checkReplayParity(): Promise<ReplayParityReport>;
 
 	/** Stop the relay and clean up */
 	stop(): Promise<void>;
@@ -109,6 +117,21 @@ export async function createRelayHarness(
 			clients.push(client);
 			await client.waitForOpen();
 			return client;
+		},
+
+		checkReplayParity(): Promise<ReplayParityReport> {
+			return Effect.runPromise(
+				verifyReplayParity(eventsDbPath, {
+					projectId: "integration-test",
+					// Provider reconciliation sets completion outside the event log;
+					// replay clears it when rebuilding the read model.
+					ignoredColumns: [
+						"version",
+						"session_sidebar.row.version",
+						"sessions.history_complete",
+					],
+				}),
+			);
 		},
 
 		async stop(): Promise<void> {

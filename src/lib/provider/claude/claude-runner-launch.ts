@@ -475,6 +475,7 @@ export const makeClaudeRunnerLaunch = (
 						...(input.permissionMode
 							? { permissionMode: input.permissionMode }
 							: {}),
+						...(input.sideThread ? { sideThread: true } : {}),
 						...(input.variant ? { variant: input.variant } : {}),
 						...(input.contextWindow
 							? { contextWindow: input.contextWindow }

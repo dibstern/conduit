@@ -283,6 +283,7 @@ export type PreWarmSessionInput = Pick<
 	| "configDir"
 	| "folderSource"
 	| "permissionMode"
+	| "sideThread"
 	| "variant"
 	| "contextWindow"
 	| "agent"

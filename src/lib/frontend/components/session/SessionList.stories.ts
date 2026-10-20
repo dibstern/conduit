@@ -283,28 +283,51 @@ const pinnedSession = {
 } as const;
 
 function seedDrafts() {
+	const now = Date.now();
+	sessionState.now = now;
+	projectState.projects = [
+		...projectState.projects,
+		{ slug: "api", title: "api", folders: ["/src/api"] },
+	];
 	draftList.rows = [
 		{
 			draftId: "d1",
 			projectSlug: "conduit",
 			firstLine: "Plan the next release, starting with the drafts work",
-			updatedAt: Date.now() - 120_000,
+			updatedAt: now - 120_000,
 		},
 		{
 			draftId: "d2",
-			projectSlug: "acme",
+			projectSlug: "api",
 			firstLine:
-				"Refactor the relay stack so each provider adapter owns its poller",
-			updatedAt: Date.now() - 3_600_000,
+				"Refactor the relay stack so each provider adapter owns its own poller",
+			updatedAt: now - 3_600_000,
 		},
 		{
 			draftId: "d3",
 			projectSlug: "conduit",
 			firstLine: "Why does the replay suite flake on the second run?",
-			updatedAt: Date.now() - 86_400_000,
+			updatedAt: now - 86_400_000,
 		},
 	];
-	seedSessions([...mockSessionsAllGroups, pinnedSession]);
+	const ages = [0, 2 * 3_600_000, 19 * 3_600_000, 86_400_000];
+	seedSessions([
+		...mockSessionsAllGroups.slice(0, 4).map((session, index) => ({
+			...session,
+			createdAt: now - (ages[index] ?? 0),
+			updatedAt: now - (ages[index] ?? 0),
+			unread: false,
+		})),
+		pinnedSession,
+		{
+			projectSlug: "conduit",
+			accountId: null,
+			id: "drafts-settled",
+			title: "Completed release prep",
+			settledAt: now - 86_400_000,
+			updatedAt: now - 86_400_000,
+		},
+	]);
 }
 
 export const DraftsTrayOpen: Story = {
@@ -317,6 +340,9 @@ export const DraftsTrayOpen: Story = {
 			"true",
 		);
 		await expect(canvas.getAllByTestId("draft-row")).toHaveLength(3);
+		await expect(canvas.getByTestId("drafts-tray-clear")).toHaveTextContent(
+			"Clear all",
+		);
 	},
 };
 
@@ -329,6 +355,9 @@ export const DraftsTrayCollapsed: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(canvas.queryByTestId("draft-row")).not.toBeInTheDocument();
+		await expect(
+			canvas.queryByTestId("drafts-tray-clear"),
+		).not.toBeInTheDocument();
 		await expect(canvas.getByTestId("drafts-tray-toggle")).toHaveTextContent(
 			"Plan the next release",
 		);

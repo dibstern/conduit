@@ -75,6 +75,7 @@ export const preWarmSession = (sessionId: string, resolvedAccount?: Account) =>
 				? { model: { providerId: model.providerID, modelId: model.modelID } }
 				: {}),
 			permissionMode,
+			...(session.side_thread === 1 ? { sideThread: true } : {}),
 			configDir: prepared.configDir,
 			folderSource: "account",
 			...(agent ? { agent } : {}),
