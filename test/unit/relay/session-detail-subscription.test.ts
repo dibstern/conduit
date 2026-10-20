@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
@@ -28,6 +28,7 @@ import {
 	AccountDirectory,
 	makeAccountDirectory,
 } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
 import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
@@ -49,6 +50,7 @@ import {
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { resumeStream } from "../../../src/lib/frontend/transport/resume.js";
 import { decodeSessionDetail } from "../../../src/lib/frontend/transport/session-detail-wire.js";
+import type { Message } from "../../../src/lib/instance/sdk-types.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -65,8 +67,15 @@ import {
 	canonicalEvent,
 	type StoredEvent,
 } from "../../../src/lib/persistence/events.js";
+import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { assembleDetailRows } from "../../helpers/detail-rows.js";
+import { makeSSEEvent } from "../../helpers/sse-factories.js";
+
+// Browser markdown rendering is outside this SQLite/subscription contract.
+vi.mock("../../../src/lib/frontend/utils/markdown.js", () => ({
+	renderMarkdown: (text: string) => text,
+}));
 
 let isolatedRoot: string;
 beforeEach(() => {
@@ -1197,6 +1206,444 @@ describe("transcript states carried by the detail feed alone", () => {
 			}),
 			[],
 		);
+
+	// Failure modes: a null verdict disappears; a part write never advances the
+	// feed; wire/history conversion loses provenance; replay changes the verdict;
+	// a late verdict changes activity timing or writes another message's part.
+	it.effect.each([
+		{ probabilities: { ask: 0.8, routine: 0.2 } },
+		{ probabilities: null },
+	])(
+		"text.surfaced persists and reaches typed live assistant parts: $probabilities",
+		({ probabilities }) =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				const createdAt = at();
+				yield* commit([
+					sessionCreated(SID),
+					messageCreated(SID, "m1", "assistant"),
+					ev(
+						"text.delta",
+						{ messageId: "m1", partId: "p1", text: "A finding" },
+						createdAt,
+					),
+				]);
+				const { q } = yield* openDetail({ sessionId: SID });
+				const base = yield* takeN(q, 2);
+				const verdict = {
+					messageId: "m1",
+					partId: "p1",
+					ordinal: 7,
+					categorySetVersion: 3,
+					model: "jev-test",
+					probabilities,
+				};
+				yield* commit([
+					canonicalEvent("text.surfaced", SID, verdict, {
+						provider: "conduit",
+						createdAt: at(),
+					}),
+				]);
+				const updates = yield* takeN(q, 2);
+				expect(namesOf(updates)).toEqual(["m1/p1", "m1"]);
+				const expected = {
+					surfacingOrdinal: 7,
+					surfacingSetVersion: 3,
+					surfacingModel: "jev-test",
+					surfacingProbabilities: probabilities,
+					createdAt,
+				};
+				expect(
+					chatOf([...base, ...updates]).find(
+						(message) => message.type === "assistant",
+					),
+				).toMatchObject(expected);
+				const sql = yield* SqlClient.SqlClient;
+				const before =
+					yield* sql`SELECT surfacing_ordinal, surfacing_probabilities,
+					surfacing_set_version, surfacing_model, text, created_at, updated_at
+					FROM message_parts WHERE id = 'p1'`;
+				expect(before).toEqual([
+					{
+						surfacing_ordinal: 7,
+						surfacing_probabilities:
+							probabilities === null ? null : JSON.stringify(probabilities),
+						surfacing_set_version: 3,
+						surfacing_model: "jev-test",
+						text: "A finding",
+						created_at: createdAt,
+						updated_at: createdAt,
+					},
+				]);
+				const store = yield* EventStoreEffectTag;
+				const stored = (yield* store.readBySession(SID)).find(
+					(event) => event.type === "text.surfaced",
+				);
+				if (!stored) throw new Error("missing verdict in event log");
+				expect(stored.data).toEqual(verdict);
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.projectEvent(stored);
+				yield* runner.projectEvent(stored);
+				expect(
+					yield* sql`SELECT surfacing_ordinal, surfacing_probabilities,
+					surfacing_set_version, surfacing_model, text, created_at, updated_at
+					FROM message_parts WHERE id = 'p1'`,
+				).toEqual(before);
+				const { q: reloaded } = yield* openDetail({ sessionId: SID });
+				expect(
+					chatOf(yield* takeN(reloaded, 2)).find(
+						(message) => message.type === "assistant",
+					),
+				).toMatchObject(expected);
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
+	);
+
+	it.effect("text.surfaced targets only the named session's text part", () =>
+		Effect.gen(function* () {
+			yield* recoverProjections;
+			yield* commit([
+				sessionCreated(SID),
+				messageCreated(SID, "m1", "assistant"),
+				textDelta(SID, "m1", "p1", "Keep"),
+				toolStarted(SID, "m1", "tool1"),
+				sessionCreated("other"),
+				messageCreated("other", "m2", "assistant"),
+				textDelta("other", "m2", "p2", "Other"),
+			]);
+			for (const target of [
+				{ messageId: "m1", partId: "missing" },
+				{ messageId: "m1", partId: "tool1" },
+				{ messageId: "m1", partId: "p2" },
+				{ messageId: "m2", partId: "p2" },
+			])
+				yield* commit([
+					canonicalEvent("text.surfaced", SID, {
+						...target,
+						ordinal: 1,
+						categorySetVersion: 1,
+						model: "jev",
+						probabilities: null,
+					}),
+				]);
+			const sql = yield* SqlClient.SqlClient;
+			expect(
+				yield* sql`SELECT id FROM message_parts WHERE surfacing_ordinal IS NOT NULL`,
+			).toEqual([]);
+			expect(yield* sql`SELECT id FROM message_parts ORDER BY id`).toEqual([
+				{ id: "p1" },
+				{ id: "p2" },
+				{ id: "tool1" },
+			]);
+		}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
+	);
+
+	// Failure modes: modern SSE parts arrive before the message header; thinking
+	// and tools reorder adjacent text; a late verdict loses its ordinal on the wire;
+	// REST reconciliation erases it, duplicates text, or judges the final reply.
+	// Verdicts are supplied explicitly: ahu8.4 deferred the judging service.
+	it.effect.each([false, true])(
+		"OpenCode adapter delivers supplied verdicts live and after REST reload (part first: %s)",
+		(partFirst) =>
+			Effect.gen(function* () {
+				const log = {
+					warn: vi.fn(),
+					debug: vi.fn(),
+					info: vi.fn(),
+					verbose: vi.fn(),
+				};
+				const ingress = yield* makeEffectOpenCodeRuntimeIngress(log);
+				yield* Effect.addFinalizer(() => Effect.sync(() => ingress.shutdown()));
+				const header = makeSSEEvent("message.updated", {
+					sessionID: SID,
+					info: { id: "oc-message", role: "assistant", time: { created: 10 } },
+				});
+				const parts: NonNullable<Message["parts"]> = [
+					{
+						id: "oc-ask",
+						type: "text",
+						text: "Should I widen the change?",
+						time: { start: 11, end: 12 },
+					},
+					{
+						id: "oc-thinking",
+						type: "reasoning",
+						text: "Checking the scope",
+						time: { start: 12, end: 13 },
+					},
+					{
+						id: "oc-unjudged",
+						type: "text",
+						text: "The check needs credentials.",
+						time: { start: 13, end: 14 },
+					},
+					{
+						id: "oc-tool",
+						type: "tool",
+						tool: "Bash",
+						callID: "oc-call",
+						state: {
+							status: "completed",
+							input: { command: "pwd" },
+							output: "/project",
+							time: { start: 14, end: 15 },
+						},
+					},
+					{
+						id: "oc-final",
+						type: "text",
+						text: "Finished the review.",
+						time: { start: 15, end: 16 },
+					},
+				];
+				const first = makeSSEEvent("message.part.delta", {
+					sessionID: SID,
+					messageID: "oc-message",
+					partID: "oc-ask",
+					field: "text",
+					delta: "Should I ",
+				});
+				for (const event of partFirst ? [first, header] : [header, first])
+					expect(
+						yield* ingress.onSSEEventEffect(event, SID, "opencode"),
+					).toMatchObject({ ok: true });
+				for (const part of parts) {
+					const event = makeSSEEvent("message.part.updated", {
+						sessionID: SID,
+						part: { ...part, sessionID: SID, messageID: "oc-message" },
+					});
+					expect(
+						yield* ingress.onSSEEventEffect(event, SID, "opencode"),
+					).toMatchObject({ ok: true });
+				}
+				const { q } = yield* openDetail({ sessionId: SID });
+				const base = yield* takeN(q, 2);
+				expect(
+					chatOf(base)
+						.filter((part) => part.type === "assistant")
+						.map((part) => part.surfacingOrdinal),
+				).toEqual([undefined, undefined, undefined]);
+				const verdicts = [
+					{
+						messageId: "oc-message",
+						partId: "oc-ask",
+						ordinal: 1,
+						categorySetVersion: 1,
+						model: "jev-test",
+						probabilities: { ask: 0.8, routine: 0.2 },
+					},
+					{
+						messageId: "oc-message",
+						partId: "oc-unjudged",
+						ordinal: 2,
+						categorySetVersion: 1,
+						model: "jev-test",
+						probabilities: null,
+					},
+				];
+				yield* commit(
+					verdicts.map((verdict) =>
+						canonicalEvent("text.surfaced", SID, verdict, {
+							provider: "conduit",
+						}),
+					),
+				);
+				const live = chatOf([...base, ...(yield* takeN(q, 3))]);
+				const expected = [
+					{
+						type: "assistant",
+						partId: "oc-ask",
+						rawText: "Should I widen the change?",
+						surfacingOrdinal: 1,
+						surfacingProbabilities: { ask: 0.8, routine: 0.2 },
+						surfacingSetVersion: 1,
+						surfacingModel: "jev-test",
+					},
+					{ type: "thinking", text: "Checking the scope" },
+					{
+						type: "assistant",
+						partId: "oc-unjudged",
+						rawText: "The check needs credentials.",
+						surfacingOrdinal: 2,
+						surfacingProbabilities: null,
+						surfacingSetVersion: 1,
+						surfacingModel: "jev-test",
+					},
+					{ type: "tool", name: "Bash" },
+					{
+						type: "assistant",
+						partId: "oc-final",
+						rawText: "Finished the review.",
+					},
+				];
+				expect(live).toMatchObject(expected);
+				expect(live.at(-1)).not.toHaveProperty("surfacingOrdinal");
+				expect(live.at(-1)).not.toHaveProperty("surfacingProbabilities");
+				const rest: Message[] = [
+					{
+						id: "oc-message",
+						sessionID: SID,
+						role: "assistant",
+						time: { created: 10, completed: 20 },
+						parts,
+					},
+				];
+				const fetchMessages = vi.fn(() => Effect.succeed(rest));
+				const reconnected = yield* makeEffectOpenCodeRuntimeIngress(
+					log,
+					fetchMessages,
+				);
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => reconnected.shutdown()),
+				);
+				yield* reconnected.reconcileSession(SID);
+				// Wait on the observable completed-message update, not a timer or
+				// the reconciler's private background fiber.
+				yield* Stream.fromQueue(q).pipe(
+					Stream.takeUntil(
+						(envelope) =>
+							envelope._tag === "upsert" &&
+							envelope.item._tag === "message" &&
+							envelope.item.message.time?.completed === 20,
+					),
+					Stream.runDrain,
+				);
+				expect(fetchMessages).toHaveBeenCalledOnce();
+				const { q: reloaded } = yield* openDetail({ sessionId: SID });
+				const reload = chatOf(yield* takeN(reloaded, 2));
+				// Completion can add a result row, but the same text parts retain the
+				// same identities, order, numbers and verdicts after reconciliation.
+				const reloadedParts = reload.filter((part) => part.type !== "result");
+				expect(reloadedParts).toMatchObject(expected);
+				expect(reloadedParts.map((part) => part.uuid)).toEqual(
+					live.map((part) => part.uuid),
+				);
+				expect(reloadedParts.at(-1)).not.toHaveProperty("surfacingOrdinal");
+				expect(reloadedParts.at(-1)).not.toHaveProperty(
+					"surfacingProbabilities",
+				);
+				const query = yield* ReadQueryEffectTag;
+				const history = messageRowsToHistory(
+					yield* query.getSessionMessagesWithParts(SID),
+					{ pageSize: 50 },
+				);
+				expect(
+					history.messages[0]?.parts?.filter((part) => part.type === "text"),
+				).toMatchObject([
+					{
+						id: "oc-ask",
+						surfacingOrdinal: 1,
+						surfacingProbabilities: { ask: 0.8, routine: 0.2 },
+					},
+					{
+						id: "oc-unjudged",
+						surfacingOrdinal: 2,
+						surfacingProbabilities: null,
+					},
+					{ id: "oc-final" },
+				]);
+				expect(log.warn).not.toHaveBeenCalled();
+				yield* Effect.sync(() => {
+					mkdirSync("test-results", { recursive: true });
+					writeFileSync(
+						`test-results/ahu8-7-opencode-surfacing-${partFirst ? "part-first" : "header-first"}.json`,
+						JSON.stringify(
+							{
+								verdicts,
+								live,
+								reload,
+								history,
+								requests: fetchMessages.mock.calls,
+							},
+							null,
+							2,
+						),
+					);
+				});
+			}).pipe(Effect.provide(makeDetailIngestionTestLayer(), { local: true })),
+	);
+
+	it.effect(
+		"OpenCode snapshots retain text.surfaced facts across reconciliation and history reads",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				const snapshot = (digest: string) =>
+					canonicalEvent(
+						"message.snapshot",
+						SID,
+						{
+							messageId: "m1",
+							digest,
+							message: {
+								id: "m1",
+								sessionID: SID,
+								role: "assistant",
+								time: { created: 10, completed: 30 },
+								parts: [
+									{
+										id: "p1",
+										type: "text",
+										text: "Snapshot",
+										time: { start: 20, end: 25 },
+									},
+								],
+							},
+						},
+						{ provider: "opencode", metadata: { rawSource: "opencode.rest" } },
+					);
+				yield* commit([sessionCreated(SID), snapshot("first")]);
+				const { q } = yield* openDetail({ sessionId: SID });
+				const base = yield* takeN(q, 2);
+				yield* commit([
+					canonicalEvent(
+						"text.surfaced",
+						SID,
+						{
+							messageId: "m1",
+							partId: "p1",
+							ordinal: 2,
+							categorySetVersion: 4,
+							model: "jev",
+							probabilities: null,
+						},
+						{ provider: "conduit" },
+					),
+				]);
+				const expected = {
+					surfacingOrdinal: 2,
+					surfacingSetVersion: 4,
+					surfacingModel: "jev",
+					surfacingProbabilities: null,
+					createdAt: 20,
+				};
+				expect(
+					chatOf([...base, ...(yield* takeN(q, 2))]).find(
+						(message) => message.type === "assistant",
+					),
+				).toMatchObject(expected);
+				yield* commit([snapshot("second")]);
+				const sql = yield* SqlClient.SqlClient;
+				expect(
+					yield* sql`SELECT rest_digest FROM messages WHERE id = 'm1'`,
+				).toEqual([{ rest_digest: "second" }]);
+				const { q: reloaded } = yield* openDetail({ sessionId: SID });
+				expect(
+					chatOf(yield* takeN(reloaded, 2)).find(
+						(message) => message.type === "assistant",
+					),
+				).toMatchObject(expected);
+				const query = yield* ReadQueryEffectTag;
+				const history = messageRowsToHistory(
+					yield* query.getSessionMessagesWithParts(SID),
+					{ pageSize: 50 },
+				);
+				const { createdAt: _createdAt, ...surfacing } = expected;
+				expect(history.messages[0]?.parts?.[0]).toMatchObject({
+					...surfacing,
+					time: { start: 20 },
+				});
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
+	);
 
 	it.effect(
 		"thinking is in progress until thinking.end, which stamps its end",

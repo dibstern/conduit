@@ -41,3 +41,20 @@ export const Disabled: Story = {
 export const DisabledChecked: Story = {
 	args: { checked: true, disabled: true, onchange: meta.args.onchange },
 };
+
+export const DefaultLight: Story = { globals: { theme: "light" } };
+export const CheckedLight: Story = { ...Checked, globals: { theme: "light" } };
+
+export const Navigation: Story = {
+	args: {
+		label: "Worktree cleanup",
+		checked: undefined,
+		onclick: fn(),
+		summary: "Merged · idle 7 days · more",
+		expanded: false,
+	},
+};
+export const NavigationLight: Story = {
+	...Navigation,
+	globals: { theme: "light" },
+};

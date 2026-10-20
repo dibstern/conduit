@@ -138,6 +138,8 @@ for (const scenario of [
 	it.effect(scenario.name, () => {
 		const targetAccount = "at" in scenario ? "personal" : "work";
 		const admittedSessions: string[] = [];
+		// A switch hold is taken under the inbox permit too, before any admission.
+		const holds: string[] = [];
 		const admission = Semaphore.makeUnsafe(1);
 		const sends: Array<{
 			accountId: string;
@@ -255,7 +257,8 @@ for (const scenario of [
 					),
 				).toHaveLength(1);
 			} else if (Either.isSuccess(result)) {
-				expect(admittedSessions).toEqual(["s1"]);
+				expect(holds).toEqual(["s1"]);
+				expect(admittedSessions).toEqual(["s1", "s1"]);
 				expect(binding).toBe("work");
 				expect(yield* engine.getProviderForSessionEffect("s1")).toBe("work");
 				expect(sends).toEqual([
@@ -267,7 +270,7 @@ for (const scenario of [
 					),
 				).toHaveLength(1);
 			} else {
-				expect(admittedSessions).toEqual([]);
+				expect(admittedSessions).toEqual(holds);
 				expect(binding).toBe("deleted-claude");
 				expect(sends).toEqual([]);
 				expect(yield* store.readAllBySession("s1")).toEqual(before);
@@ -292,9 +295,14 @@ for (const scenario of [
 				publishGlobalSetting: () => Effect.void,
 			}),
 			Effect.provideService(ProviderTurnServiceTag, {
-				holdUserTurnsForAccountSwitch: () => Effect.void,
+				holdUserTurnsForAccountSwitch: (sessionId) =>
+					Effect.sync(() => {
+						holds.push(sessionId);
+					}),
 				prepareTurnSession: (input) => Effect.succeed(input.sessionId),
-				interruptTurn: () => Effect.void,
+				turnFences: () => ({ stopping: false, switching: false }),
+				fenceLifts: Effect.succeed(Stream.never),
+				beginStop: () => Effect.succeed(Effect.void),
 				sendTurn: (input) =>
 					Effect.sync(() => {
 						const account = input.account;

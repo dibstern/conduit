@@ -92,7 +92,7 @@
 	{#if offset < 0}
 		<div
 			aria-hidden="true"
-			class="absolute inset-0 flex items-center justify-end gap-1 px-3 font-brand text-sm font-medium {stage === 'none' ? 'bg-error/15 text-error' : 'bg-error text-bg'}"
+			class="absolute inset-0 flex items-center justify-end gap-1 px-3 font-sans text-sm font-medium {stage === 'none' ? 'bg-error/15 text-error' : 'bg-error text-bg'}"
 		>
 			<Icon name="trash-2" size={14} />
 			{stage === "none" ? "Remove" : "Release to remove"}

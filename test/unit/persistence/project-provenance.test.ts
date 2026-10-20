@@ -119,6 +119,12 @@ describe("Bound project provenance", () => {
 			"0066_project_tree_data",
 			"0067_purge_background_shell_sessions",
 			"0068_input_drafts",
+			"0069_goal_check_metadata",
+			"0070_message_part_surfacing",
+			"0071_sessions_settled_shelf_index",
+			"0072_surfacing_marks",
+			"0073_message_part_read",
+			"0074_turn_recaps",
 		]);
 	});
 

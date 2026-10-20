@@ -1,4 +1,8 @@
 import { Effect } from "effect";
+import {
+	AttachmentValidationError,
+	validateAttachmentDataUrls,
+} from "../attachment-data-url.js";
 import type { InputDelivery, SteerBlocker } from "../contracts/stored-event.js";
 import type { InputDraftKey } from "../contracts/ws-rpc.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
@@ -39,6 +43,14 @@ export type SendMessageToSessionResult = {
 
 export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 	Effect.gen(function* () {
+		// Reject direct RPC payloads before preparing a session or writing its inbox.
+		yield* Effect.try({
+			try: () => validateAttachmentDataUrls(input.images),
+			catch: (cause) =>
+				new AttachmentValidationError(
+					cause instanceof Error ? cause.message : String(cause),
+				),
+		});
 		const log = yield* LoggerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 
@@ -46,7 +58,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		const imageList =
 			images && images.length > 0 ? Array.from(images) : undefined;
 		let activeId = input.sessionId;
-		if (!text)
+		if (!text && !imageList)
 			return {
 				sessionId: activeId,
 				handedOff: false,
@@ -144,7 +156,7 @@ export const handleMessage = (
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
-		if (!payload.text) return;
+		if (!payload.text && !payload.images?.length) return;
 		if (!payload.commandId) {
 			log.warn(`client=${clientId} send_turn dropped: missing commandId`);
 			return;
@@ -165,11 +177,13 @@ export const cancelSessionById = (
 ) =>
 	Effect.gen(function* () {
 		const providerTurnService = yield* ProviderTurnServiceTag;
-		yield* providerTurnService.interruptTurn({
-			clientId,
-			commandId,
+		const inbox = yield* SessionInboxTag;
+		// Fence under the inbox permit, so no handoff is mid-decision; wait outside it.
+		const stopped = yield* inbox.withSession(
 			sessionId,
-		});
+			providerTurnService.beginStop({ clientId, commandId, sessionId }),
+		);
+		yield* stopped;
 	});
 
 export {

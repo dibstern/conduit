@@ -9,6 +9,7 @@ import {
 import {
 	instancesWith,
 	multiInstanceInitMessages,
+	multiInstanceProjectList,
 	noInstanceInitMessages,
 	singleInstanceInitMessages,
 	unboundInitMessages,
@@ -174,13 +175,17 @@ function defaultAccountDaemon() {
 		});
 		publishModels(defaultId());
 		await mockRelayWebSocket(page, {
-			initMessages: unboundInitMessages.filter(
-				(message) =>
-					message.type !== "instance_list" &&
-					message.type !== "model_info" &&
-					message.type !== "mock_model_catalog" &&
-					message.type !== "mock_agent_catalog",
-			),
+			// The daemon above owns the accounts; a draft sends into a project.
+			initMessages: [
+				...unboundInitMessages.filter(
+					(message) =>
+						message.type !== "model_info" &&
+						message.type !== "instance_list" &&
+						message.type !== "mock_model_catalog" &&
+						message.type !== "mock_agent_catalog",
+				),
+				multiInstanceProjectList,
+			],
 			responses: new Map(),
 			initDelay: 0,
 			messageDelay: 0,
@@ -228,6 +233,13 @@ test.describe("Claude defaults", () => {
 					.locator('#input-area [data-testid="harness-logo"]:visible')
 					.first(),
 			).toHaveAttribute("data-account", "personal");
+			// A phone shows usage under its session list, not beside a draft.
+			const phone = await client.getByTestId("session-bar-back").isVisible();
+			if (phone) await client.getByTestId("session-bar-back").click();
+			await expect(
+				client.getByTestId("usage-footer-row-personal"),
+			).toHaveAttribute("data-default", "true");
+			if (phone) await client.locator("#new-session-btn:visible").click();
 			await openPickerRoot(
 				client,
 				client.getByTestId("model-picker-trigger").first(),
@@ -531,8 +543,8 @@ async function mockInstanceRpc(page: Page): Promise<RpcMockControl> {
 }
 
 /**
- * Global settings lives in the list overflow or the session bar overflow,
- * including the phone island. The title menu needs a created session.
+ * Settings lives in the list overflow on a phone's list, and in the session
+ * bar (or phone island) overflow otherwise; a draft has no session title sheet.
  */
 async function openSettingsPanel(page: Page): Promise<void> {
 	const listOverflow = page.getByTestId("list-bar-overflow");
@@ -562,7 +574,7 @@ async function pickDraftInstance(
 	instanceId: string,
 ): Promise<void> {
 	const picker = page.locator(
-		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 	);
 	// Every fixture instance shares one harness, so the picker shows only account cards.
 	await openPickerRoot(page, picker);
@@ -593,7 +605,7 @@ test("a named instance pick is scoped to the draft and resets on reload", async 
 	await waitForChatReady(page);
 	await expect(
 		page.locator(
-			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 		),
 	).toHaveAttribute("data-instance-id", "personal");
 	await page.screenshot({
@@ -969,7 +981,7 @@ test.describe("Session List: Instance Status Banner", () => {
 				return {
 					type: "instance_list" as const,
 					instances: instancesWith({ personal: "unhealthy" }).filter(
-						(instance) => instance.id === "personal",
+						({ id }) => id === "personal",
 					),
 				};
 			}
@@ -1009,7 +1021,7 @@ test.describe("Session List: Instance Status Banner", () => {
 				return {
 					type: "instance_list" as const,
 					instances: instancesWith({ personal: "unhealthy" }).filter(
-						(instance) => instance.id === "personal",
+						({ id }) => id === "personal",
 					),
 				};
 			}

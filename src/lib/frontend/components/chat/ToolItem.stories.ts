@@ -81,3 +81,17 @@ export const SubagentRunning: Story = {
 export const SubagentCompleted: Story = {
 	args: { message: mockToolSubagentCompleted },
 };
+
+export const Final: Story = {
+	args: { message: { ...mockToolCompleted, createdAt: 1000, endedAt: 6200 } },
+	globals: { theme: "dark" },
+};
+export const FinalLight: Story = { ...Final, globals: { theme: "light" } };
+export const QuestionAnsweredLight: Story = {
+	...QuestionAnswered,
+	globals: { theme: "light" },
+};
+export const SubagentCompletedLight: Story = {
+	...SubagentCompleted,
+	globals: { theme: "light" },
+};

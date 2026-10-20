@@ -107,3 +107,5 @@ export const Hover: Story = {
 	...AddOnly,
 	parameters: { pseudo: { hover: true } },
 };
+
+export const MixedLight: Story = { ...Mixed, globals: { theme: "light" } };

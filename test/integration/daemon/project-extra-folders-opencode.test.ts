@@ -7,7 +7,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -276,19 +275,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 		]);
 		await save(fixture, [fixture.projectDir]);
 		if (restart) {
-			// SIGKILL bypasses the debounced save and shutdown flush.
-			await vi.waitFor(
-				() => {
-					const config = loadDaemonConfigResult(fixture.configDir);
-					if (config._tag === "Failure") throw config.failure;
-					const folders = config.success?.projects.find(
-						({ slug }) => slug === "process-test",
-					)?.folders;
-					expect(folders).toEqual([fixture.projectDir]);
-					evidence["persistedFoldersBeforeKill"] = folders;
-				},
-				{ timeout: 15_000 },
-			);
+			// The SaveProject acknowledgement must survive SIGKILL without a flush wait.
 			await fixture.kill();
 			await fixture.restart();
 		}

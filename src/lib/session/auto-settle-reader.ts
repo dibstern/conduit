@@ -27,6 +27,7 @@ export const readPersistedAutoSettleFacts = (
 ) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		// Discovery skips children up front; the policy turns them off either way.
 		const rows = yield* sql<SessionRow>`SELECT * FROM sessions
 			WHERE project_id = ${projectId}
 				AND ${sessionId === undefined ? sql`parent_id IS NULL` : sql`id = ${sessionId}`}`;

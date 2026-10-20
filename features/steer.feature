@@ -34,6 +34,7 @@ Scenario Outline: Steer waits while the running turn has a prompt open
   Then pending-input row 1 offers an enabled Steer
   When a prompt opens in the running turn
   Then pending-input row 1 offers a disabled Steer
+  And pending-input row 1 offers a disabled Run now
   And hovering Steer on row 1 explains Answer the open prompt before steering
   And the screen region visually matches <baseline> at <threshold> percent
 

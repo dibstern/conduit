@@ -10,9 +10,15 @@ const meta = {
 	component: GitIdentity,
 	tags: ["autodocs"],
 	args: { directory: "/src/conduit", git: undefined, presentation: "control" },
-	beforeEach: () => {
+	beforeEach: ({ canvasElement }) => {
 		sessionViewState.compact = false;
 		sessionViewState.composerWidth = 760;
+		// The root outlives the story; take back layout changes from fit checks.
+		const style = canvasElement.getAttribute("style");
+		return () => {
+			if (style === null) canvasElement.removeAttribute("style");
+			else canvasElement.setAttribute("style", style);
+		};
 	},
 } satisfies Meta<typeof GitIdentity>;
 
@@ -23,6 +29,43 @@ export const NoGit: Story = {};
 
 export const BranchOnly: Story = {
 	args: { git: { branch: "main" } },
+};
+
+export const ControlBlockResize: Story = {
+	...BranchOnly,
+	play: async ({ canvasElement }) => {
+		const identity = within(canvasElement).getByTestId("composer-checkout");
+		const slot = identity.parentElement;
+		if (!slot) throw new Error("Missing checkout slot");
+		canvasElement.style.width = "320px";
+		await waitFor(() => {
+			expect(slot.getBoundingClientRect().width).toBe(220);
+			expect(identity.querySelector('[data-part="branch"]')).toHaveTextContent(
+				"main",
+			);
+		});
+		canvasElement.style.width = "180px";
+		await waitFor(() => {
+			expect(identity.querySelector('[data-part="branch"]')).toBeNull();
+			expect(slot.getBoundingClientRect().right).toBeLessThanOrEqual(
+				canvasElement.getBoundingClientRect().right,
+			);
+		});
+		canvasElement.style.width = "360px";
+		await waitFor(() => {
+			expect(slot.getBoundingClientRect().width).toBe(220);
+			expect(identity.querySelector('[data-part="branch"]')).toHaveTextContent(
+				"main",
+			);
+		});
+	},
+};
+
+export const ControlGridResize: Story = {
+	...ControlBlockResize,
+	beforeEach: ({ canvasElement }) => {
+		canvasElement.style.display = "grid";
+	},
 };
 
 export const BranchAndWorktree: Story = {
@@ -46,12 +89,11 @@ export const Narrow: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const identity = within(canvasElement).getByTestId("composer-checkout");
-		// Size the story's own wrapper: #storybook-root outlives the story, so
-		// styling it would leak the narrow width into the next one.
+		// The pill's own 220px cap is the narrowest that keeps its labels;
+		// LongNames covers the collapse below it.
 		const container = identity.parentElement;
 		expect(container).not.toBeNull();
 		if (!container) return;
-		container.style.width = "200px";
 		const project = within(identity).getByTitle(/^conduit-project/);
 		const branch = within(identity).getByTitle(/^Branch:/);
 		expect(identity.getBoundingClientRect().right).toBeLessThanOrEqual(
@@ -621,15 +663,11 @@ export const WordNarrow: Story = {
 		const checkout = within(canvasElement).getByTestId("composer-checkout");
 		const container = checkout.parentElement;
 		if (!container) throw new Error("Missing checkout wrapper");
-		container.style.width = "240px";
-		const project = checkout.querySelector('[data-part="project"]');
+		container.style.width = "160px";
+		// The words line names the branch alone; the menu keeps the project.
+		expect(checkout.querySelector('[data-part="project"]')).toBeNull();
 		const branch = checkout.querySelector('[data-part="branch"]');
-		if (!project || !branch) throw new Error("Missing checkout labels");
-		expect(project.scrollWidth).toBeGreaterThan(project.clientWidth);
-		expect(project.getBoundingClientRect().width).toBeCloseTo(
-			Number.parseFloat(getComputedStyle(project).minWidth),
-			0,
-		);
+		if (!branch) throw new Error("Missing checkout branch");
 		expect(branch.scrollWidth).toBeGreaterThan(branch.clientWidth);
 		await userEvent.click(checkout);
 		await expect(
@@ -786,18 +824,22 @@ export const LongNames: Story = {
 		const identity = within(canvasElement).getByTestId("composer-checkout");
 		const project = identity.querySelector('[data-part="project"]');
 		const branch = identity.querySelector('[data-part="branch"]');
-		const container = identity.parentElement;
 		expect(project).not.toBeNull();
 		expect(branch).not.toBeNull();
-		expect(container).not.toBeNull();
-		if (!project || !branch || !container) return;
-		// The control has no width cap of its own, so take away exactly the
-		// project's slack: the project must give all of it up before the branch
-		// loses a character. Size the story's own wrapper, as Narrow does.
-		const floor = Number.parseFloat(getComputedStyle(project).minWidth);
-		const slack = project.getBoundingClientRect().width - floor;
-		container.style.width = `${identity.getBoundingClientRect().width - slack}px`;
-		expect(project.getBoundingClientRect().width).toBeCloseTo(floor, 0);
-		expect(branch.scrollWidth).toBe(branch.clientWidth);
+		if (!project || !branch) return;
+		// The control caps at the spec's pill width. The project gives up all of
+		// its slack before the branch loses a character.
+		expect(branch.scrollWidth).toBeGreaterThan(branch.clientWidth);
+		expect(project.getBoundingClientRect().width).toBeCloseTo(
+			Number.parseFloat(getComputedStyle(project).minWidth),
+			0,
+		);
+		// Any narrower and the checkout collapses to its icon before the model
+		// label has to truncate. Size the row: the pill rewrites its own style.
+		canvasElement.style.width = "200px";
+		await waitFor(() =>
+			expect(identity.querySelector('[data-part="branch"]')).toBeNull(),
+		);
+		expect(identity.querySelector('[data-part="project"]')).toBeNull();
 	},
 };

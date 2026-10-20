@@ -151,7 +151,14 @@ export const sessionGoalHandlers: StepHandler[] = [
 		match: /^the (amber )?session goal subtitle reads (.+)$/,
 		run: async ({ world, match }) => {
 			const subtitle = world.page.getByTestId("session-goal-subtitle");
-			await expect(subtitle).toHaveText(match[2] ?? "");
+			// Desktop sets the label and the condition as separate flex items, so
+			// the space before the separator is layout, not text.
+			const parts = (match[2] ?? "")
+				.split(/\s*·\s*/)
+				.map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+			await expect(subtitle).toHaveText(
+				new RegExp(`^\\s*${parts.join("\\s*·\\s*")}\\s*$`),
+			);
 			// The tone follows the shell row, which arrives on its own socket,
 			// so the text can settle before the colour does.
 			const read = () =>
@@ -163,7 +170,7 @@ export const sessionGoalHandlers: StepHandler[] = [
 						? "--color-status-amber"
 						: label.startsWith("Goal met")
 							? "--color-status-green"
-							: "--color-status-violet";
+							: "--color-status-goal";
 					expected.color = style.getPropertyValue(token);
 					const text = el.querySelector("span");
 					return {
@@ -201,28 +208,18 @@ export const sessionGoalHandlers: StepHandler[] = [
 			await expect
 				.poll(() =>
 					world.page.locator("#input-row").evaluate((el, kind) => {
+						// The frame draws the goal as an outline around the box.
 						const style = getComputedStyle(el);
 						const probe = document.createElement("span");
-						probe.style.color =
-							kind === "dashed violet"
-								? "color-mix(in srgb, var(--color-status-violet) 60%, var(--color-border))"
-								: "var(--color-status-violet)";
+						probe.style.color = "var(--color-status-goal)";
 						el.append(probe);
 						const color = getComputedStyle(probe).color;
 						probe.remove();
-						if (kind === "normal")
-							return (
-								style.borderStyle === "solid" &&
-								style.borderColor !== color &&
-								!style.boxShadow.includes("3px")
-							);
+						if (kind === "normal") return style.outlineColor !== color;
 						return (
-							style.borderColor === color &&
-							style.borderStyle ===
-								(kind === "dashed violet" ? "dashed" : "solid") &&
-							(kind === "dashed violet"
-								? style.boxShadow === "none"
-								: style.boxShadow.includes("3px"))
+							style.outlineColor === color &&
+							style.outlineStyle ===
+								(kind === "dashed violet" ? "dashed" : "solid")
 						);
 					}, match[1]),
 				)
@@ -244,43 +241,12 @@ export const sessionGoalHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert checking goal header",
-		match:
-			/^the composer checks the goal at check ([0-9]+) without an elapsed timer$/,
+		name: "assert composer omits text",
+		match: /^the composer does not include (.+)$/,
 		run: async ({ world, match }) => {
-			const header = world.page.getByTestId("composer-status-header");
-			await expect(header).toHaveText(`Checking goal · check ${match[1]}`);
-			await expect(
-				world.page.getByTestId("composer-status-elapsed"),
-			).toHaveCount(0);
-			await expect
-				.poll(() =>
-					header
-						.locator("svg.lucide-loader-circle")
-						.evaluate((el) => getComputedStyle(el).animationName),
-				)
-				.toBe("spin");
-			await expect
-				.poll(() =>
-					world.page.getByTestId("composer-status-checking").evaluate((el) => {
-						const style = getComputedStyle(el);
-						const expected = new Option().style;
-						expected.color = style.getPropertyValue("--color-status-violet");
-						return (
-							style.color === expected.color && Number(style.fontWeight) >= 600
-						);
-					}),
-				)
-				.toBe(true);
-		},
-	},
-	{
-		name: "assert composer status omits text",
-		match: /^the composer status header does not include (.+)$/,
-		run: async ({ world, match }) => {
-			const header = world.page.getByTestId("composer-status-header");
-			await expect(header).toBeVisible();
-			await expect(header).not.toContainText(match[1] ?? "");
+			await expect(world.page.locator("#input-row")).not.toContainText(
+				match[1] ?? "",
+			);
 		},
 	},
 	{
@@ -294,10 +260,16 @@ export const sessionGoalHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert met goal bar",
-		match: /^the met goal bar reads (.+)$/,
+		match: /^the met goal bar reads (.+) and ends (.+)$/,
 		run: async ({ world, match }) => {
 			const bar = world.page.getByTestId("composer-goal-met");
-			await expect(bar.locator(":scope > span")).toHaveText(match[1] ?? "");
+			// The headline names the goal; the small line under it carries the check time and tally.
+			const [head, tail] = [match[1] ?? "", match[2] ?? ""].map((part) =>
+				part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+			);
+			await expect(bar.locator(":scope > div")).toHaveText(
+				new RegExp(`^${head}\\s*Checked .+${tail}$`),
+			);
 			await expect(
 				bar.getByRole("button", { name: "Dismiss", exact: true }),
 			).toBeVisible();

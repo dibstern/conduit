@@ -7,7 +7,7 @@ Scenario Outline: A phone shows the session's skills in the control group
   When I scroll the transcript up by 400 pixels
   Then the skills chip reads <count> skills used
   And the skills chip sits between back and the overflow menu
-  And the skills chip has a 44 pixel touch target
+  And the skills chip owns a 24 pixel touch target
   And the session-bar region visually matches <baseline> at <threshold> percent
 
 Examples:

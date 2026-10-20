@@ -134,6 +134,7 @@ async function stagePreProvenanceStore(
 			AND name IN (SELECT name FROM previous.sqlite_master WHERE type = 'table')
 			ORDER BY name`)
 			.all() as Array<{ name: string }>;
+		// The retired activities projection no longer exists in the current store.
 		db.transaction(() => {
 			for (const { name } of names) {
 				const columns = (

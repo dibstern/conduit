@@ -8,7 +8,10 @@ import {
 import { join, resolve } from "node:path";
 import { Effect, Fiber, Schema, Stream } from "effect";
 import type { SessionInfo } from "../../../src/lib/contracts/ws-rpc.js";
-import { handoffMessagesLine } from "../../../src/lib/frontend/utils/continuation.js";
+import {
+	handoffMessagesLine,
+	usageForecastTime,
+} from "../../../src/lib/frontend/utils/continuation.js";
 import { formatSnoozeTime } from "../../../src/lib/frontend/utils/format.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
 import { openPickerRoot } from "../helpers/model-picker.js";
@@ -446,7 +449,7 @@ for (const dismiss of [false, true]) {
 				await app.goto(`${harness.baseUrl}/?p=${encodeURIComponent(slug)}`);
 				await page.locator("#new-session-btn:visible").click();
 				const picker = page.locator(
-					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 				);
 				await openPickerRoot(page, picker);
 				await page.getByTestId("picker-harness-claude").click();
@@ -500,20 +503,18 @@ for (const dismiss of [false, true]) {
 				const cutOffTag = page.getByTestId("cut-off-tag");
 				await test.step("limited-session strip and cut-off tag", async () => {
 					const phone = testInfo.project.name === "mobile";
-					const resets = `resets ${formatSnoozeTime(1791370800 * 1000)}`;
+					const resets = `Resets at ${usageForecastTime(1791370800 * 1000, Date.now())}.`;
 					await expect(strip.getByTestId("usage-limit-title")).toHaveText(
-						phone ? "Usage limit reached" : "Usage limit reached · Account 1",
+						"Account 1 hit its weekly limit.",
 					);
 					await expect(strip.getByTestId("usage-limit-detail")).toHaveText(
-						phone ? `Account 1 · ${resets}` : `Weekly limit · ${resets}`,
+						resets,
 					);
 					await expect(cutOffTag).toHaveCount(1);
 					await expect(
 						chat.userMessages.last().getByTestId("cut-off-tag"),
 					).toHaveText(
-						phone
-							? "⏸ Cut off · Dismiss"
-							: "⏸ Cut off by usage limit · Dismiss",
+						phone ? "Cut off · Dismiss" : "Cut off by usage limit · Dismiss",
 					);
 					await page.screenshot({ path: join(artifacts, "01-limited.png") });
 				});
@@ -783,9 +784,7 @@ for (const decision of [
 				await expect.poll(() => usageProbes().length).toBe(1);
 				viewed = 1;
 				await expect(page.getByTestId("usage-limit-detail")).toHaveText(
-					testInfo.project.name === "mobile"
-						? "Retry account · reset time unavailable"
-						: "Reset time unavailable",
+					"Reset time unavailable",
 				);
 				await expect(tryAgain).toHaveText("Try again");
 				await page.screenshot({
@@ -1188,6 +1187,9 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 				const names = settings.getByTestId("usage-limit-account-name");
 				await expect(names.nth(0)).toHaveText("Account 2");
 				await expect(names.nth(1)).toHaveText("Account 3");
+				// Phones hide the drag handles until Edit order is pressed.
+				if (testInfo.project.name === "mobile")
+					await settings.getByTestId("usage-settings-reorder").click();
 				// Drag Account 3 above Account 2 with the mouse. The rows slide into the
 				// saved order as it loads, and hover's stability check can pass mid-slide,
 				// so wait for the slide to finish before measuring the handles. The quota
@@ -1586,7 +1588,7 @@ for (const scenario of [
 				.poll(() => latest()?.limitRecovery)
 				.toEqual({ ...limited, scheduledAt: at });
 			if (ui) {
-				const resetLabel = formatSnoozeTime(at * 1000);
+				const resetLabel = usageForecastTime(at * 1000, Date.now());
 				await expect(strip).toHaveAttribute("data-state", "waiting");
 				await expect(page.getByTestId("usage-limit-title")).toHaveText(
 					mobile
@@ -1959,7 +1961,7 @@ for (const scenario of ["auto", "restart", "no-reset", "off"] as const) {
 			await expect
 				.poll(() => latest()?.limitRecovery)
 				.toEqual({ ...limited, scheduledAt: at, auto: true });
-			const resetLabel = formatSnoozeTime(at * 1000);
+			const resetLabel = usageForecastTime(at * 1000, Date.now());
 			await expect(strip).toHaveAttribute("data-state", "waiting");
 			await expect(page.getByTestId("usage-limit-title")).toHaveText(
 				mobile
@@ -2064,7 +2066,7 @@ test("scenario 12: changing agents sends a budgeted hidden handoff to a fresh na
 		await page.locator("#new-session-btn:visible").click();
 		await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
 		const picker = page.locator(
-			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 		);
 		await openPickerRoot(page, picker);
 		await page.getByTestId("picker-harness-claude").click();
@@ -2249,7 +2251,7 @@ test("scenario 13: the new agent reads omitted history through the registered MC
 		await page.locator("#new-session-btn:visible").click();
 		await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
 		const picker = page.locator(
-			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 		);
 		await openPickerRoot(page, picker);
 		await page.getByTestId("picker-harness-claude").click();
@@ -3222,8 +3224,14 @@ test("story 16: composer account cards switch the session, not the project", asy
 		await expect(bar.locator("[data-account]")).toHaveCount(0);
 		await page.screenshot({ path: join(artifacts, "01-composer.png") });
 
-		const trigger = page.getByTestId("composer-word-harness");
-		await trigger.click();
+		// Phones reach the account through the Composer sheet.
+		const openAccounts = async () => {
+			if ((page.viewportSize()?.width ?? 0) < 768) {
+				await page.getByTestId("composer-words-sheet-trigger").click();
+				await page.getByTestId("composer-more-account").click();
+			} else await page.getByTestId("composer-word-harness").click();
+		};
+		await openAccounts();
 		const row = page.getByTestId(`picker-account-${target.id}`);
 		const current = page.getByTestId(`picker-account-${source.id}`);
 		await expect(current).toHaveAttribute("aria-checked", "true");
@@ -3251,7 +3259,7 @@ test("story 16: composer account cards switch the session, not the project", asy
 			from: source.id,
 		});
 		expect(await registeredProject()).not.toHaveProperty("instanceId");
-		await trigger.click();
+		await openAccounts();
 		await expect(row).toHaveAttribute("aria-checked", "true");
 		await expect(row).toBeDisabled();
 		await page.keyboard.press("Escape");

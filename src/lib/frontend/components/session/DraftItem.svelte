@@ -25,12 +25,11 @@
 	});
 </script>
 
-<!-- The discard button can't nest inside the link, so it overlays the time slot: the row keeps the
-     full tray width, and on fine pointers the trash replaces the time on hover, as session rows do. -->
+<!-- Keep the link full width and overlay the separate discard button on its time slot. -->
 <div class="group relative" data-testid="draft-row" data-draft-id={draft.draftId}>
 	<Button
 		{href} variant="ghost" size="content" layout="flow" hoverFill="none"
-		class="grid w-full grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-x-[10px] gap-y-px rounded-panel px-[8px] py-[6px] pointer-coarse:pr-[44px] min-h-[44px] font-brand leading-[1.4] group-hover:bg-sidebar-hover {active ? 'bg-sidebar-active' : ''}"
+		class="grid w-full grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-x-[10px] gap-y-px rounded-panel px-[8px] py-[6px] min-h-[44px] font-sans leading-[1.4] {active ? 'bg-sidebar-active' : 'group-hover:bg-hover'}"
 		ariaLabel="Draft: {title}, {projectLabel}, {age}" aria-current={active ? "page" : undefined}
 		onclick={(event) => {
 			if (!onopen || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -39,9 +38,9 @@
 		}}
 	>
 		<span class="grid place-items-center text-text-dimmer"><Icon name="pencil-line" size={13} /></span>
-		<span class="truncate text-[13.5px] italic text-text-muted" title={title}>{title}</span>
-		<span class="font-mono text-[11px] tabular-nums text-text-dimmer pointer-fine:group-hover:invisible pointer-fine:group-focus-within:invisible">{age}</span>
-		<span class="col-span-2 col-start-2 flex min-w-0 items-center gap-[5px] text-[11.5px] text-text-dimmer">
+		<span class="min-w-0 truncate text-[13.5px] font-normal italic text-text-muted" title={title}>{title}</span>
+		<span class="whitespace-nowrap font-mono text-[11px] tabular-nums text-text-dimmer pointer-coarse:invisible pointer-coarse:min-w-[36px] pointer-fine:group-hover:invisible pointer-fine:group-focus-within:invisible">{age}</span>
+		<span class="col-span-2 col-start-2 flex min-w-0 items-center gap-[5px] text-[11.5px] text-text-dimmer pointer-coarse:pr-[36px]">
 			<ProjectSquare label={projectLabel} accent={projectAccent} dot />
 			<span class="truncate">{projectLabel}</span>
 		</span>

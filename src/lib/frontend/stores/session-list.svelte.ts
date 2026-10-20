@@ -17,6 +17,7 @@ import {
 	clearSessionSearch,
 	DAEMON_SESSION_PAGE_SIZE,
 	getFilteredSessions,
+	getSettledSessionCount,
 	loadMoreSearchResults,
 	searchSessions,
 	sessionState,
@@ -40,6 +41,7 @@ export interface SearchQuery {
 
 export interface SessionListView {
 	readonly rows: readonly SessionRow[];
+	readonly settledCount: { readonly count: number; readonly exact: boolean };
 	readonly settled: boolean;
 	readonly status: FeedStatus;
 	readonly staleSince: number | null;
@@ -74,6 +76,9 @@ const rows = $derived.by(() => getFilteredSessions());
 export const sessionList: SessionListView = {
 	get rows() {
 		return rows;
+	},
+	get settledCount() {
+		return getSettledSessionCount();
 	},
 	get settled() {
 		return (

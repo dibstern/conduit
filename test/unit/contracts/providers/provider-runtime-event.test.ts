@@ -30,6 +30,24 @@ const decodeEither = (value: unknown) =>
 	Schema.decodeUnknownExit(ProviderRuntimeEventSchema)(value);
 
 describe("ProviderRuntimeEvent contracts", () => {
+	it("rejects daemon-owned text.surfaced verdicts as provider ingress", () => {
+		expect(
+			Exit.isFailure(
+				decodeEither({
+					...baseEvent,
+					type: "text.surfaced",
+					data: {
+						messageId: "m1",
+						partId: "p1",
+						ordinal: 1,
+						categorySetVersion: 1,
+						model: "jev",
+						probabilities: null,
+					},
+				}),
+			),
+		).toBe(true);
+	});
 	it("keeps canonical and provider-runtime payload vocabularies separate", () => {
 		expectTypeOf<keyof EventPayloadMap>().toEqualTypeOf<CanonicalEventType>();
 		expectTypeOf<

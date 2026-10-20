@@ -72,7 +72,7 @@
 <div id="todo-sticky" class:hidden={isHidden}>
 	{#if !isHidden}
 		<div
-		class="todo-overlay bg-bg-surface border-b border-border p-0 relative z-10 font-brand {fading ? 'todo-fade-out' : ''}"
+		class="todo-overlay bg-bg-surface border-b border-border p-0 relative z-10 font-sans {fading ? 'todo-fade-out' : ''}"
 		>
 			<!-- Header -->
 			<TodoHeader

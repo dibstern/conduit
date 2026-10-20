@@ -13,8 +13,8 @@
 	let { driver, instanceId, size, surface }: {
 		driver: ProviderDriverKind;
 		instanceId: string | undefined;
-		// 15 and 17 retire with bn6x.8/.9.
-		size: 12 | 13 | 14 | 15 | 16 | 17;
+		/** The tile's edge; the mark inside is 60% of it, as in the Final design. */
+		size: 15 | 18;
 		surface: "box" | "surface" | "page";
 	} = $props();
 
@@ -46,14 +46,14 @@
 	data-driver={driver}
 	data-account={instanceId}
 	data-surface={surface}
-	class="logo"
+	class="logo {driver === 'claude' ? 'bg-harness-claude text-white [&_g]:fill-current' : 'bg-chip'}"
 	class:badged
 	style="--s:{size}px"
 >
 	{#if presentation}
-		<Icon name={presentation.logo} {size} />
+		<Icon name={presentation.logo} size={Math.round(size * .6)} />
 	{:else}
-		<Icon name="bot" {size} class="text-text-secondary" />
+		<Icon name="bot" size={Math.round(size * .6)} class="text-text-secondary" />
 	{/if}
 	{#if badged && instanceId !== undefined}
 		<span
@@ -75,6 +75,7 @@
 		flex-shrink: 0;
 		width: var(--s);
 		height: var(--s);
+		border-radius: calc(var(--s) * .28);
 	}
 	.logo[data-surface="box"] { --ring: var(--color-input-bg); }
 	.logo[data-surface="surface"] { --ring: var(--color-bg-surface); }

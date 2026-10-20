@@ -99,8 +99,11 @@ export const TruncatedFile: Story = {
 		// The notice is the last child of the scroll region, so at rest it sits ~25k
 		// pixels below the fold and the baseline would depict an ordinary file.
 		// Scroll to it: the truncated state is the only thing this story exists for.
+		// Wait for fonts first: a late swap grows the content after the scroll and
+		// leaves some captures a pixel short of the bottom.
 		const scroller = canvasElement.querySelector(".fv-code")?.parentElement;
 		expect(scroller).not.toBeNull();
+		await document.fonts.ready;
 		scroller?.scrollTo({ top: scroller.scrollHeight });
 		await waitFor(() => {
 			expect(scroller?.scrollTop).toBeGreaterThan(0);

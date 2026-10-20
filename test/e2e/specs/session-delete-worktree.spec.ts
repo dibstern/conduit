@@ -163,8 +163,7 @@ async function openDelete(page: Page, mobile: boolean, bulk = false) {
 	const row = page.locator('#session-list [data-session-id="delete-session"]');
 	if (mobile || bulk) {
 		if (mobile) {
-			await page.getByTestId("list-bar-overflow").click();
-			await page.getByTestId("list-overflow-select").click();
+			await page.getByTestId("list-bar-select").click();
 		} else {
 			await page.getByRole("button", { name: "Select sessions" }).click();
 		}
@@ -686,8 +685,7 @@ for (const mode of [
 				failInspection: true,
 			});
 			if (mode.mobile) {
-				await page.getByTestId("list-bar-overflow").click();
-				await page.getByTestId("list-overflow-select").click();
+				await page.getByTestId("list-bar-select").click();
 				await page
 					.locator('#session-list [data-session-id="delete-session"]')
 					.getByRole("checkbox")

@@ -66,7 +66,7 @@ for (const mode of [
 				await page.getByTestId("views-rail-terminal").hover();
 				await expect(page.getByRole("tooltip")).toContainText("⌥2");
 				await page.getByTestId("session-bar-settle").hover();
-				await expect(page.getByRole("tooltip")).toContainText("s · ⌘⇧E");
+				await expect(page.getByRole("tooltip")).toContainText("s · ⌘⇧S");
 			} else {
 				await page.getByTestId("session-bar-island-overflow").tap();
 				await expect(
@@ -99,7 +99,11 @@ for (const mode of [
 			await expect(
 				page.getByRole("status").filter({ hasText: "Unpin to settle" }),
 			).toBeVisible();
-			await expect(page.getByTestId("session-bar-state-chip")).toHaveCount(0);
+			await expect(
+				page.locator(
+					'[data-testid="session-bar-state-chip"][data-state="settled"]',
+				),
+			).toHaveCount(0);
 
 			const headerCommand = page.getByTestId("session-bar-settle");
 			await expect(headerCommand).toHaveAccessibleName("Unpin");

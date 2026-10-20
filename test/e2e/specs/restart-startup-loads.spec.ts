@@ -114,6 +114,9 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 					exit: { _tag: string };
 					values?: ShellEnvelope[];
 				};
+				// A subscription answers with its first Chunk. Any server Exit also
+				// counts because the bug fails client-side before sending a frame.
+				if (response._tag !== "Exit" && response._tag !== "Chunk") continue;
 				const tag = requests.get(String(response.requestId));
 				if (!tag) continue;
 				if (tag === "SubscribeShell" && response._tag === "Chunk") {

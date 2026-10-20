@@ -6,6 +6,7 @@
 -->
 <script lang="ts">
 	import { tick } from "svelte";
+	import { MediaQuery } from "svelte/reactivity";
 	import {
 		terminalState,
 		getTabList,
@@ -24,10 +25,22 @@
 	import { failureLine } from "../../transport/rpc-errors.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import type { GetFileTreeResponse } from "../../transport/ws-rpc.js";
+	import type { Terminal } from "@xterm/xterm";
+	import { projectState } from "../../stores/project-state.svelte.js";
+	import { TERMINAL_MODIFIERS } from "../../../contracts/terminal-keys.js";
+	import {
+		createTerminalKeys,
+		isTerminalModifier,
+		TERMINAL_KEY_LABELS,
+	} from "../../utils/terminal-keys.svelte.js";
 	import Button from "../ui/Button.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
+	import MenuSeparator from "../ui/MenuSeparator.svelte";
 	import Surface from "../ui/Surface.svelte";
+	import TerminalKey from "../ui/TerminalKey.svelte";
+	import TerminalKeyRow from "./TerminalKeyRow.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 
@@ -35,6 +48,86 @@
 		onTabBarTouchStart?: (e: TouchEvent) => void;
 		folders?: GetFileTreeResponse["roots"];
 	} = $props();
+
+	// One per panel, so key state resets when the panel closes.
+	// The find bar belongs to the tab it was opened on.
+	let find = $state<{ terminal: Terminal; tab: string | null } | null>(null);
+	const keys = createTerminalKeys({
+		openFind: (terminal) => (find = { terminal, tab: terminalState.activeTabId }),
+		settings: () => projectState.terminalKeys,
+	});
+	// Input type, not width: a fine pointer gets the tab-bar keys, touch gets
+	// the row under the terminal, phones and tablets alike.
+	// jsdom has no matchMedia; real browsers always do.
+	const finePointer =
+		typeof matchMedia === "function" ? new MediaQuery("(pointer: fine)") : { current: true };
+	const BAR_KEYS = [
+		{ key: "paste", group: "paste" },
+		{ key: "esc", group: "escTab" },
+		{ key: "tab", group: "escTab" },
+		{ key: "ctrl", group: "modifiers" },
+		{ key: "opt", group: "modifiers" },
+		{ key: "cmd", group: "modifiers" },
+		{ key: "shift", group: "modifiers" },
+		{ key: "left", group: "arrows" },
+		{ key: "up", group: "arrows" },
+		{ key: "down", group: "arrows" },
+		{ key: "right", group: "arrows" },
+	] as const;
+	const visibleBarKeys = $derived(BAR_KEYS.filter(({ group }) =>
+		projectState.terminalKeys.bar.show && projectState.terminalKeys.bar[group],
+	));
+	const heldModifiers = $derived(
+		TERMINAL_MODIFIERS.filter((key) => keys.modifiers[key] !== "off"),
+	);
+	const lockedModifier = $derived(
+		heldModifiers.some((key) => keys.modifiers[key] === "locked"),
+	);
+	const modifierDescription = $derived(
+		heldModifiers.map((key) => `${TERMINAL_KEY_LABELS[key].name} ${keys.modifiers[key]}`).join(", "),
+	);
+	const keysDescriptionId = $props.id();
+	let keysFolded = $state(false);
+	let tabBarEl = $state<HTMLDivElement>();
+	let inlineKeysEl = $state<HTMLDivElement>();
+	let keysSlotEl = $state<HTMLDivElement>();
+
+	$effect(() => {
+		const bar = tabBarEl;
+		const inline = inlineKeysEl;
+		const slot = keysSlotEl;
+		// Reobserve when tabs or optional controls change.
+		canCreate;
+		folders.length;
+		tabs;
+		pendingTitle;
+		if (!bar || !inline || !slot || typeof ResizeObserver === "undefined") return;
+		const measure = () => {
+			const style = getComputedStyle(bar);
+			let required =
+				Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight);
+			for (const child of bar.children) {
+				required += child === tabListEl ? child.scrollWidth : child.getBoundingClientRect().width;
+				// The right controls' auto margin fills spare space, not natural width.
+				if (child !== slot.parentElement) {
+					const childStyle = getComputedStyle(child);
+					required +=
+						Number.parseFloat(childStyle.marginLeft) + Number.parseFloat(childStyle.marginRight);
+				}
+			}
+			// Keep the same inline bar off-layout while folded, so its natural
+			// width stays measurable as settings change and cannot cause oscillation.
+			required +=
+				inline.getBoundingClientRect().width +
+				Number.parseFloat(getComputedStyle(inline).marginRight) -
+				slot.getBoundingClientRect().width;
+			keysFolded = required > bar.clientWidth;
+		};
+		const observer = new ResizeObserver(measure);
+		for (const element of [bar, ...bar.children, inline]) observer.observe(element);
+		measure();
+		return () => observer.disconnect();
+	});
 
 	const tabs = $derived(getTabList());
 	const pendingTitle = $derived(getPendingTabTitle());
@@ -47,6 +140,19 @@
 	let renameValue: string = $state("");
 	let renameInputEl = $state<HTMLInputElement>();
 	let tabListEl: HTMLDivElement | null = $state(null);
+
+	$effect(() => {
+		activeTabId;
+		const list = tabListEl;
+		const active = list?.querySelector<HTMLElement>('[aria-selected="true"]');
+		if (!list || !active) return;
+		const observer = new ResizeObserver(() => {
+			active.scrollIntoView({ block: "nearest", inline: "nearest" });
+		});
+		observer.observe(list);
+		observer.observe(active);
+		return () => observer.disconnect();
+	});
 
 	const FONT_SIZE_MIN = 6;
 	const FONT_SIZE_MAX = 24;
@@ -269,13 +375,14 @@
 		<!-- Tab bar -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class="term-tab-bar flex items-center gap-0 px-1 bg-bg border-b border-border shrink-0 overflow-x-auto min-h-9"
+			bind:this={tabBarEl}
+			class="term-tab-bar flex items-center gap-0 px-1 bg-bg border-b border-border shrink-0 min-h-9"
 			ontouchstart={onTabBarTouchStart}
 		>
 			<!-- Tab buttons -->
 			<div
 				bind:this={tabListEl}
-				class="flex items-center shrink-0"
+				class="flex items-center min-w-0 overflow-x-auto"
 				role="tablist"
 				aria-label="Terminal sessions"
 			>
@@ -413,8 +520,92 @@
 				{/if}
 			{/if}
 
-			<!-- Font size controls (right-aligned) -->
+			<!-- Keys and font size controls (right-aligned) -->
 			<div class="flex items-center gap-0 ml-auto shrink-0">
+				{#if finePointer.current && visibleBarKeys.length > 0}
+					<div bind:this={keysSlotEl} class="relative flex items-center shrink-0">
+						<span id={keysDescriptionId} class="sr-only">{modifierDescription}</span>
+						<div
+							bind:this={inlineKeysEl}
+							class="term-keys flex items-center shrink-0 w-max h-[32px] px-[3px] mr-[6px] rounded-full bg-chip"
+							class:absolute={keysFolded}
+							class:right-0={keysFolded}
+							class:invisible={keysFolded}
+							inert={keysFolded}
+							role="toolbar"
+							aria-label="Terminal keys"
+						>
+							{#each visibleBarKeys as { key, group }, i (key)}
+								{@const label = TERMINAL_KEY_LABELS[key]}
+								{#if i > 0 && visibleBarKeys[i - 1]?.group !== group}
+									<span class="w-px h-[18px] mx-[5px] bg-border" aria-hidden="true"></span>
+								{/if}
+								<TerminalKey
+									label={label.name}
+									glyph={group === "modifiers" || group === "arrows"}
+									repeat={group === "arrows"}
+									{...(isTerminalModifier(key) ? { state: keys.modifiers[key] } : {})}
+									onpress={(repeated) => keys.press(key, repeated)}
+								>
+									{#if label.icon}<Icon name={label.icon} size={key === "paste" ? 13 : 14} />{/if}
+									{key === "paste" ? label.name : label.text}
+								</TerminalKey>
+							{/each}
+						</div>
+						{#if keysFolded}
+							<Menu
+								ariaLabel="Terminal keys"
+								side="top"
+								align="end"
+								onCloseAutoFocus={(event) => {
+									event.preventDefault();
+									tabBarEl?.parentElement?.querySelector<HTMLTextAreaElement>(
+										".term-tab-content:not(.hidden) .xterm-helper-textarea",
+									)?.focus();
+								}}
+							>
+								{#snippet trigger({ props })}
+									<Button
+										{...props}
+										variant="ghost"
+										size="content"
+										tone={heldModifiers.length ? "accent" : "secondary"}
+										hoverFill="none"
+										ariaLabel="Keys"
+										aria-describedby={modifierDescription ? keysDescriptionId : undefined}
+										data-testid="terminal-keys-menu-trigger"
+										class="h-[32px] px-3 mr-[6px] rounded-full font-sans text-xs font-medium
+											{heldModifiers.length ? 'bg-accent/[18%]' : 'bg-chip hover:bg-hover'}
+											{lockedModifier ? 'shadow-[inset_0_0_0_1.5px_var(--color-accent)]' : ''}"
+									>
+										Keys
+									</Button>
+								{/snippet}
+								{#each visibleBarKeys as { key, group }, i (key)}
+									{@const label = TERMINAL_KEY_LABELS[key]}
+									{@const state = isTerminalModifier(key) ? keys.modifiers[key] : undefined}
+									{#if i > 0 && visibleBarKeys[i - 1]?.group !== group}
+										<MenuSeparator />
+									{/if}
+									<MenuItem
+										aria-label={label.name}
+										aria-describedby={state ? `${keysDescriptionId}-${key}` : undefined}
+										data-modifier-state={state}
+										onselect={() => keys.press(key)}
+									>
+										<span class="w-5 text-center" aria-hidden="true">
+											{#if label.icon}<Icon name={label.icon} size={14} />{:else}{label.text}{/if}
+										</span>
+										{label.name}
+										{#if state}
+											<span id={`${keysDescriptionId}-${key}`} class="ml-auto text-xs text-accent" class:sr-only={state === "off"}>{state}</span>
+										{/if}
+									</MenuItem>
+								{/each}
+							</Menu>
+						{/if}
+					</div>
+				{/if}
 				<Button
 					variant="ghost"
 					size="content"
@@ -459,6 +650,86 @@
 
 		<!-- Terminal body area -->
 		<div class="term-body flex-1 relative overflow-hidden bg-code-bg" {@attach pinchFontSize}>
+			{#if finePointer.current && (keys.modifiers.cmd === "waiting" || keys.modifiers.opt === "waiting")}
+				{@const cmd = keys.modifiers.cmd === "waiting"}
+				<div
+					class="absolute z-10 top-[6px] right-[10px] w-[330px] flex items-start gap-[10px] px-3 py-2.5 rounded-lg border border-border bg-popover-bg shadow-dropdown text-xs text-text-secondary"
+					role="note"
+				>
+					<Icon name="keyboard" size={14} class="mt-[2px] shrink-0 text-accent" />
+					<div class="flex flex-col gap-0.5">
+						<b class="font-semibold text-text">{cmd ? "⌘" : "⌥"} is waiting for your next key</b>
+						{#if cmd}
+							<span>
+								<kbd class="font-mono text-text">V</kbd> pastes, <kbd class="font-mono text-text">C</kbd> copies,
+								<kbd class="font-mono text-text">K</kbd> clears,
+								<kbd class="font-mono text-text">F</kbd> finds. Other keys go to the terminal as Meta.
+							</span>
+						{:else}
+							<span>
+								⌥ then <kbd class="font-mono text-text">B</kbd> jumps back a word. Your Mac's own ⌥B types ∫ instead.
+							</span>
+						{/if}
+					</div>
+				</div>
+			{/if}
+			<div
+				class="absolute z-10 top-[12px] left-1/2 -translate-x-1/2 pointer-events-none"
+				role="status"
+			>
+				{#if keys.notice}
+					{@const notice = keys.notice}
+					{#key notice.id}
+						{#if notice.kind === "sent"}
+							<div
+								class="term-key-confirmation flex items-center gap-1.5 h-[32px] px-[14px] rounded-full border border-border bg-popover-bg shadow-dropdown text-[13px] font-medium text-text-secondary whitespace-nowrap"
+							>
+								Sent <b class="font-mono font-semibold text-accent">{notice.combo}</b>
+								{#if notice.hint}· {notice.hint}{/if}
+							</div>
+						{:else if notice.kind === "pasted"}
+							<div
+								class="flex items-center gap-[5px] h-[22px] px-2 rounded-full bg-success/[16%] text-xs font-medium text-success whitespace-nowrap"
+							>
+								<Icon name="check" size={12} />Pasted {notice.lines} lines as one block
+							</div>
+						{:else}
+							<div
+								class="flex items-center h-[32px] px-[14px] rounded-full border border-border bg-popover-bg shadow-dropdown text-[13px] font-medium text-text-secondary whitespace-nowrap"
+							>
+								{notice.text}
+							</div>
+						{/if}
+					{/key}
+				{/if}
+			</div>
+			<!-- Loads with the first tab, so it is ready by the time ⌘ then F opens
+			     it: typing straight afterwards must reach the field, not the shell. -->
+			{#if tabs.length > 0}
+				{#await import("./TerminalFind.svelte") then { default: TerminalFind }}
+					{#if find && find.tab === activeTabId}
+						{#key find}
+							<TerminalFind terminal={find.terminal} onclose={() => (find = null)} />
+						{/key}
+					{/if}
+				{/await}
+			{/if}
+			{#if keys.pendingPasteLines}
+				<div
+					class="absolute z-20 top-[12px] left-1/2 -translate-x-1/2 flex items-center gap-3 pl-[14px] pr-[6px] h-[40px] rounded-full border border-border bg-popover-bg shadow-dropdown text-[13px] text-text-secondary whitespace-nowrap"
+					role="alertdialog"
+					aria-label="Paste {keys.pendingPasteLines} lines?"
+				>
+					<span>
+						<b class="font-semibold text-text">Paste {keys.pendingPasteLines} lines?</b>
+						They'll run one at a time.
+					</span>
+					<span class="flex items-center gap-1">
+						<Button variant="ghost" size="sm" onclick={() => keys.resolvePaste(false)}>Cancel</Button>
+						<Button variant="primary" size="sm" onclick={() => keys.resolvePaste(true)}>Paste</Button>
+					</span>
+				</div>
+			{/if}
 			{#if pendingTitle && activeTabId === null}
 				<p class="term-starting p-2 font-mono text-xs text-text-dimmer" role="status">
 					Starting terminal…
@@ -470,12 +741,16 @@
 					<TerminalTab
 						ptyId={tab.ptyId}
 						active={tab.ptyId === activeTabId}
+						{keys}
 						fontSize={termFontSize}
 						onFontSizeResize={handleFontSizeResize}
 					/>
 				{/each}
 			{/await}
 		</div>
+		{#if !finePointer.current && tabs.length > 0 && projectState.terminalKeys.row.show}
+			<TerminalKeyRow {keys} />
+		{/if}
 
 		<!-- Status message -->
 		{#if statusMessage}

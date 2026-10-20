@@ -82,6 +82,7 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 		}),
 		debug: false,
 		keepAwake: runtime.keepAwake,
+		...(runtime.avatar !== undefined && { avatar: runtime.avatar }),
 		autoSettleAfterDays:
 			runtime.autoSettleAfterDays === undefined
 				? DEFAULT_AUTO_SETTLE_AFTER_DAYS

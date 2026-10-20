@@ -39,7 +39,12 @@ for (const scenario of [
 	},
 ]) {
 	test.describe(scenario.name, () => {
-		test.use({ viewport: scenario.viewport });
+		const phone = scenario.name === "phone";
+		const activate = phone ? "tap" : "click";
+		test.use({
+			viewport: scenario.viewport,
+			hasTouch: phone,
+		});
 		test("new terminals keep their default and offer the session's folders", async ({
 			page,
 			harness,
@@ -140,21 +145,25 @@ for (const scenario of [
 				session.title,
 			);
 			await expect(page.getByTestId("side-pane-files")).toBeHidden();
-			if (scenario.viewport.width <= 480) {
-				await page.getByTestId("session-bar-island-overflow").click();
-				await page.getByTestId("overflow-view-terminal").click();
+			if (phone) {
+				expect(
+					await page.evaluate(() => matchMedia("(pointer: coarse)").matches),
+				).toBe(true);
+				await page.getByTestId("session-bar-island-overflow").tap();
+				await page.getByTestId("overflow-view-terminal").tap();
 			} else {
 				await page.getByTestId("views-rail-terminal").click();
 			}
 			await expect(page.locator(".term-tab")).toHaveCount(1);
-			await page.locator(".term-new-btn").click();
+			await page.locator(".term-new-btn")[activate]();
 			await expect(page.locator(".term-tab")).toHaveCount(2);
 			const picker = page.getByTestId("new-terminal-folder-picker");
 			if (secondary) {
 				await expect(picker).toHaveAccessibleName("New terminal in folder");
 				await picker.scrollIntoViewIfNeeded();
 				await expect(picker).toBeInViewport();
-				await picker.click();
+				await picker[activate]();
+				await expect(picker).toHaveAttribute("aria-expanded", "true");
 				const items = page.getByTestId("new-terminal-folder-item");
 				await expect(items).toHaveText(
 					scenario.roots.map(({ label }) => label),
@@ -163,9 +172,21 @@ for (const scenario of [
 					path: testInfo.outputPath("terminal-folder-picker.png"),
 					animations: "disabled",
 				});
-				await items.nth(1).click();
+				await items.nth(1)[activate]();
 				await expect(page.locator(".term-tab")).toHaveCount(3);
 				await expect(items).toHaveCount(0);
+				await expect(page.locator(".term-tab").last()).toHaveAttribute(
+					"aria-selected",
+					"true",
+				);
+				const screenshot = testInfo.outputPath(
+					"terminal-after-folder-selection.png",
+				);
+				await page.screenshot({ path: screenshot, animations: "disabled" });
+				await testInfo.attach("terminal after folder selection", {
+					path: screenshot,
+					contentType: "image/png",
+				});
 			} else {
 				await expect(picker).toHaveCount(0);
 			}

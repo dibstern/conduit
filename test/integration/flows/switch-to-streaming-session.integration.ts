@@ -28,7 +28,9 @@ describe("Integration: Switch to Streaming Session", () => {
 				"Reply with just the word 'pong'. Nothing else.",
 			);
 			const message = await client.waitForAssistantText();
-			expect(message.text).toBeTruthy();
+			expect(
+				message.parts?.find((part) => part.type === "text")?.text,
+			).toBeTruthy();
 			await client.waitForTurnEnd();
 			client.clearReceived();
 
@@ -50,7 +52,7 @@ describe("Integration: Switch to Streaming Session", () => {
 					(returned) =>
 						returned.id === message.id &&
 						returned.role === "assistant" &&
-						!!returned.text,
+						returned.parts?.some((part) => part.type === "text" && !!part.text),
 				),
 			).toBe(true);
 		} finally {

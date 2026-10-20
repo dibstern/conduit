@@ -10,17 +10,11 @@
 }
 
 @theme {
-	/* === BRAND COLORS ===
-	   Change these two values to rebrand the entire app.
-	   Theme-scoped: Conduit Light redeclares both below with AA-passing
-	   light-surface counterparts. */
-	--color-brand-a: #fe3781; /* pink */
-	--color-brand-b: #00e5ff; /* cyan */
-	--color-brand-a-glow: rgba(254, 55, 129, 0.15);
-	--color-brand-b-glow: rgba(0, 229, 255, 0.15);
-	/* Send with nothing to send: an opaque, muted rose (composer final design). */
-	--color-send-off-bg: #4a2233;
-	--color-send-off: #b98a9c;
+	/* Final palette: .vac.vf.jframe in the approved redesign. */
+	--color-accent-glow: rgba(142, 155, 255, 0.15);
+	--color-success-glow: rgba(62, 207, 142, 0.15);
+	--color-send-off-bg: #232327;
+	--color-send-off: #6c6c75;
 
 	/* Harness (provider driver) identity colors — theme-independent, like brand. */
 	--color-harness-claude: #d97757; /* Claude clay */
@@ -28,90 +22,108 @@
 
 	/* Approval modes, ordered from restrictive to permissive. */
 	--color-p-never: #4fd1c5;
-	--color-p-plan: #5aa9f5;
+	--color-p-plan: #b07cff;
 	--color-p-ask: #a8afbb;
-	--color-p-edits: #f4b740;
-	--color-p-auto: #ff8a4c;
-	--color-p-full: #f4607a;
+	--color-p-edits: #f2c14e;
+	--color-p-auto: #ff9f0a;
+	--color-p-full: #f469c4;
 
 	--animate-cascade-a: pixel-cascade-a 2.4s ease-in-out infinite;
 	--animate-cascade-b: pixel-cascade-b 2.4s ease-in-out infinite;
 	--animate-cascade-a-fast: pixel-cascade-a 1.4s ease-in-out infinite;
 	--animate-cascade-b-fast: pixel-cascade-b 1.4s ease-in-out infinite;
 
-	--font-brand: "Chakra Petch", sans-serif;
-
-	--color-bg: #0d0e11;
-	--color-bg-alt: #1b1e24;
-	--color-bg-surface: #141619;
-	--color-text: #eceef2;
-	--color-text-secondary: #a8afbb;
-	--color-text-muted: #838b98;
+	--color-bg: #111113;
+	--color-bg-surface: #1a1a1d;
+	--color-bg-alt: #232327;
+	--color-bg-raised: #18181b;
+	--color-turn-bg: #1a1a1d;
+	--color-popover-bg: #232327;
+	--color-selection: #202024;
+	--color-hover: rgba(255, 255, 255, 0.06);
+	--color-chip: rgba(255, 255, 255, 0.07);
+	--color-text: #ededf0;
+	--color-text-secondary: #a1a1aa;
+	--color-text-muted: #a1a1aa;
 	/* The quietest step, held to 3:1 rather than 4.5:1. The approved design puts
 	   timestamps, counts and keyboard hints here, deliberately below the ink of
 	   anything you read to understand the screen. See theme-contrast.test.ts. */
-	--color-text-dimmer: #676e79;
-	--color-accent: #fe3781;
-	--color-accent-hover: #ff5691;
-	--color-accent-bg: rgba(254, 55, 129, 0.12);
-	--color-code-bg: #0d0e11;
-	--color-border: #2d323b;
-	--color-border-subtle: #20242b;
+	--color-text-dimmer: #6e6e77;
+	--color-accent: #8e9bff;
+	--color-accent-hover: #9faaff;
+	--color-accent-bg: rgba(142, 155, 255, 0.12);
+	--color-code-bg: #141416;
+	--color-border: #2b2b31;
+	--color-border-subtle: #1f1f23;
 	/* The brightest border, for chips and other outlined controls that have to
 	   read as interactive against a surface. */
-	--color-border-chip: #3a414c;
-	--color-input-bg: #1b1e24;
-	--color-user-bubble: #20242b;
-	--color-error: #f4607a;
-	--color-error-bg: rgba(244, 96, 122, 0.12);
-	--color-success: #3fd69a;
+	--color-border-chip: #2b2b31;
+	--color-input-bg: #1a1a1d;
+	--color-user-bubble: #232327;
+	--color-error: #ff6369;
+	--color-error-bg: rgba(255, 99, 105, 0.12);
+	--color-success: #3ecf8e;
 
-	/* The mock only ever uses two surfaces for a row: --alt for the open one and
-	   --hover for the pressed one. --border2 is a border, never a background, and
-	   using it as the active row is what put status ink below AA on it. */
-	--color-sidebar-bg: #141619;
-	--color-sidebar-hover: #1b1e24;
-	--color-sidebar-active: #20242b;
+	--color-sidebar-bg: #141416;
+	/* The hover wash composited over the sidebar, kept opaque for contrast checks. */
+	--color-sidebar-hover: #222224;
+	--color-sidebar-active: #202024;
 
-	--color-thinking: #f4b740;
-	--color-thinking-bg: rgba(244, 183, 64, 0.06);
-	--color-tool: #5aa9f5;
-	--color-tool-bg: rgba(90, 169, 245, 0.04);
-	--color-warning: #f4b740;
-	--color-warning-bg: rgba(244, 183, 64, 0.12);
+	--color-settings-bg: #111113;
+	--color-settings-card: #1c1c1f;
+	--color-settings-segment: #232327;
+	--color-settings-rail: #161618;
+	--color-settings-separator: rgba(255, 255, 255, 0.06);
+	--color-settings-tile-neutral: #8e8e93;
+	--color-settings-tile-purple: #5e5ce6;
+	--color-settings-tile-clay: #d97757;
+	/* Darkened from the mock's amber to give the white icon 3:1 contrast. */
+	--color-settings-tile-amber: #d28308;
+	--color-settings-tile-green: #30a46c;
+	--shadow-settings-segment: 0 1px 2px rgba(0, 0, 0, 0.2);
+	--shadow-settings-dialog: 0 24px 60px rgba(0, 0, 0, 0.3);
+	--shadow-popover: 0 22px 60px rgba(0, 0, 0, 0.45);
+	--shadow-composer: 0 0 0 1px #2b2b31;
+
+	--color-thinking: #a1a1aa;
+	--color-thinking-bg: rgba(161, 161, 170, 0.06);
+	--color-tool: #a1a1aa;
+	--color-tool-bg: rgba(161, 161, 170, 0.04);
+	--color-warning: #ff9f0a;
+	--color-warning-bg: rgba(255, 159, 10, 0.12);
 
 	/* === STATUS INK ===
-	   Seven hues a session row can distinguish itself by, read as TEXT on a
+	   Session states and actions, read as TEXT on a
 	   surface — so each theme carries its own value. Never use these as a fill;
 	   the --color-fill-* set below is for that. */
-	--color-status-amber: #f4b740;
-	--color-status-blue: #5aa9f5;
-	--color-status-green: #3fd69a;
-	--color-status-red: #f4607a;
-	--color-status-indigo: #9b9bff;
-	--color-status-violet: #c0a8ff;
-	--color-status-pink: #ff9dc2;
+	--color-status-amber: #ff9f0a;
+	--color-status-blue: #8e9bff;
+	--color-status-green: #3ecf8e;
+	--color-status-red: #ff6369;
+	--color-status-ask: #ff9f0a;
+	--color-status-snoozed: #b07cff;
+	--color-status-pinned: #f2c14e;
+	--color-status-goal: #3fd0bf;
+	--color-status-risk: #f469c4;
 
-	/* === SESSION STATE GLYPHS ===
-	   The sidebar's dither glyph and its status word. Brighter than status ink
-	   because the glyph sits on its own 14% tint of the colour. */
-	--color-session-working: #ff4d94;
-	--color-session-monitoring: #33b5ff;
-	--color-session-done: #4ade80;
-	--color-session-idle: #8b93a0;
+	/* The sidebar's dither glyph and status word. Blue marks unread results;
+	   monitoring follows the teal goal, and active work stays neutral. */
+	--color-session-working: #a1a1aa;
+	--color-session-monitoring: #3fd0bf;
+	--color-session-done: #8e9bff;
+	--color-session-idle: #6c6c75;
 
 	/* === STATUS FILLS (theme-invariant) ===
 	   A saturated fill is the same colour in both themes; only what you read ON
 	   a surface changes. Pair with --color-on-fill, which is the fixed ink these
 	   are contrast-checked against. */
-	--color-fill-amber: #f4b740;
-	--color-fill-blue: #5aa9f5;
-	--color-fill-green: #3fd69a;
-	--color-fill-red: #f4607a;
-	--color-fill-indigo: #9b9bff;
-	--color-fill-brand: #fe3781;
-	--color-on-fill: #0c0d10;
-	--color-on-brand: #ffffff;
+	--color-fill-amber: #ff9f0a;
+	--color-fill-blue: #8e9bff;
+	--color-fill-green: #3ecf8e;
+	--color-fill-red: #ff6369;
+	--color-on-fill: #111113;
+	--color-fill-ask: #ff9f0a;
+	--color-on-fill-ask: #111113;
 
 	/* === PROJECT ACCENTS (theme-invariant) ===
 	   Identity colours for the sidebar's project square, assigned by index so a
@@ -119,18 +131,18 @@
 	--color-project-1: #b08cff;
 	--color-project-2: #ff9a4d;
 	--color-project-3: #2fd3c0;
-	--color-project-4: #ff6fb1;
+	--color-project-4: #f469c4;
 	--color-project-5: #5aa9f5;
 	--color-project-6: #f4b740;
 
 	/* Deliberately inverted surfaces: toast, tooltip. */
-	--color-inverse-bg: #eef0f4;
-	--color-inverse-text: #15171c;
-	--color-inverse-accent: #b3005a;
+	--color-inverse-bg: #ededf0;
+	--color-inverse-text: #111113;
+	--color-inverse-accent: #4c5bd4;
 
 	/* Frosted surfaces that float over the transcript (the session island). */
-	--color-glass: rgba(24, 25, 29, 0.9);
-	--color-glass-strong: rgba(24, 25, 29, 0.92);
+	--color-glass: rgba(26, 26, 29, 0.9);
+	--color-glass-strong: rgba(26, 26, 29, 0.92);
 
 	/* Contrast wash for scrollbars and hairline fills: white over dark, black
 	   over light. Not a scrim — see --color-backdrop, which stays dark in both
@@ -142,49 +154,43 @@
 	--shadow-rgb: 0, 0, 0;
 
 	/* Syntax highlighting defaults (conduit dark theme) */
-	--hl-comment: #79818f;
-	--hl-keyword: #fe3781;
-	--hl-string: #3fd69a;
-	--hl-number: #fe3781;
-	--hl-function: #5aa9f5;
-	--hl-variable: #f4607a;
-	--hl-type: #f4b740;
-	--hl-constant: #fe3781;
-	--hl-tag: #f4607a;
-	--hl-attr: #5aa9f5;
-	--hl-regexp: #c0a8ff;
-	--hl-meta: #f4b740;
-	--hl-builtin: #fe3781;
-	--hl-symbol: #f4b740;
-	--hl-addition: #3fd69a;
-	--hl-deletion: #f4607a;
+	--hl-comment: #6c6c75;
+	--hl-keyword: #b07cff;
+	--hl-string: #3ecf8e;
+	--hl-number: #f2c14e;
+	--hl-function: #a1a1aa;
+	--hl-variable: #ff6369;
+	--hl-type: #f2c14e;
+	--hl-constant: #3fd0bf;
+	--hl-tag: #ff6369;
+	--hl-attr: #a1a1aa;
+	--hl-regexp: #b07cff;
+	--hl-meta: #f2c14e;
+	--hl-builtin: #b07cff;
+	--hl-symbol: #f2c14e;
+	--hl-addition: #3ecf8e;
+	--hl-deletion: #ff6369;
 
-	--font-mono:
-		"JetBrains Mono", "Berkeley Mono", "IBM Plex Mono", ui-monospace,
-		SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-		monospace;
-	--font-sans:
-		"JetBrains Mono", "Berkeley Mono", "IBM Plex Mono", ui-monospace,
-		SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-		monospace;
+	--font-mono: "Geist Mono", ui-monospace, monospace;
+	--font-sans: "Geist", system-ui, sans-serif;
 
 	/* Font Size Scale (overrides Tailwind defaults) */
-	--text-xs: 10px;
+	--text-xs: 12px;
 	--text-xs--line-height: 1.4;
 
-	--text-sm: 11px;
+	--text-sm: 12.5px;
 	--text-sm--line-height: 1.4;
 
-	--text-base: 12px;
+	--text-base: 13px;
 	--text-base--line-height: 1.5;
 
-	--text-lg: 15px;
+	--text-lg: 13.5px;
 	--text-lg--line-height: 1.4;
 
-	--text-xl: 20px;
+	--text-xl: 15px;
 	--text-xl--line-height: 1.3;
 
-	--text-2xl: 24px;
+	--text-2xl: 17px;
 	--text-2xl--line-height: 1.2;
 
 	/* Z-Index Layers (theme-invariant)
@@ -218,6 +224,7 @@
 	--shadow-panel: 0 4px 16px rgba(var(--shadow-rgb), 0.3);
 	--shadow-modal: 0 8px 32px rgba(var(--shadow-rgb), 0.4);
 	--shadow-dropdown: 0 8px 32px rgba(var(--shadow-rgb), 0.3);
+	--shadow-knob: 0 1px 3px rgba(var(--shadow-rgb), 0.25);
 
 	/* Radius
 	   Panel/card corner used across setup + settings surfaces. */
@@ -225,68 +232,86 @@
 }
 
 :root.light-theme {
-	--color-brand-a: #c9004f;
-	--color-brand-b: #006d7a;
-	--color-brand-a-glow: rgba(201, 0, 79, 0.15);
-	--color-brand-b-glow: rgba(0, 109, 122, 0.15);
-	--color-send-off-bg: #f0cddb;
-	--color-send-off: #a0607a;
+	/* Minimal HSL lightness lifts preserve the two contrast tiers on opaque
+	   surfaces and rendered tints. See theme-contrast.test.ts. */
+	--color-accent-glow: rgba(76, 91, 212, 0.15);
+	--color-success-glow: rgba(20, 123, 59, 0.15);
+	--color-send-off-bg: #f1f1f3;
+	--color-send-off: #878792;
 	--color-p-never: #0b7d74;
-	--color-p-plan: #0f62c0;
+	--color-p-plan: #7441ff;
 	--color-p-ask: #4b525e;
-	--color-p-edits: #8a5500;
-	--color-p-auto: #c2410c;
-	--color-p-full: #c11d40;
+	--color-p-edits: #8d6400;
+	--color-p-auto: #a65600;
+	--color-p-full: #c0267f;
 
-	--color-bg: #f5f6f9;
-	--color-bg-alt: #eef0f5;
+	--color-bg: #ffffff;
 	--color-bg-surface: #ffffff;
-	--color-text: #14171c;
-	--color-text-secondary: #4b525e;
-	--color-text-muted: #626975;
-	--color-text-dimmer: #7e8591;
-	--color-accent: #c9004f;
-	--color-accent-hover: #a80042;
-	--color-accent-bg: rgba(201, 0, 79, 0.12);
-	--color-code-bg: #eef0f5;
-	--color-border: #ccd2dc;
-	--color-border-subtle: #e2e6ec;
-	--color-border-chip: #b7c0cc;
-	--color-input-bg: #eef0f5;
-	--color-user-bubble: #e4e8ef;
-	--color-error: #c11d40;
-	--color-error-bg: rgba(193, 29, 64, 0.12);
-	--color-success: #0c7750;
+	--color-bg-alt: #f1f1f3;
+	--color-bg-raised: #f7f7f8;
+	--color-turn-bg: #f4f4f6;
+	--color-popover-bg: #ffffff;
+	--color-selection: #ececef;
+	--color-hover: rgba(0, 0, 0, 0.045);
+	--color-chip: rgba(0, 0, 0, 0.05);
+	--color-text: #0b0b0d;
+	--color-text-secondary: #5d5d66;
+	--color-text-muted: #5d5d66;
+	--color-text-dimmer: #868692;
+	--color-accent: #4352d2;
+	--color-accent-hover: #4c5bd4;
+	--color-accent-bg: rgba(76, 91, 212, 0.12);
+	--color-code-bg: #fafafa;
+	--color-border: #e3e3e7;
+	--color-border-subtle: #eeeef0;
+	--color-border-chip: #e3e3e7;
+	--color-input-bg: #ffffff;
+	--color-user-bubble: #f1f1f3;
+	--color-error: #bc1f1f;
+	--color-error-bg: rgba(208, 34, 34, 0.12);
+	--color-success: #127136;
 
-	/* Surface is the raised layer in both themes, so the sidebar is lighter than
-	   the page here and darker than it in dark mode. */
-	--color-sidebar-bg: #ffffff;
-	--color-sidebar-hover: #eef0f5;
-	--color-sidebar-active: #e4e8ef;
+	--color-sidebar-bg: #f8f8f9;
+	--color-sidebar-hover: #ededee;
+	--color-sidebar-active: #ececef;
 
-	--color-thinking: #8a5500;
-	--color-thinking-bg: rgba(138, 85, 0, 0.06);
-	--color-tool: #0f62c0;
-	--color-tool-bg: rgba(15, 98, 192, 0.04);
-	--color-warning: #8a5500;
-	--color-warning-bg: rgba(138, 85, 0, 0.12);
+	--color-settings-bg: #f4f4f6;
+	--color-settings-card: #ffffff;
+	--color-settings-segment: #ffffff;
+	--color-settings-rail: #ffffff;
+	--color-settings-separator: rgba(0, 0, 0, 0.06);
+	--shadow-settings-dialog: 0 24px 60px rgba(0, 0, 0, 0.1);
+	--shadow-popover: 0 22px 60px rgba(0, 0, 0, 0.14);
+	--shadow-settings-segment:
+		0 1px 2px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+	--shadow-composer:
+		0 0 0 1px rgba(0, 0, 0, 0.07), 0 8px 28px rgba(0, 0, 0, 0.05);
 
-	--color-status-amber: #8a5500;
-	--color-status-blue: #0f62c0;
-	--color-status-green: #0c7750;
-	--color-status-red: #c11d40;
-	--color-status-indigo: #5344d4;
-	--color-status-violet: #6a3ed4;
-	--color-status-pink: #c4004f;
+	--color-thinking: #5d5d66;
+	--color-thinking-bg: rgba(93, 93, 102, 0.06);
+	--color-tool: #5d5d66;
+	--color-tool-bg: rgba(93, 93, 102, 0.04);
+	--color-warning: #984e00;
+	--color-warning-bg: rgba(166, 86, 0, 0.12);
 
-	--color-session-working: #e0006f;
-	--color-session-monitoring: #1d5df5;
-	--color-session-done: #3d9a0f;
-	--color-session-idle: #6b7280;
+	--color-status-amber: #a65600;
+	--color-status-blue: #4c5bd4;
+	--color-status-green: #147b3b;
+	--color-status-red: #d02222;
+	--color-status-ask: #984e00;
+	--color-status-snoozed: #6f39ff;
+	--color-status-pinned: #8d6400;
+	--color-status-goal: #0c786c;
+	--color-status-risk: #c0267f;
 
-	--color-inverse-bg: #1b1e24;
-	--color-inverse-text: #f2f4f8;
-	--color-inverse-accent: #ff9dc2;
+	--color-session-working: #5d5d66;
+	--color-session-monitoring: #0c786c;
+	--color-session-done: #4c5bd4;
+	--color-session-idle: #878792;
+
+	--color-inverse-bg: #0b0b0d;
+	--color-inverse-text: #ffffff;
+	--color-inverse-accent: #8e9bff;
 
 	--color-glass: rgba(255, 255, 255, 0.88);
 	--color-glass-strong: rgba(255, 255, 255, 0.9);
@@ -297,57 +322,57 @@
 	--color-backdrop-subtle: rgba(22, 26, 33, 0.15);
 	--shadow-rgb: 19, 26, 37;
 
-	--hl-comment: #6c7481;
-	--hl-keyword: #c9004f;
-	--hl-string: #0c7750;
-	--hl-number: #c9004f;
-	--hl-function: #0f62c0;
-	--hl-variable: #c11d40;
-	--hl-type: #8a5500;
-	--hl-constant: #c9004f;
-	--hl-tag: #c11d40;
-	--hl-attr: #0f62c0;
-	--hl-regexp: #6a3ed4;
-	--hl-meta: #8a5500;
-	--hl-builtin: #c9004f;
-	--hl-symbol: #8a5500;
-	--hl-addition: #0c7750;
-	--hl-deletion: #c11d40;
+	--hl-comment: #878792;
+	--hl-keyword: #7441ff;
+	--hl-string: #147b3b;
+	--hl-number: #8d6400;
+	--hl-function: #5d5d66;
+	--hl-variable: #d02222;
+	--hl-type: #8d6400;
+	--hl-constant: #0c786c;
+	--hl-tag: #d02222;
+	--hl-attr: #5d5d66;
+	--hl-regexp: #7441ff;
+	--hl-meta: #8d6400;
+	--hl-builtin: #7441ff;
+	--hl-symbol: #8d6400;
+	--hl-addition: #147a3a;
+	--hl-deletion: #ca2121;
 }
 
-@utility glow-brand-a {
+@utility glow-accent {
 	box-shadow:
-		-4px 0 16px var(--color-brand-a-glow),
-		-3px 0 0 var(--color-brand-a);
+		-4px 0 16px var(--color-accent-glow),
+		-3px 0 0 var(--color-accent);
 }
-@utility glow-brand-b {
+@utility glow-success {
 	box-shadow:
-		-4px 0 16px var(--color-brand-b-glow),
-		-3px 0 0 var(--color-brand-b);
+		-4px 0 16px var(--color-success-glow),
+		-3px 0 0 var(--color-success);
 }
-@utility glow-brand-a-strong {
+@utility glow-accent-strong {
 	box-shadow:
-		0 0 8px rgb(from var(--color-brand-a) r g b / 0.4),
-		0 0 24px rgb(from var(--color-brand-a) r g b / 0.15);
+		0 0 8px rgb(from var(--color-accent) r g b / 0.4),
+		0 0 24px rgb(from var(--color-accent) r g b / 0.15);
 }
-@utility glow-brand-b-strong {
+@utility glow-success-strong {
 	box-shadow:
-		0 0 8px rgb(from var(--color-brand-b) r g b / 0.4),
-		0 0 24px rgb(from var(--color-brand-b) r g b / 0.15);
+		0 0 8px rgb(from var(--color-success) r g b / 0.4),
+		0 0 24px rgb(from var(--color-success) r g b / 0.15);
 }
 @utility glow-tool-running {
 	box-shadow:
-		-4px 0 16px rgba(234, 179, 8, 0.15),
+		-4px 0 16px rgb(from var(--color-warning) r g b / 0.15),
 		-3px 0 0 var(--color-warning);
 }
 @utility glow-tool-completed {
 	box-shadow:
-		-4px 0 16px rgb(from var(--color-brand-b) r g b / 0.12),
-		-3px 0 0 var(--color-brand-b);
+		-4px 0 16px rgb(from var(--color-success) r g b / 0.12),
+		-3px 0 0 var(--color-success);
 }
 @utility glow-tool-error {
 	box-shadow:
-		-4px 0 16px rgba(255, 68, 68, 0.15),
+		-4px 0 16px rgb(from var(--color-error) r g b / 0.15),
 		-3px 0 0 var(--color-error);
 }
 
@@ -359,7 +384,7 @@
 	font-family: var(--font-sans);
 	/* Composer final design .fld: 13px/1.45 with 6px padding, so one line
 	   (6 + 18.85 + 6) centres on the 32px controls beside it. */
-	font-size: 13px;
+	font-size: var(--text-base);
 	line-height: 1.45;
 	padding: 6px;
 	white-space: pre-wrap;
@@ -478,7 +503,7 @@
 		-webkit-font-smoothing: antialiased;
 		-moz-osx-font-smoothing: grayscale;
 		overflow: hidden;
-		font-size: 12px;
+		font-size: var(--text-base);
 		line-height: 1.5;
 	}
 
@@ -552,10 +577,156 @@ body:has(dialog:modal) {
 	grid-template-columns: auto minmax(0, 1fr) auto;
 	grid-template-areas:
 		"back  meta  more"
-		"title title title";
+		"title title title"
+		"goal goal goal"
+		"tasks tasks tasks";
 	align-items: center;
 	column-gap: 6px;
-	padding: 3px 12px 6px;
+	padding: 2px 10px 8px;
+}
+
+#session-bar[data-compact="true"] {
+	background: var(--color-bg);
+	grid-template-rows: 40px auto auto auto;
+	/* Let the gutters yield before a full pill crowds Back at 320px. */
+	column-gap: clamp(2px, calc(10% - 30px), 6px);
+}
+#session-bar[data-compact="true"] #session-bar-meta {
+	container: session-controls / inline-size;
+}
+#session-bar[data-compact="true"] #session-bar-meta .session-bar-segments {
+	height: 32px;
+}
+#session-bar[data-compact="true"] #session-bar-title-row {
+	padding: 4px 4px 0;
+}
+#session-bar[data-compact="true"] #session-bar-title {
+	font-size: 17px;
+	line-height: 1.5;
+	letter-spacing: -0.01em;
+}
+/* Split the 44px targets at their overlap midpoints: pill/title 40.375px,
+   title/goal 70.375px, goal/tasks 98.75px from the header top. Clip the
+   control and its pseudo-element together so both own the same rectangle.
+   Back and overflow retain 44px with explicit priority at the outer edges. */
+#session-bar[data-compact="true"][data-collapsed="false"] {
+	--phone-title-hit-height: 44px;
+	--phone-goal-hit-height: 44px;
+	--phone-task-hit-top: -2.875px;
+}
+#session-bar[data-compact="true"][data-collapsed="false"]:has(
+		[data-testid="background-tasks-row"]
+	) {
+	--phone-title-hit-height: 36.25px;
+	--phone-goal-hit-height: 28.375px;
+}
+#session-bar[data-compact="true"][data-collapsed="false"]:has(
+		[data-testid="session-goal-subtitle"]
+	) {
+	--phone-title-hit-height: 30px;
+	--phone-task-hit-top: -1.75px;
+}
+#session-bar[data-compact="true"][data-collapsed="false"]
+	:is(
+		#session-skills-chip,
+		#side-threads-control,
+		#session-bar-settle,
+		[data-testid="session-bar-title-menu"],
+		button[data-testid="session-bar-unread-chip"],
+		button[data-testid="session-bar-state-chip"],
+		[data-testid="session-goal-subtitle"],
+		[data-testid="background-tasks-toggle"],
+		[data-testid="background-tasks-row-stop-all"]
+	)::before {
+	min-height: 0;
+	translate: -50% 0;
+}
+#session-bar[data-compact="true"][data-collapsed="false"]
+	.session-bar-segments
+	button {
+	clip-path: inset(-10px 0 -6.375px);
+}
+#session-bar[data-compact="true"][data-collapsed="false"]
+	.session-bar-segments
+	button::before {
+	top: -10px;
+	height: 40.375px;
+	/* Adjacent segments meet at their shared edge instead of growing into it. */
+	width: 100%;
+	min-width: 0;
+}
+#session-bar[data-compact="true"][data-collapsed="false"]
+	#session-bar-title-row
+	button {
+	clip-path: inset(
+		calc(50% - 18.375px) 0 calc(50% + 18.375px - var(--phone-title-hit-height))
+	);
+}
+#session-bar[data-compact="true"][data-collapsed="false"]
+	#session-bar-title-row
+	[data-testid="session-bar-title-menu"] {
+	clip-path: inset(
+		calc(50% - 18.375px) -2px
+			calc(50% + 18.375px - var(--phone-title-hit-height)) -22px
+	);
+}
+#session-bar[data-compact="true"][data-collapsed="false"]
+	#session-bar-title-row
+	button::before {
+	top: calc(50% - 18.375px);
+	height: var(--phone-title-hit-height);
+}
+#session-bar[data-compact="true"][data-collapsed="false"]
+	[data-testid="session-goal-subtitle"] {
+	clip-path: inset(-1.125px 0 calc(22.125px - var(--phone-goal-hit-height)));
+}
+#session-bar[data-compact="true"][data-collapsed="false"]
+	[data-testid="session-goal-subtitle"]::before {
+	top: -1.125px;
+	height: var(--phone-goal-hit-height);
+}
+#session-bar[data-compact="true"][data-collapsed="false"]
+	[data-testid="background-tasks-row"]
+	button {
+	clip-path: inset(
+		var(--phone-task-hit-top) 0 calc(-14px - var(--phone-task-hit-top))
+	);
+}
+#session-bar[data-compact="true"][data-collapsed="false"]
+	[data-testid="background-tasks-row"]
+	button::before {
+	top: var(--phone-task-hit-top);
+	height: 44px;
+}
+#session-bar[data-compact="true"][data-collapsed="false"]
+	:is(#session-bar-back, #session-bar-more) {
+	z-index: 2;
+}
+#session-bar[data-compact="true"][data-collapsed="false"] #session-bar-meta {
+	z-index: 1;
+}
+/* Expand towards the noninteractive title, leaving the adjacent badge its own target. */
+#session-bar[data-compact="true"]
+	[data-testid="session-bar-title-menu"]::before {
+	left: calc(50% - 10px);
+}
+/* At 320px, share the spare space between the pill and the viewport edge. */
+#session-bar[data-compact="true"][data-collapsed="false"]
+	#session-bar-more::before {
+	left: calc(50% + 2px);
+}
+#session-bar[data-compact="true"] [data-testid="session-goal-subtitle"] {
+	grid-area: goal;
+	padding-inline: 4px;
+}
+#session-bar[data-compact="true"] [data-testid="background-tasks-row"] {
+	grid-area: tasks;
+	margin-top: 8px;
+}
+@container session-controls (max-width: 175px) {
+	#session-bar-settle-label {
+		display: none;
+	}
 }
 
 /* Phone chrome overlays every view so the transcript keeps its geometry. */
@@ -590,16 +761,70 @@ body:has(dialog:modal) {
 }
 
 #app.phone-session #session-bar[data-collapsed="true"] {
+	grid-template-rows: auto;
 	grid-template-columns: auto minmax(0, 1fr) auto auto;
 	grid-template-areas: "back title chev more";
 	min-height: 46px;
-	padding: 0 4px;
-	margin: 8px 9px 0;
-	border: 1px solid var(--color-border);
-	border-radius: 12px;
-	background: var(--color-glass);
-	backdrop-filter: blur(16px);
-	box-shadow: var(--shadow-panel);
+	column-gap: 0;
+	padding: 0 2px;
+	margin: 6px 12px 0;
+	border: 0;
+	border-radius: 23px;
+	background: color-mix(in srgb, var(--color-popover-bg) 90%, transparent);
+	backdrop-filter: blur(14px);
+	box-shadow:
+		0 0 0 1px var(--color-border-chip),
+		var(--shadow-popover);
+}
+
+#app.phone-session #session-bar[data-collapsed="true"] #session-bar-title-row {
+	position: relative;
+	min-height: 44px;
+	padding: 0 2px;
+}
+/* The banner summary opens the bar; its target can include the title above it. */
+#app.phone-session
+	#session-bar[data-collapsed="true"]
+	[data-testid="session-bar-banners-row"]::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+}
+#app.phone-session #session-bar[data-collapsed="true"] #session-bar-title {
+	font-size: 15px;
+}
+#app.phone-session #session-bar[data-collapsed="true"] #session-bar-back {
+	min-width: 44px;
+}
+#session-bar[data-compact="true"] #goal-details .desktop-goal-check {
+	padding: 2px 0;
+}
+#session-bar[data-compact="true"] #goal-details h2 {
+	line-height: 1.5;
+}
+#session-bar[data-compact="true"] [data-testid="goal-details-meta"] {
+	font-size: 10.58px;
+	line-height: 1.365;
+}
+#session-bar[data-compact="true"] [data-goal-checks-heading] {
+	padding: 4px 4px 8px;
+	font-size: 17px;
+	font-weight: 600;
+	color: var(--color-text);
+}
+#session-bar[data-compact="true"] [data-testid="goal-details-history"] {
+	gap: 0;
+}
+/* The badge has its own width beside the chevron, including multi-digit counts. */
+#app.phone-session
+	#session-bar[data-collapsed="true"]
+	#session-bar-back
+	> span:not([data-testid="session-bar-attention"]) {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
 }
 
 /* The meta area does not exist in the island template, and a grid item
@@ -646,54 +871,76 @@ body:has(dialog:modal) {
 	grid-area: more;
 }
 
-/* Desktop keeps the same controls mounted in one row. Only the title row grows:
-   the title, its ▾ and chip hug each other on its left, and its growth pushes
-   identity, Settle, the status dot and ⋯ to the end, so identity groups with
-   the controls on the right as it does on phones. Growing (not an auto margin)
-   gives the background-task line under the title a real box ending before the
-   skills chip, so its chips truncate rather than paint over the controls that
-   follow. The task line takes no intrinsic width, so it never sets the title
-   row's size or floor. When space runs out the identity
-   yields first (its large shrink factor) down to its own floor, then the
-   title down to its 110px floor. The title row keeps the default `min-width: auto`, so its floor is
-   its real contents; a fixed floor smaller than title + ▾ + chip let the
-   chip spill out of the row and paint over the identity. */
+/* Desktop keeps title and controls on one row. Only the title track yields;
+   background tasks occupy their own track across the whole header. */
 #session-bar[data-compact="false"] {
-	display: flex;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto auto auto;
+	grid-template-areas:
+		"title meta connection more"
+		"tasks tasks tasks tasks";
 	container: session-bar / inline-size;
-	min-height: 48px;
-	gap: 6px;
-	padding: 4px 12px;
+	min-height: 52px;
+	column-gap: 8px;
+	row-gap: 0;
+	padding: 4px 10px 4px 20px;
 	white-space: nowrap;
 }
-#session-bar[data-compact="false"] #session-bar-title-row {
-	flex: 1 1 auto;
+#session-bar[data-compact="false"]:has(#session-bar-back) {
+	grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+	grid-template-areas:
+		"back title meta connection more"
+		"tasks tasks tasks tasks tasks";
 }
+/* Final's idle header is 52px: a 44px target, 7px padding and a 1px border.
+   Keep the existing room for the goal title's focus ring and the task row. */
+#session-bar[data-compact="false"]:not(
+		:has(
+				[data-testid="session-goal-subtitle"],
+				[data-testid="background-tasks-row"]
+			)
+	) {
+	padding-block: 3.5px;
+}
+#session-bar[data-compact="false"] [data-testid="background-tasks-row"] {
+	grid-area: tasks;
+}
+#session-bar[data-compact="false"] #session-bar-title-row {
+	min-width: 0;
+}
+/* No width floor: in the grid the title track is the only one that yields, so a
+   floor would only overflow into the controls, and it parted short titles from ▾. */
 #session-bar[data-compact="false"] #session-bar-title {
-	min-width: 110px;
 	flex: 0 1 auto;
+	font-size: 14.5px;
+	letter-spacing: -0.01em;
 }
 /* The markup's negative block margin stays: the target overhangs instead of
    making the title line taller than its text. */
 #session-bar[data-compact="false"] [data-testid="session-bar-title-menu"] {
-	min-width: 30px;
+	min-width: 24px;
 	min-height: 32px;
+	width: 24px;
 }
 #session-bar[data-compact="false"] #session-bar-meta {
-	flex: 0 100 auto;
-	/* Floor at the contents' minimum (the pill's 4-letter floor plus the fixed
-	   controls), so the title yields next instead of the controls overflowing. */
 	min-width: auto;
 }
 #session-bar[data-compact="false"] #session-bar-settle {
 	flex: none;
 }
 #session-bar[data-compact="false"] #session-bar-more {
-	min-width: 32px;
-	min-height: 32px;
+	min-width: 44px;
+	min-height: 44px;
+}
+#session-bar[data-compact="false"] [data-testid="session-goal-subtitle"] {
+	font-size: 12.5px;
+}
+#session-bar[data-compact="false"] #session-bar-connection {
+	grid-area: connection;
+	font-size: 12px;
 }
 @container session-bar (max-width: 600px) {
-	#client-count-badge {
+	#session-bar-meta .segment-word {
 		display: none;
 	}
 }
@@ -717,7 +964,7 @@ body:has(dialog:modal) {
 }
 @media (max-width: 800px) {
 	#session-bar[data-compact="false"] {
-		gap: 4px;
+		column-gap: 4px;
 		padding-inline: 8px;
 	}
 }
@@ -810,9 +1057,9 @@ body:has(dialog:modal) {
 		linear-gradient(
 			100deg,
 			currentColor 0 42%,
-			var(--color-brand-a) 46%,
+			var(--color-accent) 46%,
 			#fff 50%,
-			var(--color-brand-b) 54%,
+			var(--color-success) 54%,
 			currentColor 58% 100%
 		)
 		100% 0 / 400% 100%;
@@ -849,9 +1096,9 @@ body:has(dialog:modal) {
 	background: linear-gradient(
 		100deg,
 		transparent,
-		rgb(from var(--color-brand-a) r g b / 0.1) 35%,
+		rgb(from var(--color-accent) r g b / 0.1) 35%,
 		rgb(255 255 255 / 0.1) 50%,
-		rgb(from var(--color-brand-b) r g b / 0.1) 65%,
+		rgb(from var(--color-success) r g b / 0.1) 65%,
 		transparent
 	);
 	animation: session-row-sheen 800ms cubic-bezier(0.65, 0, 0.35, 1) 260ms both;
@@ -940,7 +1187,7 @@ body:has(dialog:modal) {
 	}
 
 	.md-content p {
-		@apply mb-3.5 mt-0;
+		@apply mb-[14px] mt-0;
 	}
 	.md-content p:last-child {
 		@apply mb-0;
@@ -963,17 +1210,17 @@ body:has(dialog:modal) {
 
 	.md-content ul {
 		list-style-type: disc;
-		@apply pl-7 my-2.5;
+		@apply pl-[22px] mt-0 mb-[14px];
 	}
 	.md-content ol {
 		list-style-type: decimal;
-		@apply pl-7 my-2.5;
+		@apply pl-[22px] mt-0 mb-[14px];
 	}
 	.md-content li {
-		@apply mb-1.5 mt-0 pl-1;
+		@apply my-[5px];
 	}
 	.md-content li::marker {
-		color: var(--color-brand-b);
+		color: var(--color-text-dimmer);
 	}
 	.md-content ol li::marker {
 		color: var(--color-text-muted);
@@ -998,17 +1245,17 @@ body:has(dialog:modal) {
 	}
 
 	.md-content code {
-		@apply font-mono text-[1em] rounded-[6px] px-[7px] py-[2px];
-		background: var(--color-code-bg);
+		@apply font-mono text-[13px] rounded-[5px] px-[5px] py-[2px];
+		background: var(--color-chip);
 	}
 
 	.md-content pre {
-		@apply relative rounded-xl my-3.5 overflow-hidden;
+		@apply relative rounded-[12px] mt-[4px] mb-[16px] overflow-hidden;
 		background: var(--color-code-bg);
-		border: 1px solid var(--color-border-subtle);
+		border: 1px solid var(--color-border);
 	}
 	.md-content pre code {
-		@apply block px-[18px] py-4 text-base leading-[1.55] whitespace-pre overflow-x-auto;
+		@apply block px-[14px] py-[12px] text-[12.5px] leading-[1.7] whitespace-pre overflow-x-auto;
 		background: transparent;
 		border-radius: 0;
 	}
@@ -1079,8 +1326,8 @@ body:has(dialog:modal) {
 	.md-content th {
 		@apply px-3.5 py-2 text-left align-top font-semibold;
 		color: var(--color-text);
-		background: rgba(0, 229, 255, 0.04);
-		border-bottom: 2px solid var(--color-brand-b);
+		background: rgba(var(--overlay-rgb), 0.04);
+		border-bottom: 2px solid var(--color-success);
 	}
 	.md-content td {
 		@apply px-3.5 py-[7px] text-left align-top;
@@ -1251,13 +1498,13 @@ body:has(dialog:modal) {
 
 /* Context color thresholds — @utility blocks */
 @utility ctx-green {
-	background: var(--color-brand-b);
+	background: var(--color-success);
 }
 @utility ctx-yellow {
 	background: var(--color-warning);
 }
 @utility ctx-red {
-	background: var(--color-brand-a);
+	background: var(--color-status-risk);
 }
 
 /* Banner hidden state */

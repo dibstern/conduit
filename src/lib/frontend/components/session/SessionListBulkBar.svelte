@@ -18,7 +18,7 @@
 </script>
 
 		<!-- Tinted to match the select-mode header, so both ends of the list say "mode". -->
-		<div data-testid="select-bar" class="shrink-0 border-t border-accent bg-accent-bg px-[6px] pt-1.5 pb-[calc(10px+env(safe-area-inset-bottom))] font-brand">
+		<div data-testid="select-bar" class="shrink-0 border-t border-accent bg-accent-bg px-[6px] pt-1.5 pb-[calc(10px+env(safe-area-inset-bottom))] font-sans">
 			<div class="pb-1 text-center text-[11px] uppercase tracking-wider text-accent">
 				{selectionCount === 0 ? "Nothing selected" : `Apply to ${selectionCount} ${selectionCount === 1 ? "session" : "sessions"}`}
 			</div>
@@ -46,7 +46,7 @@
 					ariaLabel={`${unpinSelected ? "Unpin" : "Pin"} ${pinCount} ${pinCount === 1 ? "session" : "sessions"}`}
 					class={selectVerbClass}
 					onclick={() => { void onpin(); }}
-				><Icon name={unpinSelected ? "star-off" : "star"} size={17} /> {unpinSelected ? "Unpin" : "Pin"}</Button>
+				><Icon name={unpinSelected ? "pin-off" : "pin"} size={17} /> {unpinSelected ? "Unpin" : "Pin"}</Button>
 				<Button
 					variant="ghost" size="content" tone="inherit" hoverFill="none" disabledStyle="none"
 					disabled={selectionCount === 0 || bulkPending}

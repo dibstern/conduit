@@ -67,7 +67,7 @@ describe("acceptance pipeline", () => {
 						{ keyword: "When", text: "I open settings to the General section" },
 						{
 							keyword: "Then",
-							text: "the General headings are Notifications, Appearance, Composer and Sessions in order",
+							text: "the General headings are You, Appearance, Composer, Notifications and Sessions in order",
 						},
 						{
 							keyword: "And",

@@ -9,7 +9,7 @@ Scenario Outline: one account shows the design's usage states
   And the single usage footer shows 5h <fiveHour> and Week <week>
   And the usage footer claude five_hour meter is <fiveHourLevel> at <fiveHourUsed> percent
   And the usage footer claude seven_day meter is <weekLevel> at <weekUsed> percent
-  And the single usage footer bars are 40px and 36px wide
+  And the single usage footer bars are 26px and 26px wide
   And the sidebar region visually matches <baseline> at <threshold> percent
 
 Examples:
@@ -48,7 +48,7 @@ Scenario Outline: accounts follow auto-switch order inside their harness groups
   And a session already exists on the Claude harness
   And the usage footer has several accounts with an <status> Claude reading
   Then the usage footer is pinned below the session list
-  And the usage footer groups read CLAUDE, CODEX, CURSOR in that order
+  And the usage footer groups read Claude, Codex, Cursor in that order
   And the Claude usage footer rows read Personal, Work, Spare, Unreadable in auto-switch order
   And the usage footer claude row is the highlighted current account
   And the usage footer claude dot matches the composer account badge
@@ -56,10 +56,10 @@ Scenario Outline: accounts follow auto-switch order inside their harness groups
   And the usage footer work shows five_hour 12% and seven_day 48%
   And the usage footer spare shows five_hour 0% and seven_day 9%
   And the usage footer unreadable shows five_hour — and seven_day —
-  And the Claude usage footer headings read 5H and WEEK
-  And the Codex usage footer headings read 5H and WEEK
+  And the Claude usage footer headings read 5h and Week
+  And the Codex usage footer headings read 5h and Week
   And the usage footer chatgpt shows five_hour 30% and seven_day 64%
-  And the Cursor usage footer heading reads MONTH
+  And the Cursor usage footer heading reads Month
   And the usage footer cursor month window reads 38% and spans both columns
   And the usage footer omits accounts without a quota source
   And the sidebar region visually matches <baseline> at <threshold> percent

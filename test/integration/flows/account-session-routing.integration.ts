@@ -697,6 +697,8 @@ describe("Integration: account session routing", () => {
 			}),
 		);
 		disposeRegistry = () => runtime.dispose();
+		// The daemon RPC layer also carries its own store and Session Directory,
+		// whose project registry never holds this relay: share account state only.
 		const daemonConfigContext = await runtime.runPromise(
 			Effect.context<
 				AccountDirectory | DaemonConfigRefTag | ConfigPersistenceTag

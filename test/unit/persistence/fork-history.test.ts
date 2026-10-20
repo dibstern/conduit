@@ -11,6 +11,7 @@ import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
@@ -165,6 +166,95 @@ const seed = (events: readonly CanonicalEvent[] = history) =>
 	});
 
 describe("readForkSource", () => {
+	// Failure modes: verdicts disappear, retain parent ids, extend an explicit
+	// cutoff, attach to an uncopied part, arrive before text, or leak past the
+	// source snapshot. Null probabilities and later verdict revisions must survive.
+	it.effect(
+		"inherits verdicts only for copied text at the source snapshot",
+		() =>
+			Effect.gen(function* () {
+				yield* seed();
+				const commit = yield* makeCommitAndSignal;
+				const verdict = (messageId: string, partId: string, ordinal: number) =>
+					canonicalEvent("text.surfaced", "parent", {
+						messageId,
+						partId,
+						ordinal,
+						categorySetVersion: 1,
+						model: "jev-test",
+						probabilities: { ask: 0.8, routine: 0.2 },
+					});
+				// Both verdicts land after the second turn. They must not widen a
+				// fork at the first assistant message to include that second turn.
+				yield* commit([
+					verdict("msg_assistant_1", "prt_answer", 1),
+					canonicalEvent("text.surfaced", "parent", {
+						messageId: "msg_assistant_1",
+						partId: "prt_answer",
+						ordinal: 1,
+						categorySetVersion: 2,
+						model: "jev-revised",
+						probabilities: null,
+					}),
+					verdict("msg_assistant_2", "prt_answer_2", 2),
+					verdict("msg_assistant_1", "missing-part", 3),
+				]);
+				const source = yield* readForkSource("parent", {
+					messageId: "msg_assistant_1",
+					sideThread: false,
+				});
+				yield* commit([verdict("msg_assistant_1", "prt_answer", 99)]);
+				const copied = yield* source.copy("child");
+				expect(
+					copied
+						.filter((event) => event.type === "message.created")
+						.map(({ data }) => data.messageId),
+				).toEqual(["msg_user_1_child", "msg_assistant_1_child"]);
+				expect(
+					copied
+						.filter(({ type }) => type === "text.surfaced")
+						.map(({ data }) => data),
+				).toEqual([
+					{
+						messageId: "msg_assistant_1_child",
+						partId: "prt_answer_child",
+						ordinal: 1,
+						categorySetVersion: 1,
+						model: "jev-test",
+						probabilities: { ask: 0.8, routine: 0.2 },
+					},
+					{
+						messageId: "msg_assistant_1_child",
+						partId: "prt_answer_child",
+						ordinal: 1,
+						categorySetVersion: 2,
+						model: "jev-revised",
+						probabilities: null,
+					},
+				]);
+				yield* commit([
+					canonicalEvent("session.created", "child", {
+						sessionId: "child",
+						title: "Fork",
+						provider: "claude",
+					}),
+					...copied,
+				]);
+				const query = yield* ReadQueryEffectTag;
+				const messages = yield* query.getSessionMessagesWithParts("child");
+				expect(
+					messages
+						.flatMap(({ parts }) => parts)
+						.find(({ id }) => id === "prt_answer_child"),
+				).toMatchObject({
+					surfacing_ordinal: 1,
+					surfacing_probabilities: null,
+					surfacing_set_version: 2,
+					surfacing_model: "jev-revised",
+				});
+			}).pipe(Effect.provide(testLayer)),
+	);
+
 	it.effect(
 		"copies a whole turn through tool work and trailing turn events",
 		() =>

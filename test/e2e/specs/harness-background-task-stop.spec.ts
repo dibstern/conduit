@@ -141,9 +141,13 @@ async function expectTasks(page: Page, descriptions: readonly string[]) {
 			.getByTestId("background-tasks-panel")
 			.getByTestId("background-task-description"),
 	).toHaveText(descriptions);
-	await expect(page.getByTestId("composer-task-dots").locator("i")).toHaveCount(
-		descriptions.length,
-	);
+	const count = descriptions.length;
+	await expect(
+		page.getByRole("button", {
+			name: `${count} background ${count === 1 ? "task" : "tasks"}`,
+			exact: true,
+		}),
+	).toBeVisible();
 }
 
 async function startTurn(
@@ -172,11 +176,10 @@ async function startTurn(
 	if (typeof held?.["queryId"] !== "string")
 		throw new Error("No task-stop query ID");
 	const queryId = held["queryId"];
-	await expect(page.getByTestId("background-tasks-row")).toHaveAttribute(
-		"aria-label",
-		"4 background tasks",
-	);
-	await page.getByTestId("background-tasks-row").click();
+	await expect(
+		page.getByRole("button", { name: /^\d+ background tasks?$/ }),
+	).toHaveAccessibleName("4 background tasks");
+	await page.getByRole("button", { name: /^\d+ background tasks?$/ }).click();
 	await expectTasks(
 		page,
 		taskStopFixture.map((task) => task.description),
@@ -197,7 +200,6 @@ function recorder(page: Page, harness: ProcessHarness, testInfo: TestInfo) {
 	const steps: {
 		step: string;
 		rows: { description: string; depth: string | null }[];
-		dots: number;
 		headerVisible: boolean;
 		transcript: string;
 		marks: Record<string, unknown>[];
@@ -218,7 +220,6 @@ function recorder(page: Page, harness: ProcessHarness, testInfo: TestInfo) {
 							depth: node.getAttribute("data-depth"),
 						})),
 					),
-				dots: await page.getByTestId("composer-task-dots").locator("i").count(),
 				headerVisible: await page
 					.getByTestId("background-tasks-row")
 					.isVisible(),
@@ -269,10 +270,16 @@ test("stops exactly one shell only after the SDK confirms it to both clients", a
 	try {
 		await secondApp.goto(`${harness.baseUrl}/s/${sessionId}`);
 		await expect(second.getByTestId("background-tasks-row")).toBeVisible();
-		await second.getByTestId("background-tasks-row").click();
+		await second
+			.getByRole("button", { name: /^\d+ background tasks?$/ })
+			.click();
 		await steps.record("four-live-tasks");
 		await page
-			.getByRole("button", { name: `Stop ${shell.description}`, exact: true })
+			.getByTestId("background-tasks-panel")
+			.getByRole("button", {
+				name: `Stop background task ${shell.description}`,
+				exact: true,
+			})
 			.click();
 		await expect.poll(() => requestedIds(harness)).toEqual([shell.task_id]);
 		await expectTasks(
@@ -326,7 +333,6 @@ test("Stop all includes nested IDs and the foreground keeps streaming to its res
 		release(harness, "task-stop-confirm-all");
 		await expect(page.getByTestId("background-tasks-row")).toBeHidden();
 		await expect(page.getByTestId("background-tasks-panel")).toBeHidden();
-		await expect(page.getByTestId("composer-task-dots")).toBeHidden();
 		await expect
 			.poll(() => chat.getLastAssistantText())
 			.toBe(responseChunks(foreground).slice(0, 2).join("").trimEnd());
@@ -418,7 +424,11 @@ test("stopping an agent also stops its live descendants and leaves unrelated wor
 	const steps = recorder(page, harness, testInfo);
 	try {
 		await page
-			.getByRole("button", { name: `Stop ${agent.description}`, exact: true })
+			.getByTestId("background-tasks-panel")
+			.getByRole("button", {
+				name: `Stop background task ${agent.description}`,
+				exact: true,
+			})
 			.click();
 		await expect
 			.poll(() => requestedIds(harness))
@@ -455,7 +465,9 @@ test("Stop all works after the foreground result and leaves the same query usabl
 		harness,
 		"task-stop-foreground-idle",
 	);
-	const row = page.locator(`#session-list [data-session-id="${sessionId}"]`);
+	const sidebarRow = page.locator(
+		`#session-list [data-session-id="${sessionId}"]`,
+	);
 	const steps = recorder(page, harness, testInfo);
 	try {
 		release(harness, "task-stop-release-result");
@@ -473,8 +485,8 @@ test("Stop all works after the foreground result and leaves the same query usabl
 			page,
 			taskStopFixture.map((task) => task.description),
 		);
-		await expect(row).toHaveAttribute("aria-label", /^Monitoring/);
 		await steps.record("foreground-ended-tasks-live");
+		await expect(sidebarRow).toHaveAttribute("aria-label", /^Monitoring/);
 		await page.getByTestId("background-tasks-stop-all").click();
 		await expect.poll(() => requestedIds(harness)).toHaveLength(4);
 		await expectTasks(
@@ -483,9 +495,11 @@ test("Stop all works after the foreground result and leaves the same query usabl
 		);
 		release(harness, "task-stop-confirm-all");
 		await expect(page.getByTestId("background-tasks-row")).toBeHidden();
-		await expect(page.getByTestId("composer-task-dots")).toBeHidden();
 		await expect(
-			row,
+			page.getByRole("button", { name: /^\d+ background tasks?$/ }),
+		).toHaveCount(0);
+		await expect(
+			sidebarRow,
 			"Stop all left the sidebar row monitoring",
 		).not.toHaveAttribute("aria-label", /^Monitoring/);
 		assertTurnUntouched(harness, queryId);
@@ -519,7 +533,11 @@ test("a real failure keeps the row, duplicate clients and finished IDs are harml
 	try {
 		writeFileSync(failGate, "fail");
 		await page
-			.getByRole("button", { name: `Stop ${shell.description}`, exact: true })
+			.getByTestId("background-tasks-panel")
+			.getByRole("button", {
+				name: `Stop background task ${shell.description}`,
+				exact: true,
+			})
 			.click();
 		await expect(
 			page
@@ -533,12 +551,22 @@ test("a real failure keeps the row, duplicate clients and finished IDs are harml
 		await steps.record("failure-toast-row-retained");
 		unlinkSync(failGate);
 		await new AppPage(second).goto(`${harness.baseUrl}/s/${sessionId}`);
-		await second.getByTestId("background-tasks-row").click();
+		await second
+			.getByRole("button", { name: /^\d+ background tasks?$/ })
+			.click();
 		await page
-			.getByRole("button", { name: `Stop ${shell.description}`, exact: true })
+			.getByTestId("background-tasks-panel")
+			.getByRole("button", {
+				name: `Stop background task ${shell.description}`,
+				exact: true,
+			})
 			.click();
 		await second
-			.getByRole("button", { name: `Stop ${shell.description}`, exact: true })
+			.getByTestId("background-tasks-panel")
+			.getByRole("button", {
+				name: `Stop background task ${shell.description}`,
+				exact: true,
+			})
 			.click();
 		await expect
 			.poll(() => requestedIds(harness))

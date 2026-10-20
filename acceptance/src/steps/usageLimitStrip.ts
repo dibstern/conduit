@@ -189,11 +189,18 @@ export const usageLimitStripHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert usage limit strip text",
-		match: /^the usage limit strip (title|detail) reads (.+)$/,
+		match:
+			/^the (usage limit strip|queued usage recovery) (title|detail) reads (.+)$/,
 		run: async ({ world, match }) => {
-			await expect(
-				world.page.getByTestId(`usage-limit-${match[1]}`),
-			).toHaveText(match[2] ?? "");
+			const recovery = world.page.getByTestId(
+				match[1] === "queued usage recovery"
+					? "pending-input-waiting"
+					: "usage-limit-strip",
+			);
+			await expect(recovery).toBeVisible();
+			await expect(recovery.getByTestId(`usage-limit-${match[2]}`)).toHaveText(
+				match[3] ?? "",
+			);
 		},
 	},
 	{
@@ -207,10 +214,10 @@ export const usageLimitStripHandlers: StepHandler[] = [
 				world.page.locator("#input-row").boundingBox(),
 			]);
 			if (!stripBox || !inputBox) throw new Error("No strip or composer box");
-			expect(stripBox.x).toBeCloseTo(inputBox.x, 0);
-			expect(stripBox.width).toBeCloseTo(inputBox.width, 0);
-			expect(inputBox.y - (stripBox.y + stripBox.height)).toBeGreaterThan(0);
-			expect(inputBox.y - (stripBox.y + stripBox.height)).toBeLessThan(12);
+			const inset = (world.page.viewportSize()?.width ?? 1280) < 768 ? 12 : 14;
+			expect(stripBox.x).toBeCloseTo(inputBox.x + inset, 0);
+			expect(stripBox.width).toBeCloseTo(inputBox.width - inset * 2, 0);
+			expect(stripBox.y + stripBox.height).toBeCloseTo(inputBox.y, 0);
 		},
 	},
 	{
@@ -225,8 +232,8 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert cut-off tag text and placement",
-		match: /^the cut-off tag under (.+) reads (.+)$/,
+		name: "assert cut-off chip text and header placement",
+		match: /^the cut-off chip in the header for (.+) reads (.+)$/,
 		run: async ({ world, match }) => {
 			const card = world.page
 				.locator("#messages .msg-user")
@@ -234,14 +241,11 @@ export const usageLimitStripHandlers: StepHandler[] = [
 			const tag = card.getByTestId("cut-off-tag");
 			await expect(tag).toHaveText(match[2] ?? "");
 			await expect(world.page.getByTestId("cut-off-tag")).toHaveCount(1);
-			// Right-aligned under the card: below it, ending at its right edge.
-			const [tagBox, cardBox] = await Promise.all([
-				tag.locator("button").boundingBox(),
-				card.locator(":scope > div").first().boundingBox(),
-			]);
-			if (!tagBox || !cardBox) throw new Error("No tag or card box");
-			expect(tagBox.y).toBeGreaterThan(cardBox.y + cardBox.height);
-			expect(tagBox.x + tagBox.width).toBeCloseTo(cardBox.x + cardBox.width, 0);
+			await expect(
+				card.locator(
+					'[data-testid="user-message-header"] > time ~ [data-testid="cut-off-tag"]',
+				),
+			).toHaveCount(1);
 		},
 	},
 	{
@@ -305,29 +309,53 @@ export const usageLimitStripHandlers: StepHandler[] = [
 	{
 		name: "assert a usage limit strip action",
 		match:
-			/^the usage limit strip (shows|has no) (Try again|Resume at reset|Cancel auto-resume)$/,
+			/^the (usage limit strip|queued usage recovery) (shows|has no) (Try again|Resume at reset|Cancel auto-resume)$/,
 		run: async ({ world, match }) => {
-			const button = world.page.getByTestId(
-				stripActions[match[2] as StripAction].testId,
+			const recovery = world.page.getByTestId(
+				match[1] === "queued usage recovery"
+					? "pending-input-waiting"
+					: "usage-limit-strip",
 			);
-			if (match[1] === "has no") {
+			await expect(recovery).toBeVisible();
+			const button = recovery.getByTestId(
+				stripActions[match[3] as StripAction].testId,
+			);
+			if (match[2] === "has no") {
 				await expect(button).toHaveCount(0);
 				return;
 			}
-			await expect(button).toHaveText(match[2] ?? "");
+			await expect(button).toHaveText(match[3] ?? "");
 			await expect(button).toBeEnabled();
 			const [buttonBox, stripBox] = await Promise.all([
 				button.boundingBox(),
-				world.page.getByTestId("usage-limit-strip").boundingBox(),
+				recovery.boundingBox(),
 			]);
 			if (!buttonBox || !stripBox) throw new Error("No button or strip box");
-			// Desktop: the right slot of the strip. Phone: a full-width row of its own.
-			const compact = (world.page.viewportSize()?.width ?? 1280) < 768;
-			if (compact) expect(buttonBox.width).toBeGreaterThan(stripBox.width - 30);
-			else
+			// Desktop and the queued tray: natural-width actions in the trailing slot.
+			// Phone strip: actions share a full-width second row.
+			const stretched =
+				match[1] === "usage limit strip" &&
+				(world.page.viewportSize()?.width ?? 1280) < 768;
+			if (stretched) {
+				const actions = await recovery.getByRole("button").count();
+				expect(buttonBox.width).toBeGreaterThan(
+					(stripBox.width - 30) / actions - 6,
+				);
+			} else
 				expect(
 					stripBox.x + stripBox.width - (buttonBox.x + buttonBox.width),
 				).toBeLessThan(16);
+		},
+	},
+	{
+		name: "assert queued recovery keeps account switching available",
+		match: /^the queued usage recovery offers Switch account$/,
+		run: async ({ world }) => {
+			const recovery = world.page.getByTestId("pending-input-waiting");
+			await expect(recovery).toBeVisible();
+			const button = recovery.getByTestId("usage-limit-switch-account");
+			await expect(button).toHaveText("Switch account");
+			await expect(button).toBeEnabled();
 		},
 	},
 	{
@@ -336,13 +364,20 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const strip = world.page.getByTestId("usage-limit-strip");
 			await expect(strip).toHaveAttribute("data-state", match[1] ?? "");
-			// Waiting wears the theme amber (#f4b740) at 40%; limited the red at 45%.
-			await expect(strip).toHaveCSS(
-				"border-top-color",
+			// Recovery tabs use the shared strip's tint instead of a detached border.
+			const tone =
 				match[1] === "waiting"
-					? "oklab(0.815817 0.0250889 0.14507 / 0.4)"
-					: "oklab(0.684887 0.17753 0.0399031 / 0.45)",
-			);
+					? "var(--color-status-ask)"
+					: "var(--color-error)";
+			const expected = await strip.evaluate((el, mix) => {
+				const probe = document.createElement("span");
+				probe.style.backgroundColor = `color-mix(in srgb, ${mix} 13%, var(--color-bg-surface))`;
+				el.append(probe);
+				const colour = getComputedStyle(probe).backgroundColor;
+				probe.remove();
+				return colour;
+			}, tone);
+			await expect(strip).toHaveCSS("background-color", expected);
 		},
 	},
 	{
@@ -431,7 +466,10 @@ export const usageLimitStripHandlers: StepHandler[] = [
 			const divider = world.page.getByTestId("transcript-divider");
 			await expect(divider).toHaveCount(1);
 			await expect(divider).toHaveText(match[1] ?? "");
-			await expect(divider.locator("b")).toHaveCSS("color", "rgb(0, 229, 255)");
+			await expect(divider.locator("b")).toHaveCSS(
+				"color",
+				"rgb(62, 207, 142)",
+			);
 			const reply = world.page
 				.locator("#messages .msg-assistant")
 				.filter({ hasText: match[2] ?? "" });
@@ -630,7 +668,7 @@ export const usageLimitStripHandlers: StepHandler[] = [
 				{
 					violet: "rgb(176, 140, 255)",
 					teal: "rgb(47, 211, 192)",
-					blue: "rgb(90, 169, 245)",
+					blue: "rgb(142, 155, 255)",
 				}[match[3] ?? ""] ?? "",
 			);
 		},

@@ -15,6 +15,7 @@ import type {
 	ConfigUpdateData,
 	Event as OpenCodeEvent,
 } from "@opencode-ai/sdk/v2/types";
+import { parseAttachmentDataUrl } from "../attachment-data-url.js";
 import {
 	decodeOpenCodeAgentListResponse,
 	decodeOpenCodeBooleanResponse,
@@ -405,13 +406,18 @@ class SessionNamespace {
 					? { directory: options.directory }
 					: {}),
 				parts: [
-					{ type: "text", text: options.text },
-					// Images arrive as data URLs, which name their own mime type.
-					...(options.images ?? []).map((url) => ({
-						type: "file" as const,
-						mime: /^data:([^;,]+)/.exec(url)?.[1] ?? "image/png",
-						url,
-					})),
+					...(options.text
+						? [{ type: "text" as const, text: options.text }]
+						: []),
+					...(options.images ?? []).map((value) => {
+						const { mime, data, name } = parseAttachmentDataUrl(value);
+						return {
+							type: "file" as const,
+							mime,
+							...(name ? { filename: name } : {}),
+							url: `data:${mime};base64,${data}`,
+						};
+					}),
 				],
 				...(options.system !== undefined ? { system: options.system } : {}),
 				...(options.model != null ? { model: options.model } : {}),

@@ -18,65 +18,36 @@
 -->
 <script lang="ts">
 	import { tokenizeSkills } from "../../../skill-recognition.js";
+	import { referenceLabel } from "../../../composer-references.js";
+	import ComposerToken from "../ui/ComposerToken.svelte";
+	import ComposerReferenceToken from "../ui/ComposerReferenceToken.svelte";
 
 	interface Props {
 		text: string;
 		commandNames: ReadonlySet<string>;
 		builtinNames?: ReadonlySet<string>;
 		dimmed?: boolean;
+		onremove?: (start: number) => void;
 	}
-	let { text, commandNames, builtinNames, dimmed = false }: Props = $props();
+	let { text, commandNames, builtinNames, dimmed = false, onremove }: Props = $props();
 
 	const segments = $derived(tokenizeSkills(text, commandNames, builtinNames));
 </script>
 
 <div
 	aria-hidden="true"
-	class="composer-text-metrics mirror pointer-events-none relative z-0 text-text"
+	class="composer-text-metrics mirror pointer-events-none relative text-text"
 	class:opacity-0={dimmed}
->{#each segments as seg (seg.key)}{#if seg.kind === "skill"}<span class="skill-pill composer-pill">{seg.text}</span>{:else if seg.kind === "unknown"}<span class="skill-unknown">{seg.text}</span>{:else}{seg.text}{/if}{/each}</div>
+>{#each segments as seg (seg.key)}{#if seg.kind === "reference" && seg.reference}<ComposerReferenceToken label={referenceLabel(seg.reference)} ask={"ordinal" in seg.reference && seg.reference.category === "Ask"} title={seg.reference.text} onremove={() => onremove?.(seg.start ?? 0)} />{:else if seg.kind === "skill"}<ComposerToken goal={/^[/$]goal$/.test(seg.text)}>{seg.text}</ComposerToken>{:else if seg.kind === "unknown"}<span class="skill-unknown">{seg.text}</span>{:else}{seg.text}{/if}{/each}</div>
 
 <style>
 	/* A zero-width space forcing a final line box, which the row's height depends
 	   on: an empty draft would otherwise collapse to its padding, and one ending in
 	   a newline would come up a line short of the textarea. It lives in a pseudo
 	   element so the mirror's own text stays byte-for-byte the draft — anything
-	   stray in there shifts the glyphs out from under the caret. */
+	   stray in the projected text shifts glyphs out from under the caret. */
 	.mirror::after {
 		content: "\200b";
-	}
-
-	/* Composer-only additions to the shared `skill-pill` utility. The pill's
-	   horizontal padding is cancelled by an equal negative margin so it takes zero
-	   net width and the transparent textarea caret stays glyph-aligned (vertical
-	   padding only extends the tint — inline boxes ignore it for line layout). No
-	   font-weight change, for the same reason. */
-	.composer-pill {
-		/* Layer 1: the shimmer light (moves on recognition). Layer 2: the soft tint.
-		   Backgrounds are auto-clipped to the box, so no overflow/inline-block needed. */
-		background:
-			linear-gradient(
-				100deg,
-				transparent 40%,
-				color-mix(in srgb, #fff 55%, transparent) 50%,
-				transparent 60%
-			)
-			no-repeat,
-			var(--color-accent-bg);
-		background-size: 250% 100%, auto;
-		background-position: 0% 0%, 0% 0%;
-		margin: 0 -4px;
-		animation: skill-shimmer 0.7s ease-out 1;
-	}
-
-	/* One-shot light sweep on recognition; settles with the light off-screen right. */
-	@keyframes skill-shimmer {
-		from {
-			background-position: 100% 0%, 0% 0%;
-		}
-		to {
-			background-position: 0% 0%, 0% 0%;
-		}
 	}
 
 	.skill-unknown {
@@ -84,11 +55,5 @@
 		text-decoration: underline;
 		text-decoration-color: currentColor;
 		text-underline-offset: 2px;
-	}
-
-	@media (prefers-reduced-motion: reduce) {
-		.composer-pill {
-			animation: none;
-		}
 	}
 </style>

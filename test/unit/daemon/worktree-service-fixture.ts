@@ -171,7 +171,8 @@ export const worktreeFixture = () => {
 		mkdirSync(join(seed, "app"));
 		writeFileSync(join(seed, "app", "app.txt"), "app committed\n");
 		git("add", ".");
-		git("commit", "-qm", "Base");
+		// Keep detached auto-maintenance from mutating the reusable seed during copying.
+		git("-c", "maintenance.auto=false", "commit", "-qm", "Base");
 	});
 
 	beforeEach(() => {

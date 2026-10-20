@@ -9,6 +9,7 @@
  * - An explicit base is ignored, or a tag/revision is accepted as a local branch.
  * - An invalid base creates a session, generated branch or checkout before failing.
  */
+
 import { execFileSync } from "node:child_process";
 import {
 	existsSync,
@@ -644,13 +645,20 @@ process.exit(result.status ?? 1);
 	it("rejects unsupported providers and projects without Git before creating anything", async () => {
 		const { fixture, socket, sessions } = await start("unsupported-launches");
 		const before = (await sessions()).sessions.map(({ id }) => id);
+		// Cursor is the routable provider that cannot launch into a new worktree.
+		const { addedInstanceId } = await sendRpcRequest(socket, {
+			_tag: "AddInstance",
+			name: "Cursor",
+			driver: "cursor",
+		});
+		if (!addedInstanceId) throw new Error("Missing registered Cursor account");
 		await expect(
 			sendRpcRequest(socket, {
 				_tag: "CreateSession",
 				permissionMode: "ask",
 				projectSlug: "process-test",
 				originId: "new-worktree-test",
-				providerId: "unsupported-provider",
+				providerId: addedInstanceId,
 				model: { providerId: "claude", modelId: "sonnet" },
 				newWorktree: true,
 			}),

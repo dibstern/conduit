@@ -47,6 +47,17 @@ export const Default: Story = {
 	},
 };
 
+/** Settings accounts keep the same reorder controls inside borderless cards. */
+export const Settings: Story = {
+	...Default,
+	args: { variant: "settings" },
+};
+
+export const SettingsLight: Story = {
+	...Settings,
+	globals: { theme: "light" },
+};
+
 /** Disabled handles cannot pick a row up. */
 export const Disabled: Story = {
 	args: { disabled: true },

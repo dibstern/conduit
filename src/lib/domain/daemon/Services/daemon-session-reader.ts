@@ -19,7 +19,7 @@ import {
 } from "../../../session/auto-archive-policy.js";
 import { readPersistedAutoArchiveFacts } from "../../../session/auto-archive-sweep.js";
 import { readPersistedAutoDeleteFacts } from "../../../session/auto-delete-archived-sweep.js";
-import { shouldSettleIdleSession } from "../../../session/auto-settle-policy.js";
+import { getAutoSettleOutlook } from "../../../session/auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "../../../session/auto-settle-reader.js";
 import type {
 	ArchivedSessionQueryOptions,
@@ -90,27 +90,41 @@ const readProjectSessions = (
 			makeReadQueryEffect,
 		).pipe(Layer.provideMerge(database));
 
-		const sessions = yield* Effect.gen(function* () {
+		const result = yield* Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const readQuery = yield* ReadQueryEffectTag;
 			const rows = yield* makeSessionRows({
 				slug: projectSlug,
 				folders: project.folders,
 				gitCache,
 				refreshGit: true,
 			});
-			return yield* rows.list(options);
+			return yield* sql.withTransaction(
+				Effect.gen(function* () {
+					const settledCount = yield* readQuery.countSettledSessions(
+						{ projectIds: [projectSlug] },
+						options,
+					);
+					const sessions = yield* rows.list(options);
+					return { sessions, settledCount };
+				}),
+			);
 		}).pipe(Effect.provide(readQueryLayer));
-		return sessions.map(
-			(session): ProjectSessionCandidate => ({
-				sortKey: {
-					at:
-						options.orderColumn === "archived_at"
-							? (session.archivedAt ?? 0)
-							: session.updatedAt,
-					id: session.id,
-				},
-				session,
-			}),
-		);
+		return {
+			settledCount: result.settledCount,
+			sessions: result.sessions.map(
+				(session): ProjectSessionCandidate => ({
+					sortKey: {
+						at:
+							options.orderColumn === "archived_at"
+								? (session.archivedAt ?? 0)
+								: session.updatedAt,
+						id: session.id,
+					},
+					session,
+				}),
+			),
+		};
 	});
 
 /** Check recovery work without acquiring the project's relay or starting providers. */
@@ -181,8 +195,8 @@ export const hasColdAutoSettleCandidate = (
 			undefined,
 			project.folders[0],
 		).pipe(Effect.provide(database));
-		return [...facts.values()].some((item) =>
-			shouldSettleIdleSession(item, now, idleWindowMs),
+		return [...facts.values()].some(
+			(item) => getAutoSettleOutlook(item, now, idleWindowMs).kind === "due",
 		);
 	});
 
@@ -242,6 +256,7 @@ const listProjectSessions = (
 					if (reason !== undefined) {
 						return {
 							sessions: [],
+							settledCount: 0,
 							availability: {
 								projectSlug: project.slug,
 								available: false as const,
@@ -254,7 +269,7 @@ const listProjectSessions = (
 					);
 					if (Exit.isSuccess(exit)) {
 						return {
-							sessions: exit.value,
+							...exit.value,
 							availability: {
 								projectSlug: project.slug,
 								available: true as const,
@@ -263,6 +278,7 @@ const listProjectSessions = (
 					}
 					return {
 						sessions: [],
+						settledCount: 0,
 						availability: {
 							projectSlug: project.slug,
 							available: false as const,
@@ -291,6 +307,16 @@ const listProjectSessions = (
 
 		return {
 			sessions: page.map((candidate) => candidate.session),
+			settledCounts: projectResults.flatMap((result) =>
+				result.availability.available
+					? [
+							{
+								projectSlug: result.availability.projectSlug,
+								count: result.settledCount,
+							},
+						]
+					: [],
+			),
 			availability: projectResults.map((result) => result.availability),
 			hasMore,
 			nextCursor,

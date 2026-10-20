@@ -59,7 +59,8 @@ const meta = {
 	},
 	// This menu opens upward (`absolute bottom-full`), so without a positioned
 	// ancestor it renders above the viewport and the capture is a blank page.
-	beforeEach: () => menuOpensUpwardFrame(),
+	// The clearance fits the menu's full 360px height and its frame.
+	beforeEach: () => menuOpensUpwardFrame(380),
 } satisfies Meta<typeof CommandMenu>;
 
 export default meta;

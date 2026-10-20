@@ -174,7 +174,11 @@ describe("Session directory discovery through the built daemon", () => {
 				socket,
 				sessionId
 					? { _tag: "GetCommands", sessionId }
-					: { _tag: "GetCommands", projectSlug: "process-test" },
+					: {
+							_tag: "GetCommands",
+							projectSlug: "process-test",
+							instanceId: "claude",
+						},
 			);
 			const { resolved } = await sendRpcRequest(
 				socket,

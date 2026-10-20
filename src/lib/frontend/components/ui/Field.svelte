@@ -10,6 +10,8 @@
 		required?: boolean | undefined;
 		/** Override the auto-generated control id (targets the child control, not the wrapper). */
 		id?: string | undefined;
+		/** "settings" is the compact muted label of a settings card's stacked form. */
+		variant?: "default" | "settings" | undefined;
 		class?: string | undefined;
 		children: Snippet;
 	} & Omit<HTMLAttributes<HTMLDivElement>, "class" | "id">;
@@ -20,6 +22,7 @@
 		error,
 		required = false,
 		id,
+		variant = "default",
 		class: className,
 		children,
 		...rest
@@ -58,7 +61,7 @@
 	class={["flex flex-col gap-1.5", className].filter(Boolean).join(" ")}
 >
 	{#if label}
-		<label for={inputId} class="text-sm font-medium text-text">
+		<label for={inputId} class={variant === "settings" ? "text-[12px] text-text-muted max-md:text-[13px]" : "text-sm font-medium text-text"}>
 			{label}{#if required}<span class="text-error" aria-hidden="true">
 					*</span
 				>{/if}
@@ -66,8 +69,8 @@
 	{/if}
 	{@render children()}
 	{#if error}
-		<p id={errorId} class="text-xs text-error" role="alert">{error}</p>
+		<p id={errorId} class={variant === "settings" ? "text-[12px] text-error" : "text-xs text-error"} role="alert">{error}</p>
 	{:else if hint}
-		<p id={hintId} class="text-xs text-text-secondary">{hint}</p>
+		<p id={hintId} class={variant === "settings" ? "text-[12px] text-text-muted" : "text-xs text-text-secondary"}>{hint}</p>
 	{/if}
 </div>

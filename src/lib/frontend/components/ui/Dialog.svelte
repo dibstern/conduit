@@ -47,7 +47,7 @@
 		describedBy?: string | undefined;
 		/** `top` pins the dialog's top edge, so content that grows while the
 		 *  user types (a match list) extends downward instead of re-centring. */
-		placement?: "center" | "top" | "sheet" | undefined;
+		placement?: "center" | "top" | "sheet" | "fullscreen" | undefined;
 		dismissible?: boolean | undefined;
 		returnFocus?: (() => HTMLElement | null) | undefined;
 		initialFocus?: "dialog" | "first" | undefined;
@@ -171,9 +171,9 @@
 	aria-describedby={describedBy}
 	data-backdrop={backdrop}
 	data-placement={placement}
-	data-testid={placement === "sheet" ? "modal-sheet-scrim" : undefined}
+	data-testid={placement === "sheet" || placement === "fullscreen" ? "modal-sheet-scrim" : undefined}
 	tabindex="-1"
-	class="max-w-[100vw] overflow-visible border-none bg-transparent p-0 text-text focus:outline-none {placement === 'sheet' ? 'fixed inset-x-0 bottom-0 top-auto m-0 w-full max-h-none' : placement === 'top' ? 'mx-auto mt-[10dvh] mb-auto' : 'm-auto'}"
+	class="max-w-[100vw] overflow-visible border-none bg-transparent p-0 text-text focus:outline-none {placement === 'fullscreen' ? 'fixed inset-0 m-0 h-dvh w-full max-h-none' : placement === 'sheet' ? 'fixed inset-x-0 bottom-0 top-auto m-0 w-full max-h-none' : placement === 'top' ? 'mx-auto mt-[10dvh] mb-auto' : 'm-auto'}"
 	oncancel={handleCancel}
 	onclick={handleClick}
 	onpointerdown={(e) => { pressStartedInside = e.target !== dialogEl; }}
@@ -188,6 +188,12 @@
 	/* The UA stylesheet caps dialog width and sets overflow:auto, which squeezes
 	   narrow screens and clips the content box's shadow. Undone via utilities
 	   above; kept here as the reason. */
+
+	/* A bits-ui sheet underneath locks <body> with pointer-events:none, which
+	   the dialog would inherit. The top layer already makes the page inert. */
+	dialog {
+		pointer-events: auto;
+	}
 
 	/* ::backdrop inherits the dialog's theme tokens; the scrim stays dark in
 	   both themes, unlike --overlay-rgb's contrast wash. */

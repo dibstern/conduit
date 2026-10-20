@@ -15,6 +15,7 @@
 	import Button from "../ui/Button.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
+	import MenuSeparator from "../ui/MenuSeparator.svelte";
 
 	// `open` stays a bindable prop even though ui/Menu would happily own it
 	// outright: it is the only handle a story has on the open state, and the
@@ -24,11 +25,13 @@
 		open = $bindable(false),
 		onCamera,
 		onPhotos,
+		onFiles,
 		onSetGoal,
 	}: {
 		open?: boolean;
 		onCamera: () => void;
 		onPhotos: () => void;
+		onFiles: () => void;
 		onSetGoal: () => void;
 	} = $props();
 	const canSetGoal = $derived(discoveryState.currentTraits?.supportsGoalState);
@@ -38,7 +41,7 @@
      opened upwards as-found. `sideOffset` restates the old
      `bottom-[calc(100%+8px)]` gap rather than taking the 4px default.
 
-     `font-brand` was on each row as-found and is the composer's typeface --
+     `font-sans` was on each row as-found and is the composer's typeface --
      the pills beside this button wear it too -- so it moves to the surface
      rather than being repeated per row. This is the only menu in the app that
      is not in the body font. -->
@@ -48,23 +51,23 @@
 	side="top"
 	align="start"
 	sideOffset={8}
-	class="min-w-[170px] font-brand"
+	class="min-w-[240px] font-sans"
 	data-testid="attach-menu"
 >
 	{#snippet trigger({ props })}
 		<Button
 			{...props}
 			variant="ghost"
-			size="content"
+			size="composer-icon"
 			tone="inherit"
 			hoverFill="surface"
 			iconOnly
 			icon="plus"
 			iconSize={18}
+			touchTarget
 			id="attach-btn"
 			type="button"
 			ariaLabel="Attach"
-			class="shrink-0 w-[32px] h-[32px] rounded-[10px] text-text-secondary"
 		/>
 	{/snippet}
 
@@ -78,16 +81,22 @@
 		<span>Add Photos</span>
 	</MenuItem>
 
+	<MenuItem id="attach-files" density="touch" onselect={onFiles}>
+		<Icon name="file" size={18} class="shrink-0" />
+		<span>Add Files</span>
+	</MenuItem>
+
+	<MenuSeparator />
 	<MenuItem
 		data-testid="attach-set-goal"
 		density="touch"
 		disabled={!canSetGoal}
 		onselect={onSetGoal}
 	>
-		<Icon name="target" size={18} class="shrink-0 text-status-violet" />
+		<Icon name="target" size={18} class="shrink-0 text-status-goal" />
 		<span class="flex flex-col">
-			<span class="text-status-violet">{canSetGoal ? "Set goal" : "Goal"}</span>
-			{#if !canSetGoal}<span class="text-xs text-text-muted">Claude only</span>{/if}
+			<span class="text-status-goal">{canSetGoal ? "Set goal" : "Goal"}</span>
+			<span class="text-[12px] text-text-muted">{canSetGoal ? "Same as $goal" : "Claude only"}</span>
 		</span>
 	</MenuItem>
 </Menu>

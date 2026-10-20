@@ -1,5 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
+import { TLSSocket } from "node:tls";
 import type { ManagedRuntime } from "effect";
 import { Context, Effect, type Fiber, Layer, Option, Tracer } from "effect";
 import { NetAddress } from "effect/net";
@@ -24,7 +25,7 @@ import {
 import * as Failure from "../effect/failure-classification.js";
 import { ENV } from "../env.js";
 import { isRecord } from "../utils.js";
-import { getClientIp } from "./http-utils.js";
+import { getClientIp, isLoopbackAddress } from "./http-utils.js";
 import {
 	type AttachDaemonProject,
 	BrowserRpcConnectionsTag,
@@ -239,7 +240,7 @@ type RpcTransportRunFork = <A, E>(
 interface RpcWebSocketHandlerRuntime {
 	readonly transport: WsTransport;
 	readonly runTransportFork: RpcTransportRunFork;
-	readonly runConnection: (ws: WebSocket, ip: string) => void;
+	readonly runConnection: (ws: WebSocket, ip: string, secure?: boolean) => void;
 }
 
 export interface RpcWebSocketHandlerShape {
@@ -263,6 +264,7 @@ const runRpcWebSocketConnection = <R>(
 	serverLayer: Layer.Layer<Layer.Success<typeof WsRpcServerLayer>, never, R>,
 	onSuccessfulShutdownResponse?: OnSuccessfulShutdownResponse,
 	browserConnections?: Set<() => void>,
+	secure = false,
 ) =>
 	Effect.scoped(
 		Effect.gen(function* () {
@@ -376,7 +378,7 @@ const runRpcWebSocketConnection = <R>(
 				ws.once("close", () => resume(Effect.void));
 			});
 		}),
-	).pipe(Effect.provideService(RpcCaller, { kind: "browser", ip }));
+	).pipe(Effect.provideService(RpcCaller, { kind: "browser", ip, secure }));
 
 export const makeWsRpcWebSocketHandler = (
 	options: RpcWebSocketHandlerOptions,
@@ -394,13 +396,14 @@ export const makeWsRpcWebSocketHandler = (
 			{
 				transport,
 				runTransportFork: Effect.runForkWith(context),
-				runConnection: (ws, ip) => {
+				runConnection: (ws, ip, secure) => {
 					const connection = runRpcWebSocketConnection(
 						ws,
 						ip,
 						WsRpcServerLayer,
 						undefined,
 						Option.getOrUndefined(browserConnections),
+						secure,
 					);
 					if ("runtime" in options) options.runtime.runFork(connection);
 					else options.runFork(connection);
@@ -442,7 +445,7 @@ export const makeRoutedWsRpcWebSocketHandler = (
 		const handler = new WsRpcWebSocketHandler(undefined, {
 			transport: Context.get(transportContext, WsTransportTag),
 			runTransportFork: Effect.runForkWith(context),
-			runConnection: (ws, ip) =>
+			runConnection: (ws, ip, secure) =>
 				Effect.runForkWith(context)(
 					Effect.forkIn(
 						runRpcWebSocketConnection(
@@ -451,6 +454,7 @@ export const makeRoutedWsRpcWebSocketHandler = (
 							serverLayer,
 							onSuccessfulShutdownResponse,
 							Option.getOrUndefined(browserConnections),
+							secure,
 						),
 						scope,
 					),
@@ -472,7 +476,11 @@ export class WsRpcWebSocketHandler implements RpcWebSocketHandlerShape {
 		>,
 		unknown
 	>;
-	private readonly runConnection: (ws: WebSocket, ip: string) => void;
+	private readonly runConnection: (
+		ws: WebSocket,
+		ip: string,
+		secure?: boolean,
+	) => void;
 	private readonly transport: WsTransport;
 	private readonly runTransportFork: RpcTransportRunFork;
 	private readonly clients = new Set<WebSocket>();
@@ -551,6 +559,9 @@ export class WsRpcWebSocketHandler implements RpcWebSocketHandlerShape {
 		this.runConnection(
 			ws,
 			getClientIp(req.socket.remoteAddress, req.headers["x-forwarded-for"]),
+			(req.socket instanceof TLSSocket && req.socket.encrypted) ||
+				(isLoopbackAddress(req.socket.remoteAddress) &&
+					req.headers["x-forwarded-proto"] === "https"),
 		);
 	}
 

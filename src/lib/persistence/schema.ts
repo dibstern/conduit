@@ -98,6 +98,14 @@ export const TOOL_RESULT_EVENT_REFS_MIGRATION =
 	"0064_tool_result_event_refs.sql";
 export const PROJECT_TREE_DATA_MIGRATION = "0065_project_tree_data.sql";
 export const INPUT_DRAFTS_MIGRATION = "0066_input_drafts.sql";
+export const GOAL_CHECK_METADATA_MIGRATION = "0067_goal_check_metadata.sql";
+export const MESSAGE_PART_SURFACING_MIGRATION =
+	"0068_message_part_surfacing.sql";
+export const SESSIONS_SETTLED_SHELF_INDEX_MIGRATION =
+	"0069_sessions_settled_shelf_index.sql";
+export const SURFACING_MARKS_MIGRATION = "0070_surfacing_marks.sql";
+export const MESSAGE_PART_READ_MIGRATION = "0071_message_part_read.sql";
+export const TURN_RECAPS_MIGRATION = "0072_turn_recaps.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

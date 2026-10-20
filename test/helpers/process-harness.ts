@@ -213,7 +213,7 @@ export class ProcessHarness {
 		private readonly blockCapabilitiesProbe = false,
 		capabilityModels?: readonly ModelInfo[],
 		private readonly restartProof = false,
-		private readonly holdRunnerAck = false,
+		private readonly holdRunnerAck: boolean | "place-user-message" = false,
 		private readonly holdRunnerOutput?:
 			| "permission-request"
 			| "question-request"
@@ -329,51 +329,51 @@ export class ProcessHarness {
 			chmodSync(executable, 0o755);
 			if (realOpenCode)
 				symlinkSync(realOpenCode, join(this.root, "bin", "opencode-real"));
-			const config: DaemonConfig = {
-				pid: 0,
-				port: 0,
-				pinHash: null,
-				tls: false,
-				debug: false,
-				keepAwake: false,
-				projects: foregroundCli
-					? [
-							{
-								path: this.projectDir,
-								folders: [this.projectDir],
-								slug: "process-test",
-								addedAt: Date.now(),
-							},
-						]
-					: [],
-				...(managedOpenCode
-					? {
-							instances: [
-								{
-									id: managedOpenCodeId,
-									name: "Managed test",
-									port: 0,
-									managed: true,
-									driver: "opencode",
-									env: {
-										OPENCODE_SERVER_USERNAME: "test-user",
-										CONDUIT_TEST_OPENCODE_IGNORE_SIGTERM: String(
-											ignoreOpenCodeSigterm,
-										),
-										CONDUIT_TEST_OPENCODE_PAUSE_SUPERVISOR: String(
-											pauseOpenCodeSupervisor,
-										),
-									},
-								},
-							],
-						}
-					: {}),
-			};
-			writeFileSync(
-				join(this.configDir, "daemon.json"),
-				JSON.stringify(config),
-			);
 		}
+		// The user has already answered the avatar question, so the first-run
+		// dialog stays shut over the specs that are not about it.
+		const config: DaemonConfig = {
+			avatar: { kind: "initial" },
+			pid: 0,
+			port: 0,
+			pinHash: null,
+			tls: false,
+			debug: false,
+			keepAwake: false,
+			projects: foregroundCli
+				? [
+						{
+							path: this.projectDir,
+							folders: [this.projectDir],
+							slug: "process-test",
+							addedAt: Date.now(),
+						},
+					]
+				: [],
+			...(managedOpenCode
+				? {
+						instances: [
+							{
+								id: managedOpenCodeId,
+								name: "Managed test",
+								port: 0,
+								managed: true,
+								driver: "opencode",
+								env: {
+									OPENCODE_SERVER_USERNAME: "test-user",
+									CONDUIT_TEST_OPENCODE_IGNORE_SIGTERM: String(
+										ignoreOpenCodeSigterm,
+									),
+									CONDUIT_TEST_OPENCODE_PAUSE_SUPERVISOR: String(
+										pauseOpenCodeSupervisor,
+									),
+								},
+							},
+						],
+					}
+				: {}),
+		};
+		writeFileSync(join(this.configDir, "daemon.json"), JSON.stringify(config));
 		writeFileSync(
 			join(this.root, "runner-identity-fixture.mjs"),
 			`import childProcess from "node:child_process";
@@ -478,6 +478,21 @@ Object.assign(ClaudeDriver, { create: deps => {
 		return join(this.configDir, "events.db");
 	}
 
+	/**
+	 * Turn off auto-settle and auto-archive before the next start. A seeded
+	 * store of old, read sessions is otherwise due for both all at once.
+	 */
+	disableIdlePolicies(): void {
+		writeFileSync(
+			join(this.configDir, "daemon.json"),
+			JSON.stringify({
+				...Either.getOrThrow(loadDaemonConfigResult(this.configDir)),
+				autoSettleAfterDays: null,
+				autoArchiveAfterDays: null,
+			}),
+		);
+	}
+
 	promptIdForProviderRequest(providerRequestId: string): string | undefined {
 		const db = new Database(this.daemonStorePath(), { readonly: true });
 		try {
@@ -543,7 +558,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			logLevel?: "warn";
 			/** Stand in for a login service: respawn exited daemons on the same port. */
 			respawnOnExit?: boolean;
-			holdRunnerAck?: boolean;
+			holdRunnerAck?: boolean | "place-user-message";
 			holdRunnerOutput?:
 				| "permission-request"
 				| "question-request"
@@ -637,6 +652,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 				Pick<
 					NodeJS.ProcessEnv,
 					| "CONDUIT_SERVICE"
+					| "TYPESAFE_BASE_URL"
+					| "TYPESAFE_API_KEY"
 					| "CONDUIT_OUTBOX_DRAIN_INTERVAL_MS"
 					| "CONDUIT_TAILSCALE_BIN"
 					| "CONDUIT_BUILD_READY_PATH"
@@ -835,6 +852,9 @@ Object.assign(ClaudeDriver, { create: deps => {
 				cwd: this.projectDir,
 				env: (this.environment = {
 					...options.serviceEnvironment,
+					// Bootstrap once, including configs replaced by a fixture before start.
+					CONDUIT_TEST_REGISTER_PROJECT:
+						this.generations.length === 0 ? "1" : "0",
 					...(options.keepPort && this.port
 						? { CONDUIT_TEST_PORT: String(this.port) }
 						: {}),
@@ -1059,7 +1079,12 @@ Object.assign(ClaudeDriver, { create: deps => {
 							}
 						: {}),
 					...(this.holdRunnerAck
-						? { CONDUIT_TEST_HOLD_RUNNER_ACK: "text.delta" }
+						? {
+								CONDUIT_TEST_HOLD_RUNNER_ACK:
+									this.holdRunnerAck === true
+										? "text.delta"
+										: this.holdRunnerAck,
+							}
 						: {}),
 					...(this.holdRunnerOutput && this.generations.length === 0
 						? { CONDUIT_TEST_HOLD_RUNNER_OUTPUT: this.holdRunnerOutput }
@@ -1747,14 +1772,14 @@ Object.assign(ClaudeDriver, { create: deps => {
 
 	private rememberManagedOpenCode(): void {
 		const loaded = loadDaemonConfigResult(this.configDir);
-		if (loaded._tag === "Failure") {
-			// Config-safety scenarios deliberately damage this file. Record the
-			// read failure and retain already authenticated process ownership.
-			if (loaded.failure._tag !== "NotFound")
-				this.configReadErrors.add(loaded.failure.message);
-			return;
-		}
-		for (const instance of loaded.success.instances ?? []) {
+		// Config-safety scenarios deliberately damage this file. Record the read
+		// failure, retain already authenticated ownership, and still read the
+		// fixture ledger: its children need termination proof either way.
+		if (loaded._tag === "Failure" && loaded.failure._tag !== "NotFound")
+			this.configReadErrors.add(loaded.failure.message);
+		const instances =
+			loaded._tag === "Success" ? (loaded.success.instances ?? []) : [];
+		for (const instance of instances) {
 			if (
 				instance.managed &&
 				instance.driver !== "claude" &&
@@ -1879,12 +1904,11 @@ Object.assign(ClaudeDriver, { create: deps => {
 					"release",
 				);
 			}
-			const config = loadDaemonConfigResult(this.configDir);
-			const projects =
-				config._tag === "Failure" && config.failure._tag === "NotFound"
-					? [] // Startup can fail before the daemon writes its first config.
-					: (Either.getOrThrowWith(config, (error) => error)?.projects ?? []);
-			for (const project of projects) {
+			// A deliberately damaged config has no project gates to release;
+			// rememberManagedOpenCode records the read failure.
+			for (const project of Either.getOrUndefined(
+				loadDaemonConfigResult(this.configDir),
+			)?.projects ?? []) {
 				if (!project.path.startsWith(`${this.root}/`)) continue;
 				for (const name of ["recovery-gated", "recovery-fail-after-adoption"]) {
 					const gate = join(project.path, ".conduit", name);

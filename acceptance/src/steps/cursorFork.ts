@@ -224,7 +224,7 @@ export const cursorForkHandlers: StepHandler[] = [
 			const driver = (match[1] ?? "").toLowerCase();
 			const trigger = world.page
 				.locator(
-					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 				)
 				.first();
 			await expect(trigger).toHaveAttribute(

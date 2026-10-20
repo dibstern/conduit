@@ -5,6 +5,149 @@ import { requireRpcControl } from "./shared.js";
 
 export const composerWordsHandlers: StepHandler[] = [
 	{
+		name: "assert branch-only Words checkout and accessible project",
+		match:
+			/^the Words checkout shows (.+) with a (worktree|branch|commit|folder) icon and names (.+)$/,
+		run: async ({ world, match }) => {
+			const checkout = world.page.getByTestId("composer-checkout");
+			await expect(checkout).toBeVisible();
+			if (match[2] === "folder") {
+				await expect(checkout.locator('[data-part="project"]')).toHaveText(
+					match[3] ?? "",
+				);
+				await expect(checkout.locator('[data-part="branch"]')).toHaveCount(0);
+			} else {
+				await expect(checkout.locator('[data-part="project"]')).toHaveCount(0);
+				await expect(checkout.locator('[data-part="branch"]')).toHaveText(
+					match[1] ?? "",
+				);
+			}
+			await expect(
+				checkout.locator(`[data-icon="${match[2]}"] svg`),
+			).toBeVisible();
+			expect(await checkout.getAttribute("aria-label")).toContain(
+				match[3] ?? "",
+			);
+			if (match[2] !== "folder")
+				expect(await checkout.getAttribute("aria-label")).toContain(
+					match[1] ?? "",
+				);
+		},
+	},
+	{
+		name: "assert Words checkout branch truncation",
+		match:
+			/^the Words checkout truncates its branch and retains its full identity$/,
+		run: async ({ world }) => {
+			const checkout = world.page.getByTestId("composer-checkout");
+			await expect(checkout.locator('[data-part="project"]')).toHaveCount(0);
+			await expect
+				.poll(() =>
+					checkout
+						.locator('[data-part="branch"]')
+						.evaluate((element) => element.scrollWidth > element.clientWidth),
+				)
+				.toBe(true);
+			expect(await checkout.getAttribute("aria-label")).toContain(
+				"conduit-worktrees",
+			);
+			expect(await checkout.getAttribute("aria-label")).toContain(
+				"feature/session-account-chip-redesign",
+			);
+		},
+	},
+
+	{
+		name: "assert phone Words summary",
+		match: /^the phone Words summary reads (.+), (\w+), (\w+) and (\w+)$/,
+		run: async ({ world, match }) => {
+			const row = world.page.getByTestId("composer-words-row");
+			const trigger = row.getByTestId("composer-words-sheet-trigger");
+			await expect(trigger).toBeVisible();
+			await expect(row.locator("button")).toHaveCount(1);
+			for (const label of match.slice(1))
+				await expect(trigger).toContainText(label);
+			await expect(trigger.locator("button, a, input")).toHaveCount(0);
+			await expect(trigger.getByTestId("harness-logo")).toBeVisible();
+			await expect
+				.poll(() =>
+					row.evaluate((element) => {
+						const trigger = element.querySelector(
+							'[data-testid="composer-words-sheet-trigger"]',
+						);
+						if (!trigger) return false;
+						const bounds = element.getBoundingClientRect(),
+							button = trigger.getBoundingClientRect(),
+							css = getComputedStyle(element);
+						return (
+							button.width >=
+							bounds.width -
+								parseFloat(css.paddingLeft) -
+								parseFloat(css.paddingRight) -
+								1
+						);
+					}),
+				)
+				.toBe(true);
+			await expect(row.getByTestId("composer-checkout")).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert phone Words summary focus",
+		match: /^the phone Words summary is focused$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("composer-words-sheet-trigger"),
+			).toBeFocused();
+		},
+	},
+	{
+		name: "assert phone Words mode and tone",
+		match:
+			/^the phone Words mode is (never|plan|ask|edits|auto|full) with the (never|plan|ask|edits|auto|full) tone$/,
+		run: async ({ world, match }) => {
+			const mode = world.page
+				.getByTestId("composer-words-sheet-trigger")
+				.getByText(match[1] ?? "", { exact: true });
+			await expect(mode).toBeVisible();
+			await expect
+				.poll(() =>
+					mode.evaluate((element, mode) => {
+						const probe = document.createElement("span");
+						probe.style.color = `var(--color-${mode === "full" ? "error" : mode === "edits" || mode === "auto" ? "status-ask" : "text-secondary"})`;
+						element.append(probe);
+						const expected = getComputedStyle(probe).color;
+						probe.remove();
+						return getComputedStyle(element).color === expected;
+					}, match[2] ?? "ask"),
+				)
+				.toBe(true);
+		},
+	},
+	{
+		name: "assert phone Words omits checkout",
+		match: /^the phone Words row has no checkout$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page
+					.getByTestId("composer-words-row")
+					.getByTestId("composer-checkout"),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert phone Words context usage",
+		match: /^the phone Words row omits checkout and shows (\d+)% context$/,
+		run: async ({ world, match }) => {
+			const row = world.page.getByTestId("composer-words-row");
+			await expect(row.getByTestId("composer-checkout")).toHaveCount(0);
+			await expect(row.getByTestId("composer-word-context-usage")).toHaveText(
+				`${match[1]}%`,
+			);
+		},
+	},
+
+	{
 		name: "open settings to general section",
 		match: /^I open settings to the General section$/,
 		run: async ({ world }) => {
@@ -107,12 +250,9 @@ export const composerWordsHandlers: StepHandler[] = [
 			const row = world.page.getByTestId("composer-words-row");
 			const left = row.getByTestId("composer-words-left");
 			const right = row.getByTestId("composer-words-right");
-			await expect(left).toHaveCSS("flex-shrink", "0");
-			await expect(right).toHaveCSS("flex-shrink", "1");
-			await expect(row).toHaveCSS("height", "24px");
 			await expect(
 				left.getByTestId("composer-word-harness").getByTestId("harness-logo"),
-			).toHaveCSS("width", "12px");
+			).toHaveCSS("width", "15px");
 			const order = await left.evaluate((element) =>
 				Array.from(
 					element.querySelectorAll('[data-testid^="composer-word-"]'),
@@ -156,16 +296,19 @@ export const composerWordsHandlers: StepHandler[] = [
 	{
 		name: "assert checkout identity and icon kind in the composer",
 		match:
-			/^the composer checkout shows (.+) \/ (.+) with a (worktree|branch|commit|folder) icon$/,
+			/^the composer checkout shows (?:(?:(.+) \/ )?(.+) with a|just a) (worktree|branch|commit|folder) icon$/,
 		run: async ({ world, match }) => {
 			const checkout = world.page.getByTestId("composer-checkout");
 			await expect(checkout).toBeVisible();
-			await expect(checkout.locator('[data-part="project"]')).toHaveText(
-				match[1] ?? "",
-			);
+			// The words row names only the branch; the project stays in its menu.
+			const project = checkout.locator('[data-part="project"]');
+			if (match[1]) await expect(project).toHaveText(match[1]);
+			else await expect(project).toHaveCount(0);
+			// "just a" is the collapsed checkout: the icon without labels.
 			const branch = checkout.locator('[data-part="branch"]');
-			if (match[3] === "folder") await expect(branch).toHaveCount(0);
-			else await expect(branch).toHaveText(match[2] ?? "");
+			if (match[3] === "folder" || !match[2])
+				await expect(branch).toHaveCount(0);
+			else await expect(branch).toHaveText(match[2]);
 			await expect(
 				checkout.locator(`[data-icon="${match[3]}"] svg`),
 			).toBeVisible();
@@ -329,7 +472,7 @@ export const composerWordsHandlers: StepHandler[] = [
 	},
 	{
 		name: "tap a composer word",
-		match: /^I tap the (badge|account|model|window|effort|agent) word$/,
+		match: /^I tap the (badge|account|model|window|agent) word$/,
 		run: async ({ world, match }) => {
 			const word =
 				match[1] === "badge"

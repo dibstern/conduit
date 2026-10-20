@@ -88,6 +88,7 @@ describe("Integration: account catalogues", () => {
 			}),
 		);
 		const before = harness.mock.diagnostics.length;
+		// A session-scoped request names no project: its owner supplies it.
 		for (const scope of [
 			{ projectSlug: "integration-test", instanceId: "missing-account" },
 			{ sessionId: "ses-unroutable" },

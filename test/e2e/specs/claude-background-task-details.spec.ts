@@ -293,8 +293,12 @@ test.describe("Claude background task ages", () => {
 			await app.sendMessage("Launch the background work");
 			await replayer.held();
 			await expect.poll(() => snapshots.tasks.length).toBe(4);
-			await expect(page.getByTestId("composer-task-dots")).toBeVisible();
-			await page.getByTestId("background-tasks-row").click();
+			await expect(
+				page.getByRole("button", { name: "4 background tasks", exact: true }),
+			).toBeVisible();
+			await page
+				.getByRole("button", { name: /^\d+ background tasks?$/ })
+				.click();
 			await report.record("original", snapshots.tasks);
 			const originalTasks = snapshots.tasks;
 			const original = snapshots.tasks.map(({ id, firstSeenAt }) => ({
@@ -307,7 +311,9 @@ test.describe("Claude background task ages", () => {
 			snapshots.clear();
 			await page.reload();
 			await expect.poll(() => snapshots.tasks.length).toBe(4);
-			await page.getByTestId("background-tasks-row").click();
+			await page
+				.getByRole("button", { name: /^\d+ background tasks?$/ })
+				.click();
 			await report.record("restored", snapshots.tasks);
 			expect(
 				snapshots.tasks.map(({ id, firstSeenAt }) => ({ id, firstSeenAt })),
@@ -362,7 +368,9 @@ for (const transcriptOnlySubagents of [false, true]) {
 				await app.sendMessage("Launch the background work");
 				await replayer.held();
 				await expect.poll(() => snapshots.tasks.length).toBe(5);
-				await page.getByTestId("background-tasks-row").click();
+				await page
+					.getByRole("button", { name: /^\d+ background tasks?$/ })
+					.click();
 				const panel = page.getByTestId("background-tasks-panel");
 				const row = (description: string) =>
 					panel.getByTestId("background-task").filter({
@@ -394,11 +402,15 @@ for (const transcriptOnlySubagents of [false, true]) {
 					row("Unjoinable workflow").getByTestId("background-task-detail"),
 				).toHaveCount(0);
 				await report.record("parent-result", snapshots.tasks);
-				await page.getByTestId("background-tasks-row").click();
+				await page
+					.getByRole("button", { name: /^\d+ background tasks?$/ })
+					.click();
 				replayer.release();
 				await replayer.held();
 				await expect.poll(() => snapshots.tasks.length).toBe(6);
-				await page.getByTestId("background-tasks-row").click();
+				await page
+					.getByRole("button", { name: /^\d+ background tasks?$/ })
+					.click();
 				await expect(
 					row("Sleep 40 seconds then print done marker").getByTestId(
 						"background-task-detail",
@@ -427,13 +439,17 @@ for (const transcriptOnlySubagents of [false, true]) {
 				snapshots.clear();
 				await page.reload();
 				await expect.poll(() => snapshots.tasks.length).toBe(6);
-				await page.getByTestId("background-tasks-row").click();
+				await page
+					.getByRole("button", { name: /^\d+ background tasks?$/ })
+					.click();
 				expect(snapshots.tasks).toEqual(original);
 				await expect(detail).toHaveAttribute("title", LONG_COMMAND);
 				await report.record("restored-details", snapshots.tasks);
 				await page.setViewportSize({ width: 1440, height: 900 });
 				if (!(await panel.isVisible()))
-					await page.getByTestId("background-tasks-row").click();
+					await page
+						.getByRole("button", { name: /^\d+ background tasks?$/ })
+						.click();
 				await panel.getByRole("button", { name: "Open agent A" }).click();
 				const drawer = page.getByTestId("task-drawer");
 				await expect(drawer).toBeVisible();
@@ -490,10 +506,12 @@ test.describe("Claude ended stream task liveness", () => {
 			await app.sendMessage("Launch the background work");
 			await replayer.held();
 			await expect.poll(() => snapshots.tasks.length).toBe(4);
-			await page.getByTestId("background-tasks-row").click();
+			await page
+				.getByRole("button", { name: /^\d+ background tasks?$/ })
+				.click();
 			await expect(
-				page.getByTestId("composer-task-dots").locator("i"),
-			).toHaveCount(4);
+				page.getByRole("button", { name: "4 background tasks", exact: true }),
+			).toBeVisible();
 			await report.record("live-before-stream-end", snapshots.tasks);
 			const childId = snapshots.tasks.find(
 				(task) => task.description === "agent A",
@@ -514,6 +532,8 @@ test.describe("Claude ended stream task liveness", () => {
 				}
 			};
 			expect(siblingStatus()).toBe("busy");
+			// Live polls may already have persisted agent A's prompt, which ends in
+			// "A done." too; only the final transcript carries the reply itself.
 			const finalHistoryCount = () => {
 				const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
 				try {
@@ -556,7 +576,9 @@ test.describe("Claude ended stream task liveness", () => {
 				finalHistoryCount: finalHistoryCount(),
 			});
 			await expect(page.getByTestId("background-tasks-row")).toHaveCount(0);
-			await expect(page.getByTestId("composer-task-dots")).toHaveCount(0);
+			await expect(
+				page.getByRole("button", { name: /^\d+ background tasks?$/ }),
+			).toHaveCount(0);
 			expect(snapshots.tasks).toEqual([]);
 		} finally {
 			replayer.release();

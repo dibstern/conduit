@@ -390,16 +390,19 @@ for (const mode of ["seeded", "imported"] as const) {
 	});
 }
 
-it("S5 a known migration id with an unknown name is newer-schema", async () => {
+it.each([
+	"UPDATE effect_sql_migrations SET name = 'future_replacement' WHERE migration_id = 60",
+	"UPDATE effect_sql_migrations SET migration_id = 9999 WHERE name = 'goal_check_metadata'",
+	"UPDATE effect_sql_migrations SET migration_id = 0 WHERE name = 'goal_check_metadata'",
+])("S5 refuses an unknown ledger mapping: %s", async (mutation) => {
 	const project = await fixture(root, "renamed-ledger");
-	edit(
-		project.sourcePath,
-		"UPDATE effect_sql_migrations SET name = 'future_replacement' WHERE migration_id = 60",
-	);
+	edit(project.sourcePath, mutation);
+	const before = sourceChecksums(project.sourcePath);
 	expect(await run("S5", project)).toMatchObject({
 		outcome: "failed",
 		error: { kind: "newer-schema" },
 	});
+	expect(sourceChecksums(project.sourcePath)).toEqual(before);
 });
 
 const shared = [

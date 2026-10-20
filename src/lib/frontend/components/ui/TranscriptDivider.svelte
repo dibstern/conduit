@@ -23,5 +23,5 @@
 	{...rest}
 	class="flex items-center gap-[8px] my-[12px] font-mono text-[10.5px] text-text-muted before:h-px before:flex-1 before:bg-border before:content-[''] after:h-px after:flex-1 after:bg-border after:content-[''] {className}"
 >
-	<span class="min-w-0 truncate [&_b]:font-semibold [&_b]:text-brand-b">{@render children()}</span>
+	<span class="min-w-0 truncate [&_b]:font-semibold [&_b]:text-success">{@render children()}</span>
 </div>
