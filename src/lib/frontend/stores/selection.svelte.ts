@@ -171,7 +171,7 @@ export function watchSelection(): () => void {
 		const attaching = new Set<string>();
 		// An attach by session id places that session itself, so a row placing
 		// it while the reply is out must not send a second attach.
-		let sessionAttach = $state<string | null>(null);
+		let sessionAttach: string | null = null;
 		const resolving = new Set<string>();
 		let attachedOnce = attachedProjectState.slug !== null;
 		let previousAttached = attachedProjectState.slug;
