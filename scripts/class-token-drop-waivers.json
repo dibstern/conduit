@@ -1056,5 +1056,10 @@
 	"src/lib/frontend/components/overlays/SurfacingCategories.svelte :: text-text-muted": "conduit-test-zopq matches Final text3 with the approved text-dimmer token for settings descriptions, headings, and secondary metadata.",
 	"src/lib/frontend/components/overlays/SurfacingFeedbackTab.svelte :: text-text-muted": "conduit-test-zopq matches Final text3 with the approved text-dimmer token for settings descriptions, headings, and secondary metadata.",
 	"src/lib/frontend/components/overlays/UsageSettingsTab.svelte :: text-text-muted": "conduit-test-zopq matches Final text3 with the approved text-dimmer token for settings descriptions, headings, and secondary metadata.",
-	"src/lib/frontend/components/overlays/AvatarSettings.svelte :: mb-[16px]": "conduit-test-zopq matches the Final phone list's 18px gap between the You card and the first section card."
+	"src/lib/frontend/components/overlays/AvatarSettings.svelte :: mb-[16px]": "conduit-test-zopq matches the Final phone list's 18px gap between the You card and the first section card.",
+	"src/lib/frontend/components/ui/button-recipes.ts :: w-[20px]": "conduit-test-cvyi removes the redundant session header title menu and its unused button size; the existing overflow provides its actions.",
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: bg-white/[0.08],border-border/50,px-1.5,py-0.5,space-y-1.5,text-text-dimmer": {
+		"movedTo": "src/lib/frontend/components/overlays/DebugSettingsTab.svelte",
+		"reason": "These class tokens moved intact to DebugSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
+	}
 }

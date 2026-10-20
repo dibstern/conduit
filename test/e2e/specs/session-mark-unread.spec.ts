@@ -3,8 +3,11 @@ import type { ReplayHarness } from "../helpers/e2e-harness.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
 
-async function markCurrentUnreadFromTitle(page: Page): Promise<void> {
-	await page.getByTestId("session-bar-title-menu").click();
+async function markCurrentUnreadFromOverflow(page: Page): Promise<void> {
+	await page
+		.getByTestId("session-bar-overflow")
+		.or(page.getByTestId("session-bar-island-overflow"))
+		.click();
 	await page.getByTestId("session-ctx-mark-unread").click();
 }
 
@@ -169,7 +172,7 @@ test("desktop unread chip survives reload, has one keyboard-accessible read acti
 	const heightWithoutChip = (await bar.boundingBox())?.height;
 	if (heightWithoutChip == null) throw new Error("missing session bar box");
 
-	await markCurrentUnreadFromTitle(page);
+	await markCurrentUnreadFromOverflow(page);
 	const chip = page.getByTestId("session-bar-unread-chip");
 	await expect(chip).toBeVisible();
 	await expect(firstRow.getByTestId("session-unread-dot")).toBeVisible();
@@ -182,7 +185,7 @@ test("desktop unread chip survives reload, has one keyboard-accessible read acti
 			),
 		);
 	expect(titleOrder.indexOf("session-bar-unread-chip")).toBeGreaterThan(
-		titleOrder.indexOf("session-bar-title-menu"),
+		titleOrder.indexOf("session-bar-title"),
 	);
 	expect((await bar.boundingBox())?.height).toBe(heightWithoutChip);
 	expect((await chip.boundingBox())?.height).toBeGreaterThanOrEqual(44);
@@ -199,7 +202,7 @@ test("desktop unread chip survives reload, has one keyboard-accessible read acti
 	await observer.reload();
 	await expect(observerRow.getByTestId("session-unread-dot")).toBeVisible();
 	await expect(chip).toBeVisible();
-	await page.getByTestId("session-bar-title-menu").focus();
+	await bar.focus();
 	await page.keyboard.press("Tab");
 	await expect(chip).toBeFocused();
 	await page.keyboard.press("Enter");
@@ -214,7 +217,7 @@ test("desktop unread chip survives reload, has one keyboard-accessible read acti
 	await expect(chip).toHaveCount(0);
 	await expect(firstRow.getByTestId("session-unread-dot")).toHaveCount(0);
 
-	await markCurrentUnreadFromTitle(page);
+	await markCurrentUnreadFromOverflow(page);
 	await expect(chip).toBeVisible();
 	await sidebar.clickSession(secondId);
 	await sidebar.clickSession(firstId);
@@ -225,7 +228,7 @@ test("desktop unread chip survives reload, has one keyboard-accessible read acti
 test.describe("phone", () => {
 	test.use({ viewport: { width: 375, height: 740 } });
 
-	test("title sheet and composer shortcut return to the list with undo", async ({
+	test("overflow sheet and composer shortcut return to the list with undo", async ({
 		page,
 		relayUrl,
 		harness,
@@ -236,8 +239,8 @@ test.describe("phone", () => {
 			page.locator("#session-list .session-item").first(),
 		);
 		await row.click();
-		await page.getByTestId("session-bar-title-menu").click();
-		const sheet = page.getByTestId("session-action-sheet");
+		await page.getByTestId("session-bar-island-overflow").click();
+		const sheet = page.getByTestId("session-bar-island-menu");
 		await expect(sheet.getByRole("group", { name: "Triage" })).toBeVisible();
 		await sheet.getByTestId("session-ctx-mark-unread").click();
 		await expect(page.getByTestId("session-bar")).toHaveCount(0);
@@ -269,7 +272,7 @@ test.describe("phone", () => {
 			page.locator("#session-list .session-item").first(),
 		);
 		await row.click();
-		await markCurrentUnreadFromTitle(page);
+		await markCurrentUnreadFromOverflow(page);
 		await expect(page.getByTestId("session-bar-unread-chip")).toHaveCount(0);
 		await expect(row.getByTestId("session-unread-dot")).toBeVisible();
 	});

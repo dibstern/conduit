@@ -48,10 +48,13 @@ async function dragDown(
 	return { top: box.y, end };
 }
 
-async function openTitleSheet(page: Page, relayUrl: string): Promise<Locator> {
+async function openOverflowSheet(
+	page: Page,
+	relayUrl: string,
+): Promise<Locator> {
 	await gotoRelay(page, relayUrl);
-	await page.getByTestId("session-bar-title-menu").tap();
-	const sheet = page.getByTestId("session-action-sheet");
+	await page.getByTestId("session-bar-island-overflow").tap();
+	const sheet = page.getByTestId("session-bar-island-menu");
 	await expect(sheet).toBeVisible();
 	await expect(page.getByTestId("menu-sheet-scrim")).toHaveCSS(
 		"pointer-events",
@@ -64,7 +67,7 @@ test("phone: dragging the session sheet down from its top follows the finger and
 	page,
 	relayUrl,
 }) => {
-	const sheet = await openTitleSheet(page, relayUrl);
+	const sheet = await openOverflowSheet(page, relayUrl);
 	const { top, end } = await dragDown(page, sheet, 200, false);
 	// Mid-drag the sheet tracks the finger instead of scrolling its content.
 	const moved = await sheet.boundingBox();
@@ -77,7 +80,7 @@ test("phone: a short drag springs the session sheet back open", async ({
 	page,
 	relayUrl,
 }) => {
-	const sheet = await openTitleSheet(page, relayUrl);
+	const sheet = await openOverflowSheet(page, relayUrl);
 	const { top } = await dragDown(page, sheet, 30);
 	await expect(sheet).toBeVisible();
 	await expect
@@ -90,7 +93,7 @@ test("phone: dragging a scrolled sheet body scrolls without dismissing", async (
 	relayUrl,
 }, testInfo) => {
 	await page.setViewportSize({ width: 390, height: 320 });
-	const sheet = await openTitleSheet(page, relayUrl);
+	const sheet = await openOverflowSheet(page, relayUrl);
 	const body = sheet.locator("[data-sheet-body]");
 	await expect
 		.poll(() => body.evaluate((node) => node.scrollHeight - node.clientHeight))

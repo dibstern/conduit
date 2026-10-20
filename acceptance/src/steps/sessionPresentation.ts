@@ -19,7 +19,6 @@ export const sessionPresentationHandlers: StepHandler[] = [
 				"session-skills-chip",
 				"side-threads-control",
 				"session-bar-settle",
-				"session-bar-title-menu",
 				"session-bar-unread-chip",
 				"session-bar-state-chip",
 				"session-goal-subtitle",

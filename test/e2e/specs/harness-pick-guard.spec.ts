@@ -777,7 +777,6 @@ async function expectShown(picker: Locator, pick: Pick): Promise<void> {
 }
 
 async function openModelsSettings(page: Page): Promise<void> {
-	// The title menu holds no Settings; a phone's island has its own overflow.
 	await page
 		.getByTestId("session-bar-overflow")
 		.or(page.getByTestId("session-bar-island-overflow"))

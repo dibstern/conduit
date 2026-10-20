@@ -466,7 +466,6 @@ export type ButtonSize =
 	| "session-navigation"
 	| "phone-navigation"
 	| "phone-header-icon"
-	| "phone-title-menu"
 	| "phone-status"
 	| "phone-task"
 	| "subtitle"
@@ -533,7 +532,6 @@ const SIZE_CLASSES: Record<
 	"phone-navigation":
 		"h-[28px] min-w-[44px] gap-[4px] pl-[4px] pr-[9px] rounded-full text-[13px] font-medium",
 	"phone-header-icon": "size-[30px] rounded-full",
-	"phone-title-menu": "h-[24px] w-[20px] rounded-lg focus-visible:ring-inset",
 	"phone-status": "h-[22px] min-w-[44px] rounded-full focus-visible:ring-inset",
 	"phone-task":
 		"h-[30px] min-w-[44px] gap-[8px] rounded-full focus-visible:ring-inset",

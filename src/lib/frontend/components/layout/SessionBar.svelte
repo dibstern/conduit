@@ -13,8 +13,8 @@
   Phone geometry lives in style.css as a grid keyed on `data-collapsed`, so the
   title moves between rows without being re-parented and the <h1> never unmounts.
 
-  The desktop overflow shares the phone sheet's command body. The title menu
-  retains the session command list.
+  The desktop overflow and phone sheet share the session command list and
+  global actions.
 -->
 
 <script lang="ts">
@@ -49,7 +49,6 @@
 	import Tooltip from "../ui/Tooltip.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import Popover from "../ui/Popover.svelte";
-	import SessionContextMenu from "../session/SessionContextMenu.svelte";
 	import SessionRenameInput from "../session/SessionRenameInput.svelte";
 	import SessionSkillsChip from "../session/SessionSkillsChip.svelte";
 	import BackgroundTasksPanel from "../session/BackgroundTasksPanel.svelte";
@@ -287,15 +286,12 @@
 	}
 	let stateMenuOpen = $state(false);
 	let statePickingTime = false;
-	let titleMenuOpen = $state(false);
-	let titleMenuAnchor: HTMLElement | null = $state(null);
 	let renaming = $state(false);
 	// The two layouts anchor their menus differently, so crossing the
 	// breakpoint closes any open one rather than leaving it floating.
 	$effect(() => {
 		void sessionViewState.compact;
 		void sessionState.currentId;
-		titleMenuOpen = false;
 		stateMenuOpen = false;
 		overflowOpen = false;
 	});
@@ -386,26 +382,6 @@
 
 {#snippet overflowFooter()}
 	<SessionSheetFooter extras={globalActions.map((action) => ({ ...action, testId: `overflow-${action.id}` }))} onselect={selectOverflow} />
-{/snippet}
-
-{#snippet titleMenuButton()}
-	<Button
-		variant="ghost"
-		size={sessionViewState.compact ? "phone-title-menu" : "touch-icon"}
-		touchTarget={sessionViewState.compact ? "always" : false}
-		iconOnly
-		icon="chevron-down"
-		iconSize={sessionViewState.compact ? 14 : 15}
-		class="{sessionViewState.compact ? '' : '-my-[13px]'} shrink-0"
-		ariaLabel="Session menu"
-		aria-haspopup="menu"
-		aria-expanded={titleMenuOpen}
-		data-testid="session-bar-title-menu"
-		onclick={(event) => {
-			titleMenuAnchor = event.currentTarget as HTMLElement;
-			titleMenuOpen = true;
-		}}
-	/>
 {/snippet}
 
 {#snippet goalContent()}
@@ -546,7 +522,7 @@
 	     Collapsed it drops a size: the row shares its width with the state
 	     glyph and two 44px controls.
 
-	     Expanded, the title chevron opens the session menu.
+	     Session actions are available from the overflow in both layouts.
 	     The collapsed row keeps its separate chevron for expanding the bar. -->
 	{#if sessionViewState.compact || session}
 	<div id="session-bar-title-row" class="flex min-w-0 flex-col justify-center">
@@ -564,7 +540,6 @@
 				<SessionRenameInput {session} onend={() => { renaming = false; }} class="min-h-[44px] md:min-h-0" />
 			{:else}<span class="block truncate">{title}</span>{/if}
 		</h1>
-		{#if !collapsed}{@render titleMenuButton()}{/if}
 		</div>
 		{#if goalShown && !sessionViewState.compact}{@render goalLine()}{/if}
 		<!-- Collapsed, the full banner strip is hidden (style.css); this line stands in. -->
@@ -684,21 +659,6 @@
 	{#if collapsed || !sessionViewState.compact}{@render overflowMenu()}{/if}
 	{#if backgroundTasks.length > 0 && !collapsed}
 		<BackgroundTasksRow tasks={backgroundTasks} compact={sessionViewState.compact} onstop={supportsTaskStop ? (taskId) => { void stopBackgroundTasks(sessionState.currentId, taskId); } : undefined} onstopall={supportsTaskStop ? () => { void stopBackgroundTasks(sessionState.currentId); } : undefined} />
-	{/if}
-
-	{#if titleMenuOpen && titleMenuAnchor && session}
-		<SessionContextMenu
-			{session}
-			anchor={titleMenuAnchor}
-			projectLabel={project?.title ?? getCurrentSlug() ?? undefined}
-			projectAccent={getProjectAccent(session)}
-			branch={session.git?.branch}
-			presentation={sessionViewState.compact ? "sheet" : "menu"}
-			now={sessionState.now}
-			host={{ rename: () => { renaming = true; } }}
-			onclose={() => { titleMenuOpen = false; }}
-			extras={globalActions.map((action) => ({ ...action, testId: `session-title-${action.id}` }))}
-		/>
 	{/if}
 
 	{#if goalDetails.open && detailsGoal && goalFacts && !sessionViewState.compact}
