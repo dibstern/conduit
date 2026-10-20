@@ -334,7 +334,7 @@ export const HoverActions: Story = {
 		onmarkread: fn(),
 		oncontextmenu: fn(),
 	},
-	parameters: { pseudo: { hover: true } },
+	parameters: { pseudo: { hover: [".session-item"] } },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		canvasElement.querySelector<HTMLAnchorElement>(".session-item")?.focus();
@@ -358,7 +358,7 @@ export const SettledHoverActions: Story = {
 		projectLabel: "Conduit",
 		oncontextmenu: fn(),
 	},
-	parameters: { pseudo: { hover: true } },
+	parameters: { pseudo: { hover: [".session-item"] } },
 	play: async ({ canvasElement }) => {
 		canvasElement.querySelector<HTMLAnchorElement>(".session-item")?.focus();
 		await expect(
@@ -377,7 +377,7 @@ export const SnoozedHoverActions: Story = {
 		projectLabel: "Conduit",
 		oncontextmenu: fn(),
 	},
-	parameters: { pseudo: { hover: true } },
+	parameters: { pseudo: { hover: [".session-item"] } },
 	play: async ({ canvasElement }) => {
 		canvasElement.querySelector<HTMLAnchorElement>(".session-item")?.focus();
 		await expect(

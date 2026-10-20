@@ -562,10 +562,10 @@ export const ShelvesWithMore: Story = {
 				Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
 		await expect(canvas.getByTestId("settled-shelf-more")).toHaveTextContent(
-			"12 more",
+			/^12 more$/,
 		);
 		await expect(canvas.getByTestId("snoozed-shelf-more")).toHaveTextContent(
-			"2 more",
+			/^2 more$/,
 		);
 		await userEvent.click(canvas.getByTestId("settled-shelf-more"));
 		await expect(
