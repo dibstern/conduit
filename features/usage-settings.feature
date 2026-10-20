@@ -135,16 +135,16 @@ Scenario Outline: one account shows only its reported model weeks without reset 
   And the Usage account claude has model windows Fable <fable>% and Sonnet 6%
   When I open settings to the Usage section
   Then the Usage single-account windows show 5h 41% and Week 22%
-  And the Usage single-account model rows show Fable <fable>% and Sonnet 6% without reset lines
+  And the Usage single-account model rows show Fable <fable>% and Sonnet 6% with values <fableValue> and 6% without reset lines
   And the Usage account claude remains available
   And the usage-settings region visually matches <baseline> at <threshold> percent
 
 Examples:
-  | viewport | fable | baseline                                   | threshold |
-  | desktop  | 12    | usage-settings-single-models-desktop       | 98        |
-  | phone    | 12    | usage-settings-single-models-phone         | 98        |
-  | desktop  | 100   | usage-settings-single-model-limit-desktop  | 98        |
-  | phone    | 100   | usage-settings-single-model-limit-phone    | 98        |
+  | viewport | fable | fableValue | baseline                                   | threshold |
+  | desktop  | 12    | 12%        | usage-settings-single-models-desktop       | 98        |
+  | phone    | 12    | 12%        | usage-settings-single-models-phone         | 98        |
+  | desktop  | 100   | 9:00 am    | usage-settings-single-model-limit-desktop  | 98        |
+  | phone    | 100   | 9:00 am    | usage-settings-single-model-limit-phone    | 98        |
 
 Scenario Outline: an account without model windows shows no extra rows
   Given the viewport is a <viewport>
@@ -368,8 +368,8 @@ Scenario Outline: auto-switch retains its toggles and accessible reordering in U
   When I open settings to the Usage section
   Then the Auto-switch account toggle is off and reads <description>
   And the account order reads team-max, work2claude, personal
-  And the account work2claude shows limited · 9:00 quota
-  And the account personal shows ok quota
+  And the account work2claude shows Limited until 9:00 am quota
+  And the account personal shows Available quota
   And the Usage account self windows show 5h 38% and Week —
   And the account team-max shows no plan data quota
   And the Usage no-data card team reads No plan data for this login (API key, Bedrock, Vertex or proxy). Auto-switch can still pick it.

@@ -164,9 +164,18 @@ export const Final: Story = {
 			.getByText("Fix token refresh race")
 			.closest<HTMLElement>(".session-title-inner");
 		if (!title) throw new TypeError("Pinned title is missing");
-		// DOM scroll widths round fractional text advances to whole CSS pixels.
-		await expect(title.scrollWidth).toBeLessThanOrEqual(title.clientWidth + 1);
 		const phone = matchMedia("(max-width: 767px)").matches;
+		if (phone && !sessionViewState.compact) {
+			// The 260px sidebar truncates this title at the phone's larger type size.
+			await expect(title.scrollWidth).toBeGreaterThan(title.clientWidth);
+			await expect(getComputedStyle(title).overflowX).toBe("hidden");
+			await expect(getComputedStyle(title).textOverflow).toBe("ellipsis");
+		} else {
+			// DOM scroll widths round fractional text advances to whole CSS pixels.
+			await expect(title.scrollWidth).toBeLessThanOrEqual(
+				title.clientWidth + 1,
+			);
+		}
 		await expect(getComputedStyle(title).lineHeight).toBe(
 			phone ? "22.5px" : "19.5px",
 		);

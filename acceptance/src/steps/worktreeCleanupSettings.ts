@@ -267,13 +267,20 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 		match: /^worktree cleanup offers only the settle-driven rows$/,
 		run: async ({ world }) => {
 			const group = cleanupGroup(world.page);
-			await expect(group.locator("label > span:first-child")).toHaveText([
+			const labels = [
 				"Apply to",
 				"When a session settles",
 				"Remove settled worktrees after",
 				"When a session is deleted",
 				"Keep worktrees with",
-			]);
+			];
+			const rows = group.locator("label");
+			await expect(rows).toHaveCount(labels.length);
+			for (const [index, label] of labels.entries()) {
+				await expect(
+					rows.nth(index).getByText(label, { exact: true }),
+				).toBeVisible();
+			}
 			for (const label of [
 				"Remove idle worktrees after",
 				"Remove once merged",

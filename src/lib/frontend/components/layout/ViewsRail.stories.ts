@@ -21,6 +21,15 @@ type Story = StoryObj<typeof meta>;
 export const IndependentViews: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		const rail = canvas.getByTestId("views-rail");
+		if (matchMedia("(max-width: 767px)").matches) {
+			await expect(rail).not.toBeVisible();
+			expect(rail.getBoundingClientRect().width).toBe(0);
+			await expect(
+				canvas.queryByRole("button", { name: "Terminal" }),
+			).not.toBeInTheDocument();
+			return;
+		}
 		const terminal = canvas.getByRole("button", { name: "Terminal" });
 		const files = canvas.getByRole("button", { name: "Files" });
 		await expect(canvas.getByRole("button", { name: "Diff" })).toBeDisabled();
@@ -28,7 +37,6 @@ export const IndependentViews: Story = {
 		await userEvent.click(files);
 		await expect(terminal).toHaveAttribute("aria-pressed", "true");
 		await expect(files).toHaveAttribute("aria-pressed", "true");
-		const rail = canvas.getByTestId("views-rail");
 		expect(rail.getBoundingClientRect().width).toBe(44);
 		expect(getComputedStyle(terminal).borderRadius).toBe("9px");
 		expect(

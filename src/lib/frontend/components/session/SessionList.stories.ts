@@ -230,7 +230,9 @@ export const SnoozedDeadlineFormats: Story = {
 				new Intl.DateTimeFormat(undefined, {
 					hour: "numeric",
 					minute: "2-digit",
-				}).format(new Date(2030, 9, 7, 18)),
+				})
+					.format(new Date(2030, 9, 7, 18))
+					.toLowerCase(),
 				{ exact: true },
 			),
 		).toBeVisible();

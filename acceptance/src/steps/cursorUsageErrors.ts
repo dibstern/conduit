@@ -158,7 +158,7 @@ export const cursorUsageErrorsHandlers: StepHandler[] = [
 		name: "assert Cursor provider diagnostic and retry guidance",
 		match: /^the Cursor error notice contains (.+)$/,
 		run: async ({ world, match }) => {
-			const notice = world.page.locator("#messages .glow-tool-error");
+			const notice = world.page.getByTestId("system-error-notice");
 			await expect(notice).toBeVisible();
 			await expect(notice).toContainText(match[1] ?? "");
 		},
@@ -167,9 +167,9 @@ export const cursorUsageErrorsHandlers: StepHandler[] = [
 		name: "assert no Cursor error notice",
 		match: /^the Cursor transcript has no error notice$/,
 		run: async ({ world }) => {
-			await expect(
-				world.page.locator("#messages .glow-tool-error"),
-			).toHaveCount(0);
+			await expect(world.page.getByTestId("system-error-notice")).toHaveCount(
+				0,
+			);
 		},
 	},
 ];

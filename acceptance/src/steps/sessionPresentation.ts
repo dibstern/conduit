@@ -576,6 +576,17 @@ export const sessionPresentationHandlers: StepHandler[] = [
 			) {
 				throw new Error(`desktop overflow actions: ${JSON.stringify(actions)}`);
 			}
+			const resumeLabel = menu.getByText("Copy resume", { exact: true });
+			await expect(resumeLabel).toBeVisible();
+			await expect
+				.poll(() =>
+					resumeLabel.evaluate(
+						(label) =>
+							label.scrollWidth <= label.clientWidth &&
+							label.scrollHeight <= label.clientHeight,
+					),
+				)
+				.toBe(true);
 		},
 	},
 	{

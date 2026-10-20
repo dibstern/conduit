@@ -620,15 +620,15 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert mode shield safety tone",
-		match: /^the mode shield uses the (neutral|warning|danger) tone$/,
+		name: "assert mode shield permission tone",
+		match: /^the mode shield uses the (never|plan|ask|edits|auto|full) tone$/,
 		run: async ({ world, match }) => {
 			const mode = world.page.getByTestId("permission-mode-badge");
 			await expect
 				.poll(() =>
 					mode.evaluate((element, tone) => {
 						const probe = document.createElement("span");
-						probe.style.color = `var(--color-${tone === "danger" ? "error" : tone === "warning" ? "status-ask" : "text-secondary"})`;
+						probe.style.color = `var(--color-${tone === "full" ? "error" : `p-${tone}`})`;
 						element.append(probe);
 						const expected = getComputedStyle(probe).color;
 						probe.remove();
@@ -636,7 +636,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 							getComputedStyle(element.querySelector("svg") ?? element)
 								.color === expected
 						);
-					}, match[1] ?? "neutral"),
+					}, match[1] ?? "ask"),
 				)
 				.toBe(true);
 		},

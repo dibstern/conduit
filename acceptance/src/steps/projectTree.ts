@@ -3,7 +3,10 @@ import type {
 	ProjectInfo,
 	SessionInfo,
 } from "../../../src/lib/shared-types.js";
-import { chooseSettingsOption } from "../../../test/e2e/helpers/settings.js";
+import {
+	chooseSettingsOption,
+	closeSettings,
+} from "../../../test/e2e/helpers/settings.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRpcControl } from "./shared.js";
@@ -308,7 +311,7 @@ export const projectTreeHandlers: StepHandler[] = [
 				page.getByTestId("settings-project-tree-rows"),
 				match[1] ?? "",
 			);
-			await page.getByTestId("settings-close-btn").click();
+			await closeSettings(page);
 			await expect(page.locator("#settings-panel")).toBeHidden();
 		},
 	},

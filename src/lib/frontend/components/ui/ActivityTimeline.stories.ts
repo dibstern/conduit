@@ -46,6 +46,7 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = {};
 export const Light: Story = { globals: { theme: "light" } };
 export const Keyboard: Story = {
+	tags: ["viewport-capture"],
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const track = canvas.getByRole("slider", { name: /Activity timeline/ });
@@ -58,6 +59,7 @@ export const Keyboard: Story = {
 			"Read src/unread.ts · 4s",
 		);
 		await expect(track).toHaveFocus();
+		await expect(track.matches(":focus-visible")).toBe(true);
 	},
 };
 export const TouchScrub: Story = {

@@ -1239,10 +1239,13 @@ export const PhoneGoalSheet: Story = {
 			expect(canvas.queryByTestId("goal-details")).toBeNull();
 			expect(goal).toHaveFocus();
 			expect(getComputedStyle(goal).pointerEvents).toBe("auto");
-			expect(
+			const restoredColour = new Option().style;
+			restoredColour.color =
 				document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
-					?.content,
-			).toBe(theme === "dark" ? "#111113" : "#ffffff");
+					?.content ?? "";
+			expect(restoredColour.color).toBe(
+				theme === "dark" ? "rgb(17, 17, 19)" : "rgb(255, 255, 255)",
+			);
 		});
 		await userEvent.click(goal);
 		await userEvent.click(canvas.getByTestId("goal-details-scrim"));
@@ -1790,9 +1793,32 @@ export const DesktopBackgroundTasks: Story = {
 		const chip = canvas.getAllByTestId("background-task-chip")[0] ?? tasks;
 		const label = chip.querySelector("button span");
 		expect(label).not.toBeNull();
-		const range = document.createRange();
-		range.selectNodeContents(label ?? chip);
-		expect(range.getBoundingClientRect().top - box(chip).top).toBeCloseTo(4, 1);
+		if (!label) throw new Error("Background task label is missing");
+		const fonts = await canvasElement.ownerDocument.fonts.load(
+			'400 11.5px "Geist Mono"',
+			label.textContent ?? "",
+		);
+		expect(fonts.length).toBeGreaterThan(0);
+		for (const font of fonts) expect(font.status).toBe("loaded");
+		const labelStyle = getComputedStyle(label);
+		expect(labelStyle.fontFamily).toContain("Geist Mono");
+		expect(labelStyle.fontSize).toBe("11.5px");
+		expect(labelStyle.fontWeight).toBe("400");
+		expect(labelStyle.lineHeight).toBe("normal");
+		const chipStyle = getComputedStyle(chip);
+		expect(box(chip).height).toBe(22);
+		expect(chipStyle.paddingLeft).toBe("9px");
+		expect(chipStyle.paddingRight).toBe("4px");
+		expect(chipStyle.columnGap).toBe("6px");
+		const range = canvasElement.ownerDocument.createRange();
+		range.selectNodeContents(label);
+		const textBox = range.getBoundingClientRect();
+		expect((textBox.top + textBox.bottom) / 2).toBeCloseTo(
+			(box(chip).top + box(chip).bottom) / 2,
+			1,
+		);
+		expect(textBox.top).toBeGreaterThanOrEqual(box(chip).top);
+		expect(textBox.bottom).toBeLessThanOrEqual(box(chip).bottom);
 		const overlaps = (a: DOMRect, b: DOMRect) =>
 			a.left < b.right &&
 			b.left < a.right &&

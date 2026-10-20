@@ -53,7 +53,7 @@
 	const hoverClasses = $derived(hasDetails ? "hover:ring-1 hover:ring-border" : "");
 </script>
 
-<div class="max-w-[760px] mx-auto my-2 px-5" data-testid={message.setup ? "session-setup-block" : undefined} data-setup-status={message.setup?.status} data-setup-source={message.setup?.source} role={message.setup ? "status" : undefined} aria-label={message.setup ? setupTitle : undefined}>
+<div class="max-w-[760px] mx-auto my-2 px-5" data-testid={message.setup ? "session-setup-block" : isError ? "system-error-notice" : undefined} data-setup-status={message.setup?.status} data-setup-source={message.setup?.source} role={message.setup ? "status" : undefined} aria-label={message.setup ? setupTitle : undefined}>
 	<Surface
 		variant="bare"
 		padding="sm"

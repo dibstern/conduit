@@ -858,10 +858,25 @@ export const Server: Story = {
 		}
 		const url = canvas.getByText("https://conduit.example.ts.net");
 		await canvasElement.ownerDocument.fonts.ready;
-		await expect(getComputedStyle(url).fontFamily).toContain("Geist Mono");
-		await expect(
-			url.getBoundingClientRect().width / (url.textContent?.length ?? 1),
-		).toBeCloseTo(6.35, 2);
+		const fonts = await canvasElement.ownerDocument.fonts.load(
+			'400 11.5px "Geist Mono"',
+			url.textContent ?? "",
+		);
+		await expect(fonts.length).toBeGreaterThan(0);
+		for (const font of fonts) await expect(font.status).toBe("loaded");
+		const urlStyle = getComputedStyle(url);
+		await expect(urlStyle.fontFamily).toContain("Geist Mono");
+		await expect(urlStyle.fontSize).toBe("11.5px");
+		await expect(urlStyle.fontWeight).toBe("400");
+		await expect(url).toBeVisible();
+		const description = url.parentElement;
+		if (!description) throw new Error("Server URL description is missing");
+		const urlBox = url.getBoundingClientRect();
+		const descriptionBox = description.getBoundingClientRect();
+		await expect(urlBox.left).toBeGreaterThanOrEqual(descriptionBox.left);
+		await expect(urlBox.right).toBeLessThanOrEqual(descriptionBox.right);
+		await expect(urlBox.top).toBeGreaterThanOrEqual(descriptionBox.top);
+		await expect(urlBox.bottom).toBeLessThanOrEqual(descriptionBox.bottom);
 		const browsers = canvas.getByTestId("server-status-browsers");
 		await expect(getComputedStyle(browsers).whiteSpace).toBe("nowrap");
 		await expect(browsers.textContent?.trim().startsWith("·")).toBe(true);
@@ -1105,8 +1120,10 @@ export const ClaudeAccountExpanded: Story = {
 	args: { initialTab: "server" },
 	beforeEach: populateInstances,
 	play: async ({ canvasElement }) => {
+		await canvasElement.ownerDocument.fonts.ready;
 		const canvas = within(canvasElement);
-		const account = within(canvas.getByTestId("instance-row-work-claude"));
+		const accountElement = canvas.getByTestId("instance-row-work-claude");
+		const account = within(accountElement);
 		const row = account.getByRole("button", { name: /Work Claude/ });
 		await expect(row).toHaveAttribute("aria-expanded", "false");
 		await userEvent.click(row);
@@ -1122,6 +1139,13 @@ export const ClaudeAccountExpanded: Story = {
 		await expect(
 			account.queryByTestId("rename-instance-btn"),
 		).not.toBeInTheDocument();
+		await scrollSettingsIntoView(accountElement, "nearest");
+		const scroller = accountElement.closest(".settings-content");
+		if (!scroller) throw new Error("Settings content is missing");
+		const accountBox = accountElement.getBoundingClientRect();
+		const viewport = scroller.getBoundingClientRect();
+		await expect(accountBox.top).toBeGreaterThanOrEqual(viewport.top);
+		await expect(accountBox.bottom).toBeLessThanOrEqual(viewport.bottom);
 	},
 };
 

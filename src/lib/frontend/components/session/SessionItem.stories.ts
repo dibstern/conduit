@@ -337,7 +337,16 @@ export const HoverActions: Story = {
 	parameters: { pseudo: { hover: [".session-item"] } },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		canvasElement.querySelector<HTMLAnchorElement>(".session-item")?.focus();
+		const row = canvasElement.querySelector<HTMLAnchorElement>(".session-item");
+		if (!row) throw new Error("Session row is missing");
+		row.focus();
+		if (matchMedia("(max-width: 767px)").matches) {
+			await expect(canvas.getByTestId("session-row-actions")).not.toBeVisible();
+			await expect(row.getBoundingClientRect().height).toBeGreaterThanOrEqual(
+				44,
+			);
+			return;
+		}
 		await expect(canvas.getByTestId("session-row-actions")).toBeVisible();
 		await expect(
 			canvas.getByTestId("session-act-snooze").getBoundingClientRect().width,
@@ -360,10 +369,20 @@ export const SettledHoverActions: Story = {
 	},
 	parameters: { pseudo: { hover: [".session-item"] } },
 	play: async ({ canvasElement }) => {
-		canvasElement.querySelector<HTMLAnchorElement>(".session-item")?.focus();
-		await expect(
-			within(canvasElement).getByTestId("session-act-unsettle"),
-		).toBeVisible();
+		const canvas = within(canvasElement);
+		const row = canvasElement.querySelector<HTMLAnchorElement>(".session-item");
+		if (!row) throw new Error("Session row is missing");
+		row.focus();
+		const action = canvas.getByTestId("session-act-unsettle");
+		if (matchMedia("(max-width: 767px)").matches) {
+			await expect(action).not.toBeVisible();
+			await expect(canvas.getByText("Mon 9:00")).toBeVisible();
+			await expect(row.getBoundingClientRect().height).toBeGreaterThanOrEqual(
+				44,
+			);
+		} else {
+			await expect(action).toBeVisible();
+		}
 	},
 };
 
@@ -379,10 +398,20 @@ export const SnoozedHoverActions: Story = {
 	},
 	parameters: { pseudo: { hover: [".session-item"] } },
 	play: async ({ canvasElement }) => {
-		canvasElement.querySelector<HTMLAnchorElement>(".session-item")?.focus();
-		await expect(
-			within(canvasElement).getByTestId("session-act-unsnooze"),
-		).toBeVisible();
+		const canvas = within(canvasElement);
+		const row = canvasElement.querySelector<HTMLAnchorElement>(".session-item");
+		if (!row) throw new Error("Session row is missing");
+		row.focus();
+		const action = canvas.getByTestId("session-act-unsnooze");
+		if (matchMedia("(max-width: 767px)").matches) {
+			await expect(action).not.toBeVisible();
+			await expect(canvas.getByText("Tue 9:00")).toBeVisible();
+			await expect(row.getBoundingClientRect().height).toBeGreaterThanOrEqual(
+				44,
+			);
+		} else {
+			await expect(action).toBeVisible();
+		}
 	},
 };
 

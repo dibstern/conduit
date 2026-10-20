@@ -233,7 +233,7 @@ export const composerHandlers: StepHandler[] = [
 		match: /^the subagent parent link is visible$/,
 		run: async ({ world }) => {
 			await world.page
-				.getByRole("button", { name: /PARENT/ })
+				.getByRole("button", { name: /Parent/ })
 				.waitFor({ state: "visible" });
 		},
 	},

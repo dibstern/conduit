@@ -645,6 +645,14 @@ export const WordsDesktop: Story = {
 			if (separator.textContent?.trim() === "·")
 				await expect(getComputedStyle(separator).color).toBe(dimmer);
 		}
+		const wide = sessionViewState.composerTier === "wide";
+		if (!phone && !wide) {
+			const checkout = canvas.getByTestId("composer-checkout");
+			await expect(checkout.querySelector('[data-part="branch"]')).toBeNull();
+			await expect(
+				checkout.querySelector('[data-icon="worktree"]'),
+			).toBeVisible();
+		}
 		const labels = phone
 			? [
 					...row.querySelectorAll<HTMLElement>(
@@ -662,10 +670,10 @@ export const WordsDesktop: Story = {
 					"composer-word-context",
 					"composer-word-effort",
 					"composer-word-approvals",
-					"composer-checkout",
+					...(wide ? ["composer-checkout"] : []),
 					"composer-word-context-usage",
 				].map((id) => canvas.getByTestId(id));
-		await expect(labels).toHaveLength(phone ? 5 : 7);
+		await expect(labels).toHaveLength(phone ? 5 : wide ? 7 : 6);
 		const baselines = labels.map((label) => {
 			const walker = document.createTreeWalker(label, NodeFilter.SHOW_TEXT);
 			let text = walker.nextNode();
@@ -1577,8 +1585,9 @@ export const FinalIconsDesktop: Story = {
 		if (!frame || !sendButton || !attach)
 			throw new Error("Composer controls are missing");
 		const phone = sessionViewState.composerTier === "phone";
+		const compactMetrics = phone || matchMedia("(max-width: 767px)").matches;
 		await expect(frame.getBoundingClientRect().height).toBeCloseTo(
-			phone ? 84.5 : 94.5,
+			compactMetrics ? 84.5 : 94.5,
 			1,
 		);
 		if (!phone) {

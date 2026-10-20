@@ -5,7 +5,10 @@ import type {
 	UsageReading,
 } from "../../../src/lib/contracts/limit-recovery.js";
 import { QuotaForAccounts } from "../../../src/lib/contracts/ws-rpc.js";
-import { chooseSettingsOption } from "../../../test/e2e/helpers/settings.js";
+import {
+	chooseSettingsOption,
+	closeSettings,
+} from "../../../test/e2e/helpers/settings.js";
 import type { StepHandler } from "../runtime.js";
 import { seedUsageLimits } from "./providerInstances.js";
 import { mockInstances, requireRpcControl } from "./shared.js";
@@ -802,7 +805,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 	{
 		name: "assert reported single-account model rows, bars and absent reset lines",
 		match:
-			/^the Usage single-account model rows show Fable (\d+)% and Sonnet (\d+)% without reset lines$/,
+			/^the Usage single-account model rows show Fable (\d+)% and Sonnet (\d+)% with values (.+) and (.+) without reset lines$/,
 		run: async ({ world, match }) => {
 			const rows = world.page.getByTestId("usage-settings-single-model-row");
 			await expect(rows).toHaveCount(2);
@@ -819,7 +822,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 					`This week · ${model}`,
 				);
 				await expect(row.getByTestId("usage-settings-model-value")).toHaveText(
-					`${used}%`,
+					match[index + 3] ?? "",
 				);
 				await expect(row.locator('[data-testid$="-reset"]')).toHaveCount(0);
 				await expect(row.locator(":scope > div")).toHaveCount(2);
@@ -1148,7 +1151,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 		name: "close Usage settings to inspect the footer",
 		match: /^I close settings$/,
 		run: async ({ world }) => {
-			await world.page.getByTestId("settings-close-btn").click();
+			await closeSettings(world.page);
 			await expect(world.page.locator("#settings-panel")).not.toBeVisible();
 		},
 	},
