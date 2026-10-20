@@ -436,6 +436,13 @@ export const makeSessionProjector = defineProjector(() => ({
 	project: (event, ctx) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
+			if (event.type === "session.created") {
+				for (const id of [event.data.parentId, event.data.forkedFrom]) {
+					if (id === undefined) continue;
+					const [row] = yield* sql`SELECT id FROM sessions WHERE id = ${id}`;
+					if (!row) return { stamped: [], removed: [], collections: [] };
+				}
+			}
 			const written: string[] = [];
 			// Families this event can take members from, which naming the
 			// sessions it wrote does not reach.
@@ -2002,7 +2009,8 @@ export const makeProviderProjector = defineProjector(() => ({
 				return owners(
 					yield* sql<OwnedRow>`
 						INSERT OR IGNORE INTO session_providers (id, session_id, provider, status, activated_at)
-						VALUES (${`${event.data.sessionId}:initial`}, ${event.data.sessionId}, ${event.data.provider}, 'active', ${event.createdAt})
+						SELECT ${`${event.data.sessionId}:initial`}, id, ${event.data.provider}, 'active', ${event.createdAt}
+						FROM sessions WHERE id = ${event.data.sessionId}
 						RETURNING session_id`,
 				);
 			}
