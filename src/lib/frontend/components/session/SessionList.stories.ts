@@ -283,6 +283,12 @@ const pinnedSession = {
 } as const;
 
 function seedDrafts() {
+	const root = document.getElementById("storybook-root");
+	const previousStyle = root?.getAttribute("style") ?? null;
+	root?.setAttribute(
+		"style",
+		"width:340px;max-width:100%;padding:0;box-sizing:border-box;border:1px solid var(--color-border);border-radius:12px;background:var(--color-sidebar-bg)",
+	);
 	const now = Date.now();
 	sessionState.now = now;
 	projectState.projects = [
@@ -328,6 +334,10 @@ function seedDrafts() {
 			updatedAt: now - 86_400_000,
 		},
 	]);
+	return () => {
+		if (previousStyle === null) root?.removeAttribute("style");
+		else root?.setAttribute("style", previousStyle);
+	};
 }
 
 export const DraftsTrayOpen: Story = {
@@ -350,7 +360,7 @@ export const DraftsTrayCollapsed: Story = {
 	name: "Drafts tray collapsed",
 	beforeEach: () => {
 		uiState.draftsTrayOpen = false;
-		seedDrafts();
+		return seedDrafts();
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);

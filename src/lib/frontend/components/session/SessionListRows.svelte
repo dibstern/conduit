@@ -19,6 +19,7 @@
 	import { sessionCommandActions } from "./session-commands.js";
 	import SessionItem from "./SessionItem.svelte";
 	import DraftItem from "./DraftItem.svelte";
+	import DraftPencil from "./DraftPencil.svelte";
 	import { projectDisplayName, projectAccent } from "./session-list-project.js";
 	import SessionPager from "./SessionPager.svelte";
 	import Button from "../ui/Button.svelte";
@@ -201,7 +202,7 @@
 	<div id="session-list-scroller" class="flex-1 overflow-y-auto px-[6px] pb-[8px]" role="region" aria-label="Sessions" tabindex="0" onscroll={(event) => { heldSessionId = null; scrolled = event.currentTarget.scrollTop > 0; }}>
 		{#if drafts.length > 0}
 			<!-- Boxed so unsent drafts never read as sessions; collapsed, the header previews the newest. -->
-			<div class="mx-[2px] mt-[8px] mb-[2px] rounded-[12px] border border-border bg-bg-raised p-[3px]" data-testid="drafts-tray">
+			<div class="mx-[2px] mt-[8px] mb-[2px] rounded-[12px] border border-border bg-bg-raised p-[3px] leading-[1.4]" data-testid="drafts-tray">
 				<div class="flex items-center rounded-[9px] hover:bg-hover">
 					<TextButton
 						tone={uiState.draftsTrayOpen ? "inherit" : "muted"}
@@ -212,15 +213,15 @@
 						onclick={() => setDraftsTrayOpen(!uiState.draftsTrayOpen)}
 					>
 						<Icon name={uiState.draftsTrayOpen ? "chevron-down" : "chevron-right"} size={12} />
-						<span class="flex text-text-dimmer"><Icon name="pencil-line" size={12} /></span>
+						<span class="flex text-text-dimmer"><DraftPencil size={12} /></span>
 						<span>Drafts</span>
-						<span class="font-mono text-[10.5px] font-normal tabular-nums text-text-dimmer">{drafts.length}</span>
+						<span class="draft-count text-text-dimmer">{drafts.length}</span>
 						{#if !uiState.draftsTrayOpen}
 							<span class="w-0 min-w-0 flex-1 truncate text-left font-normal text-text-dimmer">· {drafts[0]?.firstLine.trim() || "Untitled draft"}</span>
 						{/if}
 					</TextButton>
 					{#if uiState.draftsTrayOpen}
-						<TextButton tone="dimmer" class="shrink-0 min-h-[44px] md:min-h-0 px-[8px] py-[6px] text-[11.5px] leading-[1.4] font-medium font-sans hover:text-error" data-testid="drafts-tray-clear" onclick={() => drafts.forEach(discardDraft)}>Clear all</TextButton>
+						<TextButton tone="dimmer" class="shrink-0 min-h-[44px] md:min-h-0 px-[8px] py-[6px] text-[11.5px] leading-[1.4] font-medium font-sans" data-testid="drafts-tray-clear" onclick={() => drafts.forEach(discardDraft)}>Clear all</TextButton>
 					{/if}
 				</div>
 				<div id="drafts-tray-rows" class={uiState.draftsTrayOpen ? "pb-px" : ""}>
@@ -364,6 +365,28 @@
 	</div>
 
 <style>
+	[data-testid="drafts-tray"] {
+		-webkit-font-smoothing: auto;
+	}
+
+	.draft-count {
+		font: 10.5px "Drafts Mono", monospace;
+	}
+
+	@media (hover: hover) {
+		[data-testid="drafts-tray"] :global([data-testid="drafts-tray-toggle"]:hover) {
+			opacity: 1;
+		}
+
+		[data-testid="drafts-tray"] :global([data-testid="drafts-tray-toggle"][aria-expanded="false"]:hover) {
+			color: var(--color-text-muted);
+		}
+
+		[data-testid="drafts-tray"] :global([data-testid="drafts-tray-clear"]:hover) {
+			color: var(--color-error);
+		}
+	}
+
 	:global(.light-theme) [data-testid="drafts-tray"] {
 		background: var(--color-bg-surface);
 	}
