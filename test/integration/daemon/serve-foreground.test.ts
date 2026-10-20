@@ -1160,21 +1160,43 @@ describe("foreground conduit serve", () => {
 			const server = harness.generations.at(-1);
 			if (!server) throw new Error("Missing foreground generation");
 			expect(alive(server.pid)).toBe(true);
-			const removal = await sendRpcRequest(
-				join(harness.configDir, "relay.sock"),
-				{ _tag: "RemoveProject", slug: removed.projectSlug },
-			);
-			expect(removal.projects.map((project) => project.slug)).not.toContain(
-				removed.projectSlug,
+			let acknowledged = false;
+			const removing = sendRpcRequest(join(harness.configDir, "relay.sock"), {
+				_tag: "RemoveProject",
+				slug: removed.projectSlug,
+			}).then(
+				(response) => {
+					acknowledged = true;
+					return Either.succeed(response);
+				},
+				(cause: unknown) => Either.fail(cause),
 			);
 			expect(existsSync(release)).toBe(false);
 			await vi.waitFor(() => expect(alive(removed.runner.pid)).toBe(false), {
 				timeout: 5000,
 			});
 			expect(alive(retained.runner.pid)).toBe(true);
+			expect(acknowledged).toBe(false);
 			writeFileSync(release, "finish signal disposal after project removal");
+			const removal = await removing;
 			await shutdown;
+			if (Either.isSuccess(removal)) {
+				expect(
+					removal.success.projects.map((project) => project.slug),
+				).not.toContain(removed.projectSlug);
+			}
+			// Shutdown may interrupt the response; either way, removal must reach disk.
 			expect(harness.generations.at(-1)?.exitCode).toBe(0);
+			const persisted = Either.getOrThrowWith(
+				loadDaemonConfigResult(harness.configDir),
+				(error) => error,
+			);
+			expect(persisted.projects.map((project) => project.slug)).not.toContain(
+				removed.projectSlug,
+			);
+			expect(persisted.projects.map((project) => project.slug)).toContain(
+				retained.projectSlug,
+			);
 			await vi.waitFor(() => expect(alive(removed.runner.pid)).toBe(false), {
 				timeout: 5000,
 			});
@@ -1183,6 +1205,7 @@ describe("foreground conduit serve", () => {
 				removeDuringSignalShutdown: true,
 				pending,
 				removal,
+				persistedProjects: persisted.projects,
 				removed: removed.runner,
 				retained: retained.runner,
 			});

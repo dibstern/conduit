@@ -300,6 +300,7 @@ export const RelayFactoryLive = (
 									? Effect.asVoid(Effect.scoped(openCodeInstances.use(id)))
 									: Effect.void,
 							),
+							Effect.andThen(configPersistence.flush),
 							Effect.provide(daemonContext),
 							Effect.mapError(
 								(cause) =>
@@ -312,6 +313,7 @@ export const RelayFactoryLive = (
 						),
 					stop: (id) =>
 						openCodeInstances.stop(id).pipe(
+							Effect.andThen(configPersistence.flush),
 							Effect.mapError(
 								(cause) =>
 									new InstanceManagementServiceError({
