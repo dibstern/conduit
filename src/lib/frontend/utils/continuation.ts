@@ -338,16 +338,6 @@ export function quotaBlocksSwitch(reading: UsageReading | undefined): boolean {
 	return reading?.status === "limited";
 }
 
-/** Measured headroom outranks unmeasured available, unknown, then unavailable. */
-export function quotaHeadroom(reading: UsageReading | undefined): number {
-	if (reading === undefined || reading.status === "unknown") return -1;
-	if (reading.status === "available") {
-		const { binding } = usageDisplay(reading, "off");
-		return binding === undefined ? 0 : 100 - binding.utilization;
-	}
-	return reading.status === "unavailable" ? -2 : -3;
-}
-
 /**
  * The first "carries over" row: how many messages go across word for word, from
  * the same budget the handoff itself uses. `compact` is the phone wording.

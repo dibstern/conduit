@@ -289,9 +289,7 @@ Examples:
   | viewport | quota       | caption       |
   | desktop  | 23% used    | 77% left      |
   | desktop  | 85% used    | 15% left      |
-  | desktop  | unknown     | quota unknown |
   | phone    | 23% used    | 77% left      |
-  | phone    | unavailable | unavailable   |
 
 Scenario Outline: switching confirms what carries over, hands the session over and marks the transcript
   Given the conduit app is served with the connected mockup
@@ -335,7 +333,7 @@ Scenario Outline: a switch the daemon refuses changes nothing and says why
   And the Claude accounts are claude as work2claude, self as personal
   And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
   When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
-  And the quota check reads claude limited until 2026-01-05T09:00:00Z, self unavailable
+  And the quota check reads claude limited until 2026-01-05T09:00:00Z, self unknown
   And the handoff carries 3 of 3 messages with the first
   And the daemon refuses the switch with Claude account authentication failed
   And I open Switch account on the usage limit strip

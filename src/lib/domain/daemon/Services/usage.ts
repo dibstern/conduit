@@ -12,6 +12,7 @@ import {
 	Stream,
 	SubscriptionRef,
 } from "effect";
+import { accountLimit } from "../../../contracts/account-limit.js";
 import {
 	type UsageForecast,
 	type UsageHistoryPoint,
@@ -471,8 +472,11 @@ export const makeUsage = (options: {
 					});
 					if (
 						reading &&
-						reading.status !== "limited" &&
-						reading.status !== "unavailable"
+						accountLimit({
+							asker: "automatic",
+							reading,
+							now: yield* Clock.currentTimeMillis,
+						}).kind === "go"
 					)
 						return account.id;
 				}

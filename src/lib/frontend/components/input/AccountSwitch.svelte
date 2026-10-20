@@ -74,9 +74,10 @@
 	{#each accounts as option (option.id)}
 		{@const selected = option.id === suggested}
 		{@const quota = claudeAccounts.quotaOf(option.id)}
+		{@const choice = claudeAccounts.availabilityOf(option.id, account)}
 		<MenuItem
 			density="compact"
-			disabled={claudeAccounts.availabilityOf(option.id, account).kind !== "selectable"}
+			disabled={choice.kind !== "selectable"}
 			data-testid="account-switch-option"
 			data-account={option.id}
 			data-selected={selected}
@@ -91,7 +92,11 @@
 			{#if option.id === account}<span class="text-[11px] text-text-dimmer">current</span>{/if}
 			<span class="flex-1"></span>
 			<!-- A limited row's red caption says it all; a full red track would crowd its name out. -->
-			<QuotaMeter {...quotaReading(quota)} size={compact ? "sm" : "md"} track={!quotaBlocksSwitch(quota)} />
+			{#if choice.kind === "selectable" && choice.usageUnknown}
+				<QuotaMeter used="unknown" caption="usage unknown" size={compact ? "sm" : "md"} track={false} />
+			{:else}
+				<QuotaMeter {...quotaReading(quota)} size={compact ? "sm" : "md"} track={!quotaBlocksSwitch(quota)} />
+			{/if}
 		</MenuItem>
 	{/each}
 	{#if !compact}

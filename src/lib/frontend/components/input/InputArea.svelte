@@ -7,6 +7,7 @@
 	import ComposerStrip from "../ui/ComposerStrip.svelte";
 	import ComposerSendGroup from "../ui/ComposerSendGroup.svelte";
 	import { AccountIdSchema, getProviderDriver } from "../../../contracts/provider-instance.js";
+	import { accountLimit } from "../../../contracts/account-limit.js";
 	import { tick, untrack, type Snippet } from "svelte";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import Button from "../ui/Button.svelte";
@@ -82,7 +83,7 @@
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import { requestDraftPreWarm, requestSessionPreWarm } from "../../utils/session-prewarm.js";
-	import { planUsageWindows, usageForecastTime } from "../../utils/continuation.js";
+	import { usageForecastTime, usageWarning } from "../../utils/continuation.js";
 	import { switchSessionAccount } from "../../utils/account-switch.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
@@ -240,12 +241,14 @@
 	const hasOtherClaudeAccount = $derived(claudeAccounts.hasAlternative(accountId));
 	const sendAccounts = $derived(currentSession ? claudeAccounts.sendOptions(accountId) : []);
 	const sendsAt = $derived.by(() => {
-		if (usageReading?.status !== "limited") return undefined;
-		const resets = planUsageWindows(usageReading)
-			.filter((window) => window.utilization >= 100)
-			.map((window) => Date.parse(window.resetsAt ?? ""))
-			.filter((at) => at > clock.now);
-		return resets.length > 0 ? Math.max(...resets) : undefined;
+		const recovery = currentSession?.limitRecovery;
+		const limit = accountLimit({
+			asker: "user",
+			...(usageReading ? { reading: usageReading } : {}),
+			...(recovery && !recovery.switched ? { recovery } : {}),
+			now: clock.now,
+		});
+		return limit.kind === "wait-until" ? limit.until : undefined;
 	});
 	const sendPick = $derived.by(() => {
 		const pick = composerDraft.sendPick;
@@ -259,12 +262,10 @@
 	});
 	const switchTarget = $derived(sendPick?.mode === "switch"
 		? sendAccounts.find((account) => account.id === sendPick.accountId)
-		: sendAccounts[0]);
+		: sendAccounts.find((account) => account.usageEligible && !account.usageUnknown));
 	const sendMode = $derived.by(() => {
 		if (sendsAt !== undefined) return sendPick?.mode ?? (usageState.limits.autoSwitch && switchTarget ? "switch" : "at-reset");
-		const warnAt = usageState.limits.warnAt;
-		return usageReading?.status === "available" && warnAt !== "off" &&
-			planUsageWindows(usageReading).some((window) => window.utilization >= warnAt && window.utilization < 100)
+		return usageWarning(usageReading, usageState.limits.warnAt, claudeAccounts.nameOf(accountId), hasOtherClaudeAccount, clock.now)
 			? "warning" : "normal";
 	});
 	const sendAtTime = $derived(usageForecastTime(sendsAt, clock.now));
@@ -1463,7 +1464,7 @@
 								<MenuItem density="compact" data-testid="composer-send-menu-account" data-account={option.id} data-selected={sendMode === "switch" && switchTarget?.id === option.id ? "true" : undefined} disabled={switchingAccount} class="rounded-[7px] {sendMode === 'switch' && switchTarget?.id === option.id ? 'bg-border-chip' : ''}" onselect={() => { composerDraft.sendPick = { mode: "switch", accountId: option.id }; }}>
 									<AccountDot instanceId={option.id} size={7} />
 									<span class="flex-1">Send now on {option.name}</span>
-									<span class="font-mono text-[10.5px] text-text-dimmer">{option.fullest.kind === "five_hour" ? "5h" : "wk"} {Math.round(option.fullest.utilization)}%</span>
+									<span class="font-mono text-[10.5px] text-text-dimmer">{#if option.usageUnknown}usage unknown{:else if option.fullest}{option.fullest.kind === "five_hour" ? "5h" : "wk"} {Math.round(option.fullest.utilization)}%{/if}</span>
 								</MenuItem>
 							{/each}
 							<div data-testid="composer-send-menu-note" class="mt-[3px] border-t border-border px-[6px] pt-[5px] pb-[3px] font-mono text-[10.5px] text-text-dimmer whitespace-normal">Another account takes over the session, as Switch account does.</div>
