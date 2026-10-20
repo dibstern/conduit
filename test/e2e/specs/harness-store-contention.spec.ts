@@ -19,10 +19,11 @@
 // - An RPC fails under load: every input.submit returns ok and every
 //   DeleteSession resolves; a rejected RPC throws and fails the test.
 // - A write is dropped or duplicated under contention: each
-//   session's persisted per-type event counts equal the baseline's, its
-//   thinking.delta and turn.completed counts equal the replayed trace's
-//   thinking_delta and result frames (the replay emits every committed frame
-//   once per session), and its stream versions have no gaps.
+//   session's non-delta event counts equal the baseline's, its joined text
+//   equals the prompt plus replayed trace and its thinking equals the trace,
+//   its turn.completed count equals the result frames, and its stream
+//   versions have no gaps. Delta rows are
+//   coalesced in 50 ms windows, so their counts vary with scheduling.
 // - Foreign keys are not enforced on the daemon's connection. PRAGMA
 //   foreign_keys read here would describe this reader's connection, not the
 //   daemon's, so enforcement is observed by its effect instead: DeleteSession
@@ -50,6 +51,7 @@ import { expect, test } from "../helpers/process-harness-fixture.js";
 // The longest existing single-input, single-result harness trace by streaming
 // delta count: 52 deltas in 87 frames, without steering or a second input.
 const fixture = "background-shell-ends-between-turns";
+const prompt = "Run the recorded streaming turn.";
 // Each test starts its own daemon. Generous startup bounds keep a loaded
 // machine from failing startup or ending a turn with "Runner startup timed out".
 test.use({
@@ -109,7 +111,7 @@ test("measures writes across three projects during six streaming turns", async (
 						originId: browser.originId,
 						inputId: randomUUID(),
 						delivery: "queue",
-						text: "Run the recorded streaming turn.",
+						text: prompt,
 					}).pipe(Effect.timeout(60_000)),
 				),
 				completion,
@@ -220,7 +222,9 @@ test.describe("write contention", () => {
 				(line) =>
 					JSON.parse(line) as {
 						type: string;
-						event?: { delta?: { type?: string } };
+						event?: {
+							delta?: { type?: string; text?: string; thinking?: string };
+						};
 					},
 			);
 		const emitted = {
@@ -228,6 +232,13 @@ test.describe("write contention", () => {
 				(frame) => frame.event?.delta?.type === "thinking_delta",
 			).length,
 			"turn.completed": trace.filter((frame) => frame.type === "result").length,
+		};
+		const emittedContent = {
+			"text.delta":
+				prompt + trace.map((frame) => frame.event?.delta?.text ?? "").join(""),
+			"thinking.delta": trace
+				.map((frame) => frame.event?.delta?.thinking ?? "")
+				.join(""),
 		};
 		const store = () =>
 			new DatabaseSync(harness.daemonStorePath(), { readOnly: true });
@@ -249,6 +260,31 @@ test.describe("write contention", () => {
 						.all(sessionId),
 				).map((row) => [String(row["type"]), Number(row["n"])]),
 			);
+		const eventIntegrity = (sessionId: string) => {
+			const deltas = read((db) =>
+				db
+					.prepare(
+						"SELECT type, json_extract(data, '$.text') AS text FROM events WHERE session_id = ? AND type IN ('text.delta', 'thinking.delta') ORDER BY stream_version",
+					)
+					.all(sessionId),
+			);
+			return {
+				counts: Object.fromEntries(
+					Object.entries(eventCounts(sessionId)).filter(
+						([type]) => type !== "text.delta" && type !== "thinking.delta",
+					),
+				),
+				content: Object.fromEntries(
+					["text.delta", "thinking.delta"].map((type) => [
+						type,
+						deltas
+							.filter((row) => row["type"] === type)
+							.map((row) => String(row["text"]))
+							.join(""),
+					]),
+				),
+			};
+		};
 		const runTurn = async (browser: ProcessBrowser, sessionId: string) => {
 			const cursor = browser.frames.length;
 			const started = performance.now();
@@ -259,7 +295,7 @@ test.describe("write contention", () => {
 						originId: browser.originId,
 						inputId: randomUUID(),
 						delivery: "queue",
-						text: "Run the recorded streaming turn.",
+						text: prompt,
 					}).pipe(Effect.timeout(90_000)),
 				),
 				browser.waitForTurnEnd(sessionId, cursor, 90_000),
@@ -307,7 +343,9 @@ test.describe("write contention", () => {
 			expect(counts).toEqual(last);
 		}).toPass({ timeout: 30_000, intervals: [500] });
 		const baseline = eventCounts(baselineId);
-		expect(baseline).toMatchObject(emitted);
+		const baselineIntegrity = eventIntegrity(baselineId);
+		expect(baseline["turn.completed"]).toBe(emitted["turn.completed"]);
+		expect(baselineIntegrity.content).toEqual(emittedContent);
 
 		const sessions: { label: string; browser: ProcessBrowser; id: string }[] =
 			[];
@@ -325,8 +363,8 @@ test.describe("write contention", () => {
 		const waveMs = performance.now() - waveStartedAt;
 		for (const { id } of sessions)
 			await expect
-				.poll(() => eventCounts(id), { timeout: 30_000 })
-				.toEqual(baseline);
+				.poll(() => eventIntegrity(id), { timeout: 30_000 })
+				.toEqual(baselineIntegrity);
 		const settledMs = performance.now() - waveStartedAt;
 		for (const id of [baselineId, ...sessions.map((session) => session.id)]) {
 			const versions = read((db) =>
@@ -426,7 +464,9 @@ test.describe("write contention", () => {
 					concurrentSessions: sessions.length,
 					fixture,
 					emitted,
+					emittedContent,
 					baselineEventCounts: baseline,
+					baselineIntegrity,
 					sessionEventCounts: Object.fromEntries(
 						sessions.map(({ label, id }) => [label, eventCounts(id)]),
 					),

@@ -2992,8 +2992,8 @@ for (const behavior of [
 				await expect.poll(() => latest()?.status).toBe("idle");
 				expect(latest()?.resumes).toHaveLength(1);
 				// The limited turn still wrote the handoff into account 2's native
-				// session, so a later continuation there resumes it natively.
-				expect(await receipt()).toMatchObject({
+				// session. Its receipt commits separately after the idle event.
+				await expect.poll(receipt).toMatchObject({
 					handoff: { instanceId: target.id, firstMessageIncluded: true },
 				});
 			} else {

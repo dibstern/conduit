@@ -1084,6 +1084,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 		});
 		let generation: Generation | undefined;
 		let fakeSdkActive = false;
+		let probeProjectDir = this.projectDir;
+		const fakeSdkProjects = new Set<string>();
 		this.exit = new Promise<void>((done) => {
 			child.once("exit", (exitCode, signal) => {
 				if (generation) Object.assign(generation, { exitCode, signal });
@@ -1142,10 +1144,13 @@ Object.assign(ClaudeDriver, { create: deps => {
 				} else if (value["kind"] === "fake-sdk-active") {
 					if (
 						value["module"] === sdkModule &&
-						value["projectDir"] === this.projectDir
+						typeof value["projectDir"] === "string"
 					) {
-						fakeSdkActive = true;
-						if (generation) generation.fakeSdkActive = true;
+						fakeSdkProjects.add(value["projectDir"]);
+						if (value["projectDir"] === probeProjectDir) {
+							fakeSdkActive = true;
+							if (generation) generation.fakeSdkActive = true;
+						}
 					}
 				} else {
 					this.marks.push(value as unknown as ProcessMark);
@@ -1188,11 +1193,26 @@ Object.assign(ClaudeDriver, { create: deps => {
 		// Project registration is lazy. Attach without sending a prompt so the
 		// selected build must acknowledge its live fake factories before use.
 		if (options.skipBrowserProbe || this.realSdk) return;
+		const { projects: registered } = await this.requestRpc({
+			_tag: "GetProjects",
+		});
+		const projects = registered.filter(
+			(project) => !project.missing && project.unavailableReason === undefined,
+		);
+		const project =
+			projects.find((project) => project.slug === "process-test") ??
+			projects[0];
+		// The ready handshake and daemon RPC succeeded. With no available project,
+		// there is no relay to activate, so the project SDK probe is inapplicable.
+		if (!project) return;
+		probeProjectDir = project.folders[0];
+		fakeSdkActive = fakeSdkProjects.has(probeProjectDir);
+		if (generation) generation.fakeSdkActive = fakeSdkActive;
 		const probe = await ProcessBrowser.connect(
 			this.port,
 			undefined,
 			undefined,
-			undefined,
+			project.slug,
 			undefined,
 			this.rpcDiagnostics,
 		);
