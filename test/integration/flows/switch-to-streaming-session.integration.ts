@@ -52,7 +52,7 @@ describe("Integration: Switch to Streaming Session", () => {
 					(returned) =>
 						returned.id === message.id &&
 						returned.role === "assistant" &&
-						!!returned.text,
+						returned.parts?.some((part) => part.type === "text" && !!part.text),
 				),
 			).toBe(true);
 		} finally {

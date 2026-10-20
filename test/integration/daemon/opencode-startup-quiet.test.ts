@@ -381,7 +381,9 @@ describe("Managed OpenCode starts on first use", () => {
 				ownedProcesses: 0,
 				url,
 			});
-			expect(external.externalRequests).toContain("POST /session");
+			expect(external.externalRequests).toContainEqual(
+				expect.stringMatching(/^POST \/session(?:\?|$)/),
+			);
 		} finally {
 			for (const { childPid } of fakeLog<{ childPid: number }>(
 				externalConfig,
@@ -468,7 +470,8 @@ describe("Managed OpenCode starts on first use", () => {
 			const permission = await browser.waitFor(
 				(message) =>
 					message["type"] === "permission_pending" &&
-					message["requestId"] === "pa7-dynamic-port",
+					fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+						"pa7-dynamic-port",
 			);
 			await browser.answerApproval(permission, "allow");
 			const replyPath = `/session/${sessionId}/permissions/pa7-dynamic-port`;
@@ -554,7 +557,8 @@ describe("Managed OpenCode starts on first use", () => {
 		const permission = await browser.waitFor(
 			(message) =>
 				message["type"] === "permission_pending" &&
-				message["requestId"] === "pa7-readopt",
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+					"pa7-readopt",
 		);
 		await vi.waitFor(
 			() => expect(persistedStatus(fixture, sessionId)).toBe("busy"),

@@ -50,6 +50,7 @@ const real = spawn(
 						},
 					},
 				},
+				...JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? "{}"),
 			}),
 			XDG_CONFIG_HOME: join(root, "config"),
 			XDG_DATA_HOME: join(root, "data"),
