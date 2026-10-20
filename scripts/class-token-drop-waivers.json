@@ -1,4 +1,6 @@
 {
+	"src/lib/frontend/components/layout/SessionBar.svelte :: gap-[6px],mb-[3px],mt-[12px],mt-[4px],mx-[4px],p-[6px],pt-[10px],text-[10.58px],text-[11.5px]": "conduit-test-aoqb.42: the approved goal summary layout replaces the always-open check list with a 12px divider gap, 10.5px single metadata line, 16px popover inset and 8px action gaps. The old check-heading and separate token-row spacing is removed.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: goal.icon,spinner": "conduit-test-aoqb.42: goalIcon now selects the alert, pause, checking and met icons for both header and sheet. These were expression fragments inside a class string, not CSS utilities; the checking icon retains motion-safe:animate-spin.",
 	"src/lib/frontend/components/ui/Badge.svelte :: bg-status-ask": {
 		"renamedTo": "bg-fill-ask",
 		"reason": "conduit-test-aoqb.19: the solid back badge keeps the dark theme's orange fill in both themes; status-ask remains contrast-safe text ink."
