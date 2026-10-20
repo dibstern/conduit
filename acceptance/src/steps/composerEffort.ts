@@ -10,7 +10,7 @@ import {
 } from "./shared.js";
 
 async function effortControl(page: Page) {
-	if ((await page.getByTestId("composer-more").count()) > 0) {
+	if ((page.viewportSize()?.width ?? 0) < 768) {
 		await openComposerMoreSheet(page);
 		return page.getByTestId("composer-more-effort");
 	}
@@ -38,9 +38,11 @@ export const composerEffortHandlers: StepHandler[] = [
 			});
 			await refetchModelCatalog(world.page);
 			await expect(
-				world.page.getByTestId(
-					/^(variant-badge|composer-word-effort|composer-more)$/,
-				),
+				world.page
+					.getByTestId(
+						/^(variant-badge|composer-word-effort|model-picker-trigger|composer-words-sheet-trigger)$/,
+					)
+					.first(),
 			).toBeVisible();
 		},
 	},
@@ -57,7 +59,11 @@ export const composerEffortHandlers: StepHandler[] = [
 		name: "cycle effort with keyboard",
 		match: /^I cycle effort with Ctrl\+T$/,
 		run: async ({ world }) => {
-			const button = world.page.getByTestId(/^(variant-badge|composer-more)$/);
+			const button = world.page
+				.getByTestId(
+					/^(variant-badge|composer-word-effort|model-picker-trigger|composer-words-sheet-trigger)$/,
+				)
+				.first();
 			await expect(button).not.toHaveAttribute("aria-busy", "true");
 			await world.page.keyboard.press("Control+t");
 		},

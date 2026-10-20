@@ -6,12 +6,12 @@ Background:
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
 
-Scenario Outline: a warning window adds an amber ring to the ordinary send button
+Scenario Outline: a usage warning keeps the neutral send circle beside its fused strip
   Given the viewport is a <viewport>
   And Usage settings have one Claude account in the <state> state
   When I type Check the next task into the composer
   Then the composer send mode is warning
-  And the send button has a gapped amber ring and no words
+  And the warning send button stays a neutral circle without words
   And the send button reads Send
   And the composer region visually matches <baseline> at <threshold> percent
 
@@ -45,7 +45,7 @@ Scenario Outline: the desktop button and placeholder name a future reset
   And Usage settings have one Claude account in the limit state
   When the mock usage window five_hour for claude is 100 percent resetting at <reset>
   Then the composer send mode is at-reset
-  And the reset send label reads <label>
+  And the reset send control announces <label>
   And the composer placeholder reads <placeholder>
   And the composer region visually matches <baseline> at <threshold> percent
 
@@ -54,20 +54,20 @@ Examples:
   | 2026-01-01T15:13:00Z | Send at 3:13 pm      | Message Claude… sends at 3:13 pm      | composer-send-at-reset-same-day-desktop    | 98        |
   | 2026-01-08T09:00:00Z | Send at Thu 9 am     | Message Claude… sends at Thu 9 am     | composer-send-at-reset-another-day-desktop | 98        |
 
-Scenario Outline: the phone button keeps a compact time and the reset placeholder
+Scenario Outline: the phone button uses a clock and keeps the reset placeholder
   Given the viewport is a phone
   And Usage settings have one Claude account in the limit state
   When the mock usage window five_hour for claude is 100 percent resetting at <reset>
   Then the composer send mode is at-reset
-  And the reset send label reads <label>
-  And the phone reset send button is 32 pixels tall
+  And the reset send control announces <label>
+  And the phone reset send control is a neutral 34 pixel clock
   And the composer placeholder reads <placeholder>
   And the composer region visually matches <baseline> at <threshold> percent
 
 Examples:
   | reset                | label    | placeholder       | baseline                                | threshold |
-  | 2026-01-01T15:13:00Z | 3:13     | Sends at 3:13 pm  | composer-send-at-reset-same-day-phone    | 98        |
-  | 2026-01-08T09:00:00Z | Thu 9 am | Sends at Thu 9 am | composer-send-at-reset-another-day-phone | 98        |
+  | 2026-01-01T15:13:00Z | Send at 3:13 pm | Message Claude… sends at 3:13 pm | composer-send-at-reset-same-day-phone | 98 |
+  | 2026-01-08T09:00:00Z | Send at Thu 9 am | Message Claude… sends at Thu 9 am | composer-send-at-reset-another-day-phone | 98        |
 
 Scenario Outline: a limited reading without a future reset keeps plain Send
   Given the viewport is a <viewport>
@@ -75,7 +75,7 @@ Scenario Outline: a limited reading without a future reset keeps plain Send
   When the mock usage window five_hour for claude is 100 percent resetting at <reset>
   Then the composer send mode is normal
   And the composer has a plain Send button
-  And the composer placeholder reads Ask Claude…
+  And the composer placeholder matches the <viewport> reply copy
   And the composer region visually matches <baseline> at <threshold> percent
 
 Examples:
@@ -88,22 +88,24 @@ Examples:
 Scenario Outline: clicking or pressing Enter queues an ordinary input with its reset caption
   Given the viewport is a <viewport>
   And Usage settings have one Claude account in the limit state
-  And the mock relay queues submitted messages for reset
+  And the mock relay holds submitted messages until reset
   When I type Also run the provider tests afterwards into the composer
   And I send the reset-bound message with <method>
   Then the pending-input tray has 1 row
   And pending-input row 1 reads Also run the provider tests afterwards
-  And pending-input row 1 has the reset caption Sends at 3:13 pm
+  And pending-input row 1 has the reset caption sends 3:13 pm
   And pending-input row 1 offers Edit and Remove
   And the composer is empty
   And the composer status header is not visible
   And the usage limit strip is not visible
+  And the queued usage recovery title reads Waiting for Personal's limit to reset
+  And the queued usage recovery shows Cancel auto-resume
   And the composer region visually matches <baseline> at <threshold> percent
   When I Edit pending reset input row 1
   Then the pending-input tray is not visible
   And the composer still holds Also run the provider tests afterwards
   When I send the reset-bound message with the button
-  Then pending-input row 1 has the reset caption Sends at 3:13 pm
+  Then pending-input row 1 has the reset caption sends 3:13 pm
   When I Remove pending reset input row 1
   Then the pending-input tray is not visible
   And the composer is empty
@@ -118,12 +120,14 @@ Scenario Outline: a queued caption follows the continuation's scheduled time
   Given the viewport is a <viewport>
   And Usage settings have one Claude account in the limit state
   And the session has a scheduled reset continuation at 2026-01-01T15:37:00Z
-  And the mock relay queues submitted messages for reset
+  And the mock relay holds submitted messages until reset
   When I type Also run the provider tests afterwards into the composer
   And I send the reset-bound message with the button
-  Then pending-input row 1 has the reset caption Sends at 3:37 pm
+  Then pending-input row 1 has the reset caption sends 3:37 pm
   And pending-input row 1 offers Edit and Remove
   And the usage limit strip is not visible
+  And the queued usage recovery title reads Waiting for Personal's limit to reset
+  And the queued usage recovery shows Cancel auto-resume
   And the composer region visually matches <baseline> at <threshold> percent
 
 Examples:
@@ -152,14 +156,15 @@ Scenario Outline: several accounts add a separate chevron to the reset pill
   And Usage settings have several Claude accounts in the limit state
   When I type Check the next task into the composer
   Then the composer send mode is at-reset
-  And the reset send label reads <label>
+  And the reset send control announces <label>
   And the composer send menu trigger is visible
+  And the reset send split pill is neutral
   And the composer region visually matches <baseline> at <threshold> percent
 
 Examples:
   | viewport | label           | baseline                                | threshold |
   | desktop  | Send at 3:13 pm | composer-send-menu-chevron-desktop      | 98        |
-  | phone    | 3:13            | composer-send-menu-chevron-phone        | 98        |
+  | phone    | Send at 3:13 pm            | composer-send-menu-chevron-phone        | 98        |
 
 Scenario Outline: send options show the selected reset then accounts in switch order
   Given the viewport is a <viewport>
@@ -218,15 +223,18 @@ Examples:
   | desktop  |
   | phone    |
 
-Scenario Outline: choosing the reset row queues the composer with its Sends at caption
+Scenario Outline: choosing the reset row queues the composer with its release-time caption
   Given the viewport is a <viewport>
   And Usage settings have several Claude accounts in the limit state
-  And the mock relay queues submitted messages for reset
+  And the mock relay holds submitted messages until reset
   When I type Also run the provider tests afterwards into the composer
   And I send the reset-bound message with <method>
   Then the pending-input tray has 1 row
   And pending-input row 1 reads Also run the provider tests afterwards
-  And pending-input row 1 has the reset caption Sends at 3:13 pm
+  And pending-input row 1 has the reset caption sends 3:13 pm
+  And the queued usage recovery title reads Waiting for Personal's limit to reset
+  And the queued usage recovery shows Cancel auto-resume
+  And the queued usage recovery offers Switch account
   And the composer is empty
 
 Examples:
@@ -281,6 +289,7 @@ Scenario Outline: auto-switch sends through the first account in the switch orde
   Then the composer send mode is switch
   And the auto-switch send button reads <label> for work
   And the composer send menu trigger is visible
+  And the reset send split pill is neutral
   And the composer region visually matches <baseline> at <threshold> percent
   When I send the switch-bound message with <method>
   Then the ContinueSession RPC switches the current session from claude to work
@@ -298,7 +307,7 @@ Scenario Outline: auto-switch uses reordered accounts and keeps the same reset c
   And Usage settings have several Claude accounts in the limit state
   And the daemon's usage limits are auto-resume off, auto-switch on, order claude, spare, work
   And the mock usage reading for claude becomes limited
-  And the mock relay queues submitted messages for reset
+  And the mock relay holds submitted messages until reset
   When I type Check the next task into the composer
   Then the composer send mode is switch
   And the auto-switch send button reads <label> for spare
@@ -306,7 +315,7 @@ Scenario Outline: auto-switch uses reordered accounts and keeps the same reset c
   Then the send menu starts with selected Send at 3:13 pm on Personal
   And the send menu account order is spare, work
   When I send the reset-bound message with the open reset menu row
-  Then pending-input row 1 has the reset caption Sends at 3:13 pm
+  Then pending-input row 1 has the reset caption sends 3:13 pm
 
 Examples:
   | viewport | label         |
@@ -321,7 +330,7 @@ Scenario Outline: auto-switch falls back to reset when the other accounts have n
   And the mock usage reading for spare becomes unavailable
   When I type Check the next task into the composer
   Then the composer send mode is at-reset
-  And the reset send label reads <label>
+  And the reset send control announces <label>
   And the composer send menu trigger is visible
   When I open the composer send menu
   Then the send menu account order is none
@@ -330,7 +339,7 @@ Scenario Outline: auto-switch falls back to reset when the other accounts have n
 Examples:
   | viewport | label           |
   | desktop  | Send at 3:13 pm |
-  | phone    | 3:13            |
+  | phone    | Send at 3:13 pm            |
 
 Scenario Outline: a draft offers only the reset row and takeover note
   Given the viewport is a <viewport>

@@ -67,6 +67,9 @@ test.describe("Session Management", () => {
 		await expect(
 			page.locator("#sidebar-header #new-session-btn"),
 		).toBeVisible();
+		await expect(
+			page.locator("#new-session-btn .lucide-square-pen"),
+		).toHaveCount(1);
 		await expect(page.locator("#session-actions")).toHaveCount(0);
 		await expect(page.locator("#file-browser-btn")).toHaveCount(0);
 		await expect(sidebar.sessionList).toBeVisible();

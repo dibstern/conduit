@@ -23,6 +23,9 @@ import {
 	type CallToolResult,
 	CallToolResultSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { Option, Schema } from "effect";
+import { CategorySetSchema } from "../../src/lib/contracts/category-set.js";
+import { CategoryTuningHunkSchema } from "../../src/lib/contracts/category-tuning.js";
 import type { ClaudeTitleQueryFactory } from "../../src/lib/domain/relay/Services/claude-title-generator.js";
 import type { ClaudeSubagentSdk } from "../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type {
@@ -2458,10 +2461,44 @@ export const claudeSdk: NonNullable<ProjectRelayConfig["claudeSdk"]> = {
 				file,
 				`${JSON.stringify({ prompt: params.prompt, cwd: params.options?.cwd })}\n`,
 			);
+		const tuning = Schema.decodeUnknownOption(
+			Schema.fromJsonString(
+				Schema.Struct({
+					currentSet: CategorySetSchema,
+					avoid: Schema.Array(CategoryTuningHunkSchema),
+				}),
+			),
+		)(params.prompt);
+		if (Option.isSome(tuning)) {
+			const before = tuning.value.currentSet.categories.find(
+				({ id }) => id === "finding",
+			);
+			if (!before) throw new Error("Tuning fixture requires Finding");
+			const weight = tuning.value.avoid.length === 0 ? 80 : 90;
+			yield {
+				type: "result",
+				subtype: "success",
+				result: JSON.stringify({
+					hunks: [
+						{
+							id: `finding-weight-${weight}`,
+							categoryId: "finding",
+							before,
+							after: { ...before, weight },
+							rationale: "Your five corrections raise findings.",
+						},
+					],
+					rationale: "A higher Finding weight agrees with the corrections.",
+				}),
+			};
+			return;
+		}
 		yield {
 			type: "result",
 			subtype: "success",
-			result: "Process harness session",
+			result: params.prompt.startsWith("Summarize this coding-assistant turn")
+				? "The first finding changed the plan [#1]. The last finding confirms the fix [#4]. An invalid citation is removed [#999]."
+				: "Process harness session",
 		};
 	},
 };

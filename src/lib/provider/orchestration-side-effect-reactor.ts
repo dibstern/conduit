@@ -429,17 +429,25 @@ export class ProviderSideEffectReactor {
 	 */
 	private durableOutcome(
 		commandId: string,
+		defaults?: {
+			readonly pollInterval: Duration.Input;
+			readonly pollTimeout: Duration.Input;
+		},
 	): Effect.Effect<
 		TurnResult,
 		ProviderCommandStoreFailure | ProviderCommandNotExecutable
 	> {
 		return Effect.gen({ self: this }, function* () {
 			const pollInterval = clampPollDuration(
-				this.options.outcomePollInterval ?? defaultOutcomePollInterval,
+				this.options.outcomePollInterval ??
+					defaults?.pollInterval ??
+					defaultOutcomePollInterval,
 				1,
 			);
 			const pollTimeout = clampPollDuration(
-				this.options.outcomePollTimeout ?? defaultOutcomePollTimeout,
+				this.options.outcomePollTimeout ??
+					defaults?.pollTimeout ??
+					defaultOutcomePollTimeout,
 				0,
 			);
 			const maxPolls = Math.ceil(
@@ -624,6 +632,39 @@ export class ProviderSideEffectReactor {
 					});
 				const result = getProviderDriver(driver)?.supportsNativeResume
 					? yield* Effect.gen({ self: this }, function* () {
+							// A terminal event can reach the browser before its native receipt.
+							// Await that settlement; active-turn steers must remain concurrent.
+							const settling = yield* this.options.sql<{ command_id: string }>`
+								SELECT earlier.command_id FROM provider_command_outbox earlier
+								WHERE earlier.project_key = ${row.project_key}
+									AND earlier.session_id = ${payload.sessionId}
+									AND earlier.effect_type = 'send_turn' AND earlier.status = 'running'
+									AND earlier.request_sequence < ${row.request_sequence}
+									AND (SELECT state FROM turns
+										WHERE session_id = earlier.session_id AND user_message_id = COALESCE(
+											json_extract(earlier.payload_json, '$.continuation.cutOffMessageId'),
+											json_extract(earlier.payload_json, '$.inputId'),
+											json_extract(earlier.payload_json, '$.userMessageId'),
+											json_extract(earlier.payload_json, '$.commandId'),
+											json_extract(earlier.payload_json, '$.turnId'))
+										ORDER BY requested_at DESC, rowid DESC LIMIT 1)
+										NOT IN ('pending', 'running')`;
+							for (const prior of settling)
+								yield* this.durableOutcome(prior.command_id, {
+									pollInterval: "10 millis",
+									pollTimeout: "5 seconds",
+								}).pipe(
+									Effect.catchTag("ProviderCommandNotExecutable", (failure) =>
+										this.receiptOutcome(prior.command_id).pipe(
+											Effect.flatMap((receipt) =>
+												receipt?.status === "side_effect_failed"
+													? Effect.void
+													: Effect.fail(failure),
+											),
+										),
+									),
+									Effect.mapError(storeFailure("awaitPriorSettlement")),
+								);
 							const state = yield* makeProviderStateEffect.pipe(
 								Effect.provideService(PersistenceProjectTag, {
 									projectId: row.project_key,

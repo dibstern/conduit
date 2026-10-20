@@ -47,11 +47,11 @@ export const composerAccountsHandlers: StepHandler[] = [
 					await expect(radio).toHaveCSS("scroll-snap-align", "start");
 				}
 				const face = radio.locator(".picker-account-card");
-				await expect(face).toHaveCSS("border-width", "1px");
-				await expect(face).toHaveCSS("border-radius", "9px");
-				await expect(face).toHaveCSS("padding", "7px 9px");
+				await expect(face).toHaveCSS("border-width", "0px");
+				await expect(face).toHaveCSS("border-radius", "10px");
+				await expect(face).toHaveCSS("padding", "8px 9px");
 				await expect(face).toHaveCSS("gap", "6px");
-				await expect(face).toHaveCSS("font-size", "11.5px");
+				await expect(face).toHaveCSS("font-size", "12.5px");
 			}
 		},
 	},
@@ -159,9 +159,7 @@ export const composerAccountsHandlers: StepHandler[] = [
 			await expect(note).toHaveCSS(
 				"color",
 				await world.page
-					.getByTestId("picker-row-model")
-					.locator("span")
-					.first()
+					.getByTestId("picker-subtitle")
 					.evaluate((element) => getComputedStyle(element).color),
 			);
 			const cards = await section
@@ -217,19 +215,22 @@ export const composerAccountsHandlers: StepHandler[] = [
 				)
 				.toBe(true);
 			const face = radio.locator(".picker-account-card");
-			const colour = await radio
-				.getByTestId("account-dot")
-				.evaluate((element) => getComputedStyle(element).backgroundColor);
-			await expect(face).toHaveCSS("border-color", colour);
-			expect(
-				await face.evaluate(
-					(element) => getComputedStyle(element).backgroundColor,
-				),
-			).toMatch(/(?:\/ 0\.1\)|, 0\.1\))$/);
+			const accent = await face.evaluate((element) => {
+				const probe = document.createElement("span");
+				probe.style.color = "var(--color-accent)";
+				element.append(probe);
+				const resolved = getComputedStyle(probe).color;
+				probe.remove();
+				return resolved;
+			});
+			await expect(face).toHaveCSS(
+				"box-shadow",
+				`${accent} 0px 0px 0px 1.5px inset`,
+			);
 		},
 	},
 	{
-		name: "assert known card usage and account-coloured meter",
+		name: "assert known card usage and matching meter tone",
 		match: /^the (\S+) Account card shows (\d+)% usage$/,
 		run: async ({ world, match }) => {
 			const radio = card(world.page, match[1] ?? "");
@@ -238,11 +239,17 @@ export const composerAccountsHandlers: StepHandler[] = [
 			);
 			await expect(radio.getByTestId("picker-account-usage")).toHaveCSS(
 				"font-size",
-				"10px",
+				"11px",
 			);
 			const meter = radio.getByTestId("picker-account-meter");
 			await expect(meter).toHaveCSS("height", "4px");
-			await expect(meter).toHaveCSS("border-radius", "2px");
+			expect(
+				Number.parseFloat(
+					await meter.evaluate(
+						(element) => getComputedStyle(element).borderRadius,
+					),
+				),
+			).toBeGreaterThanOrEqual(2);
 			const ratio = await meter.evaluate((element) => {
 				const fill = element.firstElementChild;
 				if (!fill) throw new Error("Missing usage meter fill");
@@ -256,8 +263,8 @@ export const composerAccountsHandlers: StepHandler[] = [
 			await expect(meter.locator("span")).toHaveCSS(
 				"background-color",
 				await radio
-					.getByTestId("account-dot")
-					.evaluate((element) => getComputedStyle(element).backgroundColor),
+					.getByTestId("picker-account-usage")
+					.evaluate((element) => getComputedStyle(element).color),
 			);
 		},
 	},
@@ -292,14 +299,14 @@ export const composerAccountsHandlers: StepHandler[] = [
 			await expect(radio).toHaveAttribute("aria-disabled", "true");
 			await expect(radio.locator(".picker-account-card")).toHaveCSS(
 				"opacity",
-				"0.6",
+				"0.55",
 			);
 			await expect(radio.getByTestId("picker-account-caption")).toHaveText(
 				`limit · resets ${time}`,
 			);
 			await expect(radio.getByTestId("picker-account-caption")).toHaveCSS(
 				"font-size",
-				"10px",
+				"10.5px",
 			);
 			await expect(radio.getByTestId("picker-account-usage")).toHaveCount(0);
 			await expect(radio.getByTestId("picker-account-meter")).toHaveCount(0);

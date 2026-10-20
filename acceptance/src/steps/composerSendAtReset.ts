@@ -29,16 +29,20 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert a gapped theme amber ring without send words",
-		match: /^the send button has a gapped amber ring and no words$/,
+		name: "assert neutral send during usage warning",
+		match: /^the warning send button stays a neutral circle without words$/,
 		run: async ({ world }) => {
 			const button = world.page.locator("#send");
-			await expect(button).toHaveCSS(
-				"box-shadow",
-				`${await themeColour(world.page, "--color-bg")} 0px 0px 0px 2px, ${await themeColour(world.page, "--color-status-amber")} 0px 0px 0px 3.5px`,
-			);
 			await expect(button).toHaveText("");
-			await expect(button.locator("svg")).toHaveCount(1);
+			await expect(button).toHaveCSS("width", "34px");
+			await expect(button).toHaveCSS("height", "34px");
+			await expect(button).toHaveCSS(
+				"background-color",
+				await themeColour(world.page, "--color-inverse-bg"),
+			);
+			await expect(button).toHaveCSS("box-shadow", "none");
+			await expect(button.locator("svg.lucide-arrow-up")).toBeVisible();
+			await expect(world.page.getByTestId("usage-warning-strip")).toBeVisible();
 			await expect(
 				world.page.getByTestId("composer-send-at-label"),
 			).toHaveCount(0);
@@ -58,20 +62,50 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert reset send label and clock icon",
-		match: /^the reset send label reads (.+)$/,
+		name: "assert accessible reset time and clock icon",
+		match: /^the reset send control announces (.+)$/,
 		run: async ({ world, match }) => {
-			await expect(world.page.getByTestId("composer-send-at-label")).toHaveText(
-				match[1] ?? "",
-			);
-			await expect(world.page.locator("#send svg")).toHaveCount(1);
+			const button = world.page.locator("#send");
+			await expect(button).toHaveAccessibleName(match[1] ?? "");
+			await expect(button.locator("svg.lucide-clock")).toBeVisible();
+			const caption = world.page.getByTestId("composer-send-at-label");
+			if ((world.page.viewportSize()?.width ?? 0) < 768)
+				await expect(caption).toHaveCount(0);
+			else await expect(caption).toHaveText(match[1] ?? "");
 		},
 	},
 	{
-		name: "assert the phone reset button's compact height",
-		match: /^the phone reset send button is 32 pixels tall$/,
+		name: "assert phone reset clock geometry",
+		match: /^the phone reset send control is a neutral 34 pixel clock$/,
 		run: async ({ world }) => {
-			await expect(world.page.locator("#send")).toHaveCSS("height", "32px");
+			const button = world.page.locator("#send");
+			await expect(button).toHaveCSS("height", "34px");
+			await expect(button).toHaveCSS("width", "34px");
+			await expect(button).toHaveText("");
+			await expect(button.locator("svg.lucide-clock")).toBeVisible();
+			await expect(button).toHaveCSS(
+				"background-color",
+				await themeColour(world.page, "--color-inverse-bg"),
+			);
+		},
+	},
+	{
+		name: "assert neutral filled split send pill",
+		match: /^the reset send split pill is neutral$/,
+		run: async ({ world }) => {
+			const group = world.page.getByTestId("composer-send-control");
+			await expect(group).toHaveCSS("height", "34px");
+			await expect(group).toHaveCSS(
+				"background-color",
+				await themeColour(world.page, "--color-inverse-bg"),
+			);
+			await expect(group).toHaveCSS(
+				"color",
+				await themeColour(world.page, "--color-inverse-text"),
+			);
+			await expect(
+				group.getByTestId("composer-send-menu-trigger"),
+			).toBeVisible();
 		},
 	},
 	{
@@ -92,7 +126,7 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 	},
 	{
 		name: "queue submitted inputs through the existing pending-input projection",
-		match: /^the mock relay queues submitted messages for reset$/,
+		match: /^the mock relay holds submitted messages until reset$/,
 		run: ({ world }) => {
 			const rpc = requireRpcControl(world.page);
 			const relay = requireRelayControl(world.page);
@@ -462,11 +496,13 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert the auto-switch pill names its first account with a neutral border",
+		name: "assert the neutral auto-switch pill names its first account",
 		match: /^the auto-switch send button reads (.+) for (\S+)$/,
 		run: async ({ world, match }) => {
 			const button = world.page.locator("#send");
-			await expect(button).toHaveText(match[1] ?? "");
+			await expect(button.getByTestId("composer-send-switch-label")).toHaveText(
+				match[1]?.replace(/^Send on /, "") ?? "",
+			);
 			await expect(button).toHaveAccessibleName(
 				`Send on ${match[1]?.replace(/^Send on /, "")}`,
 			);
@@ -476,11 +512,11 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 			);
 			await expect(button).toHaveCSS(
 				"color",
-				await themeColour(world.page, "--color-text"),
+				await themeColour(world.page, "--color-inverse-text"),
 			);
 			await expect(world.page.getByTestId("composer-send-control")).toHaveCSS(
-				"border-color",
-				await themeColour(world.page, "--color-border"),
+				"background-color",
+				await themeColour(world.page, "--color-inverse-bg"),
 			);
 		},
 	},

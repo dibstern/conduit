@@ -76,7 +76,9 @@ describe("BackgroundTaskList drill-in", () => {
 			},
 		});
 		await fireEvent.click(
-			screen.getByRole("button", { name: "Stop Review the router" }),
+			screen.getByRole("button", {
+				name: "Stop background task Review the router",
+			}),
 		);
 		expect(onstop).toHaveBeenCalledWith("agent");
 		expect(taskDrawer.task).toBeNull();

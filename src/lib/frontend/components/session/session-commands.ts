@@ -1,6 +1,7 @@
 import { getBrowserClientId } from "../../stores/client-identity.js";
 import { selection } from "../../stores/selection.svelte.js";
 import { followFork, isSessionSnoozed } from "../../stores/session.svelte.js";
+import { refreshListedSessions } from "../../stores/session-list.svelte.js";
 import { openSnoozePicker } from "../../stores/snooze-picker.svelte.js";
 import { showToast } from "../../stores/ui.svelte.js";
 import { toastFailure } from "../../transport/rpc-errors.js";
@@ -20,20 +21,27 @@ export type SessionCommandHost = {
 
 export type SessionCommand = {
 	testId: string;
+	section: "triage" | "manage" | "danger";
 	label: string;
-	icon?:
+	shortLabel?: string;
+	tag?: string;
+	detail?: string | null;
+	emphasis?: "primary" | undefined;
+	icon:
 		| "undo"
 		| "check"
 		| "archive"
 		| "moon"
-		| "star-off"
-		| "star"
+		| "pin-off"
+		| "pin"
 		| "circle"
 		| "circle-dot"
 		| "circle-check"
 		| "pencil"
 		| "git-fork"
 		| "copy"
+		| "zap"
+		| "trash-2"
 		| "share"
 		| "settings"
 		| "bug";
@@ -41,17 +49,36 @@ export type SessionCommand = {
 	disabledReason?: string | null;
 	checked?: boolean;
 	danger?: boolean;
+	options?: {
+		title: string;
+		hint: string;
+		items: readonly {
+			id: string;
+			label: string;
+			detail?: string;
+			icon?: string;
+			separated?: boolean;
+			selected?: boolean;
+			run(returnFocus?: () => HTMLElement | null): void;
+		}[];
+	};
 	run(returnFocus?: () => HTMLElement | null): void;
 };
-export type SessionCommandEntry = SessionCommand | { divider: true };
+export type SessionCommandEntry = Omit<SessionCommand, "section"> & {
+	section: SessionCommand["section"] | "extras";
+};
 
 /**
  * Each command's keys, defined once. `key` acts on the focused list row, or on the
  * open session from the transcript; `global` works anywhere with ⌘⇧ (Ctrl+Shift).
  */
-export type SessionCommandKeys = { key: string; global?: string };
+export type SessionCommandKeys = {
+	key: string;
+	global?: string;
+	globalAliases?: readonly string[];
+};
 export const sessionCommandKeys = {
-	settle: { key: "s", global: "e" },
+	settle: { key: "s", global: "s", globalAliases: ["e"] },
 	snooze: { key: "z" },
 	pin: { key: "p" },
 	read: { key: "u", global: "u" },
@@ -76,7 +103,7 @@ type ShortcutEvent = Pick<
 
 /** The command among `entries` that `event` triggers, if any. */
 export function findSessionCommandForKey(
-	entries: readonly SessionCommandEntry[],
+	entries: readonly SessionCommand[],
 	event: ShortcutEvent,
 ): SessionCommand | undefined {
 	if (event.repeat || event.altKey) return undefined;
@@ -84,10 +111,10 @@ export function findSessionCommandForKey(
 	const global = command && event.shiftKey;
 	if (!global && (command || event.shiftKey)) return undefined;
 	const key = event.key.toLowerCase();
-	return entries.find(
-		(entry): entry is SessionCommand =>
-			"keys" in entry &&
-			(global ? entry.keys?.global : entry.keys?.key) === key,
+	return entries.find((entry) =>
+		global
+			? entry.keys?.global === key || entry.keys?.globalAliases?.includes(key)
+			: entry.keys?.key === key,
 	);
 }
 
@@ -97,14 +124,14 @@ export function findSessionCommandForKey(
  */
 export function runSessionCommandShortcut(
 	event: ShortcutEvent & Pick<KeyboardEvent, "preventDefault" | "target">,
-	entries: readonly SessionCommandEntry[],
+	entries: readonly SessionCommand[],
 ): void {
 	const command = findSessionCommandForKey(entries, event);
 	if (!command) return;
 	event.preventDefault();
 	const origin = event.target;
 	if (command.disabledReason)
-		showToast(command.disabledReason, { variant: "warn" });
+		showToast(command.disabledReason, { variant: "pinned" });
 	else command.run(() => (origin instanceof HTMLElement ? origin : null));
 }
 
@@ -113,20 +140,28 @@ function rpcInput(session: SessionInfo) {
 	return { sessionId: session.id, originId: getBrowserClientId() };
 }
 
+// Browse follows the shell; search also needs its server totals refreshed.
+function refreshSearch(): void {
+	void refreshListedSessions().catch(
+		toastFailure("Couldn't refresh session search"),
+	);
+}
+
 async function settle(session: SessionInfo, settled: boolean) {
 	const input = rpcInput(session);
 	if (!input) return;
 	try {
 		await rpc("SetSessionSettled", { ...input, settled });
+		refreshSearch();
 		if (settled)
 			showToast(`Moved “${session.title || "New Session"}” to Settled`, {
 				duration: 5000,
 				action: {
 					label: "Undo",
 					run: () => {
-						void rpc("SetSessionSettled", { ...input, settled: false }).catch(
-							toastFailure("Couldn't undo"),
-						);
+						void rpc("SetSessionSettled", { ...input, settled: false })
+							.then(refreshSearch)
+							.catch(toastFailure("Couldn't undo"));
 					},
 				},
 			});
@@ -140,15 +175,16 @@ async function pin(session: SessionInfo, pinned: boolean) {
 	if (!input) return;
 	try {
 		await rpc("SetSessionPinned", { ...input, pinned });
+		refreshSearch();
 		if (pinned)
 			showToast(`Pinned “${session.title || "New Session"}” to the top`, {
 				duration: 5000,
 				action: {
 					label: "Undo",
 					run: () => {
-						void rpc("SetSessionPinned", { ...input, pinned: false }).catch(
-							toastFailure("Couldn't undo"),
-						);
+						void rpc("SetSessionPinned", { ...input, pinned: false })
+							.then(refreshSearch)
+							.catch(toastFailure("Couldn't undo"));
 					},
 				},
 			});
@@ -165,6 +201,7 @@ async function archive(
 	if (!input) return false;
 	try {
 		await rpc("SetSessionArchived", { ...input, archived });
+		refreshSearch();
 		return true;
 	} catch (error) {
 		toastFailure(
@@ -178,9 +215,12 @@ async function autoSettle(session: SessionInfo, disabled: boolean) {
 	const input = rpcInput(session);
 	if (!input) return;
 	try {
-		await rpc("SetSessionAutoSettle", { ...input, disabled });
+		const outlook = await rpc("SetSessionAutoSettle", { ...input, disabled });
+		refreshSearch();
+		return outlook;
 	} catch (error) {
 		toastFailure("Couldn't change auto-settle")(error);
+		return undefined;
 	}
 }
 
@@ -192,6 +232,7 @@ async function rename(session: SessionInfo, title: string) {
 			sessionId: input.sessionId,
 			title,
 		});
+		refreshSearch();
 	} catch (error) {
 		toastFailure("Couldn't rename session")(error);
 	}
@@ -204,6 +245,7 @@ async function snooze(session: SessionInfo, until: number | null, now: number) {
 	const previousUntil = session.snoozedUntil ?? null;
 	try {
 		await rpc("SnoozeSession", { ...input, until });
+		refreshSearch();
 		showToast(
 			until === null
 				? `Snoozed “${session.title || "New Session"}” until something happens`
@@ -216,7 +258,7 @@ async function snooze(session: SessionInfo, until: number | null, now: number) {
 						const undo = wasSnoozed
 							? rpc("SnoozeSession", { ...input, until: previousUntil })
 							: rpc("UnsnoozeSession", input);
-						void undo.catch(toastFailure("Couldn't undo"));
+						void undo.then(refreshSearch).catch(toastFailure("Couldn't undo"));
 					},
 				},
 			},
@@ -231,6 +273,7 @@ async function unsnooze(session: SessionInfo) {
 	if (!input) return;
 	try {
 		await rpc("UnsnoozeSession", input);
+		refreshSearch();
 	} catch (error) {
 		toastFailure("Couldn't unsnooze session")(error);
 	}
@@ -265,6 +308,7 @@ async function remove(
 		toastFailure(`Couldn't delete "${title}"`, "warn")(error);
 		return false;
 	}
+	refreshSearch();
 	if (result.worktreeWarnings?.length)
 		showToast(`Session deleted. ${result.worktreeWarnings.join("; ")}`, {
 			variant: "warn",
@@ -318,9 +362,12 @@ export function getSettleCommand(
 		testId:
 			session.settledAt != null ? "session-ctx-unsettle" : "session-ctx-settle",
 		label: session.settledAt != null ? "Un-settle" : "Settle",
+		section: "triage",
 		icon: session.settledAt != null ? "undo" : "check",
 		keys: sessionCommandKeys.settle,
 		disabledReason: actions.settleDisabledReason,
+		detail: actions.settleDisabledReason,
+		emphasis: !actions.pinned && !actions.settled ? "primary" : undefined,
 		run: () => {
 			void settle(session, !actions.settled);
 		},
@@ -332,8 +379,11 @@ export function getPinCommand(session: SessionInfo): SessionCommand {
 	return {
 		testId: pinned ? "session-ctx-unpin" : "session-ctx-pin",
 		label: pinned ? "Unpin" : "Pin to top",
-		icon: pinned ? "star-off" : "star",
+		shortLabel: pinned ? "Unpin" : "Pin",
+		section: "triage",
+		icon: pinned ? "pin-off" : "pin",
 		keys: sessionCommandKeys.pin,
+		emphasis: pinned ? "primary" : undefined,
 		run: () => {
 			void pin(session, !pinned);
 		},
@@ -358,42 +408,89 @@ export function getSessionCommands(
 	now: number,
 	host: SessionCommandHost,
 	snoozePlacement: "center" | "sheet",
-): SessionCommandEntry[] {
+): SessionCommand[] {
 	const actions = getSessionActionState(session, now);
-	const items: SessionCommandEntry[] = [];
-	items.push(
-		getSettleCommand(session, now),
-		{
-			testId: "session-ctx-archive",
-			label: session.archivedAt != null ? "Unarchive" : "Archive",
-			icon: "archive",
-			run: () => {
-				void archive(session, session.archivedAt == null);
-			},
+	const items: SessionCommand[] = [];
+	// The server records snoozedAt after the client chooses the preset's time.
+	const snoozePreset = actions.snoozed
+		? getSnoozePresets(session.snoozedAt ?? now).find(
+				(preset) =>
+					preset.until === (session.snoozedUntil ?? null) ||
+					(preset.until != null &&
+						session.snoozedUntil != null &&
+						Math.abs(preset.until - session.snoozedUntil) < 60_000),
+			)?.id
+		: undefined;
+	items.push(getSettleCommand(session, now), {
+		testId: "session-ctx-auto-settle",
+		label: "Auto-settle when idle",
+		shortLabel: "Auto-settle",
+		section: "triage",
+		icon: "zap",
+		checked: session.autoSettleDisabled !== true,
+		run: () => {
+			void autoSettle(session, session.autoSettleDisabled !== true);
 		},
-		{
-			testId: "session-ctx-auto-settle",
-			label: "Auto-settle when idle",
-			checked: session.autoSettleDisabled !== true,
-			run: () => {
-				void autoSettle(session, session.autoSettleDisabled !== true);
-			},
-		},
-	);
+	});
 	if (actions.snoozeVisible) {
 		items.push({
 			testId: "session-ctx-snooze",
 			label: actions.snoozed ? "Change snooze…" : "Snooze…",
+			shortLabel: "Snooze",
+			section: "triage",
 			icon: "moon",
 			...(actions.snoozed ? {} : { keys: sessionCommandKeys.snooze }),
 			disabledReason: actions.snoozeDisabledReason,
+			detail:
+				actions.snoozeDisabledReason ??
+				(actions.snoozed
+					? session.snoozedUntil == null
+						? "No timer"
+						: `until ${formatSnoozeTime(session.snoozedUntil, now)}`
+					: null),
 			run: (returnFocus) =>
 				openSnoozePicker(session, snoozePlacement, returnFocus),
+			options: {
+				title: "Snooze until",
+				hint: "slide to a time, let go",
+				items: [
+					...getSnoozePresets(now)
+						.filter((preset) => preset.id !== "indefinite")
+						.map((preset) => ({
+							id: preset.id,
+							label: preset.label,
+							selected: preset.id === snoozePreset,
+							detail: formatSnoozeTime(preset.until, now),
+							run: () => {
+								void snooze(session, preset.until, now);
+							},
+						})),
+					{
+						id: "pick",
+						selected: actions.snoozed && snoozePreset === undefined,
+						label: "Pick a date & time…",
+						icon: "pencil",
+						detail: "›",
+						separated: true,
+						run: (returnFocus) =>
+							openSnoozePicker(session, snoozePlacement, returnFocus, true),
+					},
+					{
+						id: "indefinite",
+						selected: actions.snoozed && session.snoozedUntil == null,
+						label: "Until something happens",
+						run: () => {
+							void snooze(session, null, now);
+						},
+					},
+				],
+			},
 		});
 		if (actions.snoozed)
 			items.push({
 				testId: "session-ctx-unsnooze",
 				label: "Unsnooze",
+				section: "triage",
 				icon: "undo",
 				keys: sessionCommandKeys.snooze,
 				run: () => {
@@ -408,19 +505,30 @@ export function getSessionCommands(
 				? "session-ctx-mark-read"
 				: "session-ctx-mark-unread",
 			label: session.unread ? "Mark read" : "Mark unread",
+			shortLabel: session.unread ? "Read" : "Unread",
+			section: "triage",
 			icon: session.unread ? "circle" : "circle-dot",
 			keys: sessionCommandKeys.read,
 			run: () => {
 				void toggleSessionRead(session);
 			},
 		});
+	items.push({
+		testId: "session-ctx-archive",
+		label: session.archivedAt != null ? "Unarchive" : "Archive",
+		section: "triage",
+		icon: "archive",
+		run: () => {
+			void archive(session, session.archivedAt == null);
+		},
+	});
 	items.push(
-		{ divider: true },
 		...(host.select
 			? [
 					{
 						testId: "session-ctx-select",
 						label: "Select",
+						section: "manage" as const,
 						icon: "circle-check" as const,
 						run: host.select,
 					},
@@ -429,6 +537,7 @@ export function getSessionCommands(
 		{
 			testId: "session-ctx-rename",
 			label: "Rename",
+			section: "manage",
 			icon: "pencil",
 			keys: sessionCommandKeys.rename,
 			run: host.rename,
@@ -436,21 +545,26 @@ export function getSessionCommands(
 		{
 			testId: "session-ctx-fork",
 			label: "Fork",
+			section: "manage",
 			icon: "git-fork",
 			run: () => fork(session),
 		},
 		{
 			testId: "session-ctx-copy-resume",
 			label: "Copy resume command",
+			shortLabel: "Copy resume",
+			section: "manage",
 			icon: "copy",
 			run: () => {
 				void copyResume(session);
 			},
 		},
-		{ divider: true },
 		{
 			testId: "session-ctx-delete",
 			label: "Delete",
+			shortLabel: "Delete…",
+			section: "danger",
+			icon: "trash-2",
 			danger: true,
 			run: (returnFocus) => {
 				void remove(session, returnFocus);

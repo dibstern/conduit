@@ -36,3 +36,11 @@ export const Hover: Story = {
 	...Default,
 	parameters: { pseudo: { hover: true } },
 };
+
+export const Final: Story = {
+	args: {
+		message: { ...mockToolSubagentCompleted, createdAt: 1000, endedAt: 109000 },
+	},
+	globals: { theme: "dark" },
+};
+export const FinalLight: Story = { ...Final, globals: { theme: "light" } };

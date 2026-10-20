@@ -149,7 +149,7 @@ export const Chip: Story = {
 		await expect(style.borderRadius).toBe("10px");
 		await expect(labelStyle.fontSize).toBe("12px");
 		await expect(labelStyle.fontWeight).toBe("600");
-		await expect(labelStyle.fontFamily).toContain("Chakra Petch");
+		await expect(labelStyle.fontFamily).toContain("Geist");
 		await expect(labelStyle.textTransform).toBe("none");
 		await expect(labelStyle.letterSpacing).toBe("normal");
 		await expect(labelStyle.color).toBe(style.color);

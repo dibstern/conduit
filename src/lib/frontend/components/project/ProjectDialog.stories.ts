@@ -6,6 +6,7 @@ import {
 	type FindFoldersResponse,
 	ProjectSaveRejected,
 } from "../../../contracts/ws-rpc.js";
+import { sessionViewState } from "../../stores/session-view.svelte.js";
 import ProjectDialog from "./ProjectDialog.svelte";
 
 const home = "/Users/dev";
@@ -61,6 +62,13 @@ const meta = {
 	title: "Project/ProjectDialog",
 	component: ProjectDialog,
 	tags: ["autodocs", "viewport-capture"],
+	beforeEach: () => {
+		const compact = sessionViewState.compact;
+		sessionViewState.compact = window.innerWidth < 768;
+		return () => {
+			sessionViewState.compact = compact;
+		};
+	},
 	parameters: {
 		layout: "fullscreen",
 		docs: { story: { inline: false } },

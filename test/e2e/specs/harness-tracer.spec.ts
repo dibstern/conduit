@@ -42,7 +42,7 @@ async function sendFromAddedProject(
 	expect(new URL(page.url()).searchParams.get("project")).toBe(slug);
 	await expect(app.input).toBeVisible();
 	const picker = page.locator(
-		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 	);
 	await openPickerRoot(page, picker);
 	if ((await picker.getAttribute("data-instance-id")) !== driver)

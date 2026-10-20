@@ -9,6 +9,7 @@ import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 const sections = [
 	["general", "General", "[data-testid=settings-composer-controls-icons]"],
+	["terminal", "Terminal", "#settings-terminal-desktop"],
 	[
 		"models",
 		"Models & agents",
@@ -19,6 +20,7 @@ const sections = [
 		"Claude",
 		"[data-testid=claude-setting-defaultPermissionMode-select]",
 	],
+	["surfacing", "Surfacing", "[data-testid=surfacing-settings-general]"],
 	["archived", "Archived", "section[aria-label='Archived sessions']"],
 	["usage", "Usage", "#usage-settings"],
 	["server", "Server", "#instances-settings"],
@@ -58,9 +60,9 @@ for (const [viewportName, viewport] of [
 					id: "personal",
 					name: "Personal",
 					driver: "claude",
-					usageEligible: true,
 					port: 0,
 					managed: false,
+					usageEligible: true,
 					status: "healthy",
 					restartCount: 0,
 					createdAt: now,
@@ -69,9 +71,9 @@ for (const [viewportName, viewport] of [
 					id: "work",
 					name: "Work",
 					driver: "claude",
-					usageEligible: true,
 					port: 0,
 					managed: false,
+					usageEligible: true,
 					status: "unhealthy",
 					restartCount: 0,
 					createdAt: now,

@@ -10,16 +10,16 @@ Scenario Outline: desktop limit strip names the account, the limit and its reset
   Then the usage limit strip sits directly above the composer
   And the usage limit strip title reads <title>
   And the usage limit strip detail reads <detail>
-  And the cut-off tag under Now run the provider tests reads ⏸ Cut off by usage limit · Dismiss
+  And the cut-off chip in the header for Now run the provider tests reads Cut off by usage limit · Dismiss
 
 Examples:
-  | limit      | account | resets               | title                                | detail                          |
-  | seven_day  | claude  | 2026-01-05T09:00:00Z | Usage limit reached · work2claude    | Weekly limit · resets Mon 9:00  |
-  | five_hour  | claude  | 2026-01-01T14:30:00Z | Usage limit reached · work2claude    | 5-hour limit · resets 14:30     |
-  | seven_day  | claude  | none                 | Usage limit reached · work2claude    | Reset time unavailable          |
-  | five_hour  | retired | 2026-01-01T14:30:00Z | Usage limit reached · work2claude    | 5-hour limit · resets 14:30     |
+  | limit     | account | resets               | title                             | detail                   |
+  | seven_day | claude  | 2026-01-05T09:00:00Z | work2claude hit its weekly limit.  | Resets at Mon 9 am.       |
+  | five_hour | claude  | 2026-01-01T14:30:00Z | work2claude hit its 5-hour limit.  | Resets at 2:30 pm.        |
+  | seven_day | claude  | none                | work2claude hit its weekly limit.  | Reset time unavailable   |
+  | five_hour | retired | 2026-01-01T14:30:00Z | work2claude hit its 5-hour limit.  | Resets at 2:30 pm.        |
 
-Scenario Outline: phone limit strip folds the account into the detail line
+Scenario Outline: phone limit strip names the account and reset
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
@@ -27,15 +27,15 @@ Scenario Outline: phone limit strip folds the account into the detail line
   And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
   When the session hits the <limit> limit on claude resetting at <resets>
   Then the usage limit strip sits directly above the composer
-  And the usage limit strip title reads Usage limit reached
+  And the usage limit strip title reads <title>
   And the usage limit strip detail reads <detail>
-  And the cut-off tag under Now run the provider tests reads ⏸ Cut off · Dismiss
+  And the cut-off chip in the header for Now run the provider tests reads Cut off · Dismiss
 
 Examples:
-  | limit     | resets               | detail                                     |
-  | seven_day | 2026-01-05T09:00:00Z | work2claude · resets Mon 9:00              |
-  | five_hour | 2026-01-01T14:30:00Z | work2claude · resets 14:30                 |
-  | seven_day | none                 | work2claude · reset time unavailable       |
+  | limit     | resets               | title                            | detail                 |
+  | seven_day | 2026-01-05T09:00:00Z | work2claude hit its weekly limit. | Resets at Mon 9 am.     |
+  | five_hour | 2026-01-01T14:30:00Z | work2claude hit its 5-hour limit. | Resets at 2:30 pm.      |
+  | seven_day | none                | work2claude hit its weekly limit. | Reset time unavailable |
 
 Scenario Outline: Dismiss clears the cut-off tag and leaves the strip
   Given the conduit app is served with the connected mockup
@@ -197,8 +197,8 @@ Scenario Outline: Resume at reset schedules the resume and Cancel auto-resume un
 
 Examples:
   | viewport | title                                | detail                       |
-  | desktop  | Resumes on work2claude at Mon 9:00   | in 3d 23h                    |
-  | phone    | Resumes Mon 9:00                     | work2claude · in 3d 23h      |
+  | desktop  | Resumes on work2claude at Mon 9 am    | in 3d 23h                    |
+  | phone    | Resumes Mon 9 am                      | work2claude · in 3d 23h      |
 
 Scenario Outline: a session that resumed at reset keeps a divider with the reset time
   Given the conduit app is served with the connected mockup
@@ -265,8 +265,8 @@ Scenario Outline: a resume the limit policy scheduled is waiting and says auto-r
 
 Examples:
   | viewport | title                              | detail                                      | baseline                         | threshold |
-  | desktop  | Resumes on work2claude at Mon 9:00 | in 3d 23h · auto-resume is on               | usage-limit-auto-waiting-desktop | 98        |
-  | phone    | Resumes Mon 9:00                   | work2claude · in 3d 23h · auto-resume is on | usage-limit-auto-waiting-phone   | 98        |
+  | desktop  | Resumes on work2claude at Mon 9 am  | in 3d 23h · auto-resume is on               | usage-limit-auto-waiting-desktop | 98        |
+  | phone    | Resumes Mon 9 am                    | work2claude · in 3d 23h · auto-resume is on | usage-limit-auto-waiting-phone   | 98        |
 
 Scenario Outline: Switch account lists each account's fresh quota and pre-selects the most headroom
   Given the conduit app is served with the connected mockup

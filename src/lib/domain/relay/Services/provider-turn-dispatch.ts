@@ -393,6 +393,7 @@ const failUnfinishedSend = (
 					messageId: inputId,
 					inputId,
 					provider: driver,
+					...(input.images ? { images: input.images } : {}),
 				})
 				.pipe(
 					Effect.catch((cause) =>

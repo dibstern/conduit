@@ -75,9 +75,13 @@ test.describe("OpenCode fork from a reply", () => {
 		const secondTurn = parentHistory[2];
 		if (!firstReply || !secondTurn) throw new Error("Parent turns missing");
 
-		const reply = chat.assistantMessages.first();
-		await reply.hover();
-		await reply.getByRole("button", { name: "Fork from here" }).click();
+		const header = page.locator(
+			`.assistant-header[data-message-id="${firstReply.id}"]`,
+		);
+		await header.hover();
+		await header
+			.getByRole("button", { name: "Fork from here", exact: true })
+			.click();
 		await expect(page).not.toHaveURL(new RegExp(`/s/${parentId}(?:\\?|$)`));
 		const forkId = new URL(page.url()).pathname.split("/").at(-1);
 		if (!forkId) throw new Error("Fork session route is missing");

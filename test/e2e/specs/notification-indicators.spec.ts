@@ -277,7 +277,7 @@ test.describe("server-derived notification indicators", () => {
 		);
 	});
 
-	test("shows Done for a session the list reports as done and unread", async ({
+	test("shows the unread dot for a session the list reports as done and unread", async ({
 		page,
 		baseURL,
 	}) => {
@@ -292,7 +292,9 @@ test.describe("server-derived notification indicators", () => {
 		await waitForChatReady(page);
 
 		await expect(sessionItem(page, SESS_B)).toBeVisible({ timeout: 5_000 });
-		await expect(statusWord(page, SESS_B)).toHaveCount(0);
+		await expect(
+			sessionItem(page, SESS_B).getByTestId("session-unread-dot"),
+		).toHaveCount(0);
 
 		// Read state is durable and server-derived: it reaches the client folded
 		// into the attention tier on a re-broadcast session list, never as a
@@ -321,9 +323,15 @@ test.describe("server-derived notification indicators", () => {
 			],
 		});
 
-		await expect(statusWord(page, SESS_B)).toHaveText("Done", {
-			timeout: 5_000,
-		});
+		// Done shows as an unread dot, not a word; the row still announces it.
+		await expect(
+			sessionItem(page, SESS_B).getByTestId("session-unread-dot"),
+		).toBeVisible({ timeout: 5_000 });
+		await expect(sessionItem(page, SESS_B)).toHaveAttribute(
+			"aria-label",
+			/^Done, unread, Session B/,
+		);
+		await expect(statusWord(page, SESS_B)).toHaveCount(0);
 	});
 
 	test("clears the attention banner when you open that session", async ({

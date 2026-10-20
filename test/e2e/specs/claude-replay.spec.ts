@@ -2037,6 +2037,10 @@ test.describe("Claude replay lane", () => {
 					await expect(s.chat.stopBtn).toBeVisible();
 					const input = page.locator("#input");
 					await input.fill("/compact");
+					await expect(page.locator("#send")).toHaveAttribute(
+						"title",
+						/stop the turn and run it/,
+					);
 					await input.press("ControlOrMeta+Enter");
 					await expect(input).toHaveValue("");
 

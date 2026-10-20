@@ -153,6 +153,18 @@ const SHIPPED_MIGRATION_HASHES = {
 		"3f13a228174941c05f74acf55e328e0004e85426bfead1c28809d17eb813bfda",
 	"0066_input_drafts.sql":
 		"4703d6a298194827b855733ce74c4503b90fb8cd9e4b35202a21cbc4169af8e8",
+	"0067_goal_check_metadata.sql":
+		"0b6fe299d16a872e98209b64531e1c7f2c840ac7aadc09a627a5a9852394c0b4",
+	"0068_message_part_surfacing.sql":
+		"135cd06c359da73ba6b13710440ddc1c03b360ff15266c61b64f8261b4eaedd3",
+	"0069_sessions_settled_shelf_index.sql":
+		"63d47e18bb1c58229c01eb0672308372ea10ba92e3f20145652923a85feaa236",
+	"0070_surfacing_marks.sql":
+		"8fa4baa13cbcfd558dbcdce6b4385defcda7bd289b72f4be29acbc1d0e4843ad",
+	"0071_message_part_read.sql":
+		"26868b5214c7ebdbf704b7d668a57bf1d165313690717d6a64cd407aa6fc8fd1",
+	"0072_turn_recaps.sql":
+		"7358a8f038b47c2575f0baaf39175b01c4b01090df0a7c2974854f1f9b85d24e",
 } satisfies Record<string, string>;
 
 describe("shipped migrations are immutable", () => {
@@ -172,10 +184,10 @@ describe("shipped migrations are immutable", () => {
 			.filter((f) => f.endsWith(".sql"))
 			.sort();
 		expect(onDisk).toEqual(Object.keys(SHIPPED_MIGRATION_HASHES).sort());
-		// Effect key 10 is a code-only purge; SQL files run from 0001 to 0066.
-		expect(onDisk).toHaveLength(66);
+		// Effect key 10 is a code-only purge; SQL files run from 0001 to 0072.
+		expect(onDisk).toHaveLength(72);
 		expect(onDisk.map((file) => Number(file.slice(0, 4)))).toEqual(
-			Array.from({ length: 66 }, (_, index) => index + 1),
+			Array.from({ length: 72 }, (_, index) => index + 1),
 		);
 	});
 });

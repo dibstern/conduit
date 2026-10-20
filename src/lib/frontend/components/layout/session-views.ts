@@ -8,7 +8,7 @@ import { closeFileViewer } from "../../stores/ui.svelte.js";
 import { toggleTerminal } from "./chrome-actions.js";
 
 export type SessionView = {
-	id: string;
+	id: "chat" | "terminal" | "diff" | "files";
 	label: string;
 	icon: string;
 	badge?: () => number | undefined;

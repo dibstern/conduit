@@ -21,7 +21,7 @@
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 	import ProjectScopeItem from "./ProjectScopeItem.svelte";
 	import Surface from "../ui/Surface.svelte";
-	import TextInput from "../ui/TextInput.svelte";
+	import SearchInput from "../ui/SearchInput.svelte";
 
 	let {
 		value,
@@ -171,23 +171,22 @@
 <svelte:window onkeydown={handleShortcut} />
 
 <div
-	class="relative flex h-[38px] md:h-[32px] items-center gap-[8px] rounded-[11px] border border-border-subtle bg-bg-surface pl-[6px] md:pl-[7px] pr-[11px] text-[13.5px] md:text-[12.5px] focus-within:border-border-chip focus-within:bg-bg-alt"
+	class="relative flex min-h-[44px] items-center gap-[6px] md:min-h-[30px]"
 	data-testid="session-search-field"
 	onfocusout={handleFocusOut}
 >
 	<!-- One pill: "All projects ▾" at rest, a removable "conduit ✕" token once
 	     scoped, the same thing `project:conduit` compiles to. -->
-	<span class="flex max-w-[60%] shrink-0 items-center rounded-full border border-border-chip bg-bg-alt">
+	<span class="flex max-w-[60%] shrink-0 items-center">
 	<Menu bind:open={() => pickerOpen, setPickerOpen} ariaLabel="Project scope">
 		{#snippet trigger({ props })}
 			<Button
 				{...props}
 				bind:element={scopeChip}
-				variant="ghost"
+				variant="field"
 				size="content"
-				tone="default"
 				touchTarget
-				class="min-w-0 gap-1 rounded-full px-[8px] py-[5px] md:px-[7px] md:py-[4px] text-[11.5px] md:text-[11px] leading-none font-medium font-brand"
+				class="min-w-0 font-sans"
 				title="Project scope (⌘P)"
 				data-testid="session-scope-chip"
 			>
@@ -279,17 +278,13 @@
 		/>
 	{/if}
 	</span>
-	<Icon name="search" size={13} class="shrink-0 text-text-dimmer" />
-	<!-- The field paints 38px tall; the negative margin lets the transparent
-	     input overhang its border to keep a 44px tap target on phones. -->
-	<TextInput
+
+	<SearchInput
 		bind:element={input}
 		id="session-search-input"
 		aria-label="Search sessions"
-		chrome="bare"
-		size="content"
-		class="min-w-0 flex-1 self-stretch -my-[4px] md:my-0 bg-transparent text-[13.5px] md:text-[12.5px] text-text font-brand placeholder:text-text-dimmer"
-		placeholder="Search sessions..."
+		shortcut="⌘K"
+		placeholder="Search"
 		autocomplete="off"
 		spellcheck={false}
 		{value}
@@ -307,7 +302,7 @@
 			variant="card"
 			radius="panel"
 			elevation="dropdown"
-			class="absolute left-[-1px] right-[-1px] top-full z-[var(--z-dropdown)] mt-[6px] max-h-[60vh] overflow-y-auto py-[6px] font-brand"
+			class="absolute left-[-1px] right-[-1px] top-full z-[var(--z-dropdown)] mt-[6px] max-h-[60vh] overflow-y-auto py-[6px] font-sans"
 			data-testid="session-scope-suggestions"
 		>
 			<div class="px-[14px] pt-[6px] pb-[5px] font-mono text-[10.5px] font-semibold uppercase leading-none tracking-[0.1em] text-text-dimmer">Scope</div>

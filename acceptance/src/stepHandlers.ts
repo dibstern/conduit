@@ -1,5 +1,6 @@
 import { PlaywrightDriver } from "./playwrightDriver.js";
 import type { AcceptanceLifecycle, StepHandler } from "./runtime.js";
+import { askContextHandlers } from "./steps/askContext.js";
 import { backgroundTasksHandlers } from "./steps/backgroundTasks.js";
 import { claudeSettingsHandlers } from "./steps/claudeSettings.js";
 import { composerHandlers } from "./steps/composer.js";
@@ -7,6 +8,7 @@ import { composerAccountsHandlers } from "./steps/composerAccounts.js";
 import { composerContextWarningHandlers } from "./steps/composerContextWarning.js";
 import { composerEffortHandlers } from "./steps/composerEffort.js";
 import { composerFieldWidthHandlers } from "./steps/composerFieldWidth.js";
+import { composerFilesHandlers } from "./steps/composerFiles.js";
 import { composerFinalDesignHandlers } from "./steps/composerFinalDesign.js";
 import { composerLiveStatusHandlers } from "./steps/composerLiveStatus.js";
 import { composerPickerHandlers } from "./steps/composerPicker.js";
@@ -33,20 +35,34 @@ import { pendingInputTrayHandlers } from "./steps/pendingInputTray.js";
 import { phoneToastsHandlers } from "./steps/phoneToasts.js";
 import { projectTreeHandlers } from "./steps/projectTree.js";
 import { providerInstancesHandlers } from "./steps/providerInstances.js";
+import { sessionAutoSettleHandlers } from "./steps/sessionAutoSettle.js";
 import { sessionGoalHandlers } from "./steps/sessionGoal.js";
 import { sessionGoalDetailsHandlers } from "./steps/sessionGoalDetails.js";
 import { sessionModeDefaultHandlers } from "./steps/sessionModeDefault.js";
 import { sessionPresentationHandlers } from "./steps/sessionPresentation.js";
 import { sessionRowsHandlers } from "./steps/sessionRows.js";
+import { sessionSheetSnoozeHandlers } from "./steps/sessionSheetSnooze.js";
+import { sessionSheetsHandlers } from "./steps/sessionSheets.js";
 import { sessionSkillsHandlers } from "./steps/sessionSkills.js";
 import { settingsGeneralHandlers } from "./steps/settingsGeneral.js";
+import { settingsSurfacingHandlers } from "./steps/settingsSurfacing.js";
 import { sideThreadsHandlers } from "./steps/sideThreads.js";
+import { surfacingCardHandlers } from "./steps/surfacingCard.js";
+import { surfacingMarksHandlers } from "./steps/surfacingMarks.js";
+import { surfacingMinimiseHandlers } from "./steps/surfacingMinimise.js";
+import { surfacingRecapHandlers } from "./steps/surfacingRecap.js";
+import { surfacingReplyHandlers } from "./steps/surfacingReply.js";
+import { surfacingSwitchesHandlers } from "./steps/surfacingSwitches.js";
+import { surfacingTuningHandlers } from "./steps/surfacingTuning.js";
 import { taskDrillInHandlers } from "./steps/taskDrillIn.js";
+import { terminalKeysHandlers } from "./steps/terminalKeys.js";
+import { terminalSettingsHandlers } from "./steps/terminalSettings.js";
 import { transcriptFeedHandlers } from "./steps/transcriptFeed.js";
 import { usageFooterMeterHandlers } from "./steps/usageFooterMeter.js";
 import { usageLimitStripHandlers } from "./steps/usageLimitStrip.js";
 import { usageSettingsHandlers } from "./steps/usageSettings.js";
 import { usageWarningStripHandlers } from "./steps/usageWarningStrip.js";
+import { userAvatarHandlers } from "./steps/userAvatar.js";
 import { visualHandlers } from "./steps/visual.js";
 import { worktreeCleanupSettingsHandlers } from "./steps/worktreeCleanupSettings.js";
 
@@ -54,6 +70,9 @@ const driver = new PlaywrightDriver();
 
 export const conduitVisualHandlers: StepHandler[] = [
 	...sessionPresentationHandlers,
+	...sessionSheetsHandlers,
+	...sessionSheetSnoozeHandlers,
+	...sessionAutoSettleHandlers,
 	...phoneToastsHandlers,
 	...sessionRowsHandlers,
 	...projectTreeHandlers,
@@ -61,7 +80,17 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...backgroundTasksHandlers,
 	...launchingRowsHandlers,
 	...taskDrillInHandlers,
+	...terminalKeysHandlers,
+	...terminalSettingsHandlers,
 	...sideThreadsHandlers,
+	...surfacingCardHandlers,
+	...surfacingMarksHandlers,
+	...surfacingMinimiseHandlers,
+	...surfacingRecapHandlers,
+	...surfacingSwitchesHandlers,
+	...surfacingReplyHandlers,
+	...askContextHandlers,
+	...surfacingTuningHandlers,
 	...sessionGoalDetailsHandlers,
 	...sessionGoalHandlers,
 	...sessionSkillsHandlers,
@@ -88,6 +117,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	// feed's more specific "the transcript shows a loading skeleton".
 	...transcriptFeedHandlers,
 	...composerFieldWidthHandlers,
+	...composerFilesHandlers,
 	...composerFinalDesignHandlers,
 	...composerLiveStatusHandlers,
 	...pendingInputTrayHandlers,
@@ -96,6 +126,8 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...composerWordsHandlers,
 	...composerContextWarningHandlers,
 	...settingsGeneralHandlers,
+	...userAvatarHandlers,
+	...settingsSurfacingHandlers,
 	...worktreeCleanupSettingsHandlers,
 	...composerHandlers,
 	...composerEffortHandlers,

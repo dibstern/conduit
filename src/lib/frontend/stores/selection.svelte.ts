@@ -169,6 +169,9 @@ export function watchSelection(): () => void {
 		});
 		let alive = true;
 		const attaching = new Set<string>();
+		// An attach by session id places that session itself, so a row placing
+		// it while the reply is out must not send a second attach.
+		let sessionAttach = $state<string | null>(null);
 		const resolving = new Set<string>();
 		let attachedOnce = attachedProjectState.slug !== null;
 		let previousAttached = attachedProjectState.slug;
@@ -254,12 +257,15 @@ export function watchSelection(): () => void {
 			const current = shown;
 			const route = getCurrentRoute();
 			const connected = getIsConnected();
+			const pendingSession = sessionAttach;
 			untrack(() => {
 				if (previousAttached !== null && attached === null)
 					attachedOnce = false;
 				previousAttached = attached;
 				if (!connected || route.page !== "chat") return;
 				const routeSessionId = route.sessionId ?? null;
+				if (pendingSession !== null && pendingSession === routeSessionId)
+					return;
 				const sessionId =
 					current.kind === "placing" || current.kind === "drawn"
 						? current.sessionId
@@ -275,6 +281,7 @@ export function watchSelection(): () => void {
 					]);
 					if (attaching.has(key)) return;
 					attaching.add(key);
+					if (sessionId) sessionAttach = sessionId;
 					void rpc("AttachProject", {
 						originId: getBrowserClientId(),
 						...(sessionId
@@ -315,7 +322,11 @@ export function watchSelection(): () => void {
 							)
 								toastFailure("Failed to switch projects")(error);
 						})
-						.finally(() => attaching.delete(key));
+						.finally(() => {
+							attaching.delete(key);
+							if (sessionId && sessionAttach === sessionId)
+								sessionAttach = null;
+						});
 					return;
 				}
 				if (!sessionId || resolving.has(sessionId)) return;

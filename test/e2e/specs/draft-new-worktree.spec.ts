@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import type { Locator, Page } from "@playwright/test";
 import { WorktreeCreationError } from "../../../src/lib/contracts/worktree.js";
 import type { SessionInfo } from "../../../src/lib/contracts/ws-rpc.js";
+import { openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
@@ -322,9 +323,9 @@ for (const mode of [
 		test.use({ viewport: mode.viewport, hasTouch: mode.hasTouch });
 		const press = (target: Locator) =>
 			mode.hasTouch ? target.tap() : target.click();
-		// Phones keep the session checkout in the composer's ⋯ sheet.
+		// Phones keep the session checkout in the Composer sheet.
 		const checkout = async (page: Page) => {
-			if (mode.hasTouch) await press(page.getByTestId("composer-more"));
+			if (mode.hasTouch) await press(page.getByTestId("model-picker-trigger"));
 			return page.getByTestId("composer-checkout");
 		};
 
@@ -571,7 +572,7 @@ for (const mode of [
 				);
 				await page.keyboard.press("Escape");
 				if (mode.hasTouch) {
-					// The ⋯ sheet is modal, so the session bar is inert until it closes.
+					// The Composer sheet is modal, so close it before using the session bar.
 					await page.keyboard.press("Escape");
 					await expect(
 						page.getByRole("dialog", { name: "Composer" }),
@@ -700,7 +701,7 @@ for (const mode of [
 				page.getByRole("menuitemradio", { name: "feature/base", exact: true }),
 			);
 			const picker = page.locator(
-				'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+				'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 			);
 			for (const provider of [
 				"opencode",
@@ -708,9 +709,7 @@ for (const mode of [
 				"claude",
 				"limited-provider",
 			]) {
-				await press(picker);
-				const back = page.getByTestId("picker-back");
-				if (await back.isVisible()) await press(back);
+				await openPickerRoot(page, picker);
 				await press(
 					page.getByTestId(
 						`picker-harness-${provider === "claude" ? "claude" : "opencode"}`,

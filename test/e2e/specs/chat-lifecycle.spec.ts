@@ -66,7 +66,7 @@ test.describe("Tool Call", () => {
 
 		await expect(ledgers).toHaveCount(1);
 		await expect(ledgers.locator(".turn-activity-toggle")).toContainText(
-			/Worked\sfor/,
+			/Worked\s/,
 		);
 
 		await page.reload();
@@ -75,7 +75,7 @@ test.describe("Tool Call", () => {
 
 		await expect(ledgers).toHaveCount(1);
 		await expect(ledgers.locator(".turn-activity-toggle")).toContainText(
-			/Worked\sfor/,
+			/Worked\s/,
 		);
 	});
 });

@@ -3,7 +3,9 @@
 // Pure conversion with no I/O.
 
 import { Option, Schema } from "effect";
+import { SurfacingMarkSchema } from "../contracts/category-set.js";
 import { ProjectSetupStateSchema } from "../contracts/project-setup.js";
+import { TextSurfacedPayloadSchema } from "../contracts/stored-event.js";
 import {
 	type MessageVersion,
 	type PartVersion,
@@ -35,6 +37,7 @@ function snapshotRowToHistory(
 		!Array.isArray(parsed.parts)
 	)
 		return undefined;
+	const projectedParts = new Map(row.parts.map((part) => [part.id, part]));
 	const parts: HistoryMessagePart[] = parsed.parts.map((part: unknown) => {
 		if (
 			typeof part !== "object" ||
@@ -61,6 +64,7 @@ function snapshotRowToHistory(
 							),
 					)
 				: undefined;
+		const projected = projectedParts.get(part.id);
 		// The RPC wire rejects an own undefined property, so drop the provider's
 		// metadata and add back only the filtered metadata when there is one.
 		const { metadata: _providerMetadata, ...providerState } = {
@@ -71,6 +75,7 @@ function snapshotRowToHistory(
 			...part,
 			id: part.id,
 			type: part.type as HistoryMessagePart["type"],
+			...(projected && partSurfacing(projected)),
 			...(state === undefined
 				? {}
 				: {
@@ -217,6 +222,43 @@ export function toolOutputText(result: string): string {
 	}
 }
 
+function partSurfacing(
+	row: MessagePartRow,
+): Pick<
+	HistoryMessagePart,
+	| "surfacingOrdinal"
+	| "surfacingProbabilities"
+	| "surfacingSetVersion"
+	| "surfacingModel"
+	| "surfacingMark"
+	| "surfacingRead"
+> {
+	const mark =
+		row.surfacing_mark == null
+			? {}
+			: {
+					surfacingMark: Schema.decodeUnknownSync(
+						Schema.fromJsonString(SurfacingMarkSchema),
+					)(row.surfacing_mark),
+				};
+	if (row.surfacing_ordinal == null) return mark;
+	return {
+		...mark,
+		surfacingRead: row.surfacing_read === true,
+		surfacingOrdinal: row.surfacing_ordinal,
+		surfacingProbabilities:
+			row.surfacing_probabilities == null
+				? null
+				: Schema.decodeUnknownSync(
+						TextSurfacedPayloadSchema.fields.probabilities,
+					)(JSON.parse(row.surfacing_probabilities)),
+		...(row.surfacing_set_version != null && {
+			surfacingSetVersion: row.surfacing_set_version,
+		}),
+		...(row.surfacing_model != null && { surfacingModel: row.surfacing_model }),
+	};
+}
+
 function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 	if (row.type === "text" && row.metadata != null) {
 		const value = parseObjectJson(row.metadata)?.["setup"];
@@ -322,6 +364,7 @@ function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 	return {
 		id: row.id,
 		type: row.type as HistoryMessagePart["type"],
+		...partSurfacing(row),
 		// Per-part stamps, not the message's: a whole turn's tools share one
 		// message row, so the message stamp would make every step 0ms long.
 		time: { start: row.created_at, end: row.updated_at },

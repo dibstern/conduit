@@ -1,27 +1,23 @@
 <!-- Auto-expanding textarea with send/stop button, attach menu, agent/model pills. -->
 <!-- Command menu triggered by "/" prefix. -->
 
-<script module lang="ts">
-	// A composer remount must not repeat the same turn's diagnostic.
-	const reportedMissingPrompts = new Set<string>();
-</script>
-
 <script lang="ts">
+	import Popover from "../ui/Popover.svelte";
+	import ComposerFrame from "../ui/ComposerFrame.svelte";
+	import ComposerStrip from "../ui/ComposerStrip.svelte";
+	import ComposerSendGroup from "../ui/ComposerSendGroup.svelte";
 	import { AccountIdSchema, getProviderDriver } from "../../../contracts/provider-instance.js";
 	import { tick, untrack, type Snippet } from "svelte";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import Disclosure from "../ui/Disclosure.svelte";
 	import AccountDot from "../ui/AccountDot.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
-	import Dialog from "../ui/Dialog.svelte";
-	import Surface from "../ui/Surface.svelte";
 	import Textarea from "../ui/Textarea.svelte";
-	import TextButton from "../ui/TextButton.svelte";
 	import TwoRowComposerLayout from "../ui/TwoRowComposerLayout.svelte";
 	import AttachMenu from "./AttachMenu.svelte";
-	import ComposerStatusHeader from "./ComposerStatusHeader.svelte";
 	// biome-ignore lint/style/useImportType: CommandMenu is used as a value for bind:this
 	import CommandMenu from "./CommandMenu.svelte";
 	// biome-ignore lint/style/useImportType: FileMenu is used as a value for bind:this
@@ -33,12 +29,16 @@
 	import GitIdentity from "../session/GitIdentity.svelte";
 	import PermissionModeSelector from "./PermissionModeSelector.svelte";
 	import SkillHighlightBackdrop from "./SkillHighlightBackdrop.svelte";
+	import { projectReferences, serializeReferences } from "../../../composer-references.js";
+	import { referenceEditing } from "./reference-editing.js";
+	import { provideComposerDraft } from "./composer-reference.svelte.js";
+	import { messageSurfacing } from "../../stores/message-surfacing.svelte.js";
 	// biome-ignore lint/style/useImportType: SubagentBackBar is used as a value for bind:this
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
 	import PendingInputTray from "./PendingInputTray.svelte";
 	import { openSideThreads } from "../session/side-threads.svelte.js";
-	import { currentChat, draftSend, isProcessing, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
+	import { currentChat, draftSend, isProcessing, registerInputDraft, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
 	import { send, stop, turn as readTurn } from "../../stores/turn.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { approvals } from "../../stores/composer-settings.svelte.js";
@@ -61,7 +61,8 @@
 		fileTreeState,
 		filterFiles,
 	} from "../../stores/file-tree.svelte.js";
-	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
+	import { fetchFileContent, fetchDirectoryListing, prepareFileAttachment } from "./input-utils.js";
+	import { parseAttachmentDataUrl } from "../../../attachment-data-url.js";
 	import { findSession, isSessionSnoozed, sessionState } from "../../stores/session.svelte.js";
 	import { selection } from "../../stores/selection.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
@@ -71,15 +72,12 @@
 	import { fade } from "svelte/transition";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { getDriverTraits, instanceState } from "../../stores/instance.svelte.js";
-	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast, uiState } from "../../stores/ui.svelte.js";
 	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
 	import { composerPickerState } from "../../stores/composer-picker.svelte.js";
-	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
-	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
-	import { isPaused, segmentTurns, workingTime } from "../../utils/turns.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
@@ -88,21 +86,19 @@
 	import { switchSessionAccount } from "../../utils/account-switch.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
-	import type { PendingImage, SessionPermissionMode } from "../../types.js";
+	import type { PendingAttachment, SessionPermissionMode } from "../../types.js";
 	import type { InputDelivery, SteerBlocker } from "../../../contracts/stored-event.js";
 	import type { WorktreeInfo } from "../../../shared-types.js";
 
 	const inputAreaId = $props.id();
 	const fileListboxId = `${inputAreaId}-file-listbox`;
 	const commandListboxId = `${inputAreaId}-command-listbox`;
-	const composerMoreTitleId = `${inputAreaId}-more-title`;
+	let composerWrapperEl: HTMLDivElement | undefined = $state();
 	let composerMoreOpen = $state(false);
-	let composerMoreEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
-	const phoneIcons = $derived(composerPreferences.controls === "icons" && sessionViewState.composerTier === "phone");
 	$effect(() => {
 		const request = composerPickerState.request;
 		if (request && composerMoreOpen) {
-			request.opener = composerMoreEl ?? null;
+			request.opener = composerWrapperEl?.querySelector<HTMLElement>('[data-testid="model-picker-trigger"], [data-testid="composer-words-sheet-trigger"]') ?? request.opener;
 			composerMoreOpen = false;
 		}
 	});
@@ -119,7 +115,7 @@
 			return route.page !== "chat" ? null : route.sessionId ? { session: route.sessionId } : route.draftId ? { draft: route.draftId } : null;
 		},
 		projectSlug: getDraftProject,
-		hasAttachments: () => pendingImages.length > 0,
+		hasAttachments: () => pendingAttachments.length > 0 || readingAttachments > 0,
 	});
 	let draftWorktree = $state<WorktreeInfo | null>(null);
 	let draftNewWorktree = $state(false);
@@ -151,10 +147,17 @@
 			.catch((error) => { if (current) toastFailure("Couldn't load default session mode")(error); });
 		return () => { current = false; };
 	});
-	const isGoalCommand = $derived(discoveryState.currentTraits?.supportsGoalState && composerDraft.text.startsWith("/goal"));
+	const supportsGoal = $derived(discoveryState.currentTraits?.supportsGoalState === true);
+	const isGoalCommand = $derived(supportsGoal && /^[/$]goal(?:\s|$)/.test(composerDraft.text));
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
+	const referenceEditor = referenceEditing({ read: () => composerDraft.text, write: (text) => { composerDraft.text = text; }, context: () => draftContext, element: () => textareaEl, changed: handleInput });
+	const referenceView = $derived(projectReferences(composerDraft.text));
+	$effect(() => provideComposerDraft({ sessionId: () => sessionState.currentId, draft: () => composerDraft.text, insert: (reference) => { if (!readOnlySubagent) referenceEditor.insert(reference); }, remove: referenceEditor.remove }));
+	let fieldScroller: HTMLDivElement | undefined = $state();
 	let composerFocused = $state(false);
-	let pendingImages = $state<PendingImage[]>([]);
+	let pendingAttachments = $state<PendingAttachment[]>([]);
+	let readingAttachments = $state(0);
+	let attachmentError = $state("");
 	let commandMenuRef: CommandMenu | undefined = $state();
 	let fileMenuRef: FileMenu | undefined = $state();
 	let commandMenuActiveIndex = $state(0);
@@ -180,54 +183,8 @@
 		const timer = setTimeout(() => { goalNow = Date.now(); }, endedAt + 10_000 - now + 1);
 		return () => clearTimeout(timer);
 	});
-	// A queued prompt waits in the tray, so the transcript's last turn is the started one.
-	const turn = $derived(segmentTurns(currentChat().messages, isProcessing()).at(-1));
-	const paused = $derived(turn !== undefined && isPaused(turn));
 	const turnControl = $derived(readTurn());
 	const working = $derived(turnControl.working);
-	const elapsed = $derived.by(() => {
-		if (!turn) return undefined;
-		if (paused) return workingTime(turn, Date.now());
-		if (turn.live) return workingTime(turn, clock.now);
-		if (turn.user?.turnTiming?.endedAt !== undefined) return workingTime(turn, Date.now());
-		return undefined;
-	});
-	const missingPrompt = $derived(isProcessing() && currentChat().loadLifecycle === "ready" && !turn?.user);
-	$effect(() => {
-		if (!missingPrompt) return;
-		const sessionId = sessionState.currentId;
-		if (!sessionId) return;
-		const chat = currentChat();
-		const key = JSON.stringify([sessionId, turn?.id ?? null]);
-		if (reportedMissingPrompts.has(key)) return;
-		reportedMissingPrompts.add(key);
-		const lastRow = chat.transcript?.rows.at(-1);
-		const last = chat.messages.at(-1);
-		console.error("[turn-clock] Working session has no prompt to time from", {
-			sessionId,
-			messageCount: chat.messages.length,
-			lastMessageRole: lastRow?.role ?? last?.type ?? null,
-			lastMessageId: lastRow?.id ?? (last && "messageId" in last ? last.messageId ?? last.uuid : last?.uuid) ?? null,
-		});
-	});
-	const activity = $derived.by(() => {
-		const chat = currentChat();
-		for (let i = chat.messages.length - 1; i >= 0; i--) {
-			const part = chat.messages[i];
-			if (!part) continue;
-			if (part.type === "user" || part.type === "result" || (part.type === "assistant" && !part.finalized)) return "";
-			if (part.type === "thinking" && !part.done) return "Thinking";
-			// Projected rows report every ordinary tool as completed, so the
-			// missing result is what marks the tool still in flight.
-			if (part.type === "tool" && part.result === undefined && part.status !== "error") {
-				const progress = part.metadata?.["progress"];
-				if (typeof part.metadata?.["cursorToolType"] === "string" && typeof progress === "string" && progress) return progress;
-				const summary = lookupSummarizer(part.name).summarize(ensureCanonical(part.name, part.input), {});
-				return summary.subtitle ? `${part.name} · ${summary.subtitle}` : part.name;
-			}
-		}
-		return "";
-	});
 	$effect(() => {
 		requestSessionPreWarm(readOnlySubagent ? null : sessionState.currentId);
 		return () => requestSessionPreWarm(null);
@@ -316,10 +273,12 @@
 	});
 	const placeholder = $derived(
 		sendsAt !== undefined
-			? sessionViewState.compact ? `Sends at ${sendAtTime}` : `Message${composerPresentation ? ` ${composerPresentation.label}` : ""}… sends at ${sendAtTime}`
+			? `Message${composerPresentation ? ` ${composerPresentation.label}` : ""}… sends at ${sendAtTime}`
 			: currentSession?.settledAt != null ? "Message to un-settle…" :
 			currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
-			composerPresentation ? `Ask ${composerPresentation.label}…` : "Message…",
+			sessionViewState.compact ? "Reply…" :
+			messageSurfacing.status.active ? "Reply… (↩ Reply on a message drops a reference here)" :
+			composerPresentation ? `Reply to ${composerPresentation.label}…` : "Reply…",
 	);
 
 	// + opens a draft ready to type into.
@@ -328,6 +287,8 @@
 		if (route.page === "chat" && route.draft) untrack(() => textareaEl?.focus());
 	});
 
+	$effect(() => registerInputDraft(addToDraft));
+
 	const commandMatch = $derived(extractCommandQuery(composerDraft.text, cursorPos));
 	const commandMenuVisible = $derived(commandMatch !== null);
 	const commandQuery = $derived(commandMatch?.query ?? "");
@@ -335,6 +296,7 @@
 		conduitCommands.flatMap((command) => [command.name, ...command.aliases]),
 	);
 	const availableCommands = $derived([
+		...(supportsGoal ? [{ name: "goal", description: "Keep working until something is true", builtin: true }] : []),
 		...(!currentSession?.sideThread
 			? conduitCommands.flatMap((command) =>
 				[command.name, ...command.aliases].map((name) => ({
@@ -345,7 +307,7 @@
 			)
 			: []),
 		...discoveryState.commands.filter((command) =>
-			!command.builtin || !conduitCommandNames.has(command.name),
+			(!command.builtin || !conduitCommandNames.has(command.name)) && !(supportsGoal && command.name === "goal"),
 		),
 	]);
 	/** `$` lists Conduit commands and provider built-ins; `/` lists skills. */
@@ -358,16 +320,31 @@
 	);
 	const filteredCommands = $derived(filterCommands(menuCommands, commandQuery));
 	const commandListboxVisible = $derived(filteredCommands.length > 0);
+	// The preview prepares the text exactly as sending does, attached file
+	// contents included, so it only runs while open. The last result stays up
+	// while the next one loads.
+	let previewOpen = $state(false);
+	let preview = $state<string>();
+	$effect(() => {
+		if (!previewOpen || !referenceView.references.length) return;
+		let current = true;
+		void withReferences(toProviderCommands(composerDraft.text.trim(), providerBuiltinNameSet), composerProjectSlug).then((text) => {
+			if (current) preview = serializeReferences(text);
+		});
+		return () => {
+			current = false;
+		};
+	});
 
 	/** Known `/skill` and `$builtin` names, for inline recognition in the composer. */
 	const commandNameSet = $derived(
-		new Set(discoveryState.commands.filter((c) => !c.builtin).map((c) => c.name)),
+		new Set([...discoveryState.commands.filter((c) => !c.builtin).map((c) => c.name), ...(supportsGoal ? ["goal"] : [])]),
 	);
 	const builtinNameSet = $derived(
 		new Set(availableCommands.filter((c) => c.builtin).map((c) => c.name)),
 	);
 	const providerBuiltinNameSet = $derived(
-		new Set(discoveryState.commands.filter((c) => c.builtin && !conduitCommandNames.has(c.name)).map((c) => c.name)),
+		new Set([...discoveryState.commands.filter((c) => c.builtin && !conduitCommandNames.has(c.name)).map((c) => c.name), ...(supportsGoal ? ["goal"] : [])]),
 	);
 
 	const atQuery = $derived(extractAtQuery(composerDraft.text, cursorPos));
@@ -422,9 +399,14 @@
 	// whole draft out a second time, which costs ~300ms per megabyte. Fall back to
 	// the textarea's own (unhighlighted) text, exactly as during IME composition.
 	const HIGHLIGHT_MAX_CHARS = 20_000;
-	const plainText = $derived(composerDraft.text.length > HIGHLIGHT_MAX_CHARS);
+	const plainText = $derived(!referenceView.references.length && referenceView.text.length > HIGHLIGHT_MAX_CHARS);
+	// Set when the draft crosses into plain text; revealCaret() consumes it.
+	let enteredPlainText = false;
+	$effect(() => {
+		if (plainText) enteredPlainText = true;
+	});
 
-	const canSend = $derived(!readOnlySubagent && turnControl.ready && (composerDraft.text.trim().length > 0 || pendingImages.length > 0));
+	const canSend = $derived(readingAttachments === 0 && !readOnlySubagent && turnControl.ready && (composerDraft.text.trim().length > 0 || pendingAttachments.length > 0));
 	const sendButtonLabel = $derived(
 		sendMode === "at-reset"
 			? `Send at ${sendAtTime}`
@@ -467,6 +449,32 @@
 		slash_command: "Commands can't steer; they queue.",
 	};
 	const contextWarning = $derived(isContextWarning(currentChat().contextPercent, composerPreferences.contextWarning));
+	let contextDismissed = $state(false);
+	let clearedGoalDismissed = $state(false);
+	const contextDismissalKey = $derived(`conduit:context-warning-dismissed:${sessionState.currentId ?? "draft"}`);
+	$effect(() => {
+		const key = contextDismissalKey;
+		try { contextDismissed = localStorage.getItem(key) === "true"; } catch { contextDismissed = false; }
+	});
+	$effect(() => {
+		if (contextWarning || currentChat().loadLifecycle !== "ready") return;
+		contextDismissed = false;
+		try { localStorage.removeItem(contextDismissalKey); } catch { /* The current tab still rearms. */ }
+	});
+	$effect(() => {
+		const key = clearKey;
+		try { clearedGoalDismissed = key !== null && localStorage.getItem(`conduit:goal-cleared-dismissed:${key}`) === "true"; }
+		catch { clearedGoalDismissed = false; }
+	});
+	function dismissClearedGoal() {
+		clearedGoalDismissed = true;
+		try { if (clearKey) localStorage.setItem(`conduit:goal-cleared-dismissed:${clearKey}`, "true"); }
+		catch { /* Keep the in-memory dismissal. */ }
+	}
+	function dismissContextWarning() {
+		contextDismissed = true;
+		try { localStorage.setItem(contextDismissalKey, "true"); } catch { /* Keep the in-memory dismissal. */ }
+	}
 	const compacting = $derived.by(() => {
 		const messages = currentChat().messages;
 		for (let i = messages.length - 1; i >= 0; i--) {
@@ -499,24 +507,70 @@
 		);
 	}
 
-	function handleInput(event?: Event) {
+	function handleInput() {
 		if (textareaEl) {
-			cursorPos = textareaEl.selectionStart ?? 0;
+			cursorPos = referenceEditor.selection().start;
 		}
-		composerDraft.edited(event?.currentTarget instanceof HTMLTextAreaElement ? event.currentTarget.value : undefined);
+		composerDraft.edited();
+		void tick().then(revealCaret);
 		steerRefusal = null;
 		dismissedRefusal = turnControl.refusal;
 	}
 
+	/**
+	 * Bring the caret's line into the composer's scroll window. The browser does
+	 * this itself as part of an edit, but for some edits (IME commits, dictation,
+	 * `insertText`) it does so before the mirror has grown the row to fit the new
+	 * text, while the scroller is still too short to reach the caret, and nothing
+	 * scrolls again once the row grows. So once the mirror has caught up, measure
+	 * the caret with a probe laid out exactly like both layers and scroll to it.
+	 * Past HIGHLIGHT_MAX_CHARS the textarea is its own scroller and the browser
+	 * keeps the caret in it, so only the edit that crosses the limit needs help:
+	 * it swaps scrollers, and the new one comes up at the top. A probe there lays
+	 * the whole draft out once, so a caret at the end just takes the bottom.
+	 */
+	function revealCaret() {
+		if (!textareaEl || (plainText && !enteredPlainText)) return;
+		enteredPlainText = false;
+		const { value, selectionEnd, clientWidth } = textareaEl;
+		if (plainText && selectionEnd === value.length) {
+			textareaEl.scrollTop = textareaEl.scrollHeight;
+			return;
+		}
+		const scroller = plainText ? textareaEl : fieldScroller;
+		if (!scroller || scroller.scrollHeight <= scroller.clientHeight) return;
+		const probe = document.createElement("div");
+		probe.className = "composer-text-metrics";
+		probe.style.cssText = `position: absolute; inset: 0 auto auto 0; width: ${clientWidth}px; box-sizing: border-box; visibility: hidden`;
+		// The whole draft, so text after the caret wraps the caret's word as it does
+		// in the field; an empty marker adds no break opportunity of its own.
+		const caret = document.createElement("span");
+		probe.append(value.slice(0, selectionEnd), caret, value.slice(selectionEnd));
+		textareaEl.after(probe);
+		const { lineHeight, paddingTop } = getComputedStyle(probe);
+		// An empty marker's box is the line's top edge, or its glyph box inside text.
+		const top = caret.getBoundingClientRect().top - (plainText ? textareaEl.scrollTop : 0);
+		probe.remove();
+		// The field's own padding as margin, so the caret's line never sits on the clip edge.
+		const margin = parseFloat(paddingTop);
+		const view = scroller.getBoundingClientRect();
+		const below = top + parseFloat(lineHeight) + margin - view.bottom;
+		const above = view.top - (top - margin);
+		if (below > 0) scroller.scrollTop += below;
+		else if (above > 0) scroller.scrollTop -= above;
+	}
+
 	function handleKeyup() {
+		referenceEditor.select();
 		if (textareaEl) {
-			cursorPos = textareaEl.selectionStart ?? 0;
+			cursorPos = referenceEditor.selection().start;
 		}
 	}
 
 	function handleClick() {
+		referenceEditor.select();
 		if (textareaEl) {
-			cursorPos = textareaEl.selectionStart ?? 0;
+			cursorPos = referenceEditor.selection().start;
 		}
 	}
 
@@ -531,6 +585,14 @@
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
+		if (referenceEditor.keydown(e)) return;
+		if (e.key === "Escape" && isGoalCommand) {
+			e.preventDefault();
+			composerDraft.text = composerDraft.text.replace(/^[/$]goal\s*/, "");
+			handleInput();
+			cursorPos = composerDraft.text.length;
+			return;
+		}
 		// Forward keyboard events to CommandMenu when visible
 		if (commandMenuVisible && commandMenuRef) {
 			const handled = commandMenuRef.handleKeydown(e);
@@ -568,13 +630,13 @@
 		const expectedInstanceId = accountId;
 		if (!sessionId || !projectSlug || !expectedInstanceId || !canSend || switchingAccount) return false;
 		const draft = composerDraft.text;
-		const images = pendingImages;
+		const images = pendingAttachments;
 		switchingAccount = true;
 		try {
 			if (!(await switchSessionAccount({ sessionId, instanceId, expectedInstanceId }))) return false;
 			await tick();
 			// Navigation or edits during the handoff leave the draft for its owner.
-			if (sessionState.currentId !== sessionId || composerProjectSlug !== projectSlug || composerDraft.text !== draft || pendingImages !== images) return false;
+			if (sessionState.currentId !== sessionId || composerProjectSlug !== projectSlug || composerDraft.text !== draft || pendingAttachments !== images) return false;
 			return await sendMessage(undefined, delivery);
 		} finally {
 			switchingAccount = false;
@@ -608,7 +670,7 @@
 			return false;
 		}
 		const draftText = composerDraft.text;
-		const draftImages = pendingImages;
+		const draftImages = pendingAttachments;
 		const draft = JSON.stringify([parentSessionId, draftText, draftImages.map((image) => image.dataUrl)]);
 		if (sideThreadAttempt?.draft !== draft) sideThreadAttempt = { draft, inputId: crypto.randomUUID() };
 		const { inputId } = sideThreadAttempt;
@@ -620,15 +682,15 @@
 				sideThread: { sessionId: parentSessionId, title: question },
 				delivery: "queue",
 				inputId,
-				text: await withReferences(toProviderCommands(question, providerBuiltinNameSet), projectSlug),
+				text: serializeReferences(await withReferences(toProviderCommands(question, providerBuiltinNameSet), projectSlug)),
 				...(images.length > 0 ? { images } : {}),
 			});
 			if (outcome.kind === "started") {
 				sideThreadAttempt = undefined;
-				const cleared = composerDraft.sideThreadSent(parentSessionId, draftText, pendingImages === draftImages);
+				const cleared = composerDraft.sideThreadSent(parentSessionId, draftText, pendingAttachments === draftImages);
 				if (cleared.cleared) {
 					if (cleared.active) cursorPos = 0;
-					pendingImages = [];
+					pendingAttachments = [];
 				}
 			}
 			return outcome.kind === "started" || outcome.kind === "waiting";
@@ -659,9 +721,13 @@
 	}
 
 	async function sendMessage(textOverride?: string, delivery: InputDelivery = "queue"): Promise<boolean> {
-		if (readOnlySubagent || !turnControl.ready) return false;
+		if (readingAttachments > 0 || readOnlySubagent || !turnControl.ready) return false;
+		if (textOverride === undefined && pendingAttachments.some((attachment) => !attachment.dataUrl.startsWith("data:image/")) && !getProviderDriver(composerDriver)?.supportsFileAttachments) {
+			attachmentError = "File attachments are available with Claude and OpenCode. Choose one of those harnesses before sending these files.";
+			return false;
+		}
 		let text = textOverride ?? composerDraft.text.trim();
-		if (!text) return false;
+		if (!text && (textOverride !== undefined || pendingAttachments.length === 0)) return false;
 		if (textOverride === undefined) {
 			const match = text.match(/^\$(\S+)(?:\s+([\s\S]*))?$/);
 			const command = conduitCommands.find((command) =>
@@ -671,11 +737,11 @@
 			text = toProviderCommands(text, providerBuiltinNameSet);
 		}
 
-		const messageText = textOverride === undefined ? await withReferences(text, composerProjectSlug) : text;
+		const messageText = textOverride === undefined ? serializeReferences(await withReferences(text, composerProjectSlug)) : text;
 
-		// Collect image data URLs from pending images
-		const imageUrls = textOverride === undefined && pendingImages.length > 0
-			? pendingImages.map((img) => img.dataUrl)
+		// Send all attachments through the existing data URL field.
+		const imageUrls = textOverride === undefined && pendingAttachments.length > 0
+			? pendingAttachments.map((img) => img.dataUrl)
 			: undefined;
 
 		const sentFromSessionId = sessionState.currentId;
@@ -714,38 +780,48 @@
 				}
 				draft = { ...payload, draftText: composerDraft.text, ...(draftNewWorktree ? { newWorktree: true } : {}) };
 				requestDraftPreWarm();
-				draftSend.message = { type: "user", uuid: crypto.randomUUID(), text: messageText, createdAt: Date.now() };
+				draftSend.message = {
+					type: "user", uuid: crypto.randomUUID(), text: messageText, createdAt: Date.now(),
+					...(imageUrls ? {
+						attachments: imageUrls.map((url) => {
+							const { mime, name, size } = parseAttachmentDataUrl(url);
+							return { id: crypto.randomUUID(), name: name ?? "Attachment", mime, url, size };
+						}),
+					} : {}),
+				};
 				draftSend.sessionId = null;
 			}
-			const unsentImages = pendingImages;
+			const unsentImages = pendingAttachments;
 			if (!isProcessing()) requestScrollOnNextContent();
 			steerRefusal = null;
 			dismissedRefusal = null;
 			const clearOnSend = textOverride === undefined && delivery !== "steer";
 			const unsentDraft = composerDraft.sendStarted(clearOnSend);
 			if (clearOnSend) {
-				pendingImages = [];
+				pendingAttachments = [];
 				cursorPos = 0;
 			}
+			const destination = draft ? {
+				draft,
+				onCreated: (sessionId: string) => composerDraft.created(unsentDraft, sessionId),
+			} : sentFromSessionId ? { sessionId: sentFromSessionId } : undefined;
+			if (!destination) return false;
 			const outcome = await send({
 				text: messageText,
 				delivery,
 				...(imageUrls ? { images: imageUrls } : {}),
-				...(draft ? {
-					draft,
-					onCreated: (sessionId: string) => composerDraft.created(unsentDraft, sessionId),
-				} : { sessionId: sentFromSessionId! }),
+				...destination,
 			});
 			const sentToSessionId = sentFromSessionId ?? draftSend.sessionId;
 			if (outcome.kind === "failed" || outcome.kind === "refused") {
 				if (composerDraft.sendFailed(unsentDraft, sentToSessionId, textOverride === undefined, outcome.kind === "failed" && outcome.alreadySent === true)) {
 					cursorPos = composerDraft.text.length;
-					pendingImages = unsentImages;
+					pendingAttachments = unsentImages;
 				}
 				return false;
 			}
 			if (composerDraft.sendSucceeded(sentToSessionId, delivery === "steer", textOverride === undefined)) {
-				pendingImages = [];
+				pendingAttachments = [];
 				cursorPos = 0;
 			}
 			return true;
@@ -755,7 +831,8 @@
 	}
 
 	function clearComposer() {
-		pendingImages = [];
+		pendingAttachments = [];
+		attachmentError = "";
 		composerDraft.clear();
 		cursorPos = 0;
 	}
@@ -789,9 +866,21 @@
 		fileInput.click();
 	}
 
+	function handleAttachFiles() {
+		if (!getProviderDriver(composerDriver)?.supportsFileAttachments) {
+			attachmentError = "File attachments are available with Claude and OpenCode. Choose one of those harnesses before attaching files.";
+			return;
+		}
+		const fileInput = document.createElement("input");
+		fileInput.type = "file";
+		fileInput.multiple = true;
+		fileInput.onchange = () => processSelectedFiles(fileInput.files);
+		fileInput.click();
+	}
+
 	function handleAttachSetGoal(condition = "") {
 		if (!discoveryState.currentTraits?.supportsGoalState) return;
-		composerDraft.text = `/goal ${condition}`;
+		composerDraft.text = `$goal ${condition}`;
 		cursorPos = composerDraft.text.length;
 		requestAnimationFrame(() => {
 			textareaEl?.focus();
@@ -816,16 +905,18 @@
 		return () => window.removeEventListener("composer:goal", handleGoalAction);
 	});
 
-	/** Read selected files from a file input, auto-resizing if they exceed the API limit. */
-	function processSelectedFiles(files: FileList | null) {
+	/** All picker entries share one attachment row and one send path. */
+	async function processSelectedFiles(files: FileList | null) {
 		if (!files || files.length === 0) return;
-		for (const file of files) {
-			const reader = new FileReader();
-			reader.onload = async () => {
-				if (typeof reader.result !== "string") return;
+		const context = sessionModeContext;
+		attachmentError = "";
+		readingAttachments++;
+		try {
+			for (const file of Array.from(files)) {
 				try {
-					const { dataUrl, resized } = await resizeImageIfNeeded(reader.result);
-					pendingImages = [...pendingImages, {
+					const { dataUrl, resized } = await prepareFileAttachment(file);
+					if (context !== sessionModeContext) return;
+					pendingAttachments = [...pendingAttachments, {
 						id: crypto.randomUUID(),
 						dataUrl,
 						name: file.name,
@@ -834,29 +925,34 @@
 					if (resized) {
 						showToast(`"${file.name}" was resized to fit the 5 MB encoded size limit`, { variant: "warn" });
 					}
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : "Image too large";
-				showToast(msg, { variant: "error" });
+				} catch (err) {
+					if (context !== sessionModeContext) return;
+					const message = err instanceof Error ? err.message : "Could not read the file.";
+					attachmentError += `${attachmentError ? "\n" : ""}"${file.name}" could not be attached. ${message}`;
+				}
 			}
-			};
-			reader.readAsDataURL(file);
+		} finally {
+			readingAttachments--;
 		}
 	}
 
-	/** Edit on a queued row: its text and images come back to the composer. */
-	function takeBackQueuedInput(text: string, images: readonly string[]) {
-		composerDraft.text = composerDraft.text.trim() ? `${composerDraft.text}\n\n${text}` : text;
+	/** Ask replies and queued edits use the same unsent composer draft. */
+	function addToDraft(text: string, images: readonly string[] = []) {
+		composerDraft.text = composerDraft.text.trim() ? `${composerDraft.text.trimEnd()}\n\n${text}` : text;
 		handleInput();
 		cursorPos = composerDraft.text.length;
-		pendingImages = [
-			...pendingImages,
-			...images.map((dataUrl) => ({ id: crypto.randomUUID(), dataUrl, name: "image", size: dataUrl.length })),
+		pendingAttachments = [
+			...pendingAttachments,
+			...images.map((dataUrl) => {
+				const { mime, name, size } = parseAttachmentDataUrl(dataUrl);
+				return { id: crypto.randomUUID(), dataUrl, name: name ?? (mime.startsWith("image/") ? "image" : "file"), size };
+			}),
 		];
 		textareaEl?.focus();
 	}
 
-	function removePendingImage(id: string) {
-		pendingImages = pendingImages.filter((img) => img.id !== id);
+	function removePendingAttachment(id: string) {
+		pendingAttachments = pendingAttachments.filter((img) => img.id !== id);
 	}
 
 	function handleCommandSelect(command: string) {
@@ -878,8 +974,7 @@
 			textareaEl.focus();
 			void tick().then(() => {
 				if (textareaEl) {
-					textareaEl.selectionStart = newCursorPos;
-					textareaEl.selectionEnd = newCursorPos;
+					referenceEditor.focusRaw(newCursorPos);
 					cursorPos = newCursorPos;
 				}
 			});
@@ -909,8 +1004,7 @@
 		requestAnimationFrame(() => {
 			if (textareaEl) {
 				textareaEl.focus();
-				textareaEl.selectionStart = newCursorPos;
-				textareaEl.selectionEnd = newCursorPos;
+				referenceEditor.focusRaw(newCursorPos);
 				cursorPos = newCursorPos;
 			}
 		});
@@ -966,7 +1060,7 @@
 </script>
 
 {#snippet settingsStatus()}
-	<div data-testid="composer-settings-pending" role="status" class="flex items-center gap-2 px-1.5 text-xs text-text-dimmer font-brand whitespace-nowrap">
+	<div data-testid="composer-settings-pending" role="status" class="flex items-center gap-2 px-1.5 text-xs text-text-dimmer font-sans whitespace-nowrap">
 		<span class="loading-dots" aria-hidden="true"><span></span><span></span><span></span></span>
 		{offline && discoveryState.modelsLoaded ? "Reconnecting to daemon" : "Connecting"}
 	</div>
@@ -990,52 +1084,42 @@
 	</div>
 {/if}
 
-<!-- Command Menu (above input when "/" or "$" is typed) -->
-{#if commandMenuVisible}
-	<div id="command-menu-wrap" class="relative w-full max-w-[760px] mx-auto px-4">
-		<CommandMenu
-			bind:this={commandMenuRef}
-			bind:activeIndex={commandMenuActiveIndex}
-			listboxId={commandListboxId}
-			query={commandQuery}
-			visible={commandMenuVisible}
-			commands={[...menuCommands]}
-			trigger={commandMatch?.trigger ?? "/"}
-			onSelect={handleCommandSelect}
-			onClose={handleCommandClose}
-		/>
-	</div>
-{/if}
+{#snippet phoneMore(rows: Snippet, trigger: Snippet<[{ props: Record<string, unknown>; attention?: boolean }]>, checkout?: Snippet, warning?: Snippet, attention = false)}
+	{#snippet phoneTrigger({ props }: { props: Record<string, unknown> })}{@render trigger({ props, attention })}{/snippet}
+	<Popover bind:open={composerMoreOpen} presentation="auto" title="Composer" side="top" trigger={phoneTrigger} data-testid="composer-more-sheet" class="px-[16px]">
+		{@render rows()}
+		<PermissionModeSelector variant="row" />
+		{@render checkout?.()}
+		{@render warning?.()}
+	</Popover>
+{/snippet}
 
-{#snippet phoneMore(rows: Snippet, attention = false, checkout?: Snippet, warning?: Snippet)}
-	<Button
-		bind:element={composerMoreEl}
-		variant="ghost" size="content" tone="inherit" hoverFill="none"
-		class="relative h-[26px] shrink-0 rounded-[7px] px-[6px] text-text-secondary hover:bg-text/7"
-		ariaLabel={attention ? "Composer options, workspace needs attention" : "Composer options"}
-		aria-haspopup="dialog"
-		aria-expanded={composerMoreOpen}
-		data-testid="composer-more"
-		onclick={() => { composerMoreOpen = true; }}
-	>
-		<Icon name="ellipsis" size={15} />
-		{#if attention}<span data-testid="composer-more-attention" class="absolute right-[3px] top-[3px] size-[6px] rounded-full bg-warning ring-[1.5px] ring-input-bg" aria-hidden="true"></span>{/if}
-	</Button>
-	{#if composerMoreOpen}
-		<Dialog open onclose={() => { composerMoreOpen = false; }} placement="sheet" labelledBy={composerMoreTitleId} returnFocus={() => composerMoreEl ?? null}>
-			<Surface
-				variant="plain" radius="none"
-				data-testid="composer-more-sheet"
-				class="max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-[18px] border-t border-border px-[16px] pt-[8px] pb-[max(20px,env(safe-area-inset-bottom))] font-brand"
+{#snippet composerPhoneControls(rows: Snippet, trigger: Snippet<[{ props: Record<string, unknown>; attention?: boolean }]>) }
+	{#if currentSession && composerDirectory}
+		{@const session = currentSession}
+		{#key session.id}
+			<GitIdentity
+				presentation="row"
+				directory={composerDirectory}
+				git={composerGit}
+				workspaceCause={session.workspace?.cause}
+				workspaceMissing={session.workspaceMissing}
+				workspaceMismatch={session.workspaceMismatch}
+				workspaceHint={session.workspaceHint}
+				loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
+				onmove={(path) => rpc("MoveSessionWorkspace", { sessionId: session.id, path })}
+				onrecreate={() => rpc("RecreateSessionWorktree", { sessionId: session.id })}
+				oncontinue={() => rpc("ContinueSessionInMainFolder", { sessionId: session.id })}
+				ondismiss={(path) => rpc("DismissWorkspaceHint", { sessionId: session.id, path })}
+				onrenamebranch={session.canRenameBranch ? (branchName) => rpc("RenameSessionBranch", { sessionId: session.id, branchName }) : undefined}
 			>
-				<div class="mx-auto mb-[10px] h-[4px] w-[36px] rounded-[2px] bg-border-chip" aria-hidden="true"></div>
-				<h2 id={composerMoreTitleId} class="mb-[2px] text-[11.5px] font-semibold text-text">Composer</h2>
-				{@render rows()}
-				<PermissionModeSelector variant="row" />
-				{@render checkout?.()}
-				{@render warning?.()}
-			</Surface>
-		</Dialog>
+				{#snippet children(attention, checkout, warning)}
+					{@render phoneMore(rows, trigger, checkout, warning, attention)}
+				{/snippet}
+			</GitIdentity>
+		{/key}
+	{:else}
+		{@render phoneMore(rows, trigger)}
 	{/if}
 {/snippet}
 
@@ -1047,9 +1131,27 @@
 <div
 	id="input-area"
 	{@attach publishComposerClearance}
-	class="shrink-0 px-4 py-2 transition-[padding-bottom] duration-0 delay-250 has-[textarea:focus]:delay-0 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] has-[textarea:focus]:pb-[12px] max-md:px-3 max-md:py-1.5 max-md:pb-[calc(env(safe-area-inset-bottom,0px)+8px)] max-md:has-[textarea:focus]:pb-[8px]"
+	data-compact={sessionViewState.compact}
+	class="shrink-0 px-[32px] pt-[8px] transition-[padding-bottom] duration-0 delay-250 has-[textarea:focus]:delay-0 pb-[calc(env(safe-area-inset-bottom,0px)+22px)] has-[textarea:focus]:pb-[22px] max-md:px-[12px] max-md:pt-[6px] max-md:pb-[calc(env(safe-area-inset-bottom,0px)+8px)] max-md:has-[textarea:focus]:pb-[8px]"
 >
-	<div id="input-wrapper" bind:clientWidth={sessionViewState.composerWidth} class="max-w-[760px] mx-auto relative">
+	<div id="input-wrapper" bind:this={composerWrapperEl} bind:clientWidth={sessionViewState.composerWidth} class="max-w-[760px] mx-auto relative">
+		<!-- The listbox shares the composer's measured edges, including phone gutters. -->
+		{#if commandMenuVisible}
+			<div id="command-menu-wrap" class="relative w-full">
+				<CommandMenu
+					bind:this={commandMenuRef}
+					bind:activeIndex={commandMenuActiveIndex}
+					listboxId={commandListboxId}
+					query={commandQuery}
+					visible={commandMenuVisible}
+					commands={[...menuCommands]}
+					contextPercent={currentChat().contextPercent}
+					trigger={commandMatch?.trigger ?? "/"}
+					onSelect={handleCommandSelect}
+					onClose={handleCommandClose}
+				/>
+			</div>
+		{/if}
 		<!-- Subagent context bar (above input area) -->
 		<SubagentBackBar bind:this={subagentBackBarRef} />
 		{#if readOnlySubagent}
@@ -1060,42 +1162,50 @@
 			<div class="pb-1.5"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} focusComposer={() => textareaEl?.focus()} /></div>
 		{/if}
 
-		{#if isGoalCommand}
-			<div
-				data-testid="composer-goal-hint"
-				class="composer-goal-hint flex items-center gap-[7px] mb-2 rounded-2xl border px-[10px] py-[7px] text-[11.5px] leading-[1.35] text-text-secondary"
-			>
-				<Icon name="target" size={14} class="shrink-0 text-status-violet" />
-				<span class="flex-1 min-w-0"><b class="font-semibold text-status-violet">/goal</b> sets a goal. Claude keeps working, and checks itself after each turn, until it's met.</span>
+		{#if goal.phase === "checking"}
+			<div data-testid="composer-checking-goal" class="flex items-center gap-[7px] px-[16px] pb-[9px] text-[12.5px] text-status-goal">
+				<Icon name="loader-circle" size={13} class="animate-spin" /><b class="font-semibold">Checking goal</b><span class="min-w-0 truncate text-text-muted">· {goalFacts?.goal?.condition}</span>
 			</div>
+		{/if}
+		{#if isGoalCommand}
+			<ComposerStrip tone="goal" data-testid="composer-goal-hint" class="flex items-center gap-[8px]">
+				<Icon name="target" size={16} class="shrink-0 text-status-goal" />
+				<div class="min-w-0 flex-1">Claude keeps working until this is true, and checks after each turn.
+					<small class="block text-[12px] text-text-muted">{#if goalFacts?.goal?.judgeModel}{getModelDisplayName(goalFacts.goal.judgeModel)} judges · {/if}Esc to cancel</small>
+				</div>
+			</ComposerStrip>
 		{/if}
 
 		{#if goal.phase === "met" && goalFacts && !isGoalMetDismissed(goalFacts)}
-			<div data-testid="composer-goal-met" class="composer-goal-met flex items-center gap-[7px] mb-2 rounded-2xl border px-[10px] py-[7px] text-[11.5px] leading-[1.35] text-text-secondary">
-				<Icon name="check" size={14} class="shrink-0 text-status-green" />
-				<span class="flex-1 min-w-0"><b class="font-semibold text-status-green">Goal met</b>{goalFacts.endedGoal?.lastReason ? ` · ${goalFacts.endedGoal.lastReason}` : ""}{goal.subtitle.slice("Goal met".length)}</span>
-				<TextButton tone="inherit" data-testid="composer-goal-met-details" class="shrink-0 font-semibold" onclick={() => { goalDetails.open = true; }}>Details</TextButton>
-				<Button variant="ghost" size="content" tone="muted" hoverFill="none" iconOnly icon="x" iconSize={12} ariaLabel="Dismiss" class="size-5 shrink-0" onclick={() => { if (goalFacts) dismissGoalMet(goalFacts); }} />
-			</div>
-		{:else if showClearedGoal}
-			<div data-testid="composer-goal-cleared" class="composer-goal-cleared flex items-center gap-[7px] mb-2 rounded-2xl border px-[10px] py-[7px] text-[11.5px] leading-[1.35] text-text-muted">
-				<Icon name="target" size={14} class="shrink-0" />
-				<span class="flex-1 min-w-0">Goal cleared</span>
-				<TextButton tone="inherit" class="shrink-0 font-semibold" disabled={!goalFacts?.endedGoal} onclick={undoGoalClear}>Undo</TextButton>
-			</div>
+			<ComposerStrip tone="success" data-testid="composer-goal-met" class="flex items-center gap-[8px]">
+				<Icon name="circle-check" size={16} class="shrink-0 text-status-green" />
+				<div class="min-w-0 flex-1"><b class="font-semibold text-text">Goal met</b> · {goalFacts.endedGoal?.condition ?? goalFacts.endedGoal?.lastReason ?? ""}
+					<small class="block text-[12px] text-text-muted">Checked {goalFacts.endedAt === undefined ? "just now" : new Date(goalFacts.endedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}{goalFacts.endedGoal?.turnCount === undefined ? "" : ` · ${goalFacts.endedGoal.turnCount} turns`}{goal.subtitle.slice("Goal met".length)}</small>
+				</div>
+				<Button variant="secondary" size="composer-chip" data-testid="composer-goal-met-details" onclick={() => { goalDetails.open = true; }}>Details</Button>
+				<Button variant="ghost" size="composer-icon" iconOnly icon="x" iconSize={14} ariaLabel="Dismiss" onclick={() => { if (goalFacts) dismissGoalMet(goalFacts); }} />
+			</ComposerStrip>
+		{:else if showClearedGoal && !clearedGoalDismissed}
+			<ComposerStrip data-testid="composer-goal-cleared" class="flex items-center gap-[8px]">
+				<Icon name="target" size={16} class="shrink-0" />
+				<span class="min-w-0 flex-1">Goal cleared</span>
+				<Button variant="secondary" size="composer-chip" disabled={!goalFacts?.endedGoal} onclick={undoGoalClear}>Undo</Button>
+				<Button variant="ghost" size="composer-icon" iconOnly icon="x" iconSize={14} ariaLabel="Dismiss goal cleared" onclick={dismissClearedGoal} />
+			</ComposerStrip>
 		{/if}
 
 		<UsageWarningStrip session={currentSession} projectSlug={composerProjectSlug} />
 
-		{#if contextWarning && !compacting}
-			<div data-testid="composer-context-warning" class="composer-context-warning flex items-center gap-[7px] mb-2 rounded-2xl border px-[10px] py-[7px] text-[11.5px] leading-[1.35] text-text-secondary">
-				<Icon name="panels-top-left" size={14} class="shrink-0 text-status-amber" />
-				<span class="flex-1 min-w-0"><b class="font-semibold text-status-amber">Context {Math.round(currentChat().contextPercent)}% full.</b> Older turns compact soon.</span>
-				<TextButton tone="inherit" data-testid="composer-context-compact" class="shrink-0 font-semibold text-status-amber" onclick={() => sendMessage("/compact")}>Compact</TextButton>
-			</div>
+		{#if contextWarning && !compacting && !contextDismissed}
+			<ComposerStrip tone="ask" data-testid="composer-context-warning" class="flex items-center gap-[8px]">
+				<Icon name="gauge" size={16} class="shrink-0 text-status-ask" />
+				<span class="min-w-0 flex-1"><b class="font-semibold text-text">Context {Math.round(currentChat().contextPercent)}% full.</b> Compact soon to keep replies sharp.</span>
+				<Button variant="ask" size="composer-chip" data-testid="composer-context-compact" onclick={() => sendMessage("/compact")}>Compact</Button>
+				<Button variant="ghost" size="composer-icon" iconOnly icon="x" iconSize={14} ariaLabel="Dismiss context warning" onclick={dismissContextWarning} />
+			</ComposerStrip>
 		{/if}
 
-		{#if currentSession?.limitRecovery && !currentSession.limitRecovery.switched && (currentSession.limitRecovery.scheduledAt === undefined || currentSession.limitRecovery.cutOffMessageId !== undefined)}
+		{#if !currentChat().transcript?.pending.length && currentSession?.limitRecovery && !currentSession.limitRecovery.switched && (currentSession.limitRecovery.scheduledAt === undefined || currentSession.limitRecovery.cutOffMessageId !== undefined)}
 			<UsageLimitStrip limitRecovery={currentSession.limitRecovery} sessionId={currentSession.id} projectSlug={currentSession.projectSlug} />
 		{/if}
 
@@ -1103,38 +1213,36 @@
 			inputs={currentChat().transcript?.pending ?? []}
 			paused={currentChat().transcript?.paused ?? false}
 			sendsAt={pendingSendsAt}
+			limitRecovery={currentSession?.limitRecovery ?? undefined}
+			sessionId={currentSession?.id}
+			projectSlug={currentSession?.projectSlug}
 			{steer}
-			onEdit={takeBackQueuedInput}
+			onEdit={addToDraft}
 			onSteerRefused={(reason) => { if (sessionState.currentId) steerRefusal = { sessionId: sessionState.currentId, reason }; }}
 		/>
 
 		{#if visibleRefusal}
-			<div data-testid="composer-steer-refused" role="status" class="flex items-center gap-[7px] mb-2 rounded-2xl border border-border px-[10px] py-[7px] text-[11.5px] leading-[1.35] text-text-secondary">
+			<ComposerStrip tone="ask" data-testid="composer-steer-refused" role="status" class="flex items-center gap-[8px]">
 				<Icon name="info" size={14} class="shrink-0 text-status-amber" />
 				<span class="flex-1 min-w-0"><b class="font-semibold text-status-amber">Not steered.</b> {STEER_REFUSALS[visibleRefusal.reason]}</span>
 				<Button variant="ghost" size="content" tone="muted" hoverFill="none" iconOnly icon="x" iconSize={12} ariaLabel="Dismiss" class="size-5 shrink-0" onclick={() => { steerRefusal = null; dismissedRefusal = turnControl.refusal; }} />
-			</div>
+			</ComposerStrip>
 		{/if}
 
-		<div
-			id="input-row"
-			class:goal={goal.border === "solid"}
-			class:paused={goal.border === "dashed"}
-			class:phone-icons={phoneIcons}
-			class="flex flex-col bg-input-bg border border-border {phoneIcons ? 'min-h-[42px] rounded-[14px] py-[5px] pl-[10px] pr-[6px]' : 'rounded-[22px] p-[10px] max-md:rounded-[20px] max-md:p-[9px]'} transition-[border-color,box-shadow] duration-200 focus-within:border-text-dimmer focus-within:shadow-[0_0_0_1px_var(--color-border)]"
-		>
-			{#if working || goal.phase === "checking"}
-				<ComposerStatusHeader
-					{elapsed}
-					{missingPrompt}
-					{activity}
-					{goal}
-					following={sessionViewState.atBottom}
-					onlive={requestTranscriptFollow}
-					class="-mx-[10px] -mt-[10px] mb-1.5 max-md:-mx-[9px] max-md:-mt-[9px]"
-				/>
+		{#if attachmentError}
+			<ComposerStrip tone="risk" role="alert" data-testid="attachment-error">
+				<div class="flex items-start gap-2">
+					<Icon name="file" size={14} class="shrink-0 text-error" />
+					<span class="min-w-0 flex-1 whitespace-pre-line break-words">{attachmentError}</span>
+					<Button variant="ghost" size="content" tone="muted" iconOnly icon="x" iconSize={12} ariaLabel="Dismiss attachment error" class="size-5 shrink-0" onclick={() => { attachmentError = ""; }} />
+				</div>
+			</ComposerStrip>
+		{/if}
+		<ComposerFrame id="input-row" compact={sessionViewState.compact} words={composerPreferences.controls === "words"} goal={goal.border}>
+			{#if pendingAttachments.length > 0}
+				<PastePreview images={pendingAttachments} onRemove={removePendingAttachment} />
 			{/if}
-			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout" splitFooter={composerPreferences.controls === "icons" && sessionViewState.composerTier !== "phone"} style={phoneIcons ? "column-gap: 8px; align-items: center" : undefined}>
+			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout" splitFooter={composerPreferences.controls === "icons"} singleRow={composerPreferences.controls === "words"}>
 				{#snippet field()}
 					<!-- Textarea row.
 					     The composer grows with its text and then scrolls, and both of those
@@ -1142,17 +1250,19 @@
 					     caps and scrolls it, and the textarea is stretched over the mirror at
 					     the full content height so it never scrolls on its own. One scroll
 					     position for the whole composer means the caret cannot end up on a
-					     different line from the text it sits in.
+					     different line from the text it sits in. The one JS piece is
+					     revealCaret(), for edits the browser reveals before the row grows.
 					     `scrollbar-gutter: stable` keeps a scrollbar appearing from narrowing
 					     the textarea but not the mirror, which would wrap them differently. -->
-					<div class="max-h-[120px] overflow-y-auto [scrollbar-gutter:stable] max-md:[scrollbar-width:none]">
+					<div class="max-h-[120px] overflow-y-auto [scrollbar-gutter:stable] max-md:[scrollbar-width:none]" bind:this={fieldScroller}>
 						<!-- Past HIGHLIGHT_MAX_CHARS the mirror renders nothing, so it can no
 						     longer size the row: pin the row to the cap and let the textarea
 						     scroll itself. Safe only because the mirror is blank in that mode,
 						     so there is still just one scroll position in play. -->
-						<div class="relative {plainText ? 'h-[120px]' : ''}" style:min-height={`max(${phoneIcons ? 30 : 32}px, var(--composer-placeholder-height, 0px))`}>
+						<div class="relative {plainText ? 'h-[120px]' : ''}" style:min-height={`max(${composerPreferences.controls === "words" ? 24 : sessionViewState.compact ? 34 : 36}px, var(--composer-placeholder-height, 0px))`}>
 							<SkillHighlightBackdrop
 								text={plainText ? "" : composerDraft.text}
+								onremove={referenceEditor.remove}
 								commandNames={commandNameSet}
 								builtinNames={builtinNameSet}
 								dimmed={composing || plainText}
@@ -1190,9 +1300,10 @@
 									: 'overflow-hidden'} {composing || plainText
 									? 'text-text'
 									: 'text-transparent'}"
-								bind:value={composerDraft.text}
+								bind:value={() => referenceView.text, referenceEditor.input}
 								bind:element={textareaEl}
-								oninput={handleInput}
+								onbeforeinput={referenceEditor.beforeInput}
+								onselect={referenceEditor.select}
 								onfocus={() => {
 									composerFocused = true;
 									requestSessionPreWarm(sessionState.currentId);
@@ -1210,9 +1321,15 @@
 						</div>
 					</div>
 
-								<!-- Pending image previews -->
-					{#if pendingImages.length > 0}
-						<PastePreview images={pendingImages} onRemove={removePendingImage} />
+					{#if referenceView.references.length}
+						<div data-testid="surfacing-ref-preview">
+							<Disclosure look="preview" density="tight" expanded={previewOpen} onToggle={() => (previewOpen = !previewOpen)}>What {composerPresentation?.label ?? "the agent"} receives</Disclosure>
+							{#if previewOpen && preview !== undefined}
+								{@const lines = preview.split("\n")}
+								<!-- Reference lines lead, one each; their `Re …:` prefix is bold. -->
+								<pre class="mx-[12px] mb-[8px] whitespace-pre-wrap break-words font-mono text-[12.5px] leading-[1.6] text-text-secondary">{#each lines as line, index (index)}{#if index < referenceView.references.length}<b class="font-semibold text-text">{line.slice(0, line.indexOf(': "') + 1)}</b>{line.slice(line.indexOf(': "') + 1)}{:else}{line}{/if}{index < lines.length - 1 ? "\n" : ""}{/each}</pre>
+							{/if}
+						</div>
 					{/if}
 
 					<!-- Model drift notice: own row, so it never crowds the controls below -->
@@ -1232,7 +1349,7 @@
 						class="flex items-center gap-1 min-w-0"
 					>
 						<!-- Attach button + menu -->
-						<AttachMenu onCamera={handleAttachCamera} onPhotos={handleAttachPhotos} onSetGoal={() => handleAttachSetGoal()} />
+						<AttachMenu onCamera={handleAttachCamera} onPhotos={handleAttachPhotos} onFiles={handleAttachFiles} onSetGoal={() => handleAttachSetGoal()} />
 					</div>
 				{/snippet}
 				{#snippet controls()}
@@ -1243,97 +1360,66 @@
 							in:fade={{ duration: 180 }}
 							id="input-bottom-right"
 							data-testid={sessionViewState.composerTier !== "phone" ? "composer-icons-left" : undefined}
-							class="flex items-center min-w-0 {sessionViewState.composerTier === 'phone' ? 'gap-1' : 'shrink-0 gap-[2px]'}"
+							class="flex w-full items-center min-w-0 gap-[2px]"
 						>
 							<!-- Harness instance + model picker -->
-						<InstanceModelPicker>
-								{#snippet phoneControls(rows)}
-									<PermissionModeSelector />
-									{#if currentSession && composerDirectory}
-										{@const session = currentSession}
-										{#key session.id}
-											<GitIdentity
-												presentation="row"
-												directory={composerDirectory}
-												git={composerGit}
-												workspaceCause={session.workspace?.cause}
-												workspaceMissing={session.workspaceMissing}
-												workspaceMismatch={session.workspaceMismatch}
-												workspaceHint={session.workspaceHint}
-												loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
-												onmove={(path) => rpc("MoveSessionWorkspace", { sessionId: session.id, path })}
-												onrecreate={() => rpc("RecreateSessionWorktree", { sessionId: session.id })}
-												oncontinue={() => rpc("ContinueSessionInMainFolder", { sessionId: session.id })}
-												ondismiss={(path) => rpc("DismissWorkspaceHint", { sessionId: session.id, path })}
-												onrenamebranch={session.canRenameBranch ? (branchName) => rpc("RenameSessionBranch", { sessionId: session.id, branchName }) : undefined}
-											>
-												{#snippet children(attention, checkout, warning)}
-													{@render phoneMore(rows, attention, checkout, warning)}
-												{/snippet}
-											</GitIdentity>
-										{/key}
-									{:else}
-										{@render phoneMore(rows)}
-									{/if}
-								{/snippet}
-							</InstanceModelPicker>
+							<InstanceModelPicker phoneControls={composerPhoneControls} />
 
 							<!-- Approvals (permission mode) selector -->
-							{#if sessionViewState.composerTier !== "phone"}<PermissionModeSelector />{/if}
+							<PermissionModeSelector />
+							<span class="grow"></span>
+							{#if composerPreferences.controls === "icons" && sessionViewState.composerTier !== "phone" && !settingsPending && currentSession && composerDirectory}
+								{@const session = currentSession}
+								{#key session.id}
+									<GitIdentity
+										presentation="control"
+										directory={composerDirectory}
+										git={composerGit}
+										workspaceCause={session.workspace?.cause}
+										workspaceMissing={session.workspaceMissing}
+										workspaceMismatch={session.workspaceMismatch}
+										workspaceHint={session.workspaceHint}
+										loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
+										onmove={(path) => rpc("MoveSessionWorkspace", { sessionId: session.id, path })}
+										onrecreate={() => rpc("RecreateSessionWorktree", { sessionId: session.id })}
+										oncontinue={() => rpc("ContinueSessionInMainFolder", { sessionId: session.id })}
+										ondismiss={(path) => rpc("DismissWorkspaceHint", { sessionId: session.id, path })}
+										onrenamebranch={session.canRenameBranch ? (branchName) => rpc("RenameSessionBranch", { sessionId: session.id, branchName }) : undefined}
+									/>
+								{/key}
+							{/if}
 						</div>
 					{/if}
 				{/snippet}
 				{#snippet send()}
-					{#if composerPreferences.controls === "icons" && sessionViewState.composerTier !== "phone" && !settingsPending && currentSession && composerDirectory}
-						{@const session = currentSession}
-						{#key session.id}
-							<GitIdentity
-								presentation="control"
-								directory={composerDirectory}
-								git={composerGit}
-								workspaceCause={session.workspace?.cause}
-								workspaceMissing={session.workspaceMissing}
-								workspaceMismatch={session.workspaceMismatch}
-								workspaceHint={session.workspaceHint}
-								loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
-								onmove={(path) => rpc("MoveSessionWorkspace", { sessionId: session.id, path })}
-								onrecreate={() => rpc("RecreateSessionWorktree", { sessionId: session.id })}
-								oncontinue={() => rpc("ContinueSessionInMainFolder", { sessionId: session.id })}
-								ondismiss={(path) => rpc("DismissWorkspaceHint", { sessionId: session.id, path })}
-								onrenamebranch={session.canRenameBranch ? (branchName) => rpc("RenameSessionBranch", { sessionId: session.id, branchName }) : undefined}
-							/>
-						{/key}
-					{/if}
 					{#snippet sendAtLabel()}
-						<span data-testid="composer-send-at-label">{sessionViewState.compact ? sendAtTime.replace(/^(\d\S*) (?:am|pm)$/, "$1") : `Send at ${sendAtTime}`}</span>
+						{#if !sessionViewState.compact}<span data-testid="composer-send-at-label">Send at {sendAtTime}</span>{/if}
 					{/snippet}
 					<!-- Send / Stop buttons. While working, send only shows once there is
 					     something to steer with; otherwise stop stands alone. -->
-					<!-- No tone supplies text-white without a hover step; inherit leaves that colour local.
-					     transition-colors replaces the arbitrary transition; 150ms is its default. -->
 					{#if !working || canSend}
 					{#if hasSendMenu}
-					<div data-testid="composer-send-control" class="inline-flex shrink-0 items-center rounded-full border font-mono text-[10.5px] whitespace-nowrap {sendMode === 'switch' ? 'border-border text-text' : 'border-status-red/50 text-status-red'} {sessionViewState.compact ? 'h-[32px]' : 'h-[26px]'}">
+					<ComposerSendGroup>
 						<Button
 							variant="ghost"
 							size="content"
 							tone="inherit"
 							hoverFill="none"
 							disabledStyle="undimmed"
-							{...(sendMode === "switch" && sessionViewState.compact ? {} : { icon: sendMode === "switch" ? "arrow-up" : "clock" })}
+							icon={sendMode === "switch" ? "arrow-up" : "clock"}
 							iconSize={13}
 							id="send"
 							data-goal={isGoalCommand ? "true" : "false"}
 							data-send-mode={sendMode}
 							type="button"
-							class="send-btn h-full gap-[5px] rounded-l-full px-[10px] pr-[2px] font-mono text-[10.5px] touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70"
+							class="send-btn h-full gap-[6px] px-[12px] text-[13px] font-semibold touch-manipulation"
 							disabled={!canSend || switchingAccount}
 							title={sendButtonTitle}
 							ariaLabel={sendButtonLabel}
 							onclick={handleSendClick}
 						>
 							{#if sendMode === "switch" && switchTarget}
-								{#if !sessionViewState.compact}<span>Send on</span>{/if}
+								{#if !sessionViewState.compact}<span data-testid="composer-send-switch-prefix">Send on</span>{/if}
 								<AccountDot instanceId={switchTarget.id} size={7} />
 								<span data-testid="composer-send-switch-label">{switchTarget.name}</span>
 							{:else}
@@ -1354,7 +1440,7 @@
 							data-testid="composer-send-menu"
 						>
 							{#snippet trigger({ props })}
-								<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" iconOnly icon="chevron-down" iconSize={11} ariaLabel="Send options" data-testid="composer-send-menu-trigger" disabled={switchingAccount} class="h-full w-[24px] rounded-r-full pr-[4px] touch-manipulation hover:not-disabled:opacity-90" />
+								<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" iconOnly icon="chevron-down" iconSize={11} ariaLabel="Send options" data-testid="composer-send-menu-trigger" disabled={switchingAccount} class="h-full shrink-0 touch-manipulation" />
 							{/snippet}
 							<MenuItem density="compact" data-testid="composer-send-menu-reset" data-selected="true" disabled={!canSend || switchingAccount} class="rounded-[7px] bg-border-chip" onselect={() => void sendMessage()}>
 								<Icon name="clock" size={13} class="shrink-0 text-status-red" />
@@ -1370,65 +1456,50 @@
 							{/each}
 							<div data-testid="composer-send-menu-note" class="mt-[3px] border-t border-border px-[6px] pt-[5px] pb-[3px] font-mono text-[10.5px] text-text-dimmer whitespace-normal">Another account takes over the session, as Switch account does.</div>
 						</Menu>
-					</div>
+					</ComposerSendGroup>
 					{:else}
-					<Button
-						variant="ghost"
-						size="content"
-						tone="inherit"
-						hoverFill="none"
-						disabledStyle="undimmed"
-						{...(sendMode === "at-reset" ? { iconOnly: false as const, children: sendAtLabel } : { iconOnly: true as const })}
-						icon={sendMode === "at-reset" ? "clock" : isGoalCommand ? "target" : "arrow-up"}
-						iconSize={sendMode === "at-reset" || phoneIcons ? 13 : 17}
-						id="send"
-						data-goal={isGoalCommand ? "true" : "false"}
-						data-send-mode={sendMode}
-						type="button"
-						class="send-btn shrink-0 touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70 {sendMode === 'at-reset' ? 'gap-[5px] rounded-full border border-status-red/50 px-[10px] font-mono text-[10.5px] text-status-red whitespace-nowrap' : (phoneIcons ? 'w-[30px] rounded-[9px] ' : 'w-[32px] rounded-[10px] ') + (isGoalCommand ? 'bg-status-violet text-bg' : 'bg-brand-a text-white')} {sendMode === 'at-reset' && !sessionViewState.compact ? 'h-[26px]' : phoneIcons && sendMode !== 'at-reset' ? 'h-[30px]' : 'h-[32px]'} {sendMode === 'at-reset' ? '' : 'disabled:bg-send-off-bg disabled:text-send-off'}"
-						disabled={!canSend}
-						title={sendButtonTitle}
-						ariaLabel={isGoalCommand ? "Set goal" : sendButtonLabel}
-						onclick={handleSendClick}
-					/>
+					{#if sendMode === "at-reset" && sessionViewState.compact}
+						<Button variant="inverse" size="composer-action" iconOnly icon="clock" iconSize={16} id="send" data-goal={isGoalCommand ? "true" : "false"} data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel={sendButtonLabel} onclick={handleSendClick} touchTarget class="send-btn" />
+					{:else if sendMode === "at-reset"}
+						<Button variant="inverse" size="composer-action" icon="clock" iconSize={16} id="send" data-goal={isGoalCommand ? "true" : "false"} data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel={sendButtonLabel} onclick={handleSendClick} touchTarget class="send-btn">
+							{@render sendAtLabel()}
+						</Button>
+					{:else if isGoalCommand}
+						<Button variant="goal" size="composer-action" icon="target" iconSize={16} id="send" data-goal="true" data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel="Set goal" onclick={handleSendClick} touchTarget class="send-btn">Set goal</Button>
+					{:else}
+						<Button variant="inverse" size="composer-action" iconOnly icon="arrow-up" iconSize={17} id="send" data-goal="false" data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel={sendButtonLabel} onclick={handleSendClick} touchTarget class="send-btn" />
+					{/if}
 					{/if}
 					{/if}
 					{#if working}
-						<Button
-							variant="ghost"
-							size="content"
-							tone="inherit"
-							hoverFill="none"
-							id="stop"
-							type="button"
-							class="shrink-0 ml-[3px] w-[32px] h-[32px] rounded-[10px] bg-text text-bg touch-manipulation hover:opacity-90 active:opacity-70"
-							title={steerPending ? "Stop generating · A pending steer still runs" : "Stop generating"}
-							ariaLabel="Stop generating"
-							onclick={() => { if (sessionState.currentId) void stop(sessionState.currentId); }}
-						><i data-testid="stop-square" class="block w-[10px] h-[10px] rounded-[2px] bg-current"></i></Button>
+						<Button variant="inverse" size="composer-action" id="stop" title={steerPending ? "Stop generating · A pending steer still runs" : "Stop generating"} ariaLabel="Stop generating" onclick={() => { if (sessionState.currentId) void stop(sessionState.currentId); }} touchTarget class="ml-[3px]">
+							<i data-testid="stop-square" class="block size-[10px] rounded-[2px] bg-current"></i>
+						</Button>
 					{/if}
 				{/snippet}
 			</TwoRowComposerLayout>
-		</div>
+		</ComposerFrame>
 		{#if composerPreferences.controls === "words"}
 			<div
 				data-testid="composer-words-row"
-				class="flex h-[24px] items-center justify-between gap-[14px] px-[6px] pt-[3px] text-[11.5px] text-text-muted whitespace-nowrap"
+				class="flex min-h-[36px] items-center justify-between gap-[12px] px-[14px] pt-[9px] text-[12px] text-text-muted whitespace-nowrap"
 			>
 				{#if settingsPending}
 					{@render settingsStatus()}
 				{:else}
-				<div in:fade={{ duration: 180 }} data-testid="composer-words-left" class="inline-flex min-w-0 shrink-0 items-center gap-[5px]">
-					<InstanceModelPicker variant="words" />
-					{#if (composerTraits?.composerModeControl ?? "permission-mode") === "permission-mode"}
+				<div in:fade={{ duration: 180 }} data-testid="composer-words-left" class="inline-flex min-w-0 items-center gap-[5px]" class:flex-1={sessionViewState.composerTier === "phone"}>
+					<InstanceModelPicker variant="words" phoneControls={composerPhoneControls}>
+						{#snippet phoneMode()}<PermissionModeSelector variant="summary" />{/snippet}
+					</InstanceModelPicker>
+					{#if sessionViewState.composerTier !== "phone" && (composerTraits?.composerModeControl ?? "permission-mode") === "permission-mode"}
 						<span aria-hidden="true" class="text-border-chip">·</span>
 						<PermissionModeSelector variant="words" />
 					{/if}
 				</div>
-				<div in:fade={{ duration: 180 }} data-testid="composer-words-right" class="inline-flex min-w-0 shrink items-center justify-end gap-[5px]">
+				{#if !sessionViewState.compact}<div in:fade={{ duration: 180 }} data-testid="composer-words-right" class="inline-flex min-w-[56px] flex-[0_1000000_auto] items-center justify-end gap-[5px]">
 					{#if currentSession}
 						{@const session = currentSession}
-						{#if composerDirectory}
+						{#if composerDirectory && sessionViewState.composerTier !== "phone"}
 							{#key session.id}
 								<GitIdentity
 									presentation="word"
@@ -1448,23 +1519,19 @@
 							{/key}
 						{/if}
 						{#if currentChat().contextPercent > 0}
-							<span data-testid="composer-word-context-usage" data-warning={contextWarning ? "true" : undefined} class:text-status-amber={contextWarning} class="shrink-0 pl-[4px]">{Math.round(currentChat().contextPercent)}%</span>
+							{#if composerDirectory && sessionViewState.composerTier !== "phone"}<span aria-hidden="true" class="text-border-chip">·</span>{/if}
+							<span data-testid="composer-word-context-usage" data-warning={contextWarning ? "true" : undefined} class:text-status-amber={contextWarning} class="shrink-0">{Math.round(currentChat().contextPercent)}%</span>
 						{/if}
 					{/if}
-				</div>
+				</div>{/if}
 				{/if}
 			</div>
 		{/if}
+		{#if working}
+			<p data-testid="composer-next-turn-note" class="px-[16px] pt-[8px] text-[12px] text-text-muted">Model and mode changes apply from the <span class="font-medium text-text-secondary">next turn</span>.</p>
+		{/if}
 		{#if composerNotice}
 			<p data-testid="composer-provider-notice" class="px-[6px] pt-2 text-[11px] text-text-muted">{composerNotice}</p>
-		{/if}
-		{#if currentSession?.backgroundTasks?.length}
-			<!-- One pulse per live background task; the header row lists them. -->
-			<div data-testid="composer-task-dots" aria-hidden="true" class="flex justify-center gap-1.5 pt-[7px]">
-				{#each currentSession.backgroundTasks as task, index (task.id)}
-					<i class="composer-task-dot" style:animation-delay="{(index % 3) * 0.35}s"></i>
-				{/each}
-			</div>
 		{/if}
 		{#if !sessionState.currentId && routeSessionId === null && !sessionViewState.compact}
 			<div class="pt-2"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} focusComposer={() => textareaEl?.focus()} /></div>
@@ -1474,62 +1541,6 @@
 </div>
 
 <style>
-	.phone-icons :global(.composer-text-metrics) {
-		font-size: 12.5px;
-		line-height: 20px;
-		padding: 5px 0;
-	}
-	.phone-icons :global(#attach-btn) {
-		width: 15px;
-		height: 30px;
-	}
-	.phone-icons :global(#attach-btn svg) {
-		width: 15px;
-		height: 15px;
-	}
-
-	.composer-task-dot {
-		width: 5px;
-		height: 5px;
-		border-radius: 50%;
-		background: var(--color-tool);
-		animation: composer-task-pulse 1.4s ease-in-out infinite;
-	}
-	@keyframes composer-task-pulse { 50% { opacity: 0.3; } }
-	@media (prefers-reduced-motion: reduce) { .composer-task-dot { animation: none; } }
-	:global(#send[data-goal="true"]:not([data-send-mode="at-reset"]):not([data-send-mode="switch"])) {
-		background: var(--color-status-violet);
-		color: var(--color-bg);
-	}
-	:global(#send[data-send-mode="warning"]) {
-		box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 3.5px var(--color-status-amber);
-	}
-
-	.composer-goal-hint, .composer-goal-met, .composer-goal-cleared {
-		border-color: color-mix(in srgb, var(--goal-bar-color, var(--color-status-violet)) 38%, transparent);
-		background: color-mix(in srgb, var(--goal-bar-color, var(--color-status-violet)) 10%, transparent);
-	}
-
-	.composer-goal-met {
-		--goal-bar-color: var(--color-status-green);
-	}
-
-	.composer-goal-cleared {
-		--goal-bar-color: var(--color-text-muted);
-	}
-
-	.composer-context-warning {
-		border-color: color-mix(in srgb, var(--color-status-amber) 38%, transparent);
-		background: color-mix(in srgb, var(--color-status-amber) 10%, transparent);
-	}
-
-	#input-row.goal {
-		border-color: var(--color-status-violet);
-		box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-status-violet) 16%, transparent);
-	}
-
-	#input-row.paused {
-		border: 1px dashed color-mix(in srgb, var(--color-status-violet) 60%, var(--color-border));
-		box-shadow: none;
-	}
+	#input-area[data-compact="true"] { padding: 6px 12px calc(env(safe-area-inset-bottom, 0px) + 8px); }
+	#input-area[data-compact="true"]:has(:global(textarea:focus)) { padding-bottom: 8px; }
 </style>

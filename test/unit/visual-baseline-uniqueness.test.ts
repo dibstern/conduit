@@ -34,12 +34,33 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"tapping the collapsed banners row opens the full header with its banners",
 	"project-projectdialog--multi-folder-supported | project-projectdialog--multi-folder-unknown":
 		"an unknown multi-folder capability warns like a supported one, i.e. not at all; both assert the missing warning in play()",
+	"ui-useravatar--initial | ui-useravatar--missing-mac-picture":
+		"a Mac choice with no readable picture falls back to the initial, so matching Initial is the assertion",
+	"ui-useravatar--initial-light | ui-useravatar--missing-mac-picture-light":
+		"a Mac choice with no readable picture falls back to the initial, so matching Initial is the assertion",
 
 	// Verified legitimate (conduit-test-cju0.13). On desktop both open General.
 	"overlays-settingspanel--composer | overlays-settingspanel--default":
 		"Composer's play walks every composer preference and restores the defaults so module state cannot leak into later stories; its assertions live in play(), and phone still differs because Composer opens drilled in",
 	"overlays-settingspanel--composer-light | overlays-settingspanel--default-light":
 		"the light pair of Composer and Default, identical for the same reason",
+	// conduit-test-aoqb.8: the phone section list is a touch surface with no hover state.
+	"overlays-settingspanel--default | overlays-settingspanel--hover":
+		"on phone Default and Hover both end on the section list, whose rows have no hover style; desktop still differs on the rail's hover colour",
+
+	// conduit-test-ahu8.19: turn summaries do not depend on Jev or its key.
+	"chat-surfacing-switches--jev-off-summaries-on | chat-surfacing-switches--no-key":
+		"with Jev off a missing key changes nothing in the turn, so matching JevOffSummariesOn is the assertion; NoKey's play proves the summary still opens",
+	"chat-surfacing-switches--jev-off-summaries-on-light | chat-surfacing-switches--no-key-light":
+		"the light pair of JevOffSummariesOn and NoKey, identical for the same reason",
+	"overlays-surfacingsettings--general | overlays-surfacingsettings--no-key-summaries":
+		"General already has no key and summaries on by default; NoKeySummaries asserts in play() that Jev's switch is disabled while Turn summaries stays enabled",
+	"overlays-surfacingsettings--general-light | overlays-surfacingsettings--no-key-summaries-light":
+		"the light pair of General and NoKeySummaries, identical for the same reason",
+	"overlays-surfacingsettings--jev-off-summaries-on | overlays-surfacingsettings--valid-key":
+		"a valid key with Jev off is the summaries-only default; JevOffSummariesOn asserts in play() that Turn summaries is on",
+	"overlays-surfacingsettings--jev-off-summaries-on-light | overlays-surfacingsettings--valid-key-light":
+		"the light pair of JevOffSummariesOn and ValidKey, identical for the same reason",
 
 	// Verified legitimate (conduit-test-732b). Each of these was traced to the
 	// source; the two stories genuinely produce the same frame.
@@ -59,41 +80,57 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 
 	// Verified legitimate (conduit-test-6owk). ToolItem is a pure dispatcher
 	// that passes each message unchanged to its selected card, and each pair uses
-	// the same fixture in both stories. Once fa0f1041 pinned the visual suite's
-	// clock, the identical bytes became proof of the expected dispatch.
-	"chat-toolgenericcard--default | chat-toolitem--completed":
-		"Both stories use mockToolCompleted, which ToolItem dispatches to ToolGenericCard.",
-	"chat-toolgenericcard--error-state | chat-toolitem--error-state":
-		"Both stories use mockToolError, which ToolItem dispatches to ToolGenericCard.",
-	"chat-toolgenericcard--pending | chat-toolitem--pending":
-		"Both stories use mockToolPending, which ToolItem dispatches to ToolGenericCard.",
-	"chat-toolgenericcard--with-tags | chat-toolitem--read-with-offset-limit":
-		"Both stories use mockToolReadWithOffset, which ToolItem dispatches to ToolGenericCard.",
-	"chat-toolitem--question-answered | chat-toolquestioncard--default":
-		"Both stories use mockQuestionAnswered, which ToolItem dispatches to ToolQuestionCard.",
-	"chat-toolitem--question-pending | chat-toolquestioncard--waiting-without-question-data":
-		"Both stories use mockQuestionPending, which ToolItem dispatches to ToolQuestionCard.",
-	"chat-toolitem--question-skipped | chat-toolquestioncard--skipped":
-		"Both stories use mockQuestionSkipped, which ToolItem dispatches to ToolQuestionCard.",
+	// the same fixture in both stories. Since conduit-test-aoqb.2 the wrapper's
+	// margin is a whole 3px rather than a fractional my-1, so every such pair
+	// meets in one frame; the dispatch itself is what the ToolItem stories prove.
 	"chat-toolitem--subagent-completed | chat-toolsubagentcard--default":
 		"Both stories use mockToolSubagentCompleted, which ToolItem dispatches to ToolSubagentCard.",
+	"chat-toolitem--subagent-running | chat-toolsubagentcard--running":
+		"same running subagent fixture, dispatched to ToolSubagentCard",
+	"chat-toolgenericcard--default | chat-toolitem--completed":
+		"same completed tool fixture, dispatched to ToolGenericCard",
+	"chat-toolgenericcard--error-state | chat-toolitem--error-state":
+		"same errored tool fixture, dispatched to ToolGenericCard",
+	"chat-toolgenericcard--final | chat-toolitem--final":
+		"same Final-style fixture, dispatched to ToolGenericCard",
+	"chat-toolgenericcard--final-light | chat-toolitem--final-light":
+		"the light pair of Final, identical for the same reason",
+	"chat-toolgenericcard--pending | chat-toolitem--pending":
+		"same pending tool fixture, dispatched to ToolGenericCard",
+	"chat-toolgenericcard--running | chat-toolitem--running":
+		"same running tool fixture, dispatched to ToolGenericCard",
+	"chat-toolgenericcard--with-tags | chat-toolitem--read-with-offset-limit":
+		"same Read-with-offset fixture, dispatched to ToolGenericCard",
+	"chat-toolitem--question-answered | chat-toolquestioncard--default":
+		"same answered question fixture, dispatched to ToolQuestionCard",
+	"chat-toolitem--question-pending | chat-toolquestioncard--waiting-without-question-data":
+		"same pending question without data, dispatched to ToolQuestionCard",
+	"chat-toolitem--question-running | chat-toolquestioncard--active":
+		"same running question fixture, dispatched to ToolQuestionCard",
+	"chat-toolitem--question-skipped | chat-toolquestioncard--skipped":
+		"same skipped question fixture, dispatched to ToolQuestionCard",
+
+	// Verified legitimate (conduit-test-aoqb.2). For these the identical bytes
+	// are the assertion.
+	"chat-messagelist--follow-live | chat-messagelist--live-turn-visible":
+		"FollowLive scrolls away and clicks Jump to live, so it must land on exactly the live frame LiveTurnVisible opens on; the detach and the pill are asserted in play()",
+	"chat-messagelist--follow-live-light | chat-messagelist--live-turn-visible-light":
+		"the light pair of FollowLive and LiveTurnVisible, identical for the same reason",
 
 	// Verified legitimate (conduit-test-dfvd composer redesign).
 	"input-attachmenu--open | input-attachmenu--open-code":
 		"Open uses the default OpenCode provider; OpenCode asserts the disabled 'Claude only' Goal entry in play()",
-	"input-inputarea--words-desktop | input-inputarea--words-phone":
-		"only the mobile capture matches: the mobile viewport is already narrower than both stories' frame widths",
-	"input-inputarea--words-desktop-light | input-inputarea--words-phone-light":
-		"only the mobile capture matches: the mobile viewport is already narrower than both stories' frame widths",
-	"input-permissionmodeselector--open-code-normalizes-auto | input-permissionmodeselector--phone-open-code-cycle | input-permissionmodeselector--responsive":
-		"all three end on the phone-width OpenCode ASK badge; the cycle, normalisation and breakpoint are asserted in play()",
-	"layout-sessionbar--expanded-by-chevron | layout-sessionbar--goal-cleared | layout-sessionbar--phone-claude-header | layout-sessionbar--phone-no-checkout | layout-sessionbar--phone-open-code-header":
-		"a cleared goal renders no subtitle and the A1 header (bn6x.10) shows no checkout, account pill or instance badge for either harness, so all five end on the plain expanded phone bar; the header stories assert those absences in play()",
+	"input-permissionmodeselector--default | input-permissionmodeselector--open-code-normalizes-auto | input-permissionmodeselector--phone-default | input-permissionmodeselector--responsive":
+		"the Final badge is the same icon-only Ask shield at every width (aoqb.6); normalisation, the phone default and each breakpoint are asserted in play()",
+	"input-permissionmodeselector--light | input-permissionmodeselector--phone-default-light":
+		"the light pair of Default and PhoneDefault, identical for the same reason",
+	"layout-sessionbar--goal-cleared | layout-sessionbar--phone-claude-header | layout-sessionbar--phone-no-checkout | layout-sessionbar--phone-open-code-header":
+		"a cleared goal renders no subtitle and the Final phone header shows no checkout, account pill or instance badge for either harness, so these four end on the plain expanded bar; the header stories assert those absences in play()",
+	"layout-sessionbar--auto-settled-collapsed | layout-sessionbar--collapsed":
+		"the island hides state chips; AutoSettledCollapsed expands to assert the automatic state, then returns to the same island",
 
 	// Verified legitimate (conduit-test-dc8k.1). The A1 header is the same for
 	// every harness and has no checkout, so these stories now meet in one frame.
-	"layout-sessionbar--desktop-claude-header | layout-sessionbar--desktop-no-checkout | layout-sessionbar--desktop-open-code-header":
-		"the A1 header shows no checkout, account pill or instance badge for either harness; each story asserts those absences in play()",
 	"layout-sessionbar--desktop-claude-header | layout-sessionbar--desktop-open-code-header":
 		"the A1 header is the same for Claude and OpenCode; each story asserts no account pill or instance badge in play()",
 
@@ -118,6 +155,18 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"SilentValueChanges ends by emptying the field; its row changes are asserted in play()",
 	"ui-tworowcomposerlayout--idle-empty-light | ui-tworowcomposerlayout--silent-value-changes-light":
 		"SilentValueChanges ends by emptying the field; its row changes are asserted in play()",
+
+	// Verified legitimate (conduit-test-aoqb.1). The Final type scale raised the
+	// root from 12px to 13px, so md (28rem = 364px) now exceeds the 90vw panel
+	// on a 393px phone, just as lg always did. Desktop still differs.
+	"ui-modal--default | ui-modal--large":
+		"on a phone both md and lg clamp to the same 90vw panel width",
+
+	// Verified legitimate (conduit-test-aoqb.17). The pair proves the checkout
+	// pill sizes the same under a block parent and a grid parent; play() resizes
+	// the root through 320/180/360px in both, so one frame is the expected result.
+	"session-gitidentity--control-block-resize | session-gitidentity--control-grid-resize":
+		"the same resize assertions under block and grid parents end in one identical 360px frame",
 };
 
 const BASELINE_DIRECTORY = resolve(

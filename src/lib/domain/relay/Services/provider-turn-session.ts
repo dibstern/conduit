@@ -243,10 +243,14 @@ const interruptLegacyTurn = (input: ProviderTurnServiceInterruptInput) =>
 				`client=${input.clientId} session=${input.sessionId} Abort failed:`,
 				formatErrorDetail(abortResult.failure),
 			);
+			return yield* Effect.fail(abortResult.failure);
 		}
 	});
 
-export const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
+export const interruptTurn = (
+	input: ProviderTurnServiceInterruptInput,
+	turnIds?: readonly string[],
+) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
 		log.info(`client=${input.clientId} session=${input.sessionId} Aborting`);
@@ -275,6 +279,7 @@ export const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 				type: "interrupt_turn",
 				commandId: input.commandId,
 				sessionId: input.sessionId,
+				...(turnIds ? { turnIds } : {}),
 			}),
 		);
 		if (interruptResult._tag === "Failure") {

@@ -45,6 +45,7 @@ const FORK_HISTORY_TYPES: ReadonlySet<StoredEvent["type"]> = new Set<
 >([
 	"message.created",
 	"text.delta",
+	"text.surfaced",
 	"thinking.start",
 	"thinking.delta",
 	"thinking.end",
@@ -249,12 +250,14 @@ export const readForkSource = Effect.fn("fork.readForkSource")(function* (
 					WHERE session_id = ${parentId} AND sequence <= ${streamEnd}
 						AND ${historyMessageId ?? null} IS NOT NULL
 						AND json_extract(data, '$.messageId') = ${historyMessageId ?? null}
+						AND type != 'text.surfaced'
 				), cut AS (
 					SELECT COALESCE((
 						SELECT MIN(sequence) FROM events
 						WHERE session_id = ${parentId} AND sequence <= ${streamEnd}
 							AND sequence > (SELECT last_sequence FROM target)
 							AND type NOT LIKE 'turn.%'
+							AND type != 'text.surfaced'
 					), ${streamEnd + 1}) AS excluded_sequence
 				)
 				SELECT project_id, sequence, event_id, session_id, stream_version,
@@ -262,7 +265,7 @@ export const readForkSource = Effect.fn("fork.readForkSource")(function* (
 					(SELECT first_sequence FROM target) AS first_target_sequence
 				FROM events INDEXED BY idx_events_session_seq
 				WHERE session_id = ${parentId} AND sequence <= ${streamEnd}
-					AND sequence < (SELECT excluded_sequence FROM cut)
+					AND (sequence < (SELECT excluded_sequence FROM cut) OR type = 'text.surfaced')
 					AND type IN ${sql.in([...FORK_HISTORY_TYPES])}
 				ORDER BY sequence`;
 						const firstTargetSequence = content[0]?.first_target_sequence;
@@ -322,7 +325,16 @@ function copyForkHistory(
 	const suffix = `_${input.newSessionId}`;
 	const rekey = (id: string) => `${id}${suffix}`;
 	const events: CanonicalEvent[] = [];
-	for (const event of parentEvents) {
+	const copiedTextParts = new Map<string, string>();
+	// Verdicts may precede text or land after later turns. Apply them after
+	// copying content, only to the text parts this fork actually retained.
+	const content = parentEvents.filter(
+		(event) => event.type !== "text.surfaced",
+	);
+	const verdicts = parentEvents.filter(
+		(event) => event.type === "text.surfaced",
+	);
+	for (const event of [...content, ...verdicts]) {
 		if (!FORK_HISTORY_TYPES.has(event.type)) continue;
 		const messageId = messageIdOf(event);
 		if (
@@ -332,6 +344,13 @@ function copyForkHistory(
 				input.keptMessageIds?.has(messageId) === false)
 		)
 			continue;
+		if (
+			event.type === "text.surfaced" &&
+			copiedTextParts.get(event.data.partId) !== event.data.messageId
+		)
+			continue;
+		if (event.type === "text.delta")
+			copiedTextParts.set(event.data.partId, event.data.messageId);
 		const data: Record<string, unknown> = { ...event.data };
 		for (const field of ["messageId", "partId", "callId", "turnId"] as const) {
 			if (typeof data[field] === "string") data[field] = rekey(data[field]);

@@ -12,6 +12,7 @@ import {
 	SessionModeSchema,
 } from "../contracts/project-file.js";
 import type { KnownProviderDriverKind } from "../contracts/provider-instance.js";
+import { TerminalKeysSetting } from "../contracts/terminal-keys.js";
 import type { ModelOverride } from "../domain/relay/Services/session-overrides-state.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 import {
@@ -31,6 +32,7 @@ export interface RelaySettings {
 	defaultSessionMode?: DefaultSessionMode;
 	/** The mode the last composer-created session started in, read when the default is "last". */
 	lastSessionMode?: SessionMode;
+	terminalKeys?: TerminalKeysSetting;
 	defaultVariants?: Record<string, string>;
 	/** Model keys ("<providerId>/<modelId>") hidden from the model dropdown. */
 	hiddenModels?: string[];
@@ -73,8 +75,11 @@ export function loadRelaySettings(configDir?: string): RelaySettings {
 			defaultSessionMode,
 			lastSessionMode,
 			defaultGroupingMode: _retired,
+			terminalKeys,
 			...rest
 		} = settings;
+		const decodedTerminalKeys =
+			Schema.decodeUnknownOption(TerminalKeysSetting)(terminalKeys);
 		return {
 			...rest,
 			...(defaultPermissionMode !== undefined &&
@@ -85,6 +90,9 @@ export function loadRelaySettings(configDir?: string): RelaySettings {
 				isDefaultSessionMode(defaultSessionMode) && { defaultSessionMode }),
 			...(lastSessionMode !== undefined &&
 				isSessionMode(lastSessionMode) && { lastSessionMode }),
+			...(decodedTerminalKeys._tag === "Some" && {
+				terminalKeys: decodedTerminalKeys.value,
+			}),
 		};
 	} catch {
 		return {};
@@ -124,6 +132,9 @@ export function saveRelaySettings(
 	}
 	if (settings.lastSessionMode !== undefined) {
 		merged.lastSessionMode = settings.lastSessionMode;
+	}
+	if (settings.terminalKeys !== undefined) {
+		merged.terminalKeys = settings.terminalKeys;
 	}
 
 	// Merge defaultVariants map (shallow merge of entries)

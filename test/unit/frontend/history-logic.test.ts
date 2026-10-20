@@ -21,6 +21,79 @@ function assistantMsg(id: string): HistoryMessage {
 	return makeMsg("assistant", id);
 }
 
+describe("historyToChatMessages attachments", () => {
+	test("keeps file-only documents and decoded byte sizes after history reload", () => {
+		const [message] = historyToChatMessages([
+			{
+				id: "file-only",
+				role: "user",
+				parts: [
+					{
+						id: "notes",
+						type: "file",
+						mime: "text/plain",
+						filename: "notes.txt",
+						url: "data:text/plain;name=notes.txt;base64,Y2Fmw6k=",
+					},
+					{
+						id: "pdf",
+						type: "file",
+						mime: "application/pdf",
+						filename: "guide.pdf",
+						url: "data:application/pdf;base64,JVBERi0xLjQ=",
+					},
+				],
+			},
+		]);
+		expect(message).toMatchObject({
+			type: "user",
+			text: "",
+			attachments: [
+				{ id: "notes", mime: "text/plain", name: "notes.txt", size: 5 },
+				{ id: "pdf", mime: "application/pdf", name: "guide.pdf", size: 8 },
+			],
+		});
+	});
+
+	test("preserves image URLs and external file references alongside text", () => {
+		const image = "data:image/png;base64,aW1hZ2U=";
+		const [message] = historyToChatMessages([
+			{
+				id: "mixed",
+				role: "user",
+				parts: [
+					{ id: "text", type: "text", text: "Review these files" },
+					{
+						id: "image",
+						type: "file",
+						mime: "image/png",
+						filename: "screenshot.png",
+						url: image,
+					},
+					{
+						id: "external",
+						type: "file",
+						mime: "application/pdf",
+						filename: "external.pdf",
+						url: "https://example.com/external.pdf",
+					},
+				],
+			},
+		]);
+		expect(message).toMatchObject({
+			text: "Review these files",
+			attachments: [
+				{ id: "image", mime: "image/png", url: image, size: 5 },
+				{
+					id: "external",
+					mime: "application/pdf",
+					url: "https://example.com/external.pdf",
+				},
+			],
+		});
+	});
+});
+
 describe("groupIntoTurns", () => {
 	test("returns empty array for empty messages", () => {
 		expect(groupIntoTurns([])).toEqual([]);

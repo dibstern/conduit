@@ -14,17 +14,18 @@
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
-	import { formatSnoozeTime } from "../../utils/format.js";
+	import { usageForecastTime } from "../../utils/continuation.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
-	import Surface from "../ui/Surface.svelte";
+	import ComposerStrip from "../ui/ComposerStrip.svelte";
 	import AccountSwitch from "./AccountSwitch.svelte";
 
 	let {
 		limitRecovery,
 		sessionId,
 		projectSlug,
-	}: { limitRecovery: LimitRecovery; sessionId: string; projectSlug: string } = $props();
+		presentation = "strip",
+	}: { limitRecovery: LimitRecovery; sessionId: string; projectSlug: string; presentation?: "strip" | "tray" } = $props();
 
 	let busy = $state(false);
 	const claudeAccounts = $derived(getClaudeAccounts(projectSlug));
@@ -37,18 +38,18 @@
 	const canSwitch = $derived(
 		accountId !== undefined && claudeAccounts.hasAlternative(accountId),
 	);
-	const geometry = $derived(
-		sessionViewState.compact ? "h-[34px] flex-1 rounded-[10px] text-[12px]" : "h-[24px] rounded-[8px] text-[11px]",
-	);
+	// Phone strips stack full-width actions; the tray keeps them trailing at natural width.
+	const stretch = $derived(sessionViewState.compact && presentation === "strip");
+	const geometry = $derived(stretch ? "flex-1 justify-center" : "");
 	const limitWindow = $derived(
 		limitRecovery.rateLimitType.startsWith("seven_day")
-			? "Weekly limit"
+			? "weekly limit"
 			: limitRecovery.rateLimitType === "five_hour"
 				? "5-hour limit"
-				: "Usage limit",
+				: "usage limit",
 	);
 	const scheduledAt = $derived(limitRecovery.continued ? undefined : limitRecovery.scheduledAt);
-	const resumesAt = $derived(scheduledAt === undefined ? "" : formatSnoozeTime(scheduledAt * 1000));
+	const resumesAt = $derived(scheduledAt === undefined ? "" : usageForecastTime(scheduledAt * 1000, clock.now));
 	// Worked out on read from the local clock, so it ticks without the server.
 	const countdown = $derived.by(() => {
 		if (scheduledAt === undefined) return "";
@@ -61,9 +62,8 @@
 	});
 	const detail = $derived.by(() => {
 		if (limitRecovery.resetsAt === undefined)
-			return sessionViewState.compact ? `${account} · reset time unavailable` : "Reset time unavailable";
-		const resets = `resets ${formatSnoozeTime(limitRecovery.resetsAt * 1000)}`;
-		return `${sessionViewState.compact ? account : limitWindow} · ${resets}`;
+			return "Reset time unavailable";
+		return `Resets at ${usageForecastTime(limitRecovery.resetsAt * 1000, clock.now)}.`;
 	});
 
 	// Each action is one RPC on the session's own account. A refusal leaves the
@@ -110,12 +110,13 @@
 		{#snippet trigger({ props, loading })}
 			<Button
 				{...props}
-				variant={primary ? "inverse" : "secondary"}
-				size="content"
+				variant={primary ? "danger-soft" : "secondary"}
+				size="composer-chip"
+				touchTarget
 				iconSize={12}
 				{loading}
 				data-testid="usage-limit-switch-account"
-				class="gap-[5px] px-[10px] {primary ? 'font-semibold' : ''} {sessionViewState.compact ? 'justify-center' : ''} {geometry}"
+				class="{primary ? 'font-semibold' : ''} {geometry}"
 			>
 				Switch account{#if !sessionViewState.compact}<Icon name="chevron-down" size={12} />{/if}
 			</Button>
@@ -123,42 +124,53 @@
 	</AccountSwitch>
 {/snippet}
 
-<Surface
-	variant={scheduledAt === undefined ? "danger" : "warning"}
-	radius="none"
-	data-testid="usage-limit-strip"
-	data-state={scheduledAt === undefined ? "limited" : "waiting"}
-	class="mb-2 flex flex-wrap items-center gap-[7px] rounded-2xl px-[10px] py-[7px] text-[11.5px] leading-[1.35]"
->
+<!-- The copy keeps a readable width; the actions wrap below it before it squeezes. -->
+{#snippet recovery()}
 	{#if scheduledAt === undefined}
 		<Icon name="gauge" size={13} class="shrink-0 text-error" />
-		<span class="min-w-0 flex-1">
-			<b data-testid="usage-limit-title" class="font-semibold text-text">Usage limit reached{sessionViewState.compact ? "" : ` · ${account}`}</b><br />
-			<span data-testid="usage-limit-detail" class="text-text-dimmer">{detail}</span>
+		<span class="min-w-[min(100%,16em)] flex-1">
+			<b data-testid="usage-limit-title" class="font-semibold text-text">{presentation === "tray" ? `Waiting for ${account}'s limit to reset` : `${account} hit its ${limitWindow}.`}</b>{" "}
+			{#if presentation === "strip"}<span data-testid="usage-limit-detail" class="text-text-dimmer">{detail}</span>{/if}
 		</span>
 		{#if !limitRecovery.continued}
-			<div class="flex gap-[6px] {sessionViewState.compact ? 'mt-[6px] w-full' : 'shrink-0'}">
+			<div class="flex flex-wrap gap-[6px] {stretch ? 'mt-[6px] w-full' : 'ml-auto shrink-0'}">
 				{#if canSwitch && accountId}
 					{@render switchAccount(true, accountId)}
 				{/if}
 				{#if limitRecovery.resetsAt === undefined}
-					<Button variant={canSwitch ? "secondary" : "inverse"} size="content" iconSize={12} loading={busy} disabled={busy} data-testid="usage-limit-try-again" class="px-[10px] {canSwitch ? '' : 'font-semibold'} {geometry}" onclick={() => continueAt()}>Try again</Button>
+					<Button variant={canSwitch ? "secondary" : "inverse"} size="composer-chip" touchTarget iconSize={12} loading={busy} disabled={busy} data-testid="usage-limit-try-again" class={geometry} onclick={() => continueAt()}>Try again</Button>
 				{:else}
-					<Button variant="secondary" size="content" iconSize={12} loading={busy} disabled={busy} data-testid="usage-limit-resume-at-reset" class="px-[10px] {geometry}" onclick={() => continueAt(limitRecovery.resetsAt)}>Resume at reset</Button>
+					<Button variant="secondary" size="composer-chip" touchTarget iconSize={12} loading={busy} disabled={busy} data-testid="usage-limit-resume-at-reset" class={geometry} onclick={() => continueAt(limitRecovery.resetsAt)}>Resume at reset</Button>
 				{/if}
 			</div>
 		{/if}
 	{:else}
 		<Icon name="timer" size={13} class="shrink-0 text-warning" />
-		<span class="min-w-0 flex-1">
-			<b data-testid="usage-limit-title" class="font-semibold text-text">{sessionViewState.compact ? `Resumes ${resumesAt}` : `Resumes on ${account} at ${resumesAt}`}</b><br />
+		<span class="min-w-[min(100%,16em)] flex-1">
+			<b data-testid="usage-limit-title" class="font-semibold text-text">{presentation === "tray" ? `Waiting for ${account}'s limit to reset` : sessionViewState.compact ? `Resumes ${resumesAt}` : `Resumes on ${account} at ${resumesAt}`}</b><br />
 			<span data-testid="usage-limit-detail" class="text-text-dimmer">{sessionViewState.compact ? `${account} · ${countdown}` : countdown}{limitRecovery.auto ? " · auto-resume is on" : ""}</span>
 		</span>
-		<div class="flex gap-[6px] {sessionViewState.compact ? 'mt-[6px] w-full' : 'shrink-0'}">
+		<div class="flex flex-wrap gap-[6px] {stretch ? 'mt-[6px] w-full' : 'ml-auto shrink-0'}">
 			{#if canSwitch && accountId}
 				{@render switchAccount(false, accountId)}
 			{/if}
-			<Button variant="ghost" size="content" iconSize={12} loading={busy} disabled={busy} data-testid="usage-limit-cancel-resume" class="text-[11px] {sessionViewState.compact ? 'h-[34px] flex-1 rounded-[10px] px-[8px]' : 'h-[24px] rounded-[8px] px-[10px]'}" onclick={cancelResume}>Cancel auto-resume</Button>
+			<Button variant="ghost" size="composer-chip" touchTarget iconSize={12} loading={busy} disabled={busy} data-testid="usage-limit-cancel-resume" class={geometry} onclick={cancelResume}>Cancel auto-resume</Button>
 		</div>
 	{/if}
-</Surface>
+{/snippet}
+
+{#if presentation === "tray"}
+	<div data-testid="pending-input-waiting" class="flex min-h-[30px] flex-wrap items-center gap-[8px] px-[6px] text-[12px] text-text-muted">
+		{@render recovery()}
+	</div>
+{:else}
+<ComposerStrip
+	tone={scheduledAt === undefined ? "risk" : "ask"}
+	data-testid="usage-limit-strip"
+	data-state={scheduledAt === undefined ? "limited" : "waiting"}
+	class="flex flex-wrap items-center gap-[8px]"
+>
+	{@render recovery()}
+</ComposerStrip>
+{/if}
+

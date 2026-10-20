@@ -1,8 +1,8 @@
 import { Context, Effect, HashMap, Layer, Option, Ref } from "effect";
 import { getAllIPs, getTailscaleIP } from "../../../cli/tls.js";
-import type {
-	ProjectSaveRejected,
-	SaveProjectInput,
+import {
+	type ProjectSaveRejected,
+	type SaveProjectInput,
 	WsRpcError,
 } from "../../../contracts/ws-rpc.js";
 import type { DaemonLifecycleContext } from "../../../daemon/daemon-lifecycle.js";
@@ -128,6 +128,11 @@ export const DaemonHandleLive: Layer.Layer<
 					Effect.provideService(ProjectSaveLockTag, projectSaveLock),
 				);
 				yield* persistence.requestSave;
+				yield* persistence.flush.pipe(
+					Effect.mapError(
+						(error) => new WsRpcError({ message: error.message }),
+					),
+				);
 				return result;
 			}).pipe(Effect.withSpan("daemonHandle.saveProject"));
 
@@ -145,6 +150,11 @@ export const DaemonHandleLive: Layer.Layer<
 					Effect.provideService(RelayCacheTag, relayCache),
 					Effect.provideService(ConfigPersistenceTag, persistence),
 					Effect.provideService(DaemonStateTag, daemonState),
+				);
+				yield* persistence.flush.pipe(
+					Effect.mapError(
+						(error) => new WsRpcError({ message: error.message }),
+					),
 				);
 			}).pipe(Effect.withSpan("daemonHandle.removeProject"));
 

@@ -5,6 +5,8 @@
 	import type { ToolMessage, QuestionRequest, AskUserQuestion } from "../../types.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
+	import { clock } from "../../stores/clock.svelte.js";
+	import { fmtDuration } from "../../utils/turns.js";
 
 	import Icon from "../ui/Icon.svelte";
 	import BlockGrid from '../ui/BlockGrid.svelte';
@@ -133,90 +135,47 @@
 		message.status === "completed" && !message.isError && questionAnswer !== null,
 	);
 	const isUnanswered = $derived(message.status === "completed" && !isAnswered);
-	const glowClass = $derived.by(() => {
-		if (message.status === "error") return "glow-tool-error";
-		if (isAnswered) return "glow-brand-b";
-		if (message.status === "running") return "glow-tool-running";
-		return "";
-	});
-
-	const statusIconName = $derived.by(() => {
-		if (isUnanswered) return "minus";
-		switch (message.status) {
-			case "running":
-			case "pending":
-				return "loader";
-			case "completed":
-				return "check";
-			case "error":
-				return "circle-alert";
-			default:
-				return "loader";
-		}
-	});
-
-	const statusIconClass = $derived.by(() => {
-		if (message.status === "running" || message.status === "pending")
-			return "text-text-muted";
-		if (message.status === "error") return "text-error";
-		return "text-text-dimmer";
-	});
+	const running = $derived(message.status === "running" || message.status === "pending");
+	const duration = $derived(message.createdAt === undefined || (!running && message.endedAt === undefined) ? undefined : Math.max(0, (message.endedAt ?? clock.now) - message.createdAt));
 </script>
 
+<div class="min-w-0">
+	<div class="question-tool-header flex items-center gap-[8px] min-h-[28px] py-[3px] text-[13px] text-text-secondary">
+		<span class="tool-status-icon shrink-0 text-text-dimmer"><Icon name="message-square" size={14} /></span>
+		<span class="shrink-0 font-semibold">{running ? "Asking" : "Asked"}</span>
+		<span class="min-w-0 flex-1 truncate font-mono text-[12.5px]">{questionData?.[0]?.question ?? "Input required"}</span>
+		{#if duration !== undefined}<time class="ml-auto shrink-0 font-mono text-[12px] text-text-dimmer">{fmtDuration(duration)}</time>{/if}
+		{#if running}<BlockGrid cols={4} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
+		{:else if message.status === "error" || message.isError}<span class="shrink-0 text-error"><Icon name="circle-alert" size={12} /></span>{/if}
+	</div>
 {#if isQuestionActive && questionRequest}
 	<QuestionCard request={questionRequest} inline synthetic={pendingQuestionRequest === null} />
 {:else}
 	<!-- Completed/historical question: show read-only summary -->
-	<div class="{isAnswered ? '' : 'bg-bg-surface'} rounded-panel relative overflow-hidden {glowClass}">
-		{#if message.status === 'running'}
-			<div class="absolute inset-0 pointer-events-none" style="background: linear-gradient(90deg, transparent 0%, rgba(234,179,8,0.04) 50%, transparent 100%); animation: tool-shimmer-slide 2s ease-in-out infinite;"></div>
-		{/if}
-		<!-- Header row -->
-		<div
-			class="question-tool-header flex items-center gap-2.5 w-full py-2 px-3 text-xs text-text-dimmer"
-		>
-			<!-- Status icon -->
-			{#if message.status === 'running'}
-				<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0 self-center" />
-			{:else}
-				<span class="tool-status-icon shrink-0 [&_.lucide]:w-3.5 [&_.lucide]:h-3.5 {statusIconClass}">
-					<Icon name={statusIconName} size={14} />
-				</span>
-			{/if}
-
-			<!-- Question icon -->
-			<span class="text-accent [&_.lucide]:w-4 [&_.lucide]:h-4">
-				<Icon name="message-square" size={16} />
-			</span>
-
-			<!-- Title -->
-			<span class="font-medium text-text-dimmer">Input Required</span>
-
-			<span class="flex-1"></span>
-		</div>
+	<div class="pl-[22px] min-w-0">
 
 		<!-- Question content (read-only) -->
 		{#if questionData}
-			<div class="px-3 pb-2">
+			<div class="pb-[8px]">
 				{#each questionData as q, qIdx}
 					<div class="question-tool-section" class:mt-2={qIdx > 0}>
 						{#if q.header}
-							<div class="text-xs font-semibold text-accent font-mono mb-0.5">
+							<div class="text-[12px] font-semibold text-text-dimmer font-mono mb-[2px]">
 								{q.header.charAt(0).toUpperCase() + q.header.slice(1)}
 							</div>
 						{/if}
-						<div class="text-sm text-text-secondary mb-1.5">
+						<div class="text-[13px] text-text-secondary mb-[6px]">
 							{q.question}
 						</div>
 						{#if q.options.length > 0}
 							<div class="flex flex-col gap-1">
 								{#each q.options as opt}
-									<div class="flex items-start gap-2 px-2.5 py-1.5 rounded-lg text-xs bg-bg-surface border border-border-subtle">
+									<div class="question-tool-option flex items-start gap-[8px] px-[10px] py-[6px] rounded-[6px] text-[12px] bg-bg-surface border border-border-subtle">
 										<span class="text-text-dimmer mt-0.5 shrink-0">○</span>
 										<span class="flex flex-col gap-0.5">
-											<span class="text-text font-medium text-base">{opt.label}</span>
+											<span class="text-text-secondary font-medium text-[13px]">{opt.label}</span>
 											{#if opt.description}
-												<span class="text-text-muted text-xs">{opt.description}</span>
+												<span class="text-text-muted text-[12px]">{opt.description}</span>
 											{/if}
 										</span>
 									</div>
@@ -230,11 +189,10 @@
 
 		<!-- Subtitle row -->
 		<div
-			class="tool-subtitle flex items-center gap-1.5 py-0.5 px-3 pl-4 text-xs italic text-text-dimmer"
+			class="tool-subtitle pb-[3px] text-[12px] text-text-dimmer"
 		>
-			<span class="tool-connector font-mono not-italic text-border">└</span>
 			{#if isAnswered}
-				<span class="tool-subtitle-text text-success not-italic">Answered ✓</span>
+				<span class="tool-subtitle-text">Answered ✓</span>
 			{:else if isUnanswered}
 				<span class="tool-subtitle-text not-italic">Not answered</span>
 			{:else if message.status === "error"}
@@ -249,10 +207,11 @@
 			<Surface
 				variant="inset"
 				radius="md"
-				class="font-mono text-xs whitespace-pre-wrap break-all my-0.5 mx-2.5 py-2 px-2.5 text-text-secondary max-h-[200px] overflow-y-auto mb-2"
+				class="font-mono text-[12px] leading-[1.6] whitespace-pre-wrap break-all my-[4px] py-[8px] px-[10px] text-text-secondary max-h-[200px] overflow-y-auto mb-[8px]"
 			>
 				{questionAnswer}
 			</Surface>
 		{/if}
 	</div>
 {/if}
+</div>

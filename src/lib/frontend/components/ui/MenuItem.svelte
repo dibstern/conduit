@@ -22,6 +22,8 @@
 	type MenuItemVariantProps = {
 		variant?: MenuItemVariant | undefined;
 		icon?: string | undefined;
+		/** Trailing quiet detail, such as a time; a selected row lends it its own ink. */
+		detail?: string | undefined;
 	};
 
 	type MenuItemOwnProps = MenuItemVariantProps & {
@@ -61,6 +63,7 @@
 		variant = "default",
 		density,
 		icon,
+		detail,
 		disabled = false,
 		href,
 		id,
@@ -106,12 +109,13 @@
 		<span aria-hidden="true" data-menu-item-icon class={`${MENU_SHEET_LEADING_ICON_CLASSES} ${variant === "danger" ? "text-error" : "text-text-secondary"}`}>
 			{#if icon || variant === "danger"}<Icon name={icon ?? "trash-2"} size={15} />{/if}
 		</span>
-	{:else if variant === "danger"}
+	{:else if variant === "danger" || ((resolvedDensity === "final" || resolvedDensity === "option") && icon)}
 		<span aria-hidden="true" data-menu-item-icon class="shrink-0">
 			<Icon name={icon ?? "trash-2"} size={13} />
 		</span>
 	{/if}
 	{@render children()}
+	{#if detail}<small data-menu-item-detail class="ml-auto font-mono text-[11.5px] {variant === 'selected' ? '' : 'text-text-dimmer'}">{detail}</small>{/if}
 {/snippet}
 
 <DropdownMenu.Item {...itemProps}>

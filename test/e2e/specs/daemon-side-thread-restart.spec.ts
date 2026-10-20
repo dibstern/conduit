@@ -3,7 +3,7 @@
 // Spawns its own ephemeral OpenCode, so no live instance or password is needed.
 
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test } from "@playwright/test";
@@ -24,6 +24,22 @@ const staticDir = resolve(import.meta.dirname, "../../../dist/frontend");
 const modelPick = "opencode/mimo-v2.6-flash-free";
 
 function startDaemon(configDir: string, opencodeUrl: string) {
+	// The user has already answered the avatar question, so the first-run
+	// dialog stays shut over the composer. A restart keeps what the first start saved.
+	if (!existsSync(join(configDir, "daemon.json")))
+		writeFileSync(
+			join(configDir, "daemon.json"),
+			JSON.stringify({
+				pid: 0,
+				port: 0,
+				pinHash: null,
+				tls: false,
+				debug: false,
+				keepAwake: false,
+				projects: [],
+				avatar: { kind: "initial" },
+			}),
+		);
 	return startForegroundDaemon({
 		port: 0,
 		host: "127.0.0.1",
@@ -151,9 +167,9 @@ test("a Side Thread keeps Plan and its read-only rules after a daemon restart", 
 		const app = new AppPage(page);
 		await page.goto(`http://127.0.0.1:${daemon.port}/s/${sideId}`);
 		await app.connectOverlay.waitFor({ state: "detached", timeout: 30_000 });
-		await expect(page.getByTestId("permission-mode-badge")).toContainText(
-			"Plan",
-		);
+		await expect(
+			page.getByTestId("permission-mode-badge"),
+		).toHaveAccessibleName("Approvals: Plan. Open options");
 
 		await app.sendMessage("List the files here.");
 		const agents = async () =>

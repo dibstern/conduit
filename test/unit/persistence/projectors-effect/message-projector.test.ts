@@ -679,6 +679,7 @@ describe("MessageProjector", () => {
 			"message.part.removed",
 			"message.snapshot",
 			"text.delta",
+			"text.surfaced",
 			"thinking.start",
 			"thinking.delta",
 			"thinking.end",
@@ -693,6 +694,53 @@ describe("MessageProjector", () => {
 			"session.setup_started",
 			"session.setup_output",
 			"session.setup_finished",
+		]);
+	});
+
+	// A snapshot must replace event-backed tool output while retained text keeps
+	// its Conduit verdict; otherwise full detail reads return the stale event.
+	it("replaces retained tool result references without clearing surfacing verdicts", async () => {
+		await harness.query(
+			"INSERT INTO messages (id, session_id, role, created_at, updated_at) VALUES ('snapshot', 's1', 'assistant', 1, 1)",
+		);
+		await harness.query(
+			"INSERT INTO message_parts (id, message_id, type, text, tool_name, result, result_event_seq, result_bytes, surfacing_ordinal, surfacing_model, sort_order, created_at, updated_at) VALUES ('tool', 'snapshot', 'tool', '', 'Bash', '\"old\"', 99, 3000, NULL, NULL, 0, 1, 1), ('text', 'snapshot', 'text', 'Before', NULL, NULL, NULL, NULL, 4, 'judge', 1, 1, 1)",
+		);
+		await project(
+			makeStored("message.snapshot", "s1", {
+				messageId: "snapshot",
+				digest: "new-result",
+				message: {
+					id: "snapshot",
+					sessionID: "s1",
+					role: "assistant",
+					time: { created: 1 },
+					parts: [
+						{
+							id: "tool",
+							type: "tool",
+							tool: "Bash",
+							callID: "call",
+							state: { status: "completed", output: "New result" },
+						},
+						{ id: "text", type: "text", text: "After" },
+					],
+				},
+			}),
+		);
+		expect(
+			await harness.query(
+				"SELECT result, result_event_seq, result_bytes FROM message_parts WHERE id = 'tool'",
+			),
+		).toEqual([
+			{ result: '"New result"', result_event_seq: null, result_bytes: null },
+		]);
+		expect(
+			await harness.query(
+				"SELECT text, surfacing_ordinal, surfacing_model FROM message_parts WHERE id = 'text'",
+			),
+		).toEqual([
+			{ text: "After", surfacing_ordinal: 4, surfacing_model: "judge" },
 		]);
 	});
 

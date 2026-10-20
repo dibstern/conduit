@@ -1,7 +1,19 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
+import {
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	within,
+} from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import Toast from "../../../src/lib/frontend/components/overlays/Toast.svelte";
 import SessionContextMenu from "../../../src/lib/frontend/components/session/SessionContextMenu.svelte";
+import type { SessionCommand } from "../../../src/lib/frontend/components/session/session-commands.js";
 import { openSnoozePicker } from "../../../src/lib/frontend/stores/snooze-picker.svelte.js";
+import {
+	showToast,
+	uiState,
+} from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 
@@ -35,6 +47,7 @@ vi.mock(
 
 afterEach(() => {
 	cleanup();
+	uiState.toasts = [];
 	vi.clearAllMocks();
 });
 
@@ -45,21 +58,155 @@ function openMenu(
 		projectLabel?: string;
 		branch?: string;
 		onrename?: () => void;
+		presentation?: "menu" | "sheet";
+		extras?: readonly Omit<SessionCommand, "section">[];
 	},
 ) {
-	render(SessionContextMenu, {
+	return render(SessionContextMenu, {
 		props: {
 			session: { status: "idle", projectSlug: "test", ...session },
 			anchor: options?.anchor ?? document.body,
 			projectLabel: options?.projectLabel,
 			branch: options?.branch,
 			host: { rename: options?.onrename ?? vi.fn() },
+			presentation: options?.presentation ?? "menu",
+			extras: options?.extras ?? [],
 			onclose: vi.fn(),
 		},
 	});
 }
 
 describe("session triage menu", () => {
+	// A sheet must retain live notifications, their details/severity and every
+	// action, including Undo. Closing it must restore any unexpired notices.
+	it("moves an existing Undo toast into the sheet and restores it on close", async () => {
+		const undo = vi.fn();
+		showToast("Moved Alpha to Settled", {
+			action: { label: "Undo", run: undo },
+		});
+		render(Toast);
+		expect(screen.getByTestId("toast-action").textContent?.trim()).toBe("Undo");
+		const menu = openMenu(
+			{ id: "a", title: "Alpha" },
+			{ presentation: "sheet" },
+		);
+		const notice = await screen.findByTestId("session-sheet-toast");
+		expect(notice.textContent).toContain("Moved Alpha to Settled");
+		expect(within(notice).getByRole("menuitem", { name: "Undo" })).toBeTruthy();
+		expect(screen.queryByTestId("toast")).toBeNull();
+		await menu.unmount();
+		await fireEvent.click(await screen.findByTestId("toast-action"));
+		expect(undo).toHaveBeenCalledOnce();
+		expect(uiState.toasts).toEqual([]);
+	});
+
+	it("keeps incoming error details, emphasis and actions in the open sheet", async () => {
+		openMenu({ id: "a", title: "Alpha" }, { presentation: "sheet" });
+		await screen.findByRole("menu");
+		const undo = vi.fn();
+		showToast({
+			title: "Error",
+			body: "Beta failed because its account is unavailable.",
+			emphasis: "Beta",
+			variant: "error",
+			actions: [
+				{ kind: "primary", label: "Undo", run: undo },
+				{ kind: "dismiss", label: "Later" },
+			],
+		});
+		const notice = await screen.findByTestId("session-sheet-toast");
+		expect(notice.getAttribute("aria-live")).toBe("assertive");
+		expect(notice.textContent).toContain(
+			"Beta failed because its account is unavailable.",
+		);
+		expect(within(notice).getByText("Beta", { selector: "b" })).toBeTruthy();
+		expect(notice.querySelector(".lucide-circle-x")).toBeTruthy();
+		expect(
+			within(notice).getByRole("menuitem", { name: "Later" }),
+		).toBeTruthy();
+		await fireEvent.click(
+			within(notice).getByRole("menuitem", { name: "Undo" }),
+		);
+		expect(undo).toHaveBeenCalledOnce();
+		expect(uiState.toasts).toEqual([]);
+		expect(screen.getByRole("menu")).toBeTruthy();
+	});
+
+	it.each([
+		"menu",
+		"sheet",
+	] as const)("preserves %s commands and extras", async (presentation) => {
+		openMenu(
+			{ id: "a", title: "Alpha" },
+			{
+				presentation,
+				extras: [
+					{
+						testId: "extra-share",
+						label: "Share",
+						icon: "share",
+						run: vi.fn(),
+					},
+				],
+			},
+		);
+		await screen.findByTestId("extra-share");
+		const menu = screen.getByRole("menu");
+		expect(
+			[
+				...menu.querySelectorAll(
+					'[role="menuitem"], [role="menuitemcheckbox"], [role="separator"]',
+				),
+			].map((item) => item.getAttribute("data-testid") ?? "divider"),
+		).toEqual(
+			presentation === "sheet"
+				? [
+						"session-sheet-close",
+						"session-ctx-settle",
+						"session-ctx-snooze",
+						"session-ctx-pin",
+						"session-ctx-mark-unread",
+						"session-ctx-archive",
+						"session-ctx-auto-settle",
+						"session-ctx-rename",
+						"session-ctx-fork",
+						"session-ctx-copy-resume",
+						"session-ctx-delete",
+						"extra-share",
+					]
+				: [
+						"session-ctx-settle",
+						"session-ctx-auto-settle",
+						"session-ctx-snooze",
+						"session-ctx-pin",
+						"session-ctx-mark-unread",
+						"session-ctx-archive",
+						"divider",
+						"session-ctx-rename",
+						"session-ctx-fork",
+						"session-ctx-copy-resume",
+						"divider",
+						"session-ctx-delete",
+						"divider",
+						"extra-share",
+					],
+		);
+		expect(
+			screen.getByTestId("session-ctx-delete").querySelectorAll("svg"),
+		).toHaveLength(1);
+		expect(
+			screen.getByTestId("session-ctx-auto-settle").querySelectorAll("svg"),
+		).toHaveLength(1);
+		expect(
+			screen
+				.getByTestId("session-ctx-auto-settle")
+				.querySelector(".lucide-zap") !== null,
+		).toBe(presentation === "sheet");
+		expect(
+			screen.getByTestId("session-ctx-pin").querySelector(".lucide-pin"),
+		).toBeTruthy();
+	});
+
 	it("shows a two-line title and separate project and branch in its header", async () => {
 		openMenu(
 			{
@@ -104,7 +251,7 @@ describe("session triage menu", () => {
 		anchor.remove();
 		input.remove();
 	});
-	it("puts Settle and Pin above Rename, with a divider", async () => {
+	it("puts triage above Archive and Rename, with a divider", async () => {
 		openMenu({ id: "a", title: "Alpha" });
 		await screen.findByTestId("session-ctx-rename");
 		const firstFive = [
@@ -114,22 +261,34 @@ describe("session triage menu", () => {
 		].slice(0, 5);
 		expect(firstFive.map((item) => item.getAttribute("data-testid"))).toEqual([
 			"session-ctx-settle",
-			"session-ctx-archive",
 			"session-ctx-auto-settle",
 			"session-ctx-snooze",
 			"session-ctx-pin",
+			"session-ctx-mark-unread",
 		]);
 		for (const [index, label] of [
 			"Settle",
-			"Archive",
 			"Auto-settle when idle",
 			"Snooze…",
 			"Pin to top",
+			"Mark unread",
 		].entries()) {
 			expect(firstFive[index]?.textContent).toContain(label);
 		}
-		expect(screen.getAllByRole("separator").length).toBeGreaterThan(0);
-		expect(screen.getByTestId("session-ctx-rename")).toBeTruthy();
+		const entries = [
+			...screen
+				.getByRole("menu")
+				.querySelectorAll(
+					'[role="menuitem"], [role="menuitemcheckbox"], [role="separator"]',
+				),
+		];
+		const archiveIndex = entries.indexOf(
+			screen.getByTestId("session-ctx-archive"),
+		);
+		expect(entries[archiveIndex - 1]).toBe(
+			screen.getByTestId("session-ctx-mark-unread"),
+		);
+		expect(entries[archiveIndex + 1]?.getAttribute("role")).toBe("separator");
 		await fireEvent.click(screen.getByTestId("session-ctx-settle"));
 		expect(rpc).toHaveBeenCalledWith(
 			"SetSessionSettled",

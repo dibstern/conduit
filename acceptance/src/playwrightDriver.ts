@@ -132,6 +132,12 @@ export class PlaywrightDriver {
 			width: viewport.width,
 			height: viewport.height,
 		});
+		// The app's compact layout follows a matchMedia change event, which fires in the
+		// next rendering step; one frame lets it land before the next step acts on it.
+		await page.evaluate(
+			() =>
+				new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+		);
 		this.activeViewport = viewport;
 	}
 

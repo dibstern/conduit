@@ -48,6 +48,19 @@ export const UnderlinedLink: Story = {
 	},
 };
 
+export const PhoneTapTarget: Story = {
+	args: {
+		tone: "secondary",
+		underline: "always",
+		touchTarget: true,
+		children: label("Dismiss"),
+	},
+};
+export const PhoneTapTargetLight: Story = {
+	...PhoneTapTarget,
+	globals: { theme: "light" },
+};
+
 /**
  * The guard, not decoration. TextButton must never emit two utilities from the
  * same Tailwind group, because which one wins is decided by stylesheet emission

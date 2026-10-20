@@ -1,5 +1,6 @@
-import { Effect, Schema, Semaphore } from "effect";
+import { Clock, Effect, Ref, Schema, Semaphore } from "effect";
 import { SqlClient } from "effect/sql";
+import { validateAttachmentDataUrls } from "../../attachment-data-url.js";
 import {
 	AccountUnroutable,
 	type ContinuationError,
@@ -17,9 +18,12 @@ import {
 	WorktreeRecoveryError,
 } from "../../contracts/worktree.js";
 import { DraftAlreadySent, WsRpcError } from "../../contracts/ws-rpc.js";
+import { autoSettleIdleWindowMs } from "../../daemon/config-persistence.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
+import { DaemonConfigRefTag } from "../../domain/daemon/Services/daemon-config-ref.js";
 import { Usage } from "../../domain/daemon/Services/usage.js";
 import { WorktreeServiceTag } from "../../domain/daemon/Services/worktree-service.js";
+import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import {
 	ContinuationTag,
 	previewContinuation,
@@ -30,7 +34,12 @@ import {
 	draftLaunchKey,
 } from "../../domain/relay/Services/draft-prewarm.js";
 import { InputDraftsTag } from "../../domain/relay/Services/input-drafts.js";
-import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
+import {
+	BackgroundLivenessTag,
+	ConfigTag,
+	LoggerTag,
+} from "../../domain/relay/Services/services.js";
+import { setRead } from "../../domain/relay/Services/session-attention.js";
 import { forkSession } from "../../domain/relay/Services/session-command.js";
 import { SessionGitServiceTag } from "../../domain/relay/Services/session-git-service.js";
 import {
@@ -44,6 +53,7 @@ import {
 } from "../../domain/relay/Services/session-workspace.js";
 import { dismissWorkspaceHint } from "../../domain/relay/Services/session-workspace-hint.js";
 import { prepareSessionWorktreeDeletion } from "../../domain/relay/Services/session-worktree-deletion.js";
+import { makeSurfacingFeedback } from "../../domain/relay/Services/surfacing-feedback.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../errors.js";
 import {
@@ -84,11 +94,57 @@ import { preWarmSession } from "../../handlers/session-prewarm.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import { isPickRejection, PickRequired } from "../../provider/turn-settings.js";
 import { saveRelaySettings } from "../../relay/relay-settings.js";
+import { getAutoSettleOutlook } from "../../session/auto-settle-policy.js";
+import { readPersistedAutoSettleFacts } from "../../session/auto-settle-reader.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 const sideThreadStarts = Semaphore.makeUnsafe(1);
 
+/** The outlook the sweep would reach once nobody is viewing the session. */
+const readAutoSettleOutlook = (sessionId: string) =>
+	Effect.gen(function* () {
+		const now = yield* Clock.currentTimeMillis;
+		const { projectDir } = yield* ConfigTag;
+		const { projectId } = yield* PersistenceProjectTag;
+		const facts = (yield* readPersistedAutoSettleFacts(
+			projectId,
+			now,
+			sessionId,
+			projectDir,
+		)).get(sessionId);
+		if (facts === undefined)
+			return yield* new WsRpcError({
+				message: `Unknown session: ${sessionId}`,
+				code: "unknown-session",
+			});
+		const backgroundOf = yield* BackgroundLivenessTag;
+		const config = yield* Ref.get(yield* DaemonConfigRefTag);
+		return getAutoSettleOutlook(
+			{
+				...facts,
+				hasLiveBackgroundWork: backgroundOf(sessionId) !== undefined,
+			},
+			now,
+			autoSettleIdleWindowMs(config.autoSettleAfterDays),
+		);
+	});
+
 export const sessionsHandlers = {
+	SetSurfacingMark: ({ sessionId, partId, mark }) =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const { projectId } = yield* PersistenceProjectTag;
+			const [owned] = yield* sql<{
+				id: string;
+			}>`SELECT mp.id FROM message_parts mp JOIN messages m ON m.id = mp.message_id JOIN sessions s ON s.id = m.session_id WHERE mp.id = ${partId} AND m.session_id = ${sessionId} AND s.project_id = ${projectId}`;
+			if (!owned)
+				return yield* new WsRpcError({
+					message: "Part does not belong to this session",
+				});
+			const feedback = yield* makeSurfacingFeedback;
+			yield* feedback.set(partId, mark);
+			return { ok: true as const };
+		}).pipe(Effect.catch(mapRpcFailure("SetSurfacingMark"))),
 	ListBranches: (_request) =>
 		Effect.flatMap(ConfigTag, (config) =>
 			listLocalBranches(config.projectDir),
@@ -341,13 +397,17 @@ export const sessionsHandlers = {
 					}),
 			),
 		),
+	GetSessionAutoSettleOutlook: (request) =>
+		readAutoSettleOutlook(request.sessionId).pipe(
+			Effect.catch(mapRpcFailure("GetSessionAutoSettleOutlook")),
+		),
 	SetSessionAutoSettle: (request) =>
 		setSessionAutoSettleForClient({
 			clientId: request.originId ?? "rpc",
 			sessionId: request.sessionId,
 			disabled: request.disabled,
 		}).pipe(
-			Effect.as({ ok: true as const }),
+			Effect.andThen(readAutoSettleOutlook(request.sessionId)),
 			Effect.catch(mapRpcFailure("SetSessionAutoSettle")),
 		),
 	SnoozeSession: (request) =>
@@ -501,6 +561,11 @@ export const sessionsHandlers = {
 					}),
 				),
 			),
+		),
+	SetMessagesRead: (request) =>
+		setRead(request.partIds, request.read, request.sessionId).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catch(mapRpcFailure("SetMessagesRead")),
 		),
 	CreateSession: (request) =>
 		Effect.gen(function* () {
@@ -834,6 +899,14 @@ export const sessionsHandlers = {
 		),
 	StartSideThread: (request) =>
 		Effect.gen(function* () {
+			// Validate before the fork creates any events or provider commands.
+			yield* Effect.try({
+				try: () => validateAttachmentDataUrls(request.images),
+				catch: (cause) =>
+					new WsRpcError({
+						message: cause instanceof Error ? cause.message : String(cause),
+					}),
+			});
 			// A retry (lost reply, crash before admission) resumes the thread its
 			// input already started; serialized so a concurrent duplicate cannot
 			// fork a second one.
@@ -943,8 +1016,10 @@ export const sessionsHandlers = {
 	| "ContinueSessionInMainFolder"
 	| "DismissWorkspaceHint"
 	| "SetSessionSettled"
+	| "SetSurfacingMark"
 	| "SetSessionArchived"
 	| "SetSessionPinned"
+	| "GetSessionAutoSettleOutlook"
 	| "SetSessionAutoSettle"
 	| "SnoozeSession"
 	| "UnsnoozeSession"
@@ -956,6 +1031,7 @@ export const sessionsHandlers = {
 	| "GetContinuationHandoff"
 	| "MarkSessionUnread"
 	| "MarkSessionRead"
+	| "SetMessagesRead"
 	| "MarkSessionSeen"
 	| "CreateSession"
 	| "ViewSession"

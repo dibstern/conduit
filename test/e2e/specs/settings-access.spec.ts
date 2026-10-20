@@ -106,6 +106,7 @@ test("Access toggles Tailscale Serve, keeps it across a restart, and shows read-
 	const url = `https://fake.tailnet.ts.net:${initial.port}`;
 	await expect(toggle).toContainText(url);
 	const saved = await harness.requestRpc({ _tag: "GetStatus" });
+	expect(saved.projects).toEqual([]);
 	expect(saved.tailscaleServeEnabled).toBe(true);
 	expect(saved.tailscaleServe).toEqual({ url });
 
@@ -116,7 +117,12 @@ test("Access toggles Tailscale Serve, keeps it across a restart, and shows read-
 		keepPort: true,
 		startupTimeoutMs: 60_000,
 		serviceEnvironment,
+		// The fixture removed the default project, so there is no relay to probe.
+		skipBrowserProbe: true,
 	});
+	expect((await harness.requestRpc({ _tag: "GetStatus" })).projects).toEqual(
+		[],
+	);
 	await page.reload();
 	await openServerSettings(page);
 	await expect(toggle).toHaveAttribute("aria-checked", "true");

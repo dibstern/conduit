@@ -17,13 +17,19 @@ export const settingsGeneralHandlers: StepHandler[] = [
 	{
 		name: "assert General headings in order",
 		match:
-			/^the General headings are Notifications, Appearance, Composer and Sessions in order$/,
+			/^the General headings are You, Appearance, Composer, Notifications and Sessions in order$/,
 		run: async ({ world }) => {
 			await expect(
 				world.page
 					.locator("#settings-panel")
 					.getByRole("heading", { level: 3 }),
-			).toHaveText(["Notifications", "Appearance", "Composer", "Sessions"]);
+			).toHaveText([
+				"You",
+				"Appearance",
+				"Composer",
+				"Notifications",
+				"Sessions",
+			]);
 		},
 	},
 	{
@@ -34,13 +40,13 @@ export const settingsGeneralHandlers: StepHandler[] = [
 			await expect(
 				panel
 					.getByRole("region", { name: "Appearance", exact: true })
-					.getByRole("combobox", { name: /^Theme\b/ }),
+					.getByRole("button", { name: /^Theme\b/ }),
 			).toBeVisible();
 			await expect(
 				panel
 					.getByRole("region", { name: "Sessions", exact: true })
 					.getByTestId("settings-auto-settle-select"),
-			).toHaveValue("3");
+			).toHaveAttribute("data-value", "3");
 		},
 	},
 	{

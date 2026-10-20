@@ -150,6 +150,7 @@ const buildInitialRuntimeConfig = (
 				(options.tailscaleServe === false &&
 					persisted?.tailscaleServe === true)),
 		keepAwake: options.keepAwake ?? persisted?.keepAwake ?? false,
+		...(persisted?.avatar !== undefined && { avatar: persisted.avatar }),
 		autoSettleAfterDays:
 			persisted?.autoSettleAfterDays === undefined
 				? DEFAULT_AUTO_SETTLE_AFTER_DAYS
@@ -551,6 +552,7 @@ export async function startForegroundDaemon(
 						),
 					);
 				}
+				yield* (yield* ConfigPersistenceTag).flush;
 			}),
 		);
 		await refreshSnapshots();

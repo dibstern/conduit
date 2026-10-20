@@ -262,6 +262,7 @@ export interface SendTurnInput {
 	readonly sideThread?: boolean;
 	readonly variant?: string;
 	readonly contextWindow?: string;
+	/** Base64 data URLs for images, plain text and PDFs. Retains the wire field name. */
 	readonly images?: readonly string[];
 	readonly agent?: string;
 }
@@ -375,9 +376,10 @@ export interface ProviderInstance {
 		input: PreWarmSessionInput,
 	) => Effect.Effect<void, ProviderInstanceFailure>;
 
-	/** Interrupt an in-progress turn */
+	/** Interrupt an in-progress turn, or only one admitted under `turnIds`. */
 	interruptTurnEffect(
 		sessionId: string,
+		turnIds?: readonly string[],
 	): Effect.Effect<void, ProviderInstanceFailure>;
 
 	/** Stop a background task while leaving the query and its input queue live. */

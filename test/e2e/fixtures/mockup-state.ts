@@ -951,7 +951,8 @@ export const contextWindowInitMessages: MockMessage[] = [
 	},
 	{
 		type: "context_window_info",
-		contextWindow: "",
+		// The server resolves an unpicked session to the model's default window.
+		contextWindow: "200k",
 		options: [
 			{ value: "200k", label: "200K", isDefault: true },
 			{ value: "1m", label: "1M (beta)" },

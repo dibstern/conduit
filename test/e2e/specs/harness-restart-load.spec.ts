@@ -389,7 +389,9 @@ test("opens the heavy session after a restart under load", async ({
 	await harness.terminate();
 	const fixture = await seedSessionLoadFixture(harness.daemonStorePath(), {
 		projectId: "process-test",
+		seen: true,
 	});
+	harness.disableIdlePolicies();
 	const storeBytes = statSync(harness.daemonStorePath()).size;
 	const warmMetrics = join(harness.root, "server-metrics-warm.json");
 	// The harness probe opens a detail stream per sidebar row; skip it here and
@@ -848,8 +850,8 @@ test("opens the heavy session after a restart under load", async ({
 			'#messages .turn-activity-toggle[aria-expanded="false"]',
 		);
 		while ((await collapsed.count()) > 0) await collapsed.first().click();
-		// The scroll button shows only while the view is detached: leave it out,
-		// along with its sticky rail, so a scroll race cannot mask content changes.
+		// The scroll button shows only while the view is detached: leave its rail
+		// out, so a scroll race can neither fake nor mask a difference in content.
 		return (
 			await page.locator("#messages > :not(:has(#scroll-btn))").allInnerTexts()
 		).join("\n");

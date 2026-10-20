@@ -35,10 +35,11 @@
 	import { createFrontendLogger } from "../../utils/logger.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import Button from "../ui/Button.svelte";
-	import Select from "../ui/Select.svelte";
+	import SettingsPicker from "../ui/SettingsPicker.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
+	import SettingsBanner from "../ui/SettingsBanner.svelte";
 	import ClaudeSettingRow from "./ClaudeSettingRow.svelte";
 
 	const log = createFrontendLogger("claude-settings");
@@ -260,11 +261,9 @@
 	);
 
 
-	function updateDefaultPermissionMode(event: Event): void {
-		const select = event.currentTarget;
-		if (!(select instanceof HTMLSelectElement)) return;
+	function updateDefaultPermissionMode(value: string): void {
 		const mode = DEFAULT_MODE_OPTIONS.find(
-			(candidate) => candidate.mode === select.value,
+			(candidate) => candidate.mode === value,
 		)?.mode;
 		const projectSlug = getCurrentSlug();
 		if (!mode || !projectSlug) return;
@@ -307,17 +306,14 @@
 
 
 {#snippet defaultPermissionModeControl()}
-	<Select
+	<SettingsPicker
 		id="claude-default-permission-mode"
+		label="Default approval mode"
 		value={discoveryState.defaultPermissionMode}
-		onchange={updateDefaultPermissionMode}
-		class="w-[220px] max-w-full"
+		onvaluechange={updateDefaultPermissionMode}
 		data-testid="claude-setting-defaultPermissionMode-select"
-	>
-		{#each DEFAULT_MODE_OPTIONS as { mode, label: modeLabel } (mode)}
-			<option value={mode}>{modeLabel}</option>
-		{/each}
-	</Select>
+		options={DEFAULT_MODE_OPTIONS.map(({ mode, label }) => ({ value: mode, label }))}
+	/>
 {/snippet}
 
 {#snippet defaultPermissionModeNotes()}
@@ -397,7 +393,7 @@
 				"sessionUrl",
 				attributionSessionUrl === false,
 			)}
-		class="p-0"
+		class="min-h-[46px] p-0 max-md:min-h-[48px]"
 	/>
 {/snippet}
 
@@ -415,10 +411,10 @@
 	/>
 </SettingsGroup>
 
-<p class="text-text-dimmer">
+<SettingsBanner tone="neutral" icon="shield" class="mt-[14px]">
 	Permission rules aren't editable here. Conduit runs its own approval prompts,
 	and a settings rule that auto-allows a tool would silently bypass them.
-</p>
+</SettingsBanner>
 
 <SettingsGroup
 	title="Claude settings"
@@ -495,12 +491,13 @@
 	/>
 </SettingsGroup>
 
-<div class="flex items-center gap-[10px] py-[8px]">
-	<p class="flex-1 text-text-dimmer">
+<div class="mx-[4px] mt-[8px] flex flex-wrap items-center gap-[10px] py-[8px]">
+	<p class="flex-[1_1_220px] text-[12px] leading-[1.4] text-text-muted">
 		Restarts Claude on the current settings. Your conversation is kept.
 	</p>
 	<Button
 		size="sm"
+		touchTarget
 		data-testid="claude-settings-reload-session"
 		disabled={!sessionState.currentId || reloadInFlight}
 		onclick={reloadSession}

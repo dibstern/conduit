@@ -17,7 +17,7 @@
 
 <!-- The transcript's width and gutter belong to whatever renders this; the card
 	 only owns its own margin. -->
-<div class="tool-item my-1" data-tool-id={message.id} data-tool-status={message.status}>
+<div class="tool-item my-[3px] min-w-0" data-tool-id={message.id} data-tool-status={message.status}>
 {#if isQuestion}
 	<ToolQuestionCard {message} />
 {:else if isSubagent}

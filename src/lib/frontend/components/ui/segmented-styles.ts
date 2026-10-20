@@ -12,25 +12,8 @@
  * contract, which is why they are two components rather than one with a
  * `semantics` prop — see the header of ui/Tabs.svelte.
  *
- * Every recipe below started as the as-found class list of a real call site,
- * token for token, so the migration was zero-diff by construction.
- *
- * One convergence has since landed. The three strips
- * marked their selected option in two different colours: `pill` used `accent`
- * while `underline` and `field` used `brand-a`. Those two tokens hold the same
- * value in both canonical themes (#ff2d7b dark, #c9004f light), so the split
- * was invisible on screen and the swap below is zero-diff -- but they are
- * separate names that the queued palette work may give separate values, and
- * then the split would become a real inconsistency nobody chose. `accent` wins
- * because selection is an interactive state and `accent` is the token family
- * that models one (it has `--color-accent-hover` and `--color-accent-bg`;
- * `brand-a` is a bare swatch for glows and identity marks). The token
- * duplication remains unresolved (tracked in conduit-test-57oe).
- *
- * What is NOT converged, deliberately: `pill` stays content-width with a
- * border-colour hover and `field` stays `flex-1` with none, because one is a
- * compact toolbar switch and the other fills a form row. Different containers,
- * different geometry.
+ * Settings' joined segment follows the Final design. The other recipes retain
+ * their original call-site appearance.
  */
 
 type SegmentedRecipe = {
@@ -43,20 +26,6 @@ type SegmentedRecipe = {
 };
 
 export const SEGMENTED_VARIANTS = {
-	/** P2 effort choices, with a neutral selected fill in both themes. */
-	picker: {
-		list: "flex flex-1 min-w-0 gap-[3px]",
-		item: "flex-1 min-w-0 rounded-[7px] py-1.5 px-0.5 text-xs cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text disabled:opacity-50",
-		selected: "bg-text text-bg font-semibold",
-		unselected: "bg-border-subtle text-text-muted hover:text-text",
-	},
-	/** Context windows keep their content width within the same picker row. */
-	"picker-context": {
-		list: "flex flex-1 min-w-0 flex-wrap gap-0.5",
-		item: "rounded-[7px] py-0.5 px-2 text-xs cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text disabled:opacity-50",
-		selected: "bg-text text-bg font-semibold",
-		unselected: "text-text-muted hover:text-text",
-	},
 	/**
 	 * A horizontal tab header: an underline drawn with a bottom border that is
 	 * pulled up over the strip's own rule by `-mb-px`. Tabs' default look; it
@@ -66,14 +35,14 @@ export const SEGMENTED_VARIANTS = {
 	 * `border-none` sets border-style to none, which kills `border-b-2` outright,
 	 * so the underline never rendered from the classes at all. Someone had
 	 * patched around it with an inline `style="border-bottom: ..."`, leaving the
-	 * conditional `border-brand-a` class as dead code that contradicted the
+	 * conditional `border-accent` class as dead code that contradicted the
 	 * element's own style attribute. Dropping `border-none` makes the classes
 	 * load-bearing again and the inline style unnecessary — Tailwind v4's
 	 * preflight already sets `border: 0 solid`, so `border-b-2` alone is a solid
 	 * 2px bottom border.
 	 */
 	underline: {
-		list: "flex border-b border-border px-5 gap-1 font-brand",
+		list: "flex border-b border-border px-5 gap-1 font-sans",
 		// A whole-pixel line box (text-sm's 1.4 gives 15.4px) keeps the strip,
 		// and the scrolling panel below it, on the pixel grid.
 		item: "px-3 py-2 text-sm leading-[15px] font-medium border-b-2 -mb-px transition-colors cursor-pointer bg-transparent",
@@ -92,27 +61,17 @@ export const SEGMENTED_VARIANTS = {
 		unselected:
 			"bg-transparent border-border text-text-dimmer hover:text-text hover:border-border-subtle",
 	},
-	/**
-	 * overlays/SettingsPanel's Claude/OpenCode driver picker. Sits inside a
-	 * bordered form card, so its options are equal-width (`flex-1`) fields
-	 * rather than content-width tabs.
-	 */
-	field: {
-		list: "flex gap-1.5",
-		item: "flex-1 px-3 py-1.5 text-xs rounded border transition-colors cursor-pointer",
-		selected: "border-accent text-text bg-accent/10",
-		unselected: "border-border text-text-muted hover:text-text",
-	},
-	/**
-	 * The settings mockup's joined segment (`.seg`): one outlined capsule split
-	 * by hairlines, the selected part tinted pink. Inherits its font size from
-	 * its container. Settings wears it everywhere: Server's instance Type, Composer,
-	 * and Usage's warning and forecast switches.
-	 */
+	/** Final settings segments: a chip track and raised neutral selection. */
 	joined: {
-		list: "inline-flex shrink-0 overflow-hidden rounded-[7px] border border-border",
-		item: "px-[9px] py-[4px] font-medium border-l border-border first:border-l-0 max-md:min-h-[44px] max-md:min-w-[36px] cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-text disabled:opacity-50 disabled:cursor-not-allowed",
-		selected: "bg-accent-bg text-accent",
+		list: "inline-flex max-w-full shrink-0 rounded-[8px] bg-chip p-[2px]",
+		item: "flex min-h-[24px] items-center justify-center rounded-[6px] px-[10px] text-[12px] font-medium max-md:min-h-[44px] cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-text disabled:opacity-50 disabled:cursor-not-allowed",
+		selected: "bg-settings-segment text-text shadow-settings-segment",
+		unselected: "text-text-secondary hover:text-text",
+	},
+	avatar: {
+		list: "flex w-full rounded-[10px] bg-chip p-[3px]",
+		item: "flex min-h-[28px] max-md:min-h-[44px] flex-1 items-center justify-center rounded-[8px] px-[6px] text-[13px] font-medium cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-text",
+		selected: "bg-settings-segment text-text shadow-settings-segment",
 		unselected: "text-text-secondary hover:text-text",
 	},
 	/** Full-width session view band, with literal 44px phone targets. */
@@ -130,15 +89,24 @@ export const SEGMENTED_VARIANTS = {
 		unselected: "text-text-muted hover:text-text disabled:opacity-50",
 	},
 	/**
-	 * overlays/SettingsPanel's left section list (frame H): a vertical Tabs
-	 * whose selected row takes the alt fill. Full-width rows, so the whole
-	 * line is the hit target. On a phone the list is a whole screen you drill
-	 * in from, so rows grow to a 44px thumb target and a step larger type.
+	 * Final settings rail. On phones, Tabs groups the navigation rows into
+	 * cards and selection pushes a page.
 	 */
 	sections: {
-		list: "flex flex-col gap-[2px]",
-		item: "w-full text-left px-[8px] py-[6px] rounded-[7px] text-[11.5px] leading-[15px] max-md:flex max-md:items-center max-md:min-h-[44px] max-md:text-[13px] cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text disabled:opacity-50",
-		selected: "bg-bg-alt text-text",
+		list: "flex flex-col",
+		item: "group flex w-full min-h-[32px] items-center gap-[9px] rounded-[8px] px-[10px] text-left text-[13px] leading-[18px] max-md:min-h-[48px] max-md:gap-[12px] max-md:rounded-none max-md:px-[14px] max-md:text-[15px] cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-text disabled:opacity-50",
+		selected: "bg-selection text-text font-medium max-md:bg-settings-card",
+		unselected: "text-text-secondary hover:text-text max-md:text-text",
+	},
+	/**
+	 * chat/SurfacingCard's level control on the strip axis. Painted at the
+	 * axis's 21px; a transparent ::before takes the tap at 44px on phones, so
+	 * the chip track does not grow into a lozenge.
+	 */
+	level: {
+		list: "inline-flex rounded-[8px] bg-chip p-[2px]",
+		item: "relative inline-flex h-[21px] items-center gap-[4px] rounded-[6px] px-[6px] font-sans text-[11.5px] font-medium cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-text before:absolute before:inset-x-0 before:top-1/2 before:-translate-y-1/2 before:content-[''] max-md:before:h-[44px]",
+		selected: "bg-bg text-text shadow-settings-segment",
 		unselected: "text-text-secondary hover:text-text",
 	},
 } as const satisfies Record<string, SegmentedRecipe>;
@@ -157,6 +125,10 @@ export const SEGMENTED_VARIANT_NAMES = Object.keys(
 export type SegmentedOption<T extends string = string> = {
 	value: T;
 	label: string;
+	/** Shown instead of `label` below md; the accessible name stays `label`. */
+	shortLabel?: string;
+	/** A quiet trailing figure, such as a count. Not part of the accessible name. */
+	detail?: string;
 	shortcut?: string;
 	/** Forwarded as `data-testid`; several call sites' e2e page objects need it. */
 	testId?: string;

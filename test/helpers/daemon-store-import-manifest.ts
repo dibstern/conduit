@@ -1213,7 +1213,7 @@ export async function createProjectStoreFixture(
 				yield* sql`INSERT INTO input_drafts (draft_key, project_id, kind, text, updated_at) VALUES (${id}, ${projectId}, 'session', 'saved composer draft', 1000)`;
 				yield* sql`INSERT INTO session_pick_backfill VALUES (${id}, 'driver_unresolved')`;
 				yield* sql`INSERT INTO session_git_published VALUES (${`/fixture/${projectId}`}, '{"branch":"fixture"}')`;
-				yield* sql`INSERT INTO session_goal_checks VALUES (${`${id}_goal_check`}, ${id}, 'complete', 1000, 2, 'continue', 1000)`;
+				yield* sql`INSERT INTO session_goal_checks (event_id, session_id, condition, set_at, iterations, reason, created_at) VALUES (${`${id}_goal_check`}, ${id}, 'complete', 1000, 2, 'continue', 1000)`;
 				yield* sql`INSERT INTO provider_command_sessions (project_key, session_id, provider_id, provider_kind, status, created_at, updated_at) VALUES (${projectId}, ${id}, 'opencode', 'opencode', 'idle', 1000, 1000)`;
 				yield* sql`INSERT INTO provider_command_turns (project_key, session_id, turn_id, command_id, status, created_at, updated_at) VALUES (${projectId}, ${id}, ${user}, ${`${id}_command`}, 'completed', 1000, 1000)`;
 				yield* sql`INSERT INTO provider_command_interactions (project_key, session_id, interaction_id, kind, status, created_at, updated_at) VALUES (${projectId}, ${id}, ${`${id}_legacy_permission`}, 'permission', 'resolved', 1000, 1000)`;

@@ -24,7 +24,7 @@ test.describe("ToolGenericCard", () => {
 		await expect(toolName).toBeVisible();
 		await expect(toolName).toHaveText("Read");
 
-		// Completed tools show the status icon (check), not the subtitle row
+		// Completed tools keep the tool icon beside the past-tense verb.
 		const statusIcon = page.locator(".tool-status-icon");
 		await expect(statusIcon).toBeVisible();
 	});
@@ -64,8 +64,7 @@ test.describe("ToolGenericCard", () => {
 		});
 		await expect(page.locator(".tool-item")).toBeVisible();
 
-		// Tool name should be Bash
-		await expect(page.locator(".tool-name")).toHaveText("Bash");
+		await expect(page.locator(".tool-name")).toHaveText("Ran");
 
 		// Expand to see the command
 		await page.locator(".tool-header").click();
@@ -76,7 +75,7 @@ test.describe("ToolGenericCard", () => {
 		await expect(result).toHaveText(/\$ git rev-parse HEAD/);
 	});
 
-	test("shows running shimmer animation", async ({ page }) => {
+	test("shows running activity indicator", async ({ page }) => {
 		await page.goto(storyUrl("chat-toolitem--running"), {
 			waitUntil: "domcontentloaded",
 		});
@@ -87,9 +86,8 @@ test.describe("ToolGenericCard", () => {
 		await expect(subtitle).toBeVisible();
 		await expect(subtitle).toHaveText("Running…");
 
-		// The shimmer div should be present (pointer-events-none overlay)
-		const shimmer = page.locator(".tool-item div[style*='tool-shimmer-slide']");
-		await expect(shimmer).toBeAttached();
+		const activityIndicator = page.locator(".tool-header [style*='grid']");
+		await expect(activityIndicator).toBeAttached();
 	});
 
 	test("shows error styling for error state", async ({ page }) => {
@@ -98,17 +96,14 @@ test.describe("ToolGenericCard", () => {
 		});
 		await expect(page.locator(".tool-item")).toBeVisible();
 
-		// Tool name should be Bash
-		await expect(page.locator(".tool-name")).toHaveText("Bash");
+		await expect(page.locator(".tool-name")).toHaveText("Ran");
 
 		// Subtitle should say "Error"
 		const subtitle = page.locator(".tool-subtitle-text");
 		await expect(subtitle).toBeVisible();
 		await expect(subtitle).toHaveText("Error");
 
-		// The status icon should have the error class
-		const statusIcon = page.locator(".tool-status-icon");
-		await expect(statusIcon).toHaveClass(/text-error/);
+		await expect(page.locator(".tool-header .text-error")).toBeVisible();
 
 		// Expand to verify error result content
 		await page.locator(".tool-header").click();
@@ -172,7 +167,7 @@ test.describe("ToolQuestionCard", () => {
 		await expect(page.locator(".tool-item")).toBeVisible();
 
 		// Completed questions render read-only with options visible
-		const options = page.locator(".question-tool-section .rounded-lg");
+		const options = page.locator(".question-tool-option");
 		expect(await options.count()).toBeGreaterThanOrEqual(2);
 
 		// Check option labels are visible

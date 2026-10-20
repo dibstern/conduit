@@ -190,9 +190,11 @@ test("composer Stop preserves tasks on both clients and Stop them waits for SDK 
 		await expect(page.getByRole("alert")).toHaveCount(0);
 		for (const client of [page, second]) {
 			await expect(
-				client.getByTestId("composer-task-dots").locator("i"),
-			).toHaveCount(4);
-			await client.getByTestId("background-tasks-row").click();
+				client.getByRole("button", { name: "4 background tasks", exact: true }),
+			).toBeVisible();
+			await client
+				.getByRole("button", { name: /^\d+ background tasks?$/ })
+				.click();
 			await expect(
 				client.getByTestId("background-task-description"),
 			).toHaveText(taskStopFixture.map((task) => task.description));
@@ -200,7 +202,7 @@ test("composer Stop preserves tasks on both clients and Stop them waits for SDK 
 		await expect(
 			second.getByTestId("toast").filter({ hasText: "Turn stopped." }),
 		).toHaveCount(0);
-		await page.getByTestId("background-tasks-row").click();
+		await page.getByRole("button", { name: /^\d+ background tasks?$/ }).click();
 		const screenshot = testInfo.outputPath("turn-only-stop-toast.png");
 		await page.screenshot({ path: screenshot, animations: "disabled" });
 		await testInfo.attach("turn-only-stop-toast.png", {
@@ -224,14 +226,16 @@ test("composer Stop preserves tasks on both clients and Stop them waits for SDK 
 				taskStopFixture[0].task_id,
 			]);
 		await expect(
-			page.getByTestId("composer-task-dots").locator("i"),
-		).toHaveCount(4);
+			page.getByRole("button", { name: "4 background tasks", exact: true }),
+		).toBeVisible();
 		expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
 		expect(queryMarks(harness, queryId, "query-interrupted")).toHaveLength(1);
 		writeFileSync(join(harness.root, "task-stop-confirm-all"), "release");
 		for (const client of [page, second]) {
 			await expect(client.getByTestId("background-tasks-row")).toBeHidden();
-			await expect(client.getByTestId("composer-task-dots")).toBeHidden();
+			await expect(
+				client.getByRole("button", { name: /^\d+ background tasks?$/ }),
+			).toHaveCount(0);
 		}
 		expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
 	} finally {
@@ -278,9 +282,9 @@ test("queued tray stays Paused until Resume and the next message uses the same q
 		.toBe(responseChunks(next).join(""));
 	await expect(chat.stopBtn).toBeHidden();
 	await expect(page.getByTestId("pending-input-tray")).toHaveCount(0);
-	await expect(page.getByTestId("composer-task-dots").locator("i")).toHaveCount(
-		4,
-	);
+	await expect(
+		page.getByRole("button", { name: "4 background tasks", exact: true }),
+	).toBeVisible();
 	const delivered = marks(harness).filter(
 		(mark) => mark["kind"] === "enqueue" && mark["request"] === next,
 	);
@@ -312,9 +316,9 @@ test("queued tray stays Paused until Resume and the next message uses the same q
 			.filter((call) => call.prompt?.endsWith(sent))
 			.map((call) => call.pid),
 	).toEqual([pid]);
-	await expect(page.getByTestId("composer-task-dots").locator("i")).toHaveCount(
-		4,
-	);
+	await expect(
+		page.getByRole("button", { name: "4 background tasks", exact: true }),
+	).toBeVisible();
 	expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
 });
 
@@ -360,7 +364,8 @@ test("stop and run: Run now sends the command ahead of the queued message and dr
 	const command = page
 		.getByTestId("pending-input-row")
 		.filter({ hasText: "/goal clear" });
-	await expect(command.getByTestId("pending-input-steer")).toHaveText(
+	await expect(command.getByTestId("pending-input-steer")).toHaveCount(0);
+	await expect(command.getByTestId("pending-input-run-now")).toHaveText(
 		"Run now",
 	);
 	await command.getByRole("button", { name: "Run now", exact: true }).click();
@@ -461,7 +466,7 @@ test("a Monitor counts as live work and the toast disappears on session navigati
 	await expect(chat.stopBtn).toBeHidden();
 	const toast = page.getByTestId("toast").filter({ hasText: "Turn stopped." });
 	await expect(toast).toContainText("Turn stopped. 1 task still running");
-	await page.getByTestId("background-tasks-row").click();
+	await page.getByRole("button", { name: /^\d+ background tasks?$/ }).click();
 	await expect(page.getByTestId("background-task-description")).toHaveText([
 		taskStopMonitorFixture[0].description,
 	]);
@@ -495,7 +500,9 @@ test("composer Stop with no live tasks closes the query and shows no task toast"
 	await expect(
 		page.getByTestId("toast").filter({ hasText: "Turn stopped." }),
 	).toHaveCount(0);
-	await expect(page.getByTestId("composer-task-dots")).toHaveCount(0);
+	await expect(
+		page.getByRole("button", { name: /^\d+ background tasks?$/ }),
+	).toHaveCount(0);
 });
 
 test("correction: delayed idle cancel preserves the Monitor query and the next turn can Stop", async ({
@@ -543,9 +550,9 @@ test("correction: delayed idle cancel preserves the Monitor query and the next t
 			.filter((call) => call.prompt?.endsWith(next))
 			.map((call) => call.pid),
 	).toEqual([pid]);
-	await expect(page.getByTestId("composer-task-dots").locator("i")).toHaveCount(
-		1,
-	);
+	await expect(
+		page.getByRole("button", { name: "1 background task", exact: true }),
+	).toBeVisible();
 });
 
 test("correction: delayed idle cancel does not hide a real execution error on the next input", async ({
@@ -566,9 +573,9 @@ test("correction: delayed idle cancel does not hide a real execution error on th
 		"Fixture genuine execution failure",
 	);
 	expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
-	await expect(page.getByTestId("composer-task-dots").locator("i")).toHaveCount(
-		1,
-	);
+	await expect(
+		page.getByRole("button", { name: "1 background task", exact: true }),
+	).toBeVisible();
 });
 
 test("correction: repeated cancel belongs to one input and Stop preserves the pending steer", async ({
@@ -617,9 +624,9 @@ test("correction: repeated cancel belongs to one input and Stop preserves the pe
 	await expect(chat.stopBtn).toBeHidden();
 	expect(queryMarks(harness, queryId, "query-interrupted")).toHaveLength(2);
 	expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
-	await expect(page.getByTestId("composer-task-dots").locator("i")).toHaveCount(
-		1,
-	);
+	await expect(
+		page.getByRole("button", { name: "1 background task", exact: true }),
+	).toBeVisible();
 	await app.sendMessage("task-stop-follow-up-after-steer");
 	await expect
 		.poll(() => chat.getLastAssistantText())
@@ -810,7 +817,7 @@ test("correction: buffered foreground tools settle at the interrupted result", a
 	await expect(tool).toHaveAttribute("data-tool-status", "completed");
 	expect(queryMarks(harness, queryId, "query-interrupted")).toHaveLength(1);
 	expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
-	await expect(page.getByTestId("composer-task-dots").locator("i")).toHaveCount(
-		1,
-	);
+	await expect(
+		page.getByRole("button", { name: "1 background task", exact: true }),
+	).toBeVisible();
 });

@@ -14,8 +14,8 @@
   (that one is a Button).
 -->
 <script module lang="ts">
-	type BadgeVariant = "neutral" | "quiet" | "accent" | "accent-solid" | "tag";
-	type BadgeSize = "xs" | "sm" | "count";
+	type BadgeVariant = "neutral" | "quiet" | "accent" | "accent-solid" | "ask-solid" | "ask" | "tag" | "chip" | "success" | "error" | "snoozed" | "pinned" | "goal";
+	type BadgeSize = "xs" | "sm" | "count" | "navigation-count" | "status" | "label" | "session" | "command" | "indicator";
 	type BadgeShape = "rounded" | "pill";
 
 	const VARIANT_CLASSES: Record<BadgeVariant, string> = {
@@ -24,8 +24,18 @@
 		// SessionBar's woke/snoozed/settled state chips. The icon inside carries
 		// the colour, so the chip itself recedes.
 		quiet: "bg-bg-alt text-text-muted border border-border",
+		chip: "bg-chip text-text-secondary",
 		accent: "bg-accent-bg text-accent",
 		"accent-solid": "bg-accent text-bg",
+		"ask-solid": "bg-status-ask text-bg",
+		ask: "bg-status-ask/18 text-status-ask",
+		success: "bg-success/14 text-success",
+		error: "bg-error/14 text-error",
+		// Tint strengths are the lightest that keep the light theme's label at 4.5:1
+		// (theme-contrast.test.ts); the design's /16 left them at 4.27-4.43.
+		snoozed: "bg-status-snoozed/15 text-status-snoozed",
+		pinned: "bg-status-pinned/12 text-status-pinned",
+		goal: "bg-status-goal/12 text-status-goal",
 		// The tag tint is theme-aware on purpose: the two SettingsPanel chips
 		// used bg-white/[0.08], which is white-on-white in the light theme.
 		// An arbitrary rgba() belongs here, inside the design system, rather
@@ -39,7 +49,12 @@
 	// box guarantees that. 18px is literal rather than h-6 because the bubble
 	// is a circle paired with rounded-[9px], and the pair must not drift apart.
 	const SIZE_CLASSES: Record<BadgeSize, string> = {
+		indicator: "h-[12px] min-w-[12px] justify-center px-[3px] text-[8px] font-bold tabular-nums",
+		command: "h-[24px] gap-[6px] pl-[9px] pr-[4px] font-mono text-[11.5px]",
+		session: "h-[22px] px-[8px] text-[12px] font-medium leading-none",
+		status: "h-[20px] px-[7px] text-[11.5px] font-semibold leading-none",
 		xs: "px-[6px] py-[1px] text-[10px] font-medium",
+		label: "px-[7px] py-[2px] text-[11.5px] font-normal",
 		sm: "px-2 py-0.5 text-sm font-medium",
 		// font-semibold rather than the others' font-medium: this is a 10px
 		// digit on a solid accent fill, and the extra weight is what keeps it
@@ -47,6 +62,7 @@
 		// weight class is ever emitted -- two would leave the winner up to
 		// Tailwind's emission order rather than this file.
 		count: "min-w-[18px] h-[18px] px-[5px] text-xs font-semibold leading-none justify-center",
+		"navigation-count": "min-w-[17px] h-[17px] px-[5px] text-[10.5px] font-semibold leading-none justify-center",
 	};
 
 	// Two shapes, not three. A rounded-panel (10px) radius on an
@@ -61,8 +77,7 @@
 	// text size's own line-height and Badge v1's leading-none shaved 5px off
 	// every tag chip -- a real tightening dressed up as a migration. Only
 	// `count` pins it, where the box height makes it moot anyway.
-	const BASE_CLASSES =
-		"inline-flex items-center gap-1 whitespace-nowrap shrink-0";
+	const BASE_CLASSES = "inline-flex items-center";
 </script>
 
 <script lang="ts">
@@ -73,6 +88,8 @@
 		variant?: BadgeVariant;
 		size?: BadgeSize;
 		shape?: BadgeShape;
+		wrap?: boolean;
+		interactive?: boolean;
 		class?: string;
 		children: Snippet;
 	} & Omit<HTMLAttributes<HTMLSpanElement>, "class">;
@@ -81,6 +98,8 @@
 		variant = "neutral",
 		size = "xs",
 		shape = "rounded",
+		wrap = false,
+		interactive = false,
 		class: className,
 		children,
 		...rest
@@ -89,9 +108,12 @@
 	const badgeClass = $derived(
 		[
 			BASE_CLASSES,
+			wrap ? "min-w-0 break-words" : "whitespace-nowrap shrink-0",
 			VARIANT_CLASSES[variant],
+			size === "command" ? "" : "gap-1",
 			SIZE_CLASSES[size],
 			SHAPE_CLASSES[shape],
+			interactive ? "group-hover:bg-accent/10 group-focus-visible:bg-accent/10 group-active:bg-accent/15 group-data-[state=open]:bg-accent/15" : "",
 			className,
 		]
 			.filter(Boolean)

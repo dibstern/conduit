@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { inspectTouchTarget } from "../../../src/lib/frontend/stories/touch-target.js";
 import { PHONE_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRelayControl } from "./shared.js";
@@ -8,6 +9,66 @@ const rememberedSessionViews = new WeakMap<Page, string[]>();
 const transcriptAnchors = new WeakMap<Page, { top: number; gap: number }>();
 
 export const sessionPresentationHandlers: StepHandler[] = [
+	{
+		name: "phone header controls own their touch targets",
+		match:
+			/^the phone header controls own separate touch areas of at least 24 pixels, using 44 where space permits$/,
+		run: async ({ world }) => {
+			let checked = 0;
+			const small = [
+				"session-skills-chip",
+				"side-threads-control",
+				"session-bar-settle",
+				"session-bar-title-menu",
+				"session-bar-unread-chip",
+				"session-bar-state-chip",
+				"session-goal-subtitle",
+			];
+			for (const id of [
+				"session-bar-back",
+				"session-bar-island-overflow",
+				"session-bar-expand",
+				...small,
+				"background-tasks-toggle",
+				"background-tasks-row-stop-all",
+				"goal-details-pause",
+				"goal-details-resume",
+				"goal-details-edit",
+				"goal-details-clear",
+				"goal-details-new",
+				"goal-details-dismiss",
+			]) {
+				const control = world.page.getByTestId(id);
+				if (
+					!(await control.count()) ||
+					!(await control.isVisible()) ||
+					!(await control.evaluate((el) => el.tagName === "BUTTON"))
+				)
+					continue;
+				checked++;
+				const minimum =
+					small.includes(id) &&
+					!(
+						!(await world.page.getByTestId("background-tasks-row").count()) &&
+						(id === "session-goal-subtitle" ||
+							(id === "session-bar-state-chip" &&
+								!(await world.page
+									.getByTestId("session-goal-subtitle")
+									.count())))
+					)
+						? 24
+						: 44;
+				const target = await control.evaluate(inspectTouchTarget, minimum);
+				expect(target.width, id).toBeGreaterThanOrEqual(minimum);
+				expect(target.height, id).toBeGreaterThanOrEqual(minimum);
+				expect(
+					target.missing,
+					`${id}: ${JSON.stringify(target.failures)}`,
+				).toBe(0);
+			}
+			expect(checked).toBeGreaterThanOrEqual(2);
+		},
+	},
 	{
 		name: "set phone viewport",
 		match: /^the viewport is a phone$/,
@@ -367,7 +428,7 @@ export const sessionPresentationHandlers: StepHandler[] = [
 			if (
 				layout.compact !== "false" ||
 				layout.collapsed !== "false" ||
-				layout.height > 50
+				layout.height > 60
 			) {
 				throw new Error(
 					`desktop bar is not one row: ${JSON.stringify(layout)}`,
@@ -472,7 +533,14 @@ export const sessionPresentationHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			const menu = world.page.getByTestId("session-bar-overflow-menu");
 			await menu.waitFor({ state: "visible" });
-			const actions = await menu.getByRole("menuitem").allTextContents();
+			const actions = await menu
+				.locator('[data-testid^="overflow-"]')
+				.evaluateAll((items) =>
+					items.map(
+						(item) =>
+							item.getAttribute("aria-label") ?? item.textContent?.trim() ?? "",
+					),
+				);
 			const expected = ["Share", "Settings", "Debug panel"];
 			if (
 				JSON.stringify(actions.map((action) => action.trim())) !==

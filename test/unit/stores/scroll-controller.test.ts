@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.hoisted(() => {
 	let store: Record<string, string> = {};
@@ -61,6 +61,91 @@ describe("ScrollController", () => {
 		div.scrollTop = 200;
 		div.dispatchEvent(new Event("scroll"));
 	}
+
+	describe("explicit jumps", () => {
+		beforeEach(() => vi.useFakeTimers());
+		afterEach(() => vi.useRealTimers());
+
+		// A return expands the steps while the launching row is already visible.
+		// Neither a stale bottom-scroll event nor content timing may undo it.
+		it.each([
+			"before expansion",
+			"after expansion",
+			"after settling",
+		])("preserves the revealed row when new content arrives %s", (order) => {
+			const ctrl = makeController();
+			lifecycle = "ready";
+			const div = createScrollableDiv();
+			let top = 1500;
+			Object.defineProperty(div, "scrollTop", {
+				get: () => top,
+				set: (value: number) => {
+					top = Math.min(value, div.scrollHeight - div.clientHeight);
+				},
+			});
+			ctrl.attach(div);
+			ctrl.resetForSession();
+			ctrl.requestJump();
+			div.dispatchEvent(new Event("scroll"));
+			if (order === "before expansion") ctrl.onNewContent();
+			Object.defineProperty(div, "scrollHeight", { value: 2033 });
+			if (order === "after expansion") ctrl.onNewContent();
+			ctrl.onContainerResize();
+			vi.advanceTimersToNextFrame();
+			if (order === "after settling") ctrl.onNewContent();
+			expect(div.scrollTop).toBe(1500);
+			expect(ctrl.state).toBe("detached");
+			expect(ctrl.isPinned).toBe(false);
+
+			// Even a gap below the 50px detach threshold stays detached until
+			// the reader returns to the bottom using the normal re-follow rule.
+			div.dispatchEvent(new Event("scroll"));
+			ctrl.onNewContent();
+			expect(div.scrollTop).toBe(1500);
+			div.scrollTop = 1533;
+			div.dispatchEvent(new Event("scroll"));
+			expect(ctrl.state).toBe("following");
+			expect(ctrl.isPinned).toBe(true);
+			ctrl.detach();
+		});
+
+		it.each([
+			0, 4, 5, 33,
+		])("settles using the normal at-bottom rule with a %ipx gap, without a scroll event", (gap) => {
+			const ctrl = makeController();
+			lifecycle = "ready";
+			const div = createScrollableDiv();
+			ctrl.attach(div);
+			ctrl.requestJump();
+			div.scrollTop = 1500 - gap;
+			vi.advanceTimersToNextFrame();
+			expect(ctrl.isPinned).toBe(gap < 5);
+			expect(ctrl.isDetached).toBe(gap >= 5);
+			ctrl.detach();
+		});
+
+		it.each([
+			"requestFollow",
+			"resetForSession",
+			"detach",
+		] as const)("%s cancels a pending jump settlement", (method) => {
+			const ctrl = makeController();
+			lifecycle = "ready";
+			const div = createScrollableDiv();
+			ctrl.attach(div);
+			ctrl.requestJump();
+			ctrl[method]();
+			if (method === "detach") {
+				ctrl.attach(createScrollableDiv());
+				ctrl.resetForSession();
+			}
+			// Growth after the newer request must not let the old jump detach it.
+			Object.defineProperty(div, "scrollHeight", { value: 3000 });
+			vi.advanceTimersToNextFrame();
+			expect(ctrl.state).toBe("following");
+			ctrl.detach();
+		});
+	});
 
 	// Content that lands while the session is idle follows only a reader who
 	// was parked at the bottom, so pinned must survive the growth that moved

@@ -219,29 +219,31 @@ function baseProjects() {
 // The names deliberately differ from driver names: support is a wire fact,
 // not a frontend assumption about a provider. Both built-in drivers support
 // multi-folder sessions today; the unsupported state models a future adapter.
+// Each is its driver's default account, as the daemon reports: picking a
+// harness selects that driver's default.
 const capabilityInstances = [
 	{
 		id: "claude",
 		name: "Across folders",
 		driver: "claude",
-		isDefault: true,
 		port: 0,
 		managed: false,
 		status: "healthy",
 		restartCount: 0,
 		createdAt: 0,
+		isDefault: true,
 		capabilities: { supportsMultiFolder: true, supportsWorktree: true },
 	},
 	{
 		id: "opencode",
 		name: "Main only",
 		driver: "opencode",
-		isDefault: true,
 		port: 0,
 		managed: false,
 		status: "healthy",
 		restartCount: 0,
 		createdAt: 0,
+		isDefault: true,
 		capabilities: { supportsMultiFolder: false, supportsWorktree: false },
 	},
 ];
@@ -371,7 +373,7 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 		),
 	});
 	const picker = page.locator(
-		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 	);
 	await openPickerRoot(page, picker);
 	await page.getByTestId("picker-harness-opencode").click();
@@ -422,8 +424,8 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 			.filter((request) => request.tag === "CreateSession"),
 	).toEqual([]);
 
-	// Missing advertised capabilities use the shared driver contract (70578efa).
-	// Keep the account: removing it is a different reason to block sending.
+	// An account without capabilities falls back to its driver's, so it
+	// neither blocks a multi-folder draft nor marks worktrees unsupported.
 	sendMockDaemonList(page, "SubscribeInstances", {
 		instances: capabilityInstances.map(
 			({ capabilities: _capabilities, ...instance }) => instance,

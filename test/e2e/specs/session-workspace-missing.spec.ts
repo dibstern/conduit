@@ -16,13 +16,14 @@ import {
 	type WorkspaceMissing,
 	WorktreeRecoveryError,
 } from "../../../src/lib/contracts/worktree.js";
+import { openComposerSheet } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple", screenshot: "off" });
 
-// The words composer keeps the checkout in the footer on phones too.
+// Desktop Words shows the checkout in the footer; phones keep it in the Composer sheet.
 test.beforeEach(async ({ page }) => {
 	await page.addInitScript(() => {
 		localStorage.setItem(
@@ -151,6 +152,10 @@ for (const viewport of [
 				folder === main ? "main" : "library",
 			);
 			const label = `worktree missing: ${names.join(", ")}`;
+			if (viewport.width < 768) {
+				await expect(page.getByTestId("composer-more-attention")).toBeVisible();
+				await openComposerSheet(page);
+			}
 			const identity = page.getByTestId("composer-checkout");
 			const notice = page.getByTestId("workspace-missing");
 			await expect(notice).toBeVisible();
@@ -189,6 +194,10 @@ for (const viewport of [
 				workspaceMissing: undefined,
 				git: { branch, worktree: "0" },
 			});
+			if (viewport.width < 768)
+				await expect(page.getByTestId("composer-more-attention")).toHaveCount(
+					0,
+				);
 			await expect(notice).toHaveCount(0);
 			await capture(page, testInfo, "multi-folder-recovered");
 			await testInfo.attach("multi-folder-recovery-request", {
@@ -227,6 +236,11 @@ for (const viewport of [
 				page,
 				harness.relayBaseUrl,
 			);
+			const phone = viewport.width < 768;
+			if (phone) {
+				await expect(page.getByTestId("composer-more-attention")).toBeVisible();
+				await openComposerSheet(page);
+			}
 			const identity = page.getByTestId("composer-checkout");
 			const notice = page.getByTestId("workspace-missing");
 			await expect(notice).toBeVisible();
@@ -263,6 +277,12 @@ for (const viewport of [
 				workspace: recreated ? session.workspace : null,
 				git: recreated ? { branch, worktree: "0" } : { branch: "main" },
 			});
+			if (phone) {
+				await expect(page.getByTestId("composer-more-attention")).toHaveCount(
+					0,
+				);
+				await openComposerSheet(page);
+			}
 			await expect(notice).toHaveCount(0);
 			await expect(identity).toHaveAttribute(
 				"title",
