@@ -848,6 +848,9 @@ Object.assign(ClaudeDriver, { create: deps => {
 				cwd: this.projectDir,
 				env: (this.environment = {
 					...options.serviceEnvironment,
+					// Bootstrap once, including configs replaced by a fixture before start.
+					CONDUIT_TEST_REGISTER_PROJECT:
+						this.generations.length === 0 ? "1" : "0",
 					...(options.keepPort && this.port
 						? { CONDUIT_TEST_PORT: String(this.port) }
 						: {}),

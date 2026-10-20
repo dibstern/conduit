@@ -563,7 +563,8 @@ async function main(): Promise<void> {
 		await activeDaemon.stop();
 		process.exit(0);
 	}
-	await activeDaemon.addProject(join(root, "process-test"));
+	if (process.env["CONDUIT_TEST_REGISTER_PROJECT"] === "1")
+		await activeDaemon.addProject(join(root, "process-test"));
 	process.send({
 		channel: "conduit-process-test",
 		kind: "ready",
