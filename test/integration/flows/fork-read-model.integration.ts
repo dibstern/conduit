@@ -929,7 +929,7 @@ describe("Fork read-model inheritance", () => {
 		).toEqual(rendered);
 	});
 
-	it("seeds Cursor's digest from the copied rows without appending their events", async () => {
+	it("forks a Cursor source without appending copied events or saving a digest early", async () => {
 		harness = await createRelayHarness("chat-simple", { claudeSdk });
 		await harness.stack.effectRuntime.runtime.runPromise(
 			Effect.gen(function* () {
@@ -999,11 +999,11 @@ describe("Fork read-model inheritance", () => {
 				]);
 				const fork = yield* forkSession(sourceId);
 				const sql = yield* SqlClient.SqlClient;
-				const [digest] = yield* sql<{
-					value: string;
-				}>`SELECT value FROM provider_state WHERE session_id = ${fork.id} AND key = 'cursor.forkDigest'`;
-				expect(digest?.value).toContain("Remember the blue marker");
-				expect(digest?.value).toContain("The marker is blue");
+				// The first turn builds the digest from the inherited rows
+				// (cursor-fork-flow.test.ts); forking saves none.
+				expect(
+					yield* sql`SELECT value FROM provider_state WHERE session_id = ${fork.id} AND key = 'cursor.forkDigest'`,
+				).toEqual([]);
 				expect(
 					yield* sql`SELECT type FROM events WHERE session_id = ${fork.id} AND type IN ('message.created', 'text.delta')`,
 				).toEqual([]);

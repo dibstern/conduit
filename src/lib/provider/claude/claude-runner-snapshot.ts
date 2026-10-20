@@ -8,7 +8,12 @@ export interface RunnerSettingsSnapshot {
 	readonly claudeSettingsOverrides?: Settings;
 	readonly options: Omit<
 		Options,
-		"abortController" | "canUseTool" | "resume" | "resumeSessionAt"
+		| "abortController"
+		| "canUseTool"
+		| "resume"
+		| "resumeSessionAt"
+		| "forkSession"
+		| "sessionId"
 	>;
 	readonly fileSettings?: RunnerFileSettings;
 	/** Retain original launch directories across primary/extra folder swaps. */
