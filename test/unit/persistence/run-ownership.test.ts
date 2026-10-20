@@ -13,7 +13,7 @@ describe("run terminal ownership", () => {
 	afterEach(async () => {
 		await harness?.dispose();
 	});
-	it("leaves unowned signals unplaced and closes only accepted inputs of the terminal run once", async () => {
+	it("leaves unowned signals unplaced and closes only member inputs of the terminal run once", async () => {
 		harness = makeEffectProjectionHarness();
 		await harness.query(
 			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES ('s', 'claude', 'test', 'idle', 1, 1)",
@@ -36,32 +36,44 @@ describe("run terminal ownership", () => {
 				} as StoredEvent,
 			]);
 		};
-		await project("message.created", {
-			messageId: "a",
-			sessionId: "s",
-			role: "user",
-			inputId: "a",
-		});
+		await project(
+			"message.created",
+			{
+				messageId: "a",
+				sessionId: "s",
+				role: "user",
+				inputId: "a",
+			},
+			"r1",
+		);
 		await project("session.status", { sessionId: "s", status: "busy" });
 		expect(
 			await harness.query("SELECT state FROM turns WHERE id = 'a'"),
 		).toEqual([{ state: "pending" }]);
 		await project("run.requested", { runId: "r1", inputId: "a" }, "r1");
 		await project("run.started", { inputId: "a", requestedRunId: "r1" }, "r1");
-		await project("message.created", {
-			messageId: "b",
-			sessionId: "s",
-			role: "user",
-			inputId: "b",
-		});
+		await project(
+			"message.created",
+			{
+				messageId: "b",
+				sessionId: "s",
+				role: "user",
+				inputId: "b",
+			},
+			"r2",
+		);
 		await project("run.requested", { runId: "r2", inputId: "b" }, "r2");
 		await project("run.started", { inputId: "b", requestedRunId: "r2" }, "r1");
-		await project("message.created", {
-			messageId: "c",
-			sessionId: "s",
-			role: "user",
-			inputId: "c",
-		});
+		await project(
+			"message.created",
+			{
+				messageId: "c",
+				sessionId: "s",
+				role: "user",
+				inputId: "c",
+			},
+			"r3",
+		);
 		await project("run.requested", { runId: "r3", inputId: "c" }, "r3");
 		await project("run.started", { inputId: "c", requestedRunId: "r3" }, "r3");
 		const endBefore = await harness.query(
@@ -95,6 +107,32 @@ describe("run terminal ownership", () => {
 				"SELECT id, state, completed_at, cost FROM turns ORDER BY id",
 			),
 		).toEqual(finished);
+		await project("turn.interrupted", { messageId: "c" }, "r1");
+		expect(
+			await harness.query("SELECT finish FROM messages WHERE id = 'c'"),
+		).toEqual([{ finish: null }]);
+		const boundary = await harness.query(
+			"SELECT last_turn_end_input_id, last_turn_end_version FROM sessions WHERE id = 's'",
+		);
+		await project(
+			"run.requested",
+			{ runId: "unplaced", inputId: "never-placed" },
+			"unplaced",
+		);
+		await project(
+			"turn.error",
+			{ messageId: "", error: "Intake refused" },
+			"unplaced",
+		);
+		expect(
+			await harness.query(
+				"SELECT last_turn_end_input_id, last_turn_end_version FROM sessions WHERE id = 's'",
+			),
+		).toEqual(boundary);
+		await project("turn.interrupted", { messageId: "irrelevant" }, "r3");
+		expect(
+			await harness.query("SELECT finish FROM messages WHERE id = 'c'"),
+		).toEqual([{ finish: "interrupted" }]);
 	});
 	it("places a delayed acceptance on its already-ended run without touching a newer run", async () => {
 		harness = makeEffectProjectionHarness();
@@ -120,6 +158,7 @@ describe("run terminal ownership", () => {
 					inputId: "new-input",
 					role: "user",
 				},
+				runId: "new-run",
 			},
 			{
 				type: "run.requested",

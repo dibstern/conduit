@@ -38,6 +38,7 @@ import {
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
+import { inboxRunStatusQuery } from "../../../persistence/inbox-run-status-query.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { Usage } from "../../daemon/Services/usage.js";
 import { type Continuation, ContinuationTag } from "./continuation.js";
@@ -407,9 +408,8 @@ export const SessionInboxLive = Layer.effect(
 					stopped: number;
 					interrupt_requested: string | null;
 					running: string | null;
-				}>`SELECT
-					(SELECT status FROM provider_runs WHERE session_id = ${sessionId}
-						AND status IN ('pending', 'running') ORDER BY requested_at DESC, rowid DESC LIMIT 1) AS run_status,
+				}>`WITH latest_run AS (${inboxRunStatusQuery(sql, sessionId)}) SELECT
+					(SELECT status FROM latest_run) AS run_status,
 					(SELECT provider FROM sessions WHERE id = ${sessionId}) AS provider,
 					(SELECT json_extract(limit_recovery, '$.cutOffMessageId') IS NOT NULL
 						FROM sessions WHERE id = ${sessionId}) AS limited,
@@ -418,35 +418,7 @@ export const SessionInboxLive = Layer.effect(
 						FROM sessions WHERE id = ${sessionId}) AS scheduled,
 					(SELECT COUNT(*) FROM pending_approvals
 						WHERE session_id = ${sessionId} AND status = 'pending') AS open_prompts,
-					(EXISTS (SELECT 1 FROM turns WHERE session_id = ${sessionId}
-						AND state IN ('interrupted', 'error')
-						AND completed_at >= COALESCE(
-							(SELECT MAX(requested_at) FROM provider_command_outbox
-								WHERE session_id = ${sessionId} AND effect_type = 'send_turn'),
-							(SELECT MAX(requested_at) FROM turns WHERE session_id = ${sessionId}),
-							0)) AND NOT EXISTS (
-						SELECT 1 FROM events admitted JOIN events released
-							ON released.session_id = admitted.session_id
-						WHERE admitted.session_id = ${sessionId} AND admitted.type = 'input.admitted'
-							AND released.type = 'session.resume_cancelled'
-							AND json_extract(released.metadata, '$.source') = 'inbox-reset'
-							AND released.sequence > admitted.sequence
-							AND admitted.sequence > COALESCE((SELECT MAX(sequence) FROM events
-								WHERE session_id = ${sessionId}
-								AND type IN ('turn.interrupted', 'turn.error')), 0))
-						OR EXISTS (SELECT 1 FROM events requeued
-						WHERE session_id = ${sessionId} AND type = 'input.requeued'
-							AND json_extract(data, '$.reason') = 'failed'
-							AND sequence = (SELECT MIN(first.sequence) FROM events first
-								WHERE first.session_id = ${sessionId} AND first.type = 'input.requeued'
-								AND json_extract(first.data, '$.sentSequence') = json_extract(requeued.data, '$.sentSequence'))
-							AND json_extract(data, '$.sentSequence') = (SELECT MAX(sent.sequence) FROM events sent
-								WHERE sent.session_id = ${sessionId} AND sent.type = 'input.sent'
-								AND json_extract(sent.data, '$.inputId') = json_extract(requeued.data, '$.inputId'))
-							AND sequence > COALESCE((SELECT MAX(sequence) FROM events
-								WHERE session_id = ${sessionId} AND (type = 'input.sent'
-									OR (type = 'session.resume_cancelled'
-										AND json_extract(metadata, '$.source') = 'inbox-reset'))), 0))) AS stopped,
+					(SELECT stopped FROM latest_run) AS stopped,
 					(SELECT pending.input_id FROM pending_inputs pending
 						WHERE pending.session_id = ${sessionId} AND pending.state = 'queued'
 						AND EXISTS (SELECT 1 FROM events
@@ -600,24 +572,49 @@ export const SessionInboxLive = Layer.effect(
 				log.warn(
 					`session=${sessionId} input=${handoff.inputId} queued handoff failed before it was sent; pausing the queue`,
 				);
-				const meta = provider ? { provider: provider.provider } : {};
-				yield* persist.persistUserMessage(sessionId, request.text, {
-					messageId: handoff.inputId,
-					inputId: handoff.inputId,
-					...meta,
-				});
-				yield* persist.persistEvent(
+				const runId = randomUUID();
+				const meta = {
+					...(provider ? { provider: provider.provider } : {}),
+					metadata: { runId },
+				};
+				yield* persist.persistEvents([
+					canonicalEvent(
+						"run.requested",
+						sessionId,
+						{ runId, inputId: handoff.inputId },
+						meta,
+					),
+					canonicalEvent(
+						"message.created",
+						sessionId,
+						{
+							messageId: handoff.inputId,
+							inputId: handoff.inputId,
+							sessionId,
+							role: "user",
+						},
+						meta,
+					),
+					canonicalEvent(
+						"text.delta",
+						sessionId,
+						{
+							messageId: handoff.inputId,
+							partId: `${handoff.inputId}-0`,
+							text: request.text,
+						},
+						meta,
+					),
 					canonicalEvent(
 						"turn.error",
 						sessionId,
 						{
 							messageId: handoff.inputId,
-							userMessageId: handoff.inputId,
 							error: "This queued message could not be sent",
 						},
 						meta,
 					),
-				);
+				]);
 			});
 
 		const interrupt = (

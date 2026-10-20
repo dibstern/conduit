@@ -90,12 +90,17 @@ const seed = Effect.gen(function* () {
 			runId: `${inputId}-run`,
 			inputId,
 		}),
-		canonicalEvent("message.created", sessionId, {
+		canonicalEvent(
+			"message.created",
 			sessionId,
-			messageId: inputId,
-			role: "user",
-			inputId,
-		}),
+			{
+				sessionId,
+				messageId: inputId,
+				role: "user",
+				inputId,
+			},
+			{ metadata: { runId: `${inputId}-run` } },
+		),
 		canonicalEvent(
 			"run.started",
 			sessionId,
@@ -190,12 +195,17 @@ it.each([
 						inputId,
 						...(index ? { steer: true } : {}),
 					}),
-					canonicalEvent("message.created", sessionId, {
+					canonicalEvent(
+						"message.created",
 						sessionId,
-						messageId: inputId,
-						role: "user",
-						inputId,
-					}),
+						{
+							sessionId,
+							messageId: inputId,
+							role: "user",
+							inputId,
+						},
+						{ metadata: { runId: `run-${inputId}` } },
+					),
 					canonicalEvent(
 						"run.started",
 						sessionId,
@@ -242,12 +252,17 @@ it.each([
 					runId: "run-queued",
 					inputId: "queued-input",
 				}),
-				canonicalEvent("message.created", sessionId, {
+				canonicalEvent(
+					"message.created",
 					sessionId,
-					messageId: "queued",
-					role: "user",
-					inputId: "queued-input",
-				}),
+					{
+						sessionId,
+						messageId: "queued",
+						role: "user",
+						inputId: "queued-input",
+					},
+					{ metadata: { runId: "run-queued" } },
+				),
 				canonicalEvent(
 					"run.started",
 					sessionId,
@@ -330,7 +345,7 @@ it.each([
 			}>`SELECT last_turn_end_input_id AS input_id, last_turn_end_version AS version, last_turn_error_at AS error_at FROM sessions WHERE id = 'early'`;
 			expect(ended).toEqual({
 				input_id: null,
-				version: 6,
+				version: null,
 				error_at: null,
 			});
 			// Recovery of just the session projector sees already-closed turns and
@@ -357,7 +372,7 @@ it.each([
 	);
 });
 
-it("an interruption before the user echo advances the end version with an unknown starter", async () => {
+it("an interruption before placement does not advance a turn completion boundary", async () => {
 	await withPersistence(() =>
 		Effect.gen(function* () {
 			const commit = yield* makeCommitAndSignal;
@@ -403,7 +418,7 @@ it("an interruption before the user echo advances the end version with an unknow
 			const [ended] = yield* read;
 			expect(ended).toEqual({
 				input_id: null,
-				version: 5,
+				version: null,
 				error_at: null,
 			});
 			// The queued handoff does not turn the older interruption into its end.
@@ -487,7 +502,7 @@ it("a steered turn with an unknown starter does not name an older input", async 
 				input_id: string | null;
 				version: number;
 			}>`SELECT last_turn_end_input_id AS input_id, last_turn_end_version AS version FROM sessions WHERE id = 'unknown'`;
-			expect(ended).toEqual({ input_id: null, version: 8 });
+			expect(ended).toEqual({ input_id: null, version: null });
 		}),
 	);
 });
@@ -507,12 +522,17 @@ it("a steer placed after the preceding turn ended starts its own turn", async ()
 					runId: "alpha-run",
 					inputId: "alpha-input",
 				}),
-				canonicalEvent("message.created", "late", {
-					sessionId: "late",
-					messageId: "alpha",
-					role: "user",
-					inputId: "alpha-input",
-				}),
+				canonicalEvent(
+					"message.created",
+					"late",
+					{
+						sessionId: "late",
+						messageId: "alpha",
+						role: "user",
+						inputId: "alpha-input",
+					},
+					{ metadata: { runId: "alpha-run" } },
+				),
 				canonicalEvent(
 					"run.started",
 					"late",
@@ -540,12 +560,17 @@ it("a steer placed after the preceding turn ended starts its own turn", async ()
 					{ userMessageId: "alpha", messageId: "reply-alpha" },
 					{ provider: "claude", metadata: { runId: "alpha-run" } },
 				),
-				canonicalEvent("message.created", "late", {
-					sessionId: "late",
-					messageId: "bravo",
-					role: "user",
-					inputId: "bravo",
-				}),
+				canonicalEvent(
+					"message.created",
+					"late",
+					{
+						sessionId: "late",
+						messageId: "bravo",
+						role: "user",
+						inputId: "bravo",
+					},
+					{ metadata: { runId: "bravo-run" } },
+				),
 				canonicalEvent(
 					"run.started",
 					"late",
@@ -628,7 +653,7 @@ it("session-only recovery does not use a steer's echo from after the interruptio
 				version: number;
 				error_at: number | null;
 			}>`SELECT last_turn_end_input_id AS input_id, last_turn_end_version AS version, last_turn_error_at AS error_at FROM sessions WHERE id = 'future'`;
-			const ended = [{ input_id: null, version: 7, error_at: null }];
+			const ended = [{ input_id: null, version: null, error_at: null }];
 			expect(yield* read).toEqual(ended);
 			yield* sql`UPDATE sessions SET last_turn_end_input_id = NULL, last_turn_end_version = NULL WHERE id = 'future'`;
 			yield* sql`DELETE FROM projector_cursors WHERE projector_name = 'session'`;

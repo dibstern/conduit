@@ -11,7 +11,13 @@ import { Data, Effect, Queue, Stream } from "effect";
 import type { PromptQueueController, SDKUserMessage } from "./types.js";
 
 type PromptQueueItem =
-	| { readonly _tag: "Message"; readonly message: SDKUserMessage }
+	| {
+			readonly _tag: "Message";
+			readonly message: SDKUserMessage;
+			readonly signal: AbortSignal | undefined;
+			recalled: boolean;
+			handed: boolean;
+	  }
 	| { readonly _tag: "End" };
 
 type PromptQueueMessage = Extract<
@@ -41,10 +47,11 @@ export class EffectPromptQueueClosed extends Data.TaggedError(
 export class EffectPromptQueue implements PromptQueueController {
 	private _iterating = false;
 	private _closed = false;
+	private readonly inputs = new Map<string, PromptQueueMessage>();
 
 	private constructor(
 		private readonly queue: Queue.Queue<PromptQueueItem>,
-		private readonly iterable: AsyncIterable<SDKUserMessage>,
+		private readonly iterable: AsyncIterable<PromptQueueMessage>,
 	) {}
 
 	static make(): Effect.Effect<EffectPromptQueue> {
@@ -56,7 +63,6 @@ export class EffectPromptQueue implements PromptQueueController {
 				Stream.takeWhile(
 					(item): item is PromptQueueMessage => item._tag === "Message",
 				),
-				Stream.map((item) => item.message),
 				Stream.ensuring(Queue.shutdown(queue)),
 				Stream.toAsyncIterable,
 			);
@@ -66,13 +72,29 @@ export class EffectPromptQueue implements PromptQueueController {
 
 	enqueue(
 		message: SDKUserMessage,
+		signal?: AbortSignal,
 	): Effect.Effect<void, EffectPromptQueueClosed> {
 		return Effect.suspend(() => {
 			if (this._closed) return Effect.fail(new EffectPromptQueueClosed());
-			return Queue.offer(this.queue, {
+			const item: PromptQueueMessage = {
 				_tag: "Message",
 				message,
-			}).pipe(Effect.asVoid);
+				signal,
+				recalled: false,
+				handed: false,
+			};
+			if (message.uuid) this.inputs.set(message.uuid, item);
+			return Queue.offer(this.queue, item).pipe(Effect.asVoid);
+		});
+	}
+
+	recall(inputId: string): Effect.Effect<boolean> {
+		return Effect.sync(() => {
+			const item = this.inputs.get(inputId);
+			this.inputs.delete(inputId);
+			if (item?.handed) return false;
+			if (item) item.recalled = true;
+			return true;
 		});
 	}
 
@@ -92,10 +114,22 @@ export class EffectPromptQueue implements PromptQueueController {
 
 		const iterator = this.iterable[Symbol.asyncIterator]();
 		return {
-			next: () => iterator.next(),
+			next: async (): Promise<IteratorResult<SDKUserMessage>> => {
+				while (true) {
+					const next = await iterator.next();
+					if (next.done) return { value: undefined, done: true };
+					const item = next.value;
+					// Stream can buffer a whole chunk. Recall remains possible until
+					// this exact next() hands the individual input to the SDK.
+					if (item.recalled || item.signal?.aborted) continue;
+					item.handed = true;
+					return { value: item.message, done: false };
+				}
+			},
 			return: async (): Promise<IteratorResult<SDKUserMessage>> => {
 				this._closed = true;
-				if (iterator.return) return iterator.return();
+				this.inputs.clear();
+				await iterator.return?.();
 				return { value: undefined, done: true };
 			},
 		};

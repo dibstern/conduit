@@ -1,4 +1,4 @@
-import { Deferred, Effect, type Scope } from "effect";
+import { Effect, type Scope } from "effect";
 import type { TurnResult } from "../types.js";
 import type { RunnerPayload } from "./runner-payload.js";
 import { RunnerSinkBindings } from "./runner-sink-bindings.js";
@@ -40,6 +40,11 @@ export class InProcessSessionRunner implements SessionRunner {
 	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
 		return Effect.sync(() => this.sessions.has(sessionId));
 	}
+	hasActiveTurnsEffect(sessionId: string): Effect.Effect<boolean> {
+		return (
+			this.payload.hasActiveTurnsEffect?.(sessionId) ?? Effect.succeed(false)
+		);
+	}
 	hasPendingSubagentFinalizers(sessionId: string): boolean {
 		return this.payload.hasPendingSubagentFinalizers?.(sessionId) ?? false;
 	}
@@ -72,11 +77,9 @@ export class InProcessSessionRunner implements SessionRunner {
 			switch (command.type) {
 				case "send-turn": {
 					this.sessions.add(command.input.sessionId);
-					const finished = yield* Deferred.make<void>();
 					const sink = this.sinks.makeSessionSink(
 						command.sinkId,
 						command.input.sessionId,
-						finished,
 					);
 					const controller = this.sinks.controller(command.sinkId);
 					if (!controller)
@@ -91,11 +94,11 @@ export class InProcessSessionRunner implements SessionRunner {
 						);
 					}).pipe(
 						Effect.map((result) =>
-							result.status === "completed" && command.input.handoff
+							(result.status === "accepted" || result.status === "completed") &&
+							command.input.handoff
 								? { ...result, handoff: command.input.handoff }
 								: result,
 						),
-						Effect.ensuring(Deferred.succeed(finished, undefined)),
 						Effect.ensuring(this.sinks.releaseSinkEffect(sink)),
 					);
 				}
@@ -160,12 +163,11 @@ export class InProcessSessionRunner implements SessionRunner {
 				case "shutdown-after-turn":
 					if (this.payload.shutdownAfterTurn)
 						return yield* this.payload.shutdownAfterTurn(command.sessionId);
-					yield* this.sinks
-						.awaitSessionSends(command.sessionId)
-						.pipe(
-							Effect.andThen(this.payload.endSession(command.sessionId)),
-							Effect.forkIn(this.scope),
-						);
+					yield* Effect.gen({ self: this }, function* () {
+						while (yield* this.hasActiveTurnsEffect(command.sessionId))
+							yield* Effect.sleep("10 millis");
+						yield* this.payload.endSession(command.sessionId);
+					}).pipe(Effect.forkIn(this.scope));
 					return;
 				case "stop-task":
 					if (this.payload.stopTask)

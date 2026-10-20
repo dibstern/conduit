@@ -610,6 +610,11 @@ export const CanonicalEvents = {
 	"turn.completed": live(
 		Schema.Struct({
 			messageId: Schema.String,
+			providerStateUpdates: Schema.optionalKey(
+				Schema.Array(
+					Schema.Struct({ key: Schema.String, value: Schema.String }),
+				),
+			),
 			/** Names the turn when no assistant message of its own answered it. */
 			userMessageId: Schema.optionalKey(Schema.String),
 			cost: Schema.optionalKey(Schema.Number),
@@ -622,21 +627,21 @@ export const CanonicalEvents = {
 			duration: Schema.optionalKey(Schema.Number),
 		}),
 	),
+	"turn.notice": live(Schema.Struct({ text: Schema.String })),
 	"turn.error": live(
 		Schema.Struct({
 			messageId: Schema.String,
-			/** Durable turn owner when a process fails before or between messages. */
-			userMessageId: Schema.optionalKey(Schema.String),
 			error: Schema.String,
 			code: Schema.optionalKey(Schema.String),
 			retryable: Schema.optionalKey(Schema.Boolean),
+			retryHandled: Schema.optionalKey(Schema.Boolean),
+			retryAt: Schema.optionalKey(Schema.Number),
 		}),
 	),
 	"turn.interrupted": live(
 		Schema.Struct({
 			messageId: Schema.String,
-			/** Exact pending input when interruption precedes provider acceptance. */
-			userMessageId: Schema.optionalKey(Schema.String),
+			code: Schema.optionalKey(Schema.String),
 			reason: Schema.optionalKey(Schema.String),
 		}),
 	),

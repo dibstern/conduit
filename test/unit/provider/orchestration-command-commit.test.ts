@@ -1,7 +1,10 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
 	type DurableCommandCommitInput,
 	DurableCommandCommitRepository,
@@ -44,11 +47,11 @@ function commitInput(
 }
 
 /** Every test gets a fresh migrated in-memory database. */
-const withRepository = <A, E>(
+const withRepository = <A, E, R>(
 	body: (
 		sql: SqlClient.SqlClient,
 		repository: DurableCommandCommitRepository,
-	) => Effect.Effect<A, E>,
+	) => Effect.Effect<A, E, R>,
 ) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
@@ -62,46 +65,105 @@ const withRepository = <A, E>(
 
 describe("DurableCommandCommitRepository", () => {
 	it.effect(
-		"replaces an idle reservation with a fresh run and records its interruption",
+		"reuses a pending reservation when replacing an unclaimed outbox row",
 		() =>
 			withRepository((sql, repository) =>
 				Effect.gen(function* () {
-					yield* repository.commit(commitInput());
+					const runner = yield* ProjectionRunnerEffectTag;
+					yield* runner.recover();
+					yield* runner.projectBatch(yield* repository.commit(commitInput()));
 					const [first] = yield* sql<{
 						id: string;
 					}>`SELECT id FROM provider_runs`;
 					const stored = yield* repository.commit(
 						commitInput({ events: [], requestSequence: 2, at: 2000 }),
 					);
-					const runs = yield* sql<{
+					yield* runner.projectBatch(stored);
+					expect(yield* sql`SELECT id, status FROM provider_runs`).toEqual([
+						{ id: first?.id, status: "pending" },
+					]);
+					expect(
+						yield* sql`SELECT request_sequence, run_id FROM provider_command_outbox`,
+					).toEqual([{ request_sequence: 2, run_id: first?.id }]);
+					expect(stored).toEqual([]);
+					expect(
+						yield* sql`SELECT last_applied_sequence FROM provider_command_meta`,
+					).toEqual([{ last_applied_sequence: 2 }]);
+				}),
+			),
+	);
+
+	it.effect(
+		"reserves a live initial owner when an ended send is recommitted",
+		() =>
+			withRepository((sql, repository) =>
+				Effect.gen(function* () {
+					const runner = yield* ProjectionRunnerEffectTag;
+					yield* runner.recover();
+					yield* runner.projectBatch(yield* repository.commit(commitInput()));
+					const [first] = yield* sql<{
 						id: string;
-						status: string;
-					}>`SELECT id, status FROM provider_runs ORDER BY requested_at`;
-					expect(runs[0]).toEqual({ id: first?.id, status: "interrupted" });
-					expect(runs[1]).toEqual({
-						id: expect.any(String),
-						status: "pending",
-					});
-					expect(runs[1]?.id).not.toBe(first?.id);
+					}>`SELECT id FROM provider_runs`;
+					if (!first) throw new Error("Initial reservation missing");
+					const commit = yield* makeCommitAndSignal;
+					yield* commit([
+						canonicalEvent(
+							"turn.error",
+							"session-1",
+							{
+								messageId: "",
+								error: "retry",
+								retryable: true,
+							},
+							{
+								provider: "claude",
+								createdAt: 1500,
+								metadata: { runId: first.id },
+							},
+						),
+					]);
+					const stored = yield* repository.commit(
+						commitInput({ events: [], requestSequence: 4, at: 2000 }),
+					);
+					yield* runner.projectBatch(stored);
+					const [current] = yield* sql<{
+						run_id: string;
+					}>`SELECT run_id FROM provider_command_outbox WHERE request_sequence = 4`;
+					expect(current?.run_id).not.toBe(first?.id);
+					expect(
+						yield* sql`SELECT status FROM provider_runs WHERE id = ${first?.id}`,
+					).toEqual([{ status: "error" }]);
+					expect(
+						yield* sql`SELECT status FROM provider_runs WHERE id = ${current?.run_id}`,
+					).toEqual([{ status: "pending" }]);
 					expect(stored).toContainEqual(
 						expect.objectContaining({
-							type: "turn.interrupted",
-							metadata: { runId: first?.id },
+							type: "run.requested",
+							data: { runId: current?.run_id, inputId: "cmd-1" },
 						}),
 					);
 				}),
 			),
 	);
+
 	it.effect(
 		"reserves a run with its send and rolls it back with failed commits",
 		() =>
 			withRepository((sql, repository) =>
 				Effect.gen(function* () {
+					const runner = yield* ProjectionRunnerEffectTag;
+					yield* runner.recover();
 					const stored = yield* repository.commit(commitInput());
-					const [request] = yield* sql<{ payload_json: string }>`
-					SELECT payload_json FROM provider_command_outbox WHERE command_id = 'cmd-1'`;
+					expect(yield* sql`SELECT id FROM provider_runs`).toEqual([]);
+					yield* runner.projectBatch(stored);
+					const [request] = yield* sql<{
+						payload_json: string;
+						run_id: string;
+					}>`
+					SELECT payload_json, run_id FROM provider_command_outbox WHERE command_id = 'cmd-1'`;
 					const payload: unknown = JSON.parse(request?.payload_json ?? "null");
-					expect(payload).toEqual({ runId: expect.any(String) });
+					expect(payload).toEqual({});
+					expect(request?.run_id).toEqual(expect.any(String));
 					const [run] = yield* sql<{
 						id: string;
 						status: string;
@@ -113,7 +175,7 @@ describe("DurableCommandCommitRepository", () => {
 						status: "pending",
 						session_id: "session-1",
 					});
-					expect(payload).toEqual({ runId: run?.id });
+					expect(request?.run_id).toBe(run?.id);
 					expect(stored).toContainEqual(
 						expect.objectContaining({
 							type: "run.requested",

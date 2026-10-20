@@ -20,10 +20,7 @@ import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effe
 import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
 import { openCodeInputMessageId } from "../../../../src/lib/provider/opencode/opencode-input-message-id.js";
 import { OpenCodeProviderInstance } from "../../../../src/lib/provider/opencode-provider-instance.js";
-import {
-	runningRunnerCommands,
-	settleRunnerCommandState,
-} from "../../../../src/lib/provider/runner/runner-recovery.js";
+import { runningRunnerCommands } from "../../../../src/lib/provider/runner/runner-recovery.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,
@@ -76,6 +73,13 @@ it.effect(
 				provider.sendTurnEffect({
 					sessionId: "s",
 					inputId: "next",
+					awaitIntake: Effect.succeed({
+						status: "accepted",
+						cost: 0,
+						tokens: { input: 0, output: 0 },
+						durationMs: 0,
+						providerStateUpdates: [],
+					}),
 					runId: "next-run",
 					prompt: "Continue",
 					history: [],
@@ -99,20 +103,6 @@ it.effect(
 						expect.objectContaining({ directory: "/tmp/native-extra" }),
 					),
 				),
-			);
-			yield* Effect.all(
-				provider
-					.capturePendingTurns("s")
-					.commands.filter(({ inputId }) => inputId === "next")
-					.map((command) =>
-						command.complete({
-							status: "completed",
-							cost: 0,
-							tokens: { input: 0, output: 0 },
-							durationMs: 0,
-							providerStateUpdates: [],
-						}),
-					),
 			);
 			yield* Fiber.join(send);
 			// A recorded reset must override the initial native declaration.
@@ -139,20 +129,13 @@ it.effect(
 );
 
 it.effect(
-	"confirmed instance stop resolves its delivered send and exact outbox claim",
+	"confirmed instance stop settles its claimed reservation before provider intake",
 	() => {
 		const persistence = makePersistenceEffectLayer(":memory:", "test-project");
 		return Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
-			const client = makeMockOpenCodeAPI();
-			const provider = new OpenCodeProviderInstance({ client });
 			const ingress = yield* makeEffectOpenCodeRuntimeIngress(
 				createSilentLogger(),
-				undefined,
-				undefined,
-				undefined,
-				undefined,
-				(sessionId) => provider.capturePendingTurns(sessionId),
 			);
 			const commit = yield* makeCommitAndSignal;
 			yield* commit([
@@ -167,61 +150,23 @@ it.effect(
 					{ runId: "r", inputId: "input" },
 					{ metadata: { runId: "r" } },
 				),
-				canonicalEvent("message.created", "s", {
-					sessionId: "s",
-					messageId: "input",
-					role: "user",
-				}),
 				canonicalEvent(
-					"run.started",
+					"message.created",
 					"s",
-					{ inputId: "input", requestedRunId: "r" },
+					{
+						sessionId: "s",
+						messageId: "input",
+						role: "user",
+					},
 					{ metadata: { runId: "r" } },
 				),
 			]);
 			yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id,
-			effect_type, payload_json, status, attempt_count, requested_at, updated_at)
+			effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at)
 			VALUES (1, 'input', 'test-project', 's', 'opencode', 'send_turn',
-			'{"inputId":"input","runId":"r"}', 'running', 1, 1, 1)`;
-			yield* Effect.forkChild(
-				provider
-					.sendTurnEffect({
-						sessionId: "s",
-						inputId: "input",
-						runId: "r",
-						prompt: "Work",
-						history: [],
-						providerState: {},
-						workspaceRoot: "/tmp/project",
-						extraFolders: [],
-						abortSignal: new AbortController().signal,
-						eventSink: {
-							push: () => Effect.void,
-							requestPermission: () => Effect.succeed({ decision: "once" }),
-							requestQuestion: () => Effect.succeed({}),
-							resolvePermission: () => Effect.void,
-							resolveQuestion: () => Effect.void,
-						},
-					})
-					.pipe(
-						Effect.tap((result) =>
-							settleRunnerCommandState(
-								sql,
-								"test-project",
-								"s",
-								"input",
-								1,
-								result,
-							),
-						),
-						Effect.orDie,
-					),
-			);
-			yield* Effect.promise(() =>
-				vi.waitFor(() =>
-					expect(client.session.prompt).toHaveBeenCalledTimes(1),
-				),
-			);
+			'r', '{"inputId":"input"}', 'running', 1, 1, 1)`;
+			yield* sql`INSERT INTO command_receipts (command_id, session_id, project_key, status, created_at, updated_at)
+			VALUES ('input', 's', 'test-project', 'side_effect_requested', 1, 1)`;
 			let guards = 0;
 			yield* ingress.onInstanceStopped("opencode", () => ++guards < 3);
 			expect(
@@ -229,22 +174,20 @@ it.effect(
 			).toEqual([{ status: "running" }]);
 			expect(
 				yield* sql`SELECT status FROM provider_runs WHERE id = 'r'`,
-			).toEqual([{ status: "running" }]);
+			).toEqual([{ status: "pending" }]);
 			yield* ingress.onInstanceStopped("opencode", () => true);
-			yield* Effect.promise(() =>
-				vi.waitFor(
-					async () =>
-						expect(
-							await Effect.runPromise(
-								sql`SELECT status FROM provider_command_outbox WHERE command_id = 'input'`,
-							),
-						).toEqual([{ status: "failed" }]),
-					{ timeout: 250, interval: 10 },
-				),
-			);
 			expect(
 				yield* sql`SELECT status FROM provider_runs WHERE id = 'r'`,
 			).toEqual([{ status: "interrupted" }]);
+			expect(
+				yield* sql`SELECT status FROM provider_command_outbox WHERE command_id = 'input'`,
+			).toEqual([{ status: "failed" }]);
+			expect(
+				yield* sql`SELECT status FROM command_receipts WHERE command_id = 'input'`,
+			).toEqual([{ status: "side_effect_failed" }]);
+			expect(
+				yield* sql`SELECT state, run_id FROM turns WHERE user_message_id = 'input'`,
+			).toEqual([{ state: "interrupted", run_id: "r" }]);
 			ingress.shutdown();
 		}).pipe(
 			Effect.provide(
@@ -401,11 +344,25 @@ for (const shellStatus of ["busy", "idle"] as const) {
 						provider: "opencode",
 						title: "Exit",
 					}),
-					canonicalEvent("message.created", "s", {
-						sessionId: "s",
-						messageId: "u",
-						role: "user",
-					}),
+					canonicalEvent(
+						"run.requested",
+						"s",
+						{
+							runId: "accepted",
+							inputId: "u",
+						},
+						{ metadata: { runId: "accepted" } },
+					),
+					canonicalEvent(
+						"message.created",
+						"s",
+						{
+							sessionId: "s",
+							messageId: "u",
+							role: "user",
+						},
+						{ metadata: { runId: "accepted" } },
+					),
 					canonicalEvent(
 						"run.started",
 						"s",
@@ -505,9 +462,9 @@ for (const origin of ["native", "completed-command"] as const) {
 					]);
 					if (origin === "completed-command")
 						yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id,
-						effect_type, payload_json, status, attempt_count, requested_at, updated_at)
+						effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at)
 						VALUES (1, 'input', 'test-project', 's', 'opencode', 'send_turn',
-						'{"inputId":"input","runId":"r"}', 'completed', 1, 1, 1)`;
+						'r', '{"inputId":"input"}', 'completed', 1, 1, 1)`;
 					yield* ingress.recoverObservedRuns(() =>
 						Effect.succeed(
 							proof === "stopped"
@@ -542,7 +499,17 @@ for (const origin of ["native", "completed-command"] as const) {
 
 // Recovery must settle a reservation before its echo, and must recognize a
 // successful exact-parent reply even when the live run missed its idle event.
-for (const state of ["no-echo", "completed", "joined-native"] as const) {
+for (const state of [
+	"no-echo",
+	"lost-echo-completed",
+	"lost-echo-unfinished",
+	"completed",
+	"joined-native",
+	"aborted-after-tool-step",
+	"abort-without-message-end",
+	"idle-without-message-end",
+	"idle-after-tool-step",
+] as const) {
 	it.effect(`settles the owned OpenCode run after ${state} daemon loss`, () => {
 		const persistence = makePersistenceEffectLayer(":memory:", "test-project");
 		const dependencies = Layer.merge(
@@ -552,6 +519,21 @@ for (const state of ["no-echo", "completed", "joined-native"] as const) {
 		return Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const userId = openCodeInputMessageId("input-1");
+			const aborted =
+				state === "aborted-after-tool-step" ||
+				state === "abort-without-message-end";
+			const unfinished =
+				state === "idle-without-message-end" ||
+				state === "lost-echo-unfinished";
+			const echoed =
+				state !== "no-echo" &&
+				state !== "lost-echo-completed" &&
+				state !== "lost-echo-unfinished";
+			const failed =
+				state === "no-echo" ||
+				aborted ||
+				unfinished ||
+				state === "idle-after-tool-step";
 			const history: Message[] =
 				state !== "no-echo"
 					? [
@@ -567,9 +549,44 @@ for (const state of ["no-echo", "completed", "joined-native"] as const) {
 								role: "assistant",
 								sessionID: "s",
 								parentID: userId,
-								time: { created: 11, completed: 12 },
+								time: {
+									created: 11,
+									...(unfinished ? {} : { completed: 12 }),
+								},
+								...(unfinished
+									? {}
+									: {
+											finish:
+												aborted || state === "idle-after-tool-step"
+													? "tool-calls"
+													: "stop",
+										}),
 								parts: [{ id: "p-a", type: "text", text: "answer" }],
 							},
+							...(aborted
+								? [
+										{
+											id: "aborted-reply",
+											role: "assistant",
+											sessionID: "s",
+											parentID: userId,
+											...(state === "aborted-after-tool-step"
+												? { finish: "stop" }
+												: {}),
+											time: {
+												created: 13,
+												...(state === "abort-without-message-end"
+													? {}
+													: { completed: 14 }),
+											},
+											error: {
+												name: "MessageAbortedError",
+												data: { message: "The message was aborted" },
+											},
+											parts: [],
+										},
+									]
+								: []),
 						]
 					: [];
 			const ingress = yield* makeEffectOpenCodeRuntimeIngress(
@@ -589,14 +606,19 @@ for (const state of ["no-echo", "completed", "joined-native"] as const) {
 					{ runId: "r1", inputId: "input-1" },
 					{ metadata: { runId: "r1" } },
 				),
-				...(state !== "no-echo"
+				...(echoed
 					? [
-							canonicalEvent("message.created", "s", {
-								sessionId: "s",
-								messageId: userId,
-								inputId: "input-1",
-								role: "user",
-							}),
+							canonicalEvent(
+								"message.created",
+								"s",
+								{
+									sessionId: "s",
+									messageId: userId,
+									inputId: "input-1",
+									role: "user",
+								},
+								{ metadata: { runId: "r1" } },
+							),
 							canonicalEvent(
 								"run.started",
 								"s",
@@ -607,11 +629,16 @@ for (const state of ["no-echo", "completed", "joined-native"] as const) {
 					: []),
 				...(state === "joined-native"
 					? [
-							canonicalEvent("message.created", "s", {
-								sessionId: "s",
-								messageId: "native-user",
-								role: "user",
-							}),
+							canonicalEvent(
+								"message.created",
+								"s",
+								{
+									sessionId: "s",
+									messageId: "native-user",
+									role: "user",
+								},
+								{ metadata: { runId: "r1" } },
+							),
 							canonicalEvent(
 								"run.started",
 								"s",
@@ -622,9 +649,9 @@ for (const state of ["no-echo", "completed", "joined-native"] as const) {
 					: []),
 			]);
 			yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id,
-				effect_type, payload_json, status, attempt_count, requested_at, updated_at)
+				effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at)
 				VALUES (1, 'input-1', 'test-project', 's', 'opencode', 'send_turn',
-				'{"inputId":"input-1","runId":"r1"}', 'running', 1, 1, 1)`;
+				'r1', '{"inputId":"input-1"}', 'running', 1, 1, 1)`;
 			const commands = yield* runningRunnerCommands(
 				sql,
 				"opencode",
@@ -641,20 +668,24 @@ for (const state of ["no-echo", "completed", "joined-native"] as const) {
 			);
 			expect(
 				yield* sql`SELECT status FROM provider_runs WHERE id = 'r1'`,
-			).toEqual([{ status: state !== "no-echo" ? "completed" : "error" }]);
+			).toEqual([{ status: failed ? "error" : "completed" }]);
 			expect(yield* sql`SELECT status FROM provider_command_outbox`).toEqual([
-				{ status: state !== "no-echo" ? "completed" : "failed" },
+				{ status: failed ? "failed" : "completed" },
 			]);
 			if (state !== "no-echo")
 				expect(yield* sql`SELECT state, run_id FROM turns`).toEqual(
 					Array.from({ length: state === "joined-native" ? 2 : 1 }, () => ({
-						state: "completed",
+						state: failed ? "error" : "completed",
 						run_id: "r1",
 					})),
 				);
+			if (!echoed)
+				expect(
+					yield* sql`SELECT started_at FROM turns WHERE user_message_id = ${userId}`,
+				).toEqual(state === "no-echo" ? [] : [{ started_at: null }]);
 			expect(
 				yield* sql`SELECT json_extract(metadata, '$.runId') AS run_id FROM events
-				WHERE type = ${state !== "no-echo" ? "session.status" : "turn.error"}`,
+				WHERE type = ${failed ? "turn.error" : "session.status"}`,
 			).toEqual([{ run_id: "r1" }]);
 			ingress.shutdown();
 		}).pipe(

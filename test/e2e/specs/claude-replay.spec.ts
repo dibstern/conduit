@@ -1922,6 +1922,9 @@ test.describe("Claude replay lane", () => {
 				claudeReplay: {
 					turns: ["pong-thinking-text-turn"],
 					delayMs: 300,
+					// Hold after native intake: optimistic Stop visibility alone
+					// does not prove the first browser RPC was admitted yet.
+					holdBefore: { turn: 1, message: 6 },
 					models: [
 						{
 							id: "claude-fable-5",
@@ -1946,8 +1949,10 @@ test.describe("Claude replay lane", () => {
 				const s = await open(page, relayUrl, harness);
 				await s.app.sendMessage("Alpha");
 				await expect(s.chat.stopBtn).toBeVisible();
+				await expect.poll(() => countEvents(s.dbPath, "run.started")).toBe(1);
 				await s.switchModel("claude-sonnet-5");
 				const otherModel = await s.submit("Bravo", "steer");
+				harness.claudeReplayer?.release();
 
 				await expect.poll(s.turnEnds).toBe(1);
 				await s.chat.waitForStreamingComplete();
@@ -1996,8 +2001,10 @@ test.describe("Claude replay lane", () => {
 				const s = await open(page, relayUrl, harness);
 				await s.app.sendMessage("Alpha");
 				await expect(s.chat.stopBtn).toBeVisible();
+				await expect.poll(() => countEvents(s.dbPath, "run.started")).toBe(1);
 				await s.switchModel("claude-sonnet-5");
 				const notice = await refusedSteer(page, "Bravo");
+				harness.claudeReplayer?.release();
 
 				await expect.poll(s.turnEnds).toBe(1);
 				await s.chat.waitForStreamingComplete();
@@ -2026,6 +2033,7 @@ test.describe("Claude replay lane", () => {
 					claudeReplay: {
 						turns: ["pong-thinking-text-turn", "pong-thinking-text-turn"],
 						delayMs: 300,
+						holdBefore: { turn: 1, message: 6 },
 					},
 				});
 				test("interrupts the running turn and runs as its own input", async ({
@@ -2037,6 +2045,7 @@ test.describe("Claude replay lane", () => {
 					const s = await open(page, relayUrl, harness);
 					await s.app.sendMessage("Alpha");
 					await expect(s.chat.stopBtn).toBeVisible();
+					await expect.poll(() => countEvents(s.dbPath, "run.started")).toBe(1);
 					const input = page.locator("#input");
 					await input.fill("/compact");
 					await input.press("ControlOrMeta+Enter");

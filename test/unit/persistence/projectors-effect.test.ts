@@ -101,7 +101,7 @@ function makeSessionCreated(
 function makeMessageCreated(
 	sessionId: string,
 	messageId: string,
-	opts?: { role?: "user" | "assistant"; createdAt?: number },
+	opts?: { role?: "user" | "assistant"; createdAt?: number; runId?: string },
 ): CanonicalEvent {
 	return canonicalEvent(
 		"message.created",
@@ -113,7 +113,7 @@ function makeMessageCreated(
 		},
 		{
 			eventId: createEventId(),
-			metadata: {},
+			metadata: opts?.runId ? { runId: opts.runId } : {},
 			createdAt: opts?.createdAt ?? FIXED_TS,
 		},
 	);
@@ -2499,7 +2499,10 @@ describe("Effect Turn Projector (via ProjectionRunner)", () => {
 							);
 				const events = [
 					makeSessionCreated("s1"),
-					makeMessageCreated("s1", "u1", { role: "user" }),
+					makeMessageCreated("s1", "u1", {
+						role: "user",
+						runId: metadata.runId,
+					}),
 					canonicalEvent(
 						"run.requested",
 						"s1",
@@ -2565,7 +2568,10 @@ describe("Effect Turn Projector (via ProjectionRunner)", () => {
 				const metadata = { runId: "r" };
 				const events = [
 					makeSessionCreated("s1"),
-					makeMessageCreated("s1", "u1", { role: "user" }),
+					makeMessageCreated("s1", "u1", {
+						role: "user",
+						runId: metadata.runId,
+					}),
 					canonicalEvent(
 						"run.requested",
 						"s1",
@@ -2615,7 +2621,10 @@ describe("Effect Turn Projector (via ProjectionRunner)", () => {
 				yield* runner.projectBatch(
 					yield* store.appendBatch([
 						makeSessionCreated("s1"),
-						makeMessageCreated("s1", "u1", { role: "user" }),
+						makeMessageCreated("s1", "u1", {
+							role: "user",
+							runId: metadata.runId,
+						}),
 						canonicalEvent(
 							"run.requested",
 							"s1",
@@ -3340,9 +3349,10 @@ describe("ProjectionRunnerEffect", () => {
 												appendedMidReplay = true;
 												yield* store
 													.append(
-														makeSessionStatus("s-paged", "error", {
-															createdAt: FIXED_TS + 502,
-														}),
+														makeSessionRenamed(
+															"s-paged",
+															"Appended mid-replay",
+														),
 													)
 													.pipe(Effect.orDie);
 											}
@@ -3365,7 +3375,8 @@ describe("ProjectionRunnerEffect", () => {
 				const first = yield* runner.recover();
 				const firstSession = yield* sql<{
 					status: string;
-				}>`SELECT status FROM sessions WHERE id = 's-paged'`;
+					title: string;
+				}>`SELECT status, title FROM sessions WHERE id = 's-paged'`;
 				const firstCursors = yield* sql<{
 					projector_name: string;
 					last_applied_seq: number;
@@ -3376,7 +3387,9 @@ describe("ProjectionRunnerEffect", () => {
 					endCursor: 501,
 					totalReplayed: 1002,
 				});
-				expect(firstSession).toEqual([{ status: "busy" }]);
+				expect(firstSession).toEqual([
+					{ status: "busy", title: "Test Session" },
+				]);
 				expect(firstCursors).toEqual([
 					{ projector_name: "approval", last_applied_seq: 501 },
 					{ projector_name: "input", last_applied_seq: 501 },
@@ -3389,13 +3402,16 @@ describe("ProjectionRunnerEffect", () => {
 				const second = yield* runner.recover();
 				const secondSession = yield* sql<{
 					status: string;
-				}>`SELECT status FROM sessions WHERE id = 's-paged'`;
+					title: string;
+				}>`SELECT status, title FROM sessions WHERE id = 's-paged'`;
 				expect(second).toMatchObject({
 					startCursor: 501,
 					endCursor: 502,
-					totalReplayed: 2,
+					totalReplayed: 1,
 				});
-				expect(secondSession).toEqual([{ status: "error" }]);
+				expect(secondSession).toEqual([
+					{ status: "busy", title: "Appended mid-replay" },
+				]);
 			}),
 		));
 

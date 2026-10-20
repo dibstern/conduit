@@ -854,6 +854,8 @@ function query(params: {
 							.join("");
 			const request = currentRequest(prompt);
 			const userUuid = input.uuid ?? randomUUID();
+			if (request === "fail-before-intake")
+				throw new Error("Harness SDK iterator failed before intake");
 			// The SDK starts every consumed input, including overlapping sends.
 			yield {
 				type: "command_lifecycle",

@@ -419,16 +419,28 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 						// The check and append share the seam's transaction on redispatch.
 						const messageId = options?.messageId;
 						const inputId = options?.inputId;
-						if (messageId || inputId) {
-							const existing = yield* sql<{ readonly id: string }>`
-								SELECT id FROM messages
-								WHERE id = ${messageId ?? null} OR input_id = ${inputId ?? null}
-								LIMIT 1`;
-							if (existing.length > 0) return;
+						const [existing] =
+							messageId || inputId
+								? yield* sql<{
+										readonly id: string;
+										readonly run_id: string | null;
+									}>`
+								SELECT messages.id, turns.run_id FROM messages
+								LEFT JOIN turns ON turns.session_id = messages.session_id AND turns.user_message_id = messages.id
+								WHERE messages.session_id = ${sessionId}
+									AND (messages.id = ${messageId ?? null} OR messages.input_id = ${inputId ?? null}) LIMIT 1`
+								: [];
+						if (existing) {
+							if (!options?.runId) return;
+							const [run] = yield* sql<{
+								id: string;
+							}>`SELECT COALESCE(joined_into, id) AS id
+								FROM provider_runs WHERE session_id = ${sessionId} AND id = ${options.runId}`;
+							if (existing.run_id === (run?.id ?? options.runId)) return;
 						}
 
 						const now = Date.now();
-						const userMsgId = messageId ?? crypto.randomUUID();
+						const userMsgId = existing?.id ?? messageId ?? crypto.randomUUID();
 						const provider = options?.provider ?? "claude";
 						const events: CanonicalEvent[] = [
 							canonicalEvent(
@@ -449,7 +461,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 								},
 							),
 						];
-						if (text !== "") {
+						if (!existing && text !== "") {
 							events.push(
 								canonicalEvent(
 									"text.delta",

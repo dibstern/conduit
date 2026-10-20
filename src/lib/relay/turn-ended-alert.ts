@@ -1,26 +1,26 @@
+import { runTerminalStatus } from "../persistence/effect/projectors-effect.js";
 import type { CanonicalEvent } from "../persistence/events.js";
 import type { RelayMessage } from "../shared-types.js";
+import { isRecord } from "../utils.js";
 
 export function turnEndedAlert(
 	event: CanonicalEvent,
 ): Extract<RelayMessage, { type: "done" }> | undefined {
-	if (
-		event.type !== "turn.completed" &&
-		event.type !== "turn.error" &&
-		event.type !== "turn.interrupted"
-	)
-		return undefined;
-
-	const originId = event.data.messageId || event.eventId;
+	const status = runTerminalStatus(event, event.provider);
+	if (!status) return undefined;
+	const data: Record<string, unknown> = isRecord(event.data) ? event.data : {};
+	const error =
+		status === "error" ? String(data["error"] ?? "Provider error") : undefined;
+	const originId = data["messageId"] || event.eventId;
 	return {
 		type: "done",
 		sessionId: event.sessionId,
-		code: event.type === "turn.completed" ? 0 : 1,
+		code: status === "completed" ? 0 : 1,
 		alertId: JSON.stringify(
-			event.type === "turn.error"
-				? [event.sessionId, originId, "error", event.data.error]
+			status === "error"
+				? [event.sessionId, originId, "error", error]
 				: [event.sessionId, originId, "done"],
 		),
-		...(event.type === "turn.error" ? { error: event.data.error } : {}),
+		...(error !== undefined ? { error } : {}),
 	};
 }

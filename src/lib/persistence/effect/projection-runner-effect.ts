@@ -68,6 +68,7 @@ export interface ProjectionRunnerEffect {
 
 	readonly projectBatch: (
 		events: readonly StoredEvent[],
+		endedRunEvents?: Set<string>,
 	) => Effect.Effect<
 		ReadModelAdvance,
 		ProjectionRunnerError | SqlError,
@@ -263,6 +264,7 @@ export const makeProjectionRunnerEffect = (
 
 		const projectBatch = (
 			events: readonly StoredEvent[],
+			endedRunEvents?: Set<string>,
 		): Effect.Effect<
 			ReadModelAdvance,
 			ProjectionRunnerError | SqlError,
@@ -304,6 +306,7 @@ export const makeProjectionRunnerEffect = (
 							version,
 							replaying,
 							deferredMessageStamps,
+							...(endedRunEvents ? { endedRunEvents } : {}),
 						};
 						for (const event of events) {
 							// Stamping also syncs a fork point's clock, which needs the

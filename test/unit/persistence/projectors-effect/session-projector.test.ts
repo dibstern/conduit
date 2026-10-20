@@ -112,6 +112,7 @@ describe("SessionProjector", () => {
 				{ sessionId, messageId: inputId, role: "user" },
 				1,
 				at,
+				runId,
 			),
 		);
 		await project(

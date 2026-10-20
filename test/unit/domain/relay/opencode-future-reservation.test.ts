@@ -21,7 +21,7 @@ for (const signal of ["idle", "error", "stop"] as const) {
 		"completed",
 	] as const) {
 		it.effect(
-			`${signal} preserves an unaccepted ${commandStatus} reservation until its own intake and terminal`,
+			`${signal} settles claimed commands and preserves future ${commandStatus} reservations`,
 			() => {
 				const persistence = makePersistenceEffectLayer(
 					":memory:",
@@ -34,18 +34,33 @@ for (const signal of ["idle", "error", "stop"] as const) {
 					);
 					const commit = yield* makeCommitAndSignal;
 					const messageB = openCodeInputMessageId("input-b");
+					const stoppedClaim = signal === "stop" && commandStatus === "running";
 					yield* commit([
 						canonicalEvent("session.created", "s", {
 							sessionId: "s",
 							provider: "opencode",
 							title: "Future reservation",
 						}),
-						canonicalEvent("message.created", "s", {
-							messageId: "input-a",
-							sessionId: "s",
-							role: "user",
-							inputId: "input-a",
-						}),
+						canonicalEvent(
+							"run.requested",
+							"s",
+							{
+								runId: "run-a",
+								inputId: "input-a",
+							},
+							{ metadata: { runId: "run-a" } },
+						),
+						canonicalEvent(
+							"message.created",
+							"s",
+							{
+								messageId: "input-a",
+								sessionId: "s",
+								role: "user",
+								inputId: "input-a",
+							},
+							{ metadata: { runId: "run-a" } },
+						),
 						canonicalEvent(
 							"run.started",
 							"s",
@@ -56,23 +71,28 @@ for (const signal of ["idle", "error", "stop"] as const) {
 							sessionId: "s",
 							inputId: "input-b",
 						}),
-						canonicalEvent("message.created", "s", {
-							messageId: messageB,
-							sessionId: "s",
-							role: "user",
-							inputId: "input-b",
-						}),
 						canonicalEvent(
 							"run.requested",
 							"s",
 							{ runId: "run-b", inputId: "input-b" },
 							{ metadata: { runId: "run-b" } },
 						),
+						canonicalEvent(
+							"message.created",
+							"s",
+							{
+								messageId: messageB,
+								sessionId: "s",
+								role: "user",
+								inputId: "input-b",
+							},
+							{ metadata: { runId: "run-b" } },
+						),
 					]);
 					yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id,
-					provider_id, effect_type, payload_json, status, attempt_count, requested_at, updated_at)
+					provider_id, effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at)
 					VALUES (1, 'input-b', 'test-project', 's', 'opencode', 'send_turn',
-					'{"inputId":"input-b","runId":"run-b"}', ${commandStatus}, 1, 1, 1)`;
+					'run-b', '{"inputId":"input-b"}', ${commandStatus}, 1, 1, 1)`;
 					if (signal === "stop")
 						yield* ingress.onInstanceStopped("opencode", () => true);
 					else
@@ -104,14 +124,23 @@ for (const signal of ["idle", "error", "stop"] as const) {
 										? "error"
 										: "interrupted",
 						},
-						{ id: "run-b", status: "pending" },
+						{ id: "run-b", status: stoppedClaim ? "interrupted" : "pending" },
 					]);
 					expect(
 						yield* sql`SELECT state, run_id FROM turns WHERE user_message_id = ${messageB}`,
-					).toEqual([{ state: "pending", run_id: null }]);
+					).toEqual([
+						{
+							state: stoppedClaim ? "interrupted" : "pending",
+							run_id: "run-b",
+						},
+					]);
 					expect(
 						yield* sql`SELECT status FROM provider_command_outbox WHERE command_id = 'input-b'`,
-					).toEqual([{ status: commandStatus }]);
+					).toEqual([{ status: stoppedClaim ? "failed" : commandStatus }]);
+					if (stoppedClaim) {
+						ingress.shutdown();
+						return;
+					}
 					// The delayed echo is the provider's own intake acknowledgement.
 					yield* ingress.onSSEEventEffect(
 						makeSSEEvent("message.updated", {

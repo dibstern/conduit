@@ -58,20 +58,13 @@ function ledger(fixture: ProcessHarness, sessionId: string) {
 			}>,
 			commands: db
 				.prepare(
-					"SELECT command_id, status, payload_json AS payload FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
+					"SELECT command_id, status, run_id FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
 				)
-				.all(sessionId)
-				.map((row) => {
-					const command = row as {
-						command_id: string;
-						status: string;
-						payload: string;
-					};
-					return {
-						...command,
-						payload: JSON.parse(command.payload) as { runId?: string },
-					};
-				}),
+				.all(sessionId) as Array<{
+				command_id: string;
+				status: string;
+				run_id: string | null;
+			}>,
 			events: db
 				.prepare(
 					"SELECT sequence, type, data, metadata FROM events WHERE session_id = ? ORDER BY sequence",
@@ -233,13 +226,9 @@ describe("provider run ownership through the isolated daemon", () => {
 			{ id: bravo, run_id: runId },
 		]);
 		expect(terminals(accepted, "claude")).toEqual([]);
+		expect(new Set(accepted.commands.map(({ run_id }) => run_id)).size).toBe(2);
 		expect(
-			new Set(accepted.commands.map(({ payload }) => payload.runId)).size,
-		).toBe(2);
-		expect(
-			accepted.commands.every(
-				({ payload }) => typeof payload.runId === "string",
-			),
+			accepted.commands.every(({ run_id }) => typeof run_id === "string"),
 		).toBe(true);
 		proof["accepted"] = normalized(accepted, "claude");
 		writeFileSync(join(fixture.root, "claude-replay-release"), "release");

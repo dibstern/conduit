@@ -106,11 +106,13 @@ export interface EventSink {
 }
 
 /**
- * `joined`: the provider folded this input into a turn another input owns.
- * That input's result finalises the turn; a joined input finalises nothing.
+ * `accepted` acknowledges intake; terminal outcomes acknowledge the durable receipt.
+ * `joined` remains for legacy replies. Only a projected run terminal ends work.
  * `steer-declined`: the provider did not run this input as a steer.
  */
 export type TurnStatus =
+	| "accepted"
+	| "indeterminate"
 	| "completed"
 	| "error"
 	| "interrupted"
@@ -158,7 +160,8 @@ export interface TurnResult {
 	readonly cost: number;
 	readonly tokens: TurnTokens;
 	readonly durationMs: number;
-	readonly error?: TurnError;
+	/** Durable receipts also carry Conduit's persisted command failure codes. */
+	readonly error?: Omit<TurnError, "code"> & { readonly code: string };
 	/** Claude rejected the resume at startup, before emitting system/init. */
 	readonly nativeResumeRejected?: boolean;
 	readonly providerStateUpdates: readonly ProviderStateUpdate[];
@@ -211,7 +214,8 @@ export interface HistoryMessage {
 export interface SendTurnInput {
 	/** Durable run reservation created by the send_turn outbox transaction. */
 	readonly runId?: string;
-	/** Per-send identity, shared by the outbox command and Claude message/turn. */
+	/** Durable acknowledgement of this reservation's intake or pre-intake end. */
+	readonly awaitIntake?: Effect.Effect<TurnResult, ProviderInstanceFailure>;
 	readonly inputId: string;
 	/**
 	 * Resume an open cut-off with a hidden control prompt on its native thread.

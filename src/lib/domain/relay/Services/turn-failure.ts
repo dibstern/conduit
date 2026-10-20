@@ -8,12 +8,58 @@ import { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-servic
 import { LoggerTag } from "./services.js";
 
 export type TurnFailureOwner =
-	| { readonly runId: string; readonly inputId?: string }
+	| { readonly runId: string }
 	| { readonly inputId: string; readonly runId?: undefined };
+
+/** Silence is visible, but does not prove that native work has ended. */
+export const makeSilenceNotice = Effect.gen(function* () {
+	const ingestion = yield* ProviderRuntimeIngestionTag;
+	const sql = yield* SqlClient.SqlClient;
+	const log = yield* LoggerTag;
+	return (sessionId: string, runId: string, continuation?: boolean) =>
+		Effect.gen(function* () {
+			const [run] = yield* sql<{ id: string; continuation: number }>`
+				SELECT run.id, EXISTS (SELECT 1 FROM provider_command_outbox command
+					WHERE command.run_id = run.id AND json_extract(command.payload_json,
+						'$.continuation.cutOffMessageId') IS NOT NULL) AS continuation
+				FROM provider_runs reservation JOIN provider_runs run
+					ON run.id = COALESCE(reservation.joined_into, reservation.id)
+				WHERE reservation.id = ${runId} AND run.session_id = ${sessionId}
+					AND run.status = 'running' AND run.started_at IS NOT NULL`;
+			if (!run) return;
+			yield* ingestion.ingestBatch([
+				{
+					eventId: createEventId(),
+					providerId: "conduit",
+					sessionId,
+					runId: run.id,
+					providerRefs: {},
+					rawSource: { kind: "conduit.turn-notice" },
+					createdAt: Date.now(),
+					type: "turn.notice",
+					data: {
+						text:
+							(continuation ?? run.continuation === 1)
+								? "The continuation got no response. Stop it to try again."
+								: "No response for 2 minutes. The model may be unavailable or your usage quota may be used up. Stop this turn to try a different model.",
+					},
+				},
+			]);
+		}).pipe(
+			Effect.asVoid,
+			Effect.catch((cause) =>
+				Effect.sync(() =>
+					log.warn(
+						`session=${sessionId} Could not record silence notice: ${formatErrorDetail(cause)}`,
+					),
+				),
+			),
+		);
+});
 
 /**
  * End a turn that Conduit itself failed: a send that never reached the
- * provider, or a turn that went silent past its timeout. The failure is a
+ * provider. The failure is a
  * canonical `turn.error`, so the transcript shows it and keeps it across a
  * reload. The idle status settles the shell row, the client's busy signal.
  *
@@ -36,13 +82,16 @@ export const makeFailTurn = Effect.gen(function* () {
 			beforeCommit,
 			beforeProject,
 			settleSession = true,
+			retryable = false,
 		}: {
 			beforeCommit?: Effect.Effect<void, SqlError>;
 			beforeProject?: Effect.Effect<void, SqlError>;
 			settleSession?: boolean;
+			retryable?: boolean;
 		} = {},
 	): Effect.Effect<void> => {
-		const { runId, inputId: userMessageId } = owner;
+		const runId = owner.runId;
+		const inputId = runId === undefined ? owner.inputId : undefined;
 		const errorId = createEventId();
 		const event = <K extends ProviderRuntimeEvent["type"]>(
 			eventId: string,
@@ -65,7 +114,7 @@ export const makeFailTurn = Effect.gen(function* () {
 				messageId: errorId,
 				error,
 				code,
-				...(userMessageId ? { userMessageId } : {}),
+				retryable,
 			}),
 			...(settleSession
 				? [
@@ -78,24 +127,23 @@ export const makeFailTurn = Effect.gen(function* () {
 		];
 		return Effect.gen(function* () {
 			const [reservation] =
-				!runId && userMessageId && Option.isSome(sql)
+				!runId && inputId && Option.isSome(sql)
 					? yield* sql.value<{ run_id: string | null }>`SELECT COALESCE(
-				(SELECT json_extract(payload_json, '$.runId') FROM provider_command_outbox
-				 WHERE session_id = ${sessionId} AND effect_type = 'send_turn' AND command_id = ${userMessageId}
+				(SELECT run_id FROM provider_command_outbox
+				 WHERE session_id = ${sessionId} AND effect_type = 'send_turn' AND command_id = ${inputId}
 				 ORDER BY request_sequence DESC LIMIT 1),
-				(SELECT run_id FROM turns WHERE session_id = ${sessionId} AND (id = ${userMessageId}
-				 OR user_message_id IN (SELECT id FROM messages WHERE session_id = ${sessionId} AND input_id = ${userMessageId})))) AS run_id`
+				(SELECT run_id FROM turns WHERE session_id = ${sessionId} AND (id = ${inputId}
+				 OR user_message_id IN (SELECT id FROM messages WHERE session_id = ${sessionId} AND input_id = ${inputId})))) AS run_id`
 					: [];
 			const reservedRunId = runId ?? reservation?.run_id ?? undefined;
-			const [acceptance] =
+			const [resolved] =
 				reservedRunId && Option.isSome(sql)
 					? yield* sql.value<{
 							run_id: string;
-						}>`SELECT json_extract(metadata, '$.runId') AS run_id
-					FROM events WHERE session_id = ${sessionId} AND type = 'run.started'
-					AND json_extract(data, '$.requestedRunId') = ${reservedRunId} ORDER BY sequence LIMIT 1`
+						}>`SELECT COALESCE(joined_into, id) AS run_id FROM provider_runs
+					WHERE session_id = ${sessionId} AND id = ${reservedRunId}`
 					: [];
-			const effectiveRunId = acceptance?.run_id ?? reservedRunId;
+			const effectiveRunId = resolved?.run_id ?? reservedRunId;
 			const ownedEvents = events.map((event) =>
 				effectiveRunId ? { ...event, runId: effectiveRunId } : event,
 			);

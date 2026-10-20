@@ -2,6 +2,7 @@ import { Data, Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { EventStoreError } from "./effect/event-store-effect.js";
+import { runTerminalStatus } from "./effect/projectors-effect.js";
 import {
 	decodeStoredEventRow,
 	type StoredEventRow,
@@ -43,6 +44,9 @@ export interface ForkSource {
 const FORK_HISTORY_TYPES: ReadonlySet<StoredEvent["type"]> = new Set<
 	CanonicalEvent["type"]
 >([
+	"run.requested",
+	"run.started",
+	"session.status",
 	"message.created",
 	"text.delta",
 	"thinking.start",
@@ -244,7 +248,8 @@ export const readForkSource = Effect.fn("fork.readForkSource")(function* (
 							StoredEventRow & { readonly first_target_sequence: number | null }
 						>`
 				WITH target AS (
-					SELECT MIN(sequence) AS first_sequence, MAX(sequence) AS last_sequence
+					SELECT MIN(sequence) AS first_sequence, MAX(sequence) AS last_sequence,
+						MAX(json_extract(metadata, '$.runId')) AS run_id
 					FROM events
 					WHERE session_id = ${parentId} AND sequence <= ${streamEnd}
 						AND ${historyMessageId ?? null} IS NOT NULL
@@ -255,6 +260,8 @@ export const readForkSource = Effect.fn("fork.readForkSource")(function* (
 						WHERE session_id = ${parentId} AND sequence <= ${streamEnd}
 							AND sequence > (SELECT last_sequence FROM target)
 							AND type NOT LIKE 'turn.%'
+							AND NOT (type = 'session.status' AND json_extract(metadata, '$.runId') IS NOT NULL
+								AND json_extract(metadata, '$.runId') = (SELECT run_id FROM target))
 					), ${streamEnd + 1}) AS excluded_sequence
 				)
 				SELECT project_id, sequence, event_id, session_id, stream_version,
@@ -322,18 +329,66 @@ function copyForkHistory(
 	const suffix = `_${input.newSessionId}`;
 	const rekey = (id: string) => `${id}${suffix}`;
 	const events: CanonicalEvent[] = [];
+	const retained = (messageId: string) =>
+		!input.removedMessageIds.has(messageId) &&
+		input.retainedMessageIds.has(messageId) &&
+		(input.keptMessageIds?.has(messageId) ?? true);
+	const runs = new Set(
+		parentEvents.flatMap((event) =>
+			event.type === "message.created" &&
+			event.data.role === "user" &&
+			retained(event.data.messageId) &&
+			event.metadata.runId
+				? [event.metadata.runId]
+				: [],
+		),
+	);
+	// A fork imports finished history, never the parent's native execution.
+	const ended = new Set(
+		parentEvents.flatMap((event) =>
+			event.metadata.runId && runTerminalStatus(event, event.provider)
+				? [event.metadata.runId]
+				: [],
+		),
+	);
+	for (const event of parentEvents)
+		if (
+			event.type === "run.started" &&
+			runs.has(event.data.requestedRunId) &&
+			event.metadata.runId &&
+			ended.has(event.metadata.runId)
+		) {
+			runs.add(event.metadata.runId);
+			ended.add(event.data.requestedRunId);
+		}
+	for (const runId of runs) if (!ended.has(runId)) runs.delete(runId);
 	for (const event of parentEvents) {
 		if (!FORK_HISTORY_TYPES.has(event.type)) continue;
+		if (event.type === "run.requested" && !runs.has(event.data.runId)) continue;
+		if (event.type === "run.started" && !runs.has(event.data.requestedRunId))
+			continue;
+		const retainedTerminal =
+			event.metadata.runId &&
+			runs.has(event.metadata.runId) &&
+			runTerminalStatus(event, event.provider);
+		if (event.type === "session.status" && !retainedTerminal) continue;
 		const messageId = messageIdOf(event);
-		if (
-			messageId !== undefined &&
-			(input.removedMessageIds.has(messageId) ||
-				input.retainedMessageIds.has(messageId) === false ||
-				input.keptMessageIds?.has(messageId) === false)
-		)
+		if (messageId !== undefined && !retained(messageId) && !retainedTerminal)
 			continue;
 		const data: Record<string, unknown> = { ...event.data };
-		for (const field of ["messageId", "partId", "callId", "turnId"] as const) {
+		delete data["providerStateUpdates"];
+		delete data["providerSessionId"];
+		for (const field of [
+			"messageId",
+			"parentID",
+			"partId",
+			"callId",
+			"turnId",
+			"inputId",
+			"userMessageId",
+			"runId",
+			"requestedRunId",
+		] as const) {
 			if (typeof data[field] === "string") data[field] = rekey(data[field]);
 		}
 		if ("sessionId" in data) data["sessionId"] = input.newSessionId;
@@ -354,12 +409,18 @@ function copyForkHistory(
 		}
 		// Build a fresh envelope: StoredEvent sequence and streamVersion belong to
 		// the parent stream and must be assigned by the event store on append.
+		const { runId, schemaVersion, source } = event.metadata;
 		events.push({
 			eventId: rekey(event.eventId),
 			sessionId: input.newSessionId,
 			type: event.type,
 			data,
-			metadata: { ...event.metadata, inherited: true },
+			metadata: {
+				inherited: true,
+				...(schemaVersion !== undefined && { schemaVersion }),
+				...(source !== undefined && { source }),
+				...(runId && runs.has(runId) && { runId: rekey(runId) }),
+			},
 			provider: event.provider,
 			createdAt: event.createdAt,
 		} as CanonicalEvent);

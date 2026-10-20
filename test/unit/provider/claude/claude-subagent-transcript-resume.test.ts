@@ -85,6 +85,7 @@ function context(sink: EventSink): ClaudeSessionContext {
 		startedAt: "2026-10-16T00:00:00Z",
 		promptQueue: {
 			enqueue: () => Effect.void,
+			recall: () => Effect.succeed(false),
 			close: () => Effect.void,
 			async *[Symbol.asyncIterator]() {},
 		},

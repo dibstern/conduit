@@ -23,6 +23,7 @@ export interface LiveSettings {
 
 /** Session state belongs to the payload; interaction waiters belong to the host. */
 export interface RunnerPayload {
+	hasActiveTurnsEffect?(sessionId: string): Effect.Effect<boolean>;
 	/** A concurrent send is a steer, passed through without host serialization. */
 	sendTurn(
 		input: SessionTurn,

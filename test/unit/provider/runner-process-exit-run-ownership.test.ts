@@ -87,8 +87,8 @@ it("preserves an unaccepted reservation when idle exit retries on a replacement"
 			yield* sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at) VALUES ('s', 'test-project', 'claude', 1, 1)`;
 			yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('retry-run', 's', 'pending', 1)`;
 			yield* sql`INSERT INTO provider_command_outbox
-			(request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, attempt_count, requested_at, updated_at)
-			VALUES (1, 'retry-input', 'test-project', 's', 'claude', 'send_turn', '{"inputId":"retry-input","runId":"retry-run"}', 'running', 1, 1, 1)`;
+			(request_sequence, command_id, project_key, session_id, provider_id, effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at)
+			VALUES (1, 'retry-input', 'test-project', 's', 'claude', 'send_turn', 'retry-run', '{"inputId":"retry-input"}', 'running', 1, 1, 1)`;
 			const driver: ProcessRunnerDriver = {
 				driverKind: "claude",
 				connect: (options) =>
@@ -249,15 +249,22 @@ afterEach(() => {
 // reservation must survive. Before intake, the exact placed input (including a
 // continuation's cut-off turn) must fail even if exit wins the failRunnerTurn
 // race; leaving it pending loses the inbox's error pause. No OS signals are sent.
-for (const [joined, pendingCompletion, unaccepted, continuation] of [
-	[false, false, false, false],
-	[true, false, false, false],
-	[false, true, false, false],
-	[true, true, false, false],
-	[false, false, true, false],
-	[false, false, true, true],
+for (const [
+	joined,
+	pendingCompletion,
+	unaccepted,
+	continuation,
+	acknowledged,
+] of [
+	[false, false, false, false, false],
+	[true, false, false, false, false],
+	[false, true, false, false, false],
+	[true, true, false, false, false],
+	[false, false, true, false, false],
+	[false, false, true, true, false],
+	[false, false, false, false, true],
 ] as const) {
-	it(`${pendingCompletion ? "preserves an in-flight completion for" : "settles only"} the exited runner's ${unaccepted ? (continuation ? "pre-intake continuation" : "pre-intake input") : joined ? "joined" : "own"} run without a binding`, async () => {
+	it(`${pendingCompletion ? "preserves an in-flight completion for" : "settles only"} the exited runner's ${unaccepted ? (continuation ? "pre-intake continuation" : "pre-intake input") : joined ? "joined" : acknowledged ? "acknowledged" : "own"} run without a binding`, async () => {
 		const root = mkdtempSync(join(tmpdir(), "run-exit-"));
 		roots.push(root);
 		const child = new TestChild();
@@ -322,6 +329,10 @@ for (const [joined, pendingCompletion, unaccepted, continuation] of [
 						},
 						connection,
 					);
+					if (acknowledged)
+						options.onCommandsSettled?.([
+							{ commandId: "old-command", attempt: 1 },
+						]);
 					return connection;
 				}),
 			settingsDeferredCode: "test-deferred",
@@ -354,8 +365,8 @@ for (const [joined, pendingCompletion, unaccepted, continuation] of [
 				if (unaccepted) {
 					yield* sql`INSERT INTO messages (id, session_id, role, text, input_id, created_at, updated_at)
 						VALUES (${userMessageId}, 's', 'user', 'placed before intake', ${userMessageId}, 1, 1)`;
-					yield* sql`INSERT INTO turns (id, session_id, user_message_id, state, requested_at)
-						VALUES (${userMessageId}, 's', ${userMessageId}, 'pending', 1)`;
+					yield* sql`INSERT INTO turns (id, session_id, user_message_id, run_id, state, requested_at)
+						VALUES (${userMessageId}, 's', ${userMessageId}, 'old-run', 'pending', 1)`;
 					const commit = yield* makeCommitAndSignal;
 					yield* commit([
 						canonicalEvent("input.admitted", "s", {
@@ -382,6 +393,7 @@ for (const [joined, pendingCompletion, unaccepted, continuation] of [
 							...base,
 							eventId: `placed-${inputId}`,
 							type: "message.created",
+							runId: inputId === "old-command" ? reservation : "old-run",
 							data: {
 								sessionId: "s",
 								messageId: inputId,
@@ -418,11 +430,11 @@ for (const [joined, pendingCompletion, unaccepted, continuation] of [
 						),
 					]);
 				yield* sql`INSERT INTO provider_command_outbox
-				(request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, attempt_count, requested_at, updated_at)
+				(request_sequence, command_id, project_key, session_id, provider_id, effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at)
 				VALUES (1, 'old-command', 'test-project', 's', 'claude', 'send_turn',
-					${JSON.stringify({ inputId: "old-command", runId: reservation, ...(continuation ? { continuation: { cutOffMessageId: userMessageId } } : {}) })}, 'running', 1, 1, 1),
+					${reservation}, ${JSON.stringify({ inputId: "old-command", ...(continuation ? { continuation: { cutOffMessageId: userMessageId } } : {}) })}, 'running', 1, 1, 1),
 				(2, 'future-command', 'test-project', 's', 'claude', 'send_turn',
-					'{"inputId":"future-command","runId":"future-run"}', 'pending', 0, 2, 2)`;
+					'future-run', '{"inputId":"future-command"}', 'pending', 0, 2, 2)`;
 				const runner = yield* makeProcessSessionRunner(
 					{ workspaceRoot: root, daemonConfigDir: root },
 					(output) =>
@@ -508,8 +520,11 @@ for (const [joined, pendingCompletion, unaccepted, continuation] of [
 					yield* sql`SELECT status FROM provider_runs WHERE id = 'future-run'`,
 				).toEqual([{ status: "pending" }]);
 				if (unaccepted) {
-					// Exit committed first. The later per-command failure deliberately
-					// observes a terminal reservation and cannot repair a missed input.
+					const ended =
+						yield* sql`SELECT run.completed_at AS run_end, turn.completed_at AS turn_end
+						FROM provider_runs run JOIN turns turn ON turn.id = ${userMessageId}
+						WHERE run.id = 'old-run'`;
+					// Both exact failure facts may arrive; only projection owns the end.
 					yield* failRunnerTurn(
 						(output) =>
 							output.type === "event"
@@ -524,18 +539,21 @@ for (const [joined, pendingCompletion, unaccepted, continuation] of [
 						{
 							sessionId: "s",
 							runId: "old-run",
-							userMessageId,
 							messageId: "",
-							terminal: false,
 						},
 						runnerFailure("runner exit", "runner stopped"),
 					);
 					expect(
 						yield* sql`SELECT state, run_id FROM turns WHERE id = ${userMessageId}`,
-					).toEqual([{ state: "error", run_id: null }]);
+					).toEqual([{ state: "error", run_id: "old-run" }]);
+					expect(
+						yield* sql`SELECT run.completed_at AS run_end, turn.completed_at AS turn_end
+							FROM provider_runs run JOIN turns turn ON turn.id = ${userMessageId}
+							WHERE run.id = 'old-run'`,
+					).toEqual(ended);
 					expect(
 						yield* sql`SELECT json_extract(data, '$.userMessageId') AS user_message_id FROM events WHERE type = 'turn.error'`,
-					).toEqual([{ user_message_id: userMessageId }]);
+					).toEqual([{ user_message_id: null }, { user_message_id: null }]);
 					expect(
 						yield* sql`SELECT type FROM events WHERE type = 'run.started'`,
 					).toEqual([]);
@@ -544,6 +562,8 @@ for (const [joined, pendingCompletion, unaccepted, continuation] of [
 					).toEqual([{ started_at: null }]);
 					const read = yield* ReadQueryEffectTag;
 					expect(yield* read.readInboxState("s")).toMatchObject({
+						// Busy and paused are independent: the failure after that
+						// handoff must keep queued work paused even when it completes.
 						paused: true,
 					});
 					expect(
@@ -552,7 +572,13 @@ for (const [joined, pendingCompletion, unaccepted, continuation] of [
 				}
 				expect(
 					yield* sql`SELECT json_extract(metadata, '$.runId') AS run_id FROM events WHERE type = 'turn.error'`,
-				).toEqual(pendingCompletion ? [] : [{ run_id: "old-run" }]);
+				).toEqual(
+					pendingCompletion
+						? []
+						: unaccepted
+							? [{ run_id: "old-run" }, { run_id: "old-run" }]
+							: [{ run_id: "old-run" }],
+				);
 				if (joined) {
 					child.emit("exit", 0, null);
 					expect(

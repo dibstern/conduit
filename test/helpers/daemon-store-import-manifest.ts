@@ -819,7 +819,6 @@ export async function createProjectStoreFixture(
 							id,
 							{
 								messageId: assistant,
-								userMessageId: user,
 								cost: 0,
 								duration: 20,
 								tokens: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
@@ -1119,7 +1118,6 @@ export async function createProjectStoreFixture(
 				id,
 				{
 					messageId: `${id}_failed`,
-					userMessageId: user,
 					error: "Fixture error",
 					code: "FIXTURE",
 				},

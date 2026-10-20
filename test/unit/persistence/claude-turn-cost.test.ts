@@ -83,7 +83,7 @@ describe("Claude turn economics through SQLite persistence", () => {
 					"message.created",
 					sessionId,
 					{ messageId: userId, role: "user", sessionId },
-					{ provider: "claude", createdAt: stamp++ },
+					{ provider: "claude", createdAt: stamp++, metadata: { runId } },
 				),
 				canonicalEvent(
 					"run.requested",
@@ -163,7 +163,11 @@ describe("Claude turn economics through SQLite persistence", () => {
 						"message.created",
 						"folded",
 						{ sessionId: "folded", messageId: "u2", role: "user" },
-						{ provider: "claude", createdAt: stamp++ },
+						{
+							provider: "claude",
+							createdAt: stamp++,
+							metadata: { runId: "unused-run" },
+						},
 					),
 					canonicalEvent(
 						"run.requested",

@@ -1,15 +1,36 @@
 import { Effect } from "effect";
 import type { SqlClient } from "effect/sql";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
+import { runTerminalStatus } from "../persistence/effect/projectors-effect.js";
 import { createEventId } from "../persistence/events.js";
-import { isRecord } from "../utils.js";
 
 export interface RunSettlementOwner {
 	readonly runId: string;
-	readonly userMessageId?: string;
 }
 
-/** Only call after the provider confirms that this session cannot still run.
+export const sessionRunOwnersQuery = (
+	sql: SqlClient.SqlClient,
+	sessionId: string,
+	options: {
+		readonly confirmedStop?: boolean;
+		readonly owners?: readonly RunSettlementOwner[];
+	} = {},
+) => sql<{ id: string }>`SELECT run.id FROM provider_runs run
+	WHERE run.session_id = ${sessionId} AND run.status IN ('pending', 'running')
+	AND ${
+		options.owners
+			? sql`run.id IN ${sql.in(options.owners.map(({ runId }) => runId))}`
+			: sql`(
+		run.status = 'running' OR NOT EXISTS (SELECT 1 FROM provider_command_outbox
+			WHERE session_id = run.session_id AND effect_type = 'send_turn'
+			AND run_id = run.id)
+		OR (${options.confirmedStop ? 1 : 0} = 1 AND EXISTS (SELECT 1 FROM provider_command_outbox
+			WHERE session_id = run.session_id AND effect_type = 'send_turn'
+			AND run_id = run.id AND status = 'running')))`
+	}
+	ORDER BY run.id`;
+
+/** Only call after the provider confirms that this session or exact cohort cannot still run.
  * Guard publication against a changed session or process generation when the
  * confirmation came from an asynchronous probe. Never infer ownership by age.
  */
@@ -21,22 +42,14 @@ export function settleSessionRuns<A, E, R>(
 	options: {
 		readonly errorCode?: string;
 		readonly knownEnds?: readonly ProviderRuntimeEvent[];
+		/** A stopped instance or process also ends sends claimed before intake. */
+		readonly confirmedStop?: boolean;
 		/** Exact failed command cohort; absent for a confirmed session-wide end. */
 		readonly owners?: readonly RunSettlementOwner[];
 	} = {},
 ) {
 	return Effect.gen(function* () {
-		const runs = yield* sql<{ id: string }>`SELECT run.id FROM provider_runs run
-			WHERE run.session_id = ${sessionId} AND run.status IN ('pending', 'running')
-			AND ${
-				options.owners
-					? sql`run.id IN ${sql.in(options.owners.map(({ runId }) => runId))}`
-					: sql`(
-				run.status = 'running' OR NOT EXISTS (SELECT 1 FROM provider_command_outbox
-					WHERE session_id = run.session_id AND effect_type = 'send_turn'
-					AND json_extract(payload_json, '$.runId') = run.id))`
-			}
-			ORDER BY run.id`;
+		const runs = yield* sessionRunOwnersQuery(sql, sessionId, options);
 		const event = (
 			type: "turn.interrupted" | "turn.error" | "session.status",
 			data: Record<string, unknown>,
@@ -54,15 +67,7 @@ export function settleSessionRuns<A, E, R>(
 		});
 		const known = new Set(
 			options.knownEnds
-				?.filter(
-					(event) =>
-						event.type === "turn.completed" ||
-						event.type === "turn.error" ||
-						event.type === "turn.interrupted" ||
-						(event.type === "session.status" &&
-							isRecord(event.data) &&
-							event.data["status"] === "idle"),
-				)
+				?.filter((event) => runTerminalStatus(event, event.providerId))
 				.map((event) => event.runId),
 		);
 		return yield* publish([
@@ -73,10 +78,6 @@ export function settleSessionRuns<A, E, R>(
 					? [{ id: undefined }]
 					: []
 			).map(({ id }) => {
-				const userMessageId = options.owners?.find(
-					({ runId }) => runId === id,
-				)?.userMessageId;
-				const input = userMessageId ? { userMessageId } : {};
 				return options.errorCode
 					? event(
 							"turn.error",
@@ -84,13 +85,16 @@ export function settleSessionRuns<A, E, R>(
 								messageId: "",
 								error: reason,
 								code: options.errorCode,
-								...input,
+								retryable: false,
 							},
 							id,
 						)
-					: event("turn.interrupted", { messageId: "", reason, ...input }, id);
+					: event("turn.interrupted", { messageId: "", reason }, id);
 			}),
-			event("session.status", { sessionId, status: "idle" }),
+			// A cohort confirmation cannot idle work admitted after that cohort.
+			...(options.owners ?? [{ runId: undefined }]).map(({ runId }) =>
+				event("session.status", { sessionId, status: "idle" }, runId),
+			),
 		]);
 	});
 }

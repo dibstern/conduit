@@ -247,8 +247,12 @@ function acquireStartupServices(inputs: StartupInputs) {
 		const opencodeRuntimeIngress = yield* makeEffectOpenCodeRuntimeIngress(
 			log.child("opencode-runtime-ingress"),
 			readOpenCodeMessages,
-			(sessionId, messageId) =>
-				orchestration.openCodeInstance.inputIdForUserEcho(sessionId, messageId),
+			(sessionId, messageId, compaction) =>
+				orchestration.openCodeInstance.inputIdForUserEcho(
+					sessionId,
+					messageId,
+					compaction,
+				),
 			(instanceId, parentId) =>
 				Effect.gen(function* () {
 					const parent = parentId
@@ -270,9 +274,6 @@ function acquireStartupServices(inputs: StartupInputs) {
 						}),
 					),
 				),
-			undefined,
-			(sessionId) =>
-				orchestration.openCodeInstance.capturePendingTurns(sessionId),
 		);
 		const accounts = yield* (yield* AccountDirectory).snapshot;
 		const recoveryCommands = yield* runningRunnerCommands(

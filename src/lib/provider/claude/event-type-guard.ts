@@ -21,6 +21,10 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 	"turn.completed": { produced: true },
 	"turn.error": { produced: true },
 	"turn.interrupted": { produced: true },
+	"turn.notice": {
+		produced: false,
+		reason: "Conduit-owned processing silence notice",
+	},
 	"turn.model_resolved": { produced: true },
 	"session.status": { produced: true },
 	"session.compaction": { produced: true },

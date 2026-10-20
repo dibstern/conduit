@@ -367,6 +367,15 @@ export function translateProviderRuntimeEventToDomain(
 		}
 
 		case "turn.completed": {
+			const updates = data["providerStateUpdates"];
+			const providerStateUpdates = Array.isArray(updates)
+				? updates.filter(
+						(update): update is { key: string; value: string } =>
+							isRecord(update) &&
+							typeof update["key"] === "string" &&
+							typeof update["value"] === "string",
+					)
+				: undefined;
 			const cost = numberFieldValue(data["cost"]);
 			const providerCostTotalUsd = numberFieldValue(
 				data["providerCostTotalUsd"],
@@ -380,6 +389,7 @@ export function translateProviderRuntimeEventToDomain(
 			const userMessageId = stringField(data["userMessageId"]);
 			const payload = {
 				messageId: messageIdFromDataOrState(event, data, state),
+				...(providerStateUpdates ? { providerStateUpdates } : {}),
 				...(userMessageId ? { userMessageId } : {}),
 				...(cost != null ? { cost } : {}),
 				...(providerCostTotalUsd != null ? { providerCostTotalUsd } : {}),
@@ -391,10 +401,15 @@ export function translateProviderRuntimeEventToDomain(
 			return singleEvent(event, state, "turn.completed", payload);
 		}
 
+		case "turn.notice":
+			return singleEvent(event, state, "turn.notice", {
+				text: stringField(data["text"]) ?? "",
+			});
+
 		case "turn.error": {
 			const code = stringField(data["code"]);
 			const retryable = data["retryable"];
-			const userMessageId = stringField(data["userMessageId"]);
+			const retryHandled = data["retryHandled"];
 			const payload = {
 				messageId: messageIdFromDataOrState(event, data, state),
 				error:
@@ -403,7 +418,10 @@ export function translateProviderRuntimeEventToDomain(
 					"Provider runtime error",
 				...(code != null ? { code } : {}),
 				...(typeof retryable === "boolean" ? { retryable } : {}),
-				...(userMessageId ? { userMessageId } : {}),
+				...(typeof retryHandled === "boolean" ? { retryHandled } : {}),
+				...(typeof data["retryAt"] === "number"
+					? { retryAt: data["retryAt"] }
+					: {}),
 			} satisfies TurnErrorPayload;
 			return singleEvent(event, state, "turn.error", payload);
 		}
@@ -415,11 +433,9 @@ export function translateProviderRuntimeEventToDomain(
 					typeof data["messageId"] === "string"
 						? data["messageId"]
 						: messageIdFromDataOrState(event, data, state),
+				...(typeof data["code"] === "string" ? { code: data["code"] } : {}),
 				...(typeof data["reason"] === "string"
 					? { reason: data["reason"] }
-					: {}),
-				...(typeof data["userMessageId"] === "string"
-					? { userMessageId: data["userMessageId"] }
 					: {}),
 			});
 		}

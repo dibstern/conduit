@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect, Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +9,9 @@ import {
 	type ProcessBrowser,
 	ProcessHarness,
 } from "../../helpers/process-harness.js";
+
+const evidenceDirectory =
+	process.env["CONDUIT_TEST_ARTIFACT_DIR"] ?? "test-results";
 
 function ledger(fixture: ProcessHarness, sessionId: string) {
 	const db = new Database(fixture.daemonStorePath(), { readonly: true });
@@ -137,21 +141,25 @@ describe("Claude browser run-ownership guarantees through the daemon", () => {
 	const cases: Array<Record<string, unknown>> = [];
 
 	afterEach(async ({ task }) => {
+		mkdirSync(evidenceDirectory, { recursive: true });
 		try {
 			if (harness && existsSync(harness.daemonStorePath()))
 				proof["final"] = normalized(ledger(harness, sessionId));
-			if (task.result?.errors?.length && harness)
+			if (task.result?.errors?.length && harness) {
+				proof["failureLedger"] = ledger(harness, sessionId);
+				const runnerLog = join(harness.configDir, "runners.log");
 				writeFileSync(
-					`/tmp/82tn24-round3-${proof["case"]}.log`,
-					harness.logTail,
+					join(evidenceDirectory, `82tn24-round3-${proof["case"]}.log`),
+					harness.logTail +
+						(existsSync(runnerLog) ? readFileSync(runnerLog, "utf8") : ""),
 				);
+			}
 			await harness?.dispose();
 			harness?.assertNoRunners();
 		} finally {
 			proof["outcome"] = task.result?.state === "pass" ? "passed" : "failed";
-			mkdirSync("test-results", { recursive: true });
 			writeFileSync(
-				"test-results/82tn24-round3-claude.json",
+				join(evidenceDirectory, "82tn24-round3-claude.json"),
 				`${JSON.stringify({ cases }, null, 2)}\n`,
 			);
 			harness = undefined;
@@ -320,6 +328,65 @@ describe("Claude browser run-ownership guarantees through the daemon", () => {
 				).toEqual([alpha, bravo]);
 			},
 			{ timeout: 20_000 },
+		);
+	}, 45_000);
+
+	it("Stop with a steer pending answers the steer and keeps the remaining queue paused", async () => {
+		proof = { case: "stop-with-steer-pending", outcome: "failed" };
+		cases.push(proof);
+		const fixture = await ProcessHarness.start({
+			dist: "dist",
+			claudeReplay: { turns: ["stop-with-steer-pending"], delayMs: 100 },
+		});
+		harness = fixture;
+		const browser = await fixture.connect();
+		sessionId = await browser.createSession("Stop with a pending steer");
+		await browser.followSession(sessionId);
+		const alpha = await submit(browser, sessionId, "Alpha");
+		await browser.waitFor(
+			(message) =>
+				message["type"] === "transcript_message" &&
+				message["sessionId"] === sessionId &&
+				JSON.stringify(message["parts"]).includes("Bash"),
+		);
+		const bravo = await submit(browser, sessionId, "Bravo", "steer");
+		const charlie = await submit(browser, sessionId, "Charlie");
+		expect(ledger(fixture, sessionId).pending).toEqual([
+			{ input_id: alpha, state: "removed" },
+			{ input_id: bravo, state: "steering" },
+			{ input_id: charlie, state: "queued" },
+		]);
+		await Effect.runPromise(
+			browser.rpc.CancelSession({ sessionId, commandId: randomUUID() }),
+		);
+		await vi.waitFor(
+			() => {
+				const state = ledger(fixture, sessionId);
+				expect(state.turns.map(({ id, state }) => ({ id, state }))).toEqual([
+					{ id: alpha, state: "interrupted" },
+					{ id: bravo, state: "completed" },
+				]);
+				expect(state.pending).toEqual([
+					{ input_id: alpha, state: "removed" },
+					{ input_id: bravo, state: "removed" },
+					{ input_id: charlie, state: "queued" },
+				]);
+				expect(state.commands).toEqual([
+					{ command_id: alpha, status: "failed" },
+					{ command_id: bravo, status: "completed" },
+				]);
+				expect(
+					state.events
+						.filter(({ type }) =>
+							["turn.completed", "turn.interrupted", "turn.error"].includes(
+								type,
+							),
+						)
+						.map(({ type }) => type),
+				).toEqual(["turn.interrupted", "turn.completed"]);
+				expect(paused(browser, sessionId)).toBe(true);
+			},
+			{ timeout: 15_000 },
 		);
 	}, 45_000);
 

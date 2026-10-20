@@ -13,10 +13,12 @@ import {
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { restoreClaudeQuestionsFromStore } from "../../../src/lib/domain/relay/Services/restore-claude-questions.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import {
 	EventStoreEffectTag,
 	makeEventStoreEffect,
 } from "../../../src/lib/persistence/effect/event-store-effect.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
 import {
 	deriveSessionSnooze,
@@ -28,6 +30,7 @@ import {
 	refreshSidebar,
 	rerootSession,
 } from "../../../src/lib/persistence/effect/sidebar-projection.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
 import { sessionFamilyWindowQuery } from "../../../src/lib/persistence/session-family-query.js";
 import { pendingClaudeQuestionToolsQuery } from "../../../src/lib/persistence/startup-restore-queries.js";
@@ -35,6 +38,142 @@ import { pendingClaudeQuestionToolsQuery } from "../../../src/lib/persistence/st
 const scope = { projectIds: ["test-project"] } as const;
 
 const testLayer = EffectSqliteClient.layer({ filename: ":memory:" });
+
+for (const terminal of ["turn.error", "turn.interrupted"] as const) {
+	it.effect(
+		`browser inbox pause survives a pre-stop steer's completion after ${terminal} and resolves joined runs and reset order`,
+		() =>
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				const read = yield* ReadQueryEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				yield* commit([
+					canonicalEvent("session.created", "inbox", {
+						sessionId: "inbox",
+						provider: "claude",
+						title: "Queue",
+					}),
+					canonicalEvent("input.admitted", "inbox", {
+						sessionId: "inbox",
+						inputId: "queued",
+						delivery: "queue",
+						request: { text: "next" },
+					}),
+					canonicalEvent(
+						"run.requested",
+						"inbox",
+						{ runId: "failed", inputId: "unplaced" },
+						{ createdAt: 100 },
+					),
+					canonicalEvent(
+						"run.requested",
+						"inbox",
+						{ runId: "pending-steer", inputId: "bravo" },
+						{ createdAt: 200 },
+					),
+					canonicalEvent(
+						terminal,
+						"inbox",
+						{ messageId: "", error: "Stopped" },
+						{
+							provider: "claude",
+							metadata: { runId: "failed" },
+							createdAt: 300,
+						},
+					),
+				]);
+				expect(
+					yield* sql`SELECT id FROM turns WHERE session_id = 'inbox'`,
+				).toEqual([]);
+				expect(yield* read.readInboxState("inbox")).toMatchObject({
+					paused: true,
+				});
+				yield* commit([
+					canonicalEvent(
+						"run.started",
+						"inbox",
+						{ requestedRunId: "pending-steer", inputId: "bravo" },
+						{ metadata: { runId: "pending-steer" }, createdAt: 400 },
+					),
+				]);
+				expect(yield* read.readInboxState("inbox")).toMatchObject({
+					paused: true,
+				});
+				yield* commit([
+					canonicalEvent(
+						"turn.completed",
+						"inbox",
+						{ messageId: "" },
+						{
+							provider: "claude",
+							metadata: { runId: "pending-steer" },
+							createdAt: 500,
+						},
+					),
+				]);
+				expect(yield* read.readInboxState("inbox")).toMatchObject({
+					paused: true,
+				});
+				yield* commit([
+					canonicalEvent("run.requested", "inbox", {
+						runId: "active",
+						inputId: "active-input",
+					}),
+					canonicalEvent(
+						"run.started",
+						"inbox",
+						{ requestedRunId: "active", inputId: "active-input" },
+						{ metadata: { runId: "active" } },
+					),
+				]);
+				expect(yield* read.readInboxState("inbox")).toMatchObject({
+					paused: false,
+				});
+				yield* commit([
+					canonicalEvent("run.requested", "inbox", {
+						runId: "steer",
+						inputId: "steer-input",
+					}),
+					canonicalEvent(
+						"run.started",
+						"inbox",
+						{ requestedRunId: "steer", inputId: "steer-input" },
+						{ metadata: { runId: "active" } },
+					),
+					canonicalEvent(
+						"turn.error",
+						"inbox",
+						{ messageId: "", error: "Stopped after steer" },
+						{ provider: "claude", metadata: { runId: "active" } },
+					),
+				]);
+				expect(yield* read.readInboxState("inbox")).toMatchObject({
+					paused: true,
+				});
+				yield* commit([
+					canonicalEvent("input.admitted", "inbox", {
+						sessionId: "inbox",
+						inputId: "after-stop",
+						delivery: "queue",
+						request: { text: "after reset" },
+					}),
+					canonicalEvent(
+						"session.resume_cancelled",
+						"inbox",
+						{},
+						{ metadata: { source: "inbox-reset" } },
+					),
+				]);
+				expect(yield* read.readInboxState("inbox")).toMatchObject({
+					paused: false,
+				});
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project"), {
+					local: true,
+				}),
+			),
+	);
+}
 
 describe("typed session row derivations", () => {
 	// Unread is the generated column alone (ADR-0004, Scope).

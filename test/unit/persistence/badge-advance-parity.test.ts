@@ -136,12 +136,17 @@ it("marking seen advances the row version and announces it", async () => {
 			const commit = yield* makeCommitAndSignal;
 			yield* createSession;
 			yield* commit([
-				canonicalEvent("message.created", SESSION, {
-					messageId: "u1",
-					inputId: "input-1",
-					sessionId: SESSION,
-					role: "user",
-				}),
+				canonicalEvent(
+					"message.created",
+					SESSION,
+					{
+						messageId: "u1",
+						inputId: "input-1",
+						sessionId: SESSION,
+						role: "user",
+					},
+					{ metadata: { runId: "run-1" } },
+				),
 				canonicalEvent("run.requested", SESSION, {
 					runId: "run-1",
 					inputId: "input-1",

@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Deferred, Effect, Fiber } from "effect";
+import { Deferred, Effect, Fiber, Result } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
@@ -30,14 +30,20 @@ describe("Cursor accepted run ownership", () => {
 		"ack",
 		"user-echo",
 		"no-intake",
+		"terminal-error",
+		"recall-before-send",
+		"recall-after-send",
 	] as const)("keeps intake and terminal ownership with %s evidence", async (evidence) => {
 		const root = mkdtempSync(join(tmpdir(), "cursor-run-ownership-"));
 		const events: ProviderRuntimeEvent[] = [];
+		const lifecycle: string[] = [];
 		try {
 			await Effect.runPromise(
 				Effect.scoped(
 					Effect.gen(function* () {
 						const intake = yield* Deferred.make<void>();
+						const preparation = yield* Deferred.make<void>();
+						let preparing = false;
 						const delivered = yield* Deferred.make<
 							"complete_delivered" | "revert_to_followup"
 						>();
@@ -47,6 +53,7 @@ describe("Cursor accepted run ownership", () => {
 						const steer = vi.fn(() =>
 							Effect.runPromise(Deferred.await(delivered)),
 						);
+						const cancel = vi.fn(async () => {});
 						const port: CursorSdkPort = {
 							probeRuntime: async () => ({ available: true }),
 							authLogin: async () => {},
@@ -57,7 +64,11 @@ describe("Cursor accepted run ownership", () => {
 							openStore: async () => ({ dispose: async () => {} }),
 							getActiveRun: async () => undefined,
 							deleteAgent: async () => {},
-							primeSandbox: async () => {},
+							primeSandbox: async () => {
+								preparing = true;
+								if (evidence === "recall-before-send")
+									await Effect.runPromise(Deferred.await(preparation));
+							},
 							resumeAgent: (_id, options, credential, store, tools) =>
 								port.createAgent(options, credential, store, tools),
 							createAgent: async () => ({
@@ -73,7 +84,7 @@ describe("Cursor accepted run ownership", () => {
 									return {
 										id: nativeId,
 										steer,
-										cancel: async () => {},
+										cancel,
 										stream: (async function* () {
 											if (first) {
 												yield { ...running, run_id: "foreign-native-run" };
@@ -100,12 +111,28 @@ describe("Cursor accepted run ownership", () => {
 								daemonConfigDir: root,
 								port,
 								environment: () => ({ CURSOR_API_KEY: "inert-test-key" }),
+								onAbandonedRun: (inputId) => {
+									lifecycle.push(`retire:${inputId}`);
+								},
 							},
-							(output) =>
-								Effect.sync(() => {
+							(output) => {
+								if (
+									evidence === "terminal-error" &&
+									output.type === "event" &&
+									output.event.type === "turn.completed"
+								)
+									return Effect.fail({
+										operation: "persist terminal",
+										message: "terminal ingestion failed",
+									});
+								return Effect.sync(() => {
 									if (output.type === "event") events.push(output.event);
 									return {};
-								}),
+								});
+							},
+							(inFlight) => {
+								lifecycle.push(inFlight ? "busy" : "idle");
+							},
 						);
 						const send = (inputId: string, runId: string) => {
 							const input: SessionTurn = {
@@ -131,6 +158,68 @@ describe("Cursor accepted run ownership", () => {
 						const accepted = () =>
 							events.filter((event) => event.type === "run.started");
 						const first = yield* Effect.forkChild(send("input-a", "run-a"));
+						if (
+							evidence === "recall-before-send" ||
+							evidence === "recall-after-send"
+						) {
+							yield* Effect.promise(() =>
+								vi.waitFor(() =>
+									expect(
+										evidence === "recall-before-send" ? preparing : sends === 1,
+									).toBe(true),
+								),
+							);
+							yield* runner.executeEffect({ type: "abort", sinkId: "input-a" });
+							const response = yield* Effect.result(
+								Fiber.join(first).pipe(Effect.timeout("1 second")),
+							);
+							const cancellations = cancel.mock.calls.length;
+							if (Result.isFailure(response)) {
+								yield* Deferred.succeed(preparation, undefined);
+								yield* Deferred.succeed(intake, undefined);
+								yield* Deferred.succeed(finish, undefined);
+							}
+							expect(response._tag).toBe("Success");
+							if (Result.isFailure(response)) return;
+							expect(response.success.status).toBe(
+								evidence === "recall-before-send"
+									? "cancelled"
+									: "indeterminate",
+							);
+							expect(cancellations).toBe(0);
+							expect(accepted()).toHaveLength(0);
+							expect(
+								events.filter((event) => event.type === "turn.interrupted"),
+							).toHaveLength(0);
+							if (evidence === "recall-before-send") {
+								yield* Deferred.succeed(preparation, undefined);
+								yield* Effect.promise(() =>
+									vi.waitFor(() => expect(lifecycle.at(-1)).toBe("idle")),
+								);
+								expect(sends).toBe(0);
+								return;
+							}
+							yield* Deferred.succeed(intake, undefined);
+							yield* Effect.promise(() =>
+								vi.waitFor(() =>
+									expect(accepted().map((event) => event.runId)).toEqual([
+										"run-a",
+									]),
+								),
+							);
+							yield* Deferred.succeed(finish, undefined);
+							yield* Effect.promise(() =>
+								vi.waitFor(() =>
+									expect(
+										events
+											.filter((event) => event.type === "turn.completed")
+											.map((event) => event.runId),
+									).toEqual(["run-a"]),
+								),
+							);
+							expect(cancel).not.toHaveBeenCalled();
+							return;
+						}
 						yield* Effect.promise(() =>
 							vi.waitFor(() => expect(sends).toBe(1)),
 						);
@@ -150,19 +239,32 @@ describe("Cursor accepted run ownership", () => {
 						yield* Effect.promise(() =>
 							vi.waitFor(() => expect(accepted()).toHaveLength(1)),
 						);
+						const replies: string[] = [];
+						yield* Effect.forkChild(
+							Fiber.join(first).pipe(
+								Effect.tap((result) =>
+									Effect.sync(() => {
+										replies.push(result.status);
+									}),
+								),
+							),
+						);
+						yield* Effect.promise(() =>
+							vi.waitFor(() => expect(replies).toEqual(["accepted"])),
+						);
 						const second = yield* Effect.forkChild(send("input-b", "run-b"));
 						yield* Effect.promise(() =>
 							vi.waitFor(() => expect(steer).toHaveBeenCalledOnce()),
 						);
 						expect(accepted()).toHaveLength(1);
-						if (evidence === "ack")
+						if (evidence === "ack" || evidence === "terminal-error")
 							yield* Deferred.succeed(delivered, "complete_delivered");
 						else
 							delta?.({
 								type: "user-message-appended",
 								userMessage: { text: "input-b" },
 							});
-						expect((yield* Fiber.join(second)).status).toBe("joined");
+						expect((yield* Fiber.join(second)).status).toBe("accepted");
 						expect(
 							accepted().map(({ runId, data }) => ({ runId, data })),
 						).toEqual([
@@ -179,8 +281,34 @@ describe("Cursor accepted run ownership", () => {
 							events.filter((event) => event.type === "turn.completed"),
 						).toHaveLength(0);
 						yield* Deferred.succeed(finish, undefined);
-						expect((yield* Fiber.join(first)).status).toBe("completed");
-						expect((yield* send("input-c", "run-c")).status).toBe("completed");
+						if (evidence === "terminal-error") {
+							yield* Effect.promise(() =>
+								vi.waitFor(() =>
+									expect(lifecycle.slice(-2)).toEqual([
+										"retire:input-a",
+										"idle",
+									]),
+								),
+							);
+							expect((yield* Fiber.join(first)).status).toBe("accepted");
+							return;
+						}
+						yield* Effect.promise(() =>
+							vi.waitFor(() =>
+								expect(
+									events.filter((event) => event.type === "turn.completed"),
+								).toHaveLength(1),
+							),
+						);
+						expect((yield* Fiber.join(first)).status).toBe("accepted");
+						expect((yield* send("input-c", "run-c")).status).toBe("accepted");
+						yield* Effect.promise(() =>
+							vi.waitFor(() =>
+								expect(
+									events.filter((event) => event.type === "turn.completed"),
+								).toHaveLength(2),
+							),
+						);
 						expect(accepted().map((event) => event.runId)).toEqual([
 							"run-a",
 							"run-a",

@@ -47,11 +47,7 @@ import {
 	resolveTurnSettings,
 	type TurnSettings,
 } from "../../../provider/turn-settings.js";
-import type {
-	ModelInfo,
-	SendTurnInput,
-	TurnResult,
-} from "../../../provider/types.js";
+import type { ModelInfo, SendTurnInput } from "../../../provider/types.js";
 import {
 	effectiveSessionFolders,
 	effectiveWorkingDirectory,
@@ -88,7 +84,7 @@ import {
 	SessionWorkspaceTag,
 } from "./session-workspace.js";
 import { SSEStreamTag } from "./sse-stream-service.js";
-import { makeFailTurn } from "./turn-failure.js";
+import { makeFailTurn, makeSilenceNotice } from "./turn-failure.js";
 
 export const CLAUDE_PROVIDER_ID = "claude";
 export const OPENCODE_PROVIDER_ID = "opencode";
@@ -333,26 +329,19 @@ const hasNewerHandoff = (
 };
 
 /**
- * End a send that failed. Each failure gets exactly one turn.error: a provider
- * that already ended the turn it was handed (failed, interrupted or completed
- * it) recorded that end through this send's sink. A handoff that ended before
- * its message was placed still shows the send, and its turn ends failed so a
- * queue behind it pauses instead of draining. A continuation places nothing:
- * its turn is the cut-off's.
+ * Restore a failed delivery's placement or queue position. The durable receipt
+ * already owns ordinary provider failure; transport/commit failures still need
+ * their own owned error event.
  */
-const failUnfinishedSend = (
+const restoreFailedPlacement = (
 	input: ProviderTurnServiceSendInput,
 	driver: ProviderDriverKind | undefined,
-	endedByProvider: boolean,
-	error: string,
-	code: string,
 	runId?: string,
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
 		const sql = yield* SqlClient.SqlClient;
-		const handoff =
-			input.steer && input.events?.find((event) => event.type === "input.sent");
+		const handoff = input.events?.find((event) => event.type === "input.sent");
 		if (handoff) {
 			const [requeued] = yield* sql`SELECT 1 FROM events
 				WHERE session_id = ${input.sessionId} AND type = 'input.requeued'
@@ -360,11 +349,8 @@ const failUnfinishedSend = (
 					WHERE event_id = ${handoff.eventId}) LIMIT 1`;
 			// Recovery can publish before this old dispatch unwinds. Its timeout
 			// and failure must never affect a turn the user has already retried.
-			if (requeued) return;
+			if (requeued) return false;
 		}
-		const failTurn = yield* makeFailTurn;
-		if (!input.steer && !(yield* hasNewerHandoff(input, sql)))
-			yield* clearProcessingTimeout(input.sessionId);
 		const inputId = input.continuation ? undefined : input.commandId;
 		const userMessageId =
 			input.continuation?.cutOffMessageId ??
@@ -392,7 +378,7 @@ const failUnfinishedSend = (
 					input.sessionId,
 					input.commandId,
 				);
-				return;
+				return false;
 			}
 			const persist = yield* ClaudeEventPersistEffectTag;
 			yield* persist
@@ -412,19 +398,7 @@ const failUnfinishedSend = (
 					),
 				);
 		}
-		// A provider's own turn end cannot have ended a turn placed only now.
-		if (endedByProvider && !unplaced) return;
-		yield* failTurn(
-			input.sessionId,
-			error,
-			code,
-			runId
-				? {
-						runId,
-						inputId: userMessageId,
-					}
-				: { inputId: input.commandId },
-		);
+		return true;
 	});
 
 export const makeEventSinkFactory = Effect.gen(function* () {
@@ -473,17 +447,10 @@ export const makeEventSinkFactory = Effect.gen(function* () {
 		});
 });
 
-const TURN_END_TYPES = new Set([
-	"turn.completed",
-	"turn.error",
-	"turn.interrupted",
-]);
-
 const handleDispatchFailure = (
 	input: ProviderTurnServiceSendInput,
 	sendErr: unknown,
 	driver: ProviderDriverKind | undefined,
-	endedByProvider = false,
 	runId?: string,
 ) =>
 	Effect.gen(function* () {
@@ -496,14 +463,18 @@ const handleDispatchFailure = (
 		const error = missing
 			? { message: sendErr.message, code: "WORKTREE_MISSING" }
 			: RelayError.fromCaught(sendErr, "SEND_FAILED", "Failed to send message");
-		yield* failUnfinishedSend(
-			input,
-			driver,
-			endedByProvider,
-			error.message,
-			error.code,
-			runId,
-		);
+		if (
+			!input.steer &&
+			!(yield* hasNewerHandoff(input, yield* SqlClient.SqlClient))
+		)
+			yield* clearProcessingTimeout(input.sessionId);
+		if (yield* restoreFailedPlacement(input, driver, runId))
+			yield* (yield* makeFailTurn)(
+				input.sessionId,
+				error.message,
+				error.code,
+				runId ? { runId } : { inputId: input.commandId },
+			);
 		if (missing) {
 			const ws = yield* Effect.serviceOption(WebSocketHandlerTag);
 			if (
@@ -517,67 +488,6 @@ const handleDispatchFailure = (
 					sessionId: input.sessionId,
 					message: error.message,
 				});
-		}
-	});
-
-const handleDispatchResult = (
-	input: ProviderTurnServiceSendInput,
-	result: TurnResult,
-	driver: ProviderDriverKind,
-	endedByProvider: boolean,
-	runId?: string,
-) =>
-	Effect.gen(function* () {
-		const log = yield* LoggerTag;
-		if (result.status === "steer-declined") {
-			yield* input.onSteerDeclined ?? Effect.void;
-			return;
-		}
-		// The interrupter already sent done; finalizing again can end a newer turn.
-		if (result.status === "interrupted" && !result.error) return;
-		// One provider result finalises once: the input that owns it does that,
-		// so an input it folded in finalises nothing.
-		if (result.status === "joined") return;
-
-		// Other non-`completed` terminal statuses (error / cancelled / orphaned)
-		// must finalize the turn: a completed turn's `done` arrives via the
-		// streamed provider events. A provider that streamed its own turn end
-		// already finalized it; otherwise the browser would stay
-		// "processing" until the 2-minute PROCESSING_TIMEOUT, so record it here.
-		if (result.status !== "completed") {
-			const msg =
-				result.error?.message ??
-				(result.status === "error" ? "Send failed" : `Turn ${result.status}`);
-			log.warn(
-				`client=${input.clientId} session=${input.sessionId} engine dispatch ${result.status}: ${msg}`,
-			);
-			yield* failUnfinishedSend(
-				input,
-				driver,
-				endedByProvider,
-				msg,
-				"SEND_FAILED",
-				runId,
-			);
-			return;
-		}
-
-		if (!result.providerStateUpdates?.length) {
-			return;
-		}
-		const providerState = yield* ProviderStateEffectTag;
-
-		const updates = result.providerStateUpdates.map((update) => ({
-			key: update.key,
-			value: String(update.value),
-		}));
-		const saveResult = yield* Effect.result(
-			providerState.saveUpdates(input.sessionId, updates),
-		);
-		if (saveResult._tag === "Failure") {
-			log.warn(
-				`Non-fatal provider state persistence error for ${input.sessionId}: ${formatErrorDetail(saveResult.failure)}`,
-			);
 		}
 	});
 
@@ -824,32 +734,6 @@ const dispatchEngineTurn = (
 		// one reads the committed handoff, not the moment before it.
 		const accepted = yield* Deferred.make<void>();
 
-		// Each failure gets exactly one turn.error. A provider that ended the
-		// turn it was handed records that end through this send's sink: `push`
-		// on the inline path, `noteActivity` where the reactor ingests output.
-		// Only a turn it left open is Conduit's to fail: a send that fails after
-		// its turn was interrupted (a reload ends the session) must not turn
-		// that interrupted turn into an error.
-		let endedByProvider = false;
-		const { eventSink } = sendTurnInput;
-		const watchedInput: SendTurnInput = {
-			...sendTurnInput,
-			eventSink: {
-				...eventSink,
-				push: (event) =>
-					eventSink.push(event).pipe(
-						Effect.tap(() =>
-							Effect.sync(() => {
-								if (TURN_END_TYPES.has(event.type)) endedByProvider = true;
-							}),
-						),
-					),
-				noteActivity: (event) => {
-					if (TURN_END_TYPES.has(event.type)) endedByProvider = true;
-					eventSink.noteActivity?.(event);
-				},
-			},
-		};
 		const events = (resolvedInput.events ?? []).map((event) =>
 			event.type === "input.sent" && workspaceMoveSequence !== undefined
 				? { ...event, data: { ...event.data, workspaceMoveSequence } }
@@ -881,6 +765,7 @@ const dispatchEngineTurn = (
 			| OverridesStateTag
 			| LoggerTag
 			| ProviderRuntimeIngestionTag
+			| OrchestrationEngineTag
 		>();
 		const dispatchProgram = Effect.try({
 			try: () =>
@@ -888,7 +773,7 @@ const dispatchEngineTurn = (
 					type: "send_turn",
 					commandId: resolvedInput.commandId,
 					providerId,
-					input: watchedInput,
+					input: sendTurnInput,
 					...(events.length > 0 ? { events } : {}),
 					onAccepted: Effect.gen(function* () {
 						const sql = yield* SqlClient.SqlClient;
@@ -901,13 +786,13 @@ const dispatchEngineTurn = (
 						reservedRunId = reservation?.run_id ?? undefined;
 						if (!resolvedInput.steer && reservedRunId) {
 							const [active] = yield* sql`
-									SELECT 1 FROM provider_runs WHERE session_id = ${resolvedInput.sessionId}
-										AND id = COALESCE((SELECT json_extract(metadata, '$.runId') FROM events
-											WHERE session_id = ${resolvedInput.sessionId} AND type = 'run.started'
-												AND json_extract(data, '$.requestedRunId') = ${reservedRunId}
-											ORDER BY sequence LIMIT 1), ${reservedRunId})
-										AND status IN ('pending', 'running')`;
-							if (active) yield* startProcessing(resolvedInput, reservedRunId);
+									SELECT 1 FROM provider_runs run JOIN provider_runs reservation
+										ON run.id = COALESCE(reservation.joined_into, reservation.id) AND run.session_id = reservation.session_id
+										WHERE reservation.session_id = ${resolvedInput.sessionId} AND reservation.id = ${reservedRunId}
+										AND run.status IN ('pending', 'running')`;
+							if (active) {
+								yield* startProcessing(resolvedInput, reservedRunId);
+							}
 						}
 						yield* Deferred.succeed(accepted, undefined);
 					}).pipe(Effect.provide(timeoutRuntime), Effect.orDie),
@@ -916,13 +801,15 @@ const dispatchEngineTurn = (
 		}).pipe(
 			Effect.flatten,
 			Effect.flatMap((result) =>
-				handleDispatchResult(
-					dispatchedInput,
-					result,
-					driver,
-					endedByProvider,
-					reservedRunId,
-				),
+				result.status === "steer-declined"
+					? (dispatchedInput.onSteerDeclined ?? Effect.void)
+					: result.error
+						? restoreFailedPlacement(
+								dispatchedInput,
+								driver,
+								reservedRunId,
+							).pipe(Effect.asVoid)
+						: Effect.void,
 			),
 			Effect.catch((error) =>
 				restorePreviousBinding.pipe(
@@ -931,7 +818,6 @@ const dispatchEngineTurn = (
 							dispatchedInput,
 							error,
 							driver,
-							endedByProvider,
 							reservedRunId,
 						),
 					),
@@ -1005,30 +891,14 @@ const sendViaEngine = (
 		);
 	});
 
-/** The handoff is where a turn starts working: arm its timeout. The browser's
- *  processing phase follows the session's shell row (ni8.35). */
+/** Arm a notice for silence; only native evidence or Stop can end the run. */
 const startProcessing = (input: ProviderTurnServiceSendInput, runId: string) =>
 	Effect.gen(function* () {
-		const log = yield* LoggerTag;
-		const failTurn = yield* makeFailTurn;
-		const { sessionId } = input;
-		yield* startProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION, () =>
-			Effect.suspend(() => {
-				log.warn(
-					`client=${input.clientId} session=${sessionId} Processing timeout (120s) — failing the turn`,
-				);
-				return failTurn(
-					sessionId,
-					input.continuation
-						? "The continuation received no response. Try again."
-						: "No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
-					"PROCESSING_TIMEOUT",
-					{
-						runId,
-						inputId: input.continuation?.cutOffMessageId ?? input.commandId,
-					},
-				);
-			}),
+		const notice = yield* makeSilenceNotice;
+		yield* startProcessingTimeout(
+			input.sessionId,
+			PROCESSING_TIMEOUT_DURATION,
+			() => notice(input.sessionId, runId, Boolean(input.continuation)),
 		);
 	});
 

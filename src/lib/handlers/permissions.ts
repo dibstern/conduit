@@ -29,7 +29,7 @@ import {
 	startProcessingTimeout,
 } from "../domain/relay/Services/session-overrides-state.js";
 import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
-import { makeFailTurn } from "../domain/relay/Services/turn-failure.js";
+import { makeSilenceNotice } from "../domain/relay/Services/turn-failure.js";
 import { fixupConfigFile } from "../instance/opencode-config-fixup.js";
 import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
@@ -214,31 +214,24 @@ const restartProcessingTimeout = (sessionId: string, runId?: string | null) =>
 		if (!sessionId || !runId) return;
 		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
 		if (Option.isNone(sql)) return;
-		const [active] = yield* sql.value`
-			SELECT 1 FROM provider_runs WHERE id = ${runId} AND session_id = ${sessionId}
-				AND status IN ('pending', 'running')`;
+		const active = sql.value`SELECT 1 FROM provider_runs reservation
+			JOIN provider_runs run ON run.id = COALESCE(reservation.joined_into, reservation.id)
+			WHERE reservation.id = ${runId} AND run.session_id = ${sessionId}
+				AND run.status = 'running' AND run.started_at IS NOT NULL`.pipe(
+			Effect.orDie,
+		);
 		// A late answer must not replace a newer run's inactivity timer.
-		if (!active) return;
+		if (!(yield* active).length) return;
 		const overrides = yield* Effect.serviceOption(OverridesStateTag);
 		const ingestion = yield* Effect.serviceOption(ProviderRuntimeIngestionTag);
 		if (Option.isNone(overrides) || Option.isNone(ingestion)) return;
-		const log = yield* LoggerTag;
-		const failTurn = yield* makeFailTurn.pipe(
+		const notice = yield* makeSilenceNotice.pipe(
+			Effect.provideService(SqlClient.SqlClient, sql.value),
 			Effect.provideService(ProviderRuntimeIngestionTag, ingestion.value),
 		);
 
 		yield* startProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION, () =>
-			Effect.suspend(() => {
-				log.warn(
-					`session=${sessionId} Processing timeout (120s) after question answered — failing the turn`,
-				);
-				return failTurn(
-					sessionId,
-					"No response received — the model may be unavailable or your usage quota may be exhausted. Try a different model.",
-					"PROCESSING_TIMEOUT",
-					{ runId },
-				);
-			}),
+			notice(sessionId, runId),
 		).pipe(Effect.provideService(OverridesStateTag, overrides.value));
 	});
 

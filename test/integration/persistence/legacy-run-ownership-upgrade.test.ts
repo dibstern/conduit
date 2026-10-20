@@ -39,12 +39,15 @@ import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 
 // Failure modes: upgrade declares an executing runner idle, guessing a legacy
 // turn owner places old events, recovery loses the reserved run id, or a
-// terminal legacy turn suppresses the owned failure and pins the inbox busy.
+// terminal legacy turn suppresses the owned failure and pins the inbox busy;
+// a successful joined replay leaves its migrated reservation running forever.
 it.each([
 	"stopped",
 	"completed",
+	"joined",
 	"superseded",
 ] as const)("keeps a migrated executing run busy until its exact %s runner recovery terminal", async (result) => {
+	const succeeded = result === "completed" || result === "joined";
 	const root = mkdtempSync(join(tmpdir(), "legacy-run-upgrade-"));
 	const database = join(root, "events.db");
 	const proof = {
@@ -179,8 +182,9 @@ it.each([
 							closing: () => false,
 							failTurn: () =>
 								Effect.die("Successful legacy replay must not fail"),
-							replay: () =>
+							replay: (_row, input) =>
 								Effect.gen(function* () {
+									expect(input.runId).toBe(reservation?.id);
 									// The surviving old runner cannot stamp the newly minted reservation.
 									yield* emit({
 										type: "event",
@@ -197,7 +201,7 @@ it.each([
 										},
 									});
 									return {
-										status: "completed",
+										status: result === "joined" ? "joined" : "completed",
 										cost: 0,
 										tokens: { input: 0, output: 0 },
 										durationMs: 10,
@@ -246,7 +250,6 @@ it.each([
 							expect(turn).toMatchObject({
 								runId: reservation?.id,
 								userMessageId: "legacy-input",
-								terminal: true,
 							});
 							proof.recoveredTerminalLegacyTurn = true;
 							return failRunnerTurn(emit, sinkId, turn, failure);
@@ -254,12 +257,12 @@ it.each([
 					);
 				expect(
 					yield* sql`SELECT status FROM provider_runs WHERE id = ${reservation?.id}`,
-				).toEqual([{ status: result === "completed" ? "completed" : "error" }]);
+				).toEqual([{ status: succeeded ? "completed" : "error" }]);
 				expect(
 					yield* sql`SELECT type, json_extract(metadata, '$.runId') AS run_id FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted') AND json_extract(metadata, '$.runId') IS NOT NULL`,
 				).toEqual([
 					{
-						type: result === "completed" ? "turn.completed" : "turn.error",
+						type: succeeded ? "turn.completed" : "turn.error",
 						run_id: reservation?.id,
 					},
 				]);
@@ -267,7 +270,7 @@ it.each([
 					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
 				).toEqual([
 					{
-						status: result === "completed" ? "completed" : "failed",
+						status: succeeded ? "completed" : "failed",
 						attempt_count: 1,
 					},
 				]);
@@ -275,11 +278,8 @@ it.each([
 					yield* sql`SELECT status, error_code FROM command_receipts`,
 				).toEqual([
 					{
-						status:
-							result === "completed"
-								? "side_effect_completed"
-								: "side_effect_failed",
-						error_code: result === "completed" ? null : "runner_stopped",
+						status: succeeded ? "side_effect_completed" : "side_effect_failed",
+						error_code: succeeded ? null : "runner_stopped",
 					},
 				]);
 				expect(yield* sql`SELECT state, run_id FROM turns`).toEqual([

@@ -13,6 +13,8 @@ import {
 
 const makeClient = RpcClient.make(WsRpcGroup);
 type Client = Effect.Success<typeof makeClient>;
+const evidenceDirectory =
+	process.env["CONDUIT_TEST_ARTIFACT_DIR"] ?? "test-results";
 
 function rpc<A, E>(
 	harness: ReplayHarness,
@@ -79,13 +81,89 @@ describe("Claude run ownership through the browser's in-process replay relay", (
 			await harness?.stop();
 		} finally {
 			harness = undefined;
-			mkdirSync("test-results", { recursive: true });
+			mkdirSync(evidenceDirectory, { recursive: true });
 			writeFileSync(
-				"test-results/82tn24-round3-in-process.json",
+				`${evidenceDirectory}/82tn24-round3-in-process.json`,
 				`${JSON.stringify({ cases }, null, 2)}\n`,
 			);
 		}
 	});
+
+	for (const status of ["pending", "running"] as const) {
+		it(`refuses a model mismatch while Alpha's first run is ${status}`, async () => {
+			const proof: (typeof cases)[number] = {
+				case: `first-${status}-model-mismatch`,
+				outcome: "failed",
+			};
+			cases.push(proof);
+			harness = await createReplayHarness("chat-streaming", {
+				claudeReplay: {
+					turns: ["pong-thinking-text-turn"],
+					holdBefore: { turn: 1, message: status === "pending" ? 5 : 6 },
+					models: [
+						{
+							id: "claude-fable-5",
+							name: "Claude Fable 5",
+							providerId: "claude",
+						},
+						{
+							id: "claude-sonnet-5",
+							name: "Claude Sonnet 5",
+							providerId: "claude",
+						},
+					],
+				},
+			});
+			const fixture = harness;
+			const sessionId = decodeURIComponent(
+				fixture.projectUrl.slice("/s/".length),
+			);
+			const alpha = randomUUID();
+			const bravo = randomUUID();
+			expect(
+				await rpc(fixture, (client) =>
+					client["input.submit"]({
+						sessionId,
+						inputId: alpha,
+						text: "Alpha",
+						delivery: "queue",
+					}),
+				),
+			).toMatchObject({ ok: true });
+			await fixture.claudeReplayer?.held();
+			expect(ledger(fixture).runs.map((run) => run.status)).toEqual([status]);
+			await rpc(fixture, (client) =>
+				client.SwitchModel({
+					sessionId,
+					providerId: "claude",
+					modelId: "claude-sonnet-5",
+				}),
+			);
+			expect(
+				await rpc(fixture, (client) =>
+					client["input.submit"]({
+						sessionId,
+						inputId: bravo,
+						text: "Bravo",
+						delivery: "steer",
+					}),
+				),
+			).toEqual({ ok: false, reason: "model_differs" });
+			expect(
+				ledger(fixture).commands.map((command) => command.command_id),
+			).toEqual([alpha]);
+			fixture.claudeReplayer?.release();
+			await vi.waitFor(() =>
+				expect(ledger(fixture).runs.map((run) => run.status)).toEqual([
+					"completed",
+				]),
+			);
+			fixture.claudeReplayer?.assertComplete();
+			proof.turns = ledger(fixture).turns.map((turn) => turn.state);
+			proof.ownedEnds = ledger(fixture).ends.length;
+			proof.outcome = "passed";
+		}, 60_000);
+	}
 
 	for (const timing of ["accepted", "queued"] as const) {
 		for (const action of ["stop", "restart", "slash"] as const) {
@@ -105,6 +183,14 @@ describe("Claude run ownership through the browser's in-process replay relay", (
 								: []),
 						],
 						delayMs: 300,
+						...(action === "slash"
+							? {
+									holdBefore: {
+										turn: 1,
+										message: timing === "accepted" ? 6 : 5,
+									},
+								}
+							: {}),
 					},
 				});
 				const fixture = harness;

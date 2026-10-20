@@ -321,6 +321,9 @@ export interface PromptQueueController extends AsyncIterable<SDKUserMessage> {
 	/** Fails once the queue is closed, so a sender never waits on a lost prompt. */
 	enqueue(
 		message: SDKUserMessage,
+		signal?: AbortSignal,
 	): Effect.Effect<void, EffectPromptQueueClosed>;
+	/** True only when the input has not crossed the SDK iterator boundary. */
+	recall(inputId: string): Effect.Effect<boolean>;
 	close(): Effect.Effect<void>;
 }

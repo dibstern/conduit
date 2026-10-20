@@ -65,81 +65,25 @@ export class DurableCommandCommitRepository {
 					}),
 				);
 				const events = [...input.events];
-				const requests: DurableCommandOutboxRequest[] = [];
-				for (const request of input.outboxRequests) {
-					if (request.effectType !== "send_turn") {
-						requests.push({ ...request, projectKey: this.projectId });
-						continue;
-					}
-					const payload = yield* Effect.try({
-						try: (): unknown => JSON.parse(request.payloadJson),
-						catch: (cause) =>
-							new Error("Invalid send_turn reservation payload", { cause }),
-					});
-					if (!isRecord(payload))
-						return yield* Effect.fail(
-							new Error("Invalid send_turn reservation payload"),
-						);
-					const superseded = yield* this.sql<{ id: string; input_id: string }>`
-						SELECT r.id, COALESCE(json_extract(o.payload_json, '$.inputId'), o.command_id) AS input_id
-						FROM provider_command_outbox o JOIN provider_runs r ON r.id = json_extract(o.payload_json, '$.runId')
-						WHERE o.command_id = ${request.commandId} AND o.project_key = ${this.projectId}
-							AND o.status IN ('pending', 'retryable_failed') AND r.status = 'pending'`;
-					for (const previous of superseded) {
-						events.push(
-							canonicalEvent(
-								"turn.interrupted",
-								request.sessionId,
-								{ messageId: previous.input_id },
-								{
-									provider: request.providerId,
-									createdAt: input.receipt.updatedAt,
-									metadata: { runId: previous.id },
-								},
-							),
-						);
-					}
-					const runId = randomUUID();
-					const inputId =
-						typeof payload["inputId"] === "string"
-							? payload["inputId"]
-							: request.commandId;
-					yield* this
-						.sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
-						VALUES (${runId}, ${request.sessionId}, 'pending', ${input.receipt.updatedAt})`;
-					events.push(
-						canonicalEvent(
-							"run.requested",
-							request.sessionId,
-							{ runId, inputId },
-							{
-								provider: request.providerId,
-								createdAt: input.receipt.updatedAt,
-								metadata: { runId },
-							},
-						),
-					);
-					requests.push({
-						...request,
-						projectKey: this.projectId,
-						payloadJson: JSON.stringify({ ...payload, runId }),
-					});
-				}
-				const storedEvents = yield* eventStore.appendBatch(events);
+
 				yield* this.recordReceipt({
 					...input.receipt,
 					projectKey: this.projectId,
 				});
-				for (const request of requests) {
-					yield* this.recordOutboxRequest(
+				for (const request of input.outboxRequests) {
+					const reserved = yield* this.recordOutboxRequest(
 						{ ...request, projectKey: this.projectId },
 						input.receipt.updatedAt,
 					);
+					if (reserved) events.push(reserved);
 				}
-				yield* this.recordMeta(
-					storedEvents.at(-1)?.sequence ?? 0,
-					input.receipt.updatedAt,
-				);
+				const storedEvents = yield* eventStore.appendBatch(events);
+				yield* this.sql`
+					INSERT INTO provider_command_meta (project_key, last_applied_sequence, schema_version, rebuilt_at)
+					VALUES (${this.projectId}, ${storedEvents.at(-1)?.sequence ?? 0}, 1, ${input.receipt.updatedAt})
+					ON CONFLICT (project_key) DO UPDATE SET
+						last_applied_sequence = MAX(provider_command_meta.last_applied_sequence, excluded.last_applied_sequence),
+						schema_version = excluded.schema_version, rebuilt_at = excluded.rebuilt_at`;
 				return storedEvents;
 			}),
 		);
@@ -179,22 +123,21 @@ export class DurableCommandCommitRepository {
 	private recordOutboxRequest(
 		request: DurableCommandOutboxRequest,
 		updatedAt: number,
-	): Effect.Effect<void, SqlError | Error> {
-		// One live execution claim per command id. A re-dispatch after a
-		// retryable failure recommits the same command; supersede any prior
-		// *idle* non-terminal row (pending/retryable_failed) so the fresh pending
-		// row is the only executable claim. A `running` row is an active claim
-		// held by an executor — superseding it would let a second executor run
-		// the provider concurrently, so refuse the recommit and let the whole
-		// commit transaction roll back. Terminal rows (completed/failed) are
-		// preserved as history.
+	): Effect.Effect<CanonicalEvent | undefined, SqlError | Error> {
+		// Recommit replaces idle rows while retaining their reservation. A live
+		// executor keeps its exclusive claim; terminal rows remain history.
 		return Effect.gen({ self: this }, function* () {
 			const [running] = yield* this.sql<{
 				readonly n: number;
 				readonly attempt_count: number;
+				readonly run_id: string | null;
 			}>`
 				SELECT COUNT(*) FILTER (WHERE status = 'running') AS n,
-					COALESCE(MAX(attempt_count), 0) AS attempt_count FROM provider_command_outbox
+					COALESCE(MAX(attempt_count), 0) AS attempt_count,
+					MAX(CASE WHEN status IN ('pending', 'retryable_failed')
+						AND run_id IN (SELECT id FROM provider_runs WHERE session_id = ${request.sessionId} AND status IN ('pending', 'running'))
+						THEN run_id END) AS run_id
+				FROM provider_command_outbox
 				WHERE command_id = ${request.commandId} AND project_key = ${this.projectId}`;
 			if ((running?.n ?? 0) > 0) {
 				return yield* Effect.fail(
@@ -203,12 +146,10 @@ export class DurableCommandCommitRepository {
 					),
 				);
 			}
-			yield* this
-				.sql`UPDATE provider_runs SET status = 'interrupted', completed_at = ${updatedAt}
-				WHERE status = 'pending' AND id IN (
-					SELECT json_extract(payload_json, '$.runId') FROM provider_command_outbox
-					WHERE command_id = ${request.commandId} AND project_key = ${this.projectId}
-					AND status IN ('pending', 'retryable_failed'))`;
+			const runId =
+				request.effectType === "send_turn"
+					? (running?.run_id ?? randomUUID())
+					: null;
 			yield* this.sql`
 				DELETE FROM provider_command_outbox
 				WHERE command_id = ${request.commandId}
@@ -217,26 +158,38 @@ export class DurableCommandCommitRepository {
 			yield* this.sql`
 				INSERT INTO provider_command_outbox (
 					request_sequence, command_id, project_key, session_id, provider_id,
-					effect_type, payload_json, status, attempt_count, requested_at, updated_at
+					effect_type, payload_json, run_id, status, attempt_count, requested_at, updated_at
 				) VALUES (
 					${request.requestSequence}, ${request.commandId}, ${request.projectKey},
 					${request.sessionId}, ${request.providerId}, ${request.effectType},
-					${request.payloadJson}, 'pending', ${running?.attempt_count ?? 0}, ${updatedAt}, ${updatedAt}
+					${request.payloadJson}, ${runId}, 'pending', ${running?.attempt_count ?? 0}, ${updatedAt}, ${updatedAt}
 				)`;
+			if (!runId || running?.run_id) return;
+			const payload = yield* Effect.try({
+				try: (): unknown => JSON.parse(request.payloadJson),
+				catch: (cause) =>
+					new Error("Invalid send_turn reservation payload", { cause }),
+			});
+			if (!isRecord(payload))
+				return yield* Effect.fail(
+					new Error("Invalid send_turn reservation payload"),
+				);
+			return canonicalEvent(
+				"run.requested",
+				request.sessionId,
+				{
+					runId,
+					inputId:
+						typeof payload["inputId"] === "string"
+							? payload["inputId"]
+							: request.commandId,
+				},
+				{
+					provider: request.providerId,
+					createdAt: updatedAt,
+					metadata: { runId },
+				},
+			);
 		});
-	}
-
-	private recordMeta(
-		lastAppliedSequence: number,
-		updatedAt: number,
-	): Effect.Effect<void, SqlError> {
-		return this.sql`
-			INSERT INTO provider_command_meta (
-				project_key, last_applied_sequence, schema_version, rebuilt_at
-			) VALUES (${this.projectId}, ${lastAppliedSequence}, 1, ${updatedAt})
-			ON CONFLICT (project_key) DO UPDATE SET
-				last_applied_sequence = excluded.last_applied_sequence,
-				schema_version = excluded.schema_version,
-				rebuilt_at = excluded.rebuilt_at`.pipe(Effect.asVoid);
 	}
 }

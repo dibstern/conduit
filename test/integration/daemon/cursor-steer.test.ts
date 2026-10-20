@@ -648,6 +648,11 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 		const messageId = state.messages.find(
 			(row) => row.input_id === inputId,
 		)?.id;
+		expect(state.assistantMessages).toContainEqual({
+			id: terminals[0]?.data["messageId"],
+			turn_id: messageId,
+			parent_id: messageId,
+		});
 		expect(
 			state.messages.find((row) => row.input_id === inputId)?.steered,
 		).toBe(1);
@@ -659,7 +664,6 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 				.map((event) => event.data),
 		).toEqual([
 			expect.objectContaining({
-				userMessageId: messageId,
 				error:
 					"The delivered steer run disconnected.\n\nYou can retry this turn.",
 				code: "network_error",

@@ -23,10 +23,11 @@ function stored(harness: ProcessHarness, sessionId: string) {
 		return {
 			commands: db
 				.prepare(
-					"SELECT command_id, payload_json, attempt_count, status FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
+					"SELECT command_id, run_id, payload_json, attempt_count, status FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
 				)
 				.all(sessionId) as Array<{
 				command_id: string;
+				run_id: string;
 				payload_json: string;
 				attempt_count: number;
 				status: string;
@@ -97,21 +98,26 @@ describe("runner host at-most-once delivery through Claude's process seam", () =
 				"sends",
 				sessionId,
 			);
-			const journal = readdirSync(journalDirectory)
-				.map(
-					(filename) =>
-						JSON.parse(
-							readFileSync(join(journalDirectory, filename), "utf8"),
-						) as Record<string, unknown>,
-				)
-				.find((record) => record["commandId"] === command.command_id);
-			expect(journal).toMatchObject({
-				commandId: command.command_id,
-				attempt: command.attempt_count,
-				runnerPid: original.pid,
-				startedAt: expect.any(Number),
+			let journal: Record<string, unknown> | undefined;
+			await vi.waitFor(() => {
+				journal = readdirSync(journalDirectory)
+					.map(
+						(filename) =>
+							JSON.parse(
+								readFileSync(join(journalDirectory, filename), "utf8"),
+							) as Record<string, unknown>,
+					)
+					.find((record) => record["commandId"] === command.command_id);
+				expect(journal).toMatchObject({
+					commandId: command.command_id,
+					attempt: command.attempt_count,
+					runnerPid: original.pid,
+					startedAt: expect.any(Number),
+					completedAt: expect.any(Number),
+					result: { status: "accepted" },
+				});
 			});
-			expect(journal).not.toHaveProperty("completedAt");
+			expect(stored(harness, sessionId).commands[0]?.status).toBe("running");
 			expect(stored(harness, sessionId).turns).toEqual([{ state: "running" }]);
 			await harness.kill();
 			await pending;
@@ -210,6 +216,7 @@ describe("runner host at-most-once delivery through Claude's process seam", () =
 									aborted: false,
 									input: {
 										...(JSON.parse(command.payload_json) as SessionTurn),
+										runId: command.run_id,
 										commandAttempt: command.attempt_count,
 									},
 								},
@@ -217,10 +224,14 @@ describe("runner host at-most-once delivery through Claude's process seam", () =
 							)
 							.pipe(Effect.result, Effect.timeout("15 seconds")),
 					);
-					expect(result).toMatchObject({
-						_tag: "Failure",
-						failure: { code: "runner_send_uncertain", retryable: false },
-					});
+					expect(result).toMatchObject(
+						partialJournal
+							? {
+									_tag: "Failure",
+									failure: { code: "runner_send_uncertain", retryable: false },
+								}
+							: { _tag: "Success", success: { status: "accepted" } },
+					);
 					failures.push(result);
 				}
 				expect(

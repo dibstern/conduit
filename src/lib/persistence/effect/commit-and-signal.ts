@@ -61,6 +61,7 @@ export class ProjectOutsideSeamTransaction extends Data.TaggedError(
 
 export interface CommitAndSignalOptions {
 	readonly publish?: boolean;
+	readonly endedRunEvents?: Set<string>;
 	/** Runs after projection, inside the append transaction, before COMMIT. */
 	readonly beforeCommit?: Effect.Effect<void, SqlError>;
 	readonly afterCommit?: Effect.Effect<void>;
@@ -204,7 +205,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 										yield* requireSeamTransaction;
 										if (events.length === 0) return;
 										const advance = yield* projectionRunner
-											.projectBatch(events)
+											.projectBatch(events, options.endedRunEvents)
 											.pipe(Effect.provideService(SqlClient.SqlClient, sql));
 										stored.push(...events);
 										advances.push(advance);

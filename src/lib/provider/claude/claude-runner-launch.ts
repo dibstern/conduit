@@ -366,6 +366,8 @@ export const makeClaudeRunnerLaunch = (
 							onSubagentFinalizationComplete: reportUpgradeState,
 							onTurnStateChanged: (_sessionId, inFlight) =>
 								callbacks.turnStateChanged(inFlight),
+							onAbandonedRun: (inputId) =>
+								callbacks.retireAfterCommand?.(inputId),
 						},
 						(output) => {
 							if (

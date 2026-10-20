@@ -175,6 +175,7 @@ it.effect(
 				registry: new ProviderRegistry([provider]),
 				accountDirectory: makeMockAccountDirectory(),
 				durableCommands: {
+					ingestion: yield* ProviderRuntimeIngestionTag,
 					sql,
 					projectKey: "test-project",
 					snapshot: yield* new CommandReadModelRepository(

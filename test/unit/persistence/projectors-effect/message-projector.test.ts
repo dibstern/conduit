@@ -687,6 +687,7 @@ describe("MessageProjector", () => {
 			"tool.completed",
 			"file.attached",
 			"turn.completed",
+			"turn.notice",
 			"turn.error",
 			"turn.interrupted",
 			"session.compaction",
@@ -1970,7 +1971,7 @@ describe("MessageProjector", () => {
 	});
 
 	describe("turn.error", () => {
-		it("clears streaming flag", async () => {
+		it("records error content while leaving streaming settlement to the run transition", async () => {
 			const created = makeStored(
 				"message.created",
 				"s1",
@@ -1998,7 +1999,12 @@ describe("MessageProjector", () => {
 				"SELECT * FROM messages WHERE id = ?",
 				["m1"],
 			);
-			expect(row?.is_streaming).toBe(0);
+			expect(row?.is_streaming).toBe(1);
+			expect(
+				await harness.query(
+					"SELECT text FROM message_parts WHERE type = 'error'",
+				),
+			).toEqual([{ text: "rate_limit" }]);
 		});
 	});
 

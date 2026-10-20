@@ -16,10 +16,10 @@ import type { TurnResult } from "../../../../src/lib/provider/types.js";
 import { makeTestClaudeProviderInstance } from "../../../helpers/claude-provider-instance.js";
 import {
 	getClaudeRuntimeSessionCountForTest,
+	hasClaudeRuntimePendingIntakesForTest,
 	hasClaudeRuntimeSessionForTest,
-	hasClaudeRuntimeTurnWaitersForTest,
+	setClaudeRuntimePendingIntakesForTest,
 	setClaudeRuntimeSessionForTest,
-	setClaudeRuntimeTurnWaitersForTest,
 } from "../../../helpers/claude-runtime-state.js";
 import {
 	createMockEventSink,
@@ -131,7 +131,9 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			const deferred = await Effect.runPromise(
 				Deferred.make<TurnResult, Error>(),
 			);
-			setClaudeRuntimeTurnWaitersForTest(instance, "sess-shutdown", [deferred]);
+			setClaudeRuntimePendingIntakesForTest(instance, "sess-shutdown", [
+				deferred,
+			]);
 			const result = Effect.runPromise(
 				Deferred.await(deferred).pipe(Effect.result),
 			);
@@ -290,7 +292,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 
 			const d1 = await Effect.runPromise(Deferred.make<TurnResult, Error>());
 			const d2 = await Effect.runPromise(Deferred.make<TurnResult, Error>());
-			setClaudeRuntimeTurnWaitersForTest(instance, "sess-interrupt-reject", [
+			setClaudeRuntimePendingIntakesForTest(instance, "sess-interrupt-reject", [
 				d1,
 				d2,
 			]);
@@ -313,7 +315,10 @@ describe("ClaudeProviderInstance lifecycle", () => {
 				});
 			}
 			expect(
-				hasClaudeRuntimeTurnWaitersForTest(instance, "sess-interrupt-reject"),
+				hasClaudeRuntimePendingIntakesForTest(
+					instance,
+					"sess-interrupt-reject",
+				),
 			).toBe(false);
 		});
 
@@ -447,7 +452,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			const deferred = await Effect.runPromise(
 				Deferred.make<TurnResult, Error>(),
 			);
-			setClaudeRuntimeTurnWaitersForTest(instance, "sess-1", [deferred]);
+			setClaudeRuntimePendingIntakesForTest(instance, "sess-1", [deferred]);
 			await Effect.runPromise(instance.interruptTurnEffect("sess-1"));
 			expect(await Effect.runPromise(Deferred.await(deferred))).toMatchObject({
 				status: "interrupted",
@@ -610,7 +615,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 
 			const d1 = await Effect.runPromise(Deferred.make<TurnResult, Error>());
 			const d2 = await Effect.runPromise(Deferred.make<TurnResult, Error>());
-			setClaudeRuntimeTurnWaitersForTest(instance, "sess-reject", [d1, d2]);
+			setClaudeRuntimePendingIntakesForTest(instance, "sess-reject", [d1, d2]);
 
 			const rejected: Error[] = [];
 			const caught = [
@@ -625,9 +630,9 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			expect(rejected[0]?.message).toContain("reload");
 			expect(rejected[1]?.message).toContain("reload");
 			// The deferred queue should be cleared
-			expect(hasClaudeRuntimeTurnWaitersForTest(instance, "sess-reject")).toBe(
-				false,
-			);
+			expect(
+				hasClaudeRuntimePendingIntakesForTest(instance, "sess-reject"),
+			).toBe(false);
 		});
 
 		it("endSession followed by sendTurn creates a fresh query", async () => {

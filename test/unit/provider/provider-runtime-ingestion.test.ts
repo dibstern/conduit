@@ -27,6 +27,7 @@ import {
 	ProjectionRunnerEffectTag,
 	ProjectionRunnerError,
 } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import { runTerminalStatus } from "../../../src/lib/persistence/effect/projectors-effect.js";
 import type {
 	CanonicalEvent,
 	StoredEvent,
@@ -107,23 +108,35 @@ function makeHarness(options?: {
 			);
 		}),
 	);
-	const projectBatch = vi.fn((events: readonly StoredEvent[]) => {
-		projectBatchCallIndex += 1;
-		projected.push(...events);
-		batchProjected.push(...events);
-		return (
-			options?.projectBatchEffect?.(events, projectBatchCallIndex) ??
-			Effect.void
-		).pipe(
-			Effect.as({
-				version: events[events.length - 1]?.sequence ?? 0,
-				projectIds: [...new Set(events.map((event) => event.projectId))],
-				sessionIds: [...new Set(events.map((event) => event.sessionId))],
-				removedSessionIds: [],
-				collections: ["messages"] as const,
-			}),
-		);
-	});
+	const projectBatch = vi.fn(
+		(events: readonly StoredEvent[], endedRunEvents?: Set<string>) => {
+			projectBatchCallIndex += 1;
+			projected.push(...events);
+			batchProjected.push(...events);
+			return (
+				options?.projectBatchEffect?.(events, projectBatchCallIndex) ??
+				Effect.void
+			).pipe(
+				Effect.tap(() =>
+					Effect.sync(() => {
+						for (const event of events)
+							if (
+								event.metadata.runId &&
+								runTerminalStatus(event, event.provider)
+							)
+								endedRunEvents?.add(event.eventId);
+					}),
+				),
+				Effect.as({
+					version: events[events.length - 1]?.sequence ?? 0,
+					projectIds: [...new Set(events.map((event) => event.projectId))],
+					sessionIds: [...new Set(events.map((event) => event.sessionId))],
+					removedSessionIds: [],
+					collections: ["messages"] as const,
+				}),
+			);
+		},
+	);
 
 	const eventStore = {
 		projectId: "test-project",
@@ -222,6 +235,7 @@ describe("ProviderRuntimeIngestion", () => {
 					runtimeEvent({
 						eventId: "runtime-turn-completed",
 						type: "turn.completed",
+						runId: "run-1",
 						turnId: "turn-1",
 						data: { messageId: "message-1" },
 					}),
@@ -313,6 +327,7 @@ describe("ProviderRuntimeIngestion", () => {
 						runtimeEvent({
 							eventId: "publication-matrix-completed",
 							type: "turn.completed",
+							runId: "run-1",
 							turnId: "turn-1",
 							data: {
 								messageId: "message-1",
@@ -371,12 +386,15 @@ describe("ProviderRuntimeIngestion", () => {
 
 		expect(result._tag).toBe("Failure");
 		expect(harness.projectBatch).toHaveBeenCalledTimes(1);
-		expect(harness.projectBatch).toHaveBeenCalledWith([
-			expect.objectContaining({
-				eventId: "single-event-projection-failure",
-				sequence: 1,
-			}),
-		]);
+		expect(harness.projectBatch).toHaveBeenCalledWith(
+			[
+				expect.objectContaining({
+					eventId: "single-event-projection-failure",
+					sequence: 1,
+				}),
+			],
+			expect.any(Set),
+		);
 		expect(harness.projectEvent).not.toHaveBeenCalled();
 		expect(busPublish).not.toHaveBeenCalled();
 		expect(relayPublish).not.toHaveBeenCalled();

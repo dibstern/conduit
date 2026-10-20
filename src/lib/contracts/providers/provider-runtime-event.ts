@@ -39,6 +39,7 @@ export const PROVIDER_RUNTIME_EVENT_TYPES = [
 	"tool.completed",
 	"file.attached",
 	"turn.completed",
+	"turn.notice",
 	"turn.error",
 	"turn.interrupted",
 	"turn.model_resolved",

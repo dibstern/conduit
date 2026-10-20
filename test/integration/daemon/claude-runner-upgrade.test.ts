@@ -838,7 +838,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			() => {
 				const state = persisted(harness, sessionId);
 				expect(state.session.status).toBe("busy");
-				expect(state.turns).toEqual([{ state: "running" }]);
+				expect(state.turns).toEqual([{ state: "completed" }]);
 				expect(
 					state.events.some(
 						(event) =>
@@ -886,7 +886,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		expect(() => process.kill(old.pid, 0)).not.toThrow();
 		expect(persisted(harness, sessionId)).toMatchObject({
 			session: { status: "busy" },
-			turns: [{ state: "running" }],
+			turns: [{ state: "completed" }],
 			commands: [{ status: "completed" }],
 		});
 		expect(

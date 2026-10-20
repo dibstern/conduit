@@ -479,7 +479,7 @@ export interface PtyInfo {
  */
 export interface HistoryMessagePart {
 	id: string;
-	type: PartType | "thinking" | "error" | "setup";
+	type: PartType | "thinking" | "error" | "setup" | "notice";
 	/** Daemon setup notice, carried by the normal durable transcript. */
 	setup?: ProjectSetupState;
 	/** Text content — matches OpenCode's TextPart schema (field is "text", not "content"). */

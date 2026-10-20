@@ -17,6 +17,115 @@ import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 
 describe("ClaudeEventPersistEffect session lifecycle", () => {
 	it.effect(
+		"reuses the user body while placing a fresh retry reservation exactly once",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const persist = yield* ClaudeEventPersistEffectTag;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.recover();
+				yield* runner.projectEvent(
+					yield* store.append(
+						canonicalEvent("session.created", "retry", {
+							sessionId: "retry",
+							title: "Retry",
+							provider: "claude",
+						}),
+					),
+				);
+				yield* persist.persistEvents([
+					canonicalEvent("run.requested", "retry", {
+						runId: "r1",
+						inputId: "input",
+					}),
+				]);
+				yield* persist.persistUserMessage("retry", "original body", {
+					messageId: "original-message",
+					inputId: "input",
+					runId: "r1",
+				});
+				const before =
+					yield* sql`SELECT id, text, created_at FROM messages WHERE session_id = 'retry' AND role = 'user'`;
+				yield* persist.persistEvents([
+					canonicalEvent(
+						"turn.error",
+						"retry",
+						{ messageId: "", error: "first attempt failed" },
+						{ provider: "claude", metadata: { runId: "r1" } },
+					),
+					canonicalEvent("run.requested", "retry", {
+						runId: "r2",
+						inputId: "input",
+					}),
+				]);
+				yield* persist.persistUserMessage(
+					"retry",
+					"must not append another body",
+					{ messageId: "another-candidate", inputId: "input", runId: "r2" },
+				);
+				expect(
+					yield* sql`SELECT state, run_id, started_at, completed_at FROM turns WHERE user_message_id = 'original-message'`,
+				).toEqual([
+					{
+						state: "pending",
+						run_id: "r2",
+						started_at: null,
+						completed_at: null,
+					},
+				]);
+				expect(
+					yield* sql`SELECT id, text, created_at FROM messages WHERE session_id = 'retry' AND role = 'user'`,
+				).toEqual(before);
+				expect(
+					yield* sql`SELECT text FROM message_parts WHERE message_id = 'original-message'`,
+				).toEqual([{ text: "original body" }]);
+				const placed = yield* store.readBySession("retry");
+				expect(
+					placed.filter((event) => event.type === "message.created"),
+				).toHaveLength(2);
+				expect(
+					placed.filter((event) => event.type === "text.delta"),
+				).toHaveLength(1);
+				yield* persist.persistUserMessage("retry", "duplicate body", {
+					inputId: "input",
+					runId: "r2",
+				});
+				expect((yield* store.readBySession("retry")).length).toBe(
+					placed.length,
+				);
+				yield* persist.persistEvents([
+					canonicalEvent("run.requested", "retry", {
+						runId: "joined",
+						inputId: "input",
+					}),
+					canonicalEvent(
+						"run.started",
+						"retry",
+						{ requestedRunId: "joined", inputId: "input" },
+						{ metadata: { runId: "r2" } },
+					),
+				]);
+				const joined = yield* store.readBySession("retry");
+				yield* persist.persistUserMessage("retry", "joined duplicate", {
+					messageId: "another-candidate",
+					inputId: "input",
+					runId: "joined",
+				});
+				expect((yield* store.readBySession("retry")).length).toBe(
+					joined.length,
+				);
+				expect(
+					yield* sql`SELECT id, text, created_at FROM messages WHERE session_id = 'retry' AND role = 'user'`,
+				).toEqual(before);
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project"), {
+					local: true,
+				}),
+			),
+	);
+
+	it.effect(
 		"omits empty user deltas without losing attachments or nonempty text",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-empty-delta-"));

@@ -1373,7 +1373,8 @@ export const effectMigrationEntries = {
 				status TEXT NOT NULL CHECK(status IN ('pending', 'running', 'completed', 'error', 'interrupted', 'joined')),
 				requested_at INTEGER NOT NULL,
 				started_at INTEGER,
-				completed_at INTEGER
+				completed_at INTEGER,
+				joined_into TEXT
 			);
 			CREATE INDEX IF NOT EXISTS idx_provider_runs_session_status ON provider_runs(session_id, status);
 			CREATE TRIGGER IF NOT EXISTS delete_session_provider_runs AFTER DELETE ON sessions
@@ -1387,37 +1388,57 @@ export const effectMigrationEntries = {
 		yield* executeSqlStatements(
 			"CREATE INDEX IF NOT EXISTS idx_turns_run ON turns(run_id)",
 		);
+		yield* runAddColumnMigrationIfMissing(
+			"provider_command_outbox",
+			"run_id",
+			"ALTER TABLE provider_command_outbox ADD COLUMN run_id TEXT",
+		);
+		// Read legacy payload ownership once; every runtime reader uses the column.
+		yield* sql`UPDATE provider_command_outbox SET run_id = json_extract(payload_json, '$.runId')
+			WHERE effect_type = 'send_turn' AND run_id IS NULL AND json_valid(payload_json)`;
 		if (alreadyOwned) return;
-		// Reservations survive re-opening and migration-ledger repairs. They do
-		// not claim that the provider accepted the legacy input.
+		// Preserve executing legacy reservations without claiming intake.
 		yield* sql`UPDATE provider_command_outbox
-			SET payload_json = json_set(payload_json, '$.runId', 'legacy-run:' || project_key || ':' || request_sequence)
-			WHERE effect_type = 'send_turn' AND status IN ('pending', 'running', 'retryable_failed')
-				AND json_valid(payload_json) AND json_type(payload_json) = 'object'
-				AND json_extract(payload_json, '$.runId') IS NULL`;
+			SET run_id = 'legacy-run:' || project_key || ':' || request_sequence
+			WHERE effect_type = 'send_turn' AND status IN ('pending', 'running', 'retryable_failed') AND run_id IS NULL`;
 		yield* sql`INSERT OR IGNORE INTO provider_runs (id, session_id, status, requested_at, started_at)
-			SELECT json_extract(payload_json, '$.runId'), session_id,
+			SELECT run_id, session_id,
 				CASE WHEN status = 'running' THEN 'running' ELSE 'pending' END,
 				requested_at, CASE WHEN status = 'running' THEN updated_at END
 			FROM provider_command_outbox
 			WHERE effect_type = 'send_turn' AND status IN ('pending', 'running', 'retryable_failed')
 				AND json_valid(payload_json) AND json_type(payload_json) = 'object'
-				AND json_extract(payload_json, '$.runId') IS NOT NULL`;
+				AND run_id IS NOT NULL`;
 		yield* sql`INSERT OR IGNORE INTO events (event_id, session_id, stream_version, type, data, metadata, provider, created_at, project_id)
-			SELECT 'run-requested-migration:' || json_extract(o.payload_json, '$.runId'), o.session_id,
+			SELECT 'run-requested-migration:' || o.run_id, o.session_id,
 				COALESCE((SELECT MAX(stream_version) FROM events WHERE session_id = o.session_id), 0)
 					+ ROW_NUMBER() OVER (PARTITION BY o.session_id ORDER BY o.request_sequence),
-				'run.requested', json_object('runId', json_extract(o.payload_json, '$.runId'),
+				'run.requested', json_object('runId', o.run_id,
 					'inputId', COALESCE(json_extract(o.payload_json, '$.inputId'), json_extract(o.payload_json, '$.userMessageId'), o.command_id)),
-				json_object('runId', json_extract(o.payload_json, '$.runId')), o.provider_id, o.requested_at,
+				json_object('runId', o.run_id), o.provider_id, o.requested_at,
 				(SELECT project_id FROM sessions WHERE id = o.session_id)
 			FROM provider_command_outbox o
 			WHERE o.effect_type = 'send_turn' AND o.status IN ('pending', 'running', 'retryable_failed')
 				AND json_valid(o.payload_json) AND json_type(o.payload_json) = 'object'
-				AND json_extract(o.payload_json, '$.runId') IS NOT NULL
-				AND NOT EXISTS (SELECT 1 FROM events WHERE event_id = 'run-requested-migration:' || json_extract(o.payload_json, '$.runId'))`;
-		// Keep an executing legacy reservation busy until its surviving runner
-		// or ordinary command recovery proves it ended. Acceptance stays unknown.
+				AND o.run_id IS NOT NULL
+				AND NOT EXISTS (SELECT 1 FROM events WHERE event_id = 'run-requested-migration:' || o.run_id)`;
+		// Membership comes from the command's exact input, never turn recency.
+		// Preserve state and acceptance until ordinary provider recovery ends it.
+		yield* sql`UPDATE turns SET run_id = (
+			SELECT command.run_id FROM provider_command_outbox command
+			JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id
+			LEFT JOIN messages user ON user.session_id = turns.session_id
+				AND user.id = COALESCE(turns.user_message_id, turns.id)
+			WHERE command.session_id = turns.session_id AND command.effect_type = 'send_turn'
+				AND command.status IN ('pending', 'running', 'retryable_failed')
+				AND json_valid(command.payload_json) AND json_type(command.payload_json) = 'object'
+				AND COALESCE(json_extract(command.payload_json, '$.continuation.cutOffMessageId'),
+					json_extract(command.payload_json, '$.inputId'), json_extract(command.payload_json, '$.userMessageId'),
+					json_extract(command.payload_json, '$.commandId'), json_extract(command.payload_json, '$.turnId'),
+					command.command_id) IN (turns.id, turns.user_message_id, user.input_id)
+			ORDER BY command.request_sequence DESC LIMIT 1)
+			WHERE run_id IS NULL AND state IN ('pending', 'running')`;
+		// A turn with no recoverable command cannot receive an owned end.
 		yield* sql`UPDATE turns SET state = 'interrupted', completed_at = COALESCE(completed_at, requested_at)
 			WHERE run_id IS NULL AND state IN ('pending', 'running')`;
 	}),

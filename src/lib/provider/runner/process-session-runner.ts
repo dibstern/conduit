@@ -385,18 +385,15 @@ export const makeProcessSessionRunner = (
 			string,
 			{
 				sessionId: string;
+				inputId?: string;
 				runId?: string | undefined;
-				/** The turn's user message: a continuation's is its cut-off message. */
-				userMessageId?: string;
 				/** What a failed send places when the SDK never started it. */
 				placement?: { inputId: string; text: string };
 				messageId: string;
-				terminal: boolean;
 				pending: boolean;
 				accepted: boolean;
 				admission?: Deferred.Deferred<void>;
 				releaseRequested: boolean;
-				completed: Deferred.Deferred<void> | undefined;
 			}
 		>();
 		let closing = false;
@@ -536,7 +533,6 @@ export const makeProcessSessionRunner = (
 			entry: RunnerChild,
 			failure: SessionFailure,
 		) => {
-			const wasReady = entry.connection !== undefined;
 			if (failure.code === "runner_idle_exit") entry.idleExiting = true;
 			if (entry.stopping || entry.recovering || entry.failure || closing)
 				return;
@@ -548,40 +544,37 @@ export const makeProcessSessionRunner = (
 			);
 			const commands = [...(entry.pendingSendCommands ?? [])];
 			const settleExitedRuns = Effect.gen(function* () {
-				const reservations = new Map<string, string>();
+				const reservations = new Set<string>();
 				if (sql && ingestion)
 					for (const [commandId, attempt] of commands) {
 						const [owner] = yield* sql<{
 							run_id: string | null;
-							user_message_id: string;
 						}>`
-							SELECT json_extract(outbox.payload_json, '$.runId') AS run_id,
-								COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'),
-									json_extract(outbox.payload_json, '$.inputId'),
-									json_extract(outbox.payload_json, '$.userMessageId'),
-									json_extract(outbox.payload_json, '$.commandId'),
-									json_extract(outbox.payload_json, '$.turnId'), outbox.command_id) AS user_message_id
+							SELECT outbox.run_id AS run_id
 							FROM provider_command_outbox outbox WHERE project_key = ${projectId}
 								AND session_id = ${sessionId} AND command_id = ${commandId} AND attempt_count = ${attempt}
 							ORDER BY request_sequence LIMIT 1`;
-						if (owner?.run_id)
-							reservations.set(owner.run_id, owner.user_message_id);
+						if (owner?.run_id) reservations.add(owner.run_id);
 					}
 				yield* Deferred.await(entry.stopped);
+				if (process.env["NODE_ENV"] === "test")
+					yield* Effect.sleep(
+						Number(process.env["CONDUIT_TEST_RUNNER_FAILURE_DELAY_MS"] ?? 0),
+					);
 				yield* entry.outputs.withPermits(1)(
 					lock.withPermits(1)(
 						Effect.gen(function* () {
 							const owners = new Map<string, RunSettlementOwner>();
 							for (const runId of entry.ownedRunIds ?? [])
-								owners.set(runId, { runId });
+								reservations.add(runId);
 							for (const [, binding] of bindings)
 								if (binding.accepted && binding.runId)
-									owners.set(binding.runId, { runId: binding.runId });
+									reservations.add(binding.runId);
 							const pid = entry.pid ?? entry.child?.pid;
 							if (
 								!sql ||
 								!ingestion ||
-								(!owners.size && !reservations.size) ||
+								!reservations.size ||
 								closing ||
 								entry.recovering ||
 								entry.candidate ||
@@ -590,20 +583,13 @@ export const makeProcessSessionRunner = (
 								runnerPidAlive(pid)
 							)
 								return Effect.void;
-							for (const [reservation, userMessageId] of reservations) {
-								const [accepted] = yield* sql<{ run_id: string | null }>`
-									SELECT json_extract(metadata, '$.runId') AS run_id FROM events
-									WHERE session_id = ${sessionId} AND type = 'run.started'
-										AND json_extract(data, '$.requestedRunId') = ${reservation}
-									ORDER BY sequence LIMIT 1`;
+							for (const reservation of reservations) {
+								const [accepted] = yield* sql<{ run_id: string }>`
+									SELECT COALESCE(joined_into, id) AS run_id FROM provider_runs
+									WHERE session_id = ${sessionId} AND id = ${reservation}
+										AND (${entry.idleExiting ? 1 : 0} = 0 OR status = 'running' OR started_at IS NOT NULL OR joined_into IS NOT NULL)`;
 								if (accepted?.run_id)
 									owners.set(accepted.run_id, { runId: accepted.run_id });
-								// Idle retirement retries commands it never took in.
-								else if (!entry.idleExiting)
-									owners.set(reservation, {
-										runId: reservation,
-										userMessageId,
-									});
 							}
 							if (!owners.size) return;
 							return yield* settleSessionRuns(
@@ -621,12 +607,7 @@ export const makeProcessSessionRunner = (
 					Effect.logError("Could not settle exited runner runs", cause),
 				),
 			);
-			if (
-				!entry.idleExiting &&
-				(!wasReady ||
-					failure.operation === "runner hello" ||
-					bindings.some(([, binding]) => binding.pending))
-			)
+			if (!entry.idleExiting)
 				log.error(
 					`${runnerLabel} failed for session ${sessionId}: ${failure.message}`,
 				);
@@ -654,18 +635,6 @@ export const makeProcessSessionRunner = (
 					)
 					.pipe(
 						Effect.ignore,
-						Effect.andThen(
-							Effect.forEach(
-								bindings.filter(
-									([, binding]) => !entry.idleExiting || binding.accepted,
-								),
-								([, binding]) =>
-									binding.completed
-										? Deferred.await(binding.completed)
-										: Effect.void,
-								{ discard: true },
-							),
-						),
 						Effect.ensuring(Effect.sync(() => evict(sessionId, entry))),
 						Effect.ensuring(Deferred.succeed(entry.drained, undefined)),
 					),
@@ -711,35 +680,16 @@ export const makeProcessSessionRunner = (
 							return Effect.succeed({});
 						const binding =
 							"sinkId" in received ? sinks.get(received.sinkId) : undefined;
-						const output =
-							received.type === "event" &&
-							received.event.type === "turn.error" &&
-							binding?.userMessageId &&
-							received.event.sessionId === binding.sessionId &&
-							isRecord(received.event.data) &&
-							// A payload can name a newer input delivered within this run.
-							typeof received.event.data["userMessageId"] !== "string"
-								? {
-										...received,
-										event: {
-											...received.event,
-											data: {
-												...received.event.data,
-												userMessageId: binding.userMessageId,
-											},
-										},
-									}
-								: received;
-						if (output.type === "release-sink" && binding?.pending) {
+						if (received.type === "release-sink" && binding?.pending) {
 							binding.releaseRequested = true;
 							return Effect.succeed({});
 						}
-						return emit(output, sessionId).pipe(
+						return emit(received, sessionId).pipe(
 							Effect.tap(() =>
 								Effect.sync(() => {
-									observeRunnerTurn(output, binding);
-									if (output.type === "release-sink")
-										sinks.delete(output.sinkId);
+									observeRunnerTurn(received, binding);
+									if (received.type === "release-sink")
+										sinks.delete(received.sinkId);
 								}),
 							),
 						);
@@ -803,28 +753,22 @@ export const makeProcessSessionRunner = (
 							? []
 							: (hello.bindings ?? [])) {
 							let inputId: string | undefined;
-							let userMessageId: string | undefined;
 							let runId: string | undefined;
 							let messageId = "";
-							let terminal = false;
 							let pending = false;
 							if (sql) {
 								const rows = yield* sql<{
 									input_id: string | null;
-									user_message_id: string | null;
 									run_id: string | null;
 									status: string;
 									attempt_count: number;
 									assistant_message_id: string | null;
-									state: string | null;
 								}>`SELECT COALESCE(json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS input_id,
-									COALESCE((SELECT json_extract(accepted.metadata, '$.runId') FROM events accepted
-										WHERE accepted.type = 'run.started' AND accepted.session_id = outbox.session_id
-										AND json_extract(accepted.data, '$.requestedRunId') = json_extract(outbox.payload_json, '$.runId') LIMIT 1),
-										json_extract(outbox.payload_json, '$.runId')) AS run_id,
-									COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS user_message_id,
-									outbox.status, outbox.attempt_count, turns.assistant_message_id, turns.state
+									COALESCE(reservation.joined_into, reservation.id) AS run_id,
+									outbox.status, outbox.attempt_count, turns.assistant_message_id
 									FROM provider_command_outbox outbox
+									LEFT JOIN provider_runs reservation ON reservation.session_id = outbox.session_id
+										AND reservation.id = outbox.run_id
 									LEFT JOIN turns ON turns.session_id = outbox.session_id
 										AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
 									WHERE outbox.project_key = ${projectId} AND outbox.command_id = ${binding.commandId ?? binding.sinkId} AND outbox.session_id = ${sessionId}`.pipe(
@@ -836,14 +780,9 @@ export const makeProcessSessionRunner = (
 								const row = rows[0];
 								if (row) {
 									inputId = row.input_id ?? undefined;
-									userMessageId = row.user_message_id ?? undefined;
 									runId = row.run_id ?? undefined;
 									// Acknowledged events will not replay after adoption.
 									messageId = row.assistant_message_id ?? "";
-									terminal =
-										row.state !== null &&
-										row.state !== "pending" &&
-										row.state !== "running";
 									pending =
 										row.status === "running" &&
 										(binding.sinkId ===
@@ -856,20 +795,15 @@ export const makeProcessSessionRunner = (
 													runnerSinkId(inputId, row.attempt_count)));
 								}
 							}
-							const completed = pending
-								? yield* Deferred.make<void>()
-								: undefined;
 							yield* ensureAttached();
 							sinks.set(binding.sinkId, {
 								sessionId,
+								...(inputId ? { inputId } : {}),
 								runId,
-								...(userMessageId ? { userMessageId } : {}),
 								messageId,
-								terminal,
 								pending,
 								accepted: true,
 								releaseRequested: false,
-								completed,
 							});
 						}
 						for (const pending of entry.candidate
@@ -900,11 +834,38 @@ export const makeProcessSessionRunner = (
 					}
 				},
 				onCommandsSettled: (commands) => {
-					for (const { commandId, attempt } of commands) {
-						const pending = entry.pendingSendCommands?.get(commandId);
-						if (pending !== undefined && pending <= attempt)
-							entry.pendingSendCommands?.delete(commandId);
-					}
+					runFork(
+						entry.outputs
+							.withPermits(1)(
+								Effect.gen(function* () {
+									for (const { commandId, attempt } of commands) {
+										const pending = entry.pendingSendCommands?.get(commandId);
+										if (pending === undefined || pending > attempt) continue;
+										if (sql) {
+											const rows = yield* sql<{
+												run_id: string | null;
+											}>`SELECT run_id
+										FROM provider_command_outbox WHERE project_key = ${projectId}
+										AND session_id = ${sessionId} AND command_id = ${commandId}
+										AND attempt_count = ${pending}`;
+											for (const row of rows)
+												if (row.run_id)
+													(entry.ownedRunIds ??= new Set()).add(row.run_id);
+										}
+										if (entry.pendingSendCommands?.get(commandId) === pending)
+											entry.pendingSendCommands.delete(commandId);
+									}
+								}),
+							)
+							.pipe(
+								Effect.catch((cause) =>
+									Effect.logWarning(
+										"Runner send ownership acknowledgement failed",
+										cause,
+									),
+								),
+							),
+					);
 				},
 				onUpgradeState: (state) => {
 					const snapshot = state.snapshot ?? entry.upgrade.state?.snapshot;
@@ -1415,16 +1376,12 @@ export const makeProcessSessionRunner = (
 									if (!binding) {
 										binding = {
 											sessionId: registration.sessionId,
-											userMessageId:
-												command.input.continuation?.cutOffMessageId ??
-												command.input.inputId,
+											inputId: command.input.inputId,
 											messageId: command.messageId,
 											...(command.runId ? { runId: command.runId } : {}),
-											terminal: command.terminal,
 											pending: true,
 											accepted: false,
 											releaseRequested: false,
-											completed: yield* Deferred.make<void>(),
 										};
 										sinks.set(command.sinkId, binding);
 									}
@@ -1435,7 +1392,7 @@ export const makeProcessSessionRunner = (
 									const admission = binding.admission;
 									runFork(
 										command.wait.pipe(
-											Effect.tap(() => {
+											Effect.onExit(() => {
 												if (
 													!binding ||
 													sinks.get(command.sinkId) !== binding ||
@@ -1458,11 +1415,6 @@ export const makeProcessSessionRunner = (
 													}),
 												);
 											}),
-											Effect.ensuring(
-												binding?.completed
-													? Deferred.succeed(binding.completed, undefined)
-													: Effect.void,
-											),
 											Effect.ensuring(
 												admission
 													? Deferred.succeed(admission, undefined)
@@ -1594,10 +1546,8 @@ export const makeProcessSessionRunner = (
 					command.type === "send-turn"
 						? {
 								sessionId: command.input.sessionId,
+								inputId: command.input.inputId,
 								runId: command.input.runId,
-								userMessageId:
-									command.input.continuation?.cutOffMessageId ??
-									command.input.inputId,
 								...(command.input.continuation
 									? {}
 									: {
@@ -1607,11 +1557,9 @@ export const makeProcessSessionRunner = (
 											},
 										}),
 								messageId: "",
-								terminal: false,
 								pending: true,
 								accepted: false,
 								releaseRequested: false,
-								completed: undefined as Deferred.Deferred<void> | undefined,
 							}
 						: undefined;
 				let child: RunnerChild | undefined;
@@ -1621,7 +1569,6 @@ export const makeProcessSessionRunner = (
 				let ending: RunnerChild | undefined;
 				return Effect.gen(function* () {
 					const outputOwner = yield* currentRunnerOutput;
-					if (turn) turn.completed = yield* Deferred.make<void>();
 					if (command.type === "shutdown") {
 						yield* shutdown;
 						return;
@@ -1955,39 +1902,25 @@ export const makeProcessSessionRunner = (
 						commandId = rows[0]?.command_id ?? commandId;
 					}
 					if (command.type === "end-session") {
-						const bindings = [...sinks.values()].filter(
-							(binding) => binding.sessionId === sessionId,
-						);
-						return yield* connection.commandEffect(commandId, payload).pipe(
-							Effect.ensuring(
-								stop(entry).pipe(
-									Effect.andThen(
-										Effect.suspend(() =>
-											entry.failure
-												? Deferred.await(entry.drained)
-												: Effect.forEach(
-														bindings.filter(
-															(binding) =>
-																!entry.idleExiting || binding.accepted,
+						return yield* connection
+							.commandEffect(commandId, payload)
+							.pipe(
+								Effect.ensuring(
+									stop(entry).pipe(
+										Effect.andThen(
+											Effect.suspend(() =>
+												entry.failure
+													? Deferred.await(entry.drained)
+													: Effect.sync(() => evict(sessionId, entry)).pipe(
+															Effect.ensuring(
+																Deferred.succeed(entry.drained, undefined),
+															),
 														),
-														(binding) =>
-															binding.completed
-																? Deferred.await(binding.completed)
-																: Effect.void,
-														{ discard: true },
-													).pipe(
-														Effect.ensuring(
-															Effect.sync(() => evict(sessionId, entry)),
-														),
-														Effect.ensuring(
-															Deferred.succeed(entry.drained, undefined),
-														),
-													),
+											),
 										),
 									),
 								),
-							),
-						);
+							);
 					}
 					if (
 						process.env["NODE_ENV"] === "test" &&
@@ -2007,31 +1940,13 @@ export const makeProcessSessionRunner = (
 							commandId,
 							command.input.commandAttempt ?? 0,
 						);
-					return yield* connection
-						.commandEffect(
-							commandId,
-							payload,
-							command.type === "send-turn"
-								? command.input.commandAttempt
-								: undefined,
-						)
-						.pipe(
-							Effect.tap(() => {
-								if (!turn || command.type !== "send-turn") return Effect.void;
-								return entry.outputs.withPermits(1)(
-									Effect.gen(function* () {
-										turn.pending = false;
-										if (turn.releaseRequested || entry.failure) {
-											yield* emit({
-												type: "release-sink",
-												sinkId: command.sinkId,
-											});
-											sinks.delete(command.sinkId);
-										}
-									}),
-								);
-							}),
-						);
+					return yield* connection.commandEffect(
+						commandId,
+						payload,
+						command.type === "send-turn"
+							? command.input.commandAttempt
+							: undefined,
+					);
 				}).pipe(
 					Effect.ensuring(
 						Effect.sync(() => {
@@ -2049,12 +1964,6 @@ export const makeProcessSessionRunner = (
 							!turn.accepted &&
 							!closing,
 					}),
-					Effect.onExit(() =>
-						Effect.gen(function* () {
-							if (ending && --ending.ending === 0 && ending.endingReleased)
-								yield* Deferred.succeed(ending.endingReleased, undefined);
-						}),
-					),
 					Effect.catchDefect((cause) =>
 						Effect.fail(runnerFailure(command.type, cause)),
 					),
@@ -2099,12 +2008,26 @@ export const makeProcessSessionRunner = (
 							)
 						);
 					}),
-					Effect.ensuring(
-						Effect.suspend(() =>
-							turn?.completed
-								? Deferred.succeed(turn.completed, undefined)
-								: Effect.void,
-						),
+					Effect.onExit(() =>
+						Effect.gen(function* () {
+							const entry = child;
+							if (turn && command.type === "send-turn" && entry)
+								yield* entry.outputs.withPermits(1)(
+									Effect.gen(function* () {
+										turn.pending = false;
+										if (turn.releaseRequested || entry.failure) {
+											yield* emit({
+												type: "release-sink",
+												sinkId: command.sinkId,
+											});
+											sinks.delete(command.sinkId);
+										}
+									}),
+								);
+							else if (turn) turn.pending = false;
+							if (ending && --ending.ending === 0 && ending.endingReleased)
+								yield* Deferred.succeed(ending.endingReleased, undefined);
+						}),
 					),
 				);
 			}

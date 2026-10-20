@@ -20,7 +20,10 @@ import type {
 import type { RunnerSettingsSnapshot } from "./runner-upgrade.js";
 
 /** Provider-Owned Payload fields contain JSON data, as on the event ingress. */
-export type SessionTurn = Omit<SendTurnInput, "eventSink" | "abortSignal">;
+export type SessionTurn = Omit<
+	SendTurnInput,
+	"eventSink" | "abortSignal" | "awaitIntake" | "reconcileIntake"
+>;
 
 export type SessionCommand =
 	| {
@@ -128,12 +131,13 @@ export type SessionOutput =
 			  }
 			| { readonly type: "release-sink" }
 			| {
-					/** Places a send's user message before the query admits it. */
+					/** Places a send's membership before the query admits it. */
 					readonly type: "place-user-message";
 					readonly input: {
 						readonly sessionId: string;
 						readonly inputId: string;
 						readonly text: string;
+						readonly runId?: string;
 					};
 			  }
 			| {
@@ -169,6 +173,8 @@ export interface SessionFailure {
 
 /** Effects are execution carriers; only command/output/reply data crosses here. */
 export interface SessionRunner {
+	/** Native execution and pending intake, independent of an intake reply. */
+	hasActiveTurnsEffect?(sessionId: string): Effect.Effect<boolean>;
 	readonly recoverEffect?: Effect.Effect<void, SessionFailure>;
 	/** Process ownership in every lifecycle state, even when no session is usable. */
 	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean>;

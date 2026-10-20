@@ -165,18 +165,10 @@ export interface DurableCommandStoreOptions {
 	readonly projectKey: string;
 	readonly now: () => number;
 	readonly generateId: () => string;
-	/**
-	 * Provider-output sink for the side-effect reactor. Production supplies the
-	 * shared ProviderRuntimeIngestion so streamed provider events are persisted
-	 * exactly as the inline path did. Absent in narrow unit tests (no-op sink).
-	 */
-	readonly ingestion?: Pick<ProviderRuntimeIngestion, "ingest" | "ingestBatch">;
-	/**
-	 * The commit-and-signal seam. When present, a send_turn's events are
-	 * projected and announced with the commit that records its outbox row.
-	 * Absent in narrow unit tests, where events are appended unprojected.
-	 */
-	readonly write?: CommitAndSignal["write"];
+	/** Provider output and command outcomes share durable ingestion. */
+	readonly ingestion: Pick<ProviderRuntimeIngestion, "ingest" | "ingestBatch">;
+	/** Atomically project and announce command commits and execution claims. */
+	readonly write: CommitAndSignal["write"];
 	readonly persistHandoffDelivered?: ClaudeEventPersistEffect["persistHandoffDelivered"];
 	readonly claudeSessionForkSdk?: ClaudeSessionForkSdk;
 }
@@ -197,11 +189,12 @@ interface DurableCommandRuntime {
 	readonly commit: DurableCommandCommitRepository;
 	readonly receipts: CommandReadModelRepository;
 	readonly reactor: ProviderSideEffectReactor;
+	readonly ingestion: Pick<ProviderRuntimeIngestion, "ingest" | "ingestBatch">;
 	readonly sql: SqlClient.SqlClient;
 	readonly now: () => number;
 	readonly generateId: () => string;
 	readonly snapshot: CommandReadModelSnapshot;
-	readonly write?: CommitAndSignal["write"];
+	readonly write: CommitAndSignal["write"];
 }
 
 /**
@@ -217,13 +210,7 @@ const REPLAYED_TURN_RESULT: TurnResult = {
 	providerStateUpdates: [],
 };
 
-/**
- * Result returned when a durable receipt is still `side_effect_requested` — the
- * command was committed but never executed (crash between commit and provider
- * execution). Per the plan's crash policy the provider is NOT re-executed on
- * replay; the caller receives an explicit incomplete/orphaned status rather than
- * a synthetic success.
- */
+/** Orphan replay settles as interrupted without executing the provider. */
 const ORPHANED_TURN_RESULT: TurnResult = {
 	status: "interrupted",
 	cost: 0,
@@ -265,19 +252,12 @@ export class OrchestrationEngine {
 					durable.sql,
 					durable.projectKey,
 				),
-				// Single provider executor. Shares the durable DB, registry, and
-				// wall-clock with the engine; provider output streams to the shared
-				// ProviderRuntimeIngestion (no-op sink when none is supplied).
 				reactor: new ProviderSideEffectReactor({
 					sql: durable.sql,
 					projectId: durable.projectKey,
 					registry: this.registry,
-					ingestion: durable.ingestion ?? {
-						ingest: () => Effect.succeed(0),
-						ingestBatch: (_events, options) =>
-							(options?.beforeCommit ?? Effect.void).pipe(Effect.as(0)),
-					},
-					...(durable.write ? { write: durable.write } : {}),
+					ingestion: durable.ingestion,
+					write: durable.write,
 					...(durable.persistHandoffDelivered
 						? { persistHandoffDelivered: durable.persistHandoffDelivered }
 						: {}),
@@ -293,10 +273,11 @@ export class OrchestrationEngine {
 						: {}),
 				}),
 				sql: durable.sql,
+				ingestion: durable.ingestion,
 				now: durable.now,
 				generateId: durable.generateId,
 				snapshot: durable.snapshot,
-				...(durable.write ? { write: durable.write } : {}),
+				write: durable.write,
 			};
 		}
 	}
@@ -333,7 +314,22 @@ export class OrchestrationEngine {
 			const commandId = command.commandId;
 
 			const existing = this.inFlightCommands.get(commandId);
-			if (existing) return yield* Deferred.await(existing);
+			if (existing) {
+				const receipt =
+					command.type === "send_turn" && this.durable
+						? yield* this.durable.receipts
+								.checkReceipt(commandId)
+								.pipe(Effect.orDie)
+						: undefined;
+				if (receipt?.status !== "side_effect_failed")
+					return yield* Deferred.await(existing);
+				// Resume may arrive before the failed attempt's receipt poll unwinds.
+				// Release that attempt's live claim before reserving the next one.
+				yield* Effect.result(Deferred.await(existing));
+				if (this.inFlightCommands.get(commandId) === existing)
+					this.inFlightCommands.delete(commandId);
+				return yield* this.dispatchEffect(command);
+			}
 
 			const deferred = yield* Deferred.make<
 				OrchestrationResult,
@@ -450,19 +446,43 @@ export class OrchestrationEngine {
 					return REPLAYED_TURN_RESULT;
 				}
 				if (existing.status === "side_effect_requested") {
-					// Committed but never executed (orphaned). Terminalize any leftover
-					// executable outbox row so a later recovery drain cannot execute it
-					// for real (crash policy: never re-execute an orphaned command). The
-					// receipt stays `side_effect_requested` so subsequent replays remain
-					// idempotently orphaned. Then surface an explicit incomplete status.
-					yield* durable.sql`
-						UPDATE provider_command_outbox
-						SET status = 'failed', error_code = 'orphaned', updated_at = ${durable.now()}
-						WHERE command_id = ${command.commandId}
-						  AND project_key = ${durable.projectId}
-						  AND status IN ('pending', 'running', 'retryable_failed')`.pipe(
+					// Replaying an orphan cannot execute it. Its owned interruption
+					// settles the reservation, command and receipt together.
+					const [owner] = yield* durable.sql<{
+						run_id: string;
+						input_id: string;
+						error_code: string | null;
+					}>`
+						SELECT outbox.error_code, COALESCE(run.joined_into, run.id) AS run_id,
+							COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'),
+								json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), outbox.command_id) AS input_id
+						FROM provider_command_outbox outbox JOIN provider_runs run
+							ON run.id = outbox.run_id AND run.session_id = outbox.session_id
+						WHERE outbox.command_id = ${command.commandId} AND outbox.project_key = ${durable.projectId}
+							AND outbox.status IN ('pending', 'running', 'retryable_failed') LIMIT 1`.pipe(
 						Effect.orDie,
 					);
+					if (owner?.error_code === "delivery_indeterminate")
+						return { ...REPLAYED_TURN_RESULT, status: "indeterminate" };
+					if (owner)
+						yield* durable.ingestion
+							.ingest({
+								eventId: `provider-command-orphaned:${owner.run_id}`,
+								type: "turn.interrupted",
+								providerId: "conduit",
+								sessionId: command.input.sessionId,
+								runId: owner.run_id,
+								providerRefs: {},
+								rawSource: { kind: "conduit.command-replay" },
+								createdAt: durable.now(),
+								data: {
+									messageId: owner.input_id,
+									userMessageId: owner.input_id,
+									reason: ORPHANED_TURN_RESULT.error?.message,
+									code: "orphaned",
+								},
+							})
+							.pipe(Effect.orDie);
 					return ORPHANED_TURN_RESULT;
 				}
 			}
@@ -530,8 +550,8 @@ export class OrchestrationEngine {
 			yield* command.onAccepted ?? Effect.void;
 
 			// The reactor is the single provider executor: it performs the call
-			// once, ingests output, and records completion/failure. Its result
-			// (carrying provider-state updates) is surfaced to the waiter. The
+			// once and ingests output. The projector settles the receipt; the
+			// foreground caller waits on that durable outcome. The
 			// caller's real event sink is threaded through so provider-driven
 			// permission/question interactions resolve exactly as the inline path.
 			return yield* durable.reactor
@@ -614,9 +634,7 @@ export class OrchestrationEngine {
 		});
 		// Through the seam the events are projected in the same transaction and
 		// announced once it commits.
-		return durable.write
-			? durable.write((project) => Effect.flatMap(commit, project))
-			: durable.sql.withTransaction(commit).pipe(Effect.asVoid);
+		return durable.write((project) => Effect.flatMap(commit, project));
 	}
 
 	private handleInlineSendTurnEffect(

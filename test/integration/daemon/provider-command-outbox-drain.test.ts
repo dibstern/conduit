@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
@@ -11,6 +12,10 @@ interface OutboxState {
 	attempt_count: number;
 	next_attempt_at: number | null;
 }
+
+const artifactDirectory =
+	process.env["CONDUIT_TEST_ARTIFACT_DIR"] ??
+	join(tmpdir(), "conduit-integration-artifacts");
 
 // Failure modes: no startup drain, an early retry, duplicate execution while
 // immediate dispatch overlaps polling, a store error kills or hot-loops the
@@ -47,7 +52,11 @@ describe("provider command outbox drain", () => {
 
 	async function leavePending(
 		prefix = "outbox",
-		options: { stop?: boolean; extraSession?: boolean } = {},
+		options: {
+			stop?: boolean;
+			extraSession?: boolean;
+			holdClaim?: boolean;
+		} = {},
 	) {
 		const fixture = await ProcessHarness.start({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
@@ -89,29 +98,76 @@ describe("provider command outbox drain", () => {
 		);
 		expect(dispatches(fixture, prompt)).toBe(0);
 		if (options.stop !== false) await fixture.kill();
-		const stopped = new Database(fixture.daemonStorePath());
-		try {
-			stopped.exec("DROP TRIGGER hold_outbox_claim");
-		} finally {
-			stopped.close();
-		}
-		return { fixture, sessionId, extraSessionId, inputId, prompt };
+		const releaseClaim = () => {
+			const stopped = new Database(fixture.daemonStorePath());
+			try {
+				stopped.exec("DROP TRIGGER hold_outbox_claim");
+			} finally {
+				stopped.close();
+			}
+		};
+		if (!options.holdClaim) releaseClaim();
+		return {
+			fixture,
+			sessionId,
+			extraSessionId,
+			inputId,
+			prompt,
+			releaseClaim,
+		};
 	}
 
 	afterEach(async ({ task }) => {
+		mkdirSync(artifactDirectory, { recursive: true });
 		try {
-			if (task.result?.errors?.length && harness)
+			if (task.result?.errors?.length && harness) {
 				writeFileSync(
 					`/tmp/82tn24-outbox-drain-${cases.length}.log`,
 					harness.logTail,
 				);
+				const db = new Database(harness.daemonStorePath(), { readonly: true });
+				try {
+					writeFileSync(
+						join(artifactDirectory, "review5-stop-ledger.json"),
+						JSON.stringify(
+							{
+								runs: db.prepare("SELECT * FROM provider_runs").all(),
+								outbox: db
+									.prepare(
+										"SELECT command_id, request_sequence, status, run_id, error_code, attempt_count FROM provider_command_outbox",
+									)
+									.all(),
+								pending: db
+									.prepare(
+										"SELECT input_id, state, admitted_at FROM pending_inputs",
+									)
+									.all(),
+								events: db
+									.prepare(
+										"SELECT sequence, type, json_extract(data, '$.inputId') AS input, json_extract(metadata, '$.runId') AS run, json_extract(data, '$.reason') AS reason FROM events ORDER BY sequence DESC LIMIT 45",
+									)
+									.all(),
+								sdk: existsSync(join(harness.root, "sdk-proof.ndjson"))
+									? readFileSync(join(harness.root, "sdk-proof.ndjson"), "utf8")
+									: "",
+								runnerLog: existsSync(join(harness.configDir, "runners.log"))
+									? readFileSync(join(harness.configDir, "runners.log"), "utf8")
+									: "",
+							},
+							null,
+							2,
+						),
+					);
+				} finally {
+					db.close();
+				}
+			}
 			await harness?.dispose();
 			harness?.assertNoRunners();
 		} finally {
 			harness = undefined;
-			mkdirSync("test-results", { recursive: true });
 			writeFileSync(
-				"test-results/v6co3-outbox-drain.json",
+				join(artifactDirectory, "review5-provider-command-outbox-drain.json"),
 				`${JSON.stringify(cases, null, 2)}\n`,
 			);
 		}
@@ -267,34 +323,79 @@ describe("provider command outbox drain", () => {
 		proof.outcome = "passed";
 	});
 
-	it("leaves an owned pending live command alone until its process stops", async () => {
+	it("Stop returns an unclaimed handoff to the paused queue; Resume sends it first and exactly once", async () => {
 		const proof = {
-			case: "live-pending-ownership",
+			case: "stop-unclaimed-handoff",
 			outcome: "failed",
 			dispatches: 0,
 		};
 		cases.push(proof);
-		const { fixture, inputId, prompt } = await leavePending("owned-outbox", {
-			stop: false,
-		});
-		// The trigger held the immediate claim. Removing it exposes precisely
-		// the pending row that polling could steal while its live caller waits.
-		await new Promise<void>((done) => setTimeout(done, 1250));
+		const { fixture, sessionId, inputId, prompt, releaseClaim } =
+			await leavePending("owned-outbox", { stop: false, holdClaim: true });
+		const browser = await fixture.connect(sessionId);
+		const later = randomUUID();
+		await Effect.runPromise(
+			browser.rpc["input.submit"]({
+				sessionId,
+				originId: browser.originId,
+				inputId: later,
+				delivery: "queue",
+				text: `later-${later}`,
+			}),
+		);
+		await Effect.runPromise(
+			browser.rpc.CancelSession({ sessionId, commandId: randomUUID() }),
+		);
+		releaseClaim();
+		const queue = () => {
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				return db
+					.prepare(
+						"SELECT input_id FROM pending_inputs WHERE session_id = ? AND state = 'queued' ORDER BY admitted_at, rowid",
+					)
+					.all(sessionId);
+			} finally {
+				db.close();
+			}
+		};
+		await vi.waitFor(() =>
+			expect(queue()).toEqual([{ input_id: inputId }, { input_id: later }]),
+		);
 		expect(state(fixture, inputId)).toMatchObject({
-			status: "pending",
+			status: "failed",
 			attempt_count: 0,
 		});
 		expect(dispatches(fixture, prompt)).toBe(0);
+		// Let the original foreground receipt waiter finish before restarting.
+		await new Promise<void>((done) => setTimeout(done, 1250));
+		expect(queue()).toEqual([{ input_id: inputId }, { input_id: later }]);
 		await fixture.kill();
 		await fixture.restart();
+		await new Promise<void>((done) => setTimeout(done, 1250));
+		expect(queue()).toEqual([{ input_id: inputId }, { input_id: later }]);
+		expect(dispatches(fixture, prompt)).toBe(0);
+		await (await fixture.connect(sessionId)).sendNow(sessionId, inputId);
 		await vi.waitFor(
-			() => expect(state(fixture, inputId)?.status).toBe("completed"),
+			() => {
+				expect(state(fixture, later)?.status).toBe("completed");
+				expect(queue()).toEqual([]);
+			},
 			{ timeout: 10_000 },
 		);
 		proof.dispatches = dispatches(fixture, prompt);
 		expect(proof.dispatches).toBe(1);
+		expect(dispatches(fixture, `later-${later}`)).toBe(1);
+		expect(
+			readFileSync(join(fixture.root, "sdk-proof.ndjson"), "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line) as { kind: string; request?: string })
+				.filter((mark) => mark.kind === "enqueue")
+				.map((mark) => mark.request),
+		).toEqual([prompt, `later-${later}`]);
 		proof.outcome = "passed";
-	});
+	}, 90_000);
 
 	it("drains another session's newly due retry while preserving a held session's order", async () => {
 		const proof = {
@@ -321,6 +422,9 @@ describe("provider command outbox drain", () => {
 				[secondId, sessionId, secondPrompt, false],
 				[otherId, extraSessionId, otherPrompt, true],
 			] as const) {
+				const runId = randomUUID();
+				db.prepare(`INSERT INTO provider_runs (id, session_id, status, requested_at)
+					VALUES (?, ?, 'pending', ?)`).run(runId, targetSession, Date.now());
 				db.prepare(`INSERT INTO command_receipts (command_id, session_id, status, created_at, command_type, project_key, updated_at)
 					SELECT ?, ?, 'side_effect_requested', created_at, command_type, project_key, updated_at
 					FROM command_receipts WHERE command_id = ?`).run(
@@ -329,12 +433,13 @@ describe("provider command outbox drain", () => {
 					inputId,
 				);
 				db.prepare(`INSERT INTO provider_command_outbox
-					(request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json,
+					(request_sequence, command_id, project_key, session_id, provider_id, effect_type, run_id, payload_json,
 					status, attempt_count, next_attempt_at, requested_at, updated_at)
 					SELECT (SELECT MAX(request_sequence) + 1 FROM provider_command_outbox), ?, project_key, ?, provider_id,
-					effect_type, ?, ?, ?, ?, requested_at, updated_at FROM provider_command_outbox WHERE command_id = ?`).run(
+					effect_type, ?, ?, ?, ?, ?, requested_at, updated_at FROM provider_command_outbox WHERE command_id = ?`).run(
 					id,
 					targetSession,
+					runId,
 					JSON.stringify({
 						...JSON.parse(source.payload_json),
 						sessionId: targetSession,

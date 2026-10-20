@@ -101,6 +101,9 @@ export class MockOpenCodeServer {
 	/** Dynamically created PTYs (not from recording). */
 	private dynamicPtys = new Map<string, Record<string, unknown>>();
 	private ptyListHold: Promise<void> | undefined;
+	/** Summarize returns after its native compaction loop, not at submission. */
+	summarizeHold: Promise<void> | undefined;
+	abortHold: Promise<void> | undefined;
 	ptyListFailures = 0;
 	readonly rejectedPtyConnections = new Set<string>();
 
@@ -1290,6 +1293,8 @@ export class MockOpenCodeServer {
 			}
 		}
 
+		if (/\/summarize$/.test(basePath)) await this.summarizeHold;
+		if (/\/abort$/.test(basePath)) await this.abortHold;
 		if (entry.status === 204) {
 			res.writeHead(204);
 			res.end();
