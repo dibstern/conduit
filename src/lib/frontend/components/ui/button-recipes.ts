@@ -42,6 +42,7 @@ export type ButtonVariant =
 	| "goal"
 	| "capsule-primary"
 	| "chip"
+	| "settings"
 	| "menu-trigger"
 	| "scrim"
 	| "sheet-scrim"
@@ -208,6 +209,11 @@ type VariantRecipe = {
 };
 
 export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
+	settings: {
+		chrome: "rounded-full px-[12px] font-medium",
+		tone: TONE_CLASSES.default,
+		hoverFill: HOVER_FILL_CLASSES.text,
+	},
 	"capsule-primary": {
 		chrome: "bg-accent/18",
 		tone: "text-accent-ink",
@@ -647,17 +653,21 @@ export function buttonClasses({
 	className?: string | undefined;
 }>): string {
 	const sizeClasses =
-		size === "composer-action"
-			? `h-[34px] shrink-0 rounded-full gap-[6px] text-[13px] font-semibold ${iconOnly ? "w-[34px]" : "px-[12px]"}`
-			: size !== "sm" && size !== "md"
-				? SIZE_CLASSES[size]
-				: iconOnly
-					? `${size === "sm" ? "h-8 w-8" : "h-9 w-9"} ${SHARED_SIZE_CLASSES}`
-					: size === "sm"
-						? // Literal px from the mockup's `.btn`. `min-h`, not `h`, so a
-							// taller touch target composes without a collision.
-							"min-h-[25px] px-[10px] py-[4px] text-[11.5px] gap-[5px] rounded-[7px] font-normal"
-						: `h-9 px-4 text-sm gap-2 ${SHARED_SIZE_CLASSES}`;
+		variant === "settings"
+			? size === "sm"
+				? "h-[26px] gap-[5px] text-[12.5px]"
+				: "h-[28px] gap-[6px] text-[13px]"
+			: size === "composer-action"
+				? `h-[34px] shrink-0 rounded-full gap-[6px] text-[13px] font-semibold ${iconOnly ? "w-[34px]" : "px-[12px]"}`
+				: size !== "sm" && size !== "md"
+					? SIZE_CLASSES[size]
+					: iconOnly
+						? `${size === "sm" ? "h-8 w-8" : "h-9 w-9"} ${SHARED_SIZE_CLASSES}`
+						: size === "sm"
+							? // Literal px from the mockup's `.btn`. `min-h`, not `h`, so a
+								// taller touch target composes without a collision.
+								"min-h-[25px] px-[10px] py-[4px] text-[11.5px] gap-[5px] rounded-[7px] font-normal"
+							: `h-9 px-4 text-sm gap-2 ${SHARED_SIZE_CLASSES}`;
 
 	/**
 	 * Nearly every variant declares a `hover:bg-*`, and `:hover` keeps matching while a
@@ -687,6 +697,13 @@ export function buttonClasses({
 	const recipe = VARIANT_RECIPES[variant];
 	const assembled = [
 		recipe.chrome,
+		variant === "settings"
+			? tone === "error"
+				? "bg-error/14"
+				: tone === "accent"
+					? "bg-accent/18"
+					: "bg-chip"
+			: "",
 		tone === undefined ? recipe.tone : TONE_CLASSES[tone],
 		hoverFill === undefined ? recipe.hoverFill : HOVER_FILL_CLASSES[hoverFill],
 	]

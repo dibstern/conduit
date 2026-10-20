@@ -87,10 +87,27 @@ type Story = StoryObj<typeof meta>;
 const general: NonNullable<Story["play"]> = async ({ canvasElement }) => {
 	const body = within(canvasElement.ownerDocument.body);
 	await expect(await body.findByTestId("surfacing-key-state")).toBeVisible();
+	for (const badge of [
+		body.getByText("Experimental"),
+		body.getByTestId("surfacing-key-state"),
+	]) {
+		await expect(badge.getBoundingClientRect().height).toBe(22);
+		await expect(getComputedStyle(badge).fontSize).toBe("12px");
+		await expect(getComputedStyle(badge).fontWeight).toBe("500");
+		await expect(
+			parseFloat(getComputedStyle(badge).borderRadius),
+		).toBeGreaterThanOrEqual(11);
+	}
 	await expect(
 		body.getByRole("switch", { name: "Jev categorisation & escalation" }),
 	).toHaveAttribute("aria-checked", "false");
 	await expect(body.getByTestId("surfacing-disclosure")).toBeVisible();
+	await expect(
+		getComputedStyle(body.getByTestId("surfacing-disclosure")).color,
+	).toBe(
+		getComputedStyle(body.getByRole("heading", { name: "Jev", level: 3 }))
+			.color,
+	);
 	if (fixture.settings.key.source === "env")
 		await expect(body.queryByTestId("surfacing-key-input")).toBeNull();
 };
@@ -181,6 +198,12 @@ const categories: NonNullable<Story["play"]> = async (context) => {
 	await expect(
 		body.getByTestId("surfacing-category-row-finding"),
 	).toBeVisible();
+	const add = body.getByTestId("surfacing-category-add");
+	await context.canvasElement.ownerDocument.fonts.ready;
+	await expect(add.getBoundingClientRect().height).toBe(26);
+	await expect(add.getBoundingClientRect().width).toBeCloseTo(120.23, 1);
+	await expect(getComputedStyle(add).borderTopWidth).toBe("0px");
+	await expect(getComputedStyle(add).fontSize).toBe("12.5px");
 	await userEvent.click(
 		body.getByRole("button", { name: "Raise Finding weight" }),
 	);

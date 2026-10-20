@@ -256,10 +256,6 @@
 		"movedTo": "src/lib/frontend/components/overlays/InstancesSettingsTab.svelte",
 		"reason": "These class tokens moved intact to InstancesSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
 	},
-	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: bg-white/[0.08],border-border/50,px-1.5,py-0.5,space-y-1.5,text-text-dimmer": {
-		"movedTo": "src/lib/frontend/components/overlays/DebugSettingsTab.svelte",
-		"reason": "These class tokens moved intact to DebugSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
-	},
 	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: Failed": {
 		"movedTo": "src/lib/frontend/components/overlays/InstancesSettingsTab.svelte",
 		"reason": "The checker reads this word from a relocated instance message string; it is not a CSS class."
@@ -1045,5 +1041,20 @@
 	"src/lib/frontend/components/chat/TurnActivity.svelte :: min-h-[40px]": {
 		"renamedTo": "h-[38px]",
 		"reason": "turn-07 matches the Final phone summary row's 38px height; Button's touchTarget keeps the larger invisible hit area."
-	}
+	},
+	"src/lib/frontend/components/overlays/AvatarSettings.svelte :: min-h-[26px],min-h-[64px],px-[10px],py-[10px],rounded-full,text-[12.5px],text-text-muted": "conduit-test-zopq matches Final settings: the shared settings pill owns the Change action, the phone You row is 56.3px with a 12px subtitle, and secondary text uses text-dimmer.",
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: leading-[1.35],min-w-[44px],text-text-dimmer": "conduit-test-zopq restores the Final design's 1.5 line height and phone chevron colours. Done aligns its text to the nav's right inset; Button's touchTarget recipe retains the 44px hit area without widening its visible box.",
+	"src/lib/frontend/components/ui/SettingsGroup.svelte :: text-text-muted": "conduit-test-zopq uses text-dimmer for Final settings group labels and captions, as explicitly approved.",
+	"src/lib/frontend/components/ui/SettingsRow.svelte :: text-text-muted": "conduit-test-zopq uses text-dimmer for neutral Final settings descriptions, retaining semantic success and warning tones.",
+	"src/lib/frontend/components/ui/Tabs.svelte :: max-md:[,text-text-muted": "conduit-test-zopq uses text-dimmer for settings rail labels. Brand mark fills now inherit currentColor on desktop as well as phone, replacing the phone-only fill-current selector.",
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: bg-white/[0.08],border-border/50,px-1.5,py-0.5,space-y-1.5": {
+		"movedTo": "src/lib/frontend/components/overlays/DebugSettingsTab.svelte",
+		"reason": "These class tokens moved intact to DebugSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
+	},
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: text-text-muted": "conduit-test-zopq matches Final text3 with the approved text-dimmer token for settings descriptions, headings, and secondary metadata.",
+	"src/lib/frontend/components/overlays/SurfacingSettingsTab.svelte :: text-text-muted": "conduit-test-zopq matches Final text3 with the approved text-dimmer token for settings descriptions, headings, and secondary metadata.",
+	"src/lib/frontend/components/overlays/SurfacingCategories.svelte :: text-text-muted": "conduit-test-zopq matches Final text3 with the approved text-dimmer token for settings descriptions, headings, and secondary metadata.",
+	"src/lib/frontend/components/overlays/SurfacingFeedbackTab.svelte :: text-text-muted": "conduit-test-zopq matches Final text3 with the approved text-dimmer token for settings descriptions, headings, and secondary metadata.",
+	"src/lib/frontend/components/overlays/UsageSettingsTab.svelte :: text-text-muted": "conduit-test-zopq matches Final text3 with the approved text-dimmer token for settings descriptions, headings, and secondary metadata.",
+	"src/lib/frontend/components/overlays/AvatarSettings.svelte :: mb-[16px]": "conduit-test-zopq matches the Final phone list's 18px gap between the You card and the first section card."
 }

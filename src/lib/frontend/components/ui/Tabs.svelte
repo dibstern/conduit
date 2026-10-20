@@ -114,8 +114,7 @@
 		class={segmentedItemClass(variant, value === option.value)}
 	>
 		{#if option.icon}
-			<!-- Brand marks fill in their own colour; a phone tile paints them white like the rest. -->
-			<span aria-hidden="true" class="flex size-[15px] shrink-0 items-center justify-center text-text-dimmer group-data-[state=active]:text-text max-md:size-[28px] max-md:rounded-[8px] max-md:text-white max-md:[&_g]:fill-current {iconTones[option.iconTone ?? 'neutral']}">
+			<span aria-hidden="true" class="flex size-[15px] shrink-0 items-center justify-center {variant === 'sections' ? 'text-settings-icon' : 'text-text-dimmer'} group-data-[state=active]:text-text [&_g]:fill-current max-md:size-[28px] max-md:rounded-[8px] max-md:text-white {iconTones[option.iconTone ?? 'neutral']}">
 				<Icon name={option.icon} size={15} />
 			</span>
 		{/if}
@@ -147,7 +146,7 @@
 		{#if variant === "sections"}
 			{#each sections as section, index (index)}
 				{#if section.label}
-					<div aria-hidden="true" data-testid="tabs-group-label" class="mt-[16px] mb-[4px] px-[10px] text-[11.5px] font-medium text-text-muted max-md:mt-[18px] max-md:mb-[6px] max-md:px-[4px] max-md:text-[13px]">{section.label}</div>
+					<div aria-hidden="true" data-testid="tabs-group-label" class="mt-[16px] mb-[4px] px-[10px] text-[11.5px] font-medium text-text-dimmer max-md:mt-[18px] max-md:mb-[6px] max-md:px-[4px] max-md:text-[13px]">{section.label}</div>
 				{/if}
 				<div class="flex flex-col max-md:overflow-hidden max-md:rounded-[12px] max-md:bg-settings-card max-md:divide-y max-md:divide-settings-separator">
 					{#each section.options as option (option.value)}{@render trigger(option)}{/each}

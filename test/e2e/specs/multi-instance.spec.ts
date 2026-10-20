@@ -764,7 +764,11 @@ test.describe("Instance Management Settings", () => {
 		await expect(
 			page.getByRole("button", { name: "Start", exact: true }),
 		).toHaveCount(0);
-		await expect(page.getByText("Stop")).toBeVisible();
+		await expect(
+			page
+				.locator("#instance-settings-list")
+				.getByRole("button", { name: "Stop", exact: true }),
+		).toBeVisible();
 		await expect(page.getByTestId("edit-instance-btn")).toBeVisible();
 		await expect(page.getByText("Remove")).toBeVisible();
 	});
