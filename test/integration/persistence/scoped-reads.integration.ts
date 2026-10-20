@@ -1093,7 +1093,8 @@ describe("Event-owned tool results", () => {
 				makeEffectSqlMigrator(
 					Object.fromEntries(
 						Object.entries(effectMigrationEntries).filter(
-							([key]) => !key.endsWith("_tool_result_event_refs"),
+							// Start before the backfill and every migration that depends on it.
+							([key]) => Number.parseInt(key, 10) < 65,
 						),
 					),
 				).pipe(Effect.provide(SqliteClient.layer({ filename: legacyFile }))),
