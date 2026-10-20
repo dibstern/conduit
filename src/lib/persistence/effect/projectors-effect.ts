@@ -22,6 +22,7 @@ import {
 	NEVER_CUT_TOOL_NAMES,
 	PREVIEW_CODE_POINTS,
 } from "../tool-wire-projection.js";
+import { inheritForkHistory } from "./inherit-fork-history.js";
 import { rerootSession } from "./sidebar-projection.js";
 
 export class ProjectionError extends Data.TaggedError("ProjectionError")<{
@@ -547,6 +548,10 @@ export const makeSessionProjector = defineProjector(() => ({
 				);
 				written.push(...rows.map((row) => row.id));
 			}
+			const inheritsHistory =
+				event.type === "session.created" && event.data.inheritsHistory === true;
+			if (event.type === "session.created" && inheritsHistory)
+				yield* inheritForkHistory(event, ctx.version);
 			// Only these two write a parent.
 			if (event.type === "session.created" || event.type === "session.forked")
 				left.push(...(yield* rerootSession(event.data.sessionId, ctx.version)));
@@ -562,7 +567,9 @@ export const makeSessionProjector = defineProjector(() => ({
 								"approvals",
 								"inputs",
 							] as const)
-						: touch.collections,
+						: inheritsHistory
+							? ([...touch.collections, "messages"] as const)
+							: touch.collections,
 				sidebar: [...touch.stamped, ...touch.removed, ...left],
 			};
 		}).pipe(

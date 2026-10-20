@@ -311,7 +311,7 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 			if (!sourceBoundary) throw new Error("Missing source fork boundary");
 			expect(forkRow).toMatchObject({
 				forkedFrom: id,
-				forkPointMessageId: `${sourceBoundary.id}_${forkId}`,
+				forkPointMessageId: sourceBoundary.id,
 			});
 			const history = await browser.history(forkId);
 			const renderedHistory = historyToChatMessages(
@@ -321,6 +321,7 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 				renderedHistory,
 				forkRow?.forkPointMessageId,
 				forkRow?.forkPointTimestamp,
+				forkId,
 			);
 			expect(initialSplit.current).toEqual([]);
 			expect(initialSplit.inherited).toEqual(renderedHistory);
