@@ -22,6 +22,12 @@ export const makeCursorRunnerLaunch = (
 				// local.store does not redirect SDK transcript writes (workspace-resume).
 				const dataDir = join(daemonConfigDir, "cursor", "data");
 				process.env["CURSOR_DATA_DIR"] = dataDir;
+				// A runner may start while the daemon redirects these for a title call.
+				process.env["CURSOR_SANDBOX_POLICY_DIR"] = join(
+					daemonConfigDir,
+					"cursor",
+					"sandbox-policies",
+				);
 				yield* Effect.sync(() =>
 					mkdirSync(dataDir, { recursive: true, mode: 0o700 }),
 				);

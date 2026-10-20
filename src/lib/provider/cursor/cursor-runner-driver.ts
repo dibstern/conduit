@@ -1,6 +1,9 @@
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
 import { Effect, Schema, Semaphore } from "effect";
 import type { Account } from "../../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
+import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { ProviderInstanceFailure } from "../errors.js";
 import type { RunnerDriverPieces } from "../runner/runner-provider-instance.js";
 import type { ModelInfo, ProviderCapabilities } from "../types.js";
@@ -8,7 +11,13 @@ import { resolveCursorCredential } from "./cursor-credential.js";
 import { createCursorSdkPort } from "./cursor-sdk.js";
 import { discoverCursorSkillsEffect } from "./cursor-skill-discovery.js";
 import { cursorTurnError } from "./sdk-error.js";
-import type { CursorModel, CursorSdkPort } from "./sdk-port.js";
+import type {
+	CursorAgent,
+	CursorModel,
+	CursorRun,
+	CursorSdkPort,
+	CursorStore,
+} from "./sdk-port.js";
 
 export const CursorModelParameters = Schema.Array(
 	Schema.Struct({ id: Schema.String, value: Schema.String }),
@@ -105,6 +114,9 @@ const discoveryFailure = (reason: string, authRequired = false) =>
 	});
 
 let defaultPort: CursorSdkPort | undefined;
+// Local SDK transcript paths use process-global environment variables. Session
+// agents live in child runners; serialize all in-daemon text calls across relays.
+const textGenerationLock = Semaphore.makeUnsafe(1);
 const catalogs = new WeakMap<
 	CursorSdkPort,
 	{
@@ -219,17 +231,202 @@ export const discoverCursorEffect = (
 export const makeCursorRunnerDriver = (
 	workspaceRoot: string,
 	port?: CursorSdkPort,
+	daemonConfigDir = DEFAULT_CONFIG_DIR,
 ): RunnerDriverPieces => ({
 	driverKind: "cursor",
 	discoverEffect: (directory, account) =>
 		discoverCursorEffect(port, account, directory ?? workspaceRoot),
-	generateTextEffect: () =>
-		Effect.fail(
-			new ProviderInstanceFailure({
-				providerId: "cursor",
-				operation: "generateText",
-				cause: new Error("Cursor text generation is not supported yet"),
-			}),
+	generateTextEffect: (input) =>
+		Effect.gen(function* () {
+			const account =
+				input.account.driver === "cursor" && input.model.providerId === "cursor"
+					? input.account
+					: yield* Effect.fail(
+							new Error(
+								"Cursor text generation requires a Cursor account and model",
+							),
+						);
+			const adapter = yield* Effect.try(
+				() => port ?? (defaultPort ??= createCursorSdkPort()),
+			);
+			const credential = yield* Effect.tryPromise(() =>
+				resolveCursorCredential(adapter, {
+					...process.env,
+					...account.env,
+				}),
+			);
+			if (!credential)
+				return yield* Effect.fail(
+					new ProviderInstanceFailure({
+						providerId: "cursor",
+						operation: "generateText",
+						code: "auth_required",
+						cause: new Error("Cursor authentication required"),
+					}),
+				);
+			const catalog = yield* discoverCursorEffect(adapter, account);
+			const model = catalog.models.find(({ id }) => id === input.model.modelId);
+			if (!model)
+				return yield* Effect.fail(
+					new Error("Cursor title model is not offered"),
+				);
+			// Captured parameter values are cheapest-first. Composer lists its paid
+			// Fast variant first, so neither variant order nor isDefault is suitable.
+			const variant =
+				input.effort ||
+				model.parameters?.combinations.find(({ values }) =>
+					model.parameters?.rows.every(
+						(row) => values[row.id] === row.values[0]?.value,
+					),
+				)?.variant;
+			if (
+				(input.effort && !model.variants?.[input.effort]) ||
+				(model.parameters && !variant)
+			)
+				return yield* Effect.fail(
+					new Error("Cursor title model parameter choice is not offered"),
+				);
+			const params = yield* Schema.decodeUnknownEffect(CursorModelParameters)(
+				variant ? model.variants?.[variant]?.["params"] : [],
+			);
+			const scratchRoot = join(daemonConfigDir, "text-generation");
+			return yield* Effect.acquireUseRelease(
+				Effect.tryPromise(async () => {
+					await mkdir(scratchRoot, { recursive: true });
+					return mkdtemp(join(scratchRoot, "cursor-"));
+				}),
+				(root) =>
+					Effect.uninterruptibleMask((restore) => {
+						const cwd = join(root, "cwd");
+						const storePath = join(root, "store");
+						let store: CursorStore | undefined;
+						let agent: CursorAgent | undefined;
+						let run: CursorRun | undefined;
+						let finished = false;
+						const previous = {
+							CURSOR_DATA_DIR: process.env["CURSOR_DATA_DIR"],
+							CURSOR_SANDBOX_POLICY_DIR:
+								process.env["CURSOR_SANDBOX_POLICY_DIR"],
+						};
+						// Register cleanup before any uncancellable SDK acquisition. Only the
+						// stream/wait is interruptible; late-created handles still get released.
+						return Effect.acquireUseRelease(
+							Effect.sync(() => {
+								// local.store does not redirect transcripts or sandbox-policy writes.
+								process.env["CURSOR_DATA_DIR"] = join(root, "data");
+								process.env["CURSOR_SANDBOX_POLICY_DIR"] = join(
+									root,
+									"sandbox-policies",
+								);
+							}),
+							() =>
+								Effect.gen(function* () {
+									yield* Effect.tryPromise(() => mkdir(cwd));
+									store = yield* Effect.tryPromise(() =>
+										adapter.openStore(storePath, cwd),
+									);
+									const openedStore = store;
+									agent = yield* Effect.tryPromise(() =>
+										adapter.createAgent(
+											{
+												cwd,
+												dirs: [],
+												settingSources: [],
+												storePath,
+												sandboxOptions: { enabled: true },
+												autoReview: false,
+												tools: [],
+												disallowedTools: ["mcp", "task"],
+												customToolNames: [],
+												subagentInherit: { reportedWorkspacePath: cwd },
+												credentialFingerprint: credential.fingerprint,
+											},
+											credential,
+											openedStore,
+										),
+									);
+									const openedAgent = agent;
+									run = yield* Effect.tryPromise(() =>
+										openedAgent.send(
+											`${input.instructions}\n\n${input.prompt}`,
+											{
+												model: { id: model.id, params },
+												mode: "agent",
+											},
+											() => {},
+										),
+									);
+									const activeRun = run;
+									const result = yield* restore(
+										Effect.tryPromise(async () => {
+											const drained = (async () => {
+												for await (const _ of activeRun.stream) {
+													/* Drain the independent SDK stream. */
+												}
+											})();
+											const [terminal] = await Promise.all([
+												activeRun.wait(),
+												drained,
+											]);
+											return terminal;
+										}).pipe(
+											Effect.flatMap(
+												Schema.decodeUnknownEffect(
+													Schema.Struct({
+														status: Schema.Literal("finished"),
+														result: Schema.String,
+													}),
+												),
+											),
+										),
+									);
+									finished = true;
+									return result.result;
+								}),
+							() =>
+								Effect.tryPromise(async () => {
+									try {
+										if (!finished) await run?.cancel();
+									} finally {
+										try {
+											await agent?.close();
+										} finally {
+											try {
+												if (agent && store)
+													await adapter.deleteAgent(agent.id, cwd, store);
+											} finally {
+												await store?.dispose();
+											}
+										}
+									}
+								}).pipe(
+									Effect.ensuring(
+										Effect.sync(() => {
+											for (const [key, value] of Object.entries(previous)) {
+												if (value === undefined) delete process.env[key];
+												else process.env[key] = value;
+											}
+										}),
+									),
+								),
+						);
+					}),
+				(root) =>
+					Effect.tryPromise(() => rm(root, { recursive: true, force: true })),
+			);
+		}).pipe(
+			textGenerationLock.withPermits(1),
+			Effect.mapError(
+				(cause) =>
+					new ProviderInstanceFailure({
+						providerId: "cursor",
+						operation: "generateText",
+						cause,
+						...(cause instanceof ProviderInstanceFailure && cause.code
+							? { code: cause.code }
+							: {}),
+					}),
+			),
 		),
 	prepareTurnEffect: (input) =>
 		Effect.gen(function* () {

@@ -13,7 +13,7 @@ import { makeCursorRunnerDriver } from "./cursor-runner-driver.js";
 export const makeCursorProviderRuntime = (deps: RunnerProviderInstanceDeps) =>
 	makeRunnerProviderInstance(
 		deps,
-		makeCursorRunnerDriver(deps.workspaceRoot),
+		makeCursorRunnerDriver(deps.workspaceRoot, undefined, deps.daemonConfigDir),
 		(emit) =>
 			makeProcessSessionRunner(deps, emit, {
 				driverKind: "cursor",
