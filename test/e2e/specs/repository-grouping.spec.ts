@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import type { ProjectInfo } from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
+import { closeSettings } from "../helpers/settings.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple" });
@@ -179,7 +180,7 @@ for (const viewport of [
 				path: info.outputPath("settings.png"),
 				animations: "disabled",
 			});
-			await page.getByTestId("settings-close-btn").click();
+			await closeSettings(page);
 			await page.getByTestId("session-scope-chip").click();
 			const row = page
 				.getByRole("menuitemradio")

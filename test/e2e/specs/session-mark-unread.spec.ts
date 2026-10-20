@@ -1,4 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
+import { inspectTouchTarget } from "../../../src/lib/frontend/stories/touch-target.js";
 import type { ReplayHarness } from "../helpers/e2e-harness.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
@@ -188,7 +189,10 @@ test("desktop unread chip survives reload, has one keyboard-accessible read acti
 		titleOrder.indexOf("session-bar-title"),
 	);
 	expect((await bar.boundingBox())?.height).toBe(heightWithoutChip);
-	expect((await chip.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+	const target = await chip.evaluate(inspectTouchTarget, 44);
+	expect(target.width).toBeGreaterThanOrEqual(44);
+	expect(target.height).toBeGreaterThanOrEqual(44);
+	expect(target.missing, JSON.stringify(target.failures)).toBe(0);
 
 	const observer = await page.context().newPage();
 	await gotoRelay(observer, new URL("/", relayUrl).toString());

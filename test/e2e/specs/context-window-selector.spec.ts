@@ -83,14 +83,14 @@ test.describe("Picker context row", () => {
 		await expect(page.getByTestId("picker-row-context")).toBeVisible();
 		await expect(
 			page.getByTestId("picker-context-option-200k"),
-		).toHaveAttribute("aria-checked", "false");
+		).toHaveAttribute("aria-checked", "true");
 		await expect(
 			page
 				.getByTestId("picker-row-context")
 				.getByRole("radio", { checked: true }),
-		).toHaveCount(0);
+		).toHaveCount(1);
 		await expect(page.getByTestId("model-picker-trigger")).toHaveAccessibleName(
-			/context Default/,
+			/context 200K/,
 		);
 	});
 
@@ -128,7 +128,7 @@ test.describe("Picker context row", () => {
 		await openPicker(page);
 
 		const row = page.getByTestId("picker-row-context");
-		await expect(row).toContainText("Default");
+		await expect(row).toContainText("200K");
 		await expect(row.getByRole("radio")).toHaveCount(0);
 		await expect(page.getByTestId("picker-context-option-200k")).toHaveCount(0);
 		expect(
@@ -297,7 +297,7 @@ test.describe("Picker context selection", () => {
 
 		await expect(
 			page.getByTestId("picker-context-option-200k"),
-		).toHaveAttribute("aria-checked", "false");
+		).toHaveAttribute("aria-checked", "true");
 
 		control.sendMessage({
 			type: "context_window_info",
@@ -312,6 +312,9 @@ test.describe("Picker context selection", () => {
 			"aria-checked",
 			"true",
 		);
+		await expect(
+			page.getByTestId("picker-context-option-200k"),
+		).toHaveAttribute("aria-checked", "false");
 		await expect(page.getByTestId("picker-selected-context")).toHaveText(
 			/1M \(beta\)/,
 		);

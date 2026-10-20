@@ -5,6 +5,7 @@ import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js"
 import { dualDriverProviders } from "../fixtures/mockup-state.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
+import { closeSettings } from "../helpers/settings.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 const sections = [
@@ -350,7 +351,7 @@ for (const [viewportName, viewport] of [
 				Math.round(anchorOffset * devicePixelRatio),
 			).toBeGreaterThanOrEqual(0);
 			if (!atScrollEnd) expect(anchorOffset).toBeLessThanOrEqual(15);
-			await page.getByTestId("settings-close-btn").click();
+			await closeSettings(page);
 			await expect(panel).toBeHidden();
 		});
 	});

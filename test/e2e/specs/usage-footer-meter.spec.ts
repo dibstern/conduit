@@ -279,7 +279,7 @@ test.describe("send at an account's reset", () => {
 				instanceId: Schema.decodeUnknownSync(
 					Schema.String.pipe(Schema.brand("AccountId")),
 				)(addedInstanceId),
-				model: { modelId: "sonnet", providerId: "claude" },
+				model: { modelId: "harness", providerId: "claude" },
 				originId: browser.originId,
 			}),
 		);

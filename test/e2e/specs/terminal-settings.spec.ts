@@ -552,6 +552,7 @@ test.describe("Phone row", () => {
 	}
 
 	async function closePhoneSettings(page: Page) {
+		await tap(page, page.getByTestId("settings-back-btn"));
 		await tap(page, page.getByTestId("settings-close-btn"));
 		await expect(page.locator("#settings-panel")).toHaveCount(0);
 		await textarea(page).focus();

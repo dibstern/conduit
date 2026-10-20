@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { test as base, expect, type Page } from "@playwright/test";
 
 import { ProcessHarness } from "../../helpers/process-harness.js";
+import { closeSettings } from "../helpers/settings.js";
 import { AppPage } from "../page-objects/app.page.js";
 
 // A stand-in for the tailscale CLI, so the test never changes the real
@@ -107,7 +108,7 @@ test("Access toggles Tailscale Serve, keeps it across a restart, and shows read-
 	expect(saved.tailscaleServe).toEqual({ url });
 
 	// Restart checks the stored choice; reload discards the browser snapshot.
-	await page.getByTestId("settings-close-btn").click();
+	await closeSettings(page);
 	await harness.shutdown();
 	await harness.restart({
 		keepPort: true,

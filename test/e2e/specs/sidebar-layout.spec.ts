@@ -286,7 +286,7 @@ test.describe("Sidebar Layout — Desktop", () => {
 		const terminal = page.getByTestId("views-rail-terminal");
 		const files = page.getByTestId("views-rail-files");
 		await expect(rail).toBeVisible();
-		await expect(rail).toHaveCSS("width", "38px");
+		await expect(rail).toHaveCSS("width", "44px");
 		await page.locator("#session-list .session-item").first().click();
 		await expect(rail).toBeVisible();
 		await expect(page.getByTestId("views-rail-diff")).toBeDisabled();
@@ -654,10 +654,25 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(menu).toBeHidden();
 		await expect(overflowButton).toBeFocused();
 		await overflowButton.click();
-		await expect(page.getByTestId("menu-sheet-scrim")).not.toHaveClass(
-			/pointer-events-none/,
-		);
-		await page.mouse.click(20, 200);
+		const scrim = page.getByTestId("menu-sheet-scrim");
+		await expect(scrim).not.toHaveClass(/pointer-events-none/);
+		const scrimBox = await scrim.boundingBox();
+		const reopenedSheet = await menu.boundingBox();
+		if (!scrimBox || !reopenedSheet)
+			throw new Error("Sheet or scrim is missing");
+		expect(reopenedSheet.y).toBeGreaterThan(scrimBox.y);
+		const scrimPoint = {
+			x: scrimBox.x + scrimBox.width / 2,
+			y: (scrimBox.y + reopenedSheet.y) / 2,
+		};
+		expect(
+			await scrim.evaluate(
+				(element, point) =>
+					element.contains(document.elementFromPoint(point.x, point.y)),
+				scrimPoint,
+			),
+		).toBe(true);
+		await page.mouse.click(scrimPoint.x, scrimPoint.y);
 		await expect(menu).toBeHidden();
 
 		await overflowButton.click();

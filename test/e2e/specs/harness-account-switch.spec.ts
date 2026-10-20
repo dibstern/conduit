@@ -16,6 +16,7 @@ import { formatSnoozeTime } from "../../../src/lib/frontend/utils/format.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
 import { openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
+import { closeSettings } from "../helpers/settings.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 import { PermissionPage } from "../page-objects/permission.page.js";
@@ -1270,7 +1271,7 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 						'[data-testid="quota-meter"][data-state="checking"]',
 					),
 				).toHaveCount(0);
-				await page.getByTestId("settings-close-btn").click();
+				await closeSettings(page);
 				await expect(page.locator("#settings-panel")).toBeHidden();
 			}
 			const before = proofMarks().length;

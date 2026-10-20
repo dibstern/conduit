@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { test as base, expect, type Page } from "@playwright/test";
 
 import { ProcessHarness } from "../../helpers/process-harness.js";
+import { closeSettings } from "../helpers/settings.js";
 import { AppPage } from "../page-objects/app.page.js";
 
 // Real daemon, isolated config and dynamic ports; only the provider SDK is fake.
@@ -165,7 +166,7 @@ test("no project open: instance mutations, scan and log level use daemon RPC", a
 		)
 		.toBe("Success");
 	await expect(page.getByTestId("scan-now-btn")).toBeEnabled();
-	await page.getByTestId("settings-close-btn").click();
+	await closeSettings(page);
 	await page.keyboard.press("Control+Shift+D");
 	await page.getByRole("button", { name: "verbose:off", exact: true }).click();
 	await expect
@@ -222,7 +223,7 @@ test("open project: daemon settings retain the socket pair and a working session
 			() => observed.calls.find((call) => call.tag === "ScanNow")?.exit?._tag,
 		)
 		.toBe("Success");
-	await page.getByTestId("settings-close-btn").click();
+	await closeSettings(page);
 	await expect(app.connectOverlay).toHaveCount(0);
 	await expect(app.input).toHaveValue("settings connection still works");
 	await app.sendMessage("settings connection still works");
