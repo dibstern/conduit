@@ -15,6 +15,7 @@ import {
 	type KnownProviderDriverKind,
 	PROVIDER_DRIVERS,
 } from "../contracts/provider-instance.js";
+import type { TitleGenerationSelection } from "../contracts/title-generation.js";
 import type { GetModelsResponse } from "../contracts/ws-rpc.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import {
@@ -55,6 +56,7 @@ import { formatErrorDetail } from "../errors.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { isSameModelIdentity } from "../provider/claude/claude-api-model-id.js";
 import { ProviderRegistryTag } from "../provider/provider-registry.js";
+import { resolveTitleGeneration } from "../provider/title-generation.js";
 import {
 	catalogFromProviderList,
 	findCatalogModel,
@@ -426,6 +428,10 @@ export const getModelsResponse = (
 		);
 		const selectedDriver: KnownProviderDriverKind =
 			activeDriver ?? instanceDriver ?? modelDriver;
+		const accountCatalogRequested =
+			instanceId !== undefined &&
+			activeId === undefined &&
+			getProviderDriver(instanceDriver)?.catalogSource === "discovery";
 		let catalogues = yield* Ref.get((yield* ProjectSettingsTag).live);
 		let claudeCatalog = claudeAccount
 			? (catalogues[`providerModels:${claudeAccount.id}`] ??
@@ -524,7 +530,9 @@ export const getModelsResponse = (
 			...((activeAccount?.id ?? instanceId) === undefined
 				? {}
 				: { instanceId: activeAccount?.id ?? instanceId }),
-			providers,
+			providers: accountCatalogRequested
+				? (claudeCatalog?.providers ?? [])
+				: providers,
 			...(activeModel
 				? {
 						active: {
@@ -783,6 +791,54 @@ export const setHarnessDefaultForRelay = (input: {
 		);
 		yield* publishGlobalProjectSetting("harnessDefaults");
 		return { pick: { ...model, effort, contextWindow }, status: "ok" } as const;
+	});
+
+export const getTitleGenerationForRelay = Effect.gen(function* () {
+	const config = yield* ConfigTag;
+	return loadRelaySettings(config.configDir).titleGeneration ?? null;
+});
+
+export const setTitleGenerationForRelay = (
+	selection: TitleGenerationSelection | null,
+) =>
+	Effect.gen(function* () {
+		const config = yield* ConfigTag;
+		let saved = selection;
+		if (selection !== null) {
+			const directory = yield* AccountDirectory;
+			const accounts = yield* directory.snapshot;
+			const candidate = resolveTitleGeneration(
+				selection,
+				accounts,
+				() => undefined,
+			);
+			if (candidate.status !== "unverified")
+				return yield* Effect.fail(
+					new Error(candidate.problem ?? "Invalid title generation selection"),
+				);
+			const account = yield* directory.resolve(candidate.pick.account);
+			const catalog = yield* loadModelCatalog(account.driver, account.id, {
+				startIfStopped: true,
+			});
+			const resolved = resolveTitleGeneration(
+				selection,
+				accounts,
+				() => catalog,
+			);
+			if (resolved.status !== "ok")
+				return yield* Effect.fail(
+					new Error(
+						resolved.problem ?? "Title generation catalog is unavailable",
+					),
+				);
+			saved = resolved.pick;
+		}
+		yield* saveRelaySettingsEffect(
+			{ titleGeneration: saved },
+			config.configDir,
+		);
+		yield* publishGlobalProjectSetting("titleGeneration");
+		return saved;
 	});
 
 export interface SwitchVariantInput {

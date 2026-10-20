@@ -112,7 +112,7 @@ export function createModelSelectionState(
 				? []
 				: target.effortOptions.map((variant) => ({
 						value: variant,
-						label: variant,
+						label: variant || "Default",
 						testId: `picker-effort-option-${variant}`,
 						disabled: target.pending.effort,
 					}))),

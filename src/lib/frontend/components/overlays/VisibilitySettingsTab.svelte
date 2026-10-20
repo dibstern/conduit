@@ -5,6 +5,7 @@
 	import SettingsPicker from "../ui/SettingsPicker.svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
+	import TitleGenerationPicker from "../model/TitleGenerationPicker.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
@@ -227,6 +228,10 @@
 			{/if}
 		</div>
 	{/each}
+</SettingsGroup>
+
+<SettingsGroup id="settings-title-generation-group" title="Session titles">
+	<TitleGenerationPicker />
 </SettingsGroup>
 
 <div class="mt-[16px] flex flex-col gap-[8px]">

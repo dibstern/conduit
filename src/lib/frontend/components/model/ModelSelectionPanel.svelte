@@ -58,9 +58,9 @@
 	const harnesses = $derived([...new Set(target.accounts.map((account) => account.driver))].map((driver) => ({
 		value: driver,
 		label: getProviderPresentation(driver)?.label ?? driver.charAt(0).toUpperCase() + driver.slice(1),
-		locked: target.accounts.filter((account) => account.driver === driver).every((account) => account.available === false),
+		locked: target.pending.model || target.accounts.filter((account) => account.driver === driver).every((account) => account.available === false),
 	})));
-	const accountOptions = $derived(target.accounts.filter((account) => account.driver === target.pick.driver).map((account) => ({ value: account.id, label: account.label, locked: account.available === false })));
+	const accountOptions = $derived(target.accounts.filter((account) => account.driver === target.pick.driver).map((account) => ({ value: account.id, label: account.label, locked: target.pending.model || account.available === false })));
 	function selectHarness(driver: ProviderDriverKind) {
 		const available = target.accounts.filter((account) => account.driver === driver && account.available !== false);
 		const account = available.find((account) => account.isDefault) ?? available[0];
@@ -102,6 +102,7 @@
 
 	function handleModelClick(model: Immutable<ModelInfo>, e: MouseEvent, modelId?: string) {
 		e.stopPropagation();
+		if (target.pending.model) return;
 		const targetId = modelId ?? model.id;
 		target.selectModel({
 			modelId: targetId,
@@ -133,7 +134,7 @@
 		<div class="min-h-0 overflow-y-auto">
 			{#if view === "root"}
 				{#if accountControls}{@render accountControls()}{:else}
-					{#if harnesses.length > 1}
+					{#if harnesses.length > 0}
 						<section data-testid="picker-harness-section" aria-label="Harness" class="pb-[6px]">
 							<div class="flex items-center justify-between px-[10px] pt-[8px] pb-[6px] text-[12px] font-medium text-text-muted"><span>Harness</span></div>
 							<OptionRow variant="joined" options={harnesses} value={target.pick.driver ?? ""} onChange={selectHarness} label="Harness" itemWidth={104} testId="picker-harness-options" itemTestId={(driver) => `picker-harness-${driver}`} class="mx-[4px]">
@@ -141,7 +142,7 @@
 							</OptionRow>
 						</section>
 					{/if}
-					{#if accountOptions.length > 1}
+					{#if accountOptions.length > 0}
 						<section data-testid="picker-account-section" tabindex="-1" aria-label="Account" class="pb-[6px] outline-none">
 							<div class="flex items-center justify-between px-[10px] pt-[8px] pb-[6px] text-[12px] font-medium text-text-muted"><span>Account</span></div>
 							<OptionRow variant="cards" options={accountOptions} value={target.pick.account ?? ""} onChange={target.selectAccount} label="Account" itemWidth={108} testId="picker-account-options" itemTestId={(id) => `picker-account-${id}`} class="mx-[4px] gap-[6px] pt-[2px] pb-[6px]">
@@ -156,6 +157,7 @@
 					size="content"
 					layout="flow"
 					data-testid="picker-row-model"
+					disabled={target.pending.model}
 					onclick={() => { view = "model"; }}
 				>
 					<Icon name="zap" size={16} class="shrink-0 text-text-muted" />
@@ -256,6 +258,7 @@
 											class={modelItemClass(model)}
 											data-model-id={model.id}
 											data-provider-id={model.provider}
+											disabled={target.pending.model}
 											aria-current={isActiveModel(model) ? "true" : undefined}
 											onclick={(e) => handleModelClick(model, e)}
 										>
@@ -282,6 +285,7 @@
 														class="rounded px-1.5 py-0.5 text-xs duration-100 {routed ? 'bg-bg font-semibold' : 'hover:bg-bg hover:text-text-secondary'}"
 														title="Route via {option.label}{option.isDefault ? ' (default)' : ''}"
 														data-routing-value={option.value}
+														disabled={target.pending.model}
 														data-active={routed ? "" : undefined}
 														onclick={(e) => handleModelClick(model, e, option.value)}
 													>{option.label}</Button>

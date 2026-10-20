@@ -276,6 +276,10 @@ const globalSettingRows = (
 			_tag: "terminalKeys",
 			terminalKeys: settings.terminalKeys ?? DEFAULT_TERMINAL_KEYS,
 		},
+		titleGeneration: {
+			_tag: "titleGeneration",
+			selection: settings.titleGeneration ?? null,
+		},
 		claudeSettings: {
 			_tag: "claudeSettings",
 			overrides: settings.claudeSettings ?? {},

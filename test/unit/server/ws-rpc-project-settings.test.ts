@@ -89,6 +89,7 @@ describe("SubscribeProjectSettings", () => {
 					{ _tag: "defaultPermissionMode", mode: "ask" },
 					{ _tag: "defaultSessionMode", mode: "local" },
 					{ _tag: "claudeSettings", overrides: {} },
+					{ _tag: "titleGeneration", selection: null },
 				]),
 			);
 		}).pipe(Effect.provide(makeLayer(), { local: true })),
