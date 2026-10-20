@@ -603,7 +603,12 @@ export const sessionHandlers = {
 		{
 			sql: "UPDATE sessions SET limit_recovery = ?, updated_at = ? WHERE id = ?",
 			params: [
-				JSON.stringify({ ...event.data, rearms: 0, continued: false }),
+				JSON.stringify({
+					...event.data,
+					limitedAt: event.createdAt,
+					rearms: 0,
+					continued: false,
+				}),
 				event.createdAt,
 				event.sessionId,
 			],
