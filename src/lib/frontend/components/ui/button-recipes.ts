@@ -31,6 +31,7 @@ export type ButtonVariant =
 	| "pill"
 	| "filter"
 	| "field"
+	| "field-token"
 	| "composer-model"
 	| "composer-checkout"
 	| "composer-word"
@@ -332,6 +333,13 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 			"h-[30px] gap-[3px] rounded-[9px] bg-chip pl-[10px] pr-[7px] text-[12.5px] font-medium",
 		tone: TONE_CLASSES.secondary,
 		hoverFill: "hover:bg-hover",
+	},
+	/** The label inside a shared field pill, beside its separate clear button. */
+	"field-token": {
+		chrome:
+			"h-[30px] gap-[3px] rounded-[9px] pl-[10px] pr-[2px] text-[12.5px] font-medium",
+		tone: TONE_CLASSES.secondary,
+		hoverFill: "",
 	},
 	"ghost-accent": {
 		chrome: "",

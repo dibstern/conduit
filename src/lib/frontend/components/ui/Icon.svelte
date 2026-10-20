@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Component } from 'svelte';
   import {
+    PanelLeft,
     PanelLeftClose,
     PanelLeftOpen,
     Plus,
@@ -119,6 +120,7 @@
   // Keys match the names used in data-lucide="..." attributes in the vanilla HTML.
   const icons: Record<string, Component> = {
     // Icons actively used in the existing vanilla HTML
+    'panel-left': PanelLeft,
     'panel-left-close': PanelLeftClose,
     'panel-left-open': PanelLeftOpen,
     'plus': Plus,

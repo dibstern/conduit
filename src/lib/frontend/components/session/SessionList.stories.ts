@@ -201,8 +201,42 @@ export const SnoozedShelfOpen: Story = {
 			"aria-expanded",
 			"true",
 		);
-		await expect(canvas.getByText("Tue 9:00 AM")).toBeVisible();
+		await expect(canvas.getByText("Tue", { exact: true })).toBeVisible();
 		await expect(canvas.getByText("No timer")).toBeVisible();
+	},
+};
+
+export const SnoozedDeadlineFormats: Story = {
+	beforeEach: () => {
+		uiState.snoozedShelfOpen = true;
+		sessionState.now = SNOOZE_STORY_NOW;
+		seedSessions(
+			[7, 8, 13, 14].map((day) => ({
+				projectSlug: "conduit",
+				accountId: null,
+				id: `deadline-${day}`,
+				title: `Review on October ${day}`,
+				attention: "idle" as const,
+				snoozedAt: SNOOZE_STORY_NOW,
+				snoozedUntil: new Date(2030, 9, day, 18).getTime(),
+			})),
+		);
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("snoozed-shelf-more"));
+		await expect(
+			canvas.getByText(
+				new Intl.DateTimeFormat(undefined, {
+					hour: "numeric",
+					minute: "2-digit",
+				}).format(new Date(2030, 9, 7, 18)),
+				{ exact: true },
+			),
+		).toBeVisible();
+		await expect(canvas.getByText("Tue", { exact: true })).toBeVisible();
+		await expect(canvas.getByText("Sun", { exact: true })).toBeVisible();
+		await expect(canvas.getByText("14 Oct", { exact: true })).toBeVisible();
 	},
 };
 
@@ -538,10 +572,10 @@ export const ShelvesWithMore: Story = {
 				Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
 		await expect(canvas.getByTestId("settled-shelf-more")).toHaveTextContent(
-			"+ 12 more",
+			/^12 more$/,
 		);
 		await expect(canvas.getByTestId("snoozed-shelf-more")).toHaveTextContent(
-			"+ 2 more",
+			/^2 more$/,
 		);
 		await userEvent.click(canvas.getByTestId("settled-shelf-more"));
 		await expect(
@@ -654,6 +688,24 @@ export const Scoped: Story = {
 			"Acme",
 		);
 		await expect(canvas.getByText("No sessions in Acme")).toBeVisible();
+		const trigger = canvas.getByTestId("session-scope-chip");
+		const pill = trigger.parentElement;
+		if (!pill) throw new TypeError("Scope pill is missing");
+		const clear = canvas.getByRole("button", { name: "Clear project scope" });
+		await expect(pill.getBoundingClientRect().height).toBe(30);
+		await expect(getComputedStyle(pill).borderRadius).toBe("9px");
+		await expect(getComputedStyle(pill).backgroundColor).not.toBe(
+			"rgba(0, 0, 0, 0)",
+		);
+		await expect(getComputedStyle(trigger).backgroundColor).toBe(
+			"rgba(0, 0, 0, 0)",
+		);
+		await expect(
+			pill.getBoundingClientRect().right - clear.getBoundingClientRect().right,
+		).toBe(6);
+		if (matchMedia("(max-width: 767px)").matches) {
+			await expect(getComputedStyle(clear, "::before").minHeight).toBe("44px");
+		}
 	},
 };
 

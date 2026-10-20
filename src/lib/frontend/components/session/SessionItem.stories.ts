@@ -47,9 +47,14 @@ export const ArchivedSearchResult: Story = {
 		active: false,
 	},
 	play: async ({ canvasElement }) => {
-		await expect(
-			within(canvasElement).getByTestId("session-archived-badge"),
-		).toHaveTextContent("Archived");
+		const badge = within(canvasElement).getByTestId("session-archived-badge");
+		await expect(badge).toHaveTextContent("Archived");
+		await expect(getComputedStyle(badge).borderWidth).toBe("0px");
+		await expect(getComputedStyle(badge).color).toBe(
+			getComputedStyle(
+				canvasElement.querySelector(".session-item-meta") as HTMLElement,
+			).color,
+		);
 	},
 };
 
@@ -200,6 +205,11 @@ export const Pinned: Story = {
 		active: false,
 		pinned: true,
 	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByTitle("Pinned session"),
+		).toBeVisible();
+	},
 };
 
 // A pinned fork keeps pin and fork glyphs in their declared order.
@@ -317,34 +327,63 @@ export const Hover: Story = {
 export const HoverActions: Story = {
 	name: "Hover actions",
 	args: {
+		href: "#session",
 		session: mockSession,
 		projectLabel: "Conduit",
 		branch: "main",
 		onmarkread: fn(),
+		oncontextmenu: fn(),
 	},
-	parameters: { pseudo: { hover: true } },
+	parameters: { pseudo: { hover: [".session-item"] } },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		canvasElement.querySelector<HTMLAnchorElement>(".session-item")?.focus();
+		await expect(canvas.getByTestId("session-row-actions")).toBeVisible();
+		await expect(
+			canvas.getByTestId("session-act-snooze").getBoundingClientRect().width,
+		).toBe(21);
+		await expect(
+			canvas.getByTestId("session-act-settle").getBoundingClientRect().height,
+		).toBe(21);
+	},
 };
 
 export const SettledHoverActions: Story = {
 	name: "Settled hover actions",
 	args: {
+		href: "#session",
 		session: { ...mockSession, settledAt: 1 },
 		settled: true,
 		settledAt: "Mon 9:00",
 		projectLabel: "Conduit",
+		oncontextmenu: fn(),
 	},
-	parameters: { pseudo: { hover: true } },
+	parameters: { pseudo: { hover: [".session-item"] } },
+	play: async ({ canvasElement }) => {
+		canvasElement.querySelector<HTMLAnchorElement>(".session-item")?.focus();
+		await expect(
+			within(canvasElement).getByTestId("session-act-unsettle"),
+		).toBeVisible();
+	},
 };
 
 export const SnoozedHoverActions: Story = {
 	name: "Snoozed hover actions",
 	args: {
+		href: "#session",
 		session: { ...mockSession, snoozedAt: 1 },
 		snoozed: true,
 		snoozedUntilText: "Tue 9:00",
 		projectLabel: "Conduit",
+		oncontextmenu: fn(),
 	},
-	parameters: { pseudo: { hover: true } },
+	parameters: { pseudo: { hover: [".session-item"] } },
+	play: async ({ canvasElement }) => {
+		canvasElement.querySelector<HTMLAnchorElement>(".session-item")?.focus();
+		await expect(
+			within(canvasElement).getByTestId("session-act-unsnooze"),
+		).toBeVisible();
+	},
 };
 
 function dragStory(

@@ -141,7 +141,7 @@
 	{#each groupsOf(rows) as group, groupIndex (group.harness)}
 		<div data-testid="{prefix}-group-{group.harness}" class="w-full {groupIndex > 0 ? 'mt-[6px]' : ''}">
 			{#if group.harness !== continues && (size === "sidebar" || prefix === "usage-sheet")}
-				<div class="{rowClass} grid items-center gap-[6px] text-text-muted {size === 'sidebar' ? 'h-[22px] text-[11.5px]' : 'h-[28px] text-[12.5px]'}">
+				<div class="{rowClass} grid items-center gap-[6px] text-text-dimmer {size === 'sidebar' ? 'h-[22px] text-[11.5px]' : 'h-[28px] text-[12.5px]'}">
 					<span data-testid="{prefix}-heading-{group.harness}" class="font-semibold text-text-secondary">{harnessLabels[group.harness]}</span>
 					{#each group.columns as kind, index (kind)}
 						<span data-testid="{prefix}-column-{group.harness}-{kind}" class="{group.columns.length === 1 ? 'spanning-window' : index === 1 ? 'second-window' : ''}">{windowLabels[kind]}</span>
@@ -171,7 +171,7 @@
 	{@render meter(docked, prefix, "phone")}
 	{#if folded.length > 0}
 		<!-- Its height is the distance the sheet's rest slides up to close the gap it leaves. -->
-		<span data-testid="{morePrefix}-more" aria-hidden={prefix === "usage-sheet" || undefined} class="flex h-[28px] items-center gap-[6px] px-[6px] text-[12.5px] text-text-muted {prefix === 'usage-sheet' ? 'sheet-fades' : ''}">
+		<span data-testid="{morePrefix}-more" aria-hidden={prefix === "usage-sheet" || undefined} class="flex h-[28px] items-center gap-[6px] px-[6px] text-[12.5px] text-text-dimmer {prefix === 'usage-sheet' ? 'sheet-fades' : ''}">
 			<span data-testid="{morePrefix}-more-count">{folded.length === 1 && folded[0] ? `+1 ${harnessLabels[folded[0].harness]} account` : `+${folded.length} more`}</span>
 			{#each folded as reading (reading.accountId)}
 				<AccountDot instanceId={reading.accountId} size={6} data-testid="{morePrefix}-folded-{reading.accountId}" />
@@ -186,7 +186,7 @@
 		<span data-testid="usage-footer-harness" class="mr-auto font-semibold text-text-secondary">{harnessLabels[single.harness]}</span>
 		{#each kinds.filter((kind) => single.windows.some((window) => window.kind === kind)) as kind, index (kind)}
 			<span class="flex min-w-0 items-center gap-[5px] {index === 1 ? 'second-window' : ''}">
-				<span data-testid="{columnPrefix}-{kind}" class="text-text-muted">{windowLabels[kind]}</span>
+				<span data-testid="{columnPrefix}-{kind}" class="text-text-dimmer">{windowLabels[kind]}</span>
 				{@render cell("usage-footer", single, kind)}
 			</span>
 		{/each}
