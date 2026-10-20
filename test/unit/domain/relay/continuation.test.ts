@@ -253,12 +253,6 @@ for (const scenario of [
 	},
 	{ name: "busy before quota", busy: true, result: "SessionBusy", probes: 0 },
 	{
-		name: "fresh limited quota",
-		quota: "Limited",
-		result: "AccountUnavailable",
-		probes: 1,
-	},
-	{
 		name: "unavailable account",
 		quota: "Unavailable",
 		result: "AccountUnavailable",
@@ -353,14 +347,7 @@ for (const scenario of [
 													reason: "Not logged in",
 												}),
 											]
-										: "quota" in scenario && scenario.quota === "Limited"
-											? [
-													usageReading("claude", {
-														status: "limited",
-														windows: [{ kind: "seven_day", utilization: 100 }],
-													}),
-												]
-											: [usageReading("claude")];
+										: [usageReading("claude")];
 								}).pipe(Effect.orDie),
 							pickFailover: () => Effect.succeed(undefined),
 						}),

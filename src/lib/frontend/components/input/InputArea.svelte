@@ -1215,7 +1215,7 @@
 			</ComposerStrip>
 		{/if}
 
-		{#if !currentChat().transcript?.pending.length && currentSession?.limitRecovery && !currentSession.limitRecovery.switched && (currentSession.limitRecovery.scheduledAt === undefined || currentSession.limitRecovery.cutOffMessageId !== undefined)}
+		{#if !currentChat().transcript?.pending.length && currentSession?.limitRecovery && !currentSession.limitRecovery.switched}
 			<UsageLimitStrip limitRecovery={currentSession.limitRecovery} sessionId={currentSession.id} projectSlug={currentSession.projectSlug} />
 		{/if}
 

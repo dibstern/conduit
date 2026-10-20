@@ -14,6 +14,7 @@ import { SqlClient } from "effect/sql";
 import type { AccountRef, ClaudeAccount } from "../../../contracts/account.js";
 import { accountLimit } from "../../../contracts/account-limit.js";
 import {
+	AccountStillLimited,
 	AccountUnavailable,
 	type ContinuationError,
 	type ContinuationReason,
@@ -304,6 +305,8 @@ export const makeContinuation = Effect.gen(function* () {
 			const expectedSourceMatches =
 				options.expectedInstanceId === initialSession.provider ||
 				options.expectedInstanceId === source.id;
+			const sameAccountNow =
+				!due && options.at === undefined && source.id === account.id;
 			const checkSession = (ownRequest = false) =>
 				Effect.gen(function* () {
 					const session = yield* read.getSession(sessionId);
@@ -439,6 +442,7 @@ export const makeContinuation = Effect.gen(function* () {
 									const session = yield* checkSession(true);
 									if (
 										!due &&
+										!sameAccountNow &&
 										decision &&
 										(decision.status === "limited" ||
 											decision.status === "unavailable")
@@ -502,6 +506,25 @@ export const makeContinuation = Effect.gen(function* () {
 									}
 									// Dismiss or a reply may have closed it while the probe ran.
 									if (!switched && (!recovery || recovery.continued)) return;
+									if (sameAccountNow) {
+										const answer = accountLimit({
+											asker: "user",
+											...(decision === undefined ? {} : { reading: decision }),
+											...(recovery === null ? {} : { recovery }),
+											now: yield* Clock.currentTimeMillis,
+										});
+										if (answer.kind === "wait-until")
+											return yield* new AccountStillLimited({
+												label: answer.label,
+												until: answer.until,
+											});
+										if (answer.kind === "signed-out")
+											return yield* new AccountUnavailable({
+												instanceId: account.id,
+												reason:
+													decision?.reason ?? "Claude account is unavailable",
+											});
+									}
 									if (due && recovery && due.autoResume) {
 										const limit = accountLimit({
 											asker: "automatic",
