@@ -544,7 +544,7 @@ test.describe("Claude ended stream task liveness", () => {
 								// assistant text is exactly this captured response.
 								"SELECT COUNT(*) AS n FROM events WHERE session_id = ? AND type = 'text.delta' AND json_extract(data, '$.text') = ?",
 							)
-							.get(childId, '"A done."')?.["n"],
+							.get(childId, "A done.")?.["n"],
 					);
 				} finally {
 					db.close();
