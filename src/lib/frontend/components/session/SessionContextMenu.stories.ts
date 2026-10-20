@@ -127,6 +127,16 @@ function phoneSheet(state: Partial<SessionInfo> = {}): Story {
 		parameters: { viewport: { defaultViewport: "mobile1" } },
 		play: async () => {
 			const menu = await phoneMenu();
+			await waitFor(() =>
+				expect(
+					document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+						?.content,
+				).toBe(
+					document.documentElement.classList.contains("light-theme")
+						? "#b0b1b4"
+						: "#0b0c0e",
+				),
+			);
 			await expect(
 				within(menu).getByTestId("session-sheet-header"),
 			).toBeVisible();
@@ -140,10 +150,37 @@ function phoneSheet(state: Partial<SessionInfo> = {}): Story {
 				name: "Session",
 			});
 			const tiles = within(group).getAllByRole("menuitem");
-			await expect(tiles).toHaveLength(5);
+			await expect(tiles).toHaveLength(6);
+			await expect(
+				within(group).getByTestId("session-ctx-archive"),
+			).toBeVisible();
 			expect(
 				new Set(tiles.map((tile) => tile.getBoundingClientRect().top)).size,
-			).toBe(1);
+			).toBe(2);
+			for (const tile of menu.querySelectorAll<HTMLElement>(
+				"[data-menu-tile]",
+			)) {
+				for (const label of tile.querySelectorAll<HTMLElement>(
+					"small, span:not([aria-hidden])",
+				)) {
+					expect(label.getBoundingClientRect().height).toBeLessThanOrEqual(
+						Number.parseFloat(getComputedStyle(label).lineHeight) ||
+							Number.parseFloat(getComputedStyle(label).fontSize) * 1.5,
+					);
+				}
+			}
+			const icon = menu.querySelector(
+				'[data-testid="session-sheet-header"] > span svg',
+			);
+			const expectedIcon =
+				state.pinnedAt != null
+					? "pin"
+					: state.snoozedAt != null
+						? "moon"
+						: state.settledAt != null
+							? "check"
+							: "circle-dot";
+			expect(icon).toHaveClass(`lucide-${expectedIcon}`);
 			await expect(
 				within(menu).getByTestId("session-ctx-auto-settle"),
 			).toHaveAttribute(
@@ -244,7 +281,7 @@ export const PhoneWithFooter: Story = {
 			within(menu)
 				.getByRole("group", { name: "Session" })
 				.querySelectorAll("[data-menu-tile]"),
-		).toHaveLength(4);
+		).toHaveLength(5);
 	},
 };
 export const PhoneWithFooterLight: Story = {
@@ -310,6 +347,15 @@ export const PhoneSnoozeHolding: Story = {
 		});
 		const time = within(list).getByRole("menuitem", { name: /In 3 hours/ });
 		await waitFor(() => {
+			expect(list.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+				tile.getBoundingClientRect().bottom + 9,
+			);
+			expect(
+				list.getBoundingClientRect().top - tile.getBoundingClientRect().bottom,
+			).toBeLessThanOrEqual(13);
+			expect(list.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+				window.innerHeight,
+			);
 			const target = time.getBoundingClientRect();
 			pointer("pointermove", target.left + 20, target.top + target.height / 2);
 			expect(time).toHaveAttribute("data-followed", "true");

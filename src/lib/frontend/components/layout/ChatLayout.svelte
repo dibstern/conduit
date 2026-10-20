@@ -602,8 +602,8 @@
 	<!--
 		iOS 26 paints a progressive blur under the status bar unless WebKit finds an
 		opaque fixed or sticky box at the top edge (hit-tested at x = width/2, y = 4).
-		Both phone top bars are static, so this strip stands in for them. Same colour
-		as the bars, so it is invisible; compact-only, styled in style.css.
+		Both phone top bars are static, so this strip stands in for them. It shares
+		--color-bg with the session bar and theme-color; compact-only, styled in style.css.
 		It must paint over #app: WebKit skips boxes with no fixed or sticky element
 		in or around them, so #app is harmless until it holds one (the sticky
 		scroll-to-bottom button), and then it hides the strip. Guarded by

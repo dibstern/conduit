@@ -78,10 +78,10 @@ export const SEGMENTED_VARIANTS = {
 	},
 	/** Compact vertical dock beside desktop panes. */
 	rail: {
-		list: "flex flex-col items-center gap-1 py-1",
-		item: "relative flex h-[32px] w-[32px] items-center justify-center rounded-md text-base cursor-pointer transition-colors",
-		selected: "bg-bg-alt text-text",
-		unselected: "text-text-muted hover:text-text disabled:opacity-50",
+		list: "flex flex-col items-center gap-[6px] py-[10px]",
+		item: "relative flex h-[32px] w-[32px] items-center justify-center rounded-[9px] text-base cursor-pointer transition-colors",
+		selected: "bg-accent/16 text-accent",
+		unselected: "text-text-dimmer hover:text-text disabled:opacity-50",
 	},
 	/**
 	 * Final settings rail. On phones, Tabs groups the navigation rows into

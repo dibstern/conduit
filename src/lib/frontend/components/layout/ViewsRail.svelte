@@ -16,7 +16,7 @@
 	const pressed = $derived(railViews.filter((view) => view.isOn()).map((view) => view.id));
 </script>
 
-<div data-testid="views-rail" class="hidden md:flex w-[38px] shrink-0 justify-center border-l border-border bg-bg-surface">
+<div data-testid="views-rail" class="hidden md:flex w-[44px] shrink-0 justify-center border-l border-border-subtle bg-sidebar-bg">
 	<ToggleGroup
 		value={pressed}
 		{options}
@@ -30,7 +30,7 @@
 			{@const badge = view?.badge?.()}
 			{#if view}<Icon name={view.icon} size={16} />{/if}
 			{#if badge}
-				<Badge variant="accent-solid" size="count" shape="pill" class="absolute -top-1 -right-1">{badge}</Badge>
+				<Badge variant="accent-solid" size="rail-count" shape="pill" class="absolute -top-[3px] -right-[4px]">{badge}</Badge>
 			{/if}
 		{/snippet}
 	</ToggleGroup>

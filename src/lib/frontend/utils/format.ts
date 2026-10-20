@@ -76,7 +76,9 @@ export function formatSnoozeTime(
 	const time = new Intl.DateTimeFormat(undefined, {
 		hour: "numeric",
 		minute: "2-digit",
-	}).format(date);
+	})
+		.format(date)
+		.toLowerCase();
 	if (daysAway === 0) return time;
 	if (daysAway > 0 && daysAway < 7) {
 		const weekday = date.toLocaleDateString("en", { weekday: "short" });

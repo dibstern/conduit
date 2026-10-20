@@ -231,7 +231,7 @@ Scenario Outline: Phone session sheets show the shared body for every session st
   And the conduit app is served with the long-transcript mockup
   And the phone session sheet state is <state>
   When I open the overflow session sheet
-  Then the session sheet has the shared grids and 4 Session tiles
+  Then the session sheet has the shared grids and 5 Session tiles
   And the session sheet displays the <state> commands
   And the session sheet footer is overflow with Debug off
   And the auto-settle status line is <line>
@@ -239,8 +239,8 @@ Scenario Outline: Phone session sheets show the shared body for every session st
 
 Examples:
   | state    | theme | line                               | baseline                            | threshold |
-  | idle     | dark  | On · settles Sat 9:41 AM if left idle | session-sheet-idle-dark             | 98        |
-  | idle     | light | On · settles Sat 9:41 AM if left idle | session-sheet-idle-light            | 98        |
+  | idle     | dark  | On · settles Sat 9:41 am if left idle | session-sheet-idle-dark             | 98        |
+  | idle     | light | On · settles Sat 9:41 am if left idle | session-sheet-idle-light            | 98        |
   | unread   | dark  | On · paused while unread           | session-sheet-unread-dark           | 98        |
   | unread   | light | On · paused while unread           | session-sheet-unread-light          | 98        |
   | snoozed  | dark  | On · paused while snoozed          | session-sheet-snoozed-dark          | 98        |
@@ -277,9 +277,9 @@ Scenario Outline: The title chevron sheet shares the body and Debug footer
   And the phone session sheet state is idle
   And I enable the desktop Debug action
   When I open the chevron session sheet
-  Then the session sheet has the shared grids and 4 Session tiles
+  Then the session sheet has the shared grids and 5 Session tiles
   And the session sheet footer is chevron with Debug on
-  And the auto-settle status line is On · settles Sat 9:41 AM if left idle
+  And the auto-settle status line is On · settles Sat 9:41 am if left idle
   And the session-sheet region visually matches <baseline> at <threshold> percent
 
 Examples:
@@ -287,15 +287,15 @@ Examples:
   | dark  | session-sheet-chevron-debug-dark  | 98        |
   | light | session-sheet-chevron-debug-light | 98        |
 
-Scenario Outline: The session list long-press sheet has five Session tiles and no footer
+Scenario Outline: The session list long-press sheet has six Session tiles and no footer
   Given the viewport is a phone
   And the session sheet theme is <theme>
   And the conduit app is served with the long-transcript mockup
   And the phone session sheet state is idle
   When I open the list session sheet
-  Then the session sheet has the shared grids and 5 Session tiles
+  Then the session sheet has the shared grids and 6 Session tiles
   And the session sheet footer is absent with Debug off
-  And the auto-settle status line is On · settles Sat 9:41 AM if left idle
+  And the auto-settle status line is On · settles Sat 9:41 am if left idle
   And the session-sheet region visually matches <baseline> at <threshold> percent
 
 Examples:
