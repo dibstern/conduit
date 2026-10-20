@@ -997,7 +997,11 @@ test("a placed session only enables send for nonempty input", async ({
 }) => {
 	const { rpc } = await setup(page, { ViewSession: () => ({ ok: true }) });
 	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
-	await expect(page.locator("#input")).toBeVisible();
+	// The seed session restores a saved draft; wait for it so the empty check
+	// below cannot pass before the draft arrives.
+	await expect(page.locator("#input")).toHaveValue("Seed draft");
+	await expect(page.locator("#send")).toBeEnabled();
+	await page.locator("#input").fill("");
 	await expect(page.locator("#send")).toBeDisabled();
 	await page.locator("#input").fill("   ");
 	await expect(page.locator("#send")).toBeDisabled();
