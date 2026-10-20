@@ -1,12 +1,5 @@
 import { Data, Effect } from "effect";
 import { SqlClient } from "effect/sql";
-import type { SqlError } from "effect/sql/SqlError";
-import { EventStoreError } from "./effect/event-store-effect.js";
-import {
-	decodeStoredEventRow,
-	type StoredEventRow,
-} from "./effect/stored-event-row.js";
-import type { CanonicalEvent, StoredEvent } from "./events.js";
 
 export class ForkRefusal extends Data.TaggedError("ForkRefusal")<{
 	readonly reason:
@@ -31,35 +24,7 @@ export interface ForkSource {
 		readonly role: string;
 		readonly created_at: number;
 	}[];
-	readonly copy: (
-		newSessionId: string,
-	) => Effect.Effect<
-		CanonicalEvent[],
-		EventStoreError | SqlError,
-		SqlClient.SqlClient
-	>;
 }
-
-const FORK_HISTORY_TYPES: ReadonlySet<StoredEvent["type"]> = new Set<
-	CanonicalEvent["type"]
->([
-	"message.created",
-	"text.delta",
-	"text.surfaced",
-	"thinking.start",
-	"thinking.delta",
-	"thinking.end",
-	"tool.started",
-	"tool.running",
-	"tool.completed",
-	"file.attached",
-	"turn.completed",
-	"turn.error",
-	"turn.interrupted",
-	"turn.model_resolved",
-	// Projects to the compaction divider and the reduced context gauge.
-	"session.compaction",
-]);
 
 const FORK_BOUNDARY_TYPES = [
 	"session.created",
@@ -135,7 +100,7 @@ export const readSideThreadForkBoundary = Effect.fn(
 	return yield* midTurnForkBoundary(yield* readBoundaryRows(parentId));
 });
 
-/** Resolve a fork without reading message parts or decoding transcript content. */
+/** Resolve visible rows without reading or decoding transcript events. */
 export const readForkSource = Effect.fn("fork.readForkSource")(function* (
 	parentId: string,
 	at: { readonly messageId?: string; readonly sideThread: boolean },
@@ -143,266 +108,119 @@ export const readForkSource = Effect.fn("fork.readForkSource")(function* (
 	const sql = yield* SqlClient.SqlClient;
 	return yield* sql.withTransaction(
 		Effect.gen(function* () {
-			const rows = yield* readBoundaryRows(parentId);
-			const messageId =
-				at.messageId ??
-				(at.sideThread ? yield* midTurnForkBoundary(rows) : undefined);
 			const messages = yield* sql<{
 				readonly id: string;
 				readonly role: string;
 				readonly created_at: number;
+				readonly last_applied_seq: number | null;
+				readonly is_inherited: number;
 				readonly current_provider: string;
 				readonly pending_rewind_message_id: string | null;
+				readonly completed_turn: number;
+				readonly assistant_message_id: string | null;
+				readonly removed: number;
 			}>`
-		SELECT m.id, m.role, m.created_at,
-			s.provider AS current_provider, s.pending_rewind_message_id
-		FROM messages m JOIN sessions s ON s.id = m.session_id
-		WHERE m.session_id = ${parentId}
-			AND NOT EXISTS (
-				SELECT 1 FROM sessions pending JOIN messages cut
-					ON cut.id = pending.pending_rewind_message_id AND cut.session_id = pending.id
-				WHERE pending.id = m.session_id
-					AND (m.created_at > cut.created_at
-						OR (m.created_at = cut.created_at AND m.id >= cut.id))
-			)
-		ORDER BY m.created_at ASC, m.id ASC`;
-			const point =
-				messageId === undefined
-					? messages.at(-1)
-					: messages.find((message) => message.id === messageId);
-			if (!point)
-				return yield* new ForkRefusal({
-					reason:
-						messageId === undefined ? "no_transcript" : "message_not_found",
-					...(messageId !== undefined && { messageId }),
-				});
-			const removedMessageIds = new Set([
-				...rows.flatMap((row) =>
-					row.type === "message.removed" && row.message_id !== null
-						? [row.message_id]
-						: [],
-				),
-				...(yield* sql<{
-					message_id: string;
-				}>`SELECT message_id FROM message_tombstones
-					WHERE session_id = ${parentId}`).map((row) => row.message_id),
-			]);
-			const creation = rows.find(
-				(row) => row.type === "message.created" && row.message_id === point.id,
-			);
+				SELECT m.id, m.role, m.created_at, m.last_applied_seq, m.is_inherited,
+					s.provider AS current_provider, s.pending_rewind_message_id,
+					COALESCE(t.state = 'completed', 0) AS completed_turn, t.assistant_message_id,
+					EXISTS (SELECT 1 FROM message_tombstones removed
+						WHERE removed.session_id = m.session_id AND removed.message_id = m.id) AS removed
+				FROM messages m JOIN sessions s ON s.id = m.session_id
+				LEFT JOIN turns t ON t.id = COALESCE(m.turn_id, m.id)
+					AND t.session_id = m.session_id
+				WHERE m.session_id = ${parentId}
+					AND NOT EXISTS (
+						SELECT 1 FROM messages cut
+						WHERE cut.id = s.pending_rewind_message_id AND cut.session_id = s.id
+							AND (m.created_at > cut.created_at
+								OR (m.created_at = cut.created_at AND m.id >= cut.id))
+					)
+				ORDER BY m.created_at, m.id`;
 			if (
-				!creation ||
-				(messageId !== undefined && removedMessageIds.has(messageId))
+				at.messageId !== undefined &&
+				messages.some(
+					(message) => message.id === at.messageId && message.removed === 1,
+				)
 			)
 				return yield* new ForkRefusal({
 					reason: "point_not_found",
-					...(messageId !== undefined && { messageId }),
+					messageId: at.messageId,
 				});
-			const lastRewindCommitSequence = rows.reduce(
-				(sequence, row) =>
-					row.type === "session.rewind_committed" ? row.sequence : sequence,
-				0,
-			);
+			const visible = messages.filter((message) => message.removed === 0);
+			const point =
+				at.messageId !== undefined
+					? visible.find((message) => message.id === at.messageId)
+					: at.sideThread
+						? visible
+								.filter(
+									(message) =>
+										(message.role === "assistant" ||
+											message.assistant_message_id === null) &&
+										message.completed_turn === 1,
+								)
+								.at(-1)
+						: visible.at(-1);
+			if (!point)
+				return yield* new ForkRefusal({
+					reason:
+						at.messageId !== undefined
+							? "message_not_found"
+							: at.sideThread
+								? "no_completed_turn"
+								: "no_transcript",
+					...(at.messageId !== undefined && { messageId: at.messageId }),
+				});
+			// Native Claude receipts are ordered by events. These two scalar keys
+			// retain that contract without reading any history payloads to copy.
+			const [keys] = yield* sql<{
+				readonly creation: number | null;
+				readonly rewind: number | null;
+			}>`SELECT
+				(SELECT MIN(sequence) FROM events
+					WHERE session_id = ${parentId} AND type = 'message.created'
+						AND json_extract(data, '$.messageId') = ${point.id}) AS creation,
+				(SELECT MAX(sequence) FROM events
+					WHERE session_id = ${parentId} AND type = 'session.rewind_committed') AS rewind`;
+			const sequence =
+				keys?.creation ??
+				(point.is_inherited === 1 ? point.last_applied_seq : null);
+			if (sequence == null)
+				return yield* new ForkRefusal({
+					reason: "point_not_found",
+					messageId: point.id,
+				});
+			const providers = yield* sql<{ readonly provider: string }>`
+				SELECT provider FROM session_providers WHERE session_id = ${parentId}
+				ORDER BY activated_at,
+					CASE WHEN id = ${`${parentId}:initial`} THEN 0
+						ELSE CAST(substr(id, length(${parentId}) + 2) AS INTEGER) END`;
+			const lastRewindCommitSequence = keys?.rewind ?? 0;
 			const historyMessageId =
-				messageId ??
-				(point.pending_rewind_message_id !== null ||
+				at.messageId ??
+				(at.sideThread ||
+				point.pending_rewind_message_id !== null ||
 				lastRewindCommitSequence > 0
 					? point.id
 					: undefined);
-			const instanceIds = new Set([point.current_provider]);
-			for (const row of rows) {
-				if (row.type === "session.created" && row.provider !== null)
-					instanceIds.add(row.provider);
-				if (row.type === "session.provider_changed") {
-					if (row.old_provider !== null) instanceIds.add(row.old_provider);
-					if (row.new_provider !== null) instanceIds.add(row.new_provider);
-				}
-			}
-			const retained = messages.map(({ id, role, created_at }) => ({
-				id,
-				role,
-				created_at,
-			}));
-			const retainedMessageIds = new Set(retained.map((message) => message.id));
-			const streamEnd = rows[0]?.stream_end ?? 0;
 			const source: ForkSource = {
 				boundary: {
 					messageId: point.id,
 					createdAt: point.created_at,
-					sequence: creation.sequence,
+					sequence,
 				},
 				...(historyMessageId !== undefined && { historyMessageId }),
 				lastRewindCommitSequence,
-				instanceIds,
-				retained,
-				copy: (newSessionId) =>
-					Effect.gen(function* () {
-						if (
-							historyMessageId !== undefined &&
-							removedMessageIds.has(historyMessageId)
-						)
-							return [];
-						// Cut at the LAST target event, but retain messages created before its
-						// FIRST event. Adjacent turn events are determined from the full parent
-						// stream: omitted parent events break the run; other sessions do not.
-						const content = yield* sql<
-							StoredEventRow & { readonly first_target_sequence: number | null }
-						>`
-				WITH target AS (
-					SELECT MIN(sequence) AS first_sequence, MAX(sequence) AS last_sequence
-					FROM events
-					WHERE session_id = ${parentId} AND sequence <= ${streamEnd}
-						AND ${historyMessageId ?? null} IS NOT NULL
-						AND json_extract(data, '$.messageId') = ${historyMessageId ?? null}
-						AND type != 'text.surfaced'
-				), cut AS (
-					SELECT COALESCE((
-						SELECT MIN(sequence) FROM events
-						WHERE session_id = ${parentId} AND sequence <= ${streamEnd}
-							AND sequence > (SELECT last_sequence FROM target)
-							AND type NOT LIKE 'turn.%'
-							AND type != 'text.surfaced'
-					), ${streamEnd + 1}) AS excluded_sequence
-				)
-				SELECT project_id, sequence, event_id, session_id, stream_version,
-					type, data, metadata, provider, created_at,
-					(SELECT first_sequence FROM target) AS first_target_sequence
-				FROM events INDEXED BY idx_events_session_seq
-				WHERE session_id = ${parentId} AND sequence <= ${streamEnd}
-					AND (sequence < (SELECT excluded_sequence FROM cut) OR type = 'text.surfaced')
-					AND type IN ${sql.in([...FORK_HISTORY_TYPES])}
-				ORDER BY sequence`;
-						const firstTargetSequence = content[0]?.first_target_sequence;
-						const keptMessageIds =
-							historyMessageId === undefined
-								? undefined
-								: new Set([historyMessageId]);
-						if (
-							keptMessageIds &&
-							firstTargetSequence !== null &&
-							firstTargetSequence !== undefined
-						)
-							for (const row of rows)
-								if (
-									row.type === "message.created" &&
-									row.message_id !== null &&
-									row.sequence < firstTargetSequence
-								)
-									keptMessageIds.add(row.message_id);
-						const events = yield* Effect.forEach(content, (row) =>
-							decodeStoredEventRow(
-								row,
-								(cause) =>
-									new EventStoreError({
-										operation: "decodeStoredEventRow",
-										cause,
-									}),
-							),
-						);
-						return copyForkHistory(events, {
-							newSessionId,
-							removedMessageIds,
-							retainedMessageIds,
-							...(keptMessageIds !== undefined && { keptMessageIds }),
-						});
-					}),
+				instanceIds: new Set([
+					point.current_provider,
+					...providers.map(({ provider }) => provider),
+				]),
+				retained: visible.map(({ id, role, created_at }) => ({
+					id,
+					role,
+					created_at,
+				})),
 			};
 			return source;
 		}),
 	);
 });
-
-const messageIdOf = (event: StoredEvent) =>
-	"messageId" in event.data && typeof event.data.messageId === "string"
-		? event.data.messageId
-		: undefined;
-
-function copyForkHistory(
-	parentEvents: readonly StoredEvent[],
-	input: {
-		readonly newSessionId: string;
-		readonly retainedMessageIds: ReadonlySet<string>;
-		readonly removedMessageIds: ReadonlySet<string>;
-		readonly keptMessageIds?: ReadonlySet<string>;
-	},
-): CanonicalEvent[] {
-	const suffix = `_${input.newSessionId}`;
-	const rekey = (id: string) => `${id}${suffix}`;
-	const events: CanonicalEvent[] = [];
-	const copiedTextParts = new Map<string, string>();
-	// Verdicts may precede text or land after later turns. Apply them after
-	// copying content, only to the text parts this fork actually retained.
-	const content = parentEvents.filter(
-		(event) => event.type !== "text.surfaced",
-	);
-	const verdicts = parentEvents.filter(
-		(event) => event.type === "text.surfaced",
-	);
-	for (const event of [...content, ...verdicts]) {
-		if (!FORK_HISTORY_TYPES.has(event.type)) continue;
-		const messageId = messageIdOf(event);
-		if (
-			messageId !== undefined &&
-			(input.removedMessageIds.has(messageId) ||
-				input.retainedMessageIds.has(messageId) === false ||
-				input.keptMessageIds?.has(messageId) === false)
-		)
-			continue;
-		if (
-			event.type === "text.surfaced" &&
-			copiedTextParts.get(event.data.partId) !== event.data.messageId
-		)
-			continue;
-		if (event.type === "text.delta")
-			copiedTextParts.set(event.data.partId, event.data.messageId);
-		const data: Record<string, unknown> = { ...event.data };
-		for (const field of ["messageId", "partId", "callId", "turnId"] as const) {
-			if (typeof data[field] === "string") data[field] = rekey(data[field]);
-		}
-		if ("sessionId" in data) data["sessionId"] = input.newSessionId;
-		// A streamed part arrives as thousands of fragments that project to their
-		// concatenation; copying each one makes a long session slow to fork.
-		const previous = events.at(-1);
-		if (
-			(event.type === "text.delta" || event.type === "thinking.delta") &&
-			previous?.type === event.type &&
-			previous.data.partId === data["partId"] &&
-			previous.data.messageId === data["messageId"]
-		) {
-			events[events.length - 1] = {
-				...previous,
-				data: { ...previous.data, text: previous.data.text + event.data.text },
-			};
-			continue;
-		}
-		// Build a fresh envelope: StoredEvent sequence and streamVersion belong to
-		// the parent stream and must be assigned by the event store on append.
-		events.push({
-			eventId: rekey(event.eventId),
-			sessionId: input.newSessionId,
-			type: event.type,
-			data,
-			metadata: { ...event.metadata, inherited: true },
-			provider: event.provider,
-			createdAt: event.createdAt,
-		} as CanonicalEvent);
-	}
-	// A heartbeat with no payload only says the tool is still running, which
-	// any later event for that tool also says. Long tools emit thousands. Keyed
-	// by message too: a part whose row is gone falls back to the event's message.
-	const toolKey = (data: { messageId: string; partId: string }) =>
-		`${data.messageId}\0${data.partId}`;
-	const lastToolEvent = new Map<string, number>();
-	events.forEach((event, index) => {
-		if (event.type === "tool.running" || event.type === "tool.completed")
-			lastToolEvent.set(toolKey(event.data), index);
-	});
-	return events.filter(
-		(event, index) =>
-			event.type !== "tool.running" ||
-			lastToolEvent.get(toolKey(event.data)) === index ||
-			Object.keys(event.data).some(
-				(key) => key !== "messageId" && key !== "partId",
-			),
-	);
-}

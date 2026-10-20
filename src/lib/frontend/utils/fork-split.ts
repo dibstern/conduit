@@ -26,7 +26,14 @@ export function splitAtForkPoint(
 	messages: ChatMessage[],
 	forkMessageId?: string,
 	forkPointTimestamp?: number,
+	forkSessionId?: string,
 ): ForkSplit {
+	// New forks store the Source's ordering id. Legacy Cursor forks already
+	// store the copied id, so compare both in the Source's id space.
+	const suffix = forkSessionId === undefined ? undefined : `_${forkSessionId}`;
+	const sourceId = (id: string | undefined) =>
+		suffix && id?.endsWith(suffix) ? id.slice(0, -suffix.length) : id;
+	const boundaryId = sourceId(forkMessageId);
 	// Primary: timestamp-based split (reliable — each message self-identifies).
 	if (forkPointTimestamp != null) {
 		const inherited: ChatMessage[] = [];
@@ -35,16 +42,17 @@ export function splitAtForkPoint(
 			const createdAt =
 				msg.messageOrder?.createdAt ??
 				("createdAt" in msg ? msg.createdAt : undefined);
-			const messageId =
+			const messageId = sourceId(
 				msg.messageOrder?.id ??
-				("messageId" in msg ? msg.messageId : undefined);
+					("messageId" in msg ? msg.messageId : undefined),
+			);
 			if (
 				typeof createdAt === "number" &&
 				(createdAt < forkPointTimestamp ||
 					(createdAt === forkPointTimestamp &&
-						forkMessageId !== undefined &&
+						boundaryId !== undefined &&
 						typeof messageId === "string" &&
-						messageId <= forkMessageId))
+						messageId <= boundaryId))
 			) {
 				inherited.push(msg);
 			} else {
@@ -63,7 +71,7 @@ export function splitAtForkPoint(
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const msg = messages[i];
 		if (msg === undefined) continue;
-		if ("messageId" in msg && msg.messageId === forkMessageId) {
+		if ("messageId" in msg && sourceId(msg.messageId) === boundaryId) {
 			splitIndex = i;
 			break;
 		}

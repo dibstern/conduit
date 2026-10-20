@@ -87,8 +87,11 @@ describe("retired stored events", () => {
 						sessionId: "fork",
 						title: "Fork",
 						provider: "claude",
+						forkedFrom: "parent",
+						inheritsHistory: true,
+						forkPointMessageId: source.boundary.messageId,
+						forkPointTimestamp: source.boundary.createdAt,
 					}),
-					...(yield* source.copy("fork")),
 				]);
 				expect(
 					yield* queries.getSessionMessagesWithParts("fork"),
@@ -107,6 +110,9 @@ describe("retired stored events", () => {
 					},
 				]);
 				const forkHistory = yield* store.readAllBySession("fork");
+				expect(forkHistory.map((event) => event.type)).toEqual([
+					"session.created",
+				]);
 				for (const type of [
 					"tool.input_updated",
 					"session.read",

@@ -631,6 +631,7 @@ export const forkOpenCodeSession = (
 									}
 								: {}),
 							...(forkPointEvent === undefined ? {} : { forkPointEvent }),
+							inheritsHistory: false,
 							providerSessionId: session.id,
 						},
 					},
@@ -851,7 +852,6 @@ const forkSessionInWorkspace = (
 					driver: account.driver,
 					pick,
 					providerSessionId: undefined,
-					forkPointMessageId: `${source.boundary.messageId}_${id}`,
 					saveProviderState: () =>
 						Effect.gen(function* () {
 							const messages =
@@ -958,7 +958,6 @@ const forkSessionInWorkspace = (
 				driver: "claude" as const,
 				pick,
 				providerSessionId: parentThread ? forked.sdkSessionId : undefined,
-				forkPointMessageId: source.boundary.messageId,
 				saveProviderState: (firstSequence: number, deliveredThrough: number) =>
 					parentThread
 						? state.saveUpdates(forked.sdkSessionId, [
@@ -976,14 +975,22 @@ const forkSessionInWorkspace = (
 			};
 		});
 		const { id, provider, pick } = fork;
-		const history = yield* source
-			.copy(id)
-			.pipe(Effect.provideService(SqlClient.SqlClient, sql.value));
 		const forkPointEvent = source.boundary.messageId;
 		// A native cursor commits before the row is announced. Without one,
 		// prepareTurn hands off this child's bounded history on its first send.
-		yield* commitAndSignal.write((project) =>
+		const boundary = yield* commitAndSignal.write((project) =>
 			Effect.gen(function* () {
+				// Native transcript creation can yield to source ingestion. Validate
+				// its exact cut again under the same transaction that copies rows.
+				const current = yield* readForkSource(parentSessionId, {
+					messageId: source.boundary.messageId,
+					sideThread: false,
+				}).pipe(
+					Effect.catchTag("ForkRefusal", (refusal) =>
+						Effect.fail(forkRefusalError(parentSessionId, refusal)),
+					),
+					Effect.provideService(SqlClient.SqlClient, sql.value),
+				);
 				const created = yield* eventStore.value.appendBatch([
 					canonicalEvent(
 						"session.created",
@@ -1003,8 +1010,9 @@ const forkSessionInWorkspace = (
 									}
 								: {}),
 							forkPointEvent,
-							forkPointTimestamp: source.boundary.createdAt,
-							forkPointMessageId: fork.forkPointMessageId,
+							forkPointTimestamp: current.boundary.createdAt,
+							forkPointMessageId: current.boundary.messageId,
+							inheritsHistory: true,
 						} satisfies Extract<
 							SessionCommand,
 							{ type: "session.created" }
@@ -1022,21 +1030,6 @@ const forkSessionInWorkspace = (
 					yield* workspace.value.inherit(id, parentSessionId, {
 						project,
 					});
-				// The fork has nothing in flight. Copied history can end inside a
-				// turn the parent is still running; the idle closes it, or the
-				// inbox reads the fork as busy and holds every send.
-				const stored = history.length
-					? yield* eventStore.value.appendBatch([
-							...history,
-							canonicalEvent(
-								"session.status",
-								id,
-								{ sessionId: id, status: "idle" },
-								{ provider, metadata: { source: "relay" } },
-							),
-						])
-					: created;
-				if (history.length) yield* project(stored);
 				yield* inheritSurfacingMarks(parentSessionId, id).pipe(
 					Effect.provideService(SqlClient.SqlClient, sql.value),
 				);
@@ -1045,11 +1038,12 @@ const forkSessionInWorkspace = (
 				);
 				yield* fork.saveProviderState(
 					created[0]?.sequence ?? 0,
-					stored.at(-1)?.sequence ?? 0,
+					created.at(-1)?.sequence ?? 0,
 				);
 				// Ask applies before the row is announced, so no send can reach the
 				// Side Thread first.
 				if (side) yield* setPermissionMode(id, "ask");
+				return current.boundary;
 			}),
 		);
 		// The copied turns were the parent's to read, so the fork starts seen up
@@ -1067,7 +1061,7 @@ const forkSessionInWorkspace = (
 			time: { created: now, updated: now },
 			provider: fork.driver,
 			forkMessageId: forkPointEvent,
-			forkPointTimestamp: source.boundary.createdAt,
+			forkPointTimestamp: boundary.createdAt,
 		};
 	});
 
