@@ -236,7 +236,7 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 	{
 		name: "report OpenCode connection status",
 		match:
-			/^the mock relay reports OpenCode (stopped|starting|connected|reconnecting|failed)(?: for instance (\S+))?$/,
+			/^the mock (relay|WebSocket) reports OpenCode (stopped|starting|connected|reconnecting|failed)(?: for instance (\S+))?$/,
 		run: async ({ world, match }) => {
 			const rpc = requireRpcControl(world.page);
 			// These facts ride the project-settings stream, which opens only once
@@ -245,16 +245,24 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 				(request) => request.tag === "SubscribeProjectSettings",
 				15_000,
 			);
-			rpc.setProjectSetting({
-				_tag: "opencodeConnection",
-				instanceId: match[2] ?? "opencode",
-				status: match[1] as
-					| "stopped"
-					| "starting"
-					| "connected"
-					| "reconnecting"
-					| "failed",
-			});
+			const status = match[2] as
+				| "stopped"
+				| "starting"
+				| "connected"
+				| "reconnecting"
+				| "failed";
+			if (match[1] === "WebSocket") {
+				requireRelayControl(world.page).sendMessage({
+					type: "connection_status",
+					status,
+				});
+			} else {
+				rpc.setProjectSetting({
+					_tag: "opencodeConnection",
+					instanceId: match[3] ?? "opencode",
+					status,
+				});
+			}
 			// A later fact on the same stream confirms dispatch has finished,
 			// so an absent-banner assertion cannot pass before the status arrives.
 			rpc.setProjectSetting({ _tag: "clientCount", count: 3 });

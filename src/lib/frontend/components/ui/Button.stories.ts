@@ -60,6 +60,18 @@ export const Danger: Story = {
 
 export const Small: Story = {
 	args: { variant: "primary", size: "sm", children: label("Small") },
+	play: ({ canvasElement }) => {
+		const button = within(canvasElement).getByRole("button", { name: "Small" });
+		const style = getComputedStyle(button);
+		expect(style.minHeight).toBe("25px");
+		expect(style.paddingInlineStart).toBe("10px");
+		expect(style.paddingInlineEnd).toBe("10px");
+		expect(style.paddingTop).toBe("4px");
+		expect(style.paddingBottom).toBe("4px");
+		expect(style.fontSize).toBe("11.5px");
+		expect(style.gap).toBe("5px");
+		expect(style.borderRadius).toBe("7px");
+	},
 };
 
 export const SuccessSoft: Story = {

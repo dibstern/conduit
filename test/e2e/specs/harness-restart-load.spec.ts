@@ -402,6 +402,12 @@ test("opens the heavy session after a restart under load", async ({
 
 	const driver = await harness.connect(undefined, undefined, undefined, false);
 	await expect.poll(() => harness.generations.at(-1)?.fakeSdkActive).toBe(true);
+	const approvalSession = await driver.createSession(
+		"Approval read sharing",
+		undefined,
+		"claude",
+		{ permissionMode: "ask" },
+	);
 	const streams: string[] = [];
 	for (let index = 0; index < STREAMS; index++) {
 		const sessionId = await driver.createSession(`Stream ${index}`);
@@ -419,6 +425,7 @@ test("opens the heavy session after a restart under load", async ({
 	await driver.close();
 
 	const frames: Frame[] = [];
+	const approvalFrames: { device: number; kind: string; id: string }[] = [];
 	// Whole /rpc payloads the opener receives, kept only while sizes are pinned.
 	let pinned: { bytes: number; payload: string }[] | undefined;
 	const pages: Page[] = [];
@@ -454,6 +461,39 @@ test("opens the heavy session after a restart under load", async ({
 				(direction: Frame["direction"]) =>
 				({ payload }: { payload: string | Buffer }) => {
 					const bytes = Buffer.byteLength(payload);
+					if (direction === "received" && path === "/rpc") {
+						const message: {
+							_tag?: string;
+							values?: {
+								_tag: string;
+								item?: {
+									_tag?: string;
+									sessionId?: string;
+									requestId?: string;
+								};
+								id?: string;
+							}[];
+						} = JSON.parse(payload.toString());
+						for (const envelope of message.values ?? []) {
+							if (
+								envelope._tag === "upsert" &&
+								envelope.item?._tag === "permission" &&
+								envelope.item.sessionId === approvalSession &&
+								envelope.item.requestId
+							)
+								approvalFrames.push({
+									device,
+									kind: "upsert",
+									id: envelope.item.requestId,
+								});
+							else if (envelope._tag === "remove" && envelope.id)
+								approvalFrames.push({
+									device,
+									kind: "remove",
+									id: envelope.id,
+								});
+						}
+					}
 					frames.push({
 						device,
 						socket: path,
@@ -747,7 +787,12 @@ test("opens the heavy session after a restart under load", async ({
 	await longDriver.close();
 	await harness.terminate();
 	const longRestartAt = Date.now();
-	await harness.restart({ keepPort: true, skipBrowserProbe: true });
+	const approvalMetrics = join(harness.root, "server-metrics-approvals.json");
+	await harness.restart({
+		keepPort: true,
+		skipBrowserProbe: true,
+		metricsFile: approvalMetrics,
+	});
 	await expect
 		.poll(
 			() =>
@@ -975,5 +1020,65 @@ test("opens the heavy session after a restart under load", async ({
 		carriedFollowUp: true,
 	});
 	expect(resumedTranscript).toBe(coldTranscript);
+
+	const approvalStarted = Date.now();
+	await new AppPage(opener).goto(
+		`${harness.baseUrl}/s/${approvalSession}?p=process-test`,
+	);
+	const approvalStart = await serverMetrics(approvalMetrics);
+	await new AppPage(opener).sendMessage("approval-read-sharing");
+	await expect
+		.poll(
+			() =>
+				new Set(
+					approvalFrames
+						.filter((frame) => frame.kind === "upsert")
+						.map((frame) => frame.device),
+				).size,
+		)
+		.toBe(DEVICES);
+	const approvalId = approvalFrames.find(
+		(frame) => frame.kind === "upsert",
+	)?.id;
+	if (!approvalId) throw new Error("No approval delivered");
+	await opener
+		.locator(".permission-card")
+		.getByRole("button", { name: "Allow", exact: true })
+		.click();
+	await expect
+		.poll(
+			() =>
+				new Set(
+					approvalFrames
+						.filter(
+							(frame) => frame.kind === "remove" && frame.id === approvalId,
+						)
+						.map((frame) => frame.device),
+				).size,
+		)
+		.toBe(DEVICES);
+	const approvalEnd = await serverMetrics(approvalMetrics);
+	const approvalReads = serverWindow(
+		approvalStart,
+		approvalEnd,
+		approvalStarted,
+		Date.now(),
+	).bySource["approvals"];
+	expect(approvalReads?.reads["window"]).toBeGreaterThan(0);
+	expect(approvalReads?.reads["window"]).toBe(approvalReads?.windowsRead);
+	const approvalReport = testInfo.outputPath("approval-read-sharing.json");
+	writeFileSync(
+		approvalReport,
+		JSON.stringify(
+			{
+				frames: approvalFrames,
+				reads: approvalReads,
+				ms: Date.now() - approvalStarted,
+			},
+			null,
+			2,
+		),
+	);
+	await testInfo.attach("approval-read-sharing", { path: approvalReport });
 	for (const page of pages) await page.context().close();
 });
