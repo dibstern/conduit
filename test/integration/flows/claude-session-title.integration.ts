@@ -25,6 +25,7 @@ import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-que
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { ClaudeOneShotQueryFactory } from "../../../src/lib/provider/claude/claude-provider-runtime.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
 	makeClaudeTextGenerationLayer,
 	replayClaudeText,
@@ -84,6 +85,7 @@ const makeTitleServiceLayer = (input: {
 	readonly filename: string;
 	readonly queryFactory: ClaudeOneShotQueryFactory;
 	readonly accounts?: ReturnType<typeof makeMockAccountDirectory>;
+	readonly configDir?: string;
 }) =>
 	Layer.provideMerge(
 		makeSessionTitleServiceLive(),
@@ -94,7 +96,12 @@ const makeTitleServiceLayer = (input: {
 			makeClaudeTextGenerationLayer(input.queryFactory),
 			Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 			Layer.succeed(LoggerTag)(makeMockLogger()),
-			Layer.succeed(ConfigTag)(makeMockConfig({ projectDir: process.cwd() })),
+			Layer.succeed(ConfigTag)(
+				makeMockConfig({
+					projectDir: process.cwd(),
+					...(input.configDir ? { configDir: input.configDir } : {}),
+				}),
+			),
 			Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 			Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()),
 			makePersistenceEffectLayer(input.filename, "test-project"),
@@ -261,6 +268,81 @@ const waitForQueryFactoryCalls = (
 	});
 
 describe("Integration: Claude Session Titles", () => {
+	it.effect(
+		"uses the saved title account after the title service restarts",
+		() => {
+			const { dir, filename } = makeTempDbPath();
+			const queryFactory = vi.fn(
+				(_params: Parameters<ClaudeOneShotQueryFactory>[0]) =>
+					replayClaudeText(),
+			);
+			const accounts = makeMockAccountDirectory([
+				{
+					driver: "claude",
+					id: AccountIdSchema.make("claude-personal"),
+					name: "Personal",
+					folder: configuredClaudeConfigDir("/integration-personal-login"),
+					usageEligible: true,
+				},
+				{
+					driver: "claude",
+					id: AccountIdSchema.make("claude-work"),
+					name: "Work",
+					folder: configuredClaudeConfigDir("/integration-work-login"),
+					usageEligible: true,
+				},
+			]);
+			const generateSessionTitle = (sessionId: string) =>
+				Effect.gen(function* () {
+					yield* (yield* ProjectionRunnerEffectTag).markRecovered();
+					yield* seedSessionRow({
+						sessionId,
+						title: DEFAULT_TITLE,
+						createdAt: 1000,
+					});
+					yield* (yield* SessionTitleServiceTag).titleFromMessage({
+						sessionId,
+						message: FIRST_MESSAGE,
+					});
+					yield* waitForSessionTitle(sessionId, GENERATED_TITLE);
+				}).pipe(
+					Effect.provide(
+						makeTitleServiceLayer({
+							filename,
+							queryFactory,
+							accounts,
+							configDir: dir,
+						}),
+					),
+				);
+			return Effect.gen(function* () {
+				yield* Effect.sync(() =>
+					saveRelaySettings(
+						{
+							titleGeneration: {
+								account: { _tag: "Id", id: "claude-work" },
+								providerId: "claude",
+								modelId: "sonnet",
+								effort: "high",
+							},
+						},
+						dir,
+					),
+				);
+				yield* generateSessionTitle("selected-account-before-restart");
+				yield* generateSessionTitle("selected-account-after-restart");
+				expect(queryFactory).toHaveBeenCalledTimes(2);
+				for (const [params] of queryFactory.mock.calls) {
+					expect(params.options).toMatchObject({
+						env: { CLAUDE_CONFIG_DIR: "/integration-work-login" },
+						model: "sonnet",
+						effort: "high",
+					});
+				}
+			}).pipe(Effect.ensuring(removeTempDir(dir)));
+		},
+	);
+
 	it.effect(
 		"generates with the directory's selected default Claude account",
 		() => {

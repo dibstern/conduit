@@ -5,6 +5,7 @@ import { DEFAULT_CATEGORY_SET } from "../../../src/lib/contracts/category-set.js
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/message-surfacing.js";
 import { DEFAULT_TERMINAL_KEYS } from "../../../src/lib/contracts/terminal-keys.js";
+import type { TitleGenerationSelection } from "../../../src/lib/contracts/title-generation.js";
 import type { Avatar } from "../../../src/lib/contracts/user-avatar.js";
 import {
 	DEFAULT_WORKTREE_CLEANUP,
@@ -138,6 +139,7 @@ export class RpcMockControl {
 	private familySequence = 0;
 	catalog: MockCatalog = {};
 	terminalKeys = DEFAULT_TERMINAL_KEYS;
+	titleGeneration: TitleGenerationSelection | null = null;
 	avatar: Avatar = {
 		choice: { kind: "initial" },
 		name: "You",
@@ -1106,6 +1108,15 @@ export async function mockWsRpc(
 			return control.avatar;
 		},
 		GetTerminalKeys: () => ({ terminalKeys: control.terminalKeys }),
+		GetTitleGeneration: ({ projectSlug }) => ({
+			projectSlug,
+			selection: control.titleGeneration,
+		}),
+		SetTitleGeneration: ({ projectSlug, selection }) => {
+			control.titleGeneration = selection;
+			control.setProjectSetting({ _tag: "titleGeneration", selection });
+			return { projectSlug, selection };
+		},
 		SetTerminalKeys: ({ terminalKeys }) => {
 			control.setProjectSetting({ _tag: "terminalKeys", terminalKeys });
 			return { terminalKeys };

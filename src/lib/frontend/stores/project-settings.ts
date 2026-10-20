@@ -12,6 +12,7 @@ import { handleClaudeSettingsInfo } from "./claude-settings.svelte.js";
 import {
 	applyDefaultPermissionMode,
 	applyDefaultSessionMode,
+	applyTitleGeneration,
 	handleDefaultModelInfo,
 	handleHarnessDefaults,
 	handleModelList,
@@ -31,6 +32,9 @@ export const applyProjectSetting = (
 			break;
 		case "harnessDefaults":
 			handleHarnessDefaults(setting);
+			break;
+		case "titleGeneration":
+			applyTitleGeneration(setting.selection);
 			break;
 		case "visibility":
 			handleVisibilityInfo(setting);

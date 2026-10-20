@@ -12,6 +12,7 @@ import {
 	type ProviderDriverKind,
 	type ProviderSessionCapabilities,
 } from "../../contracts/provider-instance.js";
+import type { TitleGenerationSelection } from "../../contracts/title-generation.js";
 import {
 	catalogFromProviderList,
 	findCatalogModel,
@@ -185,6 +186,7 @@ const serverDiscovery = $state({
 	defaultVariant: "" as string,
 	defaultsLoaded: false,
 	harnessDefaults: missingHarnessDefaults(),
+	titleGeneration: null as TitleGenerationSelection | null,
 	currentVariant: "" as string,
 	availableVariants: [] as string[],
 	currentContextWindow: "" as string,
@@ -295,7 +297,10 @@ function providersFor(scope = catalogScope()): ProviderInfo[] {
 function agentsFor(scope = catalogScope()) {
 	return agentCatalogs[scope.key] ?? noAgents;
 }
-function draftCatalog(instanceId: string, project = getCurrentSlug() ?? "") {
+export function getModelCatalogForInstance(
+	instanceId: string,
+	project = getCurrentSlug() ?? "",
+) {
 	const driver = instanceState.instances.find(
 		(account) => account.id === instanceId,
 	)?.driver;
@@ -305,6 +310,32 @@ function draftCatalog(instanceId: string, project = getCurrentSlug() ?? "") {
 				? provider.instanceId === instanceId
 				: driverForProvider(provider.id) === driver,
 	);
+}
+
+/** Read an account catalog without changing the composer's selected scope. */
+export async function loadModelCatalog(
+	projectSlug: string,
+	instanceId: string,
+): Promise<void> {
+	const scope = catalogScope(null, instanceId, projectSlug);
+	const issue = ++catalogReadIssue;
+	const response = await rpc("GetModels", { projectSlug, instanceId });
+	const previous = modelsFor(scope);
+	if (issue < previous.filledAtIssue) return;
+	const providers = providersFromGetModelsResponse(response.providers);
+	if (getInstanceTraits(instanceId)?.catalogSource === "discovery") {
+		(accountModelCatalogs[projectSlug] ??= {})[instanceId] = providers;
+	}
+	// A settings catalog read must not apply the account's active composer pick.
+	modelCatalogs[scope.key] = {
+		...previous,
+		filledAtIssue: issue,
+		providers,
+		loaded: true,
+		hiddenModels: response.hiddenModels
+			? [...response.hiddenModels]
+			: previous.hiddenModels,
+	};
 }
 
 /** All callers refresh the currently shown scope; replies retain their issued key. */
@@ -570,7 +601,7 @@ export function getDraftPick(): Immutable<DraftPick> | undefined {
 					effort: draftModel.variant,
 					contextWindow: draftModel.contextWindow,
 				},
-				catalogFromProviderList(draftCatalog(instanceId)),
+				catalogFromProviderList(getModelCatalogForInstance(instanceId)),
 			),
 		)
 	)
@@ -805,6 +836,9 @@ export const discoveryState = {
 	> {
 		return serverDiscovery.harnessDefaults;
 	},
+	get titleGeneration(): TitleGenerationSelection | null {
+		return serverDiscovery.titleGeneration;
+	},
 	get availableVariants(): readonly string[] {
 		if (sessionState.currentId)
 			return getSessionPick(sessionState.currentId)?.variants ?? [];
@@ -917,7 +951,7 @@ export function getActiveModel(
 	const providers = sessionState.currentId
 		? discoveryState.providers
 		: instanceId
-			? draftCatalog(instanceId)
+			? getModelCatalogForInstance(instanceId)
 			: [];
 	return providers
 		.find((provider) => provider.id === providerId)
@@ -1032,13 +1066,16 @@ export function getAvailableInstances(): InstanceOption[] {
 /** Visible provider groups scoped to one instance (the picker's right pane). */
 export function getProviderGroupsForInstance(
 	instanceId: string | null | undefined,
+	projectSlug?: string,
 ): readonly Immutable<ProviderGroup>[] {
 	if (!instanceId) return [];
 	const driver = instanceState.instances.find(
 		(instance) => instance.id === instanceId,
 	)?.driver;
 	if (!driver) return [];
-	const cached = !sessionState.currentId && draftCatalog(instanceId);
+	const cached =
+		(projectSlug !== undefined || !sessionState.currentId) &&
+		getModelCatalogForInstance(instanceId, projectSlug);
 	if (cached) {
 		const groups = cached.map((provider) => ({
 			provider,
@@ -1120,7 +1157,9 @@ function fillDraftDefault(): void {
 	)
 		return;
 	if (defaults.status !== "ok" || !defaults.pick) return;
-	const catalog = catalogFromProviderList(draftCatalog(instanceId));
+	const catalog = catalogFromProviderList(
+		getModelCatalogForInstance(instanceId),
+	);
 	const resolved = resolveTurnSettings(
 		{
 			harness: draftDriver(instanceId),
@@ -1171,7 +1210,7 @@ function setDraftModel(
 		return;
 	const harness = draftDriver(instanceId);
 	const catalog = catalogFromProviderList(
-		draftCatalog(instanceId, target.project),
+		getModelCatalogForInstance(instanceId, target.project),
 	);
 	const entry = findCatalogModel(harness, model, catalog);
 	if (!entry) return;
@@ -1599,6 +1638,12 @@ export function applyHarnessDefaultSet(
 	fillDraftDefault();
 }
 
+export function applyTitleGeneration(
+	selection: TitleGenerationSelection | null,
+): void {
+	serverDiscovery.titleGeneration = selection;
+}
+
 /** Get the available variants for the currently active model. */
 export function getActiveModelVariants(): readonly string[] {
 	if (sessionState.currentId) return discoveryState.availableVariants;
@@ -1912,6 +1957,7 @@ export function clearDiscoveryState(): void {
 	serverDiscovery.defaultVariant = "";
 	serverDiscovery.defaultsLoaded = false;
 	serverDiscovery.harnessDefaults = missingHarnessDefaults();
+	serverDiscovery.titleGeneration = null;
 	serverDiscovery.currentVariant = "";
 	serverDiscovery.availableVariants = [];
 	serverDiscovery.currentContextWindow = "";

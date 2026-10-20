@@ -31,6 +31,7 @@ import type { StoredEvent } from "../../../src/lib/persistence/events.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { ClaudeOneShotQueryFactory } from "../../../src/lib/provider/claude/claude-provider-runtime.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
 	makeClaudeTextGenerationLayer,
 	replayClaudeText,
@@ -323,6 +324,95 @@ describe("session title helpers", () => {
 });
 
 describe("SessionTitleService", () => {
+	it.effect(
+		"reads account, model and effort again for the next title without restarting",
+		() => {
+			const configDir = mkdtempSync(join(tmpdir(), "conduit-title-setting-"));
+			const queryFactory = vi.fn(
+				(_params: Parameters<ClaudeOneShotQueryFactory>[0]) =>
+					replayClaudeText(),
+			);
+			const layer = makeTestLayer({
+				queryFactory,
+				config: makeMockConfig({ configDir }),
+				accounts: makeMockAccountDirectory([
+					{
+						driver: "claude",
+						id: AccountIdSchema.make("claude-personal"),
+						name: "Personal",
+						folder: configuredClaudeConfigDir("/title-personal-login"),
+						usageEligible: true,
+					},
+					{
+						driver: "claude",
+						id: AccountIdSchema.make("claude-work"),
+						name: "Work",
+						folder: configuredClaudeConfigDir("/title-work-login"),
+						usageEligible: true,
+					},
+				]),
+			});
+			return Effect.gen(function* () {
+				const service = yield* SessionTitleServiceTag;
+				yield* seedSessionRow("before-setting");
+				yield* service.titleFromMessage({
+					sessionId: "before-setting",
+					message: "Fix auth",
+				});
+				yield* waitForSessionProjectorToReachLatestRename("before-setting");
+				expect(yield* getSessionTitle("before-setting")).toBe("pong");
+				expect(queryFactory.mock.calls[0]?.[0].options).toMatchObject({
+					env: { CLAUDE_CONFIG_DIR: "/title-personal-login" },
+					model: "opus",
+					thinking: { type: "disabled" },
+				});
+
+				yield* Effect.sync(() =>
+					saveRelaySettings(
+						{
+							titleGeneration: {
+								account: { _tag: "Id", id: "claude-work" },
+								providerId: "claude",
+								modelId: "sonnet",
+								effort: "high",
+							},
+						},
+						configDir,
+					),
+				);
+				yield* seedSessionRow("after-setting");
+				yield* service.titleFromMessage({
+					sessionId: "after-setting",
+					message: "Fix auth",
+				});
+				yield* waitForSessionProjectorToReachLatestRename("after-setting");
+				expect(yield* getSessionTitle("after-setting")).toBe("pong");
+				expect(queryFactory.mock.calls[1]?.[0].options).toMatchObject({
+					env: { CLAUDE_CONFIG_DIR: "/title-work-login" },
+					model: "sonnet",
+					effort: "high",
+				});
+
+				yield* Effect.sync(() =>
+					saveRelaySettings({ titleGeneration: null }, configDir),
+				);
+				yield* seedSessionRow("after-reset");
+				yield* service.titleFromMessage({
+					sessionId: "after-reset",
+					message: "Fix auth",
+				});
+				yield* waitForSessionProjectorToReachLatestRename("after-reset");
+				expect(yield* getSessionTitle("after-reset")).toBe("pong");
+				expect(queryFactory.mock.calls[2]?.[0].options).toMatchObject({
+					env: { CLAUDE_CONFIG_DIR: "/title-personal-login" },
+					model: "opus",
+					thinking: { type: "disabled" },
+				});
+				expect(queryFactory).toHaveBeenCalledTimes(3);
+			}).pipe(Effect.provide(layer), Effect.ensuring(removeTempDir(configDir)));
+		},
+	);
+
 	it.effect(
 		"uses the directory's default account and removes the scratch directory",
 		() => {

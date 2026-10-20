@@ -64,9 +64,12 @@ export const makeRelayStateLive = (
 		makeSessionRegistryStateLive(),
 		Layer.provideMerge(
 			makeSessionTitleServiceLive(),
-			Layer.provideMerge(
-				sessionManagerStateAndServiceLive,
-				makeOverridesStateLive(),
+			Layer.mergeAll(
+				ProjectSettingsLive,
+				Layer.provideMerge(
+					sessionManagerStateAndServiceLive,
+					makeOverridesStateLive(),
+				),
 			),
 		),
 		// Poller state
@@ -77,8 +80,6 @@ export const makeRelayStateLive = (
 		RelayEventBusLive,
 		// Committed-event change signal, shared by daemon relays.
 		sessionEventBusLayer,
-		// Per-relay project-settings change fanout
-		ProjectSettingsLive,
 		// Per-relay alert and composer-draft fanout (live-only subscriptions)
 		AlertsLive,
 		InputDraftsLive,
