@@ -105,7 +105,9 @@ for (const viewport of [
 						.filter(({ tag }) => tag === "MoveSessionWorkspace")
 						.map(({ payload }) => payload),
 				)
-				.toMatchObject([{ projectSlug, sessionId: session.id, path: target }]);
+				.toEqual([
+					{ _tag: "MoveSessionWorkspace", sessionId: session.id, path: target },
+				]);
 			await checkout.click();
 			await expect(mismatch).toBeVisible();
 			// The shell feed clears the mismatch without a session-family update.

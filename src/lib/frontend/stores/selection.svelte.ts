@@ -259,6 +259,7 @@ export function watchSelection(): () => void {
 					attachedOnce = false;
 				previousAttached = attached;
 				if (!connected || route.page !== "chat") return;
+				const routeSessionId = route.sessionId ?? null;
 				const sessionId =
 					current.kind === "placing" || current.kind === "drawn"
 						? current.sessionId
@@ -267,7 +268,11 @@ export function watchSelection(): () => void {
 					(wanted !== null && wanted !== attached) ||
 					(!attachedOnce && attached === null)
 				) {
-					const key = JSON.stringify([wanted, sessionId]);
+					// Learning this session's project must not start another attach.
+					const key = JSON.stringify([
+						routeSessionId ? null : wanted,
+						routeSessionId,
+					]);
 					if (attaching.has(key)) return;
 					attaching.add(key);
 					void rpc("AttachProject", {
@@ -279,11 +284,13 @@ export function watchSelection(): () => void {
 								: {}),
 					})
 						.then(({ projectSlug, sessionSlug }) => {
+							attaching.delete(key);
 							if (!alive) return;
 							// Place only this reply's id; a delete always wins over a late reply.
 							const matches =
-								wantedProject === wanted &&
-								(!sessionId || getCurrentSessionId() === sessionId);
+								getCurrentSessionId() === routeSessionId &&
+								(wantedProject === wanted ||
+									(sessionId !== null && wantedProject === sessionSlug));
 							if (sessionId && placement.get(sessionId) !== "deleted")
 								placement.set(
 									sessionId,
@@ -303,8 +310,8 @@ export function watchSelection(): () => void {
 								if (placement.get(sessionId) !== "deleted")
 									placement.set(sessionId, "missing");
 							} else if (
-								wantedProject === wanted &&
-								(!sessionId || getCurrentSessionId() === sessionId)
+								getCurrentSessionId() === routeSessionId &&
+								(routeSessionId !== null || wantedProject === wanted)
 							)
 								toastFailure("Failed to switch projects")(error);
 						})

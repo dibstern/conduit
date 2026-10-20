@@ -169,6 +169,9 @@ test("cold session navigation reuses attach resolution; warm navigation needs no
 				),
 			)
 			.map((request) => request.tag);
+	const coldOutput = testInfo.outputPath("cold-navigation-requests.json");
+	await writeFile(coldOutput, `${JSON.stringify(cold, null, 2)}\n`);
+	await testInfo.attach("cold-navigation-requests", { path: coldOutput });
 	expect(placement(cold)).toEqual(["AttachProject", "SubscribeSessionDetail"]);
 	expect(
 		cold.find((request) => request.tag === "AttachProject")?.payload,
@@ -268,6 +271,60 @@ test("a cold session link waits for attach placement before scoped reads", async
 		`${JSON.stringify({ beforePlacement, placed: rpc.getRequests(), route: page.url() }, null, 2)}\n`,
 	);
 	await testInfo.attach("cold-session-placement", { path: output });
+});
+
+test("a failed cold attach still reports the failure after the shell reveals its owner", async ({
+	page,
+	harness,
+}, testInfo) => {
+	let rejectAttach!: (error: WsRpcError) => void;
+	const { rpc } = await setup(
+		page,
+		{
+			AttachProject: () =>
+				new Promise<never>((_resolve, reject) => {
+					rejectAttach = reject;
+				}),
+		},
+		[],
+	);
+	const url = `${harness.relayBaseUrl}/s/${seed}`;
+	await page.goto(url);
+	const attach = await rpc.waitForRequest(
+		(request) => request.tag === "AttachProject",
+	);
+	expect(attach.payload).toMatchObject({ sessionId: seed });
+	rpc.setShellRows([
+		{
+			id: seed,
+			title: "Unavailable session",
+			status: "idle",
+			projectSlug: otherProject,
+		},
+	]);
+	await expect(
+		page.locator(`#session-list [data-session-id="${seed}"]`),
+	).toContainText("Unavailable session");
+	rejectAttach(new WsRpcError({ message: "Project is unavailable" }));
+	await expect(
+		page.getByText("Failed to switch projects", { exact: true }),
+	).toBeVisible();
+	await expect(
+		page.getByText("Project is unavailable", { exact: true }),
+	).toBeVisible();
+	await expect(page).toHaveURL(url);
+	expect(
+		rpc.getRequests().filter(({ tag }) => tag === "AttachProject"),
+	).toEqual([attach]);
+	expect(
+		rpc.getRequests().filter(({ tag }) => tag === "SubscribeSessionDetail"),
+	).toEqual([]);
+	const output = testInfo.outputPath("failed-cold-session-attach.json");
+	await writeFile(
+		output,
+		`${JSON.stringify({ requests: rpc.getRequests(), route: page.url() }, null, 2)}\n`,
+	);
+	await testInfo.attach("failed-cold-session-attach", { path: output });
 });
 
 test("an unknown session link goes home with a not-found notice", async ({
@@ -541,17 +598,12 @@ test("a delayed project attach keeps the target session's transcript and files",
 				request.payload["sessionId"] === target,
 		),
 	).toEqual([]);
-	const projectReadsBeforeAttach = rpc
-		.getRequests()
-		.filter((request) => request.tag === "GetProjects").length;
 	finishAttach({ projectSlug: otherProject, sessionSlug: null });
-	await expect
-		.poll(
-			() =>
-				rpc.getRequests().filter((request) => request.tag === "GetProjects")
-					.length,
-		)
-		.toBeGreaterThan(projectReadsBeforeAttach);
+	await rpc.waitForRequest(
+		(request) =>
+			request.tag === "SubscribeSessionDetail" &&
+			request.payload["sessionId"] === target,
+	);
 	if (
 		(await page
 			.getByTestId("views-rail-files")

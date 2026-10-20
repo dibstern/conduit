@@ -102,9 +102,8 @@ test.describe("Claude session effort and context window across a relay restart",
 		await chat.waitForStreamingComplete();
 
 		await effort.click();
-		await page.getByTestId("variant-option-high").click();
+		await page.getByTestId("picker-effort-option-high").click();
 		await expect(effort).toContainText("High");
-		await trigger.click();
 		await page.getByTestId("picker-context-option-200k").click();
 		await page.keyboard.press("Escape");
 		await expect(trigger).toHaveAccessibleName(/context 200k/i);

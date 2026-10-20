@@ -44,16 +44,47 @@ test.describe("Long tool output in a reopened session", () => {
 			}
 		});
 
+		// Since y7eo.6, opening a tool loads its full detail automatically.
+		// Observe the real transcript stream to verify the initial preview.
+		const received: unknown[] = [];
+		page.on("websocket", (socket) => {
+			socket.on("framereceived", ({ payload }) => {
+				const frame = JSON.parse(payload.toString()) as {
+					values?: readonly {
+						_tag?: string;
+						rows?: readonly unknown[];
+						item?: unknown;
+					}[];
+				};
+				for (const value of frame.values ?? []) {
+					if (value._tag === "snapshot") received.push(...(value.rows ?? []));
+					if (value._tag === "upsert") received.push(value.item);
+				}
+			});
+		});
 		await page.goto(sessionUrl);
+		await expect
+			.poll(() => received)
+			.toContainEqual(
+				expect.objectContaining({
+					_tag: "part",
+					part: expect.objectContaining({
+						callID: toolId,
+						state: expect.objectContaining({
+							output: {
+								_tag: "preview",
+								text: output.slice(0, 2_000),
+								fullBytes: Buffer.byteLength(output),
+							},
+						}),
+					}),
+				}),
+			);
 		await openActivity();
 		const tool = page.locator(`.tool-item[data-tool-id="${toolId}"]`);
 		await tool.getByRole("button").first().click();
 		const result = tool.locator(".tool-result");
-		await expect(tool.getByText("Showing 48.8 KB of 128.9 KB")).toBeVisible();
-		expect((await result.textContent())?.length).toBeLessThanOrEqual(50_000);
-
-		await tool.getByRole("button", { name: "Show full output" }).click();
 		await expect.poll(() => result.textContent()).toBe(output);
-		await expect(tool.getByText(/^Showing /)).toHaveCount(0);
+		await expect(tool.locator(".tool-full-detail")).toHaveCount(0);
 	});
 });

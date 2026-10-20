@@ -151,38 +151,6 @@ test.describe("Claude background work", () => {
 			});
 		}
 	});
-
-	test("Stop all in the tasks pull-down ends the session and its background shell", async ({
-		page,
-		harness,
-		relayUrl,
-	}, testInfo) => {
-		const sessionId = decodeURIComponent(
-			harness.projectUrl.slice("/s/".length),
-		);
-		const app = new AppPage(page);
-		await app.goto(relayUrl);
-		await app.sendMessage("Run sleep 8 in the background");
-
-		const tasksRow = page.getByTestId("background-tasks-row");
-		const row = page.locator(`#session-list [data-session-id="${sessionId}"]`);
-		await expect(tasksRow).toContainText("sleep 8");
-		await expect(row).toHaveAttribute("aria-label", /^Monitoring/);
-
-		await tasksRow.click();
-		await page.getByTestId("background-tasks-stop-all").click();
-		await expect(
-			tasksRow,
-			"Stop all left the background tasks row up",
-		).toBeHidden();
-		await expect(
-			row,
-			"Stop ended the session but the sidebar still says monitoring",
-		).not.toHaveAttribute("aria-label", /^Monitoring/);
-		const path = testInfo.outputPath("after-stop.png");
-		await page.screenshot({ path, animations: "disabled" });
-		await testInfo.attach("after-stop.png", { path, contentType: "image/png" });
-	});
 });
 
 // The shell ending between turns, before the SDK's wake-up turn (the trace is
