@@ -49,12 +49,21 @@ export const composerLiveStatusHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert composer elapsed label",
-		match: /^the composer elapsed label reads (Working [0-9]+:[0-9:]+)$/,
+		name: "assert live turn head visibility",
+		match: /^the live turn head is (visible|not visible)$/,
 		run: async ({ world, match }) => {
-			await expect(
-				world.page.getByTestId("composer-status-elapsed"),
-			).toHaveText(match[1] ?? "");
+			await world.page
+				.getByTestId("turn-live-head")
+				.waitFor({ state: match[1] === "visible" ? "visible" : "hidden" });
+		},
+	},
+	{
+		name: "assert live turn elapsed label",
+		match: /^the live turn elapsed label reads (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.getByTestId("turn-live-elapsed")).toHaveText(
+				match[1] ?? "",
+			);
 		},
 	},
 	{
@@ -105,58 +114,90 @@ export const composerLiveStatusHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert composer activity",
-		match: /^the composer activity reads (.+)$/,
-		run: async ({ world, match }) => {
-			await expect(
-				world.page.getByTestId("composer-status-activity"),
-			).toHaveText(`· ${match[1] ?? ""}`);
-		},
-	},
-	{
-		name: "assert composer activity absent",
-		match: /^the composer activity is not visible$/,
+		name: "expand live turn step log",
+		match: /^I expand the live turn step log$/,
 		run: async ({ world }) => {
-			await world.page
-				.getByTestId("composer-status-activity")
-				.waitFor({ state: "hidden" });
+			const toggle = world.page
+				.getByTestId("turn-live-head")
+				.locator(".turn-activity-toggle");
+			// A tap does not scroll the transcript; Playwright's actionability
+			// scroll would detach the reader from the live bottom.
+			if ((await toggle.getAttribute("aria-expanded")) !== "true")
+				await toggle.evaluate((el: HTMLElement) => el.click());
 		},
 	},
 	{
-		name: "assert composer activity truncation",
-		match: /^the composer activity is truncated to one line$/,
-		run: async ({ world }) => {
-			await world.page.waitForFunction(() => {
-				const activity = document.querySelector(
-					'[data-testid="composer-status-activity"]',
-				);
-				if (!(activity instanceof HTMLElement)) return false;
-				const style = getComputedStyle(activity);
-				return (
-					style.whiteSpace === "nowrap" &&
-					style.textOverflow === "ellipsis" &&
-					style.overflowX === "hidden" &&
-					activity.scrollWidth > activity.clientWidth &&
-					activity.getBoundingClientRect().height <=
-						Number.parseFloat(style.lineHeight) + 1
-				);
-			});
-		},
-	},
-	{
-		name: "assert composer live control visibility",
-		match: /^the composer live control is (visible|not visible)$/,
+		name: "assert active reasoning in live step log",
+		match: /^the live turn step log shows active reasoning (.+)$/,
 		run: async ({ world, match }) => {
-			await world.page.getByTestId("composer-status-live").waitFor({
+			const reasoning = world.page
+				.getByTestId("turn-live-activity")
+				.locator(".thinking-item:not(.done)");
+			await expect(reasoning).toBeVisible();
+			await expect(reasoning).toContainText(match[1] ?? "");
+		},
+	},
+	{
+		name: "assert live turn step log activity",
+		match: /^the live turn step log shows (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.locator(".turn-activity").last()).toContainText(
+				match[1] ?? "",
+			);
+		},
+	},
+	{
+		name: "assert live turn running line",
+		match: /^the live turn running line is visible$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("turn-running")).toBeVisible();
+		},
+	},
+	{
+		name: "assert Jump to live visibility",
+		match: /^the Jump to live control is (visible|not visible)$/,
+		run: async ({ world, match }) => {
+			await world.page.getByTestId("jump-to-live").waitFor({
 				state: match[1] === "visible" ? "visible" : "hidden",
 			});
 		},
 	},
 	{
-		name: "follow latest composer output",
-		match: /^I tap the composer live control$/,
+		name: "follow live output",
+		match: /^I tap the Jump to live control$/,
 		run: async ({ world }) => {
-			await world.page.getByTestId("composer-status-live").click();
+			await world.page.getByTestId("jump-to-live").click();
+		},
+	},
+	{
+		name: "stream a long live turn",
+		match: /^the mock relay streams a long composer turn$/,
+		run: async ({ world }) => {
+			requireRelayControl(world.page).sendMessage({
+				type: "delta",
+				text:
+					Array.from(
+						{ length: 48 },
+						(_, i) => `Live output paragraph ${i + 1}.`,
+					).join("\n\n") + "\n\n",
+				messageId: "composer-status-output",
+			});
+			await expect
+				.poll(async () => {
+					const output = await world.page
+						.locator("#messages .msg-assistant")
+						.last()
+						.boundingBox();
+					return output?.height ?? 0;
+				})
+				.toBeGreaterThan((world.page.viewportSize()?.height ?? 0) + 800);
+		},
+	},
+	{
+		name: "assert live turn intersects viewport",
+		match: /^the live turn still intersects the viewport$/,
+		run: async ({ world }) => {
+			await expect(world.page.locator("[data-live-turn]")).toBeInViewport();
 		},
 	},
 	{
@@ -178,7 +219,10 @@ export const composerLiveStatusHandlers: StepHandler[] = [
 		match: /^the latest composer output is visible$/,
 		run: async ({ world }) => {
 			await expect(
-				world.page.locator("#messages .msg-assistant").last(),
+				world.page
+					.locator("#messages .msg-assistant")
+					.last()
+					.locator(".md-content > :last-child"),
 			).toBeInViewport();
 		},
 	},

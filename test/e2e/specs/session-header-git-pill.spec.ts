@@ -1,5 +1,6 @@
 import type { Page, TestInfo } from "@playwright/test";
 import { WorkspaceMoveError } from "../../../src/lib/contracts/session-workspace.js";
+import { inspectTouchTarget } from "../../../src/lib/frontend/stories/touch-target.js";
 import type {
 	SessionGit,
 	SessionWorkspace,
@@ -175,6 +176,9 @@ async function openCheckout(
 	});
 	rpc.setDaemonList("SubscribeInstances", instances);
 	await page.goto(`${relayBaseUrl}/s/header-session`);
+	// Phones keep the checkout in the Composer sheet.
+	if ((page.viewportSize()?.width ?? 0) < 768)
+		await page.getByTestId("composer-words-sheet-trigger").tap();
 	const trigger = page.getByTestId("composer-checkout");
 	await expect(trigger).toBeVisible();
 	const bar = page.getByTestId("session-bar");
@@ -205,11 +209,15 @@ for (const mode of [
 				git: { branch: "main", dirty: true, ahead: 0, behind: 0 },
 			});
 			await expect(trigger).toHaveAttribute("title", "conduit / main");
-			await expect(trigger.locator('[data-part="project"]')).toHaveText(
-				"conduit",
-			);
+			// Desktop Words names the branch alone; the phone sheet row keeps the project.
+			if (mode.hasTouch) {
+				await expect(trigger.locator('[data-part="project"]')).toHaveText(
+					"conduit",
+				);
+				await expect(trigger).toContainText("/");
+			} else
+				await expect(trigger.locator('[data-part="project"]')).toHaveCount(0);
 			await expect(trigger.locator('[data-part="branch"]')).toHaveText("main");
-			await expect(trigger).toContainText("/");
 			await expect(trigger.locator('[data-part="dirty"]')).toBeVisible();
 			await expect(trigger.locator('[data-part="dirty"]')).toHaveText(
 				"Uncommitted changes",
@@ -220,7 +228,7 @@ for (const mode of [
 			const dot = await trigger.locator('[data-part="dirty"]').boundingBox();
 			expect(dot?.width).toBe(6);
 			expect(dot?.height).toBe(6);
-			// It badges the icon, so a truncating branch never pushes it out.
+			// It follows the branch, and a truncating branch never pushes it out.
 			const bounds = await trigger.boundingBox();
 			expect(dot?.x).toBeGreaterThanOrEqual(bounds?.x ?? 0);
 			expect((dot?.x ?? 0) + 6).toBeLessThanOrEqual(
@@ -353,7 +361,7 @@ for (const mode of [
 					`${folder} / ${stage.git.branch}`,
 				);
 				await expect(trigger.locator('[data-part="project"]')).toHaveText(
-					folder ?? "",
+					mode.hasTouch ? (folder ?? "") : [],
 				);
 				await expect(trigger.locator('[data-part="branch"]')).toHaveText(
 					stage.git.branch ?? "",
@@ -419,7 +427,10 @@ for (const mode of [
 			const trigger = await openCheckout(page, harness.relayBaseUrl, {
 				directory: "/workspace/ai-notes",
 			});
-			await expect(trigger).toHaveText("ai-notes");
+			// The phone sheet row leads with its "Checkout" label.
+			await expect(trigger).toHaveText(
+				mode.hasTouch ? /^\s*Checkout\s+ai-notes\s*$/ : "ai-notes",
+			);
 			await expect(trigger.locator('[data-icon="folder"] svg')).toBeVisible();
 			await expect(trigger.locator('[data-part="branch"]')).toHaveCount(0);
 			await expect(
@@ -489,7 +500,7 @@ for (const mode of [
 				harness,
 			}) => {
 				const trigger = await openCheckout(page, harness.relayBaseUrl, {
-					provider: supportsWorktree === true ? "claude" : "opencode",
+					provider: supportsWorktree === false ? "opencode" : "claude",
 					supportsWorktree,
 					git: { branch: "main" },
 				});
@@ -569,8 +580,10 @@ for (const mode of [
 			]) {
 				await page.setViewportSize(viewport);
 				const project = trigger.locator('[data-part="project"]');
-				await expect(project).toBeVisible();
-				expect((await project.boundingBox())?.width).toBeGreaterThan(10);
+				if (mode.hasTouch) {
+					await expect(project).toBeVisible();
+					expect((await project.boundingBox())?.width).toBeGreaterThan(10);
+				} else await expect(project).toHaveCount(0);
 				const branch = trigger.locator('[data-part="branch"]');
 				await expect(branch).toBeVisible();
 				expect((await branch.boundingBox())?.width).toBeGreaterThan(10);
@@ -584,7 +597,7 @@ for (const mode of [
 				expect(checkoutBox.x + checkoutBox.width).toBeLessThanOrEqual(
 					composerBox.x + composerBox.width,
 				);
-				for (const part of ["project", "branch"]) {
+				for (const part of mode.hasTouch ? ["project", "branch"] : ["branch"]) {
 					const height = await trigger
 						.locator(`[data-part="${part}"]`)
 						.evaluate((element) => ({
@@ -698,6 +711,8 @@ for (const mode of [
 			expect(layout.branchWidth).toBeGreaterThan(10);
 			expect(layout.contained).toBe(true);
 			if (mode.hasTouch) {
+				await page.keyboard.press("Escape");
+				await expect(trigger).toBeHidden();
 				const back = page.getByTestId("session-bar-back");
 				await expect(back).toHaveAccessibleName("Sessions");
 				const backBox = await back.boundingBox();
@@ -712,13 +727,18 @@ for (const mode of [
 				expect(moreBox).not.toBeNull();
 				if (!backBox || !groupBox || !moreBox)
 					throw new Error("Header control missing");
-				expect(backBox.width).toBeGreaterThanOrEqual(44);
-				expect(backBox.height).toBeGreaterThanOrEqual(44);
+				// Final's phone header uses a compact pill with a larger touch area
+				// (4e611586, conduit-test-aoqb.5).
+				const target = await back.evaluate(inspectTouchTarget, 44);
+				expect(target.width).toBeGreaterThanOrEqual(44);
+				expect(target.height).toBeGreaterThanOrEqual(44);
+				expect(target.missing, JSON.stringify(target.failures)).toBe(0);
 				expect(backBox.x + backBox.width).toBeLessThanOrEqual(groupBox.x);
 				expect(groupBox.x + groupBox.width).toBeLessThanOrEqual(moreBox.x);
 				expect(moreBox.x + moreBox.width).toBeLessThanOrEqual(
 					mode.viewport.width,
 				);
+				await page.getByTestId("composer-words-sheet-trigger").tap();
 			}
 			await capture(page, testInfo, `${mode.name}-long-operation`);
 		});
@@ -749,12 +769,18 @@ for (const mode of [
 			});
 			const group = page.locator(".session-bar-segments");
 			await expect(group.locator(":scope > *")).toHaveCount(2);
-			const borders = await group
+			// Phone segments divide with a border; the desktop capsule with a 1px rule.
+			const dividers = await group
 				.locator(":scope > *")
 				.evaluateAll((segments) =>
-					segments.map((segment) => getComputedStyle(segment).borderLeftWidth),
+					segments.map((segment) => {
+						const rule = getComputedStyle(segment, "::after");
+						return rule.content === "none"
+							? getComputedStyle(segment).borderLeftWidth
+							: rule.width;
+					}),
 				);
-			expect(borders).toEqual(["0px", "1px"]);
+			expect(dividers).toEqual(["0px", "1px"]);
 			const pulse = page.getByTestId("session-skills-chip-pulse");
 			await expect(pulse).toBeVisible();
 			const clipping = await pulse.evaluate((element) => {
@@ -782,6 +808,9 @@ for (const mode of [
 					git: { branch: "main" },
 					viewActivity: true,
 				});
+				// Close the Composer sheet openCheckout raised; it holds the page.
+				await page.keyboard.press("Escape");
+				await expect(page.getByTestId("composer-checkout")).toHaveCount(0);
 				await expect(page.getByTestId("session-bar-views-button")).toHaveCount(
 					0,
 				);
@@ -793,7 +822,7 @@ for (const mode of [
 				await overflow.tap();
 				const sheet = page.getByTestId("session-bar-island-menu");
 				await expect(sheet).toBeVisible();
-				await expect(sheet.getByText("Views", { exact: true })).toBeVisible();
+				await expect(sheet.getByTestId("session-sheet-header")).toBeVisible();
 				for (const view of ["chat", "terminal", "diff", "files"])
 					await expect(
 						sheet.getByTestId(`overflow-view-${view}`),

@@ -7,7 +7,9 @@ import {
 	handleModelList,
 	selectInstance,
 } from "../../stores/discovery.svelte.js";
+import { instanceState } from "../../stores/instance.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
+import { mockClaudeAccount, mockOpenCodeAccount } from "../../stories/mocks.js";
 import { openSessionForSetup } from "../../stories/session-setup.js";
 import AttachMenu from "./AttachMenu.svelte";
 
@@ -20,6 +22,7 @@ function seedModel(provider: "claude" | "opencode"): void {
 			models: [{ id: "story-model", name: "Story model", provider }],
 		},
 	];
+	instanceState.instances = [mockClaudeAccount, mockOpenCodeAccount];
 	handleModelList({ providers });
 	selectInstance(provider);
 	applyGetModelsResponse({
@@ -37,18 +40,21 @@ const meta = {
 	parameters: { layout: "centered" },
 	beforeEach: () => {
 		const previousSession = sessionState.currentId;
+		const previousInstances = instanceState.instances;
 		clearDiscoveryState();
 		openSessionForSetup(null);
 		seedModel("opencode");
 		return () => {
 			clearDiscoveryState();
 			openSessionForSetup(previousSession);
+			instanceState.instances = previousInstances;
 		};
 	},
 	args: {
 		open: false,
 		onCamera: fn(),
 		onPhotos: fn(),
+		onFiles: fn(),
 		onSetGoal: fn(),
 	},
 } satisfies Meta<typeof AttachMenu>;

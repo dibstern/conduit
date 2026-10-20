@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { destroyAll, handlePtyOutput } from "../../stores/terminal.svelte.js";
 import { mockTerminalOutput } from "../../stories/mocks.js";
+import { createTerminalKeys } from "../../utils/terminal-keys.svelte.js";
 import TerminalTab from "./TerminalTab.svelte";
 
 const PTY_ID = "pty-storybook-001";
@@ -13,6 +14,7 @@ const meta = {
 	args: {
 		ptyId: PTY_ID,
 		active: true,
+		keys: createTerminalKeys({ openFind: () => {} }),
 	},
 	beforeEach: () => {
 		destroyAll();

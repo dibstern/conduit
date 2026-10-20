@@ -874,7 +874,9 @@ describe("shared-store relay project scope", () => {
 							Effect.sync(() => {
 								dispatched.push(input.sessionId);
 							}),
-						interruptTurn: () => Effect.void,
+						turnFences: () => ({ stopping: false, switching: false }),
+						fenceLifts: Effect.succeed(Stream.never),
+						beginStop: () => Effect.succeed(Effect.void),
 					}),
 					Effect.provideService(AccountDirectory, directory),
 					Effect.provideService(OpenCodeAPITag, makeMockOpenCodeAPI()),

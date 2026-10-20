@@ -61,6 +61,7 @@ export const dragToDismiss: Action<HTMLElement, DragToDismissOptions> = (
 	let lastTime = 0;
 	let velocity = 0;
 	let dismissTimer: ReturnType<typeof setTimeout> | undefined;
+	let scrollTargets: HTMLElement[] = [];
 	const dialog = node.closest("dialog");
 
 	const dismissOffset = () => options.dismissOffset?.() ?? node.offsetHeight;
@@ -80,6 +81,13 @@ export const dragToDismiss: Action<HTMLElement, DragToDismissOptions> = (
 			dismissTimer === undefined;
 		dragging = false;
 		if (!touch) return;
+		// SheetChrome scrolls its body, while the drag action stays on the shell.
+		scrollTargets = event
+			.composedPath()
+			.filter(
+				(target): target is HTMLElement =>
+					target instanceof HTMLElement && node.contains(target),
+			);
 		startY = lastY = touch.clientY;
 		lastTime = event.timeStamp;
 		velocity = 0;
@@ -92,7 +100,7 @@ export const dragToDismiss: Action<HTMLElement, DragToDismissOptions> = (
 		if (!dragging) {
 			if (offset === 0) return;
 			// The first movement decides: up, or down inside scrolled content, is a scroll.
-			if (offset < 0 || node.scrollTop > 0) {
+			if (offset < 0 || scrollTargets.some((target) => target.scrollTop > 0)) {
 				tracking = false;
 				return;
 			}

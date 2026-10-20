@@ -3,6 +3,7 @@
 <!-- Preserves element IDs and class names for E2E test compatibility. -->
 
 <script lang="ts">
+	import { loadMessageSurfacing } from "../../stores/message-surfacing.svelte.js";
 	import { onDestroy, onMount, tick, untrack } from "svelte";
 	import { Effect } from "effect";
 	import { disposeRuntime, runTransportEffect } from "../../transport/runtime.js";
@@ -40,6 +41,8 @@
 	} from "../../stores/ws-notifications.js";
 	import { onProjectAttached } from "../../stores/ws-listeners.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
+	import { avatarState, loadAvatar } from "../../stores/avatar.svelte.js";
+	import AvatarFirstRun from "../overlays/AvatarFirstRun.svelte";
 	import { attachedProjectState, getCurrentRoute, getCurrentSlug, getCurrentSearchParams, routerState } from "../../stores/router.svelte.js";
 	import { clearMessages, localSendsIn } from "../../stores/chat.svelte.js";
 	import { terminalState, destroyAll, viewPtys } from "../../stores/terminal.svelte.js";
@@ -459,7 +462,10 @@
 	// The version is daemon-wide, so it follows the connection, not the project:
 	// a reconnect after a restart can be a new build.
 	$effect(() => {
-		if (connected) void fetchCurrentVersion();
+		if (connected) { void fetchCurrentVersion(); void loadMessageSurfacing(); }
+	});
+	$effect(() => {
+		if (connected) untrack(() => { void loadAvatar(); });
 	});
 
 	// iOS fires pagehide every time a standalone PWA is backgrounded, not only
@@ -590,6 +596,8 @@
 	});
 </script>
 
+<AvatarFirstRun open={connected && avatarState.loaded && avatarState.current.choice === null} />
+
 <div id="layout" class={layoutClass}>
 	<!--
 		iOS 26 paints a progressive blur under the status bar unless WebKit finds an
@@ -633,13 +641,14 @@
 		style={vvHeight ? `height: ${vvHeight}px;` : ""}
 	>
 		<div id="session-chrome" {@attach measureChrome}>
+			{#if !phoneListScreen && !sessionViewState.compact}<Banners presentation="session-header" />{/if}
 			<!-- The list screen has its own bar in Sidebar; keep one session bar
 			     mounted across breakpoint changes so its state follows the viewport. -->
 			{#if !phoneListScreen}<SessionBar />{/if}
 
 			<!-- Banners (update available, skip permissions, etc.). The phone list
 			     screen hides #app, so Sidebar shows them there instead. -->
-			{#if !phoneListScreen}<Banners />{/if}
+			{#if !phoneListScreen && sessionViewState.compact}<Banners />{/if}
 
 			<!-- Todo Sticky Overlay -->
 			{#if todoEverOpened}
@@ -663,7 +672,7 @@
 					<div class="flex flex-col flex-1 min-h-0" class:invisible={mobileMaximized} inert={phoneView === "files" || mobileMaximized} {@attach trackSeen(sessionState.currentId)}>
 						<MessageList {topClearance} />
 						{#if !sessionState.currentId && localSendsIn(null).length === 0}
-							<div class="pointer-events-none absolute inset-x-0 top-[28%] flex flex-col items-center gap-2.5 px-6 text-center font-brand" data-testid="draft-empty">
+							<div class="pointer-events-none absolute inset-x-0 top-[28%] flex flex-col items-center gap-2.5 px-6 text-center font-sans" data-testid="draft-empty">
 								{#if draftSlug}<ProjectSquare large label={projectDisplayName(draftSlug)} accent={projectAccent(draftSlug)} />{/if}
 								<b class="text-[16px] font-semibold text-text">What should happen{draftSlug ? ` in ${projectDisplayName(draftSlug)}` : ""}?</b>
 								<span class="text-[13px] text-text-dimmer">Nothing is created until you send.</span>

@@ -288,7 +288,13 @@ const makeClaudeCapabilitiesServiceWithCache = (
 										expiresAt: probedAt + ttlMs,
 									}),
 								);
-								if (cacheDir !== undefined && file !== undefined) {
+								// An empty catalogue means the probe found nothing; keep the last
+								// one, which is what the next start serves while it refreshes.
+								if (
+									cacheDir !== undefined &&
+									file !== undefined &&
+									value.models.length > 0
+								) {
 									yield* Effect.tryPromise(async () => {
 										await mkdir(cacheDir, { recursive: true });
 										const temp = `${file}.${process.pid}.${randomUUID()}.tmp`;

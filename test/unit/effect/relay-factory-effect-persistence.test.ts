@@ -245,6 +245,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				expect(daemonSessions).toEqual({
 					sessions: [],
 					availability: [{ projectSlug: "effect-project", available: true }],
+					settledCounts: [{ projectSlug: "effect-project", count: 0 }],
 					hasMore: false,
 					nextCursor: null,
 				});

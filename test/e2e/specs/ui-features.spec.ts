@@ -114,6 +114,5 @@ test.describe("Todo Overlay", () => {
 		await app.goto(relayUrl);
 
 		await expect(app.todoSticky).toHaveCount(0);
-		await expect(app.todoSticky).toBeHidden();
 	});
 });

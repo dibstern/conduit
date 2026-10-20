@@ -1,10 +1,12 @@
 import type { resolveSettings } from "@anthropic-ai/claude-agent-sdk";
 import { Effect } from "effect";
+import type { ClaudeOneShotQueryFactory } from "../../domain/daemon/Services/claude-one-shot.js";
 import type { ClaudeSessionRunnerDeps } from "./claude-provider-runtime.js";
 
 interface ClaudeSdkTestModule {
 	readonly claudeSdk: {
 		readonly query: NonNullable<ClaudeSessionRunnerDeps["queryFactory"]>;
+		readonly titleQuery?: ClaudeOneShotQueryFactory;
 		readonly fork?: ClaudeSessionRunnerDeps["sessionForkSdk"];
 	};
 	readonly claudeSubagentSdk?: ClaudeSessionRunnerDeps["subagentSdk"];

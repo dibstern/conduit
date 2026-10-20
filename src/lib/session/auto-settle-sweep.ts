@@ -4,7 +4,7 @@ import type { SqlError } from "effect/sql/SqlError";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import {
 	type AutoSettleFacts,
-	shouldSettleIdleSession,
+	getAutoSettleOutlook,
 } from "./auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "./auto-settle-reader.js";
 
@@ -29,7 +29,7 @@ export const settleIdleSessions = <SettleError>(
 	Effect.gen(function* () {
 		const { projectId } = yield* PersistenceProjectTag;
 		const decide = (sessionId: string, facts: AutoSettleFacts) =>
-			shouldSettleIdleSession(
+			getAutoSettleOutlook(
 				{
 					...facts,
 					hasViewer: ports.hasViewer(sessionId),
@@ -37,7 +37,7 @@ export const settleIdleSessions = <SettleError>(
 				},
 				now,
 				idleWindowMs,
-			);
+			).kind === "due";
 		const candidates = [
 			...(yield* readPersistedAutoSettleFacts(
 				projectId,

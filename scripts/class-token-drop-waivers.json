@@ -1,4 +1,5 @@
 {
+	"src/lib/frontend/components/session/DraftItem.svelte :: grid": "The Final SessionRow owns the draft link grid; the outer container positions the discard button over the time so the link fills the tray.",
 	"src/lib/frontend/components/session/DraftItem.svelte :: bg-bg-alt,gap-1.5,group-hover:bg-text/5,md:min-h-[46px],min-h-[52px],pointer-fine:right-[5px],text-base,text-sm,text-xs": "conduit-test-9ra5.9 matches the draft row to mockup (2)(a) exactly: mockup px font sizes and 1.4 line-height (48px row, still above the 44px touch floor), sidebar hover fill like session rows, 7px project dot instead of the initials chip, and the trash at the mockup's 6px inset.",
 	"src/lib/frontend/components/session/SessionListRows.svelte :: bg-bg-surface,gap-1.5,my-1,py-1.5,tracking-normal": "conduit-test-9ra5.9 matches the drafts tray to mockup (2)(a): raised tray fill, 8px/2px tray margins, 6px/8px header padding, literal 6px header gap (gap-1.5 renders 4.5px at the 12px root), title-case header with no tracking override.",
 	"src/lib/frontend/components/session/DraftItem.svelte :: grid-cols-[16px_minmax(0,1fr)]": "conduit-test-9ra5.8: the draft row grid gains a third (time) column to match tray design (a); waived alone because the token contains a comma.",
@@ -46,11 +47,7 @@
 	"src/lib/frontend/components/model/ModelVariant.svelte :: opacity-50": "The approved effort control removes the dimmed dropdown chevron. Pending opacity remains owned by MicroLabelButton.",
 	"src/lib/frontend/components/model/ModelVariant.svelte :: border-border,border-t,mt-1,pb-1,pt-1,px-3,text-text-dimmer": "The approved effort menu contains Default and the described levels, without the old Ctrl+T footer. Its divider, footer spacing and dimmed text are intentionally removed; Ctrl+T remains in the keyboard handler and button title.",
 	"src/lib/frontend/components/input/InputArea.svelte :: animate-bounce-bar,bg-bg-alt,flex-1,gap-2,h-[3px],h-full,min-w-6": "The bounce-bar indicator is intentionally replaced by ComposerStatusHeader inside the composer box. Its track, spacer and animation are removed.",
-	"src/lib/frontend/components/input/InputArea.svelte :: bg-accent,rounded-full": {
-		"movedTo": "src/lib/frontend/components/input/ComposerStatusHeader.svelte",
-		"requires": "<ComposerStatusHeader",
-		"reason": "The processing indicator's accent and round shape now belong to the status header's pulse dot."
-	},
+	"src/lib/frontend/components/input/InputArea.svelte :: bg-accent,rounded-full": "conduit-test-aoqb.2: Only ComposerStatusHeader and its exclusive bindings/margins are removed. TurnActivity and TranscriptJump carry live status and navigation; the rest of the composer is unchanged.",
 	"src/lib/frontend/components/input/InputArea.svelte :: justify-between": "W2 moves the field, leading button, controls and send into TwoRowComposerLayout. Its controls slot uses margin-left:auto to align the second row, replacing the bottom row's justify-between.",
 	"src/lib/domain/relay/Services/agent-service.ts :: function": "Not a class: the typeof guard on an optional engine lookup. The orchestration engine is now required, so the guard is gone.",
 	"src/lib/domain/relay/Services/provider-turn-dispatch.ts :: ProviderRuntimeIngestion,output:,required": "Not classes: words from ProviderRuntimeIngestionRequired's message. Ingestion is now a required service, so that error no longer exists.",
@@ -184,11 +181,7 @@
 		"requires": "<MenuSeparator />",
 		"reason": "The phone sheet now uses Menu's separator, which carries the same three divider classes."
 	},
-	"src/lib/frontend/components/layout/SessionBar.svelte :: w-[13px]": {
-		"movedTo": "src/lib/frontend/components/ui/MenuCheckboxItem.svelte",
-		"requires": "<MenuCheckboxItem",
-		"reason": "The checkbox primitive owns the fixed-width leading check slot."
-	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: w-[13px]": "conduit-test-aoqb.4: AutoSettleRow replaces the plain checkbox and its empty check spacer with SwitchRow's icon, switch and server outlook.",
 	"src/lib/frontend/components/session/SessionContextMenu.svelte :: w-[13px]": {
 		"movedTo": "src/lib/frontend/components/session/SessionVerbItems.svelte",
 		"requires": "<SessionVerbItems",
@@ -344,22 +337,10 @@
 	"src/lib/frontend/components/input/InputArea.svelte :: h-8,min-h-6,w-8": "conduit-test-3oqa: send and stop become literal 32px squares (root font is 12px, so h-8/w-8 rendered 24px) and the field floor is 32px to centre the placeholder on the controls row.",
 	"src/lib/frontend/components/model/AgentSelector.svelte :: agent-dropdown-panel,flex-1,font-bold,font-brand,font-medium,font-semibold,gap-[2px],h-9,max-w-[160px],max-w-[calc(100vw-16px)],min-w-0,ml-auto,opacity-50,pb-1.5,pt-1,px-2,px-3.5,py-1.5,py-4,rounded-panel,text-accent,text-center,text-ellipsis,text-sm,text-text-dimmer,text-xs,tracking-[0.5px],uppercase,w-[12px],whitespace-nowrap": "conduit-test-3oqa: the final composer design moves agent choice into the model picker's Agent row, so the standalone AgentSelector component is deleted.",
 	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: duration-150,font-medium,h-9,hidden,hover:bg-bg-alt,md:inline,px-2": "conduit-test-3oqa: the trigger follows the final design, a 32px tag (logo plus short model tag) on phones and a name chip with context and chevron on desktop, replacing the old 36px pill with a desktop-only label.",
-	"src/lib/frontend/components/layout/SessionBar.svelte :: font-medium,h-[22px],px-[8px],rounded-none": {
-		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
-		"reason": "conduit-test-fnrs cleanup: the session header's segmented cells (skills | checkout | Settle) share one Button size=\"segment\" recipe instead of three copies of the same 22px, square-cornered, 10px geometry.",
-		"requires": "size=\"segment\""
-	},
-	"src/lib/frontend/components/session/GitIdentity.svelte :: font-medium,gap-[5px],h-[22px],rounded-none": {
-		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
-		"reason": "conduit-test-fnrs cleanup: the session header's segmented cells (skills | checkout | Settle) share one Button size=\"segment\" recipe instead of three copies of the same 22px, square-cornered, 10px geometry.",
-		"requires": "size=\"segment\""
-	},
-	"src/lib/frontend/components/session/SessionSkillsChip.svelte :: gap-[5px],h-[22px],px-[8px],rounded-none,text-[10px]": {
-		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
-		"reason": "conduit-test-fnrs cleanup: the session header's segmented cells (skills | checkout | Settle) share one Button size=\"segment\" recipe instead of three copies of the same 22px, square-cornered, 10px geometry.",
-		"requires": "size=\"segment\""
-	},
-	"src/lib/frontend/components/session/SessionSkillsChip.svelte :: segmented": "Not a class: the dead `segmented` prop, which every call site passed as true. Its square-cornered geometry now comes from Button size=\"segment\".",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: font-medium,h-[22px],px-[8px],rounded-none": "conduit-test-aoqb.5 review: the Final capsule replaces the old 22px, square-cornered session-header cells; their unused shared recipe is removed.",
+	"src/lib/frontend/components/session/GitIdentity.svelte :: font-medium,gap-[5px],h-[22px],rounded-none": "conduit-test-aoqb.5 review: the Final capsule replaces the old 22px, square-cornered session-header cells; their unused shared recipe is removed.",
+	"src/lib/frontend/components/session/SessionSkillsChip.svelte :: gap-[5px],h-[22px],px-[8px],rounded-none,text-[10px]": "conduit-test-aoqb.5 review: the Final capsule replaces the old 22px, square-cornered session-header cells; their unused shared recipe is removed.",
+	"src/lib/frontend/components/session/SessionSkillsChip.svelte :: segmented": "Not a class: the removed segmented prop. The Final header now supplies capsule presentation; the old square-cornered recipe has no consumers and is removed in conduit-test-aoqb.5.",
 	"src/lib/frontend/components/chat/UserMessage.svelte :: items-center,mt-2,queued-shimmer,text-text-muted": "conduit-test-jyr9.5 deletes the queued-send shimmer label under a user message. Queued sends now wait in the pending-input tray above the composer (PendingInputTray.svelte), so the transcript never shows an unplaced message and the label, its layout and its animation go.",
 	"src/lib/frontend/components/layout/Sidebar.svelte :: left-1,min-w-[240px],mt-0.5,right-1,top-full,z-[var(--z-dropdown)]": "conduit-test-usg5.11 retires the old projects panel: the scope pill menu plus ProjectDialog is the only way to manage projects. These positioned the Projects… panel surface under the sidebar header; the surface and its route are deleted.",
 	"src/lib/frontend/components/project/DirectoryAutocomplete.stories.ts :: bg-bg-alt,rounded-lg,z-[var(--z-dropdown)],z-[var(--z-popover)]": "conduit-test-usg5.11 retires the old projects panel: the scope pill menu plus ProjectDialog is the only way to manage projects. The stories probed the deleted directory autocomplete; ProjectDialog's folder picker has its own stories.",
@@ -440,5 +421,579 @@
 	"src/lib/frontend/components/ui/SettingsRow.svelte :: gap-3,gap-x-3": "conduit-test-96d9 A: settings rows use the mockup's literal 12px gaps (rem utilities render at 0.75x on the 12px root).",
 	"src/lib/frontend/components/ui/segmented-styles.ts :: bg-border-chip,px-[7px],py-[2px],rounded-[8px],text-[10.5px]": "conduit-test-96d9 D: the `compact` segmented variant is deleted; its last users (Usage's warning and forecast switches) now wear `joined` like the rest of Settings.",
 	"src/lib/frontend/components/ui/field-styles.ts :: h-9,rounded-md": "conduit-test-96d9 G/H: bordered fields follow the mockup's `.inp`/`.sel`: 7px radius and min-height literal px sizes so consumer heights and touch targets win without a collision.",
-	"src/lib/frontend/components/chat/MessageList.svelte :: left-1/2,translate-x-1/2": "The jump-to-latest button moved onto a zero-height sticky rail (so showing or hiding it never changes the scroll range); the rail's justify-center now centres it, so the button's own left-1/2 -translate-x-1/2 centring is gone."
+	"src/lib/frontend/components/chat/MessageList.svelte :: left-1/2,translate-x-1/2": "The jump-to-latest button moved onto a zero-height sticky rail (so showing or hiding it never changes the scroll range); the rail's justify-center now centres it, so the button's own left-1/2 -translate-x-1/2 centring is gone.",
+	"src/lib/frontend/components/ui/Tile.svelte :: text-text-dimmer": "conduit-test-aoqb.4: the tile sub-line lifts to text-muted; text-dimmer on the chip fill measured 2.52:1 over the dark popover, below even the quiet tier's 3:1.",
+	"src/lib/frontend/components/ui/button-recipes.ts :: bg-error/22": "conduit-test-aoqb.4: danger-soft's tint drops to bg-error/12, the lightest that keeps its error label at 4.5:1 on a dark popover and in the light theme (theme-contrast.test.ts).",
+	"src/lib/frontend/components/ui/button-recipes.ts :: hover:bg-error/30": "conduit-test-aoqb.4: danger-soft's hover tint drops to bg-error/20 to stay one step above the lowered /12 rest tint.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: bg-[rgba(var(--overlay-rgb),0.35)]": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "variant={sessionViewState.compact ? \"scrim\" : \"scrim-clear\"}",
+		"reason": "conduit-test-aoqb.4 fix: Button owns the phone scrim fill; desktop keeps a clear dismissal target."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: data-[state,open]:text-accent": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "variant=\"menu-trigger\"",
+		"reason": "conduit-test-aoqb.4 fix: Button's menu-trigger variant owns the open state."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: open]:bg-accent/16": "conduit-test-aoqb.4 fix: the menu trigger now uses the existing contrast-safe accent-bg token, owned by Button's menu-trigger variant.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: font-bold,h-[12px],min-w-[12px],px-[3px],text-[8px],text-bg": {
+		"movedTo": "src/lib/frontend/components/ui/Badge.svelte",
+		"requires": "variant=\"accent-solid\" size=\"indicator\"",
+		"reason": "conduit-test-aoqb.4 fix: Badge owns the tiny view-update count's fill and type."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: group-active:bg-accent/15,group-data-[state,group-focus-visible:bg-accent/10,group-hover:bg-accent/10,open]:bg-accent/15": {
+		"movedTo": "src/lib/frontend/components/ui/Badge.svelte",
+		"requires": "interactive>",
+		"reason": "conduit-test-aoqb.4 fix: interactive Badge owns the unread chip's hover, focus and open fills."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: justify-start,select-none,whitespace-nowrap": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "layout=\"block\" align=\"start\"",
+		"reason": "conduit-test-aoqb.4 fix: Button's block layout preserves the subtitle's display and interaction."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: min-w-[44px]": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "size=\"touch-icon\"",
+		"reason": "conduit-test-aoqb.4 fix: Button's touch sizes retain 44px targets."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: pl-1,pr-2,rounded-lg,text-base": "conduit-test-aoqb.5: the compact phone Back pill replaces the unused navigation size; desktop retains navigation-pill.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: py-[6px],rounded-[9px]": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "size=\"card-action\"",
+		"reason": "conduit-test-aoqb.4 fix: goal-card actions use Button's public card-action size."
+	},
+	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: bg-tool/13,inline-flex,pl-[5px],pr-1.5,py-0,rounded-[6px]": "conduit-test-aoqb.5: the Final phone count and Stop all strip replaces individual task chips; the unused task recipes are removed.",
+	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: justify-start,leading-[1.5],select-none,text-[11px],text-tool,whitespace-nowrap": "conduit-test-aoqb.5: the Final phone count and Stop all strip replaces individual task chips; the unused task recipes are removed.",
+	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: compact,min-w-full,w-0": "conduit-test-aoqb.4 fix: the phone-only branch always has compact=true, so its row uses w-full directly. Desktop command chips use the separate desktop branch.",
+	"src/lib/frontend/components/input/InputArea.svelte :: composer-task-dot,gap-1.5,justify-center,pt-[7px]": "conduit-test-aoqb.4: the approved 2026-10-16 audit removes composer task dots and their layout. Live tasks remain visible in the header row and its task panel.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: items-stretch,py-2,text-xs": "conduit-test-aoqb.4: the Final desktop capsule centers its segments; the state menu uses literal pixel padding and text sizes.",
+	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: border,left-4,mt-1,rounded-[14px]": "conduit-test-aoqb.4: desktop task details use the Final floating Surface with a border-chip ring, 16px corners, 20px inset and 8px anchor gap. The phone panel keeps its existing bottom border and geometry.",
+	"src/lib/frontend/components/session/SideThreadsPanel.svelte :: border,mt-1,right-4,rounded-[14px]": "conduit-test-aoqb.4: desktop side threads use the Final floating Surface with a border-chip ring, 16px corners, 16px right inset and 8px anchor gap. The phone panel keeps its existing bottom border and geometry.",
+	"src/lib/frontend/components/session/SessionContextMenu.svelte :: font-mono,grid,inline-flex,items-center,items-start,min-w-0,place-items-center,status.colour,text-text-secondary": {
+		"movedTo": "src/lib/frontend/components/session/SessionSheetBody.svelte",
+		"requires": "<SessionSheetBody",
+		"reason": "conduit-test-voxy.7 moves the phone session header into the body shared by overflow, chevron and long-press sheets. Desktop header styling stays in SessionContextMenu."
+	},
+	"src/lib/frontend/components/session/SessionContextMenu.svelte :: bg-bg,border,flex-1,flex-wrap,gap-1,gap-1.5,gap-3,leading-snug,mt-0.5,pb-[11px],pt-[8px],px-1.5,px-4,py-0.5,rounded,size-[20px],text-[11.5px],text-[15px]": "conduit-test-voxy.7 follows the Final session-menu header: 17px title, 13px metadata, 10px grid gaps, 18px attention glyph, one unwrapped meta line whose branch chip truncates, and no rule under the header. Literal padding replaces rem spacing, and the branch uses a filled chip without an outline. The grid reserves a 32px close circle with a 44px touch area.",
+	"src/lib/frontend/components/ui/LabelledGridGroup.svelte :: text-text-dimmer": "conduit-test-voxy.6: the phone sheet group labels (Triage, Session) move from text-dimmer to text-muted. The spec's --text3 measures 3.43:1 on the sheet and fails the gated SessionBar a11y check (WCAG AA needs 4.5:1 at 12.5px).",
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: h-[4px],h-full,whitespace-nowrap": {
+		"movedTo": "src/lib/frontend/components/ui/QuotaMeter.svelte",
+		"requires": "<QuotaMeter",
+		"reason": "conduit-test-aoqb.12: the existing usage meter owns the 4px track, fill and unbroken percentage caption in the Final account cards."
+	},
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: border": {
+		"movedTo": "src/lib/frontend/components/ui/Surface.svelte",
+		"requires": "<Surface",
+		"reason": "conduit-test-aoqb.12: Surface owns the popover border; the model lock notice becomes a borderless chip inset."
+	},
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: bg-[var(--account-color)],bg-border,border-dashed,gap-2.5,last:border-b-0,mb-[2px],mb-[5px],min-h-[46px],mt-[9px],pb-[4px],rounded-[2px],rounded-none,text-[10px],text-sm,tracking-[0.07em],tracking-[0.5px],uppercase,w-16": "conduit-test-aoqb.12: the approved Final model picker replaces the account-coloured full-width meter with QuotaMeter's neutral/semantic 26px usage meter, uppercase section captions with 12px sentence case, and ruled square rows with icon-led 36px rows (50px phone targets), 10px corners and intrinsic trailing values. The popover uses 6px outer padding and its shared primitives own control appearance.",
+	"src/lib/frontend/components/ui/segmented-styles.ts :: bg-border-subtle,bg-text,flex-wrap,font-semibold,gap-0.5,gap-[3px],px-0.5,py-0.5,py-1.5,rounded-[7px],text-bg": "conduit-test-aoqb.12: the picker and picker-context recipes lost their last consumer when the Final model picker moved to the joined segment, so they and their SegmentedControl stories are deleted.",
+	"src/lib/frontend/components/input/SkillHighlightBackdrop.svelte :: z-0": "conduit-test-ahu8.12: the mirror must not create a stacking context. Reference remove buttons use z-index 20 to receive clicks above the textarea at z-index 10; all other mirror content remains behind the textarea.",
+	"src/lib/frontend/components/overlays/ClaudeSettingsTab.svelte :: max-w-full": {
+		"movedTo": "src/lib/frontend/components/ui/SettingsPicker.svelte",
+		"requires": "<SettingsPicker",
+		"reason": "conduit-test-aoqb.10: the Final value picker owns its maximum width."
+	},
+	"src/lib/frontend/components/overlays/ClaudeSettingsTab.svelte :: w-[220px]": "conduit-test-aoqb.10: Final settings values use an intrinsic-width borderless picker instead of a fixed-width native field.",
+	"src/lib/frontend/components/overlays/VisibilitySettingsTab.svelte :: w-[100px],w-[220px]": "conduit-test-aoqb.10: Final model, effort and context values use intrinsic-width pickers. Model labels retain a 220px maximum and truncate instead of reserving a fixed field width.",
+	"src/lib/frontend/components/overlays/UsageSettingsTab.svelte :: leading-[1.45],rounded-[12px]": {
+		"movedTo": "src/lib/frontend/components/ui/SettingsBanner.svelte",
+		"requires": "<SettingsBanner",
+		"reason": "conduit-test-aoqb.10: the shared Final settings banner owns its corners and line height."
+	},
+	"src/lib/frontend/components/overlays/UsageSettingsTab.svelte :: bg-bg,bg-fill-amber/[0.05],bg-fill-red/[0.06],border-fill-amber/35,border-fill-red/40,headline.limited,headline.warning,px-[12px],py-[8px]": "conduit-test-aoqb.10: set-ban replaces the outlined fleet headline with an 11% semantic tint over settings-card, 11px/14px padding and neutral text. The existing limited/warning expressions now select SettingsBanner's tone; they are not removed classes.",
+	"src/lib/frontend/components/ui/SettingsGroup.svelte :: rotate-90,transition-transform,truncate": {
+		"movedTo": "src/lib/frontend/components/ui/SettingsRow.svelte",
+		"requires": "<SettingsRow",
+		"reason": "conduit-test-aoqb.10: collapsible headers reuse the Final navigation row's chevron and summary."
+	},
+	"src/lib/frontend/components/ui/SettingsGroup.svelte :: border-border-subtle,duration-200,font-normal,open,text-[11.5px],text-center,w-[10px]": "conduit-test-aoqb.10: Final cards are borderless with settings-separator hairlines. set-col uses a 13px chevron, 13.5px label and 12px summary, replacing the old tiny text chevron and typography. open is now a SettingsRow prop, not a removed class.",
+	"src/lib/frontend/components/ui/SettingsRow.svelte :: leading-[1.35],text-[11px],text-[12.5px]": "conduit-test-aoqb.10: Final settings rows use 13.5px labels (15px on phones) and 12px descriptions with 1.4 line height.",
+	"src/lib/frontend/components/ui/segmented-styles.ts :: bg-accent/10,gap-1.5": "conduit-test-aoqb.10: the `field` segmented variant is deleted; SegmentedControl now defaults to `joined` and nothing selected `field`.",
+	"src/lib/frontend/components/ui/segmented-styles.ts :: bg-accent-bg,border-l,first:border-l-0,max-md:min-w-[36px],px-[9px],py-[4px]": "conduit-test-aoqb.10: set-seg intentionally replaces the bordered accent segments with a chip track, raised neutral selection, 10px horizontal padding and 24px desktop height. Phone options retain a 44px touch target.",
+	"test/unit/provider/event-sink-effect-boundary.test.ts :: unknown": "Not a class: this was the error type in EventSink signature strings the test asserts on. The signatures now fail with EventSinkError instead of unknown.",
+	"test/unit/effect/runtime-boundary-grep.test.ts :: above,beforeEach,environment,guard,,same,stories/mocks.ts": "Not classes: these are words from the reason string of a deleted allow-list entry for NotifSettings.stories.ts, a file removed in wave 1.",
+	"test/unit/effect/runtime-boundary-grep.test.ts :: abort:,claim,invariant),live,outbox,refuses,rolls,runInTransaction,single-live-claim,supersede,transaction": "Not a class. The words came from the reason string of the removed orchestration-command-commit.ts plain-throw allowlist entry (the recommit refusal is now an Effect.fail inside sql.withTransaction); the checker matched the prose as tokens.",
+	"test/unit/effect/runtime-boundary-grep.test.ts :: play(),query": "Not a call site: an allowlist entry for ProjectSwitcher.stories.ts, removed because the file was deleted in conduit-test-vik1.7.",
+	"test/unit/persistence/session-removal-boundary-grep.test.ts :: src/lib/persistence/eviction.ts": "Not a class token: removed a stale guard exception for the already-deleted eviction module.",
+	"src/lib/frontend/components/overlays/InstancesSettingsTab.svelte :: whitespace-nowrap": "conduit-test-dc8k.4: the joined Type control overflowed the card at 393px because its labels could not wrap. max-w-full caps it at the card width and lets each option label wrap to two lines, keeping all three readable and selectable on phones; desktop is unchanged.",
+	"src/lib/frontend/components/chat/ActivityStrip.svelte :: focus-visible:ring-brand-b": {
+		"renamedTo": "focus-visible:ring-success",
+		"reason": "conduit-test-aoqb.1 Final token migration: focus-visible:ring-brand-b becomes focus-visible:ring-success; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/chat/AssistantMessage.svelte :: glow-brand-b": {
+		"renamedTo": "glow-success",
+		"reason": "conduit-test-aoqb.1 Final token migration: glow-brand-b becomes glow-success; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/chat/AssistantMessage.svelte :: text-brand-b": {
+		"renamedTo": "text-success",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-brand-b becomes text-success; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/chat/MessageList.svelte :: text-status-violet": {
+		"renamedTo": "text-status-goal",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-status-violet becomes text-status-goal; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/chat/SubagentBackBar.svelte :: bg-brand-a": {
+		"renamedTo": "bg-accent",
+		"reason": "conduit-test-aoqb.1 Final token migration: bg-brand-a becomes bg-accent; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/chat/SubagentBackBar.svelte :: bg-brand-b": {
+		"renamedTo": "bg-success",
+		"reason": "conduit-test-aoqb.1 Final token migration: bg-brand-b becomes bg-success; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/chat/SubagentBackBar.svelte :: text-white": {
+		"renamedTo": "text-bg",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-white becomes text-bg; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/chat/UserMessage.svelte :: glow-brand-a": "conduit-test-aoqb.2: Final You rows replace the bubble/glow and uppercase label with avatar/name/time and plain prose. Steered, drift and cut-off/Dismiss remain as neutral header chips.",
+	"src/lib/frontend/components/chat/UserMessage.svelte :: text-brand-a": "conduit-test-aoqb.2: Final You rows replace the bubble/glow and uppercase label with avatar/name/time and plain prose. Steered, drift and cut-off/Dismiss remain as neutral header chips.",
+	"src/lib/frontend/components/input/AttachMenu.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/input/AttachMenu.svelte :: text-status-violet": {
+		"renamedTo": "text-status-goal",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-status-violet becomes text-status-goal; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/input/ComposerStatusHeader.svelte :: text-status-violet": {
+		"renamedTo": "text-status-goal",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-status-violet becomes text-status-goal; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/input/InputArea.svelte :: bg-brand-a": {
+		"renamedTo": "bg-accent",
+		"reason": "conduit-test-aoqb.1 Final token migration: bg-brand-a becomes bg-accent; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/input/InputArea.svelte :: bg-status-violet": {
+		"renamedTo": "bg-status-goal",
+		"reason": "conduit-test-aoqb.1 Final token migration: bg-status-violet becomes bg-status-goal; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/input/InputArea.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/input/InputArea.svelte :: text-status-violet": {
+		"renamedTo": "text-status-goal",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-status-violet becomes text-status-goal; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/input/InputArea.svelte :: text-white": {
+		"renamedTo": "text-bg",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-white becomes text-bg; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/input/NewSessionContext.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/input/PermissionModeSelector.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/layout/ChatLayout.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: bg-brand-a": {
+		"renamedTo": "bg-accent",
+		"reason": "conduit-test-aoqb.1 Final token migration: bg-brand-a becomes bg-accent; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: group-active:bg-brand-a/15": {
+		"renamedTo": "group-active:bg-accent/15",
+		"reason": "conduit-test-aoqb.1 Final token migration: group-active:bg-brand-a/15 becomes group-active:bg-accent/15; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: group-focus-visible:bg-brand-a/10": {
+		"renamedTo": "group-focus-visible:bg-accent/10",
+		"reason": "conduit-test-aoqb.1 Final token migration: group-focus-visible:bg-brand-a/10 becomes group-focus-visible:bg-accent/10; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: group-hover:bg-brand-a/10": {
+		"renamedTo": "group-hover:bg-accent/10",
+		"reason": "conduit-test-aoqb.1 Final token migration: group-hover:bg-brand-a/10 becomes group-hover:bg-accent/10; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: open]:bg-brand-a/15": {
+		"renamedTo": "open]:bg-accent/15",
+		"reason": "conduit-test-aoqb.1 Final token migration: open]:bg-brand-a/15 becomes open]:bg-accent/15; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: text-status-violet": {
+		"renamedTo": "text-status-goal",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-status-violet becomes text-status-goal; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/layout/Sidebar.svelte :: bg-fill-brand": {
+		"renamedTo": "bg-accent",
+		"reason": "conduit-test-aoqb.1 Final token migration: bg-fill-brand becomes bg-accent; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/layout/Sidebar.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/layout/Sidebar.svelte :: text-on-brand": {
+		"renamedTo": "text-bg",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-on-brand becomes text-bg; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/model/ModelVariant.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/overlays/ConnectOverlay.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/overlays/Toast.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/overlays/Toast.svelte :: text-brand-b": {
+		"renamedTo": "text-success",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-brand-b becomes text-success; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: text-status-violet": {
+		"renamedTo": "text-status-goal",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-status-violet becomes text-status-goal; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/DeepSearch.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/GitIdentity.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/ProjectScopeItem.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionContextMenu.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionItem.svelte :: bg-brand-a/15": {
+		"renamedTo": "bg-accent/15",
+		"reason": "conduit-test-aoqb.1 Final token migration: bg-brand-a/15 becomes bg-accent/15; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionItem.svelte :: bg-fill-indigo": {
+		"renamedTo": "bg-fill-amber",
+		"reason": "conduit-test-aoqb.1 Final token migration: bg-fill-indigo becomes bg-fill-amber; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionItem.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionItem.svelte :: text-brand-a": {
+		"renamedTo": "text-accent",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-brand-a becomes text-accent; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionItem.svelte :: text-status-indigo": {
+		"renamedTo": "text-status-ask",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-status-indigo becomes text-status-ask; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionList.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionListBulkBar.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionListFilters.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionListHeader.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionListRows.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionRenameInput.svelte :: text-brand-b": {
+		"renamedTo": "text-success",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-brand-b becomes text-success; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SessionSearchField.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/ShortcutSheet.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SideThreadsPanel.svelte :: bg-brand-a": {
+		"renamedTo": "bg-accent",
+		"reason": "conduit-test-aoqb.1 Final token migration: bg-brand-a becomes bg-accent; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SideThreadsPanel.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/SnoozeSheet.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/session/TaskDrawer.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/todo/TodoOverlay.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/ui/ConduitLogo.svelte :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/ui/MenuCheckboxItem.svelte :: text-on-brand": {
+		"renamedTo": "text-bg",
+		"reason": "conduit-test-aoqb.1 Final token migration: text-on-brand becomes text-bg; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/ui/SettingsRow.svelte :: bg-accent": {
+		"renamedTo": "bg-success",
+		"reason": "conduit-test-aoqb.1 Final token migration: bg-accent becomes bg-success; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/ui/TranscriptDivider.svelte :: b]:text-brand-b": {
+		"renamedTo": "b]:text-success",
+		"reason": "conduit-test-aoqb.1 Final token migration: b]:text-brand-b becomes b]:text-success; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/ui/button-recipes.ts :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/ui/segmented-styles.ts :: font-brand": {
+		"renamedTo": "font-sans",
+		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/utils/account-color.ts :: bg-fill-indigo": {
+		"renamedTo": "bg-fill-amber",
+		"reason": "conduit-test-aoqb.1 Final token migration: bg-fill-indigo becomes bg-fill-amber; preserve the replacement at this call site."
+	},
+	"src/lib/frontend/components/chat/SystemMessage.svelte :: bg-black/20": {
+		"renamedTo": "bg-code-bg",
+		"reason": "conduit-test-aoqb.1 light contrast: the details well was black/20 over white (#ccc), which forced light error red down to #aa1c1c. It now sits on the code well, near-identical in dark (#141416), so light error can stay at #bc1f1f."
+	},
+	"src/lib/frontend/components/ui/floating-styles.ts :: bg-bg-alt": {
+		"renamedTo": "bg-popover-bg",
+		"reason": "conduit-test-aoqb.1: every floating surface (Popover, Menu, Tooltip, inline listboxes) wears the Final --pop step. Dark it equals bg-alt (#232327); light it is white, where bg-alt is the tinted #f1f1f3 fill."
+	},
+	"src/lib/frontend/components/input/InputArea.stories.ts :: bg-bg-alt": {
+		"renamedTo": "bg-popover-bg",
+		"reason": "Not a call site: the swap probe follows FLOATING_SURFACE_CLASSES onto the Final --pop step (conduit-test-aoqb.1)."
+	},
+	"src/lib/frontend/components/ui/Modal.svelte :: bg-bg-alt": {
+		"renamedTo": "bg-bg-surface",
+		"reason": "conduit-test-aoqb.1: sheets and dialogs wear the Final --surface step (.f-sheet), not the tinted bg-alt fill."
+	},
+	"src/lib/frontend/components/ui/Menu.svelte :: bg-bg-alt": {
+		"renamedTo": "bg-bg-surface",
+		"reason": "conduit-test-aoqb.1: sheets and dialogs wear the Final --surface step (.f-sheet), not the tinted bg-alt fill."
+	},
+	"src/lib/frontend/components/ui/__fixtures__/DialogDemo.svelte :: bg-bg-alt": {
+		"renamedTo": "bg-bg-surface",
+		"reason": "conduit-test-aoqb.1: the demo dialog panel wears the Final --surface step (.f-sheet), matching Modal."
+	},
+	"src/lib/frontend/components/ui/button-recipes.ts :: hover:text-text-secondary": {
+		"renamedTo": "hover:text-text",
+		"reason": "conduit-test-aoqb.1: the Final palette has one --text2 step, so text-secondary and text-muted are the same colour and a muted-to-secondary hover changed nothing. muted-soft now brightens to full text, the one step above."
+	},
+	"src/lib/frontend/components/input/InputArea.svelte :: overscroll-contain,w-[36px]": {
+		"movedTo": "src/lib/frontend/components/ui/SheetChrome.svelte",
+		"requires": "<SheetChrome",
+		"reason": "conduit-test-voxy.4: SheetChrome owns body scrolling and the shared handle."
+	},
+	"src/lib/frontend/components/input/InputArea.svelte :: px-[16px]": "conduit-test-voxy.4: The existing 16px side padding remains on SheetChrome bodyClass=\"px-[16px]\". The checker only recognizes class attributes, not bodyClass.",
+	"src/lib/frontend/components/input/InputArea.svelte :: h-[4px],max-h-[85dvh],mb-[10px],pt-[8px],rounded-t-[18px]": "conduit-test-voxy.4: SheetChrome replaces the old handle with 36x5px and 22px corners. The existing 85dvh cap remains via maxHeight=\"85dvh\", and the bottom inset is preserved via bottomPadding and safeAreaMode.",
+	"src/lib/frontend/components/layout/UsageFooterMeter.svelte :: pb-[calc(16px+env(safe-area-inset-bottom))]": "conduit-test-voxy.4: The existing 16px plus safe-area inset moves into SheetChrome via bottomPadding={16}. SheetChrome owns the Final corners, handle and surface; dock contents and controls remain unchanged.",
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: bg-border-chip,mx-auto": {
+		"movedTo": "src/lib/frontend/components/ui/SheetChrome.svelte",
+		"requires": "<SheetChrome",
+		"reason": "conduit-test-voxy.4: The shared sheet owns the handle colour and alignment."
+	},
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: h-1,mb-2.5,w-9": "conduit-test-voxy.4: The old rem handle becomes the shared literal 36x5px handle with its canonical spacing; body content is unchanged.",
+	"src/lib/frontend/components/overlays/HandoffDialog.svelte :: bg-border-chip,mx-auto,rounded-full,w-[36px]": {
+		"movedTo": "src/lib/frontend/components/ui/SheetChrome.svelte",
+		"requires": "<SheetChrome",
+		"reason": "conduit-test-voxy.4: The shared sheet owns the handle."
+	},
+	"src/lib/frontend/components/overlays/HandoffDialog.svelte :: h-[4px],mb-[8px]": "conduit-test-voxy.4: SheetChrome uses the approved 5px handle and canonical spacing in place of the 4px bar.",
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: phone.current": "conduit-test-voxy.4: This is an expression identifier, not CSS. The existing compact branch now reads sessionViewState.compact instead of a duplicate MediaQuery.",
+	"src/lib/frontend/components/overlays/UsageSettingsTab.svelte :: phone.current": "conduit-test-voxy.4: This is an expression identifier, not CSS. The existing compact branch now reads sessionViewState.compact instead of a duplicate MediaQuery.",
+	"src/lib/frontend/components/ui/Menu.svelte :: mb-[6px],mt-[8px],mx-auto,rounded-full": {
+		"movedTo": "src/lib/frontend/components/ui/SheetChrome.svelte",
+		"requires": "<SheetChrome",
+		"reason": "conduit-test-voxy.4: The shared sheet owns the handle."
+	},
+	"src/lib/frontend/components/ui/Menu.svelte :: bg-border,h-[4px],w-[38px]": "conduit-test-voxy.4: SheetChrome replaces the old handle with the Final 36x5px bar in the strong line token, bg-border-chip.",
+	"src/lib/frontend/components/ui/Modal.svelte :: mx-auto,rounded-full": {
+		"movedTo": "src/lib/frontend/components/ui/SheetChrome.svelte",
+		"requires": "<SheetChrome",
+		"reason": "conduit-test-voxy.4: The shared sheet owns the handle."
+	},
+	"src/lib/frontend/components/ui/Modal.svelte :: bg-border,h-1,mb-2,mt-2,w-[38px]": "conduit-test-voxy.4: SheetChrome owns the Final 36x5px handle in bg-border-chip with 8px above and 6px below; the old rem spacing and 38px width are intentionally removed.",
+	"src/lib/frontend/components/ui/SettingsRow.svelte :: bg-white,h-[18px],left-[2px],pointer-events-none,rounded-full,top-[2px],transition-colors,translate-x-[14px],w-[32px]": {
+		"movedTo": "src/lib/frontend/components/ui/Switch.svelte",
+		"requires": "<Switch",
+		"reason": "conduit-test-voxy.4: The small presentational Switch owns the track and thumb."
+	},
+	"src/lib/frontend/components/ui/SettingsRow.svelte :: bg-accent,bg-border,h-[14px],w-[14px],transition-[translate],props.checked": "conduit-test-voxy.4: Switch now owns the green on / dimmed grey off appearance. Its small white thumb uses size-[14px] and transition-transform; props.checked was an interpolation identifier, not CSS.",
+	"src/lib/frontend/components/ui/__fixtures__/PopoverDemo.svelte :: w-56": "conduit-test-voxy.4: The responsive Popover demo uses min-w-56 so the shared sheet body can fill the viewport.",
+	"src/lib/frontend/components/input/InputArea.svelte :: pb-[max(20px,env(safe-area-inset-bottom))]": "conduit-test-voxy.4: The existing max(20px, safe-area) inset moves into SheetChrome via bottomPadding={20} and safeAreaMode=\"max\".",
+	"src/lib/frontend/components/ui/SettingsRow.svelte :: bg-success,h-[18px],translate-x-[14px],w-[32px]": "conduit-test-voxy.4 moves the settings toggle into the shared ui/Switch. Switch owns the green on track and takes the Final small size from the spec's .f-switch.sm: a 38x22 track with an 18px knob and 16px travel, in place of the old 32x18 track.",
+	"src/lib/frontend/components/layout/Sidebar.svelte :: bg-accent,bottom-[calc(11px+env(safe-area-inset-bottom))],box-content,countSize,gap-[10px],gap-[5px],h-[34px],h-[40px],justify-center,min-w-[44px],p-1,pt-[10px],pt-[2px],px-[10px],px-[12px],right-[11px],rounded-full,rounded-lg,rounded-md,shadow-[0_4px_14px_var(--color-backdrop-subtle)],text-bg,titleSize": "conduit-test-aoqb.7 follows Final sidebar: 46px phone and 48px desktop header, 22px/14px title, select and compose in header. Deletes the phone FAB and Resume by ID; toolbar primitives own neutral icon treatment.",
+	"src/lib/frontend/components/layout/UsageFooterMeter.svelte :: accounts.length,bg-bg-alt,flex-1,font-mono,gap-[10px],gap-[4px],h-[19px],ml-[3px],p-[10px],pb-[7px],pl-[19px],pr-[6px],pt-[4px],px-[10px],py-[6px],text-[10px],text-[9px],text-text-dimmer,tracking-[0.05em],uppercase": "conduit-test-aoqb.7 follows Final usage: sentence-case harness/window labels, 12px desktop text, chip-filled current account, 30px phone rows, 18px dock corners and 12px/24px dock padding. QuotaMeter owns 26px usage tracks and 11px captions; sheet wrapper unchanged for voxy.4.",
+	"src/lib/frontend/components/session/SessionItem.svelte :: active,bg-sidebar-bg,branch,dragging,duration-150,gap-[6px],grid,hover:bg-bg-alt,hover:text-text,itemClass,justify-self-center,leading-none,max-[260px]:hidden,max-w-[45%],motion-reduce:transition-none,mt-0.5,no-underline,offset,place-items-center,rounded-[7px],select-none,session-status-glyph,size-[20px],size-[27px],size-[7px],status.pill,statusHidesOnHover,text-[11.5px],text-base,transition-[color,background-color,transform],transition-none": "conduit-test-aoqb.7 follows Final rows: SessionRow owns the 14px status column, selection fill, spacing and transitions; SessionStatusGlyph owns status shapes; ProjectMark replaces the initial avatar; Badge ask/status owns blocking pills; Button row-action owns 21px hover actions. Deletes duplicate title unread dot, old opacity dimming and mark-read hover button; keeps read commands in menu/swipe. Uses two-line shelf rows and compact mono ages.",
+	"src/lib/frontend/components/session/SessionListFilters.svelte :: CHIP_CLASSES,active),filterSurfaceClass(needsAttention,filterSurfaceClass(true),font-semibold,gap-1,gap-[6px],md:pb-[4px],md:pt-[8px],md:px-[10px],pb-[7px],pt-[4px],pt-[9px],px-[12px],text-text": "conduit-test-aoqb.7 follows Final chip row: Button filter owns 24px chip fill, radius and active Needs-you colour; 5px gaps and mono counts replace outlined chips and active X. Sort stays at row end on all widths.",
+	"src/lib/frontend/components/session/SessionListRows.svelte :: font-semibold,gap-1,md:min-h-0,ml-auto,pb-0.5,pt-1.5,py-0.5,py-6,tracking-[0.3px],uppercase": "conduit-test-aoqb.7 follows Final shelves: sentence-case 12px group labels with adjacent mono counts, 30px desktop/44px phone shelf toggles, Settled before Snoozed, explanatory Needs-you ending and loaded-row + N more disclosure. Settled count remains absent for aoqb.15.",
+	"src/lib/frontend/components/session/SessionSearchField.svelte :: bg-bg-alt,bg-bg-surface,bg-transparent,border,border-border-chip,border-border-subtle,focus-within:bg-bg-alt,focus-within:border-border-chip,font-medium,gap-1,gap-[8px],h-[38px],md:h-[32px],md:my-0,md:pl-[7px],md:px-[7px],md:py-[4px],md:text-[11px],my-[4px],pl-[6px],placeholder:text-text-dimmer,pr-[11px],px-[8px],py-[5px],rounded-[11px],self-stretch,text-[11.5px]": "conduit-test-aoqb.7 follows Final search: separate chip-backed 30px scope and search fields. Button field and SearchInput own chrome, typography and 44px phone hit targets; Search with Command-K hint replaces the longer placeholder.",
+	"src/lib/frontend/components/ui/QuotaMeter.svelte :: text-fill-amber,warnAt": "conduit-test-aoqb.7 usage variant uses status-ask and status-red tokens, 11px captions and neutral readings when warnings are off. Headroom variant unchanged.",
+	"src/lib/frontend/components/session/SessionItem.svelte :: transition-[color,background-color,transform]": {
+		"movedTo": "src/lib/frontend/components/ui/SessionRow.svelte",
+		"requires": "<SessionRow",
+		"reason": "conduit-test-aoqb.7 moves row painting and transitions into the SessionRow primitive."
+	},
+	"src/lib/frontend/components/layout/Sidebar.svelte :: bg-bg-surface": "conduit-test-aoqb.7 uses the Final sidebar-bg token for the desktop sidebar; phone keeps bg-bg.",
+	"src/lib/frontend/components/session/SessionItem.svelte :: gap-0.5": "conduit-test-aoqb.7 follows Final hover actions: adjacent 21px controls with no inter-button gap.",
+	"src/lib/frontend/components/layout/UsageFooterMeter.svelte :: h-[4px],mb-[3px],mt-[2px],pt-[5px],rounded-t-[14px],w-[32px]": "conduit-test-aoqb.7 follows the Final phone dock: 18px top corners and 12px top padding, with a dock-only 36x5px grab bar matching SheetChrome's handle, in place of the 14px corners and 32x4px bar.",
+	"src/lib/frontend/components/chat/ActivityRow.svelte :: bg-[rgba(var(--overlay-rgb),0.06)],bottom-1,cursor-pointer,gap-1.5,gap-2,hover:bg-[rgba(var(--overlay-rgb),0.04)],hover:text-accent,left-0,lucide]:h-3.5,lucide]:w-3.5,mb-1,min-h-[24px],min-w-[24px],ml-7,mr-1,my-1,opacity-70,px-1.5,px-2,px-2.5,py-1,py-1.5,py-2,py-px,rounded,rounded-full,rounded-lg,style.bg,style.text,text-[10px],text-xs,top-1,w-0.5": "conduit-test-aoqb.2: Final step rows replace colored rails and rem geometry with neutral icon/verb/mono argument/time rows at literal px sizes. Button owns control behavior; expanded narration is italic and keeps all details.",
+	"src/lib/frontend/components/chat/ActivityRow.svelte :: pb-1": "conduit-test-aoqb.2: the subagent model/mode details under the one-line row use literal px geometry (pb-[3px]) like the rest of the Final step rows.",
+	"src/lib/frontend/components/chat/ActivityStrip.svelte :: bg-bg-surface,cursor-pointer,flex,focus-visible:ring-1,focus-visible:ring-brand-b,gap-px,h-full,height,i),outline-none,partWidthClass(part,,rounded-full,running),segmentClass(part,,touch-manipulation,transition-opacity": "conduit-test-aoqb.2: ActivityTimeline owns segment controls, focus, roving keys and paint. stripLayout supplies exact percentages including gaps and seams, replacing flex widths and CSS minimums.",
+	"src/lib/frontend/components/chat/AssistantMessage.svelte :: backdrop-blur-sm,bg-bg-surface,bg-bg-surface/80,border-border-subtle/50,containerCopyClass,copyButtonClass,duration-150,flex,font-mono,font-semibold,gap-1,gap-2.5,glow-brand-b,group-hover:opacity-100,h-7,items-baseline,leading-[1.7],max-w-[760px],mb-2,mb-3,msg-actions,opacity-0,px-5,py-4,right-2,rounded-md,rounded-panel,text-base,text-brand-b,text-sm,top-2,touch:opacity-100,tracking-[1.5px],transition-colors,transition-opacity,uppercase,w-7,z-10": "conduit-test-aoqb.2: Final message rows replace the colored uppercase Assistant label, glow, overlay buttons and rem geometry. AssistantHeader owns identity and existing copy/fork; CodeBlockHeader owns code-copy.",
+	"src/lib/frontend/components/chat/DiffView.svelte :: border-b-0,font-medium,gap-3,items-center,leading-normal,min-w-[40px],px-2,px-3,py-1.5,rounded-t-lg,text-sm,text-xs,w-[40px]": "conduit-test-aoqb.2: Final code headers use shared CodeBlockHeader for file, actual +/- counts and copy. Existing Unified/Split controls remain with px typography.",
+	"src/lib/frontend/components/chat/MessageList.svelte :: hidden,left-1/2,px-4,py-1.5,scrollCtrl.isDetached,translate-x-1/2": "conduit-test-aoqb.2: TranscriptJump owns the Final floating live/latest pill appearance. MessageList retains positioning and live visibility; the old scroll pill is removed.",
+	"src/lib/frontend/components/chat/MessageTime.svelte :: text-xs": "conduit-test-aoqb.2: Final timestamps use plain 12px Geist Mono instead of root-scaled rem.",
+	"src/lib/frontend/components/chat/QuestionCard.svelte :: bg-accent-bg,border-accent,cursor-pointer,duration-150,gap-0.5,gap-1.5,gap-2,hover:bg-bg,hover:border-border,isCheckboxChecked(qIdx,,isRadioChecked(qIdx,,items-start,last:mb-2,leading-relaxed,mb-0.5,mb-2,mb-3,min-h-12,mt-0.5,mt-1,mt-1.5,mt-2,opt.label),p-3,px-2.5,px-3,px-4,py-2,rounded-lg,text-accent,text-base,text-sm,text-xs,transition-[background,border-color]": "conduit-test-aoqb.2: Final options compose neutral ChoiceLabel and existing radio/checkbox/Button controls at literal px sizes and 44px phone targets; behavior is unchanged.",
+	"src/lib/frontend/components/chat/ToolGenericCard.svelte :: bg-bg-surface,font-medium,gap-1.5,glowClass,italic,lucide]:h-3.5,lucide]:w-3.5,message.status,my-0.5,not-italic,pl-4,pointer-events-none,px-3,py-0.5,rounded-panel,self-center,statusIconClass,text-border,text-ellipsis,text-xs,tool-connector,whitespace-nowrap": "conduit-test-aoqb.2: Final tool rows replace colored cards/glow with neutral icon, verb, mono subject and measured duration; disclosure and full detail remain.",
+	"src/lib/frontend/components/chat/ToolItem.svelte :: my-1": "conduit-test-aoqb.2: Final tool items use literal px spacing between the neutral tool rows instead of root-scaled rem.",
+	"src/lib/frontend/components/chat/ToolQuestionCard.svelte :: gap-1.5,gap-2,gap-2.5,glowClass,isAnswered,italic,lucide]:h-3.5,lucide]:h-4,lucide]:w-3.5,lucide]:w-4,mb-0.5,mb-1.5,mb-2,mx-2.5,my-0.5,pb-2,pl-4,pointer-events-none,px-2.5,px-3,py-0.5,py-1.5,py-2,rounded-lg,rounded-panel,self-center,statusIconClass,text-accent,text-base,text-border,text-sm,text-success,text-text,text-xs,tool-connector": "conduit-test-aoqb.2: Final Asked/Asking rows use neutral icon/verb/mono question/time headers. Existing answered details and interactive form remain.",
+	"src/lib/frontend/components/chat/ToolSubagentCard.svelte :: bg-bg-surface,font-medium,gap-1.5,gap-2.5,glowClass,italic,lucide]:h-3.5,lucide]:h-4,lucide]:w-3.5,lucide]:w-4,max-w-full,message.status,mt-0.5,not-italic,pl-4,pointer-events-none,px-3,py-0.5,py-2.5,rounded-panel,self-center,statusIconClass,text-accent,text-border,text-xs,tool-connector": "conduit-test-aoqb.2: Final subagent rows replace colored rails, glow and duplicate headers with neutral delegation rows. Navigation, task status and details remain.",
+	"src/lib/frontend/components/chat/TurnActivity.svelte :: border,border-border-subtle,border-t,cursor-pointer,duration-200,final,font-medium,gap-1,gap-2,gap-2.5,gap-3,glow-tool-running,lucide]:h-3,lucide]:h-3.5,lucide]:w-3,lucide]:w-3.5,max-[336px]:hidden,max-w-[760px],my-1.5,part,partStyle(part).text,pb-1,pb-2,pl-2,pr-3,px-1,px-2,px-3,px-5,py-1,py-1.5,rounded,rounded-panel,text-text-dimmer,text-xs,transition-transform,turn.live": "conduit-test-aoqb.2: Final turn heads retain counts/duration with filled 14px corners and px type. Skills, compactions, failures, tasks, economics and ticker move into the log or duration hover. AssistantHeader precedes the head; Button owns controls.",
+	"src/lib/frontend/components/chat/TurnEconomics.svelte :: bg-[rgba(var(--overlay-rgb),0.12)],gap-2,h-1,span+span]:before:mr-2,text-text-dimmer,text-xs,w-10": "conduit-test-aoqb.2: The bill moves into the log and duration hover, with 12px mono and a 40x4px chip track; figures and context calculation are unchanged.",
+	"src/lib/frontend/components/chat/UserMessage.svelte :: bg-warning-bg,border,border-warning/30,font-medium,font-mono,gap-2.5,glow-brand-a,items-baseline,leading-[1.7],leading-relaxed,max-w-[760px],mb-2,mb-3,mt-1,mt-3,px-3,px-5,py-2,rounded-lg,text-[10px],text-base,text-brand-a,text-right,text-sm,text-status-amber,text-warning,text-xs,tracking-[1.5px],uppercase": "conduit-test-aoqb.2: Final You rows replace the bubble/glow and uppercase label with avatar/name/time and plain prose. Steered, drift and cut-off/Dismiss remain as neutral header chips.",
+	"src/lib/frontend/components/input/ComposerStatusHeader.svelte :: bg-accent,border-b,border-border-subtle,className,flex,font-semibold,gap-1.5,items-center,min-w-0,ml-auto,motion-safe:animate-pulse,motion-safe:animate-spin,pb-1.5,pt-[7px],px-3,rounded-full,size-[7px],tabular-nums,text-[11.5px],text-status-violet,text-text-muted,text-text-secondary,truncate,whitespace-nowrap": "conduit-test-aoqb.2: The duplicate in-box Working header is intentionally deleted. TurnActivity carries duration/activity and TranscriptJump carries offscreen navigation; goal checking remains in the session subtitle.",
+	"src/lib/frontend/components/input/InputArea.svelte :: max-md:-mt-[9px],max-md:-mx-[9px],mb-1.5,mt-[10px],mx-[10px]": "conduit-test-aoqb.2: Only ComposerStatusHeader and its exclusive bindings/margins are removed. TurnActivity and TranscriptJump carry live status and navigation; the rest of the composer is unchanged.",
+	"src/lib/frontend/components/chat/ActivityRow.svelte :: bg-[rgba(var(--overlay-rgb),0.06)]": "conduit-test-aoqb.2: Final transcript removes the former overlay wash or transition recipe. Neutral chip/surface tokens and shared controls now own the intended appearance; this exact comma-containing token needs an individual waiver.",
+	"src/lib/frontend/components/chat/ActivityRow.svelte :: hover:bg-[rgba(var(--overlay-rgb),0.04)]": "conduit-test-aoqb.2: Final transcript removes the former overlay wash or transition recipe. Neutral chip/surface tokens and shared controls now own the intended appearance; this exact comma-containing token needs an individual waiver.",
+	"src/lib/frontend/components/chat/QuestionCard.svelte :: transition-[background,border-color]": "conduit-test-aoqb.2: Final transcript removes the former overlay wash or transition recipe. Neutral chip/surface tokens and shared controls now own the intended appearance; this exact comma-containing token needs an individual waiver.",
+	"src/lib/frontend/components/chat/TurnEconomics.svelte :: bg-[rgba(var(--overlay-rgb),0.12)]": "conduit-test-aoqb.2: Final transcript removes the former overlay wash or transition recipe. Neutral chip/surface tokens and shared controls now own the intended appearance; this exact comma-containing token needs an individual waiver.",
+	"src/lib/frontend/components/chat/ActivityRow.svelte :: rowClass": "conduit-test-aoqb.2 review: removed the local rowClass variable; Button size=\"transcript\" now owns the shared step-row geometry in ui/button-recipes.ts.",
+	"src/lib/frontend/components/chat/ToolSubagentCard.svelte :: flex,items-center": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "size=\"transcript\"",
+		"reason": "conduit-test-aoqb.2 review: shared transcript row sizing owns alignment and geometry for disclosure and navigation controls."
+	},
+	"src/lib/frontend/components/chat/ActivityStrip.svelte :: focus-visible:ring-success": "conduit-test-aoqb.2: ActivityTimeline owns segment controls, focus, roving keys and paint. stripLayout supplies exact percentages including gaps and seams, replacing flex widths and CSS minimums.",
+	"src/lib/frontend/components/chat/AssistantMessage.svelte :: glow-success": "conduit-test-aoqb.2: Final message rows replace the colored uppercase Assistant label, glow, overlay buttons and rem geometry. AssistantHeader owns identity and existing copy/fork; CodeBlockHeader owns code-copy.",
+	"src/lib/frontend/components/chat/UserMessage.svelte :: glow-accent": "conduit-test-aoqb.2: Final You rows replace the bubble/glow and uppercase label with avatar/name/time and plain prose. Steered, drift and cut-off/Dismiss remain as neutral header chips.",
+	"src/lib/frontend/components/chat/UserMessage.svelte :: text-accent": "conduit-test-aoqb.2: Final You rows replace the bubble/glow and uppercase label with avatar/name/time and plain prose. Steered, drift and cut-off/Dismiss remain as neutral header chips.",
+	"src/lib/frontend/components/input/ComposerStatusHeader.svelte :: text-status-goal": "conduit-test-aoqb.2: The duplicate in-box Working header is intentionally deleted. TurnActivity carries duration/activity and TranscriptJump carries offscreen navigation; goal checking remains in the session subtitle.",
+	"src/lib/frontend/components/chat/MessageList.svelte :: mb-5": "conduit-test-aoqb.2: The text-only bill row joins the 820px Final transcript column under the reply's 42px gutter; it tucks under the reply (-mt-[18px]) and keeps the row rhythm (mb-[26px]).",
+	"src/lib/frontend/components/chat/MessageList.svelte :: mt-1": "conduit-test-aoqb.2: The text-only bill row joins the 820px Final transcript column under the reply's 42px gutter; it tucks under the reply (-mt-[18px]) and keeps the row rhythm (mb-[26px]).",
+	"src/lib/frontend/components/chat/TurnActivity.svelte :: bg-bg-surface": "conduit-test-aoqb.2: The turn card takes the spec's --turn-bg (bg-turn-bg). Light bg-surface is white, which made the card vanish on the white transcript.",
+	"src/lib/frontend/components/overlays/ClaudeSettingRow.svelte :: gap-3,p-0,px-3,py-2,text-[11px]": "conduit-test-aoqb.8: Final settings rows: SettingsRow owns the 14px row padding and 12px description type; the provenance line follows it instead of the old 12px/8px padding and 11px text.",
+	"src/lib/frontend/components/overlays/ClaudeSettingsTab.svelte :: flex-1": "conduit-test-aoqb.8: the Final value picker sizes to its content (SettingsPicker), so the control no longer stretches.",
+	"src/lib/frontend/components/overlays/CursorAuthSettings.svelte :: bg-[rgba(var(--overlay-rgb),0.015)],border-border-subtle,border-t,font-semibold,px-3,py-2,py-3,text-[10.5px],text-xs,tracking-[0.07em],uppercase": "conduit-test-aoqb.8: Cursor sign-in moves into a SettingsGroup card: sentence-case 12px muted group label instead of the uppercase tracked heading, borderless settings-card fill instead of the tinted top-bordered strip, row padding from SettingsRow.",
+	"src/lib/frontend/components/overlays/InstancesSettingsTab.svelte :: bg-[rgba(var(--overlay-rgb),0.015)],bg-bg-surface,border,border-accent,border-border,border-border-subtle,font-normal,gap-[7px],hover:underline,normal-case,px-[12px],py-[7px],rounded-[7px],rounded-[9px],text-[10.5px],text-[11px],text-[12.5px],tracking-[0.07em],tracking-normal": "conduit-test-aoqb.8: instance and account lists move into borderless 12px-radius SettingsGroup cards with settings-separator hairlines, sentence-case group labels and SettingsRow's 13.5/12px type; the bordered 9px cards, uppercase tracked headings and 12.5/11/10.5px type go with them.",
+	"src/lib/frontend/components/overlays/ServerAccessSettings.svelte :: text-[11px]": "conduit-test-aoqb.8: descriptions take SettingsRow's 12px Final description size.",
+	"src/lib/frontend/components/overlays/ServerLogsSettings.svelte :: px-3,text-sm": "conduit-test-aoqb.8: the logs row is a SettingsRow inside the Advanced card, which owns its padding and 13.5px label type.",
+	"src/lib/frontend/components/overlays/ServerPowerSettings.svelte :: text-[11px]": "conduit-test-aoqb.8: descriptions take SettingsRow's 12px Final description size.",
+	"src/lib/frontend/components/overlays/ServerSecuritySettings.svelte :: text-[11px]": "conduit-test-aoqb.8: descriptions take SettingsRow's 12px Final description size.",
+	"src/lib/frontend/components/overlays/ServerSettingsTab.svelte :: gap-[7px]": "conduit-test-aoqb.8: group spacing comes from the Final page stack (SettingsGroup margins) instead of a 7px column gap.",
+	"src/lib/frontend/components/overlays/ServerStartupSettings.svelte :: px-3,text-[11px]": "conduit-test-aoqb.8: the startup group is a collapsible SettingsGroup; SettingsRow owns padding and the 12px description size.",
+	"src/lib/frontend/components/overlays/ServerStatusSettings.svelte :: gap-x-2,h-[6px],text-[11px],text-[12.5px],w-[6px]": "conduit-test-aoqb.8: the Final status card draws an 8px status dot, a 13.5px 'Running' title and a 12px meta line, with buttons dropping to their own line on phone.",
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: bg-bg,border,border-border,border-border-subtle,gap-[6px],gap-[7px],h-7,h-[6px],h-[80vh],md:h-[min(600px,80vh)],md:w-[min(720px,calc(100vw-2rem))],mr-[6px],p-1,px-[18px],py-[12px],py-[14px],rounded-lg,rounded-xl,shadow-2xl,text-[11.5px],text-[14px],w-7,w-[150px],w-[6px],w-[calc(100vw-2rem)]": "conduit-test-aoqb.8: the Final settings shell: ui/Dialog owns the 16px-radius desktop dialog (settings-dialog shadow) and the phone fullscreen placement, replacing the 80vh centred card; the rail is 172px with icons via Tabs' sections variant; the header is a 44px phone nav bar or the desktop title bar; the usage dot is 7px.",
+	"src/lib/frontend/components/overlays/UsageSettingsTab.svelte :: border,border-border,border-t,display.level,grid,mb-[10px],mb-[12px],mb-[4px],md:gap-[14px],md:grid-cols-2,min-h-[30px],ml-auto,mt-[20px],pt-[10px],pt-[14px],px-[4px],rounded-[5px],sessionViewState.compact,text-[14px],text-[9.5px],usageDisplay(account,,usageState.limits.warnAt).level,whitespace-nowrap": "conduit-test-aoqb.8: Final Usage: accounts sit in one SortableList settings card (row identity, status under the name, two compact meter columns under 5-hour/Week headings) instead of bordered per-account cards with a two-column window grid; group labels and footers come from SettingsGroup; the status colour reads the row's level once.",
+	"src/lib/frontend/components/overlays/VisibilitySettingsTab.svelte :: gap-x-3,gap-y-1,mt-1,mt-2,p-0,px-3,text-[11px],text-text-dimmer": "conduit-test-aoqb.8: Models & agents rows are SettingsRows in Final cards; SettingsRow owns padding, wrapping gaps and the 12px muted description.",
+	"src/lib/frontend/components/ui/segmented-styles.ts :: gap-[2px],max-md:flex,max-md:items-center,max-md:text-[13px],px-[8px],py-[6px],text-[11.5px]": "conduit-test-aoqb.8: the sections recipe (used only by SettingsPanel) is the Final rail: 32px rows at 13px with 10px padding and icons, and on phone 48px card rows at 15px. Only the sections variant changed.",
+	"src/lib/frontend/components/ui/SettingsGroup.svelte :: font-semibold,mt-[9px],text-text": "conduit-test-aoqb.8: Final group labels are 12px medium in text-muted above borderless cards, not semibold text-colour titles; spacing comes from the page stack.",
+	"src/lib/frontend/components/overlays/CursorAuthSettings.svelte :: bg-[rgba(var(--overlay-rgb),0.015)]": "conduit-test-aoqb.8: the tinted strip becomes a borderless settings-card SettingsGroup. Its own key because the token contains a comma.",
+	"src/lib/frontend/components/overlays/InstancesSettingsTab.svelte :: bg-[rgba(var(--overlay-rgb),0.015)]": "conduit-test-aoqb.8: the tinted list header becomes a borderless settings-card SettingsGroup. Its own key because the token contains a comma.",
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: md:h-[min(600px,80vh)]": "conduit-test-aoqb.8: the Final desktop dialog takes its height from ui/Dialog's settings placement. Its own key because the token contains a comma.",
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: md:w-[min(720px,calc(100vw-2rem))]": "conduit-test-aoqb.8: ui/Dialog's settings placement owns the desktop dialog width. Its own key because the token contains a comma.",
+	"src/lib/frontend/components/chat/PastePreview.svelte :: bg-bg-alt,bg-bg-surface,border,border-border,border-border-subtle,border-t,bottom-0,gap-2,group,group-hover:opacity-100,h-[18px],h-[60px],h-full,leading-[1.2],leading-none,left-0,max-h-[90px],object-cover,opacity-0,paste-remove-btn,paste-thumb,paste-thumb-name,px-4,px-[3px],py-2,py-px,right-0,right-0.5,rounded-full,rounded-lg,text-center,text-ellipsis,text-sm,text-white,text-xs,top-0.5,transition-opacity,w-[18px],w-[60px],whitespace-nowrap": "conduit-test-aoqb.6 replaces the 60px below-text preview, filename overlay and hover-only removal with ui/ImageAttachmentThumb: 48px above-text thumbnails and an always-visible inverse remove control.",
+	"src/lib/frontend/components/chat/PastePreview.svelte :: bg-[rgba(0,0,0,0.55)]": "conduit-test-aoqb.6 replaces the 60px below-text preview, filename overlay and hover-only removal with ui/ImageAttachmentThumb: 48px above-text thumbnails and an always-visible inverse remove control.",
+	"src/lib/frontend/components/chat/PastePreview.svelte :: bg-[rgba(0,0,0,0.6)]": "conduit-test-aoqb.6 replaces the 60px below-text preview, filename overlay and hover-only removal with ui/ImageAttachmentThumb: 48px above-text thumbnails and an always-visible inverse remove control.",
+	"src/lib/frontend/components/input/AttachMenu.svelte :: h-[32px],min-w-[170px],rounded-[10px],text-text-secondary,text-xs,w-[32px]": "conduit-test-aoqb.6 uses Button composer-icon geometry and the Final two-line goal menu row with a separator. The old square button and narrow one-line menu are intentionally replaced.",
+	"src/lib/frontend/components/input/CommandMenu.svelte :: activeIndex,bg-accent-bg,cmd-item,cursor-pointer,duration-100,flex,font-medium,gap-2,hover:bg-accent-bg,hover:bg-bg-alt,items-baseline,max-h-[300px],max-sm:gap-1.5,max-sm:px-2.5,max-sm:py-1.5,max-sm:text-xs,px-3.5,py-2,text-accent,text-base,text-ellipsis,transition-colors,whitespace-nowrap": "conduit-test-aoqb.6 replaces single-line accent command rows with ui/CommandOption two-line icon rows. The $goal row uses the goal token and $compact reports context usage; / still lists skills.",
+	"src/lib/frontend/components/input/InputArea.svelte :: active:not-disabled:opacity-70,active:opacity-70,bg-input-bg,bg-status-goal,bg-text,bg-warning,border-status-red/50,composer-context-warning,composer-goal-cleared,composer-goal-hint,composer-goal-met,disabled:bg-send-off-bg,disabled:text-send-off,duration-200,flex-col,focus-within:border-text-dimmer,focus-within:shadow-[0_0_0_1px_var(--color-border)],gap-[14px],h-[10px],h-[24px],h-[26px],h-[30px],h-[32px],hover:bg-text/7,hover:not-disabled:opacity-90,hover:opacity-90,max-md:p-[9px],max-md:rounded-[20px],mb-[2px],min-h-[42px],overscroll-contain,p-[10px],phoneIcons,pl-[10px],pr-[2px],pr-[4px],pr-[6px],pt-[3px],py-[5px],right-[3px],ring-[1.5px],ring-input-bg,rounded-[10px],rounded-[14px],rounded-[22px],rounded-[9px],rounded-l-full,rounded-r-full,size-[6px],text-bg,top-[3px],w-[10px],w-[24px],w-[30px],w-[32px],w-[36px]": "conduit-test-aoqb.6 replaces the earlier composer recipe with ui/ComposerFrame, ComposerStrip, ComposerSendGroup and Button composer sizes. Icons use two rows at every width; the model pill opens the phone sheet. Send and Stop are inverse circles, goal is a labelled teal pill, limited send is an inverse split pill. Image previews precede the field; warnings and goal states fuse as inset tabs.",
+	"src/lib/frontend/components/input/InputArea.svelte :: transition-[border-color,box-shadow]": "conduit-test-aoqb.6 replaces the earlier composer recipe with ui/ComposerFrame, ComposerStrip, ComposerSendGroup and Button composer sizes. Icons use two rows at every width; the model pill opens the phone sheet. Send and Stop are inverse circles, goal is a labelled teal pill, limited send is an inverse split pill. Image previews precede the field; warnings and goal states fuse as inset tabs.",
+	"src/lib/frontend/components/input/PendingInputTray.svelte :: border,border-border,font-semibold,gap-2,leading-[1.35],mb-2,px-[10px],py-[7px],rounded-2xl,text-status-amber,text-text-secondary": "conduit-test-aoqb.6 replaces the standalone bordered queue card with ui/ComposerStrip and ComposerQueueRow. Queued badges precede message text, mono timestamps and icon edit/remove actions; narrow rows wrap their actions, and waiting/paused headers share the tray.",
+	"src/lib/frontend/components/input/PermissionModeSelector.svelte :: bg-warning/14,border-b,border-border-chip,border-border-subtle,border-dotted,flex-1,font-normal,gap-[10px],gap-[5px],gap-[7px],h-[26px],hot,hover:bg-text/7,inline-flex,last:border-b-0,min-h-[50px],presentation[option.mode].glyphClass,px-[6px],rounded-[7px],rounded-none,text-[11.5px],text-[11px],text-text,text-text-dimmer,text-text-secondary,text-warning,w-[272px],w-[64px],whitespace-nowrap": "conduit-test-aoqb.6 moves permission trigger appearance to ui/ComposerModeControl and PermissionShield. All widths keep a shield-only trigger, words stay dotted, and all six two-line modes remain with orange and red status colours and a divider before full access.",
+	"src/lib/frontend/components/input/UsageLimitStrip.svelte :: canSwitch,gap-[7px],h-[24px],h-[34px],leading-[1.35],mb-2,px-[8px],py-[7px],rounded-2xl,rounded-[10px],rounded-[8px],text-[11.5px],text-[11px]": "conduit-test-aoqb.6 fuses the limited state into ui/ComposerStrip, or the waiting queue tray. Recovery actions remain with Button composer-chip geometry; the old standalone rounded card is intentionally removed.",
+	"src/lib/frontend/components/input/UsageWarningStrip.svelte :: border,gap-[7px],h-[24px],h-[34px],leading-[1.35],mb-2,px-[10px],py-[7px],rounded-2xl,rounded-[10px],rounded-[8px],size-5,text-[11.5px],text-[11px],text-status-amber,text-text-secondary": "conduit-test-aoqb.6 replaces the standalone warning card with ui/ComposerStrip inset-tab geometry, new account/window copy and composer-chip actions, with persisted dismissal.",
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: bg-bg-alt,gap-[10px],gap-[8px],h-[14px],h-[26px],hasModel,hover:bg-text/7,min-h-[50px],mx-[4px],opacity-50,px-[6px],text-[12.5px],w-px": "conduit-test-aoqb.6 replaces separate harness/model desktop triggers and abbreviated phone tags with one truncating model pill at every width, through Button composer-model. Phone composer rows use composer-row; desktop words use composer-word. Picker contents remain unchanged.",
+	"src/lib/frontend/components/model/ModelVariant.svelte :: border-border-subtle,font-normal,gap-[10px],gap-[5px],h-[26px],hover:bg-text/7,last:border-b-0,min-h-[50px],px-[6px],rounded-[7px],rounded-none,text-[11.5px],text-[12.5px],text-text,text-text-secondary,whitespace-nowrap": "conduit-test-aoqb.6 uses Button composer-model, composer-word and composer-row recipes for effort triggers. The compact desktop effort control is omitted before labels crowd Send; its existing picker and Ctrl+T remain available.",
+	"src/lib/frontend/components/session/GitIdentity.svelte :: border-b,border-border-subtle,gap-[10px],hover:bg-text/7,last:border-b-0,rounded-none,text-[12.5px]": "conduit-test-aoqb.6 uses Button composer-checkout for the filled mono checkout pill and composer-row in the phone sheet. The old square row recipe moves into Button; checkout collapses to its icon before the model label truncates.",
+	"src/lib/frontend/components/input/InputArea.svelte :: phone": "conduit-test-aoqb.6 removes the old phone-only class condition with its abbreviated model and ellipsis control. The replacement uses the model pill and Composer sheet at all phone widths; phone was a condition literal, not a utility.",
+	"src/lib/frontend/components/input/InputArea.svelte :: shrink": "conduit-test-80a4 within aoqb.6 makes the Words checkout yield its label space before the model using a prioritized flex track; the previous equal shrink factor could leave its label and the model overlapping.",
+	"src/lib/frontend/components/input/InputArea.svelte :: has-[textarea:focus]:pb-[12px]": "conduit-test-aoqb.6 uses the Final outer spacing in literal px: 32px desktop sides and 22px bottom, 12px phone sides and 8px bottom plus safe area. This also makes 320px and 390px phones yield 296px and 366px composers, without rem scaling.",
+	"src/lib/frontend/components/input/InputArea.svelte :: max-md:px-3": "conduit-test-aoqb.6 uses the Final outer spacing in literal px: 32px desktop sides and 22px bottom, 12px phone sides and 8px bottom plus safe area. This also makes 320px and 390px phones yield 296px and 366px composers, without rem scaling.",
+	"src/lib/frontend/components/input/InputArea.svelte :: max-md:py-1.5": "conduit-test-aoqb.6 uses the Final outer spacing in literal px: 32px desktop sides and 22px bottom, 12px phone sides and 8px bottom plus safe area. This also makes 320px and 390px phones yield 296px and 366px composers, without rem scaling.",
+	"src/lib/frontend/components/input/InputArea.svelte :: pb-[calc(env(safe-area-inset-bottom,0px)+12px)]": "conduit-test-aoqb.6 uses the Final outer spacing in literal px: 32px desktop sides and 22px bottom, 12px phone sides and 8px bottom plus safe area. This also makes 320px and 390px phones yield 296px and 366px composers, without rem scaling.",
+	"src/lib/frontend/components/input/InputArea.svelte :: py-2": "conduit-test-aoqb.6 uses the Final outer spacing in literal px: 32px desktop sides and 22px bottom, 12px phone sides and 8px bottom plus safe area. This also makes 320px and 390px phones yield 296px and 366px composers, without rem scaling.",
+	"src/lib/frontend/components/input/SkillHighlightBackdrop.svelte :: composer-pill,skill-pill": {
+		"movedTo": "src/lib/frontend/components/ui/ComposerToken.svelte",
+		"requires": "<ComposerToken ",
+		"reason": "conduit-test-aoqb.6 review moves recognized-token appearance, including the goal variant, into ui/ComposerToken. The feature supplies the token text and goal state."
+	},
+	"src/lib/frontend/components/input/InputArea.svelte :: pl-[4px]": "conduit-test-aoqb.6 review: the Words context percentage follows a literal middle-dot separator like the spec's `feat/typed-session-list ● · 38%`, so the dot supplies the spacing through the row gap and the left padding goes.",
+	"src/lib/frontend/components/input/UsageLimitStrip.svelte :: gap-[5px],px-[10px]": "conduit-test-aoqb.6 review: Button has no class merging, so call-site gap and padding fought the composer-chip size recipe in stylesheet order. The composer-chip size now owns the 5px gap and 9px sides for every strip chip.",
+	"src/lib/frontend/components/input/UsageWarningStrip.svelte :: gap-[5px],justify-center": "conduit-test-aoqb.6 review: the composer-chip size recipe owns the 5px gap, and phone centring stays on the compact branch (flex-1 justify-center); the always-on justify-center duplicated it.",
+	"src/lib/frontend/components/input/UsageLimitStrip.svelte :: min-w-0": "conduit-test-aoqb.6: the limit copy keeps a readable minimum width (min-w-[min(100%,16em)]) so the recovery actions wrap below it instead of squeezing it to a sliver.",
+	"src/lib/frontend/components/chat/SurfacingCard.svelte :: bottom-0,h-[44px],max-md:min-w-[44px],min-w-[32px],translate-x-1/2": "conduit-test-ahu8.16: two pin rows sit 24px (38px on phone) apart, so each pin target is 32px tall and sized to its pill, each row sets its own bottom offset, and pills are placed by their clamped left edge instead of centred on the pin.",
+	"src/lib/frontend/components/chat/UserMessage.svelte :: bg-linear-to-br,from-accent,md:size-[28px],md:text-[13px],place-items-center,size-[20px],text-[11px],text-white,to-status-snoozed": "conduit-test-aoqb.3: the You avatar is drawn by UserAvatar, which sizes itself from a px size prop (letter at size x .44) and paints the chosen face; the placeholder accent-to-snoozed gradient is replaced by the initial on a name-picked preset orb gradient.",
+	"src/lib/frontend/components/ui/Tile.svelte :: text-[13px]": "Still 13px by default. The label size now reads --tile-font, so a 5-column grid (LabelledGridGroup columns=5) can set 12px labels as the spec's .sm-five does.",
+	"src/lib/frontend/components/input/InputArea.svelte :: leading-[1.35],mb-2,px-[10px],py-[7px],rounded-2xl,text-[11.5px]": "conduit-test-aoqb.17: the refused-steer notice is a ComposerStrip fused to the composer, so the strip primitive owns its padding, top corners, type size and line height, and it sits flush on #input-row with no gap.",
+	"src/lib/frontend/components/input/UsageLimitStrip.svelte :: sessionViewState.compact": "conduit-test-aoqb.17: the Switch account trigger takes the shared stretch geometry, which already centres it on phone strips; the tray keeps natural-width trailing actions.",
+	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: gap-1.5,px-[10px],py-[6px],rounded-[9px],text-[11.5px],text-status-red": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "variant=\"task-stop-all\"",
+		"reason": "conduit-test-aoqb.22: Stop all keeps its appearance in Button's task-stop-all recipe."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: bg-text-dimmer/30,border,border-current/40,font-sans,goalTone,h-[3px],mb-[4px],mb-[5px],min-w-full,mt-[10px],mt-[6px],mx-auto,normal-case,pb-[8px],pt-[12px],px-[14px],px-[6px],rotate-180,rounded-[6px],rounded-b-[22px],text-status-amber,text-status-green,tracking-[0.08em],tracking-normal,transition-transform,uppercase,w-0,w-[34px]": "conduit-test-aoqb.5: replace the old phone goal header, ascending elapsed-time history, and bottom handle with the Final shared goal content and ui/SheetChrome bottom sheet. The goal line spans a dedicated grid row, its indicator is the goal icon, and phone geometry uses px sizes in style.css. Desktop content retains its existing classes.",
+	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: font-semibold,gap-1,max-w-[168px],max-w-[210px],ml-1,mr-px,mt-[6px],opacity-65,opacity-75,opacity-85,px-0.5,rotate-180,shrink,tasks.length,tasksPanel.open,text-[10.5px],text-status-goal,text-text,text-text-muted,transition-transform,underGoal": "conduit-test-aoqb.5: the Final phone task strip replaces its elbow, task preview, overflow count, and chevron with a task count and Stop all. The complete descriptions, kinds, ages, and individual controls remain in the task panel. Surface task-strip owns the new appearance.",
+	"src/lib/frontend/components/ui/Badge.svelte :: bg-tool/13,pl-[5px],pr-1.5,py-0,rounded-[6px],text-[10.5px],text-tool": "conduit-test-aoqb.5: remove the task variant and size after the Final phone task strip replaces their last consumer.",
+	"src/lib/frontend/components/ui/Surface.svelte :: h-[24px],items-stretch,rounded-lg": "conduit-test-aoqb.5: remove the segments variant after its last consumer moved to the Final capsule.",
+	"src/lib/frontend/components/ui/button-recipes.ts :: bg-warning-bg,border-warning/30,rounded-none,text-[10px],text-base,text-tool,text-warning": "conduit-test-aoqb.5 review: remove task-row, navigation, segment and pill-warning after confirming zero production consumers; remove the warning-pill story and its baselines as well.",
+	"src/lib/frontend/components/ui/Badge.svelte :: bg-status-ask": {
+		"renamedTo": "bg-fill-ask",
+		"reason": "conduit-test-aoqb.19: the solid back badge keeps the dark theme's orange fill in both themes; status-ask remains contrast-safe text ink."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: bottom-0,inset-x-0,pointer-events-auto": {
+		"movedTo": "src/lib/frontend/components/ui/Popover.svelte",
+		"requires": "presentation=\"sheet\" modal",
+		"reason": "conduit-test-aoqb.35: Popover owns the bottom sheet positioning and interactive scrim."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: contents": "conduit-test-aoqb.35: Popover portals its own scrim; the caller's inert-exemption wrapper is removed.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: focus-visible:outline-hidden": "conduit-test-aoqb.35: Popover's sheet uses outline-hidden, which also suppresses the focused container outline without changing its pixels.",
+	"src/lib/frontend/components/ui/SwitchRow.svelte :: min-h-[15px]": {
+		"renamedTo": "min-h-[18.75px]",
+		"reason": "conduit-test-voxy.10: the loading state reserves the Final status line's full 12.5px times 1.5 height, so its title stays aligned before the outlook arrives."
+	},
+	"src/lib/frontend/components/session/SessionSheetBody.svelte :: text-[10.58px]": {
+		"renamedTo": "text-[11.5px]",
+		"reason": "conduit-test-voxy.10: Geist Mono already applies the Final design's 92% size adjustment in its font face; the branch chip must not apply it a second time. Normal line height restores the 16px chip."
+	},
+	"src/lib/frontend/components/ui/SwitchRow.svelte :: leading-[1.2]": {
+		"renamedTo": "leading-[1.5]",
+		"reason": "conduit-test-voxy.10: match the Final sheet's 21.75px Auto-settle label and 18.75px status line heights."
+	},
+	"src/lib/frontend/components/ui/ViewCard.svelte :: text-[7.36px]": {
+		"renamedTo": "text-[8px]",
+		"reason": "conduit-test-voxy.10: remove the second 92% mono size adjustment while preserving the design's explicit 11.04px preview line height."
+	},
+	"src/lib/frontend/components/ui/ViewCard.svelte :: leading-[1.5]": {
+		"renamedTo": "leading-[11.04px]",
+		"reason": "conduit-test-voxy.10: keep the Final preview's 8px times 0.92 times 1.5 line height when moving mono glyph scaling solely into the font face."
+	}
 }

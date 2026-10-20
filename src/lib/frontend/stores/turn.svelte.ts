@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { untrack } from "svelte";
 import { SvelteMap } from "svelte/reactivity";
+import { parseAttachmentDataUrl } from "../../attachment-data-url.js";
 import { WorkspaceMoveError } from "../../contracts/session-workspace.js";
 import type {
 	InputDelivery,
@@ -222,6 +223,20 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 		uuid: inputId,
 		text: input.text,
 		createdAt: Date.now(),
+		...(input.images?.length
+			? {
+					attachments: input.images.map((url) => {
+						const { mime, name, size } = parseAttachmentDataUrl(url);
+						return {
+							id: crypto.randomUUID(),
+							name: name ?? "Attachment",
+							mime,
+							url,
+							size,
+						};
+					}),
+				}
+			: {}),
 	} as const;
 	try {
 		if ("sideThread" in input) {

@@ -27,6 +27,7 @@ import { subscribeApprovals } from "../domain/relay/Services/approvals-subscript
 import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
 import { subscribeProjectSettings } from "../domain/relay/Services/project-settings.js";
 import { subscribePtys } from "../domain/relay/Services/pty-subscription.js";
+import { RecapServiceTag } from "../domain/relay/Services/recap-service.js";
 import { WebSocketHandlerTag } from "../domain/relay/Services/services.js";
 import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
 import { subscribeSessionFamily } from "../domain/relay/Services/session-family-subscription.js";
@@ -91,6 +92,10 @@ const daemonOnlyStreamHandlers = {
 };
 
 const streamHandlers = {
+	SubscribeRecaps: (request) =>
+		Stream.unwrap(
+			Effect.map(RecapServiceTag, (service) => service.subscribe(request)),
+		),
 	SubscribeShell: (request) =>
 		subscribeShell({
 			...(request.resumeFromSequence === undefined
@@ -242,12 +247,18 @@ export type DaemonRpcName =
 	| "UpdateInstance"
 	| "SetDefault"
 	| "GetAutoSettleSetting"
+	| "GetAvatar"
+	| "SetAvatar"
 	| "SetAutoSettleSetting"
+	| "GetAutoArchiveSetting"
+	| "SetAutoArchiveSetting"
 	| "GetAutoDeleteArchivedSetting"
 	| "SetAutoDeleteArchivedSetting"
 	| "GetWorktreeCleanupSetting"
 	| "SetWorktreeCleanupSetting"
 	| "CleanUpWorktreesNow"
+	| "SetTerminalKeys"
+	| "GetTerminalKeys"
 	| "GetUsageLimitsSetting"
 	| "SetUsageLimitsSetting"
 	| "SetCursorUsageKeychain"
@@ -261,7 +272,8 @@ export type DaemonRpcName =
 
 export class RpcCaller extends Context.Service<
 	RpcCaller,
-	{ readonly kind: "browser"; readonly ip: string } | { readonly kind: "cli" }
+	| { readonly kind: "browser"; readonly ip: string; readonly secure?: boolean }
+	| { readonly kind: "cli" }
 >()("RpcCaller") {}
 
 /** Browser mutations revoke connections after their reply has been written. */
@@ -289,7 +301,7 @@ export type DaemonRpcHandlers = {
 			Extract<RpcGroup.Rpcs<typeof WsRpcGroup>, { readonly _tag: K }>
 		>,
 		Rpc.Error<Extract<RpcGroup.Rpcs<typeof WsRpcGroup>, { readonly _tag: K }>>,
-		K extends "SetPin" ? RpcCaller : never
+		K extends "SetPin" | "UpdateMessageSurfacing" ? RpcCaller : never
 	>;
 } & {
 	readonly SubscribeInstances: () => Stream.Stream<

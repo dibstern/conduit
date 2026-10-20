@@ -207,6 +207,18 @@ vi.mock("../../../src/lib/frontend/stores/permissions.svelte.js", () => ({
 	clearAllPermissions: vi.fn(),
 }));
 
+// These layout tests set compact state directly. The breakpoint listener has
+// its own coverage in session-view-compact.test.ts.
+vi.mock(
+	"../../../src/lib/frontend/stores/session-view.svelte.js",
+	async (importOriginal) => ({
+		...(await importOriginal<
+			typeof import("../../../src/lib/frontend/stores/session-view.svelte.js")
+		>()),
+		watchCompactViewport: vi.fn(() => () => {}),
+	}),
+);
+
 vi.mock("../../../src/lib/frontend/stores/terminal.svelte.js", () => ({
 	terminalState: { panelOpen: false, unreadPtyIds: new Set() },
 	destroyAll: vi.fn(),

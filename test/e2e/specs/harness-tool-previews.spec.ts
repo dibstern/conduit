@@ -18,6 +18,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Locator, Page } from "@playwright/test";
 import { Effect } from "effect";
+import type { ResponseExitEncoded } from "effect/rpc/RpcMessage";
 import type {
 	EventPayloadMap,
 	LiveEventType,
@@ -362,12 +363,14 @@ const watchRpc = async (page: Page) => {
 						requestId: request.id,
 						exit: {
 							_tag: "Failure",
-							cause: {
-								_tag: "Fail",
-								error: { _tag: "WsRpcError", message: "Injected failure" },
-							},
+							cause: [
+								{
+									_tag: "Fail",
+									error: { _tag: "WsRpcError", message: "Injected failure" },
+								},
+							],
 						},
-					}),
+					} satisfies ResponseExitEncoded),
 				);
 			});
 		},
@@ -513,8 +516,9 @@ test("tools open as previews and expand to full detail", async ({
 	const detailsBefore = detailResponses(rpc.frames).length;
 	rpc.failNextDetails = true;
 	const bashRow = await expandTool(page, toolRow(page, BASH_ID));
-	await expect(bashRow).toContainText(
-		"Couldn't load the full command and output.",
+	// The failed load names its reason (j4ff.8), here the injected one.
+	await expect(bashRow.locator(".tool-full-detail")).toContainText(
+		"Injected failure",
 	);
 	await expect(bashRow.locator(".tool-result")).not.toContainText(
 		endOf("result"),

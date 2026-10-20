@@ -77,21 +77,22 @@ for (const [viewportName, viewport] of [
 			await expect(panel).toBeVisible();
 			await page.getByTestId("settings-tab-general").click();
 			await expect(panel.getByRole("heading", { level: 3 })).toHaveText([
-				"Notifications",
+				"You",
 				"Appearance",
 				"Composer",
+				"Notifications",
 				"Sessions",
 			]);
 			await expect(
 				panel
 					.getByRole("region", { name: "Appearance", exact: true })
-					.getByRole("combobox", { name: /^Theme\b/ }),
+					.getByRole("button", { name: /^Theme\b/ }),
 			).toBeVisible();
 			await expect(
 				panel
 					.getByRole("region", { name: "Sessions", exact: true })
 					.getByTestId("settings-auto-settle-select"),
-			).toHaveValue("3");
+			).toHaveAttribute("data-value", "3");
 			await expect(panel.getByText("Log level", { exact: true })).toHaveCount(
 				0,
 			);

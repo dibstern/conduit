@@ -59,6 +59,11 @@ describe("session command shortcuts", () => {
 	});
 
 	it("runs global commands with ⌘⇧ or Ctrl+Shift", () => {
+		for (const modifier of ["metaKey", "ctrlKey"] as const)
+			expect(press(open, { key: "S", [modifier]: true, shiftKey: true })).toBe(
+				"session-ctx-settle",
+			);
+		// Keep the previous global binding available to existing users.
 		expect(press(open, { key: "E", metaKey: true, shiftKey: true })).toBe(
 			"session-ctx-settle",
 		);
@@ -73,7 +78,6 @@ describe("session command shortcuts", () => {
 			{ key: "s", repeat: true },
 			{ key: "S", shiftKey: true },
 			{ key: "s", metaKey: true },
-			{ key: "S", metaKey: true, shiftKey: true },
 			{ key: "E", metaKey: true, shiftKey: true, altKey: true },
 		])
 			expect(press(open, event)).toBeUndefined();
@@ -86,7 +90,7 @@ describe("session command shortcuts", () => {
 	});
 
 	it("shows the same keys it matches", () => {
-		expect(sessionCommandKeysHint(sessionCommandKeys.settle)).toBe("s · ⌘⇧E");
+		expect(sessionCommandKeysHint(sessionCommandKeys.settle)).toBe("s · ⌘⇧S");
 		expect(sessionCommandKeysHint(sessionCommandKeys.read)).toBe("u · ⌘⇧U");
 		expect(sessionCommandKeysHint(sessionCommandKeys.pin)).toBe("p");
 	});

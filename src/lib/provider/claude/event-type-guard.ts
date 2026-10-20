@@ -4,6 +4,11 @@ import type { LiveEventType } from "../../contracts/stored-event.js";
 export const CLAUDE_EVENT_CLASSIFICATION = {
 	"message.created": { produced: true },
 	"text.delta": { produced: true },
+	"text.surfaced": {
+		produced: false,
+		reason:
+			"Daemon-owned surfacing verdict; never emitted by a provider adapter",
+	},
 	"thinking.start": { produced: true },
 	"thinking.delta": { produced: true },
 	"thinking.end": { produced: true },

@@ -63,7 +63,7 @@ Scenario Outline: tapping the dock opens every account's meter in a sheet
   When the usage footer work five_hour reading is 86% resetting at none
   And I tap back to the session list
   And I open the phone usage sheet
-  Then the usage sheet groups read CLAUDE, CODEX, CURSOR with rows claude, work, spare, unreadable, chatgpt, cursor
+  Then the usage sheet groups read Claude, Codex, Cursor with rows claude, work, spare, unreadable, chatgpt, cursor
   And the usage sheet row claude is the highlighted current account
   And the usage sheet work shows five_hour 86% and seven_day 48%
   And the usage sheet chatgpt shows five_hour 30% and seven_day 64%
@@ -91,20 +91,21 @@ Scenario: the usage sheet rises under the finger pulling the dock
   Then the usage sheet follows my finger up the phone usage dock
   And the usage sheet is open
 
-Scenario: the usage sheet folds back into the dock in the dock's colour
+Scenario: the usage sheet folds back to the top of the raised dock
   Given the usage footer has several accounts with an unknown Claude reading
   When I tap back to the session list
   And I drag the phone usage dock up by 120 pixels
   Then the usage sheet is open
-  And the usage sheet has the phone usage dock's background
-  And the usage sheet dragged down past the phone usage dock lands on it row for row
+  And the usage sheet uses the shared sheet surface
+  And the phone usage dock uses the sidebar surface
+  And the usage sheet dragged down past the phone usage dock lands at its top
   And the usage sheet is closed
 
 Scenario Outline: one account uses inline windows without the sheet
   Given the usage footer has one Claude account in the <state> state
   When I tap back to the session list
   Then the session list is open
-  And the single phone usage footer shows 5h <fiveHour> and Wk <week>
+  And the single phone usage footer shows 5h <fiveHour> and Week <week>
   And the usage footer claude five_hour meter is <fiveHourLevel> at <fiveHourUsed> percent
   And the usage footer claude seven_day meter is <weekLevel> at <weekUsed> percent
   And the phone usage footer clears the new-session button and the last row text
@@ -151,3 +152,18 @@ Scenario: live readings dock warning accounts from other harnesses in account or
   And the phone usage footer folds 2 more accounts
   And the phone usage footer clears the new-session button and the last row text
   And the SubscribeUsage RPC has no project payload
+
+Scenario Outline: one folded account names its provider
+  Given the usage footer has a Claude account and a hidden <provider> account named <account>
+  When I tap back to the session list
+  Then the phone usage rows are claude in that order
+  And the phone usage footer labels the hidden account "+1 <provider> account"
+  And the sidebar region visually matches <baseline> at <threshold> percent
+  When I open the phone usage sheet
+  Then the usage sheet shows the hidden account named <account>
+
+Examples:
+  | provider | account  | baseline                         | threshold |
+  | Codex    | Personal | usage-footer-hidden-codex-phone   | 98        |
+  | Claude   | Work     | usage-footer-hidden-claude-phone  | 98        |
+  | Cursor   | Team     | usage-footer-hidden-cursor-phone  | 98        |

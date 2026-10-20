@@ -1,4 +1,5 @@
 import type { Page, TestInfo } from "@playwright/test";
+import { openComposerSheet } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
@@ -158,14 +159,19 @@ test("phone hint is an accessible icon with both actions in the checkout menu", 
 }, testInfo) => {
 	await page.setViewportSize({ width: 390, height: 844 });
 	const { rpc, session } = await openHint(page, harness.relayBaseUrl);
-	const checkout = page.getByTestId("composer-checkout");
+	// The phone Words row flags the hint; the checkout lives in the Composer sheet.
+	await expect(page.getByTestId("composer-more-attention")).toBeVisible();
+	await expect(page.getByTestId("workspace-hint-move")).toHaveCount(0);
+	await expect(page.getByTestId("workspace-hint-dismiss")).toHaveCount(0);
+	await openComposerSheet(page);
+	const checkout = page
+		.getByTestId("composer-more-sheet")
+		.getByTestId("composer-checkout");
 	const hint = checkout.getByTestId("workspace-hint");
 	await expect(hint).toBeVisible();
 	await expect(hint).toHaveAttribute("aria-label", "working in conduit-hint?");
 	await expect(hint).toHaveText("");
 	await expect(hint.locator("svg")).toBeVisible();
-	await expect(page.getByTestId("workspace-hint-move")).toHaveCount(0);
-	await expect(page.getByTestId("workspace-hint-dismiss")).toHaveCount(0);
 	await capture(page, testInfo, "workspace-hint-phone");
 	await checkout.click();
 	const menu = page.getByTestId("composer-checkout-menu");
@@ -182,6 +188,7 @@ test("phone hint is an accessible icon with both actions in the checkout menu", 
 		.toEqual([
 			{ _tag: "MoveSessionWorkspace", sessionId: session.id, path: hintPath },
 		]);
+	await openComposerSheet(page);
 	await checkout.click();
 	await menu.getByTestId("workspace-hint-dismiss").click();
 	await expect
@@ -195,6 +202,7 @@ test("phone hint is an accessible icon with both actions in the checkout menu", 
 			{ _tag: "DismissWorkspaceHint", sessionId: session.id, path: hintPath },
 		]);
 	rpc.upsertShellRow({ ...session, workspaceHint: undefined });
+	await expect(page.getByTestId("composer-more-attention")).toHaveCount(0);
 	await expect(hint).toHaveCount(0);
 	await testInfo.attach("workspace-hint-rpc", {
 		body: JSON.stringify(

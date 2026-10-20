@@ -119,3 +119,13 @@ export const Hover: Story = {
 	...Default,
 	parameters: { pseudo: { hover: true } },
 };
+
+export const Final: Story = {
+	args: { message: { ...mockToolCompleted, createdAt: 1000, endedAt: 6200 } },
+	globals: { theme: "dark" },
+};
+export const FinalLight: Story = { ...Final, globals: { theme: "light" } };
+export const ExpandedResultLight: Story = {
+	...ExpandedResult,
+	globals: { theme: "light" },
+};

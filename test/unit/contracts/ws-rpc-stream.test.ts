@@ -129,6 +129,7 @@ const makeLayer = (options: {
 					listSessions: () => Effect.succeed([]),
 					listPendingClaudeQuestionTools: () => Effect.succeed([]),
 					listSessionInfos: () => Effect.succeed([]),
+					countSettledSessions: () => Effect.succeed(0),
 					listSessionGitRefreshTargets: () => Effect.succeed([]),
 					getSessionSkillMessages: () => Effect.succeed([]),
 					getSessionsForReconciliation: () => Effect.succeed([]),

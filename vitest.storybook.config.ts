@@ -9,7 +9,7 @@ export default defineConfig({
 	plugins: [svelte(), tailwindcss()],
 	// Pre-bundle lazily imported deps: discovering one mid-run reloads the
 	// browser and aborts the test files in flight.
-	optimizeDeps: { include: ["mermaid", "highlight.js"] },
+	optimizeDeps: { include: ["mermaid", "highlight.js", "@xterm/addon-search"] },
 	test: {
 		projects: [
 			{
@@ -22,7 +22,9 @@ export default defineConfig({
 					browser: {
 						enabled: true,
 						headless: true,
-						provider: playwright(),
+						provider: playwright({
+							contextOptions: { timezoneId: "UTC", locale: "en-US" },
+						}),
 						instances: [{ browser: "chromium" }],
 					},
 					setupFiles: [resolve(__dirname, ".storybook/vitest.setup.ts")],

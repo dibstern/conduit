@@ -147,7 +147,9 @@ const withHandlerStack = async (
 			holdUserTurnsForAccountSwitch: () => Effect.void,
 			prepareTurnSession: (input) => Effect.succeed(input.sessionId),
 			sendTurn: () => Effect.void,
-			interruptTurn: () => Effect.void,
+			turnFences: () => ({ stopping: false, switching: false }),
+			fenceLifts: Effect.succeed(Stream.never),
+			beginStop: () => Effect.succeed(Effect.void),
 		}),
 		makeOverridesStateLive(),
 	);

@@ -1,6 +1,7 @@
 <script lang="ts" generics="T extends string">
 	import { RadioGroup } from "bits-ui";
 	import { tick, type Snippet } from "svelte";
+	import { SEGMENTED_VARIANTS, segmentedItemClass } from "./segmented-styles.js";
 
 	let {
 		options,
@@ -12,6 +13,7 @@
 		lockedReason,
 		scrollThreshold = 4,
 		itemWidth,
+		variant = "plain",
 		class: className = "",
 		itemClass = "",
 		testId,
@@ -26,8 +28,9 @@
 		label: string;
 		lockedReason?: string;
 		scrollThreshold?: number;
-		/** Width in the scroll row; height and item appearance belong to the caller. */
+		/** Width of an option when the row scrolls. */
 		itemWidth?: number;
+		variant?: "plain" | "joined" | "cards";
 		class?: string;
 		itemClass?: string;
 		testId?: string;
@@ -80,8 +83,9 @@
 	aria-label={label}
 	data-testid={testId}
 	data-layout={scrolling ? "scroll" : "segmented"}
+	data-variant={variant}
 	data-fade={moreToRight ? "true" : "false"}
-	class="option-row {className}"
+	class="option-row {variant === 'joined' ? SEGMENTED_VARIANTS.joined.list : ''} {className}"
 	style="--option-count:{Math.max(options.length, 1)};--option-width:{itemWidth === undefined ? 'max-content' : `${itemWidth}px`};"
 	onscroll={updateFade}
 >
@@ -94,7 +98,11 @@
 			aria-disabled={option.locked ? "true" : undefined}
 			aria-describedby={option.locked ? (option.lockedReason ? `${reasonId}-${option.value}` : lockedReason ? reasonId : undefined) : undefined}
 			data-testid={itemTestId?.(option.value)}
-			class={itemClass}
+			class={variant === "joined"
+				? segmentedItemClass("joined", option.value === value, `min-w-0 flex-1 gap-[6px] ${itemClass}`)
+				: variant === "cards"
+					? `block min-w-0 rounded-[10px] text-left focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2 ${itemClass}`
+					: itemClass}
 			onclick={() => { if (!option.locked) onActivate?.(option.value); }}
 			onkeydowncapture={(event) => {
 				if (event.key === " " && !option.locked) onActivate?.(option.value);
@@ -114,6 +122,31 @@
 {/each}
 
 <style>
+	:global(.option-row[data-variant="joined"] > [data-radio-group-item]) {
+		min-height: 30px;
+		font-size: 13px;
+	}
+	:global(.option-row[data-variant="cards"] [data-option-card]) {
+		display: grid;
+		width: 100%;
+		height: 100%;
+		min-width: 0;
+		gap: 6px;
+		border-radius: 10px;
+		padding: 8px 9px;
+		background: var(--color-chip);
+		font-size: 12.5px;
+		font-weight: 500;
+	}
+	:global(.option-row[data-variant="cards"] [data-state="checked"] > [data-option-card]) {
+		box-shadow: inset 0 0 0 1.5px var(--color-accent);
+	}
+	:global(.option-row[data-variant="cards"] [data-option-card][data-limited="true"]) { opacity: .55; }
+	:global(.option-row[data-variant="cards"] [data-option-card][data-locked="true"]) { opacity: .5; }
+	@media (max-width: 767px) {
+		:global(.option-row[data-variant="joined"] > [data-radio-group-item]) { min-height: 44px; }
+		:global(.option-row[data-variant="cards"] [data-option-card]) { min-height: 44px; }
+	}
 	:global(.option-row[data-layout="segmented"]) {
 		display: grid;
 		grid-template-columns: repeat(var(--option-count), minmax(0, 1fr));
@@ -132,6 +165,13 @@
 		flex: none;
 		width: var(--option-width);
 		scroll-snap-align: start;
+	}
+	/* Match the joined track's 2px inset, or mandatory snapping parks scrollLeft at 2. */
+	:global(.option-row[data-variant="joined"][data-layout="scroll"]) { scroll-padding-inline-start: 2px; }
+	:global(.option-row[data-variant="joined"][data-layout="scroll"] > [data-radio-group-item]) {
+		padding-inline: 4px;
+		font-size: 12px;
+		white-space: nowrap;
 	}
 	:global(.option-row[data-fade="true"]) {
 		-webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);

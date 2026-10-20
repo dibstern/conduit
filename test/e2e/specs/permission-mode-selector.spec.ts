@@ -16,32 +16,38 @@ import { mockRelayWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
 type Page = import("@playwright/test").Page;
 
 const PROJECT_URL = "/s/sess-pm-001";
-const BASE = `http://localhost:${process.env["ACCEPTANCE_PORT"] ?? 4173}`;
 
 const existingSession = {
 	id: "sess-pm-001",
+	projectSlug: "myapp",
 	title: "Existing session",
 	status: "idle",
 	updatedAt: Date.now(),
 	messageCount: 4,
 };
 
-const sessionList: MockMessage = {
+type Account = "claude" | "opencode";
+
+/** The shell row names the session's account, which fixes its driver. */
+const sessionList = (accountId: Account): MockMessage => ({
 	type: "shell_snapshot",
 	roots: true,
-	sessions: [existingSession],
-};
+	sessions: [{ ...existingSession, accountId }],
+});
 
-/** The server reports the session's mode on its shell row. */
-const reportMode = (rpc: RpcMockControl, mode: string): void =>
+/** The server reports the session's account and mode on its shell row. */
+const reportMode = (
+	rpc: RpcMockControl,
+	mode: string,
+	accountId: Account = (rpc.catalog.active as GetModelsResponse["active"])
+		?.provider === "claude"
+		? "claude"
+		: "opencode",
+): void =>
 	rpc.setShellRows([
 		{
 			...existingSession,
-			accountId:
-				(rpc.catalog.active as GetModelsResponse["active"])?.provider ===
-				"claude"
-					? "claude"
-					: "opencode",
+			accountId,
 			permissionMode: mode,
 		},
 	]);
@@ -64,6 +70,22 @@ const modelList: MockMessage = {
 	],
 };
 
+/** A session's driver, and so its approval modes, comes from its instance. */
+const instanceList: MockMessage = {
+	type: "instance_list",
+	instances: (["claude", "opencode"] as const).map((driver) => ({
+		id: driver,
+		name: driver,
+		driver,
+		isDefault: true,
+		port: 0,
+		managed: false,
+		status: "healthy",
+		restartCount: 0,
+		createdAt: 1,
+	})),
+};
+
 const projectList: MockMessage = {
 	type: "project_list",
 	projects: [{ slug: "myapp", title: "myapp", folders: ["/tmp/myapp"] }],
@@ -74,16 +96,18 @@ const projectList: MockMessage = {
 const boundInit: MockMessage[] = [
 	{ type: "status", status: "idle" },
 	{ type: "model_info", model: "claude-sonnet-4", provider: "anthropic" },
-	sessionList,
+	sessionList("opencode"),
 	modelList,
+	instanceList,
 	projectList,
 ];
 
 const claudeBoundInit: MockMessage[] = [
 	{ type: "status", status: "idle" },
 	{ type: "model_info", model: "claude-sonnet-4", provider: "claude" },
-	sessionList,
+	sessionList("claude"),
 	modelList,
+	instanceList,
 	projectList,
 ];
 
@@ -91,8 +115,9 @@ const claudeBoundInit: MockMessage[] = [
 const unboundInit: MockMessage[] = [
 	{ type: "status", status: "idle" },
 	{ type: "model_info", model: "claude-sonnet-4", provider: "anthropic" },
-	sessionList,
+	sessionList("opencode"),
 	modelList,
+	instanceList,
 	projectList,
 ];
 
@@ -191,7 +216,7 @@ async function setup(
 	});
 	reportMode(rpc, "ask");
 	const bound = initMessages !== unboundInit;
-	await page.goto(`${BASE}${bound ? PROJECT_URL : "/"}`);
+	await page.goto(bound ? PROJECT_URL : "/");
 	await page.locator("#input").waitFor({ state: "visible", timeout: 10_000 });
 	if (bound) {
 		await rpc.waitForRequest((request) => request.tag === "ViewSession");
@@ -255,37 +280,41 @@ test.describe("Permission mode with a bound session", () => {
 			.locator(".connect-overlay")
 			.waitFor({ state: "hidden", timeout: 10_000 });
 
-		reportMode(rpc, "plan");
-		await expect(pill(page)).toContainText("Plan");
+		reportMode(rpc, "plan", "claude");
+		await expect(pill(page)).toHaveAccessibleName(
+			"Approvals: Plan. Open options",
+		);
 
 		// Approving ExitPlanMode makes the SDK leave plan mode, which conduit
 		// learns from the SDK's own report rather than from its stored request.
 		// A pill still reading "Plan" after that is the difference between "read
 		// only" on screen and a session that is now editing files.
-		reportMode(rpc, "ask");
-		await expect(pill(page)).toContainText("Ask");
+		reportMode(rpc, "ask", "claude");
+		await expect(pill(page)).toHaveAccessibleName(
+			"Approvals: Ask before edits. Open options",
+		);
 	});
 
 	test("switching an Auto session to an OpenCode model resets it to Ask", async ({
 		page,
 	}) => {
-		const { relay, rpc, serverModes } = await setup(page, claudeBoundInit);
+		const { rpc, serverModes } = await setup(page, claudeBoundInit);
 		await page
 			.locator(".connect-overlay")
 			.waitFor({ state: "hidden", timeout: 10_000 });
 
-		reportMode(rpc, "auto");
 		serverModes.set("sess-pm-001", "auto");
-		await expect(pill(page)).toContainText("Auto");
+		reportMode(rpc, "auto", "claude");
+		await expect(pill(page)).toHaveAccessibleName(
+			"Approvals: Auto. Open options",
+		);
 
-		relay.sendMessage({
-			type: "model_info",
-			model: "claude-sonnet-4",
-			provider: "anthropic",
-		});
-		reportMode(rpc, "auto");
+		// The session moves to an OpenCode account, which has no Auto mode.
+		reportMode(rpc, "auto", "opencode");
 
-		await expect(pill(page)).toContainText("Ask");
+		await expect(pill(page)).toHaveAccessibleName(
+			"Approvals: Ask before edits. Open options",
+		);
 		await expect
 			.poll(() => switchCalls(rpc).at(-1)?.payload)
 			.toMatchObject({ sessionId: "sess-pm-001", mode: "ask" });
@@ -301,7 +330,9 @@ test.describe("Permission mode with a bound session", () => {
 			.waitFor({ state: "hidden", timeout: 10_000 });
 
 		await selectFullAccess(page);
-		await expect(pill(page)).toContainText("Full access");
+		await expect(pill(page)).toHaveAccessibleName(
+			"Approvals: Full access. Open options",
+		);
 
 		await expect
 			.poll(() => switchCalls(rpc).at(-1)?.payload)
@@ -328,7 +359,9 @@ test.describe("Permission mode with a bound session", () => {
 		await expect
 			.poll(() => switchCalls(rpc).at(-1)?.payload)
 			.toMatchObject({ sessionId: "sess-pm-001", mode: "full" });
-		await expect(pill(page)).toContainText("Full access");
+		await expect(pill(page)).toHaveAccessibleName(
+			"Approvals: Full access. Open options",
+		);
 	});
 
 	test("mode survives navigate away and back (server re-sync)", async ({
@@ -342,9 +375,11 @@ test.describe("Permission mode with a bound session", () => {
 		await expect.poll(() => switchCalls(rpc).length).toBeGreaterThan(0);
 
 		// Full reload navigation (PWA-style revisit) — re-sync must keep "Full access".
-		await page.goto(`${BASE}/s/sess-pm-001`);
+		await page.goto("/s/sess-pm-001");
 		await page.locator("#input").waitFor({ state: "visible", timeout: 10_000 });
-		await expect(pill(page)).toContainText("Full access");
+		await expect(pill(page)).toHaveAccessibleName(
+			"Approvals: Full access. Open options",
+		);
 	});
 });
 
@@ -356,27 +391,36 @@ test.describe("Permission mode selected in a draft", () => {
 
 		// 2ba9fc5b removed the pending-mode flush. The draft owns this choice.
 		await selectFullAccess(page);
-		await expect(pill(page)).toContainText("Full access");
+		await expect(pill(page)).toHaveAccessibleName(
+			"Approvals: Full access. Open options",
+		);
 		expect(switchCalls(rpc)).toHaveLength(0);
 
 		await page
-			.locator('[data-session-id="sess-pm-001"] .session-item-title')
+			.locator('[data-session-id="sess-pm-001"]')
+			.getByText("Existing session")
 			.click();
 
 		await expect(page).toHaveURL(/\/s\/sess-pm-001$/);
-		await expect(pill(page)).toContainText("Ask");
+		await expect(pill(page)).toHaveAccessibleName(
+			"Approvals: Ask before edits. Open options",
+		);
 		expect(switchCalls(rpc)).toHaveLength(0);
 		expect(serverModes.has("sess-pm-001")).toBe(false);
 
 		// Hydrating the existing session cannot inherit the draft's elevation.
 		reportMode(rpc, "ask");
-		await expect(pill(page)).toContainText("Ask");
+		await expect(pill(page)).toHaveAccessibleName(
+			"Approvals: Ask before edits. Open options",
+		);
 		expect(switchCalls(rpc)).toHaveLength(0);
 
 		await page
 			.getByRole("button", { name: "New session", exact: true })
 			.click();
-		await expect(pill(page)).toContainText("Ask");
+		await expect(pill(page)).toHaveAccessibleName(
+			"Approvals: Ask before edits. Open options",
+		);
 		await openPickerRoot(
 			page,
 			page.locator(
@@ -386,7 +430,9 @@ test.describe("Permission mode selected in a draft", () => {
 		await page.getByTestId("picker-harness-opencode").click();
 		await page.keyboard.press("Escape");
 		await selectFullAccess(page);
-		await expect(pill(page)).toContainText("Full access");
+		await expect(pill(page)).toHaveAccessibleName(
+			"Approvals: Full access. Open options",
+		);
 		rpc.setStubs({
 			CreateSession: () => ({
 				projectSlug: "myapp",
@@ -423,10 +469,13 @@ test.describe("Permission mode selected in a draft", () => {
 		await selectFullAccess(page);
 		await pill(page).click();
 		await page.locator("[data-testid='permission-mode-option-ask']").click();
-		await expect(pill(page)).toContainText("Ask");
+		await expect(pill(page)).toHaveAccessibleName(
+			"Approvals: Ask before edits. Open options",
+		);
 
 		await page
-			.locator('[data-session-id="sess-pm-001"] .session-item-title')
+			.locator('[data-session-id="sess-pm-001"]')
+			.getByText("Existing session")
 			.click();
 
 		// The existing session keeps its own mode after the draft choice is cleared.
@@ -442,6 +491,8 @@ test.describe("Permission mode selected in a draft", () => {
 		const flushed = switchCalls(rpc).map((c) => c.payload["mode"]);
 		expect(flushed).not.toContain("full");
 		expect(switchCalls(rpc)).toHaveLength(0);
-		await expect(pill(page)).toContainText("Ask");
+		await expect(pill(page)).toHaveAccessibleName(
+			"Approvals: Ask before edits. Open options",
+		);
 	});
 });

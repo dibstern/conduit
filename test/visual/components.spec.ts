@@ -73,7 +73,6 @@ const LIGHT_STORY_IDS = new Set([
 	"project-projectdialog--warnings",
 	"project-projectdialog--suggestions-open",
 	"project-projectdialog--edit",
-	"session-sessioncommanditems--sheet",
 	"layout-sessionbar--collapsed",
 	"layout-sessionbar--overflow-menu-open",
 	"input-commandmenu--open",
@@ -445,6 +444,15 @@ if (stories.length > 0) {
 	// story ("all"), but some are a property of the layout at one width only.
 	// See conduit-test-7jv.
 	const SKIP_STORIES = new Map<string, "all" | "desktop" | "mobile">([
+		// Hold-menu behavior is asserted by play() and hold-menu.spec.ts. These
+		// end in the same frames as Closed/Open, or expose the device event log.
+		["ui-holdmenu--pick-on-release", "all"],
+		["ui-holdmenu--release-off-list", "all"],
+		["ui-holdmenu--cancelled-pointer", "all"],
+		["ui-holdmenu--dim-dismissal", "all"],
+		["ui-holdmenu--keyboard", "all"],
+		["ui-holdmenu--scroll-cancels-press", "all"],
+		["ui-holdmenu--device-probe", "all"],
 		// Interaction-only: both selections leave a closed menu in the same modal.
 		["ui-menu-in-modal--keyboard-and-pointer-selection", "all"],
 		["fixtures-modalfocus--default", "all"],
@@ -474,6 +482,14 @@ if (stories.length > 0) {
 		// still earns its keep here.
 		["overlays-attentionbanner--no-notifications", "all"],
 
+		// A 395px composer cannot fit the 393px mobile viewport; desktop proves it.
+		["input-inputarea--narrow-395", "mobile"],
+		["input-inputarea--narrow-395-light", "mobile"],
+		["input-inputarea--narrow-goal-395", "mobile"],
+		["input-inputarea--narrow-goal-395-light", "mobile"],
+		["input-inputarea--narrow-limited-395", "mobile"],
+		["input-inputarea--narrow-limited-395-light", "mobile"],
+
 		// The views rail is desktop-only (hidden below md); phones switch views
 		// from the session bar instead, so there is nothing to capture at mobile.
 		["layout-viewsrail--independent-views", "mobile"],
@@ -482,10 +498,53 @@ if (stories.length > 0) {
 		["layout-sessionbar--desktop-unread-and-settled", "mobile"],
 		// These stories pin the wide desktop row. The phone project applies phone
 		// media rules even when the fixture requests a wide canvas.
-		["layout-sessionbar--desktop-git-identity", "mobile"],
 		["layout-sessionbar--desktop-long-title-narrow", "mobile"],
 		["layout-sessionbar--desktop-settled", "mobile"],
 		["layout-sessionbar--desktop-no-session", "mobile"],
+		// The Final desktop header, its popovers and task row (conduit-test-aoqb.4).
+		["layout-sessionbar--desktop-auto-settle-save", "mobile"],
+		["layout-sessionbar--desktop-auto-settle-save-light", "mobile"],
+		["layout-sessionbar--desktop-auto-settled", "mobile"],
+		["layout-sessionbar--desktop-auto-settled-light", "mobile"],
+		["layout-sessionbar--desktop-background-tasks", "mobile"],
+		["layout-sessionbar--desktop-banners", "mobile"],
+		["layout-sessionbar--desktop-banners-light", "mobile"],
+		["layout-sessionbar--desktop-goal-checking", "mobile"],
+		["layout-sessionbar--desktop-goal-checking-light", "mobile"],
+		["layout-sessionbar--desktop-goal-details", "mobile"],
+		["layout-sessionbar--desktop-goal-details-light", "mobile"],
+		["layout-sessionbar--desktop-goal-met", "mobile"],
+		["layout-sessionbar--desktop-goal-met-light", "mobile"],
+		["layout-sessionbar--desktop-goal-met-read", "mobile"],
+		["layout-sessionbar--desktop-goal-met-read-light", "mobile"],
+		["layout-sessionbar--desktop-goal-pursuing", "mobile"],
+		["layout-sessionbar--desktop-goal-long-condition", "mobile"],
+		["layout-sessionbar--desktop-goal-pursuing-light", "mobile"],
+		["layout-sessionbar--desktop-menu", "mobile"],
+		["layout-sessionbar--desktop-menu-light", "mobile"],
+		["layout-sessionbar--desktop-menu-pinned", "mobile"],
+		["layout-sessionbar--desktop-menu-pinned-light", "mobile"],
+		["layout-sessionbar--desktop-menu-settled", "mobile"],
+		["layout-sessionbar--desktop-menu-settled-light", "mobile"],
+		["layout-sessionbar--desktop-menu-snoozed", "mobile"],
+		["layout-sessionbar--desktop-menu-snoozed-light", "mobile"],
+		["layout-sessionbar--desktop-pinned", "mobile"],
+		["layout-sessionbar--desktop-pinned-light", "mobile"],
+		["layout-sessionbar--desktop-side-threads-open", "mobile"],
+		["layout-sessionbar--desktop-sidebar-collapsed", "mobile"],
+		["layout-sessionbar--desktop-sidebar-collapsed-light", "mobile"],
+		["layout-sessionbar--desktop-snooze-list", "mobile"],
+		["layout-sessionbar--desktop-snooze-list-light", "mobile"],
+		["layout-sessionbar--desktop-snoozed", "mobile"],
+		["layout-sessionbar--desktop-snoozed-light", "mobile"],
+		["layout-sessionbar--desktop-snoozed-menu", "mobile"],
+		["layout-sessionbar--desktop-snoozed-menu-light", "mobile"],
+		["layout-sessionbar--desktop-task-controls", "mobile"],
+		["layout-sessionbar--desktop-task-controls-light", "mobile"],
+		["layout-sessionbar--desktop-woke", "mobile"],
+		["layout-sessionbar--desktop-woke-light", "mobile"],
+		["layout-sessionbar--desktop-woke-read", "mobile"],
+		["layout-sessionbar--desktop-woke-read-light", "mobile"],
 		// Row hover commands exist only from md up; phones use swipe and long-press.
 		["session-sessionitem--hover-actions-narrow-sidebar", "mobile"],
 		["layout-sessionbar--desktop-with-skills", "mobile"],

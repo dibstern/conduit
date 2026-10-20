@@ -1,5 +1,6 @@
 import type { UUID } from "node:crypto";
 import { Deferred, Effect, HashMap, Ref } from "effect";
+import { parseAttachmentDataUrl } from "../../attachment-data-url.js";
 import { nativeThreadKey } from "../../persistence/effect/provider-state-effect.js";
 import { isClaudeResumeFailure } from "../event-sink-errors.js";
 import type { SendTurnInput, TurnResult } from "../types.js";
@@ -324,38 +325,36 @@ export function sdkResultToTurnResult(
 }
 
 export function buildUserMessage(input: SendTurnInput): SDKUserMessage {
-	// Build content blocks matching the Anthropic SDK's MessageParam.content
-	// structure. Uses 'as const' for literal type narrowing.
-	const content: Array<
-		| { type: "text"; text: string }
-		| {
-				type: "image";
-				source: {
-					type: "base64";
-					media_type: "image/png";
-					data: string;
-				};
-		  }
-	> = [];
-	if (input.images) {
-		for (const img of input.images) {
+	const content: Exclude<SDKUserMessage["message"]["content"], string> = [];
+	for (const value of input.images ?? []) {
+		const { mime, data, name } = parseAttachmentDataUrl(value);
+		if (mime === "text/plain" || mime === "application/pdf") {
 			content.push({
-				type: "image" as const,
-				source: {
-					type: "base64" as const,
-					media_type: "image/png" as const,
-					data: img,
-				},
+				type: "document",
+				...(name ? { title: name } : {}),
+				source:
+					mime === "text/plain"
+						? {
+								type: "text",
+								media_type: mime,
+								data: new TextDecoder("utf-8", { fatal: true }).decode(
+									Buffer.from(data, "base64"),
+								),
+							}
+						: { type: "base64", media_type: mime, data },
+			});
+		} else {
+			content.push({
+				type: "image",
+				source: { type: "base64", media_type: mime, data },
 			});
 		}
 	}
-	content.push({
-		type: "text" as const,
-		text:
-			input.workspaceMoveDirective === undefined
-				? input.prompt
-				: `${input.workspaceMoveDirective}\n${input.prompt}`,
-	});
+	const text =
+		input.workspaceMoveDirective === undefined
+			? input.prompt
+			: `${input.workspaceMoveDirective}\n${input.prompt}`;
+	if (text) content.push({ type: "text", text });
 	// The input id is the SDK message uuid, so lifecycle frames and results
 	// name the input they belong to.
 	return {

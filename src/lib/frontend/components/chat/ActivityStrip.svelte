@@ -15,11 +15,12 @@
 		fmtDuration,
 		partLabel,
 		stepDurations,
-		stepWeights,
+		stripLayout,
 		type Segment,
 		type Turn,
 	} from "../../utils/turns.js";
-	import { segmentClass } from "./activity-style.js";
+	import { segmentAppearance } from "./activity-style.js";
+	import ActivityTimeline from "../ui/ActivityTimeline.svelte";
 
 	let {
 		turn,
@@ -29,9 +30,9 @@
 		running,
 		active = null,
 		emphasis = null,
-		height = "h-1.5",
 		onhover,
 		onjump,
+		interactive = true,
 	}: {
 		turn: Turn;
 		segment: Segment;
@@ -43,68 +44,28 @@
 		active?: number | null;
 		/** Steps to pick out while the rest recede, e.g. the skills in a breakdown. */
 		emphasis?: ReadonlySet<number> | null;
-		height?: string;
 		onhover?: (i: number | null) => void;
 		onjump?: (i: number) => void;
+		interactive?: boolean;
 	} = $props();
 
-	const weights = $derived(stepWeights(segment, turn, final, now));
+	const positions = $derived(stripLayout(segment, turn, final, now));
 	const durations = $derived(stepDurations(segment, turn, final, now));
-
-	/** Roving tabindex: the strip is one tab stop, arrows scrub within it. */
-	let cursor = $state(0);
+	const segments = $derived(segment.activity.map((part, index) => {
+		return {
+			id: part.uuid,
+			left: positions[index]?.left ?? 0,
+			width: positions[index]?.width ?? 0,
+			label: title(part, index),
+			...segmentAppearance(part, running),
+		};
+	}));
 
 	function title(part: ActivityPart, i: number): string {
 		const duration = part.type === "system" ? undefined : durations?.[i];
 		return duration === undefined ? partLabel(part) : `${partLabel(part)} · ${fmtDuration(duration)}`;
 	}
 
-	function onKeyDown(e: KeyboardEvent & { currentTarget: HTMLElement }, i: number) {
-		if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-		// Don't let the transcript scroll while scrubbing.
-		e.preventDefault();
-		e.stopPropagation();
-		const activityCount = segment.activity.length;
-		cursor = (i + (e.key === "ArrowRight" ? 1 : -1) + activityCount) % activityCount;
-		onhover?.(cursor);
-		const next = e.currentTarget.parentElement?.children[cursor];
-		if (next instanceof HTMLElement) next.focus();
-	}
-
-	function partWidthClass(part: ActivityPart, index: number): string {
-		if (part.type === "system") return "compaction-seam shrink-0 w-0.5 mx-px";
-		if (active === index || emphasis?.has(index)) return "min-w-0.5 opacity-100";
-		if (emphasis) return "min-w-0.5 opacity-20 hover:opacity-100";
-		return "min-w-0.5 opacity-60 hover:opacity-100";
-	}
 </script>
 
-<div
-	class="flex {height} gap-px rounded-full overflow-hidden bg-bg-surface"
-	role="group"
-	aria-label="Activity timeline — {segment.activity.length} steps"
-	onpointerleave={() => onhover?.(null)}
-	onfocusout={() => onhover?.(null)}
->
-	{#each segment.activity as part, i (part.uuid)}
-		<button
-			type="button"
-			class="h-full cursor-pointer touch-manipulation transition-opacity outline-none focus-visible:ring-1 focus-visible:ring-brand-b {segmentClass(part, running)} {partWidthClass(part, i)}"
-			style={part.type === "system" ? undefined : `flex-grow: ${weights[i] ?? 1}`}
-			title={title(part, i)}
-			aria-label={title(part, i)}
-			tabindex={i === Math.min(cursor, segment.activity.length - 1) ? 0 : -1}
-			onkeydown={(e) => onKeyDown(e, i)}
-			onfocus={() => {
-				// Keep the tab stop where focus actually is, so leaving and returning
-				// to the strip resumes from the last segment rather than the first.
-				cursor = i;
-				onhover?.(i);
-			}}
-			onpointerenter={(e) => {
-				if (e.pointerType === "mouse") onhover?.(i);
-			}}
-			onclick={() => onjump?.(i)}
-		></button>
-	{/each}
-</div>
+<ActivityTimeline {segments} {active} {emphasis} {onhover} {onjump} {interactive} />

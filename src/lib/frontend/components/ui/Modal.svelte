@@ -2,6 +2,7 @@
 	import type { Snippet } from "svelte";
 	import Dialog from "./Dialog.svelte";
 	import Button from "./Button.svelte";
+	import SheetChrome from "./SheetChrome.svelte";
 
 	type ModalSize = "sm" | "md" | "lg";
 
@@ -61,9 +62,7 @@
 	};
 	const panelClass = $derived(
 		[
-			placement === "sheet"
-				? "relative flex max-h-[90vh] w-full flex-col gap-4 rounded-t-[18px] border-t border-border bg-bg-alt pb-[calc(12px+env(safe-area-inset-bottom))] shadow-modal"
-				: "relative flex max-h-[85vh] w-[90vw] flex-col gap-4 rounded-xl border border-border bg-bg-alt py-5 shadow-modal",
+			"relative flex max-h-[85vh] w-[90vw] flex-col gap-4 rounded-xl border border-border bg-bg-surface py-5 shadow-modal",
 			flush ? undefined : "px-6",
 			placement === "center" ? SIZE_CLASSES[size] : undefined,
 			className,
@@ -73,6 +72,28 @@
 	);
 
 </script>
+
+{#snippet panelContent()}
+	{#if resolvedTitle || description}
+		<header class="flex flex-col gap-1 pr-8">
+			{#if resolvedTitle}<h2 id={titleId} class="text-base font-semibold text-text">{resolvedTitle}</h2>{/if}
+			{#if description}<p id={descriptionId} class="text-sm text-text-secondary">{description}</p>{/if}
+		</header>
+	{/if}
+	<div class="min-h-0 overflow-y-auto">{@render children()}</div>
+{/snippet}
+
+{#snippet closeButton()}
+	{#if showClose}
+		<div class="absolute top-3 right-3">
+			<Button variant="ghost" size="sm" iconOnly icon="x" ariaLabel="Close" onclick={onclose} />
+		</div>
+	{/if}
+{/snippet}
+
+{#snippet sheetFooter()}
+	<div class="flex justify-end gap-2 pt-4 {flush ? '' : 'px-6'}">{@render footer?.()}</div>
+{/snippet}
 
 <Dialog
 	{open}
@@ -85,43 +106,15 @@
 	ariaLabel={resolvedTitle ? undefined : ariaLabel}
 	describedBy={description ? descriptionId : undefined}
 >
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div
-		class={panelClass}
-		data-testid={placement === "sheet" ? "modal-sheet-panel" : undefined}
-	>
-		{#if placement === "sheet"}
-			<div class="mx-auto mt-2 -mb-2 h-1 w-[38px] shrink-0 rounded-full bg-border" aria-hidden="true"></div>
-		{/if}
-		{#if resolvedTitle || description}
-			<header class="flex flex-col gap-1 pr-8">
-				{#if resolvedTitle}
-					<h2 id={titleId} class="text-base font-semibold text-text">{resolvedTitle}</h2>
-				{/if}
-				{#if description}
-					<p id={descriptionId} class="text-sm text-text-secondary">{description}</p>
-				{/if}
-			</header>
-		{/if}
-		<div class="min-h-0 overflow-y-auto">{@render children()}</div>
-		{#if footer}
-			<footer class="flex justify-end gap-2">{@render footer()}</footer>
-		{/if}
-		{#if showClose}
-			<div class="absolute top-3 right-3">
-				<!-- `icon`, not a child <Icon>: Button suppresses children
-				     entirely when `iconOnly` is set, so passing the glyph as a
-				     child rendered an empty ghost button. The baselines captured
-				     that absence. -->
-				<Button
-					variant="ghost"
-					size="sm"
-					iconOnly
-					icon="x"
-					ariaLabel="Close"
-					onclick={onclose}
-				/>
-			</div>
-		{/if}
-	</div>
+	{#if placement === "sheet"}
+		<SheetChrome class={className} data-testid="modal-sheet-panel" footer={footer ? sheetFooter : undefined}>
+			<div class="flex flex-col gap-4 {flush ? '' : 'px-6'}">{@render panelContent()}{@render closeButton()}</div>
+		</SheetChrome>
+	{:else}
+		<div class={panelClass}>
+			{@render panelContent()}
+			{#if footer}<footer class="flex justify-end gap-2">{@render footer()}</footer>{/if}
+			{@render closeButton()}
+		</div>
+	{/if}
 </Dialog>

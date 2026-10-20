@@ -140,4 +140,66 @@ describe("turn-only Stop interactions", () => {
 			),
 		);
 	});
+
+	// A send-now Stop closes the query while its interrupt is still unanswered.
+	// The SDK rejects that interrupt on close; unobserved, it crashes the runner.
+	it("closes the query without leaking the pending interrupt's rejection", async () => {
+		const started = await Effect.runPromise(Deferred.make<void>());
+		const query = createMockQuery([]);
+		let rejectInterrupt: (error: Error) => void = () => {};
+		let interrupted = false;
+		// Not vi.fn: a spy observes returned promises, which would hide the leak.
+		query.interrupt = () => {
+			interrupted = true;
+			return new Promise((_resolve, reject) => {
+				rejectInterrupt = reject;
+			});
+		};
+		vi.mocked(query.close).mockImplementation(() =>
+			rejectInterrupt(new Error("Query closed before response received")),
+		);
+		const factory = vi.fn<
+			NonNullable<Parameters<typeof makeClaudeSessionRunner>[0]["queryFactory"]>
+		>(({ prompt }) => {
+			const stream = (async function* (): AsyncGenerator<SDKMessage> {
+				for await (const _input of prompt) {
+					await Effect.runPromise(Deferred.succeed(started, undefined));
+					await new Promise(() => {});
+				}
+			})();
+			return Object.assign(query, { [Symbol.asyncIterator]: () => stream });
+		});
+		const unhandled: unknown[] = [];
+		const onUnhandled = (reason: unknown) => unhandled.push(reason);
+		process.on("unhandledRejection", onUnhandled);
+		try {
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const runtime = yield* makeClaudeProviderRuntime({
+							runnerFactory: makeClaudeSessionRunner,
+							workspaceRoot: "/tmp/ws",
+							queryFactory: factory,
+						});
+						const input = makeBaseSendTurnInput({
+							eventSink: createMockEventSink(),
+							model: { providerId: "claude", modelId: "sonnet" },
+						});
+						const turn = yield* Effect.forkChild(runtime.sendTurnEffect(input));
+						yield* Deferred.await(started);
+						yield* runtime.interruptTurnEffect(input.sessionId, [
+							input.inputId,
+						]);
+						expect((yield* Fiber.join(turn)).status).toBe("interrupted");
+						expect(interrupted).toBe(true);
+						expect(query.close).toHaveBeenCalled();
+					}),
+				),
+			);
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			expect(unhandled).toEqual([]);
+		} finally {
+			process.off("unhandledRejection", onUnhandled);
+		}
+	});
 });

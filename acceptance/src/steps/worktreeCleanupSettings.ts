@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
+import { chooseSettingsOption } from "../../../test/e2e/helpers/settings.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRpcControl } from "./shared.js";
 
@@ -77,11 +78,14 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 		name: "assert the cleanup scope picker",
 		match: /^the cleanup scope picker offers All projects and "([^"]+)"$/,
 		run: async ({ world, match }) => {
-			await expect(
-				cleanupGroup(world.page)
-					.getByTestId("settings-cleanup-scope")
-					.locator("option"),
-			).toHaveText(["All projects", match[1] ?? ""]);
+			await cleanupGroup(world.page)
+				.getByTestId("settings-cleanup-scope")
+				.click();
+			await expect(world.page.getByRole("menuitemradio")).toHaveText([
+				"All projects",
+				match[1] ?? "",
+			]);
+			await world.page.keyboard.press("Escape");
 		},
 	},
 	{
@@ -100,9 +104,11 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 		name: "choose the cleanup scope",
 		match: /^I choose cleanup scope "([^"]+)"$/,
 		run: async ({ world, match }) => {
-			await cleanupGroup(world.page)
-				.getByTestId("settings-cleanup-scope")
-				.selectOption({ label: match[1] ?? "" });
+			await chooseSettingsOption(
+				world.page,
+				cleanupGroup(world.page).getByTestId("settings-cleanup-scope"),
+				{ label: match[1] ?? "" },
+			);
 		},
 	},
 	{
@@ -125,21 +131,27 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 			const select = cleanupGroup(world.page).getByTestId(
 				"settings-cleanup-mode",
 			);
-			await expect(select.locator("option")).toHaveText([
+			await select.click();
+			await expect(world.page.getByRole("menuitemradio")).toHaveText([
 				"Use global",
 				"Off",
 				"Custom",
 			]);
-			await expect(select.locator("option:checked")).toHaveText(match[1] ?? "");
+			await expect(
+				world.page.getByRole("menuitemradio", { checked: true }),
+			).toHaveText(match[1] ?? "");
+			await world.page.keyboard.press("Escape");
 		},
 	},
 	{
 		name: "choose the project cleanup mode",
 		match: /^I set the project cleanup mode to "(Use global|Off|Custom)"$/,
 		run: async ({ world, match }) => {
-			await cleanupGroup(world.page)
-				.getByTestId("settings-cleanup-mode")
-				.selectOption({ label: match[1] ?? "" });
+			await chooseSettingsOption(
+				world.page,
+				cleanupGroup(world.page).getByTestId("settings-cleanup-mode"),
+				{ label: match[1] ?? "" },
+			);
 		},
 	},
 	{
@@ -156,7 +168,7 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 				const select = cleanupGroup(world.page).getByTestId(
 					`settings-cleanup-${id}`,
 				);
-				await expect(select).toHaveValue(value ?? "");
+				await expect(select).toHaveAttribute("data-value", value ?? "");
 				await (match[1] === "disabled"
 					? expect(select).toBeDisabled()
 					: expect(select).toBeEnabled());
@@ -275,11 +287,14 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 		name: "assert the settle options",
 		match: /^the settle rule offers "([^"]+)" and "([^"]+)"$/,
 		run: async ({ world, match }) => {
-			await expect(
-				cleanupGroup(world.page)
-					.getByTestId("settings-cleanup-on-settle")
-					.locator("option"),
-			).toHaveText([match[1] ?? "", match[2] ?? ""]);
+			await cleanupGroup(world.page)
+				.getByTestId("settings-cleanup-on-settle")
+				.click();
+			await expect(world.page.getByRole("menuitemradio")).toHaveText([
+				match[1] ?? "",
+				match[2] ?? "",
+			]);
+			await world.page.keyboard.press("Escape");
 		},
 	},
 	{
@@ -299,11 +314,18 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 			const select = cleanupGroup(world.page).getByTestId(
 				"settings-cleanup-settled-after",
 			);
-			await expect(select.locator("option")).toHaveText(
+			await select.click();
+			await expect(world.page.getByRole("menuitemradio")).toHaveText(
 				(match[1] ?? "").split(", "),
 			);
-			// Frame the rule rows for the visual baseline that follows.
-			await select.scrollIntoViewIfNeeded();
+			await world.page.keyboard.press("Escape");
+			// Frame the cleanup section and action for the visual baseline that follows.
+			await cleanupGroup(world.page).evaluate((element) =>
+				element.scrollIntoView({ block: "start" }),
+			);
+			await world.page.evaluate(() =>
+				(document.activeElement as HTMLElement | null)?.blur(),
+			);
 		},
 	},
 	{
@@ -311,8 +333,8 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 		match: /^Settle idle sessions after appears above Worktree cleanup$/,
 		run: async ({ world }) => {
 			await expect(
-				world.page.getByRole("combobox", {
-					name: "Settle idle sessions after",
+				world.page.getByRole("button", {
+					name: /^Settle idle sessions after:/,
 				}),
 			).toBeVisible();
 			expect(
@@ -338,9 +360,11 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 		match: /^I set the (settle|settled age) rule to "([^"]+)"$/,
 		run: async ({ world, match }) => {
 			const id = match[1] === "settle" ? "on-settle" : "settled-after";
-			await cleanupGroup(world.page)
-				.getByTestId(`settings-cleanup-${id}`)
-				.selectOption({ label: match[2] ?? "" });
+			await chooseSettingsOption(
+				world.page,
+				cleanupGroup(world.page).getByTestId(`settings-cleanup-${id}`),
+				{ label: match[2] ?? "" },
+			);
 		},
 	},
 	{
@@ -373,11 +397,13 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 		name: "assert the settled age selection",
 		match: /^the settled age rule is set to "([^"]+)"$/,
 		run: async ({ world, match }) => {
+			await cleanupGroup(world.page)
+				.getByTestId("settings-cleanup-settled-after")
+				.click();
 			await expect(
-				cleanupGroup(world.page)
-					.getByTestId("settings-cleanup-settled-after")
-					.locator("option:checked"),
+				world.page.getByRole("menuitemradio", { checked: true }),
 			).toHaveText(match[1] ?? "");
+			await world.page.keyboard.press("Escape");
 		},
 	},
 	{
@@ -534,9 +560,13 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 		name: "choose what keeps a worktree",
 		match: /^I keep worktrees with (.+)$/,
 		run: async ({ world, match }) => {
-			await cleanupGroup(world.page)
-				.getByRole("combobox", { name: "Keep worktrees with" })
-				.selectOption({ label: match[1] ?? "" });
+			await chooseSettingsOption(
+				world.page,
+				cleanupGroup(world.page).getByRole("button", {
+					name: "Keep worktrees with",
+				}),
+				{ label: match[1] ?? "" },
+			);
 		},
 	},
 	{
@@ -555,19 +585,23 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 		name: "assert the delete rule",
 		match: /^deleting a session is set to "([^"]+)"$/,
 		run: async ({ world, match }) => {
-			const select = cleanupGroup(world.page).getByRole("combobox", {
+			const select = cleanupGroup(world.page).getByRole("button", {
 				name: "When a session is deleted",
 			});
-			await expect(select.locator("option:checked")).toHaveText(match[1] ?? "");
+			await expect(select).toHaveText(match[1] ?? "");
 		},
 	},
 	{
 		name: "choose the delete rule",
 		match: /^I set deleting a session to "([^"]+)"$/,
 		run: async ({ world, match }) => {
-			await cleanupGroup(world.page)
-				.getByRole("combobox", { name: "When a session is deleted" })
-				.selectOption({ label: match[1] ?? "" });
+			await chooseSettingsOption(
+				world.page,
+				cleanupGroup(world.page).getByRole("button", {
+					name: "When a session is deleted",
+				}),
+				{ label: match[1] ?? "" },
+			);
 		},
 	},
 	{

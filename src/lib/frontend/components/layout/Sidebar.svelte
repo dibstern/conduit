@@ -1,10 +1,9 @@
-<!-- Left sidebar with the session list. New session is a FAB on phones, + in the header on desktop. -->
+<!-- Left sidebar with session selection and compose actions in the header. -->
 <!-- Desktop: collapsible via toggle. Phone: full-screen list route. -->
 
 <script lang="ts">
 	import Button from "../ui/Button.svelte";
 	import SessionList from "../session/SessionList.svelte";
-	import SessionGroupMenu from "../session/SessionGroupMenu.svelte";
 	import {
 		uiState,
 		collapseSidebar,
@@ -63,13 +62,6 @@
 		selection.openDraft(getDraftProject(shown.kind === "placed" ? shown.project : null));
 	}
 
-	function handleResumeSession() {
-		const id = prompt("Enter session ID to resume:");
-		if (id?.trim()) {
-			selection.open(id.trim());
-		}
-	}
-
 	// Sidebar width: collapsed → 0, otherwise user-set width.
 	// Sets a CSS custom property that the stylesheet references.
 	const sidebarStyle = $derived(
@@ -78,35 +70,50 @@
 
 </script>
 
-{#snippet title(titleSize: string, countSize: string)}
-	<h1 class="m-0 flex min-w-0 items-baseline gap-[5px] {titleSize} font-semibold tracking-[-0.01em] text-text font-brand" data-testid="list-bar-title">
+{#snippet title()}
+	<h1 class="m-0 flex min-w-0 items-baseline gap-[7px] {sessionViewState.compact ? 'text-[22px] font-bold' : 'text-[14px] font-semibold'} tracking-[-0.01em] text-text font-sans" data-testid="list-bar-title">
 		Sessions
-		<span class="{countSize} font-normal tabular-nums text-text-dimmer" data-testid="list-bar-count">{openCount}</span>
+		<span class="font-mono text-[12px] font-normal tabular-nums text-text-dimmer" data-testid="list-bar-count">{openCount}</span>
 	</h1>
 {/snippet}
 
 <!-- Sidebar -->
 <div
 	id="sidebar"
-	class="{sessionViewState.compact ? 'bg-bg' : 'bg-bg-surface'} @container/sidebar border-r border-border-subtle flex flex-col shrink-0 h-full overflow-hidden"
+	class="{sessionViewState.compact ? 'bg-bg' : 'bg-sidebar-bg'} @container/sidebar border-r border-border-subtle flex flex-col shrink-0 h-full overflow-hidden"
 	style={sidebarStyle}
 >
-	<!-- Sidebar header: title + count, then actions. Literal px per the design:
-	     phone bar 40px under 2px, desktop 34px under 10px. -->
 	<div
 		id="sidebar-header"
-		class="box-content flex shrink-0 items-center {sessionViewState.compact ? 'h-[40px] gap-[10px] px-[12px] pt-[2px]' : 'h-[34px] gap-[2px] px-[10px] pt-[10px]'}"
+		class="flex shrink-0 items-center gap-[2px] pr-[8px] {sessionViewState.compact ? 'h-[46px] pl-[18px]' : 'h-[48px] pl-[16px]'}"
 	>
+		{@render title()}
+		<span class="flex-1"></span>
+		<Button
+			variant="toolbar"
+			size="content"
+			iconOnly
+			icon="circle-check"
+			iconSize={16}
+			class="shrink-0 rounded-[8px] {sessionViewState.compact ? 'size-[44px]' : 'size-[28px]'}"
+			title="Select sessions"
+			ariaLabel="Select sessions"
+			data-testid="list-bar-select"
+			onclick={() => { uiState.selectMode = true; }}
+		/>
+		<Button
+			id="new-session-btn"
+			variant="toolbar"
+			size="content"
+			iconOnly
+			icon="square-pen"
+			iconSize={18}
+			class="shrink-0 rounded-[8px] {sessionViewState.compact ? 'size-[44px]' : 'size-[28px]'}"
+			title="New session"
+			ariaLabel="New session"
+			onclick={handleNewSession}
+		/>
 		{#if sessionViewState.compact}
-			<!--
-				Phone list bar (design option A): title, instance identity, group-by, overflow.
-				Select joins
-				this menu with multi-select. Literal px keeps touch targets at 44px
-				despite the 12px root font size.
-			-->
-			{@render title("text-[19px]", "text-[13px]")}
-			<span class="flex-1"></span>
-			<SessionGroupMenu compact />
 			<Menu
 				bind:open={listMenuOpen}
 				ariaLabel="More actions"
@@ -117,33 +124,17 @@
 					<Button
 						{...props}
 						id="list-bar-more"
-						variant="ghost"
+						variant="toolbar"
 						size="content"
 						iconOnly
 						icon="ellipsis"
 						iconSize={17}
-						class="shrink-0 min-h-[44px] min-w-[44px] justify-center rounded-lg"
+						class="size-[44px] shrink-0 rounded-[8px]"
 						title="More actions"
 						ariaLabel="More actions"
 						data-testid="list-bar-overflow"
 					/>
 				{/snippet}
-				<MenuItem
-					title="Select"
-					data-testid="list-overflow-select"
-					class="min-h-[44px] md:min-h-0"
-					onselect={() => { uiState.selectMode = true; }}
-				>
-					Select
-				</MenuItem>
-				<MenuItem
-					title="Resume a session by ID"
-					data-testid="list-overflow-resume"
-					class="min-h-[44px] md:min-h-0"
-					onselect={handleResumeSession}
-				>
-					Resume by ID…
-				</MenuItem>
 				<MenuItem
 					title="Settings"
 					data-testid="list-overflow-settings"
@@ -165,53 +156,14 @@
 				{/if}
 			</Menu>
 		{:else}
-			{@render title("text-[15px]", "text-[12px]")}
-			<span class="flex-1"></span>
-			<Button
-				variant="ghost"
-				size="content"
-				tone="muted"
-				hoverFill="alt"
-				iconOnly
-				icon="circle-check"
-				iconSize={16}
-				class="p-1 rounded-md"
-				title="Select sessions"
-				ariaLabel="Select sessions"
-				onclick={() => { uiState.selectMode = true; }}
-			/>
-			<Button
-				id="new-session-btn"
-				variant="ghost"
-				size="content"
-				tone="muted"
-				hoverFill="alt"
-				iconOnly
-				icon="plus"
-				iconSize={18}
-				class="p-1 rounded-md"
-				title="New session"
-				ariaLabel="New session"
-				onclick={handleNewSession}
-			/>
-			<!--
-				`tone="muted"` and `hoverFill="alt"` reproduce this button's two colour
-				pairs token for token. Dropped: `bg-none` (background-image is already
-				none), `border-none` and `cursor-pointer` (preflight and BASE do those on
-				a button), `transition-[color,background]` (BASE's `transition-colors`
-				has always outranked it, since arbitrary values sort first) and
-				`duration-150`, which only restated the default.
-			-->
 			<Button
 				id="sidebar-toggle-btn"
-				variant="ghost"
+				variant="toolbar"
 				size="content"
-				tone="muted"
-				hoverFill="alt"
 				iconOnly
 				icon="panel-left-close"
 				iconSize={18}
-				class="p-1 rounded-md"
+				class="size-[28px] shrink-0 rounded-[8px]"
 				title="Close sidebar"
 				ariaLabel="Close sidebar"
 				onclick={handleCloseSidebar}
@@ -222,7 +174,7 @@
 	{#if listScreen}<Banners />{/if}
 
 	<!-- Sidebar nav -->
-	<nav id="sidebar-nav" class:phone-list={listScreen} class:usage-docked={listScreen && phoneUsageHeight > 0} style:--phone-usage-height="{phoneUsageHeight}px" class="relative flex-1 flex flex-col overflow-hidden">
+	<nav id="sidebar-nav" class:clears-home-indicator={listScreen && phoneUsageHeight === 0} class="flex-1 flex flex-col overflow-hidden">
 		<!-- Sessions panel -->
 		<div
 			id="sidebar-panel-sessions"
@@ -236,22 +188,6 @@
 
 		{#if sessionViewState.compact && listScreen}
 			<UsageFooterMeter phone bind:height={phoneUsageHeight} />
-		{/if}
-		{#if sessionViewState.compact && !uiState.selectMode}
-			<Button
-				id="new-session-btn"
-				variant="ghost"
-				size="content"
-				tone="inherit"
-				hoverFill="none"
-				iconOnly
-				icon="plus"
-				iconSize={20}
-				class="absolute right-[11px] bottom-[calc(11px+max(env(safe-area-inset-bottom),var(--toast-clearance,0px)))] z-[var(--z-raised)] size-[44px] justify-center rounded-full bg-fill-brand text-on-brand shadow-[0_4px_14px_var(--color-backdrop-subtle)]"
-				title="New session"
-				ariaLabel="New session"
-				onclick={handleNewSession}
-			/>
 		{/if}
 	</nav>
 	{#if !sessionViewState.compact}<UsageFooterMeter />{/if}
@@ -271,16 +207,8 @@
 {/if}
 
 <style>
-	.phone-list :global(#session-list-scroller) {
-		padding-bottom: calc(55px + env(safe-area-inset-bottom, 0px) + 12px);
-	}
-
-	/* The usage dock sits below the list and takes the home-indicator inset,
-	   so the new-session button rides above it and the list only clears the button. */
-	.phone-list.usage-docked :global(#new-session-btn) {
-		bottom: calc(max(var(--phone-usage-height), var(--toast-clearance, 0px)) + 12px);
-	}
-	.phone-list.usage-docked :global(#session-list-scroller) {
-		padding-bottom: 68px;
+	/* With no usage dock to take the home-indicator inset, the list clears it. */
+	.clears-home-indicator :global(#session-list-scroller) {
+		padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
 	}
 </style>

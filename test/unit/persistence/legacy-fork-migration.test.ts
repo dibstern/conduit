@@ -276,8 +276,9 @@ describe("legacy Fork migration", () => {
 				expect(yield* sql`SELECT * FROM messages ORDER BY id`).toEqual(
 					messages,
 				);
+				// Later migrations may append columns; existing values must survive.
 				expect(yield* sql`SELECT * FROM message_parts ORDER BY id`).toEqual(
-					parts,
+					parts.map((part) => expect.objectContaining(part)),
 				);
 				expect(yield* sql`SELECT * FROM events ORDER BY sequence`).toEqual(
 					history,

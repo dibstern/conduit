@@ -32,6 +32,13 @@ export const Sheet: Story = {
 		const menu = body.getByRole("menu", { name: "File actions" });
 		await expect(menu).toBeVisible();
 		await expect(body.getByTestId("menu-sheet-scrim")).toBeVisible();
+		const chrome = menu.querySelector("[data-sheet-chrome]");
+		const handle = menu.querySelector("[data-sheet-handle]");
+		if (!chrome || !handle)
+			throw new Error("The shared sheet chrome is missing");
+		await expect(getComputedStyle(chrome).borderTopLeftRadius).toBe("22px");
+		await expect(handle.getBoundingClientRect().width).toBe(36);
+		await expect(handle.getBoundingClientRect().height).toBe(5);
 		for (const item of [
 			body.getByRole("menuitem", { name: "Archive" }),
 			body.getByRole("menuitem", { name: "Duplicate" }),

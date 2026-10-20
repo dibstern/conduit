@@ -19,15 +19,32 @@ export type ButtonVariant =
 	| "primary"
 	| "inverse"
 	| "secondary"
+	| "task-stop-all"
 	| "ghost"
 	| "ghost-accent"
 	| "danger"
+	| "danger-soft"
 	| "success-soft"
 	| "danger-outline"
 	| "accent-soft"
 	| "toolbar"
 	| "pill"
-	| "pill-warning";
+	| "filter"
+	| "field"
+	| "composer-model"
+	| "composer-checkout"
+	| "composer-word"
+	| "composer-row"
+	| "picker-row"
+	| "composer-summary"
+	| "ask"
+	| "goal"
+	| "capsule-primary"
+	| "chip"
+	| "menu-trigger"
+	| "scrim"
+	| "sheet-scrim"
+	| "scrim-clear";
 
 /**
  * Resting text colour paired with its hover step, as ONE decision. "Dim,
@@ -57,12 +74,18 @@ export const TONE_CLASSES = {
 	default: "text-text",
 	secondary: "text-text-secondary hover:text-text",
 	muted: "text-text-muted hover:text-text",
-	/** Brightens only one step, not to full. `pill`'s pairing. */
-	"muted-soft": "text-text-muted hover:text-text-secondary",
+	/**
+	 * `pill`'s pairing. It used to brighten one step short of full, but the
+	 * Final palette folds secondary onto muted, so the one step up IS full.
+	 */
+	"muted-soft": "text-text-muted hover:text-text",
 	dimmer: "text-text-dimmer hover:text-text",
 	accent: "text-accent",
 	error: "text-error",
 	success: "text-success",
+	goal: "text-status-goal",
+	"goal-paused": "text-status-amber",
+	"goal-met": "text-status-green",
 } as const;
 
 /**
@@ -73,19 +96,9 @@ export const TONE_CLASSES = {
  * belong to their variants and stay private, because "danger, but with a
  * sidebar hover" is not a thing anyone should be able to ask for.
  *
- * Two pairs in here are very probably drift rather than design, and are
- * deliberately NOT collapsed by this ticket:
- *
- *   `overlay` 0.04 vs `overlay-soft` 0.03 -- a 1% alpha delta on a
- *   neutral scrim. Collapsing them is a real, if tiny, pixel change and
- *   so belongs in a ticket that can own the baseline churn.
- *
- *   `alt` vs `surface` -- `--color-bg-alt` and `--color-bg-surface` are
- *   defined to the SAME value in both shipped themes (style.css:29,30 and
- *   :142,143), so these render identically TODAY. Both names survive
- *   anyway: two first-party themes are in flight, and silently rewriting
- *   9 call sites onto a token they did not name would make that
- *   coincidence permanent by accident.
+ * `overlay` and `overlay-soft` keep their 0.04 and 0.03 neutral washes.
+ * `alt` is the tinted fill (the Final bubble step) and `surface` the card
+ * fill. They differ in both themes, so neither may fold onto the other.
  */
 export const HOVER_FILL_CLASSES = {
 	none: "",
@@ -194,6 +207,82 @@ type VariantRecipe = {
 };
 
 export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
+	"capsule-primary": {
+		chrome: "bg-accent-bg",
+		tone: "text-accent",
+		hoverFill: "hover:bg-accent-bg",
+	},
+	chip: {
+		chrome: "bg-chip",
+		tone: TONE_CLASSES.secondary,
+		hoverFill: HOVER_FILL_CLASSES.text,
+	},
+	"menu-trigger": {
+		chrome: "data-[state=open]:bg-accent-bg data-[state=open]:text-accent",
+		tone: TONE_CLASSES.secondary,
+		hoverFill: HOVER_FILL_CLASSES.text,
+	},
+	scrim: {
+		chrome: "bg-[rgba(var(--overlay-rgb),0.35)]",
+		tone: TONE_CLASSES.default,
+		hoverFill: "",
+	},
+	"sheet-scrim": {
+		chrome: "bg-backdrop",
+		tone: TONE_CLASSES.default,
+		hoverFill: "",
+	},
+	"scrim-clear": {
+		chrome: "",
+		tone: TONE_CLASSES.default,
+		hoverFill: "",
+	},
+	"composer-summary": {
+		// Keyboard focus rings the summary words, not the full-width tap target.
+		chrome:
+			"group/composer-summary min-w-0 w-full gap-[5px] font-sans text-[12px] font-normal [&:focus-visible]:ring-0",
+		tone: "text-text-muted",
+		hoverFill: "hover:text-text",
+	},
+	"composer-row": {
+		chrome:
+			"min-h-[50px] w-full gap-[10px] rounded-[10px] px-[10px] text-left text-[13px] font-normal font-sans",
+		tone: "text-text",
+		hoverFill: "hover:bg-hover",
+	},
+	"picker-row": {
+		chrome:
+			"flex min-h-[36px] max-md:min-h-[50px] w-full min-w-0 items-center gap-[10px] rounded-[10px] px-[10px] py-[6px] text-left text-[13.5px] font-normal font-sans focus-visible:ring-inset aria-current:bg-accent/14 aria-pressed:bg-accent/14",
+		tone: "text-text",
+		hoverFill: "hover:bg-hover",
+	},
+	ask: {
+		chrome: "bg-status-ask/22",
+		tone: "text-status-ask",
+		hoverFill: "hover:bg-status-ask/30",
+	},
+	"composer-model": {
+		chrome: "min-w-0 gap-[6px] font-sans text-[13px] font-normal",
+		tone: "text-text-secondary",
+		hoverFill: "hover:bg-hover",
+	},
+	"composer-checkout": {
+		chrome: "min-w-0 bg-chip font-mono text-[11.5px] font-normal",
+		tone: "text-text-secondary",
+		hoverFill: "hover:bg-hover",
+	},
+	"composer-word": {
+		// An offset outline, so focus clears the glyphs and the dotted underline.
+		chrome:
+			"min-w-0 gap-[5px] rounded-[4px] font-sans text-[12px] font-normal underline decoration-dotted decoration-border-chip underline-offset-[4px] [&:focus-visible]:ring-0 [&:focus-visible]:outline-2 [&:focus-visible]:outline-solid [&:focus-visible]:outline-offset-[3px] [&:focus-visible]:outline-text",
+		tone: "text-text-muted",
+		hoverFill: "hover:text-text",
+	},
+	goal: {
+		chrome: "bg-status-goal",
+		tone: "text-bg",
+		hoverFill: "hover:bg-status-goal/90",
+	},
 	primary: {
 		chrome: "bg-accent",
 		tone: "text-bg",
@@ -219,10 +308,30 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 		tone: TONE_CLASSES.secondary,
 		hoverFill: "hover:border-text-muted",
 	},
+	"task-stop-all": {
+		chrome:
+			"border border-border bg-bg-alt gap-1.5 rounded-[9px] px-[10px] py-[6px] text-[11.5px]",
+		tone: "text-status-red",
+		hoverFill: "hover:border-text-muted",
+	},
 	ghost: {
 		chrome: "",
 		tone: TONE_CLASSES.secondary,
 		hoverFill: HOVER_FILL_CLASSES.text,
+	},
+	/** A toggle chip; pressed takes the ask tint, as the Final sidebar draws it. */
+	filter: {
+		chrome:
+			"h-[24px] gap-[5px] rounded-full bg-chip px-[8px] text-[12px] font-medium aria-pressed:bg-status-ask/18 aria-pressed:text-status-ask",
+		tone: TONE_CLASSES.secondary,
+		hoverFill: "hover:bg-hover",
+	},
+	/** A menu trigger dressed as a field: SearchInput's height, fill and radius. */
+	field: {
+		chrome:
+			"h-[30px] gap-[3px] rounded-[9px] bg-chip pl-[10px] pr-[7px] text-[12.5px] font-medium",
+		tone: TONE_CLASSES.secondary,
+		hoverFill: "hover:bg-hover",
 	},
 	"ghost-accent": {
 		chrome: "",
@@ -233,6 +342,13 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 		chrome: "bg-error",
 		tone: "text-bg",
 		hoverFill: "hover:bg-error/90",
+	},
+	"danger-soft": {
+		// /12, not /22: the lightest tint that keeps the error label at 4.5:1 on a
+		// dark popover and in the light theme (theme-contrast.test.ts).
+		chrome: "bg-error/12",
+		tone: "text-error",
+		hoverFill: "hover:bg-error/20",
 	},
 	// The three below are the approve / deny / tool-action language already
 	// duplicated across QuestionCard, PermissionCard, ToolGenericCard and
@@ -273,31 +389,10 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 	 */
 	pill: {
 		chrome:
-			"gap-1 h-6 px-2 rounded-full text-xs font-medium font-brand " +
+			"gap-1 h-6 px-2 rounded-full text-xs font-medium font-sans " +
 			"border border-border bg-bg-alt duration-100",
 		tone: TONE_CLASSES["muted-soft"],
 		hoverFill: HOVER_FILL_CLASSES.base,
-	},
-	/**
-	 * `pill`'s elevated state. PermissionModeSelector wears it when the
-	 * session is on a permissive approval mode, where the warning colour is
-	 * the whole message.
-	 *
-	 * Deliberately carries no hover step, matching the recipe as found: the
-	 * neutral pill's hover says "this opens something", and a warning
-	 * surface that lightens under the cursor reads as a warning being
-	 * dismissed.
-	 *
-	 * A second variant string rather than a `warning` boolean on `pill`:
-	 * every other colour choice here is a variant, and one boolean modifier
-	 * invites the next one.
-	 */
-	"pill-warning": {
-		chrome:
-			"gap-1 h-6 px-2 rounded-full text-xs font-medium font-brand " +
-			"border border-warning/30 bg-warning-bg duration-100",
-		tone: "text-warning",
-		hoverFill: HOVER_FILL_CLASSES.none,
 	},
 	/**
 	 * Dim icon affordances in a dense toolbar. The 4% overlay fill is the
@@ -346,7 +441,35 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
  * skills | checkout | Settle): square corners, because the group owns the
  * border and radius.
  */
-export type ButtonSize = "sm" | "md" | "segment" | "content";
+export type ButtonSize =
+	| "sm"
+	| "md"
+	| "capsule-segment"
+	| "phone-capsule-segment"
+	| "touch-icon"
+	| "touch-pill"
+	| "navigation-pill"
+	| "phone-navigation"
+	| "phone-header-icon"
+	| "phone-title-menu"
+	| "phone-status"
+	| "phone-task"
+	| "subtitle"
+	| "phone-subtitle"
+	| "card-action"
+	| "phone-card-action"
+	| "command-chip"
+	| "text-action"
+	| "row-action"
+	| "transcript"
+	| "content"
+	| "composer-icon"
+	| "composer-action"
+	| "composer-chip";
+
+/** Shared by disclosure and navigation rows in the transcript's step log. */
+export const TRANSCRIPT_ROW_CLASSES =
+	"flex items-center gap-[8px] w-full min-w-0 min-h-[44px] md:min-h-[28px] py-[3px] px-0 text-[13px] text-left";
 
 export type ButtonAlign = keyof typeof ALIGN_CLASSES;
 
@@ -369,7 +492,7 @@ export type ButtonAlign = keyof typeof ALIGN_CLASSES;
 // them could win against a BASE utility. It is now `disabledStyle` — see
 // DISABLED_CLASSES in button-recipes.ts.
 const TOUCH_TARGET_CLASSES =
-	"relative before:absolute before:content-[''] before:left-1/2 before:top-1/2 before:-translate-x-1/2 before:-translate-y-1/2 before:size-full before:min-h-[44px] before:min-w-[44px] md:before:hidden";
+	"relative before:absolute before:content-[''] before:left-1/2 before:top-1/2 before:-translate-x-1/2 before:-translate-y-1/2 before:size-full before:min-h-[44px] before:min-w-[44px]";
 
 const BASE_CLASSES =
 	"no-underline cursor-pointer transition-colors " +
@@ -381,6 +504,45 @@ const BASE_CLASSES =
 	"focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text";
 
 const SHARED_SIZE_CLASSES = "rounded-lg font-medium";
+
+const SIZE_CLASSES: Record<
+	Exclude<ButtonSize, "sm" | "md" | "composer-action">,
+	string
+> = {
+	"text-action": "font-medium",
+	"touch-icon": "min-h-[44px] min-w-[44px] rounded-lg",
+	"touch-pill": "min-h-[44px] min-w-[44px] rounded-full",
+	"navigation-pill":
+		"min-h-[44px] gap-1.5 pl-1 pr-2 rounded-full text-[13px] font-medium",
+	"phone-navigation":
+		"h-[28px] min-w-[44px] gap-[4px] pl-[4px] pr-[9px] rounded-full text-[13px] font-medium",
+	"phone-header-icon": "size-[30px] rounded-full",
+	"phone-title-menu": "h-[24px] w-[20px] rounded-lg focus-visible:ring-inset",
+	"phone-status": "h-[22px] min-w-[44px] rounded-full focus-visible:ring-inset",
+	"phone-task":
+		"h-[30px] min-w-[44px] gap-[8px] rounded-full focus-visible:ring-inset",
+	subtitle: "gap-1.5 text-[11px] leading-[1.35]",
+	"phone-subtitle":
+		"h-[21px] min-w-[44px] gap-[5px] text-[12.5px] leading-[1.5] focus-visible:ring-inset",
+	"card-action": "gap-[6px] rounded-[9px] px-[10px] py-[6px] text-[11.5px]",
+	"phone-card-action":
+		"h-[28px] min-w-[44px] gap-[6px] rounded-full px-[12px] text-[13px]",
+	"command-chip": "h-[24px] rounded-full px-[8px] font-mono text-[11.5px]",
+	"capsule-segment":
+		"h-[24px] gap-[5px] rounded-full px-[10px] text-[12.5px] font-medium tabular-nums",
+	"phone-capsule-segment":
+		"h-[24px] min-w-[44px] gap-[5px] rounded-full px-[10px] text-[13px] font-medium tabular-nums focus-visible:ring-inset",
+	"composer-icon": "size-[30px] shrink-0 rounded-full",
+	"composer-chip": "h-[30px] gap-[5px] rounded-full px-[9px]",
+	// Literally no classes, by design — see the ButtonSize doc comment. Not
+	// even `h-auto`: that is a button's default height anyway, so emitting it
+	// buys nothing and costs a `!` at every call site that wants an explicit
+	// height (RewindBanner's `w-6 h-6` exit control, for one), which is the
+	// exact tax this size exists to avoid.
+	content: "",
+	"row-action": "size-[21px] rounded-[6px]",
+	transcript: TRANSCRIPT_ROW_CLASSES,
+};
 
 /**
  * Main-axis alignment, as a prop rather than a base class, because the base
@@ -430,6 +592,9 @@ const SHARED_SIZE_CLASSES = "rounded-lg font-medium";
  */
 const LAYOUT_CLASSES = {
 	center: "inline-flex items-center whitespace-nowrap select-none",
+	// A <button> sizes to its content even as a flex box, so cap it at its
+	// container or a nowrap label pushes it over its neighbours.
+	block: "flex max-w-full items-center whitespace-nowrap select-none",
 	baseline: "inline-flex items-baseline whitespace-nowrap select-none",
 	flow: "",
 } as const;
@@ -467,20 +632,15 @@ export function buttonClasses({
 	align: ButtonAlign;
 	size: ButtonSize;
 	iconOnly: boolean;
-	touchTarget: boolean;
+	touchTarget: boolean | "always";
 	inert: boolean;
 	className?: string | undefined;
 }>): string {
-	// Literally no classes, by design — see the ButtonSize doc comment. Not
-	// even `h-auto`: that is a button's default height anyway, so emitting it
-	// buys nothing and costs a `!` at every call site that wants an explicit
-	// height (RewindBanner's `w-6 h-6` exit control, for one), which is the
-	// exact tax this size exists to avoid.
 	const sizeClasses =
-		size === "content"
-			? ""
-			: size === "segment"
-				? "h-[22px] gap-[5px] rounded-none px-[8px] text-[10px] font-medium"
+		size === "composer-action"
+			? `h-[34px] shrink-0 rounded-full gap-[6px] text-[13px] font-semibold ${iconOnly ? "w-[34px]" : "px-[12px]"}`
+			: size !== "sm" && size !== "md"
+				? SIZE_CLASSES[size]
 				: iconOnly
 					? `${size === "sm" ? "h-8 w-8" : "h-9 w-9"} ${SHARED_SIZE_CLASSES}`
 					: size === "sm"
@@ -537,6 +697,7 @@ export function buttonClasses({
 		variantClass,
 		sizeClasses,
 		touchTarget ? TOUCH_TARGET_CLASSES : "",
+		touchTarget === true ? "md:before:hidden" : "",
 		className,
 	]
 		.filter(Boolean)

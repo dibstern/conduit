@@ -582,7 +582,7 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 	}, 240_000);
 
 	it("attributes an error after delivered steering to the latest user input", async () => {
-		const { fixture, browser, id } = await start("delivered-error");
+		const { fixture, browser, id, firstId } = await start("delivered-error");
 		const inputId = randomUUID();
 		expect(
 			await Effect.runPromise(
@@ -618,10 +618,11 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 				retryable: true,
 			}),
 		]);
+		// A steered turn's end names the send that started it (conduit-test-i633.3).
 		expect(
 			state.sessions.find((session) => session.id === id)
 				?.last_turn_end_input_id,
-		).toBe(inputId);
+		).toBe(firstId);
 		expect(
 			state.events.filter(
 				(event) =>

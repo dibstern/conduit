@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client";
 import { describe, expect, it, vi } from "vitest";
 import { OpenCodeApiError } from "../../../src/lib/errors.js";
@@ -523,6 +524,53 @@ describe("OpenCodeAPI", () => {
 		expect(sdk.session.promptAsync).toHaveBeenCalledWith(
 			expect.objectContaining({
 				parts: [{ type: "text", text: "hello" }],
+			}),
+		);
+	});
+
+	it("session.prompt() delivers text and PDF attachments to the OpenCode SDK", async () => {
+		const sdk = makeStubSdk();
+		const api = new OpenCodeAPI({
+			sdk,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+		const textData = readFileSync(
+			new URL("../../fixtures/attachments/notes.txt", import.meta.url),
+		).toString("base64");
+		const pdfData = readFileSync(
+			new URL("../../fixtures/attachments/guide.pdf", import.meta.url),
+		).toString("base64");
+		await api.session.prompt("s1", {
+			text: "Read these files",
+			images: [
+				`data:text/plain;name=R%C3%A9sum%C3%A9%20notes.txt;base64,${textData}`,
+				`data:application/pdf;name=guide.pdf;base64,${pdfData}`,
+				"data:image/jpeg;base64,/9j/",
+			],
+		});
+		expect(sdk.session.promptAsync).toHaveBeenCalledWith(
+			expect.objectContaining({
+				parts: [
+					{ type: "text", text: "Read these files" },
+					{
+						type: "file",
+						mime: "text/plain",
+						filename: "Résumé notes.txt",
+						url: `data:text/plain;base64,${textData}`,
+					},
+					{
+						type: "file",
+						mime: "application/pdf",
+						filename: "guide.pdf",
+						url: `data:application/pdf;base64,${pdfData}`,
+					},
+					{
+						type: "file",
+						mime: "image/jpeg",
+						url: "data:image/jpeg;base64,/9j/",
+					},
+				],
 			}),
 		);
 	});

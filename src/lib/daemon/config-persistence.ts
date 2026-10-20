@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { chmod, rename, writeFile } from "node:fs/promises";
+import { chmod, open, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
@@ -36,6 +36,7 @@ import {
 	migrateLegacyDefaultOpencodeInstanceId,
 	PROVIDER_DRIVERS,
 } from "../contracts/provider-instance.js";
+import { AvatarChoiceSchema } from "../contracts/user-avatar.js";
 import {
 	DEFAULT_WORKTREE_CLEANUP,
 	ProjectWorktreeCleanupSchema,
@@ -62,6 +63,12 @@ import {
 export const DEFAULT_AUTO_SETTLE_AFTER_DAYS = 3;
 export const DEFAULT_AUTO_ARCHIVE_AFTER_DAYS = 30;
 export const DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS = 30;
+
+/** How long a session must sit idle before it settles, or null when it never does. */
+export const autoSettleIdleWindowMs = (
+	days: number | null | undefined,
+): number | null =>
+	days === null ? null : (days ?? DEFAULT_AUTO_SETTLE_AFTER_DAYS) * 86_400_000;
 
 export const CURRENT_CONFIG_VERSION = 2;
 
@@ -185,6 +192,7 @@ const DaemonConfigFields = {
 	tailscaleServeCleanupPending: Schema.optionalKey(Schema.Boolean),
 	debug: Schema.Boolean,
 	keepAwake: Schema.Boolean,
+	avatar: Schema.optionalKey(AvatarChoiceSchema),
 	autoSettleAfterDays: Schema.optionalKey(
 		Schema.NullOr(
 			Schema.Number.pipe(
@@ -614,7 +622,7 @@ export function loadAccountsState(
 	return Result.succeed(accountsStateFromConfig(loaded.success, launchLogin));
 }
 
-/** Atomic write: write to a unique tmp file then rename to daemon.json. */
+/** Flush the new contents, atomically replace daemon.json, then flush the rename. */
 export async function saveDaemonConfig(
 	config: DaemonConfig,
 	configDir?: string,
@@ -635,10 +643,17 @@ export async function saveDaemonConfig(
 		{
 			encoding: "utf-8",
 			mode: 0o600,
+			flush: true,
 		},
 	);
 	await chmod(tmpPath, 0o600);
 	await rename(tmpPath, finalPath);
+	const directory = await open(dir, "r");
+	try {
+		await directory.sync();
+	} finally {
+		await directory.close();
+	}
 }
 
 /** Persist decode migrations once, using the same snapshot that seeds startup. */

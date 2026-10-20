@@ -14,6 +14,7 @@ import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
 import { Result as Either } from "effect";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/account.js";
 
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
@@ -85,6 +86,15 @@ describe("foreground conduit serve", () => {
 				String(path).endsWith(".pid"),
 			),
 		).toEqual([]);
+	}
+
+	// Managed OpenCode starts on first use, never at startup.
+	async function startManagedOpenCode() {
+		if (!harness) throw new Error("No process harness");
+		await harness.requestRpc({
+			_tag: "StartInstance",
+			instanceId: "managed-test",
+		});
 	}
 
 	async function openCodeHealth() {
@@ -245,6 +255,7 @@ describe("foreground conduit serve", () => {
 		const hostPid = host.hello.pid;
 		pids.add(hostPid);
 		host.disconnect();
+		await startManagedOpenCode();
 		const before = await openCodeHealth();
 		noPidArtifacts();
 
@@ -389,6 +400,7 @@ describe("foreground conduit serve", () => {
 		});
 		pids.add(host.hello.pid);
 		host.disconnect();
+		await startManagedOpenCode();
 		await openCodeHealth();
 		await harness.signal("SIGINT");
 		const marker = join(harness.projectDir, ".conduit", "recovery-gated");
@@ -908,7 +920,9 @@ describe("foreground conduit serve", () => {
 		}
 	}, 60_000);
 
-	it("removes a project promptly while OpenCode path keeps recovery startup blocked", async () => {
+	// Startup recovery never asks OpenCode; a first use held on /path must not
+	// block project removal either.
+	it("removes a project promptly while a first OpenCode use is held on /path", async () => {
 		harness = await ProcessHarness.start({ dist: DIST, foregroundCli: true });
 		const removed = await warmProject("process-test");
 		await harness.signal("SIGINT");
@@ -923,9 +937,15 @@ describe("foreground conduit serve", () => {
 		scenarios.push(evidence);
 		writeFileSync(gate, "hold only the fixture OpenCode path response");
 		let pendingRemoval: Promise<unknown> | undefined;
+		let firstUse: Promise<unknown> | undefined;
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		try {
 			await harness.restart({ skipBrowserProbe: true });
+			expect(existsSync(`${gate}-started`)).toBe(false);
+			firstUse = harness.requestRpc({
+				_tag: "StartInstance",
+				instanceId: MANAGED_OPENCODE_ACCOUNT_ID,
+			});
 			await vi.waitFor(() => expect(existsSync(`${gate}-started`)).toBe(true), {
 				timeout: 5000,
 			});
@@ -969,6 +989,7 @@ describe("foreground conduit serve", () => {
 				"release OpenCode path before joining fixture cleanup",
 			);
 			await pendingRemoval?.catch(() => undefined);
+			await firstUse?.catch(() => undefined);
 		}
 	}, 60_000);
 
@@ -1139,21 +1160,43 @@ describe("foreground conduit serve", () => {
 			const server = harness.generations.at(-1);
 			if (!server) throw new Error("Missing foreground generation");
 			expect(alive(server.pid)).toBe(true);
-			const removal = await sendRpcRequest(
-				join(harness.configDir, "relay.sock"),
-				{ _tag: "RemoveProject", slug: removed.projectSlug },
-			);
-			expect(removal.projects.map((project) => project.slug)).not.toContain(
-				removed.projectSlug,
+			let acknowledged = false;
+			const removing = sendRpcRequest(join(harness.configDir, "relay.sock"), {
+				_tag: "RemoveProject",
+				slug: removed.projectSlug,
+			}).then(
+				(response) => {
+					acknowledged = true;
+					return Either.succeed(response);
+				},
+				(cause: unknown) => Either.fail(cause),
 			);
 			expect(existsSync(release)).toBe(false);
 			await vi.waitFor(() => expect(alive(removed.runner.pid)).toBe(false), {
 				timeout: 5000,
 			});
 			expect(alive(retained.runner.pid)).toBe(true);
+			expect(acknowledged).toBe(false);
 			writeFileSync(release, "finish signal disposal after project removal");
+			const removal = await removing;
 			await shutdown;
+			if (Either.isSuccess(removal)) {
+				expect(
+					removal.success.projects.map((project) => project.slug),
+				).not.toContain(removed.projectSlug);
+			}
+			// Shutdown may interrupt the response; either way, removal must reach disk.
 			expect(harness.generations.at(-1)?.exitCode).toBe(0);
+			const persisted = Either.getOrThrowWith(
+				loadDaemonConfigResult(harness.configDir),
+				(error) => error,
+			);
+			expect(persisted.projects.map((project) => project.slug)).not.toContain(
+				removed.projectSlug,
+			);
+			expect(persisted.projects.map((project) => project.slug)).toContain(
+				retained.projectSlug,
+			);
 			await vi.waitFor(() => expect(alive(removed.runner.pid)).toBe(false), {
 				timeout: 5000,
 			});
@@ -1162,6 +1205,7 @@ describe("foreground conduit serve", () => {
 				removeDuringSignalShutdown: true,
 				pending,
 				removal,
+				persistedProjects: persisted.projects,
 				removed: removed.runner,
 				retained: retained.runner,
 			});
@@ -1177,9 +1221,10 @@ describe("foreground conduit serve", () => {
 		}
 	}, 60_000);
 
-	// A managed option is not required for CLI smart-default to spawn. Its
+	// OpenCode starts on first use only, so a failed startup spawns none. A
+	// managed option is not required for the first use to spawn; its
 	// authenticated supervisor and delayed child must end before root removal.
-	it("awaits every managed fixture process after startup failure without a managed option", async () => {
+	it("spawns no OpenCode on failed startup and awaits every first-use fixture process", async () => {
 		harness = ProcessHarness.create({
 			dist: DIST,
 			foregroundCli: true,
@@ -1201,13 +1246,36 @@ await new Promise(done => child.once("message", done));
 child.disconnect();
 child.unref();
 appendFileSync(join(configDir, "fake-opencode-pids.jsonl"), JSON.stringify({ pid: process.pid, childPid: child.pid, groupPid: Number(process.env.CONDUIT_OPENCODE_GROUP_PID) }) + "\\n");
-createServer((request, response) => { response.setHeader("Content-Type", "application/json"); response.end(JSON.stringify({ healthy: true, version: "cleanup-fixture", pid: process.pid, childPid: child.pid })); }).listen(port, "127.0.0.1");
+// First use asks /path and connects the event stream before it settles.
+createServer((request, response) => {
+  const route = request.url?.split("?")[0];
+  if (route === "/event" || route === "/global/event") {
+    response.setHeader("Content-Type", "text/event-stream");
+    response.flushHeaders();
+    const payload = { id: "evt_cleanup_fixture", type: "server.connected", properties: {} };
+    response.write("data: " + JSON.stringify(route === "/global/event" ? { payload } : payload) + "\\n\\n");
+    return;
+  }
+  response.setHeader("Content-Type", "application/json");
+  response.end(JSON.stringify(route === "/path" ? { state: configDir, config: configDir, worktree: configDir, directory: configDir } : { healthy: true, version: "cleanup-fixture", pid: process.pid, childPid: child.pid }));
+}).listen(port, "127.0.0.1");
 process.on("SIGTERM", () => { child.kill("SIGTERM"); process.exit(0); });
 `,
 		);
 		chmodSync(executable, 0o755);
 		writeFileSync(harness.daemonStorePath(), "invalid fixture database");
 		await expect(harness.restart()).rejects.toThrow();
+		expect(
+			existsSync(join(harness.configDir, "fake-opencode-pids.jsonl")),
+		).toBe(false);
+		expect(harness.ownedOpenCodePids()).toEqual([]);
+		await harness.waitForExit();
+		rmSync(harness.daemonStorePath());
+		await harness.restart({ skipBrowserProbe: true });
+		await harness.requestRpc({
+			_tag: "StartInstance",
+			instanceId: MANAGED_OPENCODE_ACCOUNT_ID,
+		});
 		const record = JSON.parse(
 			readFileSync(
 				join(harness.configDir, "fake-opencode-pids.jsonl"),
@@ -1240,6 +1308,7 @@ process.on("SIGTERM", () => { child.kill("SIGTERM"); process.exit(0); });
 		expect(existsSync(root)).toBe(false);
 		scenarios.push({
 			startupFailureCleanup: true,
+			openCodeSpawnedAtStartup: false,
 			record,
 			owned,
 			authenticated,
@@ -1248,7 +1317,7 @@ process.on("SIGTERM", () => { child.kill("SIGTERM"); process.exit(0); });
 		});
 	}, 60_000);
 
-	it("awaits observed fixture children when startup cannot persist any managed identity", async () => {
+	it("awaits observed fixture children when first use cannot persist any managed identity", async () => {
 		harness = ProcessHarness.create({
 			dist: DIST,
 			foregroundCli: true,
@@ -1291,10 +1360,21 @@ writeFileSync(gate + "-release", "fail the pending identity rename");
 		);
 		chmodSync(executable, 0o755);
 		try {
-			const startup = await harness.restart({ skipBrowserProbe: true }).then(
-				() => "ready",
-				(cause: unknown) => String(cause),
-			);
+			await harness.restart({ skipBrowserProbe: true });
+			expect(
+				existsSync(join(harness.configDir, "fake-opencode-pids.jsonl")),
+			).toBe(false);
+			// Managed OpenCode starts on first use, so that is where its
+			// identity save is first attempted.
+			const firstUse = await harness
+				.requestRpc({
+					_tag: "StartInstance",
+					instanceId: MANAGED_OPENCODE_ACCOUNT_ID,
+				})
+				.then(
+					() => "ready",
+					(cause: unknown) => String(cause),
+				);
 			await vi.waitFor(() => expect(existsSync(fault)).toBe(true), {
 				timeout: 5000,
 			});
@@ -1332,7 +1412,7 @@ writeFileSync(gate + "-release", "fail the pending identity rename");
 			expect(existsSync(root)).toBe(false);
 			scenarios.push({
 				prePersistenceCleanup: true,
-				startup,
+				firstUse,
 				record,
 				authenticatedMapEmpty: true,
 				identityAlreadyPersisted: false,

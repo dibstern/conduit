@@ -190,7 +190,12 @@ test("filters models and agents, clears no matches and resets groups on reopen",
 	await expect(
 		panel.getByRole("button", { name: "Clear", exact: true }),
 	).toBeVisible();
-	await expect(panel.locator("[aria-expanded]")).toHaveCount(0);
+	// No group survives; the default-model pickers above keep their own toggles.
+	await expect(
+		panel.locator(
+			'[data-testid^="settings-models-group-"], [data-testid="settings-agents-group"]',
+		),
+	).toHaveCount(0);
 	const noMatchPath = resolve(artifactDir, "no-match-desktop.png");
 	await page.screenshot({ path: noMatchPath, animations: "disabled" });
 	await testInfo.attach("no matches desktop", {

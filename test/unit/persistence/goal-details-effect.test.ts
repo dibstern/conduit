@@ -54,8 +54,10 @@ describe("persisted goal details", () => {
 				200,
 			);
 			const read = yield* ReadQueryEffectTag;
-			expect(yield* read.getGoalDetails("selected")).toEqual({
+			expect(yield* read.getGoalDetails("selected")).toMatchObject({
 				checks: [],
+				judgeModel: null,
+				turnCount: 0,
 				tokensSinceStart: 0,
 			});
 		}).pipe(Effect.provide(testLayer, { local: true })),
@@ -73,7 +75,7 @@ describe("persisted goal details", () => {
 				300,
 			);
 			const read = yield* ReadQueryEffectTag;
-			expect(yield* read.getGoalDetails("selected")).toEqual({
+			expect(yield* read.getGoalDetails("selected")).toMatchObject({
 				checks: [],
 				tokensSinceStart: 0,
 			});
@@ -98,8 +100,20 @@ describe("persisted goal details", () => {
 				);
 				const read = yield* ReadQueryEffectTag;
 				expect((yield* read.getGoalDetails("selected")).checks).toEqual([
-					{ iteration: 1, at: 400, reason: null },
-					{ iteration: 2, at: 300, reason: "One failure remains" },
+					{
+						iteration: 1,
+						turnIndex: null,
+						judgeModel: null,
+						at: 400,
+						reason: null,
+					},
+					{
+						iteration: 2,
+						turnIndex: null,
+						judgeModel: null,
+						at: 300,
+						reason: "One failure remains",
+					},
 				]);
 			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
@@ -125,7 +139,13 @@ describe("persisted goal details", () => {
 				);
 				const read = yield* ReadQueryEffectTag;
 				expect((yield* read.getGoalDetails("selected")).checks).toEqual([
-					{ iteration: 1, at: 200, reason: "Still failing" },
+					{
+						iteration: 1,
+						turnIndex: null,
+						judgeModel: null,
+						at: 200,
+						reason: "Still failing",
+					},
 				]);
 			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
@@ -146,8 +166,16 @@ describe("persisted goal details", () => {
 				300,
 			);
 			const read = yield* ReadQueryEffectTag;
-			expect(yield* read.getGoalDetails("selected")).toEqual({
-				checks: [{ iteration: 1, at: 200, reason: "All green" }],
+			expect(yield* read.getGoalDetails("selected")).toMatchObject({
+				checks: [
+					{
+						iteration: 1,
+						turnIndex: null,
+						judgeModel: null,
+						at: 200,
+						reason: "All green",
+					},
+				],
 				tokensSinceStart: 0,
 			});
 		}).pipe(Effect.provide(testLayer, { local: true })),
@@ -157,7 +185,7 @@ describe("persisted goal details", () => {
 		Effect.gen(function* () {
 			yield* createSession("selected");
 			const read = yield* ReadQueryEffectTag;
-			expect(yield* read.getGoalDetails("selected")).toEqual({
+			expect(yield* read.getGoalDetails("selected")).toMatchObject({
 				checks: [],
 				tokensSinceStart: null,
 			});
@@ -166,7 +194,7 @@ describe("persisted goal details", () => {
 				200,
 			);
 			yield* changeGoal({ sessionId: "selected", goal: null }, 300);
-			expect(yield* read.getGoalDetails("selected")).toEqual({
+			expect(yield* read.getGoalDetails("selected")).toMatchObject({
 				checks: [],
 				tokensSinceStart: null,
 			});

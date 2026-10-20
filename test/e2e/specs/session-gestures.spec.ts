@@ -68,11 +68,11 @@ async function lift(row: Locator) {
 // A real touch through the browser's input pipeline: the sheet opens while the
 // finger is down, so its release must not reach the sheet. Synthetic events
 // skip the mousedown and click a browser derives from that release.
-async function longPress(page: Page, row: Locator) {
+async function longPress(page: Page, row: Locator, across = 0.5) {
 	await row.scrollIntoViewIfNeeded();
 	const box = await row.boundingBox();
 	if (!box) throw new Error("row is not rendered");
-	const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+	const point = { x: box.x + box.width * across, y: box.y + box.height / 2 };
 	const cdp = await page.context().newCDPSession(page);
 	await cdp.send("Input.dispatchTouchEvent", {
 		type: "touchStart",
@@ -140,33 +140,31 @@ test("desktop: hover and Tab reach the row's commands, and the menu returns focu
 	await expect(row.locator(".session-item-meta")).toBeHidden();
 	await expect(row.getByTestId("session-act-snooze")).toBeVisible();
 	await expect(row.getByTestId("session-act-pin")).toBeVisible();
-	// ● leads the strip and teaches u; on an unread row it flips to ○, Mark read.
-	const markUnread = row.getByTestId("session-act-mark-unread");
-	await expect(markUnread).toHaveAttribute("title", "Mark unread (u)");
-	await markUnread.click();
+	// Mark unread stays in the menu; the hover strip is settle, snooze, pin, more.
+	await expect(row.getByTestId("session-act-mark-unread")).toHaveCount(0);
+	await row.locator(".session-more-btn").click();
+	await page.getByTestId("session-ctx-mark-unread").click();
 	await expect(row.getByTestId("session-unread-dot")).toBeVisible();
 	await expect(
 		page.getByRole("status").filter({ hasText: "Marked unread" }),
 	).toHaveCount(1);
-	await expect(row.getByTestId("session-act-mark-read")).toHaveAttribute(
-		"title",
-		"Mark read (u)",
-	);
+	// The pointer was left on the menu item, off the row.
+	await row.hover();
+	await row.locator(".session-more-btn").click();
+	await expect(page.getByTestId("session-ctx-mark-read")).toBeVisible();
+	await page.keyboard.press("Escape");
 	await page.getByTestId("toast-action").first().click();
 	await expect(row.getByTestId("session-unread-dot")).toHaveCount(0);
 	await row.hover();
-	await expect(markUnread).toBeVisible();
 	await row.getByTestId("session-act-settle").click();
 	await expect(row).toHaveCount(0);
 	await expect(settled).toHaveCount(1);
 	await page.getByTestId("toast-action").first().click();
 	await expect(row).toBeVisible();
 
-	// Keyboard: ● then the settle twin are the first stops after the row link.
+	// Keyboard: Settle is the first stop after the row link.
 	await page.mouse.move(0, 0);
 	await row.focus();
-	await page.keyboard.press("Tab");
-	await expect(markUnread).toBeFocused();
 	await page.keyboard.press("Tab");
 	await expect(row.getByTestId("session-act-settle")).toBeFocused();
 	await page.keyboard.press("Enter");
@@ -361,7 +359,7 @@ test.describe("phone", () => {
 		const { row, title } = await setUp(page, relayUrl, harness);
 		// Short enough that the docked sheet rises under the first row, so the
 		// finger lifts over an item: the case the touchend guard exists for.
-		await page.setViewportSize({ width: 393, height: 680 });
+		await page.setViewportSize({ width: 393, height: 480 });
 		await gotoRelay(page, new URL("/", page.url()).toString());
 		await expect(row).toBeVisible();
 		const project = (
@@ -370,7 +368,9 @@ test.describe("phone", () => {
 			.split("·")[0]
 			?.trim();
 
-		const finger = await longPress(page, row);
+		// 30% across lands on the Snooze tile of the five-tile triage row
+		// rather than a gap between tiles.
+		const finger = await longPress(page, row, 0.3);
 		const sheet = page.getByTestId("session-action-sheet");
 		await expect(sheet).toBeVisible();
 		await expect(page.getByTestId("session-ctx-menu")).toHaveCount(0);
@@ -390,24 +390,24 @@ test.describe("phone", () => {
 		expect(box).not.toBeNull();
 		expect(box?.x).toBe(0);
 		expect(box?.width).toBe(393);
-		expect((box?.y ?? 0) + (box?.height ?? 0)).toBe(680);
+		expect((box?.y ?? 0) + (box?.height ?? 0)).toBe(480);
 		await expect(page.getByTestId("session-sheet-header")).toContainText(title);
 		if (project)
 			await expect(page.getByTestId("session-sheet-header")).toContainText(
 				project,
 			);
-		const firstSix = await sheet
+		const leading = await sheet
 			.locator('[data-testid^="session-ctx-"]')
 			.evaluateAll((items) =>
 				items.slice(0, 6).map((item) => item.getAttribute("data-testid")),
 			);
-		expect(firstSix).toEqual([
+		expect(leading).toEqual([
 			"session-ctx-settle",
-			"session-ctx-archive",
-			"session-ctx-auto-settle",
 			"session-ctx-snooze",
 			"session-ctx-pin",
 			"session-ctx-mark-unread",
+			"session-ctx-archive",
+			"session-ctx-auto-settle",
 		]);
 		await page.getByTestId("session-ctx-pin").click();
 		await expect(sheet).toHaveCount(0);
@@ -539,8 +539,11 @@ test.describe("phone", () => {
 		await expect(trigger).toBeFocused();
 		await trigger.click();
 		await sheet.getByTestId("session-ctx-snooze").click();
-		await expect(page.getByTestId("snooze-option-indefinite")).toBeVisible();
-		await page.getByTestId("snooze-option-indefinite").click();
+		const indefinite = page
+			.getByRole("menu", { name: "Snooze until", exact: true })
+			.locator('[data-hold-menu-item="indefinite"]');
+		await expect(indefinite).toBeVisible();
+		await indefinite.click();
 		await expect(
 			page.getByRole("status").filter({ hasText: "Snoozed “" }),
 		).toBeVisible();

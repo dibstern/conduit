@@ -63,7 +63,7 @@ function requestCount(
 }
 
 const sessionCreateCount = (mock: MockOpenCodeServer): number =>
-	requestCount(mock, (detail) => detail === "POST /session");
+	requestCount(mock, (detail) => /^POST \/session(?:\?|$)/.test(detail));
 
 const promptCount = (mock: MockOpenCodeServer): number =>
 	requestCount(mock, (detail) =>

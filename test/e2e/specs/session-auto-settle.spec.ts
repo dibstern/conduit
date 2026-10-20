@@ -1,10 +1,54 @@
+import { DatabaseSync } from "node:sqlite";
+import { Effect, Exit, Layer, Scope } from "effect";
+import { RpcClient, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
+import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import { formatSnoozeTime } from "../../../src/lib/frontend/utils/format.js";
+import type { ReplayHarness } from "../helpers/e2e-harness.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { chooseSettingsOption } from "../helpers/settings.js";
+import { AppPage } from "../page-objects/app.page.js";
+import { ChatPage } from "../page-objects/chat.page.js";
 
-test.use({
-	recording: "chat-simple",
-	viewport: { width: 1440, height: 900 },
-	screenshot: "off",
-});
+const IDLE_WINDOW_MS = 3 * 86_400_000;
+
+/** A typed WS RPC client on the relay, open until `close`. */
+async function connectRpc(relayPort: number) {
+	const scope = Effect.runSync(Scope.make());
+	const protocol = RpcClient.layerProtocolSocket().pipe(
+		Layer.provide(
+			Socket.layerWebSocket(`ws://127.0.0.1:${relayPort}/rpc`).pipe(
+				Layer.provide(Socket.layerWebSocketConstructorGlobal),
+			),
+		),
+		Layer.provide(RpcSerialization.layerJson),
+	);
+	const client = await Effect.runPromise(
+		Layer.buildWithScope(protocol, scope).pipe(
+			Effect.flatMap((context) =>
+				RpcClient.make(WsRpcGroup).pipe(Effect.provide(context)),
+			),
+			Scope.provide(scope),
+		),
+	);
+	return {
+		client,
+		close: () => Effect.runPromise(Scope.close(scope, Exit.void)),
+	};
+}
+
+function lastMessageAt(harness: ReplayHarness, sessionId: string): number {
+	const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
+	try {
+		return Number(
+			db
+				.prepare("SELECT last_message_at FROM sessions WHERE id = ?")
+				.get(sessionId)?.["last_message_at"],
+		);
+	} finally {
+		db.close();
+	}
+}
 
 test("auto-settle toggle and idle window survive reload", async ({
 	page,
@@ -29,19 +73,156 @@ test("auto-settle toggle and idle window survive reload", async ({
 	await page.getByTestId("overflow-settings").click();
 	await page.getByTestId("settings-tab-general").click();
 	const select = page.getByTestId("settings-auto-settle-select");
-	await expect(select).toHaveValue("3");
-	await select.selectOption("7");
+	await expect(select).toHaveAttribute("data-value", "3");
+	await chooseSettingsOption(page, select, "7");
 	await expect(select).toBeEnabled();
 	await page.getByTestId("settings-close-btn").click();
 	await page.getByTestId("session-bar-overflow").click();
 	await page.getByTestId("overflow-settings").click();
 	await page.getByTestId("settings-tab-general").click();
-	await expect(select).toHaveValue("7");
+	await expect(select).toHaveAttribute("data-value", "7");
 	await page.reload();
 	await page.getByTestId("session-bar-overflow").click();
 	await page.getByTestId("overflow-settings").click();
 	await page.getByTestId("settings-tab-general").click();
-	await expect(select).toHaveValue("7");
+	await expect(select).toHaveAttribute("data-value", "7");
+});
+
+test("the auto-settle outlook reads the same with or without a viewer", async ({
+	page,
+	relayUrl,
+	harness,
+}) => {
+	const app = new AppPage(page);
+	await app.goto(relayUrl);
+	await app.sendMessage("Ping");
+	const chat = new ChatPage(page);
+	await chat.waitForAssistantMessage();
+	await chat.waitForStreamingComplete();
+	const sessionId = harness.projectUrl.replace(/^\/s\//, "");
+	const { client, close } = await connectRpc(harness.relayPort);
+	try {
+		const read = () =>
+			Effect.runPromise(client.GetSessionAutoSettleOutlook({ sessionId }));
+		const sweep = (now: number) =>
+			Effect.runPromise(harness.stack.settleIdleSessions(IDLE_WINDOW_MS, now));
+
+		// An unread reply holds settlement back; reading it lets the clock run.
+		await Effect.runPromise(client.MarkSessionRead({ sessionId }));
+		// The replayed provider restamps the turn with its recorded, long-past
+		// times a moment after the reply, leaving the last message as the
+		// session's last activity.
+		const at = lastMessageAt(harness, sessionId) + IDLE_WINDOW_MS;
+		const scheduled = { kind: "scheduled", at };
+		await expect.poll(read).toEqual(scheduled);
+		await page.setViewportSize({ width: 393, height: 852 });
+		await page.getByTestId("session-bar-island-overflow").click();
+		await expect(
+			page
+				.getByTestId("session-ctx-auto-settle")
+				.locator("[data-switch-status]"),
+		).toHaveText(`On · settles ${formatSnoozeTime(at)} if left idle`);
+		await page.getByTestId("session-sheet-close").click();
+		// The open page holds the sweep back, but not the outlook.
+		expect(await sweep(at + 1)).toBe(0);
+
+		await Effect.runPromise(
+			client.SetSessionPinned({ sessionId, pinned: true }),
+		);
+		expect(await read()).toEqual({ kind: "paused", reason: "pinned" });
+		await Effect.runPromise(
+			client.SetSessionPinned({ sessionId, pinned: false }),
+		);
+
+		await Effect.runPromise(
+			client.SetAutoSettleSetting({ autoSettleAfterDays: null }),
+		);
+		expect(await read()).toEqual({ kind: "never" });
+		await Effect.runPromise(
+			client.SetAutoSettleSetting({ autoSettleAfterDays: 3 }),
+		);
+
+		expect(
+			await Effect.runPromise(
+				client.SetSessionAutoSettle({ sessionId, disabled: true }),
+			),
+		).toEqual({ kind: "off" });
+		expect(await read()).toEqual({ kind: "off" });
+		expect(
+			await Effect.runPromise(
+				client.SetSessionAutoSettle({ sessionId, disabled: false }),
+			),
+		).toEqual(scheduled);
+
+		await page.close();
+		expect(await read()).toEqual(scheduled);
+		await expect.poll(() => sweep(at + 1)).toBe(1);
+		expect(await read()).toEqual({ kind: "settled" });
+
+		await Effect.runPromise(
+			client.SetSessionSettled({ sessionId, settled: false }),
+		);
+		expect(await read()).toEqual({
+			kind: "paused",
+			reason: "awaiting-activity",
+		});
+
+		const missing = await Effect.runPromise(
+			Effect.flip(
+				client.GetSessionAutoSettleOutlook({ sessionId: "ses_missing" }),
+			),
+		);
+		expect(missing).toMatchObject({ code: "unknown-session" });
+	} finally {
+		await close();
+	}
+});
+
+test.describe("forked session", () => {
+	test.use({ recording: "fork-session" });
+
+	test("a fork is a root session, so it settles like its source", async ({
+		page,
+		relayUrl,
+		harness,
+	}) => {
+		const app = new AppPage(page);
+		const chat = new ChatPage(page);
+		await app.goto(relayUrl);
+		for (const word of ["alpha", "beta"]) {
+			await app.sendMessage(
+				word === "alpha"
+					? "Remember the word 'alpha'. Reply with only: ok, remembered."
+					: "Now remember 'beta' too. Reply with only: ok, remembered.",
+			);
+			await chat.waitForAssistantMessage();
+			await chat.waitForStreamingComplete();
+		}
+		const sessionId = harness.projectUrl.replace(/^\/s\//, "");
+		const { client, close } = await connectRpc(harness.relayPort);
+		try {
+			const fork = await Effect.runPromise(
+				client.ForkSession({ sessionId, originId: "e2e-auto-settle-fork" }),
+			);
+			expect(fork.forkedFrom).toBe(sessionId);
+			const read = (id: string) =>
+				Effect.runPromise(
+					client.GetSessionAutoSettleOutlook({ sessionId: id }),
+				);
+			expect(await read(sessionId)).not.toEqual({ kind: "off" });
+			expect(await read(fork.sessionId)).not.toEqual({ kind: "off" });
+			expect(
+				await Effect.runPromise(
+					client.SetSessionAutoSettle({
+						sessionId: fork.sessionId,
+						disabled: true,
+					}),
+				),
+			).toEqual({ kind: "off" });
+		} finally {
+			await close();
+		}
+	});
 });
 
 test.describe("phone session state chip", () => {

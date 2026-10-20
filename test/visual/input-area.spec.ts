@@ -14,14 +14,14 @@ async function navigateToStory(
 }
 
 test.describe("InputArea", () => {
-	test("renders textarea with placeholder", async ({ page }) => {
+	test("renders textarea with placeholder", async ({ page }, testInfo) => {
 		await navigateToStory(page, "input-inputarea--empty");
 		const textarea = page.locator("#input");
 		await expect(textarea).toBeVisible();
-		// Phones get the short provider placeholder; wider viewports keep the hint.
+		// The placeholder names the session's harness; phone drops the name.
 		await expect(textarea).toHaveAttribute(
 			"placeholder",
-			/^Ask (anything\.|Claude…$)/,
+			testInfo.project.name === "mobile" ? "Reply…" : "Reply to OpenCode…",
 		);
 	});
 
@@ -126,9 +126,12 @@ test.describe("Context warning", () => {
 			await navigateToStory(page, `input-inputarea--${story}`);
 			const warning = page.getByTestId("composer-context-warning");
 			await expect(warning).toBeVisible();
-			await expect(warning).toHaveText(
-				`Context ${percent}% full. Older turns compact soon.`,
+			await expect(warning).toContainText(
+				`Context ${percent}% full. Compact soon to keep replies sharp.`,
 			);
+			await expect(
+				warning.getByTestId("composer-context-compact"),
+			).toBeVisible();
 			const usage = page.getByTestId("composer-word-context-usage");
 			await expect(usage).toHaveText(`${percent}%`);
 			await expect(usage).toHaveAttribute("data-warning", "true");

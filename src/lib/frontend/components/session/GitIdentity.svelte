@@ -163,8 +163,8 @@
 	const noticeLabels = $derived([warningLabel, movedBack ? movedBackLabel : undefined, workspaceMissing ? missingLabel : undefined].filter((notice) => notice !== undefined));
 	const projectFloor = $derived(Math.min(project.length, 4.5));
 	const branchFloor = $derived(Math.min(checkout?.length ?? 0, 6.5));
-	// A thin control drops the project, then the branch and marks, rather than run under send.
-	type Fit = "full" | "branch" | "icon";
+	// Checkout gives up its labels before the model label needs to truncate.
+	type Fit = "full" | "icon";
 	// Floor = labels + slash and fixed marks in ch, plus icon, gaps, padding, chevron and notices in px. It wins over the nominal cap for long operation labels.
 	function floor(fit: Fit) {
 		const marks = fit === "icon" ? [] : [
@@ -172,26 +172,27 @@
 			operation ? operation.length : null,
 			showMerged ? 6 : null,
 		].filter((width) => width !== null);
-		const labels = fit === "icon" ? [] : fit === "branch" ? [branchFloor] : checkout ? [projectFloor, 1, branchFloor] : [projectFloor];
+		const labels = fit === "icon" ? [] : !control && !row && checkout ? [branchFloor] : checkout ? [projectFloor, 1, branchFloor] : [projectFloor];
 		const widths = [...labels, ...marks];
-		return { ch: widths.reduce((sum, width) => sum + width, 0), px: 12 + 5 * widths.length + (control ? 22 + 5 : 0) + 17 * noticeLabels.length };
+		return { ch: widths.reduce((sum, width) => sum + width, 0), px: 12 + 5 * widths.length + (control ? 12 : 0) + (fit === "icon" ? 0 : 17 * noticeLabels.length + (git?.dirty ? 11 : 0)) };
 	}
 	// Unmeasured until bound: a measured 0 means send left no room, which must fall to icon.
 	let room = $state<number>();
 	let hundredCh = $state(0);
 	const fit = $derived.by((): Fit => {
 		const available = room;
-		if (!control || available === undefined || !hundredCh) return "full";
+		if (row || available === undefined || !hundredCh) return "full";
 		const fits = (candidate: Fit) => {
 			const { ch, px } = floor(candidate);
 			return (ch * hundredCh) / 100 + px <= available;
 		};
-		return fits("full") ? "full" : checkout && fits("branch") ? "branch" : "icon";
+		return fits("full") && (!control || available >= 220) ? "full" : "icon";
 	});
-	const minimumWidth = $derived.by(() => {
-		const { ch, px } = floor(fit);
+	const width = (candidate: Fit) => {
+		const { ch, px } = floor(candidate);
 		return `calc(${ch}ch + ${px}px)`;
-	});
+	};
+	const minimumWidth = $derived(width(fit));
 
 	async function copy(text: string) {
 		try {
@@ -202,6 +203,10 @@
 	}
 </script>
 
+{#snippet dirtyMark(placement: string)}
+	<span data-part="dirty" class="{placement} size-[6px] rounded-full bg-warning" title="Uncommitted changes"><span class="sr-only">Uncommitted changes</span></span>
+{/snippet}
+
 {#snippet identity()}
 			<span class="relative flex size-[12px] shrink-0 items-center text-text-muted" data-part={git?.worktree ? "worktree" : undefined} data-icon={!git ? "folder" : !git.branch ? "commit" : git.worktree ? "worktree" : "branch"}>
 				{#if git && !git.branch}
@@ -210,19 +215,18 @@
 				{:else}
 					<Icon name={!git ? "folder" : git.worktree ? "folder-tree" : "git-branch"} size={12} />
 				{/if}
-				<!-- The dirty mark stays on the icon, which never truncates. -->
-				{#if git?.dirty}
-					<span data-part="dirty" class="absolute -right-[2px] -bottom-[1px] size-[6px] rounded-full bg-warning ring-[1.5px] {row ? 'ring-bg-surface' : 'ring-input-bg'}" title="Uncommitted changes"><span class="sr-only">Uncommitted changes</span></span>
-				{/if}
+				<!-- Without labels the dirty mark rides the icon; with them it follows the branch. -->
+				{#if git?.dirty && fit === "icon"}{@render dirtyMark("absolute -right-[2px] -bottom-[1px] ring-[1.5px] " + (row ? "ring-bg-surface" : "ring-input-bg"))}{/if}
 			</span>
-			{#if fit === "full"}
+			{#if fit === "full" && (control || row || !checkout)}
 				<span data-part="project" class="shrink-[100000000] truncate text-text-muted" style={`min-width: calc(${projectFloor}ch + 1px)`} title={project}>{project}</span>
-				{#if checkout}<span class="shrink-0 text-text-dimmer" aria-hidden="true">/</span>{/if}
+				{#if checkout}<span class="shrink-0 text-text-dimmer" aria-hidden="true">{control ? "·" : "/"}</span>{/if}
 			{/if}
 			{#if fit !== "icon"}
 				{#if checkout}
 					<span data-part="branch" class="min-w-0 truncate {git?.branch ? 'text-text-secondary' : 'text-text-muted'}" style:min-width={`${branchFloor}ch`} title={git?.branch ? `Branch: ${checkout}` : `Detached at ${checkout}`}>{checkout}</span>
 				{/if}
+				{#if git?.dirty}{@render dirtyMark("shrink-0")}{/if}
 				{#if !phone && upstreamMark}
 					<span data-part="upstream" class="shrink-0 tabular-nums text-text-muted">{upstreamMark}</span>
 				{/if}
@@ -230,23 +234,21 @@
 				{#if showMerged}<span data-part="merged" class="shrink-0 text-success">merged</span>{/if}
 			{/if}
 			{#if warningLabel}
-				<span data-part="warning" class="inline-flex shrink-0 text-warning" role="img" aria-label={warningLabel} title={warningLabel} data-testid={warningMismatch ? "workspace-mismatch-indicator" : "workspace-hint"}><Icon name="circle-alert" size={12} /></span>
+				<span data-part="warning" class="text-warning {fit === 'icon' && !row ? 'absolute right-[2px] top-[2px]' : 'inline-flex shrink-0'}" role="img" aria-label={warningLabel} title={warningLabel} data-testid={warningMismatch ? "workspace-mismatch-indicator" : "workspace-hint"}><Icon name="circle-alert" size={12} /></span>
 			{/if}
 			{#if movedBack}
-				<span class="inline-flex shrink-0 text-warning" role="img" aria-label={movedBackLabel} title={movedBackLabel} data-testid="workspace-moved-back"><Icon name="circle-alert" size={12} /></span>
+				<span class="text-warning {fit === 'icon' && !row ? 'absolute right-[2px] top-[2px]' : 'inline-flex shrink-0'}" role="img" aria-label={movedBackLabel} title={movedBackLabel} data-testid="workspace-moved-back"><Icon name="circle-alert" size={12} /></span>
 			{/if}
 			{#if workspaceMissing}
-				<span class="inline-flex shrink-0 text-warning" role="img" aria-label={missingLabel} title={missingLabel} data-testid="workspace-missing"><Icon name="circle-alert" size={12} /></span>
+				<span class="text-warning {fit === 'icon' && !row ? 'absolute right-[2px] top-[2px]' : 'inline-flex shrink-0'}" role="img" aria-label={missingLabel} title={missingLabel} data-testid="workspace-missing"><Icon name="circle-alert" size={12} /></span>
 			{/if}
-			{#if control}<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-down" size={10} /></span>{/if}
 {/snippet}
 
 {#snippet checkoutMenu()}
 <Menu presentation={phone ? "sheet" : "popover"} side="top" align="end" ariaLabel="Checkout" class={phone ? undefined : "w-[280px]"} data-testid="composer-checkout-menu" onopenchange={(open) => { if (!open) showWorktrees = false; }} onCloseAutoFocus={(event) => { if (showBranchRename) event.preventDefault(); }}>
 	{#snippet trigger({ props })}
 		{#if row}
-			<Button {...props} bind:element={identityElement} variant="ghost" size="content" tone="inherit" hoverFill="none" layout="flow"
-				class="flex min-h-[50px] w-full items-center gap-[10px] rounded-none border-b border-border-subtle text-left text-[12.5px] font-normal font-brand text-text last:border-b-0 hover:bg-text/7"
+			<Button {...props} bind:element={identityElement} variant="composer-row" size="content"
 				title={label} ariaLabel={`Checkout: ${[label, ...noticeLabels].join(", ")}`} data-testid="composer-checkout">
 				<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Checkout</span>
 				<span data-part="value" class="flex min-w-0 flex-1 items-center gap-[5px] font-normal">{@render identity()}</span>
@@ -255,7 +257,7 @@
 		{:else}
 			<!-- A grid track gives the pill an honest minimum: flex parents read a truncating label's minimum as its full text width, so the bar would overflow instead of shrinking the title. -->
 			<!-- The wrapper, ruler and button share a font so the ch floors agree. -->
-			<span class="git-pill {control ? 'git-control' : ''} text-[11.5px] font-brand inline-grid" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`} bind:clientWidth={room}>{#if control}<span class="ruler" aria-hidden="true" bind:clientWidth={hundredCh}></span>{/if}<Button {...props} bind:element={identityElement} variant="ghost" size="content" tone="muted" hoverFill="none" touchTarget align="start" class={control ? "h-[26px] max-w-full gap-[5px] rounded-[7px] px-[6px] font-normal font-brand" : "max-w-full gap-[5px] font-normal font-brand"}
+			<span class="git-pill {control ? 'git-control font-mono' : 'git-word font-sans'} text-[11.5px] inline-grid" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`} style:width={!control && !row && fit === "icon" ? width("full") : undefined} bind:clientWidth={room}>{#if !row}<span class="ruler" aria-hidden="true" bind:clientWidth={hundredCh}></span>{/if}<Button {...props} bind:element={identityElement} variant={control ? "composer-checkout" : "composer-word"} size={control ? "composer-chip" : "content"} touchTarget align="start" class="max-w-full"
 				style={`min-width: ${minimumWidth}`}
 				title={label} ariaLabel={`Checkout: ${[label, ...noticeLabels].join(", ")}`} data-testid="composer-checkout">
 				{@render identity()}
@@ -386,8 +388,10 @@
 <style>
 	/* The cap sits on the grid wrapper, the flex item: on the button it left the wrapper sized to the full label, with dead space after the pill. */
 	.git-pill { max-width: 100%; flex-shrink: 1; }
-	/* A control fills the room beside send, so its width is the room fit compares floors against. */
-	.git-pill.git-control { position: relative; flex: 1 1 0; min-width: 0; justify-content: end; }
+	/* A stable slot measures available room in block, grid and flex parents. Checkout still yields before the model. */
+	.git-pill.git-control { position: relative; width: 100%; flex: 0 1000000 220px; min-width: 30px; max-width: 220px; justify-content: end; }
+	/* Content-sized, so it sits beside the context %. As an icon it still asks for its full width, or it could never grow back. */
+	.git-pill.git-word { position: relative; flex: 0 1 auto; min-width: 12px; justify-content: end; }
 	/* 100ch in the pill's font turns ch floors into px. It extends left from the pill, so it never adds scroll. */
 	.ruler { position: absolute; top: 0; right: 0; width: 100ch; height: 0; visibility: hidden; pointer-events: none; }
 	.commit-icon { display: flex; align-items: center; width: 12px; }

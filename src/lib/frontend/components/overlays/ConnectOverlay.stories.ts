@@ -32,7 +32,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 /**
- * Overlay visible — shows animated logo and "Connecting to OpenCode..."
+ * Overlay visible — shows animated logo and "Connecting to Conduit server..."
  * status text. Simulates the disconnected/connecting state.
  */
 export const Connecting: Story = {};

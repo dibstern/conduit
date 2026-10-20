@@ -28,7 +28,7 @@
 	const staggerSpread = $derived(mode === 'fast' ? 1.0 : 1.6);
 	const staggerStep = $derived(cols > 1 ? staggerSpread / (cols - 1) : 0);
 
-	// Static opacity: linear gradient L→R for pink, R→L for cyan
+	// Static opacity: opposing gradients for the two rows.
 	function staticOpacity(index: number, total: number): number {
 		return 1 - (index / total) * 0.9; // 1.0 → 0.1
 	}
@@ -43,34 +43,34 @@
 	role="img"
 	aria-label="Conduit loading indicator"
 >
-	<!-- Top row: pink (brand-a), cascade L→R -->
+	<!-- Top row: accent, cascade L→R -->
 	{#each Array(cols) as _, i}
 		<div
 			style="
 				width: {blockSize}px;
 				height: {blockSize}px;
 				border-radius: {Math.max(0.5, blockSize / 4)}px;
-				background: var(--color-brand-a);
+				background: var(--color-accent);
 				{mode === 'static'
 				? `opacity: ${staticOpacity(i, cols)};`
 				: `animation: pixel-cascade-a ${duration}s ease-in-out infinite; animation-delay: ${(i * staggerStep).toFixed(3)}s;`}
-				{glow && mode !== 'static' ? `filter: drop-shadow(0 0 ${blockSize / 2}px var(--color-brand-a-glow));` : ''}
+				{glow && mode !== 'static' ? `filter: drop-shadow(0 0 ${blockSize / 2}px var(--color-accent-glow));` : ''}
 			"
 		></div>
 	{/each}
 
-	<!-- Bottom row: cyan (brand-b), cascade R→L -->
+	<!-- Bottom row: success, cascade R→L -->
 	{#each Array(cols) as _, i}
 		<div
 			style="
 				width: {blockSize}px;
 				height: {blockSize}px;
 				border-radius: {Math.max(0.5, blockSize / 4)}px;
-				background: var(--color-brand-b);
+				background: var(--color-success);
 				{mode === 'static'
 				? `opacity: ${staticOpacity(cols - 1 - i, cols)};`
 				: `animation: pixel-cascade-b ${duration}s ease-in-out infinite; animation-delay: ${((cols - 1 - i) * staggerStep).toFixed(3)}s;`}
-				{glow && mode !== 'static' ? `filter: drop-shadow(0 0 ${blockSize / 2}px var(--color-brand-b-glow));` : ''}
+				{glow && mode !== 'static' ? `filter: drop-shadow(0 0 ${blockSize / 2}px var(--color-success-glow));` : ''}
 			"
 		></div>
 	{/each}
