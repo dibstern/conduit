@@ -388,7 +388,8 @@ export const surfacingReplyHandlers: StepHandler[] = [
 			const synced = await requireRpcControl(world.page).waitForRequest(
 				(request) =>
 					request.tag === "SyncInputDraft" &&
-					request.payload["sessionId"] === SESSION &&
+					(request.payload["key"] as { session?: string } | undefined)
+						?.session === SESSION &&
 					String(request.payload["text"]).includes("Keep the old paint order."),
 			);
 			const draft = synced.payload["text"];

@@ -88,7 +88,8 @@ export const askContextHandlers: StepHandler[] = [
 			await rpc.waitForRequest(
 				(request) =>
 					request.tag === "SyncInputDraft" &&
-					request.payload["sessionId"] === SESSION &&
+					(request.payload["key"] as { session?: string } | undefined)
+						?.session === SESSION &&
 					serializeReferences(String(request.payload["text"])) === expected,
 			);
 			expect(
