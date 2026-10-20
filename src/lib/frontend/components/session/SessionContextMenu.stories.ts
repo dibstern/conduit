@@ -157,16 +157,38 @@ function phoneSheet(state: Partial<SessionInfo> = {}): Story {
 			expect(
 				new Set(tiles.map((tile) => tile.getBoundingClientRect().top)).size,
 			).toBe(2);
+			await expect(
+				within(within(menu).getByTestId("session-ctx-copy-resume")).getByText(
+					"Copy resume",
+					{ exact: true },
+				),
+			).toBeVisible();
 			for (const tile of menu.querySelectorAll<HTMLElement>(
 				"[data-menu-tile]",
 			)) {
+				const primary = tile.querySelector<HTMLElement>(
+					":scope > span:not([aria-hidden])",
+				);
+				if (!primary) throw new Error("Tile primary label is missing");
+				// Wrapped labels must retain their full text without horizontal clipping.
+				expect(primary.scrollWidth).toBeLessThanOrEqual(primary.clientWidth);
+				expect(primary.scrollHeight).toBeLessThanOrEqual(primary.clientHeight);
+				expect(getComputedStyle(primary).textOverflow).not.toBe("ellipsis");
+				const tileBox = tile.getBoundingClientRect();
 				for (const label of tile.querySelectorAll<HTMLElement>(
 					"small, span:not([aria-hidden])",
 				)) {
-					expect(label.getBoundingClientRect().height).toBeLessThanOrEqual(
-						Number.parseFloat(getComputedStyle(label).lineHeight) ||
-							Number.parseFloat(getComputedStyle(label).fontSize) * 1.5,
-					);
+					const labelBox = label.getBoundingClientRect();
+					expect(labelBox.left).toBeGreaterThanOrEqual(tileBox.left);
+					expect(labelBox.right).toBeLessThanOrEqual(tileBox.right);
+					expect(labelBox.top).toBeGreaterThanOrEqual(tileBox.top);
+					expect(labelBox.bottom).toBeLessThanOrEqual(tileBox.bottom);
+					if (label !== primary) {
+						expect(labelBox.height).toBeLessThanOrEqual(
+							Number.parseFloat(getComputedStyle(label).lineHeight) ||
+								Number.parseFloat(getComputedStyle(label).fontSize) * 1.5,
+						);
+					}
 				}
 			}
 			const icon = menu.querySelector(
