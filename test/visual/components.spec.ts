@@ -587,7 +587,15 @@ if (stories.length > 0) {
 					testInfo: TestInfo,
 					theme: "dark" | "light",
 				) => {
-					const skipScope = SKIP_STORIES.get(story.id);
+					// These fixtures explicitly select a sheet or desktop popover. Capture
+					// each in its intended viewport, as for the existing desktop goal stories.
+					const skipScope = story.id.startsWith(
+						"layout-sessionbar--desktop-goal-summary-",
+					)
+						? "mobile"
+						: story.id.startsWith("layout-sessionbar--phone-goal-summary-")
+							? "desktop"
+							: SKIP_STORIES.get(story.id);
 					if (skipScope === "all" || skipScope === testInfo.project.name) {
 						test.skip(true, "Intentionally excluded from visual capture");
 						return;
