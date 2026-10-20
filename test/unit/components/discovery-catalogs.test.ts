@@ -273,10 +273,18 @@ describe("discovery catalogs over the RPC wire", () => {
 			defaultOpenCodeInstanceId: "one",
 		});
 		const oldRead = discovery.refreshCatalogs();
-		await vi.waitFor(() => expect(modelReads).toHaveLength(1));
+		await vi.waitFor(() => {
+			expect(modelReads).toHaveLength(1);
+			expect(agentReads).toHaveLength(1);
+			expect(commandReads).toHaveLength(1);
+		});
 		discovery.selectInstance("two");
 		const newRead = discovery.refreshCatalogs();
-		await vi.waitFor(() => expect(modelReads).toHaveLength(2));
+		await vi.waitFor(() => {
+			expect(modelReads).toHaveLength(2);
+			expect(agentReads).toHaveLength(2);
+			expect(commandReads).toHaveLength(2);
+		});
 		const reply = models("Y", "two");
 		modelReads[1]?.resolve({
 			...reply,
