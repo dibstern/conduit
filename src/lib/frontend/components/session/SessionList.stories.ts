@@ -512,6 +512,11 @@ export const Searching: Story = {
 		seedSessions([...mockSessionsAllGroups]);
 		setSearchQuery("dark");
 	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByRole("textbox", { name: "Search sessions" }),
+		).toHaveValue("dark");
+	},
 };
 
 export const Hover: Story = {

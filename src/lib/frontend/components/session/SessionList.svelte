@@ -51,7 +51,7 @@
 
 	let { onaddproject }: { onaddproject?: (() => void) | undefined } = $props();
 
-	let localSearchValue = $state("");
+	let localSearchValue = $state(untrack(() => sessionState.searchQuery));
 	let debounceTimer: ReturnType<typeof setTimeout> | undefined = $state(
 		undefined,
 	);
