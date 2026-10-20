@@ -40,6 +40,7 @@ import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../persistence/effect/read-query-effect.js";
+import { isSessionDeleted } from "../../../persistence/effect/session-seeder-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import { SESSION_SUBTREE_SQL } from "../../../persistence/projectors/session-handlers.js";
 import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
@@ -981,6 +982,27 @@ export const SessionManagerServiceLive: Layer.Layer<
 				yield* commitAndSignal
 					.write((project) =>
 						Effect.gen(function* () {
+							for (const id of [session.id, session.parentID]) {
+								if (
+									id !== undefined &&
+									(yield* isSessionDeleted(id).pipe(
+										Effect.provideService(SqlClient.SqlClient, sql),
+									))
+								)
+									return yield* new SessionManagerError({
+										operation: "establishOpenCodeSession.deleted",
+										cause: `Session ${id} has been deleted`,
+									});
+							}
+							if (session.parentID !== undefined) {
+								const [parent] =
+									yield* sql`SELECT id FROM sessions WHERE id = ${session.parentID}`;
+								if (!parent)
+									return yield* new SessionManagerError({
+										operation: "establishOpenCodeSession.parent",
+										cause: `Parent session ${session.parentID} is missing`,
+									});
+							}
 							yield* sql`
 					INSERT OR IGNORE INTO sessions (
 						id, project_id, provider, provider_sid, title, status, created_at, updated_at
