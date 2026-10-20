@@ -49,7 +49,8 @@
 		{#snippet trigger({ props })}<Button {...props} variant="ghost" hoverFill="none" size="content" touchTarget ariaLabel="Change your avatar" class="self-start rounded-full"><UserAvatar size={sessionViewState.compact ? 20 : 28} /></Button>{/snippet}
 	</AvatarPicker>
 	<div class="min-w-0 max-md:contents">
-		<div data-testid="user-message-header" class="mb-[2px] flex min-h-[28px] flex-wrap items-center gap-x-[8px] gap-y-[4px]">
+		<!-- Mixed fonts and sizes: share a baseline, with the line centred on the avatar. -->
+		<div data-testid="user-message-header" class="mb-[2px] flex min-h-[28px] flex-wrap content-center items-baseline gap-x-[8px] gap-y-[4px]">
 			<span class="text-[13.5px] font-semibold">You</span>
 			<MessageTime createdAt={message.createdAt} />
 			{#if message.steered}

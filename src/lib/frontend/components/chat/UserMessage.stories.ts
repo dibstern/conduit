@@ -18,8 +18,26 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+// Mixed fonts in one header line must share a baseline, not a box centre.
+const baselines = (root: Element) =>
+	[...root.querySelectorAll("span, time")]
+		.filter((el) => el.childElementCount === 0 && el.textContent?.trim())
+		.map((el) => {
+			const mark = el.ownerDocument.createElement("span");
+			mark.style.cssText = "display:inline-block;width:0;height:0";
+			el.append(mark);
+			const y = mark.getBoundingClientRect().top;
+			mark.remove();
+			return y;
+		});
+
 export const Default: Story = {
 	args: { message: mockUserMessage },
+	play: async ({ canvasElement }) => {
+		const header = within(canvasElement).getByTestId("user-message-header");
+		const [name, ...rest] = baselines(header);
+		for (const y of rest) await expect(y).toBeCloseTo(name ?? 0, 1);
+	},
 };
 export const DefaultLight: Story = { ...Default, globals: { theme: "light" } };
 
