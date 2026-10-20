@@ -53,8 +53,10 @@ import { ProviderInstanceFailure } from "../errors.js";
 import {
 	type ClaudeAdapterError,
 	ClaudeBoundaryError,
+	ClaudeResumeRefused,
 	ClaudeRuntimeError,
 	isClaudeResumeFailure,
+	isClaudeResumeRefused,
 } from "../event-sink-errors.js";
 import { makeInProcessSessionRunner } from "../runner/in-process-session-runner.js";
 import type { LiveSettings, RunnerPayload } from "../runner/runner-payload.js";
@@ -81,6 +83,7 @@ import {
 	makeClaudeCapabilitiesService,
 } from "./claude-capabilities-service.js";
 import { isInterruptedResult } from "./claude-event-translator.js";
+import { makeClaudeForkQuery } from "./claude-fork-query.js";
 import {
 	ClaudeGoalTracker,
 	type ReadClaudeGoalStatus,
@@ -242,6 +245,10 @@ export type ClaudeSessionRunnerDeps = Pick<
 > & {
 	readonly onSubagentFinalizationComplete?: () => void;
 	readonly onTurnStateChanged?: (sessionId: string, inFlight: boolean) => void;
+	readonly onNativeSessionId?: (
+		sessionId: string,
+		nativeSessionId: string,
+	) => void;
 	readonly prepareQuery?: () => Promise<void>;
 };
 
@@ -318,6 +325,8 @@ export const makeClaudeSessionRunner = (
 								ClaudeProviderInstanceDeps["queryFactory"]
 							>),
 						deps.prepareQuery,
+						deps.readGoalStatus,
+						deps.onNativeSessionId,
 					);
 					payload = new ClaudeRunnerPayload(
 						{ ...deps, capabilitiesService },
@@ -1127,7 +1136,9 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					}
 				}
 				const options = warmed?.options ?? launchOptions;
-				const resumeSessionId = options.resume;
+				const resumeSessionId = options.forkSession
+					? options.sessionId
+					: options.resume;
 				const context = {
 					sessionId,
 					instanceId: input.instanceId ?? "claude",
@@ -1154,7 +1165,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					resumeFallbackAllowed:
 						input.rewind === undefined &&
 						!!launchInput.resumeSessionId &&
-						!!launchInput.handoff,
+						(!!launchInput.handoff || !!input.clearInheritedGoal),
 					queryInitialized: false,
 					turnInFlight: true,
 					currentModel: input.model?.modelId,
@@ -1184,16 +1195,39 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				const query =
 					warmed?.query ??
 					(yield* Effect.try({
-						try: () =>
-							this.queryFactory({
-								configDir: launchInput.configDir,
-								prompt: queue,
-								options,
-							}),
+						try: () => {
+							const createQuery = (prompt: AsyncIterable<SDKUserMessage>) =>
+								this.queryFactory({
+									configDir: launchInput.configDir,
+									prompt,
+									options,
+								});
+							return launchInput.clearInheritedGoal
+								? makeClaudeForkQuery(
+										createQuery,
+										queue,
+										launchInput,
+										this.deps.readGoalStatus,
+										(nativeId) =>
+											this.deps.onNativeSessionId?.(sessionId, nativeId),
+									)
+								: createQuery(queue);
+						},
 						catch: (cause) =>
 							new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 					}));
 				activeQuery = query;
+				if (launchInput.clearInheritedGoal)
+					yield* Effect.tryPromise({
+						try: () => query.initializationResult(),
+						catch: (cause) =>
+							cause instanceof ClaudeResumeRefused
+								? cause
+								: new ClaudeBoundaryError({
+										operation: "Claude fork initialization",
+										cause,
+									}),
+					});
 				ctx = {
 					...context,
 					query,
@@ -1673,9 +1707,10 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		return Effect.gen({ self: this }, function* () {
 			yield* this.consumeStreamLoopEffect(ctx, translator).pipe(
 				Effect.catch((err) =>
-					ctx.resumeFallbackAllowed &&
-					!ctx.queryInitialized &&
-					isClaudeResumeFailure(err)
+					isClaudeResumeRefused(err) ||
+					(ctx.resumeFallbackAllowed &&
+						!ctx.queryInitialized &&
+						isClaudeResumeFailure(err))
 						? this.handleStreamFailureEffect(ctx, translator, err)
 						: this.finishStreamOutputEffect(ctx, translator).pipe(
 								Effect.matchEffect({
@@ -1735,6 +1770,29 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					),
 				);
 				if (decodedMessage === undefined) continue;
+				if (
+					"session_id" in decodedMessage &&
+					typeof decodedMessage.session_id === "string"
+				) {
+					ctx.resumeSessionId = decodedMessage.session_id;
+					this.deps.onNativeSessionId?.(
+						ctx.sessionId,
+						decodedMessage.session_id,
+					);
+				}
+				if (
+					decodedMessage.type === "result" &&
+					decodedMessage.subtype !== "success" &&
+					decodedMessage.errors.some((error) =>
+						error.includes("Resume rejected by --resume-drops-turn:"),
+					)
+				)
+					return yield* Effect.fail(
+						new ClaudeResumeRefused({
+							reason: "resume_drops_turn",
+							message: decodedMessage.errors.join("\n"),
+						}),
+					);
 				if (decodedMessage.type === "command_lifecycle") {
 					yield* this.handleCommandLifecycleEffect(ctx, decodedMessage);
 				}
@@ -2080,14 +2138,14 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			const errMsg = err instanceof Error ? err.message : String(err);
 			if (
 				ctx.resumeSessionId &&
-				!ctx.queryInitialized &&
+				(!ctx.queryInitialized || isClaudeResumeRefused(err)) &&
 				isClaudeResumeFailure(err)
 			) {
 				ctx.resumeSessionId = undefined;
 				log.warn(
 					`Session ${ctx.sessionId}: stale resume cursor cleared after: ${errMsg}`,
 				);
-				if (ctx.resumeFallbackAllowed) {
+				if (ctx.resumeFallbackAllowed || isClaudeResumeRefused(err)) {
 					ctx.turnInFlight = false;
 					this.deps.onTurnStateChanged?.(ctx.sessionId, false);
 					return yield* resolveErrorTurnEffect(this.stateRef, ctx, err);

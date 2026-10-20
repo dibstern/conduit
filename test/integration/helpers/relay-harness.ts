@@ -136,6 +136,12 @@ export async function createRelayHarness(
 						"version",
 						"session_sidebar.row.version",
 						"sessions.history_complete",
+						// A child's drained wake event need not survive its ancestor.
+						// These read annotations are outside the log (ADR-0013).
+						"sessions.woken_at",
+						"sessions.woken_reason",
+						"session_sidebar.row.snooze.woken_at",
+						"session_sidebar.row.snooze.woken_reason",
 					],
 				}),
 			);

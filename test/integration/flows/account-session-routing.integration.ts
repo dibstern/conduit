@@ -475,6 +475,7 @@ describe("Integration: account session routing", () => {
 			>(),
 		);
 		const resumedSessions: Array<string | undefined> = [];
+		const forkSessionIds: Array<string | undefined> = [];
 		harness = await createRelayHarness("chat-simple", {
 			configDir: root,
 			daemonConfigContext,
@@ -486,6 +487,8 @@ describe("Integration: account session routing", () => {
 						params.options?.env?.["CLAUDE_CONFIG_DIR"] ?? "unset",
 					);
 					resumedSessions.push(params.options?.resume);
+					if (params.options?.forkSession)
+						forkSessionIds.push(params.options.sessionId);
 					return claudeSdk.query(params);
 				},
 				fork: {
@@ -547,9 +550,11 @@ describe("Integration: account session routing", () => {
 		const childCompleted = client.waitForTurnEnd(childId, 10_000);
 		await client.sendMessage("Continue the fork", { sessionId: childId });
 		expect((await childCompleted).attention).not.toBe("error");
-		expect(forkFolders).toEqual([addedLogin]);
+		expect(forkFolders).toEqual([]);
 		expect(launchFolders.at(-1)).toBe(addedLogin);
-		expect(resumedSessions.at(-1)).toBe(childId);
+		expect(resumedSessions.at(-1)).toEqual(expect.any(String));
+		expect(resumedSessions.at(-1)).not.toBe(childId);
+		expect(forkSessionIds).toEqual([childId]);
 		expect(existsSync(join(root, "daemon.json"))).toBe(false);
 	});
 

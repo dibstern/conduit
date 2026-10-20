@@ -11,6 +11,7 @@ import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
+import { sessionCreatedLineage } from "../../../contracts/session-ref.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
 import { makeAppendEventsWithClaudeTurnCosts } from "../../../persistence/effect/claude-event-persist-effect.js";
 import {
@@ -412,11 +413,8 @@ export const makeProviderRuntimeIngestionLive = (
 												if (record) sessionIds.add(event.sessionId);
 											for (const event of domainEvents)
 												if (event.type === "session.created")
-													for (const id of [
-														event.data.parentId,
-														event.data.forkedFrom,
-													])
-														if (id !== undefined) sessionIds.add(id);
+													for (const id of sessionCreatedLineage(event.data))
+														sessionIds.add(id);
 											const deleted = new Set<string>();
 											for (const id of sessionIds)
 												if (yield* isSessionDeleted(id)) deleted.add(id);
@@ -452,8 +450,8 @@ export const makeProviderRuntimeIngestionLive = (
 												}
 												if (
 													event.type === "session.created" &&
-													[event.data.parentId, event.data.forkedFrom].some(
-														(id) => id !== undefined && deleted.has(id),
+													sessionCreatedLineage(event.data).some((id) =>
+														deleted.has(id),
 													)
 												) {
 													// Keep creation and death in one commit. The missing-lineage

@@ -30,6 +30,7 @@ import { ProviderStateEffectTag } from "../../../../src/lib/persistence/effect/p
 import { ReadQueryEffectTag } from "../../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
+import { CLAUDE_FORK_SOURCE_KEY } from "../../../../src/lib/provider/claude/claude-session-fork.js";
 import { makePrepareTurn } from "../../../../src/lib/provider/claude/prepare-turn.js";
 import { claudeSdk } from "../../../helpers/fake-claude-process-sdk.js";
 import {
@@ -70,6 +71,20 @@ it.each([
 	const readTranscript = vi.fn(async (sdkId: string) => {
 		const id = sdkId === "source-sdk" ? "before" : "after";
 		return [
+			// A resumed account can retain earlier transcript records. A cut
+			// outside its delivery receipt must still use canonical history.
+			...(sdkId === "target-sdk"
+				? [
+						{
+							type: "user" as const,
+							uuid: "uncovered",
+							session_id: sdkId,
+							message: { role: "user", content: "An undelivered request" },
+							parent_tool_use_id: null,
+							parent_agent_id: null,
+						},
+					]
+				: []),
 			{
 				type: "assistant" as const,
 				uuid: id,
@@ -85,6 +100,12 @@ it.each([
 		];
 	});
 	const forkNative = vi.fn(async () => ({ sessionId: "child-sdk" }));
+	const sessionForkSdk = {
+		readTranscript,
+		forkSession: forkNative,
+		transcriptExists: vi.fn(async () => false),
+	};
+	const query = vi.fn(claudeSdk.query);
 	await Effect.runPromise(
 		Effect.gen(function* () {
 			const commit = yield* makeCommitAndSignal;
@@ -187,8 +208,30 @@ it.each([
 			);
 			const expectedAccount = point === "before" ? "claude" : "claude-sdk";
 			expect(childRow?.provider).toBe(expectedAccount);
+			expect(childRow?.provider_sid).toBeNull();
+			expect(forkNative).not.toHaveBeenCalled();
+			expect(readTranscript).not.toHaveBeenCalled();
+			expect(sessionForkSdk.transcriptExists).not.toHaveBeenCalled();
+			expect(query).not.toHaveBeenCalled();
+			expect(
+				yield* state.nativeThread(child.id, expectedAccount),
+			).toBeUndefined();
+			const sourceHint = (yield* state.getState(child.id))[
+				CLAUDE_FORK_SOURCE_KEY
+			];
+			if (point === "uncovered") expect(sourceHint).toBeUndefined();
+			else
+				expect(JSON.parse(sourceHint ?? "null")).toEqual({
+					instanceId: expectedAccount,
+					resumeSessionId: point === "before" ? "source-sdk" : "target-sdk",
+					configDir: configuredClaudeConfigDir(
+						point === "before" ? "/source" : "/target",
+					),
+					messageId: boundary,
+				});
 			const prepare = yield* makePrepareTurn({
 				folderSource: "account",
+				sessionForkSdk,
 				configDir: configuredClaudeConfigDir(
 					point === "before" ? "/source" : "/target",
 				),
@@ -200,7 +243,6 @@ it.each([
 			);
 			if (point === "uncovered") {
 				expect(forkNative).not.toHaveBeenCalled();
-				expect(readTranscript).not.toHaveBeenCalled();
 				expect(
 					yield* state.nativeThread(child.id, expectedAccount),
 				).toBeUndefined();
@@ -222,14 +264,17 @@ it.each([
 				expect(readTranscript).toHaveBeenCalledWith(nativeId, {
 					configDir: nativeFolder,
 				});
-				expect(forkNative).toHaveBeenCalledWith(nativeId, {
+				expect(forkNative).not.toHaveBeenCalled();
+				expect(prepared).toMatchObject({
+					resumeSessionId: nativeId,
+					resumeSessionAt: boundary,
+					forkSession: true,
+					clearInheritedGoal: true,
 					configDir: nativeFolder,
-					title: "Parent (fork)",
-					upToMessageId: boundary,
 				});
-				expect(prepared.resumeSessionId).toBe("child-sdk");
 				expect(prepared.prompt).toBe("Continue the child");
 			}
+			expect(query).not.toHaveBeenCalled();
 		}).pipe(
 			Effect.provide(SessionWorkspaceLive),
 			Effect.provideService(OpenCodeAPITag, makeMockOpenCodeAPI()),
@@ -266,7 +311,8 @@ it.each([
 					configDir: "/unused-config",
 					claudeSdk: {
 						...claudeSdk,
-						fork: { readTranscript, forkSession: forkNative },
+						query,
+						fork: sessionForkSdk,
 					},
 				}),
 			),

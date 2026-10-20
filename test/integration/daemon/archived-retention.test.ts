@@ -116,7 +116,7 @@ it("reclaims a root-only archived tree with unarchived side threads and subagent
 				)
 				.get(source)?.count,
 			fork: db
-				.prepare<[string], { forked_from: string }>(
+				.prepare<[string], { forked_from: string | null }>(
 					"SELECT forked_from FROM sessions WHERE id = ?",
 				)
 				.get(fork),
@@ -196,15 +196,22 @@ it("reclaims a root-only archived tree with unarchived side threads and subagent
 			await vi.waitFor(
 				() => {
 					expect(snapshot().sessions).toEqual([]);
-					expect(snapshot().events).toBe(0);
+					expect(snapshot().events).toBe(ids.length);
+					expect(snapshot().source).toBeUndefined();
+					expect(snapshot().sourceEvents).toBe(1);
+					expect(snapshot().fork?.forked_from).toBeNull();
 				},
 				{ timeout: 75_000, interval: 500 },
 			);
 			evidence["elapsedMs"] = Date.now() - started;
 			evidence["after"] = snapshot();
-			expect(snapshot().source?.id).toBe(source);
-			expect(snapshot().sourceEvents).toBeGreaterThan(0);
-			expect(snapshot().fork?.forked_from).toBe(source);
+			expect(
+				db
+					.prepare(
+						"SELECT session_id FROM events WHERE type = 'session.deleted' ORDER BY session_id",
+					)
+					.all(),
+			).toEqual([...ids, source].sort().map((session_id) => ({ session_id })));
 		} finally {
 			if (db.open) db.close();
 		}
@@ -224,7 +231,6 @@ it("reclaims a root-only archived tree with unarchived side threads and subagent
 it.each([
 	"new descendant",
 	"busy",
-	"outside fork",
 	"background work",
 	"deleted root",
 	"restored root",
@@ -310,9 +316,7 @@ it.each([
 												sessionId: "late-session",
 												provider: "opencode",
 												title: "Late session",
-												...(change === "outside fork"
-													? { forkedFrom: id }
-													: { parentId: id }),
+												parentId: id,
 											});
 								yield* runner.projectEvent(yield* store.append(event));
 							}
@@ -342,7 +346,7 @@ it.each([
 							(event) => event.type === "session.deleted",
 						),
 					).toBe(change === "deleted root");
-					if (change === "new descendant" || change === "outside fork") {
+					if (change === "new descendant") {
 						expect(yield* read.getSession("late-session")).toBeDefined();
 						expect(
 							(yield* store.readAllBySession("late-session")).length,

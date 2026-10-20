@@ -25,13 +25,6 @@ const ALLOWED_DELETES = [
 			"ADR-0005 permits migration 0057 to compact later empty deltas and thinking endings, retaining part openers. Its pinned hash, migration fixture and real-store replay parity constrain this exception.",
 	},
 	{
-		path: "src/lib/session/auto-delete-archived-sweep.ts",
-		statement:
-			/^delete\s+from\s+events\s+where\s+session_id\s+in\s*\(select\s+value\s+from\s+json_each\(\$\{JSON\.stringify\(sessionIds\)\}\)\)`;/i,
-		reason:
-			"Retention (conduit-test-iujk.7) removes events of a session tree after session.deleted; a deleted tree's events replay to nothing, and trees with surviving forks are excluded.",
-	},
-	{
 		path: "src/lib/persistence/effect/migrations.ts",
 		statement:
 			/^delete\s+from\s+events\s+where\s+session_id\s+in\s*\(select\s+id\s+from\s+background_shell_sessions\)`;/i,
@@ -43,7 +36,7 @@ const ALLOWED_DELETES = [
 		statement:
 			/^delete\s+from\s+events\s+where\s+project_id\s*=\s*\$\{projectId\}\s+and\s+session_id\s*=\s*\$\{sessionId\}\s+and\s+sequence\s+in\s*\(/i,
 		reason:
-			"EventRetention reclaims proven-dead sessions in project-scoped batches, preserving own deletion markers, lineage bounds and live part pointers (conduit-test-hiuf.8).",
+			"ADR-0013 permits only EventRetention.drain() to delete events at runtime: project-scoped batches preserve own deletion markers, lineage bounds and live part pointers.",
 	},
 ];
 
@@ -98,7 +91,7 @@ function scan(sources: Source[]) {
 }
 
 describe("permanent event log", () => {
-	it("rejects events-table deletes outside reviewed migration cleanup", () => {
+	it("rejects events-table deletes outside reviewed migrations and EventRetention.drain", () => {
 		expect(scan(sourceFiles(SRC_ROOT))).toEqual([]);
 	});
 
@@ -108,12 +101,6 @@ describe("permanent event log", () => {
 		const compaction = {
 			path: compactionPath,
 			text: readFileSync(join(REPO_ROOT, compactionPath), "utf8"),
-		};
-		const retentionPath = ALLOWED_DELETES[2]?.path;
-		if (!retentionPath) throw new Error("Missing retention exception");
-		const retention = {
-			path: retentionPath,
-			text: readFileSync(join(REPO_ROOT, retentionPath), "utf8"),
 		};
 		const backgroundShellPurge = {
 			path: "src/lib/persistence/effect/migrations.ts",
@@ -127,7 +114,6 @@ describe("permanent event log", () => {
 		expect(
 			scan([
 				compaction,
-				retention,
 				backgroundShellPurge,
 				drain,
 				{
@@ -144,7 +130,6 @@ describe("permanent event log", () => {
 		expect(
 			scan([
 				compaction,
-				retention,
 				backgroundShellPurge,
 				drain,
 				{

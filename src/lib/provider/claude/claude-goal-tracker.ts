@@ -21,8 +21,39 @@ export type ReadClaudeGoalStatus = (input: {
 	readonly configDir: ClaudeConfigDir;
 }) => Promise<ClaudeGoalStatus | undefined>;
 
+export function isGoalClearRecord(entry: unknown): boolean {
+	if (!isRecord(entry)) return false;
+	if (entry["type"] === "system" && entry["subtype"] === "local_command") {
+		const command = entry["commandRun"];
+		return (
+			isRecord(command) &&
+			command["command"] === "goal" &&
+			command["args"] === "clear"
+		);
+	}
+	if (entry["type"] === "assistant" && isRecord(entry["message"])) {
+		const command = entry["local_command_run"];
+		return (
+			(isRecord(command) &&
+				command["command"] === "goal" &&
+				command["args"] === "clear") ||
+			(entry["message"]["model"] === "<synthetic>" &&
+				typeof entry["message"]["content"] === "string" &&
+				entry["message"]["content"].startsWith("Goal cleared: "))
+		);
+	}
+	if (entry["type"] !== "user" || !isRecord(entry["message"])) return false;
+	const content = entry["message"]["content"];
+	return (
+		typeof content === "string" &&
+		/<command-name>\s*\/goal\s*<\/command-name>/.test(content) &&
+		/<command-args>\s*clear\s*<\/command-args>/.test(content)
+	);
+}
+
 /** The goal evaluator writes attachments to the transcript, but does not
- *  forward them to the SDK. Only inspect its bounded tail at turn end. */
+ *  forward them to the SDK. Search backwards in bounded reads because a goal
+ *  can remain active across arbitrarily many later transcript records. */
 export const readClaudeGoalStatus: ReadClaudeGoalStatus = async (input) => {
 	if (
 		typeof input.configDir?.path !== "string" ||
@@ -43,42 +74,54 @@ export const readClaudeGoalStatus: ReadClaudeGoalStatus = async (input) => {
 	);
 	try {
 		const { size } = await file.stat();
-		const start = Math.max(0, size - 64 * 1024);
-		const tail = Buffer.alloc(size - start);
-		const { bytesRead } = await file.read(tail, 0, tail.length, start);
-		const lines = tail.subarray(0, bytesRead).toString("utf8").split("\n");
-		for (let index = lines.length - 1; index >= 0; index--) {
-			const line = lines[index];
-			if (!line?.trim()) continue;
-			let entry: unknown;
-			try {
-				entry = JSON.parse(line);
-			} catch {
-				continue;
+		let end = size;
+		let remainder: Buffer = Buffer.alloc(0);
+		while (end > 0) {
+			const start = Math.max(0, end - 64 * 1024);
+			const chunk = Buffer.alloc(end - start);
+			const { bytesRead } = await file.read(chunk, 0, chunk.length, start);
+			const data = Buffer.concat([chunk.subarray(0, bytesRead), remainder]);
+			const firstLine = start === 0 ? 0 : data.indexOf(10) + 1;
+			// Keep an incomplete first line as bytes, including split UTF-8 chars.
+			remainder =
+				firstLine === 0 && start > 0 ? data : data.subarray(0, firstLine);
+			end = start;
+			if (firstLine === 0 && start > 0) continue;
+			const lines = data.subarray(firstLine).toString("utf8").split("\n");
+			for (let index = lines.length - 1; index >= 0; index--) {
+				const line = lines[index];
+				if (!line?.trim()) continue;
+				let entry: unknown;
+				try {
+					entry = JSON.parse(line);
+				} catch {
+					continue;
+				}
+				if (isGoalClearRecord(entry)) return { met: true, sentinel: true };
+				if (!isRecord(entry) || !isRecord(entry["attachment"])) continue;
+				const attachment = entry["attachment"];
+				if (attachment["type"] !== "goal_status") continue;
+				if (typeof attachment["met"] !== "boolean") return undefined;
+				return {
+					met: attachment["met"],
+					...(typeof attachment["sentinel"] === "boolean"
+						? { sentinel: attachment["sentinel"] }
+						: {}),
+					...(typeof attachment["failed"] === "boolean"
+						? { failed: attachment["failed"] }
+						: {}),
+					...(typeof attachment["condition"] === "string"
+						? { condition: attachment["condition"] }
+						: {}),
+					...(typeof attachment["reason"] === "string"
+						? { reason: attachment["reason"] }
+						: {}),
+					...(typeof attachment["judgeModel"] === "string" &&
+					attachment["judgeModel"].trim()
+						? { judgeModel: attachment["judgeModel"].trim() }
+						: {}),
+				};
 			}
-			if (!isRecord(entry) || !isRecord(entry["attachment"])) continue;
-			const attachment = entry["attachment"];
-			if (attachment["type"] !== "goal_status") continue;
-			if (typeof attachment["met"] !== "boolean") return undefined;
-			return {
-				met: attachment["met"],
-				...(typeof attachment["sentinel"] === "boolean"
-					? { sentinel: attachment["sentinel"] }
-					: {}),
-				...(typeof attachment["failed"] === "boolean"
-					? { failed: attachment["failed"] }
-					: {}),
-				...(typeof attachment["condition"] === "string"
-					? { condition: attachment["condition"] }
-					: {}),
-				...(typeof attachment["reason"] === "string"
-					? { reason: attachment["reason"] }
-					: {}),
-				...(typeof attachment["judgeModel"] === "string" &&
-				attachment["judgeModel"].trim()
-					? { judgeModel: attachment["judgeModel"].trim() }
-					: {}),
-			};
 		}
 		return undefined;
 	} finally {
@@ -115,6 +158,7 @@ export class ClaudeGoalTracker {
 		message: SDKMessage,
 		cumulativeTokens: number,
 	): SessionGoalChangedPayload | undefined {
+		if (isGoalClearRecord(message)) return this.clear(message.uuid);
 		if (message.type === "active_goal") {
 			const value = message.value;
 			const previous = this.unsettledGoal;
@@ -189,16 +233,7 @@ export class ClaudeGoalTracker {
 			text.startsWith("Goal cleared: ") ||
 			(text === "No goal set" && this.goal)
 		) {
-			return this.update(
-				{
-					sessionId: this.sessionId,
-					goal: null,
-					ended: "cleared",
-					...(this.goal ? { endedGoal: this.goal } : {}),
-					endedAt: Date.now(),
-				},
-				message.uuid,
-			);
+			return this.clear(message.uuid);
 		}
 		const status =
 			/^Goal active: ([\s\S]+) \((\d+) turns\)(?:\n([\s\S]*))?$/.exec(text);
@@ -236,7 +271,7 @@ export class ClaudeGoalTracker {
 		) {
 			return undefined;
 		}
-		if (status.sentinel) return undefined;
+		if (status.sentinel) return status.met ? this.clear() : undefined;
 		const goal = {
 			...current,
 			...(status.judgeModel ? { judgeModel: status.judgeModel } : {}),
@@ -278,6 +313,20 @@ export class ClaudeGoalTracker {
 	resume(): SessionGoalChangedPayload | undefined {
 		if (!this.goal || this.state.pausedReason === undefined) return undefined;
 		return this.update({ sessionId: this.sessionId, goal: this.goal });
+	}
+
+	private clear(messageId?: string): SessionGoalChangedPayload | undefined {
+		const goal = this.unsettledGoal;
+		return this.update(
+			{
+				sessionId: this.sessionId,
+				goal: null,
+				ended: "cleared",
+				...(goal ? { endedGoal: goal } : {}),
+				endedAt: Date.now(),
+			},
+			messageId,
+		);
 	}
 
 	private update(
