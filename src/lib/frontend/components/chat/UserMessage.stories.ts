@@ -1,10 +1,12 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect, within } from "storybook/test";
 import { handleCommandList } from "../../stores/discovery.svelte.js";
 import {
 	mockUserMessage,
 	mockUserMessageLong,
 	mockUserMessageShort,
 } from "../../stories/mocks.js";
+import type { UserMessage as UserMessageData } from "../../types.js";
 import UserMessage from "./UserMessage.svelte";
 
 const meta = {
@@ -19,6 +21,7 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = {
 	args: { message: mockUserMessage },
 };
+export const DefaultLight: Story = { ...Default, globals: { theme: "light" } };
 
 export const ShortText: Story = {
 	args: { message: mockUserMessageShort },
@@ -26,6 +29,30 @@ export const ShortText: Story = {
 
 export const LongText: Story = {
 	args: { message: mockUserMessageLong },
+};
+export const LongTextLight: Story = {
+	...LongText,
+	globals: { theme: "light" },
+};
+
+export const NeutralStates: Story = {
+	args: {
+		message: {
+			...mockUserMessage,
+			steered: true,
+			modelExecution: {
+				requestedModel: "Opus",
+				expectedModel: "Opus",
+				actualModel: "Fable 5",
+				drifted: true,
+			},
+		},
+		onDismissCutOff: () => {},
+	},
+};
+export const NeutralStatesLight: Story = {
+	...NeutralStates,
+	globals: { theme: "light" },
 };
 
 /** `/commit` is a known command and renders as a pill; `/comit` (a typo the
@@ -46,4 +73,76 @@ export const WithSkills: Story = {
 			text: "run /commit then /comit and /qwerty",
 		},
 	},
+};
+
+const fileOnlyMessage: UserMessageData = {
+	uuid: "persisted-documents",
+	type: "user",
+	text: "",
+	attachments: [
+		{
+			id: "notes",
+			mime: "text/plain",
+			name: "notes.txt",
+			url: "data:text/plain;name=notes.txt;base64,Y2Fmw6k=",
+			size: 5,
+		},
+		{
+			id: "guide",
+			mime: "application/pdf",
+			name: "guide.pdf",
+			url: "data:application/pdf;name=guide.pdf;base64,JVBERi0xLjQ=",
+			size: 8,
+		},
+	],
+};
+
+/** Both viewports must keep file-only sends visible after the composer clears. */
+export const FileOnlyDocuments: Story = {
+	args: { message: fileOnlyMessage },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getAllByTestId("user-message-file")).toHaveLength(2);
+		await expect(canvas.getByText("notes.txt")).toBeVisible();
+		await expect(canvas.getByText("text/plain · 5 B")).toBeVisible();
+		await expect(canvas.getByText("guide.pdf")).toBeVisible();
+		await expect(canvas.getByText("application/pdf · 8 B")).toBeVisible();
+	},
+};
+export const FileOnlyDocumentsLight: Story = {
+	...FileOnlyDocuments,
+	globals: { theme: "light" },
+};
+
+export const MixedAttachments: Story = {
+	args: {
+		message: {
+			...fileOnlyMessage,
+			text: "Review the screenshot and attached documents.",
+			attachments: [
+				{
+					id: "screenshot",
+					mime: "image/png",
+					name: "screenshot.png",
+					url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==",
+					size: 73,
+				},
+				...(fileOnlyMessage.attachments ?? []),
+			],
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByText("Review the screenshot and attached documents."),
+		).toBeVisible();
+		await expect(
+			canvas.getByRole("img", { name: "screenshot.png" }),
+		).toBeVisible();
+		await expect(canvas.getAllByTestId("user-message-file")).toHaveLength(2);
+	},
+};
+export const MixedAttachmentsLight: Story = {
+	...MixedAttachments,
+	globals: { theme: "light" },
 };

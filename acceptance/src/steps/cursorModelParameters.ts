@@ -275,6 +275,14 @@ export const cursorModelParametersHandlers: StepHandler[] = [
 		name: "assert Cursor composer words",
 		match: /^the Cursor composer words show context (.+) and effort (.+)$/,
 		run: async ({ world, match }) => {
+			// A phone shows the words as one summary that opens the Composer sheet.
+			const summary = world.page.getByTestId("composer-words-sheet-trigger");
+			if (await summary.count()) {
+				for (const word of [match[1], match[2]])
+					if (word && word !== "absent")
+						await expect(summary).toContainText(word);
+				return;
+			}
 			const context = world.page.getByTestId("composer-word-context");
 			if (match[1] === "absent") await expect(context).toHaveCount(0);
 			else await expect(context).toHaveText(match[1] ?? "");
@@ -288,7 +296,9 @@ export const cursorModelParametersHandlers: StepHandler[] = [
 		match: /^the Cursor composer stores combination (.+)$/,
 		run: async ({ world, match }) => {
 			await expect(
-				world.page.getByTestId("composer-word-model"),
+				world.page.getByTestId(
+					/^(composer-word-model|composer-words-sheet-trigger)$/,
+				),
 			).toHaveAttribute("data-shown-effort", match[1] ?? "");
 		},
 	},

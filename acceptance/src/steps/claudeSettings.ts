@@ -1,4 +1,6 @@
+import { expect } from "@playwright/test";
 import { dualDriverProviders } from "../../../test/e2e/fixtures/mockup-state.js";
+import { chooseSettingsOption } from "../../../test/e2e/helpers/settings.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	inheritedClaudeCommitAttribution,
@@ -201,20 +203,20 @@ export const claudeSettingsHandlers: StepHandler[] = [
 			await world.page
 				.getByTestId("settings-harness-default-claude-model")
 				.waitFor({ state: "visible", timeout: 5_000 });
-			await world.page.waitForFunction(
-				`document.querySelector('[data-testid="settings-harness-default-claude-model"]')?.selectedOptions[0]?.textContent?.trim() === "Claude Sonnet 4"`,
-				undefined,
-				{ timeout: 5_000 },
-			);
+			await expect(
+				world.page.getByTestId("settings-harness-default-claude-model"),
+			).toHaveText("Claude Sonnet 4");
 		},
 	},
 	{
 		name: "choose a default model",
 		match: /^I choose claude-opus-4-1 as the default model$/,
 		run: async ({ world }) => {
-			await world.page
-				.getByTestId("settings-harness-default-claude-model")
-				.selectOption("claude/claude-opus-4-1");
+			await chooseSettingsOption(
+				world.page,
+				world.page.getByTestId("settings-harness-default-claude-model"),
+				"claude/claude-opus-4-1",
+			);
 		},
 	},
 	{
@@ -234,40 +236,40 @@ export const claudeSettingsHandlers: StepHandler[] = [
 		name: "choose auto as default approval mode",
 		match: /^I choose Auto as the default approval mode$/,
 		run: async ({ world }) => {
-			await world.page
-				.getByTestId("claude-setting-defaultPermissionMode-select")
-				.selectOption({ label: "Auto" });
+			await chooseSettingsOption(
+				world.page,
+				world.page.getByTestId("claude-setting-defaultPermissionMode-select"),
+				{ label: "Auto" },
+			);
 		},
 	},
 	{
 		name: "assert default approval mode is auto",
 		match: /^the default approval mode is Auto$/,
 		run: async ({ world }) => {
-			await world.page.waitForFunction(
-				`document.querySelector('[data-testid="claude-setting-defaultPermissionMode-select"]')?.value === "auto"`,
-				undefined,
-				{ timeout: 5_000 },
-			);
+			await expect(
+				world.page.getByTestId("claude-setting-defaultPermissionMode-select"),
+			).toHaveAttribute("data-value", "auto");
 		},
 	},
 	{
 		name: "assert default model thinking level",
 		match: /^the default model row shows Thinking level: high$/,
 		run: async ({ world }) => {
-			await world.page.waitForFunction(
-				`document.querySelector('[data-testid="settings-harness-default-claude-effort"]')?.value === "high"`,
-				undefined,
-				{ timeout: 5_000 },
-			);
+			await expect(
+				world.page.getByTestId("settings-harness-default-claude-effort"),
+			).toHaveAttribute("data-value", "high");
 		},
 	},
 	{
 		name: "choose full access as default approval mode",
 		match: /^I choose Full access as the default approval mode$/,
 		run: async ({ world }) => {
-			await world.page
-				.getByTestId("claude-setting-defaultPermissionMode-select")
-				.selectOption({ label: "Full access" });
+			await chooseSettingsOption(
+				world.page,
+				world.page.getByTestId("claude-setting-defaultPermissionMode-select"),
+				{ label: "Full access" },
+			);
 		},
 	},
 	{

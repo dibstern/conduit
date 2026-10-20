@@ -20,6 +20,8 @@ export type ProviderSessionCapabilities =
 	typeof ProviderSessionCapabilitiesSchema.Type;
 
 export interface ProviderDriverTraits {
+	/** Composer provider-seam tests pin plain text and PDF delivery. */
+	readonly supportsFileAttachments: boolean;
 	/** composer-controls-words.feature pins the compact composer's behaviour control. */
 	readonly composerModeControl: "agent" | "permission-mode";
 	/** permission-modes.test.ts pins the modes each provider can enforce. */
@@ -82,6 +84,7 @@ export const PROVIDER_DRIVERS = {
 	// additionalDirectories and cwd/resume are pinned by extra-folder-read-turn
 	// and enter-worktree-turn / exit-worktree-keep-turn in claude-sdk-traces.
 	claude: {
+		supportsFileAttachments: true,
 		composerModeControl: "permission-mode",
 		permissionModes: ["ask", "acceptEdits", "full", "plan", "auto", "dontAsk"],
 		supportsQuestionSkip: false,
@@ -118,6 +121,7 @@ export const PROVIDER_DRIVERS = {
 	// Managed launches/recreation are pinned by opencode-launch-worktree.test.ts.
 	// Native moves reject destinations belonging to another OpenCode project.
 	opencode: {
+		supportsFileAttachments: true,
 		composerModeControl: "agent",
 		permissionModes: ["ask", "acceptEdits", "full"],
 		supportsQuestionSkip: true,
@@ -153,6 +157,7 @@ export const PROVIDER_DRIVERS = {
 		readOnlySubagents: false,
 	},
 	cursor: {
+		supportsFileAttachments: false,
 		composerModeControl: "permission-mode", // cursor-turn.feature pins the no-per-call-approval notice.
 		permissionModes: ["ask", "acceptEdits", "full", "plan", "auto"], // cursor-turn.test.ts pins sandbox reopen; sandbox-anchored pins enforcement.
 		supportsQuestionSkip: false, // Skipping questions needs a captured Cursor contract.

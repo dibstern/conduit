@@ -123,7 +123,10 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 			sessionId,
 		);
 		expect(toolResult.callID).toBe("toolu_lifecycle1");
-		expect(toolResult.state?.["output"]).toBe("file1.txt\nfile2.txt");
+		expect(toolResult.state?.["output"]).toEqual({
+			_tag: "whole",
+			text: "file1.txt\nfile2.txt",
+		});
 		expect(toolResult.state?.["status"]).toBe("completed");
 
 		const all = client
@@ -132,7 +135,7 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 		const startIdx = all.findIndex((message) =>
 			(message["parts"] as HistoryMessage["parts"])?.some(
 				(part) =>
-					part.id === "part-lifecycle-1" && part.state?.status === undefined,
+					part.id === "part-lifecycle-1" && part.state?.status === "pending",
 			),
 		);
 		const execIdx = all.findIndex((message) =>
@@ -277,7 +280,10 @@ describe("Integration: Tool lifecycle through pipeline", () => {
 			"completed",
 			sessionId,
 		);
-		expect(afterOverlap.state?.["output"]).toBe("file content");
+		expect(afterOverlap.state?.["output"]).toEqual({
+			_tag: "whole",
+			text: "file content",
+		});
 
 		await client.close();
 	}, 15_000);

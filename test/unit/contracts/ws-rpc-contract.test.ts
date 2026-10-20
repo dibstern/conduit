@@ -3,6 +3,7 @@ import { Effect, Schema } from "effect";
 import { expect } from "vitest";
 import { CLAUDE_DISPLAYABLE_SETTINGS_KEYS } from "../../../src/lib/contracts/claude-settings.js";
 import {
+	GoalDetailsSchema,
 	LoadMoreHistoryResponseSchema,
 	PtyInput,
 	QuotaForAccountsResponseSchema,
@@ -17,6 +18,60 @@ import { WsRpcGroup as ServerWsRpcGroup } from "../../../src/lib/server/ws-rpc.j
 import { makeRpcWire } from "../../helpers/rpc-wire.js";
 
 describe("browser WebSocket RPC contract", () => {
+	// Failure modes: metadata stripped by encoding, guessed models, and invalid
+	// turn indices crossing the RPC boundary.
+	it.effect(
+		"round-trips goal judge and turn metadata over GetGoalDetails",
+		() =>
+			Effect.scoped(
+				Effect.gen(function* () {
+					const details = {
+						judgeModel: "claude-sonnet-5",
+						setAt: 100,
+						metAt: 400,
+						turnCount: 2,
+						checks: [
+							{
+								iteration: 1,
+								turnIndex: 3,
+								judgeModel: "claude-sonnet-5",
+								at: 400,
+								reason: "All green",
+							},
+						],
+						tokensSinceStart: 10,
+					};
+					const client = yield* makeRpcWire({
+						GetGoalDetails: async () => details,
+					}).connect({
+						url: "ws://contract/rpc",
+						trafficClass: "control",
+					});
+					expect(yield* client("GetGoalDetails", { sessionId: "s1" })).toEqual(
+						details,
+					);
+					const unknown = {
+						...details,
+						judgeModel: null,
+						checks: [
+							{ ...details.checks[0], turnIndex: null, judgeModel: null },
+						],
+					};
+					expect(Schema.decodeUnknownSync(GoalDetailsSchema)(unknown)).toEqual(
+						unknown,
+					);
+					for (const turnIndex of [-1, 0, 1.5]) {
+						expect(
+							Schema.is(GoalDetailsSchema)({
+								...details,
+								checks: [{ ...details.checks[0], turnIndex }],
+							}),
+						).toBe(false);
+					}
+				}),
+			),
+	);
+
 	it("requires handedOff on accepted input replies", () => {
 		const accepts = Schema.is(SubmitInputResponseSchema);
 		expect(accepts({ ok: true, sessionId: "s1" })).toBe(false);

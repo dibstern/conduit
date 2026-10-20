@@ -49,7 +49,7 @@ Scenario Outline: Claude Compact sends the slash command and yields to the trans
   And the composer picker has the Claude catalog
   When the mock relay reports context 85 percent
   Then the composer context warning is visible
-  And the composer context warning reads Context 85% full. Older turns compact soon.
+  And the composer context warning reads Context 85% full. Compact soon to keep replies sharp.
   When I press Compact in the composer context warning
   Then the Compact RPC sends exactly /compact for the current session
   When the mock relay starts compaction for the current session
@@ -57,7 +57,7 @@ Scenario Outline: Claude Compact sends the slash command and yields to the trans
   And the transcript has a Compacting notice
   When the mock relay <outcome> compaction for the current session
   Then the composer context warning is visible
-  And the composer context warning reads Context <percent>% full. Older turns compact soon.
+  And the composer context warning reads Context <percent>% full. Compact soon to keep replies sharp.
 
 Examples:
   | outcome   | percent |
@@ -82,7 +82,7 @@ Scenario Outline: OpenCode Compact sends the slash command and follows compactio
   And the composer picker has the OpenCode catalog
   When the mock relay reports context 85 percent
   Then the composer context warning is visible
-  And the composer context warning reads Context 85% full. Older turns compact soon.
+  And the composer context warning reads Context 85% full. Compact soon to keep replies sharp.
   And the composer Compact action is present
   When I press Compact in the composer context warning
   Then the Compact RPC sends exactly /compact for the current session
@@ -109,6 +109,7 @@ Scenario Outline: phone Icons controls show the context warning above the field
   And the composer picker has the Claude catalog
   When the mock relay reports context 85 percent
   Then the composer context warning is visible
+  And the context warning is an inset tab fused to the composer
   And the composer region visually matches <baseline> at <threshold> percent
 
 Examples:
@@ -124,6 +125,7 @@ Scenario Outline: phone Words controls show the context warning and usage below 
   And I choose Words for composer controls
   And the mock relay reports context 85 percent
   Then the composer context warning is visible
+  And the context warning is an inset tab fused to the composer
   And the Words row context usage is warned
   And the composer region visually matches <baseline> at <threshold> percent
 
@@ -138,6 +140,7 @@ Scenario Outline: desktop Icons controls show the context warning above the fiel
   And the composer picker has the Claude catalog
   When the mock relay reports context 85 percent
   Then the composer context warning is visible
+  And the context warning is an inset tab fused to the composer
   And the composer region visually matches <baseline> at <threshold> percent
 
 Examples:

@@ -43,6 +43,31 @@ export function completedCompactionEvent(
 	};
 }
 
+/** OpenCode reads a text file into the prompt as a synthetic Read-tool preamble,
+ *  then the decoded contents, then the file part, which is the attachment.
+ *  Shown, the echo repeats the file as the user's own words. Other synthetic
+ *  text (task results, compaction follow-ups) stays: it can be a whole message. */
+export type FileReadEcho = "preamble" | "contents";
+
+export function fileReadEcho(
+	part: {
+		readonly type?: string;
+		readonly synthetic?: unknown;
+		readonly text?: unknown;
+	},
+	previous: FileReadEcho | undefined,
+): FileReadEcho | undefined {
+	if (
+		part.type !== "text" ||
+		part.synthetic !== true ||
+		typeof part.text !== "string"
+	)
+		return undefined;
+	if (part.text.startsWith("Called the Read tool with the following input: "))
+		return "preamble";
+	return previous === "preamble" ? "contents" : undefined;
+}
+
 export function isSettled(message: Message | undefined): boolean {
 	if (!message) return false;
 	return message.role === "user"
@@ -64,8 +89,12 @@ function stableJson(value: unknown): string {
 export function snapshotPayload(message: Message): MessageSnapshotPayload {
 	// OpenCode's compaction part requests a summary; only the canonical outcome
 	// is a transcript notice. Keeping this marker would create a second notice.
+	let echo: FileReadEcho | undefined;
 	const parts = (message.parts ?? [])
-		.filter((part) => part.type !== "compaction")
+		.filter((part) => {
+			echo = fileReadEcho(part, echo);
+			return part.type !== "compaction" && echo === undefined;
+		})
 		.map((part) => {
 			if (part.type !== "tool") return part;
 			const state = part["state"];

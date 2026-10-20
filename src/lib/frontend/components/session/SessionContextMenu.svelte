@@ -1,14 +1,10 @@
 <script lang="ts">
 	import type { SessionInfo } from "../../types.js";
-	import { isSessionSnoozed, sessionAttention } from "../../stores/session.svelte.js";
-	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
 	import { onDestroy, untrack } from "svelte";
-	import DitherGlyph from "../ui/DitherGlyph.svelte";
-	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
-	import ProjectSquare from "./ProjectSquare.svelte";
-	import { ATTENTION_DISPLAY } from "./SessionItem.svelte";
 	import SessionCommandItems from "./SessionCommandItems.svelte";
+	import SessionSheetBody from "./SessionSheetBody.svelte";
+	import SessionSheetFooter from "./SessionSheetFooter.svelte";
 	import { getSessionCommands, type SessionCommand, type SessionCommandHost } from "./session-commands.js";
 
 	let {
@@ -32,8 +28,8 @@
 		host: SessionCommandHost;
 		now?: number;
 		onclose: () => void;
-		/** Non-session actions appended after a divider, drawn as command rows. */
-		extras?: readonly SessionCommand[];
+		/** Non-session actions: desktop rows or the phone sheet footer. */
+		extras?: readonly Omit<SessionCommand, "section">[];
 	} = $props();
 	// Captured once: dialogs opened from a command call focusTarget after this menu
 	// unmounts, when its props may already be gone.
@@ -43,17 +39,9 @@
 	let open = $state(true);
 	let selected = false;
 	let focusScheduled = false;
-	const status = $derived(ATTENTION_DISPLAY[sessionAttention(session)]);
-	const activity = $derived.by(() => {
-		if (session.pinnedAt == null && session.settledAt != null)
-			return formatTimeAgo(session.settledAt);
-		if (session.pinnedAt == null && isSessionSnoozed(session, now))
-			return formatSnoozeTime(session.snoozedUntil ?? null, now);
-		return formatTimeAgo(session.updatedAt);
-	});
 	const commands = $derived([
 		...getSessionCommands(session, now, host, presentation === "sheet" ? "sheet" : "center"),
-		...(extras.length > 0 ? [{ divider: true } as const, ...extras] : []),
+		...extras.map((item) => ({ ...item, section: "extras" as const })),
 	]);
 	function focusTarget(): HTMLElement | null {
 		const row = [...opener.ownerDocument.querySelectorAll<HTMLElement>("#session-list .session-item[data-session-id]")].find((item) => item.dataset["sessionId"] === targetId);
@@ -79,30 +67,10 @@
 	}
 </script>
 
-{#snippet header(sheet: boolean)}
-	{#if sheet}
-		<div data-testid="session-sheet-header" class="flex items-start gap-3 border-b border-border px-4 pt-[8px] pb-[11px] font-brand">
-			<span class="mt-0.5 grid size-[20px] shrink-0 place-items-center {status.colour}" aria-hidden="true">{#if "dither" in status.glyph}<DitherGlyph state={status.glyph.dither} />{:else}<Icon name={status.glyph.icon} size={14} />{/if}</span>
-			<div class="min-w-0 flex-1">
-				<div class="line-clamp-2 break-words text-[15px] font-semibold leading-snug text-text">{session.title || "New Session"}</div>
-				<div class="mt-1 flex flex-wrap items-center gap-1.5 text-[11.5px] text-text-secondary">
-					{#if projectLabel}<span class="inline-flex items-center gap-1 text-text-secondary"><ProjectSquare label={projectLabel} accent={projectAccent} />{projectLabel}</span>{/if}
-					{#if branch}<span class="rounded border border-border bg-bg px-1.5 py-0.5 font-mono text-text-secondary">{branch}</span>{/if}
-					<span>{activity}</span>
-				</div>
-			</div>
-		</div>
-	{:else}
-		<div data-testid="session-ctx-header" class="border-b border-border px-3 py-2 font-brand">
-			<div class="line-clamp-2 whitespace-normal break-words text-sm font-semibold text-text">{session.title || "New Session"}</div>
-			{#if projectLabel || branch}<div class="mt-1 flex gap-2 text-xs text-text-dimmer">{#if projectLabel}<span>{projectLabel}</span>{/if}{#if branch}<span>{branch}</span>{/if}</div>{/if}
-		</div>
-	{/if}
-{/snippet}
-
 	<Menu
 		bind:open
 		presentation={presentation === "sheet" ? "sheet" : "popover"}
+		appearance="final"
 		onopenchange={(nextOpen) => {
 			if (!nextOpen) {
 				onclose();
@@ -117,10 +85,23 @@
 		ariaLabel="Session actions"
 		side="bottom"
 		align="end"
-		class="min-w-[180px]"
+		class="min-w-[180px] {presentation === 'menu' ? 'max-w-[calc(100vw-16px)]' : ''}"
 		data-testid={presentation === "sheet" ? "session-action-sheet" : "session-ctx-menu"}
+		footer={presentation === "sheet" && extras.length > 0 ? sheetFooter : undefined}
+		sheetBottomPadding={extras.length > 0 ? 12 : 22}
 	>
 		{#snippet trigger()}{/snippet}
-		{@render header(presentation === "sheet")}
-		<SessionCommandItems {commands} {presentation} onselect={select} />
+		{#if presentation === "sheet"}
+			<SessionSheetBody {commands} {now} header={{ session, projectLabel, projectAccent, branch }} onselect={select} />
+		{:else}
+			<div data-testid="session-ctx-header" class="border-b border-border px-3 py-2 font-sans">
+				<div class="line-clamp-2 whitespace-normal break-words text-sm font-semibold text-text">{session.title || "New Session"}</div>
+				{#if projectLabel || branch}<div class="mt-1 flex gap-2 text-xs text-text-dimmer">{#if projectLabel}<span class="min-w-0 truncate">{projectLabel}</span>{/if}{#if branch}<span class="min-w-0 truncate">{branch}</span>{/if}</div>{/if}
+			</div>
+			<SessionCommandItems {commands} onselect={select} />
+		{/if}
 	</Menu>
+
+{#snippet sheetFooter()}
+	<SessionSheetFooter {extras} onselect={select} />
+{/snippet}

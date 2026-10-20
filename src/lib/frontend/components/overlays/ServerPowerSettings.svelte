@@ -81,8 +81,8 @@
 	{#if status?.keepAwake && status.keepAwakeCommand !== null}
 		<SettingsRow label="Command">
 			{#snippet control()}
-				<span class="min-w-0 break-all font-mono text-[11px] text-text" data-testid="server-power-command-value">{status.keepAwakeCommand}</span>
-				<Button variant="secondary" size="sm" data-testid="server-power-edit" aria-expanded={openForm === "keep-awake-command"} aria-controls="server-power-form" disabled={saving} onclick={toggleCommandForm}>Edit</Button>
+				<span class="min-w-0 break-all font-mono text-[12px] text-text" data-testid="server-power-command-value">{status.keepAwakeCommand}</span>
+				<Button touchTarget variant="secondary" size="sm" data-testid="server-power-edit" aria-expanded={openForm === "keep-awake-command"} aria-controls="server-power-form" disabled={saving} onclick={toggleCommandForm}>Edit</Button>
 			{/snippet}
 		</SettingsRow>
 		{#if openForm === "keep-awake-command"}
@@ -96,21 +96,21 @@
 				onsubmit={(event) => { event.preventDefault(); void saveCommand(); }}
 			>
 				<div class="grid grid-cols-1 gap-2 md:grid-cols-2">
-					<label for="server-power-command" class="flex flex-col gap-1 text-[11px] text-text-muted">
+					<label for="server-power-command" class="flex flex-col gap-1 text-[12px] text-text-muted">
 						Command
 						<TextInput id="server-power-command" data-testid="server-power-command" bind:value={command} placeholder="caffeinate" autocomplete="off" required disabled={saving} aria-describedby={error ? "server-power-error" : undefined} />
 					</label>
-					<label for="server-power-args" class="flex flex-col gap-1 text-[11px] text-text-muted">
+					<label for="server-power-args" class="flex flex-col gap-1 text-[12px] text-text-muted">
 						Args
 						<TextInput id="server-power-args" data-testid="server-power-args" bind:value={args} placeholder="-di" autocomplete="off" disabled={saving} aria-describedby={error ? "server-power-error" : undefined} />
 					</label>
 				</div>
 				<div class="flex flex-wrap items-center justify-end gap-1.5">
-					<Button variant="secondary" size="sm" data-testid="server-power-cancel" disabled={saving} onclick={() => { error = null; onToggleForm("keep-awake-command"); }}>Cancel</Button>
-					<Button variant="primary" size="sm" type="submit" data-testid="server-power-save" disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
+					<Button touchTarget variant="secondary" size="sm" data-testid="server-power-cancel" disabled={saving} onclick={() => { error = null; onToggleForm("keep-awake-command"); }}>Cancel</Button>
+					<Button touchTarget variant="primary" size="sm" type="submit" data-testid="server-power-save" disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
 				</div>
 			</form>
 		{/if}
 	{/if}
-	{#if error}<p id="server-power-error" data-testid="server-power-error" role="alert" class="px-3 py-2 text-[11px] text-error">{error}</p>{/if}
+	{#if error}<p id="server-power-error" data-testid="server-power-error" role="alert" class="px-3 py-2 text-[12px] text-error">{error}</p>{/if}
 </SettingsGroup>

@@ -14,6 +14,7 @@ import type {
 	InstanceListResponse,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import { openPickerRoot } from "../helpers/model-picker.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
@@ -474,7 +475,7 @@ test("deleting Claude defaults follows usage order and adding an account restore
 	await gotoRelay(page, new URL("/?p=myapp", relayUrl).toString());
 	const composerPick = page
 		.locator(
-			'[data-testid="composer-word-model"]:visible, [data-testid="model-picker-trigger"]:visible',
+			'[data-testid="composer-word-model"]:visible, [data-testid="model-picker-trigger"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 		)
 		.first();
 	await expect(composerPick).toHaveAttribute(
@@ -523,12 +524,7 @@ test("deleting Claude defaults follows usage order and adding an account restore
 	await expect(
 		page.locator('[data-testid^="usage-footer-row-"][data-default="true"]'),
 	).toHaveCount(1);
-	await page
-		.getByTestId(
-			/^(composer-harness-trigger|model-picker-trigger|composer-word-model)$/,
-		)
-		.first()
-		.click();
+	await openPickerRoot(page, composerPick);
 	await expect(page.getByTestId("picker-account-bravo")).toHaveAttribute(
 		"aria-checked",
 		"true",
@@ -570,12 +566,7 @@ test("deleting Claude defaults follows usage order and adding an account restore
 	await expect(page.getByTestId("add-claude-account-btn")).toHaveText(
 		"Add account",
 	);
-	await page
-		.getByTestId(
-			/^(composer-harness-trigger|model-picker-trigger|composer-word-model)$/,
-		)
-		.first()
-		.click();
+	await openPickerRoot(page, composerPick);
 	await expect(page.getByTestId("picker-account-name")).toHaveCount(0);
 	await expect(page.getByTestId("picker-add-account-btn")).toHaveText(
 		"Add account",

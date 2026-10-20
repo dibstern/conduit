@@ -230,6 +230,8 @@ test.describe("Claude turn working time", () => {
 			await chat.waitForStreamingComplete();
 			const wallMs = performance.now() - sentAt;
 			const final = stamps();
+			// A turn with tools bills in its step log, so open it first.
+			await chat.expandTurnActivity();
 			const meta = page.locator(".turn-meta").last();
 			const duration = page.locator(".turn-duration").last();
 			await expect(meta).toBeVisible();
@@ -304,6 +306,7 @@ test.describe("Claude turn working time", () => {
 			const composerContext = page.getByTestId("composer-word-context-usage");
 			await expect(composerContext).toHaveText(`${contextPct}%`);
 			await page.reload();
+			await chat.expandTurnActivity();
 			await expect(
 				meta.getByTitle("Fresh input tokens", { exact: true }),
 			).toHaveText(`${sdkTokens.input} in`);

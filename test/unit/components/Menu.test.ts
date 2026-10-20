@@ -31,6 +31,7 @@ describe("Menu", () => {
 		).toEqual({
 			default: ["text-text"],
 			danger: ["text-error"],
+			selected: ["text-accent"],
 		});
 		expect(textColorClasses(MENU_RADIO_ITEM_COLOR_CLASSES)).toEqual([
 			"data-[state=unchecked]:text-text",
@@ -59,7 +60,7 @@ describe("Menu", () => {
 			"rounded-lg",
 			"border",
 			"border-border",
-			"bg-bg-alt",
+			"bg-popover-bg",
 			"py-1",
 			"data-[side=top]:shadow-menu",
 			"data-[side=bottom]:shadow-dropdown",

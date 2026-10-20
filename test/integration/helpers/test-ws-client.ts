@@ -27,6 +27,7 @@ import {
 	type InputDraftKey,
 	type LoadMoreHistoryResponse,
 	type PermissionDecision,
+	type ProviderInfo,
 	type PtyListResponse,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -68,6 +69,10 @@ export class TestWsClient {
 	>();
 	private detailSubscriptionKey: string | undefined;
 	private readonly sessionRows = new Map<string, SessionInfo>();
+	private readonly discoveredCatalogs = new Map<
+		string,
+		readonly ProviderInfo[]
+	>();
 	private readonly turnEndVersions = new Map<string, number>();
 	private readonly turnCursors = new Map<string, number>();
 	private closed = false;
@@ -248,10 +253,29 @@ export class TestWsClient {
 				...(instanceId ? { instanceId: AccountIdSchema.make(instanceId) } : {}),
 			}),
 		);
-		const firstProvider = models.providers.find(
-			(provider) => provider.models.length > 0,
-		);
-		const firstModel = firstProvider?.models[0];
+		const firstPick = (providers: readonly ProviderInfo[]) => {
+			const provider = providers.find(
+				(candidate) => candidate.models.length > 0,
+			);
+			const first = provider?.models[0];
+			return provider && first
+				? {
+						providerId: provider.id,
+						modelId: first.id,
+						variant: first.variants?.[0] ?? "",
+						contextWindow:
+							first.contextWindowOptions?.find((option) => option.isDefault)
+								?.value ?? "",
+					}
+				: undefined;
+		};
+		// GetModels carries OpenCode providers only; a Claude catalog reaches
+		// clients on the providerModels project setting, as the browser reads it.
+		const discoveredPick = async () => {
+			if (models.instanceId === undefined) return undefined;
+			await this.subscribeProjectSettings();
+			return firstPick(this.discoveredCatalogs.get(models.instanceId) ?? []);
+		};
 		const model =
 			opts.model ??
 			(models.active
@@ -261,17 +285,7 @@ export class TestWsClient {
 						variant: models.variant?.variant ?? "",
 						contextWindow: models.contextWindow?.contextWindow ?? "",
 					}
-				: firstProvider && firstModel
-					? {
-							providerId: firstProvider.id,
-							modelId: firstModel.id,
-							variant: firstModel.variants?.[0] ?? "",
-							contextWindow:
-								firstModel.contextWindowOptions?.find(
-									(option) => option.isDefault,
-								)?.value ?? "",
-						}
-					: undefined);
+				: (firstPick(models.providers) ?? (await discoveredPick())));
 		if (!model)
 			throw new Error("The session fixture needs a valid harness model pick");
 		const result = await this.rpcCall((client) =>
@@ -517,6 +531,28 @@ export class TestWsClient {
 			"pty",
 			(client) => client.SubscribePtys({ projectSlug }),
 			{ projectSlug },
+		);
+	}
+
+	/** Follow the project's settings over SubscribeProjectSettings, keeping
+	 *  each account's discovered model catalog. Idempotent. */
+	async subscribeProjectSettings(): Promise<void> {
+		const projectSlug = this.projectSlug;
+		await this.follow(
+			"projectSettings",
+			(client) => client.SubscribeProjectSettings({ projectSlug }),
+			{ projectSlug },
+			(envelope) => {
+				const settings =
+					envelope._tag === "snapshot"
+						? envelope.rows
+						: envelope._tag === "upsert"
+							? [envelope.item]
+							: [];
+				for (const setting of settings)
+					if (setting._tag === "providerModels" && setting.accountId)
+						this.discoveredCatalogs.set(setting.accountId, setting.providers);
+			},
 		);
 	}
 

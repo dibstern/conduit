@@ -83,7 +83,7 @@
 			{/if}
 			{@render children()}
 			<span
-				class="ml-auto grid size-[16px] shrink-0 place-items-center rounded-[5px] border-[1.5px] {itemChecked ? 'border-accent bg-accent text-on-brand' : 'border-border-chip'}"
+				class="ml-auto grid size-[16px] shrink-0 place-items-center rounded-[5px] border-[1.5px] {itemChecked ? 'border-accent bg-accent text-bg' : 'border-border-chip'}"
 				aria-hidden="true"
 			>
 				{#if itemChecked}<Icon name="check" size={10} />{/if}

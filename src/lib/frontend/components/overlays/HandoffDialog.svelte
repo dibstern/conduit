@@ -8,6 +8,7 @@
   single Close. A modal on desktop, a bottom sheet with condensed rows on phones.
 -->
 <script lang="ts">
+	import SheetChrome from "../ui/SheetChrome.svelte";
 	import type { HandoffSummary, UsageReading } from "../../../contracts/limit-recovery.js";
 	import { getInstanceById } from "../../stores/instance.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
@@ -97,19 +98,17 @@
 {/snippet}
 
 <Dialog {open} {onclose} placement={compact ? "sheet" : "center"} labelledBy={titleId}>
+	<SheetChrome active={compact} bottomPadding={26}>
 	<Surface
-		variant="raised"
+		variant={compact ? "bare" : "raised"}
 		radius="none"
-		elevation="modal"
+		elevation={compact ? "none" : "modal"}
 		data-testid="handoff-dialog"
 		data-mode={confirm ? "confirm" : "review"}
 		class="text-[11.5px] text-text-secondary {compact
-			? 'w-full rounded-t-[18px] px-[14px] pt-[8px] pb-[calc(26px+env(safe-area-inset-bottom))]'
+			? 'w-full px-[14px]'
 			: 'w-[560px] max-w-[calc(100vw-32px)] rounded-[14px] px-[18px] py-[16px]'}"
 	>
-		{#if compact}
-			<div aria-hidden="true" class="mx-auto mb-[8px] h-[4px] w-[36px] rounded-full bg-border-chip"></div>
-		{/if}
 		<h2 id={titleId} class="font-semibold text-text {compact ? 'mt-[4px] mb-[6px] text-[13px]' : 'mb-[3px] text-[14px]'}">
 			{confirm ? `Continue on ${nameOf(to)}?` : "What carried over?"}
 		</h2>
@@ -147,4 +146,5 @@
 			{/if}
 		</div>
 	</Surface>
+	</SheetChrome>
 </Dialog>

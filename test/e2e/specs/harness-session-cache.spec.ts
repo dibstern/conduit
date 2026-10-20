@@ -141,17 +141,20 @@ const parse = (message: string | Buffer): unknown => {
 };
 
 /** The transcript's text, without the "↓ Latest" button, which shows or not
- * depending on where the tab happens to be scrolled. */
+ * depending on where the tab happens to be scrolled, or the user's avatar,
+ * which draws its letter when the daemon answers GetAvatar. */
 const transcriptOf = (page: Page) =>
 	page.locator("#messages").evaluate((messages: HTMLElement) => {
-		const button = messages.querySelector<HTMLElement>("#scroll-btn");
-		if (!button) return messages.innerText;
-		const display = button.style.display;
-		button.style.display = "none";
+		const hidden = [
+			...messages.querySelectorAll<HTMLElement>(
+				'#scroll-btn, [data-testid="user-avatar"]',
+			),
+		].map((element) => [element, element.style.display] as const);
+		for (const [element] of hidden) element.style.display = "none";
 		try {
 			return messages.innerText;
 		} finally {
-			button.style.display = display;
+			for (const [element, display] of hidden) element.style.display = display;
 		}
 	});
 

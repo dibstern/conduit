@@ -1,24 +1,27 @@
-<!-- Modal settings panel in frame H's layout (2026-10-07 account-switch design): -->
-<!-- a vertical section list beside the open section on desktop; on phone the   -->
-<!-- list is the first screen and a section drills in one level.               -->
+<!-- Desktop dialog with a section rail; phone sections push full-screen pages. -->
 
 <script lang="ts">
 	import { tick, untrack } from "svelte";
-	import { MediaQuery } from "svelte/reactivity";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
+	import { uiState, markTerminalSettingsSeen } from "../../stores/ui.svelte.js";
 	import Dialog from "../ui/Dialog.svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Tabs from "../ui/Tabs.svelte";
+	import Badge from "../ui/Badge.svelte";
 	import ClaudeSettingsTab from "./ClaudeSettingsTab.svelte";
 	import ArchivedSettingsTab from "./ArchivedSettingsTab.svelte";
 	import UsageSettingsTab from "./UsageSettingsTab.svelte";
 	import NotificationsSettingsTab from "./NotificationsSettingsTab.svelte";
 	import AppearanceSettingsTab from "./AppearanceSettingsTab.svelte";
+	import AvatarSettings from "./AvatarSettings.svelte";
 	import ComposerSettingsTab from "./ComposerSettingsTab.svelte";
 	import SessionsSettingsTab from "./SessionsSettingsTab.svelte";
+	import TerminalSettingsTab from "./TerminalSettingsTab.svelte";
 	import VisibilitySettingsTab from "./VisibilitySettingsTab.svelte";
 	import ServerSettingsTab from "./ServerSettingsTab.svelte";
 	import DebugSettingsTab from "./DebugSettingsTab.svelte";
+	import SurfacingSettingsTab from "./SurfacingSettingsTab.svelte";
 	import type { SettingsSection } from "../layout/chrome-actions.js";
 	import { getCachedInstances, instanceStatusColor } from "../../stores/instance.svelte.js";
 	import { orderedSettingsUsageAccounts, usageAlert, usageState } from "../../stores/usage.svelte.js";
@@ -26,28 +29,34 @@
 	let { visible = false, initialTab, initialAnchor, onClose }:
 		{ visible: boolean; initialTab?: SettingsSection | undefined; initialAnchor?: "instances" | undefined; onClose?: () => void } = $props();
 	const SETTINGS_TABS = [
-		{ value: "general", label: "General", testId: "settings-tab-general" },
-		{ value: "models", label: "Models & agents", testId: "settings-tab-models" },
-		{ value: "claude", label: "Claude", testId: "settings-tab-claude" },
-		{ value: "archived", label: "Archived", testId: "settings-tab-archived" },
-		{ value: "usage", label: "Usage", testId: "settings-tab-usage", groupLabel: "This computer" },
-		{ value: "server", label: "Server", testId: "settings-tab-server" },
+		{ value: "general", label: "General", testId: "settings-tab-general", icon: "settings", iconTone: "neutral" },
+		{ value: "terminal", label: "Terminal", testId: "settings-tab-terminal", icon: "terminal", iconTone: "neutral" },
+		{ value: "models", label: "Models & agents", testId: "settings-tab-models", icon: "sliders-horizontal", iconTone: "purple" },
+		{ value: "claude", label: "Claude", testId: "settings-tab-claude", icon: "claude", iconTone: "clay" },
+		{ value: "surfacing", label: "Surfacing", testId: "settings-tab-surfacing", icon: "sparkle", iconTone: "purple" },
+		{ value: "archived", label: "Archived", testId: "settings-tab-archived", icon: "archive", iconTone: "neutral" },
+		{ value: "usage", label: "Usage", testId: "settings-tab-usage", groupLabel: "This computer", icon: "gauge", iconTone: "amber" },
+		{ value: "server", label: "Server", testId: "settings-tab-server", icon: "server", iconTone: "green" },
 	] as const;
-	const phone = new MediaQuery("(max-width: 767px)");
 	/** `null` only on phone, where it means the section list is the screen. */
 	let section = $state<SettingsSection | null>("general");
 	let backEl = $state<HTMLButtonElement | HTMLAnchorElement>();
 	let contentEl = $state<HTMLDivElement>();
+	let surfacingPage = $state<{ title: string; back: () => void } | null>(null);
 	const shown = $derived(section ?? "general");
-	const listHidden = $derived(phone.current && section !== null);
-	const sectionLabel = $derived(SETTINGS_TABS.find((tab) => tab.value === section)?.label ?? "Settings");
+	const listHidden = $derived(sessionViewState.compact && section !== null);
+	const sectionLabel = $derived(SETTINGS_TABS.find((tab) => tab.value === shown)?.label ?? "Settings");
 	const alert = $derived(usageAlert(orderedSettingsUsageAccounts(), usageState.limits.warnAt));
 	const unhealthyInstance = $derived(getCachedInstances().find((instance) => instance.status === "unhealthy"));
 
 	$effect(() => {
 		if (!visible) return;
-		section = initialTab ?? (untrack(() => phone.current) ? null : "general");
+		section = initialTab ?? (untrack(() => sessionViewState.compact) ? null : "general");
 		void scrollContent(initialAnchor);
+	});
+
+	$effect(() => {
+		if (visible && section === "terminal") markTerminalSettingsSeen();
 	});
 
 	async function scrollContent(anchor?: "instances"): Promise<void> {
@@ -59,9 +68,10 @@
 
 	async function openSection(next: SettingsSection | ""): Promise<void> {
 		if (!next) return;
+		surfacingPage = null;
 		section = next;
 		await scrollContent();
-		if (!phone.current) return;
+		if (!sessionViewState.compact) return;
 		backEl?.focus();
 	}
 
@@ -74,73 +84,65 @@
 
 </script>
 
-<Dialog open={visible} onclose={() => onClose?.()} labelledBy="settings-panel-title" backdrop="subtle" placement={phone.current && section === "usage" ? "sheet" : "center"}>
+<Dialog open={visible} onclose={() => onClose?.()} labelledBy="settings-panel-title" backdrop="subtle" placement={sessionViewState.compact ? "fullscreen" : "center"}>
 	<div
 		id="settings-panel"
-		class:usage-phone={phone.current && shown === "usage" && section !== null}
-		class="bg-bg border border-border rounded-xl shadow-2xl w-[calc(100vw-2rem)] md:w-[min(720px,calc(100vw-2rem))] h-[80vh] md:h-[min(600px,80vh)] flex flex-col overflow-hidden font-brand leading-[1.35]"
+		class:phone={sessionViewState.compact}
+		class="settings-panel bg-settings-bg ring-1 ring-border rounded-[16px] shadow-settings-dialog flex flex-col overflow-hidden font-sans leading-[1.35]"
 	>
-		<div class="shrink-0 flex items-center gap-[6px] px-[14px] py-[10px] border-b border-border-subtle">
+		<div class="settings-header shrink-0 bg-settings-rail {sessionViewState.compact ? 'grid grid-cols-[90px_minmax(0,1fr)_90px] items-center px-[8px]' : 'flex h-[52px] items-center px-[12px] pl-[20px] border-b border-settings-separator'}">
 			{#if listHidden}
 				<Button
 					bind:element={backEl}
 					variant="ghost"
+					tone="accent"
+					hoverFill="none"
 					size="content"
-					iconOnly
 					icon="chevron-left"
 					iconSize={16}
-					touchTarget
-					ariaLabel="Back to settings sections"
+					ariaLabel={surfacingPage ? "Back to Surfacing" : "Back to settings sections"}
 					data-testid="settings-back-btn"
-					class="h-7 w-7 rounded-lg"
-					onclick={showSectionList}
-				/>
+					class="min-h-[44px] justify-self-start text-[15px]"
+					onclick={() => { if (surfacingPage) surfacingPage.back(); else void showSectionList(); }}
+				>{surfacingPage ? "Surfacing" : "Settings"}</Button>
+			{:else if sessionViewState.compact}
+				<span></span>
 			{/if}
-			<h2 id="settings-panel-title" class="flex-1 min-w-0 truncate text-[14px] font-semibold text-text">
-				{listHidden ? sectionLabel : "Settings"}
+			<h2 id="settings-panel-title" class="min-w-0 truncate font-semibold text-text {sessionViewState.compact ? 'text-center text-[16px]' : 'flex-1 text-[15px]'}">
+				{listHidden ? surfacingPage?.title ?? sectionLabel : "Settings"}
 			</h2>
-			<!-- `ghost` is a shade darker than this control and carries a hover
-			     fill it has never had. Both are REPLACED rather than overridden:
-			     the `!` triple this used to carry was important at every state,
-			     so it also had to beat ghost's own `hover:text-text`. -->
-			<Button
-				iconOnly
-				ariaLabel="Close settings"
-				icon="x"
-				variant="ghost"
-				tone="muted"
-				hoverFill="none"
-				size="content"
-				class="p-1"
-				data-testid="settings-close-btn"
-				onclick={() => onClose?.()}
-			/>
+			{#if sessionViewState.compact && !listHidden}
+				<Button variant="ghost" tone="accent" hoverFill="none" size="content" class="min-h-[44px] min-w-[44px] justify-self-end text-[15px]" data-testid="settings-close-btn" ariaLabel="Close settings" onclick={() => onClose?.()}>Done</Button>
+			{:else}
+				<Button iconOnly ariaLabel="Close settings" icon="x" iconSize={16} variant="ghost" tone="muted" hoverFill="none" size="content" class={sessionViewState.compact ? 'min-h-[44px] min-w-[44px] justify-self-end' : 'size-[28px]'} data-testid="settings-close-btn" onclick={() => onClose?.()} />
+			{/if}
 		</div>
 
 		<div class="flex flex-1 min-h-0">
-			<!-- Frame H: a left section list on desktop. On phone it is the whole
-			     first screen; picking a section drills in, and the header's back
-			     control returns. Manual activation there, so arrowing through the
-			     list does not drill in on every keypress. -->
+			<!-- Manual activation on phone keeps arrow keys from pushing a page. -->
 			{#if !listHidden}
-				<div class="shrink-0 overflow-y-auto px-[8px] py-[12px] {phone.current ? 'flex-1' : 'w-[150px] border-r border-border-subtle'}">
+				<div class="shrink-0 overflow-y-auto {sessionViewState.compact ? 'flex-1 px-[14px] pt-[4px] pb-[20px]' : 'w-[172px] px-[8px] py-[10px] border-r border-settings-separator bg-settings-rail'}">
+					{#if sessionViewState.compact}<AvatarSettings root />{/if}
 					<Tabs
-						value={phone.current ? "" : shown}
+						value={sessionViewState.compact ? "" : shown}
 						variant="sections"
 						orientation="vertical"
-						activationMode={phone.current ? "manual" : "automatic"}
+						activationMode={sessionViewState.compact ? "manual" : "automatic"}
 						label="Settings sections"
 						options={SETTINGS_TABS}
 						onValueChange={openSection}
 					>
 						{#snippet optionContent(option)}
-							{#if option.value === "usage" && alert}
-								<span data-testid="settings-usage-dot" class="mr-[6px] inline-block h-[6px] w-[6px] shrink-0 rounded-full {alert.level === 'limited' ? 'bg-fill-red' : 'bg-fill-amber'}"></span>
-							{:else if option.value === "server" && unhealthyInstance}
-								<span data-testid="settings-server-dot" class="mr-[6px] inline-block h-[6px] w-[6px] shrink-0 rounded-full {instanceStatusColor(unhealthyInstance.status)}"></span>
-							{/if}
 							<span class="flex-1">{option.label}</span>
-							{#if phone.current}
+							{#if option.value === "terminal" && !uiState.terminalSettingsSeen}
+								<Badge variant="accent" size="xs" data-testid="settings-terminal-new">New</Badge>
+							{/if}
+							{#if option.value === "usage" && alert}
+								<span data-testid="settings-usage-dot" class="inline-block size-[7px] shrink-0 rounded-full {alert.level === 'limited' ? 'bg-fill-red' : 'bg-fill-amber'}"></span>
+							{:else if option.value === "server" && unhealthyInstance}
+								<span data-testid="settings-server-dot" class="inline-block size-[7px] shrink-0 rounded-full {instanceStatusColor(unhealthyInstance.status)}"></span>
+							{/if}
+							{#if sessionViewState.compact}
 								<Icon name="chevron-right" size={14} class="text-text-dimmer" />
 							{/if}
 						{/snippet}
@@ -148,18 +150,32 @@
 				</div>
 			{/if}
 
-			{#if !phone.current || section !== null}
-				<div bind:this={contentEl} class="settings-content flex-1 min-w-0 overflow-y-auto px-[18px] py-[14px] flex flex-col gap-[7px] text-[11.5px] text-text-secondary">
+			{#if !sessionViewState.compact || section !== null}
+				<div class="settings-main relative flex flex-1 min-w-0 min-h-0">
+				<div bind:this={contentEl} class="settings-content flex-1 min-w-0 overflow-y-auto text-[12px] text-text-secondary">
+					{#if !sessionViewState.compact}
+						<div class="mb-[16px] flex flex-wrap items-baseline gap-x-[10px]">
+							<h2 class="text-[17px] font-semibold tracking-[-0.01em] text-text">{sectionLabel}</h2>
+							{#if shown === "usage"}<p class="text-[12.5px] text-text-muted">This computer's accounts</p>{/if}
+							{#if shown === "surfacing"}<p class="text-[12.5px] text-text-muted">Which mid-turn messages surface, and how</p>{/if}
+						</div>
+					{/if}
+					<div class="flex flex-col">
 					{#if shown === "general"}
-						<NotificationsSettingsTab />
+						<AvatarSettings />
 						<AppearanceSettingsTab />
 						<ComposerSettingsTab />
+						<NotificationsSettingsTab />
 						<SessionsSettingsTab />
 						<DebugSettingsTab />
+					{:else if shown === "terminal"}
+						<TerminalSettingsTab />
 					{:else if shown === "models"}
 						<VisibilitySettingsTab />
 					{:else if shown === "claude"}
 						<ClaudeSettingsTab />
+					{:else if shown === "surfacing"}
+						<SurfacingSettingsTab onPageChange={(page) => { surfacingPage = page; void scrollContent(); }} />
 					{:else if shown === "archived"}
 						<ArchivedSettingsTab {onClose} />
 					{:else if shown === "usage"}
@@ -167,6 +183,8 @@
 					{:else if shown === "server"}
 						<ServerSettingsTab {onClose} onOpenUsage={() => openSection("usage")} />
 					{/if}
+					</div>
+				</div>
 				</div>
 			{/if}
 		</div>
@@ -174,28 +192,38 @@
 </Dialog>
 
 <style>
-	/* 80vh is fractional on most phones. Whole-pixel sizes keep the panel's
-	   borders crisp; the h-[80vh] classes are the fallback. The height is
-	   fixed rather than content-sized so switching sections never re-centres
-	   the dialog under the pointer. */
-	#settings-panel {
-		height: round(down, 80vh, 1px);
+	.settings-panel {
+		width: min(720px, calc(100vw - 32px));
+		height: min(600px, round(down, 80dvh, 1px));
 	}
-	@media (min-width: 768px) {
-		#settings-panel {
-			height: min(600px, round(down, 80vh, 1px));
-		}
+	.settings-content {
+		padding: 18px 24px 64px;
 	}
-	@media (max-width: 767px) {
-		#settings-panel.usage-phone {
-			width: 100vw;
-			height: 100dvh;
-			border: 0;
-			border-radius: 0;
-			padding-top: env(safe-area-inset-top, 0px);
-		}
-		.usage-phone .settings-content {
-			padding: 12px 14px calc(26px + env(safe-area-inset-bottom, 0px));
-		}
+	.settings-main::after {
+		content: "";
+		position: absolute;
+		inset: auto 0 0;
+		height: 64px;
+		background: linear-gradient(transparent, var(--color-settings-bg));
+		pointer-events: none;
+	}
+	.phone {
+		width: 100%;
+		height: 100dvh;
+		border: 0;
+		border-radius: 0;
+		box-shadow: none;
+		padding-top: env(safe-area-inset-top, 0px);
+		padding-bottom: env(safe-area-inset-bottom, 0px);
+	}
+	.phone .settings-header {
+		height: 44px;
+		background: var(--color-settings-bg);
+	}
+	.phone .settings-content {
+		padding: 4px 14px 26px;
+	}
+	.phone .settings-main::after {
+		display: none;
 	}
 </style>

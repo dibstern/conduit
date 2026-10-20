@@ -439,6 +439,20 @@ export {
 	registerInputDraftPersistence,
 } from "./composer-draft/runner.svelte.js";
 
+// The mounted composer owns insertion; persistence belongs to its keyed draft runner.
+let inputDraftInsert: ((text: string) => void) | undefined;
+export function registerInputDraft(insert: (text: string) => void): () => void {
+	inputDraftInsert = insert;
+	return () => {
+		if (inputDraftInsert === insert) inputDraftInsert = undefined;
+	};
+}
+
+/** Append ask-reply text using the composer's normal edit and draft-sync path. */
+export function insertInputDraft(text: string): void {
+	inputDraftInsert?.(text);
+}
+
 /** Get the number of messages in current conversation. */
 export function getMessageCount(): number {
 	return currentChat().messages.length;

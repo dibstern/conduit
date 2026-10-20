@@ -18,12 +18,11 @@
 //   complete daemon output plus daemon.log contain no BUSY/LOCKED text.
 // - An RPC fails under load: every input.submit returns ok and every
 //   DeleteSession resolves; a rejected RPC throws and fails the test.
-// - A write is dropped or duplicated under contention: each
-//   session's non-delta event counts equal the baseline's, its joined text
-//   equals the prompt plus replayed trace and its thinking equals the trace,
-//   its turn.completed count equals the result frames, and its stream
-//   versions have no gaps. Delta rows are
-//   coalesced in 50 ms windows, so their counts vary with scheduling.
+// - A write is dropped, duplicated or reordered under contention: each
+//   session's non-delta event counts equal the baseline's, its ordered text
+//   and thinking parts contain every native byte, its turn.completed count
+//   equals the replayed result frames, and its stream versions have no gaps.
+//   Delta row counts vary with the runner's 50 ms per-part coalescing window.
 // - Foreign keys are not enforced on the daemon's connection. PRAGMA
 //   foreign_keys read here would describe this reader's connection, not the
 //   daemon's, so enforcement is observed by its effect instead: DeleteSession
@@ -223,22 +222,67 @@ test.describe("write contention", () => {
 					JSON.parse(line) as {
 						type: string;
 						event?: {
+							type?: string;
+							index?: number;
+							content_block?: {
+								type?: string;
+								text?: string;
+								thinking?: string;
+							};
 							delta?: { type?: string; text?: string; thinking?: string };
 						};
 					},
 			);
+		const nativeParts: {
+			type: "text" | "thinking";
+			text: string;
+			fragments: number;
+		}[] = [];
+		const activeParts = new Map<number, (typeof nativeParts)[number]>();
+		for (const { event } of trace) {
+			if (event?.type === "message_start") activeParts.clear();
+			if (event?.index === undefined) continue;
+			const block = event.content_block;
+			if (
+				event.type === "content_block_start" &&
+				(block?.type === "text" || block?.type === "thinking")
+			) {
+				const text = block.type === "text" ? block.text : block.thinking;
+				const part: (typeof nativeParts)[number] = {
+					type: block.type,
+					text: text ?? "",
+					fragments: text ? 1 : 0,
+				};
+				nativeParts.push(part);
+				activeParts.set(event.index, part);
+			}
+			const delta = event.delta;
+			if (
+				event.type === "content_block_delta" &&
+				(delta?.type === "text_delta" || delta?.type === "thinking_delta")
+			) {
+				const part = activeParts.get(event.index);
+				if (!part || `${part.type}_delta` !== delta.type)
+					throw new Error("Trace delta has no matching text or thinking part");
+				part.text +=
+					(delta.type === "text_delta" ? delta.text : delta.thinking) ?? "";
+				part.fragments++;
+			}
+		}
+		const submittedText = "Run the recorded streaming turn.";
+		const expectedParts = [
+			{ role: "user", type: "text", text: submittedText },
+			...nativeParts.map(({ type, text }) => ({
+				role: "assistant",
+				type,
+				text,
+			})),
+		];
 		const emitted = {
 			"thinking.delta": trace.filter(
 				(frame) => frame.event?.delta?.type === "thinking_delta",
 			).length,
 			"turn.completed": trace.filter((frame) => frame.type === "result").length,
-		};
-		const emittedContent = {
-			"text.delta":
-				prompt + trace.map((frame) => frame.event?.delta?.text ?? "").join(""),
-			"thinking.delta": trace
-				.map((frame) => frame.event?.delta?.thinking ?? "")
-				.join(""),
 		};
 		const store = () =>
 			new DatabaseSync(harness.daemonStorePath(), { readOnly: true });
@@ -260,30 +304,54 @@ test.describe("write contention", () => {
 						.all(sessionId),
 				).map((row) => [String(row["type"]), Number(row["n"])]),
 			);
-		const eventIntegrity = (sessionId: string) => {
-			const deltas = read((db) =>
+		const nonDeltaCounts = (counts: Record<string, number>) =>
+			Object.fromEntries(
+				Object.entries(counts).filter(
+					([type]) => type !== "text.delta" && type !== "thinking.delta",
+				),
+			);
+		const contentParts = (sessionId: string) => {
+			const parts: {
+				role: "user" | "assistant";
+				type: "text" | "thinking";
+				text: string;
+				fragments: number;
+			}[] = [];
+			let previousKey: string | undefined;
+			for (const row of read((db) =>
 				db
 					.prepare(
-						"SELECT type, json_extract(data, '$.text') AS text FROM events WHERE session_id = ? AND type IN ('text.delta', 'thinking.delta') ORDER BY stream_version",
+						`SELECT events.sequence, events.type, events.data, messages.role FROM events
+						LEFT JOIN messages ON messages.id = json_extract(events.data, '$.messageId')
+							AND messages.session_id = events.session_id
+						WHERE events.session_id = ?
+							AND events.type IN ('text.delta', 'thinking.delta')
+						ORDER BY events.sequence`,
 					)
 					.all(sessionId),
-			);
-			return {
-				counts: Object.fromEntries(
-					Object.entries(eventCounts(sessionId)).filter(
-						([type]) => type !== "text.delta" && type !== "thinking.delta",
-					),
-				),
-				content: Object.fromEntries(
-					["text.delta", "thinking.delta"].map((type) => [
-						type,
-						deltas
-							.filter((row) => row["type"] === type)
-							.map((row) => String(row["text"]))
-							.join(""),
-					]),
-				),
-			};
+			)) {
+				const data = JSON.parse(String(row["data"])) as {
+					messageId: string;
+					partId: string;
+					text: string;
+				};
+				const role = row["role"];
+				if (role !== "user" && role !== "assistant")
+					throw new Error(
+						`Delta at sequence ${row["sequence"]} has no user or assistant message`,
+					);
+				const type = row["type"] === "text.delta" ? "text" : "thinking";
+				const key = JSON.stringify([data.messageId, data.partId, type]);
+				let part = parts.at(-1);
+				if (previousKey !== key || !part) {
+					part = { role, type, text: "", fragments: 0 };
+					parts.push(part);
+					previousKey = key;
+				}
+				part.text += data.text;
+				part.fragments++;
+			}
+			return parts;
 		};
 		const runTurn = async (browser: ProcessBrowser, sessionId: string) => {
 			const cursor = browser.frames.length;
@@ -295,7 +363,7 @@ test.describe("write contention", () => {
 						originId: browser.originId,
 						inputId: randomUUID(),
 						delivery: "queue",
-						text: prompt,
+						text: submittedText,
 					}).pipe(Effect.timeout(90_000)),
 				),
 				browser.waitForTurnEnd(sessionId, cursor, 90_000),
@@ -343,9 +411,20 @@ test.describe("write contention", () => {
 			expect(counts).toEqual(last);
 		}).toPass({ timeout: 30_000, intervals: [500] });
 		const baseline = eventCounts(baselineId);
-		const baselineIntegrity = eventIntegrity(baselineId);
-		expect(baseline["turn.completed"]).toBe(emitted["turn.completed"]);
-		expect(baselineIntegrity.content).toEqual(emittedContent);
+		expect(baseline).toMatchObject({
+			"turn.completed": emitted["turn.completed"],
+			"thinking.start": nativeParts.filter(({ type }) => type === "thinking")
+				.length,
+			"thinking.end": nativeParts.filter(({ type }) => type === "thinking")
+				.length,
+		});
+		expect(
+			contentParts(baselineId).map(({ role, type, text }) => ({
+				role,
+				type,
+				text,
+			})),
+		).toEqual(expectedParts);
 
 		const sessions: { label: string; browser: ProcessBrowser; id: string }[] =
 			[];
@@ -363,10 +442,28 @@ test.describe("write contention", () => {
 		const waveMs = performance.now() - waveStartedAt;
 		for (const { id } of sessions)
 			await expect
-				.poll(() => eventIntegrity(id), { timeout: 30_000 })
-				.toEqual(baselineIntegrity);
+				.poll(
+					() => ({
+						events: nonDeltaCounts(eventCounts(id)),
+						parts: contentParts(id).map(({ role, type, text }) => ({
+							role,
+							type,
+							text,
+						})),
+					}),
+					{ timeout: 30_000 },
+				)
+				.toEqual({ events: nonDeltaCounts(baseline), parts: expectedParts });
 		const settledMs = performance.now() - waveStartedAt;
 		for (const id of [baselineId, ...sessions.map((session) => session.id)]) {
+			for (const [index, part] of contentParts(id).entries()) {
+				expect(part.fragments).toBeGreaterThan(0);
+				if (part.role === "user") expect(part.fragments).toBe(1);
+				else
+					expect(part.fragments).toBeLessThanOrEqual(
+						nativeParts[index - 1]?.fragments ?? 0,
+					);
+			}
 			const versions = read((db) =>
 				db
 					.prepare(
@@ -376,6 +473,11 @@ test.describe("write contention", () => {
 			);
 			expect(versions?.["span"]).toBe(versions?.["n"]);
 		}
+		const persistedTextParts = Object.fromEntries(
+			[{ label: "baseline", id: baselineId }, ...sessions].map(
+				({ label, id }) => [label, contentParts(id)],
+			),
+		);
 
 		const orphans = () =>
 			read((db) => db.prepare("PRAGMA foreign_key_check").all());
@@ -464,9 +566,10 @@ test.describe("write contention", () => {
 					concurrentSessions: sessions.length,
 					fixture,
 					emitted,
-					emittedContent,
+					nativeTextParts: nativeParts,
+					expectedContentParts: expectedParts,
+					persistedTextParts,
 					baselineEventCounts: baseline,
-					baselineIntegrity,
 					sessionEventCounts: Object.fromEntries(
 						sessions.map(({ label, id }) => [label, eventCounts(id)]),
 					),

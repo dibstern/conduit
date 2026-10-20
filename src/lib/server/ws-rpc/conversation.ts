@@ -4,6 +4,7 @@ import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { RateLimiterTag } from "../../domain/relay/Layers/rate-limiter-layer.js";
+import { RecapServiceTag } from "../../domain/relay/Services/recap-service.js";
 import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
 import {
 	type SessionInbox,
@@ -50,6 +51,21 @@ const inboxCommand = <E>(
 	);
 
 export const conversationHandlers = {
+	ExplainAsk: (request) =>
+		RecapServiceTag.pipe(
+			Effect.flatMap((service) => service.explainAsk(request)),
+			Effect.catch(mapRpcFailure("ExplainAsk")),
+		),
+	ListRecaps: (request) =>
+		RecapServiceTag.pipe(
+			Effect.flatMap((service) => service.list(request)),
+			Effect.catch(mapRpcFailure("ListRecaps")),
+		),
+	GenerateRecap: (request) =>
+		RecapServiceTag.pipe(
+			Effect.flatMap((service) => service.generate(request)),
+			Effect.catch(mapRpcFailure("GenerateRecap")),
+		),
 	StopBackgroundTask: (request) =>
 		stopBackgroundTaskById(request.sessionId, request.taskId).pipe(
 			Effect.as({ ok: true as const }),
@@ -206,6 +222,7 @@ export const conversationHandlers = {
 				clientId: request.originId ?? "rpc",
 				sessionId: request.sessionId,
 				inputId: request.inputId,
+				...(request.interrupt ? { interrupt: true } : {}),
 			}),
 		),
 	SyncInputDraft: (request) =>
@@ -236,6 +253,9 @@ export const conversationHandlers = {
 		),
 } satisfies Pick<
 	WsRpcHandlerMap,
+	| "ListRecaps"
+	| "GenerateRecap"
+	| "ExplainAsk"
 	| "StopBackgroundTask"
 	| "SwitchPermissionMode"
 	| "RespondPermission"

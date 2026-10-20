@@ -382,7 +382,7 @@ test("fast session switches keep the model list matched to the displayed session
 		await closePicker(page);
 	} else {
 		await expect(
-			page.getByRole("button", { name: /Model: Alpha model\./ }),
+			page.getByRole("button", { name: /Harness and model: Alpha model,/ }),
 		).toHaveCount(0);
 	}
 	await new SidebarPage(page).clickSession(alphaSession);
@@ -430,7 +430,7 @@ test("a new draft's model, agent and command lists match its project", async ({
 		);
 		await expect(page.getByTestId("model-picker-trigger")).toHaveAttribute(
 			"aria-label",
-			/Model: Beta model/,
+			/Harness and model: Beta model,/,
 		);
 		await expect(await openModels(page)).toContainText("Beta model");
 		await expect(page.getByTestId("model-picker-list")).not.toContainText(

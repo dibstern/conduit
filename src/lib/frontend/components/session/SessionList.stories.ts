@@ -83,7 +83,16 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Empty: Story = {};
+// An unsettled list draws the loading skeleton; the empty state needs the
+// server to have sent an empty snapshot.
+export const Empty: Story = {
+	beforeEach: () => seedSessions([]),
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByText("No sessions yet"),
+		).toBeVisible();
+	},
+};
 
 export const SelectMode: Story = {
 	name: "Select mode, two selected",
@@ -192,7 +201,7 @@ export const SnoozedShelfOpen: Story = {
 			"aria-expanded",
 			"true",
 		);
-		await expect(canvas.getByText("Tue 9:00")).toBeVisible();
+		await expect(canvas.getByText("Tue 9:00 AM")).toBeVisible();
 		await expect(canvas.getByText("No timer")).toBeVisible();
 	},
 };
@@ -336,6 +345,49 @@ export const WithItems: Story = {
 	},
 };
 
+export const IdleGrouping: Story = {
+	name: "Idle combines attention states",
+	beforeEach: () => {
+		seedSessions([
+			...(
+				[
+					"needs-approval",
+					"needs-reply",
+					"error",
+					"done-unread",
+					"idle",
+					"working",
+					"monitoring",
+				] as const
+			).map((attention) => ({
+				id: attention,
+				title: attention,
+				projectSlug: "conduit",
+				accountId: null,
+				attention,
+			})),
+		]);
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const labels = [...canvasElement.querySelectorAll(".session-group-label")];
+		await expect(labels.map((label) => label.textContent?.trim())).toEqual([
+			"Running 2",
+			"Idle 5",
+		]);
+		await expect(canvas.getByLabelText(/^Needs approval,/)).toBeVisible();
+		await expect(canvas.getByLabelText(/^Needs reply,/)).toBeVisible();
+		await expect(canvas.getByLabelText(/^Failed,/)).toBeVisible();
+		await expect(canvas.getByLabelText(/^Done, unread,/)).toBeVisible();
+		await userEvent.click(canvas.getByTestId("session-filter-chip-needs-you"));
+		await expect(canvasElement.querySelectorAll(".session-item")).toHaveLength(
+			3,
+		);
+		await expect(canvas.getByText("Idle", { exact: true })).toBeVisible();
+		await userEvent.click(canvas.getByTestId("session-filter-chip-needs-you"));
+	},
+};
+
 export const FilteredToNeedsYou: Story = {
 	name: "Filtered to needs you",
 	beforeEach: () => {
@@ -383,6 +435,109 @@ export const FilterMatchesNothing: Story = {
 	},
 };
 
+export const NeedsYouEmpty: Story = {
+	name: "Needs you, everything handled",
+	beforeEach: () => {
+		seedSessions([
+			{
+				id: "quiet",
+				accountId: null,
+				title: "Docs sweep",
+				attention: "idle",
+				projectSlug: "conduit",
+			},
+		]);
+		routerState.search = "?status=needs-you";
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("session-filter-empty")).toHaveTextContent(
+			"That's everything waiting on you.",
+		);
+		await expect(
+			canvas.queryByTestId("session-filter-clear"),
+		).not.toBeInTheDocument();
+		await userEvent.click(canvas.getByTestId("session-filter-chip-needs-you"));
+		await expect(canvas.getByText("Docs sweep")).toBeVisible();
+		await userEvent.click(canvas.getByTestId("session-filter-chip-needs-you"));
+	},
+};
+
+export const ShelvesWithMore: Story = {
+	name: "Shelves with more",
+	beforeEach: () => {
+		sessionState.now = SNOOZE_STORY_NOW;
+		uiState.settledShelfOpen = true;
+		uiState.snoozedShelfOpen = true;
+		seedSessions([
+			...Array.from({ length: 14 }, (_, i) => ({
+				id: `settled-${i}`,
+				accountId: null,
+				projectSlug: "conduit",
+				title: `Settled task ${i + 1}`,
+				attention: "idle" as const,
+				settledAt: SNOOZE_STORY_NOW - (i + 1) * 3_600_000,
+				git: { branch: `fix/task-${i + 1}` },
+			})),
+			...Array.from({ length: 4 }, (_, i) => ({
+				id: `snoozed-${i}`,
+				accountId: null,
+				projectSlug: "conduit",
+				title: `Snoozed task ${i + 1}`,
+				attention: "idle" as const,
+				snoozedAt: SNOOZE_STORY_NOW,
+				snoozedUntil: SNOOZE_STORY_NOW + 3_600_000,
+			})),
+		]);
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const settled = canvas.getByTestId("settled-shelf-toggle");
+		const snoozed = canvas.getByTestId("snoozed-shelf-toggle");
+		await expect(
+			settled.compareDocumentPosition(snoozed) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		await expect(canvas.getByTestId("settled-shelf-more")).toHaveTextContent(
+			"+ 12 more",
+		);
+		await expect(canvas.getByTestId("snoozed-shelf-more")).toHaveTextContent(
+			"+ 2 more",
+		);
+		await userEvent.click(canvas.getByTestId("settled-shelf-more"));
+		await expect(
+			within(
+				canvasElement.querySelector("#settled-shelf-rows") as HTMLElement,
+			).getAllByText(/^Settled task/),
+		).toHaveLength(14);
+		await userEvent.click(settled);
+		await userEvent.click(settled);
+		await expect(canvas.getByTestId("settled-shelf-more")).toBeVisible();
+		// The capture shows the shelves at rest, not the toggle's focus ring.
+		settled.blur();
+	},
+};
+
+export const SettledCountBeforeRows: Story = {
+	name: "Settled count before its shelf opens",
+	beforeEach: () => {
+		seedSessions(
+			Array.from({ length: 14 }, (_, i) => ({
+				id: `count-before-rows-${i}`,
+				accountId: null,
+				projectSlug: "acme",
+				title: `Settled task ${i + 1}`,
+				settledAt: SNOOZE_STORY_NOW - (i + 1) * 3_600_000,
+			})),
+		);
+	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByTestId("settled-shelf-toggle"),
+		).toHaveTextContent("Settled 14");
+	},
+};
+
 export const GroupedByProject: Story = {
 	name: "Grouped by project",
 	beforeEach: () => {
@@ -422,6 +577,11 @@ export const Searching: Story = {
 		seedSessions([...mockSessionsAllGroups]);
 		setSearchQuery("dark");
 	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByRole("textbox", { name: "Search sessions" }),
+		).toHaveValue("dark");
+	},
 };
 
 export const Hover: Story = {
@@ -438,9 +598,7 @@ export const SearchFocused: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.keyboard("/");
-		await expect(
-			canvas.getByPlaceholderText("Search sessions..."),
-		).toHaveFocus();
+		await expect(canvas.getByPlaceholderText("Search")).toHaveFocus();
 	},
 };
 

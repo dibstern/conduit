@@ -6,6 +6,7 @@
 import { Utf8Bytes } from "../../contracts/tool-wire.js";
 import type {
 	AssistantMessage,
+	OpenCodeInstance,
 	ProjectInfo,
 	ResultMessage,
 	SessionInfo,
@@ -15,6 +16,35 @@ import type {
 	ToolMessage,
 	UserMessage,
 } from "../types.js";
+
+/**
+ * The default Claude and OpenCode accounts. A draft resolves its model, effort
+ * and harness traits through its account, so a composer story without accounts
+ * renders an empty pick.
+ */
+export const mockClaudeAccount = {
+	id: "claude",
+	name: "Claude",
+	driver: "claude",
+	isDefault: true,
+	port: 0,
+	managed: false,
+	status: "healthy",
+	restartCount: 0,
+	createdAt: 0,
+} satisfies OpenCodeInstance;
+
+export const mockOpenCodeAccount = {
+	id: "opencode",
+	name: "OpenCode",
+	driver: "opencode",
+	isDefault: true,
+	port: 4096,
+	managed: true,
+	status: "healthy",
+	restartCount: 0,
+	createdAt: 0,
+} satisfies OpenCodeInstance;
 
 export const mockProject: ProjectInfo = {
 	slug: "conduit",

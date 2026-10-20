@@ -14,6 +14,9 @@ test.describe("Session row hover", () => {
 		await page.goto(story("pinned"), { waitUntil: "domcontentloaded" });
 		const star = page.getByTitle("Pinned session");
 		const starX = async () => (await star.boundingBox())?.x;
+		// Measure after the font swap, or the title reflows under the hover.
+		await expect(star).toBeVisible();
+		await page.evaluate(() => document.fonts.ready);
 		const before = await starX();
 		expect(before).toBeDefined();
 

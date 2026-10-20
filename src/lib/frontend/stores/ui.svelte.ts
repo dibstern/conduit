@@ -10,6 +10,7 @@ const SETTLED_SHELF_STORAGE_KEY = "settled-shelf-open";
 const SNOOZED_SHELF_STORAGE_KEY = "snoozed-shelf-open";
 const DRAFTS_TRAY_STORAGE_KEY = "drafts-tray-open";
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
+const TERMINAL_SETTINGS_SEEN_KEY = "terminal-settings-seen";
 
 type WorktreeConfirmChoice = {
 	worktrees: readonly SessionWorktreeInspection[];
@@ -30,6 +31,7 @@ export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 480;
 
 export const uiState = $state({
+	terminalSettingsSeen: safeGetItem(TERMINAL_SETTINGS_SEEN_KEY) === "true",
 	// Sidebar
 	sidebarCollapsed: safeGetItem(SIDEBAR_STORAGE_KEY) === "true",
 	settledShelfOpen: safeGetItem(SETTLED_SHELF_STORAGE_KEY) === "true",
@@ -42,6 +44,8 @@ export const uiState = $state({
 
 	// Toasts
 	toasts: [] as Toast[],
+	/** A phone session sheet presents all live notifications inside its modal boundary. */
+	sheetToastHost: null as symbol | null,
 
 	// Confirm dialog
 	confirmDialog: null as {
@@ -144,6 +148,15 @@ export function setDraftsTrayOpen(open: boolean): void {
 		localStorage.setItem(DRAFTS_TRAY_STORAGE_KEY, String(open));
 	} catch {
 		/* Storage may be unavailable; keep the in-memory preference. */
+	}
+}
+
+export function markTerminalSettingsSeen(): void {
+	uiState.terminalSettingsSeen = true;
+	try {
+		localStorage.setItem(TERMINAL_SETTINGS_SEEN_KEY, "true");
+	} catch {
+		/* Storage may be unavailable; keep the in-memory flag. */
 	}
 }
 

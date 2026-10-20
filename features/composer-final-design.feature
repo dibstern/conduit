@@ -1,6 +1,6 @@
-Feature: Icons composer matches the final desktop and phone designs
+Feature: The composer matches the Final desktop and phone designs
 
-Scenario Outline: E1 phone closed composer is one row with the design's controls
+Scenario Outline: phone icons composer keeps text above its controls
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
@@ -9,14 +9,14 @@ Scenario Outline: E1 phone closed composer is one row with the design's controls
   And the composer picker has the Claude catalog
   And approvals are ask
   And the composer checkout is conduit / account-chip as worktree
-  Then the composer has 1 row
-  And the composer placeholder reads Ask Claude…
-  And the placeholder sits on the controls row
+  Then the composer has 2 rows
+  And the composer placeholder reads Reply…
+  And the placeholder sits above the controls row
   And the composer has no standalone agent selector
-  And the model button is 26 pixels tall and reads S5
-  And the phone icons line matches E1 with the default shield hidden
+  And the model chip reads Sonnet 5 with a chevron
+  And the phone icons controls show one model chip and the shield
   And the phone composer amber dot is hidden
-  And send is a 30 pixel square in the off colours
+  And send is a 34 pixel neutral circle
   And the attach button has no border
   And the composer region visually matches <baseline> at <threshold> percent
 
@@ -24,7 +24,7 @@ Examples:
   | baseline                   | threshold |
   | composer-final-idle-phone  | 98        |
 
-Scenario Outline: the phone ⋯ sheet
+Scenario Outline: the phone model pill opens the Composer sheet
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
@@ -36,10 +36,12 @@ Scenario Outline: the phone ⋯ sheet
   And the mock relay reports context 42 percent
   When I set effort to high
   And I open the phone composer sheet
-  Then the phone composer sheet matches E1
+  Then the phone composer sheet has separate Harness, Account, Model, Effort, Mode and Checkout rows
+  And the phone composer Account row reads personal
+  And the phone composer Effort row reads high
   And the screen region visually matches <baseline> at <threshold> percent
   When I close the phone composer sheet
-  Then the phone icons line matches E1 with the default shield hidden
+  Then the phone icons controls show one model chip and the shield
 
 Examples:
   | baseline                    | threshold |
@@ -57,21 +59,23 @@ Scenario Outline: every phone sheet picker row opens its target
   And the icons control opens the picker at <section>
   When I close the model picker
   Then the shared composer picker is closed
-  And the phone composer more button is focused
+  And the phone model pill is focused
 
 Examples:
   | row     | section |
   | Harness | Harness |
+  | Account | Account |
   | Model   | Model   |
   | Effort  | Effort  |
 
-Scenario: the phone model control opens Model directly
+Scenario: the phone model control opens Composer options
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
+  And the composer checkout is conduit / account-chip as worktree
   When I tap the icons model control
-  Then the icons control opens the picker at Model
+  Then the phone composer sheet has separate Harness, Account, Model, Effort, Mode and Checkout rows
 
 Scenario: the phone sheet Mode row opens the existing ranked mode menu
   Given the conduit app is served with the connected mockup
@@ -86,7 +90,7 @@ Scenario: the phone sheet Mode row opens the existing ranked mode menu
   Then the approvals menu is closed
   And the phone composer Mode row reads Auto
   When I close the phone composer sheet
-  Then the phone hot shield is visible for Auto
+  Then the phone shield is visible for Auto
 
 Scenario: the phone sheet Checkout row opens checkout details
   Given the conduit app is served with the connected mockup
@@ -98,7 +102,7 @@ Scenario: the phone sheet Checkout row opens checkout details
   Then the phone composer sheet keeps the Checkout menu above it
   And the composer checkout menu shows conduit and account-chip in full
 
-Scenario Outline: E2 phone shows a hot shield and amber dot for a workspace hint
+Scenario Outline: phone workspace hints keep the shield and amber dot
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
@@ -110,7 +114,7 @@ Scenario Outline: E2 phone shows a hot shield and amber dot for a workspace hint
   And the checkout has uncommitted changes, 2 ahead, 0 behind
   And the session has a workspace hint at /workspace/conduit-chip
   When I set effort to high
-  Then the phone hot shield is visible for Auto
+  Then the phone shield is visible for Auto
   And the phone composer amber dot is visible
   And the composer region visually matches <closed> at <threshold> percent
   When I tap the approvals shield
@@ -205,13 +209,13 @@ Scenario: changed phone mismatch evidence restores a locally dismissed warning
   And the phone composer amber dot is visible
   And the workspace mismatch stays recorded at /workspace/conduit-chip without a Dismiss RPC
 
-Scenario Outline: every phone mode other than Ask stays visible as a hot shield
+Scenario Outline: every phone permission mode keeps its shield visible
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
   And approvals are <mode>
-  Then the phone hot shield is <visible> for <label>
+  Then the phone shield is visible for <label>
   When I tap the phone composer Mode row
   Then the phone composer sheet keeps the Mode menu above it
   And the approvals menu is ranked dontAsk, plan, ask, acceptEdits, auto, full
@@ -220,12 +224,12 @@ Examples:
   | mode        | visible | label       |
   | dontAsk     | visible | Never ask   |
   | plan        | visible | Plan        |
-  | ask         | hidden  | Ask         |
-  | acceptEdits | visible | Edits       |
+  | ask         | visible | Ask before edits |
+  | acceptEdits | visible | Auto-accept edits |
   | auto        | visible | Auto        |
   | full        | visible | Full access |
 
-Scenario Outline: E3 phone draft keeps its context above the one-line composer
+Scenario Outline: phone draft keeps its context above the two-row composer
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And I start a new session
@@ -233,7 +237,7 @@ Scenario Outline: E3 phone draft keeps its context above the one-line composer
   And the Claude accounts are claude as personal, self as work
   And the composer picker has the Claude catalog
   When I set effort to high
-  Then the phone icons line matches E1 with the default shield hidden
+  Then the phone icons controls show one model chip and the shield
   And the composer region visually matches <closed> at <threshold> percent
   And the phone icons draft has no checkout and keeps context above the composer
   And the screen region visually matches <open> at <threshold> percent
@@ -242,7 +246,7 @@ Examples:
   | closed                  | open                    | threshold |
   | composer-icons-e3-phone | composer-icons-e3-sheet | 98        |
 
-Scenario Outline: E1 desktop icons split the footer and drop labels in the narrow tier
+Scenario Outline: desktop icons keep one model chip at every width
   Given the conduit app is served with the connected mockup
   And a session already exists on the Claude harness
   And the harness logo is viewed in the <tier> tier
@@ -253,21 +257,21 @@ Scenario Outline: E1 desktop icons split the footer and drop labels in the narro
   And the composer checkout is conduit / account-chip as worktree
   When I set effort to high
   Then the composer has 2 rows
-  And the composer placeholder reads Ask Claude…
+  And the composer placeholder reads Reply to Claude…
   And the composer has no standalone agent selector
-  And the desktop icons footer matches E1 in the <tier> tier
+  And the desktop icons controls match Final in the <tier> tier
   And the model chip reads Sonnet 5 · 200K with a chevron
-  And the icons checkout is a quiet shrinking control before send
-  And the composer checkout shows conduit / account-chip with a worktree icon
-  And send is a 32 pixel square in the off colours
+  And the checkout pill yields room before the model label and send
+  And the composer checkout shows <checkout> worktree icon
+  And send is a 34 pixel neutral circle
   And the composer region visually matches <baseline> at <threshold> percent
   When I open the composer checkout menu
   Then the composer checkout menu shows conduit and account-chip in full
 
 Examples:
-  | tier   | baseline                    | threshold |
-  | wide   | composer-final-idle-desktop | 98        |
-  | narrow | composer-icons-e1-narrow    | 98        |
+  | tier   | checkout                      | baseline                    | threshold |
+  | wide   | conduit / account-chip with a | composer-final-idle-desktop | 98        |
+  | narrow | just a                        | composer-icons-e1-narrow    | 98        |
 
 Scenario Outline: E2 desktop icons warn about auto approvals and a workspace hint
   Given the conduit app is served with the connected mockup
@@ -282,9 +286,9 @@ Scenario Outline: E2 desktop icons warn about auto approvals and a workspace hin
   And the session has a workspace hint at /workspace/conduit-hint
   When I set effort to high
   Then the composer has 2 rows
-  And the icons mode control has hot tint true
+  And the mode shield uses the warning tone
   And the composer checkout has a workspace hint icon without inline actions
-  And the icons checkout is a quiet shrinking control before send
+  And the checkout pill yields room before the model label and send
   And the composer region visually matches <baseline> at <threshold> percent
   When I open the composer checkout menu
   Then the composer checkout menu offers Move and Dismiss for /workspace/conduit-hint
@@ -296,34 +300,34 @@ Examples:
   | wide   | composer-icons-e2-wide   | 98        |
   | narrow | composer-icons-e2-narrow | 98        |
 
-Scenario Outline: every desktop mode other than the default is hot
+Scenario Outline: desktop mode shields preserve every permission mode
   Given the conduit app is served with the connected mockup
   And a session already exists on the Claude harness
   And the viewport is a desktop
   And the composer picker has the Claude catalog
   And approvals are <mode>
-  Then the approvals chip shows <label>
-  And the icons mode control has hot tint <hot>
+  Then the mode shield names <label>
+  And the mode shield uses the <tone> tone
   And the composer region visually matches <baseline> at <threshold> percent
 
 Examples:
-  | mode        | label       | hot   | baseline                  | threshold |
-  | dontAsk     | Never ask   | true  | composer-icons-mode-never | 98        |
-  | plan        | Plan        | true  | composer-icons-mode-plan  | 98        |
-  | ask         | Ask         | false | composer-icons-mode-ask   | 98        |
-  | acceptEdits | Edits       | true  | composer-icons-mode-edits | 98        |
-  | auto        | Auto        | true  | composer-icons-mode-auto  | 98        |
-  | full        | Full access | true  | composer-icons-mode-full  | 98        |
+  | mode        | label       | tone    | baseline                  | threshold |
+  | dontAsk     | Never ask   | neutral | composer-icons-mode-never | 98        |
+  | plan        | Plan        | neutral | composer-icons-mode-plan  | 98        |
+  | ask         | Ask before edits | neutral | composer-icons-mode-ask   | 98        |
+  | acceptEdits | Auto-accept edits | warning | composer-icons-mode-edits | 98        |
+  | auto        | Auto        | warning | composer-icons-mode-auto  | 98        |
+  | full        | Full access | danger  | composer-icons-mode-full  | 98        |
 
-Scenario Outline: E1 long checkout names truncate before the desktop icons controls
+Scenario Outline: long checkout names collapse before the model label truncates
   Given the conduit app is served with the connected mockup
   And a session already exists on the Claude harness
   And the harness logo is viewed in the narrow tier
   And the composer picker has the Claude catalog
   And the composer checkout is conduit-worktrees / feature/session-account-chip-redesign as worktree
   Then the model chip reads Sonnet 5 · 200K with a chevron
-  And the icons checkout is a quiet shrinking control before send
-  And the composer checkout truncates the project before the branch
+  And the checkout pill yields room before the model label and send
+  And the model label remains Sonnet 5 before checkout labels
   And the composer region visually matches <baseline> at <threshold> percent
   When I open the composer checkout menu
   Then the composer checkout menu shows conduit-worktrees and feature/session-account-chip-redesign in full
@@ -332,49 +336,33 @@ Examples:
   | baseline                      | threshold |
   | composer-icons-e1-long-narrow | 98        |
 
-Scenario Outline: a thin desktop composer drops checkout labels instead of covering send
+Scenario Outline: narrow desktop composers keep send visible after checkout collapses
   Given the conduit app is served with the connected mockup
   And a session already exists on the Claude harness
   And the desktop composer is <width> pixels wide
   And the composer uses icons controls
   And the composer picker has the Claude catalog
-  And the composer checkout is conduit / main as branch
+  And the composer checkout is conduit-worktrees / feature/session-account-chip-redesign as worktree
   And the checkout has uncommitted changes, 14 ahead, 0 behind
-  Then the composer checkout labels are <labels>
-  And the icons checkout is a quiet shrinking control before send
+  Then the composer has 2 rows
+  And the model chip reads Sonnet 5 with a chevron
+  And the composer checkout labels are none
+  And the checkout pill yields room before the model label and send
+  And send is fully inside the composer and its clipping ancestors
   And the composer region visually matches <baseline> at <threshold> percent
+  When I type Verify the narrow composer into the composer
+  And I send the composer message
+  Then the relay receives the sent text Verify the narrow composer
   When I open the composer checkout menu
-  Then the composer checkout menu shows conduit and main in full
+  Then the composer checkout menu shows conduit-worktrees and feature/session-account-chip-redesign in full
 
 Examples:
-  | width | labels                    | baseline                     | threshold |
-  | 520   | project, branch, upstream | composer-checkout-fit-full   | 98        |
-  | 450   | branch, upstream          | composer-checkout-fit-branch | 98        |
-  | 400   | none                      | composer-checkout-fit-icon   | 98        |
+  | width | baseline                  | threshold |
+  | 296   | composer-send-fit-296     | 98        |
+  | 366   | composer-send-fit-366     | 98        |
+  | 395   | composer-send-fit-395     | 98        |
 
-Scenario Outline: a thin desktop composer folds harness and model into one short control
-  Given the conduit app is served with the connected mockup
-  And a session already exists on the Claude harness
-  And the desktop composer is <width> pixels wide
-  And the composer uses icons controls
-  And the composer picker has the Claude catalog
-  And the composer checkout is conduit / main as branch
-  And the checkout has uncommitted changes, 14 ahead, 0 behind
-  Then the icons model control reads S5 beside the harness logo
-  And the composer checkout labels are <labels>
-  And the icons checkout is a quiet shrinking control before send after the combined model control
-  And the composer region visually matches <baseline> at <threshold> percent
-  When the desktop composer sits at the window's left edge
-  And I tap the icons model control
-  Then the icons control opens the picker at Model
-  And the model picker stays inside the window
-
-Examples:
-  | width | labels                    | baseline           | threshold |
-  | 380   | project, branch, upstream | composer-thin-full | 98        |
-  | 256   | none                      | composer-thin-icon | 98        |
-
-Scenario Outline: E3 desktop draft keeps the split footer without a checkout
+Scenario Outline: desktop draft keeps two rows without a checkout
   Given the conduit app is served with the connected mockup
   And I start a new session
   And the harness logo is viewed in the <tier> tier
@@ -382,7 +370,7 @@ Scenario Outline: E3 desktop draft keeps the split footer without a checkout
   And the Claude accounts are claude as personal, self as work
   And the composer picker has the Claude catalog
   When I set effort to high
-  Then the desktop icons footer matches E1 in the <tier> tier
+  Then the desktop icons controls match Final in the <tier> tier
   And the icons draft has no checkout and keeps context below the composer
   And the model chip reads Sonnet 5 · 200K with a chevron
   And the composer region visually matches <baseline> at <threshold> percent
@@ -392,14 +380,14 @@ Examples:
   | wide   | composer-icons-e3-wide   | 98        |
   | narrow | composer-icons-e3-narrow | 98        |
 
-Scenario Outline: working composer shows a solid stop with a small square
+Scenario Outline: working composer shows a neutral circular stop
   Given the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
   When the open session starts working
-  Then the composer placeholder reads Ask Claude…
-  And stop is a 32 pixel square filled with the text colour around a 10 pixel square
+  Then the composer placeholder matches the <viewport> reply copy
+  And stop is a 34 pixel neutral circle around a 10 pixel square
   And send is hidden while the field is empty
   And the composer region visually matches <baseline> at <threshold> percent
 
@@ -426,3 +414,36 @@ Examples:
   | viewport | baseline                           | threshold |
   | phone    | composer-final-picker-root-phone   | 98        |
   | desktop  | composer-final-picker-root-desktop | 98        |
+
+Scenario Outline: both goal prefixes show the teal goal pill and hint
+  Given the conduit app is served with the connected mockup
+  And a session already exists on the Claude harness
+  And the composer picker has the Claude catalog
+  When I type <goal> into the composer
+  Then the composer shows goal send controls
+  And the composer region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | goal                               | baseline                  | threshold |
+  | $goal Finish the accessibility work | composer-final-goal-dollar | 98        |
+  | /goal Finish the accessibility work | composer-final-goal-slash  | 98        |
+
+Scenario Outline: the dollar menu pins goal and reports compact context
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the composer picker has the Claude catalog
+  And the mock relay reports context 86 percent
+  When I type $ into the composer
+  Then the built-in menu pins $goal first in teal
+  And the command menu offers $btw
+  And the command menu offers $compact
+  And the compact command reports 86% context
+  And the command menu does not offer $review
+  And the command menu spans the composer width
+  And the screen region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline                   | threshold |
+  | desktop  | composer-final-dollar-menu | 98        |
+  | phone    | composer-final-dollar-menu | 98        |

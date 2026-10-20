@@ -106,7 +106,7 @@
 	{#if variant !== "words"}
 		<span class="glyph" aria-hidden="true">{@render children?.()}</span>
 	{/if}
-	<span class={["micro-label font-brand", labelClasses[variant]].join(" ")} aria-hidden="true">{label}</span>
+	<span class={["micro-label font-sans", labelClasses[variant]].join(" ")} aria-hidden="true">{label}</span>
 </button>
 
 <style>

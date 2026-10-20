@@ -196,16 +196,6 @@ const byId = (items: readonly Item[]) =>
  * Drive one store through commands, checking the sidebar against the full
  * computation after each one. Returns what the sidebar showed last.
  */
-/** Undo the migrations after the sidebar's, so the migrator re-runs from it. */
-const undoLaterMigrations = Effect.gen(function* () {
-	const sql = yield* SqlClient.SqlClient;
-	yield* sql`DROP TABLE pending_inputs`;
-	yield* sql`DROP INDEX idx_messages_input_id`;
-	yield* sql`ALTER TABLE messages DROP COLUMN input_id`;
-	yield* sql`ALTER TABLE messages DROP COLUMN steered`;
-	yield* sql`DROP TABLE session_git_published`;
-});
-
 const scenario = (store: Store) => {
 	let clock = Date.UTC(2026, 0, 1);
 	let messages = 0;
@@ -687,10 +677,13 @@ const scenario = (store: Store) => {
 				yield* sql`DROP TABLE session_sidebar_horizon`;
 				yield* sql`DROP INDEX idx_sessions_root`;
 				yield* sql`ALTER TABLE sessions DROP COLUMN root_id`;
-				// The tombstone migration rebuilds the table the backfill creates.
-				yield* undoLaterMigrations;
-				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id >= 38`;
-				yield* makeEffectSqlMigrator();
+				// Replay only the sidebar backfill and tombstone migrations. Later
+				// lineage migrations cannot adopt deliberately orphaned test rows.
+				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id IN (38, 39)`;
+				expect(yield* makeEffectSqlMigrator()).toEqual([
+					[38, "session_sidebar"],
+					[39, "session_sidebar_tombstones"],
+				]);
 				expect(yield* roots, "backfilled roots").toEqual(kept);
 				// Tombstones went with the dropped table; no device resumes past it.
 				devices = [];
@@ -1134,16 +1127,20 @@ describe("sidebar table on the 10k-session fixture", () => {
 		const roots = await store.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				// Back to the store as the previous release left it.
+				// Rebuild the sidebar without rewinding unrelated deployed migrations.
 				yield* sql`DROP TABLE session_sidebar`;
 				yield* sql`DROP TABLE session_sidebar_horizon`;
 				yield* sql`DROP INDEX idx_sessions_root`;
 				yield* sql`ALTER TABLE sessions DROP COLUMN root_id`;
-				yield* undoLaterMigrations;
-				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id >= 38`;
-				yield* makeEffectSqlMigrator().pipe(
-					Effect.withTracer(recordQueries(queries)),
-				);
+				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id IN (38, 39)`;
+				expect(
+					yield* makeEffectSqlMigrator().pipe(
+						Effect.withTracer(recordQueries(queries)),
+					),
+				).toEqual([
+					[38, "session_sidebar"],
+					[39, "session_sidebar_tombstones"],
+				]);
 				const [roots] = yield* sql<{ count: number }>`
 					SELECT COUNT(*) AS count FROM sessions WHERE parent_id IS NULL`;
 				return roots?.count ?? 0;

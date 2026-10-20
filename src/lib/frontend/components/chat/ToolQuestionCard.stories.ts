@@ -35,3 +35,12 @@ export const WaitingWithoutQuestionData: Story = {
 export const Skipped: Story = {
 	args: { message: mockQuestionSkipped },
 };
+
+export const Final: Story = {
+	args: {
+		message: { ...mockQuestionAnswered, createdAt: 1000, endedAt: 45000 },
+	},
+	globals: { theme: "dark" },
+};
+export const FinalLight: Story = { ...Final, globals: { theme: "light" } };
+export const ActiveLight: Story = { ...Active, globals: { theme: "light" } };

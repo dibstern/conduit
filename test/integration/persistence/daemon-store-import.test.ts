@@ -15,6 +15,7 @@ import { DatabaseSync } from "node:sqlite";
 import Database from "better-sqlite3";
 import { Effect, Result as Either, ManagedRuntime } from "effect";
 import { expect, it } from "vitest";
+import { setRead } from "../../../src/lib/domain/relay/Services/session-attention.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -43,6 +44,97 @@ import {
 
 const artifact = "test-results/82tn4-import-manifest.json";
 type Project = ProjectStoreFixture;
+
+// Failure modes: the read table makes every normalized import unsupported, or
+// the import drops its rows or detaches them from their parts.
+it("imports per-message read annotations", async () => {
+	const root = mkdtempSync(join(tmpdir(), "conduit-read-import-"));
+	const evidence: Record<string, unknown> = { passed: false };
+	try {
+		const seed = await fixture(root, "read-seed", {
+			transcript: { prompt: "Seed", reply: "Seed reply" },
+		});
+		const source = await fixture(root, "read-source", {
+			transcript: { prompt: "Read", reply: "Finding" },
+		});
+		const sessionId = "ses_read-source";
+		const partId = `${sessionId}_assistant_text`;
+		const runtime = ManagedRuntime.make(
+			makePersistenceEffectLayer(source.sourcePath, source.projectId),
+		);
+		try {
+			await runtime.runPromise(
+				Effect.gen(function* () {
+					yield* (yield* ProjectionRunnerEffectTag).recover();
+					yield* (yield* makeCommitAndSignal)([
+						canonicalEvent(
+							"text.surfaced",
+							sessionId,
+							{
+								messageId: `${sessionId}_assistant`,
+								partId,
+								ordinal: 1,
+								categorySetVersion: 1,
+								model: "jev",
+								probabilities: null,
+							},
+							{ provider: "conduit" },
+						),
+					]);
+					expect(yield* setRead([partId], true, sessionId)).toBe(true);
+				}),
+			);
+		} finally {
+			await runtime.dispose();
+		}
+		const before = projectManifest(source.sourcePath, source.projectId);
+		const configDir = join(root, "daemon");
+		mkdirSync(configDir);
+		await Effect.runPromise(importRegisteredProjectStores(configDir, [seed]));
+		const [result] = await Effect.runPromise(
+			importRegisteredProjectStores(configDir, [source]),
+		);
+		expect(result?.outcome).toBe("imported");
+		const after = projectManifest(
+			daemonStorePath(configDir),
+			source.projectId,
+			before,
+		);
+		expect(after.tables).toEqual(before.tables);
+		expect(after.rowCounts["message_part_read_state"]).toBe(1);
+		const imported = ManagedRuntime.make(
+			makePersistenceEffectLayer(daemonStorePath(configDir), source.projectId),
+		);
+		try {
+			await imported.runPromise(
+				Effect.gen(function* () {
+					yield* (yield* ProjectionRunnerEffectTag).recover();
+					const parts =
+						(yield* (yield* ReadQueryEffectTag).getSessionMessagesWithParts(
+							sessionId,
+						)).flatMap((message) => message.parts);
+					expect(parts.find((part) => part.id === partId)?.surfacing_read).toBe(
+						true,
+					);
+				}),
+			);
+		} finally {
+			await imported.dispose();
+		}
+		Object.assign(evidence, {
+			passed: true,
+			before: before.rowCounts,
+			after: after.rowCounts,
+			manifestsEqual: true,
+		});
+	} finally {
+		writeImportArtifact(
+			"test-results/ahu8-11-read-state-import.json",
+			evidence,
+		);
+		rmSync(root, { recursive: true, force: true });
+	}
+});
 
 it("remaps event-owned tool results when importing a project", async () => {
 	const root = mkdtempSync(join(tmpdir(), "conduit-tool-result-import-"));

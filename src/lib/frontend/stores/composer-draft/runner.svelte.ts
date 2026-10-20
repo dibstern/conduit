@@ -393,6 +393,19 @@ export function createComposerDraft(options: {
 			alreadySent = false,
 		): boolean {
 			const before = state;
+			const key = unsent.key ? draftKeyId(unsent.key) : null;
+			const sameScope = sentTo
+				? before.key && "session" in before.key && before.key.session === sentTo
+				: key !== null &&
+					before.key &&
+					draftKeyId(before.key) === key &&
+					!before.promoted.has(key);
+			const restoreAttachments =
+				restore &&
+				!alreadySent &&
+				sameScope &&
+				!before.text &&
+				!options.hasAttachments();
 			dispatch({
 				_tag: "SendFailed",
 				...unsent,
@@ -401,7 +414,7 @@ export function createComposerDraft(options: {
 				restore,
 				alreadySent,
 			});
-			return state.text !== before.text;
+			return state.text !== before.text || Boolean(restoreAttachments);
 		},
 		sendSucceeded(
 			sentTo: string | null,

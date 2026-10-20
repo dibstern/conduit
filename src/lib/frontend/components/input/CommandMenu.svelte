@@ -6,6 +6,7 @@
 	import type { CommandInfo } from "../../types.js";
 	import { filterCommands } from "../../stores/discovery.svelte.js";
 	import DetachedListbox from "../ui/DetachedListbox.svelte";
+	import CommandOption from "../ui/CommandOption.svelte";
 
 	let {
 		listboxId,
@@ -16,6 +17,7 @@
 		onSelect,
 		onClose,
 		activeIndex = $bindable(0),
+		contextPercent = 0,
 	}: {
 		listboxId: string;
 		query: string;
@@ -25,15 +27,17 @@
 		onSelect: (command: string) => void;
 		onClose: () => void;
 		activeIndex?: number | undefined;
+		contextPercent?: number;
 	} = $props();
 
 	const filtered = $derived(
 		[...filterCommands(commands, query)].sort((a, b) =>
-			a.name.localeCompare(b.name),
+			(trigger === "$" ? Number(b.name === "goal") - Number(a.name === "goal") : 0) || a.name.localeCompare(b.name),
 		),
 	);
 
 	const isVisible = $derived(visible && filtered.length > 0);
+	const icons: Record<string, string> = { goal: "target", btw: "messages-square", clear: "refresh-cw", compact: "gauge", cost: "zap", help: "book-open", init: "file-code", memory: "brain", model: "sparkles" };
 
 	$effect(() => {
 		// Depend on filtered.length to reset on filter change
@@ -107,16 +111,15 @@
 		<DetachedListbox
 			id={listboxId}
 			ariaLabel={trigger === "$" ? "Built-in commands" : "Slash commands"}
-			class="cmd-menu absolute bottom-full left-0 right-0 mb-1 max-h-[300px] overflow-y-auto"
+			class="cmd-menu absolute bottom-full left-0 right-0 mb-1 max-h-[360px] overflow-y-auto p-[6px]"
 		>
 			{#each filtered as cmd, i}
-				<div
-					class="cmd-item flex items-baseline gap-2 py-2 px-3.5 cursor-pointer transition-colors duration-100 max-sm:py-1.5 max-sm:px-2.5 max-sm:gap-1.5 {i === activeIndex ? 'bg-accent-bg hover:bg-accent-bg' : 'hover:bg-bg-alt'}"
+				<CommandOption
+					active={i === activeIndex}
+					goal={trigger === "$" && cmd.name === "goal"}
+					icon={icons[cmd.name] ?? "terminal"}
 					id="{listboxId}-option-{i}"
 					data-cmd-index={i}
-					role="option"
-					aria-selected={i === activeIndex}
-					tabindex="-1"
 					onmousedown={(e) => {
 						e.preventDefault();
 						selectCommand(cmd);
@@ -125,24 +128,12 @@
 						activeIndex = i;
 					}}
 				>
-					<span
-						class="cmd-name shrink-0 font-mono text-base font-medium text-accent whitespace-nowrap max-sm:text-xs"
-					>
-					{trigger}{cmd.name}
-					{#if cmd.args}
-						<span class="cmd-args font-normal text-text-muted"
-							>{cmd.args}</span
-						>
-					{/if}
-				</span>
-				{#if cmd.description}
-					<span
-						class="cmd-desc flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-base text-text-muted max-sm:text-xs"
-					>
-						{cmd.description}
-						</span>
-					{/if}
-				</div>
+					<div class="min-w-0 flex-1">
+						<span class="cmd-name block truncate font-mono text-[13.5px] {trigger === '$' && cmd.name === 'goal' ? 'text-status-goal' : 'text-text'}">{trigger}{cmd.name}{#if cmd.args}<span class="cmd-args font-normal text-text-muted"> {cmd.args}</span>{/if}</span>
+						{#if cmd.description}<span class="cmd-desc block truncate text-[12px] text-text-muted">{cmd.description}</span>{/if}
+					</div>
+					{#if trigger === "$" && cmd.name === "compact"}<span data-testid="command-context-percent" class="shrink-0 font-mono text-[11.5px] text-text-muted">{Math.round(contextPercent)}%</span>{/if}
+				</CommandOption>
 			{/each}
 		</DetachedListbox>
 	{/if}

@@ -568,7 +568,10 @@ async function main(): Promise<void> {
 	}
 	// Restarts must preserve a test's deliberate project removal.
 	const defaultProjectRegistered = join(root, "default-project-registered");
-	if (!existsSync(defaultProjectRegistered)) {
+	if (
+		process.env["CONDUIT_TEST_REGISTER_PROJECT"] === "1" &&
+		!existsSync(defaultProjectRegistered)
+	) {
 		const changes = watch(configDir);
 		try {
 			await activeDaemon.addProject(join(root, "process-test"));

@@ -1804,12 +1804,16 @@ syncBuiltinESMExports();
 			skipBrowserProbe: true,
 		});
 		expect(await setting()).toEqual({ global: migrated });
-		expect(readFileSync(configPath, "utf8")).toBe(persisted);
+		expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual({
+			...config,
+			pid: fixture.generations.at(-1)?.pid,
+			port: fixture.generations.at(-1)?.port,
+		});
 		evidence["migration"] = {
 			version: version ?? "legacy",
 			rules,
 			migrated,
-			unchangedOnSecondStart: true,
+			settingsUnchangedOnSecondStart: true,
 		};
 	}, 300_000);
 });

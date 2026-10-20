@@ -12,6 +12,7 @@ import {
 	applyGetModelsResponse,
 	clearDiscoveryState,
 } from "../../stores/discovery.svelte.js";
+import { featureFlags } from "../../stores/feature-flags.svelte.js";
 import {
 	goalDetails,
 	handleGoalChanged,
@@ -38,6 +39,12 @@ import {
 import { uiState } from "../../stores/ui.svelte.js";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
 import { openSessionForSetup } from "../../stories/session-setup.js";
+import {
+	connectedSocket,
+	connectingSocket,
+	replyRpc,
+} from "../../stories/sockets.js";
+import { inspectTouchTarget } from "../../stories/touch-target.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import type { rpc } from "../../transport/ws-rpc-client.js";
 import type {
@@ -49,6 +56,66 @@ import { sideThreadsPanel } from "../session/side-threads.svelte.js";
 import SessionBarPhoneFrame from "./__fixtures__/SessionBarPhoneFrame.svelte";
 
 let sequence = 0;
+
+// Only stories that open a session sheet answer its auto-settle read: a
+// connected socket also turns the bar's connection dot green.
+const answerAutoSettle = () => {
+	const restoreSocket = connectedSocket();
+	const restoreOutlook = replyRpc("GetSessionAutoSettleOutlook", () => ({
+		kind: "paused",
+		reason: "awaiting-activity",
+	}));
+	return () => {
+		restoreOutlook();
+		restoreSocket();
+	};
+};
+
+let desktopNow = Date.now();
+const setDesktopAutoSettle = fn((payload: unknown) => {
+	expect(payload).toMatchObject({ sessionId: mockSession.id, disabled: true });
+	return { kind: "off" };
+});
+function answerDesktopAutoSettle() {
+	sessionState.now = desktopNow;
+	setDesktopAutoSettle.mockClear();
+	const restoreSocket = connectedSocket();
+	const restoreRead = replyRpc("GetSessionAutoSettleOutlook", () => {
+		const row = sessionState.sessions.get(mockSession.id);
+		if (row?.pinnedAt != null) return { kind: "paused", reason: "pinned" };
+		if (row?.snoozedAt != null) return { kind: "paused", reason: "snoozed" };
+		if (row?.settledAt != null) return { kind: "settled" };
+		return { kind: "scheduled", at: desktopNow + 2 * 86_400_000 };
+	});
+	const restoreWrite = replyRpc("SetSessionAutoSettle", setDesktopAutoSettle);
+	return () => {
+		restoreWrite();
+		restoreRead();
+		restoreSocket();
+	};
+}
+
+async function desktopMenu() {
+	const menu = await within(document.body).findByTestId(
+		"session-bar-overflow-menu",
+	);
+	await waitFor(() =>
+		expect(
+			menu.querySelector("[data-switch-status]"),
+		).not.toBeEmptyDOMElement(),
+	);
+	return menu;
+}
+
+async function sessionSheet(testId: string) {
+	const sheet = await within(document.body).findByTestId(testId);
+	await waitFor(() =>
+		expect(sheet.querySelector("[data-switch-status]")).toHaveTextContent(
+			"On · waits for new activity",
+		),
+	);
+	return sheet;
+}
 
 type Row = Pick<SessionInfo, "id" | "title"> & Partial<SessionInfo>;
 
@@ -74,6 +141,13 @@ const goalCheckFixtures = [
 	{ minutes: 36, reason: "38/38 once. Needs a second run." },
 ];
 
+const fixtureClock = (at: number) =>
+	new Date(at).toLocaleTimeString("en-US", {
+		timeZone: "UTC",
+		hour: "numeric",
+		minute: "2-digit",
+	});
+
 const getGoalDetails = fn<
 	(input: Parameters<typeof rpc<"GetGoalDetails">>[1]) => Promise<GoalDetails>
 >(async ({ sessionId }): Promise<GoalDetails> => {
@@ -82,8 +156,11 @@ const getGoalDetails = fn<
 	if (!goal) return { checks: [], tokensSinceStart: null };
 	const count = facts?.ended === "met" ? 4 : Math.min(goal.iterations, 3);
 	return {
+		judgeModel: "Sonnet 5",
+		turnCount: goal.iterations + 1,
 		checks: goalCheckFixtures.slice(0, count).map((check, index) => ({
 			iteration: index + 1,
+			turnIndex: index + 1,
 			at: goal.setAt + check.minutes * 60_000,
 			reason: check.reason,
 		})),
@@ -91,7 +168,7 @@ const getGoalDetails = fn<
 	};
 });
 
-// Rendered through a phone-width frame; see the fixture for why.
+// The frame pins phone widths and fills the canvas for desktop stories.
 const meta = {
 	title: "Layout/SessionBar",
 	component: SessionBarPhoneFrame,
@@ -102,12 +179,16 @@ const meta = {
 	parameters: { layout: "fullscreen", a11y: { test: "error" } },
 	args: { getGoalDetails },
 	beforeEach: () => {
+		featureFlags.debug = false;
+		uiState.toasts = [];
 		const detailsOpen = goalDetails.open;
 		const now = sessionState.now;
 		goalDetails.open = false;
 		getGoalDetails.mockClear();
 		clearDiscoveryState();
 		clearSessionState();
+		desktopNow = Date.now();
+		sessionState.now = desktopNow;
 		// Layout/Header seeds this same module-level store, and Storybook shares
 		// it across story files. Reset or the badge appears in every story.
 		instanceState.instances = [];
@@ -132,9 +213,12 @@ const meta = {
 		sessionSkillsState.loads = [];
 		uiState.clientCount = 1;
 		destroyAll();
-		// An RPC in a play function dials the control socket, and every dial,
-		// retries included, probes the attached project's relay status. Answer
-		// that probe; anything else still reaches the network guard.
+		// The skills chip's read dials the control socket on mount. Keep it
+		// connecting, so the sheet stories' connectedSocket() can open the
+		// socket the RPC client then keeps for the rest of the file.
+		const restoreSocket = connectingSocket();
+		// Every dial, retries included, probes the attached project's relay
+		// status. Answer that probe; anything else still reaches the network guard.
 		const guardedFetch = globalThis.fetch;
 		globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) =>
 			String(input instanceof Request ? input.url : input).endsWith(
@@ -145,6 +229,7 @@ const meta = {
 		return () => {
 			clearDiscoveryState();
 			globalThis.fetch = guardedFetch;
+			restoreSocket();
 			attachedProjectState.slug = null;
 			goalDetails.open = detailsOpen;
 			sessionState.now = now;
@@ -172,10 +257,17 @@ export const Default: Story = {
 
 		// The back control is the only way off this screen on a phone, so its
 		// accessible name and its wiring are both worth pinning. It leaves the
-		// session's route, so it runs last.
+		// session's route, so it runs last, and the session is reopened so the
+		// capture still shows the default bar.
 		const back = canvas.getByRole("button", { name: /Sessions/ });
 		await userEvent.click(back);
 		expect(routerState.path).toBe("/");
+		routerState.path = `/s/${mockSession.id}`;
+		await waitFor(() =>
+			expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
+				"Test Session",
+			),
+		);
 	},
 };
 
@@ -185,6 +277,7 @@ let goalStorySetAt = Date.now() - 41 * 60_000 - 30_000;
 
 function setupGoal(
 	state: "checking" | "not_yet" | "paused" | "met" | "cleared",
+	unread = false,
 ) {
 	const previous = sessionGoals.get(mockSession.id);
 	applyGetModelsResponse(
@@ -240,7 +333,7 @@ function setupGoal(
 						? { pausedReason: "Goal check interrupted" }
 						: {}),
 				};
-	seedSessions([{ ...mockSession, status: "idle" }]);
+	seedSessions([{ ...mockSession, status: "idle", unread }]);
 	handleGoalChanged(facts);
 	return () => {
 		if (previous) handleGoalChanged(previous);
@@ -254,7 +347,7 @@ async function assertGoalSubtitle(
 	token: string,
 ) {
 	const subtitle = within(canvasElement).getByTestId("session-goal-subtitle");
-	await expect(subtitle).toHaveTextContent(text);
+	await expect(subtitle.textContent?.trim()).toBe(text);
 	await expect(subtitle.querySelector("svg")).toBeVisible();
 	const style = getComputedStyle(subtitle);
 	const expected = new Option().style;
@@ -269,8 +362,8 @@ export const GoalChecking: Story = {
 	play: async ({ canvasElement }) => {
 		const subtitle = await assertGoalSubtitle(
 			canvasElement,
-			"Checking goal · check 3",
-			"--color-status-violet",
+			"Checking · All 38 scenarios pass",
+			"--color-status-goal",
 		);
 		const spinner = subtitle.querySelector("svg");
 		if (!spinner) throw new Error("Checking spinner is missing");
@@ -283,7 +376,7 @@ export const GoalNotYet: Story = {
 	play: async ({ canvasElement }) => {
 		await assertGoalSubtitle(
 			canvasElement,
-			"All 38 scenarios pass · 2 checks",
+			"Pursuing · All 38 scenarios pass",
 			"--color-status-amber",
 		);
 	},
@@ -294,8 +387,8 @@ export const GoalPaused: Story = {
 	play: async ({ canvasElement }) => {
 		const subtitle = await assertGoalSubtitle(
 			canvasElement,
-			"Goal paused · All 38 scenarios pass",
-			"--color-status-violet",
+			"Paused · All 38 scenarios pass",
+			"--color-status-goal",
 		);
 		await expect(subtitle).toHaveAttribute(
 			"title",
@@ -309,7 +402,7 @@ export const GoalMet: Story = {
 	play: async ({ canvasElement }) => {
 		await assertGoalSubtitle(
 			canvasElement,
-			"Goal met · 7 checks · 41m",
+			"Goal met · All 38 scenarios pass",
 			"--color-status-green",
 		);
 	},
@@ -400,24 +493,59 @@ async function assertGoalDetails(
 		),
 	);
 	const checks = history.queryAllByTestId("goal-details-check");
+	const historyCount = Math.min(checkCount, phase === "Met" ? 4 : 3);
+	const completed =
+		phase === "Checking" || phase === "Met" ? checks.slice(1) : checks;
 	for (const [index, fixture] of goalCheckFixtures
-		.slice(0, Math.min(checkCount, 3))
+		.slice(0, historyCount)
+		.reverse()
 		.entries()) {
-		await expect(checks[index]).toHaveTextContent(`${fixture.minutes}m`);
-		await expect(checks[index]).toHaveTextContent(fixture.reason);
+		await expect(completed[index]).toHaveTextContent(fixture.reason);
+		const facts = sessionGoals.get(mockSession.id);
+		const goal = facts?.goal ?? facts?.endedGoal;
+		expect(goal).toBeDefined();
+		if (goal)
+			await expect(completed[index]?.querySelector("time")).toHaveTextContent(
+				fixtureClock(goal.setAt + fixture.minutes * 60_000),
+			);
 	}
 	return { panel, checks };
 }
 
+// Timestamps, counts and the card's section labels sit in the quiet tier (text-dimmer),
+// below AA by design and held to 3:1 by theme-contrast.test.ts. color-contrast skips
+// only those; it and every other rule stay on for the rest of the popover.
+const quietTierA11y = {
+	a11y: {
+		test: "error",
+		config: {
+			rules: [
+				{
+					id: "color-contrast",
+					selector:
+						'*:not([data-testid="goal-details-meta"], [data-testid="goal-details-tokens"], [data-compact="false"] [data-goal-checks-heading], [data-testid="goal-details-check"] time, [data-testid="goal-details-check"] small, [aria-label="Snooze until"] .hold-menu-detail, [data-testid="session-bar-state-menu"] [data-menu-item-detail])',
+				},
+			],
+		},
+	},
+};
+
 export const GoalDetailsOpen: Story = {
+	args: { island: true, height: 852 },
 	tags: ["viewport-capture"],
-	parameters: { docs: { story: { inline: false } } },
+	parameters: {
+		...quietTierA11y,
+		docs: { story: { inline: false } },
+	},
 	beforeEach: () => setupGoalDetails("not_yet"),
 	play: async ({ canvasElement }) => {
-		const { panel } = await assertGoalDetails(canvasElement, "Not yet", 3);
-		await expect(panel.getByTestId("goal-details-meta")).toHaveTextContent(
-			"Set 41m ago · 3 checks · 1.24M tokens",
-		);
+		const { panel } = await assertGoalDetails(canvasElement, "Pursuing", 3);
+		const setAt = sessionGoals.get(mockSession.id)?.goal?.setAt;
+		expect(setAt).toBeDefined();
+		if (setAt != null)
+			await expect(panel.getByTestId("goal-details-meta")).toHaveTextContent(
+				`Set ${fixtureClock(setAt)} · 3 checks · Sonnet 5 judges`,
+			);
 		await expect(panel.getByTestId("goal-details-pause")).toBeVisible();
 		await expect(panel.getByTestId("goal-details-edit")).toBeVisible();
 		await expect(panel.getByTestId("goal-details-clear")).toBeVisible();
@@ -430,9 +558,9 @@ export const GoalDetailsChecking: Story = {
 	beforeEach: () => setupGoalDetails("checking"),
 	play: async ({ canvasElement }) => {
 		const { checks } = await assertGoalDetails(canvasElement, "Checking", 4);
-		await expect(checks[3]).toHaveTextContent("now");
-		await expect(checks[3]).toHaveTextContent("Checking…");
-		const spinner = checks[3]?.querySelector("svg");
+		await expect(checks[0]).toHaveTextContent("now");
+		await expect(checks[0]).toHaveTextContent("Checking");
+		const spinner = checks[0]?.querySelector("svg");
 		await expect(spinner).toBeVisible();
 		if (!spinner) return;
 		await expect(getComputedStyle(spinner).animationName).toBe("spin");
@@ -458,19 +586,21 @@ export const GoalDetailsMet: Story = {
 	beforeEach: () => setupGoalDetails("met"),
 	play: async ({ canvasElement }) => {
 		const { panel, checks } = await assertGoalDetails(canvasElement, "Met", 5);
-		await expect(checks[3]).toHaveTextContent("36m");
-		await expect(checks[3]).toHaveTextContent(
+		await expect(checks[1]).toHaveTextContent(
 			"38/38 once. Needs a second run.",
 		);
-		await expect(checks[4]).toHaveTextContent("41m");
-		await expect(checks[4]).toHaveTextContent("38/38 on two runs in a row.");
-		const icon = checks[4]?.querySelector("svg");
+		await expect(checks[0]).toHaveTextContent("38/38 on two runs in a row.");
+		const endedAt = sessionGoals.get(mockSession.id)?.endedAt;
+		expect(endedAt).toBeDefined();
+		if (endedAt != null)
+			await expect(checks[0]?.querySelector("time")).toHaveTextContent(
+				fixtureClock(endedAt),
+			);
+		const icon = checks[0]?.querySelector("svg");
 		await expect(icon).toBeVisible();
 		if (!icon) return;
 		const expected = new Option().style;
-		expected.color = getComputedStyle(icon).getPropertyValue(
-			"--color-status-green",
-		);
+		expected.color = getComputedStyle(icon).getPropertyValue("--color-success");
 		await expect(getComputedStyle(icon).color).toBe(expected.color);
 		await expect(panel.getByTestId("goal-details-new")).toBeVisible();
 		await expect(panel.getByTestId("goal-details-dismiss")).toBeVisible();
@@ -485,7 +615,7 @@ export const GoalDetailsEmpty: Story = {
 	tags: ["viewport-capture"],
 	beforeEach: () => setupGoalDetails("starting"),
 	play: async ({ canvasElement }) => {
-		const { panel } = await assertGoalDetails(canvasElement, "Starting", 0);
+		const { panel } = await assertGoalDetails(canvasElement, "Pursuing", 0);
 		await expect(panel.getByTestId("goal-details-history")).toHaveTextContent(
 			"No checks yet. The first runs when Claude finishes a turn.",
 		);
@@ -523,12 +653,11 @@ export const GoalDetailsEmptyLight: Story = {
 
 export const ViewsSheetOpen: Story = {
 	tags: ["viewport-capture"],
+	beforeEach: answerAutoSettle,
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByTestId("session-bar-island-overflow"));
-		const sheet = await within(document.body).findByTestId(
-			"session-bar-island-menu",
-		);
+		const sheet = await sessionSheet("session-bar-island-menu");
 		await expect(sheet).toBeVisible();
 		// Accessible names, in order: the shortcut hints are aria-hidden.
 		const items = ["Chat", "Terminal", "Diff", "Files"].map((name) =>
@@ -537,6 +666,36 @@ export const ViewsSheetOpen: Story = {
 		expect(within(sheet).getAllByRole("menuitemradio")).toEqual(items);
 		await expect(items[0]).toHaveAttribute("aria-checked", "true");
 		await expect(items[2]).toHaveAttribute("aria-disabled", "true");
+		expect(
+			new Set(items.map((item) => item.getBoundingClientRect().top)).size,
+		).toBe(1);
+		await expect(
+			within(sheet).getByTestId("session-sheet-header"),
+		).toBeVisible();
+		await expect(sheet.querySelector(".shortcut-hint")).toBeNull();
+	},
+};
+
+export const ViewsSheetOpenLight: Story = {
+	...ViewsSheetOpen,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
+};
+
+export const CloseSheetReturnsFocus: Story = {
+	play: async ({ canvasElement }) => {
+		const trigger = within(canvasElement).getByTestId(
+			"session-bar-island-overflow",
+		);
+		const body = within(canvasElement.ownerDocument.body);
+		await userEvent.click(trigger);
+		await userEvent.click(await body.findByTestId("session-sheet-close"));
+		await waitFor(() =>
+			expect(
+				body.queryByTestId("session-bar-island-menu"),
+			).not.toBeInTheDocument(),
+		);
+		await waitFor(() => expect(trigger).toHaveFocus());
 	},
 };
 
@@ -558,7 +717,7 @@ export const WithViewBadge: Story = {
 
 export const OpeningTerminalClearsBadge: Story = {
 	tags: ["viewport-capture"],
-	beforeEach: emitOutputFromTwoTerminals,
+	beforeEach: [answerAutoSettle, emitOutputFromTwoTerminals],
 	play: async ({ canvasElement }) => {
 		const button = within(canvasElement).getByTestId(
 			"session-bar-island-overflow",
@@ -568,9 +727,7 @@ export const OpeningTerminalClearsBadge: Story = {
 		await tick();
 		await expect(button).not.toHaveTextContent("2");
 		await userEvent.click(button);
-		const sheet = await within(document.body).findByTestId(
-			"session-bar-island-menu",
-		);
+		const sheet = await sessionSheet("session-bar-island-menu");
 		await expect(
 			within(sheet).getByTestId("overflow-view-terminal"),
 		).toHaveAttribute("aria-checked", "true");
@@ -586,6 +743,11 @@ function showState(overrides: Partial<typeof mockSession>) {
 
 export const Settled: Story = {
 	beforeEach: () => showState({ settledAt: Date.now() - 3_600_000 }),
+	play: ({ canvasElement }) => {
+		expectTouchTarget(
+			within(canvasElement).getByTestId("session-bar-state-chip"),
+		);
+	},
 };
 
 export const AutoSettled: Story = {
@@ -599,6 +761,11 @@ export const AutoSettled: Story = {
 export const Snoozed: Story = {
 	beforeEach: () =>
 		showState({ snoozedAt: Date.now(), snoozedUntil: Date.now() + 3_600_000 }),
+	play: ({ canvasElement }) => {
+		expectTouchTarget(
+			within(canvasElement).getByTestId("session-bar-state-chip"),
+		);
+	},
 };
 
 export const Woke: Story = {
@@ -606,6 +773,7 @@ export const Woke: Story = {
 };
 
 export const AutoSettledCollapsed: Story = {
+	args: { island: true },
 	beforeEach: () => {
 		showState({
 			settledAt: Date.now() - 3_600_000,
@@ -614,6 +782,19 @@ export const AutoSettledCollapsed: Story = {
 		sessionViewState.compact = true;
 		sessionViewState.atBottom = true;
 		sessionViewState.barOpen = false;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const bar = canvas.getByTestId("session-bar");
+		await expect(bar).toHaveAttribute("data-collapsed", "true");
+		expect(canvas.queryByTestId("session-bar-state-chip")).toBeNull();
+		await userEvent.click(canvas.getByTestId("session-bar-expand"));
+		await expect(canvas.getByTestId("session-bar-state-chip")).toHaveAttribute(
+			"data-state",
+			"auto-settled",
+		);
+		sessionViewState.barOpen = false;
+		await waitFor(() => expect(bar).toHaveAttribute("data-collapsed", "true"));
 	},
 };
 
@@ -702,50 +883,6 @@ const mockInstances: OpenCodeInstance[] = [
 	},
 ];
 
-function seedOpenCodeHeader(): void {
-	instanceState.instances = [...mockInstances];
-	seedSessions([
-		{ ...mockSession, accountId: "inst-personal" },
-		mockSessionLongTitle,
-	]);
-	applyGetAgentsResponse(
-		{
-			projectSlug: "conduit",
-			providerScope: { id: "opencode", name: "OpenCode" },
-			agents: [],
-		},
-		mockSession.id,
-	);
-	projectState.projects = [
-		{
-			slug: "conduit",
-			title: "conduit",
-			folders: ["/src/conduit"],
-			git: { branch: "account-chip", dirty: true },
-		},
-	];
-}
-
-export const PhoneOpenCodeHeader: Story = {
-	beforeEach: seedOpenCodeHeader,
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
-		expect(canvas.queryByTestId("account-dot")).toBeNull();
-		const bar = canvas.getByTestId("session-bar");
-		expect(bar.scrollWidth).toBe(bar.clientWidth);
-	},
-};
-
-export const DesktopOpenCodeHeader: Story = {
-	...PhoneOpenCodeHeader,
-	args: { width: 900 },
-	beforeEach: () => {
-		seedOpenCodeHeader();
-		sessionViewState.compact = false;
-	},
-};
-
 /**
  * The collapsed bar keeps its overflow while the expanded bar uses the title
  * and Views sheets.
@@ -754,18 +891,19 @@ export const OverflowMenuOpen: Story = {
 	args: { island: true },
 	// The menu portals to <body>, so the capture has to frame the page.
 	tags: ["viewport-capture"],
-	beforeEach: () => {
-		sessionViewState.compact = true;
-		sessionViewState.atBottom = true;
-		sessionViewState.barOpen = false;
-	},
+	beforeEach: [
+		answerAutoSettle,
+		() => {
+			sessionViewState.compact = true;
+			sessionViewState.atBottom = true;
+			sessionViewState.barOpen = false;
+		},
+	],
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByTestId("session-bar-island-overflow"));
 
-		const menu = await within(document.body).findByTestId(
-			"session-bar-island-menu",
-		);
+		const menu = await sessionSheet("session-bar-island-menu");
 		for (const name of ["Chat", "Terminal", "Diff", "Files"]) {
 			await expect(
 				within(menu).getByRole("menuitemradio", { name }),
@@ -786,19 +924,52 @@ export const OverflowMenuOpen: Story = {
 
 export const TitleChevronSheet: Story = {
 	tags: ["viewport-capture"],
-	beforeEach: () => {
-		sessionViewState.compact = true;
-	},
+	beforeEach: [
+		answerAutoSettle,
+		() => {
+			sessionViewState.compact = true;
+		},
+	],
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByTestId("session-bar-title-menu"));
-		const menu = await within(document.body).findByTestId(
-			"session-action-sheet",
-		);
+		const menu = await sessionSheet("session-action-sheet");
 		await expect(menu).toHaveClass(/bottom-0/);
 		await expect(within(menu).getByTestId("session-ctx-settle")).toBeVisible();
 		await expect(within(menu).getByTestId("session-title-share")).toBeVisible();
 	},
+};
+
+export const OverflowMenuDebug: Story = {
+	...OverflowMenuOpen,
+	// The indexer reads tags statically, so a spread does not carry them.
+	tags: ["viewport-capture"],
+	beforeEach: [
+		answerAutoSettle,
+		() => {
+			sessionViewState.compact = true;
+			sessionViewState.atBottom = true;
+			sessionViewState.barOpen = false;
+			featureFlags.debug = true;
+		},
+	],
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByTestId("session-bar-island-overflow"),
+		);
+		const menu = await sessionSheet("session-bar-island-menu");
+		await expect(
+			within(menu).getByTestId("overflow-debug"),
+		).toHaveAccessibleName("Debug panel");
+		await expect(within(menu).getByTestId("overflow-debug")).toHaveTextContent(
+			/Debug\s*dev/,
+		);
+	},
+};
+export const OverflowMenuDebugLight: Story = {
+	...OverflowMenuDebug,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
 };
 
 /**
@@ -845,12 +1016,257 @@ export const Collapsed: Story = {
 	},
 };
 
+function setupPhoneHeader() {
+	seedSkills();
+	instanceState.instances = mockInstances.slice(0, 1).map((instance) => ({
+		...instance,
+		id: "claude",
+		driver: "claude",
+		capabilities: {
+			supportsMultiFolder: false,
+			supportsWorktree: false,
+			supportsTaskStop: true,
+		},
+	}));
+	const cleanup = setupGoal("checking", true);
+	const facts = sessionGoals.get(mockSession.id);
+	seedSessions([
+		{
+			...mockSession,
+			title: "Typed session list",
+			accountId: "claude",
+			unread: true,
+			backgroundTasks: [
+				{
+					id: "phone-task-1",
+					type: "local_bash",
+					description: "pnpm test:e2e",
+					firstSeenAt: Date.now(),
+				},
+				{
+					id: "phone-task-2",
+					type: "local_bash",
+					description: "pnpm check",
+					firstSeenAt: Date.now(),
+				},
+			],
+		},
+		{ ...mockSession, id: "phone-needs-reply", pendingQuestionCount: 1 },
+		{
+			...mockSession,
+			id: "phone-side-1",
+			parentID: mockSession.id,
+			sideThread: true,
+		},
+		{
+			...mockSession,
+			id: "phone-side-2",
+			parentID: mockSession.id,
+			sideThread: true,
+		},
+		{ ...mockSession, id: "phone-needs-approval", pendingPermissionCount: 1 },
+	]);
+	if (facts) handleGoalChanged(facts);
+	return cleanup;
+}
+
+// Verify actual ownership, including edges, rather than nominal CSS dimensions.
+function expectTouchTarget(control: HTMLElement, minimum = 44) {
+	const target = inspectTouchTarget(control, minimum);
+	expect(target.width, control.dataset["testid"]).toBeGreaterThanOrEqual(
+		minimum,
+	);
+	expect(target.height, control.dataset["testid"]).toBeGreaterThanOrEqual(
+		minimum,
+	);
+	expect(target.missing, JSON.stringify(target.failures)).toBe(0);
+}
+
+export const PhoneTop: Story = {
+	beforeEach: setupPhoneHeader,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const bar = canvas.getByTestId("session-bar");
+		const back = canvas.getByTestId("session-bar-back").getBoundingClientRect();
+		const title = canvas.getByTestId("session-bar-title");
+		const goal = canvas.getByTestId("session-goal-subtitle");
+		const tasks = canvas.getByTestId("background-tasks-row");
+		const pill = canvas.getByTestId("session-controls-pill");
+		expect(pill.getBoundingClientRect().left).toBeGreaterThanOrEqual(
+			back.right,
+		);
+		expect(pill.getBoundingClientRect().right).toBeLessThanOrEqual(
+			canvas.getByTestId("session-bar-island-overflow").getBoundingClientRect()
+				.left,
+		);
+		await expect(bar).toHaveAttribute("data-collapsed", "false");
+		expect(getComputedStyle(title).fontSize).toBe("17px");
+		expect(title.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+			back.bottom,
+		);
+		expect(goal.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+			title.getBoundingClientRect().bottom,
+		);
+		expect(tasks.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+			goal.getBoundingClientRect().bottom,
+		);
+		await expect(tasks).toHaveTextContent("2 background tasks");
+		expect(goal.getBoundingClientRect().width).toBe(
+			bar.getBoundingClientRect().width - 20,
+		);
+		for (const id of [
+			"session-bar-back",
+			"session-skills-chip",
+			"side-threads-control",
+			"session-bar-settle",
+			"session-bar-title-menu",
+			"session-bar-unread-chip",
+			"session-bar-island-overflow",
+			"session-goal-subtitle",
+			"background-tasks-toggle",
+			"background-tasks-row-stop-all",
+		]) {
+			expectTouchTarget(
+				canvas.getByTestId(id),
+				[
+					"session-skills-chip",
+					"side-threads-control",
+					"session-bar-settle",
+					"session-bar-title-menu",
+					"session-bar-unread-chip",
+					"session-goal-subtitle",
+				].includes(id)
+					? 24
+					: 44,
+			);
+		}
+	},
+};
+
+export const PhoneTopLight: Story = {
+	...PhoneTop,
+	globals: { theme: "light" },
+};
+
+export const PhoneTopNarrowest: Story = { ...PhoneTop, args: { width: 320 } };
+export const PhoneTopNarrowestLight: Story = {
+	...PhoneTopNarrowest,
+	globals: { theme: "light" },
+};
+
+export const PhoneIslandBadge: Story = {
+	args: { island: true },
+	beforeEach: () => {
+		const cleanup = setupPhoneHeader();
+		sessionViewState.barOpen = false;
+		return cleanup;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const bar = canvas.getByTestId("session-bar");
+		await expect(bar).toHaveAttribute("data-collapsed", "true");
+		expect(bar.getBoundingClientRect().height).toBe(46);
+		expect(bar.getBoundingClientRect().width).toBe(369);
+		expect(getComputedStyle(bar).borderRadius).toBe("23px");
+		const badge = canvas.getByTestId("session-bar-attention");
+		await expect(badge).toHaveTextContent("2");
+		const chevron = canvas.getByTestId("session-bar-back").querySelector("svg");
+		expect(chevron).not.toBeNull();
+		if (!chevron) return;
+		expect(
+			badge.getBoundingClientRect().left -
+				chevron.getBoundingClientRect().right,
+		).toBeGreaterThanOrEqual(4);
+		await expect(canvas.queryByTestId("session-goal-subtitle")).toBeNull();
+		await expect(canvas.queryByTestId("background-tasks-row")).toBeNull();
+		const heading = canvas.getByRole("heading", { level: 1 });
+		expect(getComputedStyle(heading).fontSize).toBe("15px");
+		await userEvent.click(canvas.getByTestId("session-bar-expand"));
+		expect(canvas.getByRole("heading", { level: 1 })).toBe(heading);
+		await expect(canvas.getByTestId("session-goal-subtitle")).toBeVisible();
+		await expect(bar).toHaveFocus();
+		sessionViewState.barOpen = false;
+	},
+};
+
+export const PhoneIslandBadgeLight: Story = {
+	...PhoneIslandBadge,
+	globals: { theme: "light" },
+};
+
+export const PhoneGoalSheet: Story = {
+	args: { island: true, height: 852 },
+	parameters: quietTierA11y,
+	tags: ["viewport-capture"],
+	beforeEach: () => setupGoal("checking"),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const goal = canvas.getByTestId("session-goal-subtitle");
+		await userEvent.click(goal);
+		const sheet = await canvas.findByTestId("goal-details");
+		await waitFor(() => expect(sheet).toHaveTextContent("Sonnet 5 judges"));
+		const box = sheet.getBoundingClientRect();
+		expect(box.x).toBe(0);
+		expect(box.width).toBe(393);
+		expect(box.bottom).toBe(852);
+		expect(
+			getComputedStyle(sheet.querySelector("[data-sheet-chrome]") ?? sheet)
+				.borderTopLeftRadius,
+		).toBe("22px");
+		for (const id of [
+			"goal-details-pause",
+			"goal-details-edit",
+			"goal-details-clear",
+		]) {
+			expectTouchTarget(canvas.getByTestId(id));
+		}
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() => {
+			expect(canvas.queryByTestId("goal-details")).toBeNull();
+			expect(goal).toHaveFocus();
+			expect(getComputedStyle(goal).pointerEvents).toBe("auto");
+		});
+		await userEvent.click(goal);
+		await userEvent.click(canvas.getByTestId("goal-details-scrim"));
+		await waitFor(() => {
+			expect(canvas.queryByTestId("goal-details")).toBeNull();
+			expect(goal).toHaveFocus();
+			expect(getComputedStyle(goal).pointerEvents).toBe("auto");
+		});
+		await userEvent.click(goal);
+	},
+};
+
+export const PhoneGoalSheetLight: Story = {
+	...PhoneGoalSheet,
+	globals: { theme: "light" },
+};
+
+export const PhoneLongTitleLight: Story = {
+	...LongTitle,
+	globals: { theme: "light" },
+};
+
+export const PhoneIslandLongTitle: Story = {
+	...LongTitle,
+	args: { island: true },
+	beforeEach: () => {
+		openSessionForSetup(mockSessionLongTitle.id, "conduit");
+		sessionViewState.barOpen = false;
+	},
+};
+export const PhoneIslandLongTitleLight: Story = {
+	...PhoneIslandLongTitle,
+	globals: { theme: "light" },
+};
+
 /**
  * Pressing the chevron expands the bar. It also unmounts the chevron, so this
  * pins where focus lands: on the named region, which announces as a state
  * change rather than as the control the user just pressed disappearing.
  */
 export const ExpandedByChevron: Story = {
+	args: { island: true },
 	beforeEach: () => {
 		sessionViewState.compact = true;
 		sessionViewState.atBottom = true;
@@ -871,7 +1287,7 @@ export const ExpandedByChevron: Story = {
 };
 
 export const DesktopNoCheckout: Story = {
-	args: { width: 900 },
+	args: { width: "full" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
 		uiState.clientCount = 2;
@@ -888,6 +1304,10 @@ export const DesktopNoCheckout: Story = {
 		const canvas = within(canvasElement);
 		const bar = canvas.getByTestId("session-bar");
 		await expect(bar).toHaveAttribute("data-compact", "false");
+		expect(bar.getBoundingClientRect().height).toBe(52);
+		expect(
+			canvas.getByTestId("session-bar-overflow").getBoundingClientRect().height,
+		).toBeGreaterThanOrEqual(44);
 		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
 		expect(canvas.queryByTitle("Uncommitted changes")).toBeNull();
 		await expect(canvas.getByTestId("session-bar-settle")).toBeVisible();
@@ -953,7 +1373,7 @@ export const WithSkills: Story = {
 
 export const DesktopWithSkills: Story = {
 	tags: ["viewport-capture"],
-	args: { width: 900 },
+	args: { width: "full" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
 		seedSkills();
@@ -1051,8 +1471,8 @@ function seedClaudeHeader(): void {
 	);
 }
 
-export const PhoneClaudeHeader: Story = {
-	beforeEach: seedClaudeHeader,
+export const PhoneBusySession: Story = {
+	beforeEach: setupPhoneHeader,
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
@@ -1065,17 +1485,18 @@ export const PhoneClaudeHeader: Story = {
 	},
 };
 
-export const PhoneClaudeHeaderNarrowest: Story = {
-	...PhoneClaudeHeader,
+export const PhoneBusySessionNarrowest: Story = {
+	...PhoneBusySession,
 	args: { width: 320 },
 };
 
-export const DesktopClaudeHeader: Story = {
-	...PhoneClaudeHeader,
-	args: { width: 900 },
+export const DesktopBusySession: Story = {
+	...PhoneBusySession,
+	args: { width: "full" },
 	beforeEach: () => {
-		seedClaudeHeader();
+		const cleanup = setupPhoneHeader();
 		sessionViewState.compact = false;
+		return cleanup;
 	},
 };
 
@@ -1096,7 +1517,7 @@ export const DesktopLongTitleNarrow: Story = {
 };
 
 export const DesktopSettled: Story = {
-	args: { width: 900 },
+	args: { width: "full" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
 		showState({ settledAt: Date.now() - 3_600_000 });
@@ -1114,7 +1535,7 @@ export const DesktopSettled: Story = {
 };
 
 export const DesktopNoSession: Story = {
-	args: { width: 900 },
+	args: { width: "full" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
 		openSessionForSetup(null);
@@ -1129,7 +1550,7 @@ export const DesktopNoSession: Story = {
 };
 
 export const DesktopUnread: Story = {
-	args: { width: 900 },
+	args: { width: "full" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
 		const session = { ...mockSession, unread: true };
@@ -1143,7 +1564,7 @@ export const DesktopUnread: Story = {
 };
 
 export const DesktopUnreadAndSettled: Story = {
-	args: { width: 900 },
+	args: { width: "full" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
 		const session = {
@@ -1236,6 +1657,7 @@ export const CollapsedWithBanners: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const row = canvas.getByTestId("session-bar-banners-row");
+		expectTouchTarget(row);
 		await expect(row).toHaveTextContent("Restart the server");
 		await expect(row).toHaveClass(/text-warning/);
 		await expect(
@@ -1331,24 +1753,24 @@ export const DesktopBackgroundTasks: Story = {
 				overlaps(chips, box(el ?? tasks)),
 				el?.outerHTML.slice(0, 60),
 			).toBe(false);
-		// Where the overhang meets the chips, the chips take the click.
-		const menuBox = box(canvas.getByTestId("session-bar-title-menu"));
-		expect(
-			tasks.contains(
-				document.elementFromPoint(
-					menuBox.left + menuBox.width / 2,
-					menuBox.bottom - 1,
-				),
-			),
-		).toBe(true);
-		expect(canvas.getAllByTestId("background-task-chip")).toHaveLength(3);
+		expect(canvas.getAllByTestId("background-task-chip")).toHaveLength(2);
+		await expect(canvas.getByTestId("background-tasks-more")).toHaveTextContent(
+			"+1",
+		);
+		expect(canvas.queryByTestId("background-tasks-elbow")).toBeNull();
+		expect(tasks.querySelector("svg.lucide-chevron-down")).toBeNull();
 		expect(
 			chips.top - box(canvas.getByTestId("session-bar-title")).bottom,
 		).toBeGreaterThanOrEqual(6);
+		await userEvent.click(canvas.getByTestId("background-tasks-more"));
+		await expect(canvas.getByTestId("background-tasks-panel")).toBeVisible();
+		await userEvent.keyboard("{Escape}");
 	},
 };
 
 export const BackgroundTasks: Story = {
+	args: { island: true, height: 852 },
+	tags: ["viewport-capture"],
 	beforeEach: () => {
 		seedSessions([
 			{
@@ -1366,10 +1788,24 @@ export const BackgroundTasks: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const box = (id: string) => canvas.getByTestId(id).getBoundingClientRect();
-		expect(
-			box("background-task-chip").top - box("session-bar-title").bottom,
-		).toBeGreaterThanOrEqual(6);
+		const tasks = canvas.getByTestId("background-tasks-row");
+		await expect(tasks).toHaveTextContent("1 background task");
+		expect(tasks.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+			canvas.getByTestId("session-bar-title").getBoundingClientRect().bottom,
+		);
+		await userEvent.click(canvas.getByTestId("background-tasks-toggle"));
+		await expect(canvas.getByTestId("background-tasks-panel")).toBeVisible();
+		sessionViewState.atBottom = true;
+		sessionViewState.barOpen = false;
+		await tick();
+		await expect(canvas.getByTestId("session-bar")).toHaveAttribute(
+			"data-collapsed",
+			"false",
+		);
+		await userEvent.keyboard("{Escape}");
+		await expect(canvas.getByTestId("background-tasks-toggle")).toHaveFocus();
+		await userEvent.click(canvas.getByTestId("background-tasks-toggle"));
+		await expect(canvas.getByTestId("background-tasks-panel")).toBeVisible();
 	},
 };
 
@@ -1470,7 +1906,7 @@ export const SideThreadsOpen: Story = {
 
 export const DesktopSideThreadsOpen: Story = {
 	tags: ["viewport-capture"],
-	args: { width: 900 },
+	args: { width: "full" },
 	parameters: { docs: { story: { inline: false } } },
 	beforeEach: () => {
 		sessionViewState.compact = false;
@@ -1523,4 +1959,597 @@ export const SideThreadsClosed: Story = {
 		);
 		expect(document.activeElement).toBe(control);
 	},
+};
+
+export const DesktopAutoSettled: Story = {
+	args: { width: "full" },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		showState({
+			settledAt: Date.now() - 3_600_000,
+			settledAutomatically: true,
+		});
+	},
+	play: async ({ canvasElement }) => {
+		const chip = within(canvasElement).getByTestId("session-bar-state-chip");
+		await expect(chip).toHaveTextContent("Settled");
+		await expect(chip.querySelector("svg")).toHaveClass(/lucide-zap/);
+	},
+};
+
+export const DesktopSnoozed: Story = {
+	args: { width: "full" },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		const now = sessionState.now;
+		showState({ snoozedAt: now, snoozedUntil: now + 3_600_000 });
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByTestId("session-bar-state-chip"),
+		).toHaveTextContent("Snoozed");
+		await expect(canvas.getByTestId("session-bar-settle")).toHaveTextContent(
+			/^Until /,
+		);
+	},
+};
+
+export const DesktopWoke: Story = {
+	args: { width: "full" },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		showState({ unread: true, wokenAt: sessionState.now, wokeBecause: "turn" });
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByTestId("session-bar-unread-chip"),
+		).toHaveTextContent("Unread");
+		await expect(canvas.getByTestId("session-bar-woke")).toHaveTextContent(
+			"Woke · done",
+		);
+		expect(canvas.queryByTestId("session-bar-state-chip")).toBeNull();
+	},
+};
+
+export const DesktopWokeRead: Story = {
+	...DesktopWoke,
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		showState({
+			unread: false,
+			wokenAt: sessionState.now,
+			wokeBecause: "turn",
+		});
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("session-bar-woke")).toHaveTextContent(
+			"Woke · done",
+		);
+		expect(canvas.queryByTestId("session-bar-unread-chip")).toBeNull();
+		expect(canvas.queryByTestId("session-bar-unread-mark-read")).toBeNull();
+	},
+};
+
+export const DesktopPinned: Story = {
+	args: { width: "full" },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		showState({ pinnedAt: sessionState.now });
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByTestId("session-bar-state-chip"),
+		).toHaveTextContent("Pinned");
+		await expect(canvas.getByTestId("session-bar-settle")).toHaveTextContent(
+			"Unpin",
+		);
+	},
+};
+
+export const DesktopGoalPursuing: Story = {
+	args: { width: "full" },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		return setupGoal("not_yet");
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByTestId("session-goal-subtitle").textContent?.trim(),
+		).toBe("Pursuing · All 38 scenarios pass");
+		await expect(canvas.getByTestId("session-bar-settle")).toHaveTextContent(
+			"Pin to top",
+		);
+	},
+};
+
+export const DesktopGoalChecking: Story = {
+	...DesktopGoalPursuing,
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		return setupGoal("checking");
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByTestId("session-goal-subtitle").textContent?.trim(),
+		).toBe("Checking · All 38 scenarios pass");
+		expect(canvas.queryByTestId("session-bar-settle")).toBeNull();
+	},
+};
+
+export const DesktopGoalMet: Story = {
+	...DesktopGoalPursuing,
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		return setupGoal("met", true);
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByTestId("session-goal-subtitle").textContent?.trim(),
+		).toBe("Goal met · All 38 scenarios pass");
+		await expect(canvas.getByTestId("session-bar-unread-chip")).toBeVisible();
+		await expect(canvas.getByTestId("session-bar-settle")).toHaveTextContent(
+			"Settle",
+		);
+	},
+};
+
+export const DesktopGoalMetRead: Story = {
+	...DesktopGoalMet,
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		return setupGoal("met");
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByTestId("session-goal-subtitle").textContent?.trim(),
+		).toBe("Goal met · All 38 scenarios pass");
+		expect(canvas.queryByTestId("session-bar-unread-chip")).toBeNull();
+		expect(canvas.queryByTestId("session-bar-unread-mark-read")).toBeNull();
+		await expect(canvas.getByTestId("session-bar-settle")).toHaveTextContent(
+			"Settle",
+		);
+	},
+};
+
+export const DesktopSidebarCollapsed: Story = {
+	args: { width: "full" },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		const previous = uiState.sidebarCollapsed;
+		uiState.sidebarCollapsed = true;
+		seedSessions([
+			mockSession,
+			{
+				...mockSessionLongTitle,
+				attention: "needs-reply",
+				pendingQuestionCount: 1,
+			},
+		]);
+		return () => {
+			uiState.sidebarCollapsed = previous;
+		};
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("session-bar-back")).toHaveTextContent(
+			"Sessions",
+		);
+		await expect(canvas.getByTestId("session-bar-attention")).toHaveTextContent(
+			"1",
+		);
+		const badgeStyle = getComputedStyle(
+			canvas.getByTestId("session-bar-attention"),
+		);
+		const expected = new Option().style;
+		expected.backgroundColor = badgeStyle.getPropertyValue("--color-fill-ask");
+		expect(badgeStyle.backgroundColor).toBe(expected.backgroundColor);
+	},
+};
+
+export const DesktopBanners: Story = {
+	args: {
+		width: "full",
+		banners: islandBanners.map((banner, index) => ({
+			...banner,
+			action: { label: index === 0 ? "Reload" : "Change", run: fn() },
+		})),
+	},
+	beforeEach: () => {
+		sessionViewState.compact = false;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const banners = canvas.getAllByTestId("banner-action");
+		await expect(banners).toHaveLength(2);
+		expect(banners[1]?.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+			canvas.getByTestId("session-bar").getBoundingClientRect().top,
+		);
+	},
+};
+
+export const DesktopGoalMetLight: Story = {
+	...DesktopGoalMet,
+	globals: { theme: "light" },
+};
+export const DesktopGoalMetReadLight: Story = {
+	...DesktopGoalMetRead,
+	globals: { theme: "light" },
+};
+export const DesktopWokeReadLight: Story = {
+	...DesktopWokeRead,
+	globals: { theme: "light" },
+};
+export const DesktopSidebarCollapsedLight: Story = {
+	...DesktopSidebarCollapsed,
+	globals: { theme: "light" },
+};
+export const DesktopBannersLight: Story = {
+	...DesktopBanners,
+	globals: { theme: "light" },
+};
+
+export const DesktopGoalDetails: Story = {
+	parameters: quietTierA11y,
+	args: { width: "full" },
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		const cleanup = setupGoalDetails("checking");
+		const facts = sessionGoals.get(mockSession.id);
+		if (facts?.goal)
+			handleGoalChanged({
+				...facts,
+				goal: { ...facts.goal, setAt: desktopNow - 27 * 60_000 },
+			});
+		return cleanup;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const card = await canvas.findByTestId("goal-details");
+		await waitFor(() =>
+			expect(within(card).getByTestId("goal-details-meta")).toHaveTextContent(
+				"Sonnet 5 judges",
+			),
+		);
+		await expect(card).toHaveTextContent("Checking · after turn 4");
+		expect(card.getBoundingClientRect().width).toBeLessThan(450);
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() =>
+			expect(canvas.queryByTestId("goal-details")).toBeNull(),
+		);
+		await expect(canvas.getByTestId("session-goal-subtitle")).toHaveFocus();
+		await userEvent.click(canvas.getByTestId("session-goal-subtitle"));
+	},
+};
+
+export const DesktopMenu: Story = {
+	args: { width: "full" },
+	tags: ["viewport-capture"],
+	beforeEach: [
+		answerDesktopAutoSettle,
+		() => {
+			sessionViewState.compact = false;
+		},
+	],
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByTestId("session-bar-overflow"),
+		);
+		const menu = await desktopMenu();
+		const items = within(menu);
+		await expect(items.getByTestId("session-ctx-settle")).toHaveTextContent(
+			"⌘⇧S",
+		);
+		expect(items.queryByTestId("session-sheet-header")).toBeNull();
+		expect(items.queryByRole("menuitemradio")).toBeNull();
+		await expect(items.getByTestId("session-ctx-delete")).toBeVisible();
+		await expect(items.getByTestId("session-ctx-snooze")).not.toHaveTextContent(
+			"hold",
+		);
+	},
+};
+
+export const DesktopSnoozeList: Story = {
+	...DesktopMenu,
+	parameters: quietTierA11y,
+	tags: ["viewport-capture"],
+	play: async (context) => {
+		await DesktopMenu.play?.(context);
+		const menu = await within(document.body).findByTestId(
+			"session-bar-overflow-menu",
+		);
+		await userEvent.click(within(menu).getByTestId("session-ctx-snooze"));
+		const list = await within(document.body).findByRole("menu", {
+			name: /^Snooze until$/,
+		});
+		await expect(
+			within(list).getByRole("menuitem", { name: /Pick a date & time/ }),
+		).toBeVisible();
+		await expect(
+			within(list).getByRole("menuitem", { name: "Until something happens" }),
+		).toBeVisible();
+		expect(list).not.toHaveTextContent("slide to a time");
+	},
+};
+
+export const DesktopSnoozedMenu: Story = {
+	...DesktopSnoozed,
+	parameters: quietTierA11y,
+	tags: ["viewport-capture"],
+	beforeEach: [
+		answerDesktopAutoSettle,
+		() => {
+			sessionViewState.compact = false;
+			const now = sessionState.now;
+			showState({ snoozedAt: now, snoozedUntil: now + 3_600_000 });
+		},
+	],
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByTestId("session-bar-state-chip"),
+		);
+		const menu = await within(document.body).findByTestId(
+			"session-bar-state-menu",
+		);
+		await expect(
+			within(menu).getByTestId("session-bar-wake"),
+		).toHaveTextContent("Unsnooze");
+		await expect(menu).toHaveTextContent("Change time");
+		await waitFor(() =>
+			expect(menu.querySelector("[data-switch-status]")).toHaveTextContent(
+				"On · paused while snoozed",
+			),
+		);
+		await expect(
+			within(menu).getByTestId("session-state-snooze-1h"),
+		).toHaveAttribute("aria-current", "true");
+		await expect(
+			within(menu).getByRole("menuitem", { name: "Until something happens" }),
+		).toBeVisible();
+	},
+};
+
+// Storybook reads `tags` statically, so a spread copy loses viewport-capture:
+// each popover story names it itself.
+export const DesktopMenuPinned: Story = {
+	...DesktopMenu,
+	tags: ["viewport-capture"],
+	beforeEach: [
+		answerDesktopAutoSettle,
+		() => {
+			sessionViewState.compact = false;
+			showState({ pinnedAt: desktopNow });
+		},
+	],
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByTestId("session-bar-overflow"),
+		);
+		const menu = await desktopMenu();
+		await expect(menu).toHaveTextContent("On · paused while pinned");
+		await expect(
+			within(menu).getByTestId("session-ctx-settle"),
+		).toHaveAttribute("aria-disabled", "true");
+		await expect(
+			within(menu).getByTestId("session-ctx-snooze"),
+		).toHaveTextContent("Unpin to snooze");
+		await expect(within(menu).getByTestId("session-ctx-unpin")).toBeVisible();
+	},
+};
+
+export const DesktopMenuSnoozed: Story = {
+	...DesktopMenu,
+	parameters: quietTierA11y,
+	tags: ["viewport-capture"],
+	beforeEach: [
+		answerDesktopAutoSettle,
+		() => {
+			sessionViewState.compact = false;
+			showState({
+				snoozedAt: desktopNow,
+				snoozedUntil: desktopNow + 3_600_000,
+			});
+		},
+	],
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByTestId("session-bar-overflow"),
+		);
+		const menu = await desktopMenu();
+		await expect(menu).toHaveTextContent("On · paused while snoozed");
+		await expect(
+			within(menu).getByTestId("session-ctx-unsnooze"),
+		).toBeVisible();
+	},
+};
+
+export const DesktopMenuSettled: Story = {
+	...DesktopMenu,
+	tags: ["viewport-capture"],
+	beforeEach: [
+		answerDesktopAutoSettle,
+		() => {
+			sessionViewState.compact = false;
+			showState({ settledAt: desktopNow });
+		},
+	],
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByTestId("session-bar-overflow"),
+		);
+		const menu = await desktopMenu();
+		await expect(
+			within(menu).getByTestId("session-ctx-unsettle"),
+		).toBeVisible();
+		expect(within(menu).queryByTestId("session-ctx-snooze")).toBeNull();
+	},
+};
+
+export const DesktopAutoSettleSave: Story = {
+	...DesktopMenu,
+	tags: ["viewport-capture"],
+	play: async (context) => {
+		await DesktopMenu.play?.(context);
+		const menu = await desktopMenu();
+		await userEvent.click(within(menu).getByTestId("session-ctx-auto-settle"));
+		await waitFor(() =>
+			expect(menu.querySelector("[data-switch-status]")).toHaveTextContent(
+				"Off · stays until you settle it",
+			),
+		);
+		await expect(setDesktopAutoSettle).toHaveBeenCalledTimes(1);
+		await expect(menu).toBeVisible();
+	},
+};
+
+const stopDesktopTask = fn((_payload: unknown) => ({ ok: true }));
+export const DesktopTaskControls: Story = {
+	args: { width: "full" },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		seedClaudeHeader();
+		instanceState.instances = instanceState.instances.map((instance) => ({
+			...instance,
+			capabilities: {
+				supportsMultiFolder: false,
+				supportsWorktree: false,
+				supportsTaskStop: true,
+			},
+		}));
+		seedSessions([
+			{
+				...mockSession,
+				accountId: "claude-work",
+				backgroundTasks: [
+					{
+						id: "t1",
+						type: "local_bash",
+						description: "Run tests",
+						detail: "pnpm test:e2e",
+						firstSeenAt: desktopNow,
+					},
+					{
+						id: "t2",
+						type: "local_bash",
+						description: "Watch build",
+						detail: "vite build --watch",
+						firstSeenAt: desktopNow,
+					},
+				],
+			},
+		]);
+		stopDesktopTask.mockClear();
+		const restoreSocket = connectedSocket();
+		const restoreStop = replyRpc("StopBackgroundTask", stopDesktopTask);
+		return () => {
+			restoreStop();
+			restoreSocket();
+		};
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Stop Run tests" }),
+		);
+		await waitFor(() =>
+			expect(stopDesktopTask).toHaveBeenCalledWith({
+				_tag: "StopBackgroundTask",
+				sessionId: mockSession.id,
+				taskId: "t1",
+			}),
+		);
+		// Requests leave both chips in place until the SDK confirms a stop.
+		await expect(canvas.getAllByTestId("background-task-chip")).toHaveLength(2);
+		stopDesktopTask.mockClear();
+		await userEvent.click(canvas.getByTestId("background-tasks-row-stop-all"));
+		await waitFor(() => expect(stopDesktopTask).toHaveBeenCalledTimes(2));
+		await expect(stopDesktopTask).toHaveBeenNthCalledWith(1, {
+			_tag: "StopBackgroundTask",
+			sessionId: mockSession.id,
+			taskId: "t2",
+		});
+		await expect(stopDesktopTask).toHaveBeenNthCalledWith(2, {
+			_tag: "StopBackgroundTask",
+			sessionId: mockSession.id,
+			taskId: "t1",
+		});
+	},
+};
+export const DesktopTaskControlsLight: Story = {
+	...DesktopTaskControls,
+	globals: { theme: "light" },
+};
+
+export const DesktopMenuPinnedLight: Story = {
+	...DesktopMenuPinned,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
+};
+export const DesktopMenuSnoozedLight: Story = {
+	...DesktopMenuSnoozed,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
+};
+export const DesktopMenuSettledLight: Story = {
+	...DesktopMenuSettled,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
+};
+export const DesktopAutoSettleSaveLight: Story = {
+	...DesktopAutoSettleSave,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
+};
+
+export const DesktopAutoSettledLight: Story = {
+	...DesktopAutoSettled,
+	globals: { theme: "light" },
+};
+export const DesktopSnoozedLight: Story = {
+	...DesktopSnoozed,
+	globals: { theme: "light" },
+};
+export const DesktopWokeLight: Story = {
+	...DesktopWoke,
+	globals: { theme: "light" },
+};
+export const DesktopPinnedLight: Story = {
+	...DesktopPinned,
+	globals: { theme: "light" },
+};
+export const DesktopGoalPursuingLight: Story = {
+	...DesktopGoalPursuing,
+	globals: { theme: "light" },
+};
+export const DesktopGoalCheckingLight: Story = {
+	...DesktopGoalChecking,
+	globals: { theme: "light" },
+};
+export const DesktopGoalDetailsLight: Story = {
+	...DesktopGoalDetails,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
+};
+export const DesktopMenuLight: Story = {
+	...DesktopMenu,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
+};
+export const DesktopSnoozeListLight: Story = {
+	...DesktopSnoozeList,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
+};
+export const DesktopSnoozedMenuLight: Story = {
+	...DesktopSnoozedMenu,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
 };

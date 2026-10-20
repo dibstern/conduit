@@ -20,14 +20,14 @@ const meta = {
 	args: { children: label("Button") },
 	argTypes: {
 		// Enumerated from the component, not hand-copied. The list that used to
-		// live here had already gone stale -- it was missing `pill-warning`.
+		// live here had already gone stale.
 		variant: { control: "select", options: BUTTON_VARIANTS },
 		tone: { control: "select", options: BUTTON_TONES },
 		hoverFill: { control: "select", options: BUTTON_HOVER_FILLS },
 		disabledStyle: { control: "select", options: BUTTON_DISABLED_STYLES },
 		size: {
 			control: "inline-radio",
-			options: ["sm", "md", "segment", "content"],
+			options: ["sm", "md", "content"],
 		},
 		icon: { control: "text" },
 		iconOnly: { control: "boolean" },
@@ -106,23 +106,6 @@ export const Pill: Story = {
 export const PillHover: Story = {
 	...Pill,
 	parameters: { pseudo: { hover: true } },
-};
-
-/**
- * `pill`'s elevated state, worn by PermissionModeSelector when the session is
- * on a permissive approval mode.
- *
- * It replaces a standalone `ui/Pill` component that duplicated the whole pill
- * recipe and had no consumers -- both of its variants now live here, so the
- * neutral and warning pills cannot drift apart.
- * Deliberately no PillWarningHover companion: the variant has no hover step.
- */
-export const PillWarning: Story = {
-	args: {
-		variant: "pill-warning",
-		size: "content",
-		children: label("Edits"),
-	},
 };
 
 /**

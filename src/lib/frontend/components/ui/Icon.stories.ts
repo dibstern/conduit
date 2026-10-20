@@ -64,7 +64,7 @@ export const Small: Story = {
 };
 
 export const Pause: Story = {
-	args: { name: "pause", size: 12, class: "text-status-violet" },
+	args: { name: "pause", size: 12, class: "text-status-snoozed" },
 	play: async ({ canvasElement }) => {
 		const icon = canvasElement.querySelector("svg");
 		await expect(icon).toBeVisible();
@@ -72,7 +72,7 @@ export const Pause: Story = {
 		await expect(icon.getBoundingClientRect().width).toBe(12);
 		const style = getComputedStyle(icon);
 		const expected = new Option().style;
-		expected.color = style.getPropertyValue("--color-status-violet");
+		expected.color = style.getPropertyValue("--color-status-snoozed");
 		await expect(style.color).toBe(expected.color);
 	},
 };

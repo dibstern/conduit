@@ -123,9 +123,10 @@
 		 * transparent ::before, centred, at least 44x44 below `md`. Growing the
 		 * control itself turns a rounded-full pill into a tall empty lozenge.
 		 * Literal px because the root font-size is 12px.
+		 * `"always"` retains the target in compact layouts at wider viewports.
 		 * Adds `relative`, so not for a control that is itself positioned.
 		 */
-		touchTarget?: boolean;
+		touchTarget?: boolean | "always";
 		class?: string;
 	} & Omit<
 		HTMLButtonAttributes,
@@ -213,7 +214,7 @@
 		}),
 	);
 
-	const iconSize = $derived(iconSizeProp ?? (size === "segment" ? 12 : size === "sm" ? 14 : 16));
+	const iconSize = $derived(iconSizeProp ?? (size === "capsule-segment" || size === "phone-capsule-segment" ? 13 : size === "sm" ? 14 : 16));
 
 	// `loading` is a soft-disable: the button stays focusable (so keyboard/SR
 	// context is not lost mid-action), so the handler must guard it explicitly.

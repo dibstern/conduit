@@ -358,8 +358,13 @@ test("the daemon imports project histories and keeps using its shared store acro
 		await harness.terminate();
 		assertNoSources();
 		const before = daemonStoreManifest(destination);
-		// Startup must activate the surviving project's relay after A was removed.
+		// The startup probe must activate the surviving project after A was removed.
 		await harness.restart();
+		expect(
+			(await harness.requestRpc({ _tag: "GetProjects" })).projects.map(
+				({ slug }) => slug,
+			),
+		).toEqual([slugB]);
 		assertNoSources();
 		await harness.terminate();
 		assertNoSources();

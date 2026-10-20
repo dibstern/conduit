@@ -6,7 +6,7 @@ Background:
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
 
-Scenario Outline: one account warns without a prefix and uses the viewport's actions
+Scenario Outline: one account names its usage window and uses the viewport's actions
   Given the viewport is a <viewport>
   And Usage settings have one Claude account in the <state> state
   When the mock usage window five_hour for claude is 86 percent resetting at 2026-01-01T15:37:00Z
@@ -19,10 +19,10 @@ Scenario Outline: one account warns without a prefix and uses the viewport's act
 
 Examples:
   | viewport | state  | window    | title                      | detail               | baseline                                       | threshold |
-  | desktop  | warn5  | five_hour | 5h limit 86% used.         | Resets in 1h 12m.    | usage-warning-strip-single-five-hour-desktop   | 98        |
-  | phone    | warn5  | five_hour | 5h limit 86% used.         | Resets in 1h 12m.    | usage-warning-strip-single-five-hour-phone     | 98        |
-  | desktop  | warnWk | seven_day | Weekly limit 91% used.     | Resets Thu 9 am.     | usage-warning-strip-single-weekly-desktop      | 98        |
-  | phone    | warnWk | seven_day | Weekly limit 91% used.     | Resets Thu 9 am.     | usage-warning-strip-single-weekly-phone        | 98        |
+  | desktop  | warn5  | five_hour | This session's account, Personal, has used 86% of its 5-hour window.         | Resets at 3:37 pm    | usage-warning-strip-single-five-hour-desktop   | 98        |
+  | phone    | warn5  | five_hour | This session's account, Personal, has used 86% of its 5-hour window.         | Resets at 3:37 pm    | usage-warning-strip-single-five-hour-phone     | 98        |
+  | desktop  | warnWk | seven_day | This session's account, Personal, has used 91% of its weekly window.     | Resets at Thu 9 am     | usage-warning-strip-single-weekly-desktop      | 98        |
+  | phone    | warnWk | seven_day | This session's account, Personal, has used 91% of its weekly window.     | Resets at Thu 9 am     | usage-warning-strip-single-weekly-phone        | 98        |
 
 Scenario Outline: several accounts name the session's account and offer its picker
   Given the viewport is a <viewport>
@@ -41,17 +41,17 @@ Scenario Outline: several accounts name the session's account and offer its pick
 
 Examples:
   | viewport | state  | window    | title                             | detail            | quota    | baseline                                   | threshold |
-  | desktop  | warn5  | five_hour | Personal: 5h limit 86% used.      | Resets in 1h 12m. | 14% left | usage-warning-strip-multi-five-hour-desktop | 98        |
-  | phone    | warn5  | five_hour | Personal: 5h limit 86% used.      | Resets in 1h 12m. | 14% left | usage-warning-strip-multi-five-hour-phone   | 98        |
-  | desktop  | warnWk | seven_day | Personal: Weekly limit 91% used.  | Resets Thu 9 am.  | 9% left  | usage-warning-strip-multi-weekly-desktop    | 98        |
-  | phone    | warnWk | seven_day | Personal: Weekly limit 91% used.  | Resets Thu 9 am.  | 9% left  | usage-warning-strip-multi-weekly-phone      | 98        |
+  | desktop  | warn5  | five_hour | This session's account, Personal, has used 86% of its 5-hour window.      | Resets at 3:37 pm | 14% left | usage-warning-strip-multi-five-hour-desktop | 98        |
+  | phone    | warn5  | five_hour | This session's account, Personal, has used 86% of its 5-hour window.      | Resets at 3:37 pm | 14% left | usage-warning-strip-multi-five-hour-phone   | 98        |
+  | desktop  | warnWk | seven_day | This session's account, Personal, has used 91% of its weekly window.  | Resets at Thu 9 am  | 9% left  | usage-warning-strip-multi-weekly-desktop    | 98        |
+  | phone    | warnWk | seven_day | This session's account, Personal, has used 91% of its weekly window.  | Resets at Thu 9 am  | 9% left  | usage-warning-strip-multi-weekly-phone      | 98        |
 
 Scenario: desktop Details opens Settings directly to Usage
   Given the viewport is a desktop
   And Usage settings have one Claude account in the warn5 state
   Then the usage warning strip is visible
   When I press Details on the usage warning strip
-  Then the Usage settings title reads Claude plan usage
+  Then the Usage settings title reads Usage
   And the Usage warning choice 80 is selected
 
 Scenario Outline: a dismissal below 95 percent rearms once when that window reaches 95
@@ -65,17 +65,17 @@ Scenario Outline: a dismissal below 95 percent rearms once when that window reac
   Then the usage warning strip is not visible
   When the mock usage window <window> for claude is 95 percent resetting at <reset>
   Then the usage warning strip is visible
-  And the usage warning strip title reads <label> limit 95% used.
+  And the usage warning strip title reads This session's account, Personal, has used 95% of its <label> window.
   When the mock usage window <window> for claude is 94 percent resetting at <reset>
   Then the usage warning strip is visible
-  And the usage warning strip title reads <label> limit 94% used.
+  And the usage warning strip title reads This session's account, Personal, has used 94% of its <label> window.
 
 Examples:
   | viewport | window    | label  | reset                |
-  | desktop  | five_hour | 5h     | 2026-01-01T15:37:00Z |
-  | phone    | five_hour | 5h     | 2026-01-01T15:37:00Z |
-  | desktop  | seven_day | Weekly | 2026-01-08T09:00:00Z |
-  | phone    | seven_day | Weekly | 2026-01-08T09:00:00Z |
+  | desktop  | five_hour | 5-hour | 2026-01-01T15:37:00Z |
+  | phone    | five_hour | 5-hour | 2026-01-01T15:37:00Z |
+  | desktop  | seven_day | weekly | 2026-01-08T09:00:00Z |
+  | phone    | seven_day | weekly | 2026-01-08T09:00:00Z |
 
 Scenario Outline: a new window restores a dismissed warning even when dismissed above 95
   Given the viewport is a <viewport>
@@ -88,14 +88,14 @@ Scenario Outline: a new window restores a dismissed warning even when dismissed 
   Then the usage warning strip is not visible
   When the mock usage window <window> for claude is 86 percent resetting at <nextReset>
   Then the usage warning strip is visible
-  And the usage warning strip title reads <label> limit 86% used.
+  And the usage warning strip title reads This session's account, Personal, has used 86% of its <label> window.
 
 Examples:
   | viewport | window    | label  | reset                | nextReset            |
-  | desktop  | five_hour | 5h     | 2026-01-01T15:37:00Z | 2026-01-01T20:37:00Z |
-  | phone    | five_hour | 5h     | 2026-01-01T15:37:00Z | 2026-01-01T20:37:00Z |
-  | desktop  | seven_day | Weekly | 2026-01-08T09:00:00Z | 2026-01-15T09:00:00Z |
-  | phone    | seven_day | Weekly | 2026-01-08T09:00:00Z | 2026-01-15T09:00:00Z |
+  | desktop  | five_hour | 5-hour | 2026-01-01T15:37:00Z | 2026-01-01T20:37:00Z |
+  | phone    | five_hour | 5-hour | 2026-01-01T15:37:00Z | 2026-01-01T20:37:00Z |
+  | desktop  | seven_day | weekly | 2026-01-08T09:00:00Z | 2026-01-15T09:00:00Z |
+  | phone    | seven_day | weekly | 2026-01-08T09:00:00Z | 2026-01-15T09:00:00Z |
 
 Scenario Outline: a weekly warning takes over a dismissed five-hour warning
   Given the viewport is a <viewport>
@@ -106,7 +106,7 @@ Scenario Outline: a weekly warning takes over a dismissed five-hour warning
   When the mock usage window seven_day for claude is 91 percent resetting at 2026-01-08T09:00:00Z
   Then the usage warning strip is visible
   And the usage warning strip shows the seven_day window
-  And the usage warning strip title reads Weekly limit 91% used.
+  And the usage warning strip title reads This session's account, Personal, has used 91% of its weekly window.
 
 Examples:
   | viewport |
@@ -140,11 +140,11 @@ Scenario Outline: either plan window at 100 replaces the warning with the existi
   And the usage limit strip title reads <title>
 
 Examples:
-  | viewport | window    | reset                | title                          |
-  | desktop  | five_hour | 2026-01-01T15:37:00Z | Usage limit reached · Personal |
-  | phone    | five_hour | 2026-01-01T15:37:00Z | Usage limit reached            |
-  | desktop  | seven_day | 2026-01-08T09:00:00Z | Usage limit reached · Personal |
-  | phone    | seven_day | 2026-01-08T09:00:00Z | Usage limit reached            |
+  | viewport | window    | reset                | title                              |
+  | desktop  | five_hour | 2026-01-01T15:37:00Z | Personal hit its 5-hour limit. |
+  | phone    | five_hour | 2026-01-01T15:37:00Z | Personal hit its 5-hour limit.            |
+  | desktop  | seven_day | 2026-01-08T09:00:00Z | Personal hit its weekly limit. |
+  | phone    | seven_day | 2026-01-08T09:00:00Z | Personal hit its weekly limit.            |
 
 Scenario Outline: an open limit recovery suppresses a warning from an older reading
   Given the viewport is a <viewport>
@@ -190,15 +190,15 @@ Scenario Outline: a warning without a reset time omits the reset sentence
   And Usage settings have one Claude account in the normal state
   When the mock usage window <window> for claude is 86 percent resetting at none
   Then the usage warning strip shows the <window> window
-  And the usage warning strip title reads <label> limit 86% used.
+  And the usage warning strip title reads This session's account, Personal, has used 86% of its <label> window.
   And the usage warning strip has no reset detail
 
 Examples:
   | viewport | window    | label  |
-  | desktop  | five_hour | 5h     |
-  | phone    | five_hour | 5h     |
-  | desktop  | seven_day | Weekly |
-  | phone    | seven_day | Weekly |
+  | desktop  | five_hour | 5-hour |
+  | phone    | five_hour | 5-hour |
+  | desktop  | seven_day | weekly |
+  | phone    | seven_day | weekly |
 
 Scenario Outline: unavailable, limited and missing readings cannot warn
   Given the viewport is a <viewport>
@@ -238,7 +238,7 @@ Scenario Outline: a resumed account takes priority over the session's original b
   Then the usage warning strip is not visible
   When the session resumes on work by user and replies Ready on Work.
   Then the usage warning strip is visible
-  And the usage warning strip title reads Work: 5h limit 86% used.
+  And the usage warning strip title reads This session's account, Work, has used 86% of its 5-hour window.
   When I press Switch account on the usage warning strip
   Then the account picker row for Work reads 14% left and cannot be picked
   And the account picker row for Personal reads 59% left and can be picked
@@ -258,10 +258,10 @@ Scenario Outline: a draft warns on its project's bound account without session s
 
 Examples:
   | viewport | accounts | title                         |
-  | desktop  | one      | 5h limit 86% used.            |
-  | phone    | one      | 5h limit 86% used.            |
-  | desktop  | several  | Personal: 5h limit 86% used.  |
-  | phone    | several  | Personal: 5h limit 86% used.  |
+  | desktop  | one      | This session's account, Personal, has used 86% of its 5-hour window.            |
+  | phone    | one      | This session's account, Personal, has used 86% of its 5-hour window.            |
+  | desktop  | several  | This session's account, Personal, has used 86% of its 5-hour window.  |
+  | phone    | several  | This session's account, Personal, has used 86% of its 5-hour window.  |
 
 Scenario: warning dismissals do not survive a reload
   Given the viewport is a desktop

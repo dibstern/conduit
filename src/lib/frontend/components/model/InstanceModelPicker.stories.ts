@@ -132,13 +132,9 @@ function seedClaude(
  */
 async function openPicker(canvasElement: HTMLElement) {
 	const canvas = within(canvasElement);
-	const modelTrigger = await canvas.findByTestId("model-picker-trigger");
-	const trigger =
-		canvas.queryByTestId("composer-harness-trigger") ?? modelTrigger;
+	const trigger = await canvas.findByTestId("model-picker-trigger");
 	await userEvent.click(trigger);
 	const picker = await canvas.findByTestId("model-picker");
-	if (within(picker).queryByRole("heading", { name: "Model" }))
-		await userEvent.click(within(picker).getByTestId("picker-back"));
 	await expect(
 		within(picker).getByRole("heading", { name: "Harness & model" }),
 	).toBeVisible();
@@ -200,7 +196,7 @@ async function rootControls(canvasElement: HTMLElement) {
 	await expect(picker).toBeVisible();
 	await expect(
 		within(canvasElement).getByTestId("model-picker-trigger"),
-	).toHaveAccessibleName(/context 1M/);
+	).toHaveAttribute("data-shown-context-window", "1m");
 	await userEvent.click(sheet.getByTestId("picker-effort-option-xhigh"));
 	await expect(sheet.getByTestId("picker-effort-option-xhigh")).toHaveAttribute(
 		"aria-checked",
@@ -208,13 +204,8 @@ async function rootControls(canvasElement: HTMLElement) {
 	);
 	await expect(picker).toBeVisible();
 	await expect(
-		within(canvasElement).getByTestId("variant-badge"),
-	).toHaveAccessibleName(/Extra high/);
-	const phone =
-		(canvasElement.ownerDocument.defaultView?.innerWidth ?? 1024) < 768;
-	await expect(
-		within(canvasElement).getByTestId("variant-badge"),
-	).toHaveTextContent(phone ? "XHIGH" : "Extra high");
+		within(canvasElement).getByTestId("model-picker-trigger"),
+	).toHaveAttribute("data-shown-effort", "xhigh");
 }
 
 const meta = {
@@ -256,8 +247,14 @@ export const Closed: Story = {
 		await expect(trigger).toHaveAttribute("data-shown-effort", "high");
 		await expect(trigger).toHaveAttribute("data-shown-context-window", "200k");
 		await expect(trigger).toHaveAttribute("data-shown-permission-mode", "ask");
+		await expect(trigger).toHaveTextContent(/Sonnet 4\.5/);
+		await expect(
+			within(canvasElement).queryByTestId("composer-harness-trigger"),
+		).not.toBeInTheDocument();
 	},
 };
+
+export const ClosedLight: Story = { ...Closed, globals: { theme: "light" } };
 
 /** Root view, with in-place context and effort choices. */
 export const Open: Story = {
@@ -268,6 +265,15 @@ export const Open: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const picker = await openPicker(canvasElement);
+		if (sessionViewState.compact) {
+			await expect(picker.closest("[data-sheet-chrome]")).not.toBeNull();
+			const handle = picker
+				.closest("[data-sheet-chrome]")
+				?.querySelector("[data-sheet-handle]");
+			if (!handle) throw new Error("The picker sheet handle is missing");
+			await expect(handle.getBoundingClientRect().width).toBe(36);
+			await expect(handle.getBoundingClientRect().height).toBe(5);
+		}
 		await expect(
 			within(picker).getByTestId("picker-row-context"),
 		).toBeVisible();
@@ -463,8 +469,20 @@ export const UnlockedHarnesses: Story = {
 
 /** Thinking-level variants available, with "high" selected. */
 export const WithVariants: Story = {
+	tags: ["viewport-capture"],
 	beforeEach: () => {
 		seedClaude(["low", "medium", "high"]);
+		return bottomRightFrame();
+	},
+	play: async ({ canvasElement }) => {
+		// The closed trigger does not name the effort, so open it to show the variants.
+		const picker = await openPicker(canvasElement);
+		await expect(
+			within(picker).getByTestId("picker-effort-option-high"),
+		).toHaveAttribute("aria-checked", "true");
+		await expect(
+			within(picker).queryByTestId("picker-effort-option-xhigh"),
+		).not.toBeInTheDocument();
 	},
 };
 

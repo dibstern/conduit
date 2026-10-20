@@ -174,6 +174,9 @@ test("width and open state survive reload only for their session", async ({
 	await page.reload();
 	await expect(files).toHaveAttribute("aria-pressed", "true");
 	await expect(divider).toHaveAttribute("aria-valuenow", "296");
+	// The pane restores before the socket connects; + before then opens a
+	// draft with no project picked yet.
+	await new AppPage(page).connectOverlay.waitFor({ state: "detached" });
 	await new SidebarPage(page).createNewSession();
 	await expect(page).not.toHaveURL(firstUrl);
 	await expect(files).toHaveAttribute("aria-pressed", "false");

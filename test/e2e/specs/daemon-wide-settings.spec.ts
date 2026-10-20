@@ -118,6 +118,7 @@ test("no project open: instance mutations, scan and log level use daemon RPC", a
 		)
 		.toEqual({
 			_tag: "Success",
+			// No project, so no session to place either (8rdf.16).
 			value: { projectSlug: null, sessionSlug: null },
 		});
 	// Record transient toasts too, even if they expire before the final assertion.

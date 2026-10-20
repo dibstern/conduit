@@ -100,14 +100,19 @@ test.describe("Claude background work", () => {
 				row,
 				"the turn ended but the sidebar stopped saying monitoring while its background shell ran",
 			).toHaveAttribute("aria-label", /^Monitoring/);
-			const tasksRow = page.getByTestId("background-tasks-row");
-			const age = tasksRow.getByTestId("background-task-chip-age");
-			await expect(tasksRow.getByTestId("background-task-chip")).toContainText(
-				"sleep 8",
-			);
 			await expect(
-				page.getByTestId("composer-task-dots").locator("i"),
-			).toHaveCount(1);
+				page
+					.getByTestId("background-tasks-row")
+					.getByTestId("background-task-chip"),
+			).toContainText("sleep 8");
+			const tasksButton = page.getByRole("button", {
+				name: "1 background task",
+				exact: true,
+			});
+			const age = page
+				.getByTestId("background-tasks-panel")
+				.getByTestId("background-task-age");
+			await tasksButton.click();
 			// Ages count from when the relay first saw the task, so a reload
 			// must not restart them.
 			const seconds = async () =>
@@ -115,11 +120,13 @@ test.describe("Claude background work", () => {
 			await expect.poll(seconds).toBeGreaterThanOrEqual(2);
 			const before = await seconds();
 			await page.reload();
+			await tasksButton.click();
 			await expect(age).toBeVisible();
 			expect(
 				await seconds(),
 				"reloading the page restarted the background task's age",
 			).toBeGreaterThanOrEqual(before);
+			await tasksButton.click();
 			await record("turn-ended-shell-running");
 			const composer = testInfo.outputPath("composer-monitoring.png");
 			await page.locator("#input-area").screenshot({
@@ -140,7 +147,9 @@ test.describe("Claude background work", () => {
 				"the background shell ended but the sidebar still says working",
 			).toHaveAttribute("aria-label", /^Done, unread/);
 			await expect(page.getByTestId("background-tasks-row")).toBeHidden();
-			await expect(page.getByTestId("composer-task-dots")).toBeHidden();
+			await expect(
+				page.getByRole("button", { name: /^\d+ background tasks?$/ }),
+			).toHaveCount(0);
 			await record("shell-ended");
 		} finally {
 			const path = testInfo.outputPath("background-work-report.json");
@@ -151,6 +160,10 @@ test.describe("Claude background work", () => {
 			});
 		}
 	});
+
+	// Stop all stops the tasks, not the turn (conduit-test-va96.2). Recorded
+	// replay has no stopTask replies, so the stop, the row clearing and the
+	// sidebar leaving Monitoring are proven in harness-background-task-stop.spec.ts.
 });
 
 // The shell ending between turns, before the SDK's wake-up turn (the trace is

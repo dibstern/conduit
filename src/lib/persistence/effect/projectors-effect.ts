@@ -4,6 +4,7 @@ import { Data, Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { ReadModelCollection } from "../../contracts/read-model-advance.js";
+import type { SessionGoalChangedPayload } from "../../contracts/stored-event.js";
 import { persistedTurnState } from "../../contracts/turn-phase.js";
 import { CLAUDE_WORKTREE_EVENTS } from "../../session/claude-worktree-state.js";
 import { isRecord } from "../../utils.js";
@@ -385,20 +386,59 @@ export const makeSessionProjector = defineProjector(() => ({
 			// sessions it wrote does not reach.
 			const left: string[] = [];
 
-			if (event.type === "session.goal_changed" && event.data.goal) {
-				const goal = event.data.goal;
+			let goalFacts: SessionGoalChangedPayload | undefined;
+			let goalTurnIndex: number | null = null;
+			if (event.type === "session.goal_changed") {
+				const goal = event.data.goal ?? event.data.endedGoal;
+				if (goal) {
+					const until = event.data.endedAt ?? event.createdAt;
+					// Checks can run before turn.completed, and several checks may
+					// belong to one turn. Queued inputs have not run a turn yet.
+					const [turns] = yield* sql<{
+						turnIndex: number | null;
+						turnCount: number;
+					}>`
+						SELECT NULLIF(COUNT(*), 0) AS turnIndex,
+							COALESCE(SUM(CASE WHEN COALESCE(completed_at, ${until}) >= ${goal.setAt} THEN 1 ELSE 0 END), 0) AS turnCount
+						FROM turns WHERE session_id = ${event.data.sessionId}
+						AND state != 'pending' AND COALESCE(started_at, requested_at) <= ${until}`;
+					goalTurnIndex = turns?.turnIndex ?? null;
+					const countedGoal = { ...goal, turnCount: turns?.turnCount ?? 0 };
+					// The completion timestamp bounds ended totals on resync too.
+					goalFacts = event.data.goal
+						? { ...event.data, goal: countedGoal }
+						: { ...event.data, endedGoal: countedGoal };
+				}
+			}
+			const checkedGoal =
+				event.type === "session.goal_changed"
+					? (event.data.goal ??
+						(event.data.ended === "met" ? event.data.endedGoal : undefined))
+					: undefined;
+			if (event.type === "session.goal_changed" && checkedGoal) {
+				const goal = checkedGoal;
 				// Read the preceding fact before replacing it. Pauses and status
 				// resyncs with unchanged iterations do not create another check.
 				yield* sql`INSERT OR IGNORE INTO session_goal_checks
-					(event_id, session_id, condition, set_at, iterations, reason, created_at)
+					(event_id, session_id, condition, set_at, iterations, reason, created_at, turn_index, judge_model)
 					SELECT ${event.eventId}, id, ${goal.condition}, ${goal.setAt},
-						${goal.iterations}, ${goal.lastReason ?? null}, ${event.createdAt}
+						${goal.iterations}, ${goal.lastReason ?? null}, ${event.createdAt},
+						${goalTurnIndex},
+						${goal.judgeModel ?? null}
 					FROM sessions WHERE id = ${event.data.sessionId}
 					AND ${goal.iterations} > CASE
-						WHEN json_extract(goal_state, '$.goal.setAt') = ${goal.setAt}
-							AND json_extract(goal_state, '$.goal.condition') = ${goal.condition}
-						THEN COALESCE(json_extract(goal_state, '$.goal.iterations'), 0)
+						WHEN COALESCE(json_extract(goal_state, '$.goal.setAt'), json_extract(goal_state, '$.endedGoal.setAt')) = ${goal.setAt}
+							AND COALESCE(json_extract(goal_state, '$.goal.condition'), json_extract(goal_state, '$.endedGoal.condition')) = ${goal.condition}
+							THEN COALESCE(json_extract(goal_state, '$.goal.iterations'), json_extract(goal_state, '$.endedGoal.iterations'), 0)
 						ELSE 0 END`;
+				if (goal.judgeModel) {
+					// A terminal transcript attachment may report the judge after
+					// active_goal already reported this check's iteration.
+					yield* sql`UPDATE session_goal_checks SET judge_model = ${goal.judgeModel}
+						WHERE session_id = ${event.data.sessionId} AND set_at = ${goal.setAt}
+						AND condition = ${goal.condition} AND iterations = ${goal.iterations}
+						AND judge_model IS NULL`;
+				}
 			}
 
 			// Every session statement is a single-table write against `sessions`
@@ -417,7 +457,9 @@ export const makeSessionProjector = defineProjector(() => ({
 					WHERE id = ${event.sessionId}`
 				: [];
 			for (const stmt of getSessionStatements(
-				event,
+				event.type === "session.goal_changed" && goalFacts
+					? { ...event, data: goalFacts }
+					: event,
 				worktree?.claude_worktree_state,
 			)) {
 				if (isSessionRemoval(stmt)) {
@@ -492,6 +534,7 @@ export const makeMessageProjector = defineProjector(() => ({
 		"message.part.removed",
 		"message.snapshot",
 		"text.delta",
+		"text.surfaced",
 		"thinking.start",
 		"thinking.delta",
 		"thinking.end",
@@ -608,6 +651,31 @@ export const makeMessageProjector = defineProjector(() => ({
 			// messageId can name the previous answer, whose usage and time stay put.
 			if (isEventType(event, "turn.completed") && event.data.userMessageId)
 				return [];
+			// Conduit facts also apply to settled OpenCode snapshots. Preserve the
+			// part's activity timestamps: judging it is not new agent activity.
+			if (isEventType(event, "text.surfaced")) {
+				const {
+					messageId,
+					partId,
+					ordinal,
+					categorySetVersion,
+					model,
+					probabilities,
+				} = event.data;
+				const encoded =
+					probabilities === null ? null : encodeJson(probabilities);
+				return ids(
+					yield* sql<{ id: string }>`
+					UPDATE message_parts SET surfacing_ordinal = ${ordinal},
+						surfacing_probabilities = ${encoded}, surfacing_set_version = ${categorySetVersion},
+						surfacing_model = ${model}, version = ${ctx.version}
+					WHERE id = ${partId} AND message_id = ${messageId} AND type = 'text'
+						AND EXISTS (SELECT 1 FROM messages WHERE id = ${messageId} AND session_id = ${event.sessionId})
+						AND (surfacing_ordinal IS NOT ${ordinal} OR surfacing_probabilities IS NOT ${encoded}
+							OR surfacing_set_version IS NOT ${categorySetVersion} OR surfacing_model IS NOT ${model})
+					RETURNING message_id AS id`,
+				);
+			}
 			if ("messageId" in event.data && event.type !== "message.snapshot") {
 				const rows = yield* sql<{
 					rest_digest: string | null;
@@ -723,14 +791,13 @@ export const makeMessageProjector = defineProjector(() => ({
 					 finish = excluded.finish, error = excluded.error,
 					 is_inherited = MAX(messages.is_inherited, excluded.is_inherited)
 				RETURNING id`;
-				// A provider snapshot replaces provider parts, while Conduit's own
-				// compaction outcomes must survive reconciliation and reconnects.
+				// Replace provider data on retained parts without erasing Conduit's
+				// surfacing verdicts. Canonical compaction outcomes also survive.
 				const replaced = yield* sql<{ id: string }>`
 					DELETE FROM message_parts WHERE message_id = ${message.id}
+					AND id NOT IN ${sql.in(message.parts.map((part) => part.id))}
 					AND NOT (type = 'compaction' AND rest_payload IS NULL) RETURNING id`;
-				const kept = new Set(message.parts.map((part) => part.id));
 				for (const { id } of replaced) {
-					if (kept.has(id)) continue;
 					yield* sql`INSERT INTO message_part_tombstones (session_id, message_id, part_id, version)
 						VALUES (${event.sessionId}, ${message.id}, ${id}, ${ctx.version})
 						ON CONFLICT (part_id) DO UPDATE SET
@@ -772,7 +839,15 @@ export const makeMessageProjector = defineProjector(() => ({
 						 ${toolState && "status" in toolState && typeof toolState.status === "string" ? toolState.status : null},
 						 ${index}, ${start}, ${end},
 						 ${toolState && "metadata" in toolState ? encodeJson(toolState.metadata) : null},
-						 ${encodeJson(part)}, ${ctx.version})`;
+						 ${encodeJson(part)}, ${ctx.version})
+						ON CONFLICT (id) DO UPDATE SET
+							type = excluded.type, text = excluded.text, tool_name = excluded.tool_name,
+							call_id = excluded.call_id, input = excluded.input, result = excluded.result,
+							result_event_seq = excluded.result_event_seq, result_bytes = excluded.result_bytes,
+							status = excluded.status, duration = NULL, sort_order = excluded.sort_order,
+							created_at = excluded.created_at, updated_at = excluded.updated_at,
+							metadata = excluded.metadata, rest_payload = excluded.rest_payload, version = excluded.version
+						WHERE message_parts.message_id = excluded.message_id`;
 				}
 				const previous = existing[0];
 				const moved =

@@ -111,7 +111,7 @@ const breathing = (page: Page) =>
 	page
 		.locator("#messages .turn-activity")
 		.first()
-		.locator('[aria-label^="Activity timeline"] button.animate-pulse');
+		.locator('[aria-label^="Activity timeline"] .animate-pulse');
 
 export const launchingRowsHandlers: StepHandler[] = [
 	{
@@ -188,10 +188,11 @@ export const launchingRowsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert the turn head's running pill",
-		match: /^the turn head shows (?:"([0-9]+) running"|no running pill)$/,
+		name: "assert the step log's running pill",
+		match: /^the step log shows (?:"([0-9]+) running"|no running pill)$/,
 		run: async ({ world, match }) => {
-			const pill = world.page.locator("#messages .turn-running");
+			// The Final head has no pill; the count sits in the step-log footer.
+			const pill = world.page.locator("#messages .step-log .turn-running");
 			if (match[1] === undefined) await expect(pill).toHaveCount(0);
 			else
 				await expect(pill).toHaveText(

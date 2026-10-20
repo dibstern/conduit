@@ -97,10 +97,21 @@ test.describe("Session skills chip", () => {
 		await page.keyboard.press("Escape");
 		await expect(rows).toHaveCount(0);
 
-		const activity = page.locator(".turn-activity").filter({
-			has: page.locator(".skills-toggle"),
-		});
-		await expect(activity).toHaveCount(1);
+		// Skill chapters now live in the step log rather than the turn head.
+		const collapsed = page.locator(
+			'.turn-activity-toggle[aria-expanded="false"]',
+		);
+		while (await collapsed.count()) await collapsed.first().click();
+		const turns = page.locator(".turn-activity");
+		await expect(
+			turns.filter({ has: page.locator(".skills-toggle") }),
+		).toHaveCount(1);
+		// Collapsing the step log hides .skills-toggle, so pin the turn by position.
+		const activity = turns.nth(
+			await turns.evaluateAll((nodes) =>
+				nodes.findIndex((node) => node.querySelector(".skills-toggle")),
+			),
+		);
 		const activityToggle = activity.locator(".turn-activity-toggle");
 		if ((await activityToggle.getAttribute("aria-expanded")) !== "true")
 			await activityToggle.click();
