@@ -34,6 +34,7 @@ import {
 	ProviderStateEffectTag,
 } from "../../../persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
+import { isSessionDeleted } from "../../../persistence/effect/session-seeder-effect.js";
 import {
 	canonicalEvent,
 	type EventPayloadMap,
@@ -132,6 +133,18 @@ export type SessionCommand = {
 			: EventPayloadMap[K];
 	};
 }[SessionCommandType];
+
+/** Called inside the creator's write transaction, before any seed or append. */
+const requireLiveCreationRefs = (data: EventPayloadMap["session.created"]) =>
+	Effect.gen(function* () {
+		for (const id of [data.sessionId, data.parentId, data.forkedFrom]) {
+			if (id !== undefined && (yield* isSessionDeleted(id)))
+				return yield* new SessionCommandError({
+					operation: "session.created.deleted",
+					cause: `Session ${id} has been deleted`,
+				});
+		}
+	});
 
 /**
  * Upstream sync varies for a real reason: OpenCode keeps its own session
@@ -305,18 +318,24 @@ export const applySessionCommand = (
 					: []),
 			];
 			let applied = true;
+			const append = Effect.gen(function* () {
+				if (command.type === "session.created")
+					yield* requireLiveCreationRefs(command.data);
+				return yield* eventStore.appendBatch(events);
+			});
 			yield* (
 				options.beforeWrite !== undefined
 					? commitAndSignal.write((project) =>
 							Effect.gen(function* () {
 								applied = yield* options.beforeWrite ?? Effect.succeed(true);
-								if (applied)
-									yield* project(yield* eventStore.appendBatch(events));
+								if (applied) yield* project(yield* append);
 							}),
 						)
 					: options.project
-						? Effect.flatMap(eventStore.appendBatch(events), options.project)
-						: commitAndSignal(events)
+						? Effect.flatMap(append, options.project)
+						: commitAndSignal.write((project) =>
+								Effect.flatMap(append, project),
+							)
 			).pipe(
 				Effect.mapError(
 					(cause) =>
@@ -946,6 +965,12 @@ const forkSessionInWorkspace = (
 		// resolves a native transcript or hands off the copied canonical history.
 		const boundary = yield* commitAndSignal.write((project) =>
 			Effect.gen(function* () {
+				yield* requireLiveCreationRefs({
+					sessionId: id,
+					title,
+					provider,
+					...forkPlacement(parentSessionId, Boolean(side)),
+				});
 				// Validate the cut under the same transaction that copies rows.
 				const current = yield* readForkSource(parentSessionId, {
 					messageId: source.boundary.messageId,
