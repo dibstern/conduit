@@ -1,0 +1,34 @@
+{
+	"ticket": "conduit-test-hiuf.3",
+	"instrumentation": "effect/sql Statement.CurrentTransformer around production forkSession in the relay harness",
+	"measurements": [
+		{
+			"kind": "fork",
+			"messages": 20,
+			"statements": 67,
+			"milliseconds": 194.49512499998673,
+			"events": 5
+		},
+		{
+			"kind": "side-thread",
+			"messages": 20,
+			"statements": 67,
+			"milliseconds": 10.11966699999175,
+			"events": 5
+		},
+		{
+			"kind": "fork",
+			"messages": 200,
+			"statements": 67,
+			"milliseconds": 41.757582999998704,
+			"events": 5
+		},
+		{
+			"kind": "side-thread",
+			"messages": 200,
+			"statements": 67,
+			"milliseconds": 251.3969170000055,
+			"events": 5
+		}
+	]
+}

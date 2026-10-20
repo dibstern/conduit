@@ -4,6 +4,7 @@ import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { parseAttachmentDataUrl } from "../../attachment-data-url.js";
 import type { KnownProviderDriverKind } from "../../contracts/provider-instance.js";
+import { sessionCreatedLineage } from "../../contracts/session-ref.js";
 import {
 	resolveServerSessionPick,
 	sessionPickEvents,
@@ -23,6 +24,7 @@ import {
 } from "../events.js";
 import { makeCommitAndSignal } from "./commit-and-signal.js";
 import { EventStoreEffectTag } from "./event-store-effect.js";
+import { isSessionDeleted } from "./session-seeder-effect.js";
 
 export class ClaudeEventPersistEffectError extends Data.TaggedError(
 	"ClaudeEventPersistEffectError",
@@ -223,6 +225,37 @@ export const makeAppendEventsWithClaudeTurnCosts = Effect.gen(function* () {
 
 export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
+	const requireUndeletedSession = (
+		sessionId: string,
+		operation: ClaudeSessionLifecycleError["operation"],
+		role: ClaudeSessionLifecycleError["role"],
+	) =>
+		Effect.gen(function* () {
+			if (
+				yield* isSessionDeleted(sessionId).pipe(
+					Effect.provideService(SqlClient.SqlClient, sql),
+				)
+			)
+				return yield* new ClaudeSessionLifecycleError({
+					operation,
+					sessionId,
+					role,
+					reason: "missing-session",
+				});
+		});
+	const requireLiveCreationRefs = (
+		event: CanonicalEvent,
+		operation: "persistEvent" | "persistEvents",
+	) =>
+		Effect.gen(function* () {
+			if (event.type !== "session.created") return;
+			for (const id of [
+				event.sessionId,
+				event.data.sessionId,
+				...sessionCreatedLineage(event.data),
+			])
+				yield* requireUndeletedSession(id, operation, "existing-session");
+		});
 
 	const seedClaudeSubagentSession = (input: {
 		readonly provider?: KnownProviderDriverKind;
@@ -339,19 +372,27 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 		event: CanonicalEvent,
 		options?: { readonly publish?: boolean },
 	): Effect.Effect<void, ClaudeEventPersistFailure> =>
-		Effect.gen(function* () {
-			yield* LIFECYCLE_ROOT_OPTIONAL_EVENT_TYPES.has(event.type)
-				? requireReadModelSession(
-						event.sessionId,
-						"persistEvent",
-						"existing-session",
-					)
-				: requireSession(event.sessionId, "persistEvent", "existing-session");
-			yield* commitAndSignal.write(
-				(project) => Effect.flatMap(appendEvents([event]), project),
+		commitAndSignal
+			.write(
+				(project) =>
+					Effect.gen(function* () {
+						yield* requireLiveCreationRefs(event, "persistEvent");
+						yield* LIFECYCLE_ROOT_OPTIONAL_EVENT_TYPES.has(event.type)
+							? requireReadModelSession(
+									event.sessionId,
+									"persistEvent",
+									"existing-session",
+								)
+							: requireSession(
+									event.sessionId,
+									"persistEvent",
+									"existing-session",
+								);
+						yield* project(yield* appendEvents([event]));
+					}),
 				options,
-			);
-		}).pipe(Effect.mapError(mapPersistError("persistEvent")));
+			)
+			.pipe(Effect.mapError(mapPersistError("persistEvent")));
 
 	const persistHandoffDelivered: ClaudeEventPersistEffect["persistHandoffDelivered"] =
 		(sessionId, handoff, commandId) =>
@@ -387,11 +428,26 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 		Effect.gen(function* () {
 			if (events.length === 0) return;
 
-			for (const sessionId of new Set(events.map((event) => event.sessionId))) {
-				yield* requireSession(sessionId, "persistEvents", "existing-session");
-			}
 			yield* commitAndSignal.write(
-				(project) => Effect.flatMap(appendEvents(events), project),
+				(project) =>
+					Effect.gen(function* () {
+						for (const sessionId of new Set(
+							events.map((event) => event.sessionId),
+						))
+							yield* requireSession(
+								sessionId,
+								"persistEvents",
+								"existing-session",
+							);
+						if (events.some((event) => event.type === "session.created")) {
+							// Project earlier deletions before checking a later creation,
+							// including the descendant markers the cascade appends.
+							for (const event of events) {
+								yield* requireLiveCreationRefs(event, "persistEvents");
+								yield* project(yield* appendEvents([event]));
+							}
+						} else yield* project(yield* appendEvents(events));
+					}),
 				options,
 			);
 		}).pipe(Effect.mapError(mapPersistError("persistEvents")));
@@ -502,6 +558,16 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 					Effect.gen(function* () {
 						const provider = input.provider ?? "claude";
 						const binding = input.instanceId ?? provider;
+						yield* requireUndeletedSession(
+							input.childSessionId,
+							"ensureClaudeSubagentSession",
+							"subagent-child",
+						);
+						yield* requireUndeletedSession(
+							input.parentSessionId,
+							"ensureClaudeSubagentSession",
+							"subagent-parent",
+						);
 						yield* requireSession(
 							input.parentSessionId,
 							"ensureClaudeSubagentSession",

@@ -17,7 +17,6 @@ export const readPersistedAutoDeleteFacts = (projectId: string) =>
 			root_archived_at: number | null;
 			pinned_at: number | null;
 			pending_work: number;
-			surviving_fork: number;
 		}>`
 			WITH RECURSIVE tree(root_id, id, root_archived_at) AS (
 				SELECT id, id, archived_at FROM sessions WHERE project_id = ${projectId} AND parent_id IS NULL
@@ -28,9 +27,7 @@ export const readPersistedAutoDeleteFacts = (projectId: string) =>
 				(s.status IN ('busy', 'retry', 'running')
 					OR EXISTS(SELECT 1 FROM turns t WHERE t.session_id = s.id AND t.state IN ('pending', 'running'))
 					OR EXISTS(SELECT 1 FROM pending_approvals a WHERE a.session_id = s.id AND a.status = 'pending')
-					OR EXISTS(SELECT 1 FROM pending_inputs i WHERE i.session_id = s.id AND i.state IN ('queued', 'steering'))) AS pending_work,
-				EXISTS(SELECT 1 FROM sessions f WHERE f.forked_from = s.id
-					AND NOT EXISTS(SELECT 1 FROM tree inside WHERE inside.root_id = tree.root_id AND inside.id = f.id)) AS surviving_fork
+					OR EXISTS(SELECT 1 FROM pending_inputs i WHERE i.session_id = s.id AND i.state IN ('queued', 'steering'))) AS pending_work
 			FROM tree JOIN sessions s ON s.id = tree.id`;
 		const trees = new Map<
 			string,
@@ -44,7 +41,6 @@ export const readPersistedAutoDeleteFacts = (projectId: string) =>
 					pinned: false,
 					hasPendingWork: false,
 					hasLiveBackgroundWork: false,
-					hasSurvivingFork: false,
 				},
 			};
 			tree.sessionVersions.set(row.id, row.version);
@@ -53,8 +49,6 @@ export const readPersistedAutoDeleteFacts = (projectId: string) =>
 				pinned: tree.facts.pinned || row.pinned_at !== null,
 				hasPendingWork: tree.facts.hasPendingWork || row.pending_work !== 0,
 				hasLiveBackgroundWork: false,
-				hasSurvivingFork:
-					tree.facts.hasSurvivingFork || row.surviving_fork !== 0,
 			};
 			trees.set(row.root_id, tree);
 		}
@@ -74,7 +68,6 @@ export const deleteArchivedSessions = <DeleteError>(
 	now: number,
 ) =>
 	Effect.gen(function* () {
-		const sql = yield* SqlClient.SqlClient;
 		const { projectId } = yield* PersistenceProjectTag;
 		const trees = yield* readPersistedAutoDeleteFacts(projectId);
 		let deleted = 0;
@@ -94,8 +87,6 @@ export const deleteArchivedSessions = <DeleteError>(
 				continue;
 			if (attempted++ === 50) break;
 			if (!(yield* ports.deleteSession(rootId, sessionVersions))) continue;
-			// Reclaim only after the canonical deletion, including its own event.
-			yield* sql`DELETE FROM events WHERE session_id IN (SELECT value FROM json_each(${JSON.stringify(sessionIds)}))`;
 			deleted++;
 		}
 		return deleted;

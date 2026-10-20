@@ -1,0 +1,172 @@
+<!doctype html><html><head><meta charset="utf-8"><title>aoqb.35 goal checks, options</title>
+<style>
+@font-face{font-family:Geist;src:url(../../src/lib/frontend/fonts/geist-latin-wght-normal.woff2) format("woff2");font-weight:100 900}
+@font-face{font-family:"Geist Mono";src:url(../../src/lib/frontend/fonts/geist-mono-latin-wght-normal.woff2) format("woff2");font-weight:100 900}
+*{box-sizing:border-box}body{margin:0;font-family:Geist,system-ui;background:#0a0a0b;color:#ededf0;padding:28px}
+h1{font-size:20px;margin:0 0 6px}.sub{color:#a1a1aa;font-size:13.5px;line-height:1.5;max-width:1100px;margin:0 0 24px}
+.grid{display:grid;grid-template-columns:repeat(3,393px);gap:28px 36px}
+.card h2{font-size:15px;margin:0 0 3px}.card .tag{font-size:12px;color:#8e9bff;margin-bottom:8px}
+.note{font-size:12.5px;color:#a1a1aa;line-height:1.45;margin-top:10px}.note b{color:#ededf0}.note .bad{color:#ff9f9f}.note .good{color:#7fe0b4}
+.phone{width:393px;background:#111113;border-radius:18px;overflow:hidden;border:1px solid #2b2b31}
+.sheet{background:#1c1c1f;border-radius:22px 22px 0 0;margin-top:14px;padding:10px 20px 18px}
+.grab{width:36px;height:5px;border-radius:3px;background:#3a3a40;margin:0 auto 14px}
+.chip{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:7px;font-size:12px;font-weight:500}
+.c-not{background:rgba(255,255,255,.07);color:#a1a1aa}.c-chk{background:rgba(63,208,191,.12);color:#3fd0bf}.c-pause{background:rgba(255,159,10,.14);color:#ff9f0a}
+.goal{font-size:15px;font-weight:600;margin:10px 0 4px;line-height:1.35}
+.meta{font-family:"Geist Mono";font-size:10.5px;color:#6e6e77}
+hr{border:0;border-top:1px solid #2b2b31;margin:12px 0}
+.h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}.h b{font-size:15px}.h span{font-family:"Geist Mono";font-size:10.5px;color:#6e6e77}
+.row{display:grid;grid-template-columns:16px 1fr auto;gap:8px;font-size:13px;line-height:1.4;padding:5px 0;color:#a1a1aa}.row b{color:#ededf0;font-weight:600}.row .t{font-family:"Geist Mono";font-size:10.5px;color:#6e6e77;padding-top:2px;white-space:nowrap}
+.ic{width:14px;height:14px;margin-top:2px}
+.small{font-size:11px;color:#6e6e77}
+.reason{font-size:13px;color:#c4c4cc;line-height:1.45}
+.clamp4{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}.clamp2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.link{color:#8e9bff;font-size:13px;font-weight:500}
+.foot{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#6e6e77;margin-top:10px}
+.actions{display:flex;gap:8px;margin-top:16px}.btn{height:30px;padding:0 12px;border-radius:999px;background:rgba(255,255,255,.07);font-size:12.5px;display:inline-flex;align-items:center;color:#ededf0}.btn.red{margin-left:auto;background:rgba(255,99,105,.14);color:#ff6369}.btn.pri{background:#8e9bff;color:#111113;font-weight:600}
+.check{display:grid;grid-template-columns:18px 1fr;gap:8px;font-size:13.5px;padding:5px 0;line-height:1.4}.check .sub2{display:block;font-size:12px;color:#a1a1aa}
+.callout{border:1px solid rgba(255,159,10,.35);background:rgba(255,159,10,.08);border-radius:12px;padding:11px 12px;margin-bottom:12px}.callout b{color:#ff9f0a;font-size:13.5px}.callout p{margin:4px 0 0;font-size:12.5px;color:#c4c4cc;line-height:1.45}
+.tl{position:relative;padding-left:16px}.tl:before{content:"";position:absolute;left:4px;top:6px;bottom:6px;width:1px;background:#2b2b31}
+.ev{position:relative;padding:4px 0 8px;font-size:13px;line-height:1.4}.ev:before{content:"";position:absolute;left:-15px;top:8px;width:7px;height:7px;border-radius:50%;background:#6e6e77}.ev.q:before{background:transparent;border:1px dashed #6e6e77}.ev .t{font-family:"Geist Mono";font-size:10.5px;color:#6e6e77;display:block}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px}.stat{background:rgba(255,255,255,.04);border-radius:9px;padding:7px 8px}.stat b{display:block;font-size:15px}.stat span{font-size:10.5px;color:#6e6e77}
+.strip{display:flex;gap:1.5px;height:18px;align-items:stretch;margin:4px 0 2px}.strip i{flex:1;background:#3a3a40;border-radius:1px}
+.bars{display:flex;gap:4px;align-items:flex-end;height:54px;margin:6px 0 2px}.bars i{flex:1;background:rgba(63,208,191,.55);border-radius:2px 2px 0 0}.bars i.last{background:#3fd0bf}
+.combo{border:1px solid #2b2b31;border-radius:16px;padding:20px 22px 22px;margin:0 0 36px;background:#0e0e10}
+.combo>h2{font-size:17px;margin:0 0 4px}.combo>.tag{font-size:12.5px;color:#8e9bff;margin-bottom:16px}
+.grid4{display:grid;grid-template-columns:repeat(4,393px);gap:28px}
+.state{font-size:12px;font-weight:600;color:#ededf0;margin:0 0 8px}.state span{font-weight:400;color:#6e6e77}
+.skel{height:11px;border-radius:6px;margin:7px 0;background:linear-gradient(90deg,#26262b 0%,#34343b 50%,#26262b 100%);background-size:200% 100%;animation:sh 1.4s linear infinite}
+@keyframes sh{from{background-position:200% 0}to{background-position:-200% 0}}
+.spin{display:inline-block;width:10px;height:10px;border-radius:50%;border:1.5px solid #3a3a40;border-top-color:#a1a1aa;animation:rot .8s linear infinite;vertical-align:-1px;margin-right:5px}
+@keyframes rot{to{transform:rotate(360deg)}}
+.how{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:20px;font-size:12.5px;color:#a1a1aa;line-height:1.5}.how b{color:#ededf0}.how h3{font-size:13px;color:#8e9bff;margin:0 0 4px;font-weight:600}
+/* Option 10 matrix: Final tokens from style.css, dark and light. */
+.xd{--back:#111113;--sheet:#1c1c1f;--app:#111113;--pop:#232327;--frame:#2b2b31;--line:#2b2b31;--tx:#ededf0;--tx2:#a1a1aa;--tx3:#6e6e77;--soft:rgba(255,255,255,.07);--acc:#8e9bff;--onacc:#111113;--goal:#3fd0bf;--goalbg:rgba(63,208,191,.12);--amb:#ff9f0a;--ambbg:rgba(255,159,10,.14);--ambln:rgba(255,159,10,.35);--ambcall:rgba(255,159,10,.08);--ok:#3ecf8e;--okbg:rgba(62,207,142,.14);--red:#ff6369;--redbg:rgba(255,99,105,.14);--sk1:#26262b;--sk2:#34343b;--ghost:#1d1d21;--shadow:0 14px 36px rgba(0,0,0,.55)}
+.xl{--back:#e4e4e8;--sheet:#ffffff;--app:#ffffff;--pop:#ffffff;--frame:#d4d4da;--line:#e3e3e7;--tx:#0b0b0d;--tx2:#5d5d66;--tx3:#868692;--soft:#f1f1f3;--acc:#4352d2;--onacc:#ffffff;--goal:#0c786c;--goalbg:rgba(12,120,108,.10);--amb:#984e00;--ambbg:rgba(166,86,0,.11);--ambln:rgba(166,86,0,.28);--ambcall:rgba(166,86,0,.05);--ok:#127136;--okbg:rgba(20,123,59,.10);--red:#d02222;--redbg:rgba(208,34,34,.08);--sk1:#eeeef0;--sk2:#e1e1e6;--ghost:#f1f1f3;--shadow:0 14px 36px rgba(20,20,30,.14)}
+.xd,.xl{color:var(--tx)}
+.mx{display:grid;grid-template-columns:393px 393px 520px 520px;gap:20px 24px;align-items:start}
+.mx .colh{font-size:11.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#6e6e77}
+.mx .rowh{grid-column:1/-1;font-size:13.5px;font-weight:600;color:#ededf0;margin:14px 0 -6px;padding-top:14px;border-top:1px solid #1f1f23}.mx .rowh span{font-weight:400;color:#8b8b94}
+.xphone{width:393px;background:var(--back);border-radius:18px;overflow:hidden;border:1px solid var(--frame);padding-top:40px}
+.xsheet{background:var(--sheet);border-radius:22px 22px 0 0;padding:10px 20px 18px}
+.xgrab{width:36px;height:5px;border-radius:3px;background:var(--line);margin:0 auto 14px}
+.xdesk{width:520px;background:var(--app);border-radius:12px;overflow:hidden;border:1px solid var(--frame)}
+.xbar{display:flex;justify-content:space-between;align-items:flex-start;padding:9px 16px 8px;border-bottom:1px solid var(--line)}
+.xtitle{font-size:14px;font-weight:600}.xtitle i{font-style:normal;color:var(--tx3);font-size:11px;margin-left:4px}
+.xgl{display:flex;align-items:center;gap:5px;font-size:12.5px;margin-top:2px;white-space:nowrap;max-width:330px;overflow:hidden}.xgl b{font-weight:500}.xgl span{color:var(--tx2);overflow:hidden;text-overflow:ellipsis}
+.xicons{font-family:"Geist Mono";font-size:11px;color:var(--tx3);padding-top:6px;letter-spacing:.06em}
+.xstage{position:relative;padding:8px 16px 22px}
+.xghost{position:absolute;left:412px;right:16px;top:22px}.xghost i{display:block;height:9px;border-radius:5px;background:var(--ghost);margin-bottom:9px}
+.xpop{position:relative;width:380px;background:var(--pop);border:1px solid var(--line);border-radius:16px;padding:14px 16px 12px;box-shadow:var(--shadow)}
+.xchip{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:999px;font-size:12px;font-weight:500}
+.k-goal{background:var(--goalbg);color:var(--goal)}.k-amb{background:var(--ambbg);color:var(--amb)}.k-ok{background:var(--okbg);color:var(--ok)}
+.t-goal{color:var(--goal)}.t-amb{color:var(--amb)}.t-ok{color:var(--ok)}
+.xi{width:12px;height:12px;flex:none}.xspin{animation:rot .9s linear infinite}
+.xgoal{font-size:15px;font-weight:600;margin:10px 0 4px;line-height:1.35;letter-spacing:-.01em}
+.xmeta{font-family:"Geist Mono";font-size:10.5px;color:var(--tx3)}
+.xhr{border-top:1px solid var(--line);margin:12px 0}
+.xcall{border:1px solid var(--ambln);background:var(--ambcall);border-radius:12px;padding:10px 12px;margin-bottom:12px}.xcall b{color:var(--amb);font-size:13.5px}.xcall p{margin:3px 0 0;font-size:12.5px;color:var(--tx2);line-height:1.45}
+.xh{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}.xh b{font-size:14px}.xh span{font-family:"Geist Mono";font-size:10.5px;color:var(--tx3);display:inline-flex;align-items:center;gap:5px}
+.xsum{font-size:13px;color:var(--tx2);line-height:1.5}.xsum b{color:var(--tx);font-weight:600}
+.xskel{height:11px;border-radius:6px;margin:8px 0;background:linear-gradient(90deg,var(--sk1) 0%,var(--sk2) 50%,var(--sk1) 100%);background-size:200% 100%;animation:sh 1.4s linear infinite}
+.xfoot{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--tx3);margin-top:10px}.xfoot>span:first-child{display:inline-flex;align-items:center;gap:5px}.xfoot .xlink{color:var(--acc);font-weight:500}
+.xacts{display:flex;gap:8px;margin-top:16px}.xdesk .xacts{margin-top:14px}
+.xbtn{height:30px;padding:0 12px;border-radius:999px;background:var(--soft);font-size:12.5px;display:inline-flex;align-items:center;color:var(--tx);font-weight:500}.xdesk .xbtn{height:28px}
+.xbtn.pri{background:var(--acc);color:var(--onacc);font-weight:600}.xbtn.red{background:var(--redbg);color:var(--red)}.xbtn.end{margin-left:auto}
+</style></head><body>
+<h1>aoqb.35 · goal checks without the long list</h1>
+<p class="sub">Content modelled on a real session (identifiers changed): goal <i>"Complete PAY-142 and merge it to main then clean up the worktree"</i>. The judge ran <b>196 checks in 25 minutes</b> (one every ~7 s). Every check after the third said the same thing in new words: merged, but 2 worktrees remain because killing their processes was denied. Another session ran <b>2,318 checks over 7.8 hours</b>. Reasons average ~480 characters and are almost never word-for-word identical, so plain de-duplication will not work.</p><p class="sub"><b>What others do:</b> nobody shows the full list. t3code shows only a check count; Claude Code shows the latest reason and puts each verdict as a collapsed line in the transcript; Codex shows status with pause/resume/clear. <b>Constraint:</b> the judge is Claude Code's built-in /goal evaluator; conduit reads its verdicts and can pause the goal, but cannot change what the judge writes or how often it runs.</p>
+<div class="combo"><h2>10 · Your combination: rolling summary + stuck callout + 9’s buttons</h2><div class="tag">The summary is written only when you open the sheet, and only if code sees a change since the last one. Every state below, on phone and desktop, in dark and light.</div><div class="mx" id="c"></div><div class="how" id="how"></div></div>
+<div class="grid" id="g"></div>
+<script>
+const X='<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6m0-6-6 6"/></svg>';
+const OK='<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#3ecf8e" stroke-width="2.4" stroke-linecap="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>';
+const NO='<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#ff9f0a" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg>';
+const CHEV='<span style="color:#6e6e77">›</span>';
+const R196='The merge and bead closure are done (main at 7e41c9a2, PAY-142 and .10-.17 closed, wt/pay142-* branches deleted), but the worktree cleanup is not. ~/src/app-pay142-effect4 and app-pay142-mainbase still exist, with pids 48210 and 48233 still running in them. The permission check denied killing those processes.';
+const head=(goal,chip='<span class="chip c-not">'+X.replace('class="ic"','class="ic" style="margin:0;width:12px;height:12px"')+' Not yet</span>')=>`<div class="grab"></div>${chip}<div class="goal">${goal||"Complete PAY-142 and merge it to main, then clean up the worktree"}</div><div class="meta">Set 10:55 AM · Sonnet 5 judges · 1.24M tokens</div><hr>`;
+const acts=(extra='')=>`<div class="actions">${extra||'<span class="btn">Pause</span><span class="btn">Edit</span>'}<span class="btn red">Clear goal</span></div>`;
+const sheet=(body,chip,ex,goal)=>`<div class="phone"><div style="height:40px"></div><div class="sheet">${head(goal,chip)}${body}${acts(ex)}</div></div>`;
+const O=[
+{n:'1 · Latest verdict, history behind a link',tag:'Smallest change',body:`<div class="h"><b>Latest check</b><span>11:21 AM · turn 198</span></div><div class="reason clamp4">${R196}</div><div class="foot"><span>196 checks over 25 min</span><span class="link">History ›</span></div>`,
+note:'<div style="margin-bottom:6px"><span style="color:#8e9bff">Seen in:</span> <b>t3code</b>: banner with objective, status, tokens, time and check <i>count</i> only, no history (it stores the latest reason but doesn’t show it). <b>Claude Code /goal</b>: status shows the latest reason; each verdict is a collapsed line in the transcript. <b>Codex</b>: status plus pause/resume/clear, no per-check list.</div><div style="margin-bottom:6px"><span style="color:#8e9bff">Feasible:</span> Frontend only.</div>Show only the newest check in full; the list moves to its own History screen. <span class="good">Tiny change, works for any goal.</span> <span class="bad">The latest reason is still a 480-character paragraph, and nothing tells you the agent is stuck.</span>'},
+{n:'2 · Collapse repeated verdicts',tag:'List stays, repeats fold',body:`<div class="h"><b>Checks</b><span>196 · 25 min</span></div>
+<div class="row">${X}<div><b>Not yet ×193</b> · 2 worktrees remain; killing their processes was denied.</div><span class="t">10:56–11:21</span></div>
+<div class="row">${X}<div><b>Not yet</b> · 5 worktrees removed; effect4 and mainbase remain.</div><span class="t">10:56</span></div>
+<div class="row">${X}<div><b>Not yet</b> · Merged at 7e41c9a2; worktrees and branches remain.</div><span class="t">10:56</span></div>`,
+note:'<div style="margin-bottom:6px"><span style="color:#8e9bff">Seen in:</span> <b>Grafana</b> state timelines merge equal consecutive values. <b>Diri</b> ignores identical reports and only logs changed ones.</div><div style="margin-bottom:6px"><span style="color:#8e9bff">Feasible:</span> Frontend or server text-similarity; no model call. The 196 real reasons share most of their words, so a simple overlap score separates them.</div>Runs of checks that say the same thing fold into one row with a count; tap to expand. <span class="good">Keeps the full audit trail in 3 rows.</span> <span class="bad">Needs a "same thing?" test: either the judge also returns a one-line headline we compare, or fuzzy text matching, which can mis-group.</span>'},
+{n:'3 · Done / still to do checklist',tag:'Clearest, but needs a model call',body:`<div class="h"><b>Where it stands</b><span>3 of 4 done</span></div>
+<div class="check">${OK}<div>Merged to main<span class="sub2">7e41c9a2</span></div></div>
+<div class="check">${OK}<div>Beads closed<span class="sub2">PAY-142, .10–.17</span></div></div>
+<div class="check">${OK}<div>Branches deleted<span class="sub2">wt/pay142-*</span></div></div>
+<div class="check">${NO}<div>Worktrees cleaned up<span class="sub2">effect4 and mainbase remain; killing pids 48210 and 48233 was denied</span></div></div>
+<div class="foot"><span>Checked 196 times · last 11:21 AM</span><span class="link">History ›</span></div>`,
+note:'<div style="margin-bottom:6px"><span style="color:#8e9bff">Seen in:</span> <b>Capy</b> carries review findings across rounds as open/resolved. <b>Factory Missions</b> show validation criteria per feature. <b>OpenCode, Zeron</b> show done/total todo docks.</div><div style="margin-bottom:6px"><span style="color:#8e9bff">Feasible:</span> <b>Hard here</b>: Claude’s judge only writes prose, so conduit would need its own model call to split the goal and tick parts. Could run only when the verdict changes (3 times in 196), keeping cost low.</div>Conduit splits the goal into parts once (its own model call), then marks parts done or not whenever the verdict changes. The sheet shows the parts, not the checks. <span class="good">Answers "what\'s left?" at a glance; repeats vanish because the parts don\'t change.</span> <span class="bad">Backend work: an extra model call plus storage for the parts; old goals fall back to option 1.</span>'},
+{n:'4 · Only the moments that changed',tag:'Timeline of changes',body:`<div class="h"><b>What changed</b><span>196 checks</span></div><div class="tl">
+<div class="ev q"><span class="t">10:57 → now</span>No change for 24 min · 193 checks</div>
+<div class="ev"><span class="t">10:56:45</span>Blocked: killing 2 processes was denied</div>
+<div class="ev"><span class="t">10:56:22</span>5 of 7 worktrees removed</div>
+<div class="ev"><span class="t">10:56:00</span>First check: merged at 7e41c9a2, cleanup pending</div></div>`,
+note:'<div style="margin-bottom:6px"><span style="color:#8e9bff">Seen in:</span> <b>Diri</b> appends an audit entry only when a report changes. <b>Allure</b> tracks status changes across runs.</div><div style="margin-bottom:6px"><span style="color:#8e9bff">Feasible:</span> Same similarity test as 2; the one-line summaries need either the first sentence or a model call.</div>A check only gets a line when its verdict differs from the one before; quiet stretches become one "no change" line. <span class="good">Shows progress and stalls as a story.</span> <span class="bad">Needs the same "did it change?" signal as 2 or 3; best built on top of 3.</span>'},
+{n:'5 · Stuck callout with actions',tag:'Recommended, with 2 inside History',chip:'<span class="chip c-pause">● Stuck</span>',body:`<div class="callout"><b>No progress for 24 minutes</b><p>The last 193 checks found the same thing: 2 worktrees remain because killing their processes was denied.</p></div><div class="h"><b>Latest check</b><span>11:21 AM</span></div><div class="reason clamp2">${R196}</div><div class="foot"><span>196 checks</span><span class="link">History ›</span></div>`,
+ex:'<span class="btn pri">Reply to Claude</span><span class="btn">Pause</span>',
+note:'<div style="margin-bottom:6px"><span style="color:#8e9bff">Seen in:</span> Nobody shows a stuck state. Closest: <b>Paperclip</b>’s watchdog accepts "genuine blockers" and fingerprints unchanged states; <b>Claude Code</b>’s judge can rule a goal impossible.</div><div style="margin-bottom:6px"><span style="color:#8e9bff">Feasible:</span> Similarity test + time; Pause already exists. The stuck state could also feed the needs-you count.</div>When checks stop changing, the sheet leads with "stuck", says why, and offers the fix (reply, pause). The header and sidebar could show it as needs-you too. <span class="good">This is what you actually needed in both real sessions.</span> <span class="bad">Needs a "same thing?" test; pairs with 1 or 3 rather than replacing them.</span>'},
+{n:'6 · Progress strip',tag:'For number-shaped goals',goal:'All 38 scenarios pass',chip:'<span class="chip c-chk">◌ Checking</span>',body:`<div class="h"><b>Scenarios passing</b><span>36 / 38</span></div><div class="bars">${[29,29,31,33,33,33,34,36].map((v,i,a)=>`<i class="${i==a.length-1?'last':''}" style="height:${(v-20)/18*100}%"></i>`).join('')}</div><div class="small">8 checks · 29 → 36 · tap a bar to read that check</div><hr><div class="h"><b>The worktree goal</b><span>196 checks</span></div><div class="strip">${Array.from({length:60},()=>'<i></i>').join('')}</div><div class="small">All 196 Not yet. A flat strip says "stuck", but nothing more.</div>`,
+note:'<div style="margin-bottom:6px"><span style="color:#8e9bff">Seen in:</span> <b>Statuspage</b> 90-day bars; <b>Grafana</b> state timeline.</div><div style="margin-bottom:6px"><span style="color:#8e9bff">Feasible:</span> Needs a number in the reason (regex "33/38"); flat for prose goals.</div>One mark per check: a bar chart when the judge reports a number ("33/38"), a tick strip otherwise. <span class="good">Great for "all 38 scenarios pass" style goals.</span> <span class="bad">For prose goals like the real one it is a flat grey bar; needs the judge to report a number.</span>'},
+{n:'7 · Summary stats + last 3',tag:'GitHub PR-checks pattern',body:`<div class="stats"><div class="stat"><b>196</b><span>checks</span></div><div class="stat"><b>0</b><span>met</span></div><div class="stat"><b>25m</b><span>running</span></div><div class="stat"><b>1.2M</b><span>tokens</span></div></div>
+<div class="row">${X}<div class="clamp2"><b>Not yet</b> · ${R196}</div><span class="t">11:21</span></div>
+<div class="row">${X}<div class="clamp2"><b>Not yet</b> · The merge and bead closure are evidenced, but the cleanup part is not met: app-pay142-effect4 and mainbase…</div><span class="t">11:21</span></div>
+<div class="row">${X}<div class="clamp2"><b>Not yet</b> · The merge and bead closure are done, but the worktree cleanup is not. The latest recheck shows…</div><span class="t">11:21</span></div>
+<div class="foot"><span></span><span class="link">Show all 196 checks ›</span></div>`,
+note:'<div style="margin-bottom:6px"><span style="color:#8e9bff">Seen in:</span> <b>GitHub PR checks</b> and <b>Paseo</b>: summary ring and counts, details on demand.</div><div style="margin-bottom:6px"><span style="color:#8e9bff">Feasible:</span> Frontend only.</div>A stats row on top, the last three checks clamped to two lines, the rest behind "Show all". <span class="good">Familiar, no backend change.</span> <span class="bad">When stuck, the three rows are near-identical, which is the problem we are trying to fix.</span>'},
+{n:'8 · One rolling summary',tag:'No list at all',body:`<div class="h"><b>Where it stands</b><span>updated 11:21 AM</span></div><div class="reason">Merged to main at 7e41c9a2 and closed the beads. <b style="color:#ededf0">Cleanup is blocked:</b> 2 worktrees remain because killing their processes was denied.</div><div class="foot"><span>Since last check: no change</span><span>196 checks</span></div>`,
+note:'<div style="margin-bottom:6px"><span style="color:#8e9bff">Seen in:</span> <b>Capy</b> Captains keep a rewritten digest; <b>t3code</b> overwrites the latest reason.</div><div style="margin-bottom:6px"><span style="color:#8e9bff">Feasible:</span> Needs conduit’s own model call each check, or reuse the judge’s latest reason (which is already a rolling summary, just long).</div>The judge keeps one short "where it stands" paragraph, rewritten each check, plus "what changed since last time". <span class="good">Shortest sheet; reads like a status update.</span> <span class="bad">Loses the per-check trail unless a History screen keeps it; the summary is model-written and can drift.</span>'},
+{n:'9 · Fewer checks at the source',tag:'Fix the cause, pair with 5',chip:'<span class="chip c-pause">❙❙ Paused · stuck</span>',body:`<div class="callout"><b>Paused itself after 10 unchanged checks</b><p>Saved about 1.1M tokens. 2 worktrees remain because killing their processes was denied.</p></div><div class="h"><b>Checks</b><span>10 · 2 min</span></div><div class="row">${X}<div><b>Not yet ×8</b> · 2 worktrees remain; kill denied.</div><span class="t">10:56–10:58</span></div><div class="row">${X}<div><b>Not yet ×2</b> · Merged; worktrees remain.</div><span class="t">10:56</span></div>`,
+ex:'<span class="btn pri">Resume</span><span class="btn">Edit</span>',
+note:'<div style="margin-bottom:6px"><span style="color:#8e9bff">Seen in:</span> <b>Paperclip</b> skips re-reviewing an unchanged stopped state; <b>Factory</b> validates only at milestones.</div><div style="margin-bottom:6px"><span style="color:#8e9bff">Feasible:</span> Conduit can’t slow Claude’s judge, but <b>can auto-pause</b> the goal after N unchanged checks. Product behaviour change.</div>Stop the list from growing: auto-pause the goal after N unchanged verdicts and tell you why. <span class="good">Saves real tokens (1.24M in 25 min here) and fixes the 7.8-hour loop.</span> <span class="bad">Product behaviour change; the pause threshold needs a setting or a sensible default.</span>'},
+];
+{const G='Complete PAY-142 and merge it to main, then clean up the worktree';
+const svg=(d,cls='')=>`<svg class="xi ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const ICON={
+ target:svg('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/>'),
+ spin:svg('<path d="M21 12a9 9 0 1 1-6.2-8.56"/>','xspin'),
+ alert:svg('<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><circle cx="12" cy="16.6" r=".9" fill="currentColor"/>'),
+ pause:svg('<path d="M9 6v12M15 6v12"/>'),
+ met:svg('<circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.8 2.8L16 9.5"/>'),
+};
+const sum=t=>`<div class="xsum">${t}</div>`;
+const call=(t,p)=>`<div class="xcall"><b>${t}</b><p>${p}</p></div>`;
+const head=(title,right,body)=>`<div class="xh"><b>${title}</b><span>${right}</span></div>${body}`;
+const foot=l=>`<div class="xfoot"><span>${l}</span><span class="xlink">History ›</span></div>`;
+const btn=(l,c='')=>`<span class="xbtn ${c}">${l}</span>`;
+const SKEL='<div class="xskel" style="width:96%"></div><div class="xskel" style="width:88%"></div><div class="xskel" style="width:58%"></div>';
+const SUM_IP='Tests pass and the branch is rebased on main. <b>Still to do:</b> merge to main, close the beads, then remove the two worktrees.';
+const SUM_CK='Merged to main at 7e41c9a2. <b>Still to do:</b> close PAY-142 and its 8 children, then remove the two worktrees.';
+const SUM_ST='Merged to main at 7e41c9a2 and closed the beads. <b>Blocked on cleanup:</b> worktrees effect4 and mainbase remain because killing their processes (pids 48210, 48233) was denied. Stop them or allow the kill, and the goal can finish.';
+const SUM_DONE='Merged to main at 7e41c9a2, closed PAY-142 and its 8 children, and removed both worktrees once their processes were stopped.';
+const RUN=btn('Pause')+btn('Edit')+btn('Clear goal','red end'), STUCKB=btn('Pause','pri')+btn('Edit')+btn('Clear goal','red end');
+const S=[
+{s:'In progress',d:'the last check said “not yet” and work is moving. The chip keeps the app’s word, Pursuing',k:'goal',i:'target',l:'Pursuing',tok:'61K',
+ body:head('Where it stands','Summary · 10:58 AM',sum(SUM_IP))+foot('3 checks · 3 min'),acts:RUN},
+{s:'Checking',d:'the judge is reading the latest turn; the summary from when you opened stays put',k:'goal',i:'spin',l:'Checking',tok:'84K',
+ body:head('Where it stands','Summary · 11:01 AM',sum(SUM_CK))+foot(`<span class="t-goal" style="display:inline-flex;align-items:center;gap:5px">${ICON.spin}Checking after turn 5</span>`),acts:RUN},
+{s:'Stuck · first open',d:'code spotted the repeat, the summary is being written',k:'amb',i:'alert',l:'Stuck',tok:'1.24M',
+ body:call('Stuck for 24 minutes','193 checks in a row found the same blocker.')+head('Where it stands',`${ICON.spin}Summarising 196 checks`,SKEL)+foot('196 checks · 25 min'),acts:STUCKB},
+{s:'Stuck · ready',d:'a few seconds later',k:'amb',i:'alert',l:'Stuck',tok:'1.24M',
+ body:call('Stuck for 24 minutes','193 checks in a row found the same blocker.')+head('Where it stands','Summary · 11:21 AM',sum(SUM_ST))+foot('196 checks · 25 min'),acts:STUCKB},
+{s:'Stuck · reopened later',d:'12 new checks, but code sees the same blocker, so the summary is kept and no model call is made',k:'amb',i:'alert',l:'Stuck',tok:'1.31M',
+ body:call('Stuck for 26 minutes','205 checks in a row found the same blocker.')+head('Where it stands','Summary · 11:21 AM · still current',sum(SUM_ST))+foot('208 checks · 27 min'),acts:STUCKB},
+{s:'Paused',d:'no new checks, so no new summary',k:'amb',i:'pause',l:'Paused',tok:'1.31M',
+ body:call('Paused while stuck','Checks stopped after 205 found the same blocker. Resume once it is fixed.')+head('Where it stands','Summary · 11:23 AM',sum(SUM_ST))+foot('208 checks · paused 11:23 AM'),acts:btn('Resume','pri')+btn('Edit')+btn('Clear goal','red end')},
+{s:'Done',d:'goal met; the summary is written once on open, then kept. The chip keeps the app’s words, Goal met',k:'ok',i:'met',l:'Goal met',tok:'1.38M',
+ body:head('How it ended','Summary · 11:41 AM',sum(SUM_DONE))+foot('211 checks · met 11:41 AM'),acts:btn('Set a new goal','pri')+btn('Dismiss','end')},
+];
+const inner=st=>`<span class="xchip k-${st.k}">${ICON[st.i]}${st.l}</span><div class="xgoal">${G}</div><div class="xmeta">Set 10:55 AM · Sonnet 5 judges · ${st.tok} tokens</div><div class="xhr"></div>${st.body}<div class="xacts">${st.acts}</div>`;
+const phone=(t,st)=>`<div class="xphone ${t}"><div class="xsheet"><div class="xgrab"></div>${inner(st)}</div></div>`;
+const GHOST='<div class="xghost"><i style="width:62%;margin-left:38%;height:22px;border-radius:11px"></i><i style="width:100%"></i><i style="width:92%"></i><i style="width:96%"></i><i style="width:70%"></i><i style="width:100%;margin-top:22px"></i><i style="width:84%"></i></div>';
+const desk=(t,st)=>`<div class="xdesk ${t}"><div class="xbar"><div><div class="xtitle">Finish pay142 and tidy up<i>⌄</i></div><div class="xgl t-${st.k}">${ICON[st.i]}<b>${st.l}</b><span>· ${G}</span></div></div><div class="xicons">● ▭ 1 &nbsp;···</div></div><div class="xstage">${GHOST}<div class="xpop">${inner(st)}</div></div></div>`;
+document.getElementById('c').innerHTML=['Phone · Dark','Phone · Light','Desktop · Dark','Desktop · Light'].map(h=>`<div class="colh">${h}</div>`).join('')+S.map(st=>`<div class="rowh">${st.s} <span>· ${st.d}</span></div>${phone('xd',st)}${phone('xl',st)}${desk('xd',st)}${desk('xl',st)}`).join('');
+}
+document.getElementById('how').innerHTML=`<div><h3>Stuck callout</h3><b>Code only, no model call.</b> Each check is compared with the whole stuck run so far, so drifting wording still matches. On your <b>2,713 real checks</b> it found <b>all 20 stuck runs</b>, usually on the first repeat, with <b>no false alarms</b>. <span class="bad">Caveat:</span> that score leans on rules written for git-style blockers. Without them, <b>6 of 29</b> progress checks were wrongly flagged. Before shipping, those rules become one general rule (a new id, hash or file name means new work), and the study is re-run; it ships only if false alarms stay at zero. It only <i>suggests</i> Pause, never pauses for you.</div><div><h3>Summary on open</h3><b>Written on open only when code sees something new</b> since the last summary: a different blocker, real progress, or a pause or finish. More checks on the same blocker don’t count, so a stuck goal is summarised <b>once</b>, however often you open it; the live counts in the callout come from code. While a new one is being written, the old one stays readable. A change that lands while the sheet is open shows <b>New check · Update</b> rather than rewriting under you. Uses conduit’s existing one-shot Claude call (Sonnet, on your subscription), one entry per stuck run, so the 2,318-check goal is about <b>800 tokens in</b>.</div><div><h3>Buttons</h3>Option 9’s set. <b>Pause</b> fills indigo only when stuck, since then every check spends tokens and changes nothing; while work moves it stays neutral. <b>Resume</b> fills once paused. <b>Clear goal</b> sits apart in red. When done: <b>Set a new goal</b> fills, and <b>Dismiss</b> turns neutral (the app shows it red today, but nothing is lost).</div>`;
+document.getElementById('g').innerHTML=O.map(o=>`<div class="card"><h2>${o.n}</h2><div class="tag">${o.tag}</div>${sheet(o.body,o.chip,o.ex,o.goal)}<div class="note">${o.note}</div></div>`).join('');
+</script></body></html>

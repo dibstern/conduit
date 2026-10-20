@@ -238,6 +238,10 @@ export interface SendTurnInput {
 	};
 	/** SDK chain UUID resolved from a committed rewind, used only when launching. */
 	readonly resumeSessionAt?: string | undefined;
+	/** First Claude launch forks its ancestor transcript under the Conduit id. */
+	readonly forkSession?: boolean | undefined;
+	/** Clear an inherited native goal before admitting the first visible prompt. */
+	readonly clearInheritedGoal?: boolean | undefined;
 	/** Server preparation requires replacing an idle SDK query. */
 	readonly startFreshNativeSession?: boolean;
 	/** The single fresh retry after a returning account's native resume failed. */
@@ -279,6 +283,8 @@ export type PreWarmSessionInput = Pick<
 	| "nativeThread"
 	| "resumeSessionId"
 	| "resumeSessionAt"
+	| "forkSession"
+	| "clearInheritedGoal"
 	| "model"
 	| "configDir"
 	| "folderSource"

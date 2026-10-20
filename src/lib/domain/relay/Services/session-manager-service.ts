@@ -40,6 +40,7 @@ import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../persistence/effect/read-query-effect.js";
+import { isSessionDeleted } from "../../../persistence/effect/session-seeder-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import { SESSION_SUBTREE_SQL } from "../../../persistence/projectors/session-handlers.js";
 import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
@@ -69,6 +70,7 @@ import {
 	OpenCodeInstancesTag,
 } from "../../daemon/Services/opencode-instances-service.js";
 import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
+import { EventRetentionSchedulerTag } from "../../persistence/Services/event-retention-scheduler.js";
 import { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { InputDraftsLive, InputDraftsTag } from "./input-drafts.js";
@@ -939,6 +941,10 @@ export const SessionManagerServiceLive: Layer.Layer<
 		// a daemon fiber that lacks the project's bus, and a commit without it
 		// never reaches the sidebar's shell subscription.
 		const sessionEventBus = yield* Effect.serviceOption(SessionEventBusTag);
+		// The daemon's archive sweep also lacks the project's retention scheduler.
+		const retentionScheduler = yield* Effect.serviceOption(
+			EventRetentionSchedulerTag,
+		);
 		const inFlightDeletes = new Map<
 			string,
 			Deferred.Deferred<void, SessionManagerError>
@@ -976,6 +982,27 @@ export const SessionManagerServiceLive: Layer.Layer<
 				yield* commitAndSignal
 					.write((project) =>
 						Effect.gen(function* () {
+							for (const id of [session.id, session.parentID]) {
+								if (
+									id !== undefined &&
+									(yield* isSessionDeleted(id).pipe(
+										Effect.provideService(SqlClient.SqlClient, sql),
+									))
+								)
+									return yield* new SessionManagerError({
+										operation: "establishOpenCodeSession.deleted",
+										cause: `Session ${id} has been deleted`,
+									});
+							}
+							if (session.parentID !== undefined) {
+								const [parent] =
+									yield* sql`SELECT id FROM sessions WHERE id = ${session.parentID}`;
+								if (!parent)
+									return yield* new SessionManagerError({
+										operation: "establishOpenCodeSession.parent",
+										cause: `Parent session ${session.parentID} is missing`,
+									});
+							}
 							yield* sql`
 					INSERT OR IGNORE INTO sessions (
 						id, project_id, provider, provider_sid, title, status, created_at, updated_at
@@ -1221,9 +1248,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 									), expected AS (SELECT key AS id, value AS version FROM json_each(${JSON.stringify(Object.fromEntries(versions))}))
 									SELECT ((SELECT COUNT(*) FROM tree) = (SELECT COUNT(*) FROM expected)
 										AND NOT EXISTS(SELECT 1 FROM tree JOIN sessions s ON s.id = tree.id
-											LEFT JOIN expected e ON e.id = s.id WHERE e.id IS NULL OR e.version != s.version)
-										AND NOT EXISTS(SELECT 1 FROM sessions f JOIN tree ON tree.id = f.forked_from
-											WHERE f.id NOT IN (SELECT id FROM tree))) AS matches`;
+											LEFT JOIN expected e ON e.id = s.id WHERE e.id IS NULL OR e.version != s.version)) AS matches`;
 											return (
 												row?.matches === 1 &&
 												![...versions.keys()].some(
@@ -1303,7 +1328,15 @@ export const SessionManagerServiceLive: Layer.Layer<
 								}),
 						),
 					);
-				return workspace.withLaunch(sweep);
+				return workspace.withLaunch(
+					Option.isSome(retentionScheduler)
+						? Effect.provideService(
+								sweep,
+								EventRetentionSchedulerTag,
+								retentionScheduler.value,
+							)
+						: sweep,
+				);
 			},
 			renameSession: (sessionId, title) =>
 				withSessionCommandServices(renameSession(sessionId, title)),

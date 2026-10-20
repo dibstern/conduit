@@ -9,6 +9,14 @@ import {
 import { Reactivity } from "effect/reactivity";
 import { SqlClient } from "effect/sql";
 import {
+	EventRetentionLive,
+	type EventRetentionTag,
+} from "../../domain/persistence/Services/event-retention.js";
+import {
+	EventRetentionSchedulerLive,
+	type EventRetentionSchedulerTag,
+} from "../../domain/persistence/Services/event-retention-scheduler.js";
+import {
 	makePersistenceService,
 	PersistenceError,
 	PersistenceProjectTag,
@@ -53,6 +61,8 @@ export type PersistenceEffectContext =
 	| SqliteNode.SqliteClient
 	| PersistenceServiceTag
 	| PersistenceProjectTag
+	| EventRetentionTag
+	| EventRetentionSchedulerTag
 	| EventStoreEffectTag
 	| ProjectorCursorEffectTag
 	| ProjectionRunnerEffectTag
@@ -198,6 +208,9 @@ export function makePersistenceProjectLayer(
 		Layer.effect(PersistenceServiceTag, makePersistenceService),
 	).pipe(Layer.provide(projectLayer));
 	const baseLayer = Layer.merge(projectLayer, persistenceServiceLayer);
+	const retentionLayer = EventRetentionSchedulerLive.pipe(
+		Layer.provideMerge(EventRetentionLive.pipe(Layer.provideMerge(baseLayer))),
+	);
 	const eventStoreLayer = Layer.effect(
 		EventStoreEffectTag,
 		makeEventStoreEffect,
@@ -219,6 +232,7 @@ export function makePersistenceProjectLayer(
 
 	const claudeEventPersistDeps = Layer.mergeAll(
 		baseLayer,
+		retentionLayer,
 		eventStoreLayer,
 		projectionRunnerLayer,
 	);
@@ -235,6 +249,7 @@ export function makePersistenceProjectLayer(
 
 	return Layer.mergeAll(
 		baseLayer,
+		retentionLayer,
 		eventStoreLayer,
 		projectionRunnerLayer,
 		readQueryLayer,

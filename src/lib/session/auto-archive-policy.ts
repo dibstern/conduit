@@ -36,7 +36,6 @@ export interface AutoDeleteArchivedFacts {
 	readonly pinned: boolean;
 	readonly hasPendingWork: boolean;
 	readonly hasLiveBackgroundWork: boolean;
-	readonly hasSurvivingFork: boolean;
 }
 
 export function shouldDeleteArchivedSessionTree(
@@ -50,7 +49,6 @@ export function shouldDeleteArchivedSessionTree(
 		facts.rootArchivedAt <= now - windowMs &&
 		!facts.pinned &&
 		!facts.hasPendingWork &&
-		!facts.hasLiveBackgroundWork &&
-		!facts.hasSurvivingFork
+		!facts.hasLiveBackgroundWork
 	);
 }

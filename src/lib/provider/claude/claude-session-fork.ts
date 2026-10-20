@@ -1,8 +1,10 @@
+import { readdir, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
-import type { SessionMessage } from "@anthropic-ai/claude-agent-sdk";
 import { ClaudeRuntimeError } from "../event-sink-errors.js";
+import { isGoalClearRecord } from "./claude-goal-tracker.js";
 import {
 	type ClaudeConfigDir,
 	configuredClaudeConfigDir,
@@ -14,12 +16,33 @@ interface SdkCallOptions {
 	readonly configDir: ClaudeConfigDir;
 }
 
+/** importSessionToStore includes transcript-only chain records as well as SDK messages. */
+export interface ClaudeTranscriptEntry {
+	readonly type: string;
+	readonly uuid: string;
+	readonly session_id?: string;
+	readonly parent_tool_use_id?: string | null;
+	readonly parent_agent_id?: string | null;
+	readonly message?: unknown;
+	readonly parentUuid?: string | null;
+	readonly subtype?: string;
+	readonly attachment?: unknown;
+	readonly isSidechain?: boolean;
+}
+
+export const CLAUDE_FORK_SOURCE_KEY = "claude.forkSource";
+
 export interface ClaudeSessionForkSdk {
 	/** Every main-conversation entry in the transcript, in file order. */
 	readTranscript(
 		sessionId: string,
 		options: SdkCallOptions,
-	): Promise<SessionMessage[]>;
+	): Promise<ClaudeTranscriptEntry[]>;
+	/** Distinguishes a newly initialized, empty transcript from a missing one. */
+	transcriptExists?(
+		sessionId: string,
+		options: SdkCallOptions,
+	): Promise<boolean>;
 	forkSession(
 		sessionId: string,
 		options: SdkCallOptions & { title: string; upToMessageId?: string },
@@ -113,14 +136,44 @@ export function runSdkInWorker<T>(
 
 export const defaultClaudeSessionForkSdk: ClaudeSessionForkSdk = {
 	readTranscript: async (sessionId, options) => {
-		const entries = await runSdkInWorker<
-			Array<SessionMessage & { readonly isSidechain?: boolean }>
-		>("readTranscript", sessionId, options);
-		return entries.filter(
-			(entry) =>
-				(entry.type === "user" || entry.type === "assistant") &&
-				entry.isSidechain !== true,
+		const entries = await runSdkInWorker<ClaudeTranscriptEntry[]>(
+			"readTranscript",
+			sessionId,
+			options,
 		);
+		return entries.filter(
+			(entry) => entry.isSidechain !== true && typeof entry.uuid === "string",
+		);
+	},
+	transcriptExists: async (sessionId, { configDir }) => {
+		const projects = join(configDir.path, "projects");
+		const directories = await readdir(projects, { withFileTypes: true }).catch(
+			(error: unknown) => {
+				if (
+					error instanceof Error &&
+					"code" in error &&
+					error.code === "ENOENT"
+				)
+					return [];
+				throw error;
+			},
+		);
+		for (const directory of directories) {
+			if (!directory.isDirectory()) continue;
+			const file = await stat(
+				join(projects, directory.name, `${sessionId}.jsonl`),
+			).catch((error: unknown) => {
+				if (
+					error instanceof Error &&
+					"code" in error &&
+					error.code === "ENOENT"
+				)
+					return undefined;
+				throw error;
+			});
+			if (file?.isFile()) return true;
+		}
+		return false;
 	},
 	forkSession: (sessionId, options) =>
 		runSdkInWorker("forkSession", sessionId, options),
@@ -133,8 +186,8 @@ class ClaudeForkPointNotFoundError extends Error {
 	}
 }
 
-function isRealUserPrompt(entry: SessionMessage): boolean {
-	if (entry.type !== "user") return false;
+export function isRealUserPrompt(entry: ClaudeTranscriptEntry): boolean {
+	if (entry.type !== "user" || isGoalClearRecord(entry)) return false;
 	const message = entry.message;
 	if (
 		typeof message !== "object" ||
@@ -156,17 +209,33 @@ function isRealUserPrompt(entry: SessionMessage): boolean {
 	);
 }
 
+function isConversationEntry(entry: ClaudeTranscriptEntry): boolean {
+	return (
+		!isGoalClearRecord(entry) &&
+		!(entry.type === "system" && entry.subtype === "local_command") &&
+		!(
+			entry.type === "attachment" &&
+			typeof entry.attachment === "object" &&
+			entry.attachment !== null &&
+			"type" in entry.attachment &&
+			entry.attachment.type === "goal_status"
+		)
+	);
+}
+
 export function resolveForkUpToUuid(
-	messages: readonly SessionMessage[],
+	messages: readonly ClaudeTranscriptEntry[],
 	messageId: string,
 ): string | undefined {
 	const start = messages.findIndex((entry) => {
 		const message = entry.message;
 		return (
-			message !== null &&
-			typeof message === "object" &&
-			"id" in message &&
-			message.id === messageId
+			isConversationEntry(entry) &&
+			(entry.uuid === messageId ||
+				(message !== null &&
+					typeof message === "object" &&
+					"id" in message &&
+					message.id === messageId))
 		);
 	});
 	if (start < 0) return undefined;
@@ -174,18 +243,19 @@ export function resolveForkUpToUuid(
 	for (let index = start + 1; index < messages.length; index++) {
 		const entry = messages[index];
 		if (entry && isRealUserPrompt(entry)) break;
-		end = index;
+		if (entry && isConversationEntry(entry)) end = index;
 	}
 	return messages[end]?.uuid;
 }
 
 /** Rewind excludes its target, including cuts inside an assistant turn. */
 export function resolveRewindUpToUuid(
-	messages: readonly SessionMessage[],
+	messages: readonly ClaudeTranscriptEntry[],
 	messageId: string,
 	targetMessageId?: string,
 ): string | null | undefined {
-	const matches = (entry: SessionMessage, id: string): boolean => {
+	const visible = messages.filter(isConversationEntry);
+	const matches = (entry: ClaudeTranscriptEntry, id: string): boolean => {
 		const message = entry.message;
 		return (
 			entry.uuid === id ||
@@ -198,24 +268,35 @@ export function resolveRewindUpToUuid(
 	if (targetMessageId === undefined)
 		return (
 			resolveForkUpToUuid(messages, messageId) ??
-			messages.find((entry) => matches(entry, messageId))?.uuid
+			visible.find((entry) => matches(entry, messageId))?.uuid
 		);
-	const targetIndex = messages.findIndex((entry) =>
+	const targetIndex = visible.findIndex((entry) =>
 		matches(entry, targetMessageId),
 	);
 	if (
 		targetIndex < 0 ||
-		!messages.slice(0, targetIndex).some((entry) => matches(entry, messageId))
+		!visible.slice(0, targetIndex).some((entry) => matches(entry, messageId))
 	)
 		return undefined;
-	const target = messages[targetIndex];
+	const target = visible[targetIndex];
 	// Imported SDK entries retain the native chain link. File-order adjacency
 	// can refer to an abandoned branch after an earlier in-place rewind.
 	if (target && "parentUuid" in target) {
-		if (typeof target.parentUuid === "string") return target.parentUuid;
+		if (typeof target.parentUuid === "string") {
+			let parent = target.parentUuid;
+			const seen = new Set<string>();
+			while (!seen.has(parent)) {
+				seen.add(parent);
+				const record = messages.find((entry) => entry.uuid === parent);
+				if (!record || isConversationEntry(record)) return parent;
+				if (typeof record.parentUuid !== "string") break;
+				parent = record.parentUuid;
+			}
+			return visible[targetIndex - 1]?.uuid ?? null;
+		}
 		if (target.parentUuid === null) return undefined;
 	}
-	return messages[targetIndex - 1]?.uuid ?? null;
+	return visible[targetIndex - 1]?.uuid ?? null;
 }
 
 export async function forkClaudeTranscript(

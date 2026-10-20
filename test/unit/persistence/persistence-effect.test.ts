@@ -344,6 +344,12 @@ describe("Persistence Effect", () => {
 				{ migration_id: 72, name: "surfacing_marks" },
 				{ migration_id: 73, name: "message_part_read" },
 				{ migration_id: 74, name: "turn_recaps" },
+				{ migration_id: 75, name: "events_parent_id_index" },
+				{ migration_id: 76, name: "events_forked_from_index" },
+				{
+					migration_id: 77,
+					name: "message_parts_result_event_seq_index",
+				},
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

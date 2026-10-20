@@ -432,6 +432,7 @@
 					chat.messages,
 					forkMessageId,
 					forkPointTimestamp,
+					viewedSessionId ?? undefined,
 				)
 			: null,
 	);
