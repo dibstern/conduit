@@ -8,6 +8,8 @@
 // Uses the `chat-simple` recording with `injectSSEEvents()` to inject
 // events that trigger notification broadcasts for unwatched sessions.
 
+import { writeFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import type { OpenCodeRecording } from "../fixtures/recorded/types.js";
 import { createSession } from "../helpers/e2e-harness.js";
 import { loadOpenCodeRecording } from "../helpers/recorded-loader.js";
@@ -243,7 +245,49 @@ test.describe("Notification → session navigation (replay)", () => {
 		relayUrl,
 		mockServer,
 		harness,
-	}) => {
+	}, testInfo) => {
+		await page.addInitScript(() => {
+			const notifications: { onclick: (() => void) | null }[] = [];
+			class TestNotification {
+				static permission = "granted";
+				onclick: (() => void) | null = null;
+				constructor() {
+					notifications.push(this);
+					document.documentElement.dataset["notificationCount"] = String(
+						notifications.length,
+					);
+				}
+				close() {}
+			}
+			Object.defineProperty(window, "Notification", {
+				value: TestNotification,
+			});
+			Object.defineProperty(navigator.serviceWorker, "getRegistration", {
+				value: () => Promise.resolve(undefined),
+			});
+			window.addEventListener("click-test-notification", (event) => {
+				notifications[(event as CustomEvent<number>).detail]?.onclick?.();
+			});
+			// Preserve real receipt locks and observe when every delivery attempt ends.
+			const request = navigator.locks.request;
+			let settled = 0;
+			Object.defineProperty(navigator.locks, "request", {
+				value: (...args: Parameters<LockManager["request"]>) => {
+					const result: Promise<unknown> = Reflect.apply(
+						request,
+						navigator.locks,
+						args,
+					);
+					if (args[0].startsWith("conduit-alert:"))
+						void result.then(() => {
+							document.documentElement.dataset["notificationSettled"] = String(
+								++settled,
+							);
+						});
+					return result;
+				},
+			});
+		});
 		// Capture all WS frames (received and sent) before navigating.
 		const receivedFrames: string[] = [];
 		const sentFrames: string[] = [];
@@ -338,6 +382,173 @@ test.describe("Notification → session navigation (replay)", () => {
 
 		// Verify URL updated to include /s/<target-session-id>
 		await expect(page).toHaveURL(new RegExp(`/s/${TARGET}`));
+		await expect(page.locator("html")).toHaveAttribute(
+			"data-notification-settled",
+			"1",
+		);
+		await expect(page.locator("html")).toHaveAttribute(
+			"data-notification-count",
+			"1",
+		);
+
+		const completionStarted = Date.now();
+		// The recording's sticky POST response would reuse the viewed session.
+		mockServer.setExactResponse("POST", "/session", 200, {
+			id: "ses_notification_completions",
+			title: "Notification completions",
+			projectID: "e2e-replay",
+			directory: process.cwd(),
+			version: "1",
+			time: { created: Date.now(), updated: Date.now() },
+		});
+		mockServer.setMessagePages("ses_notification_completions", [], []);
+		const completionSession = await createSession(
+			harness.relayPort,
+			"opencode",
+		);
+		expect(completionSession).not.toBe(TARGET);
+		const completed = (
+			messageId: string,
+			finish = "stop",
+			summary = false,
+		) => ({
+			type: "message.updated",
+			properties: {
+				info: {
+					id: messageId,
+					role: "assistant",
+					sessionID: completionSession,
+					time: { created: Date.now(), completed: Date.now() + 1 },
+					finish,
+					summary,
+					tokens: { input: 1, output: 1, cache: { read: 0, write: 0 } },
+				},
+			},
+		});
+		const status = (type: "busy" | "idle") => ({
+			type: "session.status",
+			properties: { sessionID: completionSession, status: { type } },
+		});
+		mockServer.injectSSEEvents([
+			status("busy"),
+			completed("assistant-tool", "tool-calls"),
+			completed("assistant-summary", "stop", true),
+		]);
+		for (let update = 0; update < 3; update++) {
+			mockServer.injectSSEEvents([completed("assistant-one")]);
+			await expect
+				.poll(
+					() => {
+						const db = new DatabaseSync(harness.eventsDbPath, {
+							readOnly: true,
+						});
+						try {
+							return db
+								.prepare(
+									"SELECT count(*) AS count FROM events WHERE session_id = ? AND type = 'turn.completed'",
+								)
+								.get(completionSession)?.["count"];
+						} finally {
+							db.close();
+						}
+					},
+					{
+						message:
+							"provider completion persisted before notification delivery",
+					},
+				)
+				.toBe(update + 3);
+			await expect(page.locator("html")).toHaveAttribute(
+				"data-notification-settled",
+				String(update + 2),
+			);
+		}
+		await expect(page.locator("html")).toHaveAttribute(
+			"data-notification-count",
+			"2",
+		);
+		mockServer.injectSSEEvents([
+			status("idle"),
+			status("busy"),
+			completed("assistant-two"),
+			status("idle"),
+		]);
+		await expect(page.locator("html")).toHaveAttribute(
+			"data-notification-settled",
+			"5",
+		);
+		await expect(page.locator("html")).toHaveAttribute(
+			"data-notification-count",
+			"3",
+		);
+		const identities = receivedFrames.flatMap((frame) => {
+			const message: {
+				values?: {
+					_tag?: string;
+					kind?: string;
+					sessionId?: string;
+					alertId?: string;
+				}[];
+			} = JSON.parse(frame);
+			return (message.values ?? [])
+				.filter(
+					(value) =>
+						value._tag === "alert" &&
+						value.kind === "done" &&
+						value.sessionId === completionSession,
+				)
+				.map((value) => value.alertId);
+		});
+		expect(identities).toEqual([
+			...Array.from({ length: 3 }, () =>
+				JSON.stringify([completionSession, "assistant-one", "done"]),
+			),
+			JSON.stringify([completionSession, "assistant-two", "done"]),
+		]);
+		for (const index of [1, 2]) {
+			const beforeClick = sentFrames.length;
+			await page.evaluate(
+				(index) =>
+					window.dispatchEvent(
+						new CustomEvent("click-test-notification", { detail: index }),
+					),
+				index,
+			);
+			await expect(page).toHaveURL(new RegExp(`/s/${completionSession}`));
+			await expect
+				.poll(() =>
+					sentFrames.slice(beforeClick).some((frame) => {
+						const message: { tag?: string; payload?: { sessionId?: string } } =
+							JSON.parse(frame);
+						return (
+							message.tag === "ViewSession" &&
+							message.payload?.sessionId === completionSession
+						);
+					}),
+				)
+				.toBe(true);
+			await page.goBack();
+			await expect(page).toHaveURL(new RegExp(`/s/${TARGET}`));
+		}
+		const notificationReport = testInfo.outputPath(
+			"notification-identities.json",
+		);
+		writeFileSync(
+			notificationReport,
+			JSON.stringify(
+				{
+					sessionId: completionSession,
+					identities,
+					notifications: 2,
+					ms: Date.now() - completionStarted,
+				},
+				null,
+				2,
+			),
+		);
+		await testInfo.attach("notification-identities", {
+			path: notificationReport,
+		});
 	});
 
 	test("no alert when session HAS viewers", async ({

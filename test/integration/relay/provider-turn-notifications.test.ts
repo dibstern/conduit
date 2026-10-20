@@ -18,6 +18,96 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { publishProviderRelayMessage } from "../../../src/lib/relay/project-relay-publisher.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
+it("persists Claude content for a session without a session.created event", async () => {
+	const layer = makeProviderRuntimeIngestionLive().pipe(
+		Layer.provideMerge(makePersistenceEffectLayer(":memory:", "test-project")),
+	);
+	await Effect.runPromise(
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const ingestion = yield* ProviderRuntimeIngestionTag;
+			expect(
+				yield* sql`SELECT id FROM sessions WHERE id = 'first-seen'`,
+			).toEqual([]);
+			yield* ingestion.ingest(
+				providerRuntimeEvent("message.created", "first-seen", {
+					messageId: "first-message",
+					sessionId: "first-seen",
+					role: "assistant",
+				}),
+			);
+			yield* ingestion.ingest(
+				providerRuntimeEvent("text.delta", "first-seen", {
+					messageId: "first-message",
+					partId: "first-part",
+					text: "First content",
+				}),
+			);
+			yield* ingestion.drain();
+			expect(
+				yield* sql`SELECT id, project_id, provider, title FROM sessions WHERE id = 'first-seen'`,
+			).toEqual([
+				{
+					id: "first-seen",
+					project_id: "test-project",
+					provider: "claude",
+					title: "Untitled",
+				},
+			]);
+			expect(
+				yield* sql`SELECT id, session_id, role, text FROM messages WHERE session_id = 'first-seen'`,
+			).toEqual([
+				{
+					id: "first-message",
+					session_id: "first-seen",
+					role: "assistant",
+					text: "First content",
+				},
+			]);
+			expect(
+				yield* sql`SELECT id, message_id, type, text FROM message_parts WHERE message_id = 'first-message'`,
+			).toEqual([
+				{
+					id: "first-part",
+					message_id: "first-message",
+					type: "text",
+					text: "First content",
+				},
+			]);
+			const events = yield* sql<{
+				event_id: string;
+				type: string;
+				provider: string;
+				data: string;
+			}>`SELECT event_id, type, provider, data FROM events WHERE session_id = 'first-seen' ORDER BY sequence`;
+			expect(
+				events.map((row) => ({ ...row, data: JSON.parse(row.data) })),
+			).toEqual([
+				{
+					event_id: "evt_message.created",
+					type: "message.created",
+					provider: "claude",
+					data: {
+						messageId: "first-message",
+						sessionId: "first-seen",
+						role: "assistant",
+					},
+				},
+				{
+					event_id: "evt_text.delta",
+					type: "text.delta",
+					provider: "claude",
+					data: {
+						messageId: "first-message",
+						partId: "first-part",
+						text: "First content",
+					},
+				},
+			]);
+		}).pipe(Effect.scoped, Effect.provide(layer)),
+	);
+});
+
 it.each([
 	{ type: "turn.completed", kind: "done", alertId: '["s1","m1","done"]' },
 	{

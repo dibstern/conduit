@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect, userEvent, within } from "storybook/test";
 import DiffView from "./DiffView.svelte";
 
 const meta = {
@@ -57,11 +58,48 @@ export const SplitView: Story = {
 	args: {
 		oldText:
 			// biome-ignore lint/suspicious/noTemplateCurlyInString: intentional template literal in code sample
-			"const name = 'world';\n\nfunction greet(who: string) {\n  return `Hello, ${who}!`;\n}\n\nconsole.log(greet(name));",
+			"const name = '<em>world</em>';\n\nfunction greet(who: string) {\n  return `Hello, ${who}!`;\n}\n\nconsole.log(greet(name));",
 		newText:
 			// biome-ignore lint/suspicious/noTemplateCurlyInString: intentional template literal in code sample
-			"const name = 'universe';\nconst greeting = 'Hi';\n\nfunction greet(who: string, prefix: string) {\n  return `${prefix}, ${who}!`;\n}\n\nconsole.log(greet(name, greeting));",
+			"const name = '<strong>universe</strong>';\nconst greeting = 'Hi';\n\nfunction greet(who: string, prefix: string) {\n  return `${prefix}, ${who}!`;\n}\n\nconsole.log(greet(name, greeting));",
 		filename: "src/greet.ts",
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		expect(canvas.queryByRole("table")).not.toBeInTheDocument();
+		expect(
+			canvas.getByText("const name = '<em>world</em>';", { exact: true }),
+		).toBeVisible();
+		expect(
+			canvas.getByText("const name = '<strong>universe</strong>';", {
+				exact: true,
+			}),
+		).toBeVisible();
+		expect(canvasElement.querySelector("em, strong")).toBeNull();
+		await userEvent.click(canvas.getByRole("tab", { name: "Split" }));
+		const table = await canvas.findByRole("table");
+		const oldLine = within(table).getByText("const name = '<em>world</em>';", {
+			exact: true,
+		});
+		const newLine = within(table).getByText(
+			"const name = '<strong>universe</strong>';",
+			{ exact: true },
+		);
+		expect(oldLine).toBeVisible();
+		expect(newLine).toBeVisible();
+		const row = oldLine.closest("tr");
+		expect(newLine.closest("tr")).toBe(row);
+		expect(
+			Array.from(row?.querySelectorAll(".diff-marker") ?? [], (cell) =>
+				cell.textContent?.trim(),
+			),
+		).toEqual(["-", "+"]);
+		expect(
+			Array.from(row?.querySelectorAll(".diff-ln") ?? [], (cell) =>
+				cell.textContent?.trim(),
+			),
+		).toEqual(["1", "1"]);
+		expect(table.querySelector("em, strong")).toBeNull();
 	},
 };
 
