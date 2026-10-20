@@ -1,4 +1,4 @@
-Feature: The composer queues at reset or sends now on another Claude account
+Feature: The send menu selects and the composer button commits
 
 Background:
   Given the conduit app is served with the connected mockup
@@ -26,7 +26,7 @@ Scenario Outline: warnings off and readings below warnAt keep the ordinary butto
   Given the viewport is a <viewport>
   And Usage settings have one Claude account in the normal state
   When I open settings to the Usage section
-  And I select the Usage warning choice <warnAt>
+  And I select the Usage warning choice <warn_at>
   And I close settings
   And the mock usage window five_hour for claude is <percent> percent resetting at 2026-01-01T15:13:00Z
   And I type Check the next task into the composer
@@ -34,7 +34,7 @@ Scenario Outline: warnings off and readings below warnAt keep the ordinary butto
   And the composer has a plain Send button
 
 Examples:
-  | viewport | warnAt | percent |
+  | viewport | warn_at | percent |
   | desktop  | 80     | 79      |
   | phone    | 80     | 79      |
   | desktop  | off    | 99      |
@@ -174,6 +174,7 @@ Scenario Outline: send options show the selected reset then accounts in switch o
   Then the send menu is a <presentation>
   And the send menu starts with selected Send at 3:13 pm on Personal
   And the send menu account order is work, spare
+  And the send menu has no Send now on this account option
   And send menu account work offers Send now on Work with wk 48%
   And send menu account spare offers Send now on Spare with wk 9%
   And the send menu explains the account takeover
@@ -223,12 +224,20 @@ Examples:
   | desktop  |
   | phone    |
 
-Scenario Outline: choosing the reset row queues the composer with its release-time caption
+Scenario Outline: choosing the reset row changes the button and committing queues the Held Message
   Given the viewport is a <viewport>
   And Usage settings have several Claude accounts in the limit state
+  And the daemon's usage limits are auto-resume off, auto-switch on, order claude, work, spare
   And the mock relay holds submitted messages until reset
   When I type Also run the provider tests afterwards into the composer
-  And I send the reset-bound message with <method>
+  Then the auto-switch send button reads <default_label> for work
+  When I open the composer send menu
+  And I choose Send at reset with <selection_method>
+  Then the composer send mode is at-reset
+  And the reset send control announces Send at 3:13 pm
+  And the composer still holds Also run the provider tests afterwards
+  And the composer has sent no message or account switch
+  When I send the reset-bound message with <commit_method>
   Then the pending-input tray has 1 row
   And pending-input row 1 reads Also run the provider tests afterwards
   And pending-input row 1 has the reset caption sends 3:13 pm
@@ -236,30 +245,42 @@ Scenario Outline: choosing the reset row queues the composer with its release-ti
   And the queued usage recovery shows Cancel auto-resume
   And the queued usage recovery offers Switch account
   And the composer is empty
+  And the composer send mode is switch
+  And the auto-switch send button reads <default_label> for work
 
 Examples:
-  | viewport | method             |
-  | desktop  | the reset menu row |
-  | phone    | the reset menu row |
-  | desktop  | the keyboard menu  |
-  | desktop  | the button         |
-  | desktop  | the keyboard       |
-  | phone    | the button         |
+  | viewport | default_label | selection_method | commit_method |
+  | desktop  | Send on Work  | the pointer      | the button    |
+  | desktop  | Send on Work  | the keyboard     | the keyboard  |
+  | desktop  | Send on Work  | the pointer      | the shortcut  |
+  | phone    | Work          | the pointer      | the button    |
 
-Scenario Outline: Send now switches this session then submits its composer text
+Scenario Outline: choosing Send now changes the button and committing switches before submitting
   Given the viewport is a <viewport>
   And Usage settings have several Claude accounts in the limit state
   And the mock relay accepts send-menu switches
   When I type Check the next task into the composer
   And I open the composer send menu
   And I choose Send now on work
+  Then the composer send mode is switch
+  And the auto-switch send button reads <label> for work
+  And the composer still holds Check the next task
+  And the composer has sent no message or account switch
+  When I open the composer send menu
+  Then the send menu starts with unselected Send at 3:13 pm on Personal
+  And the send menu selects account work
+  When I dismiss the composer send menu
+  And I send the switch-bound message with <method>
   Then the ContinueSession RPC switches the current session from claude to work
   And the composer submits Check the next task after switching to work
+  And the composer commits Check the next task as queue
 
 Examples:
-  | viewport |
-  | desktop  |
-  | phone    |
+  | viewport | label        | method       |
+  | desktop  | Send on Work | the button   |
+  | desktop  | Send on Work | the keyboard |
+  | desktop  | Send on Work | the shortcut |
+  | phone    | Work         | the button   |
 
 Scenario Outline: a refused send-now switch shows the account's toast and preserves the input
   Given the viewport is a <viewport>
@@ -268,16 +289,19 @@ Scenario Outline: a refused send-now switch shows the account's toast and preser
   When I type Check the next task into the composer
   And I open the composer send menu
   And I choose Send now on work
+  Then the composer has sent no message or account switch
+  When I send the switch-bound message with the button
   Then the ContinueSession RPC switches the current session from claude to work
   And an error toast titled Couldn't switch to Work says The account is not logged in
   And the composer still holds Check the next task
   And the refused send-menu switch submits no input
-  And the composer send mode is at-reset
+  And the composer send mode is switch
+  And the auto-switch send button reads <label> for work
 
 Examples:
-  | viewport |
-  | desktop  |
-  | phone    |
+  | viewport | label        |
+  | desktop  | Send on Work |
+  | phone    | Work         |
 
 Scenario Outline: auto-switch sends through the first account in the switch order
   Given the viewport is a <viewport>
@@ -312,10 +336,15 @@ Scenario Outline: auto-switch uses reordered accounts and keeps the same reset c
   Then the composer send mode is switch
   And the auto-switch send button reads <label> for spare
   When I open the composer send menu
-  Then the send menu starts with selected Send at 3:13 pm on Personal
+  Then the send menu starts with unselected Send at 3:13 pm on Personal
   And the send menu account order is spare, work
-  When I send the reset-bound message with the open reset menu row
+  And the send menu selects account spare
+  When I choose Send at reset with the pointer
+  Then the reset send control announces Send at 3:13 pm
+  And the composer has sent no message or account switch
+  When I send the reset-bound message with the button
   Then pending-input row 1 has the reset caption sends 3:13 pm
+  And the auto-switch send button reads <label> for spare
 
 Examples:
   | viewport | label         |
@@ -340,6 +369,99 @@ Examples:
   | viewport | label           |
   | desktop  | Send at 3:13 pm |
   | phone    | Send at 3:13 pm            |
+
+Scenario: the composer keeps each session's selection and draft
+  Given the viewport is a desktop
+  And Usage settings have several Claude accounts in the limit state
+  When I type Keep this session's pick into the composer
+  And I open the composer send menu
+  And I choose Send now on spare
+  Then the auto-switch send button reads Send on Spare for spare
+  When I open send-menu session other-send-session
+  Then the composer send mode is at-reset
+  And the composer is empty
+  When I open the composer send menu
+  And I choose Send now on work
+  Then the auto-switch send button reads Send on Work for work
+  When I open send-menu session sess-bound-claude
+  Then the auto-switch send button reads Send on Spare for spare
+  And the composer still holds Keep this session's pick
+  And the composer has sent no message or account switch
+
+Scenario Outline: an account pick falls back to the unpicked mode when its account fills up
+  Given the viewport is a <viewport>
+  And Usage settings have several Claude accounts in the limit state
+  And the daemon's usage limits are auto-resume off, auto-switch <auto_switch>, order claude, work, spare
+  When I type Check the next task into the composer
+  And I open the composer send menu
+  And I choose Send now on spare
+  Then the auto-switch send button reads <picked_label> for spare
+  When the mock usage reading for spare becomes limited
+  Then the composer send mode is <fallback_mode>
+  And the composer commit button announces <fallback_label>
+  When the mock usage reading for spare becomes available
+  Then the composer send mode is <fallback_mode>
+  And the composer commit button announces <fallback_label>
+  And the composer still holds Check the next task
+  And the composer has sent no message or account switch
+
+Examples:
+  | viewport | auto_switch | picked_label  | fallback_mode | fallback_label  |
+  | desktop  | off         | Send on Spare | at-reset      | Send at 3:13 pm |
+  | phone    | off         | Spare         | at-reset      | Send at 3:13 pm |
+  | desktop  | on          | Send on Spare | switch        | Send on Work    |
+  | phone    | on          | Spare         | switch        | Send on Work    |
+
+Scenario Outline: an account pick falls back to ordinary Send when the current account's limit clears
+  Given the viewport is a <viewport>
+  And Usage settings have several Claude accounts in the limit state
+  When I type Check the next task into the composer
+  And I open the composer send menu
+  And I choose Send now on work
+  Then the composer send mode is switch
+  When the mock usage reading for claude becomes available
+  Then the composer send mode is normal
+  And the composer has a plain Send button
+  And the composer send menu trigger is absent
+  And the composer has sent no message or account switch
+  When the mock usage reading for claude becomes limited
+  Then the composer send mode is at-reset
+  And the reset send control announces Send at 3:13 pm
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario: a reset pick is forgotten when the limit clears
+  Given the viewport is a desktop
+  And Usage settings have several Claude accounts in the limit state
+  And the daemon's usage limits are auto-resume off, auto-switch on, order claude, work, spare
+  When I type Check the next task into the composer
+  And I open the composer send menu
+  And I choose Send at reset with the pointer
+  Then the reset send control announces Send at 3:13 pm
+  When the mock usage reading for claude becomes available
+  Then the composer send mode is normal
+  And the composer has a plain Send button
+  When the mock usage reading for claude becomes limited
+  Then the auto-switch send button reads Send on Work for work
+  And the composer has sent no message or account switch
+
+Scenario: Cmd+Enter commits the picked account with the existing steer delivery
+  Given the viewport is a desktop
+  And Usage settings have several Claude accounts in the limit state
+  And the mock relay accepts send-menu switches
+  When I type Steer through the picked account into the composer
+  And I open the composer send menu
+  And I choose Send now on spare
+  And the open session starts working
+  Then the auto-switch send button reads Send on Spare for spare
+  And the composer has sent no message or account switch
+  When I send the switch-bound message with the shortcut
+  Then the ContinueSession RPC switches the current session from claude to spare
+  And the composer submits Steer through the picked account after switching to spare
+  And the composer commits Steer through the picked account as steer
 
 Scenario Outline: a draft offers only the reset row and takeover note
   Given the viewport is a <viewport>
