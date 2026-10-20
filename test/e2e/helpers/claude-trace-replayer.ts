@@ -25,10 +25,18 @@
 // the trace, with the same fresh ids as the replayed stream.
 
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import {
+	appendFileSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	realpathSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type {
+	SDKControlInitializeResponse,
 	SDKControlInterruptResponse,
 	SessionMessage,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -317,6 +325,7 @@ export function createClaudeTraceReplayer(
 	const sessionId = randomUUID();
 	const sessionIds = new Set<string>([sessionId]);
 	const transcripts = new Map<string, SessionMessage[]>();
+	const nativeTranscripts = new Map<string, string>();
 	/** Each session's played turns: their reads, and how far each has played. */
 	const playedTurns = new Map<
 		string,
@@ -327,6 +336,24 @@ export function createClaudeTraceReplayer(
 		if (!sessionIds.has(sessionId))
 			throw new Error(`Claude trace replay: unknown session ${sessionId}`);
 		return transcripts.get(sessionId) ?? [];
+	};
+	const copyTranscript = (
+		parentSessionId: string,
+		sessionId: string,
+		upToMessageId?: string,
+	) => {
+		const transcript = knownSession(parentSessionId);
+		const end =
+			upToMessageId === undefined
+				? transcript.length
+				: transcript.findIndex((entry) => entry.uuid === upToMessageId) + 1;
+		if (end === 0)
+			throw new Error(
+				`Claude trace replay: ${upToMessageId} is not in session ${parentSessionId}`,
+			);
+		return transcript
+			.slice(0, end)
+			.map((entry) => ({ ...entry, session_id: sessionId }));
 	};
 	let sent = 0;
 	const sentPermissionModes: (PermissionMode | undefined)[] = [];
@@ -353,11 +380,18 @@ export function createClaudeTraceReplayer(
 			? Promise.resolve()
 			: new Promise<void>((resolve) => onHold.push(resolve));
 
-	const query: ClaudeTraceReplayer["sdk"]["query"] = ({ prompt, options }) => {
-		const querySessionId = options?.resume ?? sessionId;
+	const query: ClaudeTraceReplayer["sdk"]["query"] = ({
+		configDir,
+		prompt,
+		options,
+	}) => {
+		const querySessionId = options?.forkSession
+			? (options.sessionId ?? randomUUID())
+			: (options?.resume ?? sessionId);
 		// A replacement process can begin by resuming its persisted parent.
-		if (sent === 0 && options?.resume) sessionIds.add(querySessionId);
-		if (!sessionIds.has(querySessionId))
+		if (sent === 0 && options?.resume && !options.forkSession)
+			sessionIds.add(querySessionId);
+		if (!options?.forkSession && !sessionIds.has(querySessionId))
 			throw new Error(`Claude trace replay: unknown session ${querySessionId}`);
 		const prompts = prompt[Symbol.asyncIterator]();
 		const closed = new AbortController();
@@ -385,6 +419,74 @@ export function createClaudeTraceReplayer(
 
 		const transcript = transcripts.get(querySessionId) ?? [];
 		transcripts.set(querySessionId, transcript);
+		// Native initialize creates the child before input admission. It must
+		// never advance replay() or spend one of the plan's recorded inputs.
+		const initialization =
+			options?.forkSession || nativeTranscripts.has(querySessionId)
+				? new Promise<SDKControlInitializeResponse>((resolve) => {
+						if (options?.forkSession) {
+							if (!options.resume)
+								throw new Error(
+									"Claude trace replay: native fork needs resume",
+								);
+							if (sessionIds.has(querySessionId))
+								throw new Error(
+									`Claude trace replay: session ${querySessionId} already exists`,
+								);
+							if (!options.cwd)
+								throw new Error("Claude trace replay: native fork needs cwd");
+							const inherited = copyTranscript(
+								options.resume,
+								querySessionId,
+								options.resumeSessionAt,
+							);
+							const directory = join(
+								configDir.path,
+								"projects",
+								realpathSync(options.cwd).replace(/[^a-zA-Z0-9]/g, "-"),
+							);
+							mkdirSync(directory, { recursive: true });
+							const file = join(directory, `${querySessionId}.jsonl`);
+							writeFileSync(
+								file,
+								inherited
+									.map((entry) =>
+										JSON.stringify({ ...entry, sessionId: querySessionId }),
+									)
+									.join("\n") + (inherited.length > 0 ? "\n" : ""),
+								{ flag: "wx" },
+							);
+							transcript.push(...inherited);
+							sessionIds.add(querySessionId);
+							nativeTranscripts.set(querySessionId, file);
+							forks.push({
+								parentSessionId: options.resume,
+								sessionId: querySessionId,
+								...(options.resumeSessionAt !== undefined && {
+									upToMessageId: options.resumeSessionAt,
+								}),
+							});
+						}
+						resolve({
+							commands: [],
+							agents: [],
+							models: [],
+							output_style: "default",
+							available_output_styles: ["default"],
+							account: {},
+						});
+					})
+				: undefined;
+		void initialization?.catch(() => {});
+		const appendEntry = (entry: SessionMessage) => {
+			const file = nativeTranscripts.get(querySessionId);
+			if (file)
+				appendFileSync(
+					file,
+					`${JSON.stringify({ ...entry, sessionId: querySessionId })}\n`,
+				);
+			transcript.push(entry);
+		};
 		const entry = (
 			type: "user" | "assistant",
 			message: unknown,
@@ -400,7 +502,7 @@ export function createClaudeTraceReplayer(
 		const promptSent = (userPrompt: { readonly message: unknown }) => {
 			sent += 1;
 			sentPermissionModes.push(permissionMode);
-			transcript.push(entry("user", userPrompt.message));
+			appendEntry(entry("user", userPrompt.message));
 		};
 		let playing:
 			| {
@@ -416,6 +518,10 @@ export function createClaudeTraceReplayer(
 			| undefined;
 
 		async function* replay(): AsyncGenerator<SDKMessage, void> {
+			if (initialization) {
+				await initialization;
+				if (closed.signal.aborted) return;
+			}
 			while (true) {
 				const first = await prompts.next();
 				if (first.done) return;
@@ -562,7 +668,7 @@ export function createClaudeTraceReplayer(
 						(message.type === "user" || message.type === "assistant") &&
 						message.parent_tool_use_id === null
 					)
-						transcript.push(entry(message.type, message.message, message.uuid));
+						appendEntry(entry(message.type, message.message, message.uuid));
 					if (
 						plan.holdAfterResult &&
 						!resultHeld &&
@@ -636,7 +742,9 @@ export function createClaudeTraceReplayer(
 			setMcpPermissionModeOverride: unsupported("setMcpPermissionModeOverride"),
 			setMaxThinkingTokens: unsupported("setMaxThinkingTokens"),
 			updateSettings: unsupported("updateSettings"),
-			initializationResult: unsupported("initializationResult"),
+			initializationResult: initialization
+				? () => initialization
+				: unsupported("initializationResult"),
 			reinitialize: unsupported("reinitialize"),
 			supportedCommands: unsupported("supportedCommands"),
 			supportedModels: unsupported("supportedModels"),
@@ -706,16 +814,12 @@ export function createClaudeTraceReplayer(
 				],
 				// Like the SDK: copy through upToMessageId inclusive, or everything.
 				forkSession: async (parentSessionId, { upToMessageId }) => {
-					const transcript = knownSession(parentSessionId);
-					const end =
-						upToMessageId === undefined
-							? transcript.length
-							: transcript.findIndex((entry) => entry.uuid === upToMessageId) +
-								1;
-					if (end === 0)
-						throw new Error(
-							`Claude trace replay: ${upToMessageId} is not in session ${parentSessionId}`,
-						);
+					const sessionId = randomUUID();
+					const transcript = copyTranscript(
+						parentSessionId,
+						sessionId,
+						upToMessageId,
+					);
 					// Read on first fork, so a plan's tracesDir need not carry it.
 					const forkTrace = JSON.parse(
 						readFileSync(
@@ -727,14 +831,9 @@ export function createClaudeTraceReplayer(
 							ReturnType<ClaudeSessionForkSdk["forkSession"]>
 						>;
 					};
-					const fork = { ...forkTrace.forkSession, sessionId: randomUUID() };
+					const fork = { ...forkTrace.forkSession, sessionId };
 					sessionIds.add(fork.sessionId);
-					transcripts.set(
-						fork.sessionId,
-						transcript
-							.slice(0, end)
-							.map((entry) => ({ ...entry, session_id: fork.sessionId })),
-					);
+					transcripts.set(fork.sessionId, transcript);
 					forks.push({
 						parentSessionId,
 						sessionId: fork.sessionId,

@@ -456,7 +456,9 @@ describe("Fork read-model inheritance", () => {
 					side: { title: "Empty", inputId: "empty-side" },
 				}),
 			),
-		).rejects.toThrow(/no completed turn/);
+		).rejects.toThrow(
+			"This session has no Claude transcript yet. Send a message first.",
+		);
 		await runtime.runPromise(
 			applySessionCommand(
 				{

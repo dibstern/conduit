@@ -278,14 +278,15 @@ export async function createReplayHarness(
 		{
 			...defaultDaemonConfig(),
 			avatar: { kind: "initial" },
-			...(claudeInstanceId !== undefined && {
+			...(claudeReplayer && {
 				instances: [
 					{
-						id: claudeInstanceId,
-						name: claudeInstanceId,
+						id: claudeInstanceId ?? "claude",
+						name: claudeInstanceId ?? "Claude",
 						port: 0,
 						managed: false,
 						driver: "claude",
+						configDir: path.join(configDir, "claude"),
 					},
 				],
 			}),
