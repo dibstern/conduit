@@ -162,7 +162,11 @@ export const surfacingReplyHandlers: StepHandler[] = [
 			);
 			expect(submitted.payload["text"]).toBe(expected);
 			await requireRelayControl(world.page).sendMessages([
-				{ type: "user_message", text: expected },
+				{
+					type: "user_message",
+					text: expected,
+					inputId: submitted.payload["inputId"],
+				},
 				{ type: "done", code: 0 },
 			]);
 			await expect
