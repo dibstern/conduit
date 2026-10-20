@@ -674,6 +674,7 @@ describe("MessageProjector", () => {
 		expect(projector.handles).toEqual([
 			"session.rewound",
 			"session.rewind_undone",
+			"session.rewind_committed",
 			"message.created",
 			"message.removed",
 			"message.part.removed",

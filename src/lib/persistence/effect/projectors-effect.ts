@@ -291,6 +291,60 @@ export const stampMessage = (
 		};
 	});
 
+const removeMessages = (
+	sessionId: string,
+	messageIds: readonly string[],
+	ctx: ProjectionContext,
+): Effect.Effect<ProjectionTouch, SqlError, SqlClient.SqlClient> =>
+	Effect.gen(function* () {
+		if (messageIds.length === 0)
+			return { stamped: [], removed: [], collections: [] };
+		const sql = yield* SqlClient.SqlClient;
+		const list = JSON.stringify(messageIds);
+		// A pending stamp can move a fork's clock. Preserve that clock before
+		// deleting its message, without stamping each disappearing row.
+		const pending = messageIds.filter((id) =>
+			ctx.deferredMessageStamps?.delete(id),
+		);
+		const forkChanges =
+			pending.length === 0
+				? []
+				: ids(
+						yield* sql<{ id: string }>`UPDATE sessions SET
+				fork_point_timestamp = (SELECT created_at FROM messages WHERE id = fork_point_event AND session_id = ${sessionId}),
+				version = ${ctx.version}
+				WHERE id = ${sessionId}
+				AND fork_point_event IN (SELECT value FROM json_each(${JSON.stringify(pending)}))
+				AND EXISTS (SELECT 1 FROM messages WHERE id = fork_point_event AND session_id = ${sessionId}
+					AND created_at IS NOT fork_point_timestamp)
+				RETURNING id`,
+					);
+		yield* sql`UPDATE turns SET
+			user_message_id = CASE WHEN user_message_id IN (SELECT value FROM json_each(${list})) THEN NULL ELSE user_message_id END,
+			assistant_message_id = CASE WHEN assistant_message_id IN (SELECT value FROM json_each(${list})) THEN NULL ELSE assistant_message_id END
+			WHERE session_id = ${sessionId} AND (
+				user_message_id IN (SELECT value FROM json_each(${list}))
+				OR assistant_message_id IN (SELECT value FROM json_each(${list})))`;
+		yield* sql`DELETE FROM messages WHERE session_id = ${sessionId}
+			AND id IN (SELECT value FROM json_each(${list}))`;
+		yield* sql`INSERT INTO message_tombstones (session_id, message_id, version)
+			SELECT ${sessionId}, value, ${ctx.version} FROM json_each(${list}) WHERE true
+			ON CONFLICT (message_id) DO UPDATE SET
+			session_id = excluded.session_id, version = excluded.version`;
+		const changed = [
+			...forkChanges,
+			...(yield* refreshLastUserMessageAt(sessionId, ctx.version)),
+		];
+		return {
+			...(yield* stampSessions([sessionId], ctx.version)),
+			collections:
+				changed.length > 0
+					? ["sessions", "messages", "sidebar"]
+					: ["sessions", "messages"],
+			...(changed.length > 0 ? { sidebar: [...new Set(changed)] } : {}),
+		};
+	});
+
 interface RewindCut {
 	readonly id: string;
 	readonly created_at: number;
@@ -487,6 +541,7 @@ export const makeMessageProjector = defineProjector(() => ({
 	handles: [
 		"session.rewound",
 		"session.rewind_undone",
+		"session.rewind_committed",
 		"message.created",
 		"message.removed",
 		"message.part.removed",
@@ -508,6 +563,20 @@ export const makeMessageProjector = defineProjector(() => ({
 		"session.setup_finished",
 	],
 	project: (event, ctx) => {
+		if (isEventType(event, "message.removed"))
+			return removeMessages(event.sessionId, [event.data.messageId], ctx);
+		if (isEventType(event, "session.rewind_committed"))
+			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				// Legacy logs already removed the cut with message.removed. A missing
+				// cut selects no range, preserving their replay result.
+				const removed = yield* sql<{ id: string }>`SELECT m.id FROM messages m
+					JOIN messages cut ON cut.id = ${event.data.messageId} AND cut.session_id = m.session_id
+					WHERE m.session_id = ${event.sessionId}
+					AND (m.created_at, m.id) >= (cut.created_at, cut.id)
+					ORDER BY m.created_at, m.id`;
+				return yield* removeMessages(event.sessionId, ids(removed), ctx);
+			});
 		let replacesUserMessage = false;
 		let previousMessage:
 			| { created_at: number; is_human_sent: number }
@@ -590,20 +659,6 @@ export const makeMessageProjector = defineProjector(() => ({
 						RETURNING message_id`,
 					(rows) => [...new Set(rows.map((row) => row.message_id))],
 				);
-			if (isEventType(event, "message.removed")) {
-				const { messageId } = event.data;
-				yield* sql`UPDATE turns SET user_message_id = NULL
-					WHERE session_id = ${event.sessionId} AND user_message_id = ${messageId}`;
-				yield* sql`UPDATE turns SET assistant_message_id = NULL
-					WHERE session_id = ${event.sessionId} AND assistant_message_id = ${messageId}`;
-				yield* sql`DELETE FROM messages
-					WHERE id = ${messageId} AND session_id = ${event.sessionId}`;
-				yield* sql`INSERT INTO message_tombstones (session_id, message_id, version)
-					VALUES (${event.sessionId}, ${messageId}, ${ctx.version})
-					ON CONFLICT (message_id) DO UPDATE SET
-					session_id = excluded.session_id, version = excluded.version`;
-				return [];
-			}
 			// A result keyed by its prompt has no answer of its own. Its
 			// messageId can name the previous answer, whose usage and time stay put.
 			if (isEventType(event, "turn.completed") && event.data.userMessageId)
@@ -1340,17 +1395,8 @@ export const makeMessageProjector = defineProjector(() => ({
 						replacesUserMessage ||= row.is_human_sent === 1;
 						yield* sql`UPDATE messages SET is_human_sent = ${Number(humanSent)} WHERE id = ${messageId}`;
 					}
-					const touch = isEventType(event, "message.removed")
-						? {
-								...(yield* stampSessions([event.sessionId], ctx.version)),
-								collections: ["sessions", "messages"] as const,
-							}
-						: yield* stampMessage(written, ctx);
-					if (
-						event.type !== "message.removed" &&
-						event.type !== "message.part.removed" &&
-						!replacesUserMessage
-					)
+					const touch = yield* stampMessage(written, ctx);
+					if (event.type !== "message.part.removed" && !replacesUserMessage)
 						return touch;
 					const changed = yield* refreshLastUserMessageAt(
 						event.sessionId,
