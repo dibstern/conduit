@@ -24,12 +24,7 @@ export function createTitleModelSelectionTarget() {
 		(saving ? localSelection : discoveryState.titleGeneration.selection) ??
 			BUILTIN_TITLE_GENERATION,
 	);
-	// Enable drivers as their text generators land.
-	const accounts = $derived(
-		getAvailableInstances().filter((account) =>
-			["claude", "cursor"].includes(account.driver),
-		),
-	);
+	const accounts = $derived(getAvailableInstances());
 	const accountId = $derived.by(() => {
 		const ref = selection.account;
 		return ref._tag === "Id"

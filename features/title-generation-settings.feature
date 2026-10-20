@@ -7,7 +7,7 @@ Scenario Outline: Title generation uses the shared picker and saves a specific C
   When I open settings to the Models & agents section
   Then title generation explains session titles and uses the built-in default
   When I open the title generation picker
-  Then the title generation picker offers only the Claude harness
+  Then the title generation picker offers the Claude and OpenCode harnesses
   When I choose Work Claude, Sonnet 5 and high effort for titles
   Then the title generation RPC saves the specific Work Claude Sonnet high selection
   And the title-generation-picker region visually matches <picker_baseline> at <threshold> percent
