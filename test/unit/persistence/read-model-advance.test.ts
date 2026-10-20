@@ -91,6 +91,58 @@ const withPersistence = async <A>(
 	}
 };
 
+it("a goal check announces goalStuck in the same session update", async () => {
+	await withPersistence((advances) =>
+		Effect.gen(function* () {
+			const commit = yield* makeCommitAndSignal;
+			const read = yield* ReadQueryEffectTag;
+			yield* commit([
+				canonicalEvent(
+					"session.created",
+					"goal-header",
+					{
+						sessionId: "goal-header",
+						title: "Synthetic goal",
+						provider: "claude",
+					},
+					{ provider: "claude", createdAt: 1 },
+				),
+			]);
+			for (let iterations = 1; iterations <= 3; iterations++) {
+				yield* commit([
+					canonicalEvent(
+						"session.goal_changed",
+						"goal-header",
+						{
+							sessionId: "goal-header",
+							goal: {
+								condition: "Publish the synthetic release",
+								setAt: 100,
+								tokensAtStart: 0,
+								iterations,
+								lastReason:
+									"The synthetic release is blocked because review approval is missing.",
+							},
+						},
+						{ provider: "claude", createdAt: 100 + iterations * 100 },
+					),
+				]);
+			}
+			const row = yield* read.getSession("goal-header");
+			if (!row) throw new Error("Missing synthetic session");
+			expect(advances.at(-1)).toMatchObject({
+				version: row.version,
+				sessionIds: ["goal-header"],
+			});
+			expect(sessionRowsToSessionInfoList([row])[0]?.goalStuck).toEqual({
+				since: 200,
+				lastAt: 400,
+				count: 3,
+			});
+		}),
+	);
+});
+
 it("a committed session write announces the session and stamps its row", async () => {
 	await withPersistence((advances) =>
 		Effect.gen(function* () {

@@ -99,6 +99,7 @@ export const SESSIONS_SETTLED_SHELF_INDEX_MIGRATION =
 export const SURFACING_MARKS_MIGRATION = "0065_surfacing_marks.sql";
 export const MESSAGE_PART_READ_MIGRATION = "0066_message_part_read.sql";
 export const TURN_RECAPS_MIGRATION = "0067_turn_recaps.sql";
+export const SESSIONS_GOAL_STUCK_MIGRATION = "0068_sessions_goal_stuck.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

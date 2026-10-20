@@ -27,6 +27,7 @@ export interface SessionRow {
 	variant?: string | null;
 	context_window?: string | null;
 	goal_state?: string | null;
+	goal_stuck?: string | null;
 	limit_recovery?: string | null;
 	/** JSON array of SessionResume, oldest first. */
 	resumes?: string | null;

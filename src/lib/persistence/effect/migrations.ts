@@ -48,6 +48,7 @@ import {
 	SESSIONS_AUTO_SETTLE_MIGRATION,
 	SESSIONS_CLAUDE_WORKTREE_STATE_MIGRATION,
 	SESSIONS_FORKED_FROM_MIGRATION,
+	SESSIONS_GOAL_STUCK_MIGRATION,
 	SESSIONS_HISTORY_COMPLETE_MIGRATION,
 	SESSIONS_LAST_TURN_END_INPUT_ID_MIGRATION,
 	SESSIONS_LAST_TURN_ERROR_MIGRATION,
@@ -495,6 +496,7 @@ const appendedSessionColumns = [
 	"pending_rewind_message_id",
 	"project_id",
 	"forked_from",
+	"goal_stuck",
 ] as const;
 
 function sameStrings(
@@ -1278,6 +1280,11 @@ export const effectMigrationEntries = {
 	),
 	"0068_turn_recaps": executeSqlStatements(
 		readMigrationSql(TURN_RECAPS_MIGRATION),
+	),
+	"0069_sessions_goal_stuck": runAddColumnMigrationIfMissing(
+		"sessions",
+		"goal_stuck",
+		readMigrationSql(SESSIONS_GOAL_STUCK_MIGRATION),
 	),
 } satisfies Record<
 	string,

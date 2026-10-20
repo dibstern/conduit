@@ -242,7 +242,11 @@ describe("legacy Fork migration", () => {
 				const unchanged = ["source", "subagent", "modern-fork", "unrelated"];
 				expect(
 					yield* sql`SELECT * FROM sessions WHERE id IN ('source', 'subagent', 'modern-fork', 'unrelated') ORDER BY id`,
-				).toEqual(before.filter((row) => unchanged.includes(String(row.id))));
+				).toEqual(
+					before
+						.filter((row) => unchanged.includes(String(row.id)))
+						.map((row) => ({ ...row, goal_stuck: null })),
+				);
 				expect((yield* sidebar).map(({ session_id }) => session_id)).toEqual([
 					"event-fork",
 					"fork",
@@ -381,7 +385,7 @@ describe("legacy Fork migration", () => {
 				for (let run = 0; run < 2; run++) {
 					yield* makeEffectSqlMigrator();
 					expect(yield* sql`SELECT * FROM sessions ORDER BY id`).toEqual(
-						before,
+						before.map((row) => ({ ...row, goal_stuck: null })),
 					);
 					expect(
 						yield* sql`SELECT * FROM session_sidebar ORDER BY session_id`,

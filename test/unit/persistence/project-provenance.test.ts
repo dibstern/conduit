@@ -119,6 +119,7 @@ describe("Bound project provenance", () => {
 			"0066_surfacing_marks",
 			"0067_message_part_read",
 			"0068_turn_recaps",
+			"0069_sessions_goal_stuck",
 		]);
 	});
 

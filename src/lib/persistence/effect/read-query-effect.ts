@@ -31,6 +31,7 @@ import {
 } from "../../session/claude-worktree-state.js";
 import type { SessionSkillMessage } from "../../session/session-skills.js";
 import {
+	GoalStuckSchema,
 	type SessionAttention,
 	type SessionInfo,
 	SessionPermissionModeSchema,
@@ -273,6 +274,13 @@ export const sessionRowsToSessionInfoList = (
 					)
 				: undefined,
 			...(row.goal_state ? { goalState: sessionGoalState(row) } : {}),
+			...(row.goal_stuck
+				? {
+						goalStuck: Schema.decodeUnknownSync(
+							Schema.parseJson(GoalStuckSchema),
+						)(row.goal_stuck),
+					}
+				: {}),
 			...(isSessionPermissionMode(row.permission_mode)
 				? { permissionMode: row.permission_mode }
 				: {}),
