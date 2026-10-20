@@ -215,9 +215,7 @@
 		<BitsPopover.Portal to={sheetScrim.portalTo}>
 			{@render scrim()}
 		</BitsPopover.Portal>
-	{/if}
-
-	<BitsPopover.Portal {...portalProps}>
+	{/if}<BitsPopover.Portal {...portalProps}>
 		{#if sheet}
 			{#if open && (!modal || sheetEl) && sheetScrim?.portalTo === undefined}{@render scrim()}{/if}
 			<BitsPopover.ContentStatic {...sheetContentProps} bind:ref={sheetEl}>
