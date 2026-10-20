@@ -24,9 +24,11 @@ export function createTitleModelSelectionTarget() {
 		(saving ? localSelection : discoveryState.titleGeneration) ??
 			BUILTIN_TITLE_GENERATION,
 	);
-	// Remove this filter when OpenCode and Cursor generation land in 9mbo.6/.7.
+	// Enable drivers as their text generators land.
 	const accounts = $derived(
-		getAvailableInstances().filter((account) => account.driver === "claude"),
+		getAvailableInstances().filter((account) =>
+			["claude", "cursor"].includes(account.driver),
+		),
 	);
 	const accountId = $derived.by(() => {
 		const ref = selection.account;

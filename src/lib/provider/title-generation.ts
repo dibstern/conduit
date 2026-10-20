@@ -36,13 +36,12 @@ export function resolveTitleGeneration(
 		...selection,
 		account: { _tag: "Id", id: account.id },
 	};
-	// Remove this restriction when the OpenCode and Cursor generators land.
-	// driver-dispatch-ok: this ticket limits title generation to Claude until 9mbo.6/.7.
-	if (account.driver !== "claude")
+	// driver-dispatch-ok: title generation is enabled as each adapter lands.
+	if (!["claude", "cursor"].includes(account.driver))
 		return {
 			pick,
 			status: "invalid",
-			problem: "Title generation currently requires a Claude account",
+			problem: "Title generation is not available for this account",
 		};
 	const catalog = catalogFor(account);
 	const resolved = resolveTurnSettings(

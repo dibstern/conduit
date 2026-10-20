@@ -31,6 +31,11 @@ import type { StoredEvent } from "../../../src/lib/persistence/events.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { ClaudeOneShotQueryFactory } from "../../../src/lib/provider/claude/claude-provider-runtime.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import { makeCursorProviderRuntime } from "../../../src/lib/provider/cursor/cursor-provider-runtime.js";
+import {
+	ProviderRegistry,
+	ProviderRegistryTag,
+} from "../../../src/lib/provider/provider-registry.js";
 import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
 	makeClaudeTextGenerationLayer,
@@ -63,13 +68,15 @@ function makeTestLayer(input: {
 	readonly logger?: ReturnType<typeof makeMockLogger>;
 	readonly accounts?: ReturnType<typeof makeMockAccountDirectory>;
 	readonly adapterConfigDir?: string;
+	readonly providerLayer?: Layer.Layer<ProviderRegistryTag>;
 }) {
 	const ws = input.wsHandler ?? makeWebSocketHandler().handler;
 	const deps = Layer.mergeAll(
 		Layer.succeed(AccountDirectory)(
 			input.accounts ?? makeMockAccountDirectory(),
 		),
-		makeClaudeTextGenerationLayer(input.queryFactory, input.adapterConfigDir),
+		input.providerLayer ??
+			makeClaudeTextGenerationLayer(input.queryFactory, input.adapterConfigDir),
 		Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 		Layer.succeed(LoggerTag)(input.logger ?? makeMockLogger()),
 		Layer.succeed(WebSocketHandlerTag)(ws),
@@ -324,6 +331,79 @@ describe("session title helpers", () => {
 });
 
 describe("SessionTitleService", () => {
+	it.effect(
+		"generates the title with the selected Cursor account by replaying captured SDK traffic",
+		() => {
+			const configDir = mkdtempSync(
+				join(tmpdir(), "conduit-cursor-title-service-"),
+			);
+			const accounts = makeMockAccountDirectory([
+				{
+					driver: "cursor",
+					id: AccountIdSchema.make("cursor-titles"),
+					name: "Cursor titles",
+					usageEligible: false,
+					env: { CURSOR_API_KEY: "[REDACTED:environment]" },
+				},
+			]);
+			vi.stubEnv(
+				"CONDUIT_CURSOR_SDK_TRACE",
+				join(
+					import.meta.dirname,
+					"../../fixtures/cursor-sdk-traces/title-generation.jsonl",
+				),
+			);
+			saveRelaySettings(
+				{
+					titleGeneration: {
+						account: { _tag: "Id", id: "cursor-titles" },
+						providerId: "cursor",
+						modelId: "composer-2.5",
+						effort: "",
+					},
+				},
+				configDir,
+			);
+			const queryFactory = vi.fn(() => replayClaudeText());
+			const layer = makeTestLayer({
+				queryFactory,
+				config: makeMockConfig({ configDir }),
+				accounts,
+				providerLayer: Layer.effect(
+					ProviderRegistryTag,
+					makeCursorProviderRuntime({
+						workspaceRoot: process.cwd(),
+						daemonConfigDir: configDir,
+						accounts: accounts.snapshot,
+					}).pipe(Effect.map((provider) => new ProviderRegistry([provider]))),
+				),
+			});
+			return Effect.gen(function* () {
+				const service = yield* SessionTitleServiceTag;
+				yield* seedSessionRow("cursor-title");
+				yield* service.titleFromMessage({
+					sessionId: "cursor-title",
+					message: "Fix login redirect loop",
+				});
+				yield* waitForSessionProjectorToReachLatestRename("cursor-title");
+				expect(yield* getSessionTitle("cursor-title")).toBe(
+					"Fix login redirect loop",
+				);
+				expect(yield* getRenameEvents("cursor-title")).toHaveLength(1);
+				expect(queryFactory).not.toHaveBeenCalled();
+				expect(readdirSync(join(configDir, "text-generation"))).toEqual([]);
+			}).pipe(
+				Effect.provide(layer),
+				Effect.ensuring(
+					Effect.sync(() => {
+						vi.unstubAllEnvs();
+						rmSync(configDir, { recursive: true, force: true });
+					}),
+				),
+			);
+		},
+	);
+
 	it.effect(
 		"reads account, model and effort again for the next title without restarting",
 		() => {
