@@ -12,6 +12,11 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 	},
 	"message.created": { produced: true },
 	"text.delta": { produced: true },
+	"text.surfaced": {
+		produced: false,
+		reason:
+			"Daemon-owned surfacing verdict; never emitted by a provider adapter",
+	},
 	"thinking.start": { produced: true },
 	"thinking.delta": { produced: true },
 	"thinking.end": { produced: true },
@@ -37,7 +42,7 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 	},
 	"message.removed": {
 		produced: false,
-		reason: "OpenCode SSE or relay-owned rewind commits; not SDK translation",
+		reason: "OpenCode SSE message removal; not SDK translation",
 	},
 	"message.part.removed": {
 		produced: false,
@@ -78,7 +83,7 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 	},
 	"session.rewind_committed": {
 		produced: false,
-		reason: "Relay-owned send admission commits the cut",
+		reason: "Relay-owned cut committed at send admission or upstream removal",
 	},
 	"session.provider_changed": {
 		produced: false,

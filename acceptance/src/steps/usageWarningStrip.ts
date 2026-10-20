@@ -133,15 +133,13 @@ export const usageWarningStripHandlers: StepHandler[] = [
 			);
 			await expect(dismiss).toBeVisible();
 			await expect(dismiss).toHaveAccessibleName("Dismiss usage warning");
+			await expect(dismiss).toHaveText(phone ? "Dismiss" : "");
 			if (several) {
 				await expect(details).toHaveCount(0);
 				await expect(switchAccount).toBeVisible();
 				await expect(switchAccount).toHaveText("Switch account");
 				await expect(switchAccount.locator("svg")).toHaveCount(phone ? 0 : 1);
-				await expect(switchAccount).toHaveCSS(
-					"height",
-					phone ? "34px" : "24px",
-				);
+				await expect(switchAccount).toHaveCSS("height", "30px");
 			} else {
 				await expect(switchAccount).toHaveCount(0);
 				if (phone) await expect(details).toHaveCount(0);
@@ -163,7 +161,7 @@ export const usageWarningStripHandlers: StepHandler[] = [
 								Node.DOCUMENT_POSITION_FOLLOWING,
 						);
 					}, actionId),
-				).toBe(phone);
+				).toBe(false);
 			}
 		},
 	},
@@ -192,8 +190,8 @@ export const usageWarningStripHandlers: StepHandler[] = [
 			]);
 			if (!warningBox || !contextBox || !inputBox)
 				throw new Error("Missing stacked warning geometry");
-			expect(warningBox.y + warningBox.height).toBeLessThan(contextBox.y);
-			expect(contextBox.y + contextBox.height).toBeLessThan(inputBox.y);
+			expect(warningBox.y + warningBox.height).toBeCloseTo(contextBox.y, 0);
+			expect(contextBox.y + contextBox.height).toBeCloseTo(inputBox.y, 0);
 			expect(warningBox.x).toBeCloseTo(contextBox.x, 0);
 			expect(warningBox.width).toBeCloseTo(contextBox.width, 0);
 			const styles = await world.page.evaluate(() =>
@@ -202,17 +200,16 @@ export const usageWarningStripHandlers: StepHandler[] = [
 					if (!strip) throw new Error("Missing warning strip styles");
 					const style = getComputedStyle(strip);
 					return [
-						style.borderTopColor,
 						style.backgroundColor,
-						style.borderRadius,
 						style.padding,
 						style.fontSize,
 						style.gap,
-						strip.querySelector("svg")?.getAttribute("width"),
 					];
 				}),
 			);
 			expect(styles[0]).toEqual(styles[1]);
+			await expect(warning).toHaveCSS("border-radius", "16px 16px 0px 0px");
+			await expect(context).toHaveCSS("border-radius", "0px");
 		},
 	},
 	{

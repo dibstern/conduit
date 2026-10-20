@@ -82,6 +82,7 @@
 	let {
 		tone = "muted",
 		underline = "none",
+		touchTarget = false,
 		disabled = false,
 		type = "button",
 		class: className,
@@ -92,6 +93,8 @@
 		tone?: TextButtonTone;
 		/** `always` for link-like text, `hover` for a reveal-on-hover affordance. */
 		underline?: keyof typeof UNDERLINE_CLASSES;
+		/** Keep the text compact while providing a 44px phone tap area. */
+		touchTarget?: boolean;
 		disabled?: boolean;
 		type?: "button" | "submit" | "reset";
 		class?: string;
@@ -106,6 +109,7 @@
 	const buttonClass = $derived(
 		[
 			BASE_CLASSES,
+			touchTarget ? "relative before:absolute before:content-[''] before:left-1/2 before:top-1/2 before:-translate-x-1/2 before:-translate-y-1/2 before:size-full before:min-h-[44px] before:min-w-[44px] md:before:hidden" : "",
 			TONE_CLASSES[tone].rest,
 			disabled ? "" : TONE_CLASSES[tone].hover,
 			UNDERLINE_CLASSES[underline],

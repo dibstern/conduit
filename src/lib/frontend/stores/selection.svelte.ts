@@ -169,6 +169,9 @@ export function watchSelection(): () => void {
 		});
 		let alive = true;
 		const attaching = new Set<string>();
+		// An attach by session id places that session itself, so a row placing
+		// it while the reply is out must not send a second attach.
+		let sessionAttach = $state<string | null>(null);
 		const resolving = new Set<string>();
 		let attachedOnce = attachedProjectState.slug !== null;
 		let previousAttached = attachedProjectState.slug;
@@ -254,11 +257,15 @@ export function watchSelection(): () => void {
 			const current = shown;
 			const route = getCurrentRoute();
 			const connected = getIsConnected();
+			const pendingSession = sessionAttach;
 			untrack(() => {
 				if (previousAttached !== null && attached === null)
 					attachedOnce = false;
 				previousAttached = attached;
 				if (!connected || route.page !== "chat") return;
+				const routeSessionId = route.sessionId ?? null;
+				if (pendingSession !== null && pendingSession === routeSessionId)
+					return;
 				const sessionId =
 					current.kind === "placing" || current.kind === "drawn"
 						? current.sessionId
@@ -267,9 +274,14 @@ export function watchSelection(): () => void {
 					(wanted !== null && wanted !== attached) ||
 					(!attachedOnce && attached === null)
 				) {
-					const key = JSON.stringify([wanted, sessionId]);
+					// Learning this session's project must not start another attach.
+					const key = JSON.stringify([
+						routeSessionId ? null : wanted,
+						routeSessionId,
+					]);
 					if (attaching.has(key)) return;
 					attaching.add(key);
+					if (sessionId) sessionAttach = sessionId;
 					void rpc("AttachProject", {
 						originId: getBrowserClientId(),
 						...(sessionId
@@ -279,11 +291,13 @@ export function watchSelection(): () => void {
 								: {}),
 					})
 						.then(({ projectSlug, sessionSlug }) => {
+							attaching.delete(key);
 							if (!alive) return;
 							// Place only this reply's id; a delete always wins over a late reply.
 							const matches =
-								wantedProject === wanted &&
-								(!sessionId || getCurrentSessionId() === sessionId);
+								getCurrentSessionId() === routeSessionId &&
+								(wantedProject === wanted ||
+									(sessionId !== null && wantedProject === sessionSlug));
 							if (sessionId && placement.get(sessionId) !== "deleted")
 								placement.set(
 									sessionId,
@@ -303,12 +317,16 @@ export function watchSelection(): () => void {
 								if (placement.get(sessionId) !== "deleted")
 									placement.set(sessionId, "missing");
 							} else if (
-								wantedProject === wanted &&
-								(!sessionId || getCurrentSessionId() === sessionId)
+								getCurrentSessionId() === routeSessionId &&
+								(routeSessionId !== null || wantedProject === wanted)
 							)
 								toastFailure("Failed to switch projects")(error);
 						})
-						.finally(() => attaching.delete(key));
+						.finally(() => {
+							attaching.delete(key);
+							if (sessionId && sessionAttach === sessionId)
+								sessionAttach = null;
+						});
 					return;
 				}
 				if (!sessionId || resolving.has(sessionId)) return;

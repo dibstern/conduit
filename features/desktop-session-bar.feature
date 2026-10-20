@@ -1,5 +1,9 @@
 Feature: Desktop merged session bar
 
+Scenario: Settle distinguishes keyboard focus from its resting capsule
+  Given the conduit app is served with the long-transcript mockup
+  Then the Settle segment shows a focus ring after tabbing and clears it after a pointer click
+
 Scenario Outline: The merged bar contains the global actions
   Given the conduit app is served with the long-transcript mockup
   Then the desktop session bar remains one row
@@ -30,7 +34,7 @@ Scenario Outline: header has no checkout
   And a named OpenCode instance Bedrock is already configured
   And the composer uses words controls
   And the composer checkout is conduit / account-chip as worktree
-  Then the composer checkout shows conduit / account-chip with a worktree icon
+  Then the composer checkout shows account-chip with a worktree icon
   And the skills chip reads 3 skills used
   And the session header has no checkout
   And the session header has no account or instance control

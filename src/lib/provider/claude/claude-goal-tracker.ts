@@ -12,6 +12,7 @@ export interface ClaudeGoalStatus {
 	readonly failed?: boolean;
 	readonly condition?: string;
 	readonly reason?: string;
+	readonly judgeModel?: string;
 }
 
 export type ReadClaudeGoalStatus = (input: {
@@ -73,6 +74,10 @@ export const readClaudeGoalStatus: ReadClaudeGoalStatus = async (input) => {
 				...(typeof attachment["reason"] === "string"
 					? { reason: attachment["reason"] }
 					: {}),
+				...(typeof attachment["judgeModel"] === "string" &&
+				attachment["judgeModel"].trim()
+					? { judgeModel: attachment["judgeModel"].trim() }
+					: {}),
 			};
 		}
 		return undefined;
@@ -98,12 +103,28 @@ export class ClaudeGoalTracker {
 		return this.state.goal;
 	}
 
+	/** active_goal can clear before the terminal goal_status attachment. */
+	get unsettledGoal(): SessionGoalChangedPayload["goal"] {
+		return (
+			this.goal ??
+			(this.state.ended === undefined ? (this.state.endedGoal ?? null) : null)
+		);
+	}
+
 	observe(
 		message: SDKMessage,
 		cumulativeTokens: number,
 	): SessionGoalChangedPayload | undefined {
 		if (message.type === "active_goal") {
 			const value = message.value;
+			const previous = this.unsettledGoal;
+			const judgeModel =
+				value && "judge_model" in value && typeof value.judge_model === "string"
+					? value.judge_model.trim() || undefined
+					: previous?.condition === value?.condition &&
+							previous?.setAt === value?.set_at
+						? previous?.judgeModel
+						: undefined;
 			return this.update(
 				{
 					sessionId: this.sessionId,
@@ -113,11 +134,13 @@ export class ClaudeGoalTracker {
 								iterations: value.iterations,
 								setAt: value.set_at,
 								tokensAtStart: value.tokens_at_start,
+								...(judgeModel ? { judgeModel } : {}),
 								...(value.last_reason !== undefined
 									? { lastReason: value.last_reason }
 									: {}),
 							}
 						: null,
+					...(!value && previous ? { endedGoal: previous } : {}),
 				},
 				message.uuid,
 			);
@@ -193,6 +216,9 @@ export class ClaudeGoalTracker {
 						iterations: Number(status[2]),
 						setAt: previous?.setAt ?? Date.now(),
 						tokensAtStart: previous?.tokensAtStart ?? cumulativeTokens,
+						...(previous?.judgeModel
+							? { judgeModel: previous.judgeModel }
+							: {}),
 						...(reason !== undefined ? { lastReason: reason } : {}),
 					},
 				},
@@ -203,22 +229,35 @@ export class ClaudeGoalTracker {
 	}
 
 	settle(status: ClaudeGoalStatus): SessionGoalChangedPayload | undefined {
+		const current = this.unsettledGoal;
 		if (
-			!this.goal ||
-			(status.condition !== undefined &&
-				status.condition !== this.goal.condition)
+			!current ||
+			(status.condition !== undefined && status.condition !== current.condition)
 		) {
 			return undefined;
 		}
-		if (status.failed) return this.pause(status.reason ?? "Goal check failed");
-		if (status.sentinel || !status.met) return undefined;
+		if (status.sentinel) return undefined;
+		const goal = {
+			...current,
+			...(status.judgeModel ? { judgeModel: status.judgeModel } : {}),
+		};
+		if (status.failed)
+			return this.update({
+				sessionId: this.sessionId,
+				goal,
+				pausedReason: status.reason ?? "Goal check failed",
+			});
+		if (!status.met)
+			return status.judgeModel
+				? this.update({ sessionId: this.sessionId, goal })
+				: undefined;
 		return this.update({
 			sessionId: this.sessionId,
 			goal: null,
 			ended: "met",
 			endedGoal: {
-				...this.goal,
-				iterations: this.goal.iterations + 1,
+				...goal,
+				iterations: goal.iterations + 1,
 				...(status.reason !== undefined ? { lastReason: status.reason } : {}),
 			},
 			endedAt: Date.now(),
@@ -260,8 +299,10 @@ export class ClaudeGoalTracker {
 				goal.setAt === next.goal.setAt &&
 				goal.tokensAtStart === next.goal.tokensAtStart &&
 				goal.lastReason === next.goal.lastReason);
+		const sameJudge = goal?.judgeModel === next.goal?.judgeModel;
 		if (
 			sameGoal &&
+			sameJudge &&
 			current.ended === next.ended &&
 			current.pausedReason === next.pausedReason
 		) {

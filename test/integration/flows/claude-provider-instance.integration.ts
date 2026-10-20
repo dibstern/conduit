@@ -5,10 +5,11 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
+import { Deferred, Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { ClaudeProviderInstanceDeps } from "../../../src/lib/provider/claude/claude-provider-instance.js";
+import { makeClaudeSessionRunner } from "../../../src/lib/provider/claude/claude-provider-runtime.js";
 import type {
 	Query,
 	SDKMessage,
@@ -288,6 +289,81 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 		).toEqual(["busy", "idle"]);
 		expect(statuses[0]?.i).toBe(0);
 		expect(statuses[1]?.i).toBeGreaterThan(turnCompletedIdx);
+	});
+
+	it("reports a replacement query busy while the prior send reply is still in flight", async () => {
+		const priorReplyReady = Effect.runSync(Deferred.make<void>());
+		const releasePriorReply = Effect.runSync(Deferred.make<void>());
+		const queryFactory = vi.fn(() =>
+			createMockQuery([
+				systemInitMessage("sdk-replacement", workspace),
+				makeSuccessResult({ session_id: "sdk-replacement" }),
+			]),
+		);
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory,
+			runnerFactory: (deps, emit) =>
+				Effect.gen(function* () {
+					const runner = yield* makeClaudeSessionRunner(deps, emit);
+					const execute = runner.executeEffect.bind(runner);
+					vi.spyOn(runner, "executeEffect").mockImplementation((command) =>
+						execute(command).pipe(
+							Effect.tap(() =>
+								command.type === "send-turn" &&
+								command.input.inputId === "prior-input"
+									? Deferred.succeed(priorReplyReady, undefined).pipe(
+											Effect.andThen(Deferred.await(releasePriorReply)),
+										)
+									: Effect.void,
+							),
+						),
+					);
+					return runner;
+				}),
+		});
+		const priorSend = Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					inputId: "prior-input",
+					workspaceRoot: workspace,
+					model: { providerId: "claude", modelId: "claude-sonnet-4" },
+				}),
+			),
+		);
+		try {
+			// The runner has settled its turn, but the server still counts this send.
+			await Promise.race([
+				Effect.runPromise(Deferred.await(priorReplyReady)),
+				priorSend.then(() => {
+					throw new Error("Prior send returned before releasing its reply");
+				}),
+			]);
+			const sink = createMockEventSink();
+			const result = await Effect.runPromise(
+				instance.sendTurnEffect(
+					makeBaseSendTurnInput({
+						inputId: "replacement-input",
+						workspaceRoot: workspace,
+						model: { providerId: "claude", modelId: "claude-sonnet-4" },
+						startFreshNativeSession: true,
+						eventSink: sink,
+					}),
+				),
+			);
+			expect(result.status).toBe("completed");
+			expect(queryFactory).toHaveBeenCalledTimes(2);
+			const events = vi.mocked(sink.push).mock.calls.map(([event]) => event);
+			expect(
+				events
+					.filter((event) => event.type === "session.status")
+					.map((event) => (event.data as { status: string }).status),
+			).toEqual(["busy", "idle"]);
+			expect(events[0]?.type).toBe("session.status");
+		} finally {
+			await Effect.runPromise(Deferred.succeed(releasePriorReply, undefined));
+			await priorSend;
+		}
 	});
 
 	it("permission flow: tool_use → canUseTool → requestPermission → allow → tool_result → result", async () => {

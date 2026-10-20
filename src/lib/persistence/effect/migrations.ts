@@ -13,9 +13,12 @@ import {
 	EVENTS_SESSION_TYPE_INDEX_MIGRATION,
 	EVENTS_UNSTAMPED_INDEX_MIGRATION,
 	FORK_POINT_TIMESTAMP_MIGRATION,
+	GOAL_CHECK_METADATA_MIGRATION,
 	INPUT_DRAFTS_MIGRATION,
 	LEGACY_FORKS_MIGRATION,
 	MESSAGE_PART_METADATA_MIGRATION,
+	MESSAGE_PART_READ_MIGRATION,
+	MESSAGE_PART_SURFACING_MIGRATION,
 	MESSAGE_PART_VERSIONS_MIGRATION,
 	MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION,
 	MESSAGE_PARTS_FILE_TYPE_MIGRATION,
@@ -61,15 +64,18 @@ import {
 	SESSIONS_READ_AT_MIGRATION,
 	SESSIONS_RESUMES_MIGRATION,
 	SESSIONS_SETTLED_PINNED_MIGRATION,
+	SESSIONS_SETTLED_SHELF_INDEX_MIGRATION,
 	SESSIONS_SIDE_THREAD_MIGRATION,
 	SESSIONS_SNOOZED_MIGRATION,
 	SESSIONS_WORKSPACE_HINT_MIGRATION,
 	SESSIONS_WORKSPACE_MIGRATION,
 	STARTUP_RESTORE_INDEXES_MIGRATION,
 	STORE_IDENTITY_MIGRATION,
+	SURFACING_MARKS_MIGRATION,
 	TOOL_CALL_INDEX_MIGRATION,
 	TOOL_RESULT_EVENT_REFS_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
+	TURN_RECAPS_MIGRATION,
 } from "../schema.js";
 import {
 	NEVER_CUT_TOOL_NAMES,
@@ -1362,7 +1368,52 @@ export const effectMigrationEntries = {
 		if (existing.length > 0) return;
 		yield* executeSqlStatements(readMigrationSql(INPUT_DRAFTS_MIGRATION));
 	}),
-	"0069_provider_run_ownership": Effect.gen(function* () {
+	"0069_goal_check_metadata": Effect.gen(function* () {
+		const statements = splitSqlStatements(
+			readMigrationSql(GOAL_CHECK_METADATA_MIGRATION),
+		);
+		for (const [index, column] of ["turn_index", "judge_model"].entries()) {
+			const statement = statements[index];
+			if (statement)
+				yield* runAddColumnMigrationIfMissing(
+					"session_goal_checks",
+					column,
+					statement,
+				);
+		}
+	}),
+	"0070_message_part_surfacing": Effect.gen(function* () {
+		const statements = splitSqlStatements(
+			readMigrationSql(MESSAGE_PART_SURFACING_MIGRATION),
+		);
+		for (const [index, column] of [
+			"surfacing_ordinal",
+			"surfacing_probabilities",
+			"surfacing_set_version",
+			"surfacing_model",
+		].entries()) {
+			const statement = statements[index];
+			if (statement)
+				yield* runAddColumnMigrationIfMissing(
+					"message_parts",
+					column,
+					statement,
+				);
+		}
+	}),
+	"0071_sessions_settled_shelf_index": executeSqlStatements(
+		readMigrationSql(SESSIONS_SETTLED_SHELF_INDEX_MIGRATION),
+	),
+	"0072_surfacing_marks": executeSqlStatements(
+		readMigrationSql(SURFACING_MARKS_MIGRATION),
+	),
+	"0073_message_part_read": executeSqlStatements(
+		readMigrationSql(MESSAGE_PART_READ_MIGRATION),
+	),
+	"0074_turn_recaps": executeSqlStatements(
+		readMigrationSql(TURN_RECAPS_MIGRATION),
+	),
+	"0075_provider_run_ownership": Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const columns = yield* sql<{ name: string }>`PRAGMA table_info(turns)`;
 		const alreadyOwned = columns.some(({ name }) => name === "run_id");

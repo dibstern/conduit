@@ -250,8 +250,13 @@ for (const action of ["sidebar", "reply"] as const) {
 			await openMenu(page, seed);
 			await page.getByTestId("session-ctx-fork").click();
 		} else {
-			await page.getByText("Existing answer", { exact: true }).hover();
-			await page.getByRole("button", { name: "Fork from here" }).click();
+			const header = page.locator(
+				'.assistant-header[data-message-id="session-error-reply"]',
+			);
+			await header.hover();
+			await header
+				.getByRole("button", { name: "Fork from here", exact: true })
+				.click();
 		}
 		const request = await rpc.waitForRequest(
 			({ tag }) => tag === "ForkSession",

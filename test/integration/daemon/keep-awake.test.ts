@@ -131,6 +131,12 @@ describe("daemon keep-awake", () => {
 					_tag: "SetKeepAwake",
 					enabled: true,
 				});
+				expect(
+					Either.getOrThrowWith(
+						loadDaemonConfigResult(harness.configDir),
+						(error) => error,
+					).keepAwake,
+				).toBe(true);
 				expect(enabled).toEqual({ ok: true, supported: true, active: true });
 				const original = await waitForChild(
 					initial.pid,
@@ -146,6 +152,15 @@ describe("daemon keep-awake", () => {
 					_tag: "SetKeepAwakeCommand",
 					command: "sleep",
 					args: ["86400"],
+				});
+				expect(
+					Either.getOrThrowWith(
+						loadDaemonConfigResult(harness.configDir),
+						(error) => error,
+					),
+				).toMatchObject({
+					keepAwakeCommand: "sleep",
+					keepAwakeArgs: ["86400"],
 				});
 				const replacement = await waitForChild(
 					initial.pid,

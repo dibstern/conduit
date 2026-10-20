@@ -1,7 +1,11 @@
 import { expect, type Page, type WebSocketRoute } from "@playwright/test";
 import { Cause, Effect, Exit, Schema, Scope, Stream } from "effect";
 import { RpcSchema } from "effect/rpc";
+import { DEFAULT_CATEGORY_SET } from "../../../src/lib/contracts/category-set.js";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
+import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/message-surfacing.js";
+import { DEFAULT_TERMINAL_KEYS } from "../../../src/lib/contracts/terminal-keys.js";
+import type { Avatar } from "../../../src/lib/contracts/user-avatar.js";
 import {
 	DEFAULT_WORKTREE_CLEANUP,
 	type ProjectWorktreeCleanup,
@@ -22,6 +26,7 @@ import {
 import { isRecord } from "../../../src/lib/utils.js";
 import { makeRpcStream, serveRpc } from "../../helpers/rpc-wire.js";
 import type { StubTable } from "../../helpers/stub-ws-rpc.js";
+import { defaultInstances } from "../fixtures/mockup-state.js";
 import {
 	mockDetailPage,
 	mockDetailSnapshot,
@@ -113,6 +118,8 @@ export class RpcMockControl {
 	readonly worktreeCleanupProjects = new Map<string, ProjectWorktreeCleanup>();
 	onConnect?: () => void;
 	onSendMessage?: (payload: Record<string, unknown>) => void;
+	/** Observe a unary reply after it has been sent to the browser. */
+	onReply?: (request: RecordedRpcRequest) => void;
 	private readonly sockets = new Set<WebSocketRoute>();
 	private connectionCount = 0;
 	private readonly requests: RecordedRpcRequest[] = [];
@@ -130,6 +137,12 @@ export class RpcMockControl {
 	familyRows: readonly unknown[] | null = null;
 	private familySequence = 0;
 	catalog: MockCatalog = {};
+	terminalKeys = DEFAULT_TERMINAL_KEYS;
+	avatar: Avatar = {
+		choice: { kind: "initial" },
+		name: "You",
+		macPicture: null,
+	};
 	private shellSequence = 0;
 	private readonly projectSettings = new Map<string, ProjectSetting>();
 	private projectSettingsSequence = 0;
@@ -333,6 +346,8 @@ export class RpcMockControl {
 	/** Publish one project-setting fact, the way another tab's or the CLI's
 	 *  write reaches every open SubscribeProjectSettings stream. */
 	setProjectSetting(setting: ProjectSetting): void {
+		if (setting._tag === "terminalKeys")
+			this.terminalKeys = setting.terminalKeys;
 		this.projectSettings.set(setting._tag, setting);
 		this.projectSettingsSequence++;
 		if (this.streams.has("SubscribeProjectSettings"))
@@ -541,7 +556,7 @@ export class RpcMockControl {
 			: tag === "SubscribeUsage"
 				? [{ readings: [] }]
 				: tag === "SubscribeInstances"
-					? [{ instances: [] }]
+					? [{ instances: defaultInstances }]
 					: [];
 	}
 
@@ -673,7 +688,15 @@ const pendingProjects = new WeakMap<Page, Record<string, unknown>>();
 const pendingFamilyRows = new WeakMap<Page, readonly unknown[]>();
 const pendingProjectSlugs = new WeakMap<Page, string>();
 const pendingCatalogs = new WeakMap<Page, MockCatalog>();
+const pendingAvatars = new WeakMap<Page, Avatar>();
 const pendingProjectSettings = new WeakMap<Page, ProjectSetting[]>();
+
+/** Seed before navigation, or change what a reconnect reads from the daemon. */
+export function setMockAvatar(page: Page, avatar: Avatar): void {
+	pendingAvatars.set(page, avatar);
+	const control = controls.get(page);
+	if (control) control.avatar = avatar;
+}
 
 export function setMockRpcProjectSlug(page: Page, slug: string): void {
 	const control = controls.get(page);
@@ -971,6 +994,19 @@ function socketTable(
 					)(response);
 					return response;
 				});
+				// Setting writes must survive the follow-up GetModels read.
+				if (isRecord(value)) {
+					if (rpc._tag === "SwitchVariant")
+						control.catalog.variant = {
+							variant: value["variant"],
+							variants: value["variants"],
+						};
+					if (rpc._tag === "SwitchContextWindow")
+						control.catalog.contextWindow = {
+							contextWindow: value["contextWindow"],
+							options: value["options"],
+						};
+				}
 				if (
 					draftId &&
 					isRecord(value) &&
@@ -1006,9 +1042,26 @@ export async function mockWsRpc(
 	page: Page,
 	options: RpcMockOptions = {},
 ): Promise<RpcMockControl> {
+	// Vite preview has no daemon HTTP edge. Redials accept /info without a
+	// buildId, as they do for an older daemon.
+	await page.route("**/info", (route) =>
+		route.fulfill({ json: MOCK_SERVER_STATUS }),
+	);
 	const control = controls.get(page) ?? new RpcMockControl(page);
 	controls.set(page, control);
 	control.stubs = {
+		GetMessageSurfacing: () => ({
+			...DEFAULT_MESSAGE_SURFACING_SETTINGS,
+			active: false,
+			key: { source: "none", rejected: false },
+		}),
+		GetCategorySet: () => DEFAULT_CATEGORY_SET,
+		ListRecaps: () => [],
+		SubscribeRecaps: () =>
+			Stream.concat(
+				Stream.succeed({ versions: [], generating: false, error: null }),
+				Stream.never,
+			),
 		"input.submit": ({ sessionId }) => ({
 			ok: true,
 			sessionId,
@@ -1047,6 +1100,16 @@ export async function mockWsRpc(
 			login: { state: "idle" },
 		}),
 		GetStatus: () => MOCK_SERVER_STATUS,
+		GetAvatar: () => control.avatar,
+		SetAvatar: ({ choice }) => {
+			control.avatar = { ...control.avatar, choice };
+			return control.avatar;
+		},
+		GetTerminalKeys: () => ({ terminalKeys: control.terminalKeys }),
+		SetTerminalKeys: ({ terminalKeys }) => {
+			control.setProjectSetting({ _tag: "terminalKeys", terminalKeys });
+			return { terminalKeys };
+		},
 		GetWorktreeCleanupSetting: ({ projectSlug }) => ({
 			global: control.worktreeCleanupGlobal,
 			...(projectSlug !== undefined && {
@@ -1083,6 +1146,8 @@ export async function mockWsRpc(
 	};
 	control.projectSlug = pendingProjectSlugs.get(page) ?? control.projectSlug;
 	control.catalog = pendingCatalogs.get(page) ?? control.catalog;
+	control.avatar = pendingAvatars.get(page) ?? control.avatar;
+	pendingAvatars.delete(page);
 	subscribeMockDetail(page, (sessionId, envelope) => {
 		if (control.hasStream("SubscribeSessionDetail", sessionId))
 			control.sendChunk("SubscribeSessionDetail", [envelope], sessionId);
@@ -1098,6 +1163,13 @@ export async function mockWsRpc(
 	for (const setting of pendingProjectSettings.get(page) ?? [])
 		control.setProjectSetting(setting);
 	pendingProjectSettings.delete(page);
+	// The mock is the server, so it answers the redial build check too. Under
+	// vite preview /info is the SPA's HTML, so the check would retry forever and
+	// a dropped socket would never reconnect. No buildId reads as "dial at once".
+	await page.route(
+		(url) => url.pathname === "/info",
+		(route) => route.fulfill({ json: {} }),
+	);
 	await page.routeWebSocket(/\/rpc/, (ws: WebSocketRoute) => {
 		const scope = Effect.runSync(Scope.make());
 		const onClose = () => control.unregisterSocket(ws);
@@ -1114,15 +1186,18 @@ export async function mockWsRpc(
 		page.once("close", onClose);
 		const requests = new Map<string, EffectRpcRequest[]>();
 		const submissions = new Map<string, Record<string, unknown>>();
+		const requestsById = new Map<string, RecordedRpcRequest>();
 		const ready = Effect.runPromise(
 			serveRpc(socketTable(ws, options, control, requests), (json) =>
 				Effect.sync(() => {
 					if (closed) return;
 					ws.send(json);
-					if (submissions.size === 0) return;
 					const frame: unknown = JSON.parse(json);
 					if (!isRecord(frame) || frame["_tag"] !== "Exit") return;
 					const id = String(frame["requestId"]);
+					const request = requestsById.get(id);
+					requestsById.delete(id);
+					if (request) control.onReply?.(request);
 					const payload = submissions.get(id);
 					submissions.delete(id);
 					// Replay a submitted turn after its answer, as the old mock did.
@@ -1142,6 +1217,10 @@ export async function mockWsRpc(
 			for (const frame of Array.isArray(raw) ? raw : [raw]) {
 				if (isEffectRpcRequest(frame)) {
 					control.record(frame.tag, frame.payload ?? {});
+					requestsById.set(String(frame.id), {
+						tag: frame.tag,
+						payload: frame.payload ?? {},
+					});
 					if (frame.tag === "input.submit")
 						submissions.set(String(frame.id), frame.payload ?? {});
 					const pending = requests.get(frame.tag) ?? [];

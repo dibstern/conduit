@@ -394,6 +394,7 @@ describe("ProviderRuntimeIngestion", () => {
 				}),
 			],
 			expect.any(Set),
+			expect.any(Function),
 		);
 		expect(harness.projectEvent).not.toHaveBeenCalled();
 		expect(busPublish).not.toHaveBeenCalled();

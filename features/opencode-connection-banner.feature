@@ -40,9 +40,9 @@ Examples:
 
 Scenario Outline: Reconnecting successfully clears the warning
   When I view the OpenCode session
-  And the mock relay reports OpenCode reconnecting
+  And the mock WebSocket reports OpenCode reconnecting
   Then the OpenCode connection banner reads Reconnecting to OpenCode…
-  When the mock relay reports OpenCode connected
+  When the mock WebSocket reports OpenCode connected
   Then the OpenCode connection banner is not visible
   And the layout region visually matches <baseline> at <threshold> percent
 

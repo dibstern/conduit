@@ -1,7 +1,7 @@
 // Tests escapeHtml, formatFileSize, formatTimeAgo, formatClockTime,
 // generateUuid.
 
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
 	escapeHtml,
 	formatClockTime,
@@ -14,17 +14,45 @@ import {
 describe("formatSnoozeTime", () => {
 	const now = new Date(2026, 9, 5, 8).getTime();
 
-	test("uses a clock today, weekday this week, and date beyond", () => {
-		expect(formatSnoozeTime(new Date(2026, 9, 5, 15, 40).getTime(), now)).toBe(
-			"15:40",
-		);
-		expect(formatSnoozeTime(new Date(2026, 9, 6, 9).getTime(), now)).toBe(
-			"Tue 9:00",
-		);
-		expect(formatSnoozeTime(new Date(2026, 9, 12, 9).getTime(), now)).toBe(
-			"12 Oct 9:00",
-		);
-		expect(formatSnoozeTime(null, now)).toBe("No timer");
+	test.each([
+		{
+			locale: "en-US",
+			today: "3:40 PM",
+			tomorrow: "Tue 9:00 AM",
+			later: "12 Oct 9:00 AM",
+		},
+		{
+			locale: "en-GB",
+			today: "15:40",
+			tomorrow: "Tue 9:00",
+			later: "12 Oct 9:00",
+		},
+	])("uses the $locale clock with relative day labels", ({
+		locale,
+		today,
+		tomorrow,
+		later,
+	}) => {
+		const DateTimeFormat = Intl.DateTimeFormat;
+		const formatter = vi
+			.spyOn(Intl, "DateTimeFormat")
+			.mockImplementation(function localClock(locales, options) {
+				return new DateTimeFormat(locales ?? locale, options);
+			});
+		try {
+			expect(
+				formatSnoozeTime(new Date(2026, 9, 5, 15, 40).getTime(), now),
+			).toBe(today);
+			expect(formatSnoozeTime(new Date(2026, 9, 6, 9).getTime(), now)).toBe(
+				tomorrow,
+			);
+			expect(formatSnoozeTime(new Date(2026, 9, 12, 9).getTime(), now)).toBe(
+				later,
+			);
+			expect(formatSnoozeTime(null, now)).toBe("No timer");
+		} finally {
+			formatter.mockRestore();
+		}
 	});
 });
 

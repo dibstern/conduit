@@ -519,6 +519,17 @@ export interface ReadQueryEffect {
 		},
 	) => Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError>;
 
+	/** Full shelf size, independent of a session page or keyset cursor. */
+	readonly countSettledSessions: (
+		scope: SessionScope,
+		opts?: {
+			roots?: boolean;
+			titleQuery?: string;
+			excludeArchived?: boolean;
+			archivedOnly?: boolean;
+		},
+	) => Effect.Effect<number, ReadQueryEffectError | SqlError>;
+
 	readonly listSessionInfos: (
 		scope: SessionScope,
 		opts?: {
@@ -941,6 +952,26 @@ function groupMessagesWithPartsAndTurnModels(
 export const makeReadQueryEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const projects = yield* SessionRollupProjects;
+	// Read state is an annotation beside the replay-owned rows; only surfaced
+	// text parts carry it.
+	const withPartReadState = (parts: readonly MessagePartRow[]) => {
+		const surfaced = parts.flatMap((part) =>
+			part.surfacing_ordinal == null ? [] : [part.id],
+		);
+		if (surfaced.length === 0) return Effect.succeed(parts);
+		return sql<{ part_id: string }>`
+			SELECT part_id FROM message_part_read_state
+			WHERE part_id IN (SELECT value FROM json_each(${JSON.stringify(surfaced)}))`.pipe(
+			Effect.map((rows) => {
+				const read = new Set(rows.map((row) => row.part_id));
+				return parts.map((part) =>
+					part.surfacing_ordinal == null
+						? part
+						: { ...part, surfacing_read: read.has(part.id) },
+				);
+			}),
+		);
+	};
 	// The provider may reconcile streamed timestamps while a rewind is pending.
 	// Visibility follows the transcript's current (created_at, id) ordering.
 	const pendingRewindHides = (table: "messages" | "m" = "messages") => sql`
@@ -988,15 +1019,25 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				THEN json_extract(${fullToolResult}, '$') ELSE ${fullToolResult} END
 			ELSE ${fullToolResult} END`;
 
+	// User annotations outlive projector-owned parts. Join them only when reading.
+	const surfacingMark = sql`(SELECT json_patch('{}', json_object(
+		'level', sm.level, 'category', sm.category, 'reason', sm.reason, 'direction', sm.direction
+	)) FROM surfacing_marks sm
+		WHERE sm.session_id = (SELECT session_id FROM messages WHERE id = mp.message_id)
+			AND sm.part_id = mp.id AND sm.message_id = mp.message_id) AS surfacing_mark`;
+
 	// Parts as the browser opens them, by the rule tool-wire-projection.ts
 	// owns: a tool output over the budget comes back as the JSON of its first
 	// PREVIEW_CODE_POINTS code points with `result_bytes` its whole UTF-8 size;
 	// never-cut tools come back whole. Only results whose stored JSON is over
 	// the budget are decoded, and parts' rest_payload blobs stay behind.
 	// `source` is the FROM clause over `message_parts mp`.
-	const previewParts = (source: Fragment) => sql<MessagePartRow>`
+	const previewParts = (source: Fragment) =>
+		sql<MessagePartRow>`
 		SELECT id, message_id, type, text, tool_name, call_id, input, metadata,
 			duration, status, sort_order, created_at, updated_at, version,
+			surfacing_ordinal, surfacing_probabilities, surfacing_set_version, surfacing_model,
+			surfacing_mark,
 			CASE WHEN result_event_seq IS NOT NULL THEN result
 				WHEN length(output) > ${PREVIEW_CODE_POINTS}
 				THEN json_quote(substr(output, 1, ${PREVIEW_CODE_POINTS}))
@@ -1005,14 +1046,14 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				WHEN length(output) > ${PREVIEW_CODE_POINTS}
 				THEN length(CAST(output AS BLOB)) END AS result_bytes
 		FROM (
-			SELECT mp.*,
+			SELECT mp.*, ${surfacingMark},
 				CASE WHEN mp.result_event_seq IS NULL AND mp.type = 'tool'
 					AND mp.tool_name NOT IN ${sql.in(NEVER_CUT_TOOL_NAMES)}
 					AND length(mp.result) > ${PREVIEW_CODE_POINTS}
 				THEN ${toolOutput} END AS output
 			${source}
 		)
-		ORDER BY message_id, sort_order`;
+		ORDER BY message_id, sort_order`.pipe(Effect.flatMap(withPartReadState));
 
 	const readToolDetails = (
 		sessionId: string,
@@ -1198,6 +1239,34 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
+	// Shared by the page and the shelf count, so a count can never match
+	// different rows than the list it labels.
+	const sessionFilters = (
+		scope: SessionScope,
+		opts?: {
+			roots?: boolean;
+			titleQuery?: string;
+			excludeArchived?: boolean;
+			archivedOnly?: boolean;
+		},
+	) => {
+		const predicates = [sql`project_id IN ${sql.in(scope.projectIds)}`];
+		// Archive state lives on the root and hides the whole family.
+		if (opts?.excludeArchived)
+			predicates.push(
+				sql`archived_at IS NULL AND NOT EXISTS (SELECT 1 FROM sessions AS archived_root WHERE archived_root.id = sessions.root_id AND archived_root.archived_at IS NOT NULL)`,
+			);
+		if (opts?.archivedOnly) predicates.push(sql`archived_at IS NOT NULL`);
+		if (opts?.roots) predicates.push(sql`parent_id IS NULL`);
+		if (opts?.titleQuery !== undefined) {
+			const escapedQuery = opts.titleQuery.replace(/[\\%_]/g, "\\$&");
+			const pattern = `%${escapedQuery}%`;
+			// SQLite LIKE is ASCII-case-insensitive; we accept non-ASCII case sensitivity until deep search adds a collation.
+			predicates.push(sql`title LIKE ${pattern} ESCAPE '\\'`);
+		}
+		return predicates;
+	};
+
 	// `readSessionList` is the only producer of the single session type (ni8.5
 	// T-1) — what the shell subscription streams and what the browser holds.
 	// The per-row re-query it replaced is gone: a subscriber asks for what moved
@@ -1227,21 +1296,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		},
 	): Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError> =>
 		Effect.gen(function* () {
-			const predicates = [sql`project_id IN ${sql.in(scope.projectIds)}`];
-			// Archive state lives on the root and hides the whole family.
-			if (opts?.excludeArchived)
-				predicates.push(
-					sql`archived_at IS NULL AND NOT EXISTS (SELECT 1 FROM sessions AS archived_root WHERE archived_root.id = sessions.root_id AND archived_root.archived_at IS NOT NULL)`,
-				);
-			if (opts?.archivedOnly) predicates.push(sql`archived_at IS NOT NULL`);
+			const predicates = sessionFilters(scope, opts);
 			const orderColumn = sql(opts?.orderColumn ?? "updated_at");
-			if (opts?.roots) predicates.push(sql`parent_id IS NULL`);
-			if (opts?.titleQuery !== undefined) {
-				const escapedQuery = opts.titleQuery.replace(/[\\%_]/g, "\\$&");
-				const pattern = `%${escapedQuery}%`;
-				// SQLite LIKE is ASCII-case-insensitive; we accept non-ASCII case sensitivity until deep search adds a collation.
-				predicates.push(sql`title LIKE ${pattern} ESCAPE '\\'`);
-			}
 			if (opts?.before !== undefined) {
 				predicates.push(
 					sql`(${orderColumn} < ${opts.before.at} OR (${orderColumn} = ${opts.before.at} AND id < ${opts.before.id}))`,
@@ -1266,6 +1322,30 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							operation: "listSessions",
 							cause: e,
 						}),
+			),
+		);
+
+	const countSettledSessions: ReadQueryEffect["countSettledSessions"] = (
+		scope,
+		opts,
+	) =>
+		Effect.gen(function* () {
+			const predicates = [
+				...sessionFilters(scope, opts),
+				sql`settled_at IS NOT NULL AND pinned_at IS NULL`,
+			];
+			const rows = yield* sql<{
+				count: number;
+			}>`SELECT COUNT(*) AS count FROM sessions
+				WHERE ${sql.and(predicates)}`;
+			return rows[0]?.count ?? 0;
+		}).pipe(
+			Effect.mapError(
+				(cause) =>
+					new ReadQueryEffectError({
+						operation: "countSettledSessions",
+						cause,
+					}),
 			),
 		);
 
@@ -1477,12 +1557,15 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					WHERE session_id = ${sessionId}
 					ORDER BY created_at ASC, id ASC
 				)
-				SELECT mp.*, ${fullToolResult} AS result, NULL AS result_bytes
+				SELECT mp.*, ${surfacingMark}, ${fullToolResult} AS result, NULL AS result_bytes
 				FROM message_parts mp
 				JOIN target_messages tm ON mp.message_id = tm.id
 				ORDER BY mp.message_id, mp.sort_order`;
 
-			return groupMessagesWithPartsAndTurnModels(messages, parts);
+			return groupMessagesWithPartsAndTurnModels(
+				messages,
+				yield* withPartReadState(parts),
+			);
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ReadQueryEffectError
@@ -1586,12 +1669,22 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						? yield* Effect.try(() => sessionGoalState(row))
 						: undefined;
 					const goal = facts?.goal ?? facts?.endedGoal;
-					if (!goal) return { checks: [], tokensSinceStart: null };
+					if (!goal)
+						return {
+							checks: [],
+							tokensSinceStart: null,
+							judgeModel: null,
+							setAt: null,
+							metAt: null,
+							turnCount: null,
+						};
 
 					const checks = yield* sql<GoalDetails["checks"][number]>`
-					SELECT iterations AS iteration, created_at AS at, reason
+					SELECT iterations AS iteration, created_at AS at, reason,
+						turn_index AS turnIndex, judge_model AS judgeModel
 					FROM session_goal_checks
 					WHERE session_id = ${sessionId} AND set_at = ${goal.setAt}
+						AND condition = ${goal.condition}
 					ORDER BY iterations ASC`;
 					const rows = yield* getSessionMessagesWithParts(sessionId);
 					const history = yield* Effect.try(
@@ -1601,6 +1694,10 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					);
 					return {
 						checks,
+						judgeModel: goal.judgeModel ?? null,
+						setAt: goal.setAt,
+						metAt: facts?.ended === "met" ? (facts.endedAt ?? null) : null,
+						turnCount: goal.turnCount ?? null,
 						tokensSinceStart:
 							history.reduce(
 								(total, message) =>
@@ -1795,12 +1892,15 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							page.length === 0
 								? []
 								: yield* sql<MessagePartRow>`
-							SELECT mp.*, ${fullToolResult} AS result, NULL AS result_bytes
+							SELECT mp.*, ${surfacingMark}, ${fullToolResult} AS result, NULL AS result_bytes
 							FROM message_parts mp
 							WHERE mp.message_id IN ${sql.in(page.map((message) => message.id))}
 							ORDER BY mp.message_id, mp.sort_order`;
 						messages.push(
-							...groupMessagesWithPartsAndTurnModels(fullPage, parts),
+							...groupMessagesWithPartsAndTurnModels(
+								fullPage,
+								yield* withPartReadState(parts),
+							),
 						);
 					}
 					if (!forward) messages.reverse();
@@ -2504,6 +2604,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getAllSessionStatuses,
 		getAllSessionStatusesWithProviders,
 		listSessions,
+		countSettledSessions,
 		listSessionInfos,
 		listSessionGitRefreshTargets,
 		getSessionLineage,

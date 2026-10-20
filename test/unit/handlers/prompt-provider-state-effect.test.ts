@@ -31,6 +31,7 @@ import {
 import { SessionTitleServiceTag } from "../../../src/lib/domain/relay/Services/session-title-service.js";
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -113,7 +114,7 @@ const makeIngestionLayer = (
 
 describe("handleMessage with Effect provider state persistence", () => {
 	it.effect(
-		"passes existing provider state into dispatch and persists returned updates",
+		"passes existing provider state into dispatch and persists owned terminal updates",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-provider-state-effect-"));
 			const filename = join(dir, "events.db");
@@ -126,22 +127,46 @@ describe("handleMessage with Effect provider state persistence", () => {
 			});
 			const engine = withDispatchEffect({
 				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
-				dispatch: vi.fn(async () => ({
-					status: "completed" as const,
-					cost: 0,
-					tokens: { input: 0, output: 0 },
-					durationMs: 0,
-					providerStateUpdates: [
-						{
-							key: "nativeThread:claude",
-							value: JSON.stringify({
-								resumeSessionId: "sdk-session-next",
-								firstSequence: 0,
-								deliveredThrough: 0,
-							}),
-						},
-					],
-				})),
+				dispatch: vi.fn(async (command: SendTurnCommand) => {
+					await Effect.runPromise(
+						command.input.eventSink.push(
+							providerRuntimeEvent(
+								"turn.completed",
+								command.input.sessionId,
+								{
+									messageId: "",
+									providerStateUpdates: [
+										{
+											key: "nativeThread:claude",
+											value: JSON.stringify({
+												resumeSessionId: "sdk-session-next",
+												firstSequence: 0,
+												deliveredThrough: 0,
+											}),
+										},
+									],
+								},
+								{ runId: "provider-state-run" },
+							),
+						),
+					);
+					return {
+						status: "completed" as const,
+						cost: 0,
+						tokens: { input: 0, output: 0 },
+						durationMs: 0,
+						providerStateUpdates: [
+							{
+								key: "nativeThread:claude",
+								value: JSON.stringify({
+									resumeSessionId: "sdk-session-next",
+									firstSequence: 0,
+									deliveredThrough: 0,
+								}),
+							},
+						],
+					};
+				}),
 			});
 			const persistence = makePersistenceEffectLayer(filename, "test-project");
 			const layer = Layer.provideMerge(
@@ -181,6 +206,23 @@ describe("handleMessage with Effect provider state persistence", () => {
 			return Effect.gen(function* () {
 				yield* establishClaudeSession("session-provider-state");
 				yield* setClaudeModel("session-provider-state");
+				yield* (yield* ClaudeEventPersistEffectTag).persistEvents([
+					canonicalEvent("run.requested", "session-provider-state", {
+						runId: "provider-state-run",
+						inputId: "cmd-provider-state-continue",
+					}),
+					canonicalEvent(
+						"message.created",
+						"session-provider-state",
+						{
+							sessionId: "session-provider-state",
+							messageId: "cmd-provider-state-continue",
+							inputId: "cmd-provider-state-continue",
+							role: "user",
+						},
+						{ metadata: { runId: "provider-state-run" } },
+					),
+				]);
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`
 				INSERT INTO provider_state (session_id, key, value)
@@ -355,16 +397,32 @@ describe("handleMessage with Effect provider state persistence", () => {
 			});
 			const engine = withDispatchEffect({
 				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
-				dispatch: vi.fn(async () => ({
-					status: "error" as const,
-					cost: 0,
-					tokens: { input: 0, output: 0 },
-					durationMs: 0,
-					error: {
-						code: "send_failed" as const,
-						message: "runner unavailable",
-					},
-				})),
+				dispatch: vi.fn(async (command: SendTurnCommand) => {
+					await Effect.runPromise(
+						command.input.eventSink.push(
+							providerRuntimeEvent(
+								"turn.error",
+								command.input.sessionId,
+								{
+									messageId: "",
+									error: "runner unavailable",
+									code: "send_failed",
+								},
+								{ runId: "failed-user-run" },
+							),
+						),
+					);
+					return {
+						status: "error" as const,
+						cost: 0,
+						tokens: { input: 0, output: 0 },
+						durationMs: 0,
+						error: {
+							code: "send_failed" as const,
+							message: "runner unavailable",
+						},
+					};
+				}),
 			});
 			const persistence = makePersistenceEffectLayer(filename, "test-project");
 			const layer = Layer.provideMerge(
@@ -404,6 +462,23 @@ describe("handleMessage with Effect provider state persistence", () => {
 			return Effect.gen(function* () {
 				yield* establishClaudeSession("session-claude-user-effect");
 				yield* setClaudeModel("session-claude-user-effect");
+				const persist = yield* ClaudeEventPersistEffectTag;
+				yield* persist.persistEvents([
+					canonicalEvent("run.requested", "session-claude-user-effect", {
+						runId: "failed-user-run",
+						inputId: "cmd-provider-state-persist-effect",
+					}),
+				]);
+				yield* persist.persistUserMessage(
+					"session-claude-user-effect",
+					"persist this through effect",
+					{
+						messageId: "cmd-provider-state-persist-effect",
+						inputId: "cmd-provider-state-persist-effect",
+						runId: "failed-user-run",
+						provider: "claude",
+					},
+				);
 				yield* handleMessage("client-1", {
 					text: "persist this through effect",
 					commandId: "cmd-provider-state-persist-effect",

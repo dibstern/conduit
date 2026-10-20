@@ -301,10 +301,17 @@ export const getModelsResponse = (
 								}),
 							),
 							Effect.asVoid,
+							// Admission may return an interrupted placeholder when another
+							// caller wins. Read the map afterward to await the actual discovery.
 							(effect) =>
 								FiberMap.run(modelDiscovery, claudeAccount.id, effect, {
 									onlyIfMissing: true,
-								}),
+								}).pipe(
+									Effect.andThen(
+										FiberMap.get(modelDiscovery, claudeAccount.id),
+									),
+									Effect.map(Option.getOrUndefined),
+								),
 						);
 
 		const inventoryInstanceId =

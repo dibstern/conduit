@@ -557,10 +557,33 @@ export function createTranslator(): Translator {
 
 			// Message updated (cost/tokens)
 			if (eventType === "message.updated") {
-				return wrapResult(
-					translateMessageUpdated(event, recordTurnStep(event)),
+				const result = translateMessageUpdated(event, recordTurnStep(event));
+				const translated = wrapResult(
+					result,
 					"message updated: not an assistant message, or still running",
 				);
+				const step = isMessageUpdatedEvent(event)
+					? (event.properties.info ?? event.properties.message)
+					: undefined;
+				const sessionId =
+					context?.sessionId ?? step?.sessionID ?? result?.sessionId;
+				// Idle hints have no durable identity and polling can miss short turns.
+				// Final successful steps own completion receipts; errors use session.error.
+				if (
+					translated.ok &&
+					result?.messageId &&
+					!result.midTurn &&
+					step?.summary !== true &&
+					step?.error == null &&
+					sessionId
+				) {
+					translated.messages.push({
+						type: "done",
+						code: 0,
+						alertId: JSON.stringify([sessionId, result.messageId, "done"]),
+					});
+				}
+				return translated;
 			}
 
 			// Message removed

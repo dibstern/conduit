@@ -68,7 +68,7 @@ const otherOpenCodeModel = {
 	modelID: "mimo-v2-omni-free",
 };
 const pickerSelector =
-	'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible';
+	'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible';
 
 // Each case starts a daemon and provider processes. Keep cases sequential
 // within a viewport, while desktop and mobile still run independently.
@@ -777,14 +777,12 @@ async function expectShown(picker: Locator, pick: Pick): Promise<void> {
 }
 
 async function openModelsSettings(page: Page): Promise<void> {
-	const titleMenu = page.getByTestId("session-bar-title-menu");
-	if (await titleMenu.isVisible()) {
-		await titleMenu.click();
-		await page.getByTestId("session-title-settings").click();
-	} else {
-		await page.getByTestId("session-bar-overflow").click();
-		await page.getByTestId("overflow-settings").click();
-	}
+	// The title menu holds no Settings; a phone's island has its own overflow.
+	await page
+		.getByTestId("session-bar-overflow")
+		.or(page.getByTestId("session-bar-island-overflow"))
+		.click();
+	await page.getByTestId("overflow-settings").click();
 	await page.getByTestId("settings-tab-models").click();
 }
 
@@ -1251,8 +1249,10 @@ test.describe("session composer owns its stored pick", () => {
 			browser.rpc.GetModels({ sessionId: sessionB }),
 		);
 		const mode = page.locator(
-			'[data-testid="permission-mode-badge"]:visible, [data-testid="composer-word-approvals"]:visible',
+			'[data-testid="permission-mode-badge"]:visible, [data-testid="composer-word-approvals"]:visible, [data-testid="composer-more-mode"]:visible',
 		);
+		const phoneWords = page.getByTestId("composer-words-sheet-trigger");
+		let openedComposer = false;
 		const older = observed.hold("GetModels", sessionA, { once: true });
 		let stage = "A-row-read";
 		let before: string | null | undefined;
@@ -1283,8 +1283,22 @@ test.describe("session composer owns its stored pick", () => {
 				.click();
 			await expect(page).toHaveURL(new RegExp(`/s/${sessionB}\\?`));
 			await expectShown(picker, shownFromGetModels(reportedB, "claude"));
-			await expect(mode).toHaveAttribute("title", "Approvals (Full access)");
-			before = await mode.getAttribute("title");
+			await expect(picker).toHaveAttribute(
+				"data-shown-permission-mode",
+				"full",
+			);
+			before = await picker.getAttribute("data-shown-permission-mode");
+			if (await phoneWords.isVisible())
+				await expect(
+					phoneWords.getByText("full", { exact: true }),
+				).toBeVisible();
+			if (!(await mode.isVisible())) {
+				await picker.click();
+				openedComposer = true;
+			}
+			await expect(mode).toHaveAccessibleName(
+				"Approvals: Full access. Open options",
+			);
 			stage = "A-stale-delivered";
 			older.release();
 			deliveredRequestIds = await observed.received(older.frames);
@@ -1294,9 +1308,15 @@ test.describe("session composer owns its stored pick", () => {
 						requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
 					),
 			);
-			after = await mode.evaluateAll(
-				(elements) => elements[0]?.getAttribute("title") ?? null,
+			after = await picker.getAttribute("data-shown-permission-mode");
+			await expect(mode).toHaveAccessibleName(
+				"Approvals: Full access. Open options",
 			);
+			if (openedComposer) await page.keyboard.press("Escape");
+			if (await phoneWords.isVisible())
+				await expect(
+					phoneWords.getByText("full", { exact: true }),
+				).toBeVisible();
 			shown = await readShown(picker);
 			expect(after).toBe(before);
 			expect(shown).toEqual(shownFromGetModels(reportedB, "claude"));
@@ -1714,8 +1734,10 @@ test.describe("session composer owns its stored pick", () => {
 			await showDraft("draft-between");
 			await showSession(openCodeId);
 			await held.wait;
+			// Until its stored pick replies, a session shows no harness (ksw2),
+			// and never the draft's Claude pick; only its bound account.
 			await expectShown(picker, {
-				harness: "opencode",
+				harness: "",
 				provider: "",
 				model: "",
 				effort: "",
@@ -1940,12 +1962,21 @@ async function selectFullPermission(page: Page): Promise<void> {
 	if (await trigger.count()) {
 		await trigger.click();
 	} else {
-		await page.getByTestId("composer-more").click();
+		await page.locator(pickerSelector).click();
 		await page.getByTestId("composer-more-mode").click();
 	}
 	await page.getByTestId("permission-mode-option-full").click();
+	await expect(
+		page.getByRole("button", {
+			name: "Approvals: Full access. Open options",
+			exact: true,
+		}),
+	).toBeVisible();
 	await page.keyboard.press("Escape");
-	await expect(trigger).toHaveAttribute("title", "Approvals (Full access)");
+	await expect(page.locator(pickerSelector)).toHaveAttribute(
+		"data-shown-permission-mode",
+		"full",
+	);
 }
 
 function readDraftReceipt(
@@ -3246,6 +3277,7 @@ test("legacy-pick-backfill: last turn restores once and survives a second restar
 	}
 	const legacy = readStoredState(harness, slug, sessionId);
 	const restorations: ReturnType<typeof readStoredState>[] = [];
+	const sampledModels: GetModelsResponse[] = [];
 	const reported: {
 		model: string;
 		provider: string;
@@ -3263,9 +3295,30 @@ test("legacy-pick-backfill: last turn restores once and survives a second restar
 				`legacy-read-${restart}`,
 				slug,
 			);
-			const models = await Effect.runPromise(
+			let models = await Effect.runPromise(
 				restoredBrowser.rpc.GetModels({ sessionId }),
 			);
+			sampledModels.push(models);
+			// Restart serves a persisted catalog while capability discovery refreshes it.
+			await expect
+				.poll(async () => {
+					models = await Effect.runPromise(
+						restoredBrowser.rpc.GetModels({ sessionId }),
+					);
+					sampledModels.push(models);
+					return {
+						model: models.active?.model ?? "",
+						provider: models.active?.provider ?? "",
+						effort: models.variant?.variant ?? "",
+						contextWindow: models.contextWindow?.contextWindow ?? "",
+					};
+				})
+				.toEqual({
+					model: "sonnet",
+					provider: "claude",
+					effort: "high",
+					contextWindow: "200k",
+				});
 			restorations.push(readStoredState(harness, slug, sessionId));
 			reported.push({
 				model: models.active?.model ?? "",
@@ -3284,6 +3337,7 @@ test("legacy-pick-backfill: last turn restores once and survives a second restar
 			before,
 			legacy,
 			restorations,
+			sampledModels,
 			reported,
 		});
 	}
@@ -3294,6 +3348,14 @@ test("legacy-pick-backfill: last turn restores once and survives a second restar
 		variant: "high",
 		context_window: "200k",
 	};
+	for (const models of sampledModels) {
+		if (models.active)
+			expect(models).toMatchObject({
+				active: { model: "sonnet", provider: "claude" },
+				variant: { variant: "high" },
+				contextWindow: { contextWindow: "200k" },
+			});
+	}
 	expect(sent).toMatchObject({
 		model: "sonnet",
 		effort: "high",
@@ -5799,7 +5861,10 @@ async function assertPickRejected(
 		expectedRejection: tag,
 		rpcResult:
 			result._tag === "Failure" && error instanceof WsRpcError
-				? { _tag: "Left", error: { _tag: error._tag, message: error.message } }
+				? {
+						_tag: "Failure",
+						error: { _tag: error._tag, message: error.message },
+					}
 				: result,
 		equal: mismatches.length === 0,
 		mismatches,

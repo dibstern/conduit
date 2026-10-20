@@ -30,7 +30,10 @@ export interface RunnerPayload {
 		sink: EventSink,
 		signal: AbortSignal,
 	): Effect.Effect<TurnResult, PayloadFailure>;
-	interrupt(sessionId: string): Effect.Effect<void, PayloadFailure>;
+	interrupt(
+		sessionId: string,
+		turnIds?: readonly string[],
+	): Effect.Effect<void, PayloadFailure>;
 	applySettings(
 		sessionId: string,
 		settings: LiveSettings,

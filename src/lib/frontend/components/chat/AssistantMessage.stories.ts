@@ -9,23 +9,61 @@ import {
 	mockAssistantWithMermaid,
 	mockAssistantWithMultipleCodeBlocks,
 } from "../../stories/mocks.js";
+import { renderMarkdown } from "../../utils/markdown.js";
 import AssistantMessage from "./AssistantMessage.svelte";
 
 const meta = {
 	title: "Chat/AssistantMessage",
 	component: AssistantMessage,
 	tags: ["autodocs"],
+	args: { providerId: "claude" },
 } satisfies Meta<typeof AssistantMessage>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const SimpleParagraph: Story = {
-	args: { message: mockAssistantSimple },
+	args: { message: mockAssistantSimple, model: "Sonnet 5" },
+};
+export const SimpleParagraphLight: Story = {
+	...SimpleParagraph,
+	globals: { theme: "light" },
 };
 
 export const WithCodeBlock: Story = {
 	args: { message: mockAssistantWithCode },
+};
+export const WithCodeBlockLight: Story = {
+	...WithCodeBlock,
+	globals: { theme: "light" },
+};
+
+const fileDiff =
+	"```diff\n--- a/src/lib/frontend/stores/unread.ts\n+++ b/src/lib/frontend/stores/unread.ts\n@@ -1,2 +1,3 @@\n-const unread = 0;\n+const unread = new Map<string, number>();\n+export { unread };\n```";
+export const FileDiff: Story = {
+	args: {
+		model: "Sonnet 5",
+		message: {
+			...mockAssistantSimple,
+			rawText: fileDiff,
+			html: renderMarkdown(fileDiff),
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			await canvas.findByText("src/lib/frontend/stores/unread.ts"),
+		).toBeVisible();
+		await expect(canvas.getByText("+2")).toBeVisible();
+		await expect(canvas.getByText("−1")).toBeVisible();
+		await expect(
+			canvas.getByRole("button", { name: "Copy code" }),
+		).toBeVisible();
+	},
+};
+export const FileDiffLight: Story = {
+	...FileDiff,
+	globals: { theme: "light" },
 };
 
 export const MultipleCodeBlocks: Story = {
@@ -42,6 +80,10 @@ export const WithMermaid: Story = {
 
 export const RichMarkdown: Story = {
 	args: { message: mockAssistantMarkdown },
+};
+export const RichMarkdownLight: Story = {
+	...RichMarkdown,
+	globals: { theme: "light" },
 };
 
 export const Empty: Story = {
@@ -109,4 +151,23 @@ export const CopyInteraction: Story = {
 export const Hover: Story = {
 	...SimpleParagraph,
 	tags: ["visual-pointer-hover"],
+};
+
+export const ReplyWithoutHeader: Story = {
+	...CopyInteraction,
+	args: { message: mockAssistantMarkdown, hideHeader: true },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const body = canvas.getByText("Here are the key findings:");
+		await userEvent.click(body);
+		await expect(canvas.getByRole("status")).toHaveTextContent(
+			"Click again to copy",
+		);
+		await userEvent.click(body);
+		await expect(canvas.getByRole("status")).toHaveTextContent("Copied!");
+	},
+};
+export const ReplyWithoutHeaderLight: Story = {
+	...ReplyWithoutHeader,
+	globals: { theme: "light" },
 };

@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
+import { createSession } from "../helpers/e2e-harness.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
-import { SidebarPage } from "../page-objects/sidebar.page.js";
 
 test.use({
 	recording: "chat-simple",
@@ -8,13 +8,18 @@ test.use({
 	screenshot: "off",
 });
 
-async function rowsReady(page: Page, relayUrl: string, count = 3) {
+async function rowsReady(page: Page, relayUrl: string, relayPort: number) {
 	await gotoRelay(page, relayUrl);
 	const rows = page.locator("#session-list .session-item");
 	await expect(rows.first()).toBeVisible();
-	const sidebar = new SidebarPage(page);
-	for (let current = await rows.count(); current < count; current++) {
-		await sidebar.createNewSession();
+	for (let current = await rows.count(); current < 3; current++) {
+		// Drafts need a daemon account feed; sidebar setup only needs stored sessions.
+		await createSession(
+			relayPort,
+			"opencode",
+			undefined,
+			`Select mode ${current}`,
+		);
 		await expect.poll(() => rows.count()).toBeGreaterThan(current);
 	}
 	return rows;
@@ -58,8 +63,9 @@ async function selectRows(page: Page, ids: string[]) {
 test("desktop: bulk settle announces once and Undo restores only this batch", async ({
 	page,
 	relayUrl,
+	harness,
 }) => {
-	const rows = await rowsReady(page, relayUrl);
+	const rows = await rowsReady(page, relayUrl, harness.relayPort);
 	const ids = await rows.evaluateAll((elements) =>
 		elements.map((element) => element.getAttribute("data-session-id")),
 	);
@@ -111,8 +117,9 @@ test("desktop: bulk settle announces once and Undo restores only this batch", as
 test("bulk Pin changes two rows with one toast and Undo restores both", async ({
 	page,
 	relayUrl,
+	harness,
 }) => {
-	const rows = await rowsReady(page, relayUrl);
+	const rows = await rowsReady(page, relayUrl, harness.relayPort);
 	const ids = (
 		await rows.evaluateAll((elements) =>
 			elements.map((element) => element.getAttribute("data-session-id")),
@@ -147,8 +154,9 @@ test("bulk Pin changes two rows with one toast and Undo restores both", async ({
 test("two pinned rows show Unpin in select mode", async ({
 	page,
 	relayUrl,
+	harness,
 }) => {
-	const rows = await rowsReady(page, relayUrl);
+	const rows = await rowsReady(page, relayUrl, harness.relayPort);
 	const ids = (
 		await rows.evaluateAll((elements) =>
 			elements.map((element) => element.getAttribute("data-session-id")),
@@ -183,8 +191,9 @@ test("two pinned rows show Unpin in select mode", async ({
 test("bulk Snooze uses one sheet and Undo returns both rows", async ({
 	page,
 	relayUrl,
+	harness,
 }) => {
-	const rows = await rowsReady(page, relayUrl);
+	const rows = await rowsReady(page, relayUrl, harness.relayPort);
 	const ids = (
 		await rows.evaluateAll((elements) =>
 			elements.map((element) => element.getAttribute("data-session-id")),
@@ -219,8 +228,8 @@ test("bulk Snooze uses one sheet and Undo returns both rows", async ({
 	}
 });
 
-test("bulk Settle skips a pinned row", async ({ page, relayUrl }) => {
-	const rows = await rowsReady(page, relayUrl, 2);
+test("bulk Settle skips a pinned row", async ({ page, relayUrl, harness }) => {
+	const rows = await rowsReady(page, relayUrl, harness.relayPort);
 	const ids = await rows.evaluateAll((elements) =>
 		elements.map((element) => element.getAttribute("data-session-id")),
 	);
@@ -248,8 +257,9 @@ test("bulk Settle skips a pinned row", async ({ page, relayUrl }) => {
 test("All selects only visible search results; Done makes no change", async ({
 	page,
 	relayUrl,
+	harness,
 }) => {
-	const rows = await rowsReady(page, relayUrl);
+	const rows = await rowsReady(page, relayUrl, harness.relayPort);
 	const title = (
 		await rows.first().locator(".session-title-inner").innerText()
 	).trim();
@@ -260,8 +270,8 @@ test("All selects only visible search results; Done makes no change", async ({
 	await rows.first().getByRole("checkbox").click();
 	await rows.last().getByRole("checkbox").click();
 	await expect(page.getByText("2 selected")).toBeVisible();
-	await page.getByPlaceholder("Search sessions...").fill(title);
-	await expect(page.getByPlaceholder("Search sessions...")).toHaveValue(title);
+	await page.getByPlaceholder("Search").fill(title);
+	await expect(page.getByPlaceholder("Search")).toHaveValue(title);
 	await expect(page.getByText("1 selected")).toBeVisible();
 	const visible = await page
 		.locator("#session-list .session-item [role=checkbox]")
@@ -278,7 +288,7 @@ test("All selects only visible search results; Done makes no change", async ({
 	await expect(page.getByText(`${visible} selected`)).toBeVisible();
 	await page.getByRole("button", { name: "Done" }).click();
 	await expect(page.getByTestId("select-bar")).toHaveCount(0);
-	await page.getByPlaceholder("Search sessions...").fill("");
+	await page.getByPlaceholder("Search").fill("");
 	await expect
 		.poll(() =>
 			rows.evaluateAll((elements) =>
@@ -291,8 +301,9 @@ test("All selects only visible search results; Done makes no change", async ({
 test("keyboard enters, toggles a checkbox, and Escape leaves", async ({
 	page,
 	relayUrl,
+	harness,
 }) => {
-	await rowsReady(page, relayUrl, 2);
+	await rowsReady(page, relayUrl, harness.relayPort);
 	const entry = page.getByRole("button", { name: "Select sessions" });
 	await entry.focus();
 	await page.keyboard.press("Enter");
@@ -316,7 +327,7 @@ test("keyboard enters, toggles a checkbox, and Escape leaves", async ({
 	await expect(page.getByTestId("select-bar")).toHaveCount(0);
 });
 
-test("phone overflow and long-press sheet enter select mode", async ({
+test("phone header and long-press sheet enter select mode", async ({
 	page,
 	relayUrl,
 }) => {
@@ -325,8 +336,7 @@ test("phone overflow and long-press sheet enter select mode", async ({
 	await page.goto(new URL("/", page.url()).toString());
 	const row = page.locator("#session-list .session-item").first();
 	await expect(row).toBeVisible();
-	await page.getByTestId("list-bar-overflow").click();
-	await page.getByTestId("list-overflow-select").click();
+	await page.getByTestId("list-bar-select").click();
 	await expect(page.getByTestId("select-bar")).toBeVisible();
 	await expect(page.getByTestId("select-bar")).toBeInViewport();
 	for (const action of ["settle", "snooze", "pin", "delete"]) {
@@ -367,8 +377,9 @@ test("phone overflow and long-press sheet enter select mode", async ({
 test("Delete in select mode still confirms and deletes", async ({
 	page,
 	relayUrl,
+	harness,
 }) => {
-	const rows = await rowsReady(page, relayUrl, 2);
+	const rows = await rowsReady(page, relayUrl, harness.relayPort);
 	const id = await rows.first().getAttribute("data-session-id");
 	if (!id) throw new Error("missing session id");
 	await page.getByRole("button", { name: "Select sessions" }).click();

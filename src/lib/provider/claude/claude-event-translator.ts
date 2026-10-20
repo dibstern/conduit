@@ -580,7 +580,7 @@ export class ClaudeEventTranslator {
 	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen({ self: this }, function* () {
 			const tracker = ctx.goalTracker;
-			if (!tracker?.goal) return;
+			if (!tracker?.unsettledGoal) return;
 			const sdkSessionId = ctx.resumeSessionId;
 			const logger = this.deps.logger ?? defaultLog;
 			if (!sdkSessionId) {
@@ -632,8 +632,8 @@ export class ClaudeEventTranslator {
 		);
 	}
 
-	/** A result for an unaccepted input cannot reset another input's live state. */
-	translateUnacceptedResult(
+	/** A result owned by another run cannot reset the current run's live state. */
+	translateDetachedResult(
 		ctx: ClaudeSessionContext,
 		result: SDKResultMessage,
 		terminalRunIds: readonly string[] = [],

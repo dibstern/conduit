@@ -1,7 +1,7 @@
 // Failures: silence settles accepted work, a late answer replaces a newer
 // timer, or a notice for an ended run appears on the newer run's transcript.
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Ref, Schema } from "effect";
+import { Effect, Layer, Ref, Schema, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -117,7 +117,9 @@ describe("interaction timeout run ownership", () => {
 								prepareTurnSession: (input) => Effect.succeed(input.sessionId),
 								sendTurn: () =>
 									Effect.die("This test only resolves live interactions"),
-								interruptTurn: () => Effect.void,
+								beginStop: () => Effect.succeed(Effect.void),
+								turnFences: () => ({ stopping: false, switching: false }),
+								fenceLifts: Effect.succeed(Stream.empty),
 							}),
 							Layer.succeed(OrchestrationEngineTag)(
 								withDispatchEffect({

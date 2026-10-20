@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect";
-import { SqlClient } from "effect/sql";
+import { SqlClient, Statement } from "effect/sql";
+import { TestClock } from "effect/testing";
 import { afterEach, expect, vi } from "vitest";
 import {
 	MessageVersion,
@@ -34,6 +35,7 @@ import {
 	ProviderTurnServiceLive,
 	type ProviderTurnServiceSendInput,
 	ProviderTurnServiceTag,
+	STOP_ABORT_WAIT_MS,
 } from "../../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
@@ -78,10 +80,14 @@ import {
 import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
 import type { SessionRow } from "../../../../src/lib/persistence/read-model-types.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
-import { ProviderInstanceFailure } from "../../../../src/lib/provider/errors.js";
+import {
+	ProviderInstanceFailure,
+	ProviderNotRegistered,
+} from "../../../../src/lib/provider/errors.js";
 import { openCodeInputMessageId } from "../../../../src/lib/provider/opencode/opencode-input-message-id.js";
 import { OpenCodeProviderInstance } from "../../../../src/lib/provider/opencode-provider-instance.js";
 import {
+	type OrchestrationCommand,
 	OrchestrationEngine,
 	type SendTurnCommand,
 } from "../../../../src/lib/provider/orchestration-engine.js";
@@ -264,6 +270,7 @@ const makeReadQuery = (
 	getStrandedChildren: () => Effect.succeed([]),
 	listSessions: vi.fn(() => Effect.succeed([])),
 	listSessionInfos: vi.fn(() => Effect.succeed([])),
+	countSettledSessions: () => Effect.succeed(0),
 	listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 	getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 	getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
@@ -479,12 +486,16 @@ const sendTurn = (input?: TestSendInputOverrides) =>
 
 const interruptTurn = () =>
 	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		yield* sql`INSERT OR IGNORE INTO sessions (id, provider, title, created_at, updated_at)
+			VALUES ('session-1', 'opencode', 'Stored session', 1, 1)`;
 		const service = yield* ProviderTurnServiceTag;
-		yield* service.interruptTurn({
+		const stopped = yield* service.beginStop({
 			clientId: "client-1",
 			commandId: "cmd-interrupt-default",
 			sessionId: "session-1",
 		});
+		yield* stopped;
 	});
 
 describe("ProviderTurnService", () => {
@@ -496,7 +507,11 @@ describe("ProviderTurnService", () => {
 			const dependencies = Layer.mergeAll(
 				liveLayer,
 				Layer.succeed(ProviderTurnServiceTag)(
-					partialFake<ProviderTurnService>({ sendTurn: send }),
+					partialFake<ProviderTurnService>({
+						sendTurn: send,
+						turnFences: () => ({ stopping: false, switching: false }),
+						fenceLifts: Effect.succeed(Stream.empty),
+					}),
 				),
 				Layer.succeed(AgentServiceTag)(makeMockAgentService()),
 				Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()),
@@ -836,6 +851,490 @@ describe("ProviderTurnService", () => {
 			},
 		);
 	}
+	// Stop fence failure modes: the abort fails (unregistered account, rejected
+	// dispatch) and the fence stays up; the worker's identity lookup fails before
+	// the abort is issued; the provider never answers and its turn stays open; a
+	// repeated Stop waits on the abandoned completion; the fence lifts without
+	// waking the inbox drain; the provider acknowledges before the turn ends; a
+	// continuation admitted behind the fence is stopped too.
+	describe("Stop fence", () => {
+		const seedSession = Effect.flatMap(
+			SqlClient.SqlClient,
+			(
+				sql,
+			) => sql`INSERT INTO sessions (id, provider, title, created_at, updated_at)
+				VALUES ('session-1', 'claude', 'Stored session', 1, 1)`,
+		);
+
+		const seedClaimedRun = (
+			inputId: string,
+			sequence: number,
+			accepted = true,
+		) =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const commit = yield* makeCommitAndSignal;
+				const runId = `run-${inputId}`;
+				const metadata = { metadata: { runId } };
+				yield* commit([
+					canonicalEvent(
+						"run.requested",
+						"session-1",
+						{ runId, inputId },
+						metadata,
+					),
+					canonicalEvent(
+						"message.created",
+						"session-1",
+						{
+							sessionId: "session-1",
+							messageId: inputId,
+							inputId,
+							role: "user",
+						},
+						metadata,
+					),
+					...(accepted
+						? [
+								canonicalEvent(
+									"run.started",
+									"session-1",
+									{
+										requestedRunId: runId,
+										inputId,
+									},
+									metadata,
+								),
+							]
+						: []),
+				]);
+				yield* sql`INSERT INTO provider_command_outbox
+					(request_sequence, command_id, project_key, session_id, provider_id, effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at)
+					VALUES (${sequence}, ${inputId}, 'test-project', 'session-1', 'claude', 'send_turn', ${runId},
+						${JSON.stringify({ inputId })}, 'running', 1, 1, 1)`;
+				yield* sql`INSERT INTO command_receipts
+					(command_id, session_id, project_key, status, created_at, updated_at)
+					VALUES (${inputId}, 'session-1', 'test-project', 'side_effect_requested', 1, 1)`;
+			});
+
+		it.effect(
+			"lifts and wakes the inbox in memory when the abort fails",
+			() => {
+				const dispatchEffect = vi.fn(() =>
+					Effect.fail(new ProviderNotRegistered({ providerId: "claude" })),
+				);
+				const engine = makeEngine({ providerId: "claude", dispatchEffect });
+				const { liveLayer } = serviceLayer({ engine });
+				return Effect.gen(function* () {
+					const service = yield* ProviderTurnServiceTag;
+					yield* seedSession;
+					yield* seedClaimedRun("active-input", 1);
+					const commit = yield* makeCommitAndSignal;
+					yield* commit([
+						canonicalEvent("input.admitted", "session-1", {
+							sessionId: "session-1",
+							inputId: "unclaimed-input",
+							delivery: "queue",
+							request: { text: "unsent" },
+						}),
+						canonicalEvent("input.sent", "session-1", {
+							sessionId: "session-1",
+							inputId: "unclaimed-input",
+						}),
+					]);
+					yield* seedClaimedRun("unclaimed-input", 2, false);
+					const sql = yield* SqlClient.SqlClient;
+					yield* sql`UPDATE provider_command_outbox SET status = 'pending', attempt_count = 0 WHERE command_id = 'unclaimed-input'`;
+					const lifts = yield* service.fenceLifts;
+					const failed = yield* interruptTurn().pipe(Effect.flip);
+					expect(failed).toMatchObject({ _tag: "ProviderNotRegistered" });
+					expect(service.turnFences("session-1").stopping).toBe(false);
+					expect(
+						yield* sql`SELECT status FROM provider_runs ORDER BY id`,
+					).toEqual([{ status: "running" }, { status: "interrupted" }]);
+					expect(yield* sql`SELECT state FROM turns ORDER BY id`).toEqual([
+						{ state: "running" },
+						{ state: "interrupted" },
+					]);
+					expect(
+						yield* sql`SELECT status FROM provider_command_outbox ORDER BY command_id`,
+					).toEqual([{ status: "running" }, { status: "failed" }]);
+					expect(
+						yield* sql`SELECT status FROM command_receipts ORDER BY command_id`,
+					).toEqual([
+						{ status: "side_effect_requested" },
+						{ status: "side_effect_failed" },
+					]);
+					// Native rejection leaves A open; C never left our queue and was recalled locally.
+					expect(
+						yield* sql`SELECT type, json_extract(metadata, '$.runId') AS run_id,
+							json_extract(data, '$.reason') AS reason FROM events
+							WHERE type IN ('turn.interrupted', 'turn.error')`,
+					).toEqual([
+						{
+							type: "turn.interrupted",
+							run_id: "run-unclaimed-input",
+							reason: "Stopped before delivery",
+						},
+					]);
+					expect(
+						yield* sql`SELECT input_id, state FROM pending_inputs`,
+					).toEqual([{ input_id: "unclaimed-input", state: "queued" }]);
+					expect(
+						yield* (yield* ReadQueryEffectTag).readInboxState("session-1"),
+					).toMatchObject({ paused: true });
+					// No store write stands between the lift and the drain.
+					expect(yield* Stream.runCollect(Stream.take(lifts, 1))).toEqual([
+						"session-1",
+					]);
+					// A repeated Stop issues a fresh abort instead of awaiting the failed one.
+					yield* interruptTurn().pipe(Effect.flip);
+					expect(dispatchEffect).toHaveBeenCalledTimes(2);
+					expect(
+						yield* sql`SELECT json_extract(metadata, '$.runId') AS run_id
+						FROM events WHERE type IN ('turn.interrupted', 'turn.error')`,
+					).toEqual([{ run_id: "run-unclaimed-input" }]);
+					expect(
+						yield* sql`SELECT status FROM provider_runs WHERE id = 'run-active-input'`,
+					).toEqual([{ status: "running" }]);
+				}).pipe(Effect.provide(liveLayer));
+			},
+		);
+
+		for (const missingTable of [
+			"provider_runs",
+			"provider_command_outbox",
+		] as const) {
+			it.effect(`lifts when the ${missingTable} identity lookup fails`, () => {
+				const engine = makeEngine({ providerId: "claude" });
+				const { layer } = serviceLayer({ engine });
+				return Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const service = yield* ProviderTurnServiceTag;
+					yield* seedSession;
+					let injected = false;
+					const failed = yield* interruptTurn().pipe(
+						Effect.provideService(Statement.CurrentTransformer, (statement) => {
+							const [query] = statement.compile();
+							if (injected || !query.includes(`FROM ${missingTable}`))
+								return Effect.succeed(statement);
+							injected = true;
+							return Effect.succeed(
+								sql.unsafe("SELECT * FROM unavailable_identity"),
+							);
+						}),
+						Effect.result,
+					);
+					expect(injected).toBe(true);
+					expect(failed._tag).toBe("Failure");
+					expect(service.turnFences("session-1").stopping).toBe(false);
+					yield* interruptTurn();
+					expect(engine.dispatchEffect).toHaveBeenCalledOnce();
+				}).pipe(Effect.provide(layer));
+			});
+		}
+
+		it.effect(
+			"Run now joins an existing plain Stop and dispatches after its bound retires the cohort",
+			() => {
+				const issued = Deferred.makeUnsafe<void>();
+				const delivered = Deferred.makeUnsafe<void>();
+				let deliver: (command: SendTurnCommand) => Effect.Effect<TurnResult> =
+					() => Effect.die("uninitialized delivery");
+				const dispatchEffect = vi.fn((command: OrchestrationCommand) =>
+					command.type === "send_turn"
+						? deliver(command)
+						: Deferred.succeed(issued, undefined).pipe(
+								Effect.andThen(Effect.never),
+							),
+				) as unknown as OrchestrationEngine["dispatchEffect"];
+				const engine = makeEngine({ providerId: "claude", dispatchEffect });
+				const dependencies = Layer.mergeAll(
+					serviceLayer({ engine }).liveLayer,
+					Layer.succeed(AgentServiceTag)(makeMockAgentService()),
+					Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()),
+					Layer.succeed(SessionEventBusTag)({
+						publish: () => Effect.void,
+						publishAdvance: () => Effect.void,
+						subscribe: () => Effect.succeed(Stream.empty),
+						subscribeAdvances: () => Effect.succeed(Stream.empty),
+					}),
+					Layer.succeed(Usage)({
+						readings: Stream.empty,
+						latest: () => Effect.succeed(undefined),
+						refresh: () => Effect.succeed([]),
+						turnEnded: () => Effect.void,
+						pickFailover: () => Effect.succeed(undefined),
+					}),
+				);
+				return Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const commit = yield* makeCommitAndSignal;
+					const context =
+						yield* Effect.context<
+							Effect.Services<ReturnType<typeof seedClaimedRun>>
+						>();
+					const service = yield* ProviderTurnServiceTag;
+					const inbox = yield* SessionInboxTag;
+					yield* commit([
+						canonicalEvent("session.created", "session-1", {
+							sessionId: "session-1",
+							provider: "claude",
+							title: "Stop then Run now",
+						}),
+					]);
+					yield* sql`UPDATE sessions SET model_provider = 'claude', model_id = 'claude-sonnet-4-5', variant = '', context_window = '' WHERE id = 'session-1'`;
+					yield* seedClaimedRun("active-input", 1);
+					deliver = (command) =>
+						Effect.gen(function* () {
+							yield* commit(command.events ?? []);
+							yield* seedClaimedRun(command.input.inputId, 2);
+							yield* command.onAccepted ?? Effect.void;
+							yield* Deferred.succeed(delivered, undefined);
+							return completedTurn();
+						}).pipe(Effect.orDie, Effect.provide(context));
+					yield* inbox.start;
+					const stopped = yield* service.beginStop({
+						clientId: "browser",
+						sessionId: "session-1",
+						commandId: "plain-stop",
+					});
+					yield* Deferred.await(issued);
+					yield* inbox.submit({
+						clientId: "browser",
+						sessionId: "session-1",
+						inputId: "queued-b",
+						delivery: "queue",
+						request: { text: "Bravo" },
+					});
+					expect(
+						yield* inbox.sendNow({
+							clientId: "browser",
+							sessionId: "session-1",
+							inputId: "queued-b",
+							interrupt: true,
+						}),
+					).toBe("accepted");
+					expect(dispatchEffect).toHaveBeenCalledTimes(1);
+					yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
+					yield* stopped;
+					expect(
+						yield* sql`SELECT status FROM provider_runs WHERE id = 'run-active-input'`,
+					).toEqual([{ status: "interrupted" }]);
+					yield* Deferred.await(delivered);
+					expect(
+						vi
+							.mocked(dispatchEffect)
+							.mock.calls.map(([command]) => command.type),
+					).toEqual(["interrupt_turn", "send_turn"]);
+					expect(
+						yield* sql`SELECT input_id, state FROM pending_inputs`,
+					).toEqual([{ input_id: "queued-b", state: "removed" }]);
+					expect(
+						yield* sql`SELECT id, status FROM provider_runs ORDER BY id`,
+					).toEqual([
+						{ id: "run-active-input", status: "interrupted" },
+						{ id: "run-queued-b", status: "running" },
+					]);
+					yield* inbox.sendNow({
+						clientId: "browser",
+						sessionId: "session-1",
+						inputId: "queued-b",
+						interrupt: true,
+					});
+					expect(dispatchEffect).toHaveBeenCalledTimes(2);
+				}).pipe(
+					Effect.provide(
+						SessionInboxLive.pipe(Layer.provideMerge(dependencies)),
+					),
+				);
+			},
+		);
+
+		it.effect(
+			"lifts after the bound and retires only its claimed cohort once",
+			() =>
+				Effect.gen(function* () {
+					const issued = yield* Deferred.make<void>();
+					const engine = makeEngine({
+						providerId: "claude",
+						dispatchEffect: vi.fn(() =>
+							Deferred.succeed(issued, undefined).pipe(
+								Effect.andThen(Effect.never),
+							),
+						),
+					});
+					const { liveLayer } = serviceLayer({ engine });
+					yield* Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						const service = yield* ProviderTurnServiceTag;
+						const commit = yield* makeCommitAndSignal;
+						yield* seedSession;
+						yield* seedClaimedRun("active-input", 1);
+						yield* commit([
+							canonicalEvent("input.admitted", "session-1", {
+								sessionId: "session-1",
+								inputId: "queued-input",
+								delivery: "queue",
+								request: { text: "later" },
+							}),
+							canonicalEvent("input.interrupt_requested", "session-1", {
+								sessionId: "session-1",
+								inputId: "queued-input",
+							}),
+						]);
+						const stopped = yield* Effect.forkChild(interruptTurn());
+						yield* Deferred.await(issued);
+						// A continuation can be admitted while the native interrupt is stalled.
+						yield* seedClaimedRun("fresh-input", 2);
+						yield* TestClock.adjust(STOP_ABORT_WAIT_MS - 1);
+						expect(service.turnFences("session-1").stopping).toBe(true);
+						yield* TestClock.adjust(1);
+						yield* Fiber.join(stopped);
+						expect(service.turnFences("session-1").stopping).toBe(false);
+						expect(
+							yield* sql`SELECT id, status FROM provider_runs ORDER BY id`,
+						).toEqual([
+							{ id: "run-active-input", status: "interrupted" },
+							{ id: "run-fresh-input", status: "running" },
+						]);
+						expect(
+							yield* sql`SELECT command_id, status FROM provider_command_outbox ORDER BY command_id`,
+						).toEqual([
+							{ command_id: "active-input", status: "failed" },
+							{ command_id: "fresh-input", status: "running" },
+						]);
+						expect(
+							yield* sql`SELECT command_id, status FROM command_receipts ORDER BY command_id`,
+						).toEqual([
+							{ command_id: "active-input", status: "side_effect_failed" },
+							{ command_id: "fresh-input", status: "side_effect_requested" },
+						]);
+						expect(
+							yield* (yield* ReadQueryEffectTag).readInboxState("session-1"),
+						).toMatchObject({ paused: false });
+						const [before] =
+							yield* sql`SELECT last_turn_end_version FROM sessions WHERE id = 'session-1'`;
+						yield* commit([
+							canonicalEvent(
+								"turn.completed",
+								"session-1",
+								{ messageId: "" },
+								{
+									provider: "claude",
+									metadata: { runId: "run-active-input" },
+								},
+							),
+						]);
+						expect(
+							yield* sql`SELECT last_turn_end_version FROM sessions WHERE id = 'session-1'`,
+						).toEqual([before]);
+						expect(
+							yield* sql`SELECT state FROM turns WHERE id = 'active-input'`,
+						).toEqual([{ state: "interrupted" }]);
+						yield* commit([
+							canonicalEvent(
+								"turn.completed",
+								"session-1",
+								{ messageId: "" },
+								{
+									provider: "claude",
+									metadata: { runId: "run-fresh-input" },
+								},
+							),
+						]);
+						expect(
+							yield* sql`SELECT id, status FROM provider_runs ORDER BY id`,
+						).toEqual([
+							{ id: "run-active-input", status: "interrupted" },
+							{ id: "run-fresh-input", status: "completed" },
+						]);
+					}).pipe(Effect.provide(liveLayer));
+				}),
+		);
+
+		it.effect("holds the fence until the acknowledged run ends", () => {
+			const engine = makeEngine({ providerId: "claude" });
+			const { liveLayer } = serviceLayer({ engine });
+			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const service = yield* ProviderTurnServiceTag;
+				const commit = yield* makeCommitAndSignal;
+				yield* seedSession;
+				yield* seedClaimedRun("active-input", 1);
+				const stopped = yield* Effect.forkChild(interruptTurn());
+				// A live background task acknowledges before the native terminal.
+				yield* TestClock.adjust(1_000);
+				expect(engine.dispatchEffect).toHaveBeenCalledOnce();
+				expect(service.turnFences("session-1").stopping).toBe(true);
+				yield* commit([
+					canonicalEvent(
+						"turn.interrupted",
+						"session-1",
+						{ messageId: "" },
+						{
+							metadata: { runId: "run-active-input" },
+						},
+					),
+				]);
+				yield* TestClock.adjust(100);
+				yield* Fiber.join(stopped);
+				expect(service.turnFences("session-1").stopping).toBe(false);
+				expect(
+					yield* sql`SELECT type FROM events WHERE type = 'turn.interrupted'`,
+				).toHaveLength(1);
+			}).pipe(Effect.provide(liveLayer));
+		});
+
+		it.effect(
+			"stops admissions from before the fence, not a continuation behind it",
+			() =>
+				Effect.gen(function* () {
+					const issued = yield* Deferred.make<void>();
+					const engine = makeEngine({
+						providerId: "claude",
+						dispatchEffect: vi.fn(() =>
+							Deferred.succeed(issued, undefined).pipe(
+								Effect.andThen(Effect.never),
+							),
+						),
+					});
+					const { liveLayer } = serviceLayer({ engine });
+					yield* Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						yield* seedSession;
+						// Intake need not have occurred for a claimed input to belong to Stop.
+						yield* seedClaimedRun("active-input", 1, false);
+						yield* seedClaimedRun("queued-steer", 2, false);
+						const stopped = yield* Effect.forkChild(interruptTurn());
+						yield* Deferred.await(issued);
+						yield* seedClaimedRun("continuation", 3, false);
+						const [interrupt] = vi
+							.mocked(engine.dispatchEffect)
+							.mock.calls.map(([command]) => command);
+						expect(interrupt).toMatchObject({ type: "interrupt_turn" });
+						expect(
+							interrupt?.type === "interrupt_turn"
+								? [...(interrupt.turnIds ?? [])].sort()
+								: [],
+						).toEqual(["active-input", "queued-steer"]);
+						yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
+						yield* Fiber.join(stopped);
+						expect(
+							yield* sql`SELECT id, status FROM provider_runs ORDER BY id`,
+						).toEqual([
+							{ id: "run-active-input", status: "interrupted" },
+							{ id: "run-continuation", status: "pending" },
+							{ id: "run-queued-steer", status: "interrupted" },
+						]);
+						expect(
+							yield* sql`SELECT state, started_at FROM turns WHERE id = 'continuation'`,
+						).toEqual([{ state: "pending", started_at: null }]);
+					}).pipe(Effect.provide(liveLayer));
+				}),
+		);
+	});
+
 	for (const driver of ["opencode", "claude"] as const) {
 		for (const sideThread of [0, 1]) {
 			it.effect(
@@ -1350,6 +1849,12 @@ describe("ProviderTurnService", () => {
 	it.effect(
 		"does not invent an OpenCode failure or native placement after a submitted RPC fails",
 		() => {
+			// A submitted RPC failure cannot prove that OpenCode rejected the input.
+			// Keep attachments in its command until a native echo establishes placement.
+			const images = [
+				"data:text/plain;name=notes.txt;base64,Y2Fmw6k=",
+				"data:application/pdf;name=guide.pdf;base64,JVBERi0xLjQ=",
+			];
 			const api = makeMockOpenCodeAPI();
 			api.session.prompt = vi.fn(async () => {
 				throw new Error("prompt unavailable");
@@ -1370,7 +1875,8 @@ describe("ProviderTurnService", () => {
 			return Effect.gen(function* () {
 				yield* sendTurn({
 					commandId: "cmd-error",
-					text: "ok",
+					text: "",
+					images,
 					model: { providerID: "opencode", modelID: "test" },
 				});
 				expect(api.session.prompt).toHaveBeenCalledOnce();
@@ -1817,10 +2323,14 @@ describe("ProviderTurnService", () => {
 				: "ordinary Claude Stop retains the pending steer's native ownership",
 			() => {
 				const stopped = Deferred.makeUnsafe<void>();
-				const abort = vi.fn(() => Effect.runPromise(Deferred.await(stopped)));
+				const issued = Deferred.makeUnsafe<void>();
+				const awaitStop = Deferred.succeed(issued, undefined).pipe(
+					Effect.andThen(Deferred.await(stopped)),
+				);
+				const abort = vi.fn(() => Effect.runPromise(awaitStop));
 				const engine = makeEngine({ providerId });
 				const dispatchEffect = vi.mocked(engine.dispatchEffect);
-				dispatchEffect.mockImplementation(() => Deferred.await(stopped));
+				dispatchEffect.mockImplementation(() => awaitStop);
 				const api = partialFake<OpenCodeAPI>({
 					session: partialFake<OpenCodeAPI["session"]>({ abort }),
 				});
@@ -1898,7 +2408,7 @@ describe("ProviderTurnService", () => {
 						}),
 					]);
 					const interrupt = yield* Effect.forkChild(interruptTurn());
-					yield* flushDispatch();
+					yield* Deferred.await(issued);
 					expect(
 						providerId === "opencode" ? abort : dispatchEffect,
 					).toHaveBeenCalledOnce();
@@ -1910,6 +2420,42 @@ describe("ProviderTurnService", () => {
 						{ status: "interrupted" },
 					]);
 					yield* Deferred.succeed(stopped, undefined);
+					if (!indeterminate) {
+						// An ordinary Stop preserves the pending steer's actual native answer.
+						yield* commit([
+							canonicalEvent(
+								"turn.interrupted",
+								"session-1",
+								{ messageId: "" },
+								{
+									provider: "claude",
+									metadata: { runId: "run-accepted-a" },
+								},
+							),
+							canonicalEvent(
+								"run.started",
+								"session-1",
+								{
+									inputId: "indeterminate-b",
+									requestedRunId: "run-indeterminate-b",
+								},
+								{
+									provider: "claude",
+									metadata: { runId: "run-indeterminate-b" },
+								},
+							),
+							canonicalEvent(
+								"turn.completed",
+								"session-1",
+								{ messageId: "" },
+								{
+									provider: "claude",
+									metadata: { runId: "run-indeterminate-b" },
+								},
+							),
+						]);
+						yield* TestClock.adjust(100);
+					}
 					yield* Fiber.join(interrupt);
 					if (providerId === "claude")
 						expect(dispatchEffect).toHaveBeenCalledWith(
@@ -1921,10 +2467,19 @@ describe("ProviderTurnService", () => {
 						expect(
 							yield* sql`SELECT status FROM provider_runs ORDER BY id`,
 						).toEqual([
-							{ status: "running" },
-							{ status: "pending" },
+							{ status: "interrupted" },
+							{ status: "completed" },
 							{ status: "interrupted" },
 						]);
+						expect(
+							yield* sql`SELECT state, started_at FROM turns WHERE id = 'indeterminate-b'`,
+						).toEqual([{ state: "completed", started_at: expect.any(Number) }]);
+						expect(
+							yield* sql`SELECT status FROM command_receipts WHERE command_id = 'indeterminate-b'`,
+						).toEqual([{ status: "side_effect_completed" }]);
+						expect(
+							yield* (yield* ReadQueryEffectTag).readInboxState("session-1"),
+						).toMatchObject({ paused: true });
 						return;
 					}
 					expect(
@@ -2250,7 +2805,7 @@ describe("ProviderTurnService", () => {
 						VALUES ('session-1', 'claude', 'Stored session', 'claude', 'claude-sonnet-4-5', '', '', 1, 1)`;
 					const service = yield* ProviderTurnServiceTag;
 					yield* service.sendTurn(defaultInput());
-					yield* service.interruptTurn({
+					yield* yield* service.beginStop({
 						clientId: "client-1",
 						commandId: "cmd-interrupt-1",
 						sessionId: "session-1",

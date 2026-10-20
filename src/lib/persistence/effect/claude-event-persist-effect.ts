@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Context, Data, Effect, Result, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
+import { parseAttachmentDataUrl } from "../../attachment-data-url.js";
 import type { KnownProviderDriverKind } from "../../contracts/provider-instance.js";
 import {
 	resolveServerSessionPick,
@@ -75,6 +76,7 @@ export interface ClaudeEventPersistEffect {
 			/** The reservation this placement belongs to; this does not prove intake. */
 			readonly runId?: string;
 			readonly provider?: string;
+			readonly images?: readonly string[];
 		},
 	) => Effect.Effect<void, ClaudeEventPersistFailure>;
 
@@ -405,6 +407,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 			readonly inputId?: string;
 			readonly runId?: string;
 			readonly provider?: string;
+			readonly images?: readonly string[];
 		},
 	): Effect.Effect<void, ClaudeEventPersistFailure> =>
 		commitAndSignal
@@ -470,6 +473,36 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 										messageId: userMsgId,
 										partId: `${userMsgId}-0`,
 										text,
+									},
+									{ provider, createdAt: now },
+								),
+							);
+						}
+						const attachments = yield* Effect.try({
+							try: () =>
+								(options?.images ?? []).map((url) => ({
+									...parseAttachmentDataUrl(url),
+									url,
+								})),
+							catch: (cause) =>
+								new ClaudeEventPersistEffectError({
+									operation: "persistUserMessage",
+									cause,
+								}),
+						});
+						for (const [index, attachment] of attachments.entries()) {
+							events.push(
+								canonicalEvent(
+									"file.attached",
+									sessionId,
+									{
+										messageId: userMsgId,
+										partId: `${userMsgId}-attachment-${index}`,
+										mime: attachment.mime,
+										...(attachment.name !== undefined
+											? { filename: attachment.name }
+											: {}),
+										url: attachment.url,
 									},
 									{ provider, createdAt: now },
 								),

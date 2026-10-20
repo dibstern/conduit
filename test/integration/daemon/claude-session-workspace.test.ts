@@ -168,6 +168,14 @@ describe("Claude declared workspace moves through the built daemon", () => {
 		if (!harness) return;
 		const fixture = harness;
 		try {
+			evidence["queryLaunches"] = fixture.claudeOptions().map((query) => ({
+				pid: query.pid,
+				cwd: query.options["cwd"],
+				resume: query.options["resume"] ?? query.resumeId,
+				agent: query.options["agent"],
+				configDir: query.configDir,
+				prompt: query.prompt,
+			}));
 			evidence["events"] = existsSync(fixture.daemonStorePath())
 				? events(fixture)
 				: [];
@@ -332,6 +340,14 @@ describe("Claude declared workspace moves through the built daemon", () => {
 		writeFileSync(join(fixture.root, "claude-replay-release"), "release\n");
 		await exitTurn;
 		await browser.send(sessionId, "Reply with pong back in the main folder.");
+		expect(
+			fixture.claudeOptions().flatMap(({ prompt }) => (prompt ? [prompt] : [])),
+		).toEqual([
+			"Enter a worktree.",
+			"Reply with pong in the worktree.",
+			"Exit the worktree and keep it.",
+			"Reply with pong back in the main folder.",
+		]);
 		expect(runnerStarts()).toBe(1);
 		expect(moves(fixture, sessionId)).toEqual([
 			{

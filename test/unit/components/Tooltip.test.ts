@@ -18,7 +18,7 @@ describe("Tooltip", () => {
 		expect(tooltip.id).not.toBe("");
 		expect(trigger.getAttribute("aria-describedby")).toBe(tooltip.id);
 		expect(tooltip.classList.contains("rounded-lg")).toBe(true);
-		expect(tooltip.classList.contains("bg-bg-alt")).toBe(true);
+		expect(tooltip.classList.contains("bg-popover-bg")).toBe(true);
 	});
 
 	it("registers its trigger as active when it mounts already open", () => {

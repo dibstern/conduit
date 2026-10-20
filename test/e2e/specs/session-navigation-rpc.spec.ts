@@ -169,6 +169,9 @@ test("cold session navigation reuses attach resolution; warm navigation needs no
 				),
 			)
 			.map((request) => request.tag);
+	const coldOutput = testInfo.outputPath("cold-navigation-requests.json");
+	await writeFile(coldOutput, `${JSON.stringify(cold, null, 2)}\n`);
+	await testInfo.attach("cold-navigation-requests", { path: coldOutput });
 	expect(placement(cold)).toEqual(["AttachProject", "SubscribeSessionDetail"]);
 	expect(
 		cold.find((request) => request.tag === "AttachProject")?.payload,
@@ -268,6 +271,60 @@ test("a cold session link waits for attach placement before scoped reads", async
 		`${JSON.stringify({ beforePlacement, placed: rpc.getRequests(), route: page.url() }, null, 2)}\n`,
 	);
 	await testInfo.attach("cold-session-placement", { path: output });
+});
+
+test("a failed cold attach still reports the failure after the shell reveals its owner", async ({
+	page,
+	harness,
+}, testInfo) => {
+	let rejectAttach!: (error: WsRpcError) => void;
+	const { rpc } = await setup(
+		page,
+		{
+			AttachProject: () =>
+				new Promise<never>((_resolve, reject) => {
+					rejectAttach = reject;
+				}),
+		},
+		[],
+	);
+	const url = `${harness.relayBaseUrl}/s/${seed}`;
+	await page.goto(url);
+	const attach = await rpc.waitForRequest(
+		(request) => request.tag === "AttachProject",
+	);
+	expect(attach.payload).toMatchObject({ sessionId: seed });
+	rpc.setShellRows([
+		{
+			id: seed,
+			title: "Unavailable session",
+			status: "idle",
+			projectSlug: otherProject,
+		},
+	]);
+	await expect(
+		page.locator(`#session-list [data-session-id="${seed}"]`),
+	).toContainText("Unavailable session");
+	rejectAttach(new WsRpcError({ message: "Project is unavailable" }));
+	await expect(
+		page.getByText("Failed to switch projects", { exact: true }),
+	).toBeVisible();
+	await expect(
+		page.getByText("Project is unavailable", { exact: true }),
+	).toBeVisible();
+	await expect(page).toHaveURL(url);
+	expect(
+		rpc.getRequests().filter(({ tag }) => tag === "AttachProject"),
+	).toEqual([attach]);
+	expect(
+		rpc.getRequests().filter(({ tag }) => tag === "SubscribeSessionDetail"),
+	).toEqual([]);
+	const output = testInfo.outputPath("failed-cold-session-attach.json");
+	await writeFile(
+		output,
+		`${JSON.stringify({ requests: rpc.getRequests(), route: page.url() }, null, 2)}\n`,
+	);
+	await testInfo.attach("failed-cold-session-attach", { path: output });
 });
 
 test("an unknown session link goes home with a not-found notice", async ({
@@ -541,17 +598,13 @@ test("a delayed project attach keeps the target session's transcript and files",
 				request.payload["sessionId"] === target,
 		),
 	).toEqual([]);
-	const projectReadsBeforeAttach = rpc
-		.getRequests()
-		.filter((request) => request.tag === "GetProjects").length;
 	finishAttach({ projectSlug: otherProject, sessionSlug: null });
-	await expect
-		.poll(
-			() =>
-				rpc.getRequests().filter((request) => request.tag === "GetProjects")
-					.length,
-		)
-		.toBeGreaterThan(projectReadsBeforeAttach);
+	// The attach reply is what releases the target's scoped reads.
+	await rpc.waitForRequest(
+		(request) =>
+			request.tag === "SubscribeSessionDetail" &&
+			request.payload["sessionId"] === target,
+	);
 	if (
 		(await page
 			.getByTestId("views-rail-files")
@@ -945,7 +998,11 @@ test("a placed session only enables send for nonempty input", async ({
 }) => {
 	const { rpc } = await setup(page, { ViewSession: () => ({ ok: true }) });
 	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
-	await expect(page.locator("#input")).toBeVisible();
+	// The seed session restores a saved draft; wait for it so the empty check
+	// below cannot pass before the draft arrives.
+	await expect(page.locator("#input")).toHaveValue("Seed draft");
+	await expect(page.locator("#send")).toBeEnabled();
+	await page.locator("#input").fill("");
 	await expect(page.locator("#send")).toBeDisabled();
 	await page.locator("#input").fill("   ");
 	await expect(page.locator("#send")).toBeDisabled();
@@ -1386,7 +1443,7 @@ test("ForkSession response selects the fork and restores its draft", async ({
 	const { rpc } = await setup(page);
 	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
-	const item = page.locator(`[data-session-id="${seed}"]`);
+	const item = page.locator(`#session-list [data-session-id="${seed}"]`);
 	await item.hover();
 	await item.locator(".session-more-btn").click();
 	await page.getByTestId("session-ctx-fork").click();
@@ -1419,13 +1476,13 @@ test("a fork reply after opening another session leaves its route and composer a
 	});
 	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
-	const item = page.locator(`[data-session-id="${seed}"]`);
+	const item = page.locator(`#session-list [data-session-id="${seed}"]`);
 	await item.hover();
 	await item.locator(".session-more-btn").click();
 	await page.getByTestId("session-ctx-fork").click();
 	await rpc.waitForRequest((request) => request.tag === "ForkSession");
 	await page
-		.locator(`[data-session-id="${survivor}"]`)
+		.locator(`#session-list [data-session-id="${survivor}"]`)
 		.click({ position: { x: 48, y: 12 } });
 	await expect(page.locator("#input")).toHaveValue(`Draft for ${survivor}`);
 	await page.locator("#input").fill("Keep the other session open");
@@ -1600,9 +1657,9 @@ test("input.submit response selects a materialized OpenCode session", async ({
 		lastTurnEndVersion: 200,
 		lastTurnEndInputId: "older-input",
 	});
-	await expect(page.locator(`[data-session-id="${seed}"]`)).toContainText(
-		"Source with history",
-	);
+	await expect(
+		page.locator(`#session-list [data-session-id="${seed}"]`),
+	).toContainText("Source with history");
 	await page.locator("#send").click();
 	const submitted = await rpc.waitForRequest(
 		(request) => request.tag === "input.submit",

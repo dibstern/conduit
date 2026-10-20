@@ -1196,6 +1196,18 @@ export class MockOpenCodeServer {
 			this.getActiveQueue(this.exactQueues, exact) ??
 			this.getActiveQueue(this.normalizedQueues, normalized);
 
+		// OpenCode answers an abort with `true`, busy or idle, and recordings
+		// rarely capture one. Stop now fails when the abort does.
+		if (
+			!queue &&
+			method === "POST" &&
+			/^\/session\/[^/]+\/abort$/.test(basePath)
+		) {
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end("true");
+			return;
+		}
+
 		if (!queue) {
 			res.writeHead(404);
 			res.end(

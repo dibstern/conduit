@@ -145,6 +145,7 @@ describe("OpenCode runtime ingress does not publish to relay/browser", () => {
 					sessionId: SESSION_ID,
 				}),
 			]),
+			new Set(),
 		);
 		expect(publishToRelay).not.toHaveBeenCalled();
 	});

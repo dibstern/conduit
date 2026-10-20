@@ -19,6 +19,226 @@ import {
 import { providerRuntimeEvent } from "../../../helpers/provider-runtime-event.js";
 
 describe("Claude accepted run ownership", () => {
+	it.each([
+		{ lateStoppedResult: false, lateRejection: false },
+		{ lateStoppedResult: true, lateRejection: false },
+		{ lateStoppedResult: false, lateRejection: true },
+	])("keeps a replacement out of the background run retired by Stop (late stopped result: $lateStoppedResult, late rejection: $lateRejection)", async ({
+		lateStoppedResult,
+		lateRejection,
+	}) => {
+		const harness = makeEffectProjectionHarness();
+		const sessionId = "stop-retired-run";
+		const inputs: [string, string] = [
+			"11111111-1111-4111-8111-111111111111",
+			"22222222-2222-4222-8222-222222222222",
+		];
+		const finish = Deferred.makeUnsafe<void>();
+		const stoppedResult = Deferred.makeUnsafe<void>();
+		const backgroundReady = Deferred.makeUnsafe<void>();
+		const interruptAck = Deferred.makeUnsafe<undefined, Error>();
+		const query = createMockQuery([]);
+		if (lateRejection)
+			query.interrupt = vi.fn(() =>
+				Effect.runPromise(Deferred.await(interruptAck)),
+			);
+		const sink = createMockEventSink();
+		sink.push = (event) =>
+			Effect.tryPromise({
+				try: () => harness.ingest(event),
+				catch: (cause) => new EventSinkIngestionError({ cause }),
+			}).pipe(Effect.asVoid);
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: "/tmp",
+			queryFactory: ({ prompt }) => {
+				if (typeof prompt === "string")
+					throw new Error("Expected streaming input");
+				const iterator = prompt[Symbol.asyncIterator]();
+				return Object.assign(query, {
+					[Symbol.asyncIterator]: () =>
+						(async function* (): AsyncGenerator<SDKMessage> {
+							for (const inputId of inputs) {
+								await iterator.next();
+								yield {
+									type: "command_lifecycle",
+									state: "started",
+									command_uuid: inputId,
+									session_id: "stop-retired-sdk",
+									uuid: crypto.randomUUID(),
+								};
+								if (inputId === inputs[0]) {
+									yield {
+										type: "system",
+										subtype: "background_tasks_changed",
+										session_id: "stop-retired-sdk",
+										uuid: crypto.randomUUID(),
+										tasks: [
+											{
+												task_id: "monitor",
+												task_type: "monitor_mcp",
+												description: "Watch",
+												ambient: false,
+											},
+										],
+									};
+									Effect.runSync(Deferred.succeed(backgroundReady, undefined));
+								}
+							}
+							if (lateStoppedResult) {
+								await Effect.runPromise(Deferred.await(stoppedResult));
+								yield makeErrorResult({ user_message_uuid: inputs[0] });
+							}
+							await Effect.runPromise(Deferred.await(finish));
+							yield makeSuccessResult({ user_message_uuid: inputs[1] });
+						})(),
+				});
+			},
+		});
+		const send = (index: 0 | 1) =>
+			Effect.runPromise(
+				instance.sendTurnEffect(
+					makeBaseSendTurnInput({
+						sessionId,
+						inputId: inputs[index],
+						runId: `run-${index}`,
+						eventSink: sink,
+						model: { providerId: "claude", modelId: "claude-fable-5" },
+					}),
+				),
+			);
+		try {
+			await harness.query(
+				"INSERT INTO sessions (id, provider, title, created_at, updated_at) VALUES (?, 'claude', 'Stop retirement', 1, 1)",
+				[sessionId],
+			);
+			for (const [index, inputId] of inputs.entries()) {
+				await harness.query(
+					"INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES (?, ?, 'pending', ?)",
+					[`run-${index}`, sessionId, index + 1],
+				);
+				await harness.ingest(
+					providerRuntimeEvent(
+						"message.created",
+						sessionId,
+						{ messageId: inputId, sessionId, role: "user" },
+						{ eventId: `placement-${index}`, runId: `run-${index}` },
+					),
+				);
+				await harness.query(
+					"INSERT INTO command_receipts (command_id, session_id, status, command_type, project_key, created_at, updated_at) VALUES (?, ?, 'side_effect_requested', 'send_turn', 'test-project', 1, 1)",
+					[inputId, sessionId],
+				);
+				await harness.query(
+					"INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at) VALUES (?, ?, 'test-project', ?, 'claude', 'send_turn', ?, '{}', 'running', 1, 1, 1)",
+					[index + 1, inputId, sessionId, `run-${index}`],
+				);
+			}
+			expect((await send(0)).status).toBe("accepted");
+			await Effect.runPromise(Deferred.await(backgroundReady));
+			// A live monitor keeps the query open. The interrupt is acknowledged,
+			// but no SDK result arrives before Stop's bound retires this cohort.
+			const stopping = Effect.runPromise(
+				instance
+					.interruptTurnEffect(sessionId, [inputs[0]])
+					.pipe(Effect.result),
+			);
+			await vi.waitFor(() => expect(query.interrupt).toHaveBeenCalledOnce());
+			if (!lateRejection) expect((await stopping)._tag).toBe("Success");
+			expect(query.close).not.toHaveBeenCalled();
+			await harness.ingest(
+				providerRuntimeEvent(
+					"turn.interrupted",
+					sessionId,
+					{ messageId: "", reason: "Stopped by the user" },
+					{ runId: "run-0" },
+				),
+			);
+			if (lateRejection) {
+				Effect.runSync(
+					Deferred.fail(
+						interruptAck,
+						new Error("Interrupt rejected after retirement"),
+					),
+				);
+				expect((await stopping)._tag).toBe("Failure");
+			}
+			expect((await send(1)).status).toBe("accepted");
+			expect(
+				await harness.query(
+					"SELECT id, status, joined_into FROM provider_runs ORDER BY requested_at",
+				),
+			).toEqual([
+				{ id: "run-0", status: "interrupted", joined_into: null },
+				{ id: "run-1", status: "running", joined_into: null },
+			]);
+			expect(
+				await harness.query(
+					"SELECT state, run_id FROM turns ORDER BY requested_at, rowid",
+				),
+			).toEqual([
+				{ state: "interrupted", run_id: "run-0" },
+				{ state: "running", run_id: "run-1" },
+			]);
+			if (lateStoppedResult) {
+				Effect.runSync(Deferred.succeed(stoppedResult, undefined));
+				await vi.waitFor(async () =>
+					expect(
+						(await harness.storedEvents(sessionId)).filter(
+							(event) =>
+								event.type === "turn.interrupted" &&
+								event.metadata?.["runId"] === "run-0",
+						),
+					).toHaveLength(2),
+				);
+				expect(
+					await harness.query(
+						"SELECT status FROM provider_runs ORDER BY requested_at",
+					),
+				).toEqual([{ status: "interrupted" }, { status: "running" }]);
+			}
+			Effect.runSync(Deferred.succeed(finish, undefined));
+			await vi.waitFor(async () =>
+				expect(
+					await harness.query(
+						"SELECT status FROM command_receipts ORDER BY rowid",
+					),
+				).toEqual([
+					{ status: "side_effect_failed" },
+					{ status: "side_effect_completed" },
+				]),
+			);
+			expect(
+				await harness.query(
+					"SELECT status FROM provider_runs ORDER BY requested_at",
+				),
+			).toEqual([{ status: "interrupted" }, { status: "completed" }]);
+			expect(
+				await harness.query(
+					"SELECT state, run_id FROM turns ORDER BY requested_at, rowid",
+				),
+			).toEqual([
+				{ state: "interrupted", run_id: "run-0" },
+				{ state: "completed", run_id: "run-1" },
+			]);
+			expect(
+				await harness.query(
+					"SELECT status FROM provider_command_outbox ORDER BY request_sequence",
+				),
+			).toEqual([{ status: "failed" }, { status: "completed" }]);
+			expect(
+				(await harness.storedEvents(sessionId))
+					.filter((event) => event.type === "turn.completed")
+					.map((event) => event.metadata?.["runId"]),
+			).toEqual(["run-1"]);
+		} finally {
+			Effect.runSync(Deferred.succeed(interruptAck, undefined));
+			Effect.runSync(Deferred.succeed(stoppedResult, undefined));
+			Effect.runSync(Deferred.succeed(finish, undefined));
+			await Effect.runPromise(instance.shutdownEffect().pipe(Effect.ignore));
+			await harness.dispose();
+		}
+	});
+
 	it.each(
 		[
 			{

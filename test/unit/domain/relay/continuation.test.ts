@@ -415,7 +415,9 @@ for (const scenario of [
 							dispatches++;
 							if (input.account) dispatchedAccounts.push(input.account);
 						}),
-					interruptTurn: () => Effect.void,
+					turnFences: () => ({ stopping: false, switching: false }),
+					fenceLifts: Effect.succeed(Stream.never),
+					beginStop: () => Effect.succeed(Effect.void),
 				}),
 				Effect.provideService(SessionInboxTag, {
 					steerDeclined: () => Effect.void,

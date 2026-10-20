@@ -24,6 +24,13 @@ export const requestConfigSave = ConfigPersistenceTag.pipe(
 	Effect.flatMap((persistence) => persistence.requestSave),
 );
 
+/** Wait for the serialized write containing this request before acknowledging it. */
+export const saveConfig = ConfigPersistenceTag.pipe(
+	Effect.flatMap((persistence) =>
+		persistence.requestSave.pipe(Effect.andThen(persistence.flush)),
+	),
+);
+
 export const ConfigPersistenceNoopLive = Layer.succeed(ConfigPersistenceTag, {
 	requestSave: Effect.void,
 	flush: Effect.void,

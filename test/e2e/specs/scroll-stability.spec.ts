@@ -819,9 +819,11 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 		// Click on Session B in the sidebar
 		const sessionACount = await page.locator(".msg-container").count();
 		await page.locator('text="Session B"').click();
-		await expect(page.locator('[data-session-id="sess-switch-B"]')).toHaveClass(
-			/active/,
-		);
+		await expect(
+			page.locator(
+				'#session-list .session-item[data-session-id="sess-switch-B"]',
+			),
+		).toHaveClass(/active/);
 		await expect
 			.poll(() => page.locator(".msg-container").count())
 			.not.toBe(sessionACount);
@@ -1099,7 +1101,8 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 	}) => {
 		// The whole first page fits, so the history sentinel is on screen from
 		// the start and never scrolls in. Older pages must load anyway.
-		await page.setViewportSize({ width: 1280, height: 12_000 });
+		// The 50-row first page renders about 13,000px tall.
+		await page.setViewportSize({ width: 1280, height: 20_000 });
 		await mockRelayWebSocket(page, {
 			initMessages: createInitMessages(30),
 			responses: new Map(),
@@ -1230,7 +1233,9 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 		const sessionACount = await page.locator(".msg-container").count();
 		await page.locator('text="Session B (short)"').click();
 		await expect(
-			page.locator('[data-session-id="sess-scrollup-B"]'),
+			page.locator(
+				'#session-list .session-item[data-session-id="sess-scrollup-B"]',
+			),
 		).toHaveClass(/active/);
 		await expect
 			.poll(() => page.locator(".msg-container").count())

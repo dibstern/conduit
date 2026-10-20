@@ -14,6 +14,7 @@ import {
 import type { StubTable } from "../../helpers/stub-ws-rpc.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { MOCK_SERVER_STATUS, mockWsRpc } from "../helpers/rpc-mock.js";
+import { chooseSettingsOption } from "../helpers/settings.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -205,12 +206,14 @@ test("refused log-level change restores the selected level and shows the server 
 		},
 	});
 	await page.getByTestId("settings-tab-server").click();
-	const select = page.locator("#server-log-level");
-	await select.selectOption("debug");
+	const logs = page.getByTestId("server-logs-group");
+	await logs.getByRole("button", { name: /^Logs\b/ }).click();
+	const select = logs.getByRole("button", { name: /^Log level\b/ });
+	await chooseSettingsOption(page, select, "debug");
 	await expect(page.locator("#server-log-level-error")).toHaveText(
 		"The server refused this log level.",
 	);
-	await expect(select).toHaveValue("info");
+	await expect(select).toHaveAttribute("data-value", "info");
 	await page.screenshot({
 		path: testInfo.outputPath("log-level-rejection.png"),
 	});

@@ -15,6 +15,57 @@ const migratedStore = Layer.effectDiscard(makeEffectSqlMigrator()).pipe(
 const T = 1_000_000_000_000;
 
 describe("Schema Migration", () => {
+	// Failure modes: existing stores miss the index, shelf predicates scan all
+	// project rows, migration changes rows, or ledger repair cannot replay it.
+	it.effect(
+		"indexes settled shelf counts when upgrading an existing store",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator(
+					Object.fromEntries(
+						Object.entries(effectMigrationEntries).slice(0, 70),
+					),
+				);
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions (id, project_id, title, provider, parent_id, settled_at, pinned_at, created_at, updated_at)
+				VALUES ('root', 'alpha', 'Alpha Ö work', 'claude', NULL, 10, NULL, 1, 1),
+				('active', 'alpha', 'Active', 'claude', NULL, NULL, NULL, 1, 1),
+				('pinned', 'alpha', 'Pinned', 'claude', NULL, 10, 11, 1, 1),
+				('child', 'alpha', 'Child', 'claude', 'root', 10, NULL, 1, 1),
+				('other', 'beta', 'Other', 'claude', NULL, 10, NULL, 1, 1)`;
+				expect(yield* makeEffectSqlMigrator()).toEqual([
+					[71, "sessions_settled_shelf_index"],
+					[72, "surfacing_marks"],
+					[73, "message_part_read"],
+					[74, "turn_recaps"],
+					[75, "provider_run_ownership"],
+				]);
+				for (const [filter, count] of [
+					["", 2],
+					["AND parent_id IS NULL", 1],
+					["AND parent_id IS NULL AND title LIKE '%Ö%' ESCAPE '\\'", 1],
+					["AND parent_id IS NULL AND title LIKE '%ö%' ESCAPE '\\'", 0],
+				] as const) {
+					const query = `SELECT COUNT(*) AS count FROM sessions WHERE project_id IN ('alpha') AND settled_at IS NOT NULL AND pinned_at IS NULL ${filter}`;
+					expect(yield* sql.unsafe(query)).toEqual([{ count }]);
+					const plan = yield* sql.unsafe<{ detail: string }>(
+						`EXPLAIN QUERY PLAN ${query}`,
+					);
+					expect(plan.map(({ detail }) => detail).join("\n")).toContain(
+						"idx_sessions_settled_shelf",
+					);
+				}
+				expect(yield* sql`SELECT COUNT(*) AS count FROM sessions`).toEqual([
+					{ count: 5 },
+				]);
+				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 71`;
+				expect(yield* makeEffectSqlMigrator()).toEqual([
+					[71, "sessions_settled_shelf_index"],
+				]);
+				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+			}).pipe(Effect.provide(SqliteClient.layer({ filename: ":memory:" }))),
+	);
+
 	// Guard the index with the launch-ownership lookup used by list reads.
 	it.effect(
 		"indexes launch ownership by session and event type when upgrading an existing store",
@@ -40,7 +91,13 @@ describe("Schema Migration", () => {
 					[66, "project_tree_data"],
 					[67, "purge_background_shell_sessions"],
 					[68, "input_drafts"],
-					[69, "provider_run_ownership"],
+					[69, "goal_check_metadata"],
+					[70, "message_part_surfacing"],
+					[71, "sessions_settled_shelf_index"],
+					[72, "surfacing_marks"],
+					[73, "message_part_read"],
+					[74, "turn_recaps"],
+					[75, "provider_run_ownership"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -70,6 +127,7 @@ describe("Schema Migration", () => {
 				"daemon_store_imports",
 				"events",
 				"input_drafts",
+				"message_part_read_state",
 				"message_part_tombstones",
 				"message_parts",
 				"message_tombstones",
@@ -97,7 +155,9 @@ describe("Schema Migration", () => {
 				"session_sidebar_horizon",
 				"sessions",
 				"store_identity",
+				"surfacing_marks",
 				"tool_content",
+				"turn_recaps",
 				"turns",
 			]);
 			const draftColumns = yield* sql<{
@@ -331,11 +391,21 @@ describe("Schema Migration", () => {
 					unique: false,
 				},
 				{ name: "idx_sessions_root", table: "sessions", unique: false },
+				{
+					name: "idx_sessions_settled_shelf",
+					table: "sessions",
+					unique: false,
+				},
 				{ name: "idx_sessions_updated", table: "sessions", unique: false },
 				{ name: "idx_sessions_version", table: "sessions", unique: false },
 				{
 					name: "idx_tool_content_session",
 					table: "tool_content",
+					unique: false,
+				},
+				{
+					name: "idx_turn_recaps_session",
+					table: "turn_recaps",
 					unique: false,
 				},
 				{

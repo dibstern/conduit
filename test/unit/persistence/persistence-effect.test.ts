@@ -147,6 +147,7 @@ describe("Persistence Effect", () => {
 					"daemon_store_imports",
 					"events",
 					"input_drafts",
+					"message_part_read_state",
 					"message_part_tombstones",
 					"message_parts",
 					"message_tombstones",
@@ -174,7 +175,9 @@ describe("Persistence Effect", () => {
 					"session_sidebar_horizon",
 					"sessions",
 					"store_identity",
+					"surfacing_marks",
 					"tool_content",
+					"turn_recaps",
 					"turns",
 				],
 				projectionFailureColumns: [
@@ -336,7 +339,13 @@ describe("Persistence Effect", () => {
 				{ migration_id: 66, name: "project_tree_data" },
 				{ migration_id: 67, name: "purge_background_shell_sessions" },
 				{ migration_id: 68, name: "input_drafts" },
-				{ migration_id: 69, name: "provider_run_ownership" },
+				{ migration_id: 69, name: "goal_check_metadata" },
+				{ migration_id: 70, name: "message_part_surfacing" },
+				{ migration_id: 71, name: "sessions_settled_shelf_index" },
+				{ migration_id: 72, name: "surfacing_marks" },
+				{ migration_id: 73, name: "message_part_read" },
+				{ migration_id: 74, name: "turn_recaps" },
+				{ migration_id: 75, name: "provider_run_ownership" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

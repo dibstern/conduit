@@ -16,7 +16,9 @@ export const fetchWithRetry = (
 	const {
 		retries = 2,
 		retryDelay = 1000,
-		timeout = 10_000,
+		timeout = process.env["NODE_ENV"] === "test"
+			? Number(process.env["CONDUIT_TEST_REQUEST_TIMEOUT_MS"] ?? 10_000)
+			: 10_000,
 		baseFetch = globalThis.fetch,
 	} = options;
 
@@ -24,7 +26,10 @@ export const fetchWithRetry = (
 		try: () =>
 			baseFetch(url, { ...init, signal: AbortSignal.timeout(timeout) }),
 		catch: (err) => {
-			if (err instanceof DOMException && err.name === "AbortError") {
+			if (
+				err instanceof DOMException &&
+				(err.name === "AbortError" || err.name === "TimeoutError")
+			) {
 				return new OpenCodeConnectionError({
 					message: `Request timed out after ${timeout}ms`,
 				});

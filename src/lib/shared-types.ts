@@ -1,6 +1,7 @@
 // Types shared between server and frontend.
 // Imported by src/lib/types.ts (server) and frontend code.
 
+import type { SurfacingMark } from "./contracts/category-set.js";
 import {
 	LimitRecoverySchema,
 	SessionResumeSchema,
@@ -337,7 +338,7 @@ export const SessionInfoSchema = Schema.Struct({
 	forkMessageId: Schema.optional(Schema.String),
 	/** Inclusive boundary in transcript (created_at, id) order. */
 	forkPointTimestamp: Schema.optional(Schema.Number),
-	/** Ordering ID when the SDK lineage boundary differs from the UI message ID. */
+	/** Source ordering ID at the cut; legacy Cursor forks may store the copied ID. */
 	forkPointMessageId: Schema.optional(Schema.String),
 	pendingQuestionCount: Schema.optional(Schema.Number),
 	pendingPermissionCount: Schema.optional(Schema.Number),
@@ -421,6 +422,10 @@ export type ProjectSessionAvailability =
 
 export interface DaemonSessionQueryResult {
 	readonly sessions: ReadonlyArray<SessionInfo>;
+	readonly settledCounts?: ReadonlyArray<{
+		readonly projectSlug: string;
+		readonly count: number;
+	}>;
 	readonly availability: ReadonlyArray<ProjectSessionAvailability>;
 	readonly hasMore: boolean;
 	readonly nextCursor: DaemonSessionCursor | null;
@@ -479,6 +484,12 @@ export interface PtyInfo {
  */
 export interface HistoryMessagePart {
 	id: string;
+	surfacingMark?: SurfacingMark | null | undefined;
+	surfacingOrdinal?: number;
+	surfacingProbabilities?: Record<string, number> | null;
+	surfacingSetVersion?: number;
+	surfacingModel?: string;
+	surfacingRead?: boolean;
 	type: PartType | "thinking" | "error" | "setup" | "notice";
 	/** Daemon setup notice, carried by the normal durable transcript. */
 	setup?: ProjectSetupState;

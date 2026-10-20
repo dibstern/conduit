@@ -1,10 +1,11 @@
+import { openComposerSheet } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple", screenshot: "off" });
 
-// The words composer keeps the checkout in the footer on phones too.
+// Desktop Words shows the checkout in the footer; phones keep it in the Composer sheet.
 test.beforeEach(async ({ page }) => {
 	await page.addInitScript(() => {
 		localStorage.setItem(
@@ -72,6 +73,10 @@ for (const viewport of [
 			responses: new Map(),
 		});
 		await page.goto(`${harness.relayBaseUrl}/s/${session.id}`);
+		if (viewport.width < 768) {
+			await expect(page.getByTestId("composer-more-attention")).toBeVisible();
+			await openComposerSheet(page);
+		}
 		const identity = page.getByTestId("composer-checkout");
 		const notice = page.getByTestId("workspace-moved-back");
 		await expect(notice).toBeVisible();
@@ -96,7 +101,11 @@ for (const viewport of [
 			git: { branch: "next", worktree: "next-worktree" },
 		});
 		await expect(notice).toHaveCount(0);
-		await expect(identity).toContainText("next-worktree");
+		// Words names the worktree in the checkout's accessible name, beside its branch.
+		await expect(identity).toHaveAccessibleName(
+			"Checkout: next-worktree / next",
+		);
+		await expect(identity.locator('[data-part="branch"]')).toHaveText("next");
 		// Main-folder resets arrive as null or an omitted workspace field.
 		// RPC JSON omits undefined; the family row still carries cause missing.
 		for (const workspace of [null, undefined]) {

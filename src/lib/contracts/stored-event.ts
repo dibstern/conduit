@@ -51,6 +51,8 @@ export type MessageSnapshotPayload = PayloadOf<"message.snapshot">;
 
 export type TextDeltaPayload = PayloadOf<"text.delta">;
 
+export type TextSurfacedPayload = PayloadOf<"text.surfaced">;
+
 export type ThinkingStartPayload = PayloadOf<"thinking.start">;
 
 export type ThinkingDeltaPayload = PayloadOf<"thinking.delta">;
@@ -191,6 +193,12 @@ const SessionGoalSchema = Schema.Struct({
 	setAt: Schema.Number,
 	tokensAtStart: Schema.Number,
 	lastReason: Schema.optional(Schema.String),
+	/** Explicit provider report only; absence means the judge is unknown. */
+	judgeModel: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty())),
+	/** Durable turns overlapping this goal's lifetime, frozen on completion. */
+	turnCount: Schema.optional(
+		Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+	),
 });
 
 export type SessionGoalChangedPayload = PayloadOf<"session.goal_changed">;
@@ -520,6 +528,19 @@ export const CanonicalEvents = {
 			text: Schema.String,
 		}),
 	),
+	"text.surfaced": live(
+		Schema.Struct({
+			messageId: Schema.String,
+			partId: Schema.String,
+			/** Stable 1-based position among all of the turn's mid-turn text parts. */
+			ordinal: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
+			/** Provenance only; consumers use the current category set for levels. */
+			categorySetVersion: Schema.Number,
+			model: Schema.String,
+			/** Null records a failed judgment, distinct from no verdict yet. */
+			probabilities: Schema.NullOr(Schema.Record(Schema.String, Schema.Number)),
+		}),
+	),
 	"thinking.start": live(
 		Schema.Struct({
 			messageId: Schema.String,
@@ -701,6 +722,7 @@ export const CanonicalEvents = {
 			forkPointEvent: Schema.optionalKey(Schema.String),
 			forkPointTimestamp: Schema.optionalKey(Schema.Number),
 			forkPointMessageId: Schema.optionalKey(Schema.String),
+			inheritsHistory: Schema.optionalKey(Schema.Boolean),
 			providerSessionId: Schema.optionalKey(Schema.String),
 			sideThread: Schema.optionalKey(Schema.Boolean),
 			/** The input a Side Thread was started with, so a retried start finds it. */
@@ -1022,6 +1044,9 @@ export type EventPayloadMap = { [K in CanonicalEventType]: PayloadOf<K> };
 export const CANONICAL_EVENT_TYPES = Object.keys(
 	CanonicalEvents,
 ) as readonly CanonicalEventType[];
+
+export const TextSurfacedPayloadSchema =
+	CanonicalEvents["text.surfaced"].payload;
 
 export const SessionGoalChangedPayloadSchema =
 	CanonicalEvents["session.goal_changed"].payload;

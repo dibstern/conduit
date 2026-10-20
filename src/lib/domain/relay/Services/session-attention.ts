@@ -86,3 +86,66 @@ export const announceBackgroundWork = (sessionId: string) =>
 /** Seen up to just before the latest turn end, so that turn end is unread. */
 export const markUnread = (sessionId: string) =>
 	writeSeen(sessionId, "COALESCE(last_turn_end_version, -1) - 1", []);
+
+/**
+ * Per-message read state (plan decision 11): a row in `message_part_read_state`
+ * means read. It is keyed by session and part, outside the replay-owned part
+ * rows, so a projector rebuild never resets it, and session deletion cascades.
+ * Only the session's own text parts can be marked. The stamp moves the parts'
+ * and their messages' versions, which is what re-sends them to every window.
+ * The sidebar's seen marker is untouched.
+ */
+export const setRead = (
+	partIds: readonly string[],
+	read: boolean,
+	sessionId: string,
+) =>
+	Effect.gen(function* () {
+		if (partIds.length === 0) return false;
+		const sql = yield* SqlClient.SqlClient;
+		const { projectId } = yield* EventStoreEffectTag;
+		const commitAndSignal = yield* makeCommitAndSignal;
+		const changed = yield* commitAndSignal.write((_project, stamp) =>
+			stamp((version) =>
+				Effect.gen(function* () {
+					const parts = sql`
+						SELECT p.id FROM message_parts p
+						JOIN messages m ON m.id = p.message_id
+						JOIN sessions s ON s.id = m.session_id
+						WHERE s.id = ${sessionId} AND s.project_id = ${projectId} AND p.type = 'text'
+							AND p.id IN (SELECT value FROM json_each(${JSON.stringify(partIds)}))`;
+					const rows = read
+						? yield* sql<{ part_id: string }>`
+							INSERT INTO message_part_read_state (session_id, part_id)
+							SELECT ${sessionId}, id FROM (${parts}) WHERE 1
+							ON CONFLICT DO NOTHING RETURNING part_id`
+						: yield* sql<{ part_id: string }>`
+							DELETE FROM message_part_read_state
+							WHERE session_id = ${sessionId} AND part_id IN (${parts})
+							RETURNING part_id`;
+					if (rows.length === 0) return [];
+					const ids = JSON.stringify(rows.map((row) => row.part_id));
+					yield* sql`UPDATE message_parts SET version = ${version}
+						WHERE id IN (SELECT value FROM json_each(${ids}))`;
+					yield* sql`UPDATE messages SET version = ${version}
+						WHERE id IN (SELECT message_id FROM message_parts
+							WHERE id IN (SELECT value FROM json_each(${ids})))`;
+					return [sessionId];
+				}),
+			),
+		);
+		return changed.length > 0;
+	});
+
+/** A conduit-side fork copies the parent's parts as `<part>_<fork>` inside its
+ * creation commit, so the copies start with the parent's read state. */
+export const inheritRead = (parentId: string, forkId: string) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		yield* sql`
+			INSERT INTO message_part_read_state (session_id, part_id)
+			SELECT ${forkId}, p.id FROM message_part_read_state r
+			JOIN message_parts p ON p.id = r.part_id || '_' || ${forkId}
+			WHERE r.session_id = ${parentId}
+			ON CONFLICT DO NOTHING`;
+	});

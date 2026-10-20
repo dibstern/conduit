@@ -475,6 +475,9 @@ describe("prompt processing timeouts through Effect state", () => {
 			);
 
 			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions (id, provider, title, created_at, updated_at)
+					VALUES ('session-1', 'opencode', 'Stored session', 1, 1)`;
 				yield* startProcessingTimeout(
 					"session-1",
 					"2 minutes",
@@ -483,7 +486,10 @@ describe("prompt processing timeouts through Effect state", () => {
 				yield* cancelSessionById("client-1", "session-1", "cmd-cancel-test");
 
 				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
-			}).pipe(Effect.provide(layer, { local: true }));
+			}).pipe(
+				Effect.provide(PassThroughSessionInbox, { local: true }),
+				Effect.provide(layer, { local: true }),
+			);
 		},
 	);
 });

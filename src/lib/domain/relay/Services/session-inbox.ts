@@ -18,6 +18,7 @@ import {
 } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
+import { parseAttachmentDataUrl } from "../../../attachment-data-url.js";
 import type { Account } from "../../../contracts/account.js";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import { advanceTouchesScope } from "../../../contracts/read-model-advance.js";
@@ -32,6 +33,7 @@ import {
 	type SteerBlocker,
 } from "../../../contracts/stored-event.js";
 import {
+	ClaudeEventPersistEffectError,
 	ClaudeEventPersistEffectTag,
 	type ClaudeEventPersistFailure,
 } from "../../../persistence/effect/claude-event-persist-effect.js";
@@ -62,12 +64,16 @@ export interface InboxView {
 	readonly provider: string | undefined;
 	/** Queued inputs, oldest first. */
 	readonly queued: readonly InboxInput[];
-	/** Oldest queued command whose interrupt request is still awaiting handoff. */
+	/** Oldest queued input whose interrupt request is still awaiting handoff. */
 	readonly interruptRequested?: InboxInput | undefined;
 	/** An input was handed off as a steer and has not started yet. */
 	readonly steering: boolean;
-	/** A turn is open, a handoff is in flight, or a prompt waits on the user. */
+	/** A run is open, or Stop/account switching fences the next handoff. */
 	readonly busy: boolean;
+	/** A Stop's abort is in flight, including after its turn becomes terminal. */
+	readonly stopping?: boolean;
+	/** A continuation is moving the session to another account. */
+	readonly switching?: boolean;
 	/** A turn was stopped or failed since the latest handoff or reset release. */
 	readonly stoppedSinceHandoff: boolean;
 	/** A usage limit cut a request off, and it is neither answered nor dismissed. */
@@ -99,7 +105,11 @@ export type InboxCommand =
 			readonly request: InputRequest;
 	  }
 	| { readonly _tag: "Cancel"; readonly inputId: string }
-	| { readonly _tag: "SendNow"; readonly inputId: string }
+	| {
+			readonly _tag: "SendNow";
+			readonly inputId: string;
+			readonly interrupt?: boolean;
+	  }
 	| { readonly _tag: "Drain" };
 
 export type InboxEvent =
@@ -119,7 +129,7 @@ export type InboxDecision =
 			readonly handoff?: InboxInput;
 			/** The handoff joins the running turn. */
 			readonly steer?: true;
-			/** Interrupt after committing the events and releasing the session permit. */
+			/** Stop the running turn once the events are committed. */
 			readonly interrupt?: true;
 	  }
 	| {
@@ -162,6 +172,23 @@ function steerBlocker(
 	return undefined;
 }
 
+/** Reserve the next turn before stopping the current one. */
+const interruptForInput = (
+	sessionId: string,
+	input: InboxInput,
+	events: readonly InboxEvent[],
+): InboxDecision => ({
+	_tag: "Accepted",
+	events: [
+		...events,
+		{
+			type: "input.interrupt_requested",
+			data: { sessionId, inputId: input.inputId },
+		},
+	],
+	interrupt: true,
+});
+
 /** Hand `input` off into the running turn, or refuse with the reason. */
 const steer = (
 	sessionId: string,
@@ -172,17 +199,7 @@ const steer = (
 	const reason = steerBlocker(view, input.request);
 	if (reason) return { _tag: "Rejected", reason };
 	if (input.request.text.trimStart().startsWith("/"))
-		return {
-			_tag: "Accepted",
-			events: [
-				...events,
-				{
-					type: "input.interrupt_requested",
-					data: { sessionId, inputId: input.inputId },
-				},
-			],
-			interrupt: true,
-		};
+		return interruptForInput(sessionId, input, events);
 	return {
 		_tag: "Accepted",
 		events: [
@@ -223,10 +240,16 @@ export function decideInbox(
 			};
 			if (view.usageResetsAt !== undefined || view.scheduled)
 				return { _tag: "Accepted", events: [admitted] };
+			if (view.stopping)
+				return !view.interruptRequested
+					? interruptForInput(sessionId, { inputId, request }, [admitted])
+					: { _tag: "Accepted", events: [admitted] };
+			// The switch's continuation owns the next turn; a steer would join the old one.
+			if (view.switching) return { _tag: "Accepted", events: [admitted] };
 			if (!idle && command.delivery === "steer")
 				return steer(sessionId, view, { inputId, request }, [admitted]);
 			if (!idle) return { _tag: "Accepted", events: [admitted] };
-			// An interrupt's command precedes the queue and bypasses its Stop pause.
+			// An interrupted input precedes the queue and bypasses its Stop pause.
 			const next =
 				view.interruptRequested && !view.limited
 					? view.interruptRequested
@@ -254,6 +277,19 @@ export function decideInbox(
 				(queued) => queued.inputId === command.inputId,
 			);
 			if (!input) return ALREADY_STARTED;
+			// A stopping turn cannot take a steer. Reserve the next turn instead, so
+			// the Stop pause does not hold this input.
+			if (view.stopping)
+				return view.interruptRequested
+					? { _tag: "Accepted", events: [] }
+					: interruptForInput(sessionId, input, []);
+			// Like a queued command's Run now, an open prompt must be answered first.
+			if (!idle && command.interrupt)
+				return view.promptOpen
+					? { _tag: "Rejected", reason: "prompt_open" }
+					: interruptForInput(sessionId, input, []);
+			// It keeps its place and drains after the switch's continuation.
+			if (view.switching) return { _tag: "Accepted", events: [] };
 			// A busy session takes it as a steer; refused, it keeps its place.
 			if (!idle) return steer(sessionId, view, input, []);
 			// Paused or not, an idle session hands this input off.
@@ -328,9 +364,9 @@ export interface SessionInbox {
 		target: SessionInboxTarget,
 	) => Effect.Effect<SessionInboxOutcome, SessionInboxError>;
 	/** Hand a queued input off now: a steer on a busy session, else the next
-	 *  turn. Commands interrupt first and run next, including after Stop. */
+	 *  turn. With interrupt, stop the running turn and send this input next. */
 	readonly sendNow: (
-		target: SessionInboxTarget,
+		target: SessionInboxTarget & { readonly interrupt?: boolean },
 	) => Effect.Effect<SessionInboxOutcome, SessionInboxError>;
 	/** The provider has declined this input and can no longer deliver it. */
 	readonly steerDeclined: (
@@ -464,6 +500,7 @@ export const SessionInboxLive = Layer.effect(
 								.map((window) => Date.parse(window.resetsAt ?? "") / 1000)
 								.filter((at) => Number.isFinite(at) && at > now)
 						: [];
+				const fences = providerTurnService.turnFences(sessionId);
 				return {
 					provider: facts?.provider ?? undefined,
 					queued,
@@ -472,7 +509,12 @@ export const SessionInboxLive = Layer.effect(
 					),
 					steering: rows.some((row) => row.state === "steering"),
 					busy:
-						facts?.run_status === "pending" || facts?.run_status === "running",
+						fences.stopping ||
+						fences.switching ||
+						facts?.run_status === "pending" ||
+						facts?.run_status === "running",
+					stopping: fences.stopping,
+					switching: fences.switching,
 					stoppedSinceHandoff: facts?.stopped === 1,
 					limited: facts?.limited === 1,
 					usageResetsAt: resets.length > 0 ? Math.max(...resets) : undefined,
@@ -513,6 +555,23 @@ export const SessionInboxLive = Layer.effect(
 				}),
 			);
 
+		// Reservations whose Stop this daemon already issued; drain re-aborts any
+		// other reservation it finds behind a running turn (one left by a restart).
+		const stopIssued = new Set<string>();
+		const stop = (sessionId: string, clientId: string, inputId: string) =>
+			Effect.sync(() => stopIssued.add(inputId)).pipe(
+				Effect.andThen(
+					providerTurnService.beginStop({
+						clientId,
+						sessionId,
+						// The input id is reserved for its later send_turn receipt.
+						commandId: `inbox-stop:${inputId}`,
+					}),
+				),
+				// The worker settles and reports the abort; the inbox only starts it.
+				Effect.asVoid,
+			);
+
 		const commit = (
 			sessionId: string,
 			decision: InboxDecision,
@@ -527,9 +586,17 @@ export const SessionInboxLive = Layer.effect(
 						...(provider ? { provider: provider.provider } : {}),
 					}),
 				);
+				for (const event of decision.events)
+					if (event.type === "input.sent" || event.type === "input.cancelled")
+						stopIssued.delete(event.data.inputId);
 				const { handoff } = decision;
 				if (!handoff) {
 					if (events.length > 0) yield* persist.persistEvents(events);
+					const reserved = decision.events.find(
+						(event) => event.type === "input.interrupt_requested",
+					);
+					if (decision.interrupt && reserved)
+						yield* stop(sessionId, delivery.clientId, reserved.data.inputId);
 					return;
 				}
 				const wasQueued = !decision.events.some(
@@ -577,6 +644,18 @@ export const SessionInboxLive = Layer.effect(
 					...(provider ? { provider: provider.provider } : {}),
 					metadata: { runId },
 				};
+				const attachments = yield* Effect.try({
+					try: () =>
+						(request.images ?? []).map((url) => ({
+							...parseAttachmentDataUrl(url),
+							url,
+						})),
+					catch: (cause) =>
+						new ClaudeEventPersistEffectError({
+							operation: "persistUserMessage",
+							cause,
+						}),
+				});
 				yield* persist.persistEvents([
 					canonicalEvent(
 						"run.requested",
@@ -595,15 +674,35 @@ export const SessionInboxLive = Layer.effect(
 						},
 						meta,
 					),
-					canonicalEvent(
-						"text.delta",
-						sessionId,
-						{
-							messageId: handoff.inputId,
-							partId: `${handoff.inputId}-0`,
-							text: request.text,
-						},
-						meta,
+					...(request.text === ""
+						? []
+						: [
+								canonicalEvent(
+									"text.delta",
+									sessionId,
+									{
+										messageId: handoff.inputId,
+										partId: `${handoff.inputId}-0`,
+										text: request.text,
+									},
+									meta,
+								),
+							]),
+					...attachments.map((attachment, index) =>
+						canonicalEvent(
+							"file.attached",
+							sessionId,
+							{
+								messageId: handoff.inputId,
+								partId: `${handoff.inputId}-attachment-${index}`,
+								mime: attachment.mime,
+								...(attachment.name !== undefined
+									? { filename: attachment.name }
+									: {}),
+								url: attachment.url,
+							},
+							meta,
+						),
 					),
 					canonicalEvent(
 						"turn.error",
@@ -617,53 +716,49 @@ export const SessionInboxLive = Layer.effect(
 				]);
 			});
 
-		const interrupt = (
-			target: Pick<SessionInboxTarget, "clientId" | "sessionId">,
-			decision: InboxDecision,
-		) =>
-			decision._tag === "Accepted" && decision.interrupt
-				? providerTurnService
-						.interruptTurn({
-							clientId: target.clientId,
-							sessionId: target.sessionId,
-							// The input id is reserved for its later send_turn receipt.
-							commandId: randomUUID(),
-						})
-						.pipe(
-							Effect.provideService(OverridesStateTag, overrides),
-							Effect.catchCause((cause) =>
-								Effect.sync(() =>
-									log.warn(
-										`session=${target.sessionId} inbox interrupt failed; command remains queued: ${cause}`,
-									),
-								),
-							),
-						)
-				: Effect.void;
-
+		// Input ids are unique across sessions. Only coalesce requests while the
+		// original Run now is active; ordinary Stop and steering keep their policy.
+		const runNowInFlight = new Set<string>();
 		const act =
-			(command: "Cancel" | "SendNow") => (target: SessionInboxTarget) =>
-				serialised(target.sessionId)(
-					Effect.gen(function* () {
-						const view = yield* readView(target.sessionId);
-						const decision = decideInbox(target.sessionId, view, {
-							_tag: command,
-							inputId: target.inputId,
-						});
-						yield* commit(target.sessionId, decision, {
-							clientId: target.clientId,
-						});
-						return decision;
-					}),
-				).pipe(
-					// A turn end triggers a drain that needs the released permit.
-					Effect.tap((decision) => interrupt(target, decision)),
-					Effect.map((decision) =>
-						decision._tag === "Rejected"
-							? decision.reason
-							: ("accepted" as const),
-					),
-				);
+			(command: "Cancel" | "SendNow") =>
+			(target: SessionInboxTarget & { readonly interrupt?: boolean }) =>
+				Effect.suspend(() => {
+					const runNow = command === "SendNow" && target.interrupt;
+					if (runNow && runNowInFlight.has(target.inputId))
+						return Effect.succeed("accepted" as const);
+					if (runNow) runNowInFlight.add(target.inputId);
+					return serialised(target.sessionId)(
+						Effect.gen(function* () {
+							const view = yield* readView(target.sessionId);
+							const decision = decideInbox(target.sessionId, view, {
+								_tag: command,
+								inputId: target.inputId,
+								...(runNow ? { interrupt: true } : {}),
+							});
+							yield* commit(
+								target.sessionId,
+								decision,
+								decision._tag === "Accepted" &&
+									decision.handoff &&
+									decision.handoff.inputId !== target.inputId
+									? DRAINED
+									: target,
+							);
+							return decision;
+						}),
+					).pipe(
+						Effect.map((decision) =>
+							decision._tag === "Rejected"
+								? decision.reason
+								: ("accepted" as const),
+						),
+						Effect.ensuring(
+							Effect.sync(() => {
+								if (runNow) runNowInFlight.delete(target.inputId);
+							}),
+						),
+					);
+				});
 
 		const scheduleReset = (sessionId: string, view: InboxView) =>
 			Effect.gen(function* () {
@@ -700,6 +795,14 @@ export const SessionInboxLive = Layer.effect(
 					const view = yield* readView(sessionId);
 					if (view.queued.length === 0) return;
 					yield* scheduleReset(sessionId, view);
+					const reserved = view.interruptRequested;
+					if (
+						reserved &&
+						view.busy &&
+						!view.stopping &&
+						!stopIssued.has(reserved.inputId)
+					)
+						yield* stop(sessionId, DRAINED.clientId, reserved.inputId);
 					yield* commit(
 						sessionId,
 						decideInbox(sessionId, view, { _tag: "Drain" }),
@@ -732,11 +835,13 @@ export const SessionInboxLive = Layer.effect(
 				),
 			);
 
-		// Subscribe before the startup sweep so no advance falls between them. A
-		// dropped advance may have named any session, so it sweeps them all.
+		// Subscribe before the startup sweep so no advance or fence lift falls
+		// between them. A dropped advance may have named any session, so it
+		// sweeps them all.
 		// Nothing drains before start: a handoff before the providers are
 		// registered would fail and pause a queue for no reason.
 		const advances = yield* bus.subscribeAdvances();
+		const lifts = yield* providerTurnService.fenceLifts;
 		const ready = yield* Deferred.make<void>();
 		yield* Effect.forkScoped(
 			Deferred.await(ready).pipe(
@@ -749,14 +854,20 @@ export const SessionInboxLive = Layer.effect(
 				),
 				Effect.andThen(drainSessions()),
 				Effect.andThen(
-					Stream.runForEach(advances, (advance) =>
-						advance.dropped
-							? drainSessions()
-							: advanceTouchesScope(advance, {
-										projectIds: [eventStore.projectId],
-									}) && advance.sessionIds.length > 0
-								? drainSessions(advance.sessionIds)
-								: Effect.void,
+					Stream.runForEach(
+						Stream.merge(
+							Stream.map(advances, (advance) =>
+								advance.dropped
+									? drainSessions()
+									: advanceTouchesScope(advance, {
+												projectIds: [eventStore.projectId],
+											}) && advance.sessionIds.length > 0
+										? drainSessions(advance.sessionIds)
+										: Effect.void,
+							),
+							Stream.map(lifts, (sessionId) => drainSessions([sessionId])),
+						),
+						(drain) => drain,
 					),
 				),
 			),
@@ -789,7 +900,6 @@ export const SessionInboxLive = Layer.effect(
 						return decision;
 					}),
 				).pipe(
-					Effect.tap((decision) => interrupt(input, decision)),
 					Effect.map((decision) =>
 						decision._tag === "Rejected" &&
 						decision.reason !== "already_started"

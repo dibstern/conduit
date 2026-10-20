@@ -146,15 +146,11 @@ test("row rename keeps the draft through updates and offers a title that lands m
 	const input = row.getByRole("textbox", { name: "Session name" });
 	await input.fill("My half-typed dra");
 
-	// Marking it unread moves the row from Idle to "Done, unread", which
-	// rebuilds the row mid-typing.
+	// Marking it unread rebuilds the row mid-typing; within Idle it moves
+	// ahead of the read rows.
 	await rowIn(other).focus();
 	await other.keyboard.press("u");
-	await expect(
-		page.locator("#session-list-scroller > .session-group-label", {
-			hasText: /^Done, unread/i,
-		}),
-	).toBeVisible();
+	await expect(row).toHaveAttribute("aria-label", /^Done, unread/);
 	await expect(input).toHaveValue("My half-typed dra");
 	await expect(input).toBeFocused();
 	await input.press("End");
@@ -237,7 +233,7 @@ test("scope digits, shortcut sheet and text-field guards", async ({
 	}
 });
 
-test("each row command has pointer and touch controls", async ({
+test("hover commands have pointer and touch controls, with unread in the menu", async ({
 	page,
 	relayUrl,
 }) => {
@@ -247,11 +243,6 @@ test("each row command has pointer and touch controls", async ({
 		{ key: "s", pointer: "session-act-settle", touch: "session-ctx-settle" },
 		{ key: "z", pointer: "session-act-snooze", touch: "session-ctx-snooze" },
 		{ key: "p", pointer: "session-act-pin", touch: "session-ctx-pin" },
-		{
-			key: "u",
-			pointer: "session-act-mark-unread",
-			touch: "session-ctx-mark-unread",
-		},
 		{ key: "r", pointer: "session-more-btn", touch: "session-ctx-rename" },
 	] as const;
 	for (const { key, pointer, touch } of twins) {
@@ -261,6 +252,8 @@ test("each row command has pointer and touch controls", async ({
 		else await expect(row.getByTestId(pointer), key).toBeVisible();
 		await row.click({ button: "right" });
 		await expect(page.getByTestId(touch), `${key} touch twin`).toBeVisible();
+		await expect(page.getByTestId("session-ctx-mark-unread")).toBeVisible();
+		await expect(row.getByTestId("session-act-mark-unread")).toHaveCount(0);
 		await page.keyboard.press("Escape");
 	}
 });

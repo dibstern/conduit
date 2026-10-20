@@ -219,6 +219,8 @@ function baseProjects() {
 // The names deliberately differ from driver names: support is a wire fact,
 // not a frontend assumption about a provider. Both built-in drivers support
 // multi-folder sessions today; the unsupported state models a future adapter.
+// Each is its driver's default account, as the daemon reports: picking a
+// harness selects that driver's default.
 const capabilityInstances = [
 	{
 		id: "claude",
@@ -229,6 +231,7 @@ const capabilityInstances = [
 		status: "healthy",
 		restartCount: 0,
 		createdAt: 0,
+		isDefault: true,
 		capabilities: { supportsMultiFolder: true, supportsWorktree: true },
 	},
 	{
@@ -240,6 +243,7 @@ const capabilityInstances = [
 		status: "healthy",
 		restartCount: 0,
 		createdAt: 0,
+		isDefault: true,
 		capabilities: { supportsMultiFolder: false, supportsWorktree: false },
 	},
 ];
@@ -307,6 +311,57 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 		baseURL,
 		"/new?project=myapp",
 	);
+	// 7a8e7be7 requires a configured default account; 2ba9fc5b requires a
+	// held catalog pick before sending, independently of folder support.
+	control.rpc.setStubs({
+		GetModels: () => ({
+			projectSlug: "myapp",
+			defaultOpenCodeInstanceId: "opencode",
+			providers: ["claude", "anthropic"].map((provider) => ({
+				id: provider,
+				name: provider,
+				configured: true,
+				models: [{ id: "sonnet", name: "Sonnet", provider }],
+			})),
+		}),
+	});
+	control.rpc.setProjectSetting({
+		_tag: "defaultModel",
+		variant: "",
+	});
+	control.rpc.setProjectSetting({
+		_tag: "harnessDefaults",
+		claude: {
+			status: "ok",
+			pick: {
+				providerId: "claude",
+				modelId: "sonnet",
+				effort: "",
+				contextWindow: "",
+			},
+		},
+		opencode: {
+			status: "ok",
+			pick: {
+				providerId: "anthropic",
+				modelId: "sonnet",
+				effort: "",
+				contextWindow: "",
+			},
+		},
+	});
+	control.rpc.setProjectSetting({
+		_tag: "providerModels",
+		accountId: "claude",
+		providers: [
+			{
+				id: "claude",
+				name: "Claude",
+				configured: true,
+				models: [{ id: "sonnet", name: "Sonnet", provider: "claude" }],
+			},
+		],
+	});
 	sendMockDaemonList(page, "SubscribeInstances", {
 		instances: capabilityInstances,
 	});
@@ -318,7 +373,7 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 		),
 	});
 	const picker = page.locator(
-		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 	);
 	await openPickerRoot(page, picker);
 	await page.getByTestId("picker-harness-opencode").click();
@@ -369,9 +424,12 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 			.filter((request) => request.tag === "CreateSession"),
 	).toEqual([]);
 
-	// Missing capabilities must not block sending into a multi-folder draft.
+	// An account without capabilities falls back to its driver's, so it
+	// neither blocks a multi-folder draft nor marks worktrees unsupported.
 	sendMockDaemonList(page, "SubscribeInstances", {
-		instances: [],
+		instances: capabilityInstances.map(
+			({ capabilities: _capabilities, ...instance }) => instance,
+		),
 		providerCapabilities: {},
 	});
 	sendMockProjects(page, {
@@ -390,7 +448,7 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 	await startChip.click();
 	await expect(
 		startMenu.getByRole("menuitem", {
-			name: "New worktree Not supported by This provider",
+			name: "New worktree Requires a Git folder",
 		}),
 	).toHaveAttribute("aria-disabled", "true");
 	await page.keyboard.press("Escape");
@@ -692,8 +750,11 @@ test.describe("Project Delete", () => {
 		await setupWithProjectManagement(page, baseURL);
 		await page.getByTestId("session-scope-chip").click();
 		await expect(scopeRow(page, "myapp")).toBeVisible();
-		await scopeRow(page, "mylib").focus();
-		await page.keyboard.press("Delete");
+		await expect(
+			page.getByRole("menu", { name: "Project scope" }),
+		).toBeFocused();
+		await scopeRow(page, "mylib").press("Delete");
+		await expect(page.locator("#confirm-modal")).toBeVisible();
 		await page.click("#confirm-modal button:has-text('Remove')");
 		await expect(page.locator("#confirm-modal")).not.toBeVisible();
 

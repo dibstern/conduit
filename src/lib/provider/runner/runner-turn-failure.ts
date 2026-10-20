@@ -48,7 +48,11 @@ export function failRunnerTurn(
 		sessionId: string;
 		inputId?: string;
 		runId?: string | undefined;
-		placement?: { inputId: string; text: string };
+		placement?: {
+			inputId: string;
+			text: string;
+			images?: readonly string[];
+		};
 		messageId: string;
 	},
 	failure: SessionFailure,

@@ -1,0 +1,915 @@
+{
+	"description": "Mid-turn assistant text parts from real Claude (conduit events.db) and OpenCode (opencode.db) sessions, labelled independently by two models with the same prompt and kept only where both agree. Request/message truncated per plan decision 4; paths, names, emails and secrets scrubbed. Built by scripts/spikes/jev-surfacing/build-fixture.ts (conduit-test-ahu8.1).",
+	"labellers": [
+		"claude-opus-5-5 via claude -p --model opus",
+		"gpt-6.1-sol (high) via codex exec"
+	],
+	"sampled": 150,
+	"bothLabelled": 150,
+	"agreed": 129,
+	"parts": [
+		{
+			"id": "ef0c6ab34a3e",
+			"provider": "claude",
+			"request": "For the terminal in conduit, I want settings to allow me to get conduit render buttons for: (a) pasting into it; (b) holding down for the next keyboard input (i) ctrl, (ii) opt/alt, (iii) cmd, (iv) shift, (v) esc, (vi) tab, and (vii) the arrow keys. \n\nYou’ll need to design, in the style of the final https://<host>/mockups/chat-redesign/?variant=app and its epic & tickets, lots of different ways to present this /design-visual-ui",
+			"message": "Reading the \"Final · app\" style tokens (colours, chips, pills, sheets); next I check how it draws the terminal view and icons, then I'll build.",
+			"label": "routine"
+		},
+		{
+			"id": "485d5836e979",
+			"provider": "claude",
+			"request": "Do those, but do not stop before the big 4, just keep going, stopping wouldn't make it more or less safe to do",
+			"message": "Worth checking: the 7 older z927 failures may share this root cause. Running them with the harness fix.",
+			"label": "routine"
+		},
+		{
+			"id": "f4de5b89fef1",
+			"provider": "claude",
+			"request": "/goal Yes please, complete this epic and merge it back to main",
+			"message": "Integration tests are slow but moving. Checking for any failures so far.",
+			"label": "routine"
+		},
+		{
+			"id": "a6641aca42b4",
+			"provider": "claude",
+			"request": "/goal Yes please, complete this epic and merge it back to main",
+			"message": "Still progressing. The log was written 2 minutes ago, and typecheck, lint and unit tests have passed. Integration tests are running, with E2E and Storybook to follow, so it has a while to go. I'll keep waiting for the completion notice.",
+			"label": "routine"
+		},
+		{
+			"id": "0ee65a56b388",
+			"provider": "claude",
+			"request": "/goal File those as bead tickets and then also implement them now and merge them to main",
+			"message": "Rather than wait, I'm verifying the prune in a separate worktree with the same two files.",
+			"label": "replan"
+		},
+		{
+			"id": "e3376b395646",
+			"provider": "claude",
+			"request": "I want design (2), t3-code inspired, please.",
+			"message": "The commit's pre-commit hook is still running. When it finishes, I'll check the result, rerun the checks, and then land the branch on main.\n\n**1 → Storybook failures sorted out.** My branch fails **3 screenshot tests** that main doesn't: ChatLayout \"Sidebar Collapsed\" (desktop and phone) and \"With Rewind Banner\" (phone). Each one differs only in the new **\"What should happen in test-project?\"** screen and the project/folder buttons under the message box.\n\n**2 → Recaptured both platforms.** New reference images for those 3 are done on Mac and Linux (Docker), **6 files**. I looked at the Linux one and it renders correctly. I left the other ChatLayout screenshots alone because they **already fail on main**.\n\n**3 → Committing 10 images.** These are the 6 above plus the 4 approved message-box screenshots from the visual check, which **passes** with them. The commit is running with the pre-commit hook on.\n\n**4 → Still to do.** The rebase onto main ran **with the pre-commit checks turned off**. So I still need to rerun type check, lint, unit tests and the key end-to-end tests. After that: land on main **without pushing**, then close the task in the tracker.\n\n**Also found:** I removed my temporary main-branch copy that I used for comparison. Main is still at d1d876fc.",
+			"label": "milestone"
+		},
+		{
+			"id": "fbd6a5b3621f",
+			"provider": "claude",
+			"request": "Continue",
+			"message": "**.8 is closed and merged.** 10 of 11 tickets are now done. **.10**, the last one, has started.\n\n**1 →** **.8 landed** as 11e66b49, with every pre-commit check green. I added a comment with the results and closed it.\n\n**2 →** **Working time is now stored as a column:** `messages.completed_at` records when each answer finished. It replaced two event-scanning lookups, and I cut its backfill so daemon startup can't stall on large databases.\n\n**3 →** **.10 is running:** an opus agent is building the drill-in in its own worktree. That's a task drawer on desktop, the full-screen child view on phone, and shell rows that can't be opened.\n\n**Open question for you:** pressing Stop all while steer messages are still queued only interrupts Claude without closing it, so background tasks may survive. Codex traced this in the source but didn't reproduce it, and left it unchanged. It's noted on .8 and needs your call.\n\n**Next:** review .10's screenshots, get a Codex review, then commit and merge .10 and land everything on main.",
+			"label": "milestone"
+		},
+		{
+			"id": "7a036eb10a00",
+			"provider": "claude",
+			"request": "Build the nav sheet now",
+			"message": "All green: **534 files, 7023 tests**. Reviewing the full working tree before staging, to leave out anything that isn't mine.",
+			"label": "milestone"
+		},
+		{
+			"id": "ae4e55a993cf",
+			"provider": "claude",
+			"request": "- Commit the design html pages to the repo\n- You haven’t shown me the tailscale available design page I need to make the decision on va96, please fucking do that",
+			"message": "Nothing else is staged, so committing just the two pages.",
+			"label": "routine"
+		},
+		{
+			"id": "81c68cea5886",
+			"provider": "claude",
+			"request": "Continue",
+			"message": "Gate green. Committing 21ge, then rebasing onto main.",
+			"label": "milestone"
+		},
+		{
+			"id": "951ae6eddf46",
+			"provider": "claude",
+			"request": "/goal Do all of conduit-test-8rdf and merge it to main",
+			"message": "Projection landed (**.4, .12, .11 closed**). Next up is committing startup.",
+			"label": "milestone"
+		},
+		{
+			"id": "66ba923e3ac3",
+			"provider": "claude",
+			"request": "1. Proceed with the structural fix, but it has to work with live streaming assistant text response. This might require you to get even more creative with your solution, I don't see how it works with the \"do this if we're at the end of the turn\" when we don't yet know if it's the end of the turn.\nYou may indeed need to get really creative about different types of solutions, even UI ones... I'm not pushing that, I just want you to broaden your mind.\n\n2. We've also got another issue -> it's taking some of the response text into the new turn activity component too:\n\n=====\n<div class=\"max-w-[760px] mx-auto px-5 my-1.5\"><div class=\"rounded-panel border border-border-subtle\"><div class=\"@container\"><div class=\"flex items-center gap-3 py-1.5 pl-2 pr-3 text-xs\"><button type=\"button\" class=\"flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer\" aria-expanded=\"true\"><span class=\"shrink-0 text-text-dimmer transition-transform duration-200 [&amp;_.lucide]:w-3.5 [&amp;_.lucide]:h-3.5 rot",
+			"message": "Two separate things here. Let me look at the streaming path before I answer #2 — the paste has a tell in it (header says \"Worked for 21m 6s\", not \"Working\", and the text step shows \"20m 50s\"), which points at the store, not `segmentTurns`.",
+			"label": "finding"
+		},
+		{
+			"id": "e161d25bcee9",
+			"provider": "claude",
+			"request": "Why does this session look like it’s still running? The turn activity says it has been running for 482m and it says it’s still running live now, and after a restart the input area “working” is now saying 2:04 and increasing",
+			"message": "I'll check conduit's event store for how this session's turns were recorded.",
+			"label": "routine"
+		},
+		{
+			"id": "03dd19cbc025",
+			"provider": "claude",
+			"request": "Fix the label please, and look for other design / style differences",
+			"message": "77 differences found, but the report says the spec deliberately keeps some existing styling. Reading those spec lines to separate real misses from intended ones.",
+			"label": "finding"
+		},
+		{
+			"id": "e417be124181",
+			"provider": "claude",
+			"request": "Is this stuck or still progressing?",
+			"message": "The WIP commit and rebase are still running. Once they finish, I'll resolve any screenshot conflicts and launch codex's second pass.",
+			"label": "routine"
+		},
+		{
+			"id": "fb08ebb727d5",
+			"provider": "claude",
+			"request": "Use my test pin, 0000",
+			"message": "Notable: `open()` builds the socket URL **without the slug** (`makeWsRpcUrl()`). If the slug never reaches the server, swapping pairs on a slug change is pure churn. Checking.",
+			"label": "finding"
+		},
+		{
+			"id": "f357aa983799",
+			"provider": "claude",
+			"request": "/goal Address and fix both of those beads now, then commit and merge them to main",
+			"message": "Re-running the two features I just fixed against the live preview.",
+			"label": "routine"
+		},
+		{
+			"id": "7910b6df48b6",
+			"provider": "claude",
+			"request": "Fix these flakes: 6jin\n\nFix these now: conduit-test-4v7x, ni8.59\n\nFor item 6, is there a better way we could make this work? Consider how past sessions have run and what we actually want to achieve",
+			"message": "Only the worker cap is changed now. Running one more full suite on the config's new default to confirm before committing.",
+			"label": "routine"
+		},
+		{
+			"id": "fb615eb549b1",
+			"provider": "claude",
+			"request": "/goal Proceed with conduit-test-c209 in a git worktree",
+			"message": "All green: lint, plus **7485 unit tests**. Now the acceptance capture for `.3`'s layout change.",
+			"label": "milestone"
+		},
+		{
+			"id": "dd628e89ec73",
+			"provider": "claude",
+			"request": "Resume now",
+			"message": "**Cycle 3 green:** qhlw and zvcf both pass. Starting full verification with the whole harness spec on desktop and mobile.",
+			"label": "milestone"
+		},
+		{
+			"id": "e83c330e069c",
+			"provider": "claude",
+			"request": "/foreman-auto Continue the work, calling out to codex to minimise claude usage",
+			"message": "`singleInstanceList` is referenced only at mockup-state.ts:583. Let me check that context and whether the sessions/multi-instance specs actually consume it.",
+			"label": "finding"
+		},
+		{
+			"id": "5a31d5ec8fd5",
+			"provider": "claude",
+			"request": "I can’t see forked sessions in the conduit session sidebar, please fix this /diagnosing-bugs",
+			"message": "Good seam found: the existing fork E2E spec never checks the sidebar. Adding a red test there.",
+			"label": "finding"
+		},
+		{
+			"id": "36350bd3c1ea",
+			"provider": "claude",
+			"request": "/diagnose When we launch subagents, they get marked as done visually even when they’re in progress. Fix this.",
+			"message": "Let me look at the frontend rendering and tool status registry to see what status a freshly-launched Task card gets.",
+			"label": "routine"
+		},
+		{
+			"id": "dc422d0c77ee",
+			"provider": "claude",
+			"request": "Continue",
+			"message": "**Not landing the coalesce work.** Its own report contains the sentence that kills it:\n\n> Actual independent providers can overwrite SQL rows while the old orchestrator waits for an ACK, so old bounded queries already skip many intermediate versions.\n\nThe existing re-query design *already* coalesces. Re-reading the current row, rather than replaying each version, is the coalescing. Adding `Stream.aggregate` on top buys nothing, and the report admits it \"may perform more eager reads while an ACK is held\". Net-negative complexity, and its own test passes identically against HEAD.\n\nThe investigation was still worth it. It produced the finding that matters: **coalescing frequency can't fix the asymptotics at all**. A response that runs T seconds sends T/window deliveries of O(T) bytes each, so it stays quadratic no matter how wide the window. Only sending the suffix instead of the whole row makes it linear.\n\nLet me check the ni8.24 P1's real shape before I brief the delta.",
+			"label": "decision"
+		},
+		{
+			"id": "47d10132ff80",
+			"provider": "claude",
+			"request": "1D, 2D, 3A, 4 Agree, 5 Leave the default and don't wrap it yet, agreed",
+			"message": "[01:07:02] Session-convergence explorer landed, and it found the thing that decides whether 2D is buildable as stated: **`SessionInfo` is not a projection of `SessionRow` — it's a join.** Five of its ten fields don't come from the read model at all.\n\n| `SessionInfo` field | actual source |\n|---|---|\n| `processing` | status poller's in-memory map — *not* `row.status`, which the adapter drops |\n| `pendingQuestionCount` | session-manager in-memory state |\n| `forkPointTimestamp` | fork metadata; **no column backs it** |\n| `parentID`, `forkMessageId` | row columns, with a fork-metadata fallback |\n\nThe shell subscription streams rows out of the event store, so it structurally cannot produce those fields. That's the crux of Round 3, and whether the clean answer exists depends on one fact I don't have yet — whether `status`, pending-question counts, and fork-point timestamps have event sources the projector could write. `status` *is* already a column the projector writes (`session-projector.ts:118`); the adapter just ignores it in favour of the poller. Explorer running on exactly that.[01:08:02] ## Round 3 (partial — the rest waits on two running explorers)\n\n**1. Fork — what happens to the unary `ListSessions`.** It has exactly two callers: initial load in `ChatLayout.svelte:344-352` (a `Promise.all` of `roots:true` and `roots:false`), and sidebar remote search in `SessionList.svelte:103-113`, debounced 300ms. The subscription's snapshot covers the first. The second is the only job the RPC does that a snapshot+delta stream doesn't — and the server-side filter it exists for is just `session.title` and `session.id` (`ws-rpc.ts:855-858`).\n\n| # | Option | Trade-off |\n|---|---|---|\n| **A** ★ | **Delete it.** The snapshot hands the client every session, so search becomes a client-side filter on `title`+`id` — precisely what the server matches today | Deletes the remote-search path, the debounce, the `search: true` store arm and the dual `roots` calls in one go; the store already \n…\n frontend keeps `rootSessions` and `allSessions` as separate arrays fed by two RPC calls. One subscription carries all sessions and the store derives roots by `parentID`, which `handleSessionList` already does in its untagged branch (`session.svelte.ts:311-320`).\n\nStill out: the in-memory-fields fork (blocked on whether `status`, pending-question counts and fork timestamps can be projected), plus the reducer/store seam, which arms of `ws-dispatch` die, and where the exactly-once assertion lives.",
+			"label": "finding"
+		},
+		{
+			"id": "0344ba016757",
+			"provider": "claude",
+			"request": "Why, for some sessions only, is the model name (Opus) getting squished to Opu, with the effort button disappearing? Please fix this. Then, fix m8gs and ewv1",
+			"message": "Three call sites share the pattern, so a small shared helper earns its place. Removing the probes first, then adding the helper.",
+			"label": "routine"
+		},
+		{
+			"id": "e510dba6a669",
+			"provider": "claude",
+			"request": "I want design (2), t3-code inspired, please.",
+			"message": "Main fails the **same tests**, so **every end-to-end failure was already there before my change**. Cleaning up, then landing on main.",
+			"label": "finding"
+		},
+		{
+			"id": "992d4d5c0b2b",
+			"provider": "claude",
+			"request": "Projects should not be tied to instances, only sessions should. The “default” applies across projects and not to any single one. This is bad.\nAnd I ran your python code, it printed nothing",
+			"message": "Clean main **fails the same tests identically so far**: the 1→2→1 empty message, plus two of the \"Try again\" tests. So these look like they predate this change. Waiting for the last 3 to confirm.",
+			"label": "finding"
+		},
+		{
+			"id": "b29fd513ff82",
+			"provider": "claude",
+			"request": "Go-ahead with 9vn3, create the worktree process test failure bead, and look into “ After falling behind, the view only catches up when the next update arrives. With the test's tiny 1-slot stream, it stays stale until then. I haven't looked into whether normal sizes do this.”",
+			"message": "Now the stale-view question. Finding where the `dropped` flag is computed.",
+			"label": "routine"
+		},
+		{
+			"id": "5d40cbb01b42",
+			"provider": "claude",
+			"request": "Commit the work, and why does renaming side-thread-plan-turn require re-recording it?",
+			"message": "Nothing is staged now. I need to check whether the other session committed during my 4-minute hook run, or whether my commit dropped their staged work.",
+			"label": "risk"
+		},
+		{
+			"id": "89849145ae5b",
+			"provider": "claude",
+			"request": "Why is https://<host>:2633/s/ses_1c3898bd151245b8a57da9abb55e4f3c?group=project not showing its full history? /diagnosing-bugs\n\nAnd why in this session is the skill auto-fill selector not coming up and the skill highlighting isn't working?",
+			"message": "**Regression test is red** as expected. Checking what frontend build the test serves before applying the fix.",
+			"label": "routine"
+		},
+		{
+			"id": "56bba8809e44",
+			"provider": "claude",
+			"request": "Continue",
+			"message": "While the pre-commit hook runs (3–8 min), cleaning up the old throwaway repro files.",
+			"label": "routine"
+		},
+		{
+			"id": "5b4eb94cb2c9",
+			"provider": "claude",
+			"request": "Continue",
+			"message": "That prewarm test passed in all three earlier runs. Rerunning the file once to rule out a regression from eon2.3.",
+			"label": "routine"
+		},
+		{
+			"id": "b1b0127d53c3",
+			"provider": "claude",
+			"request": "File the beads follow up and merge the branch into main, then proceed with a /foreman run on the follow up",
+			"message": "Worktree ready. Let me mark the issue in-progress (from the canonical checkout) and write the Codex task prompt.",
+			"label": "routine"
+		},
+		{
+			"id": "2de11a2e920b",
+			"provider": "claude",
+			"request": "Close de3.31 with 1A, 2A, 3B, 4A - then straight into 732b, then de3.5",
+			"message": "Now the part that actually matters — looking at what we captured:e captured:",
+			"label": "routine"
+		},
+		{
+			"id": "bf16e1ceff5b",
+			"provider": "claude",
+			"request": "I allow you to merge it, I give you permission to do it all",
+			"message": ".4 is done: **15/15 integration and 208/208 unit tests** pass, per Codex. Reviewing the diff.",
+			"label": "milestone"
+		},
+		{
+			"id": "9de1596e73b8",
+			"provider": "claude",
+			"request": "I love B3 and M2, but I want us to design ways for the user to easily do the following:\n1. Get a model (customisable using settings) to describe the journey of updates so the programmer is up to date, with clickable buttons for each message summarised in that story to direct the user to the actual text  \n\n2. A way to mark messages as read and unread\n3. A way to mark messages as more important than was indicated & less important than indicated, and that data written down in a way that I or maybe even they can ask agents or change settings to improve the categorisation\n4. A way to respond to specific messages with a button on each message, which when pressed adds a reference to that message that the agent can understand in the input area, where the programmer can then type a response addressing that message’s content without having to write “In response to you saying <copy-pasted-text>: “ before responding. They should be able to click one and type, then click another and type again, bef",
+			"message": "This is the same size of job as round 2, plus five features per design. I'll run it the same way: shared scenario and brief, then parallel opus agents. First, the two base designs.",
+			"label": "routine"
+		},
+		{
+			"id": "7bb501d68eb9",
+			"provider": "claude",
+			"request": "Please proceed with codex terra subagents in parallel to fix these",
+			"message": "**Status:** z25d and z28s are running in codex. I'm generating the five z30 briefs now.",
+			"label": "routine"
+		},
+		{
+			"id": "c1d7ccbaebd9",
+			"provider": "claude",
+			"request": "In the session sidebar, the projects in the project selector pill / filter, should be deletable. On desktop it should be a mouseover x button, and you should be able to press 'enter' on the keyboard instead of the only option to confirm being clicking the confirm key, and on mobile you should be able to swipe projects to delete them, with a confirm modal too. The sidebar projects button (uses 3 dots at the moment) should be removed from the sidebar header button area.",
+			"message": "Types clean, panel test green. Running the unit tests that touch the sidebar, search field, and confirm modal.",
+			"label": "routine"
+		},
+		{
+			"id": "44672f9b0aa0",
+			"provider": "claude",
+			"request": "Continue now that relay-event-sink.ts is back",
+			"message": "Self-FK is correct even under the strict `legacy_alter_table=1` that previously broke it. My probe INSERT just missed a NOT NULL column — completing it:",
+			"label": "finding"
+		},
+		{
+			"id": "5d8b63d9884f",
+			"provider": "claude",
+			"request": "1B&E, 2B&F, 3A, 4A then 4C",
+			"message": "It's my own orphan — a `python3 -m http.server` serving `conduit-wt-de32/dist/storybook`, started Aug 6 when this run began, reparented to init. Not another session's:",
+			"label": "finding"
+		},
+		{
+			"id": "a8241fee8250",
+			"provider": "claude",
+			"request": "/goal Now:\n1. fix 6jin: \"About 30 other replay tests still fail; re-recording them with the fixed proxy is the likely fix.\"\n2. add storybook baselines for the 4 new sessionbar stories\n3. Fix the codex CLI\n4. Fix \"OpenCode \"always allow\" approvals apply to the whole instance.\"\n5. Fix The plan agent overrides the user's chosen agent.\n6. Fix \"There is a race that can leave a stale \"Working\" status.\"\n\nAnd merge all of these to main",
+			"message": "Fixing the test fixtures for the stricter type (they lacked `sessionID`).",
+			"label": "routine"
+		},
+		{
+			"id": "7511b36b758c",
+			"provider": "claude",
+			"request": "Continue",
+			"message": "Two failures now: the reload-then-banner step and the reconnect count (the latter passed on the first run). Checking page state at failure.",
+			"label": "finding"
+		},
+		{
+			"id": "6cbead58ba27",
+			"provider": "claude",
+			"request": "/goal Implement g4zp in a new worktree, the merge it into main, then clean up the worktree. And delete the previous ticket bodies from /tmp",
+			"message": "Running the three upgrade/restart test files on main's base commit. I'll then run them on the branch, one file at a time, and compare test names.",
+			"label": "routine"
+		},
+		{
+			"id": "e1f1cbaa5c21",
+			"provider": "claude",
+			"request": "Is there a bead for fixing session deletion? Sessions being deleted in the side tab aren’t being deleted. Investigate and fix this bug /diagnosing-bugs",
+			"message": "All consistent with existing patterns. Running lint and the full unit suite:",
+			"label": "routine"
+		},
+		{
+			"id": "ebe2fb758371",
+			"provider": "claude",
+			"request": "(1) Wait, what is this about? Please explain in full for clarity: “ The model picker is a structural change, not a restyle (aoqb.12). The mockup has no Agent row and no Context row. The default keeps both, so no feature is lost.”\n\n(2) Wait, what is this about a desktop session header redesign? I didn’t see or approve of that, explain it to me before making any changes to anything and show me what you’re talking about on a tailscale URL\n(3) what is dc8k.4 ?\n\n(4) Is TYPESAFE_API_KEY not currently set?",
+			"message": "Rendering the header part of the mockup so I can put it next to today's app on one page.",
+			"label": "routine"
+		},
+		{
+			"id": "cce37a2026ad",
+			"provider": "claude",
+			"request": "Yes, commit and merge it into main",
+			"message": "Dialogs are a non-issue: conduit uses **no bits-ui Dialog or AlertDialog**, so Menu and Popover cover every surface that has the lock. Committing now.",
+			"label": "finding"
+		},
+		{
+			"id": "9a471f81d582",
+			"provider": "claude",
+			"request": "- Please stop the interrupted turn from showing as SEND_FAILED, for every interrupt and not just the reply-to-question case\n- Also please make the dismissed question card display something more sensible than \"Answered ✓\" with the green background -> maybe grey instead of green (or yellow or something else?) and \"Replied via Message\" or something better if you can think of it?",
+			"message": "While Codex works on the error bar, I'm updating the card.",
+			"label": "routine"
+		},
+		{
+			"id": "7605ba9010dc",
+			"provider": "claude",
+			"request": "/goal Continue the work from https://<host>:2633/s/ses_28c96f737cfe410e9421cdda3fbfb510, but in your session now, until its goal & all of its beads are complete and merged into main. \n\nUse the work trees it was using, or create your own if it was working on main.",
+			"message": "While that builds, I'm looking at the `new-project-session` screenshot from .19:",
+			"label": "routine"
+		},
+		{
+			"id": "8ef3dfaef8c6",
+			"provider": "claude",
+			"request": "/goal Implement all of conduit-test-bn6x and merge it into main",
+			"message": "The commit is running through the pre-commit hooks, which take about 6 minutes. After that come fast-forwarding feat/bn6x, closing the beads, and the merge into main.",
+			"label": "routine"
+		},
+		{
+			"id": "2c942e335419",
+			"provider": "claude",
+			"request": "I tried to use an open code free model with “Test, ping” in a new session using opencode and its Fledge Alpha Free model, but it switched to the Claude harness with an error and said it couldn’t find the opus model. Please fix this /diagnosing-bugs  https://<host>:2633/s/ses_ef5ae11f3ffe0Q3rdvpz2TeDPS",
+			"message": "While those run, checking the existing bead before adding follow-ups (from the canonical checkout, per the beads rule).",
+			"label": "routine"
+		},
+		{
+			"id": "c1c358bf8675",
+			"provider": "claude",
+			"request": "Go ahead with the acceptance scenario",
+			"message": "Green across the board — **`composer-skill-pill-dark: 100.00% (0 pixels differ)`**, and the restored `composer-with-text-dark` still matches at 0px (confirming my code doesn't regress it). The feature now has durable visual coverage in the gate.\n\nLet me make sure you can view the captured baseline over the tailnet.",
+			"label": "milestone"
+		},
+		{
+			"id": "b9f33f708a39",
+			"provider": "claude",
+			"request": "Continue",
+			"message": "That scenario passed in the first gate, before my one-line edit. So either it's flaky or the edit affects it, and the 3 + 3 reruns will tell which.",
+			"label": "risk"
+		},
+		{
+			"id": "2fe02de1c802",
+			"provider": "claude",
+			"request": "How does ~/src/personal/conduit-competitors/t3code solve the stale watchdog issue? Review that before thinking I've approved an approach",
+			"message": "Neither the contract SSE test nor the Claude test touches our code. Waiting on the baseline for the rest.",
+			"label": "finding"
+		},
+		{
+			"id": "707e433ace16",
+			"provider": "claude",
+			"request": "The goal UI didn’t come up immediately",
+			"message": "Goal acknowledged. I'm checking how this session's multi-line goal renders in conduit.",
+			"label": "routine"
+		},
+		{
+			"id": "e0728fa6be2d",
+			"provider": "claude",
+			"request": "We haven't done the selected session highlighting from the design: https://<host>:8446/mobile-first-sidebar.html\n\nPlease implement that highlighting on main now, so that the session selected in Idle or in Running is much more easily visible (e.g. currently the session label on both is greyed out)",
+			"message": "Running the Storybook visual suite scoped to session rows to see the before/after.",
+			"label": "routine"
+		},
+		{
+			"id": "b87199b46b97",
+			"provider": "claude",
+			"request": "And then add 20 more designs, these are great so far",
+			"message": "Adding 20 more: **#21–30** in the pixel-block style, **#31–40** as new shapes, in two new sections. Checking the render code first so the new ones slot in.",
+			"label": "routine"
+		},
+		{
+			"id": "17ec54e7a810",
+			"provider": "claude",
+			"request": "Look for conduit worktrees related to completed work that was merged, either in the exact form or in a different form, and plan their cleanup with me now",
+			"message": "Byte-level check says none of the 22 are in main as-is. Next: matching their bead IDs against main's history and bead status to catch reimplemented work.",
+			"label": "finding"
+		},
+		{
+			"id": "30c0fcc5d755",
+			"provider": "claude",
+			"request": "Make sure your investigation doesn’t overlap with the findings in https://<host>:2633/s/ses_787ae555547849f89f70c73e6a1f35af, make sure your new slowness findings OR for the same findings, make sure your suggestions on the best long term fix to solve and prevent the slowness from reoccurring is better than the suggestions from the other session",
+			"message": "My script leaked two OpenCode servers: killing the trap's `$!` hit the subshell, not OpenCode. Stopping just those two (ports 56532 and 53620, both mine), then fixing the script with `exec`:",
+			"label": "finding"
+		},
+		{
+			"id": "d14cebdae626",
+			"provider": "claude",
+			"request": "Sidebar modal is best, I agree, but I have changed my mind, the instances setting feature has evolved and I want it included, possibly in the server page, please include that in your final html page that you’ll use to guide to the sidebar modal, for the implementation agent to use as a reference design.",
+			"message": "Two fixes needed: the state buttons scroll to the wrong spot, and one spec note leaked into the UI as copy. Checking the other screenshots first.",
+			"label": "finding"
+		},
+		{
+			"id": "97637e8235cd",
+			"provider": "claude",
+			"request": "/goal Continue the work from https://<host>:2633/s/ses_28c96f737cfe410e9421cdda3fbfb510, but in your session now, until its goal & all of its beads are complete and merged into main. \n\nUse the work trees it was using, or create your own if it was working on main.",
+			"message": "The wire now always carries the tag by design, so the test's expectation is stale.",
+			"label": "finding"
+		},
+		{
+			"id": "4e798c639781",
+			"provider": "claude",
+			"request": "Use t3code as inspiration for how to build this, along with /codebase-design",
+			"message": "The worker approach works: the SDK loads in about 50ms, the worker sees its own config dir, and the daemon's environment stays unchanged. Rewriting the fork module around it.",
+			"label": "finding"
+		},
+		{
+			"id": "b39913800acd",
+			"provider": "claude",
+			"request": "/goal Do all of conduit-test-i7fy and merge it into main",
+			"message": "It passes 3 of 3 in isolation, so it's flaky under full-suite load, not caused by this change. Retrying the commit in the background.",
+			"label": "finding"
+		},
+		{
+			"id": "fed33963f0d3",
+			"provider": "claude",
+			"request": "Commit your changes, and yes make it show the real reason and commit that too",
+			"message": "Typecheck and build pass. The test failure is `session-context-menu` again, which fails in a clean checkout of HEAD too, so it's not from my change. Checking the lint failure.",
+			"label": "finding"
+		},
+		{
+			"id": "02edefb7c670",
+			"provider": "claude",
+			"request": "T3 code’s model as recommended, and I’d also like to implement t3code’s settings based clean up rules",
+			"message": "Starting bg1y.2 (auto-recreate a cleaned-up worktree before the next turn). Found the hook point, now checking who calls it.",
+			"label": "routine"
+		},
+		{
+			"id": "b7ccfc758e1f",
+			"provider": "claude",
+			"request": "Yes, do that, then fix these and merge them into main: conduit-test-dfyh conduit-test-gah7",
+			"message": "Syncing to the worktree and running the affected unit and integration suites there.",
+			"label": "routine"
+		},
+		{
+			"id": "915fb65a3666",
+			"provider": "claude",
+			"request": "/diagnosing-bugs \nHelp me fix this, why was a session showing up in the \"Idle\" session sidebar with no possible buttons except \"mark as unread\"? E.g. Settling, more options, etc., none of that was available.\n\nhttps://<host>:2633/s/ses_b19e1f740a054cb2ae5ec57665cfc2c3\n\n<div class=\"relative overflow-hidden rounded-panel session-swipe-wrapper\"><!----> <a href=\"/s/ses_b19e1f740a054cb2ae5ec57665cfc2c3\" class=\"session-item group grid grid-cols-[20px_minmax(110px,1fr)_auto] gap-x-[9px] items-center min-h-[52px] md:min-h-[46px] py-1.5 md:py-1 px-[7px] opacity-[0.62] mb-px rounded-panel cursor-pointer relative focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent text-text-secondary hover:bg-sidebar-hover hover:text-text no-underline  transition-[color,background-color,transform] duration-150 motion-reduce:transition-none\" data-session-id=\"ses_b19e1f740a054cb2ae5ec57665cfc2c3\" aria-label=\"Untitled, conduit · main, 1h ago\" style=\"touch-action: pan-y; transform: translateX",
+			"message": "Root cause is clear. Checking whether a ticket already covers foreign-session verbs before proposing a fix.",
+			"label": "routine"
+		},
+		{
+			"id": "b0acff788939",
+			"provider": "claude",
+			"request": "Commit your changes, and yes make it show the real reason and commit that too",
+			"message": "Unrelated, and it shows a real version-check banner already exists, so the toast's guess is redundant. Editing the toast.",
+			"label": "finding"
+		},
+		{
+			"id": "6ae306f959fe",
+			"provider": "claude",
+			"request": "Wrong, I don't see the fork button on messages on main at all",
+			"message": "The click created a new session, `ses_1b29c74a…`, with no errors, but the page shows **0 messages** so far. A fork should show the copied history. Checking the database.",
+			"label": "finding"
+		},
+		{
+			"id": "5b3d5fd50f24",
+			"provider": "claude",
+			"request": "Wait, if opencode v2 can’t do steering that’s fine, we can close that, but I thought it could? And why would we close any other cards on that basis?",
+			"message": "While the commits run: messages already wrongly marked \"steered\" in your live database will **stay marked** after this fix. Checking whether the stored events let a migration correct them:",
+			"label": "risk"
+		},
+		{
+			"id": "0a9f7da46901",
+			"provider": "claude",
+			"request": "Commit your changes to main once this is done",
+			"message": "Pre-commit runs the full suite against the **working tree**, and it's failing in `test/unit/provider/relay-event-sink.test.ts` — another session's actively-changing file. Confirming that's theirs, not mine.",
+			"label": "blocked"
+		},
+		{
+			"id": "e5b0d08e6c8f",
+			"provider": "claude",
+			"request": "- Mostly sounds good, I approve these tickets with the blocking dependencies you listed\n- How will we present \"progress\" messages, above or below the turn activity component? When it's in progress versus when it's completed? Shall we allow these messages to be collapsable? We need to visually design this, I want you to generate 7 different \"Best practice\" designs for how we might do this, 7 different \"crazy, off-the-wall, totally unique\" designs, and then another 7 designs in between those two. All 21 must be unique. Show me these designs on an HTML page.",
+			"message": "Shell and brief are ready. Launching the three design agents now.",
+			"label": "routine"
+		},
+		{
+			"id": "89518f657355",
+			"provider": "claude",
+			"request": "/goal 1. Make the below changes and merge them to main:\n=====\n\nThe fix that removes the whole class of bug. Remove the fallbacks instead of patching one:\n\nMake projectSlug required on CreateSession, with no server default, so a missing project fails loudly.\nHave every session row always carry its projectSlug. The composer, git chip and sidebar then read it straight from the session instead of guessing from the attached tab.\nThis is a small interface change with high leverage: the four fallback sites disappear rather than gaining a fifth.\n=====\n\n2. I selected the dotfiles project in the session sidebar then used the sidebar +",
+			"message": "The fix is still not on `main`. Reply **\"land now\"** or **\"go\"**.",
+			"label": "ask"
+		},
+		{
+			"id": "964381fd30db",
+			"provider": "claude",
+			"request": "Why is https://<host>:2633/s/ses_1c3898bd151245b8a57da9abb55e4f3c?group=project not showing its full history? /diagnosing-bugs\n\nAnd why in this session is the skill auto-fill selector not coming up and the skill highlighting isn't working?",
+			"message": "Reading the server code that builds the first page of a session's transcript.",
+			"label": "routine"
+		},
+		{
+			"id": "5be3552291ba",
+			"provider": "claude",
+			"request": "Work through all of the tickets now",
+			"message": "[15:07:31] Ticket 1 — porting the turn model out of the prototype as a pure, tested utility.[15:09:32] Test fixtures used raw snake_case; stored inputs are canonical. Fixing the fixtures to match what's actually persisted.[15:10:20] Ticket 1 green (31 tests). Moving to the ledger components.[15:10:59] Ticket 2 — building the real ledger components.[15:31:34] Real session renders correctly through the ledger. Notable: turn 1 (21 commands) packs into a legible barcode strip, durations and per-turn phrasing are right, and the cumulative-cost quirk ($8.60 → $9.35) is visible as expected — pre-existing, not a regression.[15:34:11] Ticket 5. Three real problems at phone width: economics squeezes the strip to nothing, the hover caption sticks forever after a tap (touch fires `mouseenter` but never `mouseleave`), and `showDuration` is a dead prop. Container queries — not viewport — since a sidebar can narrow the transcript on a wide screen.[15:35:48] Degradation confirmed at all three tiers. Running the acceptance gate.[15:38:36] All five tickets are closed. Running a cross-model review pass on the diff before handing back.[15:39:24] All five tickets are closed. Waiting on the codex cross-model review of the diff before I write the handoff.\n\nMeanwhile, one thing worth flagging from the full-suite run: `test/unit/handlers/prompt-provider-state-effect.test.ts` fails inside `pnpm test:unit` (476 pass / 1 fail) but **passes in isolation**. It shares no imports with anything I touched — it's a backend Effect/relay test, and the shared checkout currently has another session's edits to `src/lib/handlers/context-window.ts` and `model.ts`. Cross-test pollution from that work, not this change. I left it alone.",
+			"label": "milestone"
+		},
+		{
+			"id": "ee974b8c30f5",
+			"provider": "opencode",
+			"request": "No, new live content appears *before* the old clump of historical messages, which means the new live messages are hidden earlier in the session",
+			"message": "Now let me also check the third location where pollers are started — the `session_changed` handler:",
+			"label": "routine"
+		},
+		{
+			"id": "7e3932941d37",
+			"provider": "opencode",
+			"request": "/using-superpowers When questions are sent by opencode, they render on sessions unrelated to the question as well as the session of the question. Questions are also not properly sending on mobile at least, when I respond with “Other”, type my text in the box, then press submit",
+			"message": "Now I see a potential issue with the custom text flow. Let me check the `oninput` vs `onchange` behavior:",
+			"label": "routine"
+		},
+		{
+			"id": "3333b6eaa182",
+			"provider": "opencode",
+			"request": "/using-superpowers Fix these issues in a git worktree:\n- Subagent completion shouldn't trigger alerts, notifications, toasts or attention banners\n- We're getting notifications about attention being needed for questions when no questions have been asked\n- Notifications are rendered on sessions after we've already responded to the same notification in another session and gone to the other session\n\n\nBUT before we fix these, can we make any structural, design, or code changes to make these issues easier to debug, fix, and prevent bugs in the future? For example, using more functionally pure code, single responsibility, stricter typing, etc.?",
+			"message": "Design doc committed. Now transitioning to implementation planning.",
+			"label": "milestone"
+		},
+		{
+			"id": "cd25bc339b1f",
+			"provider": "opencode",
+			"request": "/using-superpowers How should we fix this so that we have clear URLs for local and tailscale, with tailscale only showing when needed? And should the links alway show :2634/setup? At least one link should match the QR code, but we definitely shouldn't have 3 URLs after the QR code...\n\n====\n\n\n   ██████╗ ██████╗ ███╗   ██╗██████╗ ██╗   ██╗██╗████████╗\n  ██╔════╝██╔═══██╗████╗  ██║██╔══██╗██║   ██║██║╚══██╔══╝\n  ██║     ██║   ██║██╔██╗ ██║██║  ██║██║   ██║██║   ██║\n  ██║     ██║   ██║██║╚██╗██║██║  ██║██║   ██║██║   ██║\n  ╚██████╗╚██████╔╝██║ ╚████║██████╔╝╚██████╔╝██║   ██║\n   ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝╚═════╝  ╚═════╝ ╚═╝   ╚═╝\n  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄\n  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\n\n  v0.1.0\n\n    ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄\n    █ ▄▄▄▄▄ █▄▄███ ██▄█ ▄▄▄▄▄ █\n    █ █   █ ██▄ ██  ▀▀█ █   █ █\n    █ █▄▄▄█ ██▀█▀▀███▀█ █▄▄▄█ █\n    █▄▄▄▄▄▄▄█ ▀▄█▄▀ █▄█▄▄▄▄▄▄▄█\n    █▄▄█  ▀▄▀▀▄▀▀█▀█▀▀▀▄█▀▀▀▀▄█\n    █▄█▄█ █▄ █▄█ █▄▄▄   █▄ ▀▀ █\n    █ ▀ ▄ █▄",
+			"message": "Now I have all the context needed. Let me write the implementation plan:",
+			"label": "routine"
+		},
+		{
+			"id": "65dea3f36cce",
+			"provider": "opencode",
+			"request": "Yes please",
+			"message": "All 2609 tests pass. The 2 \"failed suites\" are pre-existing `localStorage` environment issues in `chat-store.test.ts` and `session-store.test.ts` — not related to our changes.\n\nLet me also run a TypeScript type check to make sure everything compiles:",
+			"label": "milestone"
+		},
+		{
+			"id": "fb536d3ae385",
+			"provider": "opencode",
+			"request": "Sessions should be ordered in the sessions list not by when they were created, but by when the last message was received (unless it was created and has no messages, in which case we fall back to the creation date)",
+			"message": "Clean. Let me verify the final state of the changed files:",
+			"label": "routine"
+		},
+		{
+			"id": "bd052acf0445",
+			"provider": "opencode",
+			"request": "Know that the stop button is working as expected, so it's a test issue rather than an issue with the code being tested",
+			"message": "Now I found the root cause path. The monitoring reducer's `notify-busy` effect sends `status:processing` to the frontend. Let me check the monitoring reducer's transition logic:",
+			"label": "finding"
+		},
+		{
+			"id": "bc37d096313a",
+			"provider": "opencode",
+			"request": "/using-superpowers Please investigate and fix this bug: There are sessions with many messages, and when we scroll up, we reach a point where it isn't the start of the session, but it stops loading older messages, meaning we can never read the full session, which is a problem and a bug, it used to work",
+			"message": "Using **systematic-debugging** skill since this is a bug investigation.",
+			"label": "routine"
+		},
+		{
+			"id": "4745a7807284",
+			"provider": "opencode",
+			"request": "Reduce generator threshold to 100ms, normalize 10k to 50ms, Roundtrip 1k to 10ms, and then look for opportuinities to optimise the normalisation layer and experiment with different approaches to optimise the normalisation layer, which is the real runtime bottleneck",
+			"message": "I notice `GetCollection<T>` at line 67 still uses `.Cast<T>().ToList()` — the `CastingReadOnlyList` fix may have been lost during later modifications. Let me check and fix:",
+			"label": "finding"
+		},
+		{
+			"id": "16baacfd41d2",
+			"provider": "opencode",
+			"request": "And in this worktree",
+			"message": "The issue is that `phaseToStreaming()` sets `processing = true`, but the old `handleDelta` only set `streaming = true`. During replay, `processing` should stay false (status events aren't cached), and `handleDone` during replay doesn't clear it. So the reconciliation in `phaseEndReplay` keeps it true incorrectly.\n\nFix: `phaseToStreaming()` should NOT set processing — that's `handleStatus`'s job:",
+			"label": "finding"
+		},
+		{
+			"id": "e0036c504093",
+			"provider": "opencode",
+			"request": "Fix all of these issues, and then propose a design where we adjust modifiable-files to be a canonical source of rules about what agents can and cannot modify and read files and file paths",
+			"message": "Good, now update the exports. Let me check the current state of the file:",
+			"label": "routine"
+		},
+		{
+			"id": "4f24127b5d30",
+			"provider": "opencode",
+			"request": "1. Add a cleanup mechanism to maximise the size and evacuate sub-agent mappings, 2. write the full set of 16 ranked ideas into a file for later use, marking the ideas we're executing in this current plan, then 3. Look deeply at the changes since commit ae087f9cebb7 and consider the impacts on (a) all of the ranked ideas, and (b) all of the implementation plan",
+			"message": "Now remove the old hardcoded `IMPROVER_AGENTS` that comes after the tracker section:",
+			"label": "routine"
+		},
+		{
+			"id": "58f81ad54161",
+			"provider": "opencode",
+			"request": "Plan fixes for all of these, using best practice, clean and elegant solutions",
+			"message": "Now fix Task 2 — replace the broken test with one that actually proves LRU (T2-1, T2-2):",
+			"label": "routine"
+		},
+		{
+			"id": "c678c47747e2",
+			"provider": "opencode",
+			"request": "You’re going to need to add back the logging code because it isn’t working still, are your changes built? I tried to rebuild",
+			"message": "Also add back the MessageList debug and fork-split debug:",
+			"label": "routine"
+		},
+		{
+			"id": "73c7283caef1",
+			"provider": "opencode",
+			"request": "You’ll need to instruct agents to make edits using bash, since the edit and write tools hang. Continue",
+			"message": "## Goal\n\nImplement a `ProjectRegistry` class that replaces three independent data structures (`projects` Map, `projectRelays` Map, `pendingRelaySlugs` Set) on the Daemon class with a single class using a discriminated union type. This eliminates a race condition that caused a forever-loading screen on phones (browser loads page because project exists in `projects` Map, but WebSocket upgrade is silently rejected because relay doesn't exist yet in `projectRelays` Map).\n\n## Instructions\n\n- Follow TDD approach with `pnpm check`, `pnpm lint`, `pnpm test:unit` for verification\n- Pre-commit hooks run build + lint + test automatically\n- The project uses Svelte 5, TypeScript, Vitest, Biome linter\n- **DO NOT modify existing icon files** (`apple-touch-icon.png`, `web-app-manifest-*.png`, `favicon-*.png`)\n- **The Edit and Write tools HANG on this codebase** — use `bash` with `python3` or `cat` for ALL file edits\n- The user wants \"the best testing possible\" — property-based tests, stateful model tests, and comprehensive unit tests\n- The user wants maximum type strictness to prevent bugs\n- The design doc lives at `docs/plans/2026-03-13-project-registry-design.md`\n- The implementation plan lives at `docs/plans/2026-03-13-project-registry-implementation.md` (2020 lines)\n- Using **Subagent-Driven Development** skill for execution — fresh subagent per task, spec review + code quality review after each\n\n## Discoveries\n\n### Root cause of the forever-loading bug\nThe HTTP router checks `this.projects` Map to serve index.html for `/p/{slug}/`. The WS upgrade handler checks `this.projectRelays` Map to accept WebSocket connections. During the window between project registration and relay creation, browsers load the page but WebSocket upgrades are silently rejected. The `ProjectRegistry` eliminates this with `waitForRelay()` — a promise-based approach using EventEmitter events.\n\n### Key architectural decisions made during design\n1. **D1: `StoredProject` fields are `readonly`** — compiler cat\n…\nimprovements\n\n### EventEmitter cleanup targets (Task 10)\n- `src/lib/daemon/port-scanner.ts` — needs `EventEmitter<PortScannerEvents>`\n- `src/lib/daemon/storage-monitor.ts` — has `StorageMonitorEvents` defined, needs wiring\n- `src/lib/daemon/version-check.ts` — has `VersionCheckEvents` defined, needs wiring\n- `src/lib/daemon/keep-awake.ts` — has `KeepAwakeEvents` defined, needs wiring\n- `src/lib/instance/instance-manager.ts` — has manual overloads, switch to `EventEmitter<T>` and delete overloads",
+			"label": "routine"
+		},
+		{
+			"id": "35fdc9334fe2",
+			"provider": "opencode",
+			"request": "I do want to maintain the docker related changes that allow us to select which opencode instance to use, except via an input arg or something instead of via docker, which I had in here: e658bbc50278\n\nAnd I want to maintain the code changes that are useful outside of docker",
+			"message": "I need to remove the `HOST_HOME` tests (lines 67-77) and the entire `resolveHostPath` describe block (lines 80-142), keeping the rest:",
+			"label": "routine"
+		},
+		{
+			"id": "eaf5f0f5f73d",
+			"provider": "opencode",
+			"request": "/using-superpowers Now, in the UI, I hit 'Scan now' and I get the below, even though I know there's another instance on :4097:\n\n<div class=\"mb-3 text-xs text-text-muted bg-black/[0.03] dark:bg-white/[0.04] rounded px-2.5 py-1.5\">No changes detected.<!----></div>\n\nUse strict TDD (red, green, and YELLOW (refactor)) to replicate then fix the issue,",
+			"message": "Based on the summary, I need to finish Bug Fix 2. The immediate next step is to verify the full suite passes after the last fix, then check for other broken tests due to the `ScanResult` type change. Let me pick up where we left off.",
+			"label": "routine"
+		},
+		{
+			"id": "11c46e8890bd",
+			"provider": "opencode",
+			"request": "/using-superpowers Get to work implementing this plan in a new worktree, using TDD: docs/plans/2026-03-18-sse-aware-poller-gating-plan.md",
+			"message": "All 3233 tests pass. **BLUE** — No refactor needed. The function is a simple data assembly with no logic to simplify.",
+			"label": "milestone"
+		},
+		{
+			"id": "b0d0aff3b317",
+			"provider": "opencode",
+			"request": "<EXTREMELY-IMPORTANT>\nIf you think there is even a 1% chance a skill might apply to what you are doing, you ABSOLUTELY MUST invoke the skill.\n\nIF A SKILL APPLIES TO YOUR TASK, YOU DO NOT HAVE A CHOICE. YOU MUST USE IT.\n\nThis is not negotiable. This is not optional. You cannot rationalize your way out of this.\n</EXTREMELY-IMPORTANT>\n\n## How to Access Skills\n\n**In Claude Code:** Use the `Skill` tool. When you invoke a skill, its content is loaded and presented to you—follow it directly. Never use the Read tool on skill files.\n\n**In other environments:** Check your platform's documentation for how skills are loaded.\n\n# Using Skills\n\n## The Rule\n\n**Invoke relevant or requested skills BEFORE any response or action.** Even a 1% chance a skill might apply means that you should invoke the skill to check. If an invoked skill turns out to be wrong for the situation, you don't need to use it.\n\n```dot\ndigraph skill_flow {\n    \"User message received\" [shape=doublecircle];\n    \"About to EnterPlanMod",
+			"message": "Now let me read the frontend certificate step component to understand the iOS flow:",
+			"label": "routine"
+		},
+		{
+			"id": "8eb763c5115e",
+			"provider": "opencode",
+			"request": "- The table is weirdly shrunk to the left while having a white border that extends far to the right of the table:\nME div as max-w-[760px] mx-auto px-5, making the card 760px wide. Tool items had max-w-[760px] mx-auto px-5 on the outer and a separate inner card at 720px. \nOther tables with lots of text that wraps are fine\n\n- For pending tool calls and subagents, let's remove the inline spinner, keeping it only for active thinking blocks\n\n- Let's replace the \"Click to Copy\" on-over message copy text with a copy icon from lucide, and then show me mockups of how we can remove the big line taking up space in assistant messages while preventing text and the copy icon from overlapping in the bottom right of the assistant message text: <div class=\"msg-copy-hint text-right text-[11px] mt-1 opacity-0 group-hover:opacity-100 touch:opacity-100 transition-opacity duration-200 select-none text-text-dimmer\">Click to grab this</div>",
+			"message": "Now do the same for the Question and Subagent card types in ToolItem. Let me find them:",
+			"label": "routine"
+		},
+		{
+			"id": "10c823a17990",
+			"provider": "opencode",
+			"request": "Could running E2E tests have accidentally deleted live sessions? I ran E2E tests, then this showed up. Perhaps the E2E tests are deleting actual prod sessions?",
+			"message": "That's a significant design change. Let me load the brainstorming skill to work through this properly before implementation.",
+			"label": "routine"
+		},
+		{
+			"id": "34e17b66e99f",
+			"provider": "opencode",
+			"request": "<EXTREMELY-IMPORTANT>\nIf you think there is even a 1% chance a skill might apply to what you are doing, you ABSOLUTELY MUST invoke the skill.\n\nIF A SKILL APPLIES TO YOUR TASK, YOU DO NOT HAVE A CHOICE. YOU MUST USE IT.\n\nThis is not negotiable. This is not optional. You cannot rationalize your way out of this.\n</EXTREMELY-IMPORTANT>\n\n## How to Access Skills\n\n**In Claude Code:** Use the `Skill` tool. When you invoke a skill, its content is loaded and presented to you—follow it directly. Never use the Read tool on skill files.\n\n**In other environments:** Check your platform's documentation for how skills are loaded.\n\n# Using Skills\n\n## The Rule\n\n**Invoke relevant or requested skills BEFORE any response or action.** Even a 1% chance a skill might apply means that you should invoke the skill to check. If an invoked skill turns out to be wrong for the situation, you don't need to use it.\n\n```dot\ndigraph skill_flow {\n    \"User message received\" [shape=doublecircle];\n    \"About to EnterPlanMod",
+			"message": "I need to load the brainstorming skill first since this is creative/feature work, and then the frontend-design skill since this involves UI implementation.",
+			"label": "routine"
+		},
+		{
+			"id": "bbf3736ddc51",
+			"provider": "opencode",
+			"request": "I'm also seeing this, and yes it's still crashing:\n\n  https://<host>:2633\n    Local: https://192.168.1.164:2633\n\n  14 projects · 871 sessions\n\n  ◇  What would you like to do? · Projects\n\n   ██████╗ ██████╗ ███╗   ██╗██████╗ ██╗   ██╗██╗████████╗\n  ██╔════╝██╔═══██╗████╗  ██║██╔══██╗██║   ██║██║╚══██╔══╝\n  ██║     ██║   ██║██╔██╗ ██║██║  ██║██║   ██║██║   ██║\n  ██║     ██║   ██║██║╚██╗██║██║  ██║██║   ██║██║   ██║\n  ╚██████╗╚██████╔╝██║ ╚████║██████╔╝╚██████╔╝██║   ██║\n   ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝╚═════╝  ╚═════╝ ╚═╝   ╚═╝\n  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄\n  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\n\n  ◆  Projects\n  │\n  │  DataNormalizer    100 sessions    🟢\n  │  ~/src/personal/nuget-dn-lib/DataNormalizer\n  │\n  │  conduit    483 sessions    ⏸\n  │  ~/src/personal/opencode-relay/conduit\n  │\n  │  spm    184 sessions    ⏸\n  │  ~/src/personal/spm\n  │\n  │  opencode-relay    0 sessions    ⏸\n  │  ~/s",
+			"message": "The approach: instead of async fire-and-forget per event, use a **buffered synchronous write** that batches pending writes and flushes them in a single `appendFileSync` call via a `setInterval`. This keeps the event loop free between flushes while avoiding the promise chain explosion:",
+			"label": "decision"
+		},
+		{
+			"id": "59692bf77fab",
+			"provider": "opencode",
+			"request": "/using-superpowers Implement this plan using subagent-driven-development: \n\ndocs/plans/2026-03-17-session-switch-perf.md",
+			"message": "The `id` is in `info.id` — and `normalizeMessage` flattens it. Now let me verify the `before` cursor:",
+			"label": "finding"
+		},
+		{
+			"id": "602e2d3b58ea",
+			"provider": "opencode",
+			"request": "Please pickup where we left off",
+			"message": "Found the bug. The bash variables `TEST_FILE`, `TARGET_NAME`, `BEHAVIORS_JSON`, `TEST_LOC`, and `VALIDATE_JSON` are set in the shell but the Python heredoc reads them via `os.environ[]`. In bash, local variables aren't automatically exported to subprocesses. The fix is to export these variables before the Python block.",
+			"label": "finding"
+		},
+		{
+			"id": "c50796f40c08",
+			"provider": "opencode",
+			"request": "/using-superpowers Fix the CI tests and any & all lint issues",
+			"message": "Let me fix the 4 remaining CSS warnings. I'll read each file around the problem area and fix them.",
+			"label": "routine"
+		},
+		{
+			"id": "8f70aaf19a21",
+			"provider": "opencode",
+			"request": "Continue",
+			"message": "All 5 changes are confirmed in the diff. Now let me also verify the skill file changes need to be committed to the _current branch_ (not just to the ref/logs branches). The `commit-to-branch.sh all` script commits test files and logs to separate branches, but the skill file improvements need to stay on the current working branch. Let me check the pipeline instructions again.\n\nLooking at the pipeline step 14, it says: \"Run `commit-to-branch.sh all <ITERATION> <timestamp>`\" — this commits test outputs and logs to their respective branches. But the skill file changes (from step 12) need to be committed on the _current branch_. Let me check if the script handles this or if I need a separate commit.\n\nThe script only commits to `ds/unit-test-skill-test-outputs` (refs) and `ds/unit-test-skill-improver-logs` (logs). The skill file changes (test-writer-v2.md and test-analyzer.md) need a separate commit on the current branch. Let me check git status first.",
+			"label": "finding"
+		},
+		{
+			"id": "9c4dfe8a1d80",
+			"provider": "opencode",
+			"request": "1",
+			"message": "The app is showing the **dashboard** page, not the chat page. This is because the app navigates to the project selection dashboard first. The WS mock connects at `/ws`, but the app's routing likely needs to be on a specific project URL like `/p/myapp/` rather than the root URL.\n\nLet me check how the visual mockup test handles this:",
+			"label": "finding"
+		},
+		{
+			"id": "cb36ec382b26",
+			"provider": "opencode",
+			"request": "/using-superpowers Let's remove the 'Update available' from the sidebar and make the 'Update available' banner in the banners only use the version once (instead of twice), and include a link to npm like the sidebar one currently does.",
+			"message": "Now let me find the relevant frontend components for the update banner and sidebar.",
+			"label": "routine"
+		},
+		{
+			"id": "5d21f47b1019",
+			"provider": "opencode",
+			"request": "Commit these changes",
+			"message": "The files are staged (`M` in first column) but the commit was likely rejected by a pre-commit hook — maybe the a11y warning in SettingsPanel caused a build failure? Let me check more carefully:",
+			"label": "blocked"
+		},
+		{
+			"id": "e61c8f0c3238",
+			"provider": "opencode",
+			"request": "Update the skill to make sure this never happens again",
+			"message": "Now let me reconstruct the iteration-7 partial state. I need to rebuild the manifest, logs, and progress.json from what survived (test files + analysis JSONs still on disk).",
+			"label": "routine"
+		},
+		{
+			"id": "fed8cbc8877a",
+			"provider": "opencode",
+			"request": "/using-superpowers Figure out why our pre-commit tests are taking so long; our sse-aware-poller-gating-tests in particular look like they're taking a long time, but they're not the only ones",
+			"message": "Let me get the test timing details and read the slow test files in parallel.",
+			"label": "routine"
+		},
+		{
+			"id": "982d07919a5c",
+			"provider": "opencode",
+			"request": "Please pickup where we left off",
+			"message": "Now let me run compare-refs.sh for each target. Let me first check the script:",
+			"label": "routine"
+		},
+		{
+			"id": "e6aeb5bcd1cd",
+			"provider": "opencode",
+			"request": "Commit changes",
+			"message": "The hook ran tests and there's 1 failing test. Let me check the failure:",
+			"label": "blocked"
+		},
+		{
+			"id": "933ea1246a30",
+			"provider": "opencode",
+			"request": "CI in github actions is failing with test failures. Fix them and make sure our pre-commit hook ensures commits that fail tests can't be pushed.",
+			"message": "Now add `staticDir` to each of the 8 failing test constructors:",
+			"label": "routine"
+		},
+		{
+			"id": "1e6ac18f30c7",
+			"provider": "opencode",
+			"request": "Apply these recommendations to the implementation plan: docs/plans/2026-04-05-orchestrator-implementation-plan.md",
+			"message": "Now replace the `onSSEEvent` method body with the enhanced version:",
+			"label": "routine"
+		},
+		{
+			"id": "8527a6256d26",
+			"provider": "opencode",
+			"request": "It's still broken. How do people usually deal with these kinds of animations in svelte 5?",
+			"message": "Good question. The idiomatic Svelte approach is `{#key}` blocks with `in:/out:` transitions. Instead of swapping text in-place on a GPU-cached element (which is what causes the WebKit issue), Svelte **destroys the old element and creates a new one**. Each element only ever has one text value, so there's never a stale GPU cache to invalidate.\n\nThis would replace all the manual `transitionend` / `visibility` / `animation pause` / `tick()` / `rAF` machinery with about 5 lines of Svelte.",
+			"label": "finding"
+		},
+		{
+			"id": "75cf96b657d0",
+			"provider": "opencode",
+			"request": "The sessions list in the sidebar isn’t loading at all now",
+			"message": "Update `handleNewSession`:",
+			"label": "routine"
+		},
+		{
+			"id": "76abad7d298f",
+			"provider": "opencode",
+			"request": "We need to make sure the error message is clear to a beginner end user: the TUI session is viewable in opencode-relay, but since it's not an opencode web process we can't interact with it in the same way as if it were started in opencode-web or opencode-relay. \n\nIs there some way of transferring sessions between opencode instances?",
+			"message": "Now update the server-side error messages to be user-friendly:",
+			"label": "routine"
+		},
+		{
+			"id": "c19d3d578089",
+			"provider": "opencode",
+			"request": "We see nothing in the console logs and we just see this in the relay server logs:\n\n> <email> dev:all ~/src/personal/opencode-relay/opencode-relay\n> trap 'kill 0' EXIT; tsx watch src/bin/cli.ts -- --foreground & vite & wait\n\n\n  VITE v6.4.1  ready in 224 ms\n\n  ➜  Local:   http://127.0.0.1:5173/\n  ➜  press h + enter to show help\n\nOpenCode Relay (foreground)\n  OpenCode: http://localhost:4096\n[relay]    ✓ Default model from settings: anthropic/claude-opus-4-6\n[relay]    ✓ OpenCode is reachable at http://localhost:4096\n[relay]    ✓ Using session: ses_3341ca1fdffeN6bknYFqanazgt\n[relay]    [sse] session=ses_3341ca1fdffeN6bknYFqanazgt Connected to OpenCode event stream\n[relay]    [discovery] Discovered 12 project(s) from OpenCode, registered 0\n  Relay:    http://localhost:2633\n  Project:  ~/src/personal/opencode-relay/opencode-relay\n  Ready.\n\n[relay]    [sse] listPendingQuestions returned 0 question(s)\n[relay]    [ws] Client connected: 71fc7943c06b3474 (requ",
+			"message": "Good — `HistoryView.svelte` uses the same `ToolItem` component. So the diagnostic log should fire. The fact that it doesn't means the tool message either:\n- Doesn't have `name === \"AskUserQuestion\"` (early return at `if (!isQuestion) return;`)\n- Or the tool isn't rendered as a standalone `ToolItem` (maybe it's in a group)\n\nLet me check — the diagnostic `$effect` has an early return for non-questions. Let me make it more aggressive to log ALL tool messages in history view to see what's happening:",
+			"label": "replan"
+		},
+		{
+			"id": "7156d0dc791d",
+			"provider": "opencode",
+			"request": "/using-superpowers Many of the Storybook components have a 'Docs' that don't actually render their objects properly, please fix this",
+			"message": "The strategy: Move store mutations from `play()` into `beforeEach` callbacks on each individual story. `beforeEach` runs before the component renders in both Canvas and Docs mode, so the component will have the correct state when it first mounts. For stories that also need interactive behavior (like clicking buttons to open dropdowns), those interactions stay in `play()`.\n\nLet me fix all the files. I'll work through them in batches:\n\n**Batch 1: Missing autodocs tags + simple play-only stories**",
+			"label": "decision"
+		},
+		{
+			"id": "52645d9c1f2e",
+			"provider": "opencode",
+			"request": "- The app icon still isn't being added when adding the bookmark to the homescreen on IOS, how is this usually done?\n- We do correctly enter the auth screen to enter the pin\n- After correctly entering the pin, we go into the permanent loading screen\n\nStop the bandaid fixes and be thorough",
+			"message": "Those tests just verify the server serves the SPA shell — they don't test client-side behavior. The PinPage change is client-side only and uses `navigate()` (a well-tested router function) instead of `window.location.href`. The existing http-router tests for the auth flow still pass since we didn't change the server.\n\nLet me also verify the `navigator.standalone` TS fix in `DashboardPage.svelte` since it has the same issue:",
+			"label": "finding"
+		},
+		{
+			"id": "84aa0496ccff",
+			"provider": "opencode",
+			"request": "I think the 34 commits *are* on origin, no?",
+			"message": "Good catch -- after fetching, we're just 1 commit ahead (the workflow fix at `bf688f3`). Now I'll delete the old `v0.1.0` tag (local + remote), push the fix commit, then re-tag and push the tag.",
+			"label": "correction"
+		},
+		{
+			"id": "060e85b1c150",
+			"provider": "opencode",
+			"request": "The unit test skill improver v2 thinks that it's cleared context well but the .tmp/iteration-1 and .tmp/iteration-2 files could pollute the results, do we need to adjust the skill to fix this?",
+			"message": "Now let me investigate the actual scripts and agent files to understand how `.tmp/` is managed across iterations.",
+			"label": "routine"
+		},
+		{
+			"id": "76043e97bec7",
+			"provider": "opencode",
+			"request": "/using-superpowers Update the parent implementation plan with the changes outlined in this doc: docs/plans/2026-04-07-orchestrator-performance-scalability-solutions.md",
+			"message": "Now I need to add the `SYNC_TYPES` set, `shouldWriteSync()`, `onSSEEventDeferred()`, and P11 stats logging methods to the DualWriteHook class. Let me add them before the `onReconnect()` method:",
+			"label": "routine"
+		},
+		{
+			"id": "c68be7b8a62b",
+			"provider": "opencode",
+			"request": "And the notifications still aren't showing on desktop, by the way",
+			"message": "I need to stop guessing and add diagnostics. Sound working but no visual notifications — across both browser alerts AND push — points to something outside our code. But let me add instrumentation so we can see exactly where the flow breaks.",
+			"label": "replan"
+		},
+		{
+			"id": "b9ca16a779bf",
+			"provider": "opencode",
+			"request": "/using-superpowers Clicking on the ‘Agent has a question for you’ notification on the phone and computer should direct you to the right session that's asking the question, the same should be done for permissions. Address this in a worktree.",
+			"message": "Plan committed. Now let me start implementing. I'll skip the formal plan audit for this straightforward feature and proceed directly.",
+			"label": "decision"
+		},
+		{
+			"id": "8883fe59bdcf",
+			"provider": "opencode",
+			"request": "- /using-superpowers When we send a message in one client, and we have the same session open in another client at the same time, it doesn't show up for the other client, but it should. We need to fix this.",
+			"message": "Now let me read the `handleMessage` test section to find where I should add a new test:",
+			"label": "routine"
+		},
+		{
+			"id": "a50c10f1a91d",
+			"provider": "opencode",
+			"request": "Commit those fixes before we start the implementation of our plan",
+			"message": "All 42 tests pass. Now let me check if there are uncommitted changes from the parallel agents:",
+			"label": "milestone"
+		},
+		{
+			"id": "7bb87eb64e64",
+			"provider": "opencode",
+			"request": "Why not all 19? I asked you to fix all issues",
+			"message": "Now M7 — bash 3.2 compat for `declare -A`:",
+			"label": "routine"
+		},
+		{
+			"id": "24492126b9e3",
+			"provider": "opencode",
+			"request": "Fix the presentation of skills being used, currently it just says “Skill” and it doesn’t get the name of the skill and present it like it should in the chat. It also shows the skill text like this: <skill_content name=\"subagent-driven-development\">\n# Skill: subagent-driven-development\n\n# Subagent-Driven Development\n\nExecute plan by dispatching fresh subagent per task, with two-stage review after each: spec compliance review first, then code quality review.\n\n**Core principle:** Fresh subagent per task + two-stage review (spec then quality) = high quality, fast iteration\n… (continues)",
+			"message": "I'll start by understanding the codebase and finding how skills are currently presented in the chat.",
+			"label": "routine"
+		},
+		{
+			"id": "e99f39e79ebc",
+			"provider": "opencode",
+			"request": "Proceed to batch 2",
+			"message": "**Step 3: Wire into the tool.execute.after hook**",
+			"label": "routine"
+		},
+		{
+			"id": "af8b623ce488",
+			"provider": "opencode",
+			"request": "From first principles thinking, what's the best way to design how a user would (1) isolate sets of provider auths from one another inside opencode-relay, and (2) what would be the optimal flow to delegate this to ccs (https://github.com/kaitranntt/ccs) or CLIProxyAPI?\n\nI feel like this worktree is adding the ability to easily achieve what you want, but only if you know how to do it; I want both paths to be easy and make sense for the user",
+			"message": "Now I have the complete picture. Here's what I found:\n\n---\n\n## CCS Provider Routing — Investigation Complete\n\n**Key finding from `getClaudeEnvVars()` in `env-builder.ts`:**\n\n```typescript\nANTHROPIC_BASE_URL: `http://127.0.0.1:${port}/api/provider/${provider}`\n```\n\n**How it works:**\n- CCS CLIProxy serves all providers on **one port** via path-based routing\n- Each provider gets its own endpoint: `/api/provider/claude`, `/api/provider/gemini`, `/api/provider/codex`, etc.\n- The `extractProviderFromPathname()` function parses the provider from the URL path\n- `ANTHROPIC_AUTH_TOKEN` (not `ANTHROPIC_API_KEY`) is set to CCS's internal API key (`getEffectiveApiKey()`)\n\n**Answer to the open question:** Setting `ANTHROPIC_BASE_URL` to `/api/provider/claude/v1` gives OpenCode access to **only Claude** through that CCS instance. To access Gemini, you'd need `ANTHROPIC_BASE_URL=http://127.0.0.1:{port}/api/provider/gemini`. Each provider URL is a different path on the same port.\n\n**However**, CCS also supports a **composite/root endpoint** (no `/api/provider/` path) where routing is based on the model name in the request body. This is used for composite tiers where different model tiers (opus/sonnet/haiku) map to different providers.\n\n**Implication for opencode-relay:**\n- For a single provider per instance: `ANTHROPIC_BASE_URL=http://127.0.0.1:{port}/api/provider/{provider}`\n- For multi-provider (model-based routing): `ANTHROPIC_BASE_URL=http://127.0.0.1:{port}` (root URL, CCS routes by model name)\n- `ANTHROPIC_AUTH_TOKEN` (not `ANTHROPIC_API_KEY`) should be set to CCS's API key\n\n**Important correction to my earlier design:** The env var is `ANTHROPIC_AUTH_TOKEN`, not `ANTHROPIC_API_KEY`. And the URL path does NOT have `/v1` — it's just `/api/provider/{provider}`.\n\nLet me update the CCS guided path:\n\n---\n\n## Design Section 2b (Final): CCS Guided Path\n\n**Path 2: \"Multi-Provider — Via CCS\"**\n\n```\nCCS manages OAuth tokens and API keys for 20+ providers.\nOne CCS proxy per OpenCode inst\n…\nrk ccs cliproxy start  # Different port\n\n6. Start another OpenCode:\n   $ ANTHROPIC_BASE_URL=\"http://127.0.0.1:8318/api/provider/claude\" \\\n     ANTHROPIC_AUTH_TOKEN=\"$(CCS_DIR=~/.ccs-work ccs auth-token)\" \\\n     opencode serve --port 4099\n\nBoth instances appear here automatically!\n```\n\n**Note:** The `ccs auth-token` command is hypothetical — we need to verify what CCS's actual command is for getting the auth token. Alternatively, you may just use `\"ccs-internal-managed\"` as you originally stated.",
+			"label": "correction"
+		},
+		{
+			"id": "b6a009b06593",
+			"provider": "opencode",
+			"request": "1. Subagent driven",
+			"message": "Now let me also check if we should set up a worktree first, and look at the current git state:",
+			"label": "routine"
+		}
+	]
+}

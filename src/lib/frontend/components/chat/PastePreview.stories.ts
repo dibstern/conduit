@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import type { PendingImage } from "../../types.js";
+import { expect, fn, within } from "storybook/test";
+import type { PendingAttachment } from "../../types.js";
 import PastePreview from "./PastePreview.svelte";
 
 const meta = {
@@ -21,14 +22,14 @@ const BLUE_PIXEL =
 const GREEN_PIXEL =
 	"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
-const firstMockImage: PendingImage = {
+const firstMockImage: PendingAttachment = {
 	id: "img-1",
 	dataUrl: RED_PIXEL,
 	name: "screenshot.png",
 	size: 24576,
 };
 
-const mockImages: PendingImage[] = [
+const mockImages: PendingAttachment[] = [
 	firstMockImage,
 	{
 		id: "img-2",
@@ -62,6 +63,53 @@ export const Empty: Story = {
 	args: {
 		images: [],
 		onRemove: (id: string) => console.log("Remove image:", id),
+	},
+};
+
+export const WithFiles: Story = {
+	args: {
+		images: [
+			{
+				id: "text-file",
+				name: "notes.txt",
+				size: 34,
+				dataUrl: "data:text/plain;name=notes.txt;base64,bm90ZXM=",
+			},
+			{
+				id: "pdf-file",
+				name: "guide.pdf",
+				size: 601,
+				dataUrl: "data:application/pdf;name=guide.pdf;base64,JVBERi0xLjQ=",
+			},
+		],
+		onRemove: fn(),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getAllByTestId("file-attachment-chip")).toHaveLength(2);
+		await expect(
+			canvas.getByRole("button", { name: "Remove file notes.txt" }),
+		).toBeVisible();
+		await expect(
+			canvas.getByRole("button", { name: "Remove file guide.pdf" }),
+		).toBeVisible();
+	},
+};
+
+export const MixedAttachments: Story = {
+	args: {
+		images: [
+			firstMockImage,
+			...(WithFiles.args?.["images"] ?? []),
+			{
+				id: "long-name",
+				name: "2026-10-quarterly-infrastructure-review-notes.md",
+				size: 18_432,
+				dataUrl:
+					"data:text/plain;name=2026-10-quarterly-infrastructure-review-notes.md;base64,bm90ZXM=",
+			},
+		],
+		onRemove: fn(),
 	},
 };
 

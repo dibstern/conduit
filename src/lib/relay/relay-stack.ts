@@ -379,7 +379,6 @@ export interface RelayStackConfig {
 export interface RelayStack {
 	deleteArchivedSessions: ProjectRelay["deleteArchivedSessions"];
 	archiveIdleSessions: ProjectRelay["archiveIdleSessions"];
-	settleIdleSessions: ProjectRelay["settleIdleSessions"];
 	server: EffectRelayServer;
 	wsHandler: WebSocketHandlerShape;
 	rpcWsHandler: RpcWebSocketHandlerShape;
@@ -391,6 +390,8 @@ export interface RelayStack {
 	readonly effectRuntime: ProjectRelay["effectRuntime"];
 	/** Session selected during relay startup. */
 	readonly initialSessionId: string;
+	/** The initial project's automatic settlement pass; the daemon runs it per minute. */
+	readonly settleIdleSessions: ProjectRelay["settleIdleSessions"];
 
 	/** The port the HTTP server is actually listening on (useful when port=0) */
 	getPort(): number;

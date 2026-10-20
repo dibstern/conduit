@@ -6,7 +6,11 @@ interface Ban {
 }
 
 const banned: readonly Ban[] = [
-	{ what: "the envelope tags", pattern: /\b(snapshot|upsert|synchronized)\b/i },
+	// `$state.snapshot` is Svelte's rune for a plain copy of reactive state.
+	{
+		what: "the envelope tags",
+		pattern: /(?<!\$state\.)\b(snapshot|upsert|synchronized)\b/i,
+	},
 	{ what: "a discriminator off the wire", pattern: /_tag/ },
 	{ what: "a wire sequence", pattern: /\bsequence\b/i },
 	{

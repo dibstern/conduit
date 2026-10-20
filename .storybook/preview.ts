@@ -1,6 +1,8 @@
 import type { Preview } from "@storybook/svelte-vite";
 import "../src/lib/frontend/style.css";
+import { avatarState } from "../src/lib/frontend/stores/avatar.svelte.js";
 import { setThemeMode } from "../src/lib/frontend/stores/theme.svelte.js";
+import { seedStoryAvatar } from "../src/lib/frontend/stories/sockets.js";
 
 const preview: Preview = {
 	globalTypes: {
@@ -24,6 +26,18 @@ const preview: Preview = {
 	// TerminalTab, the Settings control -- in agreement with the CSS.
 	beforeEach: (context) => {
 		setThemeMode(context.globals["theme"] === "light" ? "light" : "dark");
+		const avatar = {
+			choice: { kind: "initial" as const },
+			name: "David",
+			macPicture: null,
+		};
+		Object.assign(avatarState, {
+			current: avatar,
+			loaded: true,
+			saving: false,
+			error: "",
+		});
+		seedStoryAvatar(avatar);
 
 		// A story that hits the network renders whatever the host's network stack
 		// happened to be doing when the frame was captured, and it fails SILENTLY:

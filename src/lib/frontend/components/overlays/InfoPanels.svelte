@@ -31,9 +31,9 @@
 	});
 
 	const contextBarColor = $derived.by(() => {
-		if (contextPercent >= 80) return "bg-brand-a";
+		if (contextPercent >= 80) return "bg-status-risk";
 		if (contextPercent >= 50) return "bg-warning";
-		return "bg-brand-b";
+		return "bg-success";
 	});
 
 	function formatCost(cost: number | undefined): string {

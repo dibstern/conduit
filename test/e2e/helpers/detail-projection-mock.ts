@@ -3,7 +3,7 @@ import type {
 	HistoryMessage,
 	HistoryMessagePart,
 } from "../../../src/lib/shared-types.js";
-import type { MockMessage } from "../fixtures/mockup-state.js";
+import { MOCK_NOW_MS, type MockMessage } from "../fixtures/mockup-state.js";
 
 type PendingInput = {
 	inputId: string;
@@ -76,7 +76,7 @@ const isHistoryMessage = (value: unknown): value is HistoryMessage =>
 // Recorded fixtures keep the old raw tool state; the wire now tags it (y7eo.6).
 const tagged = (value: unknown): boolean =>
 	typeof value === "object" && value !== null && "_tag" in value;
-const toWire = (message: HistoryMessage): HistoryMessage => ({
+export const toWire = (message: HistoryMessage): HistoryMessage => ({
 	...message,
 	...(message.parts && {
 		parts: message.parts.map((part) => {
@@ -117,6 +117,19 @@ const sortedRows = (state: SessionProjection): HistoryMessage[] =>
 			(a.time?.created ?? 0) - (b.time?.created ?? 0) ||
 			a.id.localeCompare(b.id),
 	);
+
+// Explicit scenario times may be later than the default epoch. Keep generated
+// events after those rows, with stable ordering even when the clock is fixed.
+const nextTimestamp = (state: SessionProjection): number =>
+	[...state.rows.values()].reduce(
+		(latest, message) =>
+			Math.max(
+				latest,
+				message.time?.created ?? 0,
+				message.time?.completed ?? 0,
+			),
+		MOCK_NOW_MS,
+	) + state.sequence;
 
 const snapshot = (state: SessionProjection): DetailEnvelope => {
 	const rows = sortedRows(state);
@@ -165,7 +178,12 @@ function assistant(
 		state.rows.get(id) ?? {
 			id,
 			role: "assistant",
-			time: { created: Date.now() + state.sequence },
+			time: {
+				created:
+					typeof event["createdAt"] === "number"
+						? event["createdAt"]
+						: nextTimestamp(state),
+			},
 			parts: [],
 		}
 	);
@@ -238,8 +256,7 @@ export function projectLegacyRelayMessage(
 				...(Array.isArray(images) ? { images: images.map(String) } : {}),
 			},
 			admittedAt:
-				state.pending.get(event["inputId"])?.admittedAt ??
-				Date.now() + state.sequence,
+				state.pending.get(event["inputId"])?.admittedAt ?? nextTimestamp(state),
 		};
 		state.pending.set(input.inputId, input);
 		const sequence = ++state.sequence;
@@ -296,7 +313,7 @@ export function projectLegacyRelayMessage(
 				created:
 					typeof event["createdAt"] === "number"
 						? event["createdAt"]
-						: Date.now() + state.sequence,
+						: nextTimestamp(state),
 			},
 			parts: [{ id: `${id}-text`, type: "text", text: event["text"] }],
 			...(event["steered"] === true ? { steered: true } : {}),
@@ -424,7 +441,7 @@ export function projectLegacyRelayMessage(
 					completed:
 						typeof event["createdAt"] === "number"
 							? event["createdAt"]
-							: Date.now(),
+							: nextTimestamp(state),
 				},
 				...(typeof event["cost"] === "number" ? { cost: event["cost"] } : {}),
 			});
@@ -442,7 +459,7 @@ export function projectLegacyRelayMessage(
 		(event["state"] === "completed" || event["state"] === "failed")
 	) {
 		const id = `compaction-${state.sequence + 1}`;
-		const created = Date.now() + state.sequence;
+		const created = nextTimestamp(state);
 		const clearedContext =
 			event["provider"] === "opencode" &&
 			event["state"] === "completed" &&

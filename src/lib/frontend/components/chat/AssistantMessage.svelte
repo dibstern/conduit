@@ -15,43 +15,35 @@
 </script>
 
 <script lang="ts">
-	import { tick, onDestroy } from "svelte";
+	import { tick, onDestroy, mount, unmount } from "svelte";
 	import type { AssistantMessage } from "../../types.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { isLoading, sessionMessages } from "../../stores/chat.svelte.js";
-	import { followFork, sessionState } from "../../stores/session.svelte.js";
-	import { selection } from "../../stores/selection.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { getBrowserClientId } from "../../stores/client-identity.js";
-	import { rpc } from "../../transport/ws-rpc-client.js";
-	import { toastFailure } from "../../transport/rpc-errors.js";
-	import { assertNever } from "../../../utils.js";
-	import Button from "../ui/Button.svelte";
-	import MessageTime from "./MessageTime.svelte";
 	import { initTableScrollShadows } from "../../utils/table-scroll.js";
 	import { loadHighlighter } from "../../utils/load-highlighter.js";
 	import { themeState } from "../../stores/theme.svelte.js";
+	import CodeBlockHeader from "../ui/CodeBlockHeader.svelte";
+	import AssistantHeader from "./AssistantHeader.svelte";
 
-	let { message, forkMessageId, sessionId }: {
+	let { message, forkMessageId, sessionId, hideHeader = false, model, providerId }: {
 		message: AssistantMessage;
 		forkMessageId?: string | undefined;
 		sessionId?: string | undefined;
+		hideHeader?: boolean;
+		model?: string | undefined;
+		providerId?: string | undefined;
 	} = $props();
 	let containerEl: HTMLDivElement | undefined = $state();
 
 	type CopyState = "idle" | "primed" | "done";
 	let copyState: CopyState = $state("idle");
 	let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
-	const copyButtonClass = $derived.by(() => {
-		if (copyState === "done") return "border-success/30 bg-success/10 text-success";
-		if (copyState === "primed") return "border-brand-b/30 bg-brand-b/10 text-brand-b";
-		return "border-border-subtle/50 bg-bg-surface/80 text-text-muted hover:text-text-secondary";
+	$effect(() => {
+		if (copyState === "idle") return;
+		copyResetTimer = setTimeout(() => { copyState = "idle"; }, 3000);
+		return () => { if (copyResetTimer) clearTimeout(copyResetTimer); };
 	});
-	const copyButtonLabel = $derived.by(() => {
-		if (copyState === "done") return "Copied!";
-		if (copyState === "primed") return "Click to confirm copy";
-		return "Copy message";
-	});
+
 
 	// Mermaid init (once globally)
 
@@ -61,19 +53,16 @@
 			styles.getPropertyValue(name).trim() || fallback;
 		const vars = {
 			darkMode: themeState.resolved === "dark",
-			background: get("--color-code-bg", "#141417"),
+			background: get("--color-code-bg", "#141416"),
 			// Under theme "base", primaryColor IS the node fill, so it must be a
-			// surface token. Pointing it at --color-accent turned every node brand
-			// pink; nodes should read as panels, with the accent reserved for
-			// emphasis elsewhere.
-			primaryColor: get("--color-bg-alt", "#1b1e24"),
-			primaryTextColor: get("--color-text", "#e4e4e7"),
-			primaryBorderColor: get("--color-border", "#3f3f46"),
-			lineColor: get("--color-text-muted", "#71717a"),
-			secondaryColor: get("--color-bg-surface", "#1f1f23"),
-			tertiaryColor: get("--color-bg", "#0d0e11"),
-			fontFamily:
-				"'Berkeley Mono', 'IBM Plex Mono', ui-monospace, monospace",
+			// surface token. Nodes read as panels; accent is reserved for emphasis.
+			primaryColor: get("--color-bg-alt", "#232327"),
+			primaryTextColor: get("--color-text", "#ededf0"),
+			primaryBorderColor: get("--color-border", "#2b2b31"),
+			lineColor: get("--color-text-muted", "#a1a1aa"),
+			secondaryColor: get("--color-bg-surface", "#1a1a1d"),
+			tertiaryColor: get("--color-bg", "#111113"),
+			fontFamily: get("--font-sans", "Geist, system-ui, sans-serif"),
 		};
 
 		mermaid.initialize({
@@ -184,49 +173,35 @@
 		return undefined;
 	});
 
+	const codeHeaders = new Map<HTMLElement, ReturnType<typeof mount>>();
 	function addCodeBlockHeaders(container: HTMLElement): void {
-		const pres = container.querySelectorAll("pre");
-		for (const pre of pres) {
+		for (const [element, component] of codeHeaders) {
+			if (container.contains(element)) continue;
+			void unmount(component);
+			codeHeaders.delete(element);
+		}
+		for (const pre of container.querySelectorAll("pre")) {
 			if (pre.querySelector(".code-header")) continue;
-
 			const code = pre.querySelector("code");
-			let lang = "";
-			if (code) {
-				const cls = Array.from(code.classList).find((c) =>
-					c.startsWith("language-"),
-				);
-				if (cls) lang = cls.replace("language-", "");
-			}
-			if (lang === "mermaid") continue;
-
+			if (!code) continue;
+			const language = [...code.classList].find((name) => name.startsWith("language-"))?.slice(9) ?? "";
+			if (language === "mermaid") continue;
+			const text = code.textContent ?? "";
+			const lines = text.split("\n");
+			const diff = language === "diff" || language === "patch";
+			const diffPath = diff ? lines.find((line) => line.startsWith("+++ "))?.slice(4).replace(/^b\//, "") : undefined;
+			const filename = code.dataset["filename"] ?? (diffPath === "/dev/null" ? undefined : diffPath);
 			const header = document.createElement("div");
-			header.className =
-				"code-header flex justify-between items-center text-sm py-1 px-3 border-b border-border-subtle text-text-dimmer";
-
-			const langSpan = document.createElement("span");
-			langSpan.textContent = lang || "code";
-
-			const copyBtn = document.createElement("button");
-			copyBtn.className =
-				"code-copy-btn text-sm cursor-pointer bg-transparent border border-border rounded px-2 py-0.5 text-text-muted hover:text-text hover:bg-bg-alt transition-colors duration-150";
-			copyBtn.textContent = "Copy";
-			copyBtn.addEventListener("click", (e) => {
-				e.stopPropagation();
-				const codeEl = pre.querySelector("code");
-				if (codeEl) {
-					copyToClipboard(codeEl.textContent ?? "");
-					copyBtn.textContent = "Copied!";
-					copyBtn.classList.add("text-success", "border-success");
-					setTimeout(() => {
-						copyBtn.textContent = "Copy";
-						copyBtn.classList.remove("text-success", "border-success");
-					}, 1500);
-				}
-			});
-
-			header.appendChild(langSpan);
-			header.appendChild(copyBtn);
-			pre.insertBefore(header, pre.firstChild);
+			header.className = "code-header";
+			pre.prepend(header);
+			codeHeaders.set(header, mount(CodeBlockHeader, {
+				target: header,
+				props: {
+					label: language || "code", filename, code: text,
+					additions: diff ? lines.filter((line) => line.startsWith("+") && !line.startsWith("+++ ")).length : undefined,
+					deletions: diff ? lines.filter((line) => line.startsWith("-") && !line.startsWith("--- ")).length : undefined,
+				},
+			}));
 		}
 	}
 
@@ -295,6 +270,9 @@
 		// Don't intercept clicks on interactive elements
 		const target = e.target as HTMLElement;
 		if (
+			target.closest(".assistant-header") ||
+			target.closest("button") ||
+			target.closest("[role=menuitem]") ||
 			target.closest("a") ||
 			target.closest("pre") ||
 			target.closest("code") ||
@@ -309,142 +287,50 @@
 
 		if (copyState === "idle") {
 			copyState = "primed";
-			if (copyResetTimer) clearTimeout(copyResetTimer);
-			copyResetTimer = setTimeout(() => {
-				copyState = "idle";
-			}, 3000);
 		} else if (copyState === "primed") {
 			copyToClipboard(message.rawText);
 			copyState = "done";
-			if (copyResetTimer) clearTimeout(copyResetTimer);
-			copyResetTimer = setTimeout(() => {
-				copyState = "idle";
-			}, 3000);
 		}
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
 		if (!message.finalized) return;
+		if (e.target instanceof Element && e.target.closest("button, a, [role=menuitem]")) return;
 		if (e.key !== "Enter" && e.key !== " ") return;
 		e.preventDefault();
 
 		if (copyState === "idle") {
 			copyState = "primed";
-			if (copyResetTimer) clearTimeout(copyResetTimer);
-			copyResetTimer = setTimeout(() => {
-				copyState = "idle";
-			}, 3000);
 		} else if (copyState === "primed") {
 			copyToClipboard(message.rawText);
 			copyState = "done";
-			if (copyResetTimer) clearTimeout(copyResetTimer);
-			copyResetTimer = setTimeout(() => {
-				copyState = "idle";
-			}, 3000);
 		}
 	}
 
-	function handleFork(e: MouseEvent) {
-		e.stopPropagation(); // Don't trigger the copy click handler
-		if (forkMessageId) {
-			const projectSlug = getCurrentSlug();
-			if (!projectSlug) return;
-			const sourceSessionId = sessionId ?? sessionState.currentId;
-			const from = selection.scope;
-			void rpc("ForkSession", {
-				...(sourceSessionId ? { sessionId: sourceSessionId } : { projectSlug }),
-				originId: getBrowserClientId(),
-				messageId: forkMessageId,
-			}).then((response) => followFork(from, response))
-				.catch(toastFailure("Failed to fork session"));
-		}
-	}
-
-	const hintText = $derived.by(() => {
-		switch (copyState) {
-			case "idle":
-				return "Click to grab this";
-			case "primed":
-				return "Click again to copy";
-			case "done":
-				return "Copied!";
-			default:
-				return assertNever(copyState);
-		}
-	});
-
-	const hintColor = $derived.by(() =>
-		copyState === "done" ? "text-success" : "text-text-dimmer",
-	);
-
-	// Dynamic classes for copy state (Tailwind classes with / can't use class: directive)
-	const containerCopyClass = $derived.by(() => {
-		if (copyState === "primed")
-			return "bg-[rgba(var(--overlay-rgb),0.03)] cursor-pointer";
-		if (copyState === "done") return "bg-success/[0.06]";
-		return "";
-	});
 
 	onDestroy(() => {
 		if (copyResetTimer) clearTimeout(copyResetTimer);
 		tableScrollCleanup?.();
+		for (const component of codeHeaders.values()) void unmount(component);
 	});
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
 	bind:this={containerEl}
-	class="msg-assistant group max-w-[760px] mx-auto mb-3 px-5"
+	class="msg-assistant group mx-auto mb-[26px] max-w-[820px] px-[14px] md:px-[32px]"
 	data-uuid={message.uuid}
 	onclick={handleClick}
 	onkeydown={handleKeydown}
 	role="article"
 >
-	<div class="bg-bg-surface rounded-panel py-4 px-5 relative glow-brand-b transition-colors duration-150 {containerCopyClass}">
-		<!-- Action buttons (hover) — top-right icon row -->
-		{#if message.finalized}
-			<div
-				class="msg-actions absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 touch:opacity-100 transition-opacity duration-150 z-10"
-				class:opacity-100={copyState !== "idle"}
-			>
-				<!-- No tone pairs all three copy states; inherit leaves their exact colours here. -->
-				<Button
-					variant="ghost"
-					size="content"
-					tone="inherit"
-					hoverFill="none"
-					iconOnly
-					icon={copyState === 'done' ? 'check' : 'copy'}
-					iconSize={14}
-					class="w-7 h-7 rounded-md border backdrop-blur-sm {copyButtonClass}"
-					title={copyButtonLabel}
-					ariaLabel={copyButtonLabel}
-					onclick={handleClick}
-				/>
-				{#if forkMessageId}
-					<Button
-						variant="ghost"
-						size="content"
-						tone="muted-soft"
-						hoverFill="none"
-						iconOnly
-						icon="git-fork"
-						iconSize={14}
-						class="w-7 h-7 rounded-md border border-border-subtle/50 bg-bg-surface/80 backdrop-blur-sm"
-						title="Fork from here"
-						ariaLabel="Fork from here"
-						onclick={handleFork}
-					/>
-				{/if}
-			</div>
-		{/if}
-
-		<div class="flex items-baseline gap-2.5 mb-2">
-			<span class="text-sm font-mono font-semibold uppercase tracking-[1.5px] text-brand-b">Assistant</span>
-			<MessageTime createdAt={message.createdAt} />
-		</div>
-		<div class="md-content text-base leading-[1.7]">
-			{@html message.html}
-		</div>
+	{#if !hideHeader}
+		<AssistantHeader {message} {forkMessageId} {sessionId} {model} {providerId} bind:copyState />
+	{/if}
+	<div class="md-content min-w-0 text-[15px] leading-[1.65] md:ml-[42px] {hideHeader ? '' : 'mt-[2px]'} {copyState === 'primed' ? 'bg-selection' : copyState === 'done' ? 'bg-success/5' : ''}">
+		{@html message.html}
 	</div>
+	{#if hideHeader && copyState !== "idle"}
+		<p role="status" class="mt-[4px] text-[12px] md:ml-[42px] {copyState === 'done' ? 'text-success' : 'text-text-muted'}">{copyState === "done" ? "Copied!" : "Click again to copy"}</p>
+	{/if}
 </div>

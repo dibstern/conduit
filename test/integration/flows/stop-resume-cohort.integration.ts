@@ -11,9 +11,9 @@ const artifactDirectory =
 	process.env["CONDUIT_TEST_ARTIFACT_DIR"] ??
 	join(tmpdir(), "conduit-integration-artifacts");
 
-// A Stop may outlive the five-second send barrier. Its confirmation belongs
-// to the original claimed cohort, never a returned input's fresh attempt.
-it("a slow Stop leaves the concurrently resumed fresh attempt running", async () => {
+// The in-memory Stop fence holds an explicit replacement until native abort
+// settles. The returned input then gets a fresh attempt, never the stopped run.
+it("a slow Stop holds a resumed input until native abort settles", async () => {
 	const recording = loadOpenCodeRecording("chat-simple");
 	const relay = await createRelayHarness(
 		{
@@ -101,6 +101,23 @@ it("a slow Stop leaves the concurrently resumed fresh attempt running", async ()
 				inputId,
 			}),
 		);
+		expect(
+			db
+				.prepare("SELECT state FROM pending_inputs WHERE input_id = ?")
+				.get(inputId),
+		).toEqual({ state: "queued" });
+		expect(outbox()).toMatchObject({
+			run_id: originalRun,
+			status: "failed",
+			attempt_count: 0,
+		});
+		expect(
+			relay.mock.requestBodies.filter((entry) =>
+				entry.path.endsWith("/prompt_async"),
+			),
+		).toHaveLength(0);
+		releaseAbort();
+		await stopping;
 		await vi.waitFor(
 			() =>
 				expect(outbox()).toMatchObject({ status: "running", attempt_count: 1 }),
@@ -148,8 +165,6 @@ it("a slow Stop leaves the concurrently resumed fresh attempt running", async ()
 				started_at: expect.any(Number),
 			}),
 		);
-		releaseAbort();
-		await stopping;
 		expect(run().status).toBe("running");
 		expect(
 			db.prepare("SELECT status FROM sessions WHERE id = ?").get(sessionId),

@@ -400,16 +400,21 @@ describe("SessionManager read-your-writes parity", () => {
 								const runId = `${sessionId}-run`;
 								const inputId = `${sessionId}-u`;
 								for (const event of [
-									canonicalEvent("message.created", sessionId, {
-										sessionId,
-										messageId: inputId,
-										inputId,
-										role: "user",
-									}),
 									canonicalEvent("run.requested", sessionId, {
 										runId,
 										inputId,
 									}),
+									canonicalEvent(
+										"message.created",
+										sessionId,
+										{
+											sessionId,
+											messageId: inputId,
+											inputId,
+											role: "user",
+										},
+										{ metadata: { runId } },
+									),
 									canonicalEvent(
 										"run.started",
 										sessionId,

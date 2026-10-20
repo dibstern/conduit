@@ -27,8 +27,10 @@ import { rpc } from "../../transport/ws-rpc-client.js";
 
 export type SettingsSection =
 	| "general"
+	| "terminal"
 	| "models"
 	| "claude"
+	| "surfacing"
 	| "archived"
 	| "usage"
 	| "server";
@@ -72,6 +74,8 @@ export function toggleDebugPanel(): void {
 export type ChromeMenuAction = {
 	id: "share" | "settings" | "debug";
 	label: string;
+	shortLabel?: string;
+	tag?: string;
 	icon: "share" | "settings" | "bug";
 	run: () => void;
 };
@@ -90,6 +94,8 @@ export function chromeMenuActions(): readonly ChromeMenuAction[] {
 					{
 						id: "debug" as const,
 						label: "Debug panel",
+						shortLabel: "Debug",
+						tag: "dev",
 						icon: "bug" as const,
 						run: toggleDebugPanel,
 					},

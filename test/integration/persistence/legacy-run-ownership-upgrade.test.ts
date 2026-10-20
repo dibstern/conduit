@@ -39,7 +39,7 @@ import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 
 // Failure modes: upgrade declares an executing runner idle, guessing a legacy
 // turn owner places old events, recovery loses the reserved run id, or a
-// terminal legacy turn suppresses the owned failure and pins the inbox busy;
+// migrated turn ignores its own recovery terminal;
 // a successful joined replay leaves its migrated reservation running forever.
 it.each([
 	"stopped",
@@ -64,7 +64,7 @@ it.each([
 			Effect.gen(function* () {
 				yield* makeEffectSqlMigrator(
 					Object.fromEntries(
-						Object.entries(effectMigrationEntries).slice(0, 68),
+						Object.entries(effectMigrationEntries).slice(0, 74),
 					),
 				);
 				const sql = yield* SqlClient.SqlClient;
@@ -117,7 +117,9 @@ it.each([
 			Layer.succeed(ProviderTurnServiceTag)({
 				holdUserTurnsForAccountSwitch: () => Effect.void,
 				prepareTurnSession: () => Effect.succeed("claude"),
-				interruptTurn: () => Effect.void,
+				beginStop: () => Effect.succeed(Effect.void),
+				turnFences: () => ({ stopping: false, switching: false }),
+				fenceLifts: Effect.succeed(Stream.empty),
 				sendTurn: (input) =>
 					Effect.sync(() => {
 						handoffs.push(input.commandId);
@@ -143,7 +145,7 @@ it.each([
 					yield* sql`SELECT type FROM events WHERE type = 'run.started'`,
 				).toEqual([]);
 				expect(yield* sql`SELECT state, run_id FROM turns`).toEqual([
-					{ state: "interrupted", run_id: null },
+					{ state: "running", run_id: reservation?.id },
 				]);
 				expect(
 					yield* inbox.submit({
@@ -283,7 +285,7 @@ it.each([
 					},
 				]);
 				expect(yield* sql`SELECT state, run_id FROM turns`).toEqual([
-					{ state: "interrupted", run_id: null },
+					{ state: succeeded ? "completed" : "error", run_id: reservation?.id },
 				]);
 				proof.ownedRecoveryTerminal = true;
 				expect(

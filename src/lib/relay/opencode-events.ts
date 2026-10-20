@@ -183,6 +183,8 @@ export interface PartUpdatedEvent extends SSEEventBase {
 			filename?: string;
 			url?: string;
 			source?: unknown;
+			/** OpenCode wrote this text part itself, e.g. a file read into the prompt. */
+			synthetic?: boolean;
 			callID?: string;
 			tool?: string;
 			state?: {

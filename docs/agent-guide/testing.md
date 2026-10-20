@@ -18,9 +18,13 @@ Start there unless the change crosses a boundary that unit tests cannot cover.
 
 Release CI (`.github/workflows/npm-release.yml`) is the authoritative release
 gate. It runs every group defined in `scripts/test-all.sh`, the single source
-of truth for the `pnpm test:all` stage list. With no arguments, the script runs
-all groups in their original order, reports each stage's time and result, and
-exits non-zero if any stage fails.
+of truth for the `pnpm test:all` stage list. Multiple groups overlap static
+checks with builds, then integration/contract with strict Storybook visuals.
+Builds finish before any dist/ readers; unit, Storybook interaction and E2E
+suites run separately to limit CPU contention. Lane logs and isolated Playwright
+artifacts stay in the printed temporary run directory. The summary lists stages
+in the original order with results, timings and total wall time; any failure
+exits non-zero.
 
 | Group | Stages | Release job | Runner |
 | --- | --- | --- | --- |
@@ -43,11 +47,14 @@ bash scripts/test-all.sh build e2e
 bash scripts/test-all.sh storybook visual  # macOS, for Darwin baselines
 ```
 
-Selection preserves stage order and runs each selected group once. Install
-Chromium with `pnpm exec playwright install --with-deps chromium` for the `e2e`,
+Single groups keep their original commands, order and output locations. Each
+selected group runs once. Install Chromium with
+`pnpm exec playwright install --with-deps chromium` for the `e2e`,
 `storybook`, and `visual` groups. `e2e` needs `dist/` from the `build` group or
-CI's build artifact. `visual` needs `dist/storybook/` from the `storybook` group
-or `pnpm storybook:build`, which its macOS job runs as a prerequisite.
+CI's build artifact. Some integration tests also read `dist/`, so keep it current
+when selecting `vitest` without `build`. `visual` needs `dist/storybook/` from
+the `storybook` group or `pnpm storybook:build`, which its macOS job runs as a
+prerequisite.
 
 ## Pre-commit
 
@@ -178,7 +185,7 @@ Run this when changing touch gestures, long-press, or text selection on phones. 
 pnpm test:e2e:ios
 ```
 
-Needs Xcode with an iOS simulator runtime. `safaridriver` boots a simulator itself. Verified on iPhone 17e, iOS 26.5, with no extra setup. An iOS 27.0 simulator refused automation sessions ("Could not find any session hosts"), so pin a working device with `IOS_SIMULATOR_UDID=<udid>` from `xcrun simctl list devices`. Evidence goes to `test-results/ios-long-press/`: `result.json` and a screenshot after each hold.
+Needs Xcode with an iOS simulator runtime. `safaridriver` boots a simulator itself. Verified on iPhone 17e, iOS 26.5, with no extra setup. An iOS 27.0 simulator refused automation sessions ("Could not find any session hosts"), so pin a working device with `IOS_SIMULATOR_UDID=<udid>` from `xcrun simctl list devices`. Evidence goes to `test-results/ios-long-press/`: `result.json` and a screenshot after each hold. The script also builds Storybook and drives `UI/HoldMenu` (Device Probe) through tap, dim-tap, hold-slide-release on and off the list, and hold-release in place; its `result.json` and twelve step screenshots go to `test-results/ios-hold-menu/`. A swipe that turns into a native scroll hangs safaridriver, so swipe cases live in the Chromium touch spec (`test/visual/hold-menu.spec.ts`). If a run hangs or reports "already paired with a different session", stop the stale `safaridriver` you started, then `xcrun simctl terminate <udid> com.apple.mobilesafari`.
 
 WebDriver lifts the finger at (0,0), which drags any live selection toward the top-left, so a screenshot can show a bigger highlight than a person would get. The assertions count only selections made while the finger is still down.
 

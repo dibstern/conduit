@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import { Schema } from "effect";
 import type { ClaudeSettingsOverrides } from "../../../src/lib/contracts/claude-settings.js";
+import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/message-surfacing.js";
 import {
 	InstanceListResponseSchema,
 	WsRpcError,
@@ -29,6 +30,7 @@ import {
 	inheritedClaudeCommitAttribution,
 	instanceSlug,
 	mockInstances,
+	mockMessageSurfacing,
 	mockSessionSkills,
 	openSessionRoute,
 	rejectedEffortSwitches,
@@ -38,6 +40,7 @@ import {
 	serveModelCatalog,
 	setSessionRowStatus,
 } from "./shared.js";
+import { surfacingMarkStubs } from "./surfacingMarks.js";
 
 const mockClaudeSettings = new WeakMap<Page, ClaudeSettingsOverrides>();
 /** GetAgents replies wait on this until the provider lookup answers. */
@@ -436,7 +439,7 @@ export const mockAppHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const trigger = world.page
 				.locator(
-					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 				)
 				.first();
 			await expect(trigger).toHaveAttribute("data-shown-model", match[1] ?? "");
@@ -465,7 +468,8 @@ export const mockAppHandlers: StepHandler[] = [
 		match:
 			/^the (wide|narrow|phone) (icons|words) composer shows its stored effort without offered choices$/,
 		run: async ({ world, match }) => {
-			if (match[1] === "phone" && match[2] === "icons") {
+			// A phone composer keeps effort in its sheet's effort row.
+			if (match[1] === "phone") {
 				await expect(world.page.getByTestId("picker-row-effort")).toContainText(
 					/high/i,
 				);
@@ -487,7 +491,7 @@ export const mockAppHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			const trigger = world.page
 				.locator(
-					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 				)
 				.first();
 			for (const field of [
@@ -555,6 +559,13 @@ export const mockAppHandlers: StepHandler[] = [
 				? modelExecutionProviders
 				: dualDriverProviders;
 
+			// A real daemon answers /info. Under vite preview it is the SPA's HTML,
+			// so the redial build check would retry forever and a dropped socket
+			// would never reconnect. No buildId means "older server": dial at once.
+			await world.page.route(
+				(url) => url.pathname === "/info",
+				(route) => route.fulfill({ json: {} }),
+			);
 			const relayControl = await mockRelayWebSocket(world.page, {
 				initMessages: modelExecutionMockup?.initMessages ?? unboundInitMessages,
 				responses: new Map(),
@@ -596,6 +607,9 @@ export const mockAppHandlers: StepHandler[] = [
 			 *  GetAgents afterwards returns that harness's agents (mirrors the
 			 *  real server, where the created session is bound to the instance). */
 			let createdSessionInstance: string | undefined;
+			/** Drafts the composer synced, returned when the session is viewed
+			 *  again, the way the daemon restores a draft across a reload. */
+			const syncedDrafts = new Map<string, string>();
 			const sessionInstance = (sessionId: string | undefined) => {
 				const row = rpcControls
 					.get(page)
@@ -638,8 +652,40 @@ export const mockAppHandlers: StepHandler[] = [
 					],
 				},
 				stubs: {
+					...surfacingMarkStubs(page),
+					GetMessageSurfacing: () =>
+						mockMessageSurfacing.get(page) ?? {
+							...DEFAULT_MESSAGE_SURFACING_SETTINGS,
+							active: false,
+							key: { source: "none", rejected: false },
+						},
+					UpdateMessageSurfacing: (patch) => {
+						const previous = mockMessageSurfacing.get(page);
+						if (!previous)
+							throw new Error("Surfacing settings were not seeded");
+						const next = {
+							...previous,
+							enabled: patch.enabled ?? previous.enabled,
+							summariesEnabled:
+								patch.summariesEnabled ??
+								(patch.recap?.model === "off"
+									? false
+									: previous.summariesEnabled),
+							defaultLevel: patch.defaultLevel ?? previous.defaultLevel,
+							tuningModel: patch.tuningModel ?? previous.tuningModel,
+							recap: {
+								model: patch.recap?.model ?? previous.recap.model,
+								when: patch.recap?.when ?? previous.recap.when,
+							},
+						};
+						mockMessageSurfacing.set(page, next);
+						return next;
+					},
 					ResolveSession: async () => ({ projectSlug: "myapp" }),
-					ViewSession: async () => ({ ok: true }),
+					ViewSession: async ({ sessionId }) => ({
+						ok: true,
+						draft: syncedDrafts.get(String(sessionId)),
+					}),
 					CreateSession: async (payload) => {
 						await new Promise((resolve) =>
 							setTimeout(resolve, createSessionDelays.get(page) ?? 0),
@@ -663,12 +709,20 @@ export const mockAppHandlers: StepHandler[] = [
 						sessionId,
 						...mockDetailPage(page, sessionId, before),
 					}),
-					"input.submit": async ({ sessionId }) => ({
-						ok: true,
-						sessionId,
-						handedOff: true,
-					}),
-					SyncInputDraft: async () => ({ ok: true }),
+					"input.submit": async ({ sessionId }) => {
+						syncedDrafts.delete(String(sessionId));
+						return {
+							ok: true,
+							sessionId,
+							handedOff: true,
+						};
+					},
+					SyncInputDraft: async ({ key, text }) => {
+						const id = "session" in key ? key.session : key.draft;
+						if (text) syncedDrafts.set(id, text);
+						else syncedDrafts.delete(id);
+						return { ok: true };
+					},
 					SetDefaultPermissionMode: async (payload) => ({
 						projectSlug: "myapp",
 						mode: payload["mode"],
@@ -683,6 +737,7 @@ export const mockAppHandlers: StepHandler[] = [
 					GetSessionSkills: async () => ({
 						loads: mockSessionSkills.get(page) ?? [],
 					}),
+					GetSessionAutoSettleOutlook: () => ({ kind: "never" }),
 					GetSkillContent: async (payload) => ({
 						projectSlug:
 							"projectSlug" in payload ? payload.projectSlug : "myapp",

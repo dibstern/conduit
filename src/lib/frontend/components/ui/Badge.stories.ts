@@ -17,9 +17,9 @@ const meta = {
 	argTypes: {
 		variant: {
 			control: "inline-radio",
-			options: ["neutral", "quiet", "accent", "accent-solid", "tag"],
+			options: ["neutral", "quiet", "accent", "accent-solid", "tag", "chip"],
 		},
-		size: { control: "inline-radio", options: ["xs", "sm", "count"] },
+		size: { control: "inline-radio", options: ["xs", "sm", "count", "label"] },
 		shape: { control: "inline-radio", options: ["rounded", "pill"] },
 	},
 } satisfies Meta<typeof Badge>;
@@ -43,4 +43,31 @@ export const Semantics: Story = {
 		await expect(badge.tagName).toBe("SPAN");
 		await expect(badge).toHaveTextContent("Connected clients");
 	},
+};
+
+export const TranscriptChip: Story = {
+	args: {
+		variant: "chip",
+		size: "label",
+		shape: "pill",
+		children: label("Steered"),
+	},
+};
+export const TranscriptChipLight: Story = {
+	...TranscriptChip,
+	globals: { theme: "light" },
+};
+export const WrappedTranscriptChip: Story = {
+	args: {
+		variant: "chip",
+		size: "label",
+		shape: "pill",
+		wrap: true,
+		class: "max-w-[220px]",
+		children: label("Ran claude-unlisted-5, not the requested model"),
+	},
+};
+export const WrappedTranscriptChipLight: Story = {
+	...WrappedTranscriptChip,
+	globals: { theme: "light" },
 };

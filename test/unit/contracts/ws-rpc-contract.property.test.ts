@@ -9,7 +9,22 @@ import {
 } from "effect";
 import { RpcSchema } from "effect/rpc";
 import { describe, expect, it } from "vitest";
-import { WsRpcGroup, WsRpcRequest } from "../../../src/lib/contracts/ws-rpc.js";
+import {
+	CategorySchema,
+	CategorySetContentsSchema,
+	CategorySetSchema,
+} from "../../../src/lib/contracts/category-set.js";
+import {
+	CategoryTuningHunkSchema,
+	CategoryTuningProposalSchema,
+} from "../../../src/lib/contracts/category-tuning.js";
+import {
+	ProposeCategoryTuning,
+	ReplaceCategorySet,
+	ScoreCategorySet,
+	WsRpcGroup,
+	WsRpcRequest,
+} from "../../../src/lib/contracts/ws-rpc.js";
 import { makeRpcWire } from "../../helpers/rpc-wire.js";
 import type { StubTable } from "../../helpers/stub-ws-rpc.js";
 
@@ -17,10 +32,46 @@ const options = { seed: 42, runs: 30, maxShrinks: 0 };
 const json = (value: unknown): unknown =>
 	value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 
+// Native generation cannot construct Unicode property escapes or ignore-case
+// patterns. Keep the real validators and add constructible category inputs.
+const generatedCategory = CategorySchema.mapFields((fields) => ({
+	...fields,
+	id: fields.id.check(
+		Schema.isPattern(/^[a-zA-Z0-9éÉα-ω中]+(?:-[a-zA-Z0-9éÉα-ω中]+)*$/u),
+	),
+	label: fields.label.check(
+		Schema.isPattern(/^[A-Za-zéΩ中🙂][A-Za-z0-9 éΩ中🙂]{0,23}$/u),
+	),
+	glyph: fields.glyph.check(Schema.isPattern(/^(?:[!-~éΩ中🙂]|é|👩‍💻)$/u)),
+	colour: fields.colour.check(
+		Schema.isPattern(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/u),
+	),
+}));
+const generatedContents = CategorySetContentsSchema.mapFields((fields) => ({
+	...fields,
+	categories: Schema.Array(generatedCategory),
+}));
+const generatedSet = CategorySetSchema.mapFields((fields) => ({
+	...fields,
+	categories: Schema.Array(generatedCategory),
+}));
+const generatedHunk = CategoryTuningHunkSchema.mapFields((fields) => ({
+	...fields,
+	before: Schema.NullOr(generatedCategory),
+	after: generatedCategory,
+}));
+const generatedProposal = CategoryTuningProposalSchema.mapFields((fields) => ({
+	...fields,
+	hunks: Schema.Array(generatedHunk),
+}));
+
 // Generate the wire side, then decode so transformed requests have canonical
 // account references and tagged errors are instances of their declared class.
-const values = <S extends Schema.Codec<unknown, unknown>>(schema: S) =>
-	Arbitrary.schema(Schema.toEncoded(schema)).pipe(
+const values = <S extends Schema.Codec<unknown, unknown>>(
+	schema: S,
+	generationSchema: Schema.Codec<unknown, unknown> = schema,
+) =>
+	Arbitrary.schema(Schema.toEncoded(generationSchema)).pipe(
 		Arbitrary.filter((value) =>
 			Exit.isSuccess(Schema.decodeUnknownExit(schema)(json(value))),
 		),
@@ -74,7 +125,24 @@ for (const rpc of WsRpcGroup.requests.values()) {
 	const payloadSchema = rpc.payloadSchema;
 	// Some request transforms canonicalize legacy account-selection fields.
 	// Generate their normal form, then require the next wire round trip to preserve it.
-	const payloads = values(payloadSchema).pipe(
+	const generatedPayload =
+		rpc._tag === "ReplaceCategorySet"
+			? ReplaceCategorySet.payloadSchema.mapFields((fields) => ({
+					...fields,
+					nextSet: generatedContents,
+				}))
+			: rpc._tag === "ScoreCategorySet"
+				? ScoreCategorySet.payloadSchema.mapFields((fields) => ({
+						...fields,
+						set: generatedContents,
+					}))
+				: rpc._tag === "ProposeCategoryTuning"
+					? ProposeCategoryTuning.payloadSchema.mapFields((fields) => ({
+							...fields,
+							avoid: Schema.optional(Schema.Array(generatedHunk)),
+						}))
+					: payloadSchema;
+	const payloads = values(payloadSchema, generatedPayload).pipe(
 		Arbitrary.map((payload) =>
 			Schema.decodeUnknownSync(payloadSchema)(
 				json(Schema.encodeSync(payloadSchema)(payload)),
@@ -85,6 +153,12 @@ for (const rpc of WsRpcGroup.requests.values()) {
 		? rpc.successSchema
 		: undefined;
 	const successSchema = stream?.success ?? rpc.successSchema;
+	const generatedSuccess =
+		rpc._tag === "GetCategorySet" || rpc._tag === "ReplaceCategorySet"
+			? generatedSet
+			: rpc._tag === "ProposeCategoryTuning"
+				? generatedProposal
+				: successSchema;
 
 	describe(`RPC contract properties: ${rpc._tag}`, () => {
 		it("round-trips requests and responses through JSON and the stub server", async () => {
@@ -104,7 +178,7 @@ for (const rpc of WsRpcGroup.requests.values()) {
 						Arbitrary.checkEffect(
 							Arbitrary.all([
 								payloads,
-								Arbitrary.array(values(successSchema), {
+								Arbitrary.array(values(successSchema, generatedSuccess), {
 									minLength: stream ? 0 : 1,
 									maxLength: stream ? 5 : 1,
 								}),

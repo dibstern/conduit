@@ -1,13 +1,13 @@
 Feature: Claude goal states and outcomes
 
-Scenario Outline: An idle goal check has a checking header and spinner
+Scenario Outline: An idle goal check has a checking subtitle and spinner
   Given the viewport is a phone
   And the conduit app is served with the matching-model mockup
   When Claude sets the goal <condition>
   And the goal check is running
-  Then the session goal subtitle reads Checking goal · check 3
+  Then the session goal subtitle reads Checking · <condition>
   And the session goal subtitle has a spinner
-  And the composer checks the goal at check 3 without an elapsed timer
+  And the composer status header is not visible
   And the composer has a violet goal border
   And the layout region visually matches <baseline> at <threshold> percent
 
@@ -21,8 +21,8 @@ Scenario Outline: Claude continues working after a failed goal check
   And the composer status clock is frozen
   When Claude sets the goal <condition>
   And Claude reports the goal check <reason>
-  Then the session goal subtitle reads <condition> · 1 check
-  And the composer status header does not include <reason>
+  Then the session goal subtitle reads Pursuing · <condition>
+  And the composer does not include <reason>
   And the composer has a violet goal border
   And the layout region visually matches <baseline> at <threshold> percent
 
@@ -36,7 +36,7 @@ Scenario Outline: An idle failed check has an amber subtitle
   When Claude sets the goal <condition>
   And Claude reports the goal check <reason>
   And Claude is idle
-  Then the amber session goal subtitle reads <condition> · 1 check
+  Then the amber session goal subtitle reads Pursuing · <condition>
   And the composer status header is not visible
   And the composer has a violet goal border
   And the layout region visually matches <baseline> at <threshold> percent
@@ -50,7 +50,7 @@ Scenario Outline: A paused goal explains the pause and has a dashed border
   And the conduit app is served with the matching-model mockup
   When Claude sets the goal <condition>
   And Claude pauses the goal with the reason <reason>
-  Then the session goal subtitle reads Goal paused · <condition>
+  Then the session goal subtitle reads Paused · <condition>
   And the session goal pause title includes <reason>
   And the composer status header is not visible
   And the composer has a dashed violet goal border
@@ -66,8 +66,8 @@ Scenario Outline: A met goal survives a reload and its dismissal hides both outc
   When Claude sets the goal <condition>
   And the goal is met with the reason <reason>
   And the stored goal is replayed after a reload
-  Then the session goal subtitle reads Goal met · 7 checks · 41m
-  And the met goal bar reads Goal met · <reason> · 7 checks · 41m
+  Then the session goal subtitle reads Goal met · <condition>
+  And the met goal bar reads Goal met · <condition> and ends · 7 checks · 41m
   And the composer has a normal goal border
   And the layout region visually matches <baseline> at <threshold> percent
   When I dismiss the met goal bar

@@ -182,9 +182,13 @@ describe("Managed real OpenCode lifecycle", () => {
 		return (await response.json()) as unknown;
 	}
 
-	const mentions = (browser: ProcessBrowser, id: string) =>
-		browser.frames.filter(({ message }) => JSON.stringify(message).includes(id))
-			.length;
+	const details = (browser: ProcessBrowser, id: string) =>
+		browser.frames.filter(
+			({ message }) =>
+				(message["type"] === "session_detail" ||
+					message["type"] === "transcript_message") &&
+				JSON.stringify(message).includes(id),
+		).length;
 	const rows = (browser: ProcessBrowser, id: string) =>
 		browser.frames.filter(
 			({ message }) =>
@@ -236,7 +240,8 @@ describe("Managed real OpenCode lifecycle", () => {
 			join(fixture.configDir, "relay.sock"),
 			{ _tag: "SaveProject", folders: [directoryB] },
 		);
-		const a = await fixture.connect();
+		const slugA = "process-test";
+		const a = await fixture.connect(undefined, undefined, slugA);
 		const b = await fixture.connect(undefined, undefined, slugB);
 		await a.followSessions();
 		await b.followSessions();
@@ -269,7 +274,8 @@ describe("Managed real OpenCode lifecycle", () => {
 		);
 
 		// 3. Sessions another OpenCode client creates arrive on the shared
-		// stream and reach only the project that owns their directory.
+		// stream with the correct project ownership. Shell rows are daemon-wide;
+		// each browser follows details only for its own project's sessions.
 		const external = async (directory: string) =>
 			(
 				(await opencode(fixture, "POST", "/session", directory, {})) as {
@@ -278,15 +284,44 @@ describe("Managed real OpenCode lifecycle", () => {
 			).id;
 		const externalA = await external(fixture.projectDir);
 		const externalB = await external(directoryB);
-		const isRow = (id: string) => (message: Record<string, unknown>) =>
-			message["type"] === "session_row" && message["id"] === id;
-		await a.waitFor(isRow(externalA));
-		await b.waitFor(isRow(externalB));
+		for (const [browser, browserSlug] of [
+			[a, slugA],
+			[b, slugB],
+		] as const) {
+			for (const [id, projectSlug] of [
+				[sessionA, slugA],
+				[externalA, slugA],
+				[sessionB, slugB],
+				[externalB, slugB],
+			] as const) {
+				await browser.waitFor(
+					(message) =>
+						message["type"] === "session_row" && message["id"] === id,
+				);
+				expect(
+					new Set(
+						browser.frames
+							.filter(
+								({ message }) =>
+									message["type"] === "session_row" && message["id"] === id,
+							)
+							.map(({ message }) => message["projectSlug"]),
+					),
+				).toEqual(new Set([projectSlug]));
+				if (projectSlug === browserSlug)
+					await browser.waitFor(
+						(message) =>
+							message["type"] === "session_detail" &&
+							message["sessionId"] === id &&
+							message["_tag"] === "synchronized",
+					);
+			}
+		}
 		const routed = (browser: ProcessBrowser, ids: string[]) =>
 			Object.fromEntries(
 				ids.map((id) => [
 					id,
-					{ rows: rows(browser, id), frames: mentions(browser, id) },
+					{ rows: rows(browser, id), details: details(browser, id) },
 				]),
 			);
 		const ids = [sessionA, externalA, sessionB, externalB];
@@ -296,9 +331,10 @@ describe("Managed real OpenCode lifecycle", () => {
 			[counts.a, [sessionA, externalA], [sessionB, externalB]],
 			[counts.b, [sessionB, externalB], [sessionA, externalA]],
 		] as const) {
-			for (const id of own) expect(browser[id]?.rows).toBeGreaterThan(0);
-			for (const id of other)
-				expect(browser[id]).toEqual({ rows: 0, frames: 0 });
+			for (const id of [...own, ...other])
+				expect(browser[id]?.rows).toBeGreaterThan(0);
+			for (const id of own) expect(browser[id]?.details).toBeGreaterThan(0);
+			for (const id of other) expect(browser[id]?.details).toBe(0);
 		}
 
 		// 4. Idle stop: no use is open and nothing is busy, so after the

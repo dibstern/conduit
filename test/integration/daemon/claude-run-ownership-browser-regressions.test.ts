@@ -153,6 +153,7 @@ describe("Claude browser run-ownership guarantees through the daemon", () => {
 					harness.logTail +
 						(existsSync(runnerLog) ? readFileSync(runnerLog, "utf8") : ""),
 				);
+				proof["processMarks"] = harness.marks;
 			}
 			await harness?.dispose();
 			harness?.assertNoRunners();
@@ -304,7 +305,9 @@ describe("Claude browser run-ownership guarantees through the daemon", () => {
 			{ timeout: 15_000 },
 		);
 		proof["restarted"] = normalized(ledger(fixture, sessionId));
+		proof["resumeRequested"] = true;
 		await after.sendNow(sessionId, bravo);
+		proof["resumeSubmitted"] = true;
 		await vi.waitFor(
 			() => {
 				const state = ledger(fixture, sessionId);

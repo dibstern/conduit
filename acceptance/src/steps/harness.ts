@@ -145,7 +145,7 @@ export const harnessHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const trigger = world.page
 				.locator(
-					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 				)
 				.first();
 			await expect(trigger).toHaveAttribute("data-instance-id", "cursor-work");

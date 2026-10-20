@@ -670,6 +670,7 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 				retryable: true,
 			}),
 		]);
+		// A steered turn's end names the send that started it (conduit-test-i633.3).
 		expect(
 			state.sessions.find((session) => session.id === id)
 				?.last_turn_end_input_id,

@@ -372,6 +372,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 		readonly inputId: string;
 		readonly text: string;
 		readonly runId?: string;
+		readonly images?: readonly string[];
 	}): Effect.Effect<void, ClaudeEventPersistFailure> {
 		return Effect.gen({ self: this }, function* () {
 			const persist = yield* Effect.serviceOption(ClaudeEventPersistEffectTag);
@@ -386,6 +387,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 				inputId: input.inputId,
 				provider: this.providerId,
 				...(input.runId ? { runId: input.runId } : {}),
+				...(input.images ? { images: input.images } : {}),
 			}).pipe(
 				Effect.catchIf(
 					(error) => error._tag !== "ClaudeSessionLifecycleError",
@@ -453,9 +455,21 @@ export class RunnerProviderInstance implements ProviderInstance {
 
 	interruptTurnEffect(
 		sessionId: string,
+		turnIds?: readonly string[],
 	): Effect.Effect<void, ProviderInstanceFailure> {
-		return FiberMap.remove(this.preWarmFibers, sessionId).pipe(
-			Effect.andThen(this.commandEffect({ type: "interrupt", sessionId })),
+		// A bound Stop must leave a pre-warm for a replacement turn alone.
+		return (
+			turnIds === undefined
+				? FiberMap.remove(this.preWarmFibers, sessionId)
+				: Effect.void
+		).pipe(
+			Effect.andThen(
+				this.commandEffect({
+					type: "interrupt",
+					sessionId,
+					...(turnIds !== undefined ? { turnIds } : {}),
+				}),
+			),
 		);
 	}
 	stopTaskEffect(

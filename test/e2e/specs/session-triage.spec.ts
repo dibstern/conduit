@@ -30,8 +30,8 @@ test("settle, undo, search, pin and reload preserve triage and shelf preference"
 	await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(2);
 	const settleId = await rows.nth(1).getAttribute("data-session-id");
 	const pinId = await rows.first().getAttribute("data-session-id");
-	const row = page.locator(`[data-session-id="${settleId}"]`);
-	const pinRow = page.locator(`[data-session-id="${pinId}"]`);
+	const row = page.locator(`#session-list [data-session-id="${settleId}"]`);
+	const pinRow = page.locator(`#session-list [data-session-id="${pinId}"]`);
 	const title = (await row.locator(".session-title-inner").innerText()).trim();
 	const originalSection = await sectionBefore(row);
 	const toggle = page.getByTestId("settled-shelf-toggle");
@@ -40,7 +40,7 @@ test("settle, undo, search, pin and reload preserve triage and shelf preference"
 	await row.click({ button: "right" });
 	await page.getByTestId("session-ctx-settle").click();
 	await expect(toggle).toHaveAttribute("aria-expanded", "false");
-	await expect(toggle).toHaveText(/^\s*Settled\s*$/);
+	await expect(toggle).toHaveText(/^\s*Settled\s+1\s*$/);
 	await expect(row).toHaveCount(0);
 	// Other live regions exist ("Connected", the composer); only one may speak
 	// about the settle.
@@ -63,19 +63,19 @@ test("settle, undo, search, pin and reload preserve triage and shelf preference"
 	await expect(shelf.locator(`[data-session-id="${settleId}"]`)).toBeVisible();
 	await toggle.click();
 	await expect(row).toHaveCount(0);
-	await page.getByPlaceholder("Search sessions...").fill(title);
+	await page.getByPlaceholder("Search").fill(title);
 	await expect(shelf.locator(`[data-session-id="${settleId}"]`)).toBeVisible();
 	await expect(toggle).toHaveAttribute("aria-expanded", "true");
 	expect(
 		await page.evaluate(() => localStorage.getItem("settled-shelf-open")),
 	).toBe("false");
-	await page.getByPlaceholder("Search sessions...").press("Escape");
+	await page.getByPlaceholder("Search").press("Escape");
 	await expect(toggle).toHaveAttribute("aria-expanded", "false");
 	// The cleared field stays focused, which raises the scope suggestions over
 	// the list (8db686cc); a second Escape puts them away.
 	const suggestions = page.getByTestId("session-scope-suggestions");
 	await expect(suggestions).toBeVisible();
-	await page.getByPlaceholder("Search sessions...").press("Escape");
+	await page.getByPlaceholder("Search").press("Escape");
 	await expect(suggestions).toBeHidden();
 
 	await pinRow.click({ button: "right" });

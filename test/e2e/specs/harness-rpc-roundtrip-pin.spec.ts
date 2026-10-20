@@ -24,7 +24,6 @@
 // never a threshold; bounded waits only turn hangs into failures.
 import {
 	existsSync,
-	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	realpathSync,
@@ -44,7 +43,6 @@ import { expect, test } from "../helpers/process-harness-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
-const ARTIFACT = join("test-results", "16c8-1-rpc-roundtrip.json");
 const observed = new Map<string, { case: string; [key: string]: unknown }>();
 
 // Every attempt starts a fresh record, so failures and retries are reported too.
@@ -64,32 +62,15 @@ test.afterEach(async ({ harness }, testInfo) => {
 	writeFileSync(testInfo.outputPath("daemon.log"), harness.logTail);
 	const entry = observed.get(testInfo.testId);
 	if (!entry) return;
-	mkdirSync("test-results", { recursive: true });
-	const previous: unknown = existsSync(ARTIFACT)
-		? JSON.parse(readFileSync(ARTIFACT, "utf8"))
-		: {};
-	if (!previous || typeof previous !== "object" || Array.isArray(previous))
-		throw new Error("Invalid RPC round-trip artifact");
-	const { case: caseId, ...evidence } = entry;
-	const merged: Record<string, unknown> = {
-		...previous,
-		[`${testInfo.project.name}/${caseId}`]: {
-			outcome: testInfo.status,
-			...evidence,
-		},
-	};
+	const artifact = testInfo.outputPath("rpc-roundtrip.json");
 	writeFileSync(
-		ARTIFACT,
-		`${JSON.stringify(
-			Object.fromEntries(
-				Object.keys(merged)
-					.sort()
-					.map((key) => [key, merged[key]]),
-			),
-			null,
-			2,
-		)}\n`,
+		artifact,
+		`${JSON.stringify({ project: testInfo.project.name, outcome: testInfo.status, ...entry }, null, 2)}\n`,
 	);
+	await testInfo.attach("rpc-roundtrip", {
+		path: artifact,
+		contentType: "application/json",
+	});
 });
 
 async function openProjectDialog(page: Page, harness: ProcessHarness) {

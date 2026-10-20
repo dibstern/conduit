@@ -23,6 +23,14 @@ const title = "safe";
 			violations(`<script>const title = "// snapshot";</script>`),
 		).toContain("the envelope tags");
 	});
+	it("allows Svelte's $state.snapshot rune but not a bare snapshot", () => {
+		expect(
+			violations(`<script>const copy = $state.snapshot(draft);</script>`),
+		).toEqual([]);
+		expect(
+			violations(`<script>const copy = store.snapshot(draft);</script>`),
+		).toContain("the envelope tags");
+	});
 	it("ignores CSS comments without hiding quoted CSS values", () => {
 		expect(
 			violations(`<style>/* snapshot sequence */ p { color: red; }</style>`),

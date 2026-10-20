@@ -3,8 +3,10 @@ import type { Locator, Page } from "@playwright/test";
 import type { SessionMode } from "../../../src/lib/contracts/project-file.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import type { ProjectInfo } from "../../../src/lib/shared-types.js";
+import { openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
+import { chooseSettingsOption } from "../helpers/settings.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 // Failure cases, written before implementation: a lower default replaces a
@@ -587,13 +589,12 @@ for (const viewport of [
 			const before = rpc
 				.getRequests()
 				.filter(({ tag }) => tag === "ResolveSessionMode").length;
-			await press(
+			await openPickerRoot(
+				page,
 				page.locator(
-					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 				),
 			);
-			const back = page.getByTestId("picker-back");
-			if (await back.isVisible()) await press(back);
 			await press(page.getByTestId("picker-harness-opencode"));
 			await page.keyboard.press("Escape");
 			await expect
@@ -623,9 +624,11 @@ for (const viewport of [
 			await press(page.getByTestId("overflow-settings"));
 			const panel = page.locator("#settings-panel");
 			await press(page.getByTestId("settings-tab-general"));
-			await panel
-				.getByRole("combobox", { name: "Default session mode" })
-				.selectOption("worktree");
+			await chooseSettingsOption(
+				page,
+				panel.getByRole("button", { name: "Default session mode" }),
+				"worktree",
+			);
 			const request = await rpc.waitForRequest(
 				({ tag }) => tag === "SetDefaultSessionMode",
 			);
@@ -634,8 +637,8 @@ for (const viewport of [
 				mode: "worktree",
 			});
 			await expect(
-				panel.getByRole("combobox", { name: "Default session mode" }),
-			).toHaveValue("worktree");
+				panel.getByRole("button", { name: "Default session mode" }),
+			).toHaveAttribute("data-value", "worktree");
 			await expect(page.getByTestId("draft-start-chip")).toHaveText("main");
 			await page.keyboard.press("Escape");
 			await page.goto(`${harness.relayBaseUrl}/new?project=${slug}`);

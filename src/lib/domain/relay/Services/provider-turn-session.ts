@@ -133,11 +133,12 @@ const resolvePendingClaudeQuestions = (
 			yield* pendingInteractionService.markQuestionResolved(question.requestId);
 		}
 		if (pendingQuestions.some((question) => !question.recovered)) {
-			yield* interruptTurn({
+			const stop = {
 				clientId: input.clientId,
 				sessionId: input.sessionId,
 				commandId: `${input.commandId}:interrupt-for-question`,
-			});
+			};
+			yield* interruptTurn(stop, yield* prepareStop(stop));
 		}
 	});
 
@@ -250,21 +251,18 @@ const interruptLegacyTurn = (input: ProviderTurnServiceInterruptInput) =>
 				`client=${input.clientId} session=${input.sessionId} Abort failed:`,
 				formatErrorDetail(abortResult.failure),
 			);
-			return false;
+			return yield* Effect.fail(abortResult.failure);
 		}
 		return true;
 	});
 
-export const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
+export const prepareStop = (input: ProviderTurnServiceInterruptInput) =>
 	Effect.gen(function* () {
-		const log = yield* LoggerTag;
-		log.info(`client=${input.clientId} session=${input.sessionId} Aborting`);
-		yield* clearProcessingTimeout(input.sessionId);
 		const sql = yield* SqlClient.SqlClient;
 		const commit = yield* makeCommitAndSignal;
 		const store = yield* EventStoreEffectTag;
-		// Close unused reservations and return their handoffs atomically with
-		// the claim UPDATE, so the drain cannot steal a returned input.
+		// Close unused reservations and return handoffs in one transaction,
+		// serialized against the claim UPDATE so the drain cannot steal them.
 		const owners = yield* commit.write((project) =>
 			Effect.gen(function* () {
 				const claimed = yield* sessionRunOwnersQuery(sql, input.sessionId, {
@@ -325,6 +323,42 @@ export const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 			}),
 		);
 
+		const identities =
+			owners.length === 0
+				? []
+				: yield* sql<{ input_id: string | null }>`
+			SELECT COALESCE(json_extract(command.payload_json, '$.continuation.cutOffMessageId'),
+				json_extract(command.payload_json, '$.inputId'), command.command_id) AS input_id
+			FROM provider_command_outbox command JOIN provider_runs requested
+				ON requested.id = command.run_id AND requested.session_id = command.session_id
+			WHERE command.session_id = ${input.sessionId} AND command.effect_type = 'send_turn'
+				AND command.status = 'running' AND COALESCE(requested.joined_into, requested.id)
+				IN ${sql.in(owners.map(({ runId }) => runId))}
+			UNION SELECT COALESCE(message.input_id, turn.user_message_id) AS input_id
+			FROM turns turn LEFT JOIN messages message
+				ON message.id = turn.user_message_id AND message.session_id = turn.session_id
+			WHERE turn.session_id = ${input.sessionId}
+				AND turn.run_id IN ${sql.in(owners.map(({ runId }) => runId))}`;
+		return {
+			owners,
+			turnIds: [
+				...new Set(
+					identities.flatMap(({ input_id }) => (input_id ? [input_id] : [])),
+				),
+			],
+		};
+	});
+
+export const interruptTurn = (
+	input: ProviderTurnServiceInterruptInput,
+	snapshot: Effect.Success<ReturnType<typeof prepareStop>>,
+) =>
+	Effect.gen(function* () {
+		const log = yield* LoggerTag;
+		log.info(`client=${input.clientId} session=${input.sessionId} Aborting`);
+		yield* clearProcessingTimeout(input.sessionId);
+		const sql = yield* SqlClient.SqlClient;
+
 		const engine = yield* OrchestrationEngineTag;
 		const providerId = yield* engine.getProviderForSessionEffect(
 			input.sessionId,
@@ -343,11 +377,15 @@ export const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 					JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id
 					WHERE command.session_id = ${input.sessionId} AND command.effect_type = 'send_turn'
 					AND command.status = 'running' AND command.error_code = 'delivery_indeterminate'
+						AND run.id IN ${sql.in(snapshot.owners.map(({ runId }) => runId))}
 					AND run.status IN ('pending', 'running')) AS indeterminate`;
 			const fullStop = delivery?.indeterminate === 1;
 			const interruptResult = yield* Effect.result(
 				engine.dispatchEffect({
 					type: fullStop ? "end_session" : "interrupt_turn",
+					...(!fullStop && snapshot.turnIds.length > 0
+						? { turnIds: snapshot.turnIds }
+						: {}),
 					commandId: input.commandId,
 					sessionId: input.sessionId,
 				}),
@@ -368,6 +406,6 @@ export const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 			input.sessionId,
 			"Stopped by the user",
 			(events) => ingestion.ingestBatch(events),
-			{ owners },
+			{ owners: snapshot.owners },
 		);
 	});

@@ -11,6 +11,8 @@ import {
 	Layer,
 	Option,
 	PubSub,
+	Ref,
+	Scheduler,
 	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
@@ -241,10 +243,15 @@ describe("model handlers with Effect-native model service", () => {
 
 	for (const fails of [false, true]) {
 		it.effect(`shares one pending Claude discovery and publication, then refreshes after ${fails ? "failure" : "success"}`, () => Effect.gen(function* () {
+			const configDir = mkdtempSync(join(tmpdir(), "conduit-discovery-"));
+			writeFileSync(join(configDir, "settings.jsonc"), JSON.stringify({
+				harnessDefaults: { claude: { providerId: "claude", modelId: "sonnet", contextWindow: "200k" } },
+				defaultVariants: { "claude/sonnet": "high" },
+			}));
 			let pending = yield* Deferred.make<ProviderCapabilities, Error>();
 			let discoveries = 0;
 			const capabilities: ProviderCapabilities = {
-				models: [{ id: "sonnet", name: "Sonnet", providerId: "claude" }], commands: [],
+				models: [{ id: "sonnet", name: "Sonnet", providerId: "claude", variants: { high: {} }, contextWindowOptions: [{ value: "200k", label: "200k" }] }], commands: [],
 				supportsTools: true, supportsThinking: true, supportsPermissions: true,
 				supportsQuestions: true, supportsAttachments: true, supportsFork: true, supportsRevert: true,
 			};
@@ -261,6 +268,7 @@ describe("model handlers with Effect-native model service", () => {
 					persistDefaultModel: () => Effect.void,
 				}),
 				Layer.succeed(OrchestrationEngineTag)(engine),
+				Layer.succeed(ConfigTag)(makeMockConfig({ configDir })),
 				Layer.succeed(LoggerTag)(makeMockLogger()),
 				Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 				makeOverridesStateLive(), ProjectSettingsLive, RpcSubscriptionScopeLive,
@@ -268,6 +276,14 @@ describe("model handlers with Effect-native model service", () => {
 			return yield* Effect.gen(function* () {
 				const updates = yield* PubSub.subscribe((yield* ProjectSettingsTag).changes);
 				const { modelDiscovery } = yield* ProjectSettingsTag;
+				const selected = yield* Effect.forEach(Array.from({ length: 25 }), () =>
+					Effect.forkScoped(Effect.gen(function* () {
+						const response = yield* getModelsResponse({ instanceId: "claude" });
+						const live = yield* Ref.get((yield* ProjectSettingsTag).live);
+						return { response, catalog: live["providerModels:claude"] ?? live.providerModels };
+					})), {
+					concurrency: "unbounded",
+				});
 				const responses = yield* Effect.forEach(Array.from({ length: 25 }), () => getModelsResponse(), {
 					concurrency: "unbounded",
 				});
@@ -277,9 +293,17 @@ describe("model handlers with Effect-native model service", () => {
 				const fibers = Array.from(modelDiscovery, ([, fiber]) => fiber);
 				expect(fibers).toHaveLength(1);
 				expect(discoveries).toBe(1);
+				for (const request of selected) expect(request.pollUnsafe()).toBeUndefined();
 				if (fails) yield* Deferred.fail(pending, new Error("Claude discovery failed"));
 				else yield* Deferred.succeed(pending, capabilities);
 				yield* Effect.forEach(fibers, Fiber.join);
+				const selectedResponses = yield* Effect.forEach(selected, Fiber.join);
+				for (const { response, catalog } of selectedResponses) {
+					expect(response.providers).toEqual([]);
+					expect(catalog).toMatchObject({ providers: fails ? [] : [{ id: "claude", models: [{ id: "sonnet" }] }] });
+					expect(response.active).toEqual(fails ? undefined : { provider: "claude", model: "sonnet" });
+					expect(response.variant).toEqual({ variant: fails ? "" : "high", variants: fails ? [] : ["high"] });
+				}
 				const firstUpdates = Array.from(yield* PubSub.takeUpTo(updates, Number.POSITIVE_INFINITY));
 				const firstModels = firstUpdates.filter(({ item }) => item._tag === "providerModels");
 				expect(firstModels).toHaveLength(1);
@@ -294,7 +318,7 @@ describe("model handlers with Effect-native model service", () => {
 				expect(Array.from(yield* PubSub.takeUpTo(updates, Number.POSITIVE_INFINITY)).filter(({ item }) => item._tag === "providerModels")).toMatchObject([
 					{ item: { _tag: "providerModels", providers: [{ id: "claude", models: [{ id: "opus" }] }] } },
 				]);
-			}).pipe(Effect.provide(deps, { local: true }), Effect.scoped);
+			}).pipe(Effect.provideService(Scheduler.MaxOpsBeforeYield, 8), Effect.provide(deps, { local: true }), Effect.scoped);
 		}));
 	}
 

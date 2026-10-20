@@ -32,13 +32,16 @@ function measure(page: Page) {
 		const row = ta.parentElement as HTMLElement;
 		const mirror = row.querySelector("div[aria-hidden='true']") as HTMLElement;
 		const scroller = row.parentElement as HTMLElement;
-		const cs = getComputedStyle(ta);
-		const lineHeight = parseFloat(cs.lineHeight);
-		// No soft wrapping in these fixtures, so the caret's line index is just the
-		// number of newlines before it.
-		const lineIndex =
-			ta.value.slice(0, ta.selectionStart).split("\n").length - 1;
+		// These fixtures leave the caret at the end. Measure its rendered text
+		// line, not the CSS line box's leading, which native caret scrolling
+		// need not reveal. Both layers share the same text metrics below.
+		const range = document.createRange();
+		range.selectNodeContents(mirror);
+		const lines = range.getClientRects();
+		const caretLine = lines[lines.length - 1];
+		if (!caretLine) throw new Error("Composer has no rendered text line");
 		const taBox = ta.getBoundingClientRect();
+		const visible = scroller.getBoundingClientRect();
 		// Every property that decides where a glyph lands. Both layers must agree on
 		// all of them, which is what the shared `composer-text-metrics` class buys.
 		const metrics = (el: HTMLElement) => {
@@ -77,9 +80,8 @@ function measure(page: Page) {
 			textareaMetrics: metrics(ta),
 			mirrorMetrics: metrics(mirror),
 			mirror: round(mirror.getBoundingClientRect()),
-			visible: round(scroller.getBoundingClientRect()),
-			caretTop: taBox.top + parseFloat(cs.paddingTop) + lineIndex * lineHeight,
-			lineHeight,
+			visible: { top: visible.top, bottom: visible.bottom },
+			caret: { top: caretLine.top, bottom: caretLine.bottom },
 			overflows: scroller.scrollHeight > scroller.clientHeight,
 		};
 	});
@@ -96,6 +98,14 @@ test("the caret stays on the text once the composer is taller than its cap", asy
 	}
 
 	const m = await measure(page);
+	await test.info().attach("composer-geometry.json", {
+		body: JSON.stringify(m),
+		contentType: "application/json",
+	});
+	await test.info().attach("composer-overflow.png", {
+		body: await page.screenshot(),
+		contentType: "image/png",
+	});
 	expect(m.overflows, "8 lines should overflow the composer's height cap").toBe(
 		true,
 	);
@@ -106,13 +116,13 @@ test("the caret stays on the text once the composer is taller than its cap", asy
 		false,
 	);
 	expect(
-		m.caretTop,
+		m.caret.top,
 		"caret line must not be above the visible window",
-	).toBeGreaterThanOrEqual(m.visible.top - 1);
+	).toBeGreaterThanOrEqual(m.visible.top);
 	expect(
-		m.caretTop + m.lineHeight,
+		m.caret.bottom,
 		"caret line must not be below the visible window",
-	).toBeLessThanOrEqual(m.visible.top + m.visible.height + 1);
+	).toBeLessThanOrEqual(m.visible.bottom);
 });
 
 test("both layers lay text out identically", async ({ page, baseURL }) => {

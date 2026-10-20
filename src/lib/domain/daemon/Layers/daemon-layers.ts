@@ -113,7 +113,9 @@ import {
 	SessionDirectory,
 } from "../Services/session-directory.js";
 import { WorktreeCleanupQueueLive } from "../Services/worktree-cleanup-service.js";
+import { AccountPictureLive } from "./account-picture-layer.js";
 import { AutoSettleLive } from "./auto-settle-layer.js";
+import { CategorySetLive } from "./category-set-layer.js";
 import {
 	ConfigPersistenceLive,
 	ConfigPersistenceTag,
@@ -126,6 +128,7 @@ import {
 	DaemonWsRpcHandlersTag,
 } from "./daemon-ws-rpc-layer.js";
 import { KeepAwakeLive } from "./keep-awake-layer.js";
+import { MessageSurfacingSettingsLive } from "./message-surfacing-settings-layer.js";
 import { OpenCodeInstancesLive } from "./opencode-instances-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive, PortScannerTag } from "./port-scanner-layer.js";
@@ -150,6 +153,7 @@ import {
 import { EnsureCertsLive, TlsCertLive, TlsCertTag } from "./tls-cert-layer.js";
 import { makeDaemonTracingLive } from "./tracing.js";
 import { UsageLive } from "./usage-layer.js";
+import { UserAvatarLive } from "./user-avatar-layer.js";
 import {
 	VersionCheckerLive,
 	VersionCheckerTag,
@@ -708,6 +712,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provide(EnsureCertsLive),
 	);
 	const services = Layer.mergeAll(
+		CategorySetLive(configDir),
 		AuthManagerFromConfigLive,
 		tlsCertWithDeps,
 		EnsureCertsLive,
@@ -812,9 +817,13 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const withConfigPersistence = ConfigPersistenceLive.pipe(
 		Layer.provideMerge(effectSnapshotLayer),
 	);
+	const withAvatar = UserAvatarLive.pipe(
+		Layer.provide(AccountPictureLive),
+		Layer.provideMerge(withConfigPersistence),
+	);
 	const withManagedOpenCodeServers = ManagedOpenCodeLifecycleLive(
 		configDir,
-	).pipe(Layer.provideMerge(withConfigPersistence));
+	).pipe(Layer.provideMerge(withAvatar));
 
 	const withOpenCodeInstances = OpenCodeInstancesLive.pipe(
 		Layer.provideMerge(withManagedOpenCodeServers),
@@ -836,11 +845,12 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	).pipe(Layer.provideMerge(withSessionDirectory));
 	const registries = RelayFactoryLive(configDir).pipe(
 		Layer.provideMerge(
-			Layer.merge(
+			Layer.mergeAll(
 				makeWorktreeLive(configDir, {
 					setupTimeoutMs: ENV.worktreeSetupTimeoutMs,
 				}),
 				UsageLive(),
+				MessageSurfacingSettingsLive,
 			).pipe(Layer.provideMerge(withInputDrafts)),
 		),
 	);

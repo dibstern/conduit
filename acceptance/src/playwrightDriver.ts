@@ -6,6 +6,7 @@ import {
 	chromium,
 	type Page,
 } from "@playwright/test";
+import { MOCK_NOW_MS } from "../../test/e2e/fixtures/mockup-state.js";
 import {
 	compareImages,
 	freezeAnimations,
@@ -29,16 +30,8 @@ export type VisualMatchResult = {
 	diffPath?: string;
 };
 
-/** Wall-clock every acceptance run sees.
- *
- *  Message cards render their send time, so a live clock would drift the
- *  baselines every minute. Pinning it — together with a fixed timezone and
- *  locale on the context — makes that surface deterministic, and portable
- *  across machines. Same family of guarantee as `freezeAnimations`.
- *  Only `Date.now` is overridden: it is what the app stamps messages with,
- *  and leaving the `Date` constructor alone keeps everything that reads real
- *  time working normally. */
-export const PINNED_CLOCK_MS = Date.UTC(2026, 0, 1, 9, 41, 0);
+/** Browser and mock fixtures share a clock; timers and animation frames still run. */
+export const PINNED_CLOCK_MS = MOCK_NOW_MS;
 
 export const DESKTOP_VIEWPORT: Viewport = {
 	name: "desktop",
@@ -121,7 +114,22 @@ export class PlaywrightDriver {
 			timezoneId: "UTC",
 			locale: "en-US",
 		});
+		// Pin Date reads without replacing native timers or animation frames: the
+		// transcript's scroll controller relies on their rendering-cycle ordering.
 		await this.context.addInitScript((pinned: number) => {
+			const NativeDate = Date;
+			globalThis.Date = new Proxy(NativeDate, {
+				construct(target, args, newTarget) {
+					return Reflect.construct(
+						target,
+						args.length ? args : [pinned],
+						newTarget,
+					);
+				},
+				apply() {
+					return new NativeDate(pinned).toString();
+				},
+			});
 			Date.now = () => pinned;
 		}, PINNED_CLOCK_MS);
 		return this.context.newPage();
@@ -132,6 +140,12 @@ export class PlaywrightDriver {
 			width: viewport.width,
 			height: viewport.height,
 		});
+		// The app's compact layout follows a matchMedia change event, which fires in the
+		// next rendering step; one frame lets it land before the next step acts on it.
+		await page.evaluate(
+			() =>
+				new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+		);
 		this.activeViewport = viewport;
 	}
 

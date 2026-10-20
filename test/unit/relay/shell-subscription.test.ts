@@ -1325,11 +1325,25 @@ describe("subscribeShell", () => {
 				yield* recoverProjections;
 				yield* commitThroughSeam([
 					sessionCreated(SID),
-					messageCreated(SID, "m1"),
 					canonicalEvent("run.requested", SID, {
 						runId: "seen-run",
 						inputId: "m1",
 					}),
+					canonicalEvent(
+						"message.created",
+						SID,
+						{
+							sessionId: SID,
+							messageId: "m1",
+							inputId: "m1",
+							role: "user",
+						},
+						{
+							provider: "claude",
+							createdAt: at(),
+							metadata: { runId: "seen-run" },
+						},
+					),
 					canonicalEvent(
 						"run.started",
 						SID,

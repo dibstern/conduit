@@ -372,6 +372,19 @@ export const makeClaudeRunnerLaunch = (
 						(output) => {
 							if (
 								output.type === "event" &&
+								output.event.sessionId === sessionId &&
+								output.event.type === "turn.completed"
+							) {
+								const nativeSessionId =
+									output.event.providerRefs.providerSessionId;
+								if (nativeSessionId && nativeSessionId !== resumeSessionId) {
+									resumeSessionId = nativeSessionId;
+									// Completion can immediately trigger another send.
+									reportUpgradeState();
+								}
+							}
+							if (
+								output.type === "event" &&
 								output.event.type === "workspace.changed" &&
 								snapshot
 							) {
@@ -464,6 +477,7 @@ export const makeClaudeRunnerLaunch = (
 						...(input.permissionMode
 							? { permissionMode: input.permissionMode }
 							: {}),
+						...(input.sideThread ? { sideThread: true } : {}),
 						...(input.variant ? { variant: input.variant } : {}),
 						...(input.contextWindow
 							? { contextWindow: input.contextWindow }

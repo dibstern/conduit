@@ -10,6 +10,7 @@ import { Socket } from "effect/socket";
 import NodeWebSocket from "ws";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { readNativeThread } from "../../helpers/native-thread.js";
+import { openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
@@ -364,12 +365,11 @@ test.describe("OpenCode Side Threads", () => {
 			await app.input.fill("");
 
 			// Side Thread modes are session rules, so the agent stays selectable.
-			// The harness control opens the picker root, where the agent row lives.
-			const harnessPicker = page.locator(
-				'[data-testid="composer-harness-trigger"]:visible, [data-testid="composer-word-harness"]:visible',
+			const modelPicker = page.locator(
+				'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 			);
 			const agentRow = page.getByTestId("picker-row-agent");
-			await harnessPicker.click();
+			await openPickerRoot(page, modelPicker);
 			await expect(agentRow).not.toHaveAttribute("data-locked", "plan");
 			await expect(agentRow).toContainText("Build");
 			await agentRow.click();
@@ -382,9 +382,11 @@ test.describe("OpenCode Side Threads", () => {
 			await page.getByTestId("picker-agent-build").click();
 			await expect(agentRow).toContainText("Build");
 			// Escape in an empty Side Thread composer goes back to the parent.
-			await harnessPicker.click();
+			await modelPicker.click();
 			await expect(page.getByTestId("model-picker")).toBeHidden();
-			await expect(approvalPill).toContainText("Ask");
+			await expect(approvalPill).toHaveAccessibleName(
+				"Approvals: Ask before edits. Open options",
+			);
 			await expect
 				.poll(() => parentSettings(relayUrl, sideId))
 				.toMatchObject({ permissionMode: "ask", agent: "build" });
@@ -406,7 +408,9 @@ test.describe("OpenCode Side Threads", () => {
 			await expect(planOption).toBeVisible();
 			await expect(planOption).not.toContainText("Claude");
 			await planOption.click();
-			await expect(approvalPill).toContainText("Plan");
+			await expect(approvalPill).toHaveAccessibleName(
+				"Approvals: Plan. Open options",
+			);
 			const sidePatches = () =>
 				mockServer.requestBodies
 					.filter(
@@ -421,9 +425,10 @@ test.describe("OpenCode Side Threads", () => {
 					{ title: question, permission: askRules },
 					{ permission: planRules },
 				]);
-			await harnessPicker.click();
+			await openPickerRoot(page, modelPicker);
+			await expect(agentRow).toBeVisible();
 			await expect(agentRow).not.toHaveAttribute("data-locked", "plan");
-			await harnessPicker.click();
+			await modelPicker.click();
 			await expect(page.getByTestId("model-picker")).toBeHidden();
 			const sideScreenshot = testInfo.outputPath(
 				`${command}-side-thread-after-reload.png`,
@@ -485,8 +490,9 @@ test.describe("OpenCode Side Threads", () => {
 		if (!(result.failure instanceof WsRpcError))
 			throw new Error("Missing parent failed outside the typed RPC contract");
 		expect(result.failure._tag).toBe("WsRpcError");
+		expect(result.failure.code).toBe("unknown-session");
 		expect(result.failure.message).toBe(
-			"Parent session missing-side-thread-parent was not found",
+			"Unknown session: missing-side-thread-parent",
 		);
 		expect(sessionEvents(harness.eventsDbPath)).toEqual(before);
 	});
@@ -571,9 +577,9 @@ test.describe("Claude Side Threads", () => {
 				);
 				await expect(chat.subagentBackBar).toContainText("Side Thread of");
 				await expect(chat.subagentBackBar).toContainText(parentTitle.trim());
-				await expect(page.getByTestId("permission-mode-badge")).toContainText(
-					"Ask",
-				);
+				await expect(
+					page.getByTestId("permission-mode-badge"),
+				).toHaveAccessibleName("Approvals: Ask before edits. Open options");
 				await expect(
 					page.locator(`#session-list [data-session-id="${sideId}"]`),
 				).toHaveCount(0);
@@ -625,9 +631,9 @@ test.describe("Claude Side Threads", () => {
 				await expect(page.getByTestId("session-bar-title")).toHaveText(
 					question,
 				);
-				await expect(page.getByTestId("permission-mode-badge")).toContainText(
-					"Ask",
-				);
+				await expect(
+					page.getByTestId("permission-mode-badge"),
+				).toHaveAccessibleName("Approvals: Ask before edits. Open options");
 				await expect(
 					page.locator(`#session-list [data-session-id="${sideId}"]`),
 				).toHaveCount(0);

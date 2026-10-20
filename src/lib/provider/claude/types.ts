@@ -249,6 +249,8 @@ export interface ClaudeSessionContext {
 	currentTurnId: string | undefined;
 	/** Set only when the SDK accepts an input, retained until its result. */
 	currentRunId?: string | undefined;
+	/** Stop's captured runs cannot take new members while this query stays live. */
+	closedRunIds?: Set<string>;
 	/** Init can report a model before the SDK accepts the first input. */
 	pendingRunModel?:
 		| {

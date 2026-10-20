@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import type { MessageSurfacingStatus } from "../../../src/lib/contracts/message-surfacing.js";
 import type {
 	GetModelsResponse,
 	GetSessionSkillsResponseSchema,
@@ -9,6 +10,8 @@ import type { WsMockControl } from "../../../test/e2e/helpers/ws-mock.js";
 
 export const relayControls = new WeakMap<Page, WsMockControl>();
 export const rpcControls = new WeakMap<Page, RpcMockControl>();
+/** Explicit opt-in for the surfacing acceptance scenarios. */
+export const mockMessageSurfacing = new WeakMap<Page, MessageSurfacingStatus>();
 export const effortOptions = new WeakMap<Page, string[]>();
 /** Quota reads made while the fixture seeds a draft through the picker. */
 export const pickerFixtureQuotaReads = new WeakMap<Page, number>();
@@ -198,10 +201,13 @@ export async function openModelPicker(page: Page): Promise<void> {
 		// One locator, not a count-then-pick: a tier change can swap the triggers mid-step.
 		await page
 			.getByTestId(
-				/^(composer-harness-trigger|model-picker-trigger|composer-word-model)$/,
+				/^(composer-harness-trigger|model-picker-trigger|composer-word-model|composer-words-sheet-trigger)$/,
 			)
 			.first()
 			.click();
+		const sheet = page.getByTestId("composer-more-sheet");
+		if (await sheet.isVisible())
+			await page.getByTestId("composer-more-model").click();
 	}
 	await picker.waitFor({ state: "visible", timeout: 5_000 });
 	const back = page.getByTestId("picker-back");
@@ -212,7 +218,9 @@ export async function openModelPicker(page: Page): Promise<void> {
 export async function openComposerMoreSheet(page: Page): Promise<void> {
 	const sheet = page.getByTestId("composer-more-sheet");
 	if (!(await sheet.isVisible()))
-		await page.getByTestId("composer-more").click();
+		await page
+			.getByTestId(/^(model-picker-trigger|composer-words-sheet-trigger)$/)
+			.click();
 	await expect(sheet).toBeVisible();
 }
 

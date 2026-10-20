@@ -388,7 +388,11 @@ export const makeProcessSessionRunner = (
 				inputId?: string;
 				runId?: string | undefined;
 				/** What a failed send places when the SDK never started it. */
-				placement?: { inputId: string; text: string };
+				placement?: {
+					inputId: string;
+					text: string;
+					images?: readonly string[];
+				};
 				messageId: string;
 				pending: boolean;
 				accepted: boolean;
@@ -1554,6 +1558,9 @@ export const makeProcessSessionRunner = (
 											placement: {
 												inputId: command.input.inputId,
 												text: command.input.text ?? command.input.prompt,
+												...(command.input.images
+													? { images: command.input.images }
+													: {}),
 											},
 										}),
 								messageId: "",

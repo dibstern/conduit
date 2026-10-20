@@ -43,4 +43,9 @@ export const inboxRunStatusQuery = (
 				AND sequence > COALESCE((SELECT MAX(sequence) FROM events
 					WHERE session_id = ${sessionId} AND (type = 'input.sent'
 						OR (type = 'session.resume_cancelled'
-							AND json_extract(metadata, '$.source') = 'inbox-reset'))), 0))) AS stopped`;
+							AND json_extract(metadata, '$.source') = 'inbox-reset'))), 0)))
+		AND NOT EXISTS (SELECT 1 FROM pending_inputs pending JOIN events requested
+			ON requested.session_id = pending.session_id
+			AND json_extract(requested.data, '$.inputId') = pending.input_id
+			WHERE pending.session_id = ${sessionId} AND pending.state = 'queued'
+				AND requested.type = 'input.interrupt_requested') AS stopped`;

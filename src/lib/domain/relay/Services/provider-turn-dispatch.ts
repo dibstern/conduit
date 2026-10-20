@@ -387,6 +387,7 @@ const restoreFailedPlacement = (
 					inputId,
 					provider: driver,
 					...(runId ? { runId } : {}),
+					...(input.images ? { images: input.images } : {}),
 				})
 				.pipe(
 					Effect.catch((cause) =>

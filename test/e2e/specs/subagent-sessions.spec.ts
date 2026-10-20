@@ -7,8 +7,10 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
+import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { detailRowsOf } from "../../helpers/detail-rows.js";
 import type { MockMessage } from "../fixtures/mockup-state.js";
+import { toWire } from "../helpers/detail-projection-mock.js";
 import { mockWsRpc, sendMockFamily } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 import { ChatPage } from "../page-objects/chat.page.js";
@@ -35,7 +37,7 @@ const snapshot = JSON.parse(readFileSync(snapshotPath, "utf-8")) as {
 		parentID: string;
 	};
 	parentHistory: {
-		messages: Parameters<typeof detailRowsOf>[0][];
+		messages: HistoryMessage[];
 		hasMore: boolean;
 		total: number;
 	};
@@ -209,7 +211,7 @@ test.describe("Subagent navigation", () => {
 		// recorded conversation, so expose its full fixture through the detail feed.
 		rpc.setDetailRows(
 			snapshot.parentSession.id,
-			snapshot.parentHistory.messages.flatMap(detailRowsOf),
+			snapshot.parentHistory.messages.map(toWire).flatMap(detailRowsOf),
 		);
 
 		control = await mockRelayWebSocket(page, {
@@ -223,15 +225,19 @@ test.describe("Subagent navigation", () => {
 
 		const chat = new ChatPage(page);
 
-		// A settled turn collapses its steps into a strip (22875676); the link to
-		// the child session is on the subagent's row in the expanded log
-		// (5517789f). Clicking the strip segment opens the log at that step.
-		await page
+		// A settled turn collapses into a Worked head over its activity timeline
+		// (aoqb.2); the link to the child session is on the subagent's row in
+		// the step log its head expands (5517789f).
+		for (const head of await page
+			.getByRole("button", { name: /^Worked .*subagent/ })
+			.all())
+			await head.click();
+		const subagentLink = page
 			.getByRole("button", {
 				name: /^Delegated Explore synthesis pipeline code/,
 			})
-			.click();
-		const subagentLink = chat.subagentLinks.first();
+			.locator("..")
+			.locator(".subagent-link");
 		await expect(subagentLink).toBeVisible({ timeout: 5_000 });
 		await subagentLink.click();
 

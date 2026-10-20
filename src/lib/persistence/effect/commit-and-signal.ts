@@ -5,7 +5,12 @@ import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
 import { observeTurnTimelineCommit } from "../../domain/daemon/Services/turn-timeline.js";
 import { SessionEventBusTag } from "../../domain/relay/Services/session-event-bus.js";
 import { contentionMetrics } from "../contention-metrics.js";
-import type { CanonicalEvent, StoredEvent } from "../events.js";
+import {
+	type CanonicalEvent,
+	canonicalEvent,
+	type StoredEvent,
+} from "../events.js";
+import { SESSION_SUBTREE_SQL } from "../projectors/session-handlers.js";
 import type { EventStoreError } from "./event-store-effect.js";
 import { EventStoreEffectTag } from "./event-store-effect.js";
 import type { ProjectionRunnerError } from "./projection-runner-effect.js";
@@ -70,7 +75,8 @@ export interface CommitAndSignalOptions {
 /**
  * Apply stored events to the read model. This is the only projection a `write`
  * body can reach, which is the point: a site cannot move the read model without
- * the advance being announced, because it has no other way to project.
+ * the advance being announced, because it has no other way to project. Deletes
+ * append descendant markers here before the cascade removes their lineage.
  */
 export type CommitAndSignalProject = (
 	events: readonly StoredEvent[],
@@ -163,6 +169,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 				// once it has committed. Which is exactly why `project` has to refuse
 				// to feed them from anywhere the COMMIT does not cover.
 				const stored: StoredEvent[] = [];
+				const endedRunEvents = new Set<string>();
 				const advances: ReadModelAdvance[] = [];
 				// Sessions direct stamps wrote, whose families are refreshed once,
 				// before COMMIT, however many stamps the body makes.
@@ -204,10 +211,47 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 									Effect.gen(function* () {
 										yield* requireSeamTransaction;
 										if (events.length === 0) return;
+										const marked = new Set(
+											events.flatMap((event) =>
+												event.type === "session.deleted"
+													? [event.data.sessionId]
+													: [],
+											),
+										);
+										const markers: StoredEvent[] = [];
 										const advance = yield* projectionRunner
-											.projectBatch(events, options.endedRunEvents)
+											.projectBatch(events, endedRunEvents, (event) =>
+												Effect.gen(function* () {
+													// Earlier events in this batch have projected. Capture the
+													// current subtree before the root's cascade erases it.
+													const subtree = yield* sql.unsafe<{ id: string }>(
+														SESSION_SUBTREE_SQL,
+														[event.data.sessionId],
+													);
+													const descendants = subtree.filter(
+														({ id }) => !marked.has(id),
+													);
+													for (const { id } of descendants) marked.add(id);
+													const appended = yield* eventStore.appendBatch(
+														descendants.map(({ id }) =>
+															canonicalEvent(
+																"session.deleted",
+																id,
+																{ sessionId: id },
+																{
+																	provider: event.provider,
+																	createdAt: event.createdAt,
+																	metadata: event.metadata,
+																},
+															),
+														),
+													);
+													markers.push(...appended);
+													return appended;
+												}),
+											)
 											.pipe(Effect.provideService(SqlClient.SqlClient, sql));
-										stored.push(...events);
+										stored.push(...events, ...markers);
 										advances.push(advance);
 									});
 
@@ -290,6 +334,8 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 						return result;
 					}),
 				);
+				for (const eventId of endedRunEvents)
+					options.endedRunEvents?.add(eventId);
 				// Callbacks can stall or commit again; neither may hold up advances.
 				yield* options.afterCommit ?? Effect.void;
 				if (
@@ -297,7 +343,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 					options.publish !== false &&
 					stored.length > 0
 				)
-					yield* sessionEventBus.value.publish(stored);
+					yield* sessionEventBus.value.publish(stored, endedRunEvents);
 				const sessionStateNotifier = yield* Effect.serviceOption(
 					SessionStateProjectionNotifierTag,
 				);

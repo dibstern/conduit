@@ -176,13 +176,15 @@ export async function createSession(
 	relayPort: number,
 	providerId: "claude" | "opencode",
 	instanceId?: string,
+	title?: string,
+	projectSlug = "e2e-replay",
 ): Promise<string> {
 	const { sessionId } = await Effect.runPromise(
 		Effect.scoped(
 			Effect.gen(function* () {
 				const client = yield* RpcClient.make(WsRpcGroup);
 				const modelCatalog = yield* client.GetModels({
-					projectSlug: "e2e-replay",
+					projectSlug,
 					instanceId:
 						instanceId === undefined
 							? providerId === "opencode"
@@ -195,8 +197,9 @@ export async function createSession(
 						"The replay fixture needs a valid harness model pick",
 					);
 				return yield* client.CreateSession({
+					...(title === undefined ? {} : { title }),
 					permissionMode: "ask",
-					projectSlug: "e2e-replay",
+					projectSlug,
 					originId: `e2e-${providerId}-replay`,
 					providerId,
 					model: {
@@ -269,10 +272,13 @@ export async function createReplayHarness(
 		configDir,
 	);
 	const claudeInstanceId = options.claudeReplay?.instanceId;
-	if (claudeInstanceId !== undefined)
-		await saveDaemonConfig(
-			{
-				...defaultDaemonConfig(),
+	// The user has already answered the avatar question, so the first-run
+	// dialog stays shut over the specs that are not about it.
+	await saveDaemonConfig(
+		{
+			...defaultDaemonConfig(),
+			avatar: { kind: "initial" },
+			...(claudeInstanceId !== undefined && {
 				instances: [
 					{
 						id: claudeInstanceId,
@@ -282,9 +288,10 @@ export async function createReplayHarness(
 						driver: "claude",
 					},
 				],
-			},
-			configDir,
-		);
+			}),
+		},
+		configDir,
+	);
 	if (claudeReplayer) {
 		// Capability discovery would otherwise spawn the real Claude CLI.
 		__setProbeOverrideForTesting(async () => ({

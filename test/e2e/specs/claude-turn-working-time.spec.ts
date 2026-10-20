@@ -97,13 +97,21 @@ test.describe("Claude turn working time", () => {
 					.get(parentId);
 				if (!prompt) throw new Error("parent prompt has not been stored");
 				const startedAt = Number(prompt["created_at"]);
+				// A resumed message starts at its own first content part. Background
+				// updates to an earlier message must not start the next segment.
 				const events = db
 					.prepare(
-						"SELECT type, data, created_at FROM events WHERE session_id = ? AND type IN ('message.created', 'tool.started', 'thinking.delta', 'text.delta', 'turn.completed') ORDER BY sequence",
+						"SELECT type, data, created_at FROM events WHERE session_id = ? AND type IN ('tool.started', 'thinking.start', 'thinking.delta', 'text.delta', 'turn.completed') ORDER BY sequence",
 					)
 					.all(parentId);
+				const firstContentPart = db.prepare(
+					`SELECT created_at FROM message_parts WHERE message_id = ?
+					 AND (type IN ('tool', 'thinking') OR (type = 'text' AND text != ''))
+					 ORDER BY sort_order LIMIT 1`,
+				);
 				const segments: {
-					firstEventAt: number;
+					messageId: string;
+					firstPartAt: number;
 					endAt: number;
 					contextTokens?: number;
 					tokens: {
@@ -114,27 +122,29 @@ test.describe("Claude turn working time", () => {
 						contextWindow?: number;
 					};
 				}[] = [];
-				let firstEventAt: number | undefined;
 				for (const event of events) {
-					firstEventAt ??= Number(event["created_at"]);
 					if (event["type"] !== "turn.completed") continue;
 					const data = JSON.parse(String(event["data"])) as {
+						messageId: string;
 						tokens: (typeof segments)[number]["tokens"];
 						contextTokens?: number;
 					};
 					segments.push({
-						firstEventAt,
+						messageId: data.messageId,
+						firstPartAt: Number(
+							firstContentPart.get(data.messageId)?.["created_at"] ??
+								event["created_at"],
+						),
 						endAt: Number(event["created_at"]),
 						tokens: data.tokens,
 						...(data.contextTokens === undefined
 							? {}
 							: { contextTokens: data.contextTokens }),
 					});
-					firstEventAt = undefined;
 				}
 				const gaps = segments.slice(1).map((segment, index) => ({
-					from: segments[index]?.endAt ?? segment.firstEventAt,
-					to: segment.firstEventAt,
+					from: segments[index]?.endAt ?? segment.firstPartAt,
+					to: segment.firstPartAt,
 				}));
 				const gapMs = gaps.reduce(
 					(sum, gap) => sum + Math.max(0, gap.to - gap.from),
@@ -146,6 +156,41 @@ test.describe("Claude turn working time", () => {
 					gaps,
 					gapMs,
 					workingMs: (segments.at(-1)?.endAt ?? startedAt) - startedAt - gapMs,
+					eventStamps: events.map((event) => {
+						const data = JSON.parse(String(event["data"])) as {
+							messageId?: string;
+							partId?: string;
+						};
+						return {
+							type: event["type"],
+							createdAt: event["created_at"],
+							messageId: data.messageId,
+							partId: data.partId,
+						};
+					}),
+					envelopeStamps: db
+						.prepare(
+							`SELECT json_extract(data, '$.messageId') AS messageId, created_at
+							 FROM events WHERE session_id = ? AND type = 'message.created'
+							 AND json_extract(data, '$.role') = 'assistant' ORDER BY sequence`,
+						)
+						.all(parentId),
+					partStamps: db
+						.prepare(
+							`SELECT mp.id, mp.message_id, mp.type, mp.sort_order,
+							        mp.created_at, mp.updated_at
+							 FROM message_parts mp JOIN messages m ON m.id = mp.message_id
+							 WHERE m.session_id = ? AND m.role = 'assistant'
+							 ORDER BY m.created_at, m.id, mp.sort_order`,
+						)
+						.all(parentId),
+					turnStamps: db
+						.prepare(
+							`SELECT id, user_message_id, assistant_message_id, state,
+							        requested_at, started_at, completed_at
+							 FROM turns WHERE session_id = ? ORDER BY requested_at`,
+						)
+						.all(parentId),
 				};
 			} finally {
 				db.close();
@@ -185,6 +230,8 @@ test.describe("Claude turn working time", () => {
 			await chat.waitForStreamingComplete();
 			const wallMs = performance.now() - sentAt;
 			const final = stamps();
+			// A turn with tools bills in its step log, so open it first.
+			await chat.expandTurnActivity();
 			const meta = page.locator(".turn-meta").last();
 			const duration = page.locator(".turn-duration").last();
 			await expect(meta).toBeVisible();
@@ -259,6 +306,7 @@ test.describe("Claude turn working time", () => {
 			const composerContext = page.getByTestId("composer-word-context-usage");
 			await expect(composerContext).toHaveText(`${contextPct}%`);
 			await page.reload();
+			await chat.expandTurnActivity();
 			await expect(
 				meta.getByTitle("Fresh input tokens", { exact: true }),
 			).toHaveText(`${sdkTokens.input} in`);

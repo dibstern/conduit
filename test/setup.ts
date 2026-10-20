@@ -124,7 +124,22 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 	globalThis.ResizeObserver = InertResizeObserver;
 }
 
-// 6. jsdom does not load fonts or expose document.fonts. An inert event target
+// 6. jsdom has no matchMedia. Default to desktop and let tests that exercise
+//    media changes provide their own query results and listeners.
+if (typeof window !== "undefined" && !window.matchMedia) {
+	window.matchMedia = (media): MediaQueryList => ({
+		matches: false,
+		media,
+		onchange: null,
+		addListener() {},
+		removeListener() {},
+		addEventListener() {},
+		removeEventListener() {},
+		dispatchEvent: () => false,
+	});
+}
+
+// 7. jsdom does not load fonts or expose document.fonts. An inert event target
 //    lets components register and clean up font-loading listeners.
 if (typeof document !== "undefined" && !document.fonts) {
 	Object.defineProperty(document, "fonts", {

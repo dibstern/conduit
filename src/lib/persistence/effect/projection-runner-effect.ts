@@ -5,6 +5,7 @@ import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
 import type { StoredEvent } from "../events.js";
+import type { EventStoreError } from "./event-store-effect.js";
 import { ProjectorCursorEffectTag } from "./projector-cursor-effect.js";
 import {
 	type EffectProjector,
@@ -47,6 +48,10 @@ export interface RecoveryResult {
 	readonly durationMs: number;
 }
 
+type SessionDeletionExpansion = (
+	event: Extract<StoredEvent, { type: "session.deleted" }>,
+) => Effect.Effect<readonly StoredEvent[], EventStoreError | SqlError>;
+
 export interface ProjectionRunnerEffect {
 	/**
 	 * Apply events and report how far the read model moved, which sessions moved
@@ -69,6 +74,8 @@ export interface ProjectionRunnerEffect {
 	readonly projectBatch: (
 		events: readonly StoredEvent[],
 		endedRunEvents?: Set<string>,
+		/** Append markers before each original delete; project them after the batch. */
+		expandDeletion?: SessionDeletionExpansion,
 	) => Effect.Effect<
 		ReadModelAdvance,
 		ProjectionRunnerError | SqlError,
@@ -265,6 +272,7 @@ export const makeProjectionRunnerEffect = (
 		const projectBatch = (
 			events: readonly StoredEvent[],
 			endedRunEvents?: Set<string>,
+			expandDeletion?: SessionDeletionExpansion,
 		): Effect.Effect<
 			ReadModelAdvance,
 			ProjectionRunnerError | SqlError,
@@ -289,6 +297,7 @@ export const makeProjectionRunnerEffect = (
 				// Event order decides the outcome, so the touches are folded, not
 				// unioned — see projectEvent.
 				const touches: ProjectionTouch[] = [];
+				const expandedEvents = [...events];
 
 				// One transaction for the whole batch (S9): a translation that produced
 				// several events lands all-or-nothing, so the read model never shows a
@@ -308,16 +317,13 @@ export const makeProjectionRunnerEffect = (
 							deferredMessageStamps,
 							...(endedRunEvents ? { endedRunEvents } : {}),
 						};
-						for (const event of events) {
-							// Stamping also syncs a fork point's clock, which needs the
-							// row: take a pending stamp before its message is deleted.
+						for (const [index, event] of expandedEvents.entries()) {
 							if (
-								event.type === "message.removed" &&
-								deferredMessageStamps.delete(event.data.messageId)
+								index < events.length &&
+								event.type === "session.deleted" &&
+								expandDeletion
 							)
-								touches.push(
-									yield* stampMessage([event.data.messageId], { version }),
-								);
+								expandedEvents.push(...(yield* expandDeletion(event)));
 							const matching = projectorsByEventType.get(event.type) ?? [];
 							for (const projector of matching) {
 								touches.push(yield* projector.project(event, ctx));
@@ -332,7 +338,10 @@ export const makeProjectionRunnerEffect = (
 						// cursors stay fixed so a newly added projector still starts at 0.
 						yield* cursorRepo.upsert(
 							batchCursorName,
-							events.reduce((max, event) => Math.max(max, event.sequence), 0),
+							expandedEvents.reduce(
+								(max, event) => Math.max(max, event.sequence),
+								0,
+							),
 						);
 						// Once for the batch: a refresh reads whole families.
 						const touched = mergeTouches(touches);
@@ -355,7 +364,9 @@ export const makeProjectionRunnerEffect = (
 
 				return {
 					version,
-					projectIds: [...new Set(events.map((event) => event.projectId))],
+					projectIds: [
+						...new Set(expandedEvents.map((event) => event.projectId)),
+					],
 					sessionIds: touched.stamped,
 					removedSessionIds: touched.removed,
 					collections: touched.collections,

@@ -1,4 +1,5 @@
 import { expect } from "@playwright/test";
+import { chooseSettingsOption } from "../../../test/e2e/helpers/settings.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	mockInstances,
@@ -9,16 +10,45 @@ import {
 
 export const composerContextWarningHandlers: StepHandler[] = [
 	{
+		name: "assert context warning fused tab",
+		match: /^the context warning is an inset tab fused to the composer$/,
+		run: async ({ world }) => {
+			const warning = world.page.getByTestId("composer-context-warning");
+			await expect(warning).toHaveAttribute("data-composer-tab");
+			await expect(warning.locator("svg.lucide-gauge")).toBeVisible();
+			await expect(
+				warning.getByRole("button", { name: "Dismiss context warning" }),
+			).toBeVisible();
+			await expect
+				.poll(async () => {
+					const tab = await warning.boundingBox();
+					const composer = await world.page.locator("#input-row").boundingBox();
+					if (!tab || !composer) return false;
+					return (
+						tab.x > composer.x &&
+						tab.x + tab.width < composer.x + composer.width &&
+						Math.abs(tab.y + tab.height - composer.y) <= 1
+					);
+				})
+				.toBe(true);
+			await expect(warning).toHaveCSS("border-bottom-left-radius", "0px");
+			await expect(warning).toHaveCSS("border-bottom-right-radius", "0px");
+		},
+	},
+
+	{
 		name: "choose composer context warning threshold",
 		match:
 			/^I choose (60|70|80|90|Never|default) for composer context warnings$/,
 		run: async ({ world, match }) => {
 			const threshold = match[1] ?? "default";
 			const control = world.page.getByTestId(
-				`settings-composer-context-warning-${threshold === "default" ? "80" : threshold.toLowerCase()}`,
+				"settings-composer-context-warning",
 			);
-			if (threshold !== "default") await control.click();
-			await expect(control).toHaveAttribute("aria-checked", "true");
+			const value = threshold === "default" ? "80" : threshold.toLowerCase();
+			if (threshold !== "default")
+				await chooseSettingsOption(world.page, control, value);
+			await expect(control).toHaveAttribute("data-value", value);
 			await world.page.getByTestId("settings-close-btn").click();
 			await expect(world.page.locator("#settings-panel")).toBeHidden();
 		},
@@ -146,7 +176,9 @@ export const composerContextWarningHandlers: StepHandler[] = [
 			});
 			if (state === "started") return;
 			const instanceId = await world.page
-				.getByTestId("model-picker-trigger")
+				.getByTestId(
+					/^(model-picker-trigger|composer-word-model|composer-words-sheet-trigger)$/,
+				)
 				.first()
 				.getAttribute("data-instance-id");
 			requireRelayControl(world.page).sendMessage({

@@ -181,6 +181,7 @@ function makeReadQueryEffect(
 		listSessions: vi.fn(() => Effect.succeed(rows)),
 		listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 		getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
+		countSettledSessions: () => Effect.succeed(0),
 		listSessionInfos: vi.fn((_scope, options) => {
 			const pending = pendingApprovalCountsByType(pendingApprovalCounts);
 			const selected = options?.roots
@@ -2873,16 +2874,21 @@ describe("SessionManagerService", () => {
 					},
 					{ provider: "opencode", createdAt: 10 },
 				),
-				canonicalEvent("message.created", "session-1", {
-					sessionId: "session-1",
-					messageId: "input-1",
-					inputId: "input-1",
-					role: "user",
-				}),
 				canonicalEvent("run.requested", "session-1", {
 					runId: "unread-run",
 					inputId: "input-1",
 				}),
+				canonicalEvent(
+					"message.created",
+					"session-1",
+					{
+						sessionId: "session-1",
+						messageId: "input-1",
+						inputId: "input-1",
+						role: "user",
+					},
+					{ metadata: { runId: "unread-run" } },
+				),
 				canonicalEvent(
 					"run.started",
 					"session-1",

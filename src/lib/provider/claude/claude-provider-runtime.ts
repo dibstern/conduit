@@ -573,8 +573,11 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			}),
 		).pipe(Effect.mapError((cause) => sessionFailure("send-turn", cause)));
 	}
-	interrupt(sessionId: string): Effect.Effect<void, SessionFailure> {
-		return this.interruptTurnEffect(sessionId).pipe(
+	interrupt(
+		sessionId: string,
+		turnIds?: readonly string[],
+	): Effect.Effect<void, SessionFailure> {
+		return this.interruptTurnEffect(sessionId, turnIds).pipe(
 			Effect.mapError((cause) => sessionFailure("interrupt", cause)),
 		);
 	}
@@ -760,6 +763,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				inputId: input.inputId,
 				...(input.runId ? { runId: input.runId } : {}),
 				text: input.text ?? input.prompt,
+				...(input.images ? { images: input.images } : {}),
 			},
 		}).pipe(
 			Effect.asVoid,
@@ -1314,6 +1318,14 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			});
 
 			yield* setup.pipe(
+				Effect.raceFirst(
+					Deferred.await(setupLock).pipe(
+						Effect.mapError(
+							(cause) =>
+								new ClaudeBoundaryError({ operation: "awaitSetup", cause }),
+						),
+					),
+				),
 				Effect.tap(() =>
 					Deferred.succeed(setupLock, undefined).pipe(Effect.ignore),
 				),
@@ -1986,6 +1998,12 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					this.deps.onTurnStateChanged?.(ctx.sessionId, true);
 				}
 				let unacceptedResultInputs: SendTurnInput[] = [];
+				let terminalRunIds: string[] = [];
+				let resultInput:
+					| (Pick<SendTurnInput, "inputId" | "runId" | "continuation"> & {
+							readonly eventSink: ClaudeSessionContext["eventSink"];
+					  })
+					| undefined;
 				let endsCurrentRun = true;
 				if (message.type === "result") {
 					const pending = yield* pendingIntakes(this.stateRef, ctx.sessionId);
@@ -2002,10 +2020,26 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					const inputIds = message.user_message_uuids ?? [
 						message.user_message_uuid ?? ctx.currentTurnId,
 					];
+					const acceptedOwner = inputIds.flatMap((inputId) => {
+						const runId = inputId && ctx.messageRunIds?.get(inputId);
+						return runId ? [{ inputId, runId, eventSink: ctx.eventSink }] : [];
+					});
+					terminalRunIds = [
+						...new Set([
+							...unacceptedResultInputs.flatMap((input) =>
+								input.runId ? [input.runId] : [],
+							),
+							...acceptedOwner.map(({ runId }) => runId),
+						]),
+					];
 					endsCurrentRun =
 						!ctx.currentRunId ||
-						unacceptedResultInputs.length === 0 ||
-						inputIds.includes(ctx.currentTurnId);
+						(unacceptedResultInputs.length === 0 &&
+							acceptedOwner.length === 0) ||
+						inputIds.includes(ctx.currentTurnId) ||
+						acceptedOwner.some(({ runId }) => runId === ctx.currentRunId);
+					if (!ctx.currentRunId || !endsCurrentRun)
+						resultInput = unacceptedResultInputs[0] ?? acceptedOwner[0];
 					ctx.interruptRequested =
 						ctx.interruptInputId !== undefined &&
 						inputIds.includes(ctx.interruptInputId);
@@ -2022,19 +2056,15 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					}
 					if (endsCurrentRun) ctx.turnInFlight = false;
 				}
-				const unacceptedResultInput =
-					!ctx.currentRunId || !endsCurrentRun
-						? unacceptedResultInputs[0]
-						: undefined;
-				const translationContext: ClaudeSessionContext = unacceptedResultInput
+				const translationContext: ClaudeSessionContext = resultInput
 					? {
 							...ctx,
-							currentRunId: unacceptedResultInput.runId,
-							currentTurnId: unacceptedResultInput.inputId,
+							currentRunId: resultInput.runId,
+							currentTurnId: resultInput.inputId,
 							currentUserMessageId:
-								unacceptedResultInput.continuation?.cutOffMessageId ??
-								unacceptedResultInput.inputId,
-							eventSink: unacceptedResultInput.eventSink,
+								resultInput.continuation?.cutOffMessageId ??
+								resultInput.inputId,
+							eventSink: resultInput.eventSink,
 							lastAssistantUuid: undefined,
 							activeAssistantMessageId: "",
 							goalTracker: new ClaudeGoalTracker(ctx.sessionId),
@@ -2047,12 +2077,9 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					translationContext,
 					message,
 				);
-				const terminalRunIds = unacceptedResultInputs.flatMap((input) =>
-					input.runId ? [input.runId] : [],
-				);
 				for (const translatedMessage of translatedMessages)
-					yield* translatedMessage.type === "result" && unacceptedResultInput
-						? translator.translateUnacceptedResult(
+					yield* translatedMessage.type === "result" && resultInput
+						? translator.translateDetachedResult(
 								translationContext,
 								translatedMessage,
 								terminalRunIds,
@@ -2169,10 +2196,19 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			yield* ctx.promptQueue.recall(message.command_uuid);
 			// A steer becomes the current turn when it starts, on its own sink,
 			// and is in flight even when the turn before it already ended.
+			// Stop keeps this query alive for tasks/steers, but closes its run to
+			// new members, including when the daemon has retired it at the bound.
+			if (ctx.currentRunId && ctx.closedRunIds?.has(ctx.currentRunId))
+				ctx.currentRunId = undefined;
 			ctx.currentTurnId = message.command_uuid;
 			ctx.currentUserMessageId =
 				unplaced.continuation?.cutOffMessageId ?? message.command_uuid;
 			ctx.currentRunId ??= unplaced.runId;
+			if (ctx.currentRunId)
+				(ctx.messageRunIds ??= new Map()).set(
+					message.command_uuid,
+					ctx.currentRunId,
+				);
 			ctx.turnInFlight = true;
 			this.deps.onTurnStateChanged?.(ctx.sessionId, true);
 			if (unplaced.eventSink !== ctx.eventSink) {
@@ -2397,11 +2433,12 @@ class ClaudeRunnerPayload implements RunnerPayload {
 
 	interruptTurnEffect(
 		sessionId: string,
+		turnIds?: readonly string[],
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		const attributes = { providerId: this.providerId, sessionId };
 		return this.mapProviderFailure(
 			"interruptTurn",
-			this.interruptSessionEffect(sessionId).pipe(
+			this.interruptSessionEffect(sessionId, turnIds).pipe(
 				Effect.annotateLogs(attributes),
 				Effect.withSpan("claude.interrupt", { attributes }),
 			),
@@ -2410,83 +2447,180 @@ class ClaudeRunnerPayload implements RunnerPayload {
 
 	private interruptSessionEffect(
 		sessionId: string,
+		turnIds?: readonly string[],
 	): Effect.Effect<void, ClaudeAdapterError> {
+		const bound = turnIds !== undefined;
 		return Effect.gen({ self: this }, function* () {
-			yield* FiberMap.remove(this.shutdownFibers, sessionId);
-			yield* this.warmedQueries.discardEffect(sessionId);
-			// Stop can arrive while query setup is still preparing its context.
-			// Use the existing setup lock so it cannot disappear before cleanup.
-			const setup = yield* getSetupLock(this.stateRef, sessionId);
-			if (setup) yield* Deferred.await(setup).pipe(Effect.ignore);
+			if (!bound) {
+				yield* FiberMap.remove(this.shutdownFibers, sessionId);
+				yield* this.warmedQueries.discardEffect(sessionId);
+				const setup = yield* getSetupLock(this.stateRef, sessionId);
+				if (setup) yield* Deferred.await(setup).pipe(Effect.ignore);
+			}
 			const ctx = yield* getSession(this.stateRef, sessionId);
-			if (!ctx) return;
+			const interrupt = Effect.gen({ self: this }, function* () {
+				// A queued lifecycle start can change the active admission while Stop
+				// waits for message ownership. Select its candidate under that permit.
+				const boundTurnId = bound ? ctx?.currentTurnId : undefined;
+				if (bound && !ctx) {
+					// Stop setup too: it may still be placing the user message and
+					// otherwise create a cold query after the warm query is discarded.
+					const waiters = yield* pendingIntakes(this.stateRef, sessionId);
+					if (!turnIds.some((turnId) => waiters.has(turnId)))
+						return Effect.void;
+					const setupLock = yield* getSetupLock(this.stateRef, sessionId);
+					if (setupLock)
+						yield* Deferred.fail(setupLock, new Error("Turn interrupted"));
+				} else if (
+					ctx &&
+					bound &&
+					(!boundTurnId ||
+						!turnIds.includes(boundTurnId) ||
+						!(yield* isCurrentSession(this.stateRef, ctx)))
+				)
+					return Effect.void;
+				if (bound) {
+					yield* FiberMap.remove(this.shutdownFibers, sessionId);
+					yield* this.warmedQueries.discardEffect(sessionId);
+				}
+				if (!ctx) return Effect.void;
+				// Revalidate the captured input after asynchronous owner cleanup. Never
+				// resolve a replacement query from the session id for a delayed Stop.
+				if (
+					bound &&
+					(!(yield* isCurrentSession(this.stateRef, ctx)) ||
+						ctx.currentTurnId !== boundTurnId)
+				)
+					return Effect.void;
 
-			// Live tasks and pending steering inputs need the same query and prompt
-			// queue. Interrupt only the running turn; its SDK result streams the terminal.
-			const waiters = yield* pendingIntakes(this.stateRef, sessionId);
-			if (
-				!ctx.stopped &&
-				((ctx.liveBackgroundTaskCount ?? 0) > 0 ||
-					[...waiters].some(
-						([inputId, waiter]) =>
-							waiter.unplaced !== undefined && inputId !== ctx.currentTurnId,
-					))
-			) {
-				// A delayed Cancel can arrive after the result while tasks or a steer
-				// keep the query alive. It must not interrupt an idle query or the next input.
-				const inputId = ctx.currentTurnId;
-				if (!ctx.turnInFlight || !inputId || ctx.interruptInputId === inputId)
-					return;
-				log.info(`Interrupting running turn for session ${sessionId}`);
-				ctx.interruptInputId = inputId;
-				yield* Effect.tryPromise({
-					try: () => ctx.query.interrupt(),
+				// Live tasks and pending steering inputs need the same query and prompt
+				// queue. Interrupt only the running turn; its SDK result settles it by id.
+				const waiters = yield* pendingIntakes(this.stateRef, sessionId);
+				if (
+					!ctx.stopped &&
+					((ctx.liveBackgroundTaskCount ?? 0) > 0 ||
+						[...waiters].some(
+							([inputId, waiter]) =>
+								waiter.unplaced !== undefined && inputId !== ctx.currentTurnId,
+						))
+				) {
+					// A delayed Cancel can arrive after the result while tasks or a steer
+					// keep the query alive. It must not interrupt an idle query or the next input.
+					const inputId = ctx.currentTurnId;
+					if (!ctx.turnInFlight || !inputId || ctx.interruptInputId === inputId)
+						return Effect.void;
+					log.info(`Interrupting running turn for session ${sessionId}`);
+					ctx.interruptInputId = inputId;
+					const closed = (ctx.closedRunIds ??= new Set());
+					// A late rejection can follow durable bound retirement. Membership
+					// stays closed; rejection still leaves the durable run untouched.
+					for (const id of [
+						ctx.currentRunId,
+						...(turnIds ?? [inputId]).map(
+							(id) =>
+								ctx.messageRunIds?.get(id) ?? waiters.get(id)?.unplaced?.runId,
+						),
+					])
+						if (id) closed.add(id);
+					const acknowledged = yield* this.interruptQueryEffect(ctx).pipe(
+						Effect.tapError(() =>
+							Effect.sync(() => {
+								if (ctx.interruptInputId === inputId)
+									ctx.interruptInputId = undefined;
+							}),
+						),
+					);
+					// Only an accepted interrupt may reject interactions. Keep this on
+					// the stream's ownership permit so a pending steer cannot lose its approvals.
+					// A bound Stop awaits acceptance after releasing that permit, so the
+					// acknowledgement holds no admission and a rejection still fails the Stop.
+					return acknowledged.pipe(
+						Effect.andThen(
+							(ctx.messageOwnershipPermit ??=
+								Semaphore.makeUnsafe(1)).withPermits(1)(
+								Effect.gen({ self: this }, function* () {
+									if (ctx.currentTurnId === inputId && ctx.turnInFlight)
+										yield* this.cancelInteractionsEffect(
+											ctx,
+											"Turn interrupted",
+											false,
+										);
+								}),
+							),
+						),
+					);
+				}
+
+				log.info(`Interrupting turn for session ${sessionId}`);
+				yield* this.cleanupSessionEffect(
+					ctx,
+					"Turn interrupted",
+					false,
+					!bound,
+				);
+				// With no live tasks or pending steer, retain the existing close path.
+				yield* Effect.try({
+					try: () => ctx.query.close(),
 					catch: (cause) =>
 						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
-				}).pipe(
-					Effect.tapError(() =>
-						Effect.sync(() => {
-							if (ctx.interruptInputId === inputId)
-								ctx.interruptInputId = undefined;
-						}),
-					),
+				}).pipe(Effect.ignore);
+				yield* settlePendingIntakesEffect(
+					this.stateRef,
+					ctx.sessionId,
+					INTERRUPTED_TURN,
 				);
-				// Only an accepted interrupt may reject interactions. Keep this on
-				// the stream's ownership permit so a pending steer cannot lose its approvals.
-				yield* (ctx.messageOwnershipPermit ??=
-					Semaphore.makeUnsafe(1)).withPermits(1)(
-					Effect.gen({ self: this }, function* () {
-						if (ctx.currentTurnId === inputId && ctx.turnInFlight)
-							yield* this.cancelInteractionsEffect(
-								ctx,
-								"Turn interrupted",
-								false,
-							);
-					}),
-				);
-				return;
-			}
+				if (
+					HashSet.has(
+						(yield* getState(this.stateRef)).shutdownAfterTurn,
+						sessionId,
+					)
+				)
+					yield* this.scheduleShutdownAfterTurnEffect(sessionId);
+				return Effect.void;
+			});
+			// Lifecycle starts and send admission change currentTurnId on this permit.
+			// Keep a bound Stop's identity check and query command in the same turn.
+			const acknowledged = yield* ctx && bound
+				? (ctx.messageOwnershipPermit ??= Semaphore.makeUnsafe(1)).withPermits(
+						1,
+					)(interrupt)
+				: interrupt;
+			yield* acknowledged;
+		});
+	}
 
-			log.info(`Interrupting turn for session ${sessionId}`);
-			yield* this.cleanupSessionEffect(ctx, "Turn interrupted", false);
-			// With no live tasks or pending steer, retain the existing close path.
-			yield* Effect.try({
-				try: () => ctx.query.close(),
+	/** Issues the interrupt to this query; the result awaits its acknowledgement. */
+	private interruptQueryEffect(
+		ctx: ClaudeSessionContext,
+	): Effect.Effect<
+		Effect.Effect<void, ClaudeAdapterError>,
+		ClaudeAdapterError
+	> {
+		return Effect.gen({ self: this }, function* () {
+			const inputId = ctx.currentTurnId;
+			const acknowledgement = yield* Effect.try({
+				try: () => {
+					const pending = ctx.query.interrupt();
+					// close() rejects an unanswered interrupt, and callers may fork or drop
+					// the acknowledgement. Unobserved, that rejection kills the runner.
+					pending.catch(() => {});
+					return pending;
+				},
 				catch: (cause) =>
 					new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
-			}).pipe(Effect.ignore);
-			yield* settlePendingIntakesEffect(
-				this.stateRef,
-				ctx.sessionId,
-				INTERRUPTED_TURN,
+			});
+			return Effect.tryPromise({
+				try: () => acknowledgement,
+				catch: (cause) =>
+					new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
+			}).pipe(
+				Effect.tapError(() =>
+					Effect.sync(() => {
+						if (ctx.interruptInputId === inputId)
+							ctx.interruptInputId = undefined;
+					}),
+				),
 			);
-			if (
-				HashSet.has(
-					(yield* getState(this.stateRef)).shutdownAfterTurn,
-					sessionId,
-				)
-			)
-				yield* this.scheduleShutdownAfterTurnEffect(sessionId);
 		});
 	}
 
@@ -2560,6 +2694,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		ctx: ClaudeSessionContext,
 		reason: string,
 		recoverQuestions: boolean,
+		waitForInterrupt = true,
 	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen({ self: this }, function* () {
 			if (ctx.stopped) return;
@@ -2628,11 +2763,17 @@ class ClaudeRunnerPayload implements RunnerPayload {
 
 			yield* ctx.promptQueue.close().pipe(Effect.ignore);
 
-			yield* Effect.tryPromise({
-				try: () => ctx.query.interrupt(),
-				catch: (cause) =>
-					new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
-			}).pipe(Effect.ignore);
+			const acknowledged = yield* this.interruptQueryEffect(ctx).pipe(
+				Effect.orElseSucceed(() => Effect.void),
+			);
+			// A late acknowledgement must neither hold admission nor perform cleanup
+			// against a replacement.
+			yield* waitForInterrupt
+				? Effect.ignore(acknowledged)
+				: Effect.forkIn(
+						acknowledged.pipe(Effect.interruptible, Effect.ignore),
+						this.scope,
+					);
 			yield* this.endMessageOwnershipEffect(ctx);
 		});
 	}

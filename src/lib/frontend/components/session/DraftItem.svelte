@@ -1,6 +1,5 @@
 <script lang="ts">
 	import type { DraftListItem } from "../../types.js";
-	import { formatTimeAgo } from "../../utils/format.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import ProjectSquare from "./ProjectSquare.svelte";
@@ -16,26 +15,39 @@
 		ondiscard?: () => void;
 	} = $props();
 	const title = $derived(draft.firstLine.trim() || "Untitled draft");
+	// Compact age ("2m", "1h", "3d") so the time fits the title line beside a long draft.
+	const age = $derived.by(() => {
+		const minutes = Math.floor((now - draft.updatedAt) / 60_000);
+		if (minutes < 1) return "now";
+		if (minutes < 60) return `${minutes}m`;
+		const hours = Math.floor(minutes / 60);
+		return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+	});
 </script>
 
-<div class="group flex items-center gap-1" data-testid="draft-row" data-draft-id={draft.draftId}>
+<!-- Keep the link full width and overlay the separate discard button on its time slot. -->
+<div class="group relative" data-testid="draft-row" data-draft-id={draft.draftId}>
 	<Button
-		{href} variant="ghost" size="content" layout="flow"
-		class="grid min-w-0 flex-1 grid-cols-[16px_minmax(0,1fr)] items-center gap-x-2.5 rounded-panel px-2 py-1.5 min-h-[52px] md:min-h-[46px] font-brand {active ? 'bg-bg-alt' : ''}"
-		ariaLabel="Draft: {title}, {projectLabel}" aria-current={active ? "page" : undefined}
+		{href} variant="ghost" size="content" layout="flow" hoverFill="none"
+		class="grid w-full grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-x-[10px] gap-y-px rounded-panel px-[8px] py-[6px] min-h-[44px] font-sans leading-[1.4] {active ? 'bg-sidebar-active' : 'group-hover:bg-hover'}"
+		ariaLabel="Draft: {title}, {projectLabel}, {age}" aria-current={active ? "page" : undefined}
 		onclick={(event) => {
 			if (!onopen || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
 			event.preventDefault();
 			onopen();
 		}}
 	>
-		<span class="row-span-2 text-text-muted"><Icon name="pencil-line" size={16} /></span>
-		<span class="truncate text-base italic" title={title}>{title}</span>
-		<span class="flex min-w-0 items-center gap-1.5 text-sm text-text-dimmer">
-			<ProjectSquare label={projectLabel} accent={projectAccent} />
+		<span class="grid place-items-center text-text-dimmer"><Icon name="pencil-line" size={13} /></span>
+		<span class="min-w-0 truncate text-[13.5px] font-normal italic text-text-muted" title={title}>{title}</span>
+		<span class="whitespace-nowrap font-mono text-[11px] tabular-nums text-text-dimmer pointer-coarse:invisible pointer-coarse:min-w-[36px] pointer-fine:group-hover:invisible pointer-fine:group-focus-within:invisible">{age}</span>
+		<span class="col-span-2 col-start-2 flex min-w-0 items-center gap-[5px] text-[11.5px] text-text-dimmer pointer-coarse:pr-[36px]">
+			<ProjectSquare label={projectLabel} accent={projectAccent} dot />
 			<span class="truncate">{projectLabel}</span>
-			<span class="ml-auto shrink-0 text-xs tabular-nums">{formatTimeAgo(draft.updatedAt, new Date(now))}</span>
 		</span>
 	</Button>
-	<Button variant="ghost" size="content" iconOnly tone="dimmer" icon="trash-2" iconSize={14} ariaLabel="Discard draft" data-testid="draft-row-discard" class="size-[44px] md:size-8 shrink-0 rounded-panel pointer-fine:opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity" onclick={() => ondiscard?.()} />
+	<Button
+		variant="ghost" size="content" iconOnly tone="inherit" hoverFill="none" icon="trash-2" iconSize={13} ariaLabel="Discard draft" data-testid="draft-row-discard"
+		class="absolute right-0 top-1/2 size-[44px] -translate-y-1/2 rounded-[6px] text-text-muted hover:bg-sidebar-active hover:text-error pointer-fine:right-[6px] pointer-fine:top-[5px] pointer-fine:size-[22px] pointer-fine:translate-y-0 pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 pointer-fine:group-focus-within:opacity-100"
+		onclick={() => ondiscard?.()}
+	/>
 </div>

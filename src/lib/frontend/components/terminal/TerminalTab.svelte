@@ -1,8 +1,9 @@
 <!--
   TerminalTab — Single terminal instance.
-  Creates an XtermAdapter on mount, wires input→PtyInput, subscribes to PTY output
-  via the non-reactive callback pattern, replays scrollback on mount, and handles
-  its own resize via ResizeObserver on the container element.
+  Creates the xterm emulator on mount and connects it to the panel's terminal
+  keys module, which feeds its data stream into PtyInput. Subscribes to PTY
+  output via the non-reactive callback pattern, replays scrollback on mount, and
+  handles its own resize via ResizeObserver on the container element.
 -->
 <script lang="ts">
 	import { onMount } from "svelte";
@@ -14,24 +15,35 @@
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
-	import { XtermAdapter } from "../../utils/xterm-adapter.js";
+	import { FitAddon } from "@xterm/addon-fit";
+	import { Terminal } from "@xterm/xterm";
+	import "@xterm/xterm/css/xterm.css";
+	import type { TerminalKeys } from "../../utils/terminal-keys.svelte.js";
 	import { XTERM_THEMES } from "../../utils/xterm-themes.js";
 	import { themeState } from "../../stores/theme.svelte.js";
 
 	let {
 		ptyId,
 		active,
+		keys,
 		fontSize,
 		onFontSizeResize,
 	}: {
 		ptyId: string;
 		active: boolean;
+		keys: TerminalKeys;
 		fontSize?: number;
 		onFontSizeResize?: (size: { cols: number; rows: number }) => void;
 	} = $props();
 
 	let containerEl: HTMLDivElement;
-	let adapter = $state<XtermAdapter | null>(null);
+	let mounted = $state<{ terminal: Terminal; fit: FitAddon } | null>(null);
+
+	function refit(): { cols: number; rows: number } {
+		if (!mounted) return { cols: 0, rows: 0 };
+		mounted.fit.fit();
+		return { cols: mounted.terminal.cols, rows: mounted.terminal.rows };
+	}
 
 	function sendResize(size: { cols: number; rows: number }) {
 		const projectSlug = getCurrentSlug();
@@ -71,44 +83,51 @@
 	}
 
 	function initializeTerminal(): () => void {
-		const xterm = new XtermAdapter(fontSize ? { fontSize } : undefined);
-		adapter = xterm;
-		xterm.mount(containerEl);
-
-		// Apply the resolved theme immediately, before any data is written.
-		xterm.setTheme(XTERM_THEMES[themeState.resolved]);
-
-		// Wire user input → server
-		xterm.onData((data: string) => {
-			void sendInput(data);
+		const terminal = new Terminal({
+			// The resolved theme goes in before any data is written.
+			theme: XTERM_THEMES[themeState.resolved],
+			fontFamily:
+				"Berkeley Mono, IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace",
+			fontSize: fontSize ?? 13,
+			cursorBlink: true,
+			cursorStyle: "block",
+			scrollback: 5000,
+			// The search addon's match highlights are decorations, still proposed API.
+			allowProposedApi: true,
 		});
+		const fitAddon = new FitAddon();
+		terminal.loadAddon(fitAddon);
+		terminal.open(containerEl);
+		fitAddon.fit();
+		mounted = { terminal, fit: fitAddon };
+
+		// Wire user input → server, through the keys module
+		const disconnect = keys.connect(ptyId, terminal, (data) => void sendInput(data));
 
 		// Wire resize → server
-		xterm.onResize((size: { cols: number; rows: number }) => {
-			sendResize(size);
-		});
+		terminal.onResize(sendResize);
 
 		// Replay scrollback buffer (reconnection / tab remount)
 		const buffer = getScrollback(ptyId);
 		for (const chunk of buffer) {
-			xterm.write(chunk);
+			terminal.write(chunk);
 		}
 
 		// Subscribe to live PTY output (high-throughput, bypasses Svelte reactivity)
 		const unsubOutput = onOutput(ptyId, (data: string, replace?: boolean) => {
 			// Queue cancellation and reset after any earlier writes, before replay.
-			xterm.write(replace ? `\x18\x1bc${data}` : data);
+			terminal.write(replace ? `\x18\x1bc${data}` : data);
 		});
 
 		// Send initial dimensions to server
-		sendResize({ cols: xterm.cols, rows: xterm.rows });
+		sendResize({ cols: terminal.cols, rows: terminal.rows });
 
 		// Focus if this is the active tab
-		if (active) xterm.focus();
+		if (active) terminal.focus();
 
 		// Own resize handling — fit terminal when container dimensions change
 		const ro = new ResizeObserver(() => {
-			xterm.resize();
+			fitAddon.fit();
 		});
 		ro.observe(containerEl);
 
@@ -139,7 +158,7 @@
 
 			const lines = Math.trunc(touchAccum / LINE_HEIGHT_PX);
 			if (lines !== 0) {
-				xterm.scrollLines(lines);
+				terminal.scrollLines(lines);
 				touchAccum -= lines * LINE_HEIGHT_PX;
 			}
 		}
@@ -163,8 +182,9 @@
 			containerEl.removeEventListener("touchend", onTouchEnd);
 			ro.disconnect();
 			unsubOutput();
-			xterm.dispose();
-			adapter = null;
+			disconnect();
+			terminal.dispose();
+			mounted = null;
 		};
 	}
 
@@ -188,24 +208,24 @@
 	// When tab becomes active: re-fit (container may have had zero dimensions
 	// when hidden) and focus the terminal.
 	$effect(() => {
-		if (active && adapter) {
-			adapter.resize();
-			adapter.focus();
+		if (active && mounted) {
+			refit();
+			mounted.terminal.focus();
 		}
 	});
 
-	// When font size changes, update the adapter and notify parent of new dimensions
+	// When font size changes, re-fit and notify parent of new dimensions
 	$effect(() => {
-		if (fontSize && adapter) {
-			const dims = adapter.setFontSize(fontSize);
-			onFontSizeResize?.(dims);
+		if (fontSize && mounted) {
+			mounted.terminal.options.fontSize = fontSize;
+			onFontSizeResize?.(refit());
 		}
 	});
 
 	// When theme changes, update the terminal theme
 	$effect(() => {
-		if (!adapter) return;
-		adapter.setTheme(XTERM_THEMES[themeState.resolved]);
+		if (!mounted) return;
+		mounted.terminal.options.theme = XTERM_THEMES[themeState.resolved];
 	});
 </script>
 

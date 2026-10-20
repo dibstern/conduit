@@ -16,6 +16,8 @@ export interface ScrollController {
 	detach(): void;
 	resetForSession(): void;
 	requestFollow(): void;
+	/** Suspend following before a reveal; sample its final position next frame. */
+	requestJump(): void;
 	onNewContent(): void;
 	onContainerResize(): void;
 	onPrepend(prevScrollHeight: number, prevScrollTop: number): void;
@@ -32,6 +34,12 @@ export function createScrollController(
 	let pinned = true;
 	let programmaticScrollCount = 0; // counter — prevents false detach from our own scrolls
 	let resetTimerScheduled = false; // guards against scheduling multiple reset timers
+	let jumpFrame: number | null = null;
+
+	function cancelJump(): void {
+		if (jumpFrame !== null) cancelAnimationFrame(jumpFrame);
+		jumpFrame = null;
+	}
 
 	function getState(): ScrollState {
 		const lc = getLifecycle();
@@ -64,7 +72,7 @@ export function createScrollController(
 	}
 
 	function onScroll(): void {
-		if (!container) return;
+		if (!container || jumpFrame !== null) return;
 
 		// If we triggered this scroll via scrollToBottom(), skip the detach
 		// check. Uses a counter so that multiple scrollToBottom() calls in
@@ -120,6 +128,7 @@ export function createScrollController(
 		},
 
 		detach(): void {
+			cancelJump();
 			if (container) {
 				container.removeEventListener("scroll", onScroll);
 				container = null;
@@ -127,6 +136,7 @@ export function createScrollController(
 		},
 
 		resetForSession(): void {
+			cancelJump();
 			userDetached = false;
 			// Scroll immediately so the first paint of the new session is at the
 			// bottom, not at whatever scroll position the previous session had.
@@ -134,8 +144,27 @@ export function createScrollController(
 		},
 
 		requestFollow(): void {
+			cancelJump();
 			userDetached = false;
 			scrollToBottom();
+		},
+
+		requestJump(): void {
+			if (!container) return;
+			cancelJump();
+			userDetached = true;
+			pinned = false;
+			// The reveal expands its DOM and scrolls after tick(). Ignore both
+			// content and queued scroll events until that position has settled.
+			jumpFrame = requestAnimationFrame(() => {
+				jumpFrame = null;
+				if (!container) return;
+				programmaticScrollCount = 0;
+				const gap =
+					container.scrollHeight - container.scrollTop - container.clientHeight;
+				pinned = gap < REFOLLOW_THRESHOLD;
+				userDetached = !pinned;
+			});
 		},
 
 		onNewContent(): void {

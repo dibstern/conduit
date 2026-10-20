@@ -262,18 +262,18 @@
 {#snippet cmdBlock(cmd: string, key: string)}
 	<div class="group/cmd flex items-start gap-1.5 bg-bg-alt rounded px-2.5 py-1.5 font-mono text-xs text-text leading-relaxed">
 		<span class="flex-1 whitespace-pre-wrap break-all select-all">{cmd}</span>
-		<TextButton type="button" class="shrink-0 p-0.5 opacity-0 group-hover/cmd:opacity-100 transition-opacity" title="Copy" aria-label="Copy" onclick={() => handleCopy(cmd, key)}>
+		<TextButton type="button" class="max-md:min-h-[44px] max-md:min-w-[44px] shrink-0 p-0.5 opacity-0 group-hover/cmd:opacity-100 transition-opacity" title="Copy" aria-label="Copy" onclick={() => handleCopy(cmd, key)}>
 			{#if state.copiedKey === key}<Icon name="check" size={13} class="text-success" />{:else}<Icon name="copy" size={13} />{/if}
 		</TextButton>
 	</div>
 {/snippet}
 
 
-<div id="instances-settings" class="flex flex-col gap-[7px]">
+<div id="instances-settings" class="mt-[16px] flex flex-col gap-[6px]">
 <div class="flex items-center justify-between gap-[10px]">
-	<h3 class="text-[12px] font-semibold text-text">Instances</h3>
+	<h3 class="px-[4px] text-[12px] font-medium text-text-muted max-md:text-[13px]">Instances</h3>
 	<div class="flex items-center gap-2">
-	<Button
+	<Button touchTarget
 		variant="secondary"
 		size="sm"
 		data-testid="scan-now-btn"
@@ -283,10 +283,9 @@
 		<Icon name="refresh-cw" size={12} class={scanInFlight ? "animate-spin" : ""} />
 		{scanInFlight ? "Scanning..." : "Scan"}
 	</Button>
-	<Button
-		variant="ghost-accent"
-		size="content"
-		class="gap-1.5 px-2.5 py-1 text-xs rounded-[7px] border border-accent"
+	<Button touchTarget
+		variant="secondary"
+		size="sm"
 		data-testid="add-instance-btn"
 		aria-expanded={openForm === "instance-add"}
 		aria-controls="instance-form"
@@ -300,136 +299,135 @@
 </div>
 
 {#if instanceFormMode !== null}
-	<form id="instance-form" class="border border-border-subtle bg-bg-surface rounded-[9px] p-3 flex flex-col gap-3" data-server-form data-testid="instance-form" aria-label={instanceFormMode === "edit" ? "Edit instance" : "New instance"} novalidate onsubmit={(event) => { event.preventDefault(); submitInstanceForm(); }}>
-		<div class="flex flex-wrap items-center gap-[10px] text-[12.5px]">
+	<SettingsGroup>
+	<form id="instance-form" class="px-[14px] py-3 flex flex-col gap-3" data-server-form data-testid="instance-form" aria-label={instanceFormMode === "edit" ? "Edit instance" : "New instance"} novalidate onsubmit={(event) => { event.preventDefault(); submitInstanceForm(); }}>
+		<div class="flex flex-wrap items-center gap-[10px] text-[13.5px] max-md:text-[15px]">
 			<h4 class="font-semibold text-text">{instanceFormMode === "edit" ? `Edit ${instances.find((inst) => inst.id === editingInstanceId)?.name ?? "instance"}` : "New instance"}</h4>
 			{#if instanceFormMode === "add"}
-				<SegmentedControl bind:value={state.formDriver} label="Type" options={DRIVER_TAB_OPTIONS} variant="joined" class="whitespace-nowrap" />
+				<SegmentedControl bind:value={state.formDriver} label="Type" options={DRIVER_TAB_OPTIONS} variant="joined" class="max-w-full" />
 			{/if}
 		</div>
 		{#if formTraits?.runsOpenCodeServer}
 			<SettingsRow label="Conduit starts it" description="Off: connect to one you run" checked={state.formManaged} onchange={() => { state.formManaged = !state.formManaged; }} disabled={state.formSaving || instanceFormMode === "edit"} testId="instance-form-managed" class="p-0" />
 		{/if}
 		<div class="grid grid-cols-1 gap-2 md:grid-cols-2">
-			<label for="instance-form-name" class="flex flex-col gap-1 text-[11px] text-text-muted">
+			<label for="instance-form-name" class="flex flex-col gap-1 text-[12px] text-text-muted">
 				Name
 				<TextInput id="instance-form-name" data-testid="instance-form-name" placeholder={formPresentation.namePlaceholder} bind:value={state.formName} disabled={state.formSaving} required />
 			</label>
 			{#if formTraits?.accountKind === "config-directory"}
-				<label for="instance-form-configdir" class="flex flex-col gap-1 text-[11px] text-text-muted">
+				<label for="instance-form-configdir" class="flex flex-col gap-1 text-[12px] text-text-muted">
 					Config directory (optional)
 					<TextInput id="instance-form-configdir" data-testid="instance-form-configdir" placeholder={formPresentation.configDirPlaceholder} bind:value={state.formConfigDir} disabled={state.formSaving} />
 				</label>
 			{:else if state.formManaged}
-				<label for="instance-form-port" class="flex flex-col gap-1 text-[11px] text-text-muted">
+				<label for="instance-form-port" class="flex flex-col gap-1 text-[12px] text-text-muted">
 					Port
 					<TextInput id="instance-form-port" inputmode="numeric" data-testid="instance-form-port" placeholder="4098" bind:value={state.formPort} disabled={state.formSaving} />
 				</label>
 			{:else}
-				<label for="instance-form-url" class="flex flex-col gap-1 text-[11px] text-text-muted">
+				<label for="instance-form-url" class="flex flex-col gap-1 text-[12px] text-text-muted">
 					URL (or port)
 					<TextInput id="instance-form-url" data-testid="instance-form-url" placeholder="http://127.0.0.1:4098" bind:value={state.formUrl} readonly={instanceFormMode === "edit"} disabled={state.formSaving} />
 				</label>
 			{/if}
 		</div>
 		{#if formTraits?.accountKind === "config-directory"}
-			<p class="text-[11px] text-text-muted">Folder changes apply on the next turn. Leave the folder empty to use the login Conduit was launched with.</p>
+			<p class="text-[12px] text-text-muted">Folder changes apply on the next turn. Leave the folder empty to use the login Conduit was launched with.</p>
 		{/if}
 		{#if formPresentation.environment || (formTraits?.runsOpenCodeServer && state.formManaged)}
 			<SettingsGroup title="Environment variables" summary="KEY=VALUE per line" collapsible bind:open={state.formEnvOpen}>
 				<label for="instance-form-env" class="block p-3">
 					<span class="sr-only">Environment variables</span>
 					<Textarea id="instance-form-env" data-testid="instance-form-env" rows={2} class="resize-y font-mono" placeholder={formPresentation.environment?.placeholder ?? "ANTHROPIC_API_KEY=sk-ant-..."} bind:value={state.formEnv} disabled={state.formSaving} />
-					{#if formPresentation.environment}<p class="mt-2 text-[11px] leading-[1.5] text-text-dimmer">{formPresentation.environment.hint}</p>{/if}
+					{#if formPresentation.environment}<p class="mt-2 text-[12px] leading-[1.5] text-text-dimmer">{formPresentation.environment.hint}</p>{/if}
 				</label>
 			</SettingsGroup>
 		{/if}
 		<div class="flex justify-end gap-1.5">
-			<Button variant="secondary" size="sm" data-testid="instance-form-cancel" disabled={state.formSaving} onclick={closeInstanceForm}>Cancel</Button>
-			<Button variant="primary" size="sm" type="submit" data-testid="instance-form-save" disabled={state.formSaving}>{state.formSaving ? "Saving..." : instanceFormMode === "edit" ? "Save" : "Add instance"}</Button>
+			<Button touchTarget variant="secondary" size="sm" data-testid="instance-form-cancel" disabled={state.formSaving} onclick={closeInstanceForm}>Cancel</Button>
+			<Button touchTarget variant="primary" size="sm" type="submit" data-testid="instance-form-save" disabled={state.formSaving}>{state.formSaving ? "Saving..." : instanceFormMode === "edit" ? "Save" : "Add instance"}</Button>
 		</div>
 	</form>
+	</SettingsGroup>
 {/if}
 
-<div id="instance-settings-list" class="flex flex-col gap-[6px]">
+<div id="instance-settings-list" class="flex flex-col">
 	{#each configDirectoryDrivers as driver (driver)}
 		{@const accounts = instancesByDriver[driver] ?? []}
 		{@const presentation = PROVIDER_PRESENTATION[driver]}
 		{#if presentation.auth}
 			<CursorAuthSettings account={accounts[0]} />
 		{:else if accounts.length > 0}
-			<div class="border border-border-subtle bg-bg-surface rounded-[9px] overflow-hidden" data-testid="{driver}-accounts-list">
-				<div class="flex items-center gap-[8px] bg-[rgba(var(--overlay-rgb),0.015)] px-[12px] py-[7px] text-[10.5px] font-semibold uppercase tracking-[0.07em] text-text-muted flex-wrap">
-					<h4>{presentation.label} accounts</h4>
+			<SettingsGroup title="{presentation.label} accounts" testId="{driver}-accounts-list">
+				{#snippet actions()}
 					{#if getDriverTraits(driver)?.usageHarness && accounts.some((account) => account.usageEligible !== false)}
-						<span class="ml-auto flex flex-wrap items-center justify-end gap-1 text-[11px] font-normal normal-case tracking-normal">
+						<span class="flex flex-wrap items-center justify-end gap-1 text-[12px] text-text-muted">
 							<span>Usage and switch order: </span>
-							<Button variant="ghost-accent" hoverFill="none" size="content" class="text-[11px] hover:underline" data-testid="{driver}-accounts-usage-link" onclick={onOpenUsage}>Usage ›</Button>
+							<TextButton class="max-md:min-h-[44px] max-md:min-w-[44px]" tone="accent" data-testid="{driver}-accounts-usage-link" onclick={onOpenUsage}>Usage ›</TextButton>
 						</span>
 					{/if}
-				</div>
+				{/snippet}
 				{#each accounts as inst (inst.id)}
-					<div class="border-t border-border-subtle" data-testid="instance-row-{inst.id}" data-driver={driver}>
+					<div data-testid="instance-row-{inst.id}" data-driver={driver}>
 						<Disclosure expanded={state.expandedInstanceId === inst.id} onToggle={() => handleToggleInstance(inst.id)} look="row" density="row" chevron={false} class="focus-visible:-outline-offset-2">
 							<AccountDot instanceId={inst.id} size={9} />
 							<div class="flex-1 min-w-0">
-								<div class="flex items-center gap-[6px] text-[12.5px] text-text">
+								<div class="flex items-center gap-[6px] text-[13.5px] max-md:text-[15px] text-text">
 									<span class="truncate">{inst.name}</span>
 									{#if inst.isDefault}<Badge variant="quiet" size="xs" shape="pill" data-testid="default-account-marker">default</Badge>{/if}
 								</div>
-								<div class="font-mono text-[11px] leading-[1.35] text-text-muted truncate">{inst.configDir || "env"}</div>
+								<div class="font-mono text-[12px] leading-[1.35] text-text-muted truncate">{inst.configDir || "env"}</div>
 							</div>
 							<span aria-hidden="true" class="w-[10px] shrink-0 text-center not-italic text-text-muted transition-transform duration-150" class:rotate-90={state.expandedInstanceId === inst.id}>›</span>
 						</Disclosure>
 						{#if state.expandedInstanceId === inst.id}
-							<div class="flex flex-col gap-[8px] border-t border-border-subtle bg-[rgba(var(--overlay-rgb),0.015)] pt-[9px] pb-[10px] pr-[12px] pl-[40px] max-md:pl-[12px]">
-								<dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-[14px] gap-y-[3px] text-[11px] [&_dd]:truncate">
+							<div class="flex flex-col gap-[8px] border-t border-settings-separator pt-[9px] pb-[10px] pr-[12px] pl-[40px] max-md:pl-[12px]">
+								<dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-[14px] gap-y-[3px] text-[12px] [&_dd]:truncate">
 									<dt class="text-text-muted">Config dir</dt>
 									<dd class="font-mono text-text">{inst.configDir || "env"}</dd>
 									<dt class="text-text-muted">Used by</dt>
 									<dd class="text-text">{inst.isDefault ? "New sessions, unless you pick another account" : inst.usageEligible !== false && getDriverTraits(driver)?.usageHarness ? "Sessions you move to it, and auto-switch" : "Sessions you move to it"}</dd>
 								</dl>
 								<div class="flex flex-wrap items-center gap-2">
-									<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="edit-instance-btn" disabled={state.formSaving} aria-expanded={openForm === `instance-edit:${inst.id}`} aria-controls="instance-form" onclick={() => openEditInstance(inst)}>Edit</Button>
+									<Button touchTarget variant="secondary" size="sm" data-testid="edit-instance-btn" disabled={state.formSaving} aria-expanded={openForm === `instance-edit:${inst.id}`} aria-controls="instance-form" onclick={() => openEditInstance(inst)}>Edit</Button>
 									{#if !inst.isDefault}
-										<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="make-default-btn" disabled={state.formSaving || state.defaultSaving} onclick={() => handleMakeDefault(inst.id)}>Make default</Button>
+										<Button touchTarget variant="secondary" size="sm" data-testid="make-default-btn" disabled={state.formSaving || state.defaultSaving} onclick={() => handleMakeDefault(inst.id)}>Make default</Button>
 									{/if}
-									<Button variant="danger-outline" size="content" class="px-3 py-1 text-xs rounded" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</Button>
+									<Button touchTarget variant="danger-outline" size="sm" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</Button>
 								</div>
 							</div>
 						{/if}
 					</div>
 				{/each}
-			</div>
+			</SettingsGroup>
 		{:else}
-			<SettingsGroup testId="{driver}-empty-state">
-				<div class="bg-[rgba(var(--overlay-rgb),0.015)] px-3 py-2 text-[10.5px] font-semibold uppercase tracking-[0.07em] text-text-muted"><h4>{presentation.label} accounts</h4></div>
-				<div class="flex items-center justify-between gap-2 px-3 py-2 text-xs text-text-muted">
+			<SettingsGroup title="{presentation.label} accounts" testId="{driver}-empty-state">
+				<div class="flex flex-wrap items-center justify-between gap-2 px-[14px] py-[10px] text-[12px] text-text-muted">
 					<p>No {presentation.label} accounts yet.</p>
-					<Button variant="ghost-accent" size="content" class="px-2 py-1 text-xs" data-testid="add-{driver}-account-settings-btn" disabled={state.formSaving} onclick={() => openAddInstance(driver)}>Add account</Button>
+					<Button touchTarget variant="secondary" size="sm" data-testid="add-{driver}-account-settings-btn" disabled={state.formSaving} onclick={() => openAddInstance(driver)}>Add account</Button>
 				</div>
 			</SettingsGroup>
 		{/if}
 	{/each}
-	<SettingsGroup testId="opencode-servers-list">
-		<div class="flex items-center gap-[8px] bg-[rgba(var(--overlay-rgb),0.015)] px-[12px] py-[7px] text-[10.5px] font-semibold uppercase tracking-[0.07em] text-text-muted">
-			<h4>{PROVIDER_PRESENTATION.opencode.label} servers</h4>
-			{#if serverInstances.length > 0}<span class="ml-auto text-[11px] font-normal normal-case tracking-normal">{serverInstances.length}</span>{/if}
-		</div>
+	<SettingsGroup title="{PROVIDER_PRESENTATION.opencode.label} servers" testId="opencode-servers-list">
+		{#snippet actions()}
+			{#if serverInstances.length > 0}<span class="text-[12px] text-text-muted">{serverInstances.length}</span>{/if}
+		{/snippet}
 		{#each serverInstances as inst (inst.id)}
 			<div data-testid="instance-row-{inst.id}" data-driver={inst.driver ?? "opencode"}>
 				<Disclosure expanded={state.expandedInstanceId === inst.id} onToggle={() => handleToggleInstance(inst.id)} look="row" density="row" chevron={false} class="focus-visible:-outline-offset-2">
 					<span data-testid="instance-status-dot" class={"size-[7px] rounded-full shrink-0 " + instanceStatusColor(inst.status)}></span>
-					<div class="flex-1 min-w-0 flex items-center gap-[6px] text-[12.5px] text-text">
+					<div class="flex-1 min-w-0 flex items-center gap-[6px] text-[13.5px] max-md:text-[15px] text-text">
 						<span class="truncate">{inst.name}</span>
 						{#if !inst.managed}<Badge variant="quiet" size="xs" shape="pill">discovered</Badge>{/if}
 					</div>
-					<span class="font-mono text-[11px] text-text-muted shrink-0">:{inst.port}</span>
+					<span class="font-mono text-[12px] text-text-muted shrink-0">:{inst.port}</span>
 					<span aria-hidden="true" class="w-[10px] shrink-0 text-center not-italic text-text-muted transition-transform duration-150" class:rotate-90={state.expandedInstanceId === inst.id}>›</span>
 				</Disclosure>
 				{#if state.expandedInstanceId === inst.id}
-					<div class="flex flex-col gap-[8px] border-t border-border-subtle bg-[rgba(var(--overlay-rgb),0.015)] pt-[9px] pb-[10px] pr-[12px] pl-[40px] max-md:pl-[12px]">
-						<dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-[14px] gap-y-[3px] text-[11px] [&_dd]:truncate">
+					<div class="flex flex-col gap-[8px] border-t border-settings-separator pt-[9px] pb-[10px] pr-[12px] pl-[40px] max-md:pl-[12px]">
+						<dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-[14px] gap-y-[3px] text-[12px] [&_dd]:truncate">
 							<dt class="text-text-muted">Status</dt>
 							<dd class="text-text capitalize">{inst.status}</dd>
 							<dt class="text-text-muted">Address</dt>
@@ -440,20 +438,20 @@
 						<div class="flex flex-wrap items-center gap-2">
 							{#if inst.managed}
 								{#if inst.status === "healthy" || inst.status === "starting"}
-									<Button variant="secondary" size="sm" onclick={() => handleStop(inst.id)}>Stop</Button>
+									<Button touchTarget variant="secondary" size="sm" onclick={() => handleStop(inst.id)}>Stop</Button>
 								{:else}
-									<Button variant="secondary" size="sm" onclick={() => handleStart(inst.id)}>Start</Button>
+									<Button touchTarget variant="secondary" size="sm" onclick={() => handleStart(inst.id)}>Start</Button>
 								{/if}
 							{/if}
-							<Button variant="secondary" size="sm" data-testid="edit-instance-btn" disabled={state.formSaving} aria-expanded={openForm === `instance-edit:${inst.id}`} aria-controls="instance-form" onclick={() => openEditInstance(inst)}>Edit</Button>
-							<Button variant="danger-outline" size="sm" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</Button>
+							<Button touchTarget variant="secondary" size="sm" data-testid="edit-instance-btn" disabled={state.formSaving} aria-expanded={openForm === `instance-edit:${inst.id}`} aria-controls="instance-form" onclick={() => openEditInstance(inst)}>Edit</Button>
+							<Button touchTarget variant="danger-outline" size="sm" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</Button>
 						</div>
 					</div>
 				{/if}
 			</div>
 		{:else}
 			<div class="px-3 py-2 flex flex-col gap-2 text-xs text-text-muted" data-testid="opencode-empty-state">
-				<p>No OpenCode servers yet. Start one and it shows up here, or <TextButton type="button" tone="accent" data-testid="scan-now-link" disabled={scanInFlight} onclick={handleScanNow}>{scanInFlight ? "Scanning..." : "scan now"}</TextButton>.</p>
+				<p>No OpenCode servers yet. Start one and it shows up here, or <TextButton class="max-md:min-h-[44px] max-md:min-w-[44px]" type="button" tone="accent" data-testid="scan-now-link" disabled={scanInFlight} onclick={handleScanNow}>{scanInFlight ? "Scanning..." : "scan now"}</TextButton>.</p>
 					{@render cmdBlock("opencode serve --port 4098", "empty-serve")}
 				<SettingsGroup title="Setup guides" collapsible bind:open={state.guidesOpen} summary={`Direct key · CCS${ccsDetected ? " ✓" : ""} · Custom${proxyResult === null ? " · detecting..." : ""}`} testId="opencode-setup-guides">
 					<div>
@@ -462,7 +460,7 @@
 							<span>Direct key</span>
 						</Disclosure>
 						{#if state.expandedScenario === "direct"}
-							<div class="p-[8px] flex flex-col gap-[6px] border-t border-border-subtle">
+							<div class="p-[8px] flex flex-col gap-[6px] border-t border-settings-separator">
 								<p>1. Start an OpenCode server:</p>
 								{@render cmdBlock("opencode serve --port 4098", "direct-1")}
 								<p>2. Configure your provider:</p>
@@ -478,7 +476,7 @@
 							{#if ccsDetected}<Icon name="circle-check" size={14} class="text-success ml-auto shrink-0" />{:else if proxyResult === null}<span class="text-xs text-text-muted animate-pulse ml-auto">detecting...</span>{/if}
 						</Disclosure>
 						{#if state.expandedScenario === "ccs"}
-							<div class="p-[8px] flex flex-col gap-[6px] border-t border-border-subtle">
+							<div class="p-[8px] flex flex-col gap-[6px] border-t border-settings-separator">
 								<p>CCS manages OAuth tokens and API keys for 20+ providers.</p>
 								{#if ccsDetected}
 									<div class="flex items-center gap-1.5 text-xs text-success bg-success/10 rounded px-2 py-1"><Icon name="circle-check" size={12} />CCS detected on port {proxyResult?.port ?? 8317}</div>
@@ -500,7 +498,7 @@
 							<span>Custom</span>
 						</Disclosure>
 						{#if state.expandedScenario === "custom"}
-							<div class="p-[8px] flex flex-col gap-[6px] border-t border-border-subtle">
+							<div class="p-[8px] flex flex-col gap-[6px] border-t border-settings-separator">
 								<p>Configure with environment variables:</p>
 								{@render cmdBlock("ANTHROPIC_API_KEY=sk-ant-... opencode serve --port 4098", "custom-1")}
 							</div>
@@ -517,14 +515,14 @@
 					<Disclosure expanded={state.expandedInstanceId === inst.id} onToggle={() => handleToggleInstance(inst.id)} look="row" density="row" chevron={false} class="focus-visible:-outline-offset-2">
 						<Icon name="bot" size={14} class="text-text-muted shrink-0" />
 						<div class="flex-1 min-w-0">
-							<div class="truncate text-[12.5px] text-text">{inst.name}</div>
-							<div class="text-[11px] text-text-muted">Unknown provider</div>
+							<div class="truncate text-[13.5px] max-md:text-[15px] text-text">{inst.name}</div>
+							<div class="text-[12px] text-text-muted">Unknown provider</div>
 						</div>
 						<span aria-hidden="true" class="w-[10px] shrink-0 text-center not-italic text-text-muted transition-transform duration-150" class:rotate-90={state.expandedInstanceId === inst.id}>›</span>
 					</Disclosure>
 					{#if state.expandedInstanceId === inst.id}
-						<div class="flex flex-col gap-[8px] border-t border-border-subtle bg-[rgba(var(--overlay-rgb),0.015)] pt-[9px] pb-[10px] pr-[12px] pl-[40px] max-md:pl-[12px]">
-							<dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-[14px] gap-y-[3px] text-[11px] [&_dd]:truncate">
+						<div class="flex flex-col gap-[8px] border-t border-settings-separator pt-[9px] pb-[10px] pr-[12px] pl-[40px] max-md:pl-[12px]">
+							<dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-[14px] gap-y-[3px] text-[12px] [&_dd]:truncate">
 								<dt class="text-text-muted">Driver</dt>
 								<dd class="font-mono text-text">{inst.driver}</dd>
 								<dt class="text-text-muted">Status</dt>
@@ -533,7 +531,7 @@
 								{#if inst.url}<dt class="text-text-muted">Address</dt><dd class="font-mono text-text">{inst.url}</dd>{/if}
 							</dl>
 							<div class="flex flex-wrap items-center gap-2">
-								<Button variant="danger-outline" size="sm" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</Button>
+								<Button touchTarget variant="danger-outline" size="sm" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</Button>
 							</div>
 						</div>
 					{/if}
@@ -544,7 +542,7 @@
 </div>
 
 {#if scanResult && !scanInFlight}
-	<p class="text-[11px] text-text-muted" data-testid="instance-scan-note" role="status">
+	<p class="text-[12px] text-text-muted" data-testid="instance-scan-note" role="status">
 		{#if scanResult.discovered.length > 0}
 			Found {scanResult.discovered.length} new instance{scanResult.discovered.length !== 1 ? "s" : ""} on port{scanResult.discovered.length !== 1 ? "s" : ""} {scanResult.discovered.join(", ")}.
 		{:else if scanResult.lost.length > 0}

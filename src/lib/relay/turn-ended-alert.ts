@@ -4,7 +4,10 @@ import type { RelayMessage } from "../shared-types.js";
 import { isRecord } from "../utils.js";
 
 export function turnEndedAlert(
-	event: CanonicalEvent,
+	event: Pick<CanonicalEvent, "eventId" | "sessionId" | "provider"> & {
+		readonly type: string;
+		readonly data: unknown;
+	},
 ): Extract<RelayMessage, { type: "done" }> | undefined {
 	const status = runTerminalStatus(event, event.provider);
 	if (!status) return undefined;

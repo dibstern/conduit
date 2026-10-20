@@ -36,7 +36,7 @@ const roots: string[] = [];
 const cases: Array<{ case: string; outcome: "passed" }> = [];
 const runId = "legacy-run:test-project:1";
 
-// Open a real pre-0069 file, then let the ordinary persistence layer upgrade it.
+// Open a real pre-0075 file, then let the ordinary persistence layer upgrade it.
 // Failures: upgrade invents an interruption/intake, a dead runner cannot close
 // its linked turn, idle without an OpenCode result becomes success, or legacy
 // successful replay closes the command while its turn remains interrupted.
@@ -51,7 +51,7 @@ async function legacyStore(
 	await Effect.runPromise(
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator(
-				Object.fromEntries(Object.entries(effectMigrationEntries).slice(0, 68)),
+				Object.fromEntries(Object.entries(effectMigrationEntries).slice(0, 74)),
 			);
 			const sql = yield* SqlClient.SqlClient;
 			yield* sql`INSERT INTO sessions (id, provider, project_id, status, created_at, updated_at)

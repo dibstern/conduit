@@ -5,8 +5,9 @@ Background:
   And the viewport is a phone
   And I open a composer session
 
-Scenario Outline: idle empty composer fits in one row
-  Then the composer has 1 row
+Scenario Outline: idle empty composer keeps its controls on their own row
+  Then the composer has 2 rows
+  And the composer field is at least the composer width minus 30 pixels
   And the composer placeholder is fully visible
   And the composer region visually matches <baseline> at <threshold> percent
 
@@ -31,18 +32,19 @@ Examples:
 Scenario Outline: typed text gets the full width as soon as it wraps
   When I type <message> into the composer
   Then the composer has 2 rows
-  And the composer field is at least the composer width minus 20 pixels
+  And the composer field is at least the composer width minus 30 pixels
   And the composer region visually matches <baseline> at <threshold> percent
 
 Examples:
   | message                                               | baseline                    | threshold |
   | Also run the Linux baselines before you call it done.  | composer-field-typing-phone | 98        |
 
-Scenario Outline: deleting back to short text returns to one row
+Scenario Outline: deleting back to short text keeps the full-width field
   When I type Also run the Linux baselines before you call it done. into the composer
   Then the composer has 2 rows
   When I type <message> into the composer
-  Then the composer has 1 row
+  Then the composer has 2 rows
+  And the composer field is at least the composer width minus 30 pixels
   And the composer region visually matches <baseline> at <threshold> percent
 
 Examples:
@@ -54,7 +56,7 @@ Scenario Outline: send and stop do not squeeze text while typing
   And the mock relay sets composer status to processing
   Then send and stop are both visible
   And the composer has 2 rows
-  And the composer field is at least the composer width minus 20 pixels
+  And the composer field is at least the composer width minus 30 pixels
   And the composer region visually matches <baseline> at <threshold> percent
 
 Examples:

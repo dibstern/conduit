@@ -26,7 +26,11 @@ import {
 import { isRecord } from "../../utils.js";
 import { MonotoneText } from "../monotone-text.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
-import { completedCompactionEvent } from "./opencode-history-backfill.js";
+import {
+	completedCompactionEvent,
+	type FileReadEcho,
+	fileReadEcho,
+} from "./opencode-history-backfill.js";
 
 interface TrackedPart {
 	readonly messageId: string;
@@ -35,6 +39,8 @@ interface TrackedPart {
 	readonly thinkingStarted?: boolean;
 	/** Tool parts only: the input delivered downstream so far was empty (args stream late, e.g. skill). */
 	readonly toolInputEmpty?: boolean;
+	/** Hidden on every update: the file part that follows carries the file. */
+	readonly fileReadEcho?: FileReadEcho;
 }
 
 const defaultLog = createLogger("opencode-runtime-event-translator");
@@ -478,6 +484,19 @@ export class OpenCodeRuntimeEventTranslator {
 			"text" in rawPart && typeof rawPart.text === "string"
 				? rawPart.text
 				: undefined;
+
+		const echo = existing
+			? existing.fileReadEcho
+			: fileReadEcho(
+					{ ...rawPart, text: partText },
+					[...parts.values()]
+						.filter((part) => part.messageId === messageId)
+						.at(-1)?.fileReadEcho,
+				);
+		if (echo) {
+			parts.set(partId, { type: rawPart.type, messageId, fileReadEcho: echo });
+			return null;
+		}
 
 		parts.set(
 			partId,

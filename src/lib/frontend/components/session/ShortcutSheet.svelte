@@ -1,11 +1,13 @@
 <script lang="ts">
+	import { messageSurfacing } from "../../stores/message-surfacing.svelte.js";
 	import Modal from "../ui/Modal.svelte";
 	import { sessionViews, viewShortcutHint } from "../layout/session-views.js";
 	import { globalKeyHint, sessionCommandKeys } from "./session-commands.js";
 
-	let { open, onclose }: { open: boolean; onclose: () => void } = $props();
+	let { open, onclose, surfacingActive }: { open: boolean; onclose: () => void; surfacingActive?: boolean } = $props();
 
-	const sections = [
+	const active = $derived(surfacingActive ?? (messageSurfacing.status.active && messageSurfacing.status.enabled && messageSurfacing.status.key.source !== "none" && !messageSurfacing.status.key.rejected));
+	const sections = $derived([
 		{
 			title: "Session list",
 			shortcuts: [
@@ -35,6 +37,16 @@
 				...sessionViews.map((view) => [viewShortcutHint(view), `${view.label} view`] as const),
 			],
 		},
+		...(active ? [{
+			title: "Focused turn",
+			shortcuts: [
+				["← / →", "Previous / next surfaced message"],
+				["Home / End", "First / last surfaced message"],
+				["digits ↵", "Open message number"],
+				["a / u", "Open Ask / next unread message"],
+				["Esc", "Fold message"],
+			],
+		}] : []),
 		{
 			title: "Anywhere",
 			shortcuts: [
@@ -44,15 +56,15 @@
 				["Esc", "Close menu or sheet"],
 			],
 		},
-	] as const;
+	] as const);
 </script>
 
 {#snippet body()}
-	<div data-testid="shortcut-sheet" class="flex flex-col gap-5 font-brand">
+	<div data-testid="shortcut-sheet" class="flex flex-col gap-5 font-sans">
 		{#each sections as { title, shortcuts } (title)}
 			<section class="flex flex-col gap-2">
 				<h3 class="text-xs text-text-muted">{title}</h3>
-				<dl class="grid grid-cols-[4.5rem_1fr] gap-x-4 gap-y-1.5 text-sm">
+				<dl class="grid grid-cols-[4.5rem_1fr] gap-x-4 gap-y-1.5 text-sm" style:grid-template-columns={active ? "6rem 1fr" : undefined}>
 					{#each shortcuts as [key, command] (key)}
 						<dt class="font-mono text-text whitespace-nowrap">{key}</dt>
 						<dd class="text-text-secondary">{command}</dd>

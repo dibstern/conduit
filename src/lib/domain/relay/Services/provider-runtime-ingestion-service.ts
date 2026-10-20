@@ -594,15 +594,9 @@ export const makeProviderRuntimeIngestionLive = (
 														event.data.messageId,
 													);
 													if (rewind) {
-														const events = rewind.events.map((removal) => {
-															if (removal.type !== "message.removed")
-																return removal;
-															rewoundMessageIds.add(removal.data.messageId);
-															return removal.data.messageId ===
-																event.data.messageId
-																? event
-																: removal;
-														});
+														for (const messageId of rewind.removedMessageIds)
+															rewoundMessageIds.add(messageId);
+														const events = rewind.events;
 														yield* project(yield* appendEvents(events));
 														domainEvents = domainEvents.flatMap((candidate) =>
 															candidate.eventId === event.eventId

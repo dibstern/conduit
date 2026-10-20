@@ -43,6 +43,43 @@ describe("Canonical Event Types", () => {
 	});
 
 	it.each([
+		{ probabilities: { ask: 0.75, routine: 0.25 } },
+		{ probabilities: null },
+	])("round-trips text.surfaced probabilities=$probabilities", ({
+		probabilities,
+	}) => {
+		const event = canonicalEvent(
+			"text.surfaced",
+			"s1",
+			{
+				messageId: "m1",
+				partId: "p1",
+				ordinal: 3,
+				categorySetVersion: 2,
+				model: "jev",
+				probabilities,
+			},
+			{ provider: "conduit" },
+		);
+		expect(
+			Schema.decodeUnknownSync(CanonicalEventSchema)(
+				Schema.encodeSync(CanonicalEventSchema)(event),
+			),
+		).toEqual(event);
+		const { probabilities: _probabilities, ...missing } = event.data;
+		expect(Schema.is(CanonicalEventSchema)({ ...event, data: missing })).toBe(
+			false,
+		);
+		for (const ordinal of [0, -1, 1.5])
+			expect(
+				Schema.is(CanonicalEventSchema)({
+					...event,
+					data: { ...event.data, ordinal },
+				}),
+			).toBe(false);
+	});
+
+	it.each([
 		"/repo/worktree",
 		null,
 	])("does not lose a workspace hint path=%s in canonical round-trip", (path) => {

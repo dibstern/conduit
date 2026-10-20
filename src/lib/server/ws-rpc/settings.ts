@@ -30,6 +30,7 @@ import {
 	updateProject,
 } from "../../domain/daemon/Services/project-registry-service.js";
 import { Usage } from "../../domain/daemon/Services/usage.js";
+import { UserAvatar } from "../../domain/daemon/Services/user-avatar.js";
 import {
 	cleanUpWorktreesNow,
 	requestWorktreeCleanup,
@@ -49,6 +50,11 @@ import { saveRelaySettings } from "../../relay/relay-settings.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 export const settingsHandlers = {
+	GetAvatar: (_request) => Effect.flatMap(UserAvatar, (avatar) => avatar.get),
+	SetAvatar: ({ choice }) =>
+		Effect.flatMap(UserAvatar, (avatar) => avatar.set(choice)).pipe(
+			Effect.catch(mapRpcFailure("SetAvatar")),
+		),
 	GetWorktreeCleanupSetting: ({ projectSlug }) =>
 		Effect.gen(function* () {
 			const config = yield* Ref.get(yield* DaemonConfigRefTag);
@@ -315,6 +321,8 @@ export const settingsHandlers = {
 		}),
 } satisfies Pick<
 	WsRpcHandlerMap,
+	| "GetAvatar"
+	| "SetAvatar"
 	| "GetAutoSettleSetting"
 	| "SetAutoSettleSetting"
 	| "GetAutoArchiveSetting"
