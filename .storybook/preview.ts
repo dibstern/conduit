@@ -1,4 +1,5 @@
 import type { Preview } from "@storybook/svelte-vite";
+import { expect, waitFor } from "storybook/test";
 import "../src/lib/frontend/style.css";
 import { avatarState } from "../src/lib/frontend/stores/avatar.svelte.js";
 import { setThemeMode } from "../src/lib/frontend/stores/theme.svelte.js";
@@ -24,7 +25,10 @@ const preview: Preview = {
 	// Going through the real store (rather than only toggling the class) keeps the
 	// JS-side consumers -- Mermaid in AssistantMessage, the xterm palette in
 	// TerminalTab, the Settings control -- in agreement with the CSS.
-	beforeEach: (context) => {
+	beforeEach: async (context) => {
+		await waitFor(() =>
+			expect(getComputedStyle(document.body).pointerEvents).not.toBe("none"),
+		);
 		setThemeMode(context.globals["theme"] === "light" ? "light" : "dark");
 		const avatar = {
 			choice: { kind: "initial" as const },

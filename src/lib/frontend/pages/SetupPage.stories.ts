@@ -98,12 +98,17 @@ export const TailscaleServe: Story = {
  * cross-origin ts.net URL threw a SecurityError (conduit-test-6qyv). */
 export const DoneOnLocalhost: Story = {
 	args: { initialSetupInfo: serveSetupInfo },
-	beforeEach: () => {
-		const requestPermission = Notification.requestPermission;
-		// Exercise "Finish anyway" without waiting on a real browser prompt.
-		Notification.requestPermission = async () => "denied";
+	beforeEach: async () => {
+		await import("../utils/notifications.js");
+		const register = navigator.serviceWorker.register;
+		navigator.serviceWorker.register = async () => {
+			throw new DOMException(
+				"Push setup is unavailable in this navigation story",
+				"InvalidStateError",
+			);
+		};
 		return () => {
-			Notification.requestPermission = requestPermission;
+			navigator.serviceWorker.register = register;
 		};
 	},
 	play: async ({ canvasElement }) => {

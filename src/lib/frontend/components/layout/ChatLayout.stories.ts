@@ -31,6 +31,7 @@ import {
 } from "../../stories/mocks.js";
 import { connectedSocket, failRpc } from "../../stories/sockets.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
+import { loadHighlighter } from "../../utils/load-highlighter.js";
 import ChatLayout from "./ChatLayout.svelte";
 
 const claudeModel = {
@@ -302,6 +303,7 @@ export const FilesPreview: Story = {
 		openStorySession();
 	},
 	play: async (context) => {
+		await loadHighlighter();
 		await showFilesTree(context);
 		openFileViewer("src/lib/project.ts");
 		await waitFor(() => {
