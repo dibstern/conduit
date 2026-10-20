@@ -9,6 +9,7 @@ import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 import { detailRowsOf } from "../../helpers/detail-rows.js";
 import type { MockMessage } from "../fixtures/mockup-state.js";
+import { toWire } from "../helpers/detail-projection-mock.js";
 import { mockWsRpc, sendMockFamily } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 import { ChatPage } from "../page-objects/chat.page.js";
@@ -35,7 +36,7 @@ const snapshot = JSON.parse(readFileSync(snapshotPath, "utf-8")) as {
 		parentID: string;
 	};
 	parentHistory: {
-		messages: Parameters<typeof detailRowsOf>[0][];
+		messages: Parameters<typeof toWire>[0][];
 		hasMore: boolean;
 		total: number;
 	};
@@ -209,7 +210,7 @@ test.describe("Subagent navigation", () => {
 		// recorded conversation, so expose its full fixture through the detail feed.
 		rpc.setDetailRows(
 			snapshot.parentSession.id,
-			snapshot.parentHistory.messages.flatMap(detailRowsOf),
+			snapshot.parentHistory.messages.map(toWire).flatMap(detailRowsOf),
 		);
 
 		control = await mockRelayWebSocket(page, {

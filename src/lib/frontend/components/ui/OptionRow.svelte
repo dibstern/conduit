@@ -6,6 +6,7 @@
 		options,
 		value,
 		onChange,
+		onActivate,
 		item,
 		label,
 		lockedReason,
@@ -19,6 +20,8 @@
 		options: readonly { value: T; label: string; locked?: boolean; lockedReason?: string | undefined }[];
 		value: T;
 		onChange: (value: T) => void;
+		/** Explicit activation, even when the option is already selected. */
+		onActivate?: ((value: T) => void) | undefined;
 		item: Snippet<[{ value: T; label: string; locked?: boolean }, boolean]>;
 		label: string;
 		lockedReason?: string;
@@ -92,6 +95,10 @@
 			aria-describedby={option.locked ? (option.lockedReason ? `${reasonId}-${option.value}` : lockedReason ? reasonId : undefined) : undefined}
 			data-testid={itemTestId?.(option.value)}
 			class={itemClass}
+			onclick={() => { if (!option.locked) onActivate?.(option.value); }}
+			onkeydowncapture={(event) => {
+				if (event.key === " " && !option.locked) onActivate?.(option.value);
+			}}
 		>
 			{@render item(option, option.value === value)}
 		</RadioGroup.Item>

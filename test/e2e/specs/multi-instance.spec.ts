@@ -139,6 +139,10 @@ function defaultAccountDaemon() {
 			},
 		});
 		clients.push(rpc);
+		rpc.setProjects({
+			projects: [{ slug: "myapp", title: "myapp", folders: ["/src/myapp"] }],
+			current: "myapp",
+		});
 		rpc.setDaemonList("SubscribeInstances", { instances });
 		rpc.setDaemonList("SubscribeUsage", {
 			readings: instances.map((instance) => ({
@@ -156,10 +160,23 @@ function defaultAccountDaemon() {
 			provider: "claude",
 			variant: "",
 		});
+		rpc.setProjectSetting({
+			_tag: "harnessDefaults",
+			claude: {
+				status: "ok",
+				pick: {
+					providerId: "claude",
+					modelId: "shared",
+					effort: "",
+					contextWindow: "",
+				},
+			},
+		});
 		publishModels(defaultId());
 		await mockRelayWebSocket(page, {
 			initMessages: unboundInitMessages.filter(
 				(message) =>
+					message.type !== "instance_list" &&
 					message.type !== "model_info" &&
 					message.type !== "mock_model_catalog" &&
 					message.type !== "mock_agent_catalog",
@@ -173,6 +190,9 @@ function defaultAccountDaemon() {
 		await expect(
 			page.locator('#input-area [data-testid="harness-logo"]:visible').first(),
 		).toHaveAttribute("data-account", "claude");
+		await expect(
+			page.getByTestId("model-picker-trigger").first(),
+		).toHaveAttribute("data-shown-model", "shared");
 		return rpc;
 	};
 	return { connect, setDefault, publishModels };
@@ -208,9 +228,6 @@ test.describe("Claude defaults", () => {
 					.locator('#input-area [data-testid="harness-logo"]:visible')
 					.first(),
 			).toHaveAttribute("data-account", "personal");
-			await expect(
-				client.getByTestId("usage-footer-row-personal"),
-			).toHaveAttribute("data-default", "true");
 			await openPickerRoot(
 				client,
 				client.getByTestId("model-picker-trigger").first(),
@@ -235,6 +252,15 @@ test.describe("Claude defaults", () => {
 					client === page ? "client-default.png" : "peer-default.png",
 				),
 			});
+			// The phone usage dock lives on the session list (75efabb2).
+			const back = client.getByTestId("session-bar-back");
+			if (await back.isVisible()) {
+				await client.keyboard.press("Escape");
+				await back.click();
+			}
+			await expect(
+				client.getByTestId("usage-footer-row-personal"),
+			).toHaveAttribute("data-default", "true");
 		}
 		for (const rpc of [first, second])
 			for (const tag of ["GetModels", "GetAgents"]) {
@@ -249,62 +275,79 @@ test.describe("Claude defaults", () => {
 		});
 	});
 
-	test("an explicit pick of the current default keeps its catalogue after another client changes the default", async ({
-		page,
-		baseURL,
-	}, testInfo) => {
-		const daemon = defaultAccountDaemon();
-		const rpc = await daemon.connect(page, baseURL);
-		await openPickerRoot(
+	for (const activation of ["click", "keyboard"] as const) {
+		test(`an explicit ${activation} pick of the current default keeps its catalogue after another client changes the default`, async ({
 			page,
-			page.getByTestId("model-picker-trigger").first(),
-		);
-		await page.getByTestId("picker-account-claude").click();
-		await page.keyboard.press("Escape");
-		await rpc.waitForRequest(
-			(request) =>
-				request.tag === "GetAgents" &&
-				request.payload["instanceId"] === "claude",
-		);
-		const before = rpc
-			.getRequests()
-			.filter(
-				(request) => request.tag === "GetModels" || request.tag === "GetAgents",
-			).length;
-		daemon.setDefault("personal");
-		daemon.publishModels("personal");
-		await openSettingsPanel(page);
-		await page.getByTestId("settings-tab-server").click();
-		await expect(
-			page
-				.getByTestId("instance-row-personal")
-				.getByTestId("default-account-marker"),
-		).toBeVisible();
-		await page.getByTestId("settings-close-btn").click();
-		await expect(
-			page.locator('#input-area [data-testid="harness-logo"]:visible').first(),
-		).toHaveAttribute("data-account", "claude");
-		await openPickerRoot(
-			page,
-			page.getByTestId("model-picker-trigger").first(),
-		);
-		await page.getByTestId("picker-row-model").click();
-		await expect(page.locator('[data-model-id="original-only"]')).toBeVisible();
-		await expect(page.locator('[data-model-id="personal-only"]')).toHaveCount(
-			0,
-		);
-		expect(
-			rpc
+			baseURL,
+		}, testInfo) => {
+			const daemon = defaultAccountDaemon();
+			const rpc = await daemon.connect(page, baseURL);
+			await openPickerRoot(
+				page,
+				page.getByTestId("model-picker-trigger").first(),
+			);
+			const account = page.getByTestId("picker-account-claude");
+			if (activation === "click") await account.click();
+			else {
+				await account.focus();
+				await account.press("Space");
+			}
+			await page.keyboard.press("Escape");
+			await rpc.waitForRequest(
+				(request) =>
+					request.tag === "GetAgents" &&
+					request.payload["instanceId"] === "claude",
+			);
+			const before = rpc
 				.getRequests()
 				.filter(
 					(request) =>
 						request.tag === "GetModels" || request.tag === "GetAgents",
-				),
-		).toHaveLength(before);
-		await page.screenshot({ path: testInfo.outputPath("picked-draft.png") });
-	});
+				).length;
+			daemon.setDefault("personal");
+			daemon.publishModels("personal");
+			await openPickerRoot(
+				page,
+				page.getByTestId("model-picker-trigger").first(),
+			);
+			// The default sorts first, even while this draft stays on its explicit pick.
+			await expect(
+				page.getByTestId("picker-account-options").getByRole("radio").first(),
+			).toHaveAttribute("data-testid", "picker-account-personal");
+			await expect(page.getByTestId("picker-account-claude")).toHaveAttribute(
+				"aria-checked",
+				"true",
+			);
+			await page.getByTestId("picker-row-model").click();
+			await expect(
+				page.locator('[data-model-id="original-only"]'),
+			).toBeVisible();
+			await expect(page.locator('[data-model-id="personal-only"]')).toHaveCount(
+				0,
+			);
+			// A directory change restarts the shell feed, whose synchronization
+			// refreshes both catalogs once using the draft's pinned account.
+			await expect
+				.poll(() =>
+					rpc
+						.getRequests()
+						.filter(
+							(request) =>
+								request.tag === "GetModels" || request.tag === "GetAgents",
+						)
+						.slice(before),
+				)
+				.toEqual(
+					["GetModels", "GetAgents"].map((tag) => ({
+						tag,
+						payload: { _tag: tag, projectSlug: "myapp", instanceId: "claude" },
+					})),
+				);
+			await page.screenshot({ path: testInfo.outputPath("picked-draft.png") });
+		});
+	}
 
-	test("a model-only Claude pick creates on the new default account", async ({
+	test("a model-only Claude pick keeps its original account after the default changes", async ({
 		page,
 		baseURL,
 	}, testInfo) => {
@@ -316,17 +359,27 @@ test.describe("Claude defaults", () => {
 		);
 		await page.getByTestId("picker-row-model").click();
 		await page.locator('[data-model-id="shared"]').click();
+		await page.keyboard.press("Escape");
+		await expect(page.getByTestId("model-picker")).toBeHidden();
 		daemon.setDefault("personal");
+		await openSettingsPanel(page);
+		await page.getByTestId("settings-tab-server").click();
+		await expect(
+			page
+				.getByTestId("instance-row-personal")
+				.getByTestId("default-account-marker"),
+		).toBeVisible();
+		await page.getByTestId("settings-close-btn").click();
 		await expect(
 			page.locator('#input-area [data-testid="harness-logo"]:visible').first(),
-		).toHaveAttribute("data-account", "personal");
-		await page.locator("#input").fill("Use my model on the new default");
+		).toHaveAttribute("data-account", "claude");
+		await page.locator("#input").fill("Use my model on the original account");
 		await page.locator("#send").click();
 		const created = await rpc.waitForRequest(
 			(request) => request.tag === "CreateSession",
 		);
 		expect(created.payload).toMatchObject({
-			instanceId: "personal",
+			instanceId: "claude",
 			model: { providerId: "claude", modelId: "shared" },
 		});
 		await testInfo.attach("model-only-creation.json", {
@@ -478,8 +531,8 @@ async function mockInstanceRpc(page: Page): Promise<RpcMockControl> {
 }
 
 /**
- * Settings lives in the list overflow or session title sheet on a phone,
- * and in the session bar overflow on desktop.
+ * Global settings lives in the list overflow or the session bar overflow,
+ * including the phone island. The title menu needs a created session.
  */
 async function openSettingsPanel(page: Page): Promise<void> {
 	const listOverflow = page.getByTestId("list-bar-overflow");
@@ -488,13 +541,11 @@ async function openSettingsPanel(page: Page): Promise<void> {
 		await page.getByTestId("list-overflow-settings").click();
 		return;
 	}
-	const titleMenu = page.getByTestId("session-bar-title-menu");
-	if (await titleMenu.isVisible()) {
-		await titleMenu.click();
-		await page.getByTestId("session-title-settings").click();
-		return;
-	}
-	await page.getByTestId("session-bar-overflow").click();
+	await page
+		.locator(
+			'[data-testid="session-bar-overflow"]:visible, [data-testid="session-bar-island-overflow"]:visible',
+		)
+		.click();
 	await page.getByTestId("overflow-settings").click();
 }
 
@@ -891,26 +942,10 @@ test.describe("Session List: Instance Status Banner", () => {
 			if (m.type === "instance_list") {
 				return {
 					type: "instance_list" as const,
-					instances: [
-						{
-							id: "personal",
-							name: "Personal",
-							port: 4096,
-							managed: true,
-							status: "unhealthy",
-							restartCount: 5,
-							createdAt: Date.now(),
-						},
-						{
-							id: "work",
-							name: "Work",
-							port: 4097,
-							managed: true,
-							status: "unhealthy",
-							restartCount: 3,
-							createdAt: Date.now(),
-						},
-					],
+					instances: instancesWith({
+						personal: "unhealthy",
+						work: "unhealthy",
+					}),
 				};
 			}
 			return m;
@@ -933,17 +968,9 @@ test.describe("Session List: Instance Status Banner", () => {
 			if (m.type === "instance_list") {
 				return {
 					type: "instance_list" as const,
-					instances: [
-						{
-							id: "personal",
-							name: "Personal",
-							port: 4096,
-							managed: true,
-							status: "unhealthy",
-							restartCount: 5,
-							createdAt: Date.now(),
-						},
-					],
+					instances: instancesWith({ personal: "unhealthy" }).filter(
+						(instance) => instance.id === "personal",
+					),
 				};
 			}
 			return m;
@@ -981,17 +1008,9 @@ test.describe("Session List: Instance Status Banner", () => {
 			if (m.type === "instance_list") {
 				return {
 					type: "instance_list" as const,
-					instances: [
-						{
-							id: "personal",
-							name: "Personal",
-							port: 4096,
-							managed: false,
-							status: "unhealthy",
-							restartCount: 0,
-							createdAt: Date.now(),
-						},
-					],
+					instances: instancesWith({ personal: "unhealthy" }).filter(
+						(instance) => instance.id === "personal",
+					),
 				};
 			}
 			return m;

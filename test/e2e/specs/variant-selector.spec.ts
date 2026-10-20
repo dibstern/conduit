@@ -116,45 +116,46 @@ test.describe("Variant badge visibility", () => {
 	});
 });
 
-test.describe("Variant dropdown", () => {
-	test("opens dropdown on badge click", async ({ page, baseURL }) => {
+test.describe("Effort picker", () => {
+	test("opens the shared picker on badge click", async ({ page, baseURL }) => {
 		await setupWithVariants(page, baseURL);
 
 		const badge = page.locator("[data-testid='variant-badge']");
 		await badge.click();
 
-		const dropdown = page.locator("[data-testid='variant-dropdown']");
+		const dropdown = page.getByTestId("model-picker");
 		await expect(dropdown).toBeVisible();
 	});
 
-	test("shows all variants plus default option", async ({ page, baseURL }) => {
+	test("offers every provider variant with Default represented by no selection", async ({
+		page,
+		baseURL,
+	}) => {
 		await setupWithVariants(page, baseURL);
 
 		const badge = page.locator("[data-testid='variant-badge']");
 		await badge.click();
 
-		const dropdown = page.locator("[data-testid='variant-dropdown']");
+		const dropdown = page.getByTestId("model-picker");
 		await expect(dropdown).toBeVisible();
 
-		// Should have: default, low, medium, high, max
+		const choices = page.getByRole("radiogroup", {
+			name: "Effort",
+			exact: true,
+		});
+		await expect(choices.getByRole("radio")).toHaveText([
+			"low",
+			"medium",
+			"high",
+			"max",
+		]);
+		await expect(choices.getByRole("radio", { checked: true })).toHaveCount(0);
 		await expect(
-			page.locator("[data-testid='variant-option-default']"),
-		).toBeVisible();
-		await expect(
-			page.locator("[data-testid='variant-option-low']"),
-		).toBeVisible();
-		await expect(
-			page.locator("[data-testid='variant-option-medium']"),
-		).toBeVisible();
-		await expect(
-			page.locator("[data-testid='variant-option-high']"),
-		).toBeVisible();
-		await expect(
-			page.locator("[data-testid='variant-option-max']"),
-		).toBeVisible();
+			choices.getByRole("radio", { name: "Default", exact: true }),
+		).toHaveCount(0);
 	});
 
-	test("closes dropdown after selecting a variant", async ({
+	test("keeps the shared picker open after selecting a variant", async ({
 		page,
 		baseURL,
 	}) => {
@@ -164,10 +165,13 @@ test.describe("Variant dropdown", () => {
 		await badge.click();
 
 		// Select "high"
-		await page.locator("[data-testid='variant-option-high']").click();
+		await page.getByTestId("picker-effort-option-high").click();
 
-		const dropdown = page.locator("[data-testid='variant-dropdown']");
-		await expect(dropdown).not.toBeVisible();
+		await expect(page.getByTestId("model-picker")).toBeVisible();
+		await expect(page.getByTestId("picker-effort-option-high")).toHaveAttribute(
+			"aria-checked",
+			"true",
+		);
 	});
 
 	test("closes dropdown on Escape", async ({ page, baseURL }) => {
@@ -175,14 +179,10 @@ test.describe("Variant dropdown", () => {
 
 		const badge = page.locator("[data-testid='variant-badge']");
 		await badge.click();
-		await expect(
-			page.locator("[data-testid='variant-dropdown']"),
-		).toBeVisible();
+		await expect(page.getByTestId("model-picker")).toBeVisible();
 
 		await page.keyboard.press("Escape");
-		await expect(
-			page.locator("[data-testid='variant-dropdown']"),
-		).not.toBeVisible();
+		await expect(page.getByTestId("model-picker")).not.toBeVisible();
 	});
 });
 
@@ -198,26 +198,40 @@ test.describe("Variant selection updates UI", () => {
 
 		// Open dropdown and select "high"
 		await badge.click();
-		await page.locator("[data-testid='variant-option-high']").click();
+		await page.getByTestId("picker-effort-option-high").click();
 
 		// Badge should now show "high"
 		await expect(badge).toContainText("High");
 	});
 
-	test("selecting default clears the variant", async ({ page, baseURL }) => {
-		await setupWithVariants(page, baseURL);
+	test("a server-cleared variant restores Default and clears the picker selection", async ({
+		page,
+		baseURL,
+	}) => {
+		const control = await setupWithVariants(page, baseURL);
 
 		const badge = page.locator("[data-testid='variant-badge']");
 
 		// Select "max" first
 		await badge.click();
-		await page.locator("[data-testid='variant-option-max']").click();
+		await page.getByTestId("picker-effort-option-max").click();
 		await expect(badge).toContainText("Max");
+		await expect(badge).toBeEnabled();
 
-		// Now select "default" to clear
-		await badge.click();
-		await page.locator("[data-testid='variant-option-default']").click();
+		control.sendMessage({
+			type: "variant_info",
+			variant: "",
+			variants: ["low", "medium", "high", "max"],
+		});
 		await expect(badge).toContainText("Default");
+		await expect(
+			page
+				.getByRole("radiogroup", { name: "Effort", exact: true })
+				.getByRole("radio", { checked: true }),
+		).toHaveCount(0);
+		expect(control.rpcCalls).toEqual([
+			expect.objectContaining({ sessionId: "sess-var-001", variant: "max" }),
+		]);
 	});
 });
 
@@ -230,18 +244,18 @@ test.describe("Variant selection sends RPC request", () => {
 
 		const badge = page.locator("[data-testid='variant-badge']");
 		await badge.click();
-		await page.locator("[data-testid='variant-option-high']").click();
+		await page.getByTestId("picker-effort-option-high").click();
 
 		await expect
 			.poll(() => control.rpcCalls.at(-1))
 			.toMatchObject({
-				projectSlug: "myapp",
 				sessionId: "sess-var-001",
 				variant: "high",
 			});
+		expect(control.rpcCalls.at(-1)).not.toHaveProperty("projectSlug");
 	});
 
-	test("selecting default sends SwitchVariant with empty string", async ({
+	test("explicit effort choices send their values without an implicit default reset", async ({
 		page,
 		baseURL,
 	}) => {
@@ -251,28 +265,30 @@ test.describe("Variant selection sends RPC request", () => {
 
 		// First select "low"
 		await badge.click();
-		await page.locator("[data-testid='variant-option-low']").click();
+		await page.getByTestId("picker-effort-option-low").click();
+		await expect(badge).toContainText("Low");
+		await expect(badge).toBeEnabled();
 
-		// Then select "default"
-		await badge.click();
-		await page.locator("[data-testid='variant-option-default']").click();
+		await page.getByTestId("picker-effort-option-high").click();
+		await expect(badge).toContainText("High");
+		await expect(badge).toBeEnabled();
 
 		await expect
 			.poll(() => control.rpcCalls.at(-1))
 			.toMatchObject({
-				projectSlug: "myapp",
 				sessionId: "sess-var-001",
-				variant: "",
+				variant: "high",
 			});
-		expect(control.rpcCalls).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({
-					projectSlug: "myapp",
-					sessionId: "sess-var-001",
-					variant: "low",
-				}),
-			]),
-		);
+		expect(control.rpcCalls).toEqual([
+			expect.objectContaining({
+				sessionId: "sess-var-001",
+				variant: "low",
+			}),
+			expect.objectContaining({
+				sessionId: "sess-var-001",
+				variant: "high",
+			}),
+		]);
 	});
 });
 
@@ -311,7 +327,6 @@ test.describe("Ctrl+T keyboard shortcut", () => {
 		await expect
 			.poll(() => control.rpcCalls.find((call) => call["variant"] === "low"))
 			.toMatchObject({
-				projectSlug: "myapp",
 				sessionId: "sess-var-001",
 				variant: "low",
 			});
