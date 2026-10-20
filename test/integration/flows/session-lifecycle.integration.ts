@@ -1,6 +1,7 @@
 // Tests session management operations: create, switch, rename, delete, and
 // manage sessions through the relay WebSocket interface.
 
+import { Option, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
@@ -119,7 +120,7 @@ describe("Integration: Session Lifecycle", () => {
 		await client.close();
 	});
 
-	it("switching session returns its draft and family", async () => {
+	it("restores the saved draft after switching back", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
@@ -146,7 +147,12 @@ describe("Integration: Session Lifecycle", () => {
 		client.clearReceived();
 		const switched = await client.switchSession(firstId);
 		expect(switched["id"]).toBe(firstId);
-		expect(switched["draft"]).toBe("Unsent draft");
+		const draft = await client.rpcCall((rpc) =>
+			Stream.runHead(rpc.SubscribeInputDraft({ key: { session: firstId } })),
+		);
+		expect(draft).toEqual(
+			Option.some({ _tag: "synchronized", text: "Unsent draft" }),
+		);
 
 		await client.close();
 	});
