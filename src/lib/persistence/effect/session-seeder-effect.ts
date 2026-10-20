@@ -7,12 +7,14 @@ import { PersistenceProjectTag } from "../../domain/persistence/Services/persist
 export const isSessionDeleted = (sessionId: string) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
-		// Ingestion asks this per event. Deletion removes the row, so a live session
-		// answers from the primary key before the events lookup scans its history.
+		// Only an own marker is authoritative, even over a stale or seeded row.
+		// Foreign-named deletions remove their payload's session, not this stream.
+		// A live row only overrides a legacy sidebar tombstone.
 		const rows = yield* sql<{ deleted: number }>`SELECT CASE
+			WHEN EXISTS (SELECT 1 FROM events WHERE session_id = ${sessionId} AND type = 'session.deleted'
+				AND json_extract(data, '$.sessionId') = session_id) THEN 1
 			WHEN EXISTS (SELECT 1 FROM sessions WHERE id = ${sessionId}) THEN 0
 			WHEN EXISTS (SELECT 1 FROM session_sidebar WHERE session_id = ${sessionId} AND row IS NULL) THEN 1
-			WHEN EXISTS (SELECT 1 FROM events WHERE session_id = ${sessionId} AND type = 'session.deleted') THEN 1
 			ELSE 0 END AS deleted`;
 		return rows[0]?.deleted === 1;
 	});

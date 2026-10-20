@@ -7,7 +7,10 @@ import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Servi
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
-import { EffectSessionSeeder } from "../../../src/lib/persistence/effect/session-seeder-effect.js";
+import {
+	EffectSessionSeeder,
+	isSessionDeleted,
+} from "../../../src/lib/persistence/effect/session-seeder-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 
 const testLayer = Layer.mergeAll(
@@ -16,6 +19,22 @@ const testLayer = Layer.mergeAll(
 );
 
 describe("EffectSessionSeeder", () => {
+	it.effect("a deletion marker wins over a stale or seeded live row", () =>
+		Effect.gen(function* () {
+			const commit = yield* makeCommitAndSignal;
+			yield* commit([
+				canonicalEvent("session.deleted", "dead-id", { sessionId: "dead-id" }),
+			]);
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO sessions
+				(id, project_id, provider, title, status, created_at, updated_at)
+				VALUES ('dead-id', 'test-project', 'claude', 'Stale', 'idle', 1, 1)`;
+			expect(yield* isSessionDeleted("dead-id")).toBe(true);
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
+	);
+
 	it.effect(
 		"a fresh seeder honours durable deletions, including cascaded children and absent ids",
 		() =>

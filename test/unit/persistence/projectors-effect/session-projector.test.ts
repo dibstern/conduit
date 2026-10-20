@@ -617,6 +617,31 @@ describe("SessionProjector", () => {
 	});
 
 	describe("session.created", () => {
+		// Missing lineage must skip every write, including inherited history and
+		// provider bindings, both live and when replay dispatches all projectors.
+		it.each([
+			"parentId",
+			"forkedFrom",
+		] as const)("writes nothing when %s is missing", async (reference) => {
+			await harness.dispose();
+			harness = makeEffectProjectionHarness();
+			await harness.reproject([
+				makeStored("session.created", "missing-lineage", {
+					sessionId: "missing-lineage",
+					title: "Late child",
+					provider: "claude",
+					[reference]: "missing-source",
+					inheritsHistory: true,
+					forkPointMessageId: "missing-cut",
+					forkPointTimestamp: now,
+				}),
+			]);
+			expect(await harness.query("SELECT id FROM sessions")).toEqual([]);
+			expect(await harness.query("SELECT id FROM session_providers")).toEqual(
+				[],
+			);
+		});
+
 		it("inserts a new session row", async () => {
 			const event = makeStored("session.created", "s1", {
 				sessionId: "s1",
