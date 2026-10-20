@@ -74,6 +74,7 @@
 	--color-settings-segment: #232327;
 	--color-settings-rail: #161618;
 	--color-settings-separator: rgba(255, 255, 255, 0.06);
+	--color-settings-icon: #6b6b74;
 	--color-settings-tile-neutral: #8e8e93;
 	--color-settings-tile-purple: #5e5ce6;
 	--color-settings-tile-clay: #d97757;
@@ -280,6 +281,7 @@
 	--color-settings-segment: #ffffff;
 	--color-settings-rail: #ffffff;
 	--color-settings-separator: rgba(0, 0, 0, 0.06);
+	--color-settings-icon: #9b9ba4;
 	--shadow-settings-dialog: 0 24px 60px rgba(0, 0, 0, 0.1);
 	--shadow-popover: 0 22px 60px rgba(0, 0, 0, 0.14);
 	--shadow-settings-segment:

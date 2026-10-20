@@ -271,7 +271,7 @@ test("Server status reloads after two supervised restarts, with desktop and phon
 
 test.describe("unsupervised daemon", () => {
 	test.use({ supervised: false });
-	test("hides Restart, explains terminal startup and closes the confirmation after Shut down", async ({
+	test("hides Restart, explains terminal startup and closes the confirmation after Stop", async ({
 		page,
 		harness,
 	}) => {

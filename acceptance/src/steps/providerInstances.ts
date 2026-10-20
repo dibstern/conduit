@@ -848,8 +848,8 @@ export const providerInstancesHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "open Server shutdown confirmation",
-		match: /^I open the Server Shut down confirmation$/,
+		name: "open Server Stop confirmation",
+		match: /^I open the Server Stop confirmation$/,
 		run: async ({ world }) => {
 			await world.page.getByTestId("server-shutdown-btn").click();
 			await expect(
@@ -858,8 +858,8 @@ export const providerInstancesHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert shutdown warning",
-		match: /^the Server Shut down warning says (.+)$/,
+		name: "assert Stop warning",
+		match: /^the Server Stop warning says (.+)$/,
 		run: async ({ world, match }) => {
 			await expect(
 				world.page.getByTestId("server-shutdown-confirmation"),
@@ -867,8 +867,8 @@ export const providerInstancesHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "cancel Server shutdown confirmation",
-		match: /^I cancel the Server Shut down confirmation$/,
+		name: "cancel Server Stop confirmation",
+		match: /^I cancel the Server Stop confirmation$/,
 		run: async ({ world }) => {
 			await world.page.getByTestId("server-shutdown-cancel").click();
 			await expect(

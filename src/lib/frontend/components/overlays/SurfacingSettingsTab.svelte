@@ -95,18 +95,18 @@
 				<SettingsRow label="Jev categorisation & escalation"
 					description={status.active ? "● Active" : !status.enabled ? "Off" : "Inactive until a valid key is set"}
 					descriptionTone={status.active ? "success" : status.enabled ? "warning" : "neutral"}>
-					{#snippet labelSuffix()}<Badge variant="accent" size="label">Experimental</Badge>{/snippet}
+					{#snippet labelSuffix()}<Badge variant="accent" size="session" shape="pill">Experimental</Badge>{/snippet}
 					{#snippet control()}
 						{#if key.source === "none"}<Button size="sm" data-testid="surfacing-add-key" onclick={() => keyInput?.focus()}>Add key</Button>{/if}
 						<Button role="switch" aria-checked={status.enabled} ariaLabel="Jev categorisation & escalation" variant="ghost" size="content" hoverFill="none" touchTarget disabled={saving || key.source === "none"} class="min-h-[32px] min-w-[44px] rounded-full" onclick={() => { void update({ enabled: !status.enabled }); }}><Switch checked={status.enabled} /></Button>
 					{/snippet}
 				</SettingsRow>
-				<p data-testid="surfacing-disclosure" class="-mt-[2px] px-[14px] pb-[12px] text-[12px] leading-[1.5] text-text-muted">When on, conduit sends each mid-turn message, your request (first 1,000 characters) and your category definitions to TypeSafe so Jev can classify them. About $0.00005 per message. Old sessions are never judged in bulk.</p>
+				<p data-testid="surfacing-disclosure" class="-mt-[2px] px-[14px] pb-[12px] text-[12px] leading-[1.5] text-text-dimmer">When on, conduit sends each mid-turn message, your request (first 1,000 characters) and your category definitions to TypeSafe so Jev can classify them. About $0.00005 per message. Old sessions are never judged in bulk.</p>
 			</div>
 			<SettingsRow label="TypeSafe API key" description={key.source === "env" && key.rejected ? "Set by TYPESAFE_API_KEY" : ""}>
 				{#snippet control()}
 					{#if key.source !== "none"}<code aria-label="Key is hidden" class="text-[12px] text-text-secondary">••••••••</code>{/if}
-					<Badge variant={key.rejected ? "error" : key.source === "stored" ? "success" : "chip"} size="label" data-testid="surfacing-key-state">{key.rejected ? "Rejected by TypeSafe" : key.source === "env" ? "Set by TYPESAFE_API_KEY" : key.source === "stored" ? "Valid" : "Not set"}</Badge>
+					<Badge variant={key.rejected ? "error" : key.source === "stored" ? "success" : "chip"} size="session" shape="pill" data-testid="surfacing-key-state">{key.rejected ? "Rejected by TypeSafe" : key.source === "env" ? "Set by TYPESAFE_API_KEY" : key.source === "stored" ? "Valid" : "Not set"}</Badge>
 					{#if key.source === "stored"}
 						{#if !replacing}<Button variant="ghost" size="sm" disabled={saving} data-testid="surfacing-key-replace" onclick={() => { replacing = true; }}>Replace</Button>{/if}
 						<Button variant="ghost" size="sm" disabled={saving} data-testid="surfacing-key-remove" onclick={() => { void update({ apiKey: null }); }}>Remove</Button>
@@ -161,7 +161,7 @@
 				{#snippet control()}<SettingsPicker label="Tuning model" value={status.tuningModel} options={tuningOptions} disabled={saving} onvaluechange={(tuningModel) => { void update({ tuningModel }); }} />{/snippet}
 			</SettingsRow>
 		</SettingsGroup>
-		<p class="mt-[12px] text-[12px] leading-[1.5] text-text-muted">Summaries and tuning run on your Claude subscription through the daemon. Turn summaries work without a TypeSafe key. The TypeSafe key stays on the server and is never sent to the browser. Set by TYPESAFE_API_KEY means the key is managed through the environment and can't be edited here. With both switches off, turns keep today's view.</p>
+		<p class="mt-[12px] text-[12px] leading-[1.5] text-text-dimmer">Summaries and tuning run on your Claude subscription through the daemon. Turn summaries work without a TypeSafe key. The TypeSafe key stays on the server and is never sent to the browser. Set by TYPESAFE_API_KEY means the key is managed through the environment and can't be edited here. With both switches off, turns keep today's view.</p>
 	{/if}
 </div>
 <div hidden={tab !== "categories"} data-testid="surfacing-settings-categories">

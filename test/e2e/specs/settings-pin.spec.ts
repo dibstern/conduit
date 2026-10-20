@@ -105,10 +105,10 @@ test("changing the PIN proves the current PIN and signs out both open tabs", asy
 	await openServerSettings(second);
 	// The second tab must have a live browser socket before the mutation.
 	await expect(second.getByTestId("server-status-browsers")).toHaveText(
-		"2 browsers connected",
+		"· 2 browsers connected",
 	);
 
-	// PIN editors, instance forms and Shut down all share one open form.
+	// PIN editors, instance forms and Stop all share one open form.
 	await page.getByTestId("add-instance-btn").click();
 	await page.getByTestId("server-pin-change-btn").click();
 	await expect(page.getByTestId("instance-form")).toBeHidden();

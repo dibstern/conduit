@@ -102,7 +102,12 @@ async function assertWindows(
 					? "5h"
 					: "Week",
 		);
-		const used = value === "—" ? 0 : Number.parseInt(value, 10);
+		const used =
+			value === "—"
+				? 0
+				: value.endsWith("%")
+					? Number.parseInt(value, 10)
+					: 100;
 		const fillToken =
 			value === "—"
 				? "--color-border-chip"
@@ -772,7 +777,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert full-width single account windows and labels",
-		match: /^the Usage single-account windows show 5h (\S+) and Week (\S+)$/,
+		match: /^the Usage single-account windows show 5h (.+) and Week (.+)$/,
 		run: ({ world, match }) =>
 			assertWindows(
 				world.page,
@@ -784,7 +789,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert side-by-side card windows and values",
-		match: /^the Usage account (\S+) windows show 5h (\S+) and Week (\S+)$/,
+		match: /^the Usage account (\S+) windows show 5h (.+) and Week (.+)$/,
 		run: ({ world, match }) =>
 			assertWindows(
 				world.page,
@@ -1011,7 +1016,8 @@ export const usageSettingsHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert account status text and severity colour",
-		match: /^the Usage account (\S+) status reads (.+) in (muted|amber|red)$/,
+		match:
+			/^the Usage account (\S+) status reads (.+) in (muted|green|amber|red)$/,
 		run: async ({ world, match }) => {
 			const status = world.page.getByTestId(
 				`usage-settings-status-${match[1]}`,
@@ -1025,7 +1031,9 @@ export const usageSettingsHandlers: StepHandler[] = [
 						? "--color-error"
 						: match[3] === "amber"
 							? "--color-fill-amber"
-							: "--color-text-dimmer",
+							: match[3] === "green"
+								? "--color-success"
+								: "--color-text-dimmer",
 				),
 			);
 		},
