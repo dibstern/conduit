@@ -152,13 +152,18 @@ export const makeSessionOpenCodeClient = Effect.gen(function* () {
 
 // Snapshot-only callers have no event store; Git registration remains sufficient
 // for them. Recovery uses only recorded ownership, never legacy branch inference.
-const readRecordedWorktreeOwnership = (sessionId: string) =>
+const readRecordedWorktreeOwnership = (
+	sessionId: string,
+	projectSlug: string,
+) =>
 	Effect.gen(function* () {
 		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
 		if (sql._tag === "None") return [];
-		return yield* readSessionWorktreeOwnership(sessionId, false).pipe(
-			Effect.provideService(SqlClient.SqlClient, sql.value),
-		);
+		return yield* readSessionWorktreeOwnership(
+			sessionId,
+			false,
+			projectSlug,
+		).pipe(Effect.provideService(SqlClient.SqlClient, sql.value));
 	});
 
 // Several project folders can share one checkout and its single ownership row.
@@ -199,7 +204,10 @@ export const recreateSessionWorktrees = (sessionId: string) =>
 						message:
 							"Could not recreate worktree: the session has no Conduit-owned worktree.",
 					});
-				const ownership = yield* readRecordedWorktreeOwnership(sessionId);
+				const ownership = yield* readRecordedWorktreeOwnership(
+					sessionId,
+					config.slug,
+				);
 				yield* worktrees.recreateAll(
 					folders.map(([path, directory]) => {
 						const recordedBranch = recordedBranchForFolder(
@@ -236,7 +244,7 @@ export const inspectSessionWorktree = (
 		const entries = Object.entries(session.workspace.worktrees);
 		const service = yield* Effect.serviceOption(WorktreeServiceTag);
 		const ownership = yield* Effect.cached(
-			readRecordedWorktreeOwnership(session.id).pipe(
+			readRecordedWorktreeOwnership(session.id, project.slug).pipe(
 				Effect.orElseSucceed(() => []),
 			),
 		);

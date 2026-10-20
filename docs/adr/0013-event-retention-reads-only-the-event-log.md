@@ -44,6 +44,14 @@ does not prove the child's death to drain. Markers survive reclamation,
 interrupted batches and projection resets, so late ingress cannot resurrect a
 reclaimed session. Orphans without their own marker are reported and retained.
 
+Own deletion markers may retain minimal operational worktree metadata: final
+canonical launch ownership and authorized branch renames, legacy folder/path
+evidence, or a refusal state, each with its discovery paths. Capture this for
+each session inside the deletion transaction before cascade. It preserves the
+existing deferred checkout policy without retaining conversation, title, setup
+output or workspace history; deletion markers remain the only retained event
+kind. Markers already drained without this metadata cannot recover lost ownership.
+
 **Born dead, checked by each writer (12A).** Every writer of
 `session.created` (session commands, the session manager, provider runtime
 ingestion and Claude event persistence) runs the death check inside the

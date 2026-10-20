@@ -9,6 +9,7 @@ import { holdingSessionRefs, SessionRef } from "./session-ref-schema.js";
 import {
 	SessionWorkspaceSchema,
 	SessionWorktreeOwnershipSchema,
+	SessionWorktreeOwnershipSnapshotSchema,
 } from "./session-workspace.js";
 
 export const EventId = Schema.String.pipe(Schema.brand("EventId"));
@@ -830,6 +831,9 @@ export const CanonicalEvents = {
 	"session.deleted": live(
 		Schema.Struct({
 			sessionId: Schema.String.pipe(SessionRef(false)),
+			worktreeOwnership: Schema.optionalKey(
+				SessionWorktreeOwnershipSnapshotSchema,
+			),
 			/**
 			 * Descendant sessions deleted by the schema cascade, captured BEFORE the
 			 * tombstone persists (afterwards they can no longer be found by parent).

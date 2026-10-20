@@ -6,12 +6,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { OrchestrationEngineTag } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	applySessionCommand,
 	forkSession,
 } from "../../../src/lib/domain/relay/Services/session-command.js";
+import { readSessionWorktreeOwnership } from "../../../src/lib/domain/relay/Services/session-worktree-deletion.js";
 import { splitAtForkPoint } from "../../../src/lib/frontend/utils/fork-split.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -21,6 +23,7 @@ import {
 } from "../../../src/lib/persistence/events.js";
 import { verifyReplayParity } from "../../../src/lib/persistence/replay-parity.js";
 import { PREVIEW_CODE_POINTS } from "../../../src/lib/persistence/tool-wire-projection.js";
+import { readWorktreeCleanupPaths } from "../../../src/lib/session/worktree-cleanup-sweep.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { claudeSdk } from "../../helpers/fake-claude-process-sdk.js";
 import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
@@ -287,6 +290,228 @@ describe("Fork read-model inheritance", () => {
 		vi.restoreAllMocks();
 		await harness?.stop();
 		harness = undefined;
+	});
+
+	it("retains each deleted descendant's own worktree ownership after marker-only drain", async () => {
+		harness = await createRelayHarness("chat-simple", { claudeSdk });
+		const runtime = harness.stack.effectRuntime.runtime;
+		const rootId = "ownership-root";
+		const childId = "ownership-child";
+		const rootOwnership = {
+			folder: process.cwd(),
+			path: `${process.cwd()}/.conduit-test-root`,
+			branchName: "conduit/root",
+			head: "a".repeat(40),
+		};
+		const childOwnership = {
+			...rootOwnership,
+			path: `${process.cwd()}/.conduit-test-child`,
+			branchName: "conduit/child",
+			head: "b".repeat(40),
+		};
+		await runtime.runPromise(
+			applySessionCommand(
+				{
+					type: "session.created",
+					data: { sessionId: rootId, title: "Owner", provider: "claude" },
+				},
+				{
+					pick: {
+						harness: "claude",
+						model: { providerId: "claude", modelId: "sonnet" },
+						effort: "",
+						contextWindow: "200k",
+					},
+				},
+			),
+		);
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				yield* applySessionCommand({
+					type: "session.created",
+					data: {
+						sessionId: childId,
+						parentId: rootId,
+						title: "Independent owner",
+						provider: "claude",
+					},
+				});
+				for (const [sessionId, owned] of [
+					[rootId, rootOwnership],
+					[childId, childOwnership],
+				] as const)
+					yield* applySessionCommand({
+						type: "session.workspace_changed",
+						data: {
+							sessionId,
+							cause: "launch",
+							origin: "conduit",
+							worktrees: { [owned.folder]: owned.path },
+							ownership: [owned],
+						},
+					});
+			}),
+		);
+		await emit(harness, turn(rootId, 1));
+		const inherited = await runtime.runPromise(
+			forkSession(rootId, {
+				side: { title: "Inherited checkout", inputId: "ownership-side" },
+			}),
+		);
+		const renamed = { ...rootOwnership, branchName: "conduit/renamed-root" };
+		await runtime.runPromise(
+			applySessionCommand({
+				type: "session.workspace_changed",
+				data: {
+					sessionId: rootId,
+					cause: "branch-rename",
+					origin: "conduit",
+					worktrees: { [renamed.folder]: renamed.path },
+					ownership: [renamed],
+				},
+			}),
+		);
+		// Prove the real fixture supplies inspection and canonical ownership before deletion.
+		expect(
+			await runtime.runPromise(readSessionWorktreeOwnership(rootId)),
+		).toEqual([renamed]);
+		expect(
+			await runtime.runPromise(readSessionWorktreeOwnership(childId)),
+		).toEqual([childOwnership]);
+		expect(
+			await runtime.runPromise(readSessionWorktreeOwnership(inherited.id)),
+		).toEqual([]);
+		await runtime.runPromise(
+			applySessionCommand({
+				type: "session.deleted",
+				data: { sessionId: rootId },
+			}),
+		);
+		await harness.drainEventRetention();
+		const db = new Database(harness.eventsDbPath, { readonly: true });
+		try {
+			const ids = [rootId, childId, inherited.id].sort();
+			expect(
+				db.prepare("SELECT id FROM sessions WHERE id IN (?, ?, ?)").all(...ids),
+			).toEqual([]);
+			expect(
+				db
+					.prepare(
+						"SELECT session_id, type, json_extract(data, '$.sessionId') AS own_id FROM events WHERE session_id IN (?, ?, ?) ORDER BY session_id",
+					)
+					.all(...ids),
+			).toEqual(
+				ids.map((id) => ({
+					session_id: id,
+					type: "session.deleted",
+					own_id: id,
+				})),
+			);
+		} finally {
+			db.close();
+		}
+		expect(
+			await runtime.runPromise(readSessionWorktreeOwnership(rootId)),
+		).toEqual([renamed]);
+		expect(
+			await runtime.runPromise(readSessionWorktreeOwnership(childId)),
+		).toEqual([childOwnership]);
+		expect(
+			await runtime.runPromise(readSessionWorktreeOwnership(inherited.id)),
+		).toEqual([]);
+	});
+
+	// Discovery must retain known paths without reviving older ownership authority.
+	it.each([
+		"malformed",
+		"conflict",
+		"empty",
+	] as const)("keeps historical deletion-marker paths without authorizing older ownership (%s)", async (state) => {
+		harness = await createRelayHarness("chat-simple", { claudeSdk });
+		const runtime = harness.stack.effectRuntime.runtime;
+		const sessionId = `ownership-${state}`;
+		const owned = {
+			folder: process.cwd(),
+			path: `${process.cwd()}/.conduit-test-${state}`,
+			branchName: "conduit/old-owner",
+			head: "a".repeat(40),
+		};
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				yield* applySessionCommand({
+					type: "session.created",
+					data: { sessionId, title: "Owner", provider: "claude" },
+				});
+				yield* applySessionCommand({
+					type: "session.workspace_changed",
+					data: {
+						sessionId,
+						cause: "launch",
+						origin: "conduit",
+						worktrees: { [owned.folder]: owned.path },
+						ownership: [owned],
+					},
+				});
+				yield* applySessionCommand({
+					type: "session.deleted",
+					data: { sessionId },
+				});
+			}),
+		);
+		await harness.drainEventRetention();
+		expect(
+			await runtime.runPromise(readSessionWorktreeOwnership(sessionId)),
+		).toEqual([owned]);
+		const worktreeOwnership =
+			state === "malformed"
+				? { _tag: "Owned", ownership: "invalid" }
+				: state === "conflict"
+					? { _tag: "Conflict", reason: "launch", discoveryPaths: [] }
+					: { _tag: "Owned", ownership: [], discoveryPaths: [] };
+		// Persist a newer own marker as damaged storage can leave it. Keep the
+		// canonical captured marker intact, with no surviving launch events.
+		const db = new Database(harness.eventsDbPath);
+		try {
+			expect(
+				db
+					.prepare("SELECT type FROM events WHERE session_id = ?")
+					.all(sessionId),
+			).toEqual([{ type: "session.deleted" }]);
+			db.prepare(`INSERT INTO events
+					(event_id, session_id, stream_version, type, data, metadata, provider, created_at, project_id)
+					SELECT event_id || '-newer', session_id, stream_version + 1, type, ?, metadata, provider, created_at + 1, project_id
+					FROM events WHERE session_id = ? AND type = 'session.deleted'`).run(
+				JSON.stringify({ sessionId, worktreeOwnership }),
+				sessionId,
+			);
+			expect(
+				db
+					.prepare("SELECT type FROM events WHERE session_id = ?")
+					.all(sessionId),
+			).toEqual([{ type: "session.deleted" }, { type: "session.deleted" }]);
+		} finally {
+			db.close();
+		}
+		const inspection = await runtime.runPromise(
+			Effect.result(readSessionWorktreeOwnership(sessionId)),
+		);
+		expect(inspection).toMatchObject(
+			state === "empty"
+				? { _tag: "Success", success: [] }
+				: { _tag: "Failure", failure: { operation: "worktree.inspect" } },
+		);
+		expect(
+			await runtime.runPromise(
+				readWorktreeCleanupPaths.pipe(
+					Effect.provideService(PersistenceProjectTag, {
+						projectId: "integration-test",
+					}),
+				),
+			),
+		).toContainEqual({
+			session_id: sessionId,
+			path: owned.path,
+		});
 	});
 
 	// Failure cases: missing rich parts, inclusion of a removed turn, a cut

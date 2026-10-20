@@ -36,6 +36,7 @@ import {
 } from "../../../persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { isSessionDeleted } from "../../../persistence/effect/session-seeder-effect.js";
+import { readSessionWorktreeOwnershipSnapshot } from "../../../persistence/effect/session-worktree-ownership.js";
 import {
 	canonicalEvent,
 	type EventPayloadMap,
@@ -308,20 +309,43 @@ export const applySessionCommand = (
 			return;
 
 		if (appendProvider !== undefined) {
-			const events = [
-				canonicalEvent(command.type, sessionId, command.data, {
-					provider: appendProvider,
-					createdAt: Date.now(),
-					metadata: { source: options.source ?? "relay" },
-				}),
-				...(command.type === "session.created" && options.pick
-					? sessionPickEvents(sessionId, options.pick)
-					: []),
-			];
 			let applied = true;
 			const append = Effect.gen(function* () {
 				if (command.type === "session.created")
 					yield* requireLiveCreationRefs(command.data);
+				// Read under the write permit, after beforeWrite, before deletion can
+				// cascade or retention can reclaim the canonical launch evidence.
+				const worktreeOwnership =
+					command.type === "session.deleted"
+						? yield* readSessionWorktreeOwnershipSnapshot(
+								eventStore.projectId,
+								sessionId,
+							)
+						: undefined;
+				const metadata = {
+					provider: appendProvider,
+					createdAt: Date.now(),
+					metadata: { source: options.source ?? "relay" },
+				};
+				const events = [
+					command.type === "session.deleted"
+						? canonicalEvent(
+								"session.deleted",
+								sessionId,
+								{
+									sessionId,
+									...(command.data.childSessionIds
+										? { childSessionIds: command.data.childSessionIds }
+										: {}),
+									...(worktreeOwnership ? { worktreeOwnership } : {}),
+								},
+								metadata,
+							)
+						: canonicalEvent(command.type, sessionId, command.data, metadata),
+					...(command.type === "session.created" && options.pick
+						? sessionPickEvents(sessionId, options.pick)
+						: []),
+				];
 				return yield* eventStore.appendBatch(events);
 			});
 			yield* (
