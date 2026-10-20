@@ -146,7 +146,11 @@ export function answerSubscribeInstances(
 			const requestId = String(frame.id);
 			answered.add(requestId);
 			ws.send(
-				JSON.stringify({ _tag: "Chunk", requestId, values: [{ instances }] }),
+				JSON.stringify({
+					_tag: "Chunk",
+					requestId: frame.id,
+					values: [{ instances }],
+				}),
 			);
 			return true;
 		}
