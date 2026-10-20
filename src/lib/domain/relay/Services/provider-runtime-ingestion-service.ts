@@ -411,11 +411,12 @@ export const makeProviderRuntimeIngestionLive = (
 											for (const { event, record } of prepared)
 												if (record) sessionIds.add(event.sessionId);
 											for (const event of domainEvents)
-												if (
-													event.type === "session.created" &&
-													event.data.parentId
-												)
-													sessionIds.add(event.data.parentId);
+												if (event.type === "session.created")
+													for (const id of [
+														event.data.parentId,
+														event.data.forkedFrom,
+													])
+														if (id !== undefined) sessionIds.add(id);
 											const deleted = new Set<string>();
 											for (const id of sessionIds)
 												if (yield* isSessionDeleted(id)) deleted.add(id);
@@ -451,11 +452,13 @@ export const makeProviderRuntimeIngestionLive = (
 												}
 												if (
 													event.type === "session.created" &&
-													event.data.parentId &&
-													deleted.has(event.data.parentId)
+													[event.data.parentId, event.data.forkedFrom].some(
+														(id) => id !== undefined && deleted.has(id),
+													)
 												) {
-													// A child discovered after cascading deletion belongs to that
-													// deletion too. Keep its tombstone for parentless late events.
+													// Keep creation and death in one commit. The missing-lineage
+													// projector skips creation; drain then reclaims its event.
+													accepted.push(event);
 													event = {
 														...event,
 														eventId: Schema.decodeUnknownSync(EventId)(
