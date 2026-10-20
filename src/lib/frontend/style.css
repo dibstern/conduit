@@ -984,6 +984,9 @@ body:has(dialog:modal) {
 		column-gap: 4px;
 		padding-inline: 8px;
 	}
+	#session-bar[data-compact="false"] [data-testid="background-tasks-row"] {
+		margin-inline: -8px;
+	}
 }
 
 #compact-top-edge {

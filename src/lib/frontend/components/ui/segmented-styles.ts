@@ -51,7 +51,7 @@ export const SEGMENTED_VARIANTS = {
 	},
 	/** Final's filled capsules, used for DiffView's Unified/Split switch. */
 	pill: {
-		list: "diff-toggle-bar flex shrink-0 items-center gap-[2px] rounded-full bg-chip",
+		list: "diff-toggle-bar flex w-fit shrink-0 items-center gap-[2px] rounded-full bg-chip",
 		item: "relative flex h-[24px] items-center rounded-full px-[9px] text-[12px] font-medium cursor-pointer font-sans transition-colors duration-100 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-text before:absolute before:inset-x-0 before:top-1/2 before:-translate-y-1/2 before:content-[''] max-md:before:h-[44px]",
 		selected: "bg-accent/16 text-accent",
 		unselected: "text-text-muted hover:text-text",

@@ -143,11 +143,11 @@
 								<span aria-hidden="true" class="text-status-snoozed"><Icon name={icon} size={14} /></span>{title}
 								{#if following}<small class="ml-auto text-[11.5px] font-normal text-text-dimmer">{hint}</small>{/if}
 							</div>
-							<div class="max-h-[calc(var(--bits-menu-content-available-height)-44px)] overflow-y-auto overscroll-contain">
+							<div class="flex max-h-[calc(var(--bits-menu-content-available-height)-44px)] flex-col overflow-y-auto overscroll-contain">
 							{#each items as item (item.id)}
 								<DropdownMenu.Item textValue={item.label} onSelect={item.action} data-hold-menu-item={item.id} data-selected={activation === "click" && item.selected || undefined} aria-current={activation === "click" && item.selected ? "true" : undefined} data-followed={gestureState.phase === "following" && gestureState.highlighted === item.id || undefined}>
 									{#snippet child({ props })}
-										<div {...props} class={["hold-menu-row relative flex cursor-pointer select-none items-center gap-[10px] rounded-[10px] px-[10px] text-[14.5px] outline-hidden", following ? "h-[38px]" : "h-[32px]", item.separated && "mt-[7px] before:absolute before:inset-x-[10px] before:-top-[4px] before:border-t before:border-border-chip before:content-['']"]}>
+										<div {...props} class={["hold-menu-row relative flex min-h-[32px] cursor-pointer select-none items-center gap-[10px] rounded-[10px] px-[10px] text-[14.5px] outline-hidden", following ? "h-[38px]" : "h-[32px]", item.separated && "mt-[7px] before:absolute before:inset-x-[10px] before:-top-[4px] before:border-t before:border-border-chip before:content-['']"]}>
 											<span aria-hidden="true" class="hold-menu-icon text-text-dimmer"><Icon name={item.icon ?? "clock"} size={14} /></span>{item.label}
 											{#if item.detail}<small class="hold-menu-detail ml-auto font-mono text-[12px] text-text-dimmer">{item.detail}</small>{/if}
 										</div>
