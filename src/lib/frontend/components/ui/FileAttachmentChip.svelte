@@ -19,7 +19,7 @@
 	} = $props();
 </script>
 
-<div data-testid={testid} class="relative flex h-[48px] max-w-[220px] shrink-0 items-center gap-[8px] rounded-[10px] border border-border bg-bg-raised pl-[10px] {onremove ? 'pr-[14px]' : 'pr-[10px]'}">
+<div data-testid={testid} class="relative flex h-[48px] max-w-[220px] shrink-0 items-center gap-[8px] rounded-[10px] bg-bg-raised pl-[10px] {onremove ? 'pr-[14px]' : 'pr-[10px]'}">
 	<Icon name="file" size={18} class="shrink-0 text-text-muted" />
 	<span class="min-w-0">
 		<span class="block truncate text-[12px] text-text" title={name}>{name}</span>

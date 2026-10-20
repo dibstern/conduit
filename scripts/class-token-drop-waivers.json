@@ -995,5 +995,22 @@
 	"src/lib/frontend/components/ui/ViewCard.svelte :: leading-[1.5]": {
 		"renamedTo": "leading-[11.04px]",
 		"reason": "conduit-test-voxy.10: keep the Final preview's 8px times 0.92 times 1.5 line height when moving mono glyph scaling solely into the font face."
-	}
+	},
+	"src/lib/frontend/components/chat/ActivityRow.svelte :: border-error/30,text-[12.5px],text-text": "transcript-15 and 16 intentionally use Final step-row typography and borderless code output; mono sizing comes from the shared scaled tokens.",
+	"src/lib/frontend/components/chat/AssistantHeader.svelte :: gap-[2px],size-[28px],text-[12px]": "transcript-02,03,04 intentionally scale mono to 92%, draw 14px/12px Claude glyphs, and place 14px action icons on 26px centers.",
+	"src/lib/frontend/components/chat/DiffView.svelte :: border-b,px-[12px],py-[6px],rounded-[8px],text-[11px],text-[12.5px]": "transcript-02 and 14 intentionally replace the separate outlined toggle band with 24px filled capsules inside the 36px header, radius 12 and 92% mono sizes.",
+	"src/lib/frontend/components/chat/MessageTime.svelte :: text-[12px]": "transcript-02 intentionally replaces nominal 12px with the shared text-mono-xs token at 11.04px.",
+	"src/lib/frontend/components/chat/QuestionCard.svelte :: flex-1,max-sm:flex-col,min-h-[44px]": "transcript-11 and 12 intentionally replace stretched 44px outlined slabs with natural-width 28px filled capsules; touchTarget always preserves 44px invisible targets.",
+	"src/lib/frontend/components/chat/SubagentBackBar.svelte :: bg-accent,bg-white/20,font-bold,gap-1,hover:opacity-85,max-md:px-2,md:inline-flex,ml-0.5,px-1,px-2.5,py-0.5,py-px,rounded,rounded-sm,text-bg,tracking-wide,tracking-wider,transition-opacity": "transcript-18 intentionally replaces the solid uppercase rectangle and filled keycap with a 28px primary capsule, Parent label and quiet Esc hint.",
+	"src/lib/frontend/components/chat/ToolFullDetail.svelte :: className,mx-2.5": "transcript-16 intentionally forwards the caller class on the containing element;22px indentation replaces ineffective mx-2.5 around full-width content.",
+	"src/lib/frontend/components/chat/ToolGenericCard.svelte :: font-semibold,mx-2.5,text-[13px]": "transcript-15 and 16 intentionally use regular 12.5px verbs and a 22px-indented borderless output; scaled mono tokens replace nominal sizes.",
+	"src/lib/frontend/components/chat/ToolQuestionCard.svelte :: border,border-border-subtle,min-h-[28px],py-[3px]": "transcript-09,12,15 intentionally use filled option rows, accent chosen capsules and 26px regular step headers instead of outlined options and padded 28px rows.",
+	"src/lib/frontend/components/chat/ToolSubagentCard.svelte :: font-semibold,text-[12.5px]": "transcript-15 intentionally uses regular 12.5px step verbs with quiet 11.5px arguments instead of bold labels.",
+	"src/lib/frontend/components/chat/UserMessage.svelte :: border-border": "transcript-07 intentionally removes the thumbnail outline; the existing raised fill and 96px image remain.",
+	"src/lib/frontend/components/permissions/PermissionCard.svelte :: bg-success/10,border,border-border,border-success/15,border-success/20,cursor-pointer,flex-1,gap-2,hover:bg-bg,hover:bg-success/15,hover:border-success/15,hover:text-success/80,max-sm:flex-col,min-h-[48px],text-accent,text-success/80": "transcript-13 intentionally replaces green/red outlined permission controls with 28px filled primary/neutral capsules, orange waiting marker and normal tool-name text. Existing Button recipes own hover and pointer behavior;44px targets use touchTarget.",
+	"src/lib/frontend/components/ui/CodeBlockHeader.svelte :: text-[12px]": "transcript-02 intentionally replaces nominal 12px with text-mono-xs at 11.04px.",
+	"src/lib/frontend/components/ui/FileAttachmentChip.svelte :: border,border-border": "transcript-07 intentionally removes attachment outlines while retaining the raised fill.",
+	"src/lib/frontend/components/ui/ImageAttachmentThumb.svelte :: border,border-border,rounded-[9px]": "transcript-07 intentionally removes the pasted image outline and matches both image and fill to the 10px outer radius.",
+	"src/lib/frontend/components/ui/button-recipes.ts :: bg-accent-bg": "transcript-13 and 18 intentionally use Final primary capsule 18% accent tint; this variant has exactly the permission and Parent consumers.",
+	"src/lib/frontend/components/ui/segmented-styles.ts :: bg-accent/20,border,border-accent/40,hover:border-border-subtle,mb-1,px-2,rounded,text-text-dimmer,text-xs": "transcript-14 intentionally replaces the outlined pill toggle with 24px borderless capsules and 16% chosen tint, hosted in the code header."
 }

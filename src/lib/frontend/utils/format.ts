@@ -52,7 +52,7 @@ export function formatTimeAgo(
 export function formatClockTime(timestamp: number | undefined): string {
 	if (timestamp === undefined) return "";
 	return new Date(timestamp).toLocaleTimeString(undefined, {
-		hour: "2-digit",
+		hour: "numeric",
 		minute: "2-digit",
 	});
 }
