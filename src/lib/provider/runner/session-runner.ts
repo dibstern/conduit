@@ -8,6 +8,7 @@ import type {
 } from "../claude/claude-runner-snapshot.js";
 import type { ClaudeSubagentTranscriptSnapshot } from "../claude/types.js";
 import type {
+	InputAdmission,
 	PermissionDecision,
 	PermissionRequest,
 	PermissionResponse,
@@ -181,6 +182,7 @@ export interface SessionFailure {
 
 /** Effects are execution carriers; only command/output/reply data crosses here. */
 export interface SessionRunner {
+	readonly inputAdmission?: InputAdmission | undefined;
 	/** Native execution and pending intake, independent of an intake reply. */
 	hasActiveTurnsEffect?(sessionId: string): Effect.Effect<boolean>;
 	readonly recoverEffect?: Effect.Effect<void, SessionFailure>;

@@ -3,7 +3,7 @@
 // Instances are execution-only — they don't own sessions, messages, or history.
 // Conduit owns all state. Instances turn prompts into event streams.
 
-import type { Effect, Scope } from "effect";
+import type { Effect, Scope, Stream } from "effect";
 import type { Account } from "../contracts/account.js";
 import type { ProviderSessionCapabilities } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
@@ -344,6 +344,12 @@ export interface ProviderNativeSession {
 	readonly resumeSessionId?: string | undefined;
 }
 
+export interface InputAdmission {
+	readonly isHeld: (sessionId: string) => boolean;
+	readonly changes: Effect.Effect<Stream.Stream<string>, never, Scope.Scope>;
+	readonly afterStop?: (sessionId: string) => Effect.Effect<void>;
+}
+
 /**
  * ProviderInstance -- the 7-method contract for provider execution.
  *
@@ -357,6 +363,8 @@ export interface ProviderNativeSession {
  * - No streamEvents -- instance pushes via EventSink, no output stream needed
  */
 export interface ProviderInstance {
+	/** A retained runner must upgrade before accepting another input. */
+	readonly inputAdmission?: InputAdmission | undefined;
 	/** Unique identifier for this provider (e.g. "opencode", "claude") */
 	readonly providerId: string;
 

@@ -373,6 +373,7 @@ export const runSessionRunner = (
 											? Number(process.env["CONDUIT_TEST_RUNNER_HELLO_VERSION"])
 											: RUNNER_PROTOCOL_VERSION,
 									buildId: runnerBuildId(),
+									stampsRunIds: true,
 									runnerId,
 									driverKind,
 									sessionId,

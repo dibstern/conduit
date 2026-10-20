@@ -41,6 +41,7 @@ import { EventStoreEffectTag } from "../../../persistence/effect/event-store-eff
 import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import { inboxRunStatusQuery } from "../../../persistence/inbox-run-status-query.js";
+import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { Usage } from "../../daemon/Services/usage.js";
 import { type Continuation, ContinuationTag } from "./continuation.js";
@@ -74,6 +75,8 @@ export interface InboxView {
 	readonly stopping?: boolean;
 	/** A continuation is moving the session to another account. */
 	readonly switching?: boolean;
+	/** A legacy runner is draining before replacement. */
+	readonly legacyRunner?: boolean;
 	/** A turn was stopped or failed since the latest handoff or reset release. */
 	readonly stoppedSinceHandoff: boolean;
 	/** A usage limit cut a request off, and it is neither answered nor dismissed. */
@@ -245,6 +248,7 @@ export function decideInbox(
 					? interruptForInput(sessionId, { inputId, request }, [admitted])
 					: { _tag: "Accepted", events: [admitted] };
 			// The switch's continuation owns the next turn; a steer would join the old one.
+			if (view.legacyRunner) return { _tag: "Accepted", events: [admitted] };
 			if (view.switching) return { _tag: "Accepted", events: [admitted] };
 			if (!idle && command.delivery === "steer")
 				return steer(sessionId, view, { inputId, request }, [admitted]);
@@ -289,6 +293,7 @@ export function decideInbox(
 					? { _tag: "Rejected", reason: "prompt_open" }
 					: interruptForInput(sessionId, input, []);
 			// It keeps its place and drains after the switch's continuation.
+			if (view.legacyRunner) return { _tag: "Accepted", events: [] };
 			if (view.switching) return { _tag: "Accepted", events: [] };
 			// A busy session takes it as a steer; refused, it keeps its place.
 			if (!idle) return steer(sessionId, view, input, []);
@@ -406,6 +411,13 @@ export const SessionInboxLive = Layer.effect(
 			yield* Effect.context<
 				Effect.Services<ReturnType<Continuation["requestContinuation"]>>
 			>();
+		const registry = yield* Effect.serviceOption(ProviderRegistryTag);
+		const admissions = Option.isSome(registry)
+			? registry.value.listProviders().flatMap((id) => {
+					const admission = registry.value.getInstance(id)?.inputAdmission;
+					return admission ? [admission] : [];
+				})
+			: [];
 		const permits = new Map<string, Semaphore.Semaphore>();
 		const serialised = (sessionId: string) => {
 			let permit = permits.get(sessionId);
@@ -501,6 +513,9 @@ export const SessionInboxLive = Layer.effect(
 								.filter((at) => Number.isFinite(at) && at > now)
 						: [];
 				const fences = providerTurnService.turnFences(sessionId);
+				const legacyRunner = admissions.some((admission) =>
+					admission.isHeld(sessionId),
+				);
 				return {
 					provider: facts?.provider ?? undefined,
 					queued,
@@ -515,6 +530,7 @@ export const SessionInboxLive = Layer.effect(
 						facts?.run_status === "running",
 					stopping: fences.stopping,
 					switching: fences.switching,
+					legacyRunner,
 					stoppedSinceHandoff: facts?.stopped === 1,
 					limited: facts?.limited === 1,
 					usageResetsAt: resets.length > 0 ? Math.max(...resets) : undefined,
@@ -523,6 +539,7 @@ export const SessionInboxLive = Layer.effect(
 					providerSteers: providerSteers(Option.getOrUndefined(account)),
 					promptOpen: (facts?.open_prompts ?? 0) > 0,
 					running,
+					...(legacyRunner ? { busy: true } : {}),
 				} satisfies InboxView;
 			});
 
@@ -843,6 +860,18 @@ export const SessionInboxLive = Layer.effect(
 		const advances = yield* bus.subscribeAdvances();
 		const lifts = yield* providerTurnService.fenceLifts;
 		const ready = yield* Deferred.make<void>();
+		for (const admission of admissions) {
+			const changes = yield* admission.changes;
+			yield* Effect.forkScoped(
+				Deferred.await(ready).pipe(
+					Effect.andThen(
+						Stream.runForEach(changes, (sessionId) =>
+							drainSessions([sessionId]),
+						),
+					),
+				),
+			);
+		}
 		yield* Effect.forkScoped(
 			Deferred.await(ready).pipe(
 				Effect.andThen(

@@ -364,6 +364,7 @@ const makeEngine = (input?: {
 
 const serviceLayer = (input: {
 	readonly engine?: OrchestrationEngine;
+	readonly registry?: ProviderRegistry;
 	readonly readQuery?: ReadQueryEffect;
 	readonly persist?: ClaudeEventPersistEffect;
 	readonly ingestion?: ProviderRuntimeIngestion;
@@ -381,6 +382,9 @@ const serviceLayer = (input: {
 	const ingestion = input.ingestion ?? makeIngestion();
 	const api = input.api ?? makeMockOpenCodeAPI();
 	let baseLayer = Layer.mergeAll(
+		Layer.succeed(ProviderRegistryTag)(
+			input.registry ?? new ProviderRegistry(),
+		),
 		input.accountDirectory !== undefined
 			? Layer.succeed(AccountDirectory)(input.accountDirectory)
 			: input.configDir === undefined
@@ -1033,6 +1037,55 @@ describe("ProviderTurnService", () => {
 				}).pipe(Effect.provide(layer));
 			});
 		}
+
+		it.effect(
+			"notifies a held runner only after Stop's bound has durably settled its cohort",
+			() => {
+				const issued = Deferred.makeUnsafe<void>();
+				const afterStop = vi.fn(() => Effect.void);
+				const registry = new ProviderRegistry([
+					partialFake<ProviderInstance>({
+						providerId: "claude",
+						inputAdmission: {
+							isHeld: () => true,
+							changes: Effect.succeed(Stream.empty),
+							afterStop,
+						},
+					}),
+				]);
+				const engine = makeEngine({
+					providerId: "claude",
+					dispatchEffect: () =>
+						Deferred.succeed(issued, undefined).pipe(
+							Effect.andThen(Effect.never),
+						),
+				});
+				return Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					yield* seedSession;
+					yield* seedClaimedRun("active-input", 1);
+					const stopped = yield* (yield* ProviderTurnServiceTag).beginStop({
+						clientId: "browser",
+						sessionId: "session-1",
+						commandId: "stop",
+					});
+					yield* Deferred.await(issued);
+					expect(afterStop).not.toHaveBeenCalled();
+					yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
+					yield* stopped;
+					expect(yield* sql`SELECT status FROM provider_runs`).toEqual([
+						{ status: "interrupted" },
+					]);
+					expect(
+						yield* sql`SELECT status FROM provider_command_outbox`,
+					).toEqual([{ status: "failed" }]);
+					expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
+						{ status: "side_effect_failed" },
+					]);
+					expect(afterStop).toHaveBeenCalledExactlyOnceWith("session-1");
+				}).pipe(Effect.provide(serviceLayer({ engine, registry }).liveLayer));
+			},
+		);
 
 		it.effect(
 			"Run now joins an existing plain Stop and dispatches after its bound retires the cohort",

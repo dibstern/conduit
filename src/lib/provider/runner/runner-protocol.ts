@@ -65,6 +65,8 @@ export interface RunnerHello {
 	// Runners that predate stop-task acknowledge it without stopping anything,
 	// and they also speak this protocol version, so the daemon needs the flag.
 	readonly stopsTasks?: true;
+	/** Every event produced by a send carries its conduit run identity. */
+	readonly stampsRunIds?: true;
 	readonly taggedConfigDir?: true;
 	readonly bindings?: readonly {
 		readonly sinkId: string;

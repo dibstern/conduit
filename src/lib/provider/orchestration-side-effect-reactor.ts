@@ -8,6 +8,7 @@ import {
 	Option,
 	Schema,
 	Semaphore,
+	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { AccountSchema } from "../contracts/account.js";
@@ -377,6 +378,33 @@ export class ProviderSideEffectReactor {
 		},
 	): Effect.Effect<TurnResult, ProviderCommandExecutionError> {
 		return Effect.gen({ self: this }, function* () {
+			if (row.effect_type === "send_turn") {
+				yield* Effect.scoped(
+					Effect.gen({ self: this }, function* () {
+						const admissions = this.options.registry
+							.listProviders()
+							.flatMap((id) => {
+								const admission =
+									this.options.registry.getInstance(id)?.inputAdmission;
+								return admission ? [admission] : [];
+							});
+						const held = () =>
+							admissions.some((admission) => admission.isHeld(row.session_id));
+						if (!held()) return;
+						// Subscribe before rechecking: a concurrent retirement cannot be lost.
+						const changes = yield* Effect.forEach(
+							admissions,
+							(admission) => admission.changes,
+						);
+						if (!held()) return;
+						yield* Stream.mergeAll(changes, { concurrency: "unbounded" }).pipe(
+							Stream.filter((sessionId) => sessionId === row.session_id),
+							Stream.takeWhile(held),
+							Stream.runDrain,
+						);
+					}),
+				);
+			}
 			const startedAt = yield* this.currentTimeMillis();
 			// The `pending -> running` update is the exclusive execution claim.
 			// If it changes no rows another executor already claimed this row, so
@@ -461,6 +489,21 @@ export class ProviderSideEffectReactor {
 							);
 						}),
 			);
+			if (
+				row.effect_type === "send_turn" &&
+				result._tag === "Failure" &&
+				providerFailureCode(result.failure) === "runner_input_held"
+			) {
+				yield* this.options
+					.write(
+						() => this.options
+							.sql`UPDATE provider_command_outbox SET status = 'pending', next_attempt_at = NULL
+					WHERE request_sequence = ${row.request_sequence} AND project_key = ${this.options.projectId}
+					AND status = 'running' AND attempt_count = ${row.attempt_count}`,
+					)
+					.pipe(Effect.mapError(storeFailure("returnUnreceived")));
+				return yield* this.executeRow(row, options);
+			}
 			if (
 				row.effect_type === "send_turn" &&
 				result._tag === "Success" &&

@@ -1375,6 +1375,17 @@ function query(params: {
 					turnHeld = false;
 					if (closed) return;
 				}
+				if (request === "upgrade-recovered-turn" && index === 1 && proof) {
+					const release = join(dirname(proof), "release-upgrade-recovered");
+					turnHeld = true;
+					mark({ kind: "assistant-held", prompt, queryId });
+					while (!existsSync(release) && !closed) {
+						yield* outOfBand.splice(0);
+						await new Promise<void>((done) => setTimeout(done, 20));
+					}
+					turnHeld = false;
+					if (closed) return;
+				}
 				if (request.startsWith("restart-"))
 					await new Promise<void>((done) => setTimeout(done, 120));
 				const event = stream(sessionId, {

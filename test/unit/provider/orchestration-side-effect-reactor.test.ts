@@ -8,6 +8,8 @@ import {
 	Fiber,
 	Layer,
 	Option,
+	PubSub,
+	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
@@ -117,6 +119,317 @@ function makeProvider(
 }
 
 describe("ProviderSideEffectReactor", () => {
+	it.effect("does not subscribe to admission changes for an unheld send", () =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			yield* seedSendTurnOutbox(sql);
+			const subscribe = vi.fn(() => Stream.empty);
+			const send = vi.fn(() => Effect.succeed(completedTurn));
+			const reactor = yield* makeReactor({
+				registry: new ProviderRegistry([
+					{
+						...makeProvider(send),
+						inputAdmission: {
+							isHeld: () => false,
+							changes: Effect.sync(subscribe),
+						},
+					},
+				]),
+			});
+			expect((yield* reactor.runCommand("cmd-1")).status).toBe("completed");
+			expect(send).toHaveBeenCalledOnce();
+			expect(subscribe).not.toHaveBeenCalled();
+			expect(
+				yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+			).toEqual([{ status: "completed", attempt_count: 1 }]);
+		}).pipe(Effect.provide(reactorTestLayer)),
+	);
+
+	it.effect(
+		"retains background approval support after a legacy adoption retry",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedSendTurnOutbox(sql);
+				const changes = yield* PubSub.unbounded<string>();
+				let held = false;
+				const requestPermission = vi.fn(() =>
+					Effect.succeed<PermissionResponse>({ decision: "once" }),
+				);
+				const interactions: EventSink = {
+					push: () => Effect.void,
+					requestPermission,
+					requestQuestion: () => Effect.succeed({}),
+					resolvePermission: () => Effect.void,
+					resolveQuestion: () => Effect.void,
+				};
+				const makeInteractions = vi.fn(() => interactions);
+				const send = vi.fn((input: SendTurnInput) => {
+					if (send.mock.calls.length === 1) {
+						held = true;
+						return Effect.fail(
+							new ProviderInstanceFailure({
+								providerId: "claude",
+								operation: "send-turn",
+								cause: { code: "runner_input_held" },
+							}),
+						);
+					}
+					return input.eventSink
+						.requestPermission({
+							requestId: "approval-after-restart",
+							toolName: "Bash",
+							toolInput: { command: "whoami" },
+							sessionId: input.sessionId,
+							turnId: input.inputId,
+							providerItemId: "tool-1",
+						})
+						.pipe(
+							Effect.tap((answer) =>
+								Effect.sync(() => expect(answer.decision).toBe("once")),
+							),
+							Effect.as(completedTurn),
+							Effect.mapError(
+								(cause) =>
+									new ProviderInstanceFailure({
+										providerId: "claude",
+										operation: "approval",
+										cause,
+									}),
+							),
+						);
+				});
+				const reactor = yield* makeReactor({
+					registry: new ProviderRegistry([
+						{
+							...makeProvider(send),
+							inputAdmission: {
+								isHeld: () => held,
+								changes: PubSub.subscribe(changes).pipe(
+									Effect.map(Stream.fromSubscription),
+								),
+							},
+						},
+					]),
+				});
+				const waiting = yield* Effect.forkChild(
+					reactor.runOnce(makeInteractions),
+				);
+				yield* TestClock.adjust("100 millis");
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "pending", attempt_count: 1 }]);
+				held = false;
+				yield* PubSub.publish(changes, "session-1");
+				yield* Fiber.join(waiting);
+				expect(requestPermission).toHaveBeenCalledOnce();
+				expect(makeInteractions).toHaveBeenCalledTimes(2);
+				expect(send).toHaveBeenCalledTimes(2);
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "completed", attempt_count: 2 }]);
+				expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
+					{ status: "side_effect_completed" },
+				]);
+			}).pipe(Effect.provide(reactorTestLayer)),
+	);
+
+	it.effect(
+		"returns the claimed attempt to pending on legacy adoption and delivers once after restart",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedSendTurnOutbox(sql);
+				const changes = yield* PubSub.unbounded<string>();
+				let held = false;
+				const delivered = vi.fn(() => Effect.succeed(completedTurn));
+				const send = vi.fn((input: SendTurnInput) => {
+					if (send.mock.calls.length > 1) return delivered();
+					held = true;
+					return Effect.fail(
+						new ProviderInstanceFailure({
+							providerId: "claude",
+							operation: "send-turn",
+							cause: Object.assign(new Error(`Held ${input.inputId}`), {
+								code: "runner_input_held",
+							}),
+						}),
+					);
+				});
+				const reactor = yield* makeReactor({
+					registry: new ProviderRegistry([
+						{
+							...makeProvider(send),
+							inputAdmission: {
+								isHeld: () => held,
+								changes: PubSub.subscribe(changes).pipe(
+									Effect.map(Stream.fromSubscription),
+								),
+							},
+						},
+					]),
+				});
+				const waiting = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
+				yield* TestClock.adjust("100 millis");
+				expect(
+					yield* sql`SELECT status, attempt_count, run_id FROM provider_command_outbox`,
+				).toEqual([
+					{ status: "pending", attempt_count: 1, run_id: "run:cmd-1" },
+				]);
+				expect(yield* sql`SELECT status FROM provider_runs`).toEqual([
+					{ status: "pending" },
+				]);
+				expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
+					{ status: "side_effect_requested" },
+				]);
+				expect(delivered).not.toHaveBeenCalled();
+				held = false;
+				yield* PubSub.publish(changes, "session-1");
+				expect((yield* Fiber.join(waiting)).status).toBe("completed");
+				expect(send).toHaveBeenCalledTimes(2);
+				expect(delivered).toHaveBeenCalledOnce();
+				expect(
+					yield* sql`SELECT status, attempt_count, run_id FROM provider_command_outbox`,
+				).toEqual([
+					{ status: "completed", attempt_count: 2, run_id: "run:cmd-1" },
+				]);
+				expect(yield* sql`SELECT status FROM provider_runs`).toEqual([
+					{ status: "completed" },
+				]);
+				expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
+					{ status: "side_effect_completed" },
+				]);
+			}).pipe(Effect.provide(reactorTestLayer)),
+	);
+
+	it.effect(
+		"returns a claim racing legacy adoption to pending; Stop fences its delivery after retirement",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedSendTurnOutbox(sql);
+				const changes = yield* PubSub.unbounded<string>();
+				let held = false;
+				const send = vi.fn(() => {
+					held = true;
+					return Effect.fail(
+						new ProviderInstanceFailure({
+							providerId: "claude",
+							operation: "send-turn",
+							cause: Object.assign(new Error("Legacy runner holds input"), {
+								code: "runner_input_held",
+							}),
+						}),
+					);
+				});
+				const reactor = yield* makeReactor({
+					registry: new ProviderRegistry([
+						{
+							...makeProvider(send),
+							inputAdmission: {
+								isHeld: () => held,
+								changes: PubSub.subscribe(changes).pipe(
+									Effect.map(Stream.fromSubscription),
+								),
+							},
+						},
+					]),
+				});
+				const waiting = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
+				yield* TestClock.adjust("100 millis");
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "pending", attempt_count: 1 }]);
+				expect(yield* sql`SELECT status FROM provider_runs`).toEqual([
+					{ status: "pending" },
+				]);
+				const commit = yield* makeCommitAndSignal;
+				yield* commit([
+					canonicalEvent(
+						"run.requested",
+						"session-1",
+						{ runId: "active-A", inputId: "input-A" },
+						{ provider: "claude" },
+					),
+					canonicalEvent(
+						"message.created",
+						"session-1",
+						{ sessionId: "session-1", messageId: "input-A", role: "user" },
+						{ provider: "claude", metadata: { runId: "active-A" } },
+					),
+					canonicalEvent(
+						"run.started",
+						"session-1",
+						{ inputId: "input-A", requestedRunId: "active-A" },
+						{ provider: "claude", metadata: { runId: "active-A" } },
+					),
+				]);
+				const [run] = yield* sql<{
+					run_id: string;
+				}>`SELECT run_id FROM provider_command_outbox`;
+				yield* commit([
+					canonicalEvent(
+						"turn.interrupted",
+						"session-1",
+						{ messageId: "" },
+						{
+							provider: "claude",
+							metadata: { runId: run?.run_id ?? "missing-run" },
+						},
+					),
+				]);
+				held = false;
+				yield* PubSub.publish(changes, "session-1");
+				expect((yield* Fiber.join(waiting)).status).toBe("interrupted");
+				expect(send).toHaveBeenCalledOnce();
+				expect(
+					yield* sql`SELECT status FROM provider_runs WHERE id = 'active-A'`,
+				).toEqual([{ status: "running" }]);
+				expect(
+					yield* sql`SELECT run_id, state FROM turns WHERE id = 'input-A'`,
+				).toEqual([{ run_id: "active-A", state: "running" }]);
+				expect(yield* sql`SELECT status FROM provider_command_outbox`).toEqual([
+					{ status: "failed" },
+				]);
+			}).pipe(Effect.provide(reactorTestLayer)),
+	);
+
+	it.effect(
+		"a genuinely waiting legacy send wakes on admission changes without advancing the clock",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedSendTurnOutbox(sql);
+				const changes = yield* PubSub.unbounded<string>();
+				let held = true;
+				const send = vi.fn(() => Effect.succeed(completedTurn));
+				const reactor = yield* makeReactor({
+					registry: new ProviderRegistry([
+						{
+							...makeProvider(send),
+							inputAdmission: {
+								isHeld: () => held,
+								changes: PubSub.subscribe(changes).pipe(
+									Effect.map(Stream.fromSubscription),
+								),
+							},
+						},
+					]),
+				});
+				const waiting = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
+				yield* TestClock.adjust("1 millis");
+				expect(send).not.toHaveBeenCalled();
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "pending", attempt_count: 0 }]);
+				held = false;
+				yield* PubSub.publish(changes, "session-1");
+				yield* Effect.repeat(Effect.yieldNow, { times: 10 });
+				expect(send).toHaveBeenCalledOnce();
+				expect((yield* Fiber.join(waiting)).status).toBe("completed");
+			}).pipe(Effect.provide(reactorTestLayer)),
+	);
+
 	for (const retry of [false, true])
 		it.effect(
 			`places continuation membership at claim before provider intake (retry: ${retry})`,

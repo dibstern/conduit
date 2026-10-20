@@ -10,7 +10,9 @@ import {
 	Effect,
 	Exit,
 	FiberSet,
+	PubSub,
 	Semaphore,
+	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
@@ -77,6 +79,8 @@ interface RunnerChild {
 	connection?: RunnerSocket;
 	buildId?: string;
 	stopsTasks?: boolean;
+	inputHeld?: boolean;
+	legacyIndeterminateRuns?: readonly RunSettlementOwner[];
 	draftPreWarm?: boolean;
 	candidate?: boolean;
 	commandsInFlight: number;
@@ -340,6 +344,8 @@ export const makeProcessSessionRunner = (
 		const runFork = yield* FiberSet.makeRuntime<never, void, never>();
 		const runnerLabel = `${driver.driverKind.charAt(0).toUpperCase()}${driver.driverKind.slice(1)} runner`;
 		const lock = yield* Semaphore.make(1);
+		const inputChanges = yield* PubSub.unbounded<string>();
+		const heldSessions = new Set<string>();
 		const configDir = resolve(deps.daemonConfigDir ?? DEFAULT_CONFIG_DIR);
 		const startupTimeoutMs =
 			process.env["NODE_ENV"] === "test"
@@ -470,10 +476,43 @@ export const makeProcessSessionRunner = (
 			process.send?.(mark);
 		};
 
+		const retireLegacy = (sessionId: string, entry: RunnerChild) => {
+			if (!entry.inputHeld) return;
+			entry.inputHeld = false;
+			log.warn(
+				`Legacy runner retired: session=${sessionId} runner=${entry.runnerId} build=${entry.buildId}`,
+			);
+			runFork(
+				Effect.gen(function* () {
+					if (sql && ingestion && entry.legacyIndeterminateRuns?.length)
+						yield* settleSessionRuns(
+							sql,
+							sessionId,
+							"Delivery could not be confirmed across the upgrade",
+							(events) => ingestion.ingestBatch(events),
+							{
+								errorCode: "runner_stopped",
+								owners: entry.legacyIndeterminateRuns,
+							},
+						);
+				}).pipe(
+					Effect.catch((cause) =>
+						Effect.logError("Legacy runner settlement failed", cause),
+					),
+					Effect.ensuring(
+						Effect.gen(function* () {
+							heldSessions.delete(sessionId);
+							yield* PubSub.publish(inputChanges, sessionId);
+						}),
+					),
+				),
+			);
+		};
 		const evict = (sessionId: string, entry: RunnerChild) => {
 			// A late close from an old child must not remove its replacement.
 			if (children.get(sessionId) !== entry) return;
 			children.delete(sessionId);
+			retireLegacy(sessionId, entry);
 			// Usability ends before the OS process does; keep it visible to liveness.
 			if ((entry.pid ?? entry.child?.pid) !== undefined) exiting.add(entry);
 			for (const [sinkId, binding] of sinks)
@@ -752,6 +791,17 @@ export const makeProcessSessionRunner = (
 						yield* acknowledgeSends(sessionId, entry, connection);
 						entry.buildId = hello.buildId;
 						entry.stopsTasks = hello.stopsTasks === true;
+						if (entry.inputHeld === undefined) {
+							// The sole compatibility decision: legacy runners may finish
+							// retained work, but cannot own any newly delivered input.
+							entry.inputHeld = hello.stampsRunIds !== true;
+							if (entry.inputHeld) {
+								heldSessions.add(sessionId);
+								log.warn(
+									`Legacy runner adopted: session=${sessionId} runner=${entry.runnerId} build=${hello.buildId}`,
+								);
+							}
+						}
 						entry.upgrade.state = hello.upgradeState;
 						for (const binding of entry.candidate
 							? []
@@ -1033,6 +1083,25 @@ export const makeProcessSessionRunner = (
 					),
 				} satisfies RunnerChild;
 			});
+		const restartLegacy = (sessionId: string, entry: RunnerChild) =>
+			runner.executeEffect({ type: "end-session", sessionId }).pipe(
+				Effect.timeoutOrElse({
+					duration: startupTimeoutMs,
+					orElse: () =>
+						Effect.fail(
+							runnerFailure("upgrade runner", "Runner restart timed out"),
+						),
+				}),
+				Effect.catch((failure) =>
+					Effect.sync(() => {
+						log.warn(
+							`Legacy runner restart failed: session=${sessionId} runner=${entry.runnerId} build=${entry.buildId}: ${failure.message}`,
+						);
+						failed(sessionId, entry, failure);
+					}),
+				),
+				Effect.asVoid,
+			);
 		const eligible = (sessionId: string, entry: RunnerChild) =>
 			!closing &&
 			children.get(sessionId) === entry &&
@@ -1048,6 +1117,36 @@ export const makeProcessSessionRunner = (
 			(entry.upgrade.state.snapshot !== undefined ||
 				driver.coldUpgrade === true);
 		const upgrade = makeRunnerUpgrade<RunnerChild>({
+			before: (sessionId, entry) => {
+				if (!entry.inputHeld) return false;
+				if (
+					closing ||
+					children.get(sessionId) !== entry ||
+					entry.failure ||
+					entry.stopping ||
+					entry.idleExiting ||
+					entry.ending > 0
+				)
+					return true;
+				if (
+					!entry.upgrade.inFlight &&
+					!entry.recovering &&
+					entry.commandsInFlight === 0 &&
+					entry.upgrade.state?.quiescent
+				) {
+					entry.upgrade.inFlight = true;
+					runFork(
+						restartLegacy(sessionId, entry).pipe(
+							Effect.ensuring(
+								Effect.sync(() => {
+									entry.upgrade.inFlight = false;
+								}),
+							),
+						),
+					);
+				}
+				return true;
+			},
 			eligible,
 			runFork,
 			create: (sessionId, old) =>
@@ -1179,6 +1278,19 @@ export const makeProcessSessionRunner = (
 		});
 
 		class ProcessSessionRunner implements SessionRunner {
+			readonly inputAdmission = {
+				afterStop: (sessionId: string) =>
+					Effect.suspend(() => {
+						const entry = children.get(sessionId);
+						return entry?.inputHeld
+							? restartLegacy(sessionId, entry)
+							: Effect.void;
+					}),
+				isHeld: (sessionId: string) => heldSessions.has(sessionId),
+				changes: PubSub.subscribe(inputChanges).pipe(
+					Effect.map(Stream.fromSubscription),
+				),
+			};
 			readonly recoverEffect = Effect.gen(function* () {
 				if (closing)
 					return yield* Effect.fail(
@@ -1303,6 +1415,42 @@ export const makeProcessSessionRunner = (
 								Effect.ensuring(Effect.sync(() => candidates.delete(entry))),
 							);
 							return;
+						}
+						if (sql && entry.inputHeld) {
+							const journal = entry.pendingSendCommands;
+							// A supplied journal proves non-delivery; omission proves nothing.
+							yield* sql
+								.withTransaction(
+									Effect.gen(function* () {
+										const returned = yield* sql<{
+											run_id: string | null;
+											error_code: string | null;
+										}>`UPDATE provider_command_outbox
+									SET status = CASE WHEN ${journal !== undefined} AND COALESCE(error_code, '') <> 'delivery_indeterminate' THEN 'pending' ELSE status END,
+									error_code = CASE WHEN ${journal === undefined} THEN 'delivery_indeterminate' ELSE error_code END, next_attempt_at = NULL
+									WHERE project_key = ${projectId} AND session_id = ${registration.sessionId}
+									AND effect_type = 'send_turn' AND status = 'running'
+									AND (error_code = 'delivery_indeterminate' OR NOT EXISTS (SELECT 1 FROM json_each(${JSON.stringify([...(journal ?? [])])}) retained
+										WHERE json_extract(retained.value, '$[0]') = command_id AND json_extract(retained.value, '$[1]') = attempt_count))
+									RETURNING run_id, error_code`;
+										entry.legacyIndeterminateRuns = returned.flatMap(
+											({ run_id, error_code }) =>
+												run_id && error_code === "delivery_indeterminate"
+													? [{ runId: run_id }]
+													: [],
+										);
+										if (journal === undefined)
+											yield* sql`UPDATE command_receipts SET error_code = 'delivery_indeterminate'
+										WHERE project_key = ${projectId} AND status IN ('accepted', 'side_effect_requested')
+										AND command_id IN (SELECT command_id FROM provider_command_outbox WHERE project_key = ${projectId}
+											AND session_id = ${registration.sessionId} AND status = 'running' AND error_code = 'delivery_indeterminate')`;
+									}),
+								)
+								.pipe(
+									Effect.mapError((cause) =>
+										runnerFailure("recover runner", cause),
+									),
+								);
 						}
 						const commands = sql
 							? yield* driver
@@ -1571,6 +1719,7 @@ export const makeProcessSessionRunner = (
 						: undefined;
 				let child: RunnerChild | undefined;
 				let sentToRunner = false;
+				let legacyHeld = false;
 				let admitted: RunnerChild | undefined;
 				let admittedSessionId = "";
 				let ending: RunnerChild | undefined;
@@ -1602,6 +1751,13 @@ export const makeProcessSessionRunner = (
 										runnerFailure(command.type, "Runners are shutting down"),
 									);
 								const existing = children.get(sessionId);
+								if (command.type === "send-turn" && existing?.inputHeld) {
+									legacyHeld = true;
+									return yield* Effect.fail({
+										...runnerFailure("send-turn", "Legacy runner holds input"),
+										code: "runner_input_held",
+									});
+								}
 								if (
 									outputOwner &&
 									(command.type === "answer-permission" ||
@@ -1807,6 +1963,13 @@ export const makeProcessSessionRunner = (
 					if (command.type === "pre-warm" && command.input.draftPreWarm)
 						entry.draftPreWarm = true;
 					const connection = yield* Deferred.await(entry.ready);
+					if (command.type === "send-turn" && entry.inputHeld) {
+						legacyHeld = true;
+						return yield* Effect.fail({
+							...runnerFailure("send-turn", "Legacy runner holds input"),
+							code: "runner_input_held",
+						});
+					}
 					if (
 						command.type === "pre-warm" &&
 						(entry.failure ||
@@ -1986,6 +2149,13 @@ export const makeProcessSessionRunner = (
 							: Effect.fail(failure),
 					),
 					Effect.onError((cause) => {
+						if (legacyHeld && command.type === "send-turn") {
+							sinks.delete(command.sinkId);
+							return emit({
+								type: "release-sink",
+								sinkId: command.sinkId,
+							}).pipe(Effect.ignore);
+						}
 						if (
 							command.type !== "send-turn" ||
 							!turn ||

@@ -148,6 +148,11 @@ function snapshot(harness: ProcessHarness, sessionId: string) {
 			session: db
 				.prepare("SELECT status FROM sessions WHERE id = ?")
 				.get(sessionId) as { status: string },
+			pendingInputs: db
+				.prepare(
+					"SELECT input_id, state FROM pending_inputs WHERE session_id = ? ORDER BY admitted_at, rowid",
+				)
+				.all(sessionId) as Array<{ input_id: string; state: string }>,
 			turns: db
 				.prepare(
 					`SELECT id, state, started_at, completed_at, ${upgraded ? "run_id" : "NULL AS run_id"} FROM turns WHERE session_id = ? ORDER BY requested_at, rowid`,
@@ -226,7 +231,11 @@ function wire(harness: ProcessHarness): Wire[] {
 		: [];
 }
 
-function steerSink(harness: ProcessHarness, inputs: string[]) {
+function steerSink(
+	harness: ProcessHarness,
+	inputs: string[],
+	prompt = "old-runner-steer-proof",
+) {
 	const old = harness.marks.find((mark) => mark.kind === "runner-started");
 	const frames = wire(harness);
 	const commands = frames.flatMap(({ frame }) =>
@@ -250,9 +259,7 @@ function steerSink(harness: ProcessHarness, inputs: string[]) {
 				frame.output.event.type === "text.delta" &&
 				isRecord(frame.output.event.data) &&
 				typeof frame.output.event.data["text"] === "string" &&
-				responseChunks("old-runner-steer-proof").includes(
-					frame.output.event.data["text"],
-				)
+				responseChunks(prompt).includes(frame.output.event.data["text"])
 					? [frame.output.sinkId]
 					: [],
 			),
@@ -285,6 +292,10 @@ function normalized(state: Snapshot, inputs: string[]) {
 		busy:
 			state.runs.some((row) => ["pending", "running"].includes(row.status)) ||
 			(!state.runOwnershipAvailable && state.session.status === "busy"),
+		pendingInputs: state.pendingInputs.map((row) => ({
+			input: input(row.input_id),
+			state: row.state,
+		})),
 		turns: state.turns.map((row, i) => ({
 			id: `turn-${i + 1}`,
 			state: row.state,
@@ -348,20 +359,7 @@ afterEach(async ({ task }) => {
 			JSON.stringify(evidence["errors"]),
 		);
 		writeFileSync(join(harness.root, "release-upgrade-turn"), "cleanup");
-		if (inputs.length === 2) {
-			// Keep the sink observation even if the replacement daemon cannot
-			// start: the real old runner can finish into its disconnected spool.
-			await vi
-				.waitFor(
-					() =>
-						expect(steerSink(harness, inputs).emittedByMainRunner).toBe(true),
-					{ timeout: 15_000 },
-				)
-				.catch((error: unknown) => {
-					evidence["steerProbeError"] = String(error);
-				});
-			evidence["steerSink"] = steerSink(harness, inputs);
-		}
+		writeFileSync(join(harness.root, "release-upgrade-recovered"), "cleanup");
 		await harness.dispose();
 		evidence["cleanup"] = {
 			remainingRunners: harness.remainingRunnerPids().length,
@@ -380,8 +378,21 @@ afterEach(async ({ task }) => {
 // Failure modes: a substituted build masquerades as main; migration interrupts
 // a live reply; unowned old output never ends its reservation; a steer uses a
 // different sink, loses output, or prematurely settles the original command.
-for (const steer of [false, true]) {
-	it(`temporary real-main upgrade: ${steer ? "records the old runner's steer sink" : "a live old reply completes its migrated run"}`, async () => {
+for (const delivery of [
+	"queue",
+	"steer",
+	"idle",
+	"recovered",
+	"recovered-stop",
+	"stop-run-now",
+	"steer-on-main",
+] as const) {
+	const steer = delivery === "steer";
+	const idle = delivery === "idle";
+	const recovered = delivery === "recovered" || delivery === "recovered-stop";
+	const stopped = delivery === "recovered-stop";
+	const runNow = delivery === "stop-run-now";
+	it(`temporary real-main upgrade: ${stopped ? "Stop fences an unreceived recovered attempt after the swap" : runNow ? "Run now retires a legacy reply that never ends at the Stop bound" : delivery === "steer-on-main" ? "records main steer routing before the daemon upgrade" : idle ? "swaps an idle legacy runner before its next input" : recovered ? "holds an unknown recovered send for the new runner" : steer ? "holds a steer for the new runner" : "holds a queued send for the new runner"}`, async () => {
 		const harness = ProcessHarness.create({
 			dist: mainDist,
 			restartProof: true,
@@ -389,13 +400,16 @@ for (const steer of [false, true]) {
 			rootPrefix: join(tmpdir(), "conduit-82tn31-2-case-"),
 		});
 		const evidence: Record<string, unknown> = {
-			case: steer ? "steer" : "reply",
+			case: delivery,
 			criteria: {},
 			phase: "main-bootstrap",
 		};
 		const originalInput = randomUUID();
 		const steerInput = randomUUID();
 		const inputs = [originalInput];
+		const pendingPrompt = recovered
+			? "upgrade-recovered-turn"
+			: "old-runner-steer-proof";
 		active = { harness, evidence, inputs };
 		// Observe wire writes in the test environment only. Neither build is
 		// rewritten, and the runner's encode/dispatch/ack paths are unchanged.
@@ -469,11 +483,51 @@ Socket.prototype.write = function(chunk, ...args) {
 		expect(
 			readFileSync(join(harness.root, `runner-argv-${old.pid}.json`), "utf8"),
 		).toContain(mainDist);
+		const recordLegacyRetirement = () => {
+			const oldHello = wire(harness).find(
+				({ frame }) => frame.type === "hello" && frame.pid === old.pid,
+			)?.frame;
+			if (oldHello?.type !== "hello" || !oldHello.runnerId)
+				throw new Error("Missing legacy identity");
+			const legacyLogs = readFileSync(
+				join(harness.configDir, "daemon.log"),
+				"utf8",
+			)
+				.split("\n")
+				.filter((line) => /Legacy runner (adopted|retired)/.test(line))
+				.map((line) => {
+					const value: unknown = JSON.parse(line);
+					return isRecord(value) ? value["msg"] : undefined;
+				});
+			expect(legacyLogs).toEqual([
+				`Legacy runner adopted: session=${sessionId} runner=${oldHello.runnerId} build=${old.buildId}`,
+				`Legacy runner retired: session=${sessionId} runner=${oldHello.runnerId} build=${old.buildId}`,
+			]);
+			evidence["legacyLogs"] = [
+				"adopted session-1 runner-main build-main",
+				"retired session-1 runner-main build-main",
+			];
+		};
+		if (idle) {
+			writeFileSync(
+				join(harness.root, "release-upgrade-turn"),
+				"finish before switch",
+			);
+			await vi.waitFor(
+				() =>
+					expect(snapshot(harness, sessionId).outbox[0]?.status).toBe(
+						"completed",
+					),
+				{ timeout: 30_000 },
+			);
+		}
 		const before = snapshot(harness, sessionId);
 		expect(before.turns).toHaveLength(1);
-		expect(before.outbox).toMatchObject([{ status: "running" }]);
+		expect(before.outbox).toMatchObject([
+			{ status: idle ? "completed" : "running" },
+		]);
 		evidence["beforeUpgrade"] = normalized(before, inputs);
-		if (steer) {
+		if (delivery === "steer-on-main") {
 			inputs.push(steerInput);
 			const submitted = await Effect.runPromise(
 				browser.rpc["input.submit"]({
@@ -526,6 +580,7 @@ Socket.prototype.write = function(chunk, ...args) {
 			);
 			evidence["steerSubmittedOn"] = "main-before-switch";
 			evidence["phase"] = "steer-observed";
+			evidence["steerSink"] = steerSink(harness, inputs);
 			evidence["criteria"] = {
 				realMainRunner: "passed",
 				steerSink: "recorded",
@@ -542,6 +597,31 @@ Socket.prototype.write = function(chunk, ...args) {
 		evidence["phase"] = "branch-bootstrap";
 		await harness.kill();
 		expect(() => process.kill(old.pid, 0)).not.toThrow();
+		if (recovered) {
+			// Crash window: main committed and claimed B, but never wrote it to
+			// the socket. A is still executing on that real main-build runner.
+			inputs.push(steerInput);
+			const db = new Database(harness.daemonStorePath());
+			try {
+				db.prepare(`INSERT INTO provider_command_outbox (command_id, project_key, session_id, provider_id, effect_type, payload_json, status, attempt_count, requested_at, updated_at)
+					SELECT ?, project_key, session_id, provider_id, effect_type,
+					json_set(payload_json, '$.inputId', ?, '$.prompt', ?, '$.text', ?),
+					'running', attempt_count, requested_at + 1, updated_at + 1 FROM provider_command_outbox WHERE command_id = ?`).run(
+					steerInput,
+					steerInput,
+					pendingPrompt,
+					pendingPrompt,
+					originalInput,
+				);
+				db.prepare(`INSERT INTO command_receipts (command_id, session_id, status, command_type, project_key, created_at, updated_at)
+					SELECT ?, session_id, 'accepted', command_type, project_key, created_at + 1, updated_at + 1 FROM command_receipts WHERE command_id = ?`).run(
+					steerInput,
+					originalInput,
+				);
+			} finally {
+				db.close();
+			}
+		}
 		await harness.restart({
 			dist: branchDist,
 			startupTimeoutMs: 120_000,
@@ -571,41 +651,174 @@ Socket.prototype.write = function(chunk, ...args) {
 			started_at: originalTurn.started_at,
 			run_id: migratedCommand.run_id,
 		});
-		expect(migratedTurn.run_id).not.toBeNull();
+		if (!idle) expect(migratedTurn.run_id).not.toBeNull();
+		const branchBrowser = harness.browsers.at(-1);
+		if (!branchBrowser) throw new Error("Missing branch browser");
+		if (!recovered) {
+			inputs.push(steerInput);
+			const submitted = await Effect.runPromise(
+				branchBrowser.rpc["input.submit"]({
+					sessionId,
+					originId: branchBrowser.originId,
+					inputId: steerInput,
+					text: pendingPrompt,
+					delivery: steer ? "steer" : "queue",
+				}),
+			);
+			expect(submitted.ok).toBe(true);
+			const db = new Database(harness.daemonStorePath(), { readonly: true });
+			if (!idle)
+				try {
+					expect(
+						db
+							.prepare("SELECT state FROM pending_inputs WHERE input_id = ?")
+							.get(steerInput),
+					).toEqual({ state: "queued" });
+				} finally {
+					db.close();
+				}
+			else db.close();
+			if (!idle) expect(snapshot(harness, sessionId).outbox).toHaveLength(1);
+			if (!idle)
+				expect(
+					wire(harness).filter(
+						({ frame }) =>
+							frame.type === "command" &&
+							frame.command.type === "send-turn" &&
+							frame.command.input.inputId === steerInput,
+					),
+				).toHaveLength(0);
+		} else {
+			expect(snapshot(harness, sessionId).outbox).toMatchObject([
+				{ status: "running" },
+				{ status: "pending" },
+			]);
+		}
+
+		evidence["heldBeforeReplyEnds"] = normalized(
+			snapshot(harness, sessionId),
+			inputs,
+		);
+		if (stopped || runNow) {
+			evidence["phase"] = "explicit-stop";
+			if (runNow)
+				await Effect.runPromise(
+					branchBrowser.rpc["input.sendNow"]({
+						sessionId,
+						inputId: steerInput,
+						interrupt: true,
+						originId: branchBrowser.originId,
+					}),
+				);
+			else
+				await Effect.runPromise(
+					branchBrowser.rpc.CancelSession({
+						sessionId,
+						commandId: randomUUID(),
+					}),
+				);
+			await vi.waitFor(
+				() => {
+					expect(snapshot(harness, sessionId).runs[0]?.status).toBe(
+						"interrupted",
+					);
+					expect(
+						readFileSync(join(harness.configDir, "daemon.log"), "utf8"),
+					).toContain(`Legacy runner retired: session=${sessionId}`);
+				},
+				{ timeout: 60_000 },
+			);
+			if (stopped) {
+				expect(snapshot(harness, sessionId).outbox[1]?.status).toBe("failed");
+				expect(
+					wire(harness).filter(
+						({ frame }) =>
+							frame.type === "command" &&
+							frame.command.type === "send-turn" &&
+							frame.command.input.inputId === steerInput,
+					),
+				).toHaveLength(0);
+				recordLegacyRetirement();
+				evidence["afterStoppedRetirement"] = normalized(
+					snapshot(harness, sessionId),
+					inputs,
+				);
+				evidence["phase"] = "completed";
+				evidence["criteria"] = {
+					unreceivedAttemptNeverDelivered: "passed",
+					legacyRetiredAfterStop: "passed",
+				};
+				return;
+			}
+		}
+
 		evidence["phase"] = "native-reply";
 		writeFileSync(
 			join(harness.root, "release-upgrade-turn"),
 			"finish on main runner",
 		);
-		await vi.waitFor(
-			() =>
-				expect(
-					marks(harness).filter(
-						(mark) =>
-							mark.kind === "emit" &&
-							mark.prompt ===
-								(steer ? "old-runner-steer-proof" : "upgrade-long-turn"),
-					),
-				).toHaveLength(3),
-			{ timeout: 60_000 },
-		);
+		if (!runNow)
+			await vi.waitFor(
+				() =>
+					expect(
+						marks(harness).filter(
+							(mark) =>
+								mark.kind === "emit" &&
+								mark.prompt === (steer ? pendingPrompt : "upgrade-long-turn"),
+						),
+					).toHaveLength(3),
+				{ timeout: 60_000 },
+			);
+		if (recovered) {
+			await vi.waitFor(
+				() =>
+					expect(
+						marks(harness).some(
+							(mark) =>
+								mark.kind === "assistant-held" && mark.prompt === pendingPrompt,
+						),
+					).toBe(true),
+				{ timeout: 30_000 },
+			);
+			const accepted = snapshot(harness, sessionId);
+			expect(accepted.runs[1]?.status).toBe("running");
+			expect(accepted.outbox[1]?.status).toBe("running");
+			expect(accepted.receipts[1]?.status).toBe("accepted");
+			evidence["recoveredIntake"] = normalized(accepted, inputs);
+			writeFileSync(
+				join(harness.root, "release-upgrade-recovered"),
+				"finish on new runner",
+			);
+		}
 		evidence["phase"] = "owned-completion";
 		await vi.waitFor(
 			() => {
 				const final = snapshot(harness, sessionId);
 				expect(final.turns.map((row) => row.state)).toEqual(
-					inputs.map(() => "completed"),
+					inputs.map((_, index) =>
+						runNow && index === 0 ? "interrupted" : "completed",
+					),
 				);
-				expect(final.runs.map((row) => row.status)).toEqual(["completed"]);
-				expect(final.turns[0]?.run_id).toBe(final.runs[0]?.id);
+				expect(final.runs.map((row) => row.status)).toEqual(
+					idle
+						? ["completed"]
+						: [runNow ? "interrupted" : "completed", "completed"],
+				);
+				if (!idle) expect(final.turns[0]?.run_id).toBe(final.runs[0]?.id);
 				expect(final.outbox.map((row) => row.status)).toEqual(
-					inputs.map(() => "completed"),
+					inputs.map((_, index) =>
+						runNow && index === 0 ? "failed" : "completed",
+					),
 				);
 				expect(final.receipts.map((row) => row.status)).toEqual(
-					inputs.map(() => "side_effect_completed"),
+					inputs.map((_, index) =>
+						runNow && index === 0
+							? "side_effect_failed"
+							: "side_effect_completed",
+					),
 				);
 				expect(final.session.status).toBe("idle");
-				for (const row of final.turns) {
+				for (const row of final.turns.slice(idle || runNow ? 1 : 0)) {
 					expect(row.run_id).not.toBeNull();
 					expect(
 						final.events.some(
@@ -623,7 +836,65 @@ Socket.prototype.write = function(chunk, ...args) {
 			midTurnUpgrade: "passed",
 			ownedCompletion: "passed",
 			notBusy: "passed",
-			steerSink: "covered-by-steer-case",
+			heldUntilSwap: "passed",
+			newRunnerExactlyOnce: "passed",
 		};
+		const deliveries = wire(harness).filter(
+			({ frame }) =>
+				frame.type === "command" &&
+				frame.command.type === "send-turn" &&
+				frame.command.input.inputId === steerInput,
+		);
+		expect(deliveries).toHaveLength(1);
+		const delivered = deliveries[0]?.frame;
+		if (delivered?.type !== "command" || delivered.command.type !== "send-turn")
+			throw new Error("Missing replacement send");
+		const deliveredSinkId = delivered.command.sinkId;
+		const writer = wire(harness).find(
+			({ frame }) =>
+				frame.type === "output" &&
+				frame.output.type === "event" &&
+				frame.output.sinkId === deliveredSinkId &&
+				frame.output.event.type === "text.delta",
+		);
+		const newHello = wire(harness).find(
+			({ frame }) =>
+				frame.type === "hello" &&
+				typeof frame.pid === "number" &&
+				frame.pid !== old.pid &&
+				frame.pid === writer?.pid &&
+				frame.buildId === buildId(branchDist),
+		);
+		expect(
+			newHello?.frame.type === "hello"
+				? newHello.frame.stampsRunIds
+				: undefined,
+		).toBe(true);
+		expect(steerSink(harness, inputs, pendingPrompt).emittedByMainRunner).toBe(
+			false,
+		);
+		const newPid =
+			newHello?.frame.type === "hello" ? newHello.frame.pid : undefined;
+		expect(
+			wire(harness).some(
+				({ pid, frame }) =>
+					pid === newPid &&
+					frame.type === "output" &&
+					frame.output.type === "event" &&
+					frame.output.sinkId === deliveredSinkId &&
+					frame.output.event.type === "text.delta" &&
+					isRecord(frame.output.event.data) &&
+					typeof frame.output.event.data["text"] === "string" &&
+					responseChunks(pendingPrompt).includes(
+						frame.output.event.data["text"],
+					),
+			),
+		).toBe(true);
+		evidence["steerSink"] = {
+			output: "new-runner-sink",
+			emittedByMainRunner: false,
+			stampsRunIds: true,
+		};
+		recordLegacyRetirement();
 	}, 420_000);
 }
