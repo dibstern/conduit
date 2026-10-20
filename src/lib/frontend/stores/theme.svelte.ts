@@ -10,50 +10,14 @@ export const themeState = $state<{
 });
 
 let systemPreference: MediaQueryList | null = null;
-const scrims = new Set<{
-	opacity: number | (() => number);
-	backdrop: "default" | "dark" | "subtle";
-}>();
-
-function themeChannels(colour: string): number[] {
-	if (colour.startsWith("#")) {
-		let hex = colour.slice(1);
-		if (hex.length === 3 || hex.length === 4) {
-			hex = [...hex].map((digit) => digit + digit).join("");
-		}
-		return [0, 2, 4]
-			.map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16))
-			.concat(
-				hex.length === 8 ? Number.parseInt(hex.slice(6, 8), 16) / 255 : 1,
-			);
-	}
-	const channels = colour.match(/[\d.]+/g)?.map(Number) ?? [];
-	return channels.length === 3 ? [...channels, 1] : channels;
-}
+let openScrims = 0;
 
 function syncThemeColor(): void {
 	const style = getComputedStyle(document.documentElement);
-	const background = style.getPropertyValue("--color-bg").trim();
-	if (!background) return;
-	// CSS minification shortens hex backgrounds and serializes rgba as hex alpha.
-	let channels = themeChannels(background).slice(0, 3);
-	if (channels.length !== 3 || !channels.every(Number.isFinite)) return;
-	for (const scrim of scrims) {
-		const token =
-			scrim.backdrop === "default"
-				? "--color-backdrop"
-				: `--color-backdrop-${scrim.backdrop}`;
-		const backdrop = themeChannels(style.getPropertyValue(token).trim());
-		if (backdrop.length !== 4 || !backdrop.every(Number.isFinite)) continue;
-		const opacity =
-			typeof scrim.opacity === "function" ? scrim.opacity() : scrim.opacity;
-		const alpha = (backdrop[3] ?? 0) * opacity;
-		channels = channels.map(
-			(channel, index) =>
-				channel * (1 - alpha) + (backdrop[index] ?? 0) * alpha,
-		);
-	}
-	const colour = `#${channels.map((channel) => Math.round(channel).toString(16).padStart(2, "0")).join("")}`;
+	const colour = style
+		.getPropertyValue(openScrims > 0 ? "--color-theme-scrim" : "--color-bg")
+		.trim();
+	if (!colour) return;
 	let meta = document.querySelector<HTMLMetaElement>(
 		'meta[name="theme-color"]',
 	);
@@ -65,72 +29,16 @@ function syncThemeColor(): void {
 	meta.content = colour;
 }
 
-/** Keep browser chrome aligned with each visible phone scrim, including nested sheets. */
-export function dimThemeColor(
-	opacity: number | (() => number) = 1,
-	backdrop: "default" | "dark" | "subtle" = "default",
-): () => void {
-	const scrim = { opacity, backdrop };
-	scrims.add(scrim);
+/** Keep browser chrome dimmed until the last phone scrim closes. */
+export function dimThemeColor(): () => void {
+	openScrims++;
 	syncThemeColor();
+	let released = false;
 	return () => {
-		scrims.delete(scrim);
+		if (released) return;
+		released = true;
+		openScrims--;
 		syncThemeColor();
-	};
-}
-
-/** Follow painted opacity while a phone scrim tracks a drag or settles. */
-export function themeColorScrim(
-	node: HTMLElement,
-	{
-		backdrop = "default",
-		pseudoElement,
-	}: {
-		backdrop?: "default" | "dark" | "subtle";
-		pseudoElement?: string;
-	} = {},
-): { destroy: () => void } {
-	const restore = dimThemeColor(
-		() => Number.parseFloat(getComputedStyle(node, pseudoElement).opacity),
-		backdrop,
-	);
-	let frame: number | undefined;
-	const sample = () => {
-		syncThemeColor();
-		frame = requestAnimationFrame(sample);
-	};
-	const stop = () => {
-		if (frame !== undefined) cancelAnimationFrame(frame);
-		frame = undefined;
-		syncThemeColor();
-	};
-	const transition = (event: TransitionEvent) => {
-		if (
-			event.target !== node ||
-			event.propertyName !== "opacity" ||
-			event.pseudoElement !== (pseudoElement ?? "")
-		)
-			return;
-		stop();
-		if (event.type === "transitionrun") sample();
-	};
-	const observer = new MutationObserver(syncThemeColor);
-	observer.observe(node, {
-		attributes: true,
-		attributeFilter: ["style", "class"],
-	});
-	node.addEventListener("transitionrun", transition);
-	node.addEventListener("transitionend", transition);
-	node.addEventListener("transitioncancel", transition);
-	return {
-		destroy: () => {
-			observer.disconnect();
-			node.removeEventListener("transitionrun", transition);
-			node.removeEventListener("transitionend", transition);
-			node.removeEventListener("transitioncancel", transition);
-			if (frame !== undefined) cancelAnimationFrame(frame);
-			restore();
-		},
 	};
 }
 
