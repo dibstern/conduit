@@ -175,13 +175,17 @@ export const readForkSource = Effect.fn("fork.readForkSource")(function* (
 						messageId === undefined ? "no_transcript" : "message_not_found",
 					...(messageId !== undefined && { messageId }),
 				});
-			const removedMessageIds = new Set(
-				rows.flatMap((row) =>
+			const removedMessageIds = new Set([
+				...rows.flatMap((row) =>
 					row.type === "message.removed" && row.message_id !== null
 						? [row.message_id]
 						: [],
 				),
-			);
+				...(yield* sql<{
+					message_id: string;
+				}>`SELECT message_id FROM message_tombstones
+					WHERE session_id = ${parentId}`).map((row) => row.message_id),
+			]);
 			const creation = rows.find(
 				(row) => row.type === "message.created" && row.message_id === point.id,
 			);

@@ -1,16 +1,21 @@
+import { channel } from "node:diagnostics_channel";
 import { mkdirSync, writeFileSync } from "node:fs";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionDetailEnvelopeSchema } from "../../../src/lib/contracts/ws-rpc.js";
+import type { ReadModelRead } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
 import {
 	applyTranscriptEnvelope,
 	type TranscriptEntry,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { readPendingRewindCommit } from "../../../src/lib/persistence/effect/pending-rewind.js";
+import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import type { StoredEventRow } from "../../../src/lib/persistence/effect/stored-event-row.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
 	createRelayHarness,
@@ -90,6 +95,7 @@ async function seedTurns(
 	harness: RelayHarness,
 	client: TestWsClient,
 	messageIds = seededIds,
+	withTools = false,
 ) {
 	const created = await client.createSession("Pending rewind", {
 		providerId: "opencode",
@@ -106,7 +112,13 @@ async function seedTurns(
 						id,
 						sessionID: sessionId,
 						role: index % 2 === 0 ? "user" : "assistant",
-						time: { created: createdAt, completed: createdAt },
+						...(withTools && index % 2 === 1
+							? { parentID: messageIds[index - 1] }
+							: {}),
+						time: {
+							created: createdAt,
+							...(!withTools ? { completed: createdAt } : {}),
+						},
 					},
 				},
 			},
@@ -122,6 +134,29 @@ async function seedTurns(
 					},
 				},
 			},
+			...(withTools && index % 2 === 1
+				? [
+						{
+							type: "message.part.updated",
+							properties: {
+								part: {
+									id: `${id}-tool`,
+									sessionID: sessionId,
+									messageID: id,
+									type: "tool",
+									callID: `${id}-call`,
+									tool: "bash",
+									state: {
+										status: "completed",
+										input: { command: `echo ${id}` },
+										output: id,
+										time: { start: createdAt, end: createdAt + 1 },
+									},
+								},
+							},
+						},
+					]
+				: []),
 		]),
 	);
 	await vi.waitFor(
@@ -134,6 +169,86 @@ async function seedTurns(
 		{ timeout: messageIds.length > 50 ? 30_000 : 5000 },
 	);
 	return sessionId;
+}
+
+const rewindProjection = (sessionId: string) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		// Replay assigns its own read-model clock; all persisted content and
+		// event sequence references must still match the live projection.
+		const content = (rows: readonly Record<string, unknown>[]) =>
+			rows.map((row) =>
+				Object.fromEntries(
+					Object.entries(row).filter(([key]) => key !== "version"),
+				),
+			);
+		return {
+			messages: content(
+				yield* sql`SELECT * FROM messages WHERE session_id = ${sessionId} ORDER BY id`,
+			),
+			turns: content(
+				yield* sql`SELECT * FROM turns WHERE session_id = ${sessionId} ORDER BY id`,
+			),
+			tombstones: content(
+				yield* sql`SELECT * FROM message_tombstones WHERE session_id = ${sessionId} ORDER BY message_id`,
+			),
+			parts: content(
+				yield* sql`SELECT p.* FROM message_parts p JOIN messages m ON m.id = p.message_id WHERE m.session_id = ${sessionId} ORDER BY p.id`,
+			),
+			session:
+				yield* sql`SELECT pending_rewind_message_id, fork_point_timestamp, last_user_message_at FROM sessions WHERE id = ${sessionId}`,
+		};
+	});
+
+async function replayRewind(
+	sessionId: string,
+	rows: readonly StoredEventRow[],
+) {
+	return Effect.runPromise(
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const runner = yield* ProjectionRunnerEffectTag;
+			yield* sql`INSERT INTO events ${sql.insert(rows.map((row) => ({ ...row })))}`;
+			yield* runner.recover();
+			expect(yield* runner.getFailures()).toEqual([]);
+			return yield* rewindProjection(sessionId);
+		}).pipe(
+			Effect.provide(
+				makePersistenceEffectLayer(":memory:", "integration-test"),
+			),
+		),
+	);
+}
+
+function legacyRewindRows(
+	rows: readonly StoredEventRow[],
+	removedIds: readonly string[],
+) {
+	let offset = 0;
+	return rows.flatMap((row) => {
+		const shifted = {
+			...row,
+			sequence: row.sequence + offset,
+			stream_version: row.stream_version + offset,
+		};
+		if (row.type !== "session.rewind_committed") return [shifted];
+		offset += removedIds.length;
+		return [
+			...removedIds.map((messageId, index) => ({
+				...shifted,
+				sequence: shifted.sequence + index,
+				stream_version: shifted.stream_version + index,
+				event_id: `legacy-removal-${messageId}`,
+				type: "message.removed",
+				data: JSON.stringify({ messageId }),
+			})),
+			{
+				...shifted,
+				sequence: shifted.sequence + removedIds.length,
+				stream_version: shifted.stream_version + removedIds.length,
+			},
+		];
+	});
 }
 
 describe("OpenCode pending rewind through the relay", () => {
@@ -363,9 +478,259 @@ describe("OpenCode pending rewind through the relay", () => {
 		);
 	});
 
+	it("replays a range commit and preserves a deferred fork clock before deleting its message", async () => {
+		const sessionId = "rewind-range-replay";
+		const messageIds = Array.from(
+			{ length: 12 },
+			(_, index) => `replay-${String(index).padStart(2, "0")}`,
+		);
+		const removedIds = messageIds.slice(2);
+		const target = removedIds[0] as string;
+		const forkPoint = messageIds.at(-1) as string;
+		const { live, rows } = await Effect.runPromise(
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				const sql = yield* SqlClient.SqlClient;
+				const snapshot = (messageId: string, createdAt = 100) => {
+					const index = messageIds.indexOf(messageId);
+					return canonicalEvent(
+						"message.snapshot",
+						sessionId,
+						{
+							messageId,
+							digest: `${messageId}-${createdAt}`,
+							message: {
+								id: messageId,
+								sessionID: sessionId,
+								role: index % 2 === 0 ? "user" : "assistant",
+								...(index % 2 === 1 ? { parentID: messageIds[index - 1] } : {}),
+								time: { created: createdAt, completed: createdAt },
+								parts: [
+									{ id: `${messageId}-text`, type: "text", text: messageId },
+									...(index % 2 === 1
+										? [
+												{
+													id: `${messageId}-tool`,
+													type: "tool",
+													tool: "bash",
+													callID: `${messageId}-call`,
+													state: {
+														status: "completed",
+														input: { command: "pwd" },
+														output: messageId,
+													},
+												},
+											]
+										: []),
+								],
+							},
+						},
+						{ metadata: { rawSource: "opencode.rest", inherited: true } },
+					);
+				};
+				yield* commit([
+					canonicalEvent("session.created", sessionId, {
+						sessionId,
+						title: "Range replay",
+						provider: "opencode",
+						forkPointEvent: forkPoint,
+						forkPointTimestamp: 0,
+					}),
+					// Provider clocks and ids determine the range even when receipt
+					// order runs backwards.
+					...[...messageIds].reverse().map((id) => snapshot(id)),
+				]);
+				yield* commit([
+					canonicalEvent("session.rewound", sessionId, { messageId: target }),
+				]);
+				const rewind = yield* readPendingRewindCommit(sql, sessionId);
+				expect(rewind?.removedMessageIds).toEqual(removedIds);
+				expect(rewind?.rewind).toEqual({
+					resumeSessionAt: messageIds[1],
+					targetMessageId: target,
+				});
+				if (!rewind) throw new Error("Missing pending rewind");
+				expect(rewind.events.map(({ type }) => type)).toEqual([
+					"session.rewind_committed",
+				]);
+				// This snapshot's pending stamp must preserve the fork clock while
+				// the same batch's commit removes the message carrying it.
+				yield* commit([snapshot(forkPoint, 200), ...rewind.events]);
+				return {
+					live: yield* rewindProjection(sessionId),
+					rows: yield* sql<StoredEventRow>`SELECT project_id, sequence, event_id, session_id, stream_version, type, data, metadata, provider, created_at FROM events WHERE session_id = ${sessionId} ORDER BY sequence`,
+				};
+			}).pipe(
+				Effect.provide(
+					makePersistenceEffectLayer(":memory:", "integration-test"),
+				),
+			),
+		);
+		expect(live.messages.map((row) => row["id"])).toEqual(
+			messageIds.slice(0, 2),
+		);
+		expect(live.tombstones.map((row) => row["message_id"])).toEqual(removedIds);
+		expect(live.parts.filter((row) => row["type"] === "tool")).toHaveLength(1);
+		expect(live.session[0]).toEqual(
+			expect.objectContaining({
+				pending_rewind_message_id: null,
+				fork_point_timestamp: 200,
+			}),
+		);
+		const replayed = await replayRewind(sessionId, rows);
+		const legacy = await replayRewind(
+			sessionId,
+			legacyRewindRows(rows, removedIds),
+		);
+		expect(replayed).toEqual(live);
+		expect(legacy).toEqual(live);
+		mkdirSync("test-results/rewind", { recursive: true });
+		writeFileSync(
+			"test-results/rewind/opencode-persistence-range.json",
+			JSON.stringify({ live, replayed, legacy }, null, 2),
+		);
+	});
+
 	// Failure cases: equal timestamps change the cut, another tab misses the
 	// pending point, paging leaks hidden messages, undo loses turns, or duplicate
 	// provider removals fail after the committed transcript has removed them.
+	it("commits a long tool transcript with one event and one client refresh, then replays it", async () => {
+		harness = await createRelayHarness();
+		evidence = { ticket: "conduit-test-hiuf.4" };
+		const fixture = harness;
+		const client = await fixture.connectWsClient();
+		await client.waitForInitialState();
+		const messageIds = Array.from(
+			{ length: 24 },
+			(_, index) => `range-${String(index).padStart(2, "0")}`,
+		);
+		const sessionId = await seedTurns(fixture, client, messageIds, true);
+		const removedIds = messageIds.slice(2);
+		const target = removedIds[0] as string;
+		const project = () =>
+			fixture.stack.effectRuntime.runtime.runPromise(
+				rewindProjection(sessionId),
+			);
+		await vi.waitFor(async () => {
+			const seeded = await project();
+			expect(
+				seeded.parts.filter((part) => part["type"] === "tool"),
+			).toHaveLength(12);
+			expect(seeded.turns).toHaveLength(12);
+			expect(
+				seeded.turns.every(
+					(turn) => turn["user_message_id"] && turn["assistant_message_id"],
+				),
+			).toBe(true);
+		});
+		await client.rpcCall((rpc) =>
+			rpc.RewindSession({ sessionId, messageId: target }),
+		);
+		await vi.waitFor(() =>
+			expect(detailState(client, sessionId, messageIds)).toEqual({
+				ids: messageIds.slice(0, 2),
+				pending: target,
+			}),
+		);
+		const db = new Database(fixture.eventsDbPath, { readonly: true });
+		const reads: ReadModelRead[] = [];
+		const readChannel = channel("conduit:read-model-read");
+		const observeRead = (message: unknown) => {
+			const read = message as ReadModelRead;
+			if (
+				read.source === `session-detail/${sessionId}` &&
+				read.kind === "window"
+			)
+				reads.push(read);
+		};
+		readChannel.subscribe(observeRead);
+		try {
+			const { sequence: before } = db
+				.prepare("SELECT MAX(sequence) AS sequence FROM events")
+				.get() as { sequence: number };
+			// The first upstream removal commits the whole tail. Subsequent
+			// removals and content for that tail share its ingestion batch.
+			fixture.mock.injectSSEEvents([
+				...[...removedIds].reverse().map((messageID) => ({
+					type: "message.removed",
+					properties: { sessionID: sessionId, messageID },
+				})),
+				{
+					type: "message.part.updated",
+					properties: {
+						part: {
+							id: `${target}-text`,
+							sessionID: sessionId,
+							messageID: target,
+							type: "text",
+							text: "must not restore the committed tail",
+						},
+					},
+				},
+			]);
+			await vi.waitFor(() =>
+				expect(detailState(client, sessionId, messageIds)).toEqual({
+					ids: messageIds.slice(0, 2),
+					pending: null,
+				}),
+			);
+			const appended = db
+				.prepare(
+					"SELECT type, data FROM events WHERE session_id = ? AND sequence > ? ORDER BY sequence",
+				)
+				.all(sessionId, before) as Array<{ type: string; data: string }>;
+			expect(appended).toEqual([
+				{
+					type: "session.rewind_committed",
+					data: JSON.stringify({ messageId: target }),
+				},
+			]);
+			expect(reads).toHaveLength(1);
+			const live = await project();
+			expect(live.messages.map((message) => message["id"])).toEqual(
+				messageIds.slice(0, 2),
+			);
+			expect(live.parts.map((part) => part["id"])).toEqual([
+				`${messageIds[0]}-text`,
+				`${messageIds[1]}-text`,
+				`${messageIds[1]}-tool`,
+			]);
+			expect(live.tombstones.map((row) => row["message_id"])).toEqual(
+				removedIds,
+			);
+			for (const turn of live.turns) {
+				if (removedIds.includes(String(turn["id"]))) {
+					expect(turn["user_message_id"]).toBeNull();
+					expect(turn["assistant_message_id"]).toBeNull();
+				}
+			}
+			const versions = db
+				.prepare(
+					"SELECT DISTINCT version FROM message_tombstones WHERE session_id = ?",
+				)
+				.all(sessionId);
+			expect(versions).toHaveLength(1);
+			const rows = db
+				.prepare(
+					"SELECT project_id, sequence, event_id, session_id, stream_version, type, data, metadata, provider, created_at FROM events WHERE session_id = ? ORDER BY sequence",
+				)
+				.all(sessionId) as StoredEventRow[];
+			const replayed = await replayRewind(sessionId, rows);
+			expect(replayed).toEqual(live);
+			// Old logs removed every message before the commit. Its missing cut
+			// must leave the kept prefix untouched when those logs replay today.
+			const legacy = await replayRewind(
+				sessionId,
+				legacyRewindRows(rows, removedIds),
+			);
+			expect(legacy).toEqual(live);
+			evidence["rangeCommit"] = { appended, reads, live, replayed, legacy };
+		} finally {
+			readChannel.unsubscribe(observeRead);
+			db.close();
+		}
+	}, 60_000);
+
 	it("hides and restores turns across tabs, then commits once on the next prompt", async () => {
 		harness = await createRelayHarness();
 		evidence = { tickets: ["conduit-test-qqqm", "conduit-test-bu61"] };
@@ -489,7 +854,12 @@ describe("OpenCode pending rewind through the relay", () => {
 			.map(
 				(event) => (JSON.parse(event.data) as { messageId: string }).messageId,
 			);
-		expect(removals.sort()).toEqual([...hiddenIds].sort());
+		expect(removals).toEqual([]);
+		expect(
+			committed.events.filter(
+				(event) => event.type === "session.rewind_committed",
+			),
+		).toHaveLength(1);
 		const reopened = await harness.connectWsClient();
 		await reopened.switchSession(sessionId);
 		expect(detailState(reopened, sessionId)).toEqual({
