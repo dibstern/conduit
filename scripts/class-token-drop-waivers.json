@@ -1,4 +1,8 @@
 {
+	"src/lib/frontend/components/ui/Badge.svelte :: bg-status-ask": {
+		"renamedTo": "bg-fill-ask",
+		"reason": "conduit-test-aoqb.19: the solid back badge keeps the dark theme's orange fill in both themes; status-ask remains contrast-safe text ink."
+	},
 	"src/lib/frontend/components/layout/SessionBar.svelte :: bottom-0,inset-x-0,pointer-events-auto": {
 		"movedTo": "src/lib/frontend/components/ui/Popover.svelte",
 		"requires": "presentation=\"sheet\" modal",

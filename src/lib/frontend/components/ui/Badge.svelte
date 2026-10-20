@@ -27,7 +27,7 @@
 		chip: "bg-chip text-text-secondary",
 		accent: "bg-accent-bg text-accent",
 		"accent-solid": "bg-accent text-bg",
-		"ask-solid": "bg-status-ask text-bg",
+		"ask-solid": "bg-fill-ask text-on-fill-ask",
 		ask: "bg-status-ask/18 text-status-ask",
 		success: "bg-success/14 text-success",
 		error: "bg-error/14 text-error",

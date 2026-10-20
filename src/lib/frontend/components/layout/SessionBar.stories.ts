@@ -2188,8 +2188,7 @@ export const DesktopSidebarCollapsed: Story = {
 			canvas.getByTestId("session-bar-attention"),
 		);
 		const expected = new Option().style;
-		expected.backgroundColor =
-			badgeStyle.getPropertyValue("--color-status-ask");
+		expected.backgroundColor = badgeStyle.getPropertyValue("--color-fill-ask");
 		expect(badgeStyle.backgroundColor).toBe(expected.backgroundColor);
 	},
 };
