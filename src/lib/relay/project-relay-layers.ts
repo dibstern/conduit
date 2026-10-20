@@ -67,6 +67,8 @@ import {
 	SessionDirectoryReadError,
 } from "../domain/daemon/Services/session-directory.js";
 import { makeUsage, Usage } from "../domain/daemon/Services/usage.js";
+import type { EventRetentionTag } from "../domain/persistence/Services/event-retention.js";
+import type { EventRetentionSchedulerTag } from "../domain/persistence/Services/event-retention-scheduler.js";
 import type { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
 import { makePtyRuntimeLive } from "../domain/relay/Layers/pty-manager-layer.js";
@@ -109,7 +111,10 @@ import {
 	ProjectManagementServiceLive,
 	ProjectManagementServiceTag,
 } from "../domain/relay/Services/project-management-service.js";
-import { makeProviderRuntimeIngestionLive } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
+	makeProviderRuntimeIngestionLive,
+	type ProviderRuntimeIngestionTag,
+} from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../domain/relay/Services/provider-turn-service.js";
 import { makeRecapServiceLive } from "../domain/relay/Services/recap-service.js";
 import {
@@ -254,6 +259,9 @@ export type RelayRuntimeServices =
 	| OrchestrationEngineTag
 	| SessionWorkspaceTag
 	| EventStoreEffectTag
+	| EventRetentionTag
+	| EventRetentionSchedulerTag
+	| ProviderRuntimeIngestionTag
 	| ProjectionRunnerEffectTag
 	| SessionSetupTag
 	| OverridesStateTag

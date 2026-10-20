@@ -38,6 +38,13 @@ const ALLOWED_DELETES = [
 		reason:
 			"Migration 0067 removes only Claude child leaves referenced by local_bash tool metadata, with no messages or children (conduit-test-iujk.5).",
 	},
+	{
+		path: "src/lib/domain/persistence/Services/event-retention.ts",
+		statement:
+			/^delete\s+from\s+events\s+where\s+project_id\s*=\s*\$\{projectId\}\s+and\s+session_id\s*=\s*\$\{sessionId\}\s+and\s+sequence\s+in\s*\(/i,
+		reason:
+			"EventRetention reclaims proven-dead sessions in project-scoped batches, preserving own deletion markers, lineage bounds and live part pointers (conduit-test-hiuf.8).",
+	},
 ];
 
 interface Source {
@@ -112,11 +119,17 @@ describe("permanent event log", () => {
 			path: "src/lib/persistence/effect/migrations.ts",
 			text: "yield* sql`DELETE FROM events WHERE session_id IN (SELECT id FROM background_shell_sessions)`;",
 		};
+		const drainPath = "src/lib/domain/persistence/Services/event-retention.ts";
+		const drain = {
+			path: drainPath,
+			text: readFileSync(join(REPO_ROOT, drainPath), "utf8"),
+		};
 		expect(
 			scan([
 				compaction,
 				retention,
 				backgroundShellPurge,
+				drain,
 				{
 					path: "src/lib/persistence/effect/migrations.ts",
 					text: `yield* sql\`DELETE FROM events WHERE session_id = \${id}\`;`,
@@ -133,6 +146,7 @@ describe("permanent event log", () => {
 				compaction,
 				retention,
 				backgroundShellPurge,
+				drain,
 				{
 					path: "src/lib/persistence/effect/migrations.ts",
 					text: `yield* sql\`DELETE FROM events WHERE session_id = \${id}\`;\nsql\`DELETE FROM events WHERE created_at < 1\`;`,
