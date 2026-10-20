@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	type Check,
+	detectGoalStuck,
 	detectStuck,
 } from "../../../src/lib/persistence/goal-stuck-detector.js";
 
@@ -81,29 +82,59 @@ describe("goal stuck detector", () => {
 			).stuck,
 		).toBeNull();
 	});
-	it("changed revisions and question sets separate otherwise similar blockers", () => {
-		const revision =
-			"Release review remains blocked for commit abc1234 while approval is missing.";
+	it.each([
+		["path", "samples/alpha.csv", "samples/beta.csv"],
+		["hash", "abc1234", "def5678"],
+		["version", "v1.2.3", "v2.3.4"],
+		["mixed id", "Batch7", "Batch8"],
+	])("a new %s starts new work in otherwise similar reasons", (_kind, first, next) => {
+		const reason = `The synthetic measurement review remains blocked for ${first} while approval is missing.`;
+		const history = checks([
+			reason,
+			reason,
+			reason,
+			reason.replace(first, next),
+		]);
+		expect(detectStuck(history, product).stuck).toBeNull();
+		expect(
+			detectStuck(history, { ...product, contextGuards: false }).stuck?.count,
+		).toBe(4);
+	});
+	it.each([
+		["clock", "09:30", "10:45"],
+		["date", "2026-01-02", "2026-02-03"],
+		["count", "12 samples", "24 samples"],
+		["duration", "15 minutes", "30 minutes"],
+		["size", "128 MB", "256 MB"],
+	])("changing a %s never supplies identity", (_kind, first, next) => {
+		const reason = `Synthetic measurement review remains blocked while approval is missing after ${first}.`;
 		expect(
 			detectStuck(
-				checks([
-					revision,
-					revision,
-					revision,
-					revision.replace("abc1234", "def5678"),
-				]),
+				checks([reason, reason, reason, reason.replace(first, next)]),
+				product,
+			).stuck?.count,
+		).toBe(4);
+	});
+	it("generic identifier families detect removal-only changes", () => {
+		const reason =
+			"Synthetic measurement review remains blocked while samples B1-B3 await approval.";
+		expect(
+			detectStuck(
+				checks([reason, reason, reason, reason.replace("B1-B3", "B1-B2")]),
 				product,
 			).stuck,
 		).toBeNull();
-		const questions =
-			"Release review remains blocked while answers to q1 and q2 are missing.";
+	});
+	it("generic subject polarity changes split otherwise similar evidence", () => {
+		const reason =
+			"The synthetic measurement review remains blocked. Calibration is ready.";
 		expect(
 			detectStuck(
 				checks([
-					questions,
-					questions,
-					questions,
-					questions.replace("q2", "q3"),
+					reason,
+					reason,
+					reason,
+					reason.replace("is ready", "is not ready"),
 				]),
 				product,
 			).stuck,
@@ -117,5 +148,62 @@ describe("goal stuck detector", () => {
 			]),
 		).toThrow(RangeError);
 		expect(() => detectStuck([], { minChecks: 1 })).toThrow(RangeError);
+	});
+});
+
+describe("goal detection boundary", () => {
+	it.each([
+		["duplicate", [1, 2, 3, 3]],
+		["unordered", [1, 3, 2, 4]],
+	])("%s iterations discard all runs and keep per-check verdicts", (_kind, iterations) => {
+		const history = checks(reasons).map((check, index) => ({
+			...check,
+			iteration: iterations[index] ?? 0,
+		}));
+		expect(() => detectStuck(history, product)).toThrow(RangeError);
+		expect(detectGoalStuck(history)).toEqual({
+			stuck: null,
+			runs: [],
+			verdicts: history.map(({ iteration }) => ({
+				iteration,
+				stuck: false,
+				blockerId: null,
+			})),
+		});
+	});
+	it("caps a 50 KB parser-heavy reason cheaply without mutating raw evidence", () => {
+		const reason = "item is ready ".repeat(4_000).slice(0, 51_200);
+		const history = checks([reason, reason, reason]);
+		const cpuStart = process.cpuUsage();
+		const result = detectGoalStuck(history);
+		const cpu = process.cpuUsage(cpuStart);
+		expect((cpu.user + cpu.system) / 1_000).toBeLessThan(100);
+		expect(result).toEqual(
+			detectStuck(
+				history.map((check) => ({ ...check, reason: reason.slice(0, 4_096) })),
+				product,
+			),
+		);
+		expect(result.stuck?.blocker).toHaveLength(4_096);
+		expect(history[0]?.reason).toHaveLength(51_200);
+	});
+	it("normalizes backwards clocks in iteration order and retains caller timestamps", () => {
+		const history = checks(reasons).map((check, index) => ({
+			...check,
+			at: 400 - index * 100,
+		}));
+		expect(detectGoalStuck(history)).toEqual(
+			detectStuck(
+				history.map((check) => ({ ...check, at: 400 })),
+				product,
+			),
+		);
+		expect(history.map((check) => check.at)).toEqual([400, 300, 200, 100]);
+	});
+	it("uses the production threshold and waits for three checks", () => {
+		expect(detectGoalStuck(checks(reasons.slice(0, 2))).stuck).toBeNull();
+		expect(detectGoalStuck(checks(reasons))).toEqual(
+			detectStuck(checks(reasons), { minChecks: 3, threshold: 0.55 }),
+		);
 	});
 });

@@ -48,6 +48,35 @@ const evidence = (value: GoalSummaryInput): Evidence =>
 	JSON.parse(goalSummaryPrompt(value).split("\n").at(-1) ?? "");
 
 describe("goal summary identity and key", () => {
+	it.each([
+		["duplicate", [1, 2, 3, 3]],
+		["unordered", [1, 3, 2, 4]],
+	])("%s rows retain individual evidence and per-check keys without throwing", (_kind, iterations) => {
+		const value = input(repeated.slice(0, 4));
+		value.checks = value.checks.map((check, index) => ({
+			...check,
+			iteration: iterations[index] ?? 0,
+		}));
+		const key: unknown[] = JSON.parse(goalSummaryKey(value));
+		expect(key[2]).toEqual(
+			iterations
+				.map((iteration) => `i${iteration}`)
+				.filter((id, index, ids) => ids[index - 1] !== id),
+		);
+		expect(evidence(value).history.segments).toEqual(
+			value.checks.map(({ at, reason }) => ({ at, reason })),
+		);
+		expect(
+			goalSummaryKey({
+				...value,
+				checks: [
+					...value.checks,
+					{ iteration: 5, at: 1_500, reason: repeated[0] ?? null },
+				],
+			}),
+		).not.toBe(goalSummaryKey(value));
+	});
+
 	it("clock rollback preserves raw evidence and a stable key as the blocker continues", () => {
 		const value = input();
 		value.checks = value.checks.map((check, index) => ({

@@ -67,6 +67,39 @@ const header = (sessionId = "selected") =>
 
 describe("persisted goal stuck header", () => {
 	it.effect(
+		"duplicate imported iterations clear goalStuck without stalling projection",
+		() =>
+			Effect.gen(function* () {
+				yield* createSession();
+				yield* repeat();
+				expect(yield* header()).toEqual({ since: 200, lastAt: 400, count: 3 });
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO session_goal_checks (event_id, session_id, condition, set_at, iterations, reason, created_at)
+				VALUES ('imported-duplicate', 'selected', ${goal.condition}, ${goal.setAt}, 2, ${reason}, 300)`;
+				yield* changeGoal(
+					{
+						sessionId: "selected",
+						goal: { ...goal, iterations: 4, lastReason: reason },
+					},
+					500,
+				);
+				expect(yield* header()).toBeUndefined();
+				yield* changeGoal(
+					{
+						sessionId: "selected",
+						goal: { ...goal, iterations: 5, lastReason: reason },
+					},
+					600,
+				);
+				const rows = yield* sql<{
+					iterations: number;
+				}>`SELECT iterations FROM session_goal_checks WHERE session_id = 'selected' ORDER BY iterations`;
+				expect(rows.map((row) => row.iterations)).toEqual([1, 2, 2, 3, 4, 5]);
+				expect(yield* header()).toBeUndefined();
+			}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect(
 		"publishes goalStuck with the third repeated check and clears it on progress",
 		() =>
 			Effect.gen(function* () {
