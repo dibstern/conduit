@@ -796,6 +796,24 @@ describe("Settling stops quiescent agents through the built daemon", () => {
 		const { fixture, socket, create, send } = await start();
 		const session = await create("delete failed end-session");
 		const runner = await send(session.sessionId);
+		const observer = new Database(fixture.daemonStorePath());
+		try {
+			// Capture committed receipts before deletion can reclaim event history.
+			observer.exec(`
+				CREATE TABLE test_cleanup_failure_receipts (
+					sequence INTEGER PRIMARY KEY, session_id TEXT NOT NULL,
+					type TEXT NOT NULL, data TEXT NOT NULL
+				);
+				CREATE TRIGGER test_capture_cleanup_failure AFTER INSERT ON events
+				WHEN NEW.type = 'session.provider_cleanup_failed'
+				BEGIN
+					INSERT INTO test_cleanup_failure_receipts (sequence, session_id, type, data)
+					VALUES (NEW.sequence, NEW.session_id, NEW.type, NEW.data);
+				END;
+			`);
+		} finally {
+			observer.close();
+		}
 		writeFileSync(
 			join(fixture.root, `fail-end-session-${session.sessionId}`),
 			"fail\n",
@@ -827,8 +845,20 @@ describe("Settling stops quiescent agents through the built daemon", () => {
 			expect(
 				events.filter(({ type }) => type === "session.deleted"),
 			).toHaveLength(1);
+			const receipts = db
+				.prepare(
+					"SELECT sequence, session_id, type, data FROM test_cleanup_failure_receipts WHERE session_id = ? ORDER BY sequence",
+				)
+				.all(session.sessionId) as Array<{
+				sequence: number;
+				session_id: string;
+				type: string;
+				data: string;
+			}>;
+			evidence["cleanupFailureReceipts"] = receipts;
+			expect(receipts).toHaveLength(1);
 			expect(
-				events.find(({ type }) => type === "session.provider_cleanup_failed")
+				receipts.find(({ type }) => type === "session.provider_cleanup_failed")
 					?.data,
 			).toContain("Fixture end_session failure");
 		} finally {
