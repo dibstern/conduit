@@ -26,7 +26,7 @@
 </script>
 
 <!-- Keep the link full width and overlay the separate discard button on its time slot. -->
-<div class="draft-row group relative" data-testid="draft-row" data-draft-id={draft.draftId}>
+<div class="group relative" data-testid="draft-row" data-draft-id={draft.draftId}>
 	<Button
 		{href} variant="ghost" size="content" layout="flow" hoverFill="none"
 		class="grid w-full grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-x-[10px] gap-y-px rounded-panel px-[8px] py-[6px] min-h-[44px] font-sans leading-[1.4] {active ? 'bg-sidebar-active' : 'group-hover:bg-hover'}"
@@ -39,7 +39,7 @@
 	>
 		<span class="grid place-items-center text-text-dimmer"><DraftPencil /></span>
 		<span class="min-w-0 truncate text-[13.5px] font-normal italic text-text-muted" title={title}>{title}</span>
-		<span class="draft-age whitespace-nowrap text-text-dimmer pointer-coarse:invisible pointer-coarse:min-w-[36px] pointer-fine:group-hover:invisible pointer-fine:group-focus-within:invisible">{age}</span>
+		<span class="font-mono text-mono-xs whitespace-nowrap text-text-dimmer pointer-coarse:invisible pointer-coarse:min-w-[36px] pointer-fine:group-hover:invisible pointer-fine:group-focus-within:invisible">{age}</span>
 		<span class="col-span-2 col-start-2 flex min-w-0 items-center gap-[5px] text-[11.5px] text-text-dimmer pointer-coarse:pr-[36px]">
 			<ProjectSquare label={projectLabel} accent={projectAccent} dot />
 			<span class="truncate">{projectLabel}</span>
@@ -51,22 +51,3 @@
 		onclick={() => ondiscard?.()}
 	/>
 </div>
-
-<style>
-	/* The approved tray uses Geist Mono at its native size, unlike the app's 92% face. */
-	@font-face {
-		font-family: "Drafts Mono";
-		src: url("../../fonts/geist-mono-latin-wght-normal.woff2") format("woff2");
-		font-weight: 100 900;
-		font-style: normal;
-		font-display: swap;
-	}
-
-	.draft-row {
-		-webkit-font-smoothing: auto;
-	}
-
-	.draft-age {
-		font: 11px "Drafts Mono", monospace;
-	}
-</style>

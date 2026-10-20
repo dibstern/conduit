@@ -209,6 +209,7 @@
 {/snippet}
 
 <BitsPopover.Root bind:open onOpenChange={handleOpenChange}>
+	<!-- Keep the trigger, conditional and portal adjacent so citations have no space before punctuation. -->
 	<BitsPopover.Trigger bind:ref={triggerEl}>
 		{#snippet child({ props })}
 			{@render trigger({ props })}

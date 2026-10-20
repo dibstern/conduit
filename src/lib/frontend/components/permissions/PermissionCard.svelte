@@ -263,6 +263,7 @@
 				>
 					{isPlanApproval ? "Approve Plan" : "Allow"}
 				</Button>
+				<!-- Remembering ExitPlanMode would automatically exit every future plan. -->
 				{#if !isPlanApproval}
 				<Button
 					variant="chip"

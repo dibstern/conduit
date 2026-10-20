@@ -54,79 +54,6 @@ const allowedRuntimeBoundaries: readonly AllowedRuntimeBoundary[] = [
 
 const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 	{
-		path: "src/lib/frontend/components/chat/ActivityRow.stories.ts",
-		snippetPattern: /Missing activity row|Missing activity result/,
-		reason:
-			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/chat/AssistantHeader.stories.ts",
-		snippetPattern: /Missing assistant identity/,
-		reason:
-			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/chat/AssistantMessage.stories.ts",
-		snippetPattern:
-			/Code has not highlighted yet|Missing syntax token|Diff has not highlighted yet|Missing diff addition|Missing code path|Mermaid labels have not rendered yet|Missing rich markdown/,
-		reason:
-			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/chat/DiffView.stories.ts",
-		snippetPattern: /Missing diff frame/,
-		reason:
-			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/chat/QuestionCard.stories.ts",
-		snippetPattern: /Missing question checkbox/,
-		reason:
-			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/chat/SubagentBackBar.stories.ts",
-		snippetPattern: /Missing Esc hint/,
-		reason:
-			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/chat/SystemMessage.stories.ts",
-		snippetPattern: /Missing system notice/,
-		reason:
-			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/chat/ToolGenericCard.stories.ts",
-		snippetPattern: /Missing expanded tool result|Missing tool row/,
-		reason:
-			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/chat/ToolQuestionCard.stories.ts",
-		snippetPattern: /Missing question step header/,
-		reason:
-			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/chat/ToolSubagentCard.stories.ts",
-		snippetPattern: /Missing subagent row/,
-		reason:
-			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/chat/UserMessage.stories.ts",
-		snippetPattern: /Missing user name/,
-		reason:
-			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/permissions/PermissionCard.stories.ts",
-		snippetPattern: /Missing permission card/,
-		reason:
-			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
-	},
-	{
 		path: "src/lib/utils.ts",
 		snippetPattern: /throw new Error\(`Unexpected value:/,
 		reason: "assertNever defect path for compile-time exhaustiveness",
@@ -150,122 +77,6 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 		path: "src/lib/frontend/stories/mocks.ts",
 		snippetPattern: /throw new Error\('Refresh failed'\)/,
 		reason: "storybook/mock fixture text, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/session/SessionItem.stories.ts",
-		snippetPattern: /Session row is missing/,
-		reason:
-			"storybook play() guard that narrows the row query, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/session/GitIdentity.stories.ts",
-		snippetPattern: /Missing checkout (wrapper|labels|branch|slot)/,
-		reason:
-			"storybook play() guards that narrow the checkout queries, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/chat/MessageList.stories.ts",
-		snippetPattern: /Reply header \$\{id\} is missing|Transcript is missing/,
-		reason:
-			"storybook play() guards that narrow the transcript queries, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/chat/SurfacingSummary.stories.ts",
-		snippetPattern: /Recap prose moved/,
-		reason:
-			"storybook play() guard that narrows the recap prose query, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/chat/TurnActivity.stories.ts",
-		snippetPattern: /Missing fixture for|Missing segment/,
-		reason:
-			"storybook play() guards that narrow strip fixtures and segments, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/chat/SurfacingRead.stories.ts",
-		snippetPattern:
-			/Missing quiet element|Missing summary control|Missing turn head toggle/,
-		reason:
-			"storybook play() guards that narrow turn style queries, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/chat/SurfacingMarks.stories.ts",
-		snippetPattern: /Missing neutral pin or type label/,
-		reason:
-			"storybook play() guard that narrows neutral pin and label queries, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/input/InputArea.stories.ts",
-		snippetPattern: /Composer is missing/,
-		reason:
-			"storybook play() guard that narrows the composer query, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/input/InputArea.stories.ts",
-		snippetPattern: /Ended goal is missing/,
-		reason:
-			"storybook play() guard that narrows goal fixture state, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/input/InputArea.stories.ts",
-		snippetPattern: /composer layers not found/,
-		reason:
-			"storybook play() guard that narrows the composer layer queries, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/input/InputArea.stories.ts",
-		snippetPattern:
-			/Claude driver traits are missing|Composer (story|stage) session is missing|Composer controls? (is|are) missing|Words label is missing|Send is missing|Words summary focus target is missing|Waiting tray actions are missing/,
-		reason:
-			"storybook fixture and play() guards that narrow story state and the send query, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/input/PermissionModeSelector.stories.ts",
-		snippetPattern: /Missing permission icon|Full access shield is missing/,
-		reason:
-			"storybook play() guards that narrow the permission icon queries, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/layout/SessionBar.stories.ts",
-		snippetPattern: /Checking spinner is missing/,
-		reason:
-			"storybook play() guard that narrows the spinner query, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/model/ModelVariant.stories.ts",
-		snippetPattern: /The effort meter is missing/,
-		reason:
-			"storybook play() guard that narrows the meter query, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/ui/Icon.stories.ts",
-		snippetPattern: /Pause icon is missing/,
-		reason:
-			"storybook play() guard that narrows the icon query, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/model/InstanceModelPicker.stories.ts",
-		snippetPattern: /The picker sheet handle is missing/,
-		reason:
-			"storybook play() guard that narrows the sheet handle query, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/ui/Menu.stories.ts",
-		snippetPattern: /The shared sheet chrome is missing/,
-		reason:
-			"storybook play() guard that narrows the sheet chrome query, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/ui/PhoneSheet.stories.ts",
-		snippetPattern: /Sheet body or footer is missing/,
-		reason:
-			"storybook play() guard that narrows the sheet body and footer query, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/ui/HoldMenu.stories.ts",
-		snippetPattern: /Missing in-menu dismiss layer/,
-		reason:
-			"storybook play() guard that narrows the dismiss layer query, not executable production code",
 	},
 	{
 		path: "src/lib/frontend/components/input/input-utils.ts",
@@ -584,6 +395,8 @@ describe("Effect runtime boundary grep", () => {
 
 	it("keeps remaining production plain Error throws explicitly reclassified", () => {
 		const hits = productionSourceFiles(SRC_LIB).flatMap((file) => {
+			// Story play() invariants do not run in production.
+			if (file.endsWith(".stories.ts")) return [];
 			const relPath = relative(REPO_ROOT, file);
 			const lines = readFileSync(file, "utf8").split("\n");
 			return lines.flatMap((line, index) =>

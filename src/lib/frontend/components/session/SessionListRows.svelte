@@ -207,7 +207,7 @@
 				<div class="flex items-center rounded-[9px] hover:bg-hover">
 					<TextButton
 						tone={uiState.draftsTrayOpen ? "inherit" : "muted"}
-						class="flex min-w-0 flex-1 items-center gap-[6px] min-h-[44px] md:min-h-0 px-[8px] py-[6px] text-[12.5px] leading-[1.4] font-sans {uiState.draftsTrayOpen ? 'font-semibold text-text' : 'font-medium'}"
+						class="flex min-w-0 flex-1 items-center gap-[6px] min-h-[44px] md:min-h-0 px-[8px] py-[6px] text-[12.5px] leading-[1.4] font-sans enabled:hover:opacity-100 {uiState.draftsTrayOpen ? 'font-semibold text-text' : 'font-medium enabled:hover:text-text-muted'}"
 						data-testid="drafts-tray-toggle"
 						aria-expanded={uiState.draftsTrayOpen}
 						aria-controls="drafts-tray-rows"
@@ -216,13 +216,13 @@
 						<Icon name={uiState.draftsTrayOpen ? "chevron-down" : "chevron-right"} size={12} />
 						<span class="flex text-text-dimmer"><DraftPencil size={12} /></span>
 						<span>Drafts</span>
-						<span class="draft-count text-text-dimmer">{drafts.length}</span>
+						<span class="font-mono text-mono-time text-text-dimmer">{drafts.length}</span>
 						{#if !uiState.draftsTrayOpen}
 							<span class="w-0 min-w-0 flex-1 truncate text-left font-normal text-text-dimmer">· {drafts[0]?.firstLine.trim() || "Untitled draft"}</span>
 						{/if}
 					</TextButton>
 					{#if uiState.draftsTrayOpen}
-						<TextButton tone="dimmer" class="shrink-0 min-h-[44px] md:min-h-0 px-[8px] py-[6px] text-[11.5px] leading-[1.4] font-medium font-sans" data-testid="drafts-tray-clear" onclick={() => drafts.forEach(discardDraft)}>Clear all</TextButton>
+						<TextButton tone="dimmer" class="shrink-0 min-h-[44px] md:min-h-0 px-[8px] py-[6px] text-[11.5px] leading-[1.4] font-medium font-sans enabled:hover:text-error" data-testid="drafts-tray-clear" onclick={() => drafts.forEach(discardDraft)}>Clear all</TextButton>
 					{/if}
 				</div>
 				<div id="drafts-tray-rows" class={uiState.draftsTrayOpen ? "pb-px" : ""}>
@@ -366,28 +366,6 @@
 	</div>
 
 <style>
-	[data-testid="drafts-tray"] {
-		-webkit-font-smoothing: auto;
-	}
-
-	.draft-count {
-		font: 10.5px "Drafts Mono", monospace;
-	}
-
-	@media (hover: hover) {
-		[data-testid="drafts-tray"] :global([data-testid="drafts-tray-toggle"]:hover) {
-			opacity: 1;
-		}
-
-		[data-testid="drafts-tray"] :global([data-testid="drafts-tray-toggle"][aria-expanded="false"]:hover) {
-			color: var(--color-text-muted);
-		}
-
-		[data-testid="drafts-tray"] :global([data-testid="drafts-tray-clear"]:hover) {
-			color: var(--color-error);
-		}
-	}
-
 	:global(.light-theme) [data-testid="drafts-tray"] {
 		background: var(--color-bg-surface);
 	}
