@@ -14,7 +14,7 @@
   (that one is a Button).
 -->
 <script module lang="ts">
-	type BadgeVariant = "neutral" | "quiet" | "accent" | "accent-solid" | "ask-solid" | "ask" | "tag" | "chip" | "success" | "error" | "snoozed" | "pinned" | "goal";
+	type BadgeVariant = "neutral" | "quiet" | "accent" | "accent-solid" | "ask-solid" | "ask" | "tag" | "chip" | "success" | "error" | "warning" | "snoozed" | "pinned" | "goal";
 	type BadgeSize = "xs" | "sm" | "count" | "navigation-count" | "status" | "label" | "session" | "command" | "indicator";
 	type BadgeShape = "rounded" | "pill";
 
@@ -31,6 +31,7 @@
 		ask: "bg-status-ask/18 text-status-ask",
 		success: "bg-success/14 text-success",
 		error: "bg-error/14 text-error",
+		warning: "bg-warning-bg text-warning",
 		// Tint strengths are the lightest that keep the light theme's label at 4.5:1
 		// (theme-contrast.test.ts); the design's /16 left them at 4.27-4.43.
 		snoozed: "bg-status-snoozed/15 text-status-snoozed",
