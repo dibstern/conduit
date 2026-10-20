@@ -20,7 +20,26 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Default: Story = {};
+// Mixed fonts in one header line must share a baseline, not a box centre.
+const baselines = (root: Element) =>
+	[...root.querySelectorAll("span, time")]
+		.filter((el) => el.childElementCount === 0 && el.textContent?.trim())
+		.map((el) => {
+			const mark = el.ownerDocument.createElement("span");
+			mark.style.cssText = "display:inline-block;width:0;height:0";
+			el.append(mark);
+			const y = mark.getBoundingClientRect().top;
+			mark.remove();
+			return y;
+		});
+
+export const Default: Story = {
+	play: async ({ canvasElement }) => {
+		const [label, ...rest] = baselines(canvasElement);
+		await expect(rest).toHaveLength(3);
+		for (const y of rest) await expect(y).toBeCloseTo(label ?? 0, 1);
+	},
+};
 export const DefaultLight: Story = { globals: { theme: "light" } };
 export const OpenCode: Story = {
 	args: { providerId: "opencode", model: "GPT-6" },

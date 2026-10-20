@@ -67,12 +67,15 @@
 		<Icon name={provider?.logo ?? "bot"} size={18} />
 	</span>
 	<div class="flex min-h-[28px] min-w-0 flex-wrap items-center gap-x-[8px] gap-y-[4px] text-[13.5px] font-semibold">
-		<span>{provider?.label ?? "Assistant"}</span>
-		{#if model}<span class="min-w-0 truncate font-mono text-[12px] font-normal text-text-dimmer">{getModelDisplayName(model)}</span>{/if}
-		{#if (createdAt ?? message?.createdAt) != null}
-			<span aria-hidden="true" class="font-normal text-text-dimmer">·</span>
-			<MessageTime createdAt={createdAt ?? message?.createdAt} />
-		{/if}
+		<!-- Mixed fonts and sizes: share a baseline, not a box centre. -->
+		<span class="flex min-w-0 items-baseline gap-x-[8px]">
+			<span>{provider?.label ?? "Assistant"}</span>
+			{#if model}<span class="min-w-0 truncate font-mono text-[12px] font-normal text-text-dimmer">{getModelDisplayName(model)}</span>{/if}
+			{#if (createdAt ?? message?.createdAt) != null}
+				<span aria-hidden="true" class="font-normal text-text-dimmer">·</span>
+				<MessageTime createdAt={createdAt ?? message?.createdAt} />
+			{/if}
+		</span>
 		{#if message?.finalized}
 			<div class="msg-actions ml-auto flex items-center gap-[2px] opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 group-hover/header:opacity-100 group-focus-within/header:opacity-100 touch:opacity-100" class:opacity-100={copyState !== "idle" || menuOpen}>
 				<Button variant="ghost" size="content" tone={copyState === "done" ? "success" : "dimmer"} iconOnly icon={copyState === "done" ? "check" : "copy"} iconSize={14} touchTarget class="size-[28px]" title={copyLabel} ariaLabel={copyLabel} onclick={copyMessage} />
