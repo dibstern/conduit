@@ -9,7 +9,7 @@ import { persistedTurnState } from "../../contracts/turn-phase.js";
 import { CLAUDE_WORKTREE_EVENTS } from "../../session/claude-worktree-state.js";
 import { isRecord } from "../../utils.js";
 import type { LiveEventType, StoredEvent } from "../events.js";
-import { type Check, detectStuck } from "../goal-stuck-detector.js";
+import { type Check, detectGoalStuck } from "../goal-stuck-detector.js";
 import {
 	getSessionStatements,
 	isSessionRemoval,
@@ -452,16 +452,7 @@ export const makeSessionProjector = defineProjector(() => ({
 						FROM session_goal_checks WHERE session_id = ${event.data.sessionId}
 						AND set_at = ${goal.setAt} AND condition = ${goal.condition}
 						AND iterations <= ${goal.iterations} ORDER BY iterations ASC`;
-					// Wall clocks can move backwards; iteration owns chronology.
-					// Normalise only detector input, retaining raw display times.
-					let detectorAt = -Infinity;
-					const { stuck } = detectStuck(
-						checks.map((check) => {
-							detectorAt = Math.max(detectorAt, check.at);
-							return { ...check, at: detectorAt };
-						}),
-						{ minChecks: 3 },
-					);
+					const { stuck } = detectGoalStuck(checks);
 					const latest = checks.at(-1);
 					const first = stuck
 						? checks.find((check) => check.iteration === stuck.sinceIteration)

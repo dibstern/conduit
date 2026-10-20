@@ -37,81 +37,205 @@ export type Options = {
 type Vector = {
 	keys: string[];
 	inverseNorm: number;
-	hashes: Set<string>;
-	questions: Set<number>;
-	foreign: boolean;
-	files: Set<string>;
-	actionHashes: Set<string>;
-	states: Map<string, boolean>;
+	identifiers: Set<string>;
+	groups: Map<string, Set<string>>;
+	polarities: Map<string, boolean>;
 };
+// Generic English function words only. Negation remains in the similarity input.
 const stop = new Set(
-	"a an the and or but if then than to of in on at as is are was were be been being it its this that these those with by for from has have had do does did not no yet still only also all both which so per into condition goal requires require transcript shows show assistant message last latest says states evidence evidenced satisfied met stopping explicitly".split(
+	"a an the and or but if then than to of in on at as is are was were be been being it its this that these those with by for from has have had do does did only also all both which so into".split(
 		" ",
 	),
 );
+const identifierTokens =
+	/(?:~?\/|\.\.?\/)?[a-zA-Z0-9_]+(?:[./*-][a-zA-Z0-9_*]+)*/g;
+const similarityTokens = /[a-z0-9]+(?:[._/-][a-z0-9]+)*/g;
+const letter = /[a-z]/;
+const suffix = /\.[a-zA-Z][a-zA-Z0-9]{0,11}$/;
+const literalTokens =
+	/(?:^|[\s(])(["'`])([^\s"'`]{1,80})\1(?=$|[\s.,:;!?)]|\*)/g;
+const clauses = /(?<=[.!?;])\s+|\n/;
+const qualifying = /\b(?:no|without)\b/;
+const copulas =
+	/\b(?:is|are|was|were|has been|have been|had been)\s+(not\s+)?([a-z]+)\b/g;
+const subjectTokens = /[a-z0-9_]+(?:[./*-][a-z0-9_*]+)*/g;
+const ordinary = /^[a-z]{2,}$/;
+const letterCode = (c: number) => (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+const digitCode = (c: number) => c >= 48 && c <= 57;
+const singleQuotes = /[’‘]/g,
+	doubleQuotes = /[“”]/g;
+const dates =
+	/\b\d{4}-\d\d-\d\d(?:[T ]\d\d:\d\d(?::\d\d(?:\.\d+)?)?(?:Z|[+-]\d\d:?\d\d)?)?\b/g;
+const meridians = /\b\d{1,2}\s*[ap]m\b/gi;
+const ordinals = /\b\d+(?:st|nd|rd|th)\b/gi;
+const clocks = /\b\d{1,2}:\d\d(?::\d\d)?(?:\s*[ap]m)?\b/gi;
+const quantities =
+	/\b\d+(?:\.\d+)?\s*(?:ms|milliseconds?|s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|weeks?|months?|years?|bytes?|[kmgt]i?b|hz|khz|mhz|ghz|%)\b/gi;
+const ranges = /\b([a-zA-Z]{1,12})(\d+)\s*(?:[-–—]|\bto\b)\s*(?:\1)?(\d+)\b/g;
+const asciiLetter = /[a-zA-Z]/,
+	lowercase = /^[a-z]+$/,
+	markdown = /^\*+|\*+$/g;
+// Only immutable extraction is shared. Bound entries and retained UTF-16 units;
+// oversized reasons/features bypass the cache without changing extraction.
+const memo = new Map<string, { value: Vector; weight: number }>();
+let memoWeight = 0;
+const memoLimit = 4 * 1024 * 1024;
+function extract(reason: string): Vector {
+	const cached = memo.get(reason);
+	if (cached) return cached.value;
+	const value = vector(reason);
+	if (reason.length > 4096) return value;
+	let weight =
+		reason.length +
+		value.keys.length +
+		value.identifiers.size +
+		value.polarities.size;
+	for (const token of value.keys) weight += token.length;
+	for (const id of value.identifiers) weight += id.length;
+	for (const [family, ids] of value.groups) {
+		weight += family.length + ids.size;
+		for (const id of ids) weight += id.length;
+	}
+	for (const predicate of value.polarities.keys()) weight += predicate.length;
+	if (weight > 65536) return value;
+	while (memo.size >= 4096 || memoWeight + weight > memoLimit) {
+		const oldest = memo.entries().next().value;
+		if (!oldest) break;
+		memoWeight -= oldest[1].weight;
+		memo.delete(oldest[0]);
+	}
+	memo.set(reason, { value, weight });
+	memoWeight += weight;
+	return value;
+}
 
 function vector(reason: string): Vector {
-	const text = reason.toLowerCase().replace(/[’‘]/g, "'");
-	const keys = [
-		...new Set(
-			(text.match(/[a-z0-9]+(?:[._/-][a-z0-9]+)*/g) ?? []).filter(
-				(token) => token.length > 1 && !stop.has(token),
-			),
-		),
-	];
-	const files = new Set<string>(),
-		states = new Map<string, boolean>();
-	let foreign = false;
-	// Completion and obstruction details are guards; similarity uses the whole reason.
-	for (const clause of text.split(/(?<=[.!?;])\s+|\n/)) {
-		if (clause.includes("uncommitted") || clause.includes("foreign"))
-			for (const part of clause.split(",")) {
-				if (!/\b(uncommitted|foreign)\b/.test(part)) continue;
-				foreign = true;
-				for (const path of part.match(
-					/\b[\w.-]+(?:\/[\w.-]+)*\.[a-z]{1,6}\b/g,
-				) ?? [])
-					files.add(path.split("/").at(-1) ?? path);
-			}
-		if (
-			clause.includes("branches") ||
-			clause.includes("worktrees") ||
-			clause.includes("tickets")
-		)
-			for (const m of clause.matchAll(
-				/\b(branches|worktrees|tickets)\b(?:\s+[^\s,;]+){0,5}?\s+(?:are|is|were|was|have been|has been)\s+(not\s+)?(deleted|removed|closed|merged|finished|complete)\b/g,
-			)) {
-				if (!/\b(?:no|without)\b.*\bevidence\b/.test(clause.slice(0, m.index)))
-					states.set(`${m[1]}:${m[3]}`, !m[2]);
-			}
-	}
-	const hashes = new Set(
-		(text.match(/\b[a-f0-9]{7,40}\b/g) ?? []).filter(
-			(s) => /[a-f]/.test(s) && /[0-9]/.test(s),
-		),
+	const raw = reason
+		.normalize("NFKC")
+		.replace(singleQuotes, "'")
+		.replace(doubleQuotes, '"');
+	// Quantities never supply identity, including quantities inside quotations.
+	const stable = raw
+		.replace(dates, " ")
+		.replace(meridians, " ")
+		.replace(ordinals, " ")
+		.replace(clocks, " ")
+		.replace(quantities, " ");
+	const identifiers = new Set<string>();
+	const groups = new Map<string, Set<string>>();
+	const expanded = stable.replace(
+		ranges,
+		(whole: string, prefix: string, left: string, right: string) => {
+			const start = Number(left),
+				end = Number(right);
+			if (end < start || end - start > 100) return whole;
+			return Array.from(
+				{ length: end - start + 1 },
+				(_, i) => `${prefix}${start + i}`,
+			).join(" ");
+		},
 	);
-	const questions = new Set<number>();
-	for (const m of text.matchAll(/\bq(\d+)(?:\s*(?:[-–—]|to)\s*q?(\d+))?/g)) {
-		const start = Number(m[1]),
-			end = m[2] ? Number(m[2]) : start;
-		for (let i = start; i <= Math.min(end, start + 100); i++) questions.add(i);
+	for (const token of expanded.match(identifierTokens) ?? []) {
+		let letters = false,
+			mixed = false,
+			symbol = false,
+			slashes = 0,
+			dot = false;
+		let hex = token.length >= 7 && token.length <= 64;
+		let prefixLength = 0,
+			digits = false,
+			group = true,
+			prior = 0;
+		for (let i = 0; i < token.length; i++) {
+			const c = token.charCodeAt(i),
+				isLetter = letterCode(c),
+				isDigit = digitCode(c);
+			letters ||= isLetter;
+			if (hex && !(isDigit || (c >= 65 && c <= 70) || (c >= 97 && c <= 102)))
+				hex = false;
+			if ((isLetter && digitCode(prior)) || (isDigit && letterCode(prior)))
+				mixed = true;
+			if (c === 47) slashes++;
+			if (c === 46) dot = true;
+			if (
+				c === 95 &&
+				letterCode(prior) &&
+				(letterCode(token.charCodeAt(i + 1)) || token.charCodeAt(i + 1) === 95)
+			)
+				symbol = true;
+			if (group) {
+				if (isLetter && !digits) prefixLength++;
+				else if (isDigit) digits = true;
+				else group = false;
+			}
+			prior = c;
+		}
+		if (!letters) continue;
+		const path =
+			token[0] === "/" ||
+			token.startsWith("~/") ||
+			token.startsWith("./") ||
+			token.startsWith("../") ||
+			slashes > 1 ||
+			(dot && suffix.test(token));
+		if (hex || mixed || path || symbol) identifiers.add(token);
+		if (group && digits && prefixLength >= 1 && prefixLength <= 12) {
+			const family = token.slice(0, prefixLength);
+			if (!groups.has(family)) groups.set(family, new Set());
+			groups.get(family)?.add(token);
+		}
 	}
-	const actionHashes = new Set(
-		[
-			...text.matchAll(
-				/\b(?:merged|committed|tip)\s+(?:as\s+|commit\s+)?([a-f0-9]{7,40})\b/g,
-			),
-		].map((m) => m[1] ?? ""),
-	);
+	// Short literal values only, not arbitrary quotations of changing prose.
+	// Lowercase prose words stay in similarity; structured or case-marked literals are IDs.
+	for (const match of stable.matchAll(literalTokens)) {
+		const literal = (match[2] ?? "").replace(markdown, "");
+		if (asciiLetter.test(literal) && !lowercase.test(literal))
+			identifiers.add(literal);
+	}
+	// Track polarity by a syntactically selected subject and predicate, with no domain vocabulary.
+	// Ignore contradictory predicates within a check and clauses qualifying evidence.
+	const observed = new Map<string, Set<boolean>>();
+	for (const clause of stable.toLowerCase().split(clauses)) {
+		if (qualifying.test(clause)) continue;
+		for (const match of clause.matchAll(copulas)) {
+			const prefix = clause.slice(0, match.index);
+			const boundary = Math.max(
+				prefix.lastIndexOf(","),
+				prefix.lastIndexOf(";"),
+				prefix.lastIndexOf(":"),
+				prefix.lastIndexOf("("),
+				prefix.lastIndexOf(")"),
+			);
+			const words = prefix.slice(boundary + 1).match(subjectTokens);
+			let subject: string | undefined;
+			for (let i = (words?.length ?? 0) - 1; i >= 0; i--) {
+				const word = words?.[i] ?? "";
+				if (ordinary.test(word) && !stop.has(word)) {
+					subject = word;
+					break;
+				}
+			}
+			if (!subject || stop.has(match[2] ?? "")) continue;
+			const predicate = `${subject}:${match[2] ?? ""}`;
+			if (!observed.has(predicate)) observed.set(predicate, new Set());
+			observed.get(predicate)?.add(!match[1]);
+		}
+	}
+	const polarities = new Map<string, boolean>();
+	for (const [predicate, values] of observed)
+		if (values.size === 1) polarities.set(predicate, values.has(true));
+	const unique = new Set<string>();
+	for (const token of expanded.toLowerCase().match(similarityTokens) ?? []) {
+		if (token.length > 1 && letter.test(token) && !stop.has(token))
+			unique.add(token);
+	}
+	const keys = [...unique];
 	return {
 		keys,
 		inverseNorm: 1 / Math.sqrt(keys.length),
-		hashes,
-		questions,
-		foreign,
-		files,
-		actionHashes,
-		states,
+		identifiers,
+		groups,
+		polarities,
 	};
 }
 
@@ -140,28 +264,23 @@ export function detectStuck(
 	}
 	const runs: Run[] = [],
 		verdicts: Verdict[] = [];
-	// Repeated evaluator text needs only one tokenisation per invocation.
-	// The memo stays local, so calls remain independent and deterministic.
-	const vectors = new Map<string, Vector>();
 	let members: { check: Check; keys: number[]; inverseNorm: number }[] = [];
 	const vocabulary = new Map<string, number>();
 	const sum: number[] = [];
 	let sumSquared = 0;
-	let hashes = new Set<string>(),
-		questions = new Set<number>();
-	let knownHashes = new Set<string>(),
-		foreign = false,
-		files = new Set<string>(),
-		states = new Map<string, boolean>();
+	let known = new Set<string>();
+	let groups = new Map<string, Set<string>>(),
+		polarities = new Map<string, boolean>();
 	let confirmed: Run | null = null;
 	let previous: Check | undefined;
-	const finish = () => {
+	const finish = (preserveIdentifiers = false) => {
 		if (confirmed) {
 			// Denominator common to all candidates is omitted; earliest wins ties.
 			let best = -Infinity;
 			for (const member of members) {
 				let score = 0;
-				for (const key of member.keys) score += sum[key] ?? 0;
+				for (let i = 0; i < member.keys.length; i++)
+					score += sum[member.keys[i] ?? 0] ?? 0;
 				score *= member.inverseNorm;
 				if (score > best + 1e-12) {
 					best = score;
@@ -173,13 +292,10 @@ export function detectStuck(
 		vocabulary.clear();
 		sum.length = 0;
 		sumSquared = 0;
-		hashes = new Set();
-		questions = new Set();
+		if (!preserveIdentifiers) known = new Set();
+		groups = new Map();
+		polarities = new Map();
 		confirmed = null;
-		knownHashes = new Set();
-		foreign = false;
-		files = new Set();
-		states = new Map();
 	};
 	for (const check of checks) {
 		if (
@@ -208,8 +324,7 @@ export function detectStuck(
 			});
 			continue;
 		}
-		const value = vectors.get(check.reason) ?? vector(check.reason);
-		vectors.set(check.reason, value);
+		const value = extract(check.reason);
 		if (!value.keys.length) {
 			finish();
 			verdicts.push({
@@ -226,34 +341,48 @@ export function detectStuck(
 				if (id !== undefined) dot += sum[id] ?? 0;
 			}
 			const similarity = (dot * value.inverseNorm) / Math.sqrt(sumSquared);
-			// Do not erase a new revision or a different set of pending questions.
-			const revisionChanged =
-				hashes.size > 0 &&
-				value.hashes.size > 0 &&
-				![...value.hashes].some((h) => hashes.has(h));
-			const questionsChanged =
-				(questions.size > 0 || (contextGuards && confirmed !== null)) &&
-				value.questions.size > 0 &&
-				(questions.size !== value.questions.size ||
-					[...questions].some((q) => !value.questions.has(q)));
-			const fileChanged =
-				value.files.size > 0 &&
-				(!foreign ||
-					(files.size > 0 && [...value.files].some((f) => !files.has(f))));
-			const actionChanged = [...value.actionHashes].some(
-				(h) => !knownHashes.has(h),
-			);
-			const completionChanged = [...value.states].some(
-				([subject, complete]) =>
-					states.has(subject) && states.get(subject) !== complete,
-			);
+			// Previously observed identifiers remain context across inferred boundaries.
+			// Missing reasons or explicit gaps clear them; incidental old details do not
+			// repeatedly reset a newly anchored run. This cannot detect every role reuse.
+			let changed = false;
+			if (contextGuards) {
+				for (const id of value.identifiers)
+					if (!known.has(id)) {
+						changed = true;
+						break;
+					}
+				if (!changed)
+					for (const [family, current] of value.groups) {
+						const prior = groups.get(family);
+						if (prior !== undefined && (prior.size > 1 || current.size > 1)) {
+							if (prior.size !== current.size) {
+								changed = true;
+								break;
+							}
+							for (const id of prior)
+								if (!current.has(id)) {
+									changed = true;
+									break;
+								}
+							if (changed) break;
+						}
+					}
+				if (!changed)
+					for (const [predicate, positive] of value.polarities) {
+						if (
+							polarities.has(predicate) &&
+							polarities.get(predicate) !== positive
+						) {
+							changed = true;
+							break;
+						}
+					}
+			}
 			if (
 				similarity < (confirmed ? continuationThreshold : threshold) ||
-				revisionChanged ||
-				questionsChanged ||
-				(contextGuards && (fileChanged || actionChanged || completionChanged))
+				changed
 			)
-				finish();
+				finish(true);
 		}
 		const keys: number[] = [];
 		for (const token of value.keys) {
@@ -270,17 +399,14 @@ export function detectStuck(
 			sumSquared += next * next - old * old;
 		}
 		members.push({ check, keys, inverseNorm: value.inverseNorm });
-		if (value.hashes.size) hashes = value.hashes;
-		if (value.questions.size) questions = value.questions;
-		for (const h of value.hashes) knownHashes.add(h);
-		foreign ||= value.foreign;
-		for (const file of value.files) files.add(file);
-		for (const [subject, complete] of value.states)
-			states.set(subject, complete);
+		for (const id of value.identifiers) known.add(id);
+		for (const [family, ids] of value.groups) groups.set(family, ids);
+		for (const [predicate, positive] of value.polarities)
+			polarities.set(predicate, positive);
 		if (members.length >= minChecks) {
-			const first = members[0]?.check;
-			if (!first) continue;
 			if (!confirmed) {
+				const first = members[0]?.check;
+				if (!first) continue;
 				confirmed = {
 					id: `${first.iteration}@${first.at}`,
 					since: first.at,
@@ -320,3 +446,30 @@ export function detectStuck(
 	};
 }
 export default detectStuck;
+
+/** Production boundary shared by projection and summary generation. */
+export function detectGoalStuck(checks: readonly Check[]): Result {
+	try {
+		let at = -Infinity;
+		return detectStuck(
+			checks.map((check) => {
+				// Iteration owns chronology; leave persisted/display timestamps untouched.
+				at = Math.max(at, check.at);
+				// Real reasons are about 1.5 KB; cap pathological parser work without changing normal evidence.
+				return { ...check, at, reason: check.reason?.slice(0, 4_096) ?? null };
+			}),
+			{ minChecks: 3, threshold: 0.55 },
+		);
+	} catch {
+		// Imported/old histories can violate ordering. Never stall projection or reuse a run key.
+		return {
+			stuck: null,
+			runs: [],
+			verdicts: checks.map(({ iteration }) => ({
+				iteration,
+				stuck: false,
+				blockerId: null,
+			})),
+		};
+	}
+}

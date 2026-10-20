@@ -1,4 +1,4 @@
-import { type Check, detectStuck } from "./goal-stuck-detector.js";
+import { type Check, detectGoalStuck } from "./goal-stuck-detector.js";
 
 export type GoalSummaryInput = {
 	sessionId: string;
@@ -15,18 +15,6 @@ export type GoalSummaryInput = {
 const PROMPT_VERSION = "goal-summary-v1";
 const HISTORY_LIMIT = 8_000;
 
-function detectGoalRuns(checks: readonly Check[]) {
-	let at = -Infinity;
-	// Iterations remain chronological even when the stored wall clock moves back.
-	return detectStuck(
-		checks.map((check) => {
-			at = Math.max(at, check.at);
-			return { ...check, at };
-		}),
-		{ minChecks: 3 },
-	);
-}
-
 export function goalSummaryIdentity(input: GoalSummaryInput): string {
 	return JSON.stringify([
 		input.sessionId,
@@ -37,7 +25,7 @@ export function goalSummaryIdentity(input: GoalSummaryInput): string {
 
 export function goalSummaryKey(input: GoalSummaryInput): string {
 	const signature: string[] = [];
-	for (const verdict of detectGoalRuns(input.checks).verdicts) {
+	for (const verdict of detectGoalStuck(input.checks).verdicts) {
 		const id = verdict.blockerId ?? `i${verdict.iteration}`;
 		if (signature.at(-1) !== id) signature.push(id);
 	}
@@ -65,7 +53,7 @@ type History = {
 };
 
 function summaryHistory(checks: readonly Check[]): History {
-	const { runs } = detectGoalRuns(checks);
+	const { runs } = detectGoalStuck(checks);
 	const checkTimes = new Map(
 		checks.map((check) => [check.iteration, check.at]),
 	);
