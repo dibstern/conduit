@@ -12,8 +12,7 @@ describe("Integration: Message Lifecycle", () => {
 	let harness: RelayHarness;
 
 	beforeEach(async () => {
-		harness = await createRelayHarness();
-		harness.mock.resetQueues();
+		harness = await createRelayHarness("chat-multi-turn");
 	}, 30_000);
 
 	afterEach(async () => {
@@ -61,10 +60,9 @@ describe("Integration: Message Lifecycle", () => {
 		expect(done1.status).toBe("idle");
 		expect(done1.attention).not.toBe("error");
 
-		// Clear messages between turns and reset mock queues so the second
-		// prompt_async has fresh SSE events (deltas + idle) to replay.
+		// The multi-turn recording gives the next turn distinct message IDs.
+		// Replaying the first turn would be deduplicated by the event store.
 		client.clearReceived();
-		harness.mock.resetQueues();
 
 		// --- Second message ---
 		await client.sendMessage("Reply with just 'two'.");
