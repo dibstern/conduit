@@ -232,6 +232,12 @@ export class RunnerSocket {
 	private failure: SessionFailure | undefined;
 	private idleExiting = false;
 	private peerTaggedConfigDir = false;
+	/** Temporary old-runner adapter, installed by the hello compatibility decision. */
+	legacyResult?: (
+		commandId: string,
+		attempt: number | undefined,
+		result: TurnResult | undefined,
+	) => Effect.Effect<void, SessionFailure>;
 
 	constructor(
 		private readonly socket: Socket,
@@ -384,6 +390,19 @@ export class RunnerSocket {
 						reply.failure && message.type === "command"
 							? (this.beforeCommandFailure?.() ?? Effect.void)
 							: Effect.void;
+					if (
+						this.legacyResult &&
+						!reply.failure &&
+						message.type === "command" &&
+						message.command.type === "send-turn"
+					) {
+						resume(
+							(this.beforeCommandFailure?.() ?? Effect.void).pipe(
+								Effect.as(reply.result as A),
+							),
+						);
+						return;
+					}
 					resume(
 						reply.failure
 							? precedingOutputs.pipe(

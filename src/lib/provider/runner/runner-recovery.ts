@@ -1,12 +1,10 @@
 import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
-import { ProviderRuntimeIngestionTag } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ClaudeEventPersistEffectTag } from "../../persistence/effect/claude-event-persist-effect.js";
 import { requeueFailedSteers } from "../../persistence/effect/input-requeue-effect.js";
 import { runTerminalStatus } from "../../persistence/effect/projectors-effect.js";
 import { makeProviderStateEffect } from "../../persistence/effect/provider-state-effect.js";
-import { createEventId } from "../../persistence/events.js";
 import type { TurnResult } from "../types.js";
 import { runnerSinkId } from "./runner-protocol.js";
 import type { SessionFailure, SessionTurn } from "./session-runner.js";
@@ -63,6 +61,14 @@ export const recoverRunnerCommands = <T extends SessionTurn, E = never>(
 			row: RunningCommand,
 			input: T,
 		) => Effect.Effect<TurnResult | undefined, SessionFailure>;
+		/** Temporary legacy adapter; replay includes the provider's preparation wrapper. */
+		readonly legacyResult?:
+			| ((
+					commandId: string,
+					attempt: number,
+					result: TurnResult | undefined,
+			  ) => Effect.Effect<void, SessionFailure>)
+			| undefined;
 		readonly onCompleted?: (
 			row: RunningCommand,
 			input: T,
@@ -89,6 +95,19 @@ export const recoverRunnerCommands = <T extends SessionTurn, E = never>(
 			options.driverForAccount,
 			sessionId,
 		);
+		if (options.legacyResult) {
+			const replay = options.replay;
+			const complete = options.legacyResult;
+			options = {
+				...options,
+				replay: (row, input) =>
+					replay(row, input).pipe(
+						Effect.tap((result) =>
+							complete(row.command_id, row.attempt_count, result),
+						),
+					),
+			};
+		}
 		return rows.map((row) => {
 			const input: T = {
 				...options.decodeInput(row),
@@ -251,49 +270,7 @@ export const settleRunnerCommand = (
 				})),
 			);
 		});
-		const migratedReservations = sql<{ id: string }>`SELECT run.id
-			FROM provider_command_outbox command
-			JOIN provider_runs run ON run.id = command.run_id
-				AND run.session_id = command.session_id
-			JOIN events requested ON requested.event_id = 'run-requested-migration:' || run.id
-				AND requested.session_id = command.session_id AND requested.type = 'run.requested'
-			WHERE command.project_key = ${projectId} AND command.command_id = ${commandId}
-				AND command.session_id = ${sessionId} AND command.status = 'running'
-				AND command.attempt_count = ${attempt} AND run.status IN ('pending', 'running')`;
-		const [migrated] = succeeded ? yield* migratedReservations : [];
-		if (!migrated) return yield* sql.withTransaction(saveState);
-		// A surviving old runner cannot know the reservation minted at upgrade.
-		// Its exact command result proves completion, but does not prove intake.
-		const ingestion = yield* Effect.serviceOption(ProviderRuntimeIngestionTag);
-		if (ingestion._tag === "None")
-			return yield* Effect.die(
-				new Error("Legacy runner completion requires runtime ingestion"),
-			);
-		yield* ingestion.value.ingestBatch(
-			[
-				{
-					eventId: createEventId(),
-					type: "turn.completed",
-					providerId: driverKind,
-					sessionId,
-					runId: migrated.id,
-					providerRefs: {},
-					rawSource: { kind: "conduit.runner-command-completion" },
-					createdAt: Date.now(),
-					data: { messageId: "", duration: result?.durationMs ?? 0 },
-				},
-			],
-			{
-				beforeProject: migratedReservations.pipe(
-					Effect.flatMap(([current]) =>
-						current?.id === migrated.id ? Effect.void : Effect.interrupt,
-					),
-				),
-				beforeCommit: saveState.pipe(
-					Effect.catchTag("ProviderStateEffectError", Effect.die),
-				),
-			},
-		);
+		yield* sql.withTransaction(saveState);
 	}).pipe(
 		Effect.tap(() =>
 			Effect.gen(function* () {

@@ -1263,7 +1263,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 		}
 	}, 45_000);
 
-	it("terminalizes the owning running turn when the adopted SDK fails before an assistant message", async () => {
+	it("terminalizes the owning pending turn when the adopted SDK fails before intake", async () => {
 		const harness = await ProcessHarness.start({
 			dist: "dist",
 			restartProof: true,
@@ -1290,11 +1290,24 @@ describe("Claude runners survive server replacement through built dist", () => {
 		const active = persisted(harness, sessionId);
 		expect(active.turns).toEqual([
 			{
-				state: "running",
+				state: "pending",
 				user_message_id: expect.any(String),
 				assistant_message_id: null,
 			},
 		]);
+		expect(active.events.some((event) => event.type === "run.started")).toBe(
+			false,
+		);
+		const db = new Database(harness.daemonStorePath(), { readonly: true });
+		try {
+			expect(
+				db
+					.prepare("SELECT started_at FROM turns WHERE session_id = ?")
+					.all(sessionId),
+			).toEqual([{ started_at: null }]);
+		} finally {
+			db.close();
+		}
 		expect(active.commands).toMatchObject([{ status: "running" }]);
 		await harness.kill();
 		await pending;

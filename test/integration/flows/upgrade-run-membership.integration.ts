@@ -151,7 +151,7 @@ for (const driver of ["claude", "cursor"] as const) {
 	for (const status of driver === "claude"
 		? (["completed", "joined"] as const)
 		: (["completed"] as const)) {
-		it(`a live pre-upgrade ${driver} ${status} reply completes its migrated turn through unchanged legacy recovery`, async () => {
+		it(`a live pre-upgrade ${driver} ${status} reply completes its migrated turn through stamped output`, async () => {
 			const accepted = driver === "cursor";
 			const dependencies = await legacyStore(driver, accepted);
 			await Effect.runPromise(
@@ -176,6 +176,7 @@ for (const driver of ["claude", "cursor"] as const) {
 								.ingestBatch([
 									{
 										eventId: "old-reply",
+										runId,
 										type: "message.created",
 										providerId: driver,
 										sessionId: "s",
@@ -191,6 +192,7 @@ for (const driver of ["claude", "cursor"] as const) {
 									},
 									{
 										eventId: "old-result",
+										runId,
 										type: "turn.completed",
 										providerId: driver,
 										sessionId: "s",
@@ -234,7 +236,7 @@ for (const driver of ["claude", "cursor"] as const) {
 					).toEqual([]);
 					expect(
 						yield* sql`SELECT json_extract(metadata, '$.runId') AS run_id FROM events WHERE type = 'turn.completed' ORDER BY sequence`,
-					).toEqual([{ run_id: null }, { run_id: runId }]);
+					).toEqual([{ run_id: runId }]);
 					cases.push({ case: `live-${driver}-${status}`, outcome: "passed" });
 				}).pipe(Effect.provide(dependencies)),
 			);

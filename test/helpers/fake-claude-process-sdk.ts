@@ -2136,6 +2136,64 @@ function query(params: {
 					],
 				} as unknown as SDKMessage;
 			}
+			if (
+				request === "upgrade-long-turn" &&
+				proof &&
+				existsSync(join(dirname(proof), "legacy-output-details"))
+			) {
+				for (const [index, name, id, input] of [
+					[
+						1,
+						"Bash",
+						"legacy-upgrade-bash",
+						{ command: "printf legacy-output" },
+					],
+					[
+						2,
+						"Agent",
+						"legacy-upgrade-agent",
+						{
+							description: "Legacy runner child",
+							prompt: "Review the changes",
+							subagent_type: "general-purpose",
+						},
+					],
+				] as const) {
+					yield stream(sessionId, {
+						type: "content_block_start",
+						index,
+						content_block: { type: "tool_use", id, name, input },
+					});
+					yield stream(sessionId, { type: "content_block_stop", index });
+				}
+				yield {
+					type: "user",
+					uuid: randomUUID(),
+					session_id: sessionId,
+					parent_tool_use_id: null,
+					message: {
+						role: "user",
+						content: [
+							{
+								type: "tool_result",
+								tool_use_id: "legacy-upgrade-bash",
+								content: "legacy-output",
+								is_error: false,
+							},
+						],
+					},
+				} as unknown as SDKMessage;
+				yield {
+					type: "system",
+					subtype: "task_started",
+					uuid: randomUUID(),
+					session_id: sessionId,
+					task_id: "legacy-upgrade-child",
+					tool_use_id: "legacy-upgrade-agent",
+					description: "Legacy runner child",
+					task_type: "local_agent",
+				} as unknown as SDKMessage;
+			}
 			if (request === "review-subagent-finalizer") {
 				// The SDK emits the Agent tool call before its task lifecycle messages.
 				yield stream(sessionId, {

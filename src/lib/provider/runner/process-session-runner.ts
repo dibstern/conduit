@@ -20,7 +20,9 @@ import { ProviderRuntimeIngestionTag } from "../../domain/relay/Services/provide
 import * as Failure from "../../effect/failure-classification.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { createLogger } from "../../logger.js";
+import { runTerminalStatus } from "../../persistence/effect/projectors-effect.js";
 import { makeRetireReplacedProcessPrompts } from "../../persistence/effect/retire-pending-prompts.js";
+import { createEventId } from "../../persistence/events.js";
 import { isRecord } from "../../utils.js";
 import {
 	type RunSettlementOwner,
@@ -81,12 +83,60 @@ interface RunnerChild {
 	stopsTasks?: boolean;
 	inputHeld?: boolean;
 	legacyIndeterminateRuns?: readonly RunSettlementOwner[];
+	legacySinkRuns?: Map<
+		string,
+		{ runId: string; turnId: string | null; retained: boolean }
+	>;
+	settleLegacyJoined?: () => Effect.Effect<void, SessionFailure>;
 	draftPreWarm?: boolean;
 	candidate?: boolean;
 	commandsInFlight: number;
 	pendingSendCommands?: Map<string, number> | undefined;
 	ownedRunIds?: Set<string>;
 	readonly upgrade: RunnerUpgrade;
+}
+
+/** Temporary adapter for retained output; child sessions keep their own ownership. */
+function stampLegacyOutput(
+	entry: RunnerChild,
+	output: SessionOutput,
+): SessionOutput {
+	if (!("sinkId" in output)) return output;
+	const owner = entry.legacySinkRuns?.get(output.sinkId);
+	if (!owner) return output;
+	if (output.type === "event" && output.event.sessionId === entry.sessionId) {
+		const event = { ...output.event, runId: owner.runId };
+		// Main's Cursor runner has already applied its retry policy, but only
+		// includes retryHandled on the result, after this error is projected.
+		if (
+			event.providerId === "cursor" &&
+			event.type === "turn.error" &&
+			isRecord(event.data)
+		)
+			return {
+				...output,
+				event: { ...event, data: { ...event.data, retryHandled: true } },
+			};
+		if (
+			owner.turnId &&
+			event.type === "message.created" &&
+			isRecord(event.data) &&
+			event.data["role"] === "assistant"
+		)
+			return {
+				...output,
+				event: { ...event, data: { ...event.data, parentID: owner.turnId } },
+			};
+		return { ...output, event };
+	}
+	if (
+		output.type === "place-user-message" &&
+		output.input.sessionId === entry.sessionId
+	) {
+		owner.turnId ??= output.input.inputId;
+		return { ...output, input: { ...output.input, runId: owner.runId } };
+	}
+	return output;
 }
 
 export class RunnerProcessError extends Data.TaggedError("RunnerProcessError")<{
@@ -711,6 +761,8 @@ export const makeProcessSessionRunner = (
 				},
 				emit: (received) => {
 					const operation = Effect.suspend(() => {
+						if (entry.legacySinkRuns)
+							received = stampLegacyOutput(entry, received);
 						// A retired query's shutdown notices must not clear its replacement.
 						if (
 							entry.stopping &&
@@ -737,6 +789,15 @@ export const makeProcessSessionRunner = (
 							),
 						);
 					});
+					if (
+						entry.settleLegacyJoined &&
+						received.type === "event" &&
+						received.event.sessionId === sessionId &&
+						runTerminalStatus(received.event, driver.driverKind)
+					)
+						return entry.outputs.withPermits(1)(
+							operation.pipe(Effect.tap(entry.settleLegacyJoined)),
+						);
 					return received.type === "ensure-subagent-session"
 						? operation
 						: entry.outputs.withPermits(1)(operation);
@@ -796,11 +857,124 @@ export const makeProcessSessionRunner = (
 							// retained work, but cannot own any newly delivered input.
 							entry.inputHeld = hello.stampsRunIds !== true;
 							if (entry.inputHeld) {
+								entry.legacySinkRuns = new Map();
 								heldSessions.add(sessionId);
 								log.warn(
 									`Legacy runner adopted: session=${sessionId} runner=${entry.runnerId} build=${hello.buildId}`,
 								);
 							}
+						}
+						if (entry.legacySinkRuns && sql) {
+							const owners = entry.legacySinkRuns;
+							const joined = new Map<
+								string,
+								{ commandId: string; attempt: number; result: TurnResult }
+							>();
+							const adaptResult = (
+								commandId: string,
+								attempt: number | undefined,
+								result: TurnResult | undefined,
+							) =>
+								Effect.gen(function* () {
+									if (!result || attempt === undefined) return;
+									const [run] = yield* sql<{
+										id: string;
+										joined_into: string | null;
+									}>`SELECT run.id, reservation.joined_into FROM provider_command_outbox command
+									JOIN provider_runs reservation ON reservation.id = command.run_id AND reservation.session_id = command.session_id
+									JOIN provider_runs run ON run.id = COALESCE(reservation.joined_into, reservation.id) AND run.session_id = command.session_id
+									WHERE command.project_key = ${projectId} AND command.session_id = ${sessionId}
+									AND command.command_id = ${commandId} AND command.attempt_count = ${attempt}
+									AND run.status IN ('pending', 'running')`;
+									if (!run || (result.status === "joined" && run.joined_into))
+										return;
+									let status: string =
+										result.status === "cancelled" ||
+										result.status === "steer-declined"
+											? "interrupted"
+											: result.status;
+									if (result.status === "joined") {
+										if (!joined.has(run.id)) {
+											joined.set(run.id, { commandId, attempt, result });
+											entry.legacyIndeterminateRuns = [
+												...(entry.legacyIndeterminateRuns ?? []),
+												{ runId: run.id },
+											];
+										}
+										// Joined has no target on the old wire format. Only a sole
+										// retained root can prove which end this reservation follows.
+										const roots = [
+											...new Set(
+												[...owners.values()]
+													.filter(
+														(owner) =>
+															owner.retained && !joined.has(owner.runId),
+													)
+													.map((owner) => owner.runId),
+											),
+										];
+										if (roots.length !== 1) return;
+										const [target] = yield* sql<{
+											status: string;
+										}>`SELECT status FROM provider_runs WHERE session_id = ${sessionId} AND id = ${roots[0]} AND joined_into IS NULL`;
+										status = target?.status ?? "pending";
+									}
+									const terminal = runTerminalStatus(
+										{ type: `turn.${status}`, data: {} },
+										driver.driverKind,
+									);
+									if (!terminal) return;
+									yield* emit(
+										{
+											type: "event",
+											sinkId: runnerSinkId(commandId, attempt),
+											event: {
+												eventId: createEventId(),
+												type: `turn.${terminal}`,
+												providerId: driver.driverKind,
+												sessionId,
+												runId: run.id,
+												providerRefs: {},
+												rawSource: { kind: "conduit.legacy-runner-result" },
+												createdAt: Date.now(),
+												data: {
+													messageId: "",
+													duration: result.durationMs,
+													...(result.error
+														? {
+																error: result.error.message,
+																code: result.error.code,
+																retryable: result.error.retryable,
+																retryHandled: result.error.retryHandled,
+															}
+														: {}),
+													...(result.status === "steer-declined"
+														? { code: "steer-declined" }
+														: {}),
+												},
+											},
+										},
+										sessionId,
+									);
+								}).pipe(
+									Effect.mapError((cause) =>
+										runnerFailure("adapt legacy result", cause),
+									),
+								);
+							const settleJoined = () =>
+								Effect.forEach(
+									[...joined.values()],
+									(saved) =>
+										adaptResult(saved.commandId, saved.attempt, saved.result),
+									{ discard: true },
+								);
+							entry.settleLegacyJoined = settleJoined;
+							connection.legacyResult = (commandId, attempt, result) =>
+								entry.outputs.withPermits(1)(
+									adaptResult(commandId, attempt, result).pipe(
+										Effect.andThen(settleJoined),
+									),
+								);
 						}
 						entry.upgrade.state = hello.upgradeState;
 						for (const binding of entry.candidate
@@ -817,9 +991,11 @@ export const makeProcessSessionRunner = (
 									status: string;
 									attempt_count: number;
 									assistant_message_id: string | null;
+									legacy_turn_id: string | null;
 								}>`SELECT COALESCE(json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS input_id,
 									COALESCE(reservation.joined_into, reservation.id) AS run_id,
 									outbox.status, outbox.attempt_count, turns.assistant_message_id
+									, turns.id AS legacy_turn_id
 									FROM provider_command_outbox outbox
 									LEFT JOIN provider_runs reservation ON reservation.session_id = outbox.session_id
 										AND reservation.id = outbox.run_id
@@ -847,6 +1023,28 @@ export const makeProcessSessionRunner = (
 											(inputId !== undefined &&
 												binding.sinkId ===
 													runnerSinkId(inputId, row.attempt_count)));
+									if (entry.legacySinkRuns && runId) {
+										const sinkId = binding.sinkId.replace(
+											/:native-resume-fallback$/,
+											"",
+										);
+										if (
+											sinkId ===
+												runnerSinkId(
+													binding.commandId ?? binding.sinkId,
+													row.attempt_count,
+												) ||
+											(inputId &&
+												sinkId === runnerSinkId(inputId, row.attempt_count))
+										) {
+											pending = row.status === "running";
+											entry.legacySinkRuns.set(binding.sinkId, {
+												runId,
+												turnId: row.legacy_turn_id,
+												retained: row.status === "running",
+											});
+										}
+									}
 								}
 							}
 							yield* ensureAttached();
@@ -864,6 +1062,14 @@ export const makeProcessSessionRunner = (
 							? []
 							: (hello.pendingOutputs ?? [])) {
 							yield* ensureAttached();
+							if (entry.legacySinkRuns)
+								if (pending.sequence <= (hello.acknowledgedSequence ?? 0)) {
+									yield* emit(
+										stampLegacyOutput(entry, pending.output),
+										sessionId,
+									);
+									continue;
+								}
 							if (pending.sequence <= (hello.acknowledgedSequence ?? 0))
 								yield* emit(pending.output, sessionId);
 						}
@@ -1492,6 +1698,28 @@ export const makeProcessSessionRunner = (
 												attempt,
 												nativeResumeFallback,
 											);
+											if (entry.legacySinkRuns && nativeResumeFallback) {
+												// Preparation authorizes this suffix before dispatch. Preserve
+												// the original exact attempt's owner under either sink alias.
+												const owner =
+													entry.legacySinkRuns.get(sinkId) ??
+													entry.legacySinkRuns.get(
+														runnerSinkId(commandId, attempt, true),
+													) ??
+													entry.legacySinkRuns.get(
+														runnerSinkId(inputId, attempt),
+													) ??
+													entry.legacySinkRuns.get(
+														runnerSinkId(commandId, attempt),
+													);
+												if (owner) {
+													entry.legacySinkRuns.set(sinkId, owner);
+													entry.legacySinkRuns.set(
+														runnerSinkId(commandId, attempt, true),
+														owner,
+													);
+												}
+											}
 											return sinks.has(sinkId)
 												? sinkId
 												: runnerSinkId(

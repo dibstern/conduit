@@ -23,7 +23,10 @@ import {
 	makeEffectSqlMigrator,
 } from "../../../src/lib/persistence/effect/migrations.js";
 import { createEventId } from "../../../src/lib/persistence/events.js";
-import { runnerSinkId } from "../../../src/lib/provider/runner/runner-protocol.js";
+import {
+	runnerFailure,
+	runnerSinkId,
+} from "../../../src/lib/provider/runner/runner-protocol.js";
 import {
 	recoverRunnerCommands,
 	settleUnclaimedRunnerCommands,
@@ -46,7 +49,7 @@ it.each([
 	"completed",
 	"joined",
 	"superseded",
-] as const)("keeps a migrated executing run busy until its exact %s runner recovery terminal", async (result) => {
+] as const)("keeps a migrated executing run busy until its exact %s owned runner terminal", async (result) => {
 	const succeeded = result === "completed" || result === "joined";
 	const root = mkdtempSync(join(tmpdir(), "legacy-run-upgrade-"));
 	const database = join(root, "events.db");
@@ -187,12 +190,22 @@ it.each([
 							replay: (_row, input) =>
 								Effect.gen(function* () {
 									expect(input.runId).toBe(reservation?.id);
-									// The surviving old runner cannot stamp the newly minted reservation.
+									// The adapter supplies ownership before this ingestion seam.
+									// A superseded attempt has no current binding and stays unowned.
+									if (result === "superseded")
+										yield* sql`UPDATE provider_command_outbox SET attempt_count = 2 WHERE command_id = 'legacy-input'`.pipe(
+											Effect.mapError((cause) =>
+												runnerFailure("supersede fixture attempt", cause),
+											),
+										);
 									yield* emit({
 										type: "event",
 										sinkId: "legacy-input:1",
 										event: {
 											eventId: createEventId(),
+											...(result === "superseded"
+												? {}
+												: { runId: input.runId }),
 											type: "turn.completed",
 											providerId: "claude",
 											sessionId: "legacy",
@@ -217,17 +230,7 @@ it.each([
 					if (!command)
 						return yield* Effect.die("Missing recovered legacy command");
 					if (result === "superseded") {
-						yield* Effect.exit(
-							command.wait.pipe(
-								Effect.provideService(ProviderRuntimeIngestionTag, {
-									...ingestion,
-									ingestBatch: (events, options) =>
-										sql`UPDATE provider_command_outbox SET attempt_count = 2 WHERE command_id = 'legacy-input'`.pipe(
-											Effect.andThen(ingestion.ingestBatch(events, options)),
-										),
-								}),
-							),
-						);
+						yield* command.wait;
 						expect(
 							yield* sql`SELECT status FROM provider_runs WHERE id = ${reservation?.id}`,
 						).toEqual([{ status: "running" }]);

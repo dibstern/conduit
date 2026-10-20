@@ -15,8 +15,9 @@ import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import Database from "better-sqlite3";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
+import { SessionDetailItemSchema } from "../../../src/lib/contracts/ws-rpc.js";
 import type { RunnerMessage } from "../../../src/lib/provider/runner/runner-protocol.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
@@ -26,7 +27,7 @@ import {
 	responseChunks,
 } from "../../helpers/process-harness.js";
 
-// Temporary upgrade proof, removed by 82tn.31.4. This pin must equal the main
+// Temporary upgrade proof, removed by 82tn.31.5. This pin must equal the main
 // build this machine runs at merge time, not a branch build with another ID.
 const MAIN_COMMIT = "1c07f4704344d20a86deb48f464c5b27ea99498c";
 const branchDist = resolve(process.env["CONDUIT_TEST_DIST"] ?? "dist");
@@ -42,6 +43,428 @@ function buildId(dist: string): string {
 	)?.[1];
 	if (!id) throw new Error(`Missing built server identity in ${dist}`);
 	return id;
+}
+
+function paused(browser: ProcessBrowser, sessionId: string) {
+	return browser.frames
+		.flatMap(({ message }) => {
+			if (
+				message["type"] !== "session_detail" ||
+				message["sessionId"] !== sessionId
+			)
+				return [];
+			const items =
+				message["_tag"] === "snapshot" ? message["rows"] : [message["item"]];
+			return Array.isArray(items)
+				? items.flatMap((item: unknown) => {
+						const decoded = Schema.decodeUnknownOption(SessionDetailItemSchema)(
+							item,
+						);
+						return decoded._tag === "Some" ? [decoded.value] : [];
+					})
+				: [];
+		})
+		.filter((item) => item._tag === "inbox")
+		.at(-1)?.inbox.paused;
+}
+
+// Each case starts main's actual archived runner, then changes only the daemon.
+// The captured folded trace differs from the fake SDK's separate prompt loop:
+// both inputs are covered by one result while the stream switches sinks.
+for (const scenario of [
+	"output",
+	"approval",
+	"stop",
+	"killed",
+	"folded-steer",
+] as const) {
+	it(`temporary old-runner adapter: ${scenario}`, async () => {
+		const folded = scenario === "folded-steer";
+		const harness = ProcessHarness.create({
+			dist: mainDist,
+			restartProof: true,
+			upgradeSinkProof: true,
+			...(folded
+				? {
+						claudeReplay: {
+							turns: ["steer-during-tool-folds" as const],
+							delayMs: 100,
+							holdBeforeResult: true,
+						},
+					}
+				: {}),
+			rootPrefix: join(tmpdir(), "conduit-82tn31-4-case-"),
+		});
+		const evidence: Record<string, unknown> = {
+			case: `adapter-${scenario}`,
+			phase: "main-bootstrap",
+		};
+		const inputs: string[] = [randomUUID()];
+		const firstInput = inputs[0];
+		if (!firstInput) throw new Error("Missing original input");
+		active = { harness, evidence, inputs };
+		const observer = join(harness.root, "two-build-observer.mjs");
+		writeFileSync(
+			observer,
+			`import { Socket } from "node:net";
+import { appendFileSync } from "node:fs";
+const write = Socket.prototype.write;
+Socket.prototype.write = function(chunk, ...args) {
+  if (typeof chunk === "string" && chunk.startsWith("{")) for (const line of chunk.trim().split("\\n")) {
+    let frame; try { frame = JSON.parse(line); } catch { continue; }
+    if (["hello", "command", "command-reply", "output"].includes(frame.type))
+      appendFileSync(${JSON.stringify(join(harness.root, "two-build-wire.ndjson"))}, JSON.stringify({ pid: process.pid, frame }) + "\\n");
+  }
+  return write.call(this, chunk, ...args);
+};\n`,
+		);
+		const serviceEnvironment = {
+			NODE_OPTIONS: `--import=${pathToFileURL(observer).href}`,
+		};
+		await harness.restart({
+			startupTimeoutMs: 120_000,
+			runnerStartupTimeoutMs: 120_000,
+			serviceEnvironment,
+			skipBrowserProbe: true,
+		});
+		const { ProcessBrowser: MainBrowser } = (await import(
+			pathToFileURL(join(mainDist, "test/helpers/process-harness.js")).href
+		)) as { ProcessBrowser: typeof ProcessBrowser };
+		const generation = harness.proof().generations.at(-1);
+		if (!generation) throw new Error("Missing main daemon generation");
+		const beforeBrowser = await MainBrowser.connect(generation.port);
+		harness.browsers.push(beforeBrowser);
+		await beforeBrowser.setAutoSettle(null);
+		const sessionId = await beforeBrowser.createSession(
+			`Legacy output ${scenario}`,
+		);
+		active.sessionId = sessionId;
+		const prompt = folded
+			? "Alpha"
+			: scenario === "approval"
+				? "approval-restart"
+				: "upgrade-long-turn";
+		if (scenario === "output")
+			writeFileSync(join(harness.root, "legacy-output-details"), "enabled");
+		evidence["phase"] = "old-runner-startup";
+		await Effect.runPromise(
+			beforeBrowser.rpc["input.submit"]({
+				sessionId,
+				originId: beforeBrowser.originId,
+				inputId: firstInput,
+				text: prompt,
+				delivery: "queue",
+			}),
+		);
+		let approval: Awaited<ReturnType<ProcessBrowser["waitFor"]>> | undefined;
+		if (scenario === "approval")
+			approval = await beforeBrowser.waitFor(
+				(message) => message["type"] === "permission_pending",
+				0,
+				150_000,
+			);
+		else if (folded)
+			await vi.waitFor(
+				() =>
+					expect(
+						snapshot(harness, sessionId).events.some(
+							(event) => event.type === "tool.started",
+						),
+					).toBe(true),
+				{ timeout: 150_000 },
+			);
+		else
+			await vi.waitFor(
+				() =>
+					expect(
+						marks(harness).some((mark) => mark.kind === "assistant-held"),
+					).toBe(true),
+				{ timeout: 150_000 },
+			);
+		const old = harness.marks.find(
+			(mark) => mark.kind === "runner-started" && mark.sessionId === sessionId,
+		);
+		if (old?.kind !== "runner-started") throw new Error("Missing main runner");
+		expect(old.buildId).toBe(buildId(mainDist));
+		if (folded) {
+			const secondInput = randomUUID();
+			inputs.push(secondInput);
+			await Effect.runPromise(
+				beforeBrowser.rpc["input.submit"]({
+					sessionId,
+					originId: beforeBrowser.originId,
+					inputId: secondInput,
+					text: "Bravo",
+					delivery: "steer",
+				}),
+			);
+			await vi.waitFor(
+				() => {
+					const state = snapshot(harness, sessionId);
+					expect(state.outbox).toHaveLength(2);
+					// The replay wrapper holds the result. Cut after its complete
+					// Bravo reply is durable, so migration always sees the same
+					// accepted turn rather than racing its first assistant frame.
+					expect(
+						state.messages
+							.filter((message) => message.role === "assistant")
+							.at(-1)?.text,
+					).toBe("The command finished and printed A-DONE. BANANA");
+					expect(state.turns[1]).toMatchObject({
+						state: "running",
+						started_at: expect.any(Number),
+					});
+					expect(state.outbox.map((command) => command.status)).toEqual([
+						"running",
+						"running",
+					]);
+					expect(
+						state.events.some((event) => event.type === "turn.completed"),
+					).toBe(false);
+					expect(
+						wire(harness).some(
+							({ pid, frame }) =>
+								pid === old.pid &&
+								frame.type === "output" &&
+								frame.output.type === "event" &&
+								frame.output.event.type === "session.status" &&
+								frame.output.sinkId.startsWith(secondInput),
+						),
+					).toBe(true);
+				},
+				{ timeout: 60_000 },
+			);
+			evidence["switchCut"] = "Bravo reply durable; native result held";
+		}
+		evidence["beforeUpgrade"] = normalized(
+			snapshot(harness, sessionId),
+			inputs,
+		);
+		await harness.kill();
+		expect(() => process.kill(old.pid, 0)).not.toThrow();
+		evidence["phase"] = "branch-bootstrap";
+		await harness.restart({
+			dist: branchDist,
+			startupTimeoutMs: 120_000,
+			runnerStartupTimeoutMs: 120_000,
+			serviceEnvironment,
+		});
+		const browser = await harness.connect(sessionId);
+		await vi.waitFor(
+			() =>
+				expect(
+					harness.marks.filter(
+						(mark) => mark.kind === "runner-started" && mark.pid === old.pid,
+					),
+				).toHaveLength(2),
+			{ timeout: 150_000 },
+		);
+		const adopted = snapshot(harness, sessionId);
+		expect(adopted.runs).toHaveLength(inputs.length);
+		// Main completes Alpha when the folded steer starts. Migration links
+		// only still-open turns, preserving already completed history.
+		expect(
+			adopted.turns
+				.filter((turn) => turn.state !== "completed")
+				.every((turn) => turn.run_id !== null),
+		).toBe(true);
+		evidence["afterUpgrade"] = normalized(adopted, inputs);
+		evidence["phase"] = "native-outcome";
+		if (scenario === "stop" || scenario === "killed") {
+			const queued = randomUUID();
+			inputs.push(queued);
+			await Effect.runPromise(
+				browser.rpc["input.submit"]({
+					sessionId,
+					originId: browser.originId,
+					inputId: queued,
+					text: "must-stay-queued",
+					delivery: "queue",
+				}),
+			);
+			if (scenario === "stop")
+				await Effect.runPromise(
+					browser.rpc.CancelSession({ sessionId, commandId: randomUUID() }),
+				);
+			else process.kill(old.pid, "SIGKILL");
+			await vi.waitFor(
+				() => {
+					const state = snapshot(harness, sessionId);
+					const expected = scenario === "stop" ? "interrupted" : "error";
+					expect(state.runs[0]?.status).toBe(expected);
+					expect(state.turns[0]?.state).toBe(expected);
+					expect(state.outbox[0]?.status).toBe("failed");
+					expect(state.receipts[0]?.status).toBe("side_effect_failed");
+					expect(
+						state.pendingInputs.find((input) => input.input_id === queued)
+							?.state,
+					).toBe("queued");
+					expect(paused(browser, sessionId)).toBe(true);
+				},
+				{ timeout: 60_000 },
+			);
+			expect(
+				wire(harness).some(
+					({ frame }) =>
+						frame.type === "command" &&
+						frame.command.type === "send-turn" &&
+						frame.command.input.inputId === queued,
+				),
+			).toBe(false);
+			evidence["queuePaused"] = true;
+		} else {
+			if (scenario === "approval") {
+				if (!approval) throw new Error("Missing legacy approval");
+				await browser.answerApproval(approval, "allow");
+			} else if (folded)
+				writeFileSync(
+					join(harness.root, "claude-replay-release"),
+					"finish folded result",
+				);
+			else
+				writeFileSync(
+					join(harness.root, "release-upgrade-turn"),
+					"emit owned old output",
+				);
+			await vi.waitFor(
+				() => {
+					const state = snapshot(harness, sessionId);
+					expect(state.runs.map((run) => run.status)).toEqual(
+						adopted.runs.map(() => "completed"),
+					);
+					expect(state.turns.map((turn) => turn.state)).toEqual(
+						adopted.turns.map(() => "completed"),
+					);
+					expect(state.outbox.map((command) => command.status)).toEqual(
+						adopted.outbox.map(() => "completed"),
+					);
+					expect(state.receipts.map((receipt) => receipt.status)).toEqual(
+						adopted.receipts.map(() => "side_effect_completed"),
+					);
+					if (scenario === "output")
+						expect(state.children).toEqual([{ status: "idle" }]);
+				},
+				{ timeout: 60_000 },
+			);
+			const final = snapshot(harness, sessionId);
+			for (const run of final.runs) {
+				expect(run.started_at).toBe(
+					adopted.runs.find((oldRun) => oldRun.id === run.id)?.started_at,
+				);
+				expect(
+					final.events.filter(
+						(event) =>
+							event.metadata["runId"] === run.id &&
+							["turn.completed", "turn.error", "turn.interrupted"].includes(
+								event.type,
+							),
+					),
+				).toHaveLength(1);
+			}
+			if (scenario === "output") {
+				const run = final.runs[0];
+				const turn = final.turns[0];
+				if (!run || !turn) throw new Error("Missing output owner");
+				const output = final.events
+					.slice(adopted.events.length)
+					.filter((event) =>
+						[
+							"message.created",
+							"text.delta",
+							"tool.started",
+							"tool.completed",
+							"turn.completed",
+						].includes(event.type),
+					);
+				expect(output.some((event) => event.type === "tool.started")).toBe(
+					true,
+				);
+				expect(
+					output.every((event) => event.metadata["runId"] === run.id),
+				).toBe(true);
+				expect(
+					final.parts
+						.filter((part) => part.type === "tool")
+						.every((part) => part.turn_id === turn.id),
+				).toBe(true);
+				expect(turn.tokens_in).toBe(1);
+				expect(turn.tokens_out).toBe(3);
+				expect(
+					final.messages.filter((message) => message.role === "assistant"),
+				).toMatchObject([
+					{ turn_id: turn.id, tokens_in: 1, tokens_out: 3, is_streaming: 0 },
+				]);
+			}
+			if (scenario === "approval")
+				expect(
+					marks(harness).filter((mark) => mark.kind === "approval"),
+				).toMatchObject([{ behavior: "allow" }]);
+			if (folded) {
+				const commands = wire(harness).flatMap(({ frame }) =>
+					frame.type === "command" && frame.command.type === "send-turn"
+						? [frame.command]
+						: [],
+				);
+				const observed = wire(harness).flatMap(({ pid, frame }) => {
+					if (
+						pid !== old.pid ||
+						frame.type !== "output" ||
+						frame.output.type !== "event"
+					)
+						return [];
+					const output = frame.output;
+					if (
+						!["message.created", "text.delta", "turn.completed"].includes(
+							output.event.type,
+						)
+					)
+						return [];
+					return [
+						{
+							type: output.event.type,
+							sink:
+								inputs.indexOf(
+									commands.find((command) => command.sinkId === output.sinkId)
+										?.input.inputId ?? "",
+								) + 1,
+							data: output.event.data,
+						},
+					];
+				});
+				evidence["foldedSteer"] = {
+					inputs: 2,
+					nativeResults: wire(harness).filter(
+						({ pid, frame }) =>
+							pid === old.pid &&
+							frame.type === "output" &&
+							frame.output.type === "event" &&
+							frame.output.event.type === "turn.completed",
+					).length,
+					output: observed.map(({ type, sink }) => ({
+						type,
+						sink: `input-${sink}-sink`,
+					})),
+				};
+				expect(
+					observed.some(
+						(output) => output.sink === 2 && output.type === "turn.completed",
+					),
+				).toBe(true);
+				for (const output of observed.filter(
+					(item) =>
+						item.type === "message.created" &&
+						isRecord(item.data) &&
+						item.data["role"] === "assistant",
+				)) {
+					if (!isRecord(output.data)) continue;
+					const messageId = output.data["messageId"];
+					const message = final.messages.find((item) => item.id === messageId);
+					expect(message?.turn_id).toBe(final.turns[output.sink - 1]?.id);
+				}
+			}
+		}
+		evidence["phase"] = "completed";
+	}, 420_000);
 }
 
 beforeAll(async () => {
@@ -155,7 +578,7 @@ function snapshot(harness: ProcessHarness, sessionId: string) {
 				.all(sessionId) as Array<{ input_id: string; state: string }>,
 			turns: db
 				.prepare(
-					`SELECT id, state, started_at, completed_at, ${upgraded ? "run_id" : "NULL AS run_id"} FROM turns WHERE session_id = ? ORDER BY requested_at, rowid`,
+					`SELECT id, state, started_at, completed_at, tokens_in, tokens_out, ${upgraded ? "run_id" : "NULL AS run_id"} FROM turns WHERE session_id = ? ORDER BY requested_at, rowid`,
 				)
 				.all(sessionId) as Array<{
 				id: string;
@@ -163,7 +586,37 @@ function snapshot(harness: ProcessHarness, sessionId: string) {
 				started_at: number | null;
 				completed_at: number | null;
 				run_id: string | null;
+				tokens_in: number | null;
+				tokens_out: number | null;
 			}>,
+			messages: db
+				.prepare(
+					"SELECT id, role, turn_id, text, tokens_in, tokens_out, is_streaming FROM messages WHERE session_id = ? ORDER BY created_at, rowid",
+				)
+				.all(sessionId) as Array<{
+				id: string;
+				role: string;
+				turn_id: string | null;
+				text: string;
+				tokens_in: number | null;
+				tokens_out: number | null;
+				is_streaming: number;
+			}>,
+			parts: db
+				.prepare(
+					"SELECT parts.type, parts.tool_name, parts.status, messages.turn_id FROM message_parts parts JOIN messages ON messages.id = parts.message_id WHERE messages.session_id = ? ORDER BY parts.created_at, parts.rowid",
+				)
+				.all(sessionId) as Array<{
+				type: string;
+				tool_name: string | null;
+				status: string | null;
+				turn_id: string | null;
+			}>,
+			children: db
+				.prepare(
+					"SELECT status FROM sessions WHERE parent_id = ? ORDER BY created_at, rowid",
+				)
+				.all(sessionId) as Array<{ status: string }>,
 			runs: upgraded
 				? (db
 						.prepare(
@@ -302,7 +755,26 @@ function normalized(state: Snapshot, inputs: string[]) {
 			runId: run(row.run_id),
 			accepted: row.started_at !== null,
 			ended: row.completed_at !== null,
+			tokens: { input: row.tokens_in, output: row.tokens_out },
 		})),
+		messages: state.messages.map((row) => ({
+			role: row.role,
+			turn: row.turn_id
+				? `turn-${state.turns.findIndex((turn) => turn.id === row.turn_id) + 1}`
+				: null,
+			text: row.text,
+			tokens: { input: row.tokens_in, output: row.tokens_out },
+			streaming: row.is_streaming === 1,
+		})),
+		parts: state.parts.map((row) => ({
+			type: row.type,
+			tool: row.tool_name,
+			status: row.status,
+			turn: row.turn_id
+				? `turn-${state.turns.findIndex((turn) => turn.id === row.turn_id) + 1}`
+				: null,
+		})),
+		children: state.children,
 		runs: state.runs.map((row) => ({
 			id: run(row.id),
 			status: row.status,
@@ -831,6 +1303,22 @@ Socket.prototype.write = function(chunk, ...args) {
 			},
 			{ timeout: 15_000 },
 		);
+		if (delivery === "queue") {
+			const final = snapshot(harness, sessionId);
+			const oldText = final.events
+				.slice(migrated.events.length)
+				.filter(
+					(event) =>
+						event.type === "text.delta" &&
+						String(event.data["text"]).includes("upgrade-long-turn"),
+				);
+			expect(oldText.length).toBeGreaterThan(0);
+			expect(
+				oldText.every(
+					(event) => event.metadata["runId"] === migratedTurn.run_id,
+				),
+			).toBe(true);
+		}
 		evidence["criteria"] = {
 			realMainRunner: "passed",
 			midTurnUpgrade: "passed",
