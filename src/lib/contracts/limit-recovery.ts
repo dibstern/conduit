@@ -56,6 +56,19 @@ export class AccountUnavailable extends Schema.TaggedError<AccountUnavailable>()
 	}
 }
 
+export class AccountStillLimited extends Schema.TaggedError<AccountStillLimited>()(
+	"AccountStillLimited",
+	{
+		label: Schema.String,
+		/** Epoch milliseconds. */
+		until: Schema.Number,
+	},
+) {
+	get message() {
+		return `Claude still shows the ${this.label} until ${new Date(this.until).toUTCString()}.`;
+	}
+}
+
 export class DriverMismatch extends Schema.TaggedError<DriverMismatch>()(
 	"DriverMismatch",
 	{
@@ -82,6 +95,7 @@ export const ContinuationErrorSchema = Schema.Union([
 	SessionBusy,
 	StaleSwitch,
 	AccountUnavailable,
+	AccountStillLimited,
 	DriverMismatch,
 	HandoffTooLarge,
 ]);
