@@ -12,7 +12,7 @@
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { touch } from "../../utils/attention.js";
 	import { setSessionStatusFilter, type SessionStatusFilter } from "../../stores/session-scope.js";
-	import { setSettledShelfOpen, setSnoozedShelfOpen, uiState } from "../../stores/ui.svelte.js";
+	import { setDraftsTrayOpen, setSettledShelfOpen, setSnoozedShelfOpen, uiState } from "../../stores/ui.svelte.js";
 	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
 	import { toggleSessionRead } from "../../utils/session-read.js";
 	import { openSnoozePicker } from "../../stores/snooze-picker.svelte.js";
@@ -192,15 +192,37 @@
 
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 	<div id="session-list-scroller" class="flex-1 overflow-y-auto px-2 py-0.5" role="region" aria-label="Sessions" tabindex="0" onscroll={(event) => { heldSessionId = null; scrolled = event.currentTarget.scrollTop > 0; }}>
+		{#if drafts.length > 0}
+			<!-- Boxed so unsent drafts never read as sessions; collapsed, the header previews the newest. -->
+			<div class="my-1 rounded-[12px] border border-border bg-bg-surface p-[3px]" data-testid="drafts-tray">
+				<TextButton
+					tone="dimmer"
+					class="flex w-full items-center gap-1.5 min-h-[44px] md:min-h-0 rounded-[9px] px-2 py-1.5 text-xs font-semibold tracking-[0.3px] font-brand"
+					data-testid="drafts-tray-toggle"
+					aria-expanded={uiState.draftsTrayOpen}
+					aria-controls="drafts-tray-rows"
+					onclick={() => setDraftsTrayOpen(!uiState.draftsTrayOpen)}
+				>
+					<Icon name={uiState.draftsTrayOpen ? "chevron-down" : "chevron-right"} size={12} />
+					<Icon name="pencil-line" size={12} />
+					<span class="uppercase">Drafts</span>
+					<span class="font-medium tabular-nums">{drafts.length}</span>
+					{#if !uiState.draftsTrayOpen}
+						<span class="min-w-0 truncate font-normal tracking-normal">· {drafts[0]?.firstLine.trim() || "Untitled draft"}</span>
+					{/if}
+				</TextButton>
+				<div id="drafts-tray-rows">
+					{#if uiState.draftsTrayOpen}
+						{#each drafts as draft (draft.draftId)}
+							<DraftItem {draft} href={getDraftHref(draft.draftId, draft.projectSlug)} projectLabel={projectDisplayName(draft.projectSlug)} projectAccent={projectAccent(draft.projectSlug)} now={sessionState.now} active={route.page === "chat" && route.draftId === draft.draftId} onopen={() => navigate(getDraftHref(draft.draftId, draft.projectSlug))} ondiscard={() => discardDraft(draft)} />
+						{/each}
+					{/if}
+				</div>
+			</div>
+		{/if}
 		{#if arrangement.pinned.length > 0}
 			<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand"><span>Pinned</span>{" "}<span class="ml-auto font-medium">{fullArrangement.pinned.length}</span></div>
 			{#each arrangement.pinned as s (s.id)}{@render sessionRow(s)}{/each}
-		{/if}
-		{#if drafts.length > 0}
-			<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand"><span>Drafts</span>{" "}<span class="ml-auto font-medium">{drafts.length}</span></div>
-			{#each drafts as draft (draft.draftId)}
-				<DraftItem {draft} href={getDraftHref(draft.draftId, draft.projectSlug)} projectLabel={projectDisplayName(draft.projectSlug)} projectAccent={projectAccent(draft.projectSlug)} now={sessionState.now} active={route.page === "chat" && route.draftId === draft.draftId} onopen={() => navigate(getDraftHref(draft.draftId, draft.projectSlug))} ondiscard={() => discardDraft(draft)} />
-			{/each}
 		{/if}
 		{#if isEmpty && drafts.length === 0 && !sessionState.settled}
 			<!-- First load: session-shaped rows breathe in a top-to-bottom wave. -->
