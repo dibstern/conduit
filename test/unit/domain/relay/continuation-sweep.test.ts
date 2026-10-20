@@ -64,8 +64,6 @@ import {
 } from "../../../../src/lib/domain/relay/Services/services.js";
 import { SessionEventBusLive } from "../../../../src/lib/domain/relay/Services/session-event-bus.js";
 import {
-	decideInbox,
-	type InboxView,
 	providerSteers,
 	SessionInboxLive,
 	SessionInboxTag,
@@ -321,58 +319,6 @@ it("sweeps due continuations only for its own project in a shared store", async 
 		),
 	);
 });
-
-for (const delivery of ["queue", "steer"] as const) {
-	it(`the usage hold admits ${delivery} inputs and blocks Drain but not SendNow`, () => {
-		const request = { text: "wait" };
-		const view: InboxView = {
-			provider: "claude",
-			queued: [],
-			steering: false,
-			busy: false,
-			stoppedSinceHandoff: false,
-			limited: false,
-			usageResetsAt: 10,
-			scheduled: false,
-			known: false,
-			providerSteers: true,
-			promptOpen: false,
-			running: undefined,
-		};
-		const submitted = decideInbox("s1", view, {
-			_tag: "Submit",
-			inputId: "q1",
-			delivery,
-			request,
-		});
-		expect(submitted).toEqual({
-			_tag: "Accepted",
-			events: [
-				{
-					type: "input.admitted",
-					data: { sessionId: "s1", inputId: "q1", delivery, request },
-				},
-			],
-		});
-		const queued = { ...view, queued: [{ inputId: "q1", request }] };
-		expect(decideInbox("s1", queued, { _tag: "Drain" })).toEqual({
-			_tag: "Accepted",
-			events: [],
-		});
-		// Send now / Resume is the user's explicit call, so the hold yields to it.
-		expect(
-			decideInbox("s1", queued, { _tag: "SendNow", inputId: "q1" }),
-		).toMatchObject({ handoff: { inputId: "q1" } });
-		expect(
-			decideInbox("s1", queued, { _tag: "Cancel", inputId: "q1" }),
-		).toEqual({
-			_tag: "Accepted",
-			events: [
-				{ type: "input.cancelled", data: { sessionId: "s1", inputId: "q1" } },
-			],
-		});
-	});
-}
 
 const resetInboxFixture = Effect.gen(function* () {
 	const commit = yield* makeCommitAndSignal;
@@ -859,19 +805,43 @@ for (const schedule of [
 						yield* TestClock.setTime(10_000);
 						if (schedule === "cut-off")
 							reading = usageReading("claude", { status: "available" });
-						if (schedule === "busy")
+						if (schedule === "busy") {
+							yield* fixture.sweep;
+							expect(fixture.dispatches).toEqual([]);
+							expect(
+								(yield* fixture.read.listSessionInfos({
+									projectIds: ["test-project"],
+								}))[0]?.limitRecovery?.scheduledAt,
+							).toBe(10);
 							yield* fixture.commit([
 								canonicalEvent("session.status", "s1", {
 									sessionId: "s1",
 									status: "idle",
 								}),
 							]);
+						}
 						yield* fixture.sweep;
 						if (schedule === "later-stopped") {
 							yield* Effect.yieldNow.pipe(Effect.repeat(Schedule.recurs(10)));
 							expect(fixture.dispatches).toEqual([]);
 							return;
 						}
+						const resumes = (yield* fixture.store.readAllBySession(
+							"s1",
+						)).filter((event) => event.type === "session.resumed");
+						expect(resumes).toMatchObject([
+							{ data: { reason: "reset", instanceId: "claude" } },
+						]);
+						expect(
+							(yield* fixture.store.readAllBySession("s1")).filter(
+								(event) => event.metadata.source === "inbox-reset",
+							),
+						).toEqual([]);
+						expect(
+							(yield* fixture.read.listSessionInfos({
+								projectIds: ["test-project"],
+							}))[0]?.resumes,
+						).toMatchObject([{ reason: "reset", instanceId: "claude" }]);
 						if (cutOff) {
 							expect(fixture.dispatches).toEqual(["resume"]);
 							expect(yield* fixture.next).toBe("resume");
@@ -976,7 +946,7 @@ for (const scenario of [
 						yield* continuation.cancelContinuation("s1");
 						break;
 					case "dismissed":
-						yield* sql`UPDATE sessions SET limit_recovery = json_remove(limit_recovery, '$.cutOffMessageId') WHERE id = 's1'`;
+						yield* continuation.dismissCutOff("s1");
 						break;
 					case "answered":
 						yield* commit([
@@ -1077,6 +1047,7 @@ for (const scenario of [
 				if (
 					scenario === "future" ||
 					scenario === "cancelled" ||
+					scenario === "dismissed" ||
 					scenario === "answered"
 				)
 					expect(events).toEqual([]);

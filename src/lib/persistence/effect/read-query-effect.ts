@@ -781,8 +781,8 @@ export interface ReadQueryEffect {
 	/**
 	 * The session's inbox facts, computed on read. A queue is paused while
 	 * inputs wait behind a turn stopped or failed since the latest handoff,
-	 * or behind a usage limit's open cut-off; the next handoff, or the
-	 * cut-off's reply or dismissal, un-pauses it. `version` is the session row's, which
+	 * or behind a Limit Recovery. A Resume lifts a hold admitted after the
+	 * latest Stop; a later Stop still wins. `version` is the session row's, which
 	 * every turn end, prompt and pending-input write stamps. Undefined for a
 	 * session that has never held an input, which has no queue to pause and no
 	 * turn to steer into.
@@ -2424,7 +2424,17 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						(SELECT MAX(requested_at) FROM provider_command_outbox
 							WHERE session_id = ${sessionId} AND effect_type = 'send_turn'),
 						(SELECT MAX(requested_at) FROM turns WHERE session_id = ${sessionId}),
-						0))
+						0)) AND NOT EXISTS (
+					SELECT 1 FROM events admitted JOIN events resumed
+						ON resumed.session_id = admitted.session_id
+					WHERE admitted.session_id = ${sessionId} AND admitted.type = 'input.admitted'
+						AND (resumed.type = 'session.resumed'
+							OR (resumed.type = 'session.resume_cancelled'
+								AND json_extract(resumed.metadata, '$.source') = 'inbox-reset'))
+						AND resumed.sequence > admitted.sequence
+						AND admitted.sequence > COALESCE((SELECT MAX(sequence) FROM events
+							WHERE session_id = ${sessionId}
+							AND type IN ('turn.interrupted', 'turn.error')), 0))
 					OR EXISTS (SELECT 1 FROM events requeued WHERE session_id = ${sessionId}
 						AND type = 'input.requeued' AND json_extract(data, '$.reason') = 'failed'
 						AND sequence = (SELECT MIN(first.sequence) FROM events first
@@ -2434,10 +2444,15 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							WHERE sent.session_id = ${sessionId} AND sent.type = 'input.sent'
 							AND json_extract(sent.data, '$.inputId') = json_extract(requeued.data, '$.inputId'))
 						AND sequence > COALESCE((SELECT MAX(sequence) FROM events
-							WHERE session_id = ${sessionId} AND (type = 'input.sent'
+							WHERE session_id = ${sessionId} AND (type IN ('input.sent', 'session.resumed')
 								OR (type = 'session.resume_cancelled'
 									AND json_extract(metadata, '$.source') = 'inbox-reset'))), 0))
-					OR json_extract(limit_recovery, '$.cutOffMessageId') IS NOT NULL) AS paused,
+					OR json_extract(limit_recovery, '$.cutOffMessageId') IS NOT NULL
+					OR (NOT json_extract(limit_recovery, '$.continued')
+						AND COALESCE((SELECT MAX(sequence) FROM events
+							WHERE session_id = ${sessionId} AND type = 'session.resume_scheduled'), 0)
+							> COALESCE((SELECT MAX(sequence) FROM events
+								WHERE session_id = ${sessionId} AND type = 'session.cut_off_dismissed'), 0))) AS paused,
 				EXISTS (SELECT 1 FROM pending_approvals
 					WHERE session_id = ${sessionId} AND status = 'pending') AS prompt_open
 			FROM sessions WHERE id = ${sessionId}
