@@ -3,7 +3,7 @@
 // startup hangs beyond five seconds; timed-out resources leak; failures escape.
 // Failover failures: saved order is ignored or stale; excluded/removed accounts
 // are read; duplicate order entries repeat reads; limited/unavailable wins;
-// unknown is skipped or configured accounts missing from the order are lost.
+// unknown/stale readings win or configured accounts missing from the order are lost.
 // Sampling failures: idle services read; subscribing loses the current snapshot;
 // subscribers each start a sampler; one unsubscribe stops other subscribers;
 // turn-end bursts duplicate reads or leave full accounts unread without viewers;
@@ -479,7 +479,7 @@ it.effect("treats a harness without a reader as unavailable", () =>
 );
 
 it.effect(
-	"picks cached accounts in the live saved order and allows unknown",
+	"picks proven-free accounts in the live saved order and skips unknown",
 	() =>
 		Effect.gen(function* () {
 			const order = yield* Ref.make([
@@ -516,24 +516,74 @@ it.effect(
 					{ id: "account-2", harness: "claude" },
 					{ id: "account-3", harness: "claude" },
 					{ id: "account-4", harness: "claude" },
+					{ id: "account-5", harness: "claude" },
 				]),
 				order: Ref.get(order),
 				readers: { claude: reader },
 			});
-			expect(yield* service.pickFailover("account-1")).toBe("account-2");
-			expect(read).toEqual(["account-4", "account-3", "account-2"]);
+			expect(yield* service.pickFailover("account-1")).toBe("account-5");
+			expect(read).toEqual([
+				"account-4",
+				"account-3",
+				"account-2",
+				"account-5",
+			]);
 			read.length = 0;
 			yield* Ref.set(order, ["account-1", "account-2"]);
 			expect(yield* service.pickFailover("account-3")).toBe("account-1");
 			expect(read).toEqual(["account-1"]);
 			read.length = 0;
 			yield* Ref.set(order, ["account-3", "account-3"]);
-			expect(yield* service.pickFailover("account-1")).toBe("account-2");
+			expect(yield* service.pickFailover("account-1")).toBe("account-5");
 			expect(read).toEqual([]);
 			yield* TestClock.adjust("30 seconds");
-			expect(yield* service.pickFailover("account-1")).toBe("account-2");
-			expect(read).toEqual(["account-3", "account-2"]);
+			expect(yield* service.pickFailover("account-1")).toBe("account-5");
+			expect(read).toEqual([
+				"account-3",
+				"account-2",
+				"account-4",
+				"account-5",
+			]);
 		}),
+);
+
+it.effect("never picks unknown or stale accounts for failover", () =>
+	Effect.gen(function* () {
+		let failed = false;
+		const service = yield* makeUsage({
+			accounts: Effect.succeed([
+				{ id: "current", harness: "claude" },
+				{ id: "unknown", harness: "claude" },
+				{ id: "stale", harness: "claude" },
+				{ id: "ready", harness: "claude" },
+			]),
+			order: Effect.succeed(["unknown", "stale", "ready"]),
+			readers: {
+				claude: {
+					read: (account) =>
+						Effect.suspend(() =>
+							account.id === "unknown"
+								? Effect.succeed<UsageRead>({ status: "unknown", windows: [] })
+								: failed && account.id === "stale"
+									? Effect.fail(new Error("Usage read failed"))
+									: Effect.succeed<UsageRead>({
+											status: "available",
+											windows: [{ kind: "five_hour", utilization: 20 }],
+										}),
+						),
+				},
+			},
+		});
+		yield* service.refresh({ maxAge: 0 });
+		failed = true;
+		yield* service.refresh({ accountIds: ["stale"], maxAge: 0 });
+		expect(yield* service.latest("stale")).toMatchObject({
+			status: "available",
+			stale: true,
+		});
+		expect(yield* service.pickFailover("current")).toBe("ready");
+		expect(yield* service.pickFailover("ready")).toBe("current");
+	}),
 );
 
 it.effect(

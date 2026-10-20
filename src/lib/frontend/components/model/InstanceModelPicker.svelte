@@ -160,7 +160,7 @@
 				return {
 					value: account.id,
 					label: accounts.nameOf(account.id),
-					locked: availability.kind === "limited" || (locked && account.id === selectedLogoInstanceId),
+					locked: availability.kind === "limited" || availability.kind === "signed-out" || (locked && account.id === selectedLogoInstanceId),
 					kind: "usage",
 					availability,
 				};

@@ -118,6 +118,10 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 			projectLimit(world.page, {
 				instanceId: "claude",
 				rateLimitType: "five_hour",
+				limitedAt:
+					(snapshot(world.page).find(
+						(reading) => reading.accountId === "claude",
+					)?.readAt ?? 0) - 1,
 				rearms: 0,
 				continued: false,
 				scheduledAt,
@@ -147,6 +151,10 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 						projectLimit(world.page, {
 							instanceId: row?.accountId ?? "",
 							rateLimitType: "five_hour",
+							limitedAt:
+								(snapshot(world.page).find(
+									(reading) => reading.accountId === row?.accountId,
+								)?.readAt ?? 0) - 1,
 							rearms: 0,
 							continued: false,
 							scheduledAt: Date.parse(resetsAt) / 1000,
@@ -404,6 +412,52 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "assert an account's unknown Usage Reading label",
+		match:
+			/^send menu account (\S+) offers Send now on (.+) with usage unknown$/,
+		run: async ({ world, match }) => {
+			const row = world.page
+				.getByTestId("composer-send-menu-account")
+				.and(world.page.locator(`[data-account="${match[1]}"]`));
+			await expect(
+				row.getByText(`Send now on ${match[2]}`, { exact: true }),
+			).toBeVisible();
+			await expect(row.getByText("usage unknown", { exact: true })).toHaveCSS(
+				"color",
+				await themeColour(world.page, "--color-text-dimmer"),
+			);
+		},
+	},
+	{
+		name: "publish a stale Usage Reading through the shared mock feed",
+		match: /^the mock usage reading for (\S+) becomes stale$/,
+		run: ({ world, match }) => {
+			const readings = snapshot(world.page).map((reading) =>
+				reading.accountId === match[1] ? { ...reading, stale: true } : reading,
+			);
+			const rpc = requireRpcControl(world.page);
+			rpc.setUsageReadings(readings);
+			rpc.setStubs({ QuotaForAccounts: () => readings });
+		},
+	},
+	{
+		name: "project a composer's Limit Recovery beside its Usage Reading",
+		match:
+			/^the session has a Limit Recovery recorded at (\S+) resetting at (\S+)$/,
+		run: ({ world, match }) => {
+			projectLimit(world.page, {
+				instanceId: "claude",
+				rateLimitType: "five_hour",
+				...(match[1] === "unknown"
+					? {}
+					: { limitedAt: Date.parse(match[1] ?? "") }),
+				resetsAt: Date.parse(match[2] ?? "") / 1000,
+				rearms: 0,
+				continued: false,
+			});
+		},
+	},
+	{
 		name: "assert the send menu footnote wraps under a border",
 		match: /^the send menu explains the account takeover$/,
 		run: async ({ world }) => {
@@ -487,7 +541,7 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 				QuotaForAccounts: () =>
 					readings.map((reading) =>
 						reading.accountId === "blocked"
-							? { ...reading, status: "limited" }
+							? accountReading("blocked", "Pro", [100, 9], now)
 							: reading,
 					),
 			});

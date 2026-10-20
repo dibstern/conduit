@@ -208,7 +208,7 @@ Examples:
   | desktop  | 48     | wk 48% |
   | phone    | 48     | wk 48% |
 
-Scenario Outline: limited, blocked and unread accounts are left out
+Scenario Outline: Account Limit leaves out full and signed-out accounts and labels unknown readings
   Given the viewport is a <viewport>
   And Usage settings have several Claude accounts in the limit state
   And the send menu also has limited and unread accounts
@@ -216,13 +216,98 @@ Scenario Outline: limited, blocked and unread accounts are left out
   When I type Check the next task into the composer
   And I open the composer send menu
   Then the send menu starts with selected Send at 3:13 pm on Personal
-  And the send menu account order is work, spare
+  And the send menu account order is missing, unknown, work, spare, unmeasured
+  And send menu account missing offers Send now on Missing with usage unknown
+  And send menu account unknown offers Send now on Unknown with usage unknown
   And the send menu explains the account takeover
 
 Examples:
   | viewport |
   | desktop  |
   | phone    |
+
+Scenario Outline: unknown Usage Readings are listed but automatic sends skip them
+  Given the viewport is a <viewport>
+  And Usage settings have several Claude accounts in the limit state
+  And the daemon's usage limits are auto-resume off, auto-switch on, order claude, work, spare
+  And the mock usage reading for work becomes <reading_state>
+  And the mock relay accepts send-menu switches
+  When I type Check the next task into the composer
+  Then the auto-switch send button reads <label> for spare
+  When I open the composer send menu
+  Then the send menu account order is work, spare
+  And send menu account work offers Send now on Work with usage unknown
+  And the send menu selects account spare
+  And the composer has sent no message or account switch
+  And the screen region visually matches <baseline> at <threshold> percent
+  When I dismiss the composer send menu
+  And I send the switch-bound message with the button
+  Then the ContinueSession RPC switches the current session from claude to spare
+  And the composer submits Check the next task after switching to spare
+
+Examples:
+  | viewport | reading_state | label         | baseline                          | threshold |
+  | desktop  | unknown       | Send on Spare | composer-send-menu-unknown-desktop | 98        |
+  | phone    | unknown       | Spare         | composer-send-menu-unknown-phone   | 98        |
+  | desktop  | missing       | Send on Spare | composer-send-menu-unknown-desktop | 98        |
+  | desktop  | stale         | Send on Spare | composer-send-menu-unknown-desktop | 98        |
+
+Scenario Outline: unknown usage is used only after the user picks that account
+  Given the viewport is a <viewport>
+  And Usage settings have several Claude accounts in the limit state
+  And the daemon's usage limits are auto-resume off, auto-switch <auto_switch>, order claude, work, spare
+  And the mock usage reading for work becomes unknown
+  And the mock usage reading for spare becomes unavailable
+  And the mock relay accepts send-menu switches
+  When I type Check the next task into the composer
+  Then the composer send mode is at-reset
+  And the reset send control announces Send at 3:13 pm
+  When I open the composer send menu
+  Then the send menu account order is work
+  And send menu account work offers Send now on Work with usage unknown
+  And the send menu starts with selected Send at 3:13 pm on Personal
+  When I choose Send now on work
+  Then the auto-switch send button reads <label> for work
+  And the composer has sent no message or account switch
+  When I send the switch-bound message with <method>
+  Then the ContinueSession RPC switches the current session from claude to work
+  And the composer submits Check the next task after switching to work
+
+Examples:
+  | viewport | auto_switch | label        | method       |
+  | desktop  | on          | Send on Work | the button   |
+  | desktop  | off         | Send on Work | the keyboard |
+  | phone    | on          | Work         | the button   |
+
+Scenario Outline: the account switcher offers unknown usage and rejects signed-out accounts
+  Given the viewport is a <viewport>
+  And Usage settings have several Claude accounts in the limit state
+  And the mock usage reading for work becomes <reading_state>
+  And the mock usage reading for spare becomes unavailable
+  When the session hits the five_hour limit on claude resetting at 2026-01-01T15:13:00Z
+  And I open Switch account on the usage limit strip
+  Then the account picker row for Work reads usage unknown and can be picked
+  And the account picker row for Spare reads unavailable and cannot be picked
+  And the composer has sent no message or account switch
+
+Examples:
+  | viewport | reading_state |
+  | desktop  | unknown       |
+  | phone    | missing       |
+  | desktop  | stale         |
+
+Scenario Outline: the reset choice uses the Usage Reading taken after the Limit Recovery
+  Given the viewport is a desktop
+  And Usage settings have several Claude accounts in the limit state
+  When the session has a Limit Recovery recorded at <limited_at> resetting at 2026-01-01T17:00:00Z
+  Then the composer send mode is <mode>
+  And the composer placeholder reads <placeholder>
+
+Examples:
+  | limited_at           | mode     | placeholder                     |
+  | 2026-01-01T14:22:00Z | at-reset | Message Claude… sends at 3:13 pm |
+  | 2026-01-01T14:24:00Z | normal   | Reply to Claude…                |
+  | unknown             | normal   | Reply to Claude…                |
 
 Scenario Outline: choosing the reset row changes the button and committing queues the Held Message
   Given the viewport is a <viewport>
@@ -356,6 +441,7 @@ Scenario Outline: auto-switch falls back to reset when the other accounts have n
   And Usage settings have several Claude accounts in the limit state
   And the daemon's usage limits are auto-resume off, auto-switch on, order claude, work, spare
   And the mock usage reading for work becomes limited
+  And the mock usage window five_hour for work is 100 percent resetting at 2026-01-01T15:13:00Z
   And the mock usage reading for spare becomes unavailable
   When I type Check the next task into the composer
   Then the composer send mode is at-reset
@@ -396,10 +482,10 @@ Scenario Outline: an account pick falls back to the unpicked mode when its accou
   And I open the composer send menu
   And I choose Send now on spare
   Then the auto-switch send button reads <picked_label> for spare
-  When the mock usage reading for spare becomes limited
+  When the mock usage window five_hour for spare is 100 percent resetting at 2026-01-01T15:13:00Z
   Then the composer send mode is <fallback_mode>
   And the composer commit button announces <fallback_label>
-  When the mock usage reading for spare becomes available
+  When the mock usage window five_hour for spare is 12 percent resetting at 2026-01-01T15:13:00Z
   Then the composer send mode is <fallback_mode>
   And the composer commit button announces <fallback_label>
   And the composer still holds Check the next task
@@ -420,11 +506,13 @@ Scenario Outline: an account pick falls back to ordinary Send when the current a
   And I choose Send now on work
   Then the composer send mode is switch
   When the mock usage reading for claude becomes available
+  And the mock usage window five_hour for claude is 0 percent resetting at 2026-01-01T15:13:00Z
   Then the composer send mode is normal
   And the composer has a plain Send button
   And the composer send menu trigger is absent
   And the composer has sent no message or account switch
   When the mock usage reading for claude becomes limited
+  And the mock usage window five_hour for claude is 100 percent resetting at 2026-01-01T15:13:00Z
   Then the composer send mode is at-reset
   And the reset send control announces Send at 3:13 pm
 
@@ -442,9 +530,11 @@ Scenario: a reset pick is forgotten when the limit clears
   And I choose Send at reset with the pointer
   Then the reset send control announces Send at 3:13 pm
   When the mock usage reading for claude becomes available
+  And the mock usage window five_hour for claude is 0 percent resetting at 2026-01-01T15:13:00Z
   Then the composer send mode is normal
   And the composer has a plain Send button
   When the mock usage reading for claude becomes limited
+  And the mock usage window five_hour for claude is 100 percent resetting at 2026-01-01T15:13:00Z
   Then the auto-switch send button reads Send on Work for work
   And the composer has sent no message or account switch
 
