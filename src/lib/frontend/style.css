@@ -46,6 +46,11 @@
 	--color-selection: #202024;
 	--color-hover: rgba(255, 255, 255, 0.06);
 	--color-chip: rgba(255, 255, 255, 0.07);
+	/* Activity strip fills from the approved turn design. */
+	--color-seg: #55555d;
+	--color-seg-dim: #2e2e34;
+	--color-seg-edit: #d9a521;
+	--color-seg-fail: #ff4f73;
 	--color-text: #ededf0;
 	--color-text-secondary: #a1a1aa;
 	--color-text-muted: #a1a1aa;
@@ -270,6 +275,10 @@
 	--color-selection: #ececef;
 	--color-hover: rgba(0, 0, 0, 0.045);
 	--color-chip: rgba(0, 0, 0, 0.05);
+	--color-seg: #b9b9c1;
+	--color-seg-dim: #e3e3e8;
+	--color-seg-edit: #e0a800;
+	--color-seg-fail: #ff3b62;
 	--color-text: #0b0b0d;
 	--color-text-secondary: #5d5d66;
 	--color-text-muted: #5d5d66;

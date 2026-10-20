@@ -43,6 +43,38 @@ type Story = StoryObj<typeof meta>;
 /** Counts and duration stay in the head; the bill lives in its hover and log. */
 export const Settled: Story = {
 	args: { turn: settled, segment: settledSegment, final: true },
+	play: async ({ canvasElement }) => {
+		const parts = settledSegment.activity;
+		const paints = [
+			[
+				parts.find((part) => part.type === "tool" && part.name === "Edit"),
+				"--color-seg-edit",
+			],
+			[
+				parts.find((part) => part.type === "tool" && part.status === "error"),
+				"--color-seg-fail",
+			],
+			[
+				parts.find((part) => part.type === "tool" && part.name === "Read"),
+				"--color-seg",
+			],
+			[parts.find((part) => part.type === "thinking"), "--color-seg-dim"],
+		] as const;
+		for (const [part, token] of paints) {
+			if (!part) throw new Error(`Missing fixture for ${token}`);
+			const segment = canvasElement.querySelector(
+				`[data-step-id="${part.uuid}"]`,
+			);
+			if (!segment) throw new Error(`Missing segment ${part.uuid}`);
+			const style = getComputedStyle(segment);
+			const expected = new Option().style;
+			expected.backgroundColor = style.getPropertyValue(token);
+			await expect(expected.backgroundColor).not.toBe("");
+			await expect(style.backgroundColor).toBe(expected.backgroundColor);
+			await expect(style.opacity).toBe("1");
+			await expect(segment.getBoundingClientRect().height).toBe(4);
+		}
+	},
 };
 
 export const SettledLight: Story = { ...Settled, globals: { theme: "light" } };

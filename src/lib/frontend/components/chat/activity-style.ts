@@ -14,44 +14,36 @@ export interface PartStyle {
 	/** Foreground class, for the row icon. */
 	text: string;
 	/** Semantic paint chosen by the timeline primitive. */
-	tone:
-		| "muted"
-		| "secondary"
-		| "thinking"
-		| "success"
-		| "agent"
-		| "error"
-		| "compaction"
-		| "live";
+	tone: "neutral" | "dim" | "edit" | "fail" | "compaction" | "live";
 }
 
 const CATEGORY_STYLE: Record<ToolCategory, PartStyle> = {
-	explore: { icon: "search", text: "text-text-muted", tone: "muted" },
+	explore: { icon: "search", text: "text-text-muted", tone: "neutral" },
 	edit: {
 		icon: "pencil",
 		text: "text-text-secondary",
-		tone: "secondary",
+		tone: "edit",
 	},
-	shell: { icon: "terminal", text: "text-text", tone: "secondary" },
-	fetch: { icon: "external-link", text: "text-success", tone: "success" },
+	shell: { icon: "terminal", text: "text-text", tone: "neutral" },
+	fetch: { icon: "external-link", text: "text-success", tone: "neutral" },
 	task: {
 		icon: "git-fork",
 		text: "text-harness-claude",
-		tone: "agent",
+		tone: "neutral",
 	},
-	other: { icon: "settings-2", text: "text-text-muted", tone: "muted" },
+	other: { icon: "settings-2", text: "text-text-muted", tone: "neutral" },
 };
 
 const THINKING_STYLE: PartStyle = {
 	icon: "brain",
 	text: "text-thinking",
-	tone: "thinking",
+	tone: "dim",
 };
 
 const TEXT_STYLE: PartStyle = {
 	icon: "message-square",
 	text: "text-text-secondary",
-	tone: "muted",
+	tone: "dim",
 };
 
 /** Full contrast, so the seam reads as a cut through the strip rather than work. */
@@ -100,7 +92,7 @@ export function segmentAppearance(
 ): { tone: PartStyle["tone"]; running: boolean } {
 	if (part.type === "tool") {
 		if (part.status === "error" || part.isError)
-			return { tone: "error", running: false };
+			return { tone: "fail", running: false };
 		const taskId = part.metadata?.["providerTaskId"];
 		if (
 			typeof taskId === "string" && part.metadata?.["backgrounded"] === true

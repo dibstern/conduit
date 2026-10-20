@@ -209,16 +209,12 @@
 		{#snippet child({ props })}
 			{@render trigger({ props })}
 		{/snippet}
-	</BitsPopover.Trigger>
-
-	{#if sheet && open && sheetEl && sheetScrim?.portalTo !== undefined}
+	</BitsPopover.Trigger>{#if sheet && open && sheetEl && sheetScrim?.portalTo !== undefined}
 		<!-- Register after the modal boundary so the scrim remains interactive. -->
 		<BitsPopover.Portal to={sheetScrim.portalTo}>
 			{@render scrim()}
 		</BitsPopover.Portal>
-	{/if}
-
-	<BitsPopover.Portal {...portalProps}>
+	{/if}<BitsPopover.Portal {...portalProps}>
 		{#if sheet}
 			{#if open && (!modal || sheetEl) && sheetScrim?.portalTo === undefined}{@render scrim()}{/if}
 			<BitsPopover.ContentStatic {...sheetContentProps} bind:ref={sheetEl}>

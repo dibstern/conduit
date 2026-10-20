@@ -49,7 +49,7 @@
 	</Button>
 	{#if peek}
 		<Button variant="ghost" size="content" tone="inherit" hoverFill="none" class="peek {peekAbove ? 'peek-above' : ''}" style="left:{peekLeft}px; --caret:{caretLeft}px" data-testid="surfacing-minimised-peek" data-ordinal={peek.number} onclick={() => { if (peek) onopen(peek); }}>
-			<span style:color={peek.colour}>{peek.glyph}</span><b>#{peek.number ?? "?"}</b><span class="peek-text">{peek.part.rawText.replace(/\s+/g, " ")}</span><small>Click to open</small>
+			<span style:color={peek.colour ?? "var(--color-text-dimmer)"}>{peek.glyph}</span><b>#{peek.number ?? "?"}</b><span class="peek-text">{peek.part.rawText.replace(/\s+/g, " ")}</span><small>Click to open</small>
 		</Button>
 	{/if}
 </div>

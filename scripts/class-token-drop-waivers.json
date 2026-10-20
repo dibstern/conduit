@@ -1037,5 +1037,13 @@
 	"src/lib/frontend/components/layout/SessionBar.svelte :: border-border,size-[6px],text-[10px]": "Header audit header-05/header-17: use the Final subtle divider and a 7px connection dot with the mono connection recipe; story measurements guard the intended replacements.",
 	"src/lib/frontend/components/layout/ViewsRail.svelte :: bg-bg-surface,border-border,right-1,top-1,w-[38px]": "Header audit header-12: the Final rail is 44px on sidebar-bg with a subtle border, 32px accent toggles and 15px badges at top -3px/right -4px.",
 	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: border-border,min-h-[44px]": "Header audit header-08: the task row is 36px with the subtle border; each action retains its separate 44px pointer target.",
-	"src/lib/frontend/components/ui/Badge.svelte :: bg-accent-bg,bg-status-pinned/12,bg-status-snoozed/15,bg-success/14,h-[24px],text-accent,text-status-pinned,text-status-snoozed,text-success": "Header audit header-04/header-08: Final state chips use 16% fills and task chips are 22px. Theme ink tokens preserve contrast on the stronger light fills and retain the original dark ink."
+	"src/lib/frontend/components/ui/Badge.svelte :: bg-accent-bg,bg-status-pinned/12,bg-status-snoozed/15,bg-success/14,h-[24px],text-accent,text-status-pinned,text-status-snoozed,text-success": "Header audit header-04/header-08: Final state chips use 16% fills and task chips are 22px. Theme ink tokens preserve contrast on the stronger light fills and retain the original dark ink.",
+	"src/lib/frontend/components/ui/ActivityTimeline.svelte :: opacity-60": {
+		"renamedTo": "opacity-100",
+		"reason": "turn-01 restores the approved strip palette at full opacity; only an active emphasis set dims unrelated segments."
+	},
+	"src/lib/frontend/components/chat/TurnActivity.svelte :: min-h-[40px]": {
+		"renamedTo": "h-[38px]",
+		"reason": "turn-07 matches the Final phone summary row's 38px height; Button's touchTarget keeps the larger invisible hit area."
+	}
 }
