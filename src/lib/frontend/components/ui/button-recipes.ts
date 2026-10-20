@@ -592,7 +592,9 @@ const SIZE_CLASSES: Record<
  */
 const LAYOUT_CLASSES = {
 	center: "inline-flex items-center whitespace-nowrap select-none",
-	block: "flex items-center whitespace-nowrap select-none",
+	// A <button> sizes to its content even as a flex box, so cap it at its
+	// container or a nowrap label pushes it over its neighbours.
+	block: "flex max-w-full items-center whitespace-nowrap select-none",
 	baseline: "inline-flex items-baseline whitespace-nowrap select-none",
 	flow: "",
 } as const;

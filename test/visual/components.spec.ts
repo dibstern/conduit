@@ -520,6 +520,7 @@ if (stories.length > 0) {
 		["layout-sessionbar--desktop-goal-met-read", "mobile"],
 		["layout-sessionbar--desktop-goal-met-read-light", "mobile"],
 		["layout-sessionbar--desktop-goal-pursuing", "mobile"],
+		["layout-sessionbar--desktop-goal-long-condition", "mobile"],
 		["layout-sessionbar--desktop-goal-pursuing-light", "mobile"],
 		["layout-sessionbar--desktop-menu", "mobile"],
 		["layout-sessionbar--desktop-menu-light", "mobile"],
