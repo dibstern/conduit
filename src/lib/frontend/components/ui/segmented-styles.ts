@@ -49,17 +49,12 @@ export const SEGMENTED_VARIANTS = {
 		selected: "border-accent text-text",
 		unselected: "border-transparent text-text-muted hover:text-text",
 	},
-	/**
-	 * chat/DiffView's Unified/Split switch. The only variant whose unselected
-	 * hover moves a BORDER colour rather than a background, which is precisely
-	 * why ui/Button could never express it: `hoverFill` is a background union.
-	 */
+	/** Final's filled capsules, used for DiffView's Unified/Split switch. */
 	pill: {
-		list: "diff-toggle-bar flex items-center gap-1 px-3 py-1 mb-1",
-		item: "text-xs px-2 py-1 rounded border cursor-pointer font-sans transition-colors duration-100",
-		selected: "bg-accent/20 border-accent/40 text-accent font-medium",
-		unselected:
-			"bg-transparent border-border text-text-dimmer hover:text-text hover:border-border-subtle",
+		list: "diff-toggle-bar flex shrink-0 items-center gap-[2px] rounded-full bg-chip",
+		item: "relative flex h-[24px] items-center rounded-full px-[9px] text-[12px] font-medium cursor-pointer font-sans transition-colors duration-100 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-text before:absolute before:inset-x-0 before:top-1/2 before:-translate-y-1/2 before:content-[''] max-md:before:h-[44px]",
+		selected: "bg-accent/16 text-accent",
+		unselected: "text-text-muted hover:text-text",
 	},
 	/** Final settings segments: a chip track and raised neutral selection. */
 	joined: {

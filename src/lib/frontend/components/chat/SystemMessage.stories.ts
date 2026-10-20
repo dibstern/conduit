@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect } from "storybook/test";
 import {
 	mockSystemError,
 	mockSystemErrorWithDetails,
@@ -15,12 +16,25 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+const assertErrorFill: Story["play"] = async ({ canvasElement }) => {
+	const notice = canvasElement.querySelector(".system-notice");
+	if (!notice) throw new Error("Missing system notice");
+	const style = getComputedStyle(notice);
+	expect(style.boxShadow).toBe("none");
+	expect(style.borderLeftWidth).toBe("0px");
+	expect(style.backgroundColor).toMatch(/(?:,\s*|\/\s*)0\.14\)$/);
+	const expected = document.createElement("span").style;
+	expected.color = style.getPropertyValue("--color-error");
+	expect(style.color).toBe(expected.color);
+};
+
 export const Info: Story = {
 	args: { message: mockSystemInfo },
 };
 
 export const ErrorState: Story = {
 	args: { message: mockSystemError },
+	play: assertErrorFill,
 };
 
 export const WithDetails: Story = {
@@ -48,6 +62,7 @@ export const CompactionFailed: Story = {
 			compaction: "failed",
 		},
 	},
+	play: assertErrorFill,
 };
 
 export const SetupRunning: Story = {
@@ -85,6 +100,7 @@ export const SetupFailed: Story = {
 				"Installing dependencies\nError: dependency download failed\n",
 		},
 	},
+	play: assertErrorFill,
 };
 
 export const SetupTimedOut: Story = {
