@@ -32,7 +32,6 @@ import { EventStoreEffectTag } from "../../../persistence/effect/event-store-eff
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import {
 	type NativeThread,
-	nativeThreadKey,
 	ProviderStateEffectTag,
 } from "../../../persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
@@ -47,7 +46,7 @@ import {
 	readSideThreadForkBoundary,
 } from "../../../persistence/fork-history.js";
 import { sameClaudeLogin } from "../../../provider/claude/claude-sdk-env.js";
-import { forkClaudeTranscript } from "../../../provider/claude/claude-session-fork.js";
+import { CLAUDE_FORK_SOURCE_KEY } from "../../../provider/claude/claude-session-fork.js";
 import { cursorUpstreamAdapter } from "../../../provider/cursor/cursor-session-upstream.js";
 import { sideThreadPermissionRules } from "../../../provider/opencode-provider-instance.js";
 import {
@@ -888,9 +887,8 @@ const forkSessionInWorkspace = (
 					saveProviderState: undefined,
 				};
 			}
-			const { account: nativeAccount, config, sdk, state } = native;
-			const { historyMessageId, lastRewindCommitSequence, instanceIds } =
-				source;
+			const { account: nativeAccount, config, state } = native;
+			const { lastRewindCommitSequence, instanceIds } = source;
 			let selected:
 				| {
 						account: Extract<Account, { driver: "claude" }>;
@@ -937,60 +935,25 @@ const forkSessionInWorkspace = (
 				lastRewindCommitSequence <= thread.deliveredThrough
 					? thread
 					: undefined;
-			const claudeConfigDir = forkAccount.folder;
-			// The next launch workspace can differ from the native transcript's folder.
-			// Find the SDK id across the selected account's project directories.
-			const forked = parentThread
-				? yield* Effect.tryPromise({
-						try: () =>
-							forkClaudeTranscript(
-								{
-									parentSdkId: parentThread.resumeSessionId,
-									configDir: claudeConfigDir,
-									title,
-									...(historyMessageId !== undefined && {
-										messageId: historyMessageId,
-									}),
-									...(historyMessageId !== undefined && {
-										fallbackMessageIds: source.retained
-											.slice(
-												0,
-												source.retained.findIndex(
-													(message) => message.id === source.boundary.messageId,
-												),
-											)
-											.flatMap((message) =>
-												message.role === "assistant" ? [message.id] : [],
-											)
-											.reverse(),
-									}),
-								},
-								sdk.fork,
-							),
-						catch: (cause) =>
-							new SessionCommandError({
-								operation: "session.forked.upstream",
-								cause,
-								message: cause instanceof Error ? cause.message : String(cause),
-							}),
-					})
-				: { sdkSessionId: randomUUID() };
+			const id = randomUUID();
 			return {
-				id: forked.sdkSessionId,
+				id,
 				provider,
 				driver: "claude" as const,
 				pick,
-				providerSessionId: parentThread ? forked.sdkSessionId : undefined,
-				saveProviderState: (firstSequence: number, deliveredThrough: number) =>
+				providerSessionId: undefined,
+				// Preserve the native source selected for this cut. The child owns
+				// no Claude transcript until shared turn preparation launches it.
+				saveProviderState: () =>
 					parentThread
-						? state.saveUpdates(forked.sdkSessionId, [
+						? state.saveUpdates(id, [
 								{
-									key: nativeThreadKey(provider),
+									key: CLAUDE_FORK_SOURCE_KEY,
 									value: JSON.stringify({
-										configDir: claudeConfigDir,
-										resumeSessionId: forked.sdkSessionId,
-										firstSequence,
-										deliveredThrough,
+										instanceId: provider,
+										resumeSessionId: parentThread.resumeSessionId,
+										configDir: forkAccount.folder,
+										messageId: source.boundary.messageId,
 									}),
 								},
 							])
@@ -999,8 +962,8 @@ const forkSessionInWorkspace = (
 		});
 		const { id, provider, pick } = fork;
 		const forkPointEvent = source.boundary.messageId;
-		// A native cursor commits before the row is announced. Without one,
-		// prepareTurn hands off this child's bounded history on its first send.
+		// Persist the source and cut before announcing the child. Launch preparation
+		// resolves a native transcript or hands off the copied canonical history.
 		const boundary = yield* commitAndSignal.write((project) =>
 			Effect.gen(function* () {
 				yield* requireLiveCreationRefs({
@@ -1009,8 +972,7 @@ const forkSessionInWorkspace = (
 					provider,
 					...forkPlacement(parentSessionId, Boolean(side)),
 				});
-				// Native transcript creation can yield to source ingestion. Validate
-				// its exact cut again under the same transaction that copies rows.
+				// Validate the cut under the same transaction that copies rows.
 				const current = yield* readForkSource(parentSessionId, {
 					messageId: source.boundary.messageId,
 					sideThread: false,
@@ -1065,11 +1027,7 @@ const forkSessionInWorkspace = (
 				yield* inheritRead(parentSessionId, id).pipe(
 					Effect.provideService(SqlClient.SqlClient, sql.value),
 				);
-				if (fork.saveProviderState)
-					yield* fork.saveProviderState(
-						created[0]?.sequence ?? 0,
-						created.at(-1)?.sequence ?? 0,
-					);
+				if (fork.saveProviderState) yield* fork.saveProviderState();
 				// Ask applies before the row is announced, so no send can reach the
 				// Side Thread first.
 				if (side) yield* setPermissionMode(id, "ask");

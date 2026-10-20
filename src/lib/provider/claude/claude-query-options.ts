@@ -65,6 +65,9 @@ export function buildClaudeQueryOptions(
 		// user's settings defaultMode, which can be auto and skip conduit's asks.
 		permissionMode: toSdkPermissionMode(input.permissionMode ?? "ask"),
 		...(resumeSessionId ? { resume: resumeSessionId } : {}),
+		...(resumeSessionId && input.forkSession
+			? { forkSession: true, sessionId: input.sessionId }
+			: {}),
 		...(resumeSessionId && input.resumeSessionAt
 			? { resumeSessionAt: input.resumeSessionAt }
 			: {}),

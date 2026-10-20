@@ -14,7 +14,7 @@ import {
 	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
-import { expect, vi } from "vitest";
+import { beforeEach, expect, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { decodeProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { ResumePoint } from "../../../src/lib/contracts/ws-rpc.js";
@@ -75,7 +75,10 @@ import {
 	type CanonicalEvent,
 	canonicalEvent,
 } from "../../../src/lib/persistence/events.js";
-import { defaultClaudeSessionForkSdk } from "../../../src/lib/provider/claude/claude-session-fork.js";
+import {
+	CLAUDE_FORK_SOURCE_KEY,
+	defaultClaudeSessionForkSdk,
+} from "../../../src/lib/provider/claude/claude-session-fork.js";
 import {
 	type SessionInfo,
 	SessionInfoSchema,
@@ -95,6 +98,14 @@ const getSessionMessages = vi.spyOn(
 	"readTranscript",
 );
 const sdkForkSession = vi.spyOn(defaultClaudeSessionForkSdk, "forkSession");
+const claudeQuery = vi.fn(() => {
+	throw new Error("Unexpected Claude query");
+});
+beforeEach(() => {
+	getSessionMessages.mockClear();
+	sdkForkSession.mockClear();
+	claudeQuery.mockClear();
+});
 // A fresh temp-file persistence stack + the real SessionEventBus per test. The
 // shell source reads the sessions projection and nothing else, so what is under
 // test is a contract WITH the store: the version column the projectors stamp,
@@ -162,9 +173,7 @@ const makeShellTestLayer = (
 				slug: "test-project",
 				configDir: dir,
 				claudeSdk: {
-					query: () => {
-						throw new Error("Unexpected Claude query");
-					},
+					query: claudeQuery,
 					titleQuery: async function* () {},
 					fork: defaultClaudeSessionForkSdk,
 				},
@@ -435,7 +444,7 @@ describe("subscribeShell", () => {
 	}
 	for (const entry of ["command", "handler"] as const) {
 		it.effect(
-			`a new Claude fork through the ${entry} publishes lineage without containment and resumes the SDK child`,
+			`a new Claude fork through the ${entry} publishes lineage and saves its launch source without provider work`,
 			() => {
 				const api = makeMockOpenCodeAPI();
 				return Effect.gen(function* () {
@@ -485,12 +494,24 @@ describe("subscribeShell", () => {
 						_tag: "upsert",
 						item: { id: child.id, forkedFrom: "claude-parent" },
 					});
-					expect(sdkForkSession).toHaveBeenCalledWith(
-						"sdk-parent",
-						expect.objectContaining({ upToMessageId: "transcript-boundary" }),
-					);
-					expect(yield* state.nativeThread(child.id, "claude")).toMatchObject({
-						resumeSessionId: "sdk-child",
+					expect(child.id).toMatch(/^[0-9a-f-]{36}$/);
+					expect(sdkForkSession).not.toHaveBeenCalled();
+					expect(getSessionMessages).not.toHaveBeenCalled();
+					expect(claudeQuery).not.toHaveBeenCalled();
+					expect(yield* state.nativeThread(child.id, "claude")).toBeUndefined();
+					expect(
+						JSON.parse(
+							(yield* state.getState(child.id))[CLAUDE_FORK_SOURCE_KEY] ??
+								"null",
+						),
+					).toEqual({
+						instanceId: "claude",
+						resumeSessionId: "sdk-parent",
+						configDir: {
+							_tag: "Configured",
+							path: join(tmpdir(), "conduit-test-login"),
+						},
+						messageId: "ui-boundary",
 					});
 					expect(api.session.fork).not.toHaveBeenCalled();
 					expect(api.session.message).not.toHaveBeenCalled();
@@ -536,7 +557,7 @@ describe("subscribeShell", () => {
 			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 	it.effect(
-		"a Claude tip fork records the actual parent transcript boundary",
+		"a Claude tip fork retains its canonical cut and source for first launch",
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
@@ -570,10 +591,14 @@ describe("subscribeShell", () => {
 					fork_point_timestamp: 1000,
 					fork_point_message_id: "ui-tip",
 				});
-				expect(sdkForkSession).toHaveBeenCalledWith(
-					"sdk-parent",
-					expect.not.objectContaining({ dir: expect.any(String) }),
-				);
+				expect(sdkForkSession).not.toHaveBeenCalled();
+				expect(getSessionMessages).not.toHaveBeenCalled();
+				expect(claudeQuery).not.toHaveBeenCalled();
+				expect(
+					JSON.parse(
+						(yield* state.getState(child.id))[CLAUDE_FORK_SOURCE_KEY] ?? "null",
+					),
+				).toMatchObject({ resumeSessionId: "sdk-parent", messageId: "ui-tip" });
 			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 	// hk9m.7: the imported turns were the parent's to read, so the fork has no dot.
@@ -618,7 +643,7 @@ describe("subscribeShell", () => {
 		}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 	it.effect(
-		"rejects a Claude UI boundary that continues through tool rounds",
+		"rejects a Claude cut absent from persisted history without consulting transcript tool rounds",
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
@@ -664,10 +689,12 @@ describe("subscribeShell", () => {
 				);
 				expect(result._tag).toBe("Failure");
 				expect(sdkForkSession).not.toHaveBeenCalled();
+				expect(getSessionMessages).not.toHaveBeenCalled();
+				expect(claudeQuery).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 	it.effect(
-		"a Claude fork is not published if its resume state cannot be saved",
+		"a Claude fork is not published if its launch source cannot be saved",
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
@@ -690,16 +717,22 @@ describe("subscribeShell", () => {
 					sessionId: "unresumable-child",
 				});
 				const sql = yield* SqlClient.SqlClient;
-				yield* sql`CREATE TRIGGER reject_child_state BEFORE INSERT ON provider_state WHEN NEW.session_id = 'unresumable-child' BEGIN SELECT RAISE(ABORT, 'resume state unavailable'); END`;
+				yield* sql`CREATE TRIGGER reject_child_state BEFORE INSERT ON provider_state WHEN NEW.key = 'claude.forkSource' BEGIN SELECT RAISE(ABORT, 'fork source unavailable'); END`;
 				yield* commit([messageCreated("claude-parent", "api-tip", 1000)]);
 				const result = yield* Effect.result(forkSession("claude-parent"));
 				expect(result._tag).toBe("Failure");
-				const read = yield* ReadQueryEffectTag;
-				expect(yield* read.getSession("unresumable-child")).toBeUndefined();
+				expect(
+					yield* sql<{
+						count: number;
+					}>`SELECT COUNT(*) AS count FROM sessions WHERE forked_from = 'claude-parent'`,
+				).toEqual([{ count: 0 }]);
+				expect(sdkForkSession).not.toHaveBeenCalled();
+				expect(getSessionMessages).not.toHaveBeenCalled();
+				expect(claudeQuery).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 	it.effect(
-		"rejects a Claude fork whose transcript store differs from the SDK process",
+		"a Claude fork saves its account source without reading a conflicting daemon transcript store",
 		() =>
 			Effect.gen(function* () {
 				const configDir = mkdtempSync(join(tmpdir(), "claude-fork-config-"));
@@ -727,21 +760,24 @@ describe("subscribeShell", () => {
 				vi.mocked(getSessionMessages).mockClear();
 				vi.mocked(getSessionMessages).mockResolvedValue([]);
 				const config = yield* ConfigTag;
-				const result = yield* Effect.result(
-					forkSession("claude-parent", { messageId: "api-tip" }).pipe(
-						Effect.provideService(ConfigTag, { ...config, configDir }),
+				const child = yield* forkSession("claude-parent", {
+					messageId: "api-tip",
+				}).pipe(Effect.provideService(ConfigTag, { ...config, configDir }));
+				expect(
+					JSON.parse(
+						(yield* state.getState(child.id))[CLAUDE_FORK_SOURCE_KEY] ?? "null",
 					),
-				);
-				expect(result).toMatchObject({
-					_tag: "Failure",
-					failure: { message: expect.stringContaining("Claude transcript") },
-				});
-				expect(getSessionMessages).toHaveBeenCalledWith("sdk-parent", {
+				).toMatchObject({
+					resumeSessionId: "sdk-parent",
 					configDir: {
-						_tag: expect.stringMatching(/^(Configured|SdkDefault)$/),
-						path: expect.any(String),
+						_tag: "Configured",
+						path: join(tmpdir(), "conduit-test-login"),
 					},
+					messageId: "api-tip",
 				});
+				expect(getSessionMessages).not.toHaveBeenCalled();
+				expect(sdkForkSession).not.toHaveBeenCalled();
+				expect(claudeQuery).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 	for (const messageId of ["fork-message", undefined]) {

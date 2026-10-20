@@ -130,6 +130,9 @@ export const recoverClaudeRunnerCommands = (
 										text: input.prompt,
 										configDir: prepared.configDir,
 										resumeSessionId: prepared.resumeSessionId,
+										resumeSessionAt: prepared.resumeSessionAt,
+										forkSession: prepared.forkSession,
+										clearInheritedGoal: prepared.clearInheritedGoal,
 										startFreshNativeSession:
 											prepared.resumeSessionId === undefined ||
 											input.rewind !== undefined,

@@ -3,7 +3,7 @@
 // attention; a set-based copy producing a different transcript.
 import { Effect } from "effect";
 import { SqlClient, Statement } from "effect/sql";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../../src/lib/contracts/provider-instance.js";
 import { AccountDirectory } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
@@ -19,12 +19,14 @@ import { makeOverridesStateLive } from "../../../../src/lib/domain/relay/Service
 import { makeCommitAndSignal } from "../../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
+import { ProviderStateEffectTag } from "../../../../src/lib/persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../../../src/lib/persistence/effect/read-query-effect.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
 } from "../../../../src/lib/persistence/events.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
+import { CLAUDE_FORK_SOURCE_KEY } from "../../../../src/lib/provider/claude/claude-session-fork.js";
 import { claudeSdk } from "../../../helpers/fake-claude-process-sdk.js";
 import {
 	makeMockAccountDirectory,
@@ -138,6 +140,15 @@ const transcript = (rows: readonly unknown[], sessionId: string) =>
 	);
 
 it("copies a long Side Thread history in bounded statements with the same transcript", async () => {
+	const sdk = {
+		...claudeSdk,
+		query: vi.fn(claudeSdk.query),
+		fork: claudeSdk.fork && {
+			...claudeSdk.fork,
+			readTranscript: vi.fn(claudeSdk.fork.readTranscript),
+			forkSession: vi.fn(claudeSdk.fork.forkSession),
+		},
+	};
 	await Effect.runPromise(
 		Effect.gen(function* () {
 			const commit = yield* makeCommitAndSignal;
@@ -164,6 +175,10 @@ it("copies a long Side Thread history in bounded statements with the same transc
 				}),
 				...Array.from({ length: TURNS }, (_, n) => turn(n)).flat(),
 			]);
+			const state = yield* ProviderStateEffectTag;
+			yield* state.saveUpdates("parent", [
+				{ key: "resumeSessionId", value: "sdk-parent" },
+			]);
 
 			const shapes = new Map<string, number>();
 			const child = yield* forkSession("parent", {
@@ -185,6 +200,20 @@ it("copies a long Side Thread history in bounded statements with the same transc
 					.reduce((sum, [, n]) => sum + n, 0);
 
 			const copied = yield* store.readAllBySession(child.id);
+			expect(sdk.query).not.toHaveBeenCalled();
+			expect(sdk.fork?.forkSession).not.toHaveBeenCalled();
+			expect(sdk.fork?.readTranscript).not.toHaveBeenCalled();
+			expect(yield* state.nativeThread(child.id, "claude")).toBeUndefined();
+			expect(
+				JSON.parse(
+					(yield* state.getState(child.id))[CLAUDE_FORK_SOURCE_KEY] ?? "null",
+				),
+			).toEqual({
+				instanceId: "claude",
+				resumeSessionId: "sdk-parent",
+				configDir: configuredClaudeConfigDir("/unused-config"),
+				messageId: `reply-${TURNS - 1}`,
+			});
 			const sql = yield* SqlClient.SqlClient;
 			for (const [sessionId, inherited, userHumanSent] of [
 				["parent", 0, 1],
@@ -260,7 +289,7 @@ it("copies a long Side Thread history in bounded statements with the same transc
 				makeMockConfig({
 					projectDir: "/project",
 					configDir: "/unused-config",
-					claudeSdk,
+					claudeSdk: sdk,
 				}),
 			),
 			Effect.provideService(LoggerTag, makeMockLogger()),
