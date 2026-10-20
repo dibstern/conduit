@@ -2375,7 +2375,13 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		return Effect.gen({ self: this }, function* () {
 			const inputId = ctx.currentTurnId;
 			const acknowledgement = yield* Effect.try({
-				try: () => ctx.query.interrupt(),
+				try: () => {
+					const pending = ctx.query.interrupt();
+					// close() rejects an unanswered interrupt, and callers may fork or drop
+					// the acknowledgement. Unobserved, that rejection kills the runner.
+					pending.catch(() => {});
+					return pending;
+				},
 				catch: (cause) =>
 					new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 			});

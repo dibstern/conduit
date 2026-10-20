@@ -3578,7 +3578,8 @@ const VARIANTS = [
 		<p class="pitch">Each one: what the app does today, what changes, and its ticket. The drawings are the same ones Final · app uses.</p>`, render: renderNew },
 ];
 
-const SHOTS = "../../test/visual/components.spec.ts-snapshots/chat-messagelist--full-conversation";
+// The pre-redesign transcript, frozen: the live baselines now show the redesign.
+const SHOTS = "2026-10-16-chat-redesign-designs/today";
 const stage = document.getElementById("stage");
 const label = document.getElementById("label");
 const params = new URLSearchParams(location.search);
@@ -3592,7 +3593,7 @@ function draw() {
 		const title = `<div class="flabel t-${t}">${t === "dark" ? "Dark" : "Light"}</div>`;
 		return v.render
 			? `${title}<div class="${v.jev ? "jframe" : "frame"} t-${t} ${v.cls ?? `v${v.key.toLowerCase()}`} ${t}">${v.render()}</div>`
-			: `${title}<img class="today-img t-${t}" src="${SHOTS}${t === "light" ? "-light" : ""}-desktop-darwin.png" alt="Current ${t} transcript">`;
+			: `${title}<img class="today-img t-${t}" src="${SHOTS}-${t}.png" alt="Current ${t} transcript">`;
 	}).join("");
 	stage.innerHTML = `<div class="brief">${v.brief}</div>${frames}`;
 	label.textContent = v.label ?? (v.key === "today" ? "Today" : `${v.key} · ${v.name}`);
