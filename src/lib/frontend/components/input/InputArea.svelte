@@ -38,7 +38,7 @@
 	import PastePreview from "../chat/PastePreview.svelte";
 	import PendingInputTray from "./PendingInputTray.svelte";
 	import { openSideThreads } from "../session/side-threads.svelte.js";
-	import { currentChat, draftSend, isProcessing, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
+	import { currentChat, isProcessing, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
 	import { send, stop, turn as readTurn } from "../../stores/turn.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { approvals } from "../../stores/composer-settings.svelte.js";
@@ -714,9 +714,8 @@
 				}
 				draft = { ...payload, draftText: composerDraft.text, ...(draftNewWorktree ? { newWorktree: true } : {}) };
 				requestDraftPreWarm();
-				draftSend.message = { type: "user", uuid: crypto.randomUUID(), text: messageText, createdAt: Date.now() };
-				draftSend.sessionId = null;
 			}
+			let createdSessionId: string | null = null;
 			const unsentImages = pendingImages;
 			if (!isProcessing()) requestScrollOnNextContent();
 			steerRefusal = null;
@@ -733,10 +732,13 @@
 				...(imageUrls ? { images: imageUrls } : {}),
 				...(draft ? {
 					draft,
-					onCreated: (sessionId: string) => composerDraft.created(unsentDraft, sessionId),
+					onCreated: (sessionId: string) => {
+						createdSessionId = sessionId;
+						composerDraft.created(unsentDraft, sessionId);
+					},
 				} : { sessionId: sentFromSessionId! }),
 			});
-			const sentToSessionId = sentFromSessionId ?? draftSend.sessionId;
+			const sentToSessionId = sentFromSessionId ?? createdSessionId;
 			if (outcome.kind === "failed" || outcome.kind === "refused") {
 				if (composerDraft.sendFailed(unsentDraft, sentToSessionId, textOverride === undefined, outcome.kind === "failed" && outcome.alreadySent === true)) {
 					cursorPos = composerDraft.text.length;

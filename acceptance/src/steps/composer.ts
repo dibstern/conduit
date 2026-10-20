@@ -124,15 +124,19 @@ export const composerHandlers: StepHandler[] = [
 				throw new Error("Mock relay controls were not initialised");
 			}
 
-			await rpcControl.waitForRequest(
+			const request = await rpcControl.waitForRequest(
 				(request) =>
 					request.tag === "input.submit" && request.payload["text"] === message,
 			);
-			// Stand in for the adapter placing the sent message (the browser keeps
-			// no copy of its own), then finish the turn the send started, as the
+			// Stand in for the adapter placing the sent message, which replaces the
+			// browser's own copy, then finish the turn the send started, as the
 			// relay's done does.
 			await relayControl.sendMessages([
-				{ type: "user_message", text: message },
+				{
+					type: "user_message",
+					text: message,
+					inputId: request.payload["inputId"],
+				},
 				{ type: "done", code: 0 },
 			]);
 		},

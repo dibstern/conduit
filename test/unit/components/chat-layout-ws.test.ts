@@ -144,7 +144,7 @@ vi.mock(
 vi.mock("../../../src/lib/frontend/stores/chat.svelte.js", () => ({
 	chatState: { streaming: false, processing: false, messages: [] },
 	clearMessages: vi.fn(),
-	draftSendIn: () => null,
+	localSendsIn: () => [],
 	registerClearMessagesHook: vi.fn(),
 }));
 

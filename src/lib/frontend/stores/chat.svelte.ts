@@ -417,18 +417,23 @@ export const historyState = $state({
 	loading: false,
 });
 
-/** A draft's first send, shown from the click until its new session places it.
- *  No session slot exists before the create lands, and a user message
- *  otherwise appears only once the server places it. */
-export const draftSend = $state<{
-	message: UserMessage | null;
-	/** The created session; null while the create is in flight. */
-	sessionId: string | null;
-}>({ message: null, sessionId: null });
+export type LocalSend = {
+	/** Null while a draft's create is in flight: the draft pane shows it. */
+	readonly sessionId: string | null;
+	readonly message: UserMessage;
+	/** A draft's first send: it starts its session, so the pane begins with it. */
+	readonly opensSession: boolean;
+};
 
-/** The first send to show in a pane: `null` names the draft itself. */
-export function draftSendIn(sessionId: string | null): UserMessage | null {
-	return draftSend.sessionId === sessionId ? draftSend.message : null;
+/** Sends shown from the click until the server places them, by input id.
+ *  A user message otherwise appears only once the server places it. */
+export const localSends = new SvelteMap<string, LocalSend>();
+
+/** The sends to show in a pane: `null` names the draft itself. */
+export function localSendsIn(sessionId: string | null): LocalSend[] {
+	return [...localSends.values()].filter(
+		(send) => send.sessionId === sessionId,
+	);
 }
 
 // Compatibility exports for transport consumers and the build-reload contract.
