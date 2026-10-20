@@ -509,7 +509,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 						Layer.succeed(Usage, {
 							readings: Stream.empty,
 							latest: () => Effect.succeed(undefined),
-							refresh: () => Effect.succeed([]),
+							refresh: (_options) => Effect.succeed([]),
 							turnEnded: () => Effect.void,
 							pickFailover: () =>
 								Effect.succeed(

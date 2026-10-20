@@ -325,7 +325,7 @@ for (const scenario of [
 							readings: Stream.empty,
 							latest: () => Effect.succeed(undefined),
 							turnEnded: () => Effect.void,
-							refresh: () =>
+							refresh: (_options) =>
 								Effect.gen(function* () {
 									probes++;
 									if ("duringProbe" in scenario) {

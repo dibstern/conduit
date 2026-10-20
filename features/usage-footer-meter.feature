@@ -42,6 +42,23 @@ Scenario: a live reading updates the existing footer
   And the usage footer claude five_hour meter is warning at 86 percent
   And the SubscribeUsage RPC has no project payload
 
+Scenario: usage values stay visible while tab focus re-reads them
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And a session already exists on the Claude harness
+  And the usage footer has one Claude account in the normal state
+  Then the single usage footer shows 5h 41% and Week 22%
+  Given the next tab focus usage reading is held
+  When I return to the conduit tab
+  Then tab focus has requested one usage re-read
+  And the single usage footer shows 5h 41% and Week 22%
+  And the usage footer claude five_hour meter is normal at 41 percent
+  When I return to the conduit tab
+  Then tab focus has requested one usage re-read
+  And the single usage footer shows 5h 41% and Week 22%
+  When the tab focus usage re-read completes with the warn5 reading
+  Then the single usage footer shows 5h 86% and Week 58%
+
 Scenario Outline: accounts follow auto-switch order inside their harness groups
   Given the conduit app is served with the connected mockup
   And the viewport is a desktop
