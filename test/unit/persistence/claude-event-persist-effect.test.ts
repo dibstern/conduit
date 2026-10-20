@@ -16,6 +16,139 @@ import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/p
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 
 describe("ClaudeEventPersistEffect session lifecycle", () => {
+	for (const deadRef of ["child", "parent"] as const) {
+		it.effect(`refuses subagent creation with a dead ${deadRef}`, () => {
+			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-born-dead-"));
+			const layer = makePersistenceEffectLayer(
+				join(dir, "events.db"),
+				"test-project",
+			);
+			return Effect.gen(function* () {
+				const eventStore = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const persist = yield* ClaudeEventPersistEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				yield* runner.recover();
+				const parentId = "born-dead-parent";
+				const childId = "born-dead-child";
+				const parent = yield* eventStore.append(
+					canonicalEvent("session.created", parentId, {
+						sessionId: parentId,
+						title: "Parent",
+						provider: "claude",
+					}),
+				);
+				yield* runner.projectEvent(parent);
+				yield* sql`UPDATE sessions SET model_id = 'sonnet', model_provider = 'claude',
+					variant = '', context_window = '' WHERE id = ${parentId}`;
+				const deletedId = deadRef === "child" ? childId : parentId;
+				if (deadRef === "child") {
+					yield* sql`INSERT INTO sessions
+						(id, project_id, provider, provider_sid, parent_id, title, status, created_at, updated_at)
+						VALUES (${childId}, 'test-project', 'claude', 'sdk-child', ${parentId}, 'Stale child', 'idle', 1, 1)`;
+				}
+				// Leave the row stale to prove the marker is the death authority.
+				yield* eventStore.append(
+					canonicalEvent("session.deleted", deletedId, {
+						sessionId: deletedId,
+					}),
+				);
+				const before =
+					yield* sql`SELECT event_id FROM events ORDER BY sequence`;
+
+				const result = yield* Effect.result(
+					persist.ensureClaudeSubagentSession({
+						childSessionId: childId,
+						parentSessionId: parentId,
+						providerSessionId: "sdk-child",
+						title: "Must stay dead",
+					}),
+				);
+
+				expect(result).toMatchObject({
+					_tag: "Failure",
+					failure: {
+						_tag: "ClaudeSessionLifecycleError",
+						operation: "ensureClaudeSubagentSession",
+						sessionId: deletedId,
+						role: `subagent-${deadRef}`,
+						reason: "missing-session",
+					},
+				});
+				expect(
+					yield* sql`SELECT event_id FROM events ORDER BY sequence`,
+				).toEqual(before);
+				if (deadRef === "parent")
+					expect(
+						yield* sql`SELECT id FROM sessions WHERE id = ${childId}`,
+					).toEqual([]);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
+			);
+		});
+	}
+
+	for (const method of ["persistEvent", "persistEvents"] as const) {
+		it.effect(`refuses ${method} creation from a dead fork source`, () => {
+			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-dead-source-"));
+			const layer = makePersistenceEffectLayer(
+				join(dir, "events.db"),
+				"test-project",
+			);
+			return Effect.gen(function* () {
+				const eventStore = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const persist = yield* ClaudeEventPersistEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				yield* runner.recover();
+				for (const id of ["existing-child", "dead-source"]) {
+					const created = yield* eventStore.append(
+						canonicalEvent("session.created", id, {
+							sessionId: id,
+							title: id,
+							provider: "claude",
+						}),
+					);
+					yield* runner.projectEvent(created);
+				}
+				yield* eventStore.append(
+					canonicalEvent("session.deleted", "dead-source", {
+						sessionId: "dead-source",
+					}),
+				);
+				const before =
+					yield* sql`SELECT event_id FROM events ORDER BY sequence`;
+				const event = canonicalEvent("session.created", "existing-child", {
+					sessionId: "existing-child",
+					title: "Must stay dead",
+					provider: "claude",
+					forkedFrom: "dead-source",
+				});
+				const result = yield* Effect.result(
+					method === "persistEvent"
+						? persist.persistEvent(event)
+						: persist.persistEvents([event]),
+				);
+
+				expect(result).toMatchObject({
+					_tag: "Failure",
+					failure: { _tag: "ClaudeSessionLifecycleError" },
+				});
+				expect(
+					yield* sql`SELECT event_id FROM events ORDER BY sequence`,
+				).toEqual(before);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
+			);
+		});
+	}
+
 	it.effect(
 		"reuses the user body while placing a fresh retry reservation exactly once",
 		() =>

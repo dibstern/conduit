@@ -10,6 +10,8 @@ import {
 	DROP_ACTIVITIES_MIGRATION,
 	DROP_EVENTS_SESSION_FK_MIGRATION,
 	DURABLE_PROVIDER_COMMANDS_MIGRATION,
+	EVENTS_FORKED_FROM_INDEX_MIGRATION,
+	EVENTS_PARENT_ID_INDEX_MIGRATION,
 	EVENTS_SESSION_TYPE_INDEX_MIGRATION,
 	EVENTS_UNSTAMPED_INDEX_MIGRATION,
 	FORK_POINT_TIMESTAMP_MIGRATION,
@@ -22,6 +24,7 @@ import {
 	MESSAGE_PART_VERSIONS_MIGRATION,
 	MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION,
 	MESSAGE_PARTS_FILE_TYPE_MIGRATION,
+	MESSAGE_PARTS_RESULT_EVENT_SEQ_INDEX_MIGRATION,
 	MESSAGE_TOMBSTONES_MIGRATION,
 	MESSAGES_BACKFILLED_MIGRATION,
 	MESSAGES_COMPLETED_AT_MIGRATION,
@@ -1413,7 +1416,16 @@ export const effectMigrationEntries = {
 	"0074_turn_recaps": executeSqlStatements(
 		readMigrationSql(TURN_RECAPS_MIGRATION),
 	),
-	"0075_provider_run_ownership": Effect.gen(function* () {
+	"0075_events_parent_id_index": executeSqlStatements(
+		readMigrationSql(EVENTS_PARENT_ID_INDEX_MIGRATION),
+	),
+	"0076_events_forked_from_index": executeSqlStatements(
+		readMigrationSql(EVENTS_FORKED_FROM_INDEX_MIGRATION),
+	),
+	"0077_message_parts_result_event_seq_index": executeSqlStatements(
+		readMigrationSql(MESSAGE_PARTS_RESULT_EVENT_SEQ_INDEX_MIGRATION),
+	),
+	"0078_provider_run_ownership": Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const columns = yield* sql<{ name: string }>`PRAGMA table_info(turns)`;
 		const alreadyOwned = columns.some(({ name }) => name === "run_id");

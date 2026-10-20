@@ -453,7 +453,10 @@ export const makeSessionProjector = defineProjector(() => ({
 				}>`UPDATE sessions SET last_turn_end_version = ${event.streamVersion}
 					WHERE id = ${event.sessionId} AND COALESCE(last_turn_end_version, -1) < ${event.streamVersion}
 					RETURNING id`;
-				return yield* stampSessions(ids(updated), ctx.version);
+				return {
+					...(yield* stampSessions(ids(updated), ctx.version)),
+					sidebar: ids(updated),
+				};
 			}
 			if (event.type === "turn.completed" && !terminal)
 				return { stamped: [], removed: [], collections: [] };
@@ -496,6 +499,13 @@ export const makeSessionProjector = defineProjector(() => ({
 				}
 			}
 
+			if (event.type === "session.created") {
+				for (const id of [event.data.parentId, event.data.forkedFrom]) {
+					if (id === undefined) continue;
+					const [row] = yield* sql`SELECT id FROM sessions WHERE id = ${id}`;
+					if (!row) return { stamped: [], removed: [], collections: [] };
+				}
+			}
 			const written: string[] = [];
 			// Families this event can take members from, which naming the
 			// sessions it wrote does not reach.
@@ -1766,7 +1776,7 @@ export const makeTurnProjector = defineProjector(() => ({
 					(id, session_id, state, user_message_id, requested_at, run_id, completed_at)
 					VALUES (${event.data.messageId}, ${event.sessionId}, ${run && !["pending", "running"].includes(run.status) ? run.status : "pending"}, ${event.data.messageId}, ${event.createdAt}, ${run?.id ?? runId ?? null}, ${run?.completed_at ?? null})
 					ON CONFLICT (id) DO UPDATE SET run_id = excluded.run_id, state = excluded.state,
-						started_at = NULL, completed_at = excluded.completed_at
+						started_at = NULL, completed_at = excluded.completed_at, assistant_message_id = NULL
 					WHERE excluded.run_id IS NOT NULL AND (turns.run_id IS NULL OR (
 						EXISTS (SELECT 1 FROM provider_runs prior WHERE prior.id = turns.run_id
 							AND prior.session_id = turns.session_id AND prior.status IN ('completed', 'error', 'interrupted'))
@@ -2011,7 +2021,12 @@ export const makeTurnProjector = defineProjector(() => ({
 				Effect.gen(function* () {
 					return mergeTouches([
 						yield* stampMessage(written.messages, ctx),
-						yield* stampSessions(written.sessions, ctx.version),
+						{
+							...(yield* stampSessions(written.sessions, ctx.version)),
+							sidebar: runTerminalStatus(event, event.provider)
+								? written.sessions
+								: [],
+						},
 					]);
 				}),
 			),
@@ -2137,7 +2152,8 @@ export const makeProviderProjector = defineProjector(() => ({
 				return owners(
 					yield* sql<OwnedRow>`
 						INSERT OR IGNORE INTO session_providers (id, session_id, provider, status, activated_at)
-						VALUES (${`${event.data.sessionId}:initial`}, ${event.data.sessionId}, ${event.data.provider}, 'active', ${event.createdAt})
+						SELECT ${`${event.data.sessionId}:initial`}, id, ${event.data.provider}, 'active', ${event.createdAt}
+						FROM sessions WHERE id = ${event.data.sessionId}
 						RETURNING session_id`,
 				);
 			}

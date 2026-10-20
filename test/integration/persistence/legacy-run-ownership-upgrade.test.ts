@@ -64,7 +64,7 @@ it.each([
 			Effect.gen(function* () {
 				yield* makeEffectSqlMigrator(
 					Object.fromEntries(
-						Object.entries(effectMigrationEntries).slice(0, 74),
+						Object.entries(effectMigrationEntries).slice(0, 77),
 					),
 				);
 				const sql = yield* SqlClient.SqlClient;

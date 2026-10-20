@@ -38,7 +38,10 @@ describe("Schema Migration", () => {
 					[72, "surfacing_marks"],
 					[73, "message_part_read"],
 					[74, "turn_recaps"],
-					[75, "provider_run_ownership"],
+					[75, "events_parent_id_index"],
+					[76, "events_forked_from_index"],
+					[77, "message_parts_result_event_seq_index"],
+					[78, "provider_run_ownership"],
 				]);
 				for (const [filter, count] of [
 					["", 2],
@@ -97,7 +100,10 @@ describe("Schema Migration", () => {
 					[72, "surfacing_marks"],
 					[73, "message_part_read"],
 					[74, "turn_recaps"],
-					[75, "provider_run_ownership"],
+					[75, "events_parent_id_index"],
+					[76, "events_forked_from_index"],
+					[77, "message_parts_result_event_seq_index"],
+					[78, "provider_run_ownership"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -239,6 +245,16 @@ describe("Schema Migration", () => {
 					unique: false,
 				},
 				{
+					name: "idx_events_lineage_forked_from",
+					table: "events",
+					unique: false,
+				},
+				{
+					name: "idx_events_lineage_parent",
+					table: "events",
+					unique: false,
+				},
+				{
 					name: "idx_events_session_seq",
 					table: "events",
 					unique: false,
@@ -272,6 +288,11 @@ describe("Schema Migration", () => {
 				},
 				{
 					name: "idx_message_parts_open_questions",
+					table: "message_parts",
+					unique: false,
+				},
+				{
+					name: "idx_message_parts_result_event_seq",
 					table: "message_parts",
 					unique: false,
 				},

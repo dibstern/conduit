@@ -489,15 +489,20 @@ export function translateProviderRuntimeEventToDomain(
 		}
 
 		case "session.created": {
+			const sessionId = stringField(data["sessionId"]) ?? event.sessionId;
+			// Creation must project into the stream whose death ingestion checks.
+			if (sessionId !== event.sessionId) return { events: [], state };
 			const parentId = stringField(data["parentId"]);
+			const forkedFrom = stringField(data["forkedFrom"]);
 			const providerSessionId =
 				stringField(data["providerSessionId"]) ??
 				event.providerRefs.providerSessionId;
 			const payload = {
-				sessionId: stringField(data["sessionId"]) ?? event.sessionId,
+				sessionId,
 				title: stringField(data["title"]) ?? "Untitled",
 				provider: stringField(data["provider"]) ?? event.providerId,
 				...(parentId != null ? { parentId } : {}),
+				...(forkedFrom != null ? { forkedFrom } : {}),
 				...(providerSessionId != null ? { providerSessionId } : {}),
 			} satisfies SessionCreatedPayload;
 			return singleEvent(event, state, "session.created", payload);

@@ -3,6 +3,7 @@ import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
 import { observeTurnTimelineCommit } from "../../domain/daemon/Services/turn-timeline.js";
+import { EventRetentionSchedulerTag } from "../../domain/persistence/Services/event-retention-scheduler.js";
 import { SessionEventBusTag } from "../../domain/relay/Services/session-event-bus.js";
 import { contentionMetrics } from "../contention-metrics.js";
 import {
@@ -146,6 +147,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 	const projectionRunner = yield* ProjectionRunnerEffectTag;
 	const projects = yield* SessionRollupProjects;
 	const sessionEventBus = yield* Effect.serviceOption(SessionEventBusTag);
+	const retention = yield* Effect.serviceOption(EventRetentionSchedulerTag);
 
 	const write = <A, E, R>(
 		body: (
@@ -336,6 +338,11 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 				);
 				for (const eventId of endedRunEvents)
 					options.endedRunEvents?.add(eventId);
+				// Every committed deletion kicks retention, even when no row was
+				// removed or live publication was suppressed. Never wait for drain.
+				if (stored.some((event) => event.type === "session.deleted")) {
+					if (Option.isSome(retention)) yield* retention.value.kick;
+				}
 				// Callbacks can stall or commit again; neither may hold up advances.
 				yield* options.afterCommit ?? Effect.void;
 				if (

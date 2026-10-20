@@ -5,29 +5,29 @@
 		{
 			"kind": "fork",
 			"messages": 20,
-			"statements": 67,
-			"milliseconds": 170.16645900000003,
+			"statements": 70,
+			"milliseconds": 6.366166000001613,
 			"events": 5
 		},
 		{
 			"kind": "side-thread",
 			"messages": 20,
-			"statements": 67,
-			"milliseconds": 9.964334000000235,
+			"statements": 72,
+			"milliseconds": 34.0726250000007,
 			"events": 5
 		},
 		{
 			"kind": "fork",
 			"messages": 200,
-			"statements": 67,
-			"milliseconds": 322.2892090000023,
+			"statements": 70,
+			"milliseconds": 124.5145420000008,
 			"events": 5
 		},
 		{
 			"kind": "side-thread",
 			"messages": 200,
-			"statements": 67,
-			"milliseconds": 103.43512499999633,
+			"statements": 72,
+			"milliseconds": 19.4948749999985,
 			"events": 5
 		}
 	]

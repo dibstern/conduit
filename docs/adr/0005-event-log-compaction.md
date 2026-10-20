@@ -112,6 +112,8 @@ completed thinking block. This migration does not change that writer behavior.
 
 ## Consequences
 
+The archived-tree exception below is superseded by [ADR-0013](0013-event-retention-reads-only-the-event-log.md); the 30-day archive window stays.
+
 Archived-tree retention (conduit-test-iujk.7) is another exception to the permanent
 event log. After a root has been archived for the configured window (30 days by
 default; null disables), and no member of its parent/descendant tree is pinned

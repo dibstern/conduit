@@ -596,7 +596,10 @@ describe("Claude turn economics through SQLite persistence", () => {
 					[72, "surfacing_marks"],
 					[73, "message_part_read"],
 					[74, "turn_recaps"],
-					[75, "provider_run_ownership"],
+					[75, "events_parent_id_index"],
+					[76, "events_forked_from_index"],
+					[77, "message_parts_result_event_seq_index"],
+					[78, "provider_run_ownership"],
 				]);
 				expect(yield* makeEffectSqlMigrator()).toEqual([]);
 			}),

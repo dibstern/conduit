@@ -1,7 +1,10 @@
 import type { UUID } from "node:crypto";
 import { Deferred, Effect, HashMap, Ref } from "effect";
 import { parseAttachmentDataUrl } from "../../attachment-data-url.js";
-import { isClaudeResumeFailure } from "../event-sink-errors.js";
+import {
+	isClaudeResumeFailure,
+	isClaudeResumeRefused,
+} from "../event-sink-errors.js";
 import type { SendTurnInput, TurnResult } from "../types.js";
 import { isInterruptedResult } from "./claude-event-translator.js";
 import type { ClaudeProviderRuntimeState } from "./claude-provider-runtime.js";
@@ -216,8 +219,8 @@ export function resolveIntakeErrorEffect(
 			yield* Deferred.succeed(waiter.deferred, {
 				...zeroTurnResult("error"),
 				error: { code: "provider_error", message: errorMsg },
-				...(ctx.resumeFallbackAllowed &&
-				!ctx.queryInitialized &&
+				...((ctx.resumeFallbackAllowed || isClaudeResumeRefused(err)) &&
+				(!ctx.queryInitialized || isClaudeResumeRefused(err)) &&
 				isClaudeResumeFailure(err)
 					? { nativeResumeRejected: true }
 					: {}),

@@ -40,10 +40,10 @@ const prefix = (count: number) =>
 // Ownership comes from the exact command input, including native message ids
 // and continuation cut-offs. Neither claim status nor migration proves intake.
 it.effect(
-	"0075 links in-flight turns to their exact command reservations without changing acceptance",
+	"0078 links in-flight turns to their exact command reservations without changing acceptance",
 	() =>
 		Effect.gen(function* () {
-			yield* makeEffectSqlMigrator(prefix(74));
+			yield* makeEffectSqlMigrator(prefix(77));
 			const sql = yield* SqlClient.SqlClient;
 			yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at)
 				VALUES ('legacy', 'claude', 1, 1), ('other', 'opencode', 1, 1)`;
@@ -175,7 +175,7 @@ it.effect(
 	"keeps executing legacy reservations running without guessing open turn owners",
 	() =>
 		Effect.gen(function* () {
-			yield* makeEffectSqlMigrator(prefix(74));
+			yield* makeEffectSqlMigrator(prefix(77));
 			const sql = yield* SqlClient.SqlClient;
 			yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at) VALUES ('legacy', 'claude', 1, 1)`;
 			yield* sql`INSERT INTO turns (id, session_id, state, requested_at) VALUES
@@ -242,7 +242,7 @@ it.effect(
 				effect_type, payload_json, status, requested_at, updated_at
 			) VALUES (3, 'owned-send', 'project', 'legacy', 'claude', 'send_turn',
 				'{"inputId":"owned-input","runId":"new-run"}', 'running', 30, 30)`;
-			yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 75`;
+			yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 78`;
 			yield* makeEffectSqlMigrator();
 			expect(
 				yield* sql`SELECT status FROM provider_runs WHERE id = 'new-run'`,
@@ -551,6 +551,9 @@ const expectedNames = [
 	"surfacing_marks",
 	"message_part_read",
 	"turn_recaps",
+	"events_parent_id_index",
+	"events_forked_from_index",
+	"message_parts_result_event_seq_index",
 	"provider_run_ownership",
 ];
 const legacyNames = [
@@ -592,7 +595,10 @@ it.effect(
 				[72, "surfacing_marks"],
 				[73, "message_part_read"],
 				[74, "turn_recaps"],
-				[75, "provider_run_ownership"],
+				[75, "events_parent_id_index"],
+				[76, "events_forked_from_index"],
+				[77, "message_parts_result_event_seq_index"],
+				[78, "provider_run_ownership"],
 			]);
 			yield* sql`UPDATE sessions SET forked_from = 'source' WHERE id = 'fork'`;
 			expect(yield* makeEffectSqlMigrator()).toEqual([]);
@@ -634,7 +640,10 @@ describe("Effect migration lineage", () => {
 				[72, "surfacing_marks"],
 				[73, "message_part_read"],
 				[74, "turn_recaps"],
-				[75, "provider_run_ownership"],
+				[75, "events_parent_id_index"],
+				[76, "events_forked_from_index"],
+				[77, "message_parts_result_event_seq_index"],
+				[78, "provider_run_ownership"],
 			]);
 			expect(
 				yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id <= 68 ORDER BY migration_id`,
@@ -728,7 +737,7 @@ describe("Effect migration lineage", () => {
 						const entries = {
 							...effectMigrationEntries,
 							...(migrationPath === "gap"
-								? { "0076_test_marker": Effect.void }
+								? { "0079_test_marker": Effect.void }
 								: {}),
 						};
 						yield* makeEffectSqlMigrator(entries);
@@ -775,7 +784,10 @@ describe("Effect migration lineage", () => {
 				[72, "surfacing_marks"],
 				[73, "message_part_read"],
 				[74, "turn_recaps"],
-				[75, "provider_run_ownership"],
+				[75, "events_parent_id_index"],
+				[76, "events_forked_from_index"],
+				[77, "message_parts_result_event_seq_index"],
+				[78, "provider_run_ownership"],
 			]);
 			expect(
 				yield* sql`SELECT reason, turn_index, judge_model FROM session_goal_checks`,
@@ -803,7 +815,10 @@ describe("Effect migration lineage", () => {
 					[72, "surfacing_marks"],
 					[73, "message_part_read"],
 					[74, "turn_recaps"],
-					[75, "provider_run_ownership"],
+					[75, "events_parent_id_index"],
+					[76, "events_forked_from_index"],
+					[77, "message_parts_result_event_seq_index"],
+					[78, "provider_run_ownership"],
 				]);
 				expect(
 					yield* sql`SELECT text, created_at, updated_at, surfacing_ordinal, surfacing_probabilities, surfacing_set_version, surfacing_model FROM message_parts`,
@@ -935,6 +950,9 @@ describe("Effect migration lineage", () => {
 					73,
 					74,
 					75,
+					76,
+					77,
+					78,
 				]);
 				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, workspace_hint, workspace_hint_sequence)
 					VALUES ('main-database', 'claude', 'Preserved', 'idle', 1, 1, '/repo/worktree', 123)`;
@@ -1099,8 +1117,8 @@ describe("Effect migration lineage", () => {
 			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
-	it("registers the contiguous production chain from 1 through 75", () => {
-		expect(migrationEntries).toHaveLength(75);
+	it("registers the contiguous production chain from 1 through 78", () => {
+		expect(migrationEntries).toHaveLength(78);
 		expect(migrationEntries.map(([key]) => key)).toEqual(
 			expectedNames.map(
 				(name, index) => `${String(index + 1).padStart(4, "0")}_${name}`,
@@ -1291,7 +1309,10 @@ describe("Effect migration lineage", () => {
 					[72, "surfacing_marks"],
 					[73, "message_part_read"],
 					[74, "turn_recaps"],
-					[75, "provider_run_ownership"],
+					[75, "events_parent_id_index"],
+					[76, "events_forked_from_index"],
+					[77, "message_parts_result_event_seq_index"],
+					[78, "provider_run_ownership"],
 				]);
 				expect(yield* sql`SELECT type FROM events WHERE sequence = 45`).toEqual(
 					[{ type: "thinking.end" }],
@@ -1387,7 +1408,10 @@ describe("Effect migration lineage", () => {
 					[72, "surfacing_marks"],
 					[73, "message_part_read"],
 					[74, "turn_recaps"],
-					[75, "provider_run_ownership"],
+					[75, "events_parent_id_index"],
+					[76, "events_forked_from_index"],
+					[77, "message_parts_result_event_seq_index"],
+					[78, "provider_run_ownership"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace_hint, workspace_hint_sequence
@@ -1462,7 +1486,10 @@ describe("Effect migration lineage", () => {
 					[72, "surfacing_marks"],
 					[73, "message_part_read"],
 					[74, "turn_recaps"],
-					[75, "provider_run_ownership"],
+					[75, "events_parent_id_index"],
+					[76, "events_forked_from_index"],
+					[77, "message_parts_result_event_seq_index"],
+					[78, "provider_run_ownership"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace, claude_worktree_state FROM sessions WHERE id = 'kept-workspace'`,
@@ -2071,7 +2098,10 @@ describe("Effect migration lineage", () => {
 				[72, "surfacing_marks"],
 				[73, "message_part_read"],
 				[74, "turn_recaps"],
-				[75, "provider_run_ownership"],
+				[75, "events_parent_id_index"],
+				[76, "events_forked_from_index"],
+				[77, "message_parts_result_event_seq_index"],
+				[78, "provider_run_ownership"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -2183,7 +2213,10 @@ describe("Effect migration lineage", () => {
 					[72, "surfacing_marks"],
 					[73, "message_part_read"],
 					[74, "turn_recaps"],
-					[75, "provider_run_ownership"],
+					[75, "events_parent_id_index"],
+					[76, "events_forked_from_index"],
+					[77, "message_parts_result_event_seq_index"],
+					[78, "provider_run_ownership"],
 				]);
 				const rows = yield* sql<{
 					id: string;

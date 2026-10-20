@@ -28,7 +28,7 @@ import {
 
 // Temporary upgrade proof, removed by 82tn.31.4. This pin must equal the main
 // build this machine runs at merge time, not a branch build with another ID.
-const MAIN_COMMIT = "b7ded5e225a567c4dfe300b8ab640c7771fbef54";
+const MAIN_COMMIT = "1c07f4704344d20a86deb48f464c5b27ea99498c";
 const branchDist = resolve(process.env["CONDUIT_TEST_DIST"] ?? "dist");
 const artifactDir = process.env["CONDUIT_TEST_ARTIFACT_DIR"] ?? "test-results";
 const execute = promisify(execFile);

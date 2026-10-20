@@ -4,6 +4,7 @@ import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
+import { EventRetentionSchedulerTag } from "../domain/persistence/Services/event-retention-scheduler.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
@@ -527,6 +528,7 @@ export async function startProjectRelay(inputs: StartupInputs) {
 		return await relayManagedRuntime.runPromise(
 			Effect.gen(function* () {
 				const services = yield* acquireStartupServices(inputs);
+				yield* (yield* EventRetentionSchedulerTag).kick;
 				yield* wireStartupCallbacks(services);
 				const monitoring = yield* startMonitoringAndPollers(inputs, services);
 				const { stopMonitoring } = monitoring;

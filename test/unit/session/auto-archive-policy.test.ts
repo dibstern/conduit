@@ -60,7 +60,6 @@ describe("automatic archived tree deletion", () => {
 		pinned: false,
 		hasPendingWork: false,
 		hasLiveBackgroundWork: false,
-		hasSurvivingFork: false,
 	};
 	it("includes the retention boundary and supports Never", () => {
 		expect(shouldDeleteArchivedSessionTree(tree, now, 30 * day)).toBe(true);
@@ -73,7 +72,6 @@ describe("automatic archived tree deletion", () => {
 		{ pinned: true },
 		{ hasPendingWork: true },
 		{ hasLiveBackgroundWork: true },
-		{ hasSurvivingFork: true },
 	])("keeps a tree with %j", (override) => {
 		expect(
 			shouldDeleteArchivedSessionTree({ ...tree, ...override }, now, 30 * day),

@@ -125,7 +125,10 @@ describe("Bound project provenance", () => {
 			"0072_surfacing_marks",
 			"0073_message_part_read",
 			"0074_turn_recaps",
-			"0075_provider_run_ownership",
+			"0075_events_parent_id_index",
+			"0076_events_forked_from_index",
+			"0077_message_parts_result_event_seq_index",
+			"0078_provider_run_ownership",
 		]);
 	});
 

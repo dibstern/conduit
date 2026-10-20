@@ -32,6 +32,7 @@ import type {
 	CanonicalEvent,
 	StoredEvent,
 } from "../../../src/lib/persistence/events.js";
+import { makeEffectProjectionHarness } from "../../helpers/effect-projection-harness.js";
 
 const BASE_EVENT = {
 	providerId: "claude",
@@ -56,6 +57,50 @@ function runtimeEvent(event: Record<string, unknown>): ProviderRuntimeEvent {
 		...event,
 	});
 }
+
+// Failure modes: the mapper drops the source, the transactional check misses a
+// reference, a born-dead creation hits a FK, or later content revives the child.
+describe("born-dead provider creation", () => {
+	it.each([
+		"parentId",
+		"forkedFrom",
+	] as const)("marks a creation with a deleted %s in the same projected batch", async (reference) => {
+		const harness = makeEffectProjectionHarness();
+		try {
+			await harness.ingest(
+				runtimeEvent({
+					eventId: "dead-reference",
+					sessionId: "dead-reference",
+					type: "session.deleted",
+					data: {},
+				}),
+			);
+			await harness.ingestBatch([
+				runtimeEvent({
+					eventId: "born-dead-created",
+					sessionId: "born-dead",
+					type: "session.created",
+					data: { [reference]: "dead-reference" },
+				}),
+				runtimeEvent({
+					eventId: "born-dead-late-message",
+					sessionId: "born-dead",
+					type: "message.created",
+					data: { messageId: "late-message", role: "assistant" },
+				}),
+			]);
+			expect(
+				(await harness.storedEvents("born-dead")).map((event) => event.type),
+			).toEqual(["session.created", "session.deleted"]);
+			expect(await harness.query("SELECT id FROM sessions")).toEqual([]);
+			expect(await harness.query("SELECT id FROM session_providers")).toEqual(
+				[],
+			);
+		} finally {
+			await harness.dispose();
+		}
+	});
+});
 
 function makeHarness(options?: {
 	readonly existingSession?: boolean;
