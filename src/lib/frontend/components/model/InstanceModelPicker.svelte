@@ -629,6 +629,7 @@
 							options={accountCards}
 							value={selectedLogoInstanceId ?? ""}
 							onChange={handleAccountSelect}
+							onActivate={locked ? undefined : selectInstance}
 							label={accountLabel}
 							lockedReason={hasAccountUsage ? "" : "Harness is fixed for this session"}
 							itemWidth={108}

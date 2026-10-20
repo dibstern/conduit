@@ -748,8 +748,11 @@ test.describe("Project Delete", () => {
 		await setupWithProjectManagement(page, baseURL);
 		await page.getByTestId("session-scope-chip").click();
 		await expect(scopeRow(page, "myapp")).toBeVisible();
-		await scopeRow(page, "mylib").focus();
-		await page.keyboard.press("Delete");
+		await expect(
+			page.getByRole("menu", { name: "Project scope" }),
+		).toBeFocused();
+		await scopeRow(page, "mylib").press("Delete");
+		await expect(page.locator("#confirm-modal")).toBeVisible();
 		await page.click("#confirm-modal button:has-text('Remove')");
 		await expect(page.locator("#confirm-modal")).not.toBeVisible();
 
