@@ -724,7 +724,17 @@ describe("OpenCode pending rewind through the relay", () => {
 				legacyRewindRows(rows, removedIds),
 			);
 			expect(legacy).toEqual(live);
-			evidence["rangeCommit"] = { appended, reads, live, replayed, legacy };
+			const parity = await fixture.checkReplayParity();
+			expect(parity.diffs).toEqual([]);
+			expect(parity.danglingPartPointers).toEqual([]);
+			evidence["rangeCommit"] = {
+				appended,
+				reads,
+				live,
+				replayed,
+				legacy,
+				parity,
+			};
 		} finally {
 			readChannel.unsubscribe(observeRead);
 			db.close();
