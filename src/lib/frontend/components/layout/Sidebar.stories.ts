@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import { featureFlags } from "../../stores/feature-flags.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
@@ -55,7 +55,7 @@ type Story = StoryObj<typeof meta>;
 
 function seedFinalSidebar(phone = false, singleAccount = false) {
 	sessionViewState.compact = phone;
-	uiState.sidebarWidth = phone ? 393 : 260;
+	uiState.sidebarWidth = phone ? 390 : 260;
 	const now = Date.now();
 	applySessionChange({
 		_tag: "snapshot",
@@ -152,6 +152,56 @@ export const Final: Story = {
 		await expect(canvas.getByText("Fix token refresh race")).toBeVisible();
 		await expect(canvas.getByTestId("usage-footer-row-work")).toBeVisible();
 		await expect(canvas.getByTestId("settled-shelf-toggle")).toBeVisible();
+		await expect(canvas.queryByTitle("Pinned session")).not.toBeInTheDocument();
+		if (!sessionViewState.compact) {
+			const toggle = canvas.getByRole("button", { name: "Close sidebar" });
+			await expect(
+				toggle.querySelector("svg.lucide-panel-left"),
+			).not.toBeNull();
+			await expect(toggle.querySelector("polyline")).toBeNull();
+		}
+		const title = canvas
+			.getByText("Fix token refresh race")
+			.closest<HTMLElement>(".session-title-inner");
+		if (!title) throw new TypeError("Pinned title is missing");
+		// DOM scroll widths round fractional text advances to whole CSS pixels.
+		await expect(title.scrollWidth).toBeLessThanOrEqual(title.clientWidth + 1);
+		const phone = matchMedia("(max-width: 767px)").matches;
+		await expect(getComputedStyle(title).lineHeight).toBe(
+			phone ? "22.5px" : "19.5px",
+		);
+		const rows = canvasElement.querySelectorAll(".session-item");
+		const running = rows[1];
+		const next = rows[2];
+		if (!running || !next) throw new TypeError("Running rows are missing");
+		await expect(
+			next.getBoundingClientRect().top - running.getBoundingClientRect().top,
+		).toBeCloseTo(phone ? 58.25 : 49.75, 1);
+		const chips = canvas.getByTestId("session-filter-chips");
+		if (chips.scrollWidth > chips.clientWidth) {
+			await waitFor(() =>
+				expect(getComputedStyle(chips).maskImage).not.toBe("none"),
+			);
+			chips.scrollLeft = chips.scrollWidth;
+			await waitFor(() =>
+				expect(getComputedStyle(chips).maskImage).toBe("none"),
+			);
+			chips.scrollLeft = 0;
+		} else {
+			await expect(getComputedStyle(chips).maskImage).toBe("none");
+		}
+		if (sessionViewState.compact && phone) {
+			await expect(
+				canvasElement.querySelector("#sidebar")?.getBoundingClientRect().width,
+			).toBe(390);
+			const pill = canvas
+				.getByTestId("session-scope-chip")
+				.getBoundingClientRect();
+			const chip = canvas.getByTestId("session-filter-chip-needs-you");
+			await expect(pill.top).toBe(46);
+			await expect(chip.getBoundingClientRect().top - pill.bottom).toBe(8);
+			await expect(getComputedStyle(chip, "::before").minHeight).toBe("44px");
+		}
 	},
 };
 

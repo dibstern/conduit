@@ -61,6 +61,7 @@ export function formatClockTime(timestamp: number | undefined): string {
 export function formatSnoozeTime(
 	until: number | null,
 	now: number = Date.now(),
+	format: "full" | "short" = "full",
 ): string {
 	if (until === null) return "No timer";
 	const date = new Date(until);
@@ -78,9 +79,11 @@ export function formatSnoozeTime(
 	}).format(date);
 	if (daysAway === 0) return time;
 	if (daysAway > 0 && daysAway < 7) {
-		return `${date.toLocaleDateString("en", { weekday: "short" })} ${time}`;
+		const weekday = date.toLocaleDateString("en", { weekday: "short" });
+		return format === "short" ? weekday : `${weekday} ${time}`;
 	}
-	return `${date.getDate()} ${date.toLocaleDateString("en", { month: "short" })} ${time}`;
+	const calendarDate = `${date.getDate()} ${date.toLocaleDateString("en", { month: "short" })}`;
+	return format === "short" ? calendarDate : `${calendarDate} ${time}`;
 }
 
 /**

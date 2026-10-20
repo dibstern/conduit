@@ -992,6 +992,22 @@
 		"renamedTo": "text-[8px]",
 		"reason": "conduit-test-voxy.10: remove the second 92% mono size adjustment while preserving the design's explicit 11.04px preview line height."
 	},
+	"src/lib/frontend/components/model/HarnessLogo.svelte :: accountColorClass(instanceId)": "conduit-test-b6dy: pass the ordered usage accounts to the same shared colour helper so badges retain each footer dot's collision-free group colour.",
+	"src/lib/frontend/components/ui/AccountDot.svelte :: accountColorClass(instanceId)": "conduit-test-b6dy: pass ordered usage accounts to the shared colour helper; per-group palette order replaces hash collisions while matching the composer badge.",
+	"src/lib/frontend/components/session/SessionItem.svelte :: leading-[17px]": {
+		"renamedTo": "leading-[1.5]",
+		"reason": "conduit-test-b6dy sidebar-05: the approved context line is 17.25px desktop and 18.75px phone, matching its font size times 1.5."
+	},
+	"src/lib/frontend/components/session/SessionListFilters.svelte :: md:pb-[8px]": {
+		"renamedTo": "pb-[8px]",
+		"reason": "conduit-test-b6dy sidebar-04: the approved pill-to-chip gap is 8px on phones as well as desktop."
+	},
+	"src/lib/frontend/components/session/SessionSearchField.svelte :: md:min-h-[30px]": {
+		"renamedTo": "h-[30px]",
+		"reason": "conduit-test-b6dy sidebar-04: reserve the drawn 30px field height on both viewports; Button touchTarget pseudo-elements retain 44px phone targets."
+	},
+	"src/lib/frontend/components/session/SessionSearchField.svelte :: ml-[3px],mr-[3px]": "conduit-test-b6dy sidebar-01: remove the clear button's negative overlap and outer margin. The shared pill wrapper now contains it with 6px right padding.",
+	"src/lib/frontend/components/ui/SessionRow.svelte :: px-[10px]": "conduit-test-b6dy sidebar-05: replace symmetric padding with the approved row's 10px left and 8px right padding.",
 	"src/lib/frontend/components/ui/ViewCard.svelte :: leading-[1.5]": {
 		"renamedTo": "leading-[11.04px]",
 		"reason": "conduit-test-voxy.10: keep the Final preview's 8px times 0.92 times 1.5 line height when moving mono glyph scaling solely into the font face."

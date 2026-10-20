@@ -105,17 +105,18 @@
 	     per section because the row is about to grow: the shelves and the
 	     per-row commands each land in their own ticket, and copies would mean one
 	     edit each with any divergence between them invisible. -->
-	{#snippet sessionRow(s: SessionInfo, underProject = false)}
+	{#snippet sessionRow(s: SessionInfo, underProject = false, inPinnedGroup = false)}
 		{@const settled = s.pinnedAt == null && s.settledAt != null}
 		{@const snoozed = !settled && s.pinnedAt == null && isSessionSnoozed(s, sessionState.now)}
 		{@const primary = projectState.projects.find((project) => project.slug === s.projectSlug)?.folders[0]}
 		<SessionItem
 			session={s}
 			pinned={s.pinnedAt != null}
+			{inPinnedGroup}
 			{settled}
 			{snoozed}
 			settledAt={settled ? formatTimeAgo(s.settledAt) : undefined}
-			snoozedUntilText={snoozed ? formatSnoozeTime(s.snoozedUntil ?? null, sessionState.now) : undefined}
+			snoozedUntilText={snoozed ? formatSnoozeTime(s.snoozedUntil ?? null, sessionState.now, "short") : undefined}
 			now={sessionState.now}
 			href={getSessionHref(s.id)}
 			projectLabel={underProject ? undefined : getProjectLabel(s)}
@@ -234,7 +235,7 @@
 		{/if}
 		{#if arrangement.pinned.length > 0}
 			<div class="session-group-label flex items-center gap-[6px] pt-[12px] pb-[4px] px-[10px] text-[12px] font-medium text-text-dimmer font-sans"><span>Pinned</span>{" "}<span class="font-mono text-[11px] font-normal">{fullArrangement.pinned.length}</span></div>
-			{#each arrangement.pinned as s (s.id)}{@render sessionRow(s)}{/each}
+			{#each arrangement.pinned as s (s.id)}{@render sessionRow(s, false, true)}{/each}
 		{/if}
 		{#if isEmpty && drafts.length === 0 && !sessionState.settled}
 			<!-- First load: session-shaped rows breathe in a top-to-bottom wave. -->
@@ -298,7 +299,7 @@
 							{@render sessionRow(s)}
 						{/each}
 						{#if !searching && !selectMode && !settledExpanded && settledMore > 0}
-							<TextButton tone="dimmer" class="min-h-[44px] md:min-h-[30px] px-[34px] text-[12px]" data-testid="settled-shelf-more" onclick={() => { settledExpanded = true; }}>+ {settledMore} more</TextButton>
+							<TextButton tone="dimmer" class="min-h-[44px] md:min-h-[30px] px-[34px] text-[12px]" data-testid="settled-shelf-more" onclick={() => { settledExpanded = true; }}>{settledMore} more</TextButton>
 						{/if}
 					{/if}
 				</div>
@@ -322,7 +323,7 @@
 							{@render sessionRow(s)}
 						{/each}
 						{#if !searching && !selectMode && !snoozedExpanded && fullArrangement.snoozed.length > 2}
-							<TextButton tone="dimmer" class="min-h-[44px] md:min-h-[30px] px-[34px] text-[12px]" data-testid="snoozed-shelf-more" onclick={() => { snoozedExpanded = true; }}>+ {fullArrangement.snoozed.length - 2} more</TextButton>
+							<TextButton tone="dimmer" class="min-h-[44px] md:min-h-[30px] px-[34px] text-[12px]" data-testid="snoozed-shelf-more" onclick={() => { snoozedExpanded = true; }}>{fullArrangement.snoozed.length - 2} more</TextButton>
 						{/if}
 					{/if}
 				</div>
