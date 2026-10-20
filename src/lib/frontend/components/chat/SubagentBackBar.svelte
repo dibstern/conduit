@@ -1,5 +1,5 @@
 <!-- Context bar above the input box for subagents and Side Threads. -->
-<!-- Shows parent session title and a "← PARENT" button to navigate back. -->
+<!-- Shows parent session title and a "← Parent" button to navigate back. -->
 
 <script lang="ts">
 	import Button from "../ui/Button.svelte";
@@ -61,18 +61,18 @@
 				{parentStatus === "working" ? "Working" : parentStatus === "monitoring" ? "Monitoring" : "Idle"}
 			</span>
 			<Button
-				variant="ghost"
+				variant="capsule-primary"
 				size="content"
-				tone="inherit"
 				hoverFill="none"
+				touchTarget
 				type="button"
-				class="subagent-back-btn gap-1 py-0.5 px-2.5 rounded bg-accent text-bg font-mono text-sm font-semibold transition-opacity tracking-wide hover:opacity-85 max-md:text-xs max-md:px-2"
+				class="subagent-back-btn h-[28px] gap-[6px] rounded-full px-[12px] text-[13px] font-medium"
 				onclick={navigateBack}
 				title="Back to {parentTitle}"
 			>
 				<span class="text-base leading-none">&#8592;</span>
-				PARENT
-				<span class="hidden md:inline-flex items-center py-px px-1 rounded-sm bg-white/20 text-xs font-bold tracking-wider ml-0.5">ESC</span>
+				Parent
+				<kbd class="hidden md:inline font-mono text-mono-time font-normal text-text-dimmer">Esc</kbd>
 			</Button>
 		</Surface>
 	</div>

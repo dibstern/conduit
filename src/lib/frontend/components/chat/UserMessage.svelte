@@ -46,7 +46,7 @@
 
 <div class="msg-user mx-auto mb-[26px] grid max-w-[820px] grid-cols-[20px_minmax(0,1fr)] gap-x-[8px] px-[14px] md:grid-cols-[28px_minmax(0,1fr)] md:gap-x-[14px] md:px-[32px]" data-uuid={message.uuid}>
 	<AvatarPicker>
-		{#snippet trigger({ props })}<Button {...props} variant="ghost" hoverFill="none" size="content" touchTarget ariaLabel="Change your avatar" class="self-start rounded-full"><UserAvatar size={sessionViewState.compact ? 20 : 28} /></Button>{/snippet}
+		{#snippet trigger({ props })}<Button {...props} variant="ghost" hoverFill="none" size="content" touchTarget ariaLabel="Change your avatar" class="self-start h-[28px] rounded-full"><UserAvatar size={sessionViewState.compact ? 20 : 28} /></Button>{/snippet}
 	</AvatarPicker>
 	<div class="min-w-0 max-md:contents">
 		<!-- Mixed fonts and sizes: share a baseline, with the line centred on the avatar. -->
@@ -76,7 +76,7 @@
 			<div data-testid="user-message-attachments" class="mt-[8px] flex min-w-0 flex-wrap items-start gap-[8px] max-md:col-span-2">
 				{#each message.attachments as attachment (attachment.id)}
 					{#if attachment.mime.startsWith("image/")}
-						<img src={attachment.url} alt={attachment.name} class="size-[96px] rounded-[10px] border border-border bg-bg-raised object-contain" />
+						<img src={attachment.url} alt={attachment.name} class="size-[96px] rounded-[10px] bg-bg-raised object-contain" />
 					{:else}
 						<FileAttachmentChip testid="user-message-file" name={attachment.name} detail={attachment.size === undefined ? attachment.mime : `${attachment.mime} · ${formatFileSize(attachment.size)}`} />
 					{/if}

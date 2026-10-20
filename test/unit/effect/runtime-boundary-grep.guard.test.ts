@@ -54,6 +54,79 @@ const allowedRuntimeBoundaries: readonly AllowedRuntimeBoundary[] = [
 
 const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 	{
+		path: "src/lib/frontend/components/chat/ActivityRow.stories.ts",
+		snippetPattern: /Missing activity row|Missing activity result/,
+		reason:
+			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/chat/AssistantHeader.stories.ts",
+		snippetPattern: /Missing assistant identity/,
+		reason:
+			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/chat/AssistantMessage.stories.ts",
+		snippetPattern:
+			/Code has not highlighted yet|Missing syntax token|Diff has not highlighted yet|Missing diff addition|Missing code path|Mermaid labels have not rendered yet|Missing rich markdown/,
+		reason:
+			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/chat/DiffView.stories.ts",
+		snippetPattern: /Missing diff frame/,
+		reason:
+			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/chat/QuestionCard.stories.ts",
+		snippetPattern: /Missing question checkbox/,
+		reason:
+			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/chat/SubagentBackBar.stories.ts",
+		snippetPattern: /Missing Esc hint/,
+		reason:
+			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/chat/SystemMessage.stories.ts",
+		snippetPattern: /Missing system notice/,
+		reason:
+			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/chat/ToolGenericCard.stories.ts",
+		snippetPattern: /Missing expanded tool result|Missing tool row/,
+		reason:
+			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/chat/ToolQuestionCard.stories.ts",
+		snippetPattern: /Missing question step header/,
+		reason:
+			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/chat/ToolSubagentCard.stories.ts",
+		snippetPattern: /Missing subagent row/,
+		reason:
+			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/chat/UserMessage.stories.ts",
+		snippetPattern: /Missing user name/,
+		reason:
+			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/permissions/PermissionCard.stories.ts",
+		snippetPattern: /Missing permission card/,
+		reason:
+			"transcript restyle play() invariant for measured browser fixtures, not executable production code",
+	},
+	{
 		path: "src/lib/utils.ts",
 		snippetPattern: /throw new Error\(`Unexpected value:/,
 		reason: "assertNever defect path for compile-time exhaustiveness",

@@ -127,7 +127,7 @@
 				<span class="shrink-0 text-text-dimmer">
 					<Icon name={style.icon} size={14} />
 				</span>
-				<span class="shrink-0 font-medium {running ? 'text-text' : 'text-text-secondary'}">
+				<span class="tool-name shrink-0 font-normal text-text-muted">
 					{verb}
 				</span>
 				{#if tag}
@@ -135,7 +135,7 @@
 					     differ by this far more than by their descriptions. -->
 					<Badge variant="tag" size="sm" class="shrink-0 font-mono">{tag}</Badge>
 				{/if}
-				<span class="{launch?.step ? 'min-w-0 max-w-[50%]' : 'flex-1 min-w-0'} truncate font-mono text-[12.5px] text-text-secondary">
+				<span class="tool-desc {launch?.step ? 'min-w-0 max-w-[50%]' : 'flex-1 min-w-0'} truncate font-mono text-mono-code text-text-dimmer">
 					{subject}
 				</span>
 				{#if typeof part.metadata?.['cursorToolType'] === "string" && part.metadata['truncated'] === true}<span class="shrink-0 text-text-muted">Truncated</span>{/if}
@@ -151,8 +151,8 @@
 					{@const lead = launchMeta(launch)}
 					{@const usage = launchUsage(launch)}
 					<!-- Status and time stay whole; a narrow row drops the usage. -->
-					<span class="launch-meta ml-auto shrink-0 whitespace-nowrap font-mono text-[12px]"><span class={launchTone}>{lead}</span>{#if usage}<span class="text-text-dimmer @max-[480px]:hidden">{lead ? " · " : ""}{usage}</span>{/if}</span>
-				{:else if meta}<span class="ml-auto shrink-0 font-mono text-[12px] text-text-dimmer">{meta}</span>{/if}
+					<span class="launch-meta ml-auto shrink-0 whitespace-nowrap font-mono text-mono-time"><span class={launchTone}>{lead}</span>{#if usage}<span class="text-text-dimmer @max-[480px]:hidden">{lead ? " · " : ""}{usage}</span>{/if}</span>
+				{:else if meta}<time class="ml-auto shrink-0 font-mono text-mono-time text-text-dimmer">{meta}</time>{/if}
 				{#if launch?.state.kind === "finished"}
 					<span class="shrink-0 {launchTone} [&_.lucide]:w-3 [&_.lucide]:h-3" aria-hidden="true">
 						<Icon name={{ completed: "circle-check", failed: "circle-x", stopped: "circle-stop" }[launch.state.outcome]} size={12} />
@@ -191,7 +191,7 @@
 				{#snippet children(tool)}
 					{@const fullCommand = toolCommand(tool)}
 					<div
-						class="tool-result my-[4px] py-[8px] px-[10px] font-mono text-[12px] leading-[1.6] whitespace-pre-wrap break-all bg-code-bg border rounded-[6px] max-h-[300px] overflow-y-auto {tool.isError ? 'border-error/30 text-error' : 'border-border-subtle text-text-secondary'}"
+						class="tool-result my-[4px] py-[8px] px-[10px] font-mono text-mono-xs leading-[1.6] whitespace-pre-wrap break-all bg-code-bg rounded-[6px] max-h-[300px] overflow-y-auto {tool.isError ? 'text-error' : 'text-text-secondary'}"
 					>{#if fullCommand}<span class="text-text-muted">$ {fullCommand}</span>{#if tool.result}{"\n\n"}{/if}{/if}{tool.result ?? ""}</div>
 				{/snippet}
 			</ToolFullDetail>
@@ -205,12 +205,12 @@
 			</span>
 			<span class="thinking-label shrink-0 font-medium text-text-secondary">{part.done ? "Thought" : thinkingVerb(part)}</span>
 			<span class="flex-1 truncate text-text-dimmer italic">{firstLine(part.text, 80)}</span>
-			{#if meta}<span class="thinking-duration shrink-0 font-mono text-[12px] text-text-dimmer">{meta}</span>{/if}
+			{#if meta}<span class="thinking-duration shrink-0 font-mono text-mono-time text-text-dimmer">{meta}</span>{/if}
 			{#if !part.done}<BlockGrid cols={4} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />{/if}
 		</Button>
 		{#if expanded && part.text}
 			<div
-				class="ml-[22px] mr-[4px] my-[4px] py-[8px] px-[10px] font-mono text-[12px] leading-[1.6] whitespace-pre-wrap break-words text-text-secondary bg-code-bg border border-border-subtle rounded-[6px] max-h-[300px] overflow-y-auto"
+				class="ml-[22px] mr-[4px] my-[4px] py-[8px] px-[10px] font-mono text-mono-xs leading-[1.6] whitespace-pre-wrap break-words text-text-secondary bg-code-bg border border-border-subtle rounded-[6px] max-h-[300px] overflow-y-auto"
 			>{part.text}</div>
 		{/if}
 	</div>
@@ -237,10 +237,10 @@
 {:else}
 	<div data-part={part.uuid} data-message-number={messageNumber} data-highlighted={highlight || undefined}>
 		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" class={highlight ? "bg-selection" : ""} aria-expanded={expanded} onclick={() => (expanded = !expanded)}>
-			{#if messageNumber !== undefined}<span class="shrink-0 font-mono text-[12px] text-text-dimmer">#{messageNumber}</span>
+			{#if messageNumber !== undefined}<span class="shrink-0 font-mono text-mono-xs text-text-dimmer">#{messageNumber}</span>
 			{:else}<span class="shrink-0 text-text-dimmer"><Icon name={style.icon} size={14} /></span>{/if}
 			<span class="flex-1 truncate italic text-text-secondary">{firstLine(part.rawText, 120)}</span>
-			{#if meta}<span class="shrink-0 font-mono text-[12px] text-text-dimmer">{meta}</span>{/if}
+			{#if meta}<span class="shrink-0 font-mono text-mono-time text-text-dimmer">{meta}</span>{/if}
 		</Button>
 		{#if expanded}
 			<div class="ml-[22px] mr-[4px] my-[4px] md-content text-[13px] leading-[1.6] italic text-text-secondary">{@html part.html}</div>

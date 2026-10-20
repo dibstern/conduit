@@ -1,5 +1,4 @@
 import type { Avatar, AvatarChoice } from "../../contracts/user-avatar.js";
-import { colorIndex } from "./account-color.js";
 
 export const AVATAR_PRESETS = [
 	{ id: "fox", label: "Fox", glyph: "🦊", tint: "var(--color-fill-amber)" },
@@ -64,9 +63,6 @@ export const AVATAR_PRESETS = [
 	label: string;
 } & ({ glyph: string; tint: string } | { from: string; to: string }))[];
 
-// The initial sits on a preset orb's gradient, picked by the name, so there is no second palette.
-const ORBS = AVATAR_PRESETS.filter((preset) => "from" in preset);
-
 type Face =
 	| { kind: "letter"; char: string; background: string }
 	| { kind: "image"; src: string }
@@ -130,10 +126,10 @@ export function face(avatar: Avatar): Face {
 			.segment(name)
 			[Symbol.iterator]()
 			.next().value?.segment ?? "";
-	const { from, to } = ORBS[colorIndex(name, ORBS.length)] ?? AVATAR_PRESETS[6];
 	return {
 		kind: "letter",
 		char: first.toUpperCase(),
-		background: `linear-gradient(135deg, ${from}, ${to})`,
+		background:
+			"linear-gradient(135deg, var(--color-avatar-start), var(--color-avatar-end))",
 	};
 }

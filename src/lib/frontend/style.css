@@ -2,6 +2,10 @@
 @import "./highlight-theme.css";
 @import "./fonts.css";
 
+:root {
+	--mono-scale: 0.92;
+}
+
 /* Keyboard hints only where a keyboard is likely: any fine pointer. */
 @media not (any-pointer: fine) {
 	.shortcut-hint {
@@ -154,13 +158,14 @@
 	--shadow-rgb: 0, 0, 0;
 
 	/* Syntax highlighting defaults (conduit dark theme) */
+	/* Retain the approved quiet-tier contrast lift for comments. */
 	--hl-comment: #6c6c75;
-	--hl-keyword: #b07cff;
-	--hl-string: #3ecf8e;
-	--hl-number: #f2c14e;
-	--hl-function: #a1a1aa;
+	--hl-keyword: #ff7aa8;
+	--hl-string: #7ee2b8;
+	--hl-number: #ffcf70;
+	--hl-function: #8ab4ff;
 	--hl-variable: #ff6369;
-	--hl-type: #f2c14e;
+	--hl-type: #ffcf70;
 	--hl-constant: #3fd0bf;
 	--hl-tag: #ff6369;
 	--hl-attr: #a1a1aa;
@@ -173,6 +178,12 @@
 
 	--font-mono: "Geist Mono", ui-monospace, monospace;
 	--font-sans: "Geist", system-ui, sans-serif;
+	--text-mono-xs: calc(12px * var(--mono-scale));
+	--text-mono-code: calc(12.5px * var(--mono-scale));
+	--text-mono-inline: calc(13px * var(--mono-scale));
+	--text-mono-time: calc(11px * var(--mono-scale));
+	--color-avatar-start: #6f7dff;
+	--color-avatar-end: #b07cff;
 
 	/* Font Size Scale (overrides Tailwind defaults) */
 	--text-xs: 12px;
@@ -322,13 +333,15 @@
 	--color-backdrop-subtle: rgba(22, 26, 33, 0.15);
 	--shadow-rgb: 19, 26, 37;
 
+	--color-avatar-start: #6f7dff;
+	--color-avatar-end: #b07cff;
 	--hl-comment: #878792;
-	--hl-keyword: #7441ff;
-	--hl-string: #147b3b;
-	--hl-number: #8d6400;
-	--hl-function: #5d5d66;
+	--hl-keyword: #c4134f;
+	--hl-string: #11795a;
+	--hl-number: #9a5b00;
+	--hl-function: #2357d6;
 	--hl-variable: #d02222;
-	--hl-type: #8d6400;
+	--hl-type: #9a5b00;
 	--hl-constant: #0c786c;
 	--hl-tag: #d02222;
 	--hl-attr: #5d5d66;
@@ -1245,7 +1258,7 @@ body:has(dialog:modal) {
 	}
 
 	.md-content code {
-		@apply font-mono text-[13px] rounded-[5px] px-[5px] py-[2px];
+		@apply font-mono text-mono-inline rounded-[5px] px-[5px] py-[2px];
 		background: var(--color-chip);
 	}
 
@@ -1255,13 +1268,19 @@ body:has(dialog:modal) {
 		border: 1px solid var(--color-border);
 	}
 	.md-content pre code {
-		@apply block px-[14px] py-[12px] text-[12.5px] leading-[1.7] whitespace-pre overflow-x-auto;
+		@apply block px-[14px] py-[12px] text-mono-code leading-[1.7] whitespace-pre overflow-x-auto;
 		background: transparent;
 		border-radius: 0;
 	}
+	.md-content pre .diff-line,
+	.md-content pre .hljs-addition,
+	.md-content pre .hljs-deletion {
+		display: block;
+		min-width: 100%;
+	}
 
 	.md-content table {
-		@apply my-3.5 text-base w-full;
+		@apply my-3.5 text-[14px] w-full;
 		border-collapse: separate;
 		border-spacing: 0;
 		border: 1px solid var(--color-border);
@@ -1326,8 +1345,8 @@ body:has(dialog:modal) {
 	.md-content th {
 		@apply px-3.5 py-2 text-left align-top font-semibold;
 		color: var(--color-text);
-		background: rgba(var(--overlay-rgb), 0.04);
-		border-bottom: 2px solid var(--color-success);
+		background: var(--color-bg-raised);
+		border-bottom: 1px solid var(--color-border-subtle);
 	}
 	.md-content td {
 		@apply px-3.5 py-[7px] text-left align-top;
@@ -1335,7 +1354,7 @@ body:has(dialog:modal) {
 		border-bottom: 1px solid var(--color-border-subtle);
 	}
 	.md-content tbody tr:nth-child(odd) {
-		background: rgba(255, 255, 255, 0.012);
+		background: color-mix(in srgb, var(--color-text) 3%, transparent);
 	}
 	.md-content tr:last-child td {
 		border-bottom: none;

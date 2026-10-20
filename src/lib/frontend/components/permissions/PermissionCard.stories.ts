@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect, within } from "storybook/test";
 import type { PermissionId, PermissionRequest } from "../../types.js";
 import PermissionCard from "./PermissionCard.svelte";
 
@@ -42,7 +43,48 @@ type Story = StoryObj<typeof meta>;
 
 export const Pending: Story = {
 	args: { request: mockPermissionPending },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const allow = canvas.getByRole("button", { name: "Allow" });
+		const always = canvas.getByRole("button", { name: "Always allow" });
+		const deny = canvas.getByRole("button", { name: "Deny" });
+		for (const button of [allow, always, deny]) {
+			const style = getComputedStyle(button);
+			await expect(button.getBoundingClientRect().height).toBe(28);
+			await expect(parseFloat(style.borderRadius)).toBeGreaterThanOrEqual(999);
+			await expect(style.borderTopWidth).toBe("0px");
+			await expect(
+				parseFloat(getComputedStyle(button, "::before").minHeight),
+			).toBeGreaterThanOrEqual(44);
+		}
+		await expect(getComputedStyle(always).color).toBe(
+			getComputedStyle(deny).color,
+		);
+		await expect(getComputedStyle(allow).color).not.toBe(
+			getComputedStyle(deny).color,
+		);
+		const marker = canvasElement.querySelector(".permission-waiting-marker");
+		const toolName = canvas.getByText("bash");
+		await expect(marker).not.toBeNull();
+		const palette = canvasElement.ownerDocument.createElement("span");
+		palette.style.color = "var(--color-status-ask)";
+		canvasElement.append(palette);
+		if (marker)
+			await expect(getComputedStyle(marker).backgroundColor).toBe(
+				getComputedStyle(palette).color,
+			);
+		palette.remove();
+		await expect(getComputedStyle(toolName).fontFamily).not.toContain("Mono");
+		await expect(getComputedStyle(toolName).color).toBe(
+			getComputedStyle(deny).color,
+		);
+		const card = canvasElement.querySelector(".permission-card");
+		if (!card) throw new Error("Missing permission card");
+		await expect(getComputedStyle(card).borderTopWidth).toBe("0px");
+	},
 };
+
+export const PendingLight: Story = { ...Pending, globals: { theme: "light" } };
 
 export const WithToolInput: Story = {
 	args: { request: mockPermissionWithToolInput },

@@ -203,7 +203,7 @@
 </script>
 
 <div
-	class={inline ? '' : 'my-[8px] mx-auto max-w-[760px] px-[16px]'}
+	class="question-form {inline ? '' : 'my-[8px] mx-auto max-w-[760px] px-[16px]'}"
 	data-question-tool-id={request.toolId}
 >
 	<Surface variant="raised" radius="lg" class="question-card p-[12px]">
@@ -223,7 +223,7 @@
 			{@const inputName = `question-${instanceId}-${request.toolId}-${qIdx}`}
 			<div class="question-section mb-[12px] last:mb-[8px]" data-q-idx={qIdx}>
 				<div
-					class="question-header text-[12px] font-semibold mb-[2px] text-text-dimmer font-mono"
+					class="question-header text-mono-xs font-semibold mb-[2px] text-text-dimmer font-mono"
 				>
 					{formatQuestionHeader(q.header)}
 				</div>
@@ -405,17 +405,12 @@
 		{/if}
 
 		{#if !resolved}
-			<div class="question-actions flex gap-[8px] mt-[8px] max-sm:flex-col">
-				<!-- No `!` overrides left. Two are gone rather than moved: a
-				     `disabled:opacity-40!` that disagreed with the primitive's 50%
-				     for no stated reason, and a `disabled:hover:bg-success/10!`
-				     that cancelled the disabled hover tint one call site at a time.
-				     Button now drops every variant hover while the button is inert
-, so the whole app gets what this file had. -->
+			<div class="question-actions flex flex-wrap gap-[8px] mt-[12px]">
 				<Button
-					variant="secondary"
-					size="content"
-					class="question-submit-btn min-h-[44px] flex-1 px-[16px] py-[8px] text-[13px] font-medium font-sans"
+					variant="chip"
+					size="phone-card-action"
+					touchTarget="always"
+					class="question-submit-btn font-medium font-sans"
 					disabled={!canSubmit}
 					onclick={handleSubmit}
 				>
@@ -423,9 +418,10 @@
 				</Button>
 				{#if canSkip}
 					<Button
-						variant="secondary"
-						size="content"
-						class="question-skip-btn min-h-[44px] flex-1 px-[16px] py-[8px] text-[13px] font-medium font-sans"
+						variant="chip"
+						size="phone-card-action"
+						touchTarget="always"
+						class="question-skip-btn font-medium font-sans"
 						onclick={handleSkip}
 					>
 						Skip
@@ -433,14 +429,15 @@
 				{/if}
 			</div>
 		{:else if resolved === "submitting"}
-			<div class="question-actions flex gap-[8px] mt-[8px] max-sm:flex-col">
+			<div class="question-actions flex gap-[8px] mt-[12px]">
 				<Button
-					variant="secondary"
-					size="content"
+					variant="chip"
+					size="phone-card-action"
+					touchTarget="always"
 					layout="flow"
 					hoverFill="none"
 					disabledStyle="none"
-					class="question-submit-btn min-h-[44px] flex-1 px-[16px] py-[8px] text-[13px] font-medium font-sans opacity-60 cursor-not-allowed"
+					class="question-submit-btn font-medium font-sans opacity-60 cursor-not-allowed"
 					disabled
 				>
 					Submitting&hellip;
@@ -449,8 +446,8 @@
 		{:else}
 			<div class="question-resolved text-[13px] py-[8px]">
 				{#if resolved === "skipped"}
-					<span class="question-resolved-skip text-error"
-						>Skipped &#x2717;</span
+					<span class="question-resolved-skip text-text-dimmer"
+						>Skipped</span
 					>
 				{:else}
 					<span class="question-resolved-ok text-success"
@@ -461,3 +458,45 @@
 		{/if}
 	</Surface>
 </div>
+
+<style>
+	.question-form :global(.question-option) {
+		border: 0;
+	}
+	.question-form :global(.question-option:has(input:checked)) {
+		background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+	}
+	.question-form :global(input[type="radio"]),
+	.question-form :global(input[type="checkbox"]) {
+		appearance: none;
+		position: relative;
+		width: 13px;
+		height: 13px;
+		border: 1.5px solid var(--color-text-dimmer);
+		background: transparent;
+	}
+	.question-form :global(input[type="radio"]) {
+		border-radius: 50%;
+	}
+	.question-form :global(input[type="checkbox"]) {
+		border-radius: 3px;
+	}
+	.question-form :global(input:checked) {
+		border-color: var(--color-accent);
+		background: var(--color-accent);
+	}
+	.question-form :global(input[type="radio"]:checked) {
+		box-shadow: inset 0 0 0 3px var(--color-bg-surface);
+	}
+	.question-form :global(input[type="checkbox"]:checked)::after {
+		content: "";
+		position: absolute;
+		left: 3px;
+		top: 0;
+		width: 4px;
+		height: 7px;
+		border: solid var(--color-bg);
+		border-width: 0 1.5px 1.5px 0;
+		transform: rotate(45deg);
+	}
+</style>

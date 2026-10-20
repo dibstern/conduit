@@ -209,9 +209,9 @@ type VariantRecipe = {
 
 export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 	"capsule-primary": {
-		chrome: "bg-accent-bg",
+		chrome: "bg-accent/18",
 		tone: "text-accent",
-		hoverFill: "hover:bg-accent-bg",
+		hoverFill: "hover:bg-accent/18",
 	},
 	chip: {
 		chrome: "bg-chip",
@@ -475,9 +475,11 @@ export type ButtonSize =
 	| "composer-action"
 	| "composer-chip";
 
-/** Shared by disclosure and navigation rows in the transcript's step log. */
-export const TRANSCRIPT_ROW_CLASSES =
-	"flex items-center gap-[8px] w-full min-w-0 min-h-[44px] md:min-h-[28px] py-[3px] px-0 text-[13px] text-left";
+const TOUCH_TARGET_CLASSES =
+	"relative before:absolute before:content-[''] before:left-1/2 before:top-1/2 before:-translate-x-1/2 before:-translate-y-1/2 before:size-full before:min-h-[44px] before:min-w-[44px]";
+
+/** Final's 26px step rows keep a 44px phone target outside the visible row. */
+export const TRANSCRIPT_ROW_CLASSES = `flex items-center gap-[8px] w-full min-w-0 h-[26px] py-0 px-0 text-[12.5px] font-normal text-left ${TOUCH_TARGET_CLASSES} md:before:hidden`;
 
 export type ButtonAlign = keyof typeof ALIGN_CLASSES;
 
@@ -499,9 +501,6 @@ export type ButtonAlign = keyof typeof ALIGN_CLASSES;
 // nine controls dissented on how far a dead button should dim, and none of
 // them could win against a BASE utility. It is now `disabledStyle` — see
 // DISABLED_CLASSES in button-recipes.ts.
-const TOUCH_TARGET_CLASSES =
-	"relative before:absolute before:content-[''] before:left-1/2 before:top-1/2 before:-translate-x-1/2 before:-translate-y-1/2 before:size-full before:min-h-[44px] before:min-w-[44px]";
-
 const BASE_CLASSES =
 	"no-underline cursor-pointer transition-colors " +
 	// Neutral, not accent. An accent ring against an accent-filled button

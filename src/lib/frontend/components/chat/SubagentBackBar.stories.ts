@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect, within } from "storybook/test";
 import { clearSessionState } from "../../stores/session.svelte.js";
 import { mockSession, mockSubagentSession } from "../../stories/mocks.js";
 import { openSessionForSetup } from "../../stories/session-setup.js";
@@ -44,6 +45,28 @@ export const Default: Story = {
 	beforeEach: () => {
 		seedSessions([mockSession, mockSubagentSession]);
 		openSessionForSetup(mockSubagentSession.id, "conduit");
+	},
+	play: async ({ canvasElement }) => {
+		const button = within(canvasElement).getByRole("button", {
+			name: /Parent/,
+		});
+		expect(button).toHaveTextContent("Parent");
+		expect(button).not.toHaveTextContent("PARENT");
+		expect(button.getBoundingClientRect().height).toBe(28);
+		const style = getComputedStyle(button);
+		expect(Number.parseFloat(style.borderRadius)).toBeGreaterThanOrEqual(
+			button.getBoundingClientRect().height / 2,
+		);
+		expect(style.fontFamily).not.toMatch(/mono/i);
+		const expected = document.createElement("span").style;
+		expected.color = style.getPropertyValue("--color-accent");
+		expect(style.color).toBe(expected.color);
+		expect(style.backgroundColor).not.toBe(expected.color);
+		const hint = button.querySelector("kbd");
+		if (!hint) throw new Error("Missing Esc hint");
+		expect(hint).toHaveTextContent("Esc");
+		expected.color = style.getPropertyValue("--color-text-dimmer");
+		expect(getComputedStyle(hint).color).toBe(expected.color);
 	},
 };
 

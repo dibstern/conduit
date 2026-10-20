@@ -63,28 +63,28 @@
 </script>
 
 <div data-message-id={message?.messageId} class="assistant-header group/header grid grid-cols-[20px_minmax(0,1fr)] items-start gap-x-[8px] md:grid-cols-[28px_minmax(0,1fr)] md:gap-x-[14px]">
-	<span aria-hidden="true" class="grid size-[20px] place-items-center rounded-[6px] md:size-[28px] md:rounded-[8px] {providerId === 'claude' ? 'bg-harness-claude text-white [&_g]:fill-current' : 'bg-bg-raised'}">
-		<Icon name={provider?.logo ?? "bot"} size={18} />
+	<span aria-hidden="true" class="mt-[4px] grid size-[20px] place-items-center rounded-[6px] md:mt-0 md:size-[28px] md:rounded-[8px] {providerId === 'claude' ? 'bg-harness-claude text-white [&_g]:fill-current' : 'bg-bg-raised'}">
+		<Icon name={provider?.logo ?? "bot"} size={providerId === "claude" ? 14 : 18} class={providerId === "claude" ? "size-[12px] md:size-[14px]" : ""} />
 	</span>
 	<div class="flex min-h-[28px] min-w-0 flex-wrap items-center gap-x-[8px] gap-y-[4px] text-[13.5px] font-semibold">
 		<!-- Mixed fonts and sizes: share a baseline, not a box centre. -->
 		<span class="flex min-w-0 items-baseline gap-x-[8px]">
 			<span>{provider?.label ?? "Assistant"}</span>
-			{#if model}<span class="min-w-0 truncate font-mono text-[12px] font-normal text-text-dimmer">{getModelDisplayName(model)}</span>{/if}
+			{#if model}<span class="min-w-0 truncate font-mono text-mono-xs font-normal text-text-dimmer">{getModelDisplayName(model)}</span>{/if}
 			{#if (createdAt ?? message?.createdAt) != null}
 				<span aria-hidden="true" class="font-normal text-text-dimmer">·</span>
 				<MessageTime createdAt={createdAt ?? message?.createdAt} />
 			{/if}
 		</span>
 		{#if message?.finalized}
-			<div class="msg-actions ml-auto flex items-center gap-[2px] opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 group-hover/header:opacity-100 group-focus-within/header:opacity-100 touch:opacity-100" class:opacity-100={copyState !== "idle" || menuOpen}>
-				<Button variant="ghost" size="content" tone={copyState === "done" ? "success" : "dimmer"} iconOnly icon={copyState === "done" ? "check" : "copy"} iconSize={14} touchTarget class="size-[28px]" title={copyLabel} ariaLabel={copyLabel} onclick={copyMessage} />
+			<div class="msg-actions ml-auto flex items-center gap-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 group-hover/header:opacity-100 group-focus-within/header:opacity-100 touch:opacity-100" class:opacity-100={copyState !== "idle" || menuOpen}>
+				<Button variant="ghost" size="content" tone={copyState === "done" ? "success" : "dimmer"} iconOnly icon={copyState === "done" ? "check" : "copy"} iconSize={14} touchTarget class="size-[26px]" title={copyLabel} ariaLabel={copyLabel} onclick={copyMessage} />
 				{#if forkMessageId}
-					<Button variant="ghost" size="content" tone="dimmer" iconOnly icon="git-fork" iconSize={14} touchTarget class="size-[28px]" title="Fork from here" ariaLabel="Fork from here" onclick={forkMessage} />
+					<Button variant="ghost" size="content" tone="dimmer" iconOnly icon="git-fork" iconSize={14} touchTarget class="size-[26px]" title="Fork from here" ariaLabel="Fork from here" onclick={forkMessage} />
 				{/if}
 				<Menu bind:open={menuOpen} align="end" ariaLabel="Message actions">
 					{#snippet trigger({ props })}
-						<Button {...props} variant="ghost" size="content" tone="dimmer" iconOnly icon="ellipsis" iconSize={16} touchTarget class="size-[28px]" ariaLabel="More message actions" />
+						<Button {...props} variant="ghost" size="content" tone="dimmer" iconOnly icon="ellipsis" iconSize={14} touchTarget class="size-[26px]" ariaLabel="More message actions" />
 					{/snippet}
 					<MenuItem onselect={copyMessage}>Copy message</MenuItem>
 					{#if forkMessageId}<MenuItem onselect={forkMessage}>Fork from here</MenuItem>{/if}
