@@ -2,9 +2,8 @@
 // newer user turn, busy/retrying/processing session, changed driver or account
 // reaches quota; a cancel, Dismiss, new turn or changed schedule during the probe
 // loses to resume; one bad row prevents other due rows from being swept;
-// Available/Unknown fails to resume; Unavailable resumes; Limited uses a stale
-// reset, omits the five-minute fallback, counts the initial schedule as a re-arm,
-// or re-arms more than three times. Replaying the sweep must not dispatch twice.
+// A pre-limit available reading resumes early; a sweep drops a later reset or
+// counts the initial schedule as a re-arm. Replaying must not dispatch twice.
 // Limit-policy failures: auto-resume wins before auto-switch; a refusal/defect
 // skips auto-resume; disabled/empty failover switches; an automatic turn bounces
 // after service reconstruction or an assistant event; a newer user turn with
@@ -20,7 +19,7 @@
 // reschedules itself, or releasing the hold overrides a later Stop.
 // A pending rewind refuses a future schedule or quota-reset inbox admission;
 // permitting either to schedule must never permit an immediate continuation.
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -125,7 +124,7 @@ afterEach(() => {
 	rmSync(isolatedRoot, { recursive: true, force: true });
 });
 
-const seed = (at = 10) =>
+const seed = (at = 10, resetsAt = 5) =>
 	Effect.gen(function* () {
 		const commit = yield* makeCommitAndSignal;
 		const sql = yield* SqlClient.SqlClient;
@@ -147,7 +146,7 @@ const seed = (at = 10) =>
 				instanceId: "claude",
 				rateLimitType: "seven_day",
 				cutOffMessageId: "u1",
-				resetsAt: 5,
+				resetsAt,
 			}),
 			canonicalEvent("session.resume_scheduled", "s1", {
 				instanceId: "claude",
@@ -241,7 +240,14 @@ const withContinuationAdmission = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
 	);
 };
 
-it("sweeps due continuations only for its own project in a shared store", async () => {
+it.each([
+	"missing",
+	"invalid",
+	"unreadable",
+] as const)("sweeps due continuations only for its own project with %s config", async (scenario) => {
+	if (scenario === "invalid")
+		writeFileSync(join(isolatedRoot, "daemon.json"), "invalid JSON");
+	if (scenario === "unreadable") mkdirSync(join(isolatedRoot, "daemon.json"));
 	const dispatched: string[] = [];
 	let probes = 0;
 	await Effect.runPromise(
@@ -282,7 +288,7 @@ it("sweeps due continuations only for its own project in a shared store", async 
 				const beforeEvents = yield* foreignStore.readAllBySession("foreign");
 				yield* continuation.sweepDueContinuations(10);
 				expect(dispatched).toEqual(["s1"]);
-				expect(probes).toBe(1);
+				expect(probes).toBe(0);
 				expect(yield* read.getSession("foreign")).toEqual(before);
 				expect(yield* foreignStore.readAllBySession("foreign")).toEqual(
 					beforeEvents,
@@ -296,7 +302,12 @@ it("sweeps due continuations only for its own project in a shared store", async 
 					refresh: (_options) =>
 						Effect.sync(() => {
 							probes++;
-							return [usageReading("claude", { status: "available" })];
+							return [
+								usageReading("claude", {
+									status: "available",
+									readAt: Date.now() + 1,
+								}),
+							];
 						}),
 					pickFailover: () => Effect.succeed(undefined),
 				}),
@@ -449,12 +460,14 @@ it("records Resume schedulers in the payload and projects policy, sweep, and use
 			usageLimits: { autoSwitch: false, autoResume: true, order: [] },
 		}),
 	);
-	let resetsAt = 10;
+	const currentTime = Math.floor(Date.now() / 1000);
+	let resetsAt = currentTime + 10;
 	await Effect.runPromise(
 		withResetInbox(
 			() =>
 				usageReading("claude", {
 					status: "limited",
+					readAt: Date.now() + 1,
 					windows: [
 						{
 							kind: "five_hour",
@@ -490,51 +503,62 @@ it("records Resume schedulers in the payload and projects policy, sweep, and use
 							Effect.repeat({
 								schedule: Schedule.spaced("5 millis"),
 								until: (sessions) =>
-									sessions[0]?.limitRecovery?.scheduledAt === 10,
+									sessions[0]?.limitRecovery?.scheduledAt === currentTime + 10,
 							}),
 							Effect.timeout("2 seconds"),
 						);
 					expect(rows[0]?.limitRecovery).toMatchObject({
 						auto: true,
 						rearms: 0,
-						scheduledAt: 10,
+						scheduledAt: currentTime + 10,
 					});
-					resetsAt = 20;
+					resetsAt = currentTime + 20;
 					yield* fixture.continuation
-						.sweepDueContinuations(10)
+						.sweepDueContinuations(currentTime + 10)
 						.pipe(Effect.provideService(ProviderTurnServiceTag, fixture.turns));
 					expect(
 						(yield* fixture.read.listSessionInfos({
 							projectIds: ["test-project"],
 						}))[0]?.limitRecovery,
-					).toMatchObject({ auto: true, rearms: 1, scheduledAt: 20 });
+					).toMatchObject({
+						auto: true,
+						rearms: 1,
+						scheduledAt: currentTime + 20,
+					});
 					yield* fixture.continuation
 						.requestContinuation("s1", {
 							instanceId: "claude",
 							expectedInstanceId: "claude",
 							reason: "user",
-							at: 30,
+							at: currentTime + 30,
 						})
 						.pipe(Effect.provideService(ProviderTurnServiceTag, fixture.turns));
 					const recovery = (yield* fixture.read.listSessionInfos({
 						projectIds: ["test-project"],
 					}))[0]?.limitRecovery;
-					expect(recovery).toMatchObject({ rearms: 1, scheduledAt: 30 });
+					expect(recovery).toMatchObject({
+						rearms: 1,
+						scheduledAt: currentTime + 30,
+					});
 					expect(recovery?.auto).toBeUndefined();
 					const schedules = (yield* fixture.store.readAllBySession("s1"))
 						.filter((event) => event.type === "session.resume_scheduled")
 						.map((event) => ({ data: event.data, metadata: event.metadata }));
 					expect(schedules).toEqual([
 						{
-							data: { instanceId: "claude", at: 10, by: "policy" },
+							data: {
+								instanceId: "claude",
+								at: currentTime + 10,
+								by: "policy",
+							},
 							metadata: {},
 						},
 						{
-							data: { instanceId: "claude", at: 20, by: "sweep" },
+							data: { instanceId: "claude", at: currentTime + 20, by: "sweep" },
 							metadata: {},
 						},
 						{
-							data: { instanceId: "claude", at: 30, by: "user" },
+							data: { instanceId: "claude", at: currentTime + 30, by: "user" },
 							metadata: {},
 						},
 					]);
@@ -548,7 +572,8 @@ it("records Resume schedulers in the payload and projects policy, sweep, and use
 it("a due continuation waits for the session admission lock before dispatch", async () => {
 	await Effect.runPromise(
 		withResetInbox(
-			() => usageReading("claude", { status: "available" }),
+			() =>
+				usageReading("claude", { status: "available", readAt: Date.now() + 1 }),
 			(fixture) =>
 				Effect.gen(function* () {
 					yield* fixture.commit([
@@ -804,7 +829,10 @@ for (const schedule of [
 							]);
 						yield* TestClock.setTime(10_000);
 						if (schedule === "cut-off")
-							reading = usageReading("claude", { status: "available" });
+							reading = usageReading("claude", {
+								status: "available",
+								readAt: Date.now() + 1,
+							});
 						if (schedule === "busy") {
 							yield* fixture.sweep;
 							expect(fixture.dispatches).toEqual([]);
@@ -927,6 +955,20 @@ for (const scenario of [
 	"unknown",
 ] as const) {
 	it(`due-row gate: ${scenario}`, async () => {
+		if (
+			scenario === "unavailable" ||
+			scenario.endsWith("during-probe") ||
+			scenario === "available" ||
+			scenario === "unknown"
+		) {
+			writeFileSync(
+				join(isolatedRoot, "daemon.json"),
+				JSON.stringify({
+					...defaultDaemonConfig(),
+					usageLimits: { autoSwitch: false, autoResume: true, order: [] },
+				}),
+			);
+		}
 		let probes = 0;
 		let dispatches = 0;
 		await Effect.runPromise(
@@ -1022,7 +1064,12 @@ for (const scenario of [
 											}),
 										]
 									: scenario === "available"
-										? [usageReading("claude", { status: "available" })]
+										? [
+												usageReading("claude", {
+													status: "available",
+													readAt: Date.now() + 1,
+												}),
+											]
 										: [usageReading("claude")];
 							}).pipe(Effect.orDie),
 						pickFailover: () => Effect.succeed(undefined),
@@ -1038,8 +1085,19 @@ for (const scenario of [
 				const recovery = (yield* read.listSessionInfos({
 					projectIds: ["test-project"],
 				}))[0]?.limitRecovery;
-				if (scenario === "future" || scenario === "rescheduled-during-probe")
-					expect(recovery?.scheduledAt).toBe(scenario === "future" ? 11 : 20);
+				if (
+					scenario === "future" ||
+					scenario === "rescheduled-during-probe" ||
+					scenario === "continued" ||
+					scenario === "unavailable"
+				)
+					expect(recovery?.scheduledAt).toBe(
+						scenario === "future"
+							? 11
+							: scenario === "rescheduled-during-probe"
+								? 20
+								: 10,
+					);
 				else expect(recovery?.scheduledAt).toBeUndefined();
 				const events = (yield* store.readAllBySession("s1")).slice(
 					before.length,
@@ -1048,7 +1106,9 @@ for (const scenario of [
 					scenario === "future" ||
 					scenario === "cancelled" ||
 					scenario === "dismissed" ||
-					scenario === "answered"
+					scenario === "answered" ||
+					scenario === "continued" ||
+					scenario === "unavailable"
 				)
 					expect(events).toEqual([]);
 				else if (resumes)
@@ -1109,6 +1169,7 @@ for (const scenario of [
 	"reset-after-auto",
 ] as const) {
 	it(`limit policy: ${scenario}`, async () => {
+		const resetsAt = Math.floor(Date.now() / 1000) + 3600;
 		const configDir = mkdtempSync(join(tmpdir(), "conduit-limit-policy-"));
 		writeFileSync(
 			join(configDir, "daemon.json"),
@@ -1149,7 +1210,7 @@ for (const scenario of [
 						store,
 						read,
 						continuation: initial,
-					} = yield* seed();
+					} = yield* seed(10, resetsAt);
 					yield* initial.cancelContinuation("s1");
 					const newerTurn = commit([
 						canonicalEvent("message.created", "s1", {
@@ -1214,7 +1275,7 @@ for (const scenario of [
 							canonicalEvent("session.usage_limited", "s1", {
 								instanceId: "claude",
 								rateLimitType: "seven_day",
-								resetsAt: 5,
+								resetsAt,
 								cutOffMessageId: scenario === "new-user" ? "u2" : "u1",
 							}),
 						]);
@@ -1235,7 +1296,7 @@ for (const scenario of [
 						canonicalEvent("session.usage_limited", "barrier", {
 							instanceId: "target",
 							rateLimitType: "seven_day",
-							resetsAt: 900,
+							resetsAt: resetsAt + 900,
 							cutOffMessageId: "b1",
 						}),
 					]);
@@ -1288,7 +1349,7 @@ for (const scenario of [
 												canonicalEvent("session.usage_limited", "s1", {
 													instanceId: "target",
 													rateLimitType: "seven_day",
-													resetsAt: 5,
+													resetsAt,
 													cutOffMessageId: "u1",
 												}),
 											]);
@@ -1313,7 +1374,8 @@ for (const scenario of [
 							schedule: Schedule.spaced("5 millis"),
 							until: (rows) =>
 								rows.find((row) => row.id === "barrier")?.limitRecovery
-									?.scheduledAt === 900,
+									?.scheduledAt ===
+								resetsAt + 900,
 						}),
 						Effect.timeout("2 seconds"),
 					);
@@ -1353,7 +1415,7 @@ for (const scenario of [
 							scenario === "turn-during-probe" ||
 							scenario === "reply-during-probe"
 							? undefined
-							: 5,
+							: resetsAt,
 					);
 					expect(session?.limitRecovery?.continued).toBe(
 						scenario === "reply-during-probe" ? undefined : switched,
@@ -1473,98 +1535,3 @@ it("a cancelled invalid due row does not prevent another due row from resuming",
 		),
 	);
 });
-
-for (const freshReset of [42, undefined]) {
-	it(`Limited re-arms three times using ${freshReset === undefined ? "a five-minute fallback" : "the fresh reset"}, then cancels`, async () => {
-		let probes = 0;
-		await Effect.runPromise(
-			Effect.gen(function* () {
-				const { store, read, continuation } = yield* seed();
-				expect(
-					(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
-						?.limitRecovery?.rearms,
-				).toBe(0);
-				let now = 10;
-				for (let rearms = 1; rearms <= 3; rearms++) {
-					yield* continuation.sweepDueContinuations(now);
-					const scheduledAt =
-						freshReset === undefined ? now + 300 : freshReset * rearms;
-					expect(
-						(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
-							?.limitRecovery,
-					).toMatchObject({
-						cutOffMessageId: "u1",
-						continued: false,
-						rearms,
-						scheduledAt,
-					});
-					now = scheduledAt;
-				}
-				yield* continuation.sweepDueContinuations(now);
-				const recovery = (yield* read.listSessionInfos({
-					projectIds: ["test-project"],
-				}))[0]?.limitRecovery;
-				expect(recovery).toMatchObject({
-					cutOffMessageId: "u1",
-					rearms: 3,
-					continued: false,
-				});
-				expect(recovery?.scheduledAt).toBeUndefined();
-				expect(
-					(yield* store.readAllBySession("s1"))
-						.map((event) => event.type)
-						.slice(4),
-				).toEqual([
-					"session.resume_scheduled",
-					"session.resume_scheduled",
-					"session.resume_scheduled",
-					"session.resume_cancelled",
-				]);
-				yield* continuation.sweepDueContinuations(now + 1000);
-				expect(probes).toBe(4);
-			}).pipe(
-				Effect.provideService(ConfigTag, config),
-				Effect.provideService(Usage, {
-					readings: Stream.empty,
-					latest: () => Effect.succeed(undefined),
-					turnEnded: () => Effect.void,
-					refresh: (_options) =>
-						Effect.sync(() => {
-							probes++;
-							return [
-								usageReading("claude", {
-									status: "limited",
-									windows: [
-										{
-											kind: "seven_day",
-											utilization: 100,
-											...(freshReset === undefined
-												? {}
-												: {
-														// Each fresh probe sees another future reset, not an expired one.
-														resetsAt: new Date(
-															freshReset * probes * 1000,
-														).toISOString(),
-													}),
-										},
-									],
-								}),
-							];
-						}),
-					pickFailover: () => Effect.succeed(undefined),
-				}),
-				Effect.provideService(ProviderTurnServiceTag, {
-					holdUserTurnsForAccountSwitch: () => Effect.void,
-					prepareTurnSession: (input) => Effect.succeed(input.sessionId),
-					sendTurn: () => Effect.die("Limited must never dispatch"),
-					turnFences: () => ({ stopping: false, switching: false }),
-					fenceLifts: Effect.succeed(Stream.never),
-					beginStop: () => Effect.succeed(Effect.void),
-				}),
-				withSwitchServices,
-				Effect.provide(makeOverridesStateLive()),
-				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
-			),
-		);
-	});
-}

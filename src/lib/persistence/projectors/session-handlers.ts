@@ -601,7 +601,25 @@ export const sessionHandlers = {
 
 	"session.usage_limited": (event) => [
 		{
-			sql: "UPDATE sessions SET limit_recovery = ?, updated_at = ? WHERE id = ?",
+			// Replies clear Limit Recovery. Use the canonical trail so the guard
+			// also survives a streamed reply, held-only Resume, and replay.
+			sql: `UPDATE sessions SET limit_recovery = json_patch(?, CASE WHEN EXISTS (
+				SELECT 1 FROM events resumed JOIN events limited ON limited.sequence = (
+					SELECT sequence FROM events WHERE session_id = resumed.session_id
+					AND type = 'session.usage_limited' AND sequence < resumed.sequence
+					ORDER BY sequence DESC LIMIT 1
+				)
+				WHERE resumed.sequence = (
+					SELECT sequence FROM events WHERE session_id = ?
+					AND type = 'session.resumed' AND sequence < ?
+					ORDER BY sequence DESC LIMIT 1
+				)
+				AND json_extract(resumed.data, '$.instanceId') = ?
+				AND json_extract(limited.data, '$.instanceId') = ?
+				AND json_extract(limited.data, '$.rateLimitType') = ?
+				AND resumed.created_at < json_extract(limited.data, '$.resetsAt') * 1000
+				AND ? < json_extract(limited.data, '$.resetsAt') * 1000
+			) THEN '{"timeOnly":true}' ELSE '{}' END), updated_at = ? WHERE id = ?`,
 			params: [
 				JSON.stringify({
 					...event.data,
@@ -609,6 +627,12 @@ export const sessionHandlers = {
 					rearms: 0,
 					continued: false,
 				}),
+				event.sessionId,
+				event.sequence,
+				event.data.instanceId,
+				event.data.instanceId,
+				event.data.rateLimitType,
+				event.createdAt,
 				event.createdAt,
 				event.sessionId,
 			],
