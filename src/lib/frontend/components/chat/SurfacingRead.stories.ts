@@ -131,6 +131,52 @@ export const MixedRead: Story = {
 		await expect(
 			canvas.queryByTestId("surfacing-mark-read"),
 		).not.toBeInTheDocument();
+		for (const selector of [
+			'.pin-chip[data-category="finding"] .glyph',
+			".pin-chip.seen:not(.current)",
+			".surface-axis",
+			".turn-duration",
+			".turn-activity-toggle svg",
+			'[data-testid="surfacing-minimise-toggle"] svg',
+		]) {
+			const element = canvasElement.querySelector(selector);
+			if (!element) throw new Error(`Missing quiet element ${selector}`);
+			const style = getComputedStyle(element);
+			const expected = new Option().style;
+			expected.color = style.getPropertyValue("--color-text-dimmer");
+			await expect(style.color).toBe(expected.color);
+		}
+		const verb = canvas.getByText("Worked", { exact: true });
+		const ink = new Option().style;
+		ink.color = getComputedStyle(verb).getPropertyValue("--color-text");
+		await expect(getComputedStyle(verb).color).toBe(ink.color);
+		await expect(getComputedStyle(verb).fontSize).toBe("14px");
+		await expect(getComputedStyle(verb).fontWeight).toBe("600");
+		const summary = canvas
+			.getAllByTestId("surfacing-summary-generate")
+			.find((element) => element.getBoundingClientRect().width > 0);
+		if (!summary) throw new Error("Missing summary control");
+		const style = getComputedStyle(summary);
+		await expect(style.color).toBe(ink.color);
+		await expect(style.fontWeight).toBe("500");
+		if (window.matchMedia("(max-width: 599px)").matches) {
+			await expect(style.fontSize).toBe("14px");
+			await expect(summary.getBoundingClientRect().height).toBe(38);
+			await expect(style.marginTop).toBe("10px");
+			await expect(style.borderRadius).toBe("11px");
+			await expect(style.paddingLeft).toBe("12px");
+			await expect(style.paddingRight).toBe("8px");
+			ink.backgroundColor = style.getPropertyValue("--color-bg");
+			await expect(style.backgroundColor).toBe(ink.backgroundColor);
+			const toggle = verb.closest("button");
+			if (!toggle) throw new Error("Missing turn head toggle");
+			await expect(toggle.querySelector(".truncate")).not.toBeVisible();
+			await expect(toggle.scrollWidth).toBeLessThanOrEqual(toggle.clientWidth);
+		} else {
+			await expect(style.fontSize).toBe("13px");
+			await expect(style.lineHeight).toBe("normal");
+			await expect(summary.getBoundingClientRect().height).toBe(24);
+		}
 	},
 };
 export const MixedReadLight: Story = {

@@ -103,6 +103,25 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 			"storybook play() guard that narrows the recap prose query, not executable production code",
 	},
 	{
+		path: "src/lib/frontend/components/chat/TurnActivity.stories.ts",
+		snippetPattern: /Missing fixture for|Missing segment/,
+		reason:
+			"storybook play() guards that narrow strip fixtures and segments, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/chat/SurfacingRead.stories.ts",
+		snippetPattern:
+			/Missing quiet element|Missing summary control|Missing turn head toggle/,
+		reason:
+			"storybook play() guards that narrow turn style queries, not executable production code",
+	},
+	{
+		path: "src/lib/frontend/components/chat/SurfacingMarks.stories.ts",
+		snippetPattern: /Missing neutral pin or type label/,
+		reason:
+			"storybook play() guard that narrows neutral pin and label queries, not executable production code",
+	},
+	{
 		path: "src/lib/frontend/components/input/InputArea.stories.ts",
 		snippetPattern: /Composer is missing/,
 		reason:
