@@ -306,15 +306,6 @@ export const makeProjectionRunnerEffect = (
 							deferredMessageStamps,
 						};
 						for (const event of events) {
-							// Stamping also syncs a fork point's clock, which needs the
-							// row: take a pending stamp before its message is deleted.
-							if (
-								event.type === "message.removed" &&
-								deferredMessageStamps.delete(event.data.messageId)
-							)
-								touches.push(
-									yield* stampMessage([event.data.messageId], { version }),
-								);
 							const matching = projectorsByEventType.get(event.type) ?? [];
 							for (const projector of matching) {
 								touches.push(yield* projector.project(event, ctx));
