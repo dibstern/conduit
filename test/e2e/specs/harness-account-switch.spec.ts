@@ -1738,7 +1738,7 @@ for (const scenario of [
 				const dividerAboveReply = async (): Promise<void> => {
 					await expect(strip).toHaveCount(0);
 					await expect(divider).toHaveText(
-						`↻ Resumed on Reset account after reset · ${formatSnoozeTime(resume.at)}`,
+						`↻ Resumed on Reset account after reset · ${await page.evaluate(formatSnoozeTime, resume.at)}`,
 					);
 					await expect(reply).toBeVisible();
 					const [dividerBox, replyBox] = await Promise.all([
@@ -2000,7 +2000,7 @@ for (const scenario of ["auto", "restart", "no-reset", "off"] as const) {
 			if (!resume) throw new Error("No reset resume");
 			await expect(strip).toHaveCount(0);
 			await expect(page.getByTestId("transcript-divider")).toHaveText(
-				`↻ Resumed on Reset account after reset · ${formatSnoozeTime(resume.at)}`,
+				`↻ Resumed on Reset account after reset · ${await page.evaluate(formatSnoozeTime, resume.at)}`,
 			);
 			await expect(
 				page

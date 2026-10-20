@@ -117,11 +117,12 @@ test("the auto-settle outlook reads the same with or without a viewer", async ({
 		await expect.poll(read).toEqual(scheduled);
 		await page.setViewportSize({ width: 393, height: 852 });
 		await page.getByTestId("session-bar-island-overflow").click();
+		const formattedAt = await page.evaluate(formatSnoozeTime, at);
 		await expect(
 			page
 				.getByTestId("session-ctx-auto-settle")
 				.locator("[data-switch-status]"),
-		).toHaveText(`On · settles ${formatSnoozeTime(at)} if left idle`);
+		).toHaveText(`On · settles ${formattedAt} if left idle`);
 		await page.getByTestId("session-sheet-close").click();
 		// The open page holds the sweep back, but not the outlook.
 		expect(await sweep(at + 1)).toBe(0);

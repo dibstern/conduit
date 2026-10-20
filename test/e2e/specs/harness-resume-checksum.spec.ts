@@ -306,6 +306,12 @@ test("a resume is checked against the server, and the server wins", async ({
 	);
 	await expect(title).toHaveText("Resume check", { timeout: 30_000 });
 	await expect(page.locator("#messages")).toContainText(replyEnd("base", 1));
+	await expect
+		.poll(() => page.evaluate(() => localStorage.getItem("conduit-avatar")))
+		.not.toBeNull();
+	const avatarProfile = await page.evaluate(() =>
+		localStorage.getItem("conduit-avatar"),
+	);
 
 	const cold = async () => {
 		const context = await browser.newContext({
@@ -321,9 +327,16 @@ test("a resume is checked against the server, and the server wins", async ({
 		await expect(
 			fresh.locator("#messages .msg-assistant").first(),
 		).toBeVisible();
+		// A new context has no cached avatar until the daemon profile arrives.
+		await expect
+			.poll(() => fresh.evaluate(() => localStorage.getItem("conduit-avatar")))
+			.toBe(avatarProfile);
 		const view = {
 			transcript: await transcriptOf(fresh),
 			sidebar: await sidebarOf(fresh),
+			avatarText: await fresh
+				.locator('#messages [data-testid="user-avatar"]')
+				.allTextContents(),
 		};
 		await context.close();
 		return view;
@@ -411,6 +424,12 @@ test("a resume is checked against the server, and the server wins", async ({
 			).length,
 			resentBase: frames.some(({ text }) => text.includes(replyEnd("base", 0))),
 			mismatches: mismatches.length - mismatchesBefore,
+			avatarText: {
+				tab: await page
+					.locator('#messages [data-testid="user-avatar"]')
+					.allTextContents(),
+				cold: coldView.avatarText,
+			},
 			transcriptEqualsCold: view.transcript === coldView.transcript,
 			sidebarEqualsCold:
 				JSON.stringify(view.sidebar) === JSON.stringify(coldView.sidebar),
