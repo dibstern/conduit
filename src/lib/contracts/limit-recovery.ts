@@ -92,6 +92,10 @@ export const LimitRecoverySchema = Schema.Struct({
 	rateLimitType: Schema.String,
 	/** Unix seconds, as reported by the Claude SDK. */
 	resetsAt: Schema.optional(Schema.Number),
+	/** Epoch milliseconds, from the session.usage_limited event's creation time. */
+	limitedAt: Schema.optional(Schema.Number),
+	/** Wait for the reset time even when a Usage Reading appears free. */
+	timeOnly: Schema.optional(Schema.Boolean),
 	cutOffMessageId: Schema.optional(Schema.String),
 	scheduledAt: Schema.optional(Schema.Number),
 	/** The limit policy scheduled the resume, not the user. */

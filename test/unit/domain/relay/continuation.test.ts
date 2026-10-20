@@ -118,12 +118,14 @@ it("records one limit per user turn, closes only the cut-off on Dismiss, and cle
 							events.filter((event) => event.type === "session.usage_limited"),
 						),
 					);
-			expect(yield* limits()).toHaveLength(1);
+			const limitEvents = yield* limits();
+			expect(limitEvents).toHaveLength(1);
 			expect(
 				(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
 					?.limitRecovery,
 			).toEqual({
 				...signal,
+				limitedAt: limitEvents[0]?.createdAt,
 				rearms: 0,
 				continued: false,
 			});
@@ -137,6 +139,7 @@ it("records one limit per user turn, closes only the cut-off on Dismiss, and cle
 				instanceId: "account-1",
 				rateLimitType: "seven_day",
 				resetsAt: 1791234000,
+				limitedAt: limitEvents[0]?.createdAt,
 				rearms: 0,
 				continued: false,
 			});

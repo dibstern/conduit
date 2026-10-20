@@ -104,6 +104,46 @@ describe("SessionProjector", () => {
 		expect(projector.handles).toBe(SESSION_HANDLED_TYPES);
 	});
 
+	it("projects limitedAt from the usage_limited event's createdAt on replay", async () => {
+		const events = [
+			makeStored(
+				"session.created",
+				"s1",
+				{ sessionId: "s1", title: "Limited", provider: "account-1" },
+				1,
+				now,
+			),
+			makeStored(
+				"session.usage_limited",
+				"s1",
+				{
+					instanceId: "account-1",
+					rateLimitType: "five_hour",
+					resetsAt: now / 1_000 + 60,
+					cutOffMessageId: "u1",
+				},
+				2,
+				now + 20,
+			),
+		];
+		for (let replay = 0; replay < 2; replay++) {
+			await harness.reproject(events);
+			const row = await queryOne<{ limit_recovery: string }>(
+				"SELECT limit_recovery FROM sessions WHERE id = ?",
+				["s1"],
+			);
+			expect(JSON.parse(row?.limit_recovery ?? "null")).toEqual({
+				instanceId: "account-1",
+				rateLimitType: "five_hour",
+				resetsAt: now / 1_000 + 60,
+				cutOffMessageId: "u1",
+				limitedAt: now + 20,
+				rearms: 0,
+				continued: false,
+			});
+		}
+	});
+
 	describe("session.deleted", () => {
 		it("deletes the session row", async () => {
 			await project(
