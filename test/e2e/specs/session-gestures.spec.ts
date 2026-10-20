@@ -495,7 +495,7 @@ test.describe("phone", () => {
 		await expect(row).toBeVisible();
 	});
 
-	test("phone: title sheet shares sidebar commands and works without the list mounted", async ({
+	test("phone: overflow sheet shares sidebar commands and works without the list mounted", async ({
 		page,
 		relayUrl,
 	}) => {
@@ -516,23 +516,23 @@ test.describe("phone", () => {
 		const sessionId = await row.getAttribute("data-session-id");
 		await gotoRelay(page, new URL(`/s/${sessionId}`, relayUrl).toString());
 		await expect(page.locator("#sidebar")).toBeHidden();
-		const trigger = page.getByTestId("session-bar-title-menu");
+		const trigger = page.getByTestId("session-bar-island-overflow");
 		await trigger.click();
-		const sheet = page.getByTestId("session-action-sheet");
+		const sheet = page.getByTestId("session-bar-island-menu");
 		await expect(sheet).toBeVisible();
 		const box = await sheet.boundingBox();
 		expect(box?.x).toBe(0);
 		expect(box?.width).toBe(393);
 		expect((box?.y ?? 0) + (box?.height ?? 0)).toBe(852);
 		await expect(page.getByTestId("menu-sheet-scrim")).toBeVisible();
-		const titleCommands = await sheet
+		const overflowCommands = await sheet
 			.locator(
 				'[data-testid^="session-ctx-"]:is([role="menuitem"], [role="menuitemcheckbox"])',
 			)
 			.evaluateAll((items) =>
 				items.map((item) => item.getAttribute("data-testid")),
 			);
-		expect(titleCommands).toEqual(
+		expect(overflowCommands).toEqual(
 			listCommands.filter((id) => id !== "session-ctx-select"),
 		);
 		await page.keyboard.press("Escape");

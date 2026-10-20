@@ -107,7 +107,6 @@ Scenario Outline: Every phone session sheet omits an unknown branch
 Examples:
   | entry    |
   | overflow |
-  | chevron  |
   | list     |
 
 # The collapse is a walk through the state machine rather than four separate
@@ -269,23 +268,6 @@ Examples:
   | theme | baseline                            | threshold |
   | dark  | session-sheet-disabled-reason-dark  | 98        |
   | light | session-sheet-disabled-reason-light | 98        |
-
-Scenario Outline: The title chevron sheet shares the body and Debug footer
-  Given the viewport is a phone
-  And the session sheet theme is <theme>
-  And the conduit app is served with the long-transcript mockup
-  And the phone session sheet state is idle
-  And I enable the desktop Debug action
-  When I open the chevron session sheet
-  Then the session sheet has the shared grids and 4 Session tiles
-  And the session sheet footer is chevron with Debug on
-  And the auto-settle status line is On · settles Sat 9:41 AM if left idle
-  And the session-sheet region visually matches <baseline> at <threshold> percent
-
-Examples:
-  | theme | baseline                          | threshold |
-  | dark  | session-sheet-chevron-debug-dark  | 98        |
-  | light | session-sheet-chevron-debug-light | 98        |
 
 Scenario Outline: The session list long-press sheet has five Session tiles and no footer
   Given the viewport is a phone

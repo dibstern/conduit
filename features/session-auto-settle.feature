@@ -166,5 +166,4 @@ Scenario Outline: Every phone sheet reads and saves the outlook
 Examples:
   | sheet    |
   | overflow |
-  | chevron  |
   | list     |

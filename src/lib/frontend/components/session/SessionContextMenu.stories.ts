@@ -235,11 +235,9 @@ export const PhoneWithFooter: Story = {
 	args: { ...PhoneDefault.args, selectable: false, withFooter: true },
 	play: async () => {
 		const menu = await phoneMenu();
-		await expect(within(menu).getByTestId("session-title-share")).toBeVisible();
-		await expect(
-			within(menu).getByTestId("session-title-settings"),
-		).toBeVisible();
-		expect(within(menu).queryByTestId("session-title-debug")).toBeNull();
+		await expect(within(menu).getByTestId("overflow-share")).toBeVisible();
+		await expect(within(menu).getByTestId("overflow-settings")).toBeVisible();
+		expect(within(menu).queryByTestId("overflow-debug")).toBeNull();
 		await expect(
 			within(menu)
 				.getByRole("group", { name: "Session" })
@@ -373,9 +371,7 @@ export const PhoneDebugFooter: Story = {
 	args: { ...PhoneWithFooter.args, debug: true },
 	play: async () => {
 		await phoneMenu();
-		const debug = await within(document.body).findByTestId(
-			"session-title-debug",
-		);
+		const debug = await within(document.body).findByTestId("overflow-debug");
 		await expect(debug).toHaveAccessibleName("Debug panel");
 		await expect(debug).toHaveTextContent(/Debug\s*dev/);
 	},

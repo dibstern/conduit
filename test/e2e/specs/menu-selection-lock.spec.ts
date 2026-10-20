@@ -81,8 +81,8 @@ test("phone: scrolling the session sheet, then tapping an item, keeps chat text 
 	await app.sendMessage("Hello, reply with just the word pong");
 	await new ChatPage(page).waitForStreamingComplete();
 
-	await page.getByTestId("session-bar-title-menu").tap();
-	const sheet = page.getByTestId("session-action-sheet");
+	await page.getByTestId("session-bar-island-overflow").tap();
+	const sheet = page.getByTestId("session-bar-island-menu");
 	await expect(sheet).toBeVisible();
 	await expect(page.getByTestId("menu-sheet-scrim")).toHaveCSS(
 		"pointer-events",

@@ -169,7 +169,7 @@ export const sessionSheetsHandlers: StepHandler[] = [
 	},
 	{
 		name: "open phone session sheet",
-		match: /^I open the (overflow|chevron|list) session sheet$/,
+		match: /^I open the (overflow|list) session sheet$/,
 		run: async ({ world, match }) => {
 			if (match[1] === "list") {
 				const sessionId = new URL(world.page.url()).pathname.split("/")[2];
@@ -177,13 +177,7 @@ export const sessionSheetsHandlers: StepHandler[] = [
 				if (!sessionId) throw new Error("No session is open");
 				await longPressSessionRow(world.page, sessionId);
 			} else {
-				await world.page
-					.getByTestId(
-						match[1] === "chevron"
-							? "session-bar-title-menu"
-							: "session-bar-island-overflow",
-					)
-					.click();
+				await world.page.getByTestId("session-bar-island-overflow").click();
 			}
 			await expect(world.page.locator(sheetSelector)).toBeVisible();
 		},
@@ -276,7 +270,7 @@ export const sessionSheetsHandlers: StepHandler[] = [
 	{
 		name: "assert session sheet footer",
 		match:
-			/^the session sheet footer is (absent|overflow|chevron) with Debug (on|off)$/,
+			/^the session sheet footer is (absent|overflow) with Debug (on|off)$/,
 		run: async ({ world, match }) => {
 			const sheet = world.page.locator(sheetSelector);
 			const footer = sheet.locator("[data-sheet-footer]");
@@ -289,14 +283,13 @@ export const sessionSheetsHandlers: StepHandler[] = [
 				return;
 			}
 			await expect(footer).toBeVisible();
-			const prefix = match[1] === "overflow" ? "overflow" : "session-title";
-			await expect(footer.getByTestId(`${prefix}-share`)).toHaveAccessibleName(
+			await expect(footer.getByTestId("overflow-share")).toHaveAccessibleName(
 				"Share",
 			);
 			await expect(
-				footer.getByTestId(`${prefix}-settings`),
+				footer.getByTestId("overflow-settings"),
 			).toHaveAccessibleName("Settings");
-			const debug = footer.getByTestId(`${prefix}-debug`);
+			const debug = footer.getByTestId("overflow-debug");
 			if (match[2] === "on") {
 				await expect(debug).toHaveAccessibleName("Debug panel");
 				await expect(debug).toHaveText(/Debug\s*dev/);

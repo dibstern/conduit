@@ -2112,7 +2112,7 @@ test.describe("Claude replay lane", () => {
 						)?.resumeSessionId,
 				)
 				.toBeTruthy();
-			await page.getByTestId("session-bar-title-menu").click();
+			await page.getByTestId("session-bar-overflow").click();
 			await page.getByTestId("session-ctx-fork").click();
 			await expect(page).not.toHaveURL(new RegExp(`${parentPath}$`));
 			await expect(page.locator(".fork-divider")).toContainText("Forked from");

@@ -250,7 +250,6 @@ export const Default: Story = {
 		);
 		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
 		expect(canvas.queryByTestId("session-bar-attention")).toBeNull();
-		expect(canvas.getByTestId("session-bar-title-menu")).toBeVisible();
 		expect(canvas.getByTestId("session-bar-island-overflow")).toBeVisible();
 		expect(canvas.queryByTestId("session-bar-overflow")).toBeNull();
 		expect(canvas.queryByTestId("session-bar-views")).toBeNull();
@@ -885,8 +884,7 @@ const mockInstances: OpenCodeInstance[] = [
 ];
 
 /**
- * The collapsed bar keeps its overflow while the expanded bar uses the title
- * and Views sheets.
+ * The collapsed bar keeps the same overflow sheet as the expanded bar.
  */
 export const OverflowMenuOpen: Story = {
 	args: { island: true },
@@ -920,24 +918,6 @@ export const OverflowMenuOpen: Story = {
 		).toHaveAttribute("aria-checked", "true");
 		// Debug is behind its feature flag.
 		expect(within(menu).queryByTestId("overflow-debug")).toBeNull();
-	},
-};
-
-export const TitleChevronSheet: Story = {
-	tags: ["viewport-capture"],
-	beforeEach: [
-		answerAutoSettle,
-		() => {
-			sessionViewState.compact = true;
-		},
-	],
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		await userEvent.click(canvas.getByTestId("session-bar-title-menu"));
-		const menu = await sessionSheet("session-action-sheet");
-		await expect(menu).toHaveClass(/bottom-0/);
-		await expect(within(menu).getByTestId("session-ctx-settle")).toBeVisible();
-		await expect(within(menu).getByTestId("session-title-share")).toBeVisible();
 	},
 };
 
@@ -1120,7 +1100,6 @@ export const PhoneTop: Story = {
 			"session-skills-chip",
 			"side-threads-control",
 			"session-bar-settle",
-			"session-bar-title-menu",
 			"session-bar-unread-chip",
 			"session-bar-island-overflow",
 			"session-goal-subtitle",
@@ -1133,7 +1112,6 @@ export const PhoneTop: Story = {
 					"session-skills-chip",
 					"side-threads-control",
 					"session-bar-settle",
-					"session-bar-title-menu",
 					"session-bar-unread-chip",
 					"session-goal-subtitle",
 				].includes(id)
@@ -1687,8 +1665,7 @@ export const BannersRowExpands: Story = {
 	},
 };
 
-// The desktop chips once spilled out of the title column: the ▾ painted over
-// them, and at this width they ran on over the skills chip and the identity.
+// Desktop task chips stay within the title column at narrow widths.
 export const DesktopBackgroundTasks: Story = {
 	args: { width: 700 },
 	// The chip ages fail contrast (conduit-test-srt8); every other rule stays on.
@@ -1738,22 +1715,12 @@ export const DesktopBackgroundTasks: Story = {
 			a.top < b.bottom &&
 			b.top < a.bottom;
 		const chips = box(tasks.firstElementChild ?? tasks);
-		// The ▾'s hit target overhangs by design; its icon is what must clear.
-		const menuIcon = canvas
-			.getByTestId("session-bar-title-menu")
-			.querySelector("svg");
 		for (const el of [
-			menuIcon,
-			...[
-				"session-bar-title",
-				"session-skills-chip",
-				"session-bar-overflow",
-			].map((id) => canvas.getByTestId(id)),
-		])
-			expect(
-				overlaps(chips, box(el ?? tasks)),
-				el?.outerHTML.slice(0, 60),
-			).toBe(false);
+			"session-bar-title",
+			"session-skills-chip",
+			"session-bar-overflow",
+		].map((id) => canvas.getByTestId(id)))
+			expect(overlaps(chips, box(el)), el.outerHTML.slice(0, 60)).toBe(false);
 		expect(canvas.getAllByTestId("background-task-chip")).toHaveLength(2);
 		await expect(canvas.getByTestId("background-tasks-more")).toHaveTextContent(
 			"+1",

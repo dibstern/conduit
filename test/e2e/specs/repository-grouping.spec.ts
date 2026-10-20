@@ -157,17 +157,13 @@ for (const viewport of [
 			await openList(page, harness.relayBaseUrl);
 			// Each layout reaches Settings through a different menu.
 			const listOverflow = page.getByTestId("list-bar-overflow");
-			const titleMenu = page.getByTestId("session-bar-title-menu");
-			const sessionOverflow = page.getByTestId("session-bar-overflow");
-			await expect(
-				listOverflow.or(titleMenu).or(sessionOverflow).first(),
-			).toBeVisible();
+			const sessionOverflow = page
+				.getByTestId("session-bar-overflow")
+				.or(page.getByTestId("session-bar-island-overflow"));
+			await expect(listOverflow.or(sessionOverflow).first()).toBeVisible();
 			if (await listOverflow.isVisible()) {
 				await listOverflow.click();
 				await page.getByTestId("list-overflow-settings").click();
-			} else if (await titleMenu.isVisible()) {
-				await titleMenu.click();
-				await page.getByTestId("session-title-settings").click();
 			} else {
 				await sessionOverflow.click();
 				await page.getByTestId("overflow-settings").click();
