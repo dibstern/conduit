@@ -698,6 +698,7 @@ export const CanonicalEvents = {
 			forkPointEvent: Schema.optionalKey(Schema.String),
 			forkPointTimestamp: Schema.optionalKey(Schema.Number),
 			forkPointMessageId: Schema.optionalKey(Schema.String),
+			inheritsHistory: Schema.optionalKey(Schema.Boolean),
 			providerSessionId: Schema.optionalKey(Schema.String),
 			sideThread: Schema.optionalKey(Schema.Boolean),
 			/** The input a Side Thread was started with, so a retried start finds it. */
