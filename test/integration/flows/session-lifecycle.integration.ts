@@ -119,7 +119,7 @@ describe("Integration: Session Lifecycle", () => {
 		await client.close();
 	});
 
-	it("switching session returns its draft and family", async () => {
+	it("switching session preserves its subscribed draft and family", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
@@ -146,7 +146,11 @@ describe("Integration: Session Lifecycle", () => {
 		client.clearReceived();
 		const switched = await client.switchSession(firstId);
 		expect(switched["id"]).toBe(firstId);
-		expect(switched["draft"]).toBe("Unsent draft");
+		await client.subscribeInputDraft(firstId);
+		const draft = await client.waitFor("input_draft", {
+			predicate: (message) => message["_tag"] === "synchronized",
+		});
+		expect(draft["text"]).toBe("Unsent draft");
 
 		await client.close();
 	});
