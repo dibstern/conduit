@@ -959,5 +959,36 @@
 	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: font-semibold,gap-1,max-w-[168px],max-w-[210px],ml-1,mr-px,mt-[6px],opacity-65,opacity-75,opacity-85,px-0.5,rotate-180,shrink,tasks.length,tasksPanel.open,text-[10.5px],text-status-goal,text-text,text-text-muted,transition-transform,underGoal": "conduit-test-aoqb.5: the Final phone task strip replaces its elbow, task preview, overflow count, and chevron with a task count and Stop all. The complete descriptions, kinds, ages, and individual controls remain in the task panel. Surface task-strip owns the new appearance.",
 	"src/lib/frontend/components/ui/Badge.svelte :: bg-tool/13,pl-[5px],pr-1.5,py-0,rounded-[6px],text-[10.5px],text-tool": "conduit-test-aoqb.5: remove the task variant and size after the Final phone task strip replaces their last consumer.",
 	"src/lib/frontend/components/ui/Surface.svelte :: h-[24px],items-stretch,rounded-lg": "conduit-test-aoqb.5: remove the segments variant after its last consumer moved to the Final capsule.",
-	"src/lib/frontend/components/ui/button-recipes.ts :: bg-warning-bg,border-warning/30,rounded-none,text-[10px],text-base,text-tool,text-warning": "conduit-test-aoqb.5 review: remove task-row, navigation, segment and pill-warning after confirming zero production consumers; remove the warning-pill story and its baselines as well."
+	"src/lib/frontend/components/ui/button-recipes.ts :: bg-warning-bg,border-warning/30,rounded-none,text-[10px],text-base,text-tool,text-warning": "conduit-test-aoqb.5 review: remove task-row, navigation, segment and pill-warning after confirming zero production consumers; remove the warning-pill story and its baselines as well.",
+	"src/lib/frontend/components/ui/Badge.svelte :: bg-status-ask": {
+		"renamedTo": "bg-fill-ask",
+		"reason": "conduit-test-aoqb.19: the solid back badge keeps the dark theme's orange fill in both themes; status-ask remains contrast-safe text ink."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: bottom-0,inset-x-0,pointer-events-auto": {
+		"movedTo": "src/lib/frontend/components/ui/Popover.svelte",
+		"requires": "presentation=\"sheet\" modal",
+		"reason": "conduit-test-aoqb.35: Popover owns the bottom sheet positioning and interactive scrim."
+	},
+	"src/lib/frontend/components/layout/SessionBar.svelte :: contents": "conduit-test-aoqb.35: Popover portals its own scrim; the caller's inert-exemption wrapper is removed.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: focus-visible:outline-hidden": "conduit-test-aoqb.35: Popover's sheet uses outline-hidden, which also suppresses the focused container outline without changing its pixels.",
+	"src/lib/frontend/components/ui/SwitchRow.svelte :: min-h-[15px]": {
+		"renamedTo": "min-h-[18.75px]",
+		"reason": "conduit-test-voxy.10: the loading state reserves the Final status line's full 12.5px times 1.5 height, so its title stays aligned before the outlook arrives."
+	},
+	"src/lib/frontend/components/session/SessionSheetBody.svelte :: text-[10.58px]": {
+		"renamedTo": "text-[11.5px]",
+		"reason": "conduit-test-voxy.10: Geist Mono already applies the Final design's 92% size adjustment in its font face; the branch chip must not apply it a second time. Normal line height restores the 16px chip."
+	},
+	"src/lib/frontend/components/ui/SwitchRow.svelte :: leading-[1.2]": {
+		"renamedTo": "leading-[1.5]",
+		"reason": "conduit-test-voxy.10: match the Final sheet's 21.75px Auto-settle label and 18.75px status line heights."
+	},
+	"src/lib/frontend/components/ui/ViewCard.svelte :: text-[7.36px]": {
+		"renamedTo": "text-[8px]",
+		"reason": "conduit-test-voxy.10: remove the second 92% mono size adjustment while preserving the design's explicit 11.04px preview line height."
+	},
+	"src/lib/frontend/components/ui/ViewCard.svelte :: leading-[1.5]": {
+		"renamedTo": "leading-[11.04px]",
+		"reason": "conduit-test-voxy.10: keep the Final preview's 8px times 0.92 times 1.5 line height when moving mono glyph scaling solely into the font face."
+	}
 }

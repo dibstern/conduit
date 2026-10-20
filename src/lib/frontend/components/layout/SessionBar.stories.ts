@@ -168,7 +168,7 @@ const getGoalDetails = fn<
 	};
 });
 
-// Rendered through a phone-width frame; see the fixture for why.
+// The frame pins phone widths and fills the canvas for desktop stories.
 const meta = {
 	title: "Layout/SessionBar",
 	component: SessionBarPhoneFrame,
@@ -347,7 +347,7 @@ async function assertGoalSubtitle(
 	token: string,
 ) {
 	const subtitle = within(canvasElement).getByTestId("session-goal-subtitle");
-	await expect(subtitle).toHaveTextContent(text);
+	await expect(subtitle.textContent?.trim()).toBe(text);
 	await expect(subtitle.querySelector("svg")).toBeVisible();
 	const style = getComputedStyle(subtitle);
 	const expected = new Option().style;
@@ -362,7 +362,7 @@ export const GoalChecking: Story = {
 	play: async ({ canvasElement }) => {
 		const subtitle = await assertGoalSubtitle(
 			canvasElement,
-			"Checking· All 38 scenarios pass",
+			"Checking · All 38 scenarios pass",
 			"--color-status-goal",
 		);
 		const spinner = subtitle.querySelector("svg");
@@ -376,7 +376,7 @@ export const GoalNotYet: Story = {
 	play: async ({ canvasElement }) => {
 		await assertGoalSubtitle(
 			canvasElement,
-			"Pursuing· All 38 scenarios pass",
+			"Pursuing · All 38 scenarios pass",
 			"--color-status-amber",
 		);
 	},
@@ -387,7 +387,7 @@ export const GoalPaused: Story = {
 	play: async ({ canvasElement }) => {
 		const subtitle = await assertGoalSubtitle(
 			canvasElement,
-			"Paused· All 38 scenarios pass",
+			"Paused · All 38 scenarios pass",
 			"--color-status-goal",
 		);
 		await expect(subtitle).toHaveAttribute(
@@ -402,7 +402,7 @@ export const GoalMet: Story = {
 	play: async ({ canvasElement }) => {
 		await assertGoalSubtitle(
 			canvasElement,
-			"Goal met· All 38 scenarios pass",
+			"Goal met · All 38 scenarios pass",
 			"--color-status-green",
 		);
 	},
@@ -883,50 +883,6 @@ const mockInstances: OpenCodeInstance[] = [
 	},
 ];
 
-function seedOpenCodeHeader(): void {
-	instanceState.instances = [...mockInstances];
-	seedSessions([
-		{ ...mockSession, accountId: "inst-personal" },
-		mockSessionLongTitle,
-	]);
-	applyGetAgentsResponse(
-		{
-			projectSlug: "conduit",
-			providerScope: { id: "opencode", name: "OpenCode" },
-			agents: [],
-		},
-		mockSession.id,
-	);
-	projectState.projects = [
-		{
-			slug: "conduit",
-			title: "conduit",
-			folders: ["/src/conduit"],
-			git: { branch: "account-chip", dirty: true },
-		},
-	];
-}
-
-export const PhoneOpenCodeHeader: Story = {
-	beforeEach: seedOpenCodeHeader,
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
-		expect(canvas.queryByTestId("account-dot")).toBeNull();
-		const bar = canvas.getByTestId("session-bar");
-		expect(bar.scrollWidth).toBe(bar.clientWidth);
-	},
-};
-
-export const DesktopOpenCodeHeader: Story = {
-	...PhoneOpenCodeHeader,
-	args: { width: 900 },
-	beforeEach: () => {
-		seedOpenCodeHeader();
-		sessionViewState.compact = false;
-	},
-};
-
 /**
  * The collapsed bar keeps its overflow while the expanded bar uses the title
  * and Views sheets.
@@ -1265,12 +1221,18 @@ export const PhoneGoalSheet: Story = {
 			expectTouchTarget(canvas.getByTestId(id));
 		}
 		await userEvent.keyboard("{Escape}");
-		await expect(canvas.queryByTestId("goal-details")).toBeNull();
-		await expect(goal).toHaveFocus();
+		await waitFor(() => {
+			expect(canvas.queryByTestId("goal-details")).toBeNull();
+			expect(goal).toHaveFocus();
+			expect(getComputedStyle(goal).pointerEvents).toBe("auto");
+		});
 		await userEvent.click(goal);
 		await userEvent.click(canvas.getByTestId("goal-details-scrim"));
-		await expect(canvas.queryByTestId("goal-details")).toBeNull();
-		await expect(goal).toHaveFocus();
+		await waitFor(() => {
+			expect(canvas.queryByTestId("goal-details")).toBeNull();
+			expect(goal).toHaveFocus();
+			expect(getComputedStyle(goal).pointerEvents).toBe("auto");
+		});
 		await userEvent.click(goal);
 	},
 };
@@ -1325,7 +1287,7 @@ export const ExpandedByChevron: Story = {
 };
 
 export const DesktopNoCheckout: Story = {
-	args: { width: 900 },
+	args: { width: "full" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
 		uiState.clientCount = 2;
@@ -1342,6 +1304,10 @@ export const DesktopNoCheckout: Story = {
 		const canvas = within(canvasElement);
 		const bar = canvas.getByTestId("session-bar");
 		await expect(bar).toHaveAttribute("data-compact", "false");
+		expect(bar.getBoundingClientRect().height).toBe(52);
+		expect(
+			canvas.getByTestId("session-bar-overflow").getBoundingClientRect().height,
+		).toBeGreaterThanOrEqual(44);
 		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
 		expect(canvas.queryByTitle("Uncommitted changes")).toBeNull();
 		await expect(canvas.getByTestId("session-bar-settle")).toBeVisible();
@@ -1407,7 +1373,7 @@ export const WithSkills: Story = {
 
 export const DesktopWithSkills: Story = {
 	tags: ["viewport-capture"],
-	args: { width: 900 },
+	args: { width: "full" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
 		seedSkills();
@@ -1505,8 +1471,8 @@ function seedClaudeHeader(): void {
 	);
 }
 
-export const PhoneClaudeHeader: Story = {
-	beforeEach: seedClaudeHeader,
+export const PhoneBusySession: Story = {
+	beforeEach: setupPhoneHeader,
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
@@ -1519,17 +1485,18 @@ export const PhoneClaudeHeader: Story = {
 	},
 };
 
-export const PhoneClaudeHeaderNarrowest: Story = {
-	...PhoneClaudeHeader,
+export const PhoneBusySessionNarrowest: Story = {
+	...PhoneBusySession,
 	args: { width: 320 },
 };
 
-export const DesktopClaudeHeader: Story = {
-	...PhoneClaudeHeader,
-	args: { width: 900 },
+export const DesktopBusySession: Story = {
+	...PhoneBusySession,
+	args: { width: "full" },
 	beforeEach: () => {
-		seedClaudeHeader();
+		const cleanup = setupPhoneHeader();
 		sessionViewState.compact = false;
+		return cleanup;
 	},
 };
 
@@ -1550,7 +1517,7 @@ export const DesktopLongTitleNarrow: Story = {
 };
 
 export const DesktopSettled: Story = {
-	args: { width: 900 },
+	args: { width: "full" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
 		showState({ settledAt: Date.now() - 3_600_000 });
@@ -1568,7 +1535,7 @@ export const DesktopSettled: Story = {
 };
 
 export const DesktopNoSession: Story = {
-	args: { width: 900 },
+	args: { width: "full" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
 		openSessionForSetup(null);
@@ -1583,7 +1550,7 @@ export const DesktopNoSession: Story = {
 };
 
 export const DesktopUnread: Story = {
-	args: { width: 900 },
+	args: { width: "full" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
 		const session = { ...mockSession, unread: true };
@@ -1597,7 +1564,7 @@ export const DesktopUnread: Story = {
 };
 
 export const DesktopUnreadAndSettled: Story = {
-	args: { width: 900 },
+	args: { width: "full" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
 		const session = {
@@ -1939,7 +1906,7 @@ export const SideThreadsOpen: Story = {
 
 export const DesktopSideThreadsOpen: Story = {
 	tags: ["viewport-capture"],
-	args: { width: 900 },
+	args: { width: "full" },
 	parameters: { docs: { story: { inline: false } } },
 	beforeEach: () => {
 		sessionViewState.compact = false;
@@ -1995,7 +1962,7 @@ export const SideThreadsClosed: Story = {
 };
 
 export const DesktopAutoSettled: Story = {
-	args: { width: 1000 },
+	args: { width: "full" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
 		showState({
@@ -2011,7 +1978,7 @@ export const DesktopAutoSettled: Story = {
 };
 
 export const DesktopSnoozed: Story = {
-	args: { width: 1000 },
+	args: { width: "full" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
 		const now = sessionState.now;
@@ -2029,7 +1996,7 @@ export const DesktopSnoozed: Story = {
 };
 
 export const DesktopWoke: Story = {
-	args: { width: 1000 },
+	args: { width: "full" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
 		showState({ unread: true, wokenAt: sessionState.now, wokeBecause: "turn" });
@@ -2067,7 +2034,7 @@ export const DesktopWokeRead: Story = {
 };
 
 export const DesktopPinned: Story = {
-	args: { width: 1000 },
+	args: { width: "full" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
 		showState({ pinnedAt: sessionState.now });
@@ -2084,16 +2051,16 @@ export const DesktopPinned: Story = {
 };
 
 export const DesktopGoalPursuing: Story = {
-	args: { width: 1000 },
+	args: { width: "full" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
 		return setupGoal("not_yet");
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await expect(canvas.getByTestId("session-goal-subtitle")).toHaveTextContent(
-			/Pursuing\s*· All 38 scenarios pass/,
-		);
+		await expect(
+			canvas.getByTestId("session-goal-subtitle").textContent?.trim(),
+		).toBe("Pursuing · All 38 scenarios pass");
 		await expect(canvas.getByTestId("session-bar-settle")).toHaveTextContent(
 			"Pin to top",
 		);
@@ -2108,9 +2075,9 @@ export const DesktopGoalChecking: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await expect(canvas.getByTestId("session-goal-subtitle")).toHaveTextContent(
-			/Checking\s*· All 38 scenarios pass/,
-		);
+		await expect(
+			canvas.getByTestId("session-goal-subtitle").textContent?.trim(),
+		).toBe("Checking · All 38 scenarios pass");
 		expect(canvas.queryByTestId("session-bar-settle")).toBeNull();
 	},
 };
@@ -2123,9 +2090,9 @@ export const DesktopGoalMet: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await expect(canvas.getByTestId("session-goal-subtitle")).toHaveTextContent(
-			/Goal met\s*· All 38 scenarios pass/,
-		);
+		await expect(
+			canvas.getByTestId("session-goal-subtitle").textContent?.trim(),
+		).toBe("Goal met · All 38 scenarios pass");
 		await expect(canvas.getByTestId("session-bar-unread-chip")).toBeVisible();
 		await expect(canvas.getByTestId("session-bar-settle")).toHaveTextContent(
 			"Settle",
@@ -2141,9 +2108,9 @@ export const DesktopGoalMetRead: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await expect(canvas.getByTestId("session-goal-subtitle")).toHaveTextContent(
-			/Goal met\s*· All 38 scenarios pass/,
-		);
+		await expect(
+			canvas.getByTestId("session-goal-subtitle").textContent?.trim(),
+		).toBe("Goal met · All 38 scenarios pass");
 		expect(canvas.queryByTestId("session-bar-unread-chip")).toBeNull();
 		expect(canvas.queryByTestId("session-bar-unread-mark-read")).toBeNull();
 		await expect(canvas.getByTestId("session-bar-settle")).toHaveTextContent(
@@ -2153,7 +2120,7 @@ export const DesktopGoalMetRead: Story = {
 };
 
 export const DesktopSidebarCollapsed: Story = {
-	args: { width: 1000 },
+	args: { width: "full" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
 		const previous = uiState.sidebarCollapsed;
@@ -2178,12 +2145,18 @@ export const DesktopSidebarCollapsed: Story = {
 		await expect(canvas.getByTestId("session-bar-attention")).toHaveTextContent(
 			"1",
 		);
+		const badgeStyle = getComputedStyle(
+			canvas.getByTestId("session-bar-attention"),
+		);
+		const expected = new Option().style;
+		expected.backgroundColor = badgeStyle.getPropertyValue("--color-fill-ask");
+		expect(badgeStyle.backgroundColor).toBe(expected.backgroundColor);
 	},
 };
 
 export const DesktopBanners: Story = {
 	args: {
-		width: 1000,
+		width: "full",
 		banners: islandBanners.map((banner, index) => ({
 			...banner,
 			action: { label: index === 0 ? "Reload" : "Change", run: fn() },
@@ -2225,7 +2198,7 @@ export const DesktopBannersLight: Story = {
 
 export const DesktopGoalDetails: Story = {
 	parameters: quietTierA11y,
-	args: { width: 1000 },
+	args: { width: "full" },
 	tags: ["viewport-capture"],
 	beforeEach: () => {
 		sessionViewState.compact = false;
@@ -2258,7 +2231,7 @@ export const DesktopGoalDetails: Story = {
 };
 
 export const DesktopMenu: Story = {
-	args: { width: 1000 },
+	args: { width: "full" },
 	tags: ["viewport-capture"],
 	beforeEach: [
 		answerDesktopAutoSettle,
@@ -2439,7 +2412,7 @@ export const DesktopAutoSettleSave: Story = {
 
 const stopDesktopTask = fn((_payload: unknown) => ({ ok: true }));
 export const DesktopTaskControls: Story = {
-	args: { width: 1000 },
+	args: { width: "full" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
 		seedClaudeHeader();

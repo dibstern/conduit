@@ -166,6 +166,7 @@ describe.each(["dark", "light"] as const)("%s theme contrast", (variant) => {
 		["accent", "accent-bg", 1, "bg-surface"],
 		["error", "accent-bg", 1, "bg-surface"],
 		// QuestionCard options, CommandMenu/FileMenu, Badge and joined settings tabs.
+		["on-fill-ask", "fill-ask", 1, "bg"],
 		["text", "accent-bg", 1, "bg-surface"],
 		["text-secondary", "accent-bg", 1, "bg-surface"],
 		["text-muted", "accent-bg", 1, "bg-surface"],

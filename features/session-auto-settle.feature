@@ -28,7 +28,7 @@ Examples:
   | working           | on      | On · paused while working                    |
   | awaiting-activity | on      | On · waits for new activity                  |
   | due               | on      | On · settles shortly                         |
-  | scheduled         | on      | On · settles Sat 9:41 if left idle           |
+  | scheduled         | on      | On · settles Sat 9:41 AM if left idle        |
 
 Scenario Outline: Loading preserves the stored flag without guessed copy
   Given the conduit app is served with the long-transcript mockup
@@ -76,8 +76,8 @@ Scenario Outline: Saving is busy and renders the write reply without closing
 
 Examples:
   | state    | before    | after     | disabled | enabled | before_line                        | after_line                         |
-  | idle     | scheduled | off       | true     | off     | On · settles Sat 9:41 if left idle | Off · stays until you settle it    |
-  | auto_off | off       | scheduled | false    | on      | Off · stays until you settle it    | On · settles Sat 9:41 if left idle |
+  | idle     | scheduled | off       | true     | off     | On · settles Sat 9:41 AM if left idle | Off · stays until you settle it       |
+  | auto_off | off       | scheduled | false    | on      | Off · stays until you settle it       | On · settles Sat 9:41 AM if left idle |
 
 Scenario: A read that lands while saving is dropped
   Given the conduit app is served with the long-transcript mockup
@@ -114,11 +114,11 @@ Scenario: A failed write preserves the row and shows the existing error toast
   And the auto-settle read returns scheduled
   And the auto-settle write is held as failure
   When I open the overflow session sheet
-  Then the auto-settle status line is On · settles Sat 9:41 if left idle
+  Then the auto-settle status line is On · settles Sat 9:41 AM if left idle
   When I toggle Auto-settle in the session sheet
   Then auto-settle is saving with disabled true
   When the held auto-settle write is released
-  Then the auto-settle status line is On · settles Sat 9:41 if left idle
+  Then the auto-settle status line is On · settles Sat 9:41 AM if left idle
   And the session sheet stays open with Auto-settle on
   And auto-settle is interactive
   And the session sheet stays open with the reason pill Couldn't change auto-settle Relay unavailable
@@ -156,7 +156,7 @@ Scenario Outline: Every phone sheet reads and saves the outlook
   And the auto-settle read returns scheduled
   And the auto-settle write is held as off
   When I open the <sheet> session sheet
-  Then the auto-settle status line is On · settles Sat 9:41 if left idle
+  Then the auto-settle status line is On · settles Sat 9:41 AM if left idle
   When I toggle Auto-settle in the session sheet
   Then auto-settle is saving with disabled true
   When the held auto-settle write is released

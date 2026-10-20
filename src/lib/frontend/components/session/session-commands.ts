@@ -41,6 +41,7 @@ export type SessionCommand = {
 		| "git-fork"
 		| "copy"
 		| "zap"
+		| "trash"
 		| "trash-2"
 		| "share"
 		| "settings"
@@ -564,7 +565,7 @@ export function getSessionCommands(
 			label: "Delete",
 			shortLabel: "Delete…",
 			section: "danger",
-			icon: "trash-2",
+			icon: "trash",
 			danger: true,
 			run: (returnFocus) => {
 				void remove(session, returnFocus);

@@ -209,7 +209,7 @@ Scenario Outline: a session that resumed at reset keeps a divider with the reset
   When the session hits the seven_day limit on claude resetting at 2026-01-01T09:40:00Z
   And the session resumes on claude by reset and replies All provider tests pass now.
   Then the usage limit strip is not visible
-  And the transcript divider reading ↻ Resumed on work2claude after reset · 9:40 sits directly above the reply All provider tests pass now.
+  And the transcript divider reading ↻ Resumed on work2claude after reset · 9:40 AM sits directly above the reply All provider tests pass now.
 
 Examples:
   | viewport |
@@ -278,8 +278,8 @@ Scenario Outline: Switch account lists each account's fresh quota and pre-select
   And the quota check reads claude limited until 2026-01-05T09:00:00Z, self <quota>, team limited until 2026-01-01T14:30:00Z
   And I open Switch account on the usage limit strip
   Then the account picker row for personal reads <caption> and can be picked
-  And the account picker row for work2claude reads limited · Mon 9:00 and cannot be picked
-  And the account picker row for team-max reads limited · 14:30 and cannot be picked
+  And the account picker row for work2claude reads limited · Mon 9:00 AM and cannot be picked
+  And the account picker row for team-max reads limited · 2:30 PM and cannot be picked
   And the account picker pre-selects personal
   And the account picker shows claude with a blue dot
   And the account picker shows self with a teal dot

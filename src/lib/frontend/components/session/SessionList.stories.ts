@@ -198,7 +198,7 @@ export const SnoozedShelfOpen: Story = {
 			"aria-expanded",
 			"true",
 		);
-		await expect(canvas.getByText("Tue 9:00")).toBeVisible();
+		await expect(canvas.getByText("Tue 9:00 AM")).toBeVisible();
 		await expect(canvas.getByText("No timer")).toBeVisible();
 	},
 };

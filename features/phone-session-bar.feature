@@ -239,8 +239,8 @@ Scenario Outline: Phone session sheets show the shared body for every session st
 
 Examples:
   | state    | theme | line                               | baseline                            | threshold |
-  | idle     | dark  | On · settles Sat 9:41 if left idle | session-sheet-idle-dark             | 98        |
-  | idle     | light | On · settles Sat 9:41 if left idle | session-sheet-idle-light            | 98        |
+  | idle     | dark  | On · settles Sat 9:41 AM if left idle | session-sheet-idle-dark             | 98        |
+  | idle     | light | On · settles Sat 9:41 AM if left idle | session-sheet-idle-light            | 98        |
   | unread   | dark  | On · paused while unread           | session-sheet-unread-dark           | 98        |
   | unread   | light | On · paused while unread           | session-sheet-unread-light          | 98        |
   | snoozed  | dark  | On · paused while snoozed          | session-sheet-snoozed-dark          | 98        |
@@ -279,7 +279,7 @@ Scenario Outline: The title chevron sheet shares the body and Debug footer
   When I open the chevron session sheet
   Then the session sheet has the shared grids and 4 Session tiles
   And the session sheet footer is chevron with Debug on
-  And the auto-settle status line is On · settles Sat 9:41 if left idle
+  And the auto-settle status line is On · settles Sat 9:41 AM if left idle
   And the session-sheet region visually matches <baseline> at <threshold> percent
 
 Examples:
@@ -295,7 +295,7 @@ Scenario Outline: The session list long-press sheet has five Session tiles and n
   When I open the list session sheet
   Then the session sheet has the shared grids and 5 Session tiles
   And the session sheet footer is absent with Debug off
-  And the auto-settle status line is On · settles Sat 9:41 if left idle
+  And the auto-settle status line is On · settles Sat 9:41 AM if left idle
   And the session-sheet region visually matches <baseline> at <threshold> percent
 
 Examples:

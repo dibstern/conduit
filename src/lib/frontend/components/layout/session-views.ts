@@ -44,7 +44,7 @@ export const sessionViews: readonly SessionView[] = [
 	{
 		id: "terminal",
 		label: "Terminal",
-		icon: "square-terminal",
+		icon: "terminal",
 		shortcut: 2,
 		badge: () => terminalState.unreadPtyIds.size || undefined,
 		isOn: () => terminalState.panelOpen,

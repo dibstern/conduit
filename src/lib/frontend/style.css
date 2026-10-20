@@ -122,6 +122,8 @@
 	--color-fill-green: #3ecf8e;
 	--color-fill-red: #ff6369;
 	--color-on-fill: #111113;
+	--color-fill-ask: #ff9f0a;
+	--color-on-fill-ask: #111113;
 
 	/* === PROJECT ACCENTS (theme-invariant) ===
 	   Identity colours for the sidebar's project square, assigned by index so a
@@ -889,6 +891,16 @@ body:has(dialog:modal) {
 	grid-template-areas:
 		"back title meta connection more"
 		"tasks tasks tasks tasks tasks";
+}
+/* Final's idle header is 52px: a 44px target, 7px padding and a 1px border.
+   Keep the existing room for the goal title's focus ring and the task row. */
+#session-bar[data-compact="false"]:not(
+		:has(
+				[data-testid="session-goal-subtitle"],
+				[data-testid="background-tasks-row"]
+			)
+	) {
+	padding-block: 3.5px;
 }
 #session-bar[data-compact="false"] [data-testid="background-tasks-row"] {
 	grid-area: tasks;

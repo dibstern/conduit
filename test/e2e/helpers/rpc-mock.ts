@@ -140,7 +140,7 @@ export class RpcMockControl {
 	terminalKeys = DEFAULT_TERMINAL_KEYS;
 	avatar: Avatar = {
 		choice: { kind: "initial" },
-		name: "David",
+		name: "You",
 		macPicture: null,
 	};
 	private shellSequence = 0;

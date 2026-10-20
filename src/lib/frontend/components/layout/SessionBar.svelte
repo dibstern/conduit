@@ -48,7 +48,7 @@
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
 	import Tooltip from "../ui/Tooltip.svelte";
 	import Surface from "../ui/Surface.svelte";
-	import SheetChrome from "../ui/SheetChrome.svelte";
+	import Popover from "../ui/Popover.svelte";
 	import SessionContextMenu from "../session/SessionContextMenu.svelte";
 	import SessionRenameInput from "../session/SessionRenameInput.svelte";
 	import SessionSkillsChip from "../session/SessionSkillsChip.svelte";
@@ -84,6 +84,7 @@
 	));
 	const detailsGoal = $derived(goalFacts?.goal ?? goalFacts?.endedGoal);
 	let goalSubtitleEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
+	let goalFocusHandedOff = false;
 	const backgroundTasks = $derived(session?.backgroundTasks ?? []);
 	const goalShown = $derived(goal.phase !== null && goal.phase !== "cleared" && !isGoalMetDismissed(goalFacts));
 	// The family push carries the whole tree; prefer the versioned row, as busySessionIds does.
@@ -157,12 +158,14 @@
 	}
 
 	function closeGoalDetails(returnFocus = false) {
+		goalFocusHandedOff = !returnFocus;
 		goalDetails.open = false;
-		if (returnFocus) goalSubtitleEl?.focus();
+		if (returnFocus && !sessionViewState.compact) goalSubtitleEl?.focus();
 	}
 
 	function handleGoalDetailsKeydown(event: KeyboardEvent) {
 		if (event.key !== "Escape" || (!goalDetails.open && !tasksPanel.open && !sideThreadsPanel.open) || uiState.confirmDialog) return;
+		if (goalDetails.open && sessionViewState.compact && !tasksPanel.open && !sideThreadsPanel.open) return;
 		event.preventDefault();
 		event.stopPropagation();
 		if (sideThreadsPanel.open) {
@@ -297,7 +300,7 @@
 <svelte:window onkeydown={handleSessionShortcut} onkeydowncapture={handleGoalDetailsKeydown} />
 
 {#if goalDetails.open && detailsGoal}
-	<Button variant={sessionViewState.compact ? "sheet-scrim" : "scrim-clear"} size="content" tabindex={-1} ariaLabel="Close goal details" data-testid="goal-details-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => closeGoalDetails(true)} />
+	{#if !sessionViewState.compact}<Button variant="scrim-clear" size="content" tabindex={-1} ariaLabel="Close goal details" data-testid="goal-details-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => closeGoalDetails(true)} />{/if}
 {:else if tasksPanel.open && backgroundTasks.length > 0}
 	<Button variant={sessionViewState.compact ? "scrim" : "scrim-clear"} size="content" tabindex={-1} ariaLabel="Close background tasks" data-testid="background-tasks-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => { tasksPanel.open = false; }} />
 {:else if sideThreadsPanel.open}
@@ -400,10 +403,50 @@
 	/>
 {/snippet}
 
-{#snippet goalLine()}
-	<Button variant="ghost" size={sessionViewState.compact ? "phone-subtitle" : "subtitle"} touchTarget={sessionViewState.compact ? "always" : false} layout="block" align="start" tone={goalButtonTone} hoverFill="none" bind:element={goalSubtitleEl} data-testid="session-goal-subtitle" aria-expanded={goalDetails.open} aria-controls="goal-details" title={goal.phase === "paused" ? `${goal.subtitle} · ${goalFacts?.pausedReason}` : goal.subtitle} class={sessionViewState.compact ? "" : "mt-[2px]"} onclick={() => { tasksPanel.open = false; sideThreadsPanel.open = false; goalDetails.open = !goalDetails.open; }}>
+{#snippet goalContent()}
+	{#if detailsGoal && goalFacts}
+		<div class="px-[10px] pt-[10px] pb-[4px]">
+			<Badge variant={goal.phase === "met" ? "success" : "goal"} shape="pill" size="label"><Icon name={goal.phase === "met" ? "circle-check" : "target"} size={12} />{desktopGoalLabel}</Badge>
+			<h2 id="goal-details-title" data-testid="goal-details-condition" class="mt-[8px] mb-[3px] text-[15px] font-semibold leading-[1.35] tracking-[-0.01em]">{detailsGoal.condition}</h2>
+			<p data-testid="goal-details-meta" class="m-0 font-mono text-[11.5px] text-text-dimmer">Set {goalClock(details?.setAt ?? detailsGoal.setAt)} · {detailsGoal.iterations} checks{details?.judgeModel ? ` · ${details.judgeModel} judges` : ""}</p>
+			{#if !sessionViewState.compact && details?.tokensSinceStart != null}<p data-testid="goal-details-tokens" class="mt-[4px] mb-0 font-mono text-[11px] text-text-dimmer">{goalTokens(details.tokensSinceStart)} tokens</p>{/if}
+		</div>
+		<div class="mx-[4px] mt-[8px] border-t border-border-chip"></div>
+		<div data-goal-checks-heading class="flex items-center justify-between px-[10px] pt-[8px] pb-[6px] text-[12px] font-medium text-text-dimmer">Checks{#if sessionViewState.compact && details?.tokensSinceStart != null}<span data-testid="goal-details-tokens" class="font-mono text-[10.58px] text-text-dimmer">{goalTokens(details.tokensSinceStart)} tokens</span>{/if}</div>
+	<ol data-testid="goal-details-history" class="m-0 flex list-none flex-col gap-[5px] p-0">
+			{#if goal.phase === "checking"}
+				<li data-testid="goal-details-check" class="desktop-goal-check"><Icon name="loader-circle" size={13} class="mt-[2px] motion-safe:animate-spin text-status-goal" /><span><b>Checking</b>{details?.turnCount != null ? ` · after turn ${details.turnCount}` : ""}</span><time class="text-text-dimmer">now</time></li>
+			{:else if goalFacts.ended === "met"}
+				<li data-testid="goal-details-check" class="desktop-goal-check"><Icon name="circle-check" size={13} class="text-success" /><span><b>Met</b>{detailsGoal.lastReason ? ` · ${detailsGoal.lastReason}` : ""}</span><time class="text-text-dimmer">{goalFacts.endedAt == null ? "" : goalClock(goalFacts.endedAt)}</time></li>
+			{/if}
+			{#each [...(details?.checks ?? [])].reverse() as check (check.iteration)}
+				<li data-testid="goal-details-check" class="desktop-goal-check"><Icon name="circle-x" size={13} class="mt-px text-text-dimmer" /><span><b>Not yet</b>{check.reason ? ` · ${check.reason}` : ""}{#if check.turnIndex != null}<small class="text-[11px] text-text-dimmer" class:block={!sessionViewState.compact} class:whitespace-nowrap={sessionViewState.compact}>{sessionViewState.compact ? " · " : ""}After turn {check.turnIndex}</small>{/if}</span><time class="text-text-dimmer">{goalClock(check.at)}</time></li>
+			{/each}
+		{#if detailsLoading}
+			<li role="status" class="goal-details-check"><span class="col-span-full text-text-muted">Loading checks…</span></li>
+		{:else if detailsFailed}
+			<li role="status" class="goal-details-check"><span class="col-span-full text-status-red">{detailsFailed}</span></li>
+		{:else if !details?.checks.length && goal.phase !== "checking" && goal.phase !== "met"}
+			<li class="goal-details-check"><span class="col-span-full">No checks yet. The first runs when Claude finishes a turn.</span></li>
+		{/if}
+	</ol>
+	<div class="flex gap-[6px] {sessionViewState.compact ? 'mt-[8px]' : 'mt-[12px] px-[8px]'} pb-[4px]">
+		{#if goalFacts.goal}
+			<Button variant="chip" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="secondary" icon={goal.phase === "paused" ? "play" : "pause"} iconSize={13} touchTarget={sessionViewState.compact ? "always" : true} data-testid={goal.phase === "paused" ? "goal-details-resume" : "goal-details-pause"} onclick={() => runGoalAction(goal.phase === "paused" ? "resume" : "pause")}>{goal.phase === "paused" ? "Resume" : "Pause"}</Button>
+			<Button variant="chip" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="secondary" icon="pencil" iconSize={13} touchTarget={sessionViewState.compact ? "always" : true} data-testid="goal-details-edit" onclick={() => runGoalAction("edit")}>Edit</Button>
+			<Button variant="danger-soft" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="error" touchTarget={sessionViewState.compact ? "always" : true} class="ml-auto" data-testid="goal-details-clear" onclick={() => runGoalAction("clear")}>Clear goal</Button>
+		{:else if goalFacts.ended === "met"}
+			<Button variant="secondary" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="secondary" touchTarget={sessionViewState.compact ? "always" : true} data-testid="goal-details-new" onclick={() => runGoalAction("new")}>Set a new goal</Button>
+			<Button variant="secondary" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="error" touchTarget={sessionViewState.compact ? "always" : true} class="ml-auto" data-testid="goal-details-dismiss" onclick={() => { if (goalFacts) dismissGoalMet(goalFacts); closeGoalDetails(); }}>Dismiss</Button>
+		{/if}
+	</div>
+	{/if}
+{/snippet}
+
+{#snippet goalLine(props: Record<string, unknown> = {})}
+	<Button variant="ghost" size={sessionViewState.compact ? "phone-subtitle" : "subtitle"} touchTarget={sessionViewState.compact ? "always" : false} layout="block" align="start" tone={goalButtonTone} hoverFill="none" bind:element={goalSubtitleEl} data-testid="session-goal-subtitle" aria-expanded={goalDetails.open} aria-controls="goal-details" title={goal.phase === "paused" ? `${goal.subtitle} · ${goalFacts?.pausedReason}` : goal.subtitle} class={sessionViewState.compact ? "" : "mt-[2px]"} onclick={() => { tasksPanel.open = false; sideThreadsPanel.open = false; goalDetails.open = !goalDetails.open; }} {...props}>
 		<Icon name={goal.icon === "spinner" ? "loader-circle" : goal.icon} size={12} class="shrink-0 {goal.icon === 'spinner' ? 'motion-safe:animate-spin' : ''}" />
-		<b class="shrink-0 font-medium">{desktopGoalLabel}</b><span class="min-w-0 truncate text-text-secondary">· {detailsGoal?.condition}</span>
+		<b class="shrink-0 font-medium">{desktopGoalLabel}</b>{" "}<span class="min-w-0 truncate text-text-secondary">· {detailsGoal?.condition}</span>
 	</Button>
 {/snippet}
 
@@ -474,7 +517,7 @@
 		<span>Sessions</span>
 		{#if attentionCount > 0}
 			<Badge
-				variant={sessionViewState.compact ? "ask-solid" : "accent-solid"}
+				variant="ask-solid"
 				size={sessionViewState.compact ? "navigation-count" : "count"}
 				shape="pill"
 				data-testid="session-bar-attention"
@@ -593,7 +636,15 @@
 	</div>
 	{/if}
 
-	{#if sessionViewState.compact && !collapsed && goalShown}{@render goalLine()}{/if}
+	{#if sessionViewState.compact && !collapsed && goalShown}
+		<Popover bind:open={goalDetails.open} presentation="sheet" modal initialFocus="content" labelledBy="goal-details-title" id="goal-details" data-testid="goal-details" portalTo="#session-bar" sheetBottomPadding={34} class="px-[20px] pt-[2px] whitespace-normal text-[12px]" sheetScrim={{ portalTo: goalSubtitleEl?.closest("#session-bar")?.parentElement ?? undefined, zIndex: "var(--z-dropdown)", testId: "goal-details-scrim" }}
+			onopenchange={(open) => { if (open) { goalFocusHandedOff = false; tasksPanel.open = false; sideThreadsPanel.open = false; } }}
+			onCloseAutoFocus={(event) => { if (goalFocusHandedOff) event.preventDefault(); goalFocusHandedOff = false; }}
+		>
+			{#snippet trigger({ props })}{@render goalLine(props)}{/snippet}
+			{@render goalContent()}
+		</Popover>
+	{/if}
 
 	{#if !sessionViewState.compact}{@render identityBlock()}{/if}
 
@@ -646,45 +697,9 @@
 		/>
 	{/if}
 
-	{#if goalDetails.open && detailsGoal && goalFacts}
-		<Surface id="goal-details" data-testid="goal-details" variant={sessionViewState.compact ? "bare" : "floating"} radius="none" elevation={sessionViewState.compact ? "none" : "popover"} role="region" aria-label="Goal details" class="z-[var(--z-popover)] whitespace-normal text-[12px] {sessionViewState.compact ? 'fixed inset-x-0 bottom-0' : 'absolute top-full left-[20px] mt-[8px] max-h-[70dvh] w-[380px] max-w-[calc(100%-40px)] overflow-y-auto rounded-[16px] p-[6px]'}">
-			<SheetChrome active={sessionViewState.compact} bottomPadding={34} bodyClass="px-[20px] pt-[2px]">
-				<div class="px-[10px] pt-[10px] pb-[4px]">
-					<Badge variant={goal.phase === "met" ? "success" : "goal"} shape="pill" size="label"><Icon name={goal.phase === "met" ? "circle-check" : "target"} size={12} />{desktopGoalLabel}</Badge>
-					<h2 data-testid="goal-details-condition" class="mt-[8px] mb-[3px] text-[15px] font-semibold leading-[1.35] tracking-[-0.01em]">{detailsGoal.condition}</h2>
-					<p data-testid="goal-details-meta" class="m-0 font-mono text-[11.5px] text-text-dimmer">Set {goalClock(details?.setAt ?? detailsGoal.setAt)} · {detailsGoal.iterations} checks{details?.judgeModel ? ` · ${details.judgeModel} judges` : ""}</p>
-					{#if !sessionViewState.compact && details?.tokensSinceStart != null}<p data-testid="goal-details-tokens" class="mt-[4px] mb-0 font-mono text-[11px] text-text-dimmer">{goalTokens(details.tokensSinceStart)} tokens</p>{/if}
-				</div>
-				<div class="mx-[4px] mt-[8px] border-t border-border-chip"></div>
-				<div data-goal-checks-heading class="flex items-center justify-between px-[10px] pt-[8px] pb-[6px] text-[12px] font-medium text-text-dimmer">Checks{#if sessionViewState.compact && details?.tokensSinceStart != null}<span data-testid="goal-details-tokens" class="font-mono text-[10.58px] text-text-dimmer">{goalTokens(details.tokensSinceStart)} tokens</span>{/if}</div>
-			<ol data-testid="goal-details-history" class="m-0 flex list-none flex-col gap-[5px] p-0">
-					{#if goal.phase === "checking"}
-						<li data-testid="goal-details-check" class="desktop-goal-check"><Icon name="loader-circle" size={13} class="mt-[2px] motion-safe:animate-spin text-status-goal" /><span><b>Checking</b>{details?.turnCount != null ? ` · after turn ${details.turnCount}` : ""}</span><time class="text-text-dimmer">now</time></li>
-					{:else if goalFacts.ended === "met"}
-						<li data-testid="goal-details-check" class="desktop-goal-check"><Icon name="circle-check" size={13} class="text-success" /><span><b>Met</b>{detailsGoal.lastReason ? ` · ${detailsGoal.lastReason}` : ""}</span><time class="text-text-dimmer">{goalFacts.endedAt == null ? "" : goalClock(goalFacts.endedAt)}</time></li>
-					{/if}
-					{#each [...(details?.checks ?? [])].reverse() as check (check.iteration)}
-						<li data-testid="goal-details-check" class="desktop-goal-check"><Icon name="circle-x" size={13} class="mt-px text-text-dimmer" /><span><b>Not yet</b>{check.reason ? ` · ${check.reason}` : ""}{#if check.turnIndex != null}<small class="text-[11px] text-text-dimmer" class:block={!sessionViewState.compact} class:whitespace-nowrap={sessionViewState.compact}>{sessionViewState.compact ? " · " : ""}After turn {check.turnIndex}</small>{/if}</span><time class="text-text-dimmer">{goalClock(check.at)}</time></li>
-					{/each}
-				{#if detailsLoading}
-					<li role="status" class="goal-details-check"><span class="col-span-full text-text-muted">Loading checks…</span></li>
-				{:else if detailsFailed}
-					<li role="status" class="goal-details-check"><span class="col-span-full text-status-red">{detailsFailed}</span></li>
-				{:else if !details?.checks.length && goal.phase !== "checking" && goal.phase !== "met"}
-					<li class="goal-details-check"><span class="col-span-full">No checks yet. The first runs when Claude finishes a turn.</span></li>
-				{/if}
-			</ol>
-			<div class="flex gap-[6px] {sessionViewState.compact ? 'mt-[8px]' : 'mt-[12px] px-[8px]'} pb-[4px]">
-				{#if goalFacts.goal}
-					<Button variant="chip" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="secondary" icon={goal.phase === "paused" ? "play" : "pause"} iconSize={13} touchTarget={sessionViewState.compact ? "always" : true} data-testid={goal.phase === "paused" ? "goal-details-resume" : "goal-details-pause"} onclick={() => runGoalAction(goal.phase === "paused" ? "resume" : "pause")}>{goal.phase === "paused" ? "Resume" : "Pause"}</Button>
-					<Button variant="chip" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="secondary" icon="pencil" iconSize={13} touchTarget={sessionViewState.compact ? "always" : true} data-testid="goal-details-edit" onclick={() => runGoalAction("edit")}>Edit</Button>
-					<Button variant="danger-soft" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="error" touchTarget={sessionViewState.compact ? "always" : true} class="ml-auto" data-testid="goal-details-clear" onclick={() => runGoalAction("clear")}>Clear goal</Button>
-				{:else if goalFacts.ended === "met"}
-					<Button variant="secondary" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="secondary" touchTarget={sessionViewState.compact ? "always" : true} data-testid="goal-details-new" onclick={() => runGoalAction("new")}>Set a new goal</Button>
-					<Button variant="secondary" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="error" touchTarget={sessionViewState.compact ? "always" : true} class="ml-auto" data-testid="goal-details-dismiss" onclick={() => { if (goalFacts) dismissGoalMet(goalFacts); closeGoalDetails(); }}>Dismiss</Button>
-				{/if}
-			</div>
-			</SheetChrome>
+	{#if goalDetails.open && detailsGoal && goalFacts && !sessionViewState.compact}
+		<Surface id="goal-details" data-testid="goal-details" variant="floating" radius="none" elevation="popover" role="region" aria-label="Goal details" class="z-[var(--z-popover)] whitespace-normal text-[12px] absolute top-full left-[20px] mt-[8px] max-h-[70dvh] w-[380px] max-w-[calc(100%-40px)] overflow-y-auto rounded-[16px] p-[6px]">
+			{@render goalContent()}
 		</Surface>
 	{/if}
 
