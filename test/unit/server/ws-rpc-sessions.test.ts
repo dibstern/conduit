@@ -11,6 +11,7 @@ import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { OpenCodeUnavailable } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import { GoalSummaryServiceTag } from "../../../src/lib/domain/relay/Services/goal-summary-service.js";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
 import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
@@ -63,43 +64,65 @@ const rpcClient = Effect.gen(function* () {
 });
 
 describe("WsRpcServerLayer GenerateGoalSummary", () => {
-	// Failure modes: a missing session or unsupported provider bypasses the
-	// existing goal guards, or the stub succeeds or changes goal details.
-	it.scoped("keeps goal guards and returns the unimplemented error", () => {
-		const layer = makeTestHandlerLayer({
-			persistenceLayer: makePersistenceEffectLayer(":memory:", "test-project"),
-		});
-		return Effect.gen(function* () {
-			yield* (yield* ProjectionRunnerEffectTag).recover();
-			const sql = yield* SqlClient.SqlClient;
-			yield* sql`INSERT INTO sessions (id, project_id, provider, title, created_at, updated_at)
+	it.scoped(
+		"goal RPCs keep missing-session and unsupported-provider guards and only generate on request",
+		() => {
+			const summary = {
+				text: "Upload needs a release credential.",
+				generatedAt: 300,
+				stale: false,
+			};
+			const generate = vi.fn(() => Effect.succeed(summary));
+			const layer = Layer.merge(
+				makeTestHandlerLayer({
+					persistenceLayer: makePersistenceEffectLayer(
+						":memory:",
+						"test-project",
+					),
+				}),
+				Layer.succeed(GoalSummaryServiceTag, {
+					metadata: () =>
+						Effect.succeed({ summary: null, summaryEnabled: true }),
+					generate,
+				}),
+			);
+			return Effect.gen(function* () {
+				yield* (yield* ProjectionRunnerEffectTag).recover();
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions (id, project_id, provider, title, created_at, updated_at)
 				VALUES ('claude-goal', 'test-project', 'claude', 'Goal', 1, 1),
 				('opencode-goal', 'test-project', 'opencode', 'Goal', 1, 1)`;
-			const client = yield* rpcClient;
-			const before = yield* client.GetGoalDetails({ sessionId: "claude-goal" });
-			for (const [sessionId, message] of [
-				["missing", "Session missing not found"],
-				[
-					"opencode-goal",
-					"Goal summaries are available only for Claude sessions",
-				],
-				["claude-goal", "Goal summaries are not implemented yet"],
-			] as const) {
-				expect(
-					yield* Effect.either(client.GenerateGoalSummary({ sessionId })),
-				).toMatchObject({
-					_tag: "Left",
-					left: { _tag: "WsRpcError", message },
+				const client = yield* rpcClient;
+				const before = yield* client.GetGoalDetails({
+					sessionId: "claude-goal",
 				});
-			}
-			expect(
-				yield* client.GetGoalDetails({ sessionId: "claude-goal" }),
-			).toEqual(before);
-			expect(before).not.toHaveProperty("stuck");
-			expect(before).not.toHaveProperty("summary");
-			expect(before).not.toHaveProperty("summaryEnabled");
-		}).pipe(Effect.provide(WsRpcServerLayer.pipe(Layer.provideMerge(layer))));
-	});
+				for (const [sessionId, message] of [
+					["missing", "Session missing not found"],
+					[
+						"opencode-goal",
+						"Goal summaries are available only for Claude sessions",
+					],
+				] as const) {
+					expect(
+						yield* Effect.either(client.GenerateGoalSummary({ sessionId })),
+					).toMatchObject({
+						_tag: "Left",
+						left: { _tag: "WsRpcError", message },
+					});
+				}
+				expect(generate).not.toHaveBeenCalled();
+				expect(
+					yield* client.GenerateGoalSummary({ sessionId: "claude-goal" }),
+				).toEqual(summary);
+				expect(generate).toHaveBeenCalledExactlyOnceWith("claude-goal");
+				expect(
+					yield* client.GetGoalDetails({ sessionId: "claude-goal" }),
+				).toEqual(before);
+				expect(before).not.toHaveProperty("stuck");
+				expect(before).toMatchObject({ summary: null, summaryEnabled: true });
+			}).pipe(Effect.provide(WsRpcServerLayer.pipe(Layer.provideMerge(layer))));
+		},
+	);
 });
 
 describe("WsRpcServerLayer ResolveSession", () => {

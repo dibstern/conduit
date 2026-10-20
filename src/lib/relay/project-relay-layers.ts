@@ -90,6 +90,7 @@ import {
 } from "../domain/relay/Services/daemon-session-query-service.js";
 import { DirectoryListingServiceLive } from "../domain/relay/Services/directory-listing-service.js";
 import { DraftPreWarmLive } from "../domain/relay/Services/draft-prewarm.js";
+import { makeGoalSummaryServiceLive } from "../domain/relay/Services/goal-summary-service.js";
 import {
 	InstanceManagementServiceLive,
 	InstanceManagementServiceTag,
@@ -909,9 +910,14 @@ export function createProjectRelayLayers({
 				}),
 		),
 	);
-	const relayStateWithRecaps = makeRecapServiceLive({
-		queryFactory: config.titleQuery ?? claudeSdk.titleQuery,
-	}).pipe(
+	const relayStateWithRecaps = Layer.merge(
+		makeRecapServiceLive({
+			queryFactory: config.titleQuery ?? claudeSdk.titleQuery,
+		}),
+		makeGoalSummaryServiceLive({
+			queryFactory: config.titleQuery ?? claudeSdk.titleQuery,
+		}),
+	).pipe(
 		Layer.provideMerge(relayStateBridgesAndStatus),
 		Layer.provide(recapSettingsLayer),
 	);

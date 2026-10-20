@@ -33,6 +33,7 @@ import {
 	DraftPreWarmTag,
 	draftLaunchKey,
 } from "../../domain/relay/Services/draft-prewarm.js";
+import { GoalSummaryServiceTag } from "../../domain/relay/Services/goal-summary-service.js";
 import {
 	BackgroundLivenessTag,
 	ConfigTag,
@@ -262,7 +263,14 @@ export const sessionsHandlers = {
 					message: "Goal details are available only for Claude sessions",
 				});
 			}
-			return yield* read.getGoalDetails(request.sessionId);
+			const summaries = yield* GoalSummaryServiceTag;
+			return yield* (yield* SqlClient.SqlClient).withTransaction(
+				Effect.gen(function* () {
+					const details = yield* read.getGoalDetails(request.sessionId);
+					const summary = yield* summaries.metadata(request.sessionId);
+					return { ...details, ...summary };
+				}),
+			);
 		}).pipe(Effect.catchAll(mapRpcFailure("GetGoalDetails"))),
 	GenerateGoalSummary: (request) =>
 		Effect.gen(function* () {
@@ -282,9 +290,7 @@ export const sessionsHandlers = {
 					message: "Goal summaries are available only for Claude sessions",
 				});
 			}
-			return yield* new WsRpcError({
-				message: "Goal summaries are not implemented yet",
-			});
+			return yield* (yield* GoalSummaryServiceTag).generate(request.sessionId);
 		}).pipe(Effect.catchAll(mapRpcFailure("GenerateGoalSummary"))),
 	PreWarmSession: (request) =>
 		preWarmSession(request.sessionId).pipe(
