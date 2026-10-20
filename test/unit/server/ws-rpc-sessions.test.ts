@@ -27,7 +27,8 @@ import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-que
 import { refreshSidebar } from "../../../src/lib/persistence/effect/sidebar-projection.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
-import { defaultClaudeSessionForkSdk } from "../../../src/lib/provider/claude/claude-session-fork.js";
+import { CLAUDE_FORK_SOURCE_KEY } from "../../../src/lib/provider/claude/claude-session-fork.js";
+import { makePrepareTurn } from "../../../src/lib/provider/claude/prepare-turn.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
@@ -607,13 +608,18 @@ describe("WsRpcServerLayer ListSessions", () => {
 					content: [{ type: "text", text: "Answer" }],
 				}),
 			];
-			const readTranscript = vi
-				.spyOn(defaultClaudeSessionForkSdk, "readTranscript")
-				.mockResolvedValue(parentMessages);
-			const forkSession = vi
-				.spyOn(defaultClaudeSessionForkSdk, "forkSession")
-				.mockResolvedValueOnce({ sessionId: "sdk-fork" })
-				.mockResolvedValueOnce({ sessionId: "sdk-rollback" });
+			const readTranscript = vi.fn(async () => parentMessages);
+			const forkSession = vi.fn(async () => {
+				throw new Error("Unexpected eager Claude fork");
+			});
+			const sessionForkSdk = {
+				readTranscript,
+				forkSession,
+				transcriptExists: vi.fn(async () => false),
+			};
+			const query = vi.fn(() => {
+				throw new Error("Unexpected Claude query");
+			});
 			const persistenceLayer = makePersistenceEffectLayer(
 				join(dir, "events.db"),
 				"test-project",
@@ -654,11 +660,9 @@ describe("WsRpcServerLayer ListSessions", () => {
 								configDir: dir,
 								projectDir: "/project",
 								claudeSdk: {
-									query: () => {
-										throw new Error("Unexpected Claude query");
-									},
+									query,
 									titleQuery: async function* () {},
-									fork: defaultClaudeSessionForkSdk,
+									fork: sessionForkSdk,
 								},
 								shellEnv: () => ({
 									CLAUDE_CONFIG_DIR: "/current-project-config",
@@ -832,7 +836,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 					provider: "my-claude",
 					parent_id: null,
 					forked_from: "ses-parent",
-					provider_sid: usesCanonicalHistory ? null : "sdk-fork",
+					provider_sid: null,
 					fork_point_event: "api-first",
 					fork_point_message_id: "api-first",
 				});
@@ -840,19 +844,46 @@ describe("WsRpcServerLayer ListSessions", () => {
 					result.sessionId,
 					"my-claude",
 				);
-				if (usesCanonicalHistory) expect(forkThread).toBeUndefined();
+				expect(forkThread).toBeUndefined();
+				const sourceHint = (yield* providerState.getState(result.sessionId))[
+					CLAUDE_FORK_SOURCE_KEY
+				];
+				if (usesCanonicalHistory) expect(sourceHint).toBeUndefined();
 				else
-					expect(forkThread).toMatchObject({
-						resumeSessionId: "sdk-fork",
+					expect(JSON.parse(sourceHint ?? "null")).toEqual({
+						instanceId: "my-claude",
+						resumeSessionId: "sdk-parent",
 						configDir: configuredClaudeConfigDir(claudeConfigDir),
+						messageId: "api-first",
 					});
 				expect(api.session.fork).not.toHaveBeenCalled();
-				if (usesCanonicalHistory) expect(forkSession).not.toHaveBeenCalled();
-				else {
-					expect(forkSession).toHaveBeenCalledWith("sdk-parent", {
+				expect(forkSession).not.toHaveBeenCalled();
+				expect(readTranscript).not.toHaveBeenCalled();
+				expect(sessionForkSdk.transcriptExists).not.toHaveBeenCalled();
+				expect(query).not.toHaveBeenCalled();
+				const prepare = yield* makePrepareTurn({
+					folderSource: "account",
+					configDir: configuredClaudeConfigDir(claudeConfigDir),
+					sessionForkSdk,
+				});
+				const prepared = yield* prepare(
+					result.sessionId,
+					"my-claude",
+					"Continue fork",
+				);
+				if (usesCanonicalHistory) {
+					expect(prepared.resumeSessionId).toBeUndefined();
+					expect(prepared.handoff).toBeDefined();
+					expect(prepared.prompt).toContain("Question");
+					expect(prepared.prompt).toContain("Answer");
+				} else {
+					expect(prepared).toMatchObject({
+						resumeSessionId: "sdk-parent",
+						resumeSessionAt: "parent-final",
+						forkSession: true,
+						clearInheritedGoal: true,
 						configDir: configuredClaudeConfigDir(claudeConfigDir),
-						title: "Parent (fork)",
-						upToMessageId: "parent-final",
+						prompt: "Continue fork",
 					});
 					expect(readTranscript).toHaveBeenCalledWith("sdk-parent", {
 						configDir: configuredClaudeConfigDir(claudeConfigDir),
@@ -914,13 +945,15 @@ describe("WsRpcServerLayer ListSessions", () => {
 					messageId: "result-only",
 					originId: "browser-tab-a",
 				});
-				if (usesCanonicalHistory) expect(forkSession).not.toHaveBeenCalled();
-				else
-					expect(forkSession).toHaveBeenLastCalledWith("sdk-parent", {
-						configDir: configuredClaudeConfigDir(claudeConfigDir),
-						title: "Parent (fork)",
-						upToMessageId: "parent-final",
-					});
+				expect(forkSession).not.toHaveBeenCalled();
+				const resultOnlyPrepared = yield* prepare(
+					resultOnlyFork.sessionId,
+					"my-claude",
+					"Continue result fork",
+				);
+				expect(resultOnlyPrepared.resumeSessionId).toBeUndefined();
+				expect(resultOnlyPrepared.handoff).toBeDefined();
+				expect(resultOnlyPrepared.prompt).toContain("Handled locally");
 				expect(
 					(yield* readQuery.getSessionMessagesWithParts(
 						resultOnlyFork.sessionId,
@@ -940,7 +973,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 						"was not found in the session history",
 					);
 				expect((yield* sessionCount())[0]?.count).toBe(beforeMissingPoint);
-				expect(forkSession).toHaveBeenCalledTimes(usesCanonicalHistory ? 0 : 2);
+				expect(forkSession).not.toHaveBeenCalled();
 
 				const eventStore = yield* EventStoreEffectTag;
 				const failPersist = vi
@@ -961,7 +994,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				);
 				failPersist.mockRestore();
 				expect(rolledBack._tag).toBe("Failure");
-				expect(forkSession).toHaveBeenCalledTimes(usesCanonicalHistory ? 0 : 3);
+				expect(forkSession).not.toHaveBeenCalled();
 				expect((yield* sessionCount())[0]?.count).toBe(beforeMissingPoint);
 
 				yield* applySessionCommand({
@@ -983,15 +1016,14 @@ describe("WsRpcServerLayer ListSessions", () => {
 					expect(String(missing.failure)).toContain(
 						"has no Claude transcript yet",
 					);
-				expect(forkSession).toHaveBeenCalledTimes(usesCanonicalHistory ? 0 : 3);
+				expect(forkSession).not.toHaveBeenCalled();
+				expect(query).not.toHaveBeenCalled();
 				if (usesCanonicalHistory) expect(readTranscript).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.scoped,
 				Effect.provide(layer, { local: true }),
 				Effect.ensuring(
 					Effect.sync(() => {
-						readTranscript.mockRestore();
-						forkSession.mockRestore();
 						rmSync(dir, { recursive: true, force: true });
 					}),
 				),
