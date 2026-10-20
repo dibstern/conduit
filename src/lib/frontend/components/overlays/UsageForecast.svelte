@@ -7,11 +7,11 @@
 	let selected = $state<PlanUsageWindow["kind"]>();
 	let width = $state(250);
 	const windows = $derived(planUsageWindows(account));
-	const initial = $derived(usageForecastWindow(account));
-	const window = $derived(windows.find((item) => item.kind === selected && (item.forecast || usageWindowLimited(account, item))) ?? initial);
+	const initial = $derived(usageForecastWindow(account, now));
+	const window = $derived(windows.find((item) => item.kind === selected && (item.forecast || usageWindowLimited(account, item, now))) ?? initial);
 	const copy = $derived(window ? usageForecastCopy(account, window, now) : undefined);
 	const other = $derived(usageOtherForecast(windows.find((item) => item.kind !== window?.kind), now));
-	const level = $derived(usageForecastLevel(account));
+	const level = $derived(usageForecastLevel(account, now));
 	const prefix = $derived(`usage-settings-forecast-${account.accountId}`);
 	const chart = $derived.by(() => {
 		if (!window?.resetsAt || width <= 0) return undefined;
@@ -21,7 +21,7 @@
 		const start = reset - duration;
 		const x = (at: number) => Math.max(0, Math.min(width, (at - start) / duration * width));
 		const y = (used: number) => 70 - Math.max(0, Math.min(110, used)) / 110 * 62;
-		const limited = usageWindowLimited(account, window);
+		const limited = usageWindowLimited(account, window, now);
 		const points = (window.history ?? [{ at: account.readAt || now, utilization: window.utilization }])
 			.filter((point) => point.at >= start && point.at <= Math.min(now, reset));
 		if (limited) points.push({ at: Math.min(now, reset), utilization: 100 });
@@ -57,7 +57,7 @@
 				variant="joined"
 				label="Forecast window"
 				class="text-[10px]"
-				options={(["five_hour", "seven_day"] as const).map((kind) => ({ value: kind, label: kind === "five_hour" ? "5h" : "Week", testId: `${prefix}-${kind}`, disabled: !windows.some((item) => item.kind === kind && (item.forecast || usageWindowLimited(account, item))) }))}
+				options={(["five_hour", "seven_day"] as const).map((kind) => ({ value: kind, label: kind === "five_hour" ? "5h" : "Week", testId: `${prefix}-${kind}`, disabled: !windows.some((item) => item.kind === kind && (item.forecast || usageWindowLimited(account, item, now))) }))}
 				bind:value={() => window?.kind ?? "five_hour", (next) => { selected = next; }}
 			/>
 		</div>

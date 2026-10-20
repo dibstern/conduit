@@ -12,10 +12,12 @@
 -->
 <script lang="ts">
 	import type { Snippet } from "svelte";
+	import { accountLimit } from "../../../contracts/account-limit.js";
 	import type { LimitRecovery } from "../../../contracts/limit-recovery.js";
+	import { clock } from "../../stores/clock.svelte.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
-	import { quotaBlocksSwitch, quotaReading } from "../../utils/continuation.js";
+	import { quotaReading } from "../../utils/continuation.js";
 	import HandoffDialog from "../overlays/HandoffDialog.svelte";
 	import AccountDot from "../ui/AccountDot.svelte";
 	import Menu from "../ui/Menu.svelte";
@@ -95,7 +97,7 @@
 			{#if choice.kind === "selectable" && choice.usageUnknown}
 				<QuotaMeter used="unknown" caption="usage unknown" size={compact ? "sm" : "md"} track={false} />
 			{:else}
-				<QuotaMeter {...quotaReading(quota)} size={compact ? "sm" : "md"} track={!quotaBlocksSwitch(quota)} />
+				<QuotaMeter {...quotaReading(quota, clock.now)} size={compact ? "sm" : "md"} track={accountLimit({ asker: "user", ...(quota ? { reading: quota } : {}), now: clock.now }).kind !== "wait-until"} />
 			{/if}
 		</MenuItem>
 	{/each}
@@ -113,7 +115,7 @@
 		summary={handoff.summary}
 		confirm={{
 			from: handoff.from,
-			fromQuota: claudeAccounts.fromQuota(handoff),
+			fromQuota: claudeAccounts.quotaOf(handoff.from),
 			quota: claudeAccounts.quotaOf(chosen),
 			cutOff: limit?.cutOffMessageId !== undefined,
 			busy: claudeAccounts.switching,

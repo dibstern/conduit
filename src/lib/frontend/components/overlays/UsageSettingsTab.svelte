@@ -20,6 +20,7 @@
 </script>
 
 <script lang="ts">
+	import { accountLimit } from "../../../contracts/account-limit.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import type { UsageReading, UsageWindow } from "../../../contracts/limit-recovery.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
@@ -32,7 +33,7 @@
 	import { applyUsageLimitsSetting, orderedSettingsUsageAccounts, usageAlert, usageState } from "../../stores/usage.svelte.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
-	import { usageDisplay, usageForecastDuration, usageForecastTime, usageForecastWindow, usagePaceLine, usageResetTime } from "../../utils/continuation.js";
+	import { usageDisplay, usageForecastDuration, usageForecastTime, usageForecastWindow, usagePaceLine, usageResetTime, usageWindowLimited } from "../../utils/continuation.js";
 	import AccountDot from "../ui/AccountDot.svelte";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
@@ -55,7 +56,7 @@
 	const forecastAccount = $derived(sessionId
 		? accounts.find((account) => account.accountId === sessionAccountId)
 		: accounts.find((account) => account.accountId === getEffectiveInstanceId()) ?? accounts.reduce<UsageReading | undefined>((fullest, account) =>
-			!fullest || (usageDisplay(account, "off").binding?.utilization ?? -1) > (usageDisplay(fullest, "off").binding?.utilization ?? -1) ? account : fullest, undefined));
+			!fullest || (usageDisplay(account, "off", now).binding?.utilization ?? -1) > (usageDisplay(fullest, "off", now).binding?.utilization ?? -1) ? account : fullest, undefined));
 	let expandedAccounts = $state<string[]>([]);
 	/** Phone only: whether the account order shows its drag handles. */
 	let reordering = $state(false);
@@ -137,30 +138,23 @@
 	}
 
 	/** `full` reads as a sentence; otherwise it fits a 62px meter column under its heading. */
-	function resetLine(window: UsageWindow | undefined, full: boolean): string {
+	function resetLine(account: UsageReading, window: UsageWindow | undefined, full: boolean): string {
 		if (!window || (window.kind === "five_hour" && window.utilization === 0 && !window.resetsAt)) return full ? "no window open" : "not open";
 		const time = usageResetTime(window.resetsAt, window.kind === "seven_day");
-		if (!time) return window.utilization >= 100 ? (full ? "limit reached" : "limited") : full ? "reset time unavailable" : "—";
+		const limited = usageWindowLimited(account, window, now);
+		if (!time) return limited ? (full ? "limit reached" : "limited") : full ? "reset time unavailable" : "—";
 		if (window.kind === "seven_day") return full ? `resets ${time}` : time;
-		if (window.utilization >= 100) return full ? `limit reached · resets ${time}` : time;
+		if (limited) return full ? `limit reached · resets ${time}` : time;
 		const minutes = Math.max(0, Math.ceil((Date.parse(window.resetsAt ?? "") - now) / 60_000));
 		const remaining = minutes >= 60 ? `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m` : `${minutes}m`;
 		return full ? `resets in ${remaining} (${time})` : `in ${remaining}`;
 	}
 
-	function limitWindow(account: UsageReading): UsageWindow | undefined {
-		// Warnings may bind to the week; only exhausted windows set a limit's reset.
-		return account.windows
-			.filter((window) => (window.kind === "five_hour" || window.kind === "seven_day") && window.utilization >= 100)
-			.sort((a, b) => (Date.parse(b.resetsAt ?? "") || 0) - (Date.parse(a.resetsAt ?? "") || 0))[0]
-			?? usageDisplay(account, usageState.limits.warnAt).binding;
-	}
-
 	function statusOf(account: UsageReading): string {
 		if (!hasPlanData(account)) return "no plan data";
-		const display = usageDisplay(account, usageState.limits.warnAt);
+		const display = usageDisplay(account, usageState.limits.warnAt, now);
 		if (display.level === "limited") {
-			const time = usageResetTime(limitWindow(account)?.resetsAt).replace(/ (am|pm)$/, "");
+			const time = usageResetTime(display.binding?.resetsAt).replace(/ (am|pm)$/, "");
 			return time ? `limited · ${time}` : "limited";
 		}
 		return display.level === "warn" && display.binding
@@ -170,7 +164,7 @@
 
 	function nextAccount(account: UsageReading): UsageReading | undefined {
 		return accounts.slice(accounts.indexOf(account) + 1).find((candidate) =>
-			candidate.status !== "unavailable" && usageDisplay(candidate, usageState.limits.warnAt).level !== "limited");
+			accountLimit({ asker: "automatic", reading: candidate, now }).kind === "go");
 	}
 
 	const headline = $derived.by((): { text: string; limited: boolean; warning?: boolean; bold?: string } => {
@@ -178,7 +172,7 @@
 		const alert = usageAlert(accounts, usageState.limits.warnAt);
 		if (alert?.level === "limited") {
 			const limited = alert.account;
-			const time = usageResetTime(limitWindow(limited)?.resetsAt);
+			const time = usageResetTime(usageDisplay(limited, usageState.limits.warnAt, now).binding?.resetsAt);
 			let text = `${nameOf(limited)} is limited${time ? ` until ${time}` : ""}.`;
 			const next = nextAccount(limited);
 			const fiveHour = next?.windows.find((window) => window.kind === "five_hour");
@@ -217,8 +211,7 @@
 </script>
 
 {#snippet meter(account: UsageReading, window: UsageWindow | undefined, label: string, prefix: string, full: boolean)}
-	<!-- usageDisplay only rates account-wide windows, so a lone window is rated as one. -->
-	{@const display = usageDisplay(window ? { ...account, status: window.utilization >= 100 ? "limited" : "available", windows: [{ ...window, kind: "seven_day" }] } : undefined, usageState.limits.warnAt)}
+	{@const display = usageDisplay(window ? account : undefined, usageState.limits.warnAt, now, window)}
 	{@const value = window ? `${Math.round(window.utilization)}%` : "—"}
 	{@const valueTone = display.level === "limited" ? "text-error" : display.level === "warn" ? "text-fill-amber" : "text-text-secondary"}
 	{#if full}
@@ -238,7 +231,7 @@
 	{@const prefix = full ? `usage-settings-single-${kind}` : `usage-settings-card-${account.accountId}-${kind}`}
 	<div class={full ? "min-w-0" : "w-[70px] shrink-0 self-start pt-[6px] max-md:w-[62px]"}>
 		{@render meter(account, window, label, prefix, full)}
-		<div data-testid="{prefix}-reset" class="text-text-dimmer {full ? 'mt-[3px] font-mono text-[10.5px]' : 'truncate text-[10.5px] leading-[13px]'}">{resetLine(window, full)}</div>
+		<div data-testid="{prefix}-reset" class="text-text-dimmer {full ? 'mt-[3px] font-mono text-[10.5px]' : 'truncate text-[10.5px] leading-[13px]'}">{resetLine(account, window, full)}</div>
 	</div>
 {/snippet}
 
@@ -270,7 +263,7 @@
 			if (setting) void save({ ...setting, order: next.map((account) => account.accountId) });
 		}}>
 			{#snippet row(account, index)}
-				{@const level = usageDisplay(account, usageState.limits.warnAt).level}
+				{@const level = usageDisplay(account, usageState.limits.warnAt, now).level}
 				{#if !sessionViewState.compact}<span data-testid="usage-settings-position-{account.accountId}" class="w-[14px] shrink-0 text-center font-mono text-[11px] text-text-dimmer">{index + 1}</span>{/if}
 				<div class="min-w-0 flex-1">
 					<div class="flex min-w-0 items-center gap-[7px]">
@@ -292,7 +285,7 @@
 				<div id="usage-settings-card-{account.accountId}" data-testid="usage-settings-card-{account.accountId}" class="md:pl-[48px]">
 					{#if !hasPlanData(account)}<p class="mt-[6px] font-mono text-[10.5px] text-text-dimmer">No plan data for this login (API key, Bedrock, Vertex or proxy). Auto-switch can still pick it.</p>{/if}
 					{#if models.length > 0}<div data-testid="usage-settings-models-{account.accountId}" class="mt-[7px] font-mono text-[10.5px] text-text-dimmer">{models.join(" · ")}</div>{/if}
-					{#if usageForecastWindow(account)}
+					{#if usageForecastWindow(account, now)}
 						{@const pace = usagePaceLine(account, now)}
 						{#if account === forecastAccount || !pace}
 							<UsageForecast {account} {now} />

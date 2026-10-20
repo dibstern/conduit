@@ -1145,7 +1145,7 @@
 		summary={handoff.summary}
 		confirm={{
 			from: handoff.from,
-			fromQuota: accounts.fromQuota(handoff),
+			fromQuota: accounts.quotaOf(handoff.from),
 			quota: accounts.quotaOf(handoff.to),
 			cutOff: handoff.limit?.cutOffMessageId !== undefined,
 			busy: accounts.switching,

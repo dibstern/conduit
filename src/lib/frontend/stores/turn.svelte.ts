@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { untrack } from "svelte";
 import { SvelteMap } from "svelte/reactivity";
+import { accountLimit } from "../../contracts/account-limit.js";
 import { WorkspaceMoveError } from "../../contracts/session-workspace.js";
 import type {
 	InputDelivery,
@@ -19,6 +20,7 @@ import {
 	sessionMessages,
 } from "./chat.svelte.js";
 import { getBrowserClientId } from "./client-identity.js";
+import { clock } from "./clock.svelte.js";
 import {
 	getAvailableInstances,
 	getDraftPick,
@@ -111,6 +113,10 @@ function predictsHandoff(sessionId: string): boolean {
 	const row = findSession(sessionId);
 	if (!row) return true;
 	const inbox = sessionMessages.get(sessionId)?.transcript;
+	const reading = usageState.readings.find(
+		(reading) => reading.accountId === row.accountId,
+	);
+	const recovery = row.limitRecovery;
 	return (
 		row.status !== "busy" &&
 		row.status !== "retry" &&
@@ -123,10 +129,12 @@ function predictsHandoff(sessionId: string): boolean {
 		) &&
 		!inbox?.pending.length &&
 		!inbox?.paused &&
-		!usageState.readings.some(
-			(reading) =>
-				reading.accountId === row.accountId && reading.status === "limited",
-		)
+		accountLimit({
+			asker: "user",
+			...(reading ? { reading } : {}),
+			...(recovery && !recovery.switched ? { recovery } : {}),
+			now: clock.now,
+		}).kind !== "wait-until"
 	);
 }
 

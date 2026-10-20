@@ -88,7 +88,7 @@ function singleReading(state: string): UsageReading {
 			{
 				kind: "five_hour",
 				utilization: values[0],
-				resetsAt: "2026-01-01T03:13:00Z",
+				resetsAt: "2026-01-01T15:13:00Z",
 			},
 			{ kind: "seven_day", utilization: values[1] },
 		],

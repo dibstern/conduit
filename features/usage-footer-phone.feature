@@ -43,7 +43,7 @@ Examples:
 
 Scenario Outline: a limited default shows its compact reset time
   Given the usage footer has several accounts with an unknown Claude reading
-  When the usage footer claude five_hour reading is 100% resetting at 2026-01-01T03:13:00Z
+  When the usage footer claude five_hour reading is 100% resetting at 2026-01-01T15:13:00Z
   And I tap back to the session list
   Then the session list is open
   And the phone usage rows are claude in that order
