@@ -450,11 +450,12 @@ test("Stop all works after the foreground result and leaves the same query usabl
 	page,
 	harness,
 }, testInfo) => {
-	const { queryId, app, chat } = await startTurn(
+	const { sessionId, queryId, app, chat } = await startTurn(
 		page,
 		harness,
 		"task-stop-foreground-idle",
 	);
+	const row = page.locator(`#session-list [data-session-id="${sessionId}"]`);
 	const steps = recorder(page, harness, testInfo);
 	try {
 		release(harness, "task-stop-release-result");
@@ -472,6 +473,7 @@ test("Stop all works after the foreground result and leaves the same query usabl
 			page,
 			taskStopFixture.map((task) => task.description),
 		);
+		await expect(row).toHaveAttribute("aria-label", /^Monitoring/);
 		await steps.record("foreground-ended-tasks-live");
 		await page.getByTestId("background-tasks-stop-all").click();
 		await expect.poll(() => requestedIds(harness)).toHaveLength(4);
@@ -482,6 +484,10 @@ test("Stop all works after the foreground result and leaves the same query usabl
 		release(harness, "task-stop-confirm-all");
 		await expect(page.getByTestId("background-tasks-row")).toBeHidden();
 		await expect(page.getByTestId("composer-task-dots")).toBeHidden();
+		await expect(
+			row,
+			"Stop all left the sidebar row monitoring",
+		).not.toHaveAttribute("aria-label", /^Monitoring/);
 		assertTurnUntouched(harness, queryId);
 		await steps.record("idle-tasks-confirmed-stopped");
 		release(harness, "task-stop-release-input");

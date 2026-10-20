@@ -358,8 +358,8 @@ test("the daemon imports project histories and keeps using its shared store acro
 		await harness.terminate();
 		assertNoSources();
 		const before = daemonStoreManifest(destination);
-		// A was removed; the default browser probe would attach to its old slug.
-		await harness.restart({ skipBrowserProbe: true });
+		// Startup must activate the surviving project's relay after A was removed.
+		await harness.restart();
 		assertNoSources();
 		await harness.terminate();
 		assertNoSources();

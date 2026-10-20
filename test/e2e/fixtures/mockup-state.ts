@@ -17,34 +17,36 @@ export interface MockMessage {
 	[key: string]: unknown;
 }
 
+export const defaultInstances = [
+	{
+		id: "claude",
+		name: "Claude",
+		driver: "claude",
+		isDefault: true,
+		usageEligible: true,
+		port: 0,
+		managed: false,
+		status: "healthy",
+		restartCount: 0,
+		createdAt: 1,
+	},
+	{
+		id: "opencode",
+		name: "OpenCode",
+		driver: "opencode",
+		isDefault: true,
+		port: 4096,
+		managed: true,
+		status: "healthy",
+		restartCount: 0,
+		createdAt: 1,
+	},
+];
+
 export const initMessages: MockMessage[] = [
 	{
 		type: "instance_list",
-		instances: [
-			{
-				id: "claude",
-				name: "Claude",
-				driver: "claude",
-				isDefault: true,
-				usageEligible: true,
-				port: 0,
-				managed: false,
-				status: "healthy",
-				restartCount: 0,
-				createdAt: 1,
-			},
-			{
-				id: "opencode",
-				name: "OpenCode",
-				driver: "opencode",
-				isDefault: true,
-				port: 4096,
-				managed: true,
-				status: "healthy",
-				restartCount: 0,
-				createdAt: 1,
-			},
-		],
+		instances: defaultInstances,
 	},
 	{
 		type: "status",

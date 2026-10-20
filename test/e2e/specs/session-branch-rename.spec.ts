@@ -248,7 +248,6 @@ for (const mode of [
 				);
 				expect(request.payload).toEqual({
 					_tag: "RenameSessionBranch",
-					projectSlug,
 					sessionId,
 					branchName: newName,
 				});

@@ -22,6 +22,7 @@ import {
 import { isRecord } from "../../../src/lib/utils.js";
 import { makeRpcStream, serveRpc } from "../../helpers/rpc-wire.js";
 import type { StubTable } from "../../helpers/stub-ws-rpc.js";
+import { defaultInstances } from "../fixtures/mockup-state.js";
 import {
 	mockDetailPage,
 	mockDetailSnapshot,
@@ -541,7 +542,7 @@ export class RpcMockControl {
 			: tag === "SubscribeUsage"
 				? [{ readings: [] }]
 				: tag === "SubscribeInstances"
-					? [{ instances: [] }]
+					? [{ instances: defaultInstances }]
 					: [];
 	}
 
@@ -971,6 +972,19 @@ function socketTable(
 					)(response);
 					return response;
 				});
+				// Setting writes must survive the follow-up GetModels read.
+				if (isRecord(value)) {
+					if (rpc._tag === "SwitchVariant")
+						control.catalog.variant = {
+							variant: value["variant"],
+							variants: value["variants"],
+						};
+					if (rpc._tag === "SwitchContextWindow")
+						control.catalog.contextWindow = {
+							contextWindow: value["contextWindow"],
+							options: value["options"],
+						};
+				}
 				if (
 					draftId &&
 					isRecord(value) &&
@@ -1006,6 +1020,11 @@ export async function mockWsRpc(
 	page: Page,
 	options: RpcMockOptions = {},
 ): Promise<RpcMockControl> {
+	// Vite preview has no daemon HTTP edge. Redials accept /info without a
+	// buildId, as they do for an older daemon.
+	await page.route("**/info", (route) =>
+		route.fulfill({ json: MOCK_SERVER_STATUS }),
+	);
 	const control = controls.get(page) ?? new RpcMockControl(page);
 	controls.set(page, control);
 	control.stubs = {

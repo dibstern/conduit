@@ -1715,7 +1715,7 @@ test.describe("session composer owns its stored pick", () => {
 			await showSession(openCodeId);
 			await held.wait;
 			await expectShown(picker, {
-				harness: "opencode",
+				harness: "",
 				provider: "",
 				model: "",
 				effort: "",
@@ -3246,6 +3246,7 @@ test("legacy-pick-backfill: last turn restores once and survives a second restar
 	}
 	const legacy = readStoredState(harness, slug, sessionId);
 	const restorations: ReturnType<typeof readStoredState>[] = [];
+	const sampledModels: GetModelsResponse[] = [];
 	const reported: {
 		model: string;
 		provider: string;
@@ -3263,9 +3264,30 @@ test("legacy-pick-backfill: last turn restores once and survives a second restar
 				`legacy-read-${restart}`,
 				slug,
 			);
-			const models = await Effect.runPromise(
+			let models = await Effect.runPromise(
 				restoredBrowser.rpc.GetModels({ sessionId }),
 			);
+			sampledModels.push(models);
+			// Restart serves a persisted catalog while capability discovery refreshes it.
+			await expect
+				.poll(async () => {
+					models = await Effect.runPromise(
+						restoredBrowser.rpc.GetModels({ sessionId }),
+					);
+					sampledModels.push(models);
+					return {
+						model: models.active?.model ?? "",
+						provider: models.active?.provider ?? "",
+						effort: models.variant?.variant ?? "",
+						contextWindow: models.contextWindow?.contextWindow ?? "",
+					};
+				})
+				.toEqual({
+					model: "sonnet",
+					provider: "claude",
+					effort: "high",
+					contextWindow: "200k",
+				});
 			restorations.push(readStoredState(harness, slug, sessionId));
 			reported.push({
 				model: models.active?.model ?? "",
@@ -3284,6 +3306,7 @@ test("legacy-pick-backfill: last turn restores once and survives a second restar
 			before,
 			legacy,
 			restorations,
+			sampledModels,
 			reported,
 		});
 	}
@@ -3294,6 +3317,14 @@ test("legacy-pick-backfill: last turn restores once and survives a second restar
 		variant: "high",
 		context_window: "200k",
 	};
+	for (const models of sampledModels) {
+		if (models.active)
+			expect(models).toMatchObject({
+				active: { model: "sonnet", provider: "claude" },
+				variant: { variant: "high" },
+				contextWindow: { contextWindow: "200k" },
+			});
+	}
 	expect(sent).toMatchObject({
 		model: "sonnet",
 		effort: "high",

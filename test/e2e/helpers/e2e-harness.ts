@@ -176,6 +176,7 @@ export async function createSession(
 	relayPort: number,
 	providerId: "claude" | "opencode",
 	instanceId?: string,
+	title?: string,
 ): Promise<string> {
 	const { sessionId } = await Effect.runPromise(
 		Effect.scoped(
@@ -195,6 +196,7 @@ export async function createSession(
 						"The replay fixture needs a valid harness model pick",
 					);
 				return yield* client.CreateSession({
+					...(title === undefined ? {} : { title }),
 					permissionMode: "ask",
 					projectSlug: "e2e-replay",
 					originId: `e2e-${providerId}-replay`,

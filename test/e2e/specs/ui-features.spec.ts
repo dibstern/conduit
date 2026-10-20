@@ -106,14 +106,14 @@ test.describe("Input Area", () => {
 // (InputArea wrapper + CommandMenu inner) also cause strict-mode violations.
 
 test.describe("Todo Overlay", () => {
-	test("todo sticky element exists but is hidden", async ({
+	test("todo overlay stays unmounted until the session has items", async ({
 		page,
 		relayUrl,
 	}) => {
 		const app = new AppPage(page);
 		await app.goto(relayUrl);
 
-		await expect(app.todoSticky).toBeAttached();
-		await expect(app.todoSticky).toHaveClass(/hidden/);
+		await expect(app.todoSticky).toHaveCount(0);
+		await expect(app.todoSticky).toBeHidden();
 	});
 });

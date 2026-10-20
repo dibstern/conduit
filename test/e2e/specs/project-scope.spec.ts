@@ -224,6 +224,7 @@ const capabilityInstances = [
 		id: "claude",
 		name: "Across folders",
 		driver: "claude",
+		isDefault: true,
 		port: 0,
 		managed: false,
 		status: "healthy",
@@ -235,6 +236,7 @@ const capabilityInstances = [
 		id: "opencode",
 		name: "Main only",
 		driver: "opencode",
+		isDefault: true,
 		port: 0,
 		managed: false,
 		status: "healthy",
@@ -307,6 +309,57 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 		baseURL,
 		"/new?project=myapp",
 	);
+	// 7a8e7be7 requires a configured default account; 2ba9fc5b requires a
+	// held catalog pick before sending, independently of folder support.
+	control.rpc.setStubs({
+		GetModels: () => ({
+			projectSlug: "myapp",
+			defaultOpenCodeInstanceId: "opencode",
+			providers: ["claude", "anthropic"].map((provider) => ({
+				id: provider,
+				name: provider,
+				configured: true,
+				models: [{ id: "sonnet", name: "Sonnet", provider }],
+			})),
+		}),
+	});
+	control.rpc.setProjectSetting({
+		_tag: "defaultModel",
+		variant: "",
+	});
+	control.rpc.setProjectSetting({
+		_tag: "harnessDefaults",
+		claude: {
+			status: "ok",
+			pick: {
+				providerId: "claude",
+				modelId: "sonnet",
+				effort: "",
+				contextWindow: "",
+			},
+		},
+		opencode: {
+			status: "ok",
+			pick: {
+				providerId: "anthropic",
+				modelId: "sonnet",
+				effort: "",
+				contextWindow: "",
+			},
+		},
+	});
+	control.rpc.setProjectSetting({
+		_tag: "providerModels",
+		accountId: "claude",
+		providers: [
+			{
+				id: "claude",
+				name: "Claude",
+				configured: true,
+				models: [{ id: "sonnet", name: "Sonnet", provider: "claude" }],
+			},
+		],
+	});
 	sendMockDaemonList(page, "SubscribeInstances", {
 		instances: capabilityInstances,
 	});
@@ -369,9 +422,12 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 			.filter((request) => request.tag === "CreateSession"),
 	).toEqual([]);
 
-	// Missing capabilities must not block sending into a multi-folder draft.
+	// Missing advertised capabilities use the shared driver contract (70578efa).
+	// Keep the account: removing it is a different reason to block sending.
 	sendMockDaemonList(page, "SubscribeInstances", {
-		instances: [],
+		instances: capabilityInstances.map(
+			({ capabilities: _capabilities, ...instance }) => instance,
+		),
 		providerCapabilities: {},
 	});
 	sendMockProjects(page, {
@@ -390,7 +446,7 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 	await startChip.click();
 	await expect(
 		startMenu.getByRole("menuitem", {
-			name: "New worktree Not supported by This provider",
+			name: "New worktree Requires a Git folder",
 		}),
 	).toHaveAttribute("aria-disabled", "true");
 	await page.keyboard.press("Escape");
@@ -692,8 +748,11 @@ test.describe("Project Delete", () => {
 		await setupWithProjectManagement(page, baseURL);
 		await page.getByTestId("session-scope-chip").click();
 		await expect(scopeRow(page, "myapp")).toBeVisible();
-		await scopeRow(page, "mylib").focus();
-		await page.keyboard.press("Delete");
+		await expect(
+			page.getByRole("menu", { name: "Project scope" }),
+		).toBeFocused();
+		await scopeRow(page, "mylib").press("Delete");
+		await expect(page.locator("#confirm-modal")).toBeVisible();
 		await page.click("#confirm-modal button:has-text('Remove')");
 		await expect(page.locator("#confirm-modal")).not.toBeVisible();
 

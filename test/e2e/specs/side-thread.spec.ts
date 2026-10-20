@@ -485,8 +485,9 @@ test.describe("OpenCode Side Threads", () => {
 		if (!(result.failure instanceof WsRpcError))
 			throw new Error("Missing parent failed outside the typed RPC contract");
 		expect(result.failure._tag).toBe("WsRpcError");
+		expect(result.failure.code).toBe("unknown-session");
 		expect(result.failure.message).toBe(
-			"Parent session missing-side-thread-parent was not found",
+			"Unknown session: missing-side-thread-parent",
 		);
 		expect(sessionEvents(harness.eventsDbPath)).toEqual(before);
 	});

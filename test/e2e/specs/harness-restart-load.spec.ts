@@ -654,8 +654,10 @@ test("opens the heavy session after a restart under load", async ({
 		false,
 	);
 	const longSession = await longDriver.createSession("Long turn");
+	// Status paging puts 5,001 unread roots ahead of the read tool session.
+	// Keep both recent sessions in the page while switching away and back.
 	await new AppPage(opener).goto(
-		`${harness.baseUrl}/s/${longSession}?p=process-test`,
+		`${harness.baseUrl}/s/${longSession}?p=process-test&group=time`,
 	);
 	pinned = [];
 	// A loaded server takes a few hundred ms a call.
@@ -736,15 +738,9 @@ test("opens the heavy session after a restart under load", async ({
 	// Away from the session, a follow-up turn lands and the server restarts;
 	// coming back resumes from the cursor the device holds.
 	const pick = (page: Page, id: string) =>
-		page.evaluate(
-			(id) =>
-				document
-					.querySelector<HTMLElement>(
-						`[data-session-id="${id}"] .session-item-title`,
-					)
-					?.click(),
-			id,
-		);
+		page
+			.locator(`[data-session-id="${id}"] .session-item-title`)
+			.dispatchEvent("click");
 	await pick(opener, toolSession);
 	await expect(opener).toHaveURL(new RegExp(toolSession));
 	await longDriver.send(longSession, `load-tools-${FOLLOW_UP_CALLS}`, 60_000);
@@ -808,9 +804,9 @@ test("opens the heavy session after a restart under load", async ({
 		);
 		while ((await collapsed.count()) > 0) await collapsed.first().click();
 		// The scroll button shows only while the view is detached: leave it out,
-		// so a scroll race can neither fake nor mask a difference in content.
+		// along with its sticky rail, so a scroll race cannot mask content changes.
 		return (
-			await page.locator("#messages > :not(#scroll-btn)").allInnerTexts()
+			await page.locator("#messages > :not(:has(#scroll-btn))").allInnerTexts()
 		).join("\n");
 	};
 	const [resumedTranscript, coldTranscript] = [

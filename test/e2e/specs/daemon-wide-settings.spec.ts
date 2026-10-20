@@ -116,7 +116,10 @@ test("no project open: instance mutations, scan and log level use daemon RPC", a
 		.poll(
 			() => observed.calls.find((call) => call.tag === "AttachProject")?.exit,
 		)
-		.toEqual({ _tag: "Success", value: { projectSlug: null } });
+		.toEqual({
+			_tag: "Success",
+			value: { projectSlug: null, sessionSlug: null },
+		});
 	// Record transient toasts too, even if they expire before the final assertion.
 	await page.evaluate(() => {
 		new MutationObserver((records) => {
