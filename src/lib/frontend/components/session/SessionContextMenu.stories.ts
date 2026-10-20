@@ -133,7 +133,7 @@ function phoneSheet(state: Partial<SessionInfo> = {}): Story {
 						?.content,
 				).toBe(
 					document.documentElement.classList.contains("light-theme")
-						? "#b0b1b4"
+						? "#b0b1b3"
 						: "#0b0c0e",
 				),
 			);

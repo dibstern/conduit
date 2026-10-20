@@ -38,6 +38,8 @@
 	--animate-cascade-b-fast: pixel-cascade-b 1.4s ease-in-out infinite;
 
 	--color-bg: #111113;
+	/* Browser chrome with the default backdrop over --color-bg. */
+	--color-theme-scrim: #0b0c0e;
 	--color-bg-surface: #1a1a1d;
 	--color-bg-alt: #232327;
 	--color-bg-raised: #18181b;
@@ -267,6 +269,7 @@
 	--color-p-full: #c0267f;
 
 	--color-bg: #ffffff;
+	--color-theme-scrim: #b0b1b3;
 	--color-bg-surface: #ffffff;
 	--color-bg-alt: #f1f1f3;
 	--color-bg-raised: #f7f7f8;

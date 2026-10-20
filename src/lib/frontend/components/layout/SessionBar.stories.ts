@@ -36,7 +36,7 @@ import {
 	openPanel,
 	terminalState,
 } from "../../stores/terminal.svelte.js";
-import { setThemeMode } from "../../stores/theme.svelte.js";
+import { dimThemeColor, setThemeMode } from "../../stores/theme.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
 import { openSessionForSetup } from "../../stories/session-setup.js";
@@ -1222,30 +1222,25 @@ export const PhoneGoalSheet: Story = {
 		const theme = document.documentElement.classList.contains("light-theme")
 			? "light"
 			: "dark";
-		for (const mode of ["dark", "light"] as const) {
-			setThemeMode(mode);
-			expect(
-				document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
-					?.content,
-			).toMatch(mode === "dark" ? /^#0b0c0e$/ : /^#b0b1b[34]$/);
-		}
-		// A production build compresses #ffffff and rgba tokens to hex.
-		const style = document.documentElement.style;
-		const background = style.getPropertyValue("--color-bg");
-		const backdrop = style.getPropertyValue("--color-backdrop");
+		document.querySelector('meta[name="theme-color"]')?.remove();
+		const release = dimThemeColor();
 		try {
-			style.setProperty("--color-bg", "#fff");
-			style.setProperty("--color-backdrop", "#161a2157");
-			setThemeMode("light");
-			expect(
-				document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
-					?.content,
-			).toBe("#b0b1b3");
+			for (const mode of ["dark", "light"] as const) {
+				setThemeMode(mode);
+				expect(
+					document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+						?.content,
+				).toBe(mode === "dark" ? "#0b0c0e" : "#b0b1b3");
+			}
 		} finally {
-			style.setProperty("--color-bg", background);
-			style.setProperty("--color-backdrop", backdrop);
+			release();
+			release();
 			setThemeMode(theme);
 		}
+		expect(
+			document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+				?.content,
+		).toBe(theme === "dark" ? "#0b0c0e" : "#b0b1b3");
 		const box = sheet.getBoundingClientRect();
 		expect(box.x).toBe(0);
 		expect(box.width).toBe(393);
@@ -1913,7 +1908,7 @@ export const BackgroundTasks: Story = {
 			expect(
 				document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
 					?.content,
-			).toMatch(mode === "dark" ? /^#0b0c0e$/ : /^#b0b1b[34]$/);
+			).toBe(mode === "dark" ? "#0b0c0e" : "#b0b1b3");
 		}
 		setThemeMode(theme);
 		sessionViewState.atBottom = true;
@@ -2038,7 +2033,7 @@ export const SideThreadsOpen: Story = {
 		expect(
 			document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
 				?.content,
-		).toMatch(theme === "dark" ? /^#0b0c0e$/ : /^#b0b1b[34]$/);
+		).toBe(theme === "dark" ? "#0b0c0e" : "#b0b1b3");
 		const panel = within(canvasElement).getByTestId("side-threads-panel");
 		const bar = within(canvasElement).getByTestId("session-bar");
 		// The phone sheet spans the bar.

@@ -24,7 +24,7 @@
 <script lang="ts">
 	import { onDestroy, type Snippet } from "svelte";
 	import { provideDialogTarget } from "./dialog-context.js";
-	import { themeColorScrim } from "../../stores/theme.svelte.js";
+	import { dimThemeColor } from "../../stores/theme.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 
 	let {
@@ -61,7 +61,7 @@
 
 	let dialogEl = $state<HTMLDialogElement | null>(null);
 	$effect(() => {
-		if (open && dialogEl && (placement === "sheet" || sessionViewState.compact && placement !== "fullscreen")) return themeColorScrim(dialogEl, { backdrop, pseudoElement: "::backdrop" }).destroy;
+		if (open && dialogEl && (placement === "sheet" || sessionViewState.compact && placement !== "fullscreen")) return dimThemeColor();
 		return undefined;
 	});
 	provideDialogTarget(() => dialogEl);
