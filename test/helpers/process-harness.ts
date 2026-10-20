@@ -1920,7 +1920,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			failures.push(cause);
 		}
 		try {
-			if (this.generations.length > 0) await this.shutdown();
+			if (this.generations.some(({ pid }) => pid === this.child?.pid))
+				await this.shutdown();
 			else await this.stop("SIGTERM");
 		} catch (cause) {
 			failures.push(cause);
