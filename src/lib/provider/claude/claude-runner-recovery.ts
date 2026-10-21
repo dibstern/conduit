@@ -22,7 +22,11 @@ import type {
 	SessionFailure,
 	SessionTurn,
 } from "../runner/session-runner.js";
-import type { ProviderNativeSession, TurnResult } from "../types.js";
+import type {
+	ProviderCall,
+	ProviderNativeSession,
+	TurnResult,
+} from "../types.js";
 import type { ClaudeSessionRunnerDeps } from "./claude-provider-runtime.js";
 import type { ClaudeRunnerSocket } from "./claude-runner-protocol.js";
 import { normalizeClaudeSessionTurn } from "./claude-runner-wire.js";
@@ -102,19 +106,56 @@ export const recoverClaudeRunnerCommands = (
 			closing,
 			failTurn,
 			replay: (row, input) => {
-				const instanceId = input.instanceId ?? row.provider_id;
 				const replay = Effect.gen(function* () {
-					// Recovery can race the project's asynchronous environment capture.
-					const prepareShellEnv = deps.prepareShellEnv;
-					if (prepareShellEnv)
-						yield* Effect.tryPromise(() =>
-							prepareShellEnv(input.workspaceRoot),
-						).pipe(
-							Effect.timeoutOption("10 seconds"),
-							Effect.catch(() => Effect.void),
-						);
+					const admittedAccountId =
+						input.account?.id ?? input.instanceId ?? row.provider_id;
+					let call: ProviderCall | undefined;
+					if (deps.recoveryForSession) {
+						// The shared adapter borrows environment preparation and account resolution from the project's engine.
+						const recovery = yield* deps.recoveryForSession(sessionId);
+						if (!recovery)
+							return yield* Effect.fail(
+								new Error(
+									`Project services unavailable for recovered session ${sessionId}`,
+								),
+							);
+						call = yield* recovery.resolveCallContext({
+							sessionId,
+							...(input.account ? { account: input.account } : {}),
+							providerId: admittedAccountId,
+							workspaceRoot: input.workspaceRoot,
+							extraFolders: input.extraFolders,
+							prepareShellEnv: true,
+							requireRoutableAccount: true,
+						});
+						const matchesAdmission =
+							call !== undefined &&
+							call.account.id === admittedAccountId &&
+							call.account.driver === "claude";
+						if (!matchesAdmission)
+							return yield* Effect.fail(
+								new Error(
+									`Claude account "${admittedAccountId}" is unavailable for recovery`,
+								),
+							);
+					} else {
+						// Standalone compatibility runtimes still own their environment resolver.
+						const prepareShellEnv = deps.prepareShellEnv;
+						if (prepareShellEnv)
+							yield* Effect.tryPromise(() =>
+								prepareShellEnv(input.workspaceRoot),
+							).pipe(
+								Effect.timeoutOption("10 seconds"),
+								Effect.catch(() => Effect.void),
+							);
+					}
 					// The shared recovery drops a result that arrives while closing.
 					if (closing()) return undefined;
+					const instanceId =
+						call?.account.id ?? input.instanceId ?? row.provider_id;
+					const shellEnv = call
+						? call.shellEnv
+						: (deps.shellEnv?.(input.workspaceRoot) ?? { ...process.env });
 					const state = yield* makeProviderStateEffect.pipe(
 						Effect.provideService(PersistenceProjectTag, {
 							projectId: row.project_key,
@@ -153,12 +194,19 @@ export const recoverClaudeRunnerCommands = (
 										nativeResumeFallback,
 									),
 									aborted: false,
-									shellEnv: deps.shellEnv?.(input.workspaceRoot) ?? {
-										...process.env,
-									},
+									shellEnv,
 									claudeSettingsOverrides: deps.claudeSettingsOverrides?.(),
 									input: {
 										...input,
+										...(call
+											? {
+													projectId: call.projectId,
+													account: call.account,
+													workspaceRoot: call.workspaceRoot,
+													extraFolders: call.extraFolders,
+													shellEnv: call.shellEnv,
+												}
+											: {}),
 										instanceId,
 										prompt: prepared.prompt,
 										text: input.prompt,

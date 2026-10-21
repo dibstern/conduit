@@ -395,6 +395,11 @@ export const applyAccountChange = (change: AccountChange) =>
 		const usageOrder = Option.isSome(config)
 			? ((yield* Ref.get(config.value)).usageLimits?.order ?? [])
 			: [];
+		const cursorChange =
+			change._tag !== "Add" &&
+			(yield* directory.snapshot).accounts.some(
+				(account) => account.id === change.id && account.driver === "cursor",
+			);
 		const committed = yield* directory.apply(change, usageOrder, (committed) =>
 			Effect.gen(function* () {
 				const account =
@@ -517,7 +522,10 @@ export const applyAccountChange = (change: AccountChange) =>
 			}),
 		);
 		// Outside the directory's commit lock: cancelled work may still read it.
-		if (change._tag === "Remove") {
+		if (
+			change._tag === "Remove" ||
+			(cursorChange && change._tag === "Update")
+		) {
 			const resources = yield* Effect.serviceOption(AccountResourceScopesTag);
 			if (Option.isSome(resources))
 				yield* resources.value.invalidate(change.id);

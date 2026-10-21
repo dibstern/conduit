@@ -43,6 +43,7 @@ import {
 	type ClaudeConfigDir,
 	captureClaudeLaunchLogin,
 } from "../../../provider/claude/claude-sdk-env.js";
+import { CursorAccountResourcesLive } from "../../../provider/cursor/cursor-account-resources.js";
 import {
 	ServerBuildUpdateLive,
 	serverExitCode,
@@ -141,6 +142,7 @@ import {
 	makeProjectShellEnvLive,
 	ProjectShellEnvWiringLive,
 } from "./project-shell-env-layer.js";
+import { makeProviderAdaptersLive } from "./provider-adapters-layer.js";
 import {
 	HttpServerRefTag,
 	RelayFactoryLive,
@@ -810,12 +812,15 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			)
 		: makeInstanceManagerStateLive(undefined, [], instanceManagerOptions);
 
-	const registryState = Layer.mergeAll(
+	const registryBase = Layer.mergeAll(
 		projectRegistryLayer,
 		instanceManagerLayer,
 	)
 		.pipe(Layer.provideMerge(stateLayer))
 		.pipe(Layer.provideMerge(auxiliaryServices));
+	const registryState = CursorAccountResourcesLive(configDir).pipe(
+		Layer.provideMerge(registryBase),
+	);
 
 	const effectSnapshotLayer = ConfigSnapshotFromEffectStateLive.pipe(
 		Layer.provideMerge(
@@ -854,6 +859,9 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			return InputDraftsLive.pipe(Layer.provide(Layer.succeedContext(store)));
 		}),
 	).pipe(Layer.provideMerge(withSessionDirectory));
+	const withProviderAdapters = makeProviderAdaptersLive(configDir).pipe(
+		Layer.provideMerge(withInputDrafts),
+	);
 	const registries = RelayFactoryLive(configDir).pipe(
 		Layer.provideMerge(
 			Layer.mergeAll(
@@ -862,7 +870,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 				}),
 				UsageLive(),
 				MessageSurfacingSettingsLive,
-			).pipe(Layer.provideMerge(withInputDrafts)),
+			).pipe(Layer.provideMerge(withProviderAdapters)),
 		),
 	);
 

@@ -1,8 +1,12 @@
-import { Effect, Exit, Option, Schedule } from "effect";
+import { Effect, Exit, Option, Schedule, Scope } from "effect";
 import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
+import {
+	type ProviderAdapterProjectContext,
+	ProviderAdapters,
+} from "../domain/daemon/Services/provider-adapters.js";
 import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import { EventRetentionSchedulerTag } from "../domain/persistence/Services/event-retention-scheduler.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
@@ -138,12 +142,52 @@ function acquireStartupServices(inputs: StartupInputs) {
 		// Recover pending state before initialization advances projector cursors.
 		yield* restoreClaudeQuestionsFromStore;
 		const orchestration = yield* getOrchestrationLayer;
-		for (const providerId of orchestration.registry.listProviders()) {
-			const instance =
-				yield* orchestration.registry.getInstanceEffect(providerId);
-			if (instance instanceof RunnerProviderInstance)
-				yield* instance.recoverEffect();
-		}
+		const runFork = Effect.runForkWith(
+			yield* Effect.context<
+				| SessionManagerServiceTag
+				| Effect.Services<ReturnType<typeof announceBackgroundWork>>
+			>(),
+		);
+		const onBackgroundWorkChanged = (sessionId: string) => {
+			runFork(
+				Effect.gen(function* () {
+					yield* announceBackgroundWork(sessionId);
+					if (
+						config.requestWorktreeCleanup &&
+						activity.background.backgroundOf(sessionId) === undefined &&
+						(yield* sql<{ settled_at: number | null }>`
+							SELECT settled_at FROM sessions WHERE id = ${sessionId}
+						`)[0]?.settled_at != null
+					)
+						yield* config.requestWorktreeCleanup();
+				}).pipe(
+					Effect.catchCause((cause) =>
+						Effect.sync(() =>
+							log.warn(
+								`Failed to announce background work: ${Failure.renderCause(cause)}`,
+							),
+						),
+					),
+				),
+			);
+		};
+		const sharedAdapters = yield* Effect.serviceOption(ProviderAdapters);
+		if (Option.isSome(sharedAdapters)) {
+			yield* sharedAdapters.value
+				.registerProject(
+					persistenceProject.projectId,
+					yield* Effect.context<ProviderAdapterProjectContext>(),
+					onBackgroundWorkChanged,
+				)
+				.pipe(Effect.provideService(Scope.Scope, relayManagedRuntime.scope));
+			yield* sharedAdapters.value.recover;
+		} else
+			for (const providerId of orchestration.registry.listProviders()) {
+				const instance =
+					yield* orchestration.registry.getInstanceEffect(providerId);
+				if (instance instanceof RunnerProviderInstance)
+					yield* instance.recoverEffect();
+			}
 		const projectionRunner = yield* ProjectionRunnerEffectTag;
 		if (!(yield* projectionRunner.isRecovered()))
 			yield* projectionRunner.recover();
@@ -192,12 +236,6 @@ function acquireStartupServices(inputs: StartupInputs) {
 			);
 		}
 		const sessionManagerService = yield* SessionManagerServiceTag;
-		const runFork = Effect.runForkWith(
-			yield* Effect.context<
-				| SessionManagerServiceTag
-				| Effect.Services<ReturnType<typeof announceBackgroundWork>>
-			>(),
-		);
 		// Read-model only: creating a first session could call OpenCode, so attach
 		// creates it instead (getDefaultSessionId).
 		const readQueryEffect = yield* ReadQueryEffectTag;
@@ -369,6 +407,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 			sseStream,
 			sessionManagerService,
 			runFork,
+			onBackgroundWorkChanged,
 			sessionId,
 			orchestration,
 			statusPoller,
@@ -575,7 +614,6 @@ export async function startProjectRelay(inputs: StartupInputs) {
 				const {
 					sql,
 					sessionManagerService,
-					runFork,
 					api,
 					wsHandler,
 					rpcWsHandler,
@@ -592,31 +630,7 @@ export async function startProjectRelay(inputs: StartupInputs) {
 					projectSettingsContext: services.projectSettingsContext,
 					sessionManagerService,
 					// The sidebar and open family feeds follow the stamped row.
-					announceBackgroundWork: (changedSessionId: string) => {
-						runFork(
-							Effect.gen(function* () {
-								yield* announceBackgroundWork(changedSessionId);
-								if (
-									config.requestWorktreeCleanup &&
-									services.activity.background.backgroundOf(
-										changedSessionId,
-									) === undefined &&
-									(yield* sql<{ settled_at: number | null }>`
-										SELECT settled_at FROM sessions WHERE id = ${changedSessionId}
-									`)[0]?.settled_at != null
-								)
-									yield* config.requestWorktreeCleanup();
-							}).pipe(
-								Effect.catchCause((cause) =>
-									Effect.sync(() =>
-										log.warn(
-											`Failed to announce background work: ${Failure.renderCause(cause)}`,
-										),
-									),
-								),
-							),
-						);
-					},
+					announceBackgroundWork: services.onBackgroundWorkChanged,
 					api,
 					wsHandler,
 					rpcWsHandler,

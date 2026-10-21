@@ -37,8 +37,13 @@ export class InProcessSessionRunner implements SessionRunner {
 		private readonly sinks: RunnerSinkBindings,
 		private readonly scope: Scope.Scope,
 	) {}
-	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
-		return Effect.sync(() => this.sessions.has(sessionId));
+	hasLiveProcessEffect(
+		sessionId: string,
+		processId?: string,
+	): Effect.Effect<boolean> {
+		return Effect.sync(
+			() => processId === undefined && this.sessions.has(sessionId),
+		);
 	}
 	hasActiveTurnsEffect(sessionId: string): Effect.Effect<boolean> {
 		return (

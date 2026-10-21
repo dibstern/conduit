@@ -41,7 +41,7 @@ Mermaid diagram: docs/agent-guide/per-project-relay-flow-diagram.mermaid
 
 | Boundary | Meaning |
 |---|---|
-| Relay composition | Each relay combines provider instances, session services, event pipeline modules, `WebSocketHandler`, pollers, PTY wiring, and permission/question handling. Legacy relay composition still has bridge layers while the Effect migration is in progress. |
+| Relay composition | Each relay borrows the daemon's provider registry and combines project-owned session services, event pipeline modules, `WebSocketHandler`, pollers, PTY wiring, and permission/question handling. Standalone compatibility relays still construct their own adapters. |
 | Source of truth | Durable conversation state lives in conduit's SQLite event store. Provider instances are stateless execution engines that stream events into the store. |
 | Relay-owned state | Project services, provider activity and client subscriptions borrow the daemon store. Projectors maintain materialized views from the append-only event log. |
 | Daemon-owned state | The config directory holds the protected local RPC socket, daemon config, recent projects, push settings, and all project history in one daemon store at `<configDir>/events.db`. Relays borrow this store for their lifetime. |
@@ -244,6 +244,7 @@ configuration ignores retired settings and drops them on the next save.
 
 ## Provider Runtime Notes
 
+- `ProviderAdapters` owns one Claude, OpenCode and Cursor adapter for the daemon's lifetime. Project engines pass their own `ProviderCall` and lend their recovery services while their relay is alive. One startup recovery pass finishes before any project outbox drains. A replacement relay reattaches only its own retained sessions. Project disposal releases those attachments; daemon shutdown closes the adapters.
 - Do not assume a fixed OpenCode HTTP server or debug port. Managed OpenCode test instances can run on dynamic ports, and the active base URL should come from daemon/project config, logs, or test output.
 - OpenCode integration goes through the OpenCode SDK/API client in `src/lib/instance/*` and `src/lib/provider/opencode-provider-instance.ts`.
 - Claude integration goes through the Claude Agent SDK provider instance in `src/lib/provider/claude/*`; Claude flows normally expose SDK events rather than a separate localhost debug server.

@@ -45,7 +45,10 @@ export function runnerDirectory(
 	workspaceRoot: string,
 	configDir = DEFAULT_CONFIG_DIR,
 ): string {
-	const directory = runnerTargetDirectory(workspaceRoot, configDir);
+	return runnerSocketDirectory(runnerTargetDirectory(workspaceRoot, configDir));
+}
+
+function runnerSocketDirectory(directory: string): string {
 	// Budget the separator and 12-character runner ID within Darwin's 103
 	// usable socket-path bytes. The alias keeps runner files in the config dir.
 	if (Buffer.byteLength(directory) + 1 + 12 < 104) return directory;
@@ -63,7 +66,11 @@ export function prepareRunnerDirectory(
 ): string {
 	const target = runnerTargetDirectory(workspaceRoot, configDir);
 	mkdirSync(target, { recursive: true, mode: 0o700 });
-	const directory = runnerDirectory(workspaceRoot, configDir);
+	return prepareRunnerSocketDirectory(target);
+}
+
+function prepareRunnerSocketDirectory(target: string): string {
+	const directory = runnerSocketDirectory(target);
 	if (directory !== target) {
 		try {
 			symlinkSync(target, directory);
@@ -129,6 +136,30 @@ export function discoverRunners(
 	configDir = DEFAULT_CONFIG_DIR,
 ): RunnerRegistration[] {
 	const directory = prepareRunnerDirectory(workspaceRoot, configDir);
+	return discoverRunnersInDirectory(directory);
+}
+
+/** Daemon recovery includes retained projects whose folders are no longer registered. */
+export function discoverAllRunners(
+	configDir = DEFAULT_CONFIG_DIR,
+): RunnerRegistration[] {
+	const root = join(resolve(configDir), "r");
+	let directories: string[];
+	try {
+		directories = readdirSync(root);
+	} catch (cause) {
+		if (isRecord(cause) && cause["code"] === "ENOENT") return [];
+		throw cause;
+	}
+	return directories.flatMap((directory) => {
+		if (!/^[0-9a-f]{12}$/.test(directory)) return [];
+		const target = join(root, directory);
+		if (!lstatSync(target).isDirectory()) return [];
+		return discoverRunnersInDirectory(prepareRunnerSocketDirectory(target));
+	});
+}
+
+function discoverRunnersInDirectory(directory: string): RunnerRegistration[] {
 	const entries: RunnerRegistration[] = [];
 	for (const filename of readdirSync(directory)) {
 		if (!/^[0-9a-f]{12}\.json$/.test(filename)) continue;

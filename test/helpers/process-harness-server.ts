@@ -13,7 +13,7 @@ import { Session } from "node:inspector/promises";
 import { join } from "node:path";
 import { DatabaseSync, StatementSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { Effect, Fiber } from "effect";
+import { Effect, Fiber, HashMap, Ref } from "effect";
 
 // Event-loop stalls and read-model reads for load tests, flushed to a file the
 // spec reads after each phase. Stalls are wall-clock end times and durations.
@@ -353,6 +353,348 @@ async function main(): Promise<void> {
 		? join(dist, "src")
 		: fileURLToPath(new URL("../../src", import.meta.url));
 	const extension = dist ? "js" : "ts";
+	// Drop only fixture-selected attachments, after the real hello restores demand.
+	const attachmentFault = join(root, "runner-attachment-drop.json");
+	if (existsSync(attachmentFault)) {
+		const net = await import("node:net");
+		const { syncBuiltinESMExports } = await import("node:module");
+		const connections = new Map<string, import("node:net").Socket>();
+		const attempts = new Map<string, number>();
+		const connect = net.default.createConnection;
+		Object.assign(net.default, {
+			createConnection: (
+				options: string | import("node:net").NetConnectOpts,
+				listener?: () => void,
+			) => {
+				const target =
+					typeof options === "string" ? { path: options } : options;
+				const socket = connect(target, listener);
+				const path = "path" in target ? target.path : undefined;
+				if (path && existsSync(attachmentFault)) {
+					const { socketPaths }: { socketPaths: string[] } = JSON.parse(
+						readFileSync(attachmentFault, "utf8"),
+					);
+					if (socketPaths.includes(path)) {
+						connections.set(path, socket);
+						const attempt = (attempts.get(path) ?? 0) + 1;
+						attempts.set(path, attempt);
+						appendFileSync(
+							`${attachmentFault}.attempts.ndjson`,
+							`${JSON.stringify({ socketPath: path, attempt, daemonPid: process.pid })}\n`,
+						);
+						if (attempt > 1) socket.destroy();
+					}
+				}
+				return socket;
+			},
+		});
+		syncBuiltinESMExports();
+		const send = process.send?.bind(process);
+		Object.assign(process, {
+			send: (message: import("node:child_process").Serializable) => {
+				if (
+					typeof message === "object" &&
+					message !== null &&
+					"kind" in message &&
+					message.kind === "runner-started" &&
+					"socketPath" in message &&
+					typeof message.socketPath === "string" &&
+					existsSync(attachmentFault)
+				) {
+					const { socketPaths }: { socketPaths: string[] } = JSON.parse(
+						readFileSync(attachmentFault, "utf8"),
+					);
+					if (socketPaths.includes(message.socketPath)) {
+						connections.get(message.socketPath)?.destroy();
+						appendFileSync(
+							`${attachmentFault}.ndjson`,
+							`${JSON.stringify({ socketPath: message.socketPath, daemonPid: process.pid })}\n`,
+						);
+					}
+				}
+				return send?.(message);
+			},
+		});
+	}
+	if (existsSync(join(root, "thread-read-proof.json"))) {
+		const readProbe = (): { sessionId: string; projectId: string } =>
+			JSON.parse(readFileSync(join(root, "thread-read-proof.json"), "utf8"));
+		const record = (
+			kind: "before-borrow" | "missing-project",
+			result: unknown,
+		) =>
+			appendFileSync(
+				join(root, "thread-read-probes.ndjson"),
+				`${JSON.stringify({ daemonPid: process.pid, kind, result })}\n`,
+			);
+		const { ClaudeDriver } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/provider/claude",
+					`claude-provider-instance.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/provider/claude/claude-provider-instance.js");
+		const { ProjectRegistryTag } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/daemon/Services",
+					`project-registry-service.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/daemon/Services/project-registry-service.js");
+		const create = ClaudeDriver.create;
+		Object.assign(ClaudeDriver, {
+			create: (
+				deps: import("../../src/lib/provider/claude/claude-provider-instance.js").ClaudeProviderInstanceDeps,
+			) =>
+				Effect.gen(function* () {
+					const projects = yield* ProjectRegistryTag;
+					const readThread = deps.readThread;
+					if (!readThread)
+						throw new Error("Thread-read fixture requires the daemon reader");
+					const startup = readProbe();
+					if (startup.sessionId) {
+						const result = yield* readThread(startup.sessionId, { limit: 1 });
+						yield* Effect.sync(() => record("before-borrow", result));
+					}
+					let probedMissingProject = false;
+					return yield* create({
+						...deps,
+						readThread: (sessionId, input) =>
+							Effect.gen(function* () {
+								const probe = readProbe();
+								if (sessionId === probe.sessionId && !probedMissingProject) {
+									probedMissingProject = true;
+									const project = HashMap.get(
+										yield* Ref.get(projects),
+										probe.projectId,
+									);
+									if (project._tag !== "Some")
+										throw new Error(
+											"Thread-read probe project is not registered",
+										);
+									const result = yield* Ref.update(
+										projects,
+										HashMap.remove(probe.projectId),
+									).pipe(
+										Effect.andThen(readThread(sessionId, input)),
+										Effect.ensuring(
+											Ref.update(
+												projects,
+												HashMap.set(probe.projectId, project.value),
+											),
+										),
+									);
+									yield* Effect.sync(() => record("missing-project", result));
+								}
+								return yield* readThread(sessionId, input);
+							}),
+					});
+				}),
+		});
+	}
+	if (existsSync(join(root, "daemon-adapters-proof"))) {
+		const proofPath = join(root, "daemon-adapters.ndjson");
+		const record = (entry: Record<string, unknown>) =>
+			appendFileSync(
+				proofPath,
+				`${JSON.stringify({ daemonPid: process.pid, ...entry })}\n`,
+			);
+		const { ProviderRegistry } = (await import(
+			pathToFileURL(
+				join(codeRoot, "lib/provider", `provider-registry.${extension}`),
+			).href
+		)) as typeof import("../../src/lib/provider/provider-registry.js");
+		const { RunnerProviderInstance } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/provider/runner",
+					`runner-provider-instance.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/provider/runner/runner-provider-instance.js");
+		const { OrchestrationEngine } = (await import(
+			pathToFileURL(
+				join(codeRoot, "lib/provider", `orchestration-engine.${extension}`),
+			).href
+		)) as typeof import("../../src/lib/provider/orchestration-engine.js");
+		const { ClaudeDriver } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/provider/claude",
+					`claude-provider-instance.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/provider/claude/claude-provider-instance.js");
+		const { CursorAccountResources } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/provider/cursor",
+					`cursor-account-resources.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/provider/cursor/cursor-account-resources.js");
+		const { AccountResourceScopesTag } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/daemon/Services",
+					`account-resource-scopes.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/daemon/Services/account-resource-scopes.js");
+		const { PersistenceProjectTag } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/persistence/Services",
+					`persistence-service.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/persistence/Services/persistence-service.js");
+		const resourceIdentities = new WeakMap<object, number>();
+		const observedOwners = new WeakSet<object>();
+		const observedScopes = new WeakSet<object>();
+		let nextResourceIdentity = 0;
+		const createClaude = ClaudeDriver.create;
+		Object.assign(ClaudeDriver, {
+			create: (
+				deps: import("../../src/lib/provider/claude/claude-provider-instance.js").ClaudeProviderInstanceDeps,
+			) =>
+				createClaude(deps).pipe(
+					Effect.tap(() =>
+						Effect.gen(function* () {
+							const scopes = yield* Effect.serviceOption(
+								AccountResourceScopesTag,
+							);
+							if (scopes._tag === "Some" && !observedScopes.has(scopes.value)) {
+								const owner = scopes.value;
+								observedScopes.add(owner);
+								const invalidate = owner.invalidate;
+								Object.assign(owner, {
+									invalidate: (accountId: string) =>
+										Effect.gen(function* () {
+											record({ kind: "invalidation-start", accountId });
+											while (
+												existsSync(join(root, `invalidate-${accountId}.hold`))
+											)
+												yield* Effect.sleep("10 millis");
+											yield* invalidate(accountId);
+											record({ kind: "invalidation-end", accountId });
+										}),
+								});
+							}
+							const resources = yield* Effect.serviceOption(
+								CursorAccountResources,
+							);
+							if (
+								resources._tag === "None" ||
+								observedOwners.has(resources.value)
+							)
+								return;
+							const owner = resources.value;
+							observedOwners.add(owner);
+							const use = owner.use;
+							const observedUse: typeof owner.use = (accountId, work) =>
+								use(accountId, (resource) =>
+									Effect.suspend(() => {
+										let identity = resourceIdentities.get(resource);
+										if (identity === undefined) {
+											identity = ++nextResourceIdentity;
+											resourceIdentities.set(resource, identity);
+										}
+										record({
+											kind: "account-scope-use",
+											driver: "cursor",
+											accountId,
+											resourceIdentity: identity,
+										});
+										return work(resource);
+									}),
+								);
+							Object.assign(owner, { use: observedUse });
+						}),
+					),
+				),
+		});
+		const identities = new WeakMap<object, string>();
+		const register = ProviderRegistry.prototype.registerInstance;
+		ProviderRegistry.prototype.registerInstance = function (instance) {
+			if (!identities.has(instance)) {
+				const identity = `${instance.providerId}-${++nextIdentity}`;
+				identities.set(instance, identity);
+				record({
+					kind: "adapter-constructed",
+					driver: instance.providerId,
+					identity,
+				});
+				const send = instance.sendTurnEffect.bind(instance);
+				instance.sendTurnEffect = (input) =>
+					Effect.suspend(() => {
+						record({
+							kind: "send",
+							driver: instance.providerId,
+							identity,
+							sessionId: input.sessionId,
+							projectId: input.projectId,
+							accountId: input.account?.id,
+							workspaceRoot: input.workspaceRoot,
+							extraFolders: input.extraFolders,
+						});
+						return send(input);
+					});
+				const shutdown = instance.shutdownEffect.bind(instance);
+				instance.shutdownEffect = () =>
+					Effect.suspend(() => {
+						record({ kind: "shutdown", driver: instance.providerId, identity });
+						return shutdown();
+					});
+				if (instance instanceof RunnerProviderInstance) {
+					const recover = instance.recoverProjectContextsEffect.bind(instance);
+					instance.recoverProjectContextsEffect = (...args) =>
+						Effect.suspend(() => {
+							record({
+								kind: "recovery-start",
+								driver: instance.providerId,
+								identity,
+							});
+							return recover(...args).pipe(
+								Effect.tap(() =>
+									Effect.sync(() =>
+										record({
+											kind: "recovery-end",
+											driver: instance.providerId,
+											identity,
+										}),
+									),
+								),
+							);
+						});
+				}
+			}
+			return register.call(this, instance);
+		};
+		let nextIdentity = 0;
+		const drain = OrchestrationEngine.prototype.drainSideEffects;
+		OrchestrationEngine.prototype.drainSideEffects = function (...args) {
+			return Effect.gen({ self: this }, function* () {
+				const project = yield* Effect.serviceOption(PersistenceProjectTag);
+				record({
+					kind: "outbox-drain",
+					...(project._tag === "Some"
+						? { projectId: project.value.projectId }
+						: {}),
+				});
+				return yield* drain.apply(this, args);
+			});
+		};
+	}
 	if (existsSync(join(root, "claude-end-session-failure-fixture"))) {
 		const { OrchestrationEngine } = (await import(
 			pathToFileURL(

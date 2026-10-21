@@ -7,6 +7,7 @@ import type {
 	LegacyRunnerSettings as Settings,
 } from "../claude/claude-runner-snapshot.js";
 import type { ClaudeSubagentTranscriptSnapshot } from "../claude/types.js";
+import type { CursorCredential } from "../cursor/sdk-port.js";
 import type {
 	PermissionDecision,
 	PermissionRequest,
@@ -37,6 +38,8 @@ export type SessionCommand = (
 	  }
 	| {
 			readonly type: "send-turn";
+			/** Ephemeral launch credentials, excluded from durable command inputs. */
+			readonly cursorCredential?: CursorCredential;
 			readonly sinkId: string;
 			readonly aborted: boolean;
 			readonly claudeSettingsOverrides?: Settings | undefined;
@@ -185,11 +188,30 @@ export interface SessionFailure {
 export interface SessionRunner {
 	/** Native turns, prompts, background tasks and finalizers, including after intake. */
 	hasDemandEffect?(sessionId: string): Effect.Effect<boolean>;
+	/** Release one project's attachment while its started runner remains independent. */
+	detachSessionEffect?(sessionId: string): Effect.Effect<void>;
+	/** Reattach retained processes when a project's relay is replaced. */
+	attachSessionsEffect?(
+		sessionIds: readonly string[],
+	): Effect.Effect<void, SessionFailure>;
+	/** Retains the admitted account before preparation and through native cleanup. */
+	withTurnEffect?<A, E, R>(
+		input: SessionTurn,
+		sinkId: string,
+		work: Effect.Effect<A, E, R>,
+	): Effect.Effect<A, E | SessionFailure, R>;
 	/** Native execution and pending intake, independent of an intake reply. */
 	hasActiveTurnsEffect?(sessionId: string): Effect.Effect<boolean>;
 	readonly recoverEffect?: Effect.Effect<void, SessionFailure>;
-	/** Process ownership in every lifecycle state, even when no session is usable. */
-	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean>;
+	/** Without an ID, checks all live processes; with one, checks the current or quarantined owner. */
+	hasLiveProcessEffect(
+		sessionId: string,
+		processId?: string,
+	): Effect.Effect<boolean>;
+	/** A session refusal also applies before inbox or prompt admission. */
+	getSessionFailureEffect?(
+		sessionId: string,
+	): Effect.Effect<SessionFailure | undefined>;
 	/** Local runner lifecycle state, including work outside the foreground turn. */
 	hasPendingSubagentFinalizers?(sessionId: string): boolean;
 	/** Undefined means no runtime session; null means its cursor is cleared. */

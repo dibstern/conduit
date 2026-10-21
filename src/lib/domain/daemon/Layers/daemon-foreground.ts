@@ -15,10 +15,6 @@ import {
 	Result,
 } from "effect";
 import {
-	getProviderDriver,
-	MANAGED_OPENCODE_ACCOUNT_ID,
-} from "../../../contracts/provider-instance.js";
-import {
 	type DaemonConfig,
 	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
 	DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS,
@@ -38,7 +34,6 @@ import { setLogFile, setLogFormat, setLogLevel } from "../../../logger.js";
 import type { PersistenceStore } from "../../../persistence/effect/live.js";
 import { captureClaudeLaunchLogin } from "../../../provider/claude/claude-sdk-env.js";
 import { stopRegisteredRunners } from "../../../provider/runner/process-session-runner.js";
-import { discoverRunners } from "../../../provider/runner/runner-registry.js";
 import { stopPtyHost } from "../../../terminal/pty-host-client.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
@@ -52,7 +47,6 @@ import {
 	DaemonHandleTag,
 	type EffectDaemonHandle,
 } from "../Services/daemon-handle.js";
-import { hasProviderRecoveryCandidate } from "../Services/daemon-session-reader.js";
 import { resolveDefaultStaticDir } from "../Services/daemon-static-dir.js";
 import {
 	type InstanceManagerState,
@@ -60,12 +54,12 @@ import {
 	requestManagedOpenCodeShutdown,
 } from "../Services/instance-manager-service.js";
 import { OpenCodeUnavailableError } from "../Services/opencode-smart-default.js";
-import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	normalizeProjectDirectory,
 	type ProjectRegistryState,
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
+import { ProviderAdapters } from "../Services/provider-adapters.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
 import {
 	type DaemonLiveOptions,
@@ -224,6 +218,7 @@ type ForegroundRuntimeRequirements =
 	| ProjectRegistryTag
 	| RelayCacheTag
 	| ShutdownSignalTag
+	| ProviderAdapters
 	| PersistenceStore;
 
 export async function startForegroundDaemon(
@@ -511,53 +506,43 @@ export async function startForegroundDaemon(
 		handle = await runRuntimeEffect(runtime, DaemonHandleTag);
 		instanceState = await runRuntimeEffect(runtime, InstanceManagerStateTag);
 		projectState = await runRuntimeEffect(runtime, ProjectRegistryTag);
-		const currentHandle = handle;
 		await runRuntimeEffect(
 			runtime,
 			Effect.gen(function* () {
 				const relayCache = yield* RelayCacheTag;
-				const storeContext = yield* persistenceStoreContext;
+				const adapters = yield* ProviderAdapters;
 				// Persist startup refreshes even when no project is saved this run.
 				yield* (yield* ConfigPersistenceTag).requestSave;
-				const registered = yield* currentHandle.getProjects();
-				const openCodeInstanceIds = (yield* currentHandle.getInstances())
-					.filter(
-						(instance) =>
-							getProviderDriver(instance.driver ?? "opencode")
-								?.runsOpenCodeServer,
-					)
-					.map((instance) => instance.id);
-				// Persisted default bindings route to the project's selected instance,
-				// even when only named instances are registered.
-				if (openCodeInstanceIds.length > 0)
-					openCodeInstanceIds.push(MANAGED_OPENCODE_ACCOUNT_ID);
-				for (const project of registered) {
-					yield* Effect.gen(function* () {
-						const runners = yield* Effect.sync(() =>
-							discoverRunners(project.folders[0], configDir),
-						);
-						if (
-							runners.length > 0 ||
-							(yield* hasProviderRecoveryCandidate(
-								project,
-								openCodeInstanceIds,
-							).pipe(Effect.provide(storeContext)))
-						) {
-							// Recovery subscribes OpenCode directories passively, including
-							// projects no browser has opened since the restart.
-							yield* relayCache.get(project.slug);
-						}
-					}).pipe(
-						Effect.catchCause((cause) =>
-							Failure.isInterruptedOnly(cause)
-								? Effect.failCause(cause)
-								: Effect.logError(
-										`Failed to recover relay for project "${project.slug}"`,
-										cause,
-									),
-						),
-					);
-				}
+				// Every recovery relay lends its project-owned services before the
+				// shared pass starts. Starting them together avoids serial startup
+				// waiting on a project that has not yet reached the barrier.
+				yield* Effect.forEach(
+					adapters.recoveryProjects,
+					(slug) =>
+						relayCache
+							.get(slug)
+							.pipe(
+								Effect.catchCause((cause) =>
+									Failure.isInterruptedOnly(cause)
+										? Effect.failCause(cause)
+										: adapters
+												.projectFailed(slug)
+												.pipe(
+													Effect.andThen(
+														Effect.logError(
+															`Failed to recover relay for project "${slug}"`,
+															cause,
+														),
+													),
+												),
+								),
+							),
+					{
+						concurrency: Math.max(1, adapters.recoveryProjects.length),
+						discard: true,
+					},
+				);
+				yield* adapters.recover;
 				yield* (yield* ConfigPersistenceTag).flush;
 			}),
 		);

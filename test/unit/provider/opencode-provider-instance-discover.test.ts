@@ -10,6 +10,13 @@ import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
 import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 
+const account: OpenCodeAccount = {
+	id: AccountIdSchema.make("opencode"),
+	driver: "opencode",
+	name: "Test",
+	usageEligible: false,
+};
+
 function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 	return {
 		provider: {
@@ -74,7 +81,10 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 
 	beforeEach(() => {
 		client = makeStubClient();
-		instance = new OpenCodeProviderInstance({ client });
+		instance = new OpenCodeProviderInstance({
+			client,
+			clientForAccount: () => Effect.succeed(client),
+		});
 	});
 
 	it("returns providerId = 'opencode'", () => {
@@ -82,7 +92,9 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 	});
 
 	it("discovers models from all providers", async () => {
-		const caps = await Effect.runPromise(instance.discoverEffect());
+		const caps = await Effect.runPromise(
+			instance.discoverEffect("/workspace", account),
+		);
 
 		expect(caps.models).toHaveLength(2);
 		expect(caps.models[0]).toMatchObject({
@@ -97,7 +109,9 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 	});
 
 	it("discovers commands", async () => {
-		const caps = await Effect.runPromise(instance.discoverEffect());
+		const caps = await Effect.runPromise(
+			instance.discoverEffect("/workspace", account),
+		);
 
 		const commands = caps.commands.filter((c) => c.source === "builtin");
 		expect(commands.length).toBeGreaterThanOrEqual(2);
@@ -106,7 +120,9 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 	});
 
 	it("discovers skills as project-skill commands", async () => {
-		const caps = await Effect.runPromise(instance.discoverEffect());
+		const caps = await Effect.runPromise(
+			instance.discoverEffect("/workspace", account),
+		);
 
 		const skills = caps.commands.filter((c) => c.source === "project-skill");
 		expect(skills).toHaveLength(1);
@@ -114,7 +130,9 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 	});
 
 	it("sets capability flags for OpenCode", async () => {
-		const caps = await Effect.runPromise(instance.discoverEffect());
+		const caps = await Effect.runPromise(
+			instance.discoverEffect("/workspace", account),
+		);
 
 		expect(caps.supportsTools).toBe(true);
 		expect(caps.supportsThinking).toBe(true);
@@ -135,9 +153,14 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 				})),
 			},
 		});
-		instance = new OpenCodeProviderInstance({ client });
+		instance = new OpenCodeProviderInstance({
+			client,
+			clientForAccount: () => Effect.succeed(client),
+		});
 
-		const caps = await Effect.runPromise(instance.discoverEffect());
+		const caps = await Effect.runPromise(
+			instance.discoverEffect("/workspace", account),
+		);
 		expect(caps.models).toEqual([]);
 	});
 
@@ -149,9 +172,14 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 				skills: vi.fn(async () => []),
 			},
 		});
-		instance = new OpenCodeProviderInstance({ client });
+		instance = new OpenCodeProviderInstance({
+			client,
+			clientForAccount: () => Effect.succeed(client),
+		});
 
-		const caps = await Effect.runPromise(instance.discoverEffect());
+		const caps = await Effect.runPromise(
+			instance.discoverEffect("/workspace", account),
+		);
 		expect(caps.commands).toEqual([]);
 	});
 
@@ -163,10 +191,13 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 				}),
 			},
 		});
-		instance = new OpenCodeProviderInstance({ client });
+		instance = new OpenCodeProviderInstance({
+			client,
+			clientForAccount: () => Effect.succeed(client),
+		});
 
 		const result = await Effect.runPromise(
-			Effect.result(instance.discoverEffect()),
+			Effect.result(instance.discoverEffect("/workspace", account)),
 		);
 
 		expect(result._tag).toBe("Failure");
@@ -180,13 +211,14 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 		}
 	});
 
-	it("passes workspace directory for command/skill discovery", async () => {
+	it("passes the explicit workspace directory for command/skill discovery", async () => {
 		instance = new OpenCodeProviderInstance({
 			client,
-			workspaceRoot: "/my/project",
+			workspaceRoot: "/constructor",
+			clientForAccount: () => Effect.succeed(client),
 		});
 
-		await Effect.runPromise(instance.discoverEffect());
+		await Effect.runPromise(instance.discoverEffect("/my/project", account));
 
 		expect(client.app.commands).toHaveBeenCalled();
 		expect(client.app.skills).toHaveBeenCalledWith("/my/project");
@@ -228,12 +260,12 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 		expect(client.provider.list).not.toHaveBeenCalled();
 	});
 
-	it("omits directory for commands when no workspace", async () => {
-		instance = new OpenCodeProviderInstance({ client });
-
-		await Effect.runPromise(instance.discoverEffect());
-
-		expect(client.app.commands).toHaveBeenCalled();
-		expect(client.app.skills).toHaveBeenCalledWith(undefined);
+	it("rejects discovery without an explicit workspace", async () => {
+		const result = await Effect.runPromise(
+			Effect.result(instance.discoverEffect(undefined, account)),
+		);
+		expect(result._tag).toBe("Failure");
+		expect(client.app.commands).not.toHaveBeenCalled();
+		expect(client.app.skills).not.toHaveBeenCalled();
 	});
 });

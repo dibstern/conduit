@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { Deferred, Effect, Layer, Ref } from "effect";
 import type { AccountsState } from "../../src/lib/account-directory.js";
 import { AccountPictureNone } from "../../src/lib/domain/daemon/Layers/account-picture-layer.js";
+import { makeAccountResourceScopesLive } from "../../src/lib/domain/daemon/Layers/account-resource-scopes-layer.js";
 import { CategorySetLive } from "../../src/lib/domain/daemon/Layers/category-set-layer.js";
 import { ShutdownSignalTag } from "../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { DaemonWsRpcHandlersLive } from "../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
@@ -71,6 +72,7 @@ import {
 	type ClaudeConfigDir,
 	configuredClaudeConfigDir,
 } from "../../src/lib/provider/claude/claude-sdk-env.js";
+import { CursorAccountResourcesLive } from "../../src/lib/provider/cursor/cursor-account-resources.js";
 import {
 	BrowserRpcConnectionsLive,
 	RpcCaller,
@@ -126,6 +128,7 @@ export const makeDaemonRpcTestLayer = (
 		makeProjectRegistryLive(projects),
 		makeRelayCacheLive(factory),
 		DaemonEventBusLive,
+		makeAccountResourceScopesLive(),
 		BrowserRpcConnectionsLive,
 		options.tailscaleCli ??
 			Layer.succeed(TailscaleCliTag)({
@@ -180,7 +183,13 @@ export const makeDaemonRpcTestLayer = (
 	const withDirectory = (
 		options.sessionDirectory ?? makeSharedSessionDirectoryLive
 	).pipe(Layer.provideMerge(base));
-	const dependencies = OpenCodeInstancesLive.pipe(
+	const dependencies = Layer.merge(
+		OpenCodeInstancesLive,
+		CursorAccountResourcesLive(
+			options.configDir ?? "/tmp/daemon-rpc-fixture",
+			`${options.configDir ?? "/tmp/daemon-rpc-fixture"}/legacy-cursor-auth.json`,
+		),
+	).pipe(
 		Layer.provideMerge(
 			Layer.merge(
 				AuthManagerFromConfigLive,

@@ -1,5 +1,6 @@
 import {
 	Context,
+	Deferred,
 	Effect,
 	Layer,
 	Option,
@@ -31,7 +32,7 @@ import { getRecent } from "../../../daemon/recent-projects.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { getLogLevel } from "../../../logger.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
-import { makeCursorAuth } from "../../../provider/cursor/cursor-auth.js";
+import { CursorAccountResources } from "../../../provider/cursor/cursor-account-resources.js";
 import {
 	loadRelaySettings,
 	saveRelaySettings,
@@ -60,7 +61,7 @@ import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { readSurfacingFeedback } from "../../relay/Services/surfacing-feedback.js";
 import { AuthManagerTag } from "../../server/Layers/auth-middleware.js";
-import type { AccountDirectory } from "../Services/account-directory.js";
+import { AccountDirectory } from "../Services/account-directory.js";
 import { CategorySet } from "../Services/category-set.js";
 import {
 	type ConfigPersistenceTag,
@@ -87,7 +88,6 @@ import {
 	applyAccountChange,
 	discoverInstances,
 	getInstance,
-	getInstances,
 	type InstanceManagerStateTag,
 	type PollerFibersTag,
 	persistConfig,
@@ -312,22 +312,82 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 			yield* PubSub.publish(bus, DaemonEvent.InstancesChanged());
 			return Array.from(yield* discoverInstances);
 		});
-		const cursorAuth = yield* makeCursorAuth((authenticated) =>
+		const cursorResources = yield* CursorAccountResources;
+		const cursorScope = yield* Effect.scope;
+		const cursorSelection = yield* Semaphore.make(1);
+		const cursorAuth = (
+			operation: "read" | "start" | "cancel" | "logout",
+			accountId?: string,
+		) =>
 			run(
 				Effect.gen(function* () {
-					if (
-						authenticated &&
-						!(yield* getInstances).some(
-							(instance) => instance.driver === "cursor",
+					const accounts = yield* AccountDirectory;
+					const selected = yield* cursorSelection.withPermits(1)(
+						Effect.gen(function* () {
+							let account = yield* accountId !== undefined
+								? Effect.map(accounts.snapshot, (state) =>
+										Option.fromUndefinedOr(
+											state.accounts.find(
+												(account) =>
+													account.id === accountId &&
+													account.driver === "cursor",
+											),
+										),
+									)
+								: accounts.defaultFor("cursor");
+							if (accountId !== undefined && Option.isNone(account))
+								return yield* Effect.fail(
+									new WsRpcError({
+										message: `Cursor account "${accountId}" is unavailable`,
+									}),
+								);
+							if (
+								Option.isNone(account) &&
+								operation === "start" &&
+								(yield* cursorResources.use(
+									"__cursor_login__",
+									({ auth }) => auth.read,
+								)).source !== "environment"
+							) {
+								const added = yield* addInstance({
+									name: "Cursor",
+									driver: "cursor",
+								});
+								yield* persistConfig;
+								account = Option.some(
+									yield* accounts.resolve({ _tag: "Id", id: added.id }),
+								);
+							}
+							return account;
+						}),
+					);
+					const id = Option.isSome(selected)
+						? selected.value.id
+						: "__cursor_login__";
+					if (operation !== "start")
+						return yield* cursorResources.use(
+							id,
+							({ auth }) => auth[operation],
+						);
+					const started = yield* Deferred.make<
+						import("../../../contracts/ws-rpc.js").CursorAuthState,
+						WsRpcError
+					>();
+					// The RPC returns promptly; demand lasts until the login settles.
+					yield* cursorResources
+						.use(id, ({ auth }) =>
+							auth.start.pipe(
+								Effect.tap((state) => Deferred.succeed(started, state)),
+								Effect.tap(() => auth.awaitLogin),
+							),
 						)
-					) {
-						yield* addInstance({ name: "Cursor", driver: "cursor" });
-						yield* persistConfig;
-					}
-					yield* PubSub.publish(bus, DaemonEvent.InstancesChanged());
+						.pipe(
+							Effect.onExit((exit) => Deferred.done(started, exit)),
+							Effect.forkIn(cursorScope),
+						);
+					return yield* Deferred.await(started);
 				}),
-			),
-		);
+			);
 		// Join the subscriber set BEFORE the first read, so a change landing
 		// between the two still wakes this stream: snapshot, then a fresh list
 		// per change.
@@ -614,10 +674,10 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 						})),
 					),
 				),
-			GetCursorAuth: () => cursorAuth.read,
-			StartCursorLogin: () => cursorAuth.start,
-			CancelCursorLogin: () => cursorAuth.cancel,
-			LogoutCursor: () => cursorAuth.logout,
+			GetCursorAuth: (request) => cursorAuth("read", request.accountId),
+			StartCursorLogin: (request) => cursorAuth("start", request.accountId),
+			CancelCursorLogin: (request) => cursorAuth("cancel", request.accountId),
+			LogoutCursor: (request) => cursorAuth("logout", request.accountId),
 			GetInstanceStatus: (request) =>
 				run(
 					getInstance(request.instanceId).pipe(

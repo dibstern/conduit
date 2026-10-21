@@ -209,6 +209,7 @@ export class ProcessHarness {
 			runnerHelloProtocolVersion?: number;
 			runnerHelloAfterFirst?: boolean;
 			runnerHelloWithoutRunIds?: boolean;
+			runnerHelloWithoutCursorCredentials?: boolean;
 		},
 		private readonly queryInitializationDelayMs = 0,
 		private readonly queryInitializationFailures = 0,
@@ -414,6 +415,9 @@ import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { Effect } from ${JSON.stringify(pathToFileURL(createRequire(import.meta.url).resolve("effect")).href)};
 import { ClaudeDriver } from ${JSON.stringify(pathToFileURL(join(dist, "src/lib/provider/claude/claude-provider-instance.js")).href)};
+import { ProviderRegistry } from ${JSON.stringify(pathToFileURL(join(dist, "src/lib/provider/provider-registry.js")).href)};
+import { ProviderAdapters } from ${JSON.stringify(pathToFileURL(join(dist, "src/lib/domain/daemon/Services/provider-adapters.js")).href)};
+import { ConfigTag } from ${JSON.stringify(pathToFileURL(join(dist, "src/lib/domain/relay/Services/services.js")).href)};
 const root = ${JSON.stringify(this.root)};
 if (process.env.HOME !== join(root, "home") || !process.send) throw new Error("CLI fixture requires isolated HOME and IPC");
 const identitySaveGate = join(root, "managed-identity-save-gated");
@@ -442,32 +446,42 @@ const waitForGate = (gate, workspaceRoot) => Effect.promise(async () => {
     while (!existsSync(gate + "-release")) await new Promise(done => setTimeout(done, 10));
   }
 });
-Object.assign(ClaudeDriver, { create: deps => {
-  const projectGate = join(deps.workspaceRoot, ".conduit", "recovery-gated");
-  const gate = existsSync(projectGate) ? projectGate : join(root, "capabilities-probe-gated");
-  return waitForGate(gate, deps.workspaceRoot).pipe(
-    Effect.andThen(create({ ...deps, capabilitiesService: { get: () => Effect.succeed(
-      existsSync(join(root, "capabilities-probe-result.json"))
-        ? JSON.parse(readFileSync(join(root, "capabilities-probe-result.json"), "utf8"))
-        : { models: [], agents: [], commands: [] }
-    ) } })),
-    Effect.map(instance => {
-      const recover = instance.recoverEffect.bind(instance);
-      Object.assign(instance, { recoverEffect: () => {
-        const failureGate = join(deps.workspaceRoot, ".conduit", "recovery-fail-after-adoption");
-        return recover().pipe(
-          Effect.andThen(waitForGate(failureGate, deps.workspaceRoot)),
-          Effect.tap(() => Effect.sync(() => {
-            if (!existsSync(failureGate)) return;
-            writeFileSync(failureGate + "-failed", "original recovery completed before fixture failure");
-            throw new Error("fixture recovery failed after authenticated runner adoption");
-          }))
-        );
-      } });
-      return instance;
-    })
-  );
-} });
+Object.assign(ClaudeDriver, { create: deps => create({ ...deps, capabilitiesService: { get: () => Effect.succeed(
+  existsSync(join(root, "capabilities-probe-result.json"))
+    ? JSON.parse(readFileSync(join(root, "capabilities-probe-result.json"), "utf8"))
+    : { models: [], agents: [], commands: [] }
+) } }) });
+// Registry lookup runs in the relay context, after the daemon adapter exists.
+// Gate each project borrow, and inject failure only after its real adoption.
+const observedAdapters = new WeakSet();
+const getInstance = ProviderRegistry.prototype.getInstanceEffect;
+ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
+  const registry = this;
+  return Effect.gen(function* () {
+    const shared = yield* Effect.serviceOption(ProviderAdapters);
+    if (shared._tag === "Some" && !observedAdapters.has(shared.value)) {
+      const owner = shared.value;
+      observedAdapters.add(owner);
+      const register = owner.registerProject;
+      Object.assign(owner, { registerProject: (projectId, context, onBackgroundWorkChanged) => Effect.gen(function* () {
+        const { projectDir } = yield* ConfigTag;
+        const projectGate = join(projectDir, ".conduit", "recovery-gated");
+        const gate = existsSync(projectGate) ? projectGate : join(root, "capabilities-probe-gated");
+        // Lend services before gating so other projects can finish shared recovery.
+        yield* register(projectId, context, onBackgroundWorkChanged);
+        yield* waitForGate(gate, projectDir);
+        yield* owner.recover;
+        const failureGate = join(projectDir, ".conduit", "recovery-fail-after-adoption");
+        yield* waitForGate(failureGate, projectDir);
+        if (existsSync(failureGate)) {
+          writeFileSync(failureGate + "-failed", "original recovery completed before fixture failure");
+          throw new Error("fixture recovery failed after authenticated runner adoption");
+        }
+      }) });
+    }
+    return yield* getInstance.call(registry, providerId);
+  });
+};
 `,
 			);
 		}
@@ -1049,6 +1063,9 @@ Object.assign(ClaudeDriver, { create: deps => {
 						: {}),
 					...(this.runnerLifecycle?.runnerHelloWithoutRunIds
 						? { CONDUIT_TEST_RUNNER_HELLO_WITHOUT_RUN_IDS: "1" }
+						: {}),
+					...(this.runnerLifecycle?.runnerHelloWithoutCursorCredentials
+						? { CONDUIT_TEST_RUNNER_HELLO_WITHOUT_CURSOR_CREDENTIALS: "1" }
 						: {}),
 					...(this.opencodeIdleTimeoutMs !== undefined
 						? {

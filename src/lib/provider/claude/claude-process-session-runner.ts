@@ -16,7 +16,11 @@ export const makeProcessClaudeSessionRunner = (
 	makeProcessSessionRunner(deps, emit, {
 		driverKind: "claude",
 		admitsRecoveredSends: true,
-		connect: connectClaudeRunner,
+		connect: (options) =>
+			connectClaudeRunner({
+				...options,
+				...(deps.readThread ? { readThread: deps.readThread } : {}),
+			}),
 		settingsDeferredCode: CLAUDE_SETTINGS_REPLAY_DEFERRED,
 		snapshotCommandSettings: (snapshot) => ({
 			claudeSettingsOverrides: snapshot?.claudeSettingsOverrides,
@@ -75,6 +79,7 @@ export const makeProcessClaudeSessionRunner = (
 			closing,
 			liveSession,
 			resolveSinkId,
+			_replayTurn,
 			sendTurn,
 			admitReplay,
 		) =>

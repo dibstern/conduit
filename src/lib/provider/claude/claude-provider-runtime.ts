@@ -200,6 +200,8 @@ import type {
 	ClaudeSendTurnInput,
 	ClaudeSessionContext,
 	ClaudeSessionController,
+	ClaudeThreadReadInput,
+	ClaudeThreadReadResult,
 	PromptQueueController,
 	Query,
 	Options as SDKOptions,
@@ -219,6 +221,11 @@ const INTERRUPTED_TURN: TurnResult = {
 export type { ClaudeOneShotQueryFactory } from "../../domain/daemon/Services/claude-one-shot.js";
 
 export interface ClaudeProviderInstanceDeps {
+	/** Resolve history from the calling session's current project borrow. */
+	readonly readThread?: (
+		sessionId: string,
+		input: ClaudeThreadReadInput,
+	) => Effect.Effect<ClaudeThreadReadResult>;
 	readonly readGoalStatus?: ReadClaudeGoalStatus;
 	readonly onBackgroundTask?: (
 		input: import("../../session/background-liveness.js").BackgroundTaskTransition,
@@ -226,6 +233,12 @@ export interface ClaudeProviderInstanceDeps {
 	readonly workspaceRoot: string;
 	readonly extraFolders?: readonly string[];
 	readonly daemonConfigDir?: string;
+	readonly projectRootForSession?: NonNullable<
+		import("../runner/runner-provider-instance.js").RunnerProviderInstanceDeps["projectRootForSession"]
+	>;
+	readonly recoveryForSession?: NonNullable<
+		import("../runner/runner-provider-instance.js").RunnerProviderInstanceDeps["recoveryForSession"]
+	>;
 	readonly shellEnv?: (
 		directory: string,
 	) => Readonly<Record<string, string | undefined>>;
@@ -256,6 +269,9 @@ export type ClaudeSessionRunnerDeps = Pick<
 	| "workspaceRoot"
 	| "extraFolders"
 	| "daemonConfigDir"
+	| "projectRootForSession"
+	| "recoveryForSession"
+	| "readThread"
 	| "shellEnv"
 	| "prepareShellEnv"
 	| "claudeSettingsOverrides"

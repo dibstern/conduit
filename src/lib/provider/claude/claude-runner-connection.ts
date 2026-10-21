@@ -15,11 +15,12 @@ export const connectClaudeRunner = (
 	Effect.gen(function* () {
 		const read = yield* Effect.serviceOption(ReadQueryEffectTag);
 		const readThread =
-			read._tag === "Some"
+			options.readThread ??
+			(read._tag === "Some"
 				? yield* makeClaudeThreadRead.pipe(
 						Effect.provideService(ReadQueryEffectTag, read.value),
 					)
-				: undefined;
+				: undefined);
 		return yield* connectRunner({
 			...options,
 			driverKind: options.driverKind ?? "claude",

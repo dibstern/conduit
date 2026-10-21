@@ -225,6 +225,7 @@ export const runSessionRunner = (
 				attempt?: number;
 				fallback?: boolean;
 				providerRunId?: string;
+				released?: boolean;
 			}
 		>();
 		const commands = new Map<
@@ -298,6 +299,8 @@ export const runSessionRunner = (
 												output.type === "event"
 													? output.event.providerRefs.providerTurnId
 													: undefined;
+											if (output.type === "release-sink" && binding)
+												binding.released = true;
 											const recordRun =
 												runId &&
 												binding?.commandId &&
@@ -386,6 +389,15 @@ export const runSessionRunner = (
 									process.env["CONDUIT_TEST_RUNNER_HELLO_WITHOUT_RUN_IDS"]
 										? {}
 										: { stampsRunIds: true as const }),
+									...(driverKind === "cursor" &&
+									!(
+										overrideHello &&
+										process.env[
+											"CONDUIT_TEST_RUNNER_HELLO_WITHOUT_CURSOR_CREDENTIALS"
+										]
+									)
+										? { scopedCursorCredentials: true as const }
+										: {}),
 									runnerId,
 									driverKind,
 									sessionId,
@@ -396,6 +408,12 @@ export const runSessionRunner = (
 										...(binding.commandId
 											? { commandId: binding.commandId }
 											: {}),
+										...(process.env["NODE_ENV"] === "test" &&
+										process.env[
+											"CONDUIT_TEST_RUNNER_HELLO_WITHOUT_BINDING_RELEASE_STATE"
+										]
+											? {}
+											: { released: binding.released === true }),
 									})),
 									pendingOutputs: spool.pendingOutputs,
 									completedCommands: [...completedCommands.values()],

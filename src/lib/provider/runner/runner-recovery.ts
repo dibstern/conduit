@@ -1,7 +1,10 @@
 import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
-import { makeClaudeEventPersistEffect } from "../../persistence/effect/claude-event-persist-effect.js";
+import {
+	ClaudeEventPersistEffectTag,
+	makeClaudeEventPersistEffect,
+} from "../../persistence/effect/claude-event-persist-effect.js";
 import {
 	EventStoreEffectTag,
 	makeEventStoreEffect,
@@ -12,6 +15,7 @@ import { runTerminalStatus } from "../../persistence/effect/projectors-effect.js
 import { makeProviderStateEffect } from "../../persistence/effect/provider-state-effect.js";
 import type { TurnResult } from "../types.js";
 import { runnerSinkId } from "./runner-protocol.js";
+import type { RunnerRecoveryDependencies } from "./runner-provider-instance.js";
 import type { SessionFailure, SessionTurn } from "./session-runner.js";
 
 export const runningRunnerCommands = (
@@ -21,11 +25,11 @@ export const runningRunnerCommands = (
 	sessionId?: string,
 ) =>
 	Effect.gen(function* () {
-		// A session lookup follows its durable owner. A relay-wide sweep stays
-		// bounded to that relay: its registry scan cannot disprove other owners.
+		const project = yield* Effect.serviceOption(PersistenceProjectTag);
+		const projectId = project._tag === "Some" ? project.value.projectId : null;
 		const scope =
 			sessionId === undefined
-				? sql`outbox.project_key = ${(yield* PersistenceProjectTag).projectId}`
+				? sql`(${projectId} IS NULL OR outbox.project_key = ${projectId})`
 				: sql`outbox.session_id = ${sessionId} AND outbox.project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId})`;
 		const rows = yield* sql<{
 			project_key: string;
@@ -151,12 +155,17 @@ export const settleUnclaimedRunnerCommands = <E>(
 		sinkId: string,
 		turn: {
 			sessionId: string;
+			accountId: string;
 			runId?: string;
 			userMessageId?: string;
 			messageId: string;
 		},
 		failure: SessionFailure,
 	) => Effect.Effect<void, E>,
+	recoveryForSession?: (
+		sessionId: string,
+	) => Effect.Effect<RunnerRecoveryDependencies | undefined>,
+	sessionIds?: ReadonlySet<string>,
 ) =>
 	Effect.gen(function* () {
 		for (const row of yield* runningRunnerCommands(
@@ -164,7 +173,11 @@ export const settleUnclaimedRunnerCommands = <E>(
 			driverKind,
 			driverForAccount,
 		)) {
+			if (sessionIds && !sessionIds.has(row.session_id)) continue;
 			if (claimedSessions.has(row.session_id)) continue;
+			const recovery = yield* recoveryForSession?.(row.session_id) ??
+				Effect.succeed(undefined);
+			if (recoveryForSession && !recovery) continue;
 			const failure: SessionFailure = {
 				operation: "recover stopped runner",
 				message: `${driverKind.charAt(0).toUpperCase()}${driverKind.slice(1)} runner stopped before completing the turn`,
@@ -179,6 +192,7 @@ export const settleUnclaimedRunnerCommands = <E>(
 				),
 				{
 					sessionId: row.session_id,
+					accountId: row.provider_id,
 					...(row.run_id ? { runId: row.run_id } : {}),
 					...(row.user_message_id
 						? { userMessageId: row.user_message_id }
@@ -187,7 +201,7 @@ export const settleUnclaimedRunnerCommands = <E>(
 				},
 				failure,
 			);
-			yield* settleRunnerCommand(
+			const settle = settleRunnerCommand(
 				sql,
 				row.project_key,
 				row.session_id,
@@ -197,6 +211,14 @@ export const settleUnclaimedRunnerCommands = <E>(
 				failure,
 				driverKind,
 			);
+			yield* recovery
+				? settle.pipe(
+						Effect.provideService(
+							ClaudeEventPersistEffectTag,
+							recovery.persist,
+						),
+					)
+				: settle;
 		}
 	});
 
@@ -246,7 +268,19 @@ export const settleRunnerCommand = (
 				const projector = yield* Effect.serviceOption(
 					ProjectionRunnerEffectTag,
 				);
-				if (projector._tag === "None") return;
+				if (projector._tag === "None") {
+					const persist = yield* Effect.serviceOption(
+						ClaudeEventPersistEffectTag,
+					);
+					if (persist._tag === "Some")
+						yield* requeueFailedSteers(
+							sql,
+							persist.value,
+							sessionId,
+							commandId,
+						);
+					return;
+				}
 				const eventStore = yield* makeEventStoreEffect.pipe(
 					Effect.provideService(SqlClient.SqlClient, sql),
 					Effect.provideService(PersistenceProjectTag, { projectId }),

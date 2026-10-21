@@ -33,6 +33,7 @@ import {
 	writeProjectStorageOwner,
 } from "../../../persistence/project-storage.js";
 import { ClaudeAccountScopes } from "../../../provider/claude/claude-account-scopes.js";
+import { CursorAccountResources } from "../../../provider/cursor/cursor-account-resources.js";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
 import type { StoredProject } from "../../../types.js";
 import {
@@ -90,6 +91,7 @@ import {
 	type removeProjectFromEffectRegistry,
 	type saveProject,
 } from "../Services/project-registry-service.js";
+import { ProviderAdapters } from "../Services/provider-adapters.js";
 import { SessionActivityTag } from "../Services/session-activity.js";
 import { SessionDirectory } from "../Services/session-directory.js";
 import { Usage } from "../Services/usage.js";
@@ -207,6 +209,10 @@ export const RelayFactoryLive = (
 			const claudeAccounts = yield* Effect.serviceOption(ClaudeAccountScopes);
 			const accountResources = yield* Effect.serviceOption(
 				AccountResourceScopesTag,
+			);
+			const providerAdapters = yield* Effect.serviceOption(ProviderAdapters);
+			const cursorResources = yield* Effect.serviceOption(
+				CursorAccountResources,
 			);
 			const surfacing = yield* Effect.serviceOption(MessageSurfacingSettings);
 			const categories = yield* Effect.serviceOption(CategorySet);
@@ -531,6 +537,19 @@ export const RelayFactoryLive = (
 												? Context.make(
 														AccountResourceScopesTag,
 														accountResources.value,
+													)
+												: Context.empty(),
+										),
+										Context.merge(
+											Option.isSome(providerAdapters)
+												? Context.make(ProviderAdapters, providerAdapters.value)
+												: Context.empty(),
+										),
+										Context.merge(
+											Option.isSome(cursorResources)
+												? Context.make(
+														CursorAccountResources,
+														cursorResources.value,
 													)
 												: Context.empty(),
 										),

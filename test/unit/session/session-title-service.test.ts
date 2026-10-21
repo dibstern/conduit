@@ -698,12 +698,13 @@ describe("SessionTitleService", () => {
 	it.effect(
 		"uses the directory's default account and removes the scratch directory",
 		() => {
+			const projectDir = "/title-project-root";
 			let scratchDir: string | undefined;
 			const queryFactory = vi.fn(
 				(params: Parameters<ClaudeOneShotQueryFactory>[0]) => {
 					scratchDir = params.options?.cwd;
 					expect(params.options?.env?.["CLAUDE_CONFIG_DIR"]).toBe(
-						join(process.cwd(), ".claude-work"),
+						join(projectDir, ".claude-work"),
 					);
 					expect(params.options?.env?.["TITLE_ACCOUNT_MARKER"]).toBe("work");
 					return replayClaudeText();
@@ -722,7 +723,10 @@ describe("SessionTitleService", () => {
 					},
 				]),
 				// Deliberately not a daemon config path. The job must use the directory.
-				config: makeMockConfig({ configDir: "/not-a-daemon-config" }),
+				config: makeMockConfig({
+					projectDir,
+					configDir: "/not-a-daemon-config",
+				}),
 			});
 			return Effect.gen(function* () {
 				yield* seedSessionRow();

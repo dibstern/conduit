@@ -232,6 +232,18 @@ describe("Claude runner adoption", () => {
 							}),
 					);
 					yield* runner.recoverEffect;
+					expect(
+						yield* runner.hasLiveProcessEffect(
+							"adoption-session",
+							"abcdefabcdef",
+						),
+					).toBe(true);
+					expect(
+						yield* runner.hasLiveProcessEffect(
+							"adoption-session",
+							"replaced-process",
+						),
+					).toBe(false);
 					expect(fixture.attempts).toHaveLength(3);
 					expect(fixture.attempts.every((attempt) => attempt.filesIntact)).toBe(
 						true,
@@ -310,7 +322,7 @@ describe("Claude runner adoption", () => {
 		observations.push({ case: "legacy stop-task", refused: true });
 	});
 
-	it("fails within bounded backoff without deleting or signalling a live unverified runner", async () => {
+	it("quarantines within bounded backoff without deleting or signalling a live unverified runner", async () => {
 		const fixture = await runnerSocket({
 			rejections: Number.POSITIVE_INFINITY,
 		});
@@ -326,12 +338,25 @@ describe("Claude runner adoption", () => {
 						},
 						() => Effect.succeed({}),
 					);
-					return yield* Effect.result(runner.recoverEffect);
+					const result = yield* Effect.result(runner.recoverEffect);
+					expect(
+						yield* runner.hasLiveProcessEffect(
+							"adoption-session",
+							"abcdefabcdef",
+						),
+					).toBe(true);
+					expect(
+						yield* runner.hasLiveProcessEffect(
+							"adoption-session",
+							"replaced-process",
+						),
+					).toBe(false);
+					return result;
 				}),
 			),
 		);
 		const elapsed = Date.now() - started;
-		expect(Either.isFailure(outcome)).toBe(true);
+		expect(Either.isSuccess(outcome)).toBe(true);
 		expect(fixture.attempts.length).toBeGreaterThan(1);
 		expect(fixture.attempts.length).toBeLessThanOrEqual(6);
 		expect(elapsed).toBeLessThan(5000);
@@ -342,7 +367,7 @@ describe("Claude runner adoption", () => {
 			case: "bounded rejection",
 			attempts: fixture.attempts,
 			elapsed,
-			failedClosed: Either.isFailure(outcome),
+			recovered: Either.isSuccess(outcome),
 			filesPreserved: true,
 		});
 	});

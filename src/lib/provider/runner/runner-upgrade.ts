@@ -37,7 +37,10 @@ export function makeRunnerUpgrade<
 	T extends { upgrade: RunnerUpgrade },
 >(options: {
 	readonly eligible: (sessionId: string, runner: T) => boolean;
-	readonly create: (sessionId: string, runner: T) => Effect.Effect<T>;
+	readonly create: (
+		sessionId: string,
+		runner: T,
+	) => Effect.Effect<T, SessionFailure>;
 	readonly warm: (
 		sessionId: string,
 		runner: T,
