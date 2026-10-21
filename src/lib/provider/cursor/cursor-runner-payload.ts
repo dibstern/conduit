@@ -530,10 +530,10 @@ export class CursorRunnerPayload implements RunnerPayload {
 							},
 						});
 					const credential = yield* sdkCall("credential lookup", () =>
-						resolveCursorCredential(
-							this.sdk,
-							this.deps.environment?.() ?? process.env,
-						),
+						resolveCursorCredential(this.sdk, {
+							...(input.shellEnv ?? this.deps.environment?.() ?? process.env),
+							...input.account?.env,
+						}),
 					);
 					if (!credential)
 						return yield* finish(

@@ -42,9 +42,15 @@ import {
 	sendPreparedClaudeTurn,
 } from "./claude/prepare-turn.js";
 import { ProviderInstanceFailure, ProviderNotRegistered } from "./errors.js";
+import type { ProviderCallRequest } from "./orchestration-engine.js";
 import type { ProviderRegistry } from "./provider-registry.js";
 import { toEventSinkError } from "./relay-event-sink.js";
-import type { EventSink, SendTurnInput, TurnResult } from "./types.js";
+import type {
+	EventSink,
+	ProviderCall,
+	SendTurnInput,
+	TurnResult,
+} from "./types.js";
 
 /**
  * Synthesized completion result for effects that produce no provider
@@ -83,6 +89,8 @@ interface SendTurnOutboxPayload
 	> {
 	readonly history?: SendTurnInput["history"];
 }
+
+type LiveSendContext = Pick<SendTurnInput, "account" | "shellEnv">;
 
 class UnknownProviderCommandEffect extends Data.TaggedError(
 	"UnknownProviderCommandEffect",
@@ -160,6 +168,13 @@ export interface ProviderSideEffectReactorOptions {
 	readonly persistUserMessage?: ClaudeEventPersistEffect["persistUserMessage"];
 	readonly claudeSessionForkSdk?: ClaudeSessionForkSdk;
 	readonly defaultClaudeLaunchConfig?: () => ClaudeLaunchConfig;
+	readonly resolveSessionCallContext?: (
+		sessionId: string,
+		runId: string | undefined,
+	) => Effect.Effect<ProviderCall | undefined, ProviderInstanceFailure>;
+	readonly resolveCallContext?: (
+		request: ProviderCallRequest,
+	) => Effect.Effect<ProviderCall, ProviderInstanceFailure>;
 	/** Optional deterministic override; defaults to the Effect Clock service. */
 	readonly nowMs?: () => number;
 	readonly retryBackoff?: (failureCount: number) => Duration.Input;
@@ -342,6 +357,7 @@ export class ProviderSideEffectReactor {
 		commandId: string,
 		interactions?: EventSink,
 		abortSignal?: AbortSignal,
+		liveContext?: LiveSendContext,
 	): Effect.Effect<TurnResult, ProviderCommandExecutionError> {
 		return Effect.gen({ self: this }, function* () {
 			const row = yield* this.pendingRequestForCommand(commandId);
@@ -349,6 +365,7 @@ export class ProviderSideEffectReactor {
 				const delivery = this.executeRow(row, {
 					interactions,
 					abortSignal,
+					liveContext,
 				});
 				if (row.effect_type !== "send_turn") return yield* delivery;
 				return yield* delivery.pipe(
@@ -374,6 +391,7 @@ export class ProviderSideEffectReactor {
 			makeInteractions?: ProviderCommandInteractionSinkFactory | undefined;
 			abortSignal?: AbortSignal | undefined;
 			background?: boolean;
+			liveContext?: LiveSendContext | undefined;
 		},
 	): Effect.Effect<TurnResult, ProviderCommandExecutionError> {
 		return Effect.gen({ self: this }, function* () {
@@ -404,6 +422,7 @@ export class ProviderSideEffectReactor {
 				options?.abortSignal
 					? AbortSignal.any([options.abortSignal, cancellation.signal])
 					: cancellation.signal,
+				options?.liveContext,
 			);
 			const result = yield* Effect.result(
 				row.effect_type !== "send_turn"
@@ -806,6 +825,7 @@ export class ProviderSideEffectReactor {
 		interactions?: EventSink,
 		makeInteractions?: ProviderCommandInteractionSinkFactory,
 		abortSignal?: AbortSignal,
+		liveContext?: LiveSendContext,
 	): Effect.Effect<
 		TurnResult,
 		| ProviderCommandPayloadParseFailed
@@ -835,17 +855,46 @@ export class ProviderSideEffectReactor {
 							},
 						})
 						.pipe(Effect.mapError(storeFailure("placeContinuation")));
-				const account =
-					payload.account ??
-					(this.options.accountDirectory
-						? yield* this.options.accountDirectory
-								.resolve({
-									_tag: "Id",
-									id: payload.instanceId ?? row.provider_id,
-								})
-								.pipe(Effect.mapError(storeFailure("resolveReplayAccount")))
-						: undefined);
+				const currentAccount = this.options.accountDirectory
+					? yield* this.options.accountDirectory
+							.resolve({
+								_tag: "Id",
+								id:
+									payload.account?.id ?? payload.instanceId ?? row.provider_id,
+							})
+							.pipe(
+								Effect.mapError(
+									(cause) =>
+										new ProviderInstanceFailure({
+											providerId: row.provider_id,
+											operation: "resolveReplayAccount",
+											cause,
+										}),
+								),
+							)
+					: undefined;
+				const admittedAccount = liveContext?.account ?? payload.account;
+				const account = admittedAccount
+					? {
+							...admittedAccount,
+							env: currentAccount
+								? currentAccount.env
+								: liveContext?.account?.env,
+						}
+					: currentAccount;
 				const driver = account?.driver ?? row.provider_id;
+				const call =
+					liveContext?.shellEnv === undefined && this.options.resolveCallContext
+						? yield* this.options.resolveCallContext({
+								sessionId: payload.sessionId,
+								...(account ? { account } : {}),
+								providerId: row.provider_id,
+								workspaceRoot: payload.workspaceRoot,
+								extraFolders: payload.extraFolders,
+								prepareShellEnv: true,
+							})
+						: undefined;
+				const shellEnv = liveContext?.shellEnv ?? call?.shellEnv;
 				const interactionSink =
 					interactions ?? makeInteractions?.(payload.sessionId, driver);
 				const instanceId = account?.id ?? payload.instanceId ?? row.provider_id;
@@ -863,13 +912,13 @@ export class ProviderSideEffectReactor {
 						mark(turnKey, "history-ready");
 						return instance.sendTurnEffect({
 							...payload,
+							...(shellEnv ? { shellEnv } : {}),
 							awaitIntake: this.awaitIntake(row),
 							commandAttempt: row.attempt_count,
 							account:
-								payload.account ??
-								(account?.driver === "claude" && prepared
+								account?.driver === "claude" && prepared && !payload.account
 									? { ...account, folder: prepared.configDir }
-									: account),
+									: account,
 							instanceId,
 							history: payload.history ?? [],
 							...(getProviderDriver(driver)?.supportsNativeResume
@@ -982,15 +1031,23 @@ export class ProviderSideEffectReactor {
 				return result;
 			}
 			if (row.effect_type === "interrupt_turn") {
-				const account = this.options.accountDirectory
-					? yield* this.options.accountDirectory
-							.resolve({ _tag: "Id", id: row.provider_id })
-							.pipe(Effect.mapError(storeFailure("resolveReplayAccount")))
-					: undefined;
+				const call = yield* this.options.resolveSessionCallContext?.(
+					row.session_id,
+					row.run_id ?? undefined,
+				) ?? Effect.succeed(undefined);
+				const account =
+					call?.account ??
+					(this.options.accountDirectory
+						? yield* this.options.accountDirectory
+								.resolve({ _tag: "Id", id: row.provider_id })
+								.pipe(Effect.mapError(storeFailure("resolveReplayAccount")))
+						: undefined);
 				const instance = yield* this.options.registry.getInstanceEffect(
-					account?.driver ?? row.provider_id,
+					call?.account.driver ?? account?.driver ?? row.provider_id,
 				);
-				yield* instance.interruptTurnEffect(row.session_id);
+				yield* call
+					? instance.interruptTurnEffect(row.session_id, undefined, call)
+					: instance.interruptTurnEffect(row.session_id);
 				return REACTOR_COMPLETED_RESULT;
 			}
 			return yield* Effect.fail(
@@ -1112,6 +1169,7 @@ export class ProviderSideEffectReactor {
 					turnId: _turnId,
 					userMessageId: _userMessageId,
 					commandId: _commandId,
+					shellEnv: _shellEnv,
 					...input
 				} = payload;
 				const normalized = {

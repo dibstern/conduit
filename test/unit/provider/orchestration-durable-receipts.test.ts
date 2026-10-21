@@ -1,18 +1,30 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
-import { expect, vi } from "vitest";
+import { afterAll, expect, vi } from "vitest";
+import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
+import {
+	type Account,
+	AccountIdSchema,
+	OpenCodeAccountSchema,
+} from "../../../src/lib/contracts/account.js";
 import {
 	decodeProviderRuntimeEvent,
 	type ProviderRuntimeEvent,
 } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
+import { makeAccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
 } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
@@ -26,12 +38,22 @@ import {
 	type SendTurnCommand,
 } from "../../../src/lib/provider/orchestration-engine.js";
 import { CommandReadModelRepository } from "../../../src/lib/provider/orchestration-read-model.js";
+import { ProjectShellEnvResolver } from "../../../src/lib/provider/project-shell-env.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type {
 	ProviderInstance,
 	TurnResult,
 } from "../../../src/lib/provider/types.js";
 import { createMockEventSink } from "../../helpers/mock-sdk.js";
+
+const reviewEvidence: Record<string, unknown> = {};
+afterAll(() => {
+	mkdirSync("test-results/process-harness", { recursive: true });
+	writeFileSync(
+		"test-results/process-harness/82tn-9-fix-review-engine.json",
+		JSON.stringify(reviewEvidence, null, 2),
+	);
+});
 
 const COMPLETED: TurnResult = {
 	status: "completed",
@@ -227,6 +249,468 @@ function receiptRow(sql: SqlClient.SqlClient, commandId: string) {
 }
 
 describe("OrchestrationEngine durable receipts", () => {
+	for (const snapshotEnv of [
+		undefined,
+		{ ANTHROPIC_API_KEY: "synthetic-stale-key" },
+	])
+		it.effect(
+			`refreshes live account credentials at delivery (${snapshotEnv ? "stale" : "missing"} snapshot env)`,
+			() =>
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const account = {
+						id: AccountIdSchema.make("live-account"),
+						name: "Live account",
+						driver: "claude" as const,
+						folder: configuredClaudeConfigDir("/tmp/82tn9-admitted-folder"),
+						usageEligible: false,
+						env: snapshotEnv,
+					};
+					let currentKey = "synthetic-before-admission";
+					const accountDirectory = makeAccountDirectory(
+						Effect.sync(() => ({
+							...accountsStateFromInstances(
+								[],
+								configuredClaudeConfigDir("/tmp/82tn9-default"),
+							),
+							accounts: [
+								{
+									...account,
+									folder: configuredClaudeConfigDir(
+										"/tmp/82tn9-current-folder",
+									),
+									env: { ANTHROPIC_API_KEY: currentKey },
+								},
+							],
+						})),
+					);
+					const instance = makeStubInstance("claude");
+					const engine = new OrchestrationEngine({
+						registry: new ProviderRegistry([instance]),
+						accountDirectory,
+						durableCommands: yield* makeDurableOptions({ sql }),
+					});
+					const command = sendTurnCommand({ providerId: account.id });
+					yield* engine.dispatchEffect({
+						...command,
+						input: {
+							...command.input,
+							account,
+							extraFolders: ["/tmp/82tn9-extra"],
+						},
+						onAccepted: Effect.sync(() => {
+							currentKey = "synthetic-current-delivery-key";
+						}),
+					});
+					const delivered = instance.sendTurnEffect.mock.calls[0]?.[0] as
+						| SendTurnCommand["input"]
+						| undefined;
+					const observed = {
+						account: delivered?.account,
+						workspaceRoot: delivered?.workspaceRoot,
+						extraFolders: delivered?.extraFolders,
+					};
+					reviewEvidence[`liveAccount:${snapshotEnv ? "stale" : "missing"}`] =
+						observed;
+					expect(observed).toEqual({
+						account: {
+							...account,
+							env: { ANTHROPIC_API_KEY: "synthetic-current-delivery-key" },
+						},
+						workspaceRoot: "/tmp/project",
+						extraFolders: ["/tmp/82tn9-extra"],
+					});
+				}).pipe(Effect.provide(makeFixtureLayer())),
+		);
+	for (const driver of ["claude", "cursor"] as const)
+		it.effect(
+			`fails redelivery terminally when the admitted ${driver} account was removed`,
+			() =>
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const account: Account = {
+						id: AccountIdSchema.make(`removed-${driver}`),
+						name: "Removed account",
+						usageEligible: false,
+						env: {
+							ANTHROPIC_API_KEY: "synthetic-removed-key",
+							CURSOR_API_KEY: "synthetic-removed-key",
+						},
+						...(driver === "claude"
+							? {
+									driver,
+									folder: configuredClaudeConfigDir(
+										"/tmp/82tn9-removed-account",
+									),
+								}
+							: { driver }),
+					};
+					let registered = true;
+					const accountDirectory = makeAccountDirectory(
+						Effect.sync(() => ({
+							...accountsStateFromInstances(
+								[],
+								configuredClaudeConfigDir("/tmp/82tn9-default"),
+							),
+							accounts: registered ? [account] : [],
+						})),
+					);
+					const instance = makeStubInstance(driver);
+					const durableCommands = {
+						...(yield* makeDurableOptions({ sql })),
+						persistUserMessage: (yield* ClaudeEventPersistEffectTag)
+							.persistUserMessage,
+					};
+					const options = {
+						registry: new ProviderRegistry([instance]),
+						accountDirectory,
+						durableCommands,
+					};
+					const engine = new OrchestrationEngine(options);
+					const command = sendTurnCommand({ providerId: account.id });
+					const commit = yield* makeCommitAndSignal;
+					yield* commit([
+						canonicalEvent("session.created", "session-1", {
+							sessionId: "session-1",
+							provider: account.id,
+							title: "Removed account redelivery",
+						}),
+						canonicalEvent("input.admitted", "session-1", {
+							sessionId: "session-1",
+							inputId: "turn-1",
+							delivery: "queue",
+							request: { text: "hello" },
+						}),
+					]);
+					yield* Effect.exit(
+						engine.dispatchEffect({
+							...command,
+							input: { ...command.input, account },
+							events: [
+								canonicalEvent("input.sent", "session-1", {
+									sessionId: "session-1",
+									inputId: "turn-1",
+								}),
+							],
+							onAccepted: Effect.interrupt,
+						}),
+					);
+					expect(instance.sendTurnEffect).not.toHaveBeenCalled();
+					expect(
+						yield* sql`SELECT status FROM provider_command_outbox`,
+					).toEqual([{ status: "pending" }]);
+					registered = false;
+					const replay = new OrchestrationEngine(options);
+					yield* replay.drainSideEffects();
+					yield* TestClock.adjust("1 hour");
+					yield* replay.drainSideEffects();
+					const observed = {
+						launches: instance.sendTurnEffect.mock.calls.length,
+						outbox:
+							yield* sql`SELECT status, attempt_count, next_attempt_at FROM provider_command_outbox`,
+						receipts: yield* sql`SELECT status FROM command_receipts`,
+						runs: yield* sql`SELECT status FROM provider_runs`,
+						turns: yield* sql`SELECT state FROM turns`,
+						inbox: yield* sql`SELECT state FROM pending_inputs`,
+						sessionStatus: yield* (yield* ReadQueryEffectTag).getSessionStatus(
+							"session-1",
+						),
+						errors: yield* sql<{
+							text: string;
+						}>`SELECT text FROM message_parts WHERE type = 'error'`,
+						acceptedRuns:
+							yield* sql`SELECT event_id FROM events WHERE type = 'run.started'`,
+					};
+					reviewEvidence[`removedAccount:${driver}`] = observed;
+					expect.soft(observed.launches).toBe(0);
+					expect
+						.soft(observed.outbox)
+						.toEqual([
+							{ status: "failed", attempt_count: 1, next_attempt_at: null },
+						]);
+					expect
+						.soft(observed.receipts)
+						.toEqual([{ status: "side_effect_failed" }]);
+					expect.soft(observed.runs).toEqual([{ status: "error" }]);
+					expect.soft(observed.turns).toEqual([{ state: "error" }]);
+					expect.soft(observed.inbox).toEqual([{ state: "removed" }]);
+					expect.soft(observed.sessionStatus).not.toBe("busy");
+					expect
+						.soft(observed.errors)
+						.toEqual([{ text: expect.stringContaining(account.id) }]);
+					expect.soft(observed.acceptedRuns).toEqual([]);
+				}).pipe(Effect.provide(makeFixtureLayer())),
+		);
+	it.effect(
+		"routes controls to running A rather than newer pending B using turn and prompt provenance",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const instance = makeStubInstance("opencode");
+				const interrupt = vi.spyOn(instance, "interruptTurnEffect");
+				const permission = vi.spyOn(instance, "resolvePermissionEffect");
+				const question = vi.spyOn(instance, "resolveQuestionEffect");
+				const durableCommands = yield* makeDurableOptions({ sql });
+				const accountA = OpenCodeAccountSchema.make({
+					id: AccountIdSchema.make("account-a"),
+					name: "A",
+					driver: "opencode",
+					usageEligible: false,
+				});
+				const accountB = {
+					...accountA,
+					id: AccountIdSchema.make("account-b"),
+					name: "B",
+				};
+				const engine = new OrchestrationEngine({
+					registry: new ProviderRegistry([instance]),
+					durableCommands,
+					resolveCallContext: (request) =>
+						Effect.succeed({
+							projectId: "test-project",
+							sessionId: request.sessionId,
+							account: request.account ?? accountB,
+							workspaceRoot: request.workspaceRoot ?? "/pending-b",
+							extraFolders: request.extraFolders ?? [],
+							shellEnv: {},
+						}),
+				});
+				engine.bindSession("session-1", "opencode");
+				for (const [sequence, runId, status, account, directory, inputId] of [
+					[1, "run-a", "running", accountA, "/running-a", "input-a"],
+					[2, "run-b", "pending", accountB, "/pending-b", "input-b"],
+				] as const) {
+					yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES (${runId}, 'session-1', ${status}, 1000)`;
+					const payload = JSON.stringify({
+						projectId: "test-project",
+						sessionId: "session-1",
+						account,
+						workspaceRoot: directory,
+						extraFolders: [],
+						inputId,
+						...(runId === "run-b"
+							? { continuation: { cutOffMessageId: "input-a" } }
+							: {}),
+					});
+					yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, attempt_count, requested_at, updated_at)
+					VALUES (${sequence}, ${`send-${runId}`}, 'test-project', 'session-1', 'opencode', 'send_turn', ${payload}, ${runId}, ${status}, 0, 1000, 1000)`;
+				}
+				yield* (yield* makeCommitAndSignal)([
+					canonicalEvent(
+						"permission.asked",
+						"session-1",
+						{
+							id: "permission-a",
+							sessionId: "session-1",
+							toolName: "Bash",
+							input: { command: "pwd" },
+						},
+						{ metadata: { runId: "run-a" } },
+					),
+					canonicalEvent(
+						"question.asked",
+						"session-1",
+						{ id: "question-a", sessionId: "session-1", questions: [] },
+						{ metadata: { runId: "run-a" } },
+					),
+				]);
+				yield* engine.dispatchEffect({
+					type: "interrupt_turn",
+					commandId: "stop-a",
+					sessionId: "session-1",
+					turnIds: ["input-a"],
+				});
+				yield* engine.dispatchEffect({
+					type: "resolve_permission",
+					commandId: "allow-a",
+					sessionId: "session-1",
+					requestId: "permission-a",
+					decision: "once",
+				});
+				yield* engine.dispatchEffect({
+					type: "resolve_question",
+					commandId: "answer-a",
+					sessionId: "session-1",
+					requestId: "question-a",
+					answers: {},
+				});
+				yield* engine.dispatchEffect({
+					type: "interrupt_turn",
+					commandId: "stop-running",
+					sessionId: "session-1",
+				});
+				yield* engine.dispatchEffect({
+					type: "interrupt_turn",
+					commandId: "stop-unknown",
+					sessionId: "session-1",
+					turnIds: ["missing-input"],
+				});
+				const calls = [
+					interrupt.mock.calls[0]?.[2],
+					permission.mock.calls[0]?.[4],
+					question.mock.calls[0]?.[3],
+					interrupt.mock.calls[1]?.[2],
+					interrupt.mock.calls[2]?.[2],
+				];
+				const observed = calls.map((call) =>
+					call
+						? { account: call.account.id, directory: call.workspaceRoot }
+						: null,
+				);
+				reviewEvidence["controls"] = observed;
+				expect(observed).toEqual([
+					{ account: "account-a", directory: "/running-a" },
+					{ account: "account-a", directory: "/running-a" },
+					{ account: "account-a", directory: "/running-a" },
+					{ account: "account-a", directory: "/running-a" },
+					null,
+				]);
+			}).pipe(Effect.provide(makeFixtureLayer())),
+	);
+	it.effect(
+		"keeps environment values out of completed outbox rows and resolves current overrides on redelivery",
+		() =>
+			Effect.gen(function* () {
+				const root = yield* Effect.acquireRelease(
+					Effect.sync(() => mkdtempSync(join(tmpdir(), "82tn9-review-env-"))),
+					(directory) =>
+						Effect.sync(() =>
+							rmSync(directory, { recursive: true, force: true }),
+						),
+				);
+				const env = yield* Effect.acquireRelease(
+					Effect.sync(
+						() =>
+							new ProjectShellEnvResolver({
+								env: {
+									HOME: root,
+									PATH: "/usr/bin:/bin",
+									INHERITED_SECRET: "synthetic-inherited-secret",
+								},
+								shell: "/bin/sh",
+							}),
+					),
+					(resolver) => Effect.sync(() => resolver.close()),
+				);
+				env.register(
+					root,
+					{ overrides: { ANTHROPIC_AUTH_TOKEN: "synthetic-project-secret" } },
+					"test-project",
+				);
+				yield* Effect.tryPromise(() =>
+					env.waitUntilReady(root, "test-project"),
+				);
+				const sql = yield* SqlClient.SqlClient;
+				const instance = makeStubInstance("opencode");
+				const account = OpenCodeAccountSchema.make({
+					id: AccountIdSchema.make("opencode"),
+					name: "OpenCode",
+					driver: "opencode",
+					usageEligible: false,
+					env: { ACCOUNT_SECRET: "synthetic-account-secret" },
+				});
+				const durableCommands = yield* makeDurableOptions({ sql });
+				const options = {
+					registry: new ProviderRegistry([instance]),
+					durableCommands,
+					resolveCallContext: () =>
+						Effect.succeed(
+							Object.freeze({
+								projectId: "test-project",
+								sessionId: "session-1",
+								account,
+								workspaceRoot: root,
+								extraFolders: [],
+								shellEnv: env.get(root, "test-project"),
+							}),
+						),
+				};
+				const engine = new OrchestrationEngine(options);
+				const command = sendTurnCommand();
+				const input = {
+					...command.input,
+					projectId: "test-project",
+					account,
+					workspaceRoot: root,
+					shellEnv: env.get(root, "test-project"),
+				};
+				yield* engine.dispatchEffect({ ...command, input });
+				expect(instance.sendTurnEffect).toHaveBeenCalledWith(
+					expect.objectContaining({ shellEnv: input.shellEnv }),
+				);
+				const rows = yield* sql<{
+					payload_json: string;
+					status: string;
+				}>`SELECT payload_json, status FROM provider_command_outbox`;
+				const observed = rows.map((row) => ({
+					status: row.status,
+					hasShellEnv: row.payload_json.includes('"shellEnv"'),
+					hasProjectSecret: row.payload_json.includes(
+						"synthetic-project-secret",
+					),
+					hasInheritedSecret: row.payload_json.includes(
+						"synthetic-inherited-secret",
+					),
+					hasAccountSecret: row.payload_json.includes(
+						"synthetic-account-secret",
+					),
+				}));
+				reviewEvidence["outbox"] = observed;
+				expect.soft(observed).toEqual([
+					{
+						status: "completed",
+						hasShellEnv: false,
+						hasProjectSecret: false,
+						hasInheritedSecret: false,
+						hasAccountSecret: false,
+					},
+				]);
+
+				// Stop after admission to leave a real committed, undelivered command.
+				yield* Effect.exit(
+					engine.dispatchEffect({
+						...command,
+						commandId: "redeliver-env",
+						input: { ...input, inputId: "turn-redeliver" },
+						onAccepted: Effect.interrupt,
+					}),
+				);
+				env.register(
+					root,
+					{ overrides: { ANTHROPIC_AUTH_TOKEN: "synthetic-current-secret" } },
+					"test-project",
+				);
+				yield* Effect.tryPromise(() =>
+					env.waitUntilReady(root, "test-project"),
+				);
+				yield* new OrchestrationEngine(options).drainSideEffects();
+				const delivered = instance.sendTurnEffect.mock.calls.at(-1)?.[0] as
+					| SendTurnCommand["input"]
+					| undefined;
+				reviewEvidence["redelivery"] = {
+					currentOverride: delivered?.shellEnv?.["ANTHROPIC_AUTH_TOKEN"],
+					inherited: delivered?.shellEnv?.["INHERITED_SECRET"],
+					launches: instance.sendTurnEffect.mock.calls.length,
+				};
+				expect(delivered?.shellEnv?.["ANTHROPIC_AUTH_TOKEN"]).toBe(
+					"synthetic-current-secret",
+				);
+				expect(instance.sendTurnEffect).toHaveBeenCalledTimes(2);
+				const completed = yield* sql<{
+					payload_json: string;
+					status: string;
+				}>`SELECT payload_json, status FROM provider_command_outbox ORDER BY request_sequence`;
+				const completedRows = completed.map((row) => ({
+					status: row.status,
+					hasEnvironmentValue: row.payload_json.includes("synthetic-"),
+				}));
+				reviewEvidence["completedRowsAfterRedelivery"] = completedRows;
+				expect(completedRows).toEqual([
+					{ status: "completed", hasEnvironmentValue: false },
+					{ status: "completed", hasEnvironmentValue: false },
+				]);
+			}).pipe(Effect.scoped, Effect.provide(makeFixtureLayer())),
+	);
 	it.effect(
 		"releases foreground admission so C drains after the indeterminate run's own end",
 		() =>

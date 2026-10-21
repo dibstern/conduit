@@ -1,7 +1,10 @@
 import { Context, Effect, Exit, Fiber, Layer, Semaphore } from "effect";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
-import type { PreWarmSessionInput } from "../../../provider/types.js";
+import type {
+	PreWarmSessionInput,
+	ProviderCall,
+} from "../../../provider/types.js";
 import { LoggerTag } from "./services.js";
 import { createLocalSessionId } from "./session-manager-service.js";
 
@@ -22,7 +25,10 @@ export const draftLaunchKey = (
 export class DraftPreWarmTag extends Context.Service<
 	DraftPreWarmTag,
 	{
-		readonly discardSession: (sessionId: string) => Effect.Effect<void>;
+		readonly discardSession: (
+			sessionId: string,
+			call?: ProviderCall,
+		) => Effect.Effect<void>;
 		readonly warmDirectory: (
 			instanceId: string,
 			client: OpenCodeAPI,
@@ -59,6 +65,7 @@ export const DraftPreWarmLive = Layer.effect(
 			readonly draftId: string;
 			readonly sessionId: string;
 			readonly launchKey: string;
+			readonly call: ProviderCall | undefined;
 			readonly expiresAt: number;
 			readonly warm: Fiber.Fiber<boolean>;
 			readonly timer: Fiber.Fiber<void>;
@@ -69,9 +76,11 @@ export const DraftPreWarmLive = Layer.effect(
 			string,
 			{ identity: string; paths: Set<string> }
 		>();
-		const end = (sessionId: string) =>
+		const end = (sessionId: string, call?: ProviderCall) =>
 			(
-				registry.getInstance("claude")?.endSessionEffect(sessionId) ??
+				registry
+					.getInstance("claude")
+					?.endSessionEffect(sessionId, ...(call ? ([call] as const) : [])) ??
 				Effect.void
 			).pipe(
 				Effect.catchCause((cause) =>
@@ -85,7 +94,7 @@ export const DraftPreWarmLive = Layer.effect(
 				reservations.delete(originId);
 				yield* Fiber.interrupt(entry.timer);
 				yield* Fiber.interrupt(entry.warm);
-				yield* end(entry.sessionId);
+				yield* end(entry.sessionId, entry.call);
 			});
 		const refresh = (
 			originId: string,
@@ -93,6 +102,7 @@ export const DraftPreWarmLive = Layer.effect(
 			sessionId: string,
 			launchKey: string,
 			warm: Fiber.Fiber<boolean>,
+			call: ProviderCall | undefined,
 		) =>
 			Effect.gen(function* () {
 				const expiresAt = Date.now() + ttl;
@@ -109,7 +119,7 @@ export const DraftPreWarmLive = Layer.effect(
 										return;
 									reservations.delete(originId);
 									yield* Fiber.interrupt(current.warm);
-									yield* end(sessionId);
+									yield* end(sessionId, call);
 								}).pipe(Effect.uninterruptible),
 							),
 						),
@@ -122,6 +132,7 @@ export const DraftPreWarmLive = Layer.effect(
 					draftId,
 					sessionId,
 					launchKey,
+					call,
 					expiresAt,
 					timer,
 					warm,
@@ -179,6 +190,7 @@ export const DraftPreWarmLive = Layer.effect(
 											current.sessionId,
 											launchKey,
 											current.warm,
+											current.call,
 										);
 										return current.warm;
 									}
@@ -191,6 +203,17 @@ export const DraftPreWarmLive = Layer.effect(
 									if (oldest) yield* discard(...oldest);
 								}
 								const sessionId = createLocalSessionId();
+								const call =
+									input.account && input.projectId && input.shellEnv
+										? {
+												sessionId,
+												account: input.account,
+												projectId: input.projectId,
+												workspaceRoot: input.workspaceRoot,
+												extraFolders: input.extraFolders,
+												shellEnv: input.shellEnv,
+											}
+										: undefined;
 								const warm = yield* Effect.forkIn(
 									Effect.interruptible(
 										instance.preWarmSessionEffect({
@@ -210,7 +233,14 @@ export const DraftPreWarmLive = Layer.effect(
 									scope,
 									{ uninterruptible: "inherit" },
 								);
-								yield* refresh(originId, draftId, sessionId, launchKey, warm);
+								yield* refresh(
+									originId,
+									draftId,
+									sessionId,
+									launchKey,
+									warm,
+									call,
+								);
 								return warm;
 							}),
 						)

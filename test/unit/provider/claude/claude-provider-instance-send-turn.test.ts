@@ -551,6 +551,77 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		);
 	});
 
+	it("launches concurrent sessions with their admitted environment snapshots", async () => {
+		const capturedEnv = vi.fn(() => ({ CALL_MARKER: "constructor" }));
+		queryFactorySpy = vi.fn(() => createMockQuery([makeSuccessResult()]));
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+			shellEnv: capturedEnv,
+			queryFactory: queryFactorySpy,
+		});
+		await Promise.all(
+			["a", "b"].map((id) => {
+				const launch = {
+					sessionId: `snapshot-${id}`,
+					workspaceRoot: join(workspace, id),
+					extraFolders: [join(workspace, `${id}-extra`)],
+					shellEnv: Object.freeze({ CALL_MARKER: id }),
+				};
+				return Effect.runPromise(
+					instance.sendTurnEffect(makeBaseSendTurnInput(launch)),
+				);
+			}),
+		);
+		const launches = queryFactorySpy.mock.calls.map(([call]) => ({
+			cwd: call.options?.cwd,
+			extra: call.options?.additionalDirectories,
+			marker: call.options?.env?.["CALL_MARKER"],
+		}));
+		expect(launches).toEqual(
+			expect.arrayContaining(
+				["a", "b"].map((id) => ({
+					cwd: join(workspace, id),
+					extra: [join(workspace, `${id}-extra`)],
+					marker: id,
+				})),
+			),
+		);
+		expect(capturedEnv).not.toHaveBeenCalled();
+	});
+
+	it("uses a session's changed folder and snapshot on its next launch", async () => {
+		queryFactorySpy = vi.fn(() => createMockQuery([makeSuccessResult()]));
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+			shellEnv: () => ({ CALL_MARKER: "constructor" }),
+			queryFactory: queryFactorySpy,
+		});
+		for (const folder of ["first", "moved"]) {
+			const launch = {
+				sessionId: "moving-session",
+				workspaceRoot: join(workspace, folder),
+				extraFolders: [join(workspace, `${folder}-extra`)],
+				shellEnv: Object.freeze({ CALL_MARKER: folder }),
+			};
+			await Effect.runPromise(
+				instance.sendTurnEffect(makeBaseSendTurnInput(launch)),
+			);
+			await Effect.runPromise(instance.endSessionEffect(launch.sessionId));
+		}
+		expect(queryFactorySpy.mock.calls.map(([call]) => call.options)).toEqual([
+			expect.objectContaining({
+				cwd: join(workspace, "first"),
+				additionalDirectories: [join(workspace, "first-extra")],
+				env: expect.objectContaining({ CALL_MARKER: "first" }),
+			}),
+			expect.objectContaining({
+				cwd: join(workspace, "moved"),
+				additionalDirectories: [join(workspace, "moved-extra")],
+				env: expect.objectContaining({ CALL_MARKER: "moved" }),
+			}),
+		]);
+	});
+
 	it("uses the current session event sink for Claude permission callbacks", async () => {
 		const firstQuery = createMockQuery([
 			makeSuccessResult({ session_id: "sdk-session-1" } as Record<

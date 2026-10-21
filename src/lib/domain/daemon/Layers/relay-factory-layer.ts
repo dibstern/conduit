@@ -489,7 +489,11 @@ export const RelayFactoryLive = (
 							),
 						);
 						const selectedInstance = openCodeInstanceFor(instances);
-						envResolver?.register(project.folders[0], project.shellEnv);
+						envResolver?.register(
+							project.folders[0],
+							project.shellEnv,
+							project.slug,
+						);
 						const relayPushSender = yield* pushManager.getLegacyManager.pipe(
 							Effect.map(Option.getOrUndefined),
 						);
@@ -551,9 +555,10 @@ export const RelayFactoryLive = (
 									projectDir: project.folders[0],
 									extraFolders: project.folders.slice(1),
 									...(envResolver && {
-										shellEnv: (directory: string) => envResolver.get(directory),
+										shellEnv: (directory: string) =>
+											envResolver.get(directory, project.slug),
 										prepareShellEnv: (directory: string) =>
-											envResolver.waitUntilReady(directory),
+											envResolver.waitUntilReady(directory, project.slug),
 									}),
 									slug: project.slug,
 									noServer: true,

@@ -125,6 +125,7 @@ export const discoverCursorEffect = (
 	port?: CursorSdkPort,
 	account?: Account,
 	workspaceRoot?: string,
+	shellEnv?: Readonly<Record<string, string | undefined>>,
 ): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> =>
 	Effect.gen(function* () {
 		const adapter = yield* Effect.try({
@@ -141,7 +142,10 @@ export const discoverCursorEffect = (
 			);
 		const credential = yield* Effect.tryPromise({
 			try: () =>
-				resolveCursorCredential(adapter, { ...process.env, ...account?.env }),
+				resolveCursorCredential(adapter, {
+					...(shellEnv ?? process.env),
+					...account?.env,
+				}),
 			catch: () => discoveryFailure("Cursor credential lookup failed"),
 		});
 		if (!credential)
@@ -228,11 +232,21 @@ export const makeCursorRunnerDriver = (
 	},
 ): RunnerDriverPieces => ({
 	driverKind: "cursor",
-	discoverEffect: (directory, account) =>
-		discoverCursorEffect(port, account, directory ?? workspaceRoot),
+	discoverEffect: (directory, account, _options, call) =>
+		discoverCursorEffect(
+			port,
+			call?.account ?? account,
+			call?.workspaceRoot ?? directory ?? workspaceRoot,
+			call?.shellEnv,
+		),
 	prepareTurnEffect: (input) =>
 		Effect.gen(function* () {
-			const catalog = yield* discoverCursorEffect(port, input.account).pipe(
+			const catalog = yield* discoverCursorEffect(
+				port,
+				input.account,
+				input.workspaceRoot,
+				input.shellEnv,
+			).pipe(
 				Effect.catch((failure) =>
 					// The runner owns the auth error and its durable turn terminal.
 					failure.code === "auth_required"

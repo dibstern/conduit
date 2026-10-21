@@ -600,13 +600,21 @@ export const applyLiveSessionSettings = (sessionId: string) =>
 		const registry = yield* ProviderRegistryTag;
 		const instance = registry.getInstance(driver);
 		if (!instance?.applyLiveSettingsEffect) return;
+		const engine = yield* Effect.serviceOption(OrchestrationEngineTag);
+		const call =
+			engine._tag === "Some"
+				? yield* engine.value.resolveSessionCallContextEffect(sessionId)
+				: undefined;
+		const settings = {
+			modelId: row.model_id,
+			contextWindow: row.context_window ?? "",
+			variant: row.variant ?? "",
+		};
 
 		const result = yield* Effect.result(
-			instance.applyLiveSettingsEffect(sessionId, {
-				modelId: row.model_id,
-				contextWindow: row.context_window ?? "",
-				variant: row.variant ?? "",
-			}),
+			call
+				? instance.applyLiveSettingsEffect(sessionId, settings, call)
+				: instance.applyLiveSettingsEffect(sessionId, settings),
 		);
 		if (result._tag === "Failure") {
 			const log = yield* LoggerTag;

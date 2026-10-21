@@ -54,10 +54,12 @@ import type {
 	SessionOutput,
 	SessionOutputReply,
 	SessionRunner,
+	SessionTurn,
 } from "./session-runner.js";
 
 interface RunnerChild {
 	readonly sessionId: string;
+	launch?: Pick<SessionTurn, "workspaceRoot" | "extraFolders"> | undefined;
 	readonly ready: Deferred.Deferred<RunnerSocket, SessionFailure>;
 	readonly stopped: Deferred.Deferred<void>;
 	readonly drained: Deferred.Deferred<void>;
@@ -653,7 +655,7 @@ export const makeProcessSessionRunner = (
 				...(entry.pid !== undefined ? { pid: entry.pid } : {}),
 				helloTimeoutMs: entry.child ? startupTimeoutMs : 2000,
 				...(entry.candidate ? { preserveRole: true } : {}),
-				deps: { ...deps, daemonConfigDir: configDir },
+				deps: { ...deps, ...entry.launch, daemonConfigDir: configDir },
 				...(receipts ? { receipts } : {}),
 				runFork,
 				onOutputCommitted: (output) => {
@@ -926,7 +928,7 @@ export const makeProcessSessionRunner = (
 									driver.driverKind,
 								],
 								{
-									cwd: deps.workspaceRoot,
+									cwd: entry.launch?.workspaceRoot ?? deps.workspaceRoot,
 									env: { ...process.env, CONDUIT_CONFIG_DIR: configDir },
 									detached: true,
 									stdio: ["ignore", log, log, "ipc"],
@@ -1053,6 +1055,7 @@ export const makeProcessSessionRunner = (
 					Effect.tap((entry) =>
 						Effect.sync(() => {
 							entry.candidate = true;
+							entry.launch = old.launch ?? old.upgrade.state?.snapshot?.input;
 							entry.upgrade.state = old.upgrade.state;
 							candidates.add(entry);
 						}),
@@ -1804,6 +1807,11 @@ export const makeProcessSessionRunner = (
 									};
 								}
 								const created: RunnerChild = yield* createEntry(sessionId);
+								if (command.type === "send-turn" || command.type === "pre-warm")
+									created.launch = {
+										workspaceRoot: command.input.workspaceRoot,
+										extraFolders: command.input.extraFolders,
+									};
 								created.commandsInFlight++;
 								admitted = created;
 								children.set(sessionId, created);
@@ -1869,6 +1877,7 @@ export const makeProcessSessionRunner = (
 					if (
 						command.type === "send-turn" &&
 						entry.draftPreWarm &&
+						command.input.shellEnv === undefined &&
 						deps.prepareShellEnv
 					) {
 						// Project RPC routing can prune a draft worktree's env cache.
@@ -1923,6 +1932,8 @@ export const makeProcessSessionRunner = (
 									shellEnv: (entry.upgrade.state?.frozen
 										? entry.upgrade.state.snapshot?.options.env
 										: undefined) ??
+										command.input.shellEnv ??
+										command.shellEnv ??
 										deps.shellEnv?.(command.input.workspaceRoot) ?? {
 											...process.env,
 										},
@@ -1930,9 +1941,11 @@ export const makeProcessSessionRunner = (
 							: command.type === "pre-warm"
 								? {
 										...command,
-										shellEnv: deps.shellEnv?.(command.input.workspaceRoot) ?? {
-											...process.env,
-										},
+										shellEnv: command.input.shellEnv ??
+											command.shellEnv ??
+											deps.shellEnv?.(command.input.workspaceRoot) ?? {
+												...process.env,
+											},
 									}
 								: command;
 					if (command.type === "send-turn") entry.draftPreWarm = false;

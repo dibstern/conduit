@@ -84,6 +84,7 @@ import type {
 import type {
 	EventSink,
 	PermissionDecision,
+	ProviderCall,
 	ProviderCapabilities,
 	ProviderNativeSession,
 	SendTurnInput,
@@ -630,7 +631,9 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			yield* this.warmedQueries.preWarmEffect(
 				normalizeClaudeLaunchInput(command.input),
 				command.claudeSettingsOverrides,
-				this.deps.shellEnv?.(command.input.workspaceRoot),
+				command.input.shellEnv ??
+					command.shellEnv ??
+					this.deps.shellEnv?.(command.input.workspaceRoot),
 				this.getPermissionBridge(),
 				command.settingsSnapshot !== undefined,
 			);
@@ -877,13 +880,15 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		workspaceRoot?: string,
 		account?: Account,
 		options?: { readonly refresh?: boolean },
+		call?: ProviderCall,
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
 		return this.mapProviderFailure(
 			"discover",
 			Effect.gen({ self: this }, function* () {
+				const selectedAccount = call?.account ?? account;
 				const configDir =
-					account?.driver === "claude"
-						? account.folder
+					selectedAccount?.driver === "claude"
+						? selectedAccount.folder
 						: resolveClaudeLaunchConfig(
 								yield* Effect.suspend(() =>
 									Effect.fromResult(
@@ -892,10 +897,11 @@ class ClaudeRunnerPayload implements RunnerPayload {
 								).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null))),
 							).configDir;
 				return yield* discoverCapabilitiesEffect(
-					workspaceRoot ?? this.deps.workspaceRoot,
+					call?.workspaceRoot ?? workspaceRoot ?? this.deps.workspaceRoot,
 					this.deps.capabilitiesService,
 					configDir,
 					options,
+					call,
 				);
 			}),
 		);
@@ -1096,6 +1102,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					input.contextWindow,
 					input.workspaceRoot,
 					input.agent,
+					input,
 				);
 				const userMessage = yield* Effect.try({
 					try: () => validateUserMessage(this.buildUserMessage(input)),
@@ -1182,7 +1189,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 							abortController,
 							canUseTool,
 							this.turnSettings.get(input.eventSink),
-							this.deps.shellEnv?.(input.workspaceRoot),
+							input.shellEnv ?? this.deps.shellEnv?.(input.workspaceRoot),
 						),
 					catch: (cause) =>
 						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
@@ -1609,6 +1616,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						input.contextWindow,
 						input.workspaceRoot,
 						input.agent,
+						input,
 					);
 					const userMessage = yield* Effect.try({
 						try: () => validateUserMessage(this.buildUserMessage(input)),

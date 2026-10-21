@@ -2,8 +2,13 @@
 
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	AccountIdSchema,
+	type OpenCodeAccount,
+} from "../../../src/lib/contracts/account.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
+import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 
 function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 	return {
@@ -185,6 +190,42 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 
 		expect(client.app.commands).toHaveBeenCalled();
 		expect(client.app.skills).toHaveBeenCalledWith("/my/project");
+	});
+
+	it("discovers through each call's account and directory concurrently", async () => {
+		const routed = [makeStubClient(), makeStubClient()];
+		const accounts: OpenCodeAccount[] = ["a", "b"].map((id) => ({
+			id: AccountIdSchema.make(id),
+			driver: "opencode",
+			name: id,
+			usageEligible: false,
+		}));
+		const clientForAccount = vi.fn((account: OpenCodeAccount) =>
+			Effect.succeed(routed[account.id === "a" ? 0 : 1] ?? client),
+		);
+		const provider: ProviderInstance = new OpenCodeProviderInstance({
+			client,
+			workspaceRoot: "/constructor",
+			clientForAccount,
+		});
+		await Promise.all(
+			accounts.map((account) =>
+				Effect.runPromise(
+					provider.discoverEffect(`/call/${account.id}`, account),
+				),
+			),
+		);
+		expect(clientForAccount).toHaveBeenCalledTimes(2);
+		for (const [index, account] of accounts.entries()) {
+			expect(clientForAccount).toHaveBeenCalledWith(
+				account,
+				`/call/${account.id}`,
+			);
+			expect(routed[index]?.app.skills).toHaveBeenCalledWith(
+				`/call/${account.id}`,
+			);
+		}
+		expect(client.provider.list).not.toHaveBeenCalled();
 	});
 
 	it("omits directory for commands when no workspace", async () => {

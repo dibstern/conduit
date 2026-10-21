@@ -665,9 +665,12 @@ const prepareEngineTurnInput = (
 					AND json_extract(payload_json, '$.account.id') = ${account.id}
 				ORDER BY request_sequence DESC LIMIT 1`;
 			if (turn?.account_json) {
-				turnAccount = yield* Schema.decodeUnknownEffect(
-					Schema.fromJsonString(AccountSchema),
-				)(turn.account_json);
+				turnAccount = {
+					...(yield* Schema.decodeUnknownEffect(
+						Schema.fromJsonString(AccountSchema),
+					)(turn.account_json)),
+					env: account.env,
+				};
 			}
 		}
 		const sendTurnInput: SendTurnInput = {
@@ -689,6 +692,13 @@ const prepareEngineTurnInput = (
 				folders,
 				resolvedInput.agent,
 			),
+			...(yield* (yield* OrchestrationEngineTag).resolveCallContextEffect({
+				sessionId: resolvedInput.sessionId,
+				account: turnAccount,
+				workspaceRoot: folders.workspaceRoot,
+				extraFolders: folders.extraFolders,
+				prepareShellEnv: true,
+			})),
 			...(traits.supportsGoalState && sessionRow
 				? { goalState: sessionGoalState(sessionRow) }
 				: {}),

@@ -44,6 +44,7 @@ import type {
 	EventSink,
 	PermissionDecision,
 	PreWarmSessionInput,
+	ProviderCall,
 	ProviderCapabilities,
 	ProviderInstance,
 	ProviderNativeSession,
@@ -81,6 +82,7 @@ export interface RunnerDriverPieces {
 		workspaceRoot?: string,
 		account?: Account,
 		options?: { readonly refresh?: boolean },
+		call?: ProviderCall,
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure>;
 	prepareTurnEffect(
 		input: SessionTurn,
@@ -300,8 +302,9 @@ export class RunnerProviderInstance implements ProviderInstance {
 		workspaceRoot?: string,
 		account?: Account,
 		options?: { readonly refresh?: boolean },
+		call?: ProviderCall,
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
-		return this.driver.discoverEffect(workspaceRoot, account, options);
+		return this.driver.discoverEffect(workspaceRoot, account, options, call);
 	}
 
 	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
@@ -456,6 +459,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 	interruptTurnEffect(
 		sessionId: string,
 		turnIds?: readonly string[],
+		call?: ProviderCall,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		// A bound Stop must leave a pre-warm for a replacement turn alone.
 		return (
@@ -467,6 +471,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 				this.commandEffect({
 					type: "interrupt",
 					sessionId,
+					...(call ? { call } : {}),
 					...(turnIds !== undefined ? { turnIds } : {}),
 				}),
 			),
@@ -475,19 +480,28 @@ export class RunnerProviderInstance implements ProviderInstance {
 	stopTaskEffect(
 		sessionId: string,
 		taskId: string,
+		call?: ProviderCall,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.driver.stopTask
-			? this.commandEffect({ type: "stop-task", sessionId, taskId })
+			? this.commandEffect({
+					type: "stop-task",
+					sessionId,
+					taskId,
+					...(call ? { call } : {}),
+				})
 			: Effect.void;
 	}
 	resolvePermissionEffect(
 		sessionId: string,
 		requestId: string,
 		decision: PermissionDecision,
+		_providerProcessId?: string,
+		call?: ProviderCall,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.commandEffect({
 			type: "resolve-permission",
 			sessionId,
+			...(call ? { call } : {}),
 			requestId,
 			decision,
 		});
@@ -496,10 +510,12 @@ export class RunnerProviderInstance implements ProviderInstance {
 		sessionId: string,
 		requestId: string,
 		answers: Record<string, unknown>,
+		call?: ProviderCall,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.commandEffect({
 			type: "resolve-question",
 			sessionId,
+			...(call ? { call } : {}),
 			requestId,
 			answers,
 		});
@@ -511,28 +527,39 @@ export class RunnerProviderInstance implements ProviderInstance {
 			readonly contextWindow?: string | undefined;
 			readonly variant?: string | undefined;
 		},
+		call?: ProviderCall,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.commandEffect({
 			type: "apply-live-settings",
 			sessionId,
+			...(call ? { call } : {}),
 			settings,
 		});
 	}
 	setPermissionModeEffect(
 		sessionId: string,
 		mode: SessionPermissionMode,
+		call?: ProviderCall,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.commandEffect({
 			type: "apply-live-settings",
 			sessionId,
+			...(call ? { call } : {}),
 			settings: { permissionMode: mode },
 		});
 	}
 	endSessionEffect(
 		sessionId: string,
+		call?: ProviderCall,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return FiberMap.remove(this.preWarmFibers, sessionId).pipe(
-			Effect.andThen(this.commandEffect({ type: "end-session", sessionId })),
+			Effect.andThen(
+				this.commandEffect({
+					type: "end-session",
+					sessionId,
+					...(call ? { call } : {}),
+				}),
+			),
 		);
 	}
 	shutdownEffect(): Effect.Effect<void, ProviderInstanceFailure> {

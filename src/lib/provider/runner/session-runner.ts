@@ -12,6 +12,7 @@ import type {
 	PermissionRequest,
 	PermissionResponse,
 	PreWarmSessionInput,
+	ProviderCall,
 	ProviderNativeSession,
 	QuestionRequest,
 	SendTurnInput,
@@ -25,7 +26,7 @@ export type SessionTurn = Omit<
 	"eventSink" | "abortSignal" | "awaitIntake" | "reconcileIntake"
 >;
 
-export type SessionCommand =
+export type SessionCommand = (
 	| {
 			readonly type: "pre-warm";
 			readonly sessionId: string;
@@ -105,7 +106,8 @@ export type SessionCommand =
 			readonly sessionId: string;
 			readonly mode: LegacyPermissionMode;
 	  }
-	| { readonly type: "shutdown" };
+	| { readonly type: "shutdown" }
+) & { readonly call?: ProviderCall };
 
 /** Runtime events and the existing EventSink interaction operations, all data. */
 export type SessionOutput =

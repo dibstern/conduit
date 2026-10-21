@@ -464,8 +464,18 @@ export const handlePermissionResponse = (
 			);
 
 			const engine = yield* OrchestrationEngineTag;
+			const call = yield* engine.resolveSessionCallContextEffect(
+				sessionId,
+				undefined,
+				{
+					...(stored?.run_id ? { runId: stored.run_id } : {}),
+					prompt: { id: stored?.id ?? requestId, kind: "permission" },
+				},
+			);
 			const bindingId = yield* engine.getProviderForSessionEffect(sessionId);
-			const traits = getProviderDriver(bindingId) ?? PROVIDER_DRIVERS.opencode;
+			const traits =
+				getProviderDriver(call?.account.driver ?? bindingId) ??
+				PROVIDER_DRIVERS.opencode;
 
 			// The adapter owns the reply: it scopes "always" to the session.
 			const opencode = traits.runsOpenCodeServer
@@ -478,6 +488,7 @@ export const handlePermissionResponse = (
 						stored?.provider_request_id ?? requestId,
 						result.mapped,
 						stored?.provider_process_id ?? undefined,
+						...(call ? ([call] as const) : []),
 					),
 				);
 				if (replied._tag === "Failure" && stored?.provider_process_id) {

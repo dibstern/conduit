@@ -23,7 +23,10 @@ import {
 	publishProjectSetting,
 	refreshHarnessDefaults,
 } from "../domain/relay/Services/project-settings.js";
-import { OpenCodeModelServiceTag } from "../domain/relay/Services/services.js";
+import {
+	OpenCodeModelServiceTag,
+	OrchestrationEngineTag,
+} from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
 	getPermissionMode,
@@ -715,6 +718,20 @@ export const handleSSEEventEffect = (
 				: undefined;
 			let autoApproved = false;
 			if (input?.sessionId && opencodeModeCoversAsk(mode, input.toolName)) {
+				const engine = yield* Effect.serviceOption(OrchestrationEngineTag);
+				const call =
+					engine._tag === "Some" && adapter
+						? yield* engine.value.resolveSessionCallContextEffect(
+								input.sessionId,
+								undefined,
+								{
+									prompt: {
+										id: prompt?.id ?? input.requestId,
+										kind: "permission",
+									},
+								},
+							)
+						: undefined;
 				const response: Effect.Effect<void, unknown> | undefined =
 					providerProcessId
 						? adapter?.resolvePermissionEffect(
@@ -722,6 +739,7 @@ export const handleSSEEventEffect = (
 								input.requestId,
 								"once",
 								providerProcessId,
+								...(call ? ([call] as const) : []),
 							)
 						: reply?.(input.sessionId, input.requestId, "once");
 				const replied = response ? yield* Effect.result(response) : undefined;

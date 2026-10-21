@@ -6,7 +6,13 @@ import {
 	type ClaudeAdapterError,
 	ClaudeRuntimeError,
 } from "../event-sink-errors.js";
-import type { CommandInfo, ModelInfo, ProviderCapabilities } from "../types.js";
+import type {
+	CommandInfo,
+	ModelInfo,
+	PreWarmSessionInput,
+	ProviderCall,
+	ProviderCapabilities,
+} from "../types.js";
 import {
 	contextWindowOptionsForModel,
 	expectedClaudeReportedModelId,
@@ -138,6 +144,7 @@ export function discoverCapabilitiesEffect(
 	capabilitiesService: ClaudeCapabilitiesService | undefined,
 	folder: ClaudeConfigDir,
 	options?: { readonly refresh?: boolean },
+	call?: ProviderCall,
 ): Effect.Effect<ProviderCapabilities> {
 	return Effect.gen(function* () {
 		const userBase = folder.path;
@@ -159,6 +166,7 @@ export function discoverCapabilitiesEffect(
 			capabilitiesService,
 			workspaceRoot,
 			options,
+			call,
 		).pipe(
 			Effect.catch((err) =>
 				Effect.sync(() => {
@@ -198,11 +206,14 @@ function getCapabilitiesProbeEffect(
 	service: ClaudeCapabilitiesService | undefined,
 	workspaceRoot: string,
 	options?: { readonly refresh?: boolean },
+	call?: ProviderCall,
 ): Effect.Effect<ProbeResult, ClaudeAdapterError> {
 	return service
-		? options?.refresh
-			? service.get(workspaceRoot, { refresh: true })
-			: service.get(workspaceRoot)
+		? call
+			? service.get(workspaceRoot, { ...options, call })
+			: options?.refresh
+				? service.get(workspaceRoot, { refresh: true })
+				: service.get(workspaceRoot)
 		: Effect.fail(
 				new ClaudeRuntimeError({
 					message: "Claude capabilities service unavailable",
@@ -227,10 +238,23 @@ export function expectedApiModelIdEffect(
 	contextWindow: string | undefined,
 	workspaceRoot: string,
 	agent: string | undefined,
+	input?: PreWarmSessionInput,
 ): Effect.Effect<string | undefined> {
 	if (agent !== undefined) return Effect.succeed(undefined);
 	if (!capabilitiesService) return Effect.succeed(undefined);
-	return capabilitiesService.get(workspaceRoot).pipe(
+	const call =
+		input?.projectId !== undefined && input.account && input.shellEnv
+			? {
+					...input,
+					projectId: input.projectId,
+					account: input.account,
+					shellEnv: input.shellEnv,
+				}
+			: undefined;
+	const probe = call
+		? capabilitiesService.get(workspaceRoot, { call })
+		: capabilitiesService.get(workspaceRoot);
+	return probe.pipe(
 		Effect.map((probe) =>
 			expectedClaudeReportedModelId(
 				requestedModelId,

@@ -862,70 +862,67 @@ describe("ProviderSideEffectReactor", () => {
 		}).pipe(Effect.provide(reactorTestLayer)),
 	);
 
-	// Replay must retain the admitted account snapshot when its old binding no
-	// longer resolves, and preparation/receipts must use the resolved account id.
-	it.effect(
-		"replays the carried account without resolving its historical binding",
-		() =>
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				const account = {
-					id: AccountIdSchema.make("current-account"),
-					name: "Current account",
-					driver: "claude" as const,
-					folder: configuredClaudeConfigDir("/tmp/test-claude-account"),
-					usageEligible: true,
-				};
-				yield* seedSendTurnOutbox(sql, {
-					providerId: "removed-account",
-					payloadJson: JSON.stringify({
-						sessionId: "session-1",
-						inputId: "turn-1",
-						prompt: "hello",
-						providerState: {},
-						workspaceRoot: "/tmp/test-project",
-						extraFolders: [],
-						account,
-						instanceId: account.id,
-						configDir: account.folder,
-						folderSource: "account",
-					}),
-				});
-				const sendTurn = vi.fn((_input: SendTurnInput) =>
-					Effect.succeed(completedTurn),
-				);
-				const accountDirectory = makeAccountDirectory(
-					Effect.succeed(
-						accountsStateFromInstances(
-							[],
-							configuredClaudeConfigDir("/tmp/g4zp-test-default"),
-						),
+	it.effect("refuses the carried account when it is no longer registered", () =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const account = {
+				id: AccountIdSchema.make("current-account"),
+				name: "Current account",
+				driver: "claude" as const,
+				folder: configuredClaudeConfigDir("/tmp/test-claude-account"),
+				usageEligible: true,
+			};
+			yield* seedSendTurnOutbox(sql, {
+				providerId: "removed-account",
+				payloadJson: JSON.stringify({
+					sessionId: "session-1",
+					inputId: "turn-1",
+					prompt: "hello",
+					providerState: {},
+					workspaceRoot: "/tmp/test-project",
+					extraFolders: [],
+					account,
+					instanceId: account.id,
+					configDir: account.folder,
+					folderSource: "account",
+				}),
+			});
+			const sendTurn = vi.fn((_input: SendTurnInput) =>
+				Effect.succeed(completedTurn),
+			);
+			const accountDirectory = makeAccountDirectory(
+				Effect.succeed(
+					accountsStateFromInstances(
+						[],
+						configuredClaudeConfigDir("/tmp/g4zp-test-default"),
 					),
-				);
-				const resolveAccount = vi.spyOn(accountDirectory, "resolve");
-				const reactor = yield* makeReactor({
-					registry: new ProviderRegistry([makeProvider(sendTurn)]),
-					accountDirectory,
-				});
+				),
+			);
+			const resolveAccount = vi.spyOn(accountDirectory, "resolve");
+			const reactor = yield* makeReactor({
+				registry: new ProviderRegistry([makeProvider(sendTurn)]),
+				accountDirectory,
+			});
 
-				yield* reactor.drain();
+			yield* reactor.drain();
 
-				expect(sendTurn).toHaveBeenCalledExactlyOnceWith(
-					expect.objectContaining({
-						account,
-						instanceId: account.id,
-						configDir: account.folder,
-						folderSource: "account",
-					}),
-				);
-				expect(resolveAccount).not.toHaveBeenCalled();
-				expect(
-					(yield* sql<{
-						provider_id: string;
-					}>`SELECT provider_id FROM provider_command_outbox WHERE command_id = 'cmd-1'`)[0]
-						?.provider_id,
-				).toBe("removed-account");
-			}).pipe(Effect.provide(reactorTestLayer)),
+			expect(sendTurn).not.toHaveBeenCalled();
+			expect(yield* readOutboxRetryState(sql, 10)).toMatchObject({
+				status: "failed",
+				attempt_count: 1,
+				next_attempt_at: null,
+			});
+			expect(resolveAccount).toHaveBeenCalledExactlyOnceWith({
+				_tag: "Id",
+				id: account.id,
+			});
+			expect(
+				(yield* sql<{
+					provider_id: string;
+				}>`SELECT provider_id FROM provider_command_outbox WHERE command_id = 'cmd-1'`)[0]
+					?.provider_id,
+			).toBe("removed-account");
+		}).pipe(Effect.provide(reactorTestLayer)),
 	);
 
 	it.effect("executes committed side effects once after commit", () =>

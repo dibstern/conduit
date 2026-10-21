@@ -6,11 +6,11 @@ import type { ClaudeLaunchConfig } from "./claude/claude-sdk-env.js";
 // Routes commands to the correct provider instance via ProviderRegistry.
 // Manages session-to-provider mapping.
 
-import { Data, Deferred, Effect } from "effect";
+import { Data, Deferred, Effect, Option, Schema } from "effect";
 import type { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 
-import type { Account } from "../contracts/account.js";
+import { type Account, AccountSchema } from "../contracts/account.js";
 import type { SessionScope } from "../contracts/session-scope.js";
 import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
@@ -58,6 +58,7 @@ import {
 } from "./provider-session-binding-read-model.js";
 import type {
 	PermissionDecision,
+	ProviderCall,
 	ProviderCapabilities,
 	ProviderInstance,
 	SendTurnInput,
@@ -116,6 +117,7 @@ export interface DiscoverCommand {
 	readonly commandId?: string;
 	readonly providerId: string;
 	readonly account?: Account;
+	readonly sessionId?: string;
 	readonly workspaceRoot?: string;
 	readonly refresh?: boolean;
 }
@@ -175,11 +177,24 @@ export interface DurableCommandStoreOptions {
 	readonly claudeSessionForkSdk?: ClaudeSessionForkSdk;
 }
 
+export interface ProviderCallRequest {
+	/** Empty for discovery before a draft has a reserved session. */
+	readonly sessionId: string;
+	readonly account?: Account;
+	readonly providerId?: string;
+	readonly workspaceRoot?: string;
+	readonly extraFolders?: readonly string[];
+	readonly prepareShellEnv?: boolean;
+}
+
 export interface OrchestrationEngineOptions {
 	readonly registry: ProviderRegistry;
 	readonly defaultClaudeLaunchConfig?: () => ClaudeLaunchConfig;
 	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
 	readonly durableCommands?: DurableCommandStoreOptions;
+	readonly resolveCallContext?: (
+		request: ProviderCallRequest,
+	) => Effect.Effect<ProviderCall, ProviderInstanceFailure>;
 	readonly accountDirectory?: Pick<
 		AccountDirectory["Service"],
 		"resolve" | "defaultFor"
@@ -226,14 +241,30 @@ const ORPHANED_TURN_RESULT: TurnResult = {
 	},
 };
 
+const admittedCallSchema = Schema.Struct({
+	projectId: Schema.String,
+	sessionId: Schema.String,
+	account: AccountSchema,
+	workspaceRoot: Schema.String,
+	extraFolders: Schema.Array(Schema.String),
+});
+
 export class OrchestrationEngine {
 	private readonly registry: ProviderRegistry;
 	private readonly sessionBindingReadModel: ProviderSessionBindingReadModel;
 	private readonly accountDirectory: OrchestrationEngineOptions["accountDirectory"];
+	private readonly resolveCallContext: OrchestrationEngineOptions["resolveCallContext"];
 	private readonly durable?: DurableCommandRuntime;
 	private readonly inFlightCommands = new Map<
 		string,
 		Deferred.Deferred<OrchestrationResult, OrchestrationError>
+	>();
+	private readonly preWarmPreparations = new Map<
+		string,
+		{
+			readonly cancelled: Deferred.Deferred<void>;
+			waiters: number;
+		}
 	>();
 
 	constructor(options: OrchestrationEngineOptions) {
@@ -242,6 +273,7 @@ export class OrchestrationEngine {
 			options.sessionBindingReadModel ??
 			new InMemoryProviderSessionBindingReadModel();
 		this.accountDirectory = options.accountDirectory;
+		this.resolveCallContext = options.resolveCallContext;
 		if (options.durableCommands) {
 			const durable = options.durableCommands;
 			this.durable = {
@@ -273,6 +305,15 @@ export class OrchestrationEngine {
 					...(this.accountDirectory
 						? { accountDirectory: this.accountDirectory }
 						: {}),
+					resolveSessionCallContext: (sessionId, runId) =>
+						this.resolveSessionCallContextEffect(
+							sessionId,
+							undefined,
+							runId ? { runId } : {},
+						),
+					...(this.resolveCallContext
+						? { resolveCallContext: this.resolveCallContext }
+						: {}),
 				}),
 				sql: durable.sql,
 				ingestion: durable.ingestion,
@@ -282,6 +323,148 @@ export class OrchestrationEngine {
 				write: durable.write,
 			};
 		}
+	}
+
+	/** Compatibility runtimes omit the resolver until their composition is migrated. */
+	resolveCallContextEffect(request: ProviderCallRequest) {
+		return this.resolveCallContext?.(request) ?? Effect.succeed(undefined);
+	}
+
+	/** Cancellation owns preparation too, before a call reaches the adapter. */
+	preparePreWarmSessionEffect<A, E, R>(
+		sessionId: string,
+		preparation: Effect.Effect<A, E, R>,
+	) {
+		return Effect.gen({ self: this }, function* () {
+			const entry = this.preWarmPreparations.get(sessionId) ?? {
+				cancelled: yield* Deferred.make<void>(),
+				waiters: 0,
+			};
+			entry.waiters++;
+			this.preWarmPreparations.set(sessionId, entry);
+			return yield* Effect.raceFirst(
+				preparation,
+				Deferred.await(entry.cancelled).pipe(
+					Effect.andThen(
+						Effect.fail(
+							new ProviderInstanceFailure({
+								providerId: "claude",
+								operation: "preWarmSession",
+								cause: new Error("Session pre-warm was cancelled"),
+							}),
+						),
+					),
+				),
+			).pipe(
+				Effect.ensuring(
+					Effect.sync(() => {
+						if (
+							--entry.waiters === 0 &&
+							this.preWarmPreparations.get(sessionId) === entry
+						)
+							this.preWarmPreparations.delete(sessionId);
+					}),
+				),
+			);
+		});
+	}
+
+	private cancelPreWarmPreparationEffect(sessionId: string) {
+		return Effect.gen({ self: this }, function* () {
+			const entry = this.preWarmPreparations.get(sessionId);
+			if (!entry) return;
+			this.preWarmPreparations.delete(sessionId);
+			yield* Deferred.succeed(entry.cancelled, undefined);
+		});
+	}
+
+	/** Controls retain admitted account/folders and resolve the current environment. */
+	resolveSessionCallContextEffect(
+		sessionId: string,
+		account?: Account,
+		target?: {
+			readonly runId?: string;
+			readonly turnIds?: readonly string[];
+			readonly prompt?: {
+				readonly id: string;
+				readonly kind: "permission" | "question";
+			};
+		},
+	) {
+		return Effect.gen({ self: this }, function* () {
+			if (!this.resolveCallContext) return undefined;
+			if (this.durable) {
+				const sql = this.durable.sql;
+				let targetRuns = sql`SELECT NULL`;
+				if (target?.runId) {
+					targetRuns = sql`SELECT COALESCE(joined_into, id) FROM provider_runs
+						WHERE id = ${target.runId} AND session_id = ${sessionId}`;
+				} else if (target?.turnIds?.length) {
+					targetRuns = sql`SELECT COALESCE(requested.joined_into, requested.id)
+						FROM provider_command_outbox command JOIN provider_runs requested ON requested.id = command.run_id
+						WHERE command.project_key = ${this.durable.projectId} AND command.session_id = ${sessionId}
+							AND command.effect_type = 'send_turn' AND (
+								json_extract(command.payload_json, '$.inputId') IN ${sql.in(target.turnIds)}
+								OR command.command_id IN ${sql.in(target.turnIds)}
+								OR (requested.status = 'running' AND json_extract(command.payload_json, '$.continuation.cutOffMessageId') IN ${sql.in(target.turnIds)}))
+						UNION SELECT turn.run_id FROM turns turn LEFT JOIN messages message ON message.id = turn.user_message_id
+						WHERE turn.session_id = ${sessionId} AND (turn.id IN ${sql.in(target.turnIds)}
+							OR turn.user_message_id IN ${sql.in(target.turnIds)} OR message.input_id IN ${sql.in(target.turnIds)})`;
+				} else if (target?.prompt) {
+					targetRuns = sql`SELECT COALESCE(json_extract(event.metadata, '$.runId'), turn.run_id)
+						FROM events event LEFT JOIN pending_approvals prompt ON prompt.id = json_extract(event.data, '$.id') AND prompt.session_id = event.session_id
+						LEFT JOIN turns turn ON turn.id = prompt.turn_id AND turn.session_id = event.session_id
+						WHERE event.session_id = ${sessionId} AND event.type = ${`${target.prompt.kind}.asked`}
+							AND (json_extract(event.data, '$.id') = ${target.prompt.id} OR prompt.provider_request_id = ${target.prompt.id})`;
+				}
+				const activeRows = yield* sql<{ payload_json: string }>`
+					SELECT o.payload_json FROM provider_command_outbox o
+					JOIN provider_runs r ON r.id = o.run_id
+					WHERE o.project_key = ${this.durable.projectId}
+						AND o.session_id = ${sessionId} AND r.session_id = ${sessionId} AND o.effect_type = 'send_turn'
+						AND ${target ? sql`r.id IN (${targetRuns})` : sql`r.status IN ('pending', 'running')`}
+					ORDER BY CASE WHEN r.status = 'running' THEN 0 ELSE 1 END, o.request_sequence DESC
+					LIMIT ${target ? 2 : 1}`.pipe(
+					Effect.mapError(
+						(cause) =>
+							new ProviderInstanceFailure({
+								providerId: account?.driver ?? "unknown",
+								operation: "resolveCallContext",
+								cause,
+							}),
+					),
+				);
+				const active = activeRows.length === 1 ? activeRows[0] : undefined;
+				const admitted = active
+					? Schema.decodeUnknownOption(
+							Schema.fromJsonString(admittedCallSchema),
+						)(active.payload_json)
+					: Option.none();
+				if (
+					Option.isSome(admitted) &&
+					(!account || admitted.value.account.id === account.id)
+				) {
+					const currentAccount = this.accountDirectory
+						? yield* this.accountDirectory
+								.resolve({ _tag: "Id", id: admitted.value.account.id })
+								.pipe(
+									Effect.catchTag("AccountUnroutable", () =>
+										Effect.succeed(undefined),
+									),
+								)
+						: undefined;
+					return yield* this.resolveCallContext({
+						...admitted.value,
+						account: { ...admitted.value.account, env: currentAccount?.env },
+					});
+				}
+			}
+			if (target) return undefined;
+			return yield* this.resolveCallContext({
+				sessionId,
+				...(account ? { account } : {}),
+			});
+		});
 	}
 
 	dispatchEffect(
@@ -561,6 +744,7 @@ export class OrchestrationEngine {
 					command.commandId,
 					command.input.eventSink,
 					command.input.abortSignal,
+					command.input,
 				)
 				.pipe(
 					Effect.mapError((cause) =>
@@ -604,12 +788,15 @@ export class OrchestrationEngine {
 				eventSink: _eventSink,
 				abortSignal: _abortSignal,
 				history: _history,
+				shellEnv: _shellEnv,
+				account,
 				...payload
 			} = command.input;
 			const payloadJson = yield* Effect.try({
 				try: () =>
 					JSON.stringify({
 						...payload,
+						...(account ? { account: { ...account, env: undefined } } : {}),
 						...(getProviderDriver(driver)?.supportsNativeResume && pendingRewind
 							? { rewind: pendingRewind.rewind }
 							: {}),
@@ -704,19 +891,37 @@ export class OrchestrationEngine {
 		command: InterruptTurnCommand,
 	): Effect.Effect<void, OrchestrationError> {
 		return Effect.gen({ self: this }, function* () {
+			if (command.turnIds === undefined)
+				yield* this.cancelPreWarmPreparationEffect(command.sessionId);
 			const providerId = yield* this.requireProviderForSessionEffect(
 				command.sessionId,
 			);
-			const instance = yield* this.getProviderInstanceEffect(providerId);
+			const call = yield* this.resolveSessionCallContextEffect(
+				command.sessionId,
+				undefined,
+				command.turnIds === undefined
+					? undefined
+					: { turnIds: command.turnIds },
+			);
+			const instance = yield* this.getProviderInstanceEffect(
+				providerId,
+				call?.account,
+			);
 
 			yield* Effect.sync(() =>
 				log.info(`Dispatching interruptTurn: session=${command.sessionId}`),
 			);
 
 			return yield* (
-				command.turnIds === undefined
-					? instance.interruptTurnEffect(command.sessionId)
-					: instance.interruptTurnEffect(command.sessionId, command.turnIds)
+				call
+					? instance.interruptTurnEffect(
+							command.sessionId,
+							command.turnIds,
+							call,
+						)
+					: command.turnIds === undefined
+						? instance.interruptTurnEffect(command.sessionId)
+						: instance.interruptTurnEffect(command.sessionId, command.turnIds)
 			).pipe(
 				Effect.tapError((error) =>
 					Effect.sync(() =>
@@ -736,23 +941,38 @@ export class OrchestrationEngine {
 			const providerId = yield* this.requireProviderForSessionEffect(
 				command.sessionId,
 			);
-			const instance = yield* this.getProviderInstanceEffect(providerId);
+			const call = yield* this.resolveSessionCallContextEffect(
+				command.sessionId,
+				undefined,
+				{ prompt: { id: command.requestId, kind: "permission" } },
+			);
+			const instance = yield* this.getProviderInstanceEffect(
+				providerId,
+				call?.account,
+			);
 
-			return yield* instance
-				.resolvePermissionEffect(
-					command.sessionId,
-					command.requestId,
-					command.decision,
-				)
-				.pipe(
-					Effect.tapError((error) =>
-						Effect.sync(() =>
-							log.error(
-								`resolvePermission failed: session=${command.sessionId} request=${command.requestId} provider=${providerId}: ${error.message}`,
-							),
+			const resolution = call
+				? instance.resolvePermissionEffect(
+						command.sessionId,
+						command.requestId,
+						command.decision,
+						undefined,
+						call,
+					)
+				: instance.resolvePermissionEffect(
+						command.sessionId,
+						command.requestId,
+						command.decision,
+					);
+			return yield* resolution.pipe(
+				Effect.tapError((error) =>
+					Effect.sync(() =>
+						log.error(
+							`resolvePermission failed: session=${command.sessionId} request=${command.requestId} provider=${providerId}: ${error.message}`,
 						),
 					),
-				);
+				),
+			);
 		});
 	}
 
@@ -763,13 +983,22 @@ export class OrchestrationEngine {
 			const providerId = yield* this.requireProviderForSessionEffect(
 				command.sessionId,
 			);
-			const instance = yield* this.getProviderInstanceEffect(providerId);
+			const call = yield* this.resolveSessionCallContextEffect(
+				command.sessionId,
+				undefined,
+				{ prompt: { id: command.requestId, kind: "question" } },
+			);
+			const instance = yield* this.getProviderInstanceEffect(
+				providerId,
+				call?.account,
+			);
 
 			return yield* instance
 				.resolveQuestionEffect(
 					command.sessionId,
 					command.requestId,
 					command.answers,
+					...(call ? ([call] as const) : []),
 				)
 				.pipe(
 					Effect.tapError((error) =>
@@ -787,15 +1016,31 @@ export class OrchestrationEngine {
 		command: DiscoverCommand,
 	): Effect.Effect<ProviderCapabilities, OrchestrationError> {
 		return Effect.gen({ self: this }, function* () {
+			const call = yield* this.resolveCallContextEffect({
+				sessionId: command.sessionId ?? "",
+				providerId: command.providerId,
+				...(command.account ? { account: command.account } : {}),
+				...(command.workspaceRoot
+					? { workspaceRoot: command.workspaceRoot }
+					: {}),
+				prepareShellEnv: true,
+			});
 			const instance = yield* this.getProviderInstanceEffect(
 				command.providerId,
-				command.account,
+				call?.account ?? command.account,
 			);
-			const discovery = command.refresh
-				? instance.discoverEffect(command.workspaceRoot, command.account, {
-						refresh: true,
-					})
-				: instance.discoverEffect(command.workspaceRoot, command.account);
+			const discovery = call
+				? instance.discoverEffect(
+						call.workspaceRoot,
+						call.account,
+						command.refresh ? { refresh: true } : undefined,
+						call,
+					)
+				: command.refresh
+					? instance.discoverEffect(command.workspaceRoot, command.account, {
+							refresh: true,
+						})
+					: instance.discoverEffect(command.workspaceRoot, command.account);
 			return yield* discovery.pipe(
 				Effect.tapError((error) =>
 					Effect.sync(() =>
@@ -812,6 +1057,7 @@ export class OrchestrationEngine {
 		command: EndSessionCommand,
 	): Effect.Effect<void, OrchestrationError> {
 		return Effect.gen({ self: this }, function* () {
+			yield* this.cancelPreWarmPreparationEffect(command.sessionId);
 			const targetBindingRevision =
 				yield* this.sessionBindingReadModel.getBindingRevision(
 					command.sessionId,
@@ -830,9 +1076,18 @@ export class OrchestrationEngine {
 				return;
 			}
 			const endSession = Effect.gen({ self: this }, function* () {
+				const call = yield* command.targetProviderId && !command.account
+					? this.resolveCallContextEffect({
+							sessionId: command.sessionId,
+							providerId: command.targetProviderId,
+						})
+					: this.resolveSessionCallContextEffect(
+							command.sessionId,
+							command.account,
+						);
 				const instance = yield* this.getProviderInstanceEffect(
 					providerId,
-					command.account,
+					call?.account ?? command.account,
 				);
 				yield* Effect.sync(() =>
 					log.info(
@@ -840,7 +1095,10 @@ export class OrchestrationEngine {
 					),
 				);
 				return yield* instance
-					.endSessionEffect(command.sessionId)
+					.endSessionEffect(
+						command.sessionId,
+						...(call ? ([call] as const) : []),
+					)
 					.pipe(
 						Effect.tapError((error) =>
 							Effect.sync(() =>
@@ -908,6 +1166,9 @@ export class OrchestrationEngine {
 	shutdownEffect(): Effect.Effect<void> {
 		return Effect.gen({ self: this }, function* () {
 			yield* Effect.sync(() => log.info("OrchestrationEngine shutting down"));
+			yield* Effect.forEach([...this.preWarmPreparations.keys()], (sessionId) =>
+				this.cancelPreWarmPreparationEffect(sessionId),
+			);
 			yield* this.registry.shutdownAllEffect();
 			yield* Effect.sync(() => {
 				this.sessionBindingReadModel.clearTransientBindings();

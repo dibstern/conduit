@@ -100,7 +100,10 @@ export interface ProbeResult {
 
 export interface ProbeDeps {
 	readonly workspaceRoot: string;
+	readonly extraFolders?: readonly string[];
 	readonly configDir: ClaudeConfigDir;
+	readonly baseEnv?: Readonly<Record<string, string | undefined>>;
+	readonly accountEnv?: Readonly<Record<string, string>>;
 	readonly queryFactory?: (params: {
 		prompt: string | AsyncIterable<SDKUserMessage>;
 		options?: SDKOptions;
@@ -241,6 +244,9 @@ export async function probeClaudeCapabilities(
 			persistSession: false,
 			maxTurns: 0,
 			cwd: deps.workspaceRoot,
+			...(deps.extraFolders && deps.extraFolders.length > 0
+				? { additionalDirectories: [...deps.extraFolders] }
+				: {}),
 			env: makeClaudeSdkEnv(deps),
 			settingSources: ["user", "project", "local"],
 			abortController,

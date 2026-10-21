@@ -7,7 +7,7 @@ import {
 } from "../../daemon/config-persistence.js";
 import { ProviderInstanceFailure } from "../errors.js";
 import type { RunnerDriverPieces } from "../runner/runner-provider-instance.js";
-import type { ProviderCapabilities } from "../types.js";
+import type { ProviderCall, ProviderCapabilities } from "../types.js";
 import type { ClaudeProviderInstanceDeps } from "./claude-provider-runtime.js";
 import { discoverCapabilitiesEffect } from "./claude-runtime-discovery.js";
 
@@ -18,21 +18,24 @@ export const makeClaudeRunnerDriver = (
 		workspaceRoot?: string,
 		account?: Account,
 		options?: { readonly refresh?: boolean },
+		call?: ProviderCall,
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> => {
 		return Effect.gen(function* () {
+			const selectedAccount = call?.account ?? account;
 			const configDir =
-				account?.driver === "claude"
-					? account.folder
+				selectedAccount?.driver === "claude"
+					? selectedAccount.folder
 					: resolveClaudeLaunchConfig(
 							yield* Effect.suspend(() =>
 								Effect.fromResult(loadDaemonConfigResult(deps.daemonConfigDir)),
 							).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null))),
 						).configDir;
 			return yield* discoverCapabilitiesEffect(
-				workspaceRoot ?? deps.workspaceRoot,
+				call?.workspaceRoot ?? workspaceRoot ?? deps.workspaceRoot,
 				deps.capabilitiesService,
 				configDir,
 				options,
+				call,
 			);
 		}).pipe(
 			Effect.mapError(
@@ -123,9 +126,18 @@ export const makeClaudeRunnerDriver = (
 					);
 				let model = input.model;
 				if (!model) {
+					const call =
+						input.projectId !== undefined && account && input.shellEnv
+							? {
+									...input,
+									projectId: input.projectId,
+									account,
+									shellEnv: input.shellEnv,
+								}
+							: undefined;
 					// Discovery is shared with sends; cancellation only stops this waiter.
 					const discovery = yield* Effect.forkIn(
-						discoverEffect(input.workspaceRoot, account),
+						discoverEffect(input.workspaceRoot, account, undefined, call),
 						scope,
 					);
 					const { models } = yield* Fiber.join(discovery);
@@ -134,7 +146,9 @@ export const makeClaudeRunnerDriver = (
 					if (!inferred) return;
 					model = { providerId: inferred.providerId, modelId: inferred.id };
 				}
-				const prepareShellEnv = deps.prepareShellEnv;
+				const prepareShellEnv = input.shellEnv
+					? undefined
+					: deps.prepareShellEnv;
 				if (prepareShellEnv) {
 					// Keep capture owned by the resolver when this request times out.
 					const ready = yield* Effect.tryPromise({

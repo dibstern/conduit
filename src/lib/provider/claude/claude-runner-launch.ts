@@ -456,7 +456,7 @@ export const makeClaudeRunnerLaunch = (
 				}),
 			acceptCommand: (command) => {
 				if (command.type === "send-turn" || command.type === "pre-warm")
-					shellEnv = command.shellEnv ?? process.env;
+					shellEnv = command.input.shellEnv ?? command.shellEnv ?? process.env;
 				if (command.type === "send-turn" || command.type === "pre-warm") {
 					if (command.type === "pre-warm" && command.settingsSnapshot)
 						frozenSnapshot = command.settingsSnapshot;
@@ -479,6 +479,11 @@ export const makeClaudeRunnerLaunch = (
 					}
 					launchInput = {
 						sessionId: input.sessionId,
+						...(input.projectId !== undefined
+							? { projectId: input.projectId }
+							: {}),
+						...(input.account ? { account: input.account } : {}),
+						...(input.shellEnv ? { shellEnv: input.shellEnv } : {}),
 						workspaceRoot: input.workspaceRoot,
 						extraFolders: input.extraFolders ?? [],
 						providerState: input.providerState,

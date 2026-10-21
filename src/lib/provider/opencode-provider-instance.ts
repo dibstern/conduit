@@ -29,6 +29,7 @@ import type {
 	CommandInfo,
 	ModelInfo,
 	PermissionDecision,
+	ProviderCall,
 	ProviderCapabilities,
 	ProviderDriver,
 	ProviderInstance,
@@ -173,21 +174,38 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		});
 	}
 
-	discoverEffect(): Effect.Effect<
-		ProviderCapabilities,
-		ProviderInstanceFailure
-	> {
-		return Effect.tryPromise({
-			try: () => this.discoverCapabilities(),
-			catch: (cause) => this.providerFailure("discover", cause),
-		});
+	discoverEffect(
+		workspaceRoot?: string,
+		account?: Account,
+		_options?: { readonly refresh?: boolean },
+		call?: ProviderCall,
+	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
+		const directory =
+			call?.workspaceRoot ?? workspaceRoot ?? this.workspaceRoot;
+		const selected = call?.account ?? account;
+		const client = selected
+			? this.resolveClientEffect(call?.sessionId ?? "", selected, directory)
+			: Effect.succeed(this.client);
+		return client.pipe(
+			Effect.flatMap((client) =>
+				Effect.tryPromise({
+					try: () => this.discoverCapabilities(client, directory),
+					catch: (cause) => cause,
+				}),
+			),
+			Effect.mapError((cause) => this.providerFailure("discover", cause)),
+			Effect.scoped,
+		);
 	}
 
-	private async discoverCapabilities(): Promise<ProviderCapabilities> {
+	private async discoverCapabilities(
+		client: OpenCodeAPI,
+		directory?: string,
+	): Promise<ProviderCapabilities> {
 		const [providerResult, commandsRaw, skillsRaw] = await Promise.all([
-			this.client.provider.list(),
-			this.client.app.commands(),
-			this.client.app.skills(this.workspaceRoot),
+			client.provider.list(),
+			client.app.commands(),
+			client.app.skills(directory),
 		]);
 
 		const models: ModelInfo[] = providerResult.providers.flatMap((provider) =>
@@ -491,8 +509,14 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 	interruptTurnEffect(
 		sessionId: string,
+		_turnIds?: readonly string[],
+		call?: ProviderCall,
 	): Effect.Effect<void, ProviderInstanceFailure> {
-		return this.resolveClientEffect(sessionId).pipe(
+		return this.resolveClientEffect(
+			sessionId,
+			call?.account,
+			call?.workspaceRoot,
+		).pipe(
 			Effect.flatMap((client) =>
 				Effect.tryPromise({
 					try: () => client.session.abort(sessionId),
@@ -509,8 +533,13 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	setPermissionModeEffect(
 		sessionId: string,
 		mode: SessionPermissionMode,
+		call?: ProviderCall,
 	): Effect.Effect<void, ProviderInstanceFailure> {
-		return this.resolveClientEffect(sessionId).pipe(
+		return this.resolveClientEffect(
+			sessionId,
+			call?.account,
+			call?.workspaceRoot,
+		).pipe(
 			Effect.flatMap((client) =>
 				Effect.tryPromise({
 					try: () =>
@@ -533,8 +562,13 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		requestId: string,
 		decision: PermissionDecision,
 		providerProcessId?: string,
+		call?: ProviderCall,
 	): Effect.Effect<void, ProviderInstanceFailure> {
-		return this.resolveClientEffect(sessionId).pipe(
+		return this.resolveClientEffect(
+			sessionId,
+			call?.account,
+			call?.workspaceRoot,
+		).pipe(
 			Effect.flatMap((client) =>
 				providerProcessId && client.promptProcessId !== providerProcessId
 					? Effect.fail(
@@ -547,7 +581,8 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 									const session = await client.session.get(sessionId);
 									const request = (
 										await client.permission.list(
-											session.directory || this.workspaceRoot,
+											call?.workspaceRoot ??
+												(session.directory || this.workspaceRoot),
 										)
 									).find((pending) => pending.id === requestId);
 									if (request?.always?.length) {
@@ -581,11 +616,16 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		sessionId: string,
 		requestId: string,
 		answers: Record<string, unknown>,
+		call?: ProviderCall,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		const answerArrays = Object.values(answers).map((v) =>
 			Array.isArray(v) ? v.map(String) : [String(v)],
 		);
-		return this.resolveClientEffect(sessionId).pipe(
+		return this.resolveClientEffect(
+			sessionId,
+			call?.account,
+			call?.workspaceRoot,
+		).pipe(
 			Effect.flatMap((client) =>
 				Effect.tryPromise({
 					try: async () => {
@@ -593,7 +633,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 						await client.question.reply(
 							requestId,
 							answerArrays,
-							session.directory || this.workspaceRoot,
+							call?.workspaceRoot ?? (session.directory || this.workspaceRoot),
 						);
 					},
 					catch: (cause) => cause,

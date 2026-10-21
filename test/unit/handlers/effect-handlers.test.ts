@@ -525,7 +525,7 @@ describe("reloadProviderSessionForClient", () => {
 			expect(events[0]).toBe("ended");
 			expect(events.slice(1)).toEqual(expect.arrayContaining(["workspace", "project"]));
 			expect(getWorkspace).toHaveBeenCalledWith("session-42");
-			expect(dispatchEffect).toHaveBeenCalledWith({ type: "discover", providerId: account.id, account, workspaceRoot: "/tmp/session-worktree", refresh: true });
+			expect(dispatchEffect).toHaveBeenCalledWith({ type: "discover", providerId: account.id, account, workspaceRoot: "/tmp/session-worktree", sessionId: "session-42", refresh: true });
 			expect(dispatchEffect).toHaveBeenCalledWith({ type: "discover", providerId: account.id, account, refresh: true });
 			expect(Option.isNone(yield* Effect.sync(() => Option.fromUndefinedOr(reload.pollUnsafe())))).toBe(true);
 			yield* Deferred.succeed(workspaceRelease, undefined);

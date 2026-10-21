@@ -24,6 +24,7 @@ import {
 } from "effect";
 import * as Failure from "../../effect/failure-classification.js";
 import { ClaudeBoundaryError } from "../event-sink-errors.js";
+import type { ProviderCall } from "../types.js";
 import type { ProbeResult } from "./claude-capabilities-probe.js";
 import {
 	type ProbeDeps,
@@ -134,7 +135,7 @@ export interface ClaudeCapabilitiesService {
 	/** Serves cached capabilities; refresh waits for a shared probe and propagates failure. */
 	readonly get: (
 		workspaceRoot: string,
-		options?: { readonly refresh?: boolean },
+		options?: { readonly refresh?: boolean; readonly call?: ProviderCall },
 	) => Effect.Effect<ProbeResult, ClaudeBoundaryError>;
 }
 
@@ -164,8 +165,15 @@ const makeClaudeCapabilitiesServiceWithCache = (
 			Effect.uninterruptibleMask((restore) =>
 				Effect.gen(function* () {
 					const refresh = options?.refresh === true;
+					const call = options?.call;
 					const launch = yield* Effect.try({
-						try: () => deps.launchConfig(),
+						try: () =>
+							call?.account.driver === "claude"
+								? {
+										configDir: call.account.folder,
+										folderSource: "account" as const,
+									}
+								: deps.launchConfig(),
 						catch: (cause) =>
 							new ClaudeBoundaryError({
 								operation: "probeCapabilities",
@@ -173,9 +181,22 @@ const makeClaudeCapabilitiesServiceWithCache = (
 							}),
 					});
 					const configPath = resolve(workspaceRoot, launch.configDir.path);
-					const key = [launch.configDir._tag, configPath, workspaceRoot].join(
-						"\0",
-					);
+					const key = [
+						launch.configDir._tag,
+						configPath,
+						workspaceRoot,
+						...(call
+							? [
+									JSON.stringify([
+										call.projectId,
+										call.account.id,
+										Object.entries(call.shellEnv).sort(),
+										Object.entries(call.account.env ?? {}).sort(),
+										call.extraFolders,
+									]),
+								]
+							: []),
+					].join("\0");
 					const file =
 						cacheDir === undefined
 							? undefined
@@ -268,6 +289,15 @@ const makeClaudeCapabilitiesServiceWithCache = (
 								probeClaudeCapabilities({
 									workspaceRoot,
 									...launch,
+									...(call
+										? {
+												baseEnv: call.shellEnv,
+												extraFolders: call.extraFolders,
+											}
+										: {}),
+									...(call?.account.env
+										? { accountEnv: call.account.env }
+										: {}),
 									...(deps.queryFactory
 										? { queryFactory: deps.queryFactory }
 										: {}),

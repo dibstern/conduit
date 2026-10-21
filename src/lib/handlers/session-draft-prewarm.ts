@@ -7,7 +7,11 @@ import {
 	buildSessionLaunchInput,
 	resolveLaunchFolders,
 } from "../domain/relay/Services/provider-turn-dispatch.js";
-import { ConfigTag, LoggerTag } from "../domain/relay/Services/services.js";
+import {
+	ConfigTag,
+	LoggerTag,
+	OrchestrationEngineTag,
+} from "../domain/relay/Services/services.js";
 import { getDefaultAgent } from "../domain/relay/Services/session-overrides-state.js";
 import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 import {
@@ -26,13 +30,24 @@ export const resolveDraftLaunchInput = (
 				? null
 				: yield* workspace.preview(creation.account, worktreePath);
 		const folders = yield* resolveLaunchFolders(state);
-		return buildSessionLaunchInput(
-			creation.account,
-			creation.pick,
-			creation.permissionMode,
-			folders,
-			yield* getDefaultAgent(),
-		);
+		const call =
+			yield* (yield* OrchestrationEngineTag).resolveCallContextEffect({
+				sessionId: "",
+				account: creation.account,
+				workspaceRoot: folders.workspaceRoot,
+				extraFolders: folders.extraFolders,
+				prepareShellEnv: true,
+			});
+		return {
+			...buildSessionLaunchInput(
+				creation.account,
+				creation.pick,
+				creation.permissionMode,
+				folders,
+				yield* getDefaultAgent(),
+			),
+			...(call ? { projectId: call.projectId, shellEnv: call.shellEnv } : {}),
+		};
 	});
 
 /** Hints must never turn a catalog, filesystem or provider failure into a UI error. */

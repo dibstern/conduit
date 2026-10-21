@@ -599,9 +599,8 @@ export const sessionsHandlers = {
 								),
 							)
 						: undefined;
-				const launchKey = resolvedCreation
+				const draftLaunch = resolvedCreation
 					? yield* resolveDraftLaunchInput(resolvedCreation, path).pipe(
-							Effect.map(draftLaunchKey),
 							Effect.catchCause((cause) =>
 								Effect.gen(function* () {
 									const log = yield* LoggerTag;
@@ -611,6 +610,8 @@ export const sessionsHandlers = {
 							),
 						)
 					: undefined;
+				const launchKey =
+					draftLaunch === undefined ? undefined : draftLaunchKey(draftLaunch);
 				// A mismatched or missing key discards the reservation instead of adopting it.
 				const takeReservation =
 					draftId && drafts._tag === "Some"
@@ -702,6 +703,17 @@ export const sessionsHandlers = {
 				const session = yield* Effect.uninterruptibleMask((restore) =>
 					Effect.gen(function* () {
 						const reservedSessionId = yield* takeReservation;
+						const reservedCall =
+							reservedSessionId &&
+							draftLaunch?.projectId !== undefined &&
+							draftLaunch.shellEnv !== undefined
+								? {
+										...draftLaunch,
+										sessionId: reservedSessionId,
+										projectId: draftLaunch.projectId,
+										shellEnv: draftLaunch.shellEnv,
+									}
+								: undefined;
 						const create = createSessionForClient({
 							...options,
 							...(reservedSessionId === undefined
@@ -722,7 +734,10 @@ export const sessionsHandlers = {
 						).pipe(
 							Effect.onError(() =>
 								reservedSessionId && drafts._tag === "Some"
-									? drafts.value.discardSession(reservedSessionId)
+									? drafts.value.discardSession(
+											reservedSessionId,
+											...(reservedCall ? ([reservedCall] as const) : []),
+										)
 									: Effect.void,
 							),
 						);

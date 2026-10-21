@@ -5,10 +5,11 @@
 
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import { Context, Effect, Layer, Option, type Scope } from "effect";
+import { Context, Effect, Layer, Option, Schema, type Scope } from "effect";
 import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
+import { SessionWorkspaceSchema } from "../contracts/session-workspace.js";
 import {
 	type DaemonConfigLoadError,
 	loadDaemonConfigResult,
@@ -27,19 +28,24 @@ import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js"
 import type { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
 import type { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import type { ProviderStateEffectTag } from "../persistence/effect/provider-state-effect.js";
-import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { loadRelaySettings } from "../relay/relay-settings.js";
+import { effectiveSessionFolders } from "../session/session-workspace.js";
 import { defaultClaudeSubagentSdk } from "./claude/claude-subagent-materializer.js";
 import {
 	ClaudeDriver,
 	type ClaudeProviderInstanceDeps,
 } from "./claude/index.js";
 import { makeCursorProviderRuntime } from "./cursor/cursor-provider-runtime.js";
+import { ProviderInstanceFailure } from "./errors.js";
 import {
 	OpenCodeDriver,
 	OpenCodeProviderInstance,
 } from "./opencode-provider-instance.js";
-import { OrchestrationEngine } from "./orchestration-engine.js";
+import {
+	OrchestrationEngine,
+	type ProviderCallRequest,
+} from "./orchestration-engine.js";
 import { CommandReadModelRepository } from "./orchestration-read-model.js";
 import type {
 	ProviderCommandInteractionSinkFactory,
@@ -51,6 +57,7 @@ import {
 	type ProviderSessionBindingReadModel,
 	SqliteProviderSessionBindingReadModel,
 } from "./provider-session-binding-read-model.js";
+import type { ProviderCall } from "./types.js";
 
 export interface OrchestrationLayerOptions {
 	readonly shellEnv?: ClaudeProviderInstanceDeps["shellEnv"];
@@ -218,13 +225,88 @@ const createOrchestrationComponentsEffect = (
 			const daemonConfig = yield* Effect.suspend(() =>
 				Effect.fromResult(loadDaemonConfigResult(options.configDir)),
 			).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)));
-			const config = daemonConfig?.projects.find(
-				(project) => resolve(project.path) === resolve(directory),
-			);
+			const config =
+				daemonConfig?.projects.find((project) => project.slug === projectId) ??
+				daemonConfig?.projects.find(
+					(project) => resolve(project.path) === resolve(directory),
+				);
 			resolver.register(directory, config?.shellEnv);
-			shellEnv = (projectDir) => resolver.get(projectDir);
-			prepareShellEnv = (projectDir) => resolver.waitUntilReady(projectDir);
+			shellEnv = (projectDir) => {
+				resolver.register(projectDir, config?.shellEnv);
+				return resolver.get(projectDir);
+			};
+			prepareShellEnv = (projectDir) => {
+				resolver.register(projectDir, config?.shellEnv);
+				return resolver.waitUntilReady(projectDir);
+			};
 		}
+		const read = yield* ReadQueryEffectTag;
+		const projectRoot = options.workspaceRoot ?? process.cwd();
+		const getShellEnv = shellEnv;
+		const prepareEnvironment = prepareShellEnv;
+		const resolveCallContext = (
+			request: ProviderCallRequest,
+		): Effect.Effect<ProviderCall, ProviderInstanceFailure> =>
+			Effect.gen(function* () {
+				const account =
+					request.account ??
+					(yield* accountDirectory.resolve({
+						_tag: "Id",
+						id:
+							request.providerId ??
+							(yield* sessionBindingReadModel.getProviderForSession(
+								request.sessionId,
+							)) ??
+							"opencode",
+					}));
+				const session = request.sessionId
+					? yield* read.getSession(request.sessionId)
+					: undefined;
+				const workspaceRoot =
+					request.workspaceRoot ??
+					(session
+						? yield* sessionWorkspace.get(request.sessionId)
+						: projectRoot);
+				const workspace = session?.workspace
+					? yield* Schema.decodeUnknownEffect(
+							Schema.fromJsonString(SessionWorkspaceSchema),
+						)(session.workspace)
+					: null;
+				const extraFolders =
+					request.extraFolders ??
+					effectiveSessionFolders(
+						[projectRoot, ...(options.extraFolders ?? [])],
+						workspace,
+					)
+						.map(({ directory }) => directory)
+						.filter((directory) => directory !== workspaceRoot);
+				if (request.prepareShellEnv && prepareEnvironment) {
+					yield* Effect.tryPromise(() =>
+						prepareEnvironment(workspaceRoot),
+					).pipe(
+						Effect.timeoutOption("10 seconds"),
+						Effect.catch(() => Effect.void),
+					);
+				}
+				return Object.freeze({
+					projectId,
+					sessionId: request.sessionId,
+					account,
+					workspaceRoot,
+					extraFolders: Object.freeze([...extraFolders]),
+					shellEnv: Object.freeze({ ...getShellEnv(workspaceRoot) }),
+				});
+			}).pipe(
+				Effect.mapError(
+					(cause) =>
+						new ProviderInstanceFailure({
+							providerId:
+								request.account?.driver ?? request.providerId ?? "unknown",
+							operation: "resolveCallContext",
+							cause,
+						}),
+				),
+			);
 		const claudeInstance = yield* ClaudeDriver.create({
 			shellEnv,
 			...(prepareShellEnv ? { prepareShellEnv } : {}),
@@ -290,6 +372,7 @@ const createOrchestrationComponentsEffect = (
 		const engine = new OrchestrationEngine({
 			registry,
 			accountDirectory,
+			resolveCallContext,
 			...(sessionBindingReadModel != null ? { sessionBindingReadModel } : {}),
 			...(durableCommands != null ? { durableCommands } : {}),
 		});
