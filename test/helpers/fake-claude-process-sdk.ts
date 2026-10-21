@@ -296,8 +296,9 @@ function mark(message: ProcessMark): void {
 	const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
 	if (proof) appendFileSync(proof, `${JSON.stringify(message)}\n`);
 	const send = () => {
+		// The runner can outlive its daemon; diagnostic IPC may close mid-send.
 		if (process.connected)
-			process.send?.({ channel: "conduit-process-test", ...message });
+			process.send?.({ channel: "conduit-process-test", ...message }, () => {});
 	};
 	const delay =
 		message.kind === "enqueue"

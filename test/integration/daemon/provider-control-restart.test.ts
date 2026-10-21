@@ -384,15 +384,17 @@ describe("durable controls across daemon replacement", () => {
 			expect(
 				harness.marks.filter((mark) => mark.kind === "runner-started").at(-1),
 			).toMatchObject({ pid: replacement.pid });
-			mkdirSync("/tmp/82tn-beads/end-diagnosis", { recursive: true });
-			writeFileSync(
-				`/tmp/82tn-beads/end-diagnosis/end-restart-${delivered ? "delivered" : replaced ? "replaced" : "pending"}.json`,
-				JSON.stringify(
-					{ sessionId, end, settled, deliveries, process: harness.proof() },
-					null,
-					2,
-				),
-			);
+			writeProviderCommandOutboxProof(import.meta.url, [
+				{
+					scenario: `end-restart-${delivered ? "delivered" : replaced ? "replaced" : "pending"}`,
+					passed: true,
+					sessionId,
+					end,
+					settled,
+					deliveries,
+					process: harness.proof(),
+				},
+			]);
 		} finally {
 			db.close();
 		}

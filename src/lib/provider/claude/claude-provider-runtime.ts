@@ -2813,6 +2813,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		ctx: ClaudeSessionContext,
 		reason: string,
 		recoverQuestions: boolean,
+		interruptQuery = true,
 	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen({ self: this }, function* () {
 			if (ctx.stopped) return;
@@ -2830,7 +2831,8 @@ class ClaudeRunnerPayload implements RunnerPayload {
 
 			// Disposal closes this query next. Do not let an unanswered interrupt
 			// prevent that close; interruptQueryEffect already observes rejection.
-			yield* this.interruptQueryEffect(ctx).pipe(Effect.ignore);
+			if (interruptQuery)
+				yield* this.interruptQueryEffect(ctx).pipe(Effect.ignore);
 			yield* this.endMessageOwnershipEffect(ctx);
 		});
 	}
@@ -2884,9 +2886,10 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	private disposeSessionEffect(
 		ctx: ClaudeSessionContext,
 		reason: string,
+		interruptQuery = true,
 	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen({ self: this }, function* () {
-			yield* this.cleanupSessionEffect(ctx, reason, true);
+			yield* this.cleanupSessionEffect(ctx, reason, true, interruptQuery);
 
 			// Terminal close of the SDK query (vs interrupt(), which is resumable).
 			yield* Effect.try({
@@ -2962,11 +2965,63 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			yield* this.warmedQueries.clearEffect();
 			yield* FiberMap.clear(this.shutdownFibers);
 			log.info("ClaudeProviderRuntime shutting down");
+			const interruptedQueries = new Set<ClaudeSessionContext>();
+			// Give native terminals one bounded drain before disposal stops their
+			// streams. An interrupt acknowledgement alone never settles a run.
+			yield* Effect.gen({ self: this }, function* () {
+				const starting = yield* getState(this.stateRef);
+				for (const setup of HashMap.values(starting.setupLocks))
+					yield* Deferred.await(setup).pipe(Effect.ignore);
+				const state = yield* getState(this.stateRef);
+				for (const ctx of HashMap.values(state.sessions)) {
+					// Result translation holds this permit until its terminal is
+					// persisted, beyond the early turnInFlight=false update.
+					const inputId = yield* (ctx.messageOwnershipPermit ??=
+						Semaphore.makeUnsafe(1)).withPermits(1)(
+						Effect.gen({ self: this }, function* () {
+							const inputId = ctx.turnInFlight ? ctx.currentTurnId : undefined;
+							if (!inputId) return;
+							const pending = yield* pendingIntakes(
+								this.stateRef,
+								ctx.sessionId,
+							);
+							// Shutdown still rejects inputs that never reached the SDK.
+							if (
+								pending.get(inputId)?.unplaced &&
+								(yield* ctx.promptQueue.recall(inputId))
+							)
+								return;
+							interruptedQueries.add(ctx);
+							if (ctx.interruptInputId !== inputId) {
+								ctx.interruptInputId = inputId;
+								const runId =
+									ctx.currentRunId ?? pending.get(inputId)?.unplaced?.runId;
+								if (runId) (ctx.closedRunIds ??= new Set()).add(runId);
+								yield* this.interruptQueryEffect(ctx);
+							}
+							return inputId;
+						}).pipe(Effect.uninterruptible),
+					);
+					if (!inputId) continue;
+					yield* Effect.repeat(
+						Effect.sync(() => ctx.interruptInputId === inputId && !ctx.stopped),
+						{
+							while: (waiting) => waiting,
+							schedule: Schedule.spaced("10 millis"),
+						},
+					);
+				}
+			}).pipe(
+				Effect.interruptible,
+				Effect.timeoutOption("1 second"),
+				Effect.ignore,
+			);
 			const state = yield* getState(this.stateRef);
 			for (const ctx of HashMap.values(state.sessions)) {
 				yield* this.disposeSessionEffect(
 					ctx,
 					"Provider instance shutting down",
+					!interruptedQueries.has(ctx),
 				);
 			}
 			yield* Ref.set(this.stateRef, emptyClaudeProviderRuntimeState());
