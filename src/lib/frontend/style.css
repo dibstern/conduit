@@ -25,12 +25,12 @@
 	--color-harness-opencode: #00e5ff; /* OpenCode cyan */
 
 	/* Approval modes, ordered from restrictive to permissive. */
-	--color-p-never: #4fd1c5;
+	--color-p-never: #2dd4bf;
 	--color-p-plan: #b07cff;
-	--color-p-ask: #a8afbb;
-	--color-p-edits: #f2c14e;
-	--color-p-auto: #ff9f0a;
-	--color-p-full: #f469c4;
+	--color-p-ask: #5b9cff;
+	--color-p-edits: #facc15;
+	--color-p-auto: #fb923c;
+	--color-p-full: #ff5a5f;
 
 	--animate-cascade-a: pixel-cascade-a 2.4s ease-in-out infinite;
 	--animate-cascade-b: pixel-cascade-b 2.4s ease-in-out infinite;
@@ -262,12 +262,12 @@
 	--color-success-glow: rgba(20, 123, 59, 0.15);
 	--color-send-off-bg: #f1f1f3;
 	--color-send-off: #878792;
-	--color-p-never: #0b7d74;
+	--color-p-never: #0d9488;
 	--color-p-plan: #7441ff;
-	--color-p-ask: #4b525e;
-	--color-p-edits: #8d6400;
-	--color-p-auto: #a65600;
-	--color-p-full: #c0267f;
+	--color-p-ask: #2563eb;
+	--color-p-edits: #ab7c0a;
+	--color-p-auto: #e4560c;
+	--color-p-full: #dc2626;
 
 	--color-bg: #ffffff;
 	--color-theme-scrim: #b0b1b3;

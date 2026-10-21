@@ -219,18 +219,22 @@ export const DropdownOpen: Story = {
 			getComputedStyle(probe).backgroundColor,
 		);
 		probe.remove();
-		const fullOutline = within(menu)
-			.getByTestId("permission-mode-option-full")
-			.querySelector("svg path");
-		if (!fullOutline) throw new Error("Full access shield is missing");
-		await expect(getComputedStyle(fullOutline).fill).toBe("none");
-		const plan = within(menu)
-			.getByTestId("permission-mode-option-plan")
-			.querySelector("svg path");
-		await expect(plan).toHaveAttribute(
-			"d",
-			"M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20",
-		);
+		const masks = new Set<string>();
+		for (const [mode] of ranked) {
+			const icon = within(menu)
+				.getByTestId(`permission-mode-option-${mode}`)
+				.querySelector("svg");
+			const body = icon?.querySelector('[data-part="body"]');
+			const mask = icon?.querySelector("mask");
+			if (!icon || !body || !mask)
+				throw new Error(`Missing filled permission icon for ${mode}`);
+			await expect(getComputedStyle(body).fill).toBe(
+				getComputedStyle(icon).color,
+			);
+			await expect(body.getAttribute("mask")).toBe(`url(#${mask.id})`);
+			masks.add(mask.id);
+		}
+		await expect(masks.size).toBe(6);
 	},
 };
 
