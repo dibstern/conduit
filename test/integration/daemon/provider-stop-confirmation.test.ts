@@ -363,7 +363,10 @@ describe("Stop waits for provider confirmation", () => {
 		}
 	}, 45_000);
 
-	it("the Stop bound retires a runner even when the SDK never acknowledges interrupt", async () => {
+	it.each([
+		false,
+		true,
+	])("the Stop bound retires an unacknowledged runner control in FIFO order, restart=%s", async (restart) => {
 		const harness = await ProcessHarness.start({ restartProof: true });
 		harnesses.push(harness);
 		writeFileSync(
@@ -385,8 +388,13 @@ describe("Stop waits for provider confirmation", () => {
 		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (runner?.kind !== "runner-started") throw new Error("Missing runner");
 		const db = new Database(harness.daemonStorePath());
+		const commandId = randomUUID();
+		let passed = false;
 		try {
-			const commandId = randomUUID();
+			db.exec(`CREATE TABLE control_terminals (command_id TEXT, status TEXT);
+				CREATE TRIGGER record_control_terminal AFTER UPDATE OF status ON provider_command_outbox
+				WHEN NEW.effect_type <> 'send_turn' AND NEW.status IN ('completed', 'failed', 'cancelled')
+				BEGIN INSERT INTO control_terminals VALUES (NEW.command_id, NEW.status); END`);
 			const stop = Effect.runPromise(
 				browser.rpc.CancelSession({ sessionId, commandId }),
 			).catch(() => undefined);
@@ -395,14 +403,40 @@ describe("Stop waits for provider confirmation", () => {
 					sdkProof(harness).some((mark) => mark["kind"] === "stop-held"),
 				).toBe(true),
 			);
+			const original = db
+				.prepare(
+					"SELECT payload_json, requested_at FROM provider_command_outbox WHERE command_id = ?",
+				)
+				.get(commandId) as { payload_json: string; requested_at: number };
+			const { stop: snapshot } = JSON.parse(original.payload_json) as {
+				stop: ProviderStopSnapshot;
+			};
 			expect(
 				db
 					.prepare("SELECT status FROM provider_runs WHERE session_id = ?")
 					.all(sessionId),
 			).toEqual([{ status: "running" }]);
+			if (restart) {
+				await harness.kill();
+				await stop;
+				// Let the reply deadline expire while the daemon is down. Recovery
+				// must fail this claim immediately instead of granting another wait.
+				await vi.waitFor(
+					() => expect(Date.now()).toBeGreaterThan(snapshot.deadlineAt + 6000),
+					{
+						timeout: 40_000,
+						interval: 100,
+					},
+				);
+				await harness.restart();
+				await harness.connect(sessionId);
+			}
 			await vi.waitFor(
 				() => expect(() => process.kill(runner.pid, 0)).toThrow(),
-				{ timeout: 40_000, interval: 100 },
+				{
+					timeout: Math.max(0, snapshot.deadlineAt - Date.now()) + 8000,
+					interval: 100,
+				},
 			);
 			await Promise.all([send, stop]);
 			await vi.waitFor(() =>
@@ -427,30 +461,101 @@ describe("Stop waits for provider confirmation", () => {
 					)
 					.get(commandId),
 			);
-			writeFileSync(
-				"/tmp/82tn27-stop-retirement.json",
-				JSON.stringify(
+			await vi.waitFor(() =>
+				expect(
+					db
+						.prepare(
+							"SELECT command_id, status, error_code FROM provider_command_outbox WHERE command_id IN (?, ?) ORDER BY request_sequence",
+						)
+						.all(commandId, `${commandId}:retire`),
+				).toEqual([
 					{
-						sessionId,
-						commandId,
-						runner,
-						outcomes: db
-							.prepare(
-								"SELECT command_id, effect_type, provider_process_id, status, error_code FROM provider_command_outbox WHERE session_id = ?",
-							)
-							.all(sessionId),
-						events: db
-							.prepare(
-								"SELECT type, data, metadata FROM events WHERE session_id = ? ORDER BY sequence",
-							)
-							.all(sessionId),
-						process: harness.proof(),
+						command_id: commandId,
+						status: "failed",
+						error_code: "provider_control_timeout",
 					},
-					null,
-					2,
-				),
+					{
+						command_id: `${commandId}:retire`,
+						status: "completed",
+						error_code: null,
+					},
+				]),
 			);
+			expect(
+				db
+					.prepare(
+						"SELECT command_id, status FROM command_receipts WHERE command_id IN (?, ?) ORDER BY command_id",
+					)
+					.all(commandId, `${commandId}:retire`),
+			).toEqual([
+				{ command_id: commandId, status: "side_effect_failed" },
+				{ command_id: `${commandId}:retire`, status: "side_effect_completed" },
+			]);
+			expect(
+				db
+					.prepare(
+						"SELECT type FROM events WHERE session_id = ? AND type IN ('turn.completed', 'turn.interrupted', 'turn.error')",
+					)
+					.all(sessionId),
+			).toHaveLength(1);
+			expect(
+				sdkProof(harness).filter(
+					(mark) =>
+						mark["kind"] === "runner-control" &&
+						mark["commandId"] === `${commandId}:retire`,
+				),
+			).toHaveLength(1);
+			expect(
+				db
+					.prepare(
+						"SELECT payload_json, requested_at FROM provider_command_outbox WHERE command_id = ?",
+					)
+					.get(commandId),
+			).toEqual(original);
+			expect(
+				db
+					.prepare(
+						"SELECT command_id, COUNT(*) AS count FROM control_terminals GROUP BY command_id ORDER BY command_id",
+					)
+					.all(),
+			).toEqual([
+				{ command_id: commandId, count: 1 },
+				{ command_id: `${commandId}:retire`, count: 1 },
+			]);
+			passed = true;
 		} finally {
+			recoveryEvidence.push({
+				scenario: `unacknowledged-stop-fifo-deadline-restart-${restart}`,
+				passed,
+				sessionId,
+				commandId,
+				runner,
+				terminals: db
+					.prepare(
+						"SELECT command_id, status FROM control_terminals ORDER BY rowid",
+					)
+					.all(),
+				outcomes: db
+					.prepare(
+						"SELECT command_id, effect_type, status, error_code, requested_at, updated_at FROM provider_command_outbox WHERE session_id = ? ORDER BY request_sequence",
+					)
+					.all(sessionId),
+				receipts: db
+					.prepare(
+						"SELECT command_id, status, error_code, error FROM command_receipts WHERE session_id = ?",
+					)
+					.all(sessionId),
+				events: db
+					.prepare(
+						"SELECT type, data, metadata FROM events WHERE session_id = ? ORDER BY sequence",
+					)
+					.all(sessionId),
+				process: harness.proof(),
+			});
+			writeFileSync(
+				"/tmp/82tn27-3-round3-stop-deadline.json",
+				JSON.stringify({ scenarios: recoveryEvidence }, null, 2),
+			);
 			db.close();
 		}
 	}, 75_000);

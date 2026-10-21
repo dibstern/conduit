@@ -3,6 +3,8 @@ import { AccountSchema } from "../contracts/account.js";
 import { ProviderStopSnapshotSchema } from "../contracts/stored-event.js";
 import { ProviderPermissionUpdateSchema } from "../shared-types.js";
 
+export const STOP_ABORT_WAIT_MS = 30_000;
+
 export const DURABLE_COMMAND_RECEIPT_STATUSES = [
 	"accepted",
 	"rejected",

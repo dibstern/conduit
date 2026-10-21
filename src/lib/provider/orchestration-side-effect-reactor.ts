@@ -52,7 +52,10 @@ import {
 } from "./claude/prepare-turn.js";
 import { ProviderInstanceFailure, ProviderNotRegistered } from "./errors.js";
 import { backfillLegacyControlAnswers } from "./legacy-control-outbox.js";
-import { ProviderControlPayloadSchema } from "./orchestration-command-contracts.js";
+import {
+	ProviderControlPayloadSchema,
+	STOP_ABORT_WAIT_MS,
+} from "./orchestration-command-contracts.js";
 import type {
 	OrchestrationEngine,
 	ProviderCallRequest,
@@ -89,6 +92,7 @@ const controlErrorSchema = Schema.Struct({
 			"auth_required",
 			"provider_process_gone",
 			"provider_process_unavailable",
+			"provider_control_timeout",
 		]),
 	),
 	causeMessage: Schema.String,
@@ -110,6 +114,7 @@ interface ProviderCommandOutboxRow {
 	readonly run_id: string | null;
 	readonly provider_process_id: string | null;
 	readonly attempt_count: number;
+	readonly requested_at: number;
 }
 
 interface SendTurnOutboxPayload
@@ -216,6 +221,8 @@ export interface ProviderSideEffectReactorOptions {
 const defaultRetryBackoff = (failureCount: number): Duration.Input =>
 	Duration.millis(Math.min(1000 * 2 ** Math.max(0, failureCount - 1), 30_000));
 const maxControlAttempts = 5;
+const runnerControlReplyGraceMs = 5000;
+const maxControlRetryAfterMs = 30_000;
 const defaultOutcomePollInterval: Duration.Input = Duration.millis(500);
 
 function clampPollDuration(
@@ -942,7 +949,7 @@ export class ProviderSideEffectReactor {
 			const nowMs = yield* this.currentTimeMillis();
 			return yield* this.options.sql<ProviderCommandOutboxRow>`
 			SELECT request_sequence, command_id, project_key, session_id, provider_id,
-			       effect_type, payload_json, run_id, provider_process_id, attempt_count
+			       effect_type, payload_json, run_id, provider_process_id, attempt_count, requested_at
 			FROM provider_command_outbox AS candidate
 			WHERE project_key = ${this.options.projectId}
 				AND (${sessionId ?? null} IS NULL OR session_id = ${sessionId ?? null})
@@ -1013,7 +1020,7 @@ export class ProviderSideEffectReactor {
 					))
 					AND (status = 'pending' OR (status = 'retryable_failed' AND next_attempt_at <= ${updatedAt}))
 				RETURNING request_sequence, command_id, project_key, session_id, provider_id,
-					effect_type, payload_json, run_id, provider_process_id, attempt_count`;
+					effect_type, payload_json, run_id, provider_process_id, attempt_count, requested_at`;
 					if (claimed?.run_id === runId) {
 						const store = yield* makeEventStoreEffect.pipe(
 							Effect.provideService(SqlClient.SqlClient, this.options.sql),
@@ -1170,6 +1177,25 @@ export class ProviderSideEffectReactor {
 				const instance = yield* this.options.registry.getInstanceEffect(
 					account?.driver ?? row.provider_id,
 				);
+				// Keep FIFO, but give runner controls a durable reply deadline. Stop
+				// escalation gets a small grace to enqueue retirement behind this head.
+				// Recovery must never grant the same command another full waiting period.
+				const replyRemaining = getProviderDriver(
+					account?.driver ?? instance.providerId,
+				)?.runsOpenCodeServer
+					? undefined
+					: (stop?.deadlineAt ?? row.requested_at + STOP_ABORT_WAIT_MS) +
+						runnerControlReplyGraceMs -
+						(yield* this.currentTimeMillis());
+				const timedOut = () =>
+					new ProviderInstanceFailure({
+						providerId: row.provider_id,
+						operation: row.effect_type,
+						code: "provider_control_timeout",
+						cause: new Error("Provider control reply deadline exceeded"),
+					});
+				if (replyRemaining !== undefined && replyRemaining <= 0)
+					return yield* timedOut();
 				const context = {
 					commandId: row.command_id,
 					providerProcessId: row.provider_process_id,
@@ -1312,7 +1338,7 @@ export class ProviderSideEffectReactor {
 				// An unanswered native interrupt becomes obsolete when its captured
 				// cohort ends. Release the control through the ordinary receipt path;
 				// provider terminals alone still own the turn's outcome.
-				yield* (
+				const delivery = (
 					stopRunning
 						? Effect.raceFirst(
 								deliver,
@@ -1335,6 +1361,14 @@ export class ProviderSideEffectReactor {
 							: failure,
 					),
 				);
+				yield* replyRemaining === undefined
+					? delivery
+					: delivery.pipe(
+							Effect.timeoutOrElse({
+								duration: replyRemaining,
+								orElse: () => Effect.fail(timedOut()),
+							}),
+						);
 				return REACTOR_COMPLETED_RESULT;
 			}
 			if (row.effect_type === "send_turn") {
@@ -1604,7 +1638,7 @@ export class ProviderSideEffectReactor {
 	> {
 		return this.options.sql<ProviderCommandOutboxRow>`
 			SELECT request_sequence, command_id, project_key, session_id, provider_id,
-			       effect_type, payload_json, run_id, provider_process_id, attempt_count
+			       effect_type, payload_json, run_id, provider_process_id, attempt_count, requested_at
 			FROM provider_command_outbox
 			WHERE project_key = ${this.options.projectId}
 				AND command_id = ${commandId} AND status IN ('pending', 'retryable_failed')
@@ -1750,7 +1784,10 @@ export class ProviderSideEffectReactor {
 										: Number.NaN;
 						const nextAttemptAt = retryable
 							? Number.isFinite(retryAfterAt)
-								? Math.max(updatedAt, retryAfterAt)
+								? Math.min(
+										updatedAt + maxControlRetryAfterMs,
+										Math.max(updatedAt, retryAfterAt),
+									)
 								: updatedAt +
 									Duration.toMillis(
 										(this.options.retryBackoff ?? defaultRetryBackoff)(

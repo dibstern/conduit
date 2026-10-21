@@ -11,7 +11,10 @@ import { EventStoreEffectTag } from "../../../persistence/effect/event-store-eff
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent, createEventId } from "../../../persistence/events.js";
 import { ProviderInstanceFailure } from "../../../provider/errors.js";
-import { ProviderControlPayloadSchema } from "../../../provider/orchestration-command-contracts.js";
+import {
+	ProviderControlPayloadSchema,
+	STOP_ABORT_WAIT_MS,
+} from "../../../provider/orchestration-command-contracts.js";
 import {
 	legacyStopOwnersQuery,
 	sessionRunOwnersQuery,
@@ -36,7 +39,7 @@ import {
 import { SessionManagerServiceTag } from "./session-manager-service.js";
 import { clearProcessingTimeout } from "./session-overrides-state.js";
 
-export const STOP_ABORT_WAIT_MS = 30_000;
+export { STOP_ABORT_WAIT_MS };
 
 export const completeRecoveredQuestion = (
 	question: PendingQuestion,

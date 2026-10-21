@@ -5,6 +5,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Deferred, Effect, Fiber, Layer, Ref } from "effect";
 import { SqlClient } from "effect/sql";
+import { TestClock } from "effect/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	OpenCodeInstancesTag,
@@ -82,7 +83,7 @@ describe("durable control outbox scheduling", () => {
 			const sql = yield* SqlClient.SqlClient;
 			const ingestion = yield* ProviderRuntimeIngestionTag;
 			const commit = yield* makeCommitAndSignal;
-			yield* sql`INSERT OR IGNORE INTO sessions (id, project_id, provider, created_at, updated_at) VALUES (${sessionId}, ${projectId}, 'opencode', 1000, 1000)`;
+			yield* sql`INSERT OR IGNORE INTO sessions (id, project_id, provider, created_at, updated_at) VALUES (${sessionId}, ${projectId}, ${instance.providerId}, 1000, 1000)`;
 			const snapshot = yield* new CommandReadModelRepository(
 				sql,
 				projectId,
@@ -99,7 +100,7 @@ describe("durable control outbox scheduling", () => {
 					write: wrapWrite ? wrapWrite(commit.write) : commit.write,
 				},
 			});
-			result.bindSession(sessionId, "opencode");
+			result.bindSession(sessionId, instance.providerId);
 			return result;
 		});
 	}
@@ -140,6 +141,147 @@ describe("durable control outbox scheduling", () => {
 			},
 		};
 	}
+
+	// A long runner answer may still succeed before its deadline. After timeout,
+	// its late native reply must not settle it twice or hold the next control.
+	it.each([
+		false,
+		true,
+	])("bounds runner answers and ignores late replies, timeout=%s", async (timeout) => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const entered = yield* Deferred.make<void>();
+					let reply: () => void = () => {
+						throw new Error("Answer has not started");
+					};
+					let now = 1000;
+					const instance: ProviderInstance = {
+						...provider(() => Effect.never),
+						providerId: "claude",
+						getControlProcessIdEffect: () => Effect.succeed("shared-process"),
+						resolvePermissionEffect: () =>
+							Deferred.succeed(entered, undefined).pipe(
+								Effect.andThen(
+									Effect.callback<void>((resume) => {
+										reply = () => resume(Effect.void);
+									}),
+								),
+							),
+					};
+					const accepting = yield* engine(instance, () => now);
+					yield* Effect.addFinalizer(() => accepting.shutdownEffect());
+					yield* sql.unsafe(
+						"CREATE TABLE control_terminals (command_id TEXT, status TEXT)",
+					);
+					yield* sql.unsafe(`CREATE TRIGGER record_control_terminal AFTER UPDATE OF status ON provider_command_outbox
+						WHEN NEW.status IN ('completed', 'failed', 'cancelled')
+						BEGIN INSERT INTO control_terminals VALUES (NEW.command_id, NEW.status); END`);
+					yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('card', 'control-session', 'permission', 'pending', 'shared-process', 'native-answer', 1)`;
+					const command = {
+						type: "resolve_permission" as const,
+						commandId: "deadline-answer",
+						sessionId: "control-session",
+						requestId: "card",
+						decision: "once" as const,
+						providerProcessId: "shared-process",
+					};
+					const delivery = yield* Effect.forkChild(
+						Effect.result(accepting.dispatchEffect(command)),
+					);
+					yield* Deferred.await(entered);
+					const stop = yield* Effect.forkChild(
+						accepting.dispatchEffect({
+							type: "interrupt_turn",
+							commandId: "after-answer",
+							sessionId: "control-session",
+							providerProcessId: "shared-process",
+						}),
+					);
+					now += 34_999;
+					yield* TestClock.adjust(34_999);
+					expect(
+						yield* sql`SELECT status FROM provider_command_outbox WHERE command_id = 'deadline-answer'`,
+					).toEqual([{ status: "running" }]);
+					expect(instance.interruptTurnEffect).not.toHaveBeenCalled();
+					if (timeout) {
+						now += 1;
+						yield* TestClock.adjust(1);
+					} else reply();
+					const outcome = yield* Fiber.join(delivery);
+					expect(outcome).toMatchObject(
+						timeout
+							? {
+									_tag: "Failure",
+									failure: {
+										_tag: "ProviderInstanceFailure",
+										code: "provider_control_timeout",
+									},
+								}
+							: { _tag: "Success" },
+					);
+					const settled =
+						yield* sql`SELECT status, error_code, error, updated_at FROM command_receipts WHERE command_id = 'deadline-answer'`;
+					expect(settled).toMatchObject([
+						{
+							status: timeout ? "side_effect_failed" : "side_effect_completed",
+							error_code: timeout ? "provider_control_timeout" : null,
+						},
+					]);
+					reply();
+					yield* accepting.drainSideEffects();
+					yield* TestClock.adjust(500);
+					yield* Fiber.join(stop);
+					const replay = yield* Effect.result(
+						accepting.dispatchEffect(command),
+					);
+					expect(replay).toMatchObject(
+						timeout
+							? {
+									_tag: "Failure",
+									failure: { code: "provider_control_timeout" },
+								}
+							: { _tag: "Success" },
+					);
+					expect(
+						yield* sql`SELECT status, error_code, error, updated_at FROM command_receipts WHERE command_id = 'deadline-answer'`,
+					).toEqual(settled);
+					expect(
+						yield* sql`SELECT command_id, status FROM provider_command_outbox ORDER BY request_sequence`,
+					).toEqual([
+						{
+							command_id: "deadline-answer",
+							status: timeout ? "failed" : "completed",
+						},
+						{ command_id: "after-answer", status: "completed" },
+					]);
+					expect(instance.interruptTurnEffect).toHaveBeenCalledTimes(1);
+					const terminals =
+						yield* sql`SELECT command_id, COUNT(*) AS count FROM control_terminals GROUP BY command_id ORDER BY command_id`;
+					expect(terminals).toEqual([
+						{ command_id: "after-answer", count: 1 },
+						{ command_id: "deadline-answer", count: 1 },
+					]);
+					writeFileSync(
+						`/tmp/82tn27-3-round3-answer-timeout-${timeout}.json`,
+						JSON.stringify(
+							{
+								timeout,
+								outcome,
+								receipt: settled,
+								terminals,
+								commands:
+									yield* sql`SELECT command_id, status, error_code, attempt_count FROM provider_command_outbox ORDER BY request_sequence`,
+							},
+							null,
+							2,
+						),
+					);
+				}),
+			).pipe(Effect.provide(fixture()), Effect.provide(TestClock.layer())),
+		);
+	});
 
 	it("reserves a URL-only control before post-commit publication can drain it", async () => {
 		const api = makeMockOpenCodeAPI({
@@ -301,6 +443,8 @@ describe("durable control outbox scheduling", () => {
 		[new Date(5000).toUTCString(), 5000],
 		["invalid", 2000],
 		["-1", 2000],
+		["3600", 31_000],
+		[new Date(3_601_000).toUTCString(), 31_000],
 	] as const)("retries HTTP 429 with Retry-After %s at %s", async (retryAfter, deadline) => {
 		const api = makeMockOpenCodeAPI({
 			promptProcessId: "shared-process",
@@ -455,6 +599,7 @@ describe("durable control outbox scheduling", () => {
 				yield* restarted.dispatchEffect({
 					type: "interrupt_turn",
 					commandId: "stop-after-crash",
+					turnIds: ["active-input"],
 					sessionId: "control-session",
 					providerProcessId: "shared-process",
 				});
@@ -523,6 +668,7 @@ describe("durable control outbox scheduling", () => {
 					executor.dispatchEffect({
 						type: "interrupt_turn",
 						commandId: "stop-behind-fifth-answer",
+						turnIds: ["active-input"],
 						sessionId: "control-session",
 						providerProcessId: "shared-process",
 					}),
@@ -689,6 +835,7 @@ describe("durable control outbox scheduling", () => {
 					other.dispatchEffect({
 						type: "interrupt_turn",
 						commandId: "later-stop",
+						turnIds: ["active-input"],
 						sessionId: "other-session",
 						providerProcessId: "shared-process",
 					}),
@@ -831,6 +978,7 @@ describe("durable control outbox scheduling", () => {
 					accepting.dispatchEffect({
 						type: "interrupt_turn",
 						commandId: "later-stop",
+						turnIds: ["active-input"],
 						sessionId: "control-session",
 						providerProcessId: "shared-process",
 					}),
@@ -1008,6 +1156,7 @@ describe("durable control outbox scheduling", () => {
 				yield* accepting.dispatchEffect({
 					type: "interrupt_turn",
 					commandId: "later-stop",
+					turnIds: ["active-input"],
 					sessionId: "control-session",
 					providerProcessId: processId,
 				});
@@ -1213,6 +1362,7 @@ describe("durable control outbox scheduling", () => {
 					accepting.dispatchEffect({
 						type: "interrupt_turn",
 						commandId: "later-stop",
+						turnIds: ["active-input"],
 						sessionId: "control-session",
 						providerProcessId: "shared-process",
 					}),

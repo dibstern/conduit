@@ -47,7 +47,8 @@ export class ProviderInstanceFailure extends Data.TaggedError(
 	readonly code?:
 		| "auth_required"
 		| "provider_process_gone"
-		| "provider_process_unavailable";
+		| "provider_process_unavailable"
+		| "provider_control_timeout";
 }> {
 	/** Classify the native adapter failure; unknown errors must not hold controls. */
 	get retryable(): boolean {
