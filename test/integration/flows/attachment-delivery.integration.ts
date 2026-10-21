@@ -209,6 +209,15 @@ describe("Integration: attachment delivery through the relay", () => {
 						},
 					});
 					const persist = yield* ClaudeEventPersistEffectTag;
+					const runId = randomUUID();
+					yield* persist.persistEvent(
+						canonicalEvent(
+							"run.requested",
+							sessionId,
+							{ runId, inputId: "blocking-input" },
+							{ provider, metadata: { runId } },
+						),
+					);
 					yield* persist.persistEvent(
 						canonicalEvent("session.status", sessionId, {
 							sessionId,
@@ -239,10 +248,19 @@ describe("Integration: attachment delivery through the relay", () => {
 						yield* sql`SELECT command_id FROM provider_command_outbox WHERE command_id = ${inputId}`,
 					).toHaveLength(0);
 					yield* persist.persistEvent(
-						canonicalEvent("session.status", sessionId, {
-							sessionId,
-							status: "idle",
-						}),
+						provider === "opencode"
+							? canonicalEvent(
+									"session.status",
+									sessionId,
+									{ sessionId, status: "idle" },
+									{ provider, metadata: { runId } },
+								)
+							: canonicalEvent(
+									"turn.completed",
+									sessionId,
+									{ messageId: "" },
+									{ provider, metadata: { runId } },
+								),
 					);
 					yield* Effect.promise(() =>
 						vi.waitFor(

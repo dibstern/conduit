@@ -44,6 +44,8 @@ import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 
 export type ClaudeTraceName =
 	| "api-retry-pong-turn"
+	| "background-shell-during-next-turn"
+	| "background-shell-during-next-turn-metadata-only"
 	| "background-shell-ends-between-turns"
 	| "background-shell-turn"
 	| "concurrent-background-work-after-restart-turn"

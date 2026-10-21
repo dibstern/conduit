@@ -148,40 +148,55 @@ describe("archived event retention through the relay", () => {
 		const addTranscript = async (sessionId: string) => {
 			const messageId = randomUUID();
 			const userMessageId = randomUUID();
+			const runId = `run_${messageId}`;
 			await runtime.runPromise(
-				commit([
-					canonicalEvent("message.created", sessionId, {
-						sessionId,
-						messageId: userMessageId,
-						role: "user",
-					}),
-					canonicalEvent("message.created", sessionId, {
-						sessionId,
-						messageId,
-						parentID: userMessageId,
-						role: "assistant",
-					}),
-					canonicalEvent("text.delta", sessionId, {
-						messageId,
-						partId: `text_${messageId}`,
-						text: "Retained answer",
-					}),
-					canonicalEvent("tool.started", sessionId, {
-						messageId,
-						partId: `tool_${messageId}`,
-						callId: `call_${messageId}`,
-						toolName: "Read",
-						input: { tool: "Read", filePath: "/fixture" },
-					}),
-					canonicalEvent("tool.completed", sessionId, {
-						messageId,
-						partId: `tool_${messageId}`,
-						// Large results live in the event log behind result_event_seq.
-						result: "Retained tool result ".repeat(1200),
-						duration: 1,
-					}),
-					canonicalEvent("turn.completed", sessionId, { messageId }),
-				]),
+				commit(
+					[
+						canonicalEvent("run.requested", sessionId, {
+							runId,
+							inputId: userMessageId,
+						}),
+						canonicalEvent("message.created", sessionId, {
+							sessionId,
+							messageId: userMessageId,
+							role: "user",
+						}),
+						canonicalEvent("run.started", sessionId, {
+							inputId: userMessageId,
+							requestedRunId: runId,
+						}),
+						canonicalEvent("message.created", sessionId, {
+							sessionId,
+							messageId,
+							parentID: userMessageId,
+							role: "assistant",
+						}),
+						canonicalEvent("text.delta", sessionId, {
+							messageId,
+							partId: `text_${messageId}`,
+							text: "Retained answer",
+						}),
+						canonicalEvent("tool.started", sessionId, {
+							messageId,
+							partId: `tool_${messageId}`,
+							callId: `call_${messageId}`,
+							toolName: "Read",
+							input: { tool: "Read", filePath: "/fixture" },
+						}),
+						canonicalEvent("tool.completed", sessionId, {
+							messageId,
+							partId: `tool_${messageId}`,
+							// Large results live in the event log behind result_event_seq.
+							result: "Retained tool result ".repeat(1200),
+							duration: 1,
+						}),
+						canonicalEvent("turn.completed", sessionId, { messageId }),
+					].map((event) => ({
+						...event,
+						provider: "claude",
+						metadata: { runId },
+					})),
+				),
 			);
 		};
 		const child = async (parentId: string) => {

@@ -129,6 +129,9 @@ const decodeUsage = Schema.decodeUnknownResult(
 
 /** Deltas own content; stream messages add correlation, truncation, progress and per-turn usage. */
 export class CursorTurnEvents {
+	runId: string | undefined;
+	currentUserMessageId: string | undefined;
+	private messageParentId: string | undefined;
 	private part = 0;
 	private textPart: ContentPart | undefined;
 	private thinkingPart: ContentPart | undefined;
@@ -193,6 +196,17 @@ export class CursorTurnEvents {
 		return [...this.tools.entries()].flatMap(([id, tool]) =>
 			tool.call.type === "shell" && !tool.completed ? [id] : [],
 		);
+	}
+
+	announceMessage(userMessageId?: string) {
+		this.currentUserMessageId = userMessageId;
+		this.messageParentId = userMessageId;
+		return this.push("message.created", {
+			sessionId: this.sessionId,
+			messageId: this.messageId,
+			role: "assistant",
+			...(userMessageId ? { parentID: userMessageId } : {}),
+		});
 	}
 
 	steerDelivered(callIds: readonly string[]) {
@@ -276,6 +290,7 @@ export class CursorTurnEvents {
 			type,
 			providerId: "cursor",
 			sessionId: this.sessionId,
+			...(this.runId ? { runId: this.runId } : {}),
 			providerRefs: {
 				...this.refs,
 				providerMessageId: this.messageId,
@@ -429,11 +444,7 @@ export class CursorTurnEvents {
 				this.textPart = undefined;
 				this.content.length = 0;
 				this.nextMessage = false;
-				yield* this.push("message.created", {
-					sessionId: this.sessionId,
-					messageId: this.messageId,
-					role: "assistant",
-				});
+				yield* this.announceMessage(this.currentUserMessageId);
 			}
 			if (
 				parentCallId &&
@@ -819,6 +830,7 @@ export class CursorTurnEvents {
 				id: this.messageId,
 				sessionID: this.sessionId,
 				role: "assistant" as const,
+				...(this.messageParentId ? { parentID: this.messageParentId } : {}),
 				parts,
 			};
 			yield* this.push("message.snapshot", {

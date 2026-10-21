@@ -162,6 +162,7 @@ describe("Persistence Effect", () => {
 					"provider_command_sessions",
 					"provider_command_tombstones",
 					"provider_command_turns",
+					"provider_runs",
 					"provider_state",
 					"read_model_counter",
 					"sent_alerts",
@@ -350,6 +351,7 @@ describe("Persistence Effect", () => {
 					migration_id: 77,
 					name: "message_parts_result_event_seq_index",
 				},
+				{ migration_id: 78, name: "provider_run_ownership" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

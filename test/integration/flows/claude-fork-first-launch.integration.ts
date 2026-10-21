@@ -322,6 +322,39 @@ describe("Integration: Claude forks at first launch", () => {
 				.map((mark) => (mark.kind === "enqueue" ? mark.prompt : "")),
 		).toEqual(["Continue fork"]);
 		assertNoHiddenOutput(forkId);
+		const db = new Database(harness.eventsDbPath, { readonly: true });
+		try {
+			const turns = db
+				.prepare(`SELECT t.state, t.run_id, t.started_at,
+				r.status AS run_status FROM turns t
+				JOIN messages m ON m.id = t.user_message_id AND m.session_id = t.session_id
+				LEFT JOIN provider_runs r ON r.id = t.run_id AND r.session_id = t.session_id
+				WHERE t.session_id = ? AND m.is_inherited = 0`)
+				.all(forkId);
+			expect(turns).toEqual([
+				{
+					state: "completed",
+					run_id: expect.any(String),
+					started_at: expect.any(Number),
+					run_status: "completed",
+				},
+			]);
+			expect(
+				db
+					.prepare(`SELECT e.type FROM events e JOIN provider_runs r
+				ON r.id = json_extract(e.metadata, '$.runId') AND r.session_id = e.session_id
+				WHERE e.session_id = ? ORDER BY e.sequence`)
+					.all(forkId),
+			).toEqual(
+				expect.arrayContaining([
+					{ type: "run.requested" },
+					{ type: "run.started" },
+					{ type: "turn.completed" },
+				]),
+			);
+		} finally {
+			db.close();
+		}
 	});
 
 	it("pre-warms an active-goal Fork with only a hidden clear, then adopts it for the real turn", async () => {

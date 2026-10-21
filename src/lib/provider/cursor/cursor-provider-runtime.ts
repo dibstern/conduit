@@ -49,6 +49,7 @@ export const makeCursorProviderRuntime = (deps: RunnerProviderInstanceDeps) =>
 								"cursor.forkDigest"
 							];
 							return yield* recoverRunnerCommands(sql, sessionId, "cursor", {
+								legacyResult: connection.legacyResult,
 								driverForAccount: (id) =>
 									Result.getOrUndefined(resolve(accounts, { _tag: "Id", id }))
 										?.driver,

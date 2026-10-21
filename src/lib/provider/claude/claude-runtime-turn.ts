@@ -1,7 +1,6 @@
 import type { UUID } from "node:crypto";
 import { Deferred, Effect, HashMap, Ref } from "effect";
 import { parseAttachmentDataUrl } from "../../attachment-data-url.js";
-import { nativeThreadKey } from "../../persistence/effect/provider-state-effect.js";
 import {
 	isClaudeResumeFailure,
 	isClaudeResumeRefused,
@@ -10,6 +9,7 @@ import type { SendTurnInput, TurnResult } from "../types.js";
 import { isInterruptedResult } from "./claude-event-translator.js";
 import type { ClaudeProviderRuntimeState } from "./claude-provider-runtime.js";
 import {
+	claudeProviderStateUpdates,
 	getOrUndefined,
 	getSession,
 	getState,
@@ -20,18 +20,16 @@ import type {
 	SDKUserMessage,
 } from "./types.js";
 
-/**
- * A sent input awaiting its result. Map order is start order: a waiter moves
- * to the end when the SDK starts it, so the last started one owns a result.
- */
-export interface TurnWaiter {
+/** A sent input awaiting durable provider intake or a pre-intake failure. */
+export interface PendingIntake {
 	readonly deferred: Deferred.Deferred<TurnResult, Error>;
-	readonly started: boolean;
 	/** A held send's message, placed when the SDK starts the input. */
 	readonly unplaced?: SendTurnInput;
+	/** Keeps delayed native intake output routable after an indeterminate reply. */
+	readonly releaseSink?: Effect.Effect<void>;
 }
 
-export type TurnWaiters = ReadonlyMap<string, TurnWaiter>;
+export type PendingIntakes = ReadonlyMap<string, PendingIntake>;
 
 const zeroTurnResult = (status: TurnResult["status"]): TurnResult => ({
 	status,
@@ -41,46 +39,46 @@ const zeroTurnResult = (status: TurnResult["status"]): TurnResult => ({
 	providerStateUpdates: [],
 });
 
-function updateTurnWaiters<A>(
+function updatePendingIntakes<A>(
 	stateRef: Ref.Ref<ClaudeProviderRuntimeState>,
 	sessionId: string,
-	f: (waiters: TurnWaiters) => readonly [A, TurnWaiters],
+	f: (waiters: PendingIntakes) => readonly [A, PendingIntakes],
 ): Effect.Effect<A> {
 	return Ref.modify(stateRef, (state) => {
 		const [value, waiters] = f(
-			getOrUndefined(HashMap.get(state.turnWaiters, sessionId)) ?? new Map(),
+			getOrUndefined(HashMap.get(state.pendingIntakes, sessionId)) ?? new Map(),
 		);
 		return [
 			value,
 			{
 				...state,
-				turnWaiters:
+				pendingIntakes:
 					waiters.size === 0
-						? HashMap.remove(state.turnWaiters, sessionId)
-						: HashMap.set(state.turnWaiters, sessionId, waiters),
+						? HashMap.remove(state.pendingIntakes, sessionId)
+						: HashMap.set(state.pendingIntakes, sessionId, waiters),
 			},
 		];
 	});
 }
 
-export function addTurnWaiter(
+export function addPendingIntake(
 	stateRef: Ref.Ref<ClaudeProviderRuntimeState>,
 	sessionId: string,
 	inputId: string,
-	waiter: TurnWaiter,
+	waiter: PendingIntake,
 ): Effect.Effect<void> {
-	return updateTurnWaiters(stateRef, sessionId, (waiters) => [
+	return updatePendingIntakes(stateRef, sessionId, (waiters) => [
 		undefined,
 		new Map(waiters).set(inputId, waiter),
 	]);
 }
 
-function takeTurnWaiters(
+function takePendingIntakes(
 	stateRef: Ref.Ref<ClaudeProviderRuntimeState>,
 	sessionId: string,
-	pick: (waiters: TurnWaiters) => readonly string[],
-): Effect.Effect<ReadonlyArray<readonly [string, TurnWaiter]>> {
-	return updateTurnWaiters(stateRef, sessionId, (waiters) => {
+	pick: (waiters: PendingIntakes) => readonly string[],
+): Effect.Effect<ReadonlyArray<readonly [string, PendingIntake]>> {
+	return updatePendingIntakes(stateRef, sessionId, (waiters) => {
 		const rest = new Map(waiters);
 		const taken = pick(waiters).flatMap((id) => {
 			const waiter = waiters.get(id);
@@ -88,25 +86,34 @@ function takeTurnWaiters(
 			return waiter ? [[id, waiter] as const] : [];
 		});
 		return [taken, rest];
-	});
+	}).pipe(
+		Effect.tap((taken) =>
+			Effect.forEach(
+				taken,
+				([, pending]) => pending.releaseSink ?? Effect.void,
+			),
+		),
+	);
 }
 
-export function removeTurnWaiter(
+export function removePendingIntake(
 	stateRef: Ref.Ref<ClaudeProviderRuntimeState>,
 	sessionId: string,
 	inputId: string,
 ): Effect.Effect<void> {
-	return Effect.asVoid(takeTurnWaiters(stateRef, sessionId, () => [inputId]));
+	return Effect.asVoid(
+		takePendingIntakes(stateRef, sessionId, () => [inputId]),
+	);
 }
 
-export function pendingTurnWaiters(
+export function pendingIntakes(
 	stateRef: Ref.Ref<ClaudeProviderRuntimeState>,
 	sessionId: string,
-): Effect.Effect<TurnWaiters> {
+): Effect.Effect<PendingIntakes> {
 	return Effect.map(
 		getState(stateRef),
 		(state) =>
-			getOrUndefined(HashMap.get(state.turnWaiters, sessionId)) ?? new Map(),
+			getOrUndefined(HashMap.get(state.pendingIntakes, sessionId)) ?? new Map(),
 	);
 }
 
@@ -114,113 +121,100 @@ export function hasPendingTurn(
 	stateRef: Ref.Ref<ClaudeProviderRuntimeState>,
 	sessionId: string,
 ): Effect.Effect<boolean> {
-	return Effect.map(
-		pendingTurnWaiters(stateRef, sessionId),
-		(waiters) => waiters.size > 0,
-	);
+	return Effect.gen(function* () {
+		const ctx = yield* getSession(stateRef, sessionId);
+		return (
+			ctx?.turnInFlight === true ||
+			(yield* pendingIntakes(stateRef, sessionId)).size > 0
+		);
+	});
 }
 
 /** The input a result without uuids (older SDKs) answers. */
 function currentInputId(
 	ctx: ClaudeSessionContext,
-	waiters: TurnWaiters,
+	waiters: PendingIntakes,
 ): string[] {
 	if (ctx.currentTurnId && waiters.has(ctx.currentTurnId))
 		return [ctx.currentTurnId];
-	const first = waiters.keys().next();
-	return first.done ? [] : [first.value];
+	return [];
 }
 
-/**
- * `command_lifecycle: started`: marks the input started (moving it to the end
- * of start order) and hands back its still-unplaced message, once.
- */
-export function startTurnWaiter(
-	stateRef: Ref.Ref<ClaudeProviderRuntimeState>,
-	sessionId: string,
-	inputId: string,
-): Effect.Effect<SendTurnInput | undefined> {
-	return updateTurnWaiters(stateRef, sessionId, (waiters) => {
-		const waiter = waiters.get(inputId);
-		if (!waiter) return [undefined, waiters];
-		const rest = new Map(waiters);
-		rest.delete(inputId);
-		rest.set(inputId, { deferred: waiter.deferred, started: true });
-		return [waiter.unplaced, rest];
-	});
-}
-
-/** `command_lifecycle: cancelled` before `started` resolves the input cancelled. */
-export function cancelTurnWaiterEffect(
+/** Called only after placement and run.started have been persisted. */
+export function acceptIntakeEffect(
 	stateRef: Ref.Ref<ClaudeProviderRuntimeState>,
 	sessionId: string,
 	inputId: string,
 ): Effect.Effect<void> {
 	return Effect.gen(function* () {
-		const taken = yield* takeTurnWaiters(stateRef, sessionId, (waiters) =>
-			waiters.get(inputId)?.started === false ? [inputId] : [],
-		);
+		const taken = yield* takePendingIntakes(stateRef, sessionId, () => [
+			inputId,
+		]);
+		for (const [, pending] of taken)
+			yield* Deferred.succeed(pending.deferred, zeroTurnResult("accepted"));
+	});
+}
+
+/** `command_lifecycle: cancelled` before `started` resolves the input cancelled. */
+export function cancelIntakeEffect(
+	stateRef: Ref.Ref<ClaudeProviderRuntimeState>,
+	sessionId: string,
+	inputId: string,
+): Effect.Effect<void> {
+	return Effect.gen(function* () {
+		const taken = yield* takePendingIntakes(stateRef, sessionId, () => [
+			inputId,
+		]);
 		for (const [, waiter] of taken)
 			yield* Deferred.succeed(waiter.deferred, zeroTurnResult("cancelled"));
 	});
 }
 
-export function rejectTurnIfPendingEffect(
-	stateRef: Ref.Ref<ClaudeProviderRuntimeState>,
+/** A result settles only inputs that never reached provider intake. */
+export function unacceptedResultInputIds(
 	ctx: ClaudeSessionContext,
-	err: Error,
-): Effect.Effect<void> {
-	return Effect.gen(function* () {
-		const current = yield* getSession(stateRef, ctx.sessionId);
-		if (current !== ctx) return;
-
-		const taken = yield* takeTurnWaiters(stateRef, ctx.sessionId, (waiters) =>
-			currentInputId(ctx, waiters),
-		);
-		for (const [, waiter] of taken) yield* Deferred.fail(waiter.deferred, err);
-	});
+	result: SDKResultMessage,
+	waiters: PendingIntakes,
+): string[] {
+	const covered =
+		result.user_message_uuids ??
+		(result.user_message_uuid
+			? [result.user_message_uuid]
+			: !ctx.currentRunId && ctx.acceptedOutputOwner
+				? [ctx.acceptedOutputOwner.inputId]
+				: undefined);
+	return covered
+		? [...waiters.keys()].filter((id) => covered.includes(id))
+		: currentInputId(ctx, waiters);
 }
 
-/**
- * Settles every input a result covers: the latest one started gets the
- * result, the rest resolve `joined`. A result without uuids answers the
- * current input.
- */
-export function resolveTurnEffect(
+export function settleUnacceptedResultEffect(
 	stateRef: Ref.Ref<ClaudeProviderRuntimeState>,
 	ctx: ClaudeSessionContext,
 	result: SDKResultMessage,
 ): Effect.Effect<void> {
 	return Effect.gen(function* () {
-		const covered =
-			result.user_message_uuids ??
-			(result.user_message_uuid ? [result.user_message_uuid] : undefined);
-		const taken = yield* takeTurnWaiters(stateRef, ctx.sessionId, (waiters) =>
-			covered
-				? [...waiters.keys()].filter((id) => covered.includes(id))
-				: currentInputId(ctx, waiters),
+		const taken = yield* takePendingIntakes(
+			stateRef,
+			ctx.sessionId,
+			(waiters) => unacceptedResultInputIds(ctx, result, waiters),
 		);
-		const owner =
-			[...taken].reverse().find(([, waiter]) => waiter.started) ?? taken.at(-1);
-		if (!owner) return;
-		ctx.turnCount++;
 		const turnResult = sdkResultToTurnResult(ctx, result);
-		for (const [id, waiter] of taken)
-			yield* Deferred.succeed(
-				waiter.deferred,
-				id === owner[0] ? turnResult : zeroTurnResult("joined"),
-			);
+		for (const [, waiter] of taken)
+			yield* Deferred.succeed(waiter.deferred, turnResult);
 	});
 }
 
-export function resolveErrorTurnEffect(
+export function resolveIntakeErrorEffect(
 	stateRef: Ref.Ref<ClaudeProviderRuntimeState>,
 	ctx: ClaudeSessionContext,
 	err: unknown,
 ): Effect.Effect<void> {
 	return Effect.gen(function* () {
-		const taken = yield* takeTurnWaiters(stateRef, ctx.sessionId, (waiters) =>
-			currentInputId(ctx, waiters),
+		const taken = yield* takePendingIntakes(
+			stateRef,
+			ctx.sessionId,
+			(waiters) => currentInputId(ctx, waiters),
 		);
 		// Build an error TurnResult rather than rejecting the promise,
 		// so the caller gets a structured response.
@@ -292,38 +286,7 @@ export function sdkResultToTurnResult(
 		isClaudeResumeFailure(errorMessage)
 			? { nativeResumeRejected: true }
 			: {}),
-		providerStateUpdates: [
-			...(isSuccess && ctx.resumeSessionId
-				? [
-						{
-							key: nativeThreadKey(ctx.instanceId ?? "claude"),
-							value: JSON.stringify({
-								configDir: ctx.configDir,
-								resumeSessionId: ctx.resumeSessionId,
-								firstSequence: ctx.nativeThread?.firstSequence ?? 0,
-								deliveredThrough: ctx.nativeThread?.deliveredThrough ?? 0,
-							}),
-						},
-					]
-				: []),
-			...(isSuccess
-				? [
-						{
-							key: `claudeAgent:${ctx.instanceId ?? "claude"}`,
-							value: ctx.currentAgent ?? "",
-						},
-					]
-				: []),
-			...(ctx.lastAssistantUuid
-				? [
-						{
-							key: "lastAssistantUuid",
-							value: ctx.lastAssistantUuid,
-						},
-					]
-				: []),
-			{ key: "turnCount", value: ctx.turnCount },
-		],
+		providerStateUpdates: claudeProviderStateUpdates(ctx, isSuccess),
 	};
 }
 
@@ -370,13 +333,13 @@ export function buildUserMessage(input: SendTurnInput): SDKUserMessage {
 	};
 }
 
-export function settleQueuedTurnDeferredsEffect(
+export function settlePendingIntakesEffect(
 	stateRef: Ref.Ref<ClaudeProviderRuntimeState>,
 	sessionId: string,
 	outcome: string | TurnResult,
 ): Effect.Effect<void, never> {
 	return Effect.gen(function* () {
-		const taken = yield* takeTurnWaiters(stateRef, sessionId, (waiters) => [
+		const taken = yield* takePendingIntakes(stateRef, sessionId, (waiters) => [
 			...waiters.keys(),
 		]);
 		for (const [, waiter] of taken) {

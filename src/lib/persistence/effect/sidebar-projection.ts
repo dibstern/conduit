@@ -8,6 +8,7 @@
 import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
+import { sessionRunOwnersQuery } from "../../provider/session-run-settlement.js";
 import type {
 	PendingApprovalCountRow,
 	SessionRow,
@@ -88,17 +89,30 @@ export const refreshSidebar = (
 				AND row IS NOT NULL`,
 		]);
 		const next = sidebarRows(top, family, approvals, version, projectIds);
+		// Migration backfills also refresh rows before run ownership exists.
+		const hasRunOwnership =
+			top.some((root) => root.status !== "idle") &&
+			(yield* sql`SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'provider_runs'`)
+				.length > 0;
 		const storedRows = new Map(
 			stored.map((row) => [row.session_id, decodeRow(row.row)]),
 		);
 		for (const { root_id: rootId } of candidates) {
-			const row = next.get(rootId);
+			let row = next.get(rootId);
 			if (row === undefined) {
 				if (storedRows.has(rootId))
 					yield* sql`
 						UPDATE session_sidebar SET row = NULL, version = ${version}
 						WHERE session_id = ${rootId}`;
 				continue;
+			}
+			if (hasRunOwnership && row.session.status !== "idle") {
+				const stop = yield* sessionRunOwnersQuery(sql, rootId, {
+					confirmedStop: true,
+					excludeRetainedSteers: true,
+				});
+				if (stop.owners.length === 0 && stop.retainedSteers)
+					row = { ...row, onlyRetainedSteers: true };
 			}
 			const { changed } = changeSidebarRow(storedRows.get(rootId), row);
 			if (!changed) continue;

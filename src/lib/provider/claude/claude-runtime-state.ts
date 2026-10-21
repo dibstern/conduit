@@ -7,8 +7,43 @@ import {
 	Option,
 	Ref,
 } from "effect";
+import { nativeThreadKey } from "../../persistence/effect/provider-state-effect.js";
+import type { ProviderStateUpdate } from "../types.js";
 import type { ClaudeProviderRuntimeState } from "./claude-provider-runtime.js";
 import type { ClaudeSessionContext } from "./types.js";
+
+export function claudeProviderStateUpdates(
+	ctx: ClaudeSessionContext,
+	includeResume: boolean,
+): readonly ProviderStateUpdate[] {
+	return [
+		...(includeResume && ctx.resumeSessionId
+			? [
+					{
+						key: nativeThreadKey(ctx.instanceId ?? "claude"),
+						value: JSON.stringify({
+							configDir: ctx.configDir,
+							resumeSessionId: ctx.resumeSessionId,
+							firstSequence: ctx.nativeThread?.firstSequence ?? 0,
+							deliveredThrough: ctx.nativeThread?.deliveredThrough ?? 0,
+						}),
+					},
+				]
+			: []),
+		...(includeResume
+			? [
+					{
+						key: `claudeAgent:${ctx.instanceId ?? "claude"}`,
+						value: ctx.currentAgent ?? "",
+					},
+				]
+			: []),
+		...(ctx.lastAssistantUuid
+			? [{ key: "lastAssistantUuid", value: ctx.lastAssistantUuid }]
+			: []),
+		{ key: "turnCount", value: ctx.turnCount },
+	];
+}
 
 export const getOrUndefined = <A>(option: Option.Option<A>): A | undefined =>
 	Option.isSome(option) ? option.value : undefined;

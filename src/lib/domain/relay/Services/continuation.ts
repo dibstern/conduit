@@ -678,12 +678,20 @@ export const makeContinuation = Effect.gen(function* () {
 			const value = rows[0]?.limit_recovery;
 			const recovery = value == null ? null : decodeRecovery(value);
 			if (!recovery || recovery.continued) return false;
-			// Continuations reuse the cut-off message. Only a newer user message
-			// permits another auto-switch; event sequence survives restarts and ties.
+			// Continuations re-place the cut-off to change run membership. Only a
+			// user's first creation permits another switch; sequence survives ties.
 			const latest = yield* sql<{
 				type: string;
 				reason: string | null;
-			}>`SELECT type, json_extract(data, '$.reason') AS reason FROM events WHERE session_id = ${sessionId} AND (type = 'session.resumed' OR (type = 'message.created' AND json_extract(data, '$.role') = 'user')) ORDER BY sequence DESC LIMIT 1`;
+			}>`SELECT candidate.type, json_extract(candidate.data, '$.reason') AS reason
+				FROM events candidate WHERE candidate.session_id = ${sessionId}
+				AND (candidate.type = 'session.resumed' OR (candidate.type = 'message.created'
+					AND json_extract(candidate.data, '$.role') = 'user'
+					AND NOT EXISTS (SELECT 1 FROM events prior
+						WHERE prior.session_id = candidate.session_id AND prior.type = 'message.created'
+						AND prior.sequence < candidate.sequence
+						AND json_extract(prior.data, '$.messageId') = json_extract(candidate.data, '$.messageId'))))
+				ORDER BY candidate.sequence DESC LIMIT 1`;
 			if (
 				latest[0]?.type === "session.resumed" &&
 				latest[0].reason === "auto-switch"

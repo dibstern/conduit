@@ -101,6 +101,33 @@ const seed = Effect.gen(function* () {
 	yield* sql`INSERT INTO messages (id, session_id, turn_id, role, text, created_at, updated_at) VALUES ('assistant-1', 'session-1', 'user-1', 'assistant', 'Update 1 Update 2 Final response', 2, 2)`;
 	yield* add(1, 4);
 	yield* sql`INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at) VALUES ('final-part', 'assistant-1', 'text', 'Final response', 100, 9, 9)`;
+	const commit = yield* makeCommitAndSignal;
+	const owner = { provider: "claude", metadata: { runId: "run-1" } };
+	yield* commit([
+		canonicalEvent(
+			"run.requested",
+			"session-1",
+			{ runId: "run-1", inputId: "user-1" },
+			owner,
+		),
+		canonicalEvent(
+			"message.created",
+			"session-1",
+			{
+				sessionId: "session-1",
+				messageId: "user-1",
+				role: "user",
+				inputId: "user-1",
+			},
+			owner,
+		),
+		canonicalEvent(
+			"run.started",
+			"session-1",
+			{ requestedRunId: "run-1", inputId: "user-1" },
+			owner,
+		),
+	]);
 });
 const add = (from: number, through: number) =>
 	Effect.gen(function* () {
@@ -115,12 +142,197 @@ const complete = Effect.gen(function* () {
 			"turn.completed",
 			"session-1",
 			{ messageId: "assistant-1", userMessageId: "user-1" },
-			{ provider: "claude" },
+			{ provider: "claude", metadata: { runId: "run-1" } },
 		),
 	]);
 });
 
 describe("RecapService persisted versions", () => {
+	for (const provider of ["claude", "opencode"]) {
+		it.effect(
+			`automatically recaps ${provider} only when projection completes its run`,
+			() => {
+				const fixture = layer({ when: "turn-end" });
+				return Effect.gen(function* () {
+					yield* seed;
+					const commit = yield* makeCommitAndSignal;
+					const sql = yield* SqlClient.SqlClient;
+					const service = yield* RecapServiceTag;
+					const owner = { provider, metadata: { runId: "run-1" } };
+					const completion = canonicalEvent(
+						"turn.completed",
+						"session-1",
+						{ messageId: "assistant-1" },
+						owner,
+					);
+					expect(yield* sql`SELECT status FROM provider_runs`).toEqual([
+						{ status: "running" },
+					]);
+					expect(fixture.query).not.toHaveBeenCalled();
+					yield* commit([
+						provider === "opencode"
+							? canonicalEvent(
+									"session.status",
+									"session-1",
+									{ sessionId: "session-1", status: "idle" },
+									owner,
+								)
+							: completion,
+					]);
+					expect(yield* sql`SELECT state FROM turns`).toEqual([
+						{ state: "completed" },
+					]);
+					expect(yield* sql`SELECT status FROM provider_runs`).toEqual([
+						{ status: "completed" },
+					]);
+					yield* Effect.tryPromise(() =>
+						vi.waitFor(async () => {
+							expect(fixture.query).toHaveBeenCalledTimes(1);
+						}),
+					);
+					expect(yield* service.list(target)).toHaveLength(1);
+					// Extra background log parts do not make a repeated native terminal a new run end.
+					yield* add(5, 6);
+					yield* commit([
+						canonicalEvent(
+							"turn.completed",
+							"session-1",
+							{ messageId: "assistant-1" },
+							owner,
+						),
+					]);
+					yield* Effect.yieldNow;
+					yield* Effect.yieldNow;
+					expect(fixture.query).toHaveBeenCalledTimes(1);
+					expect(yield* service.list(target)).toHaveLength(1);
+				}).pipe(Effect.provide(fixture.live));
+			},
+		);
+	}
+	for (const provider of ["claude", "opencode"]) {
+		for (const firstFails of [false, true]) {
+			it.effect(
+				`recaps each ${provider} joined input once${firstFails ? " even if one summary fails" : ""}`,
+				() => {
+					const fixture = layer({ when: "turn-end" });
+					if (firstFails)
+						fixture.query.mockImplementationOnce(async function* () {
+							yield { type: "result", result: "" };
+							throw new Error("Summary unavailable");
+						});
+					return Effect.gen(function* () {
+						yield* seed;
+						const commit = yield* makeCommitAndSignal;
+						const sql = yield* SqlClient.SqlClient;
+						const owner = { provider, metadata: { runId: "run-1" } };
+						yield* commit([
+							canonicalEvent(
+								"run.requested",
+								"session-1",
+								{ runId: "run-2", inputId: "user-2" },
+								{ provider, metadata: { runId: "run-2" } },
+							),
+							canonicalEvent(
+								"message.created",
+								"session-1",
+								{
+									sessionId: "session-1",
+									messageId: "user-2",
+									role: "user",
+									inputId: "user-2",
+								},
+								{ provider, metadata: { runId: "run-2" } },
+							),
+							canonicalEvent(
+								"run.started",
+								"session-1",
+								{ requestedRunId: "run-2", inputId: "user-2" },
+								owner,
+							),
+							canonicalEvent(
+								"message.created",
+								"session-1",
+								{
+									sessionId: "session-1",
+									messageId: "assistant-2",
+									role: "assistant",
+									parentID: "user-2",
+								},
+								owner,
+							),
+						]);
+						for (let n = 1; n <= 4; n++)
+							yield* sql`INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at, surfacing_ordinal, surfacing_probabilities) VALUES (${`joined-part-${n}`}, 'assistant-2', 'text', ${`Joined update ${n}`}, ${n}, ${n + 2}, ${n + 2}, ${n}, '{"finding":1}')`;
+						yield* commit([
+							provider === "opencode"
+								? canonicalEvent(
+										"session.status",
+										"session-1",
+										{ sessionId: "session-1", status: "idle" },
+										owner,
+									)
+								: canonicalEvent(
+										"turn.completed",
+										"session-1",
+										{ messageId: "assistant-2" },
+										owner,
+									),
+						]);
+						expect(
+							yield* sql`SELECT id, state, run_id FROM turns ORDER BY id`,
+						).toEqual([
+							{ id: "user-1", state: "completed", run_id: "run-1" },
+							{ id: "user-2", state: "completed", run_id: "run-1" },
+						]);
+						yield* Effect.tryPromise(() =>
+							vi.waitFor(() => expect(fixture.query).toHaveBeenCalledTimes(2)),
+						);
+						const recaps =
+							yield* sql`SELECT turn_id FROM turn_recaps ORDER BY turn_id`;
+						expect(recaps).toHaveLength(firstFails ? 1 : 2);
+						if (!firstFails)
+							expect(recaps).toEqual([
+								{ turn_id: "user-1" },
+								{ turn_id: "user-2" },
+							]);
+					}).pipe(Effect.provide(fixture.live));
+				},
+			);
+		}
+	}
+	for (const terminal of ["turn.error", "turn.interrupted"] as const) {
+		it.effect(`does not automatically recap an owned ${terminal}`, () => {
+			const fixture = layer({ when: "turn-end" });
+			return Effect.gen(function* () {
+				yield* seed;
+				const commit = yield* makeCommitAndSignal;
+				yield* commit([
+					terminal === "turn.error"
+						? canonicalEvent(
+								terminal,
+								"session-1",
+								{ messageId: "assistant-1", error: "failed" },
+								{ provider: "claude", metadata: { runId: "run-1" } },
+							)
+						: canonicalEvent(
+								terminal,
+								"session-1",
+								{ messageId: "assistant-1" },
+								{ provider: "claude", metadata: { runId: "run-1" } },
+							),
+				]);
+				expect(
+					yield* (yield* SqlClient.SqlClient)`SELECT state FROM turns`,
+				).toEqual([
+					{ state: terminal === "turn.error" ? "error" : "interrupted" },
+				]);
+				yield* Effect.yieldNow;
+				expect(fixture.query).not.toHaveBeenCalled();
+				expect(yield* (yield* RecapServiceTag).list(target)).toEqual([]);
+			}).pipe(Effect.provide(fixture.live));
+		});
+	}
+
 	it.effect(
 		"summarizes unclassified log messages with Jev off and no key",
 		() => {
@@ -495,7 +707,9 @@ describe("RecapService persisted versions", () => {
 					Effect.forkScoped,
 				);
 				yield* Effect.yieldNow;
-				yield* complete;
+				const requested = yield* service
+					.generate({ ...target, scope: "new" })
+					.pipe(Effect.exit, Effect.forkScoped);
 				expect((yield* Fiber.await(generating))._tag).toBe("Success");
 				const failure = yield* service.subscribe(target).pipe(
 					Stream.filter((snapshot) => snapshot.error !== null),
@@ -509,6 +723,7 @@ describe("RecapService persisted versions", () => {
 				expect(duplicate._tag).toBe("Failure");
 				releaseGeneration();
 				const failed = yield* Fiber.join(failure);
+				yield* Fiber.join(requested);
 				expect(failed._tag).toBe("Some");
 				if (failed._tag === "Some")
 					expect(failed.value).toMatchObject({

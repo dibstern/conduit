@@ -45,24 +45,43 @@ const at = () => ({ createdAt: ++clock });
 const turn = (n: number): CanonicalEvent[] => {
 	const user = `user-${n}`;
 	const reply = `reply-${n}`;
+	const runId = `run-${n}`;
+	const owned = () => ({ ...at(), provider: "claude", metadata: { runId } });
 	return [
+		canonicalEvent(
+			"run.requested",
+			"parent",
+			{ runId, inputId: user },
+			owned(),
+		),
 		canonicalEvent(
 			"message.created",
 			"parent",
 			{ sessionId: "parent", messageId: user, role: "user" },
-			at(),
+			owned(),
+		),
+		canonicalEvent(
+			"run.started",
+			"parent",
+			{ requestedRunId: runId, inputId: user },
+			owned(),
 		),
 		canonicalEvent(
 			"text.delta",
 			"parent",
 			{ messageId: user, partId: `${user}:text`, text: `Ask ${n}` },
-			at(),
+			owned(),
 		),
 		canonicalEvent(
 			"message.created",
 			"parent",
-			{ sessionId: "parent", messageId: reply, role: "assistant" },
-			at(),
+			{
+				sessionId: "parent",
+				messageId: reply,
+				role: "assistant",
+				parentID: user,
+			},
+			owned(),
 		),
 		...Array.from({ length: TOOLS }, (_, t) => {
 			const partId = `${reply}:tool-${t}`;
@@ -71,7 +90,7 @@ const turn = (n: number): CanonicalEvent[] => {
 					"tool.running",
 					"parent",
 					{ messageId: reply, partId },
-					at(),
+					owned(),
 				);
 			return [
 				canonicalEvent(
@@ -84,7 +103,7 @@ const turn = (n: number): CanonicalEvent[] => {
 						callId: partId,
 						input: { tool: "Bash", command: `echo ${t}` },
 					},
-					at(),
+					owned(),
 				),
 				heartbeat(),
 				// Progress the transcript shows: never superseded by the copy.
@@ -94,7 +113,7 @@ const turn = (n: number): CanonicalEvent[] => {
 								"tool.running",
 								"parent",
 								{ messageId: reply, partId, metadata: { progress: t } },
-								at(),
+								owned(),
 							),
 						]
 					: []),
@@ -109,7 +128,7 @@ const turn = (n: number): CanonicalEvent[] => {
 								"tool.completed",
 								"parent",
 								{ messageId: reply, partId, result: `out ${t}`, duration: t },
-								at(),
+								owned(),
 							),
 						]),
 			];
@@ -118,9 +137,9 @@ const turn = (n: number): CanonicalEvent[] => {
 			"text.delta",
 			"parent",
 			{ messageId: reply, partId: `${reply}:text`, text: `Done ${n}` },
-			at(),
+			owned(),
 		),
-		canonicalEvent("turn.completed", "parent", { messageId: reply }, at()),
+		canonicalEvent("turn.completed", "parent", { messageId: reply }, owned()),
 	];
 };
 

@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { Effect } from "effect";
+import { Effect, Layer, Schedule } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
@@ -20,6 +20,10 @@ import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/op
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import {
+	ProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionTag,
+} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
@@ -27,6 +31,7 @@ import {
 import { forkSession } from "../../../src/lib/domain/relay/Services/session-command.js";
 import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
+import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProviderStateEffectTag } from "../../../src/lib/persistence/effect/provider-state-effect.js";
@@ -78,6 +83,10 @@ it("creates Cursor forks and Side Threads locally and seeds their current inheri
 		usageEligible: false,
 	};
 	const scenarios: Record<string, unknown>[] = [];
+	const persistence = makePersistenceEffectLayer(
+		":memory:",
+		"cursor-fork-flow",
+	);
 	try {
 		await Effect.runPromise(
 			Effect.scoped(
@@ -86,50 +95,69 @@ it("creates Cursor forks and Side Threads locally and seeds their current inheri
 					const read = yield* ReadQueryEffectTag;
 					const state = yield* ProviderStateEffectTag;
 					const sql = yield* SqlClient.SqlClient;
-					yield* commit([
-						canonicalEvent("session.created", "source", {
-							sessionId: "source",
-							title: "Source",
-							provider: "cursor",
-						}),
-						...sessionPickEvents("source", {
-							harness: "cursor",
-							model: { providerId: "cursor", modelId: "composer-2.5" },
-							effort: "",
-							contextWindow: "",
-						}),
-						canonicalEvent(
-							"message.created",
-							"source",
-							{
+					const ingestion = yield* ProviderRuntimeIngestionTag;
+					const persist = yield* ClaudeEventPersistEffectTag;
+					yield* commit(
+						[
+							canonicalEvent("session.created", "source", {
 								sessionId: "source",
+								title: "Source",
+								provider: "cursor",
+							}),
+							...sessionPickEvents("source", {
+								harness: "cursor",
+								model: { providerId: "cursor", modelId: "composer-2.5" },
+								effort: "",
+								contextWindow: "",
+							}),
+							canonicalEvent("run.requested", "source", {
+								runId: "source-run",
+								inputId: "question",
+							}),
+							canonicalEvent(
+								"message.created",
+								"source",
+								{
+									sessionId: "source",
+									messageId: "question",
+									role: "user",
+								},
+								{ createdAt: 1 },
+							),
+							canonicalEvent("run.started", "source", {
+								inputId: "question",
+								requestedRunId: "source-run",
+							}),
+							canonicalEvent("text.delta", "source", {
 								messageId: "question",
-								role: "user",
-							},
-							{ createdAt: 1 },
-						),
-						canonicalEvent("text.delta", "source", {
-							messageId: "question",
-							partId: "question:text",
-							text: "Original source context",
-						}),
-						canonicalEvent(
-							"message.created",
-							"source",
-							{
-								sessionId: "source",
+								partId: "question:text",
+								text: "Original source context",
+							}),
+							canonicalEvent(
+								"message.created",
+								"source",
+								{
+									sessionId: "source",
+									messageId: "answer",
+									parentID: "question",
+									role: "assistant",
+								},
+								{ createdAt: 2 },
+							),
+							canonicalEvent("text.delta", "source", {
 								messageId: "answer",
-								role: "assistant",
-							},
-							{ createdAt: 2 },
-						),
-						canonicalEvent("text.delta", "source", {
-							messageId: "answer",
-							partId: "answer:text",
-							text: "Original answer",
-						}),
-						canonicalEvent("turn.completed", "source", { messageId: "answer" }),
-					]);
+								partId: "answer:text",
+								text: "Original answer",
+							}),
+							canonicalEvent("turn.completed", "source", {
+								messageId: "answer",
+							}),
+						].map((event) => ({
+							...event,
+							provider: "cursor",
+							metadata: { ...event.metadata, runId: "source-run" },
+						})),
+					);
 					const fork = yield* forkSession("source");
 					const side = yield* forkSession("source", {
 						side: { title: "Side", inputId: "side-input" },
@@ -170,13 +198,47 @@ it("creates Cursor forks and Side Threads locally and seeds their current inheri
 							port,
 							environment: () => ({}),
 						},
-						() => Effect.succeed({}),
+						(output) =>
+							Effect.gen(function* () {
+								if (output.type === "event")
+									yield* ingestion.ingest(output.event);
+								if (output.type === "place-user-message")
+									yield* persist.persistUserMessage(
+										output.input.sessionId,
+										output.input.text,
+										{
+											provider: "cursor",
+											messageId: output.input.inputId,
+											inputId: output.input.inputId,
+											...(output.input.runId
+												? { runId: output.input.runId }
+												: {}),
+										},
+									);
+								return {};
+							}).pipe(
+								Effect.mapError((cause) => ({
+									operation: "cursor fixture output",
+									message: String(cause),
+								})),
+							),
 					);
 					const send = (sessionId: string, prompt: string) =>
 						Effect.gen(function* () {
+							const inputId = `${sessionId}:${prompt}`;
+							const runId = `run:${inputId}`;
+							yield* commit([
+								canonicalEvent(
+									"run.requested",
+									sessionId,
+									{ runId, inputId },
+									{ provider: "cursor", metadata: { runId } },
+								),
+							]);
 							const prepared = yield* driver.prepareTurnEffect({
 								sessionId,
-								inputId: `${sessionId}:${prompt}`,
+								inputId,
+								runId,
 								prompt,
 								history: [],
 								providerState: {},
@@ -193,8 +255,19 @@ it("creates Cursor forks and Side Threads locally and seeds their current inheri
 								...prepared,
 							});
 							expect(result, JSON.stringify(result)).toMatchObject({
-								status: "completed",
+								status: "accepted",
 							});
+							const ended = yield* sql<{ run: string; turn: string }>`
+								SELECT r.status AS run, t.state AS turn FROM provider_runs r
+								JOIN turns t ON t.run_id = r.id AND t.session_id = r.session_id
+								WHERE r.id = ${runId} AND r.session_id = ${sessionId}`.pipe(
+								Effect.repeat({
+									until: (rows) => rows[0]?.run === "completed",
+									schedule: Schedule.spaced("10 millis"),
+								}),
+								Effect.timeout("5 seconds"),
+							);
+							expect(ended).toEqual([{ run: "completed", turn: "completed" }]);
 							const calls = readFileSync(capture, "utf8")
 								.trim()
 								.split("\n")
@@ -294,7 +367,10 @@ it("creates Cursor forks and Side Threads locally and seeds their current inheri
 					Effect.provideService(LoggerTag, makeMockLogger()),
 					Effect.provide(makeOverridesStateLive()),
 					Effect.provide(
-						makePersistenceEffectLayer(":memory:", "cursor-fork-flow"),
+						Layer.merge(
+							persistence,
+							ProviderRuntimeIngestionLive.pipe(Layer.provide(persistence)),
+						),
 					),
 				),
 			),

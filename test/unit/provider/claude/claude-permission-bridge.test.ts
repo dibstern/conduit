@@ -122,6 +122,73 @@ describe("ClaudePermissionBridge", () => {
 		bridge = new ClaudePermissionBridge({ sink });
 	});
 
+	it.each([
+		"Bash",
+		"AskUserQuestion",
+	])("carries the accepted run to %s requests", async (toolName) => {
+		ctx.currentRunId = "accepted-run";
+		await bridge.canUseTool(
+			ctx,
+			toolName,
+			{},
+			{
+				signal: new AbortController().signal,
+				toolUseID: "tool-run",
+				requestId: "request-run",
+			},
+		);
+		const request =
+			toolName === "AskUserQuestion"
+				? sink.requestQuestion
+				: sink.requestPermission;
+		expect(request).toHaveBeenCalledWith(
+			expect.objectContaining({ runId: "accepted-run" }),
+		);
+	});
+
+	it.each([
+		"Bash",
+		"AskUserQuestion",
+	])("leaves a foreign agent's %s request outside the root run", async (toolName) => {
+		ctx.currentRunId = "accepted-run";
+		await bridge.canUseTool(
+			ctx,
+			toolName,
+			{},
+			{
+				signal: new AbortController().signal,
+				toolUseID: "foreign-tool",
+				requestId: "foreign-request",
+				agentID: "foreign-agent",
+			},
+		);
+		const request =
+			toolName === "AskUserQuestion"
+				? sink.requestQuestion
+				: sink.requestPermission;
+		expect(request).toHaveBeenCalledWith(
+			expect.not.objectContaining({ runId: expect.anything() }),
+		);
+	});
+
+	it("retains a known root tool's run when its permission request arrives later", async () => {
+		ctx.currentRunId = "new-run";
+		ctx.toolRunIds = new Map([["old-tool", "old-run"]]);
+		await bridge.canUseTool(
+			ctx,
+			"Bash",
+			{},
+			{
+				signal: new AbortController().signal,
+				toolUseID: "old-tool",
+				requestId: "old-request",
+			},
+		);
+		expect(sink.requestPermission).toHaveBeenCalledWith(
+			expect.objectContaining({ runId: "old-run" }),
+		);
+	});
+
 	it("creates a pending approval and blocks until resolved", async () => {
 		let resolveSink: (v: unknown) => void = () => {};
 		(sink.requestPermission as ReturnType<typeof vi.fn>) = vi.fn(() =>

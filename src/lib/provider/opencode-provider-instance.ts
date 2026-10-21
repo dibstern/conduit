@@ -4,7 +4,7 @@
 
 import { realpathSync } from "node:fs";
 import { join } from "node:path";
-import { Deferred, Effect, type Scope } from "effect";
+import { Effect, type Scope } from "effect";
 import {
 	type Account,
 	MANAGED_OPENCODE_ACCOUNT_ID,
@@ -53,25 +53,11 @@ export function sideThreadPermissionRules(
 	];
 }
 
-function interruptedTurnResult(): TurnResult {
-	return {
-		status: "interrupted",
-		cost: 0,
-		tokens: { input: 0, output: 0 },
-		durationMs: 0,
-		providerStateUpdates: [],
-	};
-}
-
-function sendFailedTurnResult(message: string): TurnResult {
-	return {
-		status: "error",
-		cost: 0,
-		tokens: { input: 0, output: 0 },
-		durationMs: 0,
-		error: { code: "send_failed", message },
-		providerStateUpdates: [],
-	};
+function sendFailure(message: string) {
+	return Object.assign(new Error(message), {
+		code: "SEND_FAILED",
+		retryable: false,
+	});
 }
 
 export interface OpenCodeProviderInstanceOptions {
@@ -104,6 +90,7 @@ export interface OpenCodeProviderInstanceOptions {
 
 export class OpenCodeProviderInstance implements ProviderInstance {
 	readonly providerId = "opencode";
+	readonly userMessageIdForInput = openCodeInputMessageId;
 
 	private readonly client: OpenCodeAPI;
 	private readonly workspaceRoot: string | undefined;
@@ -115,18 +102,10 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	private readonly instanceIdForSession: OpenCodeProviderInstanceOptions["instanceIdForSession"];
 	private readonly clientForAccount: OpenCodeProviderInstanceOptions["clientForAccount"];
 	private readonly hasWorktreeToolForSession: OpenCodeProviderInstanceOptions["hasWorktreeToolForSession"];
-	private readonly pendingTurns = new Map<
+	private readonly compactions = new Map<
 		string,
-		{
-			readonly deferred: Deferred.Deferred<TurnResult, Error>;
-			inFlight: number;
-		}
+		Array<{ inputId: string; messageId?: string }>
 	>();
-	/** Sends whose user echo is not yet seen, in handoff order. Compaction and
-	 *  legacy echoes can still carry an ID that OpenCode chose. */
-	private readonly unechoedInputs = new Map<string, string[]>();
-	/** Echo message id to send, so a retried translation tags the same send. */
-	private readonly echoInputIds = new Map<string, string>();
 
 	constructor(options: OpenCodeProviderInstanceOptions) {
 		this.client = options.client;
@@ -137,26 +116,21 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		this.hasWorktreeToolForSession = options.hasWorktreeToolForSession;
 	}
 
-	/** Match reserved IDs exactly; legacy provider IDs retain their FIFO fallback. */
-	inputIdForUserEcho(sessionId: string, messageId: string): string | undefined {
-		const tagged = this.echoInputIds.get(messageId);
-		if (tagged) return tagged;
-		const queue = this.unechoedInputs.get(sessionId) ?? [];
-		const reserved = inputIdFromOpenCodeMessageId(messageId);
-		const index = reserved === undefined ? 0 : queue.indexOf(reserved);
-		const inputId = index < 0 ? undefined : queue.splice(index, 1)[0];
-		if (inputId) this.echoInputIds.set(messageId, inputId);
-		return inputId;
-	}
-
-	private forgetInput(sessionId: string, inputId: string): void {
-		const queue = this.unechoedInputs.get(sessionId) ?? [];
-		const remaining = queue.filter((id) => id !== inputId);
-		if (remaining.length > 0) this.unechoedInputs.set(sessionId, remaining);
-		else this.unechoedInputs.delete(sessionId);
-		for (const [messageId, id] of this.echoInputIds) {
-			if (id === inputId) this.echoInputIds.delete(messageId);
-		}
+	/** Summarize alone cannot reserve its native user message identity. */
+	inputIdForUserEcho(
+		sessionId: string,
+		messageId: string,
+		compaction = false,
+	): string | undefined {
+		const exact = inputIdFromOpenCodeMessageId(messageId);
+		if (exact || !compaction) return exact;
+		const calls = this.compactions.get(sessionId);
+		const pending =
+			calls?.find((call) => call.messageId === messageId) ??
+			calls?.find((call) => call.messageId === undefined);
+		if (!pending) return undefined;
+		pending.messageId = messageId;
+		return pending.inputId;
 	}
 
 	/**
@@ -254,14 +228,6 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	sendTurnEffect(
 		input: SendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
-		return this.sendTurnLocalEffect(input).pipe(
-			Effect.mapError((cause) => this.providerFailure("sendTurn", cause)),
-		);
-	}
-
-	private sendTurnLocalEffect(
-		input: SendTurnInput,
-	): Effect.Effect<TurnResult, Error> {
 		const {
 			sessionId,
 			prompt,
@@ -304,7 +270,31 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			...(variant ? { variant } : {}),
 		};
 
+		let submitted = false;
+		const indeterminate: TurnResult = {
+			status: "indeterminate",
+			cost: 0,
+			tokens: { input: 0, output: 0 },
+			durationMs: 0,
+			providerStateUpdates: [],
+		};
+		const recalled: TurnResult = { ...indeterminate, status: "cancelled" };
+		const recall = Effect.callback<TurnResult>((resume) => {
+			const onAbort = () =>
+				resume(Effect.succeed(submitted ? indeterminate : recalled));
+			if (abortSignal.aborted) onAbort();
+			else abortSignal.addEventListener("abort", onAbort, { once: true });
+			return Effect.sync(() =>
+				abortSignal.removeEventListener("abort", onAbort),
+			);
+		});
 		return Effect.gen({ self: this }, function* () {
+			if (abortSignal.aborted) return recalled;
+			const awaitIntake = input.awaitIntake;
+			if (!awaitIntake)
+				return yield* Effect.fail(
+					sendFailure("OpenCode intake acknowledgement is unavailable"),
+				);
 			// Resolve the owning client first: a session bound to a NAMED
 			// OpenCode instance must be prompted on THAT instance's server. A
 			// resolution failure (unknown/unconfigured instance) becomes a clean
@@ -318,7 +308,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 				log.error(
 					`sendTurn client resolution failed for session ${sessionId}: ${message}`,
 				);
-				return sendFailedTurnResult(message);
+				return yield* Effect.fail(sendFailure(message));
 			}
 			const client = clientResult.success;
 			if (
@@ -337,37 +327,8 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 					.join("\n");
 			}
 
-			let pendingTurn = this.pendingTurns.get(sessionId);
-			if (pendingTurn) {
-				pendingTurn.inFlight += 1;
-			} else {
-				const deferred = yield* Deferred.make<TurnResult, Error>();
-				pendingTurn = { deferred, inFlight: 1 };
-				this.pendingTurns.set(sessionId, pendingTurn);
-			}
-
-			const onAbort = () => {
-				log.info(`Turn aborted for session ${sessionId}`);
-				client.session.abort(sessionId).catch((err) => {
-					log.warn(`Failed to abort session ${sessionId}: ${err}`);
-				});
-			};
-			abortSignal.addEventListener("abort", onAbort, { once: true });
-
-			const cleanup = Effect.sync(() => {
-				abortSignal.removeEventListener("abort", onAbort);
-				this.forgetInput(sessionId, input.inputId);
-				pendingTurn.inFlight -= 1;
-				if (
-					pendingTurn.inFlight === 0 &&
-					this.pendingTurns.get(sessionId) === pendingTurn
-				) {
-					this.pendingTurns.delete(sessionId);
-				}
-			});
-
 			return yield* Effect.gen({ self: this }, function* () {
-				if (abortSignal.aborted) return interruptedTurnResult();
+				if (abortSignal.aborted) return recalled;
 				if (isCompaction) {
 					yield* input.eventSink.push({
 						...compactionEvent,
@@ -393,14 +354,26 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 											"A session model pick is required before compacting.",
 										);
 									if (abortSignal.aborted) return;
-									const queue = this.unechoedInputs.get(sessionId) ?? [];
-									queue.push(input.inputId);
-									this.unechoedInputs.set(sessionId, queue);
-									await client.session.summarize(sessionId, compactModel);
+									submitted = true;
+									const pending = { inputId: input.inputId };
+									const calls = this.compactions.get(sessionId) ?? [];
+									calls.push(pending);
+									this.compactions.set(sessionId, calls);
+									try {
+										await client.session.summarize(sessionId, compactModel);
+									} finally {
+										calls.splice(calls.indexOf(pending), 1);
+										if (
+											calls.length === 0 &&
+											this.compactions.get(sessionId) === calls
+										)
+											this.compactions.delete(sessionId);
+									}
 								}
 								return;
 							}
 							const session = await client.session.get(sessionId);
+							if (abortSignal.aborted) return;
 							// Existing sessions use their stored directory, ignoring prompt cwd.
 							if (
 								session.directory &&
@@ -457,9 +430,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 								await client.session.update(sessionId, { permission });
 							}
 							if (!abortSignal.aborted) {
-								const queue = this.unechoedInputs.get(sessionId) ?? [];
-								queue.push(input.inputId);
-								this.unechoedInputs.set(sessionId, queue);
+								submitted = true;
 								await client.session.prompt(sessionId, promptOptions);
 							}
 						},
@@ -502,36 +473,20 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 							},
 						});
 					}
-					return sendFailedTurnResult(message);
+					if (!submitted) return yield* Effect.fail(sendFailure(message));
+					return indeterminate;
 				}
-
-				if (abortSignal.aborted) return interruptedTurnResult();
-				return yield* Deferred.await(pendingTurn.deferred);
-			}).pipe(Effect.ensuring(cleanup));
-			// The client stays valid for the whole turn, abort included.
-		}).pipe(Effect.scoped);
-	}
-
-	/**
-	 * Called by the SSE event pipeline when a turn completes, errors, or
-	 * is interrupted. Resolves the pending sendTurnEffect() wait.
-	 *
-	 * This is the bridge between the existing SSE-based event flow and the
-	 * ProviderInstance interface. The SSE pipeline continues to own the
-	 * connection; the provider instance just waits for notification.
-	 */
-	notifyTurnCompleted(sessionId: string, result: TurnResult): void {
-		const pendingTurn = this.pendingTurns.get(sessionId);
-		if (pendingTurn && this.pendingTurns.get(sessionId) === pendingTurn) {
-			this.pendingTurns.delete(sessionId);
-			// SSE callbacks are synchronous; complete the Effect Deferred directly
-			// instead of adding an app-internal runtime bridge.
-			Deferred.doneUnsafe(pendingTurn.deferred, Effect.succeed(result));
-		} else {
-			log.debug(
-				`notifyTurnCompleted: no pending turn for session ${sessionId} -- may have already completed`,
-			);
-		}
+				if (!submitted) return recalled;
+				// Once submitted, only the ordinary native echo can establish intake.
+				return yield* awaitIntake.pipe(
+					Effect.catch(() => Effect.succeed(indeterminate)),
+				);
+			});
+		}).pipe(
+			Effect.raceFirst(recall),
+			Effect.scoped,
+			Effect.mapError((cause) => this.providerFailure("sendTurn", cause)),
+		);
 	}
 
 	interruptTurnEffect(
@@ -653,43 +608,14 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	}
 
 	endSessionEffect(
-		sessionId: string,
+		_sessionId: string,
 	): Effect.Effect<void, ProviderInstanceFailure> {
-		return Effect.sync(() => this.endLocalSession(sessionId));
-	}
-
-	private endLocalSession(sessionId: string): void {
-		// OpenCode owns session state server-side. The provider instance's only
-		// per-session state is the pending turn Deferred; fail it so the caller
-		// unblocks. We do not call client.session.abort: reload is a provider
-		// instance reset, while interruptTurn/cancel is a provider cancellation.
-		const pendingTurn = this.pendingTurns.get(sessionId);
-		if (pendingTurn && this.pendingTurns.get(sessionId) === pendingTurn) {
-			this.pendingTurns.delete(sessionId);
-			Deferred.doneUnsafe(
-				pendingTurn.deferred,
-				Effect.fail(new Error("Session ended (reload)")),
-			);
-		}
+		return Effect.void;
 	}
 
 	shutdownEffect(): Effect.Effect<void> {
 		return Effect.sync(() => {
 			log.info("OpenCodeProviderInstance shutting down");
-
-			for (const [sessionId, pendingTurn] of this.pendingTurns) {
-				if (this.pendingTurns.get(sessionId) !== pendingTurn) continue;
-				this.pendingTurns.delete(sessionId);
-				Deferred.doneUnsafe(
-					pendingTurn.deferred,
-					Effect.fail(
-						new Error(
-							`Provider instance shutdown -- turn for session ${sessionId} cancelled`,
-						),
-					),
-				);
-			}
-			this.pendingTurns.clear();
 		});
 	}
 }

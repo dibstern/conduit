@@ -2689,9 +2689,8 @@ export class ProcessBrowser {
 		return { chunks, done };
 	}
 
-	/** Wait for a completed/failed turn's shell version to advance past cursor,
-	 * optionally matching the input that started it so a late prior end cannot win.
-	 * The current read model does not advance this field on interruption. */
+	/** Wait for an ended turn and an idle shell, proving the exact input's end
+	 * even when the shell coalesces several native completions. */
 	waitForTurnEnd(
 		sessionId: string,
 		cursor = 0,
@@ -2712,7 +2711,22 @@ export class ProcessBrowser {
 			(message) =>
 				message["type"] === "session_row" &&
 				message["id"] === sessionId &&
-				(inputId === undefined || message["lastTurnEndInputId"] === inputId) &&
+				(inputId === undefined ||
+					message["lastTurnEndInputId"] === inputId ||
+					// Shell rows coalesce: a fast successor can replace this input's
+					// end before its idle row arrives. Its own durable transcript
+					// timing still proves completion; another input's end never does.
+					this.frames.slice(cursor).some(({ message: row }) => {
+						const timing = row["turnTiming"] as
+							| { endedAt?: number }
+							| undefined;
+						return (
+							row["type"] === "transcript_message" &&
+							row["sessionId"] === sessionId &&
+							row["inputId"] === inputId &&
+							timing?.endedAt !== undefined
+						);
+					})) &&
 				(message["status"] === "idle" || message["status"] === "error") &&
 				Number(message["lastTurnEndVersion"] ?? -1) > endedBefore,
 			cursor,
