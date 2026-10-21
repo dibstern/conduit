@@ -9,6 +9,7 @@
 			"!acceptance/visual/artifacts",
 			"!test-results",
 			"!test/e2e/linux-service/artifacts",
+			"!test/e2e/macos-service/artifacts",
 			"!.claude",
 			"!.scratch",
 			"!.worktrees",

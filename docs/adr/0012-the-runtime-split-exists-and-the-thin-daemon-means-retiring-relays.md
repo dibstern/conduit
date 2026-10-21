@@ -20,8 +20,12 @@ Most of that split has shipped:
   again at startup.
 - `conduit serve` is the server: HTTP and WebSocket, the CLI socket, the
   SQLite store and its projectors, pollers and sweeps. It is the only SQLite
-  writer. `conduit service install` runs it under launchd `KeepAlive` or
-  systemd `Restart=always`.
+  writer. `conduit service install` runs it under launchd
+  `KeepAlive.SuccessfulExit=false` or systemd `Restart=on-failure`. A full
+  Shutdown exits 0 and stays stopped, so uninstall cannot race a respawn; a
+  supervised restart or handled signal exits 75 and is restarted with its
+  runtime owners intact. Units written before this need one
+  `conduit service install` before uninstall is race-free.
 - SIGINT, SIGTERM and a restart leave runners, the PTY host and OpenCode
   running. Only an explicit full stop ends them.
 

@@ -92,8 +92,8 @@ export interface ForegroundDaemonHandle {
 	getInstances(): ReadonlyArray<Readonly<OpenCodeInstance>>;
 	removeProject(slug: string): Promise<void>;
 	stop(): Promise<void>;
-	/** Settles with stop()'s outcome, whether stop was triggered by a signal, RPC shutdown, or a direct call. */
-	readonly stopped: Promise<void>;
+	/** Settles after teardown with the effective mode; a full stop overrides a concurrent restart. */
+	readonly stopped: Promise<"restart" | "stop">;
 }
 
 class ForegroundRuntimeUnavailableError extends Error {
@@ -290,8 +290,11 @@ export async function startForegroundDaemon(
 					Effect.map((state) => state.stopManagedProcesses === true),
 				),
 	);
-	let settleStopped!: { resolve: () => void; reject: (error: unknown) => void };
-	const stopSettled = new Promise<void>((resolve, reject) => {
+	let settleStopped!: {
+		resolve: (mode: "restart" | "stop") => void;
+		reject: (error: unknown) => void;
+	};
+	const stopSettled = new Promise<"restart" | "stop">((resolve, reject) => {
 		settleStopped = { resolve, reject };
 	});
 	// A failed stop is reported through `stopped`; don't also surface it as an unhandled rejection.
@@ -391,7 +394,10 @@ export async function startForegroundDaemon(
 		})().finally(() => {
 			stopInFlight = null;
 		});
-		stopInFlight.then(settleStopped.resolve, settleStopped.reject);
+		stopInFlight.then(
+			() => settleStopped.resolve(shutdownMode),
+			settleStopped.reject,
+		);
 		return stopInFlight;
 	};
 

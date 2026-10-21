@@ -14,6 +14,7 @@ import {
 } from "../lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../lib/daemon/daemon-rpc-client.js";
 import { isDaemonRunning } from "../lib/daemon/daemon-utils.js";
+import { SUPERVISED_RESTART_EXIT_CODE } from "../lib/server/build-update.js";
 import { getVersion } from "../lib/version.js";
 import type { CommandContext } from "./cli-command-handlers.js";
 import { DEFAULT_CONFIG_DIR, type ParsedArgs } from "./cli-utils.js";
@@ -21,6 +22,7 @@ import { DEFAULT_CONFIG_DIR, type ParsedArgs } from "./cli-utils.js";
 const LABEL = "dev.conduit.server";
 
 export interface ServicePaths {
+	label: string;
 	unitFile: string;
 	configDir: string;
 	workingDirectory: string;
@@ -64,6 +66,7 @@ export interface ServiceRunner {
 	saveConfig: typeof saveDaemonConfig;
 	checkDaemon(): Promise<boolean>;
 	stopDaemon(configDir: string, pid: number): Promise<void>;
+	waitForExit(pid: number): Promise<void>;
 	isPortAvailable(port: number, host: string): Promise<boolean>;
 }
 
@@ -73,14 +76,27 @@ export function getServicePaths(
 	configDir: string,
 	workingDirectory: string,
 	xdgConfigHome?: string,
+	label = LABEL,
 ): ServicePaths {
 	if (platform !== "darwin" && platform !== "linux") {
 		throw new Error("Conduit services are supported on macOS and Linux only.");
 	}
+	if (
+		platform === "darwin" &&
+		(label !== label.trim() ||
+			!/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/.test(
+				label,
+			))
+	) {
+		throw new Error(
+			"CONDUIT_SERVICE_LABEL must be a reverse-DNS label containing only letters, digits, dots and hyphens.",
+		);
+	}
 	return {
+		label: platform === "darwin" ? label : "conduit.service",
 		unitFile:
 			platform === "darwin"
-				? join(homeDir, "Library", "LaunchAgents", `${LABEL}.plist`)
+				? join(homeDir, "Library", "LaunchAgents", `${label}.plist`)
 				: join(
 						xdgConfigHome || join(homeDir, ".config"),
 						"systemd",
@@ -160,7 +176,7 @@ export function generateServiceUnit(
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>${LABEL}</string>
+  <key>Label</key><string>${xml(paths.label)}</string>
   <key>ProgramArguments</key>
   <array>
     <string>${xml(shell)}</string>
@@ -169,7 +185,10 @@ export function generateServiceUnit(
     <string>${xml(script)}</string>
   </array>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key><false/>
+  </dict>
   <key>WorkingDirectory</key><string>${xml(paths.workingDirectory)}</string>
   <key>EnvironmentVariables</key>
   <dict>
@@ -205,7 +224,9 @@ ${Object.entries(environment)
 	.map(([key, value]) => `Environment=${systemdArgument(`${key}=${value}`)}`)
 	.join("\n")}
 ExecStart=${systemdArgument(shell)} -l -c ${systemdArgument(script.replaceAll("$", () => "$$"))}
-Restart=always
+Restart=on-failure
+SuccessExitStatus=${SUPERVISED_RESTART_EXIT_CODE}
+RestartForceExitStatus=${SUPERVISED_RESTART_EXIT_CODE}
 RestartSec=5
 KillMode=process
 StandardOutput=append:${paths.stdout.replaceAll("%", "%%")}
@@ -278,7 +299,7 @@ async function serviceState(options: ServiceOptions, runner: ServiceRunner) {
 	const result = await runner.exec(
 		platform === "darwin" ? "launchctl" : "systemctl",
 		platform === "darwin"
-			? ["print", `gui/${uid}/${LABEL}`]
+			? ["print", `gui/${uid}/${paths.label}`]
 			: [
 					"--user",
 					"show",
@@ -324,7 +345,7 @@ export async function runServiceCommand(
 		throw new Error("Conduit services are supported on macOS and Linux only.");
 	}
 	const state = await serviceState(options, runner);
-	const target = `gui/${uid}/${LABEL}`;
+	const target = `gui/${uid}/${paths.label}`;
 	const logs = `  Stdout: ${action === "install" ? paths.stdout : state.stdout}\n  Stderr: ${action === "install" ? paths.stderr : state.stderr}\n`;
 	if (action === "status") {
 		return `Conduit service\n  Installed: ${state.installed ? "yes" : "no"}\n  Loaded: ${state.loaded ? "yes" : "no"}\n  Running: ${state.running ? "yes" : "no"}\n  PID: ${state.pid ?? "none"}\n  Unit: ${paths.unitFile}\n${logs}`;
@@ -374,6 +395,7 @@ export async function runServiceCommand(
 				? ["bootout", target]
 				: ["--user", "stop", "conduit"],
 		);
+		if (state.pid !== undefined) await runner.waitForExit(state.pid);
 	}
 	if (await runner.checkDaemon()) {
 		throw new Error(
@@ -473,6 +495,22 @@ export async function runServiceCommand(
 export function createServiceRunner(
 	checkDaemon: ServiceRunner["checkDaemon"],
 ): ServiceRunner {
+	const waitForExit = async (pid: number) => {
+		const deadline = Date.now() + 60_000;
+		while (true) {
+			try {
+				process.kill(pid, 0);
+			} catch (error) {
+				if (error instanceof Error && "code" in error && error.code === "ESRCH")
+					return;
+				throw error;
+			}
+			if (Date.now() >= deadline) {
+				throw new Error(`Timed out waiting for Conduit server ${pid} to stop.`);
+			}
+			await setTimeout(100);
+		}
+	};
 	return {
 		exec: (command, args, environment) =>
 			new Promise((fulfil, reject) => {
@@ -522,6 +560,7 @@ export function createServiceRunner(
 		loadConfig: loadDaemonConfigResult,
 		saveConfig: saveDaemonConfig,
 		checkDaemon,
+		waitForExit,
 		stopDaemon: async (configDir, pid) => {
 			const socketPath = join(configDir, "relay.sock");
 			if (!(await isDaemonRunning(socketPath))) return;
@@ -531,26 +570,7 @@ export function createServiceRunner(
 			);
 			// Shutdown acknowledges intent before disposing the runtime owners.
 			// The socket closes during disposal, so wait for the original process.
-			const deadline = Date.now() + 60_000;
-			while (true) {
-				try {
-					process.kill(pid, 0);
-				} catch (error) {
-					if (
-						error instanceof Error &&
-						"code" in error &&
-						error.code === "ESRCH"
-					)
-						return;
-					throw error;
-				}
-				if (Date.now() >= deadline) {
-					throw new Error(
-						`Timed out waiting for Conduit server ${pid} to stop.`,
-					);
-				}
-				await setTimeout(100);
-			}
+			await waitForExit(pid);
 		},
 		isPortAvailable: (port, host) =>
 			new Promise((fulfil, reject) => {
@@ -586,12 +606,14 @@ export async function handleService(
 		const user = userInfo();
 		const shell = process.env["SHELL"] || user.shell || "/bin/sh";
 		const xdgConfigHome = process.env["XDG_CONFIG_HOME"];
+		const label = process.env["CONDUIT_SERVICE_LABEL"] ?? LABEL;
 		const paths = getServicePaths(
 			process.platform,
 			homeDir,
 			configDir,
 			resolve(ctx.cwd),
 			xdgConfigHome,
+			label,
 		);
 		const output = await runServiceCommand(
 			action,

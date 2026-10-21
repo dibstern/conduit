@@ -40,7 +40,10 @@ import {
 	type ClaudeConfigDir,
 	captureClaudeLaunchLogin,
 } from "../../../provider/claude/claude-sdk-env.js";
-import { ServerBuildUpdateLive } from "../../../server/build-update.js";
+import {
+	ServerBuildUpdateLive,
+	serverExitCode,
+} from "../../../server/build-update.js";
 import {
 	BrowserRpcConnectionsLive,
 	makeRoutedWsRpcServerLayer,
@@ -208,22 +211,23 @@ export const SignalHandlerLayer = Layer.effect(
 	ShutdownSignalTag,
 	Effect.gen(function* () {
 		const deferred = yield* Deferred.make<"restart" | "stop">();
-		let shuttingDown = false;
+		let shutdownMode: "restart" | "stop" | undefined;
 		yield* Deferred.await(deferred).pipe(
-			Effect.tap(() =>
+			Effect.tap((mode) =>
 				Effect.sync(() => {
-					shuttingDown = true;
+					shutdownMode = mode;
 				}),
 			),
 			Effect.forkScoped,
 		);
 
 		const onShutdown = () => {
-			shuttingDown = true;
+			shutdownMode ??= "restart";
 			Deferred.doneUnsafe(deferred, Effect.succeed("restart"));
 		};
 		const onInterrupt = () => {
-			if (shuttingDown) process.exit(0);
+			// A second interrupt during shutdown exits now, keeping the stop/restart exit policy.
+			if (shutdownMode) process.exit(serverExitCode(shutdownMode));
 			onShutdown();
 		};
 		const onReload = () => {
