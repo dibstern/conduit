@@ -176,7 +176,10 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 					await active.complete(true);
 				}
 			};
-			const api = makeMockOpenCodeAPI();
+			// Durable Stop is fenced to the target process, as real clients identify theirs.
+			const api = makeMockOpenCodeAPI({
+				promptProcessId: `opencode:run-now:${sessionId}`,
+			});
 			api.session.abort = vi.fn(stop);
 			api.session.prompt = vi.fn(async (sessionId, options) => {
 				const inputId = options.text.split(" ")[0] ?? "";
