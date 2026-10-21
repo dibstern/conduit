@@ -255,7 +255,7 @@ export const makeCursorRunnerDriver = (
 	port?: CursorSdkPort,
 	persistence?: {
 		readonly read: ReadQueryEffect;
-		readonly state: ProviderStateEffect;
+		readonly state: Omit<ProviderStateEffect, "projectId">;
 	},
 	daemonConfigDir = DEFAULT_CONFIG_DIR,
 	resources?: CursorAccountResources["Service"],

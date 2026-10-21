@@ -1,11 +1,18 @@
-import { Effect, Result } from "effect";
+import { Effect, Result, type Scope } from "effect";
 import { resolve } from "../../account-directory.js";
-import { ProviderStateEffectTag } from "../../persistence/effect/provider-state-effect.js";
-import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
+import {
+	type ProviderStateEffect,
+	ProviderStateEffectTag,
+} from "../../persistence/effect/provider-state-effect.js";
+import {
+	type ReadQueryEffect,
+	ReadQueryEffectTag,
+} from "../../persistence/effect/read-query-effect.js";
 import { makeProcessSessionRunner } from "../runner/process-session-runner.js";
 import { connectRunner } from "../runner/runner-connection.js";
 import {
 	makeRunnerProviderInstance,
+	type RunnerProviderInstance,
 	type RunnerProviderInstanceDeps,
 } from "../runner/runner-provider-instance.js";
 import { recoverRunnerCommands } from "../runner/runner-recovery.js";
@@ -13,10 +20,30 @@ import type { SessionTurn } from "../runner/session-runner.js";
 import { CursorAccountResources } from "./cursor-account-resources.js";
 import { makeCursorRunnerDriver } from "./cursor-runner-driver.js";
 
-export const makeCursorProviderRuntime = (deps: RunnerProviderInstanceDeps) =>
-	Effect.gen(function* () {
-		const read = yield* ReadQueryEffectTag;
-		const state = yield* ProviderStateEffectTag;
+export function makeCursorProviderRuntime(
+	deps: RunnerProviderInstanceDeps,
+	persistence: {
+		readonly read: ReadQueryEffect;
+		readonly state: Omit<ProviderStateEffect, "projectId">;
+	},
+): Effect.Effect<RunnerProviderInstance, never, Scope.Scope>;
+export function makeCursorProviderRuntime(
+	deps: RunnerProviderInstanceDeps,
+): Effect.Effect<
+	RunnerProviderInstance,
+	never,
+	Scope.Scope | ReadQueryEffectTag | ProviderStateEffectTag
+>;
+export function makeCursorProviderRuntime(
+	deps: RunnerProviderInstanceDeps,
+	persistence?: {
+		readonly read: ReadQueryEffect;
+		readonly state: Omit<ProviderStateEffect, "projectId">;
+	},
+) {
+	return Effect.gen(function* () {
+		const read = persistence?.read ?? (yield* ReadQueryEffectTag);
+		const state = persistence?.state ?? (yield* ProviderStateEffectTag);
 		const resources = yield* Effect.serviceOption(CursorAccountResources);
 		return yield* makeRunnerProviderInstance(
 			deps,
@@ -99,3 +126,4 @@ export const makeCursorProviderRuntime = (deps: RunnerProviderInstanceDeps) =>
 				}),
 		);
 	});
+}

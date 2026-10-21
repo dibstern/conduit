@@ -403,8 +403,8 @@ export const applyAccountChange = (change: AccountChange) =>
 		const committed = yield* directory.apply(change, usageOrder, (committed) =>
 			Effect.gen(function* () {
 				if (
-					cursorChange &&
-					(change._tag === "Remove" || change._tag === "Update")
+					change._tag === "Remove" ||
+					(cursorChange && change._tag === "Update")
 				) {
 					const scopes = yield* Effect.serviceOption(AccountResourceScopesTag);
 					if (Option.isSome(scopes)) yield* scopes.value.invalidate(change.id);

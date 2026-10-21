@@ -89,6 +89,7 @@ import {
 	type removeProjectFromEffectRegistry,
 	type saveProject,
 } from "../Services/project-registry-service.js";
+import { ProviderAdapters } from "../Services/provider-adapters.js";
 import { SessionActivityTag } from "../Services/session-activity.js";
 import { SessionDirectory } from "../Services/session-directory.js";
 import { Usage } from "../Services/usage.js";
@@ -203,6 +204,7 @@ export const RelayFactoryLive = (
 		RelayFactoryTag,
 		Effect.gen(function* () {
 			const accounts = yield* AccountDirectory;
+			const providerAdapters = yield* Effect.serviceOption(ProviderAdapters);
 			const cursorResources = yield* Effect.serviceOption(
 				CursorAccountResources,
 			);
@@ -516,6 +518,11 @@ export const RelayFactoryLive = (
 									).pipe(
 										Context.add(ConfigPersistenceTag, configPersistence),
 										Context.add(AccountDirectory, accounts),
+										Context.merge(
+											Option.isSome(providerAdapters)
+												? Context.make(ProviderAdapters, providerAdapters.value)
+												: Context.empty(),
+										),
 										Context.merge(
 											Option.isSome(cursorResources)
 												? Context.make(

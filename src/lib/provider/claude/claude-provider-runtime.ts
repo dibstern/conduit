@@ -220,6 +220,12 @@ export interface ClaudeProviderInstanceDeps {
 	readonly workspaceRoot: string;
 	readonly extraFolders?: readonly string[];
 	readonly daemonConfigDir?: string;
+	readonly projectRootForSession?: NonNullable<
+		import("../runner/runner-provider-instance.js").RunnerProviderInstanceDeps["projectRootForSession"]
+	>;
+	readonly recoveryForSession?: NonNullable<
+		import("../runner/runner-provider-instance.js").RunnerProviderInstanceDeps["recoveryForSession"]
+	>;
 	readonly shellEnv?: (
 		directory: string,
 	) => Readonly<Record<string, string | undefined>>;
@@ -250,6 +256,8 @@ export type ClaudeSessionRunnerDeps = Pick<
 	| "workspaceRoot"
 	| "extraFolders"
 	| "daemonConfigDir"
+	| "projectRootForSession"
+	| "recoveryForSession"
 	| "shellEnv"
 	| "prepareShellEnv"
 	| "claudeSettingsOverrides"

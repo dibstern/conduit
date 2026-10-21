@@ -353,6 +353,205 @@ async function main(): Promise<void> {
 		? join(dist, "src")
 		: fileURLToPath(new URL("../../src", import.meta.url));
 	const extension = dist ? "js" : "ts";
+	if (existsSync(join(root, "daemon-adapters-proof"))) {
+		const proofPath = join(root, "daemon-adapters.ndjson");
+		const record = (entry: Record<string, unknown>) =>
+			appendFileSync(
+				proofPath,
+				`${JSON.stringify({ daemonPid: process.pid, ...entry })}\n`,
+			);
+		const { ProviderRegistry } = (await import(
+			pathToFileURL(
+				join(codeRoot, "lib/provider", `provider-registry.${extension}`),
+			).href
+		)) as typeof import("../../src/lib/provider/provider-registry.js");
+		const { RunnerProviderInstance } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/provider/runner",
+					`runner-provider-instance.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/provider/runner/runner-provider-instance.js");
+		const { OrchestrationEngine } = (await import(
+			pathToFileURL(
+				join(codeRoot, "lib/provider", `orchestration-engine.${extension}`),
+			).href
+		)) as typeof import("../../src/lib/provider/orchestration-engine.js");
+		const { ClaudeDriver } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/provider/claude",
+					`claude-provider-instance.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/provider/claude/claude-provider-instance.js");
+		const { CursorAccountResources } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/provider/cursor",
+					`cursor-account-resources.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/provider/cursor/cursor-account-resources.js");
+		const { AccountResourceScopesTag } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/daemon/Services",
+					`account-resource-scopes.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/daemon/Services/account-resource-scopes.js");
+		const { PersistenceProjectTag } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/persistence/Services",
+					`persistence-service.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/persistence/Services/persistence-service.js");
+		const resourceIdentities = new WeakMap<object, number>();
+		const observedOwners = new WeakSet<object>();
+		const observedScopes = new WeakSet<object>();
+		let nextResourceIdentity = 0;
+		const createClaude = ClaudeDriver.create;
+		Object.assign(ClaudeDriver, {
+			create: (
+				deps: import("../../src/lib/provider/claude/claude-provider-instance.js").ClaudeProviderInstanceDeps,
+			) =>
+				createClaude(deps).pipe(
+					Effect.tap(() =>
+						Effect.gen(function* () {
+							const scopes = yield* Effect.serviceOption(
+								AccountResourceScopesTag,
+							);
+							if (scopes._tag === "Some" && !observedScopes.has(scopes.value)) {
+								const owner = scopes.value;
+								observedScopes.add(owner);
+								const invalidate = owner.invalidate;
+								Object.assign(owner, {
+									invalidate: (accountId: string) =>
+										Effect.gen(function* () {
+											record({ kind: "invalidation-start", accountId });
+											while (
+												existsSync(join(root, `invalidate-${accountId}.hold`))
+											)
+												yield* Effect.sleep("10 millis");
+											yield* invalidate(accountId);
+											record({ kind: "invalidation-end", accountId });
+										}),
+								});
+							}
+							const resources = yield* Effect.serviceOption(
+								CursorAccountResources,
+							);
+							if (
+								resources._tag === "None" ||
+								observedOwners.has(resources.value)
+							)
+								return;
+							const owner = resources.value;
+							observedOwners.add(owner);
+							const use = owner.use;
+							const observedUse: typeof owner.use = (accountId, work) =>
+								use(accountId, (resource) =>
+									Effect.suspend(() => {
+										let identity = resourceIdentities.get(resource);
+										if (identity === undefined) {
+											identity = ++nextResourceIdentity;
+											resourceIdentities.set(resource, identity);
+										}
+										record({
+											kind: "account-scope-use",
+											driver: "cursor",
+											accountId,
+											resourceIdentity: identity,
+										});
+										return work(resource);
+									}),
+								);
+							Object.assign(owner, { use: observedUse });
+						}),
+					),
+				),
+		});
+		const identities = new WeakMap<object, string>();
+		const register = ProviderRegistry.prototype.registerInstance;
+		ProviderRegistry.prototype.registerInstance = function (instance) {
+			if (!identities.has(instance)) {
+				const identity = `${instance.providerId}-${++nextIdentity}`;
+				identities.set(instance, identity);
+				record({
+					kind: "adapter-constructed",
+					driver: instance.providerId,
+					identity,
+				});
+				const send = instance.sendTurnEffect.bind(instance);
+				instance.sendTurnEffect = (input) =>
+					Effect.suspend(() => {
+						record({
+							kind: "send",
+							driver: instance.providerId,
+							identity,
+							sessionId: input.sessionId,
+							projectId: input.projectId,
+							accountId: input.account?.id,
+							workspaceRoot: input.workspaceRoot,
+							extraFolders: input.extraFolders,
+						});
+						return send(input);
+					});
+				const shutdown = instance.shutdownEffect.bind(instance);
+				instance.shutdownEffect = () =>
+					Effect.suspend(() => {
+						record({ kind: "shutdown", driver: instance.providerId, identity });
+						return shutdown();
+					});
+				if (instance instanceof RunnerProviderInstance) {
+					const recover = instance.recoverProjectContextsEffect.bind(instance);
+					instance.recoverProjectContextsEffect = (...args) =>
+						Effect.suspend(() => {
+							record({
+								kind: "recovery-start",
+								driver: instance.providerId,
+								identity,
+							});
+							return recover(...args).pipe(
+								Effect.tap(() =>
+									Effect.sync(() =>
+										record({
+											kind: "recovery-end",
+											driver: instance.providerId,
+											identity,
+										}),
+									),
+								),
+							);
+						});
+				}
+			}
+			return register.call(this, instance);
+		};
+		let nextIdentity = 0;
+		const drain = OrchestrationEngine.prototype.drainSideEffects;
+		OrchestrationEngine.prototype.drainSideEffects = function (...args) {
+			return Effect.gen({ self: this }, function* () {
+				const project = yield* Effect.serviceOption(PersistenceProjectTag);
+				record({
+					kind: "outbox-drain",
+					...(project._tag === "Some"
+						? { projectId: project.value.projectId }
+						: {}),
+				});
+				return yield* drain.apply(this, args);
+			});
+		};
+	}
 	if (existsSync(join(root, "claude-end-session-failure-fixture"))) {
 		const { OrchestrationEngine } = (await import(
 			pathToFileURL(

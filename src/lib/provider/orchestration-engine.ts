@@ -213,6 +213,8 @@ export interface ProviderCallRequest {
 
 export interface OrchestrationEngineOptions {
 	readonly registry: ProviderRegistry;
+	/** Standalone engines own adapters; daemon project engines only borrow them. */
+	readonly ownsRegistry?: boolean;
 	readonly defaultClaudeLaunchConfig?: () => ClaudeLaunchConfig;
 	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
 	readonly durableCommands?: DurableCommandStoreOptions;
@@ -275,6 +277,7 @@ const admittedCallSchema = Schema.Struct({
 
 export class OrchestrationEngine {
 	private readonly registry: ProviderRegistry;
+	private readonly ownsRegistry: boolean;
 	private readonly sessionBindingReadModel: ProviderSessionBindingReadModel;
 	private readonly accountDirectory: OrchestrationEngineOptions["accountDirectory"];
 	private readonly resolveCallContext: OrchestrationEngineOptions["resolveCallContext"];
@@ -294,6 +297,7 @@ export class OrchestrationEngine {
 
 	constructor(options: OrchestrationEngineOptions) {
 		this.registry = options.registry;
+		this.ownsRegistry = options.ownsRegistry ?? true;
 		this.sessionBindingReadModel =
 			options.sessionBindingReadModel ??
 			new InMemoryProviderSessionBindingReadModel();
@@ -1403,7 +1407,7 @@ export class OrchestrationEngine {
 			: Effect.void;
 	}
 
-	/** Shutdown the engine and all provider instances. */
+	/** Release project work, then adapters only when this engine owns them. */
 	shutdownEffect(): Effect.Effect<void> {
 		return Effect.gen({ self: this }, function* () {
 			yield* Effect.sync(() => log.info("OrchestrationEngine shutting down"));
@@ -1411,7 +1415,7 @@ export class OrchestrationEngine {
 				this.cancelPreWarmPreparationEffect(sessionId),
 			);
 			yield* Scope.close(this.controlScope, Exit.void);
-			yield* this.registry.shutdownAllEffect();
+			if (this.ownsRegistry) yield* this.registry.shutdownAllEffect();
 			yield* Effect.sync(() => {
 				this.sessionBindingReadModel.clearTransientBindings();
 				this.inFlightCommands.clear();

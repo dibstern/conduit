@@ -7,6 +7,7 @@ import { runTerminalStatus } from "../../persistence/effect/projectors-effect.js
 import { makeProviderStateEffect } from "../../persistence/effect/provider-state-effect.js";
 import type { TurnResult } from "../types.js";
 import { runnerSinkId } from "./runner-protocol.js";
+import type { RunnerRecoveryDependencies } from "./runner-provider-instance.js";
 import type { SessionFailure, SessionTurn } from "./session-runner.js";
 
 export const runningRunnerCommands = (
@@ -16,7 +17,8 @@ export const runningRunnerCommands = (
 	sessionId?: string,
 ) =>
 	Effect.gen(function* () {
-		const { projectId } = yield* PersistenceProjectTag;
+		const project = yield* Effect.serviceOption(PersistenceProjectTag);
+		const projectId = project._tag === "Some" ? project.value.projectId : null;
 		const rows = yield* sql<{
 			project_key: string;
 			session_id: string;
@@ -36,7 +38,7 @@ export const runningRunnerCommands = (
 		LEFT JOIN provider_runs run ON run.id = outbox.run_id AND run.session_id = outbox.session_id
 		LEFT JOIN turns ON turns.session_id = outbox.session_id
 			AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
-		WHERE outbox.project_key = ${projectId}
+		WHERE (${projectId} IS NULL OR outbox.project_key = ${projectId})
 			AND outbox.status = 'running' AND outbox.effect_type = 'send_turn'
 			AND (${sessionId ?? null} IS NULL OR outbox.session_id = ${sessionId ?? null})
 		ORDER BY outbox.request_sequence`;
@@ -149,15 +151,22 @@ export const settleUnclaimedRunnerCommands = <E>(
 		},
 		failure: SessionFailure,
 	) => Effect.Effect<void, E>,
+	recoveryForSession?: (
+		sessionId: string,
+	) => Effect.Effect<RunnerRecoveryDependencies | undefined>,
+	sessionIds?: ReadonlySet<string>,
 ) =>
 	Effect.gen(function* () {
-		const { projectId } = yield* PersistenceProjectTag;
 		for (const row of yield* runningRunnerCommands(
 			sql,
 			driverKind,
 			driverForAccount,
 		)) {
+			if (sessionIds && !sessionIds.has(row.session_id)) continue;
 			if (claimedSessions.has(row.session_id)) continue;
+			const recovery = yield* recoveryForSession?.(row.session_id) ??
+				Effect.succeed(undefined);
+			if (recoveryForSession && !recovery) continue;
 			const failure: SessionFailure = {
 				operation: "recover stopped runner",
 				message: `${driverKind.charAt(0).toUpperCase()}${driverKind.slice(1)} runner stopped before completing the turn`,
@@ -180,9 +189,9 @@ export const settleUnclaimedRunnerCommands = <E>(
 				},
 				failure,
 			);
-			yield* settleRunnerCommand(
+			const settle = settleRunnerCommand(
 				sql,
-				projectId,
+				row.project_key,
 				row.session_id,
 				row.command_id,
 				row.attempt_count,
@@ -190,6 +199,14 @@ export const settleUnclaimedRunnerCommands = <E>(
 				failure,
 				driverKind,
 			);
+			yield* recovery
+				? settle.pipe(
+						Effect.provideService(
+							ClaudeEventPersistEffectTag,
+							recovery.persist,
+						),
+					)
+				: settle;
 		}
 	});
 

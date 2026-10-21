@@ -17,6 +17,7 @@ import {
 } from "../daemon/config-persistence.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
+import { ProviderAdapters } from "../domain/daemon/Services/provider-adapters.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { InstanceManagementServiceTag } from "../domain/relay/Services/instance-management-service.js";
@@ -145,7 +146,10 @@ const createOrchestrationComponentsEffect = (
 	| ReadQueryEffectTag
 > =>
 	Effect.gen(function* () {
-		const registry = new ProviderRegistry();
+		const sharedAdapters = yield* Effect.serviceOption(ProviderAdapters);
+		const registry = Option.isSome(sharedAdapters)
+			? sharedAdapters.value.registry
+			: new ProviderRegistry();
 
 		// The relay's persistence SqlClient backs
 		// the session binding read model and durable command receipts, so
@@ -182,42 +186,45 @@ const createOrchestrationComponentsEffect = (
 				return yield* instances.use(account.id, directory);
 			});
 
-		const openCodeInstance = (yield* OpenCodeDriver.create({
-			client: options.client,
-			...(options.configDir !== undefined
-				? { configDir: options.configDir }
-				: {}),
-			...(options.workspaceRoot != null
-				? { workspaceRoot: options.workspaceRoot }
-				: {}),
-			clientForSession,
-			clientForAccount: (account, directory) =>
-				instances.use(account.id, directory),
-			instanceIdForSession: (sessionId) =>
-				sessionBindingReadModel.getProviderForSession(sessionId),
-			hasWorktreeToolForSession: (sessionId, account) =>
-				(account
-					? Effect.succeed(account.id)
-					: sessionBindingReadModel.getProviderForSession(sessionId)
-				).pipe(
-					Effect.flatMap((instanceId) =>
-						instanceManagement
-							? instanceManagement.list().pipe(
-									Effect.map((configured) =>
-										configured.some(
-											(instance) =>
-												instance.id ===
-													(instanceId ?? MANAGED_OPENCODE_ACCOUNT_ID) &&
-												instance.managed,
-										),
-									),
-									Effect.orElseSucceed(() => false),
-								)
-							: Effect.succeed(false),
-					),
-				),
-		})) as OpenCodeProviderInstance;
-		registry.registerInstance(openCodeInstance);
+		if (Option.isNone(sharedAdapters)) {
+			registry.registerInstance(
+				yield* OpenCodeDriver.create({
+					client: options.client,
+					...(options.configDir !== undefined
+						? { configDir: options.configDir }
+						: {}),
+					...(options.workspaceRoot != null
+						? { workspaceRoot: options.workspaceRoot }
+						: {}),
+					clientForSession,
+					clientForAccount: (account, directory) =>
+						instances.use(account.id, directory),
+					instanceIdForSession: (sessionId) =>
+						sessionBindingReadModel.getProviderForSession(sessionId),
+					hasWorktreeToolForSession: (sessionId, account) =>
+						(account
+							? Effect.succeed(account.id)
+							: sessionBindingReadModel.getProviderForSession(sessionId)
+						).pipe(
+							Effect.flatMap((instanceId) =>
+								instanceManagement
+									? instanceManagement.list().pipe(
+											Effect.map((configured) =>
+												configured.some(
+													(instance) =>
+														instance.id ===
+															(instanceId ?? MANAGED_OPENCODE_ACCOUNT_ID) &&
+														instance.managed,
+												),
+											),
+											Effect.orElseSucceed(() => false),
+										)
+									: Effect.succeed(false),
+							),
+						),
+				}),
+			);
+		}
 
 		const persist = yield* ClaudeEventPersistEffectTag;
 		let shellEnv = options.shellEnv;
@@ -331,45 +338,47 @@ const createOrchestrationComponentsEffect = (
 						}),
 				),
 			);
-		const claudeInstance = yield* ClaudeDriver.create({
-			shellEnv,
-			...(prepareShellEnv ? { prepareShellEnv } : {}),
-			...(options.onBackgroundTask
-				? { onBackgroundTask: options.onBackgroundTask }
-				: {}),
-			workspaceRoot: options.workspaceRoot ?? process.cwd(),
-			extraFolders: options.extraFolders ?? [],
-			...(options.configDir !== undefined
-				? { daemonConfigDir: options.configDir }
-				: {}),
-			claudeSettingsOverrides: () =>
-				loadRelaySettings(options.configDir).claudeSettings,
-			subagentSdk: options.claudeSubagentSdk ?? defaultClaudeSubagentSdk,
-			...(options.claudeSessionForkSdk
-				? { sessionForkSdk: options.claudeSessionForkSdk }
-				: {}),
-			persistUserMessage: persist.persistUserMessage,
-			...(options.claudeQueryFactory
-				? { queryFactory: options.claudeQueryFactory }
-				: {}),
-			...(options.claudeGenerateTextQueryFactory
-				? { generateTextQueryFactory: options.claudeGenerateTextQueryFactory }
-				: {}),
-			...(options.claudeRunnerFactory
-				? { runnerFactory: options.claudeRunnerFactory }
-				: {}),
-		});
-		registry.registerInstance(claudeInstance);
-		registry.registerInstance(
-			yield* makeCursorProviderRuntime({
+		if (Option.isNone(sharedAdapters)) {
+			const claudeInstance = yield* ClaudeDriver.create({
+				shellEnv,
+				...(prepareShellEnv ? { prepareShellEnv } : {}),
+				...(options.onBackgroundTask
+					? { onBackgroundTask: options.onBackgroundTask }
+					: {}),
 				workspaceRoot: options.workspaceRoot ?? process.cwd(),
-				accounts: accountDirectory.snapshot,
+				extraFolders: options.extraFolders ?? [],
 				...(options.configDir !== undefined
 					? { daemonConfigDir: options.configDir }
 					: {}),
+				claudeSettingsOverrides: () =>
+					loadRelaySettings(options.configDir).claudeSettings,
+				subagentSdk: options.claudeSubagentSdk ?? defaultClaudeSubagentSdk,
+				...(options.claudeSessionForkSdk
+					? { sessionForkSdk: options.claudeSessionForkSdk }
+					: {}),
 				persistUserMessage: persist.persistUserMessage,
-			}),
-		);
+				...(options.claudeQueryFactory
+					? { queryFactory: options.claudeQueryFactory }
+					: {}),
+				...(options.claudeGenerateTextQueryFactory
+					? { generateTextQueryFactory: options.claudeGenerateTextQueryFactory }
+					: {}),
+				...(options.claudeRunnerFactory
+					? { runnerFactory: options.claudeRunnerFactory }
+					: {}),
+			});
+			registry.registerInstance(claudeInstance);
+			registry.registerInstance(
+				yield* makeCursorProviderRuntime({
+					workspaceRoot: options.workspaceRoot ?? process.cwd(),
+					accounts: accountDirectory.snapshot,
+					...(options.configDir !== undefined
+						? { daemonConfigDir: options.configDir }
+						: {}),
+					persistUserMessage: persist.persistUserMessage,
+				}),
+			);
+		}
 		// Durable command receipts share the persistence SqlClient with the
 		// session binding read model. `now`/`generateId` are supplied at this wiring edge
 		// (wall clock + random) so core orchestration stays free of Date.now /
@@ -398,11 +407,19 @@ const createOrchestrationComponentsEffect = (
 		};
 		const engine = new OrchestrationEngine({
 			registry,
+			ownsRegistry: Option.isNone(sharedAdapters),
 			accountDirectory,
 			resolveCallContext,
 			...(sessionBindingReadModel != null ? { sessionBindingReadModel } : {}),
 			...(durableCommands != null ? { durableCommands } : {}),
 		});
+		const openCodeInstance = yield* registry
+			.getInstanceEffect("opencode")
+			.pipe(Effect.orDie);
+		if (!(openCodeInstance instanceof OpenCodeProviderInstance))
+			return yield* Effect.die(
+				new Error("opencode provider is not an OpenCodeProviderInstance"),
+			);
 		return { engine, registry, openCodeInstance };
 	});
 

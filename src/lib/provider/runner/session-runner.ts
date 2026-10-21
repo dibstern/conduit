@@ -186,6 +186,12 @@ export interface SessionFailure {
 
 /** Effects are execution carriers; only command/output/reply data crosses here. */
 export interface SessionRunner {
+	/** Release one project's attachment while its started runner remains independent. */
+	detachSessionEffect?(sessionId: string): Effect.Effect<void>;
+	/** Reattach retained processes when a project's relay is replaced. */
+	attachSessionsEffect?(
+		sessionIds: readonly string[],
+	): Effect.Effect<void, SessionFailure>;
 	/** Native execution and pending intake, independent of an intake reply. */
 	hasActiveTurnsEffect?(sessionId: string): Effect.Effect<boolean>;
 	readonly recoverEffect?: Effect.Effect<void, SessionFailure>;

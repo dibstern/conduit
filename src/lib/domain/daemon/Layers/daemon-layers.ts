@@ -141,6 +141,7 @@ import {
 	makeProjectShellEnvLive,
 	ProjectShellEnvWiringLive,
 } from "./project-shell-env-layer.js";
+import { makeProviderAdaptersLive } from "./provider-adapters-layer.js";
 import {
 	HttpServerRefTag,
 	RelayFactoryLive,
@@ -853,6 +854,9 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			return InputDraftsLive.pipe(Layer.provide(Layer.succeedContext(store)));
 		}),
 	).pipe(Layer.provideMerge(withSessionDirectory));
+	const withProviderAdapters = makeProviderAdaptersLive(configDir).pipe(
+		Layer.provideMerge(withInputDrafts),
+	);
 	const registries = RelayFactoryLive(configDir).pipe(
 		Layer.provideMerge(
 			Layer.mergeAll(
@@ -861,7 +865,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 				}),
 				UsageLive(),
 				MessageSurfacingSettingsLive,
-			).pipe(Layer.provideMerge(withInputDrafts)),
+			).pipe(Layer.provideMerge(withProviderAdapters)),
 		),
 	);
 

@@ -66,7 +66,7 @@ function sendFailure(message: string) {
 }
 
 export interface OpenCodeProviderInstanceOptions {
-	readonly client: OpenCodeAPI;
+	readonly client?: OpenCodeAPI;
 	/** Retained for constructor compatibility; directories are resolved per call. */
 	readonly workspaceRoot?: string;
 	readonly configDir?: string;
@@ -97,7 +97,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	readonly providerId = "opencode";
 	readonly userMessageIdForInput = openCodeInputMessageId;
 
-	private readonly client: OpenCodeAPI;
+	private readonly client: OpenCodeAPI | undefined;
 	private readonly configDir: string;
 	private readonly clientForSession:
 		| ((
@@ -154,16 +154,22 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 				);
 			if (this.clientForAccount && account.driver === "opencode")
 				return this.clientForAccount(account, directory);
-			if (account.id === MANAGED_OPENCODE_ACCOUNT_ID)
+			if (account.id === MANAGED_OPENCODE_ACCOUNT_ID && this.client)
 				return Effect.succeed(this.client);
 			return Effect.fail(
 				new Error(`OpenCode account "${account.id}" has no client route`),
 			);
 		}
 		const resolve = this.clientForSession;
-		if (resolve === undefined) return Effect.succeed(this.client);
-		return resolve(sessionId).pipe(
-			Effect.map((client) => client ?? this.client),
+		return (resolve ? resolve(sessionId) : Effect.succeed(this.client)).pipe(
+			Effect.flatMap((client) => {
+				const selected = client ?? this.client;
+				return selected
+					? Effect.succeed(selected)
+					: Effect.fail(
+							new Error(`OpenCode session "${sessionId}" has no client route`),
+						);
+			}),
 		);
 	}
 

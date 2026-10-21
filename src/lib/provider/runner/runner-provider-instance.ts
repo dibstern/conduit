@@ -20,8 +20,12 @@ import {
 	bindTurnTimelineSink,
 	observeTurnTimelineFrame,
 } from "../../domain/daemon/Services/turn-timeline.js";
-import { PendingInteractionServiceTag } from "../../domain/relay/Services/pending-interaction-service.js";
 import {
+	type PendingInteractionService,
+	PendingInteractionServiceTag,
+} from "../../domain/relay/Services/pending-interaction-service.js";
+import {
+	type ProviderRuntimeIngestion,
 	type ProviderRuntimeIngestionError,
 	ProviderRuntimeIngestionTag,
 } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
@@ -37,10 +41,13 @@ import {
 	ClaudeEventPersistEffectTag,
 	type ClaudeEventPersistFailure,
 } from "../../persistence/effect/claude-event-persist-effect.js";
+import type { makeRetireReplacedProcessPrompts } from "../../persistence/effect/retire-pending-prompts.js";
 import type { BackgroundTaskTransition } from "../../session/background-liveness.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import { ProviderInstanceFailure } from "../errors.js";
+import type { OrchestrationEngine } from "../orchestration-engine.js";
 import type { ProviderRegistry } from "../provider-registry.js";
+import type { RelayEventSinkDeps } from "../relay-event-sink.js";
 import type {
 	EventSink,
 	PermissionDecision,
@@ -59,7 +66,7 @@ import {
 	runnerFailure as sessionFailure,
 } from "./runner-protocol.js";
 import { settleUnclaimedRunnerCommands } from "./runner-recovery.js";
-import { discoverRunners } from "./runner-registry.js";
+import { discoverAllRunners, discoverRunners } from "./runner-registry.js";
 import { failRunnerTurn } from "./runner-turn-failure.js";
 import type {
 	SessionCommand,
@@ -120,10 +127,32 @@ export interface RunnerDriverPieces {
 	readonly nativeSession?: boolean;
 }
 
+export interface RunnerRecoveryDependencies {
+	readonly projectId: string;
+	readonly ingestion: ProviderRuntimeIngestion;
+	readonly pending: PendingInteractionService;
+	readonly timeoutHooks: Pick<
+		RelayEventSinkDeps,
+		"clearTimeout" | "resetTimeout"
+	>;
+	readonly persist: ClaudeEventPersistEffect;
+	readonly resolveCallContext: OrchestrationEngine["resolveCallContextEffect"];
+	readonly retirePrompts: (
+		currentProcessId: string | null,
+	) => ReturnType<Effect.Success<typeof makeRetireReplacedProcessPrompts>>;
+}
+
 export interface RunnerProviderInstanceDeps {
 	readonly workspaceRoot: string;
 	readonly accounts: Effect.Effect<AccountsState, DaemonConfigLoadError>;
 	readonly daemonConfigDir?: string;
+	readonly projectRootForSession?: (
+		sessionId: string,
+		projectId?: string,
+	) => Effect.Effect<string | undefined>;
+	readonly recoveryForSession?: (
+		sessionId: string,
+	) => Effect.Effect<RunnerRecoveryDependencies | undefined>;
 	readonly onBackgroundTask?: (input: BackgroundTaskTransition) => void;
 	readonly ensureChildSession?: ClaudeEventPersistEffect["ensureClaudeSubagentSession"];
 	readonly readSubagentTranscript?: ClaudeEventPersistEffect["readClaudeSubagentTranscript"];
@@ -177,9 +206,13 @@ export const makeRunnerProviderInstance = (
 export class RunnerProviderInstance implements ProviderInstance {
 	readonly providerId: KnownProviderDriverKind;
 	private readonly sinks = new Map<string, EventSink>();
+	private readonly sinkSessions = new Map<string, string>();
 	private detachingInteractions = false;
 	private recoveredSink:
-		| ((sessionId: string, sinkId: string) => EventSink)
+		| ((
+				sessionId: string,
+				sinkId: string,
+		  ) => Effect.Effect<EventSink | undefined>)
 		| undefined;
 	private readonly recoveredSinkIds = new Set<string>();
 	private readonly recoveredRequests = new Map<
@@ -188,95 +221,137 @@ export class RunnerProviderInstance implements ProviderInstance {
 	>();
 
 	readonly recoverRunnerEffect = Effect.gen({ self: this }, function* () {
-		const sql = yield* SqlClient.SqlClient;
+		if (this.deps.recoveryForSession)
+			return yield* this.recoverProjectContextsEffect(
+				this.deps.recoveryForSession,
+			);
 		const ingestion = yield* ProviderRuntimeIngestionTag;
 		const pending = yield* PendingInteractionServiceTag;
 		const timeoutRuntime = yield* Effect.context<OverridesStateTag>();
-		// An in-process runner's turns ended with the relay that ran them, so
-		// every running command is unclaimed. Runner processes may outlive it.
-		let claimed = new Set<string>();
-		if (this.runner.recoverEffect) {
-			this.recoveredSink = (sessionId, sinkId) =>
-				makeRecoveredEventSink({
-					driverKind: this.providerId,
-					sessionId,
-					sql,
-					ingestion,
-					pending,
-					timeoutHooks: makeProcessingTimeoutHooks(timeoutRuntime, sessionId),
-					onRegistered: (id) => {
-						const ready = this.recoveredRequests.get(
-							JSON.stringify([sinkId, id]),
-						);
-						return ready ? Deferred.succeed(ready, undefined) : Effect.void;
-					},
-				});
-			yield* this.runner.recoverEffect;
-			const registrations = yield* Effect.try(() =>
-				discoverRunners(this.deps.workspaceRoot, this.deps.daemonConfigDir),
-			).pipe(
-				Effect.catch((error) =>
-					Effect.logError("Could not verify runner ownership", error).pipe(
-						Effect.as(undefined),
-					),
-				),
-			);
-			// Discovery errors are not proof that a running command has no owner.
-			if (!registrations) return;
-			claimed = new Set(
-				registrations
-					.filter((runner) => runner.driverKind === this.providerId)
-					.map((runner) => runner.sessionId),
-			);
-		}
-		const accounts = yield* this.deps.accounts;
-		yield* settleUnclaimedRunnerCommands(
-			sql,
-			claimed,
-			this.providerId,
-			(id) =>
-				Result.getOrUndefined(resolveAccount(accounts, { _tag: "Id", id }))
-					?.driver,
-			(sinkId, turn, failure) =>
-				Effect.gen({ self: this }, function* () {
-					let persistenceError: ProviderRuntimeIngestionError | undefined;
-					yield* failRunnerTurn(
-						(output) =>
-							Effect.gen(function* () {
-								if (output.type === "event") {
-									// Startup has no WebSocket publisher or live sink yet.
-									yield* ingestion.ingestBatch([output.event], {
-										publishToBus: false,
-										publishToRelay: false,
-									});
-								} else if (output.type === "cancel-interactions") {
-									yield* pending.cancelSessionInteractions(
-										turn.sessionId,
-										output.reason,
-										{ recoverQuestions: false },
-									);
-								}
-								return {};
-							}).pipe(
-								Effect.tapError((error) =>
-									Effect.sync(() => {
-										persistenceError = error;
-									}),
-								),
-								Effect.mapError((error) =>
-									sessionFailure("recover stopped runner", error),
-								),
-							),
-						sinkId,
-						turn,
-						failure,
-						this.providerId,
-					);
-					// failRunnerTurn logs errors; database failures still need a retry.
-					if (persistenceError) return yield* Effect.fail(persistenceError);
-				}),
+		return yield* this.recoverWithContexts((sessionId) =>
+			Effect.succeed({
+				ingestion,
+				pending,
+				timeoutHooks: makeProcessingTimeoutHooks(timeoutRuntime, sessionId),
+			}),
 		);
 	});
+
+	private recoverWithContexts = (
+		recoveryForSession: (
+			sessionId: string,
+		) => Effect.Effect<
+			| Pick<
+					RunnerRecoveryDependencies,
+					"ingestion" | "pending" | "timeoutHooks"
+			  >
+			| undefined
+		>,
+		daemonRecovery?: RunnerProviderInstanceDeps["recoveryForSession"],
+		sessionIds?: ReadonlySet<string>,
+	) =>
+		Effect.gen({ self: this }, function* () {
+			const sql = yield* SqlClient.SqlClient;
+			// An in-process runner's turns ended with the relay that ran them, so
+			// every running command is unclaimed. Runner processes may outlive it.
+			let claimed = new Set<string>();
+			if (this.runner.recoverEffect) {
+				this.recoveredSink = (sessionId, sinkId) =>
+					Effect.gen({ self: this }, function* () {
+						const recovery = yield* recoveryForSession(sessionId);
+						if (!recovery) return undefined;
+						return makeRecoveredEventSink({
+							driverKind: this.providerId,
+							sessionId,
+							sql,
+							ingestion: recovery.ingestion,
+							pending: recovery.pending,
+							timeoutHooks: recovery.timeoutHooks,
+							onRegistered: (id) => {
+								const ready = this.recoveredRequests.get(
+									JSON.stringify([sinkId, id]),
+								);
+								return ready ? Deferred.succeed(ready, undefined) : Effect.void;
+							},
+						});
+					});
+				yield* sessionIds
+					? (this.runner.attachSessionsEffect?.([...sessionIds]) ?? Effect.void)
+					: this.runner.recoverEffect;
+				const registrations = yield* Effect.try(() =>
+					daemonRecovery
+						? discoverAllRunners(this.deps.daemonConfigDir)
+						: discoverRunners(
+								this.deps.workspaceRoot,
+								this.deps.daemonConfigDir,
+							),
+				).pipe(
+					Effect.catch((error) =>
+						Effect.logError("Could not verify runner ownership", error).pipe(
+							Effect.as(undefined),
+						),
+					),
+				);
+				// Discovery errors are not proof that a running command has no owner.
+				if (!registrations) return;
+				claimed = new Set(
+					registrations
+						.filter((runner) => runner.driverKind === this.providerId)
+						.map((runner) => runner.sessionId),
+				);
+			}
+			const accounts = yield* this.deps.accounts;
+			yield* settleUnclaimedRunnerCommands(
+				sql,
+				claimed,
+				this.providerId,
+				(id) =>
+					Result.getOrUndefined(resolveAccount(accounts, { _tag: "Id", id }))
+						?.driver,
+				(sinkId, turn, failure) =>
+					Effect.gen({ self: this }, function* () {
+						const recovery = yield* recoveryForSession(turn.sessionId);
+						if (!recovery) return;
+						let persistenceError: ProviderRuntimeIngestionError | undefined;
+						yield* failRunnerTurn(
+							(output) =>
+								Effect.gen(function* () {
+									if (output.type === "event") {
+										// Startup has no WebSocket publisher or live sink yet.
+										yield* recovery.ingestion.ingestBatch([output.event], {
+											publishToBus: false,
+											publishToRelay: false,
+										});
+									} else if (output.type === "cancel-interactions") {
+										yield* recovery.pending.cancelSessionInteractions(
+											turn.sessionId,
+											output.reason,
+											{ recoverQuestions: false },
+										);
+									}
+									return {};
+								}).pipe(
+									Effect.tapError((error) =>
+										Effect.sync(() => {
+											persistenceError = error;
+										}),
+									),
+									Effect.mapError((error) =>
+										sessionFailure("recover stopped runner", error),
+									),
+								),
+							sinkId,
+							turn,
+							failure,
+							this.providerId,
+						);
+						// failRunnerTurn logs errors; database failures still need a retry.
+						if (persistenceError) return yield* Effect.fail(persistenceError);
+					}),
+				daemonRecovery,
+				sessionIds,
+			);
+		});
 
 	constructor(
 		private readonly deps: RunnerProviderInstanceDeps,
@@ -297,6 +372,27 @@ export class RunnerProviderInstance implements ProviderInstance {
 
 	recoverEffect() {
 		return this.recoverRunnerEffect;
+	}
+
+	recoverProjectContextsEffect(
+		recoveryForSession: NonNullable<
+			RunnerProviderInstanceDeps["recoveryForSession"]
+		>,
+	) {
+		return this.recoverWithContexts(recoveryForSession, recoveryForSession);
+	}
+
+	attachSessionsEffect(
+		sessionIds: readonly string[],
+		recoveryForSession: NonNullable<
+			RunnerProviderInstanceDeps["recoveryForSession"]
+		>,
+	) {
+		return this.recoverWithContexts(
+			recoveryForSession,
+			recoveryForSession,
+			new Set(sessionIds),
+		);
 	}
 
 	private commandEffect(
@@ -374,6 +470,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 				input.nativeResumeFallback,
 			);
 			this.sinks.set(sinkId, eventSink);
+			this.sinkSessions.set(sinkId, sessionId);
 			bindTurnTimelineSink(sinkId, {
 				sessionId,
 				inputId: input.inputId,
@@ -605,6 +702,32 @@ export class RunnerProviderInstance implements ProviderInstance {
 		return this.shutdown;
 	}
 
+	/** Project scopes release their attachments without closing the shared driver. */
+	releaseSessionsEffect(sessionIds: readonly string[]): Effect.Effect<void> {
+		return Effect.gen({ self: this }, function* () {
+			const sessions = new Set(sessionIds);
+			for (const sessionId of sessions) {
+				yield* FiberMap.remove(this.preWarmFibers, sessionId);
+				yield* this.runner.detachSessionEffect?.(sessionId) ??
+					this.runner
+						.executeEffect({ type: "end-session", sessionId })
+						.pipe(Effect.ignore);
+			}
+			for (const [sinkId, sessionId] of this.sinkSessions) {
+				if (!sessions.has(sessionId)) continue;
+				yield* this.sinks.get(sinkId)?.detachInteractions?.() ?? Effect.void;
+				for (const [key] of Array.from(this.interactionFibers))
+					if (key.startsWith(`${sinkId}:`))
+						yield* FiberMap.remove(this.interactionFibers, key);
+				yield* FiberMap.remove(this.abortFibers, sinkId);
+				this.sinks.delete(sinkId);
+				this.sinkSessions.delete(sinkId);
+				this.recoveredSinkIds.delete(sinkId);
+				this.reportSinkForTesting("released", sinkId, sessionId);
+			}
+		});
+	}
+
 	/** Shared by explicit shutdown and scope disposal through one cached Effect. */
 	disposeEffect(): Effect.Effect<void, ProviderInstanceFailure> {
 		return Effect.gen({ self: this }, function* () {
@@ -618,6 +741,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 			Effect.ensuring(
 				Effect.gen({ self: this }, function* () {
 					this.sinks.clear();
+					this.sinkSessions.clear();
 					yield* FiberMap.clear(this.abortFibers);
 					yield* FiberMap.clear(this.interactionFibers);
 				}),
@@ -657,8 +781,10 @@ export class RunnerProviderInstance implements ProviderInstance {
 			}
 			let sink = this.sinks.get(output.sinkId);
 			if (!sink && recoveredSessionId && this.recoveredSink) {
-				sink = this.recoveredSink(recoveredSessionId, output.sinkId);
+				sink = yield* this.recoveredSink(recoveredSessionId, output.sinkId);
+				if (!sink) return;
 				this.sinks.set(output.sinkId, sink);
+				this.sinkSessions.set(output.sinkId, recoveredSessionId);
 				this.recoveredSinkIds.add(output.sinkId);
 				this.reportSinkForTesting(
 					"allocated",
@@ -783,6 +909,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 						}
 					}
 					this.sinks.delete(output.sinkId);
+					this.sinkSessions.delete(output.sinkId);
 					this.recoveredSinkIds.delete(output.sinkId);
 					yield* FiberMap.remove(this.abortFibers, output.sinkId);
 					this.reportSinkForTesting(
@@ -796,11 +923,15 @@ export class RunnerProviderInstance implements ProviderInstance {
 						Effect.mapError((cause) => sessionFailure(output.type, cause)),
 					);
 				case "read-subagent-transcript": {
+					const project = yield* this.deps.recoveryForSession?.(
+						output.childSessionId,
+					) ?? Effect.succeed(undefined);
 					const persist = yield* Effect.serviceOption(
 						ClaudeEventPersistEffectTag,
 					);
 					const readTranscript =
 						this.deps.readSubagentTranscript ??
+						project?.persist.readClaudeSubagentTranscript ??
 						(persist._tag === "Some"
 							? persist.value.readClaudeSubagentTranscript
 							: undefined);
@@ -812,11 +943,15 @@ export class RunnerProviderInstance implements ProviderInstance {
 					return { subagentTranscript };
 				}
 				case "ensure-subagent-session": {
+					const project = yield* this.deps.recoveryForSession?.(
+						output.input.parentSessionId,
+					) ?? Effect.succeed(undefined);
 					const persist = yield* Effect.serviceOption(
 						ClaudeEventPersistEffectTag,
 					);
 					const ensureSession =
 						this.deps.ensureChildSession ??
+						project?.persist.ensureClaudeSubagentSession ??
 						(persist._tag === "Some"
 							? persist.value.ensureClaudeSubagentSession
 							: undefined);
