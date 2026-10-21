@@ -7,6 +7,7 @@ import {
 	ClaudeConfigDirSchema,
 	configuredClaudeConfigDir,
 } from "../../provider/claude/claude-sdk-env.js";
+import { boundProjectMismatch } from "./bind-event-store-effect.js";
 
 export class ProviderStateEffectError extends Data.TaggedError(
 	"ProviderStateEffectError",
@@ -81,10 +82,12 @@ export interface ProviderStateEffect {
 	readonly saveUpdates: (
 		sessionId: string,
 		updates: ReadonlyArray<ProviderStateEffectUpdate>,
+		projectId?: string,
 	) => Effect.Effect<void, ProviderStateEffectError | SqlError>;
 
 	readonly clearState: (
 		sessionId: string,
+		projectId?: string,
 	) => Effect.Effect<void, ProviderStateEffectError | SqlError>;
 }
 
@@ -282,10 +285,39 @@ export const makeUnboundProviderStateEffect = Effect.gen(function* () {
 	} satisfies UnboundProviderStateEffect;
 });
 
+export const bindProviderStateEffect = (
+	state: UnboundProviderStateEffect,
+	projectId: string,
+): ProviderStateEffect => {
+	const mismatchFor = (
+		explicitProjectId: string | undefined,
+		operation: string,
+	) => {
+		const cause = boundProjectMismatch(projectId, explicitProjectId);
+		return cause
+			? new ProviderStateEffectError({ operation, cause })
+			: undefined;
+	};
+	return {
+		...state,
+		projectId,
+		saveUpdates: (sessionId, updates, explicitProjectId) => {
+			const mismatch = mismatchFor(explicitProjectId, "saveUpdates");
+			return mismatch
+				? Effect.fail(mismatch)
+				: state.saveUpdates(sessionId, updates);
+		},
+		clearState: (sessionId, explicitProjectId) => {
+			const mismatch = mismatchFor(explicitProjectId, "clearState");
+			return mismatch ? Effect.fail(mismatch) : state.clearState(sessionId);
+		},
+	};
+};
+
 export const makeProviderStateEffect = Effect.gen(function* () {
 	const { projectId } = yield* PersistenceProjectTag;
-	return {
-		...(yield* makeUnboundProviderStateEffect),
+	return bindProviderStateEffect(
+		yield* makeUnboundProviderStateEffect,
 		projectId,
-	} satisfies ProviderStateEffect;
+	);
 });

@@ -52,6 +52,7 @@ import {
 	type EffectProjector,
 } from "./projectors-effect.js";
 import {
+	bindProviderStateEffect,
 	makeUnboundProviderStateEffect,
 	ProviderStateEffectTag,
 	UnboundProviderStateEffectTag,
@@ -270,10 +271,9 @@ export function makePersistenceProjectLayer(
 
 	const providerStateLayer = Layer.effect(
 		ProviderStateEffectTag,
-		Effect.map(UnboundProviderStateEffectTag, (state) => ({
-			...state,
-			projectId,
-		})),
+		Effect.map(UnboundProviderStateEffectTag, (state) =>
+			bindProviderStateEffect(state, projectId),
+		),
 	).pipe(Layer.provide(daemonLayer));
 
 	const claudeEventPersistDeps = Layer.mergeAll(

@@ -12,6 +12,7 @@ import {
 	type StoredEvent,
 } from "../events.js";
 import { SESSION_SUBTREE_SQL } from "../projectors/session-handlers.js";
+import { boundProjectMismatch } from "./bind-event-store-effect.js";
 import type { EventStoreError } from "./event-store-effect.js";
 import {
 	EventStoreEffectTag,
@@ -138,7 +139,7 @@ export interface CommitAndSignal {
 const commitPermits = new WeakMap<SqlClient.SqlClient, Semaphore.Semaphore>();
 
 const makeCommitAndSignalWithStore = Effect.fn(function* (
-	eventStore: UnboundEventStoreEffect,
+	eventStore: UnboundEventStoreEffect & { readonly projectId?: string },
 ) {
 	const sql = yield* SqlClient.SqlClient;
 	let permit = commitPermits.get(sql);
@@ -165,6 +166,11 @@ const makeCommitAndSignalWithStore = Effect.fn(function* (
 	): Effect.Effect<A, E | CommitAndSignalFailure, R> =>
 		Effect.uninterruptible(
 			Effect.gen(function* () {
+				const mismatch = boundProjectMismatch(
+					eventStore.projectId,
+					options.projectId,
+				);
+				if (mismatch) return yield* mismatch;
 				// Refuse before any write: the seam publishes on the strength of
 				// owning the COMMIT, and inside someone else's transaction it does
 				// not own one.

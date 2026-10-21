@@ -22,6 +22,7 @@ import {
 	type SessionHandoffDeliveredPayload,
 	type StoredEvent,
 } from "../events.js";
+import { boundProjectMismatch } from "./bind-event-store-effect.js";
 import { makeUnboundCommitAndSignal } from "./commit-and-signal.js";
 import {
 	EventStoreEffectTag,
@@ -59,22 +60,24 @@ export interface ClaudeEventPersistEffect {
 		sessionId: string,
 		handoff: SessionHandoffDeliveredPayload,
 		commandId: string,
+		projectId?: string,
 	) => Effect.Effect<void, ClaudeEventPersistFailure>;
 
 	readonly persistEvent: (
 		event: CanonicalEvent,
-		options?: { readonly publish?: boolean },
+		options?: { readonly publish?: boolean; readonly projectId?: string },
 	) => Effect.Effect<void, ClaudeEventPersistFailure>;
 
 	readonly persistEvents: (
 		events: readonly CanonicalEvent[],
-		options?: { readonly publish?: boolean },
+		options?: { readonly publish?: boolean; readonly projectId?: string },
 	) => Effect.Effect<void, ClaudeEventPersistFailure>;
 
 	readonly persistUserMessage: (
 		sessionId: string,
 		text: string,
 		options?: {
+			readonly projectId?: string;
 			readonly publish?: boolean;
 			readonly messageId?: string;
 			/** The send that placed this message; an existing row for it wins. */
@@ -94,6 +97,7 @@ export interface ClaudeEventPersistEffect {
 	) => Effect.Effect<void, ClaudeEventPersistFailure>;
 
 	readonly ensureClaudeSubagentSession: (input: {
+		readonly projectId?: string;
 		readonly provider?: KnownProviderDriverKind;
 		readonly childSessionId: string;
 		readonly parentSessionId: string;
@@ -243,7 +247,7 @@ const makeAppendEventsWithClaudeTurnCostsForStore = Effect.fn(function* (
 });
 
 const makeClaudeEventPersistForStore = Effect.fn(function* (
-	eventStore: UnboundEventStoreEffect,
+	eventStore: UnboundEventStoreEffect & { readonly projectId?: string },
 ) {
 	const sql = yield* SqlClient.SqlClient;
 	const requireUndeletedSession = (
@@ -394,7 +398,7 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 
 	const persistEvent = (
 		event: CanonicalEvent,
-		options?: { readonly publish?: boolean },
+		options?: { readonly publish?: boolean; readonly projectId?: string },
 	): Effect.Effect<void, ClaudeEventPersistFailure> =>
 		commitAndSignal
 			.write(
@@ -419,8 +423,10 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 			.pipe(Effect.mapError(mapPersistError("persistEvent")));
 
 	const persistHandoffDelivered: ClaudeEventPersistEffect["persistHandoffDelivered"] =
-		(sessionId, handoff, commandId) =>
+		(sessionId, handoff, commandId, projectId) =>
 			Effect.gen(function* () {
+				const mismatch = boundProjectMismatch(eventStore.projectId, projectId);
+				if (mismatch) return yield* mismatch;
 				yield* requireSession(sessionId, "persistEvent", "existing-session");
 				const event = canonicalEvent(
 					"session.handoff_delivered",
@@ -442,16 +448,21 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 						const existing = yield* sql<{ event_id: string }>`SELECT event_id
 							FROM events WHERE event_id = ${event.eventId} LIMIT 1`;
 						if (existing.length > 0) return;
-						yield* project(yield* eventStore.appendBatch([event]));
+						yield* project(yield* eventStore.appendBatch([event], projectId));
 					}),
 				);
 			}).pipe(Effect.mapError(mapPersistError("persistHandoffDelivered")));
 
 	const persistEvents = (
 		events: readonly CanonicalEvent[],
-		options?: { readonly publish?: boolean },
+		options?: { readonly publish?: boolean; readonly projectId?: string },
 	): Effect.Effect<void, ClaudeEventPersistFailure> =>
 		Effect.gen(function* () {
+			const mismatch = boundProjectMismatch(
+				eventStore.projectId,
+				options?.projectId,
+			);
+			if (mismatch) return yield* mismatch;
 			if (events.length === 0) return;
 
 			yield* commitAndSignal.write(
@@ -628,7 +639,10 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 									),
 								);
 						}
-						const stored = yield* eventStore.appendBatch(events);
+						const stored = yield* eventStore.appendBatch(
+							events,
+							options?.projectId,
+						);
 						yield* project(stored);
 					}),
 				options,
@@ -639,123 +653,125 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 		(input) =>
 			// Keep session seeding, append and projection in the seam's transaction.
 			commitAndSignal
-				.write((project) =>
-					Effect.gen(function* () {
-						const provider = input.provider ?? "claude";
-						const binding = input.instanceId ?? provider;
-						yield* requireUndeletedSession(
-							input.childSessionId,
-							"ensureClaudeSubagentSession",
-							"subagent-child",
-						);
-						yield* requireUndeletedSession(
-							input.parentSessionId,
-							"ensureClaudeSubagentSession",
-							"subagent-parent",
-						);
-						yield* requireSession(
-							input.parentSessionId,
-							"ensureClaudeSubagentSession",
-							"subagent-parent",
-						);
-						const [parentOwner] = yield* sql<{
-							project_id: string | null;
-						}>`SELECT project_id FROM sessions WHERE id = ${input.parentSessionId}`;
-						if (!parentOwner?.project_id)
-							return yield* new ClaudeEventPersistEffectError({
-								operation: "ensureClaudeSubagentSession",
-								cause: `Parent session ${input.parentSessionId} has no project`,
-							});
-						const projectId = parentOwner.project_id;
-						const existingChildRows = yield* sql<{
-							project_id: string | null;
-							provider: string;
-							parent_id: string | null;
-							provider_sid: string | null;
-							model_id: string | null;
-						}>`
+				.write(
+					(project) =>
+						Effect.gen(function* () {
+							const provider = input.provider ?? "claude";
+							const binding = input.instanceId ?? provider;
+							yield* requireUndeletedSession(
+								input.childSessionId,
+								"ensureClaudeSubagentSession",
+								"subagent-child",
+							);
+							yield* requireUndeletedSession(
+								input.parentSessionId,
+								"ensureClaudeSubagentSession",
+								"subagent-parent",
+							);
+							yield* requireSession(
+								input.parentSessionId,
+								"ensureClaudeSubagentSession",
+								"subagent-parent",
+							);
+							const [parentOwner] = yield* sql<{
+								project_id: string | null;
+							}>`SELECT project_id FROM sessions WHERE id = ${input.parentSessionId}`;
+							if (!parentOwner?.project_id)
+								return yield* new ClaudeEventPersistEffectError({
+									operation: "ensureClaudeSubagentSession",
+									cause: `Parent session ${input.parentSessionId} has no project`,
+								});
+							const projectId = parentOwner.project_id;
+							const existingChildRows = yield* sql<{
+								project_id: string | null;
+								provider: string;
+								parent_id: string | null;
+								provider_sid: string | null;
+								model_id: string | null;
+							}>`
 							SELECT project_id, provider, parent_id, provider_sid, model_id
 							FROM sessions
 							WHERE id = ${input.childSessionId}
 							LIMIT 1`;
-						const existingChild = existingChildRows[0];
-						if (
-							existingChild &&
-							((existingChild.project_id &&
-								existingChild.project_id !== projectId) ||
-								existingChild.provider !== binding ||
-								existingChild.parent_id !== input.parentSessionId ||
-								existingChild.provider_sid !== input.providerSessionId)
-						) {
-							return yield* Effect.fail(
-								new ClaudeSessionLifecycleError({
-									operation: "ensureClaudeSubagentSession",
-									sessionId: input.childSessionId,
-									role: "subagent-child",
-									reason: "conflicting-subagent-session",
-								}),
-							);
-						}
-						let pickEvents: CanonicalEvent[] = [];
-						if (
-							!existingChild?.model_id?.trim() ||
-							(input.modelId !== undefined &&
-								input.modelId !== existingChild.model_id)
-						) {
-							const [parent] = yield* sql<{
-								model_id: string | null;
-								model_provider: string | null;
-								variant: string | null;
-								context_window: string | null;
-							}>`SELECT model_id, model_provider, variant, context_window
+							const existingChild = existingChildRows[0];
+							if (
+								existingChild &&
+								((existingChild.project_id &&
+									existingChild.project_id !== projectId) ||
+									existingChild.provider !== binding ||
+									existingChild.parent_id !== input.parentSessionId ||
+									existingChild.provider_sid !== input.providerSessionId)
+							) {
+								return yield* Effect.fail(
+									new ClaudeSessionLifecycleError({
+										operation: "ensureClaudeSubagentSession",
+										sessionId: input.childSessionId,
+										role: "subagent-child",
+										reason: "conflicting-subagent-session",
+									}),
+								);
+							}
+							let pickEvents: CanonicalEvent[] = [];
+							if (
+								!existingChild?.model_id?.trim() ||
+								(input.modelId !== undefined &&
+									input.modelId !== existingChild.model_id)
+							) {
+								const [parent] = yield* sql<{
+									model_id: string | null;
+									model_provider: string | null;
+									variant: string | null;
+									context_window: string | null;
+								}>`SELECT model_id, model_provider, variant, context_window
 								FROM sessions WHERE id = ${input.parentSessionId}`;
-							const pick = resolveServerSessionPick(
-								provider,
-								storedSessionPick(parent, provider),
-							);
-							if (Result.isFailure(pick)) return yield* pick.failure;
-							pickEvents = sessionPickEvents(
-								input.childSessionId,
-								input.modelId
-									? {
-											...pick.success,
-											model: {
-												...pick.success.model,
-												modelId: input.modelId,
-											},
-										}
-									: pick.success,
-							);
-						}
-						if (!existingChild)
-							yield* seedClaudeSubagentSession({ ...input, projectId });
-
-						const event = canonicalEvent(
-							"session.created",
-							input.childSessionId,
-							{
-								sessionId: input.childSessionId,
-								title: input.title,
-								provider: binding,
-								parentId: input.parentSessionId,
-								providerSessionId: input.providerSessionId,
-							},
-							{
-								eventId: claudeSubagentSessionCreatedEventId(
-									input.childSessionId,
+								const pick = resolveServerSessionPick(
 									provider,
-								),
-								provider,
-							},
-						);
-						const created = yield* sql<{ event_id: string }>`
+									storedSessionPick(parent, provider),
+								);
+								if (Result.isFailure(pick)) return yield* pick.failure;
+								pickEvents = sessionPickEvents(
+									input.childSessionId,
+									input.modelId
+										? {
+												...pick.success,
+												model: {
+													...pick.success.model,
+													modelId: input.modelId,
+												},
+											}
+										: pick.success,
+								);
+							}
+							if (!existingChild)
+								yield* seedClaudeSubagentSession({ ...input, projectId });
+
+							const event = canonicalEvent(
+								"session.created",
+								input.childSessionId,
+								{
+									sessionId: input.childSessionId,
+									title: input.title,
+									provider: binding,
+									parentId: input.parentSessionId,
+									providerSessionId: input.providerSessionId,
+								},
+								{
+									eventId: claudeSubagentSessionCreatedEventId(
+										input.childSessionId,
+										provider,
+									),
+									provider,
+								},
+							);
+							const created = yield* sql<{ event_id: string }>`
 							SELECT event_id FROM events WHERE event_id = ${event.eventId} LIMIT 1`;
-						const stored = yield* eventStore.appendBatch(
-							[...(created.length > 0 ? [] : [event]), ...pickEvents],
-							projectId,
-						);
-						yield* project(stored);
-					}),
+							const stored = yield* eventStore.appendBatch(
+								[...(created.length > 0 ? [] : [event]), ...pickEvents],
+								projectId,
+							);
+							yield* project(stored);
+						}),
+					input.projectId === undefined ? {} : { projectId: input.projectId },
 				)
 				.pipe(
 					Effect.mapError((cause) =>
