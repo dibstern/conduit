@@ -61,14 +61,6 @@ export const recoverRunnerCommands = <T extends SessionTurn>(
 			row: RunningCommand,
 			input: T,
 		) => Effect.Effect<TurnResult | undefined, SessionFailure>;
-		/** Temporary legacy adapter; replay includes the provider's preparation wrapper. */
-		readonly legacyResult?:
-			| ((
-					commandId: string,
-					attempt: number,
-					result: TurnResult | undefined,
-			  ) => Effect.Effect<void, SessionFailure>)
-			| undefined;
 		readonly resolveSinkId: (
 			commandId: string,
 			inputId: string,
@@ -90,19 +82,6 @@ export const recoverRunnerCommands = <T extends SessionTurn>(
 			options.driverForAccount,
 			sessionId,
 		);
-		if (options.legacyResult) {
-			const replay = options.replay;
-			const complete = options.legacyResult;
-			options = {
-				...options,
-				replay: (row, input) =>
-					replay(row, input).pipe(
-						Effect.tap((result) =>
-							complete(row.command_id, row.attempt_count, result),
-						),
-					),
-			};
-		}
 		return rows.map((row) => {
 			const input: T = {
 				...options.decodeInput(row),

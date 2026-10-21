@@ -56,7 +56,6 @@ export const recoverClaudeRunnerCommands = (
 		const driverForAccount = (id: string) =>
 			Result.getOrUndefined(resolve(accounts, { _tag: "Id", id }))?.driver;
 		return yield* recoverRunnerCommands(sql, sessionId, "claude", {
-			legacyResult: connection.legacyResult,
 			driverForAccount,
 			decodeInput: (row) => ({
 				...normalizeClaudeSessionTurn(

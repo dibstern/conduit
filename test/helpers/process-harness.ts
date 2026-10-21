@@ -207,6 +207,8 @@ export class ProcessHarness {
 			failureCleanupDelayMs?: number;
 			serverProtocolVersion?: number;
 			runnerHelloProtocolVersion?: number;
+			runnerHelloAfterFirst?: boolean;
+			runnerHelloWithoutRunIds?: boolean;
 		},
 		private readonly queryInitializationDelayMs = 0,
 		private readonly queryInitializationFailures = 0,
@@ -1034,6 +1036,12 @@ Object.assign(ClaudeDriver, { create: deps => {
 									this.runnerLifecycle.runnerHelloProtocolVersion,
 								),
 							}
+						: {}),
+					...(this.runnerLifecycle?.runnerHelloAfterFirst
+						? { CONDUIT_TEST_RUNNER_HELLO_AFTER_FIRST: "1" }
+						: {}),
+					...(this.runnerLifecycle?.runnerHelloWithoutRunIds
+						? { CONDUIT_TEST_RUNNER_HELLO_WITHOUT_RUN_IDS: "1" }
 						: {}),
 					...(this.opencodeIdleTimeoutMs !== undefined
 						? {

@@ -25,7 +25,6 @@ import type { ProjectionRunnerEffectTag } from "../../../persistence/effect/proj
 import type { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
 import type { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { CanonicalEvent } from "../../../persistence/events.js";
-import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { settleSessionRuns } from "../../../provider/session-run-settlement.js";
 import type { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import type { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
@@ -191,7 +190,6 @@ const makeProviderTurnService = Effect.gen(function* () {
 		| EventStoreEffectTag
 		| ProjectionRunnerEffectTag
 	>();
-	const registry = yield* Effect.serviceOption(ProviderRegistryTag);
 	const sql = yield* SqlClient.SqlClient;
 	const ingestion = yield* ProviderRuntimeIngestionTag;
 	const scope = yield* Effect.scope;
@@ -293,19 +291,6 @@ const makeProviderTurnService = Effect.gen(function* () {
 					const done = yield* Deferred.make<void, StopFailure>();
 					stopping.set(input.sessionId, done);
 					yield* abort(input, cutoff).pipe(
-						Effect.tap(() =>
-							registry._tag === "Some"
-								? Effect.forEach(
-										registry.value.listProviders(),
-										(id) =>
-											registry.value
-												.getInstance(id)
-												?.inputAdmission?.afterStop?.(input.sessionId) ??
-											Effect.void,
-										{ discard: true },
-									)
-								: Effect.void,
-						),
 						Effect.onExit((exit) =>
 							Effect.sync(() => stopping.delete(input.sessionId)).pipe(
 								Effect.andThen(Deferred.done(done, exit)),

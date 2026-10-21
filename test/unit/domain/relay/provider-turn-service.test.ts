@@ -1103,55 +1103,6 @@ describe("ProviderTurnService", () => {
 			});
 		}
 
-		it.effect(
-			"notifies a held runner only after Stop's bound has durably settled its cohort",
-			() => {
-				const issued = Deferred.makeUnsafe<void>();
-				const afterStop = vi.fn(() => Effect.void);
-				const registry = new ProviderRegistry([
-					partialFake<ProviderInstance>({
-						providerId: "claude",
-						inputAdmission: {
-							isHeld: () => true,
-							changes: Effect.succeed(Stream.empty),
-							afterStop,
-						},
-					}),
-				]);
-				const engine = makeEngine({
-					providerId: "claude",
-					dispatchEffect: () =>
-						Deferred.succeed(issued, undefined).pipe(
-							Effect.andThen(Effect.never),
-						),
-				});
-				return Effect.gen(function* () {
-					const sql = yield* SqlClient.SqlClient;
-					yield* seedSession;
-					yield* seedClaimedRun("active-input", 1);
-					const stopped = yield* (yield* ProviderTurnServiceTag).beginStop({
-						clientId: "browser",
-						sessionId: "session-1",
-						commandId: "stop",
-					});
-					yield* Deferred.await(issued);
-					expect(afterStop).not.toHaveBeenCalled();
-					yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
-					yield* stopped;
-					expect(yield* sql`SELECT status FROM provider_runs`).toEqual([
-						{ status: "interrupted" },
-					]);
-					expect(
-						yield* sql`SELECT status FROM provider_command_outbox`,
-					).toEqual([{ status: "failed" }]);
-					expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
-						{ status: "side_effect_failed" },
-					]);
-					expect(afterStop).toHaveBeenCalledExactlyOnceWith("session-1");
-				}).pipe(Effect.provide(serviceLayer({ engine, registry }).liveLayer));
-			},
-		);
-
 		for (const providerId of ["claude", "personal-claude"]) {
 			it.effect(
 				`Stop's bound preserves a pending steer on ${providerId} while retiring the running turn`,

@@ -171,10 +171,21 @@ export function runnerHelloFailure(
 	expectedDriverKind?: string,
 ): SessionFailure | undefined {
 	if (hello.protocolVersion !== RUNNER_PROTOCOL_VERSION)
-		return runnerFailure(
-			"runner hello",
-			`Runner protocol mismatch: ${peer} speaks version ${hello.protocolVersion}, expected ${RUNNER_PROTOCOL_VERSION} (peer build ${hello.buildId}, local build ${BUILD_ID})`,
-		);
+		return {
+			...runnerFailure(
+				"runner hello",
+				`Runner protocol mismatch: ${peer} speaks version ${hello.protocolVersion}, expected ${RUNNER_PROTOCOL_VERSION} (peer build ${hello.buildId}, local build ${BUILD_ID})`,
+			),
+			...(peer === "runner" ? { code: "runner_incompatible" } : {}),
+		};
+	if (peer === "runner" && hello.stampsRunIds !== true)
+		return {
+			...runnerFailure(
+				"runner hello",
+				`Runner predates run ownership (peer build ${hello.buildId}, local build ${BUILD_ID})`,
+			),
+			code: "runner_incompatible",
+		};
 	if (
 		expectedDriverKind !== undefined &&
 		(hello.driverKind ?? "claude") !== expectedDriverKind
@@ -232,12 +243,6 @@ export class RunnerSocket {
 	private failure: SessionFailure | undefined;
 	private idleExiting = false;
 	private peerTaggedConfigDir = false;
-	/** Temporary old-runner adapter, installed by the hello compatibility decision. */
-	legacyResult?: (
-		commandId: string,
-		attempt: number | undefined,
-		result: TurnResult | undefined,
-	) => Effect.Effect<void, SessionFailure>;
 
 	constructor(
 		private readonly socket: Socket,
@@ -390,19 +395,6 @@ export class RunnerSocket {
 						reply.failure && message.type === "command"
 							? (this.beforeCommandFailure?.() ?? Effect.void)
 							: Effect.void;
-					if (
-						this.legacyResult &&
-						!reply.failure &&
-						message.type === "command" &&
-						message.command.type === "send-turn"
-					) {
-						resume(
-							(this.beforeCommandFailure?.() ?? Effect.void).pipe(
-								Effect.as(reply.result as A),
-							),
-						);
-						return;
-					}
 					resume(
 						reply.failure
 							? precedingOutputs.pipe(

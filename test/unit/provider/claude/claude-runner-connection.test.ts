@@ -116,6 +116,7 @@ async function fixture(beforePublish: Effect.Effect<void> = Effect.void) {
 					peer.write({
 						type: "hello",
 						protocolVersion: RUNNER_PROTOCOL_VERSION,
+						stampsRunIds: true,
 						buildId: BUILD_ID,
 						runnerId: "runner",
 						sessionId: "session",

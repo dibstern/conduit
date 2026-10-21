@@ -308,10 +308,6 @@ export class RunnerProviderInstance implements ProviderInstance {
 		return this.runner.hasLiveProcessEffect(sessionId);
 	}
 
-	get inputAdmission() {
-		return this.runner.inputAdmission;
-	}
-
 	getNativeSessionEffect(
 		sessionId: string,
 	): Effect.Effect<ProviderNativeSession | undefined> {

@@ -128,6 +128,7 @@ export const runSessionRunner = (
 		let runner: SessionRunner | undefined;
 		let sendJournal: RunnerSendJournal | undefined;
 		let initializing = false;
+		let helloCount = 0;
 		const spool = new RunnerSpool(`${socketPath}.spool`);
 		let backgroundSnapshot:
 			| Extract<SessionOutput, { type: "background-task" }>
@@ -365,15 +366,23 @@ export const runSessionRunner = (
 								}
 								idle?.activity();
 								greeted = true;
+								const overrideHello =
+									process.env["NODE_ENV"] === "test" &&
+									(!process.env["CONDUIT_TEST_RUNNER_HELLO_AFTER_FIRST"] ||
+										helloCount > 0);
+								helloCount++;
 								peer.write({
 									type: "hello",
 									protocolVersion:
-										process.env["NODE_ENV"] === "test" &&
+										overrideHello &&
 										process.env["CONDUIT_TEST_RUNNER_HELLO_VERSION"]
 											? Number(process.env["CONDUIT_TEST_RUNNER_HELLO_VERSION"])
 											: RUNNER_PROTOCOL_VERSION,
 									buildId: runnerBuildId(),
-									stampsRunIds: true,
+									...(overrideHello &&
+									process.env["CONDUIT_TEST_RUNNER_HELLO_WITHOUT_RUN_IDS"]
+										? {}
+										: { stampsRunIds: true as const }),
 									runnerId,
 									driverKind,
 									sessionId,

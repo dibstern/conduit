@@ -36,7 +36,6 @@ export interface RunnerUpgrade {
 export function makeRunnerUpgrade<
 	T extends { upgrade: RunnerUpgrade },
 >(options: {
-	readonly before?: (sessionId: string, runner: T) => boolean;
 	readonly eligible: (sessionId: string, runner: T) => boolean;
 	readonly create: (sessionId: string, runner: T) => Effect.Effect<T>;
 	readonly warm: (
@@ -56,7 +55,6 @@ export function makeRunnerUpgrade<
 	readonly cancelled: (sessionId: string, runner: T, replacement: T) => void;
 }) {
 	const consider = (sessionId: string, runner: T): void => {
-		if (options.before?.(sessionId, runner)) return;
 		if (!options.eligible(sessionId, runner)) return;
 		if (runner.upgrade.inFlight) {
 			if (runner.upgrade.activity !== runner.upgrade.attemptActivity)

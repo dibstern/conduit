@@ -1096,6 +1096,79 @@ describe("built-dist Claude runner lifecycle", () => {
 		expect(harness.marks.some((mark) => mark.kind === "query")).toBe(false);
 	}, 30_000);
 
+	it.each([
+		"protocol version",
+		"run ownership",
+	] as const)("settles a live runner refused at adoption for %s and sends again", async (reason) => {
+		const { harness, browser, sessionId } = await start({
+			runnerHelloAfterFirst: true,
+			...(reason === "protocol version"
+				? { runnerHelloProtocolVersion: 999 }
+				: { runnerHelloWithoutRunIds: true }),
+		});
+		const pending = browser.send(sessionId, "approval-adoption-refusal");
+		void pending.catch(() => undefined);
+		await browser.waitFor((frame) => frame["type"] === "permission_pending");
+		const runner = started(harness);
+		expect(testRunnerAlive(runner.pid)).toBe(true);
+		expect(snapshot(harness, sessionId).turns).toEqual([{ state: "running" }]);
+		await harness.kill();
+		expect(testRunnerAlive(runner.pid)).toBe(true);
+		await harness.restart();
+		const restored = await harness.connect(sessionId);
+		await restored.view(sessionId);
+		await vi.waitFor(
+			() => {
+				const state = snapshot(harness, sessionId);
+				expect(state.session).toEqual({ status: "idle" });
+				expect(state.turns).toEqual([{ state: "error" }]);
+				expect(state.commands).toEqual([{ status: "failed" }]);
+				expect(state.receipts).toEqual([{ status: "side_effect_failed" }]);
+				expect(state.errorOwners).toEqual(state.runReservations);
+				expect(state.approvals).toEqual([
+					expect.objectContaining({ status: "resolved" }),
+				]);
+				expect(
+					state.events.filter((event) =>
+						/^turn\.(error|completed|interrupted)$/.test(event.type),
+					),
+				).toHaveLength(1);
+				expect(testRunnerAlive(runner.pid)).toBe(false);
+			},
+			{ timeout: 10_000 },
+		);
+		const failure =
+			reason === "protocol version"
+				? /protocol.*mismatch.*999/i
+				: /predates run ownership.*build/i;
+		expect(JSON.stringify(harness.proof())).toMatch(failure);
+		expect(harness.logTail).not.toMatch(/Failed to create relay/);
+		const state = snapshot(harness, sessionId);
+		expect(
+			JSON.stringify(
+				state.events.filter((event) => event.type === "turn.error"),
+			),
+		).toMatch(failure);
+		const reply = await restored.send(sessionId, "after-adoption-refusal");
+		expect(reply.chunks.join("")).toBe(
+			responseChunks("after-adoption-refusal").join(""),
+		);
+		expect(started(harness).pid).not.toBe(runner.pid);
+		await vi.waitFor(() => {
+			const after = snapshot(harness, sessionId);
+			expect(after.turns).toEqual([{ state: "error" }, { state: "completed" }]);
+			expect(after.commands).toEqual([
+				{ status: "failed" },
+				{ status: "completed" },
+			]);
+			expect(
+				after.events.filter((event) =>
+					/^turn\.(error|completed|interrupted)$/.test(event.type),
+				),
+			).toHaveLength(2);
+		});
+	}, 40_000);
+
 	it("fails the owning turn and requeues its unstarted steer when startup refuses the protocol", async () => {
 		const { harness, browser, sessionId } = await start({
 			serverProtocolVersion: 999,

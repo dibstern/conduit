@@ -142,6 +142,7 @@ async function runnerSocket(options: {
 					peer.write({
 						type: "hello",
 						protocolVersion: RUNNER_PROTOCOL_VERSION,
+						stampsRunIds: true,
 						buildId: BUILD_ID,
 						runnerId,
 						sessionId,
