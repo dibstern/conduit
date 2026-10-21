@@ -1962,18 +1962,23 @@ export const makeProcessSessionRunner = (
 								`Runner build ${entry.buildId ?? "unknown"} cannot stop background tasks`,
 							),
 						);
+					const frozenEnv = entry.upgrade.state?.frozen
+						? entry.upgrade.state.snapshot?.options.env
+						: undefined;
 					const payload =
 						command.type === "send-turn"
 							? {
 									...command,
+									// Query matching and SDK launch must use the same frozen env.
+									...(frozenEnv
+										? { input: { ...command.input, shellEnv: frozenEnv } }
+										: {}),
 									...(entry.upgrade.state?.frozen
 										? driver.snapshotCommandSettings(
 												entry.upgrade.state.snapshot,
 											)
 										: {}),
-									shellEnv: (entry.upgrade.state?.frozen
-										? entry.upgrade.state.snapshot?.options.env
-										: undefined) ??
+									shellEnv: frozenEnv ??
 										command.input.shellEnv ??
 										command.shellEnv ??
 										deps.shellEnv?.(command.input.workspaceRoot) ?? {

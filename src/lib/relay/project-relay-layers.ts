@@ -472,6 +472,8 @@ export function createProjectRelayLayers({
 						onBackgroundWorkChanged(transition.sessionId);
 				},
 				claudeQueryFactory: claudeSdk.query,
+				claudeGenerateTextQueryFactory:
+					config.titleQuery ?? claudeSdk.titleQuery,
 				claudeSessionForkSdk: claudeSdk.fork,
 				...(config.claudeSdk?.subagentSdk && {
 					claudeSubagentSdk: config.claudeSdk.subagentSdk,
@@ -955,7 +957,6 @@ export function createProjectRelayLayers({
 	const relayStateAndBridges = Layer.provideMerge(
 		makeRelayStateLive({
 			sessionEventBusLayer,
-			titleQueryFactory: config.titleQuery ?? claudeSdk.titleQuery,
 			...(testSendLimit !== undefined && { testSendLimit }),
 		}),
 		bridgeLayers,
