@@ -188,15 +188,19 @@ export const composerHandlers: StepHandler[] = [
 
 			// The composer hands the provider its own spelling of $goal.
 			const sent = message.replace(/^\$goal\b/, "/goal");
-			await rpcControl.waitForRequest(
+			const request = await rpcControl.waitForRequest(
 				(request) =>
 					request.tag === "input.submit" && request.payload["text"] === sent,
 			);
-			// Stand in for the adapter placing the sent message (the browser keeps
-			// no copy of its own), then finish the turn the send started, as the
+			// Stand in for the adapter placing the sent message, which replaces the
+			// browser's own copy, then finish the turn the send started, as the
 			// relay's done does.
 			await relayControl.sendMessages([
-				{ type: "user_message", text: sent },
+				{
+					type: "user_message",
+					text: sent,
+					inputId: request.payload["inputId"],
+				},
 				{ type: "done", code: 0 },
 			]);
 		},

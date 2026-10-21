@@ -109,6 +109,7 @@ export interface MessageRow {
 	context_window: number | null;
 	is_streaming: number;
 	is_backfilled: number;
+	is_inherited?: number;
 	input_id?: string | null;
 	steered?: number;
 	rest_digest?: string | null;

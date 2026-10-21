@@ -202,6 +202,12 @@ export function compareProjectionStores(
 	const ignored = options.ignoredColumns ?? [
 		"version",
 		"session_sidebar.row.version",
+		// Wake state is a read annotation: a child's wake event can be drained
+		// while its snoozed ancestor survives (ADR-0013, conduit-test-hiuf.15).
+		"sessions.woken_at",
+		"sessions.woken_reason",
+		"session_sidebar.row.snooze.woken_at",
+		"session_sidebar.row.snooze.woken_reason",
 	];
 	const sessionsOf = (db: DatabaseSync) =>
 		db

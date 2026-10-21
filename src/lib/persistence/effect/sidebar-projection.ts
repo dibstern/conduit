@@ -8,6 +8,7 @@
 import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
+import { sessionRunOwnersQuery } from "../../provider/session-run-settlement.js";
 import type {
 	PendingApprovalCountRow,
 	SessionRow,
@@ -88,17 +89,30 @@ export const refreshSidebar = (
 				AND row IS NOT NULL`,
 		]);
 		const next = sidebarRows(top, family, approvals, version, projectIds);
+		// Migration backfills also refresh rows before run ownership exists.
+		const hasRunOwnership =
+			top.some((root) => root.status !== "idle") &&
+			(yield* sql`SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'provider_runs'`)
+				.length > 0;
 		const storedRows = new Map(
 			stored.map((row) => [row.session_id, decodeRow(row.row)]),
 		);
 		for (const { root_id: rootId } of candidates) {
-			const row = next.get(rootId);
+			let row = next.get(rootId);
 			if (row === undefined) {
 				if (storedRows.has(rootId))
 					yield* sql`
 						UPDATE session_sidebar SET row = NULL, version = ${version}
 						WHERE session_id = ${rootId}`;
 				continue;
+			}
+			if (hasRunOwnership && row.session.status !== "idle") {
+				const stop = yield* sessionRunOwnersQuery(sql, rootId, {
+					confirmedStop: true,
+					excludeRetainedSteers: true,
+				});
+				if (stop.owners.length === 0 && stop.retainedSteers)
+					row = { ...row, onlyRetainedSteers: true };
 			}
 			const { changed } = changeSidebarRow(storedRows.get(rootId), row);
 			if (!changed) continue;
@@ -116,6 +130,35 @@ export const refreshSidebar = (
 					last_activity = excluded.last_activity,
 					row = excluded.row`;
 		}
+	});
+
+/** Reapply registration filtering after imports may have rebuilt whole families. */
+export const refreshCrossProjectSidebar = (projectIds: readonly string[]) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		yield* sql.withTransaction(
+			Effect.gen(function* () {
+				const roots = yield* sql<{
+					id: string;
+				}>`SELECT DISTINCT root.id FROM sessions root
+					JOIN sessions member ON member.root_id = root.id
+					WHERE root.parent_id IS NULL AND root.project_id IN ${sql.in(projectIds)}
+					AND member.project_id IS NOT root.project_id`;
+				if (roots.length === 0) return;
+				const [counter] = yield* sql<{
+					value: number;
+				}>`SELECT value FROM read_model_counter WHERE id = 1`;
+				const version = (counter?.value ?? 0) + 1;
+				yield* refreshSidebar(
+					roots.map(({ id }) => id),
+					version,
+					projectIds,
+				);
+				// An unchanged restart must not move the durable read frontier.
+				yield* sql`UPDATE read_model_counter SET value = ${version} WHERE id = 1
+					AND EXISTS (SELECT 1 FROM session_sidebar WHERE version = ${version})`;
+			}),
+		);
 	});
 
 /**

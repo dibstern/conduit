@@ -4,7 +4,6 @@ import type {
 	ClaudeProviderRuntime,
 	ClaudeProviderRuntimeState,
 } from "../../src/lib/provider/claude/claude-provider-runtime.js";
-import { addTurnWaiter } from "../../src/lib/provider/claude/claude-runtime-turn.js";
 import type { ClaudeSessionContext } from "../../src/lib/provider/claude/types.js";
 import type { TurnResult } from "../../src/lib/provider/types.js";
 
@@ -65,7 +64,7 @@ export function getClaudeRuntimeSessionCountForTest(
 	);
 }
 
-export function setClaudeRuntimeTurnWaitersForTest(
+export function setClaudeRuntimePendingIntakesForTest(
 	instance: ClaudeProviderInstance,
 	sessionId: string,
 	waiters: ReadonlyArray<Deferred.Deferred<TurnResult, Error>>,
@@ -73,13 +72,13 @@ export function setClaudeRuntimeTurnWaitersForTest(
 	Effect.runSync(
 		Ref.update(stateRefFor(instance), (state) => ({
 			...state,
-			turnWaiters: HashMap.set(
-				state.turnWaiters,
+			pendingIntakes: HashMap.set(
+				state.pendingIntakes,
 				sessionId,
 				new Map(
 					waiters.map((deferred, index) => [
-						`test-waiter-${index}`,
-						{ deferred, started: false },
+						`test-intake-${index}`,
+						{ deferred },
 					]),
 				),
 			),
@@ -87,28 +86,13 @@ export function setClaudeRuntimeTurnWaitersForTest(
 	);
 }
 
-/** Registers a sent input the way a mid-turn handoff will (ticket .7). */
-export function addClaudeRuntimeTurnWaiterForTest(
-	instance: ClaudeProviderInstance,
-	sessionId: string,
-	inputId: string,
-	deferred: Deferred.Deferred<TurnResult, Error>,
-): void {
-	Effect.runSync(
-		addTurnWaiter(stateRefFor(instance), sessionId, inputId, {
-			deferred,
-			started: false,
-		}),
-	);
-}
-
-export function hasClaudeRuntimeTurnWaitersForTest(
+export function hasClaudeRuntimePendingIntakesForTest(
 	instance: ClaudeProviderInstance,
 	sessionId: string,
 ): boolean {
 	return Effect.runSync(
 		Ref.get(stateRefFor(instance)).pipe(
-			Effect.map((state) => HashMap.has(state.turnWaiters, sessionId)),
+			Effect.map((state) => HashMap.has(state.pendingIntakes, sessionId)),
 		),
 	);
 }

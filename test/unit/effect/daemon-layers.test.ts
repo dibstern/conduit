@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Cause, Deferred, Effect, Exit, Layer, Option, Scope } from "effect";
-import { afterEach, expect } from "vitest";
+import { afterEach, expect, vi } from "vitest";
 import {
 	DaemonLifecycleLayerError,
 	ProcessErrorHandlerLayer,
@@ -30,6 +30,8 @@ import { makeDaemonStoreTestLayer } from "../../helpers/daemon-rpc.js";
 
 const fixtureDirs: string[] = [];
 afterEach(() => {
+	vi.restoreAllMocks();
+	vi.unstubAllEnvs();
 	for (const directory of fixtureDirs.splice(0))
 		rmSync(directory, { recursive: true, force: true });
 });
@@ -58,6 +60,30 @@ describe("SignalHandlerLayer", () => {
 			expect(yield* Deferred.await(deferred)).toBe("restart");
 		}).pipe(Effect.provide(SignalHandlerLayer)),
 	);
+
+	// A forced interrupt must still distinguish a supervised restart from full Shutdown.
+	for (const [mode, supervised, code] of [
+		["stop", "0", 0],
+		["stop", "1", 0],
+		["restart", "0", 0],
+		["restart", "1", 75],
+	] as const) {
+		it.effect(
+			`interrupt during ${mode} with CONDUIT_SERVICE=${supervised} exits ${code}`,
+			() =>
+				Effect.gen(function* () {
+					vi.stubEnv("CONDUIT_SERVICE", supervised);
+					vi.stubEnv("XPC_SERVICE_NAME", "");
+					const exit = vi.spyOn(process, "exit").mockImplementation(() => {
+						throw new Error("forced exit");
+					});
+					yield* Deferred.succeed(yield* ShutdownSignalTag, mode);
+					yield* Effect.yieldNow;
+					expect(() => process.emit("SIGINT")).toThrow("forced exit");
+					expect(exit).toHaveBeenCalledExactlyOnceWith(code);
+				}).pipe(Effect.provide(SignalHandlerLayer)),
+		);
+	}
 });
 
 describe("DaemonLifecycleLayerError", () => {

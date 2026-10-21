@@ -49,3 +49,4 @@ media/_test_output/
 
 # Privileged Linux service E2E evidence, one directory per run.
 /test/e2e/linux-service/artifacts/
+/test/e2e/macos-service/artifacts/

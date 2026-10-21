@@ -50,8 +50,10 @@ it.each([
 			const shift = lineage === "redesign" ? 1 : 6;
 			db.exec(`DROP TABLE input_drafts;
 				CREATE TEMP TABLE redesign_migrations AS
-				SELECT migration_id - ${shift} AS migration_id, name, created_at
-				FROM effect_sql_migrations WHERE migration_id > 68;
+				SELECT CASE WHEN name = 'sessions_goal_stuck' THEN 69 ELSE migration_id - ${shift} END AS migration_id, name, created_at
+				FROM effect_sql_migrations WHERE migration_id > 68
+				AND (migration_id <= (SELECT migration_id FROM effect_sql_migrations WHERE name = 'turn_recaps')
+					OR (name = 'sessions_goal_stuck' AND '${lineage}' = 'goal'));
 				DELETE FROM effect_sql_migrations WHERE migration_id >= ${69 - shift};
 				INSERT INTO effect_sql_migrations (migration_id, name, created_at)
 				SELECT migration_id, name, created_at FROM redesign_migrations;

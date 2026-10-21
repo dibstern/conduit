@@ -85,6 +85,7 @@ export const cursorTurnHandlers: StepHandler[] = [
 				sessionId,
 				messageId: "cursor-turn-user",
 				text: request.payload["text"],
+				inputId: request.payload["inputId"],
 			});
 			setSessionRowStatus(world.page, sessionId, "busy");
 			await expect(world.page.locator("#stop")).toBeVisible();

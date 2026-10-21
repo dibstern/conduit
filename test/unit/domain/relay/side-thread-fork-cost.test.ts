@@ -1,10 +1,9 @@
-// Failure modes: one INSERT per copied event; one message stamp per event
-// instead of per message; copying tool.running heartbeats that a later event
-// for the same tool supersedes; dropping a heartbeat that carries metadata or
-// is the tool's last word; a cheaper copy projecting a different transcript.
+// Failure modes: copied history events; per-row INSERT statements; losing tool
+// progress metadata or output references; inherited human messages triggering
+// attention; a set-based copy producing a different transcript.
 import { Effect } from "effect";
 import { SqlClient, Statement } from "effect/sql";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../../src/lib/contracts/provider-instance.js";
 import { AccountDirectory } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
@@ -20,12 +19,14 @@ import { makeOverridesStateLive } from "../../../../src/lib/domain/relay/Service
 import { makeCommitAndSignal } from "../../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
+import { ProviderStateEffectTag } from "../../../../src/lib/persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../../../src/lib/persistence/effect/read-query-effect.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
 } from "../../../../src/lib/persistence/events.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
+import { CLAUDE_FORK_SOURCE_KEY } from "../../../../src/lib/provider/claude/claude-session-fork.js";
 import { claudeSdk } from "../../../helpers/fake-claude-process-sdk.js";
 import {
 	makeMockAccountDirectory,
@@ -44,24 +45,43 @@ const at = () => ({ createdAt: ++clock });
 const turn = (n: number): CanonicalEvent[] => {
 	const user = `user-${n}`;
 	const reply = `reply-${n}`;
+	const runId = `run-${n}`;
+	const owned = () => ({ ...at(), provider: "claude", metadata: { runId } });
 	return [
+		canonicalEvent(
+			"run.requested",
+			"parent",
+			{ runId, inputId: user },
+			owned(),
+		),
 		canonicalEvent(
 			"message.created",
 			"parent",
 			{ sessionId: "parent", messageId: user, role: "user" },
-			at(),
+			owned(),
+		),
+		canonicalEvent(
+			"run.started",
+			"parent",
+			{ requestedRunId: runId, inputId: user },
+			owned(),
 		),
 		canonicalEvent(
 			"text.delta",
 			"parent",
 			{ messageId: user, partId: `${user}:text`, text: `Ask ${n}` },
-			at(),
+			owned(),
 		),
 		canonicalEvent(
 			"message.created",
 			"parent",
-			{ sessionId: "parent", messageId: reply, role: "assistant" },
-			at(),
+			{
+				sessionId: "parent",
+				messageId: reply,
+				role: "assistant",
+				parentID: user,
+			},
+			owned(),
 		),
 		...Array.from({ length: TOOLS }, (_, t) => {
 			const partId = `${reply}:tool-${t}`;
@@ -70,7 +90,7 @@ const turn = (n: number): CanonicalEvent[] => {
 					"tool.running",
 					"parent",
 					{ messageId: reply, partId },
-					at(),
+					owned(),
 				);
 			return [
 				canonicalEvent(
@@ -83,7 +103,7 @@ const turn = (n: number): CanonicalEvent[] => {
 						callId: partId,
 						input: { tool: "Bash", command: `echo ${t}` },
 					},
-					at(),
+					owned(),
 				),
 				heartbeat(),
 				// Progress the transcript shows: never superseded by the copy.
@@ -93,7 +113,7 @@ const turn = (n: number): CanonicalEvent[] => {
 								"tool.running",
 								"parent",
 								{ messageId: reply, partId, metadata: { progress: t } },
-								at(),
+								owned(),
 							),
 						]
 					: []),
@@ -108,7 +128,7 @@ const turn = (n: number): CanonicalEvent[] => {
 								"tool.completed",
 								"parent",
 								{ messageId: reply, partId, result: `out ${t}`, duration: t },
-								at(),
+								owned(),
 							),
 						]),
 			];
@@ -117,9 +137,9 @@ const turn = (n: number): CanonicalEvent[] => {
 			"text.delta",
 			"parent",
 			{ messageId: reply, partId: `${reply}:text`, text: `Done ${n}` },
-			at(),
+			owned(),
 		),
-		canonicalEvent("turn.completed", "parent", { messageId: reply }, at()),
+		canonicalEvent("turn.completed", "parent", { messageId: reply }, owned()),
 	];
 };
 
@@ -139,6 +159,15 @@ const transcript = (rows: readonly unknown[], sessionId: string) =>
 	);
 
 it("copies a long Side Thread history in bounded statements with the same transcript", async () => {
+	const sdk = {
+		...claudeSdk,
+		query: vi.fn(claudeSdk.query),
+		fork: claudeSdk.fork && {
+			...claudeSdk.fork,
+			readTranscript: vi.fn(claudeSdk.fork.readTranscript),
+			forkSession: vi.fn(claudeSdk.fork.forkSession),
+		},
+	};
 	await Effect.runPromise(
 		Effect.gen(function* () {
 			const commit = yield* makeCommitAndSignal;
@@ -165,17 +194,21 @@ it("copies a long Side Thread history in bounded statements with the same transc
 				}),
 				...Array.from({ length: TURNS }, (_, n) => turn(n)).flat(),
 			]);
+			const state = yield* ProviderStateEffectTag;
+			yield* state.saveUpdates("parent", [
+				{ key: "resumeSessionId", value: "sdk-parent" },
+			]);
 
 			const shapes = new Map<string, number>();
 			const child = yield* forkSession("parent", {
 				side: { title: "Side", inputId: "side-input" },
 			}).pipe(
 				Effect.provideService(Statement.CurrentTransformer, (statement) => {
-					const shape = statement
-						.compile()[0]
-						.replace(/\s+/g, " ")
-						.trim()
-						.slice(0, 40);
+					const query = statement.compile()[0].replace(/\s+/g, " ").trim();
+					const insert = query.match(
+						/\bINSERT INTO (turns|messages|message_parts) /,
+					);
+					const shape = insert?.[0] ?? query.slice(0, 40);
 					shapes.set(shape, (shapes.get(shape) ?? 0) + 1);
 					return Effect.succeed(statement);
 				}),
@@ -186,6 +219,20 @@ it("copies a long Side Thread history in bounded statements with the same transc
 					.reduce((sum, [, n]) => sum + n, 0);
 
 			const copied = yield* store.readAllBySession(child.id);
+			expect(sdk.query).not.toHaveBeenCalled();
+			expect(sdk.fork?.forkSession).not.toHaveBeenCalled();
+			expect(sdk.fork?.readTranscript).not.toHaveBeenCalled();
+			expect(yield* state.nativeThread(child.id, "claude")).toBeUndefined();
+			expect(
+				JSON.parse(
+					(yield* state.getState(child.id))[CLAUDE_FORK_SOURCE_KEY] ?? "null",
+				),
+			).toEqual({
+				instanceId: "claude",
+				resumeSessionId: "sdk-parent",
+				configDir: configuredClaudeConfigDir("/unused-config"),
+				messageId: `reply-${TURNS - 1}`,
+			});
 			const sql = yield* SqlClient.SqlClient;
 			for (const [sessionId, inherited, userHumanSent] of [
 				["parent", 0, 1],
@@ -210,33 +257,19 @@ it("copies a long Side Thread history in bounded statements with the same transc
 					},
 				]);
 			}
-			const heartbeats = copied.filter(
-				(event) => event.type === "tool.running",
+			expect(copied.some((event) => event.metadata.inherited === true)).toBe(
+				false,
 			);
-			const tool = (n: number, t: number) => ({
-				messageId: `reply-${n}_${child.id}`,
-				partId: `reply-${n}:tool-${t}_${child.id}`,
-			});
-			const progress = (n: number) =>
-				[0, 10, 20, 30].map((t) => ({
-					...tool(n, t),
-					metadata: { progress: t },
-				}));
-			expect
-				.soft(heartbeats.map((event) => event.data))
-				.toEqual([
-					...progress(0),
-					tool(0, TOOLS - 1),
-					...progress(1),
-					...progress(2),
-					...progress(3),
-				]);
-			// Appends are batched, not one statement per copied event.
-			expect.soft(count("INSERT INTO events")).toBeLessThanOrEqual(4);
-			// Each copied message is stamped once, not once per event naming it.
-			expect
-				.soft(count("UPDATE messages SET version"))
-				.toBeLessThanOrEqual(TURNS * 2);
+			expect(
+				copied.some(
+					(event) =>
+						event.type === "message.created" || event.type === "tool.running",
+				),
+			).toBe(false);
+			for (const table of ["turns", "messages", "message_parts"]) {
+				expect(count(`INSERT INTO ${table} `)).toBe(1);
+			}
+			expect(count("INSERT INTO events")).toBeLessThanOrEqual(4);
 			expect
 				.soft(
 					transcript(
@@ -275,7 +308,7 @@ it("copies a long Side Thread history in bounded statements with the same transc
 				makeMockConfig({
 					projectDir: "/project",
 					configDir: "/unused-config",
-					claudeSdk,
+					claudeSdk: sdk,
 				}),
 			),
 			Effect.provideService(LoggerTag, makeMockLogger()),

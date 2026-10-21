@@ -795,6 +795,38 @@ const child = (
 });
 
 describe("sidebar table against the full computation", () => {
+	it("refreshes a pre-ownership migration row without provider_runs", async () => {
+		const store = openStore(":memory:");
+		try {
+			await store.runPromise(
+				Effect.gen(function* () {
+					const commit = yield* makeCommitAndSignal;
+					const sql = yield* SqlClient.SqlClient;
+					yield* commit([
+						canonicalEvent("session.created", "legacy", {
+							sessionId: "legacy",
+							title: "Legacy",
+							provider: "claude",
+						}),
+						canonicalEvent("session.status", "legacy", {
+							sessionId: "legacy",
+							status: "busy",
+						}),
+					]);
+					yield* sql`DROP TABLE provider_runs`;
+					yield* sql`DELETE FROM session_sidebar`;
+					yield* refreshSidebar(["legacy"], 100);
+					expect(
+						yield* sql`SELECT json_extract(row, '$.session.status') AS status,
+					json_extract(row, '$.onlyRetainedSteers') AS retained FROM session_sidebar WHERE session_id = 'legacy'`,
+					).toEqual([{ status: "busy", retained: null }]);
+				}),
+			);
+		} finally {
+			await store.dispose();
+		}
+	});
+
 	it("matches it, and moves versions only on visible changes, for any command sequence", async () => {
 		await fc.assert(
 			fc.asyncProperty(

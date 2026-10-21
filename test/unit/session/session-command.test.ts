@@ -27,7 +27,7 @@ import type {
 	Message,
 	SessionDetail,
 } from "../../../src/lib/instance/sdk-types.js";
-import type { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
 	makeProjectionRunnerEffect,
@@ -42,6 +42,7 @@ import {
 	makeReadQueryEffect,
 	type ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
@@ -191,6 +192,44 @@ describe("applySessionCommand", () => {
 		}>`SELECT type FROM events ORDER BY sequence`;
 		return rows.map((row) => row.type);
 	});
+
+	for (const deadRef of ["sessionId", "parentId", "forkedFrom"] as const) {
+		it.effect(`refuses session creation with a dead ${deadRef}`, () =>
+			withHarness(() =>
+				Effect.gen(function* () {
+					const sessionId = "born-dead-command";
+					const deletedId = deadRef === "sessionId" ? sessionId : "dead-source";
+					yield* seedSession(deletedId, "opencode");
+					const eventStore = yield* EventStoreEffectTag;
+					// A committed marker wins even while its row projection is stale.
+					yield* eventStore.append(
+						canonicalEvent("session.deleted", deletedId, {
+							sessionId: deletedId,
+						}),
+					);
+
+					const result = yield* Effect.result(
+						applySessionCommand({
+							type: "session.created",
+							data: {
+								sessionId,
+								title: "Must stay dead",
+								provider: "opencode",
+								...(deadRef === "sessionId" ? {} : { [deadRef]: deletedId }),
+							},
+						}),
+					);
+
+					expect(result).toMatchObject({
+						_tag: "Failure",
+						failure: expect.any(SessionCommandError),
+					});
+					expect(yield* eventTypes).toEqual(["session.deleted"]);
+					expect(yield* sessionIds).toEqual([deletedId]);
+				}),
+			),
+		);
+	}
 
 	for (const projection of ["lagging", "empty", "matching"] as const) {
 		it.effect(
@@ -553,13 +592,13 @@ describe("applySessionCommand", () => {
 						const reads = yield* makeReadQueryEffect;
 						const row = yield* reads.getSession(forked.id);
 						expect(row?.fork_point_timestamp).toBe(
-							projection === "projected" ? 999999 : null,
+							projection === "projected" ? 999999 : 123,
 						);
 						expect(forked.forkPointTimestamp).toBe(
 							row?.fork_point_timestamp ?? undefined,
 						);
 						if (projection === "lagging")
-							expect(forked).not.toHaveProperty("forkPointTimestamp");
+							expect(forked).toHaveProperty("forkPointTimestamp", 123);
 					}),
 				),
 		);

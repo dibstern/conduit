@@ -22,6 +22,7 @@ import {
 	defaultClaudeSessionForkSdk,
 	forkClaudeTranscript,
 	resolveForkUpToUuid,
+	resolveRewindUpToUuid,
 } from "../../../../src/lib/provider/claude/claude-session-fork.js";
 
 afterEach(() => vi.unstubAllEnvs());
@@ -40,6 +41,27 @@ const entry = (
 });
 
 describe("resolveForkUpToUuid", () => {
+	it("ignores hidden goal-clear records when finding prompt boundaries and cuts", () => {
+		const messages = [
+			entry("prompt", "user", { id: "question", content: "Question" }),
+			entry("answer", "assistant", { id: "answer-id", content: "Answer" }),
+			entry("clear", "user", {
+				content:
+					"<command-name>/goal</command-name><command-args>clear</command-args>",
+			}),
+			entry("clear-output", "assistant", {
+				model: "<synthetic>",
+				content: "Goal cleared: inherited",
+			}),
+			entry("next", "user", { id: "next-question", content: "Next" }),
+		];
+		expect(resolveForkUpToUuid(messages, "answer-id")).toBe("answer");
+		expect(resolveForkUpToUuid(messages, "question")).toBe("answer");
+		expect(resolveForkUpToUuid(messages, "clear")).toBeUndefined();
+		expect(resolveRewindUpToUuid(messages, "answer-id", "next-question")).toBe(
+			"answer",
+		);
+	});
 	it("includes assistant work and tool results through the end of the turn", () => {
 		const messages = [
 			entry("prompt-1", "user", { content: "Question" }),

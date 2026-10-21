@@ -42,10 +42,49 @@ export class ClaudeRuntimeError extends Data.TaggedError("ClaudeRuntimeError")<{
 	readonly code?: string;
 }> {}
 
+/** Native fork/resume cannot safely preserve this turn's context. */
+export class ClaudeResumeRefused extends Data.TaggedError(
+	"ClaudeResumeRefused",
+)<{
+	readonly message: string;
+	readonly reason:
+		| "resume_drops_turn"
+		| "goal_clear_unsupported"
+		| "fork_transcript_unavailable";
+}> {
+	readonly code = "claude_resume_refused";
+}
+
+export function isClaudeResumeRefused(error: unknown): boolean {
+	let cause = error;
+	for (let depth = 0; depth < 5; depth++) {
+		if (typeof cause === "string")
+			return cause.includes("Resume rejected by --resume-drops-turn:");
+		if (cause === null || typeof cause !== "object") return false;
+		if ("code" in cause && cause.code === "claude_resume_refused") return true;
+		if (
+			"message" in cause &&
+			typeof cause.message === "string" &&
+			cause.message.includes("Resume rejected by --resume-drops-turn:")
+		)
+			return true;
+		if (!("cause" in cause)) return false;
+		cause = cause.cause;
+	}
+	return false;
+}
+
 /** Match the CLI's stale-resume diagnostic, including SDK stderr tails. */
 export function isClaudeResumeFailure(error: unknown): boolean {
 	let cause = error;
 	for (let depth = 0; depth < 5; depth++) {
+		if (
+			cause !== null &&
+			typeof cause === "object" &&
+			"code" in cause &&
+			cause.code === "claude_resume_refused"
+		)
+			return true;
 		const message =
 			typeof cause === "string"
 				? cause
@@ -54,7 +93,8 @@ export function isClaudeResumeFailure(error: unknown): boolean {
 					: undefined;
 		if (
 			typeof message === "string" &&
-			/^No conversation found with session ID/m.test(message)
+			(/^No conversation found with session ID/m.test(message) ||
+				/Resume rejected by --resume-drops-turn:/m.test(message))
 		)
 			return true;
 		if (cause === null || typeof cause !== "object" || !("cause" in cause))
@@ -68,6 +108,7 @@ export type ClaudeAdapterError =
 	| EventSinkError
 	| ClaudeBoundaryError
 	| ClaudeRuntimeError
+	| ClaudeResumeRefused
 	| ClaudeSDKDecodeError
 	| PickRejection;
 

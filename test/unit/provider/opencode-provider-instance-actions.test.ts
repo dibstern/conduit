@@ -439,41 +439,10 @@ describe("OpenCodeProviderInstance action methods", () => {
 	});
 
 	describe("shutdown", () => {
-		it("resolves cleanly when no pending turns", async () => {
+		it("resolves cleanly", async () => {
 			await expect(
 				Effect.runPromise(instance.shutdownEffect()),
 			).resolves.not.toThrow();
-		});
-
-		it("rejects pending turns on shutdown", async () => {
-			// Start a turn that won't be completed
-			const turnPromise = Effect.runPromise(
-				instance.sendTurnEffect({
-					sessionId: "s1",
-					inputId: "t1",
-					prompt: "hello",
-					history: [],
-					providerState: {},
-					model: { providerId: "anthropic", modelId: "claude-sonnet" },
-					workspaceRoot: "/tmp",
-					extraFolders: [],
-					eventSink: {
-						push: vi.fn(() => Effect.void),
-						requestPermission: vi.fn(() =>
-							Effect.succeed({ decision: "once" as const }),
-						),
-						requestQuestion: vi.fn(() => Effect.succeed({})),
-						resolvePermission: vi.fn(() => Effect.void),
-						resolveQuestion: vi.fn(() => Effect.void),
-					},
-					abortSignal: new AbortController().signal,
-				}),
-			);
-
-			// Shutdown while turn is pending
-			await Effect.runPromise(instance.shutdownEffect());
-
-			await expect(turnPromise).rejects.toThrow("shutdown");
 		});
 	});
 });

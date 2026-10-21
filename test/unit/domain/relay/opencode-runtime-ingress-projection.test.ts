@@ -46,6 +46,7 @@ import {
 	canonicalEvent,
 	createEventId,
 } from "../../../../src/lib/persistence/events.js";
+import { openCodeInputMessageId } from "../../../../src/lib/provider/opencode/opencode-input-message-id.js";
 import { makeSSEEvent } from "../../../helpers/sse-factories.js";
 
 const SESSION_ID = "sess-proj-001";
@@ -305,6 +306,105 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		if (dir) rmSync(dir, { recursive: true, force: true });
 		dir = undefined;
 		dbPath = undefined;
+	});
+
+	// A stale assistant error must not claim the active run or its completion;
+	// a real session-level error must still settle the accepted command.
+	it.each([
+		"unowned assistant",
+		"session-level",
+	] as const)("resolves retry error ownership from native identity or session scope (%s)", async (source) => {
+		await persistSessionCreated(SESSION_ID, "opencode");
+		await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				const sql = yield* SqlClient.SqlClient;
+				yield* commit([
+					canonicalEvent(
+						"run.requested",
+						SESSION_ID,
+						{ runId: "run-a", inputId: "a" },
+						{ metadata: { runId: "run-a" } },
+					),
+				]);
+				yield* sql`INSERT INTO provider_command_outbox
+						(request_sequence, command_id, project_key, session_id, provider_id,
+						effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at)
+						VALUES (1, 'a', 'test-project', ${SESSION_ID}, 'opencode',
+						'send_turn', 'run-a', '{}', 'running', 1, 1, 1)`;
+				yield* sql`INSERT INTO command_receipts
+						(command_id, session_id, project_key, status, created_at, updated_at)
+						VALUES ('a', ${SESSION_ID}, 'test-project', 'side_effect_requested', 1, 1)`;
+			}),
+		);
+		await ingestOk(
+			makeSSEEvent("message.updated", {
+				info: {
+					id: openCodeInputMessageId("a"),
+					sessionID: SESSION_ID,
+					role: "user",
+					time: { created: 10 },
+				},
+			}),
+		);
+		await ingestOk(
+			makeSSEEvent("session.status", {
+				sessionID: SESSION_ID,
+				status: { type: "retry", attempt: 1, message: "Upstream busy" },
+			}),
+		);
+		await ingestOk(
+			source === "unowned assistant"
+				? makeSSEEvent("message.updated", {
+						info: {
+							id: "old-assistant",
+							sessionID: SESSION_ID,
+							role: "assistant",
+							parentID: "unknown-old-input",
+							time: { created: 1, completed: 2 },
+						},
+					})
+				: makeSSEEvent("session.error", {
+						sessionID: SESSION_ID,
+						error: { name: "APIError", data: { message: "Upstream failed" } },
+					}),
+		);
+		const { ends, commands } = await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				return {
+					ends: yield* sql`SELECT type, json_extract(metadata, '$.runId') AS run_id
+							FROM events WHERE type IN ('turn.error', 'turn.completed') ORDER BY sequence`,
+					commands:
+						yield* sql`SELECT r.status AS run_status, o.status AS command_status,
+							c.status AS receipt_status FROM provider_runs r
+							JOIN provider_command_outbox o ON o.run_id = r.id
+							JOIN command_receipts c ON c.command_id = o.command_id WHERE r.id = 'run-a'`,
+				};
+			}),
+		);
+		if (source === "unowned assistant") {
+			expect(ends).toEqual([
+				{ type: "turn.error", run_id: null },
+				{ type: "turn.completed", run_id: null },
+			]);
+			expect(commands).toEqual([
+				{
+					run_status: "running",
+					command_status: "running",
+					receipt_status: "side_effect_requested",
+				},
+			]);
+		} else {
+			expect(ends).toEqual([{ type: "turn.error", run_id: "run-a" }]);
+			expect(commands).toEqual([
+				{
+					run_status: "error",
+					command_status: "failed",
+					receipt_status: "side_effect_failed",
+				},
+			]);
+		}
 	});
 
 	it("projects upstream deletion as deleted sidebar removals for the whole session subtree", async () => {
@@ -854,11 +954,20 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		expect(rows).toEqual([{ parent_id: SESSION_ID, unread: 0 }]);
 	});
 
-	it("turn.completed updates turn with cost/tokens", async () => {
+	it("an accepted run keeps message accounting and closes only on its idle boundary", async () => {
+		await persistSessionCreated(SESSION_ID, "opencode");
+		await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('owned-run', ${SESSION_ID}, 'pending', 1)`;
+				yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, run_id, payload_json, status, requested_at, updated_at)
+				VALUES (1, 'owned-input', 'test-project', ${SESSION_ID}, 'opencode', 'send_turn', 'owned-run', '{}', 'running', 1, 1)`;
+			}),
+		);
 		await ingestOk(
 			makeSSEEvent("message.created", {
 				sessionID: SESSION_ID,
-				messageID: "user-msg-001",
+				messageID: "msg_conduit_owned-input",
 				info: { role: "user", parts: [] },
 			}),
 		);
@@ -866,7 +975,11 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 			makeSSEEvent("message.created", {
 				sessionID: SESSION_ID,
 				messageID: "asst-msg-001",
-				info: { role: "assistant", parts: [] },
+				info: {
+					role: "assistant",
+					parentID: "msg_conduit_owned-input",
+					parts: [],
+				},
 			}),
 		);
 		await ingestOk(
@@ -891,6 +1004,19 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 			}),
 		);
 
+		const beforeIdle = await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				return yield* sql`SELECT state FROM turns WHERE session_id = ${SESSION_ID}`;
+			}),
+		);
+		expect(beforeIdle).toEqual([{ state: "running" }]);
+		await ingestOk(
+			makeSSEEvent("session.status", {
+				sessionID: SESSION_ID,
+				status: { type: "idle" },
+			}),
+		);
 		const stored = await readStored();
 		expect(stored.some((event) => event.type === "turn.completed")).toBe(true);
 

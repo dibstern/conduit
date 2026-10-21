@@ -106,7 +106,13 @@ export const SESSIONS_SETTLED_SHELF_INDEX_MIGRATION =
 export const SURFACING_MARKS_MIGRATION = "0070_surfacing_marks.sql";
 export const MESSAGE_PART_READ_MIGRATION = "0071_message_part_read.sql";
 export const TURN_RECAPS_MIGRATION = "0072_turn_recaps.sql";
-export const SESSIONS_GOAL_STUCK_MIGRATION = "0073_sessions_goal_stuck.sql";
+export const EVENTS_PARENT_ID_INDEX_MIGRATION =
+	"0073_events_parent_id_index.sql";
+export const EVENTS_FORKED_FROM_INDEX_MIGRATION =
+	"0074_events_forked_from_index.sql";
+export const MESSAGE_PARTS_RESULT_EVENT_SEQ_INDEX_MIGRATION =
+	"0075_message_parts_result_event_seq_index.sql";
+export const SESSIONS_GOAL_STUCK_MIGRATION = "0076_sessions_goal_stuck.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

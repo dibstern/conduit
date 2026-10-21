@@ -79,9 +79,12 @@ it("retains canonical user attachments through reopen, fork, browser history and
 							sessionId: "fork",
 							title: "Fork",
 							provider: "claude",
+							forkedFrom: "parent",
+							inheritsHistory: true,
+							forkPointMessageId: source.boundary.messageId,
+							forkPointTimestamp: source.boundary.createdAt,
 						}),
 					]);
-					yield* persist.persistEvents(yield* source.copy("fork"));
 					const threadRead = yield* makeClaudeThreadRead;
 					for (const sessionId of ["parent", "fork"]) {
 						const page = yield* read.readSessionTranscriptPage(sessionId, {

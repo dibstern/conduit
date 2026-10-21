@@ -50,6 +50,19 @@ export function translateProviderRuntimeEventToDomain(
 	const data = dataRecord(event);
 
 	switch (event.type) {
+		case "run.started": {
+			const inputId = stringField(data["inputId"]);
+			const requestedRunId = stringField(data["requestedRunId"]);
+			const userMessageId = stringField(data["userMessageId"]);
+			if (!inputId || !requestedRunId || !event.runId) {
+				throw new TypeError("A run acceptance requires its input and run ids");
+			}
+			return singleEvent(event, state, "run.started", {
+				inputId,
+				requestedRunId,
+				...(userMessageId ? { userMessageId } : {}),
+			});
+		}
 		case "workspace.changed":
 			// Session Workspace validates moves and remains their only canonical writer.
 			return {
@@ -118,10 +131,11 @@ export function translateProviderRuntimeEventToDomain(
 		case "message.created": {
 			const messageId = messageIdFromData(event, data);
 			const role = messageRole(data["role"]);
-			const parentID = getProviderDriver(event.providerId)
-				?.emitsMessageParentIds
-				? stringField(data["parentID"])
-				: undefined;
+			const parentID =
+				event.runId ||
+				getProviderDriver(event.providerId)?.emitsMessageParentIds
+					? stringField(data["parentID"])
+					: undefined;
 			const inputId = stringField(data["inputId"]);
 			const nextState =
 				role === "assistant"
@@ -353,6 +367,15 @@ export function translateProviderRuntimeEventToDomain(
 		}
 
 		case "turn.completed": {
+			const updates = data["providerStateUpdates"];
+			const providerStateUpdates = Array.isArray(updates)
+				? updates.filter(
+						(update): update is { key: string; value: string } =>
+							isRecord(update) &&
+							typeof update["key"] === "string" &&
+							typeof update["value"] === "string",
+					)
+				: undefined;
 			const cost = numberFieldValue(data["cost"]);
 			const providerCostTotalUsd = numberFieldValue(
 				data["providerCostTotalUsd"],
@@ -366,6 +389,7 @@ export function translateProviderRuntimeEventToDomain(
 			const userMessageId = stringField(data["userMessageId"]);
 			const payload = {
 				messageId: messageIdFromDataOrState(event, data, state),
+				...(providerStateUpdates ? { providerStateUpdates } : {}),
 				...(userMessageId ? { userMessageId } : {}),
 				...(cost != null ? { cost } : {}),
 				...(providerCostTotalUsd != null ? { providerCostTotalUsd } : {}),
@@ -377,10 +401,15 @@ export function translateProviderRuntimeEventToDomain(
 			return singleEvent(event, state, "turn.completed", payload);
 		}
 
+		case "turn.notice":
+			return singleEvent(event, state, "turn.notice", {
+				text: stringField(data["text"]) ?? "",
+			});
+
 		case "turn.error": {
 			const code = stringField(data["code"]);
 			const retryable = data["retryable"];
-			const userMessageId = stringField(data["userMessageId"]);
+			const retryHandled = data["retryHandled"];
 			const payload = {
 				messageId: messageIdFromDataOrState(event, data, state),
 				error:
@@ -389,7 +418,10 @@ export function translateProviderRuntimeEventToDomain(
 					"Provider runtime error",
 				...(code != null ? { code } : {}),
 				...(typeof retryable === "boolean" ? { retryable } : {}),
-				...(userMessageId ? { userMessageId } : {}),
+				...(typeof retryHandled === "boolean" ? { retryHandled } : {}),
+				...(typeof data["retryAt"] === "number"
+					? { retryAt: data["retryAt"] }
+					: {}),
 			} satisfies TurnErrorPayload;
 			return singleEvent(event, state, "turn.error", payload);
 		}
@@ -401,6 +433,10 @@ export function translateProviderRuntimeEventToDomain(
 					typeof data["messageId"] === "string"
 						? data["messageId"]
 						: messageIdFromDataOrState(event, data, state),
+				...(typeof data["code"] === "string" ? { code: data["code"] } : {}),
+				...(typeof data["reason"] === "string"
+					? { reason: data["reason"] }
+					: {}),
 			});
 		}
 
@@ -453,15 +489,20 @@ export function translateProviderRuntimeEventToDomain(
 		}
 
 		case "session.created": {
+			const sessionId = stringField(data["sessionId"]) ?? event.sessionId;
+			// Creation must project into the stream whose death ingestion checks.
+			if (sessionId !== event.sessionId) return { events: [], state };
 			const parentId = stringField(data["parentId"]);
+			const forkedFrom = stringField(data["forkedFrom"]);
 			const providerSessionId =
 				stringField(data["providerSessionId"]) ??
 				event.providerRefs.providerSessionId;
 			const payload = {
-				sessionId: stringField(data["sessionId"]) ?? event.sessionId,
+				sessionId,
 				title: stringField(data["title"]) ?? "Untitled",
 				provider: stringField(data["provider"]) ?? event.providerId,
 				...(parentId != null ? { parentId } : {}),
+				...(forkedFrom != null ? { forkedFrom } : {}),
 				...(providerSessionId != null ? { providerSessionId } : {}),
 			} satisfies SessionCreatedPayload;
 			return singleEvent(event, state, "session.created", payload);
@@ -773,6 +814,7 @@ function eventMetadata(event: ProviderRuntimeEvent): EventMetadata {
 			: undefined;
 	return {
 		...runtimeMetadata(event.metadata),
+		...(event.runId ? { runId: event.runId } : {}),
 		// Only these two kinds have readers: projectors branch on opencode.rest,
 		// and subagent persistence and its verify script on the transcript kind.
 		...(event.rawSource.kind === "opencode.rest" ||

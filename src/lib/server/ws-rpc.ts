@@ -250,6 +250,8 @@ export type DaemonRpcName =
 	| "GetAvatar"
 	| "SetAvatar"
 	| "SetAutoSettleSetting"
+	| "GetAutoArchiveSetting"
+	| "SetAutoArchiveSetting"
 	| "GetAutoDeleteArchivedSetting"
 	| "SetAutoDeleteArchivedSetting"
 	| "GetWorktreeCleanupSetting"

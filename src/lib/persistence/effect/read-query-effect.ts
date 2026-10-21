@@ -3,6 +3,7 @@ import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { Fragment } from "effect/sql/Statement";
 import type { SessionScope } from "../../contracts/session-scope.js";
+import { inboxRunStatusQuery } from "../inbox-run-status-query.js";
 import { SessionRollupProjects } from "./session-rollup-projects.js";
 
 export type { SessionScope } from "../../contracts/session-scope.js";
@@ -2423,28 +2424,11 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			provider: string;
 			version: number;
 		}>`
+			WITH latest_run AS (${inboxRunStatusQuery(sql, sessionId)})
 			SELECT version, provider,
 				EXISTS (SELECT 1 FROM pending_inputs
 					WHERE session_id = ${sessionId} AND state = 'queued')
-				AND (EXISTS (SELECT 1 FROM turns WHERE session_id = ${sessionId}
-					AND state IN ('interrupted', 'error')
-					AND completed_at >= COALESCE(
-						(SELECT MAX(requested_at) FROM provider_command_outbox
-							WHERE session_id = ${sessionId} AND effect_type = 'send_turn'),
-						(SELECT MAX(requested_at) FROM turns WHERE session_id = ${sessionId}),
-						0))
-					OR EXISTS (SELECT 1 FROM events requeued WHERE session_id = ${sessionId}
-						AND type = 'input.requeued' AND json_extract(data, '$.reason') = 'failed'
-						AND sequence = (SELECT MIN(first.sequence) FROM events first
-							WHERE first.session_id = ${sessionId} AND first.type = 'input.requeued'
-							AND json_extract(first.data, '$.sentSequence') = json_extract(requeued.data, '$.sentSequence'))
-						AND json_extract(data, '$.sentSequence') = (SELECT MAX(sent.sequence) FROM events sent
-							WHERE sent.session_id = ${sessionId} AND sent.type = 'input.sent'
-							AND json_extract(sent.data, '$.inputId') = json_extract(requeued.data, '$.inputId'))
-						AND sequence > COALESCE((SELECT MAX(sequence) FROM events
-							WHERE session_id = ${sessionId} AND (type = 'input.sent'
-								OR (type = 'session.resume_cancelled'
-									AND json_extract(metadata, '$.source') = 'inbox-reset'))), 0))
+				AND ((SELECT stopped FROM latest_run)
 					OR json_extract(limit_recovery, '$.cutOffMessageId') IS NOT NULL) AS paused,
 				EXISTS (SELECT 1 FROM pending_approvals
 					WHERE session_id = ${sessionId} AND status = 'pending') AS prompt_open

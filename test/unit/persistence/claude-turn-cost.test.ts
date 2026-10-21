@@ -39,11 +39,13 @@ describe("Claude turn economics through SQLite persistence", () => {
 	let filename: string;
 	let runtime: ReturnType<typeof makeCostRuntime>;
 	let stamp: number;
+	let messageRuns: Map<string, string>;
 
 	beforeEach(async () => {
 		dir = mkdtempSync(join(tmpdir(), "conduit-claude-turn-cost-"));
 		filename = join(dir, "events.db");
 		stamp = Date.now();
+		messageRuns = new Map();
 		runtime = makeCostRuntime(filename);
 		await runtime.runPromise(
 			Effect.flatMap(ProjectionRunnerEffectTag, (runner) => runner.recover()),
@@ -74,12 +76,26 @@ describe("Claude turn economics through SQLite persistence", () => {
 	const seedTurn = (sessionId: string, userId: string, assistantId: string) =>
 		Effect.gen(function* () {
 			const persist = yield* ClaudeEventPersistEffectTag;
+			const runId = `run-${sessionId}-${userId}`;
+			messageRuns.set(assistantId, runId);
 			yield* persist.persistEvents([
 				canonicalEvent(
 					"message.created",
 					sessionId,
 					{ messageId: userId, role: "user", sessionId },
+					{ provider: "claude", createdAt: stamp++, metadata: { runId } },
+				),
+				canonicalEvent(
+					"run.requested",
+					sessionId,
+					{ inputId: userId, runId },
 					{ provider: "claude", createdAt: stamp++ },
+				),
+				canonicalEvent(
+					"run.started",
+					sessionId,
+					{ inputId: userId, requestedRunId: runId },
+					{ provider: "claude", createdAt: stamp++, metadata: { runId } },
 				),
 				canonicalEvent(
 					"message.created",
@@ -90,7 +106,7 @@ describe("Claude turn economics through SQLite persistence", () => {
 						sessionId,
 						parentID: userId,
 					},
-					{ provider: "claude", createdAt: stamp++ },
+					{ provider: "claude", createdAt: stamp++, metadata: { runId } },
 				),
 			]);
 		});
@@ -101,11 +117,13 @@ describe("Claude turn economics through SQLite persistence", () => {
 		total: number,
 		providerSessionId = "sdk-session",
 		createdAt = stamp++,
+		runId = messageRuns.get(messageId),
 	) => {
 		const data = { messageId, providerCostTotalUsd: total, providerSessionId };
 		return canonicalEvent("turn.completed", sessionId, data, {
 			provider: "claude",
 			createdAt,
+			...(runId ? { metadata: { runId } } : {}),
 		});
 	};
 
@@ -123,11 +141,69 @@ describe("Claude turn economics through SQLite persistence", () => {
 		const sql = yield* SqlClient.SqlClient;
 		const runner = yield* ProjectionRunnerEffectTag;
 		yield* sql`DELETE FROM turns`;
+		yield* sql`DELETE FROM provider_runs`;
 		yield* sql`DELETE FROM messages`;
 		yield* sql`DELETE FROM projector_cursors WHERE projector_name IN ('message', 'turn')`;
 		yield* runner.recover();
 		expect(yield* runner.getFailures()).toEqual([]);
 		return yield* costs;
+	});
+
+	it("bills the explicit reply owner once while closing every input accepted by its run", async () => {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const persist = yield* ClaudeEventPersistEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedSession("folded");
+				yield* seedTurn("folded", "u1", "a1");
+				const runId = "run-folded-u1";
+				messageRuns.set("a2", runId);
+				yield* persist.persistEvents([
+					canonicalEvent(
+						"message.created",
+						"folded",
+						{ sessionId: "folded", messageId: "u2", role: "user" },
+						{
+							provider: "claude",
+							createdAt: stamp++,
+							metadata: { runId: "unused-run" },
+						},
+					),
+					canonicalEvent(
+						"run.requested",
+						"folded",
+						{ inputId: "u2", runId: "unused-run" },
+						{ provider: "claude", createdAt: stamp++ },
+					),
+					canonicalEvent(
+						"run.started",
+						"folded",
+						{ inputId: "u2", requestedRunId: "unused-run" },
+						{ provider: "claude", createdAt: stamp++, metadata: { runId } },
+					),
+					canonicalEvent(
+						"message.created",
+						"folded",
+						{
+							sessionId: "folded",
+							messageId: "a2",
+							parentID: "u2",
+							role: "assistant",
+						},
+						{ provider: "claude", createdAt: stamp++, metadata: { runId } },
+					),
+					completion("folded", "a2", 0.5),
+				]);
+				expect((yield* costs).turns).toEqual([
+					{ id: "u1", cost: null },
+					{ id: "u2", cost: 0.5 },
+				]);
+				expect(yield* sql`SELECT id, state FROM turns ORDER BY id`).toEqual([
+					{ id: "u1", state: "completed" },
+					{ id: "u2", state: "completed" },
+				]);
+			}),
+		);
 	});
 
 	it("keeps the latest completion event as the result boundary after late task updates and reopening", async () => {
@@ -520,7 +596,11 @@ describe("Claude turn economics through SQLite persistence", () => {
 					[72, "surfacing_marks"],
 					[73, "message_part_read"],
 					[74, "turn_recaps"],
-					[75, "sessions_goal_stuck"],
+					[75, "events_parent_id_index"],
+					[76, "events_forked_from_index"],
+					[77, "message_parts_result_event_seq_index"],
+					[78, "provider_run_ownership"],
+					[79, "sessions_goal_stuck"],
 				]);
 				expect(yield* makeEffectSqlMigrator()).toEqual([]);
 			}),
@@ -641,7 +721,11 @@ describe("Claude turn economics through SQLite persistence", () => {
 												contextWindow: 200_000,
 											},
 							},
-							{ provider, createdAt: stamp++ },
+							{
+								provider,
+								createdAt: stamp++,
+								metadata: { runId: `run-${session}-${session}-u` },
+							},
 						),
 					);
 					const history = messageRowsToHistory(
@@ -763,7 +847,7 @@ describe("Claude turn economics through SQLite persistence", () => {
 						},
 						{ provider: "claude", createdAt: stamp++ },
 					),
-					completion("s1", "a2", 0.7),
+					completion("s1", "a2", 0.7, "sdk-session", stamp++, "run-s1-u1"),
 				]);
 				const rows = yield* costs;
 				expect(rows.messages[0]?.cost).toBeCloseTo(0.3, 12);
@@ -859,7 +943,11 @@ describe("Claude turn economics through SQLite persistence", () => {
 								"turn.completed",
 								provider,
 								{ messageId: `${provider}-a`, cost },
-								{ provider, createdAt: stamp++ },
+								{
+									provider,
+									createdAt: stamp++,
+									metadata: { runId: `run-${provider}-${provider}-u` },
+								},
 							),
 						),
 					);
@@ -957,6 +1045,7 @@ describe("Claude turn economics through SQLite persistence", () => {
 						type: "turn.completed" as const,
 						providerId: "claude",
 						sessionId: "s1",
+						runId: "run-s1-u1",
 						providerRefs: { providerSessionId: "sdk-session" },
 						rawSource: {
 							kind: "claude.sdk.message",

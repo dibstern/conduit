@@ -23,24 +23,43 @@ function stored(harness: ProcessHarness, sessionId: string) {
 		return {
 			commands: db
 				.prepare(
-					"SELECT command_id, payload_json, attempt_count, status FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
+					"SELECT command_id, run_id, payload_json, attempt_count, status FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
 				)
 				.all(sessionId) as Array<{
 				command_id: string;
+				run_id: string;
 				payload_json: string;
 				attempt_count: number;
 				status: string;
 			}>,
 			turns: db
 				.prepare(
-					"SELECT state FROM turns WHERE session_id = ? ORDER BY requested_at",
+					"SELECT state, run_id, started_at FROM turns WHERE session_id = ? ORDER BY requested_at",
 				)
-				.all(sessionId) as Array<{ state: string }>,
+				.all(sessionId) as Array<{
+				state: string;
+				run_id: string;
+				started_at: number | null;
+			}>,
+			runs: db
+				.prepare(
+					"SELECT id, status, started_at FROM provider_runs WHERE session_id = ? ORDER BY requested_at",
+				)
+				.all(sessionId) as Array<{
+				id: string;
+				status: string;
+				started_at: number | null;
+			}>,
+			receipts: db
+				.prepare(
+					"SELECT receipt.status FROM command_receipts receipt JOIN provider_command_outbox outbox ON outbox.command_id = receipt.command_id AND outbox.project_key = receipt.project_key WHERE outbox.session_id = ? AND outbox.effect_type = 'send_turn' ORDER BY outbox.request_sequence",
+				)
+				.all(sessionId) as Array<{ status: string }>,
 			errors: db
 				.prepare(
-					"SELECT data FROM events WHERE session_id = ? AND type = 'turn.error'",
+					"SELECT data, json_extract(metadata, '$.runId') AS run_id FROM events WHERE session_id = ? AND type = 'turn.error'",
 				)
-				.all(sessionId) as Array<{ data: string }>,
+				.all(sessionId) as Array<{ data: string; run_id: string }>,
 		};
 	} finally {
 		db.close();
@@ -97,22 +116,34 @@ describe("runner host at-most-once delivery through Claude's process seam", () =
 				"sends",
 				sessionId,
 			);
-			const journal = readdirSync(journalDirectory)
-				.map(
-					(filename) =>
-						JSON.parse(
-							readFileSync(join(journalDirectory, filename), "utf8"),
-						) as Record<string, unknown>,
-				)
-				.find((record) => record["commandId"] === command.command_id);
-			expect(journal).toMatchObject({
-				commandId: command.command_id,
-				attempt: command.attempt_count,
-				runnerPid: original.pid,
-				startedAt: expect.any(Number),
+			let journal: Record<string, unknown> | undefined;
+			await vi.waitFor(() => {
+				journal = readdirSync(journalDirectory)
+					.map(
+						(filename) =>
+							JSON.parse(
+								readFileSync(join(journalDirectory, filename), "utf8"),
+							) as Record<string, unknown>,
+					)
+					.find((record) => record["commandId"] === command.command_id);
+				expect(journal).toMatchObject({
+					commandId: command.command_id,
+					attempt: command.attempt_count,
+					runnerPid: original.pid,
+					startedAt: expect.any(Number),
+				});
 			});
+			// This SDK gate precedes command_lifecycle.started; handoff is not intake.
 			expect(journal).not.toHaveProperty("completedAt");
-			expect(stored(harness, sessionId).turns).toEqual([{ state: "running" }]);
+			expect(journal).not.toHaveProperty("result");
+			expect(journal).not.toHaveProperty("failure");
+			expect(stored(harness, sessionId).commands[0]?.status).toBe("running");
+			expect(stored(harness, sessionId).turns).toEqual([
+				{ state: "pending", run_id: command.run_id, started_at: null },
+			]);
+			expect(stored(harness, sessionId).runs).toEqual([
+				{ id: command.run_id, status: "pending", started_at: null },
+			]);
 			await harness.kill();
 			await pending;
 			process.kill(original.pid, "SIGKILL");
@@ -143,8 +174,15 @@ describe("runner host at-most-once delivery through Claude's process seam", () =
 					expect(state.commands.map(({ status }) => status)).toEqual([
 						"failed",
 					]);
-					expect(state.turns).toEqual([{ state: "error" }]);
+					expect(state.turns).toEqual([
+						{ state: "error", run_id: command.run_id, started_at: null },
+					]);
+					expect(state.runs).toEqual([
+						{ id: command.run_id, status: "error", started_at: null },
+					]);
+					expect(state.receipts).toEqual([{ status: "side_effect_failed" }]);
 					expect(state.errors).toHaveLength(1);
+					expect(state.errors[0]?.run_id).toBe(command.run_id);
 				},
 				{ timeout: 20_000 },
 			);
@@ -210,6 +248,7 @@ describe("runner host at-most-once delivery through Claude's process seam", () =
 									aborted: false,
 									input: {
 										...(JSON.parse(command.payload_json) as SessionTurn),
+										runId: command.run_id,
 										commandAttempt: command.attempt_count,
 									},
 								},

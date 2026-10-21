@@ -27,6 +27,8 @@ export const makeProcessClaudeSessionRunner = (
 				variant,
 				permissionMode,
 				resumeSessionAt: _rewindPoint,
+				forkSession: _forkSession,
+				clearInheritedGoal: _clearInheritedGoal,
 				...launch
 			} = snapshot.input;
 			return {

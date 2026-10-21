@@ -54,15 +54,20 @@ function persisted(harness: ProcessHarness, sessionId: string) {
 				.all(sessionId) as Array<{ id: string; is_streaming: number }>,
 			events: db
 				.prepare(
-					"SELECT type, data FROM events WHERE session_id = ? ORDER BY sequence",
+					"SELECT type, data, metadata FROM events WHERE session_id = ? ORDER BY sequence",
 				)
-				.all(sessionId) as Array<{ type: string; data: string }>,
+				.all(sessionId) as Array<{
+				type: string;
+				data: string;
+				metadata: string;
+			}>,
 			commands: db
 				.prepare(
-					"SELECT o.command_id, o.status, r.status AS receipt_status FROM provider_command_outbox o LEFT JOIN command_receipts r ON r.command_id = o.command_id WHERE o.session_id = ? AND o.effect_type = 'send_turn' ORDER BY o.request_sequence",
+					"SELECT o.command_id, o.run_id, o.status, r.status AS receipt_status FROM provider_command_outbox o LEFT JOIN command_receipts r ON r.command_id = o.command_id WHERE o.session_id = ? AND o.effect_type = 'send_turn' ORDER BY o.request_sequence",
 				)
 				.all(sessionId) as Array<{
 				command_id: string;
+				run_id: string;
 				status: string;
 				receipt_status: string;
 			}>,
@@ -433,7 +438,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 		);
 	}, 60_000);
 
-	it("drains an interrupted terminal replay before acting on a cached failed send receipt", async () => {
+	it("drains an interrupted terminal replay independently of a cached intake acknowledgement", async () => {
 		const harness = await ProcessHarness.start({
 			dist: "dist",
 			restartProof: true,
@@ -458,13 +463,25 @@ describe("Claude runners survive server replacement through built dist", () => {
 		const db = new Database(harness.daemonStorePath());
 		const command = db
 			.prepare(
-				"SELECT command_id, payload_json, attempt_count FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn'",
+				"SELECT command_id, run_id, payload_json, attempt_count FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn'",
 			)
 			.get(sessionId) as {
 			command_id: string;
+			run_id: string;
 			payload_json: string;
 			attempt_count: number;
 		};
+		const runBoundary =
+			db.prepare(`SELECT run.status, run.completed_at, interruption.created_at AS interrupted_at
+			FROM provider_command_outbox command JOIN provider_runs run
+				ON run.id = command.run_id AND run.session_id = command.session_id
+			JOIN events interruption ON interruption.session_id = run.session_id
+				AND json_extract(interruption.metadata, '$.runId') = run.id AND interruption.type = 'turn.interrupted'
+			WHERE command.session_id = ? AND command.command_id = ? AND command.effect_type = 'send_turn'
+			ORDER BY command.request_sequence DESC LIMIT 1`);
+		let interruptedBoundary:
+			| { status: string; completed_at: number; interrupted_at: number }
+			| undefined;
 		const upstreamPath = `${runner.socketPath}.upstream`;
 		const sockets = new Set<Socket>();
 		const held: string[] = [];
@@ -519,7 +536,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 					if (
 						message.type === "command-reply" &&
 						message.commandId === command.command_id &&
-						message.failure
+						message.result?.status === "accepted"
 					)
 						cachedReceived(client);
 				}
@@ -527,7 +544,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 		});
 		let direct: ClaudeRunnerSocket | undefined;
 		let directHello: RunnerHello | undefined;
-		let cachedFailure: unknown;
+		let cachedIntake: unknown;
 		let blockedState: ReturnType<typeof persisted> | undefined;
 		let burst: RunnerMessage[] = [];
 		try {
@@ -597,7 +614,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 					.commandEffect(randomUUID(), { type: "end-session", sessionId })
 					.pipe(Effect.timeout("15 seconds")),
 			);
-			cachedFailure = await Effect.runPromise(
+			cachedIntake = await Effect.runPromise(
 				Effect.result(
 					direct.commandEffect(
 						command.command_id,
@@ -607,6 +624,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 							aborted: false,
 							input: {
 								...(JSON.parse(command.payload_json) as SessionTurn),
+								runId: command.run_id,
 								commandAttempt: command.attempt_count,
 							},
 						},
@@ -614,7 +632,10 @@ describe("Claude runners survive server replacement through built dist", () => {
 					),
 				).pipe(Effect.timeout("15 seconds")),
 			);
-			expect(cachedFailure).toMatchObject({ _tag: "Failure" });
+			expect(cachedIntake).toMatchObject({
+				_tag: "Success",
+				success: { status: "accepted" },
+			});
 			await new Promise<void>((resolve) => {
 				socket.once("close", resolve);
 				direct?.destroy();
@@ -652,14 +673,14 @@ describe("Claude runners survive server replacement through built dist", () => {
 					message.output.type === "event" &&
 					message.output.event.type === "turn.interrupted",
 			);
-			const failedReplyIndex = burst.findIndex(
+			const intakeReplyIndex = burst.findIndex(
 				(message) =>
 					message.type === "command-reply" &&
 					message.commandId === command.command_id &&
-					message.failure !== undefined,
+					message.result?.status === "accepted",
 			);
 			expect(terminalIndex).toBeGreaterThanOrEqual(0);
-			expect(failedReplyIndex).toBeGreaterThan(terminalIndex);
+			expect(intakeReplyIndex).toBeGreaterThan(terminalIndex);
 			expect(
 				harness.marks.filter((mark) => mark.kind === "runner-started").at(-1),
 			).toMatchObject({ pid: runner.pid, socketPath: runner.socketPath });
@@ -699,12 +720,19 @@ describe("Claude runners survive server replacement through built dist", () => {
 						],
 					});
 					expect(
-						state.events.filter((event) =>
-							["turn.completed", "turn.error", "turn.interrupted"].includes(
-								event.type,
-							),
-						),
-					).toEqual([expect.objectContaining({ type: "turn.interrupted" })]);
+						state.events.filter((event) => event.type === "turn.interrupted"),
+					).toHaveLength(1);
+					interruptedBoundary = runBoundary.get(
+						sessionId,
+						command.command_id,
+					) as typeof interruptedBoundary;
+					expect(interruptedBoundary).toMatchObject({
+						status: "interrupted",
+						completed_at: expect.any(Number),
+					});
+					expect(interruptedBoundary?.completed_at).toBe(
+						interruptedBoundary?.interrupted_at,
+					);
 				},
 				{ timeout: 15_000 },
 			);
@@ -719,12 +747,14 @@ describe("Claude runners survive server replacement through built dist", () => {
 				expect(statSync(`${runner.socketPath}.spool`).size).toBe(0),
 			);
 			expect(
-				persisted(harness, sessionId).events.filter((event) =>
-					["turn.completed", "turn.error", "turn.interrupted"].includes(
-						event.type,
-					),
+				persisted(harness, sessionId).events.filter(
+					(event) => event.type === "turn.interrupted",
 				),
-			).toEqual([expect.objectContaining({ type: "turn.interrupted" })]);
+			).toHaveLength(1);
+			// Later exact failure facts cannot move the run's sole end.
+			expect(runBoundary.get(sessionId, command.command_id)).toEqual(
+				interruptedBoundary,
+			);
 			expect(
 				sdkProof(harness).filter((mark) => mark["kind"] === "query"),
 			).toHaveLength(1);
@@ -735,10 +765,11 @@ describe("Claude runners survive server replacement through built dist", () => {
 			const evidence = {
 				runner,
 				directHello,
-				cachedFailure,
+				cachedIntake,
 				burst,
 				retries,
 				blockedState,
+				runBoundary: runBoundary.get(sessionId, command.command_id),
 				persisted: persisted(harness, sessionId),
 				sdk: sdkProof(harness),
 				wire,
@@ -796,9 +827,9 @@ describe("Claude runners survive server replacement through built dist", () => {
 		if (runner?.kind !== "runner-started")
 			throw new Error("Missing verified runner");
 		const admitted = persisted(harness, sessionId);
-		// Admission starts the turn before the runner receives the command.
+		// Admission reserves the run; held runner output has not placed the input.
 		expect(admitted).toMatchObject({
-			turns: [{ state: "running", assistant_message_id: null }],
+			turns: [],
 			commands: [{ status: "running" }],
 		});
 		expect(
@@ -936,6 +967,12 @@ describe("Claude runners survive server replacement through built dist", () => {
 					).toEqual(["running", "running"]),
 				{ timeout: 15_000 },
 			);
+			// Both commands reached the runner before its environment was ready.
+			expect(
+				persisted(harness, sessionId).events.some(
+					(event) => event.type === "run.started",
+				),
+			).toBe(false);
 			expect(
 				sdkProof(harness).filter(
 					(mark) => mark["kind"] === "query" || mark["kind"] === "enqueue",
@@ -951,6 +988,20 @@ describe("Claude runners survive server replacement through built dist", () => {
 					).toEqual([expect.stringMatching(/approval-recovery-before-steer$/)]),
 				{ timeout: 15_000 },
 			);
+			const queries = sdkProof(harness).filter(
+				(mark) => mark["kind"] === "query",
+			);
+			expect(queries).toHaveLength(1);
+			expect(queries[0]).toMatchObject({
+				env: {
+					CONDUIT_ENV_PROOF: "server-cache",
+					PATH: expect.stringMatching(/^\/tmp\/conduit-cached-env-bin:/),
+					CLAUDE_AGENT_SDK_CLIENT_APP: "conduit",
+					ENABLE_CLAUDEAI_MCP_SERVERS: "false",
+				},
+			});
+			expect(queries[0]?.["env"]).not.toHaveProperty("ANTHROPIC_API_KEY");
+			expect(queries[0]?.["env"]).not.toHaveProperty("ANTHROPIC_MODEL");
 			const approval = await after.waitFor(
 				(message) => message["type"] === "permission_pending",
 			);
@@ -1152,8 +1203,10 @@ describe("Claude runners survive server replacement through built dist", () => {
 						(event) => event.type === "turn.error",
 					);
 					expect(errors).toHaveLength(1);
+					expect(JSON.parse(errors[0]?.metadata ?? "{}")).toMatchObject({
+						runId: active.commands[0]?.run_id,
+					});
 					expect(JSON.parse(errors[0]?.data ?? "{}")).toMatchObject({
-						messageId: active.turns[0]?.assistant_message_id,
 						error: expect.any(String),
 					});
 					expect(
@@ -1210,7 +1263,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 		}
 	}, 45_000);
 
-	it("terminalizes the owning running turn when the adopted SDK fails before an assistant message", async () => {
+	it("terminalizes the owning pending turn when the adopted SDK fails before intake", async () => {
 		const harness = await ProcessHarness.start({
 			dist: "dist",
 			restartProof: true,
@@ -1237,11 +1290,24 @@ describe("Claude runners survive server replacement through built dist", () => {
 		const active = persisted(harness, sessionId);
 		expect(active.turns).toEqual([
 			{
-				state: "running",
+				state: "pending",
 				user_message_id: expect.any(String),
 				assistant_message_id: null,
 			},
 		]);
+		expect(active.events.some((event) => event.type === "run.started")).toBe(
+			false,
+		);
+		const db = new Database(harness.daemonStorePath(), { readonly: true });
+		try {
+			expect(
+				db
+					.prepare("SELECT started_at FROM turns WHERE session_id = ?")
+					.all(sessionId),
+			).toEqual([{ started_at: null }]);
+		} finally {
+			db.close();
+		}
 		expect(active.commands).toMatchObject([{ status: "running" }]);
 		await harness.kill();
 		await pending;
@@ -1268,8 +1334,11 @@ describe("Claude runners survive server replacement through built dist", () => {
 						(event) => event.type === "turn.error",
 					);
 					expect(errors).toHaveLength(1);
+					expect(JSON.parse(errors[0]?.metadata ?? "{}")).toMatchObject({
+						runId: active.commands[0]?.run_id,
+					});
 					expect(JSON.parse(errors[0]?.data ?? "{}")).toMatchObject({
-						userMessageId: active.turns[0]?.user_message_id,
+						error: "Harness failure before assistant message",
 					});
 					expect(
 						state.events.some(

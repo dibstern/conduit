@@ -11,6 +11,7 @@ import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
+import { sessionCreatedLineage } from "../../../contracts/session-ref.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
 import { makeAppendEventsWithClaudeTurnCosts } from "../../../persistence/effect/claude-event-persist-effect.js";
 import {
@@ -100,6 +101,7 @@ export interface ProviderRuntimeIngestion {
 			readonly beforeProject?: Effect.Effect<void, SqlError>;
 			readonly beforeCommit?: Effect.Effect<void, SqlError>;
 			readonly afterCommit?: Effect.Effect<void>;
+			readonly endedRunEvents?: Set<string>;
 		},
 	) => Effect.Effect<number, ProviderRuntimeIngestionError>;
 	readonly drain: () => Effect.Effect<void>;
@@ -169,6 +171,7 @@ export const makeProviderRuntimeIngestionLive = (
 					readonly beforeProject?: Effect.Effect<void, SqlError>;
 					readonly beforeCommit?: Effect.Effect<void, SqlError>;
 					readonly afterCommit?: Effect.Effect<void>;
+					readonly endedRunEvents?: Set<string>;
 					readonly onPrompt?: (id: string) => Effect.Effect<void>;
 				} = {},
 			): Effect.Effect<number, ProviderRuntimeIngestionError> =>
@@ -323,6 +326,8 @@ export const makeProviderRuntimeIngestionLive = (
 							}
 
 							let appended = true;
+							const endedRunEvents =
+								ingestOptions.endedRunEvents ?? new Set<string>();
 							const draftsToForget = new Set<string>();
 							const acceptedLimits: string[] = [];
 							const completedAccounts = new Set<string>();
@@ -389,6 +394,7 @@ export const makeProviderRuntimeIngestionLive = (
 							});
 							const commitOptions = {
 								publish: ingestOptions.publishToBus ?? true,
+								endedRunEvents,
 								afterCommit,
 							};
 							yield* commitAndSignal
@@ -411,11 +417,9 @@ export const makeProviderRuntimeIngestionLive = (
 											for (const { event, record } of prepared)
 												if (record) sessionIds.add(event.sessionId);
 											for (const event of domainEvents)
-												if (
-													event.type === "session.created" &&
-													event.data.parentId
-												)
-													sessionIds.add(event.data.parentId);
+												if (event.type === "session.created")
+													for (const id of sessionCreatedLineage(event.data))
+														sessionIds.add(id);
 											const deleted = new Set<string>();
 											for (const id of sessionIds)
 												if (yield* isSessionDeleted(id)) deleted.add(id);
@@ -451,11 +455,13 @@ export const makeProviderRuntimeIngestionLive = (
 												}
 												if (
 													event.type === "session.created" &&
-													event.data.parentId &&
-													deleted.has(event.data.parentId)
+													sessionCreatedLineage(event.data).some((id) =>
+														deleted.has(id),
+													)
 												) {
-													// A child discovered after cascading deletion belongs to that
-													// deletion too. Keep its tombstone for parentless late events.
+													// Keep creation and death in one commit. The missing-lineage
+													// projector skips creation; drain then reclaims its event.
+													accepted.push(event);
 													event = {
 														...event,
 														eventId: Schema.decodeUnknownSync(EventId)(
@@ -644,7 +650,9 @@ export const makeProviderRuntimeIngestionLive = (
 								ingestOptions.publishToRelay !== false
 							) {
 								yield* publishRelayMessages(
-									domainEvents,
+									domainEvents.filter((event) =>
+										endedRunEvents.has(event.eventId),
+									),
 									options.relayPublisher,
 								);
 							}

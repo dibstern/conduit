@@ -77,6 +77,17 @@ export const cursorSubagentsHandlers: StepHandler[] = [
 				{
 					id: "cursor-subagents-parent-user",
 					role: "user",
+					// The send's inputId lets this placed prompt replace the browser's copy.
+					inputId: String(
+						rpc
+							.getRequests()
+							.find(
+								(request) =>
+									request.tag === "input.submit" &&
+									request.payload["text"] ===
+										"Inspect the routing implementation",
+							)?.payload["inputId"],
+					),
 					time: { created: PINNED_CLOCK_MS - 2 * 60_000 },
 					parts: [
 						{

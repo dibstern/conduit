@@ -87,6 +87,7 @@ export class OpenCodeRuntimeEventTranslator {
 		private readonly inputIdForUserEcho?: (
 			sessionId: string,
 			messageId: string,
+			compaction?: boolean,
 		) => string | undefined,
 	) {}
 
@@ -314,14 +315,28 @@ export class OpenCodeRuntimeEventTranslator {
 			("messageID" in event.properties
 				? stringField(event.properties.messageID)
 				: undefined);
+		if (!messageId) return null;
+		const inputId = partMessageId
+			? this.inputIdForUserEcho?.(sessionId, messageId, true)
+			: undefined;
+		const events = inputId
+			? [
+					opencodeRuntimeEvent("message.created", sessionId, event, {
+						messageId,
+						role: "user",
+						sessionId,
+						inputId,
+					}),
+				]
+			: [];
 		if (
-			!messageId ||
-			(state.compaction?.messageId === messageId &&
-				state.compaction.state === "started")
+			state.compaction?.messageId === messageId &&
+			state.compaction.state === "started"
 		)
-			return null;
+			return events.length ? events : null;
 		state.compaction = { messageId, state: "started" };
 		return [
+			...events,
 			opencodeRuntimeEvent("session.compaction", sessionId, event, {
 				sessionId,
 				state: "started",
@@ -494,6 +509,7 @@ export class OpenCodeRuntimeEventTranslator {
 			),
 		);
 		if (rawPart.type === "compaction") {
+			if (existing?.type === "compaction") return null;
 			return this.translateCompaction(event, sessionId, state, messageId);
 		}
 

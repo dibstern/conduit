@@ -1,6 +1,5 @@
 // Failure modes: unarchived descendants prevent deletion of an archived root,
-// surviving forks lose their source,
-// active work is removed, Never is ignored, event reclamation precedes deletion,
+// active work is removed, Never is ignored, the sweep deletes event history,
 // or a retention delete schedules checkout removal. Exercise the canonical path
 // with real SQLite projections, including a daemon timer cycle.
 import { mkdtempSync, rmSync } from "node:fs";
@@ -71,7 +70,7 @@ const DAY = 86_400_000;
 
 describe("archived tree retention", () => {
 	it.effect(
-		"keeps excluded trees, deletes complete families and their events on a daemon cycle, then continues bounded work",
+		"keeps excluded trees, commits family deletions and preserves markers on a daemon cycle, then continues bounded work",
 		() =>
 			Effect.gen(function* () {
 				const dir = yield* Effect.acquireRelease(
@@ -253,10 +252,13 @@ describe("archived tree retention", () => {
 					}));
 					yield* TestClock.adjust("1 minute");
 					expect(get).toHaveBeenCalledWith("test-project");
-					for (const root of ["eligible", "internal-fork"])
+					for (const root of ["eligible", "internal-fork", "fork-source"])
 						for (const id of [root, `${root}-side`, `${root}-agent`]) {
 							expect(yield* read.getSession(id)).toBeUndefined();
-							expect(yield* store.readAllBySession(id)).toEqual([]);
+							const events = yield* store.readAllBySession(id);
+							expect(
+								events.some((event) => event.type === "session.deleted"),
+							).toBe(true);
 						}
 					for (const root of [
 						"unarchived",
@@ -264,7 +266,6 @@ describe("archived tree retention", () => {
 						"pinned",
 						"busy",
 						"running",
-						"fork-source",
 						"background",
 					])
 						for (const id of [root, `${root}-side`, `${root}-agent`]) {

@@ -333,7 +333,8 @@ for (const mode of ["seeded", "imported"] as const) {
 		const project = await fixture(root, "tail", { unprojected: true });
 		const before = sourceChecksums(project.sourcePath);
 		const result = await run("S8", project);
-		expect(result).toMatchObject({ outcome: mode, importedEvents: 35 });
+		// The fixture's send command also records its run.requested reservation.
+		expect(result).toMatchObject({ outcome: mode, importedEvents: 36 });
 		expect(
 			query(
 				daemonStorePath(configDir),

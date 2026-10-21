@@ -10,7 +10,7 @@ import {
 } from "../../../persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { SessionRollupProjects } from "../../../persistence/effect/session-rollup-projects.js";
-import { refreshSidebar } from "../../../persistence/effect/sidebar-projection.js";
+import { refreshCrossProjectSidebar } from "../../../persistence/effect/sidebar-projection.js";
 import { importRegisteredProjectStores } from "../../../persistence/migrations/daemon-store-import.js";
 import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
 import { migrateProjectStorage } from "../../../persistence/migrations/project-storage-migration.js";
@@ -118,29 +118,9 @@ export const makeDaemonSharedStoreLayer = (
 			// Imported or previously cached families may include retained owners.
 			// Rebuild after offline preparation, before any daemon reader starts.
 			const projects = yield* SessionRollupProjects;
-			const refresh = sql.withTransaction(
-				Effect.gen(function* () {
-					const projectIds = projects ? yield* Ref.get(projects) : [];
-					const roots = yield* sql<{
-						id: string;
-					}>`SELECT DISTINCT root.id FROM sessions root
-						JOIN sessions member ON member.root_id = root.id
-						WHERE root.parent_id IS NULL AND root.project_id IN ${sql.in(projectIds)}
-						AND member.project_id IS NOT root.project_id`;
-					if (roots.length === 0) return;
-					const [counter] = yield* sql<{
-						value: number;
-					}>`SELECT value FROM read_model_counter WHERE id = 1`;
-					const version = (counter?.value ?? 0) + 1;
-					yield* refreshSidebar(
-						roots.map(({ id }) => id),
-						version,
-						projectIds,
-					);
-					// An unchanged restart must not move the durable read frontier.
-					yield* sql`UPDATE read_model_counter SET value = ${version} WHERE id = 1
-						AND EXISTS (SELECT 1 FROM session_sidebar WHERE version = ${version})`;
-				}),
+			const refresh = Effect.flatMap(
+				projects ? Ref.get(projects) : Effect.succeed([]),
+				refreshCrossProjectSidebar,
 			);
 			if (unavailable.size > 0) {
 				const blocked = yield* sql`SELECT 1 FROM sessions

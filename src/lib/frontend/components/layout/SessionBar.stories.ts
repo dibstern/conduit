@@ -280,6 +280,7 @@ let goalStorySetAt = Date.now() - 41 * 60_000 - 30_000;
 function setupGoal(
 	state: "checking" | "not_yet" | "paused" | "met" | "cleared",
 	unread = false,
+	condition = "All 38 scenarios pass",
 ) {
 	const previous = sessionGoals.get(mockSession.id);
 	applyGetModelsResponse(
@@ -309,7 +310,7 @@ function setupGoal(
 		Date.now() - 41 * 60_000 - 30_000,
 	);
 	const activeGoal = {
-		condition: "All 38 scenarios pass",
+		condition,
 		iterations: 2,
 		setAt: goalStorySetAt,
 		tokensAtStart: 0,
@@ -2099,6 +2100,33 @@ export const DesktopGoalPursuing: Story = {
 		await expect(canvas.getByTestId("session-bar-settle")).toHaveTextContent(
 			"Pin to top",
 		);
+	},
+};
+
+export const DesktopGoalLongCondition: Story = {
+	args: { width: "full" },
+	beforeEach: () => {
+		sessionViewState.compact = false;
+		return setupGoal(
+			"not_yet",
+			false,
+			"Implement every open child of the redesign epics, in ready order, in parallel worktrees where tickets don't share files, integrating on a local branch.\n\nRules, so you never need to ask me:\n1. The design doc is the spec.",
+		);
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const goal = canvas
+			.getByTestId("session-goal-subtitle")
+			.getBoundingClientRect();
+		const row = canvasElement
+			.querySelector("#session-bar-title-row")
+			?.getBoundingClientRect();
+		const meta = canvasElement
+			.querySelector("#session-bar-meta")
+			?.getBoundingClientRect();
+		// The goal line truncates inside the title track, clear of the controls.
+		await expect(goal.right).toBeLessThanOrEqual(row?.right ?? 0);
+		await expect(goal.right).toBeLessThanOrEqual(meta?.left ?? 0);
 	},
 };
 

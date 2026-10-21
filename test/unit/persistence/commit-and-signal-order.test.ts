@@ -47,6 +47,82 @@ const created = (sessionId: string) =>
 
 describe("commit advance ordering", () => {
 	it.effect(
+		"publishes only committed run transitions despite rollback and a reused report",
+		() =>
+			Effect.gen(function* () {
+				const writer = yield* makeCommitAndSignal;
+				const sql = yield* SqlClient.SqlClient;
+				const owner = { provider: "claude", metadata: { runId: "owned-run" } };
+				yield* writer([
+					created("owned-session"),
+					canonicalEvent(
+						"run.requested",
+						"owned-session",
+						{ runId: "owned-run", inputId: "owned-input" },
+						owner,
+					),
+					canonicalEvent(
+						"message.created",
+						"owned-session",
+						{
+							sessionId: "owned-session",
+							messageId: "owned-input",
+							inputId: "owned-input",
+							role: "user",
+						},
+						owner,
+					),
+					canonicalEvent(
+						"run.started",
+						"owned-session",
+						{ requestedRunId: "owned-run", inputId: "owned-input" },
+						owner,
+					),
+				]);
+				const events = yield* (yield* SessionEventBusTag).subscribe();
+				const report = new Set<string>();
+				const rolledBack = canonicalEvent(
+					"turn.completed",
+					"owned-session",
+					{ messageId: "" },
+					owner,
+				);
+				yield* Effect.exit(
+					writer([rolledBack], {
+						endedRunEvents: report,
+						beforeCommit: Effect.die("rollback the terminal"),
+					}),
+				);
+				expect(report.size).toBe(0);
+				expect(yield* sql`SELECT status FROM provider_runs`).toEqual([
+					{ status: "running" },
+				]);
+				const terminal = canonicalEvent(
+					"turn.completed",
+					"owned-session",
+					{ messageId: "" },
+					owner,
+				);
+				yield* writer([terminal], { endedRunEvents: report });
+				expect(report.has(terminal.eventId)).toBe(true);
+				const duplicate = canonicalEvent(
+					"turn.completed",
+					"owned-session",
+					{ messageId: "" },
+					owner,
+				);
+				// A caller's reused collection cannot manufacture a second transition.
+				report.add(duplicate.eventId);
+				yield* writer([duplicate], { endedRunEvents: report });
+				const delivered = yield* events.pipe(Stream.take(2), Stream.runCollect);
+				expect(delivered.map((event) => event.runEnded ?? false)).toEqual([
+					true,
+					false,
+				]);
+			}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect(
 		"returns after publishing a turn while git refresh remains pending",
 		() =>
 			Effect.gen(function* () {
