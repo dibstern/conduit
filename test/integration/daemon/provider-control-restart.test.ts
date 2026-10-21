@@ -1,11 +1,16 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
+import { Effect, Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ProviderControlPayloadSchema } from "../../../src/lib/provider/orchestration-command-contracts.js";
+import { controlFingerprintHash } from "../../../src/lib/provider/orchestration-command-fingerprint.js";
 import {
 	ProcessHarness,
 	responseChunks,
 } from "../../helpers/process-harness.js";
+import { writeProviderCommandOutboxProof } from "../../helpers/provider-command-outbox-proof.js";
 
 describe("durable answers across daemon replacement", () => {
 	const harnesses: ProcessHarness[] = [];
@@ -16,6 +21,181 @@ describe("durable answers across daemon replacement", () => {
 		}
 		harnesses.length = 0;
 	});
+
+	it.each([
+		false,
+		true,
+	])("replays a predecessor Stop without changing its payload or fingerprint, pending=%s", async (pending) => {
+		const harness = await ProcessHarness.start({ restartProof: true });
+		harnesses.push(harness);
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession("Pre-snapshot Stop retry");
+		await browser.send(sessionId, "seed-completed-owner");
+		const commandId = randomUUID();
+		const db = new Database(harness.daemonStorePath());
+		let passed = false;
+		try {
+			if (pending)
+				db.exec(`CREATE TRIGGER hold_legacy_stop BEFORE UPDATE OF status ON provider_command_outbox
+				WHEN NEW.command_id = '${commandId}' AND NEW.status = 'running'
+				BEGIN SELECT RAISE(IGNORE); END`);
+			await Effect.runPromise(
+				browser.rpc.CancelSession({ sessionId, commandId }),
+			);
+			await harness.kill();
+			// Model the predecessor's committed payload and matching immutable receipt.
+			db.prepare(
+				"UPDATE provider_command_outbox SET payload_json = json_remove(payload_json, '$.stop', '$.turnIds') WHERE command_id = ?",
+			).run(commandId);
+			const original = db
+				.prepare(
+					"SELECT payload_json FROM provider_command_outbox WHERE command_id = ?",
+				)
+				.get(commandId) as { payload_json: string };
+			const payload = Schema.decodeSync(
+				Schema.fromJsonString(ProviderControlPayloadSchema),
+			)(original.payload_json);
+			const fingerprint = controlFingerprintHash(payload);
+			db.prepare(
+				"UPDATE command_receipts SET fingerprint_hash = ? WHERE command_id = ?",
+			).run(fingerprint, commandId);
+			db.prepare(
+				"UPDATE events SET data = json_remove(data, '$.stop', '$.turnIds') WHERE type = 'interrupt.requested' AND json_extract(metadata, '$.commandId') = ?",
+			).run(commandId);
+			if (pending) {
+				db.prepare(
+					"UPDATE provider_command_outbox SET status = 'pending' WHERE command_id = ?",
+				).run(commandId);
+				db.prepare(
+					"UPDATE command_receipts SET status = 'side_effect_requested' WHERE command_id = ?",
+				).run(commandId);
+			}
+			await harness.restart();
+			const restored = await harness.connect(sessionId);
+			void restored
+				.send(sessionId, "upgrade-long-turn", 60_000)
+				.catch(() => undefined);
+			await vi.waitFor(
+				() =>
+					expect(
+						readFileSync(join(harness.root, "sdk-proof.ndjson"), "utf8"),
+					).toContain('"kind":"assistant-held"'),
+				{ timeout: 15_000 },
+			);
+			if (pending) db.exec("DROP TRIGGER hold_legacy_stop");
+			const outcome = await Effect.runPromise(
+				Effect.result(restored.rpc.CancelSession({ sessionId, commandId })),
+			);
+			expect(outcome._tag).toBe("Success");
+			expect(
+				db
+					.prepare(
+						"SELECT payload_json FROM provider_command_outbox WHERE command_id = ?",
+					)
+					.get(commandId),
+			).toEqual(original);
+			await vi.waitFor(
+				() =>
+					expect(
+						db
+							.prepare(
+								"SELECT fingerprint_hash, status FROM command_receipts WHERE command_id = ?",
+							)
+							.get(commandId),
+					).toEqual({
+						fingerprint_hash: fingerprint,
+						status: "side_effect_completed",
+					}),
+				{ timeout: 10_000 },
+			);
+			if (pending) {
+				const nativeCalls = readFileSync(
+					join(harness.root, "sdk-proof.ndjson"),
+					"utf8",
+				);
+				expect(nativeCalls.includes('"kind":"query-interrupted"')).toBe(false);
+				expect(nativeCalls.includes('"kind":"query-closed"')).toBe(false);
+			}
+			expect(
+				db
+					.prepare(
+						"SELECT type FROM events WHERE session_id = ? AND type = 'interrupt.requested'",
+					)
+					.all(sessionId),
+			).toHaveLength(1);
+			expect(
+				db
+					.prepare(
+						"SELECT status FROM provider_runs WHERE session_id = ? ORDER BY rowid",
+					)
+					.all(sessionId),
+			).toEqual([{ status: "completed" }, { status: "running" }]);
+			expect(
+				db
+					.prepare(
+						"SELECT command_id FROM provider_command_outbox WHERE command_id = ?",
+					)
+					.all(`${commandId}:retire`),
+			).toEqual([]);
+			writeFileSync(join(harness.root, "release-upgrade-turn"), "release");
+			await vi.waitFor(() =>
+				expect(
+					db
+						.prepare(
+							"SELECT status FROM provider_runs WHERE session_id = ? ORDER BY rowid",
+						)
+						.all(sessionId),
+				).toEqual([{ status: "completed" }, { status: "completed" }]),
+			);
+			passed = true;
+		} finally {
+			writeProviderCommandOutboxProof([
+				{
+					scenario: pending
+						? "legacy-empty-stop-pending-replay"
+						: "legacy-stop-immutable-replay",
+					passed,
+					sessionId,
+					commandId,
+					commands: db
+						.prepare(
+							"SELECT command_id, effect_type, provider_process_id, run_id, payload_json, status FROM provider_command_outbox WHERE session_id = ? ORDER BY request_sequence",
+						)
+						.all(sessionId),
+					receipt: db
+						.prepare(
+							"SELECT fingerprint_hash, status FROM command_receipts WHERE command_id = ?",
+						)
+						.get(commandId),
+					runs: db
+						.prepare(
+							"SELECT id, status FROM provider_runs WHERE session_id = ?",
+						)
+						.all(sessionId),
+					events: db
+						.prepare(
+							"SELECT type, data, metadata FROM events WHERE session_id = ? ORDER BY sequence",
+						)
+						.all(sessionId),
+					nativeCalls: readFileSync(
+						join(harness.root, "sdk-proof.ndjson"),
+						"utf8",
+					)
+						.trim()
+						.split("\n")
+						.filter(Boolean)
+						.map((line) => JSON.parse(line) as Record<string, unknown>)
+						.filter((mark) =>
+							["runner-control", "query-interrupted", "query-closed"].includes(
+								String(mark["kind"]),
+							),
+						),
+					restartMarks: harness.proof().generations,
+				},
+			]);
+			db.close();
+		}
+	}, 90_000);
 
 	it.each([
 		{ died: false, claimed: false },

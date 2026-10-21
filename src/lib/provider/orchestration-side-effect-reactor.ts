@@ -7,6 +7,7 @@ import {
 	Fiber,
 	Option,
 	Ref,
+	Schedule,
 	Schema,
 	Semaphore,
 } from "effect";
@@ -58,6 +59,7 @@ import type {
 } from "./orchestration-engine.js";
 import type { ProviderRegistry } from "./provider-registry.js";
 import { toEventSinkError } from "./relay-event-sink.js";
+import { legacyStopOwnersQuery } from "./session-run-settlement.js";
 import type {
 	EventSink,
 	ProviderCall,
@@ -1089,6 +1091,32 @@ export class ProviderSideEffectReactor {
 							cause: "Control target does not match outbox",
 						}),
 					);
+				const stop =
+					payload.type === "interrupt_turn" || payload.type === "end_session"
+						? payload.stop
+						: undefined;
+				const stopOwners = stop?.owners.length
+					? stop.owners
+					: !stop &&
+							payload.type === "interrupt_turn" &&
+							payload.turnIds?.length
+						? yield* legacyStopOwnersQuery(
+								this.options.sql,
+								row.session_id,
+								row.command_id,
+							).pipe(Effect.mapError(storeFailure("recoverStopCohort")))
+						: undefined;
+				const stopRunning = stopOwners?.length
+					? this.options.sql<{ running: number }>`
+						SELECT EXISTS (SELECT 1 FROM provider_runs WHERE session_id = ${row.session_id}
+							AND id IN ${this.options.sql.in(stopOwners.map(({ runId }) => runId))}
+							AND status IN ('pending', 'running')) AS running`.pipe(
+							Effect.map(([cohort]) => cohort?.running === 1),
+							Effect.mapError(storeFailure("stopCohort")),
+						)
+					: undefined;
+				if (stopRunning && !(yield* stopRunning))
+					return REACTOR_COMPLETED_RESULT;
 				if (payload.type === "end_session" && payload.retireRunIds) {
 					const [cohort] = yield* this.options.sql<{ running: number }>`
 						SELECT EXISTS (SELECT 1 FROM provider_runs WHERE session_id = ${row.session_id}
@@ -1235,14 +1263,25 @@ export class ProviderSideEffectReactor {
 				}
 				const deliver = Effect.gen(function* () {
 					switch (payload.type) {
-						case "interrupt_turn":
+						case "interrupt_turn": {
+							const driver = getProviderDriver(
+								account?.driver ?? instance.providerId,
+							);
 							yield* instance.interruptTurnEffect(
 								row.session_id,
-								payload.turnIds,
+								// The predecessor omitted turnIds for an empty Stop.
+								// Fence delivery without changing its committed payload.
+								payload.turnIds ??
+									payload.stop?.turnIds ??
+									(driver?.keepsPendingSteersOnInterrupt ||
+									driver?.runsOpenCodeServer
+										? []
+										: undefined),
 								call,
 								context,
 							);
 							break;
+						}
 						case "resolve_permission":
 							yield* instance.resolvePermissionEffect(
 								row.session_id,
@@ -1270,7 +1309,20 @@ export class ProviderSideEffectReactor {
 							break;
 					}
 				});
-				yield* deliver.pipe(
+				// An unanswered native interrupt becomes obsolete when its captured
+				// cohort ends. Release the control through the ordinary receipt path;
+				// provider terminals alone still own the turn's outcome.
+				yield* (
+					stopRunning
+						? Effect.raceFirst(
+								deliver,
+								Effect.repeat(stopRunning, {
+									while: (running) => running,
+									schedule: Schedule.spaced("100 millis"),
+								}).pipe(Effect.asVoid),
+							)
+						: deliver
+				).pipe(
 					Effect.provideService(OpenCodeControlTarget, row.provider_process_id),
 					Effect.mapError((failure) =>
 						providerFailureCode(failure) === "provider_process_gone"

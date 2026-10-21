@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
@@ -139,6 +139,242 @@ describe("Stop delivery preserves its captured cohort", () => {
 		}
 	}, 100_000);
 
+	it("a delayed empty Stop preserves a pending steer after foreground completion", async () => {
+		const harness = await ProcessHarness.start({ restartProof: true });
+		harnesses.push(harness);
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession(
+			"Empty Stop with pending steer",
+		);
+		await browser.send(sessionId, "seed-completed-owner");
+		const db = new Database(harness.daemonStorePath());
+		const commandId = randomUUID();
+		const steerId = randomUUID();
+		let passed = false;
+		try {
+			db.exec(`CREATE TRIGGER hold_empty_stop BEFORE UPDATE OF status ON provider_command_outbox
+				WHEN NEW.command_id = '${commandId}' AND NEW.status = 'running'
+				BEGIN SELECT RAISE(IGNORE); END`);
+			await Effect.runPromise(
+				browser.rpc.CancelSession({ sessionId, commandId }),
+			);
+			void browser
+				.send(sessionId, "upgrade-long-turn", 60_000)
+				.catch(() => undefined);
+			await vi.waitFor(
+				() =>
+					expect(
+						sdkProof(harness).some((mark) => mark["kind"] === "assistant-held"),
+					).toBe(true),
+				{ timeout: 15_000 },
+			);
+			expect(
+				await Effect.runPromise(
+					browser.rpc["input.submit"]({
+						sessionId,
+						originId: browser.originId,
+						inputId: steerId,
+						delivery: "steer",
+						text: "load-stream-stop-before-intake",
+					}),
+				),
+			).toMatchObject({ ok: true, handedOff: true });
+			writeFileSync(join(harness.root, "release-upgrade-turn"), "release");
+			await vi.waitFor(
+				() =>
+					expect(
+						sdkProof(harness).some((mark) => mark["kind"] === "intake-held"),
+					).toBe(true),
+				{ timeout: 10_000 },
+			);
+			db.exec("DROP TRIGGER hold_empty_stop");
+			await vi.waitFor(
+				() =>
+					expect(
+						db
+							.prepare(
+								"SELECT status FROM provider_command_outbox WHERE command_id = ?",
+							)
+							.get(commandId),
+					).toEqual({ status: "completed" }),
+				{ timeout: 10_000 },
+			);
+			expect(
+				sdkProof(harness).filter((mark) => mark["kind"] === "query-closed"),
+			).toEqual([]);
+			expect(
+				db
+					.prepare(
+						"SELECT status FROM provider_runs WHERE session_id = ? ORDER BY rowid",
+					)
+					.all(sessionId),
+			).toEqual([
+				{ status: "completed" },
+				{ status: "completed" },
+				{ status: "pending" },
+			]);
+			writeFileSync(join(harness.root, "release-stop-intake"), "release");
+			await vi.waitFor(
+				() =>
+					expect(
+						db
+							.prepare(
+								"SELECT started_at FROM provider_runs WHERE session_id = ? AND id = (SELECT run_id FROM provider_command_outbox WHERE command_id = ?)",
+							)
+							.get(sessionId, steerId),
+					).toMatchObject({ started_at: expect.any(Number) }),
+				{ timeout: 10_000 },
+			);
+			expect(
+				sdkProof(harness).filter((mark) => mark["kind"] === "query-closed"),
+			).toEqual([]);
+			passed = true;
+		} finally {
+			writeProviderCommandOutboxProof([
+				{
+					scenario: "delayed-empty-stop-pending-steer",
+					passed,
+					sessionId,
+					commandId,
+					steerId,
+					commands: db
+						.prepare(
+							"SELECT command_id, effect_type, provider_process_id, run_id, status FROM provider_command_outbox WHERE session_id = ? ORDER BY request_sequence",
+						)
+						.all(sessionId),
+					runs: db
+						.prepare(
+							"SELECT id, status FROM provider_runs WHERE session_id = ? ORDER BY rowid",
+						)
+						.all(sessionId),
+					nativeCalls: sdkProof(harness),
+					restartMarks: harness.proof().generations,
+				},
+			]);
+			db.close();
+		}
+	}, 90_000);
+
+	it("a delayed empty OpenCode Stop does not abort its successor", async () => {
+		const harness = await ProcessHarness.start({ managedOpenCode: true });
+		harnesses.push(harness);
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession(
+			"Empty OpenCode Stop",
+			"managed-test",
+			"opencode",
+		);
+		await browser.send(sessionId, "seed-completed-owner");
+		const db = new Database(harness.daemonStorePath());
+		const commandId = randomUUID();
+		const successorId = randomUUID();
+		let passed = false;
+		try {
+			db.exec(`CREATE TRIGGER hold_empty_stop BEFORE UPDATE OF status ON provider_command_outbox
+				WHEN NEW.command_id = '${commandId}' AND NEW.status = 'running'
+				BEGIN SELECT RAISE(IGNORE); END`);
+			await Effect.runPromise(
+				browser.rpc.CancelSession({ sessionId, commandId }),
+			);
+			expect(
+				db
+					.prepare(
+						"SELECT status, json_extract(payload_json, '$.stop.owners') AS owners FROM provider_command_outbox WHERE command_id = ?",
+					)
+					.get(commandId),
+			).toEqual({ status: "pending", owners: "[]" });
+			writeFileSync(join(harness.configDir, "fake-opencode-hold-turn"), "hold");
+			await Effect.runPromise(
+				browser.rpc["input.submit"]({
+					sessionId,
+					originId: browser.originId,
+					inputId: successorId,
+					delivery: "queue",
+					text: "successor",
+				}),
+			);
+			await vi.waitFor(
+				() =>
+					expect(
+						harness
+							.opencodeRequests()
+							.filter(
+								({ method, url }) =>
+									method === "POST" &&
+									url.split("?")[0] === `/session/${sessionId}/prompt_async`,
+							),
+					).toHaveLength(2),
+				{ timeout: 15_000 },
+			);
+			expect(
+				db
+					.prepare(
+						"SELECT status FROM provider_runs WHERE session_id = ? ORDER BY rowid",
+					)
+					.all(sessionId),
+			).toEqual([{ status: "completed" }, { status: "pending" }]);
+			db.exec("DROP TRIGGER hold_empty_stop");
+			await vi.waitFor(
+				() =>
+					expect(
+						db
+							.prepare(
+								"SELECT status FROM provider_command_outbox WHERE command_id = ?",
+							)
+							.get(commandId),
+					).toMatchObject({
+						status: expect.stringMatching(/^(completed|failed)$/),
+					}),
+				{ timeout: 10_000 },
+			);
+			expect(
+				harness
+					.opencodeRequests()
+					.filter(
+						({ url }) => url.split("?")[0] === `/session/${sessionId}/abort`,
+					),
+			).toEqual([]);
+			expect(
+				db
+					.prepare(
+						"SELECT status FROM provider_command_outbox WHERE command_id = ?",
+					)
+					.get(commandId),
+			).toEqual({ status: "completed" });
+			expect(
+				db
+					.prepare(
+						"SELECT status FROM provider_runs WHERE session_id = ? ORDER BY rowid",
+					)
+					.all(sessionId),
+			).toEqual([{ status: "completed" }, { status: "pending" }]);
+			passed = true;
+		} finally {
+			writeProviderCommandOutboxProof([
+				{
+					scenario: "delayed-empty-stop-opencode-successor",
+					passed,
+					sessionId,
+					commandId,
+					successorId,
+					commands: db
+						.prepare(
+							"SELECT command_id, effect_type, provider_process_id, run_id, status FROM provider_command_outbox WHERE session_id = ? ORDER BY request_sequence",
+						)
+						.all(sessionId),
+					runs: db
+						.prepare(
+							"SELECT id, status FROM provider_runs WHERE session_id = ?",
+						)
+						.all(sessionId),
+					nativeCalls: harness.opencodeRequests(),
+					restartMarks: harness.proof().generations,
+				},
+			]);
+			db.close();
+		}
+	}, 90_000);
+
 	it.each([
 		false,
 		true,
@@ -172,6 +408,24 @@ describe("Stop delivery preserves its captured cohort", () => {
 		const original = db
 			.prepare("SELECT id FROM provider_runs WHERE session_id = ?")
 			.get(sessionId) as { id: string };
+		const runnerSnapshots: Record<string, unknown>[] = [];
+		const captureRunner = (stage: string) => {
+			let alive = true;
+			try {
+				process.kill(runner.pid, 0);
+			} catch {
+				alive = false;
+			}
+			const registration = `${runner.socketPath}.json`;
+			runnerSnapshots.push({
+				stage,
+				alive,
+				registration: existsSync(registration)
+					? readFileSync(registration, "utf8")
+					: null,
+			});
+		};
+		captureRunner("original");
 		let passed = false;
 		try {
 			if (projectionDelayed)
@@ -225,7 +479,9 @@ describe("Stop delivery preserves its captured cohort", () => {
 			if (!projectionDelayed) {
 				await harness.kill();
 				await Promise.all([send, stop]);
+				captureRunner("before-restart");
 				await harness.restart();
+				captureRunner("after-restart");
 				recovered = await harness.connect(sessionId);
 			}
 			db.exec("DROP TRIGGER hold_retirement");
@@ -272,6 +528,8 @@ describe("Stop delivery preserves its captured cohort", () => {
 			await recovered.send(sessionId, "after-stale-retirement");
 			passed = true;
 		} finally {
+			captureRunner("finally");
+			const runnersLog = join(harness.configDir, "runners.log");
 			writeFileSync(
 				proofPath,
 				JSON.stringify(
@@ -279,6 +537,12 @@ describe("Stop delivery preserves its captured cohort", () => {
 						scenario,
 						projectionDelayed,
 						passed,
+						processProof: harness.proof(),
+						sdkMarks: sdkProof(harness),
+						runnerSnapshots,
+						runnersLog: existsSync(runnersLog)
+							? readFileSync(runnersLog, "utf8").slice(-12_000)
+							: null,
 						sessionId,
 						commandId,
 						successorId,

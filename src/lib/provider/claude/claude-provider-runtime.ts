@@ -35,6 +35,7 @@ import {
 	Layer,
 	Ref,
 	Result,
+	Schedule,
 	type Scope,
 	Semaphore,
 } from "effect";
@@ -2555,9 +2556,8 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			const interrupt = Effect.gen({ self: this }, function* () {
 				if (ctx && bound && turnIds.length === 0) {
 					const foreground =
-						ctx.turnInFlight &&
-						(ctx.currentRunId !== undefined ||
-							(yield* pendingIntakes(this.stateRef, sessionId)).size > 0);
+						(ctx.turnInFlight && ctx.currentRunId !== undefined) ||
+						(yield* pendingIntakes(this.stateRef, sessionId)).size > 0;
 					if (foreground || !(yield* isCurrentSession(this.stateRef, ctx)))
 						return Effect.void;
 					// Stop captured no foreground run. Notification activity can still
@@ -2607,6 +2607,11 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					// keep the query alive. It must not interrupt an idle query or the next input.
 					const inputId = ctx.currentTurnId;
 					if (!ctx.turnInFlight) {
+						if (
+							bound &&
+							[...waiters.keys()].some((id) => !turnIds.includes(id))
+						)
+							return Effect.void;
 						// Background activity may remain after the foreground terminal.
 						// Dispose it without emitting another terminal for that turn.
 						yield* this.disposeSessionEffect(ctx, "Stopped by the user");
@@ -2654,19 +2659,39 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					// the stream's ownership permit so a pending steer cannot lose its approvals.
 					// A bound Stop awaits acceptance after releasing that permit, so the
 					// acknowledgement holds no admission and a rejection still fails the Stop.
-					return acknowledged.pipe(
-						Effect.andThen(
-							(ctx.messageOwnershipPermit ??=
-								Semaphore.makeUnsafe(1)).withPermits(1)(
-								Effect.gen({ self: this }, function* () {
-									if (ctx.currentTurnId === inputId && ctx.turnInFlight)
-										yield* this.cancelInteractionsEffect(
-											ctx,
-											"Turn interrupted",
-											false,
-										);
-								}),
+					// Native completion also releases the runner's command ownership.
+					// Dropping only the daemon waiter would leave this command active
+					// forever when the SDK never acknowledges an obsolete interrupt.
+					return Effect.raceFirst(
+						acknowledged.pipe(Effect.as(true)),
+						Effect.repeat(
+							Effect.sync(
+								() => ctx.interruptInputId === inputId && !ctx.stopped,
 							),
+							{
+								while: (running) => running,
+								schedule: Schedule.spaced("100 millis"),
+							},
+						).pipe(Effect.as(false)),
+					).pipe(
+						Effect.flatMap((accepted) =>
+							accepted
+								? (ctx.messageOwnershipPermit ??=
+										Semaphore.makeUnsafe(1)).withPermits(1)(
+										Effect.gen({ self: this }, function* () {
+											if (
+												ctx.currentTurnId === inputId &&
+												ctx.turnInFlight &&
+												ctx.interruptInputId === inputId
+											)
+												yield* this.cancelInteractionsEffect(
+													ctx,
+													"Turn interrupted",
+													false,
+												);
+										}),
+									)
+								: Effect.void,
 						),
 					);
 				}

@@ -10,17 +10,13 @@ import {
 	PubSub,
 	type Result,
 	Schedule,
-	Schema,
 	type Scope,
 	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { Account } from "../../../contracts/account.js";
-import {
-	type InputDelivery,
-	ProviderStopSnapshotSchema,
-} from "../../../contracts/stored-event.js";
+import type { InputDelivery } from "../../../contracts/stored-event.js";
 import type {
 	ClaudeEventPersistEffectTag,
 	ClaudeEventPersistFailure,
@@ -380,40 +376,30 @@ const makeProviderTurnService = Effect.gen(function* () {
 	const recovered = yield* sql<{
 		command_id: string;
 		session_id: string;
-		stop_json: string;
 	}>`
-		SELECT command.command_id, command.session_id, json_extract(command.payload_json, '$.stop') AS stop_json
+		SELECT command.command_id, command.session_id
 		FROM provider_command_outbox command
 		WHERE command.effect_type IN ('interrupt_turn', 'end_session')
 			AND command.project_key = ${projectId}
-			AND json_type(command.payload_json, '$.stop') = 'object'
+			AND ((json_type(command.payload_json, '$.stop') = 'object'
 			AND EXISTS (SELECT 1 FROM provider_runs run, json_each(command.payload_json, '$.stop.owners') owner
 				WHERE run.id = json_extract(owner.value, '$.runId') AND run.session_id = command.session_id
-				AND run.status IN ('pending', 'running'))
+				AND run.status IN ('pending', 'running')))
+			OR (command.effect_type = 'interrupt_turn' AND json_type(command.payload_json, '$.stop') IS NULL
+				AND command.status IN ('pending', 'running')))
 		ORDER BY command.request_sequence`.pipe(Effect.orDie);
 	for (const row of recovered) {
 		if (stopping.has(row.session_id)) continue;
-		const cutoff = yield* Effect.try({
-			try: () =>
-				Schema.decodeSync(Schema.fromJsonString(ProviderStopSnapshotSchema))(
-					row.stop_json,
-				),
-			catch: (cause) =>
-				new ProviderInstanceFailure({
-					providerId: "conduit",
-					operation: "recoverStop",
-					cause,
-				}),
-		}).pipe(Effect.result);
-		yield* startStop(
-			{
-				commandId: row.command_id,
-				sessionId: row.session_id,
-				clientId: "stop-recovery",
-			},
-			cutoff,
-			true,
+		const input = {
+			commandId: row.command_id,
+			sessionId: row.session_id,
+			clientId: "stop-recovery",
+		};
+		const cutoff = yield* prepareStop(input).pipe(
+			Effect.provide(providedContext),
+			Effect.result,
 		);
+		yield* startStop(input, cutoff, true);
 	}
 	return service;
 });

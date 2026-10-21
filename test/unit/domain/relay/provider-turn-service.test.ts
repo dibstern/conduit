@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect";
+import { Clock, Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect";
 import { SqlClient, Statement } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { afterEach, expect, vi } from "vitest";
@@ -1125,9 +1125,27 @@ describe("ProviderTurnService", () => {
 		const seedCapturedStop = (commandId = "cmd-interrupt-default") =>
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
+				const captured = yield* sql<{
+					runId: string;
+					inputId: string;
+				}>`SELECT run_id AS runId, command_id AS inputId FROM provider_command_outbox
+					WHERE session_id = 'session-1' AND effect_type = 'send_turn' AND status = 'running'`;
+				const payload = {
+					type: "interrupt_turn",
+					sessionId: "session-1",
+					providerProcessId: "original-process",
+					turnIds: captured.map(({ inputId }) => inputId),
+					stop: {
+						deadlineAt: (yield* Clock.currentTimeMillis) + STOP_ABORT_WAIT_MS,
+						owners: captured.map(({ runId }) => ({ runId })),
+						turnIds: captured.map(({ inputId }) => inputId),
+						runnerBacked: true,
+						retainedSteers: false,
+					},
+				};
 				yield* sql`INSERT INTO provider_command_outbox
 					(request_sequence, command_id, project_key, session_id, provider_id, effect_type, provider_process_id, payload_json, status, attempt_count, requested_at, updated_at)
-					VALUES (100, ${commandId}, 'test-project', 'session-1', 'claude', 'interrupt_turn', 'original-process', '{}', 'running', 1, 1, 1)`;
+					VALUES (100, ${commandId}, 'test-project', 'session-1', 'claude', 'interrupt_turn', 'original-process', ${JSON.stringify(payload)}, 'running', 1, 1, 1)`;
 			});
 		const confirmProcessLoss = (
 			command: Extract<OrchestrationCommand, { type: "end_session" }>,

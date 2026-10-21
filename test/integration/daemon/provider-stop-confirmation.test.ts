@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import type { ProviderStopSnapshot } from "../../../src/lib/contracts/stored-event.js";
+import { ProviderControlPayloadSchema } from "../../../src/lib/provider/orchestration-command-contracts.js";
+import { controlFingerprintHash } from "../../../src/lib/provider/orchestration-command-fingerprint.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 import { writeProviderCommandOutboxProof } from "../../helpers/provider-command-outbox-proof.js";
 
@@ -24,6 +26,20 @@ describe("Stop waits for provider confirmation", () => {
 	const harnesses: ProcessHarness[] = [];
 	afterEach(async () => {
 		for (const harness of harnesses.splice(0)) {
+			const runnersLog = join(harness.configDir, "runners.log");
+			writeFileSync(
+				`/tmp/82tn27-3-confirmation-${harness.root.split("/").at(-1)}.json`,
+				JSON.stringify(
+					{
+						processProof: harness.proof(),
+						runnersLog: existsSync(runnersLog)
+							? readFileSync(runnersLog, "utf8").slice(-12_000)
+							: null,
+					},
+					null,
+					2,
+				),
+			);
 			await harness.dispose();
 			harness.assertNoRunners();
 		}
@@ -88,6 +104,264 @@ describe("Stop waits for provider confirmation", () => {
 			db.close();
 		}
 	}, 60_000);
+
+	it.each([
+		{ restart: false, legacy: false },
+		{ restart: true, legacy: false },
+		{ restart: true, legacy: true },
+	])("natural completion releases an unacknowledged Stop and later controls, restart=$restart, legacy=$legacy", async ({
+		restart,
+		legacy,
+	}) => {
+		const harness = await ProcessHarness.start({ restartProof: true });
+		harnesses.push(harness);
+		writeFileSync(
+			join(harness.root, "claude", "conduit-test-hold-stop"),
+			"hold",
+		);
+		let browser = await harness.connect();
+		const sessionId = await browser.createSession(
+			"Natural completion with pending interrupt",
+		);
+		void browser
+			.send(sessionId, "upgrade-long-turn", 60_000)
+			.catch(() => undefined);
+		await vi.waitFor(
+			() =>
+				expect(
+					sdkProof(harness).some((mark) => mark["kind"] === "assistant-held"),
+				).toBe(true),
+			{ timeout: 15_000 },
+		);
+		const db = new Database(harness.daemonStorePath());
+		const commandId = randomUUID();
+		const secondCommandId = randomUUID();
+		let passed = false;
+		try {
+			const stop = Effect.runPromise(
+				browser.rpc.CancelSession({ sessionId, commandId }),
+			).catch(() => undefined);
+			await vi.waitFor(() =>
+				expect(
+					sdkProof(harness).some((mark) => mark["kind"] === "stop-held"),
+				).toBe(true),
+			);
+			const secondStop = Effect.runPromise(
+				browser.rpc.CancelSession({ sessionId, commandId: secondCommandId }),
+			).catch(() => undefined);
+			if (restart) {
+				await harness.kill();
+				await Promise.all([stop, secondStop]);
+				if (legacy) {
+					db.prepare(
+						"UPDATE provider_command_outbox SET payload_json = json_remove(payload_json, '$.stop') WHERE command_id = ?",
+					).run(commandId);
+					const row = db
+						.prepare(
+							"SELECT payload_json FROM provider_command_outbox WHERE command_id = ?",
+						)
+						.get(commandId) as { payload_json: string };
+					const payload = Schema.decodeSync(
+						Schema.fromJsonString(ProviderControlPayloadSchema),
+					)(row.payload_json);
+					db.prepare(
+						"UPDATE command_receipts SET fingerprint_hash = ? WHERE command_id = ?",
+					).run(controlFingerprintHash(payload), commandId);
+					db.prepare(
+						"UPDATE events SET data = json_remove(data, '$.stop') WHERE type = 'interrupt.requested' AND json_extract(metadata, '$.commandId') = ?",
+					).run(commandId);
+				}
+				await harness.restart();
+				browser = await harness.connect(sessionId);
+			}
+			writeFileSync(join(harness.root, "release-upgrade-turn"), "release");
+			await vi.waitFor(
+				() =>
+					expect(
+						db
+							.prepare("SELECT status FROM provider_runs WHERE session_id = ?")
+							.all(sessionId),
+					).toEqual([{ status: "completed" }]),
+				{ timeout: 10_000 },
+			);
+			await vi.waitFor(
+				() =>
+					expect(
+						db
+							.prepare(
+								"SELECT status FROM provider_command_outbox WHERE command_id = ?",
+							)
+							.get(commandId),
+					).toEqual({ status: "completed" }),
+				{ timeout: 5000 },
+			);
+			await Promise.all([stop, secondStop]);
+			expect(
+				db
+					.prepare("SELECT status FROM command_receipts WHERE command_id = ?")
+					.get(commandId),
+			).toEqual({ status: "side_effect_completed" });
+			void browser
+				.send(sessionId, "approval-outbox", 20_000)
+				.catch(() => undefined);
+			const request = await browser.waitFor(
+				(frame) => frame["type"] === "permission_pending",
+				0,
+				15_000,
+			);
+			await browser.answerApproval(request, "allow");
+			await vi.waitFor(() =>
+				expect(
+					db
+						.prepare(
+							"SELECT status FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'resolve_permission'",
+						)
+						.all(sessionId),
+				).toEqual([{ status: "completed" }]),
+			);
+			// A late SDK acknowledgement must not change either terminal or retire the process.
+			writeFileSync(join(harness.root, "release-switch-stop"), "release");
+			await browser.send(sessionId, "after-obsolete-stop");
+			expect(
+				db
+					.prepare(
+						"SELECT type FROM events WHERE session_id = ? AND type IN ('turn.interrupted', 'turn.error')",
+					)
+					.all(sessionId),
+			).toEqual([]);
+			expect(
+				db
+					.prepare(
+						"SELECT command_id FROM provider_command_outbox WHERE command_id = ?",
+					)
+					.all(`${commandId}:retire`),
+			).toEqual([]);
+			expect(
+				sdkProof(harness).filter((mark) => mark["kind"] === "query-closed"),
+			).toEqual([]);
+			passed = true;
+		} finally {
+			recoveryEvidence.push({
+				scenario: legacy
+					? "legacy-unacknowledged-stop-natural-completion-restart"
+					: restart
+						? "unacknowledged-stop-natural-completion-restart"
+						: "unacknowledged-stop-natural-completion",
+				passed,
+				sessionId,
+				commandId,
+				secondCommandId,
+				commands: db
+					.prepare(
+						"SELECT command_id, effect_type, provider_process_id, run_id, status, error_code FROM provider_command_outbox WHERE session_id = ? ORDER BY request_sequence",
+					)
+					.all(sessionId),
+				runs: db
+					.prepare("SELECT id, status FROM provider_runs WHERE session_id = ?")
+					.all(sessionId),
+				events: db
+					.prepare(
+						"SELECT type, data, metadata FROM events WHERE session_id = ? ORDER BY sequence",
+					)
+					.all(sessionId),
+				nativeCalls: sdkProof(harness),
+				restartMarks: harness.proof().generations,
+			});
+			db.close();
+		}
+	}, 80_000);
+
+	it("a naturally completed cohort releases runner ownership without an interrupt acknowledgement", async () => {
+		const harness = await ProcessHarness.start({
+			restartProof: true,
+			runnerLifecycle: { idleTimeoutMs: 500 },
+		});
+		harnesses.push(harness);
+		writeFileSync(
+			join(harness.root, "claude", "conduit-test-hold-stop"),
+			"hold",
+		);
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession(
+			"Obsolete interrupt runner ownership",
+		);
+		void browser
+			.send(sessionId, "upgrade-long-turn", 60_000)
+			.catch(() => undefined);
+		await vi.waitFor(
+			() =>
+				expect(
+					sdkProof(harness).some((mark) => mark["kind"] === "assistant-held"),
+				).toBe(true),
+			{ timeout: 15_000 },
+		);
+		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
+		if (runner?.kind !== "runner-started") throw new Error("Missing runner");
+		const db = new Database(harness.daemonStorePath());
+		const commandId = randomUUID();
+		let passed = false;
+		try {
+			const stop = Effect.runPromise(
+				browser.rpc.CancelSession({ sessionId, commandId }),
+			);
+			await vi.waitFor(() =>
+				expect(
+					sdkProof(harness).some((mark) => mark["kind"] === "stop-held"),
+				).toBe(true),
+			);
+			writeFileSync(join(harness.root, "release-upgrade-turn"), "release");
+			await vi.waitFor(
+				() =>
+					expect(
+						db
+							.prepare(
+								"SELECT status FROM provider_command_outbox WHERE command_id = ?",
+							)
+							.get(commandId),
+					).toEqual({ status: "completed" }),
+				{ timeout: 5000 },
+			);
+			await stop;
+			await vi.waitFor(
+				() => expect(() => process.kill(runner.pid, 0)).toThrow(),
+				{ timeout: 5000 },
+			);
+			expect(
+				db
+					.prepare("SELECT status FROM provider_runs WHERE session_id = ?")
+					.all(sessionId),
+			).toEqual([{ status: "completed" }]);
+			expect(
+				db
+					.prepare(
+						"SELECT type FROM events WHERE session_id = ? AND type IN ('turn.error', 'turn.interrupted')",
+					)
+					.all(sessionId),
+			).toEqual([]);
+			passed = true;
+		} finally {
+			recoveryEvidence.push({
+				scenario: "unacknowledged-stop-releases-runner-ownership",
+				passed,
+				sessionId,
+				commandId,
+				runner,
+				runnerExitMarks: harness.marks.filter(
+					(mark) => mark.kind === "runner-idle-exit-started",
+				),
+				commands: db
+					.prepare(
+						"SELECT command_id, status FROM provider_command_outbox WHERE session_id = ? ORDER BY request_sequence",
+					)
+					.all(sessionId),
+				runs: db
+					.prepare("SELECT id, status FROM provider_runs WHERE session_id = ?")
+					.all(sessionId),
+				nativeCalls: sdkProof(harness),
+			});
+			db.close();
+		}
+	}, 45_000);
 
 	it("the Stop bound retires a runner even when the SDK never acknowledges interrupt", async () => {
 		const harness = await ProcessHarness.start({ restartProof: true });

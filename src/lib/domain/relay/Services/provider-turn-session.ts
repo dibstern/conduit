@@ -5,7 +5,6 @@ import {
 	PROVIDER_DRIVERS,
 	type ProviderDriverTraits,
 } from "../../../contracts/provider-instance.js";
-import { ProviderStopSnapshotSchema } from "../../../contracts/stored-event.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
@@ -13,7 +12,10 @@ import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effec
 import { canonicalEvent, createEventId } from "../../../persistence/events.js";
 import { ProviderInstanceFailure } from "../../../provider/errors.js";
 import { ProviderControlPayloadSchema } from "../../../provider/orchestration-command-contracts.js";
-import { sessionRunOwnersQuery } from "../../../provider/session-run-settlement.js";
+import {
+	legacyStopOwnersQuery,
+	sessionRunOwnersQuery,
+} from "../../../provider/session-run-settlement.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import {
 	PendingInteractionServiceTag,
@@ -234,36 +236,68 @@ export const prepareStop = (input: ProviderTurnServiceInterruptInput) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const [stored] = yield* sql<{
-			stop_json: string;
-		}>`SELECT json_extract(payload_json, '$.stop') AS stop_json
+			payload_json: string;
+			provider_id: string;
+			requested_at: number;
+		}>`SELECT payload_json, provider_id, requested_at
 			FROM provider_command_outbox WHERE command_id = ${input.commandId} AND session_id = ${input.sessionId}
-			AND json_type(payload_json, '$.stop') = 'object'`;
-		if (stored)
-			return yield* Effect.try({
-				try: () =>
-					Schema.decodeSync(Schema.fromJsonString(ProviderStopSnapshotSchema))(
-						stored.stop_json,
-					),
-				catch: (cause) =>
-					new ProviderInstanceFailure({
-						providerId: "conduit",
-						operation: "recoverStop",
-						cause,
-					}),
-			});
+			AND effect_type IN ('interrupt_turn', 'end_session')`;
+		const replay = stored
+			? yield* Effect.try({
+					try: () =>
+						Schema.decodeSync(
+							Schema.fromJsonString(ProviderControlPayloadSchema),
+						)(stored.payload_json),
+					catch: (cause) =>
+						new ProviderInstanceFailure({
+							providerId: "conduit",
+							operation: "recoverStop",
+							cause,
+						}),
+				})
+			: undefined;
+		if (
+			(replay?.type === "interrupt_turn" || replay?.type === "end_session") &&
+			replay.stop
+		)
+			return replay.stop;
 		const deadlineAt = (yield* Clock.currentTimeMillis) + STOP_ABORT_WAIT_MS;
 		const commit = yield* makeCommitAndSignal;
 		const store = yield* EventStoreEffectTag;
 		const providerId =
-			yield* (yield* OrchestrationEngineTag).getProviderForSessionEffect(
+			stored?.provider_id ??
+			(yield* (yield* OrchestrationEngineTag).getProviderForSessionEffect(
 				input.sessionId,
-			);
+			));
 		const account = providerId
 			? yield* (yield* AccountDirectory).resolve({ _tag: "Id", id: providerId })
 			: undefined;
 		const keepsPendingSteers = account
 			? PROVIDER_DRIVERS[account.driver].keepsPendingSteersOnInterrupt
 			: false;
+		if (
+			stored &&
+			(replay?.type === "interrupt_turn" || replay?.type === "end_session")
+		) {
+			// A predecessor Stop has no snapshot. Recover only its original inputs,
+			// without recapturing reservations or changing the immutable payload.
+			const turnIds =
+				replay.type === "interrupt_turn" ? (replay.turnIds ?? []) : [];
+			const owners = yield* legacyStopOwnersQuery(
+				sql,
+				input.sessionId,
+				input.commandId,
+			);
+			return {
+				deadlineAt: stored.requested_at + STOP_ABORT_WAIT_MS,
+				owners,
+				turnIds,
+				runnerBacked:
+					account !== undefined &&
+					!PROVIDER_DRIVERS[account.driver].runsOpenCodeServer,
+				retainedSteers: false,
+			};
+		}
 		// Close unused reservations and return handoffs in one transaction,
 		// serialized against the claim UPDATE so the drain cannot steal them.
 		const { owners, retainedSteers } = yield* commit.write((project) =>
@@ -373,7 +407,7 @@ export const interruptTurn = (
 			payload_json: string;
 		}>`SELECT payload_json FROM provider_command_outbox
 			WHERE command_id = ${input.commandId} AND session_id = ${input.sessionId}
-			AND json_type(payload_json, '$.stop') = 'object'`;
+			AND effect_type IN ('interrupt_turn', 'end_session')`;
 		if (stored) {
 			const payload = yield* Effect.try({
 				try: () =>
