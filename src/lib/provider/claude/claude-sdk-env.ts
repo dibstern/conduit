@@ -65,7 +65,11 @@ export const sameClaudeLogin = (a: ClaudeLogin, b: ClaudeLogin): boolean =>
 	resolve(a.root, a.configDir.path) === resolve(b.root, b.configDir.path) &&
 	(a.account?.id ?? a.instanceId) === (b.account?.id ?? b.instanceId) &&
 	isDeepStrictEqual(a.account?.env, b.account?.env) &&
-	isDeepStrictEqual(a.shellEnv, b.shellEnv);
+	// PWD follows declared workspace moves without changing the query's login.
+	isDeepStrictEqual(
+		{ ...a.shellEnv, PWD: undefined },
+		{ ...b.shellEnv, PWD: undefined },
+	);
 
 /** Read a recorded login, leaving absent launch metadata to the caller. */
 export function claudeLoginFromEnv(

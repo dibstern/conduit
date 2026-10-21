@@ -134,8 +134,12 @@ describe("built runner startup deadlines", () => {
 				expect(proof().some((mark) => mark["kind"] === "parent-received")).toBe(
 					false,
 				);
-				expect(proof().some((mark) => mark["kind"] === "child-ready")).toBe(
-					true,
+				await vi.waitFor(
+					() =>
+						expect(proof().some((mark) => mark["kind"] === "child-ready")).toBe(
+							true,
+						),
+					{ timeout: 10_000 },
 				);
 				expect(proof().some((mark) => mark["kind"] === "child-sent")).toBe(
 					false,

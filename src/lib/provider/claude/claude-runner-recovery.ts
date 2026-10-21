@@ -17,8 +17,12 @@ import {
 } from "../../persistence/effect/read-query-effect.js";
 import { runnerFailure, runnerSinkId } from "../runner/runner-protocol.js";
 import { recoverRunnerCommands } from "../runner/runner-recovery.js";
-import type { SessionFailure, SessionTurn } from "../runner/session-runner.js";
-import type { ProviderNativeSession } from "../types.js";
+import type {
+	SessionCommand,
+	SessionFailure,
+	SessionTurn,
+} from "../runner/session-runner.js";
+import type { ProviderNativeSession, TurnResult } from "../types.js";
 import type { ClaudeSessionRunnerDeps } from "./claude-provider-runtime.js";
 import type { ClaudeRunnerSocket } from "./claude-runner-protocol.js";
 import { normalizeClaudeSessionTurn } from "./claude-runner-wire.js";
@@ -42,6 +46,22 @@ export const recoverClaudeRunnerCommands = (
 		nativeResumeFallback?: boolean,
 	) => string = (commandId, _inputId, attempt, nativeResumeFallback) =>
 		runnerSinkId(commandId, attempt, nativeResumeFallback),
+	sendTurn: (
+		commandId: string,
+		command: Extract<SessionCommand, { type: "send-turn" }>,
+		attempt: number,
+	) => Effect.Effect<TurnResult | undefined, SessionFailure> = (
+		commandId,
+		command,
+		attempt,
+	) => connection.commandEffect(commandId, command, attempt),
+	admitReplay: (
+		sinkId: string,
+		replay: Effect.Effect<TurnResult | undefined, SessionFailure>,
+	) => Effect.Effect<TurnResult | undefined, SessionFailure> = (
+		_sinkId,
+		replay,
+	) => replay,
 ) =>
 	Effect.gen(function* () {
 		const config = yield* Effect.suspend(() =>
@@ -53,23 +73,37 @@ export const recoverClaudeRunnerCommands = (
 			config,
 			captureClaudeLaunchLogin(process.env),
 		);
-		const driverForAccount = (id: string) =>
-			Result.getOrUndefined(resolve(accounts, { _tag: "Id", id }))?.driver;
+		const accountForId = (id: string) =>
+			Result.getOrUndefined(resolve(accounts, { _tag: "Id", id }));
+		const driverForAccount = (id: string) => accountForId(id)?.driver;
 		return yield* recoverRunnerCommands(sql, sessionId, "claude", {
 			driverForAccount,
-			decodeInput: (row) => ({
-				...normalizeClaudeSessionTurn(
+			decodeInput: (row) => {
+				const input = normalizeClaudeSessionTurn(
 					JSON.parse(row.payload_json) as SessionTurn,
 					() => resolveClaudeLaunchConfig(config),
-				),
-				commandAttempt: row.attempt_count,
-			}),
+				);
+				// Credentials are omitted from the durable payload. Capture them
+				// once for this replay, preserving its admitted identity and folder.
+				const account = accountForId(input.account?.id ?? row.provider_id);
+				return {
+					...input,
+					...(account
+						? {
+								account: input.account
+									? { ...input.account, env: account.env }
+									: account,
+							}
+						: {}),
+					commandAttempt: row.attempt_count,
+				};
+			},
 			resolveSinkId,
 			closing,
 			failTurn,
 			replay: (row, input) => {
 				const instanceId = input.instanceId ?? row.provider_id;
-				return Effect.gen(function* () {
+				const replay = Effect.gen(function* () {
 					// Recovery can race the project's asynchronous environment capture.
 					const prepareShellEnv = deps.prepareShellEnv;
 					if (prepareShellEnv)
@@ -108,7 +142,7 @@ export const recoverClaudeRunnerCommands = (
 								input.contextWindow === "1m" ? 1000000 : undefined,
 						},
 						send: (prepared, nativeResumeFallback) =>
-							connection.commandEffect(
+							sendTurn(
 								row.command_id,
 								{
 									type: "send-turn",
@@ -150,6 +184,15 @@ export const recoverClaudeRunnerCommands = (
 				}).pipe(
 					Effect.provideService(SqlClient.SqlClient, sql),
 					Effect.mapError((cause) => runnerFailure("recover turn", cause)),
+				);
+				return admitReplay(
+					resolveSinkId(
+						row.command_id,
+						input.inputId,
+						row.attempt_count,
+						input.nativeResumeFallback,
+					),
+					replay,
 				);
 			},
 		});
