@@ -5,14 +5,10 @@ import {
 	Fiber,
 	FiberMap,
 	Option,
-	Result,
 	type Scope,
 } from "effect";
 import { SqlClient } from "effect/sql";
-import {
-	type AccountsState,
-	resolve as resolveAccount,
-} from "../../account-directory.js";
+import type { AccountsState } from "../../account-directory.js";
 import type { Account } from "../../contracts/account.js";
 import type { KnownProviderDriverKind } from "../../contracts/provider-instance.js";
 import type { DaemonConfigLoadError } from "../../daemon/config-persistence.js";
@@ -310,8 +306,8 @@ export class RunnerProviderInstance implements ProviderInstance {
 				claimed,
 				this.providerId,
 				(id) =>
-					Result.getOrUndefined(resolveAccount(accounts, { _tag: "Id", id }))
-						?.driver,
+					accounts.accounts.find((account) => account.id === id)?.driver ??
+					accounts.deleted.find((account) => account.id === id)?.driver,
 				(sinkId, turn, failure) =>
 					Effect.gen({ self: this }, function* () {
 						const recovery = yield* recoveryForSession(turn.sessionId);
@@ -346,7 +342,14 @@ export class RunnerProviderInstance implements ProviderInstance {
 								),
 							sinkId,
 							turn,
-							failure,
+							accounts.accounts.some((account) => account.id === turn.accountId)
+								? failure
+								: {
+										operation: "recover stopped runner",
+										message: `${this.providerId} account "${turn.accountId}" is unavailable`,
+										code: "account_unavailable",
+										retryable: false,
+									},
 							this.providerId,
 						);
 						// failRunnerTurn logs errors; database failures still need a retry.
@@ -462,20 +465,20 @@ export class RunnerProviderInstance implements ProviderInstance {
 	sendTurnEffect(
 		input: SendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
-		return Effect.gen({ self: this }, function* () {
-			const {
-				eventSink,
-				abortSignal,
-				awaitIntake: _awaitIntake,
-				...payload
-			} = input;
+		const {
+			eventSink,
+			abortSignal,
+			awaitIntake: _awaitIntake,
+			...payload
+		} = input;
+		const { sessionId } = input;
+		const sinkId = runnerSinkId(
+			input.inputId,
+			input.commandAttempt,
+			input.nativeResumeFallback,
+		);
+		const send = Effect.gen({ self: this }, function* () {
 			const prepared = yield* this.driver.prepareTurnEffect(payload);
-			const { sessionId } = input;
-			const sinkId = runnerSinkId(
-				input.inputId,
-				input.commandAttempt,
-				input.nativeResumeFallback,
-			);
 			this.sinks.set(sinkId, eventSink);
 			this.sinkSessions.set(sinkId, sessionId);
 			bindTurnTimelineSink(sinkId, {
@@ -506,6 +509,17 @@ export class RunnerProviderInstance implements ProviderInstance {
 				...prepared,
 			});
 		});
+		return (this.runner.withTurnEffect?.(payload, sinkId, send) ?? send).pipe(
+			Effect.mapError((cause) =>
+				cause instanceof ProviderInstanceFailure
+					? cause
+					: new ProviderInstanceFailure({
+							providerId: this.providerId,
+							operation: cause.operation,
+							cause,
+						}),
+			),
+		);
 	}
 
 	/** Places a send's user message once; only a missing session fails it. */

@@ -74,6 +74,8 @@ export interface RunnerHello {
 		readonly sinkId: string;
 		readonly sessionId: string;
 		readonly commandId?: string;
+		/** Absent on older runners; the daemon falls back to its turn records. */
+		readonly released?: boolean;
 	}[];
 	readonly pendingOutputs?: readonly {
 		readonly sequence: number;
