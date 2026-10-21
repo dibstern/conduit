@@ -1614,11 +1614,17 @@ export const FinalIconsDesktop: Story = {
 			getComputedStyle(colour).color,
 		);
 		colour.remove();
-		await expect(getComputedStyle(sendButton).opacity).toBe("1");
+		await expect(getComputedStyle(sendButton).opacity).toBe("0.5");
 		await expect(sendButton).toBeDisabled();
 		await userEvent.click(sendButton);
 		await expect(readTurn().working).toBe(false);
 		await expect(input).toHaveValue("");
+		await userEvent.type(input, "Ready to send");
+		await expect(sendButton).toBeEnabled();
+		await expect(getComputedStyle(sendButton).opacity).toBe("1");
+		await userEvent.clear(input);
+		await expect(sendButton).toBeDisabled();
+		await expect(getComputedStyle(sendButton).opacity).toBe("0.5");
 	},
 };
 export const FinalIconsDesktopLight: Story = {
