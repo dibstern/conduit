@@ -7,6 +7,7 @@ import {
 	ClaudeConfigDirSchema,
 	configuredClaudeConfigDir,
 } from "../../provider/claude/claude-sdk-env.js";
+import { boundProjectMismatch } from "./bind-event-store-effect.js";
 
 export class ProviderStateEffectError extends Data.TaggedError(
 	"ProviderStateEffectError",
@@ -81,10 +82,12 @@ export interface ProviderStateEffect {
 	readonly saveUpdates: (
 		sessionId: string,
 		updates: ReadonlyArray<ProviderStateEffectUpdate>,
+		projectId?: string,
 	) => Effect.Effect<void, ProviderStateEffectError | SqlError>;
 
 	readonly clearState: (
 		sessionId: string,
+		projectId?: string,
 	) => Effect.Effect<void, ProviderStateEffectError | SqlError>;
 }
 
@@ -93,9 +96,27 @@ export class ProviderStateEffectTag extends Context.Service<
 	ProviderStateEffect
 >()("ProviderStateEffect") {}
 
-export const makeProviderStateEffect = Effect.gen(function* () {
+export type UnboundProviderStateEffect = Omit<ProviderStateEffect, "projectId">;
+
+export class UnboundProviderStateEffectTag extends Context.Service<
+	UnboundProviderStateEffectTag,
+	UnboundProviderStateEffect
+>()("UnboundProviderStateEffect") {}
+
+export const makeUnboundProviderStateEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
-	const { projectId } = yield* PersistenceProjectTag;
+	const sessionProject = (sessionId: string) =>
+		Effect.gen(function* () {
+			const [session] = yield* sql<{
+				project_id: string | null;
+			}>`SELECT project_id FROM sessions WHERE id = ${sessionId}`;
+			if (!session?.project_id)
+				return yield* new ProviderStateEffectError({
+					operation: "nativeThread",
+					cause: `Session ${sessionId} has no project`,
+				});
+			return session.project_id;
+		});
 
 	const nativeThread = (sessionId: string, instanceId: string) =>
 		Effect.gen(function* () {
@@ -104,7 +125,7 @@ export const makeProviderStateEffect = Effect.gen(function* () {
 			if (stored !== undefined) {
 				const thread =
 					yield* Schema.decodeUnknownEffect(NativeThreadSchema)(stored);
-				return { ...thread, projectId };
+				return { ...thread, projectId: yield* sessionProject(sessionId) };
 			}
 			// Once per-account receipts exist, legacy keys cannot prove delivery to
 			// an account with no receipt, especially after a provider change.
@@ -141,7 +162,7 @@ export const makeProviderStateEffect = Effect.gen(function* () {
 				COALESCE(MAX(sequence), 0) AS deliveredThrough
 				FROM events WHERE session_id = ${sessionId}`;
 			return {
-				projectId,
+				projectId: yield* sessionProject(sessionId),
 				...(configDir !== undefined ? { configDir } : {}),
 				resumeSessionId,
 				firstSequence: bounds?.firstSequence ?? 0,
@@ -257,10 +278,46 @@ export const makeProviderStateEffect = Effect.gen(function* () {
 		);
 
 	return {
-		projectId,
 		nativeThread,
 		getState,
 		saveUpdates,
 		clearState,
-	} satisfies ProviderStateEffect;
+	} satisfies UnboundProviderStateEffect;
+});
+
+export const bindProviderStateEffect = (
+	state: UnboundProviderStateEffect,
+	projectId: string,
+): ProviderStateEffect => {
+	const mismatchFor = (
+		explicitProjectId: string | undefined,
+		operation: string,
+	) => {
+		const cause = boundProjectMismatch(projectId, explicitProjectId);
+		return cause
+			? new ProviderStateEffectError({ operation, cause })
+			: undefined;
+	};
+	return {
+		...state,
+		projectId,
+		saveUpdates: (sessionId, updates, explicitProjectId) => {
+			const mismatch = mismatchFor(explicitProjectId, "saveUpdates");
+			return mismatch
+				? Effect.fail(mismatch)
+				: state.saveUpdates(sessionId, updates);
+		},
+		clearState: (sessionId, explicitProjectId) => {
+			const mismatch = mismatchFor(explicitProjectId, "clearState");
+			return mismatch ? Effect.fail(mismatch) : state.clearState(sessionId);
+		},
+	};
+};
+
+export const makeProviderStateEffect = Effect.gen(function* () {
+	const { projectId } = yield* PersistenceProjectTag;
+	return bindProviderStateEffect(
+		yield* makeUnboundProviderStateEffect,
+		projectId,
+	);
 });

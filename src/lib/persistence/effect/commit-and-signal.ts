@@ -12,8 +12,13 @@ import {
 	type StoredEvent,
 } from "../events.js";
 import { SESSION_SUBTREE_SQL } from "../projectors/session-handlers.js";
+import { boundProjectMismatch } from "./bind-event-store-effect.js";
 import type { EventStoreError } from "./event-store-effect.js";
-import { EventStoreEffectTag } from "./event-store-effect.js";
+import {
+	EventStoreEffectTag,
+	type UnboundEventStoreEffect,
+	UnboundEventStoreEffectTag,
+} from "./event-store-effect.js";
 import type { ProjectionRunnerError } from "./projection-runner-effect.js";
 import { ProjectionRunnerEffectTag } from "./projection-runner-effect.js";
 import { mergeTouches } from "./projectors-effect.js";
@@ -66,6 +71,8 @@ export class ProjectOutsideSeamTransaction extends Data.TaggedError(
 }> {}
 
 export interface CommitAndSignalOptions {
+	/** Required when appending before the session has an owner row. */
+	readonly projectId?: string;
 	readonly publish?: boolean;
 	readonly endedRunEvents?: Set<string>;
 	/** Runs after projection, inside the append transaction, before COMMIT. */
@@ -131,7 +138,9 @@ export interface CommitAndSignal {
 // client, not an individual writer. Weak keys retain no closed persistence stack.
 const commitPermits = new WeakMap<SqlClient.SqlClient, Semaphore.Semaphore>();
 
-export const makeCommitAndSignal = Effect.gen(function* () {
+const makeCommitAndSignalWithStore = Effect.fn(function* (
+	eventStore: UnboundEventStoreEffect & { readonly projectId?: string },
+) {
 	const sql = yield* SqlClient.SqlClient;
 	let permit = commitPermits.get(sql);
 	if (permit === undefined) {
@@ -143,7 +152,6 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 		contentionMetrics
 			? contentionMetrics.withCommitPermit(withPermit, effect)
 			: withPermit(effect);
-	const eventStore = yield* EventStoreEffectTag;
 	const projectionRunner = yield* ProjectionRunnerEffectTag;
 	const projects = yield* SessionRollupProjects;
 	const sessionEventBus = yield* Effect.serviceOption(SessionEventBusTag);
@@ -158,6 +166,11 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 	): Effect.Effect<A, E | CommitAndSignalFailure, R> =>
 		Effect.uninterruptible(
 			Effect.gen(function* () {
+				const mismatch = boundProjectMismatch(
+					eventStore.projectId,
+					options.projectId,
+				);
+				if (mismatch) return yield* mismatch;
 				// Refuse before any write: the seam publishes on the strength of
 				// owning the COMMIT, and inside someone else's transaction it does
 				// not own one.
@@ -273,14 +286,18 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 										// not touched sends every subscriber to re-query it for
 										// nothing; worse, it claims a version for rows that did not
 										// move.
-										if (sessionIds.length > 0)
+										if (sessionIds.length > 0) {
+											const owners = yield* sql<{
+												project_id: string;
+											}>`SELECT DISTINCT project_id FROM sessions WHERE id IN ${sql.in(sessionIds)}`;
 											advances.push({
 												version,
-												projectIds: [eventStore.projectId],
+												projectIds: owners.map((row) => row.project_id),
 												sessionIds: [...sessionIds],
 												removedSessionIds: [],
 												collections: ["sessions", "sidebar"],
 											});
+										}
 										return sessionIds;
 									});
 
@@ -374,7 +391,10 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 			write(
 				(project) =>
 					Effect.gen(function* () {
-						const appended = yield* eventStore.appendBatch(events);
+						const appended = yield* eventStore.appendBatch(
+							events,
+							options.projectId,
+						);
 						yield* project(appended);
 						yield* options.beforeCommit ?? Effect.void;
 					}),
@@ -385,3 +405,13 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 
 	return commitAndSignal;
 });
+
+export const makeUnboundCommitAndSignal = Effect.flatMap(
+	UnboundEventStoreEffectTag,
+	makeCommitAndSignalWithStore,
+);
+
+export const makeCommitAndSignal = Effect.flatMap(
+	EventStoreEffectTag,
+	makeCommitAndSignalWithStore,
+);
