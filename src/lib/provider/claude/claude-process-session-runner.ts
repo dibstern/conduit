@@ -76,6 +76,7 @@ export const makeProcessClaudeSessionRunner = (
 			liveSession,
 			resolveSinkId,
 			sendTurn,
+			admitReplay,
 		) =>
 			recoverClaudeRunnerCommands(
 				sql,
@@ -87,5 +88,6 @@ export const makeProcessClaudeSessionRunner = (
 				liveSession,
 				resolveSinkId,
 				sendTurn,
+				admitReplay,
 			),
 	});

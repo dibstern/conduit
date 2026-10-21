@@ -164,6 +164,10 @@ export interface ProcessRunnerDriver {
 			command: Extract<SessionCommand, { type: "send-turn" }>,
 			attempt: number,
 		) => Effect.Effect<TurnResult | undefined, SessionFailure>,
+		admitReplay: (
+			sinkId: string,
+			replay: Effect.Effect<TurnResult | undefined, SessionFailure>,
+		) => Effect.Effect<TurnResult | undefined, SessionFailure>,
 	) => Effect.Effect<
 		Effect.Success<
 			ReturnType<
@@ -1588,6 +1592,26 @@ export const makeProcessSessionRunner = (
 																: Effect.succeed(result),
 														),
 													),
+										(sinkId, replay) =>
+											Effect.suspend(() => {
+												const pending = pendingSends.get(sinkId);
+												return pending
+													? Effect.raceFirst(
+															Deferred.await(pending.cancelled).pipe(
+																Effect.andThen(
+																	Effect.fail({
+																		...runnerFailure(
+																			"send-turn",
+																			"Input cancelled before intake",
+																		),
+																		code: "cancelled",
+																	}),
+																),
+															),
+															replay,
+														)
+													: replay;
+											}),
 									)
 									.pipe(
 										Effect.provideServiceEffect(
@@ -1629,10 +1653,18 @@ export const makeProcessSessionRunner = (
 										admissions.push(binding.admission);
 									}
 									const admission = binding.admission;
-									// Undelivered replays acquire admission through executeEffect.
+									// Own cancellation before replay captures env or prepares continuation.
 									const reattaching =
 										binding.accepted || !driver.admitsRecoveredSends;
 									if (reattaching) entry.commandsInFlight++;
+									else
+										pendingSends.set(command.sinkId, {
+											sessionId: registration.sessionId,
+											turnId:
+												command.input.continuation?.cutOffMessageId ??
+												command.input.inputId,
+											cancelled: yield* Deferred.make<void>(),
+										});
 									runFork(
 										command.wait.pipe(
 											Effect.onExit(() => {
@@ -1672,6 +1704,7 @@ export const makeProcessSessionRunner = (
 											Effect.ensuring(
 												Effect.sync(() => {
 													if (reattaching) entry.commandsInFlight--;
+													else pendingSends.delete(command.sinkId);
 													upgrade(registration.sessionId, entry);
 												}),
 											),
@@ -2390,7 +2423,9 @@ export const makeProcessSessionRunner = (
 				);
 				if (command.type !== "send-turn") return execute;
 				return Effect.gen(function* () {
-					cancelled = yield* Deferred.make<void>();
+					cancelled =
+						pendingSends.get(command.sinkId)?.cancelled ??
+						(yield* Deferred.make<void>());
 					if (command.aborted) yield* Deferred.succeed(cancelled, undefined);
 					return yield* Effect.raceFirst(
 						Deferred.await(cancelled).pipe(Effect.as(CANCELLED_TURN)),

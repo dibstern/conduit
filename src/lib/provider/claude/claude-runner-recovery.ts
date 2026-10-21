@@ -55,6 +55,13 @@ export const recoverClaudeRunnerCommands = (
 		command,
 		attempt,
 	) => connection.commandEffect(commandId, command, attempt),
+	admitReplay: (
+		sinkId: string,
+		replay: Effect.Effect<TurnResult | undefined, SessionFailure>,
+	) => Effect.Effect<TurnResult | undefined, SessionFailure> = (
+		_sinkId,
+		replay,
+	) => replay,
 ) =>
 	Effect.gen(function* () {
 		const config = yield* Effect.suspend(() =>
@@ -96,7 +103,7 @@ export const recoverClaudeRunnerCommands = (
 			failTurn,
 			replay: (row, input) => {
 				const instanceId = input.instanceId ?? row.provider_id;
-				return Effect.gen(function* () {
+				const replay = Effect.gen(function* () {
 					// Recovery can race the project's asynchronous environment capture.
 					const prepareShellEnv = deps.prepareShellEnv;
 					if (prepareShellEnv)
@@ -177,6 +184,15 @@ export const recoverClaudeRunnerCommands = (
 				}).pipe(
 					Effect.provideService(SqlClient.SqlClient, sql),
 					Effect.mapError((cause) => runnerFailure("recover turn", cause)),
+				);
+				return admitReplay(
+					resolveSinkId(
+						row.command_id,
+						input.inputId,
+						row.attempt_count,
+						input.nativeResumeFallback,
+					),
+					replay,
 				);
 			},
 		});
