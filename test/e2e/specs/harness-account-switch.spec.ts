@@ -2494,10 +2494,9 @@ for (const behavior of [
 		}
 		const [source, target] = accounts;
 		if (!source || !target) throw new Error("Two accounts are required");
+		const projectDir = mkdtempSync(join(harness.root, "switch-project-"));
 		const { savedSlug: projectSlug } = await Effect.runPromise(
-			browser.rpc.SaveProject({
-				folders: [mkdtempSync(join(harness.root, "switch-project-"))],
-			}),
+			browser.rpc.SaveProject({ folders: [projectDir] }),
 		);
 		if (!projectSlug) throw new Error("No switch project slug");
 		// Project RPCs reset config persistence's debounce. Wait on disk once,
@@ -2878,6 +2877,9 @@ for (const behavior of [
 				);
 				if (behavior !== "fork-uncovered" && nativeParent?.kind !== "query")
 					throw new Error("No native parent query");
+				const queriesBeforeFork = proofMarks().filter(
+					(mark) => mark.kind === "query",
+				);
 				const fork = await Effect.runPromise(
 					browser.rpc.ForkSession({
 						sessionId,
@@ -2912,19 +2914,11 @@ for (const behavior of [
 				const nativeForks = proofMarks().filter(
 					(mark) => mark.kind === "native-fork",
 				);
-				if (behavior === "fork-uncovered") expect(nativeForks).toHaveLength(0);
-				else
-					expect(nativeForks).toEqual([
-						expect.objectContaining({
-							parentSessionId:
-								nativeParent?.kind === "query"
-									? nativeParent.sessionId
-									: undefined,
-							sessionId: fork.sessionId,
-							configDir: expectedAccount.configDir,
-							upToMessageId: point.id,
-						}),
-					]);
+				// Creation copies history without launching or forking a provider.
+				expect(nativeForks).toHaveLength(0);
+				expect(proofMarks().filter((mark) => mark.kind === "query")).toEqual(
+					queriesBeforeFork,
+				);
 				const forkPrompt = `Continue the ${behavior} fork.`;
 				await Effect.runPromise(
 					browser.rpc["input.submit"]({
@@ -2942,12 +2936,25 @@ for (const behavior of [
 							.find((call) => call.prompt?.endsWith(forkPrompt)),
 					)
 					.toBeDefined();
-				const call = harness
+				const forkCalls = harness
 					.claudeOptions()
-					.find((call) => call.prompt?.endsWith(forkPrompt));
+					.filter((call) => call.prompt?.endsWith(forkPrompt));
+				expect(forkCalls).toHaveLength(1);
+				const call = forkCalls[0];
 				expect(call?.configDir).toBe(expectedAccount.configDir);
+				expect(call?.options).toMatchObject({
+					cwd: projectDir,
+					env: { CLAUDE_CONFIG_DIR: expectedAccount.configDir },
+				});
 				if (behavior === "fork-uncovered") {
 					expect(call?.resumeId).toBeNull();
+					for (const key of [
+						"resume",
+						"forkSession",
+						"sessionId",
+						"resumeSessionAt",
+					])
+						expect(call?.options).not.toHaveProperty(key);
 					expect(call?.prompt).toContain(handoffMarker);
 					expect(call?.prompt).toContain(first);
 					expect(call?.prompt).toContain(cutOff);
@@ -2961,7 +2968,16 @@ for (const behavior of [
 					).toBeLessThanOrEqual(16_000);
 					expect(call?.prompt).toMatch(/omitted [1-9]\d* messages/);
 				} else {
-					expect(call?.resumeId).toBe(fork.sessionId);
+					if (nativeParent?.kind !== "query")
+						throw new Error("No native parent query");
+					// The first query forks the parent; later queries resume the child.
+					expect(call?.resumeId).toBe(nativeParent.sessionId);
+					expect(call?.options).toMatchObject({
+						resume: nativeParent.sessionId,
+						forkSession: true,
+						sessionId: fork.sessionId,
+						resumeSessionAt: point.id,
+					});
 					expect(call?.prompt).toBe(forkPrompt);
 				}
 				evidence["fork"] = {
