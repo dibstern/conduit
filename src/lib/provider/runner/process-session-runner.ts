@@ -1220,11 +1220,17 @@ export const makeProcessSessionRunner = (
 				const startupStartedAt = performance.now();
 				let startupTimeoutElapsedMs: number | undefined;
 				let listeningAfterMs: number | undefined;
-				child.once("exit", (exitCode, signal) => {
-					if (startupTimeoutElapsedMs !== undefined)
-						log.error(
-							`${runnerLabel} failed for session ${sessionId}: Runner startup timed out pid=${child.pid} timeoutMs=${startupTimeoutMs} elapsedMs=${startupTimeoutElapsedMs} readinessReceivedAfterMs=${listeningAfterMs ?? "none"} readinessLate=${listeningAfterMs !== undefined && listeningAfterMs >= startupTimeoutMs} exitCode=${exitCode} signal=${signal}`,
-						);
+				let startupTimeoutLogged = false;
+				const logStartupTimeout = (exited: boolean) => {
+					if (startupTimeoutElapsedMs === undefined || startupTimeoutLogged)
+						return;
+					startupTimeoutLogged = true;
+					log.error(
+						`${runnerLabel} failed for session ${sessionId}: Runner startup timed out pid=${child.pid} timeoutMs=${startupTimeoutMs} elapsedMs=${startupTimeoutElapsedMs} readinessReceivedAfterMs=${listeningAfterMs ?? "none"} readinessLate=${listeningAfterMs !== undefined && listeningAfterMs >= startupTimeoutMs} exited=${exited} exitCode=${exited ? child.exitCode : "not-exited"} signal=${exited ? child.signalCode : "not-exited"}`,
+					);
+				};
+				child.once("exit", () => {
+					logStartupTimeout(true);
 					entry.connection?.destroy();
 					failed(
 						sessionId,
@@ -1258,6 +1264,17 @@ export const makeProcessSessionRunner = (
 								performance.now() - startupStartedAt,
 							);
 							failed("Runner startup timed out");
+							runFork(
+								Deferred.await(entry.stopped).pipe(
+									Effect.andThen(
+										Effect.sync(() =>
+											logStartupTimeout(
+												child.exitCode !== null || child.signalCode !== null,
+											),
+										),
+									),
+								),
+							);
 						});
 					}, startupTimeoutMs);
 					child.once("error", failed);

@@ -39,7 +39,8 @@ export function installRunnerStartupFixture(root: string): void {
 				if (!isRecord(selection) || selection["pid"] !== process.pid)
 					return send(...args);
 				record("child-ready");
-				if (selection["mode"] === "never") return true;
+				if (selection["mode"] === "never" || selection["mode"] === "eperm")
+					return true;
 				send({
 					channel: "conduit-process-test",
 					kind: "startup-gated",
@@ -61,6 +62,17 @@ export function installRunnerStartupFixture(root: string): void {
 
 	const kill = process.kill.bind(process);
 	process.kill = (pid, signal) => {
+		if (signal !== 0 && existsSync(selected)) {
+			const selection: unknown = JSON.parse(readFileSync(selected, "utf8"));
+			if (
+				isRecord(selection) &&
+				selection["mode"] === "eperm" &&
+				selection["pid"] === pid
+			) {
+				record("parent-kill", { childPid: pid, signal, error: "EPERM" });
+				throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+			}
+		}
 		if (signal !== 0)
 			record("parent-kill", { childPid: pid, signal: signal ?? "SIGTERM" });
 		return kill(pid, signal);

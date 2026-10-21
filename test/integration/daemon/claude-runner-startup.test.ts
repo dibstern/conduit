@@ -13,11 +13,13 @@ import {
 } from "../../helpers/process-harness.js";
 
 // Failure cases: queued readiness loses to an overdue timer; a never-ready
-// runner is accepted or leaks; a failed new runner kills an adopted runner.
+// runner is accepted or leaks; EPERM hides a timeout or a late exit logs twice;
+// a failed new runner kills an adopted runner.
 describe("built runner startup deadlines", () => {
 	it.each([
 		"queued",
 		"never",
+		"eperm",
 	] as const)("handles %s readiness after adopting a surviving runner", async (mode) => {
 		const evidence: Record<string, unknown> = { mode, passed: false };
 		let harness: ProcessHarness | undefined;
@@ -104,13 +106,24 @@ describe("built runner startup deadlines", () => {
 			} else {
 				expect(turn.done["attention"]).toBe("error");
 				expect(turn.chunks).toEqual([]);
-				await vi.waitFor(
-					() =>
-						expect(
-							proof().find((mark) => mark["kind"] === "parent-exit"),
-						).toBeDefined(),
-					{ timeout: 5000 },
-				);
+				if (mode === "eperm") {
+					expect(() => process.kill(childPid, 0)).not.toThrow();
+					expect(
+						proof().find((mark) => mark["kind"] === "parent-exit"),
+					).toBeUndefined();
+					expect(
+						proof().find((mark) => mark["kind"] === "parent-kill"),
+					).toMatchObject({ childPid, error: "EPERM" });
+				} else {
+					await vi.waitFor(
+						() =>
+							expect(
+								proof().find((mark) => mark["kind"] === "parent-exit"),
+							).toBeDefined(),
+						{ timeout: 5000 },
+					);
+					expect(() => process.kill(childPid, 0)).toThrow();
+				}
 				expect(
 					proof().some(
 						(mark) =>
@@ -121,7 +134,6 @@ describe("built runner startup deadlines", () => {
 				expect(proof().some((mark) => mark["kind"] === "parent-received")).toBe(
 					false,
 				);
-				expect(() => process.kill(childPid, 0)).toThrow();
 				expect(proof().some((mark) => mark["kind"] === "child-ready")).toBe(
 					true,
 				);
@@ -141,9 +153,14 @@ describe("built runner startup deadlines", () => {
 				expect(timeoutLines).toHaveLength(1);
 				const line = timeoutLines[0] ?? "";
 				const exit = proof().find((mark) => mark["kind"] === "parent-exit");
-				expect(line).toContain(
-					`exitCode=${exit?.["exitCode"]} signal=${exit?.["signal"]}`,
-				);
+				if (mode === "eperm") {
+					expect(line).toContain("exited=false");
+					expect(line).toContain("exitCode=not-exited signal=not-exited");
+				} else {
+					expect(line).toContain(
+						`exitCode=${exit?.["exitCode"]} signal=${exit?.["signal"]}`,
+					);
+				}
 				expect(line).toContain("readinessReceivedAfterMs=none");
 				expect(
 					Number(line.match(/elapsedMs=(\d+)/)?.[1]),
@@ -177,8 +194,37 @@ describe("built runner startup deadlines", () => {
 					);
 					evidence["exitCode"] = exit?.["exitCode"] ?? null;
 					evidence["signal"] = exit?.["signal"] ?? null;
-					await harness.dispose();
+					try {
+						const childPid = observations.find(
+							(mark) => mark["kind"] === "parent-deadline",
+						)?.["childPid"];
+						if (
+							mode === "eperm" &&
+							typeof childPid === "number" &&
+							harness.remainingRunnerPids().includes(childPid)
+						) {
+							process.kill(childPid, "SIGKILL");
+							await vi.waitFor(
+								() =>
+									expect(readFileSync(path, "utf8")).toContain(
+										'"kind":"parent-exit"',
+									),
+								{ timeout: 5000 },
+							);
+							evidence["lateExitObserved"] = true;
+						}
+					} finally {
+						await harness.dispose();
+					}
 					evidence["remainingAfterCleanup"] = harness.remainingRunnerPids();
+					if (mode === "eperm") {
+						evidence["logTailAfterLateExit"] = harness.logTail;
+						expect(
+							harness.logTail
+								.split("\n")
+								.filter((line) => line.includes("Runner startup timed out")),
+						).toHaveLength(1);
+					}
 				}
 			} finally {
 				mkdirSync("test-results", { recursive: true });
