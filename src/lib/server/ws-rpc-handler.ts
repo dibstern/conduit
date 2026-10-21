@@ -397,6 +397,8 @@ export const makeWsRpcWebSocketHandler = (
 				transport,
 				runTransportFork: Effect.runForkWith(context),
 				runConnection: (ws, ip, secure) => {
+					// Socket.reader resumes after installing its message listener.
+					ws.pause();
 					const connection = runRpcWebSocketConnection(
 						ws,
 						ip,
@@ -445,7 +447,9 @@ export const makeRoutedWsRpcWebSocketHandler = (
 		const handler = new WsRpcWebSocketHandler(undefined, {
 			transport: Context.get(transportContext, WsTransportTag),
 			runTransportFork: Effect.runForkWith(context),
-			runConnection: (ws, ip, secure) =>
+			runConnection: (ws, ip, secure) => {
+				// Keep early frames buffered until Socket.reader is listening.
+				ws.pause();
 				Effect.runForkWith(context)(
 					Effect.forkIn(
 						runRpcWebSocketConnection(
@@ -458,7 +462,8 @@ export const makeRoutedWsRpcWebSocketHandler = (
 						),
 						scope,
 					),
-				),
+				);
+			},
 		});
 		yield* Effect.addFinalizer(() =>
 			Effect.tryPromise({
