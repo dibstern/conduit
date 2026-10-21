@@ -35,6 +35,7 @@ import {
 	Layer,
 	Ref,
 	Result,
+	Schedule,
 	type Scope,
 	Semaphore,
 } from "effect";
@@ -635,8 +636,11 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			Effect.mapError((cause) => sessionFailure("apply-live-settings", cause)),
 		);
 	}
-	endSession(sessionId: string): Effect.Effect<void, SessionFailure> {
-		return this.endSessionEffect(sessionId).pipe(
+	endSession(
+		sessionId: string,
+		retireRunIds?: readonly string[],
+	): Effect.Effect<void, SessionFailure> {
+		return this.endSessionEffect(sessionId, retireRunIds).pipe(
 			Effect.mapError((cause) => sessionFailure("end-session", cause)),
 		);
 	}
@@ -2566,6 +2570,17 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			}
 			const ctx = yield* getSession(this.stateRef, sessionId);
 			const interrupt = Effect.gen({ self: this }, function* () {
+				if (ctx && bound && turnIds.length === 0) {
+					const foreground =
+						(ctx.turnInFlight && ctx.currentRunId !== undefined) ||
+						(yield* pendingIntakes(this.stateRef, sessionId)).size > 0;
+					if (foreground || !(yield* isCurrentSession(this.stateRef, ctx)))
+						return Effect.void;
+					// Stop captured no foreground run. Notification activity can still
+					// hold the query, but cannot reopen its completed durable owner.
+					yield* this.disposeSessionEffect(ctx, "Stopped by the user");
+					return Effect.void;
+				}
 				// A queued lifecycle start can change the active admission while Stop
 				// waits for message ownership. Select its candidate under that permit.
 				const boundTurnId = bound ? ctx?.currentTurnId : undefined;
@@ -2600,22 +2615,41 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				)
 					return Effect.void;
 
-				// Live tasks and pending steering inputs need the same query and prompt
-				// queue. Interrupt only the running turn; its SDK result settles it by id.
+				// The SDK terminal owns settlement, even when interrupt() acknowledges
+				// without ending the turn. Keep its stream and prompt queue alive.
 				const waiters = yield* pendingIntakes(this.stateRef, sessionId);
-				if (
-					!ctx.stopped &&
-					((ctx.liveBackgroundTaskCount ?? 0) > 0 ||
-						[...waiters].some(
-							([inputId, waiter]) =>
-								waiter.unplaced !== undefined && inputId !== ctx.currentTurnId,
-						))
-				) {
+				if (!ctx.stopped) {
 					// A delayed Cancel can arrive after the result while tasks or a steer
 					// keep the query alive. It must not interrupt an idle query or the next input.
 					const inputId = ctx.currentTurnId;
-					if (!ctx.turnInFlight || !inputId || ctx.interruptInputId === inputId)
+					if (!ctx.turnInFlight) {
+						if (
+							bound &&
+							[...waiters.keys()].some((id) => !turnIds.includes(id))
+						)
+							return Effect.void;
+						// Background activity may remain after the foreground terminal.
+						// Dispose it without emitting another terminal for that turn.
+						yield* this.disposeSessionEffect(ctx, "Stopped by the user");
 						return Effect.void;
+					}
+					if (!inputId || ctx.interruptInputId === inputId) return Effect.void;
+					const unplaced = waiters.get(inputId)?.unplaced;
+					if (unplaced && (yield* ctx.promptQueue.recall(inputId))) {
+						// This input never reached the SDK, so local cancellation is final.
+						yield* unplaced.eventSink.push(
+							claudeRuntimeEvent(
+								"turn.interrupted",
+								sessionId,
+								{ messageId: "" },
+								unplaced.runId,
+							),
+						);
+						ctx.turnInFlight = false;
+						this.deps.onTurnStateChanged?.(sessionId, false);
+						yield* cancelIntakeEffect(this.stateRef, sessionId, inputId);
+						return Effect.void;
+					}
 					log.info(`Interrupting running turn for session ${sessionId}`);
 					ctx.interruptInputId = inputId;
 					const closed = (ctx.closedRunIds ??= new Set());
@@ -2641,48 +2675,43 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					// the stream's ownership permit so a pending steer cannot lose its approvals.
 					// A bound Stop awaits acceptance after releasing that permit, so the
 					// acknowledgement holds no admission and a rejection still fails the Stop.
-					return acknowledged.pipe(
-						Effect.andThen(
-							(ctx.messageOwnershipPermit ??=
-								Semaphore.makeUnsafe(1)).withPermits(1)(
-								Effect.gen({ self: this }, function* () {
-									if (ctx.currentTurnId === inputId && ctx.turnInFlight)
-										yield* this.cancelInteractionsEffect(
-											ctx,
-											"Turn interrupted",
-											false,
-										);
-								}),
+					// Native completion also releases the runner's command ownership.
+					// Dropping only the daemon waiter would leave this command active
+					// forever when the SDK never acknowledges an obsolete interrupt.
+					return Effect.raceFirst(
+						acknowledged.pipe(Effect.as(true)),
+						Effect.repeat(
+							Effect.sync(
+								() => ctx.interruptInputId === inputId && !ctx.stopped,
 							),
+							{
+								while: (running) => running,
+								schedule: Schedule.spaced("100 millis"),
+							},
+						).pipe(Effect.as(false)),
+					).pipe(
+						Effect.flatMap((accepted) =>
+							accepted
+								? (ctx.messageOwnershipPermit ??=
+										Semaphore.makeUnsafe(1)).withPermits(1)(
+										Effect.gen({ self: this }, function* () {
+											if (
+												ctx.currentTurnId === inputId &&
+												ctx.turnInFlight &&
+												ctx.interruptInputId === inputId
+											)
+												yield* this.cancelInteractionsEffect(
+													ctx,
+													"Turn interrupted",
+													false,
+												);
+										}),
+									)
+								: Effect.void,
 						),
 					);
 				}
 
-				log.info(`Interrupting turn for session ${sessionId}`);
-				yield* this.cleanupSessionEffect(
-					ctx,
-					"Turn interrupted",
-					false,
-					!bound,
-				);
-				// With no live tasks or pending steer, retain the existing close path.
-				yield* Effect.try({
-					try: () => ctx.query.close(),
-					catch: (cause) =>
-						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
-				}).pipe(Effect.ignore);
-				yield* settlePendingIntakesEffect(
-					this.stateRef,
-					ctx.sessionId,
-					INTERRUPTED_TURN,
-				);
-				if (
-					HashSet.has(
-						(yield* getState(this.stateRef)).shutdownAfterTurn,
-						sessionId,
-					)
-				)
-					yield* this.scheduleShutdownAfterTurnEffect(sessionId);
 				return Effect.void;
 			});
 			// Lifecycle starts and send admission change currentTurnId on this permit.
@@ -2791,78 +2820,23 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	}
 
 	/**
-	 * Shared cleanup for a single session — used by both interruptTurn()
-	 * and shutdown(). Completes in-flight tools except questions on disposal,
-	 * resolves pending approvals with deny, rejects provider question waiters, persists
-	 * turn.interrupted + session.status idle for any in-flight turn, closes
-	 * the prompt queue, and interrupts the SDK query.
+	 * Session disposal completes tools except recoverable questions, denies
+	 * pending approvals, closes the prompt queue and interrupts the SDK query.
+	 * Terminal state
+	 * belongs to the SDK stream or the confirmed process-exit path.
 	 */
 	private cleanupSessionEffect(
 		ctx: ClaudeSessionContext,
 		reason: string,
 		recoverQuestions: boolean,
-		waitForInterrupt = true,
 	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen({ self: this }, function* () {
 			if (ctx.stopped) return;
 			ctx.stopped = true;
-			const turnInFlight = ctx.turnInFlight === true;
-			const messageId = ctx.activeAssistantMessageId ?? "";
-			const unaccepted = (yield* pendingIntakes(
-				this.stateRef,
-				ctx.sessionId,
-			)).get(ctx.currentTurnId ?? "")?.unplaced;
-			const runId = ctx.currentRunId ?? unaccepted?.runId;
 
 			yield* this.completeTurnToolsEffect(ctx, recoverQuestions);
 
 			yield* this.cancelInteractionsEffect(ctx, reason, recoverQuestions);
-
-			// Persist terminal turn state. The SDK's post-interrupt `result`
-			// message is never translated (stream finalizers bail once
-			// `stopped` is set), so without this the turn row stays 'running'
-			// and the session stays 'busy' forever — the UI keeps showing the
-			// session as processing until the next turn accidentally resets it.
-			if (ctx.eventSink && turnInFlight) {
-				const goalChange = ctx.goalTracker?.pause("Interrupted");
-				if (goalChange) {
-					yield* ctx.eventSink
-						.push(
-							claudeRuntimeEvent(
-								"session.goal_changed",
-								ctx.sessionId,
-								goalChange,
-								runId,
-							),
-						)
-						.pipe(Effect.ignore);
-				}
-				yield* ctx.eventSink
-					.push(
-						claudeRuntimeEvent(
-							"turn.interrupted",
-							ctx.sessionId,
-							{
-								messageId,
-							},
-							runId,
-						),
-					)
-					.pipe(Effect.ignore);
-				yield* ctx.eventSink
-					.push(
-						claudeRuntimeEvent(
-							"session.status",
-							ctx.sessionId,
-							{
-								sessionId: ctx.sessionId,
-								status: "idle",
-							},
-							runId,
-						),
-					)
-					.pipe(Effect.ignore);
-			}
 
 			ctx.turnInFlight = false;
 			ctx.currentRunId = undefined;
@@ -2870,17 +2844,9 @@ class ClaudeRunnerPayload implements RunnerPayload {
 
 			yield* ctx.promptQueue.close().pipe(Effect.ignore);
 
-			const acknowledged = yield* this.interruptQueryEffect(ctx).pipe(
-				Effect.orElseSucceed(() => Effect.void),
-			);
-			// A late acknowledgement must neither hold admission nor perform cleanup
-			// against a replacement.
-			yield* waitForInterrupt
-				? Effect.ignore(acknowledged)
-				: Effect.forkIn(
-						acknowledged.pipe(Effect.interruptible, Effect.ignore),
-						this.scope,
-					);
+			// Disposal closes this query next. Do not let an unanswered interrupt
+			// prevent that close; interruptQueryEffect already observes rejection.
+			yield* this.interruptQueryEffect(ctx).pipe(Effect.ignore);
 			yield* this.endMessageOwnershipEffect(ctx);
 		});
 	}
@@ -2938,8 +2904,6 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		return Effect.gen({ self: this }, function* () {
 			yield* this.cleanupSessionEffect(ctx, reason, true);
 
-			yield* settlePendingIntakesEffect(this.stateRef, ctx.sessionId, reason);
-
 			// Terminal close of the SDK query (vs interrupt(), which is resumable).
 			yield* Effect.try({
 				try: () => ctx.query.close(),
@@ -2947,6 +2911,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 			}).pipe(Effect.ignore);
 
+			yield* settlePendingIntakesEffect(this.stateRef, ctx.sessionId, reason);
 			yield* FiberMap.remove(this.streamFibers, ctx.sessionId);
 			yield* this.removeSessionEffect(ctx.sessionId);
 		});
@@ -2954,15 +2919,17 @@ class ClaudeRunnerPayload implements RunnerPayload {
 
 	endSessionEffect(
 		sessionId: string,
+		retireRunIds?: readonly string[],
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.mapProviderFailure(
 			"endSession",
-			this.endSessionLocalEffect(sessionId),
+			this.endSessionLocalEffect(sessionId, retireRunIds),
 		);
 	}
 
 	private endSessionLocalEffect(
 		sessionId: string,
+		retireRunIds?: readonly string[],
 	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen({ self: this }, function* () {
 			yield* FiberMap.remove(this.shutdownFibers, sessionId);
@@ -2970,7 +2937,28 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			const ctx = yield* getSession(this.stateRef, sessionId);
 			if (!ctx) return; // idempotent
 			log.info(`Ending Claude session: ${sessionId}`);
-			yield* this.disposeSessionEffect(ctx, "Session ended (reload)");
+			const dispose = Effect.gen({ self: this }, function* () {
+				// A retained steer can start while End crosses the runner socket.
+				// Check on the same permit as SDK terminals and lifecycle starts.
+				if (
+					retireRunIds &&
+					(!ctx.turnInFlight ||
+						(ctx.currentRunId && !retireRunIds.includes(ctx.currentRunId)))
+				)
+					return yield* new ClaudeBoundaryError({
+						operation: "end-session",
+						cause: {
+							code: "stop_cohort_ended",
+							message: "The captured Stop cohort has ended",
+						},
+					});
+				yield* this.disposeSessionEffect(ctx, "Session ended (reload)");
+			});
+			yield* retireRunIds
+				? (ctx.messageOwnershipPermit ??= Semaphore.makeUnsafe(1)).withPermits(
+						1,
+					)(dispose)
+				: dispose;
 		});
 	}
 

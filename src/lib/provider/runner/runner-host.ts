@@ -567,6 +567,15 @@ export const runSessionRunner = (
 									SessionFailure
 								>();
 								commands.set(deduplicationKey, result);
+								const proof =
+									process.env["NODE_ENV"] === "test"
+										? process.env["CONDUIT_TEST_PROCESS_PROOF"]
+										: undefined;
+								if (proof && command.control)
+									appendFileSync(
+										proof,
+										`${JSON.stringify({ kind: "runner-control", commandId: message.commandId, type: command.type, runnerId })}\n`,
+									);
 								if (!runner)
 									return yield* Effect.die("Runner is not initialized");
 								const execution = launch.executeEffect(runner, command);

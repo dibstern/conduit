@@ -1522,7 +1522,7 @@ describe("ProviderSideEffectReactor", () => {
 	}
 
 	it.effect(
-		"keeps non-send retry backoff tied to the claimed attempt count",
+		"cancels a legacy interrupt without a captured process instead of replaying it",
 		() =>
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -1547,10 +1547,10 @@ describe("ProviderSideEffectReactor", () => {
 				});
 				yield* reactor.drain();
 				expect(yield* readOutboxRetryState(sql, 10)).toEqual({
-					status: "retryable_failed",
+					status: "cancelled",
 					attempt_count: 1,
-					error_code: "rate_limit",
-					next_attempt_at: 100,
+					error_code: "provider_process_gone",
+					next_attempt_at: null,
 				});
 			}).pipe(Effect.provide(reactorTestLayer)),
 	);

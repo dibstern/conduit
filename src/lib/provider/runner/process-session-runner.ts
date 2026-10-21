@@ -10,6 +10,7 @@ import {
 	Effect,
 	Exit,
 	FiberSet,
+	Option,
 	Semaphore,
 } from "effect";
 import { SqlClient } from "effect/sql";
@@ -378,7 +379,11 @@ export const makeProcessSessionRunner = (
 			: yield* makeRetireReplacedProcessPrompts;
 		const retireReplacedPrompts = (
 			currentProcessId: string | null,
-			owner: { readonly sessionId: string },
+			owner: {
+				readonly sessionId: string;
+				readonly expiredProcessId?: string;
+				readonly exceptCommandId?: string;
+			},
 		) =>
 			deps.recoveryForSession
 				? deps
@@ -386,7 +391,7 @@ export const makeProcessSessionRunner = (
 						.pipe(
 							Effect.flatMap(
 								(recovery) =>
-									recovery?.retirePrompts(currentProcessId) ??
+									recovery?.retirePrompts(currentProcessId, owner) ??
 									Effect.succeed(0),
 							),
 						)
@@ -577,22 +582,17 @@ export const makeProcessSessionRunner = (
 			.pipe(Effect.uninterruptible);
 		yield* Effect.addFinalizer(() => shutdown);
 
-		const failed = (
+		const settleExitedRuns = (
 			sessionId: string,
 			entry: RunnerChild,
 			failure: SessionFailure,
+			endCommandId?: string,
 		) => {
-			if (failure.code === "runner_idle_exit") entry.idleExiting = true;
-			if (entry.stopping || entry.recovering || entry.failure || closing)
-				return;
-			entry.failure = failure;
-			runFork(Deferred.fail(entry.ready, failure));
-			if (entry.candidate) return;
 			const bindings = [...sinks].filter(
 				([, binding]) => binding.sessionId === sessionId,
 			);
 			const commands = [...(entry.pendingSendCommands ?? [])];
-			const settleExitedRuns = Effect.gen(function* () {
+			return Effect.gen(function* () {
 				const ingestion = yield* ingestionForSession(sessionId);
 				const reservations = new Set<string>();
 				if (sql && ingestion)
@@ -607,6 +607,18 @@ export const makeProcessSessionRunner = (
 						if (owner?.run_id) reservations.add(owner.run_id);
 					}
 				yield* Deferred.await(entry.stopped);
+				const exitedPid = entry.pid ?? entry.child?.pid;
+				if (!closing && exitedPid !== undefined && !runnerPidAlive(exitedPid)) {
+					const current = children.get(sessionId);
+					yield* retireReplacedPrompts(
+						current && current !== entry ? current.runnerId : null,
+						{
+							sessionId,
+							expiredProcessId: entry.runnerId,
+							...(endCommandId ? { exceptCommandId: endCommandId } : {}),
+						},
+					);
+				}
 				if (process.env["NODE_ENV"] === "test")
 					yield* Effect.sleep(
 						Number(process.env["CONDUIT_TEST_RUNNER_FAILURE_DELAY_MS"] ?? 0),
@@ -647,16 +659,31 @@ export const makeProcessSessionRunner = (
 								sessionId,
 								failure.message,
 								(events) => ingestion.ingestBatch(events),
-								{ errorCode: "runner_stopped", owners: [...owners.values()] },
+								{
+									...(endCommandId ? {} : { errorCode: "runner_stopped" }),
+									owners: [...owners.values()],
+								},
 							);
 						}),
 					),
 				);
-			}).pipe(
-				Effect.catch((cause) =>
-					Effect.logError("Could not settle exited runner runs", cause),
-				),
+			});
+		};
+		const failed = (
+			sessionId: string,
+			entry: RunnerChild,
+			failure: SessionFailure,
+		) => {
+			if (failure.code === "runner_idle_exit") entry.idleExiting = true;
+			if (entry.stopping || entry.recovering || entry.failure || closing)
+				return;
+			entry.failure = failure;
+			runFork(Deferred.fail(entry.ready, failure));
+			if (entry.candidate) return;
+			const bindings = [...sinks].filter(
+				([, binding]) => binding.sessionId === sessionId,
 			);
+			const settlement = settleExitedRuns(sessionId, entry, failure);
 			if (!entry.idleExiting && !entry.startupTimedOut)
 				log.error(
 					`${runnerLabel} failed for session ${sessionId}: ${failure.message}`,
@@ -664,8 +691,11 @@ export const makeProcessSessionRunner = (
 			// Warm completed turns retain a sink for background output. A
 			// dead runner cannot release it, even when no send is waiting.
 			runFork(
-				settleExitedRuns
+				settlement
 					.pipe(
+						Effect.catch((cause) =>
+							Effect.logError("Could not settle exited runner runs", cause),
+						),
 						Effect.andThen(
 							entry.outputs.withPermits(1)(
 								emit({
@@ -1288,6 +1318,16 @@ export const makeProcessSessionRunner = (
 		});
 
 		class ProcessSessionRunner implements SessionRunner {
+			getControlProcessIdEffect(
+				sessionId: string,
+			): Effect.Effect<string | undefined> {
+				return Effect.sync(() => {
+					const entry = children.get(sessionId);
+					return entry && !entry.failure && !entry.stopping
+						? entry.runnerId
+						: undefined;
+				});
+			}
 			detachSessionEffect(sessionId: string): Effect.Effect<void> {
 				return lock
 					.withPermits(1)(
@@ -1458,9 +1498,10 @@ export const makeProcessSessionRunner = (
 								if (runnerPidAlive(registration.pid))
 									return yield* quarantine(entry, failure);
 								if (!abandoned && sql && ingestion) {
-									// No runner remains current, so retire every pending prompt in this session.
+									// Only this runner's interactions lost their owner.
 									yield* retireReplacedPrompts(null, {
 										sessionId: registration.sessionId,
+										expiredProcessId: registration.runnerId,
 									}).pipe(
 										Effect.mapError((cause) =>
 											runnerFailure("refuse runner interactions", cause),
@@ -1754,7 +1795,10 @@ export const makeProcessSessionRunner = (
 					),
 				);
 			}
-			hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
+			hasLiveProcessEffect(
+				sessionId: string,
+				processId?: string,
+			): Effect.Effect<boolean> {
 				return Effect.sync(() => {
 					// Before hello only the spawned child's pid is known.
 					const alive = (entry: RunnerChild) => {
@@ -1763,10 +1807,17 @@ export const makeProcessSessionRunner = (
 					};
 					for (const entry of exiting) if (!alive(entry)) exiting.delete(entry);
 					const owns = (entry: RunnerChild | undefined) =>
-						entry?.sessionId === sessionId && alive(entry);
+						entry?.sessionId === sessionId &&
+						(processId === undefined || entry.runnerId === processId) &&
+						alive(entry);
 					return (
 						owns(children.get(sessionId)) ||
-						[...candidates, ...exiting].some(owns)
+						[...candidates, ...exiting].some(
+							(entry) =>
+								(processId === undefined ||
+									entry.failure?.code === "runner_quarantined") &&
+								owns(entry),
+						)
 					);
 				});
 			}
@@ -1870,6 +1921,20 @@ export const makeProcessSessionRunner = (
 								const refusal = quarantined.get(sessionId);
 								if (refusal) return yield* Effect.fail(refusal);
 								const existing = children.get(sessionId);
+								if (
+									command.control &&
+									(!existing ||
+										existing.runnerId !== command.control.providerProcessId ||
+										existing.failure ||
+										existing.stopping)
+								)
+									return yield* Effect.fail({
+										...runnerFailure(
+											command.type,
+											"The target provider process is no longer running",
+										),
+										code: "provider_process_gone",
+									});
 								if (
 									outputOwner &&
 									(command.type === "answer-permission" ||
@@ -2090,6 +2155,21 @@ export const makeProcessSessionRunner = (
 						entry.draftPreWarm = true;
 					const connection = yield* Deferred.await(entry.ready);
 					if (
+						command.control &&
+						(children.get(sessionId) !== entry ||
+							entry.runnerId !== command.control.providerProcessId ||
+							entry.failure ||
+							entry.stopping ||
+							connection.closed)
+					)
+						return yield* Effect.fail({
+							...runnerFailure(
+								command.type,
+								"The target provider process is no longer running",
+							),
+							code: "provider_process_gone",
+						});
+					if (
 						command.type === "pre-warm" &&
 						(entry.failure ||
 							entry.recovering ||
@@ -2179,7 +2259,10 @@ export const makeProcessSessionRunner = (
 								: command;
 					if (command.type === "send-turn") entry.draftPreWarm = false;
 					let commandId =
-						command.type === "send-turn" ? command.input.inputId : randomUUID();
+						command.control?.commandId ??
+						(command.type === "send-turn"
+							? command.input.inputId
+							: randomUUID());
 					if (
 						command.type === "send-turn" &&
 						sql &&
@@ -2201,25 +2284,78 @@ export const makeProcessSessionRunner = (
 						commandId = rows[0]?.command_id ?? commandId;
 					}
 					if (command.type === "end-session") {
-						return yield* connection
+						// Read after readiness, while End holds admission against new sends.
+						const cohortRunning =
+							sql && command.control?.retireRunIds
+								? sql<{
+										running: number;
+									}>`SELECT EXISTS (SELECT 1 FROM provider_runs
+								WHERE session_id = ${sessionId} AND id IN ${sql.in(command.control.retireRunIds)}
+								AND status IN ('pending', 'running')) AS running`.pipe(
+										Effect.map(([row]) => row?.running === 1),
+										Effect.mapError((cause) =>
+											runnerFailure("retirement cohort", cause),
+										),
+									)
+								: Effect.succeed(true);
+						if (!(yield* cohortRunning)) return;
+						const settlement = settleExitedRuns(
+							sessionId,
+							entry,
+							runnerFailure("end-session", "Provider process stopped"),
+							commandId,
+						);
+						const ended = yield* connection
 							.commandEffect(commandId, payload)
 							.pipe(
-								Effect.ensuring(
-									stop(entry).pipe(
-										Effect.andThen(
-											Effect.suspend(() =>
-												entry.failure
-													? Deferred.await(entry.drained)
-													: Effect.sync(() => evict(sessionId, entry)).pipe(
-															Effect.ensuring(
-																Deferred.succeed(entry.drained, undefined),
-															),
-														),
-											),
-										),
-									),
+								Effect.as(true),
+								Effect.catch((failure) =>
+									failure.code === "stop_cohort_ended"
+										? Effect.succeed(false)
+										: Effect.fail(failure),
 								),
+								Effect.timeoutOption("1 second"),
+								Effect.onExit((exit) =>
+									// A stale native End must not become a forced process kill.
+									Exit.isSuccess(exit) &&
+									Option.isSome(exit.value) &&
+									!exit.value.value
+										? Effect.void
+										: cohortRunning.pipe(
+												Effect.flatMap((running) =>
+													running ? stop(entry) : Effect.void,
+												),
+											),
+								),
+								Effect.result,
 							);
+						if (
+							(ended._tag === "Success" &&
+								Option.isSome(ended.success) &&
+								!ended.success.value) ||
+							!(yield* cohortRunning)
+						)
+							return;
+						const pid = entry.pid ?? entry.child?.pid;
+						if (pid !== undefined && runnerPidAlive(pid)) {
+							const failure = runnerFailure(
+								"end-session",
+								"Runner survived Stop escalation",
+							);
+							yield* quarantine(entry, failure);
+							return yield* Effect.fail(failure);
+						}
+						yield* settlement.pipe(
+							Effect.mapError((cause) =>
+								runnerFailure("settle stopped runner", cause),
+							),
+						);
+						yield* entry.failure
+							? Deferred.await(entry.drained)
+							: Effect.sync(() => evict(sessionId, entry)).pipe(
+									Effect.ensuring(Deferred.succeed(entry.drained, undefined)),
+								);
+						return;
 					}
 					if (
 						process.env["NODE_ENV"] === "test" &&
@@ -2286,6 +2422,9 @@ export const makeProcessSessionRunner = (
 							Failure.isInterruptedOnly(cause)
 						)
 							return Effect.void;
+						// Explicit End owns settlement after confirmed exit. A socket
+						// failure during its graceful phase is not a process terminal.
+						if (child && child.ending > 0) return Deferred.await(child.stopped);
 						const cleanup = failRunnerTurn(
 							emit,
 							command.sinkId,

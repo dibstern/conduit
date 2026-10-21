@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { AccountSchema } from "../contracts/account.js";
+import { ProviderStopSnapshotSchema } from "../contracts/stored-event.js";
 import { ProviderPermissionUpdateSchema } from "../shared-types.js";
 
 export const DURABLE_COMMAND_RECEIPT_STATUSES = [
@@ -107,6 +108,7 @@ export const ProviderControlPayloadSchema = Schema.Union([
 		...controlTarget,
 		type: Schema.Literal("interrupt_turn"),
 		turnIds: Schema.optionalKey(Schema.Array(Schema.String)),
+		stop: Schema.optionalKey(ProviderStopSnapshotSchema),
 	}),
 	Schema.Struct({
 		...controlTarget,
@@ -134,6 +136,9 @@ export const ProviderControlPayloadSchema = Schema.Union([
 	Schema.Struct({
 		...controlTarget,
 		type: Schema.Literal("end_session"),
+		stop: Schema.optionalKey(ProviderStopSnapshotSchema),
+		retireProcess: Schema.optionalKey(Schema.Literal(true)),
+		retireRunIds: Schema.optionalKey(Schema.Array(Schema.String)),
 		targetProviderId: Schema.optionalKey(Schema.String),
 		account: Schema.optionalKey(AccountSchema),
 		unbind: Schema.optionalKey(Schema.Boolean),

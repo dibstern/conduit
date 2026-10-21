@@ -131,8 +131,13 @@ export const makeProviderAdaptersLive = (configDir: string) =>
 									project.context,
 									sessionId,
 								),
-								retirePrompts: (currentProcessId: string | null) =>
-									retire(currentProcessId, { sessionId }),
+								retirePrompts: (
+									currentProcessId: string | null,
+									options?: {
+										readonly expiredProcessId?: string;
+										readonly exceptCommandId?: string;
+									},
+								) => retire(currentProcessId, { ...options, sessionId }),
 								resolveCallContext: (request: ProviderCallRequest) =>
 									engine.resolveCallContextEffect(request),
 							};

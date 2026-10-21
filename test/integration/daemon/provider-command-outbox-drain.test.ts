@@ -3,16 +3,33 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { Deferred, Effect, Fiber, Layer } from "effect";
+import { Deferred, Effect, Fiber, Layer, Ref } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+	OpenCodeInstancesTag,
+	OpenCodeUnavailable,
+} from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
 } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import {
+	OpenCodeApiError,
+	OpenCodeConnectionError,
+} from "../../../src/lib/errors.js";
+import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import {
+	type CommitAndSignal,
+	makeCommitAndSignal,
+} from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { SessionRollupProjects } from "../../../src/lib/persistence/effect/session-rollup-projects.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
+import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
 import {
 	OrchestrationEngine,
 	type SendTurnCommand,
@@ -24,6 +41,10 @@ import type {
 	ProviderInstance,
 	TurnResult,
 } from "../../../src/lib/provider/types.js";
+import {
+	makeMockOpenCodeAPI,
+	makeOpenCodeInstancesStub,
+} from "../../helpers/mock-factories.js";
 import { createMockEventSink } from "../../helpers/mock-sdk.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -40,6 +61,19 @@ const artifactDirectory =
 // These scheduling cases exercise the real engine, writer and SQLite store
 // without starting a daemon or moving the legacy browser control callers.
 describe("durable control outbox scheduling", () => {
+	function controlApi(options: Partial<OpenCodeAPI>) {
+		const api = makeMockOpenCodeAPI(options);
+		vi.mocked(api.session.get).mockResolvedValue({
+			id: "control-session",
+			projectID: "control-project",
+			title: "Control",
+			version: "1",
+			time: { created: 1, updated: 1 },
+			directory: "/tmp/control-project",
+		});
+		return api;
+	}
+
 	function fixture() {
 		const persistence = makePersistenceEffectLayer(
 			":memory:",
@@ -51,15 +85,21 @@ describe("durable control outbox scheduling", () => {
 		);
 	}
 
-	function engine(instance: ProviderInstance) {
+	function engine(
+		instance: ProviderInstance,
+		now: () => number = () => 1000,
+		projectId = "control-project",
+		sessionId = "control-session",
+		wrapWrite?: (write: CommitAndSignal["write"]) => CommitAndSignal["write"],
+	) {
 		return Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const ingestion = yield* ProviderRuntimeIngestionTag;
 			const commit = yield* makeCommitAndSignal;
-			yield* sql`INSERT OR IGNORE INTO sessions (id, project_id, provider, created_at, updated_at) VALUES ('control-session', 'control-project', 'opencode', 1000, 1000)`;
+			yield* sql`INSERT OR IGNORE INTO sessions (id, project_id, provider, created_at, updated_at) VALUES (${sessionId}, ${projectId}, 'opencode', 1000, 1000)`;
 			const snapshot = yield* new CommandReadModelRepository(
 				sql,
-				"control-project",
+				projectId,
 			).bootstrap();
 			const result = new OrchestrationEngine({
 				registry: new ProviderRegistry([instance]),
@@ -67,13 +107,13 @@ describe("durable control outbox scheduling", () => {
 					sql,
 					ingestion,
 					snapshot,
-					projectKey: "control-project",
-					now: () => 1000,
+					projectKey: projectId,
+					now,
 					generateId: () => "control-dispatch",
-					write: commit.write,
+					write: wrapWrite ? wrapWrite(commit.write) : commit.write,
 				},
 			});
-			result.bindSession("control-session", "opencode");
+			result.bindSession(sessionId, "opencode");
 			return result;
 		});
 	}
@@ -114,6 +154,1622 @@ describe("durable control outbox scheduling", () => {
 			},
 		};
 	}
+
+	it("reserves a URL-only control before post-commit publication can drain it", async () => {
+		const api = controlApi({
+			promptProcessId: "shared-process",
+			controlReplaySafe: false,
+		});
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				let accepting: OrchestrationEngine;
+				const wrapWrite =
+					(write: CommitAndSignal["write"]): CommitAndSignal["write"] =>
+					(body, options) =>
+						write(body, options).pipe(
+							Effect.tap((result) =>
+								result &&
+								typeof result === "object" &&
+								"newlyAccepted" in result &&
+								result.newlyAccepted === true
+									? accepting.drainSideEffects().pipe(Effect.orDie)
+									: Effect.void,
+							),
+						);
+				accepting = yield* engine(
+					new OpenCodeProviderInstance({
+						client: api,
+						clientForSession: () => Effect.succeed(api),
+						configDir: "/tmp/control-test-config",
+					}),
+					undefined,
+					undefined,
+					undefined,
+					wrapWrite,
+				);
+				yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('card', 'control-session', 'permission', 'pending', 'shared-process', 'native-answer', 1)`;
+				const command = {
+					type: "resolve_permission" as const,
+					commandId: "publication-answer",
+					sessionId: "control-session",
+					requestId: "card",
+					decision: "once" as const,
+					providerProcessId: "shared-process",
+				};
+				expect(
+					yield* Effect.result(accepting.dispatchEffect(command)),
+				).toMatchObject({ _tag: "Success" });
+				yield* accepting.dispatchEffect(command);
+				expect(api.permission.reply).toHaveBeenCalledTimes(1);
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "completed", attempt_count: 1 }]);
+			}).pipe(
+				Effect.provide(fixture()),
+				Effect.provideService(
+					OpenCodeInstancesTag,
+					makeOpenCodeInstancesStub({ opencode: api }),
+				),
+			),
+		);
+	});
+
+	it("removes a live control reservation when its acceptance transaction rolls back", async () => {
+		const api = controlApi({
+			promptProcessId: "shared-process",
+			controlReplaySafe: false,
+		});
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const instance = new OpenCodeProviderInstance({
+					client: api,
+					clientForSession: () => Effect.succeed(api),
+					configDir: "/tmp/control-test-config",
+				});
+				const rollback =
+					(write: CommitAndSignal["write"]): CommitAndSignal["write"] =>
+					(body, options) =>
+						write(
+							(project, stamp) =>
+								body(project, stamp).pipe(
+									Effect.tap((result) =>
+										result &&
+										typeof result === "object" &&
+										"newlyAccepted" in result &&
+										result.newlyAccepted === true
+											? sql.unsafe("SELECT * FROM force_acceptance_rollback")
+											: Effect.void,
+									),
+								),
+							options,
+						);
+				const accepting = yield* engine(
+					instance,
+					undefined,
+					undefined,
+					undefined,
+					rollback,
+				);
+				yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('card', 'control-session', 'permission', 'pending', 'shared-process', 'native-answer', 1)`;
+				const command = {
+					type: "resolve_permission" as const,
+					commandId: "rolled-back-answer",
+					sessionId: "control-session",
+					requestId: "card",
+					decision: "once" as const,
+					providerProcessId: "shared-process",
+				};
+				expect(
+					yield* Effect.result(accepting.dispatchEffect(command)),
+				).toMatchObject({ _tag: "Failure" });
+				expect(
+					yield* sql`SELECT command_id FROM provider_command_outbox`,
+				).toEqual([]);
+				expect(yield* sql`SELECT command_id FROM command_receipts`).toEqual([]);
+				expect(yield* sql`SELECT status FROM pending_approvals`).toEqual([
+					{ status: "pending" },
+				]);
+				// A different daemon commits that id and stops before delivery. The
+				// rolled-back registration must not authorize its URL-only replay.
+				const stopAfterCommit =
+					(write: CommitAndSignal["write"]): CommitAndSignal["write"] =>
+					(body, options) =>
+						write(body, options).pipe(
+							Effect.tap((result) =>
+								result &&
+								typeof result === "object" &&
+								"newlyAccepted" in result &&
+								result.newlyAccepted === true
+									? Effect.die("stopped after commit")
+									: Effect.void,
+							),
+						);
+				const otherDaemon = yield* engine(
+					instance,
+					undefined,
+					undefined,
+					undefined,
+					stopAfterCommit,
+				);
+				yield* Effect.exit(otherDaemon.dispatchEffect(command));
+				yield* accepting.drainSideEffects();
+				expect(api.permission.reply).not.toHaveBeenCalled();
+				expect(
+					yield* sql`SELECT status, error_code FROM provider_command_outbox`,
+				).toEqual([
+					{ status: "cancelled", error_code: "provider_process_unavailable" },
+				]);
+			}).pipe(
+				Effect.provide(fixture()),
+				Effect.provideService(
+					OpenCodeInstancesTag,
+					makeOpenCodeInstancesStub({ opencode: api }),
+				),
+			),
+		);
+	});
+
+	it.each([
+		[undefined, 2000],
+		["3", 4000],
+		[new Date(5000).toUTCString(), 5000],
+		["invalid", 2000],
+		["-1", 2000],
+	] as const)("retries HTTP 429 with Retry-After %s at %s", async (retryAfter, deadline) => {
+		const api = controlApi({
+			promptProcessId: "shared-process",
+			controlReplaySafe: true,
+		});
+		const throttled = Object.assign(
+			new OpenCodeApiError({
+				message: "Too Many Requests",
+				endpoint: "/permission/native-answer",
+				responseStatus: 429,
+			}),
+			{ retryAfter },
+		);
+		vi.mocked(api.permission.reply)
+			.mockRejectedValueOnce(throttled)
+			.mockResolvedValue(undefined);
+		vi.mocked(api.permission.list).mockRejectedValue(throttled);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				let now = 1000;
+				const instance = new OpenCodeProviderInstance({
+					client: api,
+					clientForSession: () => Effect.succeed(api),
+					configDir: "/tmp/control-test-config",
+				});
+				const accepting = yield* engine(instance, () => now);
+				yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('card', 'control-session', 'permission', 'pending', 'shared-process', 'native-answer', 1)`;
+				yield* Effect.result(
+					accepting.dispatchEffect({
+						type: "resolve_permission",
+						commandId: "throttled-answer",
+						sessionId: "control-session",
+						requestId: "card",
+						decision: "once",
+						providerProcessId: "shared-process",
+					}),
+				);
+				expect(
+					yield* sql`SELECT status, attempt_count, next_attempt_at FROM provider_command_outbox`,
+				).toEqual([
+					{
+						status: "retryable_failed",
+						attempt_count: 1,
+						next_attempt_at: deadline,
+					},
+				]);
+				const restarted = yield* engine(instance, () => now);
+				now = deadline - 1;
+				yield* restarted.drainSideEffects();
+				expect(api.permission.reply).toHaveBeenCalledTimes(1);
+				now = deadline;
+				yield* restarted.drainSideEffects();
+				expect(api.permission.reply).toHaveBeenCalledTimes(2);
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "completed", attempt_count: 2 }]);
+			}).pipe(
+				Effect.provide(fixture()),
+				Effect.provideService(
+					OpenCodeInstancesTag,
+					makeOpenCodeInstancesStub({ opencode: api }),
+				),
+			),
+		);
+	});
+
+	// A crash in attempt five, including a rolled-back reopen, cannot buy a
+	// sixth delivery. Terminal outcome, receipt and reopen must commit together.
+	it.each([
+		"running",
+		"pending",
+		"retryable_failed",
+		"reopen-rollback",
+		"consumed",
+	] as const)("enforces the persisted budget before replay of %s", async (state) => {
+		const api = controlApi({
+			promptProcessId: "shared-process",
+			controlReplaySafe: true,
+		});
+		const outage = new OpenCodeConnectionError({ message: "provider offline" });
+		vi.mocked(api.permission.reply).mockRejectedValue(outage);
+		vi.mocked(api.permission.list).mockRejectedValue(outage);
+		if (state === "consumed") {
+			vi.mocked(api.permission.list).mockResolvedValue([]);
+			vi.mocked(api.session.get).mockResolvedValue({
+				id: "control-session",
+				projectID: "control-project",
+				title: "Control",
+				version: "1",
+				time: { created: 1, updated: 1 },
+				directory: "/tmp/control-project",
+			});
+		}
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const instance = new OpenCodeProviderInstance({
+					client: api,
+					clientForSession: () => Effect.succeed(api),
+					configDir: "/tmp/control-test-config",
+				});
+				const accepting = yield* engine(instance);
+				yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('card', 'control-session', 'permission', 'pending', 'shared-process', 'native-answer', 1)`;
+				yield* Effect.result(
+					accepting.dispatchEffect({
+						type: "resolve_permission",
+						commandId: "crashed-answer",
+						sessionId: "control-session",
+						requestId: "card",
+						decision: "once",
+						providerProcessId: "shared-process",
+					}),
+				);
+				if (state === "reopen-rollback") {
+					yield* sql`UPDATE provider_command_outbox SET attempt_count = 4, next_attempt_at = 0`;
+					yield* sql.unsafe(
+						`CREATE TRIGGER interrupt_reopen BEFORE UPDATE ON pending_approvals WHEN OLD.status = 'resolved' AND NEW.status = 'pending' BEGIN SELECT RAISE(ABORT, 'crash during reopen'); END`,
+					);
+					yield* accepting.drainSideEffects();
+					expect(
+						yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+					).toEqual([{ status: "running", attempt_count: 5 }]);
+					expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
+						{ status: "side_effect_requested" },
+					]);
+					expect(yield* sql`SELECT status FROM pending_approvals`).toEqual([
+						{ status: "resolved" },
+					]);
+					expect(
+						yield* sql`SELECT type FROM events WHERE json_extract(metadata, '$.source') = 'conduit.control-reconciliation'`,
+					).toEqual([]);
+					yield* sql.unsafe("DROP TRIGGER interrupt_reopen");
+				} else {
+					yield* sql`UPDATE provider_command_outbox SET status = ${state === "consumed" ? "running" : state}, attempt_count = 5, next_attempt_at = 0`;
+				}
+				const delivered = vi.mocked(api.permission.reply).mock.calls.length;
+				const restarted = yield* engine(instance);
+				yield* restarted.drainSideEffects();
+				yield* restarted.drainSideEffects();
+				expect(api.permission.reply).toHaveBeenCalledTimes(delivered);
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "failed", attempt_count: 5 }]);
+				expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
+					{ status: "side_effect_failed" },
+				]);
+				expect(yield* sql`SELECT status FROM pending_approvals`).toEqual([
+					{ status: state === "consumed" ? "resolved" : "pending" },
+				]);
+				expect(
+					yield* sql`SELECT type FROM events WHERE json_extract(metadata, '$.source') = 'conduit.control-reconciliation'`,
+				).toEqual(state === "consumed" ? [] : [{ type: "permission.asked" }]);
+				yield* restarted.dispatchEffect({
+					type: "interrupt_turn",
+					commandId: "stop-after-crash",
+					turnIds: ["in-flight-turn"],
+					sessionId: "control-session",
+					providerProcessId: "shared-process",
+				});
+				expect(api.session.abort).toHaveBeenCalledTimes(1);
+			}).pipe(
+				Effect.provide(fixture()),
+				Effect.provideService(
+					OpenCodeInstancesTag,
+					makeOpenCodeInstancesStub({ opencode: api }),
+				),
+			),
+		);
+	});
+
+	it.each([
+		{ origin: "current daemon", rollback: false },
+		{ origin: "recovered", rollback: false },
+		{ origin: "current daemon", rollback: true },
+		{ origin: "recovered", rollback: true },
+	])("protects a $origin fifth control delivery across sweeps (outcome rollback: $rollback)", async ({
+		origin,
+		rollback,
+	}) => {
+		const api = controlApi({
+			promptProcessId: "shared-process",
+			controlReplaySafe: true,
+		});
+		let release: (() => void) | undefined;
+		vi.mocked(api.permission.reply)
+			.mockRejectedValueOnce(
+				new OpenCodeConnectionError({ message: "connection reset" }),
+			)
+			.mockImplementationOnce(
+				() =>
+					new Promise((resolve) => {
+						release = () => resolve(undefined);
+					}),
+			);
+		vi.mocked(api.permission.list).mockRejectedValue(
+			new OpenCodeConnectionError({ message: "reconciliation offline" }),
+		);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const instance = new OpenCodeProviderInstance({
+					client: api,
+					clientForSession: () => Effect.succeed(api),
+					configDir: "/tmp/control-test-config",
+				});
+				const accepting = yield* engine(instance);
+				yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('card', 'control-session', 'permission', 'pending', 'shared-process', 'native-answer', 1)`;
+				const command = {
+					type: "resolve_permission" as const,
+					commandId: "live-fifth-answer",
+					sessionId: "control-session",
+					requestId: "card",
+					decision: "once" as const,
+					providerProcessId: "shared-process",
+				};
+				yield* Effect.result(accepting.dispatchEffect(command));
+				yield* sql`UPDATE provider_command_outbox SET attempt_count = 4, next_attempt_at = 0`;
+				const executor =
+					origin === "recovered" ? yield* engine(instance) : accepting;
+				const delivery = yield* Effect.forkChild(executor.drainSideEffects());
+				while (!release) yield* Effect.sleep("1 millis");
+				const stopping = yield* Effect.forkChild(
+					executor.dispatchEffect({
+						type: "interrupt_turn",
+						commandId: "stop-behind-fifth-answer",
+						turnIds: ["in-flight-turn"],
+						sessionId: "control-session",
+						providerProcessId: "shared-process",
+					}),
+				);
+				while (
+					!(yield* sql`SELECT command_id FROM provider_command_outbox WHERE command_id = 'stop-behind-fifth-answer'`)
+						.length
+				)
+					yield* Effect.sleep("1 millis");
+				yield* executor.drainSideEffects();
+				yield* executor.drainSideEffects();
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox WHERE command_id = ${command.commandId}`,
+				).toEqual([{ status: "running", attempt_count: 5 }]);
+				expect(yield* sql`SELECT status FROM pending_approvals`).toEqual([
+					{ status: "resolved" },
+				]);
+				expect(api.session.abort).not.toHaveBeenCalled();
+				if (rollback)
+					yield* sql.unsafe(
+						`CREATE TRIGGER interrupt_outcome BEFORE UPDATE ON command_receipts WHEN NEW.command_id = 'live-fifth-answer' AND NEW.status = 'side_effect_completed' BEGIN SELECT RAISE(ABORT, 'outcome rollback'); END`,
+					);
+				release();
+				yield* Fiber.join(delivery);
+				if (rollback) {
+					expect(
+						yield* sql`SELECT status, attempt_count FROM provider_command_outbox WHERE command_id = ${command.commandId}`,
+					).toEqual([{ status: "running", attempt_count: 5 }]);
+					expect(
+						yield* sql`SELECT status FROM command_receipts WHERE command_id = ${command.commandId}`,
+					).toEqual([{ status: "side_effect_requested" }]);
+					expect(api.session.abort).not.toHaveBeenCalled();
+					yield* sql.unsafe("DROP TRIGGER interrupt_outcome");
+					// The failed commit released execution ownership. Recover the
+					// exhausted row in this process without a sixth provider call.
+					yield* executor.drainSideEffects();
+				} else yield* executor.dispatchEffect(command);
+				yield* Fiber.join(stopping);
+				yield* executor.drainSideEffects();
+				expect(api.permission.reply).toHaveBeenCalledTimes(2);
+				expect(api.session.abort).toHaveBeenCalledTimes(1);
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([
+					{ status: rollback ? "failed" : "completed", attempt_count: 5 },
+					{ status: "completed", attempt_count: 1 },
+				]);
+				expect(
+					yield* sql`SELECT status FROM command_receipts WHERE command_id = ${command.commandId}`,
+				).toEqual([
+					{ status: rollback ? "side_effect_failed" : "side_effect_completed" },
+				]);
+				expect(yield* sql`SELECT status FROM pending_approvals`).toEqual([
+					{ status: rollback ? "pending" : "resolved" },
+				]);
+			}).pipe(
+				Effect.provide(fixture()),
+				Effect.provideService(
+					OpenCodeInstancesTag,
+					makeOpenCodeInstancesStub({ opencode: api }),
+				),
+				Effect.timeout("5 seconds"),
+			),
+		);
+	});
+
+	// Failure modes: real adapter errors lack retryable flags; a rejected answer
+	// can retain the process queue across projects/restart, or exhaust retries
+	// without ending its receipt. A consumed prompt must never be resurrected.
+	it.each([
+		["permission", 400, false, false],
+		["permission", 404, false, false],
+		["question", 404, false, false],
+		["reject", 400, false, false],
+		["permission", 400, true, false],
+		["question", 400, true, false],
+		["reject", 400, true, false],
+		["permission", 400, true, true],
+		["question", 400, true, true],
+	] as const)("terminalizes a permanent OpenCode %s %s, pending=%s, legacy=%s, and releases another project's Stop after restart", async (kind, responseStatus, stillPending, legacy) => {
+		const nativeRequestId = legacy ? "bad-card" : "native-answer";
+		const api = controlApi({
+			promptProcessId: "shared-process",
+			controlReplaySafe: true,
+		});
+		const reply =
+			kind === "permission"
+				? api.permission.reply
+				: kind === "question"
+					? api.question.reply
+					: api.question.reject;
+		vi.mocked(api.session.get).mockResolvedValue({
+			id: "control-session",
+			projectID: "control-project",
+			title: "Control",
+			version: "1",
+			time: { created: 1, updated: 1 },
+			directory: "/tmp/control-project",
+		});
+		vi.mocked(api.permission.list).mockResolvedValue(
+			stillPending
+				? [
+						{
+							id: nativeRequestId,
+							permission: "bash",
+							patterns: [],
+							sessionID: "control-session",
+							metadata: {},
+							always: [],
+						},
+					]
+				: [],
+		);
+		vi.mocked(api.question.list).mockResolvedValue(
+			stillPending ? [{ id: nativeRequestId }] : [],
+		);
+		vi.mocked(reply).mockRejectedValue(
+			new OpenCodeApiError({
+				message: "Request already consumed or unknown",
+				endpoint: "/answer/native-answer",
+				responseStatus,
+			}),
+		);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				let now = 1000;
+				const instance = new OpenCodeProviderInstance({
+					client: api,
+					clientForSession: () => Effect.succeed(api),
+					configDir: "/tmp/control-test-config",
+				});
+				const accepting = yield* engine(instance, () => now);
+				const other = yield* engine(
+					instance,
+					() => now,
+					"other-project",
+					"other-session",
+				);
+				yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('bad-card', 'control-session', ${kind === "permission" ? "permission" : "question"}, 'pending', 'shared-process', ${legacy ? null : nativeRequestId}, 1), ('unrelated-card', 'control-session', 'question', 'pending', 'shared-process', 'native-other', 1)`;
+				const command =
+					kind === "permission"
+						? {
+								type: "resolve_permission" as const,
+								commandId: "bad-answer",
+								sessionId: "control-session",
+								requestId: "bad-card",
+								decision: "once" as const,
+								providerProcessId: "shared-process",
+							}
+						: {
+								type: "resolve_question" as const,
+								commandId: "bad-answer",
+								sessionId: "control-session",
+								requestId: "bad-card",
+								answers: {},
+								operation:
+									kind === "reject" ? ("reject" as const) : ("reply" as const),
+								providerProcessId: "shared-process",
+							};
+				expect(
+					yield* Effect.result(accepting.dispatchEffect(command)),
+				).toMatchObject({ _tag: "Failure" });
+				const stop = yield* Effect.forkChild(
+					other.dispatchEffect({
+						type: "interrupt_turn",
+						commandId: "later-stop",
+						turnIds: ["in-flight-turn"],
+						sessionId: "other-session",
+						providerProcessId: "shared-process",
+					}),
+				);
+				yield* Effect.sleep("20 millis");
+				const restarted = yield* engine(instance, () => now);
+				const restartedOther = yield* engine(
+					instance,
+					() => now,
+					"other-project",
+					"other-session",
+				);
+				now = 100_000;
+				yield* restarted.drainSideEffects();
+				yield* restartedOther.drainSideEffects();
+				expect(
+					yield* sql`SELECT command_id, status, attempt_count, next_attempt_at FROM provider_command_outbox ORDER BY request_sequence`,
+				).toEqual([
+					{
+						command_id: "bad-answer",
+						status: "failed",
+						attempt_count: 1,
+						next_attempt_at: null,
+					},
+					{
+						command_id: "later-stop",
+						status: "completed",
+						attempt_count: 1,
+						next_attempt_at: null,
+					},
+				]);
+				expect(
+					yield* sql`SELECT status, error FROM command_receipts WHERE command_id = 'bad-answer'`,
+				).toEqual([
+					{
+						status: "side_effect_failed",
+						error: expect.stringContaining(
+							"Request already consumed or unknown",
+						),
+					},
+				]);
+				expect(
+					yield* sql`SELECT id, status FROM pending_approvals ORDER BY id`,
+				).toEqual([
+					{ id: "bad-card", status: stillPending ? "pending" : "resolved" },
+					{ id: "unrelated-card", status: "pending" },
+				]);
+				expect(
+					yield* Effect.result(restarted.dispatchEffect(command)),
+				).toMatchObject({
+					_tag: "Failure",
+					failure: {
+						cause: expect.objectContaining({
+							message: expect.stringContaining(
+								"Request already consumed or unknown",
+							),
+						}),
+					},
+				});
+				expect(reply).toHaveBeenCalledTimes(1);
+				expect(api.session.abort).toHaveBeenCalledTimes(1);
+				yield* Fiber.join(stop);
+				if (stillPending) {
+					vi.mocked(reply).mockResolvedValue(undefined);
+					yield* restarted.dispatchEffect({
+						...command,
+						commandId: "corrected-answer",
+					});
+					expect(reply).toHaveBeenCalledTimes(2);
+					expect(
+						yield* sql`SELECT status FROM pending_approvals WHERE id = 'bad-card'`,
+					).toEqual([{ status: "resolved" }]);
+					expect(
+						yield* sql`SELECT status FROM command_receipts WHERE command_id = 'corrected-answer'`,
+					).toEqual([{ status: "side_effect_completed" }]);
+					expect(
+						yield* sql`SELECT type FROM events WHERE json_extract(metadata, '$.source') = 'conduit.control-reconciliation'`,
+					).toEqual([
+						{
+							type:
+								kind === "permission" ? "permission.asked" : "question.asked",
+						},
+					]);
+				}
+			}).pipe(
+				Effect.provide(fixture()),
+				Effect.provideService(
+					OpenCodeInstancesTag,
+					makeOpenCodeInstancesStub({ opencode: api }),
+				),
+			),
+		);
+	});
+
+	it.each([
+		"permanent",
+		"cap",
+		"unknown",
+	] as const)("bounds answer retries: %s, including restart mid-backoff", async (ending) => {
+		const api = controlApi({
+			promptProcessId: "shared-process",
+			controlReplaySafe: true,
+		});
+		let attempts = 0;
+		vi.mocked(api.permission.reply).mockImplementation(async () => {
+			attempts++;
+			if (ending === "unknown")
+				throw new Error("unclassified delivery failure");
+			if (ending === "permanent" && attempts > 1)
+				throw new OpenCodeApiError({
+					message: "Request no longer exists",
+					endpoint: "/permission/native-answer",
+					responseStatus: 404,
+				});
+			throw new OpenCodeConnectionError({
+				message: "Connection reset before delivery",
+			});
+		});
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				let now = 1000;
+				const instance = new OpenCodeProviderInstance({
+					client: api,
+					clientForSession: () => Effect.succeed(api),
+					configDir: "/tmp/control-test-config",
+				});
+				const accepting = yield* engine(instance, () => now);
+				yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('bad-card', 'control-session', 'permission', 'pending', 'shared-process', 'native-answer', 1)`;
+				yield* Effect.result(
+					accepting.dispatchEffect({
+						type: "resolve_permission",
+						commandId: "bounded-answer",
+						sessionId: "control-session",
+						requestId: "bad-card",
+						decision: "once",
+						providerProcessId: "shared-process",
+					}),
+				);
+				const stop = yield* Effect.forkChild(
+					accepting.dispatchEffect({
+						type: "interrupt_turn",
+						commandId: "later-stop",
+						turnIds: ["in-flight-turn"],
+						sessionId: "control-session",
+						providerProcessId: "shared-process",
+					}),
+				);
+				yield* Effect.sleep("20 millis");
+				let restarted = yield* engine(instance, () => now);
+				yield* restarted.drainSideEffects();
+				expect(attempts).toBe(1);
+				if (ending !== "unknown") {
+					expect(
+						yield* sql`SELECT status, next_attempt_at FROM provider_command_outbox WHERE command_id = 'bounded-answer'`,
+					).toEqual([{ status: "retryable_failed", next_attempt_at: 2000 }]);
+					expect(api.session.abort).not.toHaveBeenCalled();
+				}
+				const expectedAttempts =
+					ending === "cap" ? 5 : ending === "permanent" ? 2 : 1;
+				for (let attempt = 1; attempt < expectedAttempts; attempt++) {
+					now += 100_000;
+					restarted = yield* engine(instance, () => now);
+					yield* restarted.drainSideEffects();
+				}
+				now += 100_000;
+				yield* restarted.drainSideEffects();
+				expect(
+					yield* sql`SELECT command_id, status, attempt_count, next_attempt_at FROM provider_command_outbox ORDER BY request_sequence`,
+				).toEqual([
+					{
+						command_id: "bounded-answer",
+						status: "failed",
+						attempt_count: expectedAttempts,
+						next_attempt_at: null,
+					},
+					{
+						command_id: "later-stop",
+						status: "completed",
+						attempt_count: 1,
+						next_attempt_at: null,
+					},
+				]);
+				expect(
+					yield* sql`SELECT status, error FROM command_receipts WHERE command_id = 'bounded-answer'`,
+				).toEqual([
+					{
+						status: "side_effect_failed",
+						error: expect.stringContaining(
+							ending === "cap"
+								? "Connection reset"
+								: ending === "permanent"
+									? "Request no longer exists"
+									: "unclassified delivery failure",
+						),
+					},
+				]);
+				expect(attempts).toBe(expectedAttempts);
+				expect(api.session.abort).toHaveBeenCalledTimes(1);
+				yield* Fiber.join(stop);
+			}).pipe(
+				Effect.provide(fixture()),
+				Effect.provideService(
+					OpenCodeInstancesTag,
+					makeOpenCodeInstancesStub({ opencode: api }),
+				),
+			),
+		);
+	});
+
+	it.each([
+		"unreachable",
+		"stalled",
+		"replaced",
+		"newer-resolution",
+	] as const)("reconciliation reopens unconfirmed answers without blocking controls or reviving stale prompts: %s", async (scenario) => {
+		let processId = "shared-process";
+		const api = controlApi({
+			promptProcessId: processId,
+			controlReplaySafe: true,
+		});
+		Object.defineProperty(api, "promptProcessId", { get: () => processId });
+		vi.mocked(api.session.get).mockResolvedValue({
+			id: "control-session",
+			projectID: "control-project",
+			title: "Control",
+			version: "1",
+			time: { created: 1, updated: 1 },
+			directory: "/tmp/control-project",
+		});
+		vi.mocked(api.permission.reply).mockRejectedValue(
+			new OpenCodeApiError({
+				message: "Invalid answer",
+				endpoint: "/permission/native-answer",
+				responseStatus: 400,
+			}),
+		);
+		let release:
+			| ((pending: Awaited<ReturnType<typeof api.permission.list>>) => void)
+			| undefined;
+		vi.mocked(api.permission.list).mockImplementation(() =>
+			scenario === "unreachable"
+				? Promise.reject(
+						new OpenCodeConnectionError({ message: "list unreachable" }),
+					)
+				: new Promise((resolve) => {
+						release = resolve;
+					}),
+		);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const commit = yield* makeCommitAndSignal;
+				const store = yield* EventStoreEffectTag;
+				const instance = new OpenCodeProviderInstance({
+					client: api,
+					clientForSession: () => Effect.succeed(api),
+					configDir: "/tmp/control-test-config",
+				});
+				const accepting = yield* engine(instance);
+				yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('bad-card', 'control-session', 'permission', 'pending', 'shared-process', 'native-answer', 1)`;
+				const answering = yield* Effect.forkChild(
+					Effect.result(
+						accepting.dispatchEffect({
+							type: "resolve_permission",
+							commandId: "bad-answer",
+							sessionId: "control-session",
+							requestId: "bad-card",
+							decision: "once",
+							providerProcessId: "shared-process",
+						}),
+					),
+				);
+				if (scenario === "replaced" || scenario === "newer-resolution") {
+					while (!release) yield* Effect.sleep("1 millis");
+					if (scenario === "replaced") processId = "replacement-process";
+					else
+						yield* commit.write((project) =>
+							store
+								.append(
+									canonicalEvent("permission.resolved", "control-session", {
+										id: "bad-card",
+										decision: "reject",
+										providerProcessId: "shared-process",
+										providerRequestId: "native-answer",
+									}),
+								)
+								.pipe(Effect.flatMap((event) => project([event]))),
+						);
+					release([
+						{
+							id: "native-answer",
+							permission: "bash",
+							patterns: [],
+							sessionID: "control-session",
+							metadata: {},
+							always: [],
+						},
+					]);
+				}
+				expect(yield* Fiber.join(answering)).toMatchObject({ _tag: "Failure" });
+				expect(
+					yield* sql`SELECT status FROM pending_approvals WHERE id = 'bad-card'`,
+				).toEqual([
+					{
+						status:
+							scenario === "unreachable" || scenario === "stalled"
+								? "pending"
+								: "resolved",
+					},
+				]);
+				expect(
+					yield* sql`SELECT status, error FROM command_receipts WHERE command_id = 'bad-answer'`,
+				).toEqual([
+					{
+						status: "side_effect_failed",
+						error: expect.stringContaining("Invalid answer"),
+					},
+				]);
+				yield* accepting.dispatchEffect({
+					type: "interrupt_turn",
+					commandId: "later-stop",
+					turnIds: ["in-flight-turn"],
+					sessionId: "control-session",
+					providerProcessId: processId,
+				});
+				expect(api.session.abort).toHaveBeenCalledTimes(1);
+			}).pipe(
+				Effect.provide(fixture()),
+				Effect.provideService(
+					OpenCodeInstancesTag,
+					makeOpenCodeInstancesStub({ opencode: api }),
+				),
+				Effect.timeout("3 seconds"),
+			),
+		);
+	});
+
+	// Unconfirmed terminal answers must reopen durably, accept a provider re-ask,
+	// and permit a fresh answer once, while releasing Stop/End behind the failure.
+	it.each([
+		"permission",
+		"question",
+		"reject",
+	] as const)("reopens an exhausted %s answer through a durable ask and delivers its replacement once", async (kind) => {
+		const api = controlApi({
+			promptProcessId: "shared-process",
+			controlReplaySafe: true,
+		});
+		const reply =
+			kind === "permission"
+				? api.permission.reply
+				: kind === "question"
+					? api.question.reply
+					: api.question.reject;
+		const outage = new OpenCodeConnectionError({ message: "provider offline" });
+		vi.mocked(reply).mockRejectedValue(outage);
+		vi.mocked(api.permission.list).mockRejectedValue(outage);
+		vi.mocked(api.question.list).mockRejectedValue(outage);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				let now = 1000;
+				const instance = new OpenCodeProviderInstance({
+					client: api,
+					clientForSession: () => Effect.succeed(api),
+					configDir: "/tmp/control-test-config",
+				});
+				const accepting = yield* engine(instance, () => now);
+				const ask = {
+					eventId: "original-ask",
+					type:
+						kind === "permission"
+							? ("permission.asked" as const)
+							: ("question.asked" as const),
+					providerId: "opencode",
+					sessionId: "control-session",
+					providerRefs: {
+						providerProcessId: "shared-process",
+						providerRequestId: "native-answer",
+					},
+					rawSource: { kind: "test" },
+					createdAt: now,
+					data: {
+						id: "native-answer",
+						sessionId: "control-session",
+						toolName: "bash",
+						input: {},
+						questions: [],
+					},
+				};
+				yield* ingestion.ingest(ask);
+				const [prompt] = yield* sql<{
+					id: string;
+				}>`SELECT id FROM pending_approvals`;
+				if (!prompt) throw new Error("Missing ingested ask");
+				const command =
+					kind === "permission"
+						? {
+								type: "resolve_permission" as const,
+								commandId: "exhausted-answer",
+								sessionId: "control-session",
+								requestId: prompt.id,
+								decision: "once" as const,
+								providerProcessId: "shared-process",
+							}
+						: {
+								type: "resolve_question" as const,
+								commandId: "exhausted-answer",
+								sessionId: "control-session",
+								requestId: prompt.id,
+								answers: {},
+								operation:
+									kind === "reject" ? ("reject" as const) : ("reply" as const),
+								providerProcessId: "shared-process",
+							};
+				yield* Effect.result(accepting.dispatchEffect(command));
+				for (let attempt = 1; attempt < 5; attempt++) {
+					now += 100_000;
+					const restarted = yield* engine(instance, () => now);
+					yield* restarted.drainSideEffects();
+				}
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "failed", attempt_count: 5 }]);
+				expect(yield* sql`SELECT status FROM pending_approvals`).toEqual([
+					{ status: "pending" },
+				]);
+				expect(
+					yield* sql`SELECT type FROM events WHERE json_extract(metadata, '$.source') = 'conduit.control-reconciliation'`,
+				).toEqual([{ type: ask.type }]);
+				const restarted = yield* engine(instance, () => now);
+				for (const type of ["interrupt_turn", "end_session"] as const) {
+					yield* restarted.dispatchEffect({
+						type,
+						commandId: type,
+						sessionId: "control-session",
+						providerProcessId: "shared-process",
+					});
+				}
+				yield* ingestion.ingest({
+					...ask,
+					eventId: "provider-reask",
+					createdAt: ++now,
+				});
+				expect(yield* sql`SELECT id, status FROM pending_approvals`).toEqual([
+					{ id: prompt.id, status: "pending" },
+				]);
+				vi.mocked(reply).mockResolvedValue(undefined);
+				const replacement = { ...command, commandId: "replacement-answer" };
+				yield* restarted.dispatchEffect(replacement);
+				yield* restarted.dispatchEffect(replacement);
+				const afterRestart = yield* engine(instance, () => now);
+				yield* afterRestart.drainSideEffects();
+				expect(reply).toHaveBeenCalledTimes(6);
+				expect(yield* sql`SELECT status FROM pending_approvals`).toEqual([
+					{ status: "resolved" },
+				]);
+				expect(
+					yield* sql`SELECT command_id, status FROM command_receipts ORDER BY command_id`,
+				).toEqual([
+					{ command_id: "end_session", status: "side_effect_completed" },
+					{ command_id: "exhausted-answer", status: "side_effect_failed" },
+					{ command_id: "interrupt_turn", status: "side_effect_completed" },
+					{ command_id: "replacement-answer", status: "side_effect_completed" },
+				]);
+			}).pipe(
+				Effect.provide(fixture()),
+				Effect.provideService(
+					OpenCodeInstancesTag,
+					makeOpenCodeInstancesStub({ opencode: api }),
+				),
+			),
+		);
+	});
+
+	it("retries the production client acquisition's unreachable error before a permanent reply failure", async () => {
+		const api = controlApi({
+			promptProcessId: "shared-process",
+			controlReplaySafe: true,
+		});
+		vi.mocked(api.permission.reply).mockRejectedValue(
+			new OpenCodeApiError({
+				message: "Unknown request",
+				endpoint: "/permission/native-answer",
+				responseStatus: 404,
+			}),
+		);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				let now = 1000;
+				let attempts = 0;
+				const instance = new OpenCodeProviderInstance({
+					client: api,
+					configDir: "/tmp/control-test-config",
+					clientForSession: () =>
+						Effect.suspend(() =>
+							++attempts === 1
+								? Effect.fail(
+										new OpenCodeUnavailable({
+											instanceId: "opencode",
+											reason: "unreachable",
+											message: "Connection failed during client acquisition",
+										}),
+									)
+								: Effect.succeed(api),
+						),
+				});
+				const accepting = yield* engine(instance, () => now);
+				yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('bad-card', 'control-session', 'permission', 'pending', 'shared-process', 'native-answer', 1)`;
+				yield* Effect.result(
+					accepting.dispatchEffect({
+						type: "resolve_permission",
+						commandId: "unreachable-answer",
+						sessionId: "control-session",
+						requestId: "bad-card",
+						decision: "once",
+						providerProcessId: "shared-process",
+					}),
+				);
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "retryable_failed", attempt_count: 1 }]);
+				const stop = yield* Effect.forkChild(
+					accepting.dispatchEffect({
+						type: "interrupt_turn",
+						commandId: "later-stop",
+						turnIds: ["in-flight-turn"],
+						sessionId: "control-session",
+						providerProcessId: "shared-process",
+					}),
+				);
+				yield* Effect.sleep("20 millis");
+				now = 2000;
+				const restarted = yield* engine(instance, () => now);
+				yield* restarted.drainSideEffects();
+				yield* restarted.drainSideEffects();
+				expect(
+					yield* sql`SELECT command_id, status, attempt_count FROM provider_command_outbox ORDER BY request_sequence`,
+				).toEqual([
+					{
+						command_id: "unreachable-answer",
+						status: "failed",
+						attempt_count: 2,
+					},
+					{ command_id: "later-stop", status: "completed", attempt_count: 1 },
+				]);
+				expect(
+					yield* sql`SELECT status, error FROM command_receipts WHERE command_id = 'unreachable-answer'`,
+				).toEqual([
+					{
+						status: "side_effect_failed",
+						error: expect.stringContaining("Unknown request"),
+					},
+				]);
+				expect(api.permission.reply).toHaveBeenCalledTimes(1);
+				expect(api.session.abort).toHaveBeenCalledTimes(1);
+				yield* Fiber.join(stop);
+			}).pipe(
+				Effect.provide(fixture()),
+				Effect.provideService(
+					OpenCodeInstancesTag,
+					makeOpenCodeInstancesStub({ opencode: api }),
+				),
+			),
+		);
+	});
+
+	it.each([
+		"pending",
+		"running",
+		"retryable_failed",
+	])("cancels an inactive project's %s head without blocking the shared process", async (status) => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const registered = yield* Ref.make<readonly string[]>([
+					"removed-project",
+					"control-project",
+				]);
+				const instance = {
+					...provider(() => Effect.die("No turn expected")),
+					getControlProcessIdEffect: () => Effect.succeed("shared-process"),
+				};
+				const orchestration = yield* engine(instance);
+				for (const [sequence, commandId, projectId, sessionId, state] of [
+					[1, "inactive-head", "removed-project", "retained-session", status],
+					[2, "active-stop", "control-project", "control-session", "pending"],
+				] as const) {
+					yield* sql`INSERT INTO command_receipts (command_id, command_type, project_key, session_id, status, fingerprint_hash, fingerprint_version, created_at, updated_at) VALUES (${commandId}, 'interrupt_turn', ${projectId}, ${sessionId}, 'side_effect_requested', 'fixture', 2, 1, 1)`;
+					yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, provider_process_id, status, requested_at, updated_at) VALUES (${sequence}, ${commandId}, ${projectId}, ${sessionId}, 'opencode', 'interrupt_turn', ${JSON.stringify({ type: "interrupt_turn", sessionId, providerProcessId: "shared-process" })}, 'shared-process', ${state}, 1, 1)`;
+				}
+				const drain = orchestration
+					.drainSideEffects()
+					.pipe(Effect.provideService(SessionRollupProjects, registered));
+				yield* drain;
+				expect(instance.interruptTurnEffect).not.toHaveBeenCalled();
+				yield* Ref.set(registered, ["control-project"]);
+				yield* drain;
+				expect(
+					yield* sql`SELECT command_id, status, error_code FROM provider_command_outbox ORDER BY request_sequence`,
+				).toEqual([
+					{
+						command_id: "inactive-head",
+						status: "cancelled",
+						error_code: "project_inactive",
+					},
+					{ command_id: "active-stop", status: "completed", error_code: null },
+				]);
+				expect(
+					yield* sql`SELECT status, error_code FROM command_receipts WHERE command_id = 'inactive-head'`,
+				).toEqual([
+					{ status: "side_effect_failed", error_code: "project_inactive" },
+				]);
+				const restarted = yield* engine(instance);
+				yield* restarted
+					.drainSideEffects()
+					.pipe(Effect.provideService(SessionRollupProjects, registered));
+				expect(instance.interruptTurnEffect).toHaveBeenCalledTimes(1);
+			}).pipe(Effect.provide(fixture())),
+		);
+	});
+
+	it.each([
+		"permission",
+		"question",
+	] as const)("retries an undelivered %s answer with its stable command after restart", async (kind) => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				let now = 1000;
+				let attempts = 0;
+				const answer = () =>
+					Effect.suspend(() =>
+						++attempts === 1
+							? Effect.fail(
+									new ProviderInstanceFailure({
+										providerId: "opencode",
+										operation: `resolve_${kind}`,
+										cause: new OpenCodeConnectionError({
+											message: "connection reset before delivery",
+										}),
+									}),
+								)
+							: Effect.void,
+					);
+				const instance = {
+					...provider(() => Effect.die("No turn expected")),
+					getControlProcessIdEffect: () => Effect.succeed("answer-process"),
+					resolvePermissionEffect: vi.fn(answer),
+					resolveQuestionEffect: vi.fn(answer),
+				};
+				const orchestration = yield* engine(instance, () => now);
+				yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('answer-card', 'control-session', ${kind}, 'pending', 'answer-process', 'native-answer', 1)`;
+				const response = {
+					decision: "always" as const,
+					permissionUpdates: [
+						{
+							type: "setMode" as const,
+							mode: "acceptEdits" as const,
+							destination: "session" as const,
+						},
+					],
+				};
+				const command =
+					kind === "permission"
+						? {
+								type: "resolve_permission" as const,
+								sessionId: "control-session",
+								commandId: "automatic-or-browser-answer",
+								requestId: "answer-card",
+								providerProcessId: "answer-process",
+								decision: "always" as const,
+								response,
+							}
+						: {
+								type: "resolve_question" as const,
+								sessionId: "control-session",
+								commandId: "automatic-or-browser-answer",
+								requestId: "answer-card",
+								providerProcessId: "answer-process",
+								answers: {},
+								operation: "reject" as const,
+							};
+				expect(
+					yield* Effect.result(orchestration.dispatchEffect(command)),
+				).toMatchObject({ _tag: "Failure" });
+				expect(
+					yield* sql`SELECT status, attempt_count, next_attempt_at FROM provider_command_outbox`,
+				).toEqual([
+					{
+						status: "retryable_failed",
+						attempt_count: 1,
+						next_attempt_at: 2000,
+					},
+				]);
+				expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
+					{ status: "side_effect_requested" },
+				]);
+				expect(yield* sql`SELECT status FROM pending_approvals`).toEqual([
+					{ status: "resolved" },
+				]);
+				yield* orchestration.drainSideEffects();
+				expect(attempts).toBe(1);
+				now = 2000;
+				const restarted = yield* engine(instance, () => now);
+				yield* restarted.drainSideEffects();
+				yield* restarted.drainSideEffects();
+				expect(attempts).toBe(2);
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "completed", attempt_count: 2 }]);
+				expect(
+					yield* sql`SELECT status, error_code FROM command_receipts`,
+				).toEqual([{ status: "side_effect_completed", error_code: null }]);
+				if (kind === "permission")
+					expect(instance.resolvePermissionEffect.mock.calls[1]).toEqual([
+						"control-session",
+						"native-answer",
+						"always",
+						"answer-process",
+						undefined,
+						{
+							commandId: command.commandId,
+							providerProcessId: "answer-process",
+							response,
+						},
+					]);
+			}).pipe(Effect.provide(fixture())),
+		);
+	});
+
+	it.each([
+		false,
+		true,
+	])("keeps URL-only answer retries in their admitting runtime, restarted=%s", async (restart) => {
+		const api = controlApi({
+			promptProcessId: "url-process",
+			controlReplaySafe: false,
+		});
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				let now = 1000;
+				let attempts = 0;
+				const instance = {
+					...provider(() => Effect.die("No turn expected")),
+					resolvePermissionEffect: () =>
+						Effect.suspend(() =>
+							++attempts === 1
+								? Effect.fail(
+										new ProviderInstanceFailure({
+											providerId: "opencode",
+											operation: "resolve_permission",
+											cause: new OpenCodeConnectionError({
+												message: "connection refused",
+											}),
+										}),
+									)
+								: Effect.void,
+						),
+				};
+				const admitted = yield* engine(instance, () => now);
+				yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES
+				('answer', 'control-session', 'permission', 'pending', 'url-process', 'native-answer', 1),
+				('unrelated', 'control-session', 'question', 'pending', 'url-process', 'native-unrelated', 1)`;
+				yield* Effect.result(
+					admitted.dispatchEffect({
+						type: "resolve_permission",
+						commandId: "url-answer",
+						sessionId: "control-session",
+						requestId: "answer",
+						decision: "once",
+						providerProcessId: "url-process",
+					}),
+				);
+				expect(attempts).toBe(1);
+				now = 2000;
+				const draining = restart
+					? yield* engine(instance, () => now)
+					: admitted;
+				yield* draining.drainSideEffects();
+				yield* draining.drainSideEffects();
+				expect(attempts).toBe(restart ? 1 : 2);
+				expect(
+					yield* sql`SELECT status, error_code FROM provider_command_outbox WHERE command_id = 'url-answer'`,
+				).toEqual([
+					{
+						status: restart ? "cancelled" : "completed",
+						error_code: restart ? "provider_process_unavailable" : null,
+					},
+				]);
+				expect(
+					yield* sql`SELECT status FROM pending_approvals WHERE id = 'unrelated'`,
+				).toEqual([{ status: "pending" }]);
+			}).pipe(
+				Effect.provide(fixture()),
+				Effect.provideService(
+					OpenCodeInstancesTag,
+					makeOpenCodeInstancesStub({ opencode: api }),
+				),
+			),
+		);
+	});
+
+	it("cancels controls when no projects remain registered and retains pending sends", async () => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const registered = yield* Ref.make<readonly string[]>([]);
+				const instance = provider(() => Effect.die("No turn expected"));
+				const orchestration = yield* engine(instance);
+				for (const [sequence, commandId, effectType] of [
+					[1, "removed-stop", "interrupt_turn"],
+					[2, "retained-send", "send_turn"],
+				] as const) {
+					yield* sql`INSERT INTO command_receipts (command_id, command_type, project_key, session_id, status, fingerprint_hash, fingerprint_version, created_at, updated_at) VALUES (${commandId}, ${effectType}, 'removed-project', 'retained-session', 'side_effect_requested', 'fixture', 2, 1, 1)`;
+					yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, provider_process_id, status, requested_at, updated_at) VALUES (${sequence}, ${commandId}, 'removed-project', 'retained-session', 'opencode', ${effectType}, '{}', 'shared-process', 'pending', 1, 1)`;
+				}
+				yield* orchestration
+					.drainSideEffects()
+					.pipe(Effect.provideService(SessionRollupProjects, registered));
+				expect(
+					yield* sql`SELECT command_id, status FROM provider_command_outbox ORDER BY request_sequence`,
+				).toEqual([
+					{ command_id: "removed-stop", status: "cancelled" },
+					{ command_id: "retained-send", status: "pending" },
+				]);
+				expect(instance.interruptTurnEffect).not.toHaveBeenCalled();
+			}).pipe(Effect.provide(fixture())),
+		);
+	});
+
+	it("captures the process for an unqualified Stop and replays its original target", async () => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				let processId = "original-process";
+				const instance = {
+					...provider(() => Effect.die("No turn expected")),
+					getControlProcessIdEffect: () => Effect.sync(() => processId),
+				};
+				const orchestration = yield* engine(instance);
+				const command = {
+					type: "interrupt_turn" as const,
+					commandId: "unqualified-stop",
+					sessionId: "control-session",
+				};
+				yield* orchestration.dispatchEffect(command);
+				expect(
+					yield* sql`SELECT provider_process_id, status FROM provider_command_outbox WHERE command_id = 'unqualified-stop'`,
+				).toEqual([
+					{ provider_process_id: "original-process", status: "completed" },
+				]);
+				processId = "replacement-process";
+				yield* orchestration.dispatchEffect(command);
+				expect(instance.interruptTurnEffect).toHaveBeenCalledTimes(1);
+			}).pipe(Effect.provide(fixture())),
+		);
+	});
+
+	it.each([
+		true,
+		false,
+	])("retires prompts only with confirmed process loss, alive=%s", async (alive) => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const instance = {
+					...provider(() => Effect.die("No turn expected")),
+					getControlProcessIdEffect: () => Effect.succeed(undefined),
+					hasLiveProcessEffect: () => Effect.succeed(alive),
+				};
+				const orchestration = yield* engine(instance);
+				yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('answer-card', 'control-session', 'permission', 'pending', 'original-process', 'native-answer', 1), ('other-prompt', 'control-session', 'question', 'pending', 'original-process', 'native-question', 1)`;
+				yield* Effect.result(
+					orchestration.dispatchEffect({
+						type: "resolve_permission",
+						commandId: "unavailable-answer",
+						sessionId: "control-session",
+						requestId: "answer-card",
+						decision: "once",
+						providerProcessId: "original-process",
+					}),
+				);
+				expect(
+					yield* sql`SELECT status, error_code FROM provider_command_outbox`,
+				).toEqual([
+					{
+						status: "cancelled",
+						error_code: alive
+							? "provider_process_unavailable"
+							: "provider_process_gone",
+					},
+				]);
+				expect(
+					yield* sql`SELECT status FROM pending_approvals WHERE id = 'other-prompt'`,
+				).toEqual([{ status: alive ? "pending" : "resolved" }]);
+				expect(instance.resolvePermissionEffect).not.toHaveBeenCalled();
+			}).pipe(Effect.provide(fixture())),
+		);
+	});
+
+	it("ending an already gone process records cancellation and lets cleanup continue", async () => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const instance = {
+					...provider(() => Effect.die("No turn expected")),
+					getControlProcessIdEffect: () => Effect.succeed(undefined),
+					hasLiveProcessEffect: () => Effect.succeed(false),
+				};
+				const orchestration = yield* engine(instance);
+				yield* orchestration.dispatchEffect({
+					type: "end_session",
+					commandId: "end-gone",
+					sessionId: "control-session",
+				});
+				expect(
+					yield* sql`SELECT status, error_code FROM provider_command_outbox WHERE command_id = 'end-gone'`,
+				).toEqual([
+					{ status: "cancelled", error_code: "provider_process_gone" },
+				]);
+				expect(instance.endSessionEffect).not.toHaveBeenCalled();
+			}).pipe(Effect.provide(fixture())),
+		);
+	});
+
+	it("delivers targeted deletion cleanup after its own session tombstone without recreating it", async () => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const commit = yield* makeCommitAndSignal;
+				const instance = {
+					...provider(() => Effect.die("No turn expected")),
+					getControlProcessIdEffect: () =>
+						Effect.succeed("deleted-session-process"),
+				};
+				const orchestration = yield* engine(instance);
+				yield* commit.write((project) =>
+					store
+						.append(
+							canonicalEvent("session.deleted", "control-session", {
+								sessionId: "control-session",
+							}),
+						)
+						.pipe(Effect.flatMap((event) => project([event]))),
+				);
+				yield* orchestration.dispatchEffect({
+					type: "end_session",
+					commandId: "delete-cleanup",
+					sessionId: "control-session",
+					targetProviderId: "opencode",
+					unbind: true,
+				});
+				expect(instance.endSessionEffect).toHaveBeenCalledExactlyOnceWith(
+					"control-session",
+					undefined,
+					{
+						commandId: "delete-cleanup",
+						providerProcessId: "deleted-session-process",
+					},
+				);
+				expect(
+					yield* sql`SELECT id FROM sessions WHERE id = 'control-session'`,
+				).toEqual([]);
+				expect(
+					yield* sql`SELECT status FROM provider_command_outbox WHERE command_id = 'delete-cleanup'`,
+				).toEqual([{ status: "completed" }]);
+			}).pipe(Effect.provide(fixture())),
+		);
+	});
+
+	it.each([
+		null,
+		"url-process",
+	])("cancels replay without a verifiable process identity: %s", async (processId) => {
+		const api = controlApi({
+			promptProcessId: "url-process",
+			controlReplaySafe: false,
+		});
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const instance = provider(() => Effect.die("No turn expected"));
+				const orchestration = yield* engine(instance);
+				yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('unrelated-live-prompt', 'control-session', 'permission', 'pending', 'another-live-process', '0', 1)`;
+				yield* sql`INSERT INTO command_receipts (command_id, command_type, project_key, session_id, status, fingerprint_hash, fingerprint_version, created_at, updated_at) VALUES ('old-stop', 'interrupt_turn', 'control-project', 'control-session', 'side_effect_requested', 'legacy', 2, 1, 1)`;
+				yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, provider_process_id, status, requested_at, updated_at) VALUES (1, 'old-stop', 'control-project', 'control-session', 'opencode', 'interrupt_turn', ${JSON.stringify({ type: "interrupt_turn", sessionId: "control-session", providerProcessId: processId })}, ${processId}, 'pending', 1, 1)`;
+				yield* orchestration.drainSideEffects();
+				expect(
+					yield* sql`SELECT status, error_code FROM provider_command_outbox WHERE command_id = 'old-stop'`,
+				).toEqual([
+					{
+						status: "cancelled",
+						error_code:
+							processId === null
+								? "provider_process_gone"
+								: "provider_process_unavailable",
+					},
+				]);
+				expect(instance.interruptTurnEffect).not.toHaveBeenCalled();
+				expect(
+					yield* sql`SELECT status FROM pending_approvals WHERE id = 'unrelated-live-prompt'`,
+				).toEqual([{ status: "pending" }]);
+			}).pipe(
+				Effect.provide(fixture()),
+				Effect.provideService(
+					OpenCodeInstancesTag,
+					makeOpenCodeInstancesStub({ opencode: api }),
+				),
+			),
+		);
+	});
+
+	it("delivers question rejection through the outbox to the fenced OpenCode client", async () => {
+		const api = controlApi({
+			promptProcessId: "question-process",
+			controlReplaySafe: true,
+		});
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const instance = provider(() => Effect.die("No turn expected"));
+				const orchestration = yield* engine(instance);
+				yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('question-card', 'control-session', 'question', 'pending', 'question-process', 'native-question', 1)`;
+				yield* orchestration.dispatchEffect({
+					type: "resolve_question",
+					commandId: "reject-question",
+					sessionId: "control-session",
+					requestId: "question-card",
+					answers: {},
+					operation: "reject",
+					providerProcessId: "question-process",
+				});
+				expect(api.question.reject).toHaveBeenCalledExactlyOnceWith(
+					"native-question",
+					undefined,
+				);
+				expect(instance.resolveQuestionEffect).not.toHaveBeenCalled();
+				expect(
+					yield* sql`SELECT status FROM pending_approvals WHERE id = 'question-card'`,
+				).toEqual([{ status: "resolved" }]);
+				expect(
+					yield* sql`SELECT status FROM provider_command_outbox WHERE command_id = 'reject-question'`,
+				).toEqual([{ status: "completed" }]);
+			}).pipe(
+				Effect.provide(fixture()),
+				Effect.provideService(
+					OpenCodeInstancesTag,
+					makeOpenCodeInstancesStub({ opencode: api }),
+				),
+			),
+		);
+	});
 
 	for (const background of [false, true]) {
 		it(`delivers a control while a blocked ${background ? "background send holds the session drain lease" : "foreground send still runs"}`, async () => {

@@ -1352,18 +1352,16 @@ describe("Claude accepted run ownership", () => {
 			await new Promise<void>((resolve) => setImmediate(resolve));
 			Effect.runSync(Deferred.succeed(setup, undefined));
 			await stop;
-			await vi.waitFor(() =>
-				expect(
-					events.filter((event) => event.type === "turn.interrupted"),
-				).toEqual([
-					expect.objectContaining({
-						runId: "setup-run",
-						data: { messageId: "" },
-					}),
-				]),
-			);
+			expect(
+				events.filter((event) => event.type === "turn.interrupted"),
+			).toEqual([
+				expect.objectContaining({
+					runId: "setup-run",
+					data: { messageId: "" },
+				}),
+			]);
 			expect(events.some((event) => event.type === "run.started")).toBe(false);
-			expect(await send).toMatchObject({ status: "interrupted" });
+			expect(await send).toMatchObject({ status: "cancelled" });
 		} finally {
 			Effect.runSync(Deferred.succeed(setup, undefined));
 			await Effect.runPromise(instance.shutdownEffect().pipe(Effect.ignore));

@@ -493,6 +493,7 @@ export const deleteSession = (
 								commandId: randomUUID(),
 								sessionId,
 								targetProviderId: capturedInstanceId,
+								...(account ? { account } : {}),
 								...(capturedCall ? { call: capturedCall } : {}),
 								unbind: true,
 							}),

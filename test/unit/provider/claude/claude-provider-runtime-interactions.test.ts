@@ -292,7 +292,8 @@ describe("Claude runner interaction transport", () => {
 						: runtime.shutdownEffect();
 					expect(query.interrupt).toHaveBeenCalledOnce();
 					if (operation === "interrupt") {
-						expect((yield* Fiber.join(turn)).status).toBe("interrupted");
+						expect((yield* Fiber.join(turn)).status).toBe("completed");
+						expect(query.close).not.toHaveBeenCalled();
 					} else {
 						const exit = yield* Fiber.await(turn);
 						expect(Exit.isFailure(exit)).toBe(true);

@@ -337,9 +337,9 @@ describe("Claude provider runtime boundary", () => {
 					);
 					expect(failure._tag).toBe("Failure");
 					expect(query.close).not.toHaveBeenCalled();
-					// Composer Stop retains its existing teardown behavior.
+					// Composer Stop leaves the query open for its native terminal.
 					yield* instance.interruptTurnEffect("task-stop");
-					expect(query.close).toHaveBeenCalledOnce();
+					expect(query.close).not.toHaveBeenCalled();
 					yield* Fiber.join(turn);
 				}),
 			),

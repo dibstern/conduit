@@ -14,6 +14,7 @@ import type {
 	PermissionResponse,
 	PreWarmSessionInput,
 	ProviderCall,
+	ProviderControlContext,
 	ProviderNativeSession,
 	QuestionRequest,
 	SendTurnInput,
@@ -110,7 +111,7 @@ export type SessionCommand = (
 			readonly mode: LegacyPermissionMode;
 	  }
 	| { readonly type: "shutdown" }
-) & { readonly call?: ProviderCall };
+) & { readonly call?: ProviderCall; readonly control?: ProviderControlContext };
 
 /** Runtime events and the existing EventSink interaction operations, all data. */
 export type SessionOutput =
@@ -186,6 +187,9 @@ export interface SessionFailure {
 
 /** Effects are execution carriers; only command/output/reply data crosses here. */
 export interface SessionRunner {
+	readonly getControlProcessIdEffect?: (
+		sessionId: string,
+	) => Effect.Effect<string | undefined>;
 	/** Release one project's attachment while its started runner remains independent. */
 	detachSessionEffect?(sessionId: string): Effect.Effect<void>;
 	/** Reattach retained processes when a project's relay is replaced. */
@@ -195,8 +199,11 @@ export interface SessionRunner {
 	/** Native execution and pending intake, independent of an intake reply. */
 	hasActiveTurnsEffect?(sessionId: string): Effect.Effect<boolean>;
 	readonly recoverEffect?: Effect.Effect<void, SessionFailure>;
-	/** Process ownership in every lifecycle state, even when no session is usable. */
-	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean>;
+	/** Without an ID, checks all live processes; with one, checks the current or quarantined owner. */
+	hasLiveProcessEffect(
+		sessionId: string,
+		processId?: string,
+	): Effect.Effect<boolean>;
 	/** A session refusal also applies before inbox or prompt admission. */
 	getSessionFailureEffect?(
 		sessionId: string,
