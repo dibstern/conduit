@@ -183,6 +183,8 @@ export interface SessionFailure {
 
 /** Effects are execution carriers; only command/output/reply data crosses here. */
 export interface SessionRunner {
+	/** Native turns, prompts, background tasks and finalizers, including after intake. */
+	hasDemandEffect?(sessionId: string): Effect.Effect<boolean>;
 	/** Native execution and pending intake, independent of an intake reply. */
 	hasActiveTurnsEffect?(sessionId: string): Effect.Effect<boolean>;
 	readonly recoverEffect?: Effect.Effect<void, SessionFailure>;

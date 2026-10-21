@@ -505,6 +505,9 @@ export const makeClaudeRunnerLaunch = (
 						...(input.clearInheritedGoal ? { clearInheritedGoal: true } : {}),
 						...(input.model ? { model: input.model } : {}),
 						configDir: input.configDir,
+						...(input.expectedApiModelId !== undefined
+							? { expectedApiModelId: input.expectedApiModelId }
+							: {}),
 						folderSource: input.folderSource,
 						...(input.permissionMode
 							? { permissionMode: input.permissionMode }
@@ -578,6 +581,9 @@ export const makeClaudeRunnerLaunch = (
 							env: makeClaudeSdkEnv({
 								configDir: input.configDir,
 								baseEnv: shellEnv,
+								...(input.account?.env
+									? { accountEnv: input.account.env }
+									: {}),
 							}),
 						};
 						if (!fileSettingsPreparation)

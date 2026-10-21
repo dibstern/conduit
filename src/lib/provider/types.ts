@@ -280,6 +280,8 @@ export interface SendTurnInput
 	 */
 	readonly model?: ModelSelection;
 	readonly configDir?: ClaudeConfigDir | undefined;
+	/** Claude model expectation resolved in its account scope; null means unknown. */
+	readonly expectedApiModelId?: string | null;
 	readonly folderSource?: ClaudeLaunchConfig["folderSource"] | undefined;
 	/** Projected Claude goal facts and cumulative usage seed a reopened SDK query. */
 	readonly goalState?: SessionGoalChangedPayload;
@@ -314,6 +316,7 @@ export type PreWarmSessionInput = Pick<
 	| "clearInheritedGoal"
 	| "model"
 	| "configDir"
+	| "expectedApiModelId"
 	| "folderSource"
 	| "permissionMode"
 	| "sideThread"

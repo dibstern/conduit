@@ -14,6 +14,7 @@ const DEFAULT_TIMEOUT_MS = 5_000;
 const MAX_OUTPUT_BYTES = 1_048_576;
 
 export interface ClaudeSettingsChildRequest {
+	readonly signal?: AbortSignal;
 	readonly cwd: string;
 	readonly env: NodeJS.ProcessEnv;
 	readonly timeoutMs: number;
@@ -35,6 +36,7 @@ const runClaudeSettingsChild: ClaudeSettingsChildRunner = ({
 	cwd,
 	env,
 	timeoutMs,
+	signal,
 }) =>
 	new Promise((resolve, reject) => {
 		const sdkModuleUrl = pathToFileURL(
@@ -57,6 +59,7 @@ const runClaudeSettingsChild: ClaudeSettingsChildRunner = ({
 				cwd,
 				env,
 				stdio: ["ignore", "pipe", "pipe"],
+				...(signal ? { signal } : {}),
 			},
 		);
 		let stdout = "";
@@ -102,17 +105,20 @@ export const resolveClaudeSettingsFromDisk = (
 	input: {
 		readonly workspaceRoot: string;
 		readonly configDir: ClaudeConfigDir;
+		readonly baseEnv?: Readonly<Record<string, string | undefined>>;
+		readonly accountEnv?: Readonly<Record<string, string>>;
 		readonly timeoutMs?: number | undefined;
 	},
 	runChild: ClaudeSettingsChildRunner = runClaudeSettingsChild,
 ): Effect.Effect<ResolvedClaudeSettings, ClaudeSettingsResolveError> =>
 	Effect.gen(function* () {
 		const result = yield* Effect.tryPromise({
-			try: () =>
+			try: (signal) =>
 				runChild({
 					cwd: input.workspaceRoot,
 					env: makeClaudeSdkEnv(input),
 					timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+					signal,
 				}),
 			catch: (cause) =>
 				new ClaudeSettingsResolveError({

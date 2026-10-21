@@ -241,6 +241,8 @@ export function expectedApiModelIdEffect(
 	input?: PreWarmSessionInput,
 ): Effect.Effect<string | undefined> {
 	if (agent !== undefined) return Effect.succeed(undefined);
+	if (input?.expectedApiModelId !== undefined)
+		return Effect.succeed(input.expectedApiModelId ?? undefined);
 	if (!capabilitiesService) return Effect.succeed(undefined);
 	const call =
 		input?.projectId !== undefined && input.account && input.shellEnv

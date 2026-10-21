@@ -68,6 +68,7 @@ import {
 	AccountDirectoryLive,
 	AccountDirectoryStateLive,
 } from "./account-directory.js";
+import { AccountResourceScopesTag } from "./account-resource-scopes.js";
 
 export { InstanceNotFound } from "../../../instance/instance-errors.js";
 
@@ -515,6 +516,12 @@ export const applyAccountChange = (change: AccountChange) =>
 				yield* requestConfigSave;
 			}),
 		);
+		// Outside the directory's commit lock: cancelled work may still read it.
+		if (change._tag === "Remove") {
+			const resources = yield* Effect.serviceOption(AccountResourceScopesTag);
+			if (Option.isSome(resources))
+				yield* resources.value.invalidate(change.id);
+		}
 		yield* PubSub.publish(
 			yield* DaemonEventBusTag,
 			DaemonEvent.DaemonSessionsChanged(),

@@ -32,6 +32,7 @@ import {
 	projectStorageDir,
 	writeProjectStorageOwner,
 } from "../../../persistence/project-storage.js";
+import { ClaudeAccountScopes } from "../../../provider/claude/claude-account-scopes.js";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
 import type { StoredProject } from "../../../types.js";
 import {
@@ -56,6 +57,7 @@ import { ScanServiceTag } from "../../relay/Services/scan-service.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
+import { AccountResourceScopesTag } from "../Services/account-resource-scopes.js";
 import { CategorySet } from "../Services/category-set.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
@@ -202,6 +204,10 @@ export const RelayFactoryLive = (
 		RelayFactoryTag,
 		Effect.gen(function* () {
 			const accounts = yield* AccountDirectory;
+			const claudeAccounts = yield* Effect.serviceOption(ClaudeAccountScopes);
+			const accountResources = yield* Effect.serviceOption(
+				AccountResourceScopesTag,
+			);
 			const surfacing = yield* Effect.serviceOption(MessageSurfacingSettings);
 			const categories = yield* Effect.serviceOption(CategorySet);
 			const sessionDirectory = yield* Effect.serviceOption(SessionDirectory);
@@ -512,6 +518,22 @@ export const RelayFactoryLive = (
 									).pipe(
 										Context.add(ConfigPersistenceTag, configPersistence),
 										Context.add(AccountDirectory, accounts),
+										Context.merge(
+											Option.isSome(claudeAccounts)
+												? Context.make(
+														ClaudeAccountScopes,
+														claudeAccounts.value,
+													)
+												: Context.empty(),
+										),
+										Context.merge(
+											Option.isSome(accountResources)
+												? Context.make(
+														AccountResourceScopesTag,
+														accountResources.value,
+													)
+												: Context.empty(),
+										),
 										Context.merge(
 											Option.isSome(surfacing)
 												? Context.make(

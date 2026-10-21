@@ -29,6 +29,7 @@ import {
 	loadDaemonConfigResult,
 } from "../daemon/config-persistence.js";
 import { AccountPictureLive } from "../domain/daemon/Layers/account-picture-layer.js";
+import { makeAccountResourceScopesLive } from "../domain/daemon/Layers/account-resource-scopes-layer.js";
 import { CategorySetLive } from "../domain/daemon/Layers/category-set-layer.js";
 import {
 	ConfigPersistenceLive,
@@ -170,6 +171,10 @@ import {
 } from "../persistence/effect/live.js";
 import type { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import {
+	ClaudeAccountScopes,
+	ClaudeAccountScopesLive,
+} from "../provider/claude/claude-account-scopes.js";
 import { ClaudeProviderInstance } from "../provider/claude/claude-provider-instance.js";
 import { captureClaudeLaunchLogin } from "../provider/claude/claude-sdk-env.js";
 import { defaultClaudeSessionForkSdk } from "../provider/claude/claude-session-fork.js";
@@ -417,9 +422,19 @@ export function createProjectRelayLayers({
 			Layer.succeedContext(config.daemonConfigContext ?? Context.empty()),
 		),
 	);
+	const claudeAccountsLayer = Layer.unwrap(
+		Effect.gen(function* () {
+			const shared = yield* Effect.serviceOption(ClaudeAccountScopes);
+			return Option.isSome(shared)
+				? Layer.empty
+				: ClaudeAccountScopesLive(config.configDir).pipe(
+						Layer.provideMerge(makeAccountResourceScopesLive()),
+					);
+		}),
+	).pipe(Layer.provideMerge(daemonSettingsLayer));
 	const daemonConfigLayer = UserAvatarLive.pipe(
 		Layer.provide(AccountPictureLive),
-		Layer.provideMerge(daemonSettingsLayer),
+		Layer.provideMerge(claudeAccountsLayer),
 	);
 	const activityLayer = Layer.effect(
 		SessionActivityTag,

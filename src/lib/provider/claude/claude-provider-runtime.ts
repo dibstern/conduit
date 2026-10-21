@@ -33,8 +33,8 @@ import {
 	HashMap,
 	HashSet,
 	Layer,
+	Option,
 	Ref,
-	Result,
 	type Scope,
 	Semaphore,
 } from "effect";
@@ -49,6 +49,9 @@ import {
 	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,
 } from "../../daemon/config-persistence.js";
+import { makeAccountResourceScopesLive } from "../../domain/daemon/Layers/account-resource-scopes-layer.js";
+import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
+import { AccountResourceScopesTag } from "../../domain/daemon/Services/account-resource-scopes.js";
 import type { ClaudeOneShotQueryFactory } from "../../domain/daemon/Services/claude-one-shot.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { createLogger } from "../../logger.js";
@@ -68,6 +71,7 @@ import type { LiveSettings, RunnerPayload } from "../runner/runner-payload.js";
 import {
 	makeRunnerProviderInstance,
 	type RunnerProviderInstance,
+	type RunnerProviderInstanceDeps,
 } from "../runner/runner-provider-instance.js";
 import type { RunnerSinkBindings } from "../runner/runner-sink-bindings.js";
 import type { SessionTurn } from "../runner/session-runner.js";
@@ -91,11 +95,12 @@ import type {
 	SendTurnInput,
 	TurnResult,
 } from "../types.js";
-import { claudeApiModelId } from "./claude-api-model-id.js";
 import {
-	type ClaudeCapabilitiesService,
-	makeClaudeCapabilitiesService,
-} from "./claude-capabilities-service.js";
+	ClaudeAccountScopes,
+	makeClaudeAccountScopes,
+} from "./claude-account-scopes.js";
+import { claudeApiModelId } from "./claude-api-model-id.js";
+import type { ClaudeCapabilitiesService } from "./claude-capabilities-service.js";
 import { isInterruptedResult } from "./claude-event-translator.js";
 import { makeClaudeForkQuery } from "./claude-fork-query.js";
 import {
@@ -262,6 +267,7 @@ export type ClaudeSessionRunnerDeps = Pick<
 	| "capabilitiesService"
 	| "readGoalStatus"
 > & {
+	readonly accountResources?: RunnerProviderInstanceDeps["accountResources"];
 	readonly onSubagentFinalizationComplete?: () => void;
 	readonly onTurnStateChanged?: (sessionId: string, inFlight: boolean) => void;
 	readonly onAbandonedRun?: (inputId: string) => void;
@@ -303,42 +309,95 @@ export const makeClaudeProviderRuntime = (
 	deps: ClaudeProviderInstanceDeps,
 ): Effect.Effect<RunnerProviderInstance, never, Scope.Scope> =>
 	Effect.gen(function* () {
-		const capabilitiesService =
-			deps.capabilitiesService ??
-			(yield* makeClaudeCapabilitiesService({
-				...(deps.daemonConfigDir !== undefined
-					? {
-							cacheDir: join(
-								deps.daemonConfigDir,
-								"cache",
-								"claude-capabilities",
-							),
-						}
-					: {}),
-				launchConfig: () =>
-					resolveClaudeLaunchConfig(
-						Result.getOrElse(
-							loadDaemonConfigResult(deps.daemonConfigDir),
-							(error) => {
-								if (error._tag === "NotFound") return null;
-								throw error;
-							},
+		const directory = yield* Effect.serviceOption(AccountDirectory);
+		const accounts = Option.isSome(directory)
+			? directory.value.snapshot
+			: Effect.suspend(() =>
+					Effect.fromResult(loadDaemonConfigResult(deps.daemonConfigDir)),
+				).pipe(
+					Effect.catchTag("NotFound", () =>
+						Effect.succeed(defaultDaemonConfig()),
+					),
+					Effect.map((config) =>
+						accountsStateFromConfig(
+							config,
+							captureClaudeLaunchLogin(process.env),
 						),
 					),
-			}));
-		const driver = makeClaudeRunnerDriver({ ...deps, capabilitiesService });
-		const accounts = Effect.suspend(() =>
-			Effect.fromResult(loadDaemonConfigResult(deps.daemonConfigDir)),
-		).pipe(
-			Effect.catchTag("NotFound", () => Effect.succeed(defaultDaemonConfig())),
-			Effect.map((config) =>
-				accountsStateFromConfig(config, captureClaudeLaunchLogin(process.env)),
-			),
-		);
+				);
+		const shared = yield* Effect.serviceOption(ClaudeAccountScopes);
+		const sharedOwner = yield* Effect.serviceOption(AccountResourceScopesTag);
+		const owner = Option.isSome(sharedOwner)
+			? sharedOwner.value
+			: Context.get(
+					yield* Layer.build(makeAccountResourceScopesLive()),
+					AccountResourceScopesTag,
+				);
+		const accountScopes = Option.isSome(shared)
+			? shared.value
+			: yield* makeClaudeAccountScopes({
+					accounts,
+					...(Option.isNone(directory)
+						? { trustAdmission: true as const }
+						: {}),
+					...(deps.daemonConfigDir !== undefined
+						? {
+								cacheDir: join(
+									deps.daemonConfigDir,
+									"cache",
+									"claude-capabilities",
+								),
+							}
+						: {}),
+					...(deps.capabilitiesService
+						? { capabilitiesService: deps.capabilitiesService }
+						: {}),
+				}).pipe(Effect.provideService(AccountResourceScopesTag, owner));
+		const capabilitiesService: ClaudeCapabilitiesService =
+			deps.capabilitiesService ?? {
+				get: (workspaceRoot, options) => {
+					const call = options?.call;
+					return call
+						? accountScopes.use(call.account, ({ account, capabilities }) =>
+								capabilities.get(workspaceRoot, {
+									...options,
+									call: { ...call, account },
+								}),
+							)
+						: Effect.fail(
+								new ClaudeBoundaryError({
+									operation: "probeCapabilities",
+									cause: new Error(
+										"Claude capabilities require an admitted call",
+									),
+								}),
+							);
+				},
+			};
+		const driver = makeClaudeRunnerDriver(deps, accountScopes);
+		const accountResources: NonNullable<
+			RunnerProviderInstanceDeps["accountResources"]
+		> = {
+			use: (account, work) =>
+				accountScopes
+					.use(account, (resource) => work(resource.account))
+					.pipe(
+						Effect.mapError((cause) =>
+							cause instanceof ClaudeBoundaryError
+								? new ProviderInstanceFailure({
+										providerId: "claude",
+										operation: "accountScope",
+										cause,
+									})
+								: cause,
+						),
+					),
+		};
 		return yield* makeRunnerProviderInstance(
 			{
 				...deps,
 				accounts,
+				accountResources,
 				...(deps.ensureClaudeSubagentSession
 					? { ensureChildSession: deps.ensureClaudeSubagentSession }
 					: {}),
@@ -349,7 +408,7 @@ export const makeClaudeProviderRuntime = (
 			driver,
 			(emit) =>
 				(deps.runnerFactory ?? makeProcessClaudeSessionRunner)(
-					{ ...deps, capabilitiesService },
+					{ ...deps, capabilitiesService, accountResources },
 					emit,
 				),
 		);
@@ -377,29 +436,6 @@ export const makeClaudeSessionRunner = (
 						void,
 						never
 					>();
-					const capabilitiesService =
-						deps.capabilitiesService ??
-						(yield* makeClaudeCapabilitiesService({
-							...(deps.daemonConfigDir !== undefined
-								? {
-										cacheDir: join(
-											deps.daemonConfigDir,
-											"cache",
-											"claude-capabilities",
-										),
-									}
-								: {}),
-							launchConfig: () =>
-								resolveClaudeLaunchConfig(
-									Result.getOrElse(
-										loadDaemonConfigResult(deps.daemonConfigDir),
-										(error) => {
-											if (error._tag === "NotFound") return null;
-											throw error;
-										},
-									),
-								),
-						}));
 					const warmedQueries = yield* makeClaudeWarmedQueryOwner(
 						deps.queryFactory ??
 							(sdkQuery as NonNullable<
@@ -410,7 +446,7 @@ export const makeClaudeSessionRunner = (
 						deps.onNativeSessionId,
 					);
 					payload = new ClaudeRunnerPayload(
-						{ ...deps, capabilitiesService },
+						deps,
 						stateRef,
 						streamFibers,
 						subagentFinalizationFibers,
@@ -519,6 +555,18 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			return (
 				(yield* getSetupLock(this.stateRef, sessionId)) !== undefined ||
 				(yield* hasPendingTurn(this.stateRef, sessionId))
+			);
+		});
+	}
+	hasDemandEffect(sessionId: string): Effect.Effect<boolean> {
+		return Effect.gen({ self: this }, function* () {
+			const ctx = yield* getSession(this.stateRef, sessionId);
+			return (
+				(yield* this.hasActiveTurnsEffect(sessionId)) ||
+				(ctx?.liveBackgroundTaskCount ?? 0) > 0 ||
+				(ctx?.pendingApprovals.size ?? 0) > 0 ||
+				(ctx?.pendingQuestions.size ?? 0) > 0 ||
+				this.hasPendingSubagentFinalizers(sessionId)
 			);
 		});
 	}

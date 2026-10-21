@@ -41,6 +41,7 @@ import {
 	runnerFailure,
 	runnerSinkId,
 } from "./runner-protocol.js";
+import type { RunnerProviderInstanceDeps } from "./runner-provider-instance.js";
 import {
 	currentRunnerOutput,
 	makeRunnerReceiptStore,
@@ -106,6 +107,7 @@ export class RunnerProcessError extends Data.TaggedError("RunnerProcessError")<{
 }> {}
 
 interface ProcessRunnerDeps {
+	readonly accountResources?: RunnerProviderInstanceDeps["accountResources"];
 	readonly workspaceRoot: string;
 	readonly daemonConfigDir?: string;
 	readonly shellEnv?: (
@@ -1147,10 +1149,10 @@ export const makeProcessSessionRunner = (
 						}),
 					),
 				),
-			warm: (sessionId, old, replacement) =>
-				Effect.gen(function* () {
-					const state = old.upgrade.state;
-					const snapshot = state?.snapshot;
+			warm: (sessionId, old, replacement) => {
+				const state = old.upgrade.state;
+				const snapshot = state?.snapshot;
+				const warm = Effect.gen(function* () {
 					if (!snapshot && !driver.coldUpgrade)
 						return yield* Effect.fail(
 							runnerFailure(
@@ -1166,7 +1168,17 @@ export const makeProcessSessionRunner = (
 							randomUUID(),
 							driver.warmCommand(sessionId, state, snapshot),
 						);
-				}),
+				});
+				return snapshot?.input.account && deps.accountResources
+					? deps.accountResources
+							.use(snapshot.input.account, () => warm)
+							.pipe(
+								Effect.mapError((cause) =>
+									runnerFailure("upgrade runner", cause),
+								),
+							)
+					: warm;
+			},
 			commit: (sessionId, old, replacement, activity) =>
 				Effect.gen(function* () {
 					// A replacement cannot dedupe an old turn whose outbox completion
@@ -1674,6 +1686,18 @@ export const makeProcessSessionRunner = (
 				});
 			}
 
+			hasDemandEffect(sessionId: string): Effect.Effect<boolean> {
+				return Effect.sync(() => {
+					const entry = children.get(sessionId);
+					return (
+						entry !== undefined &&
+						!entry.stopping &&
+						!entry.idleExiting &&
+						(entry.upgrade.inFlight || entry.upgrade.state?.quiescent !== true)
+					);
+				});
+			}
+
 			getNativeSessionEffect(
 				sessionId: string,
 			): Effect.Effect<ProviderNativeSession | undefined> {
@@ -2069,24 +2093,16 @@ export const makeProcessSessionRunner = (
 								`Runner build ${entry.buildId ?? "unknown"} cannot stop background tasks`,
 							),
 						);
-					const frozenEnv = entry.upgrade.state?.frozen
-						? entry.upgrade.state.snapshot?.options.env
-						: undefined;
 					const payload =
 						command.type === "send-turn"
 							? {
 									...command,
-									// Query matching and SDK launch must use the same frozen env.
-									...(frozenEnv
-										? { input: { ...command.input, shellEnv: frozenEnv } }
-										: {}),
 									...(entry.upgrade.state?.frozen
 										? driver.snapshotCommandSettings(
 												entry.upgrade.state.snapshot,
 											)
 										: {}),
-									shellEnv: frozenEnv ??
-										command.input.shellEnv ??
+									shellEnv: command.input.shellEnv ??
 										command.shellEnv ??
 										deps.shellEnv?.(command.input.workspaceRoot) ?? {
 											...process.env,

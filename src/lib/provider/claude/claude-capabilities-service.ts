@@ -145,6 +145,7 @@ export class ClaudeCapabilitiesServiceTag extends Context.Service<
 >()("ClaudeCapabilitiesService") {}
 
 export interface ClaudeCapabilitiesServiceDeps {
+	readonly forkRefresh?: (effect: Effect.Effect<void>) => Effect.Effect<void>;
 	readonly launchConfig: () => ClaudeLaunchConfig;
 	readonly queryFactory?: ProbeDeps["queryFactory"];
 	readonly ttlMs?: number;
@@ -285,8 +286,9 @@ const makeClaudeCapabilitiesServiceWithCache = (
 					const { inFlight, staleValue } = lookup;
 					const probe = restore(
 						Effect.tryPromise({
-							try: () =>
+							try: (signal) =>
 								probeClaudeCapabilities({
+									signal,
 									workspaceRoot,
 									...launch,
 									...(call
@@ -386,7 +388,7 @@ const makeClaudeCapabilitiesServiceWithCache = (
 					);
 					if (staleValue && !refresh) {
 						// The service has no Scope; the daemon refresh is bounded by the probe's own abort.
-						yield* probe.pipe(
+						const refresh = probe.pipe(
 							Effect.withSpan("claude.capabilities.refresh", {
 								attributes: {
 									providerId: "claude",
@@ -395,8 +397,10 @@ const makeClaudeCapabilitiesServiceWithCache = (
 								},
 							}),
 							Effect.catchCause(() => Effect.void),
-							Effect.forkDetach,
 						);
+						yield* deps.forkRefresh
+							? deps.forkRefresh(refresh)
+							: Effect.asVoid(Effect.forkDetach(refresh));
 						return staleValue;
 					}
 					return yield* probe;
