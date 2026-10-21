@@ -4,6 +4,7 @@ import type { SqlError } from "effect/sql/SqlError";
 import { PersistenceProjectTag } from "./persistence-service.js";
 
 export interface DrainReport {
+	/** Touched deleted sessions whose reclaimable history is now exhausted. */
 	readonly sessionsFreed: number;
 	readonly eventsFreed: number;
 	/** Logical bytes in the deleted rows' text columns, without page reclamation. */
@@ -40,16 +41,27 @@ export const makeEventRetention = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const { projectId } = yield* PersistenceProjectTag;
 
+	// Deferred checkout cleanup needs the complete launch/rename chain;
+	// cleanup failures remain queryable audit receipts.
+	const retainedMetadata = sql`
+		e.type = 'session.provider_cleanup_failed'
+		OR CASE WHEN e.type = 'session.workspace_changed' AND json_valid(e.data)
+			THEN (json_extract(e.data, '$.cause') IS 'launch'
+				AND json_extract(e.data, '$.origin') IS 'conduit')
+				OR json_extract(e.data, '$.cause') IS 'branch-rename'
+			ELSE 0 END`;
+
 	const candidates = () => sql<{ session_id: string }>`
 		SELECT DISTINCT marker.session_id FROM events marker
 		WHERE marker.project_id = ${projectId} AND marker.type = 'session.deleted'
 			AND json_extract(marker.data, '$.sessionId') = marker.session_id
 			AND NOT EXISTS (SELECT 1 FROM sessions WHERE id = marker.session_id)
 			AND EXISTS (
-				SELECT 1 FROM events other
-				WHERE other.project_id = ${projectId} AND other.session_id = marker.session_id
-					AND (other.type <> 'session.deleted'
-						OR json_extract(other.data, '$.sessionId') IS NOT other.session_id)
+				SELECT 1 FROM events e
+				WHERE e.project_id = ${projectId} AND e.session_id = marker.session_id
+					AND (e.type <> 'session.deleted'
+						OR json_extract(e.data, '$.sessionId') IS NOT e.session_id)
+					AND NOT (${retainedMetadata})
 			) ORDER BY marker.session_id`;
 	const holders = (sessionId: string) =>
 		sql.unsafe<{ holder_session_id: string; bound: number }>(
@@ -74,6 +86,7 @@ export const makeEventRetention = Effect.gen(function* () {
 						AND e.sequence > ${bound}
 						AND (e.type <> 'session.deleted'
 							OR json_extract(e.data, '$.sessionId') IS NOT e.session_id)
+						AND NOT (${retainedMetadata})
 					LIMIT 1`;
 				if (reclaimable.length === 0) continue;
 				while (true) {
@@ -98,6 +111,7 @@ export const makeEventRetention = Effect.gen(function* () {
 											AND e.sequence > ${bound}
 											AND (e.type <> 'session.deleted'
 												OR json_extract(e.data, '$.sessionId') IS NOT e.session_id)
+											AND NOT (${retainedMetadata})
 										AND NOT EXISTS (
 											SELECT 1 FROM message_parts part
 												JOIN messages message ON message.id = part.message_id
@@ -140,6 +154,7 @@ export const makeEventRetention = Effect.gen(function* () {
 					AND e.sequence > ${bound}
 					AND (e.type <> 'session.deleted'
 						OR json_extract(e.data, '$.sessionId') IS NOT e.session_id)
+					AND NOT (${retainedMetadata})
 					AND EXISTS (
 						SELECT 1 FROM message_parts part
 						JOIN messages message ON message.id = part.message_id
@@ -171,10 +186,11 @@ export const makeEventRetention = Effect.gen(function* () {
 						AND json_extract(marker.data, '$.sessionId') = marker.session_id
 				)
 				AND NOT EXISTS (
-					SELECT 1 FROM events other
-					WHERE other.project_id = ${projectId} AND other.session_id = touched.value
-						AND (other.type <> 'session.deleted'
-							OR json_extract(other.data, '$.sessionId') IS NOT other.session_id)
+					SELECT 1 FROM events e
+					WHERE e.project_id = ${projectId} AND e.session_id = touched.value
+						AND (e.type <> 'session.deleted'
+							OR json_extract(e.data, '$.sessionId') IS NOT e.session_id)
+						AND NOT (${retainedMetadata})
 				)`;
 		return {
 			sessionsFreed: freed?.count ?? 0,

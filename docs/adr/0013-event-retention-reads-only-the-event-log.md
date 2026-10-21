@@ -44,6 +44,20 @@ does not prove the child's death to drain. Markers survive reclamation,
 interrupted batches and projection resets, so late ingress cannot resurrect a
 reclaimed session. Orphans without their own marker are reported and retained.
 
+**Checkout ownership and cleanup audit facts survive deletion.** Drain keeps
+every `session.workspace_changed` launch with origin `conduit`, including
+legacy launches without `ownership`, and the complete canonical `branch-rename`
+chain. Deferred checkout cleanup folds these events in sequence to prove
+checkout and branch ownership after the session is deleted. It also keeps
+`session.provider_cleanup_failed` receipts as queryable audit data. These
+facts remain in the event log without creating lineage holds. Like own
+deletion markers, they are excluded consistently
+from reclamation candidates, reclaimability checks and held/pointer counts.
+`sessionsFreed` counts touched sessions with no reclaimable history left,
+even when this metadata remains; freed event and byte counts cover only
+deleted rows. Ordinary transcript events remain reclaimable under the
+same lineage bounds and live-part protections.
+
 **Born dead, checked by each writer (12A).** Every writer of
 `session.created` (session commands, the session manager, provider runtime
 ingestion and Claude event persistence) runs the death check inside the
