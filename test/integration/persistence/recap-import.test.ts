@@ -40,10 +40,12 @@ it("imports pre-merge redesign recaps without changing their versions or source 
 				);
 			expected = db.prepare("SELECT * FROM turn_recaps ORDER BY version").all();
 			// rd/mainmerge predates durable drafts and numbers this suffix one lower.
+			// Run ownership was not part of that historical migration ledger.
 			db.exec(`DROP TABLE input_drafts;
 				CREATE TEMP TABLE redesign_migrations AS
 				SELECT migration_id - 1 AS migration_id, name, created_at
-				FROM effect_sql_migrations WHERE migration_id > 68;
+				FROM effect_sql_migrations WHERE migration_id > 68
+				AND name != 'provider_run_ownership';
 				DELETE FROM effect_sql_migrations WHERE migration_id >= 68;
 				INSERT INTO effect_sql_migrations (migration_id, name, created_at)
 				SELECT migration_id, name, created_at FROM redesign_migrations;

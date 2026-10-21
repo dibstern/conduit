@@ -12,6 +12,7 @@ import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
+import { makeSessionRows } from "../../../src/lib/domain/daemon/Services/session-rows.js";
 import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
 import { makeRelayStatusSnapshot } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
@@ -59,6 +60,125 @@ const snapshotRow = (snapshot: Option.Option<Envelope<SessionInfo>>) => {
 };
 
 describe("Session Rows read paths", () => {
+	for (const provider of ["claude", "cursor", "opencode"]) {
+		it.effect(
+			`Stop availability follows durable membership and delivery on ${provider}`,
+			() =>
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const commit = yield* makeCommitAndSignal;
+					const rows = yield* makeSessionRows({
+						slug: "project",
+						folders: ["/tmp"],
+					});
+					yield* commit([
+						canonicalEvent("session.created", sessionId, {
+							sessionId,
+							title: "After reply",
+							provider,
+						}),
+						canonicalEvent(
+							"run.requested",
+							sessionId,
+							{ runId: "reply", inputId: "a" },
+							{ provider, metadata: { runId: "reply" } },
+						),
+						canonicalEvent(
+							"message.created",
+							sessionId,
+							{ sessionId, messageId: "a", inputId: "a", role: "user" },
+							{ provider, metadata: { runId: "reply" } },
+						),
+						canonicalEvent(
+							"run.started",
+							sessionId,
+							{ inputId: "a", requestedRunId: "reply" },
+							{ provider, metadata: { runId: "reply" } },
+						),
+						canonicalEvent(
+							"turn.completed",
+							sessionId,
+							{ messageId: "assistant-a" },
+							{ provider: "claude", metadata: { runId: "reply" } },
+						),
+						canonicalEvent("input.admitted", sessionId, {
+							sessionId,
+							inputId: "b",
+							delivery: "steer",
+							request: { text: "correction" },
+						}),
+						canonicalEvent("input.sent", sessionId, {
+							sessionId,
+							inputId: "b",
+							steer: true,
+						}),
+						canonicalEvent(
+							"run.requested",
+							sessionId,
+							{ runId: "steer", inputId: "b" },
+							{ provider, metadata: { runId: "steer" } },
+						),
+					]);
+					yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at)
+					VALUES (1, 'b', 'project', ${sessionId}, ${provider}, 'send_turn', 'steer', '{}', 'running', 1, 1, 1)`;
+					const visible = Effect.map(rows.list(), (items) =>
+						items.find(({ id }) => id === sessionId),
+					);
+					expect(yield* visible).toMatchObject({
+						status: "busy",
+						canStop: provider !== "claude",
+					});
+					yield* sql`UPDATE provider_command_outbox SET error_code = 'delivery_indeterminate' WHERE command_id = 'b'`;
+					expect(yield* visible).toMatchObject({
+						status: "busy",
+						canStop: true,
+					});
+					yield* sql`UPDATE provider_command_outbox SET error_code = NULL WHERE command_id = 'b'`;
+					// Placement makes a pending reservation stoppable even before acceptance.
+					yield* commit([
+						canonicalEvent(
+							"message.created",
+							sessionId,
+							{
+								sessionId,
+								messageId: "b",
+								inputId: "b",
+								role: "user",
+							},
+							{ provider, metadata: { runId: "steer" } },
+						),
+					]);
+					expect(yield* visible).toMatchObject({
+						status: "busy",
+						canStop: true,
+					});
+					expect(
+						yield* sql`SELECT status, started_at FROM provider_runs WHERE id = 'steer'`,
+					).toEqual([{ status: "pending", started_at: null }]);
+					yield* commit([
+						canonicalEvent(
+							"run.started",
+							sessionId,
+							{ inputId: "b", requestedRunId: "steer" },
+							{ provider, metadata: { runId: "steer" } },
+						),
+					]);
+					expect(yield* visible).toMatchObject({
+						status: "busy",
+						canStop: true,
+					});
+				}).pipe(
+					Effect.provide(
+						Layer.mergeAll(
+							makePersistenceEffectLayer(":memory:", "project"),
+							Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+							Layer.effect(SessionActivityTag, makeSessionActivity),
+						),
+					),
+				),
+		);
+	}
+
 	for (const [taskType, attention] of [
 		["local_bash", "monitoring"],
 		["workflow", "working"],

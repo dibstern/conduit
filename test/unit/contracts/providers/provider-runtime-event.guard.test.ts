@@ -59,6 +59,10 @@ describe("ProviderRuntimeEvent contracts", () => {
 		];
 		const allowed = new Set([
 			"src/lib/provider/provider-runtime-event-to-domain.ts",
+			// The durable command repository owns run reservation events, not provider output.
+			"src/lib/provider/orchestration-command-commit.ts",
+			// Retry claims reserve their attempt in the same durable transaction.
+			"src/lib/provider/orchestration-side-effect-reactor.ts",
 		]);
 		const unexpected = files.flatMap((file) => {
 			if (allowed.has(file)) return [];

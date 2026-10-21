@@ -234,6 +234,8 @@ export type QuestionAskedPayload = PayloadOf<"question.asked">;
 export type QuestionResolvedPayload = PayloadOf<"question.resolved">;
 
 export interface EventMetadata {
+	/** Conduit run ownership; only this run's terminal event can settle its turns. */
+	readonly runId?: string;
 	readonly commandId?: string;
 	readonly causationEventId?: string;
 	readonly correlationId?: string;
@@ -254,6 +256,8 @@ export interface EventMetadata {
 	readonly synthetic?: boolean;
 	readonly inherited?: boolean;
 	readonly providerCreatedAt?: number;
+	/** First observed OpenCode directory before an explicit workspace move. */
+	readonly nativeDirectory?: string;
 	readonly source?: string;
 	readonly sseBatchId?: string;
 	readonly sseBatchSize?: number;
@@ -270,6 +274,7 @@ export type StoredEvent = CanonicalEvent<CanonicalEventType> & {
 };
 
 export const EventMetadataSchema = Schema.Struct({
+	runId: Schema.optionalKey(Schema.String),
 	commandId: Schema.optionalKey(Schema.String),
 	causationEventId: Schema.optionalKey(Schema.String),
 	correlationId: Schema.optionalKey(Schema.String),
@@ -294,6 +299,7 @@ export const EventMetadataSchema = Schema.Struct({
 	synthetic: Schema.optionalKey(Schema.Boolean),
 	inherited: Schema.optionalKey(Schema.Boolean),
 	providerCreatedAt: Schema.optionalKey(Schema.Number),
+	nativeDirectory: Schema.optionalKey(Schema.String),
 	source: Schema.optionalKey(Schema.String),
 	sseBatchId: Schema.optionalKey(Schema.String),
 	sseBatchSize: Schema.optionalKey(Schema.Number),
@@ -615,9 +621,24 @@ export const CanonicalEvents = {
 			]),
 		),
 	),
+	"run.requested": live(
+		Schema.Struct({ runId: Schema.String, inputId: Schema.String }),
+	),
+	"run.started": live(
+		Schema.Struct({
+			inputId: Schema.String,
+			requestedRunId: Schema.String,
+			userMessageId: Schema.optionalKey(Schema.String),
+		}),
+	),
 	"turn.completed": live(
 		Schema.Struct({
 			messageId: Schema.String,
+			providerStateUpdates: Schema.optionalKey(
+				Schema.Array(
+					Schema.Struct({ key: Schema.String, value: Schema.String }),
+				),
+			),
 			/** Names the turn when no assistant message of its own answered it. */
 			userMessageId: Schema.optionalKey(Schema.String),
 			cost: Schema.optionalKey(Schema.Number),
@@ -632,19 +653,22 @@ export const CanonicalEvents = {
 			duration: Schema.optionalKey(Schema.Number),
 		}),
 	),
+	"turn.notice": live(Schema.Struct({ text: Schema.String })),
 	"turn.error": live(
 		Schema.Struct({
 			messageId: Schema.String,
-			/** Durable turn owner when a process fails before or between messages. */
-			userMessageId: Schema.optionalKey(Schema.String),
 			error: Schema.String,
 			code: Schema.optionalKey(Schema.String),
 			retryable: Schema.optionalKey(Schema.Boolean),
+			retryHandled: Schema.optionalKey(Schema.Boolean),
+			retryAt: Schema.optionalKey(Schema.Number),
 		}),
 	),
 	"turn.interrupted": live(
 		Schema.Struct({
 			messageId: Schema.String,
+			code: Schema.optionalKey(Schema.String),
+			reason: Schema.optionalKey(Schema.String),
 		}),
 	),
 	"turn.model_resolved": live(

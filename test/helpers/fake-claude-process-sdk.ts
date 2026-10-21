@@ -924,6 +924,8 @@ function query(params: {
 							.join("");
 			const request = currentRequest(prompt);
 			const userUuid = input.uuid ?? randomUUID();
+			if (request === "fail-before-intake")
+				throw new Error("Harness SDK iterator failed before intake");
 			if (prompt === "/goal clear") {
 				for (const hookName of ["SessionStart", "UserPromptSubmit"])
 					yield {
@@ -956,30 +958,6 @@ function query(params: {
 					uuid: randomUUID(),
 					session_id: sessionId,
 				};
-			}
-			// The SDK starts every consumed input, including overlapping sends.
-			yield {
-				type: "command_lifecycle",
-				state: "started",
-				command_uuid: userUuid,
-				uuid: randomUUID(),
-				session_id: sessionId,
-			};
-			if (prompt !== "/goal clear") {
-				recordNativeMessage(
-					{
-						type: "user",
-						uuid: userUuid,
-						parentUuid: nativeParentUuid,
-						session_id: sessionId,
-						message: { ...input.message, id: userUuid },
-						parent_tool_use_id: null,
-						parent_agent_id: null,
-					},
-					accountConfigDir,
-					params.options?.cwd,
-				);
-				nativeParentUuid = userUuid;
 			}
 			const optionsFile = process.env["CONDUIT_TEST_CLAUDE_OPTIONS_FILE"];
 			if (optionsFile) {
@@ -1067,11 +1045,6 @@ function query(params: {
 					plugins: [],
 				} as unknown as SDKMessage;
 			}
-			if (
-				params.options?.forkSession &&
-				consumeAccountMarker("crash-after-init")
-			)
-				throw new Error("Synthetic crash immediately after system/init");
 			if (params.options?.resume && consumeAccountMarker("resume-drops-turn")) {
 				yield {
 					type: "result",
@@ -1093,6 +1066,35 @@ function query(params: {
 				};
 				continue;
 			}
+			// Native resume validation precedes intake, as it does in the CLI.
+			yield {
+				type: "command_lifecycle",
+				state: "started",
+				command_uuid: userUuid,
+				uuid: randomUUID(),
+				session_id: sessionId,
+			};
+			if (prompt !== "/goal clear") {
+				recordNativeMessage(
+					{
+						type: "user",
+						uuid: userUuid,
+						parentUuid: nativeParentUuid,
+						session_id: sessionId,
+						message: { ...input.message, id: userUuid },
+						parent_tool_use_id: null,
+						parent_agent_id: null,
+					},
+					accountConfigDir,
+					params.options?.cwd,
+				);
+				nativeParentUuid = userUuid;
+			}
+			if (
+				params.options?.forkSession &&
+				consumeAccountMarker("crash-after-init")
+			)
+				throw new Error("Synthetic crash immediately after system/init");
 			if (prompt === "/goal clear") {
 				const unknown = consumeAccountMarker("unknown-goal");
 				const modelReply = consumeAccountMarker("model-goal-reply");
@@ -1640,6 +1642,17 @@ function query(params: {
 					turnHeld = false;
 					if (closed) return;
 				}
+				if (request === "upgrade-recovered-turn" && index === 1 && proof) {
+					const release = join(dirname(proof), "release-upgrade-recovered");
+					turnHeld = true;
+					mark({ kind: "assistant-held", prompt, queryId });
+					while (!existsSync(release) && !closed) {
+						yield* outOfBand.splice(0);
+						await new Promise<void>((done) => setTimeout(done, 20));
+					}
+					turnHeld = false;
+					if (closed) return;
+				}
 				if (request.startsWith("restart-"))
 					await new Promise<void>((done) => setTimeout(done, 120));
 				const event = stream(sessionId, {
@@ -2121,6 +2134,64 @@ function query(params: {
 							ambient: request === "notification-parent-turn-during-warm",
 						},
 					],
+				} as unknown as SDKMessage;
+			}
+			if (
+				request === "upgrade-long-turn" &&
+				proof &&
+				existsSync(join(dirname(proof), "legacy-output-details"))
+			) {
+				for (const [index, name, id, input] of [
+					[
+						1,
+						"Bash",
+						"legacy-upgrade-bash",
+						{ command: "printf legacy-output" },
+					],
+					[
+						2,
+						"Agent",
+						"legacy-upgrade-agent",
+						{
+							description: "Legacy runner child",
+							prompt: "Review the changes",
+							subagent_type: "general-purpose",
+						},
+					],
+				] as const) {
+					yield stream(sessionId, {
+						type: "content_block_start",
+						index,
+						content_block: { type: "tool_use", id, name, input },
+					});
+					yield stream(sessionId, { type: "content_block_stop", index });
+				}
+				yield {
+					type: "user",
+					uuid: randomUUID(),
+					session_id: sessionId,
+					parent_tool_use_id: null,
+					message: {
+						role: "user",
+						content: [
+							{
+								type: "tool_result",
+								tool_use_id: "legacy-upgrade-bash",
+								content: "legacy-output",
+								is_error: false,
+							},
+						],
+					},
+				} as unknown as SDKMessage;
+				yield {
+					type: "system",
+					subtype: "task_started",
+					uuid: randomUUID(),
+					session_id: sessionId,
+					task_id: "legacy-upgrade-child",
+					tool_use_id: "legacy-upgrade-agent",
+					description: "Legacy runner child",
+					task_type: "local_agent",
 				} as unknown as SDKMessage;
 			}
 			if (request === "review-subagent-finalizer") {

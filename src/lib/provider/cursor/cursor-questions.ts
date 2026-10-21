@@ -94,6 +94,7 @@ export function cursorAskUserTool(
 						return sink
 							.requestQuestion({
 								requestId: callId,
+								...(!label && events.runId ? { runId: events.runId } : {}),
 								toolUseId: callId,
 								questions: decoded.success.questions.map((question) => ({
 									...question,

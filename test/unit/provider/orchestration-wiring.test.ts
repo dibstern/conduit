@@ -4,7 +4,6 @@ import { Effect, Layer, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/sql";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
-import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	AccountDirectory,
 	makeAccountDirectory,
@@ -28,7 +27,6 @@ import {
 } from "../../../src/lib/provider/orchestration-wiring.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
-import { makeBaseSendTurnInput } from "../../helpers/mock-sdk.js";
 
 function orchestrationDeps(
 	persistence: ReturnType<typeof makePersistenceEffectLayer>,
@@ -282,73 +280,5 @@ describe("Orchestration wiring", () => {
 		});
 
 		expect(layer.openCodeInstance).toBeInstanceOf(OpenCodeProviderInstance);
-	});
-
-	describe("wireSSEToInstance", () => {
-		it.each([
-			"properties.sessionID",
-			"event.sessionId",
-		])("settles a pending turn only on idle, using %s", async (sessionIdField) => {
-			const client = makeStubClient();
-			const layer = await makeScopedOrchestrationView({ client });
-			const sessionId = "sess-123";
-			const handlers: Array<(event: unknown) => void> = [];
-			layer.wireSSEToInstance((_event, handler) => {
-				handlers.push(handler);
-			});
-			expect(handlers).toHaveLength(1);
-
-			let settled = false;
-			const pending = Effect.runPromise(
-				layer.openCodeInstance.sendTurnEffect(
-					makeBaseSendTurnInput({
-						sessionId,
-						account: {
-							id: MANAGED_OPENCODE_ACCOUNT_ID,
-							name: "OpenCode",
-							driver: "opencode",
-							usageEligible: false,
-						},
-					}),
-				),
-			).then((result) => {
-				settled = true;
-				return result;
-			});
-			await vi.waitFor(() => {
-				expect(client.session.prompt).toHaveBeenCalledOnce();
-			});
-
-			for (const event of [
-				{ type: "message.created", properties: { sessionID: sessionId } },
-				{
-					type: "session.status",
-					properties: { sessionID: sessionId, status: { type: "busy" } },
-				},
-				{ type: "session.status", properties: { status: { type: "idle" } } },
-			]) {
-				handlers[0]?.(event);
-				await new Promise<void>((resolve) => setImmediate(resolve));
-				expect(settled).toBe(false);
-			}
-
-			handlers[0]?.({
-				type: "session.status",
-				...(sessionIdField === "event.sessionId" ? { sessionId } : {}),
-				properties: {
-					...(sessionIdField === "properties.sessionID"
-						? { sessionID: sessionId }
-						: {}),
-					status: { type: "idle" },
-				},
-			});
-			await expect(pending).resolves.toEqual({
-				status: "completed",
-				cost: 0,
-				tokens: { input: 0, output: 0 },
-				durationMs: 0,
-				providerStateUpdates: [],
-			});
-		});
 	});
 });

@@ -70,8 +70,8 @@ const withPersistence = async (
 	}
 };
 
-// Creates root (turn ends at stream versions 1 and 2), a sub-agent child and
-// a fork of root (each with a turn end at version 1), and an idle session
+// Creates root (turn ends at stream versions 4 and 8), a sub-agent child and
+// a fork of root (each with a turn end at version 4), and an idle session
 // with no turn end.
 const seed = Effect.gen(function* () {
 	const commit = yield* makeCommitAndSignal;
@@ -85,27 +85,53 @@ const seed = Effect.gen(function* () {
 			{ sessionId, title: sessionId, provider: "claude", ...extra },
 			{ provider: "claude" },
 		);
-	const completed = (sessionId: string) =>
+	const accepted = (sessionId: string, inputId: string) => [
+		canonicalEvent("run.requested", sessionId, {
+			runId: `${inputId}-run`,
+			inputId,
+		}),
+		canonicalEvent(
+			"message.created",
+			sessionId,
+			{
+				sessionId,
+				messageId: inputId,
+				role: "user",
+				inputId,
+			},
+			{ metadata: { runId: `${inputId}-run` } },
+		),
+		canonicalEvent(
+			"run.started",
+			sessionId,
+			{ inputId, requestedRunId: `${inputId}-run` },
+			{ provider: "claude", metadata: { runId: `${inputId}-run` } },
+		),
+	];
+	const completed = (sessionId: string) => [
+		...accepted(sessionId, `${sessionId}-a`),
 		canonicalEvent(
 			"turn.completed",
 			sessionId,
 			{ messageId: `${sessionId}-a` },
-			{ provider: "claude" },
-		);
-	yield* commit([created("root"), completed("root")]);
+			{ provider: "claude", metadata: { runId: `${sessionId}-a-run` } },
+		),
+	];
+	yield* commit([created("root"), ...completed("root")]);
 	yield* commit([
+		...accepted("root", "root-b"),
 		canonicalEvent(
 			"turn.error",
 			"root",
 			{ messageId: "root-b", error: "boom" },
-			{ provider: "claude" },
+			{ provider: "claude", metadata: { runId: "root-b-run" } },
 		),
 	]);
 	yield* commit([
 		created("child", { parentId: "root" }),
-		completed("child"),
+		...completed("child"),
 		created("fork", { parentId: "root", forkPointEvent: "root-a" }),
-		completed("fork"),
+		...completed("fork"),
 		created("idle"),
 	]);
 });
@@ -125,9 +151,9 @@ it("turn.completed and turn.error both raise last_turn_end_version", async () =>
 	await withPersistence(() =>
 		Effect.gen(function* () {
 			yield* seed;
-			expect(yield* state("root")).toEqual({ last: 2, seen: null, unread: 1 });
-			expect(yield* state("fork")).toEqual({ last: 1, seen: null, unread: 1 });
-			expect(yield* state("child")).toEqual({ last: 1, seen: null, unread: 0 });
+			expect(yield* state("root")).toEqual({ last: 8, seen: null, unread: 1 });
+			expect(yield* state("fork")).toEqual({ last: 4, seen: null, unread: 1 });
+			expect(yield* state("child")).toEqual({ last: 4, seen: null, unread: 0 });
 		}),
 	);
 });
@@ -160,17 +186,32 @@ it.each([
 						delivery: index ? "steer" : "queue",
 						request: { text: inputId, images: [] },
 					}),
+					canonicalEvent("run.requested", sessionId, {
+						runId: `run-${inputId}`,
+						inputId,
+					}),
 					canonicalEvent("input.sent", sessionId, {
 						sessionId,
 						inputId,
 						...(index ? { steer: true } : {}),
 					}),
-					canonicalEvent("message.created", sessionId, {
+					canonicalEvent(
+						"message.created",
 						sessionId,
-						messageId: inputId,
-						role: "user",
-						inputId,
-					}),
+						{
+							sessionId,
+							messageId: inputId,
+							role: "user",
+							inputId,
+						},
+						{ metadata: { runId: `run-${inputId}` } },
+					),
+					canonicalEvent(
+						"run.started",
+						sessionId,
+						{ inputId, requestedRunId: `run-${inputId}` },
+						{ provider: "claude", metadata: { runId: "run-alpha" } },
+					),
 					canonicalEvent("message.created", sessionId, {
 						sessionId,
 						messageId: `reply-${inputId}`,
@@ -180,10 +221,15 @@ it.each([
 				]);
 			}
 			yield* commit([
-				canonicalEvent(type, sessionId, {
-					messageId: "reply-charlie",
-					...(type === "turn.error" ? { error: "failed" } : {}),
-				}),
+				canonicalEvent(
+					type,
+					sessionId,
+					{
+						messageId: "reply-charlie",
+						...(type === "turn.error" ? { error: "failed" } : {}),
+					},
+					{ provider: "claude", metadata: { runId: "run-alpha" } },
+				),
 			]);
 			const read = sql<{
 				input_id: string | null;
@@ -202,21 +248,39 @@ it.each([
 			expect(yield* read).toEqual([ended]);
 
 			yield* commit([
-				canonicalEvent("message.created", sessionId, {
-					sessionId,
-					messageId: "queued",
-					role: "user",
+				canonicalEvent("run.requested", sessionId, {
+					runId: "run-queued",
 					inputId: "queued-input",
 				}),
+				canonicalEvent(
+					"message.created",
+					sessionId,
+					{
+						sessionId,
+						messageId: "queued",
+						role: "user",
+						inputId: "queued-input",
+					},
+					{ metadata: { runId: "run-queued" } },
+				),
+				canonicalEvent(
+					"run.started",
+					sessionId,
+					{ inputId: "queued-input", requestedRunId: "run-queued" },
+					{ provider: "claude", metadata: { runId: "run-queued" } },
+				),
 				canonicalEvent("message.created", sessionId, {
 					sessionId,
 					messageId: "reply-queued",
 					role: "assistant",
 					parentID: "queued",
 				}),
-				canonicalEvent("turn.completed", sessionId, {
-					messageId: "reply-queued",
-				}),
+				canonicalEvent(
+					"turn.completed",
+					sessionId,
+					{ messageId: "reply-queued" },
+					{ provider: "claude", metadata: { runId: "run-queued" } },
+				),
 			]);
 			const [queued] = yield* read;
 			expect(queued?.input_id).toBe("queued-input");
@@ -263,7 +327,16 @@ it.each([
 					role: "user",
 					inputId: "steer",
 				}),
-				canonicalEvent("turn.interrupted", "early", { messageId }),
+				canonicalEvent("run.requested", "early", {
+					runId: "unplaced-run",
+					inputId: "unknown-input",
+				}),
+				canonicalEvent(
+					"turn.interrupted",
+					"early",
+					{ messageId },
+					{ provider: "claude", metadata: { runId: "unplaced-run" } },
+				),
 			]);
 			const [ended] = yield* sql<{
 				input_id: string | null;
@@ -272,7 +345,7 @@ it.each([
 			}>`SELECT last_turn_end_input_id AS input_id, last_turn_end_version AS version, last_turn_error_at AS error_at FROM sessions WHERE id = 'early'`;
 			expect(ended).toEqual({
 				input_id: null,
-				version: 5,
+				version: null,
 				error_at: null,
 			});
 			// Recovery of just the session projector sees already-closed turns and
@@ -299,7 +372,7 @@ it.each([
 	);
 });
 
-it("an interruption before the user echo advances the end version with an unknown starter", async () => {
+it("an interruption before placement does not advance a turn completion boundary", async () => {
 	await withPersistence(() =>
 		Effect.gen(function* () {
 			const commit = yield* makeCommitAndSignal;
@@ -326,7 +399,16 @@ it("an interruption before the user echo advances the end version with an unknow
 					delivery: "queue",
 					request: { text: "Later", images: [] },
 				}),
-				canonicalEvent("turn.interrupted", "early", { messageId: "" }),
+				canonicalEvent("run.requested", "early", {
+					runId: "unaccepted-run",
+					inputId: "starter",
+				}),
+				canonicalEvent(
+					"turn.interrupted",
+					"early",
+					{ messageId: "" },
+					{ provider: "claude", metadata: { runId: "unaccepted-run" } },
+				),
 			]);
 			const read = sql<{
 				input_id: string | null;
@@ -336,7 +418,7 @@ it("an interruption before the user echo advances the end version with an unknow
 			const [ended] = yield* read;
 			expect(ended).toEqual({
 				input_id: null,
-				version: 4,
+				version: null,
 				error_at: null,
 			});
 			// The queued handoff does not turn the older interruption into its end.
@@ -383,6 +465,10 @@ it("a steered turn with an unknown starter does not name an older input", async 
 					userMessageId: "older",
 					messageId: "older-reply",
 				}),
+				canonicalEvent("run.requested", "unknown", {
+					runId: "unplaced-run",
+					inputId: "unknown-starter",
+				}),
 				canonicalEvent("message.created", "unknown", {
 					sessionId: "unknown",
 					messageId: "unknown-starter",
@@ -405,16 +491,18 @@ it("a steered turn with an unknown starter does not name an older input", async 
 					role: "user",
 					inputId: "steer",
 				}),
-				canonicalEvent("turn.completed", "unknown", {
-					userMessageId: "steer",
-					messageId: "reply",
-				}),
+				canonicalEvent(
+					"turn.completed",
+					"unknown",
+					{ userMessageId: "steer", messageId: "reply" },
+					{ provider: "claude", metadata: { runId: "unplaced-run" } },
+				),
 			]);
 			const [ended] = yield* sql<{
 				input_id: string | null;
 				version: number;
 			}>`SELECT last_turn_end_input_id AS input_id, last_turn_end_version AS version FROM sessions WHERE id = 'unknown'`;
-			expect(ended).toEqual({ input_id: null, version: 7 });
+			expect(ended).toEqual({ input_id: null, version: null });
 		}),
 	);
 });
@@ -430,12 +518,27 @@ it("a steer placed after the preceding turn ended starts its own turn", async ()
 					title: "Late",
 					provider: "claude",
 				}),
-				canonicalEvent("message.created", "late", {
-					sessionId: "late",
-					messageId: "alpha",
-					role: "user",
+				canonicalEvent("run.requested", "late", {
+					runId: "alpha-run",
 					inputId: "alpha-input",
 				}),
+				canonicalEvent(
+					"message.created",
+					"late",
+					{
+						sessionId: "late",
+						messageId: "alpha",
+						role: "user",
+						inputId: "alpha-input",
+					},
+					{ metadata: { runId: "alpha-run" } },
+				),
+				canonicalEvent(
+					"run.started",
+					"late",
+					{ inputId: "alpha-input", requestedRunId: "alpha-run" },
+					{ provider: "claude", metadata: { runId: "alpha-run" } },
+				),
 				canonicalEvent("input.admitted", "late", {
 					sessionId: "late",
 					inputId: "bravo",
@@ -447,26 +550,45 @@ it("a steer placed after the preceding turn ended starts its own turn", async ()
 					inputId: "bravo",
 					steer: true,
 				}),
-				canonicalEvent("turn.completed", "late", {
-					userMessageId: "alpha",
-					messageId: "reply-alpha",
-				}),
-				canonicalEvent("message.created", "late", {
-					sessionId: "late",
-					messageId: "bravo",
-					role: "user",
+				canonicalEvent("run.requested", "late", {
+					runId: "bravo-run",
 					inputId: "bravo",
 				}),
-				canonicalEvent("turn.completed", "late", {
-					userMessageId: "bravo",
-					messageId: "reply-bravo",
-				}),
+				canonicalEvent(
+					"turn.completed",
+					"late",
+					{ userMessageId: "alpha", messageId: "reply-alpha" },
+					{ provider: "claude", metadata: { runId: "alpha-run" } },
+				),
+				canonicalEvent(
+					"message.created",
+					"late",
+					{
+						sessionId: "late",
+						messageId: "bravo",
+						role: "user",
+						inputId: "bravo",
+					},
+					{ metadata: { runId: "bravo-run" } },
+				),
+				canonicalEvent(
+					"run.started",
+					"late",
+					{ inputId: "bravo", requestedRunId: "bravo-run" },
+					{ provider: "claude", metadata: { runId: "bravo-run" } },
+				),
+				canonicalEvent(
+					"turn.completed",
+					"late",
+					{ userMessageId: "bravo", messageId: "reply-bravo" },
+					{ provider: "claude", metadata: { runId: "bravo-run" } },
+				),
 			]);
 			const [ended] = yield* sql<{
 				input_id: string;
 				version: number;
 			}>`SELECT last_turn_end_input_id AS input_id, last_turn_end_version AS version FROM sessions WHERE id = 'late'`;
-			expect(ended).toEqual({ input_id: "bravo", version: 6 });
+			expect(ended).toEqual({ input_id: "bravo", version: 10 });
 		}),
 	);
 });
@@ -509,7 +631,16 @@ it("session-only recovery does not use a steer's echo from after the interruptio
 					inputId: "bravo",
 					steer: true,
 				}),
-				canonicalEvent("turn.interrupted", "future", { messageId: "" }),
+				canonicalEvent("run.requested", "future", {
+					runId: "unplaced-run",
+					inputId: "unknown-input",
+				}),
+				canonicalEvent(
+					"turn.interrupted",
+					"future",
+					{ messageId: "" },
+					{ provider: "claude", metadata: { runId: "unplaced-run" } },
+				),
 				canonicalEvent("message.created", "future", {
 					sessionId: "future",
 					messageId: "bravo",
@@ -522,7 +653,7 @@ it("session-only recovery does not use a steer's echo from after the interruptio
 				version: number;
 				error_at: number | null;
 			}>`SELECT last_turn_end_input_id AS input_id, last_turn_end_version AS version, last_turn_error_at AS error_at FROM sessions WHERE id = 'future'`;
-			const ended = [{ input_id: null, version: 6, error_at: null }];
+			const ended = [{ input_id: null, version: null, error_at: null }];
 			expect(yield* read).toEqual(ended);
 			yield* sql`UPDATE sessions SET last_turn_end_input_id = NULL, last_turn_end_version = NULL WHERE id = 'future'`;
 			yield* sql`DELETE FROM projector_cursors WHERE projector_name = 'session'`;
@@ -539,10 +670,10 @@ it("markSeen caps at the latest turn end and announces the row once", async () =
 			yield* seed;
 			advances.length = 0;
 			expect(yield* markSeen("root", 99)).toBe(true);
-			expect(yield* state("root")).toEqual({ last: 2, seen: 2, unread: 0 });
+			expect(yield* state("root")).toEqual({ last: 8, seen: 8, unread: 0 });
 			expect(advances.map((advance) => advance.sessionIds)).toEqual([["root"]]);
 
-			expect(yield* markSeen("root", 2)).toBe(false);
+			expect(yield* markSeen("root", 8)).toBe(false);
 			expect(advances).toHaveLength(1);
 		}),
 	);
@@ -552,12 +683,12 @@ it("markSeen never lowers seen_version", async () => {
 	await withPersistence((advances) =>
 		Effect.gen(function* () {
 			yield* seed;
-			expect(yield* markSeen("root", 1)).toBe(true);
-			expect(yield* state("root")).toEqual({ last: 2, seen: 1, unread: 1 });
-			expect(yield* markSeen("root", 2)).toBe(true);
+			expect(yield* markSeen("root", 4)).toBe(true);
+			expect(yield* state("root")).toEqual({ last: 8, seen: 4, unread: 1 });
+			expect(yield* markSeen("root", 8)).toBe(true);
 			advances.length = 0;
-			expect(yield* markSeen("root", 1)).toBe(false);
-			expect(yield* state("root")).toEqual({ last: 2, seen: 2, unread: 0 });
+			expect(yield* markSeen("root", 4)).toBe(false);
+			expect(yield* state("root")).toEqual({ last: 8, seen: 8, unread: 0 });
 			expect(advances).toEqual([]);
 		}),
 	);
@@ -568,14 +699,14 @@ it("markSeen is a quiet no-op for a sub-agent, an idle session and an unknown id
 		Effect.gen(function* () {
 			yield* seed;
 			advances.length = 0;
-			expect(yield* markSeen("child", 1)).toBe(false);
+			expect(yield* markSeen("child", 4)).toBe(false);
 			expect(yield* markSeen("idle", 1)).toBe(false);
 			expect(yield* markSeen("missing", 1)).toBe(false);
-			expect(yield* state("child")).toEqual({ last: 1, seen: null, unread: 0 });
+			expect(yield* state("child")).toEqual({ last: 4, seen: null, unread: 0 });
 			expect(advances).toEqual([]);
 
-			expect(yield* markSeen("fork", 1)).toBe(true);
-			expect(yield* state("fork")).toEqual({ last: 1, seen: 1, unread: 0 });
+			expect(yield* markSeen("fork", 4)).toBe(true);
+			expect(yield* state("fork")).toEqual({ last: 4, seen: 4, unread: 0 });
 		}),
 	);
 });
@@ -584,10 +715,10 @@ it("markUnread puts seen one below the latest turn end and announces it", async 
 	await withPersistence((advances) =>
 		Effect.gen(function* () {
 			yield* seed;
-			yield* markSeen("root", 2);
+			yield* markSeen("root", 8);
 			advances.length = 0;
 			expect(yield* markUnread("root")).toBe(true);
-			expect(yield* state("root")).toEqual({ last: 2, seen: 1, unread: 1 });
+			expect(yield* state("root")).toEqual({ last: 8, seen: 7, unread: 1 });
 			expect(advances.map((advance) => advance.sessionIds)).toEqual([["root"]]);
 			expect(yield* markUnread("root")).toBe(false);
 			expect(yield* markUnread("child")).toBe(false);

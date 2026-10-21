@@ -89,6 +89,7 @@ export interface ProjectStoreImportResult {
 const copiedTables = [
 	"events",
 	"sessions",
+	"provider_runs",
 	"turns",
 	"turn_recaps",
 	"messages",
@@ -717,6 +718,15 @@ function collisions(
 			"sessions",
 		);
 	const identityGroups = [
+		[
+			"provider_runs",
+			[
+				"provider_runs:id",
+				"provider_runs:joined_into",
+				"turns:run_id",
+				"provider_command_outbox:run_id",
+			],
+		],
 		["messages", ["messages:id", "turns:id", "message_tombstones:message_id"]],
 		[
 			"message_parts",

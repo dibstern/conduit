@@ -205,12 +205,16 @@ export class ClaudePermissionService {
 			});
 		}
 		const questions = toQuestionRequestQuestions(toolInput ?? {});
+		const runId = options.agentID
+			? undefined
+			: (ctx.toolRunIds?.get(options.toolUseID) ?? ctx.currentRunId);
 		return Effect.uninterruptibleMask((restore) =>
 			Effect.gen(function* () {
 				const request = yield* Effect.forkDetach(
 					restore(
 						sink.requestQuestion({
 							requestId: options.requestId ?? options.toolUseID,
+							...(runId ? { runId } : {}),
 							toolUseId: options.toolUseID,
 							questions,
 						}),
@@ -257,6 +261,9 @@ export class ClaudePermissionService {
 	): Effect.Effect<PermissionResult, ClaudeAdapterError> {
 		return Effect.gen({ self: this }, function* () {
 			const requestId = options.requestId ?? options.toolUseID;
+			const runId = options.agentID
+				? undefined
+				: (ctx.toolRunIds?.get(options.toolUseID) ?? ctx.currentRunId);
 			const createdAt = new Date().toISOString();
 			const sink = ctx.eventSink ?? this.deps.sink;
 			if (!sink) {
@@ -282,6 +289,7 @@ export class ClaudePermissionService {
 						restore(
 							sink.requestPermission({
 								requestId,
+								...(runId ? { runId } : {}),
 								sessionId: ctx.sessionId,
 								turnId: ctx.currentTurnId ?? "",
 								toolName,

@@ -30,10 +30,12 @@ describe("turn-ended alert", () => {
 			alertId: '["s1","m1","done"]',
 		},
 	] as const)("preserves $type notification identity and exit code", (expected) => {
-		const event = canonicalEvent(expected.type, "s1", {
-			messageId: "m1",
-			error: "failed",
-		});
+		const event = canonicalEvent(
+			expected.type,
+			"s1",
+			{ messageId: "m1", error: "failed" },
+			{ provider: "claude" },
+		);
 		expect(turnEndedAlert(event)).toEqual({
 			type: "done",
 			sessionId: "s1",
@@ -52,7 +54,10 @@ describe("turn-ended alert", () => {
 			type,
 			"s1",
 			{ messageId: "", error: "failed" },
-			{ eventId: Schema.decodeSync(EventId)("evt_terminal") },
+			{
+				eventId: Schema.decodeSync(EventId)("evt_terminal"),
+				provider: "claude",
+			},
 		);
 		expect(turnEndedAlert(event)).toMatchObject({
 			alertId:
@@ -60,6 +65,19 @@ describe("turn-ended alert", () => {
 					? '["s1","evt_terminal","error","failed"]'
 					: '["s1","evt_terminal","done"]',
 		});
+	});
+
+	it("does not alert for an OpenCode assistant-message completion", () => {
+		expect(
+			turnEndedAlert(
+				canonicalEvent(
+					"turn.completed",
+					"s1",
+					{ messageId: "step" },
+					{ provider: "opencode" },
+				),
+			),
+		).toBeUndefined();
 	});
 
 	it.each(

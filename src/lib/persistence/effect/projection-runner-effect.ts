@@ -73,6 +73,7 @@ export interface ProjectionRunnerEffect {
 
 	readonly projectBatch: (
 		events: readonly StoredEvent[],
+		endedRunEvents?: Set<string>,
 		/** Append markers before each original delete; project them after the batch. */
 		expandDeletion?: SessionDeletionExpansion,
 	) => Effect.Effect<
@@ -270,6 +271,7 @@ export const makeProjectionRunnerEffect = (
 
 		const projectBatch = (
 			events: readonly StoredEvent[],
+			endedRunEvents?: Set<string>,
 			expandDeletion?: SessionDeletionExpansion,
 		): Effect.Effect<
 			ReadModelAdvance,
@@ -313,6 +315,7 @@ export const makeProjectionRunnerEffect = (
 							version,
 							replaying,
 							deferredMessageStamps,
+							...(endedRunEvents ? { endedRunEvents } : {}),
 						};
 						for (const [index, event] of expandedEvents.entries()) {
 							if (
