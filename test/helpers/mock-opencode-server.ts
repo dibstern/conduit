@@ -27,6 +27,7 @@ interface SseEvent {
 interface QueuedRestResponse {
 	status: number;
 	responseBody: unknown;
+	sticky?: boolean;
 	/** Mutation events that must wait for the corresponding HTTP operation. */
 	sseEvents?: SseEvent[];
 	/** How many prompts the recording had sent when this response was taken. */
@@ -400,7 +401,7 @@ export class MockOpenCodeServer {
 		responseBody: unknown,
 	): void {
 		const key = `${method} ${path}`;
-		this.exactQueues.set(key, [{ status, responseBody }]);
+		this.exactQueues.set(key, [{ status, responseBody, sticky: true }]);
 	}
 
 	/**
@@ -903,7 +904,8 @@ export class MockOpenCodeServer {
 				"POST /session",
 			);
 			if (sessionQueue && sessionQueue.length >= 1) {
-				const entry = sessionQueue.shift() as QueuedRestResponse;
+				const entry = sessionQueue[0] as QueuedRestResponse;
+				if (!entry.sticky) sessionQueue.shift();
 				// Apply the requested title and ensure the session appears in
 				// the GET /session fallback so subsequent list calls include it.
 				const body = { ...(entry.responseBody as Record<string, unknown>) };

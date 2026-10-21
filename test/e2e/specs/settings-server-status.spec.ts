@@ -156,7 +156,7 @@ test("Server status reloads after two supervised restarts, with desktop and phon
 	await page.getByTestId("server-shutdown-btn").click();
 	await expect(page.getByTestId("instance-form")).toBeHidden();
 	await expect(page.getByTestId("server-shutdown-confirmation")).toContainText(
-		"The login service will start it straight back.",
+		"Start it again from the terminal with conduit service install.",
 	);
 	await expect(page.getByTestId("server-shutdown-cancel")).toBeFocused();
 	await page.getByTestId("add-instance-btn").click();

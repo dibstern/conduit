@@ -867,9 +867,12 @@ test("opens the heavy session after a restart under load", async ({
 			.poll(() => device.evaluate(() => localStorage.getItem("conduit-avatar")))
 			.toBe(avatarProfile);
 		// These two completed turns belong to the fixture's Claude session.
-		await expect(
-			device.locator("#messages .assistant-header > div > span:first-child"),
-		).toHaveText(["Claude", "Claude"]);
+		const headers = device.locator("#messages .assistant-header");
+		await expect(headers).toHaveCount(2);
+		await expect(headers.getByText("Claude", { exact: true })).toHaveText([
+			"Claude",
+			"Claude",
+		]);
 	}
 	const [resumedTranscript, coldTranscript] = [
 		await transcriptOf(opener),
