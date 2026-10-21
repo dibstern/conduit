@@ -340,6 +340,11 @@ describe("Schema Migration", () => {
 					unique: false,
 				},
 				{
+					name: "idx_provider_command_outbox_run",
+					table: "provider_command_outbox",
+					unique: false,
+				},
+				{
 					name: "idx_provider_command_outbox_status",
 					table: "provider_command_outbox",
 					unique: false,

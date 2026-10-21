@@ -1456,6 +1456,9 @@ export const effectMigrationEntries = {
 			"run_id",
 			"ALTER TABLE provider_command_outbox ADD COLUMN run_id TEXT",
 		);
+		yield* executeSqlStatements(
+			"CREATE INDEX IF NOT EXISTS idx_provider_command_outbox_run ON provider_command_outbox(run_id)",
+		);
 		// Read legacy payload ownership once; every runtime reader uses the column.
 		yield* sql`UPDATE provider_command_outbox SET run_id = json_extract(payload_json, '$.runId')
 			WHERE effect_type = 'send_turn' AND run_id IS NULL AND json_valid(payload_json)`;
