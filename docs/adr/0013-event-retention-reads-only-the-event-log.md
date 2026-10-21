@@ -44,6 +44,11 @@ does not prove the child's death to drain. Markers survive reclamation,
 interrupted batches and projection resets, so late ingress cannot resurrect a
 reclaimed session. Orphans without their own marker are reported and retained.
 
+**Worktree ownership outlives session deletion.** Drain also keeps
+`session.workspace_changed` events for Conduit launches and branch renames so
+preserved checkouts remain discoverable with their current ownership; these
+events hold no Source lineage.
+
 **Born dead, checked by each writer (12A).** Every writer of
 `session.created` (session commands, the session manager, provider runtime
 ingestion and Claude event persistence) runs the death check inside the

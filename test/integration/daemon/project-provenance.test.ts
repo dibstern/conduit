@@ -257,21 +257,34 @@ describe("Project provenance through the built daemon", () => {
 					{ status: "completed", attempt_count: 1 },
 				]),
 			);
-			await browser.deleteSession(sessionId);
-			const manifest = provenance(fixture, slug);
-			for (const table of manifest.tables)
+			const beforeDelete = provenance(fixture, slug);
+			for (const table of beforeDelete.tables)
 				for (const row of table.rows)
 					expect(row.project, table.table).toBe(slug);
-			expect(manifest.events).toEqual(
+			expect(beforeDelete.events).toEqual(
 				expect.arrayContaining([
 					{ type: "session.created", project_id: slug, count: 1 },
-					{ type: "session.deleted", project_id: slug, count: 1 },
 					{ type: "permission.asked", project_id: slug, count: 1 },
 					{ type: "permission.resolved", project_id: slug, count: 1 },
 					{ type: "input.admitted", project_id: slug, count: 2 },
 					{ type: "input.sent", project_id: slug, count: 2 },
 				]),
 			);
+			await browser.deleteSession(sessionId);
+			const manifest = provenance(fixture, slug);
+			for (const table of manifest.tables)
+				for (const row of table.rows)
+					expect(row.project, table.table).toBe(slug);
+			expect(manifest.events).toContainEqual({
+				type: "session.deleted",
+				project_id: slug,
+				count: 1,
+			});
+			const { sessions } = await sendRpcRequest(
+				join(fixture.configDir, "relay.sock"),
+				{ _tag: "ListDaemonSessions", projectSlug: slug, scope: slug },
+			);
+			expect(sessions.some(({ id }) => id === sessionId)).toBe(false);
 			for (const command of outbox(fixture, slug)) {
 				expect(
 					fixture.marks.filter(
@@ -290,6 +303,7 @@ describe("Project provenance through the built daemon", () => {
 			expect(approvalExecutions).toBe(1);
 			projects.push({
 				projectId: slug,
+				beforeDelete,
 				...manifest,
 				executions: {
 					send: 2,

@@ -39,6 +39,15 @@ export const EVENT_RETENTION_HOLD_SQL = `
 export const makeEventRetention = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const { projectId } = yield* PersistenceProjectTag;
+	// Match cleanup discovery and readSessionWorktreeOwnership, including the
+	// launches that validate subsequent branch renames. These are not lineage holds.
+	const keptEvent = sql.literal(`(
+		(type = 'session.deleted' AND json_extract(data, '$.sessionId') IS session_id)
+		OR (type = 'session.workspace_changed' AND (
+			(json_extract(data, '$.cause') IS 'launch' AND json_extract(data, '$.origin') IS 'conduit')
+			OR json_extract(data, '$.cause') IS 'branch-rename'
+		))
+	)`);
 
 	const candidates = () => sql<{ session_id: string }>`
 		SELECT DISTINCT marker.session_id FROM events marker
@@ -48,8 +57,7 @@ export const makeEventRetention = Effect.gen(function* () {
 			AND EXISTS (
 				SELECT 1 FROM events other
 				WHERE other.project_id = ${projectId} AND other.session_id = marker.session_id
-					AND (other.type <> 'session.deleted'
-						OR json_extract(other.data, '$.sessionId') IS NOT other.session_id)
+					AND NOT ${keptEvent}
 			) ORDER BY marker.session_id`;
 	const holders = (sessionId: string) =>
 		sql.unsafe<{ holder_session_id: string; bound: number }>(
@@ -72,8 +80,7 @@ export const makeEventRetention = Effect.gen(function* () {
 				const reclaimable = yield* sql`SELECT 1 FROM events e
 					WHERE e.project_id = ${projectId} AND e.session_id = ${sessionId}
 						AND e.sequence > ${bound}
-						AND (e.type <> 'session.deleted'
-							OR json_extract(e.data, '$.sessionId') IS NOT e.session_id)
+						AND NOT ${keptEvent}
 					LIMIT 1`;
 				if (reclaimable.length === 0) continue;
 				while (true) {
@@ -96,8 +103,7 @@ export const makeEventRetention = Effect.gen(function* () {
 										SELECT e.sequence FROM events e
 										WHERE e.project_id = ${projectId} AND e.session_id = ${sessionId}
 											AND e.sequence > ${bound}
-											AND (e.type <> 'session.deleted'
-												OR json_extract(e.data, '$.sessionId') IS NOT e.session_id)
+											AND NOT ${keptEvent}
 										AND NOT EXISTS (
 											SELECT 1 FROM message_parts part
 												JOIN messages message ON message.id = part.message_id
@@ -138,8 +144,7 @@ export const makeEventRetention = Effect.gen(function* () {
 				SELECT COUNT(*) AS count FROM events e
 				WHERE e.project_id = ${projectId} AND e.session_id = ${sessionId}
 					AND e.sequence > ${bound}
-					AND (e.type <> 'session.deleted'
-						OR json_extract(e.data, '$.sessionId') IS NOT e.session_id)
+					AND NOT ${keptEvent}
 					AND EXISTS (
 						SELECT 1 FROM message_parts part
 						JOIN messages message ON message.id = part.message_id
@@ -173,8 +178,7 @@ export const makeEventRetention = Effect.gen(function* () {
 				AND NOT EXISTS (
 					SELECT 1 FROM events other
 					WHERE other.project_id = ${projectId} AND other.session_id = touched.value
-						AND (other.type <> 'session.deleted'
-							OR json_extract(other.data, '$.sessionId') IS NOT other.session_id)
+						AND NOT ${keptEvent}
 				)`;
 		return {
 			sessionsFreed: freed?.count ?? 0,
