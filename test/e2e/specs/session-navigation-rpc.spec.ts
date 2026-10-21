@@ -1425,7 +1425,9 @@ test("an inbox-queued reply clears guessed working and renders the queued messag
 	await page.locator("#input").fill("Waiting in the inbox");
 	await page.locator("#send").click();
 	await expect(
-		page.getByText("Waiting in the inbox", { exact: true }),
+		page
+			.getByRole("list", { name: "Queued messages", exact: true })
+			.getByText("Waiting in the inbox", { exact: true }),
 	).toBeVisible();
 	await expect(page.locator("#stop")).toBeHidden();
 	await testInfo.attach("queued-without-working", {
