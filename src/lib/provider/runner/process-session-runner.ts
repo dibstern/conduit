@@ -657,6 +657,11 @@ export const makeProcessSessionRunner = (
 				entry.failure = failure;
 				entry.recovering = false;
 				entry.connection?.destroy();
+				// A disconnected runner cannot finish account invalidation. Recovery
+				// will reacquire its holds from hello after the next server restart.
+				if (children.get(entry.sessionId) === entry)
+					for (const [sinkId, binding] of sinks)
+						if (binding.sessionId === entry.sessionId) releaseSink(sinkId);
 				yield* releaseEntryWaiters(entry, Cause.fail(failure));
 				log.warn(failure.message);
 			});
