@@ -15,6 +15,7 @@ export const makeProcessClaudeSessionRunner = (
 ) =>
 	makeProcessSessionRunner(deps, emit, {
 		driverKind: "claude",
+		admitsRecoveredSends: true,
 		connect: connectClaudeRunner,
 		settingsDeferredCode: CLAUDE_SETTINGS_REPLAY_DEFERRED,
 		snapshotCommandSettings: (snapshot) => ({
@@ -74,6 +75,7 @@ export const makeProcessClaudeSessionRunner = (
 			closing,
 			liveSession,
 			resolveSinkId,
+			sendTurn,
 		) =>
 			recoverClaudeRunnerCommands(
 				sql,
@@ -84,5 +86,6 @@ export const makeProcessClaudeSessionRunner = (
 				deps,
 				liveSession,
 				resolveSinkId,
+				sendTurn,
 			),
 	});

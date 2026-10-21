@@ -115,6 +115,8 @@ interface ProcessRunnerDeps {
 }
 
 export interface ProcessRunnerDriver {
+	/** Undelivered replays use the sendTurn callback's ordinary admission. */
+	readonly admitsRecoveredSends?: boolean;
 	readonly driverKind: string;
 	/** The payload resumes durable state on demand and needs no warm SDK query. */
 	readonly coldUpgrade?: true;
@@ -157,6 +159,11 @@ export interface ProcessRunnerDriver {
 			attempt: number,
 			nativeResumeFallback?: boolean,
 		) => string,
+		sendTurn: (
+			commandId: string,
+			command: Extract<SessionCommand, { type: "send-turn" }>,
+			attempt: number,
+		) => Effect.Effect<TurnResult | undefined, SessionFailure>,
 	) => Effect.Effect<
 		Effect.Success<
 			ReturnType<
@@ -514,8 +521,13 @@ export const makeProcessSessionRunner = (
 			children.delete(sessionId);
 			// Usability ends before the OS process does; keep it visible to liveness.
 			if ((entry.pid ?? entry.child?.pid) !== undefined) exiting.add(entry);
+			// Undelivered sends belong to admission, including across retirement.
 			for (const [sinkId, binding] of sinks)
-				if (binding.sessionId === sessionId) sinks.delete(sinkId);
+				if (
+					binding.sessionId === sessionId &&
+					(binding.accepted || !binding.pending)
+				)
+					sinks.delete(sinkId);
 		};
 		const releaseEntryWaiters = (
 			entry: RunnerChild,
@@ -1478,6 +1490,44 @@ export const makeProcessSessionRunner = (
 										(sinkId, failure) => {
 											const binding = sinks.get(sinkId);
 											if (!binding?.pending) return Effect.void;
+											if (
+												failure.code === "cancelled" &&
+												binding.runId &&
+												sessionIngestion
+											)
+												return entry.outputs
+													.withPermits(1)(
+														settleSessionRuns(
+															sql,
+															registration.sessionId,
+															failure.message,
+															(events) => sessionIngestion.ingestBatch(events),
+															{
+																errorCode: "cancelled",
+																owners: [{ runId: binding.runId }],
+															},
+														).pipe(
+															Effect.ensuring(
+																emit(
+																	{ type: "release-sink", sinkId },
+																	registration.sessionId,
+																).pipe(
+																	Effect.ignore,
+																	Effect.ensuring(
+																		Effect.sync(() => sinks.delete(sinkId)),
+																	),
+																),
+															),
+														),
+													)
+													.pipe(
+														Effect.catch((cause) =>
+															Effect.logError(
+																"Could not settle recovered cancellation",
+																cause,
+															),
+														),
+													);
 											return (
 												entry.failure
 													? Deferred.await(entry.stopped)
@@ -1503,7 +1553,8 @@ export const makeProcessSessionRunner = (
 										() => closing,
 										runner.getNativeSessionEffect(registration.sessionId),
 										(commandId, inputId, attempt, nativeResumeFallback) => {
-											entry.pendingSendCommands?.set(commandId, attempt);
+											if (!driver.admitsRecoveredSends)
+												entry.pendingSendCommands?.set(commandId, attempt);
 											const sinkId = runnerSinkId(
 												inputId,
 												attempt,
@@ -1517,6 +1568,26 @@ export const makeProcessSessionRunner = (
 														nativeResumeFallback,
 													);
 										},
+										(commandId, command, attempt) =>
+											sinks.get(command.sinkId)?.accepted
+												? connected.success.commandEffect(
+														commandId,
+														command,
+														attempt,
+													)
+												: runner.executeEffect(command, entry).pipe(
+														Effect.flatMap((result) =>
+															result.status === "cancelled"
+																? Effect.fail({
+																		...runnerFailure(
+																			"send-turn",
+																			"Input cancelled before intake",
+																		),
+																		code: "cancelled",
+																	})
+																: Effect.succeed(result),
+														),
+													),
 									)
 									.pipe(
 										Effect.provideServiceEffect(
@@ -1537,7 +1608,6 @@ export const makeProcessSessionRunner = (
 						yield* lock.withPermits(1)(
 							Effect.gen(function* () {
 								yield* ensureRecovering;
-								entry.commandsInFlight += commands.length;
 								const admissions: Deferred.Deferred<void>[] = [];
 								for (const command of commands) {
 									let binding = sinks.get(command.sinkId);
@@ -1559,6 +1629,10 @@ export const makeProcessSessionRunner = (
 										admissions.push(binding.admission);
 									}
 									const admission = binding.admission;
+									// Undelivered replays acquire admission through executeEffect.
+									const reattaching =
+										binding.accepted || !driver.admitsRecoveredSends;
+									if (reattaching) entry.commandsInFlight++;
 									runFork(
 										command.wait.pipe(
 											Effect.onExit(() => {
@@ -1597,7 +1671,7 @@ export const makeProcessSessionRunner = (
 											),
 											Effect.ensuring(
 												Effect.sync(() => {
-													entry.commandsInFlight--;
+													if (reattaching) entry.commandsInFlight--;
 													upgrade(registration.sessionId, entry);
 												}),
 											),
@@ -1701,19 +1775,27 @@ export const makeProcessSessionRunner = (
 
 			executeEffect(
 				command: Extract<SessionCommand, { type: "send-turn" }>,
+				recovered?: RunnerChild,
 			): Effect.Effect<TurnResult, SessionFailure>;
 			executeEffect(
 				command: Exclude<SessionCommand, { type: "send-turn" }>,
+				recovered?: RunnerChild,
 			): Effect.Effect<void, SessionFailure>;
 			executeEffect(
 				command: SessionCommand,
+				recovered?: RunnerChild,
 			): Effect.Effect<TurnResult | undefined, SessionFailure>;
 			executeEffect(
 				command: SessionCommand,
+				recovered?: RunnerChild,
 			): Effect.Effect<TurnResult | undefined, SessionFailure> {
+				const recoveredTurn =
+					command.type === "send-turn" && recovered
+						? sinks.get(command.sinkId)
+						: undefined;
 				const turn =
 					command.type === "send-turn"
-						? {
+						? (recoveredTurn ?? {
 								sessionId: command.input.sessionId,
 								inputId: command.input.inputId,
 								runId: command.input.runId,
@@ -1732,7 +1814,7 @@ export const makeProcessSessionRunner = (
 								pending: true,
 								accepted: false,
 								releaseRequested: false,
-							}
+							})
 						: undefined;
 				let child: RunnerChild | undefined;
 				let sentToRunner = false;
@@ -1794,6 +1876,21 @@ export const makeProcessSessionRunner = (
 										runnerFailure(command.type, "Runners are shutting down"),
 									);
 								const existing = children.get(sessionId);
+								if (
+									existing &&
+									existing !== recovered &&
+									(command.type === "send-turn" ||
+										command.type === "pre-warm") &&
+									!Deferred.isDoneUnsafe(existing.ready)
+								) {
+									if (command.type === "pre-warm")
+										return { entry: undefined, draining: false };
+									return {
+										entry: existing,
+										draining: true,
+										recoveryPending: true,
+									};
+								}
 								if (
 									outputOwner &&
 									(command.type === "answer-permission" ||
@@ -1978,6 +2075,17 @@ export const makeProcessSessionRunner = (
 						);
 						entry = selection.entry;
 						draining = selection.draining;
+						if ("recoveryPending" in selection && entry) {
+							const waiting = entry;
+							yield* Deferred.await(waiting.ready).pipe(
+								Effect.catch((failure) =>
+									children.get(sessionId) !== waiting && waiting.stopping
+										? Effect.void
+										: Effect.fail(failure),
+								),
+							);
+							continue;
+						}
 						if ("foldersPending" in selection) {
 							yield* Effect.sleep("10 millis");
 							continue;
@@ -1985,7 +2093,7 @@ export const makeProcessSessionRunner = (
 						if (selection.retire) {
 							const retiring = selection.retire;
 							yield* runner
-								.executeEffect({ type: "end-session", sessionId })
+								.executeEffect({ type: "end-session", sessionId }, retiring)
 								.pipe(
 									Effect.ensuring(
 										Effect.gen(function* () {
@@ -2013,7 +2121,21 @@ export const makeProcessSessionRunner = (
 					sentToRunner = false;
 					if (command.type === "pre-warm" && command.input.draftPreWarm)
 						entry.draftPreWarm = true;
-					const connection = yield* Deferred.await(entry.ready);
+					// Restored controls must still reach the old query while a send
+					// waits to rebind. That send is what keeps admission readiness gated.
+					const connection =
+						entry.connection &&
+						(entry === recovered ||
+							(command.type !== "send-turn" &&
+								command.type !== "pre-warm" &&
+								entry.verified &&
+								!entry.connection.closed &&
+								!entry.recovering &&
+								!entry.failure &&
+								!entry.stopping &&
+								!entry.idleExiting))
+							? entry.connection
+							: yield* Deferred.await(entry.ready);
 					if (
 						command.type === "pre-warm" &&
 						(entry.failure ||
@@ -2069,24 +2191,16 @@ export const makeProcessSessionRunner = (
 								`Runner build ${entry.buildId ?? "unknown"} cannot stop background tasks`,
 							),
 						);
-					const frozenEnv = entry.upgrade.state?.frozen
-						? entry.upgrade.state.snapshot?.options.env
-						: undefined;
 					const payload =
 						command.type === "send-turn"
 							? {
 									...command,
-									// Query matching and SDK launch must use the same frozen env.
-									...(frozenEnv
-										? { input: { ...command.input, shellEnv: frozenEnv } }
-										: {}),
 									...(entry.upgrade.state?.frozen
 										? driver.snapshotCommandSettings(
 												entry.upgrade.state.snapshot,
 											)
 										: {}),
-									shellEnv: frozenEnv ??
-										command.input.shellEnv ??
+									shellEnv: command.input.shellEnv ??
 										command.shellEnv ??
 										deps.shellEnv?.(command.input.workspaceRoot) ?? {
 											...process.env,
@@ -2126,6 +2240,10 @@ export const makeProcessSessionRunner = (
 						commandId = rows[0]?.command_id ?? commandId;
 					}
 					if (command.type === "end-session") {
+						if (!recovered)
+							for (const pending of pendingSends.values())
+								if (pending.sessionId === sessionId)
+									yield* Deferred.succeed(pending.cancelled, undefined);
 						return yield* connection
 							.commandEffect(commandId, payload)
 							.pipe(
@@ -2211,6 +2329,7 @@ export const makeProcessSessionRunner = (
 					Effect.onError((cause) => {
 						if (
 							command.type !== "send-turn" ||
+							recovered ||
 							!turn ||
 							closing ||
 							Failure.isInterruptedOnly(cause)
@@ -2238,14 +2357,23 @@ export const makeProcessSessionRunner = (
 							)
 						);
 					}),
-					Effect.onExit(() =>
+					Effect.onExit((exit) =>
 						Effect.gen(function* () {
 							const entry = child;
-							if (turn && command.type === "send-turn" && entry)
+							if (
+								!recoveredTurn &&
+								turn &&
+								command.type === "send-turn" &&
+								entry
+							)
 								yield* entry.outputs.withPermits(1)(
 									Effect.gen(function* () {
 										turn.pending = false;
-										if (turn.releaseRequested || entry.failure) {
+										if (
+											turn.releaseRequested ||
+											entry.failure ||
+											(recovered && Exit.isFailure(exit))
+										) {
 											yield* emit({
 												type: "release-sink",
 												sinkId: command.sinkId,
@@ -2254,7 +2382,7 @@ export const makeProcessSessionRunner = (
 										}
 									}),
 								);
-							else if (turn) turn.pending = false;
+							else if (!recoveredTurn && turn) turn.pending = false;
 							if (ending && --ending.ending === 0 && ending.endingReleased)
 								yield* Deferred.succeed(ending.endingReleased, undefined);
 						}),
@@ -2271,7 +2399,7 @@ export const makeProcessSessionRunner = (
 						Effect.ensuring(
 							Effect.gen(function* () {
 								pendingSends.delete(command.sinkId);
-								if (!sentToRunner) {
+								if (!sentToRunner && !recoveredTurn) {
 									sinks.delete(command.sinkId);
 									yield* emit({
 										type: "release-sink",
@@ -2285,5 +2413,8 @@ export const makeProcessSessionRunner = (
 			}
 		}
 		const runner = new ProcessSessionRunner();
-		return runner;
+		const sessionRunner: SessionRunner & {
+			readonly recoverEffect: Effect.Effect<void, SessionFailure>;
+		} = runner;
+		return sessionRunner;
 	});
