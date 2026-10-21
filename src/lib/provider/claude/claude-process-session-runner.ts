@@ -54,11 +54,13 @@ export const makeProcessClaudeSessionRunner = (
 		sameAccountLogin: (a, b) =>
 			sameClaudeLogin(
 				{
+					...a,
 					root: a.root,
 					configDir: normalizeClaudeLaunchInput({ configDir: a.configDir })
 						.configDir,
 				},
 				{
+					...b,
 					root: b.root,
 					configDir: normalizeClaudeLaunchInput({ configDir: b.configDir })
 						.configDir,

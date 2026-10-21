@@ -558,13 +558,17 @@ export const makeContinuation = Effect.gen(function* () {
 								yield* Effect.sync(() =>
 									engine.bindSession(sessionId, account.id),
 								);
-								yield* engine.dispatchEffect({
-									type: "end_session",
-									commandId: randomUUID(),
-									sessionId,
-									targetProviderId: continued.previousInstanceId,
-									account: source,
-								});
+								// Same-driver account switches rebind on the next send. The
+								// process adapter negotiates query reuse with the live runner;
+								// older runners still drain and restart at that boundary.
+								if (source.driver !== account.driver)
+									yield* engine.dispatchEffect({
+										type: "end_session",
+										commandId: randomUUID(),
+										sessionId,
+										targetProviderId: continued.previousInstanceId,
+										account: source,
+									});
 								yield* preWarmSession(sessionId, account).pipe(
 									Effect.catch((error) =>
 										Effect.flatMap(LoggerTag, (log) =>

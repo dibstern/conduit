@@ -67,6 +67,8 @@ export interface RunnerHello {
 	readonly stopsTasks?: true;
 	/** Every event produced by a send carries its conduit run identity. */
 	readonly stampsRunIds?: true;
+	/** The session controller survives an idle account/query rebind. */
+	readonly rebindsAccount?: true;
 	readonly taggedConfigDir?: true;
 	readonly bindings?: readonly {
 		readonly sinkId: string;

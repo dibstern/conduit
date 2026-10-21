@@ -1010,6 +1010,28 @@ function query(params: {
 				readFileSync(rejectedResume, "utf8") === params.options.resume
 			) {
 				mark({ kind: "resume-rejected", prompt, queryId, sessionId });
+				if (
+					proof &&
+					existsSync(join(dirname(proof), "rejected-resume-as-result"))
+				) {
+					yield {
+						type: "result",
+						subtype: "error_during_execution",
+						uuid: randomUUID(),
+						session_id: sessionId,
+						is_error: true,
+						errors: [`No conversation found with session ID: ${sessionId}`],
+						duration_ms: 0,
+						duration_api_ms: 0,
+						num_turns: 0,
+						stop_reason: null,
+						total_cost_usd: 0,
+						usage: taskStopUsage,
+						modelUsage: {},
+						permission_denials: [],
+					};
+					return;
+				}
 				throw new Error(`No conversation found with session ID: ${sessionId}`);
 			}
 			if (request === "fail-before-assistant-restart") {
@@ -1065,6 +1087,27 @@ function query(params: {
 					permission_denials: [],
 				};
 				continue;
+			}
+			if (request === "approval-rebind-1" && proof) {
+				const messageId = readFileSync(
+					join(
+						dirname(proof),
+						`rebind-first-${params.options?.env?.["CONDUIT_SESSION_ID"]}`,
+					),
+					"utf8",
+				);
+				// An old message can be replayed by a newly opened account query.
+				// Its ownership still belongs to the run that created that message.
+				yield stream(sessionId, {
+					type: "message_start",
+					message: { id: messageId, role: "assistant", content: [] },
+				});
+				yield stream(sessionId, {
+					type: "content_block_start",
+					index: 9,
+					content_block: { type: "text", text: "late-from-account-A" },
+				});
+				yield stream(sessionId, { type: "content_block_stop", index: 9 });
 			}
 			// Native resume validation precedes intake, as it does in the CLI.
 			yield {
@@ -1618,6 +1661,14 @@ function query(params: {
 						? [existsSync(workspaceFile) ? "present" : "absent"]
 						: responseChunks(prompt);
 			const messageId = randomUUID();
+			if (request === "approval-rebind-0" && proof)
+				writeFileSync(
+					join(
+						dirname(proof),
+						`rebind-first-${params.options?.env?.["CONDUIT_SESSION_ID"]}`,
+					),
+					messageId,
+				);
 			const assistantUuid = request.startsWith("rewind-")
 				? randomUUID()
 				: messageId;
@@ -1876,6 +1927,46 @@ function query(params: {
 				}
 				if (turn.failAfterTools)
 					throw new Error("Harness failure after workspace writes");
+			}
+			if (request === "goal-rebind") {
+				yield {
+					type: "assistant",
+					uuid: randomUUID(),
+					session_id: sessionId,
+					parent_tool_use_id: null,
+					message: {
+						id: randomUUID(),
+						role: "assistant",
+						model: "<synthetic>",
+						content: [{ type: "text", text: "Goal set: After rebinding" }],
+					},
+				} as SDKMessage;
+			}
+			if (request.startsWith("approval-rebind-")) {
+				// A resumed SDK query replays identical native facts. The controller
+				// must retain fact deduplication across account-bound queries.
+				yield {
+					type: "active_goal",
+					uuid: "00000000-0000-4000-8000-000000000001",
+					session_id: sessionId,
+					value: {
+						condition: "Finish the rebind",
+						iterations: 0,
+						set_at: 1234,
+						tokens_at_start: 0,
+					},
+				};
+				yield {
+					type: "user",
+					uuid: "00000000-0000-4000-8000-000000000002",
+					session_id: sessionId,
+					isSynthetic: true,
+					parent_tool_use_id: null,
+					message: {
+						role: "user",
+						content: "Stop hook feedback:\n[Finish the rebind]: Keep going",
+					},
+				};
 			}
 			if (request.startsWith("question-")) {
 				if (!params.options?.canUseTool)

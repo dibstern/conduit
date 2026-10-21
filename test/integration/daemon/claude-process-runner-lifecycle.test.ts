@@ -440,6 +440,81 @@ describe("Claude runner admission socket probes", () => {
 		);
 	}, 30_000);
 
+	it.each([
+		"abort",
+		"already-aborted",
+		"interrupt",
+		"continuation-interrupt",
+	])("cancels an undelivered send during adoption via %s", async (mode) => {
+		const fixture = await probe("delayed");
+		probes.push(fixture);
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* fixture.make;
+					const recovery = yield* Effect.forkChild(runner.recoverEffect);
+					yield* Deferred.await(fixture.received);
+					const send = yield* Effect.forkChild(
+						runner.executeEffect({
+							...fixture.send,
+							aborted: mode === "already-aborted",
+							input: {
+								...fixture.send.input,
+								...(mode === "continuation-interrupt"
+									? { continuation: { cutOffMessageId: "original-user" } }
+									: {}),
+							},
+						}),
+					);
+					if (mode !== "already-aborted") {
+						yield* Effect.sleep("20 millis");
+						if (mode === "abort")
+							yield* runner.executeEffect({
+								type: "abort",
+								sinkId: fixture.send.sinkId,
+							});
+						else {
+							yield* Effect.forkChild(
+								runner.executeEffect({
+									type: "interrupt",
+									sessionId: fixture.send.input.sessionId,
+									turnIds: ["unrelated-input"],
+								}),
+							);
+							yield* Effect.sleep("20 millis");
+							expect(fixture.outputs).not.toContainEqual({
+								type: "release-sink",
+								sinkId: fixture.send.sinkId,
+							});
+							yield* Effect.forkChild(
+								runner.executeEffect({
+									type: "interrupt",
+									sessionId: fixture.send.input.sessionId,
+									turnIds: [
+										mode === "continuation-interrupt"
+											? "original-user"
+											: fixture.send.input.inputId,
+									],
+								}),
+							);
+						}
+					}
+					expect(
+						yield* Fiber.join(send).pipe(Effect.timeout("2 seconds")),
+					).toMatchObject({ status: "cancelled" });
+					expect(fixture.commands).not.toContain("send-turn");
+					expect(fixture.outputs).toContainEqual({
+						type: "release-sink",
+						sinkId: fixture.send.sinkId,
+					});
+					fixture.allowHello();
+					yield* Fiber.join(recovery);
+					expect(fixture.commands).not.toContain("send-turn");
+				}),
+			),
+		);
+	}, 15_000);
+
 	it("makes pre-warm a no-op while adoption is retrying", async () => {
 		const fixture = await probe("reject");
 		probes.push(fixture);

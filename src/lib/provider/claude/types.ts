@@ -27,7 +27,11 @@ import type {
 } from "../types.js";
 import type { ClaudeGoalTracker } from "./claude-goal-tracker.js";
 import type { ClaudeMessageOwnership } from "./claude-message-ownership.js";
-import type { ClaudeConfigDir, ClaudeLaunchConfig } from "./claude-sdk-env.js";
+import type {
+	ClaudeConfigDir,
+	ClaudeLaunchConfig,
+	ClaudeLogin,
+} from "./claude-sdk-env.js";
 import type { ClaudeSubagentTranscriptCursor } from "./claude-subagent-materializer.js";
 import type { EffectPromptQueueClosed } from "./effect-prompt-queue.js";
 
@@ -218,8 +222,28 @@ export interface ClaudeSubagentLivePoller {
  * Per-session Claude state keyed by conduit sessionId. The Effect-owned Claude
  * provider runtime stores these contexts and owns the SDK stream fibers.
  */
+/** State retained by the session controller when its account-bound query closes. */
+export interface ClaudeSessionController {
+	readonly goalTracker: ClaudeGoalTracker;
+	readonly pendingApprovals: Map<string, PendingApproval>;
+	readonly pendingQuestions: Map<string, PendingQuestion>;
+	readonly messageOwnership: ClaudeMessageOwnership;
+	readonly messageOwnershipPermit: Semaphore.Semaphore;
+	readonly messageRunIds: Map<string, string>;
+	readonly toolRunIds: Map<string, string>;
+	readonly toolMessageIds: Map<string, string>;
+	readonly subagentTasks: Map<string, ClaudeSubagentTaskContext>;
+	readonly subagentPollers: Map<string, ClaudeSubagentLivePoller>;
+	readonly subagentTranscripts: Map<string, ClaudeSubagentTranscriptCursor>;
+	readonly failedSubagentSessions: Set<string>;
+}
+
 export interface ClaudeSessionContext {
 	readonly sessionId: string;
+	readonly controller?: ClaudeSessionController;
+	readonly login?: ClaudeLogin;
+	/** Query replacement leaves controller ownership open; session end closes it. */
+	rebinding?: boolean;
 	readonly instanceId?: string;
 	readonly nativeThread?: NativeThread | undefined;
 	readonly workspaceRoot: string;

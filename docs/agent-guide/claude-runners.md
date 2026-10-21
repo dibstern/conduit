@@ -140,6 +140,22 @@ uses its hash.
 File mentions, the file browser, terminal cwd and Conduit's Claude settings lookup
 continue to use only the main folder.
 
+Claude runners advertise `rebindsAccount: true` in hello. A same-driver account
+continuation retains the session controller and waits for quiescence before the
+next send closes its SDK query and opens one with the selected login. Login
+comparison includes account identity, account env and frozen shell env as well
+as the config folder. The new query reads its account's native settings; an old
+upgrade snapshot cannot supply another account's credentials. Goal fact
+deduplication, message/run ownership and interaction routing remain with the
+controller, including native-resume fallback. Old query callbacks keep their
+stopped context. Runners without the capability drain and restart on that send.
+Pre-warm hints leave a live controller on its current login; unused warm queries
+can still be replaced before the first send.
+
+The isolated regressions are `test/integration/daemon/claude-account-rebind.test.ts`
+and `claude-controller-failure.test.ts`. The process test writes its observations
+and runner cleanup evidence to `/tmp/82tn9-3-account-rebind.json`.
+
 ## Runner upgrades
 
 Upgrades reuse the ordinary spawn and pre-warm paths. The old runner keeps serving

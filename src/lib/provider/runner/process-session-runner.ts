@@ -92,6 +92,7 @@ interface RunnerChild {
 	connection?: RunnerSocket;
 	buildId?: string;
 	stopsTasks?: boolean;
+	rebindsAccount?: boolean;
 	draftPreWarm?: boolean;
 	candidate?: boolean;
 	commandsInFlight: number;
@@ -131,10 +132,16 @@ export interface ProcessRunnerDriver {
 		a: {
 			readonly configDir: import("./session-runner.js").SessionTurn["configDir"];
 			readonly root: string;
+			readonly account?: SessionTurn["account"];
+			readonly instanceId?: string;
+			readonly shellEnv?: SessionTurn["shellEnv"];
 		},
 		b: {
 			readonly configDir: import("./session-runner.js").SessionTurn["configDir"];
 			readonly root: string;
+			readonly account?: SessionTurn["account"];
+			readonly instanceId?: string;
+			readonly shellEnv?: SessionTurn["shellEnv"];
 		},
 	) => boolean;
 	readonly recoverCommands: (
@@ -162,6 +169,13 @@ export interface ProcessRunnerDriver {
 }
 
 const log = createLogger("process-session-runner");
+const CANCELLED_TURN: TurnResult = {
+	status: "cancelled",
+	cost: 0,
+	tokens: { input: 0, output: 0 },
+	durationMs: 0,
+	providerStateUpdates: [],
+};
 
 const stop = (
 	entry: Pick<
@@ -413,6 +427,15 @@ export const makeProcessSessionRunner = (
 				accepted: boolean;
 				admission?: Deferred.Deferred<void>;
 				releaseRequested: boolean;
+			}
+		>();
+		// These sends have no runner ownership yet, including while rebinding.
+		const pendingSends = new Map<
+			string,
+			{
+				sessionId: string;
+				turnId: string;
+				cancelled: Deferred.Deferred<void>;
 			}
 		>();
 		let closing = false;
@@ -768,6 +791,7 @@ export const makeProcessSessionRunner = (
 						yield* acknowledgeSends(sessionId, entry, connection);
 						entry.buildId = hello.buildId;
 						entry.stopsTasks = hello.stopsTasks === true;
+						entry.rebindsAccount = hello.rebindsAccount === true;
 						entry.upgrade.state = hello.upgradeState;
 						for (const binding of entry.candidate
 							? []
@@ -1715,8 +1739,35 @@ export const makeProcessSessionRunner = (
 				let admitted: RunnerChild | undefined;
 				let admittedSessionId = "";
 				let ending: RunnerChild | undefined;
-				return Effect.gen(function* () {
+				let cancelled: Deferred.Deferred<void> | undefined;
+				const execute = Effect.gen(function* () {
+					if (command.type === "send-turn" && cancelled) {
+						pendingSends.set(command.sinkId, {
+							sessionId: command.input.sessionId,
+							turnId:
+								command.input.continuation?.cutOffMessageId ??
+								command.input.inputId,
+							cancelled,
+						});
+						sentToRunner = false;
+					}
 					const outputOwner = yield* currentRunnerOutput;
+					if (command.type === "abort") {
+						const pending = pendingSends.get(command.sinkId);
+						if (pending) {
+							yield* Deferred.succeed(pending.cancelled, undefined);
+							return;
+						}
+					}
+					if (command.type === "interrupt") {
+						for (const pending of pendingSends.values())
+							if (
+								pending.sessionId === command.sessionId &&
+								(command.turnIds === undefined ||
+									command.turnIds.includes(pending.turnId))
+							)
+								yield* Deferred.succeed(pending.cancelled, undefined);
+					}
 					if (command.type === "shutdown") {
 						yield* shutdown;
 						return;
@@ -1788,10 +1839,12 @@ export const makeProcessSessionRunner = (
 										launch !== undefined &&
 										!driver.sameAccountLogin(
 											{
+												...launch,
 												configDir: launch.configDir,
 												root: launch.workspaceRoot,
 											},
 											{
+												...command.input,
 												configDir: command.input.configDir,
 												root: command.input.workspaceRoot,
 											},
@@ -1831,13 +1884,21 @@ export const makeProcessSessionRunner = (
 												foldersPending: true,
 											};
 										}
-										existing.endingReleased = yield* Deferred.make<void>();
-										existing.ending++;
-										return {
-											entry: existing,
-											draining: true,
-											retire: existing,
-										};
+										// New Claude payloads replace only the SDK query. Keep the
+										// quiescence wait above, and the old restart for older peers.
+										if (
+											foldersChanged ||
+											upgradeByRestart ||
+											!existing.rebindsAccount
+										) {
+											existing.endingReleased = yield* Deferred.make<void>();
+											existing.ending++;
+											return {
+												entry: existing,
+												draining: true,
+												retire: existing,
+											};
+										}
 									}
 								}
 								if (
@@ -2097,6 +2158,12 @@ export const makeProcessSessionRunner = (
 							);
 						yield* Effect.never;
 					}
+					if (command.type === "send-turn") {
+						const pending = pendingSends.get(command.sinkId);
+						if (pending && Deferred.isDoneUnsafe(pending.cancelled))
+							return CANCELLED_TURN;
+						pendingSends.delete(command.sinkId);
+					}
 					sentToRunner = true;
 					if (command.type === "send-turn")
 						entry.pendingSendCommands?.set(
@@ -2193,6 +2260,28 @@ export const makeProcessSessionRunner = (
 						}),
 					),
 				);
+				if (command.type !== "send-turn") return execute;
+				return Effect.gen(function* () {
+					cancelled = yield* Deferred.make<void>();
+					if (command.aborted) yield* Deferred.succeed(cancelled, undefined);
+					return yield* Effect.raceFirst(
+						Deferred.await(cancelled).pipe(Effect.as(CANCELLED_TURN)),
+						execute,
+					).pipe(
+						Effect.ensuring(
+							Effect.gen(function* () {
+								pendingSends.delete(command.sinkId);
+								if (!sentToRunner) {
+									sinks.delete(command.sinkId);
+									yield* emit({
+										type: "release-sink",
+										sinkId: command.sinkId,
+									}).pipe(Effect.ignore);
+								}
+							}),
+						),
+					);
+				});
 			}
 		}
 		const runner = new ProcessSessionRunner();
