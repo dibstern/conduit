@@ -191,13 +191,12 @@ describe("project shell environment", () => {
 			NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>
 		>(() => createMockQuery([makeSuccessResult()]));
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: project,
-			shellEnv: (directory) => env.get(directory),
 			queryFactory,
 		});
 		await Effect.runPromise(
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
+					shellEnv: env.get(project),
 					workspaceRoot: project,
 					model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
 					configDir: configuredClaudeConfigDir("/named/claude"),
@@ -243,11 +242,10 @@ describe("project shell environment", () => {
 			NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>
 		>(() => createMockQuery([makeSuccessResult()]));
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: project,
-			shellEnv: (directory) => env.get(directory),
 			queryFactory,
 		});
 		const input = makeBaseSendTurnInput({
+			shellEnv: env.get(project),
 			workspaceRoot: project,
 			model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
 			account: {
@@ -284,13 +282,12 @@ describe("project shell environment", () => {
 		});
 		await env.refresh(project);
 		const resumed = makeTestClaudeProviderInstance({
-			workspaceRoot: project,
-			shellEnv: (directory) => env.get(directory),
 			queryFactory,
 		});
 		const resumedResult = await Effect.runPromise(
 			resumed.sendTurnEffect({
 				...input,
+				shellEnv: env.get(project),
 				nativeThread: { ...nativeThread, projectId: "test-project" },
 				resumeSessionId: nativeThread.resumeSessionId,
 				providerState: Object.fromEntries(
@@ -318,13 +315,12 @@ describe("project shell environment", () => {
 			});
 		const namedConfigDir = join(home, "explicit-instance");
 		const namedInstance = makeTestClaudeProviderInstance({
-			workspaceRoot: project,
-			shellEnv: (directory) => env.get(directory),
 			queryFactory,
 		});
 		const namedResult = await Effect.runPromise(
 			namedInstance.sendTurnEffect({
 				...input,
+				shellEnv: env.get(project),
 				account: {
 					id: AccountIdSchema.make("claude"),
 					name: "Claude",
@@ -564,8 +560,6 @@ describe("project shell environment", () => {
 			NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>
 		>(() => createMockQuery([makeSuccessResult()]));
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: project,
-			shellEnv: (directory) => env.get(directory),
 			queryFactory,
 		});
 		const send = async (sessionId: string) => {
@@ -573,6 +567,7 @@ describe("project shell environment", () => {
 			await Effect.runPromise(
 				instance.sendTurnEffect(
 					makeBaseSendTurnInput({
+						shellEnv: env.get(project),
 						workspaceRoot: project,
 						sessionId,
 						model: { providerId: "claude", modelId: "claude-sonnet-4-5" },

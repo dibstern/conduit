@@ -58,6 +58,7 @@ import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
 } from "../domain/daemon/Services/opencode-instances-service.js";
+import { ProviderAdapters } from "../domain/daemon/Services/provider-adapters.js";
 import {
 	makeSessionActivity,
 	SessionActivityTag,
@@ -174,10 +175,7 @@ import { ClaudeProviderInstance } from "../provider/claude/claude-provider-insta
 import { captureClaudeLaunchLogin } from "../provider/claude/claude-sdk-env.js";
 import { defaultClaudeSessionForkSdk } from "../provider/claude/claude-session-fork.js";
 import { makeClaudeUsageReader } from "../provider/claude/claude-usage-probe.js";
-import {
-	makeOrchestrationRuntimeLayer,
-	type OrchestrationRuntimeLayerOptions,
-} from "../provider/orchestration-wiring.js";
+import { makeOrchestrationRuntimeLayer } from "../provider/orchestration-wiring.js";
 import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import { SqliteProviderSessionBindingReadModel } from "../provider/provider-session-binding-read-model.js";
 import { usageAccounts } from "../provider/usage-reader.js";
@@ -251,6 +249,7 @@ const relayOpenCodeInstances = (
 /** Services promised to callers of ProjectRelay.effectRuntime. */
 export type RelayRuntimeServices =
 	| SessionDirectory
+	| ProviderAdapters
 	| AccountDirectory
 	| SessionActivityTag
 	| ConfigTag
@@ -295,9 +294,7 @@ export interface RelayRuntime {
 
 export interface ProjectRelayLayerInputs {
 	config: ProjectRelayConfig;
-	claudeRunnerFactory?: OrchestrationRuntimeLayerOptions["claudeRunnerFactory"];
 	testSendLimit?: number;
-	onBackgroundWorkChanged: (sessionId: string) => void;
 	/** Undefined until startup finishes; runner adoption publishes before then. */
 	getWsHandler: () => WebSocketHandlerShape | undefined;
 }
@@ -305,9 +302,7 @@ export interface ProjectRelayLayerInputs {
 /** Build the shared per-project Layer graph and its managed runtime. */
 export function createProjectRelayLayers({
 	config,
-	claudeRunnerFactory,
 	testSendLimit,
-	onBackgroundWorkChanged,
 	getWsHandler,
 }: ProjectRelayLayerInputs) {
 	const claudeSdk = config.claudeSdk ?? {
@@ -460,31 +455,16 @@ export function createProjectRelayLayers({
 		),
 	).pipe(Layer.provideMerge(activityLayer));
 	// Orchestration runtime layer (provider instance routing)
-	const orchestrationRuntimeLayer = Layer.unwrap(
-		Effect.map(SessionActivityTag, (activity) =>
-			makeOrchestrationRuntimeLayer({
-				...(config.shellEnv && { shellEnv: config.shellEnv }),
-				...(config.prepareShellEnv && {
-					prepareShellEnv: config.prepareShellEnv,
-				}),
-				onBackgroundTask: (transition) => {
-					if (activity.background.record(transition))
-						onBackgroundWorkChanged(transition.sessionId);
-				},
-				claudeQueryFactory: claudeSdk.query,
-				claudeGenerateTextQueryFactory:
-					config.titleQuery ?? claudeSdk.titleQuery,
-				claudeSessionForkSdk: claudeSdk.fork,
-				...(config.claudeSdk?.subagentSdk && {
-					claudeSubagentSdk: config.claudeSdk.subagentSdk,
-				}),
-				...(claudeRunnerFactory && { claudeRunnerFactory }),
-				...(config.projectDir != null && { workspaceRoot: config.projectDir }),
-				extraFolders: config.extraFolders ?? [],
-				...(config.configDir != null ? { configDir: config.configDir } : {}),
-			}),
-		),
-	).pipe(Layer.provide(activityLayer));
+	const orchestrationRuntimeLayer = makeOrchestrationRuntimeLayer({
+		...(config.shellEnv && { shellEnv: config.shellEnv }),
+		...(config.prepareShellEnv && {
+			prepareShellEnv: config.prepareShellEnv,
+		}),
+		claudeSessionForkSdk: claudeSdk.fork,
+		...(config.projectDir != null && { workspaceRoot: config.projectDir }),
+		extraFolders: config.extraFolders ?? [],
+		...(config.configDir != null ? { configDir: config.configDir } : {}),
+	});
 
 	const sharedUsage = config.usage;
 	const usageLayer = sharedUsage
@@ -765,6 +745,14 @@ export function createProjectRelayLayers({
 		},
 	);
 	const pendingInteractionServiceLayer = PendingInteractionServiceLive;
+	const providerAdaptersLayer = Layer.sync(ProviderAdapters, () =>
+		Option.getOrThrow(
+			Context.getOption(
+				config.daemonConfigContext ?? Context.empty(),
+				ProviderAdapters,
+			),
+		),
+	);
 	const providerOrchestrationDeps = Layer.mergeAll(
 		daemonConfigLayer,
 		sessionWorkspaceLayer,
@@ -782,6 +770,7 @@ export function createProjectRelayLayers({
 		// Recovery can publish a completed run while orchestration is adopted.
 		Layer.provide(HandoffReceiptsLive),
 		Layer.provide(providerOrchestrationDeps),
+		Layer.provideMerge(providerAdaptersLayer),
 	);
 	const agentLivenessLayer = Layer.effect(
 		AgentLivenessTag,

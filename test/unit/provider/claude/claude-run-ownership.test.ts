@@ -55,7 +55,6 @@ describe("Claude accepted run ownership", () => {
 				catch: (cause) => new EventSinkIngestionError({ cause }),
 			});
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: "/tmp",
 			subagentSdk: {
 				listSubagents: async () => [],
 				getSubagentMessages: async () => [],
@@ -305,7 +304,6 @@ describe("Claude accepted run ownership", () => {
 				catch: (cause) => new EventSinkIngestionError({ cause }),
 			}).pipe(Effect.asVoid);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: "/tmp",
 			queryFactory: ({ prompt }) => {
 				if (typeof prompt === "string")
 					throw new Error("Expected streaming input");
@@ -556,7 +554,6 @@ describe("Claude accepted run ownership", () => {
 				catch: (cause) => new EventSinkIngestionError({ cause }),
 			}).pipe(Effect.asVoid);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: "/tmp",
 			queryFactory: ({ prompt }) => {
 				if (typeof prompt === "string")
 					throw new Error("Expected streaming input");
@@ -811,7 +808,6 @@ describe("Claude accepted run ownership", () => {
 	it("recalls an already-aborted input before creating a native query", async () => {
 		const queryFactory = vi.fn(() => createMockQuery([]));
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: "/tmp",
 			queryFactory,
 		});
 		const controller = new AbortController();
@@ -851,7 +847,6 @@ describe("Claude accepted run ownership", () => {
 				catch: (cause) => new EventSinkIngestionError({ cause }),
 			}).pipe(Effect.asVoid);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: "/tmp",
 			queryFactory: ({ prompt }) => {
 				if (typeof prompt === "string")
 					throw new Error("Expected streaming input");
@@ -1007,7 +1002,6 @@ describe("Claude accepted run ownership", () => {
 				events.push(event);
 			});
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: "/tmp",
 			queryFactory: ({ prompt }) => {
 				if (typeof prompt === "string")
 					throw new Error("Expected streaming input");
@@ -1098,7 +1092,6 @@ describe("Claude accepted run ownership", () => {
 					)
 				: Effect.void;
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: "/tmp",
 			runnerFactory: (deps, emit) =>
 				makeClaudeSessionRunner(
 					{
@@ -1167,7 +1160,6 @@ describe("Claude accepted run ownership", () => {
 				events.push(event);
 			});
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: "/tmp",
 			queryFactory: () =>
 				Object.assign(createMockQuery([]), {
 					[Symbol.asyncIterator]: () =>
@@ -1229,7 +1221,6 @@ describe("Claude accepted run ownership", () => {
 				events.push(event);
 			});
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: "/tmp",
 			queryFactory: ({ prompt }) => {
 				if (typeof prompt === "string")
 					throw new Error("Expected streaming input");
@@ -1329,7 +1320,6 @@ describe("Claude accepted run ownership", () => {
 				})(),
 		});
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: "/tmp",
 			queryFactory: () => query,
 		});
 		const send = Effect.runPromise(
@@ -1375,7 +1365,6 @@ describe("Claude accepted run ownership", () => {
 		const inputId = "11111111-1111-4111-8111-111111111111";
 		const sink = createMockEventSink();
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: "/tmp",
 			queryFactory: () =>
 				createMockQuery([
 					{
@@ -1450,7 +1439,6 @@ describe("Claude accepted run ownership", () => {
 				events.push(event);
 			});
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: "/tmp",
 			queryFactory: ({ prompt }) => {
 				if (typeof prompt === "string")
 					throw new Error("Expected streaming input");

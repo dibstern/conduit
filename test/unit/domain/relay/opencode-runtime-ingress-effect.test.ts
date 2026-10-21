@@ -46,11 +46,11 @@ import { createSilentLogger } from "../../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import type { ProjectionRunnerEffect } from "../../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { opencodeSessionCreatedRuntimeEvent } from "../../../../src/lib/provider/opencode/opencode-runtime-event-translator.js";
-import { createProjectRelay } from "../../../../src/lib/relay/relay-stack.js";
 import {
 	makeMockConfig,
 	makeMockOpenCodeAPI,
 } from "../../../helpers/mock-factories.js";
+import { createTestProjectRelay as createProjectRelay } from "../../../helpers/project-relay.js";
 import {
 	makeSSEEvent,
 	makeUnknownSSEEvent,

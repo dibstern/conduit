@@ -16,7 +16,7 @@ import { it as effectIt } from "@effect/vitest";
 import { Effect, Exit, Fiber, Result } from "effect";
 import { afterEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { AccountIdSchema } from "../../../../src/lib/contracts/account.js";
-import { CursorAccountResources } from "../../../../src/lib/provider/cursor/cursor-account-resources.js";
+import type { CursorAccountResources } from "../../../../src/lib/provider/cursor/cursor-account-resources.js";
 import { makeCursorAuth } from "../../../../src/lib/provider/cursor/cursor-auth.js";
 import {
 	cursorModelInfo,
@@ -58,7 +58,7 @@ function setup() {
 	return {
 		root,
 		port,
-		driver: makeCursorRunnerDriver(process.cwd(), port, undefined, root),
+		driver: makeCursorRunnerDriver(port, undefined, root),
 	};
 }
 function observe(
@@ -136,7 +136,6 @@ describe("Cursor ephemeral text generation with captured SDK traffic", () => {
 						},
 					};
 					const driver = makeCursorRunnerDriver(
-						process.cwd(),
 						shared,
 						undefined,
 						root,

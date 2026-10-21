@@ -94,7 +94,6 @@ describe("Claude permission ownership during startup cleanup", () => {
 			Effect.gen(function* () {
 				const owner = yield* makeRunnerProviderInstance(
 					{
-						workspaceRoot: root,
 						accounts: Effect.die("This test does not resolve accounts"),
 					},
 					{

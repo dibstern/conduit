@@ -346,8 +346,12 @@ export const makeClaudeRunnerLaunch = (
 					daemonConfigDir = config.daemonConfigDir;
 					sessionRunner = yield* makeClaudeSessionRunner(
 						{
-							...config,
-							shellEnv: () => shellEnv,
+							...(config.daemonConfigDir !== undefined
+								? { daemonConfigDir: config.daemonConfigDir }
+								: {}),
+							...(config.subagentPollTimeoutMs !== undefined
+								? { subagentPollTimeoutMs: config.subagentPollTimeoutMs }
+								: {}),
 							queryFactory: createQuery,
 							...(sessionForkSdk ? { sessionForkSdk } : {}),
 							prepareQuery: async () => {

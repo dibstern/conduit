@@ -330,7 +330,6 @@ describe("in-process Claude session runner", () => {
 				Effect.gen(function* () {
 					const runner = yield* makeClaudeSessionRunner(
 						{
-							workspaceRoot: "/tmp/ws",
 							daemonConfigDir: getConfigDir(),
 							queryFactory,
 							capabilitiesService,
@@ -434,7 +433,6 @@ describe("in-process Claude session runner", () => {
 				Effect.gen(function* () {
 					const runner = yield* makeClaudeSessionRunner(
 						{
-							workspaceRoot: "/tmp/ws",
 							daemonConfigDir: getConfigDir(),
 							queryFactory,
 							capabilitiesService,

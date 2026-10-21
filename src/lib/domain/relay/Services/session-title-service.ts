@@ -127,16 +127,7 @@ export const makeSessionTitleServiceLive = (
 				Effect.gen(function* () {
 					const provider = yield* providers.getInstanceEffect(account.driver);
 					const rawTitle = yield* provider.generateTextEffect({
-						account:
-							account.driver === "claude"
-								? {
-										...account,
-										folder: {
-											...account.folder,
-											path: resolve(config.projectDir, account.folder.path),
-										},
-									}
-								: account,
+						account,
 						model: { providerId: pick.providerId, modelId: pick.modelId },
 						effort: pick.effort,
 						instructions: TITLE_INSTRUCTIONS,
@@ -302,5 +293,3 @@ export const makeSessionTitleServiceLive = (
 			} satisfies SessionTitleService;
 		}),
 	);
-
-import { resolve } from "node:path";

@@ -22,10 +22,10 @@ import {
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
-	createProjectRelay,
 	type ProjectRelay,
 	RelayCreationAbortedError,
 } from "../../../src/lib/relay/relay-stack.js";
+import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
 
 interface MockOpenCode {
 	server: Server;

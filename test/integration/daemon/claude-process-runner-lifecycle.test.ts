@@ -114,7 +114,7 @@ function started(harness: ProcessHarness) {
 describe("Claude runner admission socket probes", () => {
 	const probes: Array<Awaited<ReturnType<typeof probe>>> = [];
 
-	async function probe(mode: "idle" | "reject" | "delayed") {
+	async function probe(mode: "idle" | "reject" | "delayed", orphan = false) {
 		// Runner test marks are plain IPC objects; Vitest's fork uses encoded IPC.
 		const send = process.send;
 		if (send)
@@ -168,6 +168,7 @@ describe("Claude runner admission socket probes", () => {
 		const socketPath = join(directory, runnerId);
 		const sockets = new Set<Socket>();
 		const commands: string[] = [];
+		const helloRoots: Array<string | undefined> = [];
 		const outputs: import("../../../src/lib/provider/runner/session-runner.js").SessionOutput[] =
 			[];
 		const received = await Effect.runPromise(Deferred.make<void>());
@@ -209,6 +210,7 @@ describe("Claude runner admission socket probes", () => {
 					if (message.type === "output-reply")
 						Deferred.doneUnsafe(released, Effect.void);
 					if (message.type === "hello") {
+						helloRoots.push(message.config?.workspaceRoot);
 						if (mode === "delayed") {
 							delayedPeer = peer;
 							Deferred.doneUnsafe(received, Effect.void);
@@ -257,6 +259,7 @@ describe("Claude runner admission socket probes", () => {
 			socketPath,
 			buildId: BUILD_ID,
 			pid,
+			...(orphan ? { role: "candidate" as const } : {}),
 		});
 		const runnerPids = new Set([pid]);
 		const fixture = {
@@ -268,6 +271,7 @@ describe("Claude runner admission socket probes", () => {
 			server,
 			sockets,
 			commands,
+			helloRoots,
 			outputs,
 			received,
 			released,
@@ -288,7 +292,11 @@ describe("Claude runner admission socket probes", () => {
 				if (delayedPeer) replyHello(delayedPeer);
 			},
 			make: makeProcessClaudeSessionRunner(
-				{ workspaceRoot, daemonConfigDir: configDir },
+				{
+					projectRootForSession: () =>
+						Effect.succeed(orphan ? undefined : workspaceRoot),
+					daemonConfigDir: configDir,
+				},
 				(output) =>
 					Effect.sync(() => {
 						outputs.push(output);
@@ -352,6 +360,7 @@ describe("Claude runner admission socket probes", () => {
 						result: context.task.result?.state,
 						attempts: fixture.attempts,
 						commands: fixture.commands,
+						helloRoots: fixture.helloRoots,
 						outputs: fixture.outputs,
 						cleanup,
 					},
@@ -366,6 +375,22 @@ describe("Claude runner admission socket probes", () => {
 		vi.unstubAllEnvs();
 		vi.restoreAllMocks();
 	});
+
+	it("retires an orphan candidate through an identity hello without starting provider work", async () => {
+		const fixture = await probe("idle", true);
+		probes.push(fixture);
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* fixture.make;
+					yield* runner.recoverEffect;
+					expect(fixture.helloRoots).toEqual([fixture.configDir]);
+					expect(fixture.commands).toEqual(["shutdown"]);
+					expect(testRunnerAlive(fixture.child.pid ?? 0)).toBe(false);
+				}),
+			),
+		);
+	}, 15_000);
 
 	it("releases a pending send's retained sink when its caller is cancelled", async () => {
 		const fixture = await probe("idle");

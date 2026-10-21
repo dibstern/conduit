@@ -82,7 +82,7 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 	beforeEach(() => {
 		client = makeStubClient();
 		instance = new OpenCodeProviderInstance({
-			client,
+			clientForSession: () => Effect.succeed(client),
 			clientForAccount: () => Effect.succeed(client),
 		});
 	});
@@ -154,7 +154,7 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 			},
 		});
 		instance = new OpenCodeProviderInstance({
-			client,
+			clientForSession: () => Effect.succeed(client),
 			clientForAccount: () => Effect.succeed(client),
 		});
 
@@ -173,7 +173,7 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 			},
 		});
 		instance = new OpenCodeProviderInstance({
-			client,
+			clientForSession: () => Effect.succeed(client),
 			clientForAccount: () => Effect.succeed(client),
 		});
 
@@ -192,7 +192,7 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 			},
 		});
 		instance = new OpenCodeProviderInstance({
-			client,
+			clientForSession: () => Effect.succeed(client),
 			clientForAccount: () => Effect.succeed(client),
 		});
 
@@ -213,8 +213,8 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 
 	it("passes the explicit workspace directory for command/skill discovery", async () => {
 		instance = new OpenCodeProviderInstance({
-			client,
-			workspaceRoot: "/constructor",
+			clientForSession: () => Effect.succeed(client),
+
 			clientForAccount: () => Effect.succeed(client),
 		});
 
@@ -236,8 +236,8 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 			Effect.succeed(routed[account.id === "a" ? 0 : 1] ?? client),
 		);
 		const provider: ProviderInstance = new OpenCodeProviderInstance({
-			client,
-			workspaceRoot: "/constructor",
+			clientForSession: () => Effect.succeed(client),
+
 			clientForAccount,
 		});
 		await Promise.all(

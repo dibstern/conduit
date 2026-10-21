@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { join, resolve } from "node:path";
-import { Effect, Fiber, Option, Schema } from "effect";
+import { join } from "node:path";
+import { Effect, Fiber, Schema } from "effect";
 import type { Account } from "../../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import {
@@ -31,6 +31,11 @@ export const makeClaudeRunnerDriver = (
 		call?: ProviderCall,
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> => {
 		return Effect.gen(function* () {
+			const directory = call?.workspaceRoot ?? workspaceRoot;
+			if (!directory)
+				return yield* Effect.fail(
+					new Error("Claude discovery requires a workspace directory"),
+				);
 			const selectedAccount = call?.account ?? account;
 			const configDir =
 				selectedAccount?.driver === "claude"
@@ -41,7 +46,7 @@ export const makeClaudeRunnerDriver = (
 							).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null))),
 						).configDir;
 			return yield* discoverCapabilitiesEffect(
-				call?.workspaceRoot ?? workspaceRoot ?? deps.workspaceRoot,
+				directory,
 				deps.capabilitiesService,
 				configDir,
 				options,
@@ -80,10 +85,7 @@ export const makeClaudeRunnerDriver = (
 					}),
 					(cwd) =>
 						makeClaudeOneShot({
-							configDir: {
-								...account.folder,
-								path: resolve(deps.workspaceRoot, account.folder.path),
-							},
+							configDir: account.folder,
 							...(account.env ? { accountEnv: account.env } : {}),
 							cwd,
 							systemPrompt: input.instructions,
@@ -213,22 +215,6 @@ export const makeClaudeRunnerDriver = (
 						models.find((item) => item.id === "default") ?? models[0];
 					if (!inferred) return;
 					model = { providerId: inferred.providerId, modelId: inferred.id };
-				}
-				const prepareShellEnv = input.shellEnv
-					? undefined
-					: deps.prepareShellEnv;
-				if (prepareShellEnv) {
-					// Keep capture owned by the resolver when this request times out.
-					const ready = yield* Effect.tryPromise({
-						try: () => prepareShellEnv(input.workspaceRoot),
-						catch: (cause) =>
-							new ProviderInstanceFailure({
-								providerId: "claude",
-								operation: "preWarmSession",
-								cause,
-							}),
-					}).pipe(Effect.timeoutOption("10 seconds"));
-					if (Option.isNone(ready) || !ready.value) return;
 				}
 				const claudeSettingsOverrides = yield* Effect.try({
 					try: () => deps.claudeSettingsOverrides?.(),

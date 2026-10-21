@@ -1,3 +1,4 @@
+import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
 // Comprehensive verification of the monitoring reducer end-to-end (18 scenarios):
 //
 // Group 1 (1-4): SSE coverage and grace period
@@ -34,10 +35,7 @@ import { createSilentLogger } from "../../../src/lib/logger.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import {
-	createProjectRelay,
-	type ProjectRelay,
-} from "../../../src/lib/relay/relay-stack.js";
+import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
 import { TestWsClient } from "../../integration/helpers/test-ws-client.js";
 

@@ -47,6 +47,18 @@ export const configuredClaudeConfigDir = (path: string): ClaudeConfigDir => ({
 	path,
 });
 
+/** Account folders belong to the daemon's launch cwd, independently of query cwd. */
+export const resolveClaudeAccountFolder = (
+	folder: ClaudeConfigDir,
+): ClaudeConfigDir => ({
+	...folder,
+	path: resolve(
+		folder.path === "~" || folder.path.startsWith("~/")
+			? homedir() + folder.path.slice(1)
+			: folder.path,
+	),
+});
+
 /** Whether two launches log in through the same folder; a relative folder resolves against its own workspace. */
 export const sameClaudeLogin = (
 	a: { readonly configDir: ClaudeConfigDir; readonly root: string },

@@ -34,6 +34,7 @@ import { type GlobalSettingTag, WsRpcError } from "../contracts/ws-rpc.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { ConfigPersistenceTag } from "../domain/daemon/Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../domain/daemon/Services/daemon-config-ref.js";
+import { ProviderAdapters } from "../domain/daemon/Services/provider-adapters.js";
 import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import {
 	SessionDirectory,
@@ -64,7 +65,6 @@ import { formatErrorDetail } from "../errors.js";
 import { withCachedProjectGit } from "../git/session-git.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger, type Logger } from "../logger.js";
-import { makeClaudeSessionRunner } from "../provider/claude/claude-provider-runtime.js";
 import type { OrchestrationLayer } from "../provider/orchestration-wiring.js";
 import { getClientIp, parseCookies } from "../server/http-utils.js";
 import type { PushNotificationSender } from "../server/push.js";
@@ -414,10 +414,6 @@ export interface RelayStack {
 export async function createProjectRelay(
 	config: ProjectRelayConfig,
 ): Promise<ProjectRelay> {
-	// Choose before loading the env-module fake, which also loads in the runner child.
-	const claudeRunnerFactory = config.claudeSdk
-		? makeClaudeSessionRunner
-		: undefined;
 	// Child-process tests load their fake at the existing SDK factory seam.
 	// Normal launches never import test code or change provider selection.
 	const testQueryModule = process.env["CONDUIT_TEST_CLAUDE_QUERY_MODULE"];
@@ -447,8 +443,6 @@ export async function createProjectRelay(
 		testSendLimit = 10_000;
 	}
 	const log = config.log ?? createLogger("relay");
-	// Only this relay's runtime changes stamp its own store after startup.
-	let announceBackgroundWork: ((sessionId: string) => void) | undefined;
 	const sseLog = log.child("sse");
 	const statusLog = log.child("status-poller");
 	const pollerLog = log.child("msg-poller");
@@ -473,9 +467,7 @@ export async function createProjectRelay(
 
 	const layers = createProjectRelayLayers({
 		config,
-		...(claudeRunnerFactory && { claudeRunnerFactory }),
 		...(testSendLimit !== undefined && { testSendLimit }),
-		onBackgroundWorkChanged: (sessionId) => announceBackgroundWork?.(sessionId),
 		getWsHandler: () => wsHandler,
 	});
 	const { effectRuntime } = layers;
@@ -491,7 +483,6 @@ export async function createProjectRelay(
 		initialDefaultVariant,
 		layers,
 	});
-	announceBackgroundWork = startup.announceBackgroundWork;
 	const api = startup.api;
 	wsHandler = startup.wsHandler;
 	const continuationSweep = layers.relayManagedRuntime.runFork(
@@ -781,14 +772,16 @@ export async function createRelayStack(
 				`${slug}.events.db`,
 			);
 			const parentContext = await relay.effectRuntime.runtime.context();
-			const daemonContext = Context.pick(
-				DaemonConfigRefTag,
-				ConfigPersistenceTag,
-				AccountDirectory,
-				SessionActivityTag,
-			)(parentContext).pipe(
-				Context.add(ProjectManagementServiceTag, projectManagement(slug)),
-			);
+			const daemonContext = Context.merge(
+				config.daemonConfigContext ?? Context.empty(),
+				Context.pick(
+					DaemonConfigRefTag,
+					ConfigPersistenceTag,
+					AccountDirectory,
+					SessionActivityTag,
+					ProviderAdapters,
+				)(parentContext),
+			).pipe(Context.add(ProjectManagementServiceTag, projectManagement(slug)));
 			const newRelay = await createProjectRelay({
 				httpServer,
 				daemonConfigContext: daemonContext,

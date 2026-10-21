@@ -38,6 +38,7 @@ import {
 	ProjectRegistryTag,
 	projectInfos,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { ProviderAdapters } from "../../../src/lib/domain/daemon/Services/provider-adapters.js";
 import {
 	makeSessionActivity,
 	SessionActivityTag,
@@ -49,6 +50,7 @@ import {
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import { daemonSessionGitCache } from "../../../src/lib/git/session-git.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeDaemonStoreTestLayer } from "../../helpers/daemon-rpc.js";
@@ -104,6 +106,13 @@ describe("HttpServerRefTag", () => {
 
 describe("RelayFactoryTag", () => {
 	const configLayer = Layer.mergeAll(
+		Layer.sync(ProviderAdapters, () => ({
+			registry: new ProviderRegistry(),
+			recoveryProjects: [],
+			registerProject: () => Effect.void,
+			projectFailed: () => Effect.void,
+			recover: Effect.void,
+		})),
 		makeDaemonStoreTestLayer(),
 		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		InstanceHealthCheckLive,

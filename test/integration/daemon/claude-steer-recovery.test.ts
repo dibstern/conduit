@@ -14,8 +14,8 @@ import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-s
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { createProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
+import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
 
 function inbox(harness: ProcessHarness, sessionId: string) {
 	const db = new Database(harness.daemonStorePath(), { readonly: true });

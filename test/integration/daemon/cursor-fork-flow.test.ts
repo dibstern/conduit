@@ -190,7 +190,7 @@ it("creates Cursor forks and Side Threads locally and seeds their current inheri
 					);
 					expect(expectedDigest).toContain("Fork-local context at first turn");
 					expect(expectedDigest).not.toContain("Original source context");
-					const driver = makeCursorRunnerDriver(root, port, { read, state });
+					const driver = makeCursorRunnerDriver(port, { read, state });
 					const runner = yield* makeCursorSessionRunner(
 						{
 							workspaceRoot: root,

@@ -498,6 +498,11 @@ async function main(): Promise<void> {
 		const resourceIdentities = new WeakMap<object, number>();
 		const observedOwners = new WeakSet<object>();
 		const observedScopes = new WeakSet<object>();
+		const resourceGenerations = new Map<string, number>();
+		const activeResources = new Map<
+			string,
+			{ resourceIdentity: number; generation: number }
+		>();
 		let nextResourceIdentity = 0;
 		const createClaude = ClaudeDriver.create;
 		Object.assign(ClaudeDriver, {
@@ -523,6 +528,18 @@ async function main(): Promise<void> {
 											)
 												yield* Effect.sleep("10 millis");
 											yield* invalidate(accountId);
+											const resource = activeResources.get(accountId);
+											if (resource) {
+												// invalidate returns after closing the exact account scope.
+												record({
+													kind: "account-scope-close",
+													driver: "cursor",
+													accountId,
+													...resource,
+													cause: "invalidation-completed",
+												});
+												activeResources.delete(accountId);
+											}
 											record({ kind: "invalidation-end", accountId });
 										}),
 								});
@@ -545,12 +562,27 @@ async function main(): Promise<void> {
 										if (identity === undefined) {
 											identity = ++nextResourceIdentity;
 											resourceIdentities.set(resource, identity);
+											const generation =
+												(resourceGenerations.get(accountId) ?? 0) + 1;
+											resourceGenerations.set(accountId, generation);
+											activeResources.set(accountId, {
+												resourceIdentity: identity,
+												generation,
+											});
+											record({
+												kind: "account-scope-open",
+												driver: "cursor",
+												accountId,
+												resourceIdentity: identity,
+												generation,
+											});
 										}
 										record({
 											kind: "account-scope-use",
 											driver: "cursor",
 											accountId,
 											resourceIdentity: identity,
+											generation: resourceGenerations.get(accountId),
 										});
 										return work(resource);
 									}),
@@ -570,6 +602,7 @@ async function main(): Promise<void> {
 					kind: "adapter-constructed",
 					driver: instance.providerId,
 					identity,
+					constructorName: instance.constructor.name,
 				});
 				const send = instance.sendTurnEffect.bind(instance);
 				instance.sendTurnEffect = (input) =>
@@ -583,6 +616,7 @@ async function main(): Promise<void> {
 							accountId: input.account?.id,
 							workspaceRoot: input.workspaceRoot,
 							extraFolders: input.extraFolders,
+							shellMarker: input.shellEnv?.["PROJECT_OWNER"],
 						});
 						return send(input);
 					});

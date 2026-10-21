@@ -20,20 +20,11 @@ import {
 	bindTurnTimelineSink,
 	observeTurnTimelineFrame,
 } from "../../domain/daemon/Services/turn-timeline.js";
-import {
-	type PendingInteractionService,
-	PendingInteractionServiceTag,
-} from "../../domain/relay/Services/pending-interaction-service.js";
-import {
-	type ProviderRuntimeIngestion,
-	type ProviderRuntimeIngestionError,
-	ProviderRuntimeIngestionTag,
+import type { PendingInteractionService } from "../../domain/relay/Services/pending-interaction-service.js";
+import type {
+	ProviderRuntimeIngestion,
+	ProviderRuntimeIngestionError,
 } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
-import { ConfigTag } from "../../domain/relay/Services/services.js";
-import {
-	makeProcessingTimeoutHooks,
-	type OverridesStateTag,
-} from "../../domain/relay/Services/session-overrides-state.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../errors-utils.js";
 import { createLogger } from "../../logger.js";
@@ -67,7 +58,7 @@ import {
 	runnerFailure as sessionFailure,
 } from "./runner-protocol.js";
 import { settleUnclaimedRunnerCommands } from "./runner-recovery.js";
-import { discoverAllRunners, discoverRunners } from "./runner-registry.js";
+import { discoverAllRunners } from "./runner-registry.js";
 import { failRunnerTurn } from "./runner-turn-failure.js";
 import type {
 	SessionCommand,
@@ -144,7 +135,6 @@ export interface RunnerRecoveryDependencies {
 }
 
 export interface RunnerProviderInstanceDeps {
-	readonly workspaceRoot: string;
 	readonly accounts: Effect.Effect<AccountsState, DaemonConfigLoadError>;
 	readonly daemonConfigDir?: string;
 	readonly projectRootForSession?: (
@@ -221,34 +211,10 @@ export class RunnerProviderInstance implements ProviderInstance {
 		Deferred.Deferred<void>
 	>();
 
-	readonly recoverRunnerEffect = Effect.gen({ self: this }, function* () {
-		if (this.deps.recoveryForSession)
-			return yield* this.recoverProjectContextsEffect(
-				this.deps.recoveryForSession,
-			);
-		const ingestion = yield* ProviderRuntimeIngestionTag;
-		const pending = yield* PendingInteractionServiceTag;
-		const timeoutRuntime = yield* Effect.context<OverridesStateTag>();
-		return yield* this.recoverWithContexts((sessionId) =>
-			Effect.succeed({
-				ingestion,
-				pending,
-				timeoutHooks: makeProcessingTimeoutHooks(timeoutRuntime, sessionId),
-			}),
-		);
-	});
-
 	private recoverWithContexts = (
-		recoveryForSession: (
-			sessionId: string,
-		) => Effect.Effect<
-			| Pick<
-					RunnerRecoveryDependencies,
-					"ingestion" | "pending" | "timeoutHooks"
-			  >
-			| undefined
+		recoveryForSession: NonNullable<
+			RunnerProviderInstanceDeps["recoveryForSession"]
 		>,
-		daemonRecovery?: RunnerProviderInstanceDeps["recoveryForSession"],
 		sessionIds?: ReadonlySet<string>,
 	) =>
 		Effect.gen({ self: this }, function* () {
@@ -279,16 +245,8 @@ export class RunnerProviderInstance implements ProviderInstance {
 				yield* sessionIds
 					? (this.runner.attachSessionsEffect?.([...sessionIds]) ?? Effect.void)
 					: this.runner.recoverEffect;
-				const config = yield* Effect.serviceOption(ConfigTag);
 				const registrations = yield* Effect.try(() =>
-					daemonRecovery
-						? discoverAllRunners(this.deps.daemonConfigDir)
-						: discoverRunners(
-								config._tag === "Some"
-									? config.value.projectDir
-									: this.deps.workspaceRoot,
-								this.deps.daemonConfigDir,
-							),
+					discoverAllRunners(this.deps.daemonConfigDir),
 				).pipe(
 					Effect.catch((error) =>
 						Effect.logError("Could not verify runner ownership", error).pipe(
@@ -352,7 +310,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 						// failRunnerTurn logs errors; database failures still need a retry.
 						if (persistenceError) return yield* Effect.fail(persistenceError);
 					}),
-				daemonRecovery,
+				recoveryForSession,
 				sessionIds,
 			);
 		});
@@ -374,16 +332,12 @@ export class RunnerProviderInstance implements ProviderInstance {
 		this.providerId = driver.driverKind;
 	}
 
-	recoverEffect() {
-		return this.recoverRunnerEffect;
-	}
-
 	recoverProjectContextsEffect(
 		recoveryForSession: NonNullable<
 			RunnerProviderInstanceDeps["recoveryForSession"]
 		>,
 	) {
-		return this.recoverWithContexts(recoveryForSession, recoveryForSession);
+		return this.recoverWithContexts(recoveryForSession);
 	}
 
 	attachSessionsEffect(
@@ -392,11 +346,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 			RunnerProviderInstanceDeps["recoveryForSession"]
 		>,
 	) {
-		return this.recoverWithContexts(
-			recoveryForSession,
-			recoveryForSession,
-			new Set(sessionIds),
-		);
+		return this.recoverWithContexts(recoveryForSession, new Set(sessionIds));
 	}
 
 	private commandEffect(

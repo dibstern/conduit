@@ -192,7 +192,6 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 			return query;
 		});
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory,
 			capabilitiesService: makeCapabilitiesService(),
 		});
@@ -263,7 +262,6 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 		const { query, setModel } = makeMockQuery(gen);
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: vi.fn(() => query),
 			capabilitiesService: makeCapabilitiesService(),
 		});
@@ -320,7 +318,6 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 				}),
 		);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: vi.fn(() => query),
 			capabilitiesService: makeCapabilitiesService(),
 		});
@@ -372,7 +369,6 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 		})();
 		const { query, applyFlagSettings, setModel } = makeMockQuery(gen);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: vi.fn(() => query),
 			capabilitiesService: makeCapabilitiesService(),
 		});
@@ -472,7 +468,6 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 		const { query, applyFlagSettings, setModel } = makeMockQuery(gen);
 		applyFlagSettings.mockRejectedValueOnce(new Error("flag settings failed"));
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: vi.fn(() => query),
 			capabilitiesService: makeCapabilitiesService(),
 		});
@@ -537,7 +532,6 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 		})();
 		const { query, applyFlagSettings, setModel } = makeMockQuery(gen);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: vi.fn(() => query),
 			capabilitiesService: makeCapabilitiesService(),
 		});
@@ -605,7 +599,6 @@ describe("ClaudeProviderInstance mid-session setting changes", () => {
 		})();
 		const { query, setModel } = makeMockQuery(gen);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: vi.fn(() => query),
 			capabilitiesService: makeCapabilitiesService(),
 		});

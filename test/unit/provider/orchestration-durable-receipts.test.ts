@@ -929,7 +929,7 @@ describe("OrchestrationEngine durable controls", () => {
 	);
 
 	it.effect(
-		"engine shutdown releases a detached delivery before shutting its provider down",
+		"engine shutdown releases a detached delivery and leaves its borrowed provider alive",
 		() =>
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -948,11 +948,6 @@ describe("OrchestrationEngine durable controls", () => {
 						),
 					),
 				);
-				vi.mocked(instance.shutdownEffect).mockImplementation(() =>
-					Effect.sync(() => {
-						calls.push("provider shutdown");
-					}),
-				);
 				const command = controlCommand("interrupt_turn");
 				const waiter = yield* Effect.forkChild(engine.dispatchEffect(command));
 				yield* Deferred.await(entered);
@@ -960,7 +955,8 @@ describe("OrchestrationEngine durable controls", () => {
 				const callsBeforeShutdown = [...calls];
 				yield* engine.shutdownEffect();
 				expect(callsBeforeShutdown).toEqual([]);
-				expect(calls).toEqual(["delivery released", "provider shutdown"]);
+				expect(calls).toEqual(["delivery released"]);
+				expect(instance.shutdownEffect).not.toHaveBeenCalled();
 				expect((yield* receiptRow(sql, command.commandId))?.status).toBe(
 					"side_effect_requested",
 				);

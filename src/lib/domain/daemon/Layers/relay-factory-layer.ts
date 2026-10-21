@@ -199,12 +199,13 @@ export const RelayFactoryLive = (
 	| PushManagerTag
 	| OpenCodeInstancesTag
 	| PersistenceStore
+	| ProviderAdapters
 > =>
 	Layer.effect(
 		RelayFactoryTag,
 		Effect.gen(function* () {
 			const accounts = yield* AccountDirectory;
-			const providerAdapters = yield* Effect.serviceOption(ProviderAdapters);
+			const providerAdapters = yield* ProviderAdapters;
 			const cursorResources = yield* Effect.serviceOption(
 				CursorAccountResources,
 			);
@@ -518,11 +519,7 @@ export const RelayFactoryLive = (
 									).pipe(
 										Context.add(ConfigPersistenceTag, configPersistence),
 										Context.add(AccountDirectory, accounts),
-										Context.merge(
-											Option.isSome(providerAdapters)
-												? Context.make(ProviderAdapters, providerAdapters.value)
-												: Context.empty(),
-										),
+										Context.add(ProviderAdapters, providerAdapters),
 										Context.merge(
 											Option.isSome(cursorResources)
 												? Context.make(
