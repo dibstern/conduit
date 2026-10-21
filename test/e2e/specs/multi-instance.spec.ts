@@ -359,7 +359,7 @@ test.describe("Claude defaults", () => {
 		});
 	}
 
-	test("a model-only Claude pick keeps its original account after the default changes", async ({
+	test("a model-only Claude pick follows the default account when it changes", async ({
 		page,
 		baseURL,
 	}, testInfo) => {
@@ -384,14 +384,16 @@ test.describe("Claude defaults", () => {
 		await page.getByTestId("settings-close-btn").click();
 		await expect(
 			page.locator('#input-area [data-testid="harness-logo"]:visible').first(),
-		).toHaveAttribute("data-account", "claude");
-		await page.locator("#input").fill("Use my model on the original account");
+		).toHaveAttribute("data-account", "personal");
+		await page
+			.locator("#input")
+			.fill("Use my model on the new default account");
 		await page.locator("#send").click();
 		const created = await rpc.waitForRequest(
 			(request) => request.tag === "CreateSession",
 		);
 		expect(created.payload).toMatchObject({
-			instanceId: "claude",
+			instanceId: "personal",
 			model: { providerId: "claude", modelId: "shared" },
 		});
 		await testInfo.attach("model-only-creation.json", {

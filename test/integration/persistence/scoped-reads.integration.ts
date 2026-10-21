@@ -1088,14 +1088,16 @@ describe("Event-owned tool results", () => {
 
 	it("backfills only byte-identical latest completions in the same session", async () => {
 		const legacyFile = filename();
+		const migrations = Object.entries(effectMigrationEntries).sort(
+			([a], [b]) => Number.parseInt(a, 10) - Number.parseInt(b, 10),
+		);
+		const toolResultEventRefsIndex = migrations.findIndex(([key]) =>
+			key.endsWith("_tool_result_event_refs"),
+		);
 		await Effect.runPromise(
 			Effect.scoped(
 				makeEffectSqlMigrator(
-					Object.fromEntries(
-						Object.entries(effectMigrationEntries).filter(
-							([key]) => !key.endsWith("_tool_result_event_refs"),
-						),
-					),
+					Object.fromEntries(migrations.slice(0, toolResultEventRefsIndex)),
 				).pipe(Effect.provide(SqliteClient.layer({ filename: legacyFile }))),
 			),
 		);

@@ -22,7 +22,16 @@ if (reviewerClaudeConfigDir !== undefined)
 	process.env["CONDUIT_TEST_REAL_CLAUDE_CONFIG_DIR"] = reviewerClaudeConfigDir;
 delete process.env["CLAUDE_CONFIG_DIR"];
 mkdirSync(process.env["HOME"], { recursive: true });
-afterAll(() => rmSync(testEnvironment, { recursive: true, force: true }));
+// A store closing (or a drain it kicked) can still be writing here; Node
+// retries ENOTEMPTY with backoff instead of failing the whole file.
+afterAll(() =>
+	rmSync(testEnvironment, {
+		recursive: true,
+		force: true,
+		maxRetries: 5,
+		retryDelay: 100,
+	}),
+);
 
 // 0. Git hooks (lefthook pre-commit runs the suite) export GIT_DIR,
 //    GIT_INDEX_FILE and friends. A test that inherits them and runs `git init`

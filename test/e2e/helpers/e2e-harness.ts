@@ -260,8 +260,14 @@ export async function createReplayHarness(
 		JSON.stringify({ defaultModel: "anthropic/claude-opus-4-5-20251101" }),
 	);
 
+	// Native fork initialization writes here, never to the launch shell's login.
+	const nativeTranscriptsDir = path.join(configDir, "claude");
 	const claudeReplayer =
-		options.claudeReplay && createClaudeTraceReplayer(options.claudeReplay);
+		options.claudeReplay &&
+		createClaudeTraceReplayer({
+			...options.claudeReplay,
+			nativeTranscriptsDir,
+		});
 	const eventsDbPath = path.join(configDir, "events.db");
 	saveRelaySettings(
 		{
@@ -278,14 +284,15 @@ export async function createReplayHarness(
 		{
 			...defaultDaemonConfig(),
 			avatar: { kind: "initial" },
-			...(claudeInstanceId !== undefined && {
+			...(claudeReplayer && {
 				instances: [
 					{
-						id: claudeInstanceId,
-						name: claudeInstanceId,
+						id: claudeInstanceId ?? "claude",
+						name: claudeInstanceId ?? "Claude",
 						port: 0,
 						managed: false,
 						driver: "claude",
+						configDir: nativeTranscriptsDir,
 					},
 				],
 			}),

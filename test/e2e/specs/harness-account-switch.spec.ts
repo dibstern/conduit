@@ -31,6 +31,7 @@ const generalToolResult = "ACCOUNT-SWITCH-GENERAL-TOOL-RESULT";
 const handoffMarker = "[Conduit context handoff]";
 
 test.use({
+	locale: new Intl.DateTimeFormat().resolvedOptions().locale,
 	harnessOptions: {
 		// The fake SDK writes limit transcripts and gates beside the proof file.
 		restartProof: true,
@@ -2966,19 +2967,8 @@ for (const behavior of [
 				const nativeForks = proofMarks().filter(
 					(mark) => mark.kind === "native-fork",
 				);
-				if (behavior === "fork-uncovered") expect(nativeForks).toHaveLength(0);
-				else
-					expect(nativeForks).toEqual([
-						expect.objectContaining({
-							parentSessionId:
-								nativeParent?.kind === "query"
-									? nativeParent.sessionId
-									: undefined,
-							sessionId: fork.sessionId,
-							configDir: expectedAccount.configDir,
-							upToMessageId: point.id,
-						}),
-					]);
+				// Native launch happens on the first turn, without SDK forkSession().
+				expect(nativeForks).toHaveLength(0);
 				const forkPrompt = `Continue the ${behavior} fork.`;
 				await Effect.runPromise(
 					browser.rpc["input.submit"]({
@@ -2993,15 +2983,16 @@ for (const behavior of [
 					.poll(() =>
 						harness
 							.claudeOptions()
-							.find((call) => call.prompt?.endsWith(forkPrompt)),
+							.filter((call) => call.prompt?.endsWith(forkPrompt)),
 					)
-					.toBeDefined();
+					.toHaveLength(1);
 				const call = harness
 					.claudeOptions()
 					.find((call) => call.prompt?.endsWith(forkPrompt));
 				expect(call?.configDir).toBe(expectedAccount.configDir);
 				if (behavior === "fork-uncovered") {
 					expect(call?.resumeId).toBeNull();
+					expect(call?.options).not.toHaveProperty("forkSession", true);
 					expect(call?.prompt).toContain(handoffMarker);
 					expect(call?.prompt).toContain(first);
 					expect(call?.prompt).toContain(cutOff);
@@ -3015,7 +3006,14 @@ for (const behavior of [
 					).toBeLessThanOrEqual(16_000);
 					expect(call?.prompt).toMatch(/omitted [1-9]\d* messages/);
 				} else {
-					expect(call?.resumeId).toBe(fork.sessionId);
+					expect(call?.resumeId).toBe(
+						nativeParent?.kind === "query" ? nativeParent.sessionId : undefined,
+					);
+					expect(call?.options).toMatchObject({
+						forkSession: true,
+						sessionId: fork.sessionId,
+						resumeSessionAt: point.id,
+					});
 					expect(call?.prompt).toBe(forkPrompt);
 				}
 				evidence["fork"] = {

@@ -115,6 +115,12 @@ export const DoneOnLocalhost: Story = {
 			(
 				await canvas.findByRole("button", { name: /Enable Push Notifications/ })
 			).click();
+			// The lazy import and service-worker attempt must settle before pushStatus is warn.
+			await canvas.findByText(
+				/Could not enable push:|Notification permission was denied|Push notifications are not supported/,
+				{},
+				{ timeout: 15_000 },
+			);
 			(await canvas.findByRole("button", { name: "Finish anyway" })).click();
 			(await canvas.findByRole("button", { name: "Open Conduit" })).click();
 			expect(location.origin).toBe(new URL(startUrl).origin);

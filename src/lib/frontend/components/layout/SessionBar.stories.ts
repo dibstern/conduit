@@ -657,7 +657,12 @@ export const ViewsSheetOpen: Story = {
 	beforeEach: answerAutoSettle,
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(canvas.getByTestId("session-bar-island-overflow"));
+		const trigger = canvas.getByTestId("session-bar-island-overflow");
+		// Bits restores the body's pointer events after the previous sheet unmounts.
+		await waitFor(() =>
+			expect(getComputedStyle(trigger).pointerEvents).toBe("auto"),
+		);
+		await userEvent.click(trigger);
 		const sheet = await sessionSheet("session-bar-island-menu");
 		await expect(sheet).toBeVisible();
 		// Accessible names, in order: the shortcut hints are aria-hidden.
@@ -689,6 +694,9 @@ export const CloseSheetReturnsFocus: Story = {
 			"session-bar-island-overflow",
 		);
 		const body = within(canvasElement.ownerDocument.body);
+		await waitFor(() =>
+			expect(getComputedStyle(trigger).pointerEvents).toBe("auto"),
+		);
 		await userEvent.click(trigger);
 		await userEvent.click(await body.findByTestId("session-sheet-close"));
 		await waitFor(() =>
@@ -1203,6 +1211,9 @@ export const PhoneGoalSheet: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const goal = canvas.getByTestId("session-goal-subtitle");
+		await waitFor(() =>
+			expect(getComputedStyle(goal).pointerEvents).toBe("auto"),
+		);
 		await userEvent.click(goal);
 		const sheet = await canvas.findByTestId("goal-details");
 		await waitFor(() => expect(sheet).toHaveTextContent("Sonnet 5 judges"));

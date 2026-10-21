@@ -2127,10 +2127,10 @@ test.describe("Claude replay lane", () => {
 			await expect(chat.userMessages).toHaveCount(2);
 			await expect(chat.assistantMessages).toHaveText([/pong/i, /pong/i]);
 			await chat.waitForStreamingComplete();
-			// The fork copies the parent's completed turn before adding its own.
+			// The fork inherits the parent's turn as read-model rows, not events.
 			await expect
 				.poll(() => countEvents(harness.eventsDbPath, "turn.completed"))
-				.toBe(3);
+				.toBe(2);
 			await expect(history.locator(".msg-user")).toContainText("Parent turn");
 			await expect(history).not.toContainText("Fork turn");
 			await testInfo.attach("claude-fork-replay", {

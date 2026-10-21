@@ -15,7 +15,8 @@
 // 5. Unreplayed SDK surface: a Query method the replayer does not model
 //    rejects instead of resolving to a plausible fake.
 // 6. Fork identity: each fork must have a fresh resumable SDK id; resuming it
-//    must not emit its parent's id or accept an unknown session.
+//    must not emit its parent's id or accept an unknown session. Native
+//    first-turn forks use the caller's sessionId, or generate one if omitted.
 // 7. Fork cut drift: readTranscript must list what was actually replayed in
 //    that session (each prompt, then its main-chain SDK messages with their
 //    fresh ids), or conduit's fork-point lookup misses and falls back. A fork
@@ -62,15 +63,27 @@
 //    answer it with. interrupt() rejects AND assertComplete() throws. A
 //    one-input trace with no recorded interrupt keeps the synthesized stop
 //    (interrupt() drops the rest of the trace) that Stop scenarios rely on.
+// 18. Native fork admission: initialization must resolve without consuming a
+//    prompt and leave the copied native transcript readable by the real goal
+//    gate. Writes must use the test-owned config directory, never a caller's
+//    unrelated Claude directory.
 //
 // Also pinned: per-message delay, interrupt() ending the current trace, and
 // interrupt() answered with the receipt a trace records.
 // Fresh database per run is the harness's job (mkdtemp configDir per test).
 
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
+import { makeClaudeForkQuery } from "../../../src/lib/provider/claude/claude-fork-query.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type {
 	SDKMessage,
@@ -332,6 +345,248 @@ describe("createClaudeTraceReplayer", () => {
 	});
 
 	// Failure 6.
+	it.each([
+		true,
+		false,
+	])("admits the first native fork input after initialization, cut=%s", async (cut) => {
+		const root = mkdtempSync(join(tmpdir(), "claude-replay-init-"));
+		onTestFinished(() => rmSync(root, { recursive: true, force: true }));
+		const configDir = configuredClaudeConfigDir(join(root, "claude"));
+		const replayer = createClaudeTraceReplayer({
+			turns: Array.from({ length: 3 }, () => "pong-thinking-text-turn"),
+			nativeTranscriptsDir: configDir.path,
+		});
+		const prompts = promptQueue();
+		const parent = replayer.sdk.query({ configDir, prompt: prompts.iterable });
+		onTestFinished(() => {
+			prompts.close();
+			parent.close();
+		});
+		prompts.push("parent first");
+		const first = await readTurn(parent);
+		const parentId = first.at(-1)?.session_id;
+		if (!parentId) throw new Error("Replay returned no SDK session id");
+		const cutUuid = replayer.transcript(parentId).at(-1)?.uuid;
+		if (!cutUuid) throw new Error("First turn left no transcript entry");
+		prompts.push("parent second");
+		await readTurn(parent);
+		const source = [...replayer.transcript(parentId)];
+
+		expect(replayer.forks).toEqual([]);
+		expect(existsSync(join(configDir.path, "projects"))).toBe(false);
+
+		const forkPrompts = promptQueue();
+		const fork = makeClaudeForkQuery(
+			(prompt) =>
+				replayer.sdk.query({
+					configDir,
+					prompt,
+					options: {
+						resume: parentId,
+						forkSession: true,
+						sessionId: SENT_C,
+						cwd: root,
+						...(cut && { resumeSessionAt: cutUuid }),
+					},
+				}),
+			forkPrompts.iterable,
+			{
+				sessionId: SENT_C,
+				workspaceRoot: root,
+				extraFolders: [],
+				providerState: {},
+				configDir,
+				folderSource: "account",
+			},
+		);
+		onTestFinished(() => {
+			forkPrompts.close();
+			fork.close();
+		});
+		forkPrompts.push("fork first");
+		await expect(fork.initializationResult()).resolves.toEqual({
+			commands: [],
+			agents: [],
+			models: [],
+			output_style: "default",
+			available_output_styles: ["default"],
+			account: {
+				email: "replay@example.test",
+				subscriptionType: "max",
+				tokenSource: "oauth",
+				apiProvider: "firstParty",
+			},
+		});
+		// Initialization admits input but must not spend a planned trace on it.
+		expect(replayer.sentPermissionModes).toHaveLength(2);
+		const inherited = source
+			.slice(
+				0,
+				cut
+					? source.findIndex((entry) => entry.uuid === cutUuid) + 1
+					: undefined,
+			)
+			.map((entry) => ({ ...entry, session_id: SENT_C }));
+		const nativeTranscript = readFileSync(
+			join(
+				configDir.path,
+				"projects",
+				realpathSync(root).replace(/[^a-zA-Z0-9]/g, "-"),
+				`${SENT_C}.jsonl`,
+			),
+			"utf8",
+		)
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line));
+		expect(nativeTranscript).toEqual(inherited);
+		const turn = await readTurn(fork[Symbol.asyncIterator]());
+		expect(turn.every((message) => message.session_id === SENT_C)).toBe(true);
+		expect(turn.find((message) => message.type === "result")).toMatchObject({
+			result: "pong",
+			session_id: SENT_C,
+		});
+		expect(replayer.transcript(parentId)).toEqual(source);
+		expect(replayer.forks).toEqual([
+			{
+				parentSessionId: parentId,
+				sessionId: SENT_C,
+				...(cut && { upToMessageId: cutUuid }),
+			},
+		]);
+		// A mismatched config must fail before creating another fork or writing files.
+		expect(() =>
+			replayer.sdk.query({
+				configDir: configuredClaudeConfigDir("/accounts/replay"),
+				prompt: promptQueue().iterable,
+				options: {
+					resume: parentId,
+					forkSession: true,
+					sessionId: SENT_B,
+					cwd: root,
+				},
+			}),
+		).toThrow(/test-owned Claude config directory/);
+		expect(replayer.forks).toHaveLength(1);
+		expect(replayer.transcript(SENT_B)).toEqual([]);
+		replayer.assertComplete();
+	});
+
+	it.each([
+		{ sessionId: SENT_C, cut: true },
+		{ sessionId: undefined, cut: true },
+		{ sessionId: SENT_C, cut: false },
+		{ sessionId: undefined, cut: false },
+	])("launches a native fork with sessionId=$sessionId, cut=$cut", async ({
+		sessionId,
+		cut,
+	}) => {
+		const replayer = createClaudeTraceReplayer({
+			turns: Array.from({ length: 4 }, () => "pong-thinking-text-turn"),
+		});
+		const prompts = promptQueue();
+		const parent = replayer.sdk.query({
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
+			prompt: prompts.iterable,
+		});
+		prompts.push("parent first");
+		const first = await readTurn(parent);
+		const parentId = first.at(-1)?.session_id;
+		if (!parentId) throw new Error("Replay returned no SDK session id");
+		const cutUuid = replayer.transcript(parentId).at(-1)?.uuid;
+		if (!cutUuid) throw new Error("First turn left no transcript entry");
+		prompts.push("parent second");
+		await readTurn(parent);
+		const source = [...replayer.transcript(parentId)];
+
+		expect(() =>
+			replayer.sdk.query({
+				configDir: configuredClaudeConfigDir("/accounts/replay"),
+				prompt: promptQueue().iterable,
+				options: {
+					resume: parentId,
+					forkSession: true,
+					sessionId: SENT_B,
+					resumeSessionAt: "never-replayed",
+				},
+			}),
+		).toThrow(/never-replayed is not in session/);
+		expect(replayer.forks).toEqual([]);
+		expect(replayer.transcript(SENT_B)).toEqual([]);
+
+		const forkPrompts = promptQueue();
+		const fork = replayer.sdk.query({
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
+			prompt: forkPrompts.iterable,
+			options: {
+				resume: parentId,
+				forkSession: true,
+				...(sessionId !== undefined && { sessionId }),
+				...(cut && { resumeSessionAt: cutUuid }),
+			},
+		});
+		const forkId = replayer.forks[0]?.sessionId;
+		if (!forkId) throw new Error("Native query did not record its fork");
+		expect(forkId).not.toBe(parentId);
+		if (sessionId !== undefined) expect(forkId).toBe(sessionId);
+		else expect(forkId).toMatch(/^[0-9a-f-]{36}$/);
+		expect(replayer.forks).toEqual([
+			{
+				parentSessionId: parentId,
+				sessionId: forkId,
+				...(cut && { upToMessageId: cutUuid }),
+			},
+		]);
+		const inherited = source
+			.slice(
+				0,
+				cut
+					? source.findIndex((entry) => entry.uuid === cutUuid) + 1
+					: undefined,
+			)
+			.map((entry) => ({ ...entry, session_id: forkId }));
+		expect(replayer.transcript(forkId)).toEqual(inherited);
+		forkPrompts.push("fork first");
+		const forkTurn = await readTurn(fork);
+		expect(forkTurn.every((message) => message.session_id === forkId)).toBe(
+			true,
+		);
+		expect(forkTurn.find((message) => message.type === "result")).toMatchObject(
+			{
+				result: "pong",
+				session_id: forkId,
+			},
+		);
+		expect(replayer.transcript(forkId).slice(0, inherited.length)).toEqual(
+			inherited,
+		);
+		expect(replayer.transcript(forkId)[inherited.length]?.message).toEqual({
+			role: "user",
+			content: "fork first",
+		});
+		forkPrompts.close();
+		fork.close();
+		const resumedPrompts = promptQueue();
+		const resumed = replayer.sdk.query({
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
+			prompt: resumedPrompts.iterable,
+			options: { resume: forkId },
+		});
+		resumedPrompts.push("fork second");
+		expect(
+			(await readTurn(resumed)).every(
+				(message) => message.session_id === forkId,
+			),
+		).toBe(true);
+		expect(replayer.forks).toHaveLength(1);
+		expect(replayer.transcript(parentId)).toEqual(source);
+		prompts.close();
+		parent.close();
+		resumedPrompts.close();
+		resumed.close();
+		replayer.assertComplete();
+	});
+
 	it("replays captured fork operations and resumes the fork with its own id", async () => {
 		const replayer = createClaudeTraceReplayer({
 			turns: [
@@ -405,6 +660,14 @@ describe("createClaudeTraceReplayer", () => {
 		const replayer = createClaudeTraceReplayer({
 			turns: ["pong-thinking-text-turn"],
 		});
+		expect(() =>
+			replayer.sdk.query({
+				configDir: configuredClaudeConfigDir("/accounts/replay"),
+				prompt: promptQueue().iterable,
+				options: { resume: "unknown", forkSession: true, sessionId: SENT_C },
+			}),
+		).toThrow(/unknown session/);
+		expect(replayer.forks).toEqual([]);
 		const prompts = promptQueue();
 		const query = replayer.sdk.query({
 			configDir: configuredClaudeConfigDir("/accounts/replay"),

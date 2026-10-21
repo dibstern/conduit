@@ -20,15 +20,30 @@
 // Content, including tool_use/task ids, is untouched — plan a trace that
 // carries tools at most once per session.
 //
+// Native first-turn forks (query options.forkSession with options.resume) and
+// fork.forkSession both copy the parent's transcript through an inclusive cut,
+// or all of it when no cut is given. Native queries use options.sessionId for
+// the fork, generating an id when absent; its trace plays under that fork id.
+// Initialization resolves before input admission and, when the harness supplies
+// a test-owned Claude config directory, writes the native fork transcript there
+// for the runtime's inherited-goal check.
+//
 // A trace's agent transcript reads (<name>.subagent-reads.json, captured
 // alongside it) are served by subagentSdk as they were read at that point of
 // the trace, with the same fresh ids as the replayed stream.
 
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	realpathSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type {
+	SDKControlInitializeResponse,
 	SDKControlInterruptResponse,
 	SessionMessage,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -117,6 +132,8 @@ export interface ClaudeReplayPlan {
 	readonly instanceId?: string;
 	/** Trace directory override (unit tests only). */
 	readonly tracesDir?: string;
+	/** Test-owned Claude config directory for native fork transcript files. */
+	readonly nativeTranscriptsDir?: string;
 	/** Claude model catalog to advertise instead of the bare trace model. */
 	readonly models?: readonly ModelInfo[];
 }
@@ -128,7 +145,8 @@ export interface ClaudeTraceReplayer {
 	};
 	/** The permission mode the runtime requested for each sent prompt, in order. */
 	readonly sentPermissionModes: readonly (PermissionMode | undefined)[];
-	/** Every fork, in call order; upToMessageId is the inclusive cut uuid. */
+	/** Every fork, in creation order, from native first-turn queries or
+	 *  fork.forkSession; upToMessageId is the inclusive cut uuid. */
 	readonly forks: readonly {
 		readonly parentSessionId: string;
 		readonly sessionId: string;
@@ -328,6 +346,33 @@ export function createClaudeTraceReplayer(
 			throw new Error(`Claude trace replay: unknown session ${sessionId}`);
 		return transcripts.get(sessionId) ?? [];
 	};
+	const createFork = (
+		parentSessionId: string,
+		forkSessionId: string,
+		upToMessageId?: string,
+	) => {
+		const transcript = knownSession(parentSessionId);
+		const end =
+			upToMessageId === undefined
+				? transcript.length
+				: transcript.findIndex((entry) => entry.uuid === upToMessageId) + 1;
+		if (upToMessageId !== undefined && end === 0)
+			throw new Error(
+				`Claude trace replay: ${upToMessageId} is not in session ${parentSessionId}`,
+			);
+		sessionIds.add(forkSessionId);
+		transcripts.set(
+			forkSessionId,
+			transcript
+				.slice(0, end)
+				.map((entry) => ({ ...entry, session_id: forkSessionId })),
+		);
+		forks.push({
+			parentSessionId,
+			sessionId: forkSessionId,
+			...(upToMessageId !== undefined && { upToMessageId }),
+		});
+	};
 	let sent = 0;
 	const sentPermissionModes: (PermissionMode | undefined)[] = [];
 	let played = 0;
@@ -353,10 +398,27 @@ export function createClaudeTraceReplayer(
 			? Promise.resolve()
 			: new Promise<void>((resolve) => onHold.push(resolve));
 
-	const query: ClaudeTraceReplayer["sdk"]["query"] = ({ prompt, options }) => {
-		const querySessionId = options?.resume ?? sessionId;
+	const query: ClaudeTraceReplayer["sdk"]["query"] = ({
+		configDir,
+		prompt,
+		options,
+	}) => {
+		const parentSessionId = options?.forkSession ? options.resume : undefined;
+		const querySessionId = parentSessionId
+			? (options?.sessionId ?? randomUUID())
+			: (options?.resume ?? sessionId);
+		if (parentSessionId) {
+			if (
+				plan.nativeTranscriptsDir !== undefined &&
+				configDir.path !== plan.nativeTranscriptsDir
+			)
+				throw new Error(
+					"Claude trace replay: native fork must use the test-owned Claude config directory",
+				);
+			createFork(parentSessionId, querySessionId, options?.resumeSessionAt);
+		}
 		// A replacement process can begin by resuming its persisted parent.
-		if (sent === 0 && options?.resume) sessionIds.add(querySessionId);
+		else if (sent === 0 && options?.resume) sessionIds.add(querySessionId);
 		if (!sessionIds.has(querySessionId))
 			throw new Error(`Claude trace replay: unknown session ${querySessionId}`);
 		const prompts = prompt[Symbol.asyncIterator]();
@@ -385,6 +447,37 @@ export function createClaudeTraceReplayer(
 
 		const transcript = transcripts.get(querySessionId) ?? [];
 		transcripts.set(querySessionId, transcript);
+		const initialize = async (): Promise<SDKControlInitializeResponse> => {
+			if (parentSessionId && plan.nativeTranscriptsDir !== undefined) {
+				const projectDir = join(
+					plan.nativeTranscriptsDir,
+					"projects",
+					realpathSync(options?.cwd ?? process.cwd()).replace(
+						/[^a-zA-Z0-9]/g,
+						"-",
+					),
+				);
+				mkdirSync(projectDir, { recursive: true });
+				writeFileSync(
+					join(projectDir, `${querySessionId}.jsonl`),
+					transcript.map((entry) => `${JSON.stringify(entry)}\n`).join(""),
+				);
+			}
+			return {
+				commands: [],
+				agents: [],
+				models: [],
+				output_style: "default",
+				available_output_styles: ["default"],
+				account: {
+					email: "replay@example.test",
+					subscriptionType: "max",
+					tokenSource: "oauth",
+					apiProvider: "firstParty",
+				},
+			};
+		};
+		let initialization: ReturnType<typeof initialize> | undefined;
 		const entry = (
 			type: "user" | "assistant",
 			message: unknown,
@@ -636,7 +729,7 @@ export function createClaudeTraceReplayer(
 			setMcpPermissionModeOverride: unsupported("setMcpPermissionModeOverride"),
 			setMaxThinkingTokens: unsupported("setMaxThinkingTokens"),
 			updateSettings: unsupported("updateSettings"),
-			initializationResult: unsupported("initializationResult"),
+			initializationResult: () => (initialization ??= initialize()),
 			reinitialize: unsupported("reinitialize"),
 			supportedCommands: unsupported("supportedCommands"),
 			supportedModels: unsupported("supportedModels"),
@@ -704,18 +797,7 @@ export function createClaudeTraceReplayer(
 				readTranscript: async (parentSessionId) => [
 					...knownSession(parentSessionId),
 				],
-				// Like the SDK: copy through upToMessageId inclusive, or everything.
 				forkSession: async (parentSessionId, { upToMessageId }) => {
-					const transcript = knownSession(parentSessionId);
-					const end =
-						upToMessageId === undefined
-							? transcript.length
-							: transcript.findIndex((entry) => entry.uuid === upToMessageId) +
-								1;
-					if (end === 0)
-						throw new Error(
-							`Claude trace replay: ${upToMessageId} is not in session ${parentSessionId}`,
-						);
 					// Read on first fork, so a plan's tracesDir need not carry it.
 					const forkTrace = JSON.parse(
 						readFileSync(
@@ -728,18 +810,7 @@ export function createClaudeTraceReplayer(
 						>;
 					};
 					const fork = { ...forkTrace.forkSession, sessionId: randomUUID() };
-					sessionIds.add(fork.sessionId);
-					transcripts.set(
-						fork.sessionId,
-						transcript
-							.slice(0, end)
-							.map((entry) => ({ ...entry, session_id: fork.sessionId })),
-					);
-					forks.push({
-						parentSessionId,
-						sessionId: fork.sessionId,
-						...(upToMessageId !== undefined && { upToMessageId }),
-					});
+					createFork(parentSessionId, fork.sessionId, upToMessageId);
 					return fork;
 				},
 			},

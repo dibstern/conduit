@@ -856,10 +856,18 @@ test("opens the heavy session after a restart under load", async ({
 			await page.locator("#messages > :not(:has(#scroll-btn))").allInnerTexts()
 		).join("\n");
 	};
-	const [resumedTranscript, coldTranscript] = [
-		await transcriptOf(opener),
-		await transcriptOf(cold),
-	];
+	const resumedTranscript = await transcriptOf(opener);
+	let coldTranscript = "";
+	// Chat identity can arrive after the message content on a cold device.
+	await expect
+		.poll(
+			async () => {
+				coldTranscript = await transcriptOf(cold);
+				return coldTranscript;
+			},
+			{ timeout: 30_000 },
+		)
+		.toBe(resumedTranscript);
 	const longTurn = {
 		calls: LONG_TURN_CALLS,
 		liveFrames: turnFrames.length,

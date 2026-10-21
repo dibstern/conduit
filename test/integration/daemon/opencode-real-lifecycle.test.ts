@@ -233,7 +233,12 @@ describe("Managed real OpenCode lifecycle", () => {
 			rootPrefix: "/tmp/conduit-real-opencode-",
 		});
 		harness = fixture;
-		await fixture.restart({ opencodeIdleTimeoutMs: graceMs });
+		// No prompts or external plugins are needed here. Cold plugin dependency
+		// installs can exceed the daemon's first /path connection deadline.
+		await fixture.restart({
+			opencodeIdleTimeoutMs: graceMs,
+			serviceEnvironment: { OPENCODE_PURE: "true" },
+		});
 		const directoryB = join(fixture.root, "project-b");
 		mkdirSync(directoryB);
 		const { savedSlug: slugB } = await sendRpcRequest(

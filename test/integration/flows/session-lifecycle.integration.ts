@@ -95,8 +95,10 @@ describe("Integration: Session Lifecycle", () => {
 		await client.close();
 	});
 
-	it("delete a session", async () => {
-		const client = await harness.connectWsClient();
+	it("delete a session", async ({ onTestFinished }) => {
+		const deleteHarness = await createRelayHarness();
+		onTestFinished(() => deleteHarness.stop());
+		const client = await deleteHarness.connectWsClient();
 		await client.waitForInitialState();
 		client.clearReceived();
 
@@ -119,7 +121,7 @@ describe("Integration: Session Lifecycle", () => {
 		await client.close();
 	});
 
-	it("switching session returns its draft and family", async () => {
+	it("switching session restores its draft and family", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
@@ -146,7 +148,12 @@ describe("Integration: Session Lifecycle", () => {
 		client.clearReceived();
 		const switched = await client.switchSession(firstId);
 		expect(switched["id"]).toBe(firstId);
-		expect(switched["draft"]).toBe("Unsent draft");
+		await client.subscribeInputDraft(firstId);
+		const draft = await client.waitFor("input_draft", {
+			predicate: (message) =>
+				message["_tag"] === "synchronized" && message["sessionId"] === firstId,
+		});
+		expect(draft["text"]).toBe("Unsent draft");
 
 		await client.close();
 	});

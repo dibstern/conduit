@@ -507,7 +507,7 @@ for (const mode of [
 				await trigger.click();
 				await expect(
 					page.getByRole("menuitem", { name: "Move to worktree…" }),
-				).toHaveCount(supportsWorktree === true ? 1 : 0);
+				).toHaveCount(supportsWorktree === false ? 0 : 1);
 			});
 		}
 

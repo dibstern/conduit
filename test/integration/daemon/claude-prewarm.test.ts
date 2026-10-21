@@ -232,13 +232,12 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		expect(harness.marks.filter((mark) => mark.kind === "enqueue")).toEqual([
 			expect.objectContaining({ queryId: query.queryId, promptIndex: 1 }),
 		]);
-		const reused = await browser.createSession(
-			"Consumed draft token",
-			undefined,
-			"claude",
-			{ draftId, ...pick },
-		);
-		expect(reused).not.toBe(sessionId);
+		await expect(
+			browser.createSession("Consumed draft token", undefined, "claude", {
+				draftId,
+				...pick,
+			}),
+		).rejects.toMatchObject({ _tag: "DraftAlreadySent", draftId });
 	});
 
 	it("draft pre-warm with a different create model discards the old runner and sends on a fresh session", async () => {
@@ -549,13 +548,12 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		);
 		expect(otherId).not.toBe(runner.sessionId);
 		expect(alive(runner.pid)).toBe(true);
-		const ownerId = await browser.createSession(
-			"Owning origin",
-			undefined,
-			"claude",
-			{ draftId },
-		);
-		expect(ownerId).toBe(runner.sessionId);
+		await expect(
+			browser.createSession("Owning origin", undefined, "claude", { draftId }),
+		).rejects.toMatchObject({ _tag: "DraftAlreadySent", draftId });
+		await vi.waitFor(() => expect(alive(runner.pid)).toBe(false), {
+			timeout: 5000,
+		});
 	});
 
 	it("draft pre-warm orphan runner is terminated when the daemon recovers after a crash", async () => {
