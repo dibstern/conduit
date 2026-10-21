@@ -1,9 +1,13 @@
 import { Context, Effect, Option } from "effect";
 import { SqlClient } from "effect/sql";
+import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import { PendingInteractionServiceTag } from "../../domain/relay/Services/pending-interaction-service.js";
 import { canonicalEvent } from "../events.js";
 import { makeCommitAndSignal } from "./commit-and-signal.js";
-import { EventStoreEffectTag } from "./event-store-effect.js";
+import {
+	EventStoreEffectTag,
+	makeEventStoreEffect,
+} from "./event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "./projection-runner-effect.js";
 
 interface PendingPrompt {
@@ -96,20 +100,30 @@ export const makeRetireReplacedProcessPrompts = Effect.gen(function* () {
 			const rows = yield* client<{
 				id: string;
 				session_id: string;
+				project_id: string;
 				type: "permission" | "question";
-			}>`SELECT pa.id, pa.session_id, pa.type FROM pending_approvals pa
+			}>`SELECT pa.id, pa.session_id, s.project_id, pa.type FROM pending_approvals pa
 				JOIN sessions s ON s.id = pa.session_id
 				WHERE pa.status = 'pending'
 					AND (${currentProcessId} IS NULL OR (pa.provider_process_id IS NOT NULL
 						AND pa.provider_process_id <> ${currentProcessId}))
-					AND s.project_id = ${eventStore.value.projectId}
-					AND ${"sessionId" in scope ? client`pa.session_id = ${scope.sessionId}` : client`s.provider IN ${client.in(scope.providerInstanceIds)}`}`;
+					AND ${"sessionId" in scope ? client`pa.session_id = ${scope.sessionId}` : client`s.project_id = ${eventStore.value.projectId} AND s.provider IN ${client.in(scope.providerInstanceIds)}`}`;
+			const first = rows[0];
+			if (!first) return 0;
+			const store =
+				"sessionId" in scope
+					? yield* makeEventStoreEffect.pipe(
+							Effect.provideService(PersistenceProjectTag, {
+								projectId: first.project_id,
+							}),
+						)
+					: eventStore.value;
 			return yield* retirePendingPrompts(
 				rows.map((row) => ({
 					id: row.id,
 					sessionId: row.session_id,
 					type: row.type,
 				})),
-			);
+			).pipe(Effect.provideService(EventStoreEffectTag, store));
 		}).pipe(Effect.provide(context));
 });

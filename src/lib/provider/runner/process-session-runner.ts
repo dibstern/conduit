@@ -15,6 +15,7 @@ import {
 import { SqlClient } from "effect/sql";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import { ProviderRuntimeIngestionTag } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
+import { ConfigTag } from "../../domain/relay/Services/services.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { createLogger } from "../../logger.js";
@@ -355,13 +356,6 @@ export const makeProcessSessionRunner = (
 		);
 		const ingestion =
 			ingestionOption._tag === "Some" ? ingestionOption.value : undefined;
-		const project = yield* Effect.serviceOption(PersistenceProjectTag);
-		if (sql && project._tag === "None")
-			return yield* Effect.die(
-				new Error("A persistent session runner requires project ownership"),
-			);
-		const projectId =
-			project._tag === "Some" ? project.value.projectId : undefined;
 		const receipts = sql
 			? yield* makeRunnerReceiptStore(sql).pipe(Effect.orDie)
 			: undefined;
@@ -556,7 +550,7 @@ export const makeProcessSessionRunner = (
 							run_id: string | null;
 						}>`
 							SELECT outbox.run_id AS run_id
-							FROM provider_command_outbox outbox WHERE project_key = ${projectId}
+							FROM provider_command_outbox outbox WHERE project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId})
 								AND session_id = ${sessionId} AND command_id = ${commandId} AND attempt_count = ${attempt}
 							ORDER BY request_sequence LIMIT 1`;
 						if (owner?.run_id) reservations.add(owner.run_id);
@@ -776,7 +770,7 @@ export const makeProcessSessionRunner = (
 										AND reservation.id = outbox.run_id
 									LEFT JOIN turns ON turns.session_id = outbox.session_id
 										AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
-									WHERE outbox.project_key = ${projectId} AND outbox.command_id = ${binding.commandId ?? binding.sinkId} AND outbox.session_id = ${sessionId}`.pipe(
+									WHERE outbox.project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId}) AND outbox.command_id = ${binding.commandId ?? binding.sinkId} AND outbox.session_id = ${sessionId}`.pipe(
 									Effect.mapError((cause) =>
 										runnerFailure("restore runner history", cause),
 									),
@@ -850,7 +844,7 @@ export const makeProcessSessionRunner = (
 											const rows = yield* sql<{
 												run_id: string | null;
 											}>`SELECT run_id
-										FROM provider_command_outbox WHERE project_key = ${projectId}
+										FROM provider_command_outbox WHERE project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId})
 										AND session_id = ${sessionId} AND command_id = ${commandId}
 										AND attempt_count = ${pending}`;
 											for (const row of rows)
@@ -1136,7 +1130,7 @@ export const makeProcessSessionRunner = (
 								return false;
 							const running = yield* sql<{
 								command_id: string;
-							}>`SELECT command_id FROM provider_command_outbox WHERE project_key = ${projectId} AND session_id = ${sessionId} AND status = 'running' AND effect_type = 'send_turn' LIMIT 1`.pipe(
+							}>`SELECT command_id FROM provider_command_outbox WHERE project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId}) AND session_id = ${sessionId} AND status = 'running' AND effect_type = 'send_turn' LIMIT 1`.pipe(
 								Effect.mapError((cause) =>
 									runnerFailure("upgrade runner", cause),
 								),
@@ -1227,8 +1221,14 @@ export const makeProcessSessionRunner = (
 					return yield* Effect.fail(
 						runnerFailure("recover runner", "Runners are shutting down"),
 					);
+				// Until recovery is daemon-wide, the caller bounds this registry scan.
+				// Runner construction does not capture a session's project ownership.
+				const recoveryScope = yield* Effect.serviceOption(
+					PersistenceProjectTag,
+				);
+				const config = yield* Effect.serviceOption(ConfigTag);
 				for (const registration of discoverRunners(
-					deps.workspaceRoot,
+					config._tag === "Some" ? config.value.projectDir : deps.workspaceRoot,
 					configDir,
 				)) {
 					if ((registration.driverKind ?? "claude") !== driver.driverKind)
@@ -1242,7 +1242,12 @@ export const makeProcessSessionRunner = (
 								),
 							))[0]
 						: undefined;
-					if (persisted && persisted.project_id !== projectId) continue;
+					if (
+						persisted &&
+						recoveryScope._tag === "Some" &&
+						persisted.project_id !== recoveryScope.value.projectId
+					)
+						continue;
 					// Draft warms are not durable; verify their identity before stopping them.
 					let abandoned =
 						(sql !== undefined && !persisted) ||
@@ -1451,8 +1456,8 @@ export const makeProcessSessionRunner = (
 									.pipe(
 										Effect.provideServiceEffect(
 											PersistenceProjectTag,
-											project._tag === "Some"
-												? Effect.succeed(project.value)
+											persisted
+												? Effect.succeed({ projectId: persisted.project_id })
 												: Effect.die(
 														new Error(
 															"Runner recovery requires project ownership",
@@ -2003,7 +2008,7 @@ export const makeProcessSessionRunner = (
 						const rows = yield* sql<{
 							command_id: string;
 						}>`SELECT command_id FROM provider_command_outbox
-							WHERE project_key = ${projectId} AND session_id = ${sessionId} AND effect_type = 'send_turn'
+							WHERE project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId}) AND session_id = ${sessionId} AND effect_type = 'send_turn'
 								AND status = 'running' AND attempt_count = ${command.input.commandAttempt}
 								AND COALESCE(json_extract(payload_json, '$.inputId'), json_extract(payload_json, '$.userMessageId'), json_extract(payload_json, '$.commandId'), json_extract(payload_json, '$.turnId')) = ${command.input.inputId}
 							ORDER BY request_sequence LIMIT 1`.pipe(

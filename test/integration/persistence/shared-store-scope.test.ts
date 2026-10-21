@@ -5,7 +5,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import Database from "better-sqlite3";
-import { Effect, Layer, ManagedRuntime, Ref, Stream } from "effect";
+import {
+	Cause,
+	Effect,
+	Exit,
+	Fiber,
+	Layer,
+	ManagedRuntime,
+	Ref,
+	Stream,
+} from "effect";
 import { SqlClient } from "effect/sql";
 import * as Statement from "effect/sql/Statement";
 import {
@@ -106,6 +115,7 @@ import {
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
 import {
+	recoverRunnerCommands,
 	runningRunnerCommands,
 	settleUnclaimedRunnerCommands,
 } from "../../../src/lib/provider/runner/runner-recovery.js";
@@ -513,6 +523,132 @@ describe("shared-store relay project scope", () => {
 			before,
 			rows.filter((row) => row.project_key === A).length,
 			rows.filter((row) => row.project_key === B).length,
+		);
+	});
+
+	it("session-targeted runner recovery uses stored ownership instead of the relay scope", async () => {
+		const rows = await store.runtime.runPromise(
+			Effect.gen(function* () {
+				return yield* runningRunnerCommands(
+					yield* SqlClient.SqlClient,
+					"claude",
+					() => "claude",
+					id(B, "runner"),
+				);
+			}),
+		);
+		expect(rows).toMatchObject([
+			{
+				project_key: B,
+				session_id: id(B, "runner"),
+				command_id: `${B}-runner-command`,
+			},
+		]);
+	});
+
+	// Failure modes: a foreign persister rejects the requeue, retries append it
+	// twice, or cancellation/shutdown requeues a command whose replay is unfinished.
+	it.each([
+		"failed",
+		"interrupted",
+		"closing",
+		"retry",
+		"empty",
+	] as const)("session-targeted recovery requeues failed steers through their stored owner: %s", async (mode) => {
+		await store.runtime.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const sessionId = id(B, "runner");
+					const commandId = `${B}-runner-command`;
+					const eventStore = yield* makeEventStoreEffect.pipe(
+						Effect.provideService(PersistenceProjectTag, { projectId: B }),
+					);
+					if (mode !== "empty") {
+						yield* sql`INSERT INTO pending_inputs (input_id, session_id, text, request, state, admitted_at, version)
+						VALUES (${commandId}, ${sessionId}, 'steer', '{}', 'steering', 1000, 1)`;
+						yield* eventStore.appendBatch([
+							canonicalEvent("input.sent", sessionId, {
+								sessionId,
+								inputId: commandId,
+								steer: true,
+							}),
+						]);
+					}
+					let closing = mode === "closing";
+					let interrupted = mode === "interrupted";
+					let failedAttempt = 1;
+					const recover = recoverRunnerCommands(sql, sessionId, "claude", {
+						driverForAccount: () => "claude",
+						decodeInput: () => ({
+							sessionId,
+							inputId: commandId,
+							prompt: "steer",
+							workspaceRoot: store.root,
+							extraFolders: [],
+							history: [],
+							providerState: {},
+						}),
+						replay: () =>
+							interrupted
+								? Effect.interrupt
+								: Effect.fail({
+										operation: "recover",
+										message: "runner stopped",
+										code: "runner_stopped",
+									}),
+						resolveSinkId: (command) => command,
+						closing: () => closing,
+						failTurn: () =>
+							sql`UPDATE provider_command_outbox SET status = 'failed', error_code = 'runner_stopped'
+						WHERE command_id = ${commandId} AND attempt_count = ${failedAttempt}`.pipe(
+								Effect.asVoid,
+								Effect.orDie,
+							),
+					});
+					const [command] = yield* recover;
+					expect(command).toBeDefined();
+					if (!command) return;
+					if (mode === "retry") {
+						yield* sql`UPDATE provider_command_outbox SET attempt_count = 2 WHERE command_id = ${commandId}`;
+					} else if (interrupted) {
+						const fiber = yield* Effect.forkChild(command.wait);
+						const exit = yield* Fiber.await(fiber);
+						expect(
+							Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause),
+						).toBe(true);
+					}
+					if (mode === "closing" || mode === "retry") yield* command.wait;
+					if (
+						mode === "closing" ||
+						mode === "interrupted" ||
+						mode === "retry"
+					) {
+						expect(
+							yield* sql`SELECT state FROM pending_inputs WHERE input_id = ${commandId}`,
+						).toEqual([{ state: "steering" }]);
+						expect(
+							yield* sql`SELECT 1 FROM events WHERE session_id = ${sessionId} AND type = 'input.requeued'`,
+						).toEqual([]);
+					}
+					closing = false;
+					interrupted = false;
+					if (mode === "retry") failedAttempt = 2;
+					const [current] = yield* recover;
+					if (!current) throw new Error("Missing recovered command");
+					yield* current.wait;
+					yield* current.wait;
+					expect(
+						yield* sql`SELECT state FROM pending_inputs WHERE input_id = ${commandId}`,
+					).toEqual(mode === "empty" ? [] : [{ state: "queued" }]);
+					expect(
+						yield* sql`SELECT project_id FROM events WHERE session_id = ${sessionId} AND type = 'input.requeued'`,
+					).toEqual(mode === "empty" ? [] : [{ project_id: B }]);
+					expect(
+						yield* sql`SELECT input_id FROM pending_inputs WHERE session_id = ${id(A, "runner")}`,
+					).toEqual([]);
+				}),
+			),
 		);
 	});
 

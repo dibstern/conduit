@@ -25,6 +25,7 @@ import {
 	type ProviderRuntimeIngestionError,
 	ProviderRuntimeIngestionTag,
 } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
+import { ConfigTag } from "../../domain/relay/Services/services.js";
 import {
 	makeProcessingTimeoutHooks,
 	type OverridesStateTag,
@@ -191,8 +192,14 @@ export class RunnerProviderInstance implements ProviderInstance {
 					},
 				});
 			yield* this.runner.recoverEffect;
+			const config = yield* Effect.serviceOption(ConfigTag);
 			const registrations = yield* Effect.try(() =>
-				discoverRunners(this.deps.workspaceRoot, this.deps.daemonConfigDir),
+				discoverRunners(
+					config._tag === "Some"
+						? config.value.projectDir
+						: this.deps.workspaceRoot,
+					this.deps.daemonConfigDir,
+				),
 			).pipe(
 				Effect.catch((error) =>
 					Effect.logError("Could not verify runner ownership", error).pipe(
