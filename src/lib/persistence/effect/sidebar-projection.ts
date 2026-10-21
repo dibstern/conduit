@@ -132,6 +132,35 @@ export const refreshSidebar = (
 		}
 	});
 
+/** Reapply registration filtering after imports may have rebuilt whole families. */
+export const refreshCrossProjectSidebar = (projectIds: readonly string[]) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		yield* sql.withTransaction(
+			Effect.gen(function* () {
+				const roots = yield* sql<{
+					id: string;
+				}>`SELECT DISTINCT root.id FROM sessions root
+					JOIN sessions member ON member.root_id = root.id
+					WHERE root.parent_id IS NULL AND root.project_id IN ${sql.in(projectIds)}
+					AND member.project_id IS NOT root.project_id`;
+				if (roots.length === 0) return;
+				const [counter] = yield* sql<{
+					value: number;
+				}>`SELECT value FROM read_model_counter WHERE id = 1`;
+				const version = (counter?.value ?? 0) + 1;
+				yield* refreshSidebar(
+					roots.map(({ id }) => id),
+					version,
+					projectIds,
+				);
+				// An unchanged restart must not move the durable read frontier.
+				yield* sql`UPDATE read_model_counter SET value = ${version} WHERE id = 1
+					AND EXISTS (SELECT 1 FROM session_sidebar WHERE version = ${version})`;
+			}),
+		);
+	});
+
 /**
  * Store the top-level parent of a session whose parent was just written, for
  * it and everything beneath it. Returns the sessions whose families the write

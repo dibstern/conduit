@@ -28,6 +28,7 @@ import {
 import { effectMigrationEntries } from "../effect/migrations.js";
 import { ProjectionRunnerEffectTag } from "../effect/projection-runner-effect.js";
 import { createAllEffectProjectors } from "../effect/projectors-effect.js";
+import { inputDraftClaimMarker } from "../input-drafts.js";
 import { daemonStorePath } from "../project-storage.js";
 
 export interface ProjectStoreSource {
@@ -80,8 +81,6 @@ export interface ProjectStoreImportResult {
 		| "source-changed"
 		| "failed";
 	readonly importedEvents?: number;
-	/** Exact copied rows; skipped imports must never release live draft claims. */
-	readonly importedDraftKeys?: readonly string[];
 	readonly sharedSessions?: readonly string[];
 	readonly error?: DaemonStoreImportError;
 	readonly backup?: string;
@@ -997,6 +996,17 @@ function importOne(
 					"Translated counters exceed the safe integer range",
 				);
 			copyProject(db, project, names, offsets);
+			// Release only copied claims, before another connection can claim these rows.
+			db.prepare(`DELETE FROM main.input_drafts
+				WHERE promoted_session_id = ? AND text = ''
+				AND draft_key IN (SELECT draft_key FROM source.input_drafts)`).run(
+				inputDraftClaimMarker,
+			);
+			db.prepare(`UPDATE main.input_drafts SET promoted_session_id = NULL
+				WHERE promoted_session_id = ?
+				AND draft_key IN (SELECT draft_key FROM source.input_drafts)`).run(
+				inputDraftClaimMarker,
+			);
 			options.checkpoint?.("import-copied", project.projectId);
 			for (const table of ["events", "projection_failures"]) {
 				const target =
@@ -1055,10 +1065,6 @@ function importOne(
 					db,
 					"SELECT COUNT(*) AS value FROM source.events",
 				),
-				importedDraftKeys: rows<{ draft_key: string }>(
-					db,
-					"SELECT draft_key FROM source.input_drafts",
-				).map(({ draft_key }) => draft_key),
 				sharedSessions,
 			};
 		});

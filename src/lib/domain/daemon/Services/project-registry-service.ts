@@ -58,7 +58,10 @@ import { normalizeProjectTitle } from "../../../handlers/settings.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { SessionRollupProjects } from "../../../persistence/effect/session-rollup-projects.js";
-import { refreshSidebar } from "../../../persistence/effect/sidebar-projection.js";
+import {
+	refreshCrossProjectSidebar,
+	refreshSidebar,
+} from "../../../persistence/effect/sidebar-projection.js";
 import {
 	DaemonStoreImportError,
 	importProjectStoreWithBackup,
@@ -78,10 +81,7 @@ import {
 import { stopRegisteredRunners } from "../../../provider/runner/process-session-runner.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import type { StoredProject } from "../../../types.js";
-import {
-	InputDraftsTag,
-	releaseInputDraftClaims,
-} from "../../relay/Services/input-drafts.js";
+import { InputDraftsTag } from "../../relay/Services/input-drafts.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { isConduitWorktreePath } from "../Layers/worktree-layer.js";
 import {
@@ -1311,11 +1311,6 @@ export const saveProject = (input: SaveProjectInput) =>
 								Effect.tap((result) =>
 									Effect.gen(function* () {
 										if (result.error) return;
-										const draftKeys = result.importedDraftKeys ?? [];
-										if (draftKeys.length > 0)
-											yield* releaseInputDraftClaims(draftKeys).pipe(
-												Effect.provideService(SqlClient.SqlClient, sql),
-											);
 										const blocked =
 											unavailable.size === 0
 												? []
@@ -1333,7 +1328,13 @@ export const saveProject = (input: SaveProjectInput) =>
 												sql,
 											);
 										}
-										if (draftKeys.length > 0) {
+										// Repair every currently visible family. addWithoutRelay then
+										// includes the new owner and refreshes families containing its rows.
+										const projects = Context.get(store, SessionRollupProjects);
+										yield* refreshCrossProjectSidebar(
+											projects ? yield* Ref.get(projects) : [],
+										).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+										if (result.outcome === "imported") {
 											const drafts =
 												yield* Effect.serviceOption(InputDraftsTag);
 											if (Option.isSome(drafts))

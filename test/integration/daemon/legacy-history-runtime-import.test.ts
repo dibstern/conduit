@@ -17,6 +17,7 @@ import {
 	Fiber,
 	Layer,
 	ManagedRuntime,
+	Ref,
 	Stream,
 } from "effect";
 import {
@@ -46,6 +47,8 @@ import {
 	PersistenceStore,
 } from "../../../src/lib/persistence/effect/live.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { SessionRollupProjects } from "../../../src/lib/persistence/effect/session-rollup-projects.js";
+import { refreshSidebar } from "../../../src/lib/persistence/effect/sidebar-projection.js";
 import {
 	daemonStorePath,
 	writeProjectStorageOwner,
@@ -161,7 +164,11 @@ async function runtimeImportFixture() {
 			Layer.provideMerge(Layer.succeed(DaemonStoreAvailability)(unavailable)),
 		),
 	);
-	const store = await runtime.runPromise(PersistenceStore);
+	const store = Context.add(
+		await runtime.runPromise(PersistenceStore),
+		SessionRollupProjects,
+		await Effect.runPromise(Ref.make<readonly string[]>([])),
+	);
 	const sql = Context.get(store, SqlClient.SqlClient);
 	const drafts = await Effect.runPromise(
 		makeInputDrafts.pipe(Effect.provide(store)),
@@ -172,11 +179,13 @@ async function runtimeImportFixture() {
 		unavailable,
 		sql,
 		drafts,
+		store,
 		runtime,
 		save: (folder: string) =>
 			runtime.runPromise(
 				saveProject({ folders: [folder] }).pipe(
 					Effect.provideService(InputDraftsTag, drafts),
+					Effect.provideService(PersistenceStore, store),
 				),
 			),
 		close: async () => {
@@ -232,6 +241,69 @@ describe("legacy history added after daemon startup", () => {
 				},
 			]);
 			expect.soft(state.unresolvedArchiveRetained).toBe(blocked);
+		} finally {
+			writeImportArtifact("test-results/82tn28-runtime-import.json", evidence);
+			await fixture.close();
+		}
+	});
+
+	it("keeps removed-project activity out of an existing fork after runtime lineage reconciliation", async () => {
+		const fixture = await runtimeImportFixture();
+		const { root, configDir, sql, runtime, store } = fixture;
+		try {
+			const liveFolder = join(root, "live-project");
+			mkdirSync(liveFolder);
+			await fixture.save(liveFolder);
+			await runtime.runPromise(sql`INSERT INTO sessions
+				(id, project_id, provider, root_id, parent_id, forked_from, status, created_at, updated_at)
+				VALUES
+				('fork-source', 'live-project', 'claude', 'fork-source', NULL, NULL, 'idle', 1, 1),
+				('existing-fork', 'live-project', 'claude', 'existing-fork', NULL, 'fork-source', 'idle', 1, 1),
+				('removed-child', 'removed-project', 'claude', 'existing-fork', 'existing-fork', NULL, 'busy', 1, 1)`);
+			await runtime.runPromise(
+				refreshSidebar(["existing-fork"], 1, ["live-project"]).pipe(
+					Effect.provideService(SqlClient.SqlClient, sql),
+				),
+			);
+			const read = await Effect.runPromise(
+				ReadQueryEffectTag.pipe(
+					Effect.provide(
+						makePersistenceProjectLayer("live-project").pipe(
+							Layer.provide(Layer.succeedContext(store)),
+						),
+					),
+				),
+			);
+			const inspect = async () => {
+				const listed = await runtime.runPromise(
+					read.readSessionList({ projectIds: ["live-project"] }),
+				);
+				return listed.rows.find(({ item }) => item.id === "existing-fork")?.item
+					.attention;
+			};
+			const before = await inspect();
+			expect(before).toBe("idle");
+			const folder = join(root, "other-history");
+			await createProjectStoreFixture(root, "other-history", {
+				sourcePath: join(folder, ".conduit", "events.db"),
+				transcript: { prompt: "Prompt", reply: "Reply" },
+			});
+			writeFileSync(
+				join(configDir, "fork-metadata-unresolved.json"),
+				JSON.stringify({
+					"existing-fork": {
+						parentID: "fork-source",
+						forkMessageId: "source-message",
+					},
+				}),
+			);
+			await fixture.save(folder);
+			const after = await inspect();
+			const lineage = await runtime.runPromise(sql`SELECT fork_point_event
+				FROM sessions WHERE id = 'existing-fork'`);
+			evidence["filteredForkRollup"] = { before, after, lineage };
+			expect(lineage).toEqual([{ fork_point_event: "source-message" }]);
+			expect(after).toBe("idle");
 		} finally {
 			writeImportArtifact("test-results/82tn28-runtime-import.json", evidence);
 			await fixture.close();
@@ -308,6 +380,59 @@ describe("legacy history added after daemon startup", () => {
 			expect.soft(liveClaimedAgain).toBe(false);
 			expect.soft(liveEmptyClaimedAgain).toBe(false);
 		} finally {
+			writeImportArtifact("test-results/82tn28-runtime-import.json", evidence);
+			await fixture.close();
+		}
+	});
+
+	it("keeps a CreateSession draft claim taken immediately after the import commits", async () => {
+		const fixture = await runtimeImportFixture();
+		const { root, sql, drafts, runtime } = fixture;
+		const folder = join(root, "draft-history");
+		const reserve = sql.reserve;
+		let claimedAfterCommit = false;
+		try {
+			const liveFolder = join(root, "live-project");
+			mkdirSync(liveFolder);
+			await fixture.save(liveFolder);
+			const source = await createProjectStoreFixture(root, "draft-history", {
+				sourcePath: join(folder, ".conduit", "events.db"),
+				transcript: { prompt: "Prompt", reply: "Reply" },
+			});
+			const db = new Database(source.sourcePath);
+			try {
+				db.prepare(`INSERT INTO input_drafts
+					(draft_key, project_id, kind, text, updated_at)
+					VALUES ('imported-live-claim', 'draft-history', 'draft', 'Send once', 1000)`).run();
+			} finally {
+				db.close();
+			}
+			Object.defineProperty(sql, "reserve", {
+				value: Effect.gen(function* () {
+					// Finalizers run in reverse order: claim after the connection is
+					// released, before SaveProject can run any post-import cleanup.
+					yield* Effect.addFinalizer(() =>
+						drafts.claim("imported-live-claim", "live-project").pipe(
+							Effect.tap((claimed) =>
+								Effect.sync(() => {
+									claimedAfterCommit = claimed;
+								}),
+							),
+							Effect.orDie,
+						),
+					);
+					return yield* reserve;
+				}),
+			});
+			await fixture.save(folder);
+			const claimedAgain = await runtime.runPromise(
+				drafts.claim("imported-live-claim", "live-project"),
+			);
+			evidence["draftClaimAfterCommit"] = { claimedAfterCommit, claimedAgain };
+			expect(claimedAfterCommit).toBe(true);
+			expect(claimedAgain).toBe(false);
+		} finally {
+			Object.defineProperty(sql, "reserve", { value: reserve });
 			writeImportArtifact("test-results/82tn28-runtime-import.json", evidence);
 			await fixture.close();
 		}
