@@ -257,7 +257,7 @@ test.describe("phone session state chip", () => {
 		const autoSettle = page.getByTestId("session-bar-auto-settle");
 		await expect(autoSettle).toHaveAttribute("aria-checked", "true");
 		await autoSettle.click();
-		await chip.click();
+		await expect(autoSettle).toBeVisible();
 		await expect(autoSettle).toHaveAttribute("aria-checked", "false");
 		await page.keyboard.press("Escape");
 		await page.getByTestId("session-bar-back").click();
