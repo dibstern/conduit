@@ -17,8 +17,161 @@ import { AccountResourceScopesTag } from "../../../src/lib/domain/daemon/Service
 
 // Failure cases: duplicate first opens, a cached failed open, late opens surviving
 // removal, stale releases changing a replacement's demand, cross-account
-// cancellation, and idle cleanup interrupting turns, prompts or background work.
+// cancellation, callback resources surviving a use or closing before work stops,
+// and idle cleanup interrupting turns, prompts or background work.
 describe("daemon account resource scopes", () => {
+	it.effect(
+		"releases callback resources before retrying the same account",
+		() =>
+			Effect.gen(function* () {
+				const scopes = yield* AccountResourceScopesTag;
+				let opens = 0;
+				let closes = 0;
+				let attempts = 0;
+				let live = 0;
+				const liveOnAcquire: number[] = [];
+				const owner = yield* scopes.make(() =>
+					Effect.acquireRelease(
+						Effect.sync(() => ++opens),
+						() => Effect.sync(() => closes++),
+					),
+				);
+				const result = yield* owner
+					.use("a", () =>
+						Effect.gen(function* () {
+							const attempt = yield* Effect.acquireRelease(
+								Effect.sync(() => {
+									liveOnAcquire.push(++live);
+									return ++attempts;
+								}),
+								() => Effect.sync(() => live--),
+							);
+							if (attempt === 1) return yield* Effect.fail("retry");
+							return "done";
+						}),
+					)
+					.pipe(Effect.retry({ times: 1 }), Effect.scoped);
+				expect({ result, live, liveOnAcquire, opens, closes }).toEqual({
+					result: "done",
+					live: 0,
+					liveOnAcquire: [1, 1],
+					opens: 1,
+					closes: 0,
+				});
+				yield* TestClock.adjust(100);
+				expect(closes).toBe(1);
+				expect(yield* owner.use("a", Effect.succeed)).toBe(2);
+			}).pipe(
+				Effect.provide(makeAccountResourceScopesLive({ idleTimeoutMs: 100 })),
+			),
+	);
+
+	for (const operation of ["invalidation", "shutdown"] as const) {
+		it.effect(
+			`${operation} stops work before releasing callback resources`,
+			() =>
+				Effect.gen(function* () {
+					const scope = yield* Scope.fork(yield* Effect.scope);
+					const context = yield* Layer.buildWithScope(
+						makeAccountResourceScopesLive({ idleTimeoutMs: 100 }),
+						scope,
+					);
+					const scopes = Context.get(context, AccountResourceScopesTag);
+					const started = yield* Deferred.make<void>();
+					const stopped = yield* Deferred.make<void>();
+					const releasing = yield* Deferred.make<void>();
+					const order: string[] = [];
+					const owner = yield* scopes.make(() =>
+						Effect.acquireRelease(Effect.void, () =>
+							Effect.sync(() => order.push("account closed")),
+						),
+					);
+					const use = yield* owner
+						.use("a", () =>
+							Effect.gen(function* () {
+								yield* Effect.acquireRelease(Effect.void, () =>
+									Effect.gen(function* () {
+										order.push("work resource closing");
+										yield* Deferred.succeed(releasing, undefined);
+										yield* Deferred.await(stopped);
+										order.push("work resource closed");
+									}),
+								);
+								yield* Deferred.succeed(started, undefined);
+								return yield* Effect.never;
+							}).pipe(
+								Effect.ensuring(
+									Effect.sync(() => order.push("work stopped")).pipe(
+										Effect.andThen(Deferred.succeed(stopped, undefined)),
+									),
+								),
+							),
+						)
+						.pipe(Effect.forkScoped);
+					yield* Deferred.await(started);
+					const closing = yield* (
+						operation === "invalidation"
+							? scopes.invalidate("a")
+							: Scope.close(scope, Exit.void)
+					).pipe(Effect.forkScoped);
+					yield* Deferred.await(releasing);
+					const stoppedBeforeRelease = yield* Deferred.isDone(stopped);
+					// Release a deadlocked cleanup so a regression can report its ordering.
+					yield* Deferred.succeed(stopped, undefined);
+					yield* Fiber.join(closing);
+					expect(Exit.hasInterrupts(yield* Fiber.await(use))).toBe(true);
+					expect({ stoppedBeforeRelease, order }).toEqual({
+						stoppedBeforeRelease: true,
+						order: [
+							"work stopped",
+							"work resource closing",
+							"work resource closed",
+							"account closed",
+						],
+					});
+				}),
+		);
+	}
+
+	it.effect("caller interruption releases only its callback resources", () =>
+		Effect.gen(function* () {
+			const scopes = yield* AccountResourceScopesTag;
+			let closes = 0;
+			const owner = yield* scopes.make(() =>
+				Effect.acquireRelease(Effect.void, () => Effect.sync(() => closes++)),
+			);
+			const started = yield* Deferred.make<void>();
+			const live = new Set<number>();
+			const work = (id: number) =>
+				Effect.gen(function* () {
+					yield* Effect.acquireRelease(
+						Effect.sync(() => live.add(id)),
+						() => Effect.sync(() => live.delete(id)),
+					);
+					if (live.size === 2) yield* Deferred.succeed(started, undefined);
+					yield* Effect.never;
+				});
+			const first = yield* owner
+				.use("a", () => work(1))
+				.pipe(Effect.forkScoped);
+			const second = yield* owner
+				.use("a", () => work(2))
+				.pipe(Effect.forkScoped);
+			yield* Deferred.await(started);
+			yield* Fiber.interrupt(first);
+			expect([...live]).toEqual([2]);
+			yield* TestClock.adjust(200);
+			expect(closes).toBe(0);
+			expect(second.pollUnsafe()).toBeUndefined();
+			yield* Fiber.interrupt(second);
+			expect(live.size).toBe(0);
+			yield* TestClock.adjust(100);
+			expect(closes).toBe(1);
+		}).pipe(
+			Effect.provide(makeAccountResourceScopesLive({ idleTimeoutMs: 100 })),
+		),
+	);
+
 	for (const operation of ["invalidation", "shutdown"] as const) {
 		it.effect(`${operation} cancels a use before its opener starts`, () =>
 			Effect.gen(function* () {
@@ -617,6 +770,7 @@ describe("daemon account resource scopes", () => {
 		() =>
 			Effect.gen(function* () {
 				let closes = 0;
+				let workCloses = 0;
 				const started = yield* Deferred.make<void>();
 				const layerScope = yield* Scope.make();
 				const context = yield* Layer.buildWithScope(
@@ -631,14 +785,19 @@ describe("daemon account resource scopes", () => {
 				);
 				const work = yield* owner
 					.use("a", () =>
-						Deferred.succeed(started, undefined).pipe(
-							Effect.andThen(Effect.never),
-						),
+						Effect.gen(function* () {
+							yield* Effect.acquireRelease(Effect.void, () =>
+								Effect.sync(() => workCloses++),
+							);
+							yield* Deferred.succeed(started, undefined);
+							yield* Effect.never;
+						}),
 					)
 					.pipe(Effect.forkIn(layerScope));
 				yield* Deferred.await(started);
 				yield* Scope.close(layerScope, Exit.void);
 				expect(closes).toBe(1);
+				expect(workCloses).toBe(1);
 				expect(Exit.isFailure(yield* Fiber.await(work))).toBe(true);
 				const restartedScope = yield* Scope.fork(yield* Effect.scope);
 				const restartedContext = yield* Layer.buildWithScope(
@@ -654,9 +813,14 @@ describe("daemon account resource scopes", () => {
 						Effect.sync(() => closes++),
 					),
 				);
-				expect(yield* restartedOwner.use("a", Effect.succeed)).toBe(
-					"fresh resource",
-				);
+				expect(
+					yield* restartedOwner.use("a", (resource) =>
+						Effect.acquireRelease(Effect.succeed(resource), () =>
+							Effect.sync(() => workCloses++),
+						),
+					),
+				).toBe("fresh resource");
+				expect(workCloses).toBe(2);
 				yield* Scope.close(restartedScope, Exit.void);
 				expect(closes).toBe(2);
 			}),

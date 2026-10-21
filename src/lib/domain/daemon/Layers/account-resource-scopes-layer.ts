@@ -210,7 +210,7 @@ export const makeAccountResourceScopesLive = (
 											const resource = yield* Deferred.await(entry.ready);
 											return yield* Effect.acquireUseRelease(
 												Effect.suspend(() => work(resource)).pipe(
-													Scope.provide(entry.scope),
+													Effect.scoped,
 													Effect.interruptible,
 													Effect.forkIn(entry.scope),
 												),
