@@ -94,6 +94,7 @@ for (const mode of [
 		const logFile = join(root, "daemon.log");
 		setLogFile(logFile);
 		const recovered = mode.startsWith("no-journal");
+		let recoveryVersion = 0;
 		let spawned = recovered ? 1 : 0;
 		transport.spawn.mockImplementation(() => {
 			if (mode === "restart-spawn-fails" && spawned === 1)
@@ -218,6 +219,10 @@ for (const mode of [
 						recoverCommands: (sql) =>
 							Effect.gen(function* () {
 								if (recovered) {
+									const [session] = yield* sql<{
+										version: number;
+									}>`SELECT version FROM sessions WHERE id = 's'`;
+									expect(session?.version).toBeGreaterThan(recoveryVersion);
 									expect(
 										yield* sql`SELECT status, error_code, run_id FROM provider_command_outbox`,
 									).toEqual([
@@ -275,6 +280,10 @@ for (const mode of [
 						};
 						registerRunner(registration);
 						transport.discover.mockReturnValue([registration]);
+						recoveryVersion =
+							(yield* sql<{
+								version: number;
+							}>`SELECT version FROM sessions WHERE id = 's'`)[0]?.version ?? 0;
 						yield* runner.recoverEffect;
 					} else {
 						yield* runner.executeEffect({

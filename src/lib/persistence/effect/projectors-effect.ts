@@ -2026,9 +2026,7 @@ export const makeTurnProjector = defineProjector(() => ({
 						yield* stampMessage(written.messages, ctx),
 						{
 							...(yield* stampSessions(written.sessions, ctx.version)),
-							sidebar: runTerminalStatus(event, event.provider)
-								? written.sessions
-								: [],
+							sidebar: written.sessions,
 						},
 					]);
 				}),
@@ -2298,6 +2296,7 @@ export const makeInputProjector = defineProjector(() => ({
 			Effect.flatMap((written) => stampSessions(written, ctx.version)),
 			Effect.map((touch) => ({
 				...touch,
+				sidebar: touch.stamped,
 				collections:
 					touch.stamped.length > 0 && event.type !== "input.interrupt_requested"
 						? ([...touch.collections, "inputs"] as const)

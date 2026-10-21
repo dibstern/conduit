@@ -20,6 +20,9 @@ import { ProviderRuntimeIngestionTag } from "../../domain/relay/Services/provide
 import * as Failure from "../../effect/failure-classification.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { createLogger } from "../../logger.js";
+import { makeCommitAndSignal } from "../../persistence/effect/commit-and-signal.js";
+import { EventStoreEffectTag } from "../../persistence/effect/event-store-effect.js";
+import { ProjectionRunnerEffectTag } from "../../persistence/effect/projection-runner-effect.js";
 import { runTerminalStatus } from "../../persistence/effect/projectors-effect.js";
 import { makeRetireReplacedProcessPrompts } from "../../persistence/effect/retire-pending-prompts.js";
 import { createEventId } from "../../persistence/events.js";
@@ -402,6 +405,16 @@ export const makeProcessSessionRunner = (
 				: 10_000;
 		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
 		const sql = sqlOption._tag === "Some" ? sqlOption.value : undefined;
+		const legacyCommit = yield* Effect.gen(function* () {
+			const store = yield* Effect.serviceOption(EventStoreEffectTag);
+			const projector = yield* Effect.serviceOption(ProjectionRunnerEffectTag);
+			if (!sql || store._tag === "None" || projector._tag === "None") return;
+			return yield* makeCommitAndSignal.pipe(
+				Effect.provideService(SqlClient.SqlClient, sql),
+				Effect.provideService(EventStoreEffectTag, store.value),
+				Effect.provideService(ProjectionRunnerEffectTag, projector.value),
+			);
+		});
 		const ingestionOption = yield* Effect.serviceOption(
 			ProviderRuntimeIngestionTag,
 		);
@@ -1620,10 +1633,17 @@ export const makeProcessSessionRunner = (
 							return;
 						}
 						if (sql && entry.inputHeld) {
+							if (!legacyCommit)
+								return yield* Effect.fail(
+									runnerFailure(
+										"recover runner",
+										"Legacy recovery requires the commit seam",
+									),
+								);
 							const journal = entry.pendingSendCommands;
 							// A supplied journal proves non-delivery; omission proves nothing.
-							yield* sql
-								.withTransaction(
+							yield* legacyCommit
+								.write((_, stamp) =>
 									Effect.gen(function* () {
 										const returned = yield* sql<{
 											run_id: string | null;
@@ -1647,6 +1667,14 @@ export const makeProcessSessionRunner = (
 										WHERE project_key = ${projectId} AND status IN ('accepted', 'side_effect_requested')
 										AND command_id IN (SELECT command_id FROM provider_command_outbox WHERE project_key = ${projectId}
 											AND session_id = ${registration.sessionId} AND status = 'running' AND error_code = 'delivery_indeterminate')`;
+										if (returned.length)
+											yield* stamp((version) =>
+												sql<{
+													id: string;
+												}>`UPDATE sessions SET version = ${version} WHERE id = ${registration.sessionId} RETURNING id`.pipe(
+													Effect.map((rows) => rows.map(({ id }) => id)),
+												),
+											);
 									}),
 								)
 								.pipe(

@@ -718,10 +718,10 @@ export const sendPreparedClaudeTurn = <
 		const send = (prepared: PreparedTurn, fallback: boolean) =>
 			Effect.gen(function* () {
 				// Intake returns before completion; retain the receipt facts for the owned run's end.
-				if (input.commandId) {
+				if (input.commandId && prepared.handoff) {
 					const sql = yield* SqlClient.SqlClient;
 					yield* sql`UPDATE provider_command_outbox
-					SET payload_json = json_set(payload_json, '$.handoff', json(${JSON.stringify(prepared.handoff ? { ...prepared.handoff, instanceId: input.instanceId } : null)}))
+					SET payload_json = json_set(payload_json, '$.handoff', json(${JSON.stringify({ ...prepared.handoff, instanceId: input.instanceId })}))
 					WHERE command_id = ${input.commandId} AND session_id = ${input.sessionId} AND status = 'running'`;
 				}
 				return yield* input.send(prepared, fallback);

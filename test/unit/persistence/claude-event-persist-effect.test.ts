@@ -17,6 +17,8 @@ import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-s
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import { sendPreparedClaudeTurn } from "../../../src/lib/provider/claude/prepare-turn.js";
 
 describe("ClaudeEventPersistEffect session lifecycle", () => {
 	for (const terminal of [
@@ -72,6 +74,29 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 					),
 				]);
 				// Intake is not a successful handoff, including when recovery observes it.
+				if (terminal === "turn.completed") {
+					yield* sendPreparedClaudeTurn({
+						sessionId: "handoff",
+						instanceId: "personal",
+						commandId: "handoff-command",
+						userText: "Original prompt",
+						options: {
+							folderSource: "account",
+							configDir: configuredClaudeConfigDir("/accounts/personal"),
+							liveSession: {
+								instanceId: "personal",
+								configDir: configuredClaudeConfigDir("/accounts/personal"),
+								resumeSessionId: "live-handoff",
+							},
+						},
+						send: (prepared) =>
+							Effect.sync(() => {
+								expect(prepared.resumeSessionId).toBe("live-handoff");
+								expect(prepared.handoff).toBeUndefined();
+								return undefined;
+							}),
+					});
+				}
 				yield* persist.persistHandoffDelivered(
 					"handoff",
 					handoff,
@@ -239,6 +264,14 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 						).toEqual([]);
 					} else {
 						expect(result._tag).toBe("Success");
+						yield* persist.persistUserMessage("failed", "Cannot send", {
+							messageId: "failed-user",
+							inputId: "failed-input",
+							failure: { message: "Missing folder", code: "SEND_FAILED" },
+						});
+						expect(
+							yield* sql`SELECT type FROM events WHERE type = 'turn.error'`,
+						).toEqual([{ type: "turn.error" }]);
 						expect(
 							yield* sql`SELECT status, started_at FROM provider_runs`,
 						).toEqual([{ status: "error", started_at: null }]);
@@ -304,12 +337,13 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 							}),
 						]);
 					}
-					yield* persist.persistUserMessage("failed-send", "Local body", {
-						messageId: "local-user",
-						inputId: "failed-input",
-						runId: "failed-run",
-						failure: { message: "Send failed", code: "SEND_FAILED" },
-					});
+					for (let cleanup = 0; cleanup < 2; cleanup++)
+						yield* persist.persistUserMessage("failed-send", "Local body", {
+							messageId: "local-user",
+							inputId: "failed-input",
+							runId: "failed-run",
+							failure: { message: "Send failed", code: "SEND_FAILED" },
+						});
 					expect(
 						yield* sql`SELECT status, started_at FROM provider_runs`,
 					).toEqual([{ status: "error", started_at: null }]);
@@ -339,6 +373,72 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 							text: echoBeforeFailure ? "Native body" : "Local body",
 						},
 					]);
+				}).pipe(
+					Effect.provide(
+						makePersistenceEffectLayer(":memory:", "test-project"),
+					),
+				),
+		);
+	}
+
+	for (const joined of [false, true]) {
+		it.effect(
+			`failure cleanup preserves a completed run and places its missing turn (joined: ${joined})`,
+			() =>
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const persist = yield* ClaudeEventPersistEffectTag;
+					const commit = yield* makeCommitAndSignal;
+					yield* commit([
+						canonicalEvent("session.created", "finished", {
+							sessionId: "finished",
+							title: "Finished",
+							provider: "claude",
+						}),
+						canonicalEvent("run.requested", "finished", {
+							runId: "finished-run",
+							inputId: "input",
+						}),
+						...(joined
+							? [
+									canonicalEvent("run.requested", "finished", {
+										runId: "reservation",
+										inputId: "input",
+									}),
+									canonicalEvent(
+										"run.started",
+										"finished",
+										{ inputId: "input", requestedRunId: "reservation" },
+										{ provider: "claude", metadata: { runId: "finished-run" } },
+									),
+								]
+							: []),
+						canonicalEvent(
+							"turn.completed",
+							"finished",
+							{ messageId: "answer" },
+							{ provider: "claude", metadata: { runId: "finished-run" } },
+						),
+					]);
+					for (let cleanup = 0; cleanup < 2; cleanup++)
+						yield* persist.persistUserMessage("finished", "Original prompt", {
+							messageId: "input",
+							inputId: "input",
+							runId: joined ? "reservation" : "finished-run",
+							failure: {
+								message: "Transport failure after completion",
+								code: "SEND_FAILED",
+							},
+						});
+					expect(yield* sql`SELECT state, run_id FROM turns`).toEqual([
+						{ state: "completed", run_id: "finished-run" },
+					]);
+					expect(
+						yield* sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.error')`,
+					).toEqual([{ type: "turn.completed" }]);
+					expect(
+						yield* sql`SELECT type FROM message_parts WHERE type = 'error'`,
+					).toEqual([]);
 				}).pipe(
 					Effect.provide(
 						makePersistenceEffectLayer(":memory:", "test-project"),

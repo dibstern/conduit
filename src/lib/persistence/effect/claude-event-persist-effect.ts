@@ -478,9 +478,6 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 							"existing-session",
 						);
 						// The check and append share the seam's transaction on redispatch.
-						const runId =
-							options?.runId ??
-							(options?.failure ? crypto.randomUUID() : undefined);
 						const messageId = options?.messageId;
 						const inputId = options?.inputId;
 						const [existing] =
@@ -494,6 +491,12 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 								WHERE messages.session_id = ${sessionId}
 									AND (messages.id = ${messageId ?? null} OR messages.input_id = ${inputId ?? null}) LIMIT 1`
 								: [];
+						const existingRunId =
+							options?.runId ??
+							(options?.failure ? existing?.run_id : undefined);
+						const runId =
+							existingRunId ??
+							(options?.failure ? crypto.randomUUID() : undefined);
 						let alreadyPlaced = false;
 						if (existing) {
 							if (!runId) return;
@@ -572,8 +575,16 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 							);
 						}
 						if (options?.failure && runId) {
+							const canFail =
+								!existingRunId ||
+								(yield* sql`
+								SELECT 1 FROM provider_runs reservation JOIN provider_runs effective
+									ON effective.id = COALESCE(reservation.joined_into, reservation.id)
+									AND effective.session_id = reservation.session_id
+								WHERE reservation.id = ${runId} AND reservation.session_id = ${sessionId}
+									AND effective.status IN ('pending', 'running')`).length > 0;
 							const meta = { provider, createdAt: now, metadata: { runId } };
-							if (!options.runId)
+							if (!existingRunId)
 								events.unshift(
 									canonicalEvent(
 										"run.requested",
@@ -582,24 +593,25 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 										meta,
 									),
 								);
-							events.push(
-								canonicalEvent(
-									"turn.error",
-									sessionId,
-									{
-										messageId: userMsgId,
-										error: options.failure.message,
-										...(options.failure.code
-											? { code: options.failure.code }
-											: {}),
-										retryable: options.failure.retryable ?? false,
-										...(options.failure.retryAt !== undefined
-											? { retryAt: options.failure.retryAt }
-											: {}),
-									},
-									meta,
-								),
-							);
+							if (canFail)
+								events.push(
+									canonicalEvent(
+										"turn.error",
+										sessionId,
+										{
+											messageId: userMsgId,
+											error: options.failure.message,
+											...(options.failure.code
+												? { code: options.failure.code }
+												: {}),
+											retryable: options.failure.retryable ?? false,
+											...(options.failure.retryAt !== undefined
+												? { retryAt: options.failure.retryAt }
+												: {}),
+										},
+										meta,
+									),
+								);
 						}
 						const stored = yield* eventStore.appendBatch(events);
 						yield* project(stored);
