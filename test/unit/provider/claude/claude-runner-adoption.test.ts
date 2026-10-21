@@ -232,6 +232,18 @@ describe("Claude runner adoption", () => {
 							}),
 					);
 					yield* runner.recoverEffect;
+					expect(
+						yield* runner.hasLiveProcessEffect(
+							"adoption-session",
+							"abcdefabcdef",
+						),
+					).toBe(true);
+					expect(
+						yield* runner.hasLiveProcessEffect(
+							"adoption-session",
+							"replaced-process",
+						),
+					).toBe(false);
 					expect(fixture.attempts).toHaveLength(3);
 					expect(fixture.attempts.every((attempt) => attempt.filesIntact)).toBe(
 						true,
@@ -326,7 +338,20 @@ describe("Claude runner adoption", () => {
 						},
 						() => Effect.succeed({}),
 					);
-					return yield* Effect.result(runner.recoverEffect);
+					const result = yield* Effect.result(runner.recoverEffect);
+					expect(
+						yield* runner.hasLiveProcessEffect(
+							"adoption-session",
+							"abcdefabcdef",
+						),
+					).toBe(true);
+					expect(
+						yield* runner.hasLiveProcessEffect(
+							"adoption-session",
+							"replaced-process",
+						),
+					).toBe(false);
+					return result;
 				}),
 			),
 		);

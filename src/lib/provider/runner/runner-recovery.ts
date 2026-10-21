@@ -1,8 +1,16 @@
 import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
-import { ClaudeEventPersistEffectTag } from "../../persistence/effect/claude-event-persist-effect.js";
+import {
+	ClaudeEventPersistEffectTag,
+	makeClaudeEventPersistEffect,
+} from "../../persistence/effect/claude-event-persist-effect.js";
+import {
+	EventStoreEffectTag,
+	makeEventStoreEffect,
+} from "../../persistence/effect/event-store-effect.js";
 import { requeueFailedSteers } from "../../persistence/effect/input-requeue-effect.js";
+import { ProjectionRunnerEffectTag } from "../../persistence/effect/projection-runner-effect.js";
 import { runTerminalStatus } from "../../persistence/effect/projectors-effect.js";
 import { makeProviderStateEffect } from "../../persistence/effect/provider-state-effect.js";
 import type { TurnResult } from "../types.js";
@@ -19,6 +27,10 @@ export const runningRunnerCommands = (
 	Effect.gen(function* () {
 		const project = yield* Effect.serviceOption(PersistenceProjectTag);
 		const projectId = project._tag === "Some" ? project.value.projectId : null;
+		const scope =
+			sessionId === undefined
+				? sql`(${projectId} IS NULL OR outbox.project_key = ${projectId})`
+				: sql`outbox.session_id = ${sessionId} AND outbox.project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId})`;
 		const rows = yield* sql<{
 			project_key: string;
 			session_id: string;
@@ -38,9 +50,8 @@ export const runningRunnerCommands = (
 		LEFT JOIN provider_runs run ON run.id = outbox.run_id AND run.session_id = outbox.session_id
 		LEFT JOIN turns ON turns.session_id = outbox.session_id
 			AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
-		WHERE (${projectId} IS NULL OR outbox.project_key = ${projectId})
+		WHERE ${scope}
 			AND outbox.status = 'running' AND outbox.effect_type = 'send_turn'
-			AND (${sessionId ?? null} IS NULL OR outbox.session_id = ${sessionId ?? null})
 		ORDER BY outbox.request_sequence`;
 		return rows.filter(
 			(row) => driverForAccount(row.provider_id) === driverKind,
@@ -77,7 +88,6 @@ export const recoverRunnerCommands = <T extends SessionTurn>(
 	},
 ) =>
 	Effect.gen(function* () {
-		const { projectId } = yield* PersistenceProjectTag;
 		const rows = yield* runningRunnerCommands(
 			sql,
 			driverKind,
@@ -110,7 +120,7 @@ export const recoverRunnerCommands = <T extends SessionTurn>(
 						yield* options.failTurn(sinkId, execution.failure);
 						return yield* settleRunnerCommand(
 							sql,
-							projectId,
+							row.project_key,
 							sessionId,
 							row.command_id,
 							row.attempt_count,
@@ -122,7 +132,7 @@ export const recoverRunnerCommands = <T extends SessionTurn>(
 					const result = execution.success;
 					yield* settleRunnerCommand(
 						sql,
-						projectId,
+						row.project_key,
 						sessionId,
 						row.command_id,
 						row.attempt_count,
@@ -253,11 +263,32 @@ export const settleRunnerCommand = (
 	}).pipe(
 		Effect.tap(() =>
 			Effect.gen(function* () {
-				const persist = yield* Effect.serviceOption(
-					ClaudeEventPersistEffectTag,
+				const projector = yield* Effect.serviceOption(
+					ProjectionRunnerEffectTag,
 				);
-				if (persist._tag === "Some")
-					yield* requeueFailedSteers(sql, persist.value, sessionId, commandId);
+				if (projector._tag === "None") {
+					const persist = yield* Effect.serviceOption(
+						ClaudeEventPersistEffectTag,
+					);
+					if (persist._tag === "Some")
+						yield* requeueFailedSteers(
+							sql,
+							persist.value,
+							sessionId,
+							commandId,
+						);
+					return;
+				}
+				const eventStore = yield* makeEventStoreEffect.pipe(
+					Effect.provideService(SqlClient.SqlClient, sql),
+					Effect.provideService(PersistenceProjectTag, { projectId }),
+				);
+				const persist = yield* makeClaudeEventPersistEffect.pipe(
+					Effect.provideService(SqlClient.SqlClient, sql),
+					Effect.provideService(EventStoreEffectTag, eventStore),
+					Effect.provideService(ProjectionRunnerEffectTag, projector.value),
+				);
+				yield* requeueFailedSteers(sql, persist, sessionId, commandId);
 			}),
 		),
 	);
