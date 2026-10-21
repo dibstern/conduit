@@ -6,6 +6,7 @@ import type { SqlError } from "effect/sql/SqlError";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import type { CanonicalEvent, StoredEvent } from "../events.js";
 import { CanonicalEventSchema } from "../events.js";
+import { bindEventStoreEffect } from "./bind-event-store-effect.js";
 import {
 	decodeStoredEventRow,
 	type StoredEventRow,
@@ -36,14 +37,15 @@ const isOpenCodeSeed = (event: CanonicalEvent): boolean =>
 	event.provider === "opencode" &&
 	event.eventId === `evt_opencode_session_created_${event.sessionId}`;
 
-export interface EventStoreEffect {
-	readonly projectId: string;
+export interface UnboundEventStoreEffect {
 	readonly append: (
 		event: CanonicalEvent,
+		projectId?: string,
 	) => Effect.Effect<StoredEvent, EventStoreError | SqlError>;
 
 	readonly appendBatch: (
 		events: readonly CanonicalEvent[],
+		projectId?: string,
 	) => Effect.Effect<readonly StoredEvent[], EventStoreError | SqlError>;
 
 	readonly readFromSequence: (
@@ -66,6 +68,15 @@ export interface EventStoreEffect {
 		sessionId: string,
 	) => Effect.Effect<number, EventStoreError | SqlError>;
 }
+
+export interface EventStoreEffect extends UnboundEventStoreEffect {
+	readonly projectId: string;
+}
+
+export class UnboundEventStoreEffectTag extends Context.Service<
+	UnboundEventStoreEffectTag,
+	UnboundEventStoreEffect
+>()("UnboundEventStoreEffect") {}
 
 export class EventStoreEffectTag extends Context.Service<
 	EventStoreEffectTag,
@@ -92,27 +103,40 @@ export const validateCanonicalEvent = (
 		),
 	);
 
-export const makeEventStoreEffect = Effect.gen(function* () {
+export const makeUnboundEventStoreEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
-	const { projectId } = yield* PersistenceProjectTag;
-	const assertSessionOwnership = (sessionIds: readonly string[]) =>
+	const resolveSessionProject = (sessionId: string, projectId?: string) =>
 		Effect.gen(function* () {
-			// Reserve SQLite's writer slot before reading ownership. A deferred
-			// read snapshot cannot upgrade after another connection commits.
-			yield* sql`UPDATE sessions SET project_id = project_id WHERE 0`;
-			for (const sessionId of new Set(sessionIds)) {
-				const [session] = yield* sql<{ project_id: string | null }>`
-					SELECT project_id FROM sessions WHERE id = ${sessionId}`;
-				// An unstamped row (NULL or '') has no owner yet; the provenance stamp claims it.
-				if (session?.project_id && session.project_id !== projectId)
-					return yield* new EventStoreError({
-						operation: "appendOwnership",
-						sessionId,
-						projectId,
-						ownerProjectId: session.project_id,
-						cause: `Project ${projectId} cannot append to session ${sessionId} owned by project ${session.project_id}`,
-					});
-			}
+			const [session] = yield* sql<{ project_id: string | null }>`
+				SELECT project_id FROM sessions WHERE id = ${sessionId}`;
+			if (projectId !== undefined && !projectId.trim())
+				return yield* new EventStoreError({
+					operation: "appendOwnership",
+					sessionId,
+					projectId,
+					cause: "An explicit project id must be non-empty",
+				});
+			// An unstamped row (NULL or '') can only be claimed explicitly.
+			if (
+				projectId !== undefined &&
+				session?.project_id &&
+				session.project_id !== projectId
+			)
+				return yield* new EventStoreError({
+					operation: "appendOwnership",
+					sessionId,
+					projectId,
+					ownerProjectId: session.project_id,
+					cause: `Project ${projectId} cannot append to session ${sessionId} owned by project ${session.project_id}`,
+				});
+			const owner = session?.project_id || projectId;
+			if (!owner)
+				return yield* new EventStoreError({
+					operation: "appendOwnership",
+					sessionId,
+					cause: `Session ${sessionId} has no project; creation requires an explicit project id`,
+				});
+			return owner;
 		});
 
 	const getNextStreamVersion = (
@@ -136,6 +160,7 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 
 	const appendInCurrentTransaction = (
 		event: CanonicalEvent,
+		projectId: string,
 	): Effect.Effect<
 		{ readonly stored: StoredEvent; readonly duplicateAsk: boolean },
 		EventStoreError | SqlError
@@ -218,35 +243,56 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 
 	const append = (
 		event: CanonicalEvent,
+		explicitProjectId?: string,
 	): Effect.Effect<StoredEvent, EventStoreError | SqlError> =>
 		sql.withTransaction(
 			Effect.gen(function* () {
-				yield* assertSessionOwnership([event.sessionId]);
-				return (yield* appendInCurrentTransaction(event)).stored;
+				// Take the writer slot before reading ownership to avoid upgrading
+				// a stale read snapshot after another connection commits.
+				yield* sql`UPDATE sessions SET project_id = project_id WHERE 0`;
+				const projectId = yield* resolveSessionProject(
+					event.sessionId,
+					explicitProjectId,
+				);
+				return (yield* appendInCurrentTransaction(event, projectId)).stored;
 			}),
 		);
 
 	const appendBatch = (
 		events: readonly CanonicalEvent[],
+		explicitProjectId?: string,
 	): Effect.Effect<readonly StoredEvent[], EventStoreError | SqlError> => {
 		if (events.length === 0) return Effect.succeed([]);
 
 		return sql.withTransaction(
 			Effect.gen(function* () {
-				yield* assertSessionOwnership(events.map((event) => event.sessionId));
+				yield* sql`UPDATE sessions SET project_id = project_id WHERE 0`;
+				const projects = new Map<string, string>();
+				const ownedEvents: { event: CanonicalEvent; projectId: string }[] = [];
+				for (const event of events) {
+					let projectId = projects.get(event.sessionId);
+					if (projectId === undefined) {
+						projectId = yield* resolveSessionProject(
+							event.sessionId,
+							explicitProjectId,
+						);
+						projects.set(event.sessionId, projectId);
+					}
+					ownedEvents.push({ event, projectId });
+				}
 				const results: StoredEvent[] = [];
 				// Plain events are inserted many rows per statement: inside a caller's
 				// transaction each statement runs in a savepoint, where a one-row
 				// insert costs several times the row itself. The writer slot is held,
 				// so these versions cannot race another connection.
 				const nextVersions = new Map<string, number>();
-				let pending: CanonicalEvent[] = [];
+				let pending: { event: CanonicalEvent; projectId: string }[] = [];
 				const flush = Effect.gen(function* () {
 					if (pending.length === 0) return;
 					const chunk = pending;
 					pending = [];
 					const rows = [];
-					for (const event of chunk) {
+					for (const { event, projectId } of chunk) {
 						const version =
 							nextVersions.get(event.sessionId) ??
 							(yield* getNextStreamVersion(event.sessionId));
@@ -278,7 +324,7 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 					))
 						results.push(yield* decodeEventStoreRow(row));
 				});
-				for (const event of events) {
+				for (const { event, projectId } of ownedEvents) {
 					// Re-projecting a child seed would reset a renamed title. OpenCode
 					// seeds still return their stored row for projection recovery.
 					const skipIfStored =
@@ -295,7 +341,7 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 						!isOpenCodeSeed(event)
 					) {
 						yield* validateCanonicalEvent(event);
-						pending.push(event);
+						pending.push({ event, projectId });
 						if (pending.length === APPEND_CHUNK_ROWS) yield* flush;
 						continue;
 					}
@@ -305,8 +351,10 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 							SELECT sequence FROM events WHERE event_id = ${event.eventId}`;
 						if (existing.length > 0) continue;
 					}
-					const { stored, duplicateAsk } =
-						yield* appendInCurrentTransaction(event);
+					const { stored, duplicateAsk } = yield* appendInCurrentTransaction(
+						event,
+						projectId,
+					);
 					nextVersions.delete(event.sessionId);
 					// Recovery must not project an already stored ask again.
 					if (!duplicateAsk) results.push(stored);
@@ -378,12 +426,16 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 		readBySession(sessionId, fromSequence, undefined);
 
 	return {
-		projectId,
 		append,
 		appendBatch,
 		readFromSequence,
 		readBySession,
 		readAllBySession,
 		getNextStreamVersion,
-	} satisfies EventStoreEffect;
+	} satisfies UnboundEventStoreEffect;
+});
+
+export const makeEventStoreEffect = Effect.gen(function* () {
+	const { projectId } = yield* PersistenceProjectTag;
+	return bindEventStoreEffect(yield* makeUnboundEventStoreEffect, projectId);
 });
