@@ -750,6 +750,13 @@ test.describe("Sidebar Layout — Mobile", () => {
 	}) => {
 		await page.setViewportSize({ width: 393, height: 852 });
 		await new AppPage(page).goto(relayUrl);
+		const sessionId = await page
+			.locator("#session-list .session-item.active")
+			.getAttribute("data-session-id");
+		if (!sessionId) throw new Error("missing open session id");
+		const row = page.locator(
+			`#session-list .session-item[data-session-id="${sessionId}"]`,
+		);
 		const trigger = page.getByTestId("session-bar-island-overflow");
 		const sheet = page.getByTestId("session-bar-island-menu");
 		await trigger.click();
@@ -757,7 +764,10 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(
 			page.getByRole("status").filter({ hasText: "Moved “" }),
 		).toBeVisible();
+		await expect(page.getByTestId("session-bar")).toBeHidden();
 		await page.getByTestId("toast-action").click();
+		await expect(row).not.toHaveAttribute("aria-label", /^Settled,/);
+		await row.click();
 		await trigger.click();
 		await sheet.getByTestId("session-ctx-rename").click();
 		const input = page.getByRole("textbox", { name: "Session name" });

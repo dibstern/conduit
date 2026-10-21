@@ -93,6 +93,12 @@ for (const mode of [
 			const messages = page.locator("#messages");
 			await messages.focus();
 			await page.keyboard.press("s");
+			if (mode.name === "phone") {
+				await expect(page.getByTestId("session-bar")).toBeHidden();
+				await page.getByTestId("settled-shelf-toggle").click();
+				await expect(row).toHaveAttribute("aria-label", /^Settled,/);
+				await row.click();
+			}
 			await expect(page.getByTestId("session-bar-state-chip")).toBeVisible();
 			await page.locator("#input").focus();
 			await page.keyboard.press("ControlOrMeta+Shift+E");
@@ -122,7 +128,12 @@ for (const mode of [
 			);
 			await expect(headerCommand).toHaveAccessibleName("Settle");
 			await headerCommand.click();
-			await expect(page.getByTestId("session-bar-state-chip")).toBeVisible();
+			if (mode.name === "phone") {
+				await expect(page.getByTestId("session-bar")).toBeHidden();
+				await expect(row).toHaveAttribute("aria-label", /^Settled,/);
+			} else {
+				await expect(page.getByTestId("session-bar-state-chip")).toBeVisible();
+			}
 		});
 
 		test("transcript commands target the open session while composer letters remain text", async ({
