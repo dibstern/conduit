@@ -21,6 +21,7 @@ import type { SqlError } from "effect/sql/SqlError";
 
 import { type Account, AccountSchema } from "../contracts/account.js";
 import type { SessionScope } from "../contracts/session-scope.js";
+import type { ProviderStopSnapshot } from "../contracts/stored-event.js";
 import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
@@ -110,6 +111,7 @@ export interface InterruptTurnCommand {
 	readonly providerProcessId?: string;
 	/** Interrupt only an active turn admitted under one of these input ids. */
 	readonly turnIds?: readonly string[];
+	readonly stop?: ProviderStopSnapshot;
 }
 
 export interface ResolvePermissionCommand {
@@ -149,6 +151,11 @@ export interface EndSessionCommand {
 	readonly commandId: string;
 	readonly sessionId: string;
 	readonly providerProcessId?: string;
+	readonly stop?: ProviderStopSnapshot;
+	/** Stop escalation may retire its process while an earlier control is blocked. */
+	readonly retireProcess?: true;
+	/** Stop retirement is unnecessary once all captured runs have ended. */
+	readonly retireRunIds?: readonly string[];
 	/** Explicit provider-instance route captured before session projections change. */
 	readonly targetProviderId?: string;
 	readonly account?: Account;

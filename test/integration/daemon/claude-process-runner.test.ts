@@ -669,13 +669,7 @@ describe("Claude session process runner", () => {
 					expect(state.commands).toEqual(held.commands);
 					expect(
 						state.events.filter((event) => event.type === "turn.interrupted"),
-					).toEqual([
-						expect.objectContaining({
-							data: expect.objectContaining({
-								messageId: notificationMessageId,
-							}),
-						}),
-					]);
+					).toEqual([]);
 					expect(
 						state.events.filter((event) => event.type === "turn.completed"),
 					).toHaveLength(1);
@@ -697,7 +691,7 @@ describe("Claude session process runner", () => {
 				persisted(harness, sessionId).events.filter(
 					(event) => event.type === "turn.interrupted",
 				),
-			).toHaveLength(1);
+			).toHaveLength(0);
 			const terminal = persisted(harness, sessionId);
 			await harness.kill();
 			await harness.restart();

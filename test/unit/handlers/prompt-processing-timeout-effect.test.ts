@@ -509,6 +509,14 @@ describe("prompt processing timeouts through Effect state", () => {
 					type: "interrupt_turn",
 					commandId: "cmd-cancel-test",
 					sessionId: "session-1",
+					turnIds: [],
+					stop: {
+						deadlineAt: 30_000,
+						owners: [],
+						turnIds: [],
+						runnerBacked: false,
+						retainedSteers: false,
+					},
 				});
 				expect(client.session.abort).not.toHaveBeenCalled();
 			}).pipe(

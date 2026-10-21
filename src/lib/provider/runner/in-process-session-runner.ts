@@ -162,7 +162,10 @@ export class InProcessSessionRunner implements SessionRunner {
 						command.settings,
 					);
 				case "end-session":
-					yield* this.payload.endSession(command.sessionId);
+					yield* this.payload.endSession(
+						command.sessionId,
+						command.control?.retireRunIds,
+					);
 					this.sessions.delete(command.sessionId);
 					return;
 				case "pre-warm":

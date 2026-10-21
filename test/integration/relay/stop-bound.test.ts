@@ -139,9 +139,90 @@ const flushDispatch = Effect.promise<void>(
 );
 
 describe("Stop bound through SQLite ingestion and durable dispatch", () => {
+	it.effect(
+		"an acknowledged OpenCode Stop waits for its terminal and preserves natural completion",
+		() =>
+			Effect.gen(function* () {
+				const scratch = yield* scratchDirectory;
+				const api = makeMockOpenCodeAPI({
+					promptProcessId: "opencode:silent-stop",
+				});
+				yield* Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const persist = yield* ClaudeEventPersistEffectTag;
+					const turns = yield* ProviderTurnServiceTag;
+					yield* persist.persistEvents([
+						canonicalEvent(
+							"run.requested",
+							"session-1",
+							{ inputId: "original", runId: "original-run" },
+							{ metadata: { runId: "original-run" } },
+						),
+						canonicalEvent(
+							"message.created",
+							"session-1",
+							{
+								sessionId: "session-1",
+								messageId: "original",
+								role: "user",
+								inputId: "original",
+							},
+							{ metadata: { runId: "original-run" } },
+						),
+						canonicalEvent(
+							"run.started",
+							"session-1",
+							{
+								inputId: "original",
+								requestedRunId: "original-run",
+								userMessageId: "original",
+							},
+							{ metadata: { runId: "original-run" } },
+						),
+						canonicalEvent(
+							"session.status",
+							"session-1",
+							{ sessionId: "session-1", status: "busy" },
+							{ metadata: { runId: "original-run" } },
+						),
+					]);
+					const stopped = yield* turns.beginStop({
+						clientId: "client-1",
+						sessionId: "session-1",
+						commandId: "silent-stop",
+					});
+					yield* TestClock.adjust(100);
+					expect(api.session.abort).toHaveBeenCalledOnce();
+					expect(
+						yield* sql`SELECT status FROM provider_runs WHERE id = 'original-run'`,
+					).toEqual([{ status: "running" }]);
+					expect(
+						yield* sql`SELECT type FROM events WHERE type = 'turn.interrupted'`,
+					).toEqual([]);
+					expect(turns.turnFences("session-1").stopping).toBe(true);
+					yield* persist.persistEvents([
+						canonicalEvent(
+							"session.status",
+							"session-1",
+							{ sessionId: "session-1", status: "idle" },
+							{ provider: "opencode", metadata: { runId: "original-run" } },
+						),
+					]);
+					yield* TestClock.adjust(100);
+					yield* stopped;
+					expect(
+						yield* sql`SELECT status FROM provider_runs WHERE id = 'original-run'`,
+					).toEqual([{ status: "completed" }]);
+					expect(
+						yield* sql`SELECT type FROM events WHERE type = 'turn.interrupted'`,
+					).toEqual([]);
+				}).pipe(Effect.provide(stopLayer(api, scratch)));
+			}),
+	);
+
 	// Before the first echo, only the outbox admission keeps the inbox busy.
 	it.effect(
-		"plain Stop retires its cohort at the bound and releases a concurrent Run now",
+		"unconfirmed OpenCode Stop fails its cohort at the bound and ignores late acknowledgements",
 		() =>
 			Effect.gen(function* () {
 				const scratch = yield* scratchDirectory;
@@ -232,16 +313,16 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 					expect(
 						yield* sql`SELECT status, error_code FROM provider_command_outbox
 						WHERE command_id = 'original'`,
-					).toEqual([{ status: "failed", error_code: "interrupted" }]);
+					).toEqual([{ status: "failed", error_code: "stop_unconfirmed" }]);
 					expect(
 						yield* sql`SELECT status, error_code FROM command_receipts
 						WHERE command_id = 'original'`,
 					).toEqual([
-						{ status: "side_effect_failed", error_code: "interrupted" },
+						{ status: "side_effect_failed", error_code: "stop_unconfirmed" },
 					]);
 					expect(
 						yield* sql`SELECT status, started_at FROM provider_runs WHERE id = ${original?.run_id}`,
-					).toEqual([{ status: "interrupted", started_at: null }]);
+					).toEqual([{ status: "error", started_at: null }]);
 					yield* sql`SELECT 1 FROM turns WHERE user_message_id = 'msg_conduit_original'`.pipe(
 						Effect.repeat({ until: (rows) => rows.length === 1 }),
 					);
@@ -249,7 +330,7 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 						yield* sql`SELECT state, run_id, started_at FROM turns WHERE user_message_id = 'msg_conduit_original'`,
 					).toEqual([
 						{
-							state: "interrupted",
+							state: "error",
 							run_id: original?.run_id,
 							started_at: null,
 						},
@@ -277,7 +358,7 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 					expect(api.session.prompt).toHaveBeenCalledTimes(2);
 					expect(
 						yield* sql`SELECT status, error_code FROM provider_command_outbox WHERE command_id = 'original'`,
-					).toEqual([{ status: "failed", error_code: "interrupted" }]);
+					).toEqual([{ status: "failed", error_code: "stop_unconfirmed" }]);
 					acknowledgeAbort?.();
 					yield* flushDispatch;
 					vi.mocked(api.session.abort).mockResolvedValue(undefined);
@@ -286,9 +367,10 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 						sessionId: "session-1",
 						commandId: "confirmed-stop-replacement",
 					});
+					yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
 					yield* endReplacement;
 					expect(yield* inboxRunStatusQuery(sql, "session-1")).toEqual([
-						{ status: "interrupted", stopped: 1 },
+						{ status: "error", stopped: 1 },
 					]);
 					expect(
 						yield* sql`SELECT command_id, status FROM provider_command_outbox
@@ -300,8 +382,8 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 					expect(
 						yield* sql`SELECT status, started_at FROM provider_runs ORDER BY rowid`,
 					).toEqual([
-						{ status: "interrupted", started_at: null },
-						{ status: "interrupted", started_at: null },
+						{ status: "error", started_at: null },
+						{ status: "error", started_at: null },
 					]);
 					expect(
 						yield* sql`SELECT command_id, status, error_code FROM command_receipts
@@ -310,12 +392,12 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 						{
 							command_id: "original",
 							status: "side_effect_failed",
-							error_code: "interrupted",
+							error_code: "stop_unconfirmed",
 						},
 						{
 							command_id: "replacement",
 							status: "side_effect_failed",
-							error_code: "interrupted",
+							error_code: "stop_unconfirmed",
 						},
 					]);
 				}).pipe(Effect.provide(stopLayer(api, scratch)));
@@ -469,12 +551,12 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 					expect(
 						yield* sql`SELECT user_message_id, state FROM turns ORDER BY rowid`,
 					).toEqual([
-						{ user_message_id: "original", state: "interrupted" },
+						{ user_message_id: "original", state: "error" },
 						{ user_message_id: "continuation", state: "running" },
 					]);
 					expect(
 						yield* sql`SELECT json_extract(metadata, '$.runId') AS run_id FROM events
-							WHERE type = 'turn.interrupted'`,
+							WHERE type = 'turn.error' AND json_extract(data, '$.code') = 'stop_unconfirmed'`,
 					).toEqual([{ run_id: "original-run" }]);
 					expect(
 						yield* sql`SELECT status FROM sessions WHERE id = 'session-1'`,
@@ -488,7 +570,7 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 					expect(
 						yield* sql`SELECT id, status FROM provider_runs ORDER BY rowid`,
 					).toEqual([
-						{ id: "original-run", status: "interrupted" },
+						{ id: "original-run", status: "error" },
 						{ id: "continuation-run", status: "running" },
 					]);
 					expect(turns.turnFences("session-1").stopping).toBe(false);

@@ -10,6 +10,7 @@ import {
 	Effect,
 	Exit,
 	FiberSet,
+	Option,
 	Semaphore,
 } from "effect";
 import { SqlClient } from "effect/sql";
@@ -552,22 +553,17 @@ export const makeProcessSessionRunner = (
 			.pipe(Effect.uninterruptible);
 		yield* Effect.addFinalizer(() => shutdown);
 
-		const failed = (
+		const settleExitedRuns = (
 			sessionId: string,
 			entry: RunnerChild,
 			failure: SessionFailure,
+			endCommandId?: string,
 		) => {
-			if (failure.code === "runner_idle_exit") entry.idleExiting = true;
-			if (entry.stopping || entry.recovering || entry.failure || closing)
-				return;
-			entry.failure = failure;
-			runFork(Deferred.fail(entry.ready, failure));
-			if (entry.candidate) return;
 			const bindings = [...sinks].filter(
 				([, binding]) => binding.sessionId === sessionId,
 			);
 			const commands = [...(entry.pendingSendCommands ?? [])];
-			const settleExitedRuns = Effect.gen(function* () {
+			return Effect.gen(function* () {
 				const reservations = new Set<string>();
 				if (sql && ingestion)
 					for (const [commandId, attempt] of commands) {
@@ -586,7 +582,11 @@ export const makeProcessSessionRunner = (
 					const current = children.get(sessionId);
 					yield* retireReplacedPrompts(
 						current && current !== entry ? current.runnerId : null,
-						{ sessionId, expiredProcessId: entry.runnerId },
+						{
+							sessionId,
+							expiredProcessId: entry.runnerId,
+							...(endCommandId ? { exceptCommandId: endCommandId } : {}),
+						},
 					);
 				}
 				if (process.env["NODE_ENV"] === "test")
@@ -629,16 +629,31 @@ export const makeProcessSessionRunner = (
 								sessionId,
 								failure.message,
 								(events) => ingestion.ingestBatch(events),
-								{ errorCode: "runner_stopped", owners: [...owners.values()] },
+								{
+									...(endCommandId ? {} : { errorCode: "runner_stopped" }),
+									owners: [...owners.values()],
+								},
 							);
 						}),
 					),
 				);
-			}).pipe(
-				Effect.catch((cause) =>
-					Effect.logError("Could not settle exited runner runs", cause),
-				),
+			});
+		};
+		const failed = (
+			sessionId: string,
+			entry: RunnerChild,
+			failure: SessionFailure,
+		) => {
+			if (failure.code === "runner_idle_exit") entry.idleExiting = true;
+			if (entry.stopping || entry.recovering || entry.failure || closing)
+				return;
+			entry.failure = failure;
+			runFork(Deferred.fail(entry.ready, failure));
+			if (entry.candidate) return;
+			const bindings = [...sinks].filter(
+				([, binding]) => binding.sessionId === sessionId,
 			);
+			const settlement = settleExitedRuns(sessionId, entry, failure);
 			if (!entry.idleExiting && !entry.startupTimedOut)
 				log.error(
 					`${runnerLabel} failed for session ${sessionId}: ${failure.message}`,
@@ -646,8 +661,11 @@ export const makeProcessSessionRunner = (
 			// Warm completed turns retain a sink for background output. A
 			// dead runner cannot release it, even when no send is waiting.
 			runFork(
-				settleExitedRuns
+				settlement
 					.pipe(
+						Effect.catch((cause) =>
+							Effect.logError("Could not settle exited runner runs", cause),
+						),
 						Effect.andThen(
 							entry.outputs.withPermits(1)(
 								emit({
@@ -2126,25 +2144,78 @@ export const makeProcessSessionRunner = (
 						commandId = rows[0]?.command_id ?? commandId;
 					}
 					if (command.type === "end-session") {
-						return yield* connection
+						// Read after readiness, while End holds admission against new sends.
+						const cohortRunning =
+							sql && command.control?.retireRunIds
+								? sql<{
+										running: number;
+									}>`SELECT EXISTS (SELECT 1 FROM provider_runs
+								WHERE session_id = ${sessionId} AND id IN ${sql.in(command.control.retireRunIds)}
+								AND status IN ('pending', 'running')) AS running`.pipe(
+										Effect.map(([row]) => row?.running === 1),
+										Effect.mapError((cause) =>
+											runnerFailure("retirement cohort", cause),
+										),
+									)
+								: Effect.succeed(true);
+						if (!(yield* cohortRunning)) return;
+						const settlement = settleExitedRuns(
+							sessionId,
+							entry,
+							runnerFailure("end-session", "Provider process stopped"),
+							commandId,
+						);
+						const ended = yield* connection
 							.commandEffect(commandId, payload)
 							.pipe(
-								Effect.ensuring(
-									stop(entry).pipe(
-										Effect.andThen(
-											Effect.suspend(() =>
-												entry.failure
-													? Deferred.await(entry.drained)
-													: Effect.sync(() => evict(sessionId, entry)).pipe(
-															Effect.ensuring(
-																Deferred.succeed(entry.drained, undefined),
-															),
-														),
-											),
-										),
-									),
+								Effect.as(true),
+								Effect.catch((failure) =>
+									failure.code === "stop_cohort_ended"
+										? Effect.succeed(false)
+										: Effect.fail(failure),
 								),
+								Effect.timeoutOption("1 second"),
+								Effect.onExit((exit) =>
+									// A stale native End must not become a forced process kill.
+									Exit.isSuccess(exit) &&
+									Option.isSome(exit.value) &&
+									!exit.value.value
+										? Effect.void
+										: cohortRunning.pipe(
+												Effect.flatMap((running) =>
+													running ? stop(entry) : Effect.void,
+												),
+											),
+								),
+								Effect.result,
 							);
+						if (
+							(ended._tag === "Success" &&
+								Option.isSome(ended.success) &&
+								!ended.success.value) ||
+							!(yield* cohortRunning)
+						)
+							return;
+						const pid = entry.pid ?? entry.child?.pid;
+						if (pid !== undefined && runnerPidAlive(pid)) {
+							const failure = runnerFailure(
+								"end-session",
+								"Runner survived Stop escalation",
+							);
+							yield* quarantine(entry, failure);
+							return yield* Effect.fail(failure);
+						}
+						yield* settlement.pipe(
+							Effect.mapError((cause) =>
+								runnerFailure("settle stopped runner", cause),
+							),
+						);
+						yield* entry.failure
+							? Deferred.await(entry.drained)
+							: Effect.sync(() => evict(sessionId, entry)).pipe(
+									Effect.ensuring(Deferred.succeed(entry.drained, undefined)),
+								);
+						return;
 					}
 					if (
 						process.env["NODE_ENV"] === "test" &&
@@ -2210,6 +2281,9 @@ export const makeProcessSessionRunner = (
 							Failure.isInterruptedOnly(cause)
 						)
 							return Effect.void;
+						// Explicit End owns settlement after confirmed exit. A socket
+						// failure during its graceful phase is not a process terminal.
+						if (child && child.ending > 0) return Deferred.await(child.stopped);
 						const cleanup = failRunnerTurn(
 							emit,
 							command.sinkId,

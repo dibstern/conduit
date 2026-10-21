@@ -23,6 +23,16 @@ export type ProviderType = (typeof PROVIDER_TYPES)[number];
 export const SESSION_STATUSES = ["idle", "busy", "retry", "error"] as const;
 export type SessionStatusValue = (typeof SESSION_STATUSES)[number];
 
+/** Immutable Stop cohort and deadline, committed with its control intent. */
+export const ProviderStopSnapshotSchema = Schema.Struct({
+	deadlineAt: Schema.Number,
+	owners: Schema.Array(Schema.Struct({ runId: Schema.String })),
+	turnIds: Schema.Array(Schema.String),
+	runnerBacked: Schema.Boolean,
+	retainedSteers: Schema.Boolean,
+});
+export type ProviderStopSnapshot = typeof ProviderStopSnapshotSchema.Type;
+
 // Keep in sync with SessionPermissionModeSchema in src/lib/shared-types.ts.
 export const SESSION_PERMISSION_MODES = [
 	"ask",
@@ -999,10 +1009,15 @@ export const CanonicalEvents = {
 		Schema.Struct({
 			providerProcessId: Schema.String,
 			turnIds: Schema.optionalKey(Schema.Array(Schema.String)),
+			stop: Schema.optionalKey(ProviderStopSnapshotSchema),
 		}),
 	),
 	"session.end_requested": live(
-		Schema.Struct({ providerProcessId: Schema.String }),
+		Schema.Struct({
+			providerProcessId: Schema.String,
+			stop: Schema.optionalKey(ProviderStopSnapshotSchema),
+			retireRunIds: Schema.optionalKey(Schema.Array(Schema.String)),
+		}),
 	),
 	"permission.asked": live(
 		Schema.Struct({

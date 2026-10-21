@@ -53,6 +53,8 @@ export interface PermissionResponse {
 export interface ProviderControlContext {
 	readonly commandId: string;
 	readonly providerProcessId: string;
+	/** Conditional End for the original Stop cohort only. */
+	readonly retireRunIds?: readonly string[];
 	readonly response?: PermissionResponse;
 	readonly operation?: "reply" | "reject";
 }

@@ -1273,15 +1273,30 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				markTasksStarted();
 				await streamReleased;
 				if (ending === "parent result") yield result;
+				if (ending === "Stop")
+					yield makeErrorResult({ errors: ["Interrupted"] });
 			})(),
 		);
 		query.close = vi.fn(releaseStream);
+		vi.mocked(query.interrupt).mockImplementation(async () => {
+			releaseStream();
+			return undefined;
+		});
 		let runner: SessionRunner | undefined;
 		const finalized = vi.fn();
 		const onBackgroundTask = vi.fn();
 		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: workspace,
-			queryFactory: () => query,
+			queryFactory: ({ prompt }) => {
+				const stream = query[Symbol.asyncIterator]();
+				return Object.assign({}, query, {
+					[Symbol.asyncIterator]: () =>
+						(async function* () {
+							await prompt[Symbol.asyncIterator]().next();
+							yield* stream;
+						})(),
+				});
+			},
 			subagentSdk,
 			subagentPollIntervalMs: 10,
 			subagentPollTimeoutMs: 100,
@@ -1367,7 +1382,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			if (ending === "Stop") {
 				expect(denyApproval).toHaveBeenCalledWith("reject");
 				expect(query.interrupt).toHaveBeenCalledOnce();
-				expect(query.close).toHaveBeenCalledOnce();
+				expect(query.close).not.toHaveBeenCalled();
 				expect(
 					vi
 						.mocked(sink.push)
@@ -3117,7 +3132,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const secondReady = new Promise<void>((r) => {
 			resolveSecond = r;
 		});
-
 		const gen = (async function* () {
 			yield result1;
 			await secondReady;
@@ -3193,22 +3207,31 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 	it("interruptTurn during second turn resolves second turn's deferred", async () => {
 		const result1 = makeSuccessResult();
 
-		// The second turn will never yield a result — we interrupt instead
+		// The SDK reports the interrupted terminal after acknowledging Stop.
 		let resolveSecond: (() => void) | undefined;
 		const secondReady = new Promise<void>((r) => {
 			resolveSecond = r;
 		});
+		let markSecondRead = () => {};
+		const secondRead = new Promise<void>((resolve) => {
+			markSecondRead = resolve;
+		});
+		let promptIterator: AsyncIterator<SDKUserMessage> | undefined;
 
 		const gen = (async function* () {
+			const input = promptIterator;
+			if (!input) throw new Error("Missing SDK prompt iterator");
+			await input.next();
 			yield result1;
-			// Block forever — interrupt will close the prompt queue
-			// which causes the generator to end
+			await input.next();
+			markSecondRead();
 			await secondReady;
+			yield makeErrorResult({ errors: ["Interrupted"] });
 		})();
 
 		const mockQuery = Object.assign(gen, {
 			interrupt: vi.fn(async () => {
-				// Simulate SDK interrupt by unblocking the generator so it finishes
+				// Simulate the SDK terminal after interrupt acknowledgement.
 				resolveSecond?.();
 			}),
 			close: vi.fn(),
@@ -3237,7 +3260,16 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			[Symbol.asyncIterator]: () => gen,
 		}) as unknown as Query;
 
-		queryFactorySpy = vi.fn(() => mockQuery);
+		queryFactorySpy = vi.fn(
+			({
+				prompt,
+			}: Parameters<
+				NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>
+			>[0]) => {
+				promptIterator = prompt[Symbol.asyncIterator]();
+				return mockQuery;
+			},
+		);
 		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
@@ -3265,18 +3297,18 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const turn2Promise = Effect.runPromise(instance.sendTurnEffect(input2));
 
 		// Interrupt the second turn
+		await secondRead;
 		await Effect.runPromise(
 			instance.interruptTurnEffect("session-interrupt-2nd"),
 		);
 
-		// The interrupt path settles the queued turn before the stream finishes.
+		// The terminal result settles the second turn.
 		const turn2Result = await turn2Promise;
-		expect(turn2Result).toEqual({
+		expect(turn2Result).toMatchObject({
 			status: "interrupted",
-			cost: 0,
-			tokens: { input: 0, output: 0 },
-			durationMs: 0,
-			providerStateUpdates: [],
+			cost: 0.01,
+			tokens: { input: 50, output: 10 },
+			durationMs: 500,
 		});
 	});
 

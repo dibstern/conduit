@@ -80,7 +80,11 @@ export const makeRetireReplacedProcessPrompts = Effect.gen(function* () {
 	const eventStore = yield* Effect.serviceOption(EventStoreEffectTag);
 	const projector = yield* Effect.serviceOption(ProjectionRunnerEffectTag);
 	type Scope =
-		| { readonly sessionId: string; readonly expiredProcessId?: string }
+		| {
+				readonly sessionId: string;
+				readonly expiredProcessId?: string;
+				readonly exceptCommandId?: string;
+		  }
 		| { readonly providerInstanceIds: readonly string[] };
 	if (
 		Option.isNone(sql) ||
@@ -124,6 +128,8 @@ export const makeRetireReplacedProcessPrompts = Effect.gen(function* () {
 					}>`UPDATE provider_command_outbox
 						SET status = 'cancelled', error_code = 'provider_process_gone', next_attempt_at = NULL, updated_at = ${now}
 						WHERE effect_type <> 'send_turn' AND status IN ('pending', 'running', 'retryable_failed')
+							AND (${"sessionId" in scope ? (scope.exceptCommandId ?? null) : null} IS NULL
+								OR command_id <> ${"sessionId" in scope ? (scope.exceptCommandId ?? null) : null})
 							AND project_key = ${eventStore.value.projectId}
 							AND ${"sessionId" in scope && scope.expiredProcessId ? client`provider_process_id = ${scope.expiredProcessId}` : client`1 = 1`}
 							AND (${currentProcessId} IS NULL OR (provider_process_id IS NOT NULL AND provider_process_id <> ${currentProcessId}))

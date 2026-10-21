@@ -1089,6 +1089,15 @@ export class ProviderSideEffectReactor {
 							cause: "Control target does not match outbox",
 						}),
 					);
+				if (payload.type === "end_session" && payload.retireRunIds) {
+					const [cohort] = yield* this.options.sql<{ running: number }>`
+						SELECT EXISTS (SELECT 1 FROM provider_runs WHERE session_id = ${row.session_id}
+							AND id IN ${this.options.sql.in(payload.retireRunIds)}
+							AND status IN ('pending', 'running')) AS running`.pipe(
+						Effect.mapError(storeFailure("retirementCohort")),
+					);
+					if (cohort?.running !== 1) return REACTOR_COMPLETED_RESULT;
+				}
 				const call = yield* this.options.resolveSessionCallContext?.(
 					row.session_id,
 					payload.type === "end_session" ? payload.account : undefined,
@@ -1136,6 +1145,9 @@ export class ProviderSideEffectReactor {
 				const context = {
 					commandId: row.command_id,
 					providerProcessId: row.provider_process_id,
+					...(payload.type === "end_session" && payload.retireRunIds
+						? { retireRunIds: payload.retireRunIds }
+						: {}),
 				};
 				const instances = yield* Effect.serviceOption(OpenCodeInstancesTag);
 				if (instance.getControlProcessIdEffect) {

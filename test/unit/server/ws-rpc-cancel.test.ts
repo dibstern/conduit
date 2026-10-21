@@ -39,6 +39,14 @@ describe("WsRpcServerLayer CancelSession", () => {
 				type: "interrupt_turn",
 				commandId: "cmd-stop-opencode",
 				sessionId: "session-1",
+				turnIds: [],
+				stop: {
+					deadlineAt: 30_000,
+					owners: [],
+					turnIds: [],
+					runnerBacked: false,
+					retainedSteers: false,
+				},
 			});
 		}).pipe(
 			Effect.scoped,
@@ -93,6 +101,14 @@ describe("WsRpcServerLayer CancelSession", () => {
 				type: "interrupt_turn",
 				commandId: "cmd-stop-1",
 				sessionId: "session-claude",
+				turnIds: [],
+				stop: {
+					deadlineAt: 30_000,
+					owners: [],
+					turnIds: [],
+					runnerBacked: true,
+					retainedSteers: false,
+				},
 			});
 		}).pipe(
 			Effect.scoped,

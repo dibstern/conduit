@@ -1,19 +1,19 @@
-import { Effect } from "effect";
+import { Clock, Effect, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import type { Account } from "../../../contracts/account.js";
 import {
 	PROVIDER_DRIVERS,
 	type ProviderDriverTraits,
 } from "../../../contracts/provider-instance.js";
+import { ProviderStopSnapshotSchema } from "../../../contracts/stored-event.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent, createEventId } from "../../../persistence/events.js";
-import {
-	sessionRunOwnersQuery,
-	settleSessionRuns,
-} from "../../../provider/session-run-settlement.js";
+import { ProviderInstanceFailure } from "../../../provider/errors.js";
+import { ProviderControlPayloadSchema } from "../../../provider/orchestration-command-contracts.js";
+import { sessionRunOwnersQuery } from "../../../provider/session-run-settlement.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import {
 	PendingInteractionServiceTag,
@@ -22,6 +22,7 @@ import {
 import { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
 import { CLAUDE_PROVIDER_ID } from "./provider-turn-dispatch.js";
 import type {
+	ProviderTurnService,
 	ProviderTurnServiceInterruptInput,
 	ProviderTurnServicePrepareInput,
 } from "./provider-turn-service.js";
@@ -32,6 +33,8 @@ import {
 } from "./services.js";
 import { SessionManagerServiceTag } from "./session-manager-service.js";
 import { clearProcessingTimeout } from "./session-overrides-state.js";
+
+export const STOP_ABORT_WAIT_MS = 30_000;
 
 export const completeRecoveredQuestion = (
 	question: PendingQuestion,
@@ -117,6 +120,7 @@ export const completeRecoveredQuestion = (
 
 const resolvePendingClaudeQuestions = (
 	input: ProviderTurnServicePrepareInput,
+	beginStop: ProviderTurnService["beginStop"],
 ) =>
 	Effect.gen(function* () {
 		const pendingInteractionService = yield* PendingInteractionServiceTag;
@@ -136,7 +140,7 @@ const resolvePendingClaudeQuestions = (
 				sessionId: input.sessionId,
 				commandId: `${input.commandId}:interrupt-for-question`,
 			};
-			yield* interruptTurn(stop, yield* prepareStop(stop));
+			yield* yield* beginStop(stop);
 		}
 	});
 
@@ -184,7 +188,10 @@ const materializeOpenCodeSession = (
 		return session.id;
 	});
 
-export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
+export const prepareTurnSession = (
+	input: ProviderTurnServicePrepareInput,
+	beginStop: ProviderTurnService["beginStop"],
+) =>
 	Effect.gen(function* () {
 		const orchestrationEngine = yield* OrchestrationEngineTag;
 		const read = yield* ReadQueryEffectTag;
@@ -211,7 +218,7 @@ export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
 			traits.interactionSink === "permission-asking" &&
 			input.delivery !== "steer"
 		)
-			yield* resolvePendingClaudeQuestions(input);
+			yield* resolvePendingClaudeQuestions(input, beginStop);
 		if (traits.runsOpenCodeServer)
 			return yield* materializeOpenCodeSession(
 				input,
@@ -226,6 +233,25 @@ export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
 export const prepareStop = (input: ProviderTurnServiceInterruptInput) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		const [stored] = yield* sql<{
+			stop_json: string;
+		}>`SELECT json_extract(payload_json, '$.stop') AS stop_json
+			FROM provider_command_outbox WHERE command_id = ${input.commandId} AND session_id = ${input.sessionId}
+			AND json_type(payload_json, '$.stop') = 'object'`;
+		if (stored)
+			return yield* Effect.try({
+				try: () =>
+					Schema.decodeSync(Schema.fromJsonString(ProviderStopSnapshotSchema))(
+						stored.stop_json,
+					),
+				catch: (cause) =>
+					new ProviderInstanceFailure({
+						providerId: "conduit",
+						operation: "recoverStop",
+						cause,
+					}),
+			});
+		const deadlineAt = (yield* Clock.currentTimeMillis) + STOP_ABORT_WAIT_MS;
 		const commit = yield* makeCommitAndSignal;
 		const store = yield* EventStoreEffectTag;
 		const providerId =
@@ -318,6 +344,10 @@ export const prepareStop = (input: ProviderTurnServiceInterruptInput) =>
 			WHERE turn.session_id = ${input.sessionId}
 				AND turn.run_id IN ${sql.in(owners.map(({ runId }) => runId))}`;
 		return {
+			deadlineAt,
+			runnerBacked:
+				account !== undefined &&
+				!PROVIDER_DRIVERS[account.driver].runsOpenCodeServer,
 			owners,
 			retainedSteers,
 			turnIds: [
@@ -339,6 +369,27 @@ export const interruptTurn = (
 		const sql = yield* SqlClient.SqlClient;
 
 		const engine = yield* OrchestrationEngineTag;
+		const [stored] = yield* sql<{
+			payload_json: string;
+		}>`SELECT payload_json FROM provider_command_outbox
+			WHERE command_id = ${input.commandId} AND session_id = ${input.sessionId}
+			AND json_type(payload_json, '$.stop') = 'object'`;
+		if (stored) {
+			const payload = yield* Effect.try({
+				try: () =>
+					Schema.decodeSync(
+						Schema.fromJsonString(ProviderControlPayloadSchema),
+					)(stored.payload_json),
+				catch: (cause) =>
+					new ProviderInstanceFailure({
+						providerId: "conduit",
+						operation: "recoverStop",
+						cause,
+					}),
+			});
+			yield* engine.dispatchEffect({ ...payload, commandId: input.commandId });
+			return;
+		}
 		const providerId = yield* engine.getProviderForSessionEffect(
 			input.sessionId,
 		);
@@ -368,11 +419,10 @@ export const interruptTurn = (
 		const interruptResult = yield* Effect.result(
 			engine.dispatchEffect({
 				type: fullStop ? "end_session" : "interrupt_turn",
-				...(!fullStop && snapshot.turnIds.length > 0
-					? { turnIds: snapshot.turnIds }
-					: {}),
+				...(!fullStop ? { turnIds: snapshot.turnIds } : {}),
 				commandId: input.commandId,
 				sessionId: input.sessionId,
+				stop: snapshot,
 			}),
 		);
 		const processGone =
@@ -386,14 +436,6 @@ export const interruptTurn = (
 			);
 			return yield* Effect.fail(interruptResult.failure);
 		}
-		// An ordinary turn interrupt keeps the Claude SDK's pending steer alive.
-		if (!usesOpenCode && !fullStop && !processGone) return;
-		const ingestion = yield* ProviderRuntimeIngestionTag;
-		yield* settleSessionRuns(
-			sql,
-			input.sessionId,
-			"Stopped by the user",
-			(events) => ingestion.ingestBatch(events),
-			{ owners: snapshot.owners },
-		);
+		// Acknowledgement confirms delivery. Terminals and the runner's
+		// confirmed-exit path own settlement, including a full Stop.
 	});

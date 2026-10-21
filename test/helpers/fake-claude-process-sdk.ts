@@ -163,6 +163,7 @@ export type ProcessMark =
 	  }
 	| { kind: "pre-assistant-held"; prompt: string; queryId: string }
 	| { kind: "assistant-held"; prompt: string; queryId: string }
+	| { kind: "intake-held"; prompt: string; queryId: string; inputId: string }
 	| {
 			kind: "resume-rejected";
 			prompt: string;
@@ -1067,6 +1068,15 @@ function query(params: {
 				continue;
 			}
 			// Native resume validation precedes intake, as it does in the CLI.
+			if (request === "load-stream-stop-before-intake" && proof) {
+				mark({ kind: "intake-held", prompt, queryId, inputId: userUuid });
+				while (
+					!existsSync(join(dirname(proof), "release-stop-intake")) &&
+					!closed
+				)
+					await new Promise<void>((done) => setTimeout(done, 20));
+				if (closed) return;
+			}
 			yield {
 				type: "command_lifecycle",
 				state: "started",
