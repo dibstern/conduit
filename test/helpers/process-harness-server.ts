@@ -353,6 +353,69 @@ async function main(): Promise<void> {
 		? join(dist, "src")
 		: fileURLToPath(new URL("../../src", import.meta.url));
 	const extension = dist ? "js" : "ts";
+	// Drop only fixture-selected attachments, after the real hello restores demand.
+	const attachmentFault = join(root, "runner-attachment-drop.json");
+	if (existsSync(attachmentFault)) {
+		const net = await import("node:net");
+		const { syncBuiltinESMExports } = await import("node:module");
+		const connections = new Map<string, import("node:net").Socket>();
+		const attempts = new Map<string, number>();
+		const connect = net.default.createConnection;
+		Object.assign(net.default, {
+			createConnection: (
+				options: string | import("node:net").NetConnectOpts,
+				listener?: () => void,
+			) => {
+				const target =
+					typeof options === "string" ? { path: options } : options;
+				const socket = connect(target, listener);
+				const path = "path" in target ? target.path : undefined;
+				if (path && existsSync(attachmentFault)) {
+					const { socketPaths }: { socketPaths: string[] } = JSON.parse(
+						readFileSync(attachmentFault, "utf8"),
+					);
+					if (socketPaths.includes(path)) {
+						connections.set(path, socket);
+						const attempt = (attempts.get(path) ?? 0) + 1;
+						attempts.set(path, attempt);
+						appendFileSync(
+							`${attachmentFault}.attempts.ndjson`,
+							`${JSON.stringify({ socketPath: path, attempt, daemonPid: process.pid })}\n`,
+						);
+						if (attempt > 1) socket.destroy();
+					}
+				}
+				return socket;
+			},
+		});
+		syncBuiltinESMExports();
+		const send = process.send?.bind(process);
+		Object.assign(process, {
+			send: (message: import("node:child_process").Serializable) => {
+				if (
+					typeof message === "object" &&
+					message !== null &&
+					"kind" in message &&
+					message.kind === "runner-started" &&
+					"socketPath" in message &&
+					typeof message.socketPath === "string" &&
+					existsSync(attachmentFault)
+				) {
+					const { socketPaths }: { socketPaths: string[] } = JSON.parse(
+						readFileSync(attachmentFault, "utf8"),
+					);
+					if (socketPaths.includes(message.socketPath)) {
+						connections.get(message.socketPath)?.destroy();
+						appendFileSync(
+							`${attachmentFault}.ndjson`,
+							`${JSON.stringify({ socketPath: message.socketPath, daemonPid: process.pid })}\n`,
+						);
+					}
+				}
+				return send?.(message);
+			},
+		});
+	}
 	if (existsSync(join(root, "thread-read-proof.json"))) {
 		const readProbe = (): { sessionId: string; projectId: string } =>
 			JSON.parse(readFileSync(join(root, "thread-read-proof.json"), "utf8"));
