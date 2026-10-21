@@ -15,7 +15,7 @@ import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import {
 	ProjectSettingsTag,
 	publishProjectSetting,
-	refreshHarnessDefaults,
+	refreshModelSettings,
 } from "./project-settings.js";
 import {
 	LoggerTag,
@@ -96,7 +96,7 @@ export const publishDiscoveredModels = (
 			accountId: account.id,
 			providers: models.length > 0 ? [provider] : [],
 		}).pipe(Effect.provideService(ProjectSettingsTag, projectSettings.value));
-		yield* refreshHarnessDefaults;
+		yield* refreshModelSettings;
 	});
 
 /** Catalog discovery for interactive picks; turn dispatch uses cached catalogs. */
@@ -146,7 +146,7 @@ export const loadModelCatalog = (
 			);
 			return [] as ModelInfo[];
 		}
-		yield* refreshHarnessDefaults;
+		yield* refreshModelSettings;
 		return provListResult.success.providers.flatMap((provider) =>
 			(provider.models ?? []).map((model) => ({
 				...model,

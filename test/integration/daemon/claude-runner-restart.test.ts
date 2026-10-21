@@ -950,7 +950,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 				{ timeout: 15_000 },
 			);
 			const steer = "recovery-steer";
-			const submitted = await Effect.runPromise(
+			const submitted = Effect.runPromise(
 				after.rpc["input.submit"]({
 					sessionId,
 					inputId: randomUUID(),
@@ -959,18 +959,10 @@ describe("Claude runners survive server replacement through built dist", () => {
 					text: steer,
 				}),
 			);
-			expect(submitted.ok).toBe(true);
 			await harness.waitForMark(
 				(mark) => mark.kind === "receipt" && mark.prompt === steer,
 			);
-			await vi.waitFor(
-				() =>
-					expect(
-						persisted(harness, sessionId).commands.map(({ status }) => status),
-					).toEqual(["running", "running"]),
-				{ timeout: 15_000 },
-			);
-			// Both commands reached the runner before its environment was ready.
+			// The steer reached the server while its call environment is preparing.
 			expect(
 				persisted(harness, sessionId).events.some(
 					(event) => event.type === "run.started",
@@ -982,6 +974,14 @@ describe("Claude runners survive server replacement through built dist", () => {
 				),
 			).toEqual([]);
 			writeFileSync(release, "release");
+			expect((await submitted).ok).toBe(true);
+			await vi.waitFor(
+				() =>
+					expect(
+						persisted(harness, sessionId).commands.map(({ status }) => status),
+					).toEqual(["running", "running"]),
+				{ timeout: 15_000 },
+			);
 			await vi.waitFor(
 				() =>
 					expect(

@@ -717,10 +717,16 @@ export const mockAppHandlers: StepHandler[] = [
 							handedOff: true,
 						};
 					},
-					SyncInputDraft: async ({ key, text }) => {
+					SyncInputDraft: async ({ key, text, originId }) => {
 						const id = "session" in key ? key.session : key.draft;
 						if (text) syncedDrafts.set(id, text);
 						else syncedDrafts.delete(id);
+						// A reload restores the draft from SubscribeInputDraft, so persist it
+						// there too, as the default mock handler does.
+						rpcControls.get(page)?.sendInputDraft(key, {
+							text,
+							...(originId !== undefined && { from: originId }),
+						});
 						return { ok: true };
 					},
 					SetDefaultPermissionMode: async (payload) => ({

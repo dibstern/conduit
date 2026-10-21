@@ -300,7 +300,7 @@ describe("model handlers with Effect-native model service", () => {
 				yield* Effect.forEach(fibers, Fiber.join);
 				const selectedResponses = yield* Effect.forEach(selected, Fiber.join);
 				for (const { response, catalog } of selectedResponses) {
-					expect(response.providers).toEqual([]);
+					expect(response.providers).toEqual(catalog?.providers ?? []);
 					expect(catalog).toMatchObject({ providers: fails ? [] : [{ id: "claude", models: [{ id: "sonnet" }] }] });
 					expect(response.active).toEqual(fails ? undefined : { provider: "claude", model: "sonnet" });
 					expect(response.variant).toEqual({ variant: fails ? "" : "high", variants: fails ? [] : ["high"] });
@@ -384,7 +384,7 @@ describe("model handlers with Effect-native model service", () => {
 				);
 				yield* Deferred.await(refreshSubscribed);
 				const refreshed = yield* getModelsResponse({ instanceId: "claude" });
-				expect(refreshed.providers).toEqual([]);
+				expect(refreshed.providers).toMatchObject([{ id: "claude", models: [{ id: "opus" }] }]);
 				expect(Option.getOrThrow(yield* Fiber.join(refreshedUpdate))).toMatchObject({
 					_tag: "upsert", item: { _tag: "providerModels", providers: [{ id: "claude", models: [{ id: "opus" }] }] },
 				});

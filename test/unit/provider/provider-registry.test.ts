@@ -13,6 +13,7 @@ import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 function makeStubInstance(providerId: string): ProviderInstance {
 	return {
 		providerId,
+		generateTextEffect: () => Effect.die("not used"),
 		discoverEffect: vi.fn(() =>
 			Effect.succeed({
 				models: [],

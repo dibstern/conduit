@@ -151,6 +151,7 @@ for (const scenario of [
 				providerId: "claude",
 				discoverEffect: () =>
 					Effect.die("Continuation must not discover providers"),
+				generateTextEffect: () => Effect.die("not used"),
 				sendTurnEffect: () =>
 					Effect.die("Turn delivery is supplied by the fixture"),
 				preWarmSessionEffect: () => Effect.void,

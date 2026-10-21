@@ -2137,6 +2137,7 @@ describe("SessionManagerService", () => {
 			}> = [];
 			const providerInstance: ProviderInstance = {
 				providerId: "opencode",
+				generateTextEffect: () => Effect.die("not used"),
 				discoverEffect: () =>
 					Effect.succeed({
 						models: [],

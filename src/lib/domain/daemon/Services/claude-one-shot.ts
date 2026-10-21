@@ -1,6 +1,7 @@
 import type { Options as SDKOptions } from "@anthropic-ai/claude-agent-sdk";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import { Data, Effect, Schema } from "effect";
+import { claudeEffortOptions } from "../../../provider/claude/claude-query-options.js";
 import {
 	type ClaudeConfigDir,
 	makeClaudeSdkEnv,
@@ -126,14 +127,24 @@ async function collectGeneratedText(
 /** Callers own their prompt, model, timeout and failure policy. */
 export const makeClaudeOneShot = (options: {
 	readonly configDir: ClaudeConfigDir;
+	readonly accountEnv?: Readonly<Record<string, string>>;
 	readonly cwd: string;
 	readonly systemPrompt: string;
 	readonly onStderr?: (data: string) => void;
 	readonly queryFactory?: ClaudeOneShotQueryFactory;
+	readonly isolation?: Pick<
+		SDKOptions,
+		"settingSources" | "strictMcpConfig" | "mcpServers"
+	>;
 }) => {
 	const queryFactory = options.queryFactory ?? ((params) => sdkQuery(params));
 	return {
-		ask: <A, I>(prompt: string, schema: Schema.Codec<A, I>, model: string) =>
+		ask: <A, I>(
+			prompt: string,
+			schema: Schema.Codec<A, I>,
+			model: string,
+			effort = "",
+		) =>
 			Effect.gen(function* () {
 				const abortController = new AbortController();
 				const text = yield* Effect.tryPromise({
@@ -149,7 +160,8 @@ export const makeClaudeOneShot = (options: {
 										CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
 									},
 									model,
-									thinking: { type: "disabled" },
+									...(effort ? {} : { thinking: { type: "disabled" } }),
+									...claudeEffortOptions(effort),
 									// Keep user hooks, CLAUDE.md and output styles out of this query.
 									systemPrompt: options.systemPrompt,
 									settings: {
@@ -157,6 +169,7 @@ export const makeClaudeOneShot = (options: {
 										outputStyle: "default",
 										claudeMdExcludes: ["**"],
 									},
+									...options.isolation,
 									persistSession: false,
 									maxTurns: 1,
 									allowedTools: [],
