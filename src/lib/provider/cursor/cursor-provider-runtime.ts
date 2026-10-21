@@ -18,7 +18,12 @@ export const makeCursorProviderRuntime = (deps: RunnerProviderInstanceDeps) =>
 		const state = yield* ProviderStateEffectTag;
 		return yield* makeRunnerProviderInstance(
 			deps,
-			makeCursorRunnerDriver(deps.workspaceRoot, undefined, { read, state }),
+			makeCursorRunnerDriver(
+				deps.workspaceRoot,
+				undefined,
+				{ read, state },
+				deps.daemonConfigDir,
+			),
 			(emit) =>
 				makeProcessSessionRunner(deps, emit, {
 					driverKind: "cursor",

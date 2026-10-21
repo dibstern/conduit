@@ -857,6 +857,7 @@ describe("shared-store relay project scope", () => {
 			{
 				providerId: "claude",
 				discoverEffect: () => Effect.die("Unexpected discovery"),
+				generateTextEffect: () => Effect.die("not used"),
 				sendTurnEffect: () =>
 					Effect.die("Continuation uses ProviderTurnService"),
 				interruptTurnEffect: () => Effect.void,

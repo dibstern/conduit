@@ -375,6 +375,7 @@ for (const mode of [
 									let admissionChecked = false;
 									const provider: ProviderInstance = {
 										providerId: "test",
+										generateTextEffect: () => Effect.die("not used"),
 										inputAdmission: {
 											...runner.inputAdmission,
 											isHeld: (sessionId) => {

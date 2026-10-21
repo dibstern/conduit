@@ -77,6 +77,7 @@ function makeProvider(
 ): ProviderInstance {
 	return {
 		providerId,
+		generateTextEffect: () => Effect.die("not used"),
 		discoverEffect: () => Effect.succeed(emptyCapabilities),
 		// The fake provider emits its own completion frame. Its return value alone
 		// cannot settle the command or release the next session request.

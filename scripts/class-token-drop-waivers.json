@@ -1,4 +1,9 @@
 {
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: bg-bg,gap-0.5,model-check,model-empty,model-item-context,model-item-cost,model-item-name,model-provider-header,model-routing,mx-[10px],normal-case,overflow-y-auto,placeholder:text-text-dimmer,px-1,py-0.5,py-2.5,py-4,routed,text-[13px],text-base,text-center,text-right,tracking-normal": {
+		"movedTo": "src/lib/frontend/components/model/ModelSelectionPanel.svelte",
+		"requires": "<ModelSelectionPanel",
+		"reason": "conduit-test-9mbo.3 extracts the unchanged panel markup into ModelSelectionPanel; the composer wrapper still renders it."
+	},
 	"src/lib/frontend/components/ui/SortableList.svelte :: md:w-[11px]": "conduit-test-m379.15: the project tree's drag handle keeps its 24px width on desktop too; 11px was too narrow to grab, and project rows now indent by the handle's width.",
 	"src/lib/frontend/components/layout/SessionBar.svelte :: gap-[6px],mb-[3px],mt-[12px],mt-[4px],mx-[4px],p-[6px],pt-[10px],text-[10.58px],text-[11.5px]": "conduit-test-aoqb.42: the approved goal summary layout replaces the always-open check list with a 12px divider gap, 10.5px single metadata line, 16px popover inset and 8px action gaps. The old check-heading and separate token-row spacing is removed.",
 	"src/lib/frontend/components/layout/SessionBar.svelte :: goal.icon,spinner": "conduit-test-aoqb.42: goalIcon now selects the alert, pause, checking and met icons for both header and sheet. These were expression fragments inside a class string, not CSS utilities; the checking icon retains motion-safe:animate-spin.",

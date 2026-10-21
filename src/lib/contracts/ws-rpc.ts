@@ -84,6 +84,10 @@ import {
 	TextSurfacedPayloadSchema,
 } from "./stored-event.js";
 import { TerminalKeysSetting } from "./terminal-keys.js";
+import {
+	TitleGenerationSelectionSchema,
+	TitleGenerationStateSchema,
+} from "./title-generation.js";
 import { ToolCallId, ToolDetail, ToolInput, ToolText } from "./tool-wire.js";
 import {
 	RecapScopeSchema,
@@ -523,7 +527,7 @@ export const GetModelsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	instanceId: Schema.optional(Schema.String),
 	defaultOpenCodeInstanceId: Schema.optional(Schema.String),
-	/** OpenCode catalog; Claude's shared catalog follows providerModels. */
+	/** Explicit account reads include its discovered catalog; other discovery catalogs follow providerModels. */
 	providers: Schema.Array(ProviderInfoSchema),
 	active: Schema.optional(ModelSelectionSchema),
 	variant: Schema.optional(VariantInfoSchema),
@@ -571,6 +575,12 @@ export const SetHarnessDefaultResponseSchema = Schema.Struct({
 });
 export type SetHarnessDefaultResponse =
 	typeof SetHarnessDefaultResponseSchema.Type;
+
+export const TitleGenerationResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	...TitleGenerationStateSchema.fields,
+});
+export type TitleGenerationResponse = typeof TitleGenerationResponseSchema.Type;
 
 export const SetDefaultPermissionModeResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
@@ -1699,6 +1709,25 @@ export const SetHarnessDefault = Rpc.make("SetHarnessDefault", {
 		originId: Schema.optional(NonEmptyString),
 	}),
 	success: SetHarnessDefaultResponseSchema,
+	error: WsRpcError,
+});
+
+export const GetTitleGeneration = Rpc.make("GetTitleGeneration", {
+	payload: Schema.TaggedStruct("GetTitleGeneration", {
+		projectSlug: NonEmptyString,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: TitleGenerationResponseSchema,
+	error: WsRpcError,
+});
+
+export const SetTitleGeneration = Rpc.make("SetTitleGeneration", {
+	payload: Schema.TaggedStruct("SetTitleGeneration", {
+		projectSlug: NonEmptyString,
+		selection: Schema.NullOr(TitleGenerationSelectionSchema),
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: TitleGenerationResponseSchema,
 	error: WsRpcError,
 });
 
@@ -3048,6 +3077,8 @@ const wsRpcRequests = [
 	SwitchModel,
 	SetDefaultModel,
 	SetHarnessDefault,
+	GetTitleGeneration,
+	SetTitleGeneration,
 	SetDefaultPermissionMode,
 	SetDefaultSessionMode,
 	ResolveSessionMode,
@@ -3589,6 +3620,9 @@ export const ProjectSettingSchema = Schema.Union([
 	Schema.TaggedStruct("terminalKeys", {
 		terminalKeys: TerminalKeysSetting,
 	}),
+	Schema.TaggedStruct("titleGeneration", {
+		...TitleGenerationStateSchema.fields,
+	}),
 	Schema.TaggedStruct("claudeSettings", {
 		overrides: ClaudeSettingsOverridesSchema,
 	}),
@@ -3621,7 +3655,8 @@ export type GlobalProjectSetting = Extract<
 			| "defaultSessionMode"
 			| "terminalKeys"
 			| "visibility"
-			| "claudeSettings";
+			| "claudeSettings"
+			| "titleGeneration";
 	}
 >;
 /** Global writes signal each relay to compute catalog-dependent facts locally. */
