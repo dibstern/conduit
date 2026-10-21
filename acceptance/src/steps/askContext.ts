@@ -3,6 +3,7 @@ import { Stream } from "effect";
 import { serializeReferences } from "../../../src/lib/composer-references.js";
 import type { AskExplanation } from "../../../src/lib/contracts/ask-explanation.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
+import { isRecord } from "../../../src/lib/utils.js";
 import { detailRowsOf } from "../../../test/helpers/detail-rows.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
@@ -88,7 +89,8 @@ export const askContextHandlers: StepHandler[] = [
 			await rpc.waitForRequest(
 				(request) =>
 					request.tag === "SyncInputDraft" &&
-					request.payload["sessionId"] === SESSION &&
+					isRecord(request.payload["key"]) &&
+					request.payload["key"]["session"] === SESSION &&
 					serializeReferences(String(request.payload["text"])) === expected,
 			);
 			expect(
