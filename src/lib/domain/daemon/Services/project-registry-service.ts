@@ -83,6 +83,7 @@ import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import type { StoredProject } from "../../../types.js";
 import { InputDraftsTag } from "../../relay/Services/input-drafts.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
+import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { isConduitWorktreePath } from "../Layers/worktree-layer.js";
 import {
 	ConfigPersistenceTag,
@@ -667,6 +668,10 @@ export const remove = (slug: string) =>
 						}),
 					})).pipe(Effect.provideService(DaemonConfigRefTag, config.value));
 				}
+				// Removal can roll back while disposing the relay. Retire launch
+				// serialization only after it succeeds, before a locked re-add can run.
+				const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
+				if (Option.isSome(workspace)) workspace.value.forgetProject?.(slug);
 				yield* PubSub.publish(
 					bus,
 					DaemonEvent.InstanceRemoved({ instanceId: slug }),
@@ -832,6 +837,8 @@ export const removeAll = Effect.gen(function* () {
 		(slug) =>
 			Effect.gen(function* () {
 				yield* relayCache.invalidate(slug);
+				const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
+				if (Option.isSome(workspace)) workspace.value.forgetProject?.(slug);
 				yield* PubSub.publish(
 					bus,
 					DaemonEvent.InstanceRemoved({ instanceId: slug }),

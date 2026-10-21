@@ -55,6 +55,7 @@ import {
 } from "../../relay/Services/project-management-service.js";
 import { ScanServiceTag } from "../../relay/Services/scan-service.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
+import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
 import { CategorySet } from "../Services/category-set.js";
@@ -213,6 +214,7 @@ export const RelayFactoryLive = (
 			const categories = yield* Effect.serviceOption(CategorySet);
 			const sessionDirectory = yield* Effect.serviceOption(SessionDirectory);
 			const projectContext = yield* Effect.serviceOption(ProjectContext);
+			const sessionWorkspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 			const storeContext = yield* persistenceStoreContext;
 			const sharedDrafts = yield* Effect.serviceOption(InputDraftsTag);
 			const inputDrafts = Option.isSome(sharedDrafts)
@@ -551,6 +553,14 @@ export const RelayFactoryLive = (
 										Context.add(InputDraftsTag, inputDrafts),
 										Context.add(DaemonEventBusTag, eventBus),
 										Context.add(ProjectRegistryTag, projectRegistry),
+										Context.merge(
+											Option.isSome(sessionWorkspace)
+												? Context.make(
+														SessionWorkspaceTag,
+														sessionWorkspace.value,
+													)
+												: Context.empty(),
+										),
 										Context.merge(
 											Option.isSome(projectContext)
 												? Context.make(ProjectContext, projectContext.value)

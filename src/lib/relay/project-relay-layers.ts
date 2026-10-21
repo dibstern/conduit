@@ -623,18 +623,28 @@ export function createProjectRelayLayers({
 	const alertLedgerLayer = AlertLedgerLive.pipe(
 		Layer.provide(persistenceEffectLayer),
 	);
-	const sessionWorkspaceLayer = SessionWorkspaceLive.pipe(
-		Layer.provide(
-			Layer.mergeAll(
-				daemonConfigLayer,
-				persistenceEffectLayer,
-				configLayer,
-				loggerLayer,
-				openCodeApiLayer,
-				sessionEventBusLayer,
-			),
-		),
+	const worktreeLayer = config.worktreeContext
+		? Layer.succeedContext(config.worktreeContext)
+		: makeWorktreeLive(config.configDir ?? getConfigDir());
+	const sharedWorkspace = Context.getOption(
+		config.daemonConfigContext ?? Context.empty(),
+		SessionWorkspaceTag,
 	);
+	const sessionWorkspaceLayer = Option.isSome(sharedWorkspace)
+		? Layer.sync(SessionWorkspaceTag, () => sharedWorkspace.value)
+		: SessionWorkspaceLive.pipe(
+				Layer.provide(
+					Layer.mergeAll(
+						daemonConfigLayer,
+						persistenceEffectLayer,
+						configLayer,
+						loggerLayer,
+						openCodeApiLayer,
+						sessionEventBusLayer,
+						worktreeLayer,
+					),
+				),
+			);
 	const providerRuntimeIngestionLayer = Layer.unwrap(
 		Effect.gen(function* () {
 			const ledger = yield* AlertLedgerTag;
@@ -926,9 +936,7 @@ export function createProjectRelayLayers({
 		sessionDirectoryLayer,
 		sessionWorkspaceLayer,
 		daemonConfigLayer,
-		config.worktreeContext
-			? Layer.succeedContext(config.worktreeContext)
-			: makeWorktreeLive(config.configDir ?? getConfigDir()),
+		worktreeLayer,
 		usageLayer,
 		historyReconcileLayer,
 		Layer.effect(OpenCodeSessionCreationGateTag, Semaphore.make(1)),

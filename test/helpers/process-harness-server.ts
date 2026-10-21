@@ -13,7 +13,7 @@ import { Session } from "node:inspector/promises";
 import { join } from "node:path";
 import { DatabaseSync, StatementSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { Effect, Fiber, HashMap, Ref } from "effect";
+import { Context, Effect, Fiber, HashMap, Ref } from "effect";
 
 // Event-loop stalls and read-model reads for load tests, flushed to a file the
 // spec reads after each phase. Stalls are wall-clock end times and durations.
@@ -431,6 +431,113 @@ async function main(): Promise<void> {
 							}),
 					});
 				}),
+		});
+	}
+	if (existsSync(join(root, "daemon-session-workspace-proof"))) {
+		const { SessionWorkspaceTag } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/relay/Services",
+					`session-workspace.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/relay/Services/session-workspace.js");
+		const { OrchestrationEngine } = (await import(
+			pathToFileURL(
+				join(codeRoot, "lib/provider", `orchestration-engine.${extension}`),
+			).href
+		)) as typeof import("../../src/lib/provider/orchestration-engine.js");
+		const { ConfigTag } = (await import(
+			pathToFileURL(
+				join(codeRoot, "lib/domain/relay/Services", `services.${extension}`),
+			).href
+		)) as typeof import("../../src/lib/domain/relay/Services/services.js");
+		const { SessionManagerServiceTag } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/relay/Services",
+					`session-manager-service.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/relay/Services/session-manager-service.js");
+		const resolveCall = OrchestrationEngine.prototype.resolveCallContextEffect;
+		type Workspace =
+			import("../../src/lib/domain/relay/Services/session-workspace.js").SessionWorkspace;
+		const owners = new Map<Workspace, number>();
+		const heldLaunches = new Set<string>();
+		let first: Workspace | undefined;
+		Object.assign(OrchestrationEngine.prototype, {
+			resolveCallContextEffect(
+				this: InstanceType<typeof OrchestrationEngine>,
+				request: Parameters<typeof resolveCall>[0],
+			) {
+				const caller = this;
+				return Effect.gen(function* () {
+					const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
+					if (request.sessionId && workspace._tag === "Some") {
+						first ??= workspace.value;
+						if (!owners.has(workspace.value))
+							owners.set(workspace.value, owners.size + 1);
+						// Exercise the retained service without a caller-supplied root.
+						const directory = yield* first.get(request.sessionId);
+						const state = yield* first.claudeWorktreeState(request.sessionId);
+						appendFileSync(
+							join(root, "daemon-session-workspace.ndjson"),
+							`${JSON.stringify({
+								sessionId: request.sessionId,
+								owner: owners.get(workspace.value),
+								directory,
+								requestedPath: state.requestedPath,
+							})}\n`,
+						);
+						const gate = join(root, `workspace-launch-${request.sessionId}`);
+						if (existsSync(gate) && !heldLaunches.has(gate)) {
+							heldLaunches.add(gate);
+							// Keep a caller alive beyond relay disposal to prove a removed
+							// generation's held permit cannot block its replacement.
+							const hold = workspace.value.withLaunch(
+								Effect.gen(function* () {
+									writeFileSync(`${gate}-started`, "held");
+									while (!existsSync(`${gate}-release`))
+										yield* Effect.sleep("10 millis");
+									writeFileSync(`${gate}-finished`, "released");
+								}),
+							);
+							const mode = readFileSync(gate, "utf8");
+							yield* (
+								mode === "no-project"
+									? hold.pipe(Effect.updateContext(() => Context.empty()))
+									: mode === "empty-project"
+										? hold.pipe(
+												Effect.provideService(ConfigTag, {
+													...(yield* ConfigTag),
+													slug: "",
+												}),
+											)
+										: hold
+							).pipe(Effect.forkDetach);
+							if (existsSync(join(root, "workspace-retention-proof"))) {
+								const manager = yield* SessionManagerServiceTag;
+								yield* Effect.gen(function* () {
+									writeFileSync(`${gate}-retention-started`, "daemon callback");
+									// AutoSettle calls the captured manager from the daemon context.
+									yield* manager.deleteArchivedSessions(
+										30 * 86_400_000,
+										Date.now(),
+									);
+									writeFileSync(`${gate}-retention-finished`, "swept");
+								}).pipe(
+									Effect.updateContext(() => Context.empty()),
+									Effect.forkDetach,
+								);
+							}
+						}
+					}
+					return yield* resolveCall.call(caller, request);
+				});
+			},
 		});
 	}
 	if (existsSync(join(root, "project-context-proof"))) {

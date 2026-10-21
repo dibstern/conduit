@@ -1352,15 +1352,17 @@ export const SessionManagerServiceLive: Layer.Layer<
 								}),
 						),
 					);
-				return workspace.withLaunch(
-					Option.isSome(retentionScheduler)
-						? Effect.provideService(
-								sweep,
-								EventRetentionSchedulerTag,
-								retentionScheduler.value,
-							)
-						: sweep,
-				);
+				return workspace
+					.withLaunch(
+						Option.isSome(retentionScheduler)
+							? Effect.provideService(
+									sweep,
+									EventRetentionSchedulerTag,
+									retentionScheduler.value,
+								)
+							: sweep,
+					)
+					.pipe(Effect.provideService(ConfigTag, config));
 			},
 			renameSession: (sessionId, title) =>
 				withSessionCommandServices(renameSession(sessionId, title)),

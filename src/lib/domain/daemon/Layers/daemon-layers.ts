@@ -37,7 +37,10 @@ import { makeDaemonRpcSocketLayer } from "../../../daemon/daemon-rpc-server.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import { ENV, resolveTraceConfig } from "../../../env.js";
 import { startContentionMetrics } from "../../../persistence/contention-metrics.js";
-import { PersistenceStore } from "../../../persistence/effect/live.js";
+import {
+	makePersistenceDaemonLayer,
+	PersistenceStore,
+} from "../../../persistence/effect/live.js";
 import {
 	type ClaudeConfigDir,
 	captureClaudeLaunchLogin,
@@ -51,6 +54,7 @@ import {
 	BrowserRpcConnectionsLive,
 	makeRoutedWsRpcServerLayer,
 } from "../../../server/ws-rpc.js";
+import { SessionWorkspaceLive } from "../../relay/Layers/session-workspace-layer.js";
 import {
 	InputDraftsLive,
 	releaseInputDraftClaims,
@@ -861,16 +865,27 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const withProviderAdapters = makeProviderAdaptersLive(configDir).pipe(
 		Layer.provideMerge(withInputDrafts),
 	);
+	const withWorktrees = Layer.mergeAll(
+		makeWorktreeLive(configDir, {
+			setupTimeoutMs: ENV.worktreeSetupTimeoutMs,
+		}),
+		UsageLive(),
+		MessageSurfacingSettingsLive,
+	).pipe(Layer.provideMerge(withProviderAdapters));
+	const withSessionWorkspace = Layer.unwrap(
+		Effect.gen(function* () {
+			const store = yield* PersistenceStore;
+			return SessionWorkspaceLive.pipe(
+				Layer.provide(
+					makePersistenceDaemonLayer().pipe(
+						Layer.provideMerge(Layer.succeedContext(store)),
+					),
+				),
+			);
+		}),
+	).pipe(Layer.provideMerge(withWorktrees));
 	const registries = RelayFactoryLive(configDir).pipe(
-		Layer.provideMerge(
-			Layer.mergeAll(
-				makeWorktreeLive(configDir, {
-					setupTimeoutMs: ENV.worktreeSetupTimeoutMs,
-				}),
-				UsageLive(),
-				MessageSurfacingSettingsLive,
-			).pipe(Layer.provideMerge(withProviderAdapters)),
-		),
+		Layer.provideMerge(withSessionWorkspace),
 	);
 
 	const withRelayCache = makeRelayCacheLayer().pipe(
