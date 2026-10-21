@@ -38,6 +38,9 @@ import { EventStoreEffectTag } from "../../../persistence/effect/event-store-eff
 import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import { inboxRunStatusQuery } from "../../../persistence/inbox-run-status-query.js";
+import { ProviderInstanceFailure } from "../../../provider/errors.js";
+import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
+import { RunnerProviderInstance } from "../../../provider/runner/runner-provider-instance.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { Usage } from "../../daemon/Services/usage.js";
 import { type Continuation, ContinuationTag } from "./continuation.js";
@@ -331,6 +334,7 @@ type SendTurnError = Effect.Error<ReturnType<ProviderTurnService["sendTurn"]>>;
 
 export type SessionInboxError =
 	| SqlError
+	| ProviderInstanceFailure
 	| ClaudeEventPersistFailure
 	| SendTurnError
 	| Effect.Error<ReturnType<Continuation["requestContinuation"]>>;
@@ -395,6 +399,9 @@ export const SessionInboxLive = Layer.effect(
 		const eventStore = yield* EventStoreEffectTag;
 		const persist = yield* ClaudeEventPersistEffectTag;
 		const providerTurnService = yield* ProviderTurnServiceTag;
+		const registry = Option.getOrUndefined(
+			yield* Effect.serviceOption(ProviderRegistryTag),
+		);
 		const overrides = yield* OverridesStateTag;
 		const bus = yield* SessionEventBusTag;
 		const log = yield* LoggerTag;
@@ -811,6 +818,21 @@ export const SessionInboxLive = Layer.effect(
 			submit: (input) =>
 				serialised(input.sessionId)(
 					Effect.gen(function* () {
+						// Busy and approval-blocked inputs may never reach runner execution.
+						// Check every owner, including one retained across an account rebind.
+						for (const providerId of registry?.listProviders() ?? []) {
+							const provider = registry?.getInstance(providerId);
+							if (!(provider instanceof RunnerProviderInstance)) continue;
+							const failure = yield* provider.getSessionFailureEffect(
+								input.sessionId,
+							);
+							if (failure)
+								return yield* new ProviderInstanceFailure({
+									providerId,
+									operation: failure.operation,
+									cause: Object.assign(new Error(failure.message), failure),
+								});
+						}
 						const view = yield* readView(input.sessionId, input.inputId);
 						const decision = decideInbox(input.sessionId, view, {
 							_tag: "Submit",

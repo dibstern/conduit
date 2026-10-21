@@ -379,6 +379,8 @@ export const makeProcessSessionRunner = (
 			});
 		const children = new Map<string, RunnerChild>();
 		const candidates = new Set<RunnerChild>();
+		const quarantined = new Map<string, SessionFailure>();
+		let recovering = false;
 		// Liveness only: evicted children whose OS process may not have exited
 		// yet. Pruned lazily by pid, never consulted for ownership.
 		const exiting = new Set<RunnerChild>();
@@ -489,6 +491,23 @@ export const makeProcessSessionRunner = (
 				yield* Deferred.succeed(entry.drained, undefined);
 				if (entry.endingReleased)
 					yield* Deferred.succeed(entry.endingReleased, undefined);
+			});
+		const quarantine = (entry: RunnerChild, cause: SessionFailure) =>
+			Effect.gen(function* () {
+				const failure: SessionFailure = {
+					...cause,
+					code: "runner_quarantined",
+					message: `Session ${entry.sessionId} is quarantined: ${cause.message}. Runner ${entry.runnerId} (pid ${entry.pid}) is still alive. Stop it and restart Conduit before sending again.`,
+					retryable: false,
+				};
+				// Retain the entry, registration and spool. Neither a failed send nor
+				// a late socket callback may replace this process or retire its prompts.
+				quarantined.set(entry.sessionId, failure);
+				entry.failure = failure;
+				entry.recovering = false;
+				entry.connection?.destroy();
+				yield* releaseEntryWaiters(entry, Cause.fail(failure));
+				log.warn(failure.message);
 			});
 		const detach = (entry: RunnerChild) => {
 			entry.connection?.destroy();
@@ -1077,6 +1096,8 @@ export const makeProcessSessionRunner = (
 			});
 		const eligible = (sessionId: string, entry: RunnerChild) =>
 			!closing &&
+			!recovering &&
+			!quarantined.has(sessionId) &&
 			children.get(sessionId) === entry &&
 			!entry.failure &&
 			!entry.recovering &&
@@ -1223,6 +1244,8 @@ export const makeProcessSessionRunner = (
 
 		class ProcessSessionRunner implements SessionRunner {
 			readonly recoverEffect = Effect.gen(function* () {
+				// Discover every surviving candidate before scheduling replacements.
+				recovering = true;
 				if (closing)
 					return yield* Effect.fail(
 						runnerFailure("recover runner", "Runners are shutting down"),
@@ -1326,7 +1349,7 @@ export const makeProcessSessionRunner = (
 							yield* Deferred.fail(entry.ready, failure);
 							yield* stop(entry);
 							if (runnerPidAlive(registration.pid))
-								return yield* Effect.fail(failure);
+								return yield* quarantine(entry, failure);
 							if (!abandoned && sql && ingestion) {
 								// No runner remains current, so retire every pending prompt in this session.
 								yield* retireReplacedPrompts(null, {
@@ -1386,7 +1409,7 @@ export const makeProcessSessionRunner = (
 							}
 							// Keep its registration, spool and approval ownership intact.
 							// Startup must not orphan approvals or launch a second runner.
-							return yield* Effect.fail(failure);
+							return yield* quarantine(entry, failure);
 						}
 						if (abandoned) {
 							entry.recovering = false;
@@ -1395,8 +1418,16 @@ export const makeProcessSessionRunner = (
 								closing ? Effect.void : stop(entry),
 							).pipe(
 								Effect.ensuring(Deferred.succeed(entry.drained, undefined)),
-								Effect.ensuring(Effect.sync(() => candidates.delete(entry))),
 							);
+							if (runnerPidAlive(registration.pid))
+								return yield* quarantine(
+									entry,
+									runnerFailure(
+										"recover runner",
+										"Abandoned runner survived stop",
+									),
+								);
+							candidates.delete(entry);
 							return;
 						}
 						const commands = sql
@@ -1586,7 +1617,16 @@ export const makeProcessSessionRunner = (
 						}),
 					);
 				}
-			});
+			}).pipe(
+				Effect.onExit((exit) =>
+					Effect.sync(() => {
+						recovering = false;
+						if (Exit.isSuccess(exit))
+							for (const [sessionId, entry] of children)
+								upgrade(sessionId, entry);
+					}),
+				),
+			);
 			hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
 				return Effect.sync(() => {
 					// Before hello only the spawned child's pid is known.
@@ -1602,6 +1642,10 @@ export const makeProcessSessionRunner = (
 						[...candidates, ...exiting].some(owns)
 					);
 				});
+			}
+
+			getSessionFailureEffect(sessionId: string) {
+				return Effect.sync(() => quarantined.get(sessionId));
 			}
 
 			getNativeSessionEffect(
@@ -1696,6 +1740,8 @@ export const makeProcessSessionRunner = (
 									return yield* Effect.fail(
 										runnerFailure(command.type, "Runners are shutting down"),
 									);
+								const refusal = quarantined.get(sessionId);
+								if (refusal) return yield* Effect.fail(refusal);
 								const existing = children.get(sessionId);
 								if (
 									outputOwner &&

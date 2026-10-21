@@ -312,6 +312,13 @@ export class RunnerProviderInstance implements ProviderInstance {
 		return this.runner.hasLiveProcessEffect(sessionId);
 	}
 
+	getSessionFailureEffect(sessionId: string) {
+		return (
+			this.runner.getSessionFailureEffect?.(sessionId) ??
+			Effect.succeed(undefined)
+		);
+	}
+
 	getNativeSessionEffect(
 		sessionId: string,
 	): Effect.Effect<ProviderNativeSession | undefined> {
