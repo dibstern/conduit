@@ -267,6 +267,7 @@ export interface ClaudeSessionContext {
 	/** Explicit owners keep delayed message/tool updates out of newer runs. */
 	messageRunIds?: Map<string, string>;
 	toolRunIds?: Map<string, string>;
+	toolMessageIds?: Map<string, string>;
 	/** Canonical prompt identity, retained for late rejected background notices. */
 	currentUserMessageId?: string | undefined;
 	/** A returning account's failed resume is retried by the server gate. */

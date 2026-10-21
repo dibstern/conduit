@@ -1093,7 +1093,8 @@ describe("Event-owned tool results", () => {
 				makeEffectSqlMigrator(
 					Object.fromEntries(
 						Object.entries(effectMigrationEntries).filter(
-							([key]) => !key.endsWith("_tool_result_event_refs"),
+							// A store from before 0065 has none of the later migrations either.
+							([key]) => key < "0065_tool_result_event_refs",
 						),
 					),
 				).pipe(Effect.provide(SqliteClient.layer({ filename: legacyFile }))),
