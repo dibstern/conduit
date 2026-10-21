@@ -84,6 +84,7 @@ describe("durable control outbox scheduling", () => {
 		return {
 			providerId: "opencode",
 			discoverEffect: () => Effect.die("Not used by controls"),
+			generateTextEffect: () => Effect.die("Not used by controls"),
 			sendTurnEffect: send,
 			interruptTurnEffect: vi.fn(() => Effect.void),
 			resolvePermissionEffect: vi.fn(() => Effect.void),
