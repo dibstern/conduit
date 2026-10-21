@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import type { SqlClient } from "effect/sql";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import { runTerminalStatus } from "../persistence/effect/projectors-effect.js";
@@ -13,22 +13,48 @@ export const sessionRunOwnersQuery = (
 	sessionId: string,
 	options: {
 		readonly confirmedStop?: boolean;
+		readonly excludeRetainedSteers?: boolean;
 		readonly owners?: readonly RunSettlementOwner[];
 	} = {},
-) => sql<{ id: string }>`SELECT run.id FROM provider_runs run
-	WHERE run.session_id = ${sessionId} AND run.status IN ('pending', 'running')
-	AND ${
-		options.owners
-			? sql`run.id IN ${sql.in(options.owners.map(({ runId }) => runId))}`
-			: sql`(
-		run.status = 'running' OR NOT EXISTS (SELECT 1 FROM provider_command_outbox
-			WHERE session_id = run.session_id AND effect_type = 'send_turn'
-			AND run_id = run.id)
-		OR (${options.confirmedStop ? 1 : 0} = 1 AND EXISTS (SELECT 1 FROM provider_command_outbox
-			WHERE session_id = run.session_id AND effect_type = 'send_turn'
-			AND run_id = run.id AND status = 'running')))`
-	}
-	ORDER BY run.id`;
+) =>
+	Effect.gen(function* () {
+		const [row] = yield* sql<{ owners: string; retained: number | null }>`
+	WITH candidates AS (
+		SELECT run.id, (${options.excludeRetainedSteers ? 1 : 0} = 1
+			AND run.status = 'pending'
+			AND EXISTS (SELECT 1 FROM provider_command_outbox command JOIN pending_inputs pending
+				ON pending.session_id = command.session_id AND pending.input_id = command.command_id
+				WHERE command.run_id = run.id AND command.session_id = run.session_id
+					AND command.effect_type = 'send_turn' AND command.status = 'running' AND pending.state = 'steering')
+			AND NOT EXISTS (SELECT 1 FROM turns WHERE session_id = run.session_id AND run_id = run.id)
+			AND NOT EXISTS (SELECT 1 FROM provider_command_outbox command JOIN provider_runs owner
+				ON owner.id = command.run_id AND owner.session_id = command.session_id
+				WHERE command.session_id = run.session_id AND command.effect_type = 'send_turn'
+					AND command.status = 'running' AND command.error_code = 'delivery_indeterminate'
+					AND owner.status IN ('pending', 'running'))) AS retained
+		FROM provider_runs run
+		WHERE run.session_id = ${sessionId} AND run.status IN ('pending', 'running')
+		AND ${
+			options.owners
+				? sql`run.id IN ${sql.in(options.owners.map(({ runId }) => runId))}`
+				: sql`(run.status = 'running' OR NOT EXISTS (SELECT 1 FROM provider_command_outbox
+				WHERE session_id = run.session_id AND effect_type = 'send_turn' AND run_id = run.id)
+				OR (${options.confirmedStop ? 1 : 0} = 1 AND EXISTS (SELECT 1 FROM provider_command_outbox
+				WHERE session_id = run.session_id AND effect_type = 'send_turn' AND run_id = run.id AND status = 'running')))`
+		}
+		ORDER BY run.id
+	)
+	SELECT json_group_array(json_object('runId', id)) FILTER (WHERE NOT retained) AS owners,
+		MAX(retained) AS retained FROM candidates`;
+		return {
+			owners: Schema.decodeSync(
+				Schema.fromJsonString(
+					Schema.Array(Schema.Struct({ runId: Schema.String })),
+				),
+			)(row?.owners ?? "[]"),
+			retainedSteers: row?.retained === 1,
+		};
+	});
 
 /** Only call after the provider confirms that this session or exact cohort cannot still run.
  * Guard publication against a changed session or process generation when the
@@ -49,7 +75,11 @@ export function settleSessionRuns<A, E, R>(
 	} = {},
 ) {
 	return Effect.gen(function* () {
-		const runs = yield* sessionRunOwnersQuery(sql, sessionId, options);
+		const { owners: runs } = yield* sessionRunOwnersQuery(
+			sql,
+			sessionId,
+			options,
+		);
 		const event = (
 			type: "turn.interrupted" | "turn.error" | "session.status",
 			data: Record<string, unknown>,
@@ -73,11 +103,11 @@ export function settleSessionRuns<A, E, R>(
 		return yield* publish([
 			...(options.knownEnds ?? []),
 			...(runs.length
-				? runs.filter(({ id }) => !known.has(id))
+				? runs.filter(({ runId }) => !known.has(runId))
 				: options.errorCode && options.owners === undefined
-					? [{ id: undefined }]
+					? [{ runId: undefined }]
 					: []
-			).map(({ id }) => {
+			).map(({ runId }) => {
 				return options.errorCode
 					? event(
 							"turn.error",
@@ -87,9 +117,9 @@ export function settleSessionRuns<A, E, R>(
 								code: options.errorCode,
 								retryable: false,
 							},
-							id,
+							runId,
 						)
-					: event("turn.interrupted", { messageId: "", reason }, id);
+					: event("turn.interrupted", { messageId: "", reason }, runId);
 			}),
 			// A cohort confirmation cannot idle work admitted after that cohort.
 			...(options.owners ?? [{ runId: undefined }]).map(({ runId }) =>

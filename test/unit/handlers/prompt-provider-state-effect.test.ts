@@ -39,6 +39,10 @@ import { ProviderStateEffectTag } from "../../../src/lib/persistence/effect/prov
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { SendTurnCommand } from "../../../src/lib/provider/orchestration-engine.js";
+import {
+	ProviderRegistry,
+	ProviderRegistryTag,
+} from "../../../src/lib/provider/provider-registry.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
@@ -170,7 +174,13 @@ describe("handleMessage with Effect provider state persistence", () => {
 			});
 			const persistence = makePersistenceEffectLayer(filename, "test-project");
 			const layer = Layer.provideMerge(
-				Layer.provideMerge(ProviderTurnServiceLive, SessionWorkspaceLive),
+				Layer.provideMerge(
+					ProviderTurnServiceLive,
+					Layer.merge(
+						SessionWorkspaceLive,
+						Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()),
+					),
+				),
 				Layer.mergeAll(
 					AlertsLive,
 					Layer.succeed(OpenCodeAPITag)(client),
@@ -296,7 +306,13 @@ describe("handleMessage with Effect provider state persistence", () => {
 		});
 		const persistence = makePersistenceEffectLayer(filename, "test-project");
 		const layer = Layer.provideMerge(
-			Layer.provideMerge(ProviderTurnServiceLive, SessionWorkspaceLive),
+			Layer.provideMerge(
+				ProviderTurnServiceLive,
+				Layer.merge(
+					SessionWorkspaceLive,
+					Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()),
+				),
+			),
 			Layer.mergeAll(
 				AlertsLive,
 				Layer.succeed(OpenCodeAPITag)(client),
@@ -426,7 +442,13 @@ describe("handleMessage with Effect provider state persistence", () => {
 			});
 			const persistence = makePersistenceEffectLayer(filename, "test-project");
 			const layer = Layer.provideMerge(
-				Layer.provideMerge(ProviderTurnServiceLive, SessionWorkspaceLive),
+				Layer.provideMerge(
+					ProviderTurnServiceLive,
+					Layer.merge(
+						SessionWorkspaceLive,
+						Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()),
+					),
+				),
 				Layer.mergeAll(
 					AlertsLive,
 					Layer.succeed(OpenCodeAPITag)(client),
@@ -579,7 +601,13 @@ describe("handleMessage with Effect provider state persistence", () => {
 				}),
 			});
 			const layer = Layer.provideMerge(
-				Layer.provideMerge(ProviderTurnServiceLive, SessionWorkspaceLive),
+				Layer.provideMerge(
+					ProviderTurnServiceLive,
+					Layer.merge(
+						SessionWorkspaceLive,
+						Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()),
+					),
+				),
 				Layer.mergeAll(
 					AlertsLive,
 					Layer.succeed(OpenCodeAPITag)(client),

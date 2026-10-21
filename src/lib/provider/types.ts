@@ -373,6 +373,8 @@ export interface ProviderInstance {
 	readonly inputAdmission?: InputAdmission | undefined;
 	/** Unique identifier for this provider (e.g. "opencode", "claude") */
 	readonly providerId: string;
+	/** Native identity used for a locally placed input before provider acceptance. */
+	readonly userMessageIdForInput?: (inputId: string) => string;
 
 	/** Query the provider for available models, commands, and capabilities */
 	discoverEffect(

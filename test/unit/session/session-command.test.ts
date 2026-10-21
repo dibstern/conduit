@@ -592,13 +592,13 @@ describe("applySessionCommand", () => {
 						const reads = yield* makeReadQueryEffect;
 						const row = yield* reads.getSession(forked.id);
 						expect(row?.fork_point_timestamp).toBe(
-							projection === "projected" ? 999999 : null,
+							projection === "projected" ? 999999 : 123,
 						);
 						expect(forked.forkPointTimestamp).toBe(
 							row?.fork_point_timestamp ?? undefined,
 						);
 						if (projection === "lagging")
-							expect(forked).not.toHaveProperty("forkPointTimestamp");
+							expect(forked).toHaveProperty("forkPointTimestamp", 123);
 					}),
 				),
 		);

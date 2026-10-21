@@ -7,6 +7,7 @@ import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/provide
 import { makeClaudeSessionRunner } from "../../../../src/lib/provider/claude/claude-provider-runtime.js";
 import type { SDKMessage } from "../../../../src/lib/provider/claude/types.js";
 import { EventSinkIngestionError } from "../../../../src/lib/provider/event-sink-errors.js";
+import { isRecord } from "../../../../src/lib/utils.js";
 import { makeTestClaudeProviderInstance } from "../../../helpers/claude-provider-instance.js";
 import { makeEffectProjectionHarness } from "../../../helpers/effect-projection-harness.js";
 import {
@@ -19,6 +20,261 @@ import {
 import { providerRuntimeEvent } from "../../../helpers/provider-runtime-event.js";
 
 describe("Claude accepted run ownership", () => {
+	it.each([
+		false,
+		true,
+	])("retains captured background-result segments and accounting without reopening their ended run (queued input: %s)", async (queuedInput) => {
+		const sessionId = "background-result-ownership";
+		const inputId = "11111111-1111-4111-8111-111111111111";
+		const runId = "background-result-run";
+		const nextInputId = "22222222-2222-4222-8222-222222222222";
+		const nextRunId = "queued-result-run";
+		const firstResult = Deferred.makeUnsafe<void>();
+		const queuedHandoff = Deferred.makeUnsafe<void>();
+		const resumeBackground = Deferred.makeUnsafe<void>();
+		const acceptNext = Deferred.makeUnsafe<void>();
+		const messages = readFileSync(
+			join(
+				import.meta.dirname,
+				"../../../fixtures/claude-sdk-traces/concurrent-background-work-turn.jsonl",
+			),
+			"utf8",
+		)
+			.trim()
+			.split("\n")
+			.map((line) => decodeClaudeSDKMessage(JSON.parse(line)) as SDKMessage);
+		const harness = makeEffectProjectionHarness();
+		const events: ProviderRuntimeEvent[] = [];
+		const sink = createMockEventSink();
+		sink.push = (event) =>
+			Effect.tryPromise({
+				try: async () => {
+					await harness.ingest(event);
+					events.push(event);
+				},
+				catch: (cause) => new EventSinkIngestionError({ cause }),
+			});
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: "/tmp",
+			subagentSdk: {
+				listSubagents: async () => [],
+				getSubagentMessages: async () => [],
+			},
+			queryFactory: ({ prompt }) => {
+				if (typeof prompt === "string")
+					throw new Error("Expected streaming input");
+				const inputs = prompt[Symbol.asyncIterator]();
+				return Object.assign(createMockQuery([]), {
+					[Symbol.asyncIterator]: () =>
+						(async function* (): AsyncGenerator<SDKMessage> {
+							await inputs.next();
+							yield {
+								type: "command_lifecycle",
+								state: "started",
+								command_uuid: inputId,
+								session_id: "captured-background-sdk",
+								uuid: crypto.randomUUID(),
+							};
+							let results = 0;
+							let nextPrompt: ReturnType<typeof inputs.next> | undefined;
+							for (const message of messages) {
+								yield message;
+								if (
+									queuedInput &&
+									message.type === "result" &&
+									++results === 1
+								) {
+									nextPrompt = inputs.next().then((value) => {
+										Effect.runSync(Deferred.succeed(queuedHandoff, undefined));
+										return value;
+									});
+									Effect.runSync(Deferred.succeed(firstResult, undefined));
+									await Effect.runPromise(Deferred.await(resumeBackground));
+								}
+							}
+							if (queuedInput) {
+								await Effect.runPromise(Deferred.await(acceptNext));
+								await nextPrompt;
+								yield {
+									type: "command_lifecycle",
+									state: "started",
+									command_uuid: nextInputId,
+									session_id: "captured-background-sdk",
+									uuid: crypto.randomUUID(),
+								};
+								yield makeSuccessResult({ user_message_uuid: nextInputId });
+							}
+						})(),
+				});
+			},
+		});
+		try {
+			await harness.query(
+				"INSERT INTO sessions (id, provider, title, created_at, updated_at) VALUES (?, 'claude', 'Background reply', 1, 1)",
+				[sessionId],
+			);
+			await harness.query(
+				"INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES (?, ?, 'pending', 1)",
+				[runId, sessionId],
+			);
+			await harness.ingest(
+				providerRuntimeEvent(
+					"message.created",
+					sessionId,
+					{ messageId: inputId, inputId, sessionId, role: "user" },
+					{ runId },
+				),
+			);
+			const send = (inputId: string, runId: string) =>
+				Effect.runPromise(
+					instance.sendTurnEffect(
+						makeBaseSendTurnInput({
+							sessionId,
+							inputId,
+							runId,
+							eventSink: sink,
+							model: { providerId: "claude", modelId: "claude-fable-5" },
+						}),
+					),
+				);
+			await send(inputId, runId);
+			let next: ReturnType<typeof send> | undefined;
+			if (queuedInput) {
+				await Effect.runPromise(Deferred.await(firstResult));
+				await harness.query(
+					"INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES (?, ?, 'pending', 2)",
+					[nextRunId, sessionId],
+				);
+				await harness.query(
+					"INSERT INTO command_receipts (command_id, session_id, status, command_type, project_key, created_at, updated_at) VALUES (?, ?, 'side_effect_requested', 'send_turn', 'test-project', 2, 2)",
+					[nextInputId, sessionId],
+				);
+				await harness.query(
+					"INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at) VALUES (1, ?, 'test-project', ?, 'claude', 'send_turn', ?, '{}', 'running', 1, 2, 2)",
+					[nextInputId, sessionId, nextRunId],
+				);
+				next = send(nextInputId, nextRunId);
+				void next.catch(() => undefined);
+				await Effect.runPromise(Deferred.await(queuedHandoff));
+				Effect.runSync(Deferred.succeed(resumeBackground, undefined));
+			}
+			await vi.waitFor(() =>
+				expect(
+					events.filter((event) => event.type === "turn.completed"),
+				).toHaveLength(4),
+			);
+			const completions = events.filter(
+				(
+					event,
+				): event is ProviderRuntimeEvent & { data: Record<string, unknown> } =>
+					event.type === "turn.completed" && isRecord(event.data),
+			);
+			expect(completions.map((event) => event.data["contextTokens"])).toEqual([
+				26827, 27383, 27940, 28393,
+			]);
+			expect(completions.map((event) => event.data["messageId"])).toEqual([
+				"msg_011CfsViaBWMXumNpUgpmz6V",
+				"msg_011CfsVk8dQemFquExeySJL5",
+				"msg_011CfsVkWgxx9BEJXzuyJGmf",
+				"msg_011CfsVmfX3tKRTyYnVs9sY1",
+			]);
+			expect(completions.map((event) => event.runId)).toEqual([
+				runId,
+				runId,
+				runId,
+				runId,
+			]);
+			expect(
+				events.filter(
+					(event) =>
+						event.sessionId === sessionId &&
+						event.type === "message.created" &&
+						isRecord(event.data) &&
+						event.data["role"] === "assistant",
+				),
+			).toHaveLength(4);
+			for (const event of events.filter(
+				(event) =>
+					event.sessionId === sessionId &&
+					event.type === "message.created" &&
+					isRecord(event.data) &&
+					event.data["role"] === "assistant",
+			)) {
+				expect(event.runId).toBe(runId);
+				expect(event.data).toHaveProperty("parentID", inputId);
+			}
+			for (const event of events)
+				if (
+					event.sessionId === sessionId &&
+					isRecord(event.data) &&
+					"messageId" in event.data &&
+					event.data["messageId"] !== nextInputId
+				)
+					expect(event.runId, event.type).toBe(runId);
+			expect(
+				await harness.query(
+					"SELECT id, turn_id, context_tokens FROM messages WHERE session_id = ? AND role = 'assistant' AND context_tokens IS NOT NULL ORDER BY rowid",
+					[sessionId],
+				),
+			).toEqual(
+				completions.map((event) => ({
+					id: event.data["messageId"],
+					turn_id: inputId,
+					context_tokens: event.data["contextTokens"],
+				})),
+			);
+			const terminal = (await harness.storedEvents(sessionId)).find(
+				(event) => event.type === "turn.completed",
+			);
+			expect(
+				await harness.query(
+					"SELECT status, completed_at FROM provider_runs WHERE id = ?",
+					[runId],
+				),
+			).toEqual([{ status: "completed", completed_at: terminal?.createdAt }]);
+			expect(
+				await harness.query(
+					"SELECT last_turn_end_version FROM sessions WHERE id = ?",
+					[sessionId],
+				),
+			).toEqual([{ last_turn_end_version: terminal?.streamVersion }]);
+			if (queuedInput) {
+				expect(
+					await harness.query(
+						"SELECT status, started_at, joined_into FROM provider_runs WHERE id = ?",
+						[nextRunId],
+					),
+				).toEqual([{ status: "pending", started_at: null, joined_into: null }]);
+				expect(
+					await harness.query(
+						"SELECT status FROM command_receipts WHERE command_id = ?",
+						[nextInputId],
+					),
+				).toEqual([{ status: "side_effect_requested" }]);
+				Effect.runSync(Deferred.succeed(acceptNext, undefined));
+				await next;
+				await vi.waitFor(async () =>
+					expect(
+						await harness.query(
+							"SELECT status, joined_into FROM provider_runs WHERE id = ?",
+							[nextRunId],
+						),
+					).toEqual([{ status: "completed", joined_into: null }]),
+				);
+				expect(
+					await harness.query(
+						"SELECT status FROM command_receipts WHERE command_id = ?",
+						[nextInputId],
+					),
+				).toEqual([{ status: "side_effect_completed" }]);
+			}
+		} finally {
+			Effect.runSync(Deferred.succeed(resumeBackground, undefined));
+			Effect.runSync(Deferred.succeed(acceptNext, undefined));
+			await Effect.runPromise(instance.shutdownEffect().pipe(Effect.ignore));
+			await harness.dispose();
+		}
+	}, 20_000);
 	it.each([
 		{ lateStoppedResult: false, lateRejection: false },
 		{ lateStoppedResult: true, lateRejection: false },

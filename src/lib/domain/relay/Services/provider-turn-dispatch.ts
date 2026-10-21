@@ -337,6 +337,7 @@ const restoreFailedPlacement = (
 	input: ProviderTurnServiceSendInput,
 	driver: ProviderDriverKind | undefined,
 	runId?: string,
+	failure?: { readonly message: string; readonly code: string },
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
@@ -358,7 +359,6 @@ const restoreFailedPlacement = (
 				? openCodeInputMessageId(input.commandId)
 				: input.commandId);
 		const unplaced =
-			driver !== undefined &&
 			inputId !== undefined &&
 			(yield* sql`SELECT 1 FROM messages
 				WHERE session_id = ${input.sessionId}
@@ -385,8 +385,9 @@ const restoreFailedPlacement = (
 				.persistUserMessage(input.sessionId, input.text, {
 					messageId: userMessageId,
 					inputId,
-					provider: driver,
+					...(driver ? { provider: driver } : {}),
 					...(runId ? { runId } : {}),
+					...(!runId && failure ? { failure } : {}),
 					...(input.images ? { images: input.images } : {}),
 				})
 				.pipe(
@@ -398,8 +399,10 @@ const restoreFailedPlacement = (
 						),
 					),
 				);
+			// An unreserved input's placement and terminal committed together.
+			if (!runId && failure) return false;
 		}
-		return true;
+		return { runId };
 	});
 
 export const makeEventSinkFactory = Effect.gen(function* () {
@@ -453,6 +456,7 @@ const handleDispatchFailure = (
 	sendErr: unknown,
 	driver: ProviderDriverKind | undefined,
 	runId?: string,
+	failureCode?: string,
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
@@ -463,18 +467,28 @@ const handleDispatchFailure = (
 		const missing = sendErr instanceof MissingWorktreeError;
 		const error = missing
 			? { message: sendErr.message, code: "WORKTREE_MISSING" }
-			: RelayError.fromCaught(sendErr, "SEND_FAILED", "Failed to send message");
+			: RelayError.fromCaught(
+					sendErr,
+					"SEND_FAILED",
+					failureCode ? undefined : "Failed to send message",
+				);
 		if (
 			!input.steer &&
 			!(yield* hasNewerHandoff(input, yield* SqlClient.SqlClient))
 		)
 			yield* clearProcessingTimeout(input.sessionId);
-		if (yield* restoreFailedPlacement(input, driver, runId))
+		const placement = yield* restoreFailedPlacement(input, driver, runId, {
+			message: error.message,
+			code: failureCode ?? error.code,
+		});
+		if (placement)
 			yield* (yield* makeFailTurn)(
 				input.sessionId,
 				error.message,
-				error.code,
-				runId ? { runId } : { inputId: input.commandId },
+				failureCode ?? error.code,
+				placement.runId
+					? { runId: placement.runId }
+					: { inputId: input.commandId },
 			);
 		if (missing) {
 			const ws = yield* Effect.serviceOption(WebSocketHandlerTag);
@@ -509,13 +523,12 @@ const prepareEngineTurnInput = (
 		const harness = driver;
 		const pick = storedSessionPick(sessionRow, harness);
 		if (!pick) {
-			yield* clearProcessingTimeout(resolvedInput.sessionId);
-			const failTurn = yield* makeFailTurn;
-			yield* failTurn(
-				resolvedInput.sessionId,
+			yield* handleDispatchFailure(
+				resolvedInput,
 				"A session model pick is required before sending a message.",
+				driver,
+				undefined,
 				"PICK_REQUIRED",
-				{ inputId: resolvedInput.commandId },
 			);
 			return undefined;
 		}
@@ -563,13 +576,12 @@ const prepareEngineTurnInput = (
 					? Result.succeed(pick)
 					: resolveTurnSettings(pick, catalog);
 		if (Result.isFailure(resolved)) {
-			yield* clearProcessingTimeout(resolvedInput.sessionId);
-			const failTurn = yield* makeFailTurn;
-			yield* failTurn(
-				resolvedInput.sessionId,
+			yield* handleDispatchFailure(
+				resolvedInput,
 				resolved.failure.message,
+				driver,
+				undefined,
 				"PICK_REJECTED",
-				{ inputId: resolvedInput.commandId },
 			);
 			return undefined;
 		}
@@ -913,13 +925,12 @@ export const sendTurn = (input: ProviderTurnServiceSendInput) =>
 				?.provider ??
 			(yield* engine.getProviderForSessionEffect(input.sessionId));
 		if (!boundProviderId) {
-			yield* clearProcessingTimeout(input.sessionId);
-			const failTurn = yield* makeFailTurn;
-			yield* failTurn(
-				input.sessionId,
+			yield* handleDispatchFailure(
+				input,
 				"A session model pick is required before sending a message.",
+				undefined,
+				undefined,
 				"PICK_REQUIRED",
-				{ inputId: input.commandId },
 			);
 			return;
 		}

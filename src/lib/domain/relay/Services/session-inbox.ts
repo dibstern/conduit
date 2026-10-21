@@ -4,7 +4,6 @@
 // from read models on every call, serialises per session and commits the
 // decision. No queue state lives in memory, so a restart has nothing to rebuild.
 
-import { randomUUID } from "node:crypto";
 import {
 	Clock,
 	Context,
@@ -18,7 +17,6 @@ import {
 } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
-import { parseAttachmentDataUrl } from "../../../attachment-data-url.js";
 import type { Account } from "../../../contracts/account.js";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import { advanceTouchesScope } from "../../../contracts/read-model-advance.js";
@@ -33,7 +31,6 @@ import {
 	type SteerBlocker,
 } from "../../../contracts/stored-event.js";
 import {
-	ClaudeEventPersistEffectError,
 	ClaudeEventPersistEffectTag,
 	type ClaudeEventPersistFailure,
 } from "../../../persistence/effect/claude-event-persist-effect.js";
@@ -232,7 +229,8 @@ export function decideInbox(
 			view.limited ||
 			view.usageResetsAt !== undefined ||
 			view.scheduled);
-	const idle = !view.busy && !view.steering;
+	// An unanswered prompt blocks a new handoff even when no owned run is open.
+	const idle = !view.busy && !view.steering && !view.promptOpen;
 	switch (command._tag) {
 		case "Submit": {
 			if (view.known) return { _tag: "Accepted", events: [] };
@@ -645,10 +643,8 @@ export const SessionInboxLive = Layer.effect(
 						events,
 					})
 					.pipe(Effect.provideService(OverridesStateTag, overrides));
-				// sendTurn reports a failure it could not place (no provider, no
-				// model) to the session and leaves no trace, so a queued input would
-				// be retried on every advance. Place it as a failed turn instead: it
-				// leaves the tray, and the queue behind it pauses.
+				// An unplaced failed handoff remains queued. Record it once so it
+				// pauses the remaining queue instead of retrying on every advance.
 				if (!wasQueued) return;
 				const [unsent] = yield* sql<{ n: number }>`SELECT 1 AS n
 					FROM pending_inputs WHERE input_id = ${handoff.inputId} AND state = 'queued'`;
@@ -656,81 +652,13 @@ export const SessionInboxLive = Layer.effect(
 				log.warn(
 					`session=${sessionId} input=${handoff.inputId} queued handoff failed before it was sent; pausing the queue`,
 				);
-				const runId = randomUUID();
-				const meta = {
+				yield* persist.persistUserMessage(sessionId, request.text, {
+					messageId: handoff.inputId,
+					inputId: handoff.inputId,
 					...(provider ? { provider: provider.provider } : {}),
-					metadata: { runId },
-				};
-				const attachments = yield* Effect.try({
-					try: () =>
-						(request.images ?? []).map((url) => ({
-							...parseAttachmentDataUrl(url),
-							url,
-						})),
-					catch: (cause) =>
-						new ClaudeEventPersistEffectError({
-							operation: "persistUserMessage",
-							cause,
-						}),
+					...(request.images ? { images: request.images } : {}),
+					failure: { message: "This queued message could not be sent" },
 				});
-				yield* persist.persistEvents([
-					canonicalEvent(
-						"run.requested",
-						sessionId,
-						{ runId, inputId: handoff.inputId },
-						meta,
-					),
-					canonicalEvent(
-						"message.created",
-						sessionId,
-						{
-							messageId: handoff.inputId,
-							inputId: handoff.inputId,
-							sessionId,
-							role: "user",
-						},
-						meta,
-					),
-					...(request.text === ""
-						? []
-						: [
-								canonicalEvent(
-									"text.delta",
-									sessionId,
-									{
-										messageId: handoff.inputId,
-										partId: `${handoff.inputId}-0`,
-										text: request.text,
-									},
-									meta,
-								),
-							]),
-					...attachments.map((attachment, index) =>
-						canonicalEvent(
-							"file.attached",
-							sessionId,
-							{
-								messageId: handoff.inputId,
-								partId: `${handoff.inputId}-attachment-${index}`,
-								mime: attachment.mime,
-								...(attachment.name !== undefined
-									? { filename: attachment.name }
-									: {}),
-								url: attachment.url,
-							},
-							meta,
-						),
-					),
-					canonicalEvent(
-						"turn.error",
-						sessionId,
-						{
-							messageId: handoff.inputId,
-							error: "This queued message could not be sent",
-						},
-						meta,
-					),
-				]);
 			});
 
 		// Input ids are unique across sessions. Only coalesce requests while the

@@ -178,7 +178,11 @@ export function unacceptedResultInputIds(
 ): string[] {
 	const covered =
 		result.user_message_uuids ??
-		(result.user_message_uuid ? [result.user_message_uuid] : undefined);
+		(result.user_message_uuid
+			? [result.user_message_uuid]
+			: !ctx.currentRunId && ctx.acceptedOutputOwner
+				? [ctx.acceptedOutputOwner.inputId]
+				: undefined);
 	return covered
 		? [...waiters.keys()].filter((id) => covered.includes(id))
 		: currentInputId(ctx, waiters);

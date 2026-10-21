@@ -335,6 +335,18 @@ export class EffectOpenCodeRuntimeIngress
 						event.rawSource.kind === "opencode.sse" &&
 						data["backfilled"] !== true
 					) {
+						const created = event.metadata?.["providerCreatedAt"];
+						const inherited =
+							created === undefined
+								? []
+								: yield* this.sql`
+							SELECT 1 FROM sessions WHERE id = ${sessionId}
+							AND (${created}, ${messageId}) <= (fork_point_timestamp,
+								COALESCE(fork_point_message_id, fork_point_event, ''))`;
+						if (inherited.length) {
+							output.push(event);
+							continue;
+						}
 						const [prior] = yield* this.sql<{
 							run_id: string | null;
 						}>`SELECT json_extract(metadata, '$.runId') AS run_id FROM events
@@ -1405,13 +1417,8 @@ export class EffectOpenCodeRuntimeIngress
 						providerInstanceId,
 						context.providerProcessId,
 					);
-					if (
-						this.seenSessions.has(sessionId) ||
-						(yield* this.hasProjectedSession(sessionId))
-					)
-						return yield* ingest;
-					// Fork emits events before its HTTP response. Let command-owned
-					// creation persist the complete row before first-sighting seeding.
+					// Fork copies can arrive before its HTTP response even when a
+					// history read already seeded the session. Persist the cut first.
 					return yield* this.sessionCreationGate.withPermits(1)(ingest);
 				}),
 			);

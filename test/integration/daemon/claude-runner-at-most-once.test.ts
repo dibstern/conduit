@@ -34,14 +34,32 @@ function stored(harness: ProcessHarness, sessionId: string) {
 			}>,
 			turns: db
 				.prepare(
-					"SELECT state FROM turns WHERE session_id = ? ORDER BY requested_at",
+					"SELECT state, run_id, started_at FROM turns WHERE session_id = ? ORDER BY requested_at",
 				)
-				.all(sessionId) as Array<{ state: string }>,
+				.all(sessionId) as Array<{
+				state: string;
+				run_id: string;
+				started_at: number | null;
+			}>,
+			runs: db
+				.prepare(
+					"SELECT id, status, started_at FROM provider_runs WHERE session_id = ? ORDER BY requested_at",
+				)
+				.all(sessionId) as Array<{
+				id: string;
+				status: string;
+				started_at: number | null;
+			}>,
+			receipts: db
+				.prepare(
+					"SELECT receipt.status FROM command_receipts receipt JOIN provider_command_outbox outbox ON outbox.command_id = receipt.command_id AND outbox.project_key = receipt.project_key WHERE outbox.session_id = ? AND outbox.effect_type = 'send_turn' ORDER BY outbox.request_sequence",
+				)
+				.all(sessionId) as Array<{ status: string }>,
 			errors: db
 				.prepare(
-					"SELECT data FROM events WHERE session_id = ? AND type = 'turn.error'",
+					"SELECT data, json_extract(metadata, '$.runId') AS run_id FROM events WHERE session_id = ? AND type = 'turn.error'",
 				)
-				.all(sessionId) as Array<{ data: string }>,
+				.all(sessionId) as Array<{ data: string; run_id: string }>,
 		};
 	} finally {
 		db.close();
@@ -113,12 +131,19 @@ describe("runner host at-most-once delivery through Claude's process seam", () =
 					attempt: command.attempt_count,
 					runnerPid: original.pid,
 					startedAt: expect.any(Number),
-					completedAt: expect.any(Number),
-					result: { status: "accepted" },
 				});
 			});
+			// This SDK gate precedes command_lifecycle.started; handoff is not intake.
+			expect(journal).not.toHaveProperty("completedAt");
+			expect(journal).not.toHaveProperty("result");
+			expect(journal).not.toHaveProperty("failure");
 			expect(stored(harness, sessionId).commands[0]?.status).toBe("running");
-			expect(stored(harness, sessionId).turns).toEqual([{ state: "running" }]);
+			expect(stored(harness, sessionId).turns).toEqual([
+				{ state: "pending", run_id: command.run_id, started_at: null },
+			]);
+			expect(stored(harness, sessionId).runs).toEqual([
+				{ id: command.run_id, status: "pending", started_at: null },
+			]);
 			await harness.kill();
 			await pending;
 			process.kill(original.pid, "SIGKILL");
@@ -149,8 +174,15 @@ describe("runner host at-most-once delivery through Claude's process seam", () =
 					expect(state.commands.map(({ status }) => status)).toEqual([
 						"failed",
 					]);
-					expect(state.turns).toEqual([{ state: "error" }]);
+					expect(state.turns).toEqual([
+						{ state: "error", run_id: command.run_id, started_at: null },
+					]);
+					expect(state.runs).toEqual([
+						{ id: command.run_id, status: "error", started_at: null },
+					]);
+					expect(state.receipts).toEqual([{ status: "side_effect_failed" }]);
 					expect(state.errors).toHaveLength(1);
+					expect(state.errors[0]?.run_id).toBe(command.run_id);
 				},
 				{ timeout: 20_000 },
 			);
@@ -224,14 +256,10 @@ describe("runner host at-most-once delivery through Claude's process seam", () =
 							)
 							.pipe(Effect.result, Effect.timeout("15 seconds")),
 					);
-					expect(result).toMatchObject(
-						partialJournal
-							? {
-									_tag: "Failure",
-									failure: { code: "runner_send_uncertain", retryable: false },
-								}
-							: { _tag: "Success", success: { status: "accepted" } },
-					);
+					expect(result).toMatchObject({
+						_tag: "Failure",
+						failure: { code: "runner_send_uncertain", retryable: false },
+					});
 					failures.push(result);
 				}
 				expect(

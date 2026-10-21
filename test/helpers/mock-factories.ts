@@ -1259,6 +1259,7 @@ export function makeTestHandlerLayer(
 				PendingInteractionServiceLive,
 				overridesStateLayer,
 				orchestrationLayer,
+				providerRegistryLayer,
 				providerTurnPersistenceLayer,
 				providerRuntimeIngestionLayer,
 				sessionTitleServiceLayer,

@@ -270,6 +270,109 @@ it.live(
 	},
 );
 
+it.live(
+	"native fork history does not reserve a run before the first local input",
+	() =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const commit = yield* makeCommitAndSignal;
+			const ingress = yield* makeEffectOpenCodeRuntimeIngress(
+				createSilentLogger(),
+			);
+			yield* commit([
+				canonicalEvent("session.created", "source", {
+					sessionId: "source",
+					provider: "opencode",
+					title: "Source",
+				}),
+				canonicalEvent("session.created", "s", {
+					sessionId: "s",
+					provider: "opencode",
+					title: "Native fork",
+					forkedFrom: "source",
+					forkPointEvent: "native-fork-tip",
+					forkPointTimestamp: 2,
+					inheritsHistory: false,
+				}),
+			]);
+			const echo = (
+				messageId: string,
+				role: "user" | "assistant",
+				created: number,
+				parentID?: string,
+			) =>
+				ingress.onSSEEventEffect(
+					makeSSEEvent("message.updated", {
+						info: {
+							id: messageId,
+							sessionID: "s",
+							role,
+							...(parentID === undefined ? {} : { parentID }),
+							time: {
+								created,
+								...(role === "assistant" ? { completed: created + 1 } : {}),
+							},
+							...(role === "assistant" ? { finish: "stop" } : {}),
+						},
+					}),
+					"s",
+					"opencode",
+				);
+			const idle = () =>
+				ingress.onSSEEventEffect(
+					makeSSEEvent("session.status", {
+						sessionID: "s",
+						status: { type: "idle" },
+					}),
+					"s",
+					"opencode",
+				);
+			yield* echo("native-fork-user", "user", 1);
+			expect(yield* sql`SELECT id FROM provider_runs`).toEqual([]);
+			yield* echo("native-fork-tip", "assistant", 2, "native-fork-user");
+			yield* idle();
+			expect(yield* inboxRunStatusQuery(sql, "s")).toMatchObject([
+				{ status: null },
+			]);
+			expect(
+				yield* sql`SELECT is_inherited FROM messages ORDER BY created_at`,
+			).toEqual([{ is_inherited: 1 }, { is_inherited: 1 }]);
+			const messageId = openCodeInputMessageId("a");
+			yield* commit([
+				canonicalEvent(
+					"run.requested",
+					"s",
+					{ runId: "run-a", inputId: "a" },
+					{ metadata: { runId: "run-a" } },
+				),
+			]);
+			yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id,
+			provider_id, effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at)
+			VALUES (1, 'a', 'test-project', 's', 'opencode', 'send_turn', 'run-a', '{}', 'running', 1, 3, 3)`;
+			yield* sql`INSERT INTO command_receipts (command_id, session_id, project_key, status, created_at, updated_at)
+			VALUES ('a', 's', 'test-project', 'side_effect_requested', 3, 3)`;
+			yield* echo(messageId, "user", 3);
+			expect(
+				yield* sql`SELECT id, status, started_at IS NOT NULL AS accepted FROM provider_runs`,
+			).toEqual([{ id: "run-a", status: "running", accepted: 1 }]);
+			yield* echo("native-fresh-reply", "assistant", 4, messageId);
+			yield* idle();
+			expect(yield* sql`SELECT id, status FROM provider_runs`).toEqual([
+				{ id: "run-a", status: "completed" },
+			]);
+			expect(
+				yield* sql`SELECT state, run_id FROM turns WHERE id = ${messageId}`,
+			).toEqual([{ state: "completed", run_id: "run-a" }]);
+			expect(yield* sql`SELECT status FROM provider_command_outbox`).toEqual([
+				{ status: "completed" },
+			]);
+			expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
+				{ status: "side_effect_completed" },
+			]);
+			ingress.shutdown();
+		}).pipe(Effect.provide(fixtureLayer())),
+);
+
 it.live("an unrelated native echo never accepts an indeterminate send", () =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;

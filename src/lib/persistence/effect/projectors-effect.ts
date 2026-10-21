@@ -1680,6 +1680,10 @@ export const makeTurnProjector = defineProjector(() => ({
 				yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
 					VALUES (${event.data.runId}, ${event.sessionId}, 'pending', ${event.createdAt})
 					ON CONFLICT (id) DO NOTHING`;
+				yield* sql`UPDATE sessions SET status = 'busy', last_turn_error_at = NULL
+					WHERE id = ${event.sessionId} AND EXISTS (
+						SELECT 1 FROM provider_runs WHERE id = ${event.data.runId}
+							AND session_id = ${event.sessionId} AND status IN ('pending', 'running'))`;
 				yield* sql`UPDATE command_receipts SET status = 'side_effect_requested', error_code = NULL, updated_at = ${event.createdAt}
 					WHERE (command_id, project_key) IN (
 						SELECT command_id, project_key FROM provider_command_outbox WHERE run_id = ${event.data.runId}
@@ -1868,26 +1872,18 @@ export const makeTurnProjector = defineProjector(() => ({
 						WHERE session_id = ${event.sessionId} AND turn_id = ${turnId}
 						AND role = 'assistant'
 						ORDER BY created_at DESC, id DESC LIMIT 1`;
-					if (latest) {
-						const rows = yield* sql<{
-							id: string;
-						}>`UPDATE turns SET assistant_message_id = ${latest.id},
-							state = ${latest.is_streaming ? "running" : "completed"},
-							started_at = ${totals?.started_at ?? null},
-							completed_at = ${latest.is_streaming ? null : (totals?.completed_at ?? null)},
-							cost = ${totals?.cost ?? null}, tokens_in = ${totals?.tokens_in ?? null},
-							tokens_out = ${totals?.tokens_out ?? null} WHERE id = ${turnId} AND run_id IS NULL
-							RETURNING id`;
-						messageIds.push(...ids(rows));
-					} else {
-						const rows = yield* sql<{
-							id: string;
-						}>`UPDATE turns SET assistant_message_id = NULL, state = 'pending',
-							started_at = NULL, completed_at = NULL, cost = NULL,
-							tokens_in = NULL, tokens_out = NULL WHERE id = ${turnId}
-							AND assistant_message_id IS NOT NULL AND run_id IS NULL RETURNING id`;
-						messageIds.push(...ids(rows));
-					}
+					// REST repairs display ownership; an owned run keeps its lifecycle and accounting.
+					const rows = yield* sql<{
+						id: string;
+					}>`UPDATE turns SET assistant_message_id = ${latest?.id ?? null},
+						state = CASE WHEN run_id IS NULL THEN ${latest ? (latest.is_streaming ? "running" : "completed") : "pending"} ELSE state END,
+						started_at = CASE WHEN run_id IS NULL THEN ${totals?.started_at ?? null} ELSE started_at END,
+						completed_at = CASE WHEN run_id IS NULL THEN ${latest?.is_streaming ? null : (totals?.completed_at ?? null)} ELSE completed_at END,
+						cost = CASE WHEN run_id IS NULL THEN ${totals?.cost ?? null} ELSE cost END,
+						tokens_in = CASE WHEN run_id IS NULL THEN ${totals?.tokens_in ?? null} ELSE tokens_in END,
+						tokens_out = CASE WHEN run_id IS NULL THEN ${totals?.tokens_out ?? null} ELSE tokens_out END
+						WHERE id = ${turnId} RETURNING id`;
+					messageIds.push(...ids(rows));
 				}
 				return {
 					sessions: affected.size > 0 ? [event.sessionId] : [],
@@ -1900,7 +1896,10 @@ export const makeTurnProjector = defineProjector(() => ({
 				event.data.parentID
 			) {
 				const written = yield* sql<OwnedRow & { id: string }>`UPDATE turns
-					SET assistant_message_id = COALESCE(assistant_message_id, ${event.data.messageId})
+					SET assistant_message_id = COALESCE((SELECT id FROM messages
+						WHERE session_id = ${event.sessionId} AND role = 'assistant'
+						AND (turn_id = turns.id OR id = ${event.data.messageId})
+						ORDER BY created_at DESC, id DESC LIMIT 1), ${event.data.messageId})
 					WHERE id = ${event.data.parentID} AND session_id = ${event.sessionId} AND (${runId ?? null} IS NULL OR run_id = ${runId ?? null})
 					RETURNING id, session_id`;
 				if (written.length)
@@ -1949,6 +1948,10 @@ export const makeTurnProjector = defineProjector(() => ({
 				}>`UPDATE provider_runs SET status = ${terminal}, completed_at = ${event.createdAt}
 					WHERE id = ${runId} AND session_id = ${event.sessionId} AND status IN ('pending', 'running') RETURNING id`;
 				if (!ended.length) return { sessions: [], messages: [] };
+				yield* sql`UPDATE sessions SET status = CASE WHEN EXISTS (
+					SELECT 1 FROM provider_runs WHERE session_id = ${event.sessionId}
+						AND status IN ('pending', 'running')) THEN 'busy' ELSE 'idle' END
+					WHERE id = ${event.sessionId}`;
 				// Only a run transition with placed members advances the browser's
 				// completion boundary; an unplaced refusal cannot erase another end.
 				yield* sql`UPDATE sessions SET updated_at = ${event.createdAt},

@@ -1197,7 +1197,7 @@ describe("subscribeSessionDetail", () => {
 							yield* Ref.update(published, (all) => [...all, ...events]);
 						}),
 					publishAdvance: () => Effect.void,
-					subscribe: () => Effect.die(new Error("unused in this test")),
+					subscribe: () => Effect.succeed(Stream.empty),
 					subscribeAdvances: () => Effect.die(new Error("unused in this test")),
 				};
 

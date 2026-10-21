@@ -232,7 +232,6 @@ export interface ClaudeProviderInstanceDeps {
 	readonly ensureClaudeSubagentSession?: ClaudeEventPersistEffect["ensureClaudeSubagentSession"];
 	readonly readClaudeSubagentTranscript?: ClaudeEventPersistEffect["readClaudeSubagentTranscript"];
 	readonly persistUserMessage?: ClaudeEventPersistEffect["persistUserMessage"];
-	readonly persistHandoffDelivered?: ClaudeEventPersistEffect["persistHandoffDelivered"];
 	readonly subagentPollTimeoutMs?: number;
 	readonly subagentPollIntervalMs?: number;
 	readonly capabilitiesService?: ClaudeCapabilitiesService;
@@ -255,7 +254,6 @@ export type ClaudeSessionRunnerDeps = Pick<
 	| "subagentPollIntervalMs"
 	| "capabilitiesService"
 	| "readGoalStatus"
-	| "persistHandoffDelivered"
 > & {
 	readonly onSubagentFinalizationComplete?: () => void;
 	readonly onTurnStateChanged?: (sessionId: string, inFlight: boolean) => void;
@@ -2077,7 +2075,10 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						);
 					ctx.turnCount++;
 					const inputIds = message.user_message_uuids ?? [
-						message.user_message_uuid ?? ctx.currentTurnId,
+						message.user_message_uuid ??
+							(ctx.currentRunId
+								? ctx.currentTurnId
+								: (ctx.acceptedOutputOwner?.inputId ?? ctx.currentTurnId)),
 					];
 					const acceptedOwner = inputIds.flatMap((inputId) => {
 						const runId = inputId && ctx.messageRunIds?.get(inputId);
@@ -2115,6 +2116,11 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					}
 					if (endsCurrentRun) ctx.turnInFlight = false;
 				}
+				const detachedResult =
+					resultInput !== undefined &&
+					(unacceptedResultInputs.length > 0 ||
+						resultInput.inputId !==
+							(ctx.acceptedOutputOwner?.inputId ?? ctx.currentTurnId));
 				const translationContext: ClaudeSessionContext = resultInput
 					? {
 							...ctx,
@@ -2122,14 +2128,21 @@ class ClaudeRunnerPayload implements RunnerPayload {
 							currentTurnId: resultInput.inputId,
 							currentUserMessageId:
 								resultInput.continuation?.cutOffMessageId ??
+								(ctx.acceptedOutputOwner?.inputId === resultInput.inputId
+									? ctx.acceptedOutputOwner.userMessageId
+									: undefined) ??
 								resultInput.inputId,
 							eventSink: resultInput.eventSink,
-							lastAssistantUuid: undefined,
-							activeAssistantMessageId: "",
-							goalTracker: new ClaudeGoalTracker(ctx.sessionId),
-							usageLimit: undefined,
-							usageLimitReported: undefined,
-							pendingSyntheticMessages: undefined,
+							...(detachedResult
+								? {
+										lastAssistantUuid: undefined,
+										activeAssistantMessageId: "",
+										goalTracker: new ClaudeGoalTracker(ctx.sessionId),
+										usageLimit: undefined,
+										usageLimitReported: undefined,
+										pendingSyntheticMessages: undefined,
+									}
+								: {}),
 						}
 					: ctx;
 				const translatedMessages = yield* interceptClaudeUsageLimit(
@@ -2137,14 +2150,14 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					message,
 				);
 				for (const translatedMessage of translatedMessages)
-					yield* translatedMessage.type === "result" && resultInput
+					yield* translatedMessage.type === "result" && detachedResult
 						? translator.translateDetachedResult(
 								translationContext,
 								translatedMessage,
 								terminalRunIds,
 							)
 						: translator.translate(
-								ctx,
+								translationContext,
 								translatedMessage,
 								decision.receivedAt,
 								terminalRunIds,
@@ -2263,11 +2276,17 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			ctx.currentUserMessageId =
 				unplaced.continuation?.cutOffMessageId ?? message.command_uuid;
 			ctx.currentRunId ??= unplaced.runId;
-			if (ctx.currentRunId)
+			if (ctx.currentRunId) {
 				(ctx.messageRunIds ??= new Map()).set(
 					message.command_uuid,
 					ctx.currentRunId,
 				);
+				ctx.acceptedOutputOwner = {
+					inputId: message.command_uuid,
+					runId: ctx.currentRunId,
+					userMessageId: ctx.currentUserMessageId,
+				};
+			}
 			ctx.turnInFlight = true;
 			this.deps.onTurnStateChanged?.(ctx.sessionId, true);
 			if (unplaced.eventSink !== ctx.eventSink) {

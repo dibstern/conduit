@@ -153,16 +153,5 @@ export const recoverClaudeRunnerCommands = (
 					Effect.mapError((cause) => runnerFailure("recover turn", cause)),
 				);
 			},
-			onCompleted: (row, input, result) =>
-				result.handoff && deps.persistHandoffDelivered
-					? deps.persistHandoffDelivered(
-							sessionId,
-							{
-								...result.handoff,
-								instanceId: input.instanceId ?? row.provider_id,
-							},
-							row.command_id,
-						)
-					: Effect.void,
 		});
 	});

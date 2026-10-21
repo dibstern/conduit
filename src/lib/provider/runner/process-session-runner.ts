@@ -192,10 +192,7 @@ export interface ProcessRunnerDriver {
 	) => Effect.Effect<
 		Effect.Success<
 			ReturnType<
-				typeof recoverRunnerCommands<
-					import("./session-runner.js").SessionTurn,
-					unknown
-				>
+				typeof recoverRunnerCommands<import("./session-runner.js").SessionTurn>
 			>
 		>,
 		unknown,

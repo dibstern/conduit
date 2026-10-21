@@ -123,6 +123,8 @@ export class MockOpenCodeServer {
 		>
 	>();
 	private pendingReverts = new Map<string, string>();
+	/** Older captures predate client-supplied prompt IDs. Preserve that API contract. */
+	private promptMessageIds = new Map<string, string>();
 
 	/** Session IDs that have been deleted (filtered from GET /session). */
 	private deletedSessionIds = new Set<string>();
@@ -296,6 +298,7 @@ export class MockOpenCodeServer {
 		this.sseBusySessions.clear();
 		this.sseMessages.clear();
 		this.pendingReverts.clear();
+		this.promptMessageIds.clear();
 		this.sessionCounter = 0;
 		this.recordedPromptSessionIds = [];
 		this.answers?.clear();
@@ -491,6 +494,7 @@ export class MockOpenCodeServer {
 		this.sseBusySessions.clear();
 		this.sseMessages.clear();
 		this.pendingReverts.clear();
+		this.promptMessageIds.clear();
 		this.sessionCounter = 0;
 		this.recordedPromptSessionIds = [];
 		this.buildQueues();
@@ -507,9 +511,8 @@ export class MockOpenCodeServer {
 			}
 		>();
 		const mutationEvents = new Map<number, SseEvent[]>();
-		// A fork's clone/title events belong to its creation, not the previous
-		// parent prompt. Older fork recordings without a title PATCH keep their
-		// existing prompt grouping.
+		// Fork copies belong to the fork request, even when their SSE preceded
+		// its recorded response. They cannot arrive during the parent's prompt.
 		for (const [forkIndex, interaction] of interactions.entries()) {
 			if (
 				interaction.kind !== "rest" ||
@@ -544,10 +547,18 @@ export class MockOpenCodeServer {
 					following.method === "POST" &&
 					following.path.split("?")[0] === `${sessionPath}/prompt_async`,
 			);
-			if (updateIndex < 0 || promptIndex <= updateIndex) continue;
-			titledForks.set(body.id, { forkIndex, updateIndex, promptIndex });
+			if (promptIndex < 0) continue;
+			const mutationIndex =
+				updateIndex > forkIndex && updateIndex < promptIndex
+					? updateIndex
+					: forkIndex;
+			titledForks.set(body.id, {
+				forkIndex,
+				updateIndex: mutationIndex,
+				promptIndex,
+			});
 			mutationEvents.set(forkIndex, []);
-			mutationEvents.set(updateIndex, []);
+			mutationEvents.set(mutationIndex, []);
 		}
 
 		this.sseSegments = [[]];
@@ -708,8 +719,17 @@ export class MockOpenCodeServer {
 				body: rawBody,
 			});
 
-		const exact = exactKey(method, path);
-		const normalized = normalizedKey(method, path);
+		const recordedPath = path
+			.split("/")
+			.map(
+				(segment) =>
+					[...this.promptMessageIds].find(
+						([, actual]) => actual === segment,
+					)?.[0] ?? segment,
+			)
+			.join("/");
+		const exact = exactKey(method, recordedPath);
+		const normalized = normalizedKey(method, recordedPath);
 
 		const basePath = path.split("?")[0] ?? path;
 		const rewindRoute = /^\/session\/([^/]+)\/(revert|unrevert)$/.exec(
@@ -1276,6 +1296,19 @@ export class MockOpenCodeServer {
 			// promptsFired=1 → recordedPromptSessionIds[0], etc.
 			const recordedSessionId =
 				this.recordedPromptSessionIds[this.promptsFired - 1];
+			const body = JSON.parse(rawBody ?? "{}") as { messageID?: string };
+			const userEcho = this.sseSegments[this.promptsFired]?.find((event) => {
+				const info = event.properties["info"] as
+					| Record<string, unknown>
+					| undefined;
+				return (
+					event.type === "message.updated" &&
+					info?.["role"] === "user" &&
+					info["sessionID"] === recordedSessionId
+				);
+			})?.properties["info"] as { id: string } | undefined;
+			if (body.messageID && userEcho)
+				this.promptMessageIds.set(userEcho.id, body.messageID);
 
 			// Build the session ID mapping for rewriting
 			const sessionIdMap =
@@ -1312,7 +1345,7 @@ export class MockOpenCodeServer {
 			res.end();
 		} else {
 			res.writeHead(entry.status, { "Content-Type": "application/json" });
-			res.end(JSON.stringify(entry.responseBody));
+			res.end(JSON.stringify(this.rewriteMessageIds(entry.responseBody)));
 		}
 	}
 
@@ -1460,9 +1493,11 @@ export class MockOpenCodeServer {
 					await this.answer(heldFor, this.answers).promise;
 				}
 
-				const properties = sessionIdMap
-					? this.rewriteSessionIds(event.properties, sessionIdMap)
-					: event.properties;
+				const properties = this.rewriteMessageIds(
+					sessionIdMap
+						? this.rewriteSessionIds(event.properties, sessionIdMap)
+						: event.properties,
+				) as Record<string, unknown>;
 
 				let delivered = false;
 				for (const client of this.sseClients) {
@@ -1509,6 +1544,21 @@ export class MockOpenCodeServer {
 			}
 			this.diag("emit_done", `emitted=${emitCount}/${events.length}`);
 		})();
+	}
+
+	private rewriteMessageIds(value: unknown): unknown {
+		if (Array.isArray(value))
+			return value.map((item) => this.rewriteMessageIds(item));
+		if (value === null || typeof value !== "object") return value;
+		return Object.fromEntries(
+			Object.entries(value).map(([key, item]) => [
+				key,
+				typeof item === "string" &&
+				["id", "messageID", "parentID"].includes(key)
+					? (this.promptMessageIds.get(item) ?? item)
+					: this.rewriteMessageIds(item),
+			]),
+		);
 	}
 
 	/**

@@ -55,7 +55,7 @@ export function sideThreadPermissionRules(
 
 function sendFailure(message: string) {
 	return Object.assign(new Error(message), {
-		code: "send_failed",
+		code: "SEND_FAILED",
 		retryable: false,
 	});
 }
@@ -90,6 +90,7 @@ export interface OpenCodeProviderInstanceOptions {
 
 export class OpenCodeProviderInstance implements ProviderInstance {
 	readonly providerId = "opencode";
+	readonly userMessageIdForInput = openCodeInputMessageId;
 
 	private readonly client: OpenCodeAPI;
 	private readonly workspaceRoot: string | undefined;

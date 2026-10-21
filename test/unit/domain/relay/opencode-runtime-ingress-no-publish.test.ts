@@ -7,7 +7,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import {
 	afterEach,
 	beforeEach,
@@ -75,7 +75,7 @@ describe("OpenCode runtime ingress does not publish to relay/browser", () => {
 			{
 				publish: publishToBus,
 				publishAdvance: () => Effect.void,
-				subscribe: () => Effect.die(new Error("unused in this test")),
+				subscribe: () => Effect.succeed(Stream.empty),
 				subscribeAdvances: () => Effect.die(new Error("unused in this test")),
 			},
 		);

@@ -49,6 +49,10 @@ import type {
 	InterruptTurnCommand,
 	SendTurnCommand,
 } from "../../../src/lib/provider/orchestration-engine.js";
+import {
+	ProviderRegistry,
+	ProviderRegistryTag,
+} from "../../../src/lib/provider/provider-registry.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
@@ -111,7 +115,13 @@ describe("prompt processing timeouts through Effect state", () => {
 						"test-project",
 					);
 					const layer = Layer.provideMerge(
-						Layer.provideMerge(ProviderTurnServiceLive, SessionWorkspaceLive),
+						Layer.provideMerge(
+							ProviderTurnServiceLive,
+							Layer.merge(
+								SessionWorkspaceLive,
+								Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()),
+							),
+						),
 						Layer.mergeAll(
 							AlertsLive,
 							Layer.succeed(OpenCodeAPITag)(client),
@@ -470,7 +480,13 @@ describe("prompt processing timeouts through Effect state", () => {
 				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({})),
 			);
 			const layer = Layer.provideMerge(
-				Layer.provideMerge(ProviderTurnServiceLive, SessionWorkspaceLive),
+				Layer.provideMerge(
+					ProviderTurnServiceLive,
+					Layer.merge(
+						SessionWorkspaceLive,
+						Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()),
+					),
+				),
 				baseLayer,
 			);
 

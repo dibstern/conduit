@@ -465,7 +465,9 @@ export class ClaudeEventTranslator {
 					sessionId: ctx.sessionId,
 					...(ctx.currentRunId && ctx.currentUserMessageId
 						? { parentID: ctx.currentUserMessageId }
-						: {}),
+						: ctx.acceptedOutputOwner
+							? { parentID: ctx.acceptedOutputOwner.userMessageId }
+							: {}),
 				}),
 			);
 		});
@@ -2105,30 +2107,31 @@ export class ClaudeEventTranslator {
 			? event.data["messageId"]
 			: undefined;
 		const partId = isRecord(event.data) ? event.data["partId"] : undefined;
+		const outputRunId = ctx.currentRunId ?? ctx.acceptedOutputOwner?.runId;
 		if (
 			event.type === "message.created" &&
 			typeof messageId === "string" &&
-			ctx.currentRunId
+			outputRunId
 		) {
-			(ctx.messageRunIds ??= new Map()).set(messageId, ctx.currentRunId);
+			(ctx.messageRunIds ??= new Map()).set(messageId, outputRunId);
 		}
 		if (
 			event.type === "tool.started" &&
 			typeof partId === "string" &&
-			ctx.currentRunId &&
+			outputRunId &&
 			!ctx.toolRunIds?.has(partId)
 		) {
-			(ctx.toolRunIds ??= new Map()).set(partId, ctx.currentRunId);
+			(ctx.toolRunIds ??= new Map()).set(partId, outputRunId);
 		}
 		const runId =
 			event.runId ??
 			(event.type.startsWith("turn.")
-				? ctx.currentRunId
+				? outputRunId
 				: event.type.startsWith("tool.") && typeof partId === "string"
 					? ctx.toolRunIds?.get(partId)
 					: typeof messageId === "string"
 						? ctx.messageRunIds?.get(messageId)
-						: ctx.currentRunId);
+						: outputRunId);
 		const write = sink.push(runId ? { ...event, runId } : event);
 		if (!this.bufferedWrites) return write;
 		this.bufferedWrites.push(write);

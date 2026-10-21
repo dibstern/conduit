@@ -9,6 +9,7 @@
 // skips auto-resume; disabled/empty failover switches; an automatic turn bounces
 // after service reconstruction or an assistant event; a newer user turn with
 // the same timestamp, or a later user/reset continuation, stays blocked;
+// re-placing the existing cut-off for run membership permits a second switch;
 // the limited account is not excluded or the durable reason is lost.
 // A newer turn during failover selection or its gate probe is interrupted by
 // stale automation, or a newer reply still permits switching/scheduling.
@@ -320,6 +321,51 @@ it("sweeps due continuations only for its own project in a shared store", async 
 			),
 		),
 	);
+});
+
+it("holds a new input behind an unanswered prompt even without an open run", () => {
+	const request = { text: "after OpenCode replacement" };
+	const view: InboxView = {
+		provider: "opencode",
+		queued: [],
+		steering: false,
+		busy: false,
+		stoppedSinceHandoff: false,
+		limited: false,
+		usageResetsAt: undefined,
+		scheduled: false,
+		known: false,
+		providerSteers: true,
+		promptOpen: true,
+		running: undefined,
+	};
+	expect(
+		decideInbox("s1", view, {
+			_tag: "Submit",
+			inputId: "q1",
+			delivery: "queue",
+			request,
+		}),
+	).toEqual({
+		_tag: "Accepted",
+		events: [
+			{
+				type: "input.admitted",
+				data: { sessionId: "s1", inputId: "q1", delivery: "queue", request },
+			},
+		],
+	});
+	const queued = { ...view, queued: [{ inputId: "q1", request }] };
+	expect(decideInbox("s1", queued, { _tag: "Drain" })).toEqual({
+		_tag: "Accepted",
+		events: [],
+	});
+	expect(decideInbox("s1", queued, { _tag: "SendNow", inputId: "q1" })).toEqual(
+		{ _tag: "Rejected", reason: "prompt_open" },
+	);
+	expect(
+		decideInbox("s1", { ...queued, promptOpen: false }, { _tag: "Drain" }),
+	).toMatchObject({ handoff: { inputId: "q1" } });
 });
 
 for (const delivery of ["queue", "steer"] as const) {
@@ -1079,6 +1125,7 @@ for (const scenario of [
 	"reply-during-probe",
 	"auto-turn",
 	"assistant-after-auto",
+	"same-user-after-auto",
 	"new-user",
 	"user-after-auto",
 	"reset-after-auto",
@@ -1141,6 +1188,7 @@ for (const scenario of [
 						[
 							"auto-turn",
 							"assistant-after-auto",
+							"same-user-after-auto",
 							"new-user",
 							"user-after-auto",
 							"reset-after-auto",
@@ -1157,6 +1205,41 @@ for (const scenario of [
 								{ createdAt: 1000 },
 							),
 						]);
+						if (scenario === "same-user-after-auto")
+							yield* commit([
+								canonicalEvent("run.requested", "s1", {
+									runId: "continuation-run",
+									inputId: "continuation-input",
+								}),
+								canonicalEvent(
+									"message.created",
+									"s1",
+									{
+										sessionId: "s1",
+										messageId: "u1",
+										role: "user",
+									},
+									{ metadata: { runId: "continuation-run" } },
+								),
+								canonicalEvent(
+									"run.started",
+									"s1",
+									{
+										inputId: "continuation-input",
+										requestedRunId: "continuation-run",
+										userMessageId: "u1",
+									},
+									{ metadata: { runId: "continuation-run" } },
+								),
+								canonicalEvent(
+									"turn.completed",
+									"s1",
+									{ messageId: "", userMessageId: "u1" },
+									{
+										metadata: { runId: "continuation-run" },
+									},
+								),
+							]);
 						if (scenario === "new-user" || scenario === "assistant-after-auto")
 							yield* commit([
 								canonicalEvent(
@@ -1298,9 +1381,12 @@ for (const scenario of [
 						"user-after-auto",
 						"reset-after-auto",
 					].includes(scenario);
-					const skipped = ["off", "auto-turn", "assistant-after-auto"].includes(
-						scenario,
-					);
+					const skipped = [
+						"off",
+						"auto-turn",
+						"assistant-after-auto",
+						"same-user-after-auto",
+					].includes(scenario);
 					expect(picked).toEqual(
 						scenario === "off"
 							? []

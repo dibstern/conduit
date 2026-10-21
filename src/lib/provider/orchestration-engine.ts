@@ -171,7 +171,7 @@ export interface DurableCommandStoreOptions {
 	readonly ingestion: Pick<ProviderRuntimeIngestion, "ingest" | "ingestBatch">;
 	/** Atomically project and announce command commits and execution claims. */
 	readonly write: CommitAndSignal["write"];
-	readonly persistHandoffDelivered?: ClaudeEventPersistEffect["persistHandoffDelivered"];
+	readonly persistUserMessage?: ClaudeEventPersistEffect["persistUserMessage"];
 	readonly claudeSessionForkSdk?: ClaudeSessionForkSdk;
 }
 
@@ -260,8 +260,8 @@ export class OrchestrationEngine {
 					registry: this.registry,
 					ingestion: durable.ingestion,
 					write: durable.write,
-					...(durable.persistHandoffDelivered
-						? { persistHandoffDelivered: durable.persistHandoffDelivered }
+					...(durable.persistUserMessage
+						? { persistUserMessage: durable.persistUserMessage }
 						: {}),
 					...(durable.claudeSessionForkSdk
 						? { claudeSessionForkSdk: durable.claudeSessionForkSdk }

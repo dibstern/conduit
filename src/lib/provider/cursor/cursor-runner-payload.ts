@@ -427,6 +427,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 				});
 			const applyUpdate = (
 				update: Update,
+				terminal = false,
 			): Effect.Effect<void, SessionFailure | EventSinkError> =>
 				Effect.gen(function* () {
 					if (update.channel === "stream") {
@@ -446,6 +447,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 					}
 					if (
 						!accepted &&
+						!terminal &&
 						(update.channel === "delta" ||
 							update.channel === "stream" ||
 							update.channel === "steer-result")
@@ -893,8 +895,18 @@ export class CursorRunnerPayload implements RunnerPayload {
 						}
 						// Stream closure and turn-ended deltas never settle a turn. Only wait does.
 						yield* Fiber.interrupt(stream);
-						for (const pending of yield* Queue.clear(queue)) {
-							yield* applyUpdate(pending);
+						// A native result may arrive without a RUNNING frame. Retain its
+						// buffered output under the reservation without inventing intake.
+						const pendingUpdates = [
+							...beforeIntake.splice(0),
+							...(yield* Queue.clear(queue)),
+						];
+						if (!accepted && pendingUpdates.length > 0) {
+							events.runId = input.runId;
+							yield* events.announceMessage(currentInputId);
+						}
+						for (const pending of pendingUpdates) {
+							yield* applyUpdate(pending, true);
 						}
 						yield* declinePending();
 						acceptingUpdates = false;

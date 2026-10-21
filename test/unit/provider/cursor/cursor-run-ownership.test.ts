@@ -234,6 +234,15 @@ describe("Cursor accepted run ownership", () => {
 									.filter((event) => event.type === "turn.completed")
 									.map((event) => event.runId),
 							).toEqual(["run-a"]);
+							expect(events).toEqual(
+								expect.arrayContaining([
+									expect.objectContaining({
+										type: "text.delta",
+										runId: "run-a",
+										data: expect.objectContaining({ text: "Answer" }),
+									}),
+								]),
+							);
 							return;
 						}
 						yield* Effect.promise(() =>

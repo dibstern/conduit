@@ -79,6 +79,13 @@ export interface ClaudeEventPersistEffect {
 			readonly runId?: string;
 			readonly provider?: string;
 			readonly images?: readonly string[];
+			/** Place an unsent input and its owned failure in one transaction. */
+			readonly failure?: {
+				readonly message: string;
+				readonly code?: string;
+				readonly retryable?: boolean;
+				readonly retryAt?: number | undefined;
+			};
 		},
 	) => Effect.Effect<void, ClaudeEventPersistFailure>;
 
@@ -411,10 +418,12 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 						),
 					},
 				);
-				// Recovery can observe a completed SDK command after its delivery
-				// event committed but before the outbox completion did.
 				yield* commitAndSignal.write((project) =>
 					Effect.gen(function* () {
+						const completed =
+							yield* sql`SELECT command_id FROM provider_command_outbox
+							WHERE command_id = ${commandId} AND session_id = ${sessionId} AND status = 'completed'`;
+						if (completed.length === 0) return;
 						const existing = yield* sql<{ event_id: string }>`SELECT event_id
 							FROM events WHERE event_id = ${event.eventId} LIMIT 1`;
 						if (existing.length > 0) return;
@@ -454,18 +463,11 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 			);
 		}).pipe(Effect.mapError(mapPersistError("persistEvents")));
 
-	const persistUserMessage = (
-		sessionId: string,
-		text: string,
-		options?: {
-			readonly publish?: boolean;
-			readonly messageId?: string;
-			readonly inputId?: string;
-			readonly runId?: string;
-			readonly provider?: string;
-			readonly images?: readonly string[];
-		},
-	): Effect.Effect<void, ClaudeEventPersistFailure> =>
+	const persistUserMessage: ClaudeEventPersistEffect["persistUserMessage"] = (
+		sessionId,
+		text,
+		options,
+	) =>
 		commitAndSignal
 			.write(
 				(project) =>
@@ -476,6 +478,9 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 							"existing-session",
 						);
 						// The check and append share the seam's transaction on redispatch.
+						const runId =
+							options?.runId ??
+							(options?.failure ? crypto.randomUUID() : undefined);
 						const messageId = options?.messageId;
 						const inputId = options?.inputId;
 						const [existing] =
@@ -489,37 +494,39 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 								WHERE messages.session_id = ${sessionId}
 									AND (messages.id = ${messageId ?? null} OR messages.input_id = ${inputId ?? null}) LIMIT 1`
 								: [];
+						let alreadyPlaced = false;
 						if (existing) {
-							if (!options?.runId) return;
+							if (!runId) return;
 							const [run] = yield* sql<{
 								id: string;
 							}>`SELECT COALESCE(joined_into, id) AS id
-								FROM provider_runs WHERE session_id = ${sessionId} AND id = ${options.runId}`;
-							if (existing.run_id === (run?.id ?? options.runId)) return;
+								FROM provider_runs WHERE session_id = ${sessionId} AND id = ${runId}`;
+							alreadyPlaced = existing.run_id === (run?.id ?? runId);
+							if (alreadyPlaced && !options?.failure) return;
 						}
 
 						const now = Date.now();
 						const userMsgId = existing?.id ?? messageId ?? crypto.randomUUID();
 						const provider = options?.provider ?? "claude";
-						const events: CanonicalEvent[] = [
-							canonicalEvent(
-								"message.created",
-								sessionId,
-								{
-									messageId: userMsgId,
-									role: "user",
-									sessionId,
-									...(inputId ? { inputId } : {}),
-								},
-								{
-									provider,
-									createdAt: now,
-									...(options?.runId
-										? { metadata: { runId: options.runId } }
-										: {}),
-								},
-							),
-						];
+						const events: CanonicalEvent[] = alreadyPlaced
+							? []
+							: [
+									canonicalEvent(
+										"message.created",
+										sessionId,
+										{
+											messageId: userMsgId,
+											role: "user",
+											sessionId,
+											...(inputId ? { inputId } : {}),
+										},
+										{
+											provider,
+											createdAt: now,
+											...(runId ? { metadata: { runId } } : {}),
+										},
+									),
+								];
 						if (!existing && text !== "") {
 							events.push(
 								canonicalEvent(
@@ -536,7 +543,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 						}
 						const attachments = yield* Effect.try({
 							try: () =>
-								(options?.images ?? []).map((url) => ({
+								(alreadyPlaced ? [] : (options?.images ?? [])).map((url) => ({
 									...parseAttachmentDataUrl(url),
 									url,
 								})),
@@ -561,6 +568,36 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 										url: attachment.url,
 									},
 									{ provider, createdAt: now },
+								),
+							);
+						}
+						if (options?.failure && runId) {
+							const meta = { provider, createdAt: now, metadata: { runId } };
+							if (!options.runId)
+								events.unshift(
+									canonicalEvent(
+										"run.requested",
+										sessionId,
+										{ runId, inputId: inputId ?? userMsgId },
+										meta,
+									),
+								);
+							events.push(
+								canonicalEvent(
+									"turn.error",
+									sessionId,
+									{
+										messageId: userMsgId,
+										error: options.failure.message,
+										...(options.failure.code
+											? { code: options.failure.code }
+											: {}),
+										retryable: options.failure.retryable ?? false,
+										...(options.failure.retryAt !== undefined
+											? { retryAt: options.failure.retryAt }
+											: {}),
+									},
+									meta,
 								),
 							);
 						}

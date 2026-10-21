@@ -277,12 +277,17 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		).toBe(false);
 		const runs = await Effect.runPromise(
 			Effect.gen(function* () {
-				return yield* (yield* SqlClient.SqlClient)`SELECT id FROM provider_runs WHERE session_id = ${sessionId}`;
+				return yield* (yield* SqlClient.SqlClient)`SELECT status, started_at,
+					(SELECT COUNT(*) FROM turns WHERE run_id = provider_runs.id
+						AND state = 'error' AND started_at IS NULL) AS failed_inputs
+					FROM provider_runs WHERE session_id = ${sessionId}`;
 			}).pipe(
 				Effect.provide(SqliteClient.layer({ filename: relay.eventsDbPath })),
 			),
 		);
-		expect(runs).toEqual([]);
+		expect(runs).toEqual([
+			{ status: "error", started_at: null, failed_inputs: 1 },
+		]);
 		saveEvidence("pick-required", { notice, errors, runs });
 	});
 

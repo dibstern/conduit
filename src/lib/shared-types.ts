@@ -311,6 +311,8 @@ export const SessionInfoSchema = Schema.Struct({
 	accountId: Schema.NullOr(Schema.String),
 	title: Schema.String,
 	status: SessionStatusSchema,
+	/** Whether explicit Stop has a target; absence preserves older-client behavior. */
+	canStop: Schema.optional(Schema.Boolean),
 	projectSlug: Schema.String,
 	createdAt: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
 	updatedAt: Schema.optional(Schema.Union([Schema.String, Schema.Number])),

@@ -158,7 +158,7 @@ export interface ProviderSideEffectReactorOptions {
 	readonly registry: ProviderRegistry;
 	readonly ingestion: Pick<ProviderRuntimeIngestion, "ingest" | "ingestBatch">;
 	readonly write: CommitAndSignal["write"];
-	readonly persistHandoffDelivered?: ClaudeEventPersistEffect["persistHandoffDelivered"];
+	readonly persistUserMessage?: ClaudeEventPersistEffect["persistUserMessage"];
 	readonly claudeSessionForkSdk?: ClaudeSessionForkSdk;
 	readonly defaultClaudeLaunchConfig?: () => ClaudeLaunchConfig;
 	/** Optional deterministic override; defaults to the Effect Clock service. */
@@ -510,16 +510,24 @@ export class ProviderSideEffectReactor {
 				result.success.status === "indeterminate"
 			) {
 				yield* this.options
-					.write(() =>
+					.write((_project, stamp) =>
 						Effect.gen({ self: this }, function* () {
 							const marked = yield* this.options
 								.sql`UPDATE provider_command_outbox
 						SET error_code = 'delivery_indeterminate' WHERE request_sequence = ${row.request_sequence}
 						AND status = 'running' AND attempt_count = ${row.attempt_count} RETURNING command_id`;
-							if (marked.length)
+							if (marked.length) {
 								yield* this.options
 									.sql`UPDATE command_receipts SET error_code = 'delivery_indeterminate'
 						WHERE command_id = ${row.command_id} AND project_key = ${this.options.projectId} AND status = 'side_effect_requested'`;
+								yield* stamp((version) =>
+									this.options.sql<{
+										id: string;
+									}>`UPDATE sessions SET version = ${version} WHERE id = ${row.session_id} RETURNING id`.pipe(
+										Effect.map((rows) => rows.map(({ id }) => id)),
+									),
+								);
+							}
 						}),
 					)
 					.pipe(Effect.mapError(storeFailure("indeterminate")));
@@ -570,7 +578,53 @@ export class ProviderSideEffectReactor {
 						FROM provider_runs WHERE id = ${row.run_id} AND session_id = ${row.session_id}`.pipe(
 						Effect.mapError(storeFailure("failedRunOwner")),
 					);
-					if (owner)
+					const interrupted =
+						code === "interrupted" || turn?.status === "steer-declined";
+					const [placement] = yield* this.options.sql<{
+						placed: number;
+						steering: number;
+					}>`SELECT
+						EXISTS (SELECT 1 FROM turns WHERE session_id = ${row.session_id}
+							AND run_id = ${owner?.run_id ?? null}) AS placed,
+						EXISTS (SELECT 1 FROM pending_inputs WHERE session_id = ${row.session_id}
+							AND input_id = ${row.command_id} AND state = 'steering') AS steering`.pipe(
+						Effect.mapError(storeFailure("failedPlacement")),
+					);
+					const payload =
+						this.options.persistUserMessage &&
+						!placement?.placed &&
+						!placement?.steering &&
+						!interrupted
+							? yield* this.parseSendTurnPayload(row).pipe(
+									Effect.orElseSucceed(() => undefined),
+								)
+							: undefined;
+					if (owner && payload && this.options.persistUserMessage) {
+						const driver = payload.account?.driver ?? row.provider_id;
+						yield* this.options
+							.persistUserMessage(row.session_id, payload.prompt, {
+								messageId:
+									payload.continuation?.cutOffMessageId ??
+									this.options.registry
+										.getInstance(driver)
+										?.userMessageIdForInput?.(payload.inputId) ??
+									payload.inputId,
+								inputId: payload.inputId,
+								runId: owner.run_id,
+								provider: driver,
+								...(payload.images ? { images: payload.images } : {}),
+								failure: {
+									message:
+										cause instanceof Error
+											? cause.message
+											: (turn?.error?.message ?? code),
+									code,
+									retryable,
+									retryAt,
+								},
+							})
+							.pipe(Effect.mapError(storeFailure("failedPlacement")));
+					} else if (owner)
 						yield* this.options.ingestion
 							.ingest({
 								eventId: `provider-command-terminal:${row.request_sequence}:${claimed.attempt_count}`,
@@ -734,7 +788,7 @@ export class ProviderSideEffectReactor {
 	> {
 		const runId = randomUUID();
 		return this.options
-			.write((project) =>
+			.write((project, stamp) =>
 				Effect.gen({ self: this }, function* () {
 					const [claimed] = yield* this.options.sql<ProviderCommandOutboxRow>`
 				UPDATE provider_command_outbox SET status = 'running',
@@ -776,6 +830,14 @@ export class ProviderSideEffectReactor {
 							]),
 						);
 					}
+					if (claimed?.effect_type === "send_turn")
+						yield* stamp((version) =>
+							this.options.sql<{
+								id: string;
+							}>`UPDATE sessions SET version = ${version} WHERE id = ${row.session_id} RETURNING id`.pipe(
+								Effect.map((rows) => rows.map(({ id }) => id)),
+							),
+						);
 					return claimed;
 				}),
 			)
@@ -960,29 +1022,6 @@ export class ProviderSideEffectReactor {
 							),
 						)
 					: yield* send(undefined, false);
-				if (
-					(result.status === "accepted" || result.status === "completed") &&
-					result.handoff &&
-					this.options.persistHandoffDelivered
-				) {
-					yield* this.options
-						.persistHandoffDelivered(
-							payload.sessionId,
-							{
-								...result.handoff,
-								instanceId,
-							},
-							row.command_id,
-						)
-						.pipe(
-							Effect.catch((cause) =>
-								Effect.logError(
-									"Could not record delivered provider handoff",
-									cause,
-								),
-							),
-						);
-				}
 				return result;
 			}
 			if (row.effect_type === "interrupt_turn") {

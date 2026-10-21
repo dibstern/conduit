@@ -50,7 +50,7 @@ type RunningCommand = Effect.Success<
 >[number];
 
 /** Reattach admitted commands to their payload without serializing live steers. */
-export const recoverRunnerCommands = <T extends SessionTurn, E = never>(
+export const recoverRunnerCommands = <T extends SessionTurn>(
 	sql: SqlClient.SqlClient,
 	sessionId: string,
 	driverKind: string,
@@ -69,11 +69,6 @@ export const recoverRunnerCommands = <T extends SessionTurn, E = never>(
 					result: TurnResult | undefined,
 			  ) => Effect.Effect<void, SessionFailure>)
 			| undefined;
-		readonly onCompleted?: (
-			row: RunningCommand,
-			input: T,
-			result: TurnResult,
-		) => Effect.Effect<unknown, E>;
 		readonly resolveSinkId: (
 			commandId: string,
 			inputId: string,
@@ -144,18 +139,6 @@ export const recoverRunnerCommands = <T extends SessionTurn, E = never>(
 						);
 					}
 					const result = execution.success;
-					if (
-						result &&
-						runTerminalStatus(
-							{
-								type: `turn.${result.status === "joined" ? "completed" : result.status}`,
-								data: {},
-							},
-							driverKind,
-						) === "completed" &&
-						options.onCompleted
-					)
-						yield* options.onCompleted(row, input, result);
 					yield* settleRunnerCommand(
 						sql,
 						projectId,

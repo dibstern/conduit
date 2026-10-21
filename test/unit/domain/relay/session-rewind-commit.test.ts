@@ -37,7 +37,10 @@ import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
 import { synthesizeSnapshotEvent } from "../../../../src/lib/provider/opencode/opencode-history-backfill.js";
 import { OrchestrationEngine } from "../../../../src/lib/provider/orchestration-engine.js";
 import { CommandReadModelRepository } from "../../../../src/lib/provider/orchestration-read-model.js";
-import { ProviderRegistry } from "../../../../src/lib/provider/provider-registry.js";
+import {
+	ProviderRegistry,
+	ProviderRegistryTag,
+} from "../../../../src/lib/provider/provider-registry.js";
 import type { ProviderInstance } from "../../../../src/lib/provider/types.js";
 import {
 	makeMockAccountDirectory,
@@ -194,6 +197,10 @@ it.effect(
 			});
 			const context = yield* Layer.build(ProviderTurnServiceLive).pipe(
 				Effect.provideService(OrchestrationEngineTag, engine),
+				Effect.provideService(
+					ProviderRegistryTag,
+					new ProviderRegistry([provider]),
+				),
 			);
 			const turns = Context.get(context, ProviderTurnServiceTag);
 			const send = yield* turns

@@ -27,7 +27,7 @@ import {
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
 } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { ClaudeEventPersistEffectError } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
+import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -119,6 +119,67 @@ function makeProvider(
 }
 
 describe("ProviderSideEffectReactor", () => {
+	it.effect(
+		"places a claimed input and its failure before intake atomically",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedSendTurnOutbox(sql, { providerId: "opencode" });
+				yield* (yield* makeCommitAndSignal)([
+					canonicalEvent("session.created", "session-1", {
+						sessionId: "session-1",
+						provider: "opencode",
+						title: "Named failure",
+					}),
+				]);
+				yield* sql`UPDATE provider_command_outbox SET payload_json = json_set(payload_json,
+				'$.images', json_array('data:image/png;base64,aW1hZ2U='))`;
+				const reactor = yield* makeReactor({
+					persistUserMessage: (yield* ClaudeEventPersistEffectTag)
+						.persistUserMessage,
+					registry: new ProviderRegistry([
+						makeProvider(
+							() =>
+								Effect.fail(
+									new ProviderInstanceFailure({
+										providerId: "opencode",
+										operation: "sendTurn",
+										cause: {
+											code: "SEND_FAILED",
+											message: "OpenCode unreachable",
+										},
+									}),
+								),
+							"opencode",
+						),
+					]),
+				});
+				expect(yield* reactor.runCommand("cmd-1")).toMatchObject({
+					status: "error",
+				});
+				expect(yield* sql`SELECT run_id, state, started_at FROM turns`).toEqual(
+					[{ run_id: "run:cmd-1", state: "error", started_at: null }],
+				);
+				expect(
+					yield* sql`SELECT status, started_at FROM provider_runs`,
+				).toEqual([{ status: "error", started_at: null }]);
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "failed", attempt_count: 1 }]);
+				expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
+					{ status: "side_effect_failed" },
+				]);
+				expect(
+					yield* sql`SELECT type FROM message_parts ORDER BY type`,
+				).toEqual([{ type: "error" }, { type: "file" }, { type: "text" }]);
+				expect(
+					yield* sql`SELECT events.type, json_extract(events.metadata, '$.runId') AS run_id
+					FROM sessions JOIN events ON events.session_id = sessions.id
+					AND events.stream_version = sessions.last_turn_end_version`,
+				).toEqual([{ type: "turn.error", run_id: "run:cmd-1" }]);
+			}).pipe(Effect.provide(reactorTestLayer)),
+	);
+
 	it.effect("does not subscribe to admission changes for an unheld send", () =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -579,6 +640,9 @@ describe("ProviderSideEffectReactor", () => {
 				});
 				const caller = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
 				const input = yield* Deferred.await(sent);
+				const [claimedVersion] = yield* sql<{
+					version: number;
+				}>`SELECT version FROM sessions WHERE id = 'session-1'`;
 				yield* TestClock.adjust("122 seconds");
 				expect(input.abortSignal.aborted).toBe(true);
 				expect(caller.pollUnsafe()).toBeDefined();
@@ -594,6 +658,12 @@ describe("ProviderSideEffectReactor", () => {
 					return;
 				}
 				expect(result.status).toBe("indeterminate");
+				const [indeterminateVersion] = yield* sql<{
+					version: number;
+				}>`SELECT version FROM sessions WHERE id = 'session-1'`;
+				expect(indeterminateVersion?.version).toBeGreaterThan(
+					claimedVersion?.version ?? 0,
+				);
 				expect(
 					yield* sql`SELECT status, error_code FROM provider_command_outbox`,
 				).toEqual([
@@ -888,7 +958,7 @@ describe("ProviderSideEffectReactor", () => {
 				}).pipe(Effect.provide(reactorTestLayer)),
 		);
 
-	it.effect("handoff bookkeeping after intake cannot end native work", () =>
+	it.effect("handoff intake does not end native work", () =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			yield* seedSendTurnOutbox(sql);
@@ -924,13 +994,6 @@ describe("ProviderSideEffectReactor", () => {
 							),
 					),
 				]),
-				persistHandoffDelivered: () =>
-					Effect.fail(
-						new ClaudeEventPersistEffectError({
-							operation: "handoff",
-							cause: new Error("Handoff write unavailable"),
-						}),
-					),
 			});
 			yield* reactor.drain();
 			expect(yield* sql`SELECT status FROM provider_runs`).toEqual([

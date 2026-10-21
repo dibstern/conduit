@@ -226,7 +226,6 @@ const createOrchestrationComponentsEffect = (
 			prepareShellEnv = (projectDir) => resolver.waitUntilReady(projectDir);
 		}
 		const claudeInstance = yield* ClaudeDriver.create({
-			persistHandoffDelivered: persist.persistHandoffDelivered,
 			shellEnv,
 			...(prepareShellEnv ? { prepareShellEnv } : {}),
 			...(options.onBackgroundTask
@@ -283,7 +282,7 @@ const createOrchestrationComponentsEffect = (
 			ingestion,
 			// A send_turn's input.sent projects and announces with its outbox row.
 			write: (yield* makeCommitAndSignal).write,
-			persistHandoffDelivered: persist.persistHandoffDelivered,
+			persistUserMessage: persist.persistUserMessage,
 			...(options.claudeSessionForkSdk
 				? { claudeSessionForkSdk: options.claudeSessionForkSdk }
 				: {}),

@@ -156,7 +156,7 @@ export interface ProviderTurnService {
 	/** Install the session's Stop fence and fork its abort, or join the Stop in
 	 *  flight. Call under the inbox session permit: that orders the Stop against
 	 *  every handoff, and its admission cut-off excludes later ones from the
-	 *  abort. The returned effect awaits the stopped turn's end. */
+	 *  abort. Every caller awaits the same stopped turn's end or interrupt failure. */
 	readonly beginStop: (
 		input: ProviderTurnServiceInterruptInput,
 	) => Effect.Effect<Effect.Effect<void, StopFailure>>;
@@ -212,6 +212,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 	) =>
 		Effect.gen(function* () {
 			const snapshot = yield* Effect.fromResult(cutoff);
+			if (snapshot.owners.length === 0 && snapshot.retainedSteers) return;
 			const running =
 				snapshot.owners.length === 0
 					? Effect.succeed(false)

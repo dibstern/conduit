@@ -176,6 +176,7 @@ describe("Claude runner admission socket probes", () => {
 				type: "hello",
 				protocolVersion: RUNNER_PROTOCOL_VERSION,
 				buildId: BUILD_ID,
+				stampsRunIds: true,
 				runnerId,
 				sessionId,
 				pid,

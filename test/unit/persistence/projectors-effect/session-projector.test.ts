@@ -1147,7 +1147,6 @@ describe("SessionProjector", () => {
 				["s1"],
 			);
 			const originalTitle = originalRow?.title;
-			const originalStatus = originalRow?.status;
 			await project(
 				makeStored(
 					"turn.error",
@@ -1179,7 +1178,8 @@ describe("SessionProjector", () => {
 				["s1"],
 			);
 			expect(row?.title).toBe(originalTitle);
-			expect(row?.status).toBe(originalStatus);
+			// A terminal leaves the session idle when no other run is open.
+			expect(row?.status).toBe("idle");
 			expect(row?.updated_at).toBe(now + 5000);
 			expect(row?.last_turn_error_at).toBeNull();
 		});

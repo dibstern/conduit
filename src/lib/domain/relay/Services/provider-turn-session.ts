@@ -261,12 +261,23 @@ export const prepareStop = (input: ProviderTurnServiceInterruptInput) =>
 		const sql = yield* SqlClient.SqlClient;
 		const commit = yield* makeCommitAndSignal;
 		const store = yield* EventStoreEffectTag;
+		const providerId =
+			yield* (yield* OrchestrationEngineTag).getProviderForSessionEffect(
+				input.sessionId,
+			);
+		const account = providerId
+			? yield* (yield* AccountDirectory).resolve({ _tag: "Id", id: providerId })
+			: undefined;
+		const keepsPendingSteers = account
+			? PROVIDER_DRIVERS[account.driver].keepsPendingSteersOnInterrupt
+			: false;
 		// Close unused reservations and return handoffs in one transaction,
 		// serialized against the claim UPDATE so the drain cannot steal them.
-		const owners = yield* commit.write((project) =>
+		const { owners, retainedSteers } = yield* commit.write((project) =>
 			Effect.gen(function* () {
-				const claimed = yield* sessionRunOwnersQuery(sql, input.sessionId, {
+				const snapshot = yield* sessionRunOwnersQuery(sql, input.sessionId, {
 					confirmedStop: true,
+					excludeRetainedSteers: keepsPendingSteers,
 				});
 				const rows = yield* sql<{
 					command_id: string;
@@ -319,7 +330,7 @@ export const prepareStop = (input: ProviderTurnServiceInterruptInput) =>
 				// their retry schedule to the inbox, as recommit would withdraw it.
 				yield* sql`DELETE FROM provider_command_outbox WHERE session_id = ${input.sessionId}
 					AND effect_type = 'send_turn' AND status = 'retryable_failed'`;
-				return claimed.map(({ id }) => ({ runId: id }));
+				return snapshot;
 			}),
 		);
 
@@ -341,6 +352,7 @@ export const prepareStop = (input: ProviderTurnServiceInterruptInput) =>
 				AND turn.run_id IN ${sql.in(owners.map(({ runId }) => runId))}`;
 		return {
 			owners,
+			retainedSteers,
 			turnIds: [
 				...new Set(
 					identities.flatMap(({ input_id }) => (input_id ? [input_id] : [])),

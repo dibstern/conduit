@@ -31,6 +31,10 @@ import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import {
+	ProviderRegistry,
+	ProviderRegistryTag,
+} from "../../../src/lib/provider/provider-registry.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	makeMockAccountDirectory,
@@ -70,7 +74,13 @@ describe("permission/question processing timeouts through Effect state", () => {
 				"test-project",
 			);
 			const layer = Layer.provideMerge(
-				Layer.provideMerge(ProviderTurnServiceLive, SessionWorkspaceLive),
+				Layer.provideMerge(
+					ProviderTurnServiceLive,
+					Layer.merge(
+						SessionWorkspaceLive,
+						Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()),
+					),
+				),
 				Layer.mergeAll(
 					AlertsLive,
 					Layer.succeed(OpenCodeAPITag)(client),

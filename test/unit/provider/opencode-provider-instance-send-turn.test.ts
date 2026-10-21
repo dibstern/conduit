@@ -149,7 +149,7 @@ it("keeps overlapping compaction calls one-to-one without claiming ordinary echo
 function expectDeliveryFailure(
 	result: unknown,
 	message: unknown,
-	code = "send_failed",
+	code = "SEND_FAILED",
 ) {
 	expect(result).toMatchObject({
 		_tag: "Failure",
@@ -592,7 +592,7 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		expect(client.session.abort).not.toHaveBeenCalled();
 	});
 
-	it("fails with send_failed (no hang) when the bound named instance cannot be resolved", async () => {
+	it("fails with SEND_FAILED (no hang) when the bound named instance cannot be resolved", async () => {
 		instance = new OpenCodeProviderInstance({
 			client,
 			clientForSession: () =>
