@@ -38,6 +38,9 @@ import { EventStoreEffectTag } from "../../../persistence/effect/event-store-eff
 import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import { inboxRunStatusQuery } from "../../../persistence/inbox-run-status-query.js";
+import type { ProviderInstanceFailure } from "../../../provider/errors.js";
+import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
+import { assertSessionRunnerAvailable } from "../../../provider/runner/runner-provider-instance.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { Usage } from "../../daemon/Services/usage.js";
 import { type Continuation, ContinuationTag } from "./continuation.js";
@@ -331,6 +334,7 @@ type SendTurnError = Effect.Error<ReturnType<ProviderTurnService["sendTurn"]>>;
 
 export type SessionInboxError =
 	| SqlError
+	| ProviderInstanceFailure
 	| ClaudeEventPersistFailure
 	| SendTurnError
 	| Effect.Error<ReturnType<Continuation["requestContinuation"]>>;
@@ -395,6 +399,9 @@ export const SessionInboxLive = Layer.effect(
 		const eventStore = yield* EventStoreEffectTag;
 		const persist = yield* ClaudeEventPersistEffectTag;
 		const providerTurnService = yield* ProviderTurnServiceTag;
+		const registry = Option.getOrUndefined(
+			yield* Effect.serviceOption(ProviderRegistryTag),
+		);
 		const overrides = yield* OverridesStateTag;
 		const bus = yield* SessionEventBusTag;
 		const log = yield* LoggerTag;
@@ -650,12 +657,14 @@ export const SessionInboxLive = Layer.effect(
 		const act =
 			(command: "Cancel" | "SendNow") =>
 			(target: SessionInboxTarget & { readonly interrupt?: boolean }) =>
-				Effect.suspend(() => {
+				Effect.gen(function* () {
+					if (command === "SendNow")
+						yield* assertSessionRunnerAvailable(target.sessionId, registry);
 					const runNow = command === "SendNow" && target.interrupt;
 					if (runNow && runNowInFlight.has(target.inputId))
-						return Effect.succeed("accepted" as const);
+						return "accepted" as const;
 					if (runNow) runNowInFlight.add(target.inputId);
-					return serialised(target.sessionId)(
+					return yield* serialised(target.sessionId)(
 						Effect.gen(function* () {
 							const view = yield* readView(target.sessionId);
 							const decision = decideInbox(target.sessionId, view, {
@@ -811,6 +820,8 @@ export const SessionInboxLive = Layer.effect(
 			submit: (input) =>
 				serialised(input.sessionId)(
 					Effect.gen(function* () {
+						// Busy and approval-blocked inputs may never reach runner execution.
+						yield* assertSessionRunnerAvailable(input.sessionId, registry);
 						const view = yield* readView(input.sessionId, input.inputId);
 						const decision = decideInbox(input.sessionId, view, {
 							_tag: "Submit",

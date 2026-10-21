@@ -191,6 +191,10 @@ export interface SessionRunner {
 	readonly recoverEffect?: Effect.Effect<void, SessionFailure>;
 	/** Process ownership in every lifecycle state, even when no session is usable. */
 	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean>;
+	/** A session refusal also applies before inbox or prompt admission. */
+	getSessionFailureEffect?(
+		sessionId: string,
+	): Effect.Effect<SessionFailure | undefined>;
 	/** Local runner lifecycle state, including work outside the foreground turn. */
 	hasPendingSubagentFinalizers?(sessionId: string): boolean;
 	/** Undefined means no runtime session; null means its cursor is cleared. */
