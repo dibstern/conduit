@@ -1600,6 +1600,51 @@ export const FinalIconsDesktop: Story = {
 			).toBeCloseTo(8, 1);
 		}
 		await expect(attach.getBoundingClientRect().width).toBe(16);
+		const rowCentre =
+			sendButton.getBoundingClientRect().top +
+			sendButton.getBoundingClientRect().height / 2;
+		const icons = frame.querySelectorAll<SVGSVGElement>(
+			'#attach-btn svg, [data-testid="model-picker-trigger"] svg, [data-testid="permission-mode-badge"] svg, [data-testid="composer-checkout"] svg, #send svg',
+		);
+		for (const icon of icons) {
+			if (!icon.checkVisibility()) continue;
+			const box = icon.getBBox();
+			const centre = new DOMPoint(
+				box.x + box.width / 2,
+				box.y + box.height / 2,
+			).matrixTransform(icon.getScreenCTM() ?? undefined);
+			await expect(Math.abs(centre.y - rowCentre)).toBeLessThanOrEqual(0.5);
+		}
+		const meter = frame.querySelector('[data-testid="effort-meter"]');
+		if (meter?.checkVisibility()) {
+			const bars = [...meter.children].map((bar) =>
+				bar.getBoundingClientRect(),
+			);
+			const centre =
+				(Math.min(...bars.map((bar) => bar.top)) +
+					Math.max(...bars.map((bar) => bar.bottom))) /
+				2;
+			await expect(Math.abs(centre - rowCentre)).toBeLessThanOrEqual(0.5);
+		}
+		const context = document.createElement("canvas").getContext("2d");
+		if (!context) throw new Error("Text metrics are unavailable");
+		const labels = frame.querySelectorAll<HTMLElement>(
+			'.model-label, [data-testid="picker-selected-context"], [data-testid="composer-effort-label"], [data-testid="composer-checkout"] [data-part="project"], [data-testid="composer-checkout"] [data-part="branch"]',
+		);
+		for (const label of labels) {
+			if (!label.checkVisibility()) continue;
+			context.font = getComputedStyle(label).font;
+			const ink = context.measureText("x");
+			const baseline = document.createElement("i");
+			baseline.style.cssText =
+				"display:inline-block;width:0;height:0;padding:0;margin:0;border:0;vertical-align:baseline";
+			label.append(baseline);
+			const centre =
+				baseline.getBoundingClientRect().top +
+				(ink.actualBoundingBoxDescent - ink.actualBoundingBoxAscent) / 2;
+			baseline.remove();
+			await expect(Math.abs(centre - rowCentre)).toBeLessThanOrEqual(0.5);
+		}
 		const dimmer = getComputedStyle(frame)
 			.getPropertyValue("--color-text-dimmer")
 			.trim();
@@ -1614,11 +1659,17 @@ export const FinalIconsDesktop: Story = {
 			getComputedStyle(colour).color,
 		);
 		colour.remove();
-		await expect(getComputedStyle(sendButton).opacity).toBe("1");
+		await expect(getComputedStyle(sendButton).opacity).toBe("0.5");
 		await expect(sendButton).toBeDisabled();
 		await userEvent.click(sendButton);
 		await expect(readTurn().working).toBe(false);
 		await expect(input).toHaveValue("");
+		await userEvent.type(input, "Ready to send");
+		await expect(sendButton).toBeEnabled();
+		await expect(getComputedStyle(sendButton).opacity).toBe("1");
+		await userEvent.clear(input);
+		await expect(sendButton).toBeDisabled();
+		await expect(getComputedStyle(sendButton).opacity).toBe("0.5");
 	},
 };
 export const FinalIconsDesktopLight: Story = {

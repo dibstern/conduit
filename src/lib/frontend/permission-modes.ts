@@ -6,7 +6,7 @@ export const PERMISSION_MODE_COLOURS: Record<SessionPermissionMode, string> = {
 	ask: "var(--color-p-ask)",
 	acceptEdits: "var(--color-p-edits)",
 	auto: "var(--color-p-auto)",
-	full: "var(--color-error)",
+	full: "var(--color-p-full)",
 };
 
 /** `claudeOnly` marks modes backed by a Claude Agent SDK permission mode

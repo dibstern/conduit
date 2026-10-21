@@ -1503,7 +1503,7 @@
 					{:else if isGoalCommand}
 						<Button variant="goal" size="composer-action" icon="target" iconSize={16} id="send" data-goal="true" data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel="Set goal" onclick={handleSendClick} touchTarget class="send-btn">Set goal</Button>
 					{:else}
-						<Button variant="inverse" size="composer-action" disabledStyle="undimmed" iconOnly icon="arrow-up" iconSize={17} id="send" data-goal="false" data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel={sendButtonLabel} onclick={handleSendClick} touchTarget class="send-btn" />
+						<Button variant="inverse" size="composer-action" iconOnly icon="arrow-up" iconSize={17} id="send" data-goal="false" data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel={sendButtonLabel} onclick={handleSendClick} touchTarget class="send-btn" />
 					{/if}
 					{/if}
 					{/if}
