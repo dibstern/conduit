@@ -16,8 +16,10 @@ import { it as effectIt } from "@effect/vitest";
 import { Effect, Exit, Fiber, Result } from "effect";
 import { afterEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { AccountIdSchema } from "../../../../src/lib/contracts/account.js";
-import { CursorAccountResources } from "../../../../src/lib/provider/cursor/cursor-account-resources.js";
+import { WsRpcError } from "../../../../src/lib/contracts/ws-rpc.js";
+import type { CursorAccountResources } from "../../../../src/lib/provider/cursor/cursor-account-resources.js";
 import { makeCursorAuth } from "../../../../src/lib/provider/cursor/cursor-auth.js";
+import { resolveCursorCredential } from "../../../../src/lib/provider/cursor/cursor-credential.js";
 import {
 	cursorModelInfo,
 	makeCursorRunnerDriver,
@@ -92,14 +94,22 @@ afterEach(() => {
 });
 
 describe("Cursor ephemeral text generation with captured SDK traffic", () => {
-	for (const loggedIn of [true, false]) {
+	for (const [loggedIn, ambient] of [
+		[true, false],
+		[false, false],
+		[true, true],
+		[false, true],
+	]) {
 		effectIt.live(
-			loggedIn
-				? "uses each requested account's scoped credential for its catalog and title"
-				: "fails auth_required when the requested scoped store is empty despite other logins",
+			`${
+				loggedIn
+					? "uses each requested account's scoped credential for its catalog and title"
+					: "fails auth_required when the requested scoped store is empty despite other logins"
+			}${ambient ? " with an ambient daemon key" : ""}`,
 			() =>
 				Effect.gen(function* () {
-					vi.stubEnv("CURSOR_API_KEY", "");
+					vi.stubEnv("NODE_ENV", "test");
+					vi.stubEnv("CURSOR_API_KEY", ambient ? "[REDACTED:environment]" : "");
 					const { root, port: shared } = setup();
 					vi.spyOn(shared, "storedCredential").mockResolvedValue({
 						apiKey: "[REDACTED:shared]",
@@ -132,7 +142,15 @@ describe("Cursor ephemeral text generation with captured SDK traffic", () => {
 						use: (id, work) => {
 							const sdk = ports.get(id);
 							if (!sdk) throw new Error(`Unexpected account ${id}`);
-							return work({ sdk, auth });
+							return work({
+								sdk,
+								auth,
+								credential: Effect.tryPromise({
+									try: () => resolveCursorCredential(sdk, {}),
+									catch: () =>
+										new WsRpcError({ message: "Credential lookup failed" }),
+								}),
+							});
 						},
 					};
 					const driver = makeCursorRunnerDriver(
