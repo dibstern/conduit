@@ -150,13 +150,17 @@ export class OpenCodeAPI {
 		fn: () => Promise<{
 			data?: unknown;
 			error?: unknown;
-			response?: { status: number; url?: string } | undefined;
+			response?:
+				| { status: number; url?: string; headers?: Pick<Headers, "get"> }
+				| undefined;
 		}>,
 	): Promise<T> {
 		let result: {
 			data?: unknown;
 			error?: unknown;
-			response?: { status: number; url?: string } | undefined;
+			response?:
+				| { status: number; url?: string; headers?: Pick<Headers, "get"> }
+				| undefined;
 		};
 
 		try {
@@ -192,11 +196,13 @@ export class OpenCodeAPI {
 				result.response && "url" in result.response
 					? String(result.response.url)
 					: label;
+			const retryAfter = result.response.headers?.get("retry-after");
 			throw new OpenCodeApiError({
 				message: `API error during ${label}`,
 				endpoint: url,
 				responseStatus: status,
 				responseBody: result.error,
+				...(retryAfter ? { retryAfter } : {}),
 			});
 		}
 

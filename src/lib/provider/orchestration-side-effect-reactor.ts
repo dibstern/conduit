@@ -244,6 +244,10 @@ export class ProviderSideEffectReactor {
 	registerControl(commandId: string): void {
 		this.acceptedControls.add(commandId);
 	}
+
+	unregisterControl(commandId: string): void {
+		this.acceptedControls.delete(commandId);
+	}
 	private readonly liveCommands = new Set<string>();
 	private readonly drainingSessions = new Set<string>();
 	private readonly admission = Semaphore.makeUnsafe(1);
@@ -283,6 +287,7 @@ export class ProviderSideEffectReactor {
 							() => this.options
 								.sql`UPDATE provider_command_outbox SET status = 'pending', next_attempt_at = NULL
 					WHERE project_key = ${this.options.projectId} AND effect_type <> 'send_turn' AND status = 'running'
+						AND attempt_count < ${maxControlAttempts}
 						AND command_id NOT IN ${this.options.sql.in([...this.acceptedControls])}`,
 						)
 						.pipe(Effect.mapError(storeFailure("recoverControls")));
@@ -479,6 +484,20 @@ export class ProviderSideEffectReactor {
 		// Provider delivery and waiting for another claim remain interruptible.
 		return Effect.uninterruptibleMask((restore) =>
 			Effect.gen({ self: this }, function* () {
+				if (row.attempt_count >= maxControlAttempts) {
+					yield* this.recordControlOutcome(
+						row,
+						new ProviderInstanceFailure({
+							providerId: row.provider_id,
+							operation: row.effect_type,
+							cause: Object.assign(
+								new Error("Provider control attempt budget exhausted"),
+								{ code: "provider_control_attempts_exhausted" },
+							),
+						}),
+					);
+					return yield* this.durableOutcome(row.command_id);
+				}
 				const startedAt = yield* this.currentTimeMillis();
 				const claimed = yield* background
 					? this.admission.withPermit(
@@ -907,7 +926,9 @@ export class ProviderSideEffectReactor {
 			WHERE project_key = ${this.options.projectId}
 				AND (${sessionId ?? null} IS NULL OR session_id = ${sessionId ?? null})
 				AND (status = 'pending'
-					OR (status = 'retryable_failed' AND next_attempt_at <= ${nowMs}))
+					OR (status = 'retryable_failed' AND next_attempt_at <= ${nowMs})
+					OR (status = 'running' AND effect_type <> 'send_turn' AND attempt_count >= ${maxControlAttempts}
+						AND command_id NOT IN ${this.options.sql.in([...this.acceptedControls])}))
 				AND NOT EXISTS (
 					SELECT 1 FROM provider_command_outbox AS earlier
 					WHERE earlier.status IN ('pending', 'running', 'retryable_failed') AND (
@@ -962,6 +983,7 @@ export class ProviderSideEffectReactor {
 							AND run.status IN ('pending', 'running', 'joined')
 					))
 					AND attempt_count = ${row.attempt_count}
+					AND (effect_type = 'send_turn' OR attempt_count < ${maxControlAttempts})
 					AND (effect_type = 'send_turn' OR provider_process_id IS NULL OR NOT EXISTS (
 						SELECT 1 FROM provider_command_outbox prior
 						WHERE prior.effect_type <> 'send_turn' AND prior.provider_process_id = provider_command_outbox.provider_process_id
@@ -1634,6 +1656,25 @@ export class ProviderSideEffectReactor {
 				this.options.write((project) =>
 					Effect.gen({ self: this }, function* () {
 						const updatedAt = yield* this.currentTimeMillis();
+						const retryAfter = failure?.retryAfter?.trim();
+						const retryAfterAt =
+							retryAfter === undefined
+								? Number.NaN
+								: /^\d+$/.test(retryAfter)
+									? updatedAt + Number(retryAfter) * 1000
+									: /^[a-z]/i.test(retryAfter)
+										? Date.parse(retryAfter)
+										: Number.NaN;
+						const nextAttemptAt = retryable
+							? Number.isFinite(retryAfterAt)
+								? Math.max(updatedAt, retryAfterAt)
+								: updatedAt +
+									Duration.toMillis(
+										(this.options.retryBackoff ?? defaultRetryBackoff)(
+											row.attempt_count,
+										),
+									)
+							: null;
 						const errorCode = failure
 							? (failure.code ?? providerFailureCode(failure))
 							: null;
@@ -1650,9 +1691,10 @@ export class ProviderSideEffectReactor {
 								})
 							: null;
 						const changed = yield* this.options
-							.sql`UPDATE provider_command_outbox SET status = ${failure?.code === "provider_process_gone" || failure?.code === "provider_process_unavailable" ? "cancelled" : retryable ? "retryable_failed" : failure ? "failed" : "completed"}, error_code = ${errorCode}, next_attempt_at = ${retryable ? updatedAt + Duration.toMillis((this.options.retryBackoff ?? defaultRetryBackoff)(row.attempt_count)) : null}, updated_at = ${updatedAt}
+							.sql`UPDATE provider_command_outbox SET status = ${failure?.code === "provider_process_gone" || failure?.code === "provider_process_unavailable" ? "cancelled" : retryable ? "retryable_failed" : failure ? "failed" : "completed"}, error_code = ${errorCode}, next_attempt_at = ${nextAttemptAt}, updated_at = ${updatedAt}
 				WHERE request_sequence = ${row.request_sequence} AND project_key = ${this.options.projectId}
-					AND status = 'running' AND attempt_count = ${row.attempt_count} RETURNING command_id`;
+					AND (status = 'running' OR (${row.attempt_count >= maxControlAttempts} AND status IN ('pending', 'retryable_failed')))
+					AND attempt_count = ${row.attempt_count} RETURNING command_id`;
 						if (changed.length) {
 							yield* this.options
 								.sql`UPDATE command_receipts SET status = ${retryable ? "side_effect_requested" : failure ? "side_effect_failed" : "side_effect_completed"}, error_code = ${errorCode}, error = ${errorJson}, updated_at = ${updatedAt}
@@ -1686,13 +1728,14 @@ export class ProviderSideEffectReactor {
 		);
 	}
 
-	/** A terminal answer may have been rejected while the native prompt survives. */
+	/** Only confirmed consumption keeps an unconfirmed terminal answer resolved. */
 	private readFailedControlPrompt(row: ProviderCommandOutboxRow): Effect.Effect<
 		| {
 				readonly event: CanonicalEvent<"permission.asked" | "question.asked">;
 				readonly version: number;
 		  }
-		| undefined
+		| undefined,
+		ProviderCommandStoreFailure
 	> {
 		return Effect.gen({ self: this }, function* () {
 			if (
@@ -1700,8 +1743,6 @@ export class ProviderSideEffectReactor {
 				row.effect_type !== "resolve_question"
 			)
 				return undefined;
-			const instances = yield* Effect.serviceOption(OpenCodeInstancesTag);
-			if (Option.isNone(instances)) return undefined;
 			const payload = yield* Schema.decodeUnknownEffect(
 				Schema.fromJsonString(ProviderControlPayloadSchema),
 			)(row.payload_json);
@@ -1717,53 +1758,6 @@ export class ProviderSideEffectReactor {
 				provider_request_id: string | null;
 			}>`SELECT version, tool_name, input, provider_request_id FROM pending_approvals WHERE id = ${payload.requestId} AND session_id = ${row.session_id} AND provider_process_id = ${row.provider_process_id} AND status = 'resolved'`;
 			if (!prompt) return undefined;
-			const call = yield* this.options.resolveSessionCallContext?.(
-				row.session_id,
-				undefined,
-				{
-					prompt: {
-						id: payload.requestId,
-						kind:
-							payload.type === "resolve_permission" ? "permission" : "question",
-					},
-				},
-			) ?? Effect.succeed(undefined);
-			const running = yield* instances.value.ifRunning(
-				call?.account.id ?? row.provider_id,
-				call?.workspaceRoot,
-			);
-			if (
-				Option.isNone(running) ||
-				running.value.promptProcessId !== row.provider_process_id
-			)
-				return undefined;
-			const client = running.value;
-			const directory =
-				call?.workspaceRoot ??
-				(yield* Effect.tryPromise(() => client.session.get(row.session_id)))
-					.directory;
-			if (!directory) return undefined;
-			const pending = yield* Effect.tryPromise(() =>
-				payload.type === "resolve_permission"
-					? client.permission.list(directory)
-					: client.question.list(directory),
-			);
-			if (
-				!pending.some(
-					(request) =>
-						request.id === (payload.nativeRequestId ?? payload.requestId),
-				)
-			)
-				return undefined;
-			const current = yield* instances.value.ifRunning(
-				call?.account.id ?? row.provider_id,
-				call?.workspaceRoot,
-			);
-			if (
-				Option.isNone(current) ||
-				current.value.promptProcessId !== row.provider_process_id
-			)
-				return undefined;
 			const input: unknown =
 				prompt.input === null ? undefined : JSON.parse(prompt.input);
 			const target = {
@@ -1781,7 +1775,7 @@ export class ProviderSideEffectReactor {
 					source: "conduit.control-reconciliation",
 				},
 			};
-			return {
+			const reopened = {
 				version: prompt.version,
 				event:
 					payload.type === "resolve_permission"
@@ -1798,13 +1792,63 @@ export class ProviderSideEffectReactor {
 								options,
 							),
 			};
-		}).pipe(
-			Effect.scoped,
-			// Reconciliation cannot hold the process queue if the provider is down.
-			Effect.timeoutOption("1 second"),
-			Effect.map(Option.getOrUndefined),
-			Effect.catch(() => Effect.succeed(undefined)),
-		);
+			return yield* Effect.gen({ self: this }, function* () {
+				const instances = yield* Effect.serviceOption(OpenCodeInstancesTag);
+				if (Option.isNone(instances)) return reopened;
+				const call = yield* this.options.resolveSessionCallContext?.(
+					row.session_id,
+					undefined,
+					{
+						prompt: {
+							id: payload.requestId,
+							kind:
+								payload.type === "resolve_permission"
+									? "permission"
+									: "question",
+						},
+					},
+				) ?? Effect.succeed(undefined);
+				const running = yield* instances.value.ifRunning(
+					call?.account.id ?? row.provider_id,
+					call?.workspaceRoot,
+				);
+				if (Option.isNone(running)) return reopened;
+				if (running.value.promptProcessId !== row.provider_process_id)
+					return undefined;
+				const client = running.value;
+				const directory =
+					call?.workspaceRoot ??
+					(yield* Effect.tryPromise(() => client.session.get(row.session_id)))
+						.directory;
+				if (!directory) return reopened;
+				const pending = yield* Effect.tryPromise(() =>
+					payload.type === "resolve_permission"
+						? client.permission.list(directory)
+						: client.question.list(directory),
+				);
+				const current = yield* instances.value.ifRunning(
+					call?.account.id ?? row.provider_id,
+					call?.workspaceRoot,
+				);
+				if (Option.isNone(current)) return reopened;
+				if (current.value.promptProcessId !== row.provider_process_id)
+					return undefined;
+				return pending.some(
+					(request) =>
+						request.id === (payload.nativeRequestId ?? payload.requestId),
+				)
+					? reopened
+					: undefined;
+			}).pipe(
+				Effect.scoped,
+				// Reconciliation cannot hold the process queue if the provider is down.
+				Effect.timeoutOption("1 second"),
+				Effect.map((result) =>
+					Option.isSome(result) ? result.value : reopened,
+				),
+				Effect.catch(() => Effect.succeed(reopened)),
+			);
+		}).pipe(Effect.mapError(storeFailure("readFailedControlPrompt")));
 	}
 
 	private writeFailure(

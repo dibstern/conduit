@@ -1045,6 +1045,28 @@ describe("OpenCodeAPI", () => {
 		await expect(api.session.list()).rejects.toThrow(/fetch failed/);
 	});
 
+	it("preserves Retry-After on a throttled SDK response", async () => {
+		const sdk = makeStubSdk();
+		sdk.session.get.mockResolvedValue({
+			data: undefined,
+			error: { message: "Too Many Requests" },
+			response: new Response(null, {
+				status: 429,
+				headers: { "Retry-After": "3" },
+			}),
+		});
+		const api = new OpenCodeAPI({
+			sdk,
+			baseUrl: "http://localhost:4096",
+			authHeaders: {},
+		});
+		await expect(api.session.get("s1")).rejects.toMatchObject({
+			_tag: "OpenCodeApiError",
+			responseStatus: 429,
+			retryAfter: "3",
+		});
+	});
+
 	it("session.get() rejects malformed SDK data as an OpenCode API error", async () => {
 		const sdk = makeStubSdk();
 		sdk.session.get.mockResolvedValue({

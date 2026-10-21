@@ -26,6 +26,7 @@ const APPEND_CHUNK_ROWS = 500;
 /** OpenCode asks are deduplicated by request id rather than event id. */
 const openCodeRequestId = (event: CanonicalEvent): string | undefined =>
 	event.provider === "opencode" &&
+	event.metadata.source !== "conduit.control-reconciliation" &&
 	(event.type === "permission.asked" || event.type === "question.asked")
 		? event.data.id
 		: undefined;

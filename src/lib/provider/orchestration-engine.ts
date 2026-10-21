@@ -737,6 +737,7 @@ export class OrchestrationEngine {
 					yield* this.sessionBindingReadModel.getBindingRevision(
 						command.sessionId,
 					);
+				let registered = false;
 				const acceptance = yield* durable
 					.write((project) =>
 						Effect.gen({ self: this }, function* () {
@@ -830,11 +831,21 @@ export class OrchestrationEngine {
 								requestSequence,
 								nowMs,
 							});
+							// Publication may drain before write returns. Register while
+							// the transaction still hides this control from other drains.
+							durable.reactor.registerControl(command.commandId);
+							registered = true;
 							yield* project(stored);
 							return { providerId, newlyAccepted: true };
 						}),
 					)
 					.pipe(
+						Effect.onExit((exit) =>
+							Effect.sync(() => {
+								if (Exit.isFailure(exit) && registered)
+									durable.reactor.unregisterControl(command.commandId);
+							}),
+						),
 						Effect.mapError((cause) =>
 							cause instanceof CommandFingerprintMismatch ||
 							cause instanceof StaleCommandRejected ||
@@ -848,7 +859,6 @@ export class OrchestrationEngine {
 						),
 					);
 				const { providerId, newlyAccepted } = acceptance;
-				if (newlyAccepted) durable.reactor.registerControl(command.commandId);
 				if (
 					newlyAccepted &&
 					(command.type === "end_session" ||

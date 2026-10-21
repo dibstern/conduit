@@ -18,7 +18,10 @@ import {
 	OpenCodeApiError,
 	OpenCodeConnectionError,
 } from "../../../src/lib/errors.js";
-import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import {
+	type CommitAndSignal,
+	makeCommitAndSignal,
+} from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { SessionRollupProjects } from "../../../src/lib/persistence/effect/session-rollup-projects.js";
@@ -73,6 +76,7 @@ describe("durable control outbox scheduling", () => {
 		now: () => number = () => 1000,
 		projectId = "control-project",
 		sessionId = "control-session",
+		wrapWrite?: (write: CommitAndSignal["write"]) => CommitAndSignal["write"],
 	) {
 		return Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -92,7 +96,7 @@ describe("durable control outbox scheduling", () => {
 					projectKey: projectId,
 					now,
 					generateId: () => "control-dispatch",
-					write: commit.write,
+					write: wrapWrite ? wrapWrite(commit.write) : commit.write,
 				},
 			});
 			result.bindSession(sessionId, "opencode");
@@ -136,6 +140,399 @@ describe("durable control outbox scheduling", () => {
 			},
 		};
 	}
+
+	it("reserves a URL-only control before post-commit publication can drain it", async () => {
+		const api = makeMockOpenCodeAPI({
+			promptProcessId: "shared-process",
+			controlReplaySafe: false,
+		});
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				let accepting: OrchestrationEngine;
+				const wrapWrite =
+					(write: CommitAndSignal["write"]): CommitAndSignal["write"] =>
+					(body, options) =>
+						write(body, options).pipe(
+							Effect.tap((result) =>
+								result &&
+								typeof result === "object" &&
+								"newlyAccepted" in result &&
+								result.newlyAccepted === true
+									? accepting.drainSideEffects().pipe(Effect.orDie)
+									: Effect.void,
+							),
+						);
+				accepting = yield* engine(
+					new OpenCodeProviderInstance({
+						client: api,
+						configDir: "/tmp/control-test-config",
+					}),
+					undefined,
+					undefined,
+					undefined,
+					wrapWrite,
+				);
+				yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('card', 'control-session', 'permission', 'pending', 'shared-process', 'native-answer', 1)`;
+				const command = {
+					type: "resolve_permission" as const,
+					commandId: "publication-answer",
+					sessionId: "control-session",
+					requestId: "card",
+					decision: "once" as const,
+					providerProcessId: "shared-process",
+				};
+				expect(
+					yield* Effect.result(accepting.dispatchEffect(command)),
+				).toMatchObject({ _tag: "Success" });
+				yield* accepting.dispatchEffect(command);
+				expect(api.permission.reply).toHaveBeenCalledTimes(1);
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "completed", attempt_count: 1 }]);
+			}).pipe(
+				Effect.provide(fixture()),
+				Effect.provideService(
+					OpenCodeInstancesTag,
+					makeOpenCodeInstancesStub({ opencode: api }),
+				),
+			),
+		);
+	});
+
+	it("removes a live control reservation when its acceptance transaction rolls back", async () => {
+		const api = makeMockOpenCodeAPI({
+			promptProcessId: "shared-process",
+			controlReplaySafe: false,
+		});
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const instance = new OpenCodeProviderInstance({
+					client: api,
+					configDir: "/tmp/control-test-config",
+				});
+				const rollback =
+					(write: CommitAndSignal["write"]): CommitAndSignal["write"] =>
+					(body, options) =>
+						write(
+							(project, stamp) =>
+								body(project, stamp).pipe(
+									Effect.tap((result) =>
+										result &&
+										typeof result === "object" &&
+										"newlyAccepted" in result &&
+										result.newlyAccepted === true
+											? sql.unsafe("SELECT * FROM force_acceptance_rollback")
+											: Effect.void,
+									),
+								),
+							options,
+						);
+				const accepting = yield* engine(
+					instance,
+					undefined,
+					undefined,
+					undefined,
+					rollback,
+				);
+				yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('card', 'control-session', 'permission', 'pending', 'shared-process', 'native-answer', 1)`;
+				const command = {
+					type: "resolve_permission" as const,
+					commandId: "rolled-back-answer",
+					sessionId: "control-session",
+					requestId: "card",
+					decision: "once" as const,
+					providerProcessId: "shared-process",
+				};
+				expect(
+					yield* Effect.result(accepting.dispatchEffect(command)),
+				).toMatchObject({ _tag: "Failure" });
+				expect(
+					yield* sql`SELECT command_id FROM provider_command_outbox`,
+				).toEqual([]);
+				expect(yield* sql`SELECT command_id FROM command_receipts`).toEqual([]);
+				expect(yield* sql`SELECT status FROM pending_approvals`).toEqual([
+					{ status: "pending" },
+				]);
+				// A different daemon commits that id and stops before delivery. The
+				// rolled-back registration must not authorize its URL-only replay.
+				const stopAfterCommit =
+					(write: CommitAndSignal["write"]): CommitAndSignal["write"] =>
+					(body, options) =>
+						write(body, options).pipe(
+							Effect.tap((result) =>
+								result &&
+								typeof result === "object" &&
+								"newlyAccepted" in result &&
+								result.newlyAccepted === true
+									? Effect.die("stopped after commit")
+									: Effect.void,
+							),
+						);
+				const otherDaemon = yield* engine(
+					instance,
+					undefined,
+					undefined,
+					undefined,
+					stopAfterCommit,
+				);
+				yield* Effect.exit(otherDaemon.dispatchEffect(command));
+				yield* accepting.drainSideEffects();
+				expect(api.permission.reply).not.toHaveBeenCalled();
+				expect(
+					yield* sql`SELECT status, error_code FROM provider_command_outbox`,
+				).toEqual([
+					{ status: "cancelled", error_code: "provider_process_unavailable" },
+				]);
+			}).pipe(
+				Effect.provide(fixture()),
+				Effect.provideService(
+					OpenCodeInstancesTag,
+					makeOpenCodeInstancesStub({ opencode: api }),
+				),
+			),
+		);
+	});
+
+	it.each([
+		[undefined, 2000],
+		["3", 4000],
+		[new Date(5000).toUTCString(), 5000],
+		["invalid", 2000],
+		["-1", 2000],
+	] as const)("retries HTTP 429 with Retry-After %s at %s", async (retryAfter, deadline) => {
+		const api = makeMockOpenCodeAPI({
+			promptProcessId: "shared-process",
+			controlReplaySafe: true,
+		});
+		const throttled = Object.assign(
+			new OpenCodeApiError({
+				message: "Too Many Requests",
+				endpoint: "/permission/native-answer",
+				responseStatus: 429,
+			}),
+			{ retryAfter },
+		);
+		vi.mocked(api.permission.reply)
+			.mockRejectedValueOnce(throttled)
+			.mockResolvedValue(undefined);
+		vi.mocked(api.permission.list).mockRejectedValue(throttled);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				let now = 1000;
+				const instance = new OpenCodeProviderInstance({
+					client: api,
+					configDir: "/tmp/control-test-config",
+				});
+				const accepting = yield* engine(instance, () => now);
+				yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('card', 'control-session', 'permission', 'pending', 'shared-process', 'native-answer', 1)`;
+				yield* Effect.result(
+					accepting.dispatchEffect({
+						type: "resolve_permission",
+						commandId: "throttled-answer",
+						sessionId: "control-session",
+						requestId: "card",
+						decision: "once",
+						providerProcessId: "shared-process",
+					}),
+				);
+				expect(
+					yield* sql`SELECT status, attempt_count, next_attempt_at FROM provider_command_outbox`,
+				).toEqual([
+					{
+						status: "retryable_failed",
+						attempt_count: 1,
+						next_attempt_at: deadline,
+					},
+				]);
+				const restarted = yield* engine(instance, () => now);
+				now = deadline - 1;
+				yield* restarted.drainSideEffects();
+				expect(api.permission.reply).toHaveBeenCalledTimes(1);
+				now = deadline;
+				yield* restarted.drainSideEffects();
+				expect(api.permission.reply).toHaveBeenCalledTimes(2);
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "completed", attempt_count: 2 }]);
+			}).pipe(
+				Effect.provide(fixture()),
+				Effect.provideService(
+					OpenCodeInstancesTag,
+					makeOpenCodeInstancesStub({ opencode: api }),
+				),
+			),
+		);
+	});
+
+	// A crash in attempt five, including a rolled-back reopen, cannot buy a
+	// sixth delivery. Terminal outcome, receipt and reopen must commit together.
+	it.each([
+		"running",
+		"pending",
+		"retryable_failed",
+		"reopen-rollback",
+		"consumed",
+	] as const)("enforces the persisted budget before replay of %s", async (state) => {
+		const api = makeMockOpenCodeAPI({
+			promptProcessId: "shared-process",
+			controlReplaySafe: true,
+		});
+		const outage = new OpenCodeConnectionError({ message: "provider offline" });
+		vi.mocked(api.permission.reply).mockRejectedValue(outage);
+		vi.mocked(api.permission.list).mockRejectedValue(outage);
+		if (state === "consumed") {
+			vi.mocked(api.permission.list).mockResolvedValue([]);
+			vi.mocked(api.session.get).mockResolvedValue({
+				id: "control-session",
+				projectID: "control-project",
+				title: "Control",
+				version: "1",
+				time: { created: 1, updated: 1 },
+				directory: "/tmp/control-project",
+			});
+		}
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const instance = new OpenCodeProviderInstance({
+					client: api,
+					configDir: "/tmp/control-test-config",
+				});
+				const accepting = yield* engine(instance);
+				yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('card', 'control-session', 'permission', 'pending', 'shared-process', 'native-answer', 1)`;
+				yield* Effect.result(
+					accepting.dispatchEffect({
+						type: "resolve_permission",
+						commandId: "crashed-answer",
+						sessionId: "control-session",
+						requestId: "card",
+						decision: "once",
+						providerProcessId: "shared-process",
+					}),
+				);
+				if (state === "reopen-rollback") {
+					yield* sql`UPDATE provider_command_outbox SET attempt_count = 4, next_attempt_at = 0`;
+					yield* sql.unsafe(
+						`CREATE TRIGGER interrupt_reopen BEFORE UPDATE ON pending_approvals WHEN OLD.status = 'resolved' AND NEW.status = 'pending' BEGIN SELECT RAISE(ABORT, 'crash during reopen'); END`,
+					);
+					yield* accepting.drainSideEffects();
+					expect(
+						yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+					).toEqual([{ status: "running", attempt_count: 5 }]);
+					expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
+						{ status: "side_effect_requested" },
+					]);
+					expect(yield* sql`SELECT status FROM pending_approvals`).toEqual([
+						{ status: "resolved" },
+					]);
+					expect(
+						yield* sql`SELECT type FROM events WHERE json_extract(metadata, '$.source') = 'conduit.control-reconciliation'`,
+					).toEqual([]);
+					yield* sql.unsafe("DROP TRIGGER interrupt_reopen");
+				} else {
+					yield* sql`UPDATE provider_command_outbox SET status = ${state === "consumed" ? "running" : state}, attempt_count = 5, next_attempt_at = 0`;
+				}
+				const delivered = vi.mocked(api.permission.reply).mock.calls.length;
+				const restarted = yield* engine(instance);
+				yield* restarted.drainSideEffects();
+				yield* restarted.drainSideEffects();
+				expect(api.permission.reply).toHaveBeenCalledTimes(delivered);
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "failed", attempt_count: 5 }]);
+				expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
+					{ status: "side_effect_failed" },
+				]);
+				expect(yield* sql`SELECT status FROM pending_approvals`).toEqual([
+					{ status: state === "consumed" ? "resolved" : "pending" },
+				]);
+				expect(
+					yield* sql`SELECT type FROM events WHERE json_extract(metadata, '$.source') = 'conduit.control-reconciliation'`,
+				).toEqual(state === "consumed" ? [] : [{ type: "permission.asked" }]);
+				yield* restarted.dispatchEffect({
+					type: "interrupt_turn",
+					commandId: "stop-after-crash",
+					sessionId: "control-session",
+					providerProcessId: "shared-process",
+				});
+				expect(api.session.abort).toHaveBeenCalledTimes(1);
+			}).pipe(
+				Effect.provide(fixture()),
+				Effect.provideService(
+					OpenCodeInstancesTag,
+					makeOpenCodeInstancesStub({ opencode: api }),
+				),
+			),
+		);
+	});
+
+	it("does not recover a current daemon's fifth control delivery while it is running", async () => {
+		const api = makeMockOpenCodeAPI({
+			promptProcessId: "shared-process",
+			controlReplaySafe: true,
+		});
+		let release: (() => void) | undefined;
+		vi.mocked(api.permission.reply)
+			.mockRejectedValueOnce(
+				new OpenCodeConnectionError({ message: "connection reset" }),
+			)
+			.mockImplementationOnce(
+				() =>
+					new Promise((resolve) => {
+						release = () => resolve(undefined);
+					}),
+			);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const accepting = yield* engine(
+					new OpenCodeProviderInstance({
+						client: api,
+						configDir: "/tmp/control-test-config",
+					}),
+				);
+				yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('card', 'control-session', 'permission', 'pending', 'shared-process', 'native-answer', 1)`;
+				const command = {
+					type: "resolve_permission" as const,
+					commandId: "live-fifth-answer",
+					sessionId: "control-session",
+					requestId: "card",
+					decision: "once" as const,
+					providerProcessId: "shared-process",
+				};
+				yield* Effect.result(accepting.dispatchEffect(command));
+				yield* sql`UPDATE provider_command_outbox SET attempt_count = 4, next_attempt_at = 0`;
+				const delivery = yield* Effect.forkChild(accepting.drainSideEffects());
+				while (!release) yield* Effect.sleep("1 millis");
+				yield* accepting.drainSideEffects();
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "running", attempt_count: 5 }]);
+				expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
+					{ status: "side_effect_requested" },
+				]);
+				release();
+				yield* Fiber.join(delivery);
+				yield* accepting.dispatchEffect(command);
+				expect(api.permission.reply).toHaveBeenCalledTimes(2);
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "completed", attempt_count: 5 }]);
+				expect(yield* sql`SELECT status FROM pending_approvals`).toEqual([
+					{ status: "resolved" },
+				]);
+			}).pipe(
+				Effect.provide(fixture()),
+				Effect.provideService(
+					OpenCodeInstancesTag,
+					makeOpenCodeInstancesStub({ opencode: api }),
+				),
+			),
+		);
+	});
 
 	// Failure modes: real adapter errors lack retryable flags; a rejected answer
 	// can retain the process queue across projects/restart, or exhaust retries
@@ -450,7 +847,7 @@ describe("durable control outbox scheduling", () => {
 		"stalled",
 		"replaced",
 		"newer-resolution",
-	] as const)("reconciliation cannot block controls or revive a stale prompt: %s", async (scenario) => {
+	] as const)("reconciliation reopens unconfirmed answers without blocking controls or reviving stale prompts: %s", async (scenario) => {
 		let processId = "shared-process";
 		const api = makeMockOpenCodeAPI({
 			promptProcessId: processId,
@@ -537,7 +934,14 @@ describe("durable control outbox scheduling", () => {
 				expect(yield* Fiber.join(answering)).toMatchObject({ _tag: "Failure" });
 				expect(
 					yield* sql`SELECT status FROM pending_approvals WHERE id = 'bad-card'`,
-				).toEqual([{ status: "resolved" }]);
+				).toEqual([
+					{
+						status:
+							scenario === "unreachable" || scenario === "stalled"
+								? "pending"
+								: "resolved",
+					},
+				]);
 				expect(
 					yield* sql`SELECT status, error FROM command_receipts WHERE command_id = 'bad-answer'`,
 				).toEqual([
@@ -560,6 +964,144 @@ describe("durable control outbox scheduling", () => {
 					makeOpenCodeInstancesStub({ opencode: api }),
 				),
 				Effect.timeout("3 seconds"),
+			),
+		);
+	});
+
+	// Unconfirmed terminal answers must reopen durably, accept a provider re-ask,
+	// and permit a fresh answer once, while releasing Stop/End behind the failure.
+	it.each([
+		"permission",
+		"question",
+		"reject",
+	] as const)("reopens an exhausted %s answer through a durable ask and delivers its replacement once", async (kind) => {
+		const api = makeMockOpenCodeAPI({
+			promptProcessId: "shared-process",
+			controlReplaySafe: true,
+		});
+		const reply =
+			kind === "permission"
+				? api.permission.reply
+				: kind === "question"
+					? api.question.reply
+					: api.question.reject;
+		const outage = new OpenCodeConnectionError({ message: "provider offline" });
+		vi.mocked(reply).mockRejectedValue(outage);
+		vi.mocked(api.permission.list).mockRejectedValue(outage);
+		vi.mocked(api.question.list).mockRejectedValue(outage);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				let now = 1000;
+				const instance = new OpenCodeProviderInstance({
+					client: api,
+					configDir: "/tmp/control-test-config",
+				});
+				const accepting = yield* engine(instance, () => now);
+				const ask = {
+					eventId: "original-ask",
+					type:
+						kind === "permission"
+							? ("permission.asked" as const)
+							: ("question.asked" as const),
+					providerId: "opencode",
+					sessionId: "control-session",
+					providerRefs: {
+						providerProcessId: "shared-process",
+						providerRequestId: "native-answer",
+					},
+					rawSource: { kind: "test" },
+					createdAt: now,
+					data: {
+						id: "native-answer",
+						sessionId: "control-session",
+						toolName: "bash",
+						input: {},
+						questions: [],
+					},
+				};
+				yield* ingestion.ingest(ask);
+				const [prompt] = yield* sql<{
+					id: string;
+				}>`SELECT id FROM pending_approvals`;
+				if (!prompt) throw new Error("Missing ingested ask");
+				const command =
+					kind === "permission"
+						? {
+								type: "resolve_permission" as const,
+								commandId: "exhausted-answer",
+								sessionId: "control-session",
+								requestId: prompt.id,
+								decision: "once" as const,
+								providerProcessId: "shared-process",
+							}
+						: {
+								type: "resolve_question" as const,
+								commandId: "exhausted-answer",
+								sessionId: "control-session",
+								requestId: prompt.id,
+								answers: {},
+								operation:
+									kind === "reject" ? ("reject" as const) : ("reply" as const),
+								providerProcessId: "shared-process",
+							};
+				yield* Effect.result(accepting.dispatchEffect(command));
+				for (let attempt = 1; attempt < 5; attempt++) {
+					now += 100_000;
+					const restarted = yield* engine(instance, () => now);
+					yield* restarted.drainSideEffects();
+				}
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "failed", attempt_count: 5 }]);
+				expect(yield* sql`SELECT status FROM pending_approvals`).toEqual([
+					{ status: "pending" },
+				]);
+				expect(
+					yield* sql`SELECT type FROM events WHERE json_extract(metadata, '$.source') = 'conduit.control-reconciliation'`,
+				).toEqual([{ type: ask.type }]);
+				const restarted = yield* engine(instance, () => now);
+				for (const type of ["interrupt_turn", "end_session"] as const) {
+					yield* restarted.dispatchEffect({
+						type,
+						commandId: type,
+						sessionId: "control-session",
+						providerProcessId: "shared-process",
+					});
+				}
+				yield* ingestion.ingest({
+					...ask,
+					eventId: "provider-reask",
+					createdAt: ++now,
+				});
+				expect(yield* sql`SELECT id, status FROM pending_approvals`).toEqual([
+					{ id: prompt.id, status: "pending" },
+				]);
+				vi.mocked(reply).mockResolvedValue(undefined);
+				const replacement = { ...command, commandId: "replacement-answer" };
+				yield* restarted.dispatchEffect(replacement);
+				yield* restarted.dispatchEffect(replacement);
+				const afterRestart = yield* engine(instance, () => now);
+				yield* afterRestart.drainSideEffects();
+				expect(reply).toHaveBeenCalledTimes(6);
+				expect(yield* sql`SELECT status FROM pending_approvals`).toEqual([
+					{ status: "resolved" },
+				]);
+				expect(
+					yield* sql`SELECT command_id, status FROM command_receipts ORDER BY command_id`,
+				).toEqual([
+					{ command_id: "end_session", status: "side_effect_completed" },
+					{ command_id: "exhausted-answer", status: "side_effect_failed" },
+					{ command_id: "interrupt_turn", status: "side_effect_completed" },
+					{ command_id: "replacement-answer", status: "side_effect_completed" },
+				]);
+			}).pipe(
+				Effect.provide(fixture()),
+				Effect.provideService(
+					OpenCodeInstancesTag,
+					makeOpenCodeInstancesStub({ opencode: api }),
+				),
 			),
 		);
 	});

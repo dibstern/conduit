@@ -14,7 +14,7 @@ describe("provider control retry classification", () => {
 		[404, false],
 		[408, true],
 		[422, false],
-		[429, false],
+		[429, true],
 		[500, true],
 		[503, true],
 	])("classifies OpenCode HTTP %s as retryable=%s", (responseStatus, retryable) => {

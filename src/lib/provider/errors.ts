@@ -54,6 +54,13 @@ export class ProviderInstanceFailure extends Data.TaggedError(
 		return this.code === undefined && isTransientProviderError(this.cause);
 	}
 
+	get retryAfter(): string | undefined {
+		return this.cause instanceof ProviderInstanceFailure ||
+			this.cause instanceof OpenCodeApiError
+			? this.cause.retryAfter
+			: undefined;
+	}
+
 	get message(): string {
 		const inner =
 			this.cause instanceof Error ? this.cause.message : String(this.cause);
@@ -66,6 +73,7 @@ function isTransientProviderError(cause: unknown): boolean {
 	if (cause instanceof OpenCodeApiError)
 		return (
 			cause.responseStatus === 408 ||
+			cause.responseStatus === 429 ||
 			(cause.responseStatus >= 500 && cause.responseStatus < 600)
 		);
 	if (cause instanceof OpenCodeConnectionError) return true;
