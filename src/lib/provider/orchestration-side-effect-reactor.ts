@@ -239,6 +239,7 @@ const storeFailure =
 
 export class ProviderSideEffectReactor {
 	private readonly acceptedControls = new Set<string>();
+	private readonly executingControls = new Set<string>();
 	private recoveryPrepared = false;
 
 	registerControl(commandId: string): void {
@@ -482,71 +483,89 @@ export class ProviderSideEffectReactor {
 	): Effect.Effect<TurnResult, ProviderCommandExecutionError> {
 		// Keep claim and outcome persistence atomic with respect to interruption.
 		// Provider delivery and waiting for another claim remain interruptible.
-		return Effect.uninterruptibleMask((restore) =>
-			Effect.gen({ self: this }, function* () {
-				if (row.attempt_count >= maxControlAttempts) {
-					yield* this.recordControlOutcome(
-						row,
-						new ProviderInstanceFailure({
-							providerId: row.provider_id,
-							operation: row.effect_type,
-							cause: Object.assign(
-								new Error("Provider control attempt budget exhausted"),
-								{ code: "provider_control_attempts_exhausted" },
-							),
-						}),
-					);
-					return yield* this.durableOutcome(row.command_id);
-				}
-				const startedAt = yield* this.currentTimeMillis();
-				const claimed = yield* background
-					? this.admission.withPermit(
-							Effect.suspend(() =>
-								this.liveCommands.has(row.command_id)
-									? Effect.succeed(undefined)
-									: this.markRunning(row, startedAt),
-							),
-						)
-					: this.markRunning(row, startedAt);
-				if (!claimed) {
-					if (background) return REACTOR_COMPLETED_RESULT;
-					return yield* restore(
-						Effect.sleep(
-							this.options.outcomePollInterval ?? defaultOutcomePollInterval,
-						).pipe(Effect.andThen(this.runCommand(row.command_id))),
-					);
-				}
-				const result = yield* Effect.result(
-					restore(this.runProviderEffect(claimed)),
-				);
-				if (
-					claimed.provider_process_id !== null &&
-					result._tag === "Failure" &&
-					result.failure instanceof ProviderInstanceFailure &&
-					result.failure.code === "provider_process_gone"
-				) {
-					const retire = yield* makeRetireReplacedProcessPrompts;
-					yield* retire(null, {
-						sessionId: claimed.session_id,
-						expiredProcessId: claimed.provider_process_id,
-					}).pipe(Effect.mapError(storeFailure("retireControlProcess")));
-				}
-				const failure =
-					result._tag === "Failure"
-						? result.failure instanceof ProviderInstanceFailure
-							? result.failure
-							: new ProviderInstanceFailure({
-									providerId: claimed.provider_id,
-									operation: claimed.effect_type,
-									cause: result.failure,
-								})
-						: undefined;
-				yield* this.recordControlOutcome(claimed, failure);
-				// The request can report a delivery error while the accepted answer
-				// remains owned by the outbox for a later retry.
-				if (failure) return yield* failure;
-				return yield* this.durableOutcome(claimed.command_id);
+		return Effect.acquireUseRelease(
+			Effect.sync(() => {
+				if (this.executingControls.has(row.command_id)) return false;
+				this.executingControls.add(row.command_id);
+				return true;
 			}),
+			(acquired) => {
+				if (!acquired) return Effect.succeed(undefined);
+				return Effect.uninterruptibleMask((restore) =>
+					Effect.gen({ self: this }, function* () {
+						if (row.attempt_count >= maxControlAttempts) {
+							yield* this.recordControlOutcome(
+								row,
+								new ProviderInstanceFailure({
+									providerId: row.provider_id,
+									operation: row.effect_type,
+									cause: Object.assign(
+										new Error("Provider control attempt budget exhausted"),
+										{ code: "provider_control_attempts_exhausted" },
+									),
+								}),
+							);
+							return yield* this.durableOutcome(row.command_id);
+						}
+						const startedAt = yield* this.currentTimeMillis();
+						const claimed = yield* background
+							? this.admission.withPermit(
+									Effect.suspend(() =>
+										this.liveCommands.has(row.command_id)
+											? Effect.succeed(undefined)
+											: this.markRunning(row, startedAt),
+									),
+								)
+							: this.markRunning(row, startedAt);
+						if (!claimed) return;
+						const result = yield* Effect.result(
+							restore(this.runProviderEffect(claimed)),
+						);
+						if (
+							claimed.provider_process_id !== null &&
+							result._tag === "Failure" &&
+							result.failure instanceof ProviderInstanceFailure &&
+							result.failure.code === "provider_process_gone"
+						) {
+							const retire = yield* makeRetireReplacedProcessPrompts;
+							yield* retire(null, {
+								sessionId: claimed.session_id,
+								expiredProcessId: claimed.provider_process_id,
+							}).pipe(Effect.mapError(storeFailure("retireControlProcess")));
+						}
+						const failure =
+							result._tag === "Failure"
+								? result.failure instanceof ProviderInstanceFailure
+									? result.failure
+									: new ProviderInstanceFailure({
+											providerId: claimed.provider_id,
+											operation: claimed.effect_type,
+											cause: result.failure,
+										})
+								: undefined;
+						yield* this.recordControlOutcome(claimed, failure);
+						// The request can report a delivery error while the accepted answer
+						// remains owned by the outbox for a later retry.
+						if (failure) return yield* failure;
+						return yield* this.durableOutcome(claimed.command_id);
+					}),
+				);
+			},
+			(acquired) =>
+				Effect.sync(() => {
+					if (acquired) this.executingControls.delete(row.command_id);
+				}),
+		).pipe(
+			// Release this execution's reservation before a waiter polls again.
+			Effect.flatMap((result) =>
+				result
+					? Effect.succeed(result)
+					: background
+						? Effect.succeed(REACTOR_COMPLETED_RESULT)
+						: Effect.sleep(
+								this.options.outcomePollInterval ?? defaultOutcomePollInterval,
+							).pipe(Effect.andThen(this.runCommand(row.command_id))),
+			),
 		);
 	}
 
@@ -928,7 +947,7 @@ export class ProviderSideEffectReactor {
 				AND (status = 'pending'
 					OR (status = 'retryable_failed' AND next_attempt_at <= ${nowMs})
 					OR (status = 'running' AND effect_type <> 'send_turn' AND attempt_count >= ${maxControlAttempts}
-						AND command_id NOT IN ${this.options.sql.in([...this.acceptedControls])}))
+						AND command_id NOT IN ${this.options.sql.in([...this.executingControls])}))
 				AND NOT EXISTS (
 					SELECT 1 FROM provider_command_outbox AS earlier
 					WHERE earlier.status IN ('pending', 'running', 'retryable_failed') AND (

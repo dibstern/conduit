@@ -469,7 +469,15 @@ describe("durable control outbox scheduling", () => {
 		);
 	});
 
-	it("does not recover a current daemon's fifth control delivery while it is running", async () => {
+	it.each([
+		{ origin: "current daemon", rollback: false },
+		{ origin: "recovered", rollback: false },
+		{ origin: "current daemon", rollback: true },
+		{ origin: "recovered", rollback: true },
+	])("protects a $origin fifth control delivery across sweeps (outcome rollback: $rollback)", async ({
+		origin,
+		rollback,
+	}) => {
 		const api = makeMockOpenCodeAPI({
 			promptProcessId: "shared-process",
 			controlReplaySafe: true,
@@ -485,15 +493,17 @@ describe("durable control outbox scheduling", () => {
 						release = () => resolve(undefined);
 					}),
 			);
+		vi.mocked(api.permission.list).mockRejectedValue(
+			new OpenCodeConnectionError({ message: "reconciliation offline" }),
+		);
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				const accepting = yield* engine(
-					new OpenCodeProviderInstance({
-						client: api,
-						configDir: "/tmp/control-test-config",
-					}),
-				);
+				const instance = new OpenCodeProviderInstance({
+					client: api,
+					configDir: "/tmp/control-test-config",
+				});
+				const accepting = yield* engine(instance);
 				yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('card', 'control-session', 'permission', 'pending', 'shared-process', 'native-answer', 1)`;
 				const command = {
 					type: "resolve_permission" as const,
@@ -505,24 +515,68 @@ describe("durable control outbox scheduling", () => {
 				};
 				yield* Effect.result(accepting.dispatchEffect(command));
 				yield* sql`UPDATE provider_command_outbox SET attempt_count = 4, next_attempt_at = 0`;
-				const delivery = yield* Effect.forkChild(accepting.drainSideEffects());
+				const executor =
+					origin === "recovered" ? yield* engine(instance) : accepting;
+				const delivery = yield* Effect.forkChild(executor.drainSideEffects());
 				while (!release) yield* Effect.sleep("1 millis");
-				yield* accepting.drainSideEffects();
+				const stopping = yield* Effect.forkChild(
+					executor.dispatchEffect({
+						type: "interrupt_turn",
+						commandId: "stop-behind-fifth-answer",
+						sessionId: "control-session",
+						providerProcessId: "shared-process",
+					}),
+				);
+				while (
+					!(yield* sql`SELECT command_id FROM provider_command_outbox WHERE command_id = 'stop-behind-fifth-answer'`)
+						.length
+				)
+					yield* Effect.sleep("1 millis");
+				yield* executor.drainSideEffects();
+				yield* executor.drainSideEffects();
 				expect(
-					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox WHERE command_id = ${command.commandId}`,
 				).toEqual([{ status: "running", attempt_count: 5 }]);
-				expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
-					{ status: "side_effect_requested" },
-				]);
-				release();
-				yield* Fiber.join(delivery);
-				yield* accepting.dispatchEffect(command);
-				expect(api.permission.reply).toHaveBeenCalledTimes(2);
-				expect(
-					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
-				).toEqual([{ status: "completed", attempt_count: 5 }]);
 				expect(yield* sql`SELECT status FROM pending_approvals`).toEqual([
 					{ status: "resolved" },
+				]);
+				expect(api.session.abort).not.toHaveBeenCalled();
+				if (rollback)
+					yield* sql.unsafe(
+						`CREATE TRIGGER interrupt_outcome BEFORE UPDATE ON command_receipts WHEN NEW.command_id = 'live-fifth-answer' AND NEW.status = 'side_effect_completed' BEGIN SELECT RAISE(ABORT, 'outcome rollback'); END`,
+					);
+				release();
+				yield* Fiber.join(delivery);
+				if (rollback) {
+					expect(
+						yield* sql`SELECT status, attempt_count FROM provider_command_outbox WHERE command_id = ${command.commandId}`,
+					).toEqual([{ status: "running", attempt_count: 5 }]);
+					expect(
+						yield* sql`SELECT status FROM command_receipts WHERE command_id = ${command.commandId}`,
+					).toEqual([{ status: "side_effect_requested" }]);
+					expect(api.session.abort).not.toHaveBeenCalled();
+					yield* sql.unsafe("DROP TRIGGER interrupt_outcome");
+					// The failed commit released execution ownership. Recover the
+					// exhausted row in this process without a sixth provider call.
+					yield* executor.drainSideEffects();
+				} else yield* executor.dispatchEffect(command);
+				yield* Fiber.join(stopping);
+				yield* executor.drainSideEffects();
+				expect(api.permission.reply).toHaveBeenCalledTimes(2);
+				expect(api.session.abort).toHaveBeenCalledTimes(1);
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([
+					{ status: rollback ? "failed" : "completed", attempt_count: 5 },
+					{ status: "completed", attempt_count: 1 },
+				]);
+				expect(
+					yield* sql`SELECT status FROM command_receipts WHERE command_id = ${command.commandId}`,
+				).toEqual([
+					{ status: rollback ? "side_effect_failed" : "side_effect_completed" },
+				]);
+				expect(yield* sql`SELECT status FROM pending_approvals`).toEqual([
+					{ status: rollback ? "pending" : "resolved" },
 				]);
 			}).pipe(
 				Effect.provide(fixture()),
@@ -530,6 +584,7 @@ describe("durable control outbox scheduling", () => {
 					OpenCodeInstancesTag,
 					makeOpenCodeInstancesStub({ opencode: api }),
 				),
+				Effect.timeout("5 seconds"),
 			),
 		);
 	});
