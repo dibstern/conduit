@@ -8,6 +8,7 @@ import {
 	type ServerResponse,
 } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { Session } from "@opencode-ai/sdk/v2/types";
 import WebSocket, { WebSocketServer } from "ws";
 import type { PtyInfo } from "../../src/lib/shared-types.js";
 import type {
@@ -896,17 +897,13 @@ export class MockOpenCodeServer {
 				}
 			}
 
-			// Use queue if entries remain (consume extras, reuse last as fallback);
-			// only generate a dynamic session when the queue is completely empty.
+			// Each recorded creation owns one ID; generate fresh IDs once exhausted.
 			const sessionQueue = this.getActiveQueue(
 				this.exactQueues,
 				"POST /session",
 			);
 			if (sessionQueue && sessionQueue.length >= 1) {
-				const entry =
-					sessionQueue.length > 1
-						? (sessionQueue.shift() as QueuedRestResponse)
-						: (sessionQueue[0] as QueuedRestResponse);
+				const entry = sessionQueue.shift() as QueuedRestResponse;
 				// Apply the requested title and ensure the session appears in
 				// the GET /session fallback so subsequent list calls include it.
 				const body = { ...(entry.responseBody as Record<string, unknown>) };
@@ -921,8 +918,6 @@ export class MockOpenCodeServer {
 					this.renamedSessions.set(sessionId, title);
 				}
 				if (sessionId) {
-					// Un-delete if this ID was previously deleted (fallback reuse)
-					this.deletedSessionIds.delete(sessionId);
 					// Track this session so GET /session always includes it
 					this.injectedSessions.set(sessionId, { ...body });
 					// Also inject into fallback for consistency
@@ -941,7 +936,17 @@ export class MockOpenCodeServer {
 
 			// Generate dynamic session and inject into GET /session fallback
 			const id = `ses_mock${String(++this.sessionCounter).padStart(3, "0")}`;
-			const session = { id, title, createdAt: new Date().toISOString() };
+			const now = Date.now();
+			const session: Session = {
+				id,
+				slug: id,
+				projectID: "mock-project",
+				directory: this.defaultDirectory,
+				title,
+				version: "1.19.1",
+				time: { created: now, updated: now },
+			};
+			this.sessionDirectories.set(id, this.defaultDirectory);
 			this.injectedSessions.set(id, { ...session });
 			this.injectIntoSessionListFallback(session);
 			res.writeHead(200, { "Content-Type": "application/json" });
