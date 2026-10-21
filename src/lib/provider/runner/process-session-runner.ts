@@ -1283,8 +1283,8 @@ export const makeProcessSessionRunner = (
 							if (runnerPidAlive(registration.pid))
 								return yield* Effect.fail(failure);
 							if (!abandoned && sql && ingestion) {
-								// No runner remains current, so retire the stopped runner's prompts too.
-								yield* retireReplacedPrompts("", {
+								// No runner remains current, so retire every pending prompt in this session.
+								yield* retireReplacedPrompts(null, {
 									sessionId: registration.sessionId,
 								}).pipe(
 									Effect.mapError((cause) =>

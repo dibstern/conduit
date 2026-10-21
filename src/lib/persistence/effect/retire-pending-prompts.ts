@@ -83,13 +83,14 @@ export const makeRetireReplacedProcessPrompts = Effect.gen(function* () {
 		Option.isNone(eventStore) ||
 		Option.isNone(projector)
 	)
-		return (_currentProcessId: string, _scope: Scope) => Effect.succeed(0);
+		return (_currentProcessId: string | null, _scope: Scope) =>
+			Effect.succeed(0);
 	const context = (yield* Effect.context<never>()).pipe(
 		Context.add(SqlClient.SqlClient, sql.value),
 		Context.add(EventStoreEffectTag, eventStore.value),
 		Context.add(ProjectionRunnerEffectTag, projector.value),
 	);
-	return (currentProcessId: string, scope: Scope) =>
+	return (currentProcessId: string | null, scope: Scope) =>
 		Effect.gen(function* () {
 			const client = sql.value;
 			const rows = yield* client<{
@@ -98,8 +99,9 @@ export const makeRetireReplacedProcessPrompts = Effect.gen(function* () {
 				type: "permission" | "question";
 			}>`SELECT pa.id, pa.session_id, pa.type FROM pending_approvals pa
 				JOIN sessions s ON s.id = pa.session_id
-				WHERE pa.status = 'pending' AND pa.provider_process_id IS NOT NULL
-					AND pa.provider_process_id <> ${currentProcessId}
+				WHERE pa.status = 'pending'
+					AND (${currentProcessId} IS NULL OR (pa.provider_process_id IS NOT NULL
+						AND pa.provider_process_id <> ${currentProcessId}))
 					AND s.project_id = ${eventStore.value.projectId}
 					AND ${"sessionId" in scope ? client`pa.session_id = ${scope.sessionId}` : client`s.provider IN ${client.in(scope.providerInstanceIds)}`}`;
 			return yield* retirePendingPrompts(
