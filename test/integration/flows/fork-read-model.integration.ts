@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import { EventRetentionSchedulerTag } from "../../../src/lib/domain/persistence/Services/event-retention-scheduler.js";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { OrchestrationEngineTag } from "../../../src/lib/domain/relay/Services/services.js";
@@ -304,7 +305,10 @@ describe("Fork read-model inheritance", () => {
 		harness = undefined;
 	});
 
-	it("retains each deleted descendant's own worktree ownership after marker-only drain", async () => {
+	it.each([
+		"current",
+		"pre-snapshot",
+	] as const)("retains each deleted descendant's own worktree ownership after marker-only drain (%s)", async (storage) => {
 		harness = await createRelayHarness("chat-simple", { claudeSdk });
 		const runtime = harness.stack.effectRuntime.runtime;
 		const rootId = "ownership-root";
@@ -397,8 +401,58 @@ describe("Fork read-model inheritance", () => {
 			applySessionCommand({
 				type: "session.deleted",
 				data: { sessionId: rootId },
-			}),
+			}).pipe(
+				Effect.provideService(EventRetentionSchedulerTag, {
+					kick: Effect.void,
+				}),
+			),
 		);
+		if (storage === "pre-snapshot") {
+			await runtime.runPromise(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					yield* sql`UPDATE events SET data = json_remove(data, '$.worktreeOwnership')
+					WHERE project_id = 'integration-test' AND session_id IN (${rootId}, ${childId}, ${inherited.id})
+						AND type = 'session.deleted'
+						AND json_extract(data, '$.sessionId') = session_id`;
+				}),
+			);
+			const db = new Database(harness.eventsDbPath, { readonly: true });
+			try {
+				expect(
+					db
+						.prepare(`SELECT session_id, json_type(data, '$.worktreeOwnership') AS snapshot
+					FROM events WHERE type = 'session.deleted' ORDER BY session_id`)
+						.all(),
+				).toEqual(
+					[rootId, childId, inherited.id]
+						.sort()
+						.map((session_id) => ({ session_id, snapshot: null })),
+				);
+				expect(
+					db
+						.prepare(`SELECT session_id, json_extract(data, '$.cause') AS cause
+							FROM events WHERE type = 'session.workspace_changed'
+								AND session_id IN (?, ?) ORDER BY sequence`)
+						.all(rootId, childId),
+				).toEqual([
+					{ session_id: rootId, cause: "launch" },
+					{ session_id: childId, cause: "launch" },
+					{ session_id: rootId, cause: "branch-rename" },
+				]);
+			} finally {
+				db.close();
+			}
+			expect(
+				await runtime.runPromise(readSessionWorktreeOwnership(rootId)),
+			).toEqual([renamed]);
+			expect(
+				await runtime.runPromise(readSessionWorktreeOwnership(childId)),
+			).toEqual([childOwnership]);
+			expect(
+				await runtime.runPromise(readSessionWorktreeOwnership(inherited.id)),
+			).toEqual([]);
+		}
 		await harness.drainEventRetention();
 		const db = new Database(harness.eventsDbPath, { readonly: true });
 		try {
@@ -434,11 +488,14 @@ describe("Fork read-model inheritance", () => {
 	});
 
 	// Discovery must retain known paths without reviving older ownership authority.
-	it.each([
-		"malformed",
-		"conflict",
-		"empty",
-	] as const)("keeps historical deletion-marker paths without authorizing older ownership (%s)", async (state) => {
+	it.each(
+		(["malformed", "conflict", "empty", "null"] as const).flatMap((state) =>
+			[false, true].map((legacy) => ({ state, legacy })),
+		),
+	)("keeps historical deletion-marker paths without authorizing older ownership ($state, legacy=$legacy)", async ({
+		state,
+		legacy,
+	}) => {
 		harness = await createRelayHarness("chat-simple", { claudeSdk });
 		const runtime = harness.stack.effectRuntime.runtime;
 		const sessionId = `ownership-${state}`;
@@ -468,9 +525,13 @@ describe("Fork read-model inheritance", () => {
 					type: "session.deleted",
 					data: { sessionId },
 				});
-			}),
+			}).pipe(
+				Effect.provideService(EventRetentionSchedulerTag, {
+					kick: Effect.void,
+				}),
+			),
 		);
-		await harness.drainEventRetention();
+		if (!legacy) await harness.drainEventRetention();
 		expect(
 			await runtime.runPromise(readSessionWorktreeOwnership(sessionId)),
 		).toEqual([owned]);
@@ -479,23 +540,37 @@ describe("Fork read-model inheritance", () => {
 				? { _tag: "Owned", ownership: "invalid" }
 				: state === "conflict"
 					? { _tag: "Conflict", reason: "launch", discoveryPaths: [] }
-					: { _tag: "Owned", ownership: [], discoveryPaths: [] };
-		// Persist a newer own marker as damaged storage can leave it. Keep the
-		// canonical captured marker intact, with no surviving launch events.
-		const db = new Database(harness.eventsDbPath);
+					: state === "null"
+						? null
+						: { _tag: "Owned", ownership: [], discoveryPaths: [] };
+		const newerData = JSON.stringify({ sessionId, worktreeOwnership });
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql.withTransaction(
+					Effect.gen(function* () {
+						if (legacy)
+							yield* sql`UPDATE events SET data = json_remove(data, '$.worktreeOwnership')
+						WHERE project_id = 'integration-test' AND session_id = ${sessionId}
+							AND type = 'session.deleted' AND json_extract(data, '$.sessionId') = session_id`;
+						yield* sql`INSERT INTO events
+					(event_id, session_id, stream_version, type, data, metadata, provider, created_at, project_id)
+					SELECT event_id || '-newer', session_id, stream_version + 1, type, ${newerData}, metadata, provider, created_at + 1, project_id
+					FROM events WHERE session_id = ${sessionId} AND type = 'session.deleted'`;
+					}),
+				);
+			}),
+		);
+		await harness.drainEventRetention();
+		const db = new Database(harness.eventsDbPath, { readonly: true });
 		try {
 			expect(
 				db
-					.prepare("SELECT type FROM events WHERE session_id = ?")
+					.prepare(
+						"SELECT data FROM events WHERE session_id = ? AND event_id LIKE '%-newer'",
+					)
 					.all(sessionId),
-			).toEqual([{ type: "session.deleted" }]);
-			db.prepare(`INSERT INTO events
-					(event_id, session_id, stream_version, type, data, metadata, provider, created_at, project_id)
-					SELECT event_id || '-newer', session_id, stream_version + 1, type, ?, metadata, provider, created_at + 1, project_id
-					FROM events WHERE session_id = ? AND type = 'session.deleted'`).run(
-				JSON.stringify({ sessionId, worktreeOwnership }),
-				sessionId,
-			);
+			).toEqual([{ data: newerData }]);
 			expect(
 				db
 					.prepare("SELECT type FROM events WHERE session_id = ?")

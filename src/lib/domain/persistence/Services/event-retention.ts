@@ -1,6 +1,10 @@
 import { Context, Effect, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
+import {
+	readSessionWorktreeOwnershipSnapshot,
+	WORKTREE_CLEANUP_PATHS_SQL,
+} from "../../../persistence/effect/session-worktree-ownership.js";
 import { PersistenceProjectTag } from "./persistence-service.js";
 
 export interface DrainReport {
@@ -88,13 +92,41 @@ export const makeEventRetention = Effect.gen(function* () {
 						Effect.gen(function* () {
 							// Both read-model checks can only block deletion. The marker
 							// remains the only positive evidence that this session is dead.
-							const eligible = yield* sql`SELECT 1 FROM events
+							const eligible = yield* sql<{ missing_ownership: number }>`
+								SELECT json_type(data, '$.worktreeOwnership') IS NULL AS missing_ownership FROM events
 								WHERE project_id = ${projectId} AND session_id = ${sessionId}
 									AND type = 'session.deleted'
 									AND json_extract(data, '$.sessionId') = session_id
-									AND NOT EXISTS (SELECT 1 FROM sessions WHERE id = ${sessionId})
-								LIMIT 1`;
+									AND NOT EXISTS (SELECT 1 FROM sessions WHERE id = ${sessionId})`;
 							if (eligible.length === 0) return [];
+							if (eligible.some((marker) => marker.missing_ownership !== 0)) {
+								// Capture older markers before reclaiming their launch/rename evidence.
+								const ownership = yield* readSessionWorktreeOwnershipSnapshot(
+									projectId,
+									sessionId,
+								).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+								if (ownership) {
+									const paths = yield* sql.unsafe<{ path: string }>(
+										`SELECT DISTINCT path FROM (${WORKTREE_CLEANUP_PATHS_SQL}) WHERE session_id = ?`,
+										[projectId, sessionId],
+									);
+									const snapshot = {
+										...ownership,
+										discoveryPaths: [
+											...new Set([
+												...ownership.discoveryPaths,
+												...paths.map(({ path }) => path),
+											]),
+										],
+									};
+									yield* sql`UPDATE events
+										SET data = json_set(data, '$.worktreeOwnership', json(${JSON.stringify(snapshot)}))
+										WHERE project_id = ${projectId} AND session_id = ${sessionId}
+											AND type = 'session.deleted'
+											AND json_extract(data, '$.sessionId') = session_id
+											AND json_type(data, '$.worktreeOwnership') IS NULL`;
+								}
+							}
 							const holding = yield* holders(sessionId);
 							const bound = Math.max(0, ...holding.map((row) => row.bound));
 							return yield* sql<{ sequence: number; bytes: number }>`

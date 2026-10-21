@@ -49,7 +49,12 @@ canonical launch ownership and authorized branch renames, legacy folder/path
 evidence, or a refusal state, each with its discovery paths. Capture this for
 each session inside the deletion transaction before cascade. It preserves the
 existing deferred checkout policy without retaining conversation, title, setup
-output or workspace history. Markers already drained without this metadata cannot recover lost ownership.
+output or workspace history. Before reclaiming history for older own markers,
+drain captures their still-available ownership in the same transaction as its
+first deletion batch. Present snapshots remain authoritative, including empty
+ownership or refusal. Backfilled markers also keep known discovery paths from
+the remaining history without granting ownership to those paths. Markers already drained without this metadata cannot
+recover lost ownership.
 
 `session.provider_cleanup_failed` receipts also remain queryable audit data.
 They are excluded consistently from reclamation candidates, reclaimability
