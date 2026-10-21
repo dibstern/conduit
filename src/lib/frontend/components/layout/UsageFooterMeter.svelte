@@ -2,11 +2,14 @@
 	import SheetChrome from "../ui/SheetChrome.svelte";
 	import { flushSync } from "svelte";
 	import type { UsageReading, UsageWindow } from "../../../contracts/limit-recovery.js";
+	import { getProviderDriver } from "../../../contracts/provider-instance.js";
 	import { DISMISS_FRACTION, dragToDismiss, FLICK_PX_PER_MS, placeSheet } from "../../actions/drag-to-dismiss.js";
-	import { getInstanceById } from "../../stores/instance.svelte.js";
+	import { applyInstanceListResponse, getInstanceById } from "../../stores/instance.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import { composerAccountId, orderedUsageAccounts, usageState } from "../../stores/usage.svelte.js";
 	import { usageDisplay } from "../../utils/continuation.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import AccountDot from "../ui/AccountDot.svelte";
 	import Dialog from "../ui/Dialog.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -21,12 +24,12 @@
 	const windowLabels = { five_hour: "5h", seven_day: "Week", month: "Month" } as const;
 	type WindowKind = keyof typeof windowLabels;
 	const kinds: readonly WindowKind[] = ["five_hour", "seven_day", "month"];
-	const defaultAccount = $derived(composerAccountId(sessionState.currentId ? findSession(sessionState.currentId) : undefined));
+	const currentAccount = $derived(composerAccountId(sessionState.currentId ? findSession(sessionState.currentId) : undefined));
 	const accounts = $derived(orderedUsageAccounts());
 	// The phone docks the current account's row and any account that needs attention; the sheet has the rest.
 	const docked = $derived.by(() => {
 		const shown = accounts.filter((reading) => {
-			if (reading.accountId === defaultAccount) return true;
+			if (reading.accountId === currentAccount) return true;
 			const { level } = usageDisplay(reading, usageState.limits.warnAt);
 			return level === "warn" || level === "limited";
 		});
@@ -42,6 +45,19 @@
 	let pull: { startY: number; lastY: number; lastTime: number; velocity: number; rising: boolean } | undefined;
 	// A pull ends in a click on the dock, which must not reopen a sheet the release put away.
 	let swallowClick = false;
+	let defaultSaving = $state(false);
+
+	async function makeDefault(instanceId: string) {
+		if (defaultSaving || getInstanceById(instanceId)?.isDefault) return;
+		defaultSaving = true;
+		try {
+			applyInstanceListResponse(await rpc("SetDefault", { instanceId }));
+		} catch (error: unknown) {
+			toastFailure("Failed to change default account", "warn")(error);
+		} finally {
+			defaultSaving = false;
+		}
+	}
 
 	// The sheet folds into the dock rather than off screen: at its lowest, its top meets the dock's.
 	function dockOffset() {
@@ -113,6 +129,12 @@
 	}
 </script>
 
+{#snippet defaultMarker(prefix: string, accountId: string)}
+	{#if getInstanceById(accountId)?.isDefault}
+		<span data-testid="{prefix}-default-{accountId}" class="shrink-0 text-text-muted" title="Default account" aria-label="Default account"><Icon name="star" size={10} /></span>
+	{/if}
+{/snippet}
+
 {#snippet cell(prefix: string, reading: UsageReading, kind: WindowKind, layout = "")}
 	{@const window = reading.windows.find((window) => window.kind === kind)}
 	{@const display = window && !reading.stale && reading.status !== "unknown" && reading.status !== "unavailable" ? displayWindow(reading, window) : undefined}
@@ -139,7 +161,7 @@
 {#snippet meter(rows: readonly UsageReading[], prefix: "usage-footer" | "usage-sheet", size: "sidebar" | "phone", continues?: string)}
 	{@const rowClass = "account-row px-[6px]"}
 	{#each groupsOf(rows) as group, groupIndex (group.harness)}
-		<div data-testid="{prefix}-group-{group.harness}" class="w-full {groupIndex > 0 ? 'mt-[6px]' : ''}">
+		<div data-testid="{prefix}-group-{group.harness}" class="meter-group w-full {groupIndex > 0 ? 'mt-[6px]' : ''}">
 			{#if group.harness !== continues && (size === "sidebar" || prefix === "usage-sheet")}
 				<div class="{rowClass} grid items-center gap-[6px] text-text-muted {size === 'sidebar' ? 'h-[22px] text-[11.5px]' : 'h-[28px] text-[12.5px]'}">
 					<span data-testid="{prefix}-heading-{group.harness}" class="font-semibold text-text-secondary">{harnessLabels[group.harness]}</span>
@@ -149,16 +171,30 @@
 				</div>
 			{/if}
 			{#each group.rows as reading (reading.accountId)}
-				{@const isDefault = reading.accountId === defaultAccount}
-				<div data-testid="{prefix}-row-{reading.accountId}" data-default={isDefault} title={isDefault ? "Current account" : undefined} class="{rowClass} grid items-center gap-[6px] rounded-[7px] {prefix === 'usage-sheet' ? 'h-[34px] text-[14px]' : size === 'phone' ? 'h-[30px] text-[13px]' : 'h-[24px] text-[12px]'} {isDefault ? 'bg-chip' : ''}">
+				<!-- data-default retains the current-account highlight; the star uses the instance's isDefault. -->
+				{@const isDefault = reading.accountId === currentAccount}
+				{@const accountName = getInstanceById(reading.accountId)?.name ?? reading.accountId}
+				{@const interactive = size === "sidebar" || prefix === "usage-sheet"}
+				{@const canSelect = interactive && getProviderDriver(getInstanceById(reading.accountId)?.driver)?.defaultAccountSource === "selection"}
+				{#snippet rowContent()}
 					<span class="flex min-w-0 items-center gap-[6px]">
 						<AccountDot instanceId={reading.accountId} size={7} data-testid="{prefix}-dot-{reading.accountId}" />
-						<span data-testid="{prefix}-name-{reading.accountId}" class="min-w-0 truncate {isDefault ? 'text-text' : 'text-text-secondary'}">{getInstanceById(reading.accountId)?.name ?? reading.accountId}</span>
+						<span data-testid="{prefix}-name-{reading.accountId}" class="min-w-0 truncate {isDefault ? 'text-text' : 'text-text-secondary'}">{accountName}</span>
+						{@render defaultMarker(prefix, reading.accountId)}
 					</span>
 					{#each group.columns as kind, index (kind)}
 						{@render cell(prefix, reading, kind, group.columns.length === 1 ? 'spanning-window' : index === 1 ? 'second-window' : '')}
 					{/each}
-				</div>
+				{/snippet}
+				{#if canSelect}
+					<TextButton tone="inherit" data-testid="{prefix}-row-{reading.accountId}" data-default={isDefault} title={isDefault ? "Current account" : undefined} aria-label="Make {accountName} the default {harnessLabels[group.harness]} account" onclick={() => makeDefault(reading.accountId)} class="{rowClass} grid w-full items-center gap-[6px] rounded-[7px] text-left {prefix === 'usage-sheet' ? 'h-[34px] text-[14px]' : size === 'phone' ? 'h-[30px] text-[13px]' : 'h-[24px] text-[12px]'} {isDefault ? 'bg-chip' : ''}">
+						{@render rowContent()}
+					</TextButton>
+				{:else}
+					<div data-testid="{prefix}-row-{reading.accountId}" data-default={isDefault} title={isDefault ? "Current account" : undefined} class="{rowClass} grid w-full items-center gap-[6px] rounded-[7px] text-left {prefix === 'usage-sheet' ? 'h-[34px] text-[14px]' : size === 'phone' ? 'h-[30px] text-[13px]' : 'h-[24px] text-[12px]'} {isDefault ? 'bg-chip' : ''}">
+						{@render rowContent()}
+					</div>
+				{/if}
 			{/each}
 		</div>
 	{/each}
@@ -246,16 +282,19 @@
 			</SheetChrome>
 		</div>
 	</Dialog>
-{:else if single}
-	<TextButton tone="inherit" data-testid="usage-footer-meter" aria-label="Open Usage settings" onclick={() => openSettings("usage")} class="shrink-0 border-t border-border-subtle px-[8px] pt-[8px] pb-[10px] text-left text-[11.5px]">
-		<div data-testid="usage-footer-single" class="flex h-[26px] items-center gap-[8px] whitespace-nowrap px-[6px] text-[11.5px]">
-			{@render singleLine(`usage-footer-column-${single.harness}`)}
-		</div>
-	</TextButton>
-{:else if accounts.length > 1}
-	<TextButton tone="inherit" data-testid="usage-footer-meter" aria-label="Open Usage settings" onclick={() => openSettings("usage")} class="flex shrink-0 flex-col border-t border-border-subtle px-[8px] pt-[8px] pb-[10px] text-left text-[12px]">
-		{@render meter(accounts, "usage-footer", "sidebar")}
-	</TextButton>
+{:else if single || accounts.length > 1}
+	<div data-testid="usage-footer-meter" class="flex shrink-0 flex-col border-t border-border-subtle px-[8px] pt-[8px] pb-[10px] text-left text-[12px]">
+		{#if single}
+			<!-- A lone account is already its harness default, so the row is not a button. -->
+			<div data-testid="usage-footer-single" class="flex h-[26px] items-center gap-[8px] whitespace-nowrap px-[6px] text-[11.5px]">
+				{@render singleLine(`usage-footer-column-${single.harness}`)}
+				{@render defaultMarker("usage-footer", single.accountId)}
+			</div>
+		{:else}
+			{@render meter(accounts, "usage-footer", "sidebar")}
+		{/if}
+		<TextButton tone="accent" data-testid="usage-footer-settings" onclick={() => openSettings("usage")} class="mt-[6px] self-end px-[6px] text-[11.5px]">Usage settings ›</TextButton>
+	</div>
 {/if}
 
 <style>
@@ -265,7 +304,8 @@
 		padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
 	}
 
-	.account-row {
+	/* Rows can be TextButtons, whose root misses this component's scoped class. */
+	.meter-group :global(.account-row) {
 		grid-template-columns: minmax(0, 1fr) 66px 62px;
 	}
 
@@ -288,7 +328,7 @@
 	}
 
 	@container sidebar (width < 210px) {
-		.account-row {
+		.meter-group :global(.account-row) {
 			grid-template-columns: minmax(0, 1fr) 66px;
 		}
 		.second-window {

@@ -1344,7 +1344,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 		name: "click the desktop footer to open Usage",
 		match: /^I click the desktop usage footer$/,
 		run: async ({ world }) => {
-			await world.page.getByTestId("usage-footer-meter").click();
+			await world.page.getByTestId("usage-footer-settings").click();
 		},
 	},
 	{

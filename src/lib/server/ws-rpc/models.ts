@@ -10,8 +10,10 @@ import * as Failure from "../../effect/failure-classification.js";
 import { switchContextWindowForSession } from "../../handlers/context-window.js";
 import {
 	getModelsResponse,
+	getTitleGenerationForRelay,
 	setDefaultModelForRelay,
 	setHarnessDefaultForRelay,
+	setTitleGenerationForRelay,
 	switchModelForSession,
 	switchVariantForSession,
 } from "../../handlers/model.js";
@@ -162,6 +164,23 @@ export const modelsHandlers = {
 				),
 			),
 		),
+	GetTitleGeneration: (request) =>
+		getTitleGenerationForRelay.pipe(
+			Effect.map((state) => ({
+				projectSlug: request.projectSlug,
+				...state,
+			})),
+		),
+	SetTitleGeneration: (request) =>
+		setTitleGenerationForRelay(request.selection).pipe(
+			Effect.map((state) => ({
+				projectSlug: request.projectSlug,
+				...state,
+			})),
+			Effect.catch((error) =>
+				Effect.fail(new WsRpcError({ message: error.message })),
+			),
+		),
 	SwitchVariant: (request) =>
 		Effect.flatMap(ConfigTag, (config) =>
 			switchVariantForSession({
@@ -213,6 +232,8 @@ export const modelsHandlers = {
 	| "SwitchModel"
 	| "SetDefaultModel"
 	| "SetHarnessDefault"
+	| "GetTitleGeneration"
+	| "SetTitleGeneration"
 	| "SwitchVariant"
 	| "GetModels"
 >;

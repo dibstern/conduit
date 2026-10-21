@@ -1,0 +1,68 @@
+{
+	"modelId": "liquid/lfm-2.5-2.6b:free",
+	"cost": {
+		"input": 0,
+		"output": 0,
+		"cache": {
+			"read": 0,
+			"write": 0
+		}
+	},
+	"hasTitleAgent": true,
+	"text": "Fix login redirect loop",
+	"status": 200,
+	"error": {
+		"parentID": "msg_159cd3dd9001Hpn6PJ1ib2QB7F",
+		"role": "assistant",
+		"mode": "title",
+		"agent": "title",
+		"variant": "",
+		"path": {
+			"cwd": "/private/tmp/conduit-title-wire-ALNZia/conduit-config/text-generation/run-capture",
+			"root": "/"
+		},
+		"cost": 0,
+		"tokens": {
+			"total": 872,
+			"input": 670,
+			"output": 0,
+			"reasoning": 214,
+			"cache": {
+				"write": 0,
+				"read": 7
+			}
+		},
+		"modelID": "liquid/lfm-2.5-2.6b:free",
+		"providerID": "openrouter",
+		"time": {
+			"created": 1792507985512,
+			"completed": 1792508028172
+		},
+		"finish": "stop",
+		"id": "msg_159cd3e68001Pqt44lO4Mix7F7",
+		"sessionID": "ses_ea632c26dffe6TyHa54bnyuvi0"
+	},
+	"deleted": {
+		"status": 200,
+		"body": true
+	},
+	"afterDelete": {
+		"status": 404,
+		"body": {
+			"name": "NotFoundError",
+			"data": {
+				"message": "Session not found: ses_ea632c26dffe6TyHa54bnyuvi0"
+			}
+		}
+	},
+	"projectSessions": {
+		"status": 200,
+		"body": []
+	},
+	"root": "/private/tmp/conduit-title-wire-ALNZia",
+	"scratch": "/private/tmp/conduit-title-wire-ALNZia/conduit-config/text-generation/run-capture",
+	"project": "/private/tmp/conduit-title-wire-ALNZia/project",
+	"providerRequests": 1,
+	"projectReceivedScratch": false,
+	"sentinelInProviderRequest": false
+}

@@ -167,3 +167,38 @@ Examples:
   | Codex    | Personal | usage-footer-hidden-codex-phone   | 98        |
   | Claude   | Work     | usage-footer-hidden-claude-phone  | 98        |
   | Cursor   | Team     | usage-footer-hidden-cursor-phone  | 98        |
+
+Scenario: sheet account buttons change the default and the untouched draft follows
+  Given the usage footer has several accounts with an unknown Claude reading
+  When I tap back to the session list
+  And I open the phone usage sheet
+  Then the phone sheet marks claude as default instead of work
+  And the phone sheet row chatgpt is not a button
+  When I make claude the default from the phone sheet
+  Then the meter has sent 0 SetDefault requests for claude
+  When I make work the default from the phone sheet
+  Then the meter has sent 1 SetDefault requests for work
+  And the phone sheet marks work as default instead of claude
+  And the usage sheet row work is the highlighted current account
+  When I make work the default from the phone sheet
+  Then the meter has sent 1 SetDefault requests for work
+  When I tap Settings in the usage sheet
+  Then the usage sheet is closed and Usage settings are open
+
+Scenario: a failed sheet default change shows a toast
+  Given the usage footer has several accounts with an unknown Claude reading
+  When I tap back to the session list
+  And I open the phone usage sheet
+  Given changing the usage meter default fails
+  When I make work the default from the phone sheet
+  Then the usage meter default failure toast is visible
+  And the phone sheet marks claude as default instead of work
+
+Scenario: a Cursor sheet button changes only its harness default
+  Given the usage footer has a Claude account and a hidden Cursor account named Team
+  When I tap back to the session list
+  And I open the phone usage sheet
+  And I make hidden the default from the phone sheet
+  Then the meter has sent 1 SetDefault requests for hidden
+  And the phone sheet marks hidden as default
+  And the phone sheet marks claude as default

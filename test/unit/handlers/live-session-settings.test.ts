@@ -27,6 +27,7 @@ function makeClaudeInstance(
 ): ProviderInstance {
 	return {
 		providerId: "claude",
+		generateTextEffect: () => Effect.die("not used"),
 		applyLiveSettingsEffect,
 		discoverEffect: () => Effect.die("not used"),
 		sendTurnEffect: () => Effect.die("not used"),

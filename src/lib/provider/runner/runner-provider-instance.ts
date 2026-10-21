@@ -86,6 +86,7 @@ export interface RunnerDriverPieces {
 		options?: { readonly refresh?: boolean },
 		call?: ProviderCall,
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure>;
+	readonly generateTextEffect: ProviderInstance["generateTextEffect"];
 	prepareTurnEffect(
 		input: SessionTurn,
 	): Effect.Effect<PreparedTurn, ProviderInstanceFailure>;
@@ -313,6 +314,12 @@ export class RunnerProviderInstance implements ProviderInstance {
 		call?: ProviderCall,
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
 		return this.driver.discoverEffect(workspaceRoot, account, options, call);
+	}
+
+	generateTextEffect(
+		input: Parameters<ProviderInstance["generateTextEffect"]>[0],
+	): Effect.Effect<string, ProviderInstanceFailure> {
+		return this.driver.generateTextEffect(input);
 	}
 
 	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
