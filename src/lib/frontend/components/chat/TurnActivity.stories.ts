@@ -56,9 +56,9 @@ export const Settled: Story = {
 			],
 			[
 				parts.find((part) => part.type === "tool" && part.name === "Read"),
-				"--color-seg",
+				"--color-act-explore",
 			],
-			[parts.find((part) => part.type === "thinking"), "--color-seg-dim"],
+			[parts.find((part) => part.type === "thinking"), "--color-act-thinking"],
 		] as const;
 		for (const [part, token] of paints) {
 			if (!part) throw new Error(`Missing fixture for ${token}`);
@@ -93,6 +93,22 @@ export const Expanded: Story = {
 		await expect(
 			canvasElement.querySelector(".step-log .turn-meta"),
 		).toBeVisible();
+		const colours = new Set<string>();
+		for (const part of settledSegment.activity) {
+			if (part.type === "system") continue;
+			const segment = canvasElement.querySelector(
+				`[data-step-id="${part.uuid}"]`,
+			);
+			const icon = canvasElement.querySelector(
+				`[data-part="${part.uuid}"] button > span:first-child`,
+			);
+			if (!segment || !icon)
+				throw new Error(`Missing activity paint for ${part.uuid}`);
+			const colour = getComputedStyle(segment).backgroundColor;
+			await expect(getComputedStyle(icon).color).toBe(colour);
+			colours.add(colour);
+		}
+		await expect(colours.size).toBeGreaterThanOrEqual(6);
 	},
 };
 

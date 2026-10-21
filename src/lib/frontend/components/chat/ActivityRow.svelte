@@ -27,7 +27,7 @@
 	import { selection } from "../../stores/selection.svelte.js";
 	import { openTask } from "../session/background-tasks.svelte.js";
 	import type { BackgroundTask } from "../../../shared-types.js";
-	import { partStyle } from "./activity-style.js";
+	import { partStyle, segmentAppearance } from "./activity-style.js";
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import SkillDoc from "./SkillDoc.svelte";
 	import ToolFullDetail from "./ToolFullDetail.svelte";
@@ -40,6 +40,7 @@
 		highlight = false,
 		messageNumber,
 		live = false,
+		runningTasks = new Set<string>(),
 	}: {
 		part: ActivityPart;
 		liveTasks: readonly BackgroundTask[];
@@ -48,11 +49,15 @@
 		highlight?: boolean;
 		messageNumber?: number | undefined;
 		live?: boolean;
+		/** Shared with the strip so status overrides use the same snapshot. */
+		runningTasks?: ReadonlySet<string>;
 	} = $props();
 
 	let expanded = $state(false);
 
 	const style = $derived(partStyle(part));
+	const iconTone = $derived(segmentAppearance(part, runningTasks).tone);
+	const iconColor = $derived(iconTone === "fail" ? "text-seg-fail" : iconTone === "live" ? "text-accent" : style.text);
 	const meta = $derived(duration === undefined ? "" : fmtDuration(duration));
 	// A step that launched a background task tracks that task. Foreground tasks
 	// stay ordinary steps.
@@ -124,7 +129,7 @@
 					expanded = !expanded;
 				}}
 			>
-				<span class="shrink-0 text-text-dimmer">
+				<span class="shrink-0 {iconColor}">
 					<Icon name={style.icon} size={14} />
 				</span>
 				<span class="tool-name shrink-0 font-normal text-text-muted">
@@ -200,7 +205,7 @@
 {:else if part.type === "thinking"}
 	<div class="thinking-block thinking-item" class:done={part.done} data-part={part.uuid}>
 		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" aria-expanded={expanded} onclick={() => (expanded = !expanded)}>
-			<span class="shrink-0 text-text-dimmer">
+			<span class="shrink-0 {style.text}">
 				<Icon name={style.icon} size={14} />
 			</span>
 			<span class="thinking-label shrink-0 font-medium text-text-secondary">{part.done ? "Thought" : thinkingVerb(part)}</span>
@@ -237,8 +242,8 @@
 {:else}
 	<div data-part={part.uuid} data-message-number={messageNumber} data-highlighted={highlight || undefined}>
 		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" class={highlight ? "bg-selection" : ""} aria-expanded={expanded} onclick={() => (expanded = !expanded)}>
-			{#if messageNumber !== undefined}<span class="shrink-0 font-mono text-mono-xs text-text-dimmer">#{messageNumber}</span>
-			{:else}<span class="shrink-0 text-text-dimmer"><Icon name={style.icon} size={14} /></span>{/if}
+			{#if messageNumber !== undefined}<span class="shrink-0 font-mono text-mono-xs {style.text}">#{messageNumber}</span>
+			{:else}<span class="shrink-0 {style.text}"><Icon name={style.icon} size={14} /></span>{/if}
 			<span class="flex-1 truncate italic text-text-secondary">{firstLine(part.rawText, 120)}</span>
 			{#if meta}<span class="shrink-0 font-mono text-mono-time text-text-dimmer">{meta}</span>{/if}
 		</Button>
