@@ -754,9 +754,13 @@ Object.assign(ClaudeDriver, { create: deps => {
 			// Keep CLI smart-default discovery on a reachable, fixture-owned endpoint.
 			const server = createHttpServer(async (request, response) => {
 				const path = request.url?.split("?")[0];
-				const gate = join(this.root, "opencode-path-gated");
-				if (path === "/path" && existsSync(gate)) {
-					writeFileSync(`${gate}-started`, request.url ?? "/path");
+				const gate = join(this.root, "opencode-event-gated");
+				if (
+					request.method === "GET" &&
+					path === "/global/event" &&
+					existsSync(gate)
+				) {
+					writeFileSync(`${gate}-started`, request.url ?? "/global/event");
 					while (!existsSync(`${gate}-release`) && !response.destroyed)
 						await new Promise<void>((done) => setTimeout(done, 10));
 					if (response.destroyed) return;
@@ -1895,8 +1899,9 @@ Object.assign(ClaudeDriver, { create: deps => {
 			const signalSaveGate = join(this.root, "signal-config-rename-gated");
 			if (existsSync(signalSaveGate))
 				writeFileSync(`${signalSaveGate}-release`, "cleanup");
-			const pathGate = join(this.root, "opencode-path-gated");
-			if (existsSync(pathGate)) writeFileSync(`${pathGate}-release`, "cleanup");
+			const eventGate = join(this.root, "opencode-event-gated");
+			if (existsSync(eventGate))
+				writeFileSync(`${eventGate}-release`, "cleanup");
 			if (this.blockCapabilitiesProbe) {
 				writeFileSync(join(this.root, "capabilities-probe-release"), "release");
 				writeFileSync(
