@@ -33,8 +33,8 @@ import {
 	HashMap,
 	HashSet,
 	Layer,
+	Option,
 	Ref,
-	Result,
 	type Scope,
 	Semaphore,
 } from "effect";
@@ -49,6 +49,9 @@ import {
 	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,
 } from "../../daemon/config-persistence.js";
+import { makeAccountResourceScopesLive } from "../../domain/daemon/Layers/account-resource-scopes-layer.js";
+import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
+import { AccountResourceScopesTag } from "../../domain/daemon/Services/account-resource-scopes.js";
 import type { ClaudeOneShotQueryFactory } from "../../domain/daemon/Services/claude-one-shot.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { createLogger } from "../../logger.js";
@@ -68,6 +71,7 @@ import type { LiveSettings, RunnerPayload } from "../runner/runner-payload.js";
 import {
 	makeRunnerProviderInstance,
 	type RunnerProviderInstance,
+	type RunnerProviderInstanceDeps,
 } from "../runner/runner-provider-instance.js";
 import type { RunnerSinkBindings } from "../runner/runner-sink-bindings.js";
 import type { SessionTurn } from "../runner/session-runner.js";
@@ -91,11 +95,12 @@ import type {
 	SendTurnInput,
 	TurnResult,
 } from "../types.js";
-import { claudeApiModelId } from "./claude-api-model-id.js";
 import {
-	type ClaudeCapabilitiesService,
-	makeClaudeCapabilitiesService,
-} from "./claude-capabilities-service.js";
+	ClaudeAccountScopes,
+	makeClaudeAccountScopes,
+} from "./claude-account-scopes.js";
+import { claudeApiModelId } from "./claude-api-model-id.js";
+import type { ClaudeCapabilitiesService } from "./claude-capabilities-service.js";
 import { isInterruptedResult } from "./claude-event-translator.js";
 import { makeClaudeForkQuery } from "./claude-fork-query.js";
 import {
@@ -194,6 +199,7 @@ import type {
 	CanUseTool,
 	ClaudeSendTurnInput,
 	ClaudeSessionContext,
+	ClaudeSessionController,
 	ClaudeThreadReadInput,
 	ClaudeThreadReadResult,
 	PromptQueueController,
@@ -277,6 +283,7 @@ export type ClaudeSessionRunnerDeps = Pick<
 	| "capabilitiesService"
 	| "readGoalStatus"
 > & {
+	readonly accountResources?: RunnerProviderInstanceDeps["accountResources"];
 	readonly onSubagentFinalizationComplete?: () => void;
 	readonly onTurnStateChanged?: (sessionId: string, inFlight: boolean) => void;
 	readonly onAbandonedRun?: (inputId: string) => void;
@@ -318,42 +325,95 @@ export const makeClaudeProviderRuntime = (
 	deps: ClaudeProviderInstanceDeps,
 ): Effect.Effect<RunnerProviderInstance, never, Scope.Scope> =>
 	Effect.gen(function* () {
-		const capabilitiesService =
-			deps.capabilitiesService ??
-			(yield* makeClaudeCapabilitiesService({
-				...(deps.daemonConfigDir !== undefined
-					? {
-							cacheDir: join(
-								deps.daemonConfigDir,
-								"cache",
-								"claude-capabilities",
-							),
-						}
-					: {}),
-				launchConfig: () =>
-					resolveClaudeLaunchConfig(
-						Result.getOrElse(
-							loadDaemonConfigResult(deps.daemonConfigDir),
-							(error) => {
-								if (error._tag === "NotFound") return null;
-								throw error;
-							},
+		const directory = yield* Effect.serviceOption(AccountDirectory);
+		const accounts = Option.isSome(directory)
+			? directory.value.snapshot
+			: Effect.suspend(() =>
+					Effect.fromResult(loadDaemonConfigResult(deps.daemonConfigDir)),
+				).pipe(
+					Effect.catchTag("NotFound", () =>
+						Effect.succeed(defaultDaemonConfig()),
+					),
+					Effect.map((config) =>
+						accountsStateFromConfig(
+							config,
+							captureClaudeLaunchLogin(process.env),
 						),
 					),
-			}));
-		const driver = makeClaudeRunnerDriver({ ...deps, capabilitiesService });
-		const accounts = Effect.suspend(() =>
-			Effect.fromResult(loadDaemonConfigResult(deps.daemonConfigDir)),
-		).pipe(
-			Effect.catchTag("NotFound", () => Effect.succeed(defaultDaemonConfig())),
-			Effect.map((config) =>
-				accountsStateFromConfig(config, captureClaudeLaunchLogin(process.env)),
-			),
-		);
+				);
+		const shared = yield* Effect.serviceOption(ClaudeAccountScopes);
+		const sharedOwner = yield* Effect.serviceOption(AccountResourceScopesTag);
+		const owner = Option.isSome(sharedOwner)
+			? sharedOwner.value
+			: Context.get(
+					yield* Layer.build(makeAccountResourceScopesLive()),
+					AccountResourceScopesTag,
+				);
+		const accountScopes = Option.isSome(shared)
+			? shared.value
+			: yield* makeClaudeAccountScopes({
+					accounts,
+					...(Option.isNone(directory)
+						? { trustAdmission: true as const }
+						: {}),
+					...(deps.daemonConfigDir !== undefined
+						? {
+								cacheDir: join(
+									deps.daemonConfigDir,
+									"cache",
+									"claude-capabilities",
+								),
+							}
+						: {}),
+					...(deps.capabilitiesService
+						? { capabilitiesService: deps.capabilitiesService }
+						: {}),
+				}).pipe(Effect.provideService(AccountResourceScopesTag, owner));
+		const capabilitiesService: ClaudeCapabilitiesService =
+			deps.capabilitiesService ?? {
+				get: (workspaceRoot, options) => {
+					const call = options?.call;
+					return call
+						? accountScopes.use(call.account, ({ account, capabilities }) =>
+								capabilities.get(workspaceRoot, {
+									...options,
+									call: { ...call, account },
+								}),
+							)
+						: Effect.fail(
+								new ClaudeBoundaryError({
+									operation: "probeCapabilities",
+									cause: new Error(
+										"Claude capabilities require an admitted call",
+									),
+								}),
+							);
+				},
+			};
+		const driver = makeClaudeRunnerDriver(deps, accountScopes);
+		const accountResources: NonNullable<
+			RunnerProviderInstanceDeps["accountResources"]
+		> = {
+			use: (account, work) =>
+				accountScopes
+					.use(account, (resource) => work(resource.account))
+					.pipe(
+						Effect.mapError((cause) =>
+							cause instanceof ClaudeBoundaryError
+								? new ProviderInstanceFailure({
+										providerId: "claude",
+										operation: "accountScope",
+										cause,
+									})
+								: cause,
+						),
+					),
+		};
 		return yield* makeRunnerProviderInstance(
 			{
 				...deps,
 				accounts,
+				accountResources,
 				...(deps.ensureClaudeSubagentSession
 					? { ensureChildSession: deps.ensureClaudeSubagentSession }
 					: {}),
@@ -364,7 +424,7 @@ export const makeClaudeProviderRuntime = (
 			driver,
 			(emit) =>
 				(deps.runnerFactory ?? makeProcessClaudeSessionRunner)(
-					{ ...deps, capabilitiesService },
+					{ ...deps, capabilitiesService, accountResources },
 					emit,
 				),
 		);
@@ -392,29 +452,6 @@ export const makeClaudeSessionRunner = (
 						void,
 						never
 					>();
-					const capabilitiesService =
-						deps.capabilitiesService ??
-						(yield* makeClaudeCapabilitiesService({
-							...(deps.daemonConfigDir !== undefined
-								? {
-										cacheDir: join(
-											deps.daemonConfigDir,
-											"cache",
-											"claude-capabilities",
-										),
-									}
-								: {}),
-							launchConfig: () =>
-								resolveClaudeLaunchConfig(
-									Result.getOrElse(
-										loadDaemonConfigResult(deps.daemonConfigDir),
-										(error) => {
-											if (error._tag === "NotFound") return null;
-											throw error;
-										},
-									),
-								),
-						}));
 					const warmedQueries = yield* makeClaudeWarmedQueryOwner(
 						deps.queryFactory ??
 							(sdkQuery as NonNullable<
@@ -425,7 +462,7 @@ export const makeClaudeSessionRunner = (
 						deps.onNativeSessionId,
 					);
 					payload = new ClaudeRunnerPayload(
-						{ ...deps, capabilitiesService },
+						deps,
 						stateRef,
 						streamFibers,
 						subagentFinalizationFibers,
@@ -486,6 +523,7 @@ function sessionFailure(operation: string, cause: unknown): SessionFailure {
 class ClaudeRunnerPayload implements RunnerPayload {
 	readonly providerId = "claude";
 	private readonly endingOwnership = new WeakSet<ClaudeSessionContext>();
+	private readonly controllers = new Map<string, ClaudeSessionController>();
 	private readonly turnSettings = new WeakMap<
 		EventSink,
 		Settings | undefined
@@ -533,6 +571,18 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			return (
 				(yield* getSetupLock(this.stateRef, sessionId)) !== undefined ||
 				(yield* hasPendingTurn(this.stateRef, sessionId))
+			);
+		});
+	}
+	hasDemandEffect(sessionId: string): Effect.Effect<boolean> {
+		return Effect.gen({ self: this }, function* () {
+			const ctx = yield* getSession(this.stateRef, sessionId);
+			return (
+				(yield* this.hasActiveTurnsEffect(sessionId)) ||
+				(ctx?.liveBackgroundTaskCount ?? 0) > 0 ||
+				(ctx?.pendingApprovals.size ?? 0) > 0 ||
+				(ctx?.pendingQuestions.size ?? 0) > 0 ||
+				this.hasPendingSubagentFinalizers(sessionId)
 			);
 		});
 	}
@@ -953,7 +1003,8 @@ class ClaudeRunnerPayload implements RunnerPayload {
 									input.sessionId,
 									input.goalState,
 								))
-							: new ClaudeGoalTracker(input.sessionId, input.goalState);
+							: (this.controllers.get(input.sessionId)?.goalTracker ??
+								new ClaudeGoalTracker(input.sessionId, input.goalState));
 						const goalChange = tracker.pause(asError(err).message);
 						if (goalChange) {
 							// The pause write must never replace the send's original failure.
@@ -1023,18 +1074,30 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					existingCtx.workspaceStartReported,
 				);
 			} else if (
+				existingCtx?.rebinding &&
+				!(yield* hasPendingTurn(this.stateRef, sessionId))
+			) {
+				// The server's fresh-native retry replaces the rejected query while
+				// retaining this session's facts, just like an account rebind.
+				return yield* this.rebindSessionEffect(existingCtx, input);
+			} else if (
 				existingCtx &&
 				!sameClaudeLogin(
-					{ configDir: existingCtx.configDir, root: existingCtx.workspaceRoot },
-					{ configDir: input.configDir, root: input.workspaceRoot },
+					existingCtx.login ?? {
+						configDir: existingCtx.configDir,
+						root: existingCtx.workspaceRoot,
+						instanceId: existingCtx.instanceId,
+					},
+					{
+						...input,
+						root: input.workspaceRoot,
+						shellEnv:
+							input.shellEnv ?? this.deps.shellEnv?.(input.workspaceRoot),
+					},
 				) &&
 				!(yield* hasPendingTurn(this.stateRef, sessionId))
 			) {
-				return yield* this.restartSessionEffect(
-					existingCtx,
-					input,
-					"Claude account folder changed",
-				);
+				return yield* this.rebindSessionEffect(existingCtx, input);
 			} else if (existingCtx && this.hasAgentChanged(existingCtx, input)) {
 				if (yield* hasPendingTurn(this.stateRef, sessionId)) {
 					return yield* Effect.fail(
@@ -1076,6 +1139,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	private createSessionAndSendTurnEffect(
 		input: ClaudeSendTurnInput,
 		workspaceStartReported = false,
+		previous?: ClaudeSessionContext,
 	): Effect.Effect<TurnResult, ClaudeAdapterError> {
 		return Effect.gen({ self: this }, function* () {
 			const { sessionId } = input;
@@ -1237,25 +1301,51 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				const resumeSessionId = options.forkSession
 					? options.sessionId
 					: options.resume;
-				const context = {
+				const controller: ClaudeSessionController = this.controllers.get(
 					sessionId,
+				) ?? {
+					goalTracker: new ClaudeGoalTracker(sessionId, input.goalState),
+					pendingApprovals: new Map(),
+					pendingQuestions: new Map(),
+					messageOwnership: createClaudeMessageOwnership({
+						childSessionIdFor: (taskId, message) =>
+							claudeSubagentSessionId({
+								parentConduitSessionId: sessionId,
+								parentClaudeSessionId: message.session_id ?? "",
+								sdkSubagentId: taskId,
+							}),
+					}),
+					messageOwnershipPermit: yield* Semaphore.make(1),
+					messageRunIds: new Map(),
+					toolRunIds: new Map(),
+					toolMessageIds: new Map(),
+					subagentTasks: new Map(),
+					subagentPollers: new Map(),
+					subagentTranscripts: new Map(),
+					failedSubagentSessions: new Set(),
+				};
+				this.controllers.set(sessionId, controller);
+				const context = {
+					...controller,
+					controller,
+					sessionId,
+					login: {
+						...input,
+						root: input.workspaceRoot,
+						shellEnv:
+							input.shellEnv ?? this.deps.shellEnv?.(input.workspaceRoot),
+					},
 					instanceId: input.instanceId ?? "claude",
 					nativeThread: launchInput.nativeThread,
 					workspaceRoot: input.workspaceRoot,
 					workspaceStartReported,
 					configDir: input.configDir,
-					goalTracker: new ClaudeGoalTracker(sessionId, input.goalState),
-					cumulativeTokens: input.cumulativeTokens ?? 0,
-					startedAt: new Date().toISOString(),
+					cumulativeTokens:
+						input.cumulativeTokens ?? previous?.cumulativeTokens ?? 0,
+					startedAt: previous?.startedAt ?? new Date().toISOString(),
 					promptQueue: queue,
 					turnAdmissionSemaphore,
-					pendingApprovals: new Map(),
-					pendingQuestions: new Map(),
 					inFlightTools: new Map(),
-					subagentTasks: new Map(),
-					subagentPollers: new Map(),
-					subagentTranscripts: new Map(),
-					failedSubagentSessions: new Set<string>(),
 					eventSink: input.eventSink,
 					currentTurnId: input.inputId,
 					currentUserMessageId:
@@ -1276,7 +1366,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					settingsOutOfSync: false,
 					resumeSessionId,
 					lastAssistantUuid: undefined,
-					turnCount: 0,
+					turnCount: previous?.turnCount ?? 0,
 					stopped: false,
 				};
 
@@ -1338,16 +1428,6 @@ class ClaudeRunnerPayload implements RunnerPayload {
 									resolve(input.workspaceRoot, input.configDir.path),
 								),
 				};
-				const ownershipContext = ctx;
-				ctx.messageOwnership = createClaudeMessageOwnership({
-					childSessionIdFor: (taskId, message) =>
-						claudeSubagentSessionId({
-							parentConduitSessionId: ownershipContext.sessionId,
-							parentClaudeSessionId:
-								ownershipContext.resumeSessionId ?? message.session_id ?? "",
-							sdkSubagentId: taskId,
-						}),
-				});
 				warmed?.bindContext(ctx);
 				if (warmed) yield* admitPrompt;
 
@@ -1821,6 +1901,40 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		});
 	}
 
+	private rebindSessionEffect(
+		ctx: ClaudeSessionContext,
+		input: ClaudeSendTurnInput,
+	): Effect.Effect<TurnResult, ClaudeAdapterError> {
+		return Effect.gen({ self: this }, function* () {
+			if (
+				ctx.turnInFlight ||
+				(ctx.liveBackgroundTaskCount ?? 0) > 0 ||
+				ctx.pendingApprovals.size > 0 ||
+				ctx.pendingQuestions.size > 0 ||
+				this.hasPendingSubagentFinalizers(ctx.sessionId)
+			)
+				return yield* Effect.fail(
+					new ClaudeRuntimeError({
+						message: "Cannot rebind a busy Claude query",
+					}),
+				);
+			yield* FiberMap.remove(this.shutdownFibers, ctx.sessionId);
+			ctx.rebinding = true;
+			ctx.stopped = true;
+			yield* ctx.promptQueue.close().pipe(Effect.ignore);
+			yield* Effect.try(() => ctx.query.close()).pipe(Effect.ignore);
+			// Join the old consumer before opening the new query. Old SDK callbacks
+			// keep their stopped context and can never borrow the next query's run.
+			yield* FiberMap.remove(this.streamFibers, ctx.sessionId);
+			yield* this.removeSessionEffect(ctx.sessionId);
+			return yield* this.createSessionAndSendTurnEffect(
+				input,
+				ctx.workspaceStartReported,
+				ctx,
+			);
+		});
+	}
+
 	private restartSessionEffect(
 		ctx: ClaudeSessionContext,
 		input: ClaudeSendTurnInput,
@@ -1962,6 +2076,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				) {
 					ctx.resumeSessionId = undefined;
 					ctx.pendingSyntheticMessages = undefined;
+					ctx.rebinding = true;
 					ctx.turnInFlight = false;
 					this.deps.onTurnStateChanged?.(ctx.sessionId, false);
 					yield* settleUnacceptedResultEffect(
@@ -2444,8 +2559,10 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	): Effect.Effect<void> {
 		return Effect.suspend(() => {
 			// Stop and the stream finalizer can both end the same query.
-			if (this.endingOwnership.has(ctx)) return Effect.void;
+			if (ctx.rebinding || this.endingOwnership.has(ctx)) return Effect.void;
 			this.endingOwnership.add(ctx);
+			if (this.controllers.get(ctx.sessionId) === ctx.controller)
+				this.controllers.delete(ctx.sessionId);
 			return this.runSubagentFinalizationEffect(
 				ctx,
 				endClaudeMessageOwnershipEffect(this.deps, ctx),
@@ -2472,6 +2589,9 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					`Session ${ctx.sessionId}: stale resume cursor cleared after: ${errMsg}`,
 				);
 				if (ctx.resumeFallbackAllowed || isClaudeResumeRefused(err)) {
+					// Native resume fallback replaces an unopened query, not its
+					// session controller or already observed goal/message facts.
+					ctx.rebinding = true;
 					ctx.turnInFlight = false;
 					this.deps.onTurnStateChanged?.(ctx.sessionId, false);
 					return yield* resolveIntakeErrorEffect(this.stateRef, ctx, err);
@@ -2936,6 +3056,9 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		reason: string,
 	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen({ self: this }, function* () {
+			// Explicit disposal ends the controller even after a resumable query
+			// failure left its context waiting for the next send.
+			ctx.rebinding = false;
 			yield* this.cleanupSessionEffect(ctx, reason, true);
 
 			yield* settlePendingIntakesEffect(this.stateRef, ctx.sessionId, reason);
@@ -2968,7 +3091,11 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			yield* FiberMap.remove(this.shutdownFibers, sessionId);
 			yield* this.warmedQueries.discardEffect(sessionId);
 			const ctx = yield* getSession(this.stateRef, sessionId);
-			if (!ctx) return; // idempotent
+			if (!ctx) {
+				// Query creation can fail after a rebind has detached the old one.
+				this.controllers.delete(sessionId);
+				return;
+			}
 			log.info(`Ending Claude session: ${sessionId}`);
 			yield* this.disposeSessionEffect(ctx, "Session ended (reload)");
 		});
@@ -3000,6 +3127,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			yield* Ref.set(this.stateRef, emptyClaudeProviderRuntimeState());
 			yield* FiberMap.clear(this.streamFibers);
 			yield* FiberMap.clear(this.subagentFinalizationFibers);
+			this.controllers.clear();
 		});
 	}
 

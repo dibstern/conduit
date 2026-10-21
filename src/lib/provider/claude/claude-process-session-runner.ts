@@ -15,6 +15,7 @@ export const makeProcessClaudeSessionRunner = (
 ) =>
 	makeProcessSessionRunner(deps, emit, {
 		driverKind: "claude",
+		admitsRecoveredSends: true,
 		connect: (options) =>
 			connectClaudeRunner({
 				...options,
@@ -58,11 +59,13 @@ export const makeProcessClaudeSessionRunner = (
 		sameAccountLogin: (a, b) =>
 			sameClaudeLogin(
 				{
+					...a,
 					root: a.root,
 					configDir: normalizeClaudeLaunchInput({ configDir: a.configDir })
 						.configDir,
 				},
 				{
+					...b,
 					root: b.root,
 					configDir: normalizeClaudeLaunchInput({ configDir: b.configDir })
 						.configDir,
@@ -76,6 +79,9 @@ export const makeProcessClaudeSessionRunner = (
 			closing,
 			liveSession,
 			resolveSinkId,
+			_replayTurn,
+			sendTurn,
+			admitReplay,
 		) =>
 			recoverClaudeRunnerCommands(
 				sql,
@@ -86,5 +92,7 @@ export const makeProcessClaudeSessionRunner = (
 				deps,
 				liveSession,
 				resolveSinkId,
+				sendTurn,
+				admitReplay,
 			),
 	});

@@ -38,6 +38,7 @@ import * as Failure from "../../../effect/failure-classification.js";
 import { ENV, resolveTraceConfig } from "../../../env.js";
 import { startContentionMetrics } from "../../../persistence/contention-metrics.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
+import { ClaudeAccountScopesLive } from "../../../provider/claude/claude-account-scopes.js";
 import {
 	type ClaudeConfigDir,
 	captureClaudeLaunchLogin,
@@ -826,7 +827,11 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	);
 
 	const effectSnapshotLayer = ConfigSnapshotFromEffectStateLive.pipe(
-		Layer.provideMerge(registryState),
+		Layer.provideMerge(
+			ClaudeAccountScopesLive(configDir).pipe(
+				Layer.provideMerge(registryState),
+			),
+		),
 	);
 
 	const withConfigPersistence = ConfigPersistenceLive.pipe(

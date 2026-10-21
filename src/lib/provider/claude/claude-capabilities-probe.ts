@@ -99,6 +99,7 @@ export interface ProbeResult {
 }
 
 export interface ProbeDeps {
+	readonly signal?: AbortSignal;
 	readonly workspaceRoot: string;
 	readonly extraFolders?: readonly string[];
 	readonly configDir: ClaudeConfigDir;
@@ -238,6 +239,9 @@ export async function probeClaudeCapabilities(
 
 	const queryFactory = deps.queryFactory ?? sdkQuery;
 	const abortController = new AbortController();
+	const abort = () => abortController.abort();
+	deps.signal?.addEventListener("abort", abort, { once: true });
+	if (deps.signal?.aborted) abort();
 
 	try {
 		const options = {
@@ -310,6 +314,7 @@ export async function probeClaudeCapabilities(
 			agents,
 		};
 	} finally {
+		deps.signal?.removeEventListener("abort", abort);
 		if (!abortController.signal.aborted) {
 			abortController.abort();
 		}

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
 	Deferred,
 	Effect,
@@ -140,6 +141,12 @@ export interface RunnerRecoveryDependencies {
 }
 
 export interface RunnerProviderInstanceDeps {
+	readonly accountResources?: {
+		readonly use: <A, E, R>(
+			account: Account,
+			work: (account: Account) => Effect.Effect<A, E, R>,
+		) => Effect.Effect<A, E | ProviderInstanceFailure, R>;
+	};
 	readonly workspaceRoot: string;
 	readonly accounts: Effect.Effect<AccountsState, DaemonConfigLoadError>;
 	readonly daemonConfigDir?: string;
@@ -175,6 +182,7 @@ export const makeRunnerProviderInstance = (
 			void,
 			ProviderInstanceFailure
 		>();
+		const accountResourceFibers = yield* FiberMap.make<string, void, never>();
 		let instance: RunnerProviderInstance | undefined;
 		const dispose = yield* Effect.cached(
 			Effect.suspend(() => (instance ? instance.disposeEffect() : Effect.void)),
@@ -192,6 +200,7 @@ export const makeRunnerProviderInstance = (
 			abortFibers,
 			interactionFibers,
 			preWarmFibers,
+			accountResourceFibers,
 			providerScope,
 			shutdown,
 		);
@@ -301,6 +310,24 @@ export class RunnerProviderInstance implements ProviderInstance {
 				);
 			}
 			const accounts = yield* this.deps.accounts;
+			for (const sessionId of claimed) {
+				if (sessionIds && !sessionIds.has(sessionId)) continue;
+				const native = yield* this.runner.getNativeSessionEffect?.(sessionId) ??
+					Effect.succeed(undefined);
+				const account = accounts.accounts.find(
+					(account) => account.id === native?.instanceId,
+				);
+				if (
+					account &&
+					(yield* this.runner.hasDemandEffect?.(sessionId) ??
+						Effect.succeed(false))
+				)
+					yield* this.withAccountResources(
+						account,
+						sessionId,
+						() => Effect.void,
+					);
+			}
 			yield* settleUnclaimedRunnerCommands(
 				sql,
 				claimed,
@@ -370,6 +397,11 @@ export class RunnerProviderInstance implements ProviderInstance {
 			string,
 			void,
 			ProviderInstanceFailure
+		>,
+		private readonly accountResourceFibers: FiberMap.FiberMap<
+			string,
+			void,
+			never
 		>,
 		private readonly providerScope: Scope.Scope,
 		private readonly shutdown: Effect.Effect<void, ProviderInstanceFailure>,
@@ -463,6 +495,97 @@ export class RunnerProviderInstance implements ProviderInstance {
 	}
 
 	sendTurnEffect(
+		input: SendTurnInput,
+	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
+		return input.account
+			? this.withAccountResources(
+					input.account,
+					input.sessionId,
+					(account) => this.sendTurnUnscopedEffect({ ...input, account }),
+					runnerSinkId(
+						input.inputId,
+						input.commandAttempt,
+						input.nativeResumeFallback,
+					),
+				)
+			: this.sendTurnUnscopedEffect(input);
+	}
+
+	private withAccountResources<A>(
+		admitted: Account,
+		sessionId: string,
+		operation: (account: Account) => Effect.Effect<A, ProviderInstanceFailure>,
+		sinkId?: string,
+	): Effect.Effect<A, ProviderInstanceFailure> {
+		const resources = this.deps.accountResources;
+		if (!resources) return operation(admitted);
+		return Effect.uninterruptibleMask((restore) =>
+			Effect.gen({ self: this }, function* () {
+				const reply = yield* Deferred.make<A, ProviderInstanceFailure>();
+				let callerCancelled = false;
+				const work = resources
+					.use(admitted, (account) =>
+						Effect.gen({ self: this }, function* () {
+							const result = yield* operation(account);
+							yield* Deferred.succeed(reply, result);
+							// Intake can precede the end of the native turn by hours. The runner's
+							// quiescence also counts questions, approvals and background finalizers.
+							while (
+								yield* this.runner.hasDemandEffect?.(sessionId) ??
+									Effect.succeed(false)
+							) {
+								const native = yield* this.runner.getNativeSessionEffect?.(
+									sessionId,
+								) ?? Effect.succeed(undefined);
+								if (native && native.instanceId !== admitted.id) break;
+								yield* Effect.sleep("25 millis");
+							}
+						}),
+					)
+					.pipe(
+						Effect.onInterrupt(() =>
+							Effect.gen({ self: this }, function* () {
+								if (this.detachingInteractions) return;
+								if (sinkId)
+									yield* this.runner
+										.executeEffect({ type: "abort", sinkId })
+										.pipe(Effect.ignore);
+								const native = yield* this.runner.getNativeSessionEffect?.(
+									sessionId,
+								) ?? Effect.succeed(undefined);
+								if (
+									!callerCancelled &&
+									(native?.instanceId === admitted.id || (!native && !sinkId))
+								)
+									yield* this.runner
+										.executeEffect({ type: "end-session", sessionId })
+										.pipe(Effect.ignore);
+							}),
+						),
+						Effect.onExit((exit) =>
+							Exit.isFailure(exit)
+								? Deferred.failCause(reply, exit.cause)
+								: Effect.void,
+						),
+						Effect.catchCause(() => Effect.void),
+					);
+				const fiber = yield* FiberMap.run(
+					this.accountResourceFibers,
+					randomUUID(),
+					Effect.interruptible(work),
+				);
+				return yield* restore(Deferred.await(reply)).pipe(
+					Effect.onInterrupt(() =>
+						Effect.sync(() => {
+							callerCancelled = true;
+						}).pipe(Effect.andThen(Fiber.interrupt(fiber))),
+					),
+				);
+			}),
+		);
+	}
+
+	private sendTurnUnscopedEffect(
 		input: SendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
 		const {
@@ -563,10 +686,16 @@ export class RunnerProviderInstance implements ProviderInstance {
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		const prepare = this.driver.preparePreWarmEffect;
 		if (!prepare) return Effect.void;
-		const preWarm = Effect.gen({ self: this }, function* () {
-			const command = yield* prepare(input, this.providerScope);
-			if (command) yield* this.commandEffect(command);
-		});
+		const warm = (input: PreWarmSessionInput) =>
+			Effect.gen({ self: this }, function* () {
+				const command = yield* prepare(input, this.providerScope);
+				if (command) yield* this.commandEffect(command);
+			});
+		const preWarm = input.account
+			? this.withAccountResources(input.account, input.sessionId, (account) =>
+					warm({ ...input, account }),
+				)
+			: warm(input);
 		return Effect.uninterruptibleMask((restore) =>
 			Effect.gen({ self: this }, function* () {
 				const runPreWarm = yield* FiberMap.runtime(this.preWarmFibers)();

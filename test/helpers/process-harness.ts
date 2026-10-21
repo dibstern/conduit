@@ -308,10 +308,16 @@ export class ProcessHarness {
 					commands: [],
 				}),
 			);
+		// Server/runner instrumentation changes across restarts. Keep it out of
+		// the captured login shell env so it cannot masquerade as an account env
+		// change and reopen the SDK query that an upgrade is meant to preserve.
+		const clearTestEnv =
+			'for key in $(env | cut -d= -f1); do case "$key" in CONDUIT_TEST_*) unset "$key";; esac; done\n';
+		writeFileSync(join(this.root, "home/.profile"), clearTestEnv);
 		if (shellEnvProof)
 			writeFileSync(
 				join(this.root, "home/.zprofile"),
-				'export CONDUIT_ENV_PROOF=server-cache\nexport ANTHROPIC_API_KEY=must-remove\nexport ANTHROPIC_MODEL=must-remove\nexport PATH="/tmp/conduit-cached-env-bin:$PATH"\n',
+				`${clearTestEnv}export CONDUIT_ENV_PROOF=server-cache\nexport ANTHROPIC_API_KEY=must-remove\nexport ANTHROPIC_MODEL=must-remove\nexport PATH="/tmp/conduit-cached-env-bin:$PATH"\n`,
 			);
 		if (foregroundCli && !dist)
 			throw new Error("Foreground CLI coverage requires a build");
@@ -702,6 +708,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 					| "CONDUIT_TEST_CURSOR_CANCEL_NEVER_SETTLES"
 					| "CONDUIT_TEST_CURSOR_SEND_GATE"
 					| "CONDUIT_TEST_HOLD_RUNNER_OUTPUT"
+					| "CONDUIT_TEST_RUNNER_WITHOUT_ACCOUNT_REBIND"
 					| "CONDUIT_TEST_CURSOR_STREAM_GATE"
 					| "CONDUIT_CONTENTION_METRICS"
 					| "XPC_SERVICE_NAME"

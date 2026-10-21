@@ -50,6 +50,12 @@ export class InProcessSessionRunner implements SessionRunner {
 			this.payload.hasActiveTurnsEffect?.(sessionId) ?? Effect.succeed(false)
 		);
 	}
+	hasDemandEffect(sessionId: string): Effect.Effect<boolean> {
+		return (
+			this.payload.hasDemandEffect?.(sessionId) ??
+			this.hasActiveTurnsEffect(sessionId)
+		);
+	}
 	hasPendingSubagentFinalizers(sessionId: string): boolean {
 		return this.payload.hasPendingSubagentFinalizers?.(sessionId) ?? false;
 	}

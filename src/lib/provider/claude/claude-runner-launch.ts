@@ -44,6 +44,7 @@ import {
 import {
 	applyClaudeSdkProcessLogin,
 	makeClaudeSdkEnv,
+	sameClaudeLogin,
 } from "./claude-sdk-env.js";
 import { loadClaudeSdkTestModule } from "./claude-sdk-module.js";
 import { buildClaudeFlagSettings } from "./claude-sdk-settings.js";
@@ -334,7 +335,14 @@ export const makeClaudeRunnerLaunch = (
 			);
 		const launch: RunnerLaunch = {
 			wire: makeClaudeRunnerWire(defaultLaunchConfig),
-			capabilities: { stopsTasks: true, taggedConfigDir: true },
+			capabilities: {
+				stopsTasks: true,
+				taggedConfigDir: true,
+				...(process.env["NODE_ENV"] === "test" &&
+				process.env["CONDUIT_TEST_RUNNER_WITHOUT_ACCOUNT_REBIND"]
+					? {}
+					: { rebindsAccount: true as const }),
+			},
 			upgradeState: () => ({
 				...(snapshot ? { snapshot } : {}),
 				...(resumeSessionId ? { resumeSessionId } : {}),
@@ -497,6 +505,9 @@ export const makeClaudeRunnerLaunch = (
 						...(input.clearInheritedGoal ? { clearInheritedGoal: true } : {}),
 						...(input.model ? { model: input.model } : {}),
 						configDir: input.configDir,
+						...(input.expectedApiModelId !== undefined
+							? { expectedApiModelId: input.expectedApiModelId }
+							: {}),
 						folderSource: input.folderSource,
 						...(input.permissionMode
 							? { permissionMode: input.permissionMode }
@@ -524,9 +535,34 @@ export const makeClaudeRunnerLaunch = (
 			executeEffect: (runner, command) =>
 				Effect.gen(function* () {
 					if (
+						(command.type === "send-turn" || command.type === "pre-warm") &&
+						snapshot &&
+						launchInput &&
+						!sameClaudeLogin(
+							{ ...snapshot.input, root: snapshot.input.workspaceRoot },
+							{ ...launchInput, root: launchInput.workspaceRoot },
+						)
+					) {
+						// A hint cannot rebind a live controller. Unused warm queries can
+						// still be replaced, while a real send waits for quiescence.
+						if (
+							command.type === "pre-warm" &&
+							(yield* runner.getNativeSessionEffect?.(sessionId) ??
+								Effect.succeed(undefined))
+						)
+							return;
+						// Rebinds read the selected account's native settings and env.
+						snapshot = undefined;
+						frozenSnapshot = undefined;
+						fileSettings = undefined;
+						replayedSettings = undefined;
+					}
+					if (
 						(command.type === "pre-warm" || command.type === "send-turn") &&
 						settingsResolver &&
-						(!resumeSessionId || (frozenSnapshot && !replayedSettings))
+						(!snapshot ||
+							!resumeSessionId ||
+							(frozenSnapshot && !replayedSettings))
 					) {
 						const resolver = settingsResolver;
 						const input = normalizeClaudeLaunchInput(
@@ -545,6 +581,9 @@ export const makeClaudeRunnerLaunch = (
 							env: makeClaudeSdkEnv({
 								configDir: input.configDir,
 								baseEnv: shellEnv,
+								...(input.account?.env
+									? { accountEnv: input.account.env }
+									: {}),
 							}),
 						};
 						if (!fileSettingsPreparation)
