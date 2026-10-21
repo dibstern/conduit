@@ -215,11 +215,6 @@
 		gap: 2px;
 	}
 
-	/* Shorter active bars share the row's centre with the taller inactive bars. */
-	.split-footer :global(.effort-meter) {
-		align-items: center;
-	}
-
 	/* Centre the font's x-height on the icons, rather than its line box.
 	   Geist and Geist Mono have different baseline-to-x-height offsets. */
 	.split-footer :global(.model-label),

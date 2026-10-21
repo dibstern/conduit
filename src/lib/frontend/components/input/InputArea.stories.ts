@@ -1620,11 +1620,6 @@ export const FinalIconsDesktop: Story = {
 			const bars = [...meter.children].map((bar) =>
 				bar.getBoundingClientRect(),
 			);
-			for (const bar of bars) {
-				await expect(
-					Math.abs((bar.top + bar.bottom) / 2 - rowCentre),
-				).toBeLessThanOrEqual(0.5);
-			}
 			const centre =
 				(Math.min(...bars.map((bar) => bar.top)) +
 					Math.max(...bars.map((bar) => bar.bottom))) /
