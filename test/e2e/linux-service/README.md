@@ -22,8 +22,11 @@ port 27331. The test asserts `KillMode=process` in that generated unit.
 
 The real Claude SDK and detached session runner use a local Messages API mock
 through the user's `~/.claude/settings.json` environment block, including a
-dummy API key. Every streaming request produces 40 text deltas, one per second,
-ending with `Conduit runtime survival verified.` Non-streaming requests return
+dummy API key. Streaming requests produce 40 text deltas, one per second,
+ending with `Conduit runtime survival verified.` Marked scenario turns hold
+the open stream after three deltas until the driver writes
+`<marker>.release` in the shared artifacts directory. Unmarked streams run
+without holding. Non-streaming requests return
 a short message; other paths return a JSON 404. No SDK substitution, fixtures,
 or loader hooks are injected into the server or runners. Only the driver is
 executed with tsx, through `node node_modules/tsx/dist/cli.mjs`.
@@ -36,7 +39,7 @@ terminal and instance commands. It reads terminal scrollback with the browser's
   the server PID while retaining the runner, PTY host and counter process
   identities. The completed transcript is read back through history RPC, and a
   fresh PTY subscription contains ticks from before and after the restart.
-- **B:** SIGKILL of the server produces the same result through `Restart=always`.
+- **B:** SIGKILL of the server produces the same result through `Restart=on-failure`.
 - **Negative control:** removing `KillMode`, reloading the unit and repeating A
   must kill the active runner. The original unit is restored in `finally`.
 - **C:** a new active Claude turn, counter, PTY host and real managed OpenCode
@@ -46,8 +49,12 @@ terminal and instance commands. It reads terminal scrollback with the browser's
 
 PID evidence includes Linux process start times and cgroup membership, so a
 reused PID cannot pass and the negative control must exercise the service's
-actual cgroup. Each restart is triggered while the mock still has at least five
-seconds of output left. The driver has a ten-minute outer timeout; individual
+actual cgroup. Each disruption starts while the marked stream is held. Survival
+checks release it only after reconnection and owner checks, then require the
+same stream to finish and persist its final sentence. Mock logs record `held`
+and `released`; driver evidence records the release request. Driver cleanup
+releases pending markers without waiting for the streams, and a disconnected
+client clears its mock timer. The driver has a ten-minute outer timeout; individual
 operations have shorter deadlines.
 
 On success the host prints:

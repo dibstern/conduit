@@ -31,6 +31,7 @@ import type {
 	PermissionDecision,
 	ProviderCall,
 	ProviderCapabilities,
+	ProviderControlContext,
 	ProviderDriver,
 	ProviderInstance,
 	SendTurnInput,
@@ -511,6 +512,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		sessionId: string,
 		_turnIds?: readonly string[],
 		call?: ProviderCall,
+		_control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.resolveClientEffect(
 			sessionId,
@@ -563,6 +565,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		decision: PermissionDecision,
 		providerProcessId?: string,
 		call?: ProviderCall,
+		_control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.resolveClientEffect(
 			sessionId,
@@ -617,6 +620,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		requestId: string,
 		answers: Record<string, unknown>,
 		call?: ProviderCall,
+		_control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		const answerArrays = Object.values(answers).map((v) =>
 			Array.isArray(v) ? v.map(String) : [String(v)],
@@ -649,6 +653,8 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 	endSessionEffect(
 		_sessionId: string,
+		_call?: ProviderCall,
+		_control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return Effect.void;
 	}

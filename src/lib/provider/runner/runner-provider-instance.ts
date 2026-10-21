@@ -46,6 +46,7 @@ import type {
 	PreWarmSessionInput,
 	ProviderCall,
 	ProviderCapabilities,
+	ProviderControlContext,
 	ProviderInstance,
 	ProviderNativeSession,
 	SendTurnInput,
@@ -460,6 +461,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 		sessionId: string,
 		turnIds?: readonly string[],
 		call?: ProviderCall,
+		_control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		// A bound Stop must leave a pre-warm for a replacement turn alone.
 		return (
@@ -497,6 +499,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 		decision: PermissionDecision,
 		_providerProcessId?: string,
 		call?: ProviderCall,
+		_control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.commandEffect({
 			type: "resolve-permission",
@@ -511,6 +514,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 		requestId: string,
 		answers: Record<string, unknown>,
 		call?: ProviderCall,
+		_control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.commandEffect({
 			type: "resolve-question",
@@ -551,6 +555,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 	endSessionEffect(
 		sessionId: string,
 		call?: ProviderCall,
+		_control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return FiberMap.remove(this.preWarmFibers, sessionId).pipe(
 			Effect.andThen(

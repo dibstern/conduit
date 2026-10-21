@@ -13,14 +13,19 @@ import {
 	type StoredEvent,
 } from "../persistence/events.js";
 import { isRecord } from "../utils.js";
+import { CommandFingerprintMismatch } from "./errors.js";
 import type {
 	DurableCommandCommitPlan,
 	DurableCommandOutboxRequest,
 	DurableCommandReceiptWrite,
+	ProviderControlPayload,
 } from "./orchestration-command-contracts.js";
+import { DURABLE_COMMAND_FINGERPRINT_VERSION } from "./orchestration-command-contracts.js";
 
 export interface DurableCommandCommitInput extends DurableCommandCommitPlan {
 	readonly events: readonly CanonicalEvent[];
+	/** Controls retain their original acceptance and outbox identity forever. */
+	readonly immutable?: boolean;
 }
 
 export class DurableCommandCommitRepository {
@@ -28,6 +33,103 @@ export class DurableCommandCommitRepository {
 		private readonly sql: SqlClient.SqlClient,
 		private readonly projectId: string,
 	) {}
+
+	/** Accept a control without reserving a run or releasing an interaction. */
+	commitControl(input: {
+		readonly commandId: string;
+		readonly providerId: string;
+		readonly payload: ProviderControlPayload;
+		readonly fingerprintHash: string;
+		readonly requestSequence: number;
+		readonly nowMs: number;
+	}): ReturnType<DurableCommandCommitRepository["commit"]> {
+		const { payload, commandId, providerId, nowMs, requestSequence } = input;
+		const opts = {
+			provider: providerId,
+			createdAt: nowMs,
+			metadata: { commandId, source: "conduit.control-outbox" },
+		};
+		let event: CanonicalEvent;
+		switch (payload.type) {
+			case "interrupt_turn":
+				event = canonicalEvent(
+					"interrupt.requested",
+					payload.sessionId,
+					{
+						providerProcessId: payload.providerProcessId,
+						...(payload.turnIds ? { turnIds: payload.turnIds } : {}),
+					},
+					opts,
+				);
+				break;
+			case "end_session":
+				event = canonicalEvent(
+					"session.end_requested",
+					payload.sessionId,
+					{ providerProcessId: payload.providerProcessId },
+					opts,
+				);
+				break;
+			case "resolve_permission":
+				event = canonicalEvent(
+					"permission.resolved",
+					payload.sessionId,
+					{
+						id: payload.requestId,
+						providerProcessId: payload.providerProcessId,
+						...(payload.nativeRequestId
+							? { providerRequestId: payload.nativeRequestId }
+							: {}),
+						decision: payload.response?.decision ?? payload.decision,
+					},
+					opts,
+				);
+				break;
+			case "resolve_question":
+				event = canonicalEvent(
+					"question.resolved",
+					payload.sessionId,
+					{
+						id: payload.requestId,
+						providerProcessId: payload.providerProcessId,
+						...(payload.nativeRequestId
+							? { providerRequestId: payload.nativeRequestId }
+							: {}),
+						answers: payload.answers,
+					},
+					opts,
+				);
+				break;
+		}
+		return this.commit({
+			immutable: true,
+			events: [event],
+			receipt: {
+				commandId,
+				commandType: payload.type,
+				sessionId: payload.sessionId,
+				status: "side_effect_requested",
+				fingerprintHash: input.fingerprintHash,
+				fingerprintVersion: DURABLE_COMMAND_FINGERPRINT_VERSION,
+				acceptedSequence: requestSequence,
+				sideEffectSequence: requestSequence,
+				createdAt: nowMs,
+				updatedAt: nowMs,
+			},
+			outboxRequests: [
+				{
+					requestSequence,
+					commandId,
+					sessionId: payload.sessionId,
+					providerId,
+					providerProcessId: payload.providerProcessId,
+					effectType: payload.type,
+					payloadJson: JSON.stringify(payload),
+				},
+			],
+			readModelRows: ["provider_command_meta"],
+		});
+	}
 
 	/** Events, receipt, outbox requests and meta commit atomically or not at all. */
 	commit(
@@ -65,14 +167,34 @@ export class DurableCommandCommitRepository {
 					}),
 				);
 				const events = [...input.events];
-
+				if (input.immutable) {
+					const [existing] = yield* this.sql<{
+						fingerprint_hash: string;
+						fingerprint_version: number;
+					}>`SELECT fingerprint_hash, fingerprint_version FROM command_receipts WHERE command_id = ${input.receipt.commandId}`;
+					if (existing) {
+						if (
+							existing.fingerprint_hash !== input.receipt.fingerprintHash ||
+							existing.fingerprint_version !== input.receipt.fingerprintVersion
+						)
+							return yield* Effect.fail(
+								new CommandFingerprintMismatch({
+									commandId: input.receipt.commandId,
+								}),
+							);
+						return [];
+					}
+				}
 				yield* this.recordReceipt({
 					...input.receipt,
 					projectKey: this.projectId,
 				});
 				for (const request of input.outboxRequests) {
 					const reserved = yield* this.recordOutboxRequest(
-						{ ...request, projectKey: this.projectId },
+						{
+							...request,
+							projectKey: this.projectId,
+						},
 						input.receipt.updatedAt,
 					);
 					if (reserved) events.push(reserved);
@@ -158,11 +280,11 @@ export class DurableCommandCommitRepository {
 			yield* this.sql`
 				INSERT INTO provider_command_outbox (
 					request_sequence, command_id, project_key, session_id, provider_id,
-					effect_type, payload_json, run_id, status, attempt_count, requested_at, updated_at
+					effect_type, payload_json, run_id, provider_process_id, status, attempt_count, requested_at, updated_at
 				) VALUES (
 					${request.requestSequence}, ${request.commandId}, ${request.projectKey},
 					${request.sessionId}, ${request.providerId}, ${request.effectType},
-					${request.payloadJson}, ${runId}, 'pending', ${running?.attempt_count ?? 0}, ${updatedAt}, ${updatedAt}
+					${request.payloadJson}, ${runId}, ${request.providerProcessId ?? null}, 'pending', ${running?.attempt_count ?? 0}, ${updatedAt}, ${updatedAt}
 				)`;
 			if (!runId || running?.run_id) return;
 			const payload = yield* Effect.try({

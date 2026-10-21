@@ -399,10 +399,10 @@ async function main(): Promise<void> {
 					Effect.tap((instance) =>
 						Effect.sync(() => {
 							const endSession = instance.endSessionEffect.bind(instance);
-							instance.endSessionEffect = (sessionId) =>
+							instance.endSessionEffect = (sessionId, call, control) =>
 								Effect.suspend(() => {
 									if (!existsSync(join(root, `fail-end-session-${sessionId}`)))
-										return endSession(sessionId);
+										return endSession(sessionId, call, control);
 									appendFileSync(
 										join(root, "end-session-failures.ndjson"),
 										`${JSON.stringify({ sessionId })}\n`,

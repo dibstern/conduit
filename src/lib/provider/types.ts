@@ -49,6 +49,14 @@ export interface PermissionResponse {
 	readonly permissionUpdates?: readonly ProviderPermissionUpdate[];
 }
 
+/** Stable identity and answer data for a committed provider control. */
+export interface ProviderControlContext {
+	readonly commandId: string;
+	readonly providerProcessId: string;
+	readonly response?: PermissionResponse;
+	readonly operation?: "reply" | "reject";
+}
+
 export interface QuestionRequest {
 	readonly requestId: string;
 	readonly runId?: string;
@@ -410,6 +418,7 @@ export interface ProviderInstance {
 		sessionId: string,
 		turnIds?: readonly string[],
 		call?: ProviderCall,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure>;
 
 	/** Stop a background task while leaving the query and its input queue live. */
@@ -426,6 +435,7 @@ export interface ProviderInstance {
 		decision: PermissionDecision,
 		providerProcessId?: string,
 		call?: ProviderCall,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure>;
 
 	/** Resolve a pending question (from EventSink.requestQuestion) */
@@ -434,6 +444,7 @@ export interface ProviderInstance {
 		requestId: string,
 		answers: Record<string, unknown>,
 		call?: ProviderCall,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure>;
 
 	/**
@@ -469,6 +480,7 @@ export interface ProviderInstance {
 	endSessionEffect(
 		sessionId: string,
 		call?: ProviderCall,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure>;
 }
 

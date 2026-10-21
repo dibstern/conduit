@@ -24,7 +24,10 @@ import {
 	hasColdAutoSettleCandidate,
 	hasProviderRecoveryCandidate,
 } from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
-import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	type OpenCodeInstanceEvent,
+	OpenCodeInstancesTag,
+} from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { Usage } from "../../../src/lib/domain/daemon/Services/usage.js";
 import { readColdWorktreeCleanupCandidates } from "../../../src/lib/domain/daemon/Services/worktree-cleanup-reader.js";
 import { WorktreeServiceTag } from "../../../src/lib/domain/daemon/Services/worktree-service.js";
@@ -770,14 +773,38 @@ describe("shared-store relay project scope", () => {
 		);
 	});
 
-	it("SSE passive subscription includes only A's persisted directories", async () => {
+	it("SSE subscription scopes directories and replacement prompt retirement to A", async () => {
+		await store.runtime.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				for (const project of [A, B]) {
+					for (const owner of [null, "old-process", "current-process"]) {
+						for (const type of ["permission", "question"]) {
+							yield* sql`INSERT INTO pending_approvals (id, session_id, type, created_at, provider_process_id)
+								VALUES (${`${project}-${type}-${owner}`}, ${id(project, "workspace")}, ${type}, ${NOW}, ${owner})`;
+						}
+					}
+				}
+			}),
+		);
 		const before = daemonStoreManifest(store.filename);
 		let directories: readonly string[] = [];
 		const instances = {
 			...makeOpenCodeInstancesStub(),
 			events: (read: readonly string[] | (() => readonly string[])) => {
 				directories = typeof read === "function" ? read() : read;
-				return Stream.never;
+				return Stream.make({
+					_tag: "connected",
+					instanceId: "opencode",
+					managed: true,
+					providerProcessId: "current-process",
+					health: {
+						connected: true,
+						lastEventAt: null,
+						reconnectCount: 0,
+						stale: false,
+					},
+				} satisfies OpenCodeInstanceEvent);
 			},
 		};
 		await store.runtime.runPromise(
@@ -785,6 +812,30 @@ describe("shared-store relay project scope", () => {
 				Effect.gen(function* () {
 					const stream = yield* SSEStreamTag;
 					yield* stream.connectEffect();
+					const sql = yield* SqlClient.SqlClient;
+					yield* Effect.tryPromise(() =>
+						vi.waitFor(async () => {
+							const rows = await store.runtime.runPromise(
+								sql`SELECT type, status, provider_process_id FROM pending_approvals
+									WHERE session_id = ${id(A, "workspace")} ORDER BY type, provider_process_id`,
+							);
+							expect(rows).toEqual(
+								["permission", "question"].flatMap((type) => [
+									{ type, status: "pending", provider_process_id: null },
+									{
+										type,
+										status: "pending",
+										provider_process_id: "current-process",
+									},
+									{
+										type,
+										status: "resolved",
+										provider_process_id: "old-process",
+									},
+								]),
+							);
+						}),
+					);
 				}).pipe(
 					Effect.provide(
 						SSEStreamLive.pipe(
