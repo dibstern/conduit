@@ -837,7 +837,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const withInputDrafts = Layer.unwrap(
 		Effect.gen(function* () {
 			const store = yield* PersistenceStore;
-			yield* releaseInputDraftClaims.pipe(Effect.provide(store));
+			yield* releaseInputDraftClaims().pipe(Effect.provide(store));
 			return InputDraftsLive.pipe(Layer.provide(Layer.succeedContext(store)));
 		}),
 	).pipe(Layer.provideMerge(withSessionDirectory));

@@ -90,7 +90,7 @@ test.describe("Claude background work", () => {
 			await expect.poll(stored).toEqual({ status: "idle", turnEnds: 1 });
 			// The sidebar stream is ordered, so once the second window shows a
 			// rename made after that, it has had the idle status too.
-			await page.getByTestId("session-bar-title-menu").click();
+			await page.getByTestId("session-bar-overflow").click();
 			await page.getByTestId("session-ctx-rename").click();
 			const name = page.getByRole("textbox", { name: "Session name" });
 			await name.fill("Background shell");

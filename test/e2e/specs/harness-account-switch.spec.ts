@@ -18,6 +18,7 @@ import { formatSnoozeTime } from "../../../src/lib/frontend/utils/format.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
 import { openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
+import { closeSettings } from "../helpers/settings.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 import { PermissionPage } from "../page-objects/permission.page.js";
@@ -1272,7 +1273,7 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 						'[data-testid="quota-meter"][data-state="checking"]',
 					),
 				).toHaveCount(0);
-				await page.getByTestId("settings-close-btn").click();
+				await closeSettings(page);
 				await expect(page.locator("#settings-panel")).toBeHidden();
 			}
 			const before = proofMarks().length;
@@ -2495,10 +2496,9 @@ for (const behavior of [
 		}
 		const [source, target] = accounts;
 		if (!source || !target) throw new Error("Two accounts are required");
+		const projectDir = mkdtempSync(join(harness.root, "switch-project-"));
 		const { savedSlug: projectSlug } = await Effect.runPromise(
-			browser.rpc.SaveProject({
-				folders: [mkdtempSync(join(harness.root, "switch-project-"))],
-			}),
+			browser.rpc.SaveProject({ folders: [projectDir] }),
 		);
 		if (!projectSlug) throw new Error("No switch project slug");
 		// Project RPCs reset config persistence's debounce. Wait on disk once,
@@ -2945,12 +2945,25 @@ for (const behavior of [
 							.find((call) => call.prompt?.endsWith(forkPrompt)),
 					)
 					.toBeDefined();
-				const call = harness
+				const forkCalls = harness
 					.claudeOptions()
-					.find((call) => call.prompt?.endsWith(forkPrompt));
+					.filter((call) => call.prompt?.endsWith(forkPrompt));
+				expect(forkCalls).toHaveLength(1);
+				const call = forkCalls[0];
 				expect(call?.configDir).toBe(expectedAccount.configDir);
+				expect(call?.options).toMatchObject({
+					cwd: projectDir,
+					env: { CLAUDE_CONFIG_DIR: expectedAccount.configDir },
+				});
 				if (behavior === "fork-uncovered") {
 					expect(call?.resumeId).toBeNull();
+					for (const key of [
+						"resume",
+						"forkSession",
+						"sessionId",
+						"resumeSessionAt",
+					])
+						expect(call?.options).not.toHaveProperty(key);
 					expect(call?.prompt).toContain(handoffMarker);
 					expect(call?.prompt).toContain(first);
 					expect(call?.prompt).toContain(cutOff);

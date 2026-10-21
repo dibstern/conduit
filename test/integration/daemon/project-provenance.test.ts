@@ -257,8 +257,8 @@ describe("Project provenance through the built daemon", () => {
 					{ status: "completed", attempt_count: 1 },
 				]),
 			);
-			const beforeDelete = provenance(fixture, slug);
-			expect(beforeDelete.events).toEqual(
+			const manifest = provenance(fixture, slug);
+			expect(manifest.events).toEqual(
 				expect.arrayContaining([
 					{ type: "session.created", project_id: slug, count: 1 },
 					{ type: "permission.asked", project_id: slug, count: 1 },
@@ -273,8 +273,8 @@ describe("Project provenance through the built daemon", () => {
 					{ type: "session.deleted", project_id: slug, count: 1 },
 				]),
 			);
-			const manifest = provenance(fixture, slug);
-			for (const snapshot of [beforeDelete, manifest])
+			const afterDeletion = provenance(fixture, slug);
+			for (const snapshot of [manifest, afterDeletion])
 				for (const table of snapshot.tables)
 					for (const row of table.rows)
 						expect(row.project, table.table).toBe(slug);
@@ -297,6 +297,7 @@ describe("Project provenance through the built daemon", () => {
 			projects.push({
 				projectId: slug,
 				...manifest,
+				afterDeletion,
 				executions: {
 					send: 2,
 					approve: approvalExecutions,

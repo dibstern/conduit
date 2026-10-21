@@ -285,7 +285,7 @@ test("settled shelf shows full scoped totals across pages and live session chang
 		await shelf.click();
 		// "More" pages from the true total, not from the rows loaded so far.
 		const more = page.getByTestId("settled-shelf-more");
-		await expect(more).toHaveText("+ 257 more");
+		await expect(more).toHaveText("257 more");
 		await more.scrollIntoViewIfNeeded();
 		await expect(shelf).toBeInViewport();
 		await page.screenshot({ path: testInfo.outputPath("settled-count.png") });

@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { test as base, expect, type Page } from "@playwright/test";
 
 import { ProcessHarness } from "../../helpers/process-harness.js";
+import { closeSettings } from "../helpers/settings.js";
 import { AppPage } from "../page-objects/app.page.js";
 
 // A stand-in for the tailscale CLI, so the test never changes the real
@@ -65,17 +66,13 @@ if (process.env["CONDUIT_E2E_SINGLE_PROCESS"] === "1") {
 
 async function openServerSettings(page: Page): Promise<void> {
 	const listOverflow = page.getByTestId("list-bar-overflow");
-	const titleMenu = page.getByTestId("session-bar-title-menu");
-	const sessionOverflow = page.getByTestId("session-bar-overflow");
-	await expect(
-		listOverflow.or(titleMenu).or(sessionOverflow).first(),
-	).toBeVisible();
+	const sessionOverflow = page
+		.getByTestId("session-bar-overflow")
+		.or(page.getByTestId("session-bar-island-overflow"));
+	await expect(listOverflow.or(sessionOverflow).first()).toBeVisible();
 	if (await listOverflow.isVisible()) {
 		await listOverflow.click();
 		await page.getByTestId("list-overflow-settings").click();
-	} else if (await titleMenu.isVisible()) {
-		await titleMenu.click();
-		await page.getByTestId("session-title-settings").click();
 	} else {
 		await sessionOverflow.click();
 		await page.getByTestId("overflow-settings").click();
@@ -111,7 +108,7 @@ test("Access toggles Tailscale Serve, keeps it across a restart, and shows read-
 	expect(saved.tailscaleServe).toEqual({ url });
 
 	// Restart checks the stored choice; reload discards the browser snapshot.
-	await page.getByTestId("settings-close-btn").click();
+	await closeSettings(page);
 	await harness.shutdown();
 	await harness.restart({
 		keepPort: true,

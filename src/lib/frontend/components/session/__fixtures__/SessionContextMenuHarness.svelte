@@ -53,7 +53,7 @@
 		{presentation}
 		{now}
 		host={{ rename: () => {}, ...(selectable ? { select: () => {} } : {}) }}
-		extras={withFooter ? chromeMenuActions().map((action) => ({ ...action, testId: `session-title-${action.id}` })) : []}
+		extras={withFooter ? chromeMenuActions().map((action) => ({ ...action, testId: `overflow-${action.id}` })) : []}
 		onclose={() => {}}
 	/>
 {/if}

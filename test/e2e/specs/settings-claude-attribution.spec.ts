@@ -94,15 +94,14 @@ test("Claude Attribution collapses, expands and saves an edited part", async ({
 		new URL("/s/settings-attribution?p=e2e-replay", relayUrl).toString(),
 	);
 	const listOverflow = page.getByTestId("list-bar-overflow");
-	const titleMenu = page.getByTestId("session-bar-title-menu");
 	if (await listOverflow.isVisible()) {
 		await listOverflow.click();
 		await page.getByTestId("list-overflow-settings").click();
-	} else if (await titleMenu.isVisible()) {
-		await titleMenu.click();
-		await page.getByTestId("session-title-settings").click();
 	} else {
-		await page.getByTestId("session-bar-overflow").click();
+		await page
+			.getByTestId("session-bar-overflow")
+			.or(page.getByTestId("session-bar-island-overflow"))
+			.click();
 		await page.getByTestId("overflow-settings").click();
 	}
 	await page.getByTestId("settings-tab-claude").click();

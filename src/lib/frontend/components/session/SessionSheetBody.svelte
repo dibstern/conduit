@@ -26,7 +26,15 @@
 		now?: number;
 	} = $props();
 	const toastHost = Symbol("session-sheet");
-	const status = $derived(ATTENTION_DISPLAY[sessionAttention(header.session)]);
+	const status = $derived.by(() => {
+		const session = header.session;
+		const attention = sessionAttention(session);
+		if (attention === "needs-approval" || attention === "needs-reply" || attention === "error") return ATTENTION_DISPLAY[attention];
+		if (session.pinnedAt != null) return { glyph: { icon: "pin" }, colour: "text-status-pinned" };
+		if (isSessionSnoozed(session, now)) return { glyph: { icon: "moon" }, colour: "text-status-snoozed" };
+		if (session.settledAt != null) return { glyph: { icon: "check" }, colour: "text-success" };
+		return { glyph: { icon: "circle-dot" }, colour: session.unread ? "text-accent" : "text-text-dimmer" };
+	});
 	const activity = $derived.by(() => {
 		const { pinnedAt, settledAt, snoozedUntil, updatedAt } = header.session;
 		if (pinnedAt == null && settledAt != null) return `settled ${formatTimeAgo(settledAt, new Date(now))}`;

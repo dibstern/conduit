@@ -28,6 +28,7 @@ import {
 import { effectMigrationEntries } from "../effect/migrations.js";
 import { ProjectionRunnerEffectTag } from "../effect/projection-runner-effect.js";
 import { createAllEffectProjectors } from "../effect/projectors-effect.js";
+import { inputDraftClaimMarker } from "../input-drafts.js";
 import { daemonStorePath } from "../project-storage.js";
 
 export interface ProjectStoreSource {
@@ -917,7 +918,7 @@ function importOne(
 			"unsupported-source",
 			"Seed the daemon store before importing",
 		);
-	const db = new DatabaseSync(filename);
+	const db = new DatabaseSync(filename, { timeout: 5000 });
 	try {
 		const sharedSessions = excludeSharedSessions(copyPath, filename);
 		// Unlike better-sqlite3's default build, node:sqlite enables URI filenames.
@@ -995,6 +996,17 @@ function importOne(
 					"Translated counters exceed the safe integer range",
 				);
 			copyProject(db, project, names, offsets);
+			// Release only copied claims, before another connection can claim these rows.
+			db.prepare(`DELETE FROM main.input_drafts
+				WHERE promoted_session_id = ? AND text = ''
+				AND draft_key IN (SELECT draft_key FROM source.input_drafts)`).run(
+				inputDraftClaimMarker,
+			);
+			db.prepare(`UPDATE main.input_drafts SET promoted_session_id = NULL
+				WHERE promoted_session_id = ?
+				AND draft_key IN (SELECT draft_key FROM source.input_drafts)`).run(
+				inputDraftClaimMarker,
+			);
 			options.checkpoint?.("import-copied", project.projectId);
 			for (const table of ["events", "projection_failures"]) {
 				const target =
@@ -1515,6 +1527,37 @@ function writeReport(
 	}
 }
 
+const failed = (
+	project: ProjectStoreSource,
+	error: DaemonStoreImportError,
+): ProjectStoreImportResult => ({
+	projectId: project.projectId,
+	outcome: error.kind === "source-changed" ? "source-changed" : "failed",
+	error,
+});
+
+/**
+ * Import into an existing store and finish marker-backed archives. Live callers
+ * must reserve the destination's SQL connection for this effect's whole scope.
+ */
+export const importProjectStoreWithBackup = (
+	configDir: string,
+	project: ProjectStoreSource,
+	options: DaemonStoreImportOptions = {},
+) =>
+	Effect.gen(function* () {
+		const marked = yield* attempt(project, () =>
+			finishBackup(configDir, project, options),
+		);
+		if (marked) return marked;
+		const result = yield* importProjectStore(configDir, project, options);
+		return (
+			(yield* attempt(project, () =>
+				finishBackup(configDir, project, options, result),
+			)) ?? result
+		);
+	}).pipe(Effect.catch((error) => Effect.succeed(failed(project, error))));
+
 /** Registered sources seed first; retained sources follow without taking ownership. */
 export const importRegisteredProjectStores = (
 	configDir: string,
@@ -1524,14 +1567,6 @@ export const importRegisteredProjectStores = (
 	Effect.gen(function* () {
 		yield* Effect.sync(() => clearImportScratch(configDir, projects));
 		const results = new Map<string, ProjectStoreImportResult>();
-		const failed = (
-			project: ProjectStoreSource,
-			error: DaemonStoreImportError,
-		): ProjectStoreImportResult => ({
-			projectId: project.projectId,
-			outcome: error.kind === "source-changed" ? "source-changed" : "failed",
-			error,
-		});
 		if (!existsSync(daemonStorePath(configDir))) {
 			const sized = projects
 				.filter((project) => !project.retained)
@@ -1576,34 +1611,9 @@ export const importRegisteredProjectStores = (
 		}
 		for (const project of projects) {
 			if (results.has(project.projectId)) continue;
-			const marked = yield* attempt(project, () =>
-				finishBackup(configDir, project, options),
-			).pipe(Effect.result);
-			if (marked._tag === "Failure") {
-				results.set(project.projectId, failed(project, marked.failure));
-				continue;
-			}
-			if (marked.success) {
-				results.set(project.projectId, marked.success);
-				continue;
-			}
-			const result = yield* importProjectStore(
-				configDir,
-				project,
-				options,
-			).pipe(Effect.result);
-			if (result._tag === "Failure") {
-				results.set(project.projectId, failed(project, result.failure));
-				continue;
-			}
-			const completed = yield* attempt(project, () =>
-				finishBackup(configDir, project, options, result.success),
-			).pipe(Effect.result);
 			results.set(
 				project.projectId,
-				completed._tag === "Success"
-					? (completed.success ?? result.success)
-					: failed(project, completed.failure),
+				yield* importProjectStoreWithBackup(configDir, project, options),
 			);
 		}
 		const ordered = projects.flatMap((project) => {

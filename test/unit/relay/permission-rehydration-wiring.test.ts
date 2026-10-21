@@ -63,7 +63,7 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 			return;
 		}
 
-		// Health check
+		// Project paths
 		if (url.pathname === "/path") {
 			res.end(
 				JSON.stringify({

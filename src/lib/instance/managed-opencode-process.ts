@@ -35,16 +35,20 @@ export function publicManagedOpenCodeEnv(env?: Record<string, string>) {
 	return visible;
 }
 
-export const openCodeAuth = (env?: Record<string, string>) =>
-	env?.["OPENCODE_SERVER_PASSWORD"]
+export const openCodeAuth = (env?: Record<string, string>) => {
+	const password =
+		env?.["OPENCODE_SERVER_PASSWORD"] ??
+		process.env["OPENCODE_SERVER_PASSWORD"];
+	return password
 		? {
 				username:
-					env["OPENCODE_SERVER_USERNAME"] ??
+					env?.["OPENCODE_SERVER_USERNAME"] ??
 					process.env["OPENCODE_SERVER_USERNAME"] ??
 					"opencode",
-				password: env["OPENCODE_SERVER_PASSWORD"],
+				password,
 			}
 		: undefined;
+};
 
 export const managedOpenCodeEnv = (
 	env?: Record<string, string>,

@@ -312,6 +312,9 @@ test.describe("Picker context selection", () => {
 			"aria-checked",
 			"true",
 		);
+		await expect(
+			page.getByTestId("picker-context-option-200k"),
+		).toHaveAttribute("aria-checked", "false");
 		await expect(page.getByTestId("picker-selected-context")).toHaveText(
 			/1M \(beta\)/,
 		);

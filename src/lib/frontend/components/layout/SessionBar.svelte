@@ -13,8 +13,8 @@
   Phone geometry lives in style.css as a grid keyed on `data-collapsed`, so the
   title moves between rows without being re-parented and the <h1> never unmounts.
 
-  The desktop overflow shares the phone sheet's command body. The title menu
-  retains the session command list.
+  The desktop overflow and phone sheet share the session command list and
+  global actions.
 -->
 
 <script lang="ts">
@@ -49,7 +49,6 @@
 	import Tooltip from "../ui/Tooltip.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import Popover from "../ui/Popover.svelte";
-	import SessionContextMenu from "../session/SessionContextMenu.svelte";
 	import SessionRenameInput from "../session/SessionRenameInput.svelte";
 	import SessionSkillsChip from "../session/SessionSkillsChip.svelte";
 	import BackgroundTasksPanel from "../session/BackgroundTasksPanel.svelte";
@@ -61,6 +60,7 @@
 	import { openSideThreads, sideThreadsPanel } from "../session/side-threads.svelte.js";
 	import { getPinCommand, getPrimaryCommand, getSessionCommands, globalKeyHint, runSessionCommandShortcut, sessionCommandActions, sessionCommandKeys, sessionCommandKeysHint, type SessionCommand } from "../session/session-commands.js";
 	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
+	import { dimThemeColor } from "../../stores/theme.svelte.js";
 	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { chromeMenuActions } from "./chrome-actions.js";
 	import SessionSheetFooter from "../session/SessionSheetFooter.svelte";
@@ -272,6 +272,10 @@
 	}
 
 	let overflowOpen = $state(false);
+	$effect(() => {
+		if (sessionViewState.compact && !goalDetails.open && (tasksPanel.open || sideThreadsPanel.open)) return dimThemeColor();
+		return undefined;
+	});
 	let overflowOpener: HTMLElement | null = null;
 	// A selected phone action may open a dialog or move focus itself.
 	let overflowSelected = false;
@@ -282,15 +286,12 @@
 	}
 	let stateMenuOpen = $state(false);
 	let statePickingTime = false;
-	let titleMenuOpen = $state(false);
-	let titleMenuAnchor: HTMLElement | null = $state(null);
 	let renaming = $state(false);
 	// The two layouts anchor their menus differently, so crossing the
 	// breakpoint closes any open one rather than leaving it floating.
 	$effect(() => {
 		void sessionViewState.compact;
 		void sessionState.currentId;
-		titleMenuOpen = false;
 		stateMenuOpen = false;
 		overflowOpen = false;
 	});
@@ -302,9 +303,9 @@
 {#if goalDetails.open && detailsGoal}
 	{#if !sessionViewState.compact}<Button variant="scrim-clear" size="content" tabindex={-1} ariaLabel="Close goal details" data-testid="goal-details-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => closeGoalDetails(true)} />{/if}
 {:else if tasksPanel.open && backgroundTasks.length > 0}
-	<Button variant={sessionViewState.compact ? "scrim" : "scrim-clear"} size="content" tabindex={-1} ariaLabel="Close background tasks" data-testid="background-tasks-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => { tasksPanel.open = false; }} />
+	<Button variant={sessionViewState.compact ? "sheet-scrim" : "scrim-clear"} size="content" tabindex={-1} ariaLabel="Close background tasks" data-testid="background-tasks-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => { tasksPanel.open = false; }} />
 {:else if sideThreadsPanel.open}
-	<Button variant={sessionViewState.compact ? "scrim" : "scrim-clear"} size="content" tabindex={-1} ariaLabel="Close Side Threads" data-testid="side-threads-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => { sideThreadsPanel.open = false; }} />
+	<Button variant={sessionViewState.compact ? "sheet-scrim" : "scrim-clear"} size="content" tabindex={-1} ariaLabel="Close Side Threads" data-testid="side-threads-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => { sideThreadsPanel.open = false; }} />
 {/if}
 
 {#snippet viewCards()}
@@ -347,10 +348,10 @@
 				{...props}
 				id="session-bar-more"
 				variant="menu-trigger"
-				size={sessionViewState.compact && !collapsed ? "phone-header-icon" : "touch-pill"}
+				size={collapsed ? "touch-pill" : "phone-header-icon"}
 				icon="ellipsis"
-				iconSize={sessionViewState.compact ? 14 : 17}
-				touchTarget={sessionViewState.compact ? "always" : true}
+				iconSize={sessionViewState.compact ? 14 : 16}
+				touchTarget="always"
 				class="relative shrink-0"
 				title="More actions"
 				ariaLabel="More actions"
@@ -381,26 +382,6 @@
 
 {#snippet overflowFooter()}
 	<SessionSheetFooter extras={globalActions.map((action) => ({ ...action, testId: `overflow-${action.id}` }))} onselect={selectOverflow} />
-{/snippet}
-
-{#snippet titleMenuButton()}
-	<Button
-		variant="ghost"
-		size={sessionViewState.compact ? "phone-title-menu" : "touch-icon"}
-		touchTarget={sessionViewState.compact ? "always" : false}
-		iconOnly
-		icon="chevron-down"
-		iconSize={sessionViewState.compact ? 14 : 15}
-		class="{sessionViewState.compact ? '' : '-my-[13px]'} shrink-0"
-		ariaLabel="Session menu"
-		aria-haspopup="menu"
-		aria-expanded={titleMenuOpen}
-		data-testid="session-bar-title-menu"
-		onclick={(event) => {
-			titleMenuAnchor = event.currentTarget as HTMLElement;
-			titleMenuOpen = true;
-		}}
-	/>
 {/snippet}
 
 {#snippet goalContent()}
@@ -444,8 +425,8 @@
 {/snippet}
 
 {#snippet goalLine(props: Record<string, unknown> = {})}
-	<Button variant="ghost" size={sessionViewState.compact ? "phone-subtitle" : "subtitle"} touchTarget={sessionViewState.compact ? "always" : false} layout="block" align="start" tone={goalButtonTone} hoverFill="none" bind:element={goalSubtitleEl} data-testid="session-goal-subtitle" aria-expanded={goalDetails.open} aria-controls="goal-details" title={goal.phase === "paused" ? `${goal.subtitle} · ${goalFacts?.pausedReason}` : goal.subtitle} class={sessionViewState.compact ? "" : "mt-[2px]"} onclick={() => { tasksPanel.open = false; sideThreadsPanel.open = false; goalDetails.open = !goalDetails.open; }} {...props}>
-		<Icon name={goal.icon === "spinner" ? "loader-circle" : goal.icon} size={12} class="shrink-0 {goal.icon === 'spinner' ? 'motion-safe:animate-spin' : ''}" />
+	<Button variant="ghost" size={sessionViewState.compact ? "phone-subtitle" : "subtitle"} touchTarget={sessionViewState.compact ? "always" : false} layout="block" align="start" tone={goalButtonTone} hoverFill="none" bind:element={goalSubtitleEl} data-testid="session-goal-subtitle" aria-expanded={goalDetails.open} aria-controls="goal-details" title={goal.phase === "paused" ? `${goal.subtitle} · ${goalFacts?.pausedReason}` : goal.subtitle} class={sessionViewState.compact ? "" : "mt-[1px]"} onclick={() => { tasksPanel.open = false; sideThreadsPanel.open = false; goalDetails.open = !goalDetails.open; }} {...props}>
+		<Icon name={goal.phase === "met" ? "circle-check" : goal.icon === "spinner" ? "loader-circle" : goal.icon} size={12} class="shrink-0 {goal.icon === 'spinner' ? 'motion-safe:animate-spin' : ''}" />
 		<b class="shrink-0 font-medium">{desktopGoalLabel}</b>{" "}<span class="min-w-0 truncate text-text-secondary">· {detailsGoal?.condition}</span>
 	</Button>
 {/snippet}
@@ -469,7 +450,6 @@
 						{...props}
 						id="session-bar-settle"
 						variant={primaryCommand.emphasis === "primary" ? "capsule-primary" : "ghost"}
-						tone={primaryCommand.emphasis === "primary" ? "accent" : "secondary"}
 						size={sessionViewState.compact ? "phone-capsule-segment" : "capsule-segment"}
 						icon={primaryCommand.icon ?? "check"}
 						touchTarget={sessionViewState.compact ? "always" : true}
@@ -499,17 +479,17 @@
 	aria-label="Session controls"
 	tabindex="-1"
 	bind:this={barEl}
-	class="relative shrink-0 {sessionViewState.compact ? 'bg-bg-surface' : 'bg-bg'} border-b border-border outline-none {goalDetails.open || tasksPanel.open || sideThreadsPanel.open ? 'z-[var(--z-sheet)]' : ''}"
+	class="relative shrink-0 {sessionViewState.compact ? 'bg-bg-surface' : 'bg-bg'} border-b border-border-subtle outline-none {goalDetails.open || tasksPanel.open || sideThreadsPanel.open ? 'z-[var(--z-sheet)]' : ''}"
 >
 	<!-- The labelled pill becomes a chevron and adjacent count in the island. -->
 	{#if sessionViewState.compact || uiState.sidebarCollapsed}
 	<Button
 		id="session-bar-back"
 		variant={collapsed ? "ghost" : "chip"}
-		size={sessionViewState.compact && !collapsed ? "phone-navigation" : "navigation-pill"}
-		touchTarget={sessionViewState.compact ? "always" : false}
+		size={sessionViewState.compact ? collapsed ? "navigation-pill" : "phone-navigation" : "session-navigation"}
+		touchTarget="always"
 		icon="chevron-left"
-		iconSize={sessionViewState.compact ? 14 : 17}
+		iconSize={sessionViewState.compact ? 14 : 16}
 		class="shrink-0"
 		data-testid="session-bar-back"
 		onclick={sessionViewState.compact ? backToSessions : expandSidebar}
@@ -518,7 +498,7 @@
 		{#if attentionCount > 0}
 			<Badge
 				variant="ask-solid"
-				size={sessionViewState.compact ? "navigation-count" : "count"}
+				size="navigation-count"
 				shape="pill"
 				data-testid="session-bar-attention"
 			>
@@ -542,7 +522,7 @@
 	     Collapsed it drops a size: the row shares its width with the state
 	     glyph and two 44px controls.
 
-	     Expanded, the title chevron opens the session menu.
+	     Session actions are available from the overflow in both layouts.
 	     The collapsed row keeps its separate chevron for expanding the bar. -->
 	{#if sessionViewState.compact || session}
 	<div id="session-bar-title-row" class="flex min-w-0 flex-col justify-center">
@@ -560,7 +540,6 @@
 				<SessionRenameInput {session} onend={() => { renaming = false; }} class="min-h-[44px] md:min-h-0" />
 			{:else}<span class="block truncate">{title}</span>{/if}
 		</h1>
-		{#if !collapsed}{@render titleMenuButton()}{/if}
 		</div>
 		{#if goalShown && !sessionViewState.compact}{@render goalLine()}{/if}
 		<!-- Collapsed, the full banner strip is hidden (style.css); this line stands in. -->
@@ -569,7 +548,7 @@
 		{#if session?.unread === true && !collapsed}
 			<Menu appearance="final" ariaLabel="Unread session options" align="end" data-testid="session-bar-unread-menu">
 				{#snippet trigger({ props })}
-					<Button {...props} variant="ghost" size={sessionViewState.compact ? "phone-status" : "touch-pill"} touchTarget={sessionViewState.compact ? "always" : false} hoverFill="none" class="group {sessionViewState.compact ? '' : '-my-[13px]'} shrink-0" ariaLabel="Unread — open options" data-testid="session-bar-unread-chip">
+					<Button {...props} variant="ghost" size="phone-status" touchTarget="always" hoverFill="none" class="group shrink-0" ariaLabel="Unread — open options" data-testid="session-bar-unread-chip">
 						<Badge variant="accent" shape="pill" size="session" interactive>
 							<span class="size-[7px] shrink-0 rounded-full bg-accent" aria-hidden="true"></span>Unread
 						</Badge>
@@ -587,7 +566,7 @@
 			{:else}
 				<Menu bind:open={stateMenuOpen} onopenchange={(open) => { if (open) statePickingTime = false; }} onCloseAutoFocus={(event) => { if (statePickingTime) event.preventDefault(); }} appearance="final" ariaLabel="Session state options" align="start" class={stateChip.kind === "snoozed" && !sessionViewState.compact ? "w-[340px] max-w-[calc(100vw-16px)]" : undefined} data-testid="session-bar-state-menu">
 					{#snippet trigger({ props })}
-						<Button {...props} variant="ghost" size={sessionViewState.compact ? "phone-status" : "touch-pill"} touchTarget={sessionViewState.compact ? "always" : false} class="shrink-0" ariaLabel={`${stateChip.label} — open options`} data-testid="session-bar-state-chip" data-state={stateChip.kind}>
+						<Button {...props} variant="ghost" size="phone-status" touchTarget="always" class="shrink-0" ariaLabel={`${stateChip.label} — open options`} data-testid="session-bar-state-chip" data-state={stateChip.kind}>
 							<Badge variant={stateChip.kind === "snoozed" ? "snoozed" : stateChip.kind === "pinned" ? "pinned" : "success"} shape="pill" size="session">
 							<Icon name={stateChip.icon} size={13} class={sessionViewState.compact ? (stateChip.kind === "snoozed" ? "text-status-snoozed" : "text-success") : ""} />
 								<span class="desktop-state-label">{stateChip.label}</span>
@@ -649,9 +628,9 @@
 	{#if !sessionViewState.compact}{@render identityBlock()}{/if}
 
 	{#if !sessionViewState.compact}
-		<div id="session-bar-connection" class="flex shrink-0 items-center gap-[5px] px-[4px] text-[10px] text-text-muted">
-			<span id="status" class="status-dot size-[6px] shrink-0 rounded-full {statusClass}" title={statusTitle} role="status"><span class="sr-only">{statusTitle}</span></span>
-			<Icon name="laptop" size={13} />
+		<div id="session-bar-connection" class="flex shrink-0 items-center gap-[5px] pl-[8px] pr-[4px] font-mono text-[12px] leading-[normal] text-text-dimmer">
+			<span id="status" class="status-dot mr-[3px] size-[7px] shrink-0 rounded-full {statusClass}" title={statusTitle} role="status"><span class="sr-only">{statusTitle}</span></span>
+			<Icon name="laptop" size={14} />
 			<span id="client-count-badge" class="font-mono tabular-nums">{uiState.clientCount}</span>
 		</div>
 	{/if}
@@ -680,21 +659,6 @@
 	{#if collapsed || !sessionViewState.compact}{@render overflowMenu()}{/if}
 	{#if backgroundTasks.length > 0 && !collapsed}
 		<BackgroundTasksRow tasks={backgroundTasks} compact={sessionViewState.compact} onstop={supportsTaskStop ? (taskId) => { void stopBackgroundTasks(sessionState.currentId, taskId); } : undefined} onstopall={supportsTaskStop ? () => { void stopBackgroundTasks(sessionState.currentId); } : undefined} />
-	{/if}
-
-	{#if titleMenuOpen && titleMenuAnchor && session}
-		<SessionContextMenu
-			{session}
-			anchor={titleMenuAnchor}
-			projectLabel={project?.title ?? getCurrentSlug() ?? undefined}
-			projectAccent={getProjectAccent(session)}
-			branch={session.git?.branch}
-			presentation={sessionViewState.compact ? "sheet" : "menu"}
-			now={sessionState.now}
-			host={{ rename: () => { renaming = true; } }}
-			onclose={() => { titleMenuOpen = false; }}
-			extras={globalActions.map((action) => ({ ...action, testId: `session-title-${action.id}` }))}
-		/>
 	{/if}
 
 	{#if goalDetails.open && detailsGoal && goalFacts && !sessionViewState.compact}

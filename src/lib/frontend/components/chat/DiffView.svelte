@@ -73,38 +73,37 @@
 	}
 </script>
 
-<div class="diff-container min-w-0 overflow-hidden rounded-[8px] border border-border-subtle bg-code-bg">
+<div class="diff-container min-w-0 overflow-hidden rounded-[12px] border border-border-subtle bg-code-bg">
 	<div class="diff-filename diff-stats">
-		<CodeBlockHeader {filename} label="diff" additions={stats.additions} deletions={stats.deletions} code={newText} />
-	</div>
-
-	<!-- Toggle bar -->
-	<div class="px-[12px] py-[6px] border-b border-border-subtle">
-	<Tabs
-		bind:value={viewMode}
-		variant="pill"
-		label="Diff view mode"
-		options={[
-			{ value: "unified", label: "Unified" },
-			{ value: "split", label: "Split" },
-		]}
-	/>
+		<CodeBlockHeader {filename} label="diff" additions={stats.additions} deletions={stats.deletions} code={newText}>
+			{#snippet controls()}
+				<Tabs
+					bind:value={viewMode}
+					variant="pill"
+					label="Diff view mode"
+					options={[
+						{ value: "unified", label: "Unified" },
+						{ value: "split", label: "Split" },
+					]}
+				/>
+			{/snippet}
+		</CodeBlockHeader>
 	</div>
 
 	<!-- Unified view -->
 	{#if viewMode === "unified"}
 		<div
-			class="diff-viewer font-mono text-[12.5px] leading-[20px] overflow-x-auto py-[8px]"
+			class="diff-viewer font-mono text-mono-code leading-[20px] overflow-x-auto py-[8px]"
 		>
 			{#each ops as op (op.type + "-" + (op.oldLineNo ?? "") + "-" + (op.newLineNo ?? ""))}
 				<div class={lineClass(op.type)}>
 					<span
-						class="diff-gutter diff-gutter-old min-w-[36px] px-[8px] text-right text-text-dimmer select-none shrink-0 text-[11px] border-r border-border-subtle"
+						class="diff-gutter diff-gutter-old min-w-[36px] px-[8px] text-right text-text-dimmer select-none shrink-0 text-mono-time border-r border-border-subtle"
 					>
 						{op.type !== "add" ? (op.oldLineNo ?? "") : ""}
 					</span>
 					<span
-						class="diff-gutter diff-gutter-new min-w-[36px] px-[8px] text-right text-text-dimmer select-none shrink-0 text-[11px]"
+						class="diff-gutter diff-gutter-new min-w-[36px] px-[8px] text-right text-text-dimmer select-none shrink-0 text-mono-time"
 					>
 						{op.type !== "remove" ? (op.newLineNo ?? "") : ""}
 					</span>
@@ -118,13 +117,13 @@
 		<div
 			class="diff-split-view overflow-x-auto py-[8px]"
 		>
-		<table class="diff-table w-full font-mono text-[12.5px] leading-[20px] border-collapse">
+		<table class="diff-table w-full font-mono text-mono-code leading-[20px] border-collapse">
 			<tbody>
 			{#each splitRows as row, idx (row.type + "-" + idx)}
 				<tr class={splitRowClass(row.type)}>
 						<!-- Old side -->
 						<td
-							class="diff-ln text-right text-text-dimmer select-none px-[8px] text-[11px] w-[36px]"
+							class="diff-ln text-right text-text-dimmer select-none px-[8px] text-mono-time w-[36px]"
 						>
 							{row.oldLineNo ?? ""}
 						</td>
@@ -145,7 +144,7 @@
 
 						<!-- New side -->
 						<td
-							class="diff-ln text-right text-text-dimmer select-none px-[8px] text-[11px] w-[36px]"
+							class="diff-ln text-right text-text-dimmer select-none px-[8px] text-mono-time w-[36px]"
 						>
 							{row.newLineNo ?? ""}
 						</td>

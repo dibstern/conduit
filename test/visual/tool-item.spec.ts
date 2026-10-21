@@ -142,10 +142,12 @@ test.describe("ToolQuestionCard", () => {
 		await expect(subtitle).toBeVisible();
 		await expect(subtitle).toHaveText(/Answered/);
 
-		// Should display the answer result
-		const answerText = page.locator(".font-mono.whitespace-pre-wrap");
-		await expect(answerText).toBeVisible();
-		await expect(answerText).toHaveText(/Yes, fix it/);
+		const chosen = page.locator('.question-tool-option[data-chosen="true"]');
+		await expect(chosen).toHaveCount(1);
+		await expect(chosen.getByText("Staging", { exact: true })).toBeVisible();
+		await expect(chosen.locator(".question-chosen")).toHaveText("Chosen");
+		await expect(page.locator(".question-raw-answer")).toHaveCount(0);
+		await expect(page.getByText('["Staging"]', { exact: true })).toHaveCount(0);
 	});
 
 	test("shows skipped state", async ({ page }) => {

@@ -86,13 +86,14 @@ export const askContextHandlers: StepHandler[] = [
 			await expect(token).toContainText("#2 Ask");
 			await expect(page.locator("#input")).toBeFocused();
 			const rpc = requireRpcControl(page);
-			await rpc.waitForRequest(
+			const synced = await rpc.waitForRequest(
 				(request) =>
 					request.tag === "SyncInputDraft" &&
 					isRecord(request.payload["key"]) &&
 					request.payload["key"]["session"] === SESSION &&
 					serializeReferences(String(request.payload["text"])) === expected,
 			);
+			expect(synced.payload["key"]).toEqual({ session: SESSION });
 			expect(
 				rpc.getRequests().filter(({ tag }) => tag === "input.submit"),
 			).toHaveLength(0);

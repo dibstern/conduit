@@ -196,6 +196,45 @@ export const DropdownOpen: Story = {
 				claudeOnly,
 			);
 		}
+		const colours = ranked.map(([mode]) => {
+			const icon = within(menu)
+				.getByTestId(`permission-mode-option-${mode}`)
+				.querySelector("svg");
+			if (!icon) throw new Error(`Missing permission icon for ${mode}`);
+			return getComputedStyle(icon).color;
+		});
+		await expect(new Set(colours).size).toBe(6);
+		const selected = within(menu).getByTestId("permission-mode-option-ask");
+		await expect(getComputedStyle(menu).paddingTop).toBe("6px");
+		await expect(getComputedStyle(menu).borderRadius).toBe("16px");
+		await expect(getComputedStyle(selected).borderRadius).toBe("10px");
+		const probe = document.createElement("span");
+		probe.style.cssText =
+			"color:var(--color-text);background:color-mix(in oklab, var(--color-accent) 14%, transparent)";
+		menu.append(probe);
+		await expect(getComputedStyle(selected).color).toBe(
+			getComputedStyle(probe).color,
+		);
+		await expect(getComputedStyle(selected).backgroundColor).toBe(
+			getComputedStyle(probe).backgroundColor,
+		);
+		probe.remove();
+		const masks = new Set<string>();
+		for (const [mode] of ranked) {
+			const icon = within(menu)
+				.getByTestId(`permission-mode-option-${mode}`)
+				.querySelector("svg");
+			const body = icon?.querySelector('[data-part="body"]');
+			const mask = icon?.querySelector("mask");
+			if (!icon || !body || !mask)
+				throw new Error(`Missing filled permission icon for ${mode}`);
+			await expect(getComputedStyle(body).fill).toBe(
+				getComputedStyle(icon).color,
+			);
+			await expect(body.getAttribute("mask")).toBe(`url(#${mask.id})`);
+			masks.add(mask.id);
+		}
+		await expect(masks.size).toBe(6);
 	},
 };
 

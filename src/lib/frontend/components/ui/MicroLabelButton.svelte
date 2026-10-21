@@ -49,7 +49,7 @@
 	const labelClasses: Record<"micro" | "chip" | "words", string> = {
 		micro: "font-bold uppercase",
 		chip: "font-semibold normal-case",
-		words: "font-normal normal-case border-b border-dotted border-border-chip",
+		words: "font-normal normal-case underline decoration-dotted decoration-1 decoration-border-chip underline-offset-[4px]",
 	};
 	let initialized = false;
 	let previousPulseKey: unknown;
@@ -162,7 +162,7 @@
 	}
 
 	.micro-label-button[data-variant="words"] .micro-label {
-		font-size: 11.5px;
+		font-size: 12px;
 		line-height: normal;
 		letter-spacing: normal;
 	}

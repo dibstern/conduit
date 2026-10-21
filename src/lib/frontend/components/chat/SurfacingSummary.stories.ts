@@ -112,6 +112,12 @@ export const Stale: Story = {
 		await expect(
 			within(canvasElement).getByTestId("surfacing-summary-new"),
 		).toHaveTextContent("Summarize 2 new");
+		await expect(
+			canvasElement.querySelector(".summary-prose"),
+		).toHaveTextContent("consumers #1. The phone");
+		await expect(
+			canvasElement.querySelector(".summary-prose"),
+		).not.toHaveTextContent(/#\d+\s+[.,]/);
 	},
 };
 export const StaleLight: Story = { ...Stale, globals: { theme: "light" } };

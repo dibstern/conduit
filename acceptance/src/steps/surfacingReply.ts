@@ -397,6 +397,7 @@ export const surfacingReplyHandlers: StepHandler[] = [
 					request.payload["key"]["session"] === SESSION &&
 					String(request.payload["text"]).includes("Keep the old paint order."),
 			);
+			expect(synced.payload["key"]).toEqual({ session: SESSION });
 			const draft = synced.payload["text"];
 			expect(typeof draft).toBe("string");
 			expect(draft).not.toBe(await world.page.locator("#input").inputValue());

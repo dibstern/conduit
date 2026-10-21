@@ -49,8 +49,12 @@ canonical launch ownership and authorized branch renames, legacy folder/path
 evidence, or a refusal state, each with its discovery paths. Capture this for
 each session inside the deletion transaction before cascade. It preserves the
 existing deferred checkout policy without retaining conversation, title, setup
-output or workspace history; deletion markers remain the only retained event
-kind. Markers already drained without this metadata cannot recover lost ownership.
+output or workspace history. Markers already drained without this metadata cannot recover lost ownership.
+
+`session.provider_cleanup_failed` receipts also remain queryable audit data.
+They are excluded consistently from reclamation candidates, reclaimability
+checks and held/pointer counts. `sessionsFreed` counts touched sessions with no
+reclaimable history left; freed event and byte counts cover deleted rows only.
 
 **Born dead, checked by each writer (12A).** Every writer of
 `session.created` (session commands, the session manager, provider runtime

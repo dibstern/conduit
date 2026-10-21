@@ -702,13 +702,6 @@ export const mockAppHandlers: StepHandler[] = [
 						sessionId,
 						...mockDetailPage(page, sessionId, before),
 					}),
-					"input.submit": async ({ sessionId }) => {
-						return {
-							ok: true,
-							sessionId,
-							handedOff: true,
-						};
-					},
 					SetDefaultPermissionMode: async (payload) => ({
 						projectSlug: "myapp",
 						mode: payload["mode"],

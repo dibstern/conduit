@@ -966,7 +966,8 @@ function transcriptView(): {
 											refreshSessionSkills(sessionId);
 										if (
 											envelope._tag === "snapshot" ||
-											envelope._tag === "synchronized"
+											envelope._tag === "synchronized" ||
+											item?._tag === "pendingInput"
 										) {
 											cancelFrame();
 											install(sessionId, slot);

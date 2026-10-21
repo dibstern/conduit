@@ -1,4 +1,10 @@
 {
+	"src/lib/frontend/components/chat/QuestionCard.svelte :: mt-[2px]": "Polish B3 aligns each choice control to the label baseline, then centers it on the font x-height with an ex-based transform. The fixed 2px top margin placed controls 2.04px above the measured x-height center and is intentionally removed.",
+	"src/lib/frontend/components/chat/ToolQuestionCard.svelte :: items-start,mt-0.5": "Polish B3 replaces top-aligned circle glyphs and their fixed top margin with baseline-aligned 13px radio or checkbox indicators. An ex-based transform centers each indicator on the label x-height while preserving the row's 6px vertical padding.",
+	"src/lib/frontend/components/session/DraftItem.svelte :: draft-age": "The restyle audit cleanup replaces the duplicate Drafts Mono face and draft-age font shorthand with the app's font-mono and text-mono-xs utilities.",
+	"src/lib/frontend/components/session/SessionListRows.svelte :: draft-count": "The restyle audit cleanup replaces the draft-count font shorthand with the app's font-mono and text-mono-time utilities.",
+	"src/lib/frontend/components/session/DraftItem.svelte :: font-mono,hover:bg-sidebar-active,pointer-fine:right-[6px],pointer-fine:top-[5px],tabular-nums,text-[11px]": "conduit-test-dfuo matches approved mockup (2)(a): .draft-age owns the native-size 11px Drafts Mono face and normal line height, replacing the app's 92% adjusted font and redundant tabular setting. The discard uses sidebar-hover fill and an 8px right / 6px top inset, matching the measured mockup while retaining the fixed overlay and 44px phone target.",
+	"src/lib/frontend/components/session/SessionListRows.svelte :: hover:text-error,text-[10.5px]": "conduit-test-dfuo matches approved mockup (2)(a): .draft-count owns the native-size 10.5px Drafts Mono font shorthand. Clear all's error hover moved to tray-scoped CSS so it wins over TextButton's shared hover:text-text rule; computed dark and light colours match the reference.",
 	"src/lib/frontend/components/ui/SortableList.svelte :: md:w-[11px]": "conduit-test-m379.15: the project tree's drag handle keeps its 24px width on desktop too; 11px was too narrow to grab, and project rows now indent by the handle's width.",
 	"src/lib/frontend/components/session/DraftItem.svelte :: grid": "The Final SessionRow owns the draft link grid; the outer container positions the discard button over the time so the link fills the tray.",
 	"src/lib/frontend/components/session/DraftItem.svelte :: bg-bg-alt,gap-1.5,group-hover:bg-text/5,md:min-h-[46px],min-h-[52px],pointer-fine:right-[5px],text-base,text-sm,text-xs": "conduit-test-9ra5.9 matches the draft row to mockup (2)(a) exactly: mockup px font sizes and 1.4 line-height (48px row, still above the 44px touch floor), sidebar hover fill like session rows, 7px project dot instead of the initials chip, and the trash at the mockup's 6px inset.",
@@ -254,10 +260,6 @@
 	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: animate-pulse,bg-black/[0.04],bg-green-500/10,bg-white/[0.04],border-accent,border-t,break-all,cursor-pointer,dark:bg-white/[0.06],flex-wrap,font-mono,gap-1.5,gap-2,group-hover/cmd:opacity-100,group/cmd,hover:border-text-muted,italic,items-start,justify-center,justify-end,leading-relaxed,max-w-[10rem],mb-3,min-w-0,ml-2,ml-auto,mt-2,opacity-0,opacity-60,p-0.5,p-3,pb-3,pt-1,pt-2,pt-2.5,px-2.5,px-3,py-1,resize-y,rounded,rounded-lg,select-all,space-y-3,text-green-400,text-green-500,text-sm,tracking-wide,transition-opacity,truncate,w-36,whitespace-pre-wrap": {
 		"movedTo": "src/lib/frontend/components/overlays/InstancesSettingsTab.svelte",
 		"reason": "These class tokens moved intact to InstancesSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
-	},
-	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: bg-white/[0.08],border-border/50,px-1.5,py-0.5,space-y-1.5,text-text-dimmer": {
-		"movedTo": "src/lib/frontend/components/overlays/DebugSettingsTab.svelte",
-		"reason": "These class tokens moved intact to DebugSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
 	},
 	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: Failed": {
 		"movedTo": "src/lib/frontend/components/overlays/InstancesSettingsTab.svelte",
@@ -993,8 +995,76 @@
 		"renamedTo": "text-[8px]",
 		"reason": "conduit-test-voxy.10: remove the second 92% mono size adjustment while preserving the design's explicit 11.04px preview line height."
 	},
+	"src/lib/frontend/components/model/HarnessLogo.svelte :: accountColorClass(instanceId)": "conduit-test-b6dy: pass the ordered usage accounts to the same shared colour helper so badges retain each footer dot's collision-free group colour.",
+	"src/lib/frontend/components/ui/AccountDot.svelte :: accountColorClass(instanceId)": "conduit-test-b6dy: pass ordered usage accounts to the shared colour helper; per-group palette order replaces hash collisions while matching the composer badge.",
+	"src/lib/frontend/components/session/SessionItem.svelte :: leading-[17px]": {
+		"renamedTo": "leading-[1.5]",
+		"reason": "conduit-test-b6dy sidebar-05: the approved context line is 17.25px desktop and 18.75px phone, matching its font size times 1.5."
+	},
+	"src/lib/frontend/components/session/SessionListFilters.svelte :: md:pb-[8px]": {
+		"renamedTo": "pb-[8px]",
+		"reason": "conduit-test-b6dy sidebar-04: the approved pill-to-chip gap is 8px on phones as well as desktop."
+	},
+	"src/lib/frontend/components/session/SessionSearchField.svelte :: md:min-h-[30px]": {
+		"renamedTo": "h-[30px]",
+		"reason": "conduit-test-b6dy sidebar-04: reserve the drawn 30px field height on both viewports; Button touchTarget pseudo-elements retain 44px phone targets."
+	},
+	"src/lib/frontend/components/session/SessionSearchField.svelte :: ml-[3px],mr-[3px]": "conduit-test-b6dy sidebar-01: remove the clear button's negative overlap and outer margin. The shared pill wrapper now contains it with 6px right padding.",
+	"src/lib/frontend/components/ui/SessionRow.svelte :: px-[10px]": "conduit-test-b6dy sidebar-05: replace symmetric padding with the approved row's 10px left and 8px right padding.",
 	"src/lib/frontend/components/ui/ViewCard.svelte :: leading-[1.5]": {
 		"renamedTo": "leading-[11.04px]",
 		"reason": "conduit-test-voxy.10: keep the Final preview's 8px times 0.92 times 1.5 line height when moving mono glyph scaling solely into the font face."
+	},
+	"src/lib/frontend/components/input/InputArea.svelte :: min-h-[36px],text-border-chip": "composer-03: the approved Words row is 27px tall, with 9px top padding and 18px text. Remove the 36px floor and use text-text-dimmer for visible separators.",
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: border-border-chip,border-dotted,text-border-chip": "composer-02 and composer-03: composer-word owns the shared dotted text underline at 4px offset. Remove the competing span border and use text-text-dimmer separators.",
+	"src/lib/frontend/components/model/ModelVariant.svelte :: border-b,border-border-chip,border-dotted": "composer-02: the shared composer-word recipe owns the dotted text underline, offset and thickness; the effort span must not draw another border underline.",
+	"src/lib/frontend/components/chat/ActivityRow.svelte :: border-error/30,text-[12.5px],text-text": "transcript-15 and 16 intentionally use Final step-row typography and borderless code output; mono sizing comes from the shared scaled tokens.",
+	"src/lib/frontend/components/chat/AssistantHeader.svelte :: gap-[2px],size-[28px],text-[12px]": "transcript-02,03,04 intentionally scale mono to 92%, draw 14px/12px Claude glyphs, and place 14px action icons on 26px centers.",
+	"src/lib/frontend/components/chat/DiffView.svelte :: border-b,px-[12px],py-[6px],rounded-[8px],text-[11px],text-[12.5px]": "transcript-02 and 14 intentionally replace the separate outlined toggle band with 24px filled capsules inside the 36px header, radius 12 and 92% mono sizes.",
+	"src/lib/frontend/components/chat/MessageTime.svelte :: text-[12px]": "transcript-02 intentionally replaces nominal 12px with the shared text-mono-xs token at 11.04px.",
+	"src/lib/frontend/components/chat/QuestionCard.svelte :: flex-1,max-sm:flex-col,min-h-[44px]": "transcript-11 and 12 intentionally replace stretched 44px outlined slabs with natural-width 28px filled capsules; touchTarget always preserves 44px invisible targets.",
+	"src/lib/frontend/components/chat/SubagentBackBar.svelte :: bg-accent,bg-white/20,font-bold,gap-1,hover:opacity-85,max-md:px-2,md:inline-flex,ml-0.5,px-1,px-2.5,py-0.5,py-px,rounded,rounded-sm,text-bg,tracking-wide,tracking-wider,transition-opacity": "transcript-18 intentionally replaces the solid uppercase rectangle and filled keycap with a 28px primary capsule, Parent label and quiet Esc hint.",
+	"src/lib/frontend/components/chat/ToolFullDetail.svelte :: className,mx-2.5": "transcript-16 intentionally forwards the caller class on the containing element;22px indentation replaces ineffective mx-2.5 around full-width content.",
+	"src/lib/frontend/components/chat/ToolGenericCard.svelte :: font-semibold,mx-2.5,text-[13px]": "transcript-15 and 16 intentionally use regular 12.5px verbs and a 22px-indented borderless output; scaled mono tokens replace nominal sizes.",
+	"src/lib/frontend/components/chat/ToolQuestionCard.svelte :: border,border-border-subtle,min-h-[28px],py-[3px]": "transcript-09,12,15 intentionally use filled option rows, accent chosen capsules and 26px regular step headers instead of outlined options and padded 28px rows.",
+	"src/lib/frontend/components/chat/ToolSubagentCard.svelte :: font-semibold,text-[12.5px]": "transcript-15 intentionally uses regular 12.5px step verbs with quiet 11.5px arguments instead of bold labels.",
+	"src/lib/frontend/components/chat/UserMessage.svelte :: border-border": "transcript-07 intentionally removes the thumbnail outline; the existing raised fill and 96px image remain.",
+	"src/lib/frontend/components/permissions/PermissionCard.svelte :: bg-success/10,border,border-border,border-success/15,border-success/20,cursor-pointer,flex-1,gap-2,hover:bg-bg,hover:bg-success/15,hover:border-success/15,hover:text-success/80,max-sm:flex-col,min-h-[48px],text-accent,text-success/80": "transcript-13 intentionally replaces green/red outlined permission controls with 28px filled primary/neutral capsules, orange waiting marker and normal tool-name text. Existing Button recipes own hover and pointer behavior;44px targets use touchTarget.",
+	"src/lib/frontend/components/ui/CodeBlockHeader.svelte :: text-[12px]": "transcript-02 intentionally replaces nominal 12px with text-mono-xs at 11.04px.",
+	"src/lib/frontend/components/ui/FileAttachmentChip.svelte :: border,border-border": "transcript-07 intentionally removes attachment outlines while retaining the raised fill.",
+	"src/lib/frontend/components/ui/ImageAttachmentThumb.svelte :: border,border-border,rounded-[9px]": "transcript-07 intentionally removes the pasted image outline and matches both image and fill to the 10px outer radius.",
+	"src/lib/frontend/components/ui/button-recipes.ts :: bg-accent-bg": "transcript-13 and 18 intentionally use Final primary capsule 18% accent tint; this variant has exactly the permission and Parent consumers.",
+	"src/lib/frontend/components/ui/segmented-styles.ts :: bg-accent/20,border,border-accent/40,hover:border-border-subtle,mb-1,px-2,rounded,text-text-dimmer,text-xs": "transcript-14 intentionally replaces the outlined pill toggle with 24px borderless capsules and 16% chosen tint, hosted in the code header.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: border-border,size-[6px],text-[10px]": "Header audit header-05/header-17: use the Final subtle divider and a 7px connection dot with the mono connection recipe; story measurements guard the intended replacements.",
+	"src/lib/frontend/components/layout/ViewsRail.svelte :: bg-bg-surface,border-border,right-1,top-1,w-[38px]": "Header audit header-12: the Final rail is 44px on sidebar-bg with a subtle border, 32px accent toggles and 15px badges at top -3px/right -4px.",
+	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: border-border,min-h-[44px]": "Header audit header-08: the task row is 36px with the subtle border; each action retains its separate 44px pointer target.",
+	"src/lib/frontend/components/ui/Badge.svelte :: bg-accent-bg,bg-status-pinned/12,bg-status-snoozed/15,bg-success/14,h-[24px],text-accent,text-status-pinned,text-status-snoozed,text-success": "Header audit header-04/header-08: Final state chips use 16% fills and task chips are 22px. Theme ink tokens preserve contrast on the stronger light fills and retain the original dark ink.",
+	"src/lib/frontend/components/ui/ActivityTimeline.svelte :: opacity-60": {
+		"renamedTo": "opacity-100",
+		"reason": "turn-01 restores the approved strip palette at full opacity; only an active emphasis set dims unrelated segments."
+	},
+	"src/lib/frontend/components/chat/TurnActivity.svelte :: min-h-[40px]": {
+		"renamedTo": "h-[38px]",
+		"reason": "turn-07 matches the Final phone summary row's 38px height; Button's touchTarget keeps the larger invisible hit area."
+	},
+	"src/lib/frontend/components/overlays/AvatarSettings.svelte :: min-h-[26px],min-h-[64px],px-[10px],py-[10px],rounded-full,text-[12.5px],text-text-muted": "conduit-test-zopq matches Final settings: the shared settings pill owns the Change action, the phone You row is 56.3px with a 12px subtitle, and secondary text uses text-dimmer.",
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: leading-[1.35],min-w-[44px],text-text-dimmer": "conduit-test-zopq restores the Final design's 1.5 line height and phone chevron colours. Done aligns its text to the nav's right inset; Button's touchTarget recipe retains the 44px hit area without widening its visible box.",
+	"src/lib/frontend/components/ui/SettingsGroup.svelte :: text-text-muted": "conduit-test-zopq uses text-dimmer for Final settings group labels and captions, as explicitly approved.",
+	"src/lib/frontend/components/ui/SettingsRow.svelte :: text-text-muted": "conduit-test-zopq uses text-dimmer for neutral Final settings descriptions, retaining semantic success and warning tones.",
+	"src/lib/frontend/components/ui/Tabs.svelte :: max-md:[,text-text-muted": "conduit-test-zopq uses text-dimmer for settings rail labels. Brand mark fills now inherit currentColor on desktop as well as phone, replacing the phone-only fill-current selector.",
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: bg-white/[0.08],border-border/50,px-1.5,py-0.5,space-y-1.5": {
+		"movedTo": "src/lib/frontend/components/overlays/DebugSettingsTab.svelte",
+		"reason": "These class tokens moved intact to DebugSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
+	},
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: text-text-muted": "conduit-test-zopq matches Final text3 with the approved text-dimmer token for settings descriptions, headings, and secondary metadata.",
+	"src/lib/frontend/components/overlays/SurfacingSettingsTab.svelte :: text-text-muted": "conduit-test-zopq matches Final text3 with the approved text-dimmer token for settings descriptions, headings, and secondary metadata.",
+	"src/lib/frontend/components/overlays/SurfacingCategories.svelte :: text-text-muted": "conduit-test-zopq matches Final text3 with the approved text-dimmer token for settings descriptions, headings, and secondary metadata.",
+	"src/lib/frontend/components/overlays/SurfacingFeedbackTab.svelte :: text-text-muted": "conduit-test-zopq matches Final text3 with the approved text-dimmer token for settings descriptions, headings, and secondary metadata.",
+	"src/lib/frontend/components/overlays/UsageSettingsTab.svelte :: text-text-muted": "conduit-test-zopq matches Final text3 with the approved text-dimmer token for settings descriptions, headings, and secondary metadata.",
+	"src/lib/frontend/components/overlays/AvatarSettings.svelte :: mb-[16px]": "conduit-test-zopq matches the Final phone list's 18px gap between the You card and the first section card.",
+	"src/lib/frontend/components/ui/button-recipes.ts :: w-[20px]": "conduit-test-cvyi removes the redundant session header title menu and its unused button size; the existing overflow provides its actions.",
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: bg-white/[0.08],border-border/50,px-1.5,py-0.5,space-y-1.5,text-text-dimmer": {
+		"movedTo": "src/lib/frontend/components/overlays/DebugSettingsTab.svelte",
+		"reason": "These class tokens moved intact to DebugSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
 	}
 }

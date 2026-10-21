@@ -114,17 +114,13 @@ async function openServer(page: Page, baseUrl: string): Promise<void> {
 	await new AppPage(page).goto(baseUrl);
 	// Settings opens from whichever bar the landing view shows.
 	const listOverflow = page.getByTestId("list-bar-overflow");
-	const titleMenu = page.getByTestId("session-bar-title-menu");
-	const sessionOverflow = page.getByTestId("session-bar-overflow");
-	await expect(
-		listOverflow.or(titleMenu).or(sessionOverflow).first(),
-	).toBeVisible();
+	const sessionOverflow = page
+		.getByTestId("session-bar-overflow")
+		.or(page.getByTestId("session-bar-island-overflow"));
+	await expect(listOverflow.or(sessionOverflow).first()).toBeVisible();
 	if (await listOverflow.isVisible()) {
 		await listOverflow.click();
 		await page.getByTestId("list-overflow-settings").click();
-	} else if (await titleMenu.isVisible()) {
-		await titleMenu.click();
-		await page.getByTestId("session-title-settings").click();
 	} else {
 		await sessionOverflow.click();
 		await page.getByTestId("overflow-settings").click();
@@ -271,7 +267,7 @@ test("Server status reloads after two supervised restarts, with desktop and phon
 
 test.describe("unsupervised daemon", () => {
 	test.use({ supervised: false });
-	test("hides Restart, explains terminal startup and closes the confirmation after Shut down", async ({
+	test("hides Restart, explains terminal startup and closes the confirmation after Stop", async ({
 		page,
 		harness,
 	}) => {

@@ -20,7 +20,7 @@ import {
 	statSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import {
 	Array as Arr,
 	Context,
@@ -58,8 +58,21 @@ import { normalizeProjectTitle } from "../../../handlers/settings.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { SessionRollupProjects } from "../../../persistence/effect/session-rollup-projects.js";
-import { refreshSidebar } from "../../../persistence/effect/sidebar-projection.js";
-import { chooseProjectSlug } from "../../../persistence/project-storage.js";
+import {
+	refreshCrossProjectSidebar,
+	refreshSidebar,
+} from "../../../persistence/effect/sidebar-projection.js";
+import {
+	DaemonStoreImportError,
+	importProjectStoreWithBackup,
+	type ProjectStoreImportResult,
+} from "../../../persistence/migrations/daemon-store-import.js";
+import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
+import { migrateProjectStorageForProject } from "../../../persistence/migrations/project-storage-migration.js";
+import {
+	chooseProjectSlug,
+	projectStorageDir,
+} from "../../../persistence/project-storage.js";
 import {
 	checkFolders,
 	type FolderIssue,
@@ -68,6 +81,7 @@ import {
 import { stopRegisteredRunners } from "../../../provider/runner/process-session-runner.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import type { StoredProject } from "../../../types.js";
+import { InputDraftsTag } from "../../relay/Services/input-drafts.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { isConduitWorktreePath } from "../Layers/worktree-layer.js";
 import {
@@ -1260,6 +1274,99 @@ export const saveProject = (input: SaveProjectInput) =>
 						sessionMode,
 					});
 				} else {
+					const unavailable = yield* DaemonStoreAvailability;
+					if (!unavailable.has(slug)) {
+						const reason = yield* migrateProjectStorageForProject(configDir, {
+							slug,
+							path: mainFolder,
+						});
+						if (reason !== undefined) {
+							unavailable.set(slug, reason);
+						} else {
+							const store = yield* PersistenceStore;
+							const sql = Context.get(store, SqlClient.SqlClient);
+							// Enroll destination projectors as startup does, before reserving
+							// the connection: recovery needs the same SQL semaphore.
+							// Reserve without a SQLite transaction so the importer's own
+							// connection cannot busy-wait on a blocked daemon continuation.
+							const result = yield* Effect.scoped(
+								Context.get(store, ProjectionRunnerEffectTag)
+									.recover()
+									.pipe(
+										Effect.provideService(SqlClient.SqlClient, sql),
+										Effect.andThen(sql.reserve),
+										Effect.andThen(
+											importProjectStoreWithBackup(configDir, {
+												projectId: slug,
+												sourcePath: join(
+													projectStorageDir(configDir, slug),
+													"events.db",
+												),
+											}),
+										),
+									),
+							).pipe(
+								// The reservation must close before using the shared SQL client.
+								// Reconcile before addWithoutRelay makes these sessions routable.
+								Effect.tap((result) =>
+									Effect.gen(function* () {
+										if (result.error) return;
+										const blocked =
+											unavailable.size === 0
+												? []
+												: yield* sql`SELECT 1 FROM sessions
+										WHERE project_id IN ${sql.in([...unavailable.keys()])} LIMIT 1`;
+										if (blocked.length > 0) {
+											yield* Effect.logWarning(
+												"Deferring fork lineage import while stored projects are unavailable",
+											);
+										} else {
+											// Shared mode resolves all owners from SQLite, including retained projects.
+											yield* migrateForkLineage(
+												configDir,
+												{ projects: [] },
+												sql,
+											);
+										}
+										// Repair every currently visible family. addWithoutRelay then
+										// includes the new owner and refreshes families containing its rows.
+										const projects = Context.get(store, SessionRollupProjects);
+										yield* refreshCrossProjectSidebar(
+											projects ? yield* Ref.get(projects) : [],
+										).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+										if (result.outcome === "imported") {
+											const drafts =
+												yield* Effect.serviceOption(InputDraftsTag);
+											if (Option.isSome(drafts))
+												yield* drafts.value.invalidateList();
+										}
+									}),
+								),
+								Effect.catch((cause) =>
+									Effect.succeed<ProjectStoreImportResult>({
+										projectId: slug,
+										outcome: "failed" as const,
+										error: new DaemonStoreImportError({
+											projectId: slug,
+											kind: "io",
+											message: formatRelayFailure(cause),
+											cause,
+										}),
+									}),
+								),
+							);
+							if (result.error)
+								unavailable.set(
+									slug,
+									`History import failed (${result.error.kind})`,
+								);
+							const log =
+								result.error || result.backupError
+									? Effect.logWarning
+									: Effect.logInfo;
+							yield* log("Daemon store project import", result);
+						}
+					}
 					yield* addWithoutRelay(project);
 				}
 				if (

@@ -75,11 +75,11 @@
 	{:else}
 		{#if title || actions}
 			<div class="flex items-center gap-2 px-[4px]">
-				{#if title}<h3 id={titleId} class="text-[12px] max-md:text-[13px] font-medium text-text-muted">{title}</h3>{/if}
+				{#if title}<h3 id={titleId} class="text-[12px] max-md:text-[13px] font-medium text-text-dimmer">{title}</h3>{/if}
 				{#if actions}<div class="ml-auto flex items-center gap-1.5">{@render actions()}</div>{/if}
 			</div>
 		{/if}
-		{#if caption}<p class="-mt-[2px] px-[4px] text-[11px] text-text-muted max-md:text-[12px]">{caption}</p>{/if}
+		{#if caption}<p class="-mt-[2px] px-[4px] text-[11px] text-text-dimmer max-md:text-[12px]">{caption}</p>{/if}
 		<div class="{card} {rows}">{@render children()}</div>
 	{/if}
 </section>

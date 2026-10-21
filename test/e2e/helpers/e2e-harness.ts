@@ -286,7 +286,9 @@ export async function createReplayHarness(
 						port: 0,
 						managed: false,
 						driver: "claude",
-						configDir: path.join(configDir, "claude"),
+						configDir:
+							options.claudeReplay?.transcriptConfigDir ??
+							path.join(configDir, "claude"),
 					},
 				],
 			}),

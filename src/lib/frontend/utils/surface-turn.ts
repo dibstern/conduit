@@ -90,7 +90,7 @@ export function surfaceTurn(input: {
 					? "var(--color-accent)"
 					: category?.origin === "custom"
 						? category.colour
-						: (colours[result.category ?? ""] ?? "var(--color-text-muted)"),
+						: colours[result.category ?? ""],
 				read: message.surfacingRead,
 				name: `${number === undefined ? "Pending" : `#${number}`} ${label}, ${time}${message.surfacingRead === undefined ? "" : message.surfacingRead ? ", read" : ", unread"}`,
 			},

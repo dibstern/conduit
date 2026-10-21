@@ -243,12 +243,21 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		expect(harness.marks.filter((mark) => mark.kind === "enqueue")).toEqual([
 			expect.objectContaining({ queryId: query.queryId, promptIndex: 1 }),
 		]);
+		// CreateSession's durable draft claim (d3c3661c) rejects a second create,
+		// even after the pre-warm reservation has been consumed.
 		await expect(
 			browser.createSession("Consumed draft token", undefined, "claude", {
 				draftId,
 				...pick,
 			}),
 		).rejects.toMatchObject({ _tag: "DraftAlreadySent", draftId });
+		const fresh = await browser.createSession(
+			"New draft token",
+			undefined,
+			"claude",
+			{ draftId: randomUUID(), ...pick },
+		);
+		expect(fresh).not.toBe(sessionId);
 	});
 
 	it("draft pre-warm with a different create model discards the old runner and sends on a fresh session", async () => {
@@ -580,10 +589,16 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		);
 		expect(otherId).not.toBe(runner.sessionId);
 		expect(alive(runner.pid)).toBe(true);
+		// The warm reservation is origin-local, but the draft claim is shared.
 		await expect(
 			browser.createSession("Owning origin", undefined, "claude", { draftId }),
 		).rejects.toMatchObject({ _tag: "DraftAlreadySent", draftId });
+		await vi.waitFor(() => {
+			expect(alive(runner.pid)).toBe(false);
+			expect(existsSync(runner.socketPath)).toBe(false);
+		});
 		expect(durableCounts(harness, runner.sessionId).status).toBeUndefined();
+		expect(durableCounts(harness, otherId).status).toEqual({ status: "idle" });
 	});
 
 	it("draft pre-warm orphan runner is terminated when the daemon recovers after a crash", async () => {

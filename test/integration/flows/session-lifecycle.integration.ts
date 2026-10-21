@@ -1,7 +1,8 @@
 // Tests session management operations: create, switch, rename, delete, and
 // manage sessions through the relay WebSocket interface.
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Option, Stream } from "effect";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import {
 	createRelayHarness,
@@ -11,7 +12,7 @@ import {
 describe("Integration: Session Lifecycle", () => {
 	let harness: RelayHarness;
 
-	beforeEach(async () => {
+	beforeAll(async () => {
 		__setProbeOverrideForTesting(async () => ({
 			models: [],
 			commands: [],
@@ -20,7 +21,7 @@ describe("Integration: Session Lifecycle", () => {
 		harness = await createRelayHarness();
 	}, 30_000);
 
-	afterEach(async () => {
+	afterAll(async () => {
 		try {
 			if (harness) await harness.stop();
 		} finally {
@@ -130,7 +131,7 @@ describe("Integration: Session Lifecycle", () => {
 		await client.close();
 	});
 
-	it("switching session preserves its subscribed draft and family", async () => {
+	it("restores the saved draft after switching back", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
@@ -158,11 +159,12 @@ describe("Integration: Session Lifecycle", () => {
 		client.clearReceived();
 		const switched = await client.switchSession(firstId);
 		expect(switched["id"]).toBe(firstId);
-		await client.subscribeInputDraft(firstId);
-		const draft = await client.waitFor("input_draft", {
-			predicate: (message) => message["_tag"] === "synchronized",
-		});
-		expect(draft["text"]).toBe("Unsent draft");
+		const draft = await client.rpcCall((rpc) =>
+			Stream.runHead(rpc.SubscribeInputDraft({ key: { session: firstId } })),
+		);
+		expect(draft).toEqual(
+			Option.some({ _tag: "synchronized", text: "Unsent draft" }),
+		);
 
 		await client.close();
 	});

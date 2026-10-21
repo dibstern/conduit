@@ -286,7 +286,7 @@ Scenario Outline: E2 desktop icons warn about auto approvals and a workspace hin
   And the session has a workspace hint at /workspace/conduit-hint
   When I set effort to high
   Then the composer has 2 rows
-  And the mode shield uses the warning tone
+  And the mode shield uses the auto tone
   And the composer checkout has a workspace hint icon without inline actions
   And the checkout pill yields room before the model label and send
   And the composer region visually matches <baseline> at <threshold> percent
@@ -312,12 +312,12 @@ Scenario Outline: desktop mode shields preserve every permission mode
 
 Examples:
   | mode        | label       | tone    | baseline                  | threshold |
-  | dontAsk     | Never ask   | neutral | composer-icons-mode-never | 98        |
-  | plan        | Plan        | neutral | composer-icons-mode-plan  | 98        |
-  | ask         | Ask before edits | neutral | composer-icons-mode-ask   | 98        |
-  | acceptEdits | Auto-accept edits | warning | composer-icons-mode-edits | 98        |
-  | auto        | Auto        | warning | composer-icons-mode-auto  | 98        |
-  | full        | Full access | danger  | composer-icons-mode-full  | 98        |
+  | dontAsk     | Never ask   | never   | composer-icons-mode-never | 98        |
+  | plan        | Plan        | plan    | composer-icons-mode-plan  | 98        |
+  | ask         | Ask before edits | ask     | composer-icons-mode-ask   | 98        |
+  | acceptEdits | Auto-accept edits | edits   | composer-icons-mode-edits | 98        |
+  | auto        | Auto        | auto    | composer-icons-mode-auto  | 98        |
+  | full        | Full access | full    | composer-icons-mode-full  | 98        |
 
 Scenario Outline: long checkout names collapse before the model label truncates
   Given the conduit app is served with the connected mockup

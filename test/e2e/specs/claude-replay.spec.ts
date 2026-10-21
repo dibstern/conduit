@@ -2154,7 +2154,7 @@ test.describe("Claude replay lane", () => {
 						)?.resumeSessionId,
 				)
 				.toBeTruthy();
-			await page.getByTestId("session-bar-title-menu").click();
+			await page.getByTestId("session-bar-overflow").click();
 			await page.getByTestId("session-ctx-fork").click();
 			await expect(page).not.toHaveURL(new RegExp(`${parentPath}$`));
 			const forkId = new URL(page.url()).pathname.split("/").at(-1) ?? "";
@@ -2183,14 +2183,63 @@ test.describe("Claude replay lane", () => {
 			await expect(chat.userMessages).toHaveCount(2);
 			await expect(chat.assistantMessages).toHaveText([/pong/i, /pong/i]);
 			await chat.waitForStreamingComplete();
-			// hiuf.3 inherits projected history without replaying its completion event.
+			// Inherited history is copied into read models, not completion events.
 			await expect
 				.poll(() => countEvents(harness.eventsDbPath, "turn.completed"))
 				.toBe(2);
-			await expect.poll(readForkTurns).toEqual([
-				{ state: "completed", text: "Parent turn", is_inherited: 1 },
-				{ state: "completed", text: "Fork turn", is_inherited: 0 },
-			]);
+			const parentId = parentPath.split("/").at(-1);
+			if (!parentId || !forkId || !harness.eventsDbPath)
+				throw new Error("Missing fork history identity or event store");
+			const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
+			try {
+				const parentMessages = db
+					.prepare(`SELECT role, text FROM messages
+						WHERE session_id = ? ORDER BY created_at, id`)
+					.all(parentId);
+				expect(parentMessages).toHaveLength(2);
+				expect(
+					db
+						.prepare(`SELECT role, text FROM messages
+						WHERE session_id = ? AND is_inherited = 1
+						ORDER BY created_at, id`)
+						.all(forkId),
+				).toEqual(parentMessages);
+				expect(
+					db
+						.prepare(`SELECT t.state, t.run_id FROM turns t
+						JOIN messages m ON m.id = t.user_message_id AND m.session_id = t.session_id
+						WHERE t.session_id = ? AND m.is_inherited = 1`)
+						.all(forkId),
+				).toEqual([{ state: "completed", run_id: null }]);
+				expect(
+					db
+						.prepare(`SELECT t.state, t.run_id, r.status AS run_status FROM turns t
+						JOIN messages m ON m.id = t.user_message_id AND m.session_id = t.session_id
+						JOIN provider_runs r ON r.id = t.run_id AND r.session_id = t.session_id
+						WHERE t.session_id = ? AND m.is_inherited = 0`)
+						.all(forkId),
+				).toEqual([
+					{
+						state: "completed",
+						run_id: expect.any(String),
+						run_status: "completed",
+					},
+				]);
+				expect(
+					db
+						.prepare(`SELECT status FROM provider_runs
+						WHERE session_id = ?`)
+						.all(forkId),
+				).toEqual([{ status: "completed" }]);
+				expect(
+					db
+						.prepare(`SELECT session_id FROM events
+						WHERE type = 'turn.completed' ORDER BY sequence`)
+						.all(),
+				).toEqual([{ session_id: parentId }, { session_id: forkId }]);
+			} finally {
+				db.close();
+			}
 			await expect(history.locator(".msg-user")).toContainText("Parent turn");
 			await expect(history).not.toContainText("Fork turn");
 			await testInfo.attach("claude-fork-replay", {

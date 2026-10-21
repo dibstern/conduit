@@ -8,25 +8,25 @@ Scenario: the Server card shows daemon-wide status
   When I open settings to the Server section
   Then the Server card shows uptime, version, port and connected browsers
 
-Scenario Outline: Shut down explains how the daemon starts again
+Scenario Outline: Stop explains how the daemon starts again
   Given the daemon is <supervision>
   When I open settings to the Server section
   Then Server Restart is <restart>
-  When I open the Server Shut down confirmation
-  Then the Server Shut down warning says <warning>
-  When I cancel the Server Shut down confirmation
+  When I open the Server Stop confirmation
+  Then the Server Stop warning says <warning>
+  When I cancel the Server Stop confirmation
 
 Examples:
   | supervision  | restart | warning                                                                                |
   | supervised   | visible | Every browser disconnects. The login service will start it straight back.               |
   | unsupervised | hidden  | Every browser disconnects. Start it again from the terminal with conduit serve.          |
 
-Scenario: opening Shut down closes the instance editor
+Scenario: opening Stop closes the instance editor
   When I open settings to the Server section
   And I start adding a Claude instance
-  And I open the Server Shut down confirmation
+  And I open the Server Stop confirmation
   Then the Server instance editor is closed
-  When I cancel the Server Shut down confirmation
+  When I cancel the Server Stop confirmation
 
 Scenario Outline: adding a named instance makes it selectable in the composer rail
   When I open settings to the Server section
