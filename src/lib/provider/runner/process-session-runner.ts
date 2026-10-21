@@ -1646,7 +1646,10 @@ export const makeProcessSessionRunner = (
 					}),
 				),
 			);
-			hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
+			hasLiveProcessEffect(
+				sessionId: string,
+				processId?: string,
+			): Effect.Effect<boolean> {
 				return Effect.sync(() => {
 					// Before hello only the spawned child's pid is known.
 					const alive = (entry: RunnerChild) => {
@@ -1655,10 +1658,17 @@ export const makeProcessSessionRunner = (
 					};
 					for (const entry of exiting) if (!alive(entry)) exiting.delete(entry);
 					const owns = (entry: RunnerChild | undefined) =>
-						entry?.sessionId === sessionId && alive(entry);
+						entry?.sessionId === sessionId &&
+						(processId === undefined || entry.runnerId === processId) &&
+						alive(entry);
 					return (
 						owns(children.get(sessionId)) ||
-						[...candidates, ...exiting].some(owns)
+						[...candidates, ...exiting].some(
+							(entry) =>
+								(processId === undefined ||
+									entry.failure?.code === "runner_quarantined") &&
+								owns(entry),
+						)
 					);
 				});
 			}

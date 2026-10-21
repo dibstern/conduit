@@ -190,8 +190,11 @@ export interface SessionRunner {
 	/** Native execution and pending intake, independent of an intake reply. */
 	hasActiveTurnsEffect?(sessionId: string): Effect.Effect<boolean>;
 	readonly recoverEffect?: Effect.Effect<void, SessionFailure>;
-	/** Process ownership in every lifecycle state, even when no session is usable. */
-	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean>;
+	/** Without an ID, checks all live processes; with one, checks the current or quarantined owner. */
+	hasLiveProcessEffect(
+		sessionId: string,
+		processId?: string,
+	): Effect.Effect<boolean>;
 	/** A session refusal also applies before inbox or prompt admission. */
 	getSessionFailureEffect?(
 		sessionId: string,
