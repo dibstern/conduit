@@ -376,6 +376,7 @@ for (const mode of [
 									const admissionWaiting = yield* Deferred.make<void>();
 									const provider: ProviderInstance = {
 										providerId: "test",
+										generateTextEffect: () => Effect.die("not used"),
 										inputAdmission: {
 											...runner.inputAdmission,
 											changes: runner.inputAdmission.changes.pipe(

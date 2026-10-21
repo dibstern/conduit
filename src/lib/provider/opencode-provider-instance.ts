@@ -2,8 +2,10 @@
 // Wraps the existing OpenCodeClient REST API behind the ProviderInstance
 // interface. Translates OpenCode SSE events into canonical events via EventSink.
 
+import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { join } from "node:path";
+import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { Effect, type Scope } from "effect";
 import {
 	type Account,
@@ -11,6 +13,7 @@ import {
 	type OpenCodeAccount,
 } from "../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
+import { DEFAULT_CONFIG_DIR } from "../env.js";
 import { OpenCodeApiError } from "../errors.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type {
@@ -63,6 +66,7 @@ function sendFailure(message: string) {
 export interface OpenCodeProviderInstanceOptions {
 	readonly client: OpenCodeAPI;
 	readonly workspaceRoot?: string;
+	readonly configDir?: string;
 	readonly clientForAccount?: (
 		account: OpenCodeAccount,
 		directory?: string,
@@ -94,6 +98,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 	private readonly client: OpenCodeAPI;
 	private readonly workspaceRoot: string | undefined;
+	private readonly configDir: string;
 	private readonly clientForSession:
 		| ((
 				sessionId: string,
@@ -110,6 +115,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	constructor(options: OpenCodeProviderInstanceOptions) {
 		this.client = options.client;
 		this.workspaceRoot = options.workspaceRoot;
+		this.configDir = options.configDir ?? DEFAULT_CONFIG_DIR;
 		this.clientForSession = options.clientForSession;
 		this.clientForAccount = options.clientForAccount;
 		this.instanceIdForSession = options.instanceIdForSession;
@@ -181,6 +187,208 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			try: () => this.discoverCapabilities(),
 			catch: (cause) => this.providerFailure("discover", cause),
 		});
+	}
+
+	generateTextEffect(
+		input: Parameters<ProviderInstance["generateTextEffect"]>[0],
+	): Effect.Effect<string, ProviderInstanceFailure> {
+		const route = this.clientForAccount;
+		const scratchRoot = join(this.configDir, "text-generation");
+		return Effect.gen(function* () {
+			const account =
+				input.account.driver === "opencode" ? input.account : undefined;
+			if (!account || !route)
+				return yield* Effect.fail(
+					new Error(
+						"OpenCode text generation requires an account-scoped client",
+					),
+				);
+			return yield* Effect.acquireUseRelease(
+				Effect.tryPromise(async () => {
+					await mkdir(scratchRoot, { recursive: true });
+					return mkdtemp(join(scratchRoot, "run-"));
+				}),
+				(cwd) =>
+					Effect.scoped(
+						Effect.gen(function* () {
+							// Never borrow a project client: it would import its instructions and
+							// publish the scratch session through that project's subscriptions.
+							const client = yield* route(account, cwd);
+							yield* Effect.gen(function* () {
+								if (
+									!["localhost", "127.0.0.1", "[::1]"].includes(
+										new URL(client.getBaseUrl()).hostname,
+									)
+								)
+									return yield* Effect.fail(
+										new Error(
+											"OpenCode text isolation requires a local account server",
+										),
+									);
+								const config = yield* Effect.tryPromise(() =>
+									client.config.get(),
+								);
+								const paths = yield* Effect.tryPromise(() => client.app.path());
+								// The API has no per-prompt isolation flag. Refuse inherited
+								// sources rather than mutating the account server's configuration.
+								for (const key of [
+									"plugin",
+									"instructions",
+									"mcp",
+									"agent",
+									"agents",
+								])
+									if (config[key] && Object.keys(config[key]).length > 0)
+										return yield* Effect.fail(
+											new Error(
+												`OpenCode text isolation refuses configured ${key}`,
+											),
+										);
+								for (let directory = cwd; ; directory = dirname(directory)) {
+									const entries = yield* Effect.tryPromise(() =>
+										readdir(directory),
+									);
+									if (
+										["AGENTS.md", "CLAUDE.md", "CONTEXT.md", ".opencode"].some(
+											(name) => entries.includes(name),
+										)
+									)
+										return yield* Effect.fail(
+											new Error(
+												`OpenCode text isolation refuses instruction/config sources in ${directory}`,
+											),
+										);
+									if (directory === dirname(directory)) break;
+								}
+								// OpenCode also discovers plugins outside config.plugin.
+								for (const name of ["plugin", "plugins"]) {
+									const entries = yield* Effect.tryPromise(() =>
+										readdir(join(paths.config, name)).catch(
+											(cause: unknown) => {
+												if (
+													cause instanceof Error &&
+													"code" in cause &&
+													cause.code === "ENOENT"
+												)
+													return [];
+												throw cause;
+											},
+										),
+									);
+									if (entries.length > 0)
+										return yield* Effect.fail(
+											new Error(
+												"OpenCode text isolation refuses global plugins",
+											),
+										);
+								}
+							});
+							const agents = yield* Effect.tryPromise(() =>
+								client.app.agents(),
+							);
+							if (!agents.some((agent) => agent.id === "title"))
+								return yield* Effect.fail(
+									new Error("OpenCode title agent is unavailable"),
+								);
+							let variant = input.effort;
+							if (!variant) {
+								const catalog = yield* Effect.tryPromise(() =>
+									client.provider.list(),
+								);
+								const variants =
+									catalog.providers
+										.find((provider) => provider.id === input.model.providerId)
+										?.models?.find((model) => model.id === input.model.modelId)
+										?.variants ?? {};
+								variant =
+									["none", "minimal", "min", "low"].find(
+										(value) => value in variants,
+									) ??
+									Object.keys(variants)[0] ??
+									"";
+							}
+							return yield* Effect.acquireUseRelease(
+								Effect.sync(() => `ses_${randomUUID().replaceAll("-", "")}`),
+								(sessionId) =>
+									Effect.gen(function* () {
+										// Reserve before I/O so even a lost create reply has a cleanup id.
+										yield* Effect.tryPromise(() =>
+											client.session.create({
+												id: sessionId,
+												directory: cwd,
+												title: "Conduit ephemeral text generation",
+												permission: [
+													{ permission: "*", pattern: "*", action: "deny" },
+												],
+											}),
+										).pipe(Effect.uninterruptible);
+										const reply = yield* Effect.tryPromise((signal) =>
+											client.session.promptText(sessionId, {
+												directory: cwd,
+												model: {
+													providerID: input.model.providerId,
+													modelID: input.model.modelId,
+												},
+												variant,
+												agent: "title",
+												system: input.instructions,
+												text: input.prompt,
+												signal,
+											}),
+										);
+										const text = reply.parts
+											.filter((part) => part.type === "text")
+											.map((part) => part["text"])
+											.join("");
+										if (
+											reply.info.role !== "assistant" ||
+											reply.info.error ||
+											reply.info.finish !== "stop" ||
+											!text.trim() ||
+											reply.parts.some((part) => part.type === "tool")
+										)
+											return yield* Effect.fail(
+												new Error(
+													"OpenCode text generation returned an incomplete or failed reply",
+												),
+											);
+										return text;
+									}),
+								(sessionId) =>
+									Effect.gen(function* () {
+										const aborted = yield* Effect.result(
+											Effect.tryPromise(() =>
+												client.session.abort(sessionId),
+											).pipe(
+												Effect.catchIf(
+													(cause) =>
+														cause.cause instanceof OpenCodeApiError &&
+														cause.cause.responseStatus === 404,
+													() => Effect.void,
+												),
+											),
+										);
+										yield* Effect.tryPromise(() =>
+											client.session.delete(sessionId),
+										).pipe(
+											Effect.catchIf(
+												(cause) =>
+													cause.cause instanceof OpenCodeApiError &&
+													cause.cause.responseStatus === 404,
+												() => Effect.void,
+											),
+										);
+										yield* Effect.fromResult(aborted);
+									}),
+							);
+						}),
+					),
+				(cwd) =>
+					Effect.tryPromise(() => rm(cwd, { recursive: true, force: true })),
+			);
+		}).pipe(
+			Effect.mapError((cause) => this.providerFailure("generateText", cause)),
+		);
 	}
 
 	private async discoverCapabilities(): Promise<ProviderCapabilities> {

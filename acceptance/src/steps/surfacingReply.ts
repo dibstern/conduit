@@ -1,6 +1,6 @@
+import { isDeepStrictEqual } from "node:util";
 import { expect, type Locator, type Page } from "@playwright/test";
 import { encodeReference } from "../../../src/lib/composer-references.js";
-import { isRecord } from "../../../src/lib/utils.js";
 import { sendMockInputDraft } from "../../../test/e2e/helpers/rpc-mock.js";
 import type { StepHandler } from "../runtime.js";
 import {
@@ -393,8 +393,7 @@ export const surfacingReplyHandlers: StepHandler[] = [
 			const synced = await requireRpcControl(world.page).waitForRequest(
 				(request) =>
 					request.tag === "SyncInputDraft" &&
-					isRecord(request.payload["key"]) &&
-					request.payload["key"]["session"] === SESSION &&
+					isDeepStrictEqual(request.payload["key"], { session: SESSION }) &&
 					String(request.payload["text"]).includes("Keep the old paint order."),
 			);
 			expect(synced.payload["key"]).toEqual({ session: SESSION });

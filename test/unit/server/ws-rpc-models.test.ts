@@ -718,7 +718,10 @@ describe("WsRpcServerLayer GetModels", () => {
 					},
 				]);
 				for (const response of responses)
-					expect(response.providers).toEqual([]);
+					expect(response.providers).toEqual(
+						catalogs.find((row) => row.accountId === response.instanceId)
+							?.providers,
+					);
 				expect(api.provider.list).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.scoped,

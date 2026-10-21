@@ -1,15 +1,25 @@
-import { Effect, Fiber, Option } from "effect";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { Effect, Fiber, Option, Schema } from "effect";
 import type { Account } from "../../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import {
 	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,
 } from "../../daemon/config-persistence.js";
+import {
+	ClaudeOneShotFailure,
+	makeClaudeOneShot,
+} from "../../domain/daemon/Services/claude-one-shot.js";
+import { DEFAULT_CONFIG_DIR } from "../../env.js";
+import { createLogger } from "../../logger.js";
 import { ProviderInstanceFailure } from "../errors.js";
 import type { RunnerDriverPieces } from "../runner/runner-provider-instance.js";
 import type { ProviderCapabilities } from "../types.js";
 import type { ClaudeProviderInstanceDeps } from "./claude-provider-runtime.js";
 import { discoverCapabilitiesEffect } from "./claude-runtime-discovery.js";
+
+const log = createLogger("claude-runner-driver");
 
 export const makeClaudeRunnerDriver = (
 	deps: ClaudeProviderInstanceDeps,
@@ -48,6 +58,64 @@ export const makeClaudeRunnerDriver = (
 	return {
 		driverKind: "claude",
 		discoverEffect,
+		generateTextEffect: (input) =>
+			Effect.gen(function* () {
+				const account =
+					input.account.driver === "claude"
+						? input.account
+						: yield* Effect.fail(
+								new Error("Claude text generation requires a Claude account"),
+							);
+				const scratchRoot = join(
+					deps.daemonConfigDir ?? DEFAULT_CONFIG_DIR,
+					"text-generation",
+				);
+				return yield* Effect.acquireUseRelease(
+					Effect.tryPromise(async () => {
+						await mkdir(scratchRoot, { recursive: true });
+						return mkdtemp(join(scratchRoot, "run-"));
+					}),
+					(cwd) =>
+						makeClaudeOneShot({
+							configDir: {
+								...account.folder,
+								path: resolve(deps.workspaceRoot, account.folder.path),
+							},
+							...(account.env ? { accountEnv: account.env } : {}),
+							cwd,
+							systemPrompt: input.instructions,
+							isolation: {
+								settingSources: ["user"],
+								strictMcpConfig: true,
+								mcpServers: {},
+							},
+							onStderr: (data) =>
+								log.debug(`Claude text generation stderr: ${data}`),
+							...(deps.generateTextQueryFactory
+								? { queryFactory: deps.generateTextQueryFactory }
+								: {}),
+						}).ask(
+							input.prompt,
+							Schema.String,
+							input.model.modelId,
+							input.effort,
+						),
+					(cwd) =>
+						Effect.tryPromise(() => rm(cwd, { recursive: true, force: true })),
+				);
+			}).pipe(
+				Effect.mapError(
+					(cause) =>
+						new ProviderInstanceFailure({
+							providerId: "claude",
+							operation: "generateText",
+							cause:
+								cause instanceof ClaudeOneShotFailure
+									? (cause.cause ?? new Error("Claude returned no text"))
+									: cause,
+						}),
+				),
+			),
 		nativeSession: true,
 		stopTask: true,
 		prepareTurnEffect: (input) =>

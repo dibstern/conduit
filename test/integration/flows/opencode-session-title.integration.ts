@@ -3,7 +3,7 @@
 // makes a live title call; OpenCode turns use a free model.
 import Database from "better-sqlite3";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import type { ClaudeTitleQueryFactory } from "../../../src/lib/domain/relay/Services/claude-title-generator.js";
+import type { ClaudeOneShotQueryFactory } from "../../../src/lib/provider/claude/claude-provider-runtime.js";
 import {
 	type SpawnedOpenCode,
 	spawnOpenCode,
@@ -39,7 +39,7 @@ describe("Integration: OpenCode session titles", () => {
 	let harness: RelayHarness;
 	let client: TestWsClient;
 	// Each test installs its own title model behind the relay's stub.
-	let titleQuery: ClaudeTitleQueryFactory = () => titleReply("Unused");
+	let titleQuery: ClaudeOneShotQueryFactory = () => titleReply("Unused");
 	const titleCalls = vi.fn();
 
 	beforeAll(async () => {

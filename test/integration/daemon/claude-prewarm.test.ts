@@ -398,6 +398,8 @@ describe("Claude session pre-warm through daemon RPC", () => {
 											providerId: "claude",
 											discoverEffect: () =>
 												Effect.die("Pre-warm must not discover"),
+											generateTextEffect: () =>
+												Effect.die("Pre-warm must not generate text"),
 											sendTurnEffect: () =>
 												Effect.die("Pre-warm must not send"),
 											preWarmSessionEffect: (request) =>

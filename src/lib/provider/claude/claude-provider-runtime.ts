@@ -17,6 +17,7 @@ import { makeClaudeRunnerDriver } from "./claude-runner-driver.js";
 import type { ClaudeProviderInstanceDeps } from "./claude-runner-payload.js";
 import { captureClaudeLaunchLogin } from "./claude-sdk-env.js";
 
+export type { ClaudeOneShotQueryFactory } from "../../domain/daemon/Services/claude-one-shot.js";
 export { RunnerProviderInstance as ClaudeProviderRuntime } from "../runner/runner-provider-instance.js";
 export {
 	type ClaudeProviderInstanceDeps,

@@ -44,6 +44,7 @@ import {
 	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,
 } from "../../daemon/config-persistence.js";
+import type { ClaudeOneShotQueryFactory } from "../../domain/daemon/Services/claude-one-shot.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { createLogger } from "../../logger.js";
 import type { ClaudeEventPersistEffect } from "../../persistence/effect/claude-event-persist-effect.js";
@@ -212,6 +213,8 @@ export interface ClaudeProviderInstanceDeps {
 		prompt: AsyncIterable<SDKUserMessage>;
 		options?: SDKOptions;
 	}) => Query;
+	/** One-shot text generation runs independently of the long-lived session runner. */
+	readonly generateTextQueryFactory?: ClaudeOneShotQueryFactory;
 	readonly subagentSdk?: ClaudeSubagentSdk;
 	readonly sessionForkSdk?: ClaudeSessionForkSdk;
 	readonly ensureClaudeSubagentSession?: ClaudeEventPersistEffect["ensureClaudeSubagentSession"];
