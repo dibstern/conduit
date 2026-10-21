@@ -274,9 +274,11 @@ export const connectRunner = (options: {
 							if (
 								!heldAck &&
 								process.env["NODE_ENV"] === "test" &&
-								message.output.type === "event" &&
-								message.output.event.type ===
-									process.env["CONDUIT_TEST_HOLD_RUNNER_ACK"]
+								(message.output.type ===
+									process.env["CONDUIT_TEST_HOLD_RUNNER_ACK"] ||
+									(message.output.type === "event" &&
+										message.output.event.type ===
+											process.env["CONDUIT_TEST_HOLD_RUNNER_ACK"]))
 							) {
 								heldAck = true;
 								return;

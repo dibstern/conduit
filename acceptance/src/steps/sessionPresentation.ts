@@ -1,12 +1,105 @@
 import { expect, type Page } from "@playwright/test";
+import { inspectTouchTarget } from "../../../src/lib/frontend/stories/touch-target.js";
 import { PHONE_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRelayControl } from "./shared.js";
 
 const transcriptMessageTops = new WeakMap<Page, number>();
 const rememberedSessionViews = new WeakMap<Page, string[]>();
+const transcriptAnchors = new WeakMap<Page, { top: number; gap: number }>();
 
 export const sessionPresentationHandlers: StepHandler[] = [
+	{
+		name: "phone header controls own their touch targets",
+		match:
+			/^the phone header controls own separate touch areas of at least 24 pixels, using 44 where space permits$/,
+		run: async ({ world }) => {
+			let checked = 0;
+			const small = [
+				"session-skills-chip",
+				"side-threads-control",
+				"session-bar-settle",
+				"session-bar-title-menu",
+				"session-bar-unread-chip",
+				"session-bar-state-chip",
+				"session-goal-subtitle",
+			];
+			for (const id of [
+				"session-bar-back",
+				"session-bar-island-overflow",
+				"session-bar-expand",
+				...small,
+				"background-tasks-toggle",
+				"background-tasks-row-stop-all",
+				"goal-details-pause",
+				"goal-details-resume",
+				"goal-details-edit",
+				"goal-details-clear",
+				"goal-details-new",
+				"goal-details-dismiss",
+			]) {
+				const control = world.page.getByTestId(id);
+				if (
+					!(await control.count()) ||
+					!(await control.isVisible()) ||
+					!(await control.evaluate((el) => el.tagName === "BUTTON"))
+				)
+					continue;
+				checked++;
+				const minimum =
+					small.includes(id) &&
+					!(
+						!(await world.page.getByTestId("background-tasks-row").count()) &&
+						(id === "session-goal-subtitle" ||
+							(id === "session-bar-state-chip" &&
+								!(await world.page
+									.getByTestId("session-goal-subtitle")
+									.count())))
+					)
+						? 24
+						: 44;
+				const target = await control.evaluate(inspectTouchTarget, minimum);
+				expect(target.width, id).toBeGreaterThanOrEqual(minimum);
+				expect(target.height, id).toBeGreaterThanOrEqual(minimum);
+				expect(
+					target.missing,
+					`${id}: ${JSON.stringify(target.failures)}`,
+				).toBe(0);
+			}
+			expect(checked).toBeGreaterThanOrEqual(2);
+		},
+	},
+	{
+		name: "verify Settle keyboard focus ring",
+		match:
+			/^the Settle segment shows a focus ring after tabbing and clears it after a pointer click$/,
+		run: async ({ world }) => {
+			const bar = world.page.getByTestId("session-bar");
+			const settle = world.page.getByTestId("session-bar-settle");
+			await expect(settle).toBeVisible();
+			await expect(settle).not.toBeFocused();
+			await expect(settle).toHaveCSS("box-shadow", "none");
+			await bar.click({ position: { x: 1, y: 1 } });
+			for (let tabs = 0; tabs < 20; tabs++) {
+				await world.page.keyboard.press("Tab");
+				if (await settle.evaluate((el) => el === document.activeElement)) break;
+			}
+			await expect(settle).toBeFocused();
+			await expect(settle.locator(":scope:focus-visible")).toHaveCount(1);
+			await expect(settle).not.toHaveCSS("box-shadow", "none");
+			const keyboardPath =
+				"acceptance/visual/artifacts/settle-keyboard-focus.png";
+			await bar.screenshot({ path: keyboardPath });
+			world.artifacts.push(keyboardPath);
+			await bar.click({ position: { x: 1, y: 1 } });
+			await expect(settle).not.toBeFocused();
+			await expect(settle).toHaveCSS("box-shadow", "none");
+			const pointerPath =
+				"acceptance/visual/artifacts/settle-pointer-focus.png";
+			await bar.screenshot({ path: pointerPath });
+			world.artifacts.push(pointerPath);
+		},
+	},
 	{
 		name: "set phone viewport",
 		match: /^the viewport is a phone$/,
@@ -22,11 +115,38 @@ export const sessionPresentationHandlers: StepHandler[] = [
 			requireRelayControl(world.page).sendMessage({
 				type: "user_message",
 				sessionId: "sess-mockup-001",
-				messageId: `other-device-${Date.now()}`,
 				text,
-				createdAt: Date.now(),
 			});
 			await world.page.locator("#messages").getByText(text).waitFor();
+		},
+	},
+	{
+		// Stands in for live-turn rows that render a beat after the message that
+		// triggered the follow scroll, before the browser dispatches its scroll event.
+		name: "transcript grows after a message lands",
+		match: /^the transcript grows by ([0-9]+) pixels just after (.+) lands$/,
+		run: async ({ world, match }) => {
+			await world.page.evaluate(
+				([px, text]) => {
+					const list = document.querySelector("#messages");
+					if (!list) throw new Error("no #messages");
+					const observer = new MutationObserver(() => {
+						if (!list.textContent?.includes(text)) return;
+						observer.disconnect();
+						setTimeout(() => {
+							const pad = document.createElement("div");
+							pad.style.height = `${px}px`;
+							list.appendChild(pad);
+						}, 0);
+					});
+					observer.observe(list, {
+						childList: true,
+						subtree: true,
+						characterData: true,
+					});
+				},
+				[Number(match[1]), match[2] ?? ""] as const,
+			);
 		},
 	},
 	{
@@ -36,6 +156,96 @@ export const sessionPresentationHandlers: StepHandler[] = [
 			const sign = match[1] === "up" ? -1 : 1;
 			await world.page.locator("#messages").hover();
 			await world.page.mouse.wheel(0, sign * Number(match[2]));
+		},
+	},
+	{
+		// A real touch scroll, not a wheel: Chromium drops a scrollTop write made
+		// mid-touch-scroll, which a wheel never shows.
+		name: "swipe transcript by touch",
+		match: /^I swipe the transcript towards (older|newer) by ([0-9]+) pixels$/,
+		run: async ({ world, match }) => {
+			const box = await world.page.locator("#messages").boundingBox();
+			if (!box) throw new Error("transcript has no box");
+			const cdp = await world.page.context().newCDPSession(world.page);
+			await cdp.send("Emulation.setTouchEmulationEnabled", {
+				enabled: true,
+				maxTouchPoints: 1,
+			});
+			await cdp.send("Input.synthesizeScrollGesture", {
+				x: box.x + box.width / 2,
+				y: box.y + box.height / 2,
+				yDistance: (match[1] === "older" ? 1 : -1) * Number(match[2]),
+				gestureSourceType: "touch",
+				speed: 600,
+			});
+			await cdp.detach();
+		},
+	},
+	{
+		name: "remember where the transcript content sits",
+		match: /^I remember where the transcript content sits$/,
+		run: async ({ world }) => {
+			const anchor = await world.page
+				.locator("#messages")
+				.evaluate(async (el) => {
+					// A wheel scroll animates, so wait until the offset holds still.
+					let last = Number.NaN;
+					for (
+						let still = 0;
+						still < 5;
+						still = el.scrollTop === last ? still + 1 : 0
+					) {
+						last = el.scrollTop;
+						await new Promise((resolve) => requestAnimationFrame(resolve));
+					}
+					const box = el.getBoundingClientRect();
+					const target = document.elementFromPoint(
+						box.left + 30,
+						box.top + el.clientHeight / 2,
+					);
+					if (!target || target === el || !el.contains(target))
+						return undefined;
+					for (const old of el.querySelectorAll("[data-test-anchor]"))
+						old.removeAttribute("data-test-anchor");
+					target.setAttribute("data-test-anchor", "");
+					return {
+						top: target.getBoundingClientRect().top,
+						gap: el.scrollHeight - el.scrollTop - el.clientHeight,
+					};
+				});
+			if (!anchor)
+				throw new Error(
+					"no transcript content at the middle of the transcript",
+				);
+			transcriptAnchors.set(world.page, anchor);
+		},
+	},
+	{
+		name: "transcript content moved",
+		match:
+			/^the transcript content moved (?:([0-9]+) pixels|its remembered distance from the bottom) towards (older|newer)$/,
+		run: async ({ world, match }) => {
+			const before = transcriptAnchors.get(world.page);
+			if (!before)
+				throw new Error("transcript content position was not remembered");
+			// Let a trailing frame (resize observers, scroll clamps) land first.
+			await world.page.evaluate(
+				() =>
+					new Promise((resolve) =>
+						requestAnimationFrame(() => requestAnimationFrame(resolve)),
+					),
+			);
+			const after = await world.page
+				.locator("#messages [data-test-anchor]")
+				.evaluate((el) => el.getBoundingClientRect().top);
+			const distance = match[1] === undefined ? before.gap : Number(match[1]);
+			const expected =
+				before.top + (match[2] === "older" ? distance : -distance);
+			if (Math.abs(after - expected) > 3) {
+				throw new Error(
+					`transcript content is at ${after}, expected ${expected} (started at ${before.top})`,
+				);
+			}
 		},
 	},
 	{
@@ -171,6 +381,14 @@ export const sessionPresentationHandlers: StepHandler[] = [
 		match: /^the transcript is visible at the remembered scroll position$/,
 		run: async ({ world }) => {
 			await world.page.locator("#messages").waitFor({ state: "visible" });
+			// The top clearance trails a bar resize by a frame (it is measured by a
+			// ResizeObserver), so let it land before measuring.
+			await world.page.evaluate(
+				() =>
+					new Promise((resolve) =>
+						requestAnimationFrame(() => requestAnimationFrame(resolve)),
+					),
+			);
 			const before = transcriptMessageTops.get(world.page);
 			const after = await world.page
 				.locator("#messages .msg-user")
@@ -188,6 +406,18 @@ export const sessionPresentationHandlers: StepHandler[] = [
 			await world.page.locator("#messages").evaluate((el) => {
 				el.scrollTo({ top: el.scrollHeight });
 			});
+		},
+	},
+	{
+		// Sets scrollTop directly: a wheel would also toggle the bar, and the
+		// scenario needs the bar change to come only from the step after this.
+		name: "park transcript just above the bottom",
+		match: /^the transcript is parked ([0-9]+) pixels above the bottom$/,
+		run: async ({ world, match }) => {
+			const gap = Number(match[1]);
+			await world.page.locator("#messages").evaluate((el, gap) => {
+				el.scrollTop = el.scrollHeight - el.clientHeight - gap;
+			}, gap);
 		},
 	},
 	{
@@ -256,7 +486,7 @@ export const sessionPresentationHandlers: StepHandler[] = [
 			if (
 				layout.compact !== "false" ||
 				layout.collapsed !== "false" ||
-				layout.height > 50
+				layout.height > 60
 			) {
 				throw new Error(
 					`desktop bar is not one row: ${JSON.stringify(layout)}`,
@@ -361,7 +591,14 @@ export const sessionPresentationHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			const menu = world.page.getByTestId("session-bar-overflow-menu");
 			await menu.waitFor({ state: "visible" });
-			const actions = await menu.getByRole("menuitem").allTextContents();
+			const actions = await menu
+				.locator('[data-testid^="overflow-"]')
+				.evaluateAll((items) =>
+					items.map(
+						(item) =>
+							item.getAttribute("aria-label") ?? item.textContent?.trim() ?? "",
+					),
+				);
 			const expected = ["Share", "Settings", "Debug panel"];
 			if (
 				JSON.stringify(actions.map((action) => action.trim())) !==

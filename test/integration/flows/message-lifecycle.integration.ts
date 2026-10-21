@@ -12,8 +12,7 @@ describe("Integration: Message Lifecycle", () => {
 	let harness: RelayHarness;
 
 	beforeEach(async () => {
-		harness = await createRelayHarness();
-		harness.mock.resetQueues();
+		harness = await createRelayHarness("chat-multi-turn");
 	}, 30_000);
 
 	afterEach(async () => {
@@ -34,8 +33,10 @@ describe("Integration: Message Lifecycle", () => {
 
 		// 2. The detail subscription publishes the assistant's text.
 		const message = await client.waitForAssistantText();
-		expect(message.text).toBeTruthy();
-		expect(typeof message.text).toBe("string");
+		// Live updates carry the text on its part, not the message header.
+		const text = message.parts?.find((part) => part.type === "text")?.text;
+		expect(text).toBeTruthy();
+		expect(typeof text).toBe("string");
 
 		// 3. The shell reports a completed turn, with no processing state left.
 		const done = await client.waitForTurnEnd();
@@ -59,10 +60,9 @@ describe("Integration: Message Lifecycle", () => {
 		expect(done1.status).toBe("idle");
 		expect(done1.attention).not.toBe("error");
 
-		// Clear messages between turns and reset mock queues so the second
-		// prompt_async has fresh SSE events (deltas + idle) to replay.
+		// The multi-turn recording gives the next turn distinct message IDs.
+		// Replaying the first turn would be deduplicated by the event store.
 		client.clearReceived();
-		harness.mock.resetQueues();
 
 		// --- Second message ---
 		await client.sendMessage("Reply with just 'two'.");
@@ -71,7 +71,9 @@ describe("Integration: Message Lifecycle", () => {
 		await client.waitForTurnStart();
 
 		const message2 = await client.waitForAssistantText();
-		expect(message2.text).toBeTruthy();
+		expect(
+			message2.parts?.find((part) => part.type === "text")?.text,
+		).toBeTruthy();
 
 		// Should complete
 		const done2 = await client.waitForTurnEnd();

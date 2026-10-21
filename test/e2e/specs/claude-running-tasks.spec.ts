@@ -1,8 +1,8 @@
 // A turn that left background work running says so: its head shows "N running"
 // beside the cost (nested tasks included) and the launching steps keep
 // breathing on the strip after the turn's result, until the tasks finish. The
-// session lists background agents beside shells in its tasks row, composer
-// dots and pull-down, nests an agent's tasks under it, reads as monitoring
+// session lists background agents beside shells in its tasks row and
+// pull-down, nests an agent's tasks under it, reads as monitoring
 // while they run. Task stops cross the real process runner in
 // harness-background-task-stop.spec.ts; recorded replay has no stopTask replies.
 // Spec: conduit-test-i7fy.8.
@@ -33,6 +33,17 @@ const replay: ClaudeReplayPlan = {
 	holdBefore: { turn: 1, message: 104 },
 };
 
+/** The live-task count sits in each turn's step-log footer: open the logs. */
+async function openStepLogs(page: Page) {
+	await expect(page.locator(".turn-activity-toggle").first()).toBeVisible();
+	const collapsed = page.locator(
+		'.turn-activity-toggle[aria-expanded="false"]',
+	);
+	while (await collapsed.count()) await collapsed.first().click();
+	// A hovered head opens its tooltip, which repeats the count.
+	await page.mouse.move(0, 0);
+}
+
 /** What the parent turn and the session say about live background work. */
 async function readSurfaces(page: Page, sessionId: string) {
 	const turn = page.locator(".turn-activity").first();
@@ -42,17 +53,14 @@ async function readSurfaces(page: Page, sessionId: string) {
 			text.replace(/\s+/g, " ").trim(),
 		),
 		breathing: await turn
-			.locator('[aria-label^="Activity timeline"] button.animate-pulse')
+			.locator('[aria-label^="Activity timeline"] .animate-pulse')
 			.count(),
 		sidebar: await page
 			.locator(`#session-list [data-session-id="${sessionId}"]`)
 			.getAttribute("aria-label"),
 		tasksRow: (await page.getByTestId("background-tasks-row").isVisible())
-			? await page
-					.getByTestId("background-tasks-row")
-					.getAttribute("aria-label")
+			? await page.getByTestId("background-tasks-row").innerText()
 			: null,
-		dots: await page.getByTestId("composer-task-dots").locator("i").count(),
 		pulldown: (await panel.isVisible())
 			? await panel.getByTestId("background-task").evaluateAll((nodes) =>
 					nodes.map((node) => ({
@@ -120,7 +128,7 @@ function recorder(
 test.describe("Claude running tasks", () => {
 	test.use({ claudeReplay: replay });
 
-	test("the turn head counts its live tasks and the session monitors its agents until they finish", async ({
+	test("the step log counts its live tasks and the session monitors its agents until they finish", async ({
 		page,
 		relayUrl,
 		harness,
@@ -135,7 +143,9 @@ test.describe("Claude running tasks", () => {
 		if (!replayer) throw new Error("no Claude replayer");
 		const steps = recorder(page, testInfo, sessionId, harness.eventsDbPath);
 		const pill = page.locator(".turn-running");
-		const tasksRow = page.getByTestId("background-tasks-row");
+		const tasksRow = page.getByRole("button", {
+			name: /^\d+ background tasks?$/,
+		});
 		const sidebarRow = page.locator(
 			`#session-list [data-session-id="${sessionId}"]`,
 		);
@@ -146,17 +156,15 @@ test.describe("Claude running tasks", () => {
 				.poll(() => chat.getLastAssistantText(), { timeout: 30_000 })
 				.toContain("launched.");
 			await replayer.held();
+			await openStepLogs(page);
 
 			// The parent's result: the shell, both agents and agent A's first
 			// nested shell are live. The three launching steps still breathe.
 			await expect(pill).toHaveText(/^\s*4\s+running\s*$/);
-			await expect(tasksRow).toHaveAttribute(
-				"aria-label",
-				"4 background tasks",
-			);
+			await expect(tasksRow).toHaveAccessibleName("4 background tasks");
 			await expect(
-				page.getByTestId("composer-task-dots").locator("i"),
-			).toHaveCount(4);
+				page.getByRole("button", { name: "4 background tasks", exact: true }),
+			).toBeVisible();
 			const atResult = await steps.record("parent-result");
 			expect.soft(atResult.breathing, "launching steps breathing").toBe(3);
 
@@ -170,13 +178,10 @@ test.describe("Claude running tasks", () => {
 				sidebarRow,
 				"background agents ran after the turn but the session did not read as monitoring",
 			).toHaveAttribute("aria-label", /^Monitoring/);
-			await expect(tasksRow).toHaveAttribute(
-				"aria-label",
-				"5 background tasks",
-			);
+			await expect(tasksRow).toHaveAccessibleName("5 background tasks");
 			await expect(
-				page.getByTestId("composer-task-dots").locator("i"),
-			).toHaveCount(5);
+				page.getByRole("button", { name: "5 background tasks", exact: true }),
+			).toBeVisible();
 			await tasksRow.click();
 			await expect(page.getByTestId("background-tasks-panel")).toBeVisible();
 			const nested = await steps.record("nested-running");
@@ -216,6 +221,7 @@ test.describe("Claude running tasks", () => {
 			await expect(page.getByTestId("parent-session-status")).toHaveText(
 				"Monitoring",
 			);
+			await openStepLogs(page);
 			// Each of the agent's turns counts the shells it launched: one turn
 			// with both, or two with one each, as the agent's turns fell.
 			await expect
@@ -230,6 +236,7 @@ test.describe("Claude running tasks", () => {
 				.toBe(2);
 			await steps.record("child-session");
 			await gotoRelay(page, relayUrl);
+			await openStepLogs(page);
 			await expect(pill).toHaveText(/^\s*5\s+running\s*$/);
 
 			// Every task finishes: the pill goes, the strip settles, the session
@@ -241,7 +248,9 @@ test.describe("Claude running tasks", () => {
 			await chat.waitForStreamingComplete();
 			await expect(pill).toHaveCount(0);
 			await expect(tasksRow).toBeHidden();
-			await expect(page.getByTestId("composer-task-dots")).toBeHidden();
+			await expect(
+				page.getByRole("button", { name: /^\d+ background tasks?$/ }),
+			).toHaveCount(0);
 			await expect(sidebarRow).not.toHaveAttribute("aria-label", /^Monitoring/);
 			const finished = await steps.record("finished");
 			expect.soft(finished.breathing, "launching steps breathing").toBe(0);
@@ -251,6 +260,7 @@ test.describe("Claude running tasks", () => {
 			await expect
 				.poll(() => chat.getLastAssistantText(), { timeout: 30_000 })
 				.toContain("The top-level 40-second shell finished.");
+			await openStepLogs(page);
 			await expect(pill).toHaveCount(0);
 			const reloaded = await steps.record("reloaded");
 			expect.soft(reloaded.breathing, "launching steps breathing").toBe(0);

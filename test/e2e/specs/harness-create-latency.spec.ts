@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { BrowserContext, Page } from "@playwright/test";
@@ -26,14 +26,19 @@ const parameters = {
 	devices: parameter("CREATE_LATENCY_DEVICES", 4),
 	creates: parameter("CREATE_LATENCY_CREATES", 50),
 	arrivalTimeoutMs: parameter("CREATE_LATENCY_ARRIVAL_TIMEOUT_MS", 5_000),
-	gapMs: 200,
+	// About 4x the worst p90 seen under load average >400 (60 ms): flags gross
+	// regressions, not OS scheduling noise.
+	p90CeilingMs: parameter("CREATE_LATENCY_P90_CEILING_MS", 250),
 	streams: 3,
 	streamIntervalMs: 100,
+	ticksPerCreate: 2,
 	slowRpcMs: 1,
 	traceMinMs: 5,
 };
-// Calibrated 2026-10-16: worst p90 of three runs (30.7 ms) x 1.5, rounded up to 25 ms.
-const budgetMs = parameter("CREATE_LATENCY_P90_BUDGET_MS", 50);
+// A live window can contain only the creates and the three streaming sessions.
+// Count materialized rows to catch full-sidebar reads without measuring how
+// long the OS leaves the daemon or any of the browsers waiting to run.
+const sidebarRowBudget = parameters.creates + parameters.streams;
 const now = () => performance.timeOrigin + performance.now();
 
 interface ArrivalObserver {
@@ -204,11 +209,16 @@ interface Sample {
 	rpcMs: number | null;
 	arrivals: { device: number; at: number | null; ms: number | null }[];
 	slowestMs: number | null;
+	backgroundTicks: number[];
 	arrivalError?: string;
 }
 
 interface Metrics {
 	readonly flushedAt: number;
+	readonly sidebarReads: readonly {
+		readonly at: number;
+		readonly rows: number;
+	}[];
 	readonly readModelReads: readonly {
 		readonly at: number;
 		readonly source: string;
@@ -227,7 +237,7 @@ test("creates reach every sidebar under streaming write load", async ({
 	const contexts: BrowserContext[] = [];
 	const samples: Sample[] = [];
 	const metricsFile = join(harness.root, "create-latency-metrics.json");
-	const logFile = join(harness.root, "create-latency-daemon.log");
+	const logFile = testInfo.outputPath("create-latency-daemon.log");
 	const traceFile = join(harness.root, "create-latency.trace.ndjson");
 	const expectedWriteRate =
 		(parameters.streams * 1_000) / parameters.streamIntervalMs;
@@ -236,8 +246,10 @@ test("creates reach every sidebar under streaming write load", async ({
 	let backgroundTicks = 0;
 	let achievedWriteRate = 0;
 	let backgroundMeasured = false;
+	let streamTicks: number[] = [];
 	const diagnosticErrors: string[] = [];
 	const shellReads: Record<string, number> = {};
+	let sidebarReads: Metrics["sidebarReads"] = [];
 	let fixture: Awaited<ReturnType<typeof seedSessionLoadFixture>> | null = null;
 	let stopped = false;
 	let debuggedSessionId: string | null = null;
@@ -255,7 +267,9 @@ test("creates reach every sidebar under streaming write load", async ({
 		await harness.terminate();
 		fixture = await seedSessionLoadFixture(harness.daemonStorePath(), {
 			projectId: "process-test",
+			seen: true,
 		});
+		harness.disableIdlePolicies();
 		await harness.restart({
 			keepPort: true,
 			skipBrowserProbe: true,
@@ -298,41 +312,63 @@ test("creates reach every sidebar under streaming write load", async ({
 			);
 			streams.push(sessionId);
 		}
-		const pages: Page[] = [];
-		for (let device = 0; device < parameters.devices; device++) {
-			const context = await browser.newContext({
-				viewport: { width: 1440, height: 900 },
-				isMobile: false,
-			});
-			contexts.push(context);
-			const page = await context.newPage();
-			pages.push(page);
-			await new AppPage(page).goto(`${harness.baseUrl}/?p=process-test`);
-			await expect(
-				page.locator(`[data-session-id="${HEAVY_SESSION_ID}"]`).first(),
-			).toBeVisible({ timeout: 30_000 });
-		}
 		const database = new DatabaseSync(harness.daemonStorePath(), {
 			readOnly: true,
 		});
 		try {
+			// Initial Git publication stamps every seeded sidebar row in the same
+			// transaction. Finish it before opening the measured subscriptions.
+			const published = database.prepare(
+				"SELECT 1 FROM session_git_published WHERE directory = ?",
+			);
+			await expect
+				.poll(() => published.get(harness.projectDir) !== undefined)
+				.toBe(true);
+			const pages: Page[] = [];
+			for (let device = 0; device < parameters.devices; device++) {
+				const context = await browser.newContext({
+					viewport: { width: 1440, height: 900 },
+					isMobile: false,
+				});
+				contexts.push(context);
+				const page = await context.newPage();
+				pages.push(page);
+				// New idle sessions must enter the rendered page ahead of the 5,001
+				// seeded unread roots, which precede idle rows in status grouping.
+				await new AppPage(page).goto(
+					`${harness.baseUrl}/?p=process-test&group=time`,
+				);
+				await expect(
+					page.locator(`[data-session-id="${HEAVY_SESSION_ID}"]`).first(),
+				).toBeVisible({ timeout: 30_000 });
+			}
 			// Count tick tokens, so coalescing several SDK deltas into one event
 			// cannot inflate or undercount the achieved background write rate.
 			const tickQuery = database.prepare(`
-				SELECT coalesce(sum((length(json_extract(data, '$.text')) -
+				SELECT session_id, coalesce(sum((length(json_extract(data, '$.text')) -
 					length(replace(json_extract(data, '$.text'), 'tick(', ''))) / 5), 0) AS n
 				FROM events WHERE type = 'text.delta'
 				AND session_id IN (${streams.map(() => "?").join(",")})
+				GROUP BY session_id
 			`);
-			const ticks = () => Number(tickQuery.get(...streams)?.["n"] ?? 0);
-			await expect.poll(ticks).toBeGreaterThan(parameters.streams * 10);
-			// Let connection snapshots settle before measuring replacement reads.
-			await new Promise((resolve) => setTimeout(resolve, 500));
+			const ticks = () => {
+				const counts = new Map(
+					tickQuery
+						.all(...streams)
+						.map((row) => [String(row["session_id"]), Number(row["n"])]),
+				);
+				streamTicks = streams.map((id) => counts.get(id) ?? 0);
+				return streamTicks;
+			};
+			await expect.poll(() => Math.min(...ticks())).toBeGreaterThan(10);
+			// Each device has rendered its snapshot above, so its initial sidebar
+			// read is already complete before the measured live windows start.
 			const beforeTicks = ticks();
 			phaseStart = now();
 			try {
 				const pending: Promise<void>[] = [];
 				for (let index = 0; index < parameters.creates; index++) {
+					const beforeCreateTicks = ticks();
 					await Promise.all(pages.map((page) => armArrival(page, index)));
 					const sample: Sample = {
 						index,
@@ -345,6 +381,7 @@ test("creates reach every sidebar under streaming write load", async ({
 							ms: null,
 						})),
 						slowestMs: null,
+						backgroundTicks: [],
 					};
 					samples.push(sample);
 					const reply = await Effect.runPromise(
@@ -389,16 +426,27 @@ test("creates reach every sidebar under streaming write load", async ({
 							},
 						),
 					);
-					if (index + 1 < parameters.creates)
-						await new Promise((resolve) =>
-							setTimeout(resolve, parameters.gapMs),
-						);
+					// Keep the same two ticks per stream/create as the former 200 ms
+					// cadence. Waiting for persisted work also tolerates OS scheduling
+					// delays without silently reducing the background workload.
+					await expect
+						.poll(() => {
+							sample.backgroundTicks = ticks().map(
+								(count, stream) => count - (beforeCreateTicks[stream] ?? 0),
+							);
+							return Math.min(...sample.backgroundTicks);
+						})
+						.toBeGreaterThanOrEqual(parameters.ticksPerCreate);
 				}
 				await Promise.all(pending);
 			} finally {
 				phaseEnd = now();
 				try {
-					backgroundTicks = ticks() - beforeTicks;
+					backgroundTicks = ticks().reduce(
+						(total, count, stream) =>
+							total + count - (beforeTicks[stream] ?? 0),
+						0,
+					);
 					achievedWriteRate =
 						(backgroundTicks * 1_000) / (phaseEnd - phaseStart);
 					backgroundMeasured = true;
@@ -441,15 +489,9 @@ test("creates reach every sidebar under streaming write load", async ({
 						slowestMs === null ? [] : [slowestMs],
 					),
 				).p90,
-				"Create-to-slowest-device p90 must stay within its calibrated budget",
+				"Create-to-slowest-device p90 must stay under its regression ceiling",
 			)
-			.toBeLessThanOrEqual(budgetMs);
-		expect
-			.soft(
-				achievedWriteRate,
-				"Background streams must sustain at least 80% of their configured write rate",
-			)
-			.toBeGreaterThanOrEqual(expectedWriteRate * 0.8);
+			.toBeLessThanOrEqual(parameters.p90CeilingMs);
 		expect
 			.soft(
 				slowRecords.length,
@@ -522,6 +564,13 @@ test("creates reach every sidebar under streaming write load", async ({
 					readFileSync(metricsFile, "utf8"),
 				) as Metrics;
 				metricsFlushedAt = metrics.flushedAt;
+				sidebarReads = metrics.sidebarReads.filter(
+					(read) =>
+						phaseStart !== null &&
+						phaseEnd !== null &&
+						read.at >= phaseStart &&
+						read.at <= phaseEnd,
+				);
 				for (const read of metrics.readModelReads) {
 					if (
 						read.source === "shell" &&
@@ -549,7 +598,7 @@ test("creates reach every sidebar under streaming write load", async ({
 		);
 		const report = {
 			parameters,
-			budgetMs,
+			sidebarRowBudget,
 			fixture,
 			phaseStart,
 			phaseEnd,
@@ -566,6 +615,7 @@ test("creates reach every sidebar under streaming write load", async ({
 			),
 			background: {
 				measured: backgroundMeasured,
+				streamTicks,
 				expectedWriteRate,
 				achievedWriteRate,
 				persistedTicks: backgroundTicks,
@@ -582,20 +632,27 @@ test("creates reach every sidebar under streaming write load", async ({
 					0,
 				),
 				replacements: shellReads["replacement"] ?? 0,
+				sidebarReads,
+				maxRowsPerRead: Math.max(0, ...sidebarReads.map(({ rows }) => rows)),
 			},
 			slowRpc: slowRecords,
 			trace: traceSummary(traceFile, debuggedSessionId),
 		};
-		mkdirSync("test-results", { recursive: true });
-		const output = join(
-			"test-results",
-			`create-latency.${testInfo.project.name}.json`,
-		);
+		const output = testInfo.outputPath("create-latency.json");
 		writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`);
 		await testInfo.attach("create-latency", {
 			path: output,
 			contentType: "application/json",
 		});
+		expect
+			.soft(sidebarReads.length, "Creates must exercise live sidebar reads")
+			.toBeGreaterThan(0);
+		expect
+			.soft(
+				report.shell.maxRowsPerRead,
+				"Live reads must materialize changed sessions within the row budget",
+			)
+			.toBeLessThanOrEqual(sidebarRowBudget);
 		expect
 			.soft(
 				shellReads["replacement"] ?? 0,
@@ -642,7 +699,9 @@ test("overflow catches up every sidebar through create and delete bursts", async
 		await harness.terminate();
 		await seedSessionLoadFixture(harness.daemonStorePath(), {
 			projectId: "process-test",
+			seen: true,
 		});
+		harness.disableIdlePolicies();
 		await harness.restart({
 			keepPort: true,
 			skipBrowserProbe: true,
@@ -681,7 +740,9 @@ test("overflow catches up every sidebar through create and delete bursts", async
 			contexts.push(context);
 			const page = await context.newPage();
 			pages[device] = page;
-			await new AppPage(page).goto(`${harness.baseUrl}/?p=process-test`);
+			await new AppPage(page).goto(
+				`${harness.baseUrl}/?p=process-test&group=time`,
+			);
 			await expect(
 				page.locator(`[data-session-id="${HEAVY_SESSION_ID}"]`).first(),
 			).toBeVisible({ timeout: 30_000 });
@@ -699,7 +760,14 @@ test("overflow catches up every sidebar through create and delete bursts", async
 			const ticks = () => Number(tickQuery.get(...streams)?.["n"] ?? 0);
 			await expect.poll(ticks).toBeGreaterThan(parameters.streams * 10);
 			// Keep setup snapshots outside the measured burst, as in the latency test.
-			await new Promise((resolve) => setTimeout(resolve, 500));
+			const setupRenderedAt = now();
+			await expect
+				.poll(
+					() =>
+						(JSON.parse(readFileSync(metricsFile, "utf8")) as Metrics)
+							.flushedAt,
+				)
+				.toBeGreaterThan(setupRenderedAt);
 			const beforeTicks = ticks();
 			phaseStart = now();
 			await Promise.all(
@@ -832,11 +900,7 @@ test("overflow catches up every sidebar through create and delete bursts", async
 			if (result.status === "rejected")
 				cleanupErrors.push(String(result.reason));
 		}
-		mkdirSync("test-results", { recursive: true });
-		const output = join(
-			"test-results",
-			`overflow-catch-up.${testInfo.project.name}.json`,
-		);
+		const output = testInfo.outputPath("overflow-catch-up.json");
 		writeFileSync(
 			output,
 			`${JSON.stringify(

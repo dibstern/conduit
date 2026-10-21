@@ -1,10 +1,12 @@
 import { subscribe } from "node:diagnostics_channel";
+import { once } from "node:events";
 import {
 	appendFileSync,
 	existsSync,
 	readFileSync,
 	renameSync,
 	statSync,
+	watch,
 	writeFileSync,
 } from "node:fs";
 import { Session } from "node:inspector/promises";
@@ -351,6 +353,75 @@ async function main(): Promise<void> {
 		? join(dist, "src")
 		: fileURLToPath(new URL("../../src", import.meta.url));
 	const extension = dist ? "js" : "ts";
+	if (existsSync(join(root, "claude-end-session-failure-fixture"))) {
+		const { OrchestrationEngine } = (await import(
+			pathToFileURL(
+				join(codeRoot, "lib/provider", `orchestration-engine.${extension}`),
+			).href
+		)) as typeof import("../../src/lib/provider/orchestration-engine.js");
+		const dispatch = OrchestrationEngine.prototype.dispatchEffect;
+		Object.assign(OrchestrationEngine.prototype, {
+			dispatchEffect(
+				this: InstanceType<typeof OrchestrationEngine>,
+				command: import("../../src/lib/provider/orchestration-engine.js").OrchestrationCommand,
+			) {
+				return Effect.suspend(() => {
+					if (command.type === "end_session")
+						appendFileSync(
+							join(root, "end-session-commands.ndjson"),
+							`${JSON.stringify({
+								sessionId: command.sessionId,
+								unbind: command.unbind ?? false,
+							})}\n`,
+						);
+					return dispatch.call(this, command);
+				});
+			},
+		});
+		const { ClaudeDriver } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/provider/claude",
+					`claude-provider-instance.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/provider/claude/claude-provider-instance.js");
+		const { ProviderInstanceFailure } = (await import(
+			pathToFileURL(join(codeRoot, "lib/provider", `errors.${extension}`)).href
+		)) as typeof import("../../src/lib/provider/errors.js");
+		const create = ClaudeDriver.create;
+		Object.assign(ClaudeDriver, {
+			create: (
+				deps: import("../../src/lib/provider/claude/claude-provider-instance.js").ClaudeProviderInstanceDeps,
+			) =>
+				create(deps).pipe(
+					Effect.tap((instance) =>
+						Effect.sync(() => {
+							const endSession = instance.endSessionEffect.bind(instance);
+							instance.endSessionEffect = (sessionId) =>
+								Effect.suspend(() => {
+									if (!existsSync(join(root, `fail-end-session-${sessionId}`)))
+										return endSession(sessionId);
+									appendFileSync(
+										join(root, "end-session-failures.ndjson"),
+										`${JSON.stringify({ sessionId })}\n`,
+									);
+									return Effect.fail(
+										new ProviderInstanceFailure({
+											providerId: "claude",
+											operation: "endSession",
+											cause: new Error(
+												"Fixture end_session failure leaves the runner alive",
+											),
+										}),
+									);
+								});
+						}),
+					),
+				),
+		});
+	}
 	const metricsFile = process.env["CONDUIT_TEST_SERVER_METRICS"];
 	if (metricsFile)
 		recordServerMetrics(
@@ -377,7 +448,10 @@ async function main(): Promise<void> {
 					) as import("../../src/lib/provider/claude/claude-capabilities-probe.js").ProbeResult)
 				: { models: [], agents: [], commands: [] };
 		};
-	if (existsSync(join(root, "capabilities-probe-gated"))) {
+	if (
+		existsSync(join(root, "capabilities-probe-gated")) ||
+		existsSync(join(root, "capabilities-probe-result.json"))
+	) {
 		const { ClaudeDriver } = (await import(
 			pathToFileURL(
 				join(
@@ -474,11 +548,12 @@ async function main(): Promise<void> {
 			),
 		).href
 	)) as typeof import("../../src/lib/domain/daemon/Layers/daemon-foreground.js");
+	const configDir =
+		process.env["CONDUIT_TEST_DAEMON_CONFIG_DIR"] ?? join(root, "config");
 	const activeDaemon = await startForegroundDaemon({
 		port: Number(process.env["CONDUIT_TEST_PORT"] ?? 0),
 		host: "127.0.0.1",
-		configDir:
-			process.env["CONDUIT_TEST_DAEMON_CONFIG_DIR"] ?? join(root, "config"),
+		configDir,
 		claudeConfigDir: process.env["CLAUDE_CONFIG_DIR"] ?? join(root, "claude"),
 		staticDir: dist ? join(dist, "frontend") : join(root, "static"),
 		smartDefault: false,
@@ -494,7 +569,32 @@ async function main(): Promise<void> {
 		await activeDaemon.stop();
 		process.exit(0);
 	}
-	await activeDaemon.addProject(join(root, "process-test"));
+	// Restarts must preserve a test's deliberate project removal.
+	const defaultProjectRegistered = join(root, "default-project-registered");
+	if (
+		process.env["CONDUIT_TEST_REGISTER_PROJECT"] === "1" &&
+		!existsSync(defaultProjectRegistered)
+	) {
+		const changes = watch(configDir);
+		try {
+			await activeDaemon.addProject(join(root, "process-test"));
+			while (true) {
+				const stored = JSON.parse(
+					readFileSync(join(configDir, "daemon.json"), "utf8"),
+				) as { projects: { folders: string[] }[] };
+				if (
+					stored.projects.some((project) =>
+						project.folders.includes(join(root, "process-test")),
+					)
+				)
+					break;
+				await once(changes, "change");
+			}
+			writeFileSync(defaultProjectRegistered, "registered\n");
+		} finally {
+			changes.close();
+		}
+	}
 	process.send({
 		channel: "conduit-process-test",
 		kind: "ready",

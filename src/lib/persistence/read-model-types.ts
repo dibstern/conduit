@@ -20,6 +20,7 @@ export interface SessionRow {
 	fork_point_timestamp?: number | null;
 	fork_point_message_id?: string | null;
 	last_message_at: number | null;
+	last_user_message_at?: number | null;
 	last_turn_error_at: number | null;
 	permission_mode: string | null;
 	model_id?: string | null;
@@ -107,6 +108,7 @@ export interface MessageRow {
 	context_window: number | null;
 	is_streaming: number;
 	is_backfilled: number;
+	is_inherited?: number;
 	input_id?: string | null;
 	steered?: number;
 	rest_digest?: string | null;
@@ -137,8 +139,15 @@ export interface MessagePartRow {
 	created_at: number;
 	updated_at: number;
 	version: PartVersion;
+	surfacing_ordinal?: number | null;
+	surfacing_probabilities?: string | null;
+	surfacing_set_version?: number | null;
+	surfacing_model?: string | null;
+	surfacing_mark?: string | null;
+	/** Set by the read query from `message_part_read_state`. */
+	surfacing_read?: boolean;
 	rest_payload?: string | null;
-	/** Set when a previewing read cut `result`: the whole output's UTF-8 size. */
+	/** Set when stored or read as a preview: the whole output's UTF-8 size. */
 	result_bytes?: number | null;
 }
 

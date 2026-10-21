@@ -5,7 +5,6 @@ import { Effect, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClaudeRunnerSocket } from "../../../src/lib/provider/claude/claude-runner-protocol.js";
 import type { RunnerMessage } from "../../../src/lib/provider/runner/runner-protocol.js";
-import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import {
 	type ProcessBrowser,
 	ProcessHarness,
@@ -101,71 +100,6 @@ describe("foreground daemon process harness", () => {
 				// Successful teardown already killed this fixture-owned PID.
 			}
 		}
-	});
-
-	it.each([
-		"allow",
-		"deny",
-	] as const)("resolves a tool approval through browser RPC with decision %s", async (decision) => {
-		harness = await ProcessHarness.start();
-		const browser = await harness.connect();
-		const sessionId = await browser.createSession();
-		const cursor = browser.frames.length;
-		const pending = browser.send(sessionId, "approval-proof");
-		const request = await browser.waitFor(
-			(message) => message["type"] === "permission_pending",
-			cursor,
-		);
-		expect(request["toolName"]).toBe("Bash");
-		expect(request["toolInput"]).toEqual({
-			command: "printf harness-approved",
-		});
-		expect(
-			browser.frames
-				.slice(cursor)
-				.some(
-					({ message }) =>
-						message["type"] === "transcript_message" &&
-						(message["parts"] as HistoryMessage["parts"])?.some(
-							(part) =>
-								part.type === "tool" && part.state?.status === "completed",
-						) === true,
-				),
-		).toBe(false);
-		await browser.answerApproval(request, decision);
-		const turn = await pending;
-		expect(turn.chunks.join("")).toBe(
-			responseChunks("approval-proof").join(""),
-		);
-		await browser.waitFor(
-			(message) =>
-				message["type"] === "approval_removed" &&
-				message["id"] === request["requestId"],
-			cursor,
-		);
-		const result = await browser.waitFor(
-			(message) =>
-				message["type"] === "transcript_message" &&
-				(message["parts"] as HistoryMessage["parts"])?.some(
-					(part) => part.type === "tool" && part.state?.status === "completed",
-				) === true,
-			cursor,
-		);
-		expect(result["parts"]).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({
-					type: "tool",
-					state: expect.objectContaining({
-						status: "completed",
-						output: {
-							_tag: "whole",
-							text:
-								decision === "allow" ? "harness-approved" : "harness-denied",
-						},
-					}),
-				}),
-			]),
-		);
 	});
 
 	it("survives SIGKILL, reconnects on the same dirs, and reads persisted history", async () => {

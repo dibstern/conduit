@@ -14,6 +14,48 @@ pnpm test:unit
 
 Start there unless the change crosses a boundary that unit tests cannot cover.
 
+## Release gate
+
+Release CI (`.github/workflows/npm-release.yml`) is the authoritative release
+gate. It runs every group defined in `scripts/test-all.sh`, the single source
+of truth for the `pnpm test:all` stage list. Multiple groups overlap static
+checks with builds, then integration/contract with strict Storybook visuals.
+Builds finish before any dist/ readers; unit, Storybook interaction and E2E
+suites run separately to limit CPU contention. Lane logs and isolated Playwright
+artifacts stay in the printed temporary run directory. The summary lists stages
+in the original order with results, timings and total wall time; any failure
+exits non-zero.
+
+| Group | Stages | Release job | Runner |
+| --- | --- | --- | --- |
+| `static` | Type check, lint | `lint-and-build` | `ubuntu-latest` |
+| `vitest` | Unit, integration, contract | `vitest` | `ubuntu-latest` |
+| `build` | Build | `lint-and-build` | `ubuntu-latest` |
+| `e2e` | Replay, harness, daemon, preview Playwright configs, including all configured projects | `e2e` | `ubuntu-latest` |
+| `storybook` | Storybook build, interaction and a11y | `storybook` | `ubuntu-latest` |
+| `visual` | Strict Darwin Storybook visual | `visual` | `macos-latest` |
+
+The release job waits for every verification job. The existing release-only
+build-output tests also run in `lint-and-build`, after the `build` group.
+Normal CI (`ci.yml`) runs a narrower set of checks.
+
+Run one or more groups locally:
+
+```bash
+bash scripts/test-all.sh static
+bash scripts/test-all.sh build e2e
+bash scripts/test-all.sh storybook visual  # macOS, for Darwin baselines
+```
+
+Single groups keep their original commands, order and output locations. Each
+selected group runs once. Install Chromium with
+`pnpm exec playwright install --with-deps chromium` for the `e2e`,
+`storybook`, and `visual` groups. `e2e` needs `dist/` from the `build` group or
+CI's build artifact. Some integration tests also read `dist/`, so keep it current
+when selecting `vitest` without `build`. `visual` needs `dist/storybook/` from
+the `storybook` group or `pnpm storybook:build`, which its macOS job runs as a
+prerequisite.
+
 ## Pre-commit
 
 Lefthook runs every check in parallel: Biome on staged files, `pnpm lint:rules`,
@@ -41,6 +83,9 @@ Run this when changing daemon, relay, server, session, or instance behavior that
 pnpm test:integration
 pnpm test:contract
 ```
+
+Integration files run in parallel in up to 4 fork workers. Set
+`CONDUIT_INTEGRATION_WORKERS=<positive integer>` to override the worker cap.
 
 ### Claude process runners
 
@@ -140,7 +185,7 @@ Run this when changing touch gestures, long-press, or text selection on phones. 
 pnpm test:e2e:ios
 ```
 
-Needs Xcode with an iOS simulator runtime. `safaridriver` boots a simulator itself. Verified on iPhone 17e, iOS 26.5, with no extra setup. An iOS 27.0 simulator refused automation sessions ("Could not find any session hosts"), so pin a working device with `IOS_SIMULATOR_UDID=<udid>` from `xcrun simctl list devices`. Evidence goes to `test-results/ios-long-press/`: `result.json` and a screenshot after each hold.
+Needs Xcode with an iOS simulator runtime. `safaridriver` boots a simulator itself. Verified on iPhone 17e, iOS 26.5, with no extra setup. An iOS 27.0 simulator refused automation sessions ("Could not find any session hosts"), so pin a working device with `IOS_SIMULATOR_UDID=<udid>` from `xcrun simctl list devices`. Evidence goes to `test-results/ios-long-press/`: `result.json` and a screenshot after each hold. The script also builds Storybook and drives `UI/HoldMenu` (Device Probe) through tap, dim-tap, hold-slide-release on and off the list, and hold-release in place; its `result.json` and twelve step screenshots go to `test-results/ios-hold-menu/`. A swipe that turns into a native scroll hangs safaridriver, so swipe cases live in the Chromium touch spec (`test/visual/hold-menu.spec.ts`). If a run hangs or reports "already paired with a different session", stop the stale `safaridriver` you started, then `xcrun simctl terminate <udid> com.apple.mobilesafari`.
 
 WebDriver lifts the finger at (0,0), which drags any live selection toward the top-left, so a screenshot can show a bigger highlight than a person would get. The assertions count only selections made while the finger is still down.
 
@@ -207,9 +252,13 @@ CONDUIT_TEST_DIST=dist pnpm exec playwright test --config test/e2e/playwright-ha
 ```
 
 The create-latency gate reuses that isolated store and fake streams. It sends
-raw CreateSession RPCs 200 ms apart while four desktop devices hold the sidebar
-open. Its clock includes the first rendered row on each device, measured by
-observers armed before each RPC.
+raw CreateSession RPCs while four desktop devices hold the sidebar open,
+waiting for two newly persisted ticks from each stream between creates.
+This preserves the background work of the former 200 ms cadence under load.
+Devices use chronological grouping so the new idle sessions enter the rendered
+page ahead of the 5,001 seeded unread roots.
+Its clock includes the first rendered row on each device, measured by observers
+armed before each RPC.
 
 ```sh
 export npm_config_verify_deps_before_run=false pnpm_config_verify_deps_before_run=false
@@ -217,22 +266,26 @@ pnpm test:perf:create </dev/null
 ```
 
 Parameters are `CREATE_LATENCY_DEVICES` (4), `CREATE_LATENCY_CREATES` (50),
-`CREATE_LATENCY_P90_BUDGET_MS` (50), and
-`CREATE_LATENCY_ARRIVAL_TIMEOUT_MS` (5000). The test always uses three existing
+`CREATE_LATENCY_ARRIVAL_TIMEOUT_MS` (5000), and `CREATE_LATENCY_P90_CEILING_MS` (250). The test always uses three existing
 100 ms fake Claude streams, `CONDUIT_SLOW_RPC_MS=1`, and
 `CONDUIT_TRACE_MIN_MS=5` in its isolated daemon. Before the measured phase, it
 creates a stream session and restarts with `CONDUIT_TRACE_SESSION` set to that
 session's ID, retaining its short successful spans while filtering other sessions.
 
-The 50 ms budget is the worst p90 of three runs (30.7 ms on an M-series Mac)
-multiplied by 1.5 and rounded up to a multiple of 25 ms. Recalibrate the same
-way after an intended change to the create or sidebar path.
+The regression gate counts rows materialized per live sidebar read. Each read
+must contain at most the created sessions plus the three streaming sessions,
+even when several changes coalesce into one window. Reading the whole sidebar
+from the 10,000-session store fails this bound independently of machine load.
+Latency has only a loose p90 ceiling, about 4x the worst p90 seen under heavy
+load, because a tight limit also measures OS scheduling delays.
 
-The attached `test-results/create-latency.desktop.json` records parameters,
-budget, every RPC and device arrival, p50/p90/max, achieved persisted write rate,
-shell read and replacement counts, and CreateSession/SubscribeShell slow logs.
-An arrival or p90 failure means creates failed to reach all sidebars promptly.
-A write-rate failure means the intended background load was not sustained;
+The attached `create-latency.json` in each test's output directory records
+parameters, the row budget, every RPC and device arrival, p50/p90/max, achieved
+persisted write rate, sidebar row counts, shell read and replacement counts,
+and CreateSession/SubscribeShell slow logs. Separate output directories preserve
+every project's and repeat's evidence. An arrival failure means creates failed
+to reach all sidebars before their deadline.
+A stream-progress failure means the intended background work was not sustained;
 replacement reads indicate a shell subscription regression. Missing slow logs
 or short successful spans outside the debugged session indicate broken request
 logging or file sampling. Missing short spans for the debugged session indicate

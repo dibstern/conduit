@@ -1,21 +1,145 @@
-import { expect } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { SessionGoalChangedPayload } from "../../../src/lib/contracts/stored-event.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRelayControl, requireRpcControl } from "./shared.js";
 
 const CONDITION = "All 38 scenarios pass";
-const CHECK_REASONS = [
-	"29/38 pass. Three baselines are stale.",
-	"33/38. Focus ring regressed.",
-	"35/38. jump-to-live fails.",
-] as const;
-const CHECK_TEXT = [
-	/8m\s*Not yet\s*·\s*29\/38 pass\. Three baselines are stale\./,
-	/19m\s*Not yet\s*·\s*33\/38\. Focus ring regressed\./,
-	/31m\s*Not yet\s*·\s*35\/38\. jump-to-live fails\./,
+const goalFixtureTimes = new WeakMap<Page, { setAt: number; now: number }>();
+const fixtureClock = (at: number) =>
+	new Date(at).toLocaleTimeString("en-US", {
+		timeZone: "UTC",
+		hour: "numeric",
+		minute: "2-digit",
+	});
+const CHECKS = [
+	{ minutes: 8, reason: "29/38 pass. Three baselines are stale." },
+	{ minutes: 19, reason: "33/38. Focus ring regressed." },
+	{ minutes: 31, reason: "35/38. jump-to-live fails." },
 ];
+function fixtureTimes(page: Page) {
+	const times = goalFixtureTimes.get(page);
+	if (!times) throw new Error("Goal details fixture has not been seeded");
+	return times;
+}
+function checkText(page: Page) {
+	const { setAt } = fixtureTimes(page);
+	return [...CHECKS]
+		.reverse()
+		.map(
+			({ minutes, reason }) =>
+				new RegExp(
+					`Not yet.*${reason.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}.*${fixtureClock(setAt + minutes * 60_000).replace(/\s/g, "\\s")}`,
+				),
+		);
+}
 
 export const sessionGoalDetailsHandlers: StepHandler[] = [
+	{
+		name: "open goal details with keyboard",
+		match: /^I open the session goal subtitle with the keyboard$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("session-goal-subtitle").focus();
+			await world.page.keyboard.press("Enter");
+		},
+	},
+	{
+		name: "assert phone goal sheet modality",
+		match:
+			/^the phone goal sheet is a labelled modal with focus inside and an inert background$/,
+		run: async ({ world }) => {
+			const sheet = world.page.getByTestId("goal-details");
+			await expect(sheet).toHaveRole("dialog");
+			await expect(sheet).toHaveAttribute("aria-modal", "true");
+			await expect(sheet).toHaveAccessibleName(CONDITION);
+			const titleId = await sheet
+				.getByTestId("goal-details-condition")
+				.getAttribute("id");
+			if (!titleId) throw new Error("Goal sheet title has no id");
+			await expect(sheet).toHaveAttribute("aria-labelledby", titleId);
+			await expect
+				.poll(() => sheet.evaluate((el) => el.contains(document.activeElement)))
+				.toBe(true);
+			for (const target of [
+				world.page.getByTestId("session-goal-subtitle"),
+				world.page.locator("#input"),
+			]) {
+				await expect
+					.poll(() => target.evaluate((el) => el.closest("[inert]") !== null))
+					.toBe(true);
+				await target.focus();
+				await expect(target).not.toBeFocused();
+			}
+		},
+	},
+	{
+		name: "cycle phone goal sheet actions in both directions",
+		match: /^I tab forwards and backwards through the goal sheet actions$/,
+		run: async ({ world }) => {
+			const sheet = world.page.getByTestId("goal-details");
+			const active = await sheet.getByTestId("goal-details-pause").count();
+			const actions = active ? ["pause", "edit", "clear"] : ["new", "dismiss"];
+			await sheet.getByTestId(`goal-details-${actions[0]}`).focus();
+			for (const action of [...actions.slice(1), actions[0]]) {
+				await world.page.keyboard.press("Tab");
+				await expect(sheet.getByTestId(`goal-details-${action}`)).toBeFocused();
+			}
+			for (const action of [...actions.slice(1).reverse(), actions[0]]) {
+				await world.page.keyboard.press("Shift+Tab");
+				await expect(sheet.getByTestId(`goal-details-${action}`)).toBeFocused();
+			}
+		},
+	},
+	{
+		name: "tap goal subtitle or scrim with touch input",
+		match: /^I tap the (session goal subtitle|goal details scrim)$/,
+		run: async ({ world, match }) => {
+			const scrim = match[1] === "goal details scrim";
+			const target = world.page.getByTestId(
+				scrim ? "goal-details-scrim" : "session-goal-subtitle",
+			);
+			await expect(target).toHaveCSS("pointer-events", "auto");
+			await expect
+				.poll(() => target.evaluate((el) => el.closest("[inert]") !== null))
+				.toBe(false);
+			const box = await target.boundingBox();
+			if (!box) throw new Error("Goal touch target has no layout box");
+			const sheet = scrim
+				? await world.page.getByTestId("goal-details").boundingBox()
+				: null;
+			const touch = await world.page.context().newCDPSession(world.page);
+			try {
+				await touch.send("Input.dispatchTouchEvent", {
+					type: "touchStart",
+					touchPoints: [
+						{
+							x: scrim ? box.x + 10 : box.x + box.width / 2,
+							y: sheet ? (box.y + sheet.y) / 2 : box.y + box.height / 2,
+						},
+					],
+				});
+				await touch.send("Input.dispatchTouchEvent", {
+					type: "touchEnd",
+					touchPoints: [],
+				});
+			} finally {
+				await touch.detach();
+			}
+		},
+	},
+	{
+		name: "assert goal sheet releases background inertness",
+		match: /^the goal sheet background is interactive again$/,
+		run: async ({ world }) => {
+			for (const target of [
+				world.page.getByTestId("session-goal-subtitle"),
+				world.page.locator("#input"),
+			]) {
+				await expect
+					.poll(() => target.evaluate((el) => el.closest("[inert]") !== null))
+					.toBe(false);
+			}
+		},
+	},
 	{
 		name: "provide goal details through mocked RPC",
 		match:
@@ -26,12 +150,13 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 			const phase = match[1];
 			const now = await world.page.evaluate(() => Date.now());
 			const setAt = now - 41 * 60_000;
+			goalFixtureTimes.set(world.page, { setAt, now });
 			const goal = {
 				condition: CONDITION,
 				iterations: 3,
 				setAt,
 				tokensAtStart: 0,
-				lastReason: phase === "checking" ? undefined : CHECK_REASONS[2],
+				lastReason: phase === "checking" ? undefined : CHECKS[2]?.reason,
 			};
 			const facts: SessionGoalChangedPayload =
 				phase === "met"
@@ -52,10 +177,14 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 			const rpc = requireRpcControl(world.page);
 			rpc.setStubs({
 				GetGoalDetails: () => ({
-					checks: [8, 19, 31].map((minutes, index) => ({
+					judgeModel: "Sonnet 5",
+					setAt,
+					turnCount: 4,
+					checks: CHECKS.map(({ minutes, reason }, index) => ({
 						iteration: index + 1,
+						turnIndex: index + 1,
 						at: setAt + minutes * 60_000,
-						reason: CHECK_REASONS[index] ?? null,
+						reason,
 					})),
 					tokensSinceStart: 1_240_000,
 				}),
@@ -102,7 +231,7 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert open goal details and header anchoring",
-		match: /^goal details are open below the full session header$/,
+		match: /^goal details open in the session header popover or phone sheet$/,
 		run: async ({ world }) => {
 			await expect(world.page.getByTestId("goal-details")).toBeVisible();
 			await expect(world.page.getByTestId("goal-details-scrim")).toBeVisible();
@@ -116,6 +245,9 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 			expect(request.payload["sessionId"]).toBe(
 				new URL(world.page.url()).pathname.split("/")[2],
 			);
+			const desktop = await world.page
+				.locator('#session-bar[data-compact="false"]')
+				.count();
 			await expect
 				.poll(async () => {
 					const header = await world.page
@@ -127,9 +259,17 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 					return (
 						header !== null &&
 						panel !== null &&
-						Math.abs(panel.x - header.x) < 2 &&
-						Math.abs(panel.width - header.width) < 2 &&
-						Math.abs(panel.y - (header.y + header.height)) < 2
+						(desktop
+							? panel.width <= 380 &&
+								panel.x >= header.x &&
+								panel.y >= header.y + header.height
+							: Math.abs(panel.x - header.x) < 2 &&
+								Math.abs(panel.width - header.width) < 2 &&
+								Math.abs(
+									panel.y +
+										panel.height -
+										(world.page.viewportSize()?.height ?? 0),
+								) < 2)
 					);
 				})
 				.toBe(true);
@@ -145,39 +285,45 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert goal details age and tokens",
-		match: /^the goal details metadata includes 41m and 1\.24M tokens$/,
+		name: "assert goal details metadata and tokens",
+		match: /^the goal details metadata describes its start, checks and tokens$/,
 		run: async ({ world }) => {
 			const metadata = world.page.getByTestId("goal-details-meta");
-			await expect(metadata).toContainText("41m");
-			await expect(metadata).toContainText("1.24M");
+			await expect(metadata).toHaveText(
+				`Set ${fixtureClock(fixtureTimes(world.page).setAt)} · 3 checks · Sonnet 5 judges`,
+			);
+			await expect(world.page.getByTestId("goal-details")).toContainText(
+				"1.24M tokens",
+			);
 		},
 	},
 	{
-		name: "assert complete goal details history in iteration order",
-		match:
-			/^the goal details history shows all three checks in iteration order$/,
+		name: "assert complete goal details history in layout order",
+		match: /^the goal details history shows all three checks in layout order$/,
 		run: async ({ world }) => {
 			await expect(
 				world.page
 					.getByTestId("goal-details-history")
 					.getByTestId("goal-details-check"),
-			).toHaveText(CHECK_TEXT);
+			).toHaveText(checkText(world.page));
 		},
 	},
 	{
 		name: "assert checking goal details history",
 		match:
-			/^the goal details history shows three checks followed by Checking now$/,
+			/^the goal details history shows Checking now followed by three checks$/,
 		run: async ({ world }) => {
 			const checks = world.page
 				.getByTestId("goal-details-history")
 				.getByTestId("goal-details-check");
-			await expect(checks).toHaveText([...CHECK_TEXT, /now\s*Checking…/]);
+			await expect(checks).toHaveText([
+				/Checking.*now/,
+				...checkText(world.page),
+			]);
 			await expect
 				.poll(() =>
 					checks
-						.last()
+						.first()
 						.locator("svg")
 						.evaluate((el) => getComputedStyle(el).animationName),
 				)
@@ -215,6 +361,13 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 			await expect(world.page.getByTestId("goal-details-dismiss")).toHaveText(
 				"Dismiss",
 			);
+			await expect(
+				world.page
+					.getByTestId("goal-details-history")
+					.getByTestId("goal-details-check")
+					.first()
+					.locator("time"),
+			).toHaveText(fixtureClock(fixtureTimes(world.page).now));
 			for (const action of ["pause", "resume", "edit", "clear"])
 				await expect(
 					world.page.getByTestId(`goal-details-${action}`),
@@ -228,7 +381,15 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 			const scrim = world.page.getByTestId("goal-details-scrim");
 			const box = await scrim.boundingBox();
 			if (!box) throw new Error("Goal details scrim has no layout box");
-			await scrim.click({ position: { x: 10, y: box.height - 10 } });
+			const phoneSheet = world.page.locator(
+				'#session-bar[data-compact="true"] #goal-details',
+			);
+			const sheet = (await phoneSheet.count())
+				? await phoneSheet.boundingBox()
+				: null;
+			await scrim.click({
+				position: { x: 10, y: sheet ? (sheet.y - box.y) / 2 : box.height - 10 },
+			});
 		},
 	},
 	{
@@ -301,8 +462,9 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 		match:
 			/^the composer is ready (to edit the goal|for a new goal) with its cursor at the end$/,
 		run: async ({ world, match }) => {
+			// The composer spells Claude's goal command $goal, as its command menu does.
 			const draft =
-				match[1] === "to edit the goal" ? `/goal ${CONDITION}` : "/goal ";
+				match[1] === "to edit the goal" ? `$goal ${CONDITION}` : "$goal ";
 			const input = world.page.locator("#input");
 			await expect(input).toHaveValue(draft);
 			await expect(input).toBeFocused();

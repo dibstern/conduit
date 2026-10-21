@@ -395,6 +395,7 @@ export function createMockProjectRelay(
 		refreshGlobalDefaults: () => Effect.void,
 		settleIdleSessions: () => Effect.succeed(0),
 		archiveIdleSessions: () => Effect.succeed(0),
+		deleteArchivedSessions: () => Effect.succeed(0),
 		wsHandler: makeMockWebSocketHandler(),
 		rpcWsHandler: {
 			handleUpgrade: vi.fn(),
@@ -432,7 +433,6 @@ export function createMockProjectRelay(
 			},
 			registry: {} as OrchestrationLayer["registry"],
 			openCodeInstance: {} as OrchestrationLayer["openCodeInstance"],
-			wireSSEToInstance: vi.fn(),
 		} as unknown as OrchestrationLayer,
 		effectRuntime: {
 			runtime: {} as ProjectRelay["effectRuntime"]["runtime"],
@@ -552,6 +552,7 @@ export function makeOpenCodeInstancesStub(
 		use,
 		borrow: use,
 		ifRunning: (instanceId) => Effect.option(use(instanceId)),
+		isManagedStopped: () => Effect.succeed(false),
 		useIfRunning: (instanceId) => Effect.option(use(instanceId)),
 		stop: () => Effect.void,
 	};
@@ -706,6 +707,7 @@ export function makeMockSessionManagerService(
 		markSessionSeen: vi.fn(() => Effect.succeed(false)),
 		setSessionSettled: vi.fn(() => Effect.succeed(false)),
 		setSessionArchived: vi.fn(() => Effect.succeed(false)),
+		deleteArchivedSessions: vi.fn(() => Effect.succeed(0)),
 		restoreSessionForSend: vi.fn(() => Effect.void),
 		setSessionPinned: vi.fn(() => Effect.succeed(false)),
 		snoozeSession: vi.fn(() => Effect.succeed(false)),
@@ -1202,6 +1204,17 @@ export function makeTestHandlerLayer(
 			),
 		),
 	);
+	const sessionWorkspaceLayer = SessionWorkspaceLive.pipe(
+		Layer.provide(
+			Layer.mergeAll(
+				openCodeApiLayer,
+				configLayer,
+				loggerLayer,
+				providerTurnPersistenceLayer,
+				accountDirectoryLayer,
+			),
+		),
+	);
 	const sessionManagerServiceLayer = opts?.sessionManagerService
 		? Layer.succeed(SessionManagerServiceTag)(opts.sessionManagerService)
 		: SessionManagerServiceLive.pipe(
@@ -1209,6 +1222,7 @@ export function makeTestHandlerLayer(
 					Layer.mergeAll(
 						openCodeApiLayer,
 						makeSessionManagerStateLive(),
+						sessionWorkspaceLayer,
 						activityLayer,
 						Layer.succeed(LoggerTag)(log),
 						Layer.succeed(StatusPollerTag)(statusPoller),
@@ -1234,6 +1248,8 @@ export function makeTestHandlerLayer(
 		Layer.provide(
 			Layer.mergeAll(
 				openCodeApiLayer,
+				openCodeInstancesLayer,
+				sessionWorkspaceLayer,
 				openCodeModelServiceLayer,
 				wsHandlerLayer,
 				loggerLayer,
@@ -1243,6 +1259,7 @@ export function makeTestHandlerLayer(
 				PendingInteractionServiceLive,
 				overridesStateLayer,
 				orchestrationLayer,
+				providerRegistryLayer,
 				providerTurnPersistenceLayer,
 				providerRuntimeIngestionLayer,
 				sessionTitleServiceLayer,
@@ -1255,16 +1272,7 @@ export function makeTestHandlerLayer(
 		openCodeApiLayer,
 		activityLayer,
 		backgroundLayer,
-		SessionWorkspaceLive.pipe(
-			Layer.provide(
-				Layer.mergeAll(
-					openCodeApiLayer,
-					configLayer,
-					loggerLayer,
-					providerTurnPersistenceLayer,
-				),
-			),
-		),
+		sessionWorkspaceLayer,
 		openCodeInstancesLayer,
 		openCodeFileServiceLayer,
 		openCodeModelServiceLayer,
@@ -1289,7 +1297,7 @@ export function makeTestHandlerLayer(
 		ProjectSettingsLive,
 		RpcSubscriptionScopeLive,
 		AlertsLive,
-		InputDraftsLive,
+		InputDraftsLive.pipe(Layer.provide(persistenceLayer)),
 		ptyManagerLayer,
 		configLayer,
 		accountDirectoryLayer,

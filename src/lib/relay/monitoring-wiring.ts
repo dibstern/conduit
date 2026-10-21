@@ -23,7 +23,12 @@ import {
 import * as Failure from "../effect/failure-classification.js";
 import type { Message } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
+import {
+	decodeStoredEventRow,
+	type StoredEventRow,
+} from "../persistence/effect/stored-event-row.js";
 import type { PushNotificationSender } from "../server/push.js";
+import { isRecord } from "../utils.js";
 import { type EffectDeps, executeEffects } from "./effect-executor.js";
 import {
 	applyPipelineResult,
@@ -48,6 +53,7 @@ import { DEFAULT_POLLER_GATING_CONFIG } from "./monitoring-types.js";
 import { resolveNotifications } from "./notification-policy.js";
 import { createSessionSSETracker } from "./session-sse-tracker.js";
 import { sendPushForEvent, sendPushForEventEffect } from "./sse-wiring.js";
+import { turnEndedAlert } from "./turn-ended-alert.js";
 
 /** Structural interface for the message poller manager's capabilities needed by monitoring wiring. */
 interface PollerManagerLike {
@@ -147,8 +153,16 @@ export interface MonitoringWiringResult {
 
 export type EffectMonitoringWiringDeps = Omit<
 	MonitoringWiringDeps,
-	"sessionService" | "processingTimeouts" | "statusPoller" | "resolveAccount"
->;
+	| "sessionService"
+	| "processingTimeouts"
+	| "statusPoller"
+	| "resolveAccount"
+	| "client"
+> & {
+	readonly readMessages: (
+		sessionId: string,
+	) => Effect.Effect<Message[], unknown>;
+};
 
 export type EffectMonitoringWiringResult = Omit<
 	MonitoringWiringResult,
@@ -194,15 +208,38 @@ const processAndApplyDoneEffect = (
 
 		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
 		let originId: string | undefined;
+		let committedDone: ReturnType<typeof turnEndedAlert>;
 		if (sql._tag === "Some") {
 			originId = yield* Effect.gen(function* () {
 				const [turn] = yield* sql.value<{
 					assistant_message_id: string | null;
 					requested_at: number;
+					run_id: string | null;
 				}>`
-					SELECT assistant_message_id, requested_at FROM turns
+					SELECT assistant_message_id, requested_at, run_id FROM turns
 					WHERE session_id = ${sessionId}
 					ORDER BY requested_at DESC, rowid DESC LIMIT 1`;
+				if (turn?.run_id) {
+					const ends =
+						yield* sql.value<StoredEventRow>`SELECT event.* FROM events event
+						JOIN provider_runs run ON run.id = ${turn.run_id} AND run.session_id = event.session_id
+						WHERE event.session_id = ${sessionId}
+						AND json_extract(event.metadata, '$.runId') = run.id
+						AND event.created_at = run.completed_at ORDER BY event.sequence`;
+					for (const row of ends) {
+						const event = yield* decodeStoredEventRow(row, (cause) => cause);
+						const alert = turnEndedAlert(event);
+						if (!alert) continue;
+						committedDone = alert;
+						const data: Record<string, unknown> = isRecord(event.data)
+							? event.data
+							: {};
+						const messageId = data["messageId"];
+						return typeof messageId === "string" && messageId
+							? messageId
+							: event.eventId;
+					}
+				}
 				const [terminal] = yield* sql.value<{
 					origin_id: string;
 					message_id: string | null;
@@ -242,11 +279,15 @@ const processAndApplyDoneEffect = (
 			);
 		}
 		const doneMsg = {
-			type: "done" as const,
-			sessionId,
-			code: 0,
+			...(committedDone ?? {
+				type: "done" as const,
+				sessionId,
+				code: 0,
+				...(originId && {
+					alertId: JSON.stringify([sessionId, originId, "done"]),
+				}),
+			}),
 			...(originId && {
-				alertId: JSON.stringify([sessionId, originId, "done"]),
 				// Usually the turn's assistant message. Sent after the next turn
 				// started, it lets the browser tell this done is late.
 				messageId: originId,
@@ -279,7 +320,7 @@ const processAndApplyDoneEffect = (
 			// The provider can know the completed assistant message before its
 			// terminal event reaches this relay. Resolve that identity off the tick.
 			yield* Effect.forkDetach(
-				Effect.tryPromise(() => deps.client.session.messages(sessionId)).pipe(
+				deps.readMessages(sessionId).pipe(
 					Effect.flatMap((messages) => {
 						const lastMessage = messages.at(-1);
 						if (lastMessage?.role !== "assistant") return Effect.void;
@@ -329,10 +370,7 @@ const executeMonitoringEffectsEffect = (
 					// the effects that follow it (other sessions' stops and dones).
 					yield* Effect.forkDetach(
 						Effect.gen(function* () {
-							const messages = yield* Effect.tryPromise({
-								try: () => deps.client.session.messages(sessionId),
-								catch: (error) => error,
-							}).pipe(
+							const messages = yield* deps.readMessages(sessionId).pipe(
 								Effect.catch((err) =>
 									Effect.sync(() => {
 										if (isOpenCodeNotRunningError(err)) return;

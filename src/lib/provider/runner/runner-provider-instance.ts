@@ -37,7 +37,6 @@ import {
 	ClaudeEventPersistEffectTag,
 	type ClaudeEventPersistFailure,
 } from "../../persistence/effect/claude-event-persist-effect.js";
-import { createEventId } from "../../persistence/events.js";
 import type { BackgroundTaskTransition } from "../../session/background-liveness.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import { ProviderInstanceFailure } from "../errors.js";
@@ -103,6 +102,7 @@ export interface RunnerProviderInstanceDeps {
 	readonly daemonConfigDir?: string;
 	readonly onBackgroundTask?: (input: BackgroundTaskTransition) => void;
 	readonly ensureChildSession?: ClaudeEventPersistEffect["ensureClaudeSubagentSession"];
+	readonly readSubagentTranscript?: ClaudeEventPersistEffect["readClaudeSubagentTranscript"];
 	readonly persistUserMessage?: ClaudeEventPersistEffect["persistUserMessage"];
 }
 
@@ -153,8 +153,6 @@ export const makeRunnerProviderInstance = (
 export class RunnerProviderInstance implements ProviderInstance {
 	readonly providerId: KnownProviderDriverKind;
 	private readonly sinks = new Map<string, EventSink>();
-	/** Sends handed to the runner and not yet finished, per session. */
-	private readonly sendsInFlight = new Map<string, number>();
 	private detachingInteractions = false;
 	private recoveredSink:
 		| ((sessionId: string, sinkId: string) => EventSink)
@@ -306,6 +304,14 @@ export class RunnerProviderInstance implements ProviderInstance {
 		return this.driver.discoverEffect(workspaceRoot, account, options);
 	}
 
+	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
+		return this.runner.hasLiveProcessEffect(sessionId);
+	}
+
+	get inputAdmission() {
+		return this.runner.inputAdmission;
+	}
+
 	getNativeSessionEffect(
 		sessionId: string,
 	): Effect.Effect<ProviderNativeSession | undefined> {
@@ -320,97 +326,47 @@ export class RunnerProviderInstance implements ProviderInstance {
 		input: SendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
 		return Effect.gen({ self: this }, function* () {
-			const { eventSink, abortSignal, ...payload } = input;
+			const {
+				eventSink,
+				abortSignal,
+				awaitIntake: _awaitIntake,
+				...payload
+			} = input;
 			const prepared = yield* this.driver.prepareTurnEffect(payload);
 			const { sessionId } = input;
-			return yield* Effect.acquireUseRelease(
-				Effect.sync(() => {
-					const inFlight = this.sendsInFlight.get(sessionId) ?? 0;
-					this.sendsInFlight.set(sessionId, inFlight + 1);
-					return inFlight;
-				}),
-				(inFlight) =>
-					Effect.gen({ self: this }, function* () {
-						// An idle send is placed before the runner hop, as fast as a
-						// local write; the runner places a held send when the SDK
-						// starts it (command_lifecycle: started). A continuation places
-						// nothing: it resumes the cut-off message's turn.
-						if (inFlight === 0 && !input.continuation)
-							yield* this.placeUserMessageEffect({
-								sessionId,
-								inputId: input.inputId,
-								text: input.text ?? input.prompt,
-							}).pipe(
-								Effect.mapError(
-									(cause) =>
-										new ProviderInstanceFailure({
-											providerId: this.providerId,
-											operation: "sendTurn",
-											cause,
-										}),
-								),
-							);
-						// The SDK reports busy only once the model streams, so SDK-local
-						// work (a manual /compact, a slash command) ran with the session
-						// idle until its result. A send to an idle session starts its
-						// turn now; the turn's end reports idle as before.
-						if (inFlight === 0)
-							yield* eventSink
-								.push({
-									eventId: createEventId(),
-									type: "session.status",
-									providerId: this.providerId,
-									sessionId,
-									providerRefs: {},
-									rawSource: { kind: `${this.providerId}.provider-runtime` },
-									createdAt: Date.now(),
-									data: { sessionId, status: "busy" },
-								})
-								.pipe(Effect.ignore);
-						const sinkId = runnerSinkId(
-							input.inputId,
-							input.commandAttempt,
-							input.nativeResumeFallback,
-						);
-						this.sinks.set(sinkId, eventSink);
-						bindTurnTimelineSink(sinkId, {
-							sessionId,
-							inputId: input.inputId,
-						});
-						this.reportSinkForTesting("allocated", sinkId, sessionId);
-						const aborted = Effect.callback<void>((resume) => {
-							const onAbort = () => resume(Effect.void);
-							if (abortSignal.aborted) onAbort();
-							else
-								abortSignal.addEventListener("abort", onAbort, { once: true });
-							return Effect.sync(() =>
-								abortSignal.removeEventListener("abort", onAbort),
-							);
-						});
-						yield* FiberMap.run(
-							this.abortFibers,
-							sinkId,
-							aborted.pipe(
-								Effect.andThen(
-									this.runner.executeEffect({ type: "abort", sinkId }),
-								),
-								Effect.ignore,
-							),
-						);
-						return yield* this.commandEffect({
-							type: "send-turn",
-							sinkId,
-							aborted: abortSignal.aborted,
-							...prepared,
-						});
-					}),
-				() =>
-					Effect.sync(() => {
-						const remaining = (this.sendsInFlight.get(sessionId) ?? 1) - 1;
-						if (remaining > 0) this.sendsInFlight.set(sessionId, remaining);
-						else this.sendsInFlight.delete(sessionId);
-					}),
+			const sinkId = runnerSinkId(
+				input.inputId,
+				input.commandAttempt,
+				input.nativeResumeFallback,
 			);
+			this.sinks.set(sinkId, eventSink);
+			bindTurnTimelineSink(sinkId, {
+				sessionId,
+				inputId: input.inputId,
+			});
+			this.reportSinkForTesting("allocated", sinkId, sessionId);
+			const aborted = Effect.callback<void>((resume) => {
+				const onAbort = () => resume(Effect.void);
+				if (abortSignal.aborted) onAbort();
+				else abortSignal.addEventListener("abort", onAbort, { once: true });
+				return Effect.sync(() =>
+					abortSignal.removeEventListener("abort", onAbort),
+				);
+			});
+			yield* FiberMap.run(
+				this.abortFibers,
+				sinkId,
+				aborted.pipe(
+					Effect.andThen(this.runner.executeEffect({ type: "abort", sinkId })),
+					Effect.ignore,
+				),
+			);
+			return yield* this.commandEffect({
+				type: "send-turn",
+				sinkId,
+				aborted: abortSignal.aborted,
+				...prepared,
+			});
 		});
 	}
 
@@ -419,6 +375,8 @@ export class RunnerProviderInstance implements ProviderInstance {
 		readonly sessionId: string;
 		readonly inputId: string;
 		readonly text: string;
+		readonly runId?: string;
+		readonly images?: readonly string[];
 	}): Effect.Effect<void, ClaudeEventPersistFailure> {
 		return Effect.gen({ self: this }, function* () {
 			const persist = yield* Effect.serviceOption(ClaudeEventPersistEffectTag);
@@ -432,6 +390,8 @@ export class RunnerProviderInstance implements ProviderInstance {
 				messageId: input.inputId,
 				inputId: input.inputId,
 				provider: this.providerId,
+				...(input.runId ? { runId: input.runId } : {}),
+				...(input.images ? { images: input.images } : {}),
 			}).pipe(
 				Effect.catchIf(
 					(error) => error._tag !== "ClaudeSessionLifecycleError",
@@ -463,11 +423,22 @@ export class RunnerProviderInstance implements ProviderInstance {
 						this.preWarmFibers,
 						input.sessionId,
 					);
-					return Option.isSome(existing)
-						? existing.value
-						: runPreWarm(input.sessionId, Effect.interruptible(preWarm), {
-								onlyIfMissing: true,
+					if (Option.isSome(existing)) {
+						if (
+							process.env["NODE_ENV"] === "test" &&
+							process.env["CONDUIT_TEST_UPGRADE_SINK_PROOF"] === "1" &&
+							process.connected
+						)
+							process.send?.({
+								channel: "conduit-process-test",
+								kind: "pre-warm-joined",
+								sessionId: input.sessionId,
 							});
+						return existing.value;
+					}
+					return runPreWarm(input.sessionId, Effect.interruptible(preWarm), {
+						onlyIfMissing: true,
+					});
 				});
 				const exit = yield* restore(Fiber.await(fiber)).pipe(
 					Effect.onInterrupt(() => Fiber.interrupt(fiber)),
@@ -488,9 +459,21 @@ export class RunnerProviderInstance implements ProviderInstance {
 
 	interruptTurnEffect(
 		sessionId: string,
+		turnIds?: readonly string[],
 	): Effect.Effect<void, ProviderInstanceFailure> {
-		return FiberMap.remove(this.preWarmFibers, sessionId).pipe(
-			Effect.andThen(this.commandEffect({ type: "interrupt", sessionId })),
+		// A bound Stop must leave a pre-warm for a replacement turn alone.
+		return (
+			turnIds === undefined
+				? FiberMap.remove(this.preWarmFibers, sessionId)
+				: Effect.void
+		).pipe(
+			Effect.andThen(
+				this.commandEffect({
+					type: "interrupt",
+					sessionId,
+					...(turnIds !== undefined ? { turnIds } : {}),
+				}),
+			),
 		);
 	}
 	stopTaskEffect(
@@ -750,6 +733,22 @@ export class RunnerProviderInstance implements ProviderInstance {
 					return yield* this.placeUserMessageEffect(output.input).pipe(
 						Effect.mapError((cause) => sessionFailure(output.type, cause)),
 					);
+				case "read-subagent-transcript": {
+					const persist = yield* Effect.serviceOption(
+						ClaudeEventPersistEffectTag,
+					);
+					const readTranscript =
+						this.deps.readSubagentTranscript ??
+						(persist._tag === "Some"
+							? persist.value.readClaudeSubagentTranscript
+							: undefined);
+					const subagentTranscript = yield* readTranscript?.(
+						output.childSessionId,
+					).pipe(
+						Effect.mapError((cause) => sessionFailure(output.type, cause)),
+					) ?? Effect.succeed({ messages: [], parts: [] });
+					return { subagentTranscript };
+				}
 				case "ensure-subagent-session": {
 					const persist = yield* Effect.serviceOption(
 						ClaudeEventPersistEffectTag,
@@ -768,7 +767,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 				}
 			}
 		}).pipe(
-			Effect.as({}),
+			Effect.map((reply) => reply ?? {}),
 			Effect.catchDefect((cause) =>
 				Effect.fail(sessionFailure(output.type, cause)),
 			),

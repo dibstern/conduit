@@ -3,6 +3,7 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { MessageVersion } from "../../../src/lib/contracts/tool-wire.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import type { PollerManagerShape } from "../../../src/lib/domain/relay/Services/services.js";
 import {
@@ -95,7 +96,7 @@ function makeSessionMetadataLayer(options: {
 	return {
 		api,
 		logger,
-		layer: baseLayer,
+		layer: Layer.provideMerge(InputDraftsLive, baseLayer),
 	};
 }
 
@@ -192,6 +193,7 @@ describe("session handler metadata", () => {
 			getStrandedChildren: () => Effect.succeed([]),
 			listSessions: vi.fn(() => Effect.succeed([])),
 			listSessionInfos: vi.fn(() => Effect.succeed([])),
+			countSettledSessions: () => Effect.succeed(0),
 			listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 			getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 			getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),

@@ -113,13 +113,13 @@ it("shares one control transport across unary helpers and projects", async () =>
 	await Promise.all([
 		rpc("SetLogLevel", { projectSlug: "alpha", level: "debug" }),
 		rpc("SyncInputDraft", {
-			sessionId: "s1",
+			key: { session: "s1" },
 			text: "draft",
 		}),
 	]);
 	await rpc("SetLogLevel", { projectSlug: "alpha", level: "info" });
 	await rpc("SyncInputDraft", {
-		sessionId: "s2",
+		key: { session: "s2" },
 		text: "other",
 	});
 	await rpc("SetLogLevel", { projectSlug: "beta", level: "info" });

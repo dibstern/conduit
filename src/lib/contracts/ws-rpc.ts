@@ -13,6 +13,20 @@ import {
 } from "../shared-types.js";
 import { AccountChangeRejected } from "./account.js";
 import {
+	CategorySetContentsSchema,
+	CategorySetRejected,
+	CategorySetSchema,
+	SurfacingFeedbackEntrySchema,
+	SurfacingMarkSchema,
+} from "./category-set.js";
+import {
+	CategoryTuningHunkSchema,
+	CategoryTuningProposalSchema,
+	CategoryTuningScoreSchema,
+} from "./category-tuning.js";
+import { AvatarChoiceSchema, AvatarSchema } from "./user-avatar.js";
+import {
+	ProjectWorktreeCleanupSchema,
 	WorktreeBranchRenameError,
 	WorktreeCleanupReportSchema,
 	WorktreeCleanupSchema,
@@ -26,6 +40,7 @@ export { SessionInfoSchema, SessionStatusSchema };
 export type { SessionInfo };
 
 import { AccountRefSchema } from "./account.js";
+import { AskExplanationSchema } from "./ask-explanation.js";
 import {
 	ClaudeSettingsOverridesSchema,
 	ClaudeSettingsResolveError,
@@ -39,6 +54,10 @@ import {
 	UsageLimitsSettingSchema,
 	UsageReadingSchema,
 } from "./limit-recovery.js";
+import {
+	MessageSurfacingPatchSchema,
+	MessageSurfacingStatusSchema,
+} from "./message-surfacing.js";
 import {
 	DefaultSessionModeSchema,
 	type SessionMode,
@@ -61,8 +80,15 @@ import {
 	INPUT_DELIVERIES,
 	InputRequestSchema,
 	STEER_BLOCKERS,
+	TextSurfacedPayloadSchema,
 } from "./stored-event.js";
+import { TerminalKeysSetting } from "./terminal-keys.js";
 import { ToolCallId, ToolDetail, ToolInput, ToolText } from "./tool-wire.js";
+import {
+	RecapScopeSchema,
+	RecapSnapshotSchema,
+	TurnRecapSchema,
+} from "./turn-recap.js";
 
 const NonEmptyString = Schema.NonEmptyString;
 
@@ -273,6 +299,7 @@ export const CommandInfoSchema = Schema.Struct({
 export const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
+	addedAt: Schema.optional(Schema.Number),
 	folders: Schema.NonEmptyArray(Schema.String),
 	setupScript: Schema.optional(Schema.String),
 	sessionMode: Schema.optional(SessionModeSchema),
@@ -347,6 +374,18 @@ export const PtyInfoSchema = Schema.Struct({
 export const HistoryMessagePartSchema = Schema.Struct({
 	id: Schema.String,
 	type: Schema.String,
+	surfacingMark: Schema.optional(Schema.NullOr(SurfacingMarkSchema)),
+	surfacingRead: Schema.optionalKey(Schema.Boolean),
+	surfacingOrdinal: Schema.optionalKey(
+		TextSurfacedPayloadSchema.fields.ordinal,
+	),
+	surfacingProbabilities: Schema.optionalKey(
+		TextSurfacedPayloadSchema.fields.probabilities,
+	),
+	surfacingSetVersion: Schema.optionalKey(
+		TextSurfacedPayloadSchema.fields.categorySetVersion,
+	),
+	surfacingModel: Schema.optionalKey(TextSurfacedPayloadSchema.fields.model),
 	text: Schema.optional(Schema.String),
 	renderedHtml: Schema.optional(Schema.String),
 	state: Schema.optional(
@@ -633,6 +672,15 @@ export const DaemonSessionCursorSchema = Schema.Struct({
 export const ListDaemonSessionsResponseSchema = Schema.Struct({
 	projectSlug: Schema.optional(Schema.String),
 	sessions: Schema.Array(SessionInfoSchema),
+	/** Full shelf counts per available project, unaffected by page/cursor. */
+	settledCounts: Schema.optional(
+		Schema.Array(
+			Schema.Struct({
+				projectSlug: Schema.String,
+				count: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+			}),
+		),
+	),
 	availability: Schema.Array(ProjectSessionAvailabilitySchema),
 	hasMore: Schema.Boolean,
 	nextCursor: Schema.NullOr(DaemonSessionCursorSchema),
@@ -657,7 +705,6 @@ export const CreateSessionResponseSchema = Schema.Struct({
 
 export const ViewSessionResponseSchema = Schema.Struct({
 	ok: Schema.Literal(true),
-	draft: Schema.optional(Schema.String),
 });
 
 const SteerRefusedSchema = Schema.Struct({
@@ -1051,6 +1098,15 @@ export class WsRpcError extends Schema.TaggedError<WsRpcError>()("WsRpcError", {
 	code: Schema.optional(Schema.Literal("unknown-session")),
 }) {}
 
+export class DraftAlreadySent extends Schema.TaggedError<DraftAlreadySent>()(
+	"DraftAlreadySent",
+	{ draftId: Schema.String },
+) {
+	override get message() {
+		return "This draft was already sent";
+	}
+}
+
 export const GetStatus = Rpc.make("GetStatus", {
 	payload: Schema.TaggedStruct("GetStatus", {}),
 	success: GetStatusResponseSchema,
@@ -1246,6 +1302,14 @@ export const SaveProject = Rpc.make("SaveProject", {
 	error: Schema.Union([WsRpcError, ProjectSaveRejected]),
 });
 
+export const SetProjectOrder = Rpc.make("SetProjectOrder", {
+	payload: Schema.TaggedStruct("SetProjectOrder", {
+		projectOrder: Schema.Array(Schema.String),
+	}),
+	success: Schema.Void,
+	error: WsRpcError,
+});
+
 export const RemoveProject = Rpc.make("RemoveProject", {
 	payload: Schema.TaggedStruct("RemoveProject", {
 		projectSlug: Schema.optional(NonEmptyString),
@@ -1345,28 +1409,57 @@ export const SetDefault = Rpc.make("SetDefault", {
 });
 
 const WorktreeCleanupSettingResponseSchema = Schema.Struct({
-	worktreeCleanup: WorktreeCleanupSchema,
+	global: WorktreeCleanupSchema,
+	project: Schema.optional(Schema.NullOr(ProjectWorktreeCleanupSchema)),
 });
 
 export const GetWorktreeCleanupSetting = Rpc.make("GetWorktreeCleanupSetting", {
-	payload: Schema.TaggedStruct("GetWorktreeCleanupSetting", {}),
+	payload: Schema.TaggedStruct("GetWorktreeCleanupSetting", {
+		projectSlug: Schema.optional(NonEmptyString),
+	}),
 	success: WorktreeCleanupSettingResponseSchema,
 	error: WsRpcError,
 });
 
 export const SetWorktreeCleanupSetting = Rpc.make("SetWorktreeCleanupSetting", {
 	payload: Schema.TaggedStruct("SetWorktreeCleanupSetting", {
-		worktreeCleanup: WorktreeCleanupSchema,
+		scope: Schema.Literal("global"),
+		rules: WorktreeCleanupSchema,
 	}),
 	success: WorktreeCleanupSettingResponseSchema,
 	error: WsRpcError,
 });
+
+export const SetProjectWorktreeCleanupSetting = Rpc.make(
+	SetWorktreeCleanupSetting._tag,
+	{
+		payload: Schema.TaggedStruct(SetWorktreeCleanupSetting._tag, {
+			scope: Schema.Literal("project"),
+			projectSlug: NonEmptyString,
+			override: Schema.NullOr(ProjectWorktreeCleanupSchema),
+		}),
+		success: SetWorktreeCleanupSetting.successSchema,
+		error: SetWorktreeCleanupSetting.errorSchema,
+	},
+);
 
 export const CleanUpWorktreesNow = Rpc.make("CleanUpWorktreesNow", {
 	payload: Schema.TaggedStruct("CleanUpWorktreesNow", {
 		projectSlug: Schema.optional(NonEmptyString),
 	}),
 	success: WorktreeCleanupReportSchema,
+	error: WsRpcError,
+});
+
+export const GetAvatar = Rpc.make("GetAvatar", {
+	payload: Schema.TaggedStruct("GetAvatar", {}),
+	success: AvatarSchema,
+	error: WsRpcError,
+});
+
+export const SetAvatar = Rpc.make("SetAvatar", {
+	payload: Schema.TaggedStruct("SetAvatar", { choice: AvatarChoiceSchema }),
+	success: AvatarSchema,
 	error: WsRpcError,
 });
 
@@ -1409,6 +1502,30 @@ export const SetAutoArchiveSetting = Rpc.make("SetAutoArchiveSetting", {
 	success: AutoArchiveSettingResponseSchema,
 	error: WsRpcError,
 });
+
+const AutoDeleteArchivedSettingResponseSchema = Schema.Struct({
+	autoDeleteArchivedAfterDays: Schema.NullOr(Schema.Number),
+});
+
+export const GetAutoDeleteArchivedSetting = Rpc.make(
+	"GetAutoDeleteArchivedSetting",
+	{
+		payload: Schema.TaggedStruct("GetAutoDeleteArchivedSetting", {}),
+		success: AutoDeleteArchivedSettingResponseSchema,
+		error: WsRpcError,
+	},
+);
+
+export const SetAutoDeleteArchivedSetting = Rpc.make(
+	"SetAutoDeleteArchivedSetting",
+	{
+		payload: Schema.TaggedStruct("SetAutoDeleteArchivedSetting", {
+			autoDeleteArchivedAfterDays: Schema.NullOr(Schema.Number),
+		}),
+		success: AutoDeleteArchivedSettingResponseSchema,
+		error: WsRpcError,
+	},
+);
 
 export const GetUsageLimitsSetting = Rpc.make("GetUsageLimitsSetting", {
 	payload: Schema.TaggedStruct("GetUsageLimitsSetting", {}),
@@ -1612,6 +1729,131 @@ export const ResolveSessionMode = Rpc.make("ResolveSessionMode", {
 	error: WsRpcError,
 });
 
+export const SetTerminalKeys = Rpc.make("SetTerminalKeys", {
+	payload: Schema.TaggedStruct("SetTerminalKeys", {
+		terminalKeys: TerminalKeysSetting,
+	}),
+	success: Schema.Struct({ terminalKeys: TerminalKeysSetting }),
+	error: WsRpcError,
+});
+
+export const GetTerminalKeys = Rpc.make("GetTerminalKeys", {
+	payload: Schema.TaggedStruct("GetTerminalKeys", {}),
+	success: Schema.Struct({ terminalKeys: TerminalKeysSetting }),
+	error: WsRpcError,
+});
+
+export const GetMessageSurfacing = Rpc.make("GetMessageSurfacing", {
+	payload: Schema.TaggedStruct("GetMessageSurfacing", {}),
+	success: MessageSurfacingStatusSchema,
+	error: WsRpcError,
+});
+
+export const UpdateMessageSurfacing = Rpc.make("UpdateMessageSurfacing", {
+	payload: Schema.TaggedStruct(
+		"UpdateMessageSurfacing",
+		MessageSurfacingPatchSchema.fields,
+	).pipe(
+		Schema.middlewareDecoding((effect) =>
+			Effect.mapError(
+				effect,
+				() =>
+					new SchemaIssue.InvalidValue({
+						message: "Invalid message surfacing settings",
+					}),
+			),
+		),
+	),
+	success: MessageSurfacingStatusSchema,
+	error: WsRpcError,
+});
+
+export const GetCategorySet = Rpc.make("GetCategorySet", {
+	payload: Schema.TaggedStruct("GetCategorySet", {}),
+	success: CategorySetSchema,
+	error: WsRpcError,
+});
+
+export const SetSurfacingMark = Rpc.make("SetSurfacingMark", {
+	payload: Schema.TaggedStruct("SetSurfacingMark", {
+		sessionId: NonEmptyString,
+		partId: NonEmptyString,
+		mark: Schema.NullOr(SurfacingMarkSchema),
+	}),
+	success: Schema.Struct({ ok: Schema.Literal(true) }),
+	error: WsRpcError,
+});
+
+export const GetSurfacingFeedback = Rpc.make("GetSurfacingFeedback", {
+	payload: Schema.TaggedStruct("GetSurfacingFeedback", {}),
+	success: Schema.Array(SurfacingFeedbackEntrySchema),
+	error: WsRpcError,
+});
+
+export const GetSurfacingLedger = Rpc.make("GetSurfacingLedger", {
+	payload: Schema.TaggedStruct("GetSurfacingLedger", {}),
+	success: Schema.Array(SurfacingFeedbackEntrySchema),
+	error: WsRpcError,
+});
+
+export const ScoreCategorySet = Rpc.make("ScoreCategorySet", {
+	payload: Schema.TaggedStruct("ScoreCategorySet", {
+		set: CategorySetContentsSchema,
+		estimateOnly: Schema.optional(Schema.Boolean),
+	}),
+	success: CategoryTuningScoreSchema,
+	error: WsRpcError,
+});
+
+export const ProposeCategoryTuning = Rpc.make("ProposeCategoryTuning", {
+	payload: Schema.TaggedStruct("ProposeCategoryTuning", {
+		avoid: Schema.optional(Schema.Array(CategoryTuningHunkSchema)),
+	}),
+	success: CategoryTuningProposalSchema,
+	error: WsRpcError,
+});
+
+export const ListRecaps = Rpc.make("ListRecaps", {
+	payload: Schema.TaggedStruct("ListRecaps", {
+		sessionId: NonEmptyString,
+		turnId: NonEmptyString,
+	}),
+	success: Schema.Array(TurnRecapSchema),
+	error: WsRpcError,
+});
+
+export const GenerateRecap = Rpc.make("GenerateRecap", {
+	payload: Schema.TaggedStruct("GenerateRecap", {
+		sessionId: NonEmptyString,
+		turnId: NonEmptyString,
+		scope: RecapScopeSchema,
+		sourceVersion: Schema.optional(
+			Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
+		),
+	}),
+	success: TurnRecapSchema,
+	error: WsRpcError,
+});
+
+export const ExplainAsk = Rpc.make("ExplainAsk", {
+	payload: Schema.TaggedStruct("ExplainAsk", {
+		sessionId: NonEmptyString,
+		turnId: NonEmptyString,
+		partId: NonEmptyString,
+	}),
+	success: AskExplanationSchema,
+	error: WsRpcError,
+});
+
+export const ReplaceCategorySet = Rpc.make("ReplaceCategorySet", {
+	payload: Schema.TaggedStruct("ReplaceCategorySet", {
+		expectedVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+		nextSet: CategorySetContentsSchema,
+	}),
+	success: CategorySetSchema,
+	error: Schema.Union([WsRpcError, CategorySetRejected]),
+});
+
 export const SetHiddenEntries = Rpc.make("SetHiddenEntries", {
 	payload: Schema.TaggedStruct("SetHiddenEntries", {
 		projectSlug: NonEmptyString,
@@ -1759,6 +2001,7 @@ export const InspectSessionWorktrees = Rpc.make("InspectSessionWorktrees", {
 	success: Schema.Struct({
 		worktrees: Schema.Array(SessionWorktreeInspectionSchema),
 		removeWorktrees: Schema.Boolean,
+		onDelete: Schema.Literals(["ask", "remove"]),
 	}),
 	error: WsRpcError,
 });
@@ -1854,6 +2097,19 @@ export const MarkSessionRead = Rpc.make("MarkSessionRead", {
 	error: WsRpcError,
 });
 
+export const SetMessagesRead = Rpc.make("SetMessagesRead", {
+	payload: Schema.TaggedStruct("SetMessagesRead", {
+		sessionId: NonEmptyString,
+		partIds: Schema.Array(NonEmptyString).pipe(
+			Schema.check(Schema.isMinLength(1)),
+		),
+		read: Schema.Boolean,
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
+
 export const SetSessionSettled = Rpc.make("SetSessionSettled", {
 	payload: Schema.TaggedStruct("SetSessionSettled", {
 		sessionId: NonEmptyString,
@@ -1874,6 +2130,35 @@ export const SetSessionPinned = Rpc.make("SetSessionPinned", {
 	error: WsRpcError,
 });
 
+/** What automatic settlement will do with a session. */
+export const AutoSettleOutlookSchema = Schema.Union([
+	Schema.Struct({ kind: Schema.Literals(["off", "never", "settled", "due"]) }),
+	Schema.Struct({
+		kind: Schema.Literal("paused"),
+		reason: Schema.Literals([
+			"pinned",
+			"snoozed",
+			"unread",
+			"working",
+			"awaiting-activity",
+		]),
+	}),
+	Schema.Struct({ kind: Schema.Literal("scheduled"), at: Schema.Number }),
+]);
+export type AutoSettleOutlook = typeof AutoSettleOutlookSchema.Type;
+
+/** The outlook as once the asking viewer leaves: an open viewer never pauses it. */
+export const GetSessionAutoSettleOutlook = Rpc.make(
+	"GetSessionAutoSettleOutlook",
+	{
+		payload: Schema.TaggedStruct("GetSessionAutoSettleOutlook", {
+			sessionId: NonEmptyString,
+		}),
+		success: AutoSettleOutlookSchema,
+		error: WsRpcError,
+	},
+);
+
 export const SetSessionArchived = Rpc.make("SetSessionArchived", {
 	payload: Schema.TaggedStruct("SetSessionArchived", {
 		sessionId: NonEmptyString,
@@ -1884,13 +2169,14 @@ export const SetSessionArchived = Rpc.make("SetSessionArchived", {
 	error: WsRpcError,
 });
 
+/** Replies with the outlook after the change. */
 export const SetSessionAutoSettle = Rpc.make("SetSessionAutoSettle", {
 	payload: Schema.TaggedStruct("SetSessionAutoSettle", {
 		sessionId: NonEmptyString,
 		disabled: Schema.Boolean,
 		originId: Schema.optional(NonEmptyString),
 	}),
-	success: OkResponseSchema,
+	success: AutoSettleOutlookSchema,
 	error: WsRpcError,
 });
 
@@ -2249,12 +2535,14 @@ const CreateSessionWire = Rpc.make("CreateSession", {
 	payload: Schema.TaggedStruct("CreateSession", {
 		...draftSessionPayload,
 		draftId: Schema.optional(NonEmptyString),
+		draftText: Schema.optional(Schema.String),
 		title: Schema.optional(Schema.String),
 		newWorktree: Schema.optional(Schema.Boolean),
 	}),
 	success: CreateSessionResponseSchema,
 	error: Schema.Union([
 		WsRpcError,
+		DraftAlreadySent,
 		Schema.suspend(() => AccountUnroutable),
 		WorkspaceMoveError,
 		WorktreeCreationError,
@@ -2519,21 +2807,30 @@ export const CancelInput = Rpc.make("input.cancel", {
 	error: WsRpcError,
 });
 
-/** Hand a queued input off now; Resume calls it on the oldest row. */
+/** Hand a queued input off now; interrupt starts a new turn instead of steering.
+ *  Resume calls it on the oldest row without interrupt. */
 export const SendInputNow = Rpc.make("input.sendNow", {
 	payload: Schema.TaggedStruct("input.sendNow", {
 		sessionId: NonEmptyString,
 		inputId: NonEmptyString,
+		interrupt: Schema.optional(Schema.Boolean),
 		originId: Schema.optional(NonEmptyString),
 	}),
 	success: InboxCommandResponseSchema,
 	error: WsRpcError,
 });
 
+export const InputDraftKeySchema = Schema.Union([
+	Schema.Struct({ session: NonEmptyString }),
+	Schema.Struct({ draft: NonEmptyString }),
+]);
+export type InputDraftKey = typeof InputDraftKeySchema.Type;
+
 export const SyncInputDraft = Rpc.make("SyncInputDraft", {
 	payload: Schema.TaggedStruct("SyncInputDraft", {
-		sessionId: NonEmptyString,
+		key: InputDraftKeySchema,
 		text: Schema.String,
+		projectSlug: Schema.optional(NonEmptyString),
 		originId: Schema.optional(NonEmptyString),
 	}),
 	success: OkResponseSchema,
@@ -2576,11 +2873,23 @@ export const ResolveSession = Rpc.make("ResolveSession", {
 });
 
 export const GoalDetailsSchema = Schema.Struct({
+	judgeModel: Schema.optional(
+		Schema.NullOr(Schema.Trimmed.check(Schema.isNonEmpty())),
+	),
+	setAt: Schema.optional(Schema.NullOr(Schema.Number)),
+	metAt: Schema.optional(Schema.NullOr(Schema.Number)),
+	turnCount: Schema.optional(
+		Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+	),
 	checks: Schema.Array(
 		Schema.Struct({
-			iteration: Schema.Number.check(
-				Schema.isInt(),
-				Schema.isGreaterThanOrEqualTo(0),
+			iteration: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+			/** One-based session turn index, independent of the check iteration. */
+			turnIndex: Schema.optional(
+				Schema.NullOr(Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)))),
+			),
+			judgeModel: Schema.optional(
+				Schema.NullOr(Schema.Trimmed.check(Schema.isNonEmpty())),
 			),
 			at: Schema.Number,
 			reason: Schema.NullOr(Schema.String),
@@ -2636,6 +2945,11 @@ const closedPayload = <const Fields extends Schema.Struct.Fields>(
 // One registration per RPC tag, shared by CLI/IPC decoding and browser RPC.
 // Paired forms share one wire tag while keeping their request definitions.
 const wsRpcRequests = [
+	ListRecaps,
+	GenerateRecap,
+	ExplainAsk,
+	GetMessageSurfacing,
+	UpdateMessageSurfacing,
 	GetStatus,
 	SetPin,
 	SetKeepAwake,
@@ -2713,6 +3027,15 @@ const wsRpcRequests = [
 	SetDefaultPermissionMode,
 	SetDefaultSessionMode,
 	ResolveSessionMode,
+	SetTerminalKeys,
+	GetTerminalKeys,
+	GetCategorySet,
+	SetSurfacingMark,
+	GetSurfacingFeedback,
+	GetSurfacingLedger,
+	ScoreCategorySet,
+	ProposeCategoryTuning,
+	ReplaceCategorySet,
 	SetHiddenEntries,
 	GetClaudeSettings,
 	SetClaudeSettings,
@@ -2801,11 +3124,13 @@ const wsRpcRequests = [
 	OpenCodeUseWorktree,
 	MarkSessionUnread,
 	MarkSessionRead,
+	SetMessagesRead,
 	MarkSessionSeen,
 	SetSessionSettled,
 	SetSessionArchived,
 	SetSessionPinned,
 	SetSessionAutoSettle,
+	GetSessionAutoSettleOutlook,
 	SnoozeSession,
 	UnsnoozeSession,
 	DismissCutOff,
@@ -2904,6 +3229,7 @@ const wsRpcRequests = [
 		}),
 	},
 	SaveProject,
+	SetProjectOrder,
 	RemoveProject,
 	StartInstance,
 	StopInstance,
@@ -2914,10 +3240,30 @@ const wsRpcRequests = [
 	SetDefault,
 	GetAutoSettleSetting,
 	SetAutoSettleSetting,
+	GetAvatar,
+	SetAvatar,
 	GetAutoArchiveSetting,
 	SetAutoArchiveSetting,
+	GetAutoDeleteArchivedSetting,
+	SetAutoDeleteArchivedSetting,
 	GetWorktreeCleanupSetting,
-	SetWorktreeCleanupSetting,
+	{
+		requests: [SetProjectWorktreeCleanupSetting, SetWorktreeCleanupSetting],
+		rpc: Rpc.make(SetWorktreeCleanupSetting._tag, {
+			payload: Schema.Union([
+				closedPayload({
+					...SetProjectWorktreeCleanupSetting.payloadSchema.fields,
+					_tag: wireTag(SetProjectWorktreeCleanupSetting._tag),
+				}),
+				closedPayload({
+					...SetWorktreeCleanupSetting.payloadSchema.fields,
+					_tag: wireTag(SetWorktreeCleanupSetting._tag),
+				}),
+			]),
+			success: SetWorktreeCleanupSetting.successSchema,
+			error: SetWorktreeCleanupSetting.errorSchema,
+		}),
+	},
 	CleanUpWorktreesNow,
 	GetUsageLimitsSetting,
 	SetUsageLimitsSetting,
@@ -3008,6 +3354,7 @@ export const ShellProjectsFrameSchema = Schema.Struct({
 	projects: Schema.Array(ProjectInfoSchema),
 	/** The project a new session prefills, on every client. */
 	newSessionProject: Schema.optional(Schema.String),
+	projectOrder: Schema.optional(Schema.Array(Schema.String)),
 });
 export type ShellProjectsFrame = typeof ShellProjectsFrameSchema.Type;
 
@@ -3215,6 +3562,9 @@ export const ProjectSettingSchema = Schema.Union([
 	Schema.TaggedStruct("defaultSessionMode", {
 		mode: DefaultSessionModeSchema,
 	}),
+	Schema.TaggedStruct("terminalKeys", {
+		terminalKeys: TerminalKeysSetting,
+	}),
 	Schema.TaggedStruct("claudeSettings", {
 		overrides: ClaudeSettingsOverridesSchema,
 	}),
@@ -3245,6 +3595,7 @@ export type GlobalProjectSetting = Extract<
 			| "defaultModel"
 			| "defaultPermissionMode"
 			| "defaultSessionMode"
+			| "terminalKeys"
 			| "visibility"
 			| "claudeSettings";
 	}
@@ -3297,28 +3648,63 @@ export const SubscribeAlerts = Rpc.make("SubscribeAlerts", {
 });
 
 const InputDraftEnvelopeSchema = Schema.Union([
-	Schema.Struct({ _tag: Schema.Literal("synchronized") }),
+	Schema.Struct({
+		_tag: Schema.Literal("synchronized"),
+		text: Schema.optional(Schema.String),
+		projectId: Schema.optional(Schema.String),
+		/** A durable retirement marker; promoted draft text is never replayed. */
+		promotedSessionId: Schema.optional(NonEmptyString),
+	}),
 	Schema.TaggedStruct("draft", {
 		text: Schema.String,
+		projectId: Schema.optional(Schema.String),
 		/** The writer's SyncInputDraft originId; that tab drops its own echo. */
 		from: Schema.optional(Schema.String),
+	}),
+	Schema.TaggedStruct("promoted", {
+		sessionId: NonEmptyString,
+		text: Schema.String,
 	}),
 ]);
 export type InputDraftEnvelope = typeof InputDraftEnvelopeSchema.Type;
 
 /**
- * Live-only: a session's composer draft as other tabs type it. The draft at
- * session switch rides the ViewSession response, so resubscribing after a
- * reconnect never clobbers text typed while offline.
+ * Opens with the stored composer draft, then follows live changes. The browser
+ * merges snapshots with local edits, including text typed while disconnected.
  */
 export const SubscribeInputDraft = Rpc.make("SubscribeInputDraft", {
-	payload: { sessionId: NonEmptyString },
+	payload: { key: InputDraftKeySchema },
 	success: InputDraftEnvelopeSchema,
 	error: WsRpcError,
 	stream: true,
 });
 
+export const DraftListItemSchema = Schema.Struct({
+	draftId: NonEmptyString,
+	projectSlug: NonEmptyString,
+	firstLine: Schema.String,
+	updatedAt: Schema.Number,
+});
+export type DraftListItem = typeof DraftListItemSchema.Type;
+
+/** The daemon's full non-empty draft list, initially and once per change batch. */
+export const SubscribeDrafts = Rpc.make("SubscribeDrafts", {
+	payload: {},
+	success: Schema.Array(DraftListItemSchema),
+	error: WsRpcError,
+	stream: true,
+});
+
+/** Each snapshot is persisted; subscribing and reloading never invokes a model. */
+export const SubscribeRecaps = Rpc.make("SubscribeRecaps", {
+	payload: { sessionId: NonEmptyString, turnId: NonEmptyString },
+	success: RecapSnapshotSchema,
+	error: WsRpcError,
+	stream: true,
+});
+
 export const WsRpcGroup = RpcGroup.make(
+	SubscribeRecaps,
 	SubscribeShell,
 	SubscribeSessionDetail,
 	SubscribeSessionTodos,
@@ -3329,6 +3715,7 @@ export const WsRpcGroup = RpcGroup.make(
 	SubscribeDraftModels,
 	SubscribeAlerts,
 	SubscribeInputDraft,
+	SubscribeDrafts,
 	SubscribeInstances,
 	SubscribeUsage,
 	SubscribeServerStatus,

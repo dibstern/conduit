@@ -18,27 +18,6 @@ test.describe("Connection Overlay", () => {
 		const overlay = new OverlayPage(page);
 		await overlay.waitForOverlayHidden(15_000);
 	});
-
-	test("pixel canvas and connect verb are present initially", async ({
-		page,
-		relayUrl,
-	}) => {
-		// Use a fresh page to catch the overlay before it hides
-		const overlay = new OverlayPage(page);
-
-		// Go to the page — overlay is visible briefly
-		await page.goto(relayUrl);
-
-		// Try to catch overlay elements (they hide fast after connection)
-		// If we can't see them, that's OK — it means connection was instant
-		try {
-			await expect(overlay.connectOverlay).toBeVisible({ timeout: 1_000 });
-			await expect(overlay.pixelCanvas).toBeVisible({ timeout: 1_000 });
-			await expect(overlay.connectVerb).toBeVisible({ timeout: 1_000 });
-		} catch {
-			// Connection was too fast to see the overlay — that's fine
-		}
-	});
 });
 
 test.describe("Input Area", () => {
@@ -127,14 +106,13 @@ test.describe("Input Area", () => {
 // (InputArea wrapper + CommandMenu inner) also cause strict-mode violations.
 
 test.describe("Todo Overlay", () => {
-	test("todo sticky element exists but is hidden", async ({
+	test("todo overlay stays unmounted until the session has items", async ({
 		page,
 		relayUrl,
 	}) => {
 		const app = new AppPage(page);
 		await app.goto(relayUrl);
 
-		await expect(app.todoSticky).toBeAttached();
-		await expect(app.todoSticky).toHaveClass(/hidden/);
+		await expect(app.todoSticky).toHaveCount(0);
 	});
 });

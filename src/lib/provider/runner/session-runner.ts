@@ -6,7 +6,9 @@ import type {
 	LegacyRunnerPermissionMode as LegacyPermissionMode,
 	LegacyRunnerSettings as Settings,
 } from "../claude/claude-runner-snapshot.js";
+import type { ClaudeSubagentTranscriptSnapshot } from "../claude/types.js";
 import type {
+	InputAdmission,
 	PermissionDecision,
 	PermissionRequest,
 	PermissionResponse,
@@ -19,7 +21,10 @@ import type {
 import type { RunnerSettingsSnapshot } from "./runner-upgrade.js";
 
 /** Provider-Owned Payload fields contain JSON data, as on the event ingress. */
-export type SessionTurn = Omit<SendTurnInput, "eventSink" | "abortSignal">;
+export type SessionTurn = Omit<
+	SendTurnInput,
+	"eventSink" | "abortSignal" | "awaitIntake" | "reconcileIntake"
+>;
 
 export type SessionCommand =
 	| {
@@ -70,7 +75,14 @@ export type SessionCommand =
 			readonly answers: Record<string, unknown>;
 	  }
 	| {
-			readonly type: "interrupt" | "end-session" | "shutdown-after-turn";
+			readonly type: "interrupt";
+			readonly sessionId: string;
+			// No capability flag: runners predating it ignore the field and
+			// interrupt session-wide, bounded by the daemon's Stop wait like OpenCode.
+			readonly turnIds?: readonly string[];
+	  }
+	| {
+			readonly type: "end-session" | "shutdown-after-turn";
 			readonly sessionId: string;
 	  }
 	| {
@@ -127,13 +139,19 @@ export type SessionOutput =
 			  }
 			| { readonly type: "release-sink" }
 			| {
-					/** Places a send's user message before the query admits it. */
+					/** Places a send's membership before the query admits it. */
 					readonly type: "place-user-message";
 					readonly input: {
 						readonly sessionId: string;
 						readonly inputId: string;
 						readonly text: string;
+						readonly runId?: string;
+						readonly images?: readonly string[];
 					};
+			  }
+			| {
+					readonly type: "read-subagent-transcript";
+					readonly childSessionId: string;
 			  }
 			| {
 					readonly type: "ensure-subagent-session";
@@ -149,7 +167,9 @@ export type SessionOutput =
 	  ));
 
 /** Plain-data reply to an output operation; events and notifications return {}. */
-export type SessionOutputReply = Readonly<Record<string, never>>;
+export interface SessionOutputReply {
+	readonly subagentTranscript?: ClaudeSubagentTranscriptSnapshot;
+}
 
 /** Failure replies preserve the SDK fields used by the side-effect reactor. */
 export interface SessionFailure {
@@ -162,7 +182,12 @@ export interface SessionFailure {
 
 /** Effects are execution carriers; only command/output/reply data crosses here. */
 export interface SessionRunner {
+	readonly inputAdmission?: InputAdmission | undefined;
+	/** Native execution and pending intake, independent of an intake reply. */
+	hasActiveTurnsEffect?(sessionId: string): Effect.Effect<boolean>;
 	readonly recoverEffect?: Effect.Effect<void, SessionFailure>;
+	/** Process ownership in every lifecycle state, even when no session is usable. */
+	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean>;
 	/** Local runner lifecycle state, including work outside the foreground turn. */
 	hasPendingSubagentFinalizers?(sessionId: string): boolean;
 	/** Undefined means no runtime session; null means its cursor is cleared. */

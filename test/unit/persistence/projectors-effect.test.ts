@@ -101,7 +101,7 @@ function makeSessionCreated(
 function makeMessageCreated(
 	sessionId: string,
 	messageId: string,
-	opts?: { role?: "user" | "assistant"; createdAt?: number },
+	opts?: { role?: "user" | "assistant"; createdAt?: number; runId?: string },
 ): CanonicalEvent {
 	return canonicalEvent(
 		"message.created",
@@ -113,7 +113,7 @@ function makeMessageCreated(
 		},
 		{
 			eventId: createEventId(),
-			metadata: {},
+			metadata: opts?.runId ? { runId: opts.runId } : {},
 			createdAt: opts?.createdAt ?? FIXED_TS,
 		},
 	);
@@ -1917,7 +1917,6 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 				yield* runner.markRecovered();
 
 				yield* seedSession("parent-session");
-				yield* seedSession("claude-subagent-abc");
 				const parent = yield* store.append(
 					makeSessionCreated("parent-session", {
 						provider: "claude",
@@ -2446,25 +2445,7 @@ describe("Effect Message Projector (via ProjectionRunner)", () => {
 });
 
 describe("Effect Turn Projector (via ProjectionRunner)", () => {
-	// The persisted state after each recorded event, in fixture order. Only the
-	// turn's own results finish it; anything that follows puts it back to work.
-	const EXPECTED_STATE = [
-		"pending", // 1. the user prompt opens the turn
-		"running", // 2. the session goes busy
-		"running", // 3. the first assistant message
-		"completed", // 4. a result arrives, but Claude is not done
-		"completed", // 5. idle
-		"running", // 6. busy again, 68ms later
-		"running", // 7. a second assistant message, same turn
-		"running", // 8. thinking
-		"running", // 9. a tool starts
-		"running", // 10. the tool finishes
-		"completed", // 11. the second execution reports its own result
-		"running", // 12. a third assistant message, 15 minutes later
-		"running", // 13. still working 45 minutes after the first "completion"
-	];
-
-	it("keeps one production turn running when Claude resumes after successive results", () =>
+	it("leaves the unowned production timeline unplaced on replay", () =>
 		runTest(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -2472,463 +2453,212 @@ describe("Effect Turn Projector (via ProjectionRunner)", () => {
 				const sessionId = "ses_c2d8cd521bc14f9f8f7700096bbf1d23";
 				yield* seedSession(sessionId);
 				yield* runner.markRecovered();
+				expect(resumedTurnEvents.length).toBeGreaterThan(0);
 				for (const [index, recorded] of resumedTurnEvents.entries()) {
-					// The export omits envelope fields unrelated to the regression.
-					const event = {
+					yield* runner.projectEvent({
 						...recorded,
-						eventId: `recorded-${recorded.sequence}`,
+						eventId: `recorded-${index}`,
 						sessionId,
 						projectId: "test-project",
 						streamVersion: index,
 						metadata: {},
-					} as StoredEvent;
-					yield* runner.projectEvent(event);
-					const turns = yield* sql<{
-						id: string;
-					}>`SELECT id, state, assistant_message_id, completed_at, cost, tokens_in, tokens_out FROM turns`;
-					// No user message follows, so all thirteen events are one turn.
-					expect(turns).toHaveLength(1);
-					expect(turns[0], `after event ${index + 1}`).toMatchObject({
-						id: "52feab57-ed40-4885-b23b-71dcd78209a8",
-						state: EXPECTED_STATE[index],
-					});
-					if (EXPECTED_STATE[index] === "running") {
-						// Reopening has to clear the finish too, or every reader that
-						// asks "when did this end" still sees a finished turn.
-						expect(turns[0], `after event ${index + 1}`).toMatchObject({
-							completed_at: null,
-						});
-					}
-					if (event.type === "turn.completed") {
-						expect(turns[0]).toMatchObject({
-							assistant_message_id: event.data.messageId,
-							completed_at: event.createdAt,
-							// Cost is cumulative for the whole SDK session, so the latest
-							// wins; tokens are per-execution, so the second result adds.
-							cost: event.data.cost,
-							tokens_in: index === 3 ? 2 : 4,
-							tokens_out: index === 3 ? 2 : 3,
-						});
-					}
+					} as StoredEvent);
+					expect(
+						yield* sql`SELECT state, run_id, completed_at FROM turns`,
+					).toEqual([{ state: "pending", run_id: null, completed_at: null }]);
 				}
 				expect(yield* runner.getFailures()).toEqual([]);
 			}),
 		));
 
-	it("preserves known accounting when a later execution omits usage", () =>
+	it.each([
+		"turn.completed",
+		"turn.error",
+		"turn.interrupted",
+	] as const)("preserves its own %s boundary through late activity and replay", (type) =>
 		runTest(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				const store = yield* EventStoreEffectTag;
 				const runner = yield* ProjectionRunnerEffectTag;
 				yield* runner.markRecovered();
-				for (const event of [
+				const metadata = { runId: "run1" };
+				const terminal =
+					type === "turn.error"
+						? canonicalEvent(
+								type,
+								"s1",
+								{ messageId: "foreign", error: "Failed" },
+								{ metadata, provider: "claude", createdAt: FIXED_TS + 2 },
+							)
+						: canonicalEvent(
+								type,
+								"s1",
+								{ messageId: "foreign" },
+								{ metadata, provider: "claude", createdAt: FIXED_TS + 2 },
+							);
+				const events = [
 					makeSessionCreated("s1"),
-					makeMessageCreated("s1", "u1", { role: "user" }),
-					makeMessageCreated("s1", "a1"),
-					canonicalEvent("turn.completed", "s1", { messageId: "a1" }),
-				])
-					yield* runner.projectEvent(yield* store.append(event));
-				expect(
-					yield* sql`SELECT cost, tokens_in, tokens_out FROM turns`,
-				).toEqual([{ cost: null, tokens_in: null, tokens_out: null }]);
-				for (const event of [
+					makeMessageCreated("s1", "u1", {
+						role: "user",
+						runId: metadata.runId,
+					}),
+					canonicalEvent(
+						"run.requested",
+						"s1",
+						{ runId: "run1", inputId: "u1" },
+						{ metadata },
+					),
+					canonicalEvent(
+						"run.started",
+						"s1",
+						{ inputId: "u1", requestedRunId: "run1" },
+						{ metadata },
+					),
+					canonicalEvent(
+						"message.created",
+						"s1",
+						{
+							messageId: "a1",
+							role: "assistant",
+							sessionId: "s1",
+							parentID: "u1",
+						},
+						{ metadata },
+					),
+					terminal,
+					canonicalEvent(
+						"session.status",
+						"s1",
+						{ sessionId: "s1", status: "busy" },
+						{ metadata },
+					),
 					makeMessageCreated("s1", "a2"),
-					canonicalEvent("turn.completed", "s1", {
-						messageId: "a2",
-						cost: 0.5,
-						tokens: { input: 100, output: 20 },
+					makeToolStarted("s1", "a1", "late-tool"),
+				];
+				const stored = yield* store.appendBatch(events);
+				for (let replay = 0; replay < 2; replay += 1) {
+					yield* runner.projectBatch(stored);
+					expect(
+						yield* sql`SELECT state, run_id, assistant_message_id, completed_at FROM turns`,
+					).toEqual([
+						{
+							state:
+								type === "turn.completed"
+									? "completed"
+									: type === "turn.error"
+										? "error"
+										: "interrupted",
+							run_id: "run1",
+							assistant_message_id: "a1",
+							completed_at: FIXED_TS + 2,
+						},
+					]);
+				}
+			}),
+		));
+
+	it("keeps completed accounting when duplicate or unowned results arrive", () =>
+		runTest(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				const metadata = { runId: "r" };
+				const events = [
+					makeSessionCreated("s1"),
+					makeMessageCreated("s1", "u1", {
+						role: "user",
+						runId: metadata.runId,
 					}),
-					makeMessageCreated("s1", "a3"),
-					canonicalEvent("turn.completed", "s1", {
-						messageId: "a3",
-						tokens: { output: 0 },
-					}),
-				])
-					yield* runner.projectEvent(yield* store.append(event));
+					canonicalEvent(
+						"run.requested",
+						"s1",
+						{ runId: "r", inputId: "u1" },
+						{ metadata },
+					),
+					canonicalEvent(
+						"run.started",
+						"s1",
+						{ inputId: "u1", requestedRunId: "r" },
+						{ metadata },
+					),
+					canonicalEvent(
+						"turn.completed",
+						"s1",
+						{
+							messageId: "reply",
+							userMessageId: "u1",
+							cost: 0.5,
+							tokens: { input: 100, output: 20 },
+						},
+						{ metadata, provider: "claude" },
+					),
+					canonicalEvent(
+						"turn.completed",
+						"s1",
+						{ messageId: "reply" },
+						{ metadata, provider: "claude" },
+					),
+					canonicalEvent("turn.completed", "s1", { messageId: "reply" }),
+				];
+				yield* runner.projectBatch(yield* store.appendBatch(events));
 				expect(
 					yield* sql`SELECT cost, tokens_in, tokens_out FROM turns`,
 				).toEqual([{ cost: 0.5, tokens_in: 100, tokens_out: 20 }]);
 			}),
 		));
 
-	it.each([
-		"busy",
-		"assistant",
-		"tool",
-	] as const)("reopens on %s, attaches the next execution, and keeps accounting straight through replay", (resume) =>
+	it("resolves model evidence by run even after it ends, leaving other turns untouched", () =>
 		runTest(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				const store = yield* EventStoreEffectTag;
 				const runner = yield* ProjectionRunnerEffectTag;
 				yield* runner.markRecovered();
-				const events = [
-					makeSessionCreated("s1"),
-					makeMessageCreated("s1", "u1", { role: "user" }),
-					makeMessageCreated("s1", "a1", { createdAt: FIXED_TS + 1 }),
-					canonicalEvent(
-						"turn.completed",
-						"s1",
-						{
-							messageId: "a1",
-							cost: 0.25,
-							tokens: { input: 100, output: 20 },
-						},
-						{ createdAt: FIXED_TS + 2 },
-					),
-					canonicalEvent("session.status", "s1", {
-						sessionId: "s1",
-						status: "idle",
-					}),
-				];
-				for (const event of events) {
-					yield* runner.projectEvent(yield* store.append(event));
-				}
-				expect(yield* sql`SELECT state, completed_at FROM turns`).toEqual([
-					{ state: "completed", completed_at: FIXED_TS + 2 },
-				]);
-
-				const activity =
-					resume === "busy"
-						? canonicalEvent("session.status", "s1", {
-								sessionId: "s1",
-								status: "busy",
-							})
-						: resume === "assistant"
-							? makeMessageCreated("s1", "a2")
-							: makeToolStarted("s1", "a1", "tool2");
-				yield* runner.projectEvent(yield* store.append(activity));
-				expect(
-					yield* sql`SELECT state, assistant_message_id, started_at, completed_at FROM turns`,
-				).toEqual([
-					{
-						state: "running",
-						assistant_message_id: resume === "assistant" ? "a2" : null,
-						started_at: FIXED_TS + 1,
-						completed_at: null,
-					},
-				]);
-				if (resume !== "assistant") {
-					yield* runner.projectEvent(
-						yield* store.append(makeMessageCreated("s1", "a2")),
-					);
-				}
-				// Repeated busy signals must preserve the new attachment.
-				yield* runner.projectEvent(
-					yield* store.append(
-						canonicalEvent("session.status", "s1", {
-							sessionId: "s1",
-							status: "busy",
+				const metadata = { runId: "r" };
+				yield* runner.projectBatch(
+					yield* store.appendBatch([
+						makeSessionCreated("s1"),
+						makeMessageCreated("s1", "u1", {
+							role: "user",
+							runId: metadata.runId,
 						}),
-					),
-				);
-				yield* runner.projectEvent(
-					yield* store.append(
+						canonicalEvent(
+							"run.requested",
+							"s1",
+							{ runId: "r", inputId: "u1" },
+							{ metadata },
+						),
+						canonicalEvent(
+							"run.started",
+							"s1",
+							{ inputId: "u1", requestedRunId: "r" },
+							{ metadata },
+						),
 						canonicalEvent(
 							"turn.completed",
 							"s1",
-							{
-								messageId: "a2",
-								cost: 0.5,
-								tokens: { input: 200, output: 30 },
-							},
-							{ createdAt: FIXED_TS + 5 },
+							{ messageId: "reply" },
+							{ metadata, provider: "claude" },
 						),
-					),
+						makeMessageCreated("s1", "u2", { role: "user" }),
+						{
+							...makeTurnModelResolved("s1", "claude-sonnet-5[1m]", {
+								requestedModel: "sonnet",
+								expectedModel: "claude-sonnet-5[1m]",
+							}),
+							metadata,
+						},
+					]),
 				);
-				const expected = [
-					{
-						id: "u1",
-						state: "completed",
-						assistant_message_id: "a2",
-						cost: 0.5,
-						tokens_in: 300,
-						tokens_out: 50,
-						completed_at: FIXED_TS + 5,
-					},
-				];
 				expect(
-					yield* sql`SELECT id, state, assistant_message_id, cost, tokens_in, tokens_out, completed_at FROM turns`,
-				).toEqual(expected);
-
-				// Rebuild the turn projection from its durable events.
-				yield* sql`DELETE FROM turns`;
-				yield* sql`DELETE FROM projector_cursors WHERE projector_name = 'turn'`;
-				yield* runner.recover();
-				expect(yield* runner.getFailures()).toEqual([]);
-				expect(
-					yield* sql`SELECT id, state, assistant_message_id, cost, tokens_in, tokens_out, completed_at FROM turns`,
-				).toEqual(expected);
-			}),
-		));
-
-	it("streamed output and tool progress do not reopen a settled turn", () =>
-		runTest(
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				const store = yield* EventStoreEffectTag;
-				const runner = yield* ProjectionRunnerEffectTag;
-				yield* runner.markRecovered();
-				for (const event of [
-					makeSessionCreated("s1"),
-					makeMessageCreated("s1", "u1", { role: "user" }),
-					makeMessageCreated("s1", "a1"),
-					makeToolStarted("s1", "a1", "tool1"),
-					makeToolCompleted("s1", "a1", "tool1"),
-					canonicalEvent(
-						"turn.completed",
-						"s1",
-						{ messageId: "a1" },
-						{ createdAt: FIXED_TS + 2 },
-					),
-				]) {
-					yield* runner.projectEvent(yield* store.append(event));
-				}
-				// A late flush of text for work that already finished is not new
-				// work. Treating it as new would leave the turn permanently running.
-				yield* runner.projectEvent(
-					yield* store.append(
-						makeToolRunning("s1", "a1", "tool1", { duration: 500 }),
-					),
-				);
-				yield* runner.projectEvent(
-					yield* store.append(makeTextDelta("s1", "a1", "trailing")),
-				);
-				expect(yield* sql`SELECT state, completed_at FROM turns`).toEqual([
-					{ state: "completed", completed_at: FIXED_TS + 2 },
-				]);
-			}),
-		));
-
-	it("a new prompt opens a separate turn, including when prompt timestamps tie", () =>
-		runTest(
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				const store = yield* EventStoreEffectTag;
-				const runner = yield* ProjectionRunnerEffectTag;
-				yield* runner.markRecovered();
-				for (const event of [
-					makeSessionCreated("s1"),
-					makeMessageCreated("s1", "u1", { role: "user" }),
-					makeMessageCreated("s1", "a1"),
-					canonicalEvent("turn.completed", "s1", { messageId: "a1", cost: 1 }),
-					makeMessageCreated("s1", "u2", { role: "user" }),
-				])
-					yield* runner.projectEvent(yield* store.append(event));
-				expect(yield* sql`SELECT id, state FROM turns ORDER BY rowid`).toEqual([
-					{ id: "u1", state: "completed" },
-					{ id: "u2", state: "pending" },
-				]);
-				for (const event of [
-					canonicalEvent("session.status", "s1", {
-						sessionId: "s1",
-						status: "busy",
-					}),
-					makeMessageCreated("s1", "a2"),
-					canonicalEvent("turn.completed", "s1", { messageId: "a2", cost: 2 }),
-				])
-					yield* runner.projectEvent(yield* store.append(event));
-				expect(
-					yield* sql`SELECT id, state, assistant_message_id, cost FROM turns ORDER BY rowid`,
+					yield* sql`SELECT id, actual_model FROM turns ORDER BY id`,
 				).toEqual([
-					{ id: "u1", state: "completed", assistant_message_id: "a1", cost: 1 },
-					{ id: "u2", state: "completed", assistant_message_id: "a2", cost: 2 },
+					{ id: "u1", actual_model: "claude-sonnet-5[1m]" },
+					{ id: "u2", actual_model: null },
 				]);
-			}),
-		));
-
-	it.each([
-		"turn.error",
-		"turn.interrupted",
-	] as const)("preserves the %s settlement reason and permits more work", (type) =>
-		runTest(
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				const store = yield* EventStoreEffectTag;
-				const runner = yield* ProjectionRunnerEffectTag;
-				yield* runner.markRecovered();
-				for (const event of [
-					makeSessionCreated("s1"),
-					makeMessageCreated("s1", "u1", { role: "user" }),
-					makeMessageCreated("s1", "a1"),
-					type === "turn.error"
-						? canonicalEvent(type, "s1", { messageId: "a1", error: "Failed" })
-						: canonicalEvent(type, "s1", { messageId: "a1" }),
-				])
-					yield* runner.projectEvent(yield* store.append(event));
-				expect(yield* sql`SELECT state FROM turns`).toEqual([
-					{ state: type === "turn.error" ? "error" : "interrupted" },
-				]);
-				yield* runner.projectEvent(
-					yield* store.append(makeMessageCreated("s1", "a2")),
-				);
-				expect(
-					yield* sql`SELECT state, assistant_message_id, completed_at FROM turns`,
-				).toEqual([
-					{ state: "running", assistant_message_id: "a2", completed_at: null },
-				]);
-			}),
-		));
-
-	it("updates only the newest open turn and is replay-idempotent", () =>
-		runTest(
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				const store = yield* EventStoreEffectTag;
-				const runner = yield* ProjectionRunnerEffectTag;
-				yield* runner.markRecovered();
-				yield* seedSession("s1");
-				yield* sql`
-					INSERT INTO turns
-					(id, session_id, state, user_message_id, requested_at)
-					VALUES
-					('completed', 's1', 'completed', 'completed', ${FIXED_TS}),
-					('running', 's1', 'running', 'running', ${FIXED_TS + 1}),
-					('pending', 's1', 'pending', 'pending', ${FIXED_TS + 2})`;
-
-				const event = yield* store.append(
-					makeTurnModelResolved("s1", "claude-sonnet-5[1m]", {
-						requestedModel: "sonnet",
-						expectedModel: "claude-sonnet-5[1m]",
-					}),
-				);
-				yield* runner.projectEvent(event);
-				yield* runner.projectEvent(event);
-
-				const rows = yield* sql<{
-					id: string;
-					requested_model: string | null;
-					expected_model: string | null;
-					actual_model: string | null;
-				}>`SELECT id, requested_model, expected_model, actual_model
-					FROM turns ORDER BY requested_at`;
-				expect(rows).toEqual([
-					{
-						id: "completed",
-						requested_model: null,
-						expected_model: null,
-						actual_model: null,
-					},
-					{
-						id: "running",
-						requested_model: null,
-						expected_model: null,
-						actual_model: null,
-					},
-					{
-						id: "pending",
-						requested_model: "sonnet",
-						expected_model: "claude-sonnet-5[1m]",
-						actual_model: "claude-sonnet-5[1m]",
-					},
-				]);
-			}),
-		));
-
-	it("preserves nullable evidence", () =>
-		runTest(
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				const store = yield* EventStoreEffectTag;
-				const runner = yield* ProjectionRunnerEffectTag;
-				yield* runner.markRecovered();
-				yield* seedSession("s1");
-				yield* sql`
-					INSERT INTO turns
-					(id, session_id, state, user_message_id, requested_at)
-					VALUES ('pending', 's1', 'pending', 'pending', ${FIXED_TS})`;
-
-				const event = yield* store.append(
-					makeTurnModelResolved("s1", "claude-opus-4-6"),
-				);
-				yield* runner.projectEvent(event);
-
-				const rows = yield* sql<{
-					requested_model: string | null;
-					expected_model: string | null;
-					actual_model: string | null;
-				}>`SELECT requested_model, expected_model, actual_model
-					FROM turns WHERE id = 'pending'`;
-				expect(rows[0]).toEqual({
-					requested_model: null,
-					expected_model: null,
-					actual_model: "claude-opus-4-6",
-				});
-			}),
-		));
-
-	it("updates the newest running turn", () =>
-		runTest(
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				const store = yield* EventStoreEffectTag;
-				const runner = yield* ProjectionRunnerEffectTag;
-				yield* runner.markRecovered();
-				yield* seedSession("s1");
-				yield* sql`
-					INSERT INTO turns
-					(id, session_id, state, user_message_id, requested_at)
-					VALUES
-					('older-running', 's1', 'running', 'older-running', ${FIXED_TS}),
-					('newest-running', 's1', 'running', 'newest-running', ${FIXED_TS + 1})`;
-
-				const event = yield* store.append(
-					makeTurnModelResolved("s1", "claude-sonnet-5", {
-						requestedModel: "sonnet",
-						expectedModel: "claude-sonnet-5",
-					}),
-				);
-				yield* runner.projectEvent(event);
-
-				const rows = yield* sql<{
-					id: string;
-					requested_model: string | null;
-					expected_model: string | null;
-					actual_model: string | null;
-				}>`SELECT id, requested_model, expected_model, actual_model
-					FROM turns ORDER BY requested_at`;
-				expect(rows).toEqual([
-					{
-						id: "older-running",
-						requested_model: null,
-						expected_model: null,
-						actual_model: null,
-					},
-					{
-						id: "newest-running",
-						requested_model: "sonnet",
-						expected_model: "claude-sonnet-5",
-						actual_model: "claude-sonnet-5",
-					},
-				]);
-			}),
-		));
-
-	it("does not attach evidence when no open turn exists", () =>
-		runTest(
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				const store = yield* EventStoreEffectTag;
-				const runner = yield* ProjectionRunnerEffectTag;
-				yield* runner.markRecovered();
-				yield* seedSession("s1");
-				yield* sql`
-					INSERT INTO turns
-					(id, session_id, state, user_message_id, requested_at)
-					VALUES ('completed', 's1', 'completed', 'completed', ${FIXED_TS})`;
-
-				const event = yield* store.append(
-					makeTurnModelResolved("s1", "claude-sonnet-5", {
-						requestedModel: "sonnet",
-						expectedModel: "claude-sonnet-5",
-					}),
-				);
-				yield* runner.projectEvent(event);
-
-				const rows = yield* sql<{ actual_model: string | null }>`
-					SELECT actual_model FROM turns WHERE id = 'completed'`;
-				expect(rows[0]?.actual_model).toBeNull();
 			}),
 		));
 });
@@ -3619,9 +3349,10 @@ describe("ProjectionRunnerEffect", () => {
 												appendedMidReplay = true;
 												yield* store
 													.append(
-														makeSessionStatus("s-paged", "error", {
-															createdAt: FIXED_TS + 502,
-														}),
+														makeSessionRenamed(
+															"s-paged",
+															"Appended mid-replay",
+														),
 													)
 													.pipe(Effect.orDie);
 											}
@@ -3644,7 +3375,8 @@ describe("ProjectionRunnerEffect", () => {
 				const first = yield* runner.recover();
 				const firstSession = yield* sql<{
 					status: string;
-				}>`SELECT status FROM sessions WHERE id = 's-paged'`;
+					title: string;
+				}>`SELECT status, title FROM sessions WHERE id = 's-paged'`;
 				const firstCursors = yield* sql<{
 					projector_name: string;
 					last_applied_seq: number;
@@ -3655,7 +3387,9 @@ describe("ProjectionRunnerEffect", () => {
 					endCursor: 501,
 					totalReplayed: 1002,
 				});
-				expect(firstSession).toEqual([{ status: "busy" }]);
+				expect(firstSession).toEqual([
+					{ status: "busy", title: "Test Session" },
+				]);
 				expect(firstCursors).toEqual([
 					{ projector_name: "approval", last_applied_seq: 501 },
 					{ projector_name: "input", last_applied_seq: 501 },
@@ -3668,13 +3402,16 @@ describe("ProjectionRunnerEffect", () => {
 				const second = yield* runner.recover();
 				const secondSession = yield* sql<{
 					status: string;
-				}>`SELECT status FROM sessions WHERE id = 's-paged'`;
+					title: string;
+				}>`SELECT status, title FROM sessions WHERE id = 's-paged'`;
 				expect(second).toMatchObject({
 					startCursor: 501,
 					endCursor: 502,
-					totalReplayed: 2,
+					totalReplayed: 1,
 				});
-				expect(secondSession).toEqual([{ status: "error" }]);
+				expect(secondSession).toEqual([
+					{ status: "busy", title: "Appended mid-replay" },
+				]);
 			}),
 		));
 

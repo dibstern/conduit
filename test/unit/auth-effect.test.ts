@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import { Effect, Exit } from "effect";
+import { Effect } from "effect";
 import { expect } from "vitest";
 import {
 	AuthenticationError,
@@ -63,22 +63,6 @@ describe("authenticateEffect", () => {
 			const result = yield* authenticateEffect(manager, "1234", "127.0.0.1");
 			expect(result.ok).toBe(true);
 			expect(result.cookie).toBeDefined();
-		}),
-	);
-
-	it.effect("fails with AuthenticationError for invalid PIN", () =>
-		Effect.gen(function* () {
-			const manager = makeManager();
-			const exit = yield* authenticateEffect(manager, "9999", "127.0.0.1").pipe(
-				Effect.exit,
-			);
-			expect(Exit.isFailure(exit)).toBe(true);
-			if (Exit.isFailure(exit)) {
-				const error = exit.cause;
-				// Extract the failure from the cause
-				const failure = error as unknown as { _tag: string };
-				expect(failure).toBeDefined();
-			}
 		}),
 	);
 

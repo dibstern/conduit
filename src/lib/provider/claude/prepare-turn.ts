@@ -12,9 +12,13 @@ import {
 	ProviderStateEffectTag,
 } from "../../persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
+import { readForkSource } from "../../persistence/fork-history.js";
 import type { MessageWithParts } from "../../persistence/read-model-types.js";
 import { assertNever } from "../../utils.js";
-import { isClaudeResumeFailure } from "../event-sink-errors.js";
+import {
+	isClaudeResumeFailure,
+	isClaudeResumeRefused,
+} from "../event-sink-errors.js";
 import { historicalMessageText } from "../historical-message-text.js";
 import type {
 	ProviderNativeSession,
@@ -23,13 +27,16 @@ import type {
 } from "../types.js";
 import {
 	type ClaudeConfigDir,
+	ClaudeConfigDirSchema,
 	type ClaudeLaunchConfig,
 	sameClaudeLogin,
 } from "./claude-sdk-env.js";
 import { loadClaudeSdkTestModule } from "./claude-sdk-module.js";
 import {
+	CLAUDE_FORK_SOURCE_KEY,
 	type ClaudeSessionForkSdk,
 	defaultClaudeSessionForkSdk,
+	resolveForkUpToUuid,
 	resolveRewindUpToUuid,
 } from "./claude-session-fork.js";
 import { THREAD_READ_QUALIFIED_NAME } from "./types.js";
@@ -39,7 +46,7 @@ export { HandoffTooLarge } from "../../contracts/limit-recovery.js";
 export class ContinuationNotReady extends Data.TaggedError(
 	"ContinuationNotReady",
 )<{
-	readonly reason: string;
+	readonly message: string;
 }> {}
 
 interface PrepareTurnOptions extends ClaudeLaunchConfig {
@@ -48,7 +55,8 @@ interface PrepareTurnOptions extends ClaudeLaunchConfig {
 	readonly modelContextWindow?: number | undefined;
 	readonly agent?: string | undefined;
 	readonly userMessageId?: string | undefined;
-	readonly continuation?: boolean | undefined;
+	/** The cut-off this turn continues, from the continuation command itself. */
+	readonly continuation?: { readonly cutOffMessageId: string } | undefined;
 	readonly nativeResumeFallback?: boolean | undefined;
 	readonly rewind?: SendTurnInput["rewind"];
 	readonly sessionForkSdk?: ClaudeSessionForkSdk | undefined;
@@ -57,6 +65,9 @@ interface PrepareTurnOptions extends ClaudeLaunchConfig {
 
 export interface PreparedTurn {
 	readonly resumeSessionId?: string;
+	readonly resumeSessionAt?: string;
+	readonly forkSession?: boolean;
+	readonly clearInheritedGoal?: boolean;
 	readonly configDir: ClaudeConfigDir;
 	readonly prompt: string;
 	readonly handoff?: HandoffSummary;
@@ -70,8 +81,10 @@ function planTurn(input: {
 	readonly instanceId: string;
 	readonly nativeThread: NativeThread | undefined;
 	readonly hasAccountSwitch: boolean;
+	readonly hasWorkspaceMove: boolean;
 	readonly deliveredAgent: string | undefined;
 	readonly limitRecovery: LimitRecovery | null;
+	readonly cutOffDismissed: boolean;
 	readonly messages?: readonly MessageWithParts[];
 	readonly userText: string;
 	readonly options: PrepareTurnOptions;
@@ -81,9 +94,11 @@ function planTurn(input: {
 	| ContinuationNotReady
 	| { readonly _tag: "ReadHistory"; readonly deliveredThrough?: number } {
 	const { nativeThread, options, userText } = input;
-	if (options.continuation && !input.limitRecovery?.cutOffMessageId)
+	// Only Dismiss closes a continuation. The continuation's own reply clears
+	// limit_recovery, and a restart or retry must still be able to re-plan it.
+	if (options.continuation && input.cutOffDismissed)
 		return new ContinuationNotReady({
-			reason: "The cut-off request is no longer open.",
+			message: "The cut-off request was dismissed.",
 		});
 	// A cut-off remains an open request until Dismiss or a real assistant reply.
 	const note =
@@ -151,7 +166,7 @@ function planTurn(input: {
 		!options.nativeResumeFallback
 	)
 		return new ContinuationNotReady({
-			reason: "The cut-off request has no native session to resume.",
+			message: "The cut-off request has no native session to resume.",
 		});
 	const requiresFreshSession =
 		sameLiveAccount && (!sameLiveAgent || !live?.resumeSessionId);
@@ -178,13 +193,16 @@ function planTurn(input: {
 					resumeSessionId,
 				}
 			: undefined;
-	// A receipt from another or unknown folder may be unresumable on this login.
+	// A receipt from another or unknown login folder may be unresumable. So may
+	// one from before a workspace move: Claude finds transcripts only from their
+	// own cwd or a live sibling worktree, and the old worktree may be gone.
 	// Catch up so a rejected native resume can fall back to a fresh handoff.
 	const root = options.workspaceRoot ?? process.cwd();
 	const catchingUp =
 		!!resuming &&
 		!!nativeThread &&
 		(input.hasAccountSwitch ||
+			input.hasWorkspaceMove ||
 			nativeThread.configDir === undefined ||
 			!sameClaudeLogin(
 				{ configDir: nativeThread.configDir, root },
@@ -329,6 +347,9 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 		return (sessionId: string, instanceId: string, userText?: string) =>
 			Effect.gen(function* () {
 				const session = yield* read.getSession(sessionId);
+				const forkState = session?.forked_from
+					? yield* state.getState(sessionId)
+					: undefined;
 				const recordedThread = options.nativeResumeFallback
 					? undefined
 					: yield* state.nativeThread(sessionId, instanceId);
@@ -350,6 +371,161 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 						break;
 					default:
 						return assertNever(options.folderSource);
+				}
+				// Only untouched copied history can bypass canonical catch-up and
+				// rewind planning. A missing receipt does not prove a first launch.
+				const [forkHistory] =
+					session?.forked_from && !recordedThread
+						? yield* sql<{ unchanged: number }>`SELECT
+							NOT EXISTS (SELECT 1 FROM messages
+								WHERE session_id = ${sessionId} AND is_inherited = 0)
+							AND NOT EXISTS (SELECT 1 FROM events
+								WHERE session_id = ${sessionId} AND type = 'session.rewind_committed')
+							AS unchanged`
+						: [];
+				if (
+					session?.forked_from &&
+					forkHistory?.unchanged === 1 &&
+					!recordedThread &&
+					!options.nativeResumeFallback &&
+					forkState?.[`claude.forkRefused:${instanceId}`] !== "true" &&
+					options.rewind === undefined &&
+					session.provider === instanceId
+				) {
+					const testModule = yield* loadClaudeSdkTestModule.pipe(
+						Effect.catch(() => Effect.succeed(undefined)),
+					);
+					const sdk =
+						testModule?.claudeSdk.fork ??
+						options.sessionForkSdk ??
+						defaultClaudeSessionForkSdk;
+					const sdkOptions = { configDir: resumeConfigDir };
+					const ownTranscript = yield* Effect.tryPromise(() =>
+						sdk.transcriptExists
+							? sdk.transcriptExists(sessionId, sdkOptions)
+							: sdk.readTranscript(sessionId, sdkOptions).then(() => true),
+					).pipe(Effect.catch(() => Effect.succeed(false)));
+					const nativeBase: PreparedTurn = {
+						configDir: resumeConfigDir,
+						prompt: options.continuation
+							? "Continue where you left off."
+							: (userText ?? ""),
+						clearInheritedGoal: true,
+					};
+					// Init can persist the fork before a delivery receipt exists. Never
+					// repeat 7A once this id owns a transcript, including an empty one.
+					if (ownTranscript)
+						return { ...nativeBase, resumeSessionId: sessionId };
+					let owner = session;
+					let cut = session.fork_point_message_id ?? session.fork_point_event;
+					const visited = new Set<string>([sessionId]);
+					while (owner.forked_from && cut && !visited.has(owner.forked_from)) {
+						const sourceId = owner.forked_from;
+						visited.add(sourceId);
+						const source = yield* read.getSession(sourceId);
+						if (!source) break;
+						if (source.pending_rewind_message_id != null) break;
+						const ownerState = yield* state.getState(owner.id);
+						const frozen = ownerState[CLAUDE_FORK_SOURCE_KEY];
+						const frozenSource =
+							frozen === undefined
+								? undefined
+								: yield* Schema.decodeUnknownEffect(
+										Schema.fromJsonString(
+											Schema.Struct({
+												instanceId: Schema.String,
+												resumeSessionId: Schema.String,
+												configDir: ClaudeConfigDirSchema,
+												messageId: Schema.String,
+											}),
+										),
+									)(frozen).pipe(Effect.catch(() => Effect.succeed(undefined)));
+						const thread = yield* state.nativeThread(sourceId, instanceId);
+						// A frozen source proves only the cut it was saved for.
+						if (frozenSource?.messageId !== cut && (frozenSource || thread)) {
+							if (
+								!thread ||
+								(frozenSource &&
+									frozenSource.resumeSessionId !== thread.resumeSessionId)
+							)
+								break;
+							const sourceCut = yield* readForkSource(sourceId, {
+								messageId: cut,
+								sideThread: false,
+							}).pipe(
+								Effect.catchTag("ForkRefusal", () => Effect.succeed(undefined)),
+							);
+							if (
+								!sourceCut ||
+								thread.firstSequence > sourceCut.boundary.sequence ||
+								thread.deliveredThrough < sourceCut.boundary.sequence ||
+								thread.deliveredThrough < sourceCut.lastRewindCommitSequence
+							)
+								break;
+						}
+						const sourceConfig =
+							frozenSource?.configDir ?? thread?.configDir ?? resumeConfigDir;
+						if (
+							(frozenSource && frozenSource.instanceId !== instanceId) ||
+							!sameClaudeLogin(
+								{
+									configDir: sourceConfig,
+									root: options.workspaceRoot ?? process.cwd(),
+								},
+								{
+									configDir: resumeConfigDir,
+									root: options.workspaceRoot ?? process.cwd(),
+								},
+							)
+						)
+							break;
+						const nativeId =
+							frozenSource?.resumeSessionId ??
+							thread?.resumeSessionId ??
+							(source.provider === instanceId ? sourceId : undefined);
+						const transcript =
+							nativeId === undefined
+								? undefined
+								: yield* Effect.tryPromise(() =>
+										sdk.readTranscript(nativeId, sdkOptions),
+									).pipe(Effect.catch(() => Effect.succeed(undefined)));
+						if (transcript?.length) {
+							let mappedCut = cut;
+							let ancestor = source;
+							const mapped = new Set<string>();
+							let uuid = resolveForkUpToUuid(transcript, mappedCut);
+							while (
+								!uuid &&
+								ancestor.forked_from &&
+								!mapped.has(ancestor.id)
+							) {
+								mapped.add(ancestor.id);
+								const suffix = `_${ancestor.id}`;
+								if (!mappedCut.endsWith(suffix)) break;
+								mappedCut = mappedCut.slice(0, -suffix.length);
+								uuid = resolveForkUpToUuid(transcript, mappedCut);
+								const parent = yield* read.getSession(ancestor.forked_from);
+								if (!parent) break;
+								ancestor = parent;
+							}
+							if (uuid && nativeId !== undefined)
+								return {
+									...nativeBase,
+									resumeSessionId: nativeId,
+									forkSession: true,
+									resumeSessionAt: uuid,
+								};
+							break;
+						}
+						// A never-launched fork has only inherited ids. Remove exactly
+						// this generation's copy suffix before looking at its parent.
+						const suffix = `_${sourceId}`;
+						if (!cut.endsWith(suffix)) break;
+						cut = cut.slice(0, -suffix.length);
+						owner = source;
+					}
+					// Missing transcripts and cuts use the same canonical history
+					// planner as account switches and continuation recovery below.
 				}
 				const newerRewinds =
 					options.rewind !== undefined || options.nativeResumeFallback
@@ -413,12 +589,34 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 								OR ${nativeThread?.deliveredThrough ?? null} IS NULL
 								AND json_extract(data, '$.newProvider') = ${instanceId})
 						LIMIT 1`;
+				const workspaceMoves = nativeThread
+					? yield* sql<{ moved: number }>`
+						SELECT 1 AS moved FROM events
+						WHERE session_id = ${sessionId} AND type = 'session.workspace_changed'
+							AND sequence > ${nativeThread.deliveredThrough}
+						LIMIT 1`
+					: [];
+				const cutOff = options.continuation?.cutOffMessageId ?? null;
+				// A message can be cut off again after an earlier Dismiss; only a
+				// dismissal after its latest cut-off closes it.
+				const dismissals =
+					cutOff === null
+						? []
+						: yield* sql<{ dismissed: number }>`
+						SELECT 1 AS dismissed FROM events
+						WHERE session_id = ${sessionId} AND type = 'session.cut_off_dismissed'
+							AND json_extract(data, '$.cutOffMessageId') = ${cutOff}
+							AND sequence > COALESCE((SELECT MAX(sequence) FROM events
+								WHERE session_id = ${sessionId} AND type = 'session.usage_limited'
+									AND json_extract(data, '$.cutOffMessageId') = ${cutOff}), 0)
+						LIMIT 1`;
 				const input = {
 					projectId: state.projectId,
 					sessionId,
 					instanceId,
 					nativeThread,
 					hasAccountSwitch: accountSwitches.length > 0,
+					hasWorkspaceMove: workspaceMoves.length > 0,
 					deliveredAgent: providerState[`claudeAgent:${instanceId}`],
 					limitRecovery:
 						session?.limit_recovery == null
@@ -426,6 +624,7 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 							: Schema.decodeUnknownSync(
 									Schema.fromJsonString(LimitRecoverySchema),
 								)(session.limit_recovery),
+					cutOffDismissed: dismissals.length > 0,
 					userText: userText ?? "",
 					options: turnOptions,
 				};
@@ -444,9 +643,7 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 					}
 					// The current user event is already committed by the send path. Its
 					// text belongs only at the end of the SDK prompt, outside the handoff.
-					const cutOffMessageId = options.continuation
-						? input.limitRecovery?.cutOffMessageId
-						: undefined;
+					const cutOffMessageId = options.continuation?.cutOffMessageId;
 					const cutOffMessage = cutOffMessageId
 						? messages.find(
 								(message) =>
@@ -455,7 +652,7 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 						: undefined;
 					if (options.continuation && !cutOffMessage)
 						return yield* new ContinuationNotReady({
-							reason: "The cut-off request is no longer available.",
+							message: "The cut-off request is no longer available.",
 						});
 					let history = messages;
 					if (plan.deliveredThrough !== undefined) {
@@ -518,16 +715,33 @@ export const sendPreparedClaudeTurn = <
 			input.instanceId,
 			input.userText,
 		);
+		const send = (prepared: PreparedTurn, fallback: boolean) =>
+			Effect.gen(function* () {
+				// Intake returns before completion; retain the receipt facts for the owned run's end.
+				if (input.commandId && prepared.handoff) {
+					const sql = yield* SqlClient.SqlClient;
+					yield* sql`UPDATE provider_command_outbox
+					SET payload_json = json_set(payload_json, '$.handoff', json(${JSON.stringify({ ...prepared.handoff, instanceId: input.instanceId })}))
+					WHERE command_id = ${input.commandId} AND session_id = ${input.sessionId} AND status = 'running'`;
+				}
+				return yield* input.send(prepared, fallback);
+			});
 		const result = yield* Effect.result(
-			input.send(prepared, input.options.nativeResumeFallback === true),
+			send(prepared, input.options.nativeResumeFallback === true),
 		);
 		const failure =
 			result._tag === "Failure" ? result.failure : result.success?.error;
+		const refused = isClaudeResumeRefused(failure);
 		if (
-			input.options.rewind !== undefined ||
+			(input.options.rewind !== undefined && !refused) ||
 			!prepared.resumeSessionId ||
-			!prepared.handoff ||
-			(result._tag === "Success" && !result.success?.nativeResumeRejected) ||
+			(!prepared.handoff &&
+				!prepared.clearInheritedGoal &&
+				!prepared.forkSession &&
+				!refused) ||
+			(result._tag === "Success" &&
+				!result.success?.nativeResumeRejected &&
+				!refused) ||
 			!isClaudeResumeFailure(failure)
 		)
 			return result._tag === "Failure"
@@ -540,6 +754,12 @@ export const sendPreparedClaudeTurn = <
 			Effect.gen(function* () {
 				yield* sql`DELETE FROM provider_state WHERE session_id = ${input.sessionId}
 				AND key IN (${nativeThreadKey(input.instanceId)}, 'resumeSessionId', 'claudeConfigDir')`;
+				if (prepared.clearInheritedGoal || prepared.forkSession) {
+					const state = yield* ProviderStateEffectTag;
+					yield* state.saveUpdates(input.sessionId, [
+						{ key: `claude.forkRefused:${input.instanceId}`, value: "true" },
+					]);
+				}
 				if (input.commandId)
 					yield* sql`UPDATE provider_command_outbox
 					SET payload_json = json_set(payload_json, '$.nativeResumeFallback', json('true'))
@@ -557,5 +777,5 @@ export const sendPreparedClaudeTurn = <
 			input.instanceId,
 			input.userText,
 		);
-		return yield* input.send(fresh, true);
+		return yield* send(fresh, true);
 	});

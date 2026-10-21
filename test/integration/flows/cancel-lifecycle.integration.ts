@@ -1,14 +1,46 @@
 // Tests the cancel/abort flow against a mock OpenCode server.
 // Verifies: send → processing → cancel → turn ends → can send again
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+	afterAll,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
 } from "../helpers/relay-harness.js";
+import type { TestWsClient } from "../helpers/test-ws-client.js";
 
 describe("Integration: Cancel / Abort Lifecycle", () => {
 	let harness: RelayHarness;
+
+	async function drainReplay(client: TestWsClient) {
+		await vi.waitFor(() => {
+			const events = harness.mock.diagnostics.map(({ event }) => event);
+			expect(events.filter((event) => event === "emit_done")).toHaveLength(
+				events.filter((event) => event === "emit_start").length,
+			);
+		});
+		// The marker travels after the replay on the same SSE stream. Its shell
+		// update proves late terminal events have reached the relay too.
+		const title = `Replay drained ${crypto.randomUUID()}`;
+		harness.mock.injectSSEEvents([
+			{
+				type: "session.updated",
+				properties: { info: { id: client.getActiveSessionId(), title } },
+			},
+		]);
+		await client.waitFor("shell", {
+			predicate: (message) =>
+				message["_tag"] === "upsert" &&
+				(message["item"] as { title?: string }).title === title,
+		});
+	}
 
 	beforeAll(async () => {
 		harness = await createRelayHarness();
@@ -18,11 +50,8 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 		if (harness) await harness.stop();
 	});
 
-	beforeEach(async () => {
+	beforeEach(() => {
 		harness.mock.resetQueues();
-		// Drain: a cancelled turn keeps emitting events after its first terminal update, and
-		// nothing marks the end of that stream, so give it time to finish.
-		await new Promise((r) => setTimeout(r, 500));
 	});
 
 	it("cancel during processing ends the turn", async () => {
@@ -43,6 +72,7 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 		const done = await client.waitForTurnEnd(undefined, 15_000);
 		expect(done.id).toBe(client.getActiveSessionId());
 		expect(done.status).toBe("idle");
+		await drainReplay(client);
 
 		await client.close();
 	}, 30_000);
@@ -61,9 +91,7 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 		await client.cancelSession();
 		const cancelled = await client.waitForTurnEnd(undefined, 15_000);
 
-		// Drain: the cancelled turn can still send late terminal updates, and no
-		// event marks the end of its stream. The next turn needs fresh replay queues.
-		await new Promise((r) => setTimeout(r, 3000));
+		await drainReplay(client);
 
 		// Clear messages between turns
 		client.clearReceived();
@@ -93,8 +121,8 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 		// Send cancel without having sent a message
 		await client.cancelSession();
 
-		// Observe a full window to ensure idle cancel produces no unexpected errors.
-		await new Promise((r) => setTimeout(r, 1000));
+		// Cancel RPC has completed; fence the provider pipeline before checking errors.
+		await drainReplay(client);
 
 		// Nothing was running, so the cancel must not fail a turn.
 		const failedTurns = client

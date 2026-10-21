@@ -151,6 +151,7 @@ describe("Claude session process runner", () => {
 			(message) => message["type"] === "permission_pending",
 			cursor,
 		);
+		expect(request["toolName"]).toBe("Bash");
 		expect(request["toolInput"]).toEqual({
 			command: "printf harness-approved",
 		});
@@ -454,9 +455,14 @@ describe("Claude session process runner", () => {
 		if (first?.kind !== "runner-started")
 			throw new Error("Missing runner proof");
 		process.kill(first.pid, "SIGKILL");
-		await vi.waitFor(() => expect(() => process.kill(first.pid, 0)).toThrow(), {
-			timeout: 5000,
-		});
+		await vi.waitFor(
+			() => {
+				expect(() => process.kill(first.pid, 0)).toThrow();
+				// The daemon removes the socket after observing the child exit.
+				expect(existsSync(first.socketPath)).toBe(false);
+			},
+			{ timeout: 5000 },
+		);
 		try {
 			const result = await browser.send(sessionId, "after-runner-exit");
 			expect(result.chunks.join("")).toBe(
@@ -532,7 +538,7 @@ describe("Claude session process runner", () => {
 	it.each([
 		"interrupt",
 		"interrupt-before-snapshot",
-	] as const)("settles a notification-driven parent turn without a send waiter on %s", async (action) => {
+	] as const)("stops notification activity without reopening its completed turn on %s", async (action) => {
 		const harness = await ProcessHarness.start({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 			restartProof: true,
@@ -558,7 +564,7 @@ describe("Claude session process runner", () => {
 		await vi.waitFor(() => {
 			const state = persisted(harness, sessionId);
 			expect(state.session.status).toBe("busy");
-			expect(state.turns).toMatchObject([{ state: "running" }]);
+			expect(state.turns).toMatchObject([{ state: "completed" }]);
 			expect(
 				state.events.some(
 					(event) =>
@@ -571,6 +577,22 @@ describe("Claude session process runner", () => {
 			).toBe(true);
 		});
 		const held = persisted(harness, sessionId);
+		const notification = held.events.find(
+			(event) =>
+				event.type === "text.delta" &&
+				typeof event.data === "object" &&
+				event.data !== null &&
+				"text" in event.data &&
+				event.data.text === "Notification parent message.",
+		);
+		if (
+			!notification ||
+			typeof notification.data !== "object" ||
+			notification.data === null ||
+			!("messageId" in notification.data)
+		)
+			throw new Error("Missing notification message");
+		const notificationMessageId = notification.data.messageId;
 		if (action === "interrupt-before-snapshot") {
 			await vi.waitFor(() =>
 				expect(
@@ -588,7 +610,7 @@ describe("Claude session process runner", () => {
 				throw new Error("Missing pre-snapshot notification proof");
 			expect(streamHeld.snapshotUuid).toEqual(expect.any(String));
 			expect(streamHeld.snapshotUuid).not.toBe(streamHeld.messageId);
-			expect(held.turns[0]?.assistant_message_id).toBe(streamHeld.messageId);
+			expect(notificationMessageId).toBe(streamHeld.messageId);
 			expect(
 				sdkProof(harness).filter(
 					(mark) =>
@@ -619,7 +641,7 @@ describe("Claude session process runner", () => {
 				() => {
 					const state = persisted(harness, sessionId);
 					expect(state.session.status).toBe("idle");
-					expect(state.turns).toMatchObject([{ state: "interrupted" }]);
+					expect(state.turns).toMatchObject([{ state: "completed" }]);
 					expect(state.turns[0]?.assistant_message_id).toBe(
 						held.turns[0]?.assistant_message_id,
 					);
@@ -629,7 +651,7 @@ describe("Claude session process runner", () => {
 					).toEqual([
 						expect.objectContaining({
 							data: expect.objectContaining({
-								messageId: held.turns[0]?.assistant_message_id,
+								messageId: notificationMessageId,
 							}),
 						}),
 					]);

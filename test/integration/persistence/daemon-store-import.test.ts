@@ -15,9 +15,11 @@ import { DatabaseSync } from "node:sqlite";
 import Database from "better-sqlite3";
 import { Effect, Result as Either, ManagedRuntime } from "effect";
 import { expect, it } from "vitest";
+import { setRead } from "../../../src/lib/domain/relay/Services/session-attention.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
 	DaemonStoreImportError,
@@ -26,6 +28,7 @@ import {
 	seedDaemonStore,
 } from "../../../src/lib/persistence/migrations/daemon-store-import.js";
 import { daemonStorePath } from "../../../src/lib/persistence/project-storage.js";
+import { PREVIEW_CODE_POINTS } from "../../../src/lib/persistence/tool-wire-projection.js";
 import {
 	daemonStoreAssertions,
 	createProjectStoreFixture as fixture,
@@ -41,6 +44,230 @@ import {
 
 const artifact = "test-results/82tn4-import-manifest.json";
 type Project = ProjectStoreFixture;
+
+// Failure modes: the read table makes every normalized import unsupported, or
+// the import drops its rows or detaches them from their parts.
+it("imports per-message read annotations", async () => {
+	const root = mkdtempSync(join(tmpdir(), "conduit-read-import-"));
+	const evidence: Record<string, unknown> = { passed: false };
+	try {
+		const seed = await fixture(root, "read-seed", {
+			transcript: { prompt: "Seed", reply: "Seed reply" },
+		});
+		const source = await fixture(root, "read-source", {
+			transcript: { prompt: "Read", reply: "Finding" },
+		});
+		const sessionId = "ses_read-source";
+		const partId = `${sessionId}_assistant_text`;
+		const runtime = ManagedRuntime.make(
+			makePersistenceEffectLayer(source.sourcePath, source.projectId),
+		);
+		try {
+			await runtime.runPromise(
+				Effect.gen(function* () {
+					yield* (yield* ProjectionRunnerEffectTag).recover();
+					yield* (yield* makeCommitAndSignal)([
+						canonicalEvent(
+							"text.surfaced",
+							sessionId,
+							{
+								messageId: `${sessionId}_assistant`,
+								partId,
+								ordinal: 1,
+								categorySetVersion: 1,
+								model: "jev",
+								probabilities: null,
+							},
+							{ provider: "conduit" },
+						),
+					]);
+					expect(yield* setRead([partId], true, sessionId)).toBe(true);
+				}),
+			);
+		} finally {
+			await runtime.dispose();
+		}
+		const before = projectManifest(source.sourcePath, source.projectId);
+		const configDir = join(root, "daemon");
+		mkdirSync(configDir);
+		await Effect.runPromise(importRegisteredProjectStores(configDir, [seed]));
+		const [result] = await Effect.runPromise(
+			importRegisteredProjectStores(configDir, [source]),
+		);
+		expect(result?.outcome).toBe("imported");
+		const after = projectManifest(
+			daemonStorePath(configDir),
+			source.projectId,
+			before,
+		);
+		expect(after.tables).toEqual(before.tables);
+		expect(after.rowCounts["message_part_read_state"]).toBe(1);
+		const imported = ManagedRuntime.make(
+			makePersistenceEffectLayer(daemonStorePath(configDir), source.projectId),
+		);
+		try {
+			await imported.runPromise(
+				Effect.gen(function* () {
+					yield* (yield* ProjectionRunnerEffectTag).recover();
+					const parts =
+						(yield* (yield* ReadQueryEffectTag).getSessionMessagesWithParts(
+							sessionId,
+						)).flatMap((message) => message.parts);
+					expect(parts.find((part) => part.id === partId)?.surfacing_read).toBe(
+						true,
+					);
+				}),
+			);
+		} finally {
+			await imported.dispose();
+		}
+		Object.assign(evidence, {
+			passed: true,
+			before: before.rowCounts,
+			after: after.rowCounts,
+			manifestsEqual: true,
+		});
+	} finally {
+		writeImportArtifact(
+			"test-results/ahu8-11-read-state-import.json",
+			evidence,
+		);
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+it("preserves run ownership and remaps event-owned tool results when importing a project", async () => {
+	const root = mkdtempSync(join(tmpdir(), "conduit-tool-result-import-"));
+	try {
+		const configDir = join(root, "daemon");
+		mkdirSync(configDir);
+		const alpha = await fixture(root, "alpha", { eventSequenceStart: 1000 });
+		const beta = await fixture(root, "beta");
+		const output = 'imported 🦊 "output"\\\n'.repeat(PREVIEW_CODE_POINTS);
+		const source = ManagedRuntime.make(
+			makePersistenceEffectLayer(beta.sourcePath, beta.projectId),
+		);
+		try {
+			await source.runPromise(
+				Effect.gen(function* () {
+					const commit = yield* makeCommitAndSignal;
+					yield* commit([
+						canonicalEvent(
+							"run.requested",
+							"ses_beta",
+							{ runId: "beta-run", inputId: "ses_beta_user_second" },
+							{ metadata: { runId: "beta-run" } },
+						),
+						canonicalEvent(
+							"message.created",
+							"ses_beta",
+							{
+								sessionId: "ses_beta",
+								messageId: "ses_beta_user_second",
+								role: "user",
+								inputId: "ses_beta_user_second",
+							},
+							{ metadata: { runId: "beta-run" } },
+						),
+						canonicalEvent(
+							"run.started",
+							"ses_beta",
+							{ inputId: "ses_beta_user_second", requestedRunId: "beta-run" },
+							{ metadata: { runId: "beta-run" } },
+						),
+						canonicalEvent("tool.completed", "ses_beta", {
+							messageId: "ses_beta_assistant",
+							partId: "ses_beta_tool",
+							result: output,
+							duration: 10,
+						}),
+					]);
+				}),
+			);
+		} finally {
+			await source.dispose();
+		}
+		const sourceDb = new Database(beta.sourcePath, { readonly: true });
+		let sourceSequence: number;
+		try {
+			const stored = sourceDb
+				.prepare<[], { result_event_seq: number }>(
+					"SELECT result_event_seq FROM message_parts WHERE id = 'ses_beta_tool'",
+				)
+				.get();
+			expect(stored?.result_event_seq).toBeGreaterThan(0);
+			sourceSequence = stored?.result_event_seq ?? 0;
+		} finally {
+			sourceDb.close();
+		}
+		await Effect.runPromise(importRegisteredProjectStores(configDir, [alpha]));
+		const imported = await Effect.runPromise(
+			importProjectStore(configDir, beta),
+		);
+		expect(imported.outcome).toBe("imported");
+		const destination = daemonStorePath(configDir);
+		const db = new Database(destination, { readonly: true });
+		try {
+			expect(
+				db
+					.prepare(
+						"SELECT id, session_id, status FROM provider_runs WHERE id = 'beta-run'",
+					)
+					.get(),
+			).toEqual({
+				id: "beta-run",
+				session_id: "ses_beta",
+				status: "running",
+			});
+			expect(
+				db
+					.prepare(
+						"SELECT run_id, state FROM turns WHERE id = 'ses_beta_user_second'",
+					)
+					.get(),
+			).toEqual({ run_id: "beta-run", state: "running" });
+			expect(
+				db
+					.prepare(
+						"SELECT json_extract(metadata, '$.runId') AS run_id FROM events WHERE type = 'run.started' AND session_id = 'ses_beta'",
+					)
+					.get(),
+			).toEqual({ run_id: "beta-run" });
+			const stored = db
+				.prepare<
+					[],
+					{ result_event_seq: number; session_id: string; result: string }
+				>(
+					`SELECT mp.result_event_seq, e.session_id, json_extract(e.data, '$.result') AS result
+					 FROM message_parts mp JOIN events e ON e.sequence = mp.result_event_seq
+					 WHERE mp.id = 'ses_beta_tool'`,
+				)
+				.get();
+			expect(stored?.result_event_seq).toBeGreaterThan(sourceSequence);
+			expect(stored).toMatchObject({ session_id: "ses_beta", result: output });
+		} finally {
+			db.close();
+		}
+		const runtime = ManagedRuntime.make(
+			makePersistenceEffectLayer(destination, beta.projectId),
+		);
+		try {
+			const details = await runtime.runPromise(
+				Effect.gen(function* () {
+					return yield* (yield* ReadQueryEffectTag).readToolDetails(
+						"ses_beta",
+						["ses_beta_call"],
+					);
+				}),
+			);
+			expect(details[0]?.output).toEqual({ _tag: "whole", text: output });
+		} finally {
+			await runtime.dispose();
+		}
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
 
 it("imports complete projects without changing sources and rolls back rejected projects", async () => {
 	const root = mkdtempSync(join(tmpdir(), "conduit-daemon-import-"));

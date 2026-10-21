@@ -75,12 +75,35 @@ function query<T>(
 	}
 }
 
-const turnEnds = (harness: ReplayHarness, sessionId: string): number[] =>
-	query<{ v: number }>(
+// Preserve observed durable boundaries for the golden normalizer; never infer
+// whether provider traffic is terminal. The run table proves each completion.
+const observedEnds = new WeakMap<ReplayHarness, Map<string, number[]>>();
+const turnEnds = (harness: ReplayHarness, sessionId: string): number[] => {
+	const [ended] = query<{ n: number }>(
 		harness,
-		"SELECT stream_version AS v FROM events WHERE session_id = ? AND type IN ('turn.completed', 'turn.error') ORDER BY stream_version",
+		`SELECT COUNT(*) AS n FROM provider_runs run
+		WHERE run.session_id = ? AND run.status IN ('completed', 'error', 'interrupted')
+		AND EXISTS (SELECT 1 FROM turns WHERE run_id = run.id AND session_id = run.session_id)`,
 		sessionId,
-	).map((row) => row.v);
+	);
+	let sessions = observedEnds.get(harness);
+	if (!sessions) observedEnds.set(harness, (sessions = new Map()));
+	let versions = sessions.get(sessionId);
+	if (!versions) sessions.set(sessionId, (versions = []));
+	if ((ended?.n ?? 0) > versions.length) {
+		expect(ended?.n).toBe(versions.length + 1);
+		const [state] = query<{ v: number | null }>(
+			harness,
+			"SELECT last_turn_end_version AS v FROM sessions WHERE id = ?",
+			sessionId,
+		);
+		if (state?.v === null || state?.v === undefined)
+			throw new Error("Ended run has no durable turn boundary");
+		expect(state.v).toBeGreaterThan(versions.at(-1) ?? -1);
+		versions.push(state.v);
+	}
+	return versions;
+};
 
 const row = (page: Page, sessionId: string) =>
 	page.locator(`#session-list [data-session-id="${sessionId}"]`);
@@ -89,7 +112,7 @@ const dot = (page: Page, sessionId: string) =>
 	row(page, sessionId).getByTestId("session-unread-dot");
 
 const unreadCount = (page: Page) =>
-	page.getByTestId("session-filter-chip-unread").locator("b");
+	page.getByTestId("session-filter-chip-unread").locator("span");
 
 async function expectDot(windows: Windows, sessionId: string, shown: boolean) {
 	for (const page of [windows.A, windows.B])
@@ -572,12 +595,22 @@ async function dwellAndViewport(
 		const viewport = A.viewportSize();
 		if (!viewport) throw new Error("window A has no viewport");
 		await A.setViewportSize({ width: viewport.width, height: 300 });
-		await transcript(A).evaluate((el) => {
-			el.scrollTop = 0;
-			// Establish the detached state before the paused-clock interaction.
-			el.dispatchEvent(new Event("scroll"));
-			el.dispatchEvent(new Event("scroll"));
-		});
+		// ResizeObserver re-pins a following transcript. Finish that render cycle
+		// before scrolling, so its pending programmatic scrolls cannot swallow ours.
+		await A.evaluate(
+			() =>
+				new Promise<void>((resolve) =>
+					requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+				),
+		);
+		await transcript(A).evaluate(
+			(el) =>
+				new Promise<void>((resolve) => {
+					el.addEventListener("scroll", () => resolve(), { once: true });
+					el.scrollTop = 0;
+				}),
+		);
+		await expect(A.locator("#scroll-btn")).toBeVisible();
 		await expect(A.locator("[data-turn-end]")).not.toBeInViewport();
 		await paused(A, async () => {
 			await transcript(A).click({ position: { x: 24, y: 24 } });
@@ -849,8 +882,8 @@ async function droppedReport(
 		await expect(dot(B, ctx.sessionId)).toHaveCount(0);
 		await proxy.reconnect();
 		await expect(dot(A, ctx.sessionId)).toHaveCount(0, { timeout: 20_000 });
-		// Negative observation window: a stray flush would follow the reconnect's session list.
-		await A.waitForTimeout(1_000);
+		// Let reconnect callbacks run after the fresh shell snapshot clears the dot.
+		await A.clock.runFor(1_000);
 		expect(proxy.reports()).toBe(3);
 		await ctx.report.record(
 			"dropped after B's pick",
@@ -991,11 +1024,24 @@ test.describe("Session unread dot", () => {
 			});
 			harness.mock.emitTestEvent("message.updated", {
 				info: {
+					id: "msg_e2e_subagent_user",
+					sessionID: childId,
+					role: "user",
+					time: { created: now },
+				},
+			});
+			harness.mock.emitTestEvent("message.updated", {
+				info: {
 					id: "msg_e2e_subagent",
 					sessionID: childId,
 					role: "assistant",
+					parentID: "msg_e2e_subagent_user",
 					time: { created: now, completed: now + 1 },
 				},
+			});
+			harness.mock.emitTestEvent("session.status", {
+				sessionID: childId,
+				status: { type: "idle" },
 			});
 			await expect
 				.poll(() => turnEnds(harness, childId).length, { timeout: 20_000 })

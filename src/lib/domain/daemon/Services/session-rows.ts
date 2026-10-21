@@ -1,6 +1,7 @@
 import { Array as Arr, Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
+import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import {
 	type createSessionGitCache,
 	withCachedSessionGit,
@@ -11,6 +12,7 @@ import {
 	ReadQueryEffectTag,
 	type SessionScope,
 } from "../../../persistence/effect/read-query-effect.js";
+import { sessionRunOwnersQuery } from "../../../provider/session-run-settlement.js";
 import {
 	effectiveSessionFolders,
 	effectiveWorkingDirectory,
@@ -136,6 +138,28 @@ export const makeSessionRows = (
 								operation: "sessionRows.owner",
 								cause: `No registered owner for session ${session.id}`,
 							});
+						const accountId = accountIds.get(session.id);
+						const keepsSteers =
+							session.status !== "idle" &&
+							!!accountId &&
+							(yield* accounts.resolve({ _tag: "Id", id: accountId }).pipe(
+								Effect.map(
+									(account) =>
+										getProviderDriver(account.driver)
+											?.keepsPendingSteersOnInterrupt === true,
+								),
+								Effect.catchTag("AccountUnroutable", () =>
+									Effect.succeed(false),
+								),
+							));
+						// Mirrors Stop's no-op rule: nothing to stop when only retained steers remain.
+						const stop =
+							session.status === "idle"
+								? undefined
+								: yield* sessionRunOwnersQuery(sql, session.id, {
+										confirmedStop: true,
+										excludeRetainedSteers: keepsSteers,
+									});
 						const compacting = activity.compactions.compactingOf(session.id);
 						const retrying = activity.retries.retryingOf(session.id);
 						const enriched = yield* withSessionWorktreeStatus(
@@ -157,6 +181,11 @@ export const makeSessionRows = (
 						return {
 							...session,
 							...enriched,
+							...(stop === undefined
+								? {}
+								: {
+										canStop: !(stop.owners.length === 0 && stop.retainedSteers),
+									}),
 							...(compacting === undefined ? {} : { compacting }),
 							...(retrying === undefined ? {} : { retrying }),
 						};

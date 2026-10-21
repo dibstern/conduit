@@ -7,6 +7,7 @@ import type { SavedTranscript } from "../../../src/lib/frontend/stores/saved-tra
 import { initSWMessageListener } from "../../../src/lib/frontend/stores/ws-notifications.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { makeWsRpcClientsLayer } from "../../../src/lib/frontend/transport/shared-client.js";
+import * as rpcClient from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import { makeRpcWire } from "../../helpers/rpc-wire.js";
 import type { StubTable } from "../../helpers/stub-ws-rpc.js";
 
@@ -35,7 +36,6 @@ vi.mock("../../../src/lib/frontend/utils/markdown.js", () => ({
 import {
 	currentChat,
 	getOrCreateSessionMessages,
-	inputSyncState,
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
@@ -101,14 +101,20 @@ import * as module from "../../../src/lib/frontend/stores/selection.svelte.js";
 
 let stop: (() => void) | undefined;
 let stopCatalogs: (() => void) | undefined;
+let pendingTransports = 0;
+const originalRpc = rpcClient.rpc;
+const rpcSpy = vi.spyOn(rpcClient, "rpc");
 const serviceWorker = new EventTarget();
 const calls = (tag: string) =>
 	wire.requests.filter((request) => request.tag === tag);
-const settle = async () => {
+const settle = async (pending = 0) => {
 	flushSync();
 	await tick();
-	await new Promise((resolve) => setTimeout(resolve, 20));
+	await vi.waitFor(() => expect(pendingTransports).toBe(pending), {
+		interval: 1,
+	});
 	flushSync();
+	await tick();
 };
 function start() {
 	stop = module.watchSelection();
@@ -134,6 +140,11 @@ beforeEach(async () => {
 	wire = makeRpcWire(table);
 	runtime = ManagedRuntime.make(makeWsRpcClientsLayer(wire.connect));
 	runtimeMock.getRuntime.mockResolvedValue(runtime);
+	rpcSpy.mockImplementation((tag, payload) => {
+		if (!table[tag]) return originalRpc(tag, payload);
+		pendingTransports++;
+		return originalRpc(tag, payload).finally(() => pendingTransports--);
+	});
 	runtimeMock.runTransportEffect.mockImplementation((effect) =>
 		runtime.runPromise(effect),
 	);
@@ -263,7 +274,7 @@ afterEach(async () => {
 	stop = undefined;
 	stopCatalogs?.();
 	stopCatalogs = undefined;
-	await settle();
+	await settle(pendingTransports);
 	if (runtime) await runtime.dispose();
 	runtimeMock.getRuntime.mockReset();
 	runtimeMock.runTransportEffect.mockReset();
@@ -375,7 +386,7 @@ describe("session selection at the browser RPC wire", () => {
 			originId: expect.any(String),
 		});
 		if (moved) module.selection.open(other.id);
-		await settle();
+		await settle(1);
 		const viewsBeforeReply = calls("ViewSession").length;
 		pending.resolve({
 			projectSlug: "ignored-response-project",
@@ -508,7 +519,8 @@ describe("session selection at the browser RPC wire", () => {
 		await vi.waitFor(() => expect(calls("AttachProject")).toHaveLength(1));
 		seedSessions([{ id: "attach-new", title: "New", projectSlug: "B" }]);
 		module.selection.open("attach-new");
-		await settle();
+		await vi.waitFor(() => expect(calls("AttachProject")).toHaveLength(2));
+		await settle(2);
 		pending.resolve({ projectSlug: "A", sessionSlug: "A" });
 		await settle();
 		expect(module.selection.shown).toEqual({
@@ -527,7 +539,7 @@ describe("session selection at the browser RPC wire", () => {
 		await vi.waitFor(() => expect(calls("ResolveSession")).toHaveLength(1));
 		seedSessions([{ id: "resolve-new", title: "New", projectSlug: "A" }]);
 		module.selection.open("resolve-new");
-		await settle();
+		await settle(1);
 		pending.resolve({ projectSlug: null });
 		await settle();
 		expect(module.selection.shown).toEqual({
@@ -552,7 +564,7 @@ describe("session selection at the browser RPC wire", () => {
 		module.selection.openDraft("C");
 		await vi.waitFor(() => expect(calls("AttachProject")).toHaveLength(2));
 		second.resolve({ projectSlug: "C", sessionSlug: null });
-		await settle();
+		await settle(1);
 		first.resolve({ projectSlug: "B", sessionSlug: null });
 		await settle();
 		expect(attachedProjectState.slug).toBe("C");
@@ -595,7 +607,8 @@ describe("session selection at the browser RPC wire", () => {
 		});
 		replaceRoute("/s/saved");
 		start();
-		await settle();
+		await vi.waitFor(() => expect(calls("AttachProject")).toHaveLength(1));
+		await settle(1);
 		expect(module.selection.shown).toEqual({
 			kind: "drawn",
 			sessionId: "saved",
@@ -636,7 +649,8 @@ describe("session selection at the browser RPC wire", () => {
 			],
 		});
 		start();
-		await settle();
+		await vi.waitFor(() => expect(calls("AttachProject")).toHaveLength(1));
+		await settle(1);
 		expect(module.selection.shown).toEqual({
 			kind: "placing",
 			sessionId: "saved-sidebar",
@@ -680,7 +694,8 @@ describe("session selection at the browser RPC wire", () => {
 		});
 		replaceRoute(`/s/foreign-saved-${project}`);
 		start();
-		await settle();
+		await vi.waitFor(() => expect(calls("AttachProject")).toHaveLength(1));
+		await settle(1);
 		expect(currentChat().messages).toHaveLength(1);
 		pending.resolve({ projectSlug: project ?? "A", sessionSlug: project });
 		await settle();
@@ -870,19 +885,19 @@ describe("session selection at the browser RPC wire", () => {
 		expect(todoState.items).toEqual([]);
 		expect(currentChat().contextPercent).toBe(0);
 	});
-	it("sends one view after placement and never applies a late draft to another session", async () => {
+	it("sends one view after placement and keeps the current route when an earlier view completes", async () => {
 		attachedProjectState.slug = "A";
 		const pending = deferred<{ projectSlug: string | null }>();
-		const draft = deferred<{ ok: true; draft: string }>();
-		const secondVisit = deferred<{ ok: true; draft: string }>();
+		const draft = deferred<{ ok: true }>();
+		const secondVisit = deferred<{ ok: true }>();
 		let oldVisits = 0;
 		table.ResolveSession = () => pending.promise;
 		table.ViewSession = ({ sessionId }) => {
-			if (sessionId !== "view-old") return { ok: true, draft: "new draft" };
+			if (sessionId !== "view-old") return { ok: true };
 			oldVisits++;
 			if (oldVisits === 1) return draft.promise;
 			if (oldVisits === 2) return secondVisit.promise;
-			return { ok: true, draft: "returned draft" };
+			return { ok: true };
 		};
 		seedSessions([{ id: "view-new", title: "New", projectSlug: "A" }]);
 		start();
@@ -892,10 +907,14 @@ describe("session selection at the browser RPC wire", () => {
 		pending.resolve({ projectSlug: "A" });
 		await vi.waitFor(() => expect(calls("ViewSession")).toHaveLength(1));
 		module.selection.open("view-new");
-		await vi.waitFor(() => expect(inputSyncState.text).toBe("new draft"));
-		draft.resolve({ ok: true, draft: "old draft" });
+		await vi.waitFor(() => expect(calls("ViewSession")).toHaveLength(2));
+		draft.resolve({ ok: true });
 		await settle();
-		expect(inputSyncState.text).toBe("new draft");
+		expect(routerState.path).toBe("/s/view-new");
+		expect(module.selection.shown).toMatchObject({
+			kind: "placed",
+			sessionId: "view-new",
+		});
 		expect(
 			calls("ViewSession").filter(
 				(request) =>
@@ -907,10 +926,14 @@ describe("session selection at the browser RPC wire", () => {
 		module.selection.open("view-new");
 		await vi.waitFor(() => expect(calls("ViewSession")).toHaveLength(4));
 		module.selection.open("view-old");
-		await vi.waitFor(() => expect(inputSyncState.text).toBe("returned draft"));
-		secondVisit.resolve({ ok: true, draft: "left visit draft" });
+		await vi.waitFor(() => expect(calls("ViewSession")).toHaveLength(5));
+		secondVisit.resolve({ ok: true });
 		await settle();
-		expect(inputSyncState.text).toBe("returned draft");
+		expect(routerState.path).toBe("/s/view-old");
+		expect(module.selection.shown).toMatchObject({
+			kind: "placed",
+			sessionId: "view-old",
+		});
 		expect(
 			calls("ViewSession").filter(
 				(request) =>

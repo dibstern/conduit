@@ -379,12 +379,14 @@ describe("legacy skeleton purge migration", () => {
 						`,
 					filename,
 				],
-				{ timeout: 10_000 },
+				// This hang guard includes Node startup and tsx/Effect imports,
+				// which can dominate the migration under parallel suite load.
+				{ timeout: 60_000 },
 			);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
-	}, 20_000);
+	}, 70_000);
 
 	it.effect("is idempotent", () =>
 		Effect.gen(function* () {

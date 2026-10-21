@@ -56,6 +56,7 @@ export const recoverClaudeRunnerCommands = (
 		const driverForAccount = (id: string) =>
 			Result.getOrUndefined(resolve(accounts, { _tag: "Id", id }))?.driver;
 		return yield* recoverRunnerCommands(sql, sessionId, "claude", {
+			legacyResult: connection.legacyResult,
 			driverForAccount,
 			decodeInput: (row) => ({
 				...normalizeClaudeSessionTurn(
@@ -99,7 +100,7 @@ export const recoverClaudeRunnerCommands = (
 							agent: input.agent,
 							userMessageId:
 								input.continuation?.cutOffMessageId ?? input.inputId,
-							continuation: input.continuation !== undefined,
+							continuation: input.continuation,
 							nativeResumeFallback: input.nativeResumeFallback,
 							rewind: input.rewind,
 							sessionForkSdk: deps.sessionForkSdk,
@@ -130,6 +131,9 @@ export const recoverClaudeRunnerCommands = (
 										text: input.prompt,
 										configDir: prepared.configDir,
 										resumeSessionId: prepared.resumeSessionId,
+										resumeSessionAt: prepared.resumeSessionAt,
+										forkSession: prepared.forkSession,
+										clearInheritedGoal: prepared.clearInheritedGoal,
 										startFreshNativeSession:
 											prepared.resumeSessionId === undefined ||
 											input.rewind !== undefined,
@@ -149,16 +153,5 @@ export const recoverClaudeRunnerCommands = (
 					Effect.mapError((cause) => runnerFailure("recover turn", cause)),
 				);
 			},
-			onCompleted: (row, input, result) =>
-				result.handoff && deps.persistHandoffDelivered
-					? deps.persistHandoffDelivered(
-							sessionId,
-							{
-								...result.handoff,
-								instanceId: input.instanceId ?? row.provider_id,
-							},
-							row.command_id,
-						)
-					: Effect.void,
 		});
 	});

@@ -116,8 +116,10 @@ test.describe("phone session island", () => {
 			.click();
 		await page.getByTestId("session-bar-island-overflow").tap();
 		await expect(page.getByTestId("session-bar-island-menu")).toBeVisible();
-		// The views sheet must stay open through this observation window.
-		await page.waitForTimeout(100);
+		await expect(page.getByTestId("menu-sheet-scrim")).toHaveCSS(
+			"pointer-events",
+			"auto",
+		);
 		await expect(page.getByTestId("session-bar-island-menu")).toBeVisible();
 		await page.keyboard.press("Escape");
 		await addProbeMessages(page);
@@ -125,8 +127,10 @@ test.describe("phone session island", () => {
 		await page.getByTestId("session-bar-island-overflow").tap();
 		const sheet = page.getByTestId("session-bar-island-menu");
 		await expect(sheet).toBeVisible();
-		// The overflow sheet must stay open through this observation window.
-		await page.waitForTimeout(100);
+		await expect(page.getByTestId("menu-sheet-scrim")).toHaveCSS(
+			"pointer-events",
+			"auto",
+		);
 		await expect(sheet).toBeVisible();
 		for (const view of ["chat", "terminal", "diff", "files"]) {
 			await expect(sheet.getByTestId(`overflow-view-${view}`)).toBeVisible();
@@ -144,20 +148,30 @@ test.describe("phone session island", () => {
 			["Chat", "Terminal"],
 			["Terminal", "Diff"],
 			["Diff", "Files"],
-			["Files", "Session"],
-			["Session", "Snooze"],
-			["Snooze", "Delete"],
-			["Delete", "More actions"],
-			["More actions", "Share"],
+			["Files", "Triage"],
+			["Triage", "Snooze"],
+			["Snooze", "Auto-settle"],
+			["Auto-settle", "Session"],
+			["Session", "Delete"],
+			["Delete", "Share"],
 			["Share", "Settings"],
 			["Settings", "Debug"],
 		] as const) {
 			expect(content.indexOf(before)).toBeLessThan(content.indexOf(after));
 		}
 
+		// Tapping Snooze opens its sticky list of times inside the sheet; the
+		// date-and-time item hands off to the snooze dialog.
 		await sheet.getByTestId("session-ctx-snooze").click();
+		const times = page.getByRole("menu", { name: "Snooze until", exact: true });
+		await expect(times).toBeVisible();
+		await page.waitForTimeout(100);
+		await expect(times).toBeVisible();
+		await times.locator('[data-hold-menu-item="pick"]').click();
 		const snooze = page.getByRole("dialog", { name: /Snooze until/ });
 		await expect(snooze).toBeVisible();
+		await expect(sheet).toBeHidden();
+		await expect(page.getByTestId("snooze-pick-input")).toBeVisible();
 		const first = page.getByTestId("snooze-option-1h");
 		await expect(first).toBeFocused();
 		expect(
@@ -184,6 +198,20 @@ test.describe("phone session island", () => {
 		await page.getByTestId("session-bar-island-overflow").tap();
 		await sheet.getByTestId("session-ctx-snooze").focus();
 		await page.keyboard.press("Enter");
+		await expect(times.locator('[data-hold-menu-item="1h"]')).toBeFocused();
+		// bits-ui focuses the first item twice: on open, then again from its
+		// focus scope a frame later. Navigate once that frame has run.
+		await page.evaluate(
+			() => new Promise((resolve) => requestAnimationFrame(resolve)),
+		);
+		await page.keyboard.press("End");
+		await expect(
+			times.locator('[data-hold-menu-item="indefinite"]'),
+		).toBeFocused();
+		await page.keyboard.press("ArrowUp");
+		await expect(times.locator('[data-hold-menu-item="pick"]')).toBeFocused();
+		await page.keyboard.press("Enter");
+		await expect(snooze).toBeVisible();
 		await expect(first).toBeFocused();
 		expect(
 			await first.evaluate((element) => element.matches(":focus-visible")),
@@ -297,6 +325,13 @@ test.describe("phone session island", () => {
 			}, theme);
 			await page.getByTestId("session-bar-island-overflow").tap();
 			await page.getByTestId("session-ctx-snooze").click();
+			await page
+				.getByRole("menu", { name: "Snooze until", exact: true })
+				.locator('[data-hold-menu-item="pick"]')
+				.click();
+			await expect(
+				page.getByRole("dialog", { name: /Snooze until/ }),
+			).toBeVisible();
 			const channels = await page.locator("dialog[open]").evaluate((dialog) => {
 				const color = getComputedStyle(dialog, "::backdrop").backgroundColor;
 				return color.match(/[\d.]+/g)?.map(Number) ?? [];

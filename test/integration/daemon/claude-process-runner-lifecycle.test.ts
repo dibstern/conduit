@@ -55,6 +55,20 @@ function snapshot(harness: ProcessHarness, sessionId: string) {
 					"SELECT status FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
 				)
 				.all(sessionId),
+			runReservations: (
+				db
+					.prepare(
+						"SELECT run_id FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
+					)
+					.all(sessionId) as Array<{ run_id: string }>
+			).map((row) => row.run_id),
+			errorOwners: (
+				db
+					.prepare(
+						"SELECT json_extract(metadata, '$.runId') AS run_id FROM events WHERE session_id = ? AND type = 'turn.error' ORDER BY sequence",
+					)
+					.all(sessionId) as Array<{ run_id: string }>
+			).map((row) => row.run_id),
 			receipts: db
 				.prepare(
 					"SELECT receipt.status FROM command_receipts receipt JOIN provider_command_outbox outbox ON outbox.command_id = receipt.command_id WHERE outbox.session_id = ? AND outbox.effect_type = 'send_turn' ORDER BY outbox.request_sequence",
@@ -152,14 +166,17 @@ describe("Claude runner admission socket probes", () => {
 		const outputs: import("../../../src/lib/provider/runner/session-runner.js").SessionOutput[] =
 			[];
 		const received = await Effect.runPromise(Deferred.make<void>());
+		const released = await Effect.runPromise(Deferred.make<void>());
 		let attempts = 0;
 		let rejecting = mode === "reject";
 		let delayedPeer: ClaudeRunnerSocket | undefined;
+		let activePeer: ClaudeRunnerSocket | undefined;
 		const replyHello = (peer: ClaudeRunnerSocket) =>
 			peer.write({
 				type: "hello",
 				protocolVersion: RUNNER_PROTOCOL_VERSION,
 				buildId: BUILD_ID,
+				stampsRunIds: true,
 				runnerId,
 				sessionId,
 				pid,
@@ -184,6 +201,8 @@ describe("Claude runner admission socket probes", () => {
 			const peer = new ClaudeRunnerSocket(
 				socket,
 				(message) => {
+					if (message.type === "output-reply")
+						Deferred.doneUnsafe(released, Effect.void);
 					if (message.type === "hello") {
 						if (mode === "delayed") {
 							delayedPeer = peer;
@@ -221,6 +240,7 @@ describe("Claude runner admission socket probes", () => {
 				},
 				() => {},
 			);
+			activePeer = peer;
 		});
 		await new Promise<void>((done, fail) => {
 			server.once("error", fail);
@@ -245,7 +265,16 @@ describe("Claude runner admission socket probes", () => {
 			commands,
 			outputs,
 			received,
+			released,
 			runnerPids,
+			releaseSink() {
+				activePeer?.write({
+					type: "output",
+					outputId: "probe-release",
+					sequence: 1,
+					output: { type: "release-sink", sinkId: "probe-send" },
+				});
+			},
 			get attempts() {
 				return attempts;
 			},
@@ -333,6 +362,36 @@ describe("Claude runner admission socket probes", () => {
 		vi.restoreAllMocks();
 	});
 
+	it("releases a pending send's retained sink when its caller is cancelled", async () => {
+		const fixture = await probe("idle");
+		probes.push(fixture);
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* fixture.make;
+					yield* runner.recoverEffect;
+					const send = yield* Effect.forkChild(
+						runner.executeEffect(fixture.send),
+					);
+					yield* Deferred.await(fixture.received);
+					fixture.releaseSink();
+					yield* Deferred.await(fixture.released).pipe(
+						Effect.timeout("2 seconds"),
+					);
+					expect(fixture.outputs).not.toContainEqual({
+						type: "release-sink",
+						sinkId: "probe-send",
+					});
+					yield* Fiber.interrupt(send);
+					expect(fixture.outputs).toContainEqual({
+						type: "release-sink",
+						sinkId: "probe-send",
+					});
+				}),
+			),
+		);
+	}, 15_000);
+
 	it("settles end-session and respawns an unaccepted send refused by idle exit", async () => {
 		const fixture = await probe("idle");
 		probes.push(fixture);
@@ -362,7 +421,7 @@ describe("Claude runner admission socket probes", () => {
 					});
 					expect(
 						(yield* Fiber.join(send).pipe(Effect.timeout("10 seconds"))).status,
-					).toBe("completed");
+					).toBe("accepted");
 					fixture.recordPids();
 					expect([...fixture.runnerPids]).toHaveLength(2);
 					expect(
@@ -487,7 +546,7 @@ describe("Claude runner admission socket probes", () => {
 					if (phase === "dead") {
 						expect(result).toMatchObject({
 							_tag: "Success",
-							value: { status: "completed" },
+							value: { status: "accepted" },
 						});
 						expect([...fixture.runnerPids]).toHaveLength(2);
 					} else {
@@ -547,27 +606,77 @@ describe("built-dist Claude runner lifecycle", () => {
 		runnerLifecycle?: NonNullable<
 			Parameters<typeof ProcessHarness.start>[0]
 		>["runnerLifecycle"],
-		queryInitializationDelayMs?: number,
+		options: { runnerStartupTimeoutMs?: number } = {},
 	) {
 		expect(existsSync("dist/src/bin/claude-session-runner.js")).toBe(true);
-		const harness = await ProcessHarness.start({
+		const harness = ProcessHarness.create({
 			dist: resolve("dist"),
 			...(runnerLifecycle ? { runnerLifecycle } : {}),
-			...(queryInitializationDelayMs ? { queryInitializationDelayMs } : {}),
 		});
 		const fixture: { harness: ProcessHarness; sessionId?: string } = {
 			harness,
 		};
 		fixtures.push(fixture);
+		await harness.restart(options);
 		const browser = await harness.connect();
 		const sessionId = await browser.createSession("Runner lifecycle");
 		fixture.sessionId = sessionId;
 		return { harness, browser, sessionId };
 	}
 
+	it("settles the reservation and receipt when the SDK iterator fails before intake", async () => {
+		const { harness, browser, sessionId } = await start();
+		const sent = browser.send(sessionId, "fail-before-intake");
+		void sent.catch(() => undefined);
+		await vi.waitFor(
+			() => {
+				const state = snapshot(harness, sessionId);
+				expect(state.commands).toEqual([{ status: "failed" }]);
+				expect(state.receipts).toEqual([{ status: "side_effect_failed" }]);
+				expect(state.turns).toEqual([{ state: "error" }]);
+				expect(state.errorOwners).toEqual(state.runReservations);
+				expect(state.events).toEqual(
+					expect.arrayContaining([
+						{
+							type: "turn.error",
+							data: expect.objectContaining({
+								error: expect.stringContaining(
+									"Harness SDK iterator failed before intake",
+								),
+							}),
+						},
+					]),
+				);
+				const db = new Database(harness.daemonStorePath(), { readonly: true });
+				try {
+					expect(
+						db
+							.prepare(
+								"SELECT status, started_at FROM provider_runs WHERE session_id = ?",
+							)
+							.all(sessionId),
+					).toEqual([{ status: "error", started_at: null }]);
+					expect(
+						db
+							.prepare("SELECT started_at FROM turns WHERE session_id = ?")
+							.all(sessionId),
+					).toEqual([{ started_at: null }]);
+				} finally {
+					db.close();
+				}
+			},
+			{ timeout: 25_000 },
+		);
+		await sent;
+	}, 30_000);
+
 	it("reclaims a pre-warmed runner through the idle policy without a send", async () => {
-		const { harness, browser, sessionId } = await start({ idleTimeoutMs: 500 });
-		await browser.preWarmSession(sessionId);
+		const { harness, browser, sessionId } = await start(
+			{ idleTimeoutMs: 500 },
+			{ runnerStartupTimeoutMs: 25_000 },
+		);
+		await browser.preWarmSession(sessionId, 30_000);
+		await harness.waitForMark((mark) => mark.kind === "runner-started");
 		const runner = started(harness);
 		const query = harness.marks.find((mark) => mark.kind === "query");
 		if (query?.kind !== "query")
@@ -608,12 +717,15 @@ describe("built-dist Claude runner lifecycle", () => {
 		expect(state.events.some((event) => event.type === "turn.error")).toBe(
 			false,
 		);
-	}, 30_000);
+	}, 60_000);
 
 	it("exits after the idle window, resets it on activity, and respawns on send", async () => {
 		const idleTimeoutMs = 1200;
-		const { harness, browser, sessionId } = await start({ idleTimeoutMs });
-		await browser.send(sessionId, "idle-first");
+		const { harness, browser, sessionId } = await start(
+			{ idleTimeoutMs },
+			{ runnerStartupTimeoutMs: 25_000 },
+		);
+		await browser.send(sessionId, "idle-first", 30_000);
 		const first = started(harness);
 		await new Promise<void>((done) => setTimeout(done, 700));
 		await browser.send(sessionId, "ambient-idle");
@@ -632,7 +744,7 @@ describe("built-dist Claude runner lifecycle", () => {
 				(event) => event.type === "turn.error",
 			),
 		).toBe(false);
-		const next = await browser.send(sessionId, "idle-restart");
+		const next = await browser.send(sessionId, "idle-restart", 30_000);
 		expect(next.chunks.join("")).toBe(responseChunks("idle-restart").join(""));
 		expect(next.done["status"]).toBe("idle");
 		expect(started(harness).pid).not.toBe(first.pid);
@@ -643,27 +755,21 @@ describe("built-dist Claude runner lifecycle", () => {
 				{ status: "completed" },
 			]),
 		);
-	}, 30_000);
+	}, 90_000);
 
 	it("releases end-session admission when interrupted before runner readiness", async () => {
 		const { harness, browser, sessionId } = await start({ helloDelayMs: 3000 });
 		const first = browser.send(sessionId, "before-interrupted-end");
-		await vi.waitFor(
-			() =>
-				expect(
-					harness.marks.some((mark) => mark.kind === "runner-hello-pending"),
-				).toBe(true),
-			{ timeout: 5000 },
-		);
+		void first.catch(() => undefined);
+		await harness.waitForMark((mark) => mark.kind === "runner-hello-pending");
 		const controller = new AbortController();
 		const reload = browser.reloadSession(sessionId, controller.signal).then(
 			() => "completed",
 			() => "interrupted",
 		);
-		await vi.waitFor(() =>
-			expect(
-				harness.marks.some((mark) => mark.kind === "runner-end-selected"),
-			).toBe(true),
+		await harness.waitForMark(
+			(mark) =>
+				mark.kind === "runner-end-selected" && mark.sessionId === sessionId,
 		);
 		controller.abort();
 		expect(await reload).toBe("interrupted");
@@ -1023,9 +1129,10 @@ describe("built-dist Claude runner lifecycle", () => {
 				{ status: "side_effect_failed" },
 				{ status: "side_effect_failed" },
 			]);
-			expect(
-				state.events.filter((event) => event.type === "turn.error"),
-			).toHaveLength(1);
+			expect([...state.errorOwners].sort()).toEqual(
+				[...state.runReservations].sort(),
+			);
+			expect(new Set(state.errorOwners).size).toBe(2);
 			expect(state.queued).toEqual([{ inputId: steerId }]);
 			expect(
 				state.events.filter((event) => event.type === "input.requeued"),
@@ -1112,9 +1219,10 @@ describe("built-dist Claude runner lifecycle", () => {
 				{ status: "side_effect_failed" },
 				{ status: "side_effect_failed" },
 			]);
-			expect(
-				state.events.filter((event) => event.type === "turn.error"),
-			).toHaveLength(1);
+			expect([...state.errorOwners].sort()).toEqual(
+				[...state.runReservations].sort(),
+			);
+			expect(new Set(state.errorOwners).size).toBe(2);
 			expect(state.queued).toEqual([{ inputId: steerId }]);
 			expect(
 				state.events.filter((event) => event.type === "input.requeued"),

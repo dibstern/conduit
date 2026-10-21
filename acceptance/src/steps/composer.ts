@@ -1,12 +1,13 @@
 import { expect, type Page } from "@playwright/test";
 import { sendMockFamily } from "../../../test/e2e/helpers/rpc-mock.js";
 import { InputPage } from "../../../test/e2e/page-objects/input.page.js";
-import { DESKTOP_VIEWPORT } from "../playwrightDriver.js";
+import { DESKTOP_VIEWPORT, PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	openComposerMoreSheet,
 	openSessionRoute,
 	relayControls,
+	requireRelayControl,
 	requireRpcControl,
 	rpcControls,
 } from "./shared.js";
@@ -19,7 +20,7 @@ async function openApprovalsMenu(page: Page): Promise<void> {
 	let button = page.getByTestId(
 		/^(permission-mode-badge|composer-word-approvals)$/,
 	);
-	if ((await page.getByTestId("composer-more").count()) > 0) {
+	if ((page.viewportSize()?.width ?? 0) < 768) {
 		const row = page.getByTestId("composer-more-mode");
 		if (await row.isVisible()) button = row;
 		else if (!(await button.isVisible())) {
@@ -33,6 +34,67 @@ async function openApprovalsMenu(page: Page): Promise<void> {
 }
 
 export const composerHandlers: StepHandler[] = [
+	{
+		name: "assert ordered mock messages after clock changes",
+		match: /^generated messages follow the scenario clock in arrival order$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			const now = await page.evaluate(() => Date.now());
+			const texts = ["Start a composer turn.", "The fixed-clock reply"];
+			for (let index = 0; index < 12; index++) {
+				const text = `Device message ${index + 1}`;
+				texts.push(text);
+				requireRelayControl(page).sendMessage({
+					type: "user_message",
+					sessionId: "sess-mockup-001",
+					text,
+				});
+			}
+			const times = page.locator("#messages time");
+			await expect(times).toHaveCount(texts.length);
+			const stamps = await times.evaluateAll((elements) =>
+				elements.map((element) =>
+					Date.parse(element.getAttribute("datetime") ?? ""),
+				),
+			);
+			expect(stamps[0]).toBe(now);
+			for (let index = 1; index < stamps.length; index++)
+				expect(stamps[index]).toBeGreaterThan(stamps[index - 1] ?? 0);
+			const transcript = page.locator("#messages");
+			const content = await transcript.innerText();
+			for (let index = 1; index < texts.length; index++)
+				expect(content.indexOf(texts[index] ?? "")).toBeGreaterThan(
+					content.indexOf(texts[index - 1] ?? ""),
+				);
+		},
+	},
+	{
+		name: "assert deterministic mock identity and time",
+		match:
+			/^the mock avatar and message clock match the fixed acceptance fixture$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			expect(
+				await page.evaluate(() => ({
+					now: Date.now(),
+					date: new Date().toISOString(),
+					zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+					locale: navigator.language,
+				})),
+			).toEqual({
+				now: PINNED_CLOCK_MS,
+				date: new Date(PINNED_CLOCK_MS).toISOString(),
+				zone: "UTC",
+				locale: "en-US",
+			});
+			const message = page.locator("#messages .msg-user").last();
+			await expect(message.getByTestId("user-avatar")).toHaveText("Y");
+			const timestamp = await message.locator("time").getAttribute("datetime");
+			const createdAt = Date.parse(timestamp ?? "");
+			expect(createdAt).toBeGreaterThanOrEqual(PINNED_CLOCK_MS);
+			expect(createdAt).toBeLessThan(PINNED_CLOCK_MS + 60_000);
+		},
+	},
 	{
 		name: "set desktop viewport",
 		match: /^the viewport is a desktop$/,
@@ -54,6 +116,35 @@ export const composerHandlers: StepHandler[] = [
 		match: /^I send the composer message$/,
 		run: async ({ world }) => {
 			await new InputPage(world.page).send();
+		},
+	},
+	{
+		name: "tap send with the keyboard open",
+		match: /^I tap the send button with the keyboard open$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			const cdp = await page.context().newCDPSession(page);
+			await cdp.send("Emulation.setTouchEmulationEnabled", {
+				enabled: true,
+				maxTouchPoints: 1,
+			});
+			// An iPhone home-indicator inset, which iOS keeps at full size while the keyboard is up.
+			await cdp.send("Emulation.setSafeAreaInsetsOverride", {
+				insets: { bottom: 34, bottomMax: 34 },
+			});
+			await page.locator("#input-area textarea").focus();
+			const box = await page.locator("#send").boundingBox();
+			if (!box) throw new Error("Send button is not visible");
+			const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+			await cdp.send("Input.dispatchTouchEvent", {
+				type: "touchStart",
+				touchPoints: [point],
+			});
+			await cdp.send("Input.dispatchTouchEvent", {
+				type: "touchEnd",
+				touchPoints: [],
+			});
+			await cdp.detach();
 		},
 	},
 	{
@@ -95,15 +186,21 @@ export const composerHandlers: StepHandler[] = [
 				throw new Error("Mock relay controls were not initialised");
 			}
 
-			await rpcControl.waitForRequest(
+			// The composer hands the provider its own spelling of $goal.
+			const sent = message.replace(/^\$goal\b/, "/goal");
+			const request = await rpcControl.waitForRequest(
 				(request) =>
-					request.tag === "input.submit" && request.payload["text"] === message,
+					request.tag === "input.submit" && request.payload["text"] === sent,
 			);
-			// Stand in for the adapter placing the sent message (the browser keeps
-			// no copy of its own), then finish the turn the send started, as the
+			// Stand in for the adapter placing the sent message, which replaces the
+			// browser's own copy, then finish the turn the send started, as the
 			// relay's done does.
 			await relayControl.sendMessages([
-				{ type: "user_message", text: message },
+				{
+					type: "user_message",
+					text: sent,
+					inputId: request.payload["inputId"],
+				},
 				{ type: "done", code: 0 },
 			]);
 		},
@@ -197,13 +294,13 @@ export const composerHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert approvals chip label",
+		name: "assert approvals shield accessible label",
 		match:
-			/^the approvals chip shows (Never ask|Plan|Ask|Edits|Auto|Full access)$/,
+			/^the approvals chip shows (Never ask|Plan|Ask before edits|Auto-accept edits|Auto|Full access)$/,
 		run: async ({ world, match }) => {
-			await expect(world.page.getByTestId("permission-mode-badge")).toHaveText(
-				match[1] ?? "",
-			);
+			await expect(
+				world.page.getByTestId("permission-mode-badge"),
+			).toHaveAccessibleName(`Approvals: ${match[1]}. Open options`);
 		},
 	},
 	{
@@ -268,7 +365,7 @@ export const composerHandlers: StepHandler[] = [
 				.poll(() =>
 					button.evaluate((element, tone) => {
 						const probe = document.createElement("span");
-						probe.style.color = `var(--color-p-${tone})`;
+						probe.style.color = `var(--color-${tone === "full" ? "error" : tone === "edits" || tone === "auto" ? "status-ask" : "text-secondary"})`;
 						document.body.append(probe);
 						const expected = getComputedStyle(probe).color;
 						probe.remove();

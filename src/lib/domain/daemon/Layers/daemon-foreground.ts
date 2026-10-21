@@ -21,6 +21,7 @@ import {
 import {
 	type DaemonConfig,
 	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
+	DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	defaultDaemonConfig,
 	loadDaemonConfigStartupResult,
@@ -149,6 +150,7 @@ const buildInitialRuntimeConfig = (
 				(options.tailscaleServe === false &&
 					persisted?.tailscaleServe === true)),
 		keepAwake: options.keepAwake ?? persisted?.keepAwake ?? false,
+		...(persisted?.avatar !== undefined && { avatar: persisted.avatar }),
 		autoSettleAfterDays:
 			persisted?.autoSettleAfterDays === undefined
 				? DEFAULT_AUTO_SETTLE_AFTER_DAYS
@@ -157,6 +159,10 @@ const buildInitialRuntimeConfig = (
 			persisted?.autoArchiveAfterDays === undefined
 				? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS
 				: persisted.autoArchiveAfterDays,
+		autoDeleteArchivedAfterDays:
+			persisted?.autoDeleteArchivedAfterDays === undefined
+				? DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS
+				: persisted.autoDeleteArchivedAfterDays,
 		...(persisted?.worktreeCleanup !== undefined && {
 			worktreeCleanup: persisted.worktreeCleanup,
 		}),
@@ -170,6 +176,9 @@ const buildInitialRuntimeConfig = (
 		...(keepAwakeArgs !== undefined && { keepAwakeArgs }),
 		...(persisted?.newSessionProject !== undefined && {
 			newSessionProject: persisted.newSessionProject,
+		}),
+		...(persisted?.projectOrder !== undefined && {
+			projectOrder: persisted.projectOrder,
 		}),
 		startTime: Date.now(),
 		persistedSessionCounts: persistedSessionCounts(persisted),
@@ -543,6 +552,7 @@ export async function startForegroundDaemon(
 						),
 					);
 				}
+				yield* (yield* ConfigPersistenceTag).flush;
 			}),
 		);
 		await refreshSnapshots();

@@ -13,6 +13,8 @@ import {
 import { Rpc, type RpcGroup, RpcSchema } from "effect/rpc";
 import type { UsageReading } from "../contracts/limit-recovery.js";
 import {
+	type DraftListItem,
+	type InputDraftEnvelope,
 	type OpenCodeInstance,
 	type ServerStatus,
 	type ShellEnvelope,
@@ -22,9 +24,10 @@ import {
 import { SessionDirectory } from "../domain/daemon/Services/session-directory.js";
 import { subscribeAlerts } from "../domain/relay/Services/alerts.js";
 import { subscribeApprovals } from "../domain/relay/Services/approvals-subscription.js";
-import { subscribeInputDraft } from "../domain/relay/Services/input-drafts.js";
+import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
 import { subscribeProjectSettings } from "../domain/relay/Services/project-settings.js";
 import { subscribePtys } from "../domain/relay/Services/pty-subscription.js";
+import { RecapServiceTag } from "../domain/relay/Services/recap-service.js";
 import { WebSocketHandlerTag } from "../domain/relay/Services/services.js";
 import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
 import { subscribeSessionFamily } from "../domain/relay/Services/session-family-subscription.js";
@@ -89,6 +92,10 @@ const daemonOnlyStreamHandlers = {
 };
 
 const streamHandlers = {
+	SubscribeRecaps: (request) =>
+		Stream.unwrap(
+			Effect.map(RecapServiceTag, (service) => service.subscribe(request)),
+		),
 	SubscribeShell: (request) =>
 		subscribeShell({
 			...(request.resumeFromSequence === undefined
@@ -138,7 +145,12 @@ const streamHandlers = {
 	SubscribeProjectSettings: () => subscribeProjectSettings(),
 	SubscribeDraftModels: (request) => subscribeDraftModels(request),
 	SubscribeAlerts: () => subscribeAlerts(),
-	SubscribeInputDraft: (request) => subscribeInputDraft(request.sessionId),
+	SubscribeInputDraft: (request) =>
+		Stream.unwrap(
+			Effect.map(InputDraftsTag, (drafts) => drafts.subscribe(request.key)),
+		),
+	SubscribeDrafts: () =>
+		Stream.unwrap(Effect.map(InputDraftsTag, (drafts) => drafts.listDrafts())),
 	...daemonOnlyStreamHandlers,
 } satisfies {
 	[K in WsRpcs as Rpc.IsStream<K, K["_tag"]> extends never
@@ -235,10 +247,18 @@ export type DaemonRpcName =
 	| "UpdateInstance"
 	| "SetDefault"
 	| "GetAutoSettleSetting"
+	| "GetAvatar"
+	| "SetAvatar"
 	| "SetAutoSettleSetting"
+	| "GetAutoArchiveSetting"
+	| "SetAutoArchiveSetting"
+	| "GetAutoDeleteArchivedSetting"
+	| "SetAutoDeleteArchivedSetting"
 	| "GetWorktreeCleanupSetting"
 	| "SetWorktreeCleanupSetting"
 	| "CleanUpWorktreesNow"
+	| "SetTerminalKeys"
+	| "GetTerminalKeys"
 	| "GetUsageLimitsSetting"
 	| "SetUsageLimitsSetting"
 	| "SetCursorUsageKeychain"
@@ -252,7 +272,8 @@ export type DaemonRpcName =
 
 export class RpcCaller extends Context.Service<
 	RpcCaller,
-	{ readonly kind: "browser"; readonly ip: string } | { readonly kind: "cli" }
+	| { readonly kind: "browser"; readonly ip: string; readonly secure?: boolean }
+	| { readonly kind: "cli" }
 >()("RpcCaller") {}
 
 /** Browser mutations revoke connections after their reply has been written. */
@@ -280,7 +301,7 @@ export type DaemonRpcHandlers = {
 			Extract<RpcGroup.Rpcs<typeof WsRpcGroup>, { readonly _tag: K }>
 		>,
 		Rpc.Error<Extract<RpcGroup.Rpcs<typeof WsRpcGroup>, { readonly _tag: K }>>,
-		K extends "SetPin" ? RpcCaller : never
+		K extends "SetPin" | "UpdateMessageSurfacing" ? RpcCaller : never
 	>;
 } & {
 	readonly SubscribeInstances: () => Stream.Stream<
@@ -295,6 +316,13 @@ export type DaemonRpcHandlers = {
 		request: Rpc.Payload<Rpc.ExtractTag<WsRpcs, "SubscribeShell">>,
 	) => Stream.Stream<ShellEnvelope, WsRpcError>;
 	readonly SubscribeServerStatus: () => Stream.Stream<ServerStatus, WsRpcError>;
+	readonly SubscribeInputDraft?: (
+		request: Rpc.Payload<Rpc.ExtractTag<WsRpcs, "SubscribeInputDraft">>,
+	) => Stream.Stream<InputDraftEnvelope, WsRpcError>;
+	readonly SubscribeDrafts?: () => Stream.Stream<
+		readonly DraftListItem[],
+		WsRpcError
+	>;
 	/** Told after a session is created in `projectSlug`. */
 	readonly sessionCreated: (projectSlug: string) => Effect.Effect<void>;
 };
@@ -312,8 +340,18 @@ export const makeRoutedWsRpcServerLayer = <
 			const directory = yield* SessionDirectory;
 			const projectSlugFor = (payload: object, fallback?: string) =>
 				Effect.gen(function* () {
-					if ("sessionId" in payload && typeof payload.sessionId === "string") {
-						const owner = yield* directory.projectOf(payload.sessionId).pipe(
+					const key = "key" in payload ? payload.key : undefined;
+					const sessionId =
+						"sessionId" in payload && typeof payload.sessionId === "string"
+							? payload.sessionId
+							: typeof key === "object" &&
+									key !== null &&
+									"session" in key &&
+									typeof key.session === "string"
+								? key.session
+								: undefined;
+					if (sessionId !== undefined) {
+						const owner = yield* directory.projectOf(sessionId).pipe(
 							Failure.mapEffectFailures(
 								(error) =>
 									new WsRpcError({
@@ -324,7 +362,7 @@ export const makeRoutedWsRpcServerLayer = <
 						if (Option.isNone(owner))
 							return yield* new WsRpcError({
 								code: "unknown-session",
-								message: `Unknown session: ${payload.sessionId}`,
+								message: `Unknown session: ${sessionId}`,
 							});
 						return owner.value;
 					}
@@ -510,7 +548,11 @@ export const makeRoutedWsRpcServerLayer = <
 								return routeStream<unknown, unknown, StreamHandlerContext>(
 									request,
 									() => handler(request),
-									name === "SubscribeShell" ? defaultProjectSlug : undefined,
+									name === "SubscribeShell" ||
+										name === "SubscribeInputDraft" ||
+										name === "SubscribeDrafts"
+										? defaultProjectSlug
+										: undefined,
 								);
 							},
 						];

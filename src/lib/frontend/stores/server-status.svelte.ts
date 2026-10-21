@@ -23,7 +23,7 @@ import {
 	refreshAppShell,
 	releaseBuildReload,
 } from "../utils/build-id.js";
-import { inputSyncState, persistInputDraft } from "./chat.svelte.js";
+import { persistInputDraft } from "./chat.svelte.js";
 import { refreshListedSessions } from "./session-list.svelte.js";
 import { removeBanner, showBanner, showToast } from "./ui.svelte.js";
 
@@ -219,7 +219,6 @@ function handleBuildId(serverBuildId: string): Promise<void> {
 		showBuildMismatchBanner();
 		return Promise.resolve();
 	}
-	inputSyncState.reloadPending = true;
 	showToast({
 		title: "Conduit was updated",
 		body: "Saving your draft and reloading…",
@@ -240,7 +239,6 @@ function handleBuildId(serverBuildId: string): Promise<void> {
 		}
 		releaseBuildReload(serverBuildId);
 		buildReload = null;
-		inputSyncState.reloadPending = false;
 		showBuildMismatchBanner();
 	})();
 	return buildReload;

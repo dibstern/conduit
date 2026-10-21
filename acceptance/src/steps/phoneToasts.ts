@@ -84,7 +84,7 @@ export const phoneToastsHandlers: StepHandler[] = [
 		name: "assert New session opened a draft",
 		match: /^a new session draft is open$/,
 		run: async ({ world }) => {
-			await expect(world.page).toHaveURL(/\/new(?:\?|$)/);
+			await expect(world.page).toHaveURL(/\/draft\/[^/?]+(?:\?|$)/);
 			await expect(world.page.locator("#input-area")).toBeVisible();
 		},
 	},

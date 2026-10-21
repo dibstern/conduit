@@ -24,8 +24,10 @@ import {
 	type GetModelsResponse,
 	type GetProjectsResponse,
 	type HistoryMessageSchema,
+	type InputDraftKey,
 	type LoadMoreHistoryResponse,
 	type PermissionDecision,
+	type ProviderInfo,
 	type PtyListResponse,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -67,6 +69,10 @@ export class TestWsClient {
 	>();
 	private detailSubscriptionKey: string | undefined;
 	private readonly sessionRows = new Map<string, SessionInfo>();
+	private readonly discoveredCatalogs = new Map<
+		string,
+		readonly ProviderInfo[]
+	>();
 	private readonly turnEndVersions = new Map<string, number>();
 	private readonly turnCursors = new Map<string, number>();
 	private closed = false;
@@ -247,10 +253,29 @@ export class TestWsClient {
 				...(instanceId ? { instanceId: AccountIdSchema.make(instanceId) } : {}),
 			}),
 		);
-		const firstProvider = models.providers.find(
-			(provider) => provider.models.length > 0,
-		);
-		const firstModel = firstProvider?.models[0];
+		const firstPick = (providers: readonly ProviderInfo[]) => {
+			const provider = providers.find(
+				(candidate) => candidate.models.length > 0,
+			);
+			const first = provider?.models[0];
+			return provider && first
+				? {
+						providerId: provider.id,
+						modelId: first.id,
+						variant: first.variants?.[0] ?? "",
+						contextWindow:
+							first.contextWindowOptions?.find((option) => option.isDefault)
+								?.value ?? "",
+					}
+				: undefined;
+		};
+		// GetModels carries OpenCode providers only; a Claude catalog reaches
+		// clients on the providerModels project setting, as the browser reads it.
+		const discoveredPick = async () => {
+			if (models.instanceId === undefined) return undefined;
+			await this.subscribeProjectSettings();
+			return firstPick(this.discoveredCatalogs.get(models.instanceId) ?? []);
+		};
 		const model =
 			opts.model ??
 			(models.active
@@ -260,17 +285,7 @@ export class TestWsClient {
 						variant: models.variant?.variant ?? "",
 						contextWindow: models.contextWindow?.contextWindow ?? "",
 					}
-				: firstProvider && firstModel
-					? {
-							providerId: firstProvider.id,
-							modelId: firstModel.id,
-							variant: firstModel.variants?.[0] ?? "",
-							contextWindow:
-								firstModel.contextWindowOptions?.find(
-									(option) => option.isDefault,
-								)?.value ?? "",
-						}
-					: undefined);
+				: (firstPick(models.providers) ?? (await discoveredPick())));
 		if (!model)
 			throw new Error("The session fixture needs a valid harness model pick");
 		const result = await this.rpcCall((client) =>
@@ -362,19 +377,25 @@ export class TestWsClient {
 	async syncInputDraft(
 		text: string,
 		opts: {
+			readonly key?: InputDraftKey;
 			readonly sessionId?: string;
+			readonly projectSlug?: string;
 			readonly originId?: string;
 		} = {},
 	): Promise<void> {
 		const sessionId = opts.sessionId ?? this.getActiveSessionId();
-		if (!sessionId) {
+		const key = opts.key ?? (sessionId ? { session: sessionId } : undefined);
+		if (!key) {
 			throw new Error("Cannot sync input draft before selecting a session");
 		}
-		await this.subscribeSessionDetail(sessionId);
+		if ("session" in key) await this.subscribeSessionDetail(key.session);
 		await this.rpcCall((client) =>
 			client.SyncInputDraft({
-				sessionId,
+				key,
 				text,
+				...("draft" in key
+					? { projectSlug: opts.projectSlug ?? this.projectSlug }
+					: {}),
 				...(opts.originId ? { originId: opts.originId } : {}),
 			}),
 		);
@@ -510,6 +531,28 @@ export class TestWsClient {
 			"pty",
 			(client) => client.SubscribePtys({ projectSlug }),
 			{ projectSlug },
+		);
+	}
+
+	/** Follow the project's settings over SubscribeProjectSettings, keeping
+	 *  each account's discovered model catalog. Idempotent. */
+	async subscribeProjectSettings(): Promise<void> {
+		const projectSlug = this.projectSlug;
+		await this.follow(
+			"projectSettings",
+			(client) => client.SubscribeProjectSettings({ projectSlug }),
+			{ projectSlug },
+			(envelope) => {
+				const settings =
+					envelope._tag === "snapshot"
+						? envelope.rows
+						: envelope._tag === "upsert"
+							? [envelope.item]
+							: [];
+				for (const setting of settings)
+					if (setting._tag === "providerModels" && setting.accountId)
+						this.discoveredCatalogs.set(setting.accountId, setting.providers);
+			},
 		);
 	}
 
@@ -837,14 +880,19 @@ export class TestWsClient {
 	 * lands in `received` as `{ type: "input_draft", ...envelope }`.
 	 */
 	async subscribeInputDraft(
-		sessionId: string,
+		key: InputDraftKey | string,
 		projectSlug = this.projectSlug,
 	): Promise<void> {
-		await this.subscribeSessionDetail(sessionId, projectSlug);
+		const draftKey = typeof key === "string" ? { session: key } : key;
+		if ("session" in draftKey)
+			await this.subscribeSessionDetail(draftKey.session, projectSlug);
 		await this.follow(
 			"input_draft",
-			(client) => client.SubscribeInputDraft({ sessionId }),
-			{ projectSlug, sessionId },
+			(client) => client.SubscribeInputDraft({ key: draftKey }),
+			{
+				projectSlug,
+				...("session" in draftKey ? { sessionId: draftKey.session } : {}),
+			},
 		);
 	}
 

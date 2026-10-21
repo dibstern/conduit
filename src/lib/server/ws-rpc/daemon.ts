@@ -6,6 +6,10 @@ const daemonRequired = (operation: string) =>
 	Effect.fail(new WsRpcError({ message: `${operation} requires daemon mode` }));
 
 export const daemonOnlyHandlers = {
+	GetMessageSurfacing: (_request) => daemonRequired("GetMessageSurfacing"),
+	UpdateMessageSurfacing: (_request) =>
+		daemonRequired("UpdateMessageSurfacing"),
+	SetProjectOrder: (_request) => daemonRequired("SetProjectOrder"),
 	GetStatus: (_request) => daemonRequired("GetStatus"),
 	SetPin: (_request): Effect.Effect<never, WsRpcError | SetPinRejected> =>
 		daemonRequired("SetPin"),
@@ -23,8 +27,19 @@ export const daemonOnlyHandlers = {
 	GetInstanceStatus: (_request) => daemonRequired("GetInstanceStatus"),
 	OpenCodeUseWorktree: (_request) => daemonRequired("OpenCodeUseWorktree"),
 	ResolveSessionMode: (_request) => daemonRequired("ResolveSessionMode"),
+	SetTerminalKeys: (_request) => daemonRequired("SetTerminalKeys"),
+	GetTerminalKeys: (_request) => daemonRequired("GetTerminalKeys"),
+	GetCategorySet: (_request) => daemonRequired("GetCategorySet"),
+	GetSurfacingFeedback: (_request) => daemonRequired("GetSurfacingFeedback"),
+	GetSurfacingLedger: (_request) => daemonRequired("GetSurfacingLedger"),
+	ScoreCategorySet: (_request) => daemonRequired("ScoreCategorySet"),
+	ProposeCategoryTuning: (_request) => daemonRequired("ProposeCategoryTuning"),
+	ReplaceCategorySet: (_request) => daemonRequired("ReplaceCategorySet"),
 } satisfies Pick<
 	WsRpcHandlerMap,
+	| "GetMessageSurfacing"
+	| "UpdateMessageSurfacing"
+	| "SetProjectOrder"
 	| "GetStatus"
 	| "SetPin"
 	| "SetKeepAwake"
@@ -41,4 +56,12 @@ export const daemonOnlyHandlers = {
 	| "GetInstanceStatus"
 	| "OpenCodeUseWorktree"
 	| "ResolveSessionMode"
+	| "SetTerminalKeys"
+	| "GetTerminalKeys"
+	| "GetCategorySet"
+	| "GetSurfacingFeedback"
+	| "GetSurfacingLedger"
+	| "ScoreCategorySet"
+	| "ProposeCategoryTuning"
+	| "ReplaceCategorySet"
 >;

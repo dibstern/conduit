@@ -161,6 +161,12 @@ export function onOutput(
 	};
 }
 
+/** Replace a tab's local output, as a clear does. The server keeps its own,
+ *  so a reconnect or another device still shows the full history. */
+export function replaceScrollback(ptyId: string, data: string): void {
+	scrollbackBuffers.set(ptyId, data ? [data] : []);
+}
+
 /** Get scrollback buffer for replay on mount. This is the store's own array,
  *  not a copy — the caller replays it, it does not get to edit it. */
 export function getScrollback(ptyId: string): readonly string[] {

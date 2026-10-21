@@ -38,6 +38,21 @@ function storedSession(dbPath: string, id: string) {
 	}
 }
 
+function terminalCount(dbPath: string, id: string, messageId: string): number {
+	const db = new DatabaseSync(dbPath, { readOnly: true });
+	try {
+		return Number(
+			db
+				.prepare(
+					"SELECT COUNT(*) AS n FROM events WHERE session_id = ? AND type = 'turn.completed' AND json_extract(data, '$.messageId') = ?",
+				)
+				.get(id, messageId)?.["n"],
+		);
+	} finally {
+		db.close();
+	}
+}
+
 /** The recorded reply's final message.updated: the event that ends turn A. */
 function recordedTurnEnd(): Record<string, unknown> {
 	const ends = loadOpenCodeRecording(recording).interactions.flatMap((ix) => {
@@ -68,12 +83,6 @@ test.describe("Late turn end", () => {
 			!viewport || viewport.width < 1440,
 			"Runs on the desktop viewport only",
 		);
-		const frames: string[] = [];
-		page.on("websocket", (ws) =>
-			ws.on("framereceived", ({ payload }) => {
-				if (typeof payload === "string") frames.push(payload);
-			}),
-		);
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
 		await app.goto(relayUrl);
@@ -88,49 +97,9 @@ test.describe("Late turn end", () => {
 			.toBe("idle");
 		const endedA = storedSession(harness.eventsDbPath, id);
 
-		// Prompt B. The recording has no reply for it, so it stays where a real
-		// provider sits before reporting busy.
+		// The recording has no second reply. Accept B and hold its terminal event.
 		await app.sendMessage("And again");
 		await expect(chat.stopBtn).toBeVisible();
-
-		// A's end is reported again, late.
-		const end = recordedTurnEnd();
-		const info = end["info"] as Record<string, unknown>;
-		mockServer.injectSSEEvents([
-			{
-				type: "message.updated",
-				properties: { ...end, info: { ...info, sessionID: id } },
-			},
-		]);
-		await expect
-			.poll(
-				() =>
-					storedSession(harness.eventsDbPath, id).last_turn_end_version ?? -1,
-			)
-			.toBeGreaterThan(endedA.last_turn_end_version ?? -1);
-		const lateA = storedSession(harness.eventsDbPath, id);
-		await expect
-			.poll(() =>
-				frames.some((frame) =>
-					frame.includes(
-						`"lastTurnEndVersion":${String(lateA.last_turn_end_version)}`,
-					),
-				),
-			)
-			.toBe(true);
-		await page.waitForTimeout(500);
-		const workingAfterLateEnd = await chat.stopBtn.isVisible();
-		await page.screenshot({ path: testInfo.outputPath("after-late-end.png") });
-
-		// B starts, then its own end finishes it.
-		const row = page.locator(`#session-list [data-session-id="${id}"]`);
-		mockServer.injectSSEEvents([
-			{
-				type: "session.status",
-				properties: { sessionID: id, status: { type: "busy" } },
-			},
-		]);
-		await expect(row).toHaveAccessibleName(/^Working/);
 		await expect
 			.poll(() =>
 				mockServer.requestBodies.some(
@@ -140,8 +109,17 @@ test.describe("Late turn end", () => {
 				),
 			)
 			.toBe(true);
-		// The recording has no second reply, so supply B's user echo and end.
-		const userMessageId = "msg_turn_b_user";
+		const request = mockServer.requestBodies.find(
+			(request) =>
+				request.path.endsWith("/prompt_async") &&
+				request.body.includes("And again"),
+		);
+		const { messageID: userMessageId } = JSON.parse(request?.body ?? "{}") as {
+			messageID?: string;
+		};
+		if (!userMessageId)
+			throw new Error("B has no reserved provider message ID");
+		const row = page.locator(`#session-list [data-session-id="${id}"]`);
 		mockServer.injectSSEEvents([
 			{
 				type: "message.updated",
@@ -154,6 +132,51 @@ test.describe("Late turn end", () => {
 					},
 				},
 			},
+			{
+				type: "session.status",
+				properties: { sessionID: id, status: { type: "busy" } },
+			},
+		]);
+		await expect(row).toHaveAccessibleName(/^Working/);
+
+		// A's duplicate is ingested while B remains the active run.
+		const end = recordedTurnEnd();
+		const info = end["info"] as Record<string, unknown>;
+		const assistantId = String(info["id"]);
+		const beforeDuplicate = terminalCount(
+			harness.eventsDbPath,
+			id,
+			assistantId,
+		);
+		expect(beforeDuplicate).toBeGreaterThan(0);
+		mockServer.injectSSEEvents([
+			{
+				type: "message.updated",
+				properties: { ...end, info: { ...info, sessionID: id } },
+			},
+		]);
+		await expect
+			.poll(() => terminalCount(harness.eventsDbPath, id, assistantId))
+			.toBeGreaterThan(beforeDuplicate);
+		const lateA = storedSession(harness.eventsDbPath, id);
+		expect(lateA.status).toBe("busy");
+		expect(lateA.last_turn_end_version).toBe(endedA.last_turn_end_version);
+		expect(lateA.last_turn_end_input_id).toBe(endedA.last_turn_end_input_id);
+		// Observe a later shell row before checking the browser's working state.
+		mockServer.injectSSEEvents([
+			{
+				type: "session.updated",
+				properties: { info: { id, title: "Late end reconciled" } },
+			},
+		]);
+		await expect(row).toContainText("Late end reconciled");
+		await expect(chat.stopBtn).toBeVisible();
+		await expect(row).toHaveAccessibleName(/^Working/);
+		const workingAfterLateEnd = await chat.stopBtn.isVisible();
+		await page.screenshot({ path: testInfo.outputPath("after-late-end.png") });
+
+		// Only B's own terminal boundary may finish it.
+		mockServer.injectSSEEvents([
 			{
 				type: "message.updated",
 				properties: {
@@ -174,6 +197,8 @@ test.describe("Late turn end", () => {
 		await expect
 			.poll(() => storedSession(harness.eventsDbPath, id).last_turn_end_version)
 			.toBeGreaterThan(lateA.last_turn_end_version ?? -1);
+		const endedB = storedSession(harness.eventsDbPath, id);
+		expect(endedB.status).toBe("idle");
 		writeFileSync(
 			testInfo.outputPath("late-turn-end.json"),
 			JSON.stringify(
@@ -181,7 +206,7 @@ test.describe("Late turn end", () => {
 					sessionId: id,
 					endedA,
 					lateA,
-					endedB: storedSession(harness.eventsDbPath, id),
+					endedB,
 					workingAfterLateEnd,
 				},
 				null,
@@ -189,9 +214,13 @@ test.describe("Late turn end", () => {
 			),
 		);
 		await expect(chat.stopBtn).toBeHidden();
-		// The late end names A's send, not B's.
+		await expect(row).not.toHaveAccessibleName(/^Working/);
 		expect(endedA.last_turn_end_input_id).toEqual(expect.any(String));
 		expect(lateA.last_turn_end_input_id).toBe(endedA.last_turn_end_input_id);
+		expect(endedB.last_turn_end_input_id).toEqual(expect.any(String));
+		expect(endedB.last_turn_end_input_id).not.toBe(
+			endedA.last_turn_end_input_id,
+		);
 		expect(workingAfterLateEnd).toBe(true);
 	});
 });

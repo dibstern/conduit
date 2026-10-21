@@ -48,8 +48,13 @@ export function buildClaudeQueryOptions(
 		// Individual task stops are exposed by the session's task pull-down.
 		perTaskStopAffordance: true,
 		// A string is a custom prompt; the claude_code preset changes every query.
-		systemPrompt:
-			"To work in another worktree, use EnterWorktree instead of cd.",
+		systemPrompt: `To work in another worktree, use EnterWorktree instead of cd.${
+			input.sideThread
+				? "\nThis is a Side Thread: answer the user's side question about the conversation so far. Do not continue the parent session's task or goal."
+				: ""
+		}`,
+		// A Side Thread answers here; it must not message the parent's agents.
+		...(input.sideThread ? { disallowedTools: ["SendMessage"] } : {}),
 		settings: buildClaudeFlagSettings(claudeSettingsOverrides),
 		settingSources: ["user", "project", "local"],
 		canUseTool,
@@ -60,6 +65,9 @@ export function buildClaudeQueryOptions(
 		// user's settings defaultMode, which can be auto and skip conduit's asks.
 		permissionMode: toSdkPermissionMode(input.permissionMode ?? "ask"),
 		...(resumeSessionId ? { resume: resumeSessionId } : {}),
+		...(resumeSessionId && input.forkSession
+			? { forkSession: true, sessionId: input.sessionId }
+			: {}),
 		...(resumeSessionId && input.resumeSessionAt
 			? { resumeSessionAt: input.resumeSessionAt }
 			: {}),

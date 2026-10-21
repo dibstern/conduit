@@ -1,5 +1,6 @@
-import { Effect, Schema, Semaphore } from "effect";
+import { Clock, Effect, Ref, Schema, Semaphore } from "effect";
 import { SqlClient } from "effect/sql";
+import { validateAttachmentDataUrls } from "../../attachment-data-url.js";
 import {
 	AccountUnroutable,
 	type ContinuationError,
@@ -16,10 +17,13 @@ import {
 	WorktreeCreationError,
 	WorktreeRecoveryError,
 } from "../../contracts/worktree.js";
-import { WsRpcError } from "../../contracts/ws-rpc.js";
+import { DraftAlreadySent, WsRpcError } from "../../contracts/ws-rpc.js";
+import { autoSettleIdleWindowMs } from "../../daemon/config-persistence.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
+import { DaemonConfigRefTag } from "../../domain/daemon/Services/daemon-config-ref.js";
 import { Usage } from "../../domain/daemon/Services/usage.js";
 import { WorktreeServiceTag } from "../../domain/daemon/Services/worktree-service.js";
+import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import {
 	ContinuationTag,
 	previewContinuation,
@@ -29,7 +33,13 @@ import {
 	DraftPreWarmTag,
 	draftLaunchKey,
 } from "../../domain/relay/Services/draft-prewarm.js";
-import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
+import { InputDraftsTag } from "../../domain/relay/Services/input-drafts.js";
+import {
+	BackgroundLivenessTag,
+	ConfigTag,
+	LoggerTag,
+} from "../../domain/relay/Services/services.js";
+import { setRead } from "../../domain/relay/Services/session-attention.js";
 import { forkSession } from "../../domain/relay/Services/session-command.js";
 import { SessionGitServiceTag } from "../../domain/relay/Services/session-git-service.js";
 import {
@@ -43,6 +53,7 @@ import {
 } from "../../domain/relay/Services/session-workspace.js";
 import { dismissWorkspaceHint } from "../../domain/relay/Services/session-workspace-hint.js";
 import { prepareSessionWorktreeDeletion } from "../../domain/relay/Services/session-worktree-deletion.js";
+import { makeSurfacingFeedback } from "../../domain/relay/Services/surfacing-feedback.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../errors.js";
 import {
@@ -83,11 +94,57 @@ import { preWarmSession } from "../../handlers/session-prewarm.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import { isPickRejection, PickRequired } from "../../provider/turn-settings.js";
 import { saveRelaySettings } from "../../relay/relay-settings.js";
+import { getAutoSettleOutlook } from "../../session/auto-settle-policy.js";
+import { readPersistedAutoSettleFacts } from "../../session/auto-settle-reader.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 const sideThreadStarts = Semaphore.makeUnsafe(1);
 
+/** The outlook the sweep would reach once nobody is viewing the session. */
+const readAutoSettleOutlook = (sessionId: string) =>
+	Effect.gen(function* () {
+		const now = yield* Clock.currentTimeMillis;
+		const { projectDir } = yield* ConfigTag;
+		const { projectId } = yield* PersistenceProjectTag;
+		const facts = (yield* readPersistedAutoSettleFacts(
+			projectId,
+			now,
+			sessionId,
+			projectDir,
+		)).get(sessionId);
+		if (facts === undefined)
+			return yield* new WsRpcError({
+				message: `Unknown session: ${sessionId}`,
+				code: "unknown-session",
+			});
+		const backgroundOf = yield* BackgroundLivenessTag;
+		const config = yield* Ref.get(yield* DaemonConfigRefTag);
+		return getAutoSettleOutlook(
+			{
+				...facts,
+				hasLiveBackgroundWork: backgroundOf(sessionId) !== undefined,
+			},
+			now,
+			autoSettleIdleWindowMs(config.autoSettleAfterDays),
+		);
+	});
+
 export const sessionsHandlers = {
+	SetSurfacingMark: ({ sessionId, partId, mark }) =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const { projectId } = yield* PersistenceProjectTag;
+			const [owned] = yield* sql<{
+				id: string;
+			}>`SELECT mp.id FROM message_parts mp JOIN messages m ON m.id = mp.message_id JOIN sessions s ON s.id = m.session_id WHERE mp.id = ${partId} AND m.session_id = ${sessionId} AND s.project_id = ${projectId}`;
+			if (!owned)
+				return yield* new WsRpcError({
+					message: "Part does not belong to this session",
+				});
+			const feedback = yield* makeSurfacingFeedback;
+			yield* feedback.set(partId, mark);
+			return { ok: true as const };
+		}).pipe(Effect.catch(mapRpcFailure("SetSurfacingMark"))),
 	ListBranches: (_request) =>
 		Effect.flatMap(ConfigTag, (config) =>
 			listLocalBranches(config.projectDir),
@@ -119,9 +176,18 @@ export const sessionsHandlers = {
 			if (!(yield* read.getSession(request.sessionId)))
 				return yield* new WsRpcError({ message: "Session not found." });
 			const plan = yield* prepareSessionWorktreeDeletion(request.sessionId);
+			const config = yield* ConfigTag;
+			// The daemon read resolves an unreadable project to "off", which asks.
+			const rules = config.getWorktreeCleanup
+				? yield* config.getWorktreeCleanup()
+				: "off";
 			return {
 				worktrees: plan.worktrees,
 				removeWorktrees: plan.removeWorktrees,
+				onDelete:
+					rules !== "off" && rules.onDelete
+						? ("remove" as const)
+						: ("ask" as const),
 			};
 		}).pipe(Effect.catch(mapRpcFailure("InspectSessionWorktrees"))),
 	RenameSessionBranch: (request) =>
@@ -331,13 +397,17 @@ export const sessionsHandlers = {
 					}),
 			),
 		),
+	GetSessionAutoSettleOutlook: (request) =>
+		readAutoSettleOutlook(request.sessionId).pipe(
+			Effect.catch(mapRpcFailure("GetSessionAutoSettleOutlook")),
+		),
 	SetSessionAutoSettle: (request) =>
 		setSessionAutoSettleForClient({
 			clientId: request.originId ?? "rpc",
 			sessionId: request.sessionId,
 			disabled: request.disabled,
 		}).pipe(
-			Effect.as({ ok: true as const }),
+			Effect.andThen(readAutoSettleOutlook(request.sessionId)),
 			Effect.catch(mapRpcFailure("SetSessionAutoSettle")),
 		),
 	SnoozeSession: (request) =>
@@ -492,165 +562,217 @@ export const sessionsHandlers = {
 				),
 			),
 		),
+	SetMessagesRead: (request) =>
+		setRead(request.partIds, request.read, request.sessionId).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catch(mapRpcFailure("SetMessagesRead")),
+		),
 	CreateSession: (request) =>
 		Effect.gen(function* () {
-			if (request.worktreeBase !== undefined && !request.newWorktree)
-				return yield* new WsRpcError({
-					message: "worktreeBase requires newWorktree: true.",
-				});
-			if (
-				request.permissionMode == null ||
-				!request.model?.modelId.trim() ||
-				!request.model.providerId.trim()
-			)
-				return yield* new PickRequired();
-			const workspace = yield* SessionWorkspaceTag;
-			const path = request.worktreePath;
-			const account = yield* resolveSessionCreationAccount(request);
-			const drafts = yield* Effect.serviceOption(DraftPreWarmTag);
-			const draftId = request.draftId;
-			const resolvedCreation =
-				draftId &&
-				!request.newWorktree &&
-				PROVIDER_DRIVERS[account.driver].supportsNativeResume
-					? yield* resolveSessionCreation({ ...request, account }).pipe(
-							Effect.onError(() =>
-								drafts._tag === "Some"
-									? drafts.value
-											.take(request.originId, draftId, undefined)
-											.pipe(Effect.asVoid)
-									: Effect.void,
+			const create = Effect.gen(function* () {
+				if (request.worktreeBase !== undefined && !request.newWorktree)
+					return yield* new WsRpcError({
+						message: "worktreeBase requires newWorktree: true.",
+					});
+				if (
+					request.permissionMode == null ||
+					!request.model?.modelId.trim() ||
+					!request.model.providerId.trim()
+				)
+					return yield* new PickRequired();
+				const workspace = yield* SessionWorkspaceTag;
+				const path = request.worktreePath;
+				const account = yield* resolveSessionCreationAccount(request);
+				const drafts = yield* Effect.serviceOption(DraftPreWarmTag);
+				const draftId = request.draftId;
+				const resolvedCreation =
+					draftId &&
+					!request.newWorktree &&
+					PROVIDER_DRIVERS[account.driver].supportsNativeResume
+						? yield* resolveSessionCreation({ ...request, account }).pipe(
+								Effect.onError(() =>
+									drafts._tag === "Some"
+										? drafts.value
+												.take(request.originId, draftId, undefined)
+												.pipe(Effect.asVoid)
+										: Effect.void,
+								),
+							)
+						: undefined;
+				const launchKey = resolvedCreation
+					? yield* resolveDraftLaunchInput(resolvedCreation, path).pipe(
+							Effect.map(draftLaunchKey),
+							Effect.catchCause((cause) =>
+								Effect.gen(function* () {
+									const log = yield* LoggerTag;
+									log.debug(`Draft launch comparison failed: ${String(cause)}`);
+									return undefined;
+								}),
 							),
 						)
 					: undefined;
-			const launchKey = resolvedCreation
-				? yield* resolveDraftLaunchInput(resolvedCreation, path).pipe(
-						Effect.map(draftLaunchKey),
-						Effect.catchCause((cause) =>
+				// A mismatched or missing key discards the reservation instead of adopting it.
+				const takeReservation =
+					draftId && drafts._tag === "Some"
+						? drafts.value.take(request.originId, draftId, launchKey)
+						: Effect.succeed(undefined);
+				const options = {
+					clientId: request.originId,
+					account,
+					...(request.title != null ? { title: request.title } : {}),
+					...(request.model != null ? { model: request.model } : {}),
+					permissionMode: request.permissionMode,
+					...(resolvedCreation === undefined ? {} : { resolvedCreation }),
+				};
+				if (request.newWorktree) {
+					yield* takeReservation;
+					if (path !== undefined)
+						return yield* new WsRpcError({
+							message: "Choose either a new worktree or an existing worktree.",
+						});
+					const config = yield* ConfigTag;
+					if (
+						!PROVIDER_SESSION_CAPABILITIES[account.driver].supportsNewWorktree
+					)
+						return yield* new WorkspaceMoveError({
+							path: config.projectDir,
+							reason: "unsupported-provider",
+						});
+					const worktrees = yield* WorktreeServiceTag;
+					const sessionId = createLocalSessionId();
+					const session = yield* workspace.withLaunch(
+						Effect.uninterruptibleMask((restore) =>
 							Effect.gen(function* () {
-								const log = yield* LoggerTag;
-								log.debug(`Draft launch comparison failed: ${String(cause)}`);
-								return undefined;
+								// The id belongs to this launch, but no session exists until Git succeeds.
+								const created = yield* restore(
+									worktrees.create(
+										[config.projectDir, ...(config.extraFolders ?? [])].map(
+											(folder) => ({
+												path: folder,
+												projectSlug: config.slug,
+												sessionId,
+											}),
+										),
+										request.worktreeBase === undefined
+											? undefined
+											: { [config.projectDir]: request.worktreeBase },
+									),
+								);
+								const session = yield* restore(
+									createSessionForClient({
+										...options,
+										sessionId,
+										directory:
+											created.worktrees[config.projectDir] ?? config.projectDir,
+										initializeWorkspace: (id: string) =>
+											Effect.forEach(
+												Object.entries(created.worktrees),
+												([folder, path], index) =>
+													workspace.move(
+														id,
+														path,
+														"launch",
+														"conduit",
+														folder,
+														index === 0 ? created.ownership : undefined,
+													),
+												{ discard: true },
+											),
+									}),
+								).pipe(
+									Effect.catchCause((cause) =>
+										worktrees
+											.rollback(created)
+											.pipe(Effect.andThen(Effect.failCause(cause))),
+									),
+								);
+								const setup = yield* Effect.serviceOption(SessionSetupTag);
+								if (setup._tag === "Some")
+									yield* setup.value.start(
+										session.id,
+										created.worktrees[config.projectDir] ?? config.projectDir,
+									);
+								return session;
 							}),
 						),
-					)
-				: undefined;
-			// A mismatched or missing key discards the reservation instead of adopting it.
-			const takeReservation =
-				draftId && drafts._tag === "Some"
-					? drafts.value.take(request.originId, draftId, launchKey)
-					: Effect.succeed(undefined);
-			const options = {
-				clientId: request.originId,
-				account,
-				...(request.title != null ? { title: request.title } : {}),
-				...(request.model != null ? { model: request.model } : {}),
-				permissionMode: request.permissionMode,
-				...(resolvedCreation === undefined ? {} : { resolvedCreation }),
-			};
-			if (request.newWorktree) {
-				yield* takeReservation;
-				if (path !== undefined)
-					return yield* new WsRpcError({
-						message: "Choose either a new worktree or an existing worktree.",
-					});
-				const config = yield* ConfigTag;
-				if (!PROVIDER_SESSION_CAPABILITIES[account.driver].supportsNewWorktree)
-					return yield* new WorkspaceMoveError({
-						path: config.projectDir,
-						reason: "unsupported-provider",
-					});
-				const worktrees = yield* WorktreeServiceTag;
-				const sessionId = createLocalSessionId();
-				const session = yield* workspace.withLaunch(
-					Effect.uninterruptibleMask((restore) =>
-						Effect.gen(function* () {
-							// The id belongs to this launch, but no session exists until Git succeeds.
-							const created = yield* restore(
-								worktrees.create(
-									[config.projectDir, ...(config.extraFolders ?? [])].map(
-										(folder) => ({
-											path: folder,
-											projectSlug: config.slug,
-											sessionId,
-										}),
-									),
-									request.worktreeBase === undefined
-										? undefined
-										: { [config.projectDir]: request.worktreeBase },
-								),
-							);
-							const session = yield* restore(
-								createSessionForClient({
-									...options,
-									sessionId,
-									initializeWorkspace: (id: string) =>
-										Effect.forEach(
-											Object.entries(created.worktrees),
-											([folder, path], index) =>
-												workspace.move(
-													id,
-													path,
-													"launch",
-													"conduit",
-													folder,
-													index === 0 ? created.ownership : undefined,
-												),
-											{ discard: true },
-										),
-								}),
-							).pipe(
-								Effect.catchCause((cause) =>
-									worktrees
-										.rollback(created)
-										.pipe(Effect.andThen(Effect.failCause(cause))),
-								),
-							);
-							const setup = yield* Effect.serviceOption(SessionSetupTag);
-							if (setup._tag === "Some")
-								yield* setup.value.start(
-									session.id,
-									created.worktrees[config.projectDir] ?? config.projectDir,
-								);
-							return session;
-						}),
-					),
+					);
+					return { projectSlug: request.projectSlug, sessionId: session.id };
+				}
+				// Taking a reservation and arming its rollback must not be split by interruption.
+				const session = yield* Effect.uninterruptibleMask((restore) =>
+					Effect.gen(function* () {
+						const reservedSessionId = yield* takeReservation;
+						const create = createSessionForClient({
+							...options,
+							...(reservedSessionId === undefined
+								? {}
+								: { sessionId: reservedSessionId }),
+							...(path === undefined
+								? {}
+								: {
+										directory: path,
+										initializeWorkspace: (sessionId: string) =>
+											workspace
+												.move(sessionId, path, "launch")
+												.pipe(Effect.asVoid),
+									}),
+						});
+						return yield* restore(
+							path === undefined ? create : workspace.withLaunch(create),
+						).pipe(
+							Effect.onError(() =>
+								reservedSessionId && drafts._tag === "Some"
+									? drafts.value.discardSession(reservedSessionId)
+									: Effect.void,
+							),
+						);
+					}),
 				);
-				return { projectSlug: request.projectSlug, sessionId: session.id };
-			}
-			// Taking a reservation and arming its rollback must not be split by interruption.
-			const session = yield* Effect.uninterruptibleMask((restore) =>
+				return {
+					projectSlug: request.projectSlug,
+					sessionId: session.id,
+				};
+			});
+			if (request.draftId === undefined) return yield* create;
+			const draftId = request.draftId;
+			const inputDrafts = yield* InputDraftsTag;
+			const config = yield* ConfigTag;
+			return yield* Effect.uninterruptibleMask((restore) =>
 				Effect.gen(function* () {
-					const reservedSessionId = yield* takeReservation;
-					const create = createSessionForClient({
-						...options,
-						...(reservedSessionId === undefined
-							? {}
-							: { sessionId: reservedSessionId }),
-						...(path === undefined
-							? {}
-							: {
-									initializeWorkspace: (sessionId: string) =>
-										workspace
-											.move(sessionId, path, "launch")
-											.pipe(Effect.asVoid),
-								}),
-					});
-					return yield* restore(
-						path === undefined ? create : workspace.withLaunch(create),
-					).pipe(
+					const claimed = yield* inputDrafts.claim(draftId, config.slug);
+					if (!claimed) {
+						// The loser's prewarmed session would otherwise linger until its TTL.
+						const prewarm = yield* Effect.serviceOption(DraftPreWarmTag);
+						if (prewarm._tag === "Some")
+							yield* prewarm.value.take(request.originId, draftId, undefined);
+						return yield* new DraftAlreadySent({ draftId });
+					}
+					const session = yield* restore(create).pipe(
 						Effect.onError(() =>
-							reservedSessionId && drafts._tag === "Some"
-								? drafts.value.discardSession(reservedSessionId)
-								: Effect.void,
+							inputDrafts
+								.releaseClaim(draftId)
+								.pipe(
+									Effect.catch((cause) =>
+										Effect.logError(
+											`Could not release draft claim ${draftId}: ${cause}`,
+										),
+									),
+								),
 						),
 					);
+					// Once creation succeeds the claim must stay a tombstone, even if
+					// finalizing it fails. Releasing it would permit a duplicate create,
+					// and failing the request would report a send that happened.
+					yield* inputDrafts
+						.promote(draftId, session.sessionId, request.draftText ?? "")
+						.pipe(
+							Effect.catch((cause) =>
+								Effect.logError(`Could not promote draft ${draftId}: ${cause}`),
+							),
+						);
+					return session;
 				}),
 			);
-			return {
-				projectSlug: request.projectSlug,
-				sessionId: session.id,
-			};
 		}).pipe(
 			Effect.tap(() =>
 				Effect.gen(function* () {
@@ -683,8 +805,10 @@ export const sessionsHandlers = {
 					| WorkspaceMoveError
 					| WorktreeCreationError
 					| AccountUnroutable
+					| DraftAlreadySent
 					| WsRpcError
 				> =>
+					error instanceof DraftAlreadySent ||
 					error instanceof AccountUnroutable ||
 					error instanceof WorkspaceMoveError ||
 					error instanceof WorktreeCreationError
@@ -703,7 +827,7 @@ export const sessionsHandlers = {
 			clientId: request.originId,
 			sessionId: request.sessionId,
 		}).pipe(
-			Effect.map(({ draft }) => ({ ok: true as const, draft })),
+			Effect.as({ ok: true as const }),
 			Effect.catch((error) =>
 				Effect.fail(
 					new WsRpcError({
@@ -775,6 +899,14 @@ export const sessionsHandlers = {
 		),
 	StartSideThread: (request) =>
 		Effect.gen(function* () {
+			// Validate before the fork creates any events or provider commands.
+			yield* Effect.try({
+				try: () => validateAttachmentDataUrls(request.images),
+				catch: (cause) =>
+					new WsRpcError({
+						message: cause instanceof Error ? cause.message : String(cause),
+					}),
+			});
 			// A retry (lost reply, crash before admission) resumes the thread its
 			// input already started; serialized so a concurrent duplicate cannot
 			// fork a second one.
@@ -884,8 +1016,10 @@ export const sessionsHandlers = {
 	| "ContinueSessionInMainFolder"
 	| "DismissWorkspaceHint"
 	| "SetSessionSettled"
+	| "SetSurfacingMark"
 	| "SetSessionArchived"
 	| "SetSessionPinned"
+	| "GetSessionAutoSettleOutlook"
 	| "SetSessionAutoSettle"
 	| "SnoozeSession"
 	| "UnsnoozeSession"
@@ -897,6 +1031,7 @@ export const sessionsHandlers = {
 	| "GetContinuationHandoff"
 	| "MarkSessionUnread"
 	| "MarkSessionRead"
+	| "SetMessagesRead"
 	| "MarkSessionSeen"
 	| "CreateSession"
 	| "ViewSession"

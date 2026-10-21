@@ -5,6 +5,7 @@ import type {
 	UsageReading,
 } from "../../../src/lib/contracts/limit-recovery.js";
 import { QuotaForAccounts } from "../../../src/lib/contracts/ws-rpc.js";
+import { chooseSettingsOption } from "../../../test/e2e/helpers/settings.js";
 import type { StepHandler } from "../runtime.js";
 import { seedUsageLimits } from "./providerInstances.js";
 import { mockInstances, requireRpcControl } from "./shared.js";
@@ -68,7 +69,7 @@ async function openUsage(page: Page): Promise<void> {
 		),
 	);
 	await expect(page.getByTestId("usage-settings")).toBeVisible();
-	await expect(page.getByTestId("usage-settings-warn-80")).toBeEnabled();
+	await expect(page.getByTestId("usage-settings-warn")).toBeEnabled();
 }
 
 async function assertWindows(
@@ -136,14 +137,9 @@ async function assertWindows(
 		);
 		if (!fiveHourBox || !weekBox)
 			throw new Error("Missing account window bars");
-		// Desktop cards put the windows side by side; phone cards stack them.
-		if ((page.viewportSize()?.width ?? 0) >= 768) {
-			expect(fiveHourBox.y).toBeCloseTo(weekBox.y, 0);
-			expect(fiveHourBox.x + fiveHourBox.width).toBeLessThan(weekBox.x);
-		} else {
-			expect(weekBox.y).toBeGreaterThan(fiveHourBox.y);
-			expect(weekBox.x).toBeCloseTo(fiveHourBox.x, 0);
-		}
+		// The windows sit side by side in the account row, under the 5-hour and Week headings.
+		expect(fiveHourBox.y).toBeCloseTo(weekBox.y, 0);
+		expect(fiveHourBox.x + fiveHourBox.width).toBeLessThan(weekBox.x);
 	}
 }
 
@@ -665,27 +661,22 @@ export const usageSettingsHandlers: StepHandler[] = [
 		run: ({ world }) => openUsage(world.page),
 	},
 	{
-		name: "assert the desktop heading or phone screen title",
-		match: /^the Usage settings title reads (Claude plan usage|Usage)$/,
-		run: async ({ world, match }) => {
+		name: "assert the Usage page title and navigation",
+		match: /^the Usage settings title reads Usage$/,
+		run: async ({ world }) => {
 			await expect(world.page.getByTestId("usage-settings")).toBeVisible();
 			await expect(
-				world.page.getByRole("heading", { name: match[1] ?? "", exact: true }),
+				world.page.getByRole("heading", { name: "Usage", exact: true }),
 			).toBeVisible();
-			if (match[1] === "Usage") {
-				await expect(
-					world.page
-						.getByTestId("usage-settings")
-						.getByRole("heading", { name: "Claude plan usage" }),
-				).toHaveCount(0);
-			} else
-				await expect(
-					world.page.getByTestId("settings-tab-usage"),
-				).toHaveAttribute("aria-selected", "true");
+			const tab = world.page.getByTestId("settings-tab-usage");
+			if (await tab.count())
+				await expect(tab).toHaveAttribute("aria-selected", "true");
+			else
+				await expect(world.page.getByTestId("settings-back-btn")).toBeVisible();
 		},
 	},
 	{
-		name: "assert the six settings sections and computer grouping",
+		name: "assert the settings sections and computer grouping",
 		match: /^the settings sections place Usage and Server under This computer$/,
 		run: async ({ world }) => {
 			const panel = world.page.locator("#settings-panel");
@@ -695,8 +686,10 @@ export const usageSettingsHandlers: StepHandler[] = [
 			);
 			expect(ids).toEqual([
 				"settings-tab-general",
+				"settings-tab-terminal",
 				"settings-tab-models",
 				"settings-tab-claude",
+				"settings-tab-surfacing",
 				"settings-tab-archived",
 				"settings-tab-usage",
 				"settings-tab-server",
@@ -762,12 +755,16 @@ export const usageSettingsHandlers: StepHandler[] = [
 			await expect(headline).toHaveText(match[1] ?? "");
 			await expect(headline).toHaveCSS(
 				"color",
+				await themeColour(world.page, "--color-text-secondary"),
+			);
+			await expect(headline.locator("[aria-hidden='true']").first()).toHaveCSS(
+				"color",
 				await themeColour(
 					world.page,
 					match[2] === "red"
 						? "--color-error"
 						: match[2] === "amber"
-							? "--color-fill-amber"
+							? "--color-warning"
 							: "--color-text-secondary",
 				),
 			);
@@ -959,20 +956,36 @@ export const usageSettingsHandlers: StepHandler[] = [
 	{
 		name: "assert account positions, identity dots, plan badges and handles",
 		match:
-			/^the Usage cards show their positions, account dots, plan badges and drag handles$/,
-		run: async ({ world }) => {
+			/^the Usage cards show their positions, account dots, plan badges and drag handles$|^the phone Usage cards show account dots and plan badges, and drag handles only after Edit order$/,
+		run: async ({ world, match }) => {
+			const phone = match[0].startsWith("the phone");
 			const list = world.page.getByRole("list", {
 				name: "Auto-switch account order",
 			});
+			const reorder = world.page.getByTestId("usage-settings-reorder");
+			const hint = world.page.getByTestId("usage-settings-order-hint");
 			await expect(list.getByTestId("sortable-row")).toHaveCount(3);
+			if (phone) {
+				await expect(
+					list.getByRole("button", { name: /^Reorder / }),
+				).toHaveCount(0);
+				await expect(hint).toHaveCount(0);
+				await expect(reorder).toHaveText("Edit order");
+				await reorder.click();
+				await expect(reorder).toHaveText("Done");
+				await expect(reorder).toHaveAttribute("aria-pressed", "true");
+				await expect(hint).toHaveText("Drag ⠿ to set the auto-switch order.");
+			} else await expect(reorder).toHaveCount(0);
 			for (const [index, [id, name, plan]] of [
 				["claude", "Personal", "Max 5×"],
 				["work", "Work", "Max 20×"],
 				["spare", "Spare", "Pro"],
 			].entries()) {
-				await expect(
-					world.page.getByTestId(`usage-settings-position-${id}`),
-				).toHaveText(String(index + 1));
+				const position = world.page.getByTestId(
+					`usage-settings-position-${id}`,
+				);
+				if (phone) await expect(position).toHaveCount(0);
+				else await expect(position).toHaveText(String(index + 1));
 				await expect(
 					world.page.getByTestId(`usage-settings-dot-${id}`),
 				).toHaveAttribute("data-account", id ?? "");
@@ -987,6 +1000,13 @@ export const usageSettingsHandlers: StepHandler[] = [
 					await expect(badge).toHaveCount(0);
 				else await expect(badge).toHaveText(plan ?? "");
 			}
+			if (!phone) return;
+			await reorder.click();
+			await expect(reorder).toHaveText("Edit order");
+			await expect(list.getByRole("button", { name: /^Reorder / })).toHaveCount(
+				0,
+			);
+			await expect(hint).toHaveCount(0);
 		},
 	},
 	{
@@ -1023,28 +1043,44 @@ export const usageSettingsHandlers: StepHandler[] = [
 		name: "assert desktop or phone warning choice labels",
 		match: /^the Usage warning choices read (.+)$/,
 		run: async ({ world, match }) => {
+			await world.page.getByTestId("usage-settings-warn").click();
+			await expect(world.page.getByRole("menuitemradio")).toHaveText(
+				(match[1] ?? "").split(", "),
+			);
+			await world.page.keyboard.press("Escape");
 			await expect(
-				world.page
-					.getByRole("radiogroup", { name: "Warn me at" })
-					.getByRole("radio"),
-			).toHaveText((match[1] ?? "").split(", "));
+				world.page.getByRole("menu", { name: "Warn me at" }),
+			).toBeHidden();
+			// Escape returns keyboard focus to the trigger; drop it so the region baseline shows no focus ring.
+			await world.page.getByTestId("usage-settings-warn").blur();
 		},
 	},
 	{
 		name: "assert each phone warning option has a 44px touch target",
 		match: /^the phone Usage warning choices are 44px tall$/,
 		run: async ({ world }) => {
+			await world.page.getByTestId("usage-settings-warn").click();
 			for (const choice of [70, 80, 90, "off"])
 				await expect(
 					world.page.getByTestId(`usage-settings-warn-${choice}`),
 				).toHaveCSS("height", "44px");
+			await world.page.keyboard.press("Escape");
+			await expect(
+				world.page.getByRole("menu", { name: "Warn me at" }),
+			).toBeHidden();
+			// Escape returns keyboard focus to the trigger; drop it so the region baseline shows no focus ring.
+			await world.page.getByTestId("usage-settings-warn").blur();
 		},
 	},
 	{
 		name: "select a persisted warning threshold",
 		match: /^I select the Usage warning choice (70|80|90|off)$/,
 		run: async ({ world, match }) => {
-			await world.page.getByTestId(`usage-settings-warn-${match[1]}`).click();
+			await chooseSettingsOption(
+				world.page,
+				world.page.getByTestId("usage-settings-warn"),
+				match[1] ?? "",
+			);
 		},
 	},
 	{
@@ -1052,13 +1088,21 @@ export const usageSettingsHandlers: StepHandler[] = [
 		match: /^the Usage warning choice (70|80|90|off) is selected$/,
 		run: async ({ world, match }) => {
 			await expect(
+				world.page.getByTestId("usage-settings-warn"),
+			).toHaveAttribute("data-value", match[1] ?? "");
+			await world.page.getByTestId("usage-settings-warn").click();
+			await expect(
+				world.page.getByRole("menuitemradio", { checked: true }),
+			).toHaveCount(1);
+			await expect(
 				world.page.getByTestId(`usage-settings-warn-${match[1]}`),
 			).toHaveAttribute("aria-checked", "true");
+			await world.page.keyboard.press("Escape");
 			await expect(
-				world.page
-					.getByRole("radiogroup", { name: "Warn me at" })
-					.getByRole("radio", { checked: true }),
-			).toHaveCount(1);
+				world.page.getByRole("menu", { name: "Warn me at" }),
+			).toBeHidden();
+			// Escape returns keyboard focus to the trigger; drop it so the region baseline shows no focus ring.
+			await world.page.getByTestId("usage-settings-warn").blur();
 		},
 	},
 	{
@@ -1168,6 +1212,15 @@ export const usageSettingsHandlers: StepHandler[] = [
 				{ steps: 12 },
 			);
 			await world.page.mouse.up();
+		},
+	},
+	{
+		name: "toggle the phone account order's drag handles",
+		match: /^I tap (Edit order|Done) in Usage settings$/,
+		run: async ({ world, match }) => {
+			const reorder = world.page.getByTestId("usage-settings-reorder");
+			await expect(reorder).toHaveText(match[1] ?? "");
+			await reorder.click();
 		},
 	},
 	{

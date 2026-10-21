@@ -417,58 +417,45 @@ export const historyState = $state({
 	loading: false,
 });
 
-/** A draft's first send, shown from the click until its new session places it.
- *  No session slot exists before the create lands, and a user message
- *  otherwise appears only once the server places it. */
-export const draftSend = $state<{
-	message: UserMessage | null;
-	/** The created session; null while the create is in flight. */
-	sessionId: string | null;
-}>({ message: null, sessionId: null });
+export type LocalSend = {
+	/** Null while a draft's create is in flight: the draft pane shows it. */
+	readonly sessionId: string | null;
+	readonly message: UserMessage;
+	/** A draft's first send: it starts its session, so the pane begins with it. */
+	readonly opensSession: boolean;
+};
 
-/** The first send to show in a pane: `null` names the draft itself. */
-export function draftSendIn(sessionId: string | null): UserMessage | null {
-	return draftSend.sessionId === sessionId ? draftSend.message : null;
+/** Sends shown from the click until the server places them, by input id.
+ *  A user message otherwise appears only once the server places it. */
+export const localSends = new SvelteMap<string, LocalSend>();
+
+/** The sends to show in a pane: `null` names the draft itself. */
+export function localSendsIn(sessionId: string | null): LocalSend[] {
+	return [...localSends.values()].filter(
+		(send) => send.sessionId === sessionId,
+	);
 }
 
-// Tracks the last input text received from another tab viewing the same session.
+// Compatibility exports for transport consumers and the build-reload contract.
+export {
+	handleInputSyncReceived,
+	inputSyncState,
+	persistInputDraft,
+	registerInputDraftPersistence,
+} from "./composer-draft/runner.svelte.js";
 
-export const inputSyncState = $state({
-	/** The synced input text. */
-	text: "",
-	/** Client ID that originated the sync (empty string if unknown). */
-	lastFrom: "",
-	/** Timestamp of the last sync update (monotonic, for change detection). */
-	lastUpdated: 0,
-	/** A reconnect's older server draft must not replace text being saved. */
-	reloadPending: false,
-});
-
-let persistInputDraftHook: (() => Promise<boolean>) | undefined;
-
-/** The mounted composer flushes its latest text through existing draft sync. */
-export function registerInputDraftPersistence(
-	persist: () => Promise<boolean>,
-): () => void {
-	persistInputDraftHook = persist;
+// The mounted composer owns insertion; persistence belongs to its keyed draft runner.
+let inputDraftInsert: ((text: string) => void) | undefined;
+export function registerInputDraft(insert: (text: string) => void): () => void {
+	inputDraftInsert = insert;
 	return () => {
-		if (persistInputDraftHook === persist) persistInputDraftHook = undefined;
+		if (inputDraftInsert === insert) inputDraftInsert = undefined;
 	};
 }
 
-/** False defers reload to keep pending attachments in the mounted composer. */
-export async function persistInputDraft(): Promise<boolean> {
-	return (await persistInputDraftHook?.()) ?? true;
-}
-
-/** Apply a draft typed in another tab, or the one read at session switch. */
-export function handleInputSyncReceived(msg: {
-	text?: string | undefined;
-	from?: string | undefined;
-}): void {
-	inputSyncState.text = msg.text ?? "";
-	inputSyncState.lastFrom = msg.from ?? "";
-	inputSyncState.lastUpdated = Date.now();
+/** Append ask-reply text using the composer's normal edit and draft-sync path. */
+export function insertInputDraft(text: string): void {
+	inputDraftInsert?.(text);
 }
 
 /** Get the number of messages in current conversation. */

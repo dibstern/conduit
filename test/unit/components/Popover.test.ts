@@ -16,7 +16,7 @@ describe("Popover", () => {
 		expect(dialog.getAttribute("aria-labelledby")).toBe(heading.id);
 		expect(dialog.getAttribute("data-testid")).toBe("popover");
 		expect(dialog.classList.contains("rounded-lg")).toBe(true);
-		expect(dialog.classList.contains("bg-bg-alt")).toBe(true);
+		expect(dialog.classList.contains("bg-popover-bg")).toBe(true);
 		const stylesheet = document.createElement("style");
 		stylesheet.textContent = (await compile("@tailwind utilities;")).build([
 			...dialog.classList,

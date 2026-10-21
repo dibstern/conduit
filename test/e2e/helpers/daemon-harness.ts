@@ -9,7 +9,7 @@
 //   - OPENCODE_SERVER_PASSWORD set (for auth-aware health checks)
 //   - Project built (`pnpm run build`) — daemon serves dist/frontend/
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -86,6 +86,21 @@ export async function createDaemonHarness(
 
 	// Create temp directory for daemon config, socket, PID file, and logs
 	const tmpDir = mkdtempSync(join(tmpdir(), "e2e-daemon-"));
+	// The user has already answered the avatar question, so the first-run
+	// dialog stays shut over the specs that are not about it.
+	writeFileSync(
+		join(tmpDir, "daemon.json"),
+		JSON.stringify({
+			pid: 0,
+			port: 0,
+			pinHash: null,
+			tls: false,
+			debug: false,
+			keepAwake: false,
+			projects: [],
+			avatar: { kind: "initial" },
+		}),
+	);
 
 	const daemon = await startForegroundDaemon({
 		port: 0,

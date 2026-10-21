@@ -24,6 +24,20 @@ const ALLOWED_DELETES = [
 		reason:
 			"ADR-0005 permits migration 0057 to compact later empty deltas and thinking endings, retaining part openers. Its pinned hash, migration fixture and real-store replay parity constrain this exception.",
 	},
+	{
+		path: "src/lib/persistence/effect/migrations.ts",
+		statement:
+			/^delete\s+from\s+events\s+where\s+session_id\s+in\s*\(select\s+id\s+from\s+background_shell_sessions\)`;/i,
+		reason:
+			"Migration 0067 removes only Claude child leaves referenced by local_bash tool metadata, with no messages or children (conduit-test-iujk.5).",
+	},
+	{
+		path: "src/lib/domain/persistence/Services/event-retention.ts",
+		statement:
+			/^delete\s+from\s+events\s+where\s+project_id\s*=\s*\$\{projectId\}\s+and\s+session_id\s*=\s*\$\{sessionId\}\s+and\s+sequence\s+in\s*\(/i,
+		reason:
+			"ADR-0013 permits only EventRetention.drain() to delete events at runtime: project-scoped batches preserve own deletion markers, lineage bounds and live part pointers.",
+	},
 ];
 
 interface Source {
@@ -48,7 +62,7 @@ function sourceFiles(dir: string): Source[] {
 }
 
 function scan(sources: Source[]) {
-	const seen = new Map<string, number>();
+	const seen = new Map<(typeof ALLOWED_DELETES)[number], number>();
 	const violations: string[] = [];
 	for (const { path, text } of sources) {
 		for (const match of text.matchAll(EVENTS_DELETE)) {
@@ -59,14 +73,15 @@ function scan(sources: Source[]) {
 					entry.path === path && entry.statement.test(text.slice(offset)),
 			);
 			if (allowed) {
-				seen.set(path, (seen.get(path) ?? 0) + 1);
+				seen.set(allowed, (seen.get(allowed) ?? 0) + 1);
 			} else {
 				violations.push(`${path}:${line}`);
 			}
 		}
 	}
-	for (const { path, reason } of ALLOWED_DELETES) {
-		if (seen.get(path) !== 1) {
+	for (const entry of ALLOWED_DELETES) {
+		const { path, reason } = entry;
+		if (seen.get(entry) !== 1) {
 			violations.push(
 				`${path}: allowed delete must have one live site (${reason})`,
 			);
@@ -76,7 +91,7 @@ function scan(sources: Source[]) {
 }
 
 describe("permanent event log", () => {
-	it("rejects events-table deletes outside reviewed migration cleanup", () => {
+	it("rejects events-table deletes outside reviewed migrations and EventRetention.drain", () => {
 		expect(scan(sourceFiles(SRC_ROOT))).toEqual([]);
 	});
 
@@ -87,9 +102,20 @@ describe("permanent event log", () => {
 			path: compactionPath,
 			text: readFileSync(join(REPO_ROOT, compactionPath), "utf8"),
 		};
+		const backgroundShellPurge = {
+			path: "src/lib/persistence/effect/migrations.ts",
+			text: "yield* sql`DELETE FROM events WHERE session_id IN (SELECT id FROM background_shell_sessions)`;",
+		};
+		const drainPath = "src/lib/domain/persistence/Services/event-retention.ts";
+		const drain = {
+			path: drainPath,
+			text: readFileSync(join(REPO_ROOT, drainPath), "utf8"),
+		};
 		expect(
 			scan([
 				compaction,
+				backgroundShellPurge,
+				drain,
 				{
 					path: "src/lib/persistence/effect/migrations.ts",
 					text: `yield* sql\`DELETE FROM events WHERE session_id = \${id}\`;`,
@@ -104,6 +130,8 @@ describe("permanent event log", () => {
 		expect(
 			scan([
 				compaction,
+				backgroundShellPurge,
+				drain,
 				{
 					path: "src/lib/persistence/effect/migrations.ts",
 					text: `yield* sql\`DELETE FROM events WHERE session_id = \${id}\`;\nsql\`DELETE FROM events WHERE created_at < 1\`;`,

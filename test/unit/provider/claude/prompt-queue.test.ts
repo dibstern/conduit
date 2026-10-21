@@ -44,18 +44,6 @@ async function close(queue: PromptQueueController): Promise<void> {
 }
 
 describe("EffectPromptQueue", () => {
-	it("exposes Effect-returning producer operations", async () => {
-		const q = await makeQueue();
-
-		const enqueueEffect = q.enqueue(msg("effectful"));
-		expect(Effect.isEffect(enqueueEffect)).toBe(true);
-		await Effect.runPromise(enqueueEffect);
-
-		const closeEffect = q.close();
-		expect(Effect.isEffect(closeEffect)).toBe(true);
-		await Effect.runPromise(closeEffect);
-	});
-
 	it("yields messages in enqueue order", async () => {
 		const q = await makeQueue();
 		await enqueue(q, msg("one"));
@@ -152,6 +140,31 @@ describe("EffectPromptQueue", () => {
 				"EffectPromptQueue is single-consumer. Cannot iterate more than once.",
 		});
 		await close(q);
+	});
+
+	it("recalls a buffered input until its own SDK next() hands it over", async () => {
+		const queue = await makeQueue();
+		const first = {
+			...msg("first"),
+			uuid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as const,
+		};
+		const second = {
+			...msg("second"),
+			uuid: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" as const,
+		};
+		const third = {
+			...msg("third"),
+			uuid: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" as const,
+		};
+		await enqueue(queue, first);
+		await enqueue(queue, second);
+		await enqueue(queue, third);
+		const iterator = queue[Symbol.asyncIterator]();
+		expect((await iterator.next()).value).toEqual(first);
+		expect(await Effect.runPromise(queue.recall(first.uuid))).toBe(false);
+		expect(await Effect.runPromise(queue.recall(second.uuid))).toBe(true);
+		expect((await iterator.next()).value).toEqual(third);
+		await iterator.return?.();
 	});
 
 	it("close() is idempotent", async () => {

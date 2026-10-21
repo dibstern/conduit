@@ -28,6 +28,7 @@
 		variant = "rows",
 		ariaLabel,
 		disabled = false,
+		handles = true,
 		class: className = "",
 	}: {
 		items: readonly T[];
@@ -39,15 +40,25 @@
 		onreorder: (next: T[]) => void;
 		/** The row's content, after the handle. */
 		row: Snippet<[item: T, index: number]>;
-		/** Cards keep the handle beside their heading, with details underneath. */
+		/** Cards and trees keep the handle beside their heading, with details underneath. */
 		details?: Snippet<[item: T, index: number]>;
-		variant?: "rows" | "cards";
+		variant?: "rows" | "cards" | "settings" | "tree";
 		/** Names the list for assistive tech. */
 		ariaLabel: string;
 		disabled?: boolean | undefined;
+		/** `false` hides the handles, e.g. until a phone user asks to reorder. */
+		handles?: boolean | undefined;
 		/** Layout only (margin, width). */
 		class?: string | undefined;
 	} = $props();
+
+	const ROW_CLASS = {
+		tree: "rounded-panel",
+		rows: "min-h-[30px] rounded-[7px] border bg-bg p-[6px] text-[11.5px]",
+		cards: "min-h-[30px] rounded-[12px] border bg-bg px-[11px] py-[9px] text-[11.5px]",
+		settings: "min-h-[54px] bg-settings-card py-[8px] pl-[10px] pr-[14px] text-[13.5px] first:rounded-t-[12px] last:rounded-b-[12px] max-md:pl-[14px] max-md:text-[15px]",
+	};
+	const REST_BORDER = { rows: "border-border-subtle", cards: "border-border", settings: "", tree: "" };
 
 	const id = $props.id();
 	const reducedMotion = new MediaQuery("(prefers-reduced-motion: reduce)");
@@ -117,7 +128,7 @@
 		if (disabled) return;
 		const k = key(item);
 		const step = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
-		if (variant === "cards" && !lifted && step !== 0) {
+		if (variant !== "rows" && !lifted && step !== 0) {
 			event.preventDefault();
 			const from = position(items, k);
 			const to = from + step;
@@ -208,7 +219,7 @@
 <ul
 	bind:this={listEl}
 	aria-label={ariaLabel}
-	class="relative flex flex-col {variant === 'cards' ? 'gap-[8px]' : 'gap-[6px]'} {className}"
+	class="relative flex flex-col {variant === 'settings' ? 'rounded-[12px] bg-settings-card divide-y divide-settings-separator' : variant === 'cards' ? 'gap-[8px]' : variant === 'rows' ? 'gap-[6px]' : ''} {className}"
 	{onfocusout}
 	{onpointermove}
 	onpointerup={(event) => onpointerend(event, true)}
@@ -220,11 +231,11 @@
 			animate:flip={{ duration: reducedMotion.current || (isLifted && lifted?.by === "pointer") ? 0 : 150 }}
 			data-testid="sortable-row"
 			data-lifted={isLifted || undefined}
-			class="min-h-[30px] border bg-bg text-[11.5px] text-text-secondary {variant === 'cards' ? 'rounded-[12px] px-[11px] py-[9px]' : 'rounded-[7px] p-[6px]'} {isLifted ? 'relative z-10 border-border shadow-modal' : variant === 'cards' ? 'border-border' : 'border-border-subtle'}"
+			class="text-text-secondary {ROW_CLASS[variant]} {isLifted ? `relative z-10 shadow-modal ${variant === 'tree' ? 'bg-bg-surface' : 'border-border'}` : REST_BORDER[variant]}"
 			style:transform={isLifted && lifted?.by === "pointer" ? `translateY(${offset}px)` : undefined}
 		>
-			<div class="flex min-w-0 items-center {variant === 'cards' ? 'gap-[7px]' : 'gap-[8px]'}">
-			<button
+			<div class="flex min-w-0 items-center {variant === 'rows' ? 'gap-[8px]' : variant === 'settings' ? 'gap-[10px]' : variant === 'cards' ? 'gap-[7px]' : ''}">
+			{#if handles}<button
 				type="button"
 				data-sortable-handle
 				data-testid="sortable-handle"
@@ -232,10 +243,10 @@
 				aria-describedby="{id}-instructions"
 				aria-pressed={isLifted}
 				{disabled}
-				class="-my-[2px] shrink-0 cursor-grab touch-none select-none rounded-[4px] px-[2px] leading-none text-text-dimmer hover:text-text-secondary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text disabled:cursor-default disabled:opacity-50 {isLifted ? 'cursor-grabbing text-text-secondary' : ''}"
+				class="-my-[2px] shrink-0 cursor-grab touch-none select-none rounded-[4px] px-[2px] leading-none text-text-dimmer hover:text-text-secondary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text disabled:cursor-default disabled:opacity-50 {isLifted ? 'cursor-grabbing text-text-secondary' : ''} {variant === 'tree' ? 'min-h-[44px] md:min-h-[28px] w-[24px] md:w-[11px]' : ''} {variant === 'settings' ? `relative w-[14px] before:absolute before:content-[''] before:left-1/2 before:top-1/2 before:-translate-x-1/2 before:-translate-y-1/2 before:size-full before:min-h-[44px] before:min-w-[44px] md:before:hidden` : ''}"
 				onkeydown={(event) => onkeydown(event, item)}
 				onpointerdown={(event) => onpointerdown(event, item)}
-				><span aria-hidden="true">{variant === "cards" ? "⠿" : "⋮⋮"}</span></button>
+				><span aria-hidden="true">{variant === "rows" ? "⋮⋮" : "⠿"}</span></button>{/if}
 			{@render row(item, index)}
 			</div>
 			{#if details}{@render details(item, index)}{/if}

@@ -20,13 +20,14 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 import { InstanceManagementServiceTag } from "../domain/relay/Services/instance-management-service.js";
 import { ProviderRuntimeIngestionTag } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
+import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
-import { createLogger } from "../logger.js";
 import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
 import type { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
 import type { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
-import type { SSEEvent } from "../relay/opencode-events.js";
+import type { ProviderStateEffectTag } from "../persistence/effect/provider-state-effect.js";
+import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { loadRelaySettings } from "../relay/relay-settings.js";
 import { defaultClaudeSubagentSdk } from "./claude/claude-subagent-materializer.js";
 import {
@@ -40,16 +41,16 @@ import {
 } from "./opencode-provider-instance.js";
 import { OrchestrationEngine } from "./orchestration-engine.js";
 import { CommandReadModelRepository } from "./orchestration-read-model.js";
-import type { ProviderCommandStoreFailure } from "./orchestration-side-effect-reactor.js";
+import type {
+	ProviderCommandInteractionSinkFactory,
+	ProviderCommandStoreFailure,
+} from "./orchestration-side-effect-reactor.js";
 import { ProjectShellEnvResolver } from "./project-shell-env.js";
 import { ProviderRegistry, ProviderRegistryTag } from "./provider-registry.js";
 import {
 	type ProviderSessionBindingReadModel,
 	SqliteProviderSessionBindingReadModel,
 } from "./provider-session-binding-read-model.js";
-import type { TurnResult } from "./types.js";
-
-const log = createLogger("orchestration-wiring");
 
 export interface OrchestrationLayerOptions {
 	readonly shellEnv?: ClaudeProviderInstanceDeps["shellEnv"];
@@ -92,29 +93,14 @@ export interface OrchestrationLayer {
 	readonly registry: ProviderRegistry;
 	readonly openCodeInstance: OpenCodeProviderInstance;
 	/**
-	 * Wire SSE session.status idle events to notifyTurnCompleted().
-	 * Must be called once after the SSEStream is created so that
-	 * OpenCodeProviderInstance.sendTurnEffect() deferred promises can resolve when
-	 * the session transitions to idle.
-	 */
-	wireSSEToInstance(
-		sseOn: (event: "event", handler: (e: unknown) => void) => void,
-	): void;
-	/**
 	 * Deterministic quiescence seam: drain committed-but-unexecuted provider
 	 * side effects through the reactor (crash recovery / test flush). Same-process
 	 * dispatch already awaits its own execution.
 	 */
-	drainSideEffects(): Effect.Effect<void, ProviderCommandStoreFailure>;
+	drainSideEffects(
+		makeInteractions?: ProviderCommandInteractionSinkFactory,
+	): Effect.Effect<void, ProviderCommandStoreFailure>;
 }
-
-const TURN_COMPLETE_RESULT: TurnResult = {
-	status: "completed",
-	cost: 0,
-	tokens: { input: 0, output: 0 },
-	durationMs: 0,
-	providerStateUpdates: [],
-};
 
 /**
  * Scoped orchestration components built by the relay runtime layer.
@@ -140,10 +126,13 @@ const createOrchestrationComponentsEffect = (
 	| PersistenceProjectTag
 	| AccountDirectory
 	| OpenCodeInstancesTag
+	| SessionWorkspaceTag
 	| ClaudeEventPersistEffectTag
 	| ProviderRuntimeIngestionTag
 	| EventStoreEffectTag
 	| ProjectionRunnerEffectTag
+	| ProviderStateEffectTag
+	| ReadQueryEffectTag
 > =>
 	Effect.gen(function* () {
 		const registry = new ProviderRegistry();
@@ -161,26 +150,27 @@ const createOrchestrationComponentsEffect = (
 		// resolve the historical binding through the in-memory directory.
 		const instances = yield* OpenCodeInstancesTag;
 		const accountDirectory = yield* AccountDirectory;
+		const sessionWorkspace = yield* SessionWorkspaceTag;
 		const instanceManagement = Option.getOrUndefined(
 			yield* Effect.serviceOption(InstanceManagementServiceTag),
 		);
 		const clientForSession = (sessionId: string) =>
-			sessionBindingReadModel.getProviderForSession(sessionId).pipe(
-				Effect.flatMap((boundInstanceId) =>
-					accountDirectory.resolve(
-						boundInstanceId === undefined
-							? { _tag: "DriverDefault", driver: "opencode" }
-							: { _tag: "Id", id: boundInstanceId },
-					),
-				),
-				Effect.flatMap((account) =>
-					PROVIDER_DRIVERS[account.driver].runsOpenCodeServer
-						? instances.use(account.id)
-						: Effect.fail(
-								new Error("OpenCode session requires an OpenCode account"),
-							),
-				),
-			);
+			Effect.gen(function* () {
+				const boundInstanceId =
+					yield* sessionBindingReadModel.getProviderForSession(sessionId);
+				const account = yield* accountDirectory.resolve(
+					boundInstanceId === undefined
+						? { _tag: "DriverDefault", driver: "opencode" }
+						: { _tag: "Id", id: boundInstanceId },
+				);
+				if (!PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
+					return yield* Effect.fail(
+						new Error("OpenCode session requires an OpenCode account"),
+					);
+				}
+				const directory = yield* sessionWorkspace.get(sessionId);
+				return yield* instances.use(account.id, directory);
+			});
 
 		const openCodeInstance = (yield* OpenCodeDriver.create({
 			client: options.client,
@@ -188,7 +178,8 @@ const createOrchestrationComponentsEffect = (
 				? { workspaceRoot: options.workspaceRoot }
 				: {}),
 			clientForSession,
-			clientForAccount: (account) => instances.use(account.id),
+			clientForAccount: (account, directory) =>
+				instances.use(account.id, directory),
 			instanceIdForSession: (sessionId) =>
 				sessionBindingReadModel.getProviderForSession(sessionId),
 			hasWorktreeToolForSession: (sessionId, account) =>
@@ -235,7 +226,6 @@ const createOrchestrationComponentsEffect = (
 			prepareShellEnv = (projectDir) => resolver.waitUntilReady(projectDir);
 		}
 		const claudeInstance = yield* ClaudeDriver.create({
-			persistHandoffDelivered: persist.persistHandoffDelivered,
 			shellEnv,
 			...(prepareShellEnv ? { prepareShellEnv } : {}),
 			...(options.onBackgroundTask
@@ -292,7 +282,7 @@ const createOrchestrationComponentsEffect = (
 			ingestion,
 			// A send_turn's input.sent projects and announces with its outbox row.
 			write: (yield* makeCommitAndSignal).write,
-			persistHandoffDelivered: persist.persistHandoffDelivered,
+			persistUserMessage: persist.persistUserMessage,
 			...(options.claudeSessionForkSdk
 				? { claudeSessionForkSdk: options.claudeSessionForkSdk }
 				: {}),
@@ -311,37 +301,12 @@ function createOrchestrationView(
 ): OrchestrationLayer {
 	const { openCodeInstance, engine, registry } = components;
 
-	function wireSSEToInstance(
-		sseOn: (event: "event", handler: (e: unknown) => void) => void,
-	): void {
-		sseOn("event", (raw) => {
-			const event = raw as SSEEvent;
-			if (event.type !== "session.status") return;
-			const props = event.properties as Record<string, unknown> | undefined;
-			const statusType = (props?.["status"] as { type?: string } | undefined)
-				?.type;
-			if (statusType !== "idle") return;
-			const sessionId =
-				(props?.["sessionID"] as string | undefined) ??
-				(event as { sessionId?: string }).sessionId;
-			if (sessionId) {
-				try {
-					openCodeInstance.notifyTurnCompleted(sessionId, TURN_COMPLETE_RESULT);
-				} catch (err) {
-					log.error(
-						`notifyTurnCompleted failed for session ${sessionId}: ${err instanceof Error ? err.message : err}`,
-					);
-				}
-			}
-		});
-	}
-
 	return {
 		engine,
 		registry,
 		openCodeInstance,
-		wireSSEToInstance,
-		drainSideEffects: () => engine.drainSideEffects(),
+		drainSideEffects: (makeInteractions) =>
+			engine.drainSideEffects(makeInteractions),
 	};
 }
 
@@ -355,10 +320,13 @@ export const makeOrchestrationRuntimeLayer = (
 	| PersistenceProjectTag
 	| AccountDirectory
 	| OpenCodeInstancesTag
+	| SessionWorkspaceTag
 	| ClaudeEventPersistEffectTag
 	| ProviderRuntimeIngestionTag
 	| EventStoreEffectTag
 	| ProjectionRunnerEffectTag
+	| ProviderStateEffectTag
+	| ReadQueryEffectTag
 > => {
 	const componentsLayer = Layer.effect(
 		OrchestrationComponentsTag,

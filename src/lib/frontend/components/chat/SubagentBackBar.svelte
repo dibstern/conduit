@@ -52,7 +52,7 @@
 {#if visible}
 	<div class="subagent-back-bar mb-1.5">
 		<Surface variant="card" radius="panel" class="flex items-center gap-2 py-1.5 px-3.5 max-md:gap-1.5 max-md:py-1 max-md:px-3">
-			<span class="w-1.5 h-1.5 rounded-full bg-brand-b shrink-0"></span>
+			<span class="w-1.5 h-1.5 rounded-full bg-success shrink-0"></span>
 			<span class="flex-1 min-w-0 text-sm font-mono text-text-muted truncate max-md:text-xs">
 				{activeSession?.sideThread ? "Side Thread" : "Subagent"} of <strong class="text-text-secondary font-semibold">{parentTitle}</strong>
 			</span>
@@ -66,7 +66,7 @@
 				tone="inherit"
 				hoverFill="none"
 				type="button"
-				class="subagent-back-btn gap-1 py-0.5 px-2.5 rounded bg-brand-a text-white font-mono text-sm font-semibold transition-opacity tracking-wide hover:opacity-85 max-md:text-xs max-md:px-2"
+				class="subagent-back-btn gap-1 py-0.5 px-2.5 rounded bg-accent text-bg font-mono text-sm font-semibold transition-opacity tracking-wide hover:opacity-85 max-md:text-xs max-md:px-2"
 				onclick={navigateBack}
 				title="Back to {parentTitle}"
 			>

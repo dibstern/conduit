@@ -17,6 +17,7 @@ import {
 	PROVIDER_SESSION_CAPABILITIES,
 } from "../../../contracts/provider-instance.js";
 import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
+import { DEFAULT_TERMINAL_KEYS } from "../../../contracts/terminal-keys.js";
 import {
 	ProjectSaveRejected,
 	SetPinRejected,
@@ -32,6 +33,10 @@ import { getLogLevel } from "../../../logger.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
 import { makeCursorAuth } from "../../../provider/cursor/cursor-auth.js";
 import {
+	loadRelaySettings,
+	saveRelaySettings,
+} from "../../../relay/relay-settings.js";
+import {
 	getRestartAvailable,
 	isServerSupervised,
 	SERVER_BUILD_ID,
@@ -45,14 +50,22 @@ import {
 } from "../../../server/ws-rpc.js";
 import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
 import { getVersion } from "../../../version.js";
+import { makeCategoryTuning } from "../../relay/Services/category-tuning.js";
 import { findFolders } from "../../relay/Services/directory-listing-service.js";
+import {
+	InputDraftsTag,
+	makeInputDrafts,
+} from "../../relay/Services/input-drafts.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
+import { readSurfacingFeedback } from "../../relay/Services/surfacing-feedback.js";
 import { AuthManagerTag } from "../../server/Layers/auth-middleware.js";
 import type { AccountDirectory } from "../Services/account-directory.js";
+import { CategorySet } from "../Services/category-set.js";
 import {
 	type ConfigPersistenceTag,
 	requestConfigSave,
+	saveConfig,
 } from "../Services/config-persistence-service.js";
 import {
 	commitDaemonRuntimeConfig,
@@ -82,22 +95,27 @@ import {
 	requestManagedOpenCodeShutdown,
 	updateInstance,
 } from "../Services/instance-manager-service.js";
+import {
+	isSurfacingLoopback,
+	MessageSurfacingSettings,
+} from "../Services/message-surfacing-settings.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
 import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	allProjects,
 	broadcastProjectList,
 	type ProjectRegistryTag,
-	type ProjectSaveLockTag,
+	ProjectSaveLockTag,
 	projectInfos,
 	removeProjectFromEffectRegistry,
 	resolveSessionMode,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
 import { SessionActivityTag } from "../Services/session-activity.js";
-import type { SessionDirectory } from "../Services/session-directory.js";
+import { SessionDirectory } from "../Services/session-directory.js";
 import { subscribeDaemonShell } from "../Services/shell-subscription.js";
 import { Usage } from "../Services/usage.js";
+import type { UserAvatar } from "../Services/user-avatar.js";
 import { KeepAwakeTag } from "./keep-awake-layer.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
 import {
@@ -123,6 +141,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 			| DaemonConfigRefTag
 			| DaemonEventBusTag
 			| ConfigPersistenceTag
+			| UserAvatar
 			| RelayCacheTag
 			| AccountDirectory
 			| InstanceManagerStateTag
@@ -141,11 +160,22 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 			Context.merge(yield* persistenceStoreContext),
 		);
 		const shellContext = Context.merge(context, yield* PersistenceStore);
+		const sharedDrafts = yield* Effect.serviceOption(InputDraftsTag);
+		const drafts = Option.isSome(sharedDrafts)
+			? sharedDrafts.value
+			: yield* makeInputDrafts.pipe(Effect.provide(yield* PersistenceStore));
+		const directory = yield* SessionDirectory;
 		const bus = yield* DaemonEventBusTag;
 		const cache = yield* RelayCacheTag;
 		const handle = yield* DaemonHandleTag;
 		const openCodeInstances = yield* OpenCodeInstancesTag;
 		const usage = yield* Usage;
+		const messageSurfacing = yield* MessageSurfacingSettings;
+		const categorySet = yield* CategorySet;
+		const categoryTuning = yield* makeCategoryTuning({
+			configDir,
+			cwd: configDir,
+		}).pipe(Effect.provide(yield* PersistenceStore));
 		// Serialize process changes together with their config/persistence updates.
 		const keepAwakeLock = yield* Semaphore.make(1);
 		const tailscaleServeLock = yield* Semaphore.make(1);
@@ -209,6 +239,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				| DaemonEventBusTag
 				| SessionActivityTag
 				| ConfigPersistenceTag
+				| UserAvatar
 				| RelayCacheTag
 				| AccountDirectory
 				| InstanceManagerStateTag
@@ -322,6 +353,35 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 			);
 
 		return {
+			SubscribeDrafts: () =>
+				drafts.listDrafts().pipe(
+					Stream.mapError(
+						(error) =>
+							new WsRpcError({
+								message: `Could not list drafts: ${error.message}`,
+							}),
+					),
+				),
+			SubscribeInputDraft: (request) =>
+				Stream.unwrap(
+					Effect.gen(function* () {
+						if ("session" in request.key) {
+							const owner = yield* directory
+								.projectOf(request.key.session)
+								.pipe(
+									Effect.mapError(
+										(error) => new WsRpcError({ message: error.message }),
+									),
+								);
+							if (Option.isNone(owner))
+								return yield* new WsRpcError({
+									code: "unknown-session",
+									message: `Unknown session: ${request.key.session}`,
+								});
+						}
+						return drafts.subscribe(request.key);
+					}),
+				),
 			SubscribeInstances: () =>
 				followList(
 					"instances",
@@ -340,13 +400,14 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 						"projects",
 						Effect.gen(function* () {
 							const projects = yield* projectInfos;
-							const { newSessionProject } = yield* Ref.get(
+							const { newSessionProject, projectOrder } = yield* Ref.get(
 								yield* DaemonConfigRefTag,
 							);
 							return {
 								_tag: "projects" as const,
 								projects,
 								...(newSessionProject !== undefined && { newSessionProject }),
+								...(projectOrder !== undefined && { projectOrder }),
 							};
 						}),
 					),
@@ -437,7 +498,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 									else invalidateBrowsers();
 								});
 							}
-							yield* requestConfigSave;
+							yield* saveConfig;
 							return { ok: true as const };
 						}),
 					).pipe(Effect.uninterruptible);
@@ -460,7 +521,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 							...config,
 							keepAwake: request.enabled,
 						}));
-						yield* requestConfigSave;
+						yield* saveConfig;
 						return { ok: true as const, supported, active };
 					}).pipe(Effect.uninterruptible, keepAwakeLock.withPermits(1)),
 				),
@@ -468,7 +529,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				run(
 					Effect.gen(function* () {
 						yield* applyTailscaleServe(request.enabled);
-						yield* requestConfigSave;
+						yield* saveConfig;
 						return { ok: true as const };
 					}).pipe(Effect.uninterruptible, tailscaleServeLock.withPermits(1)),
 				),
@@ -487,7 +548,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 							...config,
 							...updates,
 						}));
-						yield* requestConfigSave;
+						yield* saveConfig;
 						return { ok: true as const };
 					}).pipe(Effect.uninterruptible, keepAwakeLock.withPermits(1)),
 				),
@@ -533,7 +594,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 							...config,
 							shuttingDown: true,
 						}));
-						yield* requestConfigSave;
+						yield* saveConfig;
 						return { ok: true as const };
 					}),
 				),
@@ -602,6 +663,27 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 							: new WsRpcError({ message: formatErrorDetail(error) }),
 					),
 				),
+			SetProjectOrder: (request) =>
+				run(
+					Effect.flatMap(ProjectSaveLockTag, (lock) =>
+						lock.withPermits(1)(
+							Effect.gen(function* () {
+								const registered = new Set(
+									(yield* allProjects).map(({ slug }) => slug),
+								);
+								const projectOrder = [...new Set(request.projectOrder)].filter(
+									(slug) => registered.has(slug),
+								);
+								yield* commitDaemonRuntimeConfig((current) => ({
+									...current,
+									projectOrder,
+								}));
+								yield* PubSub.publish(bus, DaemonEvent.ProjectsChanged());
+								yield* saveConfig;
+							}),
+						),
+					),
+				),
 			RemoveProject: (request) =>
 				run(
 					Effect.gen(function* () {
@@ -609,6 +691,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 							(project) => project.slug === request.slug,
 						);
 						yield* removeProjectFromEffectRegistry(request.slug);
+						yield* saveConfig;
 						// Removed folders feed the dialog's "recent" suggestions. Reversed
 						// so the main folder ends up first; a failed write must not fail
 						// the removal.
@@ -639,6 +722,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 								?.runsOpenCodeServer
 						)
 							yield* Effect.scoped(openCodeInstances.use(request.instanceId));
+						yield* saveConfig;
 						return {
 							projectSlug: request.projectSlug,
 							instances: yield* instanceList,
@@ -654,6 +738,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 								?.runsOpenCodeServer
 						)
 							yield* openCodeInstances.stop(request.instanceId);
+						yield* saveConfig;
 						return {
 							projectSlug: request.projectSlug,
 							instances: yield* instanceList,
@@ -723,14 +808,92 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				),
 			GetAutoSettleSetting: (request) =>
 				run(wsRpcHandlers.GetAutoSettleSetting(request)),
+			GetAvatar: (request) => run(wsRpcHandlers.GetAvatar(request)),
+			SetAvatar: (request) => run(wsRpcHandlers.SetAvatar(request)),
+			GetMessageSurfacing: () => messageSurfacing.get,
+			UpdateMessageSurfacing: (request) =>
+				Effect.gen(function* () {
+					if (request.apiKey !== undefined) {
+						const caller = yield* RpcCaller;
+						if (
+							caller.kind === "browser" &&
+							!caller.secure &&
+							!isSurfacingLoopback(caller.ip)
+						) {
+							return yield* new WsRpcError({
+								message: "Saving a TypeSafe key requires TLS or loopback",
+							});
+						}
+					}
+					return yield* messageSurfacing
+						.update(request)
+						.pipe(
+							Effect.mapError(
+								(error) => new WsRpcError({ message: error.message }),
+							),
+						);
+				}),
 			SetAutoSettleSetting: (request) =>
 				run(wsRpcHandlers.SetAutoSettleSetting(request)),
+			GetAutoArchiveSetting: (request) =>
+				run(wsRpcHandlers.GetAutoArchiveSetting(request)),
+			SetAutoArchiveSetting: (request) =>
+				run(wsRpcHandlers.SetAutoArchiveSetting(request)),
+			GetAutoDeleteArchivedSetting: (request) =>
+				run(wsRpcHandlers.GetAutoDeleteArchivedSetting(request)),
+			SetAutoDeleteArchivedSetting: (request) =>
+				run(wsRpcHandlers.SetAutoDeleteArchivedSetting(request)),
 			GetWorktreeCleanupSetting: (request) =>
 				run(wsRpcHandlers.GetWorktreeCleanupSetting(request)),
 			SetWorktreeCleanupSetting: (request) =>
 				run(wsRpcHandlers.SetWorktreeCleanupSetting(request)),
 			CleanUpWorktreesNow: (request) =>
 				run(wsRpcHandlers.CleanUpWorktreesNow(request)),
+			GetTerminalKeys: (_request) =>
+				run(
+					Effect.sync(() => ({
+						terminalKeys:
+							loadRelaySettings(configDir).terminalKeys ??
+							DEFAULT_TERMINAL_KEYS,
+					})),
+				),
+			SetTerminalKeys: ({ terminalKeys }) =>
+				run(
+					Effect.gen(function* () {
+						yield* Effect.try(() =>
+							saveRelaySettings({ terminalKeys }, configDir),
+						);
+						yield* PubSub.publish(
+							bus,
+							DaemonEvent.GlobalSettingChanged({
+								originSlug: "",
+								tag: "terminalKeys",
+							}),
+						);
+						return { terminalKeys };
+					}),
+				),
+			GetCategorySet: () => categorySet.current(),
+			GetSurfacingFeedback: () =>
+				run(
+					Effect.flatMap(PersistenceStore, (store) =>
+						readSurfacingFeedback().pipe(Effect.provide(store)),
+					),
+				),
+			GetSurfacingLedger: () =>
+				run(
+					Effect.flatMap(PersistenceStore, (store) =>
+						readSurfacingFeedback().pipe(Effect.provide(store)),
+					),
+				),
+			ScoreCategorySet: ({ set, estimateOnly }) =>
+				categoryTuning.score(set, estimateOnly),
+			ProposeCategoryTuning: (request) =>
+				categoryTuning.propose({
+					...(request.avoid === undefined ? {} : { avoid: request.avoid }),
+				}),
+			ReplaceCategorySet: ({ expectedVersion, nextSet }) =>
+				categorySet.replace(expectedVersion, nextSet),
 			GetUsageLimitsSetting: (request) =>
 				run(wsRpcHandlers.GetUsageLimitsSetting(request)),
 			SetUsageLimitsSetting: (request) =>

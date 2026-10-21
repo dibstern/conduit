@@ -84,7 +84,9 @@ const previewContinuationForAccount = (
 			agent: yield* getAgent(sessionId),
 			modelContextWindow: contextWindow === "1m" ? 1000000 : undefined,
 			continuation:
-				account.id !== session.provider && !!recovery?.cutOffMessageId,
+				account.id !== session.provider && recovery?.cutOffMessageId
+					? { cutOffMessageId: recovery.cutOffMessageId }
+					: undefined,
 		});
 		const prepared = yield* prepare(sessionId, account.id);
 		return (
@@ -408,8 +410,17 @@ export const makeContinuation = Effect.gen(function* () {
 								resetTimes.length > 0 &&
 								resetTimes.every((at) => Number.isFinite(at) && at <= due.now);
 							const turns = yield* ProviderTurnServiceTag;
-							if (source.id !== account.id)
-								yield* turns.holdUserTurnsForAccountSwitch(sessionId);
+							// The inbox constructs this service's scheduling context before
+							// it exists. Actual resumes run in the completed relay context.
+							const inbox = yield* Effect.serviceOption(SessionInboxTag);
+							if (source.id !== account.id) {
+								const hold = turns.holdUserTurnsForAccountSwitch(sessionId);
+								// Under the inbox permit, so no handoff is mid-decision when the
+								// switch starts. A scheduled request may come from inside it.
+								yield* options.at === undefined && inbox._tag === "Some"
+									? inbox.value.withSession(sessionId, hold)
+									: hold;
+							}
 							const continued = yield* commit.write((project) =>
 								Effect.gen(function* () {
 									// A probe can take five seconds; selection and turn state must
@@ -588,9 +599,6 @@ export const makeContinuation = Effect.gen(function* () {
 							const agent = yield* getAgent(sessionId);
 							const variant = row?.variant ?? "";
 							const contextWindow = row?.context_window ?? "";
-							// The inbox constructs this service's scheduling context before
-							// it exists. Actual resumes run in the completed relay context.
-							const inbox = yield* Effect.serviceOption(SessionInboxTag);
 							if (inbox._tag === "None")
 								return yield* Effect.die(
 									new Error(
@@ -670,12 +678,20 @@ export const makeContinuation = Effect.gen(function* () {
 			const value = rows[0]?.limit_recovery;
 			const recovery = value == null ? null : decodeRecovery(value);
 			if (!recovery || recovery.continued) return false;
-			// Continuations reuse the cut-off message. Only a newer user message
-			// permits another auto-switch; event sequence survives restarts and ties.
+			// Continuations re-place the cut-off to change run membership. Only a
+			// user's first creation permits another switch; sequence survives ties.
 			const latest = yield* sql<{
 				type: string;
 				reason: string | null;
-			}>`SELECT type, json_extract(data, '$.reason') AS reason FROM events WHERE session_id = ${sessionId} AND (type = 'session.resumed' OR (type = 'message.created' AND json_extract(data, '$.role') = 'user')) ORDER BY sequence DESC LIMIT 1`;
+			}>`SELECT candidate.type, json_extract(candidate.data, '$.reason') AS reason
+				FROM events candidate WHERE candidate.session_id = ${sessionId}
+				AND (candidate.type = 'session.resumed' OR (candidate.type = 'message.created'
+					AND json_extract(candidate.data, '$.role') = 'user'
+					AND NOT EXISTS (SELECT 1 FROM events prior
+						WHERE prior.session_id = candidate.session_id AND prior.type = 'message.created'
+						AND prior.sequence < candidate.sequence
+						AND json_extract(prior.data, '$.messageId') = json_extract(candidate.data, '$.messageId'))))
+				ORDER BY candidate.sequence DESC LIMIT 1`;
 			if (
 				latest[0]?.type === "session.resumed" &&
 				latest[0].reason === "auto-switch"

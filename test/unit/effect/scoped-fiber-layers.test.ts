@@ -77,7 +77,7 @@ const sessions = (count: number) =>
 /** OpenCode Instances whose running instances list the given sessions. */
 const makeInstancesLayer = (
 	lists: Readonly<Record<string, () => Promise<SessionDetail[]>>>,
-	calls: Array<[string, string | undefined]> = [],
+	calls: Array<[string, string | null | undefined]> = [],
 ) => {
 	const stub = makeOpenCodeInstancesStub(
 		Object.fromEntries(
@@ -102,7 +102,7 @@ const makeInstancesLayer = (
 		),
 		Layer.succeed(OpenCodeInstancesTag)({
 			...stub,
-			ifRunning: (instanceId: string, directory?: string) => {
+			ifRunning: (instanceId: string, directory?: string | null) => {
 				calls.push([instanceId, directory]);
 				return stub.ifRunning(instanceId, directory);
 			},

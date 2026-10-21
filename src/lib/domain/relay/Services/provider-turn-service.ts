@@ -1,5 +1,18 @@
-import { Context, Deferred, Effect, FiberMap, Layer, type Scope } from "effect";
-import type { SqlClient } from "effect/sql";
+import {
+	Context,
+	Deferred,
+	Effect,
+	Exit,
+	FiberMap,
+	Layer,
+	Option,
+	PubSub,
+	type Result,
+	Schedule,
+	type Scope,
+	Stream,
+} from "effect";
+import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { Account } from "../../../contracts/account.js";
 import type { InputDelivery } from "../../../contracts/stored-event.js";
@@ -12,22 +25,28 @@ import type { ProjectionRunnerEffectTag } from "../../../persistence/effect/proj
 import type { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
 import type { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { CanonicalEvent } from "../../../persistence/events.js";
+import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
+import { settleSessionRuns } from "../../../provider/session-run-settlement.js";
 import type { AccountDirectory } from "../../daemon/Services/account-directory.js";
+import type { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import type { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type { AlertsTag } from "./alerts.js";
 import type {
 	PendingInteractionServiceTag,
 	PendingQuestion,
 } from "./pending-interaction-service.js";
-import type { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
+import {
+	type ProviderRuntimeIngestionError,
+	ProviderRuntimeIngestionTag,
+} from "./provider-runtime-ingestion-service.js";
 import {
 	ProviderTurnDispatchFibersTag,
-	ProviderTurnTimeoutRuntimeTag,
 	sendTurn,
 } from "./provider-turn-dispatch.js";
 import {
 	completeRecoveredQuestion,
 	interruptTurn,
+	prepareStop,
 	prepareTurnSession,
 } from "./provider-turn-session.js";
 import type {
@@ -39,9 +58,10 @@ import type {
 import type { SessionManagerServiceTag } from "./session-manager-service.js";
 import {
 	clearProcessingTimeout,
-	OverridesStateTag,
+	type OverridesStateTag,
 } from "./session-overrides-state.js";
 import type { SessionTitleServiceTag } from "./session-title-service.js";
+import type { SessionWorkspaceTag } from "./session-workspace.js";
 
 export interface ProviderTurnServiceSendInput {
 	/** Continuation admission may already have resolved this immutable snapshot. */
@@ -86,11 +106,31 @@ export interface ProviderTurnServiceInterruptInput {
 	readonly sessionId: string;
 }
 
+// A Stop fences new handoffs until its abort settles, for at most this long.
+// OpenCode's abort is session-wide, and so is a retained runner's that predates
+// bound interrupts: an abort still running past the bound can hit a replacement.
+export const STOP_ABORT_WAIT_MS = 30_000;
+
+type StopFailure =
+	| Effect.Error<ReturnType<typeof interruptTurn>>
+	| Effect.Error<ReturnType<typeof prepareStop>>
+	| ProviderRuntimeIngestionError
+	| SqlError;
+
 export interface ProviderTurnService {
-	/** Hold new user turns until account mutation and runner replacement finish. */
+	/** Hold user turns from the continuation's commit until its scope closes.
+	 *  Acquire under the inbox session permit, so no decided handoff overlaps it. */
 	readonly holdUserTurnsForAccountSwitch: (
 		sessionId: string,
 	) => Effect.Effect<void, never, Scope.Scope>;
+	/** In-memory fences the inbox treats as busy. */
+	readonly turnFences: (sessionId: string) => {
+		readonly stopping: boolean;
+		readonly switching: boolean;
+	};
+	/** The session of each fence that lifts. Subscribe before the drain's first
+	 *  read; a lift is the drain's only wake-up once the fence was its sole gate. */
+	readonly fenceLifts: Effect.Effect<Stream.Stream<string>, never, Scope.Scope>;
 	readonly completeRecoveredQuestion?: (
 		question: PendingQuestion,
 		result: string | null,
@@ -113,13 +153,13 @@ export interface ProviderTurnService {
 		Effect.Error<ReturnType<typeof sendTurn>>,
 		OverridesStateTag
 	>;
-	readonly interruptTurn: (
+	/** Install the session's Stop fence and fork its abort, or join the Stop in
+	 *  flight. Call under the inbox session permit: that orders the Stop against
+	 *  every handoff, and its admission cut-off excludes later ones from the
+	 *  abort. Every caller awaits the same stopped turn's end or interrupt failure. */
+	readonly beginStop: (
 		input: ProviderTurnServiceInterruptInput,
-	) => Effect.Effect<
-		void,
-		Effect.Error<ReturnType<typeof interruptTurn>>,
-		OverridesStateTag
-	>;
+	) => Effect.Effect<Effect.Effect<void, StopFailure>>;
 }
 
 export class ProviderTurnServiceTag extends Context.Service<
@@ -128,8 +168,10 @@ export class ProviderTurnServiceTag extends Context.Service<
 >()("ProviderTurnService") {}
 
 const makeProviderTurnService = Effect.gen(function* () {
-	const context = yield* Effect.context<
+	const providedContext = yield* Effect.context<
 		| AccountDirectory
+		| OpenCodeInstancesTag
+		| SessionWorkspaceTag
 		| OpenCodeAPITag
 		| WebSocketHandlerTag
 		| LoggerTag
@@ -149,28 +191,56 @@ const makeProviderTurnService = Effect.gen(function* () {
 		| EventStoreEffectTag
 		| ProjectionRunnerEffectTag
 	>();
-	const runtime = yield* Effect.context<OverridesStateTag>();
-	const overridesRef = yield* OverridesStateTag;
-	const providedContext = Context.add(context, ProviderTurnTimeoutRuntimeTag, {
-		runtime,
-		overridesRef,
-	});
+	const registry = yield* Effect.serviceOption(ProviderRegistryTag);
+	const sql = yield* SqlClient.SqlClient;
+	const ingestion = yield* ProviderRuntimeIngestionTag;
+	const scope = yield* Effect.scope;
 	// A Stop ends with session-wide frames (idle status, done) that can trail
-	// the button press. A prompt sent before they go out would be ended by
-	// them, so a new prompt waits for the session's Stop to finish first.
-	const stopping = new Map<string, Deferred.Deferred<void>>();
+	// the button press. Each entry lives exactly as long as its abort worker,
+	// so a fence never outlives the process, scope or call that owns it.
+	const stopping = new Map<string, Deferred.Deferred<void, StopFailure>>();
 	const accountSwitches = new Map<string, Deferred.Deferred<void>>();
-	const awaitStop = (sessionId: string) =>
+	// In memory, so no failed write can strand input reserved behind a fence.
+	const lifts = yield* PubSub.unbounded<string>();
+	const lift = (sessionId: string) => PubSub.publish(lifts, sessionId);
+	const abort = (
+		input: ProviderTurnServiceInterruptInput,
+		cutoff: Result.Result<
+			Effect.Success<ReturnType<typeof prepareStop>>,
+			Effect.Error<ReturnType<typeof prepareStop>>
+		>,
+	) =>
 		Effect.gen(function* () {
-			const stop = stopping.get(sessionId);
-			if (stop)
-				yield* Deferred.await(stop).pipe(
-					Effect.timeout("5 seconds"),
-					Effect.ignore,
-				);
-			// A switch can begin while this send awaits an earlier Stop.
-			const switching = accountSwitches.get(sessionId);
-			if (switching) yield* Deferred.await(switching);
+			const snapshot = yield* Effect.fromResult(cutoff);
+			if (snapshot.owners.length === 0 && snapshot.retainedSteers) return;
+			const running =
+				snapshot.owners.length === 0
+					? Effect.succeed(false)
+					: sql<{ running: number }>`
+			SELECT EXISTS (SELECT 1 FROM provider_runs WHERE session_id = ${input.sessionId}
+				AND id IN ${sql.in(snapshot.owners.map(({ runId }) => runId))}
+				AND status IN ('pending', 'running')) AS running`.pipe(
+							Effect.map(([row]) => row?.running === 1),
+						);
+			const ended = yield* interruptTurn(input, snapshot).pipe(
+				Effect.andThen(
+					Effect.repeat(running, {
+						while: (still) => still,
+						schedule: Schedule.spaced("100 millis"),
+					}),
+				),
+				Effect.timeoutOption(STOP_ABORT_WAIT_MS),
+			);
+			if (Option.isSome(ended) || !(yield* running)) return;
+			// Explicit Stop retirement uses the same owned settlement as confirmed
+			// native Stop. It can never consume a reservation claimed afterwards.
+			yield* settleSessionRuns(
+				sql,
+				input.sessionId,
+				"Stopped by the user",
+				(events) => ingestion.ingestBatch(events),
+				{ owners: snapshot.owners },
+			);
 		});
 	const service: ProviderTurnService = {
 		holdUserTurnsForAccountSwitch: (sessionId) =>
@@ -183,43 +253,77 @@ const makeProviderTurnService = Effect.gen(function* () {
 				(hold) =>
 					Effect.sync(() => accountSwitches.delete(sessionId)).pipe(
 						Effect.andThen(Deferred.succeed(hold, undefined)),
+						Effect.andThen(lift(sessionId)),
 					),
 			).pipe(Effect.asVoid),
+		turnFences: (sessionId) => ({
+			stopping: stopping.has(sessionId),
+			switching: accountSwitches.has(sessionId),
+		}),
+		fenceLifts: Effect.map(PubSub.subscribe(lifts), Stream.fromSubscription),
 		completeRecoveredQuestion: (question, result, answers) =>
 			completeRecoveredQuestion(question, result, answers).pipe(
 				Effect.provide(providedContext),
 			),
 		prepareTurnSession: (input) =>
-			awaitStop(input.sessionId).pipe(
-				Effect.andThen(prepareTurnSession(input)),
+			Effect.gen(function* () {
+				// Outside the inbox permit, so waiting cannot stall the switch's handoff.
+				const switching = accountSwitches.get(input.sessionId);
+				if (switching) yield* Deferred.await(switching);
+				return yield* prepareTurnSession(input);
+			}).pipe(Effect.provide(providedContext)),
+		sendTurn: (input) =>
+			// The handoff arms a non-steer turn's timeout; a failure that escapes
+			// the dispatch must not leave it to fire on an idle session.
+			sendTurn(input).pipe(
+				Effect.onError(() =>
+					input.steer ? Effect.void : clearProcessingTimeout(input.sessionId),
+				),
 				Effect.provide(providedContext),
 			),
-		sendTurn: (input) =>
-			Effect.gen(function* () {
-				// A user may already have prepared before the switch acquired its
-				// hold. Wait again before routing; the switch's own turn owns the hold.
-				if (!input.continuation) yield* awaitStop(input.sessionId);
-				// The handoff arms a non-steer turn's timeout; a failure that escapes
-				// the dispatch must not leave it to fire on an idle session.
-				yield* sendTurn(input).pipe(
-					Effect.onError(() =>
-						input.steer ? Effect.void : clearProcessingTimeout(input.sessionId),
-					),
-				);
-			}).pipe(Effect.provide(providedContext)),
-		interruptTurn: (input) =>
-			Effect.gen(function* () {
-				const stop = yield* Deferred.make<void>();
-				stopping.set(input.sessionId, stop);
-				yield* interruptTurn(input).pipe(
-					Effect.ensuring(
-						Effect.sync(() => {
-							if (stopping.get(input.sessionId) === stop)
-								stopping.delete(input.sessionId);
-						}).pipe(Effect.andThen(Deferred.succeed(stop, undefined))),
-					),
-				);
-			}).pipe(Effect.provide(providedContext)),
+		beginStop: (input) =>
+			Effect.uninterruptible(
+				Effect.gen(function* () {
+					const existing = stopping.get(input.sessionId);
+					if (existing) return Deferred.await(existing);
+					const cutoff = yield* prepareStop(input).pipe(
+						Effect.provide(providedContext),
+						Effect.result,
+					);
+					const done = yield* Deferred.make<void, StopFailure>();
+					stopping.set(input.sessionId, done);
+					yield* abort(input, cutoff).pipe(
+						Effect.tap(() =>
+							registry._tag === "Some"
+								? Effect.forEach(
+										registry.value.listProviders(),
+										(id) =>
+											registry.value
+												.getInstance(id)
+												?.inputAdmission?.afterStop?.(input.sessionId) ??
+											Effect.void,
+										{ discard: true },
+									)
+								: Effect.void,
+						),
+						Effect.onExit((exit) =>
+							Effect.sync(() => stopping.delete(input.sessionId)).pipe(
+								Effect.andThen(Deferred.done(done, exit)),
+								// Scope close interrupts the worker; nothing is left to drain.
+								Effect.andThen(
+									Exit.hasInterrupts(exit)
+										? Effect.void
+										: lift(input.sessionId),
+								),
+							),
+						),
+						Effect.provide(providedContext),
+						Effect.interruptible,
+						Effect.forkIn(scope),
+					);
+					return Deferred.await(done);
+				}),
+			),
 	};
 	return service;
 });
@@ -233,6 +337,8 @@ export const ProviderTurnServiceLive: Layer.Layer<
 	ProviderTurnServiceTag,
 	never,
 	| AccountDirectory
+	| OpenCodeInstancesTag
+	| SessionWorkspaceTag
 	| OpenCodeAPITag
 	| WebSocketHandlerTag
 	| LoggerTag

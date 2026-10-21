@@ -8,6 +8,7 @@ import {
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import {
 	AgentServiceTag,
 	filterAgents,
@@ -33,6 +34,7 @@ import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
@@ -60,6 +62,7 @@ import type {
 } from "../../../src/lib/domain/relay/Services/services.js";
 // Batch 2 imports
 import {
+	AgentLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OpenCodeModelServiceLive,
@@ -126,10 +129,6 @@ import {
 } from "../../../src/lib/handlers/session.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";
-import {
-	type ClaudeEventPersistEffect,
-	ClaudeEventPersistEffectTag,
-} from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -335,18 +334,9 @@ function mockConfig(
 }
 
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
-const persistentHandlerPersistence = Layer.merge(
-	makePersistenceEffectLayer(":memory:", "test-project"),
-	Layer.succeed(ClaudeEventPersistEffectTag)({
-		persistHandoffDelivered: () => Effect.void,
-		persistEvent: () => Effect.void,
-		persistEvents: () => Effect.void,
-		persistUserMessage: () => Effect.void,
-		ensureClaudeSubagentSession: () => Effect.void,
-	} satisfies ClaudeEventPersistEffect),
-);
+const persistentHandlerPersistence = makePersistenceEffectLayer(":memory:", "test-project");
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
-layer(Layer.mergeAll(Layer.succeed(AccountDirectory)(makeMockAccountDirectory()), AlertsLive, persistentHandlerPersistence, makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistentHandlerPersistence)), Layer.succeed(AgentServiceTag)(makeMockAgentService()), Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()), PendingInteractionServiceLive, Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()), Layer.succeed(ConfigTag)(mockConfig()), Layer.succeed(LoggerTag)(mockLogger()), ProjectSettingsLive, RpcSubscriptionScopeLive))("persistent handler runtime", (it) => {
+layer(Layer.provideMerge(SessionWorkspaceLive, Layer.mergeAll(Layer.succeed(OpenCodeAPITag)(makeHandlerOpenCodeAPI()), Layer.succeed(AccountDirectory)(makeMockAccountDirectory()), AlertsLive, InputDraftsLive.pipe(Layer.provide(persistentHandlerPersistence)), persistentHandlerPersistence, makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistentHandlerPersistence)), Layer.succeed(AgentServiceTag)(makeMockAgentService()), Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()), PendingInteractionServiceLive, Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()), Layer.succeed(ConfigTag)(mockConfig()), Layer.succeed(LoggerTag)(mockLogger()), ProjectSettingsLive, RpcSubscriptionScopeLive)))("persistent handler runtime", (it) => {
 describe("GetAgents", () => {
 	it.effect(
 		"fetches agents via OpenCodeAPI and returns the filtered list",
@@ -957,6 +947,7 @@ describe("switchModelForSession", () => {
 				getStrandedChildren: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				countSettledSessions: () => Effect.succeed(0),
 				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 				readSessionTranscriptCatchUp: () => Effect.succeed({ messages: [], version: 0 }),
@@ -1388,7 +1379,7 @@ function makeForkSessionLayer(options?: {
 	vi.spyOn(client.provider, "list").mockResolvedValue(makeProviderListResult({
 			providers: [{ id: "openai", name: "OpenAI", models: [{ id: "gpt-4", name: "GPT-4" }] }],
 		}));
-	return Layer.mergeAll(
+	const dependencies = Layer.mergeAll(
 		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		openCodeModelLayer(client),
 		Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
@@ -1410,6 +1401,7 @@ function makeForkSessionLayer(options?: {
 		makeOverridesStateLive(),
 		forkPersistence,
 	);
+	return Layer.provideMerge(SessionWorkspaceLive, dependencies);
 }
 
 function makeSessionLifecycleLayer(options?: {
@@ -1438,6 +1430,7 @@ function makeSessionLifecycleLayer(options?: {
 			providers: [{ id: "openai", name: "OpenAI", models: [{ id: "gpt-4", name: "GPT-4" }] }],
 		}));
 	return Layer.mergeAll(
+		Layer.succeed(AgentLivenessTag)(() => Effect.succeed(false)),
 		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		openCodeModelLayer(client),
 		Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [{ id: "sonnet", name: "Sonnet", providerId: "claude" }] })) })),
@@ -2099,7 +2092,7 @@ describe("handleQuestionReject", () => {
 		return handleQuestionReject("client-1", { toolId: "que-1" }).pipe(
 			Effect.provide(layer, { local: true }),
 			Effect.tap(() => Effect.sync(() => {
-				expect(client.question.reject).toHaveBeenCalledWith("que-1", undefined);
+				expect(client.question.reject).toHaveBeenCalledWith("que-1", tmpdir());
 			})),
 		);
 	});
@@ -2183,7 +2176,9 @@ describe("handleAskUserResponse", () => {
 				completeRecoveredQuestion,
 				prepareTurnSession: ({ sessionId }) => Effect.succeed(sessionId),
 				sendTurn,
-				interruptTurn: () => Effect.void,
+				turnFences: () => ({ stopping: false, switching: false }),
+				fenceLifts: Effect.succeed(Stream.never),
+				beginStop: () => Effect.succeed(Effect.void),
 			};
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
@@ -2240,6 +2235,7 @@ describe("handleAskUserResponse", () => {
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(ConfigTag)(mockConfig()),
 					PendingInteractionServiceLive,
@@ -2258,7 +2254,7 @@ describe("handleAskUserResponse", () => {
 				expect(client.question.reply).toHaveBeenCalledWith(
 					"que-1",
 					[["Yes"], ["Approve"]],
-					undefined,
+					tmpdir(),
 				);
 			})),
 		);
@@ -2290,6 +2286,7 @@ describe("handleAskUserResponse", () => {
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(ConfigTag)(mockConfig()),
 					Layer.succeed(LoggerTag)(log),
@@ -2478,6 +2475,7 @@ describe("handleNewSession", () => {
 				getStrandedChildren: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				countSettledSessions: () => Effect.succeed(0),
 				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 				readSessionTranscriptCatchUp: () => Effect.succeed({ messages: [], version: 0 }),
@@ -2580,6 +2578,7 @@ describe("handleNewSession", () => {
 				getStrandedChildren: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				countSettledSessions: () => Effect.succeed(0),
 				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 				readSessionTranscriptCatchUp: () => Effect.succeed({ messages: [], version: 0 }),
@@ -2876,6 +2875,7 @@ describe("loadMoreHistoryForSession", () => {
 			getStrandedChildren: () => Effect.succeed([]),
 			listSessions: vi.fn(() => Effect.succeed([])),
 			listSessionInfos: vi.fn(() => Effect.succeed([])),
+			countSettledSessions: () => Effect.succeed(0),
 			listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 			getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 			readSessionTranscriptCatchUp: () => Effect.succeed({ messages: [], version: 0 }),
@@ -3056,7 +3056,9 @@ Layer.effect(SessionActivityTag, makeSessionActivity),
 									events.filter((e) => e.type === "session.unsnoozed"),
 								).toHaveLength(snoozed ? 1 : 0);
 							}).pipe(Effect.orDie),
-						interruptTurn: () => Effect.void,
+						turnFences: () => ({ stopping: false, switching: false }),
+						fenceLifts: Effect.succeed(Stream.never),
+						beginStop: () => Effect.succeed(Effect.void),
 					};
 					yield* sendMessageToSession({
 						clientId: "c1",
@@ -3089,7 +3091,9 @@ Layer.effect(SessionActivityTag, makeSessionActivity),
 			holdUserTurnsForAccountSwitch: () => Effect.void,
 			prepareTurnSession: (input) => Effect.succeed(input.sessionId),
 			sendTurn,
-			interruptTurn: () => Effect.void,
+			turnFences: () => ({ stopping: false, switching: false }),
+			fenceLifts: Effect.succeed(Stream.never),
+			beginStop: () => Effect.succeed(Effect.void),
 		};
 		const service = makeMockSessionManagerService({
 			restoreSessionForSend: () =>
@@ -3128,7 +3132,9 @@ describe("cancelSessionById", () => {
 			holdUserTurnsForAccountSwitch: () => Effect.void,
 			prepareTurnSession: vi.fn((input) => Effect.succeed(input.sessionId)),
 			sendTurn: vi.fn(() => Effect.void),
-			interruptTurn: vi.fn(() => Effect.void),
+			turnFences: () => ({ stopping: false, switching: false }),
+			fenceLifts: Effect.succeed(Stream.never),
+			beginStop: vi.fn(() => Effect.succeed(Effect.void)),
 		};
 
 		const layer = Layer.mergeAll(
@@ -3139,12 +3145,12 @@ describe("cancelSessionById", () => {
 		return Effect.gen(function* () {
 			yield* cancelSessionById("client-1", "session-1", "cmd-cancel-test");
 
-			expect(providerTurnService.interruptTurn).toHaveBeenCalledWith({
+			expect(providerTurnService.beginStop).toHaveBeenCalledWith({
 				clientId: "client-1",
 				commandId: "cmd-cancel-test",
 				sessionId: "session-1",
 			});
-		}).pipe(Effect.provide(layer, { local: true }));
+		}).pipe(Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }));
 	});
 });
 
@@ -3198,6 +3204,7 @@ describe("handleMessage", () => {
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 				Layer.succeed(WebSocketHandlerTag)(ws),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
@@ -3244,6 +3251,7 @@ describe("handleMessage", () => {
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 				Layer.succeed(WebSocketHandlerTag)(ws),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
@@ -3344,6 +3352,7 @@ describe("handleMessage", () => {
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
@@ -3445,6 +3454,7 @@ describe("handleMessage", () => {
 				getStrandedChildren: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				countSettledSessions: () => Effect.succeed(0),
 				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 				readSessionTranscriptCatchUp: () => Effect.succeed({ messages: [], version: 0 }),
@@ -3473,6 +3483,7 @@ describe("handleMessage", () => {
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
@@ -3575,6 +3586,7 @@ describe("handleMessage", () => {
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
@@ -3642,6 +3654,7 @@ describe("handleMessage", () => {
 			ProviderTurnServiceLive,
 			Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag)(client),
+				Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 				Layer.succeed(WebSocketHandlerTag)(ws),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
@@ -3686,7 +3699,6 @@ describe("handleMessage", () => {
 			const sessionManagerService = makeMockSessionManagerService({
 				createSession: serviceCreateSession,
 			});
-			const ingestBatch = vi.fn(() => Effect.succeed(0));
 			const config = mockConfig();
 			const client = makeHandlerOpenCodeAPI();
 			const readQuery = {
@@ -3725,6 +3737,7 @@ describe("handleMessage", () => {
 				getStrandedChildren: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				countSettledSessions: () => Effect.succeed(0),
 				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 				readSessionTranscriptCatchUp: () => Effect.succeed({ messages: [], version: 0 }),
@@ -3762,6 +3775,7 @@ describe("handleMessage", () => {
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
@@ -3769,16 +3783,16 @@ describe("handleMessage", () => {
 					PendingInteractionServiceLive,
 					Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 					Layer.succeed(ReadQueryEffectTag)(readQuery),
-					Layer.succeed(ProviderRuntimeIngestionTag)({
-						ingest: () => Effect.succeed(0),
-						ingestBatch,
-						drain: () => Effect.void,
-					}),
 					makeOverridesStateLive(),
 				),
 			);
 
 			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* (yield* ProjectionRunnerEffectTag).projectEvent(yield* (yield* EventStoreEffectTag).append(canonicalEvent(
+					"session.created", "ses-local-placeholder",
+					{ sessionId: "ses-local-placeholder", title: "Untitled", provider: "claude" },
+				)));
 				yield* setModel("ses-local-placeholder", {
 					providerID: "opencode",
 					modelID: "big-pickle",
@@ -3796,13 +3810,19 @@ describe("handleMessage", () => {
 				expect(engine.bindSession).not.toHaveBeenCalled();
 				expect(ws.setClientSession).not.toHaveBeenCalled();
 				expect(engine.dispatchEffect).not.toHaveBeenCalled();
-				expect(ingestBatch).toHaveBeenCalledWith(expect.arrayContaining([
-					expect.objectContaining({
-						type: "turn.error",
-						sessionId: "ses-local-placeholder",
-						data: expect.objectContaining({ code: "PICK_REQUIRED" }),
-					}),
-				]));
+				const events = yield* sql<{ type: string; run_id: string | null; code: string | null }>`
+					SELECT type, json_extract(metadata, '$.runId') AS run_id,
+						json_extract(data, '$.code') AS code FROM events
+					WHERE session_id = 'ses-local-placeholder' AND type <> 'session.created' ORDER BY sequence`;
+				const [run] = yield* sql<{ id: string; status: string; started_at: number | null }>`
+					SELECT id, status, started_at FROM provider_runs WHERE session_id = 'ses-local-placeholder'`;
+				expect(run).toEqual({ id: expect.any(String), status: "error", started_at: null });
+				expect(events).toEqual([
+					{ type: "run.requested", run_id: run?.id, code: null },
+					{ type: "message.created", run_id: run?.id, code: null },
+					{ type: "text.delta", run_id: null, code: null },
+					{ type: "turn.error", run_id: run?.id, code: "PICK_REQUIRED" },
+				]);
 			}).pipe(Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }));
 		},
 	);
@@ -3836,6 +3856,7 @@ describe("handleMessage", () => {
 				ProviderTurnServiceLive,
 				Layer.mergeAll(
 					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
@@ -3848,9 +3869,12 @@ describe("handleMessage", () => {
 
 			return Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				yield* sql`INSERT INTO sessions
-					(id, project_id, provider, title, status, created_at, updated_at, model_id, model_provider, variant, context_window)
-					VALUES ('session-rejected', 'test-project', 'claude', 'Rejected session', 'idle', 0, 0, 'sonnet', 'claude', '', '')`;
+				yield* (yield* ProjectionRunnerEffectTag).projectEvent(yield* (yield* EventStoreEffectTag).append(canonicalEvent(
+					"session.created", "session-rejected",
+					{ sessionId: "session-rejected", title: "Rejected session", provider: "claude" },
+				)));
+				yield* sql`UPDATE sessions SET model_id = 'sonnet', model_provider = 'claude', variant = '', context_window = ''
+					WHERE id = 'session-rejected'`;
 				yield* sendMessageToSession({
 					clientId: "client-1",
 					sessionId: "session-rejected",
@@ -3861,8 +3885,7 @@ describe("handleMessage", () => {
 				expect(yield* hasActiveProcessingTimeout("session-rejected")).toBe(
 					false,
 				);
-				// The failure is recorded as the turn's error; the relay's failed
-				// `done` idles the composer from there.
+				// The owned failure closes the unaccepted run and its placed turn.
 				const failures = yield* sql<{ code: string; error: string }>`
 					SELECT json_extract(data, '$.code') AS code,
 						json_extract(data, '$.error') AS error
@@ -3870,6 +3893,17 @@ describe("handleMessage", () => {
 					WHERE session_id = 'session-rejected' AND type = 'turn.error'`;
 				expect(failures).toEqual([
 					{ code: "SEND_FAILED", error: expect.any(String) },
+				]);
+				const [run] = yield* sql<{ id: string; status: string; started_at: number | null }>`
+					SELECT id, status, started_at FROM provider_runs WHERE session_id = 'session-rejected'`;
+				expect(run).toEqual({ id: expect.any(String), status: "error", started_at: null });
+				expect(yield* sql`
+					SELECT type, json_extract(metadata, '$.runId') AS run_id FROM events
+					WHERE session_id = 'session-rejected' AND type <> 'session.created' ORDER BY sequence`).toEqual([
+					{ type: "run.requested", run_id: run?.id },
+					{ type: "message.created", run_id: run?.id },
+					{ type: "text.delta", run_id: null },
+					{ type: "turn.error", run_id: run?.id },
 				]);
 			}).pipe(Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }));
 		},

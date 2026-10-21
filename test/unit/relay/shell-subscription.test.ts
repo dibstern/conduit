@@ -14,7 +14,7 @@ import {
 	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
-import { expect, vi } from "vitest";
+import { beforeEach, expect, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { decodeProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { ResumePoint } from "../../../src/lib/contracts/ws-rpc.js";
@@ -26,6 +26,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
 import {
 	makeProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionLive,
@@ -50,6 +51,7 @@ import {
 	SessionEventBusLive,
 	type SessionEventBusTag,
 } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { subscribeSessionFamily } from "../../../src/lib/domain/relay/Services/session-family-subscription.js";
 import { persistSessionPermissionMode } from "../../../src/lib/domain/relay/Services/session-manager-permission-mode.js";
 import { deleteSession } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
@@ -74,7 +76,10 @@ import {
 	type CanonicalEvent,
 	canonicalEvent,
 } from "../../../src/lib/persistence/events.js";
-import { defaultClaudeSessionForkSdk } from "../../../src/lib/provider/claude/claude-session-fork.js";
+import {
+	CLAUDE_FORK_SOURCE_KEY,
+	defaultClaudeSessionForkSdk,
+} from "../../../src/lib/provider/claude/claude-session-fork.js";
 import {
 	type SessionInfo,
 	SessionInfoSchema,
@@ -94,6 +99,14 @@ const getSessionMessages = vi.spyOn(
 	"readTranscript",
 );
 const sdkForkSession = vi.spyOn(defaultClaudeSessionForkSdk, "forkSession");
+const claudeQuery = vi.fn(() => {
+	throw new Error("Unexpected Claude query");
+});
+beforeEach(() => {
+	getSessionMessages.mockClear();
+	sdkForkSession.mockClear();
+	claudeQuery.mockClear();
+});
 // A fresh temp-file persistence stack + the real SessionEventBus per test. The
 // shell source reads the sessions projection and nothing else, so what is under
 // test is a contract WITH the store: the version column the projectors stamp,
@@ -133,6 +146,7 @@ const makeShellTestLayer = (
 		RelayStatusSnapshotLive,
 		Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 		persistenceLayer,
+		InputDraftsLive.pipe(Layer.provide(persistenceLayer)),
 		...(handlerApi === undefined
 			? []
 			: [makeTestHandlerLayer({ api: handlerApi, persistenceLayer })]),
@@ -160,9 +174,7 @@ const makeShellTestLayer = (
 				slug: "test-project",
 				configDir: dir,
 				claudeSdk: {
-					query: () => {
-						throw new Error("Unexpected Claude query");
-					},
+					query: claudeQuery,
 					titleQuery: async function* () {},
 					fork: defaultClaudeSessionForkSdk,
 				},
@@ -335,6 +347,153 @@ const takeN = <A>(q: Queue.Queue<A>, n: number): Effect.Effect<A[]> =>
 const SID = "session-shell";
 
 describe("subscribeShell", () => {
+	for (const kind of ["root", "child", "side-thread"] as const) {
+		it.effect(
+			"Stop availability advances the live sidebar when a retained steer becomes indeterminate or is placed" +
+				(kind === "root" ? "" : ` (${kind})`),
+			() =>
+				Effect.gen(function* () {
+					yield* recoverProjections;
+					const sql = yield* SqlClient.SqlClient;
+					const write = yield* makeCommitAndSignal;
+					const meta = (runId: string) => ({
+						provider: "claude",
+						metadata: { runId },
+					});
+					yield* write([
+						...(kind === "root"
+							? [sessionCreated(SID)]
+							: [
+									sessionCreated("parent"),
+									canonicalEvent("session.created", SID, {
+										sessionId: SID,
+										title: "Child",
+										provider: "claude",
+										parentId: "parent",
+										sideThread: kind === "side-thread",
+									}),
+								]),
+						canonicalEvent(
+							"run.requested",
+							SID,
+							{ runId: "reply-run", inputId: "reply" },
+							meta("reply-run"),
+						),
+						canonicalEvent(
+							"message.created",
+							SID,
+							{
+								sessionId: SID,
+								messageId: "reply",
+								inputId: "reply",
+								role: "user",
+							},
+							meta("reply-run"),
+						),
+						canonicalEvent(
+							"run.started",
+							SID,
+							{ inputId: "reply", requestedRunId: "reply-run" },
+							meta("reply-run"),
+						),
+						canonicalEvent("input.admitted", SID, {
+							sessionId: SID,
+							inputId: "steer",
+							delivery: "steer",
+							request: { text: "Correction" },
+						}),
+						canonicalEvent("input.sent", SID, {
+							sessionId: SID,
+							inputId: "steer",
+							steer: true,
+						}),
+						canonicalEvent(
+							"run.requested",
+							SID,
+							{ runId: "steer-run", inputId: "steer" },
+							meta("steer-run"),
+						),
+					]);
+					yield* write.write((_, stamp) =>
+						Effect.gen(function* () {
+							yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at)
+					VALUES (1, 'steer', 'test-project', ${SID}, 'claude', 'send_turn', 'steer-run', '{}', 'running', 1, 1, 1)`;
+							yield* stamp((version) =>
+								sql<{
+									id: string;
+								}>`UPDATE sessions SET version = ${version} WHERE id = ${SID} RETURNING id`.pipe(
+									Effect.map((rows) => rows.map(({ id }) => id)),
+								),
+							);
+						}),
+					);
+					const q = yield* Queue.unbounded<Envelope<SessionInfo>>();
+					const stream =
+						kind === "root"
+							? subscribeShell()
+							: subscribeSessionFamily({ sessionId: SID });
+					yield* Stream.runForEach(stream, (envelope) =>
+						envelope._tag === "projects" ||
+						(envelope._tag === "upsert" && envelope.item.id !== SID)
+							? Effect.void
+							: Queue.offer(q, envelope),
+					).pipe(Effect.forkScoped);
+					yield* takeN(q, 2);
+					yield* write([
+						canonicalEvent(
+							"turn.completed",
+							SID,
+							{ messageId: "reply-answer" },
+							meta("reply-run"),
+						),
+					]);
+					expect(yield* Queue.take(q)).toMatchObject({
+						_tag: "upsert",
+						item: { id: SID, status: "busy", canStop: false },
+					});
+					yield* write.write((_, stamp) =>
+						Effect.gen(function* () {
+							yield* sql`UPDATE provider_command_outbox SET error_code = 'delivery_indeterminate' WHERE command_id = 'steer'`;
+							yield* stamp((version) =>
+								sql<{
+									id: string;
+								}>`UPDATE sessions SET version = ${version} WHERE id = ${SID} RETURNING id`.pipe(
+									Effect.map((rows) => rows.map(({ id }) => id)),
+								),
+							);
+						}),
+					);
+					yield* Effect.yieldNow;
+					yield* Effect.yieldNow;
+					expect(yield* Queue.size(q)).toBe(1);
+					expect(yield* Queue.take(q)).toMatchObject({
+						_tag: "upsert",
+						item: { id: SID, status: "busy", canStop: true },
+					});
+					yield* write([
+						canonicalEvent(
+							"message.created",
+							SID,
+							{
+								sessionId: SID,
+								messageId: "steer",
+								inputId: "steer",
+								role: "user",
+							},
+							meta("steer-run"),
+						),
+					]);
+					expect(yield* Queue.take(q)).toMatchObject({
+						_tag: "upsert",
+						item: { id: SID, status: "busy", canStop: true },
+					});
+					expect(
+						yield* sql`SELECT status, started_at FROM provider_runs WHERE id = 'steer-run'`,
+					).toEqual([{ status: "pending", started_at: null }]);
+				}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+		);
+	}
+
 	it.effect(
 		"a project's sidebar ignores another project's committed advance",
 		() =>
@@ -433,7 +592,7 @@ describe("subscribeShell", () => {
 	}
 	for (const entry of ["command", "handler"] as const) {
 		it.effect(
-			`a new Claude fork through the ${entry} publishes lineage without containment and resumes the SDK child`,
+			`a new Claude fork through the ${entry} publishes lineage and saves its launch source without provider work`,
 			() => {
 				const api = makeMockOpenCodeAPI();
 				return Effect.gen(function* () {
@@ -483,12 +642,24 @@ describe("subscribeShell", () => {
 						_tag: "upsert",
 						item: { id: child.id, forkedFrom: "claude-parent" },
 					});
-					expect(sdkForkSession).toHaveBeenCalledWith(
-						"sdk-parent",
-						expect.objectContaining({ upToMessageId: "transcript-boundary" }),
-					);
-					expect(yield* state.nativeThread(child.id, "claude")).toMatchObject({
-						resumeSessionId: "sdk-child",
+					expect(child.id).toMatch(/^[0-9a-f-]{36}$/);
+					expect(sdkForkSession).not.toHaveBeenCalled();
+					expect(getSessionMessages).not.toHaveBeenCalled();
+					expect(claudeQuery).not.toHaveBeenCalled();
+					expect(yield* state.nativeThread(child.id, "claude")).toBeUndefined();
+					expect(
+						JSON.parse(
+							(yield* state.getState(child.id))[CLAUDE_FORK_SOURCE_KEY] ??
+								"null",
+						),
+					).toEqual({
+						instanceId: "claude",
+						resumeSessionId: "sdk-parent",
+						configDir: {
+							_tag: "Configured",
+							path: join(tmpdir(), "conduit-test-login"),
+						},
+						messageId: "ui-boundary",
 					});
 					expect(api.session.fork).not.toHaveBeenCalled();
 					expect(api.session.message).not.toHaveBeenCalled();
@@ -534,7 +705,7 @@ describe("subscribeShell", () => {
 			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 	it.effect(
-		"a Claude tip fork records the actual parent transcript boundary",
+		"a Claude tip fork retains its canonical cut and source for first launch",
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
@@ -568,10 +739,14 @@ describe("subscribeShell", () => {
 					fork_point_timestamp: 1000,
 					fork_point_message_id: "ui-tip",
 				});
-				expect(sdkForkSession).toHaveBeenCalledWith(
-					"sdk-parent",
-					expect.not.objectContaining({ dir: expect.any(String) }),
-				);
+				expect(sdkForkSession).not.toHaveBeenCalled();
+				expect(getSessionMessages).not.toHaveBeenCalled();
+				expect(claudeQuery).not.toHaveBeenCalled();
+				expect(
+					JSON.parse(
+						(yield* state.getState(child.id))[CLAUDE_FORK_SOURCE_KEY] ?? "null",
+					),
+				).toMatchObject({ resumeSessionId: "sdk-parent", messageId: "ui-tip" });
 			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 	// hk9m.7: the imported turns were the parent's to read, so the fork has no dot.
@@ -581,11 +756,25 @@ describe("subscribeShell", () => {
 			yield* commit([
 				...forkSourceEvents("claude-parent"),
 				messageCreated("claude-parent", "ui-tip", 1000),
+				canonicalEvent("run.requested", "claude-parent", {
+					runId: "parent-run",
+					inputId: "ui-tip",
+				}),
+				canonicalEvent(
+					"run.started",
+					"claude-parent",
+					{ inputId: "ui-tip", requestedRunId: "parent-run" },
+					{ metadata: { runId: "parent-run" } },
+				),
 				canonicalEvent(
 					"turn.completed",
 					"claude-parent",
 					{ messageId: "ui-tip" },
-					{ provider: "claude", createdAt: at() },
+					{
+						provider: "claude",
+						createdAt: at(),
+						metadata: { runId: "parent-run" },
+					},
 				),
 			]);
 			const state = yield* ProviderStateEffectTag;
@@ -616,7 +805,7 @@ describe("subscribeShell", () => {
 		}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 	it.effect(
-		"rejects a Claude UI boundary that continues through tool rounds",
+		"rejects a Claude cut absent from persisted history without consulting transcript tool rounds",
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
@@ -662,10 +851,12 @@ describe("subscribeShell", () => {
 				);
 				expect(result._tag).toBe("Failure");
 				expect(sdkForkSession).not.toHaveBeenCalled();
+				expect(getSessionMessages).not.toHaveBeenCalled();
+				expect(claudeQuery).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 	it.effect(
-		"a Claude fork is not published if its resume state cannot be saved",
+		"a Claude fork is not published if its launch source cannot be saved",
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
@@ -688,16 +879,22 @@ describe("subscribeShell", () => {
 					sessionId: "unresumable-child",
 				});
 				const sql = yield* SqlClient.SqlClient;
-				yield* sql`CREATE TRIGGER reject_child_state BEFORE INSERT ON provider_state WHEN NEW.session_id = 'unresumable-child' BEGIN SELECT RAISE(ABORT, 'resume state unavailable'); END`;
+				yield* sql`CREATE TRIGGER reject_child_state BEFORE INSERT ON provider_state WHEN NEW.key = 'claude.forkSource' BEGIN SELECT RAISE(ABORT, 'fork source unavailable'); END`;
 				yield* commit([messageCreated("claude-parent", "api-tip", 1000)]);
 				const result = yield* Effect.result(forkSession("claude-parent"));
 				expect(result._tag).toBe("Failure");
-				const read = yield* ReadQueryEffectTag;
-				expect(yield* read.getSession("unresumable-child")).toBeUndefined();
+				expect(
+					yield* sql<{
+						count: number;
+					}>`SELECT COUNT(*) AS count FROM sessions WHERE forked_from = 'claude-parent'`,
+				).toEqual([{ count: 0 }]);
+				expect(sdkForkSession).not.toHaveBeenCalled();
+				expect(getSessionMessages).not.toHaveBeenCalled();
+				expect(claudeQuery).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 	it.effect(
-		"rejects a Claude fork whose transcript store differs from the SDK process",
+		"a Claude fork saves its account source without reading a conflicting daemon transcript store",
 		() =>
 			Effect.gen(function* () {
 				const configDir = mkdtempSync(join(tmpdir(), "claude-fork-config-"));
@@ -725,21 +922,24 @@ describe("subscribeShell", () => {
 				vi.mocked(getSessionMessages).mockClear();
 				vi.mocked(getSessionMessages).mockResolvedValue([]);
 				const config = yield* ConfigTag;
-				const result = yield* Effect.result(
-					forkSession("claude-parent", { messageId: "api-tip" }).pipe(
-						Effect.provideService(ConfigTag, { ...config, configDir }),
+				const child = yield* forkSession("claude-parent", {
+					messageId: "api-tip",
+				}).pipe(Effect.provideService(ConfigTag, { ...config, configDir }));
+				expect(
+					JSON.parse(
+						(yield* state.getState(child.id))[CLAUDE_FORK_SOURCE_KEY] ?? "null",
 					),
-				);
-				expect(result).toMatchObject({
-					_tag: "Failure",
-					failure: { message: expect.stringContaining("Claude transcript") },
-				});
-				expect(getSessionMessages).toHaveBeenCalledWith("sdk-parent", {
+				).toMatchObject({
+					resumeSessionId: "sdk-parent",
 					configDir: {
-						_tag: expect.stringMatching(/^(Configured|SdkDefault)$/),
-						path: expect.any(String),
+						_tag: "Configured",
+						path: join(tmpdir(), "conduit-test-login"),
 					},
+					messageId: "api-tip",
 				});
+				expect(getSessionMessages).not.toHaveBeenCalled();
+				expect(sdkForkSession).not.toHaveBeenCalled();
+				expect(claudeQuery).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 	for (const messageId of ["fork-message", undefined]) {
@@ -1001,7 +1201,15 @@ describe("subscribeShell", () => {
 	it.effect("traffic that moves no session row emits nothing", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
-			yield* commit([sessionCreated(SID), messageCreated(SID, "m1")]);
+			yield* commit([
+				sessionCreated(SID),
+				canonicalEvent(
+					"message.created",
+					SID,
+					{ messageId: "m1", sessionId: SID, role: "assistant" },
+					{ provider: "claude" },
+				),
+			]);
 
 			const requeries = yield* Ref.make(0);
 			const real = yield* ReadQueryEffectTag;
@@ -1301,12 +1509,36 @@ describe("subscribeShell", () => {
 				yield* recoverProjections;
 				yield* commitThroughSeam([
 					sessionCreated(SID),
-					messageCreated(SID, "m1"),
+					canonicalEvent("run.requested", SID, {
+						runId: "seen-run",
+						inputId: "m1",
+					}),
+					canonicalEvent(
+						"message.created",
+						SID,
+						{
+							sessionId: SID,
+							messageId: "m1",
+							inputId: "m1",
+							role: "user",
+						},
+						{
+							provider: "claude",
+							createdAt: at(),
+							metadata: { runId: "seen-run" },
+						},
+					),
+					canonicalEvent(
+						"run.started",
+						SID,
+						{ inputId: "m1", requestedRunId: "seen-run" },
+						{ metadata: { runId: "seen-run" } },
+					),
 					canonicalEvent(
 						"turn.completed",
 						SID,
 						{ messageId: "m1" },
-						{ provider: "claude" },
+						{ provider: "claude", metadata: { runId: "seen-run" } },
 					),
 				]);
 
@@ -1393,7 +1625,12 @@ describe("subscribeShell", () => {
 			yield* recoverProjections;
 			yield* commitThroughSeam([
 				sessionCreated(SID),
-				messageCreated(SID, "m1"),
+				canonicalEvent(
+					"message.created",
+					SID,
+					{ messageId: "m1", sessionId: SID, role: "assistant" },
+					{ provider: "claude" },
+				),
 			]);
 
 			const { q } = yield* openShell();

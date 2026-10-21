@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import type { GetSessionSkillsResponseSchema } from "../../../src/lib/contracts/ws-rpc.js";
+import { inspectTouchTarget } from "../../../src/lib/frontend/stories/touch-target.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
@@ -15,7 +16,7 @@ const navigationScrollTops = new WeakMap<Page, number>();
 
 const activityPanel = (page: Page, turn: string) =>
 	page.locator(
-		`#messages .msg-container:has([data-uuid="msg-skill-nav-user-${turn}/user"]) + div .turn-activity`,
+		`#messages .msg-container:has([data-uuid="msg-skill-nav-user-${turn}/user"]) + .turn-activity`,
 	);
 
 // e.g. "release-notes by you in turn 1; changelog-style by agent in turn 2, loading"
@@ -339,7 +340,7 @@ export const sessionSkillsHandlers: StepHandler[] = [
 			);
 			await expect(step).toContainText("paged-skill");
 			await expect(step.getByRole("button").first()).toHaveClass(
-				/bg-\[rgba\(var\(--overlay-rgb\),0\.06\)\]/,
+				/\bbg-selection\b/,
 			);
 			await expect(step).toBeInViewport({ ratio: 0.5 });
 		},
@@ -497,7 +498,12 @@ export const sessionSkillsHandlers: StepHandler[] = [
 			await expect(chip).toHaveAccessibleName(
 				`${count} ${count === "1" ? "skill" : "skills"} used`,
 			);
-			await expect(chip).toHaveText(count);
+			const desktop = await world.page
+				.locator('#session-bar[data-compact="false"]')
+				.count();
+			await expect(chip).toHaveText(
+				desktop ? `${count} ${count === "1" ? "skill" : "skills"}` : count,
+			);
 		},
 	},
 	{
@@ -515,22 +521,15 @@ export const sessionSkillsHandlers: StepHandler[] = [
 	},
 	{
 		name: "skills chip touch target",
-		match: /^the skills chip has a 44 pixel touch target$/,
-		run: async ({ world }) => {
+		match: /^the skills chip owns a (24|44) pixel touch target$/,
+		run: async ({ world, match }) => {
+			const minimum = Number(match[1]);
 			const target = await world.page
 				.getByTestId("session-skills-chip")
-				.evaluate((el) => {
-					const hit = getComputedStyle(el, "::before");
-					const box = el.getBoundingClientRect();
-					return {
-						height: Math.max(box.height, Number.parseFloat(hit.minHeight) || 0),
-						width: Math.max(box.width, Number.parseFloat(hit.minWidth) || 0),
-					};
-				});
-			if (target.height < 44 || target.width < 44)
-				throw new Error(
-					`skills chip target is ${target.width}x${target.height}`,
-				);
+				.evaluate(inspectTouchTarget, minimum);
+			expect(target.width).toBeGreaterThanOrEqual(minimum);
+			expect(target.height).toBeGreaterThanOrEqual(minimum);
+			expect(target.missing, JSON.stringify(target.failures)).toBe(0);
 		},
 	},
 	{

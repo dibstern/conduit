@@ -20,6 +20,7 @@ import { DEFAULT_WORKTREE_CLEANUP } from "../../../contracts/worktree.js";
 import {
 	type DaemonConfig,
 	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
+	DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	loadDaemonConfigResult,
 	saveDaemonConfig,
@@ -81,6 +82,7 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 		}),
 		debug: false,
 		keepAwake: runtime.keepAwake,
+		...(runtime.avatar !== undefined && { avatar: runtime.avatar }),
 		autoSettleAfterDays:
 			runtime.autoSettleAfterDays === undefined
 				? DEFAULT_AUTO_SETTLE_AFTER_DAYS
@@ -89,6 +91,10 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 			runtime.autoArchiveAfterDays === undefined
 				? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS
 				: runtime.autoArchiveAfterDays,
+		autoDeleteArchivedAfterDays:
+			runtime.autoDeleteArchivedAfterDays === undefined
+				? DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS
+				: runtime.autoDeleteArchivedAfterDays,
 		worktreeCleanup: runtime.worktreeCleanup ?? DEFAULT_WORKTREE_CLEANUP,
 		...(runtime.usageLimits !== undefined && {
 			usageLimits: runtime.usageLimits,
@@ -105,6 +111,11 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 		...(runtime.newSessionProject !== undefined && {
 			newSessionProject: runtime.newSessionProject,
 		}),
+		...(runtime.projectOrder !== undefined && {
+			projectOrder: runtime.projectOrder.filter((slug) =>
+				projects.some((project) => project.slug === slug),
+			),
+		}),
 		projects: projects.map((project) => {
 			const sessionCount =
 				runtime.persistedSessionCounts.get(project.slug) ?? 0;
@@ -116,13 +127,17 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 				}),
 				slug: project.slug,
 				title: project.title,
-				addedAt: project.lastUsed ?? Date.now(),
+				addedAt: project.addedAt ?? project.lastUsed ?? Date.now(),
+				...(project.lastUsed !== undefined && { lastUsed: project.lastUsed }),
 				...(project.shellEnv !== undefined && { shellEnv: project.shellEnv }),
 				...(project.setupScript !== undefined && {
 					setupScript: project.setupScript,
 				}),
 				...(project.sessionMode !== undefined && {
 					sessionMode: project.sessionMode,
+				}),
+				...(project.worktreeCleanup !== undefined && {
+					worktreeCleanup: project.worktreeCleanup,
 				}),
 				...(sessionCount > 0 && { sessionCount }),
 			};

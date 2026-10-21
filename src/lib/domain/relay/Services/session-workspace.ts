@@ -1,6 +1,6 @@
 import { lstat } from "node:fs/promises";
 import { join, sep } from "node:path";
-import { Context, Effect, Schema } from "effect";
+import { Context, Effect, Option, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import type { Account } from "../../../contracts/account.js";
 import {
@@ -19,6 +19,10 @@ import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effec
 import { labelProjectFolders } from "../../../project-folders.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 import type { SessionInfo } from "../../../shared-types.js";
+import {
+	OpenCodeInstancesTag,
+	OpenCodeUnavailable,
+} from "../../daemon/Services/opencode-instances-service.js";
 import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
 import { ConfigTag } from "./services.js";
 import type {
@@ -47,6 +51,8 @@ export interface SessionWorkspace {
 	) => Effect.Effect<A, E, R>;
 	readonly get: (
 		sessionId: string,
+		/** Native directory before the session declares a stored workspace. */
+		nativeDirectory?: string,
 	) => Effect.Effect<string, SessionCommandError>;
 	readonly move: (
 		sessionId: string,
@@ -107,6 +113,42 @@ export class SessionWorkspaceTag extends Context.Service<
 	SessionWorkspaceTag,
 	SessionWorkspace
 >()("SessionWorkspace") {}
+
+/** Passive reads never start an instance or extend its idle grace. */
+export const makeSessionOpenCodeClient = Effect.gen(function* () {
+	const workspace = yield* SessionWorkspaceTag;
+	const read = yield* ReadQueryEffectTag;
+	const instances = yield* OpenCodeInstancesTag;
+	return (sessionId: string, instanceId?: string, directory?: string) =>
+		Effect.gen(function* () {
+			const target = yield* workspace.withLaunch(
+				Effect.gen(function* () {
+					const row = yield* read.getSession(sessionId);
+					const owner = instanceId ?? row?.provider;
+					if (owner === undefined) return Option.none();
+					return Option.some({
+						instanceId: owner,
+						directory:
+							row === undefined
+								? (directory ?? null)
+								: yield* workspace.get(sessionId, directory),
+					});
+				}),
+			);
+			if (Option.isNone(target)) return Option.none();
+			const client = yield* instances.ifRunning(
+				target.value.instanceId,
+				target.value.directory,
+			);
+			if (Option.isNone(client))
+				return yield* new OpenCodeUnavailable({
+					instanceId: target.value.instanceId,
+					reason: "not-running",
+					message: `OpenCode instance "${target.value.instanceId}" is not running`,
+				});
+			return client;
+		});
+});
 
 // Snapshot-only callers have no event store; Git registration remains sufficient
 // for them. Recovery uses only recorded ownership, never legacy branch inference.

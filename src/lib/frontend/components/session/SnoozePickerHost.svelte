@@ -12,6 +12,7 @@
 		sessionTitle={session.title}
 		now={snoozePicker.now}
 		returnFocus={snoozePicker.returnFocus}
+		initialPicking={snoozePicker.picking}
 		onclose={() => { snoozePicker.session = null; }}
 		onsnooze={(until) => { void sessionCommandActions.snooze(session, until, snoozePicker.now); }}
 	/>

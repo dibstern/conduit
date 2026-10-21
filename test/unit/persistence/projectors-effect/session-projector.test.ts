@@ -32,6 +32,8 @@ function makeStored<T extends StoredEvent["type"]>(
 	data: EventPayloadMap[T],
 	sequence: number = 1,
 	createdAt: number = Date.now(),
+	runId = type.startsWith("turn.") ? `${sessionId}-run` : undefined,
+	provider = "opencode",
 ): StoredEvent {
 	return {
 		sequence,
@@ -41,8 +43,8 @@ function makeStored<T extends StoredEvent["type"]>(
 		sessionId,
 		type,
 		data,
-		metadata: {},
-		provider: "opencode",
+		metadata: runId ? { runId } : {},
+		provider,
 		createdAt,
 	} as StoredEvent;
 }
@@ -81,7 +83,12 @@ describe("SessionProjector", () => {
 		);
 		if (!effectProjector) throw new Error("Session projector not found");
 		projector = effectProjector;
-		harness = makeEffectProjectionHarness([projector]);
+		harness = makeEffectProjectionHarness(
+			createAllEffectProjectors().filter(
+				(candidate) =>
+					candidate.name === "session" || candidate.name === "turn",
+			),
+		);
 	});
 
 	afterEach(async () => {
@@ -90,6 +97,37 @@ describe("SessionProjector", () => {
 
 	async function project(event: StoredEvent): Promise<void> {
 		await harness.reproject([event]);
+	}
+
+	async function acceptRun(
+		sessionId: string,
+		at = now,
+		runId = `${sessionId}-run`,
+	) {
+		const inputId = `${runId}-input`;
+		await project(
+			makeStored(
+				"message.created",
+				sessionId,
+				{ sessionId, messageId: inputId, role: "user" },
+				1,
+				at,
+				runId,
+			),
+		);
+		await project(
+			makeStored("run.requested", sessionId, { inputId, runId }, 1, at),
+		);
+		await project(
+			makeStored(
+				"run.started",
+				sessionId,
+				{ inputId, requestedRunId: runId },
+				1,
+				at,
+				runId,
+			),
+		);
 	}
 
 	async function queryOne<T extends object>(
@@ -146,7 +184,7 @@ describe("SessionProjector", () => {
 				makeStored(
 					"session.created",
 					"s1",
-					{ sessionId: "s1", title: "Session", provider: "opencode" },
+					{ sessionId: "s1", title: "Session", provider: "claude" },
 					1,
 					now,
 				),
@@ -154,6 +192,7 @@ describe("SessionProjector", () => {
 			await project(
 				makeStored("session.snoozed", "s1", { sessionId: "s1", until }, 2, at),
 			);
+			await acceptRun("s1");
 		}
 
 		it.each([
@@ -189,7 +228,15 @@ describe("SessionProjector", () => {
 			],
 			[
 				"turn",
-				makeStored("turn.completed", "s1", { messageId: "m1" }, 3, now + 20),
+				makeStored(
+					"turn.completed",
+					"s1",
+					{ messageId: "m1" },
+					3,
+					now + 20,
+					"s1-run",
+					"claude",
+				),
 			],
 		] as const)("wakes on %s alone", async (reason, trigger) => {
 			await seedSnooze(now + 100);
@@ -289,8 +336,16 @@ describe("SessionProjector", () => {
 					now + 12,
 				),
 			);
+			await acceptRun("child", now + 12);
 			await project(
-				makeStored("turn.completed", "child", { messageId: "m1" }, 5, now + 15),
+				makeStored(
+					"session.status",
+					"child",
+					{ sessionId: "child", status: "idle" },
+					5,
+					now + 15,
+					"child-run",
+				),
 			);
 			const beforeVersion = (
 				await queryOne<SessionRow>("SELECT * FROM sessions WHERE id = 's1'")
@@ -321,7 +376,15 @@ describe("SessionProjector", () => {
 		it("wakes an indefinite snooze", async () => {
 			await seedSnooze();
 			await project(
-				makeStored("turn.completed", "s1", { messageId: "m1" }, 3, now + 20),
+				makeStored(
+					"turn.completed",
+					"s1",
+					{ messageId: "m1" },
+					3,
+					now + 20,
+					"s1-run",
+					"claude",
+				),
 			);
 			expect(
 				(await queryOne<SessionRow>("SELECT * FROM sessions WHERE id = 's1'"))
@@ -396,6 +459,7 @@ describe("SessionProjector", () => {
 					provider: "claude",
 				}),
 			);
+			await acceptRun("claude");
 		});
 
 		// A fallback must retain its cause on the row, require a directive only
@@ -617,6 +681,31 @@ describe("SessionProjector", () => {
 	});
 
 	describe("session.created", () => {
+		// Missing lineage must skip every write, including inherited history and
+		// provider bindings, both live and when replay dispatches all projectors.
+		it.each([
+			"parentId",
+			"forkedFrom",
+		] as const)("writes nothing when %s is missing", async (reference) => {
+			await harness.dispose();
+			harness = makeEffectProjectionHarness();
+			await harness.reproject([
+				makeStored("session.created", "missing-lineage", {
+					sessionId: "missing-lineage",
+					title: "Late child",
+					provider: "claude",
+					[reference]: "missing-source",
+					inheritsHistory: true,
+					forkPointMessageId: "missing-cut",
+					forkPointTimestamp: now,
+				}),
+			]);
+			expect(await harness.query("SELECT id FROM sessions")).toEqual([]);
+			expect(await harness.query("SELECT id FROM session_providers")).toEqual(
+				[],
+			);
+		});
+
 		it("inserts a new session row", async () => {
 			const event = makeStored("session.created", "s1", {
 				sessionId: "s1",
@@ -654,59 +743,6 @@ describe("SessionProjector", () => {
 				["s1"],
 			);
 			expect(rows).toHaveLength(1);
-		});
-
-		it("writes parent and provider session ids, then preserves them when omitted", async () => {
-			await project(
-				makeStored(
-					"session.created",
-					"parent-session",
-					{
-						sessionId: "parent-session",
-						title: "Parent",
-						provider: "claude",
-					} satisfies SessionCreatedPayload,
-					1,
-					now,
-				),
-			);
-
-			await project(
-				makeStored(
-					"session.created",
-					"claude-subagent-abc",
-					{
-						sessionId: "claude-subagent-abc",
-						title: "Explore Agent",
-						provider: "claude",
-						parentId: "parent-session",
-						providerSessionId: "sdk-subagent-1",
-					} satisfies SessionCreatedPayload,
-					2,
-					now + 1,
-				),
-			);
-			await project(
-				makeStored(
-					"session.created",
-					"claude-subagent-abc",
-					{
-						sessionId: "claude-subagent-abc",
-						title: "Explore Agent Updated",
-						provider: "claude",
-					} satisfies SessionCreatedPayload,
-					3,
-					now + 2,
-				),
-			);
-
-			const row = await queryOne<SessionRow>(
-				"SELECT * FROM sessions WHERE id = ?",
-				["claude-subagent-abc"],
-			);
-			expect(row?.title).toBe("Explore Agent Updated");
-			expect(row?.parent_id).toBe("parent-session");
-			expect(row?.provider_sid).toBe("sdk-subagent-1");
 		});
 	});
 
@@ -885,6 +921,7 @@ describe("SessionProjector", () => {
 				now,
 			);
 			await project(created);
+			await acceptRun("s1");
 			await project(
 				makeStored(
 					"turn.error",
@@ -924,6 +961,7 @@ describe("SessionProjector", () => {
 					provider: "opencode",
 				}),
 			);
+			await acceptRun("s1");
 			await project(
 				makeStored(
 					"turn.error",
@@ -1096,19 +1134,19 @@ describe("SessionProjector", () => {
 				{
 					sessionId: "s1",
 					title: "Test",
-					provider: "opencode",
+					provider: "claude",
 				} satisfies SessionCreatedPayload,
 				1,
 				now,
 			);
 			await project(created);
+			await acceptRun("s1");
 
 			const originalRow = await queryOne<SessionRow>(
 				"SELECT * FROM sessions WHERE id = ?",
 				["s1"],
 			);
 			const originalTitle = originalRow?.title;
-			const originalStatus = originalRow?.status;
 			await project(
 				makeStored(
 					"turn.error",
@@ -1129,7 +1167,10 @@ describe("SessionProjector", () => {
 				} satisfies TurnCompletedPayload,
 				3,
 				now + 5000,
+				"s1-next-run",
+				"claude",
 			);
+			await acceptRun("s1", now + 3000, "s1-next-run");
 			await project(turnDone);
 
 			const row = await queryOne<SessionRow>(
@@ -1137,7 +1178,8 @@ describe("SessionProjector", () => {
 				["s1"],
 			);
 			expect(row?.title).toBe(originalTitle);
-			expect(row?.status).toBe(originalStatus);
+			// A terminal leaves the session idle when no other run is open.
+			expect(row?.status).toBe("idle");
 			expect(row?.updated_at).toBe(now + 5000);
 			expect(row?.last_turn_error_at).toBeNull();
 		});
@@ -1157,6 +1199,7 @@ describe("SessionProjector", () => {
 				now,
 			);
 			await project(created);
+			await acceptRun("s1");
 
 			const turnErr = makeStored(
 				"turn.error",
@@ -1188,6 +1231,7 @@ describe("SessionProjector", () => {
 					provider: "opencode",
 				}),
 			);
+			await acceptRun("s1");
 			await project(
 				makeStored(
 					"turn.error",

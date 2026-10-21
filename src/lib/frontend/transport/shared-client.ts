@@ -31,7 +31,10 @@ import {
 } from "effect";
 import { RpcClient, RpcSerialization } from "effect/rpc";
 import { Socket } from "effect/socket";
-import type { SessionDetailEnvelope } from "../../contracts/ws-rpc.js";
+import type {
+	InputDraftKey,
+	SessionDetailEnvelope,
+} from "../../contracts/ws-rpc.js";
 import {
 	markControlSocketOpen,
 	trackControlSocket,
@@ -70,6 +73,9 @@ const makeSubscriptions = (
 	projectSlug: string,
 	sockets: { readonly control: WsRpcClient; readonly stream: WsRpcClient },
 ) => ({
+	/** Cached snapshots, including an automatic recap finishing after the turn. */
+	recaps: (options: { readonly sessionId: string; readonly turnId: string }) =>
+		resumeStream(() => sockets.control("SubscribeRecaps", options)),
 	/** The session list. Low-rate, so it rides the control socket. */
 	shell: (
 		options: {
@@ -182,13 +188,15 @@ const makeSubscriptions = (
 	 *  never replays one, so a reconnect cannot re-fire a ding. */
 	alerts: () =>
 		resumeStream(() => sockets.control("SubscribeAlerts", { projectSlug })),
-	/** One session's composer draft as other tabs type it. Live-only. */
-	inputDraft: (options: { readonly sessionId: string }) =>
+	/** Stored composer text followed by live draft changes. */
+	inputDraft: (options: { readonly key: InputDraftKey }) =>
 		resumeStream(() =>
 			sockets.control("SubscribeInputDraft", {
-				sessionId: options.sessionId,
+				key: options.key,
 			}),
 		),
+	/** All unsent new-session drafts, replaced in full on each frame. */
+	drafts: () => resumeStream(() => sockets.control("SubscribeDrafts", {})),
 	/**
 	 * The daemon's instance list and usage. Both ride the control socket.
 	 */

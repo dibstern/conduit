@@ -1,4 +1,9 @@
-import { Deferred, Effect } from "effect";
+import { type Cause, Deferred, Effect, Exit, Schema, Semaphore } from "effect";
+import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
+import {
+	CanonicalEvents,
+	type TextDeltaPayload,
+} from "../../contracts/stored-event.js";
 import { EventSinkIngestionError } from "../event-sink-errors.js";
 import type {
 	EventSink,
@@ -12,15 +17,31 @@ import type {
 	SessionOutputReply,
 } from "./session-runner.js";
 
-/** Owns every turn abort and the interaction waits retained across attachment loss. */
+// Batch storage writes while keeping streamed text visible within 50 ms.
+const DELTA_COALESCE_WINDOW_MS = 50;
+const isDeltaPayload = Schema.is(CanonicalEvents["text.delta"].payload);
+
+/** Owns ordered sink output, turn aborts, and retained interaction waits. */
 export class RunnerSinkBindings {
-	/** The first send's abort signal stays linked for the query's lifetime. */
-	private readonly sessionAbortSources = new Map<string, EventSink>();
+	private readonly pendingDeltas = new Map<
+		string,
+		{
+			readonly sinkId: string;
+			event: ProviderRuntimeEvent & { readonly data: TextDeltaPayload };
+			readonly timer: ReturnType<typeof setTimeout>;
+		}
+	>();
+	private readonly lastDeltaParts = new Map<string, string>();
+	/** Later outputs must wait while an earlier flush awaits acknowledgement. */
+	private readonly sessionEmits = new Map<string, Semaphore.Semaphore>();
+	private readonly deltaFailures = new Map<
+		string,
+		Cause.Cause<SessionFailure>
+	>();
 	private readonly sinkBindings = new Map<
 		string,
 		{
 			readonly sessionId: string;
-			readonly finished: Deferred.Deferred<void>;
 			readonly sink: EventSink;
 			readonly abortController: AbortController;
 			readonly permissions: Map<
@@ -40,11 +61,114 @@ export class RunnerSinkBindings {
 			output: SessionOutput,
 		) => Effect.Effect<SessionOutputReply, SessionFailure>,
 	) {}
-	makeSessionSink(
-		sinkId: string,
+
+	/** A timer flush's failure fails the session's next output once, then clears. */
+	private takeDeltaFailure(
 		sessionId: string,
-		finished: Deferred.Deferred<void>,
-	): EventSink {
+	): Cause.Cause<SessionFailure> | undefined {
+		const failure = this.deltaFailures.get(sessionId);
+		this.deltaFailures.delete(sessionId);
+		return failure;
+	}
+
+	/** Takes pending text synchronously, before a timer's fork can yield. */
+	private flushSession(sessionId: string): Effect.Effect<void, SessionFailure> {
+		const pending = this.pendingDeltas.get(sessionId);
+		if (pending) {
+			this.pendingDeltas.delete(sessionId);
+			clearTimeout(pending.timer);
+		}
+		const failure = this.takeDeltaFailure(sessionId);
+		if (failure) return Effect.failCause(failure);
+		return pending
+			? this.emit({
+					type: "event",
+					sinkId: pending.sinkId,
+					event: pending.event,
+				}).pipe(Effect.asVoid)
+			: Effect.void;
+	}
+
+	flushAllEffect(): Effect.Effect<void, SessionFailure> {
+		return Effect.suspend(() =>
+			Effect.forEach([...this.pendingDeltas.keys()], (id) =>
+				Effect.exit(this.flushSession(id)),
+			).pipe(
+				Effect.flatMap((exits) => {
+					const failure = exits.find(Exit.isFailure);
+					return failure ? Effect.failCause(failure.cause) : Effect.void;
+				}),
+			),
+		);
+	}
+
+	private emitForSession(
+		sessionId: string,
+		output: SessionOutput,
+	): Effect.Effect<SessionOutputReply, SessionFailure> {
+		const permit = this.sessionEmits.get(sessionId) ?? Semaphore.makeUnsafe(1);
+		this.sessionEmits.set(sessionId, permit);
+		return Effect.gen({ self: this }, function* () {
+			const failure = this.takeDeltaFailure(sessionId);
+			if (failure) return yield* Effect.failCause(failure);
+			const delta =
+				output.type === "event" &&
+				(output.event.type === "text.delta" ||
+					output.event.type === "thinking.delta") &&
+				isDeltaPayload(output.event.data)
+					? {
+							sinkId: output.sinkId,
+							event: { ...output.event, data: { ...output.event.data } },
+						}
+					: undefined;
+			const pending = this.pendingDeltas.get(sessionId);
+			if (
+				delta &&
+				pending &&
+				pending.sinkId === delta.sinkId &&
+				pending.event.type === delta.event.type &&
+				pending.event.data.messageId === delta.event.data.messageId &&
+				pending.event.data.partId === delta.event.data.partId
+			) {
+				pending.event = {
+					...pending.event,
+					data: {
+						...pending.event.data,
+						text: pending.event.data.text + delta.event.data.text,
+					},
+				};
+				return {};
+			}
+			yield* this.flushSession(sessionId);
+			if (delta) {
+				const key = JSON.stringify([
+					delta.sinkId,
+					delta.event.type,
+					delta.event.data.messageId,
+					delta.event.data.partId,
+				]);
+				if (this.lastDeltaParts.get(sessionId) === key) {
+					const timer = setTimeout(() => {
+						Effect.runFork(
+							this.flushSession(sessionId).pipe(
+								Effect.catchCause((cause) =>
+									Effect.sync(() => {
+										this.deltaFailures.set(sessionId, cause);
+									}),
+								),
+							),
+						);
+					}, DELTA_COALESCE_WINDOW_MS);
+					this.pendingDeltas.set(sessionId, { ...delta, timer });
+					return {};
+				}
+				this.lastDeltaParts.set(sessionId, key);
+			}
+			return yield* this.emit(output);
+		}).pipe(permit.withPermits(1));
+	}
+
+	makeSessionSink(sinkId: string, sessionId: string): EventSink {
 		const permissions = new Map<
 			string,
 			Deferred.Deferred<PermissionResponse, SessionFailure>
@@ -58,7 +182,10 @@ export class RunnerSinkBindings {
 				cause: Object.assign(new Error(cause.message), cause),
 			});
 		const emit = (output: SessionOutput) =>
-			this.emit(output).pipe(Effect.asVoid, Effect.mapError(sinkFailure));
+			this.emitForSession(sessionId, output).pipe(
+				Effect.asVoid,
+				Effect.mapError(sinkFailure),
+			);
 		const sink: EventSink & { readonly runnerSinkId: string } = {
 			runnerSinkId: sinkId,
 			push: (event) => emit({ type: "event", sinkId, event }),
@@ -154,7 +281,6 @@ export class RunnerSinkBindings {
 		};
 		this.sinkBindings.set(sinkId, {
 			sessionId,
-			finished,
 			sink,
 			abortController: new AbortController(),
 			permissions,
@@ -204,7 +330,7 @@ export class RunnerSinkBindings {
 				});
 			}
 			this.sinkBindings.delete(sink.runnerSinkId);
-			yield* this.emit({
+			yield* this.emitForSession(binding.sessionId, {
 				type: "release-sink",
 				sinkId: sink.runnerSinkId,
 			}).pipe(Effect.ignore);
@@ -218,34 +344,6 @@ export class RunnerSinkBindings {
 		return Array.from(this.sinkBindings.values()).some(
 			(binding) => binding.sessionId === sessionId,
 		);
-	}
-	awaitSessionSends(sessionId: string): Effect.Effect<void> {
-		return Effect.forEach(
-			Array.from(this.sinkBindings.values()).filter(
-				(binding) => binding.sessionId === sessionId,
-			),
-			(binding) => Deferred.await(binding.finished),
-			{ discard: true },
-		);
-	}
-	sessionSendsFinished(sessionId: string): Effect.Effect<boolean> {
-		return Effect.forEach(
-			Array.from(this.sinkBindings.values()).filter(
-				(binding) => binding.sessionId === sessionId,
-			),
-			(binding) => Deferred.isDone(binding.finished),
-		).pipe(Effect.map((finished) => finished.every(Boolean)));
-	}
-	retainAbortSource(sessionId: string, sink: EventSink): void {
-		this.retainSink(sink);
-		this.sessionAbortSources.set(sessionId, sink);
-	}
-	releaseAbortSource(sessionId: string): Effect.Effect<void> {
-		return Effect.suspend(() => {
-			const source = this.sessionAbortSources.get(sessionId);
-			this.sessionAbortSources.delete(sessionId);
-			return this.releaseSinkEffect(source);
-		});
 	}
 	settle(
 		command: Extract<

@@ -4,6 +4,7 @@
 // most a second apart (shared-client.ts), not on the library's 5 s default.
 
 import { writeFile } from "node:fs/promises";
+import type { ShellEnvelope } from "../../../src/lib/contracts/ws-rpc.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 
@@ -13,14 +14,10 @@ type ProbeWindow = typeof window & {
 	__startupLoadErrors: string[];
 };
 
-const startupLoads = [
-	"GetProjects",
-	"GetFileTree",
-	"GetAgents",
-	"GetModels",
-	"GetCommands",
-	"ListDaemonSessions",
-];
+const startupCalls = ["GetFileTree", "GetAgents", "GetModels", "GetCommands"];
+// 7c22caa9 moved projects to a feed; 2a1493f9 moved sidebar browsing
+// into SubscribeShell. Both resources must still arrive after reconnect.
+const startupLoads = [...startupCalls, "projects", "sessions"];
 
 // Socket retry cap (1 s) + resume re-issue cap (1 s), with headroom. Timed to
 // the last startup request sent, not answered: the answers wait on the server,
@@ -92,9 +89,18 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 					id: string | number;
 					tag: string;
 				};
-				if (request._tag === "Request" && startupLoads.includes(request.tag)) {
+				if (
+					request._tag === "Request" &&
+					(startupCalls.includes(request.tag) ||
+						request.tag === "SubscribeShell")
+				) {
 					requests.set(String(request.id), request.tag);
-					if (restarting) restartSent.add(request.tag);
+					if (restarting) {
+						if (request.tag === "SubscribeShell") {
+							restartSent.add("projects");
+							restartSent.add("sessions");
+						} else restartSent.add(request.tag);
+					}
 				}
 				if (restarting && restartSent.size === startupLoads.length)
 					allSentAt ??= Date.now();
@@ -106,13 +112,25 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 					_tag: string;
 					requestId: string | number;
 					exit: { _tag: string };
+					values?: ShellEnvelope[];
 				};
-				// Any server Exit counts: the bug fails the call client-side before a
-				// frame is sent. This harness has no daemon, so ListDaemonSessions
-				// is answered with a typed "not supported" Failure.
-				if (response._tag !== "Exit") continue;
+				// A subscription answers with its first Chunk. Any server Exit also
+				// counts because the bug fails client-side before sending a frame.
+				if (response._tag !== "Exit" && response._tag !== "Chunk") continue;
 				const tag = requests.get(String(response.requestId));
-				if (tag) answered.add(tag);
+				if (!tag) continue;
+				if (tag === "SubscribeShell" && response._tag === "Chunk") {
+					for (const value of response.values ?? []) {
+						if (value._tag === "projects") answered.add("projects");
+						if (value._tag === "snapshot" || value._tag === "synchronized")
+							answered.add("sessions");
+					}
+				} else if (
+					response._tag === "Exit" &&
+					response.exit._tag === "Success"
+				) {
+					answered.add(tag);
+				}
 				if (restarting && restartAnswered.size === startupLoads.length)
 					allAnsweredAt ??= Date.now();
 			}
@@ -133,15 +151,12 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 	});
 	restarting = true;
 	await harness.restart();
-	await page.evaluate(
-		() =>
-			new Promise<void>((resolve) => {
-				setTimeout(() => {
-					(window as ProbeWindow).__holdRpc = false;
-					resolve();
-				}, 2_000);
-			}),
-	);
+	await expect
+		.poll(() => page.evaluate(() => (window as ProbeWindow).__heldRpcDials))
+		.toBeGreaterThan(0);
+	await page.evaluate(() => {
+		(window as ProbeWindow).__holdRpc = false;
+	});
 	releasedAt = Date.now();
 	const hold = await page.evaluate(() => ({
 		heldRpcDials: (window as ProbeWindow).__heldRpcDials,
@@ -152,14 +167,16 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 		await expect
 			.poll(
 				async () => ({
-					answeredExits: startupLoads.filter((tag) => restartAnswered.has(tag)),
+					loadedResources: startupLoads.filter((tag) =>
+						restartAnswered.has(tag),
+					),
 					loadErrors: await page.evaluate(
 						() => (window as ProbeWindow).__startupLoadErrors,
 					),
 				}),
 				{ timeout: 20_000 },
 			)
-			.toEqual({ answeredExits: startupLoads, loadErrors: [] });
+			.toEqual({ loadedResources: startupLoads, loadErrors: [] });
 		expect(sentMs()).toBeLessThan(resendBudgetMs);
 	} finally {
 		const artifact = testInfo.outputPath("restart-startup-loads.json");
@@ -169,7 +186,7 @@ test("an open tab reloads startup data after the control socket reconnects", asy
 				...hold,
 				sentMs: sentMs(),
 				reloadMs: reloadMs(),
-				answeredExits: startupLoads.filter((tag) => restartAnswered.has(tag)),
+				loadedResources: startupLoads.filter((tag) => restartAnswered.has(tag)),
 				loadErrors: await page.evaluate(
 					() => (window as ProbeWindow).__startupLoadErrors,
 				),

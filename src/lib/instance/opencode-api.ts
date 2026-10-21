@@ -15,6 +15,7 @@ import type {
 	ConfigUpdateData,
 	Event as OpenCodeEvent,
 } from "@opencode-ai/sdk/v2/types";
+import { parseAttachmentDataUrl } from "../attachment-data-url.js";
 import {
 	decodeOpenCodeAgentListResponse,
 	decodeOpenCodeBooleanResponse,
@@ -263,23 +264,35 @@ class SessionNamespace {
 		title?: string;
 		parentID?: string;
 		id?: string;
+		directory?: string;
 	}): Promise<SessionDetail> {
 		if (options?.id !== undefined) {
 			const id = options.id;
+			const scope =
+				options.directory === undefined ? {} : { directory: options.directory };
 			// v2 accepts the id reserved for a worktree launch. Read the legacy
 			// shape used by the existing event and history adapters afterwards.
 			return this.api.sdk(
 				"session.create",
 				decodeSessionDetailResponse,
 				async () => {
-					const created = await this.api._sdk.v2.session.create({ id });
+					const created = await this.api._sdk.v2.session.create({
+						id,
+						...(options.directory === undefined
+							? {}
+							: { location: { directory: options.directory } }),
+					});
 					if (created.error !== undefined) return created;
 					return options.title
 						? this.api._sdk.session.update({
 								sessionID: id,
 								title: options.title,
+								...scope,
 							})
-						: this.api._sdk.session.get({ sessionID: id });
+						: this.api._sdk.session.get({
+								sessionID: id,
+								...scope,
+							});
 				},
 			);
 		}
@@ -386,17 +399,25 @@ class SessionNamespace {
 		await this.api.sdk("session.prompt", decodeOpenCodeUndefinedResponse, () =>
 			this.api._sdk.session.promptAsync({
 				sessionID: sessionId,
+				...(options.messageId !== undefined
+					? { messageID: options.messageId }
+					: {}),
 				...(options.directory !== undefined
 					? { directory: options.directory }
 					: {}),
 				parts: [
-					{ type: "text", text: options.text },
-					// Images arrive as data URLs, which name their own mime type.
-					...(options.images ?? []).map((url) => ({
-						type: "file" as const,
-						mime: /^data:([^;,]+)/.exec(url)?.[1] ?? "image/png",
-						url,
-					})),
+					...(options.text
+						? [{ type: "text" as const, text: options.text }]
+						: []),
+					...(options.images ?? []).map((value) => {
+						const { mime, data, name } = parseAttachmentDataUrl(value);
+						return {
+							type: "file" as const,
+							mime,
+							...(name ? { filename: name } : {}),
+							url: `data:${mime};base64,${data}`,
+						};
+					}),
 				],
 				...(options.system !== undefined ? { system: options.system } : {}),
 				...(options.model != null ? { model: options.model } : {}),

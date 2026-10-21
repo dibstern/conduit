@@ -1266,6 +1266,11 @@ describe("MessageProjector resilience", () => {
 				.map((m) => m.type);
 			// Expect: thinking → tool → thinking → assistant
 			expect(types).toEqual(["thinking", "tool", "thinking", "assistant"]);
+			expect(
+				chat
+					.filter((m): m is ThinkingMessage => m.type === "thinking")
+					.map((m) => m.text),
+			).toEqual(["pre-tool reasoning", "post-tool reasoning"]);
 		});
 	});
 
@@ -2089,6 +2094,44 @@ describe("MessageProjector resilience", () => {
 		});
 
 		it("turn.error mid-thinking — thinking part still readable", async () => {
+			const runId = "error-run";
+			await project(
+				makeStored(
+					"run.requested",
+					SESSION_A,
+					{ runId, inputId: "msg-err-input" },
+					{
+						sequence: nextSeq(),
+						createdAt: NOW - 3,
+						metadata: { runId },
+					},
+				),
+			);
+			await project(
+				makeStored(
+					"message.created",
+					SESSION_A,
+					{
+						sessionId: SESSION_A,
+						messageId: "msg-err-input",
+						inputId: "msg-err-input",
+						role: "user",
+					},
+					{ sequence: nextSeq(), createdAt: NOW - 2, metadata: { runId } },
+				),
+			);
+			await project(
+				makeStored(
+					"run.started",
+					SESSION_A,
+					{ requestedRunId: runId, inputId: "msg-err-input" },
+					{
+						sequence: nextSeq(),
+						createdAt: NOW - 1,
+						metadata: { runId },
+					},
+				),
+			);
 			await project(
 				makeStored(
 					"message.created",
@@ -2097,8 +2140,9 @@ describe("MessageProjector resilience", () => {
 						messageId: "msg-err-mid",
 						role: "assistant",
 						sessionId: SESSION_A,
+						parentID: "msg-err-input",
 					},
-					{ sequence: nextSeq(), createdAt: NOW },
+					{ sequence: nextSeq(), createdAt: NOW, metadata: { runId } },
 				),
 			);
 
@@ -2110,7 +2154,7 @@ describe("MessageProjector resilience", () => {
 						messageId: "msg-err-mid",
 						partId: "part-err-mid",
 					},
-					{ sequence: nextSeq(), createdAt: NOW + 100 },
+					{ sequence: nextSeq(), createdAt: NOW + 100, metadata: { runId } },
 				),
 			);
 
@@ -2123,7 +2167,7 @@ describe("MessageProjector resilience", () => {
 						partId: "part-err-mid",
 						text: "reasoning before error",
 					},
-					{ sequence: nextSeq(), createdAt: NOW + 200 },
+					{ sequence: nextSeq(), createdAt: NOW + 200, metadata: { runId } },
 				),
 			);
 
@@ -2137,7 +2181,7 @@ describe("MessageProjector resilience", () => {
 						error: "Internal error",
 						code: "INTERNAL_ERROR",
 					},
-					{ sequence: nextSeq(), createdAt: NOW + 300 },
+					{ sequence: nextSeq(), createdAt: NOW + 300, metadata: { runId } },
 				),
 			);
 
@@ -2148,7 +2192,7 @@ describe("MessageProjector resilience", () => {
 			expect(thinking).toBeDefined();
 			assert.exists(thinking, "expected thinking message");
 			expect(thinking.text).toBe("reasoning before error");
-			// History-loaded = always done=true
+			// The owned error closes thinking even without thinking.end.
 			expect(thinking.done).toBe(true);
 		});
 

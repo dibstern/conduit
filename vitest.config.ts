@@ -89,7 +89,9 @@ export default defineConfig({
 					// forks isolates better-sqlite3 native module in separate
 					// processes, preventing SIGSEGV from shared-memory corruption.
 					pool: "forks",
-					maxWorkers: 1,
+					// 2026-10-19: interleaved 1/4-fork runs took 110/29/62/38s,
+					// at 1m loads 44/52/36/28; all 720 tests passed in each run.
+					maxWorkers: 4,
 					isolate: false,
 					// Vitest requires a separate group for a different worker limit.
 					sequence: { groupOrder: 1 },
@@ -118,18 +120,8 @@ export default defineConfig({
 		],
 		coverage: {
 			provider: "v8",
-			include: [
-				"src/lib/instance-manager.ts",
-				"src/lib/daemon.ts",
-				"src/lib/daemon-ipc.ts",
-				"src/lib/ipc-protocol.ts",
-				"src/lib/client-init.ts",
-				"src/lib/config-persistence.ts",
-				"src/lib/frontend/stores/instance.svelte.ts",
-				"src/bin/cli-utils.ts",
-				"src/bin/cli-core.ts",
-				"src/lib/shared-types.ts",
-			],
+			// No include list: a hand-kept list went stale as modules moved, leaving
+			// the thresholds applied to four files. Measure every imported file.
 			reporter: ["text", "json-summary"],
 			thresholds: {
 				lines: 70,

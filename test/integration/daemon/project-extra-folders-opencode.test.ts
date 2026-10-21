@@ -275,6 +275,7 @@ describe("OpenCode project extra folders through the daemon", () => {
 		]);
 		await save(fixture, [fixture.projectDir]);
 		if (restart) {
+			// The SaveProject acknowledgement must survive SIGKILL without a flush wait.
 			await fixture.kill();
 			await fixture.restart();
 		}

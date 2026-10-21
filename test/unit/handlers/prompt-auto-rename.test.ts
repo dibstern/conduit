@@ -40,6 +40,8 @@ const makePersistService = (
 	persistEvents: vi.fn(() => Effect.void),
 	persistUserMessage,
 	ensureClaudeSubagentSession: vi.fn(() => Effect.void),
+	readClaudeSubagentTranscript: () =>
+		Effect.succeed({ messages: [], parts: [] }),
 });
 
 const makeTitleService = (): SessionTitleService => ({
@@ -91,6 +93,7 @@ const makeReadQuery = (
 	getStrandedChildren: () => Effect.succeed([]),
 	listSessions: vi.fn(() => Effect.succeed([])),
 	listSessionInfos: vi.fn(() => Effect.succeed([])),
+	countSettledSessions: () => Effect.succeed(0),
 	listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 	getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 	readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),

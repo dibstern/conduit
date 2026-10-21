@@ -72,7 +72,10 @@ export function formatSnoozeTime(
 		today.getDate(),
 	);
 	const daysAway = Math.round((day.getTime() - start.getTime()) / 86_400_000);
-	const time = `${date.getHours()}:${String(date.getMinutes()).padStart(2, "0")}`;
+	const time = new Intl.DateTimeFormat(undefined, {
+		hour: "numeric",
+		minute: "2-digit",
+	}).format(date);
 	if (daysAway === 0) return time;
 	if (daysAway > 0 && daysAway < 7) {
 		return `${date.toLocaleDateString("en", { weekday: "short" })} ${time}`;

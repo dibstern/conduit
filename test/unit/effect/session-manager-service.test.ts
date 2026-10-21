@@ -74,6 +74,7 @@ import {
 	makeOverridesStateLive,
 	setDefaultModel,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
 import { OpenCodeApiError } from "../../../src/lib/errors.js";
 import type { SessionStatus } from "../../../src/lib/instance/sdk-types.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
@@ -180,6 +181,7 @@ function makeReadQueryEffect(
 		listSessions: vi.fn(() => Effect.succeed(rows)),
 		listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 		getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
+		countSettledSessions: () => Effect.succeed(0),
 		listSessionInfos: vi.fn((_scope, options) => {
 			const pending = pendingApprovalCountsByType(pendingApprovalCounts);
 			const selected = options?.roots
@@ -403,6 +405,9 @@ const sessionConfigLayer = Layer.succeed(ConfigTag)(
 const sessionLoggerLayer = Layer.succeed(LoggerTag)(makeMockLogger());
 const openCodeApi = makeMockOpenCodeAPI();
 const requiredSessionServices = Layer.mergeAll(
+	Layer.mock(SessionWorkspaceTag, {
+		get: () => Effect.succeed("/tmp/project"),
+	}),
 	Layer.succeed(AccountDirectory)(
 		makeAccountDirectory(
 			Effect.succeed(
@@ -431,6 +436,63 @@ const requiredSessionServices = Layer.mergeAll(
 );
 
 describe("SessionManagerService", () => {
+	for (const deadRef of ["sessionId", "parentId"] as const) {
+		it.effect(`refuses OpenCode establishment with a dead ${deadRef}`, () => {
+			const layer = Layer.provideMerge(
+				SessionManagerServiceLive,
+				Layer.mergeAll(
+					requiredSessionServices,
+					makeSessionManagerStateLive(),
+					DaemonEventBusLive,
+				),
+			);
+			return Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+				const sql = yield* SqlClient.SqlClient;
+				const eventStore = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.markRecovered();
+				const sessionId = "born-dead-opencode";
+				const deletedId = deadRef === "sessionId" ? sessionId : "dead-parent";
+				yield* sql`INSERT INTO sessions
+					(id, project_id, provider, title, status, created_at, updated_at)
+					VALUES (${deletedId}, 'test-project', 'opencode', 'Stale row', 'idle', 1, 1)`;
+				yield* eventStore.append(
+					canonicalEvent("session.deleted", deletedId, {
+						sessionId: deletedId,
+					}),
+				);
+
+				const result = yield* Effect.result(
+					service.establishOpenCodeSession(
+						{
+							id: sessionId,
+							projectID: "project-1",
+							directory: "/tmp/project",
+							title: "Must stay dead",
+							version: "1.0.0",
+							time: { created: 10, updated: 10 },
+							...(deadRef === "parentId" ? { parentID: deletedId } : {}),
+						},
+						AccountIdSchema.make("opencode"),
+					),
+				);
+
+				expect(result).toMatchObject({
+					_tag: "Failure",
+					failure: { _tag: "SessionManagerError" },
+				});
+				expect(yield* sql<{ id: string }>`SELECT id FROM sessions`).toEqual([
+					{ id: deletedId },
+				]);
+				expect(yield* sql`SELECT id FROM session_providers`).toEqual([]);
+				expect(yield* sql<{ type: string }>`SELECT type FROM events`).toEqual([
+					{ type: "session.deleted" },
+				]);
+			}).pipe(Effect.provide(Layer.fresh(layer)));
+		});
+	}
+
 	it.effect("checks session existence in the store", () => {
 		const api = makeMockOpenCodeAPI();
 		const readQuery = makeReadQueryEffect([makeRow("existing")]);
@@ -553,7 +615,10 @@ describe("SessionManagerService", () => {
 				});
 
 				expect(session.id).toBe("created-session");
-				expect(api.session.create).toHaveBeenCalledWith({ title: "Created" });
+				expect(api.session.create).toHaveBeenCalledWith({
+					title: "Created",
+					directory: tmpdir(),
+				});
 				const event = (yield* PubSub.takeUpTo(sub, 1))[0] ?? null;
 				expect(event).toMatchObject({
 					_tag: "SessionCreated",
@@ -716,6 +781,7 @@ describe("SessionManagerService", () => {
 				});
 				expect(api.session.create).toHaveBeenCalledWith({
 					title: "OpenCode Session",
+					directory: tmpdir(),
 				});
 				expect(bindSession).toHaveBeenCalledWith(
 					"opencode-session",
@@ -1207,6 +1273,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use,
 				borrow: use,
+				isManagedStopped: () => Effect.succeed(false),
 				ifRunning: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
@@ -1273,10 +1340,11 @@ describe("SessionManagerService", () => {
 					}
 				});
 
-				expect(use).toHaveBeenCalledWith("work-oc");
+				expect(use).toHaveBeenCalledWith("work-oc", "/tmp/project");
 				expect(api.session.create).not.toHaveBeenCalled();
 				expect(namedApi.session.create).toHaveBeenCalledWith({
 					title: "Named",
+					directory: "/tmp/project",
 				});
 				expect(bindings).toEqual([
 					{
@@ -1341,6 +1409,7 @@ describe("SessionManagerService", () => {
 				expect(result._tag).toBe("Failure");
 				expect(api.session.create).toHaveBeenCalledWith({
 					title: "OpenCode Session",
+					directory: tmpdir(),
 				});
 				expect(sessions).toEqual([]);
 			}).pipe(
@@ -1430,6 +1499,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use,
 				borrow: use,
+				isManagedStopped: () => Effect.succeed(false),
 				ifRunning: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
@@ -1733,6 +1803,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use,
 				borrow: use,
+				isManagedStopped: () => Effect.succeed(false),
 				ifRunning: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
@@ -1837,6 +1908,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use: vi.fn(() => Effect.succeed(namedApi)),
 				borrow: () => Effect.succeed(namedApi),
+				isManagedStopped: () => Effect.succeed(false),
 				ifRunning: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
@@ -1913,6 +1985,7 @@ describe("SessionManagerService", () => {
 			events: () => Stream.empty,
 			use: vi.fn(() => Effect.succeed(namedApi)),
 			borrow: () => Effect.succeed(namedApi),
+			isManagedStopped: () => Effect.succeed(false),
 			ifRunning: () => Effect.succeedNone,
 			useIfRunning: () => Effect.succeedNone,
 			stop: () => Effect.void,
@@ -2121,6 +2194,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use,
 				borrow: use,
+				isManagedStopped: () => Effect.succeed(false),
 				ifRunning: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
@@ -2161,7 +2235,7 @@ describe("SessionManagerService", () => {
 				expect(
 					yield* engine.getProviderForSessionEffect(sessionId),
 				).toBeUndefined();
-				expect(use).toHaveBeenCalledWith("work-oc");
+				expect(use).toHaveBeenCalledWith("work-oc", "/tmp/project");
 				expect(namedApi.session.delete).toHaveBeenCalledWith(sessionId);
 				expect(events.map((event) => event.type)).toEqual(["session.deleted"]);
 			}).pipe(
@@ -2201,6 +2275,7 @@ describe("SessionManagerService", () => {
 					events: () => Stream.empty,
 					use,
 					borrow: use,
+					isManagedStopped: () => Effect.succeed(false),
 					ifRunning: () => Effect.succeedNone,
 					useIfRunning: () => Effect.succeedNone,
 					stop: () => Effect.void,
@@ -2856,11 +2931,36 @@ describe("SessionManagerService", () => {
 					},
 					{ provider: "opencode", createdAt: 10 },
 				),
+				canonicalEvent("run.requested", "session-1", {
+					runId: "unread-run",
+					inputId: "input-1",
+				}),
 				canonicalEvent(
-					"turn.completed",
+					"message.created",
 					"session-1",
-					{ messageId: "message-1" },
-					{ provider: "opencode", createdAt: 20 },
+					{
+						sessionId: "session-1",
+						messageId: "input-1",
+						inputId: "input-1",
+						role: "user",
+					},
+					{ metadata: { runId: "unread-run" } },
+				),
+				canonicalEvent(
+					"run.started",
+					"session-1",
+					{ inputId: "input-1", requestedRunId: "unread-run" },
+					{ metadata: { runId: "unread-run" } },
+				),
+				canonicalEvent(
+					"session.status",
+					"session-1",
+					{ sessionId: "session-1", status: "idle" },
+					{
+						provider: "opencode",
+						createdAt: 20,
+						metadata: { runId: "unread-run" },
+					},
 				),
 			]) {
 				const stored = yield* store.append(event);
@@ -2877,36 +2977,6 @@ describe("SessionManagerService", () => {
 			Effect.provide(Layer.fresh(layer)),
 			Effect.provide(requiredSessionServices, { local: true }),
 			Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
-		);
-	});
-
-	it.effect("reads projected pending counts", () => {
-		const readQuery = makeReadQueryEffect(
-			[makeRow("session-1")],
-			[
-				{
-					session_id: "session-1",
-					type: "question",
-					pending_count: 1,
-				},
-			],
-		);
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
-			Layer.succeed(ReadQueryEffectTag)(readQuery),
-			makeSessionManagerStateLive(),
-		);
-
-		return Effect.gen(function* () {
-			const sessions = yield* listSessions("test-project", undefined, {
-				slug: "test-project",
-				folders: [tmpdir()],
-			});
-
-			expect(sessions[0]?.pendingQuestionCount).toBe(1);
-		}).pipe(
-			Effect.provide(layer),
-			Effect.provide(requiredSessionServices, { local: true }),
 		);
 	});
 

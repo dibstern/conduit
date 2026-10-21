@@ -6,10 +6,10 @@
 	import { RpcLogLevelSchema, type RpcLogLevel } from "../../transport/ws-rpc.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { failureLine } from "../../transport/rpc-errors.js";
-	import Select from "../ui/Select.svelte";
-	import SettingsGroup from "../ui/SettingsGroup.svelte";
+	import SettingsPicker from "../ui/SettingsPicker.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
 
+	let open = $state(false);
 	let logLevel = $state("");
 	let saving = $state(false);
 	let error = $state<string | null>(null);
@@ -21,6 +21,7 @@
 	async function changeLogLevel(level: RpcLogLevel): Promise<void> {
 		if (!serverStatus.status || saving) return;
 		const previousLevel = serverStatus.status.logLevel;
+		logLevel = level;
 		saving = true;
 		error = null;
 		try {
@@ -37,28 +38,31 @@
 	}
 </script>
 
-<SettingsGroup id="server-logs" title="Logs" testId="server-logs-group">
+<div id="server-logs" data-testid="server-logs-group">
+	<SettingsRow label="Logs" summary={logLevel || undefined} expanded={open} onclick={() => (open = !open)} />
+	{#if open}
+	<div class="border-t border-settings-separator">
 	<SettingsRow
 		label="Log level"
 		labelFor="server-log-level"
 		description="Whole daemon · resets when conduit restarts"
 	>
 		{#snippet control()}
-			<Select
+			<SettingsPicker
 				id="server-log-level"
-				bind:value={logLevel}
+				label="Log level"
+				value={logLevel}
 				disabled={!serverStatus.status || saving}
 				invalid={error !== null}
 				aria-describedby={error ? "server-log-level-error" : undefined}
-				onchange={(event) => changeLogLevel(event.currentTarget.value as RpcLogLevel)}
-			>
-				{#each RpcLogLevelSchema.literals as level (level)}
-					<option value={level}>{level}</option>
-				{/each}
-			</Select>
+				onvaluechange={(level) => { const next = RpcLogLevelSchema.literals.find((option) => option === level); if (next) void changeLogLevel(next); }}
+				options={RpcLogLevelSchema.literals.map((level) => ({ value: level, label: level }))}
+			/>
 		{/snippet}
 	</SettingsRow>
 	{#if error}
-		<p id="server-log-level-error" role="alert" class="px-3 py-2 text-sm text-error">{error}</p>
+		<p id="server-log-level-error" role="alert" class="px-[14px] py-2 text-[12px] text-error">{error}</p>
 	{/if}
-</SettingsGroup>
+	</div>
+	{/if}
+</div>

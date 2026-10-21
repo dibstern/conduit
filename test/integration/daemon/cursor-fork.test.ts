@@ -4,7 +4,13 @@
 // the seed, a rejected first input consumes it, later turns repeat it, or owned
 // runner processes survive cleanup.
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
@@ -12,6 +18,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { splitAtForkPoint } from "../../../src/lib/frontend/utils/fork-split.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
+import type {
+	MessagePartRow,
+	MessageWithParts,
+} from "../../../src/lib/persistence/read-model-types.js";
+import { renderCursorForkDigest } from "../../../src/lib/provider/cursor/cursor-fork-digest.js";
 import { discoverCursorEffect } from "../../../src/lib/provider/cursor/cursor-runner-driver.js";
 import {
 	cursorSessionStorePath,
@@ -28,7 +39,27 @@ interface TraceRow {
 }
 
 const TIMEOUT = 120_000;
-const EVIDENCE = "test-results/conduit-test-xqsg.14.json";
+const EVIDENCE = "test-results/conduit-test-hiuf.7.json";
+
+function inheritedDigest(fixture: ProcessHarness, sessionId: string) {
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
+	try {
+		const messages = db
+			.prepare<[string], MessageWithParts>(
+				"SELECT * FROM messages WHERE session_id = ? AND is_inherited = 1 ORDER BY created_at, id",
+			)
+			.all(sessionId);
+		for (const message of messages)
+			message.parts = db
+				.prepare<[string], MessagePartRow>(
+					"SELECT * FROM message_parts WHERE message_id = ? ORDER BY sort_order",
+				)
+				.all(message.id);
+		return renderCursorForkDigest(messages);
+	} finally {
+		db.close();
+	}
+}
 
 function rows(path: string): TraceRow[] {
 	return existsSync(path)
@@ -113,6 +144,17 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 	let capture = "";
 	let sourceId = "";
 	const scenarios: Record<string, unknown>[] = [];
+	let creationCalls: TraceRow[] = [];
+	let creationStart = 0;
+
+	function assertLocalCreation(fixture: ProcessHarness, forkId: string) {
+		creationCalls = rows(capture).slice(creationStart);
+		expect(creationCalls).toEqual([]);
+		expect(state(fixture, forkId).digest).toBeUndefined();
+		expect(
+			readCursorSessionIdentity(fixture.configDir, forkId),
+		).toBeUndefined();
+	}
 
 	async function start(name: string, source = "basic") {
 		scenario = name;
@@ -123,6 +165,8 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 		const fixture = harness;
 		const trace = join(fixture.root, "cursor-replay.jsonl");
 		capture = join(fixture.root, "cursor-capture.jsonl");
+		const sendGate = join(fixture.root, "send.gate");
+		creationCalls = [];
 		const replay = rows(
 			resolve(`test/fixtures/cursor-sdk-traces/${source}.jsonl`),
 		);
@@ -150,13 +194,17 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 				discoverCursorEffect(createTraceCursorSdkPort(trace)),
 			),
 		).toMatchObject({ supportsFork: true, supportsRevert: false });
-		const restart = () =>
+		const restart = (holdBeforeSend = false) =>
 			fixture.restart({
 				startupTimeoutMs: TIMEOUT,
 				runnerStartupTimeoutMs: TIMEOUT,
 				serviceEnvironment: {
 					CONDUIT_CURSOR_SDK_TRACE: trace,
 					CONDUIT_CURSOR_SDK_CAPTURE: capture,
+					CONDUIT_TEST_CURSOR_SEND_GATE: sendGate,
+					...(holdBeforeSend
+						? { CONDUIT_TEST_HOLD_RUNNER_OUTPUT: "send-turn" }
+						: {}),
 				},
 			});
 		await restart();
@@ -172,7 +220,7 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 			contextWindow: "",
 			permissionMode: "full",
 		});
-		return { fixture, browser, id: sourceId, trace, restart };
+		return { fixture, browser, id: sourceId, trace, restart, sendGate };
 	}
 
 	function freshCapturedAgent(trace: string) {
@@ -221,6 +269,10 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 	afterEach(async ({ task }) => {
 		if (!harness) return;
 		const fixture = harness;
+		const observedDigests = sends(capture).flatMap((prompt) => {
+			const end = prompt.indexOf("\n\n[Current request]\n");
+			return end < 0 ? [] : [prompt.slice(0, end)];
+		});
 		try {
 			await fixture.dispose();
 			expect(fixture.remainingRunnerPids()).toEqual([]);
@@ -228,6 +280,9 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 			const proof = fixture.proof();
 			scenarios.push({
 				scenario: `${scenario}:cleanup`,
+				creationProviderCalls: creationCalls,
+				firstTurnDigest: observedDigests[0] ?? null,
+				seededSends: observedDigests.length,
 				result: task.result?.state,
 				failures: task.result?.errors?.map(({ message }) => message) ?? [],
 				invariants: {
@@ -251,7 +306,7 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 			mkdirSync("test-results", { recursive: true });
 			writeFileSync(
 				EVIDENCE,
-				`${JSON.stringify({ ticket: "conduit-test-xqsg.14", scenarios }, null, 2)}\n`,
+				`${JSON.stringify({ ticket: "conduit-test-hiuf.7", scenarios }, null, 2)}\n`,
 			);
 			harness = undefined;
 		}
@@ -268,21 +323,23 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 				"SOURCE_CONTEXT: inspect this project's files and summarize your work.";
 			await browser.send(id, sourcePrompt, TIMEOUT);
 			await completed(fixture, id, 1);
+			expect(sends(capture).at(-1)).toBe(sourcePrompt);
+			expect(state(fixture, id).digest).toBeUndefined();
 			const before = state(fixture, id);
 			const sourceIdentity = readCursorSessionIdentity(fixture.configDir, id);
 			expect(sourceIdentity).toBeDefined();
 			expect(before.tools.length).toBeGreaterThan(0);
 			const expectedAgent = freshCapturedAgent(trace);
+			creationStart = rows(capture).length;
 			const { sessionId: forkId } = await fixture.requestRpc({
 				_tag: "ForkSession",
 				originId: browser.originId,
 				sessionId: id,
 			});
 			expect(forkId).not.toBe(id);
+			assertLocalCreation(fixture, forkId);
 			const forkBeforeSend = state(fixture, forkId);
-			const digest = forkBeforeSend.digest;
-			expect(digest).toBeTypeOf("string");
-			if (!digest) throw new Error("Missing persisted fork digest");
+			const digest = inheritedDigest(fixture, forkId);
 			expect(digest.length).toBeLessThanOrEqual(32_000);
 			expect(digest).toContain(sourcePrompt);
 			expect(before.textParts.some(({ text }) => text.trim())).toBe(true);
@@ -311,7 +368,7 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 			if (!sourceBoundary) throw new Error("Missing source fork boundary");
 			expect(forkRow).toMatchObject({
 				forkedFrom: id,
-				forkPointMessageId: `${sourceBoundary.id}_${forkId}`,
+				forkPointMessageId: sourceBoundary.id,
 			});
 			const history = await browser.history(forkId);
 			const renderedHistory = historyToChatMessages(
@@ -321,6 +378,7 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 				renderedHistory,
 				forkRow?.forkPointMessageId,
 				forkRow?.forkPointTimestamp,
+				forkId,
 			);
 			expect(initialSplit.current).toEqual([]);
 			expect(initialSplit.inherited).toEqual(renderedHistory);
@@ -338,8 +396,7 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 			await browser.send(forkId, firstPrompt, TIMEOUT);
 			await completed(fixture, forkId, 2);
 			const firstSend = sends(capture).at(-1);
-			expect(firstSend).toContain(digest);
-			expect(firstSend).toContain(firstPrompt);
+			expect(firstSend).toBe(`${digest}\n\n[Current request]\n${firstPrompt}`);
 			expect(firstSend?.indexOf(sourcePrompt)).toBeLessThan(
 				firstSend?.indexOf(firstPrompt) ?? -1,
 			);
@@ -430,6 +487,165 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 	);
 
 	it(
+		"settles an accepted first seed after its runner crashes before send returns",
+		async () => {
+			const { fixture, browser, id, trace, restart, sendGate } =
+				await start("fork-crash-retry");
+			await browser.send(id, "Remember the inherited context.", TIMEOUT);
+			await completed(fixture, id, 1);
+			freshCapturedAgent(trace);
+			creationStart = rows(capture).length;
+			const { sessionId: forkId } = await fixture.requestRpc({
+				_tag: "ForkSession",
+				originId: browser.originId,
+				sessionId: id,
+			});
+			assertLocalCreation(fixture, forkId);
+			const digest = inheritedDigest(fixture, forkId);
+			writeFileSync(sendGate, "hold");
+			const pending = browser
+				.send(forkId, "First fork request", TIMEOUT)
+				.catch(() => undefined);
+			await vi.waitFor(
+				() => {
+					expect(sends(capture)).toHaveLength(2);
+					const persisted = JSON.parse(
+						readFileSync(
+							join(
+								cursorSessionStorePath(fixture.configDir, forkId),
+								"trace-state.json",
+							),
+							"utf8",
+						),
+					) as unknown;
+					expect(persisted).toMatchObject({ activeRun: { status: "running" } });
+				},
+				{ timeout: TIMEOUT },
+			);
+			expect(sends(capture).at(-1)).toBe(
+				`${digest}\n\n[Current request]\nFirst fork request`,
+			);
+			expect(
+				readCursorSessionIdentity(fixture.configDir, forkId)?.forkSeedPending,
+			).toBe(true);
+			const owned = fixture.marks.find(
+				(mark) => mark.kind === "runner-started" && mark.sessionId === forkId,
+			);
+			if (owned?.kind !== "runner-started")
+				throw new Error("Missing owned fork runner");
+			process.kill(owned.pid, "SIGKILL");
+			await vi.waitFor(
+				() => expect(() => process.kill(owned.pid, 0)).toThrow(),
+				{ timeout: TIMEOUT },
+			);
+			rmSync(sendGate, { force: true });
+			await pending;
+			await vi.waitFor(
+				() =>
+					expect(state(fixture, forkId).turns).toEqual(["completed", "error"]),
+				{ timeout: TIMEOUT },
+			);
+			await fixture.kill();
+			await restart();
+			const reconnected = await fixture.connect(forkId);
+			await reconnected.send(forkId, "Retry after the crash", TIMEOUT);
+			await vi.waitFor(
+				() =>
+					expect(state(fixture, forkId).turns).toEqual([
+						"completed",
+						"error",
+						"completed",
+					]),
+				{ timeout: TIMEOUT },
+			);
+			expect(sends(capture).at(-1)).toBe("Retry after the crash");
+			expect(
+				sends(capture).filter((prompt) =>
+					prompt.includes("[Conduit fork context]"),
+				),
+			).toHaveLength(1);
+			expect(
+				readCursorSessionIdentity(fixture.configDir, forkId)?.forkSeedPending,
+			).toBe(false);
+		},
+		TIMEOUT * 4,
+	);
+
+	it(
+		"restores the first-turn digest when the daemon crashes before the runner receives its command",
+		async () => {
+			const { fixture, browser, id, trace, restart } = await start(
+				"fork-unseen-command-retry",
+			);
+			await browser.send(
+				id,
+				"Keep the source context for a future fork.",
+				TIMEOUT,
+			);
+			await completed(fixture, id, 1);
+			freshCapturedAgent(trace);
+			await fixture.kill();
+			await restart(true);
+			const before = await fixture.connect(id);
+			creationStart = rows(capture).length;
+			const { sessionId: forkId } = await fixture.requestRpc({
+				_tag: "ForkSession",
+				originId: before.originId,
+				sessionId: id,
+			});
+			assertLocalCreation(fixture, forkId);
+			const digest = inheritedDigest(fixture, forkId);
+			const prompt = "Continue this fork after recovery.";
+			const pending = before
+				.send(forkId, prompt, TIMEOUT)
+				.catch(() => undefined);
+			await vi.waitFor(
+				() => {
+					expect(
+						rows(join(fixture.root, "sdk-proof.ndjson")).some(
+							({ kind, type }) =>
+								kind === "held-output" && type === "send-turn",
+						),
+					).toBe(true);
+				},
+				{ timeout: TIMEOUT },
+			);
+			expect(state(fixture, forkId).digest).toBe(digest);
+			expect(sends(capture)).toHaveLength(1);
+			const owned = fixture.marks.find(
+				(mark) => mark.kind === "runner-started" && mark.sessionId === forkId,
+			);
+			if (owned?.kind !== "runner-started")
+				throw new Error("Missing owned fork runner");
+			await fixture.kill();
+			await pending;
+			await restart();
+			await completed(fixture, forkId, 2);
+			expect(
+				fixture.marks
+					.filter(
+						(mark) =>
+							mark.kind === "runner-started" && mark.sessionId === forkId,
+					)
+					.at(-1),
+			).toMatchObject({ pid: owned.pid });
+			expect(sends(capture).at(-1)).toBe(
+				`${digest}\n\n[Current request]\n${prompt}`,
+			);
+			const after = await fixture.connect(forkId);
+			await after.send(forkId, "Next fork request", TIMEOUT);
+			await completed(fixture, forkId, 3);
+			expect(sends(capture).at(-1)).toBe("Next fork request");
+			expect(
+				sends(capture).filter((text) =>
+					text.includes("[Conduit fork context]"),
+				),
+			).toHaveLength(1);
+		},
+		TIMEOUT * 4,
+	);
+
+	it(
 		"honors an explicit message cutoff in both copied history and digest",
 		async () => {
 			const { fixture, browser, id, trace } = await start("fork-cutoff");
@@ -446,6 +662,7 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 			await completed(fixture, id, 2);
 			const before = state(fixture, id).events;
 			freshCapturedAgent(trace);
+			creationStart = rows(capture).length;
 			const { sessionId: forkId } = await fixture.requestRpc({
 				_tag: "ForkSession",
 				originId: browser.originId,
@@ -453,12 +670,15 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 				messageId: firstAnswer.id,
 			});
 			const fork = state(fixture, forkId);
-			expect(fork.digest).toContain(early);
-			expect(fork.digest).not.toContain(later);
+			assertLocalCreation(fixture, forkId);
+			const digest = inheritedDigest(fixture, forkId);
+			expect(digest).toContain(early);
+			expect(digest).not.toContain(later);
 			expect(fork.messages.map(({ text }) => text)).toContain(early);
 			expect(fork.messages.map(({ text }) => text)).not.toContain(later);
 			await browser.send(forkId, "Continue from this point.", TIMEOUT);
 			await completed(fixture, forkId, 2);
+			expect(state(fixture, forkId).digest).toBe(digest);
 			expect(sends(capture).at(-1)).toContain(early);
 			expect(sends(capture).at(-1)).not.toContain(later);
 			expect(state(fixture, id).events).toEqual(before);
@@ -495,13 +715,14 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 			await completed(fixture, id, 1);
 			const before = state(fixture, id).events;
 			freshCapturedAgent(trace);
+			creationStart = rows(capture).length;
 			const { sessionId: forkId } = await fixture.requestRpc({
 				_tag: "ForkSession",
 				originId: browser.originId,
 				sessionId: id,
 			});
-			const digest = state(fixture, forkId).digest;
-			if (!digest) throw new Error("Missing bounded fork digest");
+			assertLocalCreation(fixture, forkId);
+			const digest = inheritedDigest(fixture, forkId);
 			expect(digest.length).toBeLessThanOrEqual(32_000);
 			expect(digest).toContain("amber-lake");
 			expect(digest).not.toContain("OLD_CONTEXT_BEGIN");
@@ -563,13 +784,14 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 			await completed(fixture, id, 1);
 			const before = state(fixture, id).events;
 			freshCapturedAgent(trace);
+			creationStart = rows(capture).length;
 			const { sessionId: forkId } = await fixture.requestRpc({
 				_tag: "ForkSession",
 				originId: browser.originId,
 				sessionId: id,
 			});
-			const digest = state(fixture, forkId).digest;
-			if (!digest) throw new Error("Missing fork digest before rejected send");
+			assertLocalCreation(fixture, forkId);
+			const digest = inheritedDigest(fixture, forkId);
 			const replay = rows(trace);
 			const sendIndex = replay.findIndex(({ kind }) => kind === "send.options");
 			if (sendIndex < 0) throw new Error("Missing captured send");

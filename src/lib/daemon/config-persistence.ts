@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { chmod, rename, writeFile } from "node:fs/promises";
+import { chmod, open, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
@@ -9,6 +9,7 @@ import {
 	Record,
 	Result,
 	Schema,
+	SchemaParser,
 	SchemaTransformation,
 	Struct,
 } from "effect";
@@ -35,8 +36,11 @@ import {
 	migrateLegacyDefaultOpencodeInstanceId,
 	PROVIDER_DRIVERS,
 } from "../contracts/provider-instance.js";
+import { AvatarChoiceSchema } from "../contracts/user-avatar.js";
 import {
 	DEFAULT_WORKTREE_CLEANUP,
+	ProjectWorktreeCleanupSchema,
+	type WorktreeCleanup,
 	WorktreeCleanupSchema,
 } from "../contracts/worktree.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
@@ -58,8 +62,35 @@ import {
 /** Days of inactivity before automatic settlement when no value is persisted. */
 export const DEFAULT_AUTO_SETTLE_AFTER_DAYS = 3;
 export const DEFAULT_AUTO_ARCHIVE_AFTER_DAYS = 30;
+export const DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS = 30;
 
-export const CURRENT_CONFIG_VERSION = 1;
+/** How long a session must sit idle before it settles, or null when it never does. */
+export const autoSettleIdleWindowMs = (
+	days: number | null | undefined,
+): number | null =>
+	days === null ? null : (days ?? DEFAULT_AUTO_SETTLE_AFTER_DAYS) * 86_400_000;
+
+export const CURRENT_CONFIG_VERSION = 2;
+
+const LegacyWorktreeCleanupSchema = Schema.Struct({
+	onSettle: Schema.Literals(["off", "merged", "any"]).pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => "merged" as const)),
+	),
+	onDelete: WorktreeCleanupSchema.fields.onDelete,
+	afterInactiveDays: Schema.NullOr(
+		Schema.Number.pipe(
+			Schema.check(Schema.isInt()),
+			Schema.check(Schema.isBetween({ minimum: 1, maximum: 3650 })),
+		),
+	).pipe(Schema.withDecodingDefaultType(Effect.sync(() => null))),
+	whenMerged: Schema.Boolean.pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => false)),
+	),
+	noCommitsBeyondDefault: Schema.Boolean.pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => false)),
+	),
+	keepWhen: WorktreeCleanupSchema.fields.keepWhen,
+});
 
 const ProjectSchema = Schema.Struct({
 	path: Schema.String,
@@ -69,10 +100,12 @@ const ProjectSchema = Schema.Struct({
 	),
 	slug: Schema.String,
 	title: Schema.optionalKey(Schema.String),
-	addedAt: Schema.Number,
+	addedAt: Schema.optionalKey(Schema.Number),
+	lastUsed: Schema.optionalKey(Schema.Number),
 	shellEnv: Schema.optionalKey(ProjectShellEnvConfigSchema),
 	setupScript: Schema.optionalKey(Schema.String),
 	sessionMode: Schema.optionalKey(SessionModeSchema),
+	worktreeCleanup: Schema.optionalKey(ProjectWorktreeCleanupSchema),
 	sessionCount: Schema.optionalKey(Schema.Number),
 });
 
@@ -159,6 +192,7 @@ const DaemonConfigFields = {
 	tailscaleServeCleanupPending: Schema.optionalKey(Schema.Boolean),
 	debug: Schema.Boolean,
 	keepAwake: Schema.Boolean,
+	avatar: Schema.optionalKey(AvatarChoiceSchema),
 	autoSettleAfterDays: Schema.optionalKey(
 		Schema.NullOr(
 			Schema.Number.pipe(
@@ -175,6 +209,14 @@ const DaemonConfigFields = {
 			),
 		),
 	),
+	autoDeleteArchivedAfterDays: Schema.optionalKey(
+		Schema.NullOr(
+			Schema.Number.pipe(
+				Schema.check(Schema.isInt()),
+				Schema.check(Schema.isBetween({ minimum: 1, maximum: 90 })),
+			),
+		),
+	),
 	worktreeCleanup: Schema.optionalKey(WorktreeCleanupSchema),
 	usageLimits: Schema.optionalKey(UsageLimitsSettingSchema),
 	cursorUsageBinding: Schema.optionalKey(CursorUsageBindingSchema),
@@ -183,6 +225,7 @@ const DaemonConfigFields = {
 		Schema.mutable(Schema.Array(Schema.String)),
 	),
 	newSessionProject: Schema.optionalKey(Schema.String),
+	projectOrder: Schema.optionalKey(Schema.Array(Schema.String)),
 	projects: Schema.mutable(Schema.Array(DaemonProjectSchema)),
 	instances: Schema.optionalKey(
 		Schema.mutable(Schema.Array(DaemonInstanceSchema)),
@@ -212,6 +255,7 @@ export type DaemonConfig = typeof CurrentDaemonConfigSchema.Type;
 
 export const DaemonConfigSchema = Schema.Struct({
 	...DaemonConfigFields,
+	worktreeCleanup: Schema.optionalKey(Schema.Unknown),
 	claudeConfigDir: Schema.optionalKey(Schema.String),
 })
 	.mapFields(Struct.map(Schema.mutableKey))
@@ -219,12 +263,40 @@ export const DaemonConfigSchema = Schema.Struct({
 	.pipe(
 		Schema.decodeTo(
 			Schema.toType(CurrentDaemonConfigSchema),
-			SchemaTransformation.transform({
-				decode: ({ claudeConfigDir, ...config }): DaemonConfig =>
-					normalizeDaemonConfig(
-						migrateLegacyClaudeAccount(config, claudeConfigDir),
-					),
-				encode: (config) => config,
+			SchemaTransformation.transformEffect({
+				decode: ({ claudeConfigDir, worktreeCleanup, ...config }) =>
+					Effect.gen(function* () {
+						const persistedCleanup = worktreeCleanup ?? {};
+						const cleanup: WorktreeCleanup =
+							config.configVersion === CURRENT_CONFIG_VERSION
+								? yield* SchemaParser.decodeUnknownEffect(
+										WorktreeCleanupSchema,
+									)(persistedCleanup)
+								: yield* SchemaParser.decodeUnknownEffect(
+										LegacyWorktreeCleanupSchema,
+									)(persistedCleanup).pipe(
+										Effect.map((old) => ({
+											onSettle:
+												old.onSettle === "merged" ||
+												old.onSettle === "any" ||
+												old.whenMerged ||
+												old.noCommitsBeyondDefault
+													? ("nothing-missing" as const)
+													: ("keep" as const),
+											settledAfterDays:
+												old.onSettle === "any" ? 0 : old.afterInactiveDays,
+											onDelete: old.onDelete,
+											keepWhen: old.keepWhen,
+										})),
+									);
+						return normalizeDaemonConfig(
+							migrateLegacyClaudeAccount(
+								{ ...config, worktreeCleanup: cleanup },
+								claudeConfigDir,
+							),
+						);
+					}),
+				encode: (config) => Effect.succeed(config),
 			}),
 		),
 	)
@@ -361,6 +433,7 @@ export function defaultDaemonConfig(): DaemonConfig {
 		keepAwake: false,
 		autoSettleAfterDays: DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 		autoArchiveAfterDays: DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
+		autoDeleteArchivedAfterDays: DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS,
 		worktreeCleanup: DEFAULT_WORKTREE_CLEANUP,
 		projects: [],
 		instances: [
@@ -481,6 +554,8 @@ function readDaemonConfigResult(
 						raw["claudeConfigDir"] !== undefined ||
 						raw["autoSettleAfterDays"] !== config.autoSettleAfterDays ||
 						raw["autoArchiveAfterDays"] !== config.autoArchiveAfterDays ||
+						raw["autoDeleteArchivedAfterDays"] !==
+							config.autoDeleteArchivedAfterDays ||
 						!isDeepStrictEqual(raw["instances"], config.instances) ||
 						!isDeepStrictEqual(
 							raw["accountDefaults"],
@@ -510,6 +585,10 @@ function normalizeDaemonConfig(decoded: DaemonConfig): DaemonConfig {
 			decoded.autoArchiveAfterDays === undefined
 				? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS
 				: decoded.autoArchiveAfterDays,
+		autoDeleteArchivedAfterDays:
+			decoded.autoDeleteArchivedAfterDays === undefined
+				? DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS
+				: decoded.autoDeleteArchivedAfterDays,
 	};
 }
 
@@ -543,7 +622,7 @@ export function loadAccountsState(
 	return Result.succeed(accountsStateFromConfig(loaded.success, launchLogin));
 }
 
-/** Atomic write: write to a unique tmp file then rename to daemon.json. */
+/** Flush the new contents, atomically replace daemon.json, then flush the rename. */
 export async function saveDaemonConfig(
 	config: DaemonConfig,
 	configDir?: string,
@@ -564,10 +643,17 @@ export async function saveDaemonConfig(
 		{
 			encoding: "utf-8",
 			mode: 0o600,
+			flush: true,
 		},
 	);
 	await chmod(tmpPath, 0o600);
 	await rename(tmpPath, finalPath);
+	const directory = await open(dir, "r");
+	try {
+		await directory.sync();
+	} finally {
+		await directory.close();
+	}
 }
 
 /** Persist decode migrations once, using the same snapshot that seeds startup. */

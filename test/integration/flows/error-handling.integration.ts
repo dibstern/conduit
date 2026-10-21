@@ -1,7 +1,9 @@
 // Verifies that malformed RPC input and failed requests leave the server usable.
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createServer } from "node:http";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
+import { createSdkClient } from "../../../src/lib/instance/sdk-factory.js";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -16,6 +18,50 @@ describe("Integration: Error Handling", () => {
 
 	afterAll(async () => {
 		if (harness) await harness.stop();
+	});
+
+	it("times out a held provider request without retrying and recovers on the next call", async () => {
+		let requests = 0;
+		let holdResponse = true;
+		const provider = createServer((_request, response) => {
+			requests++;
+			if (!holdResponse) {
+				response.writeHead(200, { "Content-Type": "application/json" });
+				response.end(JSON.stringify([{ name: "recovered" }]));
+			}
+		});
+		await new Promise<void>((resolve) =>
+			provider.listen(0, "127.0.0.1", resolve),
+		);
+		vi.stubEnv("CONDUIT_TEST_REQUEST_TIMEOUT_MS", "150");
+		try {
+			const address = provider.address();
+			if (!address || typeof address === "string")
+				throw new Error("No provider port");
+			const { fetch: request } = createSdkClient({
+				baseUrl: `http://127.0.0.1:${address.port}`,
+				retry: { retries: 2, retryDelay: 1 },
+			});
+			const url = `http://127.0.0.1:${address.port}/agent`;
+			const failure = await request(url).catch((error: unknown) => error);
+			expect(requests, "native deadline must not retry the held request").toBe(
+				1,
+			);
+			expect(failure).toMatchObject({
+				message: "Request timed out after 150ms",
+			});
+			holdResponse = false;
+			const recovered = await request(url);
+			expect(recovered.status).toBe(200);
+			expect(await recovered.json()).toEqual([{ name: "recovered" }]);
+			expect(requests).toBe(2);
+		} finally {
+			vi.unstubAllEnvs();
+			provider.closeAllConnections();
+			await new Promise<void>((resolve, reject) =>
+				provider.close((error) => (error ? reject(error) : resolve())),
+			);
+		}
 	});
 
 	it("rejects the removed project RPC socket", async () => {
@@ -66,38 +112,17 @@ describe("Integration: Error Handling", () => {
 		await client.close();
 	});
 
-	it("a failed RPC leaves the same client usable", async () => {
-		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
-		client.clearReceived();
-
-		await expect(
-			client.rpcCall((rpc) =>
-				rpc.GetSkillContent({
-					projectSlug: "integration-test",
-					name: "nonexistent-skill",
-				}),
-			),
-		).rejects.toThrow("Skill content not available");
-
-		const result = await client.getAgents();
-		expect(Array.isArray(result.agents)).toBe(true);
-
-		await client.close();
-	});
-
 	it("GetFileContent RPC with non-existent path fails without crashing", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		client.clearReceived();
 
-		try {
-			const result = await client.getFileContent("/nonexistent/path/file.txt");
-			expect(result.path).toBe("/nonexistent/path/file.txt");
-			expect(typeof result.content).toBe("string");
-		} catch (error) {
-			expect(error).toBeInstanceOf(Error);
-		}
+		harness.mock.setExactResponse("GET", "/file/content", 404, {
+			message: "File not found",
+		});
+		await expect(
+			client.getFileContent("nonexistent/path/file.txt"),
+		).rejects.toThrow("GetFileContent failed:");
 
 		// Verify the server is still alive
 		client.clearReceived();

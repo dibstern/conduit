@@ -15,11 +15,12 @@ async function dragDown(
 	sheet: Locator,
 	distance: number,
 	release = true,
+	startOffset = 10,
 ) {
 	const box = await sheet.boundingBox();
 	if (!box) throw new Error("sheet is not rendered");
 	const x = box.x + box.width / 2;
-	const startY = box.y + 10;
+	const startY = box.y + startOffset;
 	const cdp = await page.context().newCDPSession(page);
 	await cdp.send("Input.dispatchTouchEvent", {
 		type: "touchStart",
@@ -31,7 +32,10 @@ async function dragDown(
 			type: "touchMove",
 			touchPoints: [{ x, y: startY + (distance * step) / steps }],
 		});
-		await page.waitForTimeout(16);
+		await page.evaluate(
+			() =>
+				new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+		);
 	}
 	const end = async () => {
 		await cdp.send("Input.dispatchTouchEvent", {
@@ -49,7 +53,10 @@ async function openTitleSheet(page: Page, relayUrl: string): Promise<Locator> {
 	await page.getByTestId("session-bar-title-menu").tap();
 	const sheet = page.getByTestId("session-action-sheet");
 	await expect(sheet).toBeVisible();
-	await page.waitForTimeout(150);
+	await expect(page.getByTestId("menu-sheet-scrim")).toHaveCSS(
+		"pointer-events",
+		"auto",
+	);
 	return sheet;
 }
 
@@ -72,7 +79,34 @@ test("phone: a short drag springs the session sheet back open", async ({
 }) => {
 	const sheet = await openTitleSheet(page, relayUrl);
 	const { top } = await dragDown(page, sheet, 30);
-	await page.waitForTimeout(400);
 	await expect(sheet).toBeVisible();
-	expect((await sheet.boundingBox())?.y).toBeCloseTo(top, 0);
+	await expect
+		.poll(async () => (await sheet.boundingBox())?.y)
+		.toBeCloseTo(top, 0);
+});
+
+test("phone: dragging a scrolled sheet body scrolls without dismissing", async ({
+	page,
+	relayUrl,
+}, testInfo) => {
+	await page.setViewportSize({ width: 390, height: 320 });
+	const sheet = await openTitleSheet(page, relayUrl);
+	const body = sheet.locator("[data-sheet-body]");
+	await expect
+		.poll(() => body.evaluate((node) => node.scrollHeight - node.clientHeight))
+		.toBeGreaterThan(40);
+	await body.evaluate((node) => {
+		node.scrollTop = 40;
+	});
+	const top = (await sheet.boundingBox())?.y;
+	await dragDown(page, body, 30, true, 30);
+	await expect(sheet).toBeVisible();
+	expect((await sheet.boundingBox())?.y).toBeCloseTo(top ?? 0, 0);
+	await expect
+		.poll(() => body.evaluate((node) => node.scrollTop))
+		.toBeLessThan(40);
+	await testInfo.attach("scrolled-sheet-body", {
+		body: await page.screenshot(),
+		contentType: "image/png",
+	});
 });

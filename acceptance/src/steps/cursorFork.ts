@@ -224,7 +224,7 @@ export const cursorForkHandlers: StepHandler[] = [
 			const driver = (match[1] ?? "").toLowerCase();
 			const trigger = world.page
 				.locator(
-					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 				)
 				.first();
 			await expect(trigger).toHaveAttribute(
@@ -269,7 +269,7 @@ export const cursorForkHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			await world.page.locator("#input").fill(forkPrompt);
 			await world.page.locator("#send").click();
-			await requireRpcControl(world.page).waitForRequest(
+			const request = await requireRpcControl(world.page).waitForRequest(
 				(request) =>
 					request.tag === "input.submit" &&
 					request.payload["sessionId"] === forkId &&
@@ -281,6 +281,7 @@ export const cursorForkHandlers: StepHandler[] = [
 				sessionId: forkId,
 				messageId: "fork-question",
 				text: forkPrompt,
+				inputId: request.payload["inputId"],
 			});
 			setSessionRowStatus(world.page, forkId, "busy");
 			relay.sendMessage({

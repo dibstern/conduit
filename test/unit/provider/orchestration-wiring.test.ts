@@ -11,6 +11,7 @@ import {
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
@@ -46,6 +47,18 @@ function orchestrationDeps(
 			),
 		),
 		Layer.succeed(OpenCodeAPITag)(client),
+		Layer.succeed(SessionWorkspaceTag)({
+			get: () => Effect.die("Unexpected workspace lookup"),
+			withLaunch: (effect) => effect,
+			preview: () => Effect.die("Unexpected workspace preview"),
+			renameBranch: () => Effect.die("Unexpected workspace rename"),
+			move: () => Effect.die("Unexpected workspace move"),
+			inherit: () => Effect.die("Unexpected workspace inheritance"),
+			resolve: () => Effect.die("Unexpected workspace resolution"),
+			record: () => Effect.die("Unexpected workspace recording"),
+			claudeWorktreeState: () =>
+				Effect.die("Unexpected Claude workspace lookup"),
+		}),
 		persistence,
 		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({ opencode: client }),
@@ -56,7 +69,12 @@ function orchestrationDeps(
 
 function makeStubClient(): OpenCodeAPI {
 	return {
-		session: { abort: vi.fn(async () => {}), prompt: vi.fn(async () => {}) },
+		session: {
+			get: vi.fn(async () => ({ permission: [] })),
+			update: vi.fn(async () => {}),
+			abort: vi.fn(async () => {}),
+			prompt: vi.fn(async () => {}),
+		},
 		permission: { reply: vi.fn(async () => {}), list: vi.fn(async () => []) },
 		question: {
 			reply: vi.fn(async () => {}),
@@ -262,126 +280,5 @@ describe("Orchestration wiring", () => {
 		});
 
 		expect(layer.openCodeInstance).toBeInstanceOf(OpenCodeProviderInstance);
-	});
-
-	describe("wireSSEToInstance", () => {
-		it("calls notifyTurnCompleted when session.status idle event arrives", async () => {
-			const client = makeStubClient();
-			const layer = await makeScopedOrchestrationView({ client });
-
-			const notifySpy = vi.spyOn(layer.openCodeInstance, "notifyTurnCompleted");
-
-			// Capture the handler registered via sseOn
-			type Handler = (e: unknown) => void;
-			const handlers: Handler[] = [];
-			const mockSseOn = (_event: "event", handler: Handler) => {
-				handlers.push(handler);
-			};
-			layer.wireSSEToInstance(mockSseOn);
-			expect(handlers.length).toBe(1);
-
-			// Fire a session.status idle event
-			handlers[0]?.({
-				type: "session.status",
-				properties: {
-					sessionID: "sess-123",
-					status: { type: "idle" },
-				},
-			});
-
-			expect(notifySpy).toHaveBeenCalledTimes(1);
-			expect(notifySpy).toHaveBeenCalledWith(
-				"sess-123",
-				expect.objectContaining({ status: "completed" }),
-			);
-		});
-
-		it("ignores non-session.status events", async () => {
-			const client = makeStubClient();
-			const layer = await makeScopedOrchestrationView({ client });
-			const notifySpy = vi.spyOn(layer.openCodeInstance, "notifyTurnCompleted");
-
-			type Handler = (e: unknown) => void;
-			const handlers: Handler[] = [];
-			layer.wireSSEToInstance((_event, handler) => {
-				handlers.push(handler);
-			});
-
-			handlers[0]?.({
-				type: "message.created",
-				properties: { sessionID: "sess-123" },
-			});
-
-			expect(notifySpy).not.toHaveBeenCalled();
-		});
-
-		it("ignores session.status events with non-idle status", async () => {
-			const client = makeStubClient();
-			const layer = await makeScopedOrchestrationView({ client });
-			const notifySpy = vi.spyOn(layer.openCodeInstance, "notifyTurnCompleted");
-
-			type Handler = (e: unknown) => void;
-			const handlers: Handler[] = [];
-			layer.wireSSEToInstance((_event, handler) => {
-				handlers.push(handler);
-			});
-
-			handlers[0]?.({
-				type: "session.status",
-				properties: {
-					sessionID: "sess-123",
-					status: { type: "busy" },
-				},
-			});
-
-			expect(notifySpy).not.toHaveBeenCalled();
-		});
-
-		it("does nothing when sessionId is not present in event", async () => {
-			const client = makeStubClient();
-			const layer = await makeScopedOrchestrationView({ client });
-			const notifySpy = vi.spyOn(layer.openCodeInstance, "notifyTurnCompleted");
-
-			type Handler = (e: unknown) => void;
-			const handlers: Handler[] = [];
-			layer.wireSSEToInstance((_event, handler) => {
-				handlers.push(handler);
-			});
-
-			// No sessionID in properties
-			handlers[0]?.({
-				type: "session.status",
-				properties: {
-					status: { type: "idle" },
-				},
-			});
-
-			expect(notifySpy).not.toHaveBeenCalled();
-		});
-
-		it("falls back to event.sessionId when properties.sessionID is absent", async () => {
-			const client = makeStubClient();
-			const layer = await makeScopedOrchestrationView({ client });
-			const notifySpy = vi.spyOn(layer.openCodeInstance, "notifyTurnCompleted");
-
-			type Handler = (e: unknown) => void;
-			const handlers: Handler[] = [];
-			layer.wireSSEToInstance((_event, handler) => {
-				handlers.push(handler);
-			});
-
-			handlers[0]?.({
-				type: "session.status",
-				sessionId: "sess-fallback",
-				properties: {
-					status: { type: "idle" },
-				},
-			});
-
-			expect(notifySpy).toHaveBeenCalledWith(
-				"sess-fallback",
-				expect.objectContaining({ status: "completed" }),
-			);
-		});
 	});
 });

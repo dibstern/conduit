@@ -25,6 +25,7 @@
 		routerState,
 	} from "../../stores/router.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
+	import { draftList } from "../../stores/draft-list.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
@@ -47,16 +48,23 @@
 	import { runBulkChange, runBulkSnooze } from "./session-list-bulk-actions.js";
 	import { confirmSessionDeletion } from "./session-deletion.js";
 	import { getProjectAccent, getProjectLabel, projectDisplayName } from "./session-list-project.js";
+	import { buildProjectTree } from "../../stores/project-tree.svelte.js";
 
 	let { onaddproject }: { onaddproject?: (() => void) | undefined } = $props();
 
-	let localSearchValue = $state("");
+	let localSearchValue = $state(untrack(() => sessionState.searchQuery));
 	let debounceTimer: ReturnType<typeof setTimeout> | undefined = $state(
 		undefined,
 	);
 
 	// Context menu state
-	let ctxMenuSession = $state<SessionInfo | null>(null);
+	let ctxMenuOpened = $state<SessionInfo | null>(null);
+	// Render the row as it is now, not as it was when the menu opened: a restored
+	// saved-shell row is replaced by the live one moments after a reload.
+	const ctxMenuSession = $derived.by(() => {
+		const opened = ctxMenuOpened;
+		return opened && (sessionList.rows.find((row) => row.id === opened.id) ?? opened);
+	});
 	let ctxMenuAnchor = $state<HTMLElement | null>(null);
 	let ctxMenuPresentation = $state<"menu" | "sheet">("menu");
 	let snoozePlacement = $state<"center" | "sheet">("center");
@@ -89,6 +97,7 @@
 	const statusFilter = $derived(getSessionStatusFilter());
 	const grouping = $derived(getSessionGrouping());
 	const matching = $derived(filtered.filter((session) => statusFilter === null || sessionMatchesStatus(session, statusFilter)));
+	const settledCount = $derived(sessionList.settledCount);
 	const fullArrangement = $derived(projectSessionList(
 		matching,
 		grouping,
@@ -103,44 +112,55 @@
 	const arrangement = $derived.by(() => {
 		if (currentSearchQuery() !== null) return fullArrangement;
 		let remaining = browsePage.limit;
-		const take = (sessions: SessionInfo[]) => {
-			const visible = sessions.slice(0, remaining);
-			remaining -= visible.length;
+		const take = (sessions: SessionInfo[], floor = 0) => {
+			const visible = sessions.slice(0, Math.max(remaining, floor));
+			remaining = Math.max(remaining - visible.length, 0);
 			return visible;
 		};
 		return {
 			pinned: take(fullArrangement.pinned),
-			sections: fullArrangement.sections
+			// The project tree bounds its own rows, per project.
+			sections: grouping === "project" ? fullArrangement.sections : fullArrangement.sections
 				.map((section) => ({ ...section, sessions: take(section.sessions) }))
 				.filter((section) => section.sessions.length > 0),
+			// The shelf previews two rows even when live rows fill the page.
+			settled: take(fullArrangement.settled, 2),
 			snoozed: take(fullArrangement.snoozed),
-			settled: take(fullArrangement.settled),
 		};
 	});
 	// Chips count only live rows: settled and snoozed sets grow without bound.
 	const live = $derived(filtered.filter((session) => session.settledAt == null && !isSessionSnoozed(session, sessionState.now)));
 
-	const isEmpty = $derived(matching.length === 0);
+	const isEmpty = $derived(matching.length === 0 && settledCount.count === 0);
 	const searching = $derived(sessionState.searchQuery.trim().length > 0);
 	const settledShelfOpen = $derived(searching || uiState.settledShelfOpen);
 	const snoozedShelfOpen = $derived(searching || uiState.snoozedShelfOpen);
+	const scope = $derived(getSessionScope());
+	const tree = $derived(grouping === "project" ? buildProjectTree({
+		projects: projectState.projects.filter((project) => scope === null || project.slug === scope),
+		sections: fullArrangement.sections,
+		sessions: filtered,
+		narrowed: searching || statusFilter !== null,
+		currentId: sessionState.currentId,
+	}) : null);
 	const visibleRowIds = $derived([
 		...arrangement.pinned.map((session) => session.id),
-		...arrangement.sections.flatMap((section) => section.sessions.map((session) => session.id)),
-		...(snoozedShelfOpen ? arrangement.snoozed.map((session) => session.id) : []),
+		...(tree ? tree.flatMap((node) => node.shown) : arrangement.sections.flatMap((section) => section.sessions)).map((session) => session.id),
 		...(settledShelfOpen ? arrangement.settled.map((session) => session.id) : []),
+		...(snoozedShelfOpen ? arrangement.snoozed.map((session) => session.id) : []),
 	]);
 	const selectCandidates = $derived.by(() => {
 		const shown = new Set(visibleRowIds);
 		return matching.filter((session) => shown.has(session.id));
 	});
 
-	const scope = $derived(getSessionScope());
+	const drafts = $derived(draftList.rows.filter((draft) => scope === null || draft.projectSlug === scope));
 	const scopeLabel = $derived(getSessionScopeLabel(scope));
 	const emptyMessage = $derived.by(() => {
 		if (searching && filtered.length === 0) return "No matching sessions";
+		if (statusFilter === "needs-you") return "That's everything waiting on you.";
 		if (statusFilter !== null) {
-			const label = statusFilter === "needs-you" ? "needs you" : statusFilter;
+			const label = statusFilter;
 			return `Nothing ${label}${scope === null ? "" : ` in ${scopeLabel}`}`;
 		}
 		if (scope !== null) return `No sessions in ${scopeLabel}`;
@@ -273,13 +293,13 @@
 
 	function handleContextMenu(session: SessionInfo, anchor: HTMLElement, trigger?: "touch") {
 		// Open context menu for this session
-		ctxMenuSession = session;
+		ctxMenuOpened = session;
 		ctxMenuAnchor = anchor;
 		ctxMenuPresentation = trigger === "touch" ? "sheet" : "menu";
 	}
 
 	function handleCloseContextMenu() {
-		ctxMenuSession = null;
+		ctxMenuOpened = null;
 		ctxMenuAnchor = null;
 	}
 
@@ -487,15 +507,15 @@
 	<SessionListHeader {selectMode} {selectionCount} {allSelected} onselectall={handleToggleSelectAll} ondone={resetSelectMode} />
 	<SessionListFilters {localSearchValue} {live} {searchSummary} onsearchinput={handleSearchInput} onclearsearch={clearSearch} {onaddproject} />
 	{#if feedStale}
-		<div class="px-3.5 py-1 text-xs text-text-dimmer font-brand" data-testid="session-list-stale">May be out of date</div>
+		<div class="px-3.5 py-1 text-xs text-text-dimmer font-sans" data-testid="session-list-stale">May be out of date</div>
 	{/if}
 	{#if selectMode && selectionCount === 0}
-		<div class="mx-3 mb-2 flex shrink-0 items-center gap-2 rounded-lg border border-dashed border-accent px-2.5 py-2 text-xs text-text-secondary font-brand" data-testid="select-hint">
+		<div class="mx-3 mb-2 flex shrink-0 items-center gap-2 rounded-lg border border-dashed border-accent px-2.5 py-2 text-xs text-text-secondary font-sans" data-testid="select-hint">
 			<Icon name="circle-check" size={15} class="shrink-0 text-accent" />
 			Pick sessions to act on, then choose an action below.
 		</div>
 	{/if}
-	<SessionListRows {arrangement} {fullArrangement} {isEmpty} {emptyMessage} {statusFilter} {searching} filteredLength={filtered.length} {snoozedShelfOpen} {settledShelfOpen} {pagerPending} {unavailableProjectLabels} {selectMode} {selectedSessionIds} menuOpenId={ctxMenuSession?.id} {renamingSessionId} {getProjectLabel} {getProjectAccent} oncontextmenu={handleContextMenu} ontoggleselection={handleToggleSelection} onrenamestart={handleCtxRename} onrenameend={handleRenameEnd} />
+	<SessionListRows {arrangement} {fullArrangement} {settledCount} {tree} {drafts} reorderable={!searching && statusFilter === null && scope === null} {isEmpty} {emptyMessage} {statusFilter} {searching} filteredLength={filtered.length} {snoozedShelfOpen} {settledShelfOpen} {pagerPending} {unavailableProjectLabels} {selectMode} {selectedSessionIds} menuOpenId={ctxMenuSession?.id} {renamingSessionId} {getProjectLabel} {getProjectAccent} oncontextmenu={handleContextMenu} ontoggleselection={handleToggleSelection} onrenamestart={handleCtxRename} onrenameend={handleRenameEnd} />
 	{#if selectMode}
 		<SessionListBulkBar settleCount={settleEligible.length} snoozeCount={snoozeEligible.length} pinCount={pinEligible.length} {selectionCount} {unpinSelected} {bulkPending} onsettle={() => { void handleBulkChange("settle"); }} onsnooze={handleOpenBulkSnooze} onpin={() => { void handleBulkChange("pin"); }} ondelete={handleBulkDelete} />
 	{/if}

@@ -271,7 +271,13 @@ export const providerInstancesHandlers: StepHandler[] = [
 					return { ok: true };
 				},
 			});
-			await world.page.getByTestId("views-rail-terminal").click();
+			// A phone has no views rail; the terminal is in the session bar's overflow.
+			const rail = world.page.getByTestId("views-rail-terminal");
+			if (await rail.isVisible()) await rail.click();
+			else {
+				await world.page.getByTestId("session-bar-island-overflow").click();
+				await world.page.getByTestId("overflow-view-terminal").click();
+			}
 			await expect(world.page.locator("#terminal-panel .term-tab")).toHaveCount(
 				1,
 			);
@@ -569,7 +575,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 		match: /^the session's usage limit names (Personal|Claude)$/,
 		run: async ({ world, match }) => {
 			await expect(world.page.getByTestId("usage-limit-title")).toHaveText(
-				`Usage limit reached · ${match[1]}`,
+				new RegExp(`^${match[1]} hit its .+ limit\\.$`),
 			);
 		},
 	},
@@ -723,6 +729,9 @@ export const providerInstancesHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const page = world.page;
 			const section = page.locator("#usage-settings");
+			// Phone hides the handles until Edit order is tapped.
+			if (match[2] === "touch")
+				await section.getByTestId("usage-settings-reorder").click();
 			const handle = section.getByRole("button", {
 				name: `Reorder ${match[1]}`,
 			});

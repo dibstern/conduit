@@ -26,7 +26,7 @@ import {
 	ProjectSaveRejected,
 	type SaveProjectInput,
 } from "../../../contracts/ws-rpc.js";
-import type { PersistenceStore } from "../../../persistence/effect/live.js";
+import { PersistenceStore } from "../../../persistence/effect/live.js";
 import {
 	daemonStorePath,
 	projectStorageDir,
@@ -38,6 +38,10 @@ import {
 	DaemonSessionQueryServiceError,
 	DaemonSessionQueryServiceTag,
 } from "../../relay/Services/daemon-session-query-service.js";
+import {
+	InputDraftsTag,
+	makeInputDrafts,
+} from "../../relay/Services/input-drafts.js";
 import {
 	InstanceManagementServiceError,
 	InstanceManagementServiceTag,
@@ -52,6 +56,7 @@ import { ScanServiceTag } from "../../relay/Services/scan-service.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
+import { CategorySet } from "../Services/category-set.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
@@ -71,10 +76,12 @@ import {
 	removeInstance as removeEffectInstance,
 	updateInstance as updateEffectInstance,
 } from "../Services/instance-manager-service.js";
+import { MessageSurfacingSettings } from "../Services/message-surfacing-settings.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
 import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	type broadcastProjectList,
+	getEffectiveWorktreeCleanup,
 	projectInfos as getEffectProjectInfos,
 	openCodeInstanceFor,
 	ProjectRegistryTag,
@@ -195,8 +202,14 @@ export const RelayFactoryLive = (
 		RelayFactoryTag,
 		Effect.gen(function* () {
 			const accounts = yield* AccountDirectory;
+			const surfacing = yield* Effect.serviceOption(MessageSurfacingSettings);
+			const categories = yield* Effect.serviceOption(CategorySet);
 			const sessionDirectory = yield* Effect.serviceOption(SessionDirectory);
 			const storeContext = yield* persistenceStoreContext;
+			const sharedDrafts = yield* Effect.serviceOption(InputDraftsTag);
+			const inputDrafts = Option.isSome(sharedDrafts)
+				? sharedDrafts.value
+				: yield* makeInputDrafts.pipe(Effect.provide(yield* PersistenceStore));
 			const unavailable = yield* DaemonStoreAvailability;
 			const configRef = yield* DaemonConfigRefTag;
 			const envResolver = Option.getOrUndefined(
@@ -295,6 +308,7 @@ export const RelayFactoryLive = (
 									? Effect.asVoid(Effect.scoped(openCodeInstances.use(id)))
 									: Effect.void,
 							),
+							Effect.andThen(configPersistence.flush),
 							Effect.provide(daemonContext),
 							Effect.mapError(
 								(cause) =>
@@ -307,6 +321,7 @@ export const RelayFactoryLive = (
 						),
 					stop: (id) =>
 						openCodeInstances.stop(id).pipe(
+							Effect.andThen(configPersistence.flush),
 							Effect.mapError(
 								(cause) =>
 									new InstanceManagementServiceError({
@@ -493,8 +508,22 @@ export const RelayFactoryLive = (
 									).pipe(
 										Context.add(ConfigPersistenceTag, configPersistence),
 										Context.add(AccountDirectory, accounts),
+										Context.merge(
+											Option.isSome(surfacing)
+												? Context.make(
+														MessageSurfacingSettings,
+														surfacing.value,
+													)
+												: Context.empty(),
+										),
+										Context.merge(
+											Option.isSome(categories)
+												? Context.make(CategorySet, categories.value)
+												: Context.empty(),
+										),
 										Context.add(SessionActivityTag, activity),
 										Context.add(SessionEventBusTag, sessionEventBus),
+										Context.add(InputDraftsTag, inputDrafts),
 										Context.add(DaemonEventBusTag, eventBus),
 										Context.add(ProjectRegistryTag, projectRegistry),
 										Context.add(PortScannerTag, portScanner),
@@ -538,6 +567,15 @@ export const RelayFactoryLive = (
 													projectSlug: project.slug,
 												}).pipe(Effect.asVoid)
 											: Effect.void,
+									getWorktreeCleanup: () =>
+										getEffectiveWorktreeCleanup(project.slug).pipe(
+											Effect.provideService(
+												ProjectRegistryTag,
+												projectRegistry,
+											),
+											Effect.provideService(DaemonConfigRefTag, configRef),
+											Effect.orElseSucceed(() => "off" as const),
+										),
 									publishGlobalSetting: (tag) =>
 										PubSub.publish(
 											eventBus,

@@ -27,6 +27,7 @@
 		default: undefined,
 		warn: { name: "triangle-alert", class: "text-warning" },
 		error: { name: "circle-x", class: "text-error" },
+		pinned: { name: "pin", class: "text-status-pinned" },
 	} as const;
 
 	const SWIPE_DISMISS_PX = 48;
@@ -98,7 +99,7 @@
 	}
 </script>
 
-{#if uiState.toasts.length > 0}
+{#if uiState.toasts.length > 0 && uiState.sheetToastHost === null}
 	<div
 		{@attach publishToastClearance}
 		class="pointer-events-none fixed z-[var(--z-toast)] flex flex-col max-md:pointer-events-auto max-md:inset-x-0 max-md:bottom-[var(--composer-clearance,0px)] max-md:divide-y max-md:divide-border-subtle max-md:rounded-t-[18px] max-md:border-t max-md:border-border max-md:bg-bg-alt max-md:pb-[max(0px,calc(env(safe-area-inset-bottom)_-_var(--composer-clearance,0px)))] max-md:shadow-modal md:right-[14px] md:bottom-[calc(var(--composer-clearance,0px)+14px)] md:w-[310px] md:gap-2"
@@ -111,7 +112,7 @@
 				...toast.actions.filter((action) => action.kind === "dismiss"),
 			]}
 			<div
-				class="toast-card pointer-events-auto touch-none px-[16px] py-[12px] font-brand text-sm text-text-secondary md:rounded-[12px] md:border md:border-border md:bg-bg-alt md:p-[12px] md:shadow-modal"
+				class="toast-card pointer-events-auto touch-none px-[16px] py-[12px] font-sans text-sm text-text-secondary md:rounded-[12px] md:border md:border-border md:bg-bg-alt md:p-[12px] md:shadow-modal"
 				data-variant={toast.variant}
 				role={toast.variant === "error" ? "alert" : "status"}
 				aria-live={toast.variant === "error" ? "assertive" : "polite"}
@@ -142,7 +143,7 @@
 				{#if toast.body}
 					<p class="mt-[4px] leading-snug break-words">
 						{#if toast.emphasis && at >= 0}
-							{toast.body.slice(0, at)}<b class="font-semibold text-brand-b">{toast.emphasis}</b>{toast.body.slice(at + toast.emphasis.length)}
+							{toast.body.slice(0, at)}<b class="font-semibold text-success">{toast.emphasis}</b>{toast.body.slice(at + toast.emphasis.length)}
 						{:else}
 							{toast.body}
 						{/if}

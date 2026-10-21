@@ -27,6 +27,7 @@ export const readPersistedAutoSettleFacts = (
 ) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		// Discovery skips children up front; the policy turns them off either way.
 		const rows = yield* sql<SessionRow>`SELECT * FROM sessions
 			WHERE project_id = ${projectId}
 				AND ${sessionId === undefined ? sql`parent_id IS NULL` : sql`id = ${sessionId}`}`;
@@ -68,23 +69,6 @@ export const readPersistedAutoSettleFacts = (
 				userBySession.set(user.session_id, user.created_at);
 		}
 		const pendingIds = new Set(pending.map((item) => item.session_id));
-		// Keep the consumed head in the existing settlement event, so a message
-		// can wake a session without a restart/fetch settling that same work again.
-		const merges = yield* sql.unsafe<{
-			session_id: string;
-			merged_head: string;
-		}>(
-			`SELECT session_id, merged_head FROM (
-				SELECT session_id, json_extract(data, '$.mergedHead') AS merged_head,
-					ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY sequence DESC) AS rank
-				FROM events WHERE project_id = ? AND type = 'session.settled' AND json_type(data, '$.mergedHead') = 'text'
-					AND session_id IN (${placeholders})
-			) WHERE rank = 1`,
-			[projectId, ...ids],
-		);
-		const settledHeadBySession = new Map(
-			merges.map((item) => [item.session_id, item.merged_head]),
-		);
 		const directoryBySession = new Map<string, string>();
 		if (projectDir !== undefined) {
 			for (const row of rows) {
@@ -109,10 +93,9 @@ export const readPersistedAutoSettleFacts = (
 			rows.map((row) => [
 				row.id,
 				sessionRowToAutoSettleFacts(row, {
-					mergedHead: daemonSessionGitCache.peek(
+					mergedAt: daemonSessionGitCache.peek(
 						directoryBySession.get(row.id) ?? "",
-					)?.mergedHead,
-					settledMergedHead: settledHeadBySession.get(row.id),
+					)?.mergedAt,
 					latestTurn: turnBySession.get(row.id) ?? null,
 					latestUserMessageAt: userBySession.get(row.id) ?? null,
 					hasPendingApproval: pendingIds.has(row.id),

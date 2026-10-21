@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import Database from "better-sqlite3";
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { RpcTest } from "effect/rpc";
 import { SqlClient } from "effect/sql";
 import {
 	afterEach,
@@ -18,11 +19,14 @@ import {
 	onTestFailed,
 } from "vitest";
 import { advanceTouchesScope } from "../../../src/lib/contracts/read-model-advance.js";
+import { ToolCallId } from "../../../src/lib/contracts/tool-wire.js";
+import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { markUnread } from "../../../src/lib/domain/relay/Services/session-attention.js";
 import {
 	makeSessionEventBusLive,
 	SessionEventBusTag,
 } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { ToolContentServiceLive } from "../../../src/lib/domain/relay/Services/tool-content-service.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import {
@@ -43,6 +47,14 @@ import {
 	type CanonicalEvent,
 	canonicalEvent,
 } from "../../../src/lib/persistence/events.js";
+import { readForkSource } from "../../../src/lib/persistence/fork-history.js";
+import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
+import {
+	NEVER_CUT_TOOL_NAMES,
+	PREVIEW_CODE_POINTS,
+} from "../../../src/lib/persistence/tool-wire-projection.js";
+import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
+import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 
 const scopes = {
 	A: { projectIds: ["alpha"] },
@@ -756,6 +768,477 @@ describe("Scope-filtered reads over one store-wide version space", () => {
 			).toEqual([{ project_id: "alpha" }]);
 		} finally {
 			await runtime.dispose();
+		}
+	});
+});
+
+// Output must survive previewing, full-history reads, RPC, replay and a fork
+// whose source session is removed. Full replacements must clear old pointers;
+// question and subagent outputs must stay inline.
+describe("Event-owned tool results", () => {
+	it("stores one full result while preserving browser previews, details, replay and forks", async () => {
+		const sharedFile = filename();
+		const runtime = ManagedRuntime.make(
+			makePersistenceEffectLayer(sharedFile, "alpha"),
+		);
+		const replay = ManagedRuntime.make(
+			makePersistenceEffectLayer(filename(), "alpha"),
+		);
+		const sessionId = "ses_tool_output";
+		const messageId = "msg_tool_output";
+		const longText = '🙂e\u0301 "quoted" \\ path\n'.repeat(PREVIEW_CODE_POINTS);
+		const examples = [
+			{ id: "part_string", name: "Bash", result: longText, cut: true },
+			{
+				id: "part_object",
+				name: "Read",
+				result: { nested: longText },
+				cut: true,
+			},
+			{ id: "part_short", name: "Bash", result: "short", cut: false },
+			{
+				id: "part_todos",
+				name: "TodoWrite",
+				result: JSON.stringify([
+					{ id: "todo-long", content: longText, status: "pending" },
+				]),
+				cut: true,
+			},
+			...NEVER_CUT_TOOL_NAMES.map((name) => ({
+				id: `part_${name}`,
+				name,
+				result: longText,
+				cut: false,
+			})),
+		].map((example) => ({
+			...example,
+			output:
+				typeof example.result === "string"
+					? example.result
+					: JSON.stringify(example.result),
+		}));
+		const events = [
+			canonicalEvent("session.created", sessionId, {
+				sessionId,
+				title: "Tool output",
+				provider: "claude",
+			}),
+			canonicalEvent("message.created", sessionId, {
+				sessionId,
+				messageId,
+				role: "assistant",
+			}),
+			...examples.flatMap(({ id, name, result }) => [
+				canonicalEvent("tool.started", sessionId, {
+					messageId,
+					partId: id,
+					callId: `call_${id}`,
+					toolName: name,
+					input: { tool: "Bash", command: "printf output" },
+				}),
+				canonicalEvent("tool.completed", sessionId, {
+					messageId,
+					partId: id,
+					result,
+					duration: 1,
+				}),
+			]),
+		];
+		try {
+			await commit(runtime, events);
+			const read = await runtime.runPromise(ReadQueryEffectTag);
+			const sql = await runtime.runPromise(SqlClient.SqlClient);
+			const stored = await runtime.runPromise(
+				sql<{
+					id: string;
+					result: string;
+					result_event_seq: number | null;
+					result_bytes: number | null;
+					event_sequence: number;
+				}>`SELECT mp.id, mp.result, mp.result_event_seq, mp.result_bytes,
+					e.sequence AS event_sequence
+					FROM message_parts mp JOIN events e
+					ON e.session_id = ${sessionId} AND e.type = 'tool.completed'
+					AND json_extract(e.data, '$.partId') = mp.id
+					WHERE mp.message_id = ${messageId} ORDER BY mp.id`,
+			);
+			const preview = await runtime.runPromise(
+				read.readSessionTranscriptPage(sessionId, {
+					limit: 10,
+					previewTools: true,
+				}),
+			);
+			const browser = messageRowsToHistory(preview.messages, { pageSize: 10 });
+			for (const example of examples) {
+				const row = stored.find(({ id }) => id === example.id);
+				const head = Array.from(example.output)
+					.slice(0, PREVIEW_CODE_POINTS)
+					.join("");
+				expect(row?.result).toBe(
+					example.cut ? JSON.stringify(head) : JSON.stringify(example.result),
+				);
+				expect(row?.result_event_seq).toBe(
+					example.cut ? row?.event_sequence : null,
+				);
+				expect(row?.result_bytes).toBe(
+					example.cut ? Buffer.byteLength(example.output, "utf8") : null,
+				);
+				expect(
+					browser.messages[0]?.parts?.find(({ id }) => id === example.id)?.state
+						?.output,
+				).toEqual(
+					example.cut
+						? {
+								_tag: "preview",
+								text: head,
+								fullBytes: Buffer.byteLength(example.output, "utf8"),
+							}
+						: { _tag: "whole", text: example.output },
+				);
+			}
+			for (const full of [
+				(
+					await runtime.runPromise(
+						read.readSessionTranscriptPage(sessionId, { limit: 10 }),
+					)
+				).messages,
+				await runtime.runPromise(read.getSessionMessagesWithParts(sessionId)),
+			]) {
+				for (const example of examples) {
+					const part = full[0]?.parts.find(({ id }) => id === example.id);
+					expect(part?.result).toBe(JSON.stringify(example.result));
+					expect(part?.result_bytes ?? null).toBeNull();
+				}
+			}
+			expect(
+				(await runtime.runPromise(read.readSessionTodos(sessionId))).rows[0]
+					?.item.items,
+			).toEqual([{ id: "todo-long", subject: longText, status: "pending" }]);
+			const rpcLayer = WsRpcServerLayer.pipe(
+				Layer.provideMerge(
+					Layer.merge(
+						makeTestHandlerLayer(),
+						ToolContentServiceLive.pipe(
+							Layer.provide(Layer.succeed(ReadQueryEffectTag, read)),
+						),
+					),
+				),
+			);
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const client = yield* RpcTest.makeClient(WsRpcGroup);
+					const details = yield* client.GetToolDetails({
+						sessionId,
+						toolIds: [
+							ToolCallId.make("call_part_string"),
+							...examples
+								.slice(1)
+								.map(({ id }) => ToolCallId.make(`call_${id}`)),
+						],
+					});
+					for (const example of examples)
+						expect(
+							details.tools.find(
+								({ toolId }) => toolId === `call_${example.id}`,
+							)?.output,
+						).toEqual({ _tag: "whole", text: example.output });
+				}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
+			);
+
+			await replay.runPromise(
+				Effect.gen(function* () {
+					yield* (yield* EventStoreEffectTag).appendBatch(events);
+					const recovery = yield* (yield* ProjectionRunnerEffectTag).recover();
+					expect(recovery.startCursor).toBe(0);
+					expect(recovery.totalReplayed).toBeGreaterThan(0);
+					const replaySql = yield* SqlClient.SqlClient;
+					expect(
+						yield* replaySql`SELECT id, result, result_event_seq, result_bytes
+						FROM message_parts WHERE message_id = ${messageId} ORDER BY id`,
+					).toEqual(stored.map(({ event_sequence: _, ...part }) => part));
+				}),
+			);
+
+			const forkId = "ses_tool_fork";
+			await runtime.runPromise(
+				Effect.gen(function* () {
+					const source = yield* readForkSource(sessionId, {
+						sideThread: false,
+					});
+					const write = yield* makeCommitAndSignal;
+					yield* write([
+						canonicalEvent("session.created", forkId, {
+							sessionId: forkId,
+							title: "Tool fork",
+							provider: "claude",
+							forkedFrom: sessionId,
+							inheritsHistory: true,
+							forkPointMessageId: source.boundary.messageId,
+							forkPointTimestamp: source.boundary.createdAt,
+						}),
+					]);
+					expect(
+						yield* sql`SELECT DISTINCT e.session_id FROM message_parts mp
+						JOIN events e ON e.sequence = mp.result_event_seq
+						JOIN messages m ON m.id = mp.message_id
+						WHERE m.session_id = ${forkId}`,
+					).toEqual([{ session_id: sessionId }]);
+					yield* write([
+						canonicalEvent("session.deleted", sessionId, { sessionId }),
+					]);
+				}),
+			);
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const client = yield* RpcTest.makeClient(WsRpcGroup);
+					const details = yield* client.GetToolDetails({
+						sessionId: forkId,
+						toolIds: [
+							ToolCallId.make(`call_part_string_${forkId}`),
+							...examples
+								.slice(1)
+								.map(({ id }) => ToolCallId.make(`call_${id}_${forkId}`)),
+						],
+					});
+					for (const example of examples)
+						expect(
+							details.tools.find(
+								({ toolId }) => toolId === `call_${example.id}_${forkId}`,
+							)?.output,
+						).toEqual({ _tag: "whole", text: example.output });
+				}).pipe(Effect.scoped, Effect.provide(rpcLayer)),
+			);
+
+			await commit(runtime, [
+				canonicalEvent("tool.completed", forkId, {
+					messageId: `${messageId}_${forkId}`,
+					partId: `part_string_${forkId}`,
+					result: "replacement",
+					duration: 1,
+				}),
+			]);
+			expect(
+				await runtime.runPromise(
+					sql`SELECT result, result_event_seq, result_bytes FROM message_parts
+					WHERE id = ${`part_string_${forkId}`}`,
+				),
+			).toEqual([
+				{ result: '"replacement"', result_event_seq: null, result_bytes: null },
+			]);
+			await commit(runtime, [
+				canonicalEvent("message.snapshot", forkId, {
+					messageId: `${messageId}_${forkId}`,
+					digest: "replacement-snapshot",
+					message: {
+						id: `${messageId}_${forkId}`,
+						sessionID: forkId,
+						role: "assistant",
+						parts: [
+							{
+								id: `part_object_${forkId}`,
+								type: "tool",
+								tool: "Read",
+								state: { status: "completed", output: longText },
+							},
+						],
+					},
+				}),
+			]);
+			expect(
+				await runtime.runPromise(
+					sql`SELECT result, result_event_seq, result_bytes FROM message_parts
+					WHERE id = ${`part_object_${forkId}`}`,
+				),
+			).toEqual([
+				{
+					result: JSON.stringify(longText),
+					result_event_seq: null,
+					result_bytes: null,
+				},
+			]);
+			mkdirSync("test-results", { recursive: true });
+			writeFileSync(
+				"test-results/iujk6-tool-result-refs.json",
+				`${JSON.stringify(
+					{
+						pass: true,
+						previewCodePoints: PREVIEW_CODE_POINTS,
+						results: examples
+							.filter(({ cut }) => cut)
+							.map((example) => ({
+								partId: example.id,
+								storedBytes: Buffer.byteLength(
+									stored.find(({ id }) => id === example.id)?.result ?? "",
+									"utf8",
+								),
+								fullOutputBytes: Buffer.byteLength(example.output, "utf8"),
+							})),
+						fullDetailsViaRpc: true,
+						forkDetailsAfterParentDeletion: true,
+						replayedFromSequenceZero: true,
+					},
+					null,
+					2,
+				)}\n`,
+			);
+		} finally {
+			await Promise.all([runtime.dispose(), replay.dispose()]);
+		}
+	});
+
+	it("backfills only byte-identical latest completions in the same session", async () => {
+		const legacyFile = filename();
+		await Effect.runPromise(
+			Effect.scoped(
+				makeEffectSqlMigrator(
+					Object.fromEntries(
+						Object.entries(effectMigrationEntries).filter(
+							([key]) => !key.endsWith("_tool_result_event_refs"),
+						),
+					),
+				).pipe(Effect.provide(SqliteClient.layer({ filename: legacyFile }))),
+			),
+		);
+		const longText = '🙂 "quoted" \\ /\n'.repeat(PREVIEW_CODE_POINTS);
+		const examples = [
+			{
+				id: "match",
+				name: "Bash",
+				result: longText,
+				events: [longText],
+				cut: true,
+			},
+			{
+				id: "object",
+				name: "Read",
+				result: { nested: longText },
+				events: [{ nested: longText }],
+				cut: true,
+			},
+			{
+				id: "newer_mismatch",
+				name: "Bash",
+				result: longText,
+				events: [longText, "newer different result"],
+				cut: false,
+			},
+			{ id: "missing", name: "Bash", result: longText, events: [], cut: false },
+			{
+				id: "wrong_session",
+				name: "Bash",
+				result: longText,
+				events: [longText],
+				cut: false,
+			},
+			{
+				id: "escaped_json",
+				name: "Bash",
+				result: longText,
+				events: [longText],
+				cut: false,
+			},
+			{
+				id: "short",
+				name: "Bash",
+				result: "short",
+				events: ["short"],
+				cut: false,
+			},
+			...NEVER_CUT_TOOL_NAMES.map((name) => ({
+				id: `never_${name}`,
+				name,
+				result: longText,
+				events: [longText],
+				cut: false,
+			})),
+		].map((example) => ({
+			...example,
+			stored:
+				example.id === "escaped_json"
+					? JSON.stringify(example.result).replaceAll("/", "\\/")
+					: JSON.stringify(example.result),
+			output:
+				typeof example.result === "string"
+					? example.result
+					: JSON.stringify(example.result),
+		}));
+		const sequences = new Map<string, number>();
+		const db = new Database(legacyFile);
+		try {
+			db.exec(`
+				INSERT INTO sessions (id, provider, created_at, updated_at, root_id, project_id)
+				VALUES ('ses_backfill', 'claude', 1, 1, 'ses_backfill', 'alpha');
+				INSERT INTO messages (id, session_id, role, created_at, updated_at)
+				VALUES ('msg_backfill', 'ses_backfill', 'assistant', 1, 1);
+			`);
+			const insertPart = db.prepare(`INSERT INTO message_parts
+				(id, message_id, type, tool_name, result, sort_order, created_at, updated_at)
+				VALUES (?, 'msg_backfill', 'tool', ?, ?, 0, 1, 1)`);
+			const insertEvent = db.prepare(`INSERT INTO events
+				(event_id, session_id, stream_version, type, data, provider, created_at, project_id)
+				VALUES (?, ?, ?, 'tool.completed', ?, 'claude', 1, 'alpha')`);
+			let version = 0;
+			for (const example of examples) {
+				insertPart.run(example.id, example.name, example.stored);
+				for (const result of example.events) {
+					version++;
+					const inserted = insertEvent.run(
+						`evt_backfill_${version}`,
+						example.id === "wrong_session" ? "ses_other" : "ses_backfill",
+						version,
+						JSON.stringify({
+							messageId: "msg_backfill",
+							partId: example.id,
+							result,
+						}),
+					);
+					sequences.set(example.id, Number(inserted.lastInsertRowid));
+				}
+			}
+		} finally {
+			db.close();
+		}
+		await Effect.runPromise(
+			Effect.scoped(
+				makeEffectSqlMigrator().pipe(
+					Effect.provide(SqliteClient.layer({ filename: legacyFile })),
+				),
+			),
+		);
+		const migrated = new Database(legacyFile, { readonly: true });
+		try {
+			const rows = migrated
+				.prepare<
+					[],
+					{
+						id: string;
+						result: string;
+						result_event_seq: number | null;
+						result_bytes: number | null;
+					}
+				>(
+					"SELECT id, result, result_event_seq, result_bytes FROM message_parts",
+				)
+				.all();
+			for (const example of examples) {
+				const row = rows.find(({ id }) => id === example.id);
+				expect(row).toEqual({
+					id: example.id,
+					result: example.cut
+						? JSON.stringify(
+								Array.from(example.output)
+									.slice(0, PREVIEW_CODE_POINTS)
+									.join(""),
+							)
+						: example.stored,
+					result_event_seq: example.cut ? sequences.get(example.id) : null,
+					result_bytes: example.cut
+						? Buffer.byteLength(example.output, "utf8")
+						: null,
+				});
+			}
+		} finally {
+			migrated.close();
 		}
 	});
 });

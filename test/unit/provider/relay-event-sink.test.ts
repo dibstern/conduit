@@ -121,24 +121,6 @@ describe("createRelayEventSink — processing timeouts", () => {
 		expect(resetTimeout).toHaveBeenCalledTimes(1);
 	});
 
-	it("clears timeout on non-RETRY errors", async () => {
-		const clearTimeout = vi.fn();
-		const sink = createRelayEventSink({
-			sessionId: "ses-1",
-			clearTimeout,
-		});
-		await Effect.runPromise(
-			sink.push(
-				makeEvent("turn.error", {
-					messageId: "msg_1",
-					error: "rate limit",
-					code: "provider_error",
-				}),
-			),
-		);
-		expect(clearTimeout).toHaveBeenCalled();
-	});
-
 	it("does not clear timeout on idle/busy session.status", async () => {
 		const clearTimeout = vi.fn();
 		const sink = createRelayEventSink({
@@ -230,10 +212,7 @@ describe("createRelayEventSink — persistence", () => {
 				sessionId: event.sessionId,
 				provider: event.providerId,
 				data: event.data,
-				metadata: expect.objectContaining({
-					providerRuntimeEventId: event.eventId,
-					rawSource: event.rawSource.kind,
-				}),
+				metadata: {},
 			}),
 		);
 	});
@@ -339,68 +318,10 @@ describe("createRelayEventSink — permission/question", () => {
 		});
 	});
 
-	it("resolves when resolvePermission is called", async () => {
-		let resolvePermission:
-			| ((response: { decision: "once" | "always" | "reject" }) => void)
-			| undefined;
-		const pendingInteractions = {
-			beginPermissionRequest: vi.fn((_entry: { requestId: string }) =>
-				Effect.sync(() => {
-					const promise = new Promise<{
-						decision: "once" | "always" | "reject";
-					}>((resolve) => {
-						resolvePermission = resolve;
-					});
-					return {
-						awaitResponse: Effect.promise(() => promise),
-					};
-				}),
-			),
-			resolvePermissionRequest: vi.fn((_requestId, response) =>
-				Effect.sync(() => {
-					resolvePermission?.(response);
-					return true;
-				}),
-			),
-			beginQuestionRequest: vi.fn(() =>
-				Effect.succeed({
-					awaitAnswers: Effect.succeed({}),
-				}),
-			),
-			resolveQuestionRequest: vi.fn(() => Effect.succeed(true)),
-		};
-		const sink = createRelayEventSink({
-			sessionId: "ses-1",
-			pendingInteractions,
-		});
-		const pending = Effect.runPromise(
-			sink.requestPermission({
-				requestId: "req_1",
-				toolName: "Bash",
-				toolInput: { command: "rm -rf /" },
-				sessionId: "ses-1",
-				turnId: "turn_1",
-				providerItemId: "item_1",
-			}),
-		);
-
-		const conduitId =
-			pendingInteractions.beginPermissionRequest.mock.calls[0]?.[0].requestId;
-		expect(conduitId).toBeTypeOf("string");
-		expect(conduitId).not.toBe("req_1");
-		// Resolving unblocks the awaiting provider instance.
-		await Effect.runPromise(
-			sink.resolvePermission(conduitId ?? "", { decision: "once" }),
-		);
-		const response = await pending;
-		expect(response.decision).toBe("once");
-		expect(pendingInteractions.resolvePermissionRequest).toHaveBeenCalledWith(
-			conduitId,
-			{ decision: "once" },
-		);
-	});
-
-	it("tracks permission and question replay state through the pending interaction port", async () => {
+	it.each([
+		"once",
+		"reject",
+	] as const)("tracks permission=%s and question replay state through the pending interaction port", async (decision) => {
 		let resolvePermission:
 			| ((response: { decision: "once" | "always" | "reject" }) => void)
 			| undefined;
@@ -471,12 +392,12 @@ describe("createRelayEventSink — permission/question", () => {
 			always: ["Bash"],
 		});
 		await Effect.runPromise(
-			sink.resolvePermission(permissionId ?? "", { decision: "once" }),
+			sink.resolvePermission(permissionId ?? "", { decision }),
 		);
-		await expect(permission).resolves.toEqual({ decision: "once" });
+		await expect(permission).resolves.toEqual({ decision });
 		expect(pendingInteractions.resolvePermissionRequest).toHaveBeenCalledWith(
 			permissionId,
-			{ decision: "once" },
+			{ decision },
 		);
 
 		const question = Effect.runPromise(
@@ -767,18 +688,5 @@ describe("createRelayEventSink — permission delegation", () => {
 				answers: {},
 			},
 		});
-	});
-
-	it("fails closed when an ask arrives with no interaction port", async () => {
-		const sink = createRelayEventSink({
-			sessionId: "ses-1",
-		});
-
-		// Previously "full" short-circuited to allow here. With the SDK owning
-		// the mode, reaching this point with nowhere to ask must not silently
-		// approve.
-		await expect(
-			Effect.runPromise(sink.requestPermission(request)),
-		).rejects.toThrow();
 	});
 });

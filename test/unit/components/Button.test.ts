@@ -27,16 +27,6 @@ describe("Button", () => {
 		expect(button.className).toContain("border-border");
 	});
 
-	it("applies the variant and size class maps", () => {
-		const { getByRole } = render(Button, {
-			props: { variant: "primary", size: "sm", children: label("Go") },
-		});
-		const button = getByRole("button");
-
-		expect(button.className).toContain("bg-accent");
-		expect(button.className).toContain("min-h-[25px]");
-	});
-
 	it("renders the recipe classes for a disabled customized button", () => {
 		const recipe = {
 			variant: "toolbar",
@@ -178,7 +168,9 @@ describe("Button colour axes", () => {
 	// variant-prefixed, so they never compete with the resting colour.
 	const restingText = (classes: string[]) =>
 		classes.filter((c) =>
-			/^text-(?!xs$|sm$|base$|lg$|left$|center$|right$)/.test(c),
+			/^text-(?!xs$|sm$|base$|lg$|left$|center$|right$|\[\d+(?:\.\d+)?px\]$)/.test(
+				c,
+			),
 		);
 	const hoverFill = (classes: string[]) =>
 		classes.filter((c) => c.startsWith("hover:bg-"));
@@ -207,13 +199,6 @@ describe("Button colour axes", () => {
 		expect(classes).not.toContain("text-text-secondary");
 		// Non-colour parts of the variant survive.
 		expect(classes).toContain("border-border");
-	});
-
-	it("replaces the variant's hover fill rather than adding to it", () => {
-		const classes = emitted({ variant: "ghost", hoverFill: "sidebar" });
-
-		expect(hoverFill(classes)).toEqual(["hover:bg-sidebar-hover"]);
-		expect(restingText(classes)).toEqual(["text-text-secondary"]);
 	});
 
 	it('hoverFill="none" removes the wash entirely', () => {

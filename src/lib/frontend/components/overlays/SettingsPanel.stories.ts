@@ -5,6 +5,7 @@ import {
 	composerPreferences,
 	setComposerPreferences,
 } from "../../stores/composer-preferences.svelte.js";
+import { cursorAuth } from "../../stores/cursor-auth.svelte.js";
 import {
 	clearDiscoveryState,
 	handleAgentList,
@@ -14,16 +15,17 @@ import {
 } from "../../stores/discovery.svelte.js";
 import { featureFlags } from "../../stores/feature-flags.svelte.js";
 import {
-	applyDetectProxyResponse,
 	applyInstanceListResponse,
 	getCachedInstances,
 } from "../../stores/instance.svelte.js";
 import { routerState } from "../../stores/router.svelte.js";
 import { serverStatus } from "../../stores/server-status.svelte.js";
+import { sessionViewState } from "../../stores/session-view.svelte.js";
 import {
 	applyUsageLimitsSetting,
 	applyUsageReadings,
 } from "../../stores/usage.svelte.js";
+import { connectedSocket, replyRpc } from "../../stories/sockets.js";
 import SettingsPanel from "./SettingsPanel.svelte";
 
 function resetState() {
@@ -59,6 +61,13 @@ function resetState() {
 	});
 	applyUsageReadings([]);
 	applyUsageLimitsSetting(DEFAULT_USAGE_LIMITS);
+	// GetCursorAuth is never answered in stories, so seed a settled logged-out reply.
+	cursorAuth.current = {
+		source: "none",
+		status: "logged-out",
+		expiresSoon: false,
+		login: { state: "idle" },
+	};
 	featureFlags.debug = false;
 	localStorage.setItem(
 		"notif-settings",
@@ -73,6 +82,7 @@ function populateInstances() {
 				id: "claude",
 				name: "Personal Claude",
 				driver: "claude",
+				isDefault: true,
 				configDir: "~/.claude",
 				port: 0,
 				managed: false,
@@ -125,14 +135,113 @@ const meta = {
 		visible: true,
 		onClose: fn(),
 	},
-	beforeEach: resetState,
+	beforeEach: () => {
+		const compact = sessionViewState.compact;
+		sessionViewState.compact = window.innerWidth < 768;
+		// Mount-time reads wait on an open socket instead of failing whenever the
+		// real dial gives up; proxy detection settles at once as "not found".
+		const restoreSocket = connectedSocket();
+		const restoreDetectProxy = replyRpc("DetectProxy", () => ({
+			found: false,
+			port: 8317,
+		}));
+		resetState();
+		return () => {
+			sessionViewState.compact = compact;
+			cursorAuth.current = undefined;
+			restoreDetectProxy();
+			restoreSocket();
+		};
+	},
 } satisfies Meta<typeof SettingsPanel>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+/** Scroll changes do not produce the DOM mutations the visual runner waits for. */
+async function scrollSettingsIntoView(
+	element: HTMLElement,
+	block: ScrollLogicalPosition,
+): Promise<void> {
+	await element.ownerDocument.fonts.ready;
+	const scroller = element.closest<HTMLElement>(".settings-content");
+	await expect(scroller).not.toBeNull();
+	if (!scroller) return;
+	element.scrollIntoView({ block, behavior: "instant" });
+	let previousTop = scroller.scrollTop;
+	let stableFrames = 0;
+	while (stableFrames < 2) {
+		await new Promise<void>((resolve) =>
+			requestAnimationFrame(() => resolve()),
+		);
+		const top = scroller.scrollTop;
+		stableFrames = top === previousTop ? stableFrames + 1 : 0;
+		previousTop = top;
+	}
+}
+
 /** A generic open: General on desktop, the section list on phone. */
-export const Default: Story = {};
+export const Default: Story = {
+	play: async ({ canvasElement }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		await expect(body.getByRole("dialog", { name: "Settings" })).toBeVisible();
+		await expect(body.getByTestId("settings-close-btn")).toBeVisible();
+		if (sessionViewState.compact) {
+			const bounds = canvasElement.ownerDocument
+				.getElementById("settings-panel")
+				?.getBoundingClientRect();
+			await expect(bounds?.x).toBeCloseTo(0, 0);
+			await expect(bounds?.y).toBeCloseTo(0, 0);
+			await expect(bounds?.width).toBe(window.innerWidth);
+			await expect(bounds?.height).toBe(window.innerHeight);
+			await expect(body.getByTestId("settings-close-btn")).toHaveTextContent(
+				"Done",
+			);
+			await expect(
+				body.queryByTestId("settings-back-btn"),
+			).not.toBeInTheDocument();
+			await userEvent.click(body.getByTestId("settings-tab-general"));
+			const heading = body.getByRole("heading", {
+				level: 2,
+				name: "General",
+			});
+			await expect(heading).toBeVisible();
+			const title = heading.getBoundingClientRect();
+			await expect(title.x + title.width / 2).toBeCloseTo(
+				window.innerWidth / 2,
+				0,
+			);
+			await userEvent.click(body.getByTestId("settings-back-btn"));
+			await expect(
+				body.getByRole("heading", { level: 2, name: "Settings" }),
+			).toBeVisible();
+			await waitFor(() =>
+				expect(body.getByTestId("settings-tab-general")).toHaveFocus(),
+			);
+		} else {
+			await expect(body.getByRole("tablist")).toHaveAttribute(
+				"aria-orientation",
+				"vertical",
+			);
+			await expect(body.getByTestId("settings-tab-general")).toHaveAttribute(
+				"aria-selected",
+				"true",
+			);
+			await userEvent.click(body.getByTestId("settings-tab-models"));
+			await expect(
+				body.getByRole("heading", {
+					level: 2,
+					name: "Models & agents",
+				}),
+			).toBeVisible();
+			await userEvent.click(body.getByTestId("settings-tab-general"));
+			await expect(
+				body.getByRole("heading", { level: 2, name: "General" }),
+			).toBeVisible();
+		}
+		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
+	},
+};
 
 /** An explicit General open: on phone it lands drilled in, past the list. */
 export const NotificationsEnabled: Story = {
@@ -155,7 +264,7 @@ export const Composer: Story = {
 			body
 				.getAllByRole("heading", { level: 3 })
 				.map((heading) => heading.textContent),
-		).toEqual(["Notifications", "Appearance", "Composer", "Sessions"]);
+		).toEqual(["You", "Appearance", "Composer", "Notifications", "Sessions"]);
 		await expect(
 			body.getByRole("button", { name: /^Advanced.*Debug off$/ }),
 		).toHaveAttribute("aria-expanded", "false");
@@ -175,20 +284,24 @@ export const Composer: Story = {
 		await userEvent.click(icons);
 		await expect(icons).toHaveAttribute("aria-checked", "true");
 		await expect(composerPreferences.controls).toBe("icons");
-		const warning = body.getByTestId("settings-composer-context-warning-80");
-		await expect(warning).toHaveAttribute("aria-checked", "true");
+		const warning = body.getByTestId("settings-composer-context-warning");
+		await expect(warning).toHaveAttribute("data-value", "80");
 		for (const threshold of [60, 70, 80, 90, "never"] as const) {
+			await userEvent.click(warning);
 			const option = body.getByTestId(
 				`settings-composer-context-warning-${threshold}`,
 			);
 			await userEvent.click(option);
-			await expect(option).toHaveAttribute("aria-checked", "true");
+			await expect(warning).toHaveAttribute("data-value", String(threshold));
 			await expect(composerPreferences.contextWarning).toBe(threshold);
 		}
 		await expect(
 			JSON.parse(localStorage.getItem("conduit-composer-preferences") ?? "{}"),
 		).toEqual({ controls: "icons", contextWarning: "never" });
 		await userEvent.click(warning);
+		await userEvent.click(
+			body.getByTestId("settings-composer-context-warning-80"),
+		);
 		// userEvent focus reads as keyboard focus; keep its ring out of the baseline.
 		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
 	},
@@ -208,7 +321,7 @@ export const Advanced: Story = {
 			name: /^Advanced.*Debug off$/,
 		});
 		await expect(disclosure).toHaveAttribute("aria-expanded", "false");
-		disclosure.scrollIntoView({ block: "nearest" });
+		await scrollSettingsIntoView(disclosure, "nearest");
 		await userEvent.click(disclosure);
 		const toggle = body.getByRole("switch", {
 			name: "Toggle connection debug panel",
@@ -217,7 +330,7 @@ export const Advanced: Story = {
 		await userEvent.click(toggle);
 		await expect(disclosure).toHaveTextContent("Debug on");
 		await expect(disclosure).toHaveAttribute("aria-expanded", "true");
-		toggle.scrollIntoView({ block: "nearest" });
+		await scrollSettingsIntoView(toggle, "nearest");
 		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
 	},
 };
@@ -228,20 +341,20 @@ export const WorktreeCleanup: Story = {
 	play: async ({ canvasElement }) => {
 		const body = within(canvasElement.ownerDocument.body);
 		const disclosure = body.getByRole("button", {
-			name: /^Worktree cleanup.*Settled and merged$/,
+			name: /^Worktree cleanup.*When nothing is missing$/,
 		});
 		await userEvent.click(disclosure);
 		await expect(disclosure).toHaveAttribute("aria-expanded", "true");
-		disclosure.scrollIntoView({ block: "start" });
-		await expect(body.getByTestId("settings-cleanup-on-settle")).toHaveValue(
-			"merged",
-		);
-		await expect(body.getByTestId("settings-cleanup-idle")).toHaveValue(
-			"never",
-		);
-		await expect(body.getByTestId("settings-cleanup-keep-when")).toHaveValue(
-			"uncommitted-changes",
-		);
+		await scrollSettingsIntoView(disclosure, "start");
+		await expect(
+			body.getByTestId("settings-cleanup-on-settle"),
+		).toHaveAttribute("data-value", "nothing-missing");
+		await expect(
+			body.getByTestId("settings-cleanup-settled-after"),
+		).toHaveAttribute("data-value", "never");
+		await expect(
+			body.getByTestId("settings-cleanup-keep-when"),
+		).toHaveAttribute("data-value", "uncommitted-changes");
 		await expect(
 			body.getByTestId("settings-cleanup-keep-warning"),
 		).toHaveTextContent(/^Ignored files, like \.env/);
@@ -254,6 +367,22 @@ export const VisibilityEmpty: Story = {
 };
 
 function populateVisibility() {
+	// Claude's catalog belongs to its default account, so the project default resolves against it.
+	applyInstanceListResponse({
+		instances: [
+			{
+				id: "claude",
+				name: "Personal Claude",
+				driver: "claude",
+				isDefault: true,
+				port: 0,
+				managed: false,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 1_772_011_800_000,
+			},
+		],
+	});
 	handleModelList({
 		providers: [
 			{
@@ -366,6 +495,8 @@ export const Models: Story = {
 	},
 };
 
+export const ModelsLight: Story = { ...Models, globals: { theme: "light" } };
+
 export const ModelsInvalidDefault: Story = {
 	args: { initialTab: "models" },
 	beforeEach: () => {
@@ -450,11 +581,14 @@ export const Claude: Story = {
 		await expect(
 			canvas.queryByTestId("claude-setting-attribution"),
 		).not.toBeInTheDocument();
-		canvas
-			.getByTestId("claude-attribution-group")
-			.scrollIntoView({ block: "end" });
+		await scrollSettingsIntoView(
+			canvas.getByTestId("claude-attribution-group"),
+			"end",
+		);
 	},
 };
+
+export const ClaudeLight: Story = { ...Claude, globals: { theme: "light" } };
 
 export const ClaudeAttributionExpanded: Story = {
 	args: { initialTab: "claude" },
@@ -481,9 +615,10 @@ export const ClaudeAttributionExpanded: Story = {
 		await expect(
 			canvas.getByTestId("claude-setting-attribution-provenance"),
 		).toBeVisible();
-		canvas
-			.getByTestId("claude-attribution-group")
-			.scrollIntoView({ block: "end" });
+		await scrollSettingsIntoView(
+			canvas.getByTestId("claude-attribution-group"),
+			"end",
+		);
 	},
 };
 
@@ -491,6 +626,72 @@ export const Usage: Story = {
 	args: { initialTab: "usage" },
 };
 
+export const UsageLight: Story = { ...Usage, globals: { theme: "light" } };
+
+/** Three Claude accounts in auto-switch order: normal, warning and limited. */
+export const UsageAccounts: Story = {
+	args: { initialTab: "usage" },
+	beforeEach: () => {
+		const accounts = [
+			{ id: "claude", name: "Personal Claude", plan: "Max 20x" },
+			{ id: "work-claude", name: "Work Claude", plan: "Team" },
+			{ id: "lab-claude", name: "Lab Claude", plan: "Pro" },
+		];
+		applyInstanceListResponse({
+			instances: accounts.map(({ id, name }, index) => ({
+				id,
+				name,
+				driver: "claude",
+				isDefault: index === 0,
+				port: 0,
+				managed: false,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 1_772_011_800_000 + index * 60_000,
+				usageEligible: true,
+			})),
+		});
+		// The visual suite pins Date.now(), so offsets from it render the same times.
+		const at = (minutes: number) =>
+			new Date(Date.now() + minutes * 60_000).toISOString();
+		applyUsageReadings(
+			accounts.map(({ id, plan }, index) => ({
+				accountId: id,
+				harness: "claude",
+				status: index === 2 ? "limited" : "available",
+				planLabel: plan,
+				windows: [
+					{
+						kind: "five_hour",
+						utilization: [42, 86, 100][index] ?? 0,
+						resetsAt: at([185, 62, 140][index] ?? 0),
+					},
+					{
+						kind: "seven_day",
+						utilization: [18, 64, 71][index] ?? 0,
+						resetsAt: at(2 * 24 * 60 + 47),
+					},
+					...(index === 0
+						? [
+								{
+									kind: "seven_day_model" as const,
+									model: "Opus",
+									utilization: 9,
+								},
+							]
+						: []),
+				],
+				readAt: Date.now() - 120_000,
+				stale: false,
+			})),
+		);
+	},
+};
+
+export const UsageAccountsLight: Story = {
+	...UsageAccounts,
+	globals: { theme: "light" },
+};
 export const Server: Story = {
 	args: { initialTab: "server" },
 	beforeEach: () => {
@@ -499,9 +700,17 @@ export const Server: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		const logs = within(canvas.getByTestId("server-logs-group")).getByRole(
+			"button",
+			{ name: /^Logs\b/ },
+		);
+		await expect(logs).toHaveAttribute("aria-expanded", "false");
+		await userEvent.click(logs);
 		await expect(
-			canvas.getByRole("combobox", { name: /^Log level\b/ }),
-		).toHaveValue("info");
+			canvas.getByRole("button", { name: /^Log level\b/ }),
+		).toHaveAttribute("data-value", "info");
+		await userEvent.click(logs);
+		await expect(logs).toHaveAttribute("aria-expanded", "false");
 		// The fixture has no PIN, so this frame is also the PIN-off state.
 		await expect(
 			canvas.getByTestId("server-access-settings"),
@@ -543,11 +752,14 @@ export const Server: Story = {
 			canvas.queryByTestId("server-shutdown-confirmation"),
 		).not.toBeInTheDocument();
 		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
-		canvas
-			.getByTestId("server-startup-settings")
-			.scrollIntoView({ block: "end" });
+		await scrollSettingsIntoView(
+			canvas.getByTestId("server-startup-settings"),
+			"end",
+		);
 	},
 };
+
+export const ServerLight: Story = { ...Server, globals: { theme: "light" } };
 
 export const ServerStartupExpanded: Story = {
 	args: { initialTab: "server" },
@@ -571,7 +783,7 @@ export const ServerStartupExpanded: Story = {
 			"Installed",
 		);
 		await expect(within(startup).queryByRole("switch")).not.toBeInTheDocument();
-		startup.scrollIntoView({ block: "end" });
+		await scrollSettingsIntoView(startup, "end");
 	},
 };
 
@@ -587,9 +799,10 @@ export const PowerCommandEdit: Story = {
 		await expect(canvas.getByTestId("server-power-args")).toHaveValue("-di");
 		await expect(canvas.getByTestId("server-power-save")).toBeVisible();
 		await expect(canvas.getByTestId("server-power-cancel")).toBeVisible();
-		canvas
-			.getByTestId("server-power-settings")
-			.scrollIntoView({ block: "end" });
+		await scrollSettingsIntoView(
+			canvas.getByTestId("server-power-settings"),
+			"end",
+		);
 	},
 };
 
@@ -610,9 +823,10 @@ export const PowerNotAvailable: Story = {
 		await expect(
 			canvas.queryByTestId("server-power-edit"),
 		).not.toBeInTheDocument();
-		canvas
-			.getByTestId("server-power-settings")
-			.scrollIntoView({ block: "end" });
+		await scrollSettingsIntoView(
+			canvas.getByTestId("server-power-settings"),
+			"end",
+		);
 	},
 };
 
@@ -630,7 +844,7 @@ export const PinOn: Story = {
 		);
 		await expect(canvas.getByTestId("server-pin-change-btn")).toBeVisible();
 		await expect(canvas.getByTestId("server-pin-remove-btn")).toBeVisible();
-		security.scrollIntoView({ block: "nearest" });
+		await scrollSettingsIntoView(security, "nearest");
 	},
 };
 
@@ -647,9 +861,10 @@ export const ChangePin: Story = {
 		await expect(canvas.getByTestId("server-pin-form")).toHaveTextContent(
 			"Every browser, including this one, will ask for the new PIN.",
 		);
-		canvas.getByTestId("server-security-settings").scrollIntoView({
-			block: "end",
-		});
+		await scrollSettingsIntoView(
+			canvas.getByTestId("server-security-settings"),
+			"end",
+		);
 	},
 };
 
@@ -662,6 +877,8 @@ export const ChangePin: Story = {
 export const QuickStartExpanded: Story = {
 	args: { initialTab: "server" },
 	play: async ({ canvasElement }) => {
+		// Click-driven focus scrolls too, so wait for layout before interacting.
+		await canvasElement.ownerDocument.fonts.ready;
 		const guides = within(
 			within(canvasElement).getByTestId("opencode-setup-guides"),
 		);
@@ -675,12 +892,24 @@ export const QuickStartExpanded: Story = {
 			guides.getByText(/opencode config set provider anthropic/),
 		).toBeVisible();
 		await expect(row).toHaveAttribute("aria-expanded", "true");
+		// Show the opened guide at the top. Without a settled scroll, focusing a
+		// row this close to the phone fold scrolls by 0 or 1px.
+		await scrollSettingsIntoView(row, "start");
 	},
+};
+
+/** Instances sit below the fold on the Server page, so scroll them in. */
+const showInstances: Story["play"] = async ({ canvasElement }) => {
+	await scrollSettingsIntoView(
+		within(canvasElement).getByTestId("add-instance-btn"),
+		"start",
+	);
 };
 
 export const InstancesPopulated: Story = {
 	args: { initialTab: "server" },
 	beforeEach: populateInstances,
+	play: showInstances,
 };
 
 export const InstanceExpanded: Story = {
@@ -730,14 +959,14 @@ export const DefaultClaudeAccountEdit: Story = {
 	args: { initialTab: "server" },
 	beforeEach: populateInstances,
 	play: async ({ canvasElement }) => {
+		await canvasElement.ownerDocument.fonts.ready;
 		const canvas = within(canvasElement);
 		const account = within(canvas.getByTestId("instance-row-claude"));
 		await userEvent.click(
 			account.getByRole("button", { name: /Personal Claude/ }),
 		);
-		await expect(
-			account.queryByTestId("remove-instance-btn"),
-		).not.toBeInTheDocument();
+		// Every account can be removed, the default included (conduit-test-g4zp.10).
+		await expect(account.getByTestId("remove-instance-btn")).toBeVisible();
 		await expect(
 			account.queryByText("Applies after restart"),
 		).not.toBeInTheDocument();
@@ -756,6 +985,10 @@ export const DefaultClaudeAccountEdit: Story = {
 		await expect(
 			canvas.queryByRole("radiogroup", { name: "Type" }),
 		).not.toBeInTheDocument();
+		await scrollSettingsIntoView(
+			canvas.getByTestId("instance-form"),
+			"nearest",
+		);
 	},
 };
 
@@ -768,6 +1001,7 @@ export const InstancesEmpty: Story = {
 				(instance) => instance.driver === "claude",
 			),
 		});
+		return replyRpc("DetectProxy", () => ({ found: true, port: 8317 }));
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -775,13 +1009,16 @@ export const InstancesEmpty: Story = {
 			"opencode serve --port 4098",
 		);
 		const guides = canvas.getByTestId("opencode-setup-guides");
-		applyDetectProxyResponse({ found: true, port: 8317 });
 		await waitFor(() =>
 			expect(guides).toHaveTextContent("Direct key · CCS ✓ · Custom"),
 		);
 		await expect(within(guides).getByRole("button")).toHaveAttribute(
 			"aria-expanded",
 			"false",
+		);
+		await scrollSettingsIntoView(
+			canvas.getByTestId("add-instance-btn"),
+			"start",
 		);
 	},
 };
@@ -790,6 +1027,7 @@ export const InstanceAddOpenCode: Story = {
 	args: { initialTab: "server" },
 	beforeEach: populateInstances,
 	play: async ({ canvasElement }) => {
+		await canvasElement.ownerDocument.fonts.ready;
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByTestId("add-instance-btn"));
 		await userEvent.click(canvas.getByTestId("instance-form-driver-opencode"));
@@ -808,6 +1046,10 @@ export const InstanceAddOpenCode: Story = {
 		await expect(canvas.getByTestId("instance-form-save")).toHaveTextContent(
 			"Add instance",
 		);
+		await scrollSettingsIntoView(
+			canvas.getByTestId("instance-form"),
+			"nearest",
+		);
 	},
 };
 
@@ -825,6 +1067,7 @@ export const Hover: Story = {
 export const InstanceForm: Story = {
 	args: { initialTab: "server" },
 	play: async ({ canvasElement }) => {
+		await canvasElement.ownerDocument.fonts.ready;
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByTestId("add-instance-btn"));
 		await expect(canvas.getByTestId("instance-form-save")).toBeVisible();
@@ -833,7 +1076,11 @@ export const InstanceForm: Story = {
 		// baseline would otherwise bake in Add's focus ring — and that ring is
 		// exactly what changes when Add moves onto Button. A fidelity baseline
 		// has to be blind to the migration it is about to police.
-		await userEvent.click(canvas.getByTestId("instance-form-name"));
+		canvas.getByTestId("instance-form-name").focus({ preventScroll: true });
+		await scrollSettingsIntoView(
+			canvas.getByTestId("instance-form"),
+			"nearest",
+		);
 	},
 };
 

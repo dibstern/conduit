@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Page } from "@playwright/test";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
@@ -9,6 +9,7 @@ import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 const sections = [
 	["general", "General", "[data-testid=settings-composer-controls-icons]"],
+	["terminal", "Terminal", "#settings-terminal-desktop"],
 	[
 		"models",
 		"Models & agents",
@@ -19,6 +20,7 @@ const sections = [
 		"Claude",
 		"[data-testid=claude-setting-defaultPermissionMode-select]",
 	],
+	["surfacing", "Surfacing", "[data-testid=surfacing-settings-general]"],
 	["archived", "Archived", "section[aria-label='Archived sessions']"],
 	["usage", "Usage", "#usage-settings"],
 	["server", "Server", "#instances-settings"],
@@ -60,6 +62,7 @@ for (const [viewportName, viewport] of [
 					driver: "claude",
 					port: 0,
 					managed: false,
+					usageEligible: true,
 					status: "healthy",
 					restartCount: 0,
 					createdAt: now,
@@ -70,6 +73,7 @@ for (const [viewportName, viewport] of [
 					driver: "claude",
 					port: 0,
 					managed: false,
+					usageEligible: true,
 					status: "unhealthy",
 					restartCount: 0,
 					createdAt: now,
@@ -146,6 +150,7 @@ for (const [viewportName, viewport] of [
 								title: "Settings shell",
 								status: "idle",
 								projectSlug: "e2e-replay",
+								accountId: "personal",
 							},
 						],
 					},
@@ -317,21 +322,36 @@ for (const [viewportName, viewport] of [
 			await expect(page.locator("#instances-settings")).toBeInViewport();
 			// The anchor scrolls to the top unless the section is too short to
 			// scroll that far, in which case it scrolls to the end.
-			const { anchorOffset, atScrollEnd } = await page
+			const geometry = await page
 				.locator("#instances-settings")
 				.evaluate((element) => {
 					const scroller = element.closest(".settings-content");
 					if (!scroller) throw new Error("no .settings-content");
+					const anchorOffset =
+						element.getBoundingClientRect().top -
+						scroller.getBoundingClientRect().top;
 					return {
-						anchorOffset:
-							element.getBoundingClientRect().top -
-							scroller.getBoundingClientRect().top,
+						anchorOffset,
+						scrollTop: scroller.scrollTop,
+						desiredStartScrollTop: scroller.scrollTop + anchorOffset,
+						devicePixelRatio: window.devicePixelRatio,
 						atScrollEnd:
 							scroller.scrollTop + scroller.clientHeight >=
 							scroller.scrollHeight - 1,
 					};
 				});
-			expect(anchorOffset).toBeGreaterThanOrEqual(0);
+			const geometryPath = testInfo.outputPath(
+				`settings-anchor-${viewportName}.json`,
+			);
+			await writeFile(geometryPath, `${JSON.stringify(geometry, null, 2)}\n`);
+			await testInfo.attach(`settings-anchor-${viewportName}`, {
+				path: geometryPath,
+				contentType: "application/json",
+			});
+			const { anchorOffset, atScrollEnd, devicePixelRatio } = geometry;
+			expect(
+				Math.round(anchorOffset * devicePixelRatio),
+			).toBeGreaterThanOrEqual(0);
 			if (!atScrollEnd) expect(anchorOffset).toBeLessThanOrEqual(15);
 			await page.getByTestId("settings-close-btn").click();
 			await expect(panel).toBeHidden();

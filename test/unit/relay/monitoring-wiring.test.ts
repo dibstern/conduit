@@ -6,6 +6,7 @@ import { Effect, Layer, ManagedRuntime, Option, PubSub, Scope } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
+import { EventId } from "../../../src/lib/contracts/stored-event.js";
 import type { Alert } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	AccountDirectory,
@@ -28,6 +29,7 @@ import {
 import { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Message } from "../../../src/lib/instance/sdk-types.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
@@ -389,7 +391,10 @@ describe("wireMonitoring shutdown", () => {
 		harness.result.stopMonitoring();
 	});
 
-	it("production poller pushes a root completion once using the primary alert identity", async () => {
+	it.each([
+		"idle",
+		"error",
+	] as const)("production poller pushes a root %s once using the primary alert identity", async (status) => {
 		const directory = mkdtempSync(join(tmpdir(), "conduit-poller-alert-"));
 		const dbPath = join(directory, "events.db");
 		const sendToAll = vi.fn(async () => ({
@@ -409,9 +414,87 @@ describe("wireMonitoring shutdown", () => {
 					() => Effect.void,
 					pushManager,
 					dbPath,
-					relay === 0,
+					false,
 				);
 				try {
+					if (!harness.runtime) throw new Error("Missing test runtime");
+					const owner = { provider: "opencode", metadata: { runId: "run-1" } };
+					const idle = canonicalEvent(
+						"session.status",
+						"root",
+						{ sessionId: "root", status },
+						{ ...owner, eventId: EventId.make(`root-${status}`), createdAt: 5 },
+					);
+					if (relay === 0)
+						await harness.runtime.runPromise(
+							Effect.gen(function* () {
+								const commit = yield* makeCommitAndSignal;
+								yield* commit([
+									canonicalEvent("session.created", "root", {
+										sessionId: "root",
+										title: "root",
+										provider: "opencode",
+									}),
+									canonicalEvent(
+										"run.requested",
+										"root",
+										{
+											runId: "run-1",
+											inputId: "input-1",
+										},
+										{ ...owner, createdAt: 1 },
+									),
+									canonicalEvent(
+										"message.created",
+										"root",
+										{
+											sessionId: "root",
+											messageId: "input-1",
+											inputId: "input-1",
+											role: "user",
+										},
+										{ ...owner, createdAt: 1 },
+									),
+									canonicalEvent(
+										"run.started",
+										"root",
+										{
+											requestedRunId: "run-1",
+											inputId: "input-1",
+										},
+										{ ...owner, createdAt: 2 },
+									),
+									canonicalEvent(
+										"message.created",
+										"root",
+										{
+											sessionId: "root",
+											messageId: "message-1",
+											parentID: "input-1",
+											role: "assistant",
+										},
+										{ ...owner, createdAt: 3 },
+									),
+									canonicalEvent(
+										"turn.completed",
+										"root",
+										{ messageId: "message-1" },
+										{ ...owner, createdAt: 4 },
+									),
+									idle,
+								]);
+								const sql = yield* SqlClient.SqlClient;
+								expect(yield* sql`SELECT status FROM provider_runs`).toEqual([
+									{ status: status === "idle" ? "completed" : "error" },
+								]);
+								expect(yield* sql`SELECT state, run_id FROM turns`).toEqual([
+									{
+										state: status === "idle" ? "completed" : "error",
+										run_id: "run-1",
+									},
+								]);
+							}),
+						);
 					harness.result.setMonitoringState({
 						sessions: new Map([
 							[
@@ -422,12 +505,7 @@ describe("wireMonitoring shutdown", () => {
 					});
 					harness.emitStatus({ root: { type: "idle" } });
 					await flushPromises();
-					if (!harness.runtime) throw new Error("Missing test runtime");
-					const primary = turnEndedAlert(
-						canonicalEvent("turn.completed", "root", {
-							messageId: "message-1",
-						}),
-					);
+					const primary = turnEndedAlert(idle);
 					if (!primary) throw new Error("Missing turn-ended alert");
 					await harness.runtime.runPromise(
 						sendPushForEventEffect(pushManager, primary, createSilentLogger(), {
@@ -444,7 +522,13 @@ describe("wireMonitoring shutdown", () => {
 				}
 			}
 			expect(sendToAll).toHaveBeenCalledWith(
-				expect.objectContaining({ alertId: '["root","message-1","done"]' }),
+				expect.objectContaining({
+					alertId: JSON.stringify(
+						status === "idle"
+							? ["root", "root-idle", "done"]
+							: ["root", "root-error", "error", "Provider error"],
+					),
+				}),
 			);
 		} finally {
 			rmSync(directory, { recursive: true, force: true });
@@ -772,7 +856,7 @@ async function createEffectHarness(
 	let changed: ChangedCallback | undefined;
 	let resolveMessages: ((messages: Message[]) => void) | undefined;
 	const messages = vi.fn(
-		() =>
+		(_sessionId: string) =>
 			new Promise<Message[]>((resolve) => {
 				resolveMessages = resolve;
 			}),
@@ -802,6 +886,7 @@ async function createEffectHarness(
 			establishOpenCodeSession: unused,
 			createSession: unused,
 			deleteSession: unused,
+			deleteArchivedSessions: unused,
 			renameSession: unused,
 			markSessionRead: unused,
 			markSessionUnread: unused,
@@ -842,7 +927,11 @@ async function createEffectHarness(
 	const statusLog = createSilentLogger();
 	const statusWarn = vi.spyOn(statusLog, "warn");
 	const monitoring = wireMonitoringEffect({
-		client: { session: { messages } },
+		readMessages: (sessionId) =>
+			Effect.tryPromise({
+				try: () => messages(sessionId),
+				catch: (cause) => cause,
+			}),
 		wsHandler: {
 			getClientsForSession,
 		},

@@ -13,9 +13,13 @@ import {
 	ReadQueryEffectTag,
 	type SessionScope,
 } from "../../../persistence/effect/read-query-effect.js";
-import { shouldArchiveIdleSession } from "../../../session/auto-archive-policy.js";
+import {
+	shouldArchiveIdleSession,
+	shouldDeleteArchivedSessionTree,
+} from "../../../session/auto-archive-policy.js";
 import { readPersistedAutoArchiveFacts } from "../../../session/auto-archive-sweep.js";
-import { shouldSettleIdleSession } from "../../../session/auto-settle-policy.js";
+import { readPersistedAutoDeleteFacts } from "../../../session/auto-delete-archived-sweep.js";
+import { getAutoSettleOutlook } from "../../../session/auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "../../../session/auto-settle-reader.js";
 import type {
 	ArchivedSessionQueryOptions,
@@ -86,27 +90,41 @@ const readProjectSessions = (
 			makeReadQueryEffect,
 		).pipe(Layer.provideMerge(database));
 
-		const sessions = yield* Effect.gen(function* () {
+		const result = yield* Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const readQuery = yield* ReadQueryEffectTag;
 			const rows = yield* makeSessionRows({
 				slug: projectSlug,
 				folders: project.folders,
 				gitCache,
 				refreshGit: true,
 			});
-			return yield* rows.list(options);
+			return yield* sql.withTransaction(
+				Effect.gen(function* () {
+					const settledCount = yield* readQuery.countSettledSessions(
+						{ projectIds: [projectSlug] },
+						options,
+					);
+					const sessions = yield* rows.list(options);
+					return { sessions, settledCount };
+				}),
+			);
 		}).pipe(Effect.provide(readQueryLayer));
-		return sessions.map(
-			(session): ProjectSessionCandidate => ({
-				sortKey: {
-					at:
-						options.orderColumn === "archived_at"
-							? (session.archivedAt ?? 0)
-							: session.updatedAt,
-					id: session.id,
-				},
-				session,
-			}),
-		);
+		return {
+			settledCount: result.settledCount,
+			sessions: result.sessions.map(
+				(session): ProjectSessionCandidate => ({
+					sortKey: {
+						at:
+							options.orderColumn === "archived_at"
+								? (session.archivedAt ?? 0)
+								: session.updatedAt,
+						id: session.id,
+					},
+					session,
+				}),
+			),
+		};
 	});
 
 /** Check recovery work without acquiring the project's relay or starting providers. */
@@ -120,7 +138,8 @@ export const hasProviderRecoveryCandidate = (
 			const sql = yield* SqlClient.SqlClient;
 			const rows = yield* sql<{ needs_recovery: number }>`SELECT EXISTS (
 				SELECT 1 FROM provider_command_outbox
-				WHERE project_key = ${project.slug} AND provider_id = 'claude' AND effect_type = 'send_turn' AND status = 'running'
+				WHERE project_key = ${project.slug} AND (provider_id = 'claude' OR provider_id IN ${sql.in(openCodeInstanceIds)})
+					AND effect_type = 'send_turn' AND status = 'running'
 			) OR EXISTS (
 				SELECT 1 FROM sessions AS session
 				JOIN session_providers AS binding ON binding.session_id = session.id
@@ -130,6 +149,15 @@ export const hasProviderRecoveryCandidate = (
 					SELECT 1 FROM pending_approvals AS approval
 					WHERE approval.session_id = session.id AND approval.status = 'pending'
 				))
+				) OR EXISTS (
+					SELECT 1 FROM pending_inputs pending
+					JOIN sessions session ON session.id = pending.session_id
+					WHERE session.project_id = ${project.slug} AND pending.state = 'steering'
+					AND NOT EXISTS (SELECT 1 FROM messages WHERE input_id = pending.input_id)
+					AND (SELECT status FROM provider_command_outbox
+						WHERE project_key = ${project.slug} AND command_id = pending.input_id
+						AND session_id = pending.session_id AND effect_type = 'send_turn'
+						ORDER BY request_sequence DESC LIMIT 1) = 'failed'
 			) AS needs_recovery`;
 			return rows[0]?.needs_recovery === 1;
 		}).pipe(Effect.provide(database));
@@ -167,8 +195,8 @@ export const hasColdAutoSettleCandidate = (
 			undefined,
 			project.folders[0],
 		).pipe(Effect.provide(database));
-		return [...facts.values()].some((item) =>
-			shouldSettleIdleSession(item, now, idleWindowMs),
+		return [...facts.values()].some(
+			(item) => getAutoSettleOutlook(item, now, idleWindowMs).kind === "due",
 		);
 	});
 
@@ -184,6 +212,21 @@ export const hasColdAutoArchiveCandidate = (
 		);
 		return [...facts.values()].some((item) =>
 			shouldArchiveIdleSession(item, now, idleWindowMs),
+		);
+	});
+
+export const hasColdAutoDeleteCandidate = (
+	project: Pick<StoredProject, "slug" | "folders">,
+	now: number,
+	windowMs: number,
+) =>
+	Effect.gen(function* () {
+		const database = yield* projectReadDatabase(project);
+		const trees = yield* readPersistedAutoDeleteFacts(project.slug).pipe(
+			Effect.provide(database),
+		);
+		return [...trees.values()].some(({ facts }) =>
+			shouldDeleteArchivedSessionTree(facts, now, windowMs),
 		);
 	});
 
@@ -213,6 +256,7 @@ const listProjectSessions = (
 					if (reason !== undefined) {
 						return {
 							sessions: [],
+							settledCount: 0,
 							availability: {
 								projectSlug: project.slug,
 								available: false as const,
@@ -225,7 +269,7 @@ const listProjectSessions = (
 					);
 					if (Exit.isSuccess(exit)) {
 						return {
-							sessions: exit.value,
+							...exit.value,
 							availability: {
 								projectSlug: project.slug,
 								available: true as const,
@@ -234,6 +278,7 @@ const listProjectSessions = (
 					}
 					return {
 						sessions: [],
+						settledCount: 0,
 						availability: {
 							projectSlug: project.slug,
 							available: false as const,
@@ -262,6 +307,16 @@ const listProjectSessions = (
 
 		return {
 			sessions: page.map((candidate) => candidate.session),
+			settledCounts: projectResults.flatMap((result) =>
+				result.availability.available
+					? [
+							{
+								projectSlug: result.availability.projectSlug,
+								count: result.settledCount,
+							},
+						]
+					: [],
+			),
 			availability: projectResults.map((result) => result.availability),
 			hasMore,
 			nextCursor,

@@ -66,11 +66,30 @@ test("reports provider folder and worktree capabilities through instance info", 
 	expect(capabilities).toEqual([
 		{
 			provider: "claude",
-			capabilities: { supportsMultiFolder: true, supportsWorktree: true },
+			capabilities: {
+				supportsMultiFolder: true,
+				supportsWorktree: true,
+				supportsNewWorktree: true,
+				supportsTaskStop: true,
+			},
+		},
+		{
+			provider: "cursor",
+			capabilities: {
+				supportsMultiFolder: true,
+				supportsWorktree: false,
+				supportsNewWorktree: false,
+				supportsTaskStop: false,
+			},
 		},
 		{
 			provider: "opencode",
-			capabilities: { supportsMultiFolder: true, supportsWorktree: false },
+			capabilities: {
+				supportsMultiFolder: true,
+				supportsWorktree: false,
+				supportsNewWorktree: true,
+				supportsTaskStop: false,
+			},
 		},
 	]);
 	for (const instance of reported.instances) {
@@ -234,7 +253,7 @@ test("adds with the keyboard alone and cancels without creating a folder", async
 	await page.keyboard.press("Enter");
 	const dialog = page.getByRole("dialog", { name: "Add project", exact: true });
 	await expect(dialog).toBeVisible();
-	const input = dialog.getByRole("combobox");
+	const input = dialog.getByRole("combobox", { name: "Add folder" });
 	await expect(input).toBeFocused();
 	await page.keyboard.type(created);
 	await expect(
@@ -309,7 +328,9 @@ test("keeps a failed creation inline and the draft correctable", async ({
 	const root = realpathSync(harness.root);
 	const missingParent = join(root, "missing-parent", "notes");
 	const dialog = await openDialog(page, harness);
-	await dialog.getByRole("combobox").fill(missingParent);
+	await dialog
+		.getByRole("combobox", { name: "Add folder" })
+		.fill(missingParent);
 	await dialog.getByRole("option", { name: /New folder/ }).click();
 	await dialog.getByRole("button", { name: /^Add project/ }).click();
 	await expect(dialog.getByRole("alert")).toContainText(missingParent);
@@ -384,7 +405,7 @@ test("permission denied stays inline and keeps the selected folder", async ({
 	}
 	await dialog.getByRole("button", { name: /^Add project/ }).click();
 	await expect(dialog).toBeHidden();
-	await expect(page).toHaveURL(/\/new\?/);
+	await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
 	expect(new URL(page.url()).searchParams.get("p")).toBe("denied-folder");
 	expect(new URL(page.url()).searchParams.get("project")).toBe("denied-folder");
 });

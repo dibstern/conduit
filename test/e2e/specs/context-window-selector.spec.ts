@@ -8,6 +8,7 @@ import {
 	type MockMessage,
 	noContextWindowInitMessages,
 } from "../fixtures/mockup-state.js";
+import { openPickerRoot } from "../helpers/model-picker.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
@@ -34,6 +35,14 @@ async function setup(
 			SwitchContextWindow: (params) => {
 				const contextWindow = String(params["contextWindow"] ?? "");
 				if (contextInfo) contextInfo["contextWindow"] = contextWindow;
+				// The app rereads GetModels after a switch, as the server reports it.
+				rpc.catalog = {
+					...rpc.catalog,
+					contextWindow: {
+						contextWindow,
+						options: contextInfo?.["options"] ?? [],
+					},
+				};
 				return {
 					projectSlug: "myapp",
 					contextWindow,
@@ -59,7 +68,7 @@ async function setup(
 }
 
 async function openPicker(page: Page): Promise<void> {
-	await page.getByTestId("model-picker-trigger").click();
+	await openPickerRoot(page, page.getByTestId("model-picker-trigger"));
 	await expect(page.getByTestId("picker-row-model")).toBeVisible();
 }
 
@@ -74,9 +83,14 @@ test.describe("Picker context row", () => {
 		await expect(page.getByTestId("picker-row-context")).toBeVisible();
 		await expect(
 			page.getByTestId("picker-context-option-200k"),
-		).toHaveAttribute("aria-checked", "true");
+		).toHaveAttribute("aria-checked", "false");
+		await expect(
+			page
+				.getByTestId("picker-row-context")
+				.getByRole("radio", { checked: true }),
+		).toHaveCount(0);
 		await expect(page.getByTestId("model-picker-trigger")).toHaveAccessibleName(
-			/200K/,
+			/context Default/,
 		);
 	});
 
@@ -114,7 +128,7 @@ test.describe("Picker context row", () => {
 		await openPicker(page);
 
 		const row = page.getByTestId("picker-row-context");
-		await expect(row).toContainText("200K");
+		await expect(row).toContainText("Default");
 		await expect(row.getByRole("radio")).toHaveCount(0);
 		await expect(page.getByTestId("picker-context-option-200k")).toHaveCount(0);
 		expect(
@@ -197,7 +211,7 @@ test.describe("Picker context selection", () => {
 			sessionId: "sess-context-001",
 			contextWindow: "1m",
 		});
-		await expect(page.getByTestId("model-picker-trigger")).toHaveAccessibleName(
+		await expect(page.getByTestId("picker-selected-context")).toHaveText(
 			/1M \(beta\)/,
 		);
 		await expect(page.getByTestId("picker-context-option-1m")).toHaveAttribute(
@@ -216,7 +230,7 @@ test.describe("Picker context selection", () => {
 		await openPicker(page);
 
 		await page.getByTestId("picker-context-option-1m").click();
-		await expect(page.getByTestId("model-picker-trigger")).toHaveAccessibleName(
+		await expect(page.getByTestId("picker-selected-context")).toHaveText(
 			/1M \(beta\)/,
 		);
 
@@ -227,7 +241,7 @@ test.describe("Picker context selection", () => {
 				request.tag === "SwitchContextWindow" &&
 				request.payload["contextWindow"] === "200k",
 		);
-		await expect(page.getByTestId("model-picker-trigger")).toHaveAccessibleName(
+		await expect(page.getByTestId("picker-selected-context")).toHaveText(
 			/200K/,
 		);
 		await expect(
@@ -269,7 +283,7 @@ test.describe("Picker context selection", () => {
 			"aria-checked",
 			"true",
 		);
-		await expect(page.getByTestId("model-picker-trigger")).toHaveAccessibleName(
+		await expect(page.getByTestId("picker-selected-context")).toHaveText(
 			/1M \(beta\)/,
 		);
 	});
@@ -283,7 +297,7 @@ test.describe("Picker context selection", () => {
 
 		await expect(
 			page.getByTestId("picker-context-option-200k"),
-		).toHaveAttribute("aria-checked", "true");
+		).toHaveAttribute("aria-checked", "false");
 
 		control.sendMessage({
 			type: "context_window_info",
@@ -298,7 +312,7 @@ test.describe("Picker context selection", () => {
 			"aria-checked",
 			"true",
 		);
-		await expect(page.getByTestId("model-picker-trigger")).toHaveAccessibleName(
+		await expect(page.getByTestId("picker-selected-context")).toHaveText(
 			/1M \(beta\)/,
 		);
 	});

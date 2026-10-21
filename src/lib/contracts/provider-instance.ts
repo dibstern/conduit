@@ -20,6 +20,8 @@ export type ProviderSessionCapabilities =
 	typeof ProviderSessionCapabilitiesSchema.Type;
 
 export interface ProviderDriverTraits {
+	/** Composer provider-seam tests pin plain text and PDF delivery. */
+	readonly supportsFileAttachments: boolean;
 	/** composer-controls-words.feature pins the compact composer's behaviour control. */
 	readonly composerModeControl: "agent" | "permission-mode";
 	/** permission-modes.test.ts pins the modes each provider can enforce. */
@@ -71,6 +73,8 @@ export interface ProviderDriverTraits {
 	readonly emitsMessageParentIds: boolean;
 	/** steer-during-tool-folds.jsonl pins native delivery; otherwise inputs stay queued. */
 	readonly steering: "native" | "queue";
+	/** Ordinary interrupt preserves unplaced native steers. */
+	readonly keepsPendingSteersOnInterrupt: boolean;
 	/** provider-instance.test.ts pins false until restart-safe prompt replies are captured. */
 	readonly promptsSurviveRestart: boolean;
 	/** cursor-subagents.test.ts pins child transcripts that cannot be resumed. */
@@ -82,6 +86,7 @@ export const PROVIDER_DRIVERS = {
 	// additionalDirectories and cwd/resume are pinned by extra-folder-read-turn
 	// and enter-worktree-turn / exit-worktree-keep-turn in claude-sdk-traces.
 	claude: {
+		supportsFileAttachments: true,
 		composerModeControl: "permission-mode",
 		permissionModes: ["ask", "acceptEdits", "full", "plan", "auto", "dontAsk"],
 		supportsQuestionSkip: false,
@@ -110,6 +115,7 @@ export const PROVIDER_DRIVERS = {
 		emitsMessageParentIds: false,
 		// steer-during-tool-folds.jsonl and claude-steer-recovery.test.ts pin native delivery and requeue.
 		steering: "native",
+		keepsPendingSteersOnInterrupt: true,
 		// provider-instance.test.ts pins false; no restart-safe approval/question reply capture yet.
 		promptsSurviveRestart: false,
 		readOnlySubagents: false,
@@ -118,6 +124,7 @@ export const PROVIDER_DRIVERS = {
 	// Managed launches/recreation are pinned by opencode-launch-worktree.test.ts.
 	// Native moves reject destinations belonging to another OpenCode project.
 	opencode: {
+		supportsFileAttachments: true,
 		composerModeControl: "agent",
 		permissionModes: ["ask", "acceptEdits", "full"],
 		supportsQuestionSkip: true,
@@ -148,11 +155,13 @@ export const PROVIDER_DRIVERS = {
 		// (test/fixtures/opencode-wire-traces/classic-prompt-during-tool.json).
 		// Flip to native only after approval, image and subagent captures on OpenCode 1.19.1.
 		steering: "queue",
+		keepsPendingSteersOnInterrupt: false,
 		// provider-instance.test.ts pins false; no restart-safe approval/question reply capture yet.
 		promptsSurviveRestart: false,
 		readOnlySubagents: false,
 	},
 	cursor: {
+		supportsFileAttachments: false,
 		composerModeControl: "permission-mode", // cursor-turn.feature pins the no-per-call-approval notice.
 		permissionModes: ["ask", "acceptEdits", "full", "plan", "auto"], // cursor-turn.test.ts pins sandbox reopen; sandbox-anchored pins enforcement.
 		supportsQuestionSkip: false, // Skipping questions needs a captured Cursor contract.
@@ -182,6 +191,7 @@ export const PROVIDER_DRIVERS = {
 		// steer.jsonl pins native text delivery; cursor-steer.test.ts pins missing
 		// methods, declined/image/pending steers and crash recovery through the inbox.
 		steering: "native",
+		keepsPendingSteersOnInterrupt: false,
 		readOnlySubagents: true, // cursor-subagents.test.ts pins rejection of child input.
 		// cursor-question.test.ts pins an ask_user wait answered after daemon restart on the retained runner.
 		promptsSurviveRestart: true,

@@ -105,7 +105,10 @@ export interface InstanceManagerConfig {
 
 const DEFAULT_CONFIG: InstanceManagerConfig = {
 	maxInstances: 5,
-	healthPollIntervalMs: 5000,
+	healthPollIntervalMs:
+		process.env["NODE_ENV"] === "test"
+			? Number(process.env["CONDUIT_TEST_HEALTH_POLL_INTERVAL_MS"] ?? 5000)
+			: 5000,
 	maxRestartsPerWindow: 5,
 	restartWindowMs: 60_000,
 };
@@ -719,6 +722,31 @@ export const getManagedOpenCodeProcessIdentity = (instanceId: string) =>
 			? record.value.processIdentity?.token
 			: undefined;
 	});
+
+/** Cached stopped status can also mean failed adoption of a still-live process. */
+export const isManagedOpenCodeStopped = (instanceId: string) =>
+	withManagedOpenCodeLock(
+		Effect.gen(function* () {
+			const state = yield* Ref.get(yield* InstanceManagerStateTag);
+			const instance = HashMap.get(state.instances, instanceId);
+			const record = HashMap.get(
+				state.managedProcesses ?? HashMap.empty(),
+				instanceId,
+			);
+			return (
+				Option.isSome(instance) &&
+				instance.value.managed &&
+				getProviderDriver(instance.value.driver ?? "opencode")
+					?.runsOpenCodeServer === true &&
+				Option.isSome(record) &&
+				(record.value.pid !== undefined ||
+					record.value.processIdentity !== undefined) &&
+				(!record.value.pid || !isProcessAlive(record.value.pid)) &&
+				(!record.value.processIdentity ||
+					!isProcessAlive(record.value.processIdentity.supervisorPid))
+			);
+		}),
+	);
 
 /** Accounts own configuration; OpenCode contributes only process recovery data. */
 export function persistedInstanceConfigs(

@@ -389,7 +389,9 @@ test("opens the heavy session after a restart under load", async ({
 	await harness.terminate();
 	const fixture = await seedSessionLoadFixture(harness.daemonStorePath(), {
 		projectId: "process-test",
+		seen: true,
 	});
+	harness.disableIdlePolicies();
 	const storeBytes = statSync(harness.daemonStorePath()).size;
 	const warmMetrics = join(harness.root, "server-metrics-warm.json");
 	// The harness probe opens a detail stream per sidebar row; skip it here and
@@ -402,6 +404,12 @@ test("opens the heavy session after a restart under load", async ({
 
 	const driver = await harness.connect(undefined, undefined, undefined, false);
 	await expect.poll(() => harness.generations.at(-1)?.fakeSdkActive).toBe(true);
+	const approvalSession = await driver.createSession(
+		"Approval read sharing",
+		undefined,
+		"claude",
+		{ permissionMode: "ask" },
+	);
 	const streams: string[] = [];
 	for (let index = 0; index < STREAMS; index++) {
 		const sessionId = await driver.createSession(`Stream ${index}`);
@@ -419,6 +427,7 @@ test("opens the heavy session after a restart under load", async ({
 	await driver.close();
 
 	const frames: Frame[] = [];
+	const approvalFrames: { device: number; kind: string; id: string }[] = [];
 	// Whole /rpc payloads the opener receives, kept only while sizes are pinned.
 	let pinned: { bytes: number; payload: string }[] | undefined;
 	const pages: Page[] = [];
@@ -454,6 +463,39 @@ test("opens the heavy session after a restart under load", async ({
 				(direction: Frame["direction"]) =>
 				({ payload }: { payload: string | Buffer }) => {
 					const bytes = Buffer.byteLength(payload);
+					if (direction === "received" && path === "/rpc") {
+						const message: {
+							_tag?: string;
+							values?: {
+								_tag: string;
+								item?: {
+									_tag?: string;
+									sessionId?: string;
+									requestId?: string;
+								};
+								id?: string;
+							}[];
+						} = JSON.parse(payload.toString());
+						for (const envelope of message.values ?? []) {
+							if (
+								envelope._tag === "upsert" &&
+								envelope.item?._tag === "permission" &&
+								envelope.item.sessionId === approvalSession &&
+								envelope.item.requestId
+							)
+								approvalFrames.push({
+									device,
+									kind: "upsert",
+									id: envelope.item.requestId,
+								});
+							else if (envelope._tag === "remove" && envelope.id)
+								approvalFrames.push({
+									device,
+									kind: "remove",
+									id: envelope.id,
+								});
+						}
+					}
 					frames.push({
 						device,
 						socket: path,
@@ -498,6 +540,7 @@ test("opens the heavy session after a restart under load", async ({
 	);
 	const warmStart = await serverMetrics(warmMetrics);
 	const warmFrom = Date.now();
+	// This fixed sampling window measures sustained stream load and read sharing.
 	await opener.waitForTimeout(SETTLE_MS);
 	const warmTo = Date.now();
 	const warm = await serverMetrics(warmMetrics);
@@ -567,6 +610,7 @@ test("opens the heavy session after a restart under load", async ({
 	await expect(
 		opener.locator(".msg-assistant").filter({ hasText: HEAVY_FINAL_TEXT }),
 	).toBeVisible();
+	// Match the warm sampling window to measure sustained load after reconnecting.
 	await opener.waitForTimeout(SETTLE_MS);
 	const restartTo = Date.now();
 	// Rows versioned past the stopped store whose session took no event since:
@@ -652,8 +696,10 @@ test("opens the heavy session after a restart under load", async ({
 		false,
 	);
 	const longSession = await longDriver.createSession("Long turn");
+	// Status paging puts 5,001 unread roots ahead of the read tool session.
+	// Keep both recent sessions in the page while switching away and back.
 	await new AppPage(opener).goto(
-		`${harness.baseUrl}/s/${longSession}?p=process-test`,
+		`${harness.baseUrl}/s/${longSession}?p=process-test&group=time`,
 	);
 	pinned = [];
 	// A loaded server takes a few hundred ms a call.
@@ -734,22 +780,21 @@ test("opens the heavy session after a restart under load", async ({
 	// Away from the session, a follow-up turn lands and the server restarts;
 	// coming back resumes from the cursor the device holds.
 	const pick = (page: Page, id: string) =>
-		page.evaluate(
-			(id) =>
-				document
-					.querySelector<HTMLElement>(
-						`[data-session-id="${id}"] .session-item-title`,
-					)
-					?.click(),
-			id,
-		);
+		page
+			.locator(`[data-session-id="${id}"] .session-item-title`)
+			.dispatchEvent("click");
 	await pick(opener, toolSession);
 	await expect(opener).toHaveURL(new RegExp(toolSession));
 	await longDriver.send(longSession, `load-tools-${FOLLOW_UP_CALLS}`, 60_000);
 	await longDriver.close();
 	await harness.terminate();
 	const longRestartAt = Date.now();
-	await harness.restart({ keepPort: true, skipBrowserProbe: true });
+	const approvalMetrics = join(harness.root, "server-metrics-approvals.json");
+	await harness.restart({
+		keepPort: true,
+		skipBrowserProbe: true,
+		metricsFile: approvalMetrics,
+	});
 	await expect
 		.poll(
 			() =>
@@ -762,12 +807,16 @@ test("opens the heavy session after a restart under load", async ({
 			{ timeout: 30_000 },
 		)
 		.toBe(true);
-	await opener.waitForTimeout(SETTLE_MS);
+	await expect(
+		opener.locator("#messages > div:not([inert]) .turn-activity-toggle").last(),
+	).toContainText("Worked");
 	pinned = [];
 	await pick(opener, longSession);
 	const followUp = `load-tools-${FOLLOW_UP_CALLS}`;
 	await expect(opener.locator("#messages")).toContainText(followUp);
-	await opener.waitForTimeout(SETTLE_MS);
+	await expect(
+		opener.locator("#messages > div:not([inert]) .turn-activity-toggle").last(),
+	).toContainText(new RegExp(`Worked.*${FOLLOW_UP_CALLS} commands`));
 	const resumed = pinned;
 	pinned = undefined;
 
@@ -793,16 +842,18 @@ test("opens the heavy session after a restart under load", async ({
 		`${harness.baseUrl}/s/${longSession}?p=process-test`,
 	);
 	await expect(cold.locator("#messages")).toContainText(followUp);
-	await cold.waitForTimeout(SETTLE_MS);
+	await expect(
+		cold.locator("#messages > div:not([inert]) .turn-activity-toggle").last(),
+	).toContainText(new RegExp(`Worked.*${FOLLOW_UP_CALLS} commands`));
 	const transcriptOf = async (page: Page) => {
 		const collapsed = page.locator(
 			'#messages .turn-activity-toggle[aria-expanded="false"]',
 		);
 		while ((await collapsed.count()) > 0) await collapsed.first().click();
-		// The scroll button shows only while the view is detached: leave it out,
-		// so a scroll race can neither fake nor mask a difference in content.
+		// The scroll button shows only while the view is detached: leave its rail
+		// out, so a scroll race can neither fake nor mask a difference in content.
 		return (
-			await page.locator("#messages > :not(#scroll-btn)").allInnerTexts()
+			await page.locator("#messages > :not(:has(#scroll-btn))").allInnerTexts()
 		).join("\n");
 	};
 	const [resumedTranscript, coldTranscript] = [
@@ -971,5 +1022,65 @@ test("opens the heavy session after a restart under load", async ({
 		carriedFollowUp: true,
 	});
 	expect(resumedTranscript).toBe(coldTranscript);
+
+	const approvalStarted = Date.now();
+	await new AppPage(opener).goto(
+		`${harness.baseUrl}/s/${approvalSession}?p=process-test`,
+	);
+	const approvalStart = await serverMetrics(approvalMetrics);
+	await new AppPage(opener).sendMessage("approval-read-sharing");
+	await expect
+		.poll(
+			() =>
+				new Set(
+					approvalFrames
+						.filter((frame) => frame.kind === "upsert")
+						.map((frame) => frame.device),
+				).size,
+		)
+		.toBe(DEVICES);
+	const approvalId = approvalFrames.find(
+		(frame) => frame.kind === "upsert",
+	)?.id;
+	if (!approvalId) throw new Error("No approval delivered");
+	await opener
+		.locator(".permission-card")
+		.getByRole("button", { name: "Allow", exact: true })
+		.click();
+	await expect
+		.poll(
+			() =>
+				new Set(
+					approvalFrames
+						.filter(
+							(frame) => frame.kind === "remove" && frame.id === approvalId,
+						)
+						.map((frame) => frame.device),
+				).size,
+		)
+		.toBe(DEVICES);
+	const approvalEnd = await serverMetrics(approvalMetrics);
+	const approvalReads = serverWindow(
+		approvalStart,
+		approvalEnd,
+		approvalStarted,
+		Date.now(),
+	).bySource["approvals"];
+	expect(approvalReads?.reads["window"]).toBeGreaterThan(0);
+	expect(approvalReads?.reads["window"]).toBe(approvalReads?.windowsRead);
+	const approvalReport = testInfo.outputPath("approval-read-sharing.json");
+	writeFileSync(
+		approvalReport,
+		JSON.stringify(
+			{
+				frames: approvalFrames,
+				reads: approvalReads,
+				ms: Date.now() - approvalStarted,
+			},
+			null,
+			2,
+		),
+	);
+	await testInfo.attach("approval-read-sharing", { path: approvalReport });
 	for (const page of pages) await page.context().close();
 });

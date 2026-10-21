@@ -11,8 +11,10 @@ import {
 	handleModelList,
 	selectInstance,
 } from "../../stores/discovery.svelte.js";
+import { instanceState } from "../../stores/instance.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
+import { mockClaudeAccount, mockOpenCodeAccount } from "../../stories/mocks.js";
 import { openSessionForSetup } from "../../stories/session-setup.js";
 import type { SessionPermissionMode } from "../../types.js";
 import PermissionModeSelector from "./PermissionModeSelector.svelte";
@@ -50,6 +52,7 @@ function seedModel(provider: "claude" | "opencode"): void {
 			models: [{ id: "story-model", name: "Story model", provider }],
 		},
 	];
+	instanceState.instances = [mockClaudeAccount, mockOpenCodeAccount];
 	handleModelList({ providers });
 	selectInstance(provider);
 	applyGetModelsResponse({
@@ -73,12 +76,12 @@ function pendingApprovals(): () => void {
 }
 
 const ranked = [
-	["dontAsk", "Never ask", "Denies anything not pre-approved.", true],
-	["plan", "Plan", "Reads and proposes. No edits.", true],
-	["ask", "Ask", "Asks before each edit or command.", false],
-	["acceptEdits", "Edits", "File edits run without asking.", false],
-	["auto", "Auto", "A model approves or denies each action.", true],
-	["full", "Full access", "Everything runs. No prompts.", false],
+	["dontAsk", "Never ask", "Denies anything not pre-approved", true],
+	["plan", "Plan", "Reads and plans, changes nothing", true],
+	["ask", "Ask before edits", "The default", false],
+	["acceptEdits", "Auto-accept edits", "Still asks before commands", false],
+	["auto", "Auto", "A model approves or denies each action", true],
+	["full", "Full access", "Never asks. Use in a sandbox", false],
 ] as const;
 
 async function assertMode(
@@ -88,10 +91,9 @@ async function assertMode(
 	await waitFor(() => expect(discoveryState.permissionMode).toBe(mode));
 	await tick();
 	const badge = within(canvasElement).queryByTestId("permission-mode-badge");
-	if (sessionViewState.compact && mode === "ask") {
-		await expect(badge).not.toBeInTheDocument();
-		return;
-	}
+	await expect(badge).toBeVisible();
+	await expect(badge?.textContent?.trim()).toBe("");
+	await expect(badge?.querySelector("svg")).toBeInTheDocument();
 	const label = ranked.find(([value]) => value === mode)?.[1];
 	await expect(badge).toHaveAccessibleName(
 		new RegExp(`Approvals:? ${label}\\. Open options`),
@@ -124,6 +126,7 @@ const meta = {
 	parameters: { layout: "centered" },
 	beforeEach: () => {
 		const previousSession = sessionState.currentId;
+		const previousInstances = instanceState.instances;
 		const restoreViewport = viewport(1280);
 		clearDiscoveryState();
 		openSessionForSetup(null);
@@ -133,6 +136,7 @@ const meta = {
 			restoreViewport();
 			clearDiscoveryState();
 			openSessionForSetup(previousSession);
+			instanceState.instances = previousInstances;
 		};
 	},
 } satisfies Meta<typeof PermissionModeSelector>;
@@ -175,6 +179,7 @@ export const DropdownOpen: Story = {
 		);
 		await expect(menu).toBeVisible();
 		await expect(menu).toHaveAttribute("role", "menu");
+		await expect(within(menu).getAllByRole("separator")).toHaveLength(1);
 		await expect(
 			within(menu).getByTestId("permission-mode-option-ask"),
 		).toHaveAttribute("aria-checked", "true");
@@ -192,6 +197,24 @@ export const DropdownOpen: Story = {
 			);
 		}
 	},
+};
+
+export const DropdownOpenLight: Story = {
+	...DropdownOpen,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
+};
+
+export const PhoneDefault: Story = {
+	beforeEach: () => viewport(393),
+	play: async ({ canvasElement }) => {
+		await assertMode(canvasElement, "ask");
+	},
+};
+
+export const PhoneDefaultLight: Story = {
+	...PhoneDefault,
+	globals: { theme: "light" },
 };
 
 export const Hover: Story = {
@@ -343,13 +366,10 @@ export const Responsive: Story = {
 	beforeEach: () => viewport(393),
 	play: async ({ canvasElement }) => {
 		await assertMode(canvasElement, "ask");
-		const restoreViewport = viewport(768);
-		try {
+		for (const width of [296, 366, 395, 768, 1280]) {
+			viewport(width);
 			await assertMode(canvasElement, "ask");
-		} finally {
-			restoreViewport();
 		}
-		await assertMode(canvasElement, "ask");
 	},
 };
 
@@ -357,7 +377,6 @@ export const OpenCodeNormalizesAuto: Story = {
 	beforeEach: () => {
 		seedModel("opencode");
 		setMode("auto");
-		return viewport(393);
 	},
 	play: async ({ canvasElement }) => {
 		await assertMode(canvasElement, "ask");

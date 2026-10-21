@@ -1,12 +1,15 @@
 import { join } from "node:path";
 import { Deferred, Effect, Layer, Ref } from "effect";
 import type { AccountsState } from "../../src/lib/account-directory.js";
+import { AccountPictureNone } from "../../src/lib/domain/daemon/Layers/account-picture-layer.js";
+import { CategorySetLive } from "../../src/lib/domain/daemon/Layers/category-set-layer.js";
 import { ShutdownSignalTag } from "../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { DaemonWsRpcHandlersLive } from "../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { KeepAwakeTag } from "../../src/lib/domain/daemon/Layers/keep-awake-layer.js";
 import { OpenCodeInstancesLive } from "../../src/lib/domain/daemon/Layers/opencode-instances-layer.js";
 import { PortScannerTag } from "../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
 import { TailscaleCliTag } from "../../src/lib/domain/daemon/Layers/tailscale-serve-layer.js";
+import { UserAvatarLive } from "../../src/lib/domain/daemon/Layers/user-avatar-layer.js";
 import type { AccountDirectory } from "../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	ConfigPersistenceNoopLive,
@@ -32,6 +35,11 @@ import {
 	type InstanceManagerStateTag,
 	makeInstanceManagerStateLive,
 } from "../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import {
+	MessageSurfacingSettings,
+	type MessageSurfacingSettingsOptions,
+	makeMessageSurfacingSettings,
+} from "../../src/lib/domain/daemon/Services/message-surfacing-settings.js";
 import {
 	makeProjectRegistryLive,
 	type ProjectRegistryTag,
@@ -84,6 +92,7 @@ export const makeDaemonRpcTestLayer = (
 	options: {
 		config?: Partial<DaemonRuntimeConfig>;
 		configDir?: string;
+		messageSurfacing?: MessageSurfacingSettingsOptions;
 		/** Routing fixtures may supply a lookup double. */
 		sessionDirectory?: Layer.Layer<SessionDirectory>;
 		instances?: ReadonlyArray<DaemonInstanceConfig>;
@@ -105,6 +114,14 @@ export const makeDaemonRpcTestLayer = (
 		options.configDir ? join(options.configDir, "events.db") : ":memory:",
 	);
 	const base = Layer.mergeAll(
+		Layer.effect(
+			MessageSurfacingSettings,
+			makeMessageSurfacingSettings(
+				options.configDir ?? "/tmp/daemon-rpc-fixture",
+				options.messageSurfacing ?? { env: {} },
+			),
+		),
+		CategorySetLive(options.configDir ?? "/tmp/daemon-rpc-fixture"),
 		Layer.effect(SessionActivityTag, makeSessionActivity),
 		makeProjectRegistryLive(projects),
 		makeRelayCacheLive(factory),
@@ -172,6 +189,15 @@ export const makeDaemonRpcTestLayer = (
 		),
 	);
 	return DaemonWsRpcHandlersLive.pipe(
-		Layer.provideMerge(DaemonHandleLive.pipe(Layer.provideMerge(dependencies))),
+		Layer.provideMerge(
+			DaemonHandleLive.pipe(
+				Layer.provideMerge(
+					UserAvatarLive.pipe(
+						Layer.provide(AccountPictureNone),
+						Layer.provideMerge(dependencies),
+					),
+				),
+			),
+		),
 	);
 };

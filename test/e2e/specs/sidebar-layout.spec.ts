@@ -3,11 +3,11 @@
 // - Mobile: session list and session are separate routes
 // Uses real relay backed by MockOpenCodeServer.
 
+import { createSession } from "../helpers/e2e-harness.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 import { AppPage } from "../page-objects/app.page.js";
-import { SidebarPage } from "../page-objects/sidebar.page.js";
 
 test.use({ recording: "chat-simple" });
 
@@ -204,6 +204,8 @@ test("a promptly resynchronized shell feed does not show the stale line", async 
 	page,
 	relayUrl,
 }) => {
+	await page.clock.install();
+	let subscriptions = 0;
 	const rpc = await mockWsRpc(page, {
 		stubs: {
 			ListDaemonSessions: () => ({
@@ -215,7 +217,23 @@ test("a promptly resynchronized shell feed does not show the stale line", async 
 		},
 		streams: {
 			SubscribeShell: () => [
-				{ _tag: "snapshot", sequence: 1, rows: [] },
+				{
+					_tag: "snapshot",
+					sequence: ++subscriptions,
+					rows:
+						subscriptions === 1
+							? []
+							: [
+									{
+										accountId: null,
+										projectSlug: "e2e-replay",
+										id: "resynchronized-root",
+										title: "Resynchronized shell",
+										status: "idle",
+										updatedAt: new Date().toISOString(),
+									},
+								],
+				},
 				{ _tag: "synchronized" },
 			],
 		},
@@ -247,9 +265,11 @@ test("a promptly resynchronized shell feed does not show the stale line", async 
 			{ timeout: 5_000 },
 		)
 		.toBeGreaterThan(1);
-	// Negative observation window: the stale line only appears 3s after the
-	// feed drops, so wait past that before asserting it never showed.
-	await page.waitForTimeout(3_300);
+	await expect(
+		page.locator('#session-list [data-session-id="resynchronized-root"]'),
+	).toBeVisible();
+	// Cross the stale deadline after the reconnect's fresh snapshot has rendered.
+	await page.clock.fastForward(3_300);
 	await expect(page.getByTestId("session-list-stale")).toBeHidden();
 });
 
@@ -362,6 +382,7 @@ test.describe("Sidebar Layout — Desktop", () => {
 	test("desktop: sidebar chrome shows loaded groups and project identity", async ({
 		page,
 		relayUrl,
+		harness,
 	}) => {
 		const app = new AppPage(page);
 		await app.goto(relayUrl);
@@ -369,21 +390,22 @@ test.describe("Sidebar Layout — Desktop", () => {
 		await expect(rows.first()).toBeVisible();
 		await expect(app.sidebar).toHaveCSS("width", "300px");
 		await expect(page.locator("#sidebar-footer")).toHaveCount(0);
-		await new SidebarPage(page).createNewSession();
+		// The standalone replay relay has no daemon account feed for drafts.
+		await createSession(harness.relayPort, "opencode");
 		await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(2);
-		await expect(rows.first()).toHaveCSS("margin-bottom", "1px");
+		await expect(rows.first()).toHaveCSS("margin-bottom", "0px");
 
 		for (const shelf of ["snoozed", "settled"]) {
 			const toggle = page.getByTestId(`${shelf}-shelf-toggle`);
 			if (await toggle.count()) await toggle.click();
 		}
 		const headings = page.locator(
-			"#session-list-scroller > .session-group-label",
+			"#session-list-scroller > div.session-group-label",
 		);
 		expect(await headings.count()).toBeGreaterThan(0);
 		for (const heading of await headings.all()) {
 			const label = (await heading.locator("span").first().innerText()).trim();
-			expect(label).toBe(label.toUpperCase());
+			expect(label).not.toBe(label.toUpperCase());
 			const renderedRows = await heading.evaluate((element) => {
 				let count = 0;
 				let sibling = element.nextElementSibling;
@@ -402,12 +424,12 @@ test.describe("Sidebar Layout — Desktop", () => {
 
 		// The status column is never blank, idle rows included.
 		for (const row of await rows.all()) {
-			await expect(row.locator(".session-status-glyph svg")).toBeVisible();
+			await expect(row.locator(".session-status-glyph")).toBeVisible();
 		}
-		const square = rows.first().locator(".project-square");
-		await expect(square).toHaveText(/^[A-Z]{2}$/);
-		await expect(square).toHaveCSS("width", "16px");
-		await expect(square).toHaveCSS("height", "16px");
+		const square = rows.first().locator(".project-mark");
+		await expect(square).toHaveText("");
+		await expect(square).toHaveCSS("width", "7px");
+		await expect(square).toHaveCSS("height", "7px");
 		await expect(square).toHaveClass(/bg-project-1/);
 		expect(
 			await square.evaluate(
@@ -479,11 +501,11 @@ test.describe("Sidebar Layout — Desktop", () => {
 		await more.click();
 		const menu = page.getByTestId("session-bar-overflow-menu");
 		await expect(menu).toBeVisible();
-		await expect(menu.getByRole("menuitem")).toHaveText([
-			"Share",
-			"Settings",
-			"Debug panel",
-		]);
+		// The session commands lead; the global actions sit in the footer.
+		const globals = menu.locator('[role="menuitem"][data-testid^="overflow-"]');
+		await expect(globals).toHaveCount(3);
+		for (const [index, name] of ["Share", "Settings", "Debug panel"].entries())
+			await expect(globals.nth(index)).toHaveAccessibleName(name);
 		await page.keyboard.press("Escape");
 		await expect(menu).toBeHidden();
 		await expect(more).toBeFocused();
@@ -652,7 +674,9 @@ test.describe("Sidebar Layout — Mobile", () => {
 		const titleMenu = page.getByTestId("session-action-sheet");
 		await expect(titleMenu).toBeVisible();
 		await expect(titleMenu.getByTestId("session-ctx-settle")).toBeVisible();
-		await expect(titleMenu.locator(".shortcut-hint").first()).toBeVisible();
+		await expect(
+			titleMenu.getByRole("group", { name: "Triage" }),
+		).toBeVisible();
 		await page.keyboard.press("Escape");
 		await expect(titleMenu).toBeHidden();
 		await expect(titleChevron).toBeFocused();
@@ -896,7 +920,7 @@ test.describe("Sidebar Layout — Mobile", () => {
 		const titleMenuButton = page.getByTestId("session-bar-title-menu");
 		await titleMenuButton.click();
 		const actions = page.getByTestId("session-action-sheet");
-		await expect(actions.locator(".shortcut-hint").first()).toBeVisible();
+		await expect(actions.getByRole("group", { name: "Triage" })).toBeVisible();
 		await actions.getByTestId("session-ctx-rename").click();
 		const longTitle =
 			"Investigate the long running terminal session across every project";
@@ -978,34 +1002,46 @@ test.describe("Sidebar Layout — Mobile", () => {
 			'a, button, input, select, [role="button"], [role="checkbox"], [role="tab"], [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [tabindex="0"]';
 		const failures: string[] = [];
 		async function measure(scope: string) {
-			const controls = page.locator(scope).locator(selector);
-			for (const control of await controls.all()) {
-				if (!(await control.isVisible())) continue;
-				const label = (await control.innerText().catch(() => "")).trim();
-				const name =
-					((await control.getAttribute("data-testid")) ??
-						(await control.getAttribute("aria-label")) ??
-						(await control.getAttribute("title")) ??
-						(label || (await control.getAttribute("id")))) ||
-					"unnamed control";
-				const box = await control.boundingBox();
-				if (!box) {
+			// Read one DOM snapshot per state instead of making several browser
+			// round trips for every control in all fourteen states.
+			const measurements = await page
+				.locator(scope)
+				.locator(selector)
+				.filter({ visible: true })
+				.evaluateAll((controls) =>
+					controls.map((element) => {
+						const label =
+							element instanceof HTMLElement ? element.innerText.trim() : "";
+						const name =
+							(element.getAttribute("data-testid") ??
+								element.getAttribute("aria-label") ??
+								element.getAttribute("title") ??
+								(label || element.id)) ||
+							"unnamed control";
+						const box = element.getBoundingClientRect();
+						// A touchTarget control paints small and takes the tap on a
+						// transparent ::before, outside its own bounding box.
+						const before = getComputedStyle(element, "::before");
+						const hit =
+							before.position === "absolute" && before.content !== "none"
+								? {
+										width: Number.parseFloat(before.width),
+										height: Number.parseFloat(before.height),
+									}
+								: { width: 0, height: 0 };
+						return {
+							name,
+							hasBox: box.width > 0 && box.height > 0,
+							width: Math.max(box.width, hit.width),
+							height: Math.max(box.height, hit.height),
+						};
+					}),
+				);
+			for (const { name, hasBox, width, height } of measurements) {
+				if (!hasBox) {
 					failures.push(`${name}: visible without a bounding box (${scope})`);
 					continue;
 				}
-				// A touchTarget control paints small and takes the tap on a
-				// transparent ::before, which boundingBox() cannot see.
-				const hit = await control.evaluate((element) => {
-					const before = getComputedStyle(element, "::before");
-					return before.position === "absolute" && before.content !== "none"
-						? {
-								width: Number.parseFloat(before.width),
-								height: Number.parseFloat(before.height),
-							}
-						: { width: 0, height: 0 };
-				});
-				const width = Math.max(box.width, hit.width);
-				const height = Math.max(box.height, hit.height);
 				if (width < 44 || height < 44) {
 					failures.push(
 						`${name}: ${width.toFixed(1)}x${height.toFixed(1)} (${scope})`,
@@ -1047,11 +1083,16 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await measure("#sidebar");
 		await page.getByRole("button", { name: "Clear project scope" }).click();
 		await page.getByTestId("session-filter-chip-needs-you").click();
-		await expect(page.getByTestId("session-filter-clear")).toBeVisible();
+		await expect(page.getByTestId("session-filter-empty")).toHaveText(
+			"That's everything waiting on you.",
+		);
+		await expect(page.getByTestId("session-filter-clear")).toHaveCount(0);
 		await measure("#sidebar");
-		await page.getByTestId("session-filter-clear").click();
+		await page.getByTestId("session-filter-chip-needs-you").click();
 		await page.getByTestId("list-bar-overflow").click();
-		await expect(page.getByTestId("list-overflow-select")).toBeVisible();
+		await expect(page.getByTestId("list-overflow-settings")).toBeVisible();
+		await expect(page.getByTestId("list-overflow-select")).toHaveCount(0);
+		await expect(page.getByTestId("list-overflow-resume")).toHaveCount(0);
 		await measure("[role=menu]");
 		await page.keyboard.press("Escape");
 		await page.getByTestId("session-scope-chip").click();
@@ -1064,8 +1105,7 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await measure('role=dialog[name="Add project"]');
 		await page.keyboard.press("Escape");
 		await expect(addProject).toHaveCount(0);
-		await page.getByTestId("list-bar-overflow").click();
-		await page.getByTestId("list-overflow-select").click();
+		await page.getByTestId("list-bar-select").click();
 		await expect(
 			page
 				.locator("#session-list .session-list-header")
@@ -1124,6 +1164,22 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(page.getByTestId("list-bar-title")).toHaveText(
 			/^Sessions\s*\d+$/,
 		);
+		await expect(page.getByTestId("list-bar-title")).toHaveCSS(
+			"font-size",
+			"22px",
+		);
+		await expect(page.getByTestId("list-bar-title")).toHaveCSS(
+			"font-weight",
+			"700",
+		);
+		await expect(page.getByTestId("list-bar-select")).toBeVisible();
+		const compose = page.locator("#sidebar-header #new-session-btn");
+		await expect(compose).toBeVisible();
+		await expect(page.locator("#sidebar-nav #new-session-btn")).toHaveCount(0);
+		await expect(compose.locator(".lucide-square-pen")).toHaveCount(1);
+		await expect(
+			page.locator("#sidebar-header").getByTestId("session-group-button"),
+		).toHaveCount(0);
 		await expect(page.locator("#sidebar").getByText(/^sessions$/i)).toHaveCount(
 			0,
 		);

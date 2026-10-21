@@ -54,6 +54,10 @@ beforeEach(() => {
 	}));
 	clearSessionState();
 	vi.clearAllMocks();
+	// jsdom has no matchMedia; Toast watches the phone breakpoint (desktop here).
+	vi.stubGlobal("matchMedia", (media: string) =>
+		Object.assign(new EventTarget(), { media, matches: false }),
+	);
 	const storage = new Map<string, string>();
 	vi.stubGlobal("localStorage", {
 		getItem: (key: string) => storage.get(key) ?? null,
@@ -177,7 +181,7 @@ describe("session triage list", () => {
 		);
 	});
 
-	it("keeps snoozed rows in a counted shelf above Settled", async () => {
+	it("keeps snoozed rows in a counted shelf after Settled", async () => {
 		const until = new Date(2099, 9, 12, 9).getTime();
 		addSnoozedRow(until);
 		render(SessionList);
@@ -189,7 +193,7 @@ describe("session triage list", () => {
 		expect(
 			toggle.compareDocumentPosition(
 				screen.getByTestId("settled-shelf-toggle"),
-			) & Node.DOCUMENT_POSITION_FOLLOWING,
+			) & Node.DOCUMENT_POSITION_PRECEDING,
 		).toBeTruthy();
 		await fireEvent.click(toggle);
 		expect(localStorage.getItem("snoozed-shelf-open")).toBe("true");
@@ -212,6 +216,37 @@ describe("session triage list", () => {
 		sessionState.searchQuery = "";
 		await tick();
 		expect(screen.queryByText("Sleeping work")).toBeNull();
+	});
+
+	it("allocates the first page to Settled before Snoozed and reveals its more rows", async () => {
+		const now = sessionState.now;
+		seedRootSessions([
+			...Array.from({ length: 4 }, (_, i) => ({
+				projectSlug: "current-project",
+				id: `settled-${i}`,
+				title: `Settled task ${i + 1}`,
+				settledAt: now - (i + 1) * 1_000,
+			})),
+			...Array.from({ length: 30 }, (_, i) => ({
+				projectSlug: "current-project",
+				id: `snoozed-${i}`,
+				title: `Snoozed task ${i + 1}`,
+				snoozedAt: now,
+				snoozedUntil: now + 3_600_000,
+			})),
+		]);
+		uiState.settledShelfOpen = true;
+		uiState.snoozedShelfOpen = true;
+		const { container } = render(SessionList);
+		expect(screen.getAllByText(/^Settled task/)).toHaveLength(2);
+		expect(screen.getByTestId("settled-shelf-more").textContent).toContain(
+			"+ 2 more",
+		);
+		await fireEvent.click(screen.getByTestId("settled-shelf-more"));
+		expect(screen.getAllByText(/^Settled task/)).toHaveLength(4);
+		await fireEvent.click(screen.getByTestId("snoozed-shelf-more"));
+		expect(screen.getAllByText(/^Snoozed task/)).toHaveLength(26);
+		expect(container.querySelectorAll("[data-session-id]")).toHaveLength(30);
 	});
 
 	it("wakes a timed row on the client clock without another list read", async () => {
@@ -260,7 +295,7 @@ describe("session triage list", () => {
 			vi.useRealTimers();
 		}
 	});
-	it("places Pinned first and hides settled rows behind a count-free disclosure", () => {
+	it("places Pinned first and hides settled rows behind a counted disclosure", () => {
 		const { container } = render(SessionList);
 		expect(
 			container.querySelector(".session-group-label")?.textContent?.trim(),
@@ -272,7 +307,7 @@ describe("session triage list", () => {
 		).toBe("pin");
 		expect(screen.queryByText("Finished work")).toBeNull();
 		const toggle = screen.getByTestId("settled-shelf-toggle");
-		expect(toggle.textContent?.trim()).toBe("Settled");
+		expect(toggle.textContent?.trim()).toBe("Settled 1");
 		expect(toggle.getAttribute("aria-expanded")).toBe("false");
 		expect(
 			document.getElementById(toggle.getAttribute("aria-controls") ?? ""),
@@ -287,7 +322,7 @@ describe("session triage list", () => {
 		expect(localStorage.getItem("settled-shelf-open")).toBe("true");
 		const row = screen.getByText("Finished work").closest("a");
 		expect(row?.querySelector(".session-item-meta")?.textContent).toBe(
-			formatTimeAgo(Date.now() - 120_000),
+			formatTimeAgo(Date.now() - 120_000).replace(/ ago$/, ""),
 		);
 		await fireEvent.click(toggle);
 		expect(localStorage.getItem("settled-shelf-open")).toBe("false");

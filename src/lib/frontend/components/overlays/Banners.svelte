@@ -104,13 +104,25 @@
 	import Button from "../ui/Button.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 
-	let { banners, ondismiss = removeBanner }: {
+	let { banners, ondismiss = removeBanner, presentation = "default" }: {
 		banners?: BannerConfig[];
 		ondismiss?: (id: string) => void;
+		presentation?: "default" | "session-header";
 	} = $props();
 	const visibleBanners = $derived(banners ?? appBanners());
 
 	function getVariantClasses(variant: BannerConfig["variant"]): string {
+		if (presentation === "session-header") {
+			switch (variant) {
+				case "update": return "bg-success/14";
+				case "onboarding": return "bg-accent/14";
+				case "skip-permissions":
+				case "error": return "bg-error/14";
+				case "warning": return "bg-status-ask/14";
+				case "info": return "bg-chip";
+				default: return assertNever(variant);
+			}
+		}
 		switch (variant) {
 			case "update":
 				return "bg-success/[0.08] border-success/30";
@@ -133,11 +145,11 @@
 	<div class="banners flex flex-col">
 		{#each visibleBanners as banner (banner.id)}
 			<div
-				class="banner flex items-center gap-2 px-4 py-2 text-xs border-b {getVariantClasses(banner.variant)} {bannerTone(banner.variant)}"
+				class="banner flex items-center {presentation === 'session-header' ? 'min-h-[34px] gap-[8px] pl-[20px] pr-[12px] py-[5px] text-[12.5px] text-text' : `gap-2 px-4 py-2 text-xs border-b ${bannerTone(banner.variant)}`} {getVariantClasses(banner.variant)}"
 				data-banner-id={banner.id}
 				data-banner-variant={banner.variant}
 			>
-				<span class="banner-icon shrink-0">
+				<span class="banner-icon shrink-0 {presentation === 'session-header' ? bannerTone(banner.variant) : ''}">
 					<Icon name={banner.icon} size={14} />
 				</span>
 				<span class="banner-text flex-1 min-w-0">
@@ -154,6 +166,9 @@
 					</a>
 				{/if}
 				{#if banner.action}
+					{#if presentation === "session-header"}
+						<Button variant="secondary" size="content" tone="secondary" touchTarget class="h-[24px] shrink-0 rounded-[8px] px-[10px] text-[12px]" data-testid="banner-action" onclick={banner.action.run}>{banner.action.label}</Button>
+					{:else}
 					<TextButton
 						type="button"
 						tone="inherit"
@@ -164,6 +179,7 @@
 					>
 						{banner.action.label}
 					</TextButton>
+					{/if}
 				{/if}
 				{#if banner.dismissible}
 					<!-- Inherit keeps the banner's own colour without adding a hover colour. -->

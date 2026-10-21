@@ -1,14 +1,16 @@
 import { existsSync } from "node:fs";
 import { Clock, Effect, Layer, Option, PubSub, Ref, Schedule } from "effect";
 import {
+	autoSettleIdleWindowMs,
 	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
-	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
+	DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS,
 } from "../../../daemon/config-persistence.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {
 	hasColdAutoArchiveCandidate,
+	hasColdAutoDeleteCandidate,
 	hasColdAutoSettleCandidate,
 } from "../Services/daemon-session-reader.js";
 import { persistenceStoreContext } from "../Services/project-read-database.js";
@@ -17,8 +19,6 @@ import {
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
-
-const MILLISECONDS_PER_DAY = 86_400_000;
 
 export const AutoSettleLive = () =>
 	Layer.effectDiscard(
@@ -32,13 +32,13 @@ export const AutoSettleLive = () =>
 
 			const sweep = Effect.gen(function* () {
 				const config = yield* Ref.get(configRef);
-				const days = config.autoSettleAfterDays;
 				const archiveDays = config.autoArchiveAfterDays;
-				const idleWindowMs =
-					(days ?? DEFAULT_AUTO_SETTLE_AFTER_DAYS) * MILLISECONDS_PER_DAY;
+				const idleWindowMs = autoSettleIdleWindowMs(config.autoSettleAfterDays);
+				const deleteDays = config.autoDeleteArchivedAfterDays;
+				const deleteWindowMs =
+					(deleteDays ?? DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS) * 86_400_000;
 				const archiveWindowMs =
-					(archiveDays ?? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS) *
-					MILLISECONDS_PER_DAY;
+					(archiveDays ?? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS) * 86_400_000;
 				const now = yield* Clock.currentTimeMillis;
 				const projects = yield* allProjects.pipe(
 					Effect.provideService(ProjectRegistryTag, registry),
@@ -62,11 +62,16 @@ export const AutoSettleLive = () =>
 							return;
 						}
 						missingDirectories.delete(mainFolder);
-						if (days === null && archiveDays === null) return;
+						if (
+							idleWindowMs === null &&
+							archiveDays === null &&
+							deleteDays === null
+						)
+							return;
 						const running = yield* cache.peek(project.slug);
 						const relay = Option.isSome(running)
 							? running.value
-							: (days !== null &&
+							: (idleWindowMs !== null &&
 										(yield* hasColdAutoSettleCandidate(
 											project,
 											now,
@@ -77,19 +82,29 @@ export const AutoSettleLive = () =>
 											project,
 											now,
 											archiveWindowMs,
+										).pipe(Effect.provide(storeContext)))) ||
+									(deleteDays !== null &&
+										(yield* hasColdAutoDeleteCandidate(
+											project,
+											now,
+											deleteWindowMs,
 										).pipe(Effect.provide(storeContext))))
 								? yield* cache.get(project.slug)
 								: null;
 						if (relay === null) return;
 						const settled =
-							days === null || relay.settleIdleSessions === undefined
+							idleWindowMs === null || relay.settleIdleSessions === undefined
 								? 0
 								: yield* relay.settleIdleSessions(idleWindowMs, now);
 						const archived =
 							archiveDays === null || relay.archiveIdleSessions === undefined
 								? 0
 								: yield* relay.archiveIdleSessions(archiveWindowMs, now);
-						const count = settled + archived;
+						const deleted =
+							deleteDays === null || relay.deleteArchivedSessions === undefined
+								? 0
+								: yield* relay.deleteArchivedSessions(deleteWindowMs, now);
+						const count = settled + archived + deleted;
 						if (count > 0)
 							yield* PubSub.publish(bus, DaemonEvent.DaemonSessionsChanged());
 					}).pipe(

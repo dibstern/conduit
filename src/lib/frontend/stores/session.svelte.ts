@@ -48,7 +48,7 @@ import { attachedProjectState, getCurrentSlug } from "./router.svelte.js";
 import { markSessionDeleted, selection } from "./selection.svelte.js";
 import { restoreServerUpdateBanner } from "./server-status.svelte.js";
 import type { SessionGrouping, SessionStatusFilter } from "./session-scope.js";
-import { getSessionScope } from "./session-scope.js";
+import { getSessionScope, getSessionStatusFilter } from "./session-scope.js";
 import { clearTodoState } from "./todo.svelte.js";
 import { applyTurnRow, deleteTurn, rebaseTurns } from "./turn.svelte.js";
 import { showToast } from "./ui.svelte.js";
@@ -140,6 +140,7 @@ const clientSession = $state({
 	searchQuery: "",
 	searchIncludeArchived: false,
 	searchResults: null as SessionInfo[] | null,
+	searchSettledCounts: undefined as ListDaemonSessionsResponse["settledCounts"],
 	searchCursor: null as ListDaemonSessionsResponse["nextCursor"],
 	searchHasMore: false,
 	searchLoading: false,
@@ -448,10 +449,12 @@ export function projectSessionList(
 		return {
 			...shelves,
 			sections: [
-				{ key: "needs-you", label: "Needs you", sessions: groups.needsYou },
 				{ key: "running", label: "Running", sessions: groups.running },
-				{ key: "unread", label: "Done, unread", sessions: groups.doneUnread },
-				{ key: "idle", label: "Idle", sessions: groups.idle },
+				{
+					key: "idle",
+					label: "Idle",
+					sessions: [...groups.needsYou, ...groups.doneUnread, ...groups.idle],
+				},
 			].filter((section) => section.sessions.length > 0),
 		};
 	}
@@ -636,6 +639,7 @@ export function clearSessionSearch(): void {
 	daemonSearchToken += 1;
 	activeSearch = null;
 	clientSession.searchResults = null;
+	clientSession.searchSettledCounts = undefined;
 	clientSession.searchCursor = null;
 	clientSession.searchHasMore = false;
 	clientSession.searchLoading = false;
@@ -694,6 +698,7 @@ export function applySearchResultsResponse(
 		];
 	}
 	clientSession.searchCursor = response.nextCursor;
+	clientSession.searchSettledCounts = response.settledCounts;
 	clientSession.searchHasMore = response.hasMore;
 }
 
@@ -789,6 +794,36 @@ function lastChangedAt(session: Immutable<SessionInfo>): number {
 	// — exactly as the line below reads a missing timestamp as 0.
 	const at = session.updatedAt || session.createdAt;
 	return typeof at === "number" ? at : at ? Date.parse(at) : 0;
+}
+
+/** Browse totals come from the complete shell feed; paged search has server totals. */
+export function getSettledSessionCount(): { count: number; exact: boolean } {
+	const scope = getSessionScope();
+	const searching = sessionState.searchResults !== null;
+	const status = getSessionStatusFilter();
+	const totals = clientSession.searchSettledCounts;
+	const queryReady = searching || sessionState.searchQuery.trim().length === 0;
+	if (searching && status === null && totals !== undefined) {
+		return {
+			count: totals
+				.filter((entry) => scope === null || entry.projectSlug === scope)
+				.reduce((sum, entry) => sum + entry.count, 0),
+			exact: true,
+		};
+	}
+	return {
+		count: getFilteredSessions().filter(
+			(row) =>
+				!row.parentID &&
+				!row.sideThread &&
+				row.pinnedAt == null &&
+				row.settledAt != null &&
+				(status === null || sessionMatchesStatus(row, status)),
+		).length,
+		exact:
+			queryReady &&
+			(searching ? !sessionState.searchHasMore : sessionState.settled),
+	};
 }
 
 /** The sidebar and its search show root sessions only. */

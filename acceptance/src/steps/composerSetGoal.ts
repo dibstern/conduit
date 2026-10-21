@@ -16,7 +16,8 @@ export const composerSetGoalHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			const entry = world.page.getByTestId("attach-set-goal");
 			await expect(entry).toBeEnabled();
-			await expect(entry).toHaveText("Set goal");
+			await expect(entry.getByText("Set goal", { exact: true })).toBeVisible();
+			await expect(entry).toContainText("Same as $goal");
 			await entry.click();
 			await expect(world.page.getByTestId("attach-menu")).toHaveCount(0);
 		},
@@ -26,7 +27,7 @@ export const composerSetGoalHandlers: StepHandler[] = [
 		match: /^the composer contains the focused goal prefix$/,
 		run: async ({ world }) => {
 			const input = world.page.locator("#input");
-			await expect(input).toHaveValue("/goal ");
+			await expect(input).toHaveValue("$goal ");
 			await expect(input).toBeFocused();
 			await expect
 				.poll(() =>
@@ -73,9 +74,11 @@ export const composerSetGoalHandlers: StepHandler[] = [
 			await expect(send).toHaveAttribute("data-goal", String(goal));
 			if (goal) {
 				await expect(send).toHaveAttribute("aria-label", "Set goal");
-				await expect(hint).toHaveText(
-					"/goal sets a goal. Claude keeps working, and checks itself after each turn, until it's met.",
+				await expect(send).toHaveText("Set goal");
+				await expect(hint).toContainText(
+					"Claude keeps working until this is true, and checks after each turn.",
 				);
+				await expect(hint).toContainText("Esc to cancel");
 				await expect(hint.locator("svg.lucide-target")).toBeVisible();
 			} else {
 				await expect(send).not.toHaveAttribute("aria-label", "Set goal");
@@ -84,23 +87,18 @@ export const composerSetGoalHandlers: StepHandler[] = [
 			await expect(
 				send.locator(goal ? "svg.lucide-target" : "svg.lucide-arrow-up"),
 			).toBeVisible();
-			// Normal send is brand-coloured when enabled but ghosted when the
-			// composer is empty, so "normal" only asserts the violet is gone.
 			await expect
 				.poll(() =>
-					send.evaluate((el) => {
-						const style = getComputedStyle(el);
-						const probe = new Option().style;
-						probe.color = style.getPropertyValue("--color-status-violet");
-						const violet = probe.color;
-						probe.color = style.getPropertyValue("--color-bg");
-						return {
-							violetBackground: style.backgroundColor === violet,
-							pageColouredText: style.color === probe.color,
-						};
+					send.evaluate((element) => {
+						const probe = document.createElement("span");
+						probe.style.color = "var(--color-status-goal)";
+						element.append(probe);
+						const teal = getComputedStyle(probe).color;
+						probe.remove();
+						return getComputedStyle(element).backgroundColor === teal;
 					}),
 				)
-				.toEqual({ violetBackground: goal, pageColouredText: goal });
+				.toBe(goal);
 		},
 	},
 ];

@@ -468,10 +468,34 @@ export const SessionWorkspaceLive = Layer.effect(
 						),
 					),
 				),
-			get: (sessionId) =>
+			get: (sessionId, nativeDirectory) =>
 				readWorkspace(sessionId).pipe(
-					Effect.map(({ workspace }) =>
-						effectiveWorkingDirectory(config.projectDir, workspace),
+					Effect.flatMap(({ workspace }) =>
+						Effect.gen(function* () {
+							// Native sessions retain their first observed directory until an
+							// explicit workspace move, including a reset, overrides it.
+							if (
+								workspace === null &&
+								(yield* latestMove(sessionId)).length === 0
+							) {
+								if (nativeDirectory !== undefined) return nativeDirectory;
+								const [native] = yield* sql<{ directory: string | null }>`
+									SELECT json_extract(metadata, '$.nativeDirectory') AS directory FROM events
+									WHERE session_id = ${sessionId} AND type = 'session.created'
+									AND json_type(metadata, '$.nativeDirectory') = 'text'
+									ORDER BY sequence DESC LIMIT 1`;
+								if (native?.directory) return native.directory;
+							}
+							return effectiveWorkingDirectory(config.projectDir, workspace);
+						}).pipe(
+							Effect.mapError(
+								(cause) =>
+									new SessionCommandError({
+										operation: "workspace.get",
+										cause,
+									}),
+							),
+						),
 					),
 				),
 			resolve,

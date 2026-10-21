@@ -5,7 +5,16 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect } from "effect";
+import {
+	type DrainReport,
+	EventRetentionTag,
+} from "../../../src/lib/domain/persistence/Services/event-retention.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import {
+	type ReplayParityReport,
+	verifyReplayParity,
+} from "../../../src/lib/persistence/replay-parity.js";
 import {
 	createRelayStack,
 	type RelayStack,
@@ -26,6 +35,12 @@ export interface RelayHarness {
 
 	/** Connect a typed browser RPC client to the relay */
 	connectWsClient(): Promise<TestWsClient>;
+
+	/** Replay the durable event log and compare its live read model. */
+	checkReplayParity(): Promise<ReplayParityReport>;
+
+	/** Reclaim deleted sessions through the project's production retention service. */
+	drainEventRetention(): Promise<DrainReport>;
 
 	/** Stop the relay and clean up */
 	stop(): Promise<void>;
@@ -109,6 +124,33 @@ export async function createRelayHarness(
 			clients.push(client);
 			await client.waitForOpen();
 			return client;
+		},
+
+		checkReplayParity(): Promise<ReplayParityReport> {
+			return Effect.runPromise(
+				verifyReplayParity(eventsDbPath, {
+					projectId: "integration-test",
+					// Provider reconciliation sets completion outside the event log;
+					// replay clears it when rebuilding the read model.
+					ignoredColumns: [
+						"version",
+						"session_sidebar.row.version",
+						"sessions.history_complete",
+						// A child's drained wake event need not survive its ancestor.
+						// These read annotations are outside the log (ADR-0013).
+						"sessions.woken_at",
+						"sessions.woken_reason",
+						"session_sidebar.row.snooze.woken_at",
+						"session_sidebar.row.snooze.woken_reason",
+					],
+				}),
+			);
+		},
+
+		drainEventRetention(): Promise<DrainReport> {
+			return stack.effectRuntime.runtime.runPromise(
+				Effect.flatMap(EventRetentionTag, (retention) => retention.drain()),
+			);
 		},
 
 		async stop(): Promise<void> {

@@ -3,19 +3,28 @@
 import { Data, Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
+import { getProviderDriver } from "../../contracts/provider-instance.js";
 import type { ReadModelCollection } from "../../contracts/read-model-advance.js";
-import { persistedTurnState } from "../../contracts/turn-phase.js";
+import type { SessionGoalChangedPayload } from "../../contracts/stored-event.js";
+import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import { CLAUDE_WORKTREE_EVENTS } from "../../session/claude-worktree-state.js";
 import { isRecord } from "../../utils.js";
 import type { LiveEventType, StoredEvent } from "../events.js";
 import {
 	getSessionStatements,
+	isHumanSentMessage,
 	isSessionRemoval,
 	REMOVE_SESSION_SQL,
 	SESSION_HANDLED_TYPES,
 	SESSION_SUBTREE_SQL,
 } from "../projectors/session-handlers.js";
 import { PAGE_MESSAGES } from "../session-history-adapter.js";
+import {
+	NEVER_CUT_TOOL_NAMES,
+	PREVIEW_CODE_POINTS,
+} from "../tool-wire-projection.js";
+import { inheritForkHistory } from "./inherit-fork-history.js";
+import { makeProviderStateEffect } from "./provider-state-effect.js";
 import { rerootSession } from "./sidebar-projection.js";
 
 export class ProjectionError extends Data.TaggedError("ProjectionError")<{
@@ -33,6 +42,14 @@ export interface ProjectionContext {
 	 */
 	readonly version: number;
 	readonly replaying?: boolean;
+	/**
+	 * Set by a batch: message stamps collect here and run once at the end. A
+	 * batch shares one version, so stamping a message per event repeats the same
+	 * write, and a forked history makes that tens of thousands of statements.
+	 */
+	readonly deferredMessageStamps?: Set<string>;
+	/** Exact event IDs which moved a run to terminal in this transaction. */
+	readonly endedRunEvents?: Set<string>;
 }
 
 /**
@@ -186,6 +203,28 @@ const stampSessions = (
 		};
 	});
 
+const HUMAN_USER_MESSAGE_SQL =
+	"messages.is_human_sent = 1 AND messages.role = 'user' AND messages.is_inherited = 0";
+
+function jsonRecord(value: string | null): Record<string, unknown> {
+	const parsed: unknown = value === null ? undefined : JSON.parse(value);
+	return isRecord(parsed) ? parsed : {};
+}
+
+const refreshLastUserMessageAt = (sessionId: string, version: number) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const [latest] = yield* sql<{ created_at: number | null }>`
+			SELECT MAX(messages.created_at) AS created_at FROM messages
+			WHERE messages.session_id = ${sessionId} AND ${sql.literal(HUMAN_USER_MESSAGE_SQL)}`;
+		return ids(
+			yield* sql<{ id: string }>`
+			UPDATE sessions SET last_user_message_at = ${latest?.created_at ?? null}, version = ${version}
+			WHERE id = ${sessionId} AND last_user_message_at IS NOT ${latest?.created_at ?? null}
+			RETURNING id`,
+		);
+	});
+
 // Takes the messages the handler reported writing, not the id in the event
 // header: a guard that declined and a conflict that was ignored both report
 // nothing, and a row nobody wrote must not be announced as changed.
@@ -194,22 +233,42 @@ const stampSessions = (
 // message is stored against the subagent session and that is the row a
 // subscriber must re-query. A part write stamps the part itself and also
 // advances the message that owns it, whose updated_at moved with it.
-const stampMessage = (
+export const stampMessage = (
 	messageIds: readonly string[],
-	version: number,
+	ctx: ProjectionContext,
 ): Effect.Effect<ProjectionTouch, SqlError, SqlClient.SqlClient> =>
 	Effect.gen(function* () {
+		if (ctx.deferredMessageStamps) {
+			for (const messageId of messageIds)
+				ctx.deferredMessageStamps.add(messageId);
+			return { stamped: [], removed: [], collections: [] };
+		}
+		const { version } = ctx;
 		const sql = yield* SqlClient.SqlClient;
 		const stamped: string[] = [];
 		const changedSessions: string[] = [];
 		for (const messageId of new Set(messageIds)) {
-			const rows = yield* sql<OwnedRow & { readonly created_at: number }>`
+			const rows = yield* sql<
+				OwnedRow & { readonly created_at: number; readonly human_sent: number }
+			>`
 				UPDATE messages SET version = ${version}
 				WHERE id = ${messageId}
-				RETURNING session_id, created_at`;
+				RETURNING session_id, created_at, (${sql.literal(HUMAN_USER_MESSAGE_SQL)}) AS human_sent`;
 			// The fork split uses the copy's stored clock, including when a
 			// snapshot replaces a streamed row with a provider timestamp.
 			for (const row of rows) {
+				if (row.human_sent) {
+					changedSessions.push(
+						...ids(
+							yield* sql<{ id: string }>`
+						UPDATE sessions SET last_user_message_at = MAX(COALESCE(last_user_message_at, ${row.created_at}), ${row.created_at}),
+							version = ${version}
+						WHERE id = ${row.session_id}
+						AND (last_user_message_at IS NULL OR last_user_message_at < ${row.created_at})
+						RETURNING id`,
+						),
+					);
+				}
 				changedSessions.push(
 					...ids(
 						yield* sql<{
@@ -235,6 +294,60 @@ const stampMessage = (
 			removed: [],
 			collections,
 			...(changedSessions.length > 0 ? { sidebar: changedSessions } : {}),
+		};
+	});
+
+const removeMessages = (
+	sessionId: string,
+	messageIds: readonly string[],
+	ctx: ProjectionContext,
+): Effect.Effect<ProjectionTouch, SqlError, SqlClient.SqlClient> =>
+	Effect.gen(function* () {
+		if (messageIds.length === 0)
+			return { stamped: [], removed: [], collections: [] };
+		const sql = yield* SqlClient.SqlClient;
+		const list = JSON.stringify(messageIds);
+		// A pending stamp can move a fork's clock. Preserve that clock before
+		// deleting its message, without stamping each disappearing row.
+		const pending = messageIds.filter((id) =>
+			ctx.deferredMessageStamps?.delete(id),
+		);
+		const forkChanges =
+			pending.length === 0
+				? []
+				: ids(
+						yield* sql<{ id: string }>`UPDATE sessions SET
+				fork_point_timestamp = (SELECT created_at FROM messages WHERE id = fork_point_event AND session_id = ${sessionId}),
+				version = ${ctx.version}
+				WHERE id = ${sessionId}
+				AND fork_point_event IN (SELECT value FROM json_each(${JSON.stringify(pending)}))
+				AND EXISTS (SELECT 1 FROM messages WHERE id = fork_point_event AND session_id = ${sessionId}
+					AND created_at IS NOT fork_point_timestamp)
+				RETURNING id`,
+					);
+		yield* sql`UPDATE turns SET
+			user_message_id = CASE WHEN user_message_id IN (SELECT value FROM json_each(${list})) THEN NULL ELSE user_message_id END,
+			assistant_message_id = CASE WHEN assistant_message_id IN (SELECT value FROM json_each(${list})) THEN NULL ELSE assistant_message_id END
+			WHERE session_id = ${sessionId} AND (
+				user_message_id IN (SELECT value FROM json_each(${list}))
+				OR assistant_message_id IN (SELECT value FROM json_each(${list})))`;
+		yield* sql`DELETE FROM messages WHERE session_id = ${sessionId}
+			AND id IN (SELECT value FROM json_each(${list}))`;
+		yield* sql`INSERT INTO message_tombstones (session_id, message_id, version)
+			SELECT ${sessionId}, value, ${ctx.version} FROM json_each(${list}) WHERE true
+			ON CONFLICT (message_id) DO UPDATE SET
+			session_id = excluded.session_id, version = excluded.version`;
+		const changed = [
+			...forkChanges,
+			...(yield* refreshLastUserMessageAt(sessionId, ctx.version)),
+		];
+		return {
+			...(yield* stampSessions([sessionId], ctx.version)),
+			collections:
+				changed.length > 0
+					? ["sessions", "messages", "sidebar"]
+					: ["sessions", "messages"],
+			...(changed.length > 0 ? { sidebar: [...new Set(changed)] } : {}),
 		};
 	});
 
@@ -327,25 +440,130 @@ export const makeSessionProjector = defineProjector(() => ({
 	project: (event, ctx) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
+			const terminal = runTerminalStatus(event, event.provider) !== undefined;
+			// Fork copies preserve historical attention without creating runs or settling live work.
+			if (
+				event.metadata.inherited &&
+				["turn.completed", "turn.error", "turn.interrupted"].includes(
+					event.type,
+				)
+			) {
+				const updated = yield* sql<{
+					id: string;
+				}>`UPDATE sessions SET last_turn_end_version = ${event.streamVersion}
+					WHERE id = ${event.sessionId} AND COALESCE(last_turn_end_version, -1) < ${event.streamVersion}
+					RETURNING id`;
+				return {
+					...(yield* stampSessions(ids(updated), ctx.version)),
+					sidebar: ids(updated),
+				};
+			}
+			if (event.type === "turn.completed" && !terminal)
+				return { stamped: [], removed: [], collections: [] };
+			const unownedStatus =
+				event.type === "session.status" && !event.metadata.runId;
+			if (terminal && unownedStatus) {
+				// An orphan status observation may move; it cannot end owned work.
+				const open =
+					yield* sql`SELECT 1 FROM provider_runs WHERE session_id = ${event.sessionId}
+					AND status IN ('pending', 'running') LIMIT 1`;
+				if (open.length) return { stamped: [], removed: [], collections: [] };
+			}
+			if (
+				(terminal && !unownedStatus) ||
+				(event.type === "session.status" && event.metadata.runId)
+			) {
+				const runId = event.metadata.runId;
+				if (!runId) return { stamped: [], removed: [], collections: [] };
+				const [run] = yield* sql<{
+					status: string;
+					completed_at: number | null;
+				}>`SELECT status, completed_at FROM provider_runs
+					WHERE id = ${runId} AND session_id = ${event.sessionId}`;
+				if (!run) return { stamped: [], removed: [], collections: [] };
+				const open = run.status === "pending" || run.status === "running";
+				if (
+					terminal &&
+					!open &&
+					!(ctx.replaying && run.completed_at === event.createdAt)
+				)
+					return { stamped: [], removed: [], collections: [] };
+				if (event.type === "session.status" && !open) {
+					if (event.data.status === "busy" || event.data.status === "retry")
+						return { stamped: [], removed: [], collections: [] };
+					const newer =
+						yield* sql`SELECT 1 FROM provider_runs WHERE session_id = ${event.sessionId}
+						AND id <> ${runId} AND status IN ('pending', 'running') LIMIT 1`;
+					if (newer.length)
+						return { stamped: [], removed: [], collections: [] };
+				}
+			}
+
+			if (event.type === "session.created") {
+				for (const id of [event.data.parentId, event.data.forkedFrom]) {
+					if (id === undefined) continue;
+					const [row] = yield* sql`SELECT id FROM sessions WHERE id = ${id}`;
+					if (!row) return { stamped: [], removed: [], collections: [] };
+				}
+			}
 			const written: string[] = [];
 			// Families this event can take members from, which naming the
 			// sessions it wrote does not reach.
 			const left: string[] = [];
 
-			if (event.type === "session.goal_changed" && event.data.goal) {
-				const goal = event.data.goal;
+			let goalFacts: SessionGoalChangedPayload | undefined;
+			let goalTurnIndex: number | null = null;
+			if (event.type === "session.goal_changed") {
+				const goal = event.data.goal ?? event.data.endedGoal;
+				if (goal) {
+					const until = event.data.endedAt ?? event.createdAt;
+					// Checks can run before turn.completed, and several checks may
+					// belong to one turn. Queued inputs have not run a turn yet.
+					const [turns] = yield* sql<{
+						turnIndex: number | null;
+						turnCount: number;
+					}>`
+						SELECT NULLIF(COUNT(*), 0) AS turnIndex,
+							COALESCE(SUM(CASE WHEN COALESCE(completed_at, ${until}) >= ${goal.setAt} THEN 1 ELSE 0 END), 0) AS turnCount
+						FROM turns WHERE session_id = ${event.data.sessionId}
+						AND state != 'pending' AND COALESCE(started_at, requested_at) <= ${until}`;
+					goalTurnIndex = turns?.turnIndex ?? null;
+					const countedGoal = { ...goal, turnCount: turns?.turnCount ?? 0 };
+					// The completion timestamp bounds ended totals on resync too.
+					goalFacts = event.data.goal
+						? { ...event.data, goal: countedGoal }
+						: { ...event.data, endedGoal: countedGoal };
+				}
+			}
+			const checkedGoal =
+				event.type === "session.goal_changed"
+					? (event.data.goal ??
+						(event.data.ended === "met" ? event.data.endedGoal : undefined))
+					: undefined;
+			if (event.type === "session.goal_changed" && checkedGoal) {
+				const goal = checkedGoal;
 				// Read the preceding fact before replacing it. Pauses and status
 				// resyncs with unchanged iterations do not create another check.
 				yield* sql`INSERT OR IGNORE INTO session_goal_checks
-					(event_id, session_id, condition, set_at, iterations, reason, created_at)
+					(event_id, session_id, condition, set_at, iterations, reason, created_at, turn_index, judge_model)
 					SELECT ${event.eventId}, id, ${goal.condition}, ${goal.setAt},
-						${goal.iterations}, ${goal.lastReason ?? null}, ${event.createdAt}
+						${goal.iterations}, ${goal.lastReason ?? null}, ${event.createdAt},
+						${goalTurnIndex},
+						${goal.judgeModel ?? null}
 					FROM sessions WHERE id = ${event.data.sessionId}
 					AND ${goal.iterations} > CASE
-						WHEN json_extract(goal_state, '$.goal.setAt') = ${goal.setAt}
-							AND json_extract(goal_state, '$.goal.condition') = ${goal.condition}
-						THEN COALESCE(json_extract(goal_state, '$.goal.iterations'), 0)
+						WHEN COALESCE(json_extract(goal_state, '$.goal.setAt'), json_extract(goal_state, '$.endedGoal.setAt')) = ${goal.setAt}
+							AND COALESCE(json_extract(goal_state, '$.goal.condition'), json_extract(goal_state, '$.endedGoal.condition')) = ${goal.condition}
+							THEN COALESCE(json_extract(goal_state, '$.goal.iterations'), json_extract(goal_state, '$.endedGoal.iterations'), 0)
 						ELSE 0 END`;
+				if (goal.judgeModel) {
+					// A terminal transcript attachment may report the judge after
+					// active_goal already reported this check's iteration.
+					yield* sql`UPDATE session_goal_checks SET judge_model = ${goal.judgeModel}
+						WHERE session_id = ${event.data.sessionId} AND set_at = ${goal.setAt}
+						AND condition = ${goal.condition} AND iterations = ${goal.iterations}
+						AND judge_model IS NULL`;
+				}
 			}
 
 			// Every session statement is a single-table write against `sessions`
@@ -364,7 +582,9 @@ export const makeSessionProjector = defineProjector(() => ({
 					WHERE id = ${event.sessionId}`
 				: [];
 			for (const stmt of getSessionStatements(
-				event,
+				event.type === "session.goal_changed" && goalFacts
+					? { ...event, data: goalFacts }
+					: event,
 				worktree?.claude_worktree_state,
 			)) {
 				if (isSessionRemoval(stmt)) {
@@ -398,6 +618,10 @@ export const makeSessionProjector = defineProjector(() => ({
 				);
 				written.push(...rows.map((row) => row.id));
 			}
+			const inheritsHistory =
+				event.type === "session.created" && event.data.inheritsHistory === true;
+			if (event.type === "session.created" && inheritsHistory)
+				yield* inheritForkHistory(event, ctx.version);
 			// Only these two write a parent.
 			if (event.type === "session.created" || event.type === "session.forked")
 				left.push(...(yield* rerootSession(event.data.sessionId, ctx.version)));
@@ -413,7 +637,9 @@ export const makeSessionProjector = defineProjector(() => ({
 								"approvals",
 								"inputs",
 							] as const)
-						: touch.collections,
+						: inheritsHistory
+							? ([...touch.collections, "messages"] as const)
+							: touch.collections,
 				sidebar: [...touch.stamped, ...touch.removed, ...left],
 			};
 		}).pipe(
@@ -434,11 +660,13 @@ export const makeMessageProjector = defineProjector(() => ({
 	handles: [
 		"session.rewound",
 		"session.rewind_undone",
+		"session.rewind_committed",
 		"message.created",
 		"message.removed",
 		"message.part.removed",
 		"message.snapshot",
 		"text.delta",
+		"text.surfaced",
 		"thinking.start",
 		"thinking.delta",
 		"thinking.end",
@@ -447,6 +675,7 @@ export const makeMessageProjector = defineProjector(() => ({
 		"tool.completed",
 		"file.attached",
 		"turn.completed",
+		"turn.notice",
 		"turn.error",
 		"turn.interrupted",
 		"session.compaction",
@@ -454,8 +683,31 @@ export const makeMessageProjector = defineProjector(() => ({
 		"session.setup_output",
 		"session.setup_finished",
 	],
-	project: (event, ctx) =>
-		Effect.gen(function* () {
+	project: (event, ctx) => {
+		if (isEventType(event, "message.removed"))
+			return removeMessages(event.sessionId, [event.data.messageId], ctx);
+		if (isEventType(event, "session.rewind_committed"))
+			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				// Legacy logs already removed the cut with message.removed. A missing
+				// cut selects no range, preserving their replay result.
+				const removed = yield* sql<{ id: string }>`SELECT m.id FROM messages m
+					JOIN messages cut ON cut.id = ${event.data.messageId} AND cut.session_id = m.session_id
+					WHERE m.session_id = ${event.sessionId}
+					AND (m.created_at, m.id) >= (cut.created_at, cut.id)
+					ORDER BY m.created_at, m.id`;
+				return yield* removeMessages(event.sessionId, ids(removed), ctx);
+			});
+		let replacesUserMessage = false;
+		let previousMessage:
+			| { created_at: number; is_human_sent: number }
+			| undefined;
+		let authorshipMessageId =
+			isEventType(event, "message.created") &&
+			(event.data.role === "user" || event.metadata.synthetic === true)
+				? event.data.messageId
+				: undefined;
+		return Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			if (isEventType(event, "session.setup_started")) {
 				const messageId = `setup-${event.sessionId}`;
@@ -528,43 +780,77 @@ export const makeMessageProjector = defineProjector(() => ({
 						RETURNING message_id`,
 					(rows) => [...new Set(rows.map((row) => row.message_id))],
 				);
-			if (isEventType(event, "message.removed")) {
-				const { messageId } = event.data;
-				yield* sql`UPDATE turns SET user_message_id = NULL
-					WHERE session_id = ${event.sessionId} AND user_message_id = ${messageId}`;
-				yield* sql`UPDATE turns SET assistant_message_id = NULL
-					WHERE session_id = ${event.sessionId} AND assistant_message_id = ${messageId}`;
-				yield* sql`DELETE FROM messages
-					WHERE id = ${messageId} AND session_id = ${event.sessionId}`;
-				yield* sql`INSERT INTO message_tombstones (session_id, message_id, version)
-					VALUES (${event.sessionId}, ${messageId}, ${ctx.version})
-					ON CONFLICT (message_id) DO UPDATE SET
-					session_id = excluded.session_id, version = excluded.version`;
-				return [];
-			}
 			// A result keyed by its prompt has no answer of its own. Its
 			// messageId can name the previous answer, whose usage and time stay put.
 			if (isEventType(event, "turn.completed") && event.data.userMessageId)
 				return [];
-			if (
-				"messageId" in event.data &&
-				event.type !== "message.part.removed" &&
-				event.metadata.rawSource !== "opencode.rest"
-			) {
+			// Conduit facts also apply to settled OpenCode snapshots. Preserve the
+			// part's activity timestamps: judging it is not new agent activity.
+			if (isEventType(event, "text.surfaced")) {
+				const {
+					messageId,
+					partId,
+					ordinal,
+					categorySetVersion,
+					model,
+					probabilities,
+				} = event.data;
+				const encoded =
+					probabilities === null ? null : encodeJson(probabilities);
+				return ids(
+					yield* sql<{ id: string }>`
+					UPDATE message_parts SET surfacing_ordinal = ${ordinal},
+						surfacing_probabilities = ${encoded}, surfacing_set_version = ${categorySetVersion},
+						surfacing_model = ${model}, version = ${ctx.version}
+					WHERE id = ${partId} AND message_id = ${messageId} AND type = 'text'
+						AND EXISTS (SELECT 1 FROM messages WHERE id = ${messageId} AND session_id = ${event.sessionId})
+						AND (surfacing_ordinal IS NOT ${ordinal} OR surfacing_probabilities IS NOT ${encoded}
+							OR surfacing_set_version IS NOT ${categorySetVersion} OR surfacing_model IS NOT ${model})
+					RETURNING message_id AS id`,
+				);
+			}
+			if ("messageId" in event.data && event.type !== "message.snapshot") {
 				const rows = yield* sql<{
 					rest_digest: string | null;
 					session_id: string;
+					role: string;
+					is_human_sent: number;
+					created_at: number;
 				}>`
-						SELECT rest_digest, session_id FROM messages WHERE id = ${event.data.messageId}`;
-				if (rows[0]?.rest_digest != null) {
+						SELECT rest_digest, session_id, role, is_human_sent, created_at FROM messages WHERE id = ${event.data.messageId}`;
+				previousMessage = rows[0];
+				if (rows[0]?.role === "user" || rows[0]?.is_human_sent === 1) {
+					switch (event.type) {
+						case "message.created":
+						case "message.part.removed":
+						case "text.delta":
+						case "file.attached":
+						case "thinking.start":
+						case "thinking.delta":
+						case "tool.started":
+						case "tool.running":
+						case "tool.completed":
+							authorshipMessageId = event.data.messageId;
+					}
+				}
+				if (
+					event.type !== "message.part.removed" &&
+					event.metadata.rawSource !== "opencode.rest" &&
+					rows[0]?.rest_digest != null
+				) {
 					yield* sql`UPDATE sessions SET history_complete = 0 WHERE id = ${rows[0].session_id}`;
-					// A late provider echo still tags the snapshot row with its send.
-					if (isEventType(event, "message.created") && event.data.inputId) {
+					// A late header can add send identity or synthetic provenance
+					// without replacing the snapshot's authoritative content.
+					if (
+						isEventType(event, "message.created") &&
+						(event.data.inputId || event.metadata.synthetic)
+					) {
 						return ids(
 							yield* sql<{
 								id: string;
-							}>`UPDATE messages SET input_id = ${event.data.inputId}
-								WHERE id = ${event.data.messageId} AND input_id IS NULL
+							}>`UPDATE messages SET input_id = COALESCE(input_id, ${event.data.inputId ?? null})
+								WHERE id = ${event.data.messageId}
+								AND ((input_id IS NULL AND ${event.data.inputId ?? null} IS NOT NULL) OR ${event.metadata.synthetic === true})
 								RETURNING id`,
 						);
 					}
@@ -582,32 +868,48 @@ export const makeMessageProjector = defineProjector(() => ({
 					)
 					.map((part) => part["text"])
 					.join("");
-				// Only snapshots can change a stored message's ordering clock. Drive
+				// A snapshot can change a stored message's ordering clock. Drive
 				// the cut lookup from this message's primary key, never scan sessions
 				// on ordinary writes or restamp siblings when the clock is unchanged.
 				const existing = yield* sql<{
 					is_backfilled: number;
+					role: string;
 					created_at: number;
+					rest_payload: string | null;
 					rewind_session_id: string | null;
-				}>`SELECT m.is_backfilled, m.created_at, s.id AS rewind_session_id
+				}>`SELECT m.is_backfilled, m.role, m.created_at, m.rest_payload, s.id AS rewind_session_id
 					FROM messages m LEFT JOIN sessions s
 						ON s.id = m.session_id AND s.pending_rewind_message_id = m.id
 					WHERE m.id = ${message.id}`;
+				replacesUserMessage =
+					existing.length > 0 &&
+					(existing[0]?.role === "user" || message.role === "user");
+				if (message.role === "user" || existing[0]?.role === "user")
+					authorshipMessageId = message.id;
+				const previousPayload = jsonRecord(existing[0]?.rest_payload ?? null);
+				const synthetic =
+					event.metadata.synthetic ||
+					previousPayload["isSynthetic"] === true ||
+					previousPayload["isCompactSummary"] === true;
 				const written = yield* sql<{ id: string }>`
 					INSERT INTO messages
 					(id, session_id, role, text, cost, tokens_in, tokens_out,
 					 tokens_cache_read, tokens_cache_write, context_window, context_tokens,
 					 is_streaming, is_backfilled, created_at, updated_at,
-					 rest_digest, rest_event_id, rest_payload, finish, error)
+					 rest_digest, rest_event_id, rest_payload, finish, error, is_inherited)
 					VALUES (${message.id}, ${event.sessionId}, ${message.role}, ${text},
 					 ${message.cost ?? null}, ${message.tokens?.input ?? null},
 					 ${message.tokens?.output ?? null}, ${message.tokens?.cache?.read ?? null},
 					 ${message.tokens?.cache?.write ?? null}, ${message.tokens?.contextWindow ?? null},
 					 ${message.role === "assistant" && message.summary === true && message.time?.completed != null && message.error == null ? 0 : null},
 					 0, ${existing.length === 0 ? 1 : (existing[0]?.is_backfilled ?? 0)},
-					 ${created}, ${completed}, ${digest}, ${event.eventId}, ${encodeJson(message)},
+					 ${created}, ${completed}, ${digest}, ${event.eventId}, ${encodeJson(synthetic ? { ...message, isSynthetic: true } : message)},
 					 ${message.finish ?? null},
-					 ${message.error === undefined ? null : encodeJson(message.error)})
+					 ${message.error === undefined ? null : encodeJson(message.error)},
+					 ${event.metadata.inherited ? 1 : 0} OR EXISTS (
+						SELECT 1 FROM sessions s WHERE s.id = ${event.sessionId}
+						AND (${created}, ${message.id}) <= (s.fork_point_timestamp,
+							COALESCE(s.fork_point_message_id, s.fork_point_event, ''))))
 					ON CONFLICT (id) DO UPDATE SET
 					 role = excluded.role, text = excluded.text, cost = excluded.cost,
 					 tokens_in = excluded.tokens_in, tokens_out = excluded.tokens_out,
@@ -619,16 +921,16 @@ export const makeMessageProjector = defineProjector(() => ({
 					 created_at = excluded.created_at, updated_at = excluded.updated_at,
 					 rest_digest = excluded.rest_digest, rest_event_id = excluded.rest_event_id,
 					 rest_payload = excluded.rest_payload,
-					 finish = excluded.finish, error = excluded.error
+					 finish = excluded.finish, error = excluded.error,
+					 is_inherited = MAX(messages.is_inherited, excluded.is_inherited)
 				RETURNING id`;
-				// A provider snapshot replaces provider parts, while Conduit's own
-				// compaction outcomes must survive reconciliation and reconnects.
+				// Replace provider data on retained parts without erasing Conduit's
+				// surfacing verdicts. Canonical compaction outcomes also survive.
 				const replaced = yield* sql<{ id: string }>`
 					DELETE FROM message_parts WHERE message_id = ${message.id}
+					AND id NOT IN ${sql.in(message.parts.map((part) => part.id))}
 					AND NOT (type = 'compaction' AND rest_payload IS NULL) RETURNING id`;
-				const kept = new Set(message.parts.map((part) => part.id));
 				for (const { id } of replaced) {
-					if (kept.has(id)) continue;
 					yield* sql`INSERT INTO message_part_tombstones (session_id, message_id, part_id, version)
 						VALUES (${event.sessionId}, ${message.id}, ${id}, ${ctx.version})
 						ON CONFLICT (part_id) DO UPDATE SET
@@ -658,7 +960,7 @@ export const makeMessageProjector = defineProjector(() => ({
 							: undefined;
 					yield* sql`
 						INSERT INTO message_parts
-						(id, message_id, type, text, tool_name, call_id, input, result,
+						(id, message_id, type, text, tool_name, call_id, input, result, result_event_seq, result_bytes,
 						 status, sort_order, created_at, updated_at, metadata, rest_payload, version)
 						VALUES (${part.id}, ${message.id}, ${part.type},
 						 ${typeof part["text"] === "string" ? part["text"] : ""},
@@ -666,10 +968,19 @@ export const makeMessageProjector = defineProjector(() => ({
 						 ${typeof part["callID"] === "string" ? part["callID"] : null},
 						 ${toolState && "input" in toolState ? encodeJson(toolState.input) : null},
 						 ${toolState && "output" in toolState ? encodeJson(toolState.output) : null},
+						 NULL, NULL,
 						 ${toolState && "status" in toolState && typeof toolState.status === "string" ? toolState.status : null},
 						 ${index}, ${start}, ${end},
 						 ${toolState && "metadata" in toolState ? encodeJson(toolState.metadata) : null},
-						 ${encodeJson(part)}, ${ctx.version})`;
+						 ${encodeJson(part)}, ${ctx.version})
+						ON CONFLICT (id) DO UPDATE SET
+							type = excluded.type, text = excluded.text, tool_name = excluded.tool_name,
+							call_id = excluded.call_id, input = excluded.input, result = excluded.result,
+							result_event_seq = excluded.result_event_seq, result_bytes = excluded.result_bytes,
+							status = excluded.status, duration = NULL, sort_order = excluded.sort_order,
+							created_at = excluded.created_at, updated_at = excluded.updated_at,
+							metadata = excluded.metadata, rest_payload = excluded.rest_payload, version = excluded.version
+						WHERE message_parts.message_id = excluded.message_id`;
 				}
 				const previous = existing[0];
 				const moved =
@@ -685,6 +996,13 @@ export const makeMessageProjector = defineProjector(() => ({
 			}
 
 			if (isEventType(event, "message.part.removed")) {
+				const [message] = yield* sql<{ rest_payload: string | null }>`
+					SELECT rest_payload FROM messages WHERE id = ${event.data.messageId}`;
+				// Invalidate the snapshot's parts but retain header provenance for
+				// later streamed parts; no second provenance column is needed.
+				const { parts: _parts, ...header } = jsonRecord(
+					message?.rest_payload ?? null,
+				);
 				const removed = yield* sql<{ id: string }>`DELETE FROM message_parts
 					WHERE id = ${event.data.partId} AND message_id = ${event.data.messageId}
 					RETURNING id`;
@@ -699,7 +1017,7 @@ export const makeMessageProjector = defineProjector(() => ({
 					SET text = COALESCE((SELECT group_concat(text, '') FROM (
 						SELECT text FROM message_parts WHERE message_id = ${event.data.messageId}
 						AND type = 'text' ORDER BY sort_order
-					)), ''), rest_payload = NULL, rest_digest = NULL,
+					)), ''), rest_payload = ${Object.keys(header).length > 0 ? encodeJson(header) : null}, rest_digest = NULL,
 					updated_at = ${event.createdAt}
 					WHERE id = ${event.data.messageId} AND session_id = ${event.sessionId}
 					RETURNING id`,
@@ -712,17 +1030,27 @@ export const makeMessageProjector = defineProjector(() => ({
 				}
 				// A backfilled message is settled history: it never streams here.
 				const isBackfilled = event.data.backfilled ? 1 : 0;
+				const created = event.metadata.providerCreatedAt ?? event.createdAt;
+				if (
+					event.metadata.providerCreatedAt !== undefined &&
+					previousMessage?.is_human_sent === 1 &&
+					created < previousMessage.created_at
+				)
+					replacesUserMessage = true;
 				const isStreaming =
 					event.data.role === "assistant" && !isBackfilled ? 1 : 0;
 				// A live user message whose input was sent as a steer, landing while
 				// another turn is open, was read mid-turn; the turn projector closes
 				// that turn. A steer landing after the turn ended ran as its own.
 				const steers = event.data.role === "user" && !isBackfilled;
-				return ids(
-					yield* sql<{ id: string }>`
+				const written = yield* sql<{ id: string }>`
 						INSERT INTO messages
-						(id, session_id, role, text, is_streaming, is_backfilled, created_at, updated_at, parent_id, input_id, steered)
-						VALUES (${event.data.messageId}, ${event.data.sessionId}, ${event.data.role}, '', ${isStreaming}, ${isBackfilled}, ${event.createdAt}, ${event.createdAt}, ${event.data.parentID ?? null}, ${event.data.inputId ?? null},
+						(id, session_id, role, text, is_streaming, is_backfilled, created_at, updated_at, parent_id, input_id, is_inherited, steered)
+						VALUES (${event.data.messageId}, ${event.data.sessionId}, ${event.data.role}, '', ${isStreaming}, ${isBackfilled}, ${created}, ${event.createdAt}, ${event.data.parentID ?? null}, ${event.data.inputId ?? null},
+							${event.metadata.inherited ? 1 : 0} OR EXISTS (
+								SELECT 1 FROM sessions s WHERE s.id = ${event.data.sessionId}
+								AND (${created}, ${event.data.messageId}) <= (s.fork_point_timestamp,
+									COALESCE(s.fork_point_message_id, s.fork_point_event, ''))),
 							${steers ? 1 : 0}
 								AND EXISTS (SELECT 1 FROM pending_inputs
 									WHERE input_id = ${event.data.inputId ?? null}
@@ -733,12 +1061,39 @@ export const makeMessageProjector = defineProjector(() => ({
 									AND id != ${event.data.messageId}))
 						ON CONFLICT (id) DO UPDATE SET
 							role = excluded.role,
+							created_at = CASE WHEN ${event.metadata.providerCreatedAt !== undefined}
+								THEN excluded.created_at ELSE messages.created_at END,
 							is_streaming = CASE WHEN excluded.role = 'user' THEN 0 ELSE messages.is_streaming END,
-							input_id = COALESCE(messages.input_id, excluded.input_id)
+							input_id = COALESCE(messages.input_id, excluded.input_id),
+							is_inherited = MAX(messages.is_inherited, excluded.is_inherited)
 						WHERE messages.role <> excluded.role
+							OR ${event.metadata.synthetic === true}
+							OR messages.is_inherited < excluded.is_inherited
+							OR (${event.metadata.providerCreatedAt !== undefined} AND messages.created_at <> excluded.created_at)
 							OR (messages.input_id IS NULL AND excluded.input_id IS NOT NULL)
-						RETURNING id`,
-				);
+						RETURNING id`;
+				if (
+					!previousMessage ||
+					event.metadata.providerCreatedAt === undefined ||
+					previousMessage.created_at === created ||
+					written.length === 0
+				)
+					return ids(written);
+				const [rewind] = yield* sql<{ id: string }>`SELECT id FROM sessions
+					WHERE id = ${event.data.sessionId} AND pending_rewind_message_id = ${event.data.messageId}`;
+				if (!rewind) return ids(written);
+				return [
+					...ids(written),
+					...(yield* restampRewind(
+						rewind.id,
+						{
+							id: event.data.messageId,
+							created_at: previousMessage.created_at,
+						},
+						{ id: event.data.messageId, created_at: created },
+						ctx.version,
+					)),
+				];
 			}
 
 			if (isEventType(event, "text.delta")) {
@@ -761,12 +1116,14 @@ export const makeMessageProjector = defineProjector(() => ({
 					VALUES (${event.data.messageId}, ${event.sessionId}, 'assistant', '', 1, ${event.createdAt}, ${event.createdAt})`;
 
 				yield* sql`
-					INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at, version)
+					INSERT INTO message_parts (id, message_id, type, text, metadata, sort_order, created_at, updated_at, version)
 					VALUES (${event.data.partId}, ${event.data.messageId}, 'text', ${event.data.text},
+						${event.metadata.synthetic ? encodeJson({ synthetic: true }) : null},
 						COALESCE((SELECT MAX(sort_order) + 1 FROM message_parts WHERE message_id = ${event.data.messageId}), 0),
 						${event.createdAt}, ${event.createdAt}, ${ctx.version})
 					ON CONFLICT (id) DO UPDATE SET
 						text = message_parts.text || excluded.text,
+						metadata = COALESCE(excluded.metadata, message_parts.metadata),
 						updated_at = excluded.updated_at, version = excluded.version`;
 
 				return ids(
@@ -901,8 +1258,29 @@ export const makeMessageProjector = defineProjector(() => ({
 					event.data.metadata["isError"] === true
 						? "error"
 						: "completed";
-				const rows = yield* sql<{ metadata: string | null }>`
-					SELECT metadata FROM message_parts WHERE id = ${event.data.partId}`;
+				const rows = yield* sql<{
+					metadata: string | null;
+					result: string;
+					result_bytes: number | null;
+				}>`
+					WITH completed AS (SELECT ${resultJson} AS result),
+					output AS (
+						SELECT result, CASE WHEN json_type(result) = 'text'
+							THEN json_extract(result, '$') ELSE result END AS output
+						FROM completed
+					)
+					SELECT mp.metadata,
+						CASE WHEN mp.type = 'tool'
+							AND mp.tool_name NOT IN ${sql.in(NEVER_CUT_TOOL_NAMES)}
+							AND length(output) > ${PREVIEW_CODE_POINTS}
+							THEN json_quote(substr(output, 1, ${PREVIEW_CODE_POINTS}))
+							ELSE output.result END AS result,
+						CASE WHEN mp.type = 'tool'
+							AND mp.tool_name NOT IN ${sql.in(NEVER_CUT_TOOL_NAMES)}
+							AND length(output) > ${PREVIEW_CODE_POINTS}
+							THEN length(CAST(output AS BLOB)) END AS result_bytes
+					FROM message_parts mp CROSS JOIN output
+					WHERE mp.id = ${event.data.partId}`;
 				const metadata = yield* mergeMetadata(
 					rows[0]?.metadata ?? null,
 					event.data.metadata,
@@ -911,9 +1289,17 @@ export const makeMessageProjector = defineProjector(() => ({
 				);
 				yield* sql`
 					UPDATE message_parts
-					SET result = ${resultJson}, duration = ${event.data.duration}, status = ${toolStatus}, metadata = ${metadata}, updated_at = ${event.createdAt}, version = ${ctx.version},
+					SET result = ${rows[0]?.result ?? resultJson},
+						result_event_seq = ${rows[0]?.result_bytes == null ? null : event.sequence},
+						result_bytes = ${rows[0]?.result_bytes ?? null},
+						duration = ${event.data.duration}, status = ${toolStatus}, metadata = ${metadata}, updated_at = ${event.createdAt}, version = ${ctx.version},
 						input = COALESCE(${event.data.input === undefined ? null : encodeJson(event.data.input)}, input)
-					WHERE id = ${event.data.partId}`;
+					WHERE id = ${event.data.partId}
+						-- A completion without a result (the turn-end settle) only closes
+						-- unfinished tools; on a finished one it would erase output that
+						-- already arrived, e.g. via a forked subagent's transcript.
+						AND (${event.data.result == null || event.data.result === "" ? 0 : 1} = 1
+							OR status NOT IN ('completed', 'error'))`;
 				return ids(
 					yield* sql<{
 						id: string;
@@ -974,8 +1360,30 @@ export const makeMessageProjector = defineProjector(() => ({
 				);
 			}
 
+			if (isEventType(event, "turn.notice")) {
+				if (!event.metadata.runId) return [];
+				const [owner] = yield* sql<{
+					id: string;
+				}>`SELECT run.id FROM provider_runs requested
+					JOIN provider_runs run ON run.id = COALESCE(requested.joined_into, requested.id)
+						AND run.session_id = requested.session_id
+					WHERE requested.id = ${event.metadata.runId} AND requested.session_id = ${event.sessionId}
+						AND run.status = 'running' AND run.started_at IS NOT NULL`;
+				if (!owner) return [];
+				const messageId = `turn-notice-${event.sequence}`;
+				yield* sql`INSERT INTO messages
+					(id, session_id, role, text, is_streaming, created_at, updated_at, version)
+					VALUES (${messageId}, ${event.sessionId}, 'assistant', '', 0, ${event.createdAt}, ${event.createdAt}, ${ctx.version})
+					ON CONFLICT (id) DO NOTHING`;
+				yield* sql`INSERT INTO message_parts
+					(id, message_id, type, text, metadata, sort_order, created_at, updated_at, version)
+					VALUES (${`turn-notice-part-${event.sequence}`}, ${messageId}, 'text', ${event.data.text},
+						${encodeJson({ notice: true })}, 0, ${event.createdAt}, ${event.createdAt}, ${ctx.version})
+					ON CONFLICT (id) DO NOTHING`;
+				return [messageId];
+			}
+
 			if (isEventType(event, "turn.error")) {
-				yield* closeThinking(event.data.messageId);
 				// The error is the turn's last word, so it replays like any
 				// content: a synthetic message after the turn's own, keyed on the
 				// event sequence. A part on the turn's message would be lost when
@@ -993,24 +1401,7 @@ export const makeMessageProjector = defineProjector(() => ({
 						${event.data.code === undefined ? null : encodeJson({ code: event.data.code })},
 						0, ${event.createdAt}, ${event.createdAt}, ${ctx.version})
 					ON CONFLICT (id) DO NOTHING`;
-				return [
-					errorMessageId,
-					...ids(
-						yield* sql<{
-							id: string;
-						}>`UPDATE messages SET is_streaming = 0, updated_at = ${event.createdAt} WHERE id = ${event.data.messageId} RETURNING id`,
-					),
-				];
-			}
-
-			if (isEventType(event, "turn.interrupted")) {
-				const closed = yield* closeThinking(event.data.messageId);
-				const interrupted = yield* sql<{ id: string }>`UPDATE messages
-					SET finish = 'interrupted' WHERE id = ${event.data.messageId}
-						OR id IN (SELECT user_message_id FROM turns
-							WHERE session_id = ${event.sessionId} AND state IN ('pending', 'running'))
-					RETURNING id`;
-				return [...new Set([...closed, ...ids(interrupted)])];
+				return [errorMessageId];
 			}
 
 			if (isEventType(event, "session.compaction")) {
@@ -1086,21 +1477,193 @@ export const makeMessageProjector = defineProjector(() => ({
 						}),
 			),
 			Effect.flatMap((written) =>
-				isEventType(event, "message.removed")
-					? stampSessions([event.sessionId], ctx.version).pipe(
-							Effect.map((touch) => ({
-								...touch,
-								collections: [...touch.collections, "messages"] as const,
-							})),
-						)
-					: stampMessage(written, ctx.version),
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					for (const messageId of new Set(written)) {
+						if (messageId !== authorshipMessageId) continue;
+						const [row] = yield* sql<{
+							role: string;
+							input_id: string | null;
+							is_inherited: number;
+							is_human_sent: number;
+							rest_payload: string | null;
+						}>`SELECT role, input_id, is_inherited, is_human_sent, rest_payload
+							FROM messages WHERE id = ${messageId}`;
+						if (!row) continue;
+						const snapshot = jsonRecord(row.rest_payload);
+						if (
+							isEventType(event, "message.created") &&
+							event.metadata.synthetic
+						) {
+							// A header-only synthetic fact must survive subsequent part events.
+							snapshot["isSynthetic"] = true;
+							yield* sql`UPDATE messages SET rest_payload = ${encodeJson(snapshot)} WHERE id = ${messageId}`;
+						}
+						if (row.role !== "user" && row.is_human_sent === 0) continue;
+						const storedParts =
+							row.role === "user"
+								? yield* sql<{
+										type: string;
+										metadata: string | null;
+										rest_payload: string | null;
+									}>`SELECT type, metadata, rest_payload FROM message_parts WHERE message_id = ${messageId}`
+								: [];
+						const parts = storedParts.map((part) => {
+							const raw = jsonRecord(part.rest_payload);
+							return {
+								type: part.type,
+								synthetic:
+									raw["synthetic"] === true ||
+									jsonRecord(part.metadata)["synthetic"] === true,
+								ignored: raw["ignored"],
+							};
+						});
+						// Old snapshots may have parts only in rest_payload.
+						const ownParts =
+							parts.length > 0
+								? parts
+								: Array.isArray(snapshot["parts"])
+									? snapshot["parts"]
+											.filter(isRecord)
+											.map((part) => ({ ...part, type: part["type"] }))
+									: [];
+						const [legacy] =
+							row.role === "user" &&
+							row.is_inherited === 0 &&
+							row.rest_payload === null &&
+							row.input_id === null &&
+							ownParts.length === 0
+								? yield* sql<{
+										text: string;
+									}>`SELECT text FROM messages WHERE id = ${messageId}`
+								: [];
+						const humanSent = isHumanSentMessage(
+							{
+								role: row.role,
+								inputId: row.input_id,
+								inherited: row.is_inherited === 1,
+								synthetic:
+									snapshot["isSynthetic"] === true ||
+									snapshot["isCompactSummary"] === true,
+								legacyText: legacy?.text ?? "",
+							},
+							ownParts,
+						);
+						if (row.is_human_sent === Number(humanSent)) continue;
+						replacesUserMessage ||= row.is_human_sent === 1;
+						yield* sql`UPDATE messages SET is_human_sent = ${Number(humanSent)} WHERE id = ${messageId}`;
+					}
+					const touch = yield* stampMessage(written, ctx);
+					if (event.type !== "message.part.removed" && !replacesUserMessage)
+						return touch;
+					const changed = yield* refreshLastUserMessageAt(
+						event.sessionId,
+						ctx.version,
+					);
+					if (changed.length === 0) return touch;
+					return {
+						...touch,
+						stamped: [...new Set([...touch.stamped, ...changed])],
+						collections: [
+							...new Set<ReadModelCollection>([
+								...touch.collections,
+								"sessions",
+								"sidebar",
+							]),
+						],
+						sidebar: [...new Set([...(touch.sidebar ?? []), ...changed])],
+					};
+				}),
 			),
-		),
+		);
+	},
 }));
+
+export function runTerminalStatus(
+	event: { readonly type: string; readonly data: unknown },
+	provider: string,
+): "completed" | "error" | "interrupted" | undefined {
+	if (event.type === "turn.error") return "error";
+	if (event.type === "turn.interrupted") return "interrupted";
+	if (event.type === "turn.completed")
+		return getProviderDriver(provider)?.streamsSessionLifecycle === true
+			? "completed"
+			: undefined;
+	if (
+		provider === "opencode" &&
+		event.type === "session.status" &&
+		isRecord(event.data)
+	) {
+		if (event.data["status"] === "idle") return "completed";
+		if (event.data["status"] === "error") return "error";
+	}
+	return undefined;
+}
+
+// Called only by run transitions, in the same projection transaction.
+function settleRunCommands(
+	runId: string,
+	event: {
+		readonly type: string;
+		readonly provider: string;
+		readonly sessionId: string;
+		readonly data: unknown;
+		readonly createdAt: number;
+	},
+) {
+	return Effect.gen(function* () {
+		const status = runTerminalStatus(event, event.provider);
+		if (!status) return;
+		const sql = yield* SqlClient.SqlClient;
+		const data = isRecord(event.data) ? event.data : {};
+		const retryable =
+			status === "error" &&
+			data["retryable"] === true &&
+			data["retryHandled"] !== true;
+		const code =
+			status === "completed"
+				? null
+				: typeof data["code"] === "string"
+					? data["code"]
+					: status;
+		const commands = yield* sql<{
+			request_sequence: number;
+			command_id: string;
+			project_key: string;
+			attempt_count: number;
+		}>`
+			SELECT request_sequence, command_id, project_key, attempt_count FROM provider_command_outbox
+			WHERE session_id = ${event.sessionId} AND effect_type = 'send_turn'
+				AND status IN ('pending', 'running', 'retryable_failed')
+				AND run_id IN
+					(SELECT id FROM provider_runs WHERE session_id = ${event.sessionId}
+					 AND (id = ${runId} OR joined_into = ${runId}))`;
+		for (const command of commands) {
+			const retryAt = retryable
+				? typeof data["retryAt"] === "number"
+					? data["retryAt"]
+					: event.createdAt +
+						Math.min(1000 * 2 ** Math.max(0, command.attempt_count - 1), 30_000)
+				: null;
+			yield* sql`UPDATE provider_command_outbox
+				SET status = ${status === "completed" ? "completed" : retryable ? "retryable_failed" : "failed"},
+					error_code = ${code}, next_attempt_at = ${retryAt}, updated_at = ${event.createdAt}
+				WHERE request_sequence = ${command.request_sequence} AND project_key = ${command.project_key}`;
+			yield* sql`UPDATE command_receipts
+				SET status = ${status === "completed" ? "side_effect_completed" : "side_effect_failed"},
+					error_code = ${code}, updated_at = ${event.createdAt}
+				WHERE command_id = ${command.command_id} AND project_key = ${command.project_key}
+					AND ${command.request_sequence} = (SELECT MAX(request_sequence) FROM provider_command_outbox
+						WHERE command_id = ${command.command_id} AND project_key = ${command.project_key})`;
+		}
+	});
+}
 
 export const makeTurnProjector = defineProjector(() => ({
 	name: "turn",
 	handles: [
+		"run.requested",
+		"run.started",
 		"message.created",
 		"message.snapshot",
 		"tool.started",
@@ -1113,6 +1676,119 @@ export const makeTurnProjector = defineProjector(() => ({
 	project: (event, ctx) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
+			if (isEventType(event, "run.requested")) {
+				yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
+					VALUES (${event.data.runId}, ${event.sessionId}, 'pending', ${event.createdAt})
+					ON CONFLICT (id) DO NOTHING`;
+				yield* sql`UPDATE sessions SET status = 'busy', last_turn_error_at = NULL
+					WHERE id = ${event.sessionId} AND EXISTS (
+						SELECT 1 FROM provider_runs WHERE id = ${event.data.runId}
+							AND session_id = ${event.sessionId} AND status IN ('pending', 'running'))`;
+				yield* sql`UPDATE command_receipts SET status = 'side_effect_requested', error_code = NULL, updated_at = ${event.createdAt}
+					WHERE (command_id, project_key) IN (
+						SELECT command_id, project_key FROM provider_command_outbox WHERE run_id = ${event.data.runId}
+							AND session_id = ${event.sessionId} AND status = 'running'
+							AND EXISTS (SELECT 1 FROM provider_runs WHERE id = ${event.data.runId} AND status = 'pending'))`;
+				return { sessions: [event.sessionId], messages: [] };
+			}
+			const runId = event.metadata.runId;
+			if (isEventType(event, "run.started")) {
+				if (!runId) return { sessions: [], messages: [] };
+				if (event.data.requestedRunId === runId)
+					yield* sql`INSERT INTO provider_runs
+					(id, session_id, status, requested_at, started_at)
+					VALUES (${runId}, ${event.sessionId}, 'running', ${event.createdAt}, ${event.createdAt})
+					ON CONFLICT (id) DO NOTHING`;
+
+				const [resolved] = yield* sql<{
+					status: string;
+					started_at: number | null;
+					completed_at: number | null;
+				}>`
+					SELECT status, started_at, completed_at FROM provider_runs WHERE id = ${runId} AND session_id = ${event.sessionId}`;
+				if (!resolved || resolved.status === "joined")
+					return { sessions: [], messages: [] };
+				const open =
+					resolved.status === "pending" || resolved.status === "running";
+				const startedAt =
+					resolved.started_at ?? (open ? event.createdAt : null);
+				yield* sql`UPDATE provider_runs SET status = 'joined', completed_at = ${event.createdAt}, joined_into = ${runId}
+					WHERE id = ${event.data.requestedRunId} AND session_id = ${event.sessionId}
+					AND id <> ${runId} AND status = 'pending'`;
+				if (open)
+					yield* sql`UPDATE provider_runs SET status = 'running', started_at = ${startedAt}
+					WHERE id = ${runId} AND session_id = ${event.sessionId}`;
+				const joined = yield* sql<OwnedRow & { id: string }>`UPDATE turns
+					SET run_id = ${runId}, state = ${open ? sql`state` : resolved.status},
+						completed_at = ${open ? sql`completed_at` : resolved.completed_at}
+					WHERE run_id = ${event.data.requestedRunId} AND session_id = ${event.sessionId}
+					AND run_id IN (SELECT id FROM provider_runs WHERE joined_into = ${runId})
+					RETURNING id, session_id`;
+				const written = yield* sql<OwnedRow & { id: string }>`UPDATE turns
+					SET state = ${open ? "running" : resolved.status},
+						started_at = COALESCE(started_at, ${event.createdAt}), completed_at = ${open ? null : resolved.completed_at}
+					WHERE session_id = ${event.sessionId}
+					AND (id = ${event.data.userMessageId ?? event.data.inputId} OR user_message_id IN
+						(SELECT id FROM messages WHERE session_id = ${event.sessionId} AND input_id = ${event.data.inputId}))
+					AND run_id = ${runId}
+					RETURNING id, session_id`;
+				if (written.length)
+					yield* sql`UPDATE messages SET turn_id = id WHERE session_id = ${event.sessionId}
+					AND id IN ${sql.in(written.map(({ id }) => id))}`;
+				if (!open) {
+					// A delayed acceptance follows the run's recorded end, never a new adapter result.
+					const ends = yield* sql<{
+						type: string;
+						data: string;
+						provider: string;
+					}>`
+						SELECT type, data, provider FROM events WHERE session_id = ${event.sessionId}
+						AND json_extract(metadata, '$.runId') = ${runId} AND created_at = ${resolved.completed_at}
+						ORDER BY sequence`;
+					for (const end of ends) {
+						const cause = {
+							...end,
+							sessionId: event.sessionId,
+							createdAt: resolved.completed_at ?? event.createdAt,
+							data: JSON.parse(end.data) as unknown,
+						};
+						if (runTerminalStatus(cause, cause.provider) !== resolved.status)
+							continue;
+						yield* settleRunCommands(runId, cause);
+						break;
+					}
+				}
+
+				return {
+					sessions: [event.sessionId],
+					messages: ids([...joined, ...written]),
+				};
+			}
+
+			if (isEventType(event, "message.created") && event.data.role === "user") {
+				const [run] = runId
+					? yield* sql<{
+							id: string;
+							status: string;
+							completed_at: number | null;
+						}>`SELECT run.id, run.status, run.completed_at FROM provider_runs requested
+						JOIN provider_runs run ON run.id = COALESCE(requested.joined_into, requested.id)
+							AND run.session_id = requested.session_id
+						WHERE requested.id = ${runId} AND requested.session_id = ${event.sessionId}`
+					: [];
+				const written = yield* sql<OwnedRow>`INSERT INTO turns
+					(id, session_id, state, user_message_id, requested_at, run_id, completed_at)
+					VALUES (${event.data.messageId}, ${event.sessionId}, ${run && !["pending", "running"].includes(run.status) ? run.status : "pending"}, ${event.data.messageId}, ${event.createdAt}, ${run?.id ?? runId ?? null}, ${run?.completed_at ?? null})
+					ON CONFLICT (id) DO UPDATE SET run_id = excluded.run_id, state = excluded.state,
+						started_at = NULL, completed_at = excluded.completed_at, assistant_message_id = NULL
+					WHERE excluded.run_id IS NOT NULL AND (turns.run_id IS NULL OR (
+						EXISTS (SELECT 1 FROM provider_runs prior WHERE prior.id = turns.run_id
+							AND prior.session_id = turns.session_id AND prior.status IN ('completed', 'error', 'interrupted'))
+						AND EXISTS (SELECT 1 FROM provider_runs next WHERE next.id = excluded.run_id
+							AND next.session_id = excluded.session_id AND next.status IN ('pending', 'running')))) RETURNING session_id`;
+				return { sessions: owners(written), messages: [] };
+			}
+
 			if (
 				event.metadata.rawSource !== "opencode.rest" &&
 				"messageId" in event.data &&
@@ -1196,266 +1872,143 @@ export const makeTurnProjector = defineProjector(() => ({
 						WHERE session_id = ${event.sessionId} AND turn_id = ${turnId}
 						AND role = 'assistant'
 						ORDER BY created_at DESC, id DESC LIMIT 1`;
-					if (latest) {
-						const rows = yield* sql<{
-							id: string;
-						}>`UPDATE turns SET assistant_message_id = ${latest.id},
-							state = ${latest.is_streaming ? "running" : "completed"},
-							started_at = ${totals?.started_at ?? null},
-							completed_at = ${latest.is_streaming ? null : (totals?.completed_at ?? null)},
-							cost = ${totals?.cost ?? null}, tokens_in = ${totals?.tokens_in ?? null},
-							tokens_out = ${totals?.tokens_out ?? null} WHERE id = ${turnId}
-							RETURNING id`;
-						messageIds.push(...ids(rows));
-					} else {
-						const rows = yield* sql<{
-							id: string;
-						}>`UPDATE turns SET assistant_message_id = NULL, state = 'pending',
-							started_at = NULL, completed_at = NULL, cost = NULL,
-							tokens_in = NULL, tokens_out = NULL WHERE id = ${turnId}
-							AND assistant_message_id IS NOT NULL RETURNING id`;
-						messageIds.push(...ids(rows));
-					}
+					// REST repairs display ownership; an owned run keeps its lifecycle and accounting.
+					const rows = yield* sql<{
+						id: string;
+					}>`UPDATE turns SET assistant_message_id = ${latest?.id ?? null},
+						state = CASE WHEN run_id IS NULL THEN ${latest ? (latest.is_streaming ? "running" : "completed") : "pending"} ELSE state END,
+						started_at = CASE WHEN run_id IS NULL THEN ${totals?.started_at ?? null} ELSE started_at END,
+						completed_at = CASE WHEN run_id IS NULL THEN ${latest?.is_streaming ? null : (totals?.completed_at ?? null)} ELSE completed_at END,
+						cost = CASE WHEN run_id IS NULL THEN ${totals?.cost ?? null} ELSE cost END,
+						tokens_in = CASE WHEN run_id IS NULL THEN ${totals?.tokens_in ?? null} ELSE tokens_in END,
+						tokens_out = CASE WHEN run_id IS NULL THEN ${totals?.tokens_out ?? null} ELSE tokens_out END
+						WHERE id = ${turnId} RETURNING id`;
+					messageIds.push(...ids(rows));
 				}
 				return {
 					sessions: affected.size > 0 ? [event.sessionId] : [],
 					messages: messageIds,
 				};
 			}
-
-			if (isEventType(event, "message.created")) {
-				if (event.data.role === "user") {
-					// A steer closes the turn it joined at its own start time, so a
-					// folded result splits into two turns; the result completes this one.
-					const closed = event.data.backfilled
-						? []
-						: yield* sql<
-								OwnedRow & { id: string }
-							>`UPDATE turns SET state = 'completed',
-							completed_at = ${event.createdAt}
-							WHERE session_id = ${event.data.sessionId}
-							AND state IN ('pending', 'running')
-							AND id != ${event.data.messageId}
-							RETURNING id, session_id`;
-					return {
-						sessions: owners([
-							...closed,
-							...(yield* sql<OwnedRow>`
-								INSERT OR REPLACE INTO turns
-								(id, session_id, state, user_message_id, requested_at)
-								VALUES (${event.data.messageId}, ${event.data.sessionId}, ${persistedTurnState("prompt")}, ${event.data.messageId}, ${event.createdAt})
-								RETURNING session_id`),
-						]),
-						messages: ids(closed),
-					};
-				}
-			}
-
-			// Idle means the provider has nothing in flight, so every turn it
-			// leaves open is over: one waiting for a reply never got it, and one
-			// whose result named no reply this turn owns will see no other close.
-			// The inbox reads an open turn as busy and would queue every later
-			// send. A turn the provider continues reopens on its next reply.
 			if (
-				isEventType(event, "session.status") &&
-				event.data.status === "idle"
+				isEventType(event, "message.created") &&
+				event.data.role === "assistant" &&
+				event.data.parentID
 			) {
-				const written = yield* sql<OwnedRow & { id: string }>`
-						UPDATE turns SET state = 'completed', completed_at = ${event.createdAt}
-						WHERE session_id = ${event.sessionId}
-						AND state IN ('pending', 'running')
-						AND requested_at <= ${event.createdAt}
-						RETURNING id, session_id`;
-				return { sessions: owners(written), messages: ids(written) };
-			}
-
-			// A result may arrive before the provider continues the same turn.
-			if (
-				(isEventType(event, "session.status") &&
-					event.data.status === "busy") ||
-				(isEventType(event, "message.created") &&
-					event.data.role === "assistant") ||
-				isEventType(event, "tool.started")
-			) {
-				const parentTurn =
-					isEventType(event, "message.created") && event.data.parentID
-						? yield* sql<{
-								id: string;
-								state: string;
-								assistant_message_id: string | null;
-							}>`SELECT id, state, assistant_message_id FROM turns
-							WHERE id = ${event.data.parentID} AND session_id = ${event.sessionId}`
-						: isEventType(event, "tool.started")
-							? yield* sql<{
-									id: string;
-									state: string;
-									assistant_message_id: string | null;
-								}>`SELECT turns.id, turns.state, turns.assistant_message_id
-								FROM turns JOIN messages ON messages.turn_id = turns.id
-								WHERE messages.id = ${event.data.messageId}
-								AND turns.session_id = ${event.sessionId}`
-							: [];
-				// Without a key, a signal belongs to the newest turn, except that a
-				// newer turn not yet started must not take over a running turn's
-				// busy and tool signals; a new reply is what starts it. A turn still
-				// running from before a later one settled is a crash leftover, so it
-				// never wins.
-				const [turn] = parentTurn.length
-					? parentTurn
-					: yield* sql<{
-							id: string;
-							state: string;
-							assistant_message_id: string | null;
-						}>`
-					SELECT id, state, assistant_message_id FROM turns
-					WHERE session_id = ${event.sessionId}
-					AND requested_at <= ${event.createdAt}
-					ORDER BY (${isEventType(event, "message.created") ? 0 : 1}
-						AND state = 'running'
-						AND requested_at >= (SELECT COALESCE(MAX(requested_at), 0) FROM turns
-							WHERE session_id = ${event.sessionId}
-							AND state NOT IN ('pending', 'running'))) DESC,
-						requested_at DESC, rowid DESC LIMIT 1`;
-				if (!turn) return { sessions: [], messages: [] };
-				const reopening = turn.state !== "pending" && turn.state !== "running";
-				// A tool no message of ours owns (a background task restarting
-				// between turns) joins an open turn only. Reopened, a settled turn
-				// would run with no reply whose result could close it.
-				if (
-					reopening &&
-					isEventType(event, "tool.started") &&
-					!parentTurn.length
-				)
-					return { sessions: [], messages: [] };
-				// Turns run one at a time, so a reply starting ends every earlier
-				// turn still running.
-				const superseded = isEventType(event, "message.created")
-					? yield* sql<OwnedRow & { id: string }>`
-						UPDATE turns SET state = 'completed', completed_at = ${event.createdAt}
-						WHERE session_id = ${event.sessionId} AND state = 'running'
-						AND requested_at < (SELECT requested_at FROM turns WHERE id = ${turn.id})
-						RETURNING id, session_id`
-					: [];
-				if (isEventType(event, "message.created")) {
-					yield* sql`UPDATE messages SET turn_id = ${turn.id},
-						parent_id = COALESCE(parent_id, ${turn.id})
-						WHERE id = ${event.data.messageId}`;
-				}
-				const assistantMessageId = reopening ? null : turn.assistant_message_id;
-				const written = yield* sql<OwnedRow & { id: string }>`
-						UPDATE turns
-						SET state = ${persistedTurnState(event.type === "session.status" ? "busy" : "activity")},
-							started_at = COALESCE(started_at, ${event.createdAt}),
-							completed_at = NULL,
-							assistant_message_id = ${isEventType(event, "message.created") ? (assistantMessageId ?? event.data.messageId) : assistantMessageId}
-						WHERE id = ${turn.id}
-						RETURNING id, session_id`;
-				return {
-					sessions: owners([...written, ...superseded]),
-					messages: ids([...written, ...superseded]),
-				};
-			}
-
-			// These three find their turn by assistant message id, so the owning
-			// session is nowhere in the statement — `RETURNING session_id` is the
-			// only thing that knows which session row actually moved.
-			if (isEventType(event, "turn.completed")) {
-				// New Claude completions add their cost deltas, like per-execution tokens.
-				// Other providers and historical Claude events retain latest-wins cost.
-				// A result-only turn (Claude /compact) has no reply of its own,
-				// so it is keyed by its prompt instead of the previous turn's reply.
-				const tokens = event.data.tokens;
-				const written = yield* sql<OwnedRow & { id: string }>`
-						UPDATE turns
-						SET state = 'completed',
-							cost = CASE WHEN ${event.data.providerCostTotalUsd !== undefined ? 1 : 0}
-								THEN COALESCE(cost, 0) + ${event.data.cost ?? 0}
-								ELSE COALESCE(${event.data.cost ?? null}, cost) END,
-							tokens_in = COALESCE(tokens_in + ${tokens?.input ?? null}, tokens_in, ${tokens?.input ?? null}),
-							tokens_out = COALESCE(tokens_out + ${tokens?.output ?? null}, tokens_out, ${tokens?.output ?? null}),
-							completed_at = ${event.createdAt}
-						WHERE ${
-							event.data.userMessageId
-								? sql`id = ${event.data.userMessageId} AND session_id = ${event.sessionId}`
-								: // A turn can hold several replies (an input the SDK folds
-									// into it starts a new one), but its row names only the
-									// first, so the reply's own turn link settles it too.
-									sql`session_id = ${event.sessionId}
-									AND (assistant_message_id = ${event.data.messageId}
-										OR id = (SELECT turn_id FROM messages
-											WHERE id = ${event.data.messageId}))`
-						}
-						RETURNING id, session_id`;
-				return { sessions: owners(written), messages: ids(written) };
-			}
-
-			if (isEventType(event, "turn.error")) {
-				// Runner startup and queued sends can fail before an assistant
-				// message identifies the owning turn. Prefer the persisted user ID.
-				if (event.data.userMessageId) {
-					const written = yield* sql<OwnedRow & { id: string }>`UPDATE turns
-							SET state = 'error', completed_at = ${event.createdAt}
-							WHERE id = ${event.data.userMessageId}
-							AND session_id = ${event.sessionId}
-							RETURNING id, session_id`;
-					return { sessions: owners(written), messages: ids(written) };
-				}
-				// An error before the reply is named carries no id a turn owns, so
-				// it ends the running turn.
-				const written = yield* sql<OwnedRow & { id: string }>`
-						UPDATE turns
-						SET state = 'error', completed_at = ${event.createdAt}
-						WHERE session_id = ${event.sessionId}
-						AND (assistant_message_id = ${event.data.messageId}
-							OR state = 'running')
-						RETURNING id, session_id`;
-				return { sessions: owners(written), messages: ids(written) };
-			}
-
-			if (isEventType(event, "turn.interrupted")) {
-				// Stop ends the session's work, so whatever is still open stops with
-				// the named turn. That also covers an empty id (stopped before naming
-				// its reply) and an id no turn owns.
-				const written = yield* sql<OwnedRow & { id: string }>`
-						UPDATE turns
-						SET state = 'interrupted', completed_at = ${event.createdAt}
-						WHERE session_id = ${event.sessionId}
-						AND (assistant_message_id = ${event.data.messageId}
-							OR state IN ('running', 'pending'))
-						RETURNING id, session_id`;
-				return { sessions: owners(written), messages: ids(written) };
-			}
-
-			// Cursor reports its actual model at wait(), after the turn may have
-			// settled. Its assistant message identifies that turn exactly. Legacy
-			// Claude init events arrive before a reply and use the newest open turn.
-			if (isEventType(event, "turn.model_resolved")) {
-				const target = event.data.messageId
-					? sql`SELECT turn_id FROM messages
-						WHERE id = ${event.data.messageId} AND session_id = ${event.sessionId}`
-					: sql`SELECT id FROM turns
-						WHERE session_id = ${event.sessionId}
-							AND state IN ('pending', 'running')
-						ORDER BY requested_at DESC LIMIT 1`;
-				const written = yield* sql<OwnedRow & { id: string }>`
-					UPDATE turns
-					SET requested_model = ${event.data.requestedModel ?? null},
-						expected_model = ${event.data.expectedModel ?? null},
-						actual_model = ${event.data.actualModel}
-					WHERE session_id = ${event.sessionId} AND id = (${target})
+				const written = yield* sql<OwnedRow & { id: string }>`UPDATE turns
+					SET assistant_message_id = COALESCE((SELECT id FROM messages
+						WHERE session_id = ${event.sessionId} AND role = 'assistant'
+						AND (turn_id = turns.id OR id = ${event.data.messageId})
+						ORDER BY created_at DESC, id DESC LIMIT 1), ${event.data.messageId})
+					WHERE id = ${event.data.parentID} AND session_id = ${event.sessionId} AND (${runId ?? null} IS NULL OR run_id = ${runId ?? null})
 					RETURNING id, session_id`;
-				if (event.data.messageId && written.length) {
-					// Keyed resolution also associates its prompt with the resolved turn.
-					// The history adapter carries execution from that prompt to UserMessage.
-					yield* sql`UPDATE messages SET turn_id = id
-						WHERE session_id = ${event.sessionId}
-						AND id IN ${sql.in(written.map(({ id }) => id))}`;
+				if (written.length)
+					yield* sql`UPDATE messages SET turn_id = ${event.data.parentID}
+					WHERE id = ${event.data.messageId} AND session_id = ${event.sessionId}`;
+				return { sessions: owners(written), messages: ids(written) };
+			}
+
+			// Live ownership is resolved by the adapter. Unplaced events cannot change a turn.
+			if (!runId) return { sessions: [], messages: [] };
+			const [run] = yield* sql<{
+				status: string;
+			}>`SELECT status FROM provider_runs
+				WHERE id = ${runId} AND session_id = ${event.sessionId}`;
+			if (!run) return { sessions: [], messages: [] };
+
+			if (isEventType(event, "turn.model_resolved")) {
+				const written = yield* sql<OwnedRow & { id: string }>`UPDATE turns
+					SET requested_model = ${event.data.requestedModel ?? null},
+						expected_model = ${event.data.expectedModel ?? null}, actual_model = ${event.data.actualModel}
+					WHERE run_id = ${runId} AND session_id = ${event.sessionId}
+					RETURNING id, session_id`;
+				return { sessions: owners(written), messages: ids(written) };
+			}
+
+			if (isEventType(event, "turn.completed")) {
+				const tokens = event.data.tokens;
+				yield* sql`UPDATE turns SET
+					cost = CASE WHEN ${event.data.providerCostTotalUsd !== undefined ? 1 : 0}
+						THEN COALESCE(cost, 0) + ${event.data.cost ?? 0}
+						ELSE COALESCE(${event.data.cost ?? null}, cost) END,
+					tokens_in = COALESCE(tokens_in + ${tokens?.input ?? null}, tokens_in, ${tokens?.input ?? null}),
+					tokens_out = COALESCE(tokens_out + ${tokens?.output ?? null}, tokens_out, ${tokens?.output ?? null})
+					WHERE run_id = ${runId} AND session_id = ${event.sessionId}
+					AND id = COALESCE(${event.data.userMessageId ?? null},
+						(SELECT turn_id FROM messages WHERE id = ${event.data.messageId}
+						 AND session_id = ${event.sessionId}))`;
+			}
+			if (!["pending", "running"].includes(run.status))
+				return { sessions: [event.sessionId], messages: [] };
+
+			const terminal = runTerminalStatus(event, event.provider);
+			if (terminal) {
+				const ended = yield* sql<{
+					id: string;
+				}>`UPDATE provider_runs SET status = ${terminal}, completed_at = ${event.createdAt}
+					WHERE id = ${runId} AND session_id = ${event.sessionId} AND status IN ('pending', 'running') RETURNING id`;
+				if (!ended.length) return { sessions: [], messages: [] };
+				yield* sql`UPDATE sessions SET status = CASE WHEN EXISTS (
+					SELECT 1 FROM provider_runs WHERE session_id = ${event.sessionId}
+						AND status IN ('pending', 'running')) THEN 'busy' ELSE 'idle' END
+					WHERE id = ${event.sessionId}`;
+				// Only a run transition with placed members advances the browser's
+				// completion boundary; an unplaced refusal cannot erase another end.
+				yield* sql`UPDATE sessions SET updated_at = ${event.createdAt},
+					last_turn_error_at = ${terminal === "error" ? event.createdAt : null},
+					last_turn_end_input_id = (SELECT messages.input_id FROM messages
+						JOIN turns ON turns.user_message_id = messages.id
+						WHERE turns.run_id = ${runId} AND turns.session_id = ${event.sessionId}
+							AND messages.input_id IS NOT NULL
+						ORDER BY turns.started_at, turns.requested_at, messages.rowid LIMIT 1),
+					last_turn_end_version = ${event.streamVersion}
+					WHERE id = ${event.sessionId}
+					AND ${event.streamVersion} > COALESCE(last_turn_end_version, -1)
+					AND EXISTS (SELECT 1 FROM turns WHERE run_id = ${runId}
+						AND session_id = ${event.sessionId})`;
+				if (
+					isEventType(event, "turn.completed") &&
+					event.data.providerStateUpdates
+				) {
+					const state = yield* makeProviderStateEffect.pipe(
+						Effect.provideService(PersistenceProjectTag, {
+							projectId: event.projectId,
+						}),
+					);
+					yield* state.saveUpdates(
+						event.sessionId,
+						event.data.providerStateUpdates,
+					);
 				}
+				yield* settleRunCommands(runId, event);
+				const written = yield* sql<OwnedRow & { id: string }>`UPDATE turns
+					SET state = ${terminal}, completed_at = ${event.createdAt}
+					WHERE run_id = ${runId}
+					AND session_id = ${event.sessionId} AND state IN ('pending', 'running')
+					RETURNING id, session_id`;
+				const messages = yield* sql<{ id: string }>`UPDATE messages
+					SET is_streaming = 0, updated_at = ${event.createdAt},
+						finish = CASE WHEN ${terminal} = 'interrupted' THEN 'interrupted' ELSE finish END
+					WHERE session_id = ${event.sessionId} AND (is_streaming = 1 OR (${terminal} = 'interrupted' AND role = 'user'))
+					AND turn_id IN (SELECT id FROM turns WHERE run_id = ${runId}
+						AND session_id = ${event.sessionId}) RETURNING id`;
+				const thinking = yield* sql<{ message_id: string }>`UPDATE message_parts
+					SET status = 'completed', version = ${ctx.version}
+					WHERE type = 'thinking' AND status = 'running' AND message_id IN (
+						SELECT messages.id FROM messages JOIN turns ON turns.id = messages.turn_id
+						WHERE turns.run_id = ${runId} AND turns.session_id = ${event.sessionId})
+					RETURNING message_id`;
+				ctx.endedRunEvents?.add(event.eventId);
 				return {
-					sessions: owners(written),
-					messages: event.data.messageId ? ids(written) : [],
+					sessions: [event.sessionId],
+					messages: [
+						...ids(written),
+						...ids(messages),
+						...thinking.map(({ message_id }) => message_id),
+					],
 				};
 			}
+
 			return { sessions: [], messages: [] };
 		}).pipe(
 			Effect.mapError((e) =>
@@ -1470,8 +2023,11 @@ export const makeTurnProjector = defineProjector(() => ({
 			Effect.flatMap((written) =>
 				Effect.gen(function* () {
 					return mergeTouches([
-						yield* stampMessage(written.messages, ctx.version),
-						yield* stampSessions(written.sessions, ctx.version),
+						yield* stampMessage(written.messages, ctx),
+						{
+							...(yield* stampSessions(written.sessions, ctx.version)),
+							sidebar: written.sessions,
+						},
 					]);
 				}),
 			),
@@ -1570,7 +2126,7 @@ export const makeApprovalProjector = defineProjector(() => ({
 					}
 					const sessions = yield* stampSessions(owners(written), ctx.version);
 					return mergeTouches([
-						yield* stampMessage(messageIds, ctx.version),
+						yield* stampMessage(messageIds, ctx),
 						// The pending counts roll up into the family's row.
 						{
 							...sessions,
@@ -1597,7 +2153,8 @@ export const makeProviderProjector = defineProjector(() => ({
 				return owners(
 					yield* sql<OwnedRow>`
 						INSERT OR IGNORE INTO session_providers (id, session_id, provider, status, activated_at)
-						VALUES (${`${event.data.sessionId}:initial`}, ${event.data.sessionId}, ${event.data.provider}, 'active', ${event.createdAt})
+						SELECT ${`${event.data.sessionId}:initial`}, id, ${event.data.provider}, 'active', ${event.createdAt}
+						FROM sessions WHERE id = ${event.data.sessionId}
 						RETURNING session_id`,
 				);
 			}
@@ -1690,11 +2247,16 @@ export const makeInputProjector = defineProjector(() => ({
 				return owners(
 					yield* sql<OwnedRow>`
 						UPDATE pending_inputs SET state = 'queued', version = ${ctx.version},
-							admitted_at = (SELECT COALESCE(MIN(admitted_at), ${event.createdAt}) - 1
+							admitted_at = CASE WHEN ${event.metadata.runId ?? null} IS NOT NULL THEN admitted_at
+								ELSE (SELECT COALESCE(MIN(admitted_at), ${event.createdAt}) - 1
 								FROM pending_inputs WHERE session_id = ${event.sessionId}
-								AND state IN ('queued', 'steering'))
+								AND state IN ('queued', 'steering')) END
 						WHERE input_id = ${event.data.inputId} AND session_id = ${event.sessionId}
-							AND state = 'steering'
+							AND (state = 'steering' AND NOT EXISTS (SELECT 1 FROM messages WHERE input_id = ${event.data.inputId})
+								OR state = 'removed' AND EXISTS (SELECT 1 FROM provider_runs reservation JOIN provider_runs run
+									ON run.id = COALESCE(reservation.joined_into, reservation.id) AND run.session_id = reservation.session_id
+									WHERE reservation.session_id = ${event.sessionId} AND reservation.id = ${event.metadata.runId ?? null}
+										AND run.status IN ('error', 'interrupted')))
 							AND ${event.data.sentSequence} = (SELECT MAX(sequence) FROM events
 								WHERE session_id = ${event.sessionId} AND type = 'input.sent'
 								AND json_extract(data, '$.inputId') = ${event.data.inputId}
@@ -1703,7 +2265,6 @@ export const makeInputProjector = defineProjector(() => ({
 								WHERE session_id = ${event.sessionId} AND type = 'input.sent'
 								AND json_extract(data, '$.inputId') = ${event.data.inputId}
 								AND sequence > ${event.data.sentSequence}))
-							AND NOT EXISTS (SELECT 1 FROM messages WHERE input_id = ${event.data.inputId})
 						RETURNING session_id`,
 				);
 			}
@@ -1735,6 +2296,7 @@ export const makeInputProjector = defineProjector(() => ({
 			Effect.flatMap((written) => stampSessions(written, ctx.version)),
 			Effect.map((touch) => ({
 				...touch,
+				sidebar: touch.stamped,
 				collections:
 					touch.stamped.length > 0 && event.type !== "input.interrupt_requested"
 						? ([...touch.collections, "inputs"] as const)

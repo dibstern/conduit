@@ -168,7 +168,7 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 	controls.set(page, rpc);
 	await page.goto(`${baseUrl}/new?project=e2e-replay`);
 	const picker = page.locator(
-		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 	);
 	// The only harness is the draft's default, so the picker shows no harness segment.
 	await expect(picker).toHaveAttribute("data-instance-id", provider);
@@ -287,6 +287,9 @@ for (const mode of [
 				sessionId: "draft-session",
 				text: "Start in docs",
 			});
+			// Phones keep the session checkout in the Composer sheet.
+			if (mode.hasTouch)
+				await press(page.getByTestId("composer-words-sheet-trigger"));
 			await expect(page.getByTestId("composer-checkout")).toContainText(
 				"feature/docs",
 			);
@@ -378,7 +381,7 @@ for (const mode of [
 			await expect(
 				page.getByText("That worktree no longer exists.", { exact: true }),
 			).toBeVisible();
-			await expect(page).toHaveURL(/\/new\?project=e2e-replay$/);
+			await expect(page).toHaveURL(/\/draft\/[^/?]+\?project=e2e-replay$/);
 			await expect(page.locator("#input")).toHaveValue("Keep this prompt");
 			expect(rpc.getRequests().some(({ tag }) => tag === "input.submit")).toBe(
 				false,

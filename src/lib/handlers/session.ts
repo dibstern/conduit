@@ -38,7 +38,6 @@ import {
 import { saveRelaySettings } from "../relay/relay-settings.js";
 import type { SessionPermissionMode } from "../shared-types.js";
 import { RelaySettingsSaveError } from "./model.js";
-import { getSessionInputDraft } from "./prompt.js";
 
 interface ViewSessionPayload {
 	readonly sessionId: string;
@@ -155,7 +154,11 @@ const switchClientToSession = (
 			!options?.skipPollerSeed &&
 			!pollerManager.isPolling(sessionId)
 		) {
-			pollerManager.startPolling(sessionId);
+			const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
+			const start = Effect.sync(() => pollerManager.startPolling(sessionId));
+			yield* workspace._tag === "Some"
+				? workspace.value.withLaunch(start)
+				: start;
 		}
 	});
 
@@ -170,7 +173,7 @@ export const viewSessionForClient = ({
 		const log = yield* LoggerTag;
 
 		const id = sessionId;
-		if (!id) return { draft: "" };
+		if (!id) return;
 
 		yield* switchClientToSession(clientId, id);
 
@@ -179,7 +182,6 @@ export const viewSessionForClient = ({
 		// session.mark_seen instead (ADR-0004, Scope; conduit-test-hk9m.3).
 
 		log.info(`client=${clientId} Viewing: ${id}`);
-		return { draft: getSessionInputDraft(id) };
 	});
 
 export const handleViewSession = (
@@ -200,6 +202,7 @@ export const createSessionForClient = <E = never>({
 	account: resolvedAccount,
 	model,
 	permissionMode,
+	directory,
 	initializeWorkspace,
 	sessionId,
 	resolvedCreation,
@@ -211,6 +214,7 @@ export const createSessionForClient = <E = never>({
 	readonly accountRef?: AccountRef;
 	readonly account?: Account;
 	readonly sessionId?: string;
+	readonly directory?: string;
 	readonly resolvedCreation?: Effect.Success<
 		ReturnType<typeof resolveSessionCreation>
 	>;
@@ -240,6 +244,7 @@ export const createSessionForClient = <E = never>({
 			account,
 			pick,
 			permissionMode,
+			...(directory === undefined ? {} : { directory }),
 			...(sessionId === undefined ? {} : { sessionId }),
 		});
 

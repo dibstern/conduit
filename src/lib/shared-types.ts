@@ -1,6 +1,7 @@
 // Types shared between server and frontend.
 // Imported by src/lib/types.ts (server) and frontend code.
 
+import type { SurfacingMark } from "./contracts/category-set.js";
 import {
 	LimitRecoverySchema,
 	SessionResumeSchema,
@@ -265,6 +266,8 @@ export interface SessionGit {
 	merged?: boolean;
 	/** Full branch head incorporated into the default branch. */
 	mergedHead?: string;
+	/** Epoch milliseconds when the branch head reached the default branch. */
+	mergedAt?: number;
 	operation?: "rebase" | "merge" | "cherry-pick" | "revert" | "bisect";
 	/** Git and shared Effective Folders in Project Folder order. */
 	folders?: readonly SessionFolderGit[];
@@ -279,6 +282,7 @@ const GitStatusSchema = Schema.Struct({
 	behind: Schema.optionalKey(Schema.Number),
 	merged: Schema.optionalKey(Schema.Boolean),
 	mergedHead: Schema.optionalKey(Schema.String),
+	mergedAt: Schema.optionalKey(Schema.Number),
 	operation: Schema.optionalKey(
 		Schema.Literals(["rebase", "merge", "cherry-pick", "revert", "bisect"]),
 	),
@@ -307,9 +311,13 @@ export const SessionInfoSchema = Schema.Struct({
 	accountId: Schema.NullOr(Schema.String),
 	title: Schema.String,
 	status: SessionStatusSchema,
+	/** Whether explicit Stop has a target; absence preserves older-client behavior. */
+	canStop: Schema.optional(Schema.Boolean),
 	projectSlug: Schema.String,
 	createdAt: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
 	updatedAt: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
+	/** Latest human-authored message in this session alone, in epoch milliseconds. */
+	lastUserMessageAt: Schema.optional(Schema.Number),
 	messageCount: Schema.optional(Schema.Number),
 	processing: Schema.optional(Schema.Boolean),
 	goalState: Schema.optional(SessionGoalChangedPayloadSchema),
@@ -332,7 +340,7 @@ export const SessionInfoSchema = Schema.Struct({
 	forkMessageId: Schema.optional(Schema.String),
 	/** Inclusive boundary in transcript (created_at, id) order. */
 	forkPointTimestamp: Schema.optional(Schema.Number),
-	/** Ordering ID when the SDK lineage boundary differs from the UI message ID. */
+	/** Source ordering ID at the cut; legacy Cursor forks may store the copied ID. */
 	forkPointMessageId: Schema.optional(Schema.String),
 	pendingQuestionCount: Schema.optional(Schema.Number),
 	pendingPermissionCount: Schema.optional(Schema.Number),
@@ -416,6 +424,10 @@ export type ProjectSessionAvailability =
 
 export interface DaemonSessionQueryResult {
 	readonly sessions: ReadonlyArray<SessionInfo>;
+	readonly settledCounts?: ReadonlyArray<{
+		readonly projectSlug: string;
+		readonly count: number;
+	}>;
 	readonly availability: ReadonlyArray<ProjectSessionAvailability>;
 	readonly hasMore: boolean;
 	readonly nextCursor: DaemonSessionCursor | null;
@@ -474,7 +486,13 @@ export interface PtyInfo {
  */
 export interface HistoryMessagePart {
 	id: string;
-	type: PartType | "thinking" | "error" | "setup";
+	surfacingMark?: SurfacingMark | null | undefined;
+	surfacingOrdinal?: number;
+	surfacingProbabilities?: Record<string, number> | null;
+	surfacingSetVersion?: number;
+	surfacingModel?: string;
+	surfacingRead?: boolean;
+	type: PartType | "thinking" | "error" | "setup" | "notice";
 	/** Daemon setup notice, carried by the normal durable transcript. */
 	setup?: ProjectSetupState;
 	/** Text content — matches OpenCode's TextPart schema (field is "text", not "content"). */
@@ -570,6 +588,7 @@ export type RepositoryIdentity = typeof RepositoryIdentitySchema.Type;
 export interface ProjectInfo {
 	slug: string;
 	title: string;
+	addedAt?: number;
 	/** folders[0] is the main folder, where sessions run. */
 	folders: readonly [string, ...string[]];
 	setupScript?: string | undefined;

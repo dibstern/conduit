@@ -10,10 +10,7 @@ import {
 } from "effect";
 import { RpcSchema } from "effect/rpc";
 import { build } from "vite";
-import {
-	ProjectSaveRejected,
-	WsRpcGroup,
-} from "../../../src/lib/contracts/ws-rpc.js";
+import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { MOCK_SERVER_STATUS, mockWsRpc } from "../helpers/rpc-mock.js";
 
 let browserCode: string;
@@ -38,35 +35,6 @@ test.beforeAll(async () => {
 	);
 	if (chunk?.type !== "chunk") throw new Error("Missing browser entry");
 	browserCode = chunk.code;
-});
-
-test("prototype: a declared error reaches the browser as its class over Playwright", async ({
-	page,
-}, testInfo) => {
-	await mockWsRpc(page, {
-		stubs: {
-			SaveProject: () => {
-				throw new ProjectSaveRejected({ issues: [] });
-			},
-		},
-	});
-	await page.route("http://rpc.test/", (route) =>
-		route.fulfill({ contentType: "text/html", body: "<!doctype html>" }),
-	);
-	await page.goto("http://rpc.test/");
-	await page.addScriptTag({ type: "module", content: browserCode });
-	await page.waitForFunction(() => typeof window.callRpc === "function");
-	const result = await page.evaluate(() =>
-		window.callRpc("SaveProject", { folders: [] }),
-	);
-	expect(result).toEqual({
-		error: { _tag: "ProjectSaveRejected", issues: [] },
-		isInstance: true,
-	});
-	await testInfo.attach("declared-error-browser-result", {
-		body: JSON.stringify(result, null, 2),
-		contentType: "application/json",
-	});
 });
 
 async function openClient(page: import("@playwright/test").Page) {
@@ -238,8 +206,7 @@ for (const typed of [false, true]) {
 				window.callRpc(
 					"SubscribeInputDraft",
 					{
-						projectSlug: "p",
-						sessionId: "s",
+						key: { session: "s" },
 					},
 					take,
 				),
@@ -269,7 +236,7 @@ test("a control helper fails a typed stream with its declared error", async ({
 	});
 	await openClient(page);
 	const pending = page.evaluate(() =>
-		window.callRpc("SubscribeInputDraft", { projectSlug: "p", sessionId: "s" }),
+		window.callRpc("SubscribeInputDraft", { key: { session: "s" } }),
 	);
 	await expect
 		.poll(() => control.hasStream("SubscribeInputDraft", "s"))
@@ -293,11 +260,7 @@ test("an invalid typed stream chunk fails its owning spec", async ({
 	});
 	await openClient(page);
 	await page.evaluate(() =>
-		window.callRpc(
-			"SubscribeInputDraft",
-			{ projectSlug: "p", sessionId: "s" },
-			1,
-		),
+		window.callRpc("SubscribeInputDraft", { key: { session: "s" } }, 1),
 	);
 	test.fail(
 		true,
@@ -317,7 +280,7 @@ test("an invalid typed stream failure fails its owning spec", async ({
 	});
 	await openClient(page);
 	await page.evaluate(() =>
-		window.callRpc("SubscribeInputDraft", { projectSlug: "p", sessionId: "s" }),
+		window.callRpc("SubscribeInputDraft", { key: { session: "s" } }),
 	);
 	test.fail(
 		true,

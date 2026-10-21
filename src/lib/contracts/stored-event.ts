@@ -5,6 +5,7 @@ import {
 	SessionSetupOutputPayloadSchema,
 	SessionSetupStartedPayloadSchema,
 } from "./project-setup.js";
+import { holdingSessionRefs, SessionRef } from "./session-ref-schema.js";
 import {
 	SessionWorkspaceSchema,
 	SessionWorktreeOwnershipSchema,
@@ -50,6 +51,8 @@ export type MessagePartRemovedPayload = PayloadOf<"message.part.removed">;
 export type MessageSnapshotPayload = PayloadOf<"message.snapshot">;
 
 export type TextDeltaPayload = PayloadOf<"text.delta">;
+
+export type TextSurfacedPayload = PayloadOf<"text.surfaced">;
 
 export type ThinkingStartPayload = PayloadOf<"thinking.start">;
 
@@ -191,6 +194,12 @@ const SessionGoalSchema = Schema.Struct({
 	setAt: Schema.Number,
 	tokensAtStart: Schema.Number,
 	lastReason: Schema.optional(Schema.String),
+	/** Explicit provider report only; absence means the judge is unknown. */
+	judgeModel: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty())),
+	/** Durable turns overlapping this goal's lifetime, frozen on completion. */
+	turnCount: Schema.optional(
+		Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+	),
 });
 
 export type SessionGoalChangedPayload = PayloadOf<"session.goal_changed">;
@@ -225,6 +234,8 @@ export type QuestionAskedPayload = PayloadOf<"question.asked">;
 export type QuestionResolvedPayload = PayloadOf<"question.resolved">;
 
 export interface EventMetadata {
+	/** Conduit run ownership; only this run's terminal event can settle its turns. */
+	readonly runId?: string;
 	readonly commandId?: string;
 	readonly causationEventId?: string;
 	readonly correlationId?: string;
@@ -243,6 +254,10 @@ export interface EventMetadata {
 		readonly parentProviderTaskId?: string;
 	};
 	readonly synthetic?: boolean;
+	readonly inherited?: boolean;
+	readonly providerCreatedAt?: number;
+	/** First observed OpenCode directory before an explicit workspace move. */
+	readonly nativeDirectory?: string;
 	readonly source?: string;
 	readonly sseBatchId?: string;
 	readonly sseBatchSize?: number;
@@ -259,6 +274,7 @@ export type StoredEvent = CanonicalEvent<CanonicalEventType> & {
 };
 
 export const EventMetadataSchema = Schema.Struct({
+	runId: Schema.optionalKey(Schema.String),
 	commandId: Schema.optionalKey(Schema.String),
 	causationEventId: Schema.optionalKey(Schema.String),
 	correlationId: Schema.optionalKey(Schema.String),
@@ -273,12 +289,17 @@ export const EventMetadataSchema = Schema.Struct({
 			providerMessageId: Schema.optionalKey(Schema.String),
 			providerToolUseId: Schema.optionalKey(Schema.String),
 			providerRequestId: Schema.optionalKey(Schema.String),
-			providerSessionId: Schema.optionalKey(Schema.String),
+			providerSessionId: Schema.optionalKey(Schema.String).pipe(
+				SessionRef(false),
+			),
 			providerTaskId: Schema.optionalKey(Schema.String),
 			parentProviderTaskId: Schema.optionalKey(Schema.String),
 		}),
 	),
 	synthetic: Schema.optionalKey(Schema.Boolean),
+	inherited: Schema.optionalKey(Schema.Boolean),
+	providerCreatedAt: Schema.optionalKey(Schema.Number),
+	nativeDirectory: Schema.optionalKey(Schema.String),
 	source: Schema.optionalKey(Schema.String),
 	sseBatchId: Schema.optionalKey(Schema.String),
 	sseBatchSize: Schema.optionalKey(Schema.Number),
@@ -451,7 +472,7 @@ export const CanonicalEvents = {
 		Schema.Struct({
 			messageId: Schema.String,
 			role: MessageRoleSchema,
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			parentID: Schema.optionalKey(Schema.String),
 			turnId: Schema.optionalKey(Schema.String),
 			/** The browser send this user message was placed for. */
@@ -508,6 +529,19 @@ export const CanonicalEvents = {
 			messageId: Schema.String,
 			partId: Schema.String,
 			text: Schema.String,
+		}),
+	),
+	"text.surfaced": live(
+		Schema.Struct({
+			messageId: Schema.String,
+			partId: Schema.String,
+			/** Stable 1-based position among all of the turn's mid-turn text parts. */
+			ordinal: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
+			/** Provenance only; consumers use the current category set for levels. */
+			categorySetVersion: Schema.Number,
+			model: Schema.String,
+			/** Null records a failed judgment, distinct from no verdict yet. */
+			probabilities: Schema.NullOr(Schema.Record(Schema.String, Schema.Number)),
 		}),
 	),
 	"thinking.start": live(
@@ -587,34 +621,54 @@ export const CanonicalEvents = {
 			]),
 		),
 	),
+	"run.requested": live(
+		Schema.Struct({ runId: Schema.String, inputId: Schema.String }),
+	),
+	"run.started": live(
+		Schema.Struct({
+			inputId: Schema.String,
+			requestedRunId: Schema.String,
+			userMessageId: Schema.optionalKey(Schema.String),
+		}),
+	),
 	"turn.completed": live(
 		Schema.Struct({
 			messageId: Schema.String,
+			providerStateUpdates: Schema.optionalKey(
+				Schema.Array(
+					Schema.Struct({ key: Schema.String, value: Schema.String }),
+				),
+			),
 			/** Names the turn when no assistant message of its own answered it. */
 			userMessageId: Schema.optionalKey(Schema.String),
 			cost: Schema.optionalKey(Schema.Number),
 			/** Claude's session running total; cost is its delta at persistence time. */
 			providerCostTotalUsd: Schema.optionalKey(Schema.Number),
-			providerSessionId: Schema.optionalKey(Schema.String),
+			providerSessionId: Schema.optionalKey(Schema.String).pipe(
+				SessionRef(false),
+			),
 			/** Input and cache tokens in the final main request, excluding output. */
 			contextTokens: Schema.optionalKey(Schema.Number),
 			tokens: Schema.optionalKey(TokensSchema),
 			duration: Schema.optionalKey(Schema.Number),
 		}),
 	),
+	"turn.notice": live(Schema.Struct({ text: Schema.String })),
 	"turn.error": live(
 		Schema.Struct({
 			messageId: Schema.String,
-			/** Durable turn owner when a process fails before or between messages. */
-			userMessageId: Schema.optionalKey(Schema.String),
 			error: Schema.String,
 			code: Schema.optionalKey(Schema.String),
 			retryable: Schema.optionalKey(Schema.Boolean),
+			retryHandled: Schema.optionalKey(Schema.Boolean),
+			retryAt: Schema.optionalKey(Schema.Number),
 		}),
 	),
 	"turn.interrupted": live(
 		Schema.Struct({
 			messageId: Schema.String,
+			code: Schema.optionalKey(Schema.String),
+			reason: Schema.optionalKey(Schema.String),
 		}),
 	),
 	"turn.model_resolved": live(
@@ -627,7 +681,7 @@ export const CanonicalEvents = {
 	),
 	"input.admitted": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			inputId: Schema.String,
 			delivery: Schema.Literals([...INPUT_DELIVERIES]),
 			request: InputRequestSchema,
@@ -635,7 +689,7 @@ export const CanonicalEvents = {
 	),
 	"input.sent": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			inputId: Schema.String,
 			/** Handed into the running turn rather than starting one. */
 			steer: Schema.optionalKey(Schema.Literal(true)),
@@ -645,7 +699,7 @@ export const CanonicalEvents = {
 	),
 	"input.requeued": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			inputId: Schema.String,
 			sentSequence: Schema.Number,
 			reason: Schema.Literals(["declined", "failed"]),
@@ -653,27 +707,30 @@ export const CanonicalEvents = {
 	),
 	"input.cancelled": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			inputId: Schema.String,
 		}),
 	),
 	"input.interrupt_requested": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			inputId: Schema.String,
 		}),
 	),
 	"session.created": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			title: Schema.String,
 			provider: Schema.String,
-			parentId: Schema.optionalKey(Schema.String),
-			forkedFrom: Schema.optionalKey(Schema.String),
+			parentId: Schema.optionalKey(Schema.String).pipe(SessionRef(true)),
+			forkedFrom: Schema.optionalKey(Schema.String).pipe(SessionRef(true)),
 			forkPointEvent: Schema.optionalKey(Schema.String),
 			forkPointTimestamp: Schema.optionalKey(Schema.Number),
 			forkPointMessageId: Schema.optionalKey(Schema.String),
-			providerSessionId: Schema.optionalKey(Schema.String),
+			inheritsHistory: Schema.optionalKey(Schema.Boolean),
+			providerSessionId: Schema.optionalKey(Schema.String).pipe(
+				SessionRef(false),
+			),
 			sideThread: Schema.optionalKey(Schema.Boolean),
 			/** The input a Side Thread was started with, so a retried start finds it. */
 			startInputId: Schema.optionalKey(Schema.String),
@@ -684,7 +741,7 @@ export const CanonicalEvents = {
 	),
 	"session.renamed": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			title: Schema.String,
 		}),
 	),
@@ -702,7 +759,7 @@ export const CanonicalEvents = {
 	"session.rewind_committed": live(Schema.Struct({ messageId: Schema.String })),
 	"session.workspace_changed": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			/** Effective cwd after applying the mapping, including a reset to main. */
 			path: Schema.optionalKey(Schema.String),
 			/** Launch ownership, or its branch-name update. Forks never copy this metadata. */
@@ -724,7 +781,7 @@ export const CanonicalEvents = {
 	),
 	"session.workspace_started": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			path: Schema.String,
 		}),
 	),
@@ -734,89 +791,91 @@ export const CanonicalEvents = {
 	"session.read": retired(
 		"SessionAttention writes seen_version",
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 		}),
 	),
 	"session.unread": retired(
 		"SessionAttention writes seen_version",
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 		}),
 	),
 	"session.settled": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			automatic: Schema.optionalKey(Schema.Boolean),
 			mergedHead: Schema.optionalKey(Schema.String),
 		}),
 	),
 	"session.unsettled": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 		}),
 	),
 	"session.archived": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			automatic: Schema.Boolean,
 		}),
 	),
 	"session.unarchived": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			cause: Schema.Literals(["manual", "send"]),
 		}),
 	),
 	"session.pinned": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 		}),
 	),
 	"session.unpinned": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 		}),
 	),
 	"session.snoozed": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			until: Schema.NullOr(Schema.Number),
 		}),
 	),
 	"session.auto_settle_set": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			disabled: Schema.Boolean,
 		}),
 	),
 	"session.unsnoozed": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 		}),
 	),
 	"session.deleted": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			/**
 			 * Descendant sessions deleted by the schema cascade, captured BEFORE the
 			 * tombstone persists (afterwards they can no longer be found by parent).
 			 * Optional: historical
 			 * tombstones lack it, and it is omitted when the session has no children.
 			 */
-			childSessionIds: Schema.optionalKey(Schema.Array(Schema.String)),
+			childSessionIds: Schema.optionalKey(Schema.Array(Schema.String)).pipe(
+				SessionRef(false),
+			),
 		}),
 	),
 	"session.forked": live(
 		Schema.Struct({
-			sessionId: Schema.String,
-			parentId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
+			parentId: Schema.String.pipe(SessionRef(true)),
 			forkPointEvent: Schema.optionalKey(Schema.String),
 			forkPointTimestamp: Schema.optionalKey(Schema.Number),
 		}),
 	),
 	"session.status": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			status: SessionStatusSchema,
 			turnId: Schema.optionalKey(Schema.String),
 			/** A retry's reason, for the shell row while the provider waits. */
@@ -825,7 +884,7 @@ export const CanonicalEvents = {
 	),
 	"session.compaction": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			state: Schema.Literals(["started", "completed", "failed"]),
 			detail: Schema.String,
 			preTokens: Schema.optionalKey(Schema.Number),
@@ -834,7 +893,7 @@ export const CanonicalEvents = {
 	),
 	"session.provider_changed": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			oldProvider: Schema.String,
 			newProvider: Schema.String,
 			reason: Schema.optionalKey(
@@ -844,7 +903,7 @@ export const CanonicalEvents = {
 	),
 	"session.provider_cleanup_failed": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			provider: Schema.String,
 			instanceId: Schema.optionalKey(Schema.String),
 			reason: Schema.String,
@@ -852,32 +911,32 @@ export const CanonicalEvents = {
 	),
 	"session.permission_mode_changed": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			mode: Schema.Literals([...SESSION_PERMISSION_MODES]),
 		}),
 	),
 	"session.model_changed": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			modelId: Schema.String,
 			providerId: Schema.String,
 		}),
 	),
 	"session.variant_changed": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			variant: Schema.String,
 		}),
 	),
 	"session.context_window_changed": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			contextWindow: Schema.String,
 		}),
 	),
 	"session.goal_changed": live(
 		Schema.Struct({
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			goal: Schema.NullOr(SessionGoalSchema),
 			ended: Schema.optional(Schema.Literals(["met", "cleared"])),
 			endedGoal: Schema.optional(SessionGoalSchema),
@@ -941,7 +1000,7 @@ export const CanonicalEvents = {
 			id: Schema.String,
 			providerProcessId: Schema.optionalKey(Schema.String),
 			providerRequestId: Schema.optionalKey(Schema.String),
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			toolName: Schema.String,
 			input: Schema.Unknown.pipe(
 				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
@@ -963,7 +1022,7 @@ export const CanonicalEvents = {
 			id: Schema.String,
 			providerProcessId: Schema.optionalKey(Schema.String),
 			providerRequestId: Schema.optionalKey(Schema.String),
-			sessionId: Schema.String,
+			sessionId: Schema.String.pipe(SessionRef(false)),
 			questions: Schema.Unknown.pipe(
 				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
 			),
@@ -995,6 +1054,9 @@ export const CANONICAL_EVENT_TYPES = Object.keys(
 	CanonicalEvents,
 ) as readonly CanonicalEventType[];
 
+export const TextSurfacedPayloadSchema =
+	CanonicalEvents["text.surfaced"].payload;
+
 export const SessionGoalChangedPayloadSchema =
 	CanonicalEvents["session.goal_changed"].payload;
 export const SessionWorkspaceChangedPayloadSchema =
@@ -1012,7 +1074,7 @@ function eventEnvelope<T extends CanonicalEventType, S extends Schema.Top>(
 ) {
 	return Schema.Struct({
 		eventId: Schema.String,
-		sessionId: Schema.String,
+		sessionId: Schema.String.pipe(SessionRef(false)),
 		type: Schema.Literal(type),
 		data: dataSchema,
 		metadata: EventMetadataSchema,
@@ -1056,3 +1118,8 @@ export const StoredEventSchema = canonicalEventSchema({
 	sequence: Schema.Number,
 	streamVersion: Schema.Number,
 });
+
+/** Payload JSON paths held by retained lineage events. Drain SQL stays explicit. */
+export const STORED_EVENT_HOLDING_FIELDS = holdingSessionRefs(
+	StoredEventSchema.ast,
+);

@@ -5,10 +5,14 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SessionDetailItemSchema } from "../../../src/lib/contracts/ws-rpc.js";
 
-import { ProcessHarness } from "../../helpers/process-harness.js";
+import {
+	type ProcessBrowser,
+	ProcessHarness,
+} from "../../helpers/process-harness.js";
 
 interface TraceRow {
 	kind?: string;
@@ -49,15 +53,38 @@ function snapshot(fixture: ProcessHarness, sessionId: string) {
 				data: JSON.parse(event.data) as Record<string, unknown>,
 				metadata: JSON.parse(event.metadata) as Record<string, unknown>,
 			}));
+		const runs = db
+			.prepare<[string], { id: string; status: string }>(
+				"SELECT id, status FROM provider_runs WHERE session_id = ? ORDER BY requested_at, rowid",
+			)
+			.all(sessionId);
+		const terminalErrors = events
+			.filter(
+				({ type, metadata }) =>
+					type === "turn.error" &&
+					runs.some(
+						({ id, status }) => id === metadata["runId"] && status === "error",
+					),
+			)
+			.filter(
+				(event, index, errors) =>
+					errors.findIndex(
+						({ metadata }) => metadata["runId"] === event.metadata["runId"],
+					) === index,
+			);
 		return {
 			events,
+			terminalErrors,
 			eventCounts: events.reduce<Record<string, number>>((counts, event) => {
 				counts[event.type] = (counts[event.type] ?? 0) + 1;
 				return counts;
 			}, {}),
 			turns: db
-				.prepare<[string], { state: string }>(
-					"SELECT state FROM turns WHERE session_id = ? ORDER BY requested_at, rowid",
+				.prepare<
+					[string],
+					{ state: string; run_id: string | null; started_at: number | null }
+				>(
+					"SELECT state, run_id, started_at FROM turns WHERE session_id = ? ORDER BY requested_at, rowid",
 				)
 				.all(sessionId),
 			interactions: db
@@ -65,6 +92,15 @@ function snapshot(fixture: ProcessHarness, sessionId: string) {
 					"SELECT COUNT(*) AS count FROM provider_command_interactions WHERE session_id = ?",
 				)
 				.get(sessionId)?.count,
+			runs,
+			commands: db
+				.prepare<
+					[string],
+					{ input_id: string; run_id: string; status: string }
+				>(
+					"SELECT json_extract(payload_json, '$.inputId') AS input_id, run_id, status FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
+				)
+				.all(sessionId),
 		};
 	} finally {
 		db.close();
@@ -200,6 +236,75 @@ describe("Cursor text turns through the built daemon and detached runner", () =>
 		);
 	}
 
+	async function rejectBeforeIntake(
+		fixture: ProcessHarness,
+		browser: ProcessBrowser,
+		id: string,
+	) {
+		const inputId = randomUUID();
+		expect(
+			await Effect.runPromise(
+				browser.rpc["input.submit"]({
+					sessionId: id,
+					originId: browser.originId,
+					inputId,
+					delivery: "queue",
+					text: "Say hi.",
+				}),
+			),
+		).toMatchObject({ ok: true });
+		await vi.waitFor(
+			() => {
+				const state = snapshot(fixture, id);
+				const command = state.commands.find((row) => row.input_id === inputId);
+				if (!command) throw new Error("Missing rejected input reservation");
+				expect(command).toMatchObject({ status: "failed" });
+				expect(state.runs).toContainEqual({
+					id: command.run_id,
+					status: "error",
+				});
+				expect(
+					state.runs.some(({ status }) =>
+						["pending", "running"].includes(status),
+					),
+				).toBe(false);
+				expect(state.events).toContainEqual(
+					expect.objectContaining({
+						type: "turn.error",
+						metadata: expect.objectContaining({ runId: command.run_id }),
+					}),
+				);
+				expect(state.eventCounts["run.started"] ?? 0).toBe(0);
+				// Its exact terminal closes the input without inventing provider intake.
+				expect(state.turns).toEqual([
+					{ state: "error", run_id: command.run_id, started_at: null },
+				]);
+				diagnostics["preIntakeFailure"] = {
+					runStatus: state.runs.find(({ id }) => id === command.run_id)?.status,
+					commandStatus: command.status,
+					errorCode: state.events.find(({ type }) => type === "turn.error")
+						?.data["code"],
+					errorOwnsReservation: state.events.some(
+						(event) =>
+							event.type === "turn.error" &&
+							event.metadata["runId"] === command.run_id &&
+							state.turns.some(
+								(turn) =>
+									turn.run_id === command.run_id &&
+									turn.state === "error" &&
+									turn.started_at === null,
+							),
+					),
+					accepted: (state.eventCounts["run.started"] ?? 0) > 0,
+					inboxBusy: state.runs.some(({ status }) =>
+						["pending", "running"].includes(status),
+					),
+				};
+			},
+			{ timeout: TIMEOUT, interval: 100 },
+		);
+	}
+
 	afterEach(async ({ task }) => {
 		if (!harness) return;
 		const fixture = harness;
@@ -271,19 +376,16 @@ describe("Cursor text turns through the built daemon and detached runner", () =>
 		expect(firstState.eventCounts["text.delta"]).toBeGreaterThan(0);
 		expect(firstState.eventCounts["turn.completed"]).toBe(1);
 		expect(firstState.interactions).toBe(0);
-		const capturedTerminal = traceRows(
-			resolve("test/fixtures/cursor-sdk-traces/basic.jsonl"),
-		).find(({ kind }) => kind === "wait.result")?.data as Record<
-			string,
-			unknown
-		>;
-		expect(
-			firstState.events.some(
-				({ metadata }) =>
-					metadata.providerRefs?.["providerRequestId"] ===
-					capturedTerminal["requestId"],
-			),
-		).toBe(true);
+		const acceptedRunId = firstState.events.find(
+			({ type }) => type === "run.started",
+		)?.metadata["runId"];
+		expect(acceptedRunId).toEqual(expect.any(String));
+		expect(firstState.events).toContainEqual(
+			expect.objectContaining({
+				type: "turn.completed",
+				metadata: { runId: acceptedRunId },
+			}),
+		);
 		const firstHistory = await browser.history(id);
 		expect(
 			firstHistory
@@ -600,11 +702,8 @@ describe("Cursor text turns through the built daemon and detached runner", () =>
 		const { fixture, browser, id } = await start("sandbox-prime-failure");
 		sandboxFailure = true;
 		writeTrace();
-		await browser.send(id, "Say hi.", TIMEOUT);
-		await expectTurns(fixture, id, ["error"]);
-		const errors = snapshot(fixture, id).events.filter(
-			({ type }) => type === "turn.error",
-		);
+		await rejectBeforeIntake(fixture, browser, id);
+		const errors = snapshot(fixture, id).terminalErrors;
 		diagnostics["sandboxError"] = errors;
 		expect(errors).toHaveLength(1);
 		expect(errors[0]?.data).toMatchObject({ code: "sandbox_unavailable" });
@@ -664,13 +763,150 @@ describe("Cursor text turns through the built daemon and detached runner", () =>
 		});
 	}, 240_000);
 
+	it("Stop before intake closes its exact pending input and pauses queued work", async () => {
+		const { fixture, browser, id } = await start(
+			"stop-before-intake",
+			"cancel",
+		);
+		// Hold the recorded run before its RUNNING acknowledgement. Its wait
+		// result still arrives only after the real runner calls cancel.
+		writeFileSync(
+			tracePath,
+			`${traceRows(tracePath)
+				.filter(
+					(row) =>
+						!(
+							row.kind === "stream" &&
+							typeof row.data === "object" &&
+							row.data !== null &&
+							"status" in row.data &&
+							row.data.status === "RUNNING"
+						),
+				)
+				.map((row) => JSON.stringify(row))
+				.join("\n")}\n`,
+		);
+		const inputId = randomUUID();
+		const queuedId = randomUUID();
+		const submit = (inputId: string) =>
+			Effect.runPromise(
+				browser.rpc["input.submit"]({
+					sessionId: id,
+					originId: browser.originId,
+					inputId,
+					delivery: "queue",
+					text: "Say done.",
+				}),
+			);
+		await submit(inputId);
+		await vi.waitFor(
+			() => {
+				const state = snapshot(fixture, id);
+				const command = state.commands.find((row) => row.input_id === inputId);
+				if (!command) throw new Error("Missing pending input reservation");
+				expect(state.runs).toContainEqual({
+					id: command.run_id,
+					status: "pending",
+				});
+				expect(state.turns).toEqual([
+					{ state: "pending", run_id: command.run_id, started_at: null },
+				]);
+				expect(
+					traceRows(capturePath).some(({ kind }) => kind === "send.options"),
+				).toBe(true);
+			},
+			{ timeout: TIMEOUT },
+		);
+		const reservation = snapshot(fixture, id).commands.find(
+			(row) => row.input_id === inputId,
+		);
+		if (!reservation) throw new Error("Missing pending input reservation");
+		const runId = reservation.run_id;
+		await submit(queuedId);
+		await Effect.runPromise(
+			browser.rpc.CancelSession({ sessionId: id, commandId: randomUUID() }),
+		);
+		await vi.waitFor(
+			() =>
+				expect(snapshot(fixture, id).runs).toEqual([
+					{ id: runId, status: "interrupted" },
+				]),
+			{ timeout: TIMEOUT },
+		);
+		const state = snapshot(fixture, id);
+		expect(state.turns).toEqual([
+			{ state: "interrupted", run_id: runId, started_at: null },
+		]);
+		expect(state.eventCounts["run.started"] ?? 0).toBe(0);
+		expect(
+			state.events.filter(({ type }) => type === "turn.interrupted"),
+		).toEqual([
+			expect.objectContaining({ metadata: expect.objectContaining({ runId }) }),
+		]);
+		expect(state.commands).toEqual([
+			{ input_id: inputId, run_id: runId, status: "failed" },
+		]);
+		await vi.waitFor(
+			() => {
+				const inbox = browser.frames
+					.flatMap(({ message }) => {
+						if (
+							message["type"] !== "session_detail" ||
+							message["sessionId"] !== id
+						)
+							return [];
+						const items =
+							message["_tag"] === "snapshot"
+								? message["rows"]
+								: [message["item"]];
+						return Array.isArray(items)
+							? items.flatMap((item: unknown) => {
+									const decoded = Schema.decodeUnknownOption(
+										SessionDetailItemSchema,
+									)(item);
+									return decoded._tag === "Some" &&
+										decoded.value._tag === "inbox"
+										? [decoded.value.inbox]
+										: [];
+								})
+							: [];
+					})
+					.at(-1);
+				expect(inbox?.paused).toBe(true);
+			},
+			{ timeout: TIMEOUT },
+		);
+		expect(snapshot(fixture, id).commands).toHaveLength(1);
+		expect(
+			traceRows(capturePath).filter(({ kind }) => kind === "send.options"),
+		).toHaveLength(1);
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
+		try {
+			expect(
+				db
+					.prepare(
+						"SELECT input_id, state FROM pending_inputs WHERE session_id = ? AND state = 'queued'",
+					)
+					.all(id),
+			).toEqual([{ input_id: queuedId, state: "queued" }]);
+		} finally {
+			db.close();
+		}
+		record("stop-before-intake", {
+			exactPendingInputInterrupted: true,
+			queuePaused: true,
+			noInventedIntake: true,
+		});
+	}, 240_000);
+
 	it("cancels the captured active run and persists interrupted", async () => {
 		const { fixture, browser, id } = await start("interrupt", "cancel");
+		const inputId = randomUUID();
 		await Effect.runPromise(
 			browser.rpc["input.submit"]({
 				sessionId: id,
 				originId: browser.originId,
-				inputId: randomUUID(),
+				inputId,
 				delivery: "queue",
 				text: "Call the human custom tool once, then say done.",
 			}),
@@ -682,12 +918,36 @@ describe("Cursor text turns through the built daemon and detached runner", () =>
 				).toBeGreaterThan(0),
 			{ timeout: TIMEOUT },
 		);
-		expect(snapshot(fixture, id).turns).toEqual([{ state: "running" }]);
+		const active = snapshot(fixture, id);
+		const command = active.commands.find((row) => row.input_id === inputId);
+		if (!command) throw new Error("Missing accepted input reservation");
+		expect(active.runs).toContainEqual({
+			id: command.run_id,
+			status: "running",
+		});
+		expect(active.turns).toEqual([
+			{
+				state: "running",
+				run_id: command.run_id,
+				started_at: expect.any(Number),
+			},
+		]);
 		await Effect.runPromise(
 			browser.rpc.CancelSession({ sessionId: id, commandId: randomUUID() }),
 		);
 		await expectTurns(fixture, id, ["interrupted"]);
-		expect(snapshot(fixture, id).eventCounts["turn.interrupted"]).toBe(1);
+		const interrupted = snapshot(fixture, id);
+		expect(interrupted.eventCounts["turn.interrupted"]).toBe(1);
+		expect(interrupted.runs).toContainEqual({
+			id: command.run_id,
+			status: "interrupted",
+		});
+		expect(interrupted.events).toContainEqual(
+			expect.objectContaining({
+				type: "turn.interrupted",
+				metadata: expect.objectContaining({ runId: command.run_id }),
+			}),
+		);
 		expect(
 			traceRows(capturePath).some(({ kind }) => kind === "cancel.call"),
 		).toBe(true);
@@ -698,12 +958,29 @@ describe("Cursor text turns through the built daemon and detached runner", () =>
 		const { fixture, browser, id } = await start("missing-auth");
 		credential = "missing";
 		writeTrace();
-		await browser.send(id, "Say hi.", TIMEOUT);
-		await expectTurns(fixture, id, ["error"]);
-		const errors = snapshot(fixture, id).events.filter(
-			({ type }) => type === "turn.error",
+		await rejectBeforeIntake(fixture, browser, id);
+		const state = snapshot(fixture, id);
+		const errors = state.events.filter(({ type }) => type === "turn.error");
+		// Duplicate exact failure facts do not imply another terminal transition.
+		expect(errors.length).toBeGreaterThanOrEqual(1);
+		expect(state.runs).toEqual([
+			{ id: state.commands[0]?.run_id, status: "error" },
+		]);
+		expect(new Set(errors.map(({ metadata }) => metadata["runId"]))).toEqual(
+			new Set([state.commands[0]?.run_id]),
 		);
-		expect(errors).toHaveLength(1);
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
+		try {
+			const terminal = db
+				.prepare<[string], { completed_at: number; first_error_at: number }>(`
+				SELECT run.completed_at, (SELECT created_at FROM events WHERE session_id = run.session_id
+					AND type = 'turn.error' AND json_extract(metadata, '$.runId') = run.id ORDER BY sequence LIMIT 1) AS first_error_at
+				FROM provider_runs run WHERE session_id = ?`)
+				.get(id);
+			expect(terminal?.completed_at).toBe(terminal?.first_error_at);
+		} finally {
+			db.close();
+		}
 		expect(errors[0]?.data["code"]).toMatch(/AUTH/i);
 		expect(
 			traceRows(capturePath).filter(({ kind }) => kind === "send.options"),
@@ -765,7 +1042,10 @@ describe("Cursor text turns through the built daemon and detached runner", () =>
 		);
 		await expectTurns(fixture, id, ["completed"]);
 		expect(snapshot(fixture, id).eventCounts["thinking.delta"]).toBe(1);
-		expect(fixture.logTail).toContain("Skipped malformed Cursor delta update");
+		// Detached runners write their diagnostics before completing the turn.
+		expect(
+			readFileSync(join(fixture.configDir, "runners.log"), "utf8"),
+		).toContain("Skipped malformed Cursor delta update");
 		record("decode-failure-skipped-reported", {
 			malformedUpdateSkipped: true,
 			laterTextPreserved: true,
@@ -782,7 +1062,7 @@ describe("Cursor text turns through the built daemon and detached runner", () =>
 		await browser.send(id, "Say hi.", TIMEOUT);
 		await expectTurns(fixture, id, ["error"]);
 		const state = snapshot(fixture, id);
-		expect(state.eventCounts["turn.error"]).toBe(1);
+		expect(state.terminalErrors).toHaveLength(1);
 		expect(state.eventCounts["turn.completed"] ?? 0).toBe(0);
 		expect(
 			JSON.stringify(state.events.filter(({ type }) => type === "turn.error")),

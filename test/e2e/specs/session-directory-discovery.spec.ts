@@ -241,7 +241,7 @@ test("settings, commands and skill documents follow a workspace change and sessi
 		await expect(page.locator("#command-menu")).not.toContainText("/main-only");
 
 		await page.locator("#new-session-btn:visible").click();
-		await expect(page).toHaveURL(/\/new/);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+/);
 		await input.fill("/");
 		await expect(page.locator("#command-menu")).toContainText("/main-only");
 		await expect(page.locator("#command-menu")).not.toContainText(

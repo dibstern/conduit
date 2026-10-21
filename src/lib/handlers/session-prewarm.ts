@@ -14,6 +14,7 @@ import {
 import { ProviderStateEffectTag } from "../persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { makePrepareTurn } from "../provider/claude/prepare-turn.js";
+import { isClaudeResumeRefused } from "../provider/event-sink-errors.js";
 import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import { harnessForModelProvider } from "../provider/turn-settings.js";
 
@@ -21,7 +22,8 @@ import { harnessForModelProvider } from "../provider/turn-settings.js";
 export const preWarmSession = (sessionId: string, resolvedAccount?: Account) =>
 	Effect.gen(function* () {
 		const readQuery = yield* ReadQueryEffectTag;
-		if (!(yield* readQuery.getSession(sessionId))) return;
+		const initialSession = yield* readQuery.getSession(sessionId);
+		if (!initialSession) return;
 		const engine = yield* OrchestrationEngineTag;
 		const registry = yield* ProviderRegistryTag;
 		const providerId = yield* engine.getProviderForSessionEffect(sessionId);
@@ -49,12 +51,14 @@ export const preWarmSession = (sessionId: string, resolvedAccount?: Account) =>
 		const variant = yield* getVariant(sessionId);
 		const contextWindow = yield* getContextWindow(sessionId);
 		const state = yield* providerState.getState(sessionId);
+		const folders = yield* resolveSessionFolders(initialSession);
 		const prepareTurn = yield* makePrepareTurn({
 			configDir: account.folder,
 			folderSource: "account",
 			agent,
+			workspaceRoot: folders.workspaceRoot,
 		});
-		const prepared = yield* prepareTurn(sessionId, account.id);
+		let prepared = yield* prepareTurn(sessionId, account.id);
 		const permissionMode = yield* getPermissionMode(sessionId);
 		// Skip preparation if the session disappeared or changed provider.
 		const session = yield* readQuery.getSession(sessionId);
@@ -63,22 +67,43 @@ export const preWarmSession = (sessionId: string, resolvedAccount?: Account) =>
 			(yield* engine.getProviderForSessionEffect(sessionId)) !== providerId
 		)
 			return;
-		const folders = yield* resolveSessionFolders(session);
-		yield* instance.preWarmSessionEffect({
-			sessionId,
-			...folders,
-			providerState: state,
-			instanceId: account.id,
-			nativeThread: prepared.nativeThread,
-			resumeSessionId: prepared.resumeSessionId,
-			...(model
-				? { model: { providerId: model.providerID, modelId: model.modelID } }
-				: {}),
-			permissionMode,
-			configDir: prepared.configDir,
-			folderSource: "account",
-			...(agent ? { agent } : {}),
-			...(variant ? { variant } : {}),
-			...(contextWindow ? { contextWindow } : {}),
-		});
+		for (let attempt = 0; attempt < 2; attempt++) {
+			const warmed = yield* Effect.result(
+				instance.preWarmSessionEffect({
+					sessionId,
+					...folders,
+					providerState: state,
+					instanceId: account.id,
+					nativeThread: prepared.nativeThread,
+					resumeSessionId: prepared.resumeSessionId,
+					resumeSessionAt: prepared.resumeSessionAt,
+					forkSession: prepared.forkSession,
+					clearInheritedGoal: prepared.clearInheritedGoal,
+					...(model
+						? {
+								model: { providerId: model.providerID, modelId: model.modelID },
+							}
+						: {}),
+					permissionMode,
+					...(session.side_thread === 1 ? { sideThread: true } : {}),
+					configDir: prepared.configDir,
+					folderSource: "account",
+					...(agent ? { agent } : {}),
+					...(variant ? { variant } : {}),
+					...(contextWindow ? { contextWindow } : {}),
+				}),
+			);
+			if (warmed._tag === "Success") return;
+			if (
+				attempt > 0 ||
+				!prepared.clearInheritedGoal ||
+				!isClaudeResumeRefused(warmed.failure)
+			)
+				return yield* Effect.fail(warmed.failure);
+			// A rejected warm fork must not be retried by the following send.
+			yield* providerState.saveUpdates(sessionId, [
+				{ key: `claude.forkRefused:${account.id}`, value: "true" },
+			]);
+			prepared = yield* prepareTurn(sessionId, account.id);
+		}
 	});

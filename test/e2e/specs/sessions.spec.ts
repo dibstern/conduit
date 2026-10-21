@@ -8,44 +8,6 @@ import { SidebarPage } from "../page-objects/sidebar.page.js";
 test.use({ recording: "chat-simple" });
 
 test.describe("Session Management", () => {
-	test("session list is populated on page load", async ({ page, relayUrl }) => {
-		const app = new AppPage(page);
-		const sidebar = new SidebarPage(page);
-		await app.goto(relayUrl);
-
-		// Wait for sessions to render (auto-retrying, avoids race with WS data)
-		await sidebar.waitForSessions();
-		const count = await sidebar.getSessionCount();
-		expect(count).toBeGreaterThan(0);
-	});
-
-	test("create new session via sidebar button", async ({ page, relayUrl }) => {
-		const app = new AppPage(page);
-		const sidebar = new SidebarPage(page);
-		await app.goto(relayUrl);
-
-		// Wait for sessions to render before counting
-		await sidebar.waitForSessions();
-		const countBefore = await sidebar.getSessionCount();
-
-		// Click "New session" button
-		await sidebar.createNewSession();
-
-		// Wait for the session to be created (session list updates via SSE)
-		// The relay calls POST /session on the mock and updates the frontend
-		await page.waitForFunction(
-			(prev) => {
-				const items = document.querySelectorAll("#session-list .session-item");
-				return items.length > prev;
-			},
-			countBefore,
-			{ timeout: 10_000 },
-		);
-
-		const countAfter = await sidebar.getSessionCount();
-		expect(countAfter).toBeGreaterThan(countBefore);
-	});
-
 	test("new session opens it while another session is open", async ({
 		page,
 		relayUrl,
@@ -63,9 +25,13 @@ test.describe("Session Management", () => {
 		await sidebar.clickSession(current);
 		await expect(page).toHaveURL(new RegExp(`/s/${current}$`));
 
+		const countBefore = await sidebar.getSessionCount();
 		await sidebar.createNewSession();
 		await expect(page).not.toHaveURL(new RegExp(`/s/${current}$`));
 		await expect(page).toHaveURL(/\/s\/[^/]+$/);
+		await expect
+			.poll(() => sidebar.getSessionCount())
+			.toBeGreaterThan(countBefore);
 	});
 
 	test("search sessions filters the list", async ({ page, relayUrl }) => {
@@ -101,6 +67,9 @@ test.describe("Session Management", () => {
 		await expect(
 			page.locator("#sidebar-header #new-session-btn"),
 		).toBeVisible();
+		await expect(
+			page.locator("#new-session-btn .lucide-square-pen"),
+		).toHaveCount(1);
 		await expect(page.locator("#session-actions")).toHaveCount(0);
 		await expect(page.locator("#file-browser-btn")).toHaveCount(0);
 		await expect(sidebar.sessionList).toBeVisible();

@@ -7,19 +7,6 @@ import {
 
 describe("mock-factories", () => {
 	describe("createMockHandlerDeps", () => {
-		it("returns a fully-typed HandlerDeps object", () => {
-			const deps = createMockHandlerDeps();
-			expect(deps.wsHandler.setClientSession).toBeDefined();
-			expect(deps.wsHandler.getClientSession).toBeDefined();
-			expect(deps.wsHandler.getClientsForSession).toBeDefined();
-			expect(deps.client).toBeDefined();
-			expect(deps.sessionMgr).toBeDefined();
-			expect(deps.ptyManager).toBeDefined();
-			expect(deps.config).toBeDefined();
-			expect(deps.log).toBeDefined();
-			expect(deps.connectPtyUpstream).toBeDefined();
-		});
-
 		it("accepts overrides", () => {
 			const customLog = createSilentLogger();
 			const deps = createMockHandlerDeps({ log: customLog });
@@ -40,13 +27,6 @@ describe("mock-factories", () => {
 	});
 
 	describe("createMockSSEWiringDeps", () => {
-		it("returns a fully-typed SSEWiringDeps object", () => {
-			const deps = createMockSSEWiringDeps();
-			expect(deps.translator.translate).toBeDefined();
-			expect(deps.translator.reset).toBeDefined();
-			expect(deps.log).toBeDefined();
-		});
-
 		it("accepts overrides", () => {
 			const customLog = createSilentLogger();
 			const deps = createMockSSEWiringDeps({ log: customLog });

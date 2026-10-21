@@ -115,10 +115,14 @@ export interface StoredProject {
 	>;
 	readonly title: string;
 	readonly lastUsed?: number;
+	readonly addedAt?: number;
 	readonly shellEnv?: import("./contracts/project-shell-env.js").ProjectShellEnvConfig;
 	readonly setupScript?: string | undefined;
 	readonly sessionMode?:
 		| import("./contracts/project-file.js").SessionMode
+		| undefined;
+	readonly worktreeCleanup?:
+		| import("./contracts/worktree.js").ProjectWorktreeCleanup
 		| undefined;
 }
 
@@ -184,6 +188,10 @@ export interface ProjectRelayConfig {
 	noServer?: boolean;
 	/** Request the daemon's serialized worktree sweep after a session settles. */
 	requestWorktreeCleanup?: () => import("effect").Effect.Effect<void>;
+	/** Read this project's current effective cleanup rules from the daemon. */
+	getWorktreeCleanup?: () => import("effect").Effect.Effect<
+		import("./contracts/worktree.js").WorktreeCleanup | "off"
+	>;
 	/** Notify the daemon's other live relays; standalone relays use a no-op. */
 	publishGlobalSetting: (
 		tag: import("./contracts/ws-rpc.js").GlobalSettingTag,

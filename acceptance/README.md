@@ -86,6 +86,8 @@ Steps are matched in `src/stepHandlers.ts`. Alongside the existing
   reads as a scroll gesture.
 - `I scroll the transcript back to the bottom` scrolls that same container
   to its full scroll height.
+- `I tap the send button with the keyboard open` focuses the composer, gives the
+  page an iPhone's 34px bottom safe-area inset, and taps Send with touch events.
 - `another device sends the message <text>` delivers a user message to the idle
   mockup session, as a second browser would.
 - `the jump-to-latest control is visible` / `the jump-to-latest control is not visible`

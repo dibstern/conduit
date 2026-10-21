@@ -77,6 +77,17 @@ export const cursorSubagentsHandlers: StepHandler[] = [
 				{
 					id: "cursor-subagents-parent-user",
 					role: "user",
+					// The send's inputId lets this placed prompt replace the browser's copy.
+					inputId: String(
+						rpc
+							.getRequests()
+							.find(
+								(request) =>
+									request.tag === "input.submit" &&
+									request.payload["text"] ===
+										"Inspect the routing implementation",
+							)?.payload["inputId"],
+					),
 					time: { created: PINNED_CLOCK_MS - 2 * 60_000 },
 					parts: [
 						{
@@ -212,9 +223,10 @@ export const cursorSubagentsHandlers: StepHandler[] = [
 			const messages = world.page.locator("#messages");
 			await expect(messages.locator(".msg-user")).toHaveCount(0);
 			await expect(messages).toContainText(childText);
-			await expect(messages.locator(".turn-activity")).toHaveClass(
-				/glow-tool-running/,
-			);
+			// A live turn names itself in the head; the Final style drops the glow.
+			await expect(
+				messages.locator('.turn-activity [data-testid="turn-live-head"]'),
+			).toBeVisible();
 			await expect(messages).not.toContainText(
 				"Inspect the routing implementation",
 			);

@@ -1,9 +1,9 @@
 // test/unit/provider/claude/claude-provider-instance-send-turn.test.ts
 
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
 import {
 	afterEach,
 	beforeEach,
@@ -146,6 +146,65 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 	afterEach(() => {
 		rmSync(workspace, { recursive: true, force: true });
+	});
+
+	it("delivers attached text, PDF and JPEG bytes to the SDK prompt stream", async () => {
+		const text = readFileSync(
+			new URL("../../../fixtures/attachments/notes.txt", import.meta.url),
+			"utf8",
+		);
+		const pdf = readFileSync(
+			new URL("../../../fixtures/attachments/guide.pdf", import.meta.url),
+		);
+		let received: SDKUserMessage | undefined;
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: ({ prompt }) =>
+				createQueryFromGenerator(
+					(async function* () {
+						if (typeof prompt === "string")
+							throw new Error("Expected streamed content");
+						received = (await prompt[Symbol.asyncIterator]().next()).value;
+						yield makeSuccessResult();
+					})(),
+				),
+		});
+		try {
+			await Effect.runPromise(
+				instance.sendTurnEffect(
+					makeBaseSendTurnInput({
+						images: [
+							`data:text/plain;name=R%C3%A9sum%C3%A9%20notes.txt;base64,${Buffer.from(text).toString("base64")}`,
+							`data:application/pdf;name=guide.pdf;base64,${Buffer.from(pdf).toString("base64")}`,
+							"data:image/jpeg;base64,/9j/",
+						],
+					}),
+				),
+			);
+			expect(received?.message.content).toEqual([
+				{
+					type: "document",
+					title: "Résumé notes.txt",
+					source: { type: "text", media_type: "text/plain", data: text },
+				},
+				{
+					type: "document",
+					title: "guide.pdf",
+					source: {
+						type: "base64",
+						media_type: "application/pdf",
+						data: Buffer.from(pdf).toString("base64"),
+					},
+				},
+				{
+					type: "image",
+					source: { type: "base64", media_type: "image/jpeg", data: "/9j/" },
+				},
+				{ type: "text", text: makeBaseSendTurnInput().prompt },
+			]);
+		} finally {
+			await Effect.runPromise(instance.shutdownEffect());
+		}
 	});
 
 	it.each([
@@ -978,11 +1037,30 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			listSubagents: vi.fn(async () => [sdkSubagentId]),
 			getSubagentMessages: vi.fn(async () => []),
 		};
-		queryFactorySpy = vi.fn(() => createMockQuery([taskToolUse, taskStarted]));
+		let pollFiber: Fiber.Fiber<void, never> | undefined;
+		queryFactorySpy = vi.fn(() =>
+			createQueryFromGenerator(
+				(async function* () {
+					yield taskToolUse;
+					yield taskStarted;
+					pollFiber = getClaudeRuntimeSessionForTest(
+						instance,
+						"parent-no-result",
+					)?.subagentPollers?.get(sdkSubagentId)?.fiber;
+				})(),
+			),
+		);
+		const finalized = vi.fn();
 		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 			subagentSdk,
+			subagentPollIntervalMs: 10,
+			runnerFactory: (deps, emit) =>
+				makeClaudeSessionRunner(
+					{ ...deps, onSubagentFinalizationComplete: finalized },
+					emit,
+				),
 		});
 
 		const result = await Effect.runPromise(
@@ -1001,8 +1079,17 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			expect(subagentSdk.getSubagentMessages).toHaveBeenCalled(),
 		);
 		const reads = vi.mocked(subagentSdk.getSubagentMessages).mock.calls.length;
-		// End performs a final read, then no periodic feed survives the stream.
-		await delay(650);
+		// Finalization completes the final read and removes every periodic feed.
+		await vi.waitFor(() => expect(finalized).toHaveBeenCalled());
+		if (!pollFiber) throw new Error("No periodic subagent poll fiber started");
+		// Await actual termination so a leaked fiber cannot hide behind map removal.
+		await Effect.runPromise(
+			Fiber.await(pollFiber).pipe(Effect.timeout("100 millis")),
+		);
+		expect(
+			getClaudeRuntimeSessionForTest(instance, "parent-no-result")
+				?.subagentPollers?.size,
+		).toBe(0);
 		expect(subagentSdk.getSubagentMessages).toHaveBeenCalledTimes(reads);
 
 		await Effect.runPromise(instance.shutdownEffect());
@@ -1012,7 +1099,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		"parent result",
 		"Stop",
 		"stream-end",
-	] as const)("completes %s before hung reads and bounds all end finalization to two seconds", async (ending) => {
+	] as const)("completes %s before hung reads and bounds all end finalization to the configured deadline", async (ending) => {
 		const parentClaudeSessionId = "sdk-parent-final-poll-timeout";
 		const sdkSubagentId = "task-final-poll-timeout";
 		const taskToolUse: SDKPartialAssistantMessage = {
@@ -1111,6 +1198,8 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			workspaceRoot: workspace,
 			queryFactory: () => query,
 			subagentSdk,
+			subagentPollIntervalMs: 10,
+			subagentPollTimeoutMs: 100,
 			onBackgroundTask,
 			runnerFactory: (deps, emit) =>
 				makeClaudeSessionRunner(
@@ -1136,12 +1225,16 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				),
 			),
 		);
+		let settledTurn: Awaited<typeof turnPromise> | undefined;
+		void turnPromise.then((result) => {
+			settledTurn = result;
+		});
 
 		try {
 			await tasksStarted;
 			await vi.waitFor(
 				() => expect(subagentSdk.getSubagentMessages).toHaveBeenCalledTimes(3),
-				{ timeout: 1200 },
+				{ timeout: 100, interval: 5 },
 			);
 			const ctx = getClaudeRuntimeSessionForTest(
 				instance,
@@ -1162,13 +1255,14 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				ending === "Stop"
 					? Effect.runPromise(instance.interruptTurnEffect(ctx.sessionId))
 					: Promise.resolve(releaseStream());
-			const turnResult = await Promise.race([
-				turnPromise,
-				delay(150).then(() => "timeout" as const),
-			]);
-			expect(turnResult).not.toBe("timeout");
-			if (turnResult === "timeout")
-				throw new Error("Turn cleanup waited for a transcript");
+			const turnResult = await vi.waitFor(
+				() => {
+					if (!settledTurn)
+						throw new Error("Turn cleanup waited for a transcript");
+					return settledTurn;
+				},
+				{ timeout: 50, interval: 5 },
+			);
 			if (ending === "stream-end") expect(turnResult._tag).toBe("Failure");
 			else {
 				expect(turnResult._tag).toBe("Success");
@@ -1177,12 +1271,14 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 						ending === "Stop" ? "interrupted" : "completed",
 					);
 			}
-			expect(
-				await Promise.race([
-					stop.then(() => "done"),
-					delay(150).then(() => "timeout"),
-				]),
-			).toBe("done");
+			let stopCompleted = false;
+			void stop.then(() => {
+				stopCompleted = true;
+			});
+			await vi.waitFor(() => expect(stopCompleted).toBe(true), {
+				timeout: 50,
+				interval: 5,
+			});
 			if (ending === "Stop") {
 				expect(denyApproval).toHaveBeenCalledWith("reject");
 				expect(query.interrupt).toHaveBeenCalledOnce();
@@ -1193,29 +1289,33 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 						.mock.calls.some(([event]) => event.type === "turn.interrupted"),
 				).toBe(true);
 			}
-			await vi.waitFor(() => {
-				expect(onBackgroundTask).toHaveBeenCalledWith({
-					sessionId: ctx.sessionId,
-					kind: "session-ended",
-				});
-				expect(runner?.hasPendingSubagentFinalizers?.(ctx.sessionId)).toBe(
-					true,
-				);
-			});
+			await vi.waitFor(
+				() => {
+					expect(onBackgroundTask).toHaveBeenCalledWith({
+						sessionId: ctx.sessionId,
+						kind: "session-ended",
+					});
+					expect(runner?.hasPendingSubagentFinalizers?.(ctx.sessionId)).toBe(
+						true,
+					);
+				},
+				{ interval: 5 },
+			);
 			await vi.waitFor(
 				() =>
 					expect(runner?.hasPendingSubagentFinalizers?.(ctx.sessionId)).toBe(
 						false,
 					),
-				{ timeout: 2600 },
+				{ timeout: 200, interval: 5 },
 			);
-			expect(performance.now() - startedAt).toBeLessThan(2600);
+			expect(performance.now() - startedAt).toBeLessThan(200);
 			expect(finalized).toHaveBeenCalled();
 			expect(ctx.subagentPollers?.size).toBe(0);
 			// Completing abandoned SDK promises cannot resurrect a feed or emit history.
 			const emitted = vi.mocked(sink.push).mock.calls.length;
+			expect(finishPolls.length).toBeGreaterThan(0);
 			await releasePendingPolls();
-			await delay(550);
+			expect(finishPolls).toHaveLength(0);
 			expect(vi.mocked(sink.push).mock.calls).toHaveLength(emitted);
 		} finally {
 			releaseStream();
@@ -1524,25 +1624,33 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		await vi.waitFor(() => expect(queryFactorySpy).toHaveBeenCalledOnce());
 
 		const secondResult = await Effect.runPromise(
-			instance.sendTurnEffect(
-				makeBaseSendTurnInput({
-					sessionId: "session-active-agent",
-					inputId: "turn-2",
-					agent: "Plan",
-					eventSink: sink,
-				}),
-			),
+			instance
+				.sendTurnEffect(
+					makeBaseSendTurnInput({
+						sessionId: "session-active-agent",
+						inputId: "turn-2",
+						agent: "Plan",
+						eventSink: sink,
+					}),
+				)
+				.pipe(Effect.result),
 		);
-
-		expect(secondResult.status).toBe("error");
-		expect(secondResult.error?.message).toMatch(
-			/Cannot switch Claude agent while a turn is active/,
-		);
-		expect(queryFactorySpy).toHaveBeenCalledTimes(1);
 
 		releaseResult?.();
 		await firstPromise;
 		await Effect.runPromise(instance.shutdownEffect());
+		expect(secondResult).toMatchObject({
+			_tag: "Failure",
+			failure: {
+				cause: {
+					code: "provider_error",
+					message: expect.stringMatching(
+						/Cannot switch Claude agent while a turn is active/,
+					),
+				},
+			},
+		});
+		expect(queryFactorySpy).toHaveBeenCalledTimes(1);
 	});
 
 	it("resume uses the server-resolved SDK session", async () => {
@@ -1606,6 +1714,312 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(
 			(callArgs["options"] as Record<string, unknown>)["abortController"],
 		).toBeInstanceOf(AbortController);
+	});
+
+	it.each([
+		"queued",
+		"handed",
+		"retune",
+		"detach",
+	] as const)("recalls only the queued input while the active run finishes, phase=%s", async (phase) => {
+		const handed = phase === "handed";
+		let releaseBoundary = () => {};
+		const boundary = new Promise<void>((resolve) => {
+			releaseBoundary = resolve;
+		});
+		let secondHanded = false;
+		let releaseLifecycle = () => {};
+		const lifecycle = new Promise<void>((resolve) => {
+			releaseLifecycle = resolve;
+		});
+		const firstId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+		const secondId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+		const firstSink = createMockEventSink();
+		const secondSink = createMockEventSink();
+		let query: Query | undefined;
+		const started: string[] = [];
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: ({ prompt }) => {
+				if (typeof prompt === "string") throw new Error("Expected stream");
+				const inputs = prompt[Symbol.asyncIterator]();
+				query = createQueryFromGenerator(
+					(async function* (): AsyncGenerator<SDKMessage> {
+						const first = await inputs.next();
+						if (first.done) return;
+						started.push(firstId);
+						yield {
+							type: "command_lifecycle",
+							state: "started",
+							command_uuid: firstId,
+							uuid: firstId,
+							session_id: "sdk-recall",
+						};
+						await boundary;
+						if (!handed)
+							yield makeSuccessResult({ user_message_uuid: firstId });
+						const second = await inputs.next();
+						if (second.done) return;
+						secondHanded = true;
+						await lifecycle;
+						started.push(secondId);
+						yield {
+							type: "command_lifecycle",
+							state: "started",
+							command_uuid: secondId,
+							uuid: secondId,
+							session_id: "sdk-recall",
+						};
+						yield makeSuccessResult({
+							user_message_uuids: [firstId, secondId],
+						});
+					})(),
+				);
+				return query;
+			},
+		});
+		const first = makeBaseSendTurnInput({
+			inputId: firstId,
+			runId: "first-run",
+			eventSink: firstSink,
+		});
+		expect(
+			(await Effect.runPromise(instance.sendTurnEffect(first))).status,
+		).toBe("accepted");
+		const ctx = getClaudeRuntimeSessionForTest<ClaudeSessionContext>(
+			instance,
+			first.sessionId,
+		);
+		if (!ctx || !query) throw new Error("Missing live SDK context");
+		const enqueue = vi.spyOn(ctx.promptQueue, "enqueue");
+		const controller = new AbortController();
+		let resultStatus: string | undefined;
+		const second = Effect.runFork(
+			instance
+				.sendTurnEffect(
+					makeBaseSendTurnInput({
+						sessionId: first.sessionId,
+						inputId: secondId,
+						runId: "second-run",
+						abortSignal: controller.signal,
+						eventSink: secondSink,
+						...(phase === "retune" ? { variant: "high" } : {}),
+					}),
+				)
+				.pipe(
+					Effect.tap((result) =>
+						Effect.sync(() => {
+							resultStatus = result.status;
+						}),
+					),
+				),
+		);
+		if (phase === "retune") {
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			expect(enqueue).not.toHaveBeenCalled();
+		} else await vi.waitFor(() => expect(enqueue).toHaveBeenCalled());
+		if (handed) {
+			releaseBoundary();
+			await vi.waitFor(() => expect(secondHanded).toBe(true));
+		}
+		if (phase === "detach") await Effect.runPromise(Fiber.interrupt(second));
+		else controller.abort();
+		try {
+			if (phase !== "detach")
+				await vi.waitFor(() =>
+					expect(resultStatus).toBe(
+						handed
+							? "indeterminate"
+							: phase === "retune"
+								? "interrupted"
+								: "cancelled",
+					),
+				);
+			expect(query.close).not.toHaveBeenCalled();
+			expect(query.interrupt).not.toHaveBeenCalled();
+			expect(
+				vi
+					.mocked(firstSink.push)
+					.mock.calls.filter(([event]) => event.type === "turn.interrupted"),
+			).toHaveLength(0);
+			releaseBoundary();
+			releaseLifecycle();
+			await vi.waitFor(() =>
+				expect(
+					[
+						...vi.mocked(firstSink.push).mock.calls,
+						...vi.mocked(secondSink.push).mock.calls,
+					].filter(([event]) => event.type === "turn.completed"),
+					// Detachment leaves B live after A's result. The later exact cohort
+					// result retains A's owner too; projection ignores its duplicate end.
+				).toHaveLength(phase === "detach" ? 3 : 1),
+			);
+			await vi.waitFor(() =>
+				expect(started).toEqual(
+					handed || phase === "detach" ? [firstId, secondId] : [firstId],
+				),
+			);
+			expect(
+				vi
+					.mocked(secondSink.push)
+					.mock.calls.filter(([event]) => event.type === "run.started"),
+			).toHaveLength(handed || phase === "detach" ? 1 : 0);
+		} finally {
+			releaseBoundary();
+			releaseLifecycle();
+			await Effect.runPromise(Fiber.interrupt(second));
+			await Effect.runPromise(ctx.promptQueue.close());
+		}
+	});
+
+	it("waits for an intake acknowledgement already being committed when recall arrives", async () => {
+		let releaseStart = () => {};
+		const started = new Promise<void>((resolve) => {
+			releaseStart = resolve;
+		});
+		let startPersisting = false;
+		const sink = createMockEventSink();
+		sink.push = vi.fn((event) =>
+			event.type === "run.started"
+				? Effect.promise(() => {
+						startPersisting = true;
+						return started;
+					})
+				: Effect.void,
+		);
+		const controller = new AbortController();
+		const inputId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+		let query: Query | undefined;
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+			queryFactory: ({ prompt }) => {
+				if (typeof prompt === "string") throw new Error("Expected stream");
+				const inputs = prompt[Symbol.asyncIterator]();
+				query = createQueryFromGenerator(
+					(async function* (): AsyncGenerator<SDKMessage> {
+						await inputs.next();
+						yield {
+							type: "command_lifecycle",
+							state: "started",
+							command_uuid: inputId,
+							uuid: inputId,
+							session_id: "sdk-start-recall",
+						};
+						yield makeSuccessResult({ user_message_uuid: inputId });
+					})(),
+				);
+				return query;
+			},
+		});
+		let resultStatus: string | undefined;
+		const send = Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					inputId,
+					runId: "start-run",
+					eventSink: sink,
+					abortSignal: controller.signal,
+				}),
+			),
+		).then((result) => {
+			resultStatus = result.status;
+		});
+		await vi.waitFor(() => expect(startPersisting).toBe(true));
+		controller.abort();
+		try {
+			await new Promise<void>((resolve) => setTimeout(resolve, 25));
+			expect(resultStatus).toBeUndefined();
+			releaseStart();
+			await send;
+			expect(resultStatus).toBe("accepted");
+			expect(query?.interrupt).not.toHaveBeenCalled();
+			expect(query?.close).not.toHaveBeenCalled();
+			expect(
+				vi
+					.mocked(sink.push)
+					.mock.calls.filter(([event]) => event.type === "run.started"),
+			).toHaveLength(1);
+		} finally {
+			releaseStart();
+			await send;
+		}
+	});
+
+	it("recalls an input aborted during setup and admits a later model change", async () => {
+		let releaseSetup = () => {};
+		const setup = new Promise<void>((resolve) => {
+			releaseSetup = resolve;
+		});
+		const prepareQuery = vi.fn(() => setup);
+		const controller = new AbortController();
+		const firstId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+		const secondId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+		const handed: string[] = [];
+		let query: Query | undefined;
+		const instance = makeTestClaudeProviderInstance({
+			workspaceRoot: workspace,
+			runnerFactory: (deps, emit) =>
+				makeClaudeSessionRunner({ ...deps, prepareQuery }, emit),
+			queryFactory: ({ prompt }) => {
+				if (typeof prompt === "string") throw new Error("Expected stream");
+				const inputs = prompt[Symbol.asyncIterator]();
+				query = createQueryFromGenerator(
+					(async function* (): AsyncGenerator<SDKMessage> {
+						const next = await inputs.next();
+						if (next.done || !next.value.uuid) return;
+						handed.push(next.value.uuid);
+						yield {
+							type: "command_lifecycle",
+							state: "started",
+							command_uuid: next.value.uuid,
+							uuid: next.value.uuid,
+							session_id: "sdk-setup-recall",
+						};
+						yield makeSuccessResult({ user_message_uuid: next.value.uuid });
+					})(),
+				);
+				return query;
+			},
+		});
+		const first = Effect.runPromise(
+			instance.sendTurnEffect(
+				makeBaseSendTurnInput({
+					inputId: firstId,
+					runId: "first-run",
+					abortSignal: controller.signal,
+				}),
+			),
+		);
+		await vi.waitFor(() => expect(prepareQuery).toHaveBeenCalled());
+		controller.abort();
+		releaseSetup();
+		expect((await first).status).toBe("cancelled");
+		let secondStatus: string | undefined;
+		const second = Effect.runFork(
+			instance
+				.sendTurnEffect(
+					makeBaseSendTurnInput({
+						inputId: secondId,
+						runId: "second-run",
+						variant: "high",
+					}),
+				)
+				.pipe(
+					Effect.tap((result) =>
+						Effect.sync(() => {
+							secondStatus = result.status;
+						}),
+					),
+				),
+		);
+		try {
+			await vi.waitFor(() => expect(secondStatus).toBe("accepted"));
+			expect(handed).toEqual([secondId]);
+			expect(query?.interrupt).not.toHaveBeenCalled();
+			expect(query?.close).not.toHaveBeenCalled();
+		} finally {
+			await Effect.runPromise(Fiber.interrupt(second));
+		}
 	});
 
 	it("forwards SendTurnInput.variant as SDK options.effort", async () => {
@@ -2219,6 +2633,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const sink = createMockEventSink();
 		const input = makeBaseSendTurnInput({
 			sessionId: "session-error",
+			runId: "pre-intake-reservation",
 			eventSink: sink,
 		});
 
@@ -2232,6 +2647,9 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			(call) => call[0].type === "turn.error",
 		);
 		expect(errorEvents.length).toBeGreaterThanOrEqual(1);
+		expect(errorEvents.map(([event]) => event)).toEqual([
+			expect.objectContaining({ runId: input.runId }),
+		]);
 	});
 
 	it("resolves with error status when event sink writes fail during stream translation", async () => {
@@ -2320,28 +2738,18 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		expect(pushCalls.map((call) => call[0].type)).not.toContain("turn.error");
 	});
 
-	it("fails an invalid constructed SDK user message before calling query", async () => {
+	it("rejects a malformed caller input id before calling query", async () => {
 		queryFactorySpy = vi.fn(() => createMockQuery([makeSuccessResult()]));
 		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
-		(
-			instance as unknown as {
-				runtime: { buildUserMessage(input: unknown): SDKUserMessage };
-			}
-		).runtime.buildUserMessage = () =>
-			({
-				type: "user",
-				message: { role: "assistant", content: [] },
-				parent_tool_use_id: null,
-			}) as unknown as SDKUserMessage;
-
 		const result = await Effect.runPromise(
 			instance
 				.sendTurnEffect(
 					makeBaseSendTurnInput({
 						sessionId: "session-invalid-user-message",
+						inputId: 42 as unknown as string,
 					}),
 				)
 				.pipe(Effect.result),
@@ -2393,11 +2801,11 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			resolveReady = r;
 		});
 
-		const result1 = makeSuccessResult();
-		const result2 = makeSuccessResult({ total_cost_usd: 0.07 } as Record<
-			string,
-			unknown
-		>);
+		const result1 = makeSuccessResult({ user_message_uuid: "turn-1" });
+		const result2 = makeSuccessResult({
+			total_cost_usd: 0.07,
+			user_message_uuid: "turn-2",
+		} as Record<string, unknown>);
 
 		const gen = (async function* () {
 			yield result1;

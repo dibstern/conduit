@@ -49,6 +49,15 @@ describe("Integration: Send Message", () => {
 			const sessionId = client.getActiveSessionId();
 			if (!sessionId) throw new Error("Expected an active session");
 			const providerQuestionId = randomUUID();
+			// This synthetic question belongs to a native turn that has taken input.
+			harness.mock.emitTestEvent("message.updated", {
+				info: {
+					id: `question-user-${providerQuestionId}`,
+					sessionID: sessionId,
+					role: "user",
+					time: { created: Date.now() },
+				},
+			});
 			harness.mock.emitTestEvent("question.asked", {
 				id: providerQuestionId,
 				sessionID: sessionId,

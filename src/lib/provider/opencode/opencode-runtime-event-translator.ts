@@ -26,7 +26,11 @@ import {
 import { isRecord } from "../../utils.js";
 import { MonotoneText } from "../monotone-text.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
-import { completedCompactionEvent } from "./opencode-history-backfill.js";
+import {
+	completedCompactionEvent,
+	type FileReadEcho,
+	fileReadEcho,
+} from "./opencode-history-backfill.js";
 
 interface TrackedPart {
 	readonly messageId: string;
@@ -35,6 +39,8 @@ interface TrackedPart {
 	readonly thinkingStarted?: boolean;
 	/** Tool parts only: the input delivered downstream so far was empty (args stream late, e.g. skill). */
 	readonly toolInputEmpty?: boolean;
+	/** Hidden on every update: the file part that follows carries the file. */
+	readonly fileReadEcho?: FileReadEcho;
 }
 
 const defaultLog = createLogger("opencode-runtime-event-translator");
@@ -81,6 +87,7 @@ export class OpenCodeRuntimeEventTranslator {
 		private readonly inputIdForUserEcho?: (
 			sessionId: string,
 			messageId: string,
+			compaction?: boolean,
 		) => string | undefined,
 	) {}
 
@@ -308,14 +315,28 @@ export class OpenCodeRuntimeEventTranslator {
 			("messageID" in event.properties
 				? stringField(event.properties.messageID)
 				: undefined);
+		if (!messageId) return null;
+		const inputId = partMessageId
+			? this.inputIdForUserEcho?.(sessionId, messageId, true)
+			: undefined;
+		const events = inputId
+			? [
+					opencodeRuntimeEvent("message.created", sessionId, event, {
+						messageId,
+						role: "user",
+						sessionId,
+						inputId,
+					}),
+				]
+			: [];
 		if (
-			!messageId ||
-			(state.compaction?.messageId === messageId &&
-				state.compaction.state === "started")
+			state.compaction?.messageId === messageId &&
+			state.compaction.state === "started"
 		)
-			return null;
+			return events.length ? events : null;
 		state.compaction = { messageId, state: "started" };
 		return [
+			...events,
 			opencodeRuntimeEvent("session.compaction", sessionId, event, {
 				sessionId,
 				state: "started",
@@ -464,6 +485,19 @@ export class OpenCodeRuntimeEventTranslator {
 				? rawPart.text
 				: undefined;
 
+		const echo = existing
+			? existing.fileReadEcho
+			: fileReadEcho(
+					{ ...rawPart, text: partText },
+					[...parts.values()]
+						.filter((part) => part.messageId === messageId)
+						.at(-1)?.fileReadEcho,
+				);
+		if (echo) {
+			parts.set(partId, { type: rawPart.type, messageId, fileReadEcho: echo });
+			return null;
+		}
+
 		parts.set(
 			partId,
 			trackedPart(
@@ -475,6 +509,7 @@ export class OpenCodeRuntimeEventTranslator {
 			),
 		);
 		if (rawPart.type === "compaction") {
+			if (existing?.type === "compaction") return null;
 			return this.translateCompaction(event, sessionId, state, messageId);
 		}
 
@@ -538,11 +573,17 @@ export class OpenCodeRuntimeEventTranslator {
 			);
 			if (suffix != null || (existing === undefined && partText === "")) {
 				return [
-					opencodeRuntimeEvent("text.delta", sessionId, event, {
-						messageId,
-						partId,
-						text: suffix ?? "",
-					}),
+					{
+						...opencodeRuntimeEvent("text.delta", sessionId, event, {
+							messageId,
+							partId,
+							text: suffix ?? "",
+						}),
+						...(("synthetic" in rawPart && rawPart.synthetic === true) ||
+						("ignored" in rawPart && rawPart.ignored === true)
+							? { metadata: { synthetic: true } }
+							: {}),
+					},
 				];
 			}
 		}
@@ -691,8 +732,8 @@ export class OpenCodeRuntimeEventTranslator {
 		const messageId = msg.id ?? "";
 		const events: ProviderRuntimeEvent[] = [];
 		if (this.markMessageSeen(state, messageId)) {
-			events.push(
-				opencodeRuntimeEvent("message.created", sessionId, event, {
+			events.push({
+				...opencodeRuntimeEvent("message.created", sessionId, event, {
 					messageId,
 					role: msg.role,
 					sessionId,
@@ -703,7 +744,11 @@ export class OpenCodeRuntimeEventTranslator {
 						? this.userEchoInputId(sessionId, messageId)
 						: {}),
 				}),
-			);
+				// Keep receipt time for session activity; message provenance uses provider time.
+				...(msg.time?.created !== undefined
+					? { metadata: { providerCreatedAt: msg.time.created } }
+					: {}),
+			});
 		}
 
 		if (msg.role === "user" || msg.time?.completed == null) {

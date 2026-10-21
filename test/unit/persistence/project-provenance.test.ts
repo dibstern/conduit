@@ -115,6 +115,20 @@ describe("Bound project provenance", () => {
 			"0062_legacy_forks",
 			"0063_sessions_archived",
 			"0064_prompt_provider_reference",
+			"0065_tool_result_event_refs",
+			"0066_project_tree_data",
+			"0067_purge_background_shell_sessions",
+			"0068_input_drafts",
+			"0069_goal_check_metadata",
+			"0070_message_part_surfacing",
+			"0071_sessions_settled_shelf_index",
+			"0072_surfacing_marks",
+			"0073_message_part_read",
+			"0074_turn_recaps",
+			"0075_events_parent_id_index",
+			"0076_events_forked_from_index",
+			"0077_message_parts_result_event_seq_index",
+			"0078_provider_run_ownership",
 		]);
 	});
 
@@ -235,7 +249,7 @@ describe("Bound project provenance", () => {
 				expect(
 					db
 						.prepare(
-							`SELECT ${table === "events" ? "project_id" : "project_key"} AS project FROM ${table}`,
+							`SELECT ${table === "events" ? "project_id" : "project_key"} AS project FROM ${table}${table === "events" ? " WHERE type <> 'run.requested'" : ""}`,
 						)
 						.all(),
 					table,
@@ -260,10 +274,15 @@ describe("Bound project provenance", () => {
 			expect(
 				db
 					.prepare(
-						"SELECT sequence, event_id, session_id, stream_version, type, data, metadata, provider, created_at FROM events ORDER BY sequence",
+						"SELECT sequence, event_id, session_id, stream_version, type, data, metadata, provider, created_at FROM events WHERE type <> 'run.requested' ORDER BY sequence",
 					)
 					.all(),
 			).toEqual(events);
+			expect(
+				db
+					.prepare("SELECT project_id FROM events WHERE type = 'run.requested'")
+					.all(),
+			).toEqual([{ project_id: "alpha" }]);
 			// A populated owner survives even when a caller supplies a different
 			// scope; the expand migration never relabels an already stamped row.
 			db.exec("UPDATE events SET project_id = 'existing-owner'");

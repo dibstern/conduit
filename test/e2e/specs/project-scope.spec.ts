@@ -94,6 +94,7 @@ async function setupWithProjectManagement(
 				],
 			}),
 			ListDaemonSessions: async (params) => {
+				// Keep paging in flight so project switching exercises its cancellation race.
 				await new Promise((resolve) => setTimeout(resolve, 150));
 				const limit = Number(params["limit"] ?? Infinity);
 				const cursor = params["cursor"] as { id: string } | undefined;
@@ -128,8 +129,7 @@ async function setupWithProjectManagement(
 						projectSlug: "myapp",
 						sessionSlug: "sessionId" in params ? "myapp" : null,
 					};
-				// A real attach takes a round trip or two; an instant answer would
-				// hide anything that races it.
+				// Attach must overlap paging to expose socket-reconnect and cancellation races.
 				await new Promise((resolve) => setTimeout(resolve, 300));
 				return {
 					projectSlug: String(params["projectSlug"]),
@@ -219,6 +219,8 @@ function baseProjects() {
 // The names deliberately differ from driver names: support is a wire fact,
 // not a frontend assumption about a provider. Both built-in drivers support
 // multi-folder sessions today; the unsupported state models a future adapter.
+// Each is its driver's default account, as the daemon reports: picking a
+// harness selects that driver's default.
 const capabilityInstances = [
 	{
 		id: "claude",
@@ -229,6 +231,7 @@ const capabilityInstances = [
 		status: "healthy",
 		restartCount: 0,
 		createdAt: 0,
+		isDefault: true,
 		capabilities: { supportsMultiFolder: true, supportsWorktree: true },
 	},
 	{
@@ -240,6 +243,7 @@ const capabilityInstances = [
 		status: "healthy",
 		restartCount: 0,
 		createdAt: 0,
+		isDefault: true,
 		capabilities: { supportsMultiFolder: false, supportsWorktree: false },
 	},
 ];
@@ -307,6 +311,57 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 		baseURL,
 		"/new?project=myapp",
 	);
+	// 7a8e7be7 requires a configured default account; 2ba9fc5b requires a
+	// held catalog pick before sending, independently of folder support.
+	control.rpc.setStubs({
+		GetModels: () => ({
+			projectSlug: "myapp",
+			defaultOpenCodeInstanceId: "opencode",
+			providers: ["claude", "anthropic"].map((provider) => ({
+				id: provider,
+				name: provider,
+				configured: true,
+				models: [{ id: "sonnet", name: "Sonnet", provider }],
+			})),
+		}),
+	});
+	control.rpc.setProjectSetting({
+		_tag: "defaultModel",
+		variant: "",
+	});
+	control.rpc.setProjectSetting({
+		_tag: "harnessDefaults",
+		claude: {
+			status: "ok",
+			pick: {
+				providerId: "claude",
+				modelId: "sonnet",
+				effort: "",
+				contextWindow: "",
+			},
+		},
+		opencode: {
+			status: "ok",
+			pick: {
+				providerId: "anthropic",
+				modelId: "sonnet",
+				effort: "",
+				contextWindow: "",
+			},
+		},
+	});
+	control.rpc.setProjectSetting({
+		_tag: "providerModels",
+		accountId: "claude",
+		providers: [
+			{
+				id: "claude",
+				name: "Claude",
+				configured: true,
+				models: [{ id: "sonnet", name: "Sonnet", provider: "claude" }],
+			},
+		],
+	});
 	sendMockDaemonList(page, "SubscribeInstances", {
 		instances: capabilityInstances,
 	});
@@ -318,7 +373,7 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 		),
 	});
 	const picker = page.locator(
-		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 	);
 	await openPickerRoot(page, picker);
 	await page.getByTestId("picker-harness-opencode").click();
@@ -369,9 +424,12 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 			.filter((request) => request.tag === "CreateSession"),
 	).toEqual([]);
 
-	// Missing capabilities must not block sending into a multi-folder draft.
+	// An account without capabilities falls back to its driver's, so it
+	// neither blocks a multi-folder draft nor marks worktrees unsupported.
 	sendMockDaemonList(page, "SubscribeInstances", {
-		instances: [],
+		instances: capabilityInstances.map(
+			({ capabilities: _capabilities, ...instance }) => instance,
+		),
 		providerCapabilities: {},
 	});
 	sendMockProjects(page, {
@@ -390,7 +448,7 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 	await startChip.click();
 	await expect(
 		startMenu.getByRole("menuitem", {
-			name: "New worktree Not supported by This provider",
+			name: "New worktree Requires a Git folder",
 		}),
 	).toHaveAttribute("aria-disabled", "true");
 	await page.keyboard.press("Escape");
@@ -580,6 +638,7 @@ test("switching projects while the list pages does not fail the switch", async (
 		many,
 	);
 	for (const target of ["mylib", "myapp", "mylib"]) {
+		const requestsBefore = control.rpc.getRequests().length;
 		await page.getByTestId("session-scope-chip").click();
 		await page
 			.getByRole("menuitemradio", { name: new RegExp(`^${target}\\b`) })
@@ -590,7 +649,23 @@ test("switching projects while the list pages does not fail the switch", async (
 				request.payload["projectSlug"] === target,
 		);
 		await expect(page.getByTestId("session-scope-chip")).toHaveText(target);
-		await page.waitForTimeout(800);
+		await expect
+			.poll(() =>
+				control.rpc
+					.getRequests()
+					.slice(requestsBefore)
+					.some(
+						(request) =>
+							request.tag === "GetFileTree" &&
+							request.payload["projectSlug"] === target,
+					),
+			)
+			.toBe(true);
+		await expect(
+			page.locator("#session-list .session-item").filter({
+				hasText: target === "myapp" ? "Test session" : "Library session",
+			}),
+		).toBeVisible();
 	}
 	await expect(page.getByText("Failed to switch projects")).toHaveCount(0);
 });
@@ -600,6 +675,7 @@ test("switching projects attaches once and loads the new project's file tree", a
 	baseURL,
 }) => {
 	const control = await setupWithProjectManagement(page, baseURL);
+	const connectionsBefore = control.rpc.connections;
 	await page.getByTestId("session-scope-chip").click();
 	await scopeRow(page, "mylib").click();
 	await control.rpc.waitForRequest(
@@ -607,9 +683,12 @@ test("switching projects attaches once and loads the new project's file tree", a
 			request.tag === "GetFileTree" &&
 			request.payload["projectSlug"] === "mylib",
 	);
-	// A switch that reopens the sockets fails the in-flight attach and retries it
-	// on every reconnect, so give a loop time to show.
-	await page.waitForTimeout(1000);
+	await expect(page.getByTestId("session-scope-chip")).toHaveText("mylib");
+	const sessions = page.locator("#session-list .session-item");
+	await expect(sessions).toHaveCount(1);
+	await expect(sessions).toContainText("Library session");
+	await expect(page.locator(".connect-overlay")).toBeHidden();
+	expect(control.rpc.connections).toBe(connectionsBefore);
 	const attaches = control.rpc
 		.getRequests()
 		.filter(
@@ -656,8 +735,8 @@ test.describe("Project Delete", () => {
 		await page.click("#confirm-modal button:has-text('Cancel')");
 		await expect(page.locator("#confirm-modal")).not.toBeVisible();
 
-		// No RemoveProject RPC may arrive during this observation window.
-		await page.waitForTimeout(300);
+		await page.getByTestId("session-scope-chip").click();
+		await expect(scopeRow(page, "mylib")).toBeVisible();
 		const removeRequests = control.rpc
 			.getRequests()
 			.filter((request) => request.tag === "RemoveProject");
@@ -671,8 +750,11 @@ test.describe("Project Delete", () => {
 		await setupWithProjectManagement(page, baseURL);
 		await page.getByTestId("session-scope-chip").click();
 		await expect(scopeRow(page, "myapp")).toBeVisible();
-		await scopeRow(page, "mylib").focus();
-		await page.keyboard.press("Delete");
+		await expect(
+			page.getByRole("menu", { name: "Project scope" }),
+		).toBeFocused();
+		await scopeRow(page, "mylib").press("Delete");
+		await expect(page.locator("#confirm-modal")).toBeVisible();
 		await page.click("#confirm-modal button:has-text('Remove')");
 		await expect(page.locator("#confirm-modal")).not.toBeVisible();
 

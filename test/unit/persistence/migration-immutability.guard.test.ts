@@ -147,6 +147,30 @@ const SHIPPED_MIGRATION_HASHES = {
 		"8ce7746c0f9ac51a3539f7f53fd3ea082ffede67088660c82a9bb1bb34fb9dba",
 	"0063_prompt_provider_reference.sql":
 		"335105d46d429c4e67d1f5ffe7823ff1bce3e3dcb7f734ec3ab7ffeacd010f84",
+	"0064_tool_result_event_refs.sql":
+		"b4909d3a9fb1b4bd3a80ca0b37c73d73818740d5941b27739ed9ee9ad1bef448",
+	"0065_project_tree_data.sql":
+		"3f13a228174941c05f74acf55e328e0004e85426bfead1c28809d17eb813bfda",
+	"0066_input_drafts.sql":
+		"4703d6a298194827b855733ce74c4503b90fb8cd9e4b35202a21cbc4169af8e8",
+	"0067_goal_check_metadata.sql":
+		"0b6fe299d16a872e98209b64531e1c7f2c840ac7aadc09a627a5a9852394c0b4",
+	"0068_message_part_surfacing.sql":
+		"135cd06c359da73ba6b13710440ddc1c03b360ff15266c61b64f8261b4eaedd3",
+	"0069_sessions_settled_shelf_index.sql":
+		"63d47e18bb1c58229c01eb0672308372ea10ba92e3f20145652923a85feaa236",
+	"0070_surfacing_marks.sql":
+		"8fa4baa13cbcfd558dbcdce6b4385defcda7bd289b72f4be29acbc1d0e4843ad",
+	"0071_message_part_read.sql":
+		"26868b5214c7ebdbf704b7d668a57bf1d165313690717d6a64cd407aa6fc8fd1",
+	"0072_turn_recaps.sql":
+		"7358a8f038b47c2575f0baaf39175b01c4b01090df0a7c2974854f1f9b85d24e",
+	"0073_events_parent_id_index.sql":
+		"127476385ea8318e498ece14e889d75ab1d5486677d0d55b0982cb794d69b3bf",
+	"0074_events_forked_from_index.sql":
+		"7aa6f3fe5afb81f2c6b3879eca7db70782dc8de1cf039c8b8a289287f74d6eba",
+	"0075_message_parts_result_event_seq_index.sql":
+		"ad6ea7cae6aa4ea73105a9c30b3b07d5b92913cd8d827614ca10406d893bf7fe",
 } satisfies Record<string, string>;
 
 describe("shipped migrations are immutable", () => {
@@ -166,10 +190,10 @@ describe("shipped migrations are immutable", () => {
 			.filter((f) => f.endsWith(".sql"))
 			.sort();
 		expect(onDisk).toEqual(Object.keys(SHIPPED_MIGRATION_HASHES).sort());
-		// Effect key 10 is a code-only purge; SQL files run from 0001 to 0063.
-		expect(onDisk).toHaveLength(63);
+		// Effect key 10 is a code-only purge; SQL files run from 0001 to 0075.
+		expect(onDisk).toHaveLength(75);
 		expect(onDisk.map((file) => Number(file.slice(0, 4)))).toEqual(
-			Array.from({ length: 63 }, (_, index) => index + 1),
+			Array.from({ length: 75 }, (_, index) => index + 1),
 		);
 	});
 });

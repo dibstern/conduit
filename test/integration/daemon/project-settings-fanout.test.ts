@@ -134,16 +134,41 @@ it("fans global settings out to another live project's subscribers and defaults"
 			},
 			{ _tag: "claudeSettings", overrides: { alwaysThinkingEnabled: true } },
 		];
+		// Catalog discovery and its validation state are local to each relay.
 		const changes = (received: readonly ProjectSettingsEnvelope[]) =>
 			received.flatMap((envelope) =>
 				envelope._tag === "upsert" &&
 				envelope.item._tag !== "clientCount" &&
-				envelope.item._tag !== "opencodeConnection"
+				envelope.item._tag !== "opencodeConnection" &&
+				envelope.item._tag !== "providerModels" &&
+				envelope.item._tag !== "harnessDefaults"
 					? [envelope.item]
 					: [],
 			);
 		await expect.poll(() => changes(receivedB)).toEqual(expected);
 		expect(changes(receivedA)).toEqual(expected);
+		const expectedPick = {
+			providerId: "claude",
+			modelId: "opus",
+			effort: "high",
+			contextWindow: "",
+		};
+		await expect
+			.poll(() =>
+				[receivedA, receivedB].map((received) =>
+					received
+						.filter(
+							(envelope) =>
+								envelope._tag === "upsert" &&
+								envelope.item._tag === "harnessDefaults",
+						)
+						.at(-1),
+				),
+			)
+			.toMatchObject([
+				{ item: { claude: { status: "ok", pick: expectedPick } } },
+				{ item: { claude: { status: "unverified", pick: expectedPick } } },
+			]);
 
 		// Re-read from B's already-running relay, after observing the live changes.
 		const fresh = await Effect.runPromise(
@@ -156,6 +181,12 @@ it("fans global settings out to another live project's subscribers and defaults"
 		if (snapshotB?._tag !== "snapshot") throw new Error("Missing B snapshot");
 		for (const setting of expected)
 			expect(snapshotB.rows).toContainEqual(setting);
+		expect(snapshotB.rows).toContainEqual(
+			expect.objectContaining({
+				_tag: "harnessDefaults",
+				claude: { status: "unverified", pick: expectedPick },
+			}),
+		);
 		expect(loadRelaySettings(harness.configDir)).toMatchObject({
 			defaultPermissionMode: "full",
 			defaultModel: "claude/opus",
@@ -239,7 +270,12 @@ it("fans global settings out to another live project's subscribers and defaults"
 			})
 			.toEqual(["auto", "auto"]);
 
-		const sessionId = await browserA.createSession("Global variant preference");
+		const sessionId = await browserA.createSession(
+			"Global variant preference",
+			undefined,
+			"claude",
+			{ modelId: "opus", variant: "high", contextWindow: "" },
+		);
 		await Effect.runPromise(
 			browserA.rpc.SwitchVariant({
 				sessionId,

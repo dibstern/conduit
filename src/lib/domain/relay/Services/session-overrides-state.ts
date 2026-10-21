@@ -38,7 +38,11 @@ export interface OverridesState {
 	sessions: Map<string, SessionState>;
 	processingTimeouts: Map<
 		string,
-		{ readonly callback: () => Effect.Effect<void>; readonly token: symbol }
+		{
+			readonly callback: () => Effect.Effect<void>;
+			readonly token: symbol;
+			readonly fired?: boolean;
+		}
 	>;
 	processingTimeoutFibers: FiberMap.FiberMap<string, void>;
 	defaultModel: ModelOverride | undefined;
@@ -108,11 +112,11 @@ const completeProcessingTimeout = (
 	Effect.gen(function* () {
 		const shouldRun = yield* Ref.modify(ref, (state) => {
 			const entry = state.processingTimeouts.get(sessionId);
-			if (!entry || entry.token !== token) {
+			if (!entry || entry.token !== token || entry.fired) {
 				return [false, state] as const;
 			}
 			const next = new Map(state.processingTimeouts);
-			next.delete(sessionId);
+			next.set(sessionId, { ...entry, fired: true });
 			return [true, { ...state, processingTimeouts: next }] as const;
 		});
 		if (shouldRun) {
@@ -390,7 +394,7 @@ export const startProcessingTimeout = (
 
 /**
  * Reset the processing timeout back to the given duration with the same callback.
- * No-op if no timeout is currently active for the session.
+ * No-op if the session has no silence callback (for example, after its run ends).
  */
 export const resetProcessingTimeout = (
 	sessionId: string,
@@ -474,7 +478,8 @@ export const hasActiveProcessingTimeout = (sessionId: string) =>
 	Effect.gen(function* () {
 		const ref = yield* OverridesStateTag;
 		const state = yield* Ref.get(ref);
-		return state.processingTimeouts.has(sessionId);
+		const entry = state.processingTimeouts.get(sessionId);
+		return entry !== undefined && !entry.fired;
 	});
 
 /** Get raw session state (for tests). */

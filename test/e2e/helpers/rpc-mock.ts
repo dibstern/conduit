@@ -1,10 +1,19 @@
 import { expect, type Page, type WebSocketRoute } from "@playwright/test";
 import { Cause, Effect, Exit, Schema, Scope, Stream } from "effect";
 import { RpcSchema } from "effect/rpc";
+import { DEFAULT_CATEGORY_SET } from "../../../src/lib/contracts/category-set.js";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
-import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
+import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/message-surfacing.js";
+import { DEFAULT_TERMINAL_KEYS } from "../../../src/lib/contracts/terminal-keys.js";
+import type { Avatar } from "../../../src/lib/contracts/user-avatar.js";
+import {
+	DEFAULT_WORKTREE_CLEANUP,
+	type ProjectWorktreeCleanup,
+	type WorktreeCleanup,
+} from "../../../src/lib/contracts/worktree.js";
 import {
 	type Alert,
+	DraftAlreadySent,
 	GetAgentsResponseSchema,
 	GetCommandsResponseSchema,
 	GetModelsResponseSchema,
@@ -17,6 +26,7 @@ import {
 import { isRecord } from "../../../src/lib/utils.js";
 import { makeRpcStream, serveRpc } from "../../helpers/rpc-wire.js";
 import type { StubTable } from "../../helpers/stub-ws-rpc.js";
+import { defaultInstances } from "../fixtures/mockup-state.js";
 import {
 	mockDetailPage,
 	mockDetailSnapshot,
@@ -30,6 +40,10 @@ interface EffectRpcRequest {
 	readonly tag: string;
 	readonly payload?: Record<string, unknown>;
 }
+
+type DraftKey = { readonly session: string } | { readonly draft: string };
+const draftKeyId = (key: DraftKey): string =>
+	"session" in key ? `session:${key.session}` : `draft:${key.draft}`;
 
 export const MOCK_SERVER_STATUS: GetStatusResponse = {
 	uptime: 273_600,
@@ -61,8 +75,7 @@ const isSessionStream = (tag: string): boolean =>
 	tag === "SubscribeInputDraft";
 
 /** Live-only feeds open synchronized, with nothing to replay. */
-const isLiveOnlyStream = (tag: string): boolean =>
-	tag === "SubscribeAlerts" || tag === "SubscribeInputDraft";
+const isLiveOnlyStream = (tag: string): boolean => tag === "SubscribeAlerts";
 
 export interface RpcMockOptions {
 	readonly stubs?: StubTable;
@@ -101,8 +114,12 @@ export interface RecordedRpcRequest {
 export class RpcMockControl {
 	constructor(private readonly page: Page) {}
 	projectSlug = "myapp";
+	worktreeCleanupGlobal: WorktreeCleanup = DEFAULT_WORKTREE_CLEANUP;
+	readonly worktreeCleanupProjects = new Map<string, ProjectWorktreeCleanup>();
 	onConnect?: () => void;
 	onSendMessage?: (payload: Record<string, unknown>) => void;
+	/** Observe a unary reply after it has been sent to the browser. */
+	onReply?: (request: RecordedRpcRequest) => void;
 	private readonly sockets = new Set<WebSocketRoute>();
 	private connectionCount = 0;
 	private readonly requests: RecordedRpcRequest[] = [];
@@ -120,6 +137,12 @@ export class RpcMockControl {
 	familyRows: readonly unknown[] | null = null;
 	private familySequence = 0;
 	catalog: MockCatalog = {};
+	terminalKeys = DEFAULT_TERMINAL_KEYS;
+	avatar: Avatar = {
+		choice: { kind: "initial" },
+		name: "You",
+		macPicture: null,
+	};
 	private shellSequence = 0;
 	private readonly projectSettings = new Map<string, ProjectSetting>();
 	private projectSettingsSequence = 0;
@@ -127,6 +150,12 @@ export class RpcMockControl {
 	private readonly detailSequences = new Map<string, number>();
 	private readonly sessionTodos = new Map<string, readonly unknown[]>();
 	private sessionTodosSequence = 0;
+	private readonly inputDrafts = new Map<
+		string,
+		{ readonly text: string; readonly projectId?: string }
+	>();
+	private readonly draftClaims = new Set<string>();
+	private readonly promotedDrafts = new Map<string, string>();
 
 	stubs: StubTable = {};
 
@@ -317,6 +346,8 @@ export class RpcMockControl {
 	/** Publish one project-setting fact, the way another tab's or the CLI's
 	 *  write reaches every open SubscribeProjectSettings stream. */
 	setProjectSetting(setting: ProjectSetting): void {
+		if (setting._tag === "terminalKeys")
+			this.terminalKeys = setting.terminalKeys;
 		this.projectSettings.set(setting._tag, setting);
 		this.projectSettingsSequence++;
 		if (this.streams.has("SubscribeProjectSettings"))
@@ -335,16 +366,64 @@ export class RpcMockControl {
 		this.sendChunk("SubscribeAlerts", [alert]);
 	}
 
-	/** Publish a draft another tab typed on that session's SubscribeInputDraft. */
+	/** Persist and publish a draft as another tab's SyncInputDraft would. */
 	sendInputDraft(
-		sessionId: string,
-		draft: { readonly text: string; readonly from?: string },
+		key: DraftKey | string,
+		draft: {
+			readonly text: string;
+			readonly from?: string;
+			readonly projectId?: string;
+		},
 	): void {
-		this.sendChunk(
-			"SubscribeInputDraft",
-			[{ _tag: "draft", ...draft }],
-			sessionId,
-		);
+		const typedKey = typeof key === "string" ? { session: key } : key;
+		const id = draftKeyId(typedKey);
+		if (
+			"draft" in typedKey &&
+			(this.draftClaims.has(typedKey.draft) ||
+				this.promotedDrafts.has(typedKey.draft))
+		)
+			return;
+		if (draft.text === "" && "draft" in typedKey) this.inputDrafts.delete(id);
+		else
+			this.inputDrafts.set(id, {
+				text: draft.text,
+				...(draft.projectId !== undefined && { projectId: draft.projectId }),
+			});
+		if (this.hasStream("SubscribeInputDraft", id))
+			this.sendChunk("SubscribeInputDraft", [{ _tag: "draft", ...draft }], id);
+	}
+
+	initialInputDraftFrames(key: DraftKey): readonly unknown[] {
+		if ("draft" in key) {
+			const promotedSessionId = this.promotedDrafts.get(key.draft);
+			if (promotedSessionId)
+				return [{ _tag: "synchronized", promotedSessionId }];
+		}
+		return [{ _tag: "synchronized", ...this.inputDrafts.get(draftKeyId(key)) }];
+	}
+
+	claimInputDraft(draftId: string): void {
+		if (this.draftClaims.has(draftId) || this.promotedDrafts.has(draftId))
+			throw new DraftAlreadySent({ draftId });
+		this.draftClaims.add(draftId);
+	}
+
+	releaseInputDraftClaim(draftId: string): void {
+		this.draftClaims.delete(draftId);
+	}
+
+	/** Publish another device's successful draft send and retain its tombstone. */
+	promoteInputDraft(draftId: string, sessionId: string, text: string): void {
+		this.draftClaims.delete(draftId);
+		this.promotedDrafts.set(draftId, sessionId);
+		const id = draftKeyId({ draft: draftId });
+		this.inputDrafts.delete(id);
+		if (this.hasStream("SubscribeInputDraft", id))
+			this.sendChunk(
+				"SubscribeInputDraft",
+				[{ _tag: "promoted", sessionId, text }],
+				id,
+			);
 	}
 
 	/** Replace one session's todo list, the way a TodoWrite does: an upsert on
@@ -477,7 +556,7 @@ export class RpcMockControl {
 			: tag === "SubscribeUsage"
 				? [{ readings: [] }]
 				: tag === "SubscribeInstances"
-					? [{ instances: [] }]
+					? [{ instances: defaultInstances }]
 					: [];
 	}
 
@@ -531,6 +610,8 @@ export class RpcMockControl {
 	}
 
 	private streamKey(tag: string, sessionId?: string): string {
+		if (tag === "SubscribeInputDraft" && sessionId)
+			return `${tag}:${/^(session|draft):/.test(sessionId) ? sessionId : `session:${sessionId}`}`;
 		return isSessionStream(tag) ? `${tag}:${sessionId ?? ""}` : tag;
 	}
 
@@ -607,7 +688,15 @@ const pendingProjects = new WeakMap<Page, Record<string, unknown>>();
 const pendingFamilyRows = new WeakMap<Page, readonly unknown[]>();
 const pendingProjectSlugs = new WeakMap<Page, string>();
 const pendingCatalogs = new WeakMap<Page, MockCatalog>();
+const pendingAvatars = new WeakMap<Page, Avatar>();
 const pendingProjectSettings = new WeakMap<Page, ProjectSetting[]>();
+
+/** Seed before navigation, or change what a reconnect reads from the daemon. */
+export function setMockAvatar(page: Page, avatar: Avatar): void {
+	pendingAvatars.set(page, avatar);
+	const control = controls.get(page);
+	if (control) control.avatar = avatar;
+}
 
 export function setMockRpcProjectSlug(page: Page, slug: string): void {
 	const control = controls.get(page);
@@ -666,21 +755,25 @@ export function sendMockProjectSetting(
 		]);
 }
 
-/** Mock-only input: once the page follows `sessionId`'s draft, deliver one
- *  typed in another tab. */
+/** Mock-only input: once the page follows the key, deliver another tab's edit. */
 export async function sendMockInputDraft(
 	page: Page,
-	sessionId: string,
-	draft: { readonly text: string; readonly from?: string },
+	key: DraftKey | string,
+	draft: {
+		readonly text: string;
+		readonly from?: string;
+		readonly projectId?: string;
+	},
 ): Promise<void> {
 	const control = controls.get(page);
 	if (!control) throw new Error("mockWsRpc is not installed on this page");
+	const typedKey = typeof key === "string" ? { session: key } : key;
 	await control.waitForRequest(
 		(request) =>
 			request.tag === "SubscribeInputDraft" &&
-			request.payload["sessionId"] === sessionId,
+			draftKeyId(request.payload["key"] as DraftKey) === draftKeyId(typedKey),
 	);
-	control.sendInputDraft(sessionId, draft);
+	control.sendInputDraft(typedKey, draft);
 }
 
 export function sendMockShellSnapshot(
@@ -759,6 +852,10 @@ function initialStream(
 			return control.initialSessionTodosFrames(
 				String(payload["sessionId"] ?? ""),
 			);
+		case "SubscribeInputDraft":
+			return control.initialInputDraftFrames(payload["key"] as DraftKey);
+		case "SubscribeDrafts":
+			return [[]];
 		case "SubscribeSessionFamily":
 			return control.initialFamilyFrames();
 		case "SubscribeProjectSettings":
@@ -802,9 +899,12 @@ function socketTable(
 				return Stream.unwrap(
 					Effect.gen(function* () {
 						const queue = yield* makeRpcStream<unknown, WsRpcError>();
-						const sessionId = isSessionStream(rpc._tag)
-							? String(payload["sessionId"] ?? "")
-							: undefined;
+						const sessionId =
+							rpc._tag === "SubscribeInputDraft"
+								? draftKeyId(payload["key"] as DraftKey)
+								: isSessionStream(rpc._tag)
+									? String(payload["sessionId"] ?? "")
+									: undefined;
 						control.registerStream(
 							rpc._tag,
 							ws,
@@ -876,13 +976,49 @@ function socketTable(
 			}
 			if (!stub) return new Promise<never>(() => {});
 			return (async () => {
-				const response = await stub(payload);
+				const draftId =
+					rpc._tag === "CreateSession" && typeof payload["draftId"] === "string"
+						? payload["draftId"]
+						: undefined;
+				if (draftId) control.claimInputDraft(draftId);
+				let response: unknown;
+				try {
+					response = await stub(payload);
+				} catch (error) {
+					if (draftId) control.releaseInputDraftClaim(draftId);
+					throw error;
+				}
 				const value = checkedReply(rpc._tag, () => {
 					Schema.encodeUnknownSync(
 						Schema.make<Schema.Codec<unknown>>(rpc.successSchema.ast),
 					)(response);
 					return response;
 				});
+				// Setting writes must survive the follow-up GetModels read.
+				if (isRecord(value)) {
+					if (rpc._tag === "SwitchVariant")
+						control.catalog.variant = {
+							variant: value["variant"],
+							variants: value["variants"],
+						};
+					if (rpc._tag === "SwitchContextWindow")
+						control.catalog.contextWindow = {
+							contextWindow: value["contextWindow"],
+							options: value["options"],
+						};
+				}
+				if (
+					draftId &&
+					isRecord(value) &&
+					typeof value["sessionId"] === "string"
+				)
+					control.promoteInputDraft(
+						draftId,
+						value["sessionId"],
+						typeof payload["draftText"] === "string"
+							? payload["draftText"]
+							: "",
+					);
 				if (!rpc._tag.startsWith("Get") && isRecord(value)) {
 					if (Array.isArray(value["projects"]))
 						control.setProjects({
@@ -906,9 +1042,26 @@ export async function mockWsRpc(
 	page: Page,
 	options: RpcMockOptions = {},
 ): Promise<RpcMockControl> {
+	// Vite preview has no daemon HTTP edge. Redials accept /info without a
+	// buildId, as they do for an older daemon.
+	await page.route("**/info", (route) =>
+		route.fulfill({ json: MOCK_SERVER_STATUS }),
+	);
 	const control = controls.get(page) ?? new RpcMockControl(page);
 	controls.set(page, control);
 	control.stubs = {
+		GetMessageSurfacing: () => ({
+			...DEFAULT_MESSAGE_SURFACING_SETTINGS,
+			active: false,
+			key: { source: "none", rejected: false },
+		}),
+		GetCategorySet: () => DEFAULT_CATEGORY_SET,
+		ListRecaps: () => [],
+		SubscribeRecaps: () =>
+			Stream.concat(
+				Stream.succeed({ versions: [], generating: false, error: null }),
+				Stream.never,
+			),
 		"input.submit": ({ sessionId }) => ({
 			ok: true,
 			sessionId,
@@ -924,8 +1077,20 @@ export async function mockWsRpc(
 			sessionSlug: "sessionId" in payload ? control.projectSlug : null,
 		}),
 		ResolveSession: () => ({ projectSlug: control.projectSlug }),
+		SyncInputDraft: ({ key, text, projectSlug, originId }) => {
+			control.sendInputDraft(key, {
+				text,
+				...(originId !== undefined && { from: originId }),
+				...(projectSlug !== undefined && { projectId: projectSlug }),
+			});
+			return { ok: true };
+		},
 		ViewSession: () => ({ ok: true }),
-		InspectSessionWorktrees: () => ({ worktrees: [], removeWorktrees: false }),
+		InspectSessionWorktrees: () => ({
+			worktrees: [],
+			removeWorktrees: false,
+			onDelete: "ask",
+		}),
 		...control.catalogStubs(),
 		ResolveSessionMode: () => ({ mode: "local", source: "global" }),
 		GetCursorAuth: () => ({
@@ -935,10 +1100,40 @@ export async function mockWsRpc(
 			login: { state: "idle" },
 		}),
 		GetStatus: () => MOCK_SERVER_STATUS,
-		GetWorktreeCleanupSetting: () => ({
-			worktreeCleanup: DEFAULT_WORKTREE_CLEANUP,
+		GetAvatar: () => control.avatar,
+		SetAvatar: ({ choice }) => {
+			control.avatar = { ...control.avatar, choice };
+			return control.avatar;
+		},
+		GetTerminalKeys: () => ({ terminalKeys: control.terminalKeys }),
+		SetTerminalKeys: ({ terminalKeys }) => {
+			control.setProjectSetting({ _tag: "terminalKeys", terminalKeys });
+			return { terminalKeys };
+		},
+		GetWorktreeCleanupSetting: ({ projectSlug }) => ({
+			global: control.worktreeCleanupGlobal,
+			...(projectSlug !== undefined && {
+				project: control.worktreeCleanupProjects.get(projectSlug) ?? null,
+			}),
 		}),
-		SetWorktreeCleanupSetting: ({ worktreeCleanup }) => ({ worktreeCleanup }),
+		SetWorktreeCleanupSetting: (payload) => {
+			if (payload.scope === "global") {
+				control.worktreeCleanupGlobal = payload.rules;
+				return { global: control.worktreeCleanupGlobal };
+			}
+			if (payload.override === null)
+				control.worktreeCleanupProjects.delete(payload.projectSlug);
+			else
+				control.worktreeCleanupProjects.set(
+					payload.projectSlug,
+					payload.override,
+				);
+			return {
+				global: control.worktreeCleanupGlobal,
+				project:
+					control.worktreeCleanupProjects.get(payload.projectSlug) ?? null,
+			};
+		},
 		GetUsageLimitsSetting: () => ({
 			usageLimits: {
 				autoResume: false,
@@ -951,6 +1146,8 @@ export async function mockWsRpc(
 	};
 	control.projectSlug = pendingProjectSlugs.get(page) ?? control.projectSlug;
 	control.catalog = pendingCatalogs.get(page) ?? control.catalog;
+	control.avatar = pendingAvatars.get(page) ?? control.avatar;
+	pendingAvatars.delete(page);
 	subscribeMockDetail(page, (sessionId, envelope) => {
 		if (control.hasStream("SubscribeSessionDetail", sessionId))
 			control.sendChunk("SubscribeSessionDetail", [envelope], sessionId);
@@ -966,6 +1163,13 @@ export async function mockWsRpc(
 	for (const setting of pendingProjectSettings.get(page) ?? [])
 		control.setProjectSetting(setting);
 	pendingProjectSettings.delete(page);
+	// The mock is the server, so it answers the redial build check too. Under
+	// vite preview /info is the SPA's HTML, so the check would retry forever and
+	// a dropped socket would never reconnect. No buildId reads as "dial at once".
+	await page.route(
+		(url) => url.pathname === "/info",
+		(route) => route.fulfill({ json: {} }),
+	);
 	await page.routeWebSocket(/\/rpc/, (ws: WebSocketRoute) => {
 		const scope = Effect.runSync(Scope.make());
 		const onClose = () => control.unregisterSocket(ws);
@@ -982,15 +1186,18 @@ export async function mockWsRpc(
 		page.once("close", onClose);
 		const requests = new Map<string, EffectRpcRequest[]>();
 		const submissions = new Map<string, Record<string, unknown>>();
+		const requestsById = new Map<string, RecordedRpcRequest>();
 		const ready = Effect.runPromise(
 			serveRpc(socketTable(ws, options, control, requests), (json) =>
 				Effect.sync(() => {
 					if (closed) return;
 					ws.send(json);
-					if (submissions.size === 0) return;
 					const frame: unknown = JSON.parse(json);
 					if (!isRecord(frame) || frame["_tag"] !== "Exit") return;
 					const id = String(frame["requestId"]);
+					const request = requestsById.get(id);
+					requestsById.delete(id);
+					if (request) control.onReply?.(request);
 					const payload = submissions.get(id);
 					submissions.delete(id);
 					// Replay a submitted turn after its answer, as the old mock did.
@@ -1010,6 +1217,10 @@ export async function mockWsRpc(
 			for (const frame of Array.isArray(raw) ? raw : [raw]) {
 				if (isEffectRpcRequest(frame)) {
 					control.record(frame.tag, frame.payload ?? {});
+					requestsById.set(String(frame.id), {
+						tag: frame.tag,
+						payload: frame.payload ?? {},
+					});
 					if (frame.tag === "input.submit")
 						submissions.set(String(frame.id), frame.payload ?? {});
 					const pending = requests.get(frame.tag) ?? [];

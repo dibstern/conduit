@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, ManagedRuntime, Ref } from "effect";
+import { Effect, Layer, ManagedRuntime, Option, Ref, Stream } from "effect";
 import { RpcClient, RpcSerialization } from "effect/rpc";
 import { Socket } from "effect/socket";
 import { SqlClient } from "effect/sql";
@@ -26,7 +26,7 @@ import {
 	WebSocketRelayRouterTag,
 	WebSocketRoutingLive,
 } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
-import { clearSessionInputDraft } from "../../../src/lib/handlers/prompt.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { daemonStorePath } from "../../../src/lib/persistence/project-storage.js";
 import { makeWsRpcWebSocketHandler } from "../../../src/lib/server/ws-rpc-handler.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
@@ -88,9 +88,6 @@ describe("daemon shared RPC routing", () => {
 					ReturnType<typeof makeMockWebSocketHandler>
 				>();
 				const startPolling = vi.fn();
-				yield* Effect.addFinalizer(() =>
-					Effect.sync(() => clearSessionInputDraft("session-b")),
-				);
 				const factory = (slug: string) =>
 					Effect.gen(function* () {
 						const wsHandler = makeMockWebSocketHandler();
@@ -105,6 +102,10 @@ describe("daemon shared RPC routing", () => {
 							Layer.mergeAll(
 								makeTestHandlerLayer({
 									config: makeMockConfig({ slug }),
+									persistenceLayer: makePersistenceEffectLayer(
+										daemonStorePath(root),
+										slug,
+									),
 									wsHandler,
 									pollerManager,
 								}),
@@ -197,7 +198,7 @@ describe("daemon shared RPC routing", () => {
 				).toEqual({ projectSlug: "project-a", sessionSlug: null });
 				if (operation === "ViewSession") {
 					yield* rpcClient.SyncInputDraft({
-						sessionId: "session-b",
+						key: { session: "session-b" },
 						text: "saved draft",
 					});
 				}
@@ -213,9 +214,15 @@ describe("daemon shared RPC routing", () => {
 							}),
 				).toMatchObject(
 					operation === "ViewSession"
-						? { ok: true, draft: "saved draft" }
+						? { ok: true }
 						: { projectSlug: "project-b" },
 				);
+				if (operation === "ViewSession")
+					expect(
+						yield* Stream.runHead(
+							rpcClient.SubscribeInputDraft({ key: { session: "session-b" } }),
+						),
+					).toEqual(Option.some({ _tag: "synchronized", text: "saved draft" }));
 				for (const projectSlug of ["project-a", "project-b"]) {
 					expect(yield* rpcClient.GetCommands({ projectSlug })).toMatchObject({
 						projectSlug,

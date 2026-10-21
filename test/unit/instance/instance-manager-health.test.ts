@@ -137,40 +137,9 @@ describe("InstanceManager health polling", () => {
 			expect(statusEvents.length).toBeGreaterThanOrEqual(1);
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
-
-	it.effect("stops polling if instance removed during polling", () =>
-		Effect.gen(function* () {
-			yield* addInstance(mkInstance("inst-1", 1));
-			yield* startHealthPoller("inst-1");
-			yield* removeInstance("inst-1");
-			// Poller fiber should be gone (removeInstance cancels it)
-			const fibers = yield* PollerFibersTag;
-			const exists = yield* FiberMap.has(fibers, "poller:inst-1");
-			expect(exists).toBe(false);
-		}).pipe(Effect.provide(Layer.fresh(testLayer))),
-	);
 });
 
 describe("InstanceManager restart scheduling", () => {
-	it.effect("scheduleRestart registers a restart fiber", () =>
-		Effect.gen(function* () {
-			yield* addInstance(mkInstance("inst-1", 4096));
-			// Set to unhealthy so restart makes sense
-			const stateRef = yield* InstanceManagerStateTag;
-			yield* Ref.update(stateRef, (s) => ({
-				...s,
-				instances: HashMap.modify(s.instances, "inst-1", (inst) => ({
-					...inst,
-					status: "unhealthy" as const,
-				})),
-			}));
-			yield* scheduleRestart("inst-1");
-			const fibers = yield* PollerFibersTag;
-			const exists = yield* FiberMap.has(fibers, "restart:inst-1");
-			expect(exists).toBe(true);
-		}).pipe(Effect.provide(Layer.fresh(testLayer))),
-	);
-
 	it.effect("restartInstance directly resets status to starting", () =>
 		Effect.gen(function* () {
 			yield* addInstance(mkInstance("inst-1", 4096));

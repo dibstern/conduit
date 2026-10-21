@@ -1,4 +1,5 @@
-// Tests the thinking-level variant dropdown on the model selector.
+// Tests the effort (thinking-level variant) control: the composer badge opens
+// the model picker, whose Effort row lists the model's levels.
 //
 // Uses WS mock — no real OpenCode or relay needed.
 // Frontend served by Vite preview, WebSocket intercepted by page.routeWebSocket().
@@ -36,11 +37,13 @@ async function setupWithVariants(
 		stubs: {
 			SwitchVariant: (params) => {
 				rpcCalls.push({ ...params });
-				return {
-					projectSlug: "myapp",
+				const variant = {
 					variant: String(params["variant"] ?? ""),
 					variants: ["low", "medium", "high", "max"],
 				};
+				// The app rereads GetModels after a switch, as the server reports it.
+				rpc.catalog = { ...rpc.catalog, variant };
+				return { projectSlug: "myapp", ...variant };
 			},
 		},
 	});
@@ -92,6 +95,10 @@ async function setupWithoutVariants(
 	return control;
 }
 
+const badge = (page: Page) => page.locator("[data-testid='variant-badge']");
+const effortOption = (page: Page, variant: string) =>
+	page.locator(`[data-testid='picker-effort-option-${variant}']`);
+
 test.describe("Variant badge visibility", () => {
 	test("shows variant badge when model has variants", async ({
 		page,
@@ -99,10 +106,9 @@ test.describe("Variant badge visibility", () => {
 	}) => {
 		await setupWithVariants(page, baseURL);
 
-		const badge = page.locator("[data-testid='variant-badge']");
-		await expect(badge).toBeVisible();
+		await expect(badge(page)).toBeVisible();
 		// Should show "default" when no variant is selected
-		await expect(badge).toContainText("Default");
+		await expect(badge(page)).toContainText("Default");
 	});
 
 	test("hides variant badge when model has no variants", async ({
@@ -111,168 +117,155 @@ test.describe("Variant badge visibility", () => {
 	}) => {
 		await setupWithoutVariants(page, baseURL);
 
-		const badge = page.locator("[data-testid='variant-badge']");
-		await expect(badge).not.toBeVisible();
+		await expect(badge(page)).not.toBeVisible();
 	});
 });
 
-test.describe("Variant dropdown", () => {
-	test("opens dropdown on badge click", async ({ page, baseURL }) => {
+/** The badge opens the model picker at its Effort row. */
+async function openEffort(page: Page): Promise<void> {
+	await badge(page).click();
+	await expect(page.locator("[data-testid='picker-row-effort']")).toBeVisible();
+}
+
+test.describe("Effort row", () => {
+	test("opens on badge click", async ({ page, baseURL }) => {
 		await setupWithVariants(page, baseURL);
-
-		const badge = page.locator("[data-testid='variant-badge']");
-		await badge.click();
-
-		const dropdown = page.locator("[data-testid='variant-dropdown']");
-		await expect(dropdown).toBeVisible();
+		await openEffort(page);
 	});
 
-	test("shows all variants plus default option", async ({ page, baseURL }) => {
-		await setupWithVariants(page, baseURL);
-
-		const badge = page.locator("[data-testid='variant-badge']");
-		await badge.click();
-
-		const dropdown = page.locator("[data-testid='variant-dropdown']");
-		await expect(dropdown).toBeVisible();
-
-		// Should have: default, low, medium, high, max
-		await expect(
-			page.locator("[data-testid='variant-option-default']"),
-		).toBeVisible();
-		await expect(
-			page.locator("[data-testid='variant-option-low']"),
-		).toBeVisible();
-		await expect(
-			page.locator("[data-testid='variant-option-medium']"),
-		).toBeVisible();
-		await expect(
-			page.locator("[data-testid='variant-option-high']"),
-		).toBeVisible();
-		await expect(
-			page.locator("[data-testid='variant-option-max']"),
-		).toBeVisible();
-	});
-
-	test("closes dropdown after selecting a variant", async ({
+	test("lists exactly the model's levels, with no Default", async ({
 		page,
 		baseURL,
 	}) => {
 		await setupWithVariants(page, baseURL);
+		await openEffort(page);
 
-		const badge = page.locator("[data-testid='variant-badge']");
-		await badge.click();
-
-		// Select "high"
-		await page.locator("[data-testid='variant-option-high']").click();
-
-		const dropdown = page.locator("[data-testid='variant-dropdown']");
-		await expect(dropdown).not.toBeVisible();
+		for (const variant of ["low", "medium", "high", "max"])
+			await expect(effortOption(page, variant)).toBeVisible();
+		await expect(
+			page.locator("[data-testid^='picker-effort-option-']"),
+		).toHaveCount(4);
+		await expect(
+			page
+				.getByRole("radiogroup", { name: "Effort", exact: true })
+				.getByRole("radio", { checked: true }),
+		).toHaveCount(0);
 	});
 
-	test("closes dropdown on Escape", async ({ page, baseURL }) => {
+	test("selecting a level checks it and keeps the picker open", async ({
+		page,
+		baseURL,
+	}) => {
 		await setupWithVariants(page, baseURL);
+		await openEffort(page);
 
-		const badge = page.locator("[data-testid='variant-badge']");
-		await badge.click();
-		await expect(
-			page.locator("[data-testid='variant-dropdown']"),
-		).toBeVisible();
+		await effortOption(page, "high").click();
+		await expect(effortOption(page, "high")).toHaveAttribute(
+			"aria-checked",
+			"true",
+		);
+		await expect(page.locator("[data-testid='model-picker']")).toBeVisible();
+	});
+
+	test("closes on Escape", async ({ page, baseURL }) => {
+		await setupWithVariants(page, baseURL);
+		await openEffort(page);
 
 		await page.keyboard.press("Escape");
-		await expect(
-			page.locator("[data-testid='variant-dropdown']"),
-		).not.toBeVisible();
+		await expect(page.locator("[data-testid='model-picker']")).toBeHidden();
 	});
 });
 
-test.describe("Variant selection updates UI", () => {
-	test("selecting a variant updates the badge label", async ({
+test.describe("Effort selection updates UI", () => {
+	test("selecting a level updates the badge label", async ({
+		page,
+		baseURL,
+	}) => {
+		await setupWithVariants(page, baseURL);
+		await expect(badge(page)).toContainText("Default");
+
+		await openEffort(page);
+		await effortOption(page, "high").click();
+		await expect(badge(page)).toContainText("High");
+	});
+
+	test("selecting another level replaces the previous one", async ({
 		page,
 		baseURL,
 	}) => {
 		await setupWithVariants(page, baseURL);
 
-		const badge = page.locator("[data-testid='variant-badge']");
-		await expect(badge).toContainText("Default");
+		await openEffort(page);
+		await effortOption(page, "max").click();
+		await expect(badge(page)).toContainText("Max");
 
-		// Open dropdown and select "high"
-		await badge.click();
-		await page.locator("[data-testid='variant-option-high']").click();
-
-		// Badge should now show "high"
-		await expect(badge).toContainText("High");
-	});
-
-	test("selecting default clears the variant", async ({ page, baseURL }) => {
-		await setupWithVariants(page, baseURL);
-
-		const badge = page.locator("[data-testid='variant-badge']");
-
-		// Select "max" first
-		await badge.click();
-		await page.locator("[data-testid='variant-option-max']").click();
-		await expect(badge).toContainText("Max");
-
-		// Now select "default" to clear
-		await badge.click();
-		await page.locator("[data-testid='variant-option-default']").click();
-		await expect(badge).toContainText("Default");
-	});
-});
-
-test.describe("Variant selection sends RPC request", () => {
-	test("selecting a variant sends SwitchVariant request", async ({
-		page,
-		baseURL,
-	}) => {
-		const control = await setupWithVariants(page, baseURL);
-
-		const badge = page.locator("[data-testid='variant-badge']");
-		await badge.click();
-		await page.locator("[data-testid='variant-option-high']").click();
-
-		await expect
-			.poll(() => control.rpcCalls.at(-1))
-			.toMatchObject({
-				projectSlug: "myapp",
-				sessionId: "sess-var-001",
-				variant: "high",
-			});
-	});
-
-	test("selecting default sends SwitchVariant with empty string", async ({
-		page,
-		baseURL,
-	}) => {
-		const control = await setupWithVariants(page, baseURL);
-
-		const badge = page.locator("[data-testid='variant-badge']");
-
-		// First select "low"
-		await badge.click();
-		await page.locator("[data-testid='variant-option-low']").click();
-
-		// Then select "default"
-		await badge.click();
-		await page.locator("[data-testid='variant-option-default']").click();
-
-		await expect
-			.poll(() => control.rpcCalls.at(-1))
-			.toMatchObject({
-				projectSlug: "myapp",
-				sessionId: "sess-var-001",
-				variant: "",
-			});
-		expect(control.rpcCalls).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({
-					projectSlug: "myapp",
-					sessionId: "sess-var-001",
-					variant: "low",
-				}),
-			]),
+		await effortOption(page, "low").click();
+		await expect(badge(page)).toContainText("Low");
+		await expect(effortOption(page, "max")).toHaveAttribute(
+			"aria-checked",
+			"false",
 		);
+	});
+
+	test("a server-cleared variant restores Default and clears the picker selection", async ({
+		page,
+		baseURL,
+	}) => {
+		const control = await setupWithVariants(page, baseURL);
+		await openEffort(page);
+		await effortOption(page, "max").click();
+		await expect(badge(page)).toContainText("Max");
+		await expect(badge(page)).toBeEnabled();
+
+		control.sendMessage({
+			type: "variant_info",
+			variant: "",
+			variants: ["low", "medium", "high", "max"],
+		});
+		await expect(badge(page)).toContainText("Default");
+		await expect(
+			page
+				.getByRole("radiogroup", { name: "Effort", exact: true })
+				.getByRole("radio", { checked: true }),
+		).toHaveCount(0);
+		expect(control.rpcCalls).toEqual([
+			expect.objectContaining({ sessionId: "sess-var-001", variant: "max" }),
+		]);
+	});
+});
+
+test.describe("Effort selection sends RPC request", () => {
+	test("selecting a level sends SwitchVariant", async ({ page, baseURL }) => {
+		const control = await setupWithVariants(page, baseURL);
+
+		await openEffort(page);
+		await effortOption(page, "high").click();
+
+		await expect
+			.poll(() => control.rpcCalls.at(-1))
+			.toMatchObject({ sessionId: "sess-var-001", variant: "high" });
+		expect(control.rpcCalls.at(-1)).not.toHaveProperty("projectSlug");
+	});
+
+	test("each selection sends its own SwitchVariant", async ({
+		page,
+		baseURL,
+	}) => {
+		const control = await setupWithVariants(page, baseURL);
+
+		await openEffort(page);
+		await effortOption(page, "low").click();
+		await expect(badge(page)).toContainText("Low");
+		await expect(badge(page)).toBeEnabled();
+		await expect
+			.poll(() => control.rpcCalls.at(-1))
+			.toMatchObject({ sessionId: "sess-var-001", variant: "low" });
+		await effortOption(page, "max").click();
+		await expect(badge(page)).toContainText("Max");
+		await expect(badge(page)).toBeEnabled();
+		await expect
+			.poll(() => control.rpcCalls.map((call) => call["variant"]))
+			.toEqual(["low", "max"]);
 	});
 });
 
@@ -283,8 +276,7 @@ test.describe("Server-pushed variant updates", () => {
 	}) => {
 		const control = await setupWithVariants(page, baseURL);
 
-		const badge = page.locator("[data-testid='variant-badge']");
-		await expect(badge).toContainText("Default");
+		await expect(badge(page)).toContainText("Default");
 
 		// Server pushes a variant change
 		control.sendMessage({
@@ -293,7 +285,7 @@ test.describe("Server-pushed variant updates", () => {
 			variants: ["low", "medium", "high", "max"],
 		});
 
-		await expect(badge).toContainText("Medium");
+		await expect(badge(page)).toContainText("Medium");
 	});
 });
 
@@ -301,35 +293,33 @@ test.describe("Ctrl+T keyboard shortcut", () => {
 	test("Ctrl+T cycles through variants", async ({ page, baseURL }) => {
 		const control = await setupWithVariants(page, baseURL);
 
-		const badge = page.locator("[data-testid='variant-badge']");
-		await expect(badge).toContainText("Default");
+		await expect(badge(page)).toContainText("Default");
 
 		// First Ctrl+T: default → low
 		await page.keyboard.press("Control+t");
-		await expect(badge).toContainText("Low");
+		await expect(badge(page)).toContainText("Low");
 
 		await expect
 			.poll(() => control.rpcCalls.find((call) => call["variant"] === "low"))
 			.toMatchObject({
-				projectSlug: "myapp",
 				sessionId: "sess-var-001",
 				variant: "low",
 			});
 
 		// Second Ctrl+T: low → medium
 		await page.keyboard.press("Control+t");
-		await expect(badge).toContainText("Medium");
+		await expect(badge(page)).toContainText("Medium");
 
 		// Third: medium → high
 		await page.keyboard.press("Control+t");
-		await expect(badge).toContainText("High");
+		await expect(badge(page)).toContainText("High");
 
 		// Fourth: high → max
 		await page.keyboard.press("Control+t");
-		await expect(badge).toContainText("Max");
+		await expect(badge(page)).toContainText("Max");
 
 		// Fifth: max → low (wraps without selecting default)
 		await page.keyboard.press("Control+t");
-		await expect(badge).toContainText("Low");
+		await expect(badge(page)).toContainText("Low");
 	});
 });

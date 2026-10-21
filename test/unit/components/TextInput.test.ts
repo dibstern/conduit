@@ -29,12 +29,6 @@ describe("TextInput", () => {
 		expect(getByTestId("mirror").textContent).toBe("updated");
 	});
 
-	it("applies the small size class", () => {
-		const { getByRole } = render(TextInput, { props: { size: "sm" } });
-
-		expect(getByRole("textbox").className).toContain("h-8");
-	});
-
 	it("emits aria-invalid only when invalid", () => {
 		const invalidRender = render(TextInput, { props: { invalid: true } });
 		expect(
@@ -69,31 +63,6 @@ describe("TextInput", () => {
 	// argument the primitive started. These assert emission, not precedence.
 	const tokens = (el: Element) =>
 		(el.getAttribute("class") ?? "").split(/\s+/).filter(Boolean);
-
-	it("emits no chrome or sizing utility when bare and content-sized", () => {
-		const { getByRole } = render(TextInput, {
-			props: { chrome: "bare", size: "content" },
-		});
-		const emitted = tokens(getByRole("textbox"));
-
-		const contested = emitted.filter((t) =>
-			/^(bg-|border|rounded-|placeholder:|h-|w-|p[xy]?-|text-(xs|sm|base|lg|\[))/.test(
-				t,
-			),
-		);
-		expect(contested).toEqual([]);
-	});
-
-	it("keeps outline-none when bare, because preflight does not", () => {
-		const { getByRole } = render(TextInput, { props: { chrome: "bare" } });
-
-		// `bg-transparent`, `border-none` and `p-0` are all no-ops under
-		// Tailwind v4 preflight and were dropped from both call sites. This one
-		// is real: it suppresses the UA focus ring, which is why the missing
-		// focus indicator on a bare field is a filed defect rather than a bug
-		// this change introduced (conduit-test-de3.35.9.3).
-		expect(tokens(getByRole("textbox"))).toContain("outline-none");
-	});
 
 	it("emits exactly one utility per contested group when bordered", () => {
 		const { getByRole } = render(TextInput);

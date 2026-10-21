@@ -195,7 +195,7 @@ it("delivers a subscription and a unary response on the same client", async () =
 			const clients = yield* WsRpcClients;
 			const sockets = yield* clients.forProject("alpha");
 			return yield* Stream.runHead(
-				sockets.subscriptions.inputDraft({ sessionId: "s1" }),
+				sockets.subscriptions.inputDraft({ key: { session: "s1" } }),
 			);
 		}),
 	);
@@ -223,7 +223,7 @@ function contractTypes() {
 	// @ts-expect-error Stream tags cannot be called as unary RPCs.
 	rpc("SubscribeShell", {});
 	// @ts-expect-error The Effect call also accepts only unary tags.
-	rpcEffect("SubscribeInputDraft", { sessionId: "s1" });
+	rpcEffect("SubscribeInputDraft", { key: { session: "s1" } });
 	// @ts-expect-error Contract payload fields are required.
 	rpc("input.submit", { sessionId: "s1", text: "" });
 	// @ts-expect-error Unknown payload fields must not be accepted.

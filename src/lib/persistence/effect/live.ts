@@ -9,6 +9,14 @@ import {
 import { Reactivity } from "effect/reactivity";
 import { SqlClient } from "effect/sql";
 import {
+	EventRetentionLive,
+	type EventRetentionTag,
+} from "../../domain/persistence/Services/event-retention.js";
+import {
+	EventRetentionSchedulerLive,
+	type EventRetentionSchedulerTag,
+} from "../../domain/persistence/Services/event-retention-scheduler.js";
+import {
 	makePersistenceService,
 	PersistenceError,
 	PersistenceProjectTag,
@@ -53,6 +61,8 @@ export type PersistenceEffectContext =
 	| SqliteNode.SqliteClient
 	| PersistenceServiceTag
 	| PersistenceProjectTag
+	| EventRetentionTag
+	| EventRetentionSchedulerTag
 	| EventStoreEffectTag
 	| ProjectorCursorEffectTag
 	| ProjectionRunnerEffectTag
@@ -132,6 +142,10 @@ export function makePersistenceStoreLayer(
 			// WAL's NORMAL sync, explicit rather than better-sqlite3's build default.
 			yield* sql`PRAGMA synchronous = NORMAL`;
 			yield* sql`PRAGMA mmap_size = 1073741824`;
+			// Every INSERT ... RETURNING buffers its rows in a temp b-tree. On the
+			// default file temp store that opens a temp file per statement, which
+			// made event appends ~5x slower than the insert itself.
+			yield* sql`PRAGMA temp_store = MEMORY`;
 			yield* sql`PRAGMA analysis_limit = 400`;
 			yield* sql`PRAGMA optimize = 0x10002`;
 			const optimize = sql`PRAGMA optimize`.pipe(
@@ -194,6 +208,9 @@ export function makePersistenceProjectLayer(
 		Layer.effect(PersistenceServiceTag, makePersistenceService),
 	).pipe(Layer.provide(projectLayer));
 	const baseLayer = Layer.merge(projectLayer, persistenceServiceLayer);
+	const retentionLayer = EventRetentionSchedulerLive.pipe(
+		Layer.provideMerge(EventRetentionLive.pipe(Layer.provideMerge(baseLayer))),
+	);
 	const eventStoreLayer = Layer.effect(
 		EventStoreEffectTag,
 		makeEventStoreEffect,
@@ -215,6 +232,7 @@ export function makePersistenceProjectLayer(
 
 	const claudeEventPersistDeps = Layer.mergeAll(
 		baseLayer,
+		retentionLayer,
 		eventStoreLayer,
 		projectionRunnerLayer,
 	);
@@ -231,6 +249,7 @@ export function makePersistenceProjectLayer(
 
 	return Layer.mergeAll(
 		baseLayer,
+		retentionLayer,
 		eventStoreLayer,
 		projectionRunnerLayer,
 		readQueryLayer,

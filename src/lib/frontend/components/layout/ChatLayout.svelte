@@ -3,6 +3,7 @@
 <!-- Preserves element IDs and class names for E2E test compatibility. -->
 
 <script lang="ts">
+	import { loadMessageSurfacing } from "../../stores/message-surfacing.svelte.js";
 	import { onDestroy, onMount, tick, untrack } from "svelte";
 	import { Effect } from "effect";
 	import { disposeRuntime, runTransportEffect } from "../../transport/runtime.js";
@@ -40,8 +41,10 @@
 	} from "../../stores/ws-notifications.js";
 	import { onProjectAttached } from "../../stores/ws-listeners.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
+	import { avatarState, loadAvatar } from "../../stores/avatar.svelte.js";
+	import AvatarFirstRun from "../overlays/AvatarFirstRun.svelte";
 	import { attachedProjectState, getCurrentRoute, getCurrentSlug, getCurrentSearchParams, routerState } from "../../stores/router.svelte.js";
-	import { clearMessages, draftSendIn } from "../../stores/chat.svelte.js";
+	import { clearMessages, localSendsIn } from "../../stores/chat.svelte.js";
 	import { terminalState, destroyAll, viewPtys } from "../../stores/terminal.svelte.js";
 	import { clearSessionSearch, findSession, resetSessionFamily, sessionState } from "../../stores/session.svelte.js";
 	import { attachSessionList, detachSessionList, drawSavedShell } from "../../stores/session-list.svelte.js";
@@ -119,6 +122,21 @@
 		);
 	});
 	const topClearance = $derived(sessionViewState.compact && !phoneListScreen ? chromeHeight : 0);
+
+	// The transcript keeps clearance for the open bar while the bar is
+	// collapsed. The island floats over the transcript either way, so the only
+	// cost is a little extra room above the first message, and the bar
+	// toggling mid-swipe never changes the transcript's geometry: at the top,
+	// a shrinking padding can only be absorbed by moving the content under the
+	// finger, as scrollTop cannot go negative.
+	function measureChrome(chrome: HTMLElement) {
+		const observer = new ResizeObserver(() => {
+			const collapsed = chrome.querySelector('#session-bar[data-collapsed="true"]') !== null;
+			chromeHeight = collapsed ? Math.max(chromeHeight, chrome.offsetHeight) : chrome.offsetHeight;
+		});
+		observer.observe(chrome);
+		return () => observer.disconnect();
+	}
 
 	const layoutClass = $derived.by(() => {
 		let cls = "flex h-dvh";
@@ -444,7 +462,10 @@
 	// The version is daemon-wide, so it follows the connection, not the project:
 	// a reconnect after a restart can be a new build.
 	$effect(() => {
-		if (connected) void fetchCurrentVersion();
+		if (connected) { void fetchCurrentVersion(); void loadMessageSurfacing(); }
+	});
+	$effect(() => {
+		if (connected) untrack(() => { void loadAvatar(); });
 	});
 
 	// iOS fires pagehide every time a standalone PWA is backgrounded, not only
@@ -532,6 +553,17 @@
 	});
 
 	$effect(() => {
+		function handleNewSessionShortcut(event: KeyboardEvent) {
+			if (event.defaultPrevented || event.repeat || event.altKey || !event.shiftKey || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "n") return;
+			event.preventDefault();
+			const shown = selection.shown;
+			selection.openDraft(getDraftProject(shown.kind === "placed" ? shown.project : null));
+		}
+		window.addEventListener("keydown", handleNewSessionShortcut);
+		return () => window.removeEventListener("keydown", handleNewSessionShortcut);
+	});
+
+	$effect(() => {
 		function handleViewShortcut(event: KeyboardEvent) {
 			const view = matchSessionViewShortcut(event);
 			if (!view || event.defaultPrevented) return;
@@ -563,6 +595,8 @@
 		return () => window.removeEventListener("debug:toggle", onDebugToggle);
 	});
 </script>
+
+<AvatarFirstRun open={connected && avatarState.loaded && avatarState.current.choice === null} />
 
 <div id="layout" class={layoutClass}>
 	<!--
@@ -606,14 +640,15 @@
 		class:select-none={isResizing || isSidebarResizing || isPaneResizing}
 		style={vvHeight ? `height: ${vvHeight}px;` : ""}
 	>
-		<div id="session-chrome" bind:offsetHeight={chromeHeight}>
+		<div id="session-chrome" {@attach measureChrome}>
+			{#if !phoneListScreen && !sessionViewState.compact}<Banners presentation="session-header" />{/if}
 			<!-- The list screen has its own bar in Sidebar; keep one session bar
 			     mounted across breakpoint changes so its state follows the viewport. -->
 			{#if !phoneListScreen}<SessionBar />{/if}
 
 			<!-- Banners (update available, skip permissions, etc.). The phone list
 			     screen hides #app, so Sidebar shows them there instead. -->
-			{#if !phoneListScreen}<Banners />{/if}
+			{#if !phoneListScreen && sessionViewState.compact}<Banners />{/if}
 
 			<!-- Todo Sticky Overlay -->
 			{#if todoEverOpened}
@@ -636,8 +671,8 @@
 					<!-- Touches here clear the unread dot (conduit-test-hk9m.4). -->
 					<div class="flex flex-col flex-1 min-h-0" class:invisible={mobileMaximized} inert={phoneView === "files" || mobileMaximized} {@attach trackSeen(sessionState.currentId)}>
 						<MessageList {topClearance} />
-						{#if !sessionState.currentId && !draftSendIn(null)}
-							<div class="pointer-events-none absolute inset-x-0 top-[28%] flex flex-col items-center gap-2.5 px-6 text-center font-brand" data-testid="draft-empty">
+						{#if !sessionState.currentId && localSendsIn(null).length === 0}
+							<div class="pointer-events-none absolute inset-x-0 top-[28%] flex flex-col items-center gap-2.5 px-6 text-center font-sans" data-testid="draft-empty">
 								{#if draftSlug}<ProjectSquare large label={projectDisplayName(draftSlug)} accent={projectAccent(draftSlug)} />{/if}
 								<b class="text-[16px] font-semibold text-text">What should happen{draftSlug ? ` in ${projectDisplayName(draftSlug)}` : ""}?</b>
 								<span class="text-[13px] text-text-dimmer">Nothing is created until you send.</span>

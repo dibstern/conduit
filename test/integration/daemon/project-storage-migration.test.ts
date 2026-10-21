@@ -133,6 +133,7 @@ describe("project storage migration through the daemon", () => {
 			JSON.stringify({
 				...config,
 				configVersion: undefined,
+				worktreeCleanup: undefined,
 				projects: config.projects.map(({ folders, ...project }) => ({
 					...project,
 					directory: folders[0],
@@ -250,15 +251,18 @@ describe("project storage migration through the daemon", () => {
 
 	it("adopts a preserved Claude runner against migrated history", async () => {
 		scenario = "runner-adoption";
-		harness = await ProcessHarness.start({
+		harness = ProcessHarness.create({
 			restartProof: true,
 			holdRunnerAck: true,
 		});
+		await harness.restart({ runnerStartupTimeoutMs: 25_000 });
 		const before = await harness.connect();
 		const sessionId = await before.createSession("Runner migration");
 		// The restart fixture lets IPC disconnect settle between chunk marks.
 		const prompt = "restart-migration-replay";
-		const pending = before.send(sessionId, prompt).catch(() => undefined);
+		const pending = before
+			.send(sessionId, prompt, 30_000)
+			.catch(() => undefined);
 		await before.waitFor(
 			(message) =>
 				message["type"] === "transcript_message" &&
@@ -266,8 +270,12 @@ describe("project storage migration through the daemon", () => {
 				(message["parts"] as HistoryMessage["parts"])?.some(
 					(part) => part.type === "text" && Boolean(part.text),
 				) === true,
+			0,
+			30_000,
 		);
-		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
+		const runner = await harness.waitForMark(
+			(mark) => mark.kind === "runner-started",
+		);
 		if (runner?.kind !== "runner-started")
 			throw new Error("Missing preserved runner");
 		const pendingStore = new Database(storageDb(harness), { readonly: true });
@@ -318,7 +326,7 @@ describe("project storage migration through the daemon", () => {
 		expect(existsSync(storageDb(harness))).toBe(true);
 		expect(existsSync(`${legacyDb(harness)}.migrated`)).toBe(true);
 		evidence = { ...evidence, migrated: true };
-	}, 60_000);
+	}, 90_000);
 
 	it("keeps removed history and reuses it when the same folder returns", async () => {
 		scenario = "reuse";
@@ -385,9 +393,14 @@ describe("project storage migration through the daemon", () => {
 			() => expect(readProjectStorageOwner(configDir, secondSlug)).toBe(second),
 			{ timeout: 15_000 },
 		);
-		await expect(other.history(sessionId)).rejects.toThrow(
-			`Unknown session: ${sessionId}`,
-		);
+		await expect(other.history(sessionId)).rejects.toMatchObject({
+			code: "unknown-session",
+		});
+		const isolated = await sendRpcRequest(socket(harness), {
+			_tag: "ListDaemonSessions",
+			scope: secondSlug,
+		});
+		expect(isolated.sessions).toEqual([]);
 		expect(existsSync(join(second, ".conduit"))).toBe(false);
 		evidence = {
 			first,

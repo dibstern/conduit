@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 import {
 	appendFileSync,
 	chmodSync,
@@ -17,7 +18,7 @@ import {
 import { createServer as createHttpServer, type Server } from "node:http";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
-import { userInfo } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
@@ -84,6 +85,8 @@ import {
 export { responseChunks };
 
 const TIMEOUT_MS = 15_000;
+// Loaded four-worker runs reached 22.9s. Leave 5s within the 30s hook deadline.
+const STARTUP_TIMEOUT_MS = 25_000;
 
 class BrowserRpc extends Context.Service<
 	BrowserRpc,
@@ -132,6 +135,7 @@ interface Generation {
 	signal?: NodeJS.Signals | null;
 	exitCode?: number | null;
 	fakeSdkActive?: boolean;
+	startupMs?: number;
 }
 
 export interface BrowserFrame {
@@ -209,7 +213,7 @@ export class ProcessHarness {
 		private readonly blockCapabilitiesProbe = false,
 		capabilityModels?: readonly ModelInfo[],
 		private readonly restartProof = false,
-		private readonly holdRunnerAck = false,
+		private readonly holdRunnerAck: boolean | "place-user-message" = false,
 		private readonly holdRunnerOutput?:
 			| "permission-request"
 			| "question-request"
@@ -248,6 +252,7 @@ export class ProcessHarness {
 		private readonly opencodeBorrowIdleTimeoutMs?: number,
 		private readonly opencodeInitiallyIdle = false,
 		private readonly draftPreWarmTtlMs?: number,
+		private readonly managedOpenCodeStopGraceMs?: number,
 	) {
 		this.root = realpathSync(mkdtempSync(rootPrefix));
 		this.rpcDiagnostics = new RpcDecodeDiagnostics(
@@ -324,51 +329,51 @@ export class ProcessHarness {
 			chmodSync(executable, 0o755);
 			if (realOpenCode)
 				symlinkSync(realOpenCode, join(this.root, "bin", "opencode-real"));
-			const config: DaemonConfig = {
-				pid: 0,
-				port: 0,
-				pinHash: null,
-				tls: false,
-				debug: false,
-				keepAwake: false,
-				projects: foregroundCli
-					? [
-							{
-								path: this.projectDir,
-								folders: [this.projectDir],
-								slug: "process-test",
-								addedAt: Date.now(),
-							},
-						]
-					: [],
-				...(managedOpenCode
-					? {
-							instances: [
-								{
-									id: managedOpenCodeId,
-									name: "Managed test",
-									port: 0,
-									managed: true,
-									driver: "opencode",
-									env: {
-										OPENCODE_SERVER_USERNAME: "test-user",
-										CONDUIT_TEST_OPENCODE_IGNORE_SIGTERM: String(
-											ignoreOpenCodeSigterm,
-										),
-										CONDUIT_TEST_OPENCODE_PAUSE_SUPERVISOR: String(
-											pauseOpenCodeSupervisor,
-										),
-									},
-								},
-							],
-						}
-					: {}),
-			};
-			writeFileSync(
-				join(this.configDir, "daemon.json"),
-				JSON.stringify(config),
-			);
 		}
+		// The user has already answered the avatar question, so the first-run
+		// dialog stays shut over the specs that are not about it.
+		const config: DaemonConfig = {
+			avatar: { kind: "initial" },
+			pid: 0,
+			port: 0,
+			pinHash: null,
+			tls: false,
+			debug: false,
+			keepAwake: false,
+			projects: foregroundCli
+				? [
+						{
+							path: this.projectDir,
+							folders: [this.projectDir],
+							slug: "process-test",
+							addedAt: Date.now(),
+						},
+					]
+				: [],
+			...(managedOpenCode
+				? {
+						instances: [
+							{
+								id: managedOpenCodeId,
+								name: "Managed test",
+								port: 0,
+								managed: true,
+								driver: "opencode",
+								env: {
+									OPENCODE_SERVER_USERNAME: "test-user",
+									CONDUIT_TEST_OPENCODE_IGNORE_SIGTERM: String(
+										ignoreOpenCodeSigterm,
+									),
+									CONDUIT_TEST_OPENCODE_PAUSE_SUPERVISOR: String(
+										pauseOpenCodeSupervisor,
+									),
+								},
+							},
+						],
+					}
+				: {}),
+		};
+		writeFileSync(join(this.configDir, "daemon.json"), JSON.stringify(config));
 		writeFileSync(
 			join(this.root, "runner-identity-fixture.mjs"),
 			`import childProcess from "node:child_process";
@@ -473,6 +478,21 @@ Object.assign(ClaudeDriver, { create: deps => {
 		return join(this.configDir, "events.db");
 	}
 
+	/**
+	 * Turn off auto-settle and auto-archive before the next start. A seeded
+	 * store of old, read sessions is otherwise due for both all at once.
+	 */
+	disableIdlePolicies(): void {
+		writeFileSync(
+			join(this.configDir, "daemon.json"),
+			JSON.stringify({
+				...Either.getOrThrow(loadDaemonConfigResult(this.configDir)),
+				autoSettleAfterDays: null,
+				autoArchiveAfterDays: null,
+			}),
+		);
+	}
+
 	promptIdForProviderRequest(providerRequestId: string): string | undefined {
 		const db = new Database(this.daemonStorePath(), { readonly: true });
 		try {
@@ -525,6 +545,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			queryInitializationDelayMs?: number;
 			/** Keep draft reservation expiry observable without a ten-minute wait. */
 			draftPreWarmTtlMs?: number;
+			/** Test-only SIGTERM grace for the fixture-owned managed process group. */
+			managedOpenCodeStopGraceMs?: number;
 			queryInitializationFailures?: number;
 			blockCapabilitiesProbe?: boolean;
 			capabilityModels?: readonly ModelInfo[];
@@ -536,7 +558,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			logLevel?: "warn";
 			/** Stand in for a login service: respawn exited daemons on the same port. */
 			respawnOnExit?: boolean;
-			holdRunnerAck?: boolean;
+			holdRunnerAck?: boolean | "place-user-message";
 			holdRunnerOutput?:
 				| "permission-request"
 				| "question-request"
@@ -592,6 +614,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			options.opencodeBorrowIdleTimeoutMs,
 			options.opencodeInitiallyIdle,
 			options.draftPreWarmTtlMs,
+			options.managedOpenCodeStopGraceMs,
 		);
 	}
 
@@ -629,6 +652,9 @@ Object.assign(ClaudeDriver, { create: deps => {
 				Pick<
 					NodeJS.ProcessEnv,
 					| "CONDUIT_SERVICE"
+					| "TYPESAFE_BASE_URL"
+					| "TYPESAFE_API_KEY"
+					| "CONDUIT_OUTBOX_DRAIN_INTERVAL_MS"
 					| "CONDUIT_TAILSCALE_BIN"
 					| "CONDUIT_BUILD_READY_PATH"
 					| "NODE_OPTIONS"
@@ -659,6 +685,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 					| "CONDUIT_TEST_CURSOR_CANCEL_TERMINAL_DELAY_MS"
 					| "CONDUIT_TEST_CURSOR_CANCEL_NEVER_SETTLES"
 					| "CONDUIT_TEST_CURSOR_SEND_GATE"
+					| "CONDUIT_TEST_HOLD_RUNNER_OUTPUT"
 					| "CONDUIT_TEST_CURSOR_STREAM_GATE"
 					| "CONDUIT_CONTENTION_METRICS"
 					| "XPC_SERVICE_NAME"
@@ -788,9 +815,11 @@ Object.assign(ClaudeDriver, { create: deps => {
 				});
 			});
 		}
+		const startupAt = performance.now();
 		const child = spawn(
 			process.execPath,
 			[
+				"--disable-warning=DEP0205",
 				"--import",
 				pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href,
 				"--import",
@@ -824,6 +853,9 @@ Object.assign(ClaudeDriver, { create: deps => {
 				cwd: this.projectDir,
 				env: (this.environment = {
 					...options.serviceEnvironment,
+					// Bootstrap once, including configs replaced by a fixture before start.
+					CONDUIT_TEST_REGISTER_PROJECT:
+						this.generations.length === 0 ? "1" : "0",
 					...(options.keepPort && this.port
 						? { CONDUIT_TEST_PORT: String(this.port) }
 						: {}),
@@ -839,6 +871,11 @@ Object.assign(ClaudeDriver, { create: deps => {
 					SHELL: "/bin/sh",
 					XDG_CONFIG_HOME: join(this.root, "config"),
 					XDG_CACHE_HOME: join(this.root, "cache"),
+					// Reuse V8 compilation across fixtures and workers, including tsx's
+					// loader thread. Per-fixture HOME/XDG directories stay isolated.
+					NODE_COMPILE_CACHE:
+						process.env["NODE_COMPILE_CACHE"] ??
+						join(tmpdir(), "conduit-process-harness-compile-cache"),
 					XDG_DATA_HOME: join(this.root, "data"),
 					CONDUIT_CONFIG_DIR: join(this.root, "config"),
 					...(this.opencodeBorrowIdleTimeoutMs === undefined
@@ -868,6 +905,13 @@ Object.assign(ClaudeDriver, { create: deps => {
 							}
 						: {}),
 					CONDUIT_TEST_CLAUDE_QUERY_MODULE: sdkModule,
+					...(this.managedOpenCodeStopGraceMs === undefined
+						? {}
+						: {
+								CONDUIT_TEST_OPENCODE_STOP_GRACE_MS: String(
+									this.managedOpenCodeStopGraceMs,
+								),
+							}),
 					...(options.setupTimeoutMs === undefined
 						? {}
 						: {
@@ -1036,7 +1080,12 @@ Object.assign(ClaudeDriver, { create: deps => {
 							}
 						: {}),
 					...(this.holdRunnerAck
-						? { CONDUIT_TEST_HOLD_RUNNER_ACK: "text.delta" }
+						? {
+								CONDUIT_TEST_HOLD_RUNNER_ACK:
+									this.holdRunnerAck === true
+										? "text.delta"
+										: this.holdRunnerAck,
+							}
 						: {}),
 					...(this.holdRunnerOutput && this.generations.length === 0
 						? { CONDUIT_TEST_HOLD_RUNNER_OUTPUT: this.holdRunnerOutput }
@@ -1061,6 +1110,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 		});
 		let generation: Generation | undefined;
 		let fakeSdkActive = false;
+		let probeProjectDir = this.projectDir;
+		const fakeSdkProjects = new Set<string>();
 		this.exit = new Promise<void>((done) => {
 			child.once("exit", (exitCode, signal) => {
 				if (generation) Object.assign(generation, { exitCode, signal });
@@ -1083,7 +1134,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			const timer = setTimeout(() => {
 				finished = true;
 				fail(new Error(`Server startup timeout\n${this.logs}`));
-			}, options.startupTimeoutMs ?? TIMEOUT_MS);
+			}, options.startupTimeoutMs ?? STARTUP_TIMEOUT_MS);
 			const onExit = () => {
 				finished = true;
 				clearTimeout(timer);
@@ -1102,7 +1153,11 @@ Object.assign(ClaudeDriver, { create: deps => {
 				clearTimeout(timer);
 				child.off("exit", onExit);
 				child.off("error", onError);
-				generation = { ...value, fakeSdkActive };
+				generation = {
+					...value,
+					fakeSdkActive,
+					startupMs: Math.round(performance.now() - startupAt),
+				};
 				this.port = generation.port;
 				this.generations.push(generation);
 				done();
@@ -1115,10 +1170,13 @@ Object.assign(ClaudeDriver, { create: deps => {
 				} else if (value["kind"] === "fake-sdk-active") {
 					if (
 						value["module"] === sdkModule &&
-						value["projectDir"] === this.projectDir
+						typeof value["projectDir"] === "string"
 					) {
-						fakeSdkActive = true;
-						if (generation) generation.fakeSdkActive = true;
+						fakeSdkProjects.add(value["projectDir"]);
+						if (value["projectDir"] === probeProjectDir) {
+							fakeSdkActive = true;
+							if (generation) generation.fakeSdkActive = true;
+						}
 					}
 				} else {
 					this.marks.push(value as unknown as ProcessMark);
@@ -1161,11 +1219,26 @@ Object.assign(ClaudeDriver, { create: deps => {
 		// Project registration is lazy. Attach without sending a prompt so the
 		// selected build must acknowledge its live fake factories before use.
 		if (options.skipBrowserProbe || this.realSdk) return;
+		const { projects: registered } = await this.requestRpc({
+			_tag: "GetProjects",
+		});
+		const projects = registered.filter(
+			(project) => !project.missing && project.unavailableReason === undefined,
+		);
+		const project =
+			projects.find((project) => project.slug === "process-test") ??
+			projects[0];
+		// The ready handshake and daemon RPC succeeded. With no available project,
+		// there is no relay to activate, so the project SDK probe is inapplicable.
+		if (!project) return;
+		probeProjectDir = project.folders[0];
+		fakeSdkActive = fakeSdkProjects.has(probeProjectDir);
+		if (generation) generation.fakeSdkActive = fakeSdkActive;
 		const probe = await ProcessBrowser.connect(
 			this.port,
 			undefined,
 			undefined,
-			undefined,
+			project.slug,
 			undefined,
 			this.rpcDiagnostics,
 		);
@@ -1458,6 +1531,25 @@ Object.assign(ClaudeDriver, { create: deps => {
 		await this.stop(signal, 10_000);
 	}
 
+	/** Fixture IPC and browser RPC travel independently; wait on the mark itself. */
+	async waitForMark(
+		predicate: (mark: ProcessMark) => boolean,
+		cursor = 0,
+	): Promise<ProcessMark> {
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+		try {
+			for (;;) {
+				const mark = this.marks.slice(cursor).find(predicate);
+				if (mark) return mark;
+				if (!this.child) throw new Error("No server to receive fixture marks");
+				await once(this.child, "message", { signal: controller.signal });
+			}
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+
 	async runCli(
 		args: string[],
 		/** A cold CLI start can exceed the default bound on a loaded machine. */
@@ -1681,14 +1773,14 @@ Object.assign(ClaudeDriver, { create: deps => {
 
 	private rememberManagedOpenCode(): void {
 		const loaded = loadDaemonConfigResult(this.configDir);
-		if (loaded._tag === "Failure") {
-			// Config-safety scenarios deliberately damage this file. Record the
-			// read failure and retain already authenticated process ownership.
-			if (loaded.failure._tag !== "NotFound")
-				this.configReadErrors.add(loaded.failure.message);
-			return;
-		}
-		for (const instance of loaded.success.instances ?? []) {
+		// Config-safety scenarios deliberately damage this file. Record the read
+		// failure, retain already authenticated ownership, and still read the
+		// fixture ledger: its children need termination proof either way.
+		if (loaded._tag === "Failure" && loaded.failure._tag !== "NotFound")
+			this.configReadErrors.add(loaded.failure.message);
+		const instances =
+			loaded._tag === "Success" ? (loaded.success.instances ?? []) : [];
+		for (const instance of instances) {
 			if (
 				instance.managed &&
 				instance.driver !== "claude" &&
@@ -1813,9 +1905,10 @@ Object.assign(ClaudeDriver, { create: deps => {
 					"release",
 				);
 			}
-			for (const project of Either.getOrThrowWith(
+			// A deliberately damaged config has no project gates to release;
+			// rememberManagedOpenCode records the read failure.
+			for (const project of Either.getOrUndefined(
 				loadDaemonConfigResult(this.configDir),
-				(error) => error,
 			)?.projects ?? []) {
 				if (!project.path.startsWith(`${this.root}/`)) continue;
 				for (const name of ["recovery-gated", "recovery-fail-after-adoption"]) {
@@ -2551,11 +2644,12 @@ export class ProcessBrowser {
 			knownMessages.set(owner, ids);
 		}
 		const cursor = this.frames.length;
+		const inputId = randomUUID();
 		const result = await this.run(
 			this.rpc["input.submit"]({
 				sessionId,
 				originId: this.originId,
-				inputId: randomUUID(),
+				inputId,
 				delivery,
 				text: prompt,
 			}),
@@ -2564,7 +2658,13 @@ export class ProcessBrowser {
 		// A queued submit is never refused; only a steer can be.
 		if (!result.ok) throw new Error(`submit refused: ${result.reason}`);
 		await this.followSession(result.sessionId);
-		const done = await this.waitForTurnEnd(result.sessionId, cursor, timeoutMs);
+		const done = await this.waitForTurnEnd(
+			result.sessionId,
+			cursor,
+			timeoutMs,
+			// A steered input shares the running turn's original input identity.
+			delivery === "queue" ? inputId : undefined,
+		);
 		// The detail source currently emits projected messages, not StoredEvents.
 		// A fresh typed history read fences the final text against shell completion.
 		const history = await this.history(result.sessionId);
@@ -2584,12 +2684,13 @@ export class ProcessBrowser {
 		return { chunks, done };
 	}
 
-	/** Wait for a completed/failed turn's shell version to advance past cursor.
-	 * The current read model does not advance this field on interruption. */
+	/** Wait for an ended turn and an idle shell, proving the exact input's end
+	 * even when the shell coalesces several native completions. */
 	waitForTurnEnd(
 		sessionId: string,
 		cursor = 0,
 		timeoutMs = TIMEOUT_MS,
+		inputId?: string,
 	): Promise<Record<string, unknown>> {
 		const endedBefore = Math.max(
 			-1,
@@ -2605,6 +2706,22 @@ export class ProcessBrowser {
 			(message) =>
 				message["type"] === "session_row" &&
 				message["id"] === sessionId &&
+				(inputId === undefined ||
+					message["lastTurnEndInputId"] === inputId ||
+					// Shell rows coalesce: a fast successor can replace this input's
+					// end before its idle row arrives. Its own durable transcript
+					// timing still proves completion; another input's end never does.
+					this.frames.slice(cursor).some(({ message: row }) => {
+						const timing = row["turnTiming"] as
+							| { endedAt?: number }
+							| undefined;
+						return (
+							row["type"] === "transcript_message" &&
+							row["sessionId"] === sessionId &&
+							row["inputId"] === inputId &&
+							timing?.endedAt !== undefined
+						);
+					})) &&
 				(message["status"] === "idle" || message["status"] === "error") &&
 				Number(message["lastTurnEndVersion"] ?? -1) > endedBefore,
 			cursor,

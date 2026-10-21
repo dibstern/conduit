@@ -8,7 +8,7 @@ import { closeFileViewer } from "../../stores/ui.svelte.js";
 import { toggleTerminal } from "./chrome-actions.js";
 
 export type SessionView = {
-	id: string;
+	id: "chat" | "terminal" | "diff" | "files";
 	label: string;
 	icon: string;
 	badge?: () => number | undefined;
@@ -44,7 +44,7 @@ export const sessionViews: readonly SessionView[] = [
 	{
 		id: "terminal",
 		label: "Terminal",
-		icon: "square-terminal",
+		icon: "terminal",
 		shortcut: 2,
 		badge: () => terminalState.unreadPtyIds.size || undefined,
 		isOn: () => terminalState.panelOpen,

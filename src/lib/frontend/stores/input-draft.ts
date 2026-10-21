@@ -1,59 +1,98 @@
-// The viewed session's composer draft as other tabs type it, fed by its
-// SubscribeInputDraft stream. The draft at session switch rides the
-// ViewSession response; this carries only what changes after.
+// The viewed session's stored composer draft, followed by live changes.
 
-import { Effect, Fiber, Stream } from "effect";
+import { Effect, FiberHandle, Scope, Stream } from "effect";
+import type { InputDraftKey } from "../../contracts/ws-rpc.js";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
 import { supervise } from "../transport/supervise.js";
 import type { InputDraftEnvelope } from "../transport/ws-rpc.js";
 import { handleInputSyncReceived } from "./chat.svelte.js";
 import { isOwnBrowserClientId } from "./client-identity.js";
+import {
+	handleDraftPromoted,
+	handleDraftRetired,
+	handleInputDraftStarted,
+} from "./composer-draft/runner.svelte.js";
+import { draftKeyId } from "./composer-draft/state.js";
 
-export const applyInputDraft = (envelope: InputDraftEnvelope): void => {
+export const applyInputDraft = (
+	envelope: InputDraftEnvelope,
+	key: InputDraftKey,
+): void => {
+	if (envelope._tag === "promoted") {
+		handleDraftPromoted(key, envelope.sessionId, envelope.text);
+		return;
+	}
+	if (envelope._tag === "synchronized" && envelope.promotedSessionId) {
+		handleDraftRetired(key, envelope.promotedSessionId);
+		return;
+	}
 	// The writing tab already shows its own text.
-	if (envelope._tag === "draft" && !isOwnBrowserClientId(envelope.from))
-		handleInputSyncReceived(envelope);
+	if (envelope._tag === "synchronized" || !isOwnBrowserClientId(envelope.from))
+		handleInputSyncReceived({
+			key,
+			...envelope,
+			...(envelope._tag === "synchronized" ? { initial: true } : {}),
+		});
 };
 
-let viewed: { project: string; sessionId: string | null } | null = null;
-let generation = 0;
-let fiber: Fiber.Fiber<void, never> | null = null;
+let viewed: { project: string; key: InputDraftKey | null } | null = null;
+
+async function makeFollower() {
+	const runtime = await getRuntime();
+	const handle = await runTransportEffect(
+		FiberHandle.make<void, never>().pipe(Scope.provide(runtime.scope)),
+	);
+	return { runtime, handle };
+}
+
+let follower: ReturnType<typeof makeFollower> | undefined;
 
 /** Follow one session's draft; a `null` session stops. */
 export function viewInputDraft(
 	project: string,
-	sessionId: string | null,
+	key: InputDraftKey | null,
 ): void {
-	if (viewed?.project === project && viewed.sessionId === sessionId) return;
-	viewed = { project, sessionId };
-	const currentGeneration = ++generation;
-	const old = fiber;
-	fiber = null;
-	void (old ? runTransportEffect(Fiber.interrupt(old)) : Promise.resolve())
-		.catch(() => undefined)
-		.then(async () => {
-			if (currentGeneration !== generation || !sessionId) return;
-			const runtime = await getRuntime();
-			if (currentGeneration !== generation) return;
-			const next = runtime.runFork(
-				Effect.flatMap(WsRpcClients, (clients) =>
-					Effect.flatMap(clients.forProject(project), ({ subscriptions }) =>
-						Stream.runForEach(
-							supervise(
-								Stream.suspend(() => subscriptions.inputDraft({ sessionId })),
-								() => undefined,
+	if (
+		viewed !== null &&
+		(viewed.key ? draftKeyId(viewed.key) : null) ===
+			(key ? draftKeyId(key) : null)
+	)
+		return;
+	const selection = { project, key };
+	viewed = selection;
+	if (!key && !follower) return;
+	follower ??= makeFollower();
+	void follower.then(({ runtime, handle }) => {
+		if (viewed !== selection) return;
+		runtime.runFork(
+			Effect.suspend(() => {
+				if (viewed !== selection) return Effect.void;
+				if (!key) return FiberHandle.clear(handle);
+				return Effect.asVoid(
+					FiberHandle.run(
+						handle,
+						Effect.flatMap(WsRpcClients, (clients) =>
+							Effect.flatMap(clients.forProject(project), ({ subscriptions }) =>
+								Stream.runForEach(
+									supervise(
+										Stream.suspend(() => {
+											handleInputDraftStarted(key);
+											return subscriptions.inputDraft({ key });
+										}),
+										() => undefined,
+									),
+									(envelope) =>
+										Effect.sync(() => {
+											if (viewed === selection || envelope._tag === "promoted")
+												applyInputDraft(envelope, key);
+										}),
+								),
 							),
-							(envelope) =>
-								Effect.sync(() => {
-									if (currentGeneration === generation)
-										applyInputDraft(envelope);
-								}),
 						),
 					),
-				),
-			);
-			if (currentGeneration === generation) fiber = next;
-			else runtime.runFork(Fiber.interrupt(next));
-		});
+				);
+			}),
+		);
+	});
 }

@@ -35,10 +35,15 @@ import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-se
 import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { makeContinuation } from "../../../src/lib/domain/relay/Services/continuation.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
-import { ProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
+	makeProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionTag,
+} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import { resolveOrphanedClaudePermissions } from "../../../src/lib/domain/relay/Services/resolve-orphaned-claude-permissions.js";
 import {
+	AgentLivenessTag,
 	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
@@ -211,7 +216,14 @@ async function fixture() {
 		Layer.effect(
 			PersistenceStore,
 			Effect.context<PersistenceStoreContext>(),
-		).pipe(Layer.provideMerge(makePersistenceEffectLayer(filename, A))),
+		).pipe(
+			Layer.provideMerge(
+				Layer.provideMerge(
+					makeProviderRuntimeIngestionLive(),
+					makePersistenceEffectLayer(filename, A),
+				),
+			),
+		),
 	);
 	await runtime.runPromise(
 		Effect.gen(function* () {
@@ -366,7 +378,7 @@ async function fixture() {
 				).entries()) {
 					const commandId = `${project}-${kind}-command`;
 					const sequence = (project === A ? 100 : 200) + index;
-					yield* repository.commit({
+					const committed = yield* repository.commit({
 						events: [],
 						readModelRows: [],
 						receipt: {
@@ -396,6 +408,7 @@ async function fixture() {
 							},
 						],
 					});
+					yield* runner.projectBatch(committed);
 					// Status transitions normally come from a live runner. No provider is
 					// launched in this fixture; these model its crash-time durable state.
 					if (kind !== "pending")
@@ -458,11 +471,14 @@ describe("shared-store relay project scope", () => {
 		const acted = await store.runtime.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				const options = {
+				const options: ConstructorParameters<
+					typeof ProviderSideEffectReactor
+				>[0] = {
+					write: (yield* makeCommitAndSignal).write,
 					sql,
 					projectId: A,
 					registry: new ProviderRegistry(),
-					ingestion: { ingest: () => Effect.succeed(0) },
+					ingestion: yield* ProviderRuntimeIngestionTag,
 					nowMs: () => NOW,
 				};
 				yield* new ProviderSideEffectReactor(options).drain();
@@ -619,7 +635,7 @@ describe("shared-store relay project scope", () => {
 		const rows = await store.runtime.runPromise(
 			readColdWorktreeCleanupCandidates(
 				{ slug: A, folders: [store.root] },
-				{ ...DEFAULT_WORKTREE_CLEANUP, whenMerged: true },
+				DEFAULT_WORKTREE_CLEANUP,
 				NOW,
 			),
 		);
@@ -682,7 +698,11 @@ describe("shared-store relay project scope", () => {
 		};
 		await store.runtime.runPromise(
 			cleanUpProjectWorktrees(
-				Effect.succeed({ ...DEFAULT_WORKTREE_CLEANUP, onSettle: "any" }),
+				Effect.succeed({
+					...DEFAULT_WORKTREE_CLEANUP,
+					onSettle: "keep",
+					settledAfterDays: 0,
+				}),
 				Effect.succeed([]),
 				NOW,
 			).pipe(
@@ -697,6 +717,7 @@ describe("shared-store relay project scope", () => {
 				),
 				Effect.provideService(WebSocketHandlerTag, makeMockWebSocketHandler()),
 				Effect.provideService(BackgroundLivenessTag, () => undefined),
+				Effect.provideService(AgentLivenessTag, () => Effect.succeed(false)),
 			),
 		);
 		record(
@@ -868,7 +889,9 @@ describe("shared-store relay project scope", () => {
 							Effect.sync(() => {
 								dispatched.push(input.sessionId);
 							}),
-						interruptTurn: () => Effect.void,
+						turnFences: () => ({ stopping: false, switching: false }),
+						fenceLifts: Effect.succeed(Stream.never),
+						beginStop: () => Effect.succeed(Effect.void),
 					}),
 					Effect.provideService(AccountDirectory, directory),
 					Effect.provideService(OpenCodeAPITag, makeMockOpenCodeAPI()),

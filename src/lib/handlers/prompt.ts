@@ -1,9 +1,15 @@
 import { Effect } from "effect";
+import {
+	AttachmentValidationError,
+	validateAttachmentDataUrls,
+} from "../attachment-data-url.js";
 import type { InputDelivery, SteerBlocker } from "../contracts/stored-event.js";
+import type { InputDraftKey } from "../contracts/ws-rpc.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
-import { publishInputDraft } from "../domain/relay/Services/input-drafts.js";
+import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
 import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
 import {
+	ConfigTag,
 	LoggerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
@@ -11,25 +17,10 @@ import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 
-// Stores the last draft per session so that a tab switching to it (e.g. on a
-// different device) reads the current draft in its ViewSession response.
-
-const sessionInputDrafts = new Map<string, string>();
-
 interface LegacyMessagePayload {
 	text: string;
 	images?: string[];
 	commandId?: string;
-}
-
-/** Get the stored input draft for a session (empty string if none). */
-export function getSessionInputDraft(sessionId: string): string {
-	return sessionInputDrafts.get(sessionId) ?? "";
-}
-
-/** Clear the stored input draft for a session (e.g. after sending a message). */
-export function clearSessionInputDraft(sessionId: string): void {
-	sessionInputDrafts.delete(sessionId);
 }
 
 export interface SendMessageToSessionInput {
@@ -52,6 +43,14 @@ export type SendMessageToSessionResult = {
 
 export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 	Effect.gen(function* () {
+		// Reject direct RPC payloads before preparing a session or writing its inbox.
+		yield* Effect.try({
+			try: () => validateAttachmentDataUrls(input.images),
+			catch: (cause) =>
+				new AttachmentValidationError(
+					cause instanceof Error ? cause.message : String(cause),
+				),
+		});
 		const log = yield* LoggerTag;
 		const sessionManagerService = yield* SessionManagerServiceTag;
 
@@ -59,7 +58,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		const imageList =
 			images && images.length > 0 ? Array.from(images) : undefined;
 		let activeId = input.sessionId;
-		if (!text)
+		if (!text && !imageList)
 			return {
 				sessionId: activeId,
 				handedOff: false,
@@ -140,8 +139,10 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 				sessionId: activeId,
 				refused: submitted.refused,
 			} satisfies SendMessageToSessionResult;
-		if (originalActiveId !== activeId) clearSessionInputDraft(originalActiveId);
-		clearSessionInputDraft(activeId);
+		const drafts = yield* InputDraftsTag;
+		if (originalActiveId !== activeId)
+			yield* drafts.clearSent(originalActiveId, text);
+		yield* drafts.clearSent(activeId, text);
 		return {
 			sessionId: activeId,
 			handedOff: submitted.handedOff,
@@ -155,7 +156,7 @@ export const handleMessage = (
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
 		const log = yield* LoggerTag;
-		if (!payload.text) return;
+		if (!payload.text && !payload.images?.length) return;
 		if (!payload.commandId) {
 			log.warn(`client=${clientId} send_turn dropped: missing commandId`);
 			return;
@@ -176,11 +177,13 @@ export const cancelSessionById = (
 ) =>
 	Effect.gen(function* () {
 		const providerTurnService = yield* ProviderTurnServiceTag;
-		yield* providerTurnService.interruptTurn({
-			clientId,
-			commandId,
+		const inbox = yield* SessionInboxTag;
+		// Fence under the inbox permit, so no handoff is mid-decision; wait outside it.
+		const stopped = yield* inbox.withSession(
 			sessionId,
-		});
+			providerTurnService.beginStop({ clientId, commandId, sessionId }),
+		);
+		yield* stopped;
 	});
 
 export {
@@ -190,22 +193,17 @@ export {
 	undoSessionRewind,
 } from "../domain/relay/Services/session-rewind.js";
 
-export const syncInputDraftForSession = ({
-	sessionId,
+export const syncInputDraft = ({
+	key,
 	text,
 	from,
 }: {
-	sessionId: string;
+	key: InputDraftKey;
 	text: string;
 	from?: string;
 }) =>
 	Effect.gen(function* () {
-		// Store the draft so a tab switching to the session reads it
-		if (text) {
-			sessionInputDrafts.set(sessionId, text);
-		} else {
-			sessionInputDrafts.delete(sessionId);
-		}
-
-		yield* publishInputDraft({ sessionId, text, ...(from ? { from } : {}) });
+		const drafts = yield* InputDraftsTag;
+		const projectId = "draft" in key ? (yield* ConfigTag).slug : undefined;
+		yield* drafts.write(key, text, from, projectId);
 	});

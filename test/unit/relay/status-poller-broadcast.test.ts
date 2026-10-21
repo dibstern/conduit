@@ -314,6 +314,40 @@ async function createTestHarness(): Promise<TestHarness> {
 	};
 }
 
+it("checks cache freshness on the poll cadence without rereading fresh git", async () => {
+	// Install virtual time before this harness starts its background poller.
+	vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+	const isStale = vi
+		.spyOn(daemonSessionGitCache, "isStale")
+		.mockReturnValue(false);
+	const refresh = vi.spyOn(daemonSessionGitCache, "refresh");
+	let harness: TestHarness | undefined;
+	try {
+		harness = await createTestHarness();
+		for (let tick = 0; tick < 2; tick++) {
+			const checked = new Promise<void>((resolve) => {
+				isStale.mockImplementation(() => {
+					resolve();
+					return false;
+				});
+			});
+			const previousCalls = isStale.mock.calls.length;
+			await vi.advanceTimersByTimeAsync(100);
+			await checked;
+			expect(isStale.mock.calls.length).toBeGreaterThan(previousCalls);
+			expect(refresh).not.toHaveBeenCalled();
+		}
+	} finally {
+		try {
+			await harness?.stop();
+		} finally {
+			isStale.mockRestore();
+			refresh.mockRestore();
+			vi.useRealTimers();
+		}
+	}
+});
+
 describe("Status poller → browser shell transitions", () => {
 	let harness: TestHarness;
 	const publishStatus = (sessionId: string, status: "busy" | "idle") => {
@@ -346,27 +380,6 @@ describe("Status poller → browser shell transitions", () => {
 	afterAll(async () => {
 		if (harness) await harness.stop();
 	}, 10_000);
-
-	it("checks cache freshness on the poll cadence without rereading fresh git", async () => {
-		const isStale = vi
-			.spyOn(daemonSessionGitCache, "isStale")
-			.mockReturnValue(false);
-		const refresh = vi.spyOn(daemonSessionGitCache, "refresh");
-		try {
-			await vi.waitFor(() => expect(isStale).toHaveBeenCalled(), {
-				timeout: 3000,
-			});
-			const previousCalls = isStale.mock.calls.length;
-			await vi.waitFor(
-				() => expect(isStale.mock.calls.length).toBeGreaterThan(previousCalls),
-				{ timeout: 3000 },
-			);
-			expect(refresh).not.toHaveBeenCalled();
-		} finally {
-			isStale.mockRestore();
-			refresh.mockRestore();
-		}
-	});
 
 	it("publishes an idle shell row when a viewed session becomes idle", async () => {
 		const client = await harness.connectClient();

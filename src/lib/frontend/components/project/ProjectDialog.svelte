@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Rpc } from "effect/rpc";
 	import { onMount, tick } from "svelte";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import type { SessionMode } from "../../../contracts/project-file.js";
 	import {
 		type FindFolders,
@@ -83,7 +84,7 @@
 	let lookupError = $state("");
 	let saveError = $state("");
 	let input = $state<HTMLInputElement>();
-	let isPhone = $state(false);
+	const isPhone = $derived(sessionViewState.compact);
 	let viewportHeight = $state(0);
 	let keyboardInset = $state(0);
 	let lookupVersion = 0;
@@ -114,20 +115,16 @@
 	);
 
 	onMount(() => {
-		const phone = window.matchMedia("(max-width: 767px)");
 		const viewport = window.visualViewport;
 		function measure(): void {
-			isPhone = phone.matches;
 			viewportHeight = Math.round(viewport?.height ?? window.innerHeight);
 			keyboardInset = Math.max(0, window.innerHeight - viewportHeight - (viewport?.offsetTop ?? 0));
 		}
 		measure();
-		phone.addEventListener("change", measure);
 		viewport?.addEventListener("resize", measure);
 		viewport?.addEventListener("scroll", measure);
 		window.addEventListener("resize", measure);
 		return () => {
-			phone.removeEventListener("change", measure);
 			viewport?.removeEventListener("resize", measure);
 			viewport?.removeEventListener("scroll", measure);
 			window.removeEventListener("resize", measure);
@@ -406,7 +403,7 @@
 					</section>
 				{/if}
 				<Field label="Default session mode" hint="Without a project override, conduit.json takes precedence over the global default.">
-					<Select bind:value={sessionMode} disabled={saving}>
+					<Select bind:value={sessionMode} disabled={saving} touchTarget>
 						<option value="">Use global default</option>
 						<option value="local">Local</option>
 						<option value="worktree">New worktree</option>

@@ -1,18 +1,9 @@
-// test/unit/persistence/projectors-effect/turn-projector.test.ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createAllEffectProjectors } from "../../../../src/lib/persistence/effect/projectors-effect.js";
 import {
-	createAllEffectProjectors,
-	type EffectProjector,
-} from "../../../../src/lib/persistence/effect/projectors-effect.js";
-import {
-	createEventId,
-	type MessageCreatedPayload,
-	type SessionStatusPayload,
+	canonicalEvent,
+	type LiveEventType,
 	type StoredEvent,
-	type TurnCompletedPayload,
-	type TurnErrorPayload,
-	type TurnInterruptedPayload,
-	type TurnModelResolvedPayload,
 } from "../../../../src/lib/persistence/events.js";
 import resumedTurnEvents from "../../../fixtures/claude-resumed-turn.json" with {
 	type: "json",
@@ -21,33 +12,13 @@ import {
 	type EffectProjectionHarness,
 	makeEffectProjectionHarness,
 } from "../../../helpers/effect-projection-harness.js";
-
-function makeStored<T extends StoredEvent["type"]>(
-	type: T,
-	sessionId: string,
-	data: Extract<StoredEvent, { type: T }>["data"],
-	sequence: number = 1,
-	createdAt: number = Date.now(),
-): StoredEvent {
-	return {
-		sequence,
-		projectId: "test-project",
-		streamVersion: sequence - 1,
-		eventId: createEventId(),
-		sessionId,
-		type,
-		data,
-		metadata: {},
-		provider: "opencode",
-		createdAt,
-	} as StoredEvent;
-}
+import { providerRuntimeEventFromCanonical } from "../../../helpers/provider-runtime-event.js";
 
 interface TurnRow {
 	id: string;
 	session_id: string;
 	state: string;
-	user_message_id: string | null;
+	run_id: string | null;
 	assistant_message_id: string | null;
 	cost: number | null;
 	tokens_in: number | null;
@@ -60,34 +31,24 @@ interface TurnRow {
 	actual_model: string | null;
 }
 
+// Failure cases: recency invents ownership, queued inputs join too soon,
+// foreign/duplicate terminals settle another run, late output reopens a run,
+// or run ownership drops accounting and model evidence.
 describe("TurnProjector", () => {
 	let harness: EffectProjectionHarness;
-	let projector: EffectProjector;
-	let replayNextProjection: boolean;
-	const now = Date.now();
+	let sequence: number;
+	const now = 1_000;
 
 	beforeEach(async () => {
-		replayNextProjection = false;
-		const effectProjector = createAllEffectProjectors().find(
+		sequence = 0;
+		const projector = createAllEffectProjectors().find(
 			(candidate) => candidate.name === "turn",
 		);
-		if (!effectProjector) throw new Error("Turn projector not found");
-		projector = {
-			...effectProjector,
-			project: (event, context) => {
-				const effectiveContext = replayNextProjection
-					? { ...context, replaying: true }
-					: context;
-				replayNextProjection = false;
-				return effectProjector.project(event, effectiveContext);
-			},
-		};
+		if (!projector) throw new Error("Turn projector not found");
 		harness = makeEffectProjectionHarness([projector]);
-
-		// Pre-insert a session so FK constraints don't block inserts
 		await harness.query(
-			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-			["s1", "opencode", "Test", "idle", now, now],
+			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES ('s1', 'claude', 'Test', 'idle', ?, ?)",
+			[now, now],
 		);
 	});
 
@@ -95,1174 +56,835 @@ describe("TurnProjector", () => {
 		await harness?.dispose();
 	});
 
-	async function project(event: StoredEvent, replaying = false): Promise<void> {
-		replayNextProjection = replaying;
-		await harness.reproject([event]);
+	function event<T extends LiveEventType>(
+		type: T,
+		data: Parameters<typeof canonicalEvent<T>>[2],
+		options: { runId?: string; provider?: string; sessionId?: string } = {},
+	): StoredEvent {
+		sequence += 1;
+		return {
+			...canonicalEvent(type, options.sessionId ?? "s1", data, {
+				provider: options.provider ?? "claude",
+				createdAt: now + sequence,
+				metadata: options.runId ? { runId: options.runId } : {},
+			}),
+			sequence,
+			streamVersion: sequence,
+			projectId: "test-project",
+		} as StoredEvent;
 	}
 
-	async function queryOne<T extends object>(
-		statement: string,
-		params: readonly (string | number | null)[] = [],
-	): Promise<T | undefined> {
-		return (await harness.query<T>(statement, params))[0];
+	async function project<T extends LiveEventType>(
+		type: T,
+		data: Parameters<typeof canonicalEvent<T>>[2],
+		options?: { runId?: string; provider?: string; sessionId?: string },
+	): Promise<StoredEvent> {
+		const stored = event(type, data, options);
+		await harness.reproject([stored]);
+		return stored;
 	}
 
-	// The persisted state after each recorded event, in fixture order. Only the
-	// turn's own results finish it; anything that follows puts it back to work.
-	const EXPECTED_STATE = [
-		"pending", // 1. the user prompt opens the turn
-		"running", // 2. the session goes busy
-		"running", // 3. the first assistant message
-		"completed", // 4. a result arrives, but Claude is not done
-		"completed", // 5. idle
-		"running", // 6. busy again, 68ms later
-		"running", // 7. a second assistant message, same turn
-		"running", // 8. thinking
-		"running", // 9. a tool starts
-		"running", // 10. the tool finishes
-		"completed", // 11. the second execution reports its own result
-		"running", // 12. a third assistant message, 15 minutes later
-		"running", // 13. still working 45 minutes after the first "completion"
-	];
+	async function input(inputId: string, runId?: string): Promise<void> {
+		await project(
+			"message.created",
+			{
+				messageId: inputId,
+				role: "user",
+				sessionId: "s1",
+			},
+			runId ? { runId } : {},
+		);
+	}
 
-	it("agrees with the Effect turn projector on the production resumed-turn timeline", async () => {
+	async function reserve(runId: string, inputId: string): Promise<void> {
+		await project("run.requested", { runId, inputId }, { runId });
+	}
+
+	async function accept(
+		inputId: string,
+		runId: string,
+		requestedRunId = runId,
+	): Promise<void> {
+		await project("run.started", { inputId, requestedRunId }, { runId });
+	}
+
+	async function turn(inputId: string): Promise<TurnRow | undefined> {
+		return (
+			await harness.query<TurnRow>("SELECT * FROM turns WHERE id = ?", [
+				inputId,
+			])
+		)[0];
+	}
+
+	it("keeps historical unowned resumed output unplaced", async () => {
 		const sessionId = "ses_c2d8cd521bc14f9f8f7700096bbf1d23";
 		await harness.query(
-			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-			[sessionId, "claude", "Resumed turn", "idle", now, now],
+			"INSERT INTO sessions (id, provider, created_at, updated_at) VALUES (?, 'claude', ?, ?)",
+			[sessionId, now, now],
 		);
-		expect(resumedTurnEvents).toHaveLength(EXPECTED_STATE.length);
 		for (const [index, recorded] of resumedTurnEvents.entries()) {
-			// The export omits envelope fields unrelated to the regression.
-			const event = {
-				...recorded,
-				eventId: `recorded-${recorded.sequence}`,
-				sessionId,
-				projectId: "test-project",
-				streamVersion: index,
-				metadata: {},
-			} as StoredEvent;
-			await project(event);
-			const turns = await harness.query<TurnRow>("SELECT * FROM turns");
-			// No user message follows, so all thirteen events are one turn.
-			expect(turns).toHaveLength(1);
-			expect(turns[0], `after event ${index + 1}`).toMatchObject({
-				id: "52feab57-ed40-4885-b23b-71dcd78209a8",
-				state: EXPECTED_STATE[index],
+			await harness.reproject([
+				{
+					...recorded,
+					eventId: `recorded-${recorded.sequence}`,
+					sessionId,
+					projectId: "test-project",
+					streamVersion: index,
+					metadata: {},
+				} as StoredEvent,
+			]);
+			expect(await turn("52feab57-ed40-4885-b23b-71dcd78209a8")).toMatchObject({
+				state: "pending",
+				run_id: null,
+				assistant_message_id: null,
+				started_at: null,
+				completed_at: null,
+				cost: null,
 			});
-			if (EXPECTED_STATE[index] === "running") {
-				// Reopening has to clear the finish too, or every reader that
-				// asks "when did this end" still sees a finished turn.
-				expect(turns[0], `after event ${index + 1}`).toMatchObject({
-					completed_at: null,
-				});
-			}
-			if (event.type === "turn.completed") {
-				expect(turns[0]).toMatchObject({
-					assistant_message_id: event.data.messageId,
-					completed_at: event.createdAt,
-					// Cost is cumulative for the whole SDK session, so the latest
-					// wins; tokens are per-execution, so the second result adds.
-					cost: event.data.cost,
-					tokens_in: index === 3 ? 2 : 4,
-					tokens_out: index === 3 ? 2 : 3,
-				});
-			}
 		}
 	});
 
-	it("has the correct name and handles list", async () => {
-		expect(projector.name).toBe("turn");
-		expect(projector.handles).toEqual([
+	// An unaccepted steer has no foreground children; its failure cannot idle
+	// another run's Task subtree, while that subtree's own failure still must.
+	it.each([
+		"turn.error",
+		"turn.interrupted",
+	] as const)("keeps active subagents busy when an unrelated pending reservation receives %s", async (terminal) => {
+		await harness.dispose();
+		harness = makeEffectProjectionHarness();
+		for (const sessionId of ["s1", "child", "grandchild", "background"]) {
+			await project(
+				"session.created",
+				{ sessionId, title: sessionId, provider: "claude" },
+				{ sessionId },
+			);
+			if (sessionId !== "s1")
+				await project(
+					"session.status",
+					{ sessionId, status: "busy" },
+					{ sessionId },
+				);
+		}
+		await reserve("active", "u1");
+		await input("u1", "active");
+		await accept("u1", "active");
+		await project(
 			"message.created",
-			"message.snapshot",
-			"tool.started",
-			"session.status",
-			"turn.completed",
-			"turn.error",
-			"turn.interrupted",
-			"turn.model_resolved",
+			{ messageId: "a1", role: "assistant", sessionId: "s1", parentID: "u1" },
+			{ runId: "active" },
+		);
+		await project(
+			"message.created",
+			{ messageId: "child-answer", role: "assistant", sessionId: "child" },
+			{ sessionId: "child" },
+		);
+		for (const [sessionId, messageId, partId, childSessionId, backgrounded] of [
+			["s1", "a1", "task", "child", false],
+			["s1", "a1", "background-task", "background", true],
+			["child", "child-answer", "nested-task", "grandchild", false],
+		] as const) {
+			await project(
+				"tool.started",
+				{
+					messageId,
+					partId,
+					callId: partId,
+					toolName: "Task",
+					input: { tool: "Task", description: "Child task", prompt: "Work" },
+				},
+				{ sessionId },
+			);
+			await project(
+				"tool.running",
+				{ messageId, partId, metadata: { childSessionId, backgrounded } },
+				{ sessionId },
+			);
+		}
+		await reserve("pending", "u2");
+		if (terminal === "turn.error") await input("u2", "pending");
+		await project(
+			terminal,
+			terminal === "turn.error"
+				? { messageId: "", error: "before intake" }
+				: { messageId: "" },
+			{ runId: "pending" },
+		);
+		expect(
+			await harness.query(
+				"SELECT id, status FROM sessions WHERE id <> 's1' ORDER BY id",
+			),
+		).toEqual([
+			{ id: "background", status: "busy" },
+			{ id: "child", status: "busy" },
+			{ id: "grandchild", status: "busy" },
+		]);
+		await project(
+			terminal,
+			terminal === "turn.error"
+				? { messageId: "a1", error: "active failed" }
+				: { messageId: "a1" },
+			{ runId: "active" },
+		);
+		expect(
+			await harness.query(
+				"SELECT id, status FROM sessions WHERE id <> 's1' ORDER BY id",
+			),
+		).toEqual([
+			{ id: "background", status: "busy" },
+			{ id: "child", status: "idle" },
+			{ id: "grandchild", status: "idle" },
 		]);
 	});
 
-	describe("user message.created", () => {
-		it("inserts a new turn with state=pending and user_message_id", async () => {
-			const event = makeStored(
-				"message.created",
-				"s1",
-				{
-					messageId: "user_m1",
-					role: "user",
-					sessionId: "s1",
-				} satisfies MessageCreatedPayload,
-				1,
-				now,
-			);
-
-			await project(event);
-
-			const row = await queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
-				"user_m1",
-			]);
-			expect(row).toBeDefined();
-			expect(row?.id).toBe("user_m1");
-			expect(row?.session_id).toBe("s1");
-			expect(row?.state).toBe("pending");
-			expect(row?.user_message_id).toBe("user_m1");
-			expect(row?.assistant_message_id).toBeNull();
-			expect(row?.requested_at).toBe(now);
-			expect(row?.started_at).toBeNull();
-			expect(row?.completed_at).toBeNull();
+	it("leaves placed input pending until its provider accepts it", async () => {
+		await input("u1", "r1");
+		await reserve("r1", "u1");
+		await project(
+			"session.status",
+			{ sessionId: "s1", status: "busy" },
+			{ runId: "r1" },
+		);
+		await project(
+			"message.created",
+			{ messageId: "a1", role: "assistant", sessionId: "s1" },
+			{ runId: "r1" },
+		);
+		expect(await turn("u1")).toMatchObject({
+			state: "pending",
+			run_id: "r1",
+			started_at: null,
+		});
+		const accepted = await project(
+			"run.started",
+			{ inputId: "u1", requestedRunId: "r1" },
+			{ runId: "r1" },
+		);
+		expect(await turn("u1")).toMatchObject({
+			state: "running",
+			run_id: "r1",
+			started_at: accepted.createdAt,
 		});
 	});
 
-	describe("assistant message.created", () => {
-		it("starts the most recent turn and attaches its assistant_message_id", async () => {
-			// User message creates the turn
-			await project(
-				makeStored(
-					"message.created",
-					"s1",
-					{
-						messageId: "user_m1",
-						role: "user",
-						sessionId: "s1",
-					} satisfies MessageCreatedPayload,
-					1,
-					now,
-				),
+	it.each([
+		"turn.completed",
+		"turn.error",
+		"turn.interrupted",
+	] as const)("%s closes streaming member messages without an adapter message identity", async (type) => {
+		for (const [runId, userId, messageId] of [
+			["r1", "u1", "a1"],
+			["r2", "u2", "a2"],
+		] as const) {
+			await reserve(runId, userId);
+			await input(userId, runId);
+			await accept(userId, runId);
+			await harness.query(
+				"INSERT INTO messages (id, session_id, role, turn_id, is_streaming, created_at, updated_at) VALUES (?, 's1', 'assistant', ?, 1, 1, 1)",
+				[messageId, userId],
 			);
-
-			// Assistant message arrives
-			await project(
-				makeStored(
-					"message.created",
-					"s1",
-					{
-						messageId: "asst_m1",
-						role: "assistant",
-						sessionId: "s1",
-					} satisfies MessageCreatedPayload,
-					2,
-					now + 100,
-				),
+			await harness.query(
+				"INSERT INTO message_parts (id, message_id, type, status, sort_order, created_at, updated_at) VALUES (?, ?, 'thinking', 'running', 0, 1, 1)",
+				[`thinking-${messageId}`, messageId],
 			);
-
-			const row = await queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
-				"user_m1",
-			]);
-			expect(row?.assistant_message_id).toBe("asst_m1");
-			expect(row?.state).toBe("running");
-			expect(row?.started_at).toBe(now + 100);
-		});
-
-		it("does not create a new turn for assistant messages", async () => {
-			await project(
-				makeStored(
-					"message.created",
-					"s1",
-					{
-						messageId: "user_m1",
-						role: "user",
-						sessionId: "s1",
-					} satisfies MessageCreatedPayload,
-					1,
-					now,
-				),
-			);
-
-			await project(
-				makeStored(
-					"message.created",
-					"s1",
-					{
-						messageId: "asst_m1",
-						role: "assistant",
-						sessionId: "s1",
-					} satisfies MessageCreatedPayload,
-					2,
-					now + 100,
-				),
-			);
-
-			const rows = await harness.query<TurnRow>(
-				"SELECT * FROM turns WHERE session_id = ?",
-				["s1"],
-			);
-			expect(rows).toHaveLength(1);
-		});
+		}
+		await project(type, { messageId: "", error: "Ended" }, { runId: "r1" });
+		expect(
+			await harness.query("SELECT id, is_streaming FROM messages ORDER BY id"),
+		).toEqual([
+			{ id: "a1", is_streaming: 0 },
+			{ id: "a2", is_streaming: 1 },
+		]);
+		expect(
+			await harness.query(
+				"SELECT message_id, status FROM message_parts ORDER BY message_id",
+			),
+		).toEqual([
+			{ message_id: "a1", status: "completed" },
+			{ message_id: "a2", status: "running" },
+		]);
 	});
 
-	describe("session.status (busy)", () => {
-		it("transitions the most recent pending turn to running with started_at", async () => {
-			await project(
-				makeStored(
-					"message.created",
-					"s1",
-					{
-						messageId: "user_m1",
-						role: "user",
-						sessionId: "s1",
-					} satisfies MessageCreatedPayload,
-					1,
-					now,
-				),
-			);
-
-			await project(
-				makeStored(
-					"session.status",
-					"s1",
-					{
-						sessionId: "s1",
-						status: "busy",
-					} satisfies SessionStatusPayload,
-					2,
-					now + 200,
-				),
-			);
-
-			const row = await queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
-				"user_m1",
-			]);
-			expect(row?.state).toBe("running");
-			expect(row?.started_at).toBe(now + 200);
-		});
-
-		it("settles a prompt still waiting for its reply on idle", async () => {
-			await project(
-				makeStored(
-					"message.created",
-					"s1",
-					{
-						messageId: "user_m1",
-						role: "user",
-						sessionId: "s1",
-					} satisfies MessageCreatedPayload,
-					1,
-					now,
-				),
-			);
-
-			await project(
-				makeStored(
-					"session.status",
-					"s1",
-					{
-						sessionId: "s1",
-						status: "idle",
-					} satisfies SessionStatusPayload,
-					2,
-					now + 200,
-				),
-			);
-
-			const row = await queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
-				"user_m1",
-			]);
-			expect(row?.state).toBe("completed");
-			expect(row?.started_at).toBeNull();
-			expect(row?.completed_at).toBe(now + 200);
-		});
-
-		// A result naming no reply this turn owns leaves only idle to close it;
-		// left open, the inbox reads the session as busy and queues every send.
-		it("settles a replied turn its result never named on idle, and a later reply reopens it", async () => {
-			const timeline: StoredEvent[] = [
-				makeStored("message.created", "s1", {
-					messageId: "u1",
-					role: "user",
-					sessionId: "s1",
-				} satisfies MessageCreatedPayload),
-				makeStored("message.created", "s1", {
-					messageId: "a1",
-					role: "assistant",
-					sessionId: "s1",
-				} satisfies MessageCreatedPayload),
-				makeStored("turn.completed", "s1", {
-					messageId: "unowned",
-				} satisfies TurnCompletedPayload),
-				makeStored("session.status", "s1", {
-					sessionId: "s1",
-					status: "idle",
-				} satisfies SessionStatusPayload),
-				makeStored("message.created", "s1", {
-					messageId: "a2",
-					role: "assistant",
-					sessionId: "s1",
-				} satisfies MessageCreatedPayload),
-			].map((event, index) => ({
-				...event,
-				sequence: index + 1,
-				streamVersion: index,
-				createdAt: now + index * 100,
-			}));
-			const states: string[] = [];
-			for (const event of timeline) {
-				await project(event);
-				states.push((await turnStates())["u1"] ?? "");
-			}
-
-			expect(states).toEqual([
-				"pending",
-				"running",
-				"running",
-				"completed",
-				"running",
-			]);
-		});
-	});
-
-	describe("turn.completed", () => {
-		it.each([
-			false,
-			true,
-		])("does not count a late completion for a backfilled assistant again (replay=%s)", async (replaying) => {
-			await harness.query(
-				"INSERT INTO messages (id, session_id, role, is_streaming, rest_digest, created_at, updated_at) VALUES ('a1', 's1', 'assistant', 0, 'digest', ?, ?)",
-				[now, now],
-			);
-			await harness.query(
-				"INSERT INTO turns (id, session_id, state, user_message_id, assistant_message_id, requested_at, tokens_in, tokens_out) VALUES ('u1', 's1', 'completed', 'u1', 'a1', ?, 10, 5)",
-				[now],
-			);
-			await project(
-				makeStored("turn.completed", "s1", {
-					messageId: "a1",
-					tokens: { input: 10, output: 5 },
-				}),
-				replaying,
-			);
-			expect(
-				await queryOne<TurnRow>("SELECT * FROM turns WHERE id = 'u1'"),
-			).toMatchObject({
-				tokens_in: 10,
-				tokens_out: 5,
-			});
-		});
-
-		// Claude starts a new assistant message when the SDK folds an input (a
-		// background task's notification) into the running turn, and its result
-		// names that newest reply. Left open, the turn reads as busy, so the inbox
-		// queues the next idle send instead of handing it off.
-		it("settles a turn whose result names its second assistant reply", async () => {
-			// The message projector runs first and writes these rows in production.
-			await harness.query(
-				"INSERT INTO messages (id, session_id, role, is_streaming, created_at, updated_at) VALUES ('a1', 's1', 'assistant', 0, ?, ?), ('a2', 's1', 'assistant', 0, ?, ?)",
-				[now, now, now, now],
-			);
-			const events = [
-				makeStored("message.created", "s1", {
-					messageId: "u1",
-					role: "user",
-					sessionId: "s1",
-				} satisfies MessageCreatedPayload),
-				makeStored("session.status", "s1", {
-					sessionId: "s1",
-					status: "busy",
-				} satisfies SessionStatusPayload),
-				makeStored("message.created", "s1", {
-					messageId: "a1",
-					role: "assistant",
-					sessionId: "s1",
-				} satisfies MessageCreatedPayload),
-				makeStored("message.created", "s1", {
-					messageId: "a2",
-					role: "assistant",
-					sessionId: "s1",
-				} satisfies MessageCreatedPayload),
-				makeStored("turn.completed", "s1", {
-					messageId: "a2",
-				} satisfies TurnCompletedPayload),
-			];
-			for (const [index, event] of events.entries())
-				await project({
-					...event,
-					sequence: index + 1,
-					streamVersion: index,
-					createdAt: now + index * 100,
-				});
-
-			expect(await turnStates()).toEqual({ u1: "completed" });
-		});
-
-		it("settles the turn with the latest cost, summed tokens, and completed_at", async () => {
-			// Full lifecycle
-			await project(
-				makeStored(
-					"message.created",
-					"s1",
-					{
-						messageId: "user_m1",
-						role: "user",
-						sessionId: "s1",
-					} satisfies MessageCreatedPayload,
-					1,
-					now,
-				),
-			);
-
-			await project(
-				makeStored(
-					"message.created",
-					"s1",
-					{
-						messageId: "asst_m1",
-						role: "assistant",
-						sessionId: "s1",
-					} satisfies MessageCreatedPayload,
-					2,
-					now + 100,
-				),
-			);
-
-			await project(
-				makeStored(
-					"turn.completed",
-					"s1",
-					{
-						messageId: "asst_m1",
-						cost: 0.042,
-						tokens: { input: 3000, output: 800 },
-					} satisfies TurnCompletedPayload,
-					3,
-					now + 5000,
-				),
-			);
-
-			const row = await queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
-				"user_m1",
-			]);
-			expect(row?.state).toBe("completed");
-			expect(row?.cost).toBeCloseTo(0.042);
-			expect(row?.tokens_in).toBe(3000);
-			expect(row?.tokens_out).toBe(800);
-			expect(row?.completed_at).toBe(now + 5000);
-
-			await project(
-				makeStored("message.created", "s1", {
-					messageId: "asst_m2",
-					role: "assistant",
-					sessionId: "s1",
-				}),
-			);
-			await project(
-				makeStored(
-					"turn.completed",
-					"s1",
-					{
-						messageId: "asst_m2",
-						cost: 0.05,
-						tokens: { input: 100, output: 20 },
-					},
-					5,
-					now + 6000,
-				),
-			);
-			expect(await queryOne<TurnRow>("SELECT * FROM turns")).toMatchObject({
+	it("joins a placed steer on acceptance and closes both member inputs together", async () => {
+		await input("u1", "r1");
+		await reserve("r1", "u1");
+		await accept("u1", "r1");
+		await input("u2", "r2");
+		await reserve("r2", "u2");
+		expect(await turn("u2")).toMatchObject({ state: "pending", run_id: "r2" });
+		await accept("u2", "r1", "r2");
+		expect(
+			await harness.query("SELECT id, status FROM provider_runs ORDER BY id"),
+		).toEqual([
+			{ id: "r1", status: "running" },
+			{ id: "r2", status: "joined" },
+		]);
+		const terminal = await project(
+			"turn.completed",
+			{ messageId: "a1" },
+			{ runId: "r1" },
+		);
+		for (const id of ["u1", "u2"])
+			expect(await turn(id)).toMatchObject({
 				state: "completed",
-				assistant_message_id: "asst_m2",
-				cost: 0.05,
-				tokens_in: 3100,
-				tokens_out: 820,
-				started_at: now + 100,
-				completed_at: now + 6000,
+				run_id: "r1",
+				completed_at: terminal.createdAt,
 			});
-		});
+	});
 
-		it("preserves known accounting when usage is omitted and accepts zero values", async () => {
-			await project(
-				makeStored("message.created", "s1", {
-					messageId: "u1",
-					role: "user",
-					sessionId: "s1",
-				}),
-			);
-			for (const [index, usage] of [
-				{},
-				{ cost: 0.5, tokens: { input: 100, output: 20 } },
-				{ tokens: { output: 0 } },
-				{ cost: 0, tokens: { input: 0 } },
-			].entries()) {
-				const messageId = `a${index}`;
-				await project(
-					makeStored("message.created", "s1", {
-						messageId,
-						role: "assistant",
-						sessionId: "s1",
-					}),
-				);
-				await project(
-					makeStored("turn.completed", "s1", { messageId, ...usage }),
-				);
-				expect(await queryOne<TurnRow>("SELECT * FROM turns")).toMatchObject({
-					state: "completed",
-					assistant_message_id: messageId,
-					cost: index === 0 ? null : index === 3 ? 0 : 0.5,
-					tokens_in: index === 0 ? null : 100,
-					tokens_out: index === 0 ? null : 20,
-				});
-			}
+	it.each([
+		"turn.error",
+		"turn.interrupted",
+	] as const)("%s closes its exact member input without inventing acceptance", async (type) => {
+		await input("u1", "r1");
+		await reserve("r1", "u1");
+		await input("u2", "r2");
+		await reserve("r2", "u2");
+		const terminal = await project(
+			type,
+			{ messageId: "", error: "Stopped before intake" },
+			{ runId: "r1" },
+		);
+		expect(await turn("u1")).toMatchObject({
+			state: type === "turn.error" ? "error" : "interrupted",
+			run_id: "r1",
+			started_at: null,
+			completed_at: terminal.createdAt,
+		});
+		expect(await turn("u2")).toMatchObject({
+			state: "pending",
+			run_id: "r2",
+			completed_at: null,
 		});
 	});
 
-	describe.each([
-		"completed",
-		"error",
-		"interrupted",
-	])("reopening a %s turn", (state) => {
-		it.each([
-			"busy",
-			"assistant",
-			"tool",
-		])("reopens on %s and preserves the original start and new attachment", async (resume) => {
-			await harness.query(
-				`INSERT INTO turns (id, session_id, state, requested_at, started_at, completed_at, assistant_message_id)
-				 VALUES ('older', 's1', 'pending', ?, NULL, NULL, NULL),
-				        ('latest', 's1', ?, ?, ?, ?, 'a1')`,
-				[now, state, now, now + 1, now + 2],
+	it("keeps back-to-back runs independent and ignores late duplicate completion", async () => {
+		await input("u1", "r1");
+		await reserve("r1", "u1");
+		await accept("u1", "r1");
+		const terminal = await project(
+			"turn.completed",
+			{ messageId: "a1" },
+			{ runId: "r1" },
+		);
+		await input("u2", "r2");
+		await reserve("r2", "u2");
+		await accept("u2", "r2");
+		await harness.reproject([terminal]);
+		await project(
+			"message.created",
+			{ messageId: "late", role: "assistant", sessionId: "s1" },
+			{ runId: "r1" },
+		);
+		expect(await turn("u1")).toMatchObject({
+			state: "completed",
+			completed_at: terminal.createdAt,
+		});
+		expect(await turn("u2")).toMatchObject({
+			state: "running",
+			run_id: "r2",
+			completed_at: null,
+		});
+		await project("turn.completed", { messageId: "a2" }, { runId: "r2" });
+		expect(await turn("u2")).toMatchObject({ state: "completed" });
+	});
+
+	it.each([
+		"turn.completed",
+		"turn.error",
+		"turn.interrupted",
+	] as const)("requires ownership for %s even with a matching message id", async (type) => {
+		await input("u1", "r1");
+		await reserve("r1", "u1");
+		await accept("u1", "r1");
+		for (const runId of [undefined, "unknown"]) {
+			await project(
+				type,
+				{ messageId: "u1", error: "failed" },
+				runId ? { runId } : {},
 			);
-			// The tool belongs to the turn's reply; one no turn owns cannot reopen it.
-			await harness.query(
-				"INSERT INTO messages (id, session_id, role, turn_id, created_at, updated_at) VALUES ('a1', 's1', 'assistant', 'latest', ?, ?)",
-				[now + 1, now + 1],
-			);
-			const activity =
-				resume === "busy"
-					? makeStored("session.status", "s1", {
-							sessionId: "s1",
-							status: "busy",
-						})
-					: resume === "assistant"
-						? makeStored("message.created", "s1", {
-								sessionId: "s1",
-								messageId: "a2",
-								role: "assistant",
-							})
-						: makeStored("tool.started", "s1", {
-								messageId: "a1",
-								partId: "p1",
-								toolName: "bash",
-								callId: "c1",
-								input: { tool: "Bash", command: "true" },
-							});
-			await project(activity);
-			expect(
-				await queryOne<TurnRow>("SELECT * FROM turns WHERE id = 'latest'"),
-			).toMatchObject({
+			expect(await turn("u1")).toMatchObject({
 				state: "running",
-				started_at: now + 1,
 				completed_at: null,
-				assistant_message_id: resume === "assistant" ? "a2" : null,
 			});
-			await project(
-				makeStored("message.created", "s1", {
-					sessionId: "s1",
-					messageId: "a2",
-					role: "assistant",
-				}),
-			);
-			await project(
-				makeStored("session.status", "s1", { sessionId: "s1", status: "busy" }),
-			);
-			expect(
-				await harness.query<TurnRow>(
-					"SELECT id, state, assistant_message_id, started_at, completed_at FROM turns ORDER BY rowid",
-				),
-			).toEqual([
-				{
-					id: "older",
-					state: "pending",
-					assistant_message_id: null,
-					started_at: null,
-					completed_at: null,
-				},
-				{
-					id: "latest",
-					state: "running",
-					assistant_message_id: "a2",
-					started_at: now + 1,
-					completed_at: null,
-				},
-			]);
-		});
-	});
-
-	describe("turn.error", () => {
-		it("marks the turn as errored", async () => {
-			await project(
-				makeStored(
-					"message.created",
-					"s1",
-					{
-						messageId: "user_m1",
-						role: "user",
-						sessionId: "s1",
-					} satisfies MessageCreatedPayload,
-					1,
-					now,
-				),
-			);
-
-			await project(
-				makeStored(
-					"message.created",
-					"s1",
-					{
-						messageId: "asst_m1",
-						role: "assistant",
-						sessionId: "s1",
-					} satisfies MessageCreatedPayload,
-					2,
-					now + 100,
-				),
-			);
-
-			await project(
-				makeStored(
-					"turn.error",
-					"s1",
-					{
-						messageId: "asst_m1",
-						error: "rate_limit_exceeded",
-						code: "429",
-					} satisfies TurnErrorPayload,
-					3,
-					now + 3000,
-				),
-			);
-
-			const row = await queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
-				"user_m1",
-			]);
-			expect(row?.state).toBe("error");
-			expect(row?.completed_at).toBe(now + 3000);
-		});
-
-		it("ends the running turn when messageId matches nothing, leaving settled turns alone", async () => {
-			await projectSteered();
-			await project(
-				makeStored(
-					"session.status",
-					"s1",
-					{ sessionId: "s1", status: "busy" } satisfies SessionStatusPayload,
-					4,
-					now + 150,
-				),
-			);
-			await project(
-				makeStored(
-					"turn.error",
-					"s1",
-					{ messageId: "", error: "boom" } satisfies TurnErrorPayload,
-					5,
-					now + 3000,
-				),
-			);
-
-			expect(await turnStates()).toEqual({
-				user_m1: "completed",
-				user_m2: "error",
-			});
-		});
-	});
-
-	/** user_m1 running, then user_m2 steered in: its message closes user_m1. */
-	const projectSteered = async () => {
+		}
 		await project(
-			makeStored(
-				"message.created",
-				"s1",
-				{
-					messageId: "user_m1",
-					role: "user",
-					sessionId: "s1",
-				} satisfies MessageCreatedPayload,
-				1,
-				now,
-			),
+			type,
+			{ messageId: "unmatched", error: "failed" },
+			{ runId: "r1" },
+		);
+		expect(await turn("u1")).toMatchObject({
+			state:
+				type === "turn.completed"
+					? "completed"
+					: type === "turn.error"
+						? "error"
+						: "interrupted",
+		});
+	});
+
+	it("does not settle a foreign session through a known run id", async () => {
+		await input("u1", "r1");
+		await reserve("r1", "u1");
+		await accept("u1", "r1");
+		await harness.query(
+			"INSERT INTO sessions (id, provider, created_at, updated_at) VALUES ('s2', 'claude', ?, ?)",
+			[now, now],
 		);
 		await project(
-			makeStored(
-				"session.status",
-				"s1",
-				{ sessionId: "s1", status: "busy" } satisfies SessionStatusPayload,
-				2,
-				now + 50,
-			),
+			"turn.error",
+			{ messageId: "u1", error: "wrong session" },
+			{ runId: "r1", sessionId: "s2" },
+		);
+		expect(await turn("u1")).toMatchObject({
+			state: "running",
+			completed_at: null,
+		});
+	});
+
+	it("retains OpenCode message parents without using them to settle a run", async () => {
+		await input("u1", "r1");
+		await reserve("r1", "u1");
+		await accept("u1", "r1");
+		await project(
+			"message.created",
+			{ messageId: "a1", role: "assistant", sessionId: "s1", parentID: "u1" },
+			{ runId: "r1", provider: "opencode" },
+		);
+		expect(await turn("u1")).toMatchObject({
+			assistant_message_id: "a1",
+			state: "running",
+		});
+		await project(
+			"turn.completed",
+			{
+				messageId: "a1",
+				userMessageId: "u1",
+				cost: 0.042,
+				tokens: { input: 3000, output: 800 },
+			},
+			{ runId: "r1", provider: "opencode" },
 		);
 		await project(
-			makeStored(
-				"message.created",
-				"s1",
-				{
-					messageId: "user_m2",
-					role: "user",
-					sessionId: "s1",
-				} satisfies MessageCreatedPayload,
-				3,
-				now + 100,
-			),
+			"turn.completed",
+			{
+				messageId: "a2",
+				userMessageId: "u1",
+				cost: 0.05,
+				tokens: { input: 100, output: 20 },
+			},
+			{ runId: "r1", provider: "opencode" },
 		);
-	};
-
-	const turnStates = async () =>
-		Object.fromEntries(
-			(
-				await harness.query<{ id: string; state: string }>(
-					"SELECT id, state FROM turns ORDER BY id",
-				)
-			).map((row) => [row.id, row.state]),
+		expect(await turn("u1")).toMatchObject({
+			state: "running",
+			cost: 0.05,
+			tokens_in: 3100,
+			tokens_out: 820,
+			completed_at: null,
+		});
+		const terminal = await project(
+			"session.status",
+			{ sessionId: "s1", status: "idle" },
+			{ runId: "r1", provider: "opencode" },
 		);
-
-	describe("turn.interrupted", () => {
-		it("marks the turn as interrupted", async () => {
-			await project(
-				makeStored(
-					"message.created",
-					"s1",
-					{
-						messageId: "user_m1",
-						role: "user",
-						sessionId: "s1",
-					} satisfies MessageCreatedPayload,
-					1,
-					now,
-				),
-			);
-
-			await project(
-				makeStored(
-					"message.created",
-					"s1",
-					{
-						messageId: "asst_m1",
-						role: "assistant",
-						sessionId: "s1",
-					} satisfies MessageCreatedPayload,
-					2,
-					now + 100,
-				),
-			);
-
-			await project(
-				makeStored(
-					"turn.interrupted",
-					"s1",
-					{
-						messageId: "asst_m1",
-					} satisfies TurnInterruptedPayload,
-					3,
-					now + 2000,
-				),
-			);
-
-			const row = await queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
-				"user_m1",
-			]);
-			expect(row?.state).toBe("interrupted");
-			expect(row?.completed_at).toBe(now + 2000);
+		expect(await turn("u1")).toMatchObject({
+			state: "completed",
+			completed_at: terminal.createdAt,
 		});
+	});
 
-		it("falls back to the session's open turn when messageId matches nothing", async () => {
+	it("preserves known accounting when usage is omitted and accepts zero values", async () => {
+		await input("u1", "r1");
+		await reserve("r1", "u1");
+		await accept("u1", "r1");
+		for (const [index, usage] of [
+			{},
+			{ cost: 0.5, tokens: { input: 100, output: 20 } },
+			{ tokens: { output: 0 } },
+			{ cost: 0, tokens: { input: 0 } },
+		].entries()) {
 			await project(
-				makeStored(
-					"message.created",
-					"s1",
-					{
-						messageId: "user_m1",
-						role: "user",
-						sessionId: "s1",
-					} satisfies MessageCreatedPayload,
-					1,
-					now,
-				),
+				"turn.completed",
+				{ messageId: `a${index}`, userMessageId: "u1", ...usage },
+				{ runId: "r1", provider: "opencode" },
 			);
-			// Turn transitions to running, but the interrupt arrives before the
-			// assistant message id is known (e.g. permission rejected mid-turn),
-			// so the messageId matches no assistant_message_id.
-			await project(
-				makeStored(
-					"session.status",
-					"s1",
-					{ sessionId: "s1", status: "busy" } satisfies SessionStatusPayload,
-					2,
-					now + 50,
-				),
-			);
-
-			await project(
-				makeStored(
-					"turn.interrupted",
-					"s1",
-					{
-						messageId: "unknown-uuid",
-					} satisfies TurnInterruptedPayload,
-					3,
-					now + 2000,
-				),
-			);
-
-			const row = await queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
-				"user_m1",
-			]);
-			expect(row?.state).toBe("interrupted");
-			expect(row?.completed_at).toBe(now + 2000);
-		});
-
-		it("fallback leaves other sessions' open turns untouched", async () => {
-			await harness.query(
-				"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-				["s2", "opencode", "Other", "idle", now, now],
-			);
-			await project(
-				makeStored(
-					"message.created",
-					"s2",
-					{
-						messageId: "user_s2",
-						role: "user",
-						sessionId: "s2",
-					} satisfies MessageCreatedPayload,
-					1,
-					now,
-				),
-			);
-
-			await project(
-				makeStored(
-					"turn.interrupted",
-					"s1",
-					{
-						messageId: "unknown-uuid",
-					} satisfies TurnInterruptedPayload,
-					2,
-					now + 2000,
-				),
-			);
-
-			const row = await queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
-				"user_s2",
-			]);
-			expect(row?.state).toBe("pending");
-		});
-
-		it("stops the open turn when the id is empty, leaving settled turns alone", async () => {
-			await projectSteered();
-			await project(
-				makeStored(
-					"turn.interrupted",
-					"s1",
-					{ messageId: "" } satisfies TurnInterruptedPayload,
-					4,
-					now + 2000,
-				),
-			);
-
-			expect(await turnStates()).toEqual({
-				user_m1: "completed",
-				user_m2: "interrupted",
+			expect(await turn("u1")).toMatchObject({
+				state: "running",
+				cost: index === 0 ? null : index === 3 ? 0 : 0.5,
+				tokens_in: index === 0 ? null : 100,
+				tokens_out: index === 0 ? null : 20,
 			});
-		});
+		}
 	});
 
-	describe("full turn lifecycle", () => {
-		it("tracks a complete turn from user message to completion", async () => {
-			// 1. User sends message -> turn created
-			await project(
-				makeStored(
-					"message.created",
-					"s1",
-					{
-						messageId: "user_m1",
-						role: "user",
-						sessionId: "s1",
-					} satisfies MessageCreatedPayload,
-					1,
-					now,
-				),
-			);
-
-			let row = await queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
-				"user_m1",
-			]);
-			expect(row?.state).toBe("pending");
-
-			// 2. Session goes busy -> turn starts running
-			await project(
-				makeStored(
-					"session.status",
-					"s1",
-					{
-						sessionId: "s1",
-						status: "busy",
-					} satisfies SessionStatusPayload,
-					2,
-					now + 50,
-				),
-			);
-
-			row = await queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
-				"user_m1",
-			]);
-			expect(row?.state).toBe("running");
-			expect(row?.started_at).toBe(now + 50);
-
-			// 3. Assistant message arrives
-			await project(
-				makeStored(
-					"message.created",
-					"s1",
-					{
-						messageId: "asst_m1",
-						role: "assistant",
-						sessionId: "s1",
-					} satisfies MessageCreatedPayload,
-					3,
-					now + 100,
-				),
-			);
-
-			row = await queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
-				"user_m1",
-			]);
-			expect(row?.assistant_message_id).toBe("asst_m1");
-
-			// 4. Turn completes
-			await project(
-				makeStored(
-					"turn.completed",
-					"s1",
-					{
-						messageId: "asst_m1",
-						cost: 0.1,
-						tokens: {
-							input: 5000,
-							output: 1200,
-							cacheRead: 300,
-							cacheWrite: 100,
-						},
-					} satisfies TurnCompletedPayload,
-					4,
-					now + 10000,
-				),
-			);
-
-			row = await queryOne<TurnRow>("SELECT * FROM turns WHERE id = ?", [
-				"user_m1",
-			]);
-			expect(row?.state).toBe("completed");
-			expect(row?.cost).toBeCloseTo(0.1);
-			expect(row?.tokens_in).toBe(5000);
-			expect(row?.tokens_out).toBe(1200);
-			expect(row?.completed_at).toBe(now + 10000);
-		});
-	});
-
-	describe("multiple turns in one session", () => {
-		it("tracks each turn independently", async () => {
-			// Turn 1
-			await project(
-				makeStored(
-					"message.created",
-					"s1",
-					{
-						messageId: "user_m1",
-						role: "user",
-						sessionId: "s1",
-					} satisfies MessageCreatedPayload,
-					1,
-					now,
-				),
-			);
-			await project(
-				makeStored(
-					"message.created",
-					"s1",
-					{
-						messageId: "asst_m1",
-						role: "assistant",
-						sessionId: "s1",
-					} satisfies MessageCreatedPayload,
-					2,
-					now + 100,
-				),
-			);
-			await project(
-				makeStored(
-					"turn.completed",
-					"s1",
-					{
-						messageId: "asst_m1",
-						cost: 0.01,
-						tokens: { input: 100, output: 50 },
-					} satisfies TurnCompletedPayload,
-					3,
-					now + 5000,
-				),
-			);
-
-			// Turn 2
-			await project(
-				makeStored(
-					"message.created",
-					"s1",
-					{
-						messageId: "user_m2",
-						role: "user",
-						sessionId: "s1",
-					} satisfies MessageCreatedPayload,
-					4,
-					now + 6000,
-				),
-			);
-			await project(
-				makeStored(
-					"message.created",
-					"s1",
-					{
-						messageId: "asst_m2",
-						role: "assistant",
-						sessionId: "s1",
-					} satisfies MessageCreatedPayload,
-					5,
-					now + 6100,
-				),
-			);
-			await project(
-				makeStored(
-					"turn.completed",
-					"s1",
-					{
-						messageId: "asst_m2",
-						cost: 0.02,
-						tokens: { input: 200, output: 100 },
-					} satisfies TurnCompletedPayload,
-					6,
-					now + 11000,
-				),
-			);
-
-			const rows = await harness.query<TurnRow>(
-				"SELECT * FROM turns WHERE session_id = ? ORDER BY requested_at",
-				["s1"],
-			);
-			expect(rows).toHaveLength(2);
-			expect(rows[0]?.id).toBe("user_m1");
-			expect(rows[0]?.state).toBe("completed");
-			expect(rows[1]?.id).toBe("user_m2");
-			expect(rows[1]?.state).toBe("completed");
-		});
-	});
-
-	describe("turn.model_resolved", () => {
-		it("updates only the newest open turn and is replay-idempotent", async () => {
-			await harness.query(
-				`INSERT INTO turns
-				 (id, session_id, state, user_message_id, requested_at)
-				 VALUES
-				 ('completed', 's1', 'completed', 'completed', ?),
-				 ('running', 's1', 'running', 'running', ?),
-				 ('pending', 's1', 'pending', 'pending', ?)`,
-				[now, now + 1, now + 2],
-			);
-			const event = makeStored("turn.model_resolved", "s1", {
+	it("applies model evidence only to accepted inputs of its run and is replay-idempotent", async () => {
+		for (const id of ["u1", "u2", "queued"])
+			await input(id, id === "queued" ? undefined : "r1");
+		await reserve("r1", "u1");
+		await accept("u1", "r1");
+		await accept("u2", "r1");
+		const resolved = await project(
+			"turn.model_resolved",
+			{
 				requestedModel: "sonnet",
 				expectedModel: "claude-sonnet-5[1m]",
 				actualModel: "claude-sonnet-5[1m]",
-			} satisfies TurnModelResolvedPayload);
-
-			await project(event);
-			await project(event);
-
-			const rows = await harness.query<TurnRow>(
-				"SELECT * FROM turns WHERE session_id = ? ORDER BY requested_at",
-				["s1"],
-			);
-			expect(rows[0]?.actual_model).toBeNull();
-			expect(rows[1]?.actual_model).toBeNull();
-			expect(rows[2]).toMatchObject({
+			},
+			{ runId: "r1" },
+		);
+		await harness.reproject([resolved]);
+		for (const id of ["u1", "u2"])
+			expect(await turn(id)).toMatchObject({
 				requested_model: "sonnet",
 				expected_model: "claude-sonnet-5[1m]",
 				actual_model: "claude-sonnet-5[1m]",
 			});
-		});
+		expect(await turn("queued")).toMatchObject({ actual_model: null });
+	});
 
-		it("preserves nullable evidence", async () => {
+	it("preserves nullable model evidence and leaves unowned evidence unplaced", async () => {
+		await input("u1", "r1");
+		await reserve("r1", "u1");
+		await accept("u1", "r1");
+		await project("turn.model_resolved", { actualModel: "unowned" });
+		expect(await turn("u1")).toMatchObject({ actual_model: null });
+		await project(
+			"turn.model_resolved",
+			{ actualModel: "claude-opus-4-6" },
+			{ runId: "r1" },
+		);
+		expect(await turn("u1")).toMatchObject({
+			requested_model: null,
+			expected_model: null,
+			actual_model: "claude-opus-4-6",
+		});
+	});
+});
+
+// Placement can precede intake or follow the run's end; neither ordering may
+// borrow a newer run, accept another input, or leave a member unsettled.
+describe("turn membership through provider ingestion", () => {
+	let harness: EffectProjectionHarness;
+	let sequence: number;
+
+	beforeEach(async () => {
+		sequence = 0;
+		harness = makeEffectProjectionHarness();
+		await harness.query(
+			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES ('s1', 'claude', 'Test', 'idle', 1, 1)",
+		);
+	});
+
+	afterEach(async () => {
+		await harness.dispose();
+	});
+
+	async function ingest<T extends Exclude<LiveEventType, "run.requested">>(
+		type: T,
+		data: Parameters<typeof canonicalEvent<T>>[2],
+		runId?: string,
+	) {
+		const event = canonicalEvent(type, "s1", data, {
+			provider: "claude",
+			createdAt: ++sequence,
+			metadata: runId ? { runId } : {},
+		});
+		await harness.ingest({
+			...providerRuntimeEventFromCanonical(event),
+			...(runId ? { runId } : {}),
+		});
+		return event;
+	}
+
+	async function reserve(runId: string, inputId: string) {
+		await harness.reproject([
+			{
+				...canonicalEvent(
+					"run.requested",
+					"s1",
+					{ runId, inputId },
+					{
+						provider: "claude",
+						createdAt: ++sequence,
+						metadata: { runId },
+					},
+				),
+				sequence,
+				streamVersion: sequence,
+				projectId: "test-project",
+			},
+		]);
+	}
+
+	const place = (inputId: string, runId?: string) =>
+		ingest(
+			"message.created",
+			{ messageId: inputId, inputId, sessionId: "s1", role: "user" },
+			runId,
+		);
+
+	const turns = () =>
+		harness.query(
+			"SELECT id, state, run_id, started_at, completed_at FROM turns ORDER BY id",
+		);
+
+	it("does not infer membership for an unowned input from later acceptance", async () => {
+		await place("u1");
+		await reserve("r1", "u1");
+		await ingest("run.started", { inputId: "u1", requestedRunId: "r1" }, "r1");
+		await ingest("turn.completed", { messageId: "" }, "r1");
+		expect(await turns()).toEqual([
+			{
+				id: "u1",
+				state: "pending",
+				run_id: null,
+				started_at: null,
+				completed_at: null,
+			},
+		]);
+	});
+
+	it("records placement membership before intake and settles without an input identity", async () => {
+		await reserve("r1", "u1");
+		await place("u1", "r1");
+		await place("unowned");
+		expect(await turns()).toEqual([
+			{
+				id: "u1",
+				state: "pending",
+				run_id: "r1",
+				started_at: null,
+				completed_at: null,
+			},
+			{
+				id: "unowned",
+				state: "pending",
+				run_id: null,
+				started_at: null,
+				completed_at: null,
+			},
+		]);
+		const terminal = await ingest(
+			"turn.error",
+			{ messageId: "", error: "Rejected before intake" },
+			"r1",
+		);
+		expect(await turns()).toEqual([
+			{
+				id: "u1",
+				state: "error",
+				run_id: "r1",
+				started_at: null,
+				completed_at: terminal.createdAt,
+			},
+			{
+				id: "unowned",
+				state: "pending",
+				run_id: null,
+				started_at: null,
+				completed_at: null,
+			},
+		]);
+	});
+
+	it("rewrites a joined reservation cohort and timestamps each input at its own intake", async () => {
+		await reserve("root", "u1");
+		await place("u1", "root");
+		const rootStarted = await ingest(
+			"run.started",
+			{ inputId: "u1", requestedRunId: "root" },
+			"root",
+		);
+		await reserve("steer", "u2");
+		await place("u2", "steer");
+		await place("u3", "steer");
+		const steerStarted = await ingest(
+			"run.started",
+			{ inputId: "u2", requestedRunId: "steer" },
+			"root",
+		);
+		expect(await turns()).toEqual([
+			{
+				id: "u1",
+				state: "running",
+				run_id: "root",
+				started_at: rootStarted.createdAt,
+				completed_at: null,
+			},
+			{
+				id: "u2",
+				state: "running",
+				run_id: "root",
+				started_at: steerStarted.createdAt,
+				completed_at: null,
+			},
+			{
+				id: "u3",
+				state: "pending",
+				run_id: "root",
+				started_at: null,
+				completed_at: null,
+			},
+		]);
+		const terminal = await ingest("turn.completed", { messageId: "" }, "root");
+		expect(
 			await harness.query(
-				`INSERT INTO turns
-				 (id, session_id, state, user_message_id, requested_at)
-				 VALUES ('pending', 's1', 'pending', 'pending', ?)`,
-				[now],
-			);
+				"SELECT id, state, completed_at FROM turns ORDER BY id",
+			),
+		).toEqual(
+			["u1", "u2", "u3"].map((id) => ({
+				id,
+				state: "completed",
+				completed_at: terminal.createdAt,
+			})),
+		);
+	});
 
-			await project(
-				makeStored("turn.model_resolved", "s1", {
-					actualModel: "claude-opus-4-6",
-				} satisfies TurnModelResolvedPayload),
-			);
+	it.each([
+		["turn.completed", "completed"],
+		["turn.error", "error"],
+		["turn.interrupted", "interrupted"],
+	] as const)("late placement inherits its exact %s without intake", async (type, state) => {
+		await reserve("old", "u1");
+		const terminal = await ingest(
+			type,
+			{ messageId: "", error: "Ended" },
+			"old",
+		);
+		await reserve("new", "u2");
+		await place("u2", "new");
+		const newerStarted = await ingest(
+			"run.started",
+			{ inputId: "u2", requestedRunId: "new" },
+			"new",
+		);
+		await place("u1", "old");
+		expect(await turns()).toEqual([
+			{
+				id: "u1",
+				state,
+				run_id: "old",
+				started_at: null,
+				completed_at: terminal.createdAt,
+			},
+			{
+				id: "u2",
+				state: "running",
+				run_id: "new",
+				started_at: newerStarted.createdAt,
+				completed_at: null,
+			},
+		]);
+	});
 
-			const row = await queryOne<TurnRow>(
-				"SELECT * FROM turns WHERE id = 'pending'",
-			);
-			expect(row).toMatchObject({
-				requested_model: null,
-				expected_model: null,
-				actual_model: "claude-opus-4-6",
-			});
-		});
-
-		it("updates the newest running turn", async () => {
+	it("resolves a joined reservation when its member is placed after the effective run ends", async () => {
+		await reserve("root", "u1");
+		await place("u1", "root");
+		await ingest(
+			"run.started",
+			{ inputId: "u1", requestedRunId: "root" },
+			"root",
+		);
+		await reserve("steer", "u2");
+		await ingest(
+			"run.started",
+			{ inputId: "u2", requestedRunId: "steer" },
+			"root",
+		);
+		const terminal = await ingest(
+			"turn.interrupted",
+			{ messageId: "" },
+			"root",
+		);
+		await place("u2", "steer");
+		expect(
 			await harness.query(
-				`INSERT INTO turns
-				 (id, session_id, state, user_message_id, requested_at)
-				 VALUES
-				 ('older-running', 's1', 'running', 'older-running', ?),
-				 ('newest-running', 's1', 'running', 'newest-running', ?)`,
-				[now, now + 1],
-			);
+				"SELECT state, run_id, started_at, completed_at FROM turns WHERE id = 'u2'",
+			),
+		).toEqual([
+			{
+				state: "interrupted",
+				run_id: "root",
+				started_at: null,
+				completed_at: terminal.createdAt,
+			},
+		]);
+	});
 
-			await project(
-				makeStored("turn.model_resolved", "s1", {
-					requestedModel: "sonnet",
-					expectedModel: "claude-sonnet-5",
-					actualModel: "claude-sonnet-5",
-				} satisfies TurnModelResolvedPayload),
-			);
-
-			const rows = await harness.query<TurnRow>(
-				"SELECT * FROM turns WHERE session_id = ? ORDER BY requested_at",
-				["s1"],
-			);
-			expect(rows[0]?.actual_model).toBeNull();
-			expect(rows[1]).toMatchObject({
-				id: "newest-running",
-				requested_model: "sonnet",
-				expected_model: "claude-sonnet-5",
-				actual_model: "claude-sonnet-5",
-			});
+	it("persists terminal provider state with the run transition and ignores duplicate terminal updates", async () => {
+		await reserve("r1", "u1");
+		await place("u1", "r1");
+		await ingest("run.started", { inputId: "u1", requestedRunId: "r1" }, "r1");
+		await ingest(
+			"turn.completed",
+			{
+				messageId: "",
+				providerStateUpdates: [
+					{ key: "cursor", value: "finished" },
+					{
+						key: "nativeThread:claude",
+						value: JSON.stringify({
+							resumeSessionId: "sdk-thread",
+							firstSequence: 0,
+							deliveredThrough: 0,
+						}),
+					},
+				],
+			},
+			"r1",
+		);
+		const rows = await harness.query<{ key: string; value: string }>(
+			"SELECT key, value FROM provider_state WHERE session_id = 's1' ORDER BY key",
+		);
+		expect(rows[0]).toEqual({ key: "cursor", value: "finished" });
+		expect(JSON.parse(rows[1]?.value ?? "null")).toEqual({
+			resumeSessionId: "sdk-thread",
+			firstSequence: 1,
+			deliveredThrough: 3,
 		});
-
-		it("does not attach evidence when no open turn exists", async () => {
+		await ingest(
+			"turn.completed",
+			{
+				messageId: "",
+				providerStateUpdates: [{ key: "cursor", value: "duplicate" }],
+			},
+			"r1",
+		);
+		expect(
 			await harness.query(
-				`INSERT INTO turns
-				 (id, session_id, state, user_message_id, requested_at)
-				 VALUES ('completed', 's1', 'completed', 'completed', ?)`,
-				[now],
-			);
+				"SELECT value FROM provider_state WHERE session_id = 's1' AND key = 'cursor'",
+			),
+		).toEqual([{ value: "finished" }]);
+	});
 
-			await project(
-				makeStored("turn.model_resolved", "s1", {
-					requestedModel: "sonnet",
-					expectedModel: "claude-sonnet-5",
-					actualModel: "claude-sonnet-5",
-				} satisfies TurnModelResolvedPayload),
-			);
-
-			const row = await queryOne<TurnRow>(
-				"SELECT * FROM turns WHERE id = 'completed'",
-			);
-			expect(row?.actual_model).toBeNull();
-		});
+	it("rolls back terminal provider state and run settlement together when an update is invalid", async () => {
+		await reserve("r1", "u1");
+		await place("u1", "r1");
+		await ingest("run.started", { inputId: "u1", requestedRunId: "r1" }, "r1");
+		await expect(
+			ingest(
+				"turn.completed",
+				{
+					messageId: "",
+					providerStateUpdates: [
+						{ key: "cursor", value: "must roll back" },
+						{ key: "nativeThread:claude", value: "invalid json" },
+					],
+				},
+				"r1",
+			),
+		).rejects.toThrow();
+		expect(
+			await harness.query(
+				"SELECT key FROM provider_state WHERE session_id = 's1'",
+			),
+		).toEqual([]);
+		expect(
+			await harness.query("SELECT status FROM provider_runs WHERE id = 'r1'"),
+		).toEqual([{ status: "running" }]);
+		expect(
+			await harness.query(
+				"SELECT state, completed_at FROM turns WHERE id = 'u1'",
+			),
+		).toEqual([{ state: "running", completed_at: null }]);
 	});
 });

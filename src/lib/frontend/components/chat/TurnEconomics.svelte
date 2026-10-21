@@ -23,14 +23,14 @@
 		if (ctx === undefined) return "";
 		if (ctx.pct >= 80) return "bg-error";
 		if (ctx.pct >= 60) return "bg-thinking";
-		return "bg-brand-b";
+		return "bg-success";
 	});
 </script>
 
 <!-- .turn-meta / .turn-duration are E2E hooks: the turn's bill wherever it lands,
      with the one figure that moves between runs isolated so it can be frozen. -->
 <span
-	class="turn-meta inline-flex items-center gap-2 font-mono text-xs text-text-dimmer whitespace-nowrap [&>span+span]:before:content-['·'] [&>span+span]:before:mr-2"
+	class="turn-meta inline-flex flex-wrap items-center gap-[8px] font-mono text-[12px] text-text-muted whitespace-nowrap [&>span+span]:before:content-['·'] [&>span+span]:before:mr-[8px]"
 >
 	{#if showDuration && economics.duration !== undefined}
 		<span class="turn-duration text-text-secondary">{fmtDuration(economics.duration)}</span>
@@ -50,7 +50,7 @@
 			title="{fmtTokens(ctx.used)} of {fmtTokens(ctx.window)} tokens in context when this turn finished"
 		>
 			<span>ctx</span>
-			<span class="inline-block w-10 h-1 rounded-full bg-[rgba(var(--overlay-rgb),0.12)] overflow-hidden">
+			<span class="inline-block w-[40px] h-[4px] rounded-full bg-chip overflow-hidden">
 				<span class="block h-full rounded-full {gaugeClass}" style="width: {ctx.pct}%"></span>
 			</span>
 			<span>{ctx.pct}%</span>

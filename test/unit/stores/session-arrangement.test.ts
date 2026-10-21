@@ -1,9 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	attachedProjectState,
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
+	applySearchResultsResponse,
+	clearSessionState,
+	getSettledSessionCount,
 	groupSessionsByDate,
 	projectSessionList,
 	sessionMatchesStatus,
@@ -54,21 +57,20 @@ const project = (
 const ids = (sessions: SessionInfo[]) => sessions.map((session) => session.id);
 
 describe("projectSessionList", () => {
-	it("reuses attention tiers for the default grouping", () => {
+	it("merges non-running attention tiers under Idle without losing their priority", () => {
 		const result = project([
 			row("idle"),
 			row("unread", { attention: "done-unread" }),
 			row("error", { attention: "error" }),
 			row("running", { attention: "working" }),
 			row("approval", { attention: "needs-approval" }),
+			row("reply", { attention: "needs-reply" }),
 		]);
 		expect(
 			result.sections.map(({ key, sessions }) => [key, ids(sessions)]),
 		).toEqual([
-			["needs-you", ["approval", "error"]],
 			["running", ["running"]],
-			["unread", ["unread"]],
-			["idle", ["idle"]],
+			["idle", ["approval", "reply", "error", "unread", "idle"]],
 		]);
 	});
 
@@ -196,6 +198,90 @@ describe("projectSessionList", () => {
 		sessionState.searchQuery = "";
 
 		routerState.search = "";
+	});
+});
+
+describe("settled shelf counts", () => {
+	beforeEach(() => {
+		clearSessionState();
+		attachedProjectState.slug = "local";
+		routerState.path = "/";
+		routerState.search = "";
+	});
+
+	afterEach(() => {
+		clearSessionState();
+		routerState.search = "";
+	});
+
+	it.each([
+		["ö", 0],
+		["Ö", 1],
+		["WORK", 1],
+		["%_done\\", 1],
+	])("uses unpaged server totals for the searched title %s", (query, count) => {
+		seedRootSessions([
+			row("local", { title: "Ö work %_done\\now", settledAt: 10 }),
+		]);
+		sessionState.searchQuery = query;
+		applySearchResultsResponse({
+			sessions: [],
+			settledCounts: [
+				{ projectSlug: "local", count },
+				{ projectSlug: "foreign", count },
+			],
+			availability: [],
+			hasMore: true,
+			nextCursor: null,
+		});
+		expect(getSettledSessionCount()).toEqual({ count: count * 2, exact: true });
+		routerState.search = "?p=local";
+		expect(getSettledSessionCount()).toEqual({ count, exact: true });
+		routerState.search = "?p=foreign";
+		expect(getSettledSessionCount()).toEqual({ count, exact: true });
+	});
+
+	it.each([
+		true,
+		false,
+	])("counts only server search hits under an attention filter, hasMore=%s", (hasMore) => {
+		routerState.search = "?status=unread";
+		seedRootSessions([
+			row("unmatched", {
+				title: "Ö work",
+				settledAt: 10,
+				attention: "done-unread",
+			}),
+			row("matched", {
+				title: "ö work",
+				settledAt: 10,
+				attention: "done-unread",
+			}),
+		]);
+		sessionState.searchQuery = "ö";
+		applySearchResultsResponse({
+			sessions: [row("matched", { title: "ö work", settledAt: 10 })],
+			settledCounts: [{ projectSlug: "local", count: 12 }],
+			availability: [],
+			hasMore,
+			nextCursor: null,
+		});
+		expect(getSettledSessionCount()).toEqual({ count: 1, exact: !hasMore });
+	});
+
+	it("keeps browse totals live and treats the first debounced search as partial", () => {
+		const foreign = Array.from({ length: 130 }, (_, index) =>
+			row(`foreign-${index}`, { projectSlug: "foreign", settledAt: 10 }),
+		);
+		seedRootSessions([
+			row("local", { title: "Ö work", settledAt: 10 }),
+			...foreign,
+		]);
+		expect(getSettledSessionCount()).toEqual({ count: 131, exact: true });
+		seedRootSessions(foreign);
+		expect(getSettledSessionCount()).toEqual({ count: 130, exact: true });
+		sessionState.searchQuery = "ö";
+		expect(getSettledSessionCount()).toEqual({ count: 0, exact: false });
 	});
 });
 

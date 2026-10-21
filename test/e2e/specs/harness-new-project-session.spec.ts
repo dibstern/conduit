@@ -1,6 +1,7 @@
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
+import { find } from "../helpers/detail-wire.js";
 import { openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
@@ -46,7 +47,7 @@ async function toList(page: Page): Promise<void> {
 async function newSession(page: Page): Promise<void> {
 	await toList(page);
 	await page.locator("#new-session-btn:visible").click();
-	await expect(page).toHaveURL(/\/new(\?|$)/);
+	await expect(page).toHaveURL(/\/draft\/[^/?]+(\?|$)/);
 }
 
 test("a draft prefills the project last added or given a session, on every client", async ({
@@ -57,6 +58,37 @@ test("a draft prefills the project last added or given a session, on every clien
 	const folder = join(realpathSync(harness.root), "t3code");
 	mkdirSync(folder);
 	const errors: string[] = [];
+	let modeResolved = false;
+	page.on("websocket", (socket) => {
+		const modeRequests = new Set<string>();
+		socket.on("framesent", ({ payload }) => {
+			for (const request of find(
+				JSON.parse(String(payload)),
+				(value) =>
+					"tag" in value &&
+					value.tag === "ResolveSessionMode" &&
+					"payload" in value &&
+					typeof value.payload === "object" &&
+					value.payload !== null &&
+					"projectSlug" in value.payload &&
+					value.payload.projectSlug === "t3code",
+			))
+				if ("id" in request) modeRequests.add(String(request.id));
+		});
+		socket.on("framereceived", ({ payload }) => {
+			if (
+				find(
+					JSON.parse(String(payload)),
+					(value) =>
+						"_tag" in value &&
+						value._tag === "Exit" &&
+						"requestId" in value &&
+						modeRequests.has(String(value.requestId)),
+				).length > 0
+			)
+				modeResolved = true;
+		});
+	});
 	page.on("console", (message) => {
 		if (message.type() === "error") errors.push(message.text());
 	});
@@ -77,10 +109,17 @@ test("a draft prefills the project last added or given a session, on every clien
 	await dialog.getByRole("option", { name: folder, exact: true }).click();
 	await dialog.getByRole("button", { name: /^Add project/ }).click();
 	await expect(dialog).toBeHidden();
-	await expect(page).toHaveURL(/\/new\?/);
+	await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
 	await expect(draftChip).toHaveText(/t3code\s*$/);
 	await expect(page.getByTestId("session-scope-chip")).toHaveText("t3code");
-	await page.waitForTimeout(1500);
+	await expect.poll(() => modeResolved).toBe(true);
+	// Let the reply's promise handlers and resulting toast render before asserting absence.
+	await page.evaluate(
+		() =>
+			new Promise<void>((resolve) =>
+				requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+			),
+	);
 	await page.screenshot({ path: testInfo.outputPath("after-add.png") });
 	await expect(page.getByRole("alert")).toHaveCount(0);
 
@@ -161,7 +200,7 @@ test("a draft starts in the open session's project, keeps its pick, and lands in
 	else await draftChip.click();
 	await page.getByRole("menuitem", { name: "New project…" }).click();
 	await addFolder(page, beta);
-	await expect(page).toHaveURL(/\/new\?/);
+	await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
 	await expect(draftChip).toHaveText(/beta\s*$/);
 	await expect(app.input).toBeFocused();
 	expect(new URL(page.url()).searchParams.get("p")).toBeNull();

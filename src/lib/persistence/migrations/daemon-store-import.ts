@@ -89,9 +89,12 @@ export interface ProjectStoreImportResult {
 const copiedTables = [
 	"events",
 	"sessions",
+	"provider_runs",
 	"turns",
+	"turn_recaps",
 	"messages",
 	"message_parts",
+	"message_part_read_state",
 	"session_providers",
 	"pending_approvals",
 	"pending_inputs",
@@ -109,9 +112,11 @@ const copiedTables = [
 	"provider_state",
 	"tool_content",
 	"sent_alerts",
+	"input_drafts",
 	"projection_failures",
 	"session_git_published",
 	"session_pick_backfill",
+	"surfacing_marks",
 ] as const;
 const singletonTables = [
 	"projector_cursors",
@@ -123,6 +128,16 @@ const singletonTables = [
 	"daemon_store_imports",
 	"sqlite_sequence",
 ];
+// Deployed redesign ledgers before their migrations were appended to main.
+// Accept only these historical mappings; arbitrary ids still mean a newer schema.
+const deployedRedesignMigrationIds = new Map<string, readonly number[]>([
+	["goal_check_metadata", [64, 68]],
+	["message_part_surfacing", [65, 69]],
+	["sessions_settled_shelf_index", [66, 70]],
+	["surfacing_marks", [67, 71]],
+	["message_part_read", [68, 72]],
+	["turn_recaps", [69, 73]],
+]);
 const runnerTables: Readonly<Record<string, string>> = {
 	claude_runner_cursors: `CREATE TABLE claude_runner_cursors (
 		runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL,
@@ -546,11 +561,13 @@ function sessionIds(db: DatabaseSync, schema: string): string {
 			columns(db, schema, table)
 				.filter(
 					({ name }) =>
-						name === "session_id" || (table === "sessions" && name === "id"),
+						name === "session_id" ||
+						(table === "sessions" && name === "id") ||
+						(table === "input_drafts" && name === "draft_key"),
 				)
 				.map(
 					({ name }) =>
-						`SELECT ${quote(name)} AS id FROM ${schema}.${quote(table)}`,
+						`SELECT ${quote(name)} AS id FROM ${schema}.${quote(table)}${table === "input_drafts" ? " WHERE kind = 'session'" : ""}`,
 				),
 		)
 		.join(" UNION ");
@@ -599,6 +616,10 @@ function excludeSharedSessions(
 		};
 		for (const table of tables(db, "main")) {
 			const conditions = columns(db, "main", table).flatMap(({ name }) => {
+				if (table === "input_drafts" && name === "draft_key")
+					return [
+						"kind = 'session' AND draft_key IN (SELECT id FROM shared_sessions)",
+					];
 				const ids =
 					table === "sessions" && name === "id"
 						? "shared_sessions"
@@ -697,8 +718,24 @@ function collisions(
 			"sessions",
 		);
 	const identityGroups = [
+		[
+			"provider_runs",
+			[
+				"provider_runs:id",
+				"provider_runs:joined_into",
+				"turns:run_id",
+				"provider_command_outbox:run_id",
+			],
+		],
 		["messages", ["messages:id", "turns:id", "message_tombstones:message_id"]],
-		["message_parts", ["message_parts:id", "message_part_tombstones:part_id"]],
+		[
+			"message_parts",
+			[
+				"message_parts:id",
+				"message_part_tombstones:part_id",
+				"message_part_read_state:part_id",
+			],
+		],
 		[
 			"command_receipts",
 			[
@@ -765,7 +802,7 @@ function copyProject(
 			expressions["project_id"] = "COALESCE(project_id, ?)";
 		if (fields.includes("project_key"))
 			expressions["project_key"] = "COALESCE(project_key, ?)";
-		if (fields.includes("version"))
+		if (fields.includes("version") && table !== "turn_recaps")
 			expressions["version"] = `version + ${offsets.version}`;
 		if (table === "events") {
 			expressions["sequence"] = `sequence + ${offsets.event}`;
@@ -786,6 +823,11 @@ function copyProject(
 		if (table === "messages")
 			expressions["last_applied_seq"] = eventNumber(
 				"last_applied_seq",
+				offsets.event,
+			);
+		if (table === "message_parts")
+			expressions["result_event_seq"] = eventNumber(
+				"result_event_seq",
 				offsets.event,
 			);
 		if (table === "command_receipts") {
@@ -1109,7 +1151,10 @@ function withNormalisedSource(
 										(key) =>
 											Number.parseInt(key, 10) === entry.migration_id &&
 											key.slice(key.indexOf("_") + 1) === entry.name,
-									)
+									) &&
+									!deployedRedesignMigrationIds
+										.get(entry.name)
+										?.includes(entry.migration_id)
 								)
 									reject(
 										project,

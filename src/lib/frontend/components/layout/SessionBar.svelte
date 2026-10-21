@@ -13,8 +13,8 @@
   Phone geometry lives in style.css as a grid keyed on `data-collapsed`, so the
   title moves between rows without being re-parented and the <h1> never unmounts.
 
-  The title menu carries session commands and global actions; the desktop overflow
-  carries global actions.
+  The desktop overflow shares the phone sheet's command body. The title menu
+  retains the session command list.
 -->
 
 <script lang="ts">
@@ -34,8 +34,8 @@
 	} from "../../stores/session-view.svelte.js";
 	import { findSession, getAttentionSessions, sessionAttention, sessionState } from "../../stores/session.svelte.js";
 	import { backToSessions } from "../../utils/session-read.js";
-	import { formatTimeAgo } from "../../utils/format.js";
-	import { getSessionBarState } from "../../utils/session-lifecycle.js";
+	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
+	import { getSessionBarState, getWokenSessionText } from "../../utils/session-lifecycle.js";
 	import type { GoalDetails } from "../../transport/ws-rpc.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { failureLine } from "../../transport/rpc-errors.js";
@@ -44,16 +44,12 @@
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
-	import MenuCheckboxItem from "../ui/MenuCheckboxItem.svelte";
-	import MenuGroup from "../ui/MenuGroup.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
-	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
-	import MenuSeparator from "../ui/MenuSeparator.svelte";
 	import Tooltip from "../ui/Tooltip.svelte";
 	import Surface from "../ui/Surface.svelte";
+	import Popover from "../ui/Popover.svelte";
 	import SessionContextMenu from "../session/SessionContextMenu.svelte";
-	import SessionCommandItems from "../session/SessionCommandItems.svelte";
 	import SessionRenameInput from "../session/SessionRenameInput.svelte";
 	import SessionSkillsChip from "../session/SessionSkillsChip.svelte";
 	import BackgroundTasksPanel from "../session/BackgroundTasksPanel.svelte";
@@ -63,11 +59,17 @@
 	import BannersRow from "../overlays/BannersRow.svelte";
 	import { stopBackgroundTasks, tasksPanel } from "../session/background-tasks.svelte.js";
 	import { openSideThreads, sideThreadsPanel } from "../session/side-threads.svelte.js";
-	import { getPrimaryCommand, getSessionCommands, runSessionCommandShortcut, sessionCommandActions, sessionCommandKeysHint } from "../session/session-commands.js";
+	import { getPinCommand, getPrimaryCommand, getSessionCommands, globalKeyHint, runSessionCommandShortcut, sessionCommandActions, sessionCommandKeys, sessionCommandKeysHint, type SessionCommand } from "../session/session-commands.js";
 	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
 	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { chromeMenuActions } from "./chrome-actions.js";
-	import { activeSessionView, sessionViews, viewShortcutHint } from "./session-views.js";
+	import SessionSheetFooter from "../session/SessionSheetFooter.svelte";
+	import SessionSheetBody from "../session/SessionSheetBody.svelte";
+	import SessionCommandItems from "../session/SessionCommandItems.svelte";
+	import AutoSettleRow from "../session/AutoSettleRow.svelte";
+	import { getProjectAccent } from "../session/session-list-project.js";
+	import ViewCard from "../ui/ViewCard.svelte";
+	import { activeSessionView, sessionViews } from "./session-views.js";
 
 	let { getGoalDetails = (input) => rpc("GetGoalDetails", input) }: { getGoalDetails?: ((input: Parameters<typeof rpc<"GetGoalDetails">>[1]) => Promise<GoalDetails>) | undefined } = $props();
 
@@ -81,11 +83,8 @@
 		isProcessing() ? "busy" : session?.status ?? "idle",
 	));
 	const detailsGoal = $derived(goalFacts?.goal ?? goalFacts?.endedGoal);
-	const goalTone = $derived(goal.tone === "amber" ? "text-status-amber" : goal.tone === "success" ? "text-status-green" : "text-status-violet");
-	const goalPhaseLabel = $derived(goal.phase ? {
-		starting: "Starting", pursuing: "Pursuing", checking: "Checking", not_yet: "Not yet", paused: "Paused", met: "Met", cleared: "Cleared",
-	}[goal.phase] : "");
 	let goalSubtitleEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
+	let goalFocusHandedOff = false;
 	const backgroundTasks = $derived(session?.backgroundTasks ?? []);
 	const goalShown = $derived(goal.phase !== null && goal.phase !== "cleared" && !isGoalMetDismissed(goalFacts));
 	// The family push carries the whole tree; prefer the versioned row, as busySessionIds does.
@@ -115,7 +114,6 @@
 	let details: GoalDetails | null = $state(null);
 	let detailsLoading = $state(false);
 	let detailsFailed = $state("");
-	let detailsNow = $state(Date.now());
 	let detailsProjectSlug: string | null | undefined;
 
 	$effect(() => {
@@ -128,13 +126,6 @@
 
 	$effect(() => {
 		if (!detailsGoal || goal.phase === "cleared" || isGoalMetDismissed(goalFacts)) goalDetails.open = false;
-	});
-
-	$effect(() => {
-		if (!goalDetails.open) return;
-		detailsNow = Date.now();
-		const timer = setInterval(() => { detailsNow = Date.now(); }, 60_000);
-		return () => clearInterval(timer);
 	});
 
 	$effect(() => {
@@ -156,32 +147,34 @@
 		return () => { stale = true; };
 	});
 
-	function goalElapsed(milliseconds: number): string {
-		const minutes = Math.max(1, Math.floor(milliseconds / 60_000));
-		return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h${minutes % 60 ? ` ${minutes % 60}m` : ""}`;
-	}
-
 	function goalTokens(tokens: number): string {
 		if (tokens >= 1_000_000) return `${Number((tokens / 1_000_000).toFixed(2))}M`;
 		if (tokens >= 1_000) return `${Number((tokens / 1_000).toFixed(1))}K`;
 		return String(tokens);
 	}
 
+	function goalClock(at: number): string {
+		return new Date(at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+	}
+
 	function closeGoalDetails(returnFocus = false) {
+		goalFocusHandedOff = !returnFocus;
 		goalDetails.open = false;
-		if (returnFocus) goalSubtitleEl?.focus();
+		if (returnFocus && !sessionViewState.compact) goalSubtitleEl?.focus();
 	}
 
 	function handleGoalDetailsKeydown(event: KeyboardEvent) {
 		if (event.key !== "Escape" || (!goalDetails.open && !tasksPanel.open && !sideThreadsPanel.open) || uiState.confirmDialog) return;
+		if (goalDetails.open && sessionViewState.compact && !tasksPanel.open && !sideThreadsPanel.open) return;
 		event.preventDefault();
 		event.stopPropagation();
 		if (sideThreadsPanel.open) {
 			sideThreadsPanel.open = false;
 			document.getElementById("side-threads-control")?.focus();
 		} else if (tasksPanel.open) {
+			if (sessionViewState.compact) forceBarOpen();
 			tasksPanel.open = false;
-			document.querySelector<HTMLElement>("[data-testid='background-tasks-row']")?.focus();
+			document.querySelector<HTMLElement>("[data-testid='background-tasks-toggle'], button[data-testid='background-tasks-row']")?.focus();
 		} else closeGoalDetails(true);
 	}
 
@@ -193,8 +186,35 @@
 			detail: { action, sessionId, condition: detailsGoal.condition },
 		}));
 	}
-	const stateChip = $derived(getSessionBarState(session, sessionState.now));
-	const primaryCommand = $derived(session ? getPrimaryCommand(session, sessionState.now) : undefined);
+	const woke = $derived(session?.pinnedAt == null && getSessionBarState(session, sessionState.now)?.kind === "woke");
+	const stateChip = $derived.by(() => {
+		const chip = getSessionBarState(session, sessionState.now);
+		if (sessionViewState.compact) return chip;
+		if (session?.pinnedAt != null) return { kind: "pinned" as const, label: "Pinned", icon: "pin" };
+		if (chip?.kind === "woke") return null;
+		if (chip?.kind === "snoozed") return { ...chip, label: "Snoozed" };
+		if (chip?.kind === "auto-settled") return { ...chip, label: "Settled", icon: "zap" };
+		return chip;
+	});
+	const primaryCommand = $derived.by((): SessionCommand | undefined => {
+		if (!session) return undefined;
+		if (sessionViewState.compact) return getPrimaryCommand(session, sessionState.now);
+		// The Pinned chip already carries the state; Unpin is a plain segment, as in the design.
+		if (session.pinnedAt != null) return { ...getPinCommand(session), emphasis: undefined };
+		if (stateChip?.kind === "snoozed") return {
+			testId: "session-bar-snooze-time", section: "triage", icon: "moon",
+			label: session.snoozedUntil == null ? "Until something happens" : `Until ${formatSnoozeTime(session.snoozedUntil, sessionState.now)}`,
+			run: () => { stateMenuOpen = true; },
+		};
+		if (goal.phase === "checking") return undefined;
+		if (goalFacts?.goal && goal.phase !== "paused") return { ...getPinCommand(session), emphasis: "primary" };
+		if (woke) return undefined;
+		return getPrimaryCommand(session, sessionState.now);
+	});
+	// Phones colour the line by the store's tone (amber = not yet). Desktop labels not-yet as
+	// Pursuing, so only a paused goal leaves the teal.
+	const goalButtonTone = $derived(goal.tone === "success" ? "goal-met" : (sessionViewState.compact ? goal.tone === "amber" : goal.phase === "paused") ? "goal-paused" : "goal");
+	const desktopGoalLabel = $derived(goal.phase === "met" ? "Goal met" : goal.phase === "checking" ? "Checking" : goal.phase === "paused" ? "Paused" : "Pursuing");
 	const statusTitle = $derived(connectionState.statusText || "Connecting");
 	const statusClass = $derived.by(() => {
 		switch (connectionState.status) {
@@ -218,7 +238,7 @@
 	);
 
 	const activeView = $derived(activeSessionView());
-	const collapsed = $derived(isBarCollapsed() && activeView === "chat" && !goalDetails.open && !sideThreadsPanel.open);
+	const collapsed = $derived(isBarCollapsed() && activeView === "chat" && !goalDetails.open && !sideThreadsPanel.open && !tasksPanel.open);
 	const viewBadgeCount = $derived(
 		sessionViews.reduce((total, view) => total + (view.badge?.() ?? 0), 0),
 	);
@@ -226,6 +246,7 @@
 	const commands = $derived(session
 		? getSessionCommands(session, sessionState.now, { rename: () => { forceBarOpen(); renaming = true; } }, sessionViewState.compact ? "sheet" : "center")
 		: []);
+	const snoozeCommand = $derived(commands.find((item) => item.testId === "session-ctx-snooze"));
 	const globalActions = $derived(chromeMenuActions());
 
 	function handleSessionShortcut(event: KeyboardEvent) {
@@ -256,9 +277,11 @@
 	let overflowSelected = false;
 	function selectOverflow(action: (returnFocus?: () => HTMLElement | null) => void) {
 		if (sessionViewState.compact) overflowSelected = true;
+		overflowOpen = false;
 		action(() => overflowOpener?.isConnected ? overflowOpener : null);
 	}
 	let stateMenuOpen = $state(false);
+	let statePickingTime = false;
 	let titleMenuOpen = $state(false);
 	let titleMenuAnchor: HTMLElement | null = $state(null);
 	let renaming = $state(false);
@@ -266,6 +289,7 @@
 	// breakpoint closes any open one rather than leaving it floating.
 	$effect(() => {
 		void sessionViewState.compact;
+		void sessionState.currentId;
 		titleMenuOpen = false;
 		stateMenuOpen = false;
 		overflowOpen = false;
@@ -276,41 +300,19 @@
 <svelte:window onkeydown={handleSessionShortcut} onkeydowncapture={handleGoalDetailsKeydown} />
 
 {#if goalDetails.open && detailsGoal}
-	<Button variant="ghost" size="content" tone="inherit" hoverFill="none" tabindex={-1} ariaLabel="Close goal details" data-testid="goal-details-scrim" class="fixed inset-0 z-[var(--z-dropdown)] bg-[rgba(var(--overlay-rgb),0.35)]" onclick={() => closeGoalDetails(true)} />
+	{#if !sessionViewState.compact}<Button variant="scrim-clear" size="content" tabindex={-1} ariaLabel="Close goal details" data-testid="goal-details-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => closeGoalDetails(true)} />{/if}
 {:else if tasksPanel.open && backgroundTasks.length > 0}
-	<Button variant="ghost" size="content" tone="inherit" hoverFill="none" tabindex={-1} ariaLabel="Close background tasks" data-testid="background-tasks-scrim" class="fixed inset-0 z-[var(--z-dropdown)] bg-[rgba(var(--overlay-rgb),0.35)]" onclick={() => { tasksPanel.open = false; }} />
+	<Button variant={sessionViewState.compact ? "scrim" : "scrim-clear"} size="content" tabindex={-1} ariaLabel="Close background tasks" data-testid="background-tasks-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => { tasksPanel.open = false; }} />
 {:else if sideThreadsPanel.open}
-	<Button variant="ghost" size="content" tone="inherit" hoverFill="none" tabindex={-1} ariaLabel="Close Side Threads" data-testid="side-threads-scrim" class="fixed inset-0 z-[var(--z-dropdown)] bg-[rgba(var(--overlay-rgb),0.35)]" onclick={() => { sideThreadsPanel.open = false; }} />
+	<Button variant={sessionViewState.compact ? "scrim" : "scrim-clear"} size="content" tabindex={-1} ariaLabel="Close Side Threads" data-testid="side-threads-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => { sideThreadsPanel.open = false; }} />
 {/if}
 
-{#snippet viewItems(testIdPrefix: string)}
-	<MenuRadioGroup value={activeView} aria-label="Views">
+{#snippet viewCards()}
+	<MenuRadioGroup value={activeView} aria-label="Views" class="grid grid-cols-4 gap-[8px]">
 		{#each sessionViews as view (view.id)}
-			<MenuRadioItem
-				value={view.id}
-				icon={view.icon}
-				data-testid={`${testIdPrefix}-${view.id}`}
-				disabled={view.disabled === true}
-				onselect={view.select}
-			>
-				<span class="flex items-center gap-2">
-					<span class="min-w-0 flex-1">{view.label}</span>
-					<span class="shortcut-hint ml-auto text-xs text-text-muted" aria-hidden="true">{viewShortcutHint(view)}</span>
-					{#if view.badge?.()}
-						<Badge variant="accent-solid" size="count" shape="pill">{view.badge()}</Badge>
-					{/if}
-				</span>
-			</MenuRadioItem>
+			<ViewCard value={view.id} preview={view.id} label={view.label} icon={view.icon} badge={view.badge?.()} disabled={view.disabled === true} data-testid={`overflow-view-${view.id}`} onselect={view.select} />
 		{/each}
 	</MenuRadioGroup>
-{/snippet}
-
-{#snippet globalActionItems()}
-	{#each globalActions as action (action.id)}
-		<MenuItem title={action.label} icon={sessionViewState.compact ? action.icon : undefined} data-testid={`overflow-${action.id}`} onselect={() => selectOverflow(action.run)}>
-			{action.label}
-		</MenuItem>
-	{/each}
 {/snippet}
 
 {#snippet overflowMenu()}
@@ -318,6 +320,8 @@
 		bind:open={overflowOpen}
 		onopenchange={(open) => { if (open) overflowSelected = false; }}
 		presentation={sessionViewState.compact ? "sheet" : "popover"}
+		appearance="final"
+		class={sessionViewState.compact ? undefined : "w-[340px] max-w-[calc(100vw-16px)]"}
 		ariaLabel="More actions"
 		align="end"
 		onCloseAutoFocus={(event) => {
@@ -336,17 +340,18 @@
 			}
 		}}
 		data-testid={sessionViewState.compact ? "session-bar-island-menu" : "session-bar-overflow-menu"}
+		footer={overflowFooter}
 	>
 		{#snippet trigger({ props })}
 			<Button
 				{...props}
 				id="session-bar-more"
-				variant="ghost"
-				size="content"
+				variant="menu-trigger"
+				size={sessionViewState.compact && !collapsed ? "phone-header-icon" : "touch-pill"}
 				icon="ellipsis"
-				iconSize={17}
-				touchTarget
-				class="relative shrink-0 min-h-[44px] min-w-[44px] justify-center rounded-lg"
+				iconSize={sessionViewState.compact ? 14 : 17}
+				touchTarget={sessionViewState.compact ? "always" : true}
+				class="relative shrink-0"
 				title="More actions"
 				ariaLabel="More actions"
 				aria-describedby={sessionViewState.compact && viewBadgeCount > 0 ? "session-bar-view-badge" : undefined}
@@ -355,41 +360,107 @@
 				onkeydowncapture={(event) => { overflowOpener = event.currentTarget as HTMLElement; }}
 			>
 				{#if sessionViewState.compact && viewBadgeCount > 0}
-					<span id="session-bar-view-badge" data-testid="session-bar-view-badge" class="pointer-events-none absolute right-0 top-0 flex h-[12px] min-w-[12px] items-center justify-center rounded-full bg-accent px-[3px] text-[8px] font-bold tabular-nums text-bg">{viewBadgeCount}<span class="sr-only"> unread view updates</span></span>
+					<Badge variant="accent-solid" size="indicator" shape="pill" id="session-bar-view-badge" data-testid="session-bar-view-badge" class="pointer-events-none absolute right-0 top-0">{viewBadgeCount}<span class="sr-only"> unread view updates</span></Badge>
 				{/if}
 			</Button>
 		{/snippet}
 
 		{#if sessionViewState.compact}
-			<MenuGroup label="Views">
-				{@render viewItems("overflow-view")}
-			</MenuGroup>
-			<MenuSeparator />
 			{#if session}
-				<MenuGroup label="Session">
-					<SessionCommandItems {commands} presentation="sheet" onselect={selectOverflow} />
-				</MenuGroup>
+				<SessionSheetBody {commands} now={sessionState.now} header={{ session, projectLabel: project?.title ?? getCurrentSlug() ?? undefined, projectAccent: getProjectAccent(session), branch: session.git?.branch }} views={viewCards} onselect={selectOverflow} />
+			{:else}
+				<div class="px-[16px] pt-[8px]">{@render viewCards()}</div>
 			{/if}
-		{/if}
-		{#if sessionViewState.compact}<MenuSeparator />{/if}
-		{#if sessionViewState.compact}
-			<MenuGroup label="More actions">{@render globalActionItems()}</MenuGroup>
-		{:else}
-			<div role="group" aria-label="More actions">{@render globalActionItems()}</div>
+		{:else if session}
+			<div class="px-[4px] pb-[6px]">
+				<SessionCommandItems {commands} {session} now={sessionState.now} presentation="popover" settleShortcutTag={globalKeyHint(sessionCommandKeys.settle.global)} onselect={selectOverflow} />
+			</div>
 		{/if}
 	</Menu>
+{/snippet}
+
+{#snippet overflowFooter()}
+	<SessionSheetFooter extras={globalActions.map((action) => ({ ...action, testId: `overflow-${action.id}` }))} onselect={selectOverflow} />
+{/snippet}
+
+{#snippet titleMenuButton()}
+	<Button
+		variant="ghost"
+		size={sessionViewState.compact ? "phone-title-menu" : "touch-icon"}
+		touchTarget={sessionViewState.compact ? "always" : false}
+		iconOnly
+		icon="chevron-down"
+		iconSize={sessionViewState.compact ? 14 : 15}
+		class="{sessionViewState.compact ? '' : '-my-[13px]'} shrink-0"
+		ariaLabel="Session menu"
+		aria-haspopup="menu"
+		aria-expanded={titleMenuOpen}
+		data-testid="session-bar-title-menu"
+		onclick={(event) => {
+			titleMenuAnchor = event.currentTarget as HTMLElement;
+			titleMenuOpen = true;
+		}}
+	/>
+{/snippet}
+
+{#snippet goalContent()}
+	{#if detailsGoal && goalFacts}
+		<div class="px-[10px] pt-[10px] pb-[4px]">
+			<Badge variant={goal.phase === "met" ? "success" : "goal"} shape="pill" size="label"><Icon name={goal.phase === "met" ? "circle-check" : "target"} size={12} />{desktopGoalLabel}</Badge>
+			<h2 id="goal-details-title" data-testid="goal-details-condition" class="mt-[8px] mb-[3px] text-[15px] font-semibold leading-[1.35] tracking-[-0.01em]">{detailsGoal.condition}</h2>
+			<p data-testid="goal-details-meta" class="m-0 font-mono text-[11.5px] text-text-dimmer">Set {goalClock(details?.setAt ?? detailsGoal.setAt)} · {detailsGoal.iterations} checks{details?.judgeModel ? ` · ${details.judgeModel} judges` : ""}</p>
+			{#if !sessionViewState.compact && details?.tokensSinceStart != null}<p data-testid="goal-details-tokens" class="mt-[4px] mb-0 font-mono text-[11px] text-text-dimmer">{goalTokens(details.tokensSinceStart)} tokens</p>{/if}
+		</div>
+		<div class="mx-[4px] mt-[8px] border-t border-border-chip"></div>
+		<div data-goal-checks-heading class="flex items-center justify-between px-[10px] pt-[8px] pb-[6px] text-[12px] font-medium text-text-dimmer">Checks{#if sessionViewState.compact && details?.tokensSinceStart != null}<span data-testid="goal-details-tokens" class="font-mono text-[10.58px] text-text-dimmer">{goalTokens(details.tokensSinceStart)} tokens</span>{/if}</div>
+	<ol data-testid="goal-details-history" class="m-0 flex list-none flex-col gap-[5px] p-0">
+			{#if goal.phase === "checking"}
+				<li data-testid="goal-details-check" class="desktop-goal-check"><Icon name="loader-circle" size={13} class="mt-[2px] motion-safe:animate-spin text-status-goal" /><span><b>Checking</b>{details?.turnCount != null ? ` · after turn ${details.turnCount}` : ""}</span><time class="text-text-dimmer">now</time></li>
+			{:else if goalFacts.ended === "met"}
+				<li data-testid="goal-details-check" class="desktop-goal-check"><Icon name="circle-check" size={13} class="text-success" /><span><b>Met</b>{detailsGoal.lastReason ? ` · ${detailsGoal.lastReason}` : ""}</span><time class="text-text-dimmer">{goalFacts.endedAt == null ? "" : goalClock(goalFacts.endedAt)}</time></li>
+			{/if}
+			{#each [...(details?.checks ?? [])].reverse() as check (check.iteration)}
+				<li data-testid="goal-details-check" class="desktop-goal-check"><Icon name="circle-x" size={13} class="mt-px text-text-dimmer" /><span><b>Not yet</b>{check.reason ? ` · ${check.reason}` : ""}{#if check.turnIndex != null}<small class="text-[11px] text-text-dimmer" class:block={!sessionViewState.compact} class:whitespace-nowrap={sessionViewState.compact}>{sessionViewState.compact ? " · " : ""}After turn {check.turnIndex}</small>{/if}</span><time class="text-text-dimmer">{goalClock(check.at)}</time></li>
+			{/each}
+		{#if detailsLoading}
+			<li role="status" class="goal-details-check"><span class="col-span-full text-text-muted">Loading checks…</span></li>
+		{:else if detailsFailed}
+			<li role="status" class="goal-details-check"><span class="col-span-full text-status-red">{detailsFailed}</span></li>
+		{:else if !details?.checks.length && goal.phase !== "checking" && goal.phase !== "met"}
+			<li class="goal-details-check"><span class="col-span-full">No checks yet. The first runs when Claude finishes a turn.</span></li>
+		{/if}
+	</ol>
+	<div class="flex gap-[6px] {sessionViewState.compact ? 'mt-[8px]' : 'mt-[12px] px-[8px]'} pb-[4px]">
+		{#if goalFacts.goal}
+			<Button variant="chip" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="secondary" icon={goal.phase === "paused" ? "play" : "pause"} iconSize={13} touchTarget={sessionViewState.compact ? "always" : true} data-testid={goal.phase === "paused" ? "goal-details-resume" : "goal-details-pause"} onclick={() => runGoalAction(goal.phase === "paused" ? "resume" : "pause")}>{goal.phase === "paused" ? "Resume" : "Pause"}</Button>
+			<Button variant="chip" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="secondary" icon="pencil" iconSize={13} touchTarget={sessionViewState.compact ? "always" : true} data-testid="goal-details-edit" onclick={() => runGoalAction("edit")}>Edit</Button>
+			<Button variant="danger-soft" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="error" touchTarget={sessionViewState.compact ? "always" : true} class="ml-auto" data-testid="goal-details-clear" onclick={() => runGoalAction("clear")}>Clear goal</Button>
+		{:else if goalFacts.ended === "met"}
+			<Button variant="secondary" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="secondary" touchTarget={sessionViewState.compact ? "always" : true} data-testid="goal-details-new" onclick={() => runGoalAction("new")}>Set a new goal</Button>
+			<Button variant="secondary" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="error" touchTarget={sessionViewState.compact ? "always" : true} class="ml-auto" data-testid="goal-details-dismiss" onclick={() => { if (goalFacts) dismissGoalMet(goalFacts); closeGoalDetails(); }}>Dismiss</Button>
+		{/if}
+	</div>
+	{/if}
+{/snippet}
+
+{#snippet goalLine(props: Record<string, unknown> = {})}
+	<Button variant="ghost" size={sessionViewState.compact ? "phone-subtitle" : "subtitle"} touchTarget={sessionViewState.compact ? "always" : false} layout="block" align="start" tone={goalButtonTone} hoverFill="none" bind:element={goalSubtitleEl} data-testid="session-goal-subtitle" aria-expanded={goalDetails.open} aria-controls="goal-details" title={goal.phase === "paused" ? `${goal.subtitle} · ${goalFacts?.pausedReason}` : goal.subtitle} class={sessionViewState.compact ? "" : "mt-[2px]"} onclick={() => { tasksPanel.open = false; sideThreadsPanel.open = false; goalDetails.open = !goalDetails.open; }} {...props}>
+		<Icon name={goal.icon === "spinner" ? "loader-circle" : goal.icon} size={12} class="shrink-0 {goal.icon === 'spinner' ? 'motion-safe:animate-spin' : ''}" />
+		<b class="shrink-0 font-medium">{desktopGoalLabel}</b>{" "}<span class="min-w-0 truncate text-text-secondary">· {detailsGoal?.condition}</span>
+	</Button>
 {/snippet}
 
 <!-- One border for the session controls. -->
 {#snippet identityBlock()}
 	<div id="session-bar-meta" class="flex min-w-0 items-center gap-2">
-		<div class="session-bar-segments inline-flex h-[24px] items-stretch rounded-lg border border-border">
+		<Surface variant="capsule" radius="none" class="session-bar-segments" data-testid="session-controls-pill">
 			<SessionSkillsChip presentation={sessionViewState.compact ? "sheet" : "popover"} />
 			{#if sideThreads.length > 0 && !session?.sideThread}
-				<Button id="side-threads-control" variant="ghost" size="segment" icon="messages-square" touchTarget class="shrink-0 tabular-nums" ariaLabel={sideThreadsLabel} title={sideThreadsLabel} aria-expanded={sideThreadsPanel.open} aria-controls="side-threads-panel" data-testid="side-threads-control" onclick={() => openSideThreads(!sideThreadsPanel.open)}>
+				<Button id="side-threads-control" variant="ghost" size={sessionViewState.compact ? "phone-capsule-segment" : "capsule-segment"} icon="messages-square" touchTarget={sessionViewState.compact ? "always" : true} class="shrink-0" ariaLabel={sideThreadsLabel} title={sideThreadsLabel} aria-expanded={sideThreadsPanel.open} aria-controls="side-threads-panel" data-testid="side-threads-control" onclick={() => openSideThreads(!sideThreadsPanel.open)}>
 					{sideThreads.length}
+					{#if !sessionViewState.compact}<span class="segment-word">{sideThreads.length === 1 ? "side thread" : "side threads"}</span>{/if}
 					{#if sideThreadsWaiting}<span data-testid="side-threads-waiting" class="inline-flex {sideThreadsWaiting.colour}"><Icon name={sideThreadsWaiting.icon} size={11} /></span>{/if}
-					{#if sideThreads.some((row) => sessionAttention(row) === "done-unread")}<span data-testid="side-threads-unread-dot" class="size-[7px] shrink-0 rounded-full bg-brand-a" aria-hidden="true"></span>{/if}
+					{#if sideThreads.some((row) => sessionAttention(row) === "done-unread")}<span data-testid="side-threads-unread-dot" class="size-[7px] shrink-0 rounded-full bg-accent" aria-hidden="true"></span>{/if}
 				</Button>
 			{/if}
 			{#if primaryCommand}
@@ -397,22 +468,25 @@
 					{#snippet trigger({ props })}<Button
 						{...props}
 						id="session-bar-settle"
-						variant="ghost"
-						tone="default"
-						size="segment"
+						variant={primaryCommand.emphasis === "primary" ? "capsule-primary" : "ghost"}
+						tone={primaryCommand.emphasis === "primary" ? "accent" : "secondary"}
+						size={sessionViewState.compact ? "phone-capsule-segment" : "capsule-segment"}
 						icon={primaryCommand.icon ?? "check"}
-						touchTarget
+						touchTarget={sessionViewState.compact ? "always" : true}
 						class="shrink-0"
 						disabled={primaryCommand.disabledReason != null}
 						title={primaryCommand.disabledReason ?? undefined}
 						ariaLabel={primaryCommand.disabledReason ? `${primaryCommand.label}: ${primaryCommand.disabledReason}` : primaryCommand.label}
 						data-testid="session-bar-settle"
+						data-emphasis={primaryCommand.emphasis}
 						onclick={() => primaryCommand.run()}
 					><span id="session-bar-settle-label">{primaryCommand.label}</span></Button>{/snippet}
 					{#snippet children()}{primaryCommand.label}{#if primaryCommand.keys}<span class="shortcut-hint ml-2 text-text-muted" aria-hidden="true">{sessionCommandKeysHint(primaryCommand.keys)}</span>{/if}{/snippet}
 				</Tooltip>
+			{:else if woke && session && !sessionViewState.compact && !goalFacts?.goal}
+				<span data-testid="session-bar-woke" class="inline-flex h-[24px] items-center gap-[5px] px-[10px] text-[12.5px] font-medium text-text-secondary"><Icon name="clock" size={13} />{getWokenSessionText(session)}</span>
 			{/if}
-		</div>
+		</Surface>
 	</div>
 {/snippet}
 
@@ -425,36 +499,26 @@
 	aria-label="Session controls"
 	tabindex="-1"
 	bind:this={barEl}
-	class="relative shrink-0 bg-bg-surface border-b border-border outline-none {goalDetails.open || tasksPanel.open || sideThreadsPanel.open ? 'z-[var(--z-sheet)]' : ''}"
+	class="relative shrink-0 {sessionViewState.compact ? 'bg-bg-surface' : 'bg-bg'} border-b border-border outline-none {goalDetails.open || tasksPanel.open || sideThreadsPanel.open ? 'z-[var(--z-sheet)]' : ''}"
 >
-	<!--
-		Leaving. `size="content"` because this button owns its own box: a 44px
-		minimum is the platform touch target and is taller than the 38px the mock
-		draws, and the taller of the two constraints wins. Literal px, not
-		`min-h-11` — the root font-size is 12px here, so 11rem/4 would be 33px.
-
-		Collapsed, the word goes and the chevron and badge stay: the icon alone
-		is unambiguous once you have seen the labelled version, and the row needs
-		the width for the title. `sr-only` rather than `hidden`, because the icon
-		is decorative and `display: none` would leave the only way off the screen
-		with no accessible name at all.
-	-->
+	<!-- The labelled pill becomes a chevron and adjacent count in the island. -->
 	{#if sessionViewState.compact || uiState.sidebarCollapsed}
 	<Button
 		id="session-bar-back"
-		variant="ghost"
-		size="content"
+		variant={collapsed ? "ghost" : "chip"}
+		size={sessionViewState.compact && !collapsed ? "phone-navigation" : "navigation-pill"}
+		touchTarget={sessionViewState.compact ? "always" : false}
 		icon="chevron-left"
-		iconSize={17}
-		class="shrink-0 min-h-[44px] gap-1.5 rounded-lg text-base font-semibold pl-1 pr-2"
+		iconSize={sessionViewState.compact ? 14 : 17}
+		class="shrink-0"
 		data-testid="session-bar-back"
 		onclick={sessionViewState.compact ? backToSessions : expandSidebar}
 	>
 		<span>Sessions</span>
 		{#if attentionCount > 0}
 			<Badge
-				variant="accent-solid"
-				size="count"
+				variant="ask-solid"
+				size={sessionViewState.compact ? "navigation-count" : "count"}
 				shape="pill"
 				data-testid="session-bar-attention"
 			>
@@ -482,8 +546,9 @@
 	     The collapsed row keeps its separate chevron for expanding the bar. -->
 	{#if sessionViewState.compact || session}
 	<div id="session-bar-title-row" class="flex min-w-0 flex-col justify-center">
-	<div class="flex min-w-0 items-center gap-1.5">
+	<div class="flex min-w-0 items-center {sessionViewState.compact ? 'gap-[3px]' : 'gap-1.5'}">
 		<div class="min-w-0">
+		<div class="flex min-w-0 items-center">
 		<h1
 			id="session-bar-title"
 			data-testid="session-bar-title"
@@ -492,46 +557,21 @@
 			class:text-base={collapsed}
 		>
 			{#if renaming && session}
-				<SessionRenameInput {session} onend={() => { renaming = false; }} class="font-brand min-h-[44px] md:min-h-0" />
+				<SessionRenameInput {session} onend={() => { renaming = false; }} class="min-h-[44px] md:min-h-0" />
 			{:else}<span class="block truncate">{title}</span>{/if}
 		</h1>
-		{#if goalShown}
-			<Button variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="none" bind:element={goalSubtitleEl} data-testid="session-goal-subtitle" aria-expanded={goalDetails.open} aria-controls="goal-details" title={goal.phase === "paused" ? `${goal.subtitle} · ${goalFacts?.pausedReason}` : goal.subtitle} class="flex items-center justify-start whitespace-nowrap select-none w-0 min-w-full mt-[2px] gap-1.5 text-[11px] leading-[1.35] {goalTone}" onclick={() => { tasksPanel.open = false; sideThreadsPanel.open = false; goalDetails.open = !goalDetails.open; }}>
-				<Icon name={goal.icon === "spinner" ? "loader-circle" : goal.icon} size={12} class="shrink-0 {goal.icon === 'spinner' ? 'motion-safe:animate-spin' : ''}" />
-				<span class="min-w-0 truncate">{goal.subtitle}</span>
-				<Icon name="chevron-down" size={11} class="shrink-0 transition-transform {goalDetails.open ? 'rotate-180' : ''}" />
-			</Button>
-		{/if}
-		{#if backgroundTasks.length > 0 && sessionViewState.compact}
-			<BackgroundTasksRow tasks={backgroundTasks} underGoal={goalShown} compact />
-		{/if}
+		{#if !collapsed}{@render titleMenuButton()}{/if}
+		</div>
+		{#if goalShown && !sessionViewState.compact}{@render goalLine()}{/if}
 		<!-- Collapsed, the full banner strip is hidden (style.css); this line stands in. -->
 		{#if collapsed}<BannersRow banners={appBanners()} onexpand={showControls} />{/if}
 		</div>
-		{#if !collapsed}
-			<Button
-				variant="ghost"
-				size="content"
-				iconOnly
-				icon="chevron-down"
-				iconSize={17}
-				class="-my-[13px] shrink-0 min-h-[44px] min-w-[44px] justify-center rounded-lg"
-				ariaLabel="Session menu"
-				aria-haspopup="menu"
-				aria-expanded={titleMenuOpen}
-				data-testid="session-bar-title-menu"
-				onclick={(event) => {
-					titleMenuAnchor = event.currentTarget as HTMLElement;
-					titleMenuOpen = true;
-				}}
-			/>
-		{/if}
 		{#if session?.unread === true && !collapsed}
-			<Menu ariaLabel="Unread session options" align="end" data-testid="session-bar-unread-menu">
+			<Menu appearance="final" ariaLabel="Unread session options" align="end" data-testid="session-bar-unread-menu">
 				{#snippet trigger({ props })}
-					<Button {...props} variant="ghost" size="content" hoverFill="none" class="group -my-[13px] min-h-[44px] min-w-[44px] shrink-0 rounded-full" ariaLabel="Unread — open options" data-testid="session-bar-unread-chip">
-						<Badge variant="quiet" shape="pill" size="sm" class="group-hover:bg-brand-a/10 group-focus-visible:bg-brand-a/10 group-active:bg-brand-a/15 group-data-[state=open]:bg-brand-a/15">
-							<span class="size-[7px] shrink-0 rounded-full bg-brand-a" aria-hidden="true"></span>Unread
+					<Button {...props} variant="ghost" size={sessionViewState.compact ? "phone-status" : "touch-pill"} touchTarget={sessionViewState.compact ? "always" : false} hoverFill="none" class="group {sessionViewState.compact ? '' : '-my-[13px]'} shrink-0" ariaLabel="Unread — open options" data-testid="session-bar-unread-chip">
+						<Badge variant="accent" shape="pill" size="session" interactive>
+							<span class="size-[7px] shrink-0 rounded-full bg-accent" aria-hidden="true"></span>Unread
 						</Badge>
 					</Button>
 				{/snippet}
@@ -545,18 +585,24 @@
 					<span class="desktop-state-label">{stateChip.label}</span>
 				</Badge>
 			{:else}
-				<Menu bind:open={stateMenuOpen} ariaLabel="Session state options" align="end" data-testid="session-bar-state-menu">
+				<Menu bind:open={stateMenuOpen} onopenchange={(open) => { if (open) statePickingTime = false; }} onCloseAutoFocus={(event) => { if (statePickingTime) event.preventDefault(); }} appearance="final" ariaLabel="Session state options" align="start" class={stateChip.kind === "snoozed" && !sessionViewState.compact ? "w-[340px] max-w-[calc(100vw-16px)]" : undefined} data-testid="session-bar-state-menu">
 					{#snippet trigger({ props })}
-						<Button {...props} variant="ghost" size="content" class="min-h-[44px] min-w-[44px] shrink-0 rounded-full" ariaLabel={`${stateChip.label} — open options`} data-testid="session-bar-state-chip" data-state={stateChip.kind}>
-							<Badge variant="quiet" shape="pill" size="sm">
-								<Icon name={stateChip.icon} size={13} class={stateChip.kind === "snoozed" ? "text-brand-b" : "text-success"} />
+						<Button {...props} variant="ghost" size={sessionViewState.compact ? "phone-status" : "touch-pill"} touchTarget={sessionViewState.compact ? "always" : false} class="shrink-0" ariaLabel={`${stateChip.label} — open options`} data-testid="session-bar-state-chip" data-state={stateChip.kind}>
+							<Badge variant={stateChip.kind === "snoozed" ? "snoozed" : stateChip.kind === "pinned" ? "pinned" : "success"} shape="pill" size="session">
+							<Icon name={stateChip.icon} size={13} class={sessionViewState.compact ? (stateChip.kind === "snoozed" ? "text-status-snoozed" : "text-success") : ""} />
 								<span class="desktop-state-label">{stateChip.label}</span>
 							</Badge>
 						</Button>
 					{/snippet}
-					<div class="border-b border-border px-3 py-2 text-xs font-semibold text-text">
+					<div class="flex items-center gap-[7px] px-[10px] py-[8px] text-[13px] font-semibold text-text">
 						{#if stateChip.kind === "snoozed"}
-							{session.snoozedUntil == null ? "Snoozed" : `Snoozed until ${stateChip.label}`}
+							<Icon name="moon" size={14} class="text-status-snoozed" />
+							{session.snoozedUntil == null ? "Snoozed · no timer" : `Snoozed until ${formatSnoozeTime(session.snoozedUntil, sessionState.now)}`}
+							{#if !sessionViewState.compact}
+								<MenuItem variant="selected" closeOnSelect icon="undo" data-testid="session-bar-wake" class="ml-auto" onselect={() => void sessionCommandActions.unsnooze(session)}>Unsnooze</MenuItem>
+							{/if}
+						{:else if stateChip.kind === "pinned"}
+							Pinned to top
 						{:else}
 							{stateChip.label} {formatTimeAgo(session.settledAt)}
 						{/if}
@@ -565,27 +611,39 @@
 						{/if}
 					</div>
 					{#if stateChip.kind === "snoozed"}
-						<MenuItem data-testid="session-bar-wake" onselect={() => void sessionCommandActions.unsnooze(session)}>
+						{#if sessionViewState.compact}<MenuItem data-testid="session-bar-wake" onselect={() => void sessionCommandActions.unsnooze(session)}>
 							<Icon name="undo" size={13} /><span>Wake now</span>
-						</MenuItem>
+						</MenuItem>{:else}
+							<div class="px-[10px] pt-[8px] pb-[6px] text-[12.5px] font-medium text-text-muted">Change time</div>
+							{#each snoozeCommand?.options?.items ?? [] as option (option.id)}
+								<MenuItem variant={option.selected ? "selected" : "default"} density="option" icon={option.icon ?? "clock"} disabled={snoozeCommand?.disabledReason != null} title={snoozeCommand?.disabledReason ?? undefined} aria-current={option.selected ? "true" : undefined} data-testid={`session-state-snooze-${option.id}`} detail={option.detail} onselect={() => { statePickingTime = option.id === "pick"; stateMenuOpen = false; option.run(() => document.querySelector<HTMLElement>("[data-testid='session-bar-state-chip']") ?? document.getElementById("session-bar-more")); }}>
+									{option.label}
+								</MenuItem>
+							{/each}
+						{/if}
+					{:else if stateChip.kind === "pinned"}
+						<MenuItem icon="pin-off" onselect={() => getPinCommand(session).run()}>Unpin</MenuItem>
 					{:else}
 						<MenuItem data-testid="session-bar-unsettle" onselect={() => void sessionCommandActions.settle(session, false)}>
 							<Icon name="undo" size={13} /><span>Un-settle</span>
 						</MenuItem>
-						<MenuCheckboxItem data-testid="session-bar-auto-settle" checked={session.autoSettleDisabled !== true} onselect={() => void sessionCommandActions.autoSettle(session, session.autoSettleDisabled !== true)}>
-							<span class="w-[13px] shrink-0" aria-hidden="true"></span><span>Auto-settle when idle</span>
-						</MenuCheckboxItem>
 					{/if}
+					<AutoSettleRow {session} now={sessionState.now} testId="session-bar-auto-settle" />
 				</Menu>
 			{/if}
 		{/if}
 	</div>
-	<!-- Desktop gives the tasks their own line under the whole title line, as
-	     wide as the free space the title row grows into (style.css). -->
-	{#if backgroundTasks.length > 0 && !sessionViewState.compact}
-		<BackgroundTasksRow tasks={backgroundTasks} underGoal={goalShown} compact={false} />
-	{/if}
 	</div>
+	{/if}
+
+	{#if sessionViewState.compact && !collapsed && goalShown}
+		<Popover bind:open={goalDetails.open} presentation="sheet" modal initialFocus="content" labelledBy="goal-details-title" id="goal-details" data-testid="goal-details" portalTo="#session-bar" sheetBottomPadding={34} class="px-[20px] pt-[2px] whitespace-normal text-[12px]" sheetScrim={{ portalTo: goalSubtitleEl?.closest("#session-bar")?.parentElement ?? undefined, zIndex: "var(--z-dropdown)", testId: "goal-details-scrim" }}
+			onopenchange={(open) => { if (open) { goalFocusHandedOff = false; tasksPanel.open = false; sideThreadsPanel.open = false; } }}
+			onCloseAutoFocus={(event) => { if (goalFocusHandedOff) event.preventDefault(); goalFocusHandedOff = false; }}
+		>
+			{#snippet trigger({ props })}{@render goalLine(props)}{/snippet}
+			{@render goalContent()}
+		</Popover>
 	{/if}
 
 	{#if !sessionViewState.compact}{@render identityBlock()}{/if}
@@ -593,9 +651,8 @@
 	{#if !sessionViewState.compact}
 		<div id="session-bar-connection" class="flex shrink-0 items-center gap-[5px] px-[4px] text-[10px] text-text-muted">
 			<span id="status" class="status-dot size-[6px] shrink-0 rounded-full {statusClass}" title={statusTitle} role="status"><span class="sr-only">{statusTitle}</span></span>
-			{#if uiState.clientCount > 1}
-				<span id="client-count-badge" class="tabular-nums">{uiState.clientCount}</span>
-			{/if}
+			<Icon name="laptop" size={13} />
+			<span id="client-count-badge" class="font-mono tabular-nums">{uiState.clientCount}</span>
 		</div>
 	{/if}
 
@@ -605,11 +662,12 @@
 		<Button
 			id="session-bar-chevron"
 			variant="ghost"
-			size="content"
+			size="touch-icon"
+			touchTarget="always"
 			iconOnly
 			icon="chevron-down"
-			iconSize={17}
-			class="shrink-0 min-h-[44px] min-w-[44px] justify-center rounded-lg"
+			iconSize={14}
+			class="shrink-0"
 			title="Show the bar"
 			ariaLabel="Show session controls"
 			aria-expanded={false}
@@ -620,71 +678,28 @@
 	{/if}
 
 	{#if collapsed || !sessionViewState.compact}{@render overflowMenu()}{/if}
+	{#if backgroundTasks.length > 0 && !collapsed}
+		<BackgroundTasksRow tasks={backgroundTasks} compact={sessionViewState.compact} onstop={supportsTaskStop ? (taskId) => { void stopBackgroundTasks(sessionState.currentId, taskId); } : undefined} onstopall={supportsTaskStop ? () => { void stopBackgroundTasks(sessionState.currentId); } : undefined} />
+	{/if}
 
 	{#if titleMenuOpen && titleMenuAnchor && session}
 		<SessionContextMenu
 			{session}
 			anchor={titleMenuAnchor}
 			projectLabel={project?.title ?? getCurrentSlug() ?? undefined}
+			projectAccent={getProjectAccent(session)}
 			branch={session.git?.branch}
 			presentation={sessionViewState.compact ? "sheet" : "menu"}
 			now={sessionState.now}
 			host={{ rename: () => { renaming = true; } }}
 			onclose={() => { titleMenuOpen = false; }}
-			extras={globalActions.map((action) => ({ testId: `session-title-${action.id}`, label: action.label, icon: action.icon, run: action.run }))}
+			extras={globalActions.map((action) => ({ ...action, testId: `session-title-${action.id}` }))}
 		/>
 	{/if}
 
-	{#if goalDetails.open && detailsGoal && goalFacts}
-		<Surface id="goal-details" data-testid="goal-details" variant="plain" radius="none" elevation="panel" role="region" aria-label="Goal details" class="absolute inset-x-0 top-full z-[var(--z-popover)] max-h-[70dvh] overflow-y-auto rounded-b-[22px] border-b border-border px-[14px] pt-[12px] pb-[8px] text-[12px]">
-			<div class="flex items-center gap-[6px] font-brand text-[11px] font-semibold uppercase tracking-[0.08em] text-status-violet">
-				<Icon name="target" size={13} />Goal
-				<span class="ml-auto rounded-[6px] border border-current/40 px-[6px] text-[10px] normal-case tracking-normal {goalTone}">{goalPhaseLabel}</span>
-			</div>
-			<p data-testid="goal-details-condition" class="mt-[6px] mb-[4px] font-brand text-[14px] font-semibold leading-[1.35] text-text">{detailsGoal.condition}</p>
-			<div data-testid="goal-details-meta" class="text-[11px] text-text-muted">
-				Set {goalElapsed(detailsNow - detailsGoal.setAt)} ago · {detailsGoal.iterations} checks{details?.tokensSinceStart != null && !detailsLoading ? ` · ${goalTokens(details.tokensSinceStart)} tokens` : ""}
-			</div>
-			<div class="mt-[10px] mb-[5px] text-[10px] uppercase tracking-[0.08em] text-text-muted">Check history</div>
-			<ol data-testid="goal-details-history" class="m-0 flex list-none flex-col gap-[5px] p-0">
-				{#each details?.checks ?? [] as check (check.iteration)}
-					<li data-testid="goal-details-check" class="goal-details-check">
-						<Icon name="x" size={13} class="mt-px text-status-amber" />
-						<span class="text-text-muted">{goalElapsed(check.at - detailsGoal.setAt)}</span>
-						<span>Not yet{check.reason ? ` · ${check.reason}` : ""}</span>
-					</li>
-				{/each}
-				{#if goal.phase === "checking"}
-					<li data-testid="goal-details-check" class="goal-details-check">
-						<Icon name="loader-circle" size={13} class="mt-px motion-safe:animate-spin text-status-violet" />
-						<span class="text-text-muted">now</span><span>Checking…</span>
-					</li>
-				{:else if goalFacts.ended === "met"}
-					<li data-testid="goal-details-check" class="goal-details-check">
-						<Icon name="check" size={13} class="mt-px text-status-green" />
-						<span class="text-text-muted">{goalFacts.endedAt === undefined ? "" : goalElapsed(goalFacts.endedAt - detailsGoal.setAt)}</span>
-						<span>Met{detailsGoal.lastReason ? ` · ${detailsGoal.lastReason}` : ""}</span>
-					</li>
-				{/if}
-				{#if detailsLoading}
-					<li role="status" class="goal-details-check"><span class="col-span-full text-text-muted">Loading checks…</span></li>
-				{:else if detailsFailed}
-					<li role="status" class="goal-details-check"><span class="col-span-full text-status-red">{detailsFailed}</span></li>
-				{:else if !details?.checks.length && goal.phase !== "checking" && goal.phase !== "met"}
-					<li class="goal-details-check"><span class="col-span-full">No checks yet. The first runs when Claude finishes a turn.</span></li>
-				{/if}
-			</ol>
-			<div class="mt-[12px] flex gap-[6px]">
-				{#if goalFacts.goal}
-					<Button variant="secondary" size="content" tone="secondary" class="rounded-[9px] px-[10px] py-[6px] text-[11.5px]" data-testid={goal.phase === "paused" ? "goal-details-resume" : "goal-details-pause"} onclick={() => runGoalAction(goal.phase === "paused" ? "resume" : "pause")}>{goal.phase === "paused" ? "Resume" : "Pause"}</Button>
-					<Button variant="secondary" size="content" tone="secondary" class="rounded-[9px] px-[10px] py-[6px] text-[11.5px]" data-testid="goal-details-edit" onclick={() => runGoalAction("edit")}>Edit</Button>
-					<Button variant="secondary" size="content" tone="inherit" class="ml-auto rounded-[9px] px-[10px] py-[6px] text-[11.5px] text-status-red" data-testid="goal-details-clear" onclick={() => runGoalAction("clear")}>Clear goal</Button>
-				{:else if goalFacts.ended === "met"}
-					<Button variant="secondary" size="content" tone="secondary" class="rounded-[9px] px-[10px] py-[6px] text-[11.5px]" data-testid="goal-details-new" onclick={() => runGoalAction("new")}>Set a new goal</Button>
-					<Button variant="secondary" size="content" tone="inherit" class="ml-auto rounded-[9px] px-[10px] py-[6px] text-[11.5px] text-status-red" data-testid="goal-details-dismiss" onclick={() => { if (goalFacts) dismissGoalMet(goalFacts); closeGoalDetails(); }}>Dismiss</Button>
-				{/if}
-			</div>
-			<div aria-hidden="true" class="mx-auto mt-[12px] h-[3px] w-[34px] rounded-full bg-text-dimmer/30"></div>
+	{#if goalDetails.open && detailsGoal && goalFacts && !sessionViewState.compact}
+		<Surface id="goal-details" data-testid="goal-details" variant="floating" radius="none" elevation="popover" role="region" aria-label="Goal details" class="z-[var(--z-popover)] whitespace-normal text-[12px] absolute top-full left-[20px] mt-[8px] max-h-[70dvh] w-[380px] max-w-[calc(100%-40px)] overflow-y-auto rounded-[16px] p-[6px]">
+			{@render goalContent()}
 		</Surface>
 	{/if}
 
@@ -699,10 +714,14 @@
 </div>
 
 <style>
-	.session-bar-segments { flex-shrink: 1; }
-	.session-bar-segments:not(:has(> :global(*))) { display: none; }
-	.session-bar-segments > :global(* + *) { border-left: 1px solid var(--color-border); }
-	:global(#session-bar[data-compact="true"][data-collapsed="false"] #session-bar-more) { min-width: 24px; min-height: 24px; width: 24px; height: 24px; }
+	#session-bar-meta > :global(.session-bar-segments) { flex-shrink: 1; }
+	#session-bar-meta > :global(.session-bar-segments:not(:has(> *))) { display: none; }
+	#session-bar-meta > :global(.session-bar-segments) > :global(* + *) { position: relative; }
+	#session-bar-meta > :global(.session-bar-segments) > :global(* + *)::after { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 1px; background: var(--color-border-chip); }
+	#session-bar-meta > :global(.session-bar-segments) > :global(#session-bar-settle[data-emphasis="primary"])::after { display: none; }
+	.desktop-goal-check { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 7px 10px; font-size: 12.5px; line-height: 1.4; color: var(--color-text-secondary); }
+	.desktop-goal-check b { font-weight: 600; color: var(--color-text); }
+	.desktop-goal-check time { font-family: var(--font-mono); font-size: 11px; }
 	.goal-details-check {
 		display: grid;
 		grid-template-columns: 14px 32px minmax(0, 1fr);

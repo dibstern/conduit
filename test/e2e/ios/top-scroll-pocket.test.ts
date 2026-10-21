@@ -67,8 +67,8 @@ const CASES: Record<string, string[]> = {
 		`scroll-up=${SCROLL_UP}`,
 		`session-menu-open=${menu("#session-bar-more", true)}`,
 		`session-menu-close=${menu("#session-bar-more", false)}`,
-		`composer-menu-open=${menu('[data-testid="composer-more"]', true)}`,
-		`composer-menu-close=${menu('[data-testid="composer-more"]', false)}`,
+		`composer-menu-open=${menu('[data-testid="model-picker-trigger"]', true)}`,
+		`composer-menu-close=${menu('[data-testid="model-picker-trigger"]', false)}`,
 	],
 	"island, scrolled up": [
 		`ready=${READY}`,

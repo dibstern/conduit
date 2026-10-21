@@ -11,6 +11,7 @@ import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
+import { sessionCreatedLineage } from "../../../contracts/session-ref.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
 import { makeAppendEventsWithClaudeTurnCosts } from "../../../persistence/effect/claude-event-persist-effect.js";
 import {
@@ -52,6 +53,7 @@ import type { RelayMessage } from "../../../types.js";
 import { isRecord } from "../../../utils.js";
 import type { UsageService } from "../../daemon/Services/usage.js";
 import { ContinuationLive, ContinuationTag } from "./continuation.js";
+import { InputDraftsLive, InputDraftsTag } from "./input-drafts.js";
 import { announceBackgroundWork } from "./session-attention.js";
 import { sessionPickEvents } from "./session-pick.js";
 
@@ -95,8 +97,11 @@ export interface ProviderRuntimeIngestion {
 			readonly sessionPicks?: ReadonlyMap<string, TurnSettings>;
 			readonly publishToBus?: boolean;
 			readonly publishToRelay?: boolean;
+			/** Runs inside the append transaction, before any projection. */
+			readonly beforeProject?: Effect.Effect<void, SqlError>;
 			readonly beforeCommit?: Effect.Effect<void, SqlError>;
 			readonly afterCommit?: Effect.Effect<void>;
+			readonly endedRunEvents?: Set<string>;
 		},
 	) => Effect.Effect<number, ProviderRuntimeIngestionError>;
 	readonly drain: () => Effect.Effect<void>;
@@ -146,6 +151,7 @@ export const makeProviderRuntimeIngestionLive = (
 			const commitAndSignal = yield* makeCommitAndSignal;
 			const appendEvents = yield* makeAppendEventsWithClaudeTurnCosts;
 			const sql = yield* SqlClient.SqlClient;
+			const drafts = yield* InputDraftsTag;
 			const eventStore = yield* EventStoreEffectTag;
 			const continuation = yield* ContinuationTag;
 			const services = yield* Effect.context<
@@ -162,8 +168,10 @@ export const makeProviderRuntimeIngestionLive = (
 					readonly sessionPicks?: ReadonlyMap<string, TurnSettings>;
 					readonly publishToBus?: boolean;
 					readonly publishToRelay?: boolean;
+					readonly beforeProject?: Effect.Effect<void, SqlError>;
 					readonly beforeCommit?: Effect.Effect<void, SqlError>;
 					readonly afterCommit?: Effect.Effect<void>;
+					readonly endedRunEvents?: Set<string>;
 					readonly onPrompt?: (id: string) => Effect.Effect<void>;
 				} = {},
 			): Effect.Effect<number, ProviderRuntimeIngestionError> =>
@@ -318,6 +326,9 @@ export const makeProviderRuntimeIngestionLive = (
 							}
 
 							let appended = true;
+							const endedRunEvents =
+								ingestOptions.endedRunEvents ?? new Set<string>();
+							const draftsToForget = new Set<string>();
 							const acceptedLimits: string[] = [];
 							const completedAccounts = new Set<string>();
 							let skippedLimits = 0;
@@ -355,6 +366,16 @@ export const makeProviderRuntimeIngestionLive = (
 							});
 							const afterCommit = Effect.gen(function* () {
 								if (appended) {
+									for (const id of draftsToForget)
+										yield* drafts
+											.forget(id)
+											.pipe(
+												Effect.catch((cause) =>
+													Effect.logError(
+														`Could not forget input draft ${id}: ${cause}`,
+													),
+												),
+											);
 									yield* Ref.set(mapperStateRef, nextState);
 									for (const id of promptIds)
 										yield* ingestOptions.onPrompt?.(id) ?? Effect.void;
@@ -373,12 +394,14 @@ export const makeProviderRuntimeIngestionLive = (
 							});
 							const commitOptions = {
 								publish: ingestOptions.publishToBus ?? true,
+								endedRunEvents,
 								afterCommit,
 							};
 							yield* commitAndSignal
 								.write(
 									(project, stamp) =>
 										Effect.gen(function* () {
+											yield* ingestOptions.beforeProject ?? Effect.void;
 											// Claim inside the append transaction, before event IDs or
 											// projections are written. Replayed and fenced frames are no-ops.
 											if (context && (receipt || context.attachmentId))
@@ -394,11 +417,9 @@ export const makeProviderRuntimeIngestionLive = (
 											for (const { event, record } of prepared)
 												if (record) sessionIds.add(event.sessionId);
 											for (const event of domainEvents)
-												if (
-													event.type === "session.created" &&
-													event.data.parentId
-												)
-													sessionIds.add(event.data.parentId);
+												if (event.type === "session.created")
+													for (const id of sessionCreatedLineage(event.data))
+														sessionIds.add(id);
 											const deleted = new Set<string>();
 											for (const id of sessionIds)
 												if (yield* isSessionDeleted(id)) deleted.add(id);
@@ -434,11 +455,13 @@ export const makeProviderRuntimeIngestionLive = (
 												}
 												if (
 													event.type === "session.created" &&
-													event.data.parentId &&
-													deleted.has(event.data.parentId)
+													sessionCreatedLineage(event.data).some((id) =>
+														deleted.has(id),
+													)
 												) {
-													// A child discovered after cascading deletion belongs to that
-													// deletion too. Keep its tombstone for parentless late events.
+													// Keep creation and death in one commit. The missing-lineage
+													// projector skips creation; drain then reclaims its event.
+													accepted.push(event);
 													event = {
 														...event,
 														eventId: Schema.decodeUnknownSync(EventId)(
@@ -456,18 +479,24 @@ export const makeProviderRuntimeIngestionLive = (
 													continue;
 												if (event.type === "session.deleted") {
 													deleted.add(event.sessionId);
+													draftsToForget.add(event.sessionId);
 													const subtree = yield* sql.unsafe<{ id: string }>(
 														SESSION_SUBTREE_SQL,
 														[event.sessionId],
 													);
-													for (const row of subtree) deleted.add(row.id);
+													for (const row of subtree) {
+														deleted.add(row.id);
+														draftsToForget.add(row.id);
+													}
 													for (const previous of accepted)
 														if (
 															previous.type === "session.created" &&
 															previous.data.parentId &&
 															deleted.has(previous.data.parentId)
-														)
+														) {
 															deleted.add(previous.sessionId);
+															draftsToForget.add(previous.sessionId);
+														}
 												}
 												accepted.push(event);
 												if (
@@ -566,15 +595,9 @@ export const makeProviderRuntimeIngestionLive = (
 														event.data.messageId,
 													);
 													if (rewind) {
-														const events = rewind.events.map((removal) => {
-															if (removal.type !== "message.removed")
-																return removal;
-															rewoundMessageIds.add(removal.data.messageId);
-															return removal.data.messageId ===
-																event.data.messageId
-																? event
-																: removal;
-														});
+														for (const messageId of rewind.removedMessageIds)
+															rewoundMessageIds.add(messageId);
+														const events = rewind.events;
 														yield* project(yield* appendEvents(events));
 														domainEvents = domainEvents.flatMap((candidate) =>
 															candidate.eventId === event.eventId
@@ -627,7 +650,9 @@ export const makeProviderRuntimeIngestionLive = (
 								ingestOptions.publishToRelay !== false
 							) {
 								yield* publishRelayMessages(
-									domainEvents,
+									domainEvents.filter((event) =>
+										endedRunEvents.has(event.eventId),
+									),
 									options.relayPublisher,
 								);
 							}
@@ -645,6 +670,7 @@ export const makeProviderRuntimeIngestionLive = (
 			} satisfies ProviderRuntimeIngestion;
 		}),
 	).pipe(
+		Layer.provide(InputDraftsLive),
 		// Suspended: this module sits on an import cycle back through ContinuationLive, so the eager export below would read it before it is initialised.
 		Layer.provideMerge(Layer.suspend(() => ContinuationLive)),
 	);

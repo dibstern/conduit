@@ -20,12 +20,16 @@ import {
 } from "../contracts/provider-instance.js";
 import {
 	type DaemonConfigLoadError,
+	DaemonConfigUnreadable,
 	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
+	DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	defaultDaemonConfig,
 	getConfigDir,
 	loadDaemonConfigResult,
 } from "../daemon/config-persistence.js";
+import { AccountPictureLive } from "../domain/daemon/Layers/account-picture-layer.js";
+import { CategorySetLive } from "../domain/daemon/Layers/category-set-layer.js";
 import {
 	ConfigPersistenceLive,
 	ConfigSnapshotTag,
@@ -33,17 +37,23 @@ import {
 } from "../domain/daemon/Layers/config-persistence-layer.js";
 import { makeStandaloneOpenCodeInstancesLive } from "../domain/daemon/Layers/opencode-instances-layer.js";
 import { makeConfiguredCursorUsage } from "../domain/daemon/Layers/usage-layer.js";
+import { UserAvatarLive } from "../domain/daemon/Layers/user-avatar-layer.js";
 import { makeWorktreeLive } from "../domain/daemon/Layers/worktree-layer.js";
 import {
 	AccountDirectory,
 	AccountDirectoryStateLive,
 } from "../domain/daemon/Services/account-directory.js";
+import { CategorySet } from "../domain/daemon/Services/category-set.js";
 import { ConfigPersistenceTag } from "../domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
 	DaemonConfigRefTag,
 	makeDaemonConfigFromOptions,
 } from "../domain/daemon/Services/daemon-config-ref.js";
+import {
+	MessageSurfacingSettings,
+	makeMessageSurfacingSettings,
+} from "../domain/daemon/Services/message-surfacing-settings.js";
 import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
@@ -57,11 +67,12 @@ import {
 	SessionDirectoryReadError,
 } from "../domain/daemon/Services/session-directory.js";
 import { makeUsage, Usage } from "../domain/daemon/Services/usage.js";
-import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
+import type { EventRetentionTag } from "../domain/persistence/Services/event-retention.js";
+import type { EventRetentionSchedulerTag } from "../domain/persistence/Services/event-retention-scheduler.js";
+import type { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
 import { makePtyRuntimeLive } from "../domain/relay/Layers/pty-manager-layer.js";
 import {
-	backgroundOpenCodeAPI,
 	makeProjectRelayConfigLive,
 	OpenCodeAPILive,
 	ProjectRelayLoggerLive,
@@ -85,6 +96,8 @@ import {
 } from "../domain/relay/Services/daemon-session-query-service.js";
 import { DirectoryListingServiceLive } from "../domain/relay/Services/directory-listing-service.js";
 import { DraftPreWarmLive } from "../domain/relay/Services/draft-prewarm.js";
+import { HandoffReceiptsLive } from "../domain/relay/Services/handoff-receipts.js";
+import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
 import {
 	InstanceManagementServiceLive,
 	InstanceManagementServiceTag,
@@ -99,13 +112,18 @@ import {
 	ProjectManagementServiceLive,
 	ProjectManagementServiceTag,
 } from "../domain/relay/Services/project-management-service.js";
-import { makeProviderRuntimeIngestionLive } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
+	makeProviderRuntimeIngestionLive,
+	type ProviderRuntimeIngestionTag,
+} from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceLive } from "../domain/relay/Services/provider-turn-service.js";
+import { makeRecapServiceLive } from "../domain/relay/Services/recap-service.js";
 import {
 	ScanServiceLive,
 	ScanServiceTag,
 } from "../domain/relay/Services/scan-service.js";
 import {
+	AgentLivenessTag,
 	BackgroundLivenessTag,
 	type ConfigTag,
 	LiveTaskListTag,
@@ -152,6 +170,7 @@ import {
 } from "../persistence/effect/live.js";
 import type { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import { ClaudeProviderInstance } from "../provider/claude/claude-provider-instance.js";
 import { captureClaudeLaunchLogin } from "../provider/claude/claude-sdk-env.js";
 import { defaultClaudeSessionForkSdk } from "../provider/claude/claude-session-fork.js";
 import { makeClaudeUsageReader } from "../provider/claude/claude-usage-probe.js";
@@ -159,6 +178,7 @@ import {
 	makeOrchestrationRuntimeLayer,
 	type OrchestrationRuntimeLayerOptions,
 } from "../provider/orchestration-wiring.js";
+import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import { SqliteProviderSessionBindingReadModel } from "../provider/provider-session-binding-read-model.js";
 import { usageAccounts } from "../provider/usage-reader.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
@@ -222,6 +242,8 @@ const relayOpenCodeInstances = (
 			instances.useIfRunning(target(instanceId), directory),
 		ifRunning: (instanceId, directory = scope) =>
 			instances.ifRunning(target(instanceId), directory),
+		isManagedStopped: (instanceId) =>
+			instances.isManagedStopped(target(instanceId)),
 		stop: (instanceId) => instances.stop(target(instanceId)),
 	};
 };
@@ -238,6 +260,9 @@ export type RelayRuntimeServices =
 	| OrchestrationEngineTag
 	| SessionWorkspaceTag
 	| EventStoreEffectTag
+	| EventRetentionTag
+	| EventRetentionSchedulerTag
+	| ProviderRuntimeIngestionTag
 	| ProjectionRunnerEffectTag
 	| SessionSetupTag
 	| OverridesStateTag
@@ -273,7 +298,8 @@ export interface ProjectRelayLayerInputs {
 	claudeRunnerFactory?: OrchestrationRuntimeLayerOptions["claudeRunnerFactory"];
 	testSendLimit?: number;
 	onBackgroundWorkChanged: (sessionId: string) => void;
-	getWsHandler: () => WebSocketHandlerShape;
+	/** Undefined until startup finishes; runner adoption publishes before then. */
+	getWsHandler: () => WebSocketHandlerShape | undefined;
 }
 
 /** Build the shared per-project Layer graph and its managed runtime. */
@@ -295,7 +321,7 @@ export function createProjectRelayLayers({
 	// Imperative edge objects are provided as ports and merged into one Layer tree.
 
 	const configLayer = makeProjectRelayConfigLive({ ...config, claudeSdk });
-	const daemonConfigLayer: Layer.Layer<
+	const daemonSettingsLayer: Layer.Layer<
 		DaemonConfigRefTag | ConfigPersistenceTag | AccountDirectory,
 		DaemonConfigLoadError
 	> = Layer.unwrap(
@@ -353,6 +379,7 @@ export function createProjectRelayLayers({
 							const { cursorUsageBinding: _binding, ...unchanged } = persisted;
 							return {
 								...unchanged,
+								...(current.avatar !== undefined && { avatar: current.avatar }),
 								autoSettleAfterDays:
 									current.autoSettleAfterDays === undefined
 										? DEFAULT_AUTO_SETTLE_AFTER_DAYS
@@ -361,6 +388,10 @@ export function createProjectRelayLayers({
 									current.autoArchiveAfterDays === undefined
 										? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS
 										: current.autoArchiveAfterDays,
+								autoDeleteArchivedAfterDays:
+									current.autoDeleteArchivedAfterDays === undefined
+										? DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS
+										: current.autoDeleteArchivedAfterDays,
 								...(current.worktreeCleanup !== undefined && {
 									worktreeCleanup: current.worktreeCleanup,
 								}),
@@ -385,6 +416,10 @@ export function createProjectRelayLayers({
 		Layer.merge(
 			Layer.succeedContext(config.daemonConfigContext ?? Context.empty()),
 		),
+	);
+	const daemonConfigLayer = UserAvatarLive.pipe(
+		Layer.provide(AccountPictureLive),
+		Layer.provideMerge(daemonSettingsLayer),
 	);
 	const activityLayer = Layer.effect(
 		SessionActivityTag,
@@ -498,6 +533,10 @@ export function createProjectRelayLayers({
 		config.daemonConfigContext ?? Context.empty(),
 		SessionEventBusTag,
 	);
+	const sharedDrafts = Context.getOption(
+		config.daemonConfigContext ?? Context.empty(),
+		InputDraftsTag,
+	);
 	// Returning the daemon instance adds no ownership to the relay scope.
 	// Keep one layer reference so every writer and subscriber uses the same bus.
 	const sessionEventBusLayer = Option.isSome(sharedBus)
@@ -514,7 +553,16 @@ export function createProjectRelayLayers({
 					undefined,
 					sessionEventBusLayer,
 				)
-	).pipe(Layer.provideMerge(activityReaders));
+	).pipe(
+		Layer.provideMerge(activityReaders),
+		// Relay writers and subscribers share the daemon instance, so a draft that
+		// moves between projects keeps one broadcast channel.
+		Layer.merge(
+			Option.isSome(sharedDrafts)
+				? Layer.sync(InputDraftsTag, () => sharedDrafts.value)
+				: Layer.empty,
+		),
+	);
 	// Standalone WebSocket routing resolves only sessions owned by this relay.
 	const sessionDirectoryLayer = Option.isSome(sharedDirectory)
 		? Layer.succeedContext(
@@ -666,7 +714,7 @@ export function createProjectRelayLayers({
 				relayPublisher: {
 					publish: (msg) =>
 						publishProviderRelayMessage(msg, {
-							wsHandler: getWsHandler(),
+							wsHandler: getWsHandler() ?? { getClientsForSession: () => [] },
 							log,
 							slug: config.slug,
 							...(config.pushManager
@@ -717,6 +765,7 @@ export function createProjectRelayLayers({
 	const pendingInteractionServiceLayer = PendingInteractionServiceLive;
 	const providerOrchestrationDeps = Layer.mergeAll(
 		daemonConfigLayer,
+		sessionWorkspaceLayer,
 		openCodeApiLayer,
 		persistenceEffectLayer,
 		// The engine commits input.sent through commit-and-signal, which
@@ -728,8 +777,23 @@ export function createProjectRelayLayers({
 		instanceManagementLayer,
 	);
 	const providerOrchestrationLayer = orchestrationRuntimeLayer.pipe(
+		// Recovery can publish a completed run while orchestration is adopted.
+		Layer.provide(HandoffReceiptsLive),
 		Layer.provide(providerOrchestrationDeps),
 	);
+	const agentLivenessLayer = Layer.effect(
+		AgentLivenessTag,
+		Effect.gen(function* () {
+			const registry = yield* ProviderRegistryTag;
+			return (sessionId: string) =>
+				Effect.suspend(() => {
+					const instance = registry.getInstance("claude");
+					return instance instanceof ClaudeProviderInstance
+						? instance.hasLiveProcessEffect(sessionId)
+						: Effect.succeed(false);
+				});
+		}),
+	).pipe(Layer.provide(providerOrchestrationLayer));
 	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
 		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
 	);
@@ -802,13 +866,14 @@ export function createProjectRelayLayers({
 	);
 	// Polling must not restart an idle-stopped OpenCode.
 	const messagePollerManagerLayer = makeMessagePollerManagerLive({
-		hasViewers: (sid) => getWsHandler().getClientsForSession(sid).length > 0,
+		hasViewers: (sid) =>
+			(getWsHandler()?.getClientsForSession(sid).length ?? 0) > 0,
 	}).pipe(
 		Layer.provide(
 			Layer.mergeAll(
-				Layer.effect(OpenCodeAPITag, backgroundOpenCodeAPI).pipe(
-					Layer.provide(Layer.merge(configLayer, openCodeInstancesLayer)),
-				),
+				sessionWorkspaceLayer,
+				openCodeInstancesLayer,
+				persistenceEffectLayer,
 				configLayer,
 				loggerLayer,
 			),
@@ -844,7 +909,9 @@ export function createProjectRelayLayers({
 	}));
 
 	const coreBridgeLayers = Layer.mergeAll(
+		sessionWorkspaceLayer,
 		sessionDirectoryLayer,
+		sessionWorkspaceLayer,
 		daemonConfigLayer,
 		config.worktreeContext
 			? Layer.succeedContext(config.worktreeContext)
@@ -868,6 +935,7 @@ export function createProjectRelayLayers({
 		webSocketHandlerLayer,
 		messagePollerManagerLayer,
 		activityReaders,
+		agentLivenessLayer,
 		ptyRuntimeLayer,
 		configLayer,
 		loggerLayer,
@@ -896,9 +964,45 @@ export function createProjectRelayLayers({
 		StatusPollerLive,
 		Layer.provideMerge(SessionGitLive, relayStateAndBridges),
 	);
+	const recapSettingsLayer = Layer.suspend(() => {
+		const shared = config.daemonConfigContext ?? Context.empty();
+		const settings = Context.getOption(shared, MessageSurfacingSettings);
+		const categories = Context.getOption(shared, CategorySet);
+		const configDir = config.configDir ?? getConfigDir();
+		return Layer.merge(
+			Option.isSome(settings)
+				? Layer.succeedContext(
+						Context.make(MessageSurfacingSettings, settings.value),
+					)
+				: Layer.effect(
+						MessageSurfacingSettings,
+						makeMessageSurfacingSettings(configDir),
+					),
+			Option.isSome(categories)
+				? Layer.succeedContext(Context.make(CategorySet, categories.value))
+				: CategorySetLive(configDir),
+		);
+	}).pipe(
+		Layer.catch((cause) =>
+			Layer.effectContext(
+				Effect.fail(
+					new DaemonConfigUnreadable({
+						path: config.configDir ?? getConfigDir(),
+						cause,
+					}),
+				),
+			),
+		),
+	);
+	const relayStateWithRecaps = makeRecapServiceLive({
+		queryFactory: config.titleQuery ?? claudeSdk.titleQuery,
+	}).pipe(
+		Layer.provideMerge(relayStateBridgesAndStatus),
+		Layer.provide(recapSettingsLayer),
+	);
 	const relayStateServicesAndBridges = Layer.provideMerge(
 		AgentServiceLive,
-		relayStateBridgesAndStatus,
+		relayStateWithRecaps,
 	);
 	const translatorLayer = Layer.sync(TranslatorTag, () => createTranslator());
 	const baseLayers = Layer.provideMerge(
@@ -938,7 +1042,7 @@ export function createProjectRelayLayers({
 	const wiringLayers = Layer.mergeAll(
 		PermissionTimeoutLive,
 		sessionLifecycleWiringLayer,
-	).pipe(Layer.provide(baseLayers));
+	).pipe(Layer.provide(Layer.merge(baseLayers, sessionWorkspaceLayer)));
 	const inboxLayer = SessionInboxLive.pipe(Layer.provide(sessionEventBusLayer));
 	// Provide the borrowed daemon tracer to every layer, including fibers forked
 	// while building services such as the status poller.

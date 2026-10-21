@@ -246,10 +246,11 @@ function streamLiveAssistant(
 	messageId: string,
 	created: number,
 	text: string,
+	parentID?: string,
 ): void {
 	mock.emitTestEvent("message.updated", {
 		sessionID: SESSION_ID,
-		info: assistantInfo(messageId, created),
+		info: assistantInfo(messageId, created, undefined, parentID),
 	});
 	mock.emitTestEvent("message.part.updated", {
 		sessionID: SESSION_ID,
@@ -1292,6 +1293,25 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 			async () => (await messageRows(dbPath))[0]?.is_streaming === 0,
 			"completed live assistant",
 		);
+		mock.emitTestEvent("session.status", {
+			sessionID: SESSION_ID,
+			status: { type: "idle" },
+		});
+		await waitFor(
+			async () => (await readTurns(dbPath))[0]?.state === "completed",
+			"owned native idle",
+		);
+		const lifecycle = Effect.flatMap(
+			SqlClient.SqlClient,
+			(sql) => sql`SELECT t.run_id, t.state, t.started_at, t.completed_at,
+				t.cost, t.tokens_in, t.tokens_out, r.status AS run_status
+				FROM turns t JOIN provider_runs r ON r.id = t.run_id
+				WHERE t.user_message_id = 'msg_u1' AND t.session_id = ${SESSION_ID}`,
+		);
+		const completedLifecycle = await readStore(dbPath, lifecycle);
+		expect(completedLifecycle).toMatchObject([
+			{ state: "completed", run_status: "completed" },
+		]);
 		await stack.stop();
 		stack = undefined;
 		mock.setExactResponse("GET", restPath, 200, [
@@ -1322,9 +1342,10 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 			expect.objectContaining({
 				user_message_id: "msg_u1",
 				assistant_message_id: null,
-				state: "pending",
+				state: "completed",
 			}),
 		);
+		expect(await readStore(dbPath, lifecycle)).toEqual(completedLifecycle);
 		expect(await readTurns(dbPath)).toContainEqual(
 			expect.objectContaining({
 				user_message_id: "msg_u_missing",
@@ -1530,19 +1551,31 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
-		mock.setExactResponse("GET", `/session/${SESSION_ID}/message`, 200, [
+		const restPath = `/session/${SESSION_ID}/message`;
+		mock.setExactResponse("GET", restPath, 200, [
+			u1,
 			{
-				info: assistantInfo("msg_a1", T0 + 2_000, T0 + 5_000),
+				info: assistantInfo("msg_a1", T0 + 2_000),
 				parts: [textPart("msg_a1", "answer")],
 			},
 		]);
 		stack = await startStack(mock, dbPath);
 		streamLiveAssistant(mock, "msg_a1", T0 + 2_000, "answer");
-		await waitFor(
-			async () => (await messageRows(dbPath))[0]?.is_streaming === 1,
-			"streaming row",
-		);
+		await waitFor(async () => {
+			const rows = await messageRows(dbPath);
+			return (
+				rows.find((row) => row.id === "msg_u1")?.is_backfilled === 1 &&
+				rows.find((row) => row.id === "msg_a1")?.is_streaming === 1
+			);
+		}, "settled REST user and streaming assistant");
 		expect(await historyComplete(dbPath)).toBe(false);
+		mock.setExactResponse("GET", restPath, 200, [
+			u1,
+			{
+				info: assistantInfo("msg_a1", T0 + 2_000, T0 + 5_000),
+				parts: [textPart("msg_a1", "answer")],
+			},
+		]);
 		mock.emitTestEvent("message.updated", {
 			sessionID: SESSION_ID,
 			info: assistantInfo("msg_a1", T0 + 2_000, T0 + 5_000),
@@ -1669,10 +1702,12 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 			info: assistantInfo("msg_a1", T0 + 2_000, T0 + 5_000),
 		});
 		await waitFor(
-			async () => (await readTurns(dbPath))[0]?.state === "completed",
+			async () =>
+				(await messageRows(dbPath)).find(({ id }) => id === "msg_a1")
+					?.is_streaming === 0,
 			"first assistant completion",
 		);
-		streamLiveAssistant(mock, "msg_a2", T0 + 6_000, "second answer");
+		streamLiveAssistant(mock, "msg_a2", T0 + 6_000, "second answer", "msg_u1");
 		await waitFor(
 			async () =>
 				(await readTurns(dbPath))[0]?.assistant_message_id === "msg_a2",
@@ -1891,7 +1926,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 		]);
 	}, 60_000);
 
-	it("leaves provider-ahead unsettled REST history pending", async () => {
+	it("imports settled provider-ahead history while leaving the live assistant pending", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-ahead-")),
 			"events.sqlite",
@@ -1905,12 +1940,17 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 		]);
 		stack = await startStack(mock, dbPath);
 		streamLiveAssistant(mock, "msg_a2", ahead + 1_000, "live answer");
-		await waitFor(
-			async () => (await projectedTexts(dbPath))["msg_a2"] === "live answer",
-			"live message",
-		);
+		await waitFor(async () => {
+			const texts = await projectedTexts(dbPath);
+			return (
+				texts["msg_u1"] === "first question" &&
+				texts["msg_a2"] === "live answer"
+			);
+		}, "settled REST user and live assistant");
 		const rows = await messageRows(dbPath);
-		expect(rows.map((row) => row.id)).toEqual(["msg_a2"]);
+		expect(rows.map((row) => row.id)).toEqual(["msg_u1", "msg_a2"]);
+		expect(rows[0]).toMatchObject({ is_backfilled: 1, is_streaming: 0 });
+		expect(rows[1]).toMatchObject({ is_backfilled: 0, is_streaming: 1 });
 		expect(await historyComplete(dbPath)).toBe(false);
 	}, 60_000);
 

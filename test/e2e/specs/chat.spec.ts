@@ -1,5 +1,5 @@
 // Tests the core chat flow: send message, receive response, markdown
-// rendering, code blocks, and stop button.
+// rendering, and code blocks.
 // Uses real relay backed by MockOpenCodeServer replaying recorded HTTP
 // interactions — no real OpenCode needed.
 
@@ -76,34 +76,6 @@ test.describe("Chat Flow", () => {
 			"receive streamed assistant response",
 			receiveStreamedAssistantResponse,
 		);
-	});
-
-	test("stop button appears during processing and hides after", async ({
-		page,
-		relayUrl,
-	}) => {
-		const viewport = page.viewportSize();
-		const isDesktop = viewport ? viewport.width >= 1440 : false;
-		test.skip(!isDesktop, "Chat tests run on desktop viewport only");
-
-		const app = new AppPage(page);
-		const chat = new ChatPage(page);
-		await app.goto(relayUrl);
-
-		await app.sendMessage("Say something");
-
-		// The #stop button is a separate element, conditionally rendered
-		// while processing. Try to catch it — mock responses may arrive
-		// too fast for it to ever appear.
-		try {
-			await chat.stopBtn.waitFor({ state: "visible", timeout: 3_000 });
-		} catch {
-			// Mock responses arrive instantly — stop button may never appear.
-		}
-
-		// After streaming completes, stop button should be gone
-		await chat.waitForStreamingComplete();
-		await expect(app.sendBtn).toBeVisible();
 	});
 
 	test("assistant response renders in markdown container", async ({

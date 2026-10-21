@@ -14,6 +14,7 @@ import {
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
 	ConfigTag,
@@ -64,6 +65,8 @@ type OperationsOutsideReadModelParity = keyof Pick<
 	// Archive's read-model parity is covered by the real-relay session-archive E2E.
 	| "setSessionArchived"
 	| "restoreSessionForSend"
+	// Retention parity and event reclamation are covered by auto-delete-archived-sweep.
+	| "deleteArchivedSessions"
 >;
 
 type ReadModelMutation = Exclude<
@@ -339,7 +342,7 @@ describe("SessionManager read-your-writes parity", () => {
 					"test-project",
 				);
 				const layer = Layer.provideMerge(
-					SessionManagerServiceLive,
+					Layer.provideMerge(SessionManagerServiceLive, SessionWorkspaceLive),
 					Layer.mergeAll(
 						Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 						makeSessionManagerStateLive(),
@@ -393,19 +396,46 @@ describe("SessionManager read-your-writes parity", () => {
 							yield* projectionRunner
 								.projectEvent(stored)
 								.pipe(Effect.provideService(SqlClient.SqlClient, sql));
-							if (opts?.turnEnded)
-								yield* projectionRunner
-									.projectEvent(
-										yield* store.append(
-											canonicalEvent(
-												"turn.completed",
-												sessionId,
-												{ messageId: `${sessionId}-a` },
-												{ provider: "opencode", createdAt: 1_001 },
-											),
-										),
-									)
-									.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+							if (opts?.turnEnded) {
+								const runId = `${sessionId}-run`;
+								const inputId = `${sessionId}-u`;
+								for (const event of [
+									canonicalEvent("run.requested", sessionId, {
+										runId,
+										inputId,
+									}),
+									canonicalEvent(
+										"message.created",
+										sessionId,
+										{
+											sessionId,
+											messageId: inputId,
+											inputId,
+											role: "user",
+										},
+										{ metadata: { runId } },
+									),
+									canonicalEvent(
+										"run.started",
+										sessionId,
+										{ inputId, requestedRunId: runId },
+										{ metadata: { runId } },
+									),
+									canonicalEvent(
+										"session.status",
+										sessionId,
+										{ sessionId, status: "idle" },
+										{
+											provider: "opencode",
+											createdAt: 1_001,
+											metadata: { runId },
+										},
+									),
+								])
+									yield* projectionRunner
+										.projectEvent(yield* store.append(event))
+										.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+							}
 						});
 
 					const context = { api, service, readQuery, seedSession };

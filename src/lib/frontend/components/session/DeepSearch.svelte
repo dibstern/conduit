@@ -181,7 +181,7 @@
 <svelte:window onkeydown={handleShortcut} />
 
 {#snippet body()}
-	<div data-testid="deep-search" class="flex flex-col gap-3 font-brand">
+	<div data-testid="deep-search" class="flex flex-col gap-3 font-sans">
 		<TextInput
 			bind:element={input}
 			size="content"

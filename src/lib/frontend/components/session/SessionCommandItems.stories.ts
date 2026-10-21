@@ -27,21 +27,3 @@ export const Menu: Story = {
 		);
 	},
 };
-
-export const Sheet: Story = {
-	args: { presentation: "sheet" },
-	parameters: { viewport: { defaultViewport: "mobile1" } },
-	play: async () => {
-		const menu = await within(document.body).findByRole("menu", {
-			name: "Session commands",
-		});
-		for (const id of [
-			"command-demo-settle",
-			"command-demo-auto",
-			"command-demo-snooze",
-			"command-demo-delete",
-		]) {
-			await expect(within(menu).getByTestId(id)).toHaveClass(/min-h-\[44px\]/);
-		}
-	},
-};

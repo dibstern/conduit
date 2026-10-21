@@ -1,7 +1,20 @@
 import { isDeepStrictEqual } from "node:util";
-import { Deferred, Effect, Fiber, Queue, Result, Schema, Stream } from "effect";
+import {
+	Deferred,
+	Effect,
+	Exit,
+	Fiber,
+	Queue,
+	Result,
+	Schema,
+	type Scope,
+	Stream,
+} from "effect";
 import { createEventId } from "../../persistence/events.js";
-import { EventSinkIngestionError } from "../event-sink-errors.js";
+import {
+	type EventSinkError,
+	EventSinkIngestionError,
+} from "../event-sink-errors.js";
 import { makeInProcessSessionRunner } from "../runner/in-process-session-runner.js";
 import type { LiveSettings, RunnerPayload } from "../runner/runner-payload.js";
 import { runnerPidAlive } from "../runner/runner-registry.js";
@@ -66,6 +79,7 @@ interface CursorSession {
 		| ((
 				input: SessionTurn,
 				sink: EventSink,
+				claim: () => boolean,
 		  ) => Effect.Effect<TurnResult, SessionFailure>)
 		| undefined;
 }
@@ -75,6 +89,18 @@ const decodeSteeredMessage = Schema.decodeUnknownResult(
 		type: Schema.Literal("user-message-appended"),
 		userMessage: Schema.Struct({ text: Schema.String }),
 	}),
+);
+
+const decodeRunning = Schema.decodeUnknownResult(
+	Schema.Struct({
+		type: Schema.Literal("status"),
+		agent_id: Schema.String,
+		run_id: Schema.String,
+		status: Schema.Literal("RUNNING"),
+	}),
+);
+const decodeStreamIdentity = Schema.decodeUnknownResult(
+	Schema.Struct({ agent_id: Schema.String, run_id: Schema.String }),
 );
 
 const decodeTerminal = Schema.decodeUnknownResult(
@@ -164,6 +190,8 @@ export class CursorRunnerPayload implements RunnerPayload {
 		private readonly emit: (
 			output: SessionOutput,
 		) => Effect.Effect<SessionOutputReply, SessionFailure>,
+		private readonly scope: Scope.Scope,
+		private readonly onTurnStateChanged?: (inFlight: boolean) => void,
 	) {
 		this.sdk = deps.port ?? createCursorSdkPort();
 	}
@@ -172,6 +200,65 @@ export class CursorRunnerPayload implements RunnerPayload {
 		input: SessionTurn,
 		sink: EventSink,
 		signal: AbortSignal,
+	): Effect.Effect<TurnResult, SessionFailure> {
+		return Effect.gen({ self: this }, function* () {
+			const intake = yield* Deferred.make<TurnResult, SessionFailure>();
+			let handed = false;
+			const claim = () => {
+				if (signal.aborted) return false;
+				handed = true;
+				return true;
+			};
+			this.sinks.retainSink(sink);
+			yield* this.runTurn(input, sink, claim, intake).pipe(
+				Effect.onExit((exit) =>
+					Exit.isFailure(exit)
+						? Effect.sync(() => this.deps.onAbandonedRun?.(input.inputId))
+						: Effect.void,
+				),
+				Effect.exit,
+				Effect.flatMap((exit) => Deferred.done(intake, exit)),
+				Effect.ensuring(this.sinks.releaseSinkEffect(sink)),
+				Effect.ensuring(
+					Effect.sync(() => {
+						if (!this.sessions.get(input.sessionId)?.busy)
+							this.onTurnStateChanged?.(false);
+					}),
+				),
+				Effect.forkIn(this.scope),
+			);
+			return yield* Effect.raceFirst(
+				Deferred.await(intake),
+				Effect.callback<TurnResult>((resume) => {
+					const onAbort = () =>
+						resume(
+							Effect.succeed({
+								status: handed ? "indeterminate" : "cancelled",
+								cost: 0,
+								tokens: { input: 0, output: 0 },
+								durationMs: 0,
+								providerStateUpdates: [],
+							}),
+						);
+					if (signal.aborted) onAbort();
+					else signal.addEventListener("abort", onAbort, { once: true });
+					return Effect.sync(() =>
+						signal.removeEventListener("abort", onAbort),
+					);
+				}),
+			);
+		});
+	}
+
+	hasActiveTurnsEffect(sessionId: string): Effect.Effect<boolean> {
+		return Effect.sync(() => this.sessions.get(sessionId)?.busy === true);
+	}
+
+	private runTurn(
+		input: SessionTurn,
+		sink: EventSink,
+		claim: () => boolean,
+		intake: Deferred.Deferred<TurnResult, SessionFailure>,
 	): Effect.Effect<TurnResult, SessionFailure> {
 		return Effect.gen({ self: this }, function* () {
 			let state = this.sessions.get(input.sessionId);
@@ -212,9 +299,10 @@ export class CursorRunnerPayload implements RunnerPayload {
 			const session = state;
 			if (session.busy)
 				return session.steer
-					? yield* session.steer(input, sink)
+					? yield* session.steer(input, sink, claim)
 					: this.result(session, "steer-declined", 0);
 			session.busy = true;
+			this.onTurnStateChanged?.(true);
 			session.cancelRequested = false;
 			const questionAbort = new AbortController();
 			session.questionAbort = questionAbort;
@@ -224,7 +312,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 			let settled = false;
 			let waitForRun: (() => Promise<unknown>) | undefined;
 			let cost: number | undefined;
-			let currentInputId = input.inputId;
+			let currentInputId = input.continuation?.cutOffMessageId ?? input.inputId;
 			const events = new CursorTurnEvents(
 				input.sessionId,
 				createEventId(),
@@ -260,6 +348,28 @@ export class CursorRunnerPayload implements RunnerPayload {
 					outcome?: boolean;
 				}
 			>();
+			let accepted = false;
+			const beforeIntake: Update[] = [];
+			const acceptInitial = () =>
+				Effect.gen({ self: this }, function* () {
+					if (accepted) return;
+					accepted = true;
+					events.runId = input.runId;
+					if (input.runId)
+						yield* events.push("run.started", {
+							inputId: input.inputId,
+							requestedRunId: input.runId,
+							...(input.continuation
+								? { userMessageId: input.continuation.cutOffMessageId }
+								: {}),
+						});
+					yield* events.push("session.status", {
+						sessionId: input.sessionId,
+						status: "busy",
+					});
+					yield* events.announceMessage(currentInputId);
+					yield* Deferred.succeed(intake, this.result(session, "accepted", 0));
+				});
 			let acceptingSteers = true;
 			// All receipts, turn end and cancellation use this one settle point.
 			// Retain settled receipts until turn end so an ack plus its user delta
@@ -278,14 +388,23 @@ export class CursorRunnerPayload implements RunnerPayload {
 								input: {
 									sessionId: input.sessionId,
 									inputId,
+									...(pending.input.runId
+										? { runId: pending.input.runId }
+										: {}),
 									text: pending.input.text ?? pending.input.prompt,
 								},
 							});
 							currentInputId = inputId;
+							events.currentUserMessageId = inputId;
+							if (events.runId && pending.input.runId)
+								yield* events.push("run.started", {
+									inputId,
+									requestedRunId: pending.input.runId,
+								});
 						}
 						return this.result(
 							session,
-							delivered ? "joined" : "steer-declined",
+							delivered ? "accepted" : "steer-declined",
 							0,
 						);
 					}).pipe(
@@ -306,20 +425,53 @@ export class CursorRunnerPayload implements RunnerPayload {
 					for (const inputId of steers.keys())
 						yield* settleSteer(inputId, false);
 				});
-			const applyUpdate = (update: Update) =>
+			const applyUpdate = (
+				update: Update,
+				terminal = false,
+			): Effect.Effect<void, SessionFailure | EventSinkError> =>
 				Effect.gen(function* () {
+					if (update.channel === "stream") {
+						const identity = decodeStreamIdentity(update.value);
+						if (
+							Result.isSuccess(identity) &&
+							(identity.success.run_id !== events.refs.providerTurnId ||
+								identity.success.agent_id !== session.agentId)
+						)
+							return;
+						const running = decodeRunning(update.value);
+						if (Result.isSuccess(running)) {
+							yield* acceptInitial();
+							for (const pending of beforeIntake.splice(0))
+								yield* applyUpdate(pending);
+						}
+					}
+					if (
+						!accepted &&
+						!terminal &&
+						(update.channel === "delta" ||
+							update.channel === "stream" ||
+							update.channel === "steer-result")
+					) {
+						beforeIntake.push(update);
+						return;
+					}
 					if (update.channel === "steer-result") {
 						yield* settleSteer(update.inputId, update.delivered);
 					} else if (update.channel === "delta") {
 						const message = decodeSteeredMessage(update.value);
 						if (Result.isSuccess(message)) {
-							const pending = [...steers.values()].find(
+							const matching = [...steers.values()].filter(
 								(steer) =>
-									!steer.landed &&
-									steer.outcome !== false &&
 									steer.input.prompt === message.success.userMessage.text,
 							);
-							if (pending) {
+							// Appended-user deltas have no command id. Repeated text,
+							// including the initial prompt, must wait for its exact ack.
+							const pending =
+								matching.length === 1 &&
+								input.prompt !== message.success.userMessage.text
+									? matching[0]
+									: undefined;
+							if (pending && !pending.landed && pending.outcome !== false) {
 								pending.landed = true;
 								yield* settleSteer(pending.input.inputId, true);
 							}
@@ -373,18 +525,10 @@ export class CursorRunnerPayload implements RunnerPayload {
 							input: {
 								sessionId: input.sessionId,
 								inputId: input.inputId,
+								...(input.runId ? { runId: input.runId } : {}),
 								text: input.text ?? input.prompt,
 							},
 						});
-					yield* events.push("session.status", {
-						sessionId: input.sessionId,
-						status: "busy",
-					});
-					yield* events.push("message.created", {
-						messageId: events.messageId,
-						sessionId: input.sessionId,
-						role: "assistant",
-					});
 					const credential = yield* sdkCall("credential lookup", () =>
 						resolveCursorCredential(
 							this.sdk,
@@ -593,6 +737,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 						Effect.catch(() => Effect.succeed(undefined)),
 					);
 					const beforeUsage = yield* readUsage;
+					if (!claim()) return this.result(session, "cancelled", 0);
 					const run = yield* sdkCall("send", () =>
 						agent.send(
 							seed
@@ -614,7 +759,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 						yield* persistIdentity();
 					}
 					const steer = run.steer?.bind(run);
-					session.steer = (steeredInput, steerSink) =>
+					session.steer = (steeredInput, steerSink, claim) =>
 						Effect.scoped(
 							Effect.gen({ self: this }, function* () {
 								const sinkId = this.sinks.sinkId(steerSink);
@@ -630,6 +775,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 									!sinkId
 								)
 									return this.result(session, "steer-declined", 0);
+								if (!claim()) return this.result(session, "cancelled", 0);
 								steers.set(steeredInput.inputId, {
 									input: steeredInput,
 									sinkId,
@@ -661,17 +807,6 @@ export class CursorRunnerPayload implements RunnerPayload {
 					};
 					if (session.cancelRequested) yield* this.interrupt(input.sessionId);
 					events.refs.providerTurnId = run.id;
-					const abort = Effect.callback<void>((resume) => {
-						const onAbort = () => resume(Effect.void);
-						if (signal.aborted) onAbort();
-						else signal.addEventListener("abort", onAbort, { once: true });
-						return Effect.sync(() =>
-							signal.removeEventListener("abort", onAbort),
-						);
-					});
-					yield* Effect.forkScoped(
-						abort.pipe(Effect.andThen(this.interrupt(input.sessionId))),
-					);
 					// An async iterator's return can wait behind its stalled next().
 					// Await ordinary cleanup, but let controller retirement end a stuck one.
 					const stream = yield* Effect.forkDetach(
@@ -760,8 +895,18 @@ export class CursorRunnerPayload implements RunnerPayload {
 						}
 						// Stream closure and turn-ended deltas never settle a turn. Only wait does.
 						yield* Fiber.interrupt(stream);
-						for (const pending of yield* Queue.clear(queue)) {
-							yield* applyUpdate(pending);
+						// A native result may arrive without a RUNNING frame. Retain its
+						// buffered output under the reservation without inventing intake.
+						const pendingUpdates = [
+							...beforeIntake.splice(0),
+							...(yield* Queue.clear(queue)),
+						];
+						if (!accepted && pendingUpdates.length > 0) {
+							events.runId = input.runId;
+							yield* events.announceMessage(currentInputId);
+						}
+						for (const pending of pendingUpdates) {
+							yield* applyUpdate(pending, true);
 						}
 						yield* declinePending();
 						acceptingUpdates = false;
@@ -905,9 +1050,10 @@ export class CursorRunnerPayload implements RunnerPayload {
 					),
 				),
 				Effect.flatMap((result) =>
-					Effect.gen(function* () {
-						// Cleanup and admission readiness precede the terminal publication.
-						// Otherwise an inbox input can be removed while this payload is busy.
+					Effect.gen({ self: this }, function* () {
+						if (result.status === "cancelled") return result;
+						// Admission resumes after native cleanup. Host retirement also
+						// waits for terminal publication and abandoned-run grace.
 						const durationMs = Date.now() - started;
 						yield* events.finishChildren(
 							result.status === "completed"
@@ -917,6 +1063,8 @@ export class CursorRunnerPayload implements RunnerPayload {
 									: "error",
 						);
 						yield* events.endThinking();
+						// A terminal can settle an unaccepted reservation without claiming intake.
+						events.runId ??= input.runId;
 						if (result.status === "completed")
 							yield* events.push("turn.completed", {
 								messageId: events.messageId,
@@ -930,6 +1078,9 @@ export class CursorRunnerPayload implements RunnerPayload {
 									? { contextTokens: events.contextTokens }
 									: {}),
 								...(cost !== undefined ? { cost } : {}),
+								providerStateUpdates: result.providerStateUpdates.map(
+									({ key, value }) => ({ key, value: String(value) }),
+								),
 							});
 						else if (result.status === "interrupted")
 							yield* events.push("turn.interrupted", {
@@ -938,10 +1089,10 @@ export class CursorRunnerPayload implements RunnerPayload {
 						else
 							yield* events.push("turn.error", {
 								messageId: events.messageId,
-								userMessageId: currentInputId,
 								error: result.error?.message ?? "Cursor turn failed",
 								code: result.error?.code ?? "provider_error",
 								retryable: result.error?.retryable ?? false,
+								retryHandled: result.error?.retryHandled ?? false,
 							});
 						yield* events.push("session.status", {
 							sessionId: input.sessionId,
@@ -1051,8 +1202,19 @@ export const makeCursorSessionRunner = (
 	emit: (
 		output: SessionOutput,
 	) => Effect.Effect<SessionOutputReply, SessionFailure>,
+	onTurnStateChanged?: (inFlight: boolean) => void,
 ) =>
 	makeInProcessSessionRunner(
-		(sinks) => Effect.sync(() => new CursorRunnerPayload(deps, sinks, emit)),
+		(sinks) =>
+			Effect.gen(function* () {
+				const scope = yield* Effect.scope;
+				return new CursorRunnerPayload(
+					deps,
+					sinks,
+					emit,
+					scope,
+					onTurnStateChanged,
+				);
+			}),
 		emit,
 	);

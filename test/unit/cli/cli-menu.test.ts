@@ -347,66 +347,6 @@ describe("menu items", () => {
 		io.stdin.emit("data", "\x03");
 		await tick();
 	});
-
-	it("selects first item by default (Enter)", async () => {
-		const onSetupNotifications = vi.fn();
-		const io = createMockIO();
-
-		// Limit recursion: onSetupNotifications fires, then the menu re-renders.
-		// We need to handle the second menu render too. Use Ctrl+C on re-render.
-		let callCount = 0;
-		void showMainMenu(
-			io.opts({
-				onSetupNotifications: async () => {
-					onSetupNotifications();
-					callCount++;
-				},
-				// On the second render (after callback), exit via Ctrl+C
-				getDaemonInfo: () => {
-					if (callCount > 0) {
-						// Schedule Ctrl+C for the re-rendered menu
-						setTimeout(() => io.stdin.emit("data", "\x03"), 30);
-					}
-					return defaultDaemonInfo();
-				},
-			}),
-		);
-		await tick();
-
-		// Press Enter to select "Setup notifications" (first item)
-		await sendKeys(io.stdin, ["\r"]);
-		await vi.waitFor(() => expect(io.wasExitCalled()).toBe(true));
-
-		expect(onSetupNotifications).toHaveBeenCalled();
-	});
-
-	it("navigates to second item with down arrow", async () => {
-		const onProjects = vi.fn();
-		const io = createMockIO();
-
-		let callCount = 0;
-		void showMainMenu(
-			io.opts({
-				onProjects: async () => {
-					onProjects();
-					callCount++;
-				},
-				getDaemonInfo: () => {
-					if (callCount > 0) {
-						setTimeout(() => io.stdin.emit("data", "\x03"), 30);
-					}
-					return defaultDaemonInfo();
-				},
-			}),
-		);
-		await tick();
-
-		// Down arrow once to "Projects", then Enter
-		await sendKeys(io.stdin, ["\x1b[B", "\r"]);
-		await vi.waitFor(() => expect(io.wasExitCalled()).toBe(true));
-
-		expect(onProjects).toHaveBeenCalled();
-	});
 });
 
 describe("notifications", () => {
@@ -440,29 +380,21 @@ describe("notifications", () => {
 
 	it("re-renders menu after notifications callback returns", async () => {
 		const io = createMockIO();
-		let renderCount = 0;
-
-		void showMainMenu(
-			io.opts({
-				onSetupNotifications: async () => {},
-				getDaemonInfo: () => {
-					renderCount++;
-					if (renderCount > 1) {
-						// Second render — exit to prevent infinite loop
-						setTimeout(() => io.stdin.emit("data", "\x03"), 30);
-					}
-					return defaultDaemonInfo();
-				},
-			}),
+		const onKeepAliveExit = vi.fn();
+		const menuPromise = showMainMenu(
+			io.opts({ onSetupNotifications: async () => {}, onKeepAliveExit }),
 		);
 		await tick();
-
-		// Select "Setup notifications"
+		const beforeAction = io.output.length;
 		await sendKeys(io.stdin, ["\r"]);
-		await vi.waitFor(() => expect(io.wasExitCalled()).toBe(true));
-
-		// getDaemonInfo should have been called at least twice (initial + re-render)
-		expect(renderCount).toBeGreaterThanOrEqual(2);
+		const transcript = stripAnsi(io.output.slice(beforeAction).join(""));
+		expect(transcript).toContain("http://localhost:2633");
+		expect(transcript).toContain("What would you like to do?");
+		expect(transcript).toContain("Setup notifications");
+		expect(transcript).toContain("Keep server alive & exit");
+		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\x1b[B", "\x1b[B", "\r"]);
+		await menuPromise;
+		expect(onKeepAliveExit).toHaveBeenCalledOnce();
 	});
 });
 
@@ -497,27 +429,21 @@ describe("projects", () => {
 
 	it("re-renders menu after projects callback returns", async () => {
 		const io = createMockIO();
-		let renderCount = 0;
-
-		void showMainMenu(
-			io.opts({
-				onProjects: async () => {},
-				getDaemonInfo: () => {
-					renderCount++;
-					if (renderCount > 1) {
-						setTimeout(() => io.stdin.emit("data", "\x03"), 30);
-					}
-					return defaultDaemonInfo();
-				},
-			}),
+		const onKeepAliveExit = vi.fn();
+		const menuPromise = showMainMenu(
+			io.opts({ onProjects: async () => {}, onKeepAliveExit }),
 		);
 		await tick();
-
-		// Navigate to "Projects" and select
+		const beforeAction = io.output.length;
 		await sendKeys(io.stdin, ["\x1b[B", "\r"]);
-		await vi.waitFor(() => expect(io.wasExitCalled()).toBe(true));
-
-		expect(renderCount).toBeGreaterThanOrEqual(2);
+		const transcript = stripAnsi(io.output.slice(beforeAction).join(""));
+		expect(transcript).toContain("http://localhost:2633");
+		expect(transcript).toContain("What would you like to do?");
+		expect(transcript).toContain("Setup notifications");
+		expect(transcript).toContain("Keep server alive & exit");
+		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\x1b[B", "\x1b[B", "\r"]);
+		await menuPromise;
+		expect(onKeepAliveExit).toHaveBeenCalledOnce();
 	});
 });
 
@@ -552,27 +478,21 @@ describe("settings", () => {
 
 	it("re-renders menu after settings callback returns", async () => {
 		const io = createMockIO();
-		let renderCount = 0;
-
-		void showMainMenu(
-			io.opts({
-				onSettings: async () => {},
-				getDaemonInfo: () => {
-					renderCount++;
-					if (renderCount > 1) {
-						setTimeout(() => io.stdin.emit("data", "\x03"), 30);
-					}
-					return defaultDaemonInfo();
-				},
-			}),
+		const onKeepAliveExit = vi.fn();
+		const menuPromise = showMainMenu(
+			io.opts({ onSettings: async () => {}, onKeepAliveExit }),
 		);
 		await tick();
-
-		// Navigate to "Settings" and select
+		const beforeAction = io.output.length;
 		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\r"]);
-		await vi.waitFor(() => expect(io.wasExitCalled()).toBe(true));
-
-		expect(renderCount).toBeGreaterThanOrEqual(2);
+		const transcript = stripAnsi(io.output.slice(beforeAction).join(""));
+		expect(transcript).toContain("http://localhost:2633");
+		expect(transcript).toContain("What would you like to do?");
+		expect(transcript).toContain("Setup notifications");
+		expect(transcript).toContain("Keep server alive & exit");
+		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\x1b[B", "\x1b[B", "\r"]);
+		await menuPromise;
+		expect(onKeepAliveExit).toHaveBeenCalledOnce();
 	});
 });
 
@@ -614,31 +534,21 @@ describe("shutdown", () => {
 
 	it("re-renders menu when shutdown is declined", async () => {
 		const io = createMockIO();
-		let renderCount = 0;
-
-		void showMainMenu(
-			io.opts({
-				getDaemonInfo: () => {
-					renderCount++;
-					if (renderCount > 1) {
-						setTimeout(() => io.stdin.emit("data", "\x03"), 30);
-					}
-					return defaultDaemonInfo();
-				},
-			}),
-		);
+		const onKeepAliveExit = vi.fn();
+		const onShutdown = vi.fn();
+		const menuPromise = showMainMenu(io.opts({ onKeepAliveExit, onShutdown }));
 		await tick();
-
-		// Navigate to "Shut down" and select
 		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\x1b[B", "\r"]);
-		await tick();
-
-		// Decline (default is No, press Enter)
+		const beforeDecline = io.output.length;
 		await sendKeys(io.stdin, ["\r"]);
-		await vi.waitFor(() => expect(io.wasExitCalled()).toBe(true));
-
-		// Should have re-rendered (getDaemonInfo called again)
-		expect(renderCount).toBeGreaterThanOrEqual(2);
+		const transcript = stripAnsi(io.output.slice(beforeDecline).join(""));
+		expect(transcript).toContain("http://localhost:2633");
+		expect(transcript).toContain("What would you like to do?");
+		expect(transcript).toContain("Keep server alive & exit");
+		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\x1b[B", "\x1b[B", "\r"]);
+		await menuPromise;
+		expect(onKeepAliveExit).toHaveBeenCalledOnce();
+		expect(onShutdown).not.toHaveBeenCalled();
 	});
 });
 
@@ -658,25 +568,20 @@ describe("keep alive & exit", () => {
 
 	it("does not re-render menu after exit", async () => {
 		const io = createMockIO();
-		let renderCount = 0;
-
-		const menuPromise = showMainMenu(
-			io.opts({
-				onKeepAliveExit: async () => {},
-				getDaemonInfo: () => {
-					renderCount++;
-					return defaultDaemonInfo();
-				},
-			}),
-		);
+		const onKeepAliveExit = vi.fn();
+		const menuPromise = showMainMenu(io.opts({ onKeepAliveExit }));
 		await tick();
-
-		// Navigate to "Keep alive & exit" and select
-		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\x1b[B", "\x1b[B", "\r"]);
+		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\x1b[B", "\x1b[B"]);
+		const beforeExit = io.output.length;
+		await sendKeys(io.stdin, ["\r"]);
 		await menuPromise;
-
-		// Only called once for initial render
-		expect(renderCount).toBe(1);
+		expect(onKeepAliveExit).toHaveBeenCalledOnce();
+		const transcript = stripAnsi(io.output.slice(beforeExit).join(""));
+		expect(transcript).toContain(
+			"What would you like to do? · Keep server alive & exit",
+		);
+		expect(transcript).not.toContain("Setup notifications");
+		expect(transcript).not.toContain("http://localhost:2633");
 	});
 });
 
@@ -773,28 +678,19 @@ describe("edge cases", () => {
 
 	it("handles missing optional callbacks gracefully", async () => {
 		const io = createMockIO();
-		let renderCount = 0;
-
-		void showMainMenu(
-			io.opts({
-				// No onSetupNotifications provided
-				getDaemonInfo: () => {
-					renderCount++;
-					if (renderCount > 1) {
-						setTimeout(() => io.stdin.emit("data", "\x03"), 30);
-					}
-					return defaultDaemonInfo();
-				},
-			}),
-		);
+		const onKeepAliveExit = vi.fn();
+		const menuPromise = showMainMenu(io.opts({ onKeepAliveExit }));
 		await tick();
-
-		// Select "Setup notifications" with no callback — should not throw
+		const beforeAction = io.output.length;
 		await sendKeys(io.stdin, ["\r"]);
-		await vi.waitFor(() => expect(io.wasExitCalled()).toBe(true));
-
-		// Menu re-renders even with no callback
-		expect(renderCount).toBeGreaterThanOrEqual(2);
+		const transcript = stripAnsi(io.output.slice(beforeAction).join(""));
+		expect(transcript).toContain("http://localhost:2633");
+		expect(transcript).toContain("What would you like to do?");
+		expect(transcript).toContain("Setup notifications");
+		expect(transcript).toContain("Keep server alive & exit");
+		await sendKeys(io.stdin, ["\x1b[B", "\x1b[B", "\x1b[B", "\x1b[B", "\r"]);
+		await menuPromise;
+		expect(onKeepAliveExit).toHaveBeenCalledOnce();
 	});
 
 	it("shows open-in-browser hint", async () => {

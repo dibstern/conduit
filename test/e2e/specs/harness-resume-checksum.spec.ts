@@ -247,11 +247,47 @@ test("a resume is checked against the server, and the server wins", async ({
 	await harness.restart({ keepPort: true, skipBrowserProbe: true });
 
 	const received: { readonly at: number; readonly text: string }[] = [];
-	page.on("websocket", (socket) =>
-		socket.on("framereceived", ({ payload }) =>
-			received.push({ at: Date.now(), text: payload.toString() }),
-		),
-	);
+	const detailSynchronized: number[] = [];
+	page.on("websocket", (socket) => {
+		const detailRequests = new Map<string, number>();
+		socket.on("framesent", ({ payload }) => {
+			for (const request of find(
+				JSON.parse(String(payload)),
+				(value) =>
+					"tag" in value &&
+					value.tag === "SubscribeSessionDetail" &&
+					"payload" in value &&
+					typeof value.payload === "object" &&
+					value.payload !== null &&
+					"sessionId" in value.payload &&
+					value.payload.sessionId === SESSION,
+			))
+				if ("id" in request) detailRequests.set(String(request.id), Date.now());
+		});
+		socket.on("framereceived", ({ payload }) => {
+			const text = payload.toString();
+			received.push({ at: Date.now(), text });
+			for (const chunk of find(
+				JSON.parse(text),
+				(value) =>
+					"_tag" in value &&
+					value._tag === "Chunk" &&
+					"requestId" in value &&
+					detailRequests.has(String(value.requestId)),
+			)) {
+				if (!("requestId" in chunk)) continue;
+				const requestedAt = detailRequests.get(String(chunk.requestId));
+				if (
+					requestedAt !== undefined &&
+					find(
+						chunk,
+						(value) => "_tag" in value && value._tag === "synchronized",
+					).length > 0
+				)
+					detailSynchronized.push(requestedAt);
+			}
+		});
+	});
 	type Checksum = { readonly hash: number; readonly rows: number };
 	const mismatches: Promise<{
 		readonly server: Checksum;
@@ -314,6 +350,13 @@ test("a resume is checked against the server, and the server wins", async ({
 			skipBrowserProbe: true,
 		});
 		await shown();
+		await expect
+			.poll(
+				() => detailSynchronized.some((requestedAt) => requestedAt >= from),
+				{ timeout: 30_000 },
+			)
+			.toBe(true);
+		// No-op resumes expose no acceptance transition; keep this window for checksum handling and repair RPCs.
 		await page.waitForTimeout(1_000);
 		const reads = await serverReads(metricsFile);
 		const frames = received.filter(({ at }) => at >= from);

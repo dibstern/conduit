@@ -1,7 +1,13 @@
 <script lang="ts">
 	import SortableList from "../SortableList.svelte";
 
-	let { disabled = false }: { disabled?: boolean | undefined } = $props();
+	let {
+		disabled = false,
+		variant = "rows",
+	}: {
+		disabled?: boolean | undefined;
+		variant?: "rows" | "cards" | "settings";
+	} = $props();
 
 	let accounts = $state([
 		{ id: "work", name: "work2claude", left: "0% left" },
@@ -18,6 +24,7 @@
 		onreorder={(next) => (accounts = next)}
 		ariaLabel="Account order"
 		{disabled}
+		{variant}
 	>
 		{#snippet row(account, index)}
 			<span class="font-mono text-[10.5px] text-text-secondary">{index + 1}</span>

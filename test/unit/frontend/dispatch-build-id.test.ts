@@ -27,7 +27,6 @@ const mocks = vi.hoisted(() => ({
 			}>
 		>(),
 	reload: vi.fn(),
-	inputSyncState: { reloadPending: false },
 }));
 
 vi.mock("../../../src/lib/build-id.js", () => ({ BUILD_ID: "A" }));
@@ -44,7 +43,6 @@ vi.mock(
 			typeof import("../../../src/lib/frontend/stores/chat.svelte.js")
 		>()),
 		persistInputDraft: mocks.persistInputDraft,
-		inputSyncState: mocks.inputSyncState,
 	}),
 );
 vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
@@ -93,7 +91,6 @@ describe("build ID dispatch", () => {
 		mocks.restartWithConfig
 			.mockReset()
 			.mockImplementation(() => Effect.succeed({ ok: true as const }));
-		mocks.inputSyncState.reloadPending = false;
 		const entries = new Map<string, string>();
 		vi.stubGlobal("sessionStorage", {
 			getItem: (key: string) => entries.get(key) ?? null,
@@ -339,7 +336,6 @@ describe("build ID dispatch", () => {
 		await vi.runAllTimersAsync();
 
 		expect(mocks.reload).not.toHaveBeenCalled();
-		expect(mocks.inputSyncState.reloadPending).toBe(false);
 		expect(mocks.showBanner).toHaveBeenCalledWith(
 			expect.objectContaining({
 				id: "build-mismatch",
@@ -362,7 +358,6 @@ describe("build ID dispatch", () => {
 		expect(mocks.showBanner).toHaveBeenCalledWith(
 			expect.objectContaining({ id: "build-mismatch" }),
 		);
-		expect(mocks.inputSyncState.reloadPending).toBe(false);
 		expect(sessionStorage.getItem("conduit-build-reload:B")).toBeNull();
 
 		handshake();

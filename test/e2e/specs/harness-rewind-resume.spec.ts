@@ -128,17 +128,20 @@ const parse = (text: string): unknown => {
 };
 
 /** The transcript's text, without the "↓ Latest" button, which shows or not
- * depending on where the tab happens to be scrolled. */
+ * depending on where the tab happens to be scrolled, or the user's avatar,
+ * which draws its letter when the daemon answers GetAvatar. */
 const transcriptOf = (page: Page) =>
 	page.locator("#messages").evaluate((messages: HTMLElement) => {
-		const button = messages.querySelector<HTMLElement>("#scroll-btn");
-		if (!button) return messages.innerText;
-		const display = button.style.display;
-		button.style.display = "none";
+		const hidden = [
+			...messages.querySelectorAll<HTMLElement>(
+				'#scroll-btn, [data-testid="user-avatar"]',
+			),
+		].map((element) => [element, element.style.display] as const);
+		for (const [element] of hidden) element.style.display = "none";
 		try {
 			return messages.innerText;
 		} finally {
-			button.style.display = display;
+			for (const [element, display] of hidden) element.style.display = display;
 		}
 	});
 
@@ -273,8 +276,10 @@ test("returning to a session after a rewind or its undo resumes it", async ({
 				{ timeout: 30_000 },
 			)
 			.toBe(true);
-		// Anything a mismatch would trigger has landed by now.
-		await page.waitForTimeout(1_500);
+		// An interactive transcript proves the resume checksum was accepted.
+		await expect(
+			messages.locator(":scope > div:not([inert]) .msg-assistant").first(),
+		).toBeVisible();
 		const requests = detailRequests(sessionId, sentFrom);
 		const envelopes = detailEnvelopes(requests, receivedFrom);
 		const cold = await coldOpen(sessionId, shown);

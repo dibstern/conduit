@@ -59,6 +59,16 @@ function publish(page: Page, added: HistoryMessagePart[]): void {
 		{
 			id: "cursor-tools-user",
 			role: "user",
+			// The send's inputId lets this placed prompt replace the browser's copy.
+			inputId: String(
+				requireRpcControl(page)
+					.getRequests()
+					.find(
+						(request) =>
+							request.tag === "input.submit" &&
+							request.payload["text"] === "Render Cursor tools",
+					)?.payload["inputId"],
+			),
 			time: { created: toolsClock.getTime() - 5_000 },
 			parts: [
 				{
@@ -727,9 +737,8 @@ export const cursorToolsHandlers: StepHandler[] = [
 		name: "assert running Cursor progress",
 		match: /^the running Cursor turn shows progress (.+)$/,
 		run: async ({ world, match }) => {
-			await expect(
-				world.page.getByTestId("composer-status-activity"),
-			).toContainText(match[1] ?? "");
+			// The composer has no status line; the running task row names its progress.
+			await expect(row(world.page, "task")).toContainText(match[1] ?? "");
 		},
 	},
 	{
