@@ -67,6 +67,8 @@ export interface RunnerHello {
 	readonly stopsTasks?: true;
 	/** Every event produced by a send carries its conduit run identity. */
 	readonly stampsRunIds?: true;
+	/** Cursor sends consume the daemon's admitted account credential envelope. */
+	readonly scopedCursorCredentials?: true;
 	readonly taggedConfigDir?: true;
 	readonly bindings?: readonly {
 		readonly sinkId: string;
@@ -243,6 +245,9 @@ export class RunnerSocket {
 	private failure: SessionFailure | undefined;
 	private idleExiting = false;
 	private peerTaggedConfigDir = false;
+	scopedCursorCredentials = false;
+	private peerDriverKind: string | undefined;
+	private retainedSends: RunnerHello["sendCommands"];
 
 	constructor(
 		private readonly socket: Socket,
@@ -256,8 +261,13 @@ export class RunnerSocket {
 			try {
 				const decoded = JSON.parse(line) as RunnerMessage;
 				const message = this.wire?.decode(decoded) ?? decoded;
-				if (message.type === "hello")
+				if (message.type === "hello") {
 					this.peerTaggedConfigDir = message.taggedConfigDir === true;
+					this.scopedCursorCredentials =
+						message.scopedCursorCredentials === true;
+					this.peerDriverKind = message.driverKind;
+					this.retainedSends = message.sendCommands;
+				}
 				if (message.type === "idle-exit") this.idleExiting = true;
 				if (message.type === "command-accepted") {
 					const pending = this.pending.get(`command:${message.commandId}`);
@@ -336,6 +346,23 @@ export class RunnerSocket {
 		command: SessionCommand,
 		attempt?: number,
 	): Effect.Effect<TurnResult | undefined, SessionFailure> {
+		if (
+			this.peerDriverKind === "cursor" &&
+			!this.scopedCursorCredentials &&
+			(command.type === "pre-warm" ||
+				(command.type === "send-turn" &&
+					!this.retainedSends?.some(
+						(send) =>
+							send.commandId === commandId && send.attempt === (attempt ?? 0),
+					)))
+		)
+			return Effect.fail({
+				...runnerFailure(
+					command.type,
+					"Cursor runner predates scoped credentials",
+				),
+				code: "runner_incompatible",
+			});
 		return this.requestEffect(`command:${commandId}`, {
 			type: "command",
 			commandId,

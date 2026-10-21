@@ -10,12 +10,14 @@ import {
 } from "../runner/runner-provider-instance.js";
 import { recoverRunnerCommands } from "../runner/runner-recovery.js";
 import type { SessionTurn } from "../runner/session-runner.js";
+import { CursorAccountResources } from "./cursor-account-resources.js";
 import { makeCursorRunnerDriver } from "./cursor-runner-driver.js";
 
 export const makeCursorProviderRuntime = (deps: RunnerProviderInstanceDeps) =>
 	Effect.gen(function* () {
 		const read = yield* ReadQueryEffectTag;
 		const state = yield* ProviderStateEffectTag;
+		const resources = yield* Effect.serviceOption(CursorAccountResources);
 		return yield* makeRunnerProviderInstance(
 			deps,
 			makeCursorRunnerDriver(
@@ -23,6 +25,7 @@ export const makeCursorProviderRuntime = (deps: RunnerProviderInstanceDeps) =>
 				undefined,
 				{ read, state },
 				deps.daemonConfigDir,
+				resources._tag === "Some" ? resources.value : undefined,
 			),
 			(emit) =>
 				makeProcessSessionRunner(deps, emit, {

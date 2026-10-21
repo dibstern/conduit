@@ -1,7 +1,8 @@
 // Failure modes: wrong account/model/effort, tools or project context leaking,
 // transcript writes escaping the scratch root, partial text accepted as success,
 // leaked agents on rejection/interruption, acquisition racing cleanup, and
-// concurrent calls sharing the process-global Cursor data directory.
+// concurrent calls sharing the process-global Cursor data directory, and title
+// generation borrowing the shared login or another account's credential.
 import {
 	existsSync,
 	mkdtempSync,
@@ -11,9 +12,12 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { Effect, Exit, Fiber } from "effect";
+import { it as effectIt } from "@effect/vitest";
+import { Effect, Exit, Fiber, Result } from "effect";
 import { afterEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { AccountIdSchema } from "../../../../src/lib/contracts/account.js";
+import { CursorAccountResources } from "../../../../src/lib/provider/cursor/cursor-account-resources.js";
+import { makeCursorAuth } from "../../../../src/lib/provider/cursor/cursor-auth.js";
 import {
 	cursorModelInfo,
 	makeCursorRunnerDriver,
@@ -88,6 +92,93 @@ afterEach(() => {
 });
 
 describe("Cursor ephemeral text generation with captured SDK traffic", () => {
+	for (const loggedIn of [true, false]) {
+		effectIt.live(
+			loggedIn
+				? "uses each requested account's scoped credential for its catalog and title"
+				: "fails auth_required when the requested scoped store is empty despite other logins",
+			() =>
+				Effect.gen(function* () {
+					vi.stubEnv("CURSOR_API_KEY", "");
+					const { root, port: shared } = setup();
+					vi.spyOn(shared, "storedCredential").mockResolvedValue({
+						apiKey: "[REDACTED:shared]",
+						backendUrl: "https://api2.cursor.sh",
+						createdAtMs: 0,
+					});
+					vi.spyOn(shared, "createAgent");
+					vi.spyOn(shared, "modelsList");
+					const ports = new Map<string, CursorSdkPort>();
+					for (const id of [account.id, "cursor-other"]) {
+						const sdk = createTraceCursorSdkPort(trace);
+						vi.spyOn(sdk, "storedCredential").mockResolvedValue(
+							loggedIn || id !== account.id
+								? {
+										apiKey: `[REDACTED:${id}]`,
+										backendUrl: "https://api2.cursor.sh",
+										createdAtMs: 0,
+									}
+								: undefined,
+						);
+						observe(sdk);
+						vi.spyOn(sdk, "modelsList");
+						ports.set(id, sdk);
+					}
+					const auth = yield* makeCursorAuth(() => Effect.void, {
+						port: shared,
+						env: {},
+					});
+					const resources: CursorAccountResources["Service"] = {
+						use: (id, work) => {
+							const sdk = ports.get(id);
+							if (!sdk) throw new Error(`Unexpected account ${id}`);
+							return work({ sdk, auth });
+						},
+					};
+					const driver = makeCursorRunnerDriver(
+						process.cwd(),
+						shared,
+						undefined,
+						root,
+						resources,
+					);
+					for (const id of loggedIn ? ports.keys() : [account.id]) {
+						const sdk = ports.get(id);
+						if (!sdk) throw new Error(`Missing account ${id}`);
+						const result = yield* Effect.result(
+							driver.generateTextEffect({
+								...input,
+								account: { ...account, id: AccountIdSchema.make(id), env: {} },
+							}),
+						);
+						if (loggedIn) {
+							expect(Result.getOrThrow(result)).toBe(reply);
+							expect(sdk.modelsList).toHaveBeenCalledWith(
+								expect.objectContaining({ apiKey: `[REDACTED:${id}]` }),
+							);
+							expect(sdk.createAgent).toHaveBeenCalledWith(
+								expect.anything(),
+								expect.objectContaining({ apiKey: `[REDACTED:${id}]` }),
+								expect.anything(),
+							);
+							expectClean(root, sdk);
+						} else {
+							expect(Result.isFailure(result)).toBe(true);
+							if (Result.isFailure(result))
+								expect(result.failure).toMatchObject({ code: "auth_required" });
+							for (const other of ports.values()) {
+								expect(other.modelsList).not.toHaveBeenCalled();
+								expect(other.createAgent).not.toHaveBeenCalled();
+							}
+						}
+					}
+					expect(shared.storedCredential).not.toHaveBeenCalled();
+					expect(shared.modelsList).not.toHaveBeenCalled();
+					expect(shared.createAgent).not.toHaveBeenCalled();
+				}),
+		);
+	}
+
 	it("returns the captured terminal text with no tools/settings and removes all state", async () => {
 		const { root, port, driver } = setup();
 		const before = process.env["CURSOR_DATA_DIR"];

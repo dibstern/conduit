@@ -7,6 +7,7 @@ import type {
 	LegacyRunnerSettings as Settings,
 } from "../claude/claude-runner-snapshot.js";
 import type { ClaudeSubagentTranscriptSnapshot } from "../claude/types.js";
+import type { CursorCredential } from "../cursor/sdk-port.js";
 import type {
 	PermissionDecision,
 	PermissionRequest,
@@ -37,6 +38,8 @@ export type SessionCommand = (
 	  }
 	| {
 			readonly type: "send-turn";
+			/** Ephemeral launch credentials, excluded from durable command inputs. */
+			readonly cursorCredential?: CursorCredential;
 			readonly sinkId: string;
 			readonly aborted: boolean;
 			readonly claudeSettingsOverrides?: Settings | undefined;

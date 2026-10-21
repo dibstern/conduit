@@ -1085,7 +1085,9 @@ export const makeProcessSessionRunner = (
 			entry.ending === 0 &&
 			entry.commandsInFlight === 0 &&
 			entry.buildId !== undefined &&
-			entry.buildId !== runnerBuildId() &&
+			(entry.buildId !== runnerBuildId() ||
+				(driver.driverKind === "cursor" &&
+					entry.connection?.scopedCursorCredentials === false)) &&
 			entry.upgrade.state?.quiescent === true &&
 			(entry.upgrade.state.snapshot !== undefined ||
 				driver.coldUpgrade === true);
@@ -1750,6 +1752,11 @@ export const makeProcessSessionRunner = (
 												root: command.input.workspaceRoot,
 											},
 										);
+									const legacyCursor =
+										driver.driverKind === "cursor" &&
+										existing.connection?.scopedCursorCredentials === false;
+									if (legacyCursor && command.type === "pre-warm")
+										return { entry: undefined, draining: false };
 									if (foldersChanged && command.type === "pre-warm")
 										return { entry: undefined, draining: false };
 									// Only an idle runner restarts. Background tasks can keep one
@@ -1763,6 +1770,7 @@ export const makeProcessSessionRunner = (
 									if (
 										(foldersChanged ||
 											accountFolderChanged ||
+											legacyCursor ||
 											upgradeByRestart) &&
 										!existing.failure &&
 										!existing.stopping &&

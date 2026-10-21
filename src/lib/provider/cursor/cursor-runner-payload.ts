@@ -45,6 +45,7 @@ import {
 import type {
 	CursorAgent,
 	CursorAgentOptions,
+	CursorCredential,
 	CursorRun,
 	CursorSdkPort,
 	CursorStore,
@@ -55,6 +56,7 @@ export interface CursorRunnerDeps {
 	readonly daemonConfigDir: string;
 	readonly port?: CursorSdkPort;
 	readonly environment?: () => Readonly<Record<string, string | undefined>>;
+	readonly credential?: (inputId: string) => CursorCredential | undefined;
 	readonly onAbandonedRun?: (inputId: string) => void;
 }
 
@@ -529,12 +531,25 @@ export class CursorRunnerPayload implements RunnerPayload {
 								text: input.text ?? input.prompt,
 							},
 						});
-					const credential = yield* sdkCall("credential lookup", () =>
-						resolveCursorCredential(this.sdk, {
-							...(input.shellEnv ?? this.deps.environment?.() ?? process.env),
-							...input.account?.env,
-						}),
-					);
+					const credential =
+						this.deps.credential?.(input.inputId) ??
+						(yield* sdkCall("credential lookup", () =>
+							resolveCursorCredential(
+								this.deps.port ??
+									(input.account
+										? createCursorSdkPort({
+												id: input.account.id,
+												configDir: this.deps.daemonConfigDir,
+											})
+										: this.sdk),
+								{
+									...(input.shellEnv ??
+										this.deps.environment?.() ??
+										process.env),
+									...input.account?.env,
+								},
+							),
+						));
 					if (!credential)
 						return yield* finish(
 							"error",

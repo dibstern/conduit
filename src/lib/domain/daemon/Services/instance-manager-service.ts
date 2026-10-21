@@ -68,6 +68,7 @@ import {
 	AccountDirectoryLive,
 	AccountDirectoryStateLive,
 } from "./account-directory.js";
+import { AccountResourceScopesTag } from "./account-resource-scopes.js";
 
 export { InstanceNotFound } from "../../../instance/instance-errors.js";
 
@@ -394,8 +395,20 @@ export const applyAccountChange = (change: AccountChange) =>
 		const usageOrder = Option.isSome(config)
 			? ((yield* Ref.get(config.value)).usageLimits?.order ?? [])
 			: [];
+		const cursorChange =
+			change._tag !== "Add" &&
+			(yield* directory.snapshot).accounts.some(
+				(account) => account.id === change.id && account.driver === "cursor",
+			);
 		const committed = yield* directory.apply(change, usageOrder, (committed) =>
 			Effect.gen(function* () {
+				if (
+					cursorChange &&
+					(change._tag === "Remove" || change._tag === "Update")
+				) {
+					const scopes = yield* Effect.serviceOption(AccountResourceScopesTag);
+					if (Option.isSome(scopes)) yield* scopes.value.invalidate(change.id);
+				}
 				const account =
 					change._tag === "Add"
 						? committed.accounts.at(-1)

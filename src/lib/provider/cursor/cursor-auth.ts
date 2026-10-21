@@ -1,4 +1,4 @@
-import { Effect, Option, Result, Semaphore } from "effect";
+import { Effect, Fiber, Option, Result, Semaphore } from "effect";
 import type { CursorAuthState } from "../../contracts/ws-rpc.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import {
@@ -6,20 +6,27 @@ import {
 	resolveCursorCredential,
 } from "./cursor-credential.js";
 import { createCursorSdkPort } from "./cursor-sdk.js";
+import type { CursorSdkPort } from "./sdk-port.js";
 
 const EXPIRY_WARNING_MS = 7 * 24 * 60 * 60 * 1_000;
 
 /** One daemon owns the interactive flow; only the SDK persists credentials. */
 export const makeCursorAuth = (
 	onChanged: (authenticated: boolean) => Effect.Effect<void, WsRpcError>,
+	options: {
+		readonly port?: CursorSdkPort;
+		readonly env?: Readonly<Record<string, string | undefined>>;
+	} = {},
 ) =>
 	Effect.gen(function* () {
 		const scope = yield* Effect.scope;
 		const changes = yield* Semaphore.make(1);
 		let sdk: ReturnType<typeof createCursorSdkPort> | undefined;
-		const port = () => (sdk ??= createCursorSdkPort());
+		const port = () => (sdk ??= options.port ?? createCursorSdkPort());
+		const env = options.env ?? process.env;
 		let login: CursorAuthState["login"] = { state: "idle" };
 		let controller: AbortController | undefined;
+		let loginFiber: Fiber.Fiber<void> | undefined;
 		const configuredTimeout = Number(
 			process.env["CONDUIT_TEST_CURSOR_LOGIN_TIMEOUT_MS"],
 		);
@@ -31,8 +38,8 @@ export const makeCursorAuth = (
 			const result = yield* Effect.result(
 				Effect.tryPromise(async () => {
 					const sdk = port();
-					const credential = cursorEnvironmentKey(sdk)
-						? await resolveCursorCredential(sdk)
+					const credential = cursorEnvironmentKey(sdk, env)
+						? await resolveCursorCredential(sdk, env)
 						: undefined;
 					if (credential?.source === "environment") {
 						// SDK status describes only stored login, never an environment key.
@@ -77,7 +84,8 @@ export const makeCursorAuth = (
 				...(Result.isSuccess(result)
 					? result.success
 					: {
-							source: sdk && cursorEnvironmentKey(sdk) ? "environment" : "none",
+							source:
+								sdk && cursorEnvironmentKey(sdk, env) ? "environment" : "none",
 							status: "error",
 							expiresSoon: false,
 							error:
@@ -96,6 +104,9 @@ export const makeCursorAuth = (
 		yield* Effect.addFinalizer(() => cancel);
 		return {
 			read,
+			awaitLogin: Effect.suspend(() =>
+				loginFiber ? Fiber.await(loginFiber).pipe(Effect.asVoid) : Effect.void,
+			),
 			start: changes.withPermits(1)(
 				Effect.gen(function* () {
 					const current = yield* read;
@@ -109,7 +120,7 @@ export const makeCursorAuth = (
 						controller === flow &&
 						login.state === "pending" &&
 						!flow.signal.aborted;
-					yield* Effect.gen(function* () {
+					loginFiber = yield* Effect.gen(function* () {
 						const result = yield* Effect.result(
 							Effect.tryPromise((signal) =>
 								port().authLogin({

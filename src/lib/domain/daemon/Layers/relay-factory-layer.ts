@@ -32,6 +32,7 @@ import {
 	projectStorageDir,
 	writeProjectStorageOwner,
 } from "../../../persistence/project-storage.js";
+import { CursorAccountResources } from "../../../provider/cursor/cursor-account-resources.js";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
 import type { StoredProject } from "../../../types.js";
 import {
@@ -202,6 +203,9 @@ export const RelayFactoryLive = (
 		RelayFactoryTag,
 		Effect.gen(function* () {
 			const accounts = yield* AccountDirectory;
+			const cursorResources = yield* Effect.serviceOption(
+				CursorAccountResources,
+			);
 			const surfacing = yield* Effect.serviceOption(MessageSurfacingSettings);
 			const categories = yield* Effect.serviceOption(CategorySet);
 			const sessionDirectory = yield* Effect.serviceOption(SessionDirectory);
@@ -512,6 +516,14 @@ export const RelayFactoryLive = (
 									).pipe(
 										Context.add(ConfigPersistenceTag, configPersistence),
 										Context.add(AccountDirectory, accounts),
+										Context.merge(
+											Option.isSome(cursorResources)
+												? Context.make(
+														CursorAccountResources,
+														cursorResources.value,
+													)
+												: Context.empty(),
+										),
 										Context.merge(
 											Option.isSome(surfacing)
 												? Context.make(

@@ -42,6 +42,7 @@ import {
 	type ClaudeConfigDir,
 	captureClaudeLaunchLogin,
 } from "../../../provider/claude/claude-sdk-env.js";
+import { CursorAccountResourcesLive } from "../../../provider/cursor/cursor-account-resources.js";
 import {
 	ServerBuildUpdateLive,
 	serverExitCode,
@@ -809,12 +810,15 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			)
 		: makeInstanceManagerStateLive(undefined, [], instanceManagerOptions);
 
-	const registryState = Layer.mergeAll(
+	const registryBase = Layer.mergeAll(
 		projectRegistryLayer,
 		instanceManagerLayer,
 	)
 		.pipe(Layer.provideMerge(stateLayer))
 		.pipe(Layer.provideMerge(auxiliaryServices));
+	const registryState = CursorAccountResourcesLive(configDir).pipe(
+		Layer.provideMerge(registryBase),
+	);
 
 	const effectSnapshotLayer = ConfigSnapshotFromEffectStateLive.pipe(
 		Layer.provideMerge(registryState),
