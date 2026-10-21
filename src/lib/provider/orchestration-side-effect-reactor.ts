@@ -41,7 +41,7 @@ import {
 } from "../persistence/effect/read-query-effect.js";
 import { makeRetireReplacedProcessPrompts } from "../persistence/effect/retire-pending-prompts.js";
 import { SessionRollupProjects } from "../persistence/effect/session-rollup-projects.js";
-import { canonicalEvent } from "../persistence/events.js";
+import { type CanonicalEvent, canonicalEvent } from "../persistence/events.js";
 import { normalizeClaudeLaunchInput } from "./claude/claude-runner-wire.js";
 import type { ClaudeLaunchConfig } from "./claude/claude-sdk-env.js";
 import type { ClaudeSessionForkSdk } from "./claude/claude-session-fork.js";
@@ -213,6 +213,7 @@ export interface ProviderSideEffectReactorOptions {
 
 const defaultRetryBackoff = (failureCount: number): Duration.Input =>
 	Duration.millis(Math.min(1000 * 2 ** Math.max(0, failureCount - 1), 30_000));
+const maxControlAttempts = 5;
 const defaultOutcomePollInterval: Duration.Input = Duration.millis(500);
 
 function clampPollDuration(
@@ -1622,46 +1623,188 @@ export class ProviderSideEffectReactor {
 			failure !== undefined &&
 			(row.effect_type === "resolve_permission" ||
 				row.effect_type === "resolve_question") &&
-			failure.code !== "provider_process_gone" &&
-			failure.code !== "provider_process_unavailable" &&
-			!(isRecord(failure.cause) && failure.cause["retryable"] === false);
-		return this.options
-			.write(() =>
-				Effect.gen({ self: this }, function* () {
-					const updatedAt = yield* this.currentTimeMillis();
-					const errorCode = failure
-						? (failure.code ?? providerFailureCode(failure))
-						: null;
-					const errorJson = failure
-						? JSON.stringify({
-								_tag: failure._tag,
-								providerId: failure.providerId,
-								operation: failure.operation,
-								code: failure.code,
-								causeMessage:
-									failure.cause instanceof Error
-										? failure.cause.message
-										: String(failure.cause),
-							})
-						: null;
-					const changed = yield* this.options
-						.sql`UPDATE provider_command_outbox SET status = ${failure?.code === "provider_process_gone" || failure?.code === "provider_process_unavailable" ? "cancelled" : retryable ? "retryable_failed" : failure ? "failed" : "completed"}, error_code = ${errorCode}, next_attempt_at = ${retryable ? updatedAt + Duration.toMillis((this.options.retryBackoff ?? defaultRetryBackoff)(row.attempt_count)) : null}, updated_at = ${updatedAt}
+			failure.retryable &&
+			row.attempt_count < maxControlAttempts;
+		return (
+			failure && !retryable && failure.code === undefined
+				? this.readFailedControlPrompt(row)
+				: Effect.succeed(undefined)
+		).pipe(
+			Effect.flatMap((reopened) =>
+				this.options.write((project) =>
+					Effect.gen({ self: this }, function* () {
+						const updatedAt = yield* this.currentTimeMillis();
+						const errorCode = failure
+							? (failure.code ?? providerFailureCode(failure))
+							: null;
+						const errorJson = failure
+							? JSON.stringify({
+									_tag: failure._tag,
+									providerId: failure.providerId,
+									operation: failure.operation,
+									code: failure.code,
+									causeMessage:
+										failure.cause instanceof Error
+											? failure.cause.message
+											: String(failure.cause),
+								})
+							: null;
+						const changed = yield* this.options
+							.sql`UPDATE provider_command_outbox SET status = ${failure?.code === "provider_process_gone" || failure?.code === "provider_process_unavailable" ? "cancelled" : retryable ? "retryable_failed" : failure ? "failed" : "completed"}, error_code = ${errorCode}, next_attempt_at = ${retryable ? updatedAt + Duration.toMillis((this.options.retryBackoff ?? defaultRetryBackoff)(row.attempt_count)) : null}, updated_at = ${updatedAt}
 				WHERE request_sequence = ${row.request_sequence} AND project_key = ${this.options.projectId}
 					AND status = 'running' AND attempt_count = ${row.attempt_count} RETURNING command_id`;
-					if (changed.length)
-						yield* this.options
-							.sql`UPDATE command_receipts SET status = ${retryable ? "side_effect_requested" : failure ? "side_effect_failed" : "side_effect_completed"}, error_code = ${errorCode}, error = ${errorJson}, updated_at = ${updatedAt}
+						if (changed.length) {
+							yield* this.options
+								.sql`UPDATE command_receipts SET status = ${retryable ? "side_effect_requested" : failure ? "side_effect_failed" : "side_effect_completed"}, error_code = ${errorCode}, error = ${errorJson}, updated_at = ${updatedAt}
 				WHERE command_id = ${row.command_id} AND project_key = ${this.options.projectId} AND status = 'side_effect_requested'`;
-				}),
-			)
-			.pipe(
-				Effect.tap(() =>
-					Effect.sync(() => {
-						if (!retryable) this.acceptedControls.delete(row.command_id);
+							if (reopened) {
+								const current = yield* this.options
+									.sql`SELECT id FROM pending_approvals WHERE id = ${reopened.event.data.id} AND session_id = ${row.session_id} AND provider_process_id = ${row.provider_process_id} AND status = 'resolved' AND version = ${reopened.version}`;
+								if (current.length) {
+									const store = yield* makeEventStoreEffect.pipe(
+										Effect.provideService(
+											SqlClient.SqlClient,
+											this.options.sql,
+										),
+										Effect.provideService(PersistenceProjectTag, {
+											projectId: this.options.projectId,
+										}),
+									);
+									yield* project([yield* store.append(reopened.event)]);
+								}
+							}
+						}
 					}),
 				),
-				Effect.mapError(storeFailure("controlOutcome")),
+			),
+			Effect.tap(() =>
+				Effect.sync(() => {
+					if (!retryable) this.acceptedControls.delete(row.command_id);
+				}),
+			),
+			Effect.mapError(storeFailure("controlOutcome")),
+		);
+	}
+
+	/** A terminal answer may have been rejected while the native prompt survives. */
+	private readFailedControlPrompt(row: ProviderCommandOutboxRow): Effect.Effect<
+		| {
+				readonly event: CanonicalEvent<"permission.asked" | "question.asked">;
+				readonly version: number;
+		  }
+		| undefined
+	> {
+		return Effect.gen({ self: this }, function* () {
+			if (
+				row.effect_type !== "resolve_permission" &&
+				row.effect_type !== "resolve_question"
+			)
+				return undefined;
+			const instances = yield* Effect.serviceOption(OpenCodeInstancesTag);
+			if (Option.isNone(instances)) return undefined;
+			const payload = yield* Schema.decodeUnknownEffect(
+				Schema.fromJsonString(ProviderControlPayloadSchema),
+			)(row.payload_json);
+			if (
+				payload.type !== "resolve_permission" &&
+				payload.type !== "resolve_question"
+			)
+				return undefined;
+			const [prompt] = yield* this.options.sql<{
+				version: number;
+				tool_name: string | null;
+				input: string | null;
+				provider_request_id: string | null;
+			}>`SELECT version, tool_name, input, provider_request_id FROM pending_approvals WHERE id = ${payload.requestId} AND session_id = ${row.session_id} AND provider_process_id = ${row.provider_process_id} AND status = 'resolved'`;
+			if (!prompt) return undefined;
+			const call = yield* this.options.resolveSessionCallContext?.(
+				row.session_id,
+				undefined,
+				{
+					prompt: {
+						id: payload.requestId,
+						kind:
+							payload.type === "resolve_permission" ? "permission" : "question",
+					},
+				},
+			) ?? Effect.succeed(undefined);
+			const running = yield* instances.value.ifRunning(
+				call?.account.id ?? row.provider_id,
+				call?.workspaceRoot,
 			);
+			if (
+				Option.isNone(running) ||
+				running.value.promptProcessId !== row.provider_process_id
+			)
+				return undefined;
+			const client = running.value;
+			const directory =
+				call?.workspaceRoot ??
+				(yield* Effect.tryPromise(() => client.session.get(row.session_id)))
+					.directory;
+			if (!directory) return undefined;
+			const pending = yield* Effect.tryPromise(() =>
+				payload.type === "resolve_permission"
+					? client.permission.list(directory)
+					: client.question.list(directory),
+			);
+			if (
+				!pending.some(
+					(request) =>
+						request.id === (payload.nativeRequestId ?? payload.requestId),
+				)
+			)
+				return undefined;
+			const current = yield* instances.value.ifRunning(
+				call?.account.id ?? row.provider_id,
+				call?.workspaceRoot,
+			);
+			if (
+				Option.isNone(current) ||
+				current.value.promptProcessId !== row.provider_process_id
+			)
+				return undefined;
+			const input: unknown =
+				prompt.input === null ? undefined : JSON.parse(prompt.input);
+			const target = {
+				id: payload.requestId,
+				sessionId: row.session_id,
+				providerProcessId: payload.providerProcessId,
+				...(prompt.provider_request_id === null
+					? {}
+					: { providerRequestId: prompt.provider_request_id }),
+			};
+			const options = {
+				provider: row.provider_id,
+				metadata: {
+					commandId: row.command_id,
+					source: "conduit.control-reconciliation",
+				},
+			};
+			return {
+				version: prompt.version,
+				event:
+					payload.type === "resolve_permission"
+						? canonicalEvent(
+								"permission.asked",
+								row.session_id,
+								{ ...target, toolName: prompt.tool_name ?? "", input },
+								options,
+							)
+						: canonicalEvent(
+								"question.asked",
+								row.session_id,
+								{ ...target, questions: input },
+								options,
+							),
+			};
+		}).pipe(
+			Effect.scoped,
+			// Reconciliation cannot hold the process queue if the provider is down.
+			Effect.timeoutOption("1 second"),
+			Effect.map(Option.getOrUndefined),
+			Effect.catch(() => Effect.succeed(undefined)),
+		);
 	}
 
 	private writeFailure(
