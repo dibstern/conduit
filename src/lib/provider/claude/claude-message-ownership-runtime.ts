@@ -371,6 +371,12 @@ export function applyClaudeOwnershipDecisionEffect(
 									providerTaskId: taskId,
 								},
 							},
+							issuer.kind === "parent"
+								? (ctx.toolRunIds?.get(toolUseId) ??
+										(decision.issuingMessageId
+											? ctx.messageRunIds?.get(decision.issuingMessageId)
+											: undefined))
+								: undefined,
 						),
 					)
 					.pipe(

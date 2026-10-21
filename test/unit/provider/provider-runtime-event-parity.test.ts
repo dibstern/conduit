@@ -63,6 +63,40 @@ function stateEntries(state: ProviderRuntimeDomainMapperState) {
 }
 
 describe("translateProviderRuntimeEventToDomain", () => {
+	it("retains accepted run ownership and input identity without inferring an owner", () => {
+		const accepted = translateProviderRuntimeEventToDomain(
+			runtimeEvent({
+				eventId: "run-accepted",
+				type: "run.started",
+				runId: "run-active",
+				data: { inputId: "steer-1", requestedRunId: "run-reserved" },
+			}),
+		);
+		expect(accepted.events).toMatchObject([
+			{
+				type: "run.started",
+				metadata: { runId: "run-active" },
+				data: { inputId: "steer-1", requestedRunId: "run-reserved" },
+			},
+		]);
+		const terminal = translateProviderRuntimeEventToDomain(
+			runtimeEvent({
+				eventId: "run-complete",
+				type: "turn.completed",
+				runId: "run-active",
+				data: { messageId: "assistant-1" },
+			}),
+		);
+		expect(terminal.events[0]?.metadata).toEqual({ runId: "run-active" });
+		const unowned = translateProviderRuntimeEventToDomain(
+			runtimeEvent({
+				eventId: "unplaced",
+				type: "turn.completed",
+				data: { messageId: "assistant-2" },
+			}),
+		);
+		expect(unowned.events[0]?.metadata).not.toHaveProperty("runId");
+	});
 	it.each([
 		"claude.sdk.message",
 		"opencode.sse",

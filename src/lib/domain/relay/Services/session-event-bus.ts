@@ -12,6 +12,9 @@ import type { StoredEvent } from "../../../persistence/events.js";
 
 export const SESSION_EVENT_BUS_CAPACITY = 256;
 
+/** Projection outcome carried only on the live bus, never persisted as event data. */
+export type CommittedSessionEvent = StoredEvent & { readonly runEnded?: true };
+
 export interface SessionEventFilter {
 	readonly sessionId?: string;
 }
@@ -31,7 +34,10 @@ export interface SessionEventFilter {
  * read model. This bus is a live change-signal, never the backlog.
  */
 export interface SessionEventBus {
-	readonly publish: (events: readonly StoredEvent[]) => Effect.Effect<void>;
+	readonly publish: (
+		events: readonly StoredEvent[],
+		endedRunEvents?: ReadonlySet<string>,
+	) => Effect.Effect<void>;
 	/**
 	 * Announce that the read model advanced. Published by the projection path
 	 * once its transaction has committed, so a subscriber that re-queries on the
@@ -46,7 +52,7 @@ export interface SessionEventBus {
 	 */
 	readonly subscribe: (
 		filter?: SessionEventFilter,
-	) => Effect.Effect<Stream.Stream<StoredEvent>, never, Scope.Scope>;
+	) => Effect.Effect<Stream.Stream<CommittedSessionEvent>, never, Scope.Scope>;
 	/**
 	 * As {@link subscribe}, for read-model advances. `dropped` marks a gap in
 	 * this subscription's publications, independent of read-model version jumps.
@@ -71,7 +77,7 @@ export const makeSessionEventBusLive = (
 		SessionEventBusTag,
 		Effect.gen(function* () {
 			const capacity = options.capacity ?? SESSION_EVENT_BUS_CAPACITY;
-			const pubsub = yield* PubSub.sliding<StoredEvent>({ capacity });
+			const pubsub = yield* PubSub.sliding<CommittedSessionEvent>({ capacity });
 			const configuredAdvanceCapacity =
 				process.env["NODE_ENV"] === "test"
 					? Number(process.env["CONDUIT_TEST_ADVANCE_BUS_CAPACITY"] ?? capacity)
@@ -90,10 +96,19 @@ export const makeSessionEventBusLive = (
 			const publication = yield* Semaphore.make(1);
 			let ordinal = 0;
 			return {
-				publish: (events) =>
+				publish: (events, endedRunEvents) =>
 					events.length === 0
 						? Effect.void
-						: Effect.asVoid(PubSub.publishAll(pubsub, events)),
+						: Effect.asVoid(
+								PubSub.publishAll(
+									pubsub,
+									events.map((event) =>
+										endedRunEvents?.has(event.eventId)
+											? { ...event, runEnded: true as const }
+											: event,
+									),
+								),
+							),
 				publishAdvance: (advance) =>
 					publication.withPermits(1)(
 						Effect.suspend(() =>

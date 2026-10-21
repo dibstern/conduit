@@ -180,6 +180,8 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 			api.session.abort = vi.fn(stop);
 			api.session.prompt = vi.fn(async (sessionId, options) => {
 				const inputId = options.text.split(" ")[0] ?? "";
+				const messageId = options.messageId;
+				expect(messageId).toEqual(expect.any(String));
 				const assistantId = `${inputId}-assistant`;
 				sent.push(inputId);
 				providerInputs.push({ inputId, images: options.images ?? [] });
@@ -199,7 +201,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 									sessionID: sessionId,
 									info: {
 										id: assistantId,
-										parentID: inputId,
+										parentID: messageId,
 										role: "assistant",
 										time: { created: 1, completed: Date.now() },
 									},
@@ -216,7 +218,11 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 				await emitSSE(
 					makeSSEEvent("message.updated", {
 						sessionID: sessionId,
-						info: { id: inputId, role: "user", time: { created: Date.now() } },
+						info: {
+							id: messageId,
+							role: "user",
+							time: { created: Date.now() },
+						},
 					}),
 				);
 				await emitSSE(
@@ -224,7 +230,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 						sessionID: sessionId,
 						part: {
 							id: `${inputId}-text`,
-							messageID: inputId,
+							messageID: messageId,
 							type: "text",
 							text: options.text,
 						},
@@ -235,7 +241,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 						sessionID: sessionId,
 						info: {
 							id: assistantId,
-							parentID: inputId,
+							parentID: messageId,
 							role: "assistant",
 							time: { created: Date.now() },
 						},
@@ -329,6 +335,13 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 							activeTurns.set(querySessionId, queryTurn);
 							sent.push(inputId);
 							providerInputs.push({ inputId, images });
+							yield {
+								type: "command_lifecycle",
+								state: "started",
+								command_uuid: inputId,
+								uuid: inputId,
+								session_id: querySessionId,
+							};
 							yield {
 								type: "assistant",
 								uuid: "00000000-0000-0000-0000-000000000001",
@@ -443,10 +456,6 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 					yield* Effect.addFinalizer(() =>
 						Effect.sync(() => ingress.shutdown()),
 					);
-					let onSSE: (event: unknown) => void = () => {};
-					wired.wireSSEToInstance((_event, handler) => {
-						onSSE = handler;
-					});
 					emitSSE = async (event) => {
 						const sid =
 							"sessionID" in event.properties
@@ -460,7 +469,6 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 							),
 						);
 						expect(result.ok).toBe(true);
-						onSSE(event);
 					};
 					const deps = Layer.mergeAll(
 						makeTestHandlerLayer({
@@ -621,8 +629,15 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 								delivery: "queue",
 								originId: "run-now-browser",
 							});
-							if (inputId === "running")
+							if (inputId === "running") {
 								yield* awaitCondition(() => sent.length === 1);
+								yield* sql`SELECT 1 FROM provider_runs WHERE session_id = ${sessionId}
+									AND status = 'running'`.pipe(
+									Effect.delay("1 millis"),
+									Effect.repeat({ until: (rows) => rows.length === 1 }),
+									Effect.timeout("3 seconds"),
+								);
+							}
 						}
 						const secondClient = yield* RpcTest.makeClient(WsRpcGroup);
 						const runNow = (rpc = client) =>
@@ -1038,10 +1053,18 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 						);
 						expect(sent).toEqual(["running", "selected", "first", "last"]);
 						const turns = yield* sql<{
+							input_id: string;
 							user_message_id: string;
 							state: string;
-						}>`SELECT user_message_id, state FROM turns WHERE session_id = ${sessionId} ORDER BY rowid`;
-						expect(turns.map((turn) => turn.user_message_id)).toEqual(sent);
+							run_id: string;
+						}>`SELECT user.input_id, turns.user_message_id, turns.state, turns.run_id
+							FROM turns JOIN messages user ON user.id = turns.user_message_id
+							AND user.session_id = turns.session_id
+							WHERE turns.session_id = ${sessionId} ORDER BY turns.rowid`;
+						expect(turns.map((turn) => turn.input_id)).toEqual(sent);
+						expect(turns.map((turn) => turn.run_id)).toEqual(
+							sent.map(() => expect.any(String)),
+						);
 						expect(turns[0]?.state).toBe(
 							provider === "claude"
 								? "interrupted"

@@ -39,13 +39,13 @@ it("imports pre-merge redesign recaps without changing their versions or source 
 					`Cached version ${version} [#1]`,
 				);
 			expected = db.prepare("SELECT * FROM turn_recaps ORDER BY version").all();
-			// The redesign suffix ended at 74 before the merge added durable drafts.
-			// Later main migrations retain their canonical ids.
+			// rd/mainmerge predates durable drafts and numbers this suffix one lower.
+			// Its ledger ends at turn_recaps; later main migrations never ran there.
 			db.exec(`DROP TABLE input_drafts;
 				CREATE TEMP TABLE redesign_migrations AS
-				SELECT CASE WHEN migration_id <= 74 THEN migration_id - 1
-					ELSE migration_id END AS migration_id, name, created_at
-				FROM effect_sql_migrations WHERE migration_id > 68;
+				SELECT migration_id - 1 AS migration_id, name, created_at
+				FROM effect_sql_migrations WHERE migration_id > 68
+				AND migration_id <= (SELECT migration_id FROM effect_sql_migrations WHERE name = 'turn_recaps');
 				DELETE FROM effect_sql_migrations WHERE migration_id >= 68;
 				INSERT INTO effect_sql_migrations (migration_id, name, created_at)
 				SELECT migration_id, name, created_at FROM redesign_migrations;

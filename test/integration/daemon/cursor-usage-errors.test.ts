@@ -66,8 +66,26 @@ function snapshot(fixture: ProcessHarness, sessionId: string) {
 				metadata: JSON.parse(event.metadata) as Record<string, unknown>,
 				createdAt: event.created_at,
 			}));
+		const terminalErrors = events
+			.filter(
+				({ type, metadata }) =>
+					type === "turn.error" &&
+					typeof metadata["runId"] === "string" &&
+					db
+						.prepare(
+							"SELECT 1 FROM provider_runs WHERE id = ? AND session_id = ? AND status = 'error'",
+						)
+						.get(metadata["runId"], sessionId),
+			)
+			.filter(
+				(event, index, errors) =>
+					errors.findIndex(
+						({ metadata }) => metadata["runId"] === event.metadata["runId"],
+					) === index,
+			);
 		return {
 			events,
+			terminalErrors,
 			commands: db
 				.prepare<
 					[string],
@@ -503,9 +521,7 @@ describe("Cursor usage, errors and cancellation through daemon and runner", () =
 					),
 				{ timeout: TIMEOUT, interval: 100 },
 			);
-			const errors = snapshot(fixture, id).events.filter(
-				({ type }) => type === "turn.error",
-			);
+			const errors = snapshot(fixture, id).terminalErrors;
 			expect(errors).toHaveLength(index + 1);
 			expect(errors.at(-1)?.data).toMatchObject({
 				code: mapped,
@@ -575,9 +591,7 @@ describe("Cursor usage, errors and cancellation through daemon and runner", () =
 					),
 				{ timeout: TIMEOUT, interval: 100 },
 			);
-			const errors = snapshot(fixture, id).events.filter(
-				({ type }) => type === "turn.error",
-			);
+			const errors = snapshot(fixture, id).terminalErrors;
 			expect(errors).toHaveLength(index + 1);
 			expect(errors.at(-1)?.data).toMatchObject({
 				code: "network_error",

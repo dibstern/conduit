@@ -68,6 +68,7 @@ export class ProjectOutsideSeamTransaction extends Data.TaggedError(
 
 export interface CommitAndSignalOptions {
 	readonly publish?: boolean;
+	readonly endedRunEvents?: Set<string>;
 	/** Runs after projection, inside the append transaction, before COMMIT. */
 	readonly beforeCommit?: Effect.Effect<void, SqlError>;
 	readonly afterCommit?: Effect.Effect<void>;
@@ -171,6 +172,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 				// once it has committed. Which is exactly why `project` has to refuse
 				// to feed them from anywhere the COMMIT does not cover.
 				const stored: StoredEvent[] = [];
+				const endedRunEvents = new Set<string>();
 				const advances: ReadModelAdvance[] = [];
 				// Sessions direct stamps wrote, whose families are refreshed once,
 				// before COMMIT, however many stamps the body makes.
@@ -221,7 +223,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 										);
 										const markers: StoredEvent[] = [];
 										const advance = yield* projectionRunner
-											.projectBatch(events, (event) =>
+											.projectBatch(events, endedRunEvents, (event) =>
 												Effect.gen(function* () {
 													// Direct provider/born-dead writers can bypass session commands.
 													// Capture their own marker inside this same deletion transaction.
@@ -372,6 +374,8 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 						return result;
 					}),
 				);
+				for (const eventId of endedRunEvents)
+					options.endedRunEvents?.add(eventId);
 				// Every committed deletion kicks retention, even when no row was
 				// removed or live publication was suppressed. Never wait for drain.
 				if (stored.some((event) => event.type === "session.deleted")) {
@@ -384,7 +388,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 					options.publish !== false &&
 					stored.length > 0
 				)
-					yield* sessionEventBus.value.publish(stored);
+					yield* sessionEventBus.value.publish(stored, endedRunEvents);
 				const sessionStateNotifier = yield* Effect.serviceOption(
 					SessionStateProjectionNotifierTag,
 				);

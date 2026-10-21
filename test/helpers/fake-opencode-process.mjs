@@ -421,6 +421,15 @@ const server = createServer(async (request, response) => {
 			});
 			return;
 		}
+		const prompt = JSON.parse(body || "{}");
+		emitTyped(directory, "message.updated", {
+			info: {
+				id: prompt.messageID ?? prompt.messageId,
+				sessionID,
+				role: "user",
+				time: { created: Date.now() },
+			},
+		});
 		for (const type of ["busy", "idle"])
 			emitTyped(directory, "session.status", { sessionID, status: { type } });
 	} else if (

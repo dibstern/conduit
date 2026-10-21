@@ -678,6 +678,9 @@ export const forkOpenCodeSession = (
 									}
 								: {}),
 							...(forkPointEvent === undefined ? {} : { forkPointEvent }),
+							...(forkTip?.time?.created === undefined
+								? {}
+								: { forkPointTimestamp: forkTip.time.created }),
 							inheritsHistory: false,
 							providerSessionId: session.id,
 						},
@@ -809,7 +812,7 @@ const forkSessionInWorkspace = (
 						Effect.uninterruptible,
 					)
 				: fork;
-			const forked = yield* options?.side && creationGate._tag === "Some"
+			const forked = yield* creationGate._tag === "Some"
 				? creationGate.value.withPermits(1)(initializedFork)
 				: initializedFork;
 			return {

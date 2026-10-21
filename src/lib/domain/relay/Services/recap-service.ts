@@ -1,4 +1,13 @@
-import { Context, Data, Effect, Layer, PubSub, Schema, Stream } from "effect";
+import {
+	type Cause,
+	Context,
+	Data,
+	Effect,
+	Layer,
+	PubSub,
+	Schema,
+	Stream,
+} from "effect";
 import { SqlClient } from "effect/sql";
 import {
 	type AskExplanation,
@@ -18,7 +27,6 @@ import {
 import * as Failure from "../../../effect/failure-classification.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
-import type { StoredEvent } from "../../../persistence/events.js";
 import { mapToolName } from "../../../relay/event-translator.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 import { numberTurnMessages } from "../../../turn-message-numbers.js";
@@ -69,11 +77,6 @@ const probabilitiesSchema = Schema.fromJsonString(
 	Schema.Record(Schema.String, Schema.Number),
 );
 const sentenceSegments = new Intl.Segmenter("en", { granularity: "sentence" });
-function isCompletion(
-	event: StoredEvent,
-): event is Extract<StoredEvent, { type: "turn.completed" }> {
-	return event.type === "turn.completed";
-}
 
 export const makeRecapServiceLive = (
 	options: { readonly queryFactory?: ClaudeOneShotQueryFactory } = {},
@@ -562,10 +565,14 @@ export const makeRecapServiceLive = (
 								),
 					),
 				);
+			const automaticFailure = (cause: Cause.Cause<unknown>) =>
+				Failure.isInterruptedOnly(cause)
+					? Effect.interrupt
+					: Effect.sync(() => log.warn("Turn recap generation failed", cause));
 			const events = yield* bus.subscribe();
 			yield* events.pipe(
 				Stream.runForEach((event) => {
-					if (!isCompletion(event)) return Effect.void;
+					if (!event.runEnded) return Effect.void;
 					return Effect.gen(function* () {
 						const preferences = yield* settings.get;
 						if (
@@ -574,27 +581,23 @@ export const makeRecapServiceLive = (
 							preferences.recap.when !== "turn-end"
 						)
 							return;
-						const [turn] = yield* sql<{
-							id: string;
-						}>`SELECT t.id FROM turns t JOIN sessions s ON s.id = t.session_id
-					WHERE t.session_id = ${event.sessionId} AND s.project_id = ${store.projectId}
-					AND (t.id = ${event.data.userMessageId ?? null} OR t.assistant_message_id = ${event.data.messageId}
-					OR t.id = (SELECT turn_id FROM messages WHERE id = ${event.data.messageId})) LIMIT 1`;
-						if (!turn) return;
-						const target = {
-							sessionId: event.sessionId,
-							turnId: turn.id,
-							scope: "whole" as const,
-						};
-						yield* withTurn(target, generateLocked(target, true));
+						const turns = yield* sql<{ id: string }>`
+							SELECT t.id FROM turns t JOIN sessions s ON s.id = t.session_id
+							WHERE t.session_id = ${event.sessionId} AND s.project_id = ${store.projectId}
+							AND t.run_id = ${event.metadata.runId ?? null} AND t.state = 'completed'`;
+						for (const turn of turns) {
+							const target = {
+								sessionId: event.sessionId,
+								turnId: turn.id,
+								scope: "whole" as const,
+							};
+							yield* withTurn(target, generateLocked(target, true)).pipe(
+								Effect.catchCause(automaticFailure),
+								Effect.forkIn(scope),
+							);
+						}
 					}).pipe(
-						Effect.catchCause((cause) =>
-							Failure.isInterruptedOnly(cause)
-								? Effect.interrupt
-								: Effect.sync(() =>
-										log.warn("Turn recap generation failed", cause),
-									),
-						),
+						Effect.catchCause(automaticFailure),
 						Effect.forkIn(scope),
 						Effect.asVoid,
 					);

@@ -431,6 +431,83 @@ describe("turn control sends over the browser RPC wire", () => {
 		expect(uiState.toasts).toEqual([]);
 	});
 
+	it("hides Stop between the stopped reply's end and its retained steer's placement without releasing admission", async () => {
+		serve({ CancelSession: () => ({ ok: true as const }) });
+		upsert("busy");
+		const { messages } = getOrCreateSessionSlot("s");
+		// Ordinary first-send reservation still exposes Stop before placement.
+		expect(control.turn().working).toBe(true);
+		messages.transcript = {
+			rows: [
+				{
+					id: "a",
+					role: "user",
+					turnTiming: { startedAt: 1, waits: [] },
+				},
+			],
+			pending: [
+				{
+					inputId: "b",
+					state: "steering",
+					admittedAt: 2,
+					request: { text: "correction" },
+				},
+			],
+			hwm: 1,
+			hasMore: false,
+			status: { _tag: "live" },
+			project: "project-a",
+			waiting: new Map(),
+			partOrder: new Map(),
+		};
+		expect(control.turn().working).toBe(true);
+		await control.stop("s");
+		messages.transcript = {
+			...messages.transcript,
+			rows: [
+				{
+					id: "a",
+					role: "user",
+					turnTiming: { startedAt: 1, endedAt: 3, waits: [] },
+				},
+			],
+		};
+		applySessionChange({
+			_tag: "upsert",
+			item: {
+				...row("busy"),
+				canStop: false,
+				lastTurnEndInputId: "a",
+				lastTurnEndVersion: 2,
+			},
+		});
+		expect(control.turn().working).toBe(false);
+		expect(activity().phase).toBe("processing");
+		expect(messages.transcript.pending).toMatchObject([
+			{ inputId: "b", state: "steering" },
+		]);
+		// An indeterminate delivery remains a Stop target after the reply ended.
+		applySessionChange({
+			_tag: "upsert",
+			item: { ...row("busy"), canStop: true },
+		});
+		expect(control.turn().working).toBe(true);
+		// Placement, not an invented intake fact, makes the next input stoppable.
+		messages.transcript = {
+			...messages.transcript,
+			rows: [
+				...messages.transcript.rows,
+				{
+					id: "b",
+					role: "user",
+					turnTiming: { startedAt: 4, waits: [] },
+				},
+			],
+			pending: [],
+		};
+		expect(control.turn().working).toBe(true);
+	});
+
 	it("a slow stop reply ends an unstarted turn immediately", async () => {
 		let finishStop!: (value: { ok: true }) => void;
 		const cancel = vi.fn(

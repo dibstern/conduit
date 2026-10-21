@@ -40,9 +40,8 @@ export const inheritForkHistory = (
 				WHERE pending.id = ${sourceId}
 				AND (m.created_at, m.id) >= (cut.created_at, cut.id))`;
 
-		// Turns precede messages because messages.turn_id has a foreign key. The
-		// old replay did not copy busy/idle signals: its first reply starts the
-		// turn, and the fork's final idle closes any turn that was still open.
+		// Turns precede messages because messages.turn_id has a foreign key.
+		// Copy closed history, never live reservations or native execution.
 		// A bounded turn can predate its latest model. Resolve only that keyed
 		// metadata, following inherited ids back through creation events.
 		yield* sql`WITH RECURSIVE retained AS (${retained}), ancestors(session_id, suffix, through_sequence) AS (
@@ -94,7 +93,7 @@ export const inheritForkHistory = (
 			 cost, tokens_in, tokens_out, requested_at, started_at, completed_at,
 			 requested_model, expected_model, actual_model)
 			SELECT t.id || ${suffix}, ${event.sessionId},
-				CASE WHEN a.turn_id IS NOT NULL AND t.whole AND t.state NOT IN ('pending', 'running')
+				CASE WHEN t.whole AND t.state NOT IN ('pending', 'running')
 					THEN t.state ELSE 'completed' END,
 				t.user_message_id || ${suffix},
 				COALESCE((SELECT m.id || ${suffix} FROM retained m WHERE m.id = t.assistant_message_id),
@@ -107,9 +106,9 @@ export const inheritForkHistory = (
 				CASE WHEN t.whole AND a.turn_id IS NOT NULL THEN t.cost ELSE a.cost END,
 				CASE WHEN t.whole AND a.turn_id IS NOT NULL THEN t.tokens_in ELSE a.tokens_in END,
 				CASE WHEN t.whole AND a.turn_id IS NOT NULL THEN t.tokens_out ELSE a.tokens_out END,
-				t.requested_at, a.started_at,
-				CASE WHEN a.turn_id IS NULL THEN ${event.createdAt}
-					WHEN t.whole AND t.state NOT IN ('pending', 'running') THEN t.completed_at
+				t.requested_at, CASE WHEN t.whole THEN t.started_at ELSE a.started_at END,
+				CASE WHEN t.whole AND t.state NOT IN ('pending', 'running') THEN t.completed_at
+					WHEN a.turn_id IS NULL THEN ${event.createdAt}
 					WHEN (SELECT m.is_streaming FROM retained m WHERE m.turn_id = t.id AND m.role = 'assistant'
 						ORDER BY m.created_at DESC, m.id DESC LIMIT 1) = 0 THEN a.completed_at
 					ELSE ${event.createdAt} END,

@@ -63,21 +63,29 @@ async function emit(harness: RelayHarness, events: readonly CanonicalEvent[]) {
 			);
 			if (ingestion._tag === "None")
 				throw new Error("Relay ingestion unavailable");
-			return yield* ingestion.value.ingestBatch(
-				events.map(
-					(event) =>
-						({
-							eventId: event.eventId,
-							type: event.type,
-							providerId: "claude",
-							sessionId: event.sessionId,
-							providerRefs: {},
-							rawSource: { kind: "fork-golden-fixture" },
-							createdAt: event.createdAt,
-							data: event.data,
-						}) as ProviderRuntimeEvent,
-				),
-			);
+			const commit = yield* makeCommitAndSignal;
+			let pending: ProviderRuntimeEvent[] = [];
+			for (const event of events) {
+				if (event.type === "run.requested") {
+					if (pending.length) yield* ingestion.value.ingestBatch(pending);
+					pending = [];
+					yield* commit([event]);
+					continue;
+				}
+				pending.push({
+					eventId: event.eventId,
+					type: event.type,
+					providerId: "claude",
+					sessionId: event.sessionId,
+					providerRefs: {},
+					rawSource: { kind: "fork-golden-fixture" },
+					createdAt: event.createdAt,
+					data: event.data,
+					metadata: event.metadata,
+					...(event.metadata.runId ? { runId: event.metadata.runId } : {}),
+				} as ProviderRuntimeEvent);
+			}
+			if (pending.length) yield* ingestion.value.ingestBatch(pending);
 		}),
 	);
 }
@@ -85,6 +93,7 @@ async function emit(harness: RelayHarness, events: readonly CanonicalEvent[]) {
 function turn(sessionId: string, n: number, finished = true): CanonicalEvent[] {
 	const user = `turn-${n}-user`;
 	const reply = `turn-${n}-assistant`;
+	const runId = `turn-${n}-run`;
 	const timestamp = NOW - 1000 + n * 100;
 	const event = <T extends CanonicalEvent["type"]>(
 		type: T,
@@ -94,8 +103,10 @@ function turn(sessionId: string, n: number, finished = true): CanonicalEvent[] {
 		canonicalEvent(type, sessionId, data, {
 			provider: "claude",
 			createdAt: timestamp + offset,
+			metadata: { runId },
 		});
 	return [
+		event("run.requested", { runId, inputId: `input-${n}` }),
 		event("message.created", {
 			sessionId,
 			messageId: user,
@@ -108,9 +119,10 @@ function turn(sessionId: string, n: number, finished = true): CanonicalEvent[] {
 			text: `Question ${n}`,
 		}),
 		event("session.status", { sessionId, status: "busy" }, 1),
+		event("run.started", { inputId: `input-${n}`, requestedRunId: runId }, 2),
 		event(
 			"message.created",
-			{ sessionId, messageId: reply, role: "assistant" },
+			{ sessionId, messageId: reply, role: "assistant", parentID: user },
 			2,
 		),
 		event(
@@ -706,6 +718,16 @@ describe("Fork read-model inheritance", () => {
 		);
 		await emit(harness, [
 			canonicalEvent(
+				"run.requested",
+				"result-only-source",
+				{ runId: "result-only-run", inputId: "result-only-user" },
+				{
+					provider: "claude",
+					createdAt: NOW - 20,
+					metadata: { runId: "result-only-run" },
+				},
+			),
+			canonicalEvent(
 				"message.created",
 				"result-only-source",
 				{
@@ -713,13 +735,21 @@ describe("Fork read-model inheritance", () => {
 					messageId: "result-only-user",
 					role: "user",
 				},
-				{ provider: "claude", createdAt: NOW - 20 },
+				{
+					provider: "claude",
+					createdAt: NOW - 20,
+					metadata: { runId: "result-only-run" },
+				},
 			),
 			canonicalEvent(
 				"turn.completed",
 				"result-only-source",
 				{ messageId: "result-only-user", userMessageId: "result-only-user" },
-				{ provider: "claude", createdAt: NOW - 10 },
+				{
+					provider: "claude",
+					createdAt: NOW - 10,
+					metadata: { runId: "result-only-run" },
+				},
 			),
 		]);
 		const resultOnly = await runtime.runPromise(
@@ -934,7 +964,7 @@ describe("Fork read-model inheritance", () => {
 		expect(report.danglingPartPointers).toEqual([]);
 	});
 
-	// A provider can reopen the same turn after a result. Its display owner
+	// A continuation retries the same input with a fresh run. Its display owner
 	// changes to the new reply, while an earlier cut must keep the old owner.
 	it.each([
 		true,
@@ -966,12 +996,40 @@ describe("Fork read-model inheritance", () => {
 								expectedModel: "sonnet",
 								actualModel: "claude-sonnet-4-6",
 							},
-							{ provider: "claude", createdAt: event.createdAt },
+							{
+								provider: "claude",
+								createdAt: event.createdAt,
+								metadata: event.metadata,
+							},
 						)
 					: event,
 			),
 		);
+		const continuation = { runId: "continued-run" };
 		await emit(harness, [
+			canonicalEvent(
+				"run.requested",
+				sourceId,
+				{ runId: continuation.runId, inputId: "input-6" },
+				{ provider: "claude", createdAt: NOW - 301 },
+			),
+			canonicalEvent(
+				"message.created",
+				sourceId,
+				{
+					sessionId: sourceId,
+					messageId: "turn-6-user",
+					role: "user",
+					inputId: "input-6",
+				},
+				{ provider: "claude", createdAt: NOW - 301, metadata: continuation },
+			),
+			canonicalEvent(
+				"run.started",
+				sourceId,
+				{ inputId: "input-6", requestedRunId: continuation.runId },
+				{ provider: "claude", createdAt: NOW - 300, metadata: continuation },
+			),
 			canonicalEvent(
 				"message.created",
 				sourceId,
@@ -979,8 +1037,9 @@ describe("Fork read-model inheritance", () => {
 					sessionId: sourceId,
 					messageId: "continued-reply",
 					role: "assistant",
+					parentID: "turn-6-user",
 				},
-				{ provider: "claude", createdAt: NOW - 300 },
+				{ provider: "claude", createdAt: NOW - 300, metadata: continuation },
 			),
 			canonicalEvent(
 				"turn.model_resolved",
@@ -989,7 +1048,7 @@ describe("Fork read-model inheritance", () => {
 					...(keyed ? { messageId: "continued-reply" } : {}),
 					actualModel: "later-model",
 				},
-				{ provider: "claude", createdAt: NOW - 300 },
+				{ provider: "claude", createdAt: NOW - 300, metadata: continuation },
 			),
 			canonicalEvent(
 				"text.delta",
@@ -999,7 +1058,7 @@ describe("Fork read-model inheritance", () => {
 					partId: "continued-text",
 					text: "More work",
 				},
-				{ provider: "claude", createdAt: NOW - 299 },
+				{ provider: "claude", createdAt: NOW - 299, metadata: continuation },
 			),
 			canonicalEvent(
 				"turn.completed",
@@ -1009,7 +1068,7 @@ describe("Fork read-model inheritance", () => {
 					cost: 0.03,
 					tokens: { input: 100, output: 20 },
 				},
-				{ provider: "claude", createdAt: NOW - 298 },
+				{ provider: "claude", createdAt: NOW - 298, metadata: continuation },
 			),
 		]);
 		const latest = await runtime.runPromise(forkSession(sourceId));
@@ -1078,7 +1137,11 @@ describe("Fork read-model inheritance", () => {
 					error: "Permission denied",
 					code: "DENIED",
 				},
-				{ provider: "claude", createdAt: NOW - 200 },
+				{
+					provider: "claude",
+					createdAt: NOW - 200,
+					metadata: { runId: "turn-7-run" },
+				},
 			),
 		]);
 		const fork = await harness.stack.effectRuntime.runtime.runPromise(
@@ -1182,10 +1245,24 @@ describe("Fork read-model inheritance", () => {
 				const commit = yield* makeCommitAndSignal;
 				yield* commit([
 					canonicalEvent(
+						"run.requested",
+						sourceId,
+						{ runId: "cursor-run", inputId: "cursor-user" },
+						{
+							provider: "cursor",
+							createdAt: NOW - 100,
+							metadata: { runId: "cursor-run" },
+						},
+					),
+					canonicalEvent(
 						"message.created",
 						sourceId,
 						{ sessionId: sourceId, messageId: "cursor-user", role: "user" },
-						{ provider: "cursor", createdAt: NOW - 100 },
+						{
+							provider: "cursor",
+							createdAt: NOW - 100,
+							metadata: { runId: "cursor-run" },
+						},
 					),
 					canonicalEvent(
 						"text.delta",
@@ -1195,7 +1272,21 @@ describe("Fork read-model inheritance", () => {
 							partId: "cursor-user-text",
 							text: "Remember the blue marker",
 						},
-						{ provider: "cursor", createdAt: NOW - 100 },
+						{
+							provider: "cursor",
+							createdAt: NOW - 100,
+							metadata: { runId: "cursor-run" },
+						},
+					),
+					canonicalEvent(
+						"run.started",
+						sourceId,
+						{ inputId: "cursor-user", requestedRunId: "cursor-run" },
+						{
+							provider: "cursor",
+							createdAt: NOW - 90,
+							metadata: { runId: "cursor-run" },
+						},
 					),
 					canonicalEvent(
 						"message.created",
@@ -1204,8 +1295,13 @@ describe("Fork read-model inheritance", () => {
 							sessionId: sourceId,
 							messageId: "cursor-reply",
 							role: "assistant",
+							parentID: "cursor-user",
 						},
-						{ provider: "cursor", createdAt: NOW - 90 },
+						{
+							provider: "cursor",
+							createdAt: NOW - 90,
+							metadata: { runId: "cursor-run" },
+						},
 					),
 					canonicalEvent(
 						"text.delta",
@@ -1215,13 +1311,21 @@ describe("Fork read-model inheritance", () => {
 							partId: "cursor-reply-text",
 							text: "The marker is blue",
 						},
-						{ provider: "cursor", createdAt: NOW - 90 },
+						{
+							provider: "cursor",
+							createdAt: NOW - 90,
+							metadata: { runId: "cursor-run" },
+						},
 					),
 					canonicalEvent(
 						"turn.completed",
 						sourceId,
 						{ messageId: "cursor-reply" },
-						{ provider: "cursor", createdAt: NOW - 80 },
+						{
+							provider: "cursor",
+							createdAt: NOW - 80,
+							metadata: { runId: "cursor-run" },
+						},
 					),
 				]);
 				const fork = yield* forkSession(sourceId);
@@ -1299,22 +1403,59 @@ describe("Fork read-model inheritance", () => {
 				const createdAt = NOW - 10_000 + n * 10;
 				return [
 					canonicalEvent(
+						"run.requested",
+						sourceId,
+						{ runId: `${user}-run`, inputId: user },
+						{
+							provider: "claude",
+							createdAt,
+							metadata: { runId: `${user}-run` },
+						},
+					),
+					canonicalEvent(
 						"message.created",
 						sourceId,
 						{ sessionId: sourceId, messageId: user, role: "user" },
-						{ provider: "claude", createdAt },
+						{
+							provider: "claude",
+							createdAt,
+							metadata: { runId: `${user}-run` },
+						},
 					),
 					canonicalEvent(
 						"text.delta",
 						sourceId,
 						{ messageId: user, partId: `${user}-text`, text: user },
-						{ provider: "claude", createdAt },
+						{
+							provider: "claude",
+							createdAt,
+							metadata: { runId: `${user}-run` },
+						},
+					),
+					canonicalEvent(
+						"run.started",
+						sourceId,
+						{ inputId: user, requestedRunId: `${user}-run` },
+						{
+							provider: "claude",
+							createdAt: createdAt + 1,
+							metadata: { runId: `${user}-run` },
+						},
 					),
 					canonicalEvent(
 						"message.created",
 						sourceId,
-						{ sessionId: sourceId, messageId: assistant, role: "assistant" },
-						{ provider: "claude", createdAt: createdAt + 1 },
+						{
+							sessionId: sourceId,
+							messageId: assistant,
+							role: "assistant",
+							parentID: user,
+						},
+						{
+							provider: "claude",
+							createdAt: createdAt + 1,
+							metadata: { runId: `${user}-run` },
+						},
 					),
 					canonicalEvent(
 						"text.delta",
@@ -1324,13 +1465,21 @@ describe("Fork read-model inheritance", () => {
 							partId: `${assistant}-text`,
 							text: assistant,
 						},
-						{ provider: "claude", createdAt: createdAt + 1 },
+						{
+							provider: "claude",
+							createdAt: createdAt + 1,
+							metadata: { runId: `${user}-run` },
+						},
 					),
 					canonicalEvent(
 						"turn.completed",
 						sourceId,
 						{ messageId: assistant },
-						{ provider: "claude", createdAt: createdAt + 2 },
+						{
+							provider: "claude",
+							createdAt: createdAt + 2,
+							metadata: { runId: `${user}-run` },
+						},
 					),
 				];
 			}).flat();
