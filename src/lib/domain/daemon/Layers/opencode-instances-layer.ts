@@ -26,6 +26,7 @@ import {
 	resolveOpenCodeInstanceUrl,
 } from "../../../daemon/config-persistence.js";
 import { OpenCodeConnectionError } from "../../../errors.js";
+import { instanceIdleTimeoutFromEnv } from "../../../instance/idle-policy.js";
 import { openCodeAuth } from "../../../instance/managed-opencode-process.js";
 import { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import { createSdkClient } from "../../../instance/sdk-factory.js";
@@ -170,21 +171,6 @@ const borrowIdleTimeoutFromEnv = Effect.sync(() => {
 	Effect.orDie,
 );
 
-/** Grace before an instance without demand stops, like the PTY host's idle timeout. */
-const idleTimeoutFromEnv = Effect.sync(() => {
-	const configured = process.env["CONDUIT_OPENCODE_IDLE_TIMEOUT_MS"];
-	return configured === undefined ? 600_000 : Number(configured);
-}).pipe(
-	Effect.filterOrFail(
-		(ms) => Number.isInteger(ms) && ms > 0 && ms <= 2_147_483_647,
-		() =>
-			new Error(
-				"CONDUIT_OPENCODE_IDLE_TIMEOUT_MS must be an integer from 1 to 2147483647",
-			),
-	),
-	Effect.orDie,
-);
-
 export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 	resolveEndpoint: (
 		instanceId: string,
@@ -202,7 +188,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 			const { log = createLogger("daemon").child("opencode"), control } =
 				options;
 			const idleTimeoutMs =
-				options.idleTimeoutMs ?? (yield* idleTimeoutFromEnv);
+				options.idleTimeoutMs ?? (yield* instanceIdleTimeoutFromEnv);
 			const borrowIdleTimeoutMs = yield* borrowIdleTimeoutFromEnv;
 			const context = yield* Effect.context<R | Start | Stop>();
 			const scope = yield* Effect.scope;

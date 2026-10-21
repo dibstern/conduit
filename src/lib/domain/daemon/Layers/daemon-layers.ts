@@ -117,6 +117,7 @@ import {
 } from "../Services/session-directory.js";
 import { WorktreeCleanupQueueLive } from "../Services/worktree-cleanup-service.js";
 import { AccountPictureLive } from "./account-picture-layer.js";
+import { makeAccountResourceScopesLive } from "./account-resource-scopes-layer.js";
 import { AutoSettleLive } from "./auto-settle-layer.js";
 import { CategorySetLive } from "./category-set-layer.js";
 import {
@@ -722,6 +723,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		EnsureCertsLive,
 		PushNotificationManagerLive(configDir),
 		makeProjectShellEnvLive(),
+		makeAccountResourceScopesLive(),
 	).pipe(Layer.provideMerge(foundation));
 
 	const versionCheckLayer = options.versionCheck
