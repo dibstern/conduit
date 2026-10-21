@@ -101,6 +101,45 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+async function expectOptionGeometry(canvasElement: HTMLElement) {
+	await canvasElement.ownerDocument.fonts.ready;
+	for (const option of canvasElement.querySelectorAll(".question-option")) {
+		const control = option.querySelector("input");
+		const content = option.querySelector(".question-option-content");
+		const label = option.querySelector(".question-option-label");
+		if (!control || !content || !label)
+			throw new Error("Missing question option");
+		const font = getComputedStyle(label);
+		const context = canvasElement.ownerDocument
+			.createElement("canvas")
+			.getContext("2d");
+		if (!context) throw new Error("Missing text measurement context");
+		context.font = `${font.fontStyle} ${font.fontWeight} ${font.fontSize} ${font.fontFamily}`;
+		const x = context.measureText("x");
+		const baseline = canvasElement.ownerDocument.createElement("span");
+		baseline.style.cssText =
+			"display:inline-block;width:0;height:0;vertical-align:baseline";
+		label.prepend(baseline);
+		const xCenter =
+			baseline.getBoundingClientRect().top -
+			(x.actualBoundingBoxAscent - x.actualBoundingBoxDescent) / 2;
+		baseline.remove();
+		const controlRect = control.getBoundingClientRect();
+		await expect(
+			Math.abs(controlRect.top + controlRect.height / 2 - xCenter),
+		).toBeLessThanOrEqual(0.5);
+		const row = option.getBoundingClientRect();
+		const style = getComputedStyle(option);
+		const expectedHeight =
+			content.getBoundingClientRect().height +
+			parseFloat(style.paddingTop) +
+			parseFloat(style.paddingBottom);
+		await expect(Math.abs(row.height - expectedHeight)).toBeLessThanOrEqual(
+			0.5,
+		);
+	}
+}
+
 export const SingleSelect: Story = {
 	args: { request: mockSingleSelect },
 };
@@ -108,6 +147,7 @@ export const SingleSelect: Story = {
 export const MultiSelect: Story = {
 	args: { request: mockMultiSelect },
 	play: async ({ canvasElement }) => {
+		await expectOptionGeometry(canvasElement);
 		const checkbox = within(canvasElement).getAllByRole("checkbox")[0];
 		if (!checkbox) throw new Error("Missing question checkbox");
 		await expect(getComputedStyle(checkbox).appearance).toBe("none");
@@ -122,6 +162,7 @@ export const MultiSelect: Story = {
 export const WithCustomInput: Story = {
 	args: { request: mockWithCustomInput },
 	play: async ({ canvasElement }) => {
+		await expectOptionGeometry(canvasElement);
 		const canvas = within(canvasElement);
 		for (const button of [
 			canvas.getByRole("button", { name: "Submit" }),

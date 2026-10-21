@@ -224,15 +224,15 @@
 							<div class="flex flex-col gap-1">
 								{#each q.options as opt}
 									{@const chosen = isAnswered && parsedAnswers?.[qIdx]?.includes(opt.label)}
-									<div class="question-tool-option flex items-start gap-[8px] px-[10px] py-[6px] rounded-[6px] text-[12px] bg-bg-surface" data-chosen={chosen ? "true" : undefined}>
-										<span class="mt-0.5 shrink-0 {chosen ? 'text-accent' : 'text-text-dimmer'}" aria-hidden="true">{chosen ? "●" : "○"}</span>
-										<span class="flex flex-col gap-0.5">
-											<span class="text-text-secondary font-medium text-[13px]">{opt.label}</span>
+									<div class="question-tool-option flex items-baseline gap-[8px] px-[10px] py-[6px] rounded-[6px] text-[13px] font-medium bg-bg-surface" data-chosen={chosen ? "true" : undefined}>
+										<span class="question-tool-option-control shrink-0 {chosen ? 'text-accent' : 'text-text-dimmer'}" class:question-tool-checkbox={q.multiSelect} aria-hidden="true"></span>
+										<span class="question-tool-option-content flex min-w-0 flex-col gap-0.5">
+											<span class="question-tool-option-label text-text-secondary font-medium text-[13px]">{opt.label}</span>
 											{#if opt.description}
-												<span class="text-text-muted text-[12px]">{opt.description}</span>
+												<span class="text-text-muted text-[12px] font-normal">{opt.description}</span>
 											{/if}
 										</span>
-										{#if chosen}<span class="question-chosen ml-auto shrink-0 rounded-full bg-accent/16 text-accent text-[11.5px] font-semibold px-[8px] py-[2px]">Chosen</span>{/if}
+										{#if chosen}<span class="question-chosen ml-auto self-center shrink-0 rounded-full bg-accent/16 text-accent text-[11.5px] leading-none font-semibold px-[8px] py-[2px]">Chosen</span>{/if}
 									</div>
 								{/each}
 							</div>
@@ -275,3 +275,35 @@
 	</div>
 {/if}
 </div>
+
+<style>
+	.question-tool-option-control {
+		position: relative;
+		width: 13px;
+		height: 13px;
+		border: 1.5px solid currentColor;
+		border-radius: 50%;
+		/* Empty controls share the label baseline, then center on its x-height. */
+		transform: translateY(calc(50% - 0.5ex));
+	}
+	.question-tool-checkbox {
+		border-radius: 3px;
+	}
+	[data-chosen="true"] .question-tool-option-control {
+		background: currentColor;
+	}
+	[data-chosen="true"] .question-tool-option-control:not(.question-tool-checkbox) {
+		box-shadow: inset 0 0 0 3px var(--color-bg-surface);
+	}
+	[data-chosen="true"] .question-tool-checkbox::after {
+		content: "";
+		position: absolute;
+		left: 3px;
+		top: 0;
+		width: 4px;
+		height: 7px;
+		border: solid var(--color-bg);
+		border-width: 0 1.5px 1.5px 0;
+		transform: rotate(45deg);
+	}
+</style>

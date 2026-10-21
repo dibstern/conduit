@@ -24,6 +24,7 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = {
 	args: { message: mockQuestionAnswered },
 	play: async ({ canvasElement }) => {
+		await canvasElement.ownerDocument.fonts.ready;
 		const chosen = canvasElement.querySelector('[data-chosen="true"]');
 		await expect(chosen).not.toBeNull();
 		await expect(chosen?.textContent).toContain("Staging");
@@ -46,6 +47,38 @@ export const Default: Story = {
 			".question-tool-option",
 		)) {
 			await expect(getComputedStyle(option).borderTopWidth).toBe("0px");
+			const control = option.querySelector(".question-tool-option-control");
+			const content = option.querySelector(".question-tool-option-content");
+			const label = option.querySelector(".question-tool-option-label");
+			if (!control || !content || !label)
+				throw new Error("Missing question option");
+			const font = getComputedStyle(label);
+			const context = canvasElement.ownerDocument
+				.createElement("canvas")
+				.getContext("2d");
+			if (!context) throw new Error("Missing text measurement context");
+			context.font = `${font.fontStyle} ${font.fontWeight} ${font.fontSize} ${font.fontFamily}`;
+			const x = context.measureText("x");
+			const baseline = canvasElement.ownerDocument.createElement("span");
+			baseline.style.cssText =
+				"display:inline-block;width:0;height:0;vertical-align:baseline";
+			label.prepend(baseline);
+			const xCenter =
+				baseline.getBoundingClientRect().top -
+				(x.actualBoundingBoxAscent - x.actualBoundingBoxDescent) / 2;
+			baseline.remove();
+			const controlRect = control.getBoundingClientRect();
+			await expect(
+				Math.abs(controlRect.top + controlRect.height / 2 - xCenter),
+			).toBeLessThanOrEqual(0.5);
+			const style = getComputedStyle(option);
+			const expectedHeight =
+				content.getBoundingClientRect().height +
+				parseFloat(style.paddingTop) +
+				parseFloat(style.paddingBottom);
+			await expect(
+				Math.abs(option.getBoundingClientRect().height - expectedHeight),
+			).toBeLessThanOrEqual(0.5);
 		}
 	},
 };
