@@ -7,7 +7,7 @@ import {
 	responseChunks,
 } from "../../helpers/process-harness.js";
 
-describe("durable answers across daemon replacement", () => {
+describe("durable controls across daemon replacement", () => {
 	const harnesses: ProcessHarness[] = [];
 	afterEach(async () => {
 		for (const harness of harnesses) {
@@ -16,6 +16,207 @@ describe("durable answers across daemon replacement", () => {
 		}
 		harnesses.length = 0;
 	});
+
+	it.each([
+		{ delivered: false, replaced: false },
+		{ delivered: true, replaced: false },
+		{ delivered: false, replaced: true },
+	])("retains an interrupted End across restart, delivered=$delivered, replaced=$replaced", async ({
+		delivered,
+		replaced,
+	}) => {
+		const harness = await ProcessHarness.start({ restartProof: true });
+		harnesses.push(harness);
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession("Durable End restart");
+		await browser.send(sessionId, "before-retained-end");
+		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
+		if (runner?.kind !== "runner-started") throw new Error("Missing runner");
+		const db = new Database(harness.daemonStorePath());
+		try {
+			// Retain either an undelivered intent or an End whose runner has exited
+			// before the daemon can record its outcome. For the replacement case,
+			// also defer startup retirement until its new turn is already running.
+			db.exec(`CREATE TRIGGER hold_end BEFORE UPDATE OF status ON provider_command_outbox
+				WHEN NEW.effect_type = 'end_session' AND (NEW.status = '${delivered ? "completed" : "running"}'
+					OR (${Number(replaced)} = 1 AND NEW.status = 'cancelled'))
+				BEGIN SELECT RAISE(IGNORE); END`);
+			const controller = new AbortController();
+			const reload = browser.reloadSession(sessionId, controller.signal).then(
+				() => "completed",
+				() => "interrupted",
+			);
+			const ends = () =>
+				db
+					.prepare(
+						"SELECT outbox.command_id, outbox.provider_process_id, outbox.status, outbox.attempt_count, outbox.error_code, receipt.status AS receipt_status, receipt.error_code AS receipt_error FROM provider_command_outbox outbox JOIN command_receipts receipt ON receipt.command_id = outbox.command_id AND receipt.project_key = outbox.project_key WHERE outbox.session_id = ? AND outbox.effect_type = 'end_session'",
+					)
+					.all(sessionId) as Array<{
+					command_id: string;
+					provider_process_id: string;
+					status: string;
+					attempt_count: number;
+					error_code: string | null;
+					receipt_status: string;
+					receipt_error: string | null;
+				}>;
+			await vi.waitFor(
+				() => {
+					expect(ends()).toEqual([
+						{
+							command_id: expect.any(String),
+							provider_process_id: expect.any(String),
+							status: delivered ? "running" : "pending",
+							attempt_count: delivered ? 1 : 0,
+							error_code: null,
+							receipt_status: "side_effect_requested",
+							receipt_error: null,
+						},
+					]);
+					if (delivered) expect(() => process.kill(runner.pid, 0)).toThrow();
+				},
+				{ timeout: 15_000 },
+			);
+			const end = ends()[0];
+			if (!end) throw new Error("Missing End intent");
+			expect(runner.socketPath.endsWith(`/${end.provider_process_id}`)).toBe(
+				true,
+			);
+			controller.abort();
+			expect(await reload).toBe("interrupted");
+			expect(ends()).toEqual([end]);
+			await harness.kill();
+			if (replaced) {
+				process.kill(runner.pid, "SIGKILL");
+				await vi.waitFor(() =>
+					expect(() => process.kill(runner.pid, 0)).toThrow(),
+				);
+			}
+			if (!replaced) db.exec("DROP TRIGGER hold_end");
+			await harness.restart();
+			const after = await harness.connect(sessionId);
+			const gone = delivered || replaced;
+			const settledEnd = {
+				...end,
+				status: gone ? "cancelled" : "completed",
+				attempt_count: 1,
+				error_code: gone ? "provider_process_gone" : null,
+				receipt_status: gone ? "side_effect_failed" : "side_effect_completed",
+				receipt_error: gone ? "provider_process_gone" : null,
+			};
+			// On the surviving target, finish replay before submitting more work.
+			// Only the replacement case intentionally overlaps a new send with End.
+			if (!replaced)
+				await vi.waitFor(() => expect(ends()).toEqual([settledEnd]), {
+					timeout: 15_000,
+				});
+			const prompt = replaced
+				? "approval-after-retained-end"
+				: "after-retained-end";
+			// Hold the replacement's turn open so the old End must settle while a
+			// new runner owns both a live send and a pending approval.
+			const send = after.send(sessionId, prompt);
+			void send.catch(() => undefined);
+			let replacementPid: number | undefined;
+			if (replaced) {
+				const request = await after.waitFor(
+					(frame) => frame["type"] === "permission_pending",
+				);
+				const replacement = harness.marks
+					.filter((mark) => mark.kind === "runner-started")
+					.at(-1);
+				if (replacement?.kind !== "runner-started")
+					throw new Error("Missing replacement runner");
+				replacementPid = replacement.pid;
+				expect(replacementPid).not.toBe(runner.pid);
+				expect(ends()).toEqual([end]);
+				db.exec("DROP TRIGGER hold_end");
+				await vi.waitFor(() => expect(ends()[0]?.status).toBe("cancelled"), {
+					timeout: 15_000,
+				});
+				expect(() => process.kill(replacement.pid, 0)).not.toThrow();
+				expect(
+					db
+						.prepare(
+							"SELECT status FROM pending_approvals WHERE session_id = ?",
+						)
+						.all(sessionId),
+				).toEqual([{ status: "pending" }]);
+				await after.answerApproval(request, "allow");
+			}
+			const result = await send;
+			expect(result.done["status"]).toBe("idle");
+			expect(result.chunks.join("")).toBe(responseChunks(prompt).join(""));
+			await vi.waitFor(
+				() => {
+					expect(ends()).toEqual([settledEnd]);
+					expect(
+						db
+							.prepare("SELECT status FROM sessions WHERE id = ?")
+							.get(sessionId),
+					).toEqual({ status: "idle" });
+					expect(
+						db
+							.prepare(
+								"SELECT status FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
+							)
+							.all(sessionId),
+					).toEqual([{ status: "completed" }, { status: "completed" }]);
+				},
+				{ timeout: 15_000 },
+			);
+			const sdk = readFileSync(join(harness.root, "sdk-proof.ndjson"), "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line) as Record<string, unknown>);
+			const deliveries = sdk.filter(
+				(mark) =>
+					mark["kind"] === "runner-control" &&
+					mark["commandId"] === end.command_id,
+			);
+			expect(deliveries).toEqual(
+				replaced
+					? []
+					: [
+							{
+								kind: "runner-control",
+								commandId: end.command_id,
+								type: "end-session",
+								runnerId: end.provider_process_id,
+							},
+						],
+			);
+			const replacement = harness.marks
+				.filter((mark) => mark.kind === "runner-started")
+				.at(-1);
+			if (replacement?.kind !== "runner-started")
+				throw new Error("Missing replacement runner");
+			expect(replacement.pid).not.toBe(runner.pid);
+			if (replacementPid !== undefined)
+				expect(replacement.pid).toBe(replacementPid);
+			// A terminal End must stay terminal on another recovery sweep.
+			const settled = ends();
+			await harness.kill();
+			await harness.restart();
+			const recovered = await harness.connect(sessionId);
+			await recovered.send(sessionId, "after-end-recovery");
+			expect(ends()).toEqual(settled);
+			expect(
+				harness.marks.filter((mark) => mark.kind === "runner-started").at(-1),
+			).toMatchObject({ pid: replacement.pid });
+			mkdirSync("/tmp/82tn-beads/end-diagnosis", { recursive: true });
+			writeFileSync(
+				`/tmp/82tn-beads/end-diagnosis/end-restart-${delivered ? "delivered" : replaced ? "replaced" : "pending"}.json`,
+				JSON.stringify(
+					{ sessionId, end, settled, deliveries, process: harness.proof() },
+					null,
+					2,
+				),
+			);
+		} finally {
+			db.close();
+		}
+	}, 90_000);
 
 	it.each([
 		{ died: false, claimed: false },
