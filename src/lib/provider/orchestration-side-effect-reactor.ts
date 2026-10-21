@@ -971,6 +971,7 @@ export class ProviderSideEffectReactor {
 							: { turnIds: payload.turnIds }
 						: payload.type === "end_session"
 							? {
+									projectId: row.project_key,
 									includeSettledForProviderId:
 										payload.targetProviderId ??
 										payload.account?.id ??
@@ -1114,6 +1115,7 @@ export class ProviderSideEffectReactor {
 					liveContext?.shellEnv === undefined && this.options.resolveCallContext
 						? yield* this.options.resolveCallContext({
 								sessionId: payload.sessionId,
+								projectId: row.project_key,
 								...(account ? { account } : {}),
 								providerId: row.provider_id,
 								workspaceRoot: payload.workspaceRoot,

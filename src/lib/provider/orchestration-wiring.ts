@@ -17,6 +17,7 @@ import {
 } from "../daemon/config-persistence.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
+import { ProjectContext } from "../domain/daemon/Services/project-context.js";
 import { ProviderAdapters } from "../domain/daemon/Services/provider-adapters.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
@@ -249,6 +250,7 @@ const createOrchestrationComponentsEffect = (
 				resolver.waitUntilReady(projectDir, projectId);
 		}
 		const read = yield* ReadQueryEffectTag;
+		const projectContexts = yield* Effect.serviceOption(ProjectContext);
 		const projectRoot = options.workspaceRoot ?? process.cwd();
 		const getShellEnv = shellEnv;
 		const prepareEnvironment = prepareShellEnv;
@@ -256,6 +258,32 @@ const createOrchestrationComponentsEffect = (
 			request: ProviderCallRequest,
 		): Effect.Effect<ProviderCall, ProviderInstanceFailure> =>
 			Effect.gen(function* () {
+				const project = Option.isSome(projectContexts)
+					? yield* (
+							request.projectId
+								? projectContexts.value.forProject(request.projectId)
+								: request.sessionId
+									? projectContexts.value.forSession(request.sessionId)
+									: projectContexts.value.forProject(projectId)
+						).pipe(
+							Effect.catchTag("ProjectNotFound", (cause) =>
+								// Cleanup retains admitted folders when its project has been removed.
+								// Launches still require a registered project and current environment.
+								request.projectId &&
+								request.workspaceRoot &&
+								request.extraFolders &&
+								!request.requireRoutableAccount
+									? Effect.succeed({
+											projectId: request.projectId,
+											mainFolder: request.workspaceRoot,
+											extraFolders: request.extraFolders,
+											shellEnv: Object.freeze({}),
+										})
+									: Effect.fail(cause),
+							),
+						)
+					: undefined;
+				const mainFolder = project?.mainFolder ?? projectRoot;
 				const currentAccount = yield* accountDirectory
 					.resolve({
 						_tag: "Id",
@@ -296,8 +324,12 @@ const createOrchestrationComponentsEffect = (
 				const workspaceRoot =
 					request.workspaceRoot ??
 					(session
-						? yield* sessionWorkspace.get(request.sessionId)
-						: projectRoot);
+						? yield* sessionWorkspace.get(
+								request.sessionId,
+								undefined,
+								mainFolder,
+							)
+						: mainFolder);
 				const workspace = session?.workspace
 					? yield* Schema.decodeUnknownEffect(
 							Schema.fromJsonString(SessionWorkspaceSchema),
@@ -306,12 +338,15 @@ const createOrchestrationComponentsEffect = (
 				const extraFolders =
 					request.extraFolders ??
 					effectiveSessionFolders(
-						[projectRoot, ...(options.extraFolders ?? [])],
+						[
+							mainFolder,
+							...(project?.extraFolders ?? options.extraFolders ?? []),
+						],
 						workspace,
 					)
 						.map(({ directory }) => directory)
 						.filter((directory) => directory !== workspaceRoot);
-				if (request.prepareShellEnv && prepareEnvironment) {
+				if (!project && request.prepareShellEnv && prepareEnvironment) {
 					yield* Effect.tryPromise(() =>
 						prepareEnvironment(workspaceRoot),
 					).pipe(
@@ -319,13 +354,23 @@ const createOrchestrationComponentsEffect = (
 						Effect.catch(() => Effect.void),
 					);
 				}
+				const environment =
+					project && Option.isSome(projectContexts)
+						? (workspaceRoot !== project.mainFolder || request.prepareShellEnv
+								? yield* projectContexts.value.forProject(project.projectId, {
+										directory: workspaceRoot,
+										prepareShellEnv: request.prepareShellEnv === true,
+									})
+								: project
+							).shellEnv
+						: getShellEnv(workspaceRoot);
 				return Object.freeze({
-					projectId,
+					projectId: project?.projectId ?? projectId,
 					sessionId: request.sessionId,
 					account,
 					workspaceRoot,
 					extraFolders: Object.freeze([...extraFolders]),
-					shellEnv: Object.freeze({ ...getShellEnv(workspaceRoot) }),
+					shellEnv: Object.freeze({ ...environment }),
 				});
 			}).pipe(
 				Effect.mapError(

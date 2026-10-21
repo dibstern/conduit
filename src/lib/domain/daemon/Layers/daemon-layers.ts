@@ -137,6 +137,7 @@ import { MessageSurfacingSettingsLive } from "./message-surfacing-settings-layer
 import { OpenCodeInstancesLive } from "./opencode-instances-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive, PortScannerTag } from "./port-scanner-layer.js";
+import { ProjectContextLive } from "./project-context-layer.js";
 import {
 	makeProjectShellEnvLive,
 	ProjectShellEnvWiringLive,
@@ -847,13 +848,16 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			);
 		}),
 	).pipe(Layer.provideMerge(withOpenCodeInstances));
+	const withProjectContext = ProjectContextLive.pipe(
+		Layer.provideMerge(withSessionDirectory),
+	);
 	const withInputDrafts = Layer.unwrap(
 		Effect.gen(function* () {
 			const store = yield* PersistenceStore;
 			yield* releaseInputDraftClaims().pipe(Effect.provide(store));
 			return InputDraftsLive.pipe(Layer.provide(Layer.succeedContext(store)));
 		}),
-	).pipe(Layer.provideMerge(withSessionDirectory));
+	).pipe(Layer.provideMerge(withProjectContext));
 	const withProviderAdapters = makeProviderAdaptersLive(configDir).pipe(
 		Layer.provideMerge(withInputDrafts),
 	);

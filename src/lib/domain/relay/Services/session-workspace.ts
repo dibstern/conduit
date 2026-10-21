@@ -53,6 +53,8 @@ export interface SessionWorkspace {
 		sessionId: string,
 		/** Native directory before the session declares a stored workspace. */
 		nativeDirectory?: string,
+		/** A daemon call resolves the owning project's current primary folder. */
+		mainFolder?: string,
 	) => Effect.Effect<string, SessionCommandError>;
 	readonly move: (
 		sessionId: string,

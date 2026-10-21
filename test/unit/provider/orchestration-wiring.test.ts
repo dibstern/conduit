@@ -12,6 +12,11 @@ import {
 	makeAccountDirectory,
 } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	ProjectContext,
+	SessionProjectNotFound,
+} from "../../../src/lib/domain/daemon/Services/project-context.js";
+import { ProjectNotFound } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
@@ -177,6 +182,69 @@ async function makeScopedOrchestrationView(options: OrchestrationLayerOptions) {
 }
 
 describe("Orchestration wiring", () => {
+	it.each([
+		false,
+		true,
+	])("keeps admitted project B for cleanup after deletion (project removed=%s)", async (removed) => {
+		const persistence = makePersistenceEffectLayer(":memory:", "project-a");
+		const workspaceRoot = join(configDir, "project-b");
+		const extraFolders = [join(configDir, "extra-b")];
+		const runtime = ManagedRuntime.make(
+			makeOrchestrationRuntimeLayer({
+				configDir,
+				workspaceRoot: join(configDir, "project-a"),
+			}).pipe(
+				Layer.provide(
+					Layer.merge(
+						orchestrationDeps(persistence, makeStubClient()),
+						Layer.succeed(ProjectContext)({
+							forSession: (sessionId) =>
+								Effect.fail(new SessionProjectNotFound({ sessionId })),
+							forProject: (slug) =>
+								removed
+									? Effect.fail(new ProjectNotFound({ slug }))
+									: Effect.succeed({
+											projectId: slug,
+											mainFolder: workspaceRoot,
+											extraFolders,
+											shellEnv: { PROJECT_OWNER: "project-b" },
+										}),
+						}),
+					),
+				),
+			),
+		);
+		onTestFinished(() => runtime.dispose());
+		const { engine } = await runtime.runPromise(getOrchestrationLayer);
+		const request = {
+			sessionId: "deleted-b",
+			projectId: "project-b",
+			providerId: "claude",
+			workspaceRoot,
+			extraFolders,
+		};
+		const call = await runtime.runPromise(
+			engine.resolveCallContextEffect(request),
+		);
+		expect(call).toMatchObject({
+			projectId: "project-b",
+			sessionId: "deleted-b",
+			workspaceRoot,
+			extraFolders,
+			shellEnv: removed ? {} : { PROJECT_OWNER: "project-b" },
+		});
+		// A missing project's admitted launch must still fail, even when cleanup can proceed.
+		if (removed)
+			await expect(
+				runtime.runPromise(
+					engine.resolveCallContextEffect({
+						...request,
+						requireRoutableAccount: true,
+					}),
+				),
+			).rejects.toThrow();
+	});
+
 	it.each([
 		false,
 		true,

@@ -79,6 +79,7 @@ import {
 } from "../Services/instance-manager-service.js";
 import { MessageSurfacingSettings } from "../Services/message-surfacing-settings.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
+import { ProjectContext } from "../Services/project-context.js";
 import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	type broadcastProjectList,
@@ -211,6 +212,7 @@ export const RelayFactoryLive = (
 			const surfacing = yield* Effect.serviceOption(MessageSurfacingSettings);
 			const categories = yield* Effect.serviceOption(CategorySet);
 			const sessionDirectory = yield* Effect.serviceOption(SessionDirectory);
+			const projectContext = yield* Effect.serviceOption(ProjectContext);
 			const storeContext = yield* persistenceStoreContext;
 			const sharedDrafts = yield* Effect.serviceOption(InputDraftsTag);
 			const inputDrafts = Option.isSome(sharedDrafts)
@@ -549,6 +551,11 @@ export const RelayFactoryLive = (
 										Context.add(InputDraftsTag, inputDrafts),
 										Context.add(DaemonEventBusTag, eventBus),
 										Context.add(ProjectRegistryTag, projectRegistry),
+										Context.merge(
+											Option.isSome(projectContext)
+												? Context.make(ProjectContext, projectContext.value)
+												: Context.empty(),
+										),
 										Context.add(PortScannerTag, portScanner),
 										Context.merge(storeContext),
 										Context.merge(daemonServices),

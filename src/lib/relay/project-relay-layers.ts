@@ -58,6 +58,7 @@ import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
 } from "../domain/daemon/Services/opencode-instances-service.js";
+import { ProjectContext } from "../domain/daemon/Services/project-context.js";
 import {
 	makeSessionActivity,
 	SessionActivityTag,
@@ -765,7 +766,17 @@ export function createProjectRelayLayers({
 		},
 	);
 	const pendingInteractionServiceLayer = PendingInteractionServiceLive;
+	const sharedProjectContext = Context.getOption(
+		config.daemonConfigContext ?? Context.empty(),
+		ProjectContext,
+	);
+	// Without a daemon context, orchestration builds its existing relay-local
+	// folder and shell-env fallback. Shared services belong to the daemon scope.
+	const projectContextLayer = Option.isSome(sharedProjectContext)
+		? Layer.sync(ProjectContext, () => sharedProjectContext.value)
+		: Layer.empty;
 	const providerOrchestrationDeps = Layer.mergeAll(
+		projectContextLayer,
 		daemonConfigLayer,
 		sessionWorkspaceLayer,
 		openCodeApiLayer,

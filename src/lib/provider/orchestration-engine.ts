@@ -151,6 +151,8 @@ export interface EndSessionCommand {
 	/** Explicit provider-instance route captured before session projections change. */
 	readonly targetProviderId?: string;
 	readonly account?: Account;
+	/** Ephemeral context captured before deletion removes session ownership. */
+	readonly call?: ProviderCall;
 	/** Default false -- keep binding. Set true to also unbind. */
 	readonly unbind?: boolean;
 }
@@ -202,6 +204,8 @@ export interface DurableCommandStoreOptions {
 export interface ProviderCallRequest {
 	/** Empty for discovery before a draft has a reserved session. */
 	readonly sessionId: string;
+	/** Owning project from an admitted call or durable command, never the caller's relay. */
+	readonly projectId?: string;
 	readonly account?: Account;
 	readonly providerId?: string;
 	readonly workspaceRoot?: string;
@@ -408,6 +412,7 @@ export class OrchestrationEngine {
 		sessionId: string,
 		account?: Account,
 		target?: {
+			readonly projectId?: string;
 			readonly providerId?: string;
 			readonly includeSettledForProviderId?: string;
 			readonly runId?: string;
@@ -502,6 +507,7 @@ export class OrchestrationEngine {
 			if (hasRunTarget) return undefined;
 			return yield* this.resolveCallContext({
 				sessionId,
+				...(target?.projectId ? { projectId: target.projectId } : {}),
 				...(target?.providerId ? { providerId: target.providerId } : {}),
 				...(account ? { account } : {}),
 			});
@@ -1319,17 +1325,19 @@ export class OrchestrationEngine {
 				return;
 			}
 			const endSession = Effect.gen({ self: this }, function* () {
-				const call = yield* this.resolveSessionCallContextEffect(
-					command.sessionId,
-					command.account,
-					{
-						includeSettledForProviderId:
-							command.targetProviderId ?? command.account?.id ?? providerId,
-						...(command.targetProviderId
-							? { providerId: command.targetProviderId }
-							: {}),
-					},
-				);
+				const call =
+					command.call ??
+					(yield* this.resolveSessionCallContextEffect(
+						command.sessionId,
+						command.account,
+						{
+							includeSettledForProviderId:
+								command.targetProviderId ?? command.account?.id ?? providerId,
+							...(command.targetProviderId
+								? { providerId: command.targetProviderId }
+								: {}),
+						},
+					));
 				const instance = yield* this.getProviderInstanceEffect(
 					providerId,
 					call?.account ?? command.account,

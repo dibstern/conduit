@@ -468,7 +468,7 @@ export const SessionWorkspaceLive = Layer.effect(
 						),
 					),
 				),
-			get: (sessionId, nativeDirectory) =>
+			get: (sessionId, nativeDirectory, mainFolder = config.projectDir) =>
 				readWorkspace(sessionId).pipe(
 					Effect.flatMap(({ workspace }) =>
 						Effect.gen(function* () {
@@ -486,7 +486,7 @@ export const SessionWorkspaceLive = Layer.effect(
 									ORDER BY sequence DESC LIMIT 1`;
 								if (native?.directory) return native.directory;
 							}
-							return effectiveWorkingDirectory(config.projectDir, workspace);
+							return effectiveWorkingDirectory(mainFolder, workspace);
 						}).pipe(
 							Effect.mapError(
 								(cause) =>

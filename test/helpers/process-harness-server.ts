@@ -433,6 +433,51 @@ async function main(): Promise<void> {
 				}),
 		});
 	}
+	if (existsSync(join(root, "project-context-proof"))) {
+		const { OrchestrationEngine } = (await import(
+			pathToFileURL(
+				join(codeRoot, "lib/provider", `orchestration-engine.${extension}`),
+			).href
+		)) as typeof import("../../src/lib/provider/orchestration-engine.js");
+		const resolveCall = OrchestrationEngine.prototype.resolveCallContextEffect;
+		let firstEngine: InstanceType<typeof OrchestrationEngine> | undefined;
+		const engines = new Map<InstanceType<typeof OrchestrationEngine>, number>();
+		Object.assign(OrchestrationEngine.prototype, {
+			resolveCallContextEffect(
+				this: InstanceType<typeof OrchestrationEngine>,
+				request: Parameters<typeof resolveCall>[0],
+			) {
+				const caller = this;
+				return Effect.gen(function* () {
+					if (request.sessionId) {
+						firstEngine ??= caller;
+						if (!engines.has(caller)) engines.set(caller, engines.size + 1);
+						// No caller-provided folders: the retained engine must find the
+						// session's current project itself, even after another relay changes.
+						const call = yield* resolveCall.call(firstEngine, {
+							sessionId: request.sessionId,
+							...(request.account ? { account: request.account } : {}),
+							prepareShellEnv: true,
+						});
+						appendFileSync(
+							join(root, "project-context.ndjson"),
+							`${JSON.stringify({
+								callerEngine: engines.get(caller),
+								resolutionEngine: engines.get(firstEngine),
+								sessionId: request.sessionId,
+								projectId: call?.projectId,
+								workspaceRoot: call?.workspaceRoot,
+								extraFolders: call?.extraFolders,
+								projectOwner: call?.shellEnv["PROJECT_OWNER"],
+								shellProof: call?.shellEnv["CONDUIT_ENV_PROOF"],
+							})}\n`,
+						);
+					}
+					return yield* resolveCall.call(caller, request);
+				});
+			},
+		});
+	}
 	if (existsSync(join(root, "daemon-adapters-proof"))) {
 		const proofPath = join(root, "daemon-adapters.ndjson");
 		const record = (entry: Record<string, unknown>) =>

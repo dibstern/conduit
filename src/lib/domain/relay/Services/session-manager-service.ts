@@ -449,6 +449,29 @@ export const deleteSession = (
 				"provider_route: no provider route could be determined, so cleanup was skipped",
 			);
 		}
+		// Deletion projects its tombstone before provider cleanup runs. Resolve
+		// ownership while the row still exists, including drafts with no turn outbox.
+		const capturedCallExit =
+			engineOption._tag === "Some" && account !== undefined
+				? yield* Effect.exit(
+						engineOption.value.resolveSessionCallContextEffect(
+							sessionId,
+							account,
+							{
+								includeSettledForProviderId: account.id,
+								providerId: account.id,
+							},
+						),
+					)
+				: undefined;
+		const capturedCall =
+			capturedCallExit && Exit.isSuccess(capturedCallExit)
+				? capturedCallExit.value
+				: undefined;
+		if (capturedCallExit && Exit.isFailure(capturedCallExit))
+			cleanupFailures.push(
+				`call_context: ${renderProviderCleanupDetail(Failure.squashCause(capturedCallExit.cause))}`,
+			);
 
 		const providerCleanup = (command: SessionCommand) =>
 			Effect.gen(function* () {
@@ -470,6 +493,7 @@ export const deleteSession = (
 								commandId: randomUUID(),
 								sessionId,
 								targetProviderId: capturedInstanceId,
+								...(capturedCall ? { call: capturedCall } : {}),
 								unbind: true,
 							}),
 						),

@@ -499,13 +499,25 @@ describe("Claude session process runner", () => {
 		}
 	}, 45_000);
 
-	it("terminates the runner and removes its socket when a session is deleted", async () => {
+	it.each([
+		"turn",
+		"prewarm",
+	] as const)("terminates the runner and removes its socket when a session is deleted after %s", async (activity) => {
 		const harness = await ProcessHarness.start();
 		harnesses.push(harness);
 		const browser = await harness.connect();
 		const sessionId = await browser.createSession("Runner deletion proof");
-		await browser.send(sessionId, "before-session-delete");
-		await settled(harness, sessionId, 1);
+		if (activity === "turn") {
+			await browser.send(sessionId, "before-session-delete");
+			await settled(harness, sessionId, 1);
+		} else {
+			await browser.preWarmSession(sessionId);
+			await vi.waitFor(() =>
+				expect(
+					harness.marks.some((mark) => mark.kind === "runner-started"),
+				).toBe(true),
+			);
+		}
 		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (runner?.kind !== "runner-started")
 			throw new Error("Missing runner proof");
@@ -521,7 +533,7 @@ describe("Claude session process runner", () => {
 		} finally {
 			mkdirSync("test-results/process-harness", { recursive: true });
 			writeFileSync(
-				"test-results/process-harness/85kb-8-runner-deletion.json",
+				`test-results/process-harness/82tn-10-1-runner-deletion-${activity}.json`,
 				JSON.stringify(
 					{
 						runner,
