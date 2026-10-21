@@ -113,16 +113,17 @@ export const makeProviderAdaptersLive = (configDir: string) =>
 								project.context,
 								OrchestrationEngineTag,
 							);
+							const pending = Context.get(
+								project.context,
+								PendingInteractionServiceTag,
+							);
 							return {
 								projectId: project.projectId,
 								ingestion: Context.get(
 									project.context,
 									ProviderRuntimeIngestionTag,
 								),
-								pending: Context.get(
-									project.context,
-									PendingInteractionServiceTag,
-								),
+								pending,
 								persist: Context.get(
 									project.context,
 									ClaudeEventPersistEffectTag,
@@ -132,7 +133,12 @@ export const makeProviderAdaptersLive = (configDir: string) =>
 									sessionId,
 								),
 								retirePrompts: (currentProcessId: string | null) =>
-									retire(currentProcessId, { sessionId }),
+									retire(currentProcessId, { sessionId }).pipe(
+										Effect.provideService(
+											PendingInteractionServiceTag,
+											pending,
+										),
+									),
 								resolveCallContext: (request: ProviderCallRequest) =>
 									engine.resolveCallContextEffect(request),
 							};

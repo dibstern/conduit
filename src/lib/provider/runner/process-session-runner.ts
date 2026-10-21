@@ -14,7 +14,15 @@ import {
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
-import { ProviderRuntimeIngestionTag } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
+	type PendingInteractionService,
+	PendingInteractionServiceTag,
+} from "../../domain/relay/Services/pending-interaction-service.js";
+import {
+	type ProviderRuntimeIngestion,
+	ProviderRuntimeIngestionTag,
+} from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
+import { ConfigTag } from "../../domain/relay/Services/services.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { createLogger } from "../../logger.js";
@@ -80,6 +88,9 @@ interface RunnerChild {
 	listening?: boolean;
 	startupTimedOut?: boolean;
 	recovering?: boolean;
+	/** Exit callbacks run in the construction runtime, after recovery returns. */
+	readonly ingestion?: ProviderRuntimeIngestion | undefined;
+	readonly pendingInteractions?: PendingInteractionService | undefined;
 	pid?: number | undefined;
 	child?: ChildProcess;
 	connection?: RunnerSocket;
@@ -361,9 +372,6 @@ export const makeProcessSessionRunner = (
 		);
 		const ingestion =
 			ingestionOption._tag === "Some" ? ingestionOption.value : undefined;
-		const project = yield* Effect.serviceOption(PersistenceProjectTag);
-		const projectId =
-			project._tag === "Some" ? project.value.projectId : undefined;
 		const ingestionForSession = (sessionId: string) =>
 			deps.recoveryForSession
 				? deps
@@ -395,7 +403,17 @@ export const makeProcessSessionRunner = (
 		const observeProcess = (sessionId: string, entry: RunnerChild) =>
 			Effect.gen(function* () {
 				if (observedProcesses.get(sessionId) === entry.runnerId) return;
-				yield* retireReplacedPrompts(entry.runnerId, { sessionId }).pipe(
+				const retirement = retireReplacedPrompts(entry.runnerId, { sessionId });
+				yield* (
+					entry.pendingInteractions
+						? retirement.pipe(
+								Effect.provideService(
+									PendingInteractionServiceTag,
+									entry.pendingInteractions,
+								),
+							)
+						: retirement
+				).pipe(
 					Effect.mapError((cause) =>
 						runnerFailure("retire replaced runner prompts", cause),
 					),
@@ -593,15 +611,17 @@ export const makeProcessSessionRunner = (
 			);
 			const commands = [...(entry.pendingSendCommands ?? [])];
 			const settleExitedRuns = Effect.gen(function* () {
-				const ingestion = yield* ingestionForSession(sessionId);
+				const sessionIngestion = deps.recoveryForSession
+					? yield* ingestionForSession(sessionId)
+					: (entry.ingestion ?? ingestion);
 				const reservations = new Set<string>();
-				if (sql && ingestion)
+				if (sql && sessionIngestion)
 					for (const [commandId, attempt] of commands) {
 						const [owner] = yield* sql<{
 							run_id: string | null;
 						}>`
 							SELECT outbox.run_id AS run_id
-							FROM provider_command_outbox outbox WHERE project_key = COALESCE(${projectId ?? null}, (SELECT project_id FROM sessions WHERE id = ${sessionId}))
+							FROM provider_command_outbox outbox WHERE project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId})
 								AND session_id = ${sessionId} AND command_id = ${commandId} AND attempt_count = ${attempt}
 							ORDER BY request_sequence LIMIT 1`;
 						if (owner?.run_id) reservations.add(owner.run_id);
@@ -623,7 +643,7 @@ export const makeProcessSessionRunner = (
 							const pid = entry.pid ?? entry.child?.pid;
 							if (
 								!sql ||
-								!ingestion ||
+								!sessionIngestion ||
 								!reservations.size ||
 								closing ||
 								entry.recovering ||
@@ -646,7 +666,7 @@ export const makeProcessSessionRunner = (
 								sql,
 								sessionId,
 								failure.message,
-								(events) => ingestion.ingestBatch(events),
+								(events) => sessionIngestion.ingestBatch(events),
 								{ errorCode: "runner_stopped", owners: [...owners.values()] },
 							);
 						}),
@@ -821,7 +841,7 @@ export const makeProcessSessionRunner = (
 										AND reservation.id = outbox.run_id
 									LEFT JOIN turns ON turns.session_id = outbox.session_id
 										AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
-									WHERE outbox.project_key = COALESCE(${projectId ?? null}, (SELECT project_id FROM sessions WHERE id = ${sessionId})) AND outbox.command_id = ${binding.commandId ?? binding.sinkId} AND outbox.session_id = ${sessionId}`.pipe(
+									WHERE outbox.project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId}) AND outbox.command_id = ${binding.commandId ?? binding.sinkId} AND outbox.session_id = ${sessionId}`.pipe(
 									Effect.mapError((cause) =>
 										runnerFailure("restore runner history", cause),
 									),
@@ -895,7 +915,7 @@ export const makeProcessSessionRunner = (
 											const rows = yield* sql<{
 												run_id: string | null;
 											}>`SELECT run_id
-										FROM provider_command_outbox WHERE project_key = COALESCE(${projectId ?? null}, (SELECT project_id FROM sessions WHERE id = ${sessionId}))
+										FROM provider_command_outbox WHERE project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId})
 										AND session_id = ${sessionId} AND command_id = ${commandId}
 										AND attempt_count = ${pending}`;
 											for (const row of rows)
@@ -1103,11 +1123,13 @@ export const makeProcessSessionRunner = (
 
 		const createEntry = (
 			sessionId: string,
-			ownerProjectId?: string,
+			owner?: Pick<RunnerChild, "ingestion" | "pendingInteractions"> & {
+				readonly projectId?: string | undefined;
+			},
 		): Effect.Effect<RunnerChild, SessionFailure> =>
 			Effect.gen(function* () {
 				const registrationRoot = deps.projectRootForSession
-					? yield* deps.projectRootForSession(sessionId, ownerProjectId)
+					? yield* deps.projectRootForSession(sessionId, owner?.projectId)
 					: deps.workspaceRoot;
 				if (!registrationRoot)
 					return yield* Effect.fail(
@@ -1120,6 +1142,8 @@ export const makeProcessSessionRunner = (
 				return {
 					sessionId,
 					registrationRoot,
+					ingestion: owner?.ingestion,
+					pendingInteractions: owner?.pendingInteractions,
 					verified: false,
 					runnerId,
 					ready: yield* Deferred.make<RunnerSocket, SessionFailure>(),
@@ -1159,7 +1183,7 @@ export const makeProcessSessionRunner = (
 			eligible,
 			runFork,
 			create: (sessionId, old) =>
-				createEntry(sessionId).pipe(
+				createEntry(sessionId, old).pipe(
 					Effect.tap((entry) =>
 						Effect.sync(() => {
 							entry.candidate = true;
@@ -1202,7 +1226,7 @@ export const makeProcessSessionRunner = (
 								return false;
 							const running = yield* sql<{
 								command_id: string;
-							}>`SELECT command_id FROM provider_command_outbox WHERE project_key = COALESCE(${projectId ?? null}, (SELECT project_id FROM sessions WHERE id = ${sessionId})) AND session_id = ${sessionId} AND status = 'running' AND effect_type = 'send_turn' LIMIT 1`.pipe(
+							}>`SELECT command_id FROM provider_command_outbox WHERE project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId}) AND session_id = ${sessionId} AND status = 'running' AND effect_type = 'send_turn' LIMIT 1`.pipe(
 								Effect.mapError((cause) =>
 									runnerFailure("upgrade runner", cause),
 								),
@@ -1329,9 +1353,24 @@ export const makeProcessSessionRunner = (
 						return yield* Effect.fail(
 							runnerFailure("recover runner", "Runners are shutting down"),
 						);
+					const recoveryScope = yield* Effect.serviceOption(
+						PersistenceProjectTag,
+					);
+					const config = yield* Effect.serviceOption(ConfigTag);
+					const recoveryIngestion = yield* Effect.serviceOption(
+						ProviderRuntimeIngestionTag,
+					);
+					const recoveryPending = yield* Effect.serviceOption(
+						PendingInteractionServiceTag,
+					);
 					for (const registration of deps.recoveryForSession
 						? discoverAllRunners(configDir)
-						: discoverRunners(deps.workspaceRoot, configDir)) {
+						: discoverRunners(
+								config._tag === "Some"
+									? config.value.projectDir
+									: deps.workspaceRoot,
+								configDir,
+							)) {
 						if ((registration.driverKind ?? "claude") !== driver.driverKind)
 							continue;
 						if (
@@ -1351,9 +1390,10 @@ export const makeProcessSessionRunner = (
 								))[0]
 							: undefined;
 						if (
+							!deps.recoveryForSession &&
 							persisted &&
-							projectId !== undefined &&
-							persisted.project_id !== projectId
+							recoveryScope._tag === "Some" &&
+							persisted.project_id !== recoveryScope.value.projectId
 						)
 							continue;
 						const recovery = yield* deps.recoveryForSession?.(
@@ -1364,7 +1404,9 @@ export const makeProcessSessionRunner = (
 							recovery?.ingestion ??
 							(deps.recoveryForSession
 								? undefined
-								: yield* ingestionForSession(registration.sessionId));
+								: recoveryIngestion._tag === "Some"
+									? recoveryIngestion.value
+									: yield* ingestionForSession(registration.sessionId));
 						// Draft warms are not durable; verify their identity before stopping them.
 						let abandoned =
 							(sql !== undefined && !persisted) ||
@@ -1376,6 +1418,12 @@ export const makeProcessSessionRunner = (
 							candidate: abandoned,
 							stopping: false,
 							recovering: true,
+							ingestion,
+							pendingInteractions:
+								recovery?.pending ??
+								(recoveryPending._tag === "Some"
+									? recoveryPending.value
+									: undefined),
 							ending: 0,
 							idleExiting: false,
 							commandsInFlight: 0,
@@ -2037,10 +2085,9 @@ export const makeProcessSessionRunner = (
 										admission: existing?.endingReleased,
 									};
 								}
-								const created: RunnerChild = yield* createEntry(
-									sessionId,
-									command.input.projectId,
-								);
+								const created: RunnerChild = yield* createEntry(sessionId, {
+									projectId: command.input.projectId,
+								});
 								if (command.type === "send-turn" || command.type === "pre-warm")
 									created.launch = {
 										workspaceRoot: command.input.workspaceRoot,
@@ -2200,7 +2247,7 @@ export const makeProcessSessionRunner = (
 						const rows = yield* sql<{
 							command_id: string;
 						}>`SELECT command_id FROM provider_command_outbox
-							WHERE project_key = COALESCE(${projectId ?? null}, (SELECT project_id FROM sessions WHERE id = ${sessionId})) AND session_id = ${sessionId} AND effect_type = 'send_turn'
+							WHERE project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId}) AND session_id = ${sessionId} AND effect_type = 'send_turn'
 								AND status = 'running' AND attempt_count = ${command.input.commandAttempt}
 								AND COALESCE(json_extract(payload_json, '$.inputId'), json_extract(payload_json, '$.userMessageId'), json_extract(payload_json, '$.commandId'), json_extract(payload_json, '$.turnId')) = ${command.input.inputId}
 							ORDER BY request_sequence LIMIT 1`.pipe(

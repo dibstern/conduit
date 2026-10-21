@@ -29,6 +29,7 @@ import {
 	type ProviderRuntimeIngestionError,
 	ProviderRuntimeIngestionTag,
 } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
+import { ConfigTag } from "../../domain/relay/Services/services.js";
 import {
 	makeProcessingTimeoutHooks,
 	type OverridesStateTag,
@@ -278,11 +279,14 @@ export class RunnerProviderInstance implements ProviderInstance {
 				yield* sessionIds
 					? (this.runner.attachSessionsEffect?.([...sessionIds]) ?? Effect.void)
 					: this.runner.recoverEffect;
+				const config = yield* Effect.serviceOption(ConfigTag);
 				const registrations = yield* Effect.try(() =>
 					daemonRecovery
 						? discoverAllRunners(this.deps.daemonConfigDir)
 						: discoverRunners(
-								this.deps.workspaceRoot,
+								config._tag === "Some"
+									? config.value.projectDir
+									: this.deps.workspaceRoot,
 								this.deps.daemonConfigDir,
 							),
 				).pipe(
