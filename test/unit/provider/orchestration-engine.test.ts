@@ -127,6 +127,7 @@ function makeStubInstance(providerId: string): ProviderInstance & {
 } {
 	return {
 		providerId,
+		generateTextEffect: () => Effect.die("not used"),
 		discoverEffect: vi.fn(() =>
 			Effect.succeed({
 				models: [],

@@ -5,6 +5,7 @@
 	import SettingsPicker from "../ui/SettingsPicker.svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
+	import TitleGenerationPicker from "../model/TitleGenerationPicker.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
@@ -227,6 +228,15 @@
 			{/if}
 		</div>
 	{/each}
+</SettingsGroup>
+
+<SettingsGroup id="settings-title-generation-group" title="Session titles">
+	<TitleGenerationPicker />
+	{#if discoveryState.titleGeneration.status === "missing" || discoveryState.titleGeneration.status === "invalid"}
+		<p class="px-[14px] pb-[10px] text-[12px] leading-[1.4] text-text-muted" data-testid="settings-title-generation-problem" data-status={discoveryState.titleGeneration.status}>
+			{discoveryState.titleGeneration.status === "missing" ? "The saved account is gone." : "The saved model is no longer available."} Titles use the default Claude account until you pick another.
+		</p>
+	{/if}
 </SettingsGroup>
 
 <div class="mt-[16px] flex flex-col gap-[8px]">

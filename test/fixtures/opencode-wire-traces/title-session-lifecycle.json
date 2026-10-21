@@ -1,0 +1,152 @@
+{
+	"name": "title-session-lifecycle",
+	"recordedAt": "2026-10-20T14:59:15.095Z",
+	"opencodeVersion": "1.18.34",
+	"interactions": [
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/api/session?directory=%2Fprivate%2Ftmp%2Fconduit-title-lifecycle-BSRr3K%2Fconduit-config%2Ftext-generation%2Frun-capture",
+			"requestBody": {
+				"id": "ses_title_1a159d2cd19",
+				"location": {
+					"directory": "/private/tmp/conduit-title-lifecycle-BSRr3K/conduit-config/text-generation/run-capture"
+				}
+			},
+			"status": 200,
+			"responseBody": {
+				"data": {
+					"id": "ses_title_1a159d2cd19",
+					"projectID": "global",
+					"cost": 0,
+					"tokens": {
+						"input": 0,
+						"output": 0,
+						"reasoning": 0,
+						"cache": {
+							"read": 0,
+							"write": 0
+						}
+					},
+					"time": {
+						"created": 1792508353728,
+						"updated": 1792508353728
+					},
+					"title": "New session - 2026-10-20T14:59:13.728Z",
+					"location": {
+						"directory": "/private/tmp/conduit-title-lifecycle-BSRr3K/conduit-config/text-generation/run-capture"
+					},
+					"subpath": "private/tmp/conduit-title-lifecycle-BSRr3K/conduit-config/text-generation/run-capture"
+				}
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "PATCH",
+			"path": "/session/ses_title_1a159d2cd19?directory=%2Fprivate%2Ftmp%2Fconduit-title-lifecycle-BSRr3K%2Fconduit-config%2Ftext-generation%2Frun-capture",
+			"requestBody": {
+				"title": "Conduit ephemeral text generation",
+				"permission": [
+					{
+						"permission": "*",
+						"pattern": "*",
+						"action": "deny"
+					}
+				]
+			},
+			"status": 200,
+			"responseBody": {
+				"id": "ses_title_1a159d2cd19",
+				"slug": "proud-island",
+				"projectID": "global",
+				"directory": "/private/tmp/conduit-title-lifecycle-BSRr3K/conduit-config/text-generation/run-capture",
+				"path": "private/tmp/conduit-title-lifecycle-BSRr3K/conduit-config/text-generation/run-capture",
+				"cost": 0,
+				"tokens": {
+					"input": 0,
+					"output": 0,
+					"reasoning": 0,
+					"cache": {
+						"read": 0,
+						"write": 0
+					}
+				},
+				"title": "Conduit ephemeral text generation",
+				"version": "1.18.34",
+				"time": {
+					"created": 1792508353728,
+					"updated": 1792508353862
+				},
+				"permission": [
+					{
+						"permission": "*",
+						"pattern": "*",
+						"action": "deny"
+					}
+				]
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/session/ses_title_1a159d2cd19?directory=%2Fprivate%2Ftmp%2Fconduit-title-lifecycle-BSRr3K%2Fconduit-config%2Ftext-generation%2Frun-capture",
+			"status": 200,
+			"responseBody": {
+				"id": "ses_title_1a159d2cd19",
+				"slug": "proud-island",
+				"projectID": "global",
+				"directory": "/private/tmp/conduit-title-lifecycle-BSRr3K/conduit-config/text-generation/run-capture",
+				"path": "private/tmp/conduit-title-lifecycle-BSRr3K/conduit-config/text-generation/run-capture",
+				"cost": 0,
+				"tokens": {
+					"input": 0,
+					"output": 0,
+					"reasoning": 0,
+					"cache": {
+						"read": 0,
+						"write": 0
+					}
+				},
+				"title": "Conduit ephemeral text generation",
+				"version": "1.18.34",
+				"time": {
+					"created": 1792508353728,
+					"updated": 1792508353862
+				},
+				"permission": [
+					{
+						"permission": "*",
+						"pattern": "*",
+						"action": "deny"
+					}
+				]
+			}
+		},
+		{
+			"kind": "rest",
+			"method": "POST",
+			"path": "/session/ses_title_1a159d2cd19/abort?directory=%2Fprivate%2Ftmp%2Fconduit-title-lifecycle-BSRr3K%2Fconduit-config%2Ftext-generation%2Frun-capture",
+			"status": 200,
+			"responseBody": true
+		},
+		{
+			"kind": "rest",
+			"method": "DELETE",
+			"path": "/session/ses_title_1a159d2cd19?directory=%2Fprivate%2Ftmp%2Fconduit-title-lifecycle-BSRr3K%2Fconduit-config%2Ftext-generation%2Frun-capture",
+			"status": 200,
+			"responseBody": true
+		},
+		{
+			"kind": "rest",
+			"method": "GET",
+			"path": "/session/ses_title_1a159d2cd19?directory=%2Fprivate%2Ftmp%2Fconduit-title-lifecycle-BSRr3K%2Fconduit-config%2Ftext-generation%2Frun-capture",
+			"status": 404,
+			"responseBody": {
+				"name": "NotFoundError",
+				"data": {
+					"message": "Session not found: ses_title_1a159d2cd19"
+				}
+			}
+		}
+	]
+}

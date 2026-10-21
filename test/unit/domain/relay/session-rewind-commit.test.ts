@@ -155,6 +155,7 @@ it.effect(
 			const sentPrompts: string[] = [];
 			const provider: ProviderInstance = {
 				providerId: "opencode",
+				generateTextEffect: () => Effect.die("not used"),
 				discoverEffect: () => Effect.die("This send supplies its model"),
 				sendTurnEffect: (input) =>
 					Effect.gen(function* () {
