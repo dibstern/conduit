@@ -27,10 +27,12 @@ import {
 	ProjectionRunnerEffectTag,
 	ProjectionRunnerError,
 } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import { runTerminalStatus } from "../../../src/lib/persistence/effect/projectors-effect.js";
 import type {
 	CanonicalEvent,
 	StoredEvent,
 } from "../../../src/lib/persistence/events.js";
+import { makeEffectProjectionHarness } from "../../helpers/effect-projection-harness.js";
 
 const BASE_EVENT = {
 	providerId: "claude",
@@ -55,6 +57,50 @@ function runtimeEvent(event: Record<string, unknown>): ProviderRuntimeEvent {
 		...event,
 	});
 }
+
+// Failure modes: the mapper drops the source, the transactional check misses a
+// reference, a born-dead creation hits a FK, or later content revives the child.
+describe("born-dead provider creation", () => {
+	it.each([
+		"parentId",
+		"forkedFrom",
+	] as const)("marks a creation with a deleted %s in the same projected batch", async (reference) => {
+		const harness = makeEffectProjectionHarness();
+		try {
+			await harness.ingest(
+				runtimeEvent({
+					eventId: "dead-reference",
+					sessionId: "dead-reference",
+					type: "session.deleted",
+					data: {},
+				}),
+			);
+			await harness.ingestBatch([
+				runtimeEvent({
+					eventId: "born-dead-created",
+					sessionId: "born-dead",
+					type: "session.created",
+					data: { [reference]: "dead-reference" },
+				}),
+				runtimeEvent({
+					eventId: "born-dead-late-message",
+					sessionId: "born-dead",
+					type: "message.created",
+					data: { messageId: "late-message", role: "assistant" },
+				}),
+			]);
+			expect(
+				(await harness.storedEvents("born-dead")).map((event) => event.type),
+			).toEqual(["session.created", "session.deleted"]);
+			expect(await harness.query("SELECT id FROM sessions")).toEqual([]);
+			expect(await harness.query("SELECT id FROM session_providers")).toEqual(
+				[],
+			);
+		} finally {
+			await harness.dispose();
+		}
+	});
+});
 
 function makeHarness(options?: {
 	readonly existingSession?: boolean;
@@ -107,23 +153,35 @@ function makeHarness(options?: {
 			);
 		}),
 	);
-	const projectBatch = vi.fn((events: readonly StoredEvent[]) => {
-		projectBatchCallIndex += 1;
-		projected.push(...events);
-		batchProjected.push(...events);
-		return (
-			options?.projectBatchEffect?.(events, projectBatchCallIndex) ??
-			Effect.void
-		).pipe(
-			Effect.as({
-				version: events[events.length - 1]?.sequence ?? 0,
-				projectIds: [...new Set(events.map((event) => event.projectId))],
-				sessionIds: [...new Set(events.map((event) => event.sessionId))],
-				removedSessionIds: [],
-				collections: ["messages"] as const,
-			}),
-		);
-	});
+	const projectBatch = vi.fn(
+		(events: readonly StoredEvent[], endedRunEvents?: Set<string>) => {
+			projectBatchCallIndex += 1;
+			projected.push(...events);
+			batchProjected.push(...events);
+			return (
+				options?.projectBatchEffect?.(events, projectBatchCallIndex) ??
+				Effect.void
+			).pipe(
+				Effect.tap(() =>
+					Effect.sync(() => {
+						for (const event of events)
+							if (
+								event.metadata.runId &&
+								runTerminalStatus(event, event.provider)
+							)
+								endedRunEvents?.add(event.eventId);
+					}),
+				),
+				Effect.as({
+					version: events[events.length - 1]?.sequence ?? 0,
+					projectIds: [...new Set(events.map((event) => event.projectId))],
+					sessionIds: [...new Set(events.map((event) => event.sessionId))],
+					removedSessionIds: [],
+					collections: ["messages"] as const,
+				}),
+			);
+		},
+	);
 
 	const eventStore = {
 		projectId: "test-project",
@@ -222,6 +280,7 @@ describe("ProviderRuntimeIngestion", () => {
 					runtimeEvent({
 						eventId: "runtime-turn-completed",
 						type: "turn.completed",
+						runId: "run-1",
 						turnId: "turn-1",
 						data: { messageId: "message-1" },
 					}),
@@ -313,6 +372,7 @@ describe("ProviderRuntimeIngestion", () => {
 						runtimeEvent({
 							eventId: "publication-matrix-completed",
 							type: "turn.completed",
+							runId: "run-1",
 							turnId: "turn-1",
 							data: {
 								messageId: "message-1",
@@ -378,6 +438,7 @@ describe("ProviderRuntimeIngestion", () => {
 					sequence: 1,
 				}),
 			],
+			expect.any(Set),
 			expect.any(Function),
 		);
 		expect(harness.projectEvent).not.toHaveBeenCalled();

@@ -38,6 +38,10 @@ describe("Schema Migration", () => {
 					[72, "surfacing_marks"],
 					[73, "message_part_read"],
 					[74, "turn_recaps"],
+					[75, "events_parent_id_index"],
+					[76, "events_forked_from_index"],
+					[77, "message_parts_result_event_seq_index"],
+					[78, "provider_run_ownership"],
 				]);
 				for (const [filter, count] of [
 					["", 2],
@@ -96,6 +100,10 @@ describe("Schema Migration", () => {
 					[72, "surfacing_marks"],
 					[73, "message_part_read"],
 					[74, "turn_recaps"],
+					[75, "events_parent_id_index"],
+					[76, "events_forked_from_index"],
+					[77, "message_parts_result_event_seq_index"],
+					[78, "provider_run_ownership"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -140,6 +148,7 @@ describe("Schema Migration", () => {
 				"provider_command_sessions",
 				"provider_command_tombstones",
 				"provider_command_turns",
+				"provider_runs",
 				"provider_state",
 				"read_model_counter",
 				"sent_alerts",
@@ -236,6 +245,16 @@ describe("Schema Migration", () => {
 					unique: false,
 				},
 				{
+					name: "idx_events_lineage_forked_from",
+					table: "events",
+					unique: false,
+				},
+				{
+					name: "idx_events_lineage_parent",
+					table: "events",
+					unique: false,
+				},
+				{
 					name: "idx_events_session_seq",
 					table: "events",
 					unique: false,
@@ -269,6 +288,11 @@ describe("Schema Migration", () => {
 				},
 				{
 					name: "idx_message_parts_open_questions",
+					table: "message_parts",
+					unique: false,
+				},
+				{
+					name: "idx_message_parts_result_event_seq",
 					table: "message_parts",
 					unique: false,
 				},
@@ -316,6 +340,11 @@ describe("Schema Migration", () => {
 					unique: false,
 				},
 				{
+					name: "idx_provider_command_outbox_run",
+					table: "provider_command_outbox",
+					unique: false,
+				},
+				{
 					name: "idx_provider_command_outbox_status",
 					table: "provider_command_outbox",
 					unique: false,
@@ -333,6 +362,11 @@ describe("Schema Migration", () => {
 				{
 					name: "idx_provider_command_turns_session",
 					table: "provider_command_turns",
+					unique: false,
+				},
+				{
+					name: "idx_provider_runs_session_status",
+					table: "provider_runs",
 					unique: false,
 				},
 				{
@@ -402,6 +436,11 @@ describe("Schema Migration", () => {
 				},
 				{
 					name: "idx_turns_assistant_message",
+					table: "turns",
+					unique: false,
+				},
+				{
+					name: "idx_turns_run",
 					table: "turns",
 					unique: false,
 				},

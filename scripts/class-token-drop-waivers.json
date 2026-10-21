@@ -4,6 +4,7 @@
 		"requires": "<ModelSelectionPanel",
 		"reason": "conduit-test-9mbo.3 extracts the unchanged panel markup into ModelSelectionPanel; the composer wrapper still renders it."
 	},
+	"src/lib/frontend/components/ui/SortableList.svelte :: md:w-[11px]": "conduit-test-m379.15: the project tree's drag handle keeps its 24px width on desktop too; 11px was too narrow to grab, and project rows now indent by the handle's width.",
 	"src/lib/frontend/components/session/DraftItem.svelte :: grid": "The Final SessionRow owns the draft link grid; the outer container positions the discard button over the time so the link fills the tray.",
 	"src/lib/frontend/components/session/DraftItem.svelte :: bg-bg-alt,gap-1.5,group-hover:bg-text/5,md:min-h-[46px],min-h-[52px],pointer-fine:right-[5px],text-base,text-sm,text-xs": "conduit-test-9ra5.9 matches the draft row to mockup (2)(a) exactly: mockup px font sizes and 1.4 line-height (48px row, still above the 44px touch floor), sidebar hover fill like session rows, 7px project dot instead of the initials chip, and the trash at the mockup's 6px inset.",
 	"src/lib/frontend/components/session/SessionListRows.svelte :: bg-bg-surface,gap-1.5,my-1,py-1.5,tracking-normal": "conduit-test-9ra5.9 matches the drafts tray to mockup (2)(a): raised tray fill, 8px/2px tray margins, 6px/8px header padding, literal 6px header gap (gap-1.5 renders 4.5px at the 12px root), title-case header with no tracking override.",

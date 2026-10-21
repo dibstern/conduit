@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
 	appendFileSync,
 	existsSync,
+	mkdirSync,
 	readFileSync,
 	realpathSync,
 	unlinkSync,
@@ -539,14 +540,32 @@ function recordNativeMessage(
 	configDir: string | undefined,
 	directory?: string,
 ): void {
+	recordNativeEntry(entry, entry.session_id, configDir, directory);
+}
+
+function recordNativeEntry(
+	entry: object,
+	sessionId: string,
+	configDir: string | undefined,
+	directory?: string,
+): void {
 	if (configDir && existsSync(join(configDir, "conduit-test-record-forks"))) {
-		const file = join(
-			configDir,
-			`conduit-test-transcript-${entry.session_id}.ndjson`,
-		);
+		const file = join(configDir, `conduit-test-transcript-${sessionId}.ndjson`);
 		if (directory && !existsSync(`${file}.directory`))
 			writeFileSync(`${file}.directory`, directory);
 		appendFileSync(file, `${JSON.stringify(entry)}\n`);
+		if (directory) {
+			const projectDir = join(
+				configDir,
+				"projects",
+				realpathSync(directory).replace(/[^a-zA-Z0-9]/g, "-"),
+			);
+			mkdirSync(projectDir, { recursive: true });
+			appendFileSync(
+				join(projectDir, `${sessionId}.jsonl`),
+				`${JSON.stringify({ ...entry, sessionId })}\n`,
+			);
+		}
 	}
 }
 
@@ -554,13 +573,26 @@ function query(params: {
 	prompt: AsyncIterable<SDKUserMessage>;
 	options?: Options;
 }): Query {
-	const sessionId = params.options?.resume ?? randomUUID();
+	const sessionId = params.options?.forkSession
+		? (params.options.sessionId ?? randomUUID())
+		: (params.options?.resume ?? params.options?.sessionId ?? randomUUID());
 	const accountConfigDir =
 		params.options?.env?.["CLAUDE_CONFIG_DIR"] ??
 		process.env["CLAUDE_CONFIG_DIR"];
 	let nativeParentUuid: string | null = params.options?.resumeSessionAt ?? null;
+	if (
+		params.options?.forkSession &&
+		accountConfigDir &&
+		existsSync(
+			join(accountConfigDir, `conduit-test-transcript-${sessionId}.ndjson`),
+		)
+	)
+		throw new Error(`Session ID ${sessionId} is already in use`);
 	if (params.options?.resumeSessionAt) {
-		const transcript = readNativeTranscript(sessionId, accountConfigDir);
+		const transcript = readNativeTranscript(
+			params.options.resume ?? sessionId,
+			accountConfigDir,
+		);
 		if (
 			!transcript.some(
 				(entry) => entry.uuid === params.options?.resumeSessionAt,
@@ -656,6 +688,13 @@ function query(params: {
 				throw error;
 			return false;
 		}
+	};
+	const consumeAccountMarker = (name: string): boolean => {
+		if (!accountConfigDir) return false;
+		const file = join(accountConfigDir, `conduit-test-${name}`);
+		if (!existsSync(file)) return false;
+		unlinkSync(file);
+		return true;
 	};
 	const failNext = consumeMarker("fail-next-initialization");
 	const holdNext = consumeMarker("hold-next-initialization");
@@ -756,7 +795,34 @@ function query(params: {
 					at: process.hrtime.bigint().toString(),
 				});
 				if (fails) fail(new Error("Synthetic Claude initialization failure"));
-				else
+				else {
+					// The real CLI creates the caller-chosen fork during initialize,
+					// before the first prompt and the public system/init stream record.
+					if (params.options?.forkSession && params.options.resume) {
+						try {
+							const source = readNativeTranscript(
+								params.options.resume,
+								accountConfigDir,
+							);
+							const end = params.options.resumeSessionAt
+								? source.findIndex(
+										(entry) => entry.uuid === params.options?.resumeSessionAt,
+									)
+								: source.length - 1;
+							if (end < 0)
+								throw new Error("Native fork boundary was not found");
+							for (const entry of source.slice(0, end + 1))
+								recordNativeEntry(
+									{ ...entry, session_id: sessionId },
+									sessionId,
+									accountConfigDir,
+									params.options.cwd,
+								);
+						} catch (error) {
+							fail(error);
+							return;
+						}
+					}
 					done({
 						commands: [],
 						agents: [],
@@ -770,6 +836,7 @@ function query(params: {
 							apiProvider: "firstParty",
 						},
 					});
+				}
 			};
 			if (delayMs > 0) initializationTimer = setTimeout(finish, delayMs);
 			else finish();
@@ -857,28 +924,41 @@ function query(params: {
 							.join("");
 			const request = currentRequest(prompt);
 			const userUuid = input.uuid ?? randomUUID();
-			// The SDK starts every consumed input, including overlapping sends.
-			yield {
-				type: "command_lifecycle",
-				state: "started",
-				command_uuid: userUuid,
-				uuid: randomUUID(),
-				session_id: sessionId,
-			};
-			recordNativeMessage(
-				{
-					type: "user",
-					uuid: userUuid,
-					parentUuid: nativeParentUuid,
+			if (request === "fail-before-intake")
+				throw new Error("Harness SDK iterator failed before intake");
+			if (prompt === "/goal clear") {
+				for (const hookName of ["SessionStart", "UserPromptSubmit"])
+					yield {
+						type: "system",
+						subtype: "hook_started",
+						hook_id: randomUUID(),
+						hook_name: hookName,
+						hook_event: hookName,
+						uuid: randomUUID(),
+						session_id: sessionId,
+					};
+				yield {
+					type: "system",
+					subtype: "hook_response",
+					hook_id: randomUUID(),
+					hook_name: "UserPromptSubmit",
+					hook_event: "UserPromptSubmit",
+					output: "",
+					stdout: "",
+					stderr: "",
+					exit_code: 0,
+					outcome: "success",
+					uuid: randomUUID(),
 					session_id: sessionId,
-					message: { ...input.message, id: userUuid },
-					parent_tool_use_id: null,
-					parent_agent_id: null,
-				},
-				accountConfigDir,
-				params.options?.cwd,
-			);
-			nativeParentUuid = userUuid;
+				};
+				yield {
+					type: "command_lifecycle",
+					state: "queued",
+					command_uuid: userUuid,
+					uuid: randomUUID(),
+					session_id: sessionId,
+				};
+			}
 			const optionsFile = process.env["CONDUIT_TEST_CLAUDE_OPTIONS_FILE"];
 			if (optionsFile) {
 				const seen = new WeakSet<object>();
@@ -964,6 +1044,188 @@ function query(params: {
 					skills: [],
 					plugins: [],
 				} as unknown as SDKMessage;
+			}
+			if (params.options?.resume && consumeAccountMarker("resume-drops-turn")) {
+				yield {
+					type: "result",
+					subtype: "error_during_execution",
+					uuid: randomUUID(),
+					session_id: sessionId,
+					is_error: true,
+					errors: [
+						"Resume rejected by --resume-drops-turn: discarded range contains an unseen notification",
+					],
+					duration_ms: 0,
+					duration_api_ms: 0,
+					num_turns: 0,
+					stop_reason: null,
+					total_cost_usd: 0,
+					usage: taskStopUsage,
+					modelUsage: {},
+					permission_denials: [],
+				};
+				continue;
+			}
+			// Native resume validation precedes intake, as it does in the CLI.
+			yield {
+				type: "command_lifecycle",
+				state: "started",
+				command_uuid: userUuid,
+				uuid: randomUUID(),
+				session_id: sessionId,
+			};
+			if (prompt !== "/goal clear") {
+				recordNativeMessage(
+					{
+						type: "user",
+						uuid: userUuid,
+						parentUuid: nativeParentUuid,
+						session_id: sessionId,
+						message: { ...input.message, id: userUuid },
+						parent_tool_use_id: null,
+						parent_agent_id: null,
+					},
+					accountConfigDir,
+					params.options?.cwd,
+				);
+				nativeParentUuid = userUuid;
+			}
+			if (
+				params.options?.forkSession &&
+				consumeAccountMarker("crash-after-init")
+			)
+				throw new Error("Synthetic crash immediately after system/init");
+			if (prompt === "/goal clear") {
+				const unknown = consumeAccountMarker("unknown-goal");
+				const modelReply = consumeAccountMarker("model-goal-reply");
+				const text = unknown
+					? "Unknown command: goal"
+					: modelReply
+						? "I cleared your goal."
+						: "Goal cleared: Finish the Source task";
+				const uuid = randomUUID();
+				if (!unknown && !modelReply) {
+					recordNativeEntry(
+						{
+							type: "attachment",
+							uuid: randomUUID(),
+							parentUuid: nativeParentUuid,
+							attachment: {
+								type: "goal_status",
+								met: true,
+								sentinel: true,
+								condition: "Finish the Source task",
+							},
+						},
+						sessionId,
+						accountConfigDir,
+						params.options?.cwd,
+					);
+				}
+				// The spike records the completed goal status before the command
+				// user/local-command pair. A crash at init must leave no clear fact.
+				recordNativeMessage(
+					{
+						type: "user",
+						uuid: userUuid,
+						parentUuid: nativeParentUuid,
+						session_id: sessionId,
+						isSidechain: false,
+						message: {
+							role: "user",
+							content:
+								"<command-name>/goal</command-name>\n            <command-message>goal</command-message>\n            <command-args>clear</command-args>",
+						},
+						parent_tool_use_id: null,
+						parent_agent_id: null,
+					} as NativeMessage,
+					accountConfigDir,
+					params.options?.cwd,
+				);
+				nativeParentUuid = userUuid;
+				if (!unknown && !modelReply) {
+					recordNativeEntry(
+						{
+							type: "system",
+							subtype: "local_command",
+							uuid,
+							parentUuid: nativeParentUuid,
+							isSidechain: false,
+							isMeta: false,
+							content: `<local-command-stdout>${text}</local-command-stdout>`,
+							commandRun: { command: "goal", args: "clear" },
+						},
+						sessionId,
+						accountConfigDir,
+						params.options?.cwd,
+					);
+					nativeParentUuid = uuid;
+				}
+				yield {
+					type: "assistant",
+					uuid,
+					session_id: sessionId,
+					parent_tool_use_id: null,
+					message: {
+						id: randomUUID(),
+						role: "assistant",
+						model: modelReply ? "claude-sonnet-4" : "<synthetic>",
+						content: [{ type: "text", text }],
+					},
+					...(!unknown && !modelReply
+						? {
+								local_command_run: { command: "goal", args: "clear" },
+								local_command_source: `<local-command-stdout>${text}</local-command-stdout>`,
+							}
+						: {}),
+				} as unknown as SDKMessage;
+				yield {
+					type: "result",
+					subtype: "success",
+					uuid: randomUUID(),
+					session_id: sessionId,
+					is_error: false,
+					duration_ms: 0,
+					duration_api_ms: 0,
+					num_turns: modelReply ? 1 : 0,
+					result: text,
+					stop_reason: "end_turn",
+					total_cost_usd: 0,
+					usage: taskStopUsage,
+					modelUsage: {},
+					permission_denials: [],
+					...(!unknown && !modelReply ? { local_command: "goal" } : {}),
+				} as unknown as SDKMessage;
+				continue;
+			}
+			if (request === "fork-source-active-goal") {
+				recordNativeEntry(
+					{
+						type: "attachment",
+						uuid: randomUUID(),
+						parentUuid: nativeParentUuid,
+						attachment: {
+							type: "goal_status",
+							met: false,
+							sentinel: true,
+							condition: "Finish the Source task",
+						},
+					},
+					sessionId,
+					accountConfigDir,
+					params.options?.cwd,
+				);
+				yield {
+					type: "active_goal",
+					uuid: randomUUID(),
+					session_id: sessionId,
+					value: {
+						condition: "Finish the Source task",
+						iterations: 0,
+						set_at: Date.now(),
+						tokens_at_start: 0,
+					},
+				};
 			}
 			if (request === "thread-read-omitted-history") {
 				const serverKey = "conduit";
@@ -1084,6 +1346,13 @@ function query(params: {
 				).events.filter((event) => event.type === "result");
 				mark({ kind: "usage-limit", phase: "limited", sessionId, prompt });
 				continue;
+			}
+			if (request === "usage-limit-before-first-receipt") {
+				yield provisionalRejectedLimitWithoutReset(sessionId);
+				mark({ kind: "usage-limit", phase: "limited", sessionId, prompt });
+				throw new Error(
+					"Synthetic SDK exit after the limit before its receipt",
+				);
 			}
 			if (!switchTurn && request.startsWith("usage-limit-account-1")) {
 				const noReset = request.startsWith("usage-limit-account-1-no-reset");
@@ -1364,6 +1633,17 @@ function query(params: {
 			for (const [index, text] of chunks.entries()) {
 				if (request === "upgrade-long-turn" && index === 1 && proof) {
 					const release = join(dirname(proof), "release-upgrade-turn");
+					turnHeld = true;
+					mark({ kind: "assistant-held", prompt, queryId });
+					while (!existsSync(release) && !closed) {
+						yield* outOfBand.splice(0);
+						await new Promise<void>((done) => setTimeout(done, 20));
+					}
+					turnHeld = false;
+					if (closed) return;
+				}
+				if (request === "upgrade-recovered-turn" && index === 1 && proof) {
+					const release = join(dirname(proof), "release-upgrade-recovered");
 					turnHeld = true;
 					mark({ kind: "assistant-held", prompt, queryId });
 					while (!existsSync(release) && !closed) {
@@ -1854,6 +2134,64 @@ function query(params: {
 							ambient: request === "notification-parent-turn-during-warm",
 						},
 					],
+				} as unknown as SDKMessage;
+			}
+			if (
+				request === "upgrade-long-turn" &&
+				proof &&
+				existsSync(join(dirname(proof), "legacy-output-details"))
+			) {
+				for (const [index, name, id, input] of [
+					[
+						1,
+						"Bash",
+						"legacy-upgrade-bash",
+						{ command: "printf legacy-output" },
+					],
+					[
+						2,
+						"Agent",
+						"legacy-upgrade-agent",
+						{
+							description: "Legacy runner child",
+							prompt: "Review the changes",
+							subagent_type: "general-purpose",
+						},
+					],
+				] as const) {
+					yield stream(sessionId, {
+						type: "content_block_start",
+						index,
+						content_block: { type: "tool_use", id, name, input },
+					});
+					yield stream(sessionId, { type: "content_block_stop", index });
+				}
+				yield {
+					type: "user",
+					uuid: randomUUID(),
+					session_id: sessionId,
+					parent_tool_use_id: null,
+					message: {
+						role: "user",
+						content: [
+							{
+								type: "tool_result",
+								tool_use_id: "legacy-upgrade-bash",
+								content: "legacy-output",
+								is_error: false,
+							},
+						],
+					},
+				} as unknown as SDKMessage;
+				yield {
+					type: "system",
+					subtype: "task_started",
+					uuid: randomUUID(),
+					session_id: sessionId,
+					task_id: "legacy-upgrade-child",
+					tool_use_id: "legacy-upgrade-agent",
+					description: "Legacy runner child",
+					task_type: "local_agent",
 				} as unknown as SDKMessage;
 			}
 			if (request === "review-subagent-finalizer") {
@@ -2409,6 +2747,13 @@ function query(params: {
 export const claudeSdk: NonNullable<ProjectRelayConfig["claudeSdk"]> = {
 	query,
 	fork: {
+		transcriptExists: async (sessionId, options) =>
+			existsSync(
+				join(
+					options.configDir.path,
+					`conduit-test-transcript-${sessionId}.ndjson`,
+				),
+			),
 		readTranscript: async (sessionId, options) => {
 			return readNativeTranscript(
 				sessionId,

@@ -246,10 +246,11 @@ function streamLiveAssistant(
 	messageId: string,
 	created: number,
 	text: string,
+	parentID?: string,
 ): void {
 	mock.emitTestEvent("message.updated", {
 		sessionID: SESSION_ID,
-		info: assistantInfo(messageId, created),
+		info: assistantInfo(messageId, created, undefined, parentID),
 	});
 	mock.emitTestEvent("message.part.updated", {
 		sessionID: SESSION_ID,
@@ -1292,6 +1293,25 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 			async () => (await messageRows(dbPath))[0]?.is_streaming === 0,
 			"completed live assistant",
 		);
+		mock.emitTestEvent("session.status", {
+			sessionID: SESSION_ID,
+			status: { type: "idle" },
+		});
+		await waitFor(
+			async () => (await readTurns(dbPath))[0]?.state === "completed",
+			"owned native idle",
+		);
+		const lifecycle = Effect.flatMap(
+			SqlClient.SqlClient,
+			(sql) => sql`SELECT t.run_id, t.state, t.started_at, t.completed_at,
+				t.cost, t.tokens_in, t.tokens_out, r.status AS run_status
+				FROM turns t JOIN provider_runs r ON r.id = t.run_id
+				WHERE t.user_message_id = 'msg_u1' AND t.session_id = ${SESSION_ID}`,
+		);
+		const completedLifecycle = await readStore(dbPath, lifecycle);
+		expect(completedLifecycle).toMatchObject([
+			{ state: "completed", run_status: "completed" },
+		]);
 		await stack.stop();
 		stack = undefined;
 		mock.setExactResponse("GET", restPath, 200, [
@@ -1322,9 +1342,10 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 			expect.objectContaining({
 				user_message_id: "msg_u1",
 				assistant_message_id: null,
-				state: "pending",
+				state: "completed",
 			}),
 		);
+		expect(await readStore(dbPath, lifecycle)).toEqual(completedLifecycle);
 		expect(await readTurns(dbPath)).toContainEqual(
 			expect.objectContaining({
 				user_message_id: "msg_u_missing",
@@ -1681,10 +1702,12 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 			info: assistantInfo("msg_a1", T0 + 2_000, T0 + 5_000),
 		});
 		await waitFor(
-			async () => (await readTurns(dbPath))[0]?.state === "completed",
+			async () =>
+				(await messageRows(dbPath)).find(({ id }) => id === "msg_a1")
+					?.is_streaming === 0,
 			"first assistant completion",
 		);
-		streamLiveAssistant(mock, "msg_a2", T0 + 6_000, "second answer");
+		streamLiveAssistant(mock, "msg_a2", T0 + 6_000, "second answer", "msg_u1");
 		await waitFor(
 			async () =>
 				(await readTurns(dbPath))[0]?.assistant_message_id === "msg_a2",

@@ -32,6 +32,7 @@ import {
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import type { ProviderStateEffectTag } from "../../../src/lib/persistence/effect/provider-state-effect.js";
 import type { ReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { StoredEvent } from "../../../src/lib/persistence/events.js";
@@ -77,7 +78,11 @@ function makeTestLayer(input: {
 	readonly logger?: ReturnType<typeof makeMockLogger>;
 	readonly accounts?: ReturnType<typeof makeMockAccountDirectory>;
 	readonly adapterConfigDir?: string;
-	readonly providerLayer?: Layer.Layer<ProviderRegistryTag>;
+	readonly providerLayer?: Layer.Layer<
+		ProviderRegistryTag,
+		never,
+		ReadQueryEffectTag | ProviderStateEffectTag
+	>;
 }) {
 	const ws = input.wsHandler ?? makeWebSocketHandler().handler;
 	const deps = Layer.mergeAll(
@@ -93,7 +98,8 @@ function makeTestLayer(input: {
 			input.config ?? makeMockConfig({ projectDir: process.cwd() }),
 		),
 		ProjectSettingsLive,
-		makePersistenceEffectLayer(":memory:", "test-project"),
+	).pipe(
+		Layer.provideMerge(makePersistenceEffectLayer(":memory:", "test-project")),
 	);
 	return Layer.provideMerge(
 		makeSessionTitleServiceLive({

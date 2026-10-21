@@ -364,7 +364,7 @@ describe("OpenCode message snapshots", () => {
 				"SELECT id, assistant_message_id, state FROM turns ORDER BY id",
 			),
 		).toEqual([
-			{ id: "u1", assistant_message_id: "live-a1", state: "running" },
+			{ id: "u1", assistant_message_id: "live-a1", state: "pending" },
 			{ id: "u2", assistant_message_id: null, state: "pending" },
 		]);
 		await live.ingest(
@@ -386,7 +386,7 @@ describe("OpenCode message snapshots", () => {
 				"SELECT id, assistant_message_id, state FROM turns ORDER BY id",
 			),
 		).toEqual([
-			{ id: "u1", assistant_message_id: "live-a1", state: "running" },
+			{ id: "u1", assistant_message_id: "live-a1", state: "pending" },
 			{ id: "u2", assistant_message_id: null, state: "pending" },
 		]);
 		const replay = makeHarness();

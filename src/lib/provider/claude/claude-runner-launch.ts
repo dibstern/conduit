@@ -118,6 +118,8 @@ export const makeClaudeRunnerLaunch = (
 				canUseTool,
 				resume,
 				resumeSessionAt,
+				forkSession,
+				sessionId: customSessionId,
 				...launch
 			} = options;
 			const restoring = frozenSnapshot !== undefined && snapshot === undefined;
@@ -142,6 +144,9 @@ export const makeClaudeRunnerLaunch = (
 							...(canUseTool ? { canUseTool } : {}),
 							...(resume ? { resume } : {}),
 							...(resumeSessionAt ? { resumeSessionAt } : {}),
+							...(forkSession
+								? { forkSession: true, sessionId: customSessionId }
+								: {}),
 						}
 					: frozenSnapshot
 						? {
@@ -243,6 +248,8 @@ export const makeClaudeRunnerLaunch = (
 				canUseTool: _tool,
 				resume: _resume,
 				resumeSessionAt: _rewindPoint,
+				forkSession: _forkSession,
+				sessionId: _customSessionId,
 				...effectiveLaunch
 			} = queryLaunchOptions;
 			const retainedFiles = frozenSnapshot?.fileSettings ?? fileSettings;
@@ -300,7 +307,9 @@ export const makeClaudeRunnerLaunch = (
 					},
 				);
 			}
-			if (resume) resumeSessionId = resume;
+			resumeSessionId = queryOptions.forkSession
+				? queryOptions.sessionId
+				: resume;
 			if (process.env["NODE_ENV"] === "test") {
 				const mark = {
 					channel: "conduit-process-test",
@@ -366,6 +375,13 @@ export const makeClaudeRunnerLaunch = (
 							onSubagentFinalizationComplete: reportUpgradeState,
 							onTurnStateChanged: (_sessionId, inFlight) =>
 								callbacks.turnStateChanged(inFlight),
+							onAbandonedRun: (inputId) =>
+								callbacks.retireAfterCommand?.(inputId),
+							onNativeSessionId: (_sessionId, nativeId) => {
+								if (nativeId === resumeSessionId) return;
+								resumeSessionId = nativeId;
+								reportUpgradeState();
+							},
 						},
 						(output) => {
 							if (
@@ -469,6 +485,11 @@ export const makeClaudeRunnerLaunch = (
 						...(input.instanceId ? { instanceId: input.instanceId } : {}),
 						...(input.nativeThread ? { nativeThread: input.nativeThread } : {}),
 						resumeSessionId: input.resumeSessionId,
+						...(input.resumeSessionAt
+							? { resumeSessionAt: input.resumeSessionAt }
+							: {}),
+						...(input.forkSession ? { forkSession: true } : {}),
+						...(input.clearInheritedGoal ? { clearInheritedGoal: true } : {}),
 						...(input.model ? { model: input.model } : {}),
 						configDir: input.configDir,
 						folderSource: input.folderSource,

@@ -157,6 +157,14 @@ async function seedTurns(
 						},
 					]
 				: []),
+			...(!withTools && index % 2 === 1
+				? [
+						{
+							type: "session.status",
+							properties: { sessionID: sessionId, status: { type: "idle" } },
+						},
+					]
+				: []),
 		]),
 	);
 	await vi.waitFor(

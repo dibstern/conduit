@@ -3,6 +3,7 @@ import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
 import { observeTurnTimelineCommit } from "../../domain/daemon/Services/turn-timeline.js";
+import { EventRetentionSchedulerTag } from "../../domain/persistence/Services/event-retention-scheduler.js";
 import { SessionEventBusTag } from "../../domain/relay/Services/session-event-bus.js";
 import { contentionMetrics } from "../contention-metrics.js";
 import {
@@ -66,6 +67,7 @@ export class ProjectOutsideSeamTransaction extends Data.TaggedError(
 
 export interface CommitAndSignalOptions {
 	readonly publish?: boolean;
+	readonly endedRunEvents?: Set<string>;
 	/** Runs after projection, inside the append transaction, before COMMIT. */
 	readonly beforeCommit?: Effect.Effect<void, SqlError>;
 	readonly afterCommit?: Effect.Effect<void>;
@@ -145,6 +147,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 	const projectionRunner = yield* ProjectionRunnerEffectTag;
 	const projects = yield* SessionRollupProjects;
 	const sessionEventBus = yield* Effect.serviceOption(SessionEventBusTag);
+	const retention = yield* Effect.serviceOption(EventRetentionSchedulerTag);
 
 	const write = <A, E, R>(
 		body: (
@@ -168,6 +171,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 				// once it has committed. Which is exactly why `project` has to refuse
 				// to feed them from anywhere the COMMIT does not cover.
 				const stored: StoredEvent[] = [];
+				const endedRunEvents = new Set<string>();
 				const advances: ReadModelAdvance[] = [];
 				// Sessions direct stamps wrote, whose families are refreshed once,
 				// before COMMIT, however many stamps the body makes.
@@ -218,7 +222,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 										);
 										const markers: StoredEvent[] = [];
 										const advance = yield* projectionRunner
-											.projectBatch(events, (event) =>
+											.projectBatch(events, endedRunEvents, (event) =>
 												Effect.gen(function* () {
 													// Earlier events in this batch have projected. Capture the
 													// current subtree before the root's cascade erases it.
@@ -332,6 +336,13 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 						return result;
 					}),
 				);
+				for (const eventId of endedRunEvents)
+					options.endedRunEvents?.add(eventId);
+				// Every committed deletion kicks retention, even when no row was
+				// removed or live publication was suppressed. Never wait for drain.
+				if (stored.some((event) => event.type === "session.deleted")) {
+					if (Option.isSome(retention)) yield* retention.value.kick;
+				}
 				// Callbacks can stall or commit again; neither may hold up advances.
 				yield* options.afterCommit ?? Effect.void;
 				if (
@@ -339,7 +350,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 					options.publish !== false &&
 					stored.length > 0
 				)
-					yield* sessionEventBus.value.publish(stored);
+					yield* sessionEventBus.value.publish(stored, endedRunEvents);
 				const sessionStateNotifier = yield* Effect.serviceOption(
 					SessionStateProjectionNotifierTag,
 				);

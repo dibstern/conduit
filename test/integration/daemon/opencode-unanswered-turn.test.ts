@@ -34,7 +34,7 @@ function ledger(harness: ProcessHarness, sessionId: string) {
 // before any reply) used to leave its turn pending, so the inbox held every
 // later queued input forever. Failure cases: the queued input never drains
 // after the provider goes idle; or it jumps ahead while the unanswered turn
-// is still legitimately pending, before any idle.
+// is still running, before any idle.
 describe("an unanswered OpenCode user message", () => {
 	let harness: ProcessHarness | undefined;
 	afterEach(async () => {
@@ -42,7 +42,7 @@ describe("an unanswered OpenCode user message", () => {
 		harness = undefined;
 	});
 
-	it("holds the queue while pending and releases it once OpenCode is idle", async () => {
+	it("holds the queue after input acceptance and releases it once OpenCode is idle", async () => {
 		const fixture = ProcessHarness.create({
 			dist: resolve(process.env["CONDUIT_TEST_DIST"] ?? "dist"),
 			foregroundCli: true,
@@ -73,7 +73,7 @@ describe("an unanswered OpenCode user message", () => {
 			},
 		});
 		await vi.waitFor(() =>
-			expect(ledger(fixture, sessionId).turns).toEqual(["pending"]),
+			expect(ledger(fixture, sessionId).turns).toEqual(["running"]),
 		);
 
 		const inputId = randomUUID();
@@ -90,10 +90,10 @@ describe("an unanswered OpenCode user message", () => {
 		await vi.waitFor(() =>
 			expect(ledger(fixture, sessionId).queued).toEqual([inputId]),
 		);
-		// Nothing has said the provider stopped: the pending turn keeps its place.
+		// Nothing has said the provider stopped: the accepted turn keeps its place.
 		await new Promise((done) => setTimeout(done, 1_000));
 		const held = ledger(fixture, sessionId);
-		expect(held).toEqual({ queued: [inputId], sent: [], turns: ["pending"] });
+		expect(held).toEqual({ queued: [inputId], sent: [], turns: ["running"] });
 
 		await fixture.setOpenCodeStatus(fixture.projectDir, sessionId, {
 			type: "idle",
@@ -103,7 +103,7 @@ describe("an unanswered OpenCode user message", () => {
 				expect(ledger(fixture, sessionId)).toEqual({
 					queued: [],
 					sent: [inputId],
-					turns: ["completed"],
+					turns: ["completed", "completed"],
 				}),
 			{ timeout: 15_000 },
 		);

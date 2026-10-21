@@ -841,6 +841,10 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				}),
 			SetAutoSettleSetting: (request) =>
 				run(wsRpcHandlers.SetAutoSettleSetting(request)),
+			GetAutoArchiveSetting: (request) =>
+				run(wsRpcHandlers.GetAutoArchiveSetting(request)),
+			SetAutoArchiveSetting: (request) =>
+				run(wsRpcHandlers.SetAutoArchiveSetting(request)),
 			GetAutoDeleteArchivedSetting: (request) =>
 				run(wsRpcHandlers.GetAutoDeleteArchivedSetting(request)),
 			SetAutoDeleteArchivedSetting: (request) =>

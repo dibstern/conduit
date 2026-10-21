@@ -350,13 +350,13 @@ function convertAssistantParts(
 					} satisfies SystemMessage);
 				}
 				break;
+			case "notice":
 			case "error":
-				// A turn that ended in error: the notice the live error event shows.
 				result.push({
 					type: "system",
 					uuid,
 					text: part.text ?? "",
-					variant: "error",
+					variant: part.type === "notice" ? "info" : "error",
 					...(part.code !== undefined && { errorCode: part.code }),
 					...(partCreatedAt != null && { createdAt: partCreatedAt }),
 				} satisfies SystemMessage);

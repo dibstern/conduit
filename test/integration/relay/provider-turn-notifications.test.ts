@@ -161,10 +161,41 @@ it.each([
 				}),
 			);
 			yield* ingestion.ingest(
-				providerRuntimeEvent(expected.type, "s1", {
-					messageId: "m1",
-					error: "failed",
-				}),
+				providerRuntimeEvent(
+					"message.created",
+					"s1",
+					{ messageId: "u1", sessionId: "s1", role: "user" },
+					{ runId: "r1" },
+				),
+			);
+			yield* ingestion.ingest(
+				providerRuntimeEvent(
+					"run.started",
+					"s1",
+					{ inputId: "u1", requestedRunId: "r1" },
+					{ runId: "r1" },
+				),
+			);
+			yield* ingestion.ingest(
+				providerRuntimeEvent(
+					"message.created",
+					"s1",
+					{
+						messageId: "m1",
+						sessionId: "s1",
+						role: "assistant",
+						parentID: "u1",
+					},
+					{ eventId: "evt_assistant", runId: "r1" },
+				),
+			);
+			yield* ingestion.ingest(
+				providerRuntimeEvent(
+					expected.type,
+					"s1",
+					{ messageId: "m1", error: "failed" },
+					{ runId: "r1" },
+				),
 			);
 			return [
 				...(yield* PubSub.takeUpTo(subscribed, Number.POSITIVE_INFINITY)),

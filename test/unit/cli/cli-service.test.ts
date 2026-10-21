@@ -5,6 +5,10 @@
 // its process has stopped. Invalid/unreadable config must retain its tagged
 // error and prevent config or unit writes; only a missing config may default.
 // Uninstall must await full shutdown before unloading; reinstall must preserve runtimes.
+// Installed units must restart failures, but never a successful full Shutdown.
+// Reinstall must await the old PID's exit and still refuse an unrelated daemon.
+// Custom macOS labels must name every service-manager target and reject invalid
+// labels before effects; Linux must ignore the macOS label override.
 // Every effect below uses an in-memory runner.
 
 import * as childProcess from "node:child_process";
@@ -115,6 +119,7 @@ function fakeRunner(platform: NodeJS.Platform) {
 		}),
 		checkDaemon: vi.fn<ServiceRunner["checkDaemon"]>(async () => false),
 		stopDaemon: vi.fn<ServiceRunner["stopDaemon"]>(async () => {}),
+		waitForExit: vi.fn<ServiceRunner["waitForExit"]>(async () => {}),
 		isPortAvailable: vi.fn<ServiceRunner["isPortAvailable"]>(async () => true),
 	} satisfies ServiceRunner;
 	return { runner, files, events, config: options(platform) };
@@ -146,8 +151,10 @@ function loaded(
 }
 
 afterEach(() => {
+	vi.useRealTimers();
 	vi.restoreAllMocks();
 	vi.unstubAllEnvs();
+	vi.unstubAllGlobals();
 });
 
 describe("service unit generation", () => {
@@ -194,7 +201,9 @@ describe("service unit generation", () => {
 		);
 		expect(unit).toContain("<string>dev.conduit.server</string>");
 		expect(unit).toMatch(/<key>RunAtLoad<\/key>\s*<true\/>/);
-		expect(unit).toMatch(/<key>KeepAlive<\/key>\s*<true\/>/);
+		expect(unit).toMatch(
+			/<key>KeepAlive<\/key>\s*<dict>\s*<key>SuccessfulExit<\/key>\s*<false\/>\s*<\/dict>/,
+		);
 		expect(unit).toContain("<key>CONDUIT_SERVICE</key><string>1</string>");
 		expect(unit).toMatch(
 			/<string>\/bin\/zsh<\/string>\s*<string>-l<\/string>\s*<string>-c<\/string>\s*<string>exec conduit serve<\/string>/,
@@ -213,7 +222,9 @@ describe("service unit generation", () => {
 			`${homeDir}/.config/systemd/user/conduit.service`,
 		);
 		expect(unit).toContain('ExecStart="/bin/zsh" -l -c "exec conduit serve"');
-		expect(unit).toContain("Restart=always");
+		expect(unit).toContain("Restart=on-failure");
+		expect(unit).toContain("SuccessExitStatus=75");
+		expect(unit).toContain("RestartForceExitStatus=75");
 		expect(unit).toContain("KillMode=process");
 		expect(unit).toContain("WantedBy=default.target");
 		expect(unit).toContain(`WorkingDirectory=${cwd}`);
@@ -340,6 +351,19 @@ describe.each([
 	"darwin",
 	"linux",
 ] as const)("service commands on %s", (platform) => {
+	it("installs a restart policy that leaves a successful Shutdown stopped", async () => {
+		const { runner, files, config } = fakeRunner(platform);
+		await runServiceCommand("install", config, runner);
+		const unit = files.get(config.paths.unitFile);
+		if (platform === "darwin") {
+			expect(unit).toMatch(
+				/<key>KeepAlive<\/key>\s*<dict>\s*<key>SuccessfulExit<\/key>\s*<false\/>\s*<\/dict>/,
+			);
+		} else {
+			expect(unit).toMatch(/^Restart=on-failure$/m);
+		}
+	});
+
 	it.each([
 		DaemonConfigInvalid,
 		DaemonConfigUnreadable,
@@ -447,6 +471,55 @@ describe.each([
 		expect(runner.exec.mock.invocationCallOrder[1]).toBeLessThan(
 			runner.writeFile.mock.invocationCallOrder[0] ?? 0,
 		);
+	});
+
+	it("waits for the old service process to exit before checking for a daemon on reinstall", async () => {
+		vi.useFakeTimers();
+		const { runner, config, files } = fakeRunner(platform);
+		files.set(config.paths.unitFile, generateServiceUnit(config));
+		loaded(runner, platform);
+		let oldProcessAlive = true;
+		runner.waitForExit.mockImplementation(async () => {
+			await new Promise<void>((resolve) => setTimeout(resolve, 500));
+			oldProcessAlive = false;
+		});
+		runner.checkDaemon.mockImplementation(async () => oldProcessAlive);
+		const reinstall = runServiceCommand("install", config, runner).then(
+			(output) => ({ output }),
+			(error: unknown) => ({ error }),
+		);
+		await vi.advanceTimersByTimeAsync(100);
+		const checksBeforeExit = runner.checkDaemon.mock.calls.length;
+		await vi.advanceTimersByTimeAsync(400);
+		expect(await reinstall).toEqual({
+			output: expect.stringContaining("Installed"),
+		});
+		expect(checksBeforeExit).toBe(0);
+		expect(runner.waitForExit).toHaveBeenCalledExactlyOnceWith(42);
+		expect(runner.exec.mock.invocationCallOrder[1]).toBeLessThan(
+			runner.waitForExit.mock.invocationCallOrder[0] ?? 0,
+		);
+		expect(runner.checkDaemon).toHaveBeenCalledOnce();
+		expect(runner.stopDaemon).not.toHaveBeenCalled();
+	});
+
+	it("still refuses an unrelated daemon after the old service process exits", async () => {
+		const { runner, config, files } = fakeRunner(platform);
+		const unit = generateServiceUnit(config);
+		files.set(config.paths.unitFile, unit);
+		loaded(runner, platform);
+		runner.checkDaemon.mockResolvedValue(true);
+		await expect(runServiceCommand("install", config, runner)).rejects.toThrow(
+			"A Conduit daemon is already running. Stop it first with conduit --stop, then install the service.",
+		);
+		expect(runner.waitForExit).toHaveBeenCalledExactlyOnceWith(42);
+		expect(runner.waitForExit.mock.invocationCallOrder[0]).toBeLessThan(
+			runner.checkDaemon.mock.invocationCallOrder[0] ?? 0,
+		);
+		expect(runner.stopDaemon).not.toHaveBeenCalled();
+		expect(runner.writeFile).not.toHaveBeenCalled();
+		expect(runner.saveConfig).not.toHaveBeenCalled();
+		expect(files.get(config.paths.unitFile)).toBe(unit);
 	});
 
 	it("warns and uses the installed entry when conduit is absent from login PATH", async () => {
@@ -936,6 +1009,126 @@ describe("reviewed service lifecycle edge cases", () => {
 });
 
 describe("service CLI route", () => {
+	it("uses a custom macOS label for the plist and every launchctl target", async () => {
+		const label = "dev.conduit.test.run-123";
+		vi.stubEnv("HOME", homeDir);
+		vi.stubEnv("CONDUIT_SERVICE_LABEL", label);
+		vi.stubGlobal("process", {
+			...process,
+			platform: "darwin",
+			getuid: () => 501,
+		});
+		const { runner, files } = fakeRunner("darwin");
+		const stderr = { write: vi.fn() };
+		const exit = vi.fn();
+		const invoke = (action: string) =>
+			handleService(
+				{
+					args: parseArgs(["service", action]),
+					cwd,
+					options: { configDir },
+					stdout: { write: vi.fn() },
+					stderr,
+					exit,
+					checkDaemon: runner.checkDaemon,
+				},
+				runner,
+			);
+		const plist = `${homeDir}/Library/LaunchAgents/${label}.plist`;
+		await invoke("install");
+		expect(files.get(plist)).toContain(
+			`<key>Label</key><string>${label}</string>`,
+		);
+		loaded(runner, "darwin");
+		await invoke("install");
+		await invoke("status");
+		await invoke("uninstall");
+		expect(
+			runner.exec.mock.calls.filter(([command]) => command === "launchctl"),
+		).toEqual([
+			["launchctl", ["print", `gui/501/${label}`]],
+			["launchctl", ["enable", `gui/501/${label}`]],
+			["launchctl", ["bootstrap", "gui/501", plist]],
+			["launchctl", ["print", `gui/501/${label}`]],
+			["launchctl", ["bootout", `gui/501/${label}`]],
+			["launchctl", ["enable", `gui/501/${label}`]],
+			["launchctl", ["bootstrap", "gui/501", plist]],
+			["launchctl", ["print", `gui/501/${label}`]],
+			["launchctl", ["print", `gui/501/${label}`]],
+			["launchctl", ["bootout", `gui/501/${label}`]],
+		]);
+		expect(files.has(plist)).toBe(false);
+		expect(stderr.write).not.toHaveBeenCalled();
+		expect(exit).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		"",
+		"conduit",
+		"dev/conduit/test",
+		"dev.conduit test",
+		"dev..conduit",
+		".dev.conduit",
+		"dev.conduit.",
+		"dev.conduit.<test>",
+		"dev.conduit.test\n",
+	])("rejects the invalid macOS label %j before effects", async (label) => {
+		vi.stubEnv("CONDUIT_SERVICE_LABEL", label);
+		vi.stubGlobal("process", { ...process, platform: "darwin" });
+		const { runner } = fakeRunner("darwin");
+		const stderr = { write: vi.fn() };
+		const exit = vi.fn();
+		await handleService(
+			{
+				args: parseArgs(["service", "install"]),
+				cwd,
+				options: { configDir },
+				stdout: { write: vi.fn() },
+				stderr,
+				exit,
+				checkDaemon: runner.checkDaemon,
+			},
+			runner,
+		);
+		expect(stderr.write).toHaveBeenCalledWith(
+			expect.stringContaining("CONDUIT_SERVICE_LABEL"),
+		);
+		expect(exit).toHaveBeenCalledWith(1);
+		expect(runner.exec).not.toHaveBeenCalled();
+		expect(runner.writeFile).not.toHaveBeenCalled();
+	});
+
+	it("ignores the macOS label override on Linux", async () => {
+		vi.stubEnv("HOME", homeDir);
+		vi.stubEnv("CONDUIT_SERVICE_LABEL", "invalid/label");
+		vi.stubGlobal("process", { ...process, platform: "linux" });
+		const { runner } = fakeRunner("linux");
+		const stdout = { write: vi.fn() };
+		const stderr = { write: vi.fn() };
+		await handleService(
+			{
+				args: parseArgs(["service", "status"]),
+				cwd,
+				options: { configDir },
+				stdout,
+				stderr,
+				exit: vi.fn(),
+				checkDaemon: runner.checkDaemon,
+			},
+			runner,
+		);
+		expect(stdout.write).toHaveBeenCalledWith(
+			expect.stringContaining("/systemd/user/conduit.service"),
+		);
+		expect(stderr.write).not.toHaveBeenCalled();
+		expect(runner.exec).toHaveBeenCalledWith("systemctl", [
+			"--user",
+			"show",
+			"conduit",
+			"--property=LoadState,ActiveState,SubState,MainPID",
+		]);
+	});
+
 	it.each([
 		"install",
 		"uninstall",

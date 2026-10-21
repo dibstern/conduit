@@ -54,7 +54,7 @@ function setup() {
 	return {
 		root,
 		port,
-		driver: makeCursorRunnerDriver(process.cwd(), port, root),
+		driver: makeCursorRunnerDriver(process.cwd(), port, undefined, root),
 	};
 }
 function observe(

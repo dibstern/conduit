@@ -96,6 +96,10 @@ row from `sandbox-unprimed.jsonl` into basic replay and changes only its method
 wrapper kind to `sandbox.prime.error`. The captured error data is unchanged.
 Removing that row restores successful playback, allowing the case to prove a
 failed sandbox check terminates its runner and the retry uses a fresh runner.
+Pre-intake sandbox and missing-auth failures close the exact named input as
+`error`, while its `run_id` and `started_at` stay null. Their failed reservation
+has one owned terminal and no `run.started` receipt, so the inbox becomes free
+without recording provider acceptance.
 
 The queued-turn regression uses the unchanged `workspace-resume.jsonl`
 conversation. With `NODE_ENV=test`, `CONDUIT_TEST_CURSOR_CLOSE_DELAY_MS` and
@@ -471,8 +475,9 @@ observations:
   retaining both captured user-message channels.
 - Delivered error: `steer.jsonl`, changing only `wait.result.status` to the
   public `error` value and adding declared RunError `message` and
-  `code: connection_stalled`. The delivered input must own the error and
-  session's latest-turn pointer, with no requeue or second SDK send.
+  `code: connection_stalled`. The delivered input owns the error message;
+  the session's terminal pointer stays on the run's initiating input, with
+  no requeue or second SDK send.
 - Identical text: `steer.jsonl`, copying its steer.call immediately after
   itself while retaining only the original acknowledgement and user-message
   channels. The replay gates both operations before delivering the original
@@ -503,8 +508,10 @@ observations:
   conduit's child-session and steer path together, but the spike did not
   verify live steering during a background-child wait.
 
-All declined variants append the unchanged send-through-disposal segment of
-`basic.jsonl` for subsequent inbox-driven turns. The late-start case submits
+All declined variants append the send-through-disposal segment of `basic.jsonl`
+for subsequent inbox-driven turns, rebinding only its handle and stream native
+agent identity to the retained agent. Native run ids, event kinds, content and
+ordering stay captured. The late-start case submits
 delivery `steer` after the missing-method run has completed, proving an idle
 session starts a normal turn without calling native steer. Playback gates the
 captured `steer.call` until Conduit invokes the operation. Missing acknowledgements
@@ -515,7 +522,9 @@ operations, capture provenance and owned-process cleanup to
 The existing projector splits one native run at a delivered user's message.
 Delivered cases therefore assert two Conduit turn segments, the stored
 `steered` flag and subsequent assistant ownership, alongside exactly one SDK
-send. The extra transcript segment does not imply another native turn.
+send. Both inputs join the same conduit run and end on that run's single
+terminal event, including when it errors. The extra transcript segment does
+not imply another native turn.
 
 ## Fork process replay (conduit-test-xqsg.14)
 

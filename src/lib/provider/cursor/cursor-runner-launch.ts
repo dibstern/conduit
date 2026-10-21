@@ -40,6 +40,7 @@ export const makeCursorRunnerLaunch = (
 							callbacks.retireAfterCommand?.(inputId),
 					},
 					emit,
+					callbacks.turnStateChanged,
 				);
 			}),
 		upgradeState: () => ({ ...(resumeSessionId ? { resumeSessionId } : {}) }),

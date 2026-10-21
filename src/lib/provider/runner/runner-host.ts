@@ -182,10 +182,23 @@ export const runSessionRunner = (
 					},
 				});
 		};
+		const retireWhenQuiescent = () => {
+			if (
+				retirementInputId !== undefined &&
+				activeCommands === 0 &&
+				activeOutputs === 0 &&
+				!runner?.hasPendingSubagentFinalizers?.(sessionId) &&
+				idle?.quiescent === true
+			)
+				beginExit();
+		};
 		const launch = yield* makeLaunch({
 			sessionId,
 			runFork,
-			stateChanged: reportUpgradeState,
+			stateChanged: () => {
+				reportUpgradeState();
+				retireWhenQuiescent();
+			},
 			retireAfterCommand: (inputId) => {
 				retirementInputId = inputId;
 			},
@@ -193,6 +206,7 @@ export const runSessionRunner = (
 			turnStateChanged: (inFlight) => {
 				idle?.setTurnInFlight(inFlight);
 				reportUpgradeState();
+				if (!inFlight) retireWhenQuiescent();
 			},
 			readThread: (input) =>
 				connection && attached && !connection.closed
@@ -359,6 +373,7 @@ export const runSessionRunner = (
 											? Number(process.env["CONDUIT_TEST_RUNNER_HELLO_VERSION"])
 											: RUNNER_PROTOCOL_VERSION,
 									buildId: runnerBuildId(),
+									stampsRunIds: true,
 									runnerId,
 									driverKind,
 									sessionId,
@@ -419,6 +434,7 @@ export const runSessionRunner = (
 					} else if (message.type === "output-reply") {
 						spool.reply(message);
 						reportUpgradeState();
+						retireWhenQuiescent();
 					} else if (
 						message.type === "settled-commands" &&
 						greeted &&

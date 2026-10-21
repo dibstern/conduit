@@ -16,6 +16,7 @@ export function providerRuntimeEvent<K extends ProviderRuntimeEventType>(
 	options: {
 		readonly eventId?: string;
 		readonly providerId?: string;
+		readonly runId?: string;
 		readonly createdAt?: number | string;
 		readonly metadata?: Record<string, unknown>;
 		readonly rawSourceKind?: string;
@@ -25,6 +26,7 @@ export function providerRuntimeEvent<K extends ProviderRuntimeEventType>(
 		eventId: options.eventId ?? `evt_${type}`,
 		type,
 		providerId: options.providerId ?? "claude",
+		...(options.runId ? { runId: options.runId } : {}),
 		sessionId,
 		providerRefs: {},
 		rawSource: { kind: options.rawSourceKind ?? "test.provider-runtime" },

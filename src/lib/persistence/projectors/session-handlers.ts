@@ -190,6 +190,7 @@ const PART_BACKGROUND_RUNNING =
 function settleOpenSubagents(
 	parentSessionId: string,
 	createdAt: number,
+	runId: string | undefined,
 ): SessionStatement {
 	return {
 		sql: `WITH RECURSIVE foreground(id) AS (
@@ -198,49 +199,18 @@ function settleOpenSubagents(
 				JOIN messages m ON m.session_id = f.id
 				JOIN message_parts p ON p.message_id = m.id
 				WHERE p.type = 'tool' AND p.status IN ('started', 'running')
+				AND (f.id <> ? OR m.turn_id IN (
+					SELECT id FROM turns WHERE session_id = ? AND run_id = ?))
 				AND ${PART_CHILD} IS NOT NULL AND NOT (${PART_BACKGROUND_RUNNING}))
 			UPDATE sessions SET status = 'idle', updated_at = ?
 			WHERE status IN ('busy', 'retry') AND id <> ? AND id IN (SELECT id FROM foreground)`,
-		params: [parentSessionId, createdAt, parentSessionId],
-	};
-}
-
-// A turn's end advances the turn-end version and names the send the turn
-// answered, so a browser can tell a late end of an earlier turn from the end of
-// the one it is waiting on (conduit-test-jyr9.10). The id is NULL when the
-// ended turn has no known send.
-// Transcript turns split at each steer; messages.steered retains which inputs
-// joined a provider turn.
-function endTurn(
-	event: Pick<StoredEvent, "createdAt" | "sessionId" | "streamVersion">,
-	errorAt: number | null,
-	userMessageId: string | null,
-	messageId: string,
-): SessionStatement {
-	return {
-		sql: `WITH ended_input AS (
-			SELECT input_id, session_id, steered, rowid AS position FROM messages
-			WHERE id = COALESCE(?,
-				(SELECT COALESCE(turn_id, parent_id) FROM messages WHERE id = ?)))
-		UPDATE sessions SET updated_at = ?, last_turn_error_at = ?,
-			last_turn_end_input_id = CASE WHEN ? > COALESCE(last_turn_end_version, -1)
-				THEN (SELECT CASE WHEN ended.steered = 1 THEN
-					(SELECT starter.input_id FROM messages starter
-						WHERE starter.session_id = ended.session_id AND starter.role = 'user'
-						AND starter.steered = 0 AND starter.is_backfilled = 0
-						AND starter.rowid <= ended.position ORDER BY starter.rowid DESC LIMIT 1)
-					ELSE ended.input_id END FROM ended_input ended)
-				ELSE last_turn_end_input_id END,
-			last_turn_end_version = MAX(COALESCE(last_turn_end_version, -1), ?)
-			WHERE id = ?`,
 		params: [
-			userMessageId,
-			messageId,
-			event.createdAt,
-			errorAt,
-			event.streamVersion,
-			event.streamVersion,
-			event.sessionId,
+			parentSessionId,
+			parentSessionId,
+			parentSessionId,
+			runId ?? null,
+			createdAt,
+			parentSessionId,
 		],
 	};
 }
@@ -748,28 +718,16 @@ export const sessionHandlers = {
 			},
 		];
 	},
-	"turn.completed": (event) => [
-		wakeSession(event.sessionId, event.createdAt, "turn"),
-		endTurn(
-			event,
-			null,
-			event.data.userMessageId ?? null,
-			event.data.messageId,
-		),
-	],
+	"turn.completed": (event) =>
+		event.provider === "opencode" && event.metadata.runId
+			? []
+			: [wakeSession(event.sessionId, event.createdAt, "turn")],
 	"turn.error": (event) => [
 		wakeSession(event.sessionId, event.createdAt, "error"),
-		endTurn(
-			event,
-			event.createdAt,
-			event.data.userMessageId ?? null,
-			event.data.messageId,
-		),
-		settleOpenSubagents(event.sessionId, event.createdAt),
+		settleOpenSubagents(event.sessionId, event.createdAt, event.metadata.runId),
 	],
 	"turn.interrupted": (event) => [
-		endTurn(event, null, null, event.data.messageId),
-		settleOpenSubagents(event.sessionId, event.createdAt),
+		settleOpenSubagents(event.sessionId, event.createdAt, event.metadata.runId),
 	],
 	"permission.asked": (event) => [
 		wakeSession(event.data.sessionId, event.createdAt, "approval"),

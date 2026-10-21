@@ -101,11 +101,11 @@ function snapshot(fixture: ProcessHarness, sessionId: string, prompt: string) {
 			.prepare(`SELECT id, state FROM turns WHERE session_id = ?
 			ORDER BY requested_at, rowid`)
 			.all(sessionId) as Array<{ id: string; state: string }>;
-		// readView is private. Read its durable facts and the same busy predicate
-		// from SessionInboxLive, including the handoff that has no echoed message.
+		// Read the inbox's durable run status, including an unacknowledged send.
 		const facts = db
 			.prepare(`SELECT status,
-			EXISTS (SELECT 1 FROM pending_approvals WHERE session_id = @id AND status = 'pending') AS prompt_open,
+			EXISTS (SELECT 1 FROM provider_runs WHERE session_id = @id
+				AND status IN ('pending', 'running')) AS run_busy,
 			EXISTS (SELECT 1 FROM provider_command_outbox outbox
 				JOIN pending_inputs pending ON pending.input_id = outbox.command_id
 				WHERE outbox.session_id = @id AND outbox.effect_type = 'send_turn'
@@ -114,7 +114,7 @@ function snapshot(fixture: ProcessHarness, sessionId: string, prompt: string) {
 			FROM sessions WHERE id = @id`)
 			.get({ id: sessionId }) as {
 			status: string;
-			prompt_open: number;
+			run_busy: number;
 			in_flight: number;
 		};
 		const provider = db
@@ -142,11 +142,7 @@ function snapshot(fixture: ProcessHarness, sessionId: string, prompt: string) {
 		return {
 			outbox,
 			inbox: {
-				busy:
-					["busy", "retry"].includes(facts.status) ||
-					facts.prompt_open === 1 ||
-					["pending", "running"].includes(turns.at(-1)?.state ?? "") ||
-					facts.in_flight === 1,
+				busy: facts.run_busy === 1,
 				in_flight: facts.in_flight === 1,
 			},
 			turns,
@@ -1029,9 +1025,9 @@ describe("a send claimed before daemon SIGKILL", () => {
 			// A later command's receipt already committed; only the older send
 			// and stale session busy survived the crash. No other turn is open.
 			db.prepare(`INSERT INTO provider_command_outbox
-				(command_id, project_key, session_id, provider_id, effect_type, payload_json,
+				(command_id, project_key, session_id, provider_id, effect_type, run_id, payload_json,
 				status, attempt_count, requested_at, updated_at)
-				SELECT ?, project_key, session_id, provider_id, effect_type, payload_json, ?,
+				SELECT ?, project_key, session_id, provider_id, effect_type, run_id, payload_json, ?,
 				attempt_count, requested_at, updated_at FROM provider_command_outbox WHERE session_id = ?`).run(
 				randomUUID(),
 				status,
@@ -1140,15 +1136,12 @@ describe("a send claimed before daemon SIGKILL", () => {
 			).toEqual(["completed", "running"]),
 		);
 		await fixture.kill();
-		// A lost completion receipt from the earlier send, followed by a later
-		// send in another directory. Both are valid durable startup leftovers.
+		// The earlier run ended atomically. Only the newer send is outstanding,
+		// and its persisted directory must govern recovery after the move.
 		const movedDirectory = join(directory, "moved");
 		mkdirSync(movedDirectory);
 		const db = new Database(fixture.daemonStorePath());
 		try {
-			db.prepare(
-				"UPDATE provider_command_outbox SET status = 'running' WHERE session_id = ? AND command_id != ?",
-			).run(sessionId, nextInputId);
 			db.prepare(
 				"UPDATE provider_command_outbox SET payload_json = json_set(payload_json, '$.workspaceRoot', ?) WHERE session_id = ? AND command_id = ?",
 			).run(movedDirectory, sessionId, nextInputId);
@@ -1214,14 +1207,14 @@ describe("a send claimed before daemon SIGKILL", () => {
 			expect(snapshot(fixture, sessionId, prompt).inbox.busy).toBe(true);
 			expect(
 				snapshot(fixture, sessionId, prompt).outbox.map(({ status }) => status),
-			).toEqual(["running", "running"]);
+			).toEqual(["completed", "running"]);
 			await fixture.kill();
 			await fixture.restart({ skipBrowserProbe: true });
 			expect(
 				snapshot(fixture, sessionId, prompt).turns.map(({ state }) => state),
 			).toEqual(["completed", "running"]);
-			// The second run then finishes upstream. Recovery may settle the old
-			// receipt too, but must preserve both replies and never re-send either.
+			// The second run then finishes upstream. Preserve both replies and
+			// the earlier completed command without re-sending either input.
 			await fixture.kill();
 			writeFileSync(
 				join(fixture.configDir, "fake-opencode-history.json"),
@@ -1260,35 +1253,17 @@ describe("a send claimed before daemon SIGKILL", () => {
 		}
 	}, 90_000);
 
-	it("rejects an idle history sample when a new send arrives during recovery", async () => {
+	it("recovers the owned run before sending queued work", async () => {
 		const { fixture, sessionId, inputId, userId, created, directory, prompt } =
-			await startOpenCodeTurn(true);
+			await startOpenCodeTurn(false);
 		const finished = openCodeHistory(sessionId, userId, created, true);
-		await fixture.emitOpenCodeEvent({
-			directory,
-			payload: {
-				id: randomUUID(),
-				type: "message.updated",
-				properties: { info: finished[1]?.info },
-			},
-		});
-		await fixture.setOpenCodeStatus(directory, sessionId, { type: "idle" });
-		await vi.waitFor(
-			() =>
-				expect(snapshot(fixture, sessionId, prompt).outbox[0]?.status).toBe(
-					"completed",
-				),
-			{ timeout: 15_000 },
-		);
+		// Lose intake and terminal events while the reservation is pending and
+		// the command is running. Recovery must obtain its exact native history.
 		await fixture.kill();
-		const db = new Database(fixture.daemonStorePath());
-		try {
-			db.prepare(
-				"UPDATE provider_command_outbox SET status = 'running' WHERE session_id = ? AND command_id = ?",
-			).run(sessionId, inputId);
-		} finally {
-			db.close();
-		}
+		expect(snapshot(fixture, sessionId, prompt).outbox[0]?.status).toBe(
+			"running",
+		);
+		await fixture.setOpenCodeStatus(directory, sessionId, { type: "idle" });
 		const failures = join(
 			fixture.configDir,
 			"fake-opencode-history-failures.json",
@@ -1313,78 +1288,84 @@ describe("a send claimed before daemon SIGKILL", () => {
 		await vi.waitFor(() => expect(existsSync(held)).toBe(true), {
 			timeout: 20_000,
 		});
-		const recoveryLog = join(fixture.configDir, "daemon.log");
-		const recoveryFailures = () =>
-			existsSync(recoveryLog)
-				? readFileSync(recoveryLog, "utf8").split(
-						"OpenCode send recovery deferred",
-					).length - 1
-				: 0;
-		const previousFailures = recoveryFailures();
-		// No provider event advances historyRevisions for this handoff. Its
-		// durable request sequence must invalidate the already-sampled idle.
-		await fixture.dropOpenCodeEvents([
-			{ type: "session.status", status: "busy" },
-		]);
-		const nextPrompt = "arrived during recovery";
-		await Effect.runPromise(
-			after.rpc["input.submit"]({
-				sessionId,
-				originId: after.originId,
-				inputId: randomUUID(),
-				delivery: "queue",
-				text: nextPrompt,
-			}),
-		);
-		await vi.waitFor(
-			() =>
-				expect(
-					snapshot(fixture, sessionId, nextPrompt).providerPromptCount,
-				).toBe(1),
-			{ timeout: 15_000 },
-		);
-		const request = JSON.parse(
-			fixture
-				.opencodeRequestBodies()
-				.filter(({ path }) => path === `/session/${sessionId}/prompt_async`)
-				.at(-1)?.body ?? "{}",
-		) as { messageID?: string };
-		if (!request.messageID)
-			throw new Error("New sends must reserve their native user message ID");
-		const nextUserId = request.messageID;
+		const nextPrompt = "queued during recovery";
+		const nextInputId = randomUUID();
 		const proof: Record<string, unknown> = {
-			case: "new send during recovery",
+			case: "owned recovery before queued send",
+			outcome: "failed",
 			sessionId,
 			before: snapshot(fixture, sessionId, prompt),
 		};
 		proofs.push(proof);
-		// A timed-out sample would not exercise the durable admission fence.
-		expect(recoveryFailures()).toBe(previousFailures);
-		// The held response already contains the successful snapshot. Fail only
-		// the next pass, whose warning proves the stale attempt released its gate.
-		writeFileSync(failures, JSON.stringify({ [sessionId]: true }));
-		await fixture.dropOpenCodeEvents([
-			{ type: "session.status", status: "busy" },
-			{ type: "session.status", status: "idle" },
-		]);
-		await fixture.setOpenCodeStatus(directory, sessionId, { type: "idle" });
-		rmSync(hold);
-		await vi.waitFor(
-			() => expect(recoveryFailures()).toBeGreaterThan(previousFailures),
-			{ timeout: 15_000 },
-		);
-		writeFileSync(failures, "{}");
-		await fixture.setOpenCodeStatus(directory, sessionId, { type: "busy" });
 		try {
+			const admission = await Effect.runPromise(
+				after.rpc["input.submit"]({
+					sessionId,
+					originId: after.originId,
+					inputId: nextInputId,
+					delivery: "queue",
+					text: nextPrompt,
+				}),
+			);
+			expect(admission).toEqual({ ok: true, sessionId, handedOff: false });
+			expect(snapshot(fixture, sessionId, nextPrompt).providerPromptCount).toBe(
+				0,
+			);
 			expect(
 				snapshot(fixture, sessionId, prompt).outbox.map(({ status }) => status),
-			).toEqual(["running", "running"]);
+			).toEqual(["running"]);
+			proof["queuedWithoutHandoff"] = true;
+			rmSync(hold);
+			await vi.waitFor(
+				() => {
+					expect(
+						snapshot(fixture, sessionId, nextPrompt).providerPromptCount,
+					).toBe(1);
+					expect(
+						snapshot(fixture, sessionId, prompt).outbox.map(
+							({ status }) => status,
+						),
+					).toEqual(["completed", "running"]);
+				},
+				{ timeout: 15_000 },
+			);
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				const ordered = db
+					.prepare(`SELECT
+					(SELECT MIN(sequence) FROM events WHERE session_id = @sessionId AND type = 'session.status'
+					 AND json_extract(data, '$.status') = 'idle' AND json_extract(metadata, '$.runId') =
+					 (SELECT run_id FROM provider_command_outbox WHERE command_id = @inputId)) AS ended,
+					(SELECT MIN(sequence) FROM events WHERE session_id = @sessionId AND type = 'run.requested'
+					 AND json_extract(data, '$.inputId') = @nextInputId) AS requested`)
+					.get({ sessionId, inputId, nextInputId }) as {
+					ended: number;
+					requested: number;
+				};
+				expect(ordered.ended).toBeGreaterThan(0);
+				expect(ordered.ended).toBeLessThan(ordered.requested);
+			} finally {
+				db.close();
+			}
+			proof["recoveredBeforeQueuedSend"] = true;
+			const request = JSON.parse(
+				fixture
+					.opencodeRequestBodies()
+					.filter(({ path }) => path === `/session/${sessionId}/prompt_async`)
+					.at(-1)?.body ?? "{}",
+			) as { messageID?: string };
+			if (!request.messageID)
+				throw new Error("New sends must reserve their native user message ID");
+			const nextUserId = request.messageID;
+			expect(
+				snapshot(fixture, sessionId, prompt).outbox.map(({ status }) => status),
+			).toEqual(["completed", "running"]);
 			expect(snapshot(fixture, sessionId, prompt).inbox.busy).toBe(true);
 			await fixture.kill();
 			await fixture.restart({ skipBrowserProbe: true });
 			expect(
 				snapshot(fixture, sessionId, prompt).outbox.map(({ status }) => status),
-			).toEqual(["running", "running"]);
+			).toEqual(["completed", "running"]);
 			expect(snapshot(fixture, sessionId, nextPrompt).providerPromptCount).toBe(
 				1,
 			);
@@ -1407,6 +1388,10 @@ describe("a send claimed before daemon SIGKILL", () => {
 						"completed",
 						"completed",
 					]);
+					expect(state.turns.map(({ state }) => state)).toEqual([
+						"completed",
+						"completed",
+					]);
 					expect(state.inbox).toEqual({ busy: false, in_flight: false });
 					expect(state.providerPromptCount).toBe(1);
 					expect(
@@ -1415,7 +1400,9 @@ describe("a send claimed before daemon SIGKILL", () => {
 				},
 				{ timeout: 15_000 },
 			);
+			proof["outcome"] = "passed";
 		} finally {
+			rmSync(hold, { force: true });
 			proof["after"] = snapshot(fixture, sessionId, prompt);
 		}
 	}, 90_000);
@@ -1534,18 +1521,52 @@ describe("a send claimed before daemon SIGKILL", () => {
 	}, 60_000);
 
 	it("does not assign a delayed reserved echo to a newer input", async () => {
-		const { fixture, browser, sessionId, userId, created, directory, prompt } =
-			await startOpenCodeTurn(false);
-		// Upstream ends before its user echo reaches the daemon. The next input
-		// is handed off before that delayed echo arrives.
+		const {
+			fixture,
+			browser,
+			sessionId,
+			inputId,
+			userId,
+			created,
+			directory,
+			prompt,
+		} = await startOpenCodeTurn(false);
+		// Idle cannot complete an input which upstream has not acknowledged.
+		// A confirmed process stop settles that exact reservation; its delayed
+		// echo must still keep its owner after the next input has been sent.
+		const idleCount = () => {
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				return (
+					db
+						.prepare(
+							"SELECT COUNT(*) AS count FROM events WHERE session_id = ? AND type = 'session.status' AND json_extract(data, '$.status') = 'idle'",
+						)
+						.get(sessionId) as { count: number }
+				).count;
+			} finally {
+				db.close();
+			}
+		};
+		const beforeIdle = idleCount();
 		await fixture.setOpenCodeStatus(directory, sessionId, { type: "idle" });
+		await vi.waitFor(() => expect(idleCount()).toBeGreaterThan(beforeIdle));
+		expect(snapshot(fixture, sessionId, prompt).outbox[0]?.status).toBe(
+			"running",
+		);
+		expect(snapshot(fixture, sessionId, prompt).inbox.busy).toBe(true);
+		await browser.stopInstance(MANAGED_OPENCODE_ACCOUNT_ID);
 		await vi.waitFor(
 			() =>
 				expect(snapshot(fixture, sessionId, prompt).outbox[0]?.status).toBe(
-					"completed",
+					"failed",
 				),
 			{ timeout: 15_000 },
 		);
+		// The reservation ended before native placement. Its delayed echo below
+		// must inherit that end; stopping must not manufacture acceptance.
+		expect(snapshot(fixture, sessionId, prompt).turns).toEqual([]);
+		await browser.startInstance(MANAGED_OPENCODE_ACCOUNT_ID);
 		const nextInputId = randomUUID();
 		const nextPrompt = "send after delayed echo";
 		await Effect.runPromise(
@@ -1613,6 +1634,32 @@ describe("a send claimed before daemon SIGKILL", () => {
 								.prepare("SELECT id FROM messages WHERE input_id = ?")
 								.all(nextInputId),
 						).toEqual([{ id: nextUserId }]);
+						const reserved = db
+							.prepare(
+								"SELECT command_id, run_id FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
+							)
+							.all(sessionId) as Array<{ command_id: string; run_id: string }>;
+						expect(reserved.map(({ command_id }) => command_id)).toEqual([
+							inputId,
+							nextInputId,
+						]);
+						expect(
+							db
+								.prepare(
+									"SELECT turns.run_id, turns.state, provider_runs.status AS run_status, turns.completed_at = provider_runs.completed_at AS inherited_terminal FROM turns JOIN provider_runs ON provider_runs.id = turns.run_id WHERE turns.id = ?",
+								)
+								.get(userId),
+						).toEqual({
+							run_id: reserved[0]?.run_id,
+							state: "interrupted",
+							run_status: "interrupted",
+							inherited_terminal: 1,
+						});
+						expect(
+							db
+								.prepare("SELECT run_id, state FROM turns WHERE id = ?")
+								.get(nextUserId),
+						).toEqual({ run_id: reserved[1]?.run_id, state: "running" });
 					} finally {
 						db.close();
 					}
@@ -1632,11 +1679,12 @@ describe("a send claimed before daemon SIGKILL", () => {
 			await vi.waitFor(() => {
 				const state = snapshot(fixture, sessionId, nextPrompt);
 				expect(state.outbox.map(({ status }) => status)).toEqual([
-					"completed",
+					"failed",
 					"completed",
 				]);
 				expect(state.inbox.busy).toBe(false);
 				expect(state.providerPromptCount).toBe(1);
+				expect(state.turns).toHaveLength(2);
 			});
 		} finally {
 			proof["after"] = snapshot(fixture, sessionId, nextPrompt);

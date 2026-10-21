@@ -15,7 +15,7 @@
 		consumeScrollRequest,
 		createEmptySessionMessages,
 		currentChat,
-		draftSendIn,
+		localSendsIn,
 		getSessionPhase,
 		isLlmActive,
 		isProcessing,
@@ -258,6 +258,7 @@
 		const _len = chat.messages.length;
 		// A detail upsert can grow the final bubble without changing the count.
 		const _latest = chat.messages.at(-1);
+		const _localLen = localSends.length;
 		const _permLen = primary ? permissionsState.pendingPermissions.length : localPermissions.length;
 		const _questionLen = primary ? 0 : orphanQuestions.length;
 		const isActive = untrack(() => processing);
@@ -432,6 +433,7 @@
 					chat.messages,
 					forkMessageId,
 					forkPointTimestamp,
+					viewedSessionId ?? undefined,
 				)
 			: null,
 	);
@@ -492,9 +494,10 @@
 	// Turns render from chat.messages, which can still hold items from before the
 	// transcript reset. A cold open shows only the skeleton, never those leftovers.
 	const coldOpen = $derived(feed === "catchingUp" && !hasRows);
-	// A draft's first send shows until its new session places it, so the pane
-	// is not empty and never skeletons over it.
-	const firstSend = $derived(primary ? draftSendIn(sessionState.currentId) : null);
+	// Sends show from the click until the server places them. A draft's first
+	// send starts the pane, so it is not empty and never skeletons over it.
+	const localSends = $derived(primary ? localSendsIn(sessionState.currentId) : []);
+	const firstSend = $derived(localSends.some((send) => send.opensSession));
 	// A cold pane has not heard from the feed, so it cannot yet claim the start.
 	const startConfirmed = $derived(transcript != null && transcript.hwm !== null);
 
@@ -687,11 +690,11 @@
 	{/if}
 	{@render resumed(END_OF_TRANSCRIPT)}
 	</div>
-	{#if firstSend}
+	{#each localSends as send (send.message.uuid)}
 		<div class="msg-container">
-			<UserMessage message={firstSend} />
+			<UserMessage message={send.message} />
 		</div>
-	{/if}
+	{/each}
 	{#if emptyLiveTurn}
 		{@render turnItem(emptyLiveTurn)}
 	{/if}

@@ -4,10 +4,13 @@ import { Effect, Schema, Semaphore } from "effect";
 import type { Account } from "../../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
+import type { ProviderStateEffect } from "../../persistence/effect/provider-state-effect.js";
+import type { ReadQueryEffect } from "../../persistence/effect/read-query-effect.js";
 import { ProviderInstanceFailure } from "../errors.js";
 import type { RunnerDriverPieces } from "../runner/runner-provider-instance.js";
 import type { ModelInfo, ProviderCapabilities } from "../types.js";
 import { resolveCursorCredential } from "./cursor-credential.js";
+import { renderCursorForkDigest } from "./cursor-fork-digest.js";
 import { createCursorSdkPort } from "./cursor-sdk.js";
 import { discoverCursorSkillsEffect } from "./cursor-skill-discovery.js";
 import { cursorTurnError } from "./sdk-error.js";
@@ -231,6 +234,10 @@ export const discoverCursorEffect = (
 export const makeCursorRunnerDriver = (
 	workspaceRoot: string,
 	port?: CursorSdkPort,
+	persistence?: {
+		readonly read: ReadQueryEffect;
+		readonly state: ProviderStateEffect;
+	},
 	daemonConfigDir = DEFAULT_CONFIG_DIR,
 ): RunnerDriverPieces => ({
 	driverKind: "cursor",
@@ -453,6 +460,41 @@ export const makeCursorRunnerDriver = (
 					(variant) => variant["isDefault"] === true,
 				);
 			const params = variant?.["params"] ?? [];
+			const digest = yield* Effect.gen(function* () {
+				const supplied = input.providerState["cursor.forkDigest"];
+				if (typeof supplied === "string" || !persistence) return supplied;
+				const { read, state } = persistence;
+				const stored = (yield* state.getState(input.sessionId))[
+					"cursor.forkDigest"
+				];
+				if (stored !== undefined) return stored;
+				const session = yield* read.getSession(input.sessionId);
+				if (
+					!session?.forked_from &&
+					!(session?.side_thread === 1 && session.parent_id)
+				)
+					return undefined;
+				const inherited = (yield* read.getSessionMessagesWithParts(
+					input.sessionId,
+				)).filter((message) => message.is_inherited === 1);
+				if (inherited.length === 0) return undefined;
+				const rendered = renderCursorForkDigest(inherited);
+				// Persist before the runner hop. Rejected sends and recovered commands
+				// reuse this snapshot; forkSeedPending still owns seed settlement.
+				yield* state.saveUpdates(input.sessionId, [
+					{ key: "cursor.forkDigest", value: rendered },
+				]);
+				return rendered;
+			}).pipe(
+				Effect.mapError(
+					(cause) =>
+						new ProviderInstanceFailure({
+							providerId: "cursor",
+							operation: "fork seed",
+							cause,
+						}),
+				),
+			);
 			return {
 				input: {
 					...input,
@@ -460,6 +502,9 @@ export const makeCursorRunnerDriver = (
 					providerState: {
 						...input.providerState,
 						"cursor.modelParams": params,
+						...(typeof digest === "string"
+							? { "cursor.forkDigest": digest }
+							: {}),
 					},
 				},
 			};

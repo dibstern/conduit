@@ -773,7 +773,7 @@ describe("Scope-filtered reads over one store-wide version space", () => {
 });
 
 // Output must survive previewing, full-history reads, RPC, replay and a fork
-// whose source events are removed. Full replacements must clear old pointers;
+// whose source session is removed. Full replacements must clear old pointers;
 // question and subagent outputs must stay inline.
 describe("Event-owned tool results", () => {
 	it("stores one full result while preserving browser previews, details, replay and forks", async () => {
@@ -965,7 +965,6 @@ describe("Event-owned tool results", () => {
 					const source = yield* readForkSource(sessionId, {
 						sideThread: false,
 					});
-					const copied = yield* source.copy(forkId);
 					const write = yield* makeCommitAndSignal;
 					yield* write([
 						canonicalEvent("session.created", forkId, {
@@ -973,19 +972,20 @@ describe("Event-owned tool results", () => {
 							title: "Tool fork",
 							provider: "claude",
 							forkedFrom: sessionId,
+							inheritsHistory: true,
+							forkPointMessageId: source.boundary.messageId,
+							forkPointTimestamp: source.boundary.createdAt,
 						}),
-						...copied,
 					]);
 					expect(
 						yield* sql`SELECT DISTINCT e.session_id FROM message_parts mp
 						JOIN events e ON e.sequence = mp.result_event_seq
 						JOIN messages m ON m.id = mp.message_id
 						WHERE m.session_id = ${forkId}`,
-					).toEqual([{ session_id: forkId }]);
+					).toEqual([{ session_id: sessionId }]);
 					yield* write([
 						canonicalEvent("session.deleted", sessionId, { sessionId }),
 					]);
-					yield* sql`DELETE FROM events WHERE session_id = ${sessionId}`;
 				}),
 			);
 			await Effect.runPromise(
@@ -1093,7 +1093,8 @@ describe("Event-owned tool results", () => {
 				makeEffectSqlMigrator(
 					Object.fromEntries(
 						Object.entries(effectMigrationEntries).filter(
-							([key]) => !key.endsWith("_tool_result_event_refs"),
+							// A store from before 0065 has none of the later migrations either.
+							([key]) => key < "0065_tool_result_event_refs",
 						),
 					),
 				).pipe(Effect.provide(SqliteClient.layer({ filename: legacyFile }))),

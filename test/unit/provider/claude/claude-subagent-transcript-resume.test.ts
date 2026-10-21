@@ -85,6 +85,7 @@ function context(sink: EventSink): ClaudeSessionContext {
 		startedAt: "2026-10-16T00:00:00Z",
 		promptQueue: {
 			enqueue: () => Effect.void,
+			recall: () => Effect.succeed(false),
 			close: () => Effect.void,
 			async *[Symbol.asyncIterator]() {},
 		},
@@ -191,6 +192,28 @@ const setup = Effect.gen(function* () {
 afterEach(() => vi.restoreAllMocks());
 
 describe("Claude subagent transcripts across session contexts", () => {
+	it.effect("retains a parent launcher's run on a delayed child link", () =>
+		withStore(
+			Effect.gen(function* () {
+				const { emitted, sink } = yield* setup;
+				const ctx = context(sink);
+				ctx.currentRunId = "new-run";
+				ctx.toolRunIds = new Map([["launcher", "launcher-run"]]);
+				const link = yield* applyClaudeOwnershipDecisionEffect(undefined, ctx, {
+					kind: "open-child",
+					childSessionId: "later-child",
+					taskId: "later-task",
+					toolUseId: "launcher",
+					issuer: { kind: "parent" },
+					issuingMessageId: "launcher-message",
+				});
+				if (link) yield* link;
+				expect(
+					emitted.find((event) => event.type === "tool.running")?.runId,
+				).toBe("launcher-run");
+			}),
+		),
+	);
 	it.effect(
 		"emits nothing for persisted messages, indexed text, empty thinking and completed tools in a fresh context",
 		() =>
