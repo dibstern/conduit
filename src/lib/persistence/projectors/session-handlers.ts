@@ -501,13 +501,16 @@ export const sessionHandlers = {
 	},
 
 	"session.status": (event) => {
+		// Run completion records activity; repeated idle does not.
 		const startsNewWork =
 			event.data.status === "busy" || event.data.status === "retry";
 		return [
 			{
 				sql: startsNewWork
 					? "UPDATE sessions SET status = ?, updated_at = ?, last_turn_error_at = NULL WHERE id = ?"
-					: "UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?",
+					: event.data.status === "idle"
+						? "UPDATE sessions SET status = ?, updated_at = ? WHERE id = ? AND status <> 'idle'"
+						: "UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?",
 				params: [event.data.status, event.createdAt, event.data.sessionId],
 			},
 		];
