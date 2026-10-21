@@ -277,16 +277,6 @@
 </div>
 
 <style>
-	@media (pointer: coarse) {
-		.question-tool-option {
-			min-height: 44px;
-			flex-wrap: wrap;
-			align-content: center;
-		}
-		.question-tool-option-content {
-			flex: 1;
-		}
-	}
 	.question-tool-option-control {
 		position: relative;
 		width: 13px;
