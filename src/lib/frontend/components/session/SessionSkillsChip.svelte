@@ -194,7 +194,7 @@
 				id="session-skills-chip"
 				variant="ghost"
 				size={presentation === "popover" ? "capsule-segment" : "phone-capsule-segment"}
-				icon="book"
+				icon="sparkles"
 				iconSize={13}
 				touchTarget={presentation === "sheet" ? "always" : true}
 				class="shrink-0 tabular-nums"

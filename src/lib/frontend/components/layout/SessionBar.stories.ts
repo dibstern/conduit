@@ -1404,7 +1404,7 @@ export const DesktopWithSkills: Story = {
 		const canvas = within(canvasElement);
 		expect(
 			canvas.getByTestId("session-skills-chip").querySelector("svg"),
-		).toHaveClass("lucide-book");
+		).toHaveClass("lucide-sparkles");
 		await userEvent.click(
 			canvas.getByRole("button", { name: "2 skills used" }),
 		);
