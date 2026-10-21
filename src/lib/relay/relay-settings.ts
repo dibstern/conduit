@@ -13,6 +13,10 @@ import {
 } from "../contracts/project-file.js";
 import type { KnownProviderDriverKind } from "../contracts/provider-instance.js";
 import { TerminalKeysSetting } from "../contracts/terminal-keys.js";
+import {
+	type TitleGenerationSelection,
+	TitleGenerationSelectionSchema,
+} from "../contracts/title-generation.js";
 import type { ModelOverride } from "../domain/relay/Services/session-overrides-state.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 import {
@@ -22,6 +26,7 @@ import {
 
 export interface RelaySettings {
 	defaultModel?: string;
+	titleGeneration?: TitleGenerationSelection;
 	harnessDefaults?: Partial<
 		Record<
 			KnownProviderDriverKind,
@@ -76,10 +81,14 @@ export function loadRelaySettings(configDir?: string): RelaySettings {
 			lastSessionMode,
 			defaultGroupingMode: _retired,
 			terminalKeys,
+			titleGeneration,
 			...rest
 		} = settings;
 		const decodedTerminalKeys =
 			Schema.decodeUnknownOption(TerminalKeysSetting)(terminalKeys);
+		const decodedTitleGeneration = Schema.decodeUnknownOption(
+			TitleGenerationSelectionSchema,
+		)(titleGeneration);
 		return {
 			...rest,
 			...(defaultPermissionMode !== undefined &&
@@ -93,6 +102,9 @@ export function loadRelaySettings(configDir?: string): RelaySettings {
 			...(decodedTerminalKeys._tag === "Some" && {
 				terminalKeys: decodedTerminalKeys.value,
 			}),
+			...(decodedTitleGeneration._tag === "Some" && {
+				titleGeneration: decodedTitleGeneration.value,
+			}),
 		};
 	} catch {
 		return {};
@@ -105,7 +117,9 @@ export function loadRelaySettings(configDir?: string): RelaySettings {
  * Creates the directory if it doesn't exist. Uses atomic write (tmp + rename).
  */
 export function saveRelaySettings(
-	settings: RelaySettings,
+	settings: Omit<RelaySettings, "titleGeneration"> & {
+		titleGeneration?: TitleGenerationSelection | null;
+	},
 	configDir?: string,
 ): void {
 	const dir = resolveDir(configDir);
@@ -117,6 +131,10 @@ export function saveRelaySettings(
 
 	if (settings.defaultModel !== undefined) {
 		merged.defaultModel = settings.defaultModel;
+	}
+	if (settings.titleGeneration !== undefined) {
+		if (settings.titleGeneration === null) delete merged.titleGeneration;
+		else merged.titleGeneration = settings.titleGeneration;
 	}
 	if (settings.harnessDefaults) {
 		merged.harnessDefaults = {

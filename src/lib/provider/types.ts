@@ -351,7 +351,7 @@ export interface ProviderNativeSession {
 }
 
 /**
- * ProviderInstance -- the 7-method contract for provider execution.
+ * ProviderInstance -- the contract for provider execution.
  *
  * Implementations wrap a provider's REST/SDK surface and translate provider
  * events into provider runtime events via the EventSink. Instances do not own
@@ -374,6 +374,19 @@ export interface ProviderInstance {
 		account?: Account,
 		options?: { readonly refresh?: boolean },
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure>;
+
+	/**
+	 * Generate ephemeral text in an empty config-directory scratch folder.
+	 * No tools, hooks, MCP servers or project instructions may reach this call.
+	 * Interruption must stop the query and release its temporary resources.
+	 */
+	generateTextEffect(input: {
+		readonly account: Account;
+		readonly model: ModelSelection;
+		readonly effort: string;
+		readonly instructions: string;
+		readonly prompt: string;
+	}): Effect.Effect<string, ProviderInstanceFailure>;
 
 	/** Send a user turn to the provider and stream response events via EventSink */
 	sendTurnEffect(
