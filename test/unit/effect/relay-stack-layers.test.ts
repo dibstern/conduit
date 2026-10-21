@@ -22,7 +22,10 @@ import { SessionRegistryStateTag } from "../../../src/lib/domain/relay/Services/
 import { PollerStateTag } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
-import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import {
+	ProviderRegistry,
+	ProviderRegistryLive,
+} from "../../../src/lib/provider/provider-registry.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,
@@ -48,6 +51,7 @@ const dependencies = Layer.mergeAll(
 	Layer.succeed(OrchestrationEngineTag)(
 		new OrchestrationEngine({ registry: new ProviderRegistry() }),
 	),
+	ProviderRegistryLive(),
 	makePersistenceEffectLayer(":memory:", "test-project"),
 );
 const relayStateTestLayer = RelayStateLive.pipe(

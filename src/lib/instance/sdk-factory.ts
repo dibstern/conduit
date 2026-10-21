@@ -128,10 +128,19 @@ export function createSdkClient(options: SdkFactoryOptions): SdkFactoryResult {
 							undefined,
 						]
 					: [requested, requestedInit];
+				// Synchronous generation can outlive the REST deadline. Retain its
+				// caller signal and never retry a prompt that may already be running.
+				const synchronousPrompt =
+					input instanceof Request &&
+					input.method === "POST" &&
+					/\/session\/[^/]+\/message$/.test(new URL(input.url).pathname);
 				if (input instanceof Request && isEventStream(input)) {
 					return streamFetch(input, init);
 				}
-				const response = await authFetch(input, init);
+				const response = await (synchronousPrompt ? streamFetch : authFetch)(
+					input,
+					init,
+				);
 				// v2's HTML interceptor discards the response. Preserve HTTP errors
 				// and malformed successes before it can lose their status/body.
 				if (response.headers.get("Content-Type") === "text/html") {

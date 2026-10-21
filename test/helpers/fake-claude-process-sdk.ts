@@ -27,7 +27,7 @@ import {
 import { Option, Schema } from "effect";
 import { CategorySetSchema } from "../../src/lib/contracts/category-set.js";
 import { CategoryTuningHunkSchema } from "../../src/lib/contracts/category-tuning.js";
-import type { ClaudeTitleQueryFactory } from "../../src/lib/domain/relay/Services/claude-title-generator.js";
+import type { ClaudeOneShotQueryFactory } from "../../src/lib/provider/claude/claude-provider-runtime.js";
 import type { ClaudeSubagentSdk } from "../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type {
 	Options,
@@ -2730,7 +2730,9 @@ export const claudeSdk: NonNullable<ProjectRelayConfig["claudeSdk"]> = {
 			return { sessionId };
 		},
 	},
-	titleQuery: async function* (params: Parameters<ClaudeTitleQueryFactory>[0]) {
+	titleQuery: async function* (
+		params: Parameters<ClaudeOneShotQueryFactory>[0],
+	) {
 		const file = process.env["CONDUIT_TEST_CLAUDE_TITLES_FILE"];
 		if (file)
 			appendFileSync(

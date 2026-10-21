@@ -1,14 +1,22 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Context, Deferred, Effect, Exit, Layer, Scope } from "effect";
 import { SqlClient } from "effect/sql";
+import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
+import {
+	AccountIdSchema,
+	type OpenCodeAccount,
+} from "../../../src/lib/contracts/account.js";
 import { isPlaceholderTitle } from "../../../src/lib/contracts/session-title.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import type { ClaudeTitleQueryFactory } from "../../../src/lib/domain/relay/Services/claude-title-generator.js";
+import {
+	ProjectSettingsLive,
+	publishProjectSetting,
+} from "../../../src/lib/domain/relay/Services/project-settings.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -24,16 +32,31 @@ import {
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import type { ProviderStateEffectTag } from "../../../src/lib/persistence/effect/provider-state-effect.js";
 import type { ReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { StoredEvent } from "../../../src/lib/persistence/events.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import type { ClaudeOneShotQueryFactory } from "../../../src/lib/provider/claude/claude-provider-runtime.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import { makeCursorProviderRuntime } from "../../../src/lib/provider/cursor/cursor-provider-runtime.js";
+import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
+import {
+	ProviderRegistry,
+	ProviderRegistryTag,
+} from "../../../src/lib/provider/provider-registry.js";
+import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
+import {
+	makeClaudeTextGenerationLayer,
+	replayClaudeText,
+} from "../../helpers/claude-text-generation.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 } from "../../helpers/mock-factories.js";
+import { replayOpenCodeText } from "../../helpers/opencode-text-generation.js";
 
 function makeWebSocketHandler() {
 	const handler: WebSocketHandlerShape = {
@@ -47,55 +70,39 @@ function makeWebSocketHandler() {
 	return { handler };
 }
 
-async function* makeQuery(
-	messages: readonly unknown[],
-): AsyncIterable<unknown> {
-	for (const message of messages) {
-		yield message;
-	}
-}
-
-const assistantMessage = (text: string) => ({
-	type: "assistant",
-	message: {
-		content: [{ type: "text", text }],
-	},
-});
-
-const streamTextDelta = (text: string) => ({
-	type: "stream_event",
-	event: {
-		type: "content_block_delta",
-		delta: { type: "text_delta", text },
-	},
-});
-
-const resultMessage = (text: string) => ({
-	type: "result",
-	result: text,
-});
-
 function makeTestLayer(input: {
-	readonly queryFactory: ClaudeTitleQueryFactory;
+	readonly queryFactory: ClaudeOneShotQueryFactory;
 	readonly now?: () => Date;
 	readonly wsHandler?: WebSocketHandlerShape;
 	readonly config?: ReturnType<typeof makeMockConfig>;
 	readonly logger?: ReturnType<typeof makeMockLogger>;
+	readonly accounts?: ReturnType<typeof makeMockAccountDirectory>;
+	readonly adapterConfigDir?: string;
+	readonly providerLayer?: Layer.Layer<
+		ProviderRegistryTag,
+		never,
+		ReadQueryEffectTag | ProviderStateEffectTag
+	>;
 }) {
 	const ws = input.wsHandler ?? makeWebSocketHandler().handler;
 	const deps = Layer.mergeAll(
-		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+		Layer.succeed(AccountDirectory)(
+			input.accounts ?? makeMockAccountDirectory(),
+		),
+		input.providerLayer ??
+			makeClaudeTextGenerationLayer(input.queryFactory, input.adapterConfigDir),
 		Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 		Layer.succeed(LoggerTag)(input.logger ?? makeMockLogger()),
 		Layer.succeed(WebSocketHandlerTag)(ws),
 		Layer.succeed(ConfigTag)(
 			input.config ?? makeMockConfig({ projectDir: process.cwd() }),
 		),
-		makePersistenceEffectLayer(":memory:", "test-project"),
+		ProjectSettingsLive,
+	).pipe(
+		Layer.provideMerge(makePersistenceEffectLayer(":memory:", "test-project")),
 	);
 	return Layer.provideMerge(
 		makeSessionTitleServiceLive({
-			queryFactory: input.queryFactory,
 			...(input.now ? { now: input.now } : {}),
 		}),
 		deps,
@@ -103,7 +110,7 @@ function makeTestLayer(input: {
 }
 
 function makePersistenceTestLayer(input: {
-	readonly queryFactory: ClaudeTitleQueryFactory;
+	readonly queryFactory: ClaudeOneShotQueryFactory;
 	readonly now?: () => Date;
 	readonly wsHandler?: WebSocketHandlerShape;
 	readonly persistenceDbPath: string;
@@ -113,6 +120,7 @@ function makePersistenceTestLayer(input: {
 	const ws = input.wsHandler ?? makeWebSocketHandler().handler;
 	const deps = Layer.mergeAll(
 		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+		makeClaudeTextGenerationLayer(input.queryFactory),
 		Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 		Layer.succeed(LoggerTag)(input.logger ?? makeMockLogger()),
 		Layer.succeed(WebSocketHandlerTag)(ws),
@@ -123,7 +131,6 @@ function makePersistenceTestLayer(input: {
 	);
 	return Layer.provideMerge(
 		makeSessionTitleServiceLive({
-			queryFactory: input.queryFactory,
 			...(input.now ? { now: input.now } : {}),
 		}),
 		deps,
@@ -210,7 +217,7 @@ const waitForSessionProjectorToReachLatestRename = (sessionId = "session-1") =>
 	});
 
 const makeManualRenameRaceLayer = (input: {
-	readonly queryFactory: ClaudeTitleQueryFactory;
+	readonly queryFactory: ClaudeOneShotQueryFactory;
 	readonly now?: () => Date;
 	readonly wsHandler?: WebSocketHandlerShape;
 	readonly logger?: ReturnType<typeof makeMockLogger>;
@@ -265,6 +272,7 @@ const makeManualRenameRaceLayer = (input: {
 		const ws = input.wsHandler ?? makeWebSocketHandler().handler;
 		const deps = Layer.mergeAll(
 			Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+			makeClaudeTextGenerationLayer(input.queryFactory),
 			Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 			Layer.succeed(LoggerTag)(input.logger ?? makeMockLogger()),
 			Layer.succeed(WebSocketHandlerTag)(ws),
@@ -278,7 +286,6 @@ const makeManualRenameRaceLayer = (input: {
 		return {
 			layer: Layer.provideMerge(
 				makeSessionTitleServiceLive({
-					queryFactory: input.queryFactory,
 					...(input.now ? { now: input.now } : {}),
 				}),
 				deps,
@@ -340,21 +347,417 @@ describe("session title helpers", () => {
 });
 
 describe("SessionTitleService", () => {
+	for (const scenario of [
+		{
+			name: "uses the built-in default when the saved account was removed",
+			accountPresent: false,
+			catalogAvailable: false,
+			problem: "Title generation account does not exist",
+		},
+		{
+			name: "uses the built-in default when the saved model left its catalog",
+			accountPresent: true,
+			catalogAvailable: true,
+			problem:
+				"ModelNotInCatalog: model claude/sonnet is not in the claude catalog",
+		},
+		{
+			name: "uses the saved account, model and effort while its catalog is unverified",
+			accountPresent: true,
+			catalogAvailable: false,
+			problem: undefined,
+		},
+	]) {
+		it.effect(scenario.name, () => {
+			const configDir = mkdtempSync(join(tmpdir(), "conduit-title-stale-"));
+			const queryFactory = vi.fn(
+				(_params: Parameters<ClaudeOneShotQueryFactory>[0]) =>
+					replayClaudeText(),
+			);
+			const log = makeMockLogger();
+			const layer = makeTestLayer({
+				queryFactory,
+				logger: log,
+				config: makeMockConfig({ configDir }),
+				accounts: makeMockAccountDirectory([
+					{
+						driver: "claude",
+						id: AccountIdSchema.make("claude-personal"),
+						name: "Personal",
+						folder: configuredClaudeConfigDir("/title-personal-login"),
+						usageEligible: true,
+					},
+					...(scenario.accountPresent
+						? [
+								{
+									driver: "claude" as const,
+									id: AccountIdSchema.make("claude-work"),
+									name: "Work",
+									folder: configuredClaudeConfigDir("/title-work-login"),
+									usageEligible: true,
+								},
+							]
+						: []),
+				]),
+			});
+			return Effect.gen(function* () {
+				yield* Effect.sync(() =>
+					saveRelaySettings(
+						{
+							titleGeneration: {
+								account: { _tag: "Id", id: "claude-work" },
+								providerId: "claude",
+								modelId: "sonnet",
+								effort: "high",
+							},
+						},
+						configDir,
+					),
+				);
+				if (scenario.catalogAvailable) {
+					yield* publishProjectSetting({
+						_tag: "providerModels",
+						accountId: "claude-work",
+						providers: [
+							{
+								id: "claude",
+								name: "Claude",
+								configured: true,
+								models: [{ id: "opus", name: "Opus", provider: "claude" }],
+							},
+						],
+					});
+				}
+				yield* seedSessionRow();
+				const service = yield* SessionTitleServiceTag;
+				yield* service.titleFromMessage({
+					sessionId: "session-1",
+					message: "Fix auth",
+				});
+				yield* waitForSessionProjectorToReachLatestRename();
+				expect(yield* getSessionTitle()).toBe("pong");
+				expect(queryFactory).toHaveBeenCalledTimes(1);
+				if (scenario.problem) {
+					expect(queryFactory.mock.calls[0]?.[0].options).toMatchObject({
+						env: { CLAUDE_CONFIG_DIR: "/title-personal-login" },
+						model: "opus",
+						thinking: { type: "disabled" },
+					});
+					expect(log.warn).toHaveBeenCalledTimes(1);
+					expect(log.warn).toHaveBeenCalledWith(
+						expect.stringContaining(
+							`SESSION_TITLE_GENERATION_FALLBACK sessionId=session-1 harness=claude account=claude-work model=claude/sonnet reason=${scenario.problem}`,
+						),
+					);
+				} else {
+					expect(queryFactory.mock.calls[0]?.[0].options).toMatchObject({
+						env: { CLAUDE_CONFIG_DIR: "/title-work-login" },
+						model: "sonnet",
+						effort: "high",
+					});
+					expect(log.warn).not.toHaveBeenCalled();
+				}
+			}).pipe(Effect.provide(layer), Effect.ensuring(removeTempDir(configDir)));
+		});
+	}
+
+	it.effect(
+		"generates with the saved OpenCode account without importing its scratch session",
+		() => {
+			const configDir = mkdtempSync("/tmp/conduit-opencode-title-service-");
+			const replay = replayOpenCodeText();
+			const account = {
+				driver: "opencode",
+				id: AccountIdSchema.make("opencode-titles"),
+				name: "OpenCode titles",
+				usageEligible: false,
+			} as const;
+			const accounts = makeMockAccountDirectory([account]);
+			const route = vi.fn((selected: OpenCodeAccount, directory?: string) => {
+				expect(selected).toEqual(account);
+				expect(directory).toContain(join(configDir, "text-generation"));
+				return Effect.succeed(replay.client(directory ?? ""));
+			});
+			const provider = new OpenCodeProviderInstance({
+				client: replay.client("/project"),
+				configDir,
+				clientForAccount: route,
+			});
+			saveRelaySettings(
+				{
+					titleGeneration: {
+						account: { _tag: "Id", id: account.id },
+						providerId: replay.model.providerId,
+						modelId: replay.model.modelId,
+						effort: "",
+					},
+				},
+				configDir,
+			);
+			const queryFactory = vi.fn(() => replayClaudeText());
+			return Effect.gen(function* () {
+				const service = yield* SessionTitleServiceTag;
+				yield* seedSessionRow("opencode-title");
+				yield* service.titleFromMessage({
+					sessionId: "opencode-title",
+					message: "Fix login redirect loop",
+				});
+				yield* waitForSessionProjectorToReachLatestRename("opencode-title");
+				expect(yield* getSessionTitle("opencode-title")).toBe(
+					sanitizeGeneratedTitle(replay.reply),
+				);
+				expect(yield* getRenameEvents("opencode-title")).toHaveLength(1);
+				const sql = yield* SqlClient.SqlClient;
+				expect(yield* sql`SELECT id FROM sessions`).toEqual([
+					{ id: "opencode-title" },
+				]);
+				expect(
+					yield* sql`SELECT sequence FROM events WHERE session_id = ${replay.sessionId}`,
+				).toEqual([]);
+				expect(queryFactory).not.toHaveBeenCalled();
+				expect(route).toHaveBeenCalledOnce();
+				expect(readdirSync(join(configDir, "text-generation"))).toEqual([]);
+			}).pipe(
+				Effect.provide(
+					makeTestLayer({
+						queryFactory,
+						accounts,
+						config: makeMockConfig({ configDir }),
+						providerLayer: Layer.succeed(ProviderRegistryTag)(
+							new ProviderRegistry([provider]),
+						),
+					}),
+				),
+				Effect.ensuring(removeTempDir(configDir)),
+			);
+		},
+	);
+
+	it.effect(
+		"generates the title with the selected Cursor account by replaying captured SDK traffic",
+		() => {
+			const configDir = mkdtempSync(
+				join(tmpdir(), "conduit-cursor-title-service-"),
+			);
+			const accounts = makeMockAccountDirectory([
+				{
+					driver: "cursor",
+					id: AccountIdSchema.make("cursor-titles"),
+					name: "Cursor titles",
+					usageEligible: false,
+					env: { CURSOR_API_KEY: "[REDACTED:environment]" },
+				},
+			]);
+			vi.stubEnv(
+				"CONDUIT_CURSOR_SDK_TRACE",
+				join(
+					import.meta.dirname,
+					"../../fixtures/cursor-sdk-traces/title-generation.jsonl",
+				),
+			);
+			saveRelaySettings(
+				{
+					titleGeneration: {
+						account: { _tag: "Id", id: "cursor-titles" },
+						providerId: "cursor",
+						modelId: "composer-2.5",
+						effort: "",
+					},
+				},
+				configDir,
+			);
+			const queryFactory = vi.fn(() => replayClaudeText());
+			const layer = makeTestLayer({
+				queryFactory,
+				config: makeMockConfig({ configDir }),
+				accounts,
+				providerLayer: Layer.effect(
+					ProviderRegistryTag,
+					makeCursorProviderRuntime({
+						workspaceRoot: process.cwd(),
+						daemonConfigDir: configDir,
+						accounts: accounts.snapshot,
+					}).pipe(Effect.map((provider) => new ProviderRegistry([provider]))),
+				),
+			});
+			return Effect.gen(function* () {
+				const service = yield* SessionTitleServiceTag;
+				yield* seedSessionRow("cursor-title");
+				yield* service.titleFromMessage({
+					sessionId: "cursor-title",
+					message: "Fix login redirect loop",
+				});
+				yield* waitForSessionProjectorToReachLatestRename("cursor-title");
+				expect(yield* getSessionTitle("cursor-title")).toBe(
+					"Fix login redirect loop",
+				);
+				expect(yield* getRenameEvents("cursor-title")).toHaveLength(1);
+				expect(queryFactory).not.toHaveBeenCalled();
+				expect(readdirSync(join(configDir, "text-generation"))).toEqual([]);
+			}).pipe(
+				Effect.provide(layer),
+				Effect.ensuring(
+					Effect.sync(() => {
+						vi.unstubAllEnvs();
+						rmSync(configDir, { recursive: true, force: true });
+					}),
+				),
+			);
+		},
+	);
+
+	it.effect(
+		"reads account, model and effort again for the next title without restarting",
+		() => {
+			const configDir = mkdtempSync(join(tmpdir(), "conduit-title-setting-"));
+			const queryFactory = vi.fn(
+				(_params: Parameters<ClaudeOneShotQueryFactory>[0]) =>
+					replayClaudeText(),
+			);
+			const layer = makeTestLayer({
+				queryFactory,
+				config: makeMockConfig({ configDir }),
+				accounts: makeMockAccountDirectory([
+					{
+						driver: "claude",
+						id: AccountIdSchema.make("claude-personal"),
+						name: "Personal",
+						folder: configuredClaudeConfigDir("/title-personal-login"),
+						usageEligible: true,
+					},
+					{
+						driver: "claude",
+						id: AccountIdSchema.make("claude-work"),
+						name: "Work",
+						folder: configuredClaudeConfigDir("/title-work-login"),
+						usageEligible: true,
+					},
+				]),
+			});
+			return Effect.gen(function* () {
+				const service = yield* SessionTitleServiceTag;
+				yield* seedSessionRow("before-setting");
+				yield* service.titleFromMessage({
+					sessionId: "before-setting",
+					message: "Fix auth",
+				});
+				yield* waitForSessionProjectorToReachLatestRename("before-setting");
+				expect(yield* getSessionTitle("before-setting")).toBe("pong");
+				expect(queryFactory.mock.calls[0]?.[0].options).toMatchObject({
+					env: { CLAUDE_CONFIG_DIR: "/title-personal-login" },
+					model: "opus",
+					thinking: { type: "disabled" },
+				});
+
+				yield* Effect.sync(() =>
+					saveRelaySettings(
+						{
+							titleGeneration: {
+								account: { _tag: "Id", id: "claude-work" },
+								providerId: "claude",
+								modelId: "sonnet",
+								effort: "high",
+							},
+						},
+						configDir,
+					),
+				);
+				yield* seedSessionRow("after-setting");
+				yield* service.titleFromMessage({
+					sessionId: "after-setting",
+					message: "Fix auth",
+				});
+				yield* waitForSessionProjectorToReachLatestRename("after-setting");
+				expect(yield* getSessionTitle("after-setting")).toBe("pong");
+				expect(queryFactory.mock.calls[1]?.[0].options).toMatchObject({
+					env: { CLAUDE_CONFIG_DIR: "/title-work-login" },
+					model: "sonnet",
+					effort: "high",
+				});
+
+				yield* Effect.sync(() =>
+					saveRelaySettings({ titleGeneration: null }, configDir),
+				);
+				yield* seedSessionRow("after-reset");
+				yield* service.titleFromMessage({
+					sessionId: "after-reset",
+					message: "Fix auth",
+				});
+				yield* waitForSessionProjectorToReachLatestRename("after-reset");
+				expect(yield* getSessionTitle("after-reset")).toBe("pong");
+				expect(queryFactory.mock.calls[2]?.[0].options).toMatchObject({
+					env: { CLAUDE_CONFIG_DIR: "/title-personal-login" },
+					model: "opus",
+					thinking: { type: "disabled" },
+				});
+				expect(queryFactory).toHaveBeenCalledTimes(3);
+			}).pipe(Effect.provide(layer), Effect.ensuring(removeTempDir(configDir)));
+		},
+	);
+
+	it.effect(
+		"uses the directory's default account and removes the scratch directory",
+		() => {
+			let scratchDir: string | undefined;
+			const queryFactory = vi.fn(
+				(params: Parameters<ClaudeOneShotQueryFactory>[0]) => {
+					scratchDir = params.options?.cwd;
+					expect(params.options?.env?.["CLAUDE_CONFIG_DIR"]).toBe(
+						join(process.cwd(), ".claude-work"),
+					);
+					expect(params.options?.env?.["TITLE_ACCOUNT_MARKER"]).toBe("work");
+					return replayClaudeText();
+				},
+			);
+			const layer = makeTestLayer({
+				queryFactory,
+				accounts: makeMockAccountDirectory([
+					{
+						driver: "claude",
+						id: AccountIdSchema.make("claude-work"),
+						name: "Work",
+						folder: configuredClaudeConfigDir(".claude-work"),
+						env: { TITLE_ACCOUNT_MARKER: "work" },
+						usageEligible: true,
+					},
+				]),
+				// Deliberately not a daemon config path. The job must use the directory.
+				config: makeMockConfig({ configDir: "/not-a-daemon-config" }),
+			});
+			return Effect.gen(function* () {
+				yield* seedSessionRow();
+				const service = yield* SessionTitleServiceTag;
+				yield* service.titleFromMessage({
+					sessionId: "session-1",
+					message: "Fix auth",
+				});
+				yield* waitForSessionProjectorToReachLatestRename();
+				expect(yield* getSessionTitle()).toBe("pong");
+				expect(scratchDir).toBeDefined();
+				expect(existsSync(scratchDir ?? "")).toBe(false);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
 	it.effect("passes constrained Opus query options to the SDK query", () => {
+		const configDir = mkdtempSync(join(tmpdir(), "conduit-title-isolation-"));
 		return Effect.gen(function* () {
 			const queryCalled = yield* Deferred.make<void>();
 			const projectDir = join(tmpdir(), "conduit-title-project");
-			let captured: Parameters<ClaudeTitleQueryFactory>[0] | undefined;
+			let captured: Parameters<ClaudeOneShotQueryFactory>[0] | undefined;
 			const queryFactory = vi.fn(
-				(params: Parameters<ClaudeTitleQueryFactory>[0]) => {
+				(params: Parameters<ClaudeOneShotQueryFactory>[0]) => {
 					captured = params;
+					expect(params.options?.cwd?.startsWith(`${configDir}/`)).toBe(true);
+					expect(readdirSync(params.options?.cwd ?? "")).toEqual([]);
 					Effect.runSync(Deferred.succeed(queryCalled, undefined));
-					return makeQuery([resultMessage("Fix OAuth Callback Loop")]);
+					return replayClaudeText();
 				},
 			);
 			const layer = makeTestLayer({
 				queryFactory,
 				config: makeMockConfig({ projectDir }),
+				adapterConfigDir: configDir,
 			});
 			yield* Effect.gen(function* () {
 				const service = yield* SessionTitleServiceTag;
@@ -386,7 +789,7 @@ describe("SessionTitleService", () => {
 				expect(options).toBeDefined();
 				if (!options) throw new Error("query options were not provided");
 
-				expect(options.cwd).toBe(projectDir);
+				expect(options.cwd).not.toBe(projectDir);
 				expect(options.model).toBe("opus");
 				expect(options.persistSession).toBe(false);
 				expect(options.maxTurns).toBe(1);
@@ -399,6 +802,9 @@ describe("SessionTitleService", () => {
 					outputStyle: "default",
 					claudeMdExcludes: ["**"],
 				});
+				expect(options.settingSources).toEqual(["user"]);
+				expect(options.mcpServers).toEqual({});
+				expect(options.strictMcpConfig).toBe(true);
 				expect(options.abortController).toBeInstanceOf(AbortController);
 				expect(options.env).toMatchObject({
 					CLAUDE_AGENT_SDK_CLIENT_APP: "conduit",
@@ -406,7 +812,7 @@ describe("SessionTitleService", () => {
 				});
 				expect(options.thinking).toEqual({ type: "disabled" });
 			}).pipe(Effect.provide(layer));
-		});
+		}).pipe(Effect.ensuring(removeTempDir(configDir)));
 	});
 
 	it.effect("truncates overlong Opus output and applies it", () => {
@@ -414,12 +820,7 @@ describe("SessionTitleService", () => {
 		return Effect.gen(function* () {
 			const ws = makeWebSocketHandler();
 			const layer = makePersistenceTestLayer({
-				queryFactory: () =>
-					makeQuery([
-						assistantMessage(
-							"Investigate OAuth Callback Loop In Production Immediately",
-						),
-					]),
+				queryFactory: () => replayClaudeText("enter-worktree-turn"),
 				wsHandler: ws.handler,
 				persistenceDbPath: filename,
 			});
@@ -433,7 +834,7 @@ describe("SessionTitleService", () => {
 				yield* waitForSessionProjectorToReachLatestRename();
 
 				expect(yield* getSessionTitle()).toBe(
-					"Investigate OAuth Callback Loop In Production",
+					"I created the worktree `contract` on",
 				);
 			}).pipe(Effect.provide(layer));
 		}).pipe(Effect.ensuring(removeTempDir(dir)));
@@ -443,8 +844,7 @@ describe("SessionTitleService", () => {
 		const { dir, filename } = makeTempDbPath("conduit-title-opencode-");
 		return Effect.gen(function* () {
 			const layer = makePersistenceTestLayer({
-				queryFactory: () =>
-					makeQuery([assistantMessage("Fix Header Selector")]),
+				queryFactory: () => replayClaudeText(),
 				persistenceDbPath: filename,
 			});
 			yield* Effect.gen(function* () {
@@ -459,35 +859,34 @@ describe("SessionTitleService", () => {
 				});
 				yield* waitForSessionProjectorToReachLatestRename();
 
-				expect(yield* getSessionTitle()).toBe("Fix Header Selector");
+				expect(yield* getSessionTitle()).toBe("pong");
 			}).pipe(Effect.provide(layer));
 		}).pipe(Effect.ensuring(removeTempDir(dir)));
 	});
 
-	it.effect("prefers result text over partial stream text", () => {
-		const { dir, filename } = makeTempDbPath("conduit-title-result-wins-");
-		return Effect.gen(function* () {
-			const layer = makePersistenceTestLayer({
-				queryFactory: () =>
-					makeQuery([
-						streamTextDelta("Partial Stream Title"),
-						resultMessage("Final Result Title"),
-					]),
-				persistenceDbPath: filename,
-			});
-			yield* Effect.gen(function* () {
-				yield* seedSessionRow();
-				const service = yield* SessionTitleServiceTag;
-				yield* service.titleFromMessage({
-					sessionId: "session-1",
-					message: "Fix OAuth callback loop.",
+	it.effect(
+		"collects captured partials, assistant text and result without duplication",
+		() => {
+			const { dir, filename } = makeTempDbPath("conduit-title-result-wins-");
+			return Effect.gen(function* () {
+				const layer = makePersistenceTestLayer({
+					queryFactory: () => replayClaudeText(),
+					persistenceDbPath: filename,
 				});
-				yield* waitForSessionProjectorToReachLatestRename();
+				yield* Effect.gen(function* () {
+					yield* seedSessionRow();
+					const service = yield* SessionTitleServiceTag;
+					yield* service.titleFromMessage({
+						sessionId: "session-1",
+						message: "Fix OAuth callback loop.",
+					});
+					yield* waitForSessionProjectorToReachLatestRename();
 
-				expect(yield* getSessionTitle()).toBe("Final Result Title");
-			}).pipe(Effect.provide(layer));
-		}).pipe(Effect.ensuring(removeTempDir(dir)));
-	});
+					expect(yield* getSessionTitle()).toBe("pong");
+				}).pipe(Effect.provide(layer));
+			}).pipe(Effect.ensuring(removeTempDir(dir)));
+		},
+	);
 
 	it.effect("falls back when the Opus query fails", () => {
 		const { dir, filename } = makeTempDbPath("conduit-title-fallback-");
@@ -496,9 +895,7 @@ describe("SessionTitleService", () => {
 			const log = makeMockLogger();
 			const fallbackNow = new Date(2026, 4, 17, 10, 11, 0);
 			const layer = makePersistenceTestLayer({
-				queryFactory: () => {
-					throw new Error("SDK unavailable");
-				},
+				queryFactory: () => replayClaudeText("subagent-task-error-turn"),
 				wsHandler: ws.handler,
 				logger: log,
 				now: () => fallbackNow,
@@ -517,11 +914,62 @@ describe("SessionTitleService", () => {
 				expect(yield* getSessionTitle()).toBe(fallbackTitle);
 				// A background-task failure (fork 3.2): logged, never broadcast.
 				expect(log.warn).toHaveBeenCalledWith(
-					"SESSION_TITLE_GENERATION_FAILED sessionId=session-1 reason=SDK unavailable",
+					expect.stringContaining(
+						"SESSION_TITLE_GENERATION_FAILED sessionId=session-1 harness=claude account=claude model=claude/opus reason=",
+					),
+				);
+				expect(log.warn).toHaveBeenCalledWith(
+					expect.stringContaining("API Error: 529 overloaded"),
 				);
 			}).pipe(Effect.provide(layer));
 		}).pipe(Effect.ensuring(removeTempDir(dir)));
 	});
+
+	it.effect(
+		"times out after 30 seconds, aborts the query and applies the timestamp title",
+		() => {
+			return Effect.gen(function* () {
+				const started = yield* Deferred.make<void>();
+				let scratchDir: string | undefined;
+				let signal: AbortSignal | undefined;
+				const log = makeMockLogger();
+				const layer = makeTestLayer({
+					queryFactory: (params) =>
+						(async function* () {
+							signal = params.options?.abortController?.signal;
+							scratchDir = params.options?.cwd;
+							Effect.runSync(Deferred.succeed(started, undefined));
+							await new Promise<void>((resolve) => {
+								signal?.addEventListener("abort", () => resolve(), {
+									once: true,
+								});
+							});
+							yield* replayClaudeText();
+						})(),
+					logger: log,
+					now: () => new Date(2026, 4, 17, 10, 11),
+				});
+				yield* Effect.gen(function* () {
+					yield* seedSessionRow();
+					const service = yield* SessionTitleServiceTag;
+					yield* service.titleFromMessage({
+						sessionId: "session-1",
+						message: "Fix auth",
+					});
+					yield* Deferred.await(started);
+					yield* TestClock.adjust("30 seconds");
+					yield* waitForSessionProjectorToReachLatestRename();
+					expect(yield* getSessionTitle()).toBe("Session 2026-05-17 10:11");
+					expect(signal?.aborted).toBe(true);
+					expect(scratchDir).toBeDefined();
+					expect(existsSync(scratchDir ?? "")).toBe(false);
+					expect(log.warn).toHaveBeenCalledWith(
+						expect.stringContaining("Timed out waiting for title generation"),
+					);
+				}).pipe(Effect.provide(layer));
+			});
+		},
+	);
 
 	it.effect("deduplicates in-flight title jobs for the same session", () => {
 		const { dir, filename } = makeTempDbPath("conduit-title-dedupe-");
@@ -535,7 +983,7 @@ describe("SessionTitleService", () => {
 				(async function* () {
 					Effect.runSync(Deferred.succeed(queryStarted, undefined));
 					await queryGate;
-					yield assistantMessage("Fix OAuth Callback Loop");
+					yield* replayClaudeText();
 				})(),
 			);
 			const layer = makePersistenceTestLayer({
@@ -559,7 +1007,7 @@ describe("SessionTitleService", () => {
 				releaseQuery?.();
 				yield* waitForSessionProjectorToReachLatestRename();
 				expect(queryFactory).toHaveBeenCalledTimes(1);
-				expect(yield* getSessionTitle()).toBe("Fix OAuth Callback Loop");
+				expect(yield* getSessionTitle()).toBe("pong");
 			}).pipe(Effect.provide(layer));
 		}).pipe(Effect.ensuring(removeTempDir(dir)));
 	});
@@ -572,7 +1020,7 @@ describe("SessionTitleService", () => {
 				const queryFinalized = yield* Deferred.make<void>();
 				let abortSignal: AbortSignal | undefined;
 				const queryFactory = vi.fn(
-					(params: Parameters<ClaudeTitleQueryFactory>[0]) => {
+					(params: Parameters<ClaudeOneShotQueryFactory>[0]) => {
 						abortSignal = params.options?.abortController?.signal;
 						return (async function* () {
 							try {
@@ -580,6 +1028,7 @@ describe("SessionTitleService", () => {
 								await new Promise<void>((resolve) => {
 									abortSignal?.addEventListener("abort", () => resolve(), {});
 								});
+								yield* replayClaudeText();
 							} finally {
 								Effect.runSync(Deferred.succeed(queryFinalized, undefined));
 							}
@@ -624,8 +1073,7 @@ describe("SessionTitleService", () => {
 					const projectionRunner = yield* ProjectionRunnerEffectTag;
 					yield* projectionRunner.markRecovered();
 					const race = yield* makeManualRenameRaceLayer({
-						queryFactory: () =>
-							makeQuery([assistantMessage("Generated OAuth Callback Title")]),
+						queryFactory: () => replayClaudeText(),
 						wsHandler: ws.handler,
 					});
 					yield* Effect.gen(function* () {
@@ -648,7 +1096,7 @@ describe("SessionTitleService", () => {
 						).toEqual([
 							{ title: "Manual OAuth Title", source: "relay" },
 							{
-								title: "Generated OAuth Callback Title",
+								title: "pong",
 								source: "auto-title",
 							},
 						]);

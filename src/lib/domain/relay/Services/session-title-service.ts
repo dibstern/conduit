@@ -1,38 +1,28 @@
-import { Context, Effect, HashSet, Layer, Match, Ref, Schema } from "effect";
+import { Context, Effect, HashSet, Layer, Ref } from "effect";
 import { SqlClient } from "effect/sql";
+import type { Account } from "../../../contracts/account.js";
 import {
 	AUTO_TITLE_SOURCE,
 	isPlaceholderTitle,
-	type SessionTitleModel,
 } from "../../../contracts/session-title.js";
-import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
-import {
-	loadDaemonConfigResult,
-	resolveClaudeLaunchConfig,
-} from "../../../daemon/config-persistence.js";
+import type { TitleGenerationSelection } from "../../../contracts/title-generation.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
-import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
+import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
+import { resolveTitleGeneration } from "../../../provider/title-generation.js";
+import { catalogFromProviderList } from "../../../provider/turn-settings.js";
+import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
-import {
-	type ClaudeTitleQueryFactory,
-	makeClaudeTitleGenerator,
-} from "./claude-title-generator.js";
+import { ProjectSettingsTag } from "./project-settings.js";
 import { ConfigTag, LoggerTag } from "./services.js";
 import { applySessionCommand } from "./session-command.js";
-import {
-	generationFailureReason,
-	SessionTitleGenerationFailure,
-	type TitleGenerator,
-} from "./title-generator.js";
 
-function resolveSessionTitleModel(): SessionTitleModel {
-	return { harness: "claude", model: "opus" };
-}
+const TITLE_INSTRUCTIONS =
+	"You write concise sidebar titles for coding-assistant sessions.";
 
 export function sanitizeGeneratedTitle(raw: string): string | undefined {
 	const cleaned = raw
@@ -77,7 +67,6 @@ export class SessionTitleServiceTag extends Context.Service<
 >()("SessionTitleService") {}
 
 interface SessionTitleServiceLiveOptions {
-	readonly queryFactory?: ClaudeTitleQueryFactory;
 	readonly now?: () => Date;
 }
 
@@ -110,71 +99,54 @@ export const makeSessionTitleServiceLive = (
 	| ProjectionRunnerEffectTag
 	| SqlClient.SqlClient
 	| AccountDirectory
+	| ProviderRegistryTag
 > =>
 	Layer.effect(
 		SessionTitleServiceTag,
 		Effect.gen(function* () {
 			const accounts = yield* AccountDirectory;
+			const providers = yield* ProviderRegistryTag;
 			const scope = yield* Effect.scope;
 			const log = yield* LoggerTag;
 			const api = yield* OpenCodeAPITag;
 			const instances = yield* Effect.serviceOption(OpenCodeInstancesTag);
 			const config = yield* ConfigTag;
+			const projectSettings = yield* Effect.serviceOption(ProjectSettingsTag);
 			const readQuery = yield* ReadQueryEffectTag;
 			const eventStore = yield* EventStoreEffectTag;
 			const projectionRunner = yield* ProjectionRunnerEffectTag;
 			const sql = yield* SqlClient.SqlClient;
 			const inFlight = yield* Ref.make(HashSet.empty<string>());
 			const now = options.now ?? (() => new Date());
-			const primaryFolder = config.projectDir;
 
-			const generateTitle = (sessionId: string, message: string) =>
+			const generateTitle = (
+				account: Account,
+				pick: TitleGenerationSelection,
+				message: string,
+			) =>
 				Effect.gen(function* () {
-					const session = yield* readQuery.getSession(sessionId);
-					const workspace =
-						session?.workspace == null
-							? null
-							: yield* Schema.decodeUnknownEffect(
-									Schema.fromJsonString(SessionWorkspaceSchema),
-								)(session.workspace);
-					const cwd = effectiveWorkingDirectory(primaryFolder, workspace);
-					const daemonConfig = yield* Effect.suspend(() =>
-						Effect.fromResult(loadDaemonConfigResult(config.configDir)),
-					).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)));
-					const generator: TitleGenerator = Match.value(
-						resolveSessionTitleModel(),
-					).pipe(
-						Match.discriminator("harness")("claude", ({ model }) =>
-							makeClaudeTitleGenerator({
-								model,
-								...resolveClaudeLaunchConfig(daemonConfig),
-								log,
-								...(options.queryFactory === undefined
-									? {}
-									: { queryFactory: options.queryFactory }),
-							}),
-						),
-						Match.exhaustive,
-					);
-					const rawTitle = yield* generator({
+					const provider = yield* providers.getInstanceEffect(account.driver);
+					const rawTitle = yield* provider.generateTextEffect({
+						account,
+						model: { providerId: pick.providerId, modelId: pick.modelId },
+						effort: pick.effort,
+						instructions: TITLE_INSTRUCTIONS,
 						prompt: buildTitlePrompt(message),
-						cwd,
 					});
 
 					const title = sanitizeGeneratedTitle(rawTitle);
 					if (!title) {
-						return yield* new SessionTitleGenerationFailure({
-							reason: "Generator returned a placeholder title",
-						});
+						return yield* Effect.fail(
+							new Error("Generator returned a placeholder title"),
+						);
 					}
 					return title;
 				}).pipe(
-					Effect.mapError(
-						(cause) =>
-							new SessionTitleGenerationFailure({
-								reason: generationFailureReason(cause),
-							}),
-					),
+					Effect.timeoutOrElse({
+						duration: "30 seconds",
+						orElse: () =>
+							Effect.fail(new Error("Timed out waiting for title generation")),
+					}),
 				);
 
 			const applyTitleIfStillDefault = (sessionId: string, title: string) =>
@@ -226,9 +198,43 @@ export const makeSessionTitleServiceLive = (
 				readonly message: string;
 			}) =>
 				Effect.gen(function* () {
-					const titleResult = yield* Effect.result(
-						generateTitle(input.sessionId, input.message),
+					const state = yield* accounts.snapshot;
+					const facts =
+						projectSettings._tag === "Some"
+							? yield* Ref.get(projectSettings.value.live)
+							: undefined;
+					const catalogFor = (account: Account) => {
+						const catalog = facts?.[`providerModels:${account.id}`];
+						return catalog
+							? catalogFromProviderList(catalog.providers)
+							: undefined;
+					};
+					const resolved = resolveTitleGeneration(
+						loadRelaySettings(config.configDir).titleGeneration,
+						state,
+						catalogFor,
 					);
+					if (resolved.status === "missing" || resolved.status === "invalid") {
+						const ref = resolved.pick.account;
+						const accountId = ref._tag === "Id" ? ref.id : ref.driver;
+						const harness =
+							state.accounts.find((account) => account.id === accountId)
+								?.driver ?? resolved.pick.providerId;
+						log.warn(
+							`SESSION_TITLE_GENERATION_FALLBACK sessionId=${input.sessionId} harness=${harness} account=${accountId} model=${resolved.pick.providerId}/${resolved.pick.modelId} reason=${resolved.problem}`,
+						);
+					}
+					const pick =
+						resolved.status === "ok" || resolved.status === "unverified"
+							? resolved.pick
+							: resolveTitleGeneration(undefined, state, catalogFor).pick;
+					const account = yield* Effect.result(accounts.resolve(pick.account));
+					const titleResult =
+						account._tag === "Failure"
+							? account
+							: yield* Effect.result(
+									generateTitle(account.success, pick, input.message),
+								);
 					if (titleResult._tag === "Success") {
 						yield* applyTitleIfStillDefault(
 							input.sessionId,
@@ -237,7 +243,7 @@ export const makeSessionTitleServiceLive = (
 						return;
 					}
 
-					const reason = titleResult.failure.reason;
+					const reason = titleResult.failure.message;
 					const fallbackTitle = formatTitleFallback(now());
 					const applied = yield* applyTitleIfStillDefault(
 						input.sessionId,
@@ -247,7 +253,7 @@ export const makeSessionTitleServiceLive = (
 					// user-visible outcome, so the failure itself is log only.
 					if (applied) {
 						log.warn(
-							`SESSION_TITLE_GENERATION_FAILED sessionId=${input.sessionId} reason=${reason}`,
+							`SESSION_TITLE_GENERATION_FAILED sessionId=${input.sessionId} harness=${account._tag === "Success" ? account.success.driver : "claude"} account=${account._tag === "Success" ? account.success.id : "default"} model=${pick.providerId}/${pick.modelId} reason=${reason}`,
 						);
 					}
 				});

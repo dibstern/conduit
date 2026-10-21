@@ -1,5 +1,15 @@
 # Cursor SDK traces
 
+`title-generation.jsonl` is a real SDK 1.0.37 capture for conduit-test-9mbo.7.
+It uses the machine's environment credential, Composer 2.5 with `fast:false`,
+an empty temporary workspace and store, `settingSources:[]`, `tools:[]`, and
+no custom tools. Its temporary HOME has a `workspace_readonly` sandbox policy;
+`CURSOR_DATA_DIR` and `CURSOR_SANDBOX_POLICY_DIR` also point into the temporary
+root. One short prompt returns "Fix login redirect loop". Close, agent deletion
+and store disposal are captured, and the temporary root was removed afterward.
+The existing tee redacts credentials and home paths. Replay tests cover the
+adapter and `SessionTitleService.titleFromMessage` without real credentials.
+
 These 41 JSONL captures came from the Cursor SDK 1.0.37 local-mode spike in
 `cursor-spike/fixtures`. They contain 8,000 rows,
 including headers. The source findings and artifact index describe each capture.
