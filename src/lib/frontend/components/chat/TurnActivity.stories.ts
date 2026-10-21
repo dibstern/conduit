@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 import { Utf8Bytes } from "../../../contracts/tool-wire.js";
 import { turnFixtureMessages } from "../../stories/turn-fixtures.js";
 import type { ChatMessage, ToolMessage } from "../../types.js";
@@ -114,12 +114,16 @@ export const SummaryRow: Story = {
 		turn: live,
 		segment: liveSegment,
 		final: true,
-		onsummarize: () => undefined,
+		onsummarize: fn(),
 	},
-	play: async ({ canvasElement }) => {
-		await expect(
-			within(canvasElement).getByRole("button", { name: "✦ Summarize" }),
-		).toBeVisible();
+	play: async ({ canvasElement, args }) => {
+		const button = within(canvasElement).getByRole("button", {
+			name: "✦ Summary",
+		});
+		await expect(button).toBeVisible();
+		await userEvent.click(button);
+		await expect(args["onsummarize"]).toHaveBeenCalledOnce();
+		button.blur();
 	},
 };
 
