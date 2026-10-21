@@ -271,10 +271,20 @@ describe("startup runner quarantine through browser RPC", () => {
 	}, 120_000);
 
 	it.each([
-		true,
-		false,
-	])("retires an orphaned legacy permission, healthy runner=%s", async (withRunner) => {
-		const evidence: Record<string, unknown> = { withRunner, passed: false };
+		{ owner: "legacy", withRunner: true },
+		{ owner: "legacy", withRunner: false },
+		{ owner: "current", withRunner: true },
+		{ owner: "replaced", withRunner: true },
+		{ owner: "gone", withRunner: false },
+	])("cleans only orphaned permissions, owner=$owner, healthy runner=$withRunner", async ({
+		owner,
+		withRunner,
+	}) => {
+		const evidence: Record<string, unknown> = {
+			owner,
+			withRunner,
+			passed: false,
+		};
 		let harness: ProcessHarness | undefined;
 		try {
 			harness = await ProcessHarness.start({
@@ -286,6 +296,17 @@ describe("startup runner quarantine through browser RPC", () => {
 				"Orphaned legacy permission",
 			);
 			if (withRunner) await browser.send(sessionId, "healthy-permission-owner");
+			const current = discoverRunners(
+				harness.projectDir,
+				harness.configDir,
+			).find((entry) => entry.sessionId === sessionId);
+			const processId =
+				owner === "legacy"
+					? null
+					: owner === "current"
+						? current?.runnerId
+						: `${owner}-process`;
+			if (processId === undefined) throw new Error("Missing permission owner");
 			await harness.kill();
 			const id = randomUUID();
 			const db = new Database(harness.daemonStorePath());
@@ -309,8 +330,8 @@ describe("startup runner quarantine through browser RPC", () => {
 						at,
 					);
 					db.prepare(
-						"INSERT INTO pending_approvals (id, session_id, type, status, tool_name, input, details, version, created_at, provider_process_id, provider_request_id) VALUES (?, ?, 'permission', 'pending', 'Bash', ?, '{}', ?, ?, NULL, NULL)",
-					).run(id, sessionId, JSON.stringify(input), version, at);
+						"INSERT INTO pending_approvals (id, session_id, type, status, tool_name, input, details, version, created_at, provider_process_id, provider_request_id) VALUES (?, ?, 'permission', 'pending', 'Bash', ?, '{}', ?, ?, ?, NULL)",
+					).run(id, sessionId, JSON.stringify(input), version, at, processId);
 				})();
 			} finally {
 				db.close();
@@ -319,10 +340,26 @@ describe("startup runner quarantine through browser RPC", () => {
 			await harness.restart();
 			const restored = await harness.connect(sessionId);
 			evidence["afterRecovery"] = ownership(harness, sessionId);
+			if (owner === "current") {
+				expect(ownership(harness, sessionId).approvals).toEqual([
+					{ id, status: "pending", provider_process_id: processId },
+				]);
+				// Once that specific owner is gone, the same ask becomes orphaned.
+				await harness.kill();
+				if (!current) throw new Error("Missing permission owner");
+				process.kill(current.pid, "SIGKILL");
+				await vi.waitFor(() =>
+					expect(() => process.kill(current.pid, 0)).toThrow(),
+				);
+				await harness.restart();
+			}
 			expect(ownership(harness, sessionId).approvals).toEqual([
-				{ id, status: "resolved", provider_process_id: null },
+				{ id, status: "resolved", provider_process_id: processId },
 			]);
-			const response = await restored.send(sessionId, "after-orphan-cleanup");
+			const response = await (owner === "current"
+				? await harness.connect(sessionId)
+				: restored
+			).send(sessionId, "after-orphan-cleanup");
 			evidence["send"] = response;
 			evidence["afterSend"] = ownership(harness, sessionId);
 			expect(response.chunks.join("")).toBe(
@@ -337,7 +374,7 @@ describe("startup runner quarantine through browser RPC", () => {
 				expect(harness.remainingRunnerPids()).toEqual([]);
 			}
 			writeFileSync(
-				`/tmp/conduit-phis-orphan-${withRunner}-regression.json`,
+				`/tmp/conduit-phis-orphan-${owner}-${withRunner}-regression.json`,
 				JSON.stringify(evidence, null, 2),
 			);
 		}
