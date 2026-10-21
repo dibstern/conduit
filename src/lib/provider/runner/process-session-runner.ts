@@ -816,7 +816,7 @@ export const makeProcessSessionRunner = (
 						? operation
 						: entry.outputs.withPermits(1)(operation);
 				},
-				onHello: (hello, connection) =>
+				onHello: (hello, connection, replay) =>
 					Effect.gen(function* () {
 						entry.verified = true;
 						entry.pid = hello.pid;
@@ -867,6 +867,7 @@ export const makeProcessSessionRunner = (
 						entry.buildId = hello.buildId;
 						entry.stopsTasks = hello.stopsTasks === true;
 						entry.upgrade.state = hello.upgradeState;
+						const restoreAccounts: Effect.Effect<void, SessionFailure>[] = [];
 						for (const binding of entry.candidate
 							? []
 							: (hello.bindings ?? [])) {
@@ -876,6 +877,7 @@ export const makeProcessSessionRunner = (
 							let pending = false;
 							let accountId: string | undefined;
 							let activeTurn = false;
+							let turnInputId: string | undefined;
 							if (sql) {
 								const rows = yield* sql<{
 									provider_id: string;
@@ -885,9 +887,10 @@ export const makeProcessSessionRunner = (
 									attempt_count: number;
 									assistant_message_id: string | null;
 									turn_state: string | null;
+									turn_input_id: string | null;
 								}>`SELECT outbox.provider_id, COALESCE(json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS input_id,
 									COALESCE(reservation.joined_into, reservation.id) AS run_id,
-									outbox.status, outbox.attempt_count, turns.assistant_message_id, turns.state AS turn_state
+									outbox.status, outbox.attempt_count, turns.assistant_message_id, turns.state AS turn_state, turns.user_message_id AS turn_input_id
 									FROM provider_command_outbox outbox
 									LEFT JOIN provider_runs reservation ON reservation.session_id = outbox.session_id
 										AND reservation.id = outbox.run_id
@@ -902,6 +905,7 @@ export const makeProcessSessionRunner = (
 								const row = rows[0];
 								if (row) {
 									accountId = row.provider_id;
+									turnInputId = row.turn_input_id ?? undefined;
 									activeTurn =
 										row.turn_state === "pending" ||
 										row.turn_state === "running";
@@ -937,42 +941,59 @@ export const makeProcessSessionRunner = (
 								binding.released === false ||
 								(binding.released === undefined && activeTurn)
 							) {
-								const retained = yield* Effect.result(
-									retainAccount(
-										binding.sinkId,
-										accountId ??
-											hello.upgradeState?.snapshot?.input.account?.id,
-										sessionId,
-										inputId,
-										connection,
-									),
-								);
-								if (retained._tag === "Failure") {
-									if (retained.failure.code !== "account_unavailable")
-										return yield* Effect.fail(retained.failure);
-									yield* failRunnerTurn(
-										(output) => emit(output, sessionId),
-										binding.sinkId,
-										{
-											sessionId,
-											...(inputId ? { inputId } : {}),
-											runId,
-											messageId,
-										},
-										retained.failure,
-										driver.driverKind,
-									);
-									releaseSink(binding.sinkId);
-									runFork(
-										connection
-											.commandEffect(randomUUID(), {
-												type: "interrupt",
+								restoreAccounts.push(
+									Effect.gen(function* () {
+										yield* ensureAttached();
+										const turn = sinks.get(binding.sinkId);
+										if (!turn) return;
+										if (sql && turnInputId) {
+											const rows = yield* sql<{
+												state: string;
+											}>`SELECT state FROM turns
+											WHERE session_id = ${sessionId} AND user_message_id = ${turnInputId}`.pipe(
+												Effect.mapError((cause) =>
+													runnerFailure("restore runner history", cause),
+												),
+											);
+											if (
+												rows[0]?.state !== "pending" &&
+												rows[0]?.state !== "running"
+											)
+												return;
+										}
+										const retained = yield* Effect.result(
+											retainAccount(
+												binding.sinkId,
+												accountId ??
+													hello.upgradeState?.snapshot?.input.account?.id,
 												sessionId,
-												...(inputId ? { turnIds: [inputId] } : {}),
-											})
-											.pipe(Effect.ignore, Effect.asVoid),
-									);
-								}
+												inputId,
+												connection,
+											),
+										);
+										if (retained._tag === "Failure") {
+											if (retained.failure.code !== "account_unavailable")
+												return yield* Effect.fail(retained.failure);
+											yield* failRunnerTurn(
+												(output) => emit(output, sessionId),
+												binding.sinkId,
+												turn,
+												retained.failure,
+												driver.driverKind,
+											);
+											releaseSink(binding.sinkId);
+											runFork(
+												connection
+													.commandEffect(randomUUID(), {
+														type: "interrupt",
+														sessionId,
+														...(inputId ? { turnIds: [inputId] } : {}),
+													})
+													.pipe(Effect.ignore, Effect.asVoid),
+											);
+										}
+									}),
+								);
 							}
 						}
 						for (const pending of entry.candidate
@@ -982,6 +1003,11 @@ export const makeProcessSessionRunner = (
 							if (pending.sequence <= (hello.acknowledgedSequence ?? 0))
 								yield* emit(pending.output, sessionId);
 						}
+						// A previous-build runner may have completed while the store still
+						// says running. Commit its backlog before checking account demand.
+						if (driver.withAccountScope && restoreAccounts.length > 0)
+							yield* replay ?? Effect.void;
+						yield* Effect.all(restoreAccounts, { discard: true });
 						yield* ensureAttached();
 						if (process.env["NODE_ENV"] === "test" && process.connected)
 							process.send?.({

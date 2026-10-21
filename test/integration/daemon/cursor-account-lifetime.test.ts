@@ -1,6 +1,8 @@
 // Failure modes: intake releases demand before native completion, invalidation
 // cancels another account, retained native turns lose demand on restart, and
 // released historical bindings resurrect demand or reopen removed accounts.
+// Offline terminal output must win over missing-account settlement, including
+// older hellos, a partial replay failure, and a runner lost before completion.
 import { createHash } from "node:crypto";
 import {
 	existsSync,
@@ -55,8 +57,210 @@ afterEach(async ({ task }) => {
 		"test-results/82tn9-5/lifetime.json",
 		JSON.stringify({ scenarios }, null, 2),
 	);
+	writeFileSync(
+		"/tmp/82tn9-5-round4-lifetime.json",
+		JSON.stringify({ scenarios }, null, 2),
+	);
 	harness = undefined;
 });
+
+it.each([
+	{ legacy: true, outcome: "completed" },
+	{ legacy: false, outcome: "completed" },
+	{ legacy: true, outcome: "error" },
+	{ legacy: true, outcome: "dead" },
+	{ legacy: true, outcome: "replay-failure" },
+] as const)("replays retained output before missing-account settlement (%j)", async ({
+	legacy,
+	outcome,
+}) => {
+	evidence = { legacy, outcome };
+	const dist = process.env["CONDUIT_TEST_DIST"] ?? "dist";
+	harness = ProcessHarness.create({
+		dist: legacy ? (process.env["CONDUIT_TEST_PREVIOUS_DIST"] ?? dist) : dist,
+		runnerLifecycle: { idleTimeoutMs: null },
+	});
+	const fixture = harness;
+	const trace = join(fixture.root, "cursor.jsonl");
+	const capture = join(fixture.root, "capture.jsonl");
+	const gate = join(fixture.root, "stream.gate");
+	const replay = readFileSync(
+		resolve("test/fixtures/cursor-sdk-traces/auth-login.jsonl"),
+		"utf8",
+	);
+	writeFileSync(
+		trace,
+		outcome === "error"
+			? replay
+					.replaceAll('"status":"FINISHED"', '"status":"ERROR"')
+					.replaceAll(
+						'"status":"finished"',
+						'"status":"error","error":{"message":"offline provider failure","code":"offline_failure"}',
+					)
+			: replay,
+	);
+	writeFileSync(gate, "hold");
+	const serviceEnvironment = {
+		CURSOR_API_KEY: "",
+		CONDUIT_CURSOR_SDK_TRACE: trace,
+		CONDUIT_CURSOR_SDK_CAPTURE: capture,
+		CONDUIT_TEST_CURSOR_STREAM_GATE: gate,
+		CONDUIT_TEST_RUNNER_HELLO_WITHOUT_BINDING_RELEASE_STATE: legacy ? "1" : "",
+	};
+	await fixture.restart({ startupTimeoutMs: 90_000, serviceEnvironment });
+	const { addedInstanceId: accountId } = await fixture.requestRpc({
+		_tag: "AddInstance",
+		name: "Offline owner",
+		driver: "cursor",
+		env: { CURSOR_API_KEY: "[REDACTED:offline]" },
+	});
+	if (!accountId) throw new Error("No account allocated");
+	const browser = await fixture.connect();
+	const sessionId = await browser.createSession(
+		"Offline",
+		accountId,
+		"cursor",
+		{
+			modelId: "composer-2.5",
+			contextWindow: "",
+			permissionMode: "full",
+		},
+	);
+	void browser.send(sessionId, "Say hello", 90_000).catch(() => {});
+	const db = new Database(fixture.daemonStorePath());
+	try {
+		const turn = db.prepare<[string], { state: string }>(
+			"SELECT state FROM turns WHERE session_id = ?",
+		);
+		const terminals = db.prepare<[string], { type: string; data: string }>(
+			"SELECT type, data FROM events WHERE session_id = ? AND type IN ('turn.completed', 'turn.error', 'turn.interrupted') ORDER BY sequence",
+		);
+		await vi.waitFor(() => expect(turn.get(sessionId)?.state).toBe("running"), {
+			timeout: 30_000,
+		});
+		await vi.waitFor(() =>
+			expect(
+				captureRows(capture).some(({ kind }) => kind === "run.handle"),
+			).toBe(true),
+		);
+		const [runnerPid] = fixture.remainingRunnerPids();
+		expect(runnerPid).toBeDefined();
+		await fixture.terminate();
+		if (outcome === "dead") {
+			if (!runnerPid) throw new Error("No runner allocated");
+			process.kill(runnerPid, "SIGKILL");
+			await vi.waitFor(() => expect(fixture.remainingRunnerPids()).toEqual([]));
+		} else {
+			rmSync(gate);
+			await vi.waitFor(() =>
+				expect(
+					captureRows(capture).some(({ kind }) => kind === "store.disposed"),
+				).toBe(true),
+			);
+			const runner = fixture.marks.find(
+				(mark) =>
+					mark.kind === "runner-started" && mark.sessionId === sessionId,
+			);
+			if (runner?.kind !== "runner-started")
+				throw new Error("No verified runner");
+			expect(readFileSync(`${runner.socketPath}.spool`, "utf8")).toContain(
+				`"type":"turn.${outcome === "error" ? "error" : "completed"}"`,
+			);
+		}
+		expect(turn.get(sessionId)?.state).toBe("running");
+		const configPath = join(fixture.configDir, "daemon.json");
+		const config: {
+			instances: { id: string }[];
+			deletedAccounts?: { id: string; driver: string }[];
+		} = JSON.parse(readFileSync(configPath, "utf8"));
+		writeFileSync(
+			configPath,
+			JSON.stringify({
+				...config,
+				instances: config.instances.filter(({ id }) => id !== accountId),
+				deletedAccounts: [
+					...(config.deletedAccounts ?? []),
+					{ id: accountId, driver: "cursor" },
+				],
+			}),
+		);
+		if (outcome === "replay-failure") {
+			const eventCount = db.prepare<[string], { count: number }>(
+				"SELECT count(*) AS count FROM events WHERE session_id = ?",
+			);
+			const before = eventCount.get(sessionId)?.count ?? 0;
+			db.exec(`CREATE TRIGGER block_offline_completion BEFORE INSERT ON events
+				WHEN NEW.type = 'turn.completed' BEGIN SELECT RAISE(FAIL, 'replay blocked'); END`);
+			const restarting = fixture.restart({
+				dist,
+				startupTimeoutMs: 30_000,
+				serviceEnvironment,
+			});
+			void restarting.catch(() => {});
+			try {
+				await vi.waitFor(
+					() =>
+						expect(eventCount.get(sessionId)?.count).toBeGreaterThan(before),
+					{ timeout: 15_000 },
+				);
+				await setTimeout(300);
+				evidence = {
+					...evidence,
+					partialReplayTerminals: terminals.all(sessionId),
+				};
+				expect(terminals.all(sessionId)).toEqual([]);
+				expect(turn.get(sessionId)?.state).toBe("running");
+			} finally {
+				db.exec("DROP TRIGGER block_offline_completion");
+				await restarting;
+			}
+		} else {
+			await fixture.restart({
+				dist,
+				startupTimeoutMs: 30_000,
+				serviceEnvironment,
+			});
+		}
+		const expected =
+			outcome === "error" || outcome === "dead" ? "error" : "completed";
+		await vi.waitFor(() => expect(turn.get(sessionId)?.state).toBe(expected), {
+			timeout: 15_000,
+		});
+		const terminalEvents = terminals.all(sessionId);
+		const outbox = db
+			.prepare<[string], { status: string; error_code: string | null }>(
+				"SELECT status, error_code FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn'",
+			)
+			.get(sessionId);
+		evidence = {
+			...evidence,
+			turn: turn.get(sessionId),
+			terminalEvents,
+			outbox,
+		};
+		expect(terminalEvents).toHaveLength(1);
+		expect(outbox?.status).toBe(
+			expected === "completed" ? "completed" : "failed",
+		);
+		if (outcome === "dead") {
+			expect(outbox?.error_code).toBe("account_unavailable");
+		} else if (outcome === "error") {
+			expect(terminalEvents[0]?.data).toContain("offline provider failure");
+			expect(outbox?.error_code).not.toBe("account_unavailable");
+		} else {
+			expect(outbox?.error_code).toBeNull();
+		}
+		await fixture.terminate();
+		await fixture.restart({
+			dist,
+			startupTimeoutMs: 30_000,
+			serviceEnvironment,
+		});
+		expect(terminals.all(sessionId)).toEqual(terminalEvents);
+	} finally {
+		db.close();
+	}
+}, 120_000);
 
 it.each([
 	{ legacy: false, removeBeforeRestart: false },

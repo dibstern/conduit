@@ -143,6 +143,7 @@ export const settleUnclaimedRunnerCommands = <E>(
 		sinkId: string,
 		turn: {
 			sessionId: string;
+			accountId: string;
 			runId?: string;
 			userMessageId?: string;
 			messageId: string;
@@ -172,6 +173,7 @@ export const settleUnclaimedRunnerCommands = <E>(
 				),
 				{
 					sessionId: row.session_id,
+					accountId: row.provider_id,
 					...(row.run_id ? { runId: row.run_id } : {}),
 					...(row.user_message_id
 						? { userMessageId: row.user_message_id }

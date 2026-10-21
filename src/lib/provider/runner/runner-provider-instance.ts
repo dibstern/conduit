@@ -215,8 +215,8 @@ export class RunnerProviderInstance implements ProviderInstance {
 			claimed,
 			this.providerId,
 			(id) =>
-				Result.getOrUndefined(resolveAccount(accounts, { _tag: "Id", id }))
-					?.driver,
+				accounts.accounts.find((account) => account.id === id)?.driver ??
+				accounts.deleted.find((account) => account.id === id)?.driver,
 			(sinkId, turn, failure) =>
 				Effect.gen({ self: this }, function* () {
 					let persistenceError: ProviderRuntimeIngestionError | undefined;
@@ -249,7 +249,14 @@ export class RunnerProviderInstance implements ProviderInstance {
 							),
 						sinkId,
 						turn,
-						failure,
+						accounts.accounts.some((account) => account.id === turn.accountId)
+							? failure
+							: {
+									operation: "recover stopped runner",
+									message: `${this.providerId} account "${turn.accountId}" is unavailable`,
+									code: "account_unavailable",
+									retryable: false,
+								},
 						this.providerId,
 					);
 					// failRunnerTurn logs errors; database failures still need a retry.
