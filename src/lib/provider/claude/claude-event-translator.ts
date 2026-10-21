@@ -1513,6 +1513,7 @@ export class ClaudeEventTranslator {
 							? (rawInput as Record<string, unknown>)
 							: {};
 					const blockId = block.id ?? randomUUID();
+					this.rememberToolOwner(ctx, blockId, this.currentAssistantMessageId);
 					const tool: ToolInFlight = {
 						itemId: blockId,
 						toolName,
@@ -1704,6 +1705,11 @@ export class ClaudeEventTranslator {
 
 			const content = message.message.content;
 			if (!Array.isArray(content)) return;
+			for (const block of content) {
+				if (block.type === "tool_use") {
+					this.rememberToolOwner(ctx, block.id, messageId);
+				}
+			}
 
 			const readableBlocks = content.filter(
 				(block) =>
@@ -2097,6 +2103,23 @@ export class ClaudeEventTranslator {
 		});
 	}
 
+	private rememberToolOwner(
+		ctx: ClaudeSessionContext,
+		partId: string,
+		messageId: string,
+	): void {
+		// Task metadata can arrive after this run ends. Capture the launch, even
+		// when its first canonical tool.started will be emitted in a later run.
+		if (messageId && !ctx.toolMessageIds?.has(partId))
+			(ctx.toolMessageIds ??= new Map()).set(partId, messageId);
+		const runId =
+			ctx.messageRunIds?.get(messageId) ??
+			ctx.currentRunId ??
+			ctx.acceptedOutputOwner?.runId;
+		if (runId && !ctx.toolRunIds?.has(partId))
+			(ctx.toolRunIds ??= new Map()).set(partId, runId);
+	}
+
 	private push(
 		ctx: ClaudeSessionContext,
 		event: ProviderRuntimeEvent,
@@ -2116,12 +2139,17 @@ export class ClaudeEventTranslator {
 			(ctx.messageRunIds ??= new Map()).set(messageId, outputRunId);
 		}
 		if (
-			event.type === "tool.started" &&
-			typeof partId === "string" &&
-			outputRunId &&
-			!ctx.toolRunIds?.has(partId)
+			(event.type === "tool.started" ||
+				event.type === "tool.running" ||
+				event.type === "tool.completed") &&
+			typeof partId === "string"
 		) {
-			(ctx.toolRunIds ??= new Map()).set(partId, outputRunId);
+			const ownerMessageId = ctx.toolMessageIds?.get(partId);
+			if (ownerMessageId && isRecord(event.data))
+				event = {
+					...event,
+					data: { ...event.data, messageId: ownerMessageId },
+				};
 		}
 		const runId =
 			event.runId ??
