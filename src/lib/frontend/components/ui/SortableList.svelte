@@ -243,7 +243,7 @@
 				aria-describedby="{id}-instructions"
 				aria-pressed={isLifted}
 				{disabled}
-				class="-my-[2px] shrink-0 cursor-grab touch-none select-none rounded-[4px] px-[2px] leading-none text-text-dimmer hover:text-text-secondary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text disabled:cursor-default disabled:opacity-50 {isLifted ? 'cursor-grabbing text-text-secondary' : ''} {variant === 'tree' ? 'min-h-[44px] md:min-h-[28px] w-[24px] md:w-[11px]' : ''} {variant === 'settings' ? `relative w-[14px] before:absolute before:content-[''] before:left-1/2 before:top-1/2 before:-translate-x-1/2 before:-translate-y-1/2 before:size-full before:min-h-[44px] before:min-w-[44px] md:before:hidden` : ''}"
+				class="-my-[2px] shrink-0 cursor-grab touch-none select-none rounded-[4px] px-[2px] leading-none text-text-dimmer hover:text-text-secondary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text disabled:cursor-default disabled:opacity-50 {isLifted ? 'cursor-grabbing text-text-secondary' : ''} {variant === 'tree' ? 'min-h-[44px] md:min-h-[28px] w-[24px]' : ''} {variant === 'settings' ? `relative w-[14px] before:absolute before:content-[''] before:left-1/2 before:top-1/2 before:-translate-x-1/2 before:-translate-y-1/2 before:size-full before:min-h-[44px] before:min-w-[44px] md:before:hidden` : ''}"
 				onkeydown={(event) => onkeydown(event, item)}
 				onpointerdown={(event) => onpointerdown(event, item)}
 				><span aria-hidden="true">{variant === "rows" ? "⋮⋮" : "⠿"}</span></button>{/if}

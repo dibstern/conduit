@@ -14,6 +14,7 @@ import type { SendRPC } from "../lib/daemon/daemon-rpc-client.js";
 import { normalizeProjectDirectory } from "../lib/domain/daemon/Services/project-registry-service.js";
 import { ENV } from "../lib/env.js";
 import { formatErrorDetail } from "../lib/errors.js";
+import { serverExitCode } from "../lib/server/build-update.js";
 import type { CLIOptions } from "./cli-core.js";
 import {
 	DEFAULT_PORT,
@@ -92,8 +93,7 @@ export async function handleServe(
 		stdout.write("  Ready.\n\n");
 		await onReady?.();
 
-		await daemon.stopped;
-		exit(0);
+		exit(serverExitCode(await daemon.stopped));
 	} catch (err) {
 		stderr.write(`Server failed: ${formatErrorDetail(err)}\n`);
 		exit(1);

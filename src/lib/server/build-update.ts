@@ -19,6 +19,14 @@ export const isServerSupervised = (): boolean =>
 	process.env["CONDUIT_SERVICE"] === "1" ||
 	process.env["XPC_SERVICE_NAME"] === "dev.conduit.server";
 
+// The generated units restart only on failure. 75 is the one "failure" that
+// systemd still counts as clean, so `systemctl stop` doesn't mark the unit failed.
+export const SUPERVISED_RESTART_EXIT_CODE = 75;
+
+/** A full stop exits 0 and stays stopped; a supervised restart asks for a respawn. */
+export const serverExitCode = (mode: "restart" | "stop"): number =>
+	mode === "restart" && isServerSupervised() ? SUPERVISED_RESTART_EXIT_CODE : 0;
+
 // Only the daemon starts this layer; SubscribeServerStatus reads its snapshot.
 export const ServerBuildUpdateLive = Layer.effectDiscard(
 	Effect.gen(function* () {

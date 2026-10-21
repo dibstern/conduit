@@ -1137,6 +1137,25 @@ describe("built-dist Claude runner lifecycle", () => {
 			]);
 			await harness.kill();
 			expect(testRunnerAlive(runner.pid)).toBe(true);
+			// Migration 0063 leaves legacy prompts without a provider process owner.
+			const legacyPromptId = `legacy-${prompt}`;
+			const db = new Database(harness.daemonStorePath());
+			try {
+				db.prepare(
+					`INSERT INTO pending_approvals (id, session_id, turn_id, type, tool_name, input, created_at)
+					 SELECT ?, session_id, turn_id, type, tool_name, input, created_at
+					 FROM pending_approvals WHERE session_id = ? AND status = 'pending'`,
+				).run(legacyPromptId, sessionId);
+			} finally {
+				db.close();
+			}
+			expect(snapshot(harness, sessionId).approvals).toContainEqual(
+				expect.objectContaining({
+					id: legacyPromptId,
+					status: "pending",
+					provider_process_id: null,
+				}),
+			);
 			await harness.restart();
 			const restored = await harness.connect(sessionId);
 			await restored.view(sessionId);
@@ -1150,14 +1169,27 @@ describe("built-dist Claude runner lifecycle", () => {
 					expect(state.errorOwners).toEqual(state.runReservations);
 					expect(state.approvals).toEqual([
 						expect.objectContaining({ status: "resolved" }),
+						expect.objectContaining({
+							id: legacyPromptId,
+							status: "resolved",
+							provider_process_id: null,
+						}),
 					]);
-					expect(state.promptResolutions).toEqual([
-						{
-							type: `${prompt}.resolved`,
-							id: expect.any(String),
-							source: "provider-process-expired",
-						},
-					]);
+					expect(state.promptResolutions).toEqual(
+						expect.arrayContaining([
+							{
+								type: `${prompt}.resolved`,
+								id: expect.not.stringMatching(/^legacy-/),
+								source: "provider-process-expired",
+							},
+							{
+								type: `${prompt}.resolved`,
+								id: legacyPromptId,
+								source: "provider-process-expired",
+							},
+						]),
+					);
+					expect(state.promptResolutions).toHaveLength(2);
 					expect(
 						state.events.filter((event) =>
 							/^turn\.(error|completed|interrupted)$/.test(event.type),

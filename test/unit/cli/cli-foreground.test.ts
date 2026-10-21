@@ -17,7 +17,7 @@ const { mockRegisterProject, mockStartForegroundDaemon, mockEnv } = vi.hoisted(
 			.mockImplementation((opts: { port?: number }) =>
 				Promise.resolve({
 					addProject: mockRegisterProject,
-					stopped: Promise.resolve(),
+					stopped: Promise.resolve("stop" as const),
 					stop: vi.fn().mockResolvedValue(undefined),
 					getStatus: vi
 						.fn()
@@ -122,7 +122,7 @@ describe("serve handler", () => {
 		const url = "https://machine.example.ts.net:2633";
 		mockStartForegroundDaemon.mockResolvedValueOnce({
 			port: 2633,
-			stopped: Promise.resolve(),
+			stopped: Promise.resolve("stop" as const),
 			getStatus: () => ({
 				tlsEnabled: false,
 				host: "127.0.0.1",
@@ -141,7 +141,7 @@ describe("serve handler", () => {
 			"HTTPS certificates are disabled. Enable them in the tailnet DNS page.";
 		mockStartForegroundDaemon.mockResolvedValueOnce({
 			port: 2633,
-			stopped: Promise.resolve(),
+			stopped: Promise.resolve("stop" as const),
 			getStatus: () => ({
 				tlsEnabled: false,
 				host: "127.0.0.1",
@@ -230,11 +230,18 @@ describe("serve handler", () => {
 		expect(joined).toContain("Relay:    https://0.0.0.0:2633");
 	});
 
-	it("awaits shutdown before resolving and exiting successfully", async () => {
+	it.each([
+		["stop", "0", 0],
+		["stop", "1", 0],
+		["restart", "0", 0],
+		["restart", "1", 75],
+	] as const)("awaits %s with CONDUIT_SERVICE=%s before exiting %s", async (mode, supervised, code) => {
+		vi.stubEnv("CONDUIT_SERVICE", supervised);
+		vi.stubEnv("XPC_SERVICE_NAME", "");
 		const io = createMockIO("/test");
 		let stop: () => void = () => {};
-		const stopped = new Promise<void>((resolve) => {
-			stop = resolve;
+		const stopped = new Promise<"stop" | "restart">((resolve) => {
+			stop = () => resolve(mode);
 		});
 		mockStartForegroundDaemon.mockImplementationOnce(() =>
 			Promise.resolve({
@@ -255,7 +262,7 @@ describe("serve handler", () => {
 
 		stop();
 		await running;
-		expect(io.exit).toHaveBeenCalledExactlyOnceWith(0);
+		expect(io.exit).toHaveBeenCalledExactlyOnceWith(code);
 	});
 
 	it("leaves saved port and TLS resolution to the daemon", async () => {

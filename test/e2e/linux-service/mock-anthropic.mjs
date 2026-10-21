@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 
@@ -7,6 +7,8 @@ const artifacts = process.env.CONDUIT_E2E_ARTIFACTS ?? "/artifacts";
 mkdirSync(artifacts, { recursive: true });
 const logPath = join(artifacts, "mock-requests.jsonl");
 const finalSentence = "Conduit runtime survival verified.";
+const totalDeltas = 40;
+const holdAfterDeltas = 3;
 const log = (event) => {
 	const line = JSON.stringify({ at: new Date().toISOString(), ...event });
 	appendFileSync(logPath, `${line}\n`);
@@ -41,7 +43,7 @@ const server = createServer(async (request, response) => {
 		const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
 		const marker =
 			JSON.stringify(body.messages ?? []).match(
-				/CONDUIT_M37913_(?:A|B|C|CONTROL)\b/,
+				/CONDUIT_M37913_(?:A|B|C|D|CONTROL)\b/,
 			)?.[0] ?? null;
 		const id = `msg_${randomUUID().replaceAll("-", "")}`;
 		const message = {
@@ -87,10 +89,16 @@ const server = createServer(async (request, response) => {
 		log({ event: "started", id, marker });
 		let index = 0;
 		let completed = false;
+		let held = false;
 		const timer = setInterval(() => {
+			if (held) {
+				if (!existsSync(join(artifacts, `${marker}.release`))) return;
+				held = false;
+				log({ event: "released", id, marker, index });
+			}
 			index++;
 			const text =
-				index === 40
+				index === totalDeltas
 					? `\n${finalSentence}`
 					: `stream-${String(index).padStart(2, "0")} `;
 			sse("content_block_delta", {
@@ -98,7 +106,11 @@ const server = createServer(async (request, response) => {
 				delta: { type: "text_delta", text },
 			});
 			log({ event: "delta", id, marker, index });
-			if (index < 40) return;
+			if (marker && index === holdAfterDeltas) {
+				held = true;
+				log({ event: "held", id, marker, index });
+			}
+			if (index < totalDeltas) return;
 			clearInterval(timer);
 			sse("content_block_stop", { index: 0 });
 			sse("message_delta", {
@@ -112,7 +124,7 @@ const server = createServer(async (request, response) => {
 		}, 1000);
 		response.once("close", () => {
 			clearInterval(timer);
-			if (!completed) log({ event: "disconnected", id, marker, index });
+			if (!completed) log({ event: "disconnected", id, marker, index, held });
 		});
 	} catch (error) {
 		log({ event: "error", message: String(error) });
@@ -124,10 +136,14 @@ const server = createServer(async (request, response) => {
 		else response.destroy();
 	}
 });
-server.listen(18080, "127.0.0.1", () => {
+// Linux keeps its fixed container port; macOS asks the kernel for a free port.
+const port = Number(process.env.CONDUIT_E2E_MOCK_PORT ?? 18080);
+server.listen(port, "127.0.0.1", () => {
+	const address = server.address();
+	if (!address || typeof address === "string") throw new Error("No mock port");
 	writeFileSync(
 		join(artifacts, "mock-ready.json"),
-		JSON.stringify({ pid: process.pid, port: 18080 }),
+		JSON.stringify({ pid: process.pid, port: address.port }),
 	);
-	log({ event: "listening", pid: process.pid, port: 18080 });
+	log({ event: "listening", pid: process.pid, port: address.port });
 });
