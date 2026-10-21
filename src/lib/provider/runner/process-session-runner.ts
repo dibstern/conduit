@@ -1005,8 +1005,41 @@ export const makeProcessSessionRunner = (
 						}
 						// A previous-build runner may have completed while the store still
 						// says running. Commit its backlog before checking account demand.
-						if (driver.withAccountScope && restoreAccounts.length > 0)
+						if (driver.withAccountScope && restoreAccounts.length > 0) {
 							yield* replay ?? Effect.void;
+							// Replay may settle a command before recovery can install its waiter.
+							if (sql)
+								yield* entry.outputs.withPermits(1)(
+									Effect.gen(function* () {
+										for (const binding of hello.bindings ?? []) {
+											const turn = sinks.get(binding.sinkId);
+											if (!turn?.pending) continue;
+											const [command] = yield* sql<{ status: string }>`
+												SELECT status FROM provider_command_outbox
+												WHERE project_key = ${projectId} AND session_id = ${sessionId}
+													AND command_id = ${binding.commandId ?? binding.sinkId}`.pipe(
+												Effect.mapError((cause) =>
+													runnerFailure("restore runner history", cause),
+												),
+											);
+											yield* ensureAttached();
+											if (
+												command?.status !== "completed" &&
+												command?.status !== "failed"
+											)
+												continue;
+											turn.pending = false;
+											if (turn.releaseRequested) {
+												yield* emit(
+													{ type: "release-sink", sinkId: binding.sinkId },
+													sessionId,
+												);
+												releaseSink(binding.sinkId);
+											}
+										}
+									}),
+								);
+						}
 						yield* Effect.all(restoreAccounts, { discard: true });
 						yield* ensureAttached();
 						if (process.env["NODE_ENV"] === "test" && process.connected)
@@ -1570,6 +1603,20 @@ export const makeProcessSessionRunner = (
 									...failure,
 									code: "runner_recovery_abandoned",
 								};
+								// Replay can allocate sinks before command waiters take ownership.
+								yield* entry.outputs.withPermits(1)(
+									Effect.gen(function* () {
+										if (children.get(registration.sessionId) !== entry) return;
+										for (const [sinkId, binding] of sinks) {
+											if (binding.sessionId !== registration.sessionId)
+												continue;
+											yield* emit(
+												{ type: "release-sink", sinkId },
+												registration.sessionId,
+											);
+										}
+									}),
+								);
 								evict(registration.sessionId, entry);
 								candidates.delete(entry);
 								yield* releaseEntryWaiters(entry, Cause.fail(entry.failure));
@@ -1716,14 +1763,14 @@ export const makeProcessSessionRunner = (
 									runFork(
 										command.wait.pipe(
 											Effect.onExit(() => {
-												if (
-													!binding ||
-													sinks.get(command.sinkId) !== binding ||
-													closing
-												)
-													return Effect.void;
 												return entry.outputs.withPermits(1)(
 													Effect.gen(function* () {
+														if (
+															!binding ||
+															sinks.get(command.sinkId) !== binding ||
+															closing
+														)
+															return;
 														binding.pending = false;
 														if (binding.releaseRequested || entry.failure) {
 															yield* emit(
