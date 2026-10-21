@@ -208,10 +208,9 @@
 		{#snippet child({ props })}
 			{@render trigger({ props })}
 		{/snippet}
-	</BitsPopover.Trigger>
-
-	{#if sheet && open && sheetEl && sheetScrim?.portalTo !== undefined}
-		<!-- Register after the modal boundary so the scrim remains interactive. -->
+	</BitsPopover.Trigger>{#if sheet && open && sheetEl && sheetScrim?.portalTo !== undefined}
+		<!-- Register after the modal boundary so the scrim remains interactive.
+		     Abuts the trigger: inline triggers sit in pre-wrap prose, where whitespace renders. -->
 		<BitsPopover.Portal to={sheetScrim.portalTo}>
 			{@render scrim()}
 		</BitsPopover.Portal>

@@ -169,6 +169,7 @@ export function watchSelection(): () => void {
 		});
 		let alive = true;
 		const attaching = new Set<string>();
+		let failedAttach: string | null = null;
 		// An attach by session id places that session itself, so a row placing
 		// it while the reply is out must not send a second attach.
 		let sessionAttach = $state<string | null>(null);
@@ -256,13 +257,17 @@ export function watchSelection(): () => void {
 			const attached = attachedProjectState.slug;
 			const current = shown;
 			const route = getCurrentRoute();
+			const routeKey = routerState.path + routerState.search;
 			const connected = getIsConnected();
 			const pendingSession = sessionAttach;
 			untrack(() => {
+				// A server rejection waits for navigation, not another shell update.
+				if (failedAttach !== routeKey) failedAttach = null;
 				if (previousAttached !== null && attached === null)
 					attachedOnce = false;
 				previousAttached = attached;
-				if (!connected || route.page !== "chat") return;
+				if (!connected || route.page !== "chat" || failedAttach !== null)
+					return;
 				const routeSessionId = route.sessionId ?? null;
 				if (pendingSession !== null && pendingSession === routeSessionId)
 					return;
@@ -309,6 +314,11 @@ export function watchSelection(): () => void {
 						})
 						.catch((error: unknown) => {
 							if (!alive) return;
+							if (
+								error instanceof WsRpcError &&
+								routerState.path + routerState.search === routeKey
+							)
+								failedAttach = routeKey;
 							if (
 								sessionId &&
 								error instanceof WsRpcError &&
