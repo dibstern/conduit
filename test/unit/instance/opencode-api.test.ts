@@ -937,7 +937,11 @@ describe("OpenCodeAPI", () => {
 			authHeaders: {},
 		});
 
-		await expect(api.app.path()).resolves.toEqual({ cwd: "/test" });
+		await expect(api.app.path()).resolves.toEqual({
+			cwd: "/test",
+			config: "/config",
+			worktree: "/test",
+		});
 	});
 
 	it("app.path() rejects legacy cwd-only responses before normalization", async () => {

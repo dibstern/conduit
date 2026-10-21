@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { expect, type Page } from "@playwright/test";
 import { Stream } from "effect";
 import { serializeReferences } from "../../../src/lib/composer-references.js";
@@ -88,7 +89,7 @@ export const askContextHandlers: StepHandler[] = [
 			await rpc.waitForRequest(
 				(request) =>
 					request.tag === "SyncInputDraft" &&
-					request.payload["sessionId"] === SESSION &&
+					isDeepStrictEqual(request.payload["key"], { session: SESSION }) &&
 					serializeReferences(String(request.payload["text"])) === expected,
 			);
 			expect(
