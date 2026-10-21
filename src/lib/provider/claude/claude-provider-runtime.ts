@@ -194,6 +194,8 @@ import type {
 	CanUseTool,
 	ClaudeSendTurnInput,
 	ClaudeSessionContext,
+	ClaudeThreadReadInput,
+	ClaudeThreadReadResult,
 	PromptQueueController,
 	Query,
 	Options as SDKOptions,
@@ -213,6 +215,11 @@ const INTERRUPTED_TURN: TurnResult = {
 export type { ClaudeOneShotQueryFactory } from "../../domain/daemon/Services/claude-one-shot.js";
 
 export interface ClaudeProviderInstanceDeps {
+	/** Resolve history from the calling session's current project borrow. */
+	readonly readThread?: (
+		sessionId: string,
+		input: ClaudeThreadReadInput,
+	) => Effect.Effect<ClaudeThreadReadResult>;
 	readonly readGoalStatus?: ReadClaudeGoalStatus;
 	readonly onBackgroundTask?: (
 		input: import("../../session/background-liveness.js").BackgroundTaskTransition,
@@ -258,6 +265,7 @@ export type ClaudeSessionRunnerDeps = Pick<
 	| "daemonConfigDir"
 	| "projectRootForSession"
 	| "recoveryForSession"
+	| "readThread"
 	| "shellEnv"
 	| "prepareShellEnv"
 	| "claudeSettingsOverrides"

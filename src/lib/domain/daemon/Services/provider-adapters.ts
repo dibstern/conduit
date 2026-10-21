@@ -4,6 +4,7 @@ import type { ClaudeEventPersistEffectTag } from "../../../persistence/effect/cl
 import type { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import type { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import type { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
+import type { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { ProviderRegistry } from "../../../provider/provider-registry.js";
 import type { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
 import type { PendingInteractionServiceTag } from "../../relay/Services/pending-interaction-service.js";
@@ -20,6 +21,7 @@ export type ProviderAdapterProjectContext =
 	| EventStoreEffectTag
 	| ProjectionRunnerEffectTag
 	| ProviderStateEffectTag
+	| ReadQueryEffectTag
 	| ProviderRuntimeIngestionTag
 	| OrchestrationEngineTag
 	| PendingInteractionServiceTag

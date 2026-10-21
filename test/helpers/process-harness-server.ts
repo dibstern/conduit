@@ -13,7 +13,7 @@ import { Session } from "node:inspector/promises";
 import { join } from "node:path";
 import { DatabaseSync, StatementSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { Effect, Fiber } from "effect";
+import { Effect, Fiber, HashMap, Ref } from "effect";
 
 // Event-loop stalls and read-model reads for load tests, flushed to a file the
 // spec reads after each phase. Stalls are wall-clock end times and durations.
@@ -353,6 +353,86 @@ async function main(): Promise<void> {
 		? join(dist, "src")
 		: fileURLToPath(new URL("../../src", import.meta.url));
 	const extension = dist ? "js" : "ts";
+	if (existsSync(join(root, "thread-read-proof.json"))) {
+		const readProbe = (): { sessionId: string; projectId: string } =>
+			JSON.parse(readFileSync(join(root, "thread-read-proof.json"), "utf8"));
+		const record = (
+			kind: "before-borrow" | "missing-project",
+			result: unknown,
+		) =>
+			appendFileSync(
+				join(root, "thread-read-probes.ndjson"),
+				`${JSON.stringify({ daemonPid: process.pid, kind, result })}\n`,
+			);
+		const { ClaudeDriver } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/provider/claude",
+					`claude-provider-instance.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/provider/claude/claude-provider-instance.js");
+		const { ProjectRegistryTag } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/daemon/Services",
+					`project-registry-service.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/daemon/Services/project-registry-service.js");
+		const create = ClaudeDriver.create;
+		Object.assign(ClaudeDriver, {
+			create: (
+				deps: import("../../src/lib/provider/claude/claude-provider-instance.js").ClaudeProviderInstanceDeps,
+			) =>
+				Effect.gen(function* () {
+					const projects = yield* ProjectRegistryTag;
+					const readThread = deps.readThread;
+					if (!readThread)
+						throw new Error("Thread-read fixture requires the daemon reader");
+					const startup = readProbe();
+					if (startup.sessionId) {
+						const result = yield* readThread(startup.sessionId, { limit: 1 });
+						yield* Effect.sync(() => record("before-borrow", result));
+					}
+					let probedMissingProject = false;
+					return yield* create({
+						...deps,
+						readThread: (sessionId, input) =>
+							Effect.gen(function* () {
+								const probe = readProbe();
+								if (sessionId === probe.sessionId && !probedMissingProject) {
+									probedMissingProject = true;
+									const project = HashMap.get(
+										yield* Ref.get(projects),
+										probe.projectId,
+									);
+									if (project._tag !== "Some")
+										throw new Error(
+											"Thread-read probe project is not registered",
+										);
+									const result = yield* Ref.update(
+										projects,
+										HashMap.remove(probe.projectId),
+									).pipe(
+										Effect.andThen(readThread(sessionId, input)),
+										Effect.ensuring(
+											Ref.update(
+												projects,
+												HashMap.set(probe.projectId, project.value),
+											),
+										),
+									);
+									yield* Effect.sync(() => record("missing-project", result));
+								}
+								return yield* readThread(sessionId, input);
+							}),
+					});
+				}),
+		});
+	}
 	if (existsSync(join(root, "daemon-adapters-proof"))) {
 		const proofPath = join(root, "daemon-adapters.ndjson");
 		const record = (entry: Record<string, unknown>) =>

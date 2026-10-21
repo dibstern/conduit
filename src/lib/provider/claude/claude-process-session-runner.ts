@@ -15,7 +15,11 @@ export const makeProcessClaudeSessionRunner = (
 ) =>
 	makeProcessSessionRunner(deps, emit, {
 		driverKind: "claude",
-		connect: connectClaudeRunner,
+		connect: (options) =>
+			connectClaudeRunner({
+				...options,
+				...(deps.readThread ? { readThread: deps.readThread } : {}),
+			}),
 		settingsDeferredCode: CLAUDE_SETTINGS_REPLAY_DEFERRED,
 		snapshotCommandSettings: (snapshot) => ({
 			claudeSettingsOverrides: snapshot?.claudeSettingsOverrides,

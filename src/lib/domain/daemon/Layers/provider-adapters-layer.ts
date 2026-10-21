@@ -27,6 +27,8 @@ import {
 import { makeReadQueryEffect } from "../../../persistence/effect/read-query-effect.js";
 import { makeRetireReplacedProcessPrompts } from "../../../persistence/effect/retire-pending-prompts.js";
 import { ClaudeDriver } from "../../../provider/claude/claude-provider-instance.js";
+import { makeClaudeThreadRead } from "../../../provider/claude/claude-thread-read.js";
+import type { ClaudeThreadReadResult } from "../../../provider/claude/types.js";
 import { makeCursorProviderRuntime } from "../../../provider/cursor/cursor-provider-runtime.js";
 import { OpenCodeDriver } from "../../../provider/opencode-provider-instance.js";
 import type { ProviderCallRequest } from "../../../provider/orchestration-engine.js";
@@ -225,6 +227,28 @@ export const makeProviderAdaptersLive = (configDir: string) =>
 					),
 			};
 			const read = yield* makeReadQueryEffect.pipe(Effect.provide(store));
+			const readThread: NonNullable<
+				Parameters<typeof ClaudeDriver.create>[0]["readThread"]
+			> = (sessionId, input) =>
+				projectContext(sessionId).pipe(
+					Effect.flatMap((project) =>
+						project
+							? makeClaudeThreadRead.pipe(
+									Effect.provide(project.context),
+									Effect.flatMap((read) => read(sessionId, input)),
+								)
+							: Effect.succeed<ClaudeThreadReadResult>({
+									code: "ServerUnavailable",
+									message: "This Conduit session's project is unavailable.",
+								}),
+					),
+					Effect.catch(() =>
+						Effect.succeed<ClaudeThreadReadResult>({
+							code: "ServerUnavailable",
+							message: "Conduit could not find this session's project.",
+						}),
+					),
+				);
 			const runBackground = Effect.runForkWith(Context.empty());
 			const onBackgroundTask: NonNullable<
 				Parameters<typeof ClaudeDriver.create>[0]["onBackgroundTask"]
@@ -279,6 +303,7 @@ export const makeProviderAdaptersLive = (configDir: string) =>
 					recoveryForSession,
 					onBackgroundTask,
 					persistUserMessage,
+					readThread,
 					claudeSettingsOverrides: () =>
 						loadRelaySettings(configDir).claudeSettings,
 					...(testSdk
