@@ -214,6 +214,25 @@
 		justify-content: flex-end;
 		gap: 2px;
 	}
+
+	/* Shorter active bars share the row's centre with the taller inactive bars. */
+	.split-footer :global(.effort-meter) {
+		align-items: center;
+	}
+
+	/* Centre the font's x-height on the icons, rather than its line box.
+	   Geist and Geist Mono have different baseline-to-x-height offsets. */
+	.split-footer :global(.model-label),
+	.split-footer :global([data-testid="composer-effort-label"]) {
+		translate: 0 -0.8px;
+	}
+
+	.split-footer :global([data-testid="picker-selected-context"]),
+	.split-footer :global([data-testid="composer-checkout"] [data-part="project"]),
+	.split-footer :global([data-testid="composer-checkout"] [data-part="branch"]),
+	.split-footer :global([data-testid="composer-checkout"] span[aria-hidden="true"]:not(:has(svg))) {
+		translate: 0 -0.6px;
+	}
 	/* An empty controls slot leaves the grid, so send sits beside the field. */
 	.composer-layout:has(> [data-slot="controls"]:empty) {
 		grid-template-columns: auto minmax(0, 1fr) auto;
