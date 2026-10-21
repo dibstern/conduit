@@ -40,6 +40,7 @@ import {
 import type { BackgroundTaskTransition } from "../../session/background-liveness.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import { ProviderInstanceFailure } from "../errors.js";
+import type { ProviderRegistry } from "../provider-registry.js";
 import type {
 	EventSink,
 	PermissionDecision,
@@ -70,6 +71,25 @@ import type {
 } from "./session-runner.js";
 
 const log = createLogger("runner-provider-instance");
+
+/** Check every owner, including one retained across an account rebind. */
+export const assertSessionRunnerAvailable = (
+	sessionId: string,
+	registry: ProviderRegistry | undefined,
+) =>
+	Effect.gen(function* () {
+		for (const providerId of registry?.listProviders() ?? []) {
+			const provider = registry?.getInstance(providerId);
+			if (!(provider instanceof RunnerProviderInstance)) continue;
+			const failure = yield* provider.getSessionFailureEffect(sessionId);
+			if (failure)
+				return yield* new ProviderInstanceFailure({
+					providerId,
+					operation: failure.operation,
+					cause: Object.assign(new Error(failure.message), failure),
+				});
+		}
+	});
 
 type PreparedTurn = Omit<
 	Extract<SessionCommand, { type: "send-turn" }>,
