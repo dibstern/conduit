@@ -69,7 +69,7 @@ export const resolveOrphanedClaudePermissions = Effect.gen(function* () {
 		if (liveRequests.has(`${row.session_id}:${row.id}`)) continue;
 		if (
 			claude instanceof RunnerProviderInstance &&
-			(yield* claude.hasLiveProcessEffect(row.session_id))
+			(yield* claude.getSessionFailureEffect(row.session_id))
 		)
 			continue;
 		stale.push(row);

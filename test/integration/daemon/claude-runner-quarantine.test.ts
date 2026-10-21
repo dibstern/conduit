@@ -50,6 +50,11 @@ function ownership(harness: ProcessHarness, sessionId: string) {
 					"SELECT input_id, state FROM pending_inputs WHERE session_id = ? ORDER BY input_id",
 				)
 				.all(sessionId),
+			events: db
+				.prepare(
+					"SELECT type, data FROM events WHERE session_id = ? AND (type LIKE 'input.%' OR type IN ('question.resolved', 'permission.resolved', 'tool.completed')) ORDER BY sequence",
+				)
+				.all(sessionId),
 		};
 	} finally {
 		db.close();
@@ -136,7 +141,7 @@ describe("startup runner quarantine through browser RPC", () => {
 	it.each([
 		"permission",
 		"question",
-	] as const)("preserves quarantined %s approvals across answers, interruption and restart", async (kind) => {
+	] as const)("preserves quarantined %s approvals across sends, answers, interruption and restart", async (kind) => {
 		const evidence: Record<string, unknown> = { kind, passed: false };
 		let harness: ProcessHarness | undefined;
 		try {
@@ -152,7 +157,7 @@ describe("startup runner quarantine through browser RPC", () => {
 				sessionId,
 				kind === "permission"
 					? "approval-quarantine-answer"
-					: "question-quarantine-answer",
+					: "question-fixed-quarantine-answer",
 			);
 			void sending.catch(() => undefined);
 			const request = await browser.waitFor(
@@ -186,6 +191,34 @@ describe("startup runner quarantine through browser RPC", () => {
 			await harness.restart();
 			let restored = await harness.connect(sessionId);
 			evidence["before"] = before;
+			expect(
+				await restored["run"](
+					restored.rpc["input.submit"]({
+						sessionId,
+						inputId: randomUUID(),
+						originId: restored.originId,
+						text: "",
+						delivery: "queue",
+					}),
+				),
+			).toEqual({ ok: true, sessionId, handedOff: false });
+			expect(ownership(harness, sessionId)).toEqual(before);
+			const inputId = randomUUID();
+			for (const delivery of ["queue", "queue", "steer"] as const) {
+				const result = await restored["run"](
+					restored.rpc["input.submit"]({
+						sessionId,
+						inputId,
+						originId: restored.originId,
+						text: "blocked-before-question-resolution",
+						delivery,
+					}),
+				).catch(String);
+				evidence[`send-${delivery}`] = result;
+				evidence["afterSend"] = ownership(harness, sessionId);
+				expect(result).toEqual(expect.stringMatching(/quarantined/));
+				expect(ownership(harness, sessionId)).toEqual(before);
+			}
 			for (const decision of ["allow", "deny", "allow_always"] as const) {
 				const result = await answer(restored, decision).catch(String);
 				evidence[decision] = result;
@@ -212,6 +245,8 @@ describe("startup runner quarantine through browser RPC", () => {
 			renameSync(`${owner.socketPath}.unreachable`, owner.socketPath);
 			await harness.restart();
 			restored = await harness.connect(sessionId);
+			evidence["afterSocketRecovery"] = ownership(harness, sessionId);
+			expect(ownership(harness, sessionId)).toEqual(before);
 			await answer(restored, "allow");
 			const recoveredHarness = harness;
 			await vi.waitFor(() =>
@@ -235,6 +270,225 @@ describe("startup runner quarantine through browser RPC", () => {
 			}
 			writeFileSync(
 				`/tmp/conduit-phis-${kind}-regression.json`,
+				JSON.stringify(evidence, null, 2),
+			);
+		}
+	}, 120_000);
+
+	it.each([
+		true,
+		false,
+	])("retires an orphaned legacy permission, healthy runner=%s", async (withRunner) => {
+		const evidence: Record<string, unknown> = { withRunner, passed: false };
+		let harness: ProcessHarness | undefined;
+		try {
+			harness = await ProcessHarness.start({
+				dist: "dist",
+				restartProof: true,
+			});
+			const browser = await harness.connect();
+			const sessionId = await browser.createSession(
+				"Orphaned legacy permission",
+			);
+			if (withRunner) await browser.send(sessionId, "healthy-permission-owner");
+			await harness.kill();
+			const id = randomUUID();
+			const db = new Database(harness.daemonStorePath());
+			try {
+				const version =
+					db
+						.prepare<[string], { version: number }>(
+							"SELECT COALESCE(MAX(stream_version) + 1, 0) AS version FROM events WHERE session_id = ?",
+						)
+						.get(sessionId)?.version ?? 0;
+				const at = Date.now();
+				const input = { command: "echo stale" };
+				db.transaction(() => {
+					db.prepare(
+						"INSERT INTO events (project_id, event_id, session_id, stream_version, type, data, metadata, provider, created_at) VALUES ('process-test', ?, ?, ?, 'permission.asked', ?, '{}', 'claude', ?)",
+					).run(
+						randomUUID(),
+						sessionId,
+						version,
+						JSON.stringify({ id, sessionId, toolName: "Bash", input }),
+						at,
+					);
+					db.prepare(
+						"INSERT INTO pending_approvals (id, session_id, type, status, tool_name, input, details, version, created_at, provider_process_id, provider_request_id) VALUES (?, ?, 'permission', 'pending', 'Bash', ?, '{}', ?, ?, NULL, NULL)",
+					).run(id, sessionId, JSON.stringify(input), version, at);
+				})();
+			} finally {
+				db.close();
+			}
+			evidence["before"] = ownership(harness, sessionId);
+			await harness.restart();
+			const restored = await harness.connect(sessionId);
+			evidence["afterRecovery"] = ownership(harness, sessionId);
+			expect(ownership(harness, sessionId).approvals).toEqual([
+				{ id, status: "resolved", provider_process_id: null },
+			]);
+			const response = await restored.send(sessionId, "after-orphan-cleanup");
+			evidence["send"] = response;
+			evidence["afterSend"] = ownership(harness, sessionId);
+			expect(response.chunks.join("")).toBe(
+				responseChunks("after-orphan-cleanup").join(""),
+			);
+			evidence["passed"] = true;
+		} finally {
+			if (harness) {
+				evidence["logTail"] = harness.logTail;
+				await harness.dispose();
+				evidence["remainingRunnerPids"] = harness.remainingRunnerPids();
+				expect(harness.remainingRunnerPids()).toEqual([]);
+			}
+			writeFileSync(
+				`/tmp/conduit-phis-orphan-${withRunner}-regression.json`,
+				JSON.stringify(evidence, null, 2),
+			);
+		}
+	}, 60_000);
+
+	it("refuses queued Run now before interruption or steering side effects", async () => {
+		const evidence: Record<string, unknown> = { passed: false };
+		let harness: ProcessHarness | undefined;
+		try {
+			harness = await ProcessHarness.start({
+				dist: "dist",
+				restartProof: true,
+			});
+			const browser = await harness.connect();
+			const sessionId = await browser.createSession("Quarantined Run now");
+			const sending = browser.send(sessionId, "upgrade-long-turn");
+			void sending.catch(() => undefined);
+			await browser.waitFor(
+				(frame) =>
+					frame["type"] === "transcript_message" &&
+					frame["role"] === "assistant",
+			);
+			const inputId = randomUUID();
+			expect(
+				await browser["run"](
+					browser.rpc["input.submit"]({
+						sessionId,
+						inputId,
+						originId: browser.originId,
+						text: "queued-before-quarantine",
+						delivery: "queue",
+					}),
+				),
+			).toEqual({ ok: true, sessionId, handedOff: false });
+			const owner = discoverRunners(harness.projectDir, harness.configDir).find(
+				(entry) => entry.sessionId === sessionId,
+			);
+			if (!owner) throw new Error("Missing queued input owner");
+			await harness.kill();
+			await sending.catch(() => undefined);
+			renameSync(owner.socketPath, `${owner.socketPath}.unreachable`);
+			await harness.restart();
+			let restored = await harness.connect(sessionId);
+			const before = ownership(harness, sessionId);
+			evidence["before"] = before;
+			for (const interrupt of [true, true, false, false]) {
+				const result = await restored["run"](
+					restored.rpc["input.sendNow"]({
+						sessionId,
+						inputId,
+						originId: restored.originId,
+						interrupt,
+					}),
+				).catch(String);
+				evidence[`sendNow-${interrupt}`] = result;
+				evidence["afterSendNow"] = ownership(harness, sessionId);
+				expect(result).toEqual(expect.stringMatching(/quarantined/));
+				expect(ownership(harness, sessionId)).toEqual(before);
+			}
+			const concurrent = await Promise.all(
+				[true, true].map((interrupt) =>
+					restored["run"](
+						restored.rpc["input.sendNow"]({
+							sessionId,
+							inputId,
+							originId: restored.originId,
+							interrupt,
+						}),
+					).catch(String),
+				),
+			);
+			evidence["concurrentRetries"] = concurrent;
+			expect(concurrent).toEqual([
+				expect.stringMatching(/quarantined/),
+				expect.stringMatching(/quarantined/),
+			]);
+			expect(ownership(harness, sessionId)).toEqual(before);
+			await harness.kill();
+			await harness.restart();
+			restored = await harness.connect(sessionId);
+			await expect(
+				restored["run"](
+					restored.rpc["input.sendNow"]({
+						sessionId,
+						inputId,
+						originId: restored.originId,
+						interrupt: true,
+					}),
+				),
+			).rejects.toThrow(/quarantined/);
+			expect(ownership(harness, sessionId)).toEqual(before);
+			expect(() => process.kill(owner.pid, 0)).not.toThrow();
+			// Removing a queued input still works while the process is quarantined.
+			expect(
+				await restored["run"](
+					restored.rpc["input.cancel"]({
+						sessionId,
+						inputId,
+					}),
+				),
+			).toEqual({ ok: true });
+			const cancelled = ownership(harness, sessionId);
+			expect(cancelled.inputs).toContainEqual({
+				input_id: inputId,
+				state: "removed",
+			});
+			expect(cancelled.runs).toEqual(before.runs);
+			expect(cancelled.commands).toEqual(before.commands);
+			evidence["afterCancel"] = cancelled;
+			await harness.kill();
+			renameSync(`${owner.socketPath}.unreachable`, owner.socketPath);
+			await harness.restart();
+			restored = await harness.connect(sessionId);
+			// Once usable, an input that is no longer queued keeps its usual refusal.
+			expect(
+				await restored["run"](
+					restored.rpc["input.sendNow"]({
+						sessionId,
+						inputId,
+						originId: restored.originId,
+						interrupt: true,
+					}),
+				),
+			).toEqual({ ok: false, reason: "already_started" });
+			writeFileSync(join(harness.root, "release-upgrade-turn"), "release");
+			const recovered = harness;
+			await vi.waitFor(() =>
+				expect(ownership(recovered, sessionId).runs).toEqual([
+					expect.objectContaining({ status: "completed" }),
+				]),
+			);
+			expect(
+				(
+					await restored.send(sessionId, "after-queued-quarantine-recovery")
+				).chunks.join(""),
+			).toBe(responseChunks("after-queued-quarantine-recovery").join(""));
+			evidence["passed"] = true;
+		} finally {
+			if (harness) {
+				evidence["logTail"] = harness.logTail;
+				await harness.dispose();
+				evidence["remainingRunnerPids"] = harness.remainingRunnerPids();
+				expect(harness.remainingRunnerPids()).toEqual([]);
+			}
+			writeFileSync(
+				"/tmp/conduit-phis-run-now-regression.json",
 				JSON.stringify(evidence, null, 2),
 			);
 		}
