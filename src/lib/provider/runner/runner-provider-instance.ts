@@ -332,20 +332,20 @@ export class RunnerProviderInstance implements ProviderInstance {
 	sendTurnEffect(
 		input: SendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
-		return Effect.gen({ self: this }, function* () {
-			const {
-				eventSink,
-				abortSignal,
-				awaitIntake: _awaitIntake,
-				...payload
-			} = input;
+		const {
+			eventSink,
+			abortSignal,
+			awaitIntake: _awaitIntake,
+			...payload
+		} = input;
+		const { sessionId } = input;
+		const sinkId = runnerSinkId(
+			input.inputId,
+			input.commandAttempt,
+			input.nativeResumeFallback,
+		);
+		const send = Effect.gen({ self: this }, function* () {
 			const prepared = yield* this.driver.prepareTurnEffect(payload);
-			const { sessionId } = input;
-			const sinkId = runnerSinkId(
-				input.inputId,
-				input.commandAttempt,
-				input.nativeResumeFallback,
-			);
 			this.sinks.set(sinkId, eventSink);
 			bindTurnTimelineSink(sinkId, {
 				sessionId,
@@ -375,6 +375,17 @@ export class RunnerProviderInstance implements ProviderInstance {
 				...prepared,
 			});
 		});
+		return (this.runner.withTurnEffect?.(payload, sinkId, send) ?? send).pipe(
+			Effect.mapError((cause) =>
+				cause instanceof ProviderInstanceFailure
+					? cause
+					: new ProviderInstanceFailure({
+							providerId: this.providerId,
+							operation: cause.operation,
+							cause,
+						}),
+			),
+		);
 	}
 
 	/** Places a send's user message once; only a missing session fails it. */

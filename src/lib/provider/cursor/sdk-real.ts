@@ -27,9 +27,9 @@ export async function adoptLegacyCursorCredential(
 	storePath: string,
 	markerPath: string,
 	legacyStorePath?: string,
-): Promise<void> {
+): Promise<string> {
 	const completed = `${markerPath}.complete`;
-	if (existsSync(completed)) return;
+	if (existsSync(completed)) return readFileSync(markerPath, "utf8");
 	mkdirSync(dirname(markerPath), { recursive: true, mode: 0o700 });
 	// Claim the original target before any work that can fail or be interrupted.
 	// Publish the claim atomically so another startup can only read a full path.
@@ -68,6 +68,7 @@ export async function adoptLegacyCursorCredential(
 	// Record even an empty/existing store, so logout, removal or a later
 	// default change can never cause another account to inherit the old login.
 	writeFileSync(completed, "", { mode: 0o600 });
+	return selectedStorePath;
 }
 
 export function createRealCursorSdkPort(
