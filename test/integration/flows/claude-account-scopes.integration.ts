@@ -1,11 +1,14 @@
 // Failure modes: shared credentials/catalogues, removed-account fallback, early
 // idle cleanup, failed opens cached forever, and cancellation crossing accounts.
+import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Deferred, Effect, Exit, Fiber, Layer } from "effect";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
+import { BUILD_ID } from "../../../src/lib/build-id.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
 import { CLAUDE_DISPLAYABLE_SETTINGS_KEYS } from "../../../src/lib/contracts/claude-settings.js";
 import { makeAccountResourceScopesLive } from "../../../src/lib/domain/daemon/Layers/account-resource-scopes-layer.js";
@@ -22,11 +25,20 @@ import {
 	makeClaudeAccountScopes,
 } from "../../../src/lib/provider/claude/claude-account-scopes.js";
 import { makeClaudeCapabilitiesService } from "../../../src/lib/provider/claude/claude-capabilities-service.js";
+import { makeProcessClaudeSessionRunner } from "../../../src/lib/provider/claude/claude-process-session-runner.js";
 import {
 	makeClaudeProviderRuntime,
 	makeClaudeSessionRunner,
 } from "../../../src/lib/provider/claude/claude-provider-runtime.js";
+import { ClaudeRunnerSocket } from "../../../src/lib/provider/claude/claude-runner-protocol.js";
 import { ClaudeBoundaryError } from "../../../src/lib/provider/event-sink-errors.js";
+import { RUNNER_PROTOCOL_VERSION } from "../../../src/lib/provider/runner/runner-protocol.js";
+import {
+	registerRunner,
+	runnerDirectory,
+} from "../../../src/lib/provider/runner/runner-registry.js";
+import type { RunnerUpgradeState } from "../../../src/lib/provider/runner/runner-upgrade.js";
+import type { SessionRunner } from "../../../src/lib/provider/runner/session-runner.js";
 import { makeMockConfig } from "../../helpers/mock-factories.js";
 
 const roots: string[] = [];
@@ -579,3 +591,195 @@ it("removing a Claude scope aborts its actual in-flight SDK capability probe", a
 		),
 	);
 });
+
+// A failed reattachment must release the previous attachment's account demand.
+// Later successful adoption opens one new generation, and releases it once.
+it("quarantining a Claude reattachment releases its account scope before successful readoption", async () => {
+	const root = mkdtempSync("/tmp/cqs-");
+	roots.push(root);
+	const state = accountsStateFromInstances(
+		[{ id: "a", name: "A", driver: "claude", configDir: root }],
+		{ _tag: "Configured", path: root },
+	);
+	const account = state.accounts[0];
+	if (!account) throw new Error("Missing fixture account");
+	const sessionId = "quarantine-account-scope";
+	const runnerId = "abcdefabcdef";
+	const directory = runnerDirectory(root, root);
+	mkdirSync(directory, { recursive: true });
+	const socketPath = join(directory, runnerId);
+	const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+		stdio: "ignore",
+	});
+	const pid = child.pid;
+	if (!pid) throw new Error("Missing fixture process");
+	const exited = new Promise<void>((done) => child.once("exit", () => done()));
+	const launch = {
+		sessionId,
+		account,
+		instanceId: account.id,
+		workspaceRoot: root,
+		extraFolders: [],
+		providerState: {},
+		configDir: { _tag: "Configured" as const, path: root },
+		folderSource: "account" as const,
+		model: { providerId: "claude", modelId: "default" },
+		shellEnv: { HOME: root },
+	};
+	const busy: RunnerUpgradeState = {
+		quiescent: false,
+		revision: 1,
+		snapshot: { input: launch, options: {} },
+	};
+	const sockets = new Set<Socket>();
+	let peer: ClaudeRunnerSocket | undefined;
+	let rejecting = false;
+	let opens = 0;
+	let closes = 0;
+	let passed = false;
+	const observations: Record<string, unknown>[] = [];
+	const server = createServer((socket) => {
+		sockets.add(socket);
+		socket.once("close", () => sockets.delete(socket));
+		if (rejecting) {
+			socket.once("data", () => socket.destroy());
+			return;
+		}
+		const connection = new ClaudeRunnerSocket(
+			socket,
+			(message) => {
+				if (message.type === "hello")
+					connection.write({
+						type: "hello",
+						protocolVersion: RUNNER_PROTOCOL_VERSION,
+						buildId: BUILD_ID,
+						stampsRunIds: true,
+						rebindsAccount: true,
+						runnerId,
+						sessionId,
+						pid,
+						upgradeState: busy,
+					});
+				if (message.type === "command")
+					connection.write({
+						type: "command-reply",
+						commandId: message.commandId,
+					});
+			},
+			() => {},
+		);
+		peer = connection;
+	});
+	try {
+		await new Promise<void>((done, fail) => {
+			server.once("error", fail);
+			server.listen(socketPath, done);
+		});
+		registerRunner({ runnerId, sessionId, socketPath, buildId: BUILD_ID, pid });
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const accounts = yield* AccountDirectory;
+				const scopes = yield* makeClaudeAccountScopes({
+					accounts: accounts.snapshot,
+					openCapabilities: () =>
+						Effect.gen(function* () {
+							opens++;
+							yield* Effect.addFinalizer(() =>
+								Effect.sync(() => {
+									closes++;
+								}),
+							);
+							return {
+								get: () =>
+									Effect.succeed({ models: [], commands: [], agents: [] }),
+							};
+						}),
+				});
+				for (const phase of ["quarantine", "readopt"] as const) {
+					yield* Effect.scoped(
+						Effect.gen(function* () {
+							const runners: SessionRunner[] = [];
+							const instance = yield* makeClaudeProviderRuntime({
+								workspaceRoot: root,
+								daemonConfigDir: root,
+								runnerFactory: (deps, emit) =>
+									makeProcessClaudeSessionRunner(deps, emit).pipe(
+										Effect.tap((runner) =>
+											Effect.sync(() => {
+												runners.push(runner);
+											}),
+										),
+									),
+							}).pipe(Effect.provideService(ClaudeAccountScopes, scopes));
+							const runner = runners[0];
+							if (
+								!runner?.recoverEffect ||
+								!runner.attachSessionsEffect ||
+								!runner.detachSessionEffect ||
+								!runner.hasDemandEffect
+							)
+								throw new Error("Missing process runner lifecycle");
+							yield* runner.recoverEffect;
+							yield* instance.preWarmSessionEffect(launch);
+							yield* Effect.sleep(80);
+							expect(opens).toBe(phase === "quarantine" ? 1 : 2);
+							expect(closes).toBe(phase === "quarantine" ? 0 : 1);
+							if (phase === "quarantine") {
+								rejecting = true;
+								yield* instance.releaseSessionsEffect([sessionId]);
+								yield* runner.attachSessionsEffect([sessionId]);
+								expect(
+									yield* runner.getSessionFailureEffect?.(sessionId) ??
+										Effect.succeed(undefined),
+								).toMatchObject({ code: "runner_quarantined" });
+								expect(yield* runner.hasDemandEffect(sessionId)).toBe(false);
+							} else {
+								peer?.write({
+									type: "upgrade-state",
+									state: { ...busy, quiescent: true },
+								});
+							}
+							yield* Effect.tryPromise(() =>
+								vi.waitFor(() => expect(closes).toBe(opens), { timeout: 2000 }),
+							);
+							yield* instance.releaseSessionsEffect([sessionId]);
+							yield* instance.releaseSessionsEffect([sessionId]);
+							expect(yield* runner.hasDemandEffect(sessionId)).toBe(false);
+							expect(closes).toBe(opens);
+							observations.push({ phase, opens, closes, demand: false });
+						}),
+					);
+					rejecting = false;
+				}
+			}).pipe(
+				Effect.scoped,
+				Effect.provide(
+					Layer.mergeAll(
+						makeAccountResourceScopesLive({ idleTimeoutMs: 20 }),
+						AccountDirectoryStateLive(state),
+					),
+				),
+			),
+		);
+		passed = true;
+	} finally {
+		for (const socket of sockets) socket.destroy();
+		await new Promise<void>((done) => server.close(() => done()));
+		child.kill("SIGKILL");
+		await exited;
+		writeFileSync(
+			"/tmp/82tn9-4-quarantined-account-scope.json",
+			JSON.stringify(
+				{
+					passed,
+					observations,
+					opens,
+					closes,
+					childExited: child.exitCode !== null || child.signalCode !== null,
+				},
+				null,
+				2,
+			),
+		);
+	}
+}, 20_000);

@@ -2252,6 +2252,7 @@ export const makeProcessSessionRunner = (
 					const entry = children.get(sessionId);
 					return (
 						entry !== undefined &&
+						!entry.failure &&
 						!entry.stopping &&
 						!entry.idleExiting &&
 						(entry.upgrade.inFlight || entry.upgrade.state?.quiescent !== true)
