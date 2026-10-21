@@ -13,6 +13,7 @@ import type {
 	PermissionResponse,
 	PreWarmSessionInput,
 	ProviderCall,
+	ProviderControlContext,
 	ProviderNativeSession,
 	QuestionRequest,
 	SendTurnInput,
@@ -107,7 +108,7 @@ export type SessionCommand = (
 			readonly mode: LegacyPermissionMode;
 	  }
 	| { readonly type: "shutdown" }
-) & { readonly call?: ProviderCall };
+) & { readonly call?: ProviderCall; readonly control?: ProviderControlContext };
 
 /** Runtime events and the existing EventSink interaction operations, all data. */
 export type SessionOutput =
@@ -183,6 +184,9 @@ export interface SessionFailure {
 
 /** Effects are execution carriers; only command/output/reply data crosses here. */
 export interface SessionRunner {
+	readonly getControlProcessIdEffect?: (
+		sessionId: string,
+	) => Effect.Effect<string | undefined>;
 	/** Native execution and pending intake, independent of an intake reply. */
 	hasActiveTurnsEffect?(sessionId: string): Effect.Effect<boolean>;
 	readonly recoverEffect?: Effect.Effect<void, SessionFailure>;

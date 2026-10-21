@@ -6,6 +6,7 @@ import {
 	Effect,
 	Fiber,
 	Option,
+	Ref,
 	Schema,
 	Semaphore,
 } from "effect";
@@ -14,6 +15,10 @@ import { AccountSchema } from "../contracts/account.js";
 import { AccountUnroutable } from "../contracts/limit-recovery.js";
 import { getProviderDriver } from "../contracts/provider-instance.js";
 import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
+import {
+	OpenCodeControlTarget,
+	OpenCodeInstancesTag,
+} from "../domain/daemon/Services/opencode-instances-service.js";
 import { mark } from "../domain/daemon/Services/turn-timeline.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
@@ -34,6 +39,8 @@ import {
 	makeReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../persistence/effect/read-query-effect.js";
+import { makeRetireReplacedProcessPrompts } from "../persistence/effect/retire-pending-prompts.js";
+import { SessionRollupProjects } from "../persistence/effect/session-rollup-projects.js";
 import { canonicalEvent } from "../persistence/events.js";
 import { normalizeClaudeLaunchInput } from "./claude/claude-runner-wire.js";
 import type { ClaudeLaunchConfig } from "./claude/claude-sdk-env.js";
@@ -43,6 +50,7 @@ import {
 	sendPreparedClaudeTurn,
 } from "./claude/prepare-turn.js";
 import { ProviderInstanceFailure, ProviderNotRegistered } from "./errors.js";
+import { backfillLegacyControlAnswers } from "./legacy-control-outbox.js";
 import { ProviderControlPayloadSchema } from "./orchestration-command-contracts.js";
 import type {
 	OrchestrationEngine,
@@ -74,7 +82,13 @@ const controlErrorSchema = Schema.Struct({
 	_tag: Schema.Literal("ProviderInstanceFailure"),
 	providerId: Schema.String,
 	operation: Schema.String,
-	code: Schema.optionalKey(Schema.Literal("auth_required")),
+	code: Schema.optionalKey(
+		Schema.Literals([
+			"auth_required",
+			"provider_process_gone",
+			"provider_process_unavailable",
+		]),
+	),
 	causeMessage: Schema.String,
 });
 
@@ -223,6 +237,12 @@ const storeFailure =
 		});
 
 export class ProviderSideEffectReactor {
+	private readonly acceptedControls = new Set<string>();
+	private recoveryPrepared = false;
+
+	registerControl(commandId: string): void {
+		this.acceptedControls.add(commandId);
+	}
 	private readonly liveCommands = new Set<string>();
 	private readonly drainingSessions = new Set<string>();
 	private readonly admission = Semaphore.makeUnsafe(1);
@@ -249,6 +269,53 @@ export class ProviderSideEffectReactor {
 		makeInteractions?: ProviderCommandInteractionSinkFactory,
 	): Effect.Effect<void, ProviderCommandStoreFailure> {
 		return Effect.gen({ self: this }, function* () {
+			yield* this.admission.withPermit(
+				Effect.gen({ self: this }, function* () {
+					if (this.recoveryPrepared) return;
+					yield* backfillLegacyControlAnswers(this.options).pipe(
+						Effect.mapError(storeFailure("backfillLegacyAnswers")),
+					);
+					// A prior daemon may have died after selection or delivery. The
+					// surviving runner deduplicates replay under the same command id.
+					yield* this.options
+						.write(
+							() => this.options
+								.sql`UPDATE provider_command_outbox SET status = 'pending', next_attempt_at = NULL
+					WHERE project_key = ${this.options.projectId} AND effect_type <> 'send_turn' AND status = 'running'
+						AND command_id NOT IN ${this.options.sql.in([...this.acceptedControls])}`,
+						)
+						.pipe(Effect.mapError(storeFailure("recoverControls")));
+					this.recoveryPrepared = true;
+				}),
+			);
+			const registered = yield* SessionRollupProjects;
+			if (registered !== undefined) {
+				// Removed projects retain history but have no executor. Release their
+				// process queue heads before selecting another project's controls.
+				yield* this.options
+					.write(() =>
+						Effect.gen({ self: this }, function* () {
+							const projects = yield* Ref.get(registered);
+							const now = yield* this.currentTimeMillis();
+							const cancelled = yield* this.options.sql<{
+								command_id: string;
+								project_key: string;
+								provider_id: string;
+								effect_type: string;
+							}>`UPDATE provider_command_outbox
+						SET status = 'cancelled', error_code = 'project_inactive', next_attempt_at = NULL, updated_at = ${now}
+						WHERE effect_type <> 'send_turn' AND status IN ('pending', 'running', 'retryable_failed')
+							AND project_key NOT IN ${this.options.sql.in(projects)}
+						RETURNING command_id, project_key, provider_id, effect_type`;
+							for (const row of cancelled)
+								yield* this.options
+									.sql`UPDATE command_receipts SET status = 'side_effect_failed', error_code = 'project_inactive',
+							error = ${JSON.stringify({ _tag: "ProviderInstanceFailure", providerId: row.provider_id, operation: row.effect_type, causeMessage: "The target project is no longer registered" })}, updated_at = ${now}
+							WHERE command_id = ${row.command_id} AND project_key = ${row.project_key} AND status = 'side_effect_requested'`;
+						}),
+					)
+					.pipe(Effect.mapError(storeFailure("cancelInactiveControls")));
+			}
 			const heads = yield* this.nextPendingRequests();
 			yield* Effect.forEach(
 				heads,
@@ -432,8 +499,19 @@ export class ProviderSideEffectReactor {
 				const result = yield* Effect.result(
 					restore(this.runProviderEffect(claimed)),
 				);
-				yield* this.recordControlOutcome(
-					claimed,
+				if (
+					claimed.provider_process_id !== null &&
+					result._tag === "Failure" &&
+					result.failure instanceof ProviderInstanceFailure &&
+					result.failure.code === "provider_process_gone"
+				) {
+					const retire = yield* makeRetireReplacedProcessPrompts;
+					yield* retire(null, {
+						sessionId: claimed.session_id,
+						expiredProcessId: claimed.provider_process_id,
+					}).pipe(Effect.mapError(storeFailure("retireControlProcess")));
+				}
+				const failure =
 					result._tag === "Failure"
 						? result.failure instanceof ProviderInstanceFailure
 							? result.failure
@@ -442,8 +520,11 @@ export class ProviderSideEffectReactor {
 									operation: claimed.effect_type,
 									cause: result.failure,
 								})
-						: undefined,
-				);
+						: undefined;
+				yield* this.recordControlOutcome(claimed, failure);
+				// The request can report a delivery error while the accepted answer
+				// remains owned by the outbox for a later retry.
+				if (failure) return yield* failure;
 				return yield* this.durableOutcome(claimed.command_id);
 			}),
 		);
@@ -459,7 +540,11 @@ export class ProviderSideEffectReactor {
 			liveContext?: LiveSendContext | undefined;
 		},
 	): Effect.Effect<TurnResult, ProviderCommandExecutionError> {
-		if (row.provider_process_id !== null && row.effect_type !== "send_turn")
+		if (
+			(row.provider_process_id !== null ||
+				row.effect_type === "interrupt_turn") &&
+			row.effect_type !== "send_turn"
+		)
 			return this.executeControlRow(row, options?.background ?? false);
 		return Effect.gen({ self: this }, function* () {
 			const startedAt = yield* this.currentTimeMillis();
@@ -1010,41 +1095,140 @@ export class ProviderSideEffectReactor {
 					commandId: row.command_id,
 					providerProcessId: row.provider_process_id,
 				};
-				switch (payload.type) {
-					case "interrupt_turn":
-						yield* instance.interruptTurnEffect(
-							row.session_id,
-							payload.turnIds,
-							call,
-							context,
-						);
-						break;
-					case "resolve_permission":
-						yield* instance.resolvePermissionEffect(
-							row.session_id,
-							payload.nativeRequestId ?? payload.requestId,
-							payload.response?.decision ?? payload.decision,
-							row.provider_process_id,
-							call,
-							{
-								...context,
-								...(payload.response ? { response: payload.response } : {}),
-							},
-						);
-						break;
-					case "resolve_question":
-						yield* instance.resolveQuestionEffect(
-							row.session_id,
-							payload.nativeRequestId ?? payload.requestId,
-							payload.answers,
-							call,
-							{ ...context, operation: payload.operation ?? "reply" },
-						);
-						break;
-					case "end_session":
-						yield* instance.endSessionEffect(row.session_id, call, context);
-						break;
+				const instances = yield* Effect.serviceOption(OpenCodeInstancesTag);
+				if (instance.getControlProcessIdEffect) {
+					const currentProcessId = yield* instance.getControlProcessIdEffect(
+						row.session_id,
+					);
+					if (currentProcessId !== row.provider_process_id)
+						return yield* new ProviderInstanceFailure({
+							providerId: row.provider_id,
+							operation: row.effect_type,
+							// Quarantine hides the control identity while retaining a live
+							// process. Require liveness evidence before retiring its prompts.
+							code:
+								currentProcessId === undefined &&
+								(!instance.hasLiveProcessEffect ||
+									(yield* instance.hasLiveProcessEffect(row.session_id)))
+									? "provider_process_unavailable"
+									: "provider_process_gone",
+							cause: new Error(
+								"The target provider process is unavailable for control delivery",
+							),
+						});
 				}
+				if (instance.providerId === "opencode" && Option.isSome(instances)) {
+					const running = yield* instances.value.ifRunning(
+						call?.account.id ?? row.provider_id,
+						call?.workspaceRoot,
+					);
+					if (
+						Option.isNone(running) ||
+						running.value.promptProcessId !== row.provider_process_id ||
+						(!this.acceptedControls.has(row.command_id) &&
+							!running.value.controlReplaySafe)
+					)
+						return yield* new ProviderInstanceFailure({
+							providerId: row.provider_id,
+							operation: row.effect_type,
+							code:
+								Option.isSome(running) &&
+								running.value.promptProcessId === row.provider_process_id
+									? "provider_process_unavailable"
+									: "provider_process_gone",
+							cause: new Error(
+								"The target OpenCode process cannot be verified for delivery",
+							),
+						});
+					if (
+						payload.type === "resolve_question" &&
+						payload.operation === "reject"
+					) {
+						const client = yield* instances.value
+							.use(call?.account.id ?? row.provider_id, call?.workspaceRoot)
+							.pipe(
+								Effect.provideService(
+									OpenCodeControlTarget,
+									context.providerProcessId,
+								),
+								Effect.mapError(
+									(cause) =>
+										new ProviderInstanceFailure({
+											providerId: row.provider_id,
+											operation: row.effect_type,
+											cause,
+											...(cause.code === "provider_process_gone"
+												? { code: cause.code }
+												: {}),
+										}),
+								),
+							);
+						yield* Effect.tryPromise({
+							try: () =>
+								client.question.reject(
+									payload.nativeRequestId ?? payload.requestId,
+									call?.workspaceRoot,
+								),
+							catch: (cause) =>
+								new ProviderInstanceFailure({
+									providerId: row.provider_id,
+									operation: row.effect_type,
+									cause,
+								}),
+						});
+						return REACTOR_COMPLETED_RESULT;
+					}
+				}
+				const deliver = Effect.gen(function* () {
+					switch (payload.type) {
+						case "interrupt_turn":
+							yield* instance.interruptTurnEffect(
+								row.session_id,
+								payload.turnIds,
+								call,
+								context,
+							);
+							break;
+						case "resolve_permission":
+							yield* instance.resolvePermissionEffect(
+								row.session_id,
+								payload.nativeRequestId ?? payload.requestId,
+								payload.response?.decision ?? payload.decision,
+								context.providerProcessId,
+								call,
+								{
+									...context,
+									...(payload.response ? { response: payload.response } : {}),
+								},
+							);
+							break;
+						case "resolve_question":
+							yield* instance.resolveQuestionEffect(
+								row.session_id,
+								payload.nativeRequestId ?? payload.requestId,
+								payload.answers,
+								call,
+								{ ...context, operation: payload.operation ?? "reply" },
+							);
+							break;
+						case "end_session":
+							yield* instance.endSessionEffect(row.session_id, call, context);
+							break;
+					}
+				});
+				yield* deliver.pipe(
+					Effect.provideService(OpenCodeControlTarget, row.provider_process_id),
+					Effect.mapError((failure) =>
+						providerFailureCode(failure) === "provider_process_gone"
+							? new ProviderInstanceFailure({
+									providerId: row.provider_id,
+									operation: row.effect_type,
+									code: "provider_process_gone",
+									cause: failure.cause,
+								})
+							: failure,
+					),
+				);
 				return REACTOR_COMPLETED_RESULT;
 			}
 			if (row.effect_type === "send_turn") {
@@ -1259,25 +1443,12 @@ export class ProviderSideEffectReactor {
 				return result;
 			}
 			if (row.effect_type === "interrupt_turn") {
-				const call = yield* this.options.resolveSessionCallContext?.(
-					row.session_id,
-					undefined,
-					row.run_id ? { runId: row.run_id } : undefined,
-				) ?? Effect.succeed(undefined);
-				const account =
-					call?.account ??
-					(this.options.accountDirectory
-						? yield* this.options.accountDirectory
-								.resolve({ _tag: "Id", id: row.provider_id })
-								.pipe(Effect.mapError(storeFailure("resolveReplayAccount")))
-						: undefined);
-				const instance = yield* this.options.registry.getInstanceEffect(
-					call?.account.driver ?? account?.driver ?? row.provider_id,
-				);
-				yield* call
-					? instance.interruptTurnEffect(row.session_id, undefined, call)
-					: instance.interruptTurnEffect(row.session_id);
-				return REACTOR_COMPLETED_RESULT;
+				return yield* new ProviderInstanceFailure({
+					providerId: row.provider_id,
+					operation: row.effect_type,
+					code: "provider_process_gone",
+					cause: new Error("Legacy control has no captured provider process"),
+				});
 			}
 			return yield* Effect.fail(
 				new UnknownProviderCommandEffect({
@@ -1285,7 +1456,7 @@ export class ProviderSideEffectReactor {
 					code: "unknown_provider_command_effect",
 				}),
 			);
-		});
+		}).pipe(Effect.scoped);
 	}
 
 	private awaitIntake(row: ProviderCommandOutboxRow) {
@@ -1447,6 +1618,13 @@ export class ProviderSideEffectReactor {
 		row: ProviderCommandOutboxRow,
 		failure?: ProviderInstanceFailure,
 	): Effect.Effect<void, ProviderCommandStoreFailure> {
+		const retryable =
+			failure !== undefined &&
+			(row.effect_type === "resolve_permission" ||
+				row.effect_type === "resolve_question") &&
+			failure.code !== "provider_process_gone" &&
+			failure.code !== "provider_process_unavailable" &&
+			!(isRecord(failure.cause) && failure.cause["retryable"] === false);
 		return this.options
 			.write(() =>
 				Effect.gen({ self: this }, function* () {
@@ -1467,16 +1645,23 @@ export class ProviderSideEffectReactor {
 							})
 						: null;
 					const changed = yield* this.options
-						.sql`UPDATE provider_command_outbox SET status = ${failure ? "failed" : "completed"}, error_code = ${errorCode}, next_attempt_at = NULL, updated_at = ${updatedAt}
+						.sql`UPDATE provider_command_outbox SET status = ${failure?.code === "provider_process_gone" || failure?.code === "provider_process_unavailable" ? "cancelled" : retryable ? "retryable_failed" : failure ? "failed" : "completed"}, error_code = ${errorCode}, next_attempt_at = ${retryable ? updatedAt + Duration.toMillis((this.options.retryBackoff ?? defaultRetryBackoff)(row.attempt_count)) : null}, updated_at = ${updatedAt}
 				WHERE request_sequence = ${row.request_sequence} AND project_key = ${this.options.projectId}
 					AND status = 'running' AND attempt_count = ${row.attempt_count} RETURNING command_id`;
 					if (changed.length)
 						yield* this.options
-							.sql`UPDATE command_receipts SET status = ${failure ? "side_effect_failed" : "side_effect_completed"}, error_code = ${errorCode}, error = ${errorJson}, updated_at = ${updatedAt}
+							.sql`UPDATE command_receipts SET status = ${retryable ? "side_effect_requested" : failure ? "side_effect_failed" : "side_effect_completed"}, error_code = ${errorCode}, error = ${errorJson}, updated_at = ${updatedAt}
 				WHERE command_id = ${row.command_id} AND project_key = ${this.options.projectId} AND status = 'side_effect_requested'`;
 				}),
 			)
-			.pipe(Effect.mapError(storeFailure("controlOutcome")));
+			.pipe(
+				Effect.tap(() =>
+					Effect.sync(() => {
+						if (!retryable) this.acceptedControls.delete(row.command_id);
+					}),
+				),
+				Effect.mapError(storeFailure("controlOutcome")),
+			);
 	}
 
 	private writeFailure(

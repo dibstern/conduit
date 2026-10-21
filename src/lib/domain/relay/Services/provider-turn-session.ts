@@ -15,7 +15,6 @@ import {
 	settleSessionRuns,
 } from "../../../provider/session-run-settlement.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
-import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import {
 	PendingInteractionServiceTag,
 	type PendingQuestion,
@@ -33,7 +32,6 @@ import {
 } from "./services.js";
 import { SessionManagerServiceTag } from "./session-manager-service.js";
 import { clearProcessingTimeout } from "./session-overrides-state.js";
-import { SessionWorkspaceTag } from "./session-workspace.js";
 
 export const completeRecoveredQuestion = (
 	question: PendingQuestion,
@@ -225,37 +223,6 @@ export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
 		return input.sessionId;
 	});
 
-const interruptLegacyTurn = (input: ProviderTurnServiceInterruptInput) =>
-	Effect.gen(function* () {
-		const log = yield* LoggerTag;
-		const abortResult = yield* Effect.result(
-			Effect.gen(function* () {
-				const read = yield* ReadQueryEffectTag;
-				const row = yield* read.getSession(input.sessionId);
-				if (!row)
-					return yield* Effect.fail(
-						new Error(`Session ${input.sessionId} not found`),
-					);
-				const directory = yield* (yield* SessionWorkspaceTag).get(
-					input.sessionId,
-				);
-				const client = yield* (yield* OpenCodeInstancesTag).use(
-					row.provider,
-					directory,
-				);
-				yield* Effect.tryPromise(() => client.session.abort(input.sessionId));
-			}).pipe(Effect.scoped),
-		);
-		if (abortResult._tag === "Failure") {
-			log.warn(
-				`client=${input.clientId} session=${input.sessionId} Abort failed:`,
-				formatErrorDetail(abortResult.failure),
-			);
-			return yield* Effect.fail(abortResult.failure);
-		}
-		return true;
-	});
-
 export const prepareStop = (input: ProviderTurnServiceInterruptInput) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
@@ -378,11 +345,17 @@ export const interruptTurn = (
 		const account = providerId
 			? yield* (yield* AccountDirectory).resolve({ _tag: "Id", id: providerId })
 			: undefined;
-		if (!account || PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
-			if (!(yield* interruptLegacyTurn(input))) return;
-		} else {
-			if (!PROVIDER_DRIVERS[account.driver].interruptViaEngine) return;
-			const [delivery] = yield* (yield* SqlClient.SqlClient)<{
+		const usesOpenCode =
+			!account || PROVIDER_DRIVERS[account.driver].runsOpenCodeServer;
+		if (
+			account &&
+			!usesOpenCode &&
+			!PROVIDER_DRIVERS[account.driver].interruptViaEngine
+		)
+			return;
+		const fullStop =
+			!usesOpenCode &&
+			(yield* sql<{
 				indeterminate: number;
 			}>`
 				SELECT EXISTS (SELECT 1 FROM provider_command_outbox command
@@ -390,28 +363,31 @@ export const interruptTurn = (
 					WHERE command.session_id = ${input.sessionId} AND command.effect_type = 'send_turn'
 					AND command.status = 'running' AND command.error_code = 'delivery_indeterminate'
 						AND run.id IN ${sql.in(snapshot.owners.map(({ runId }) => runId))}
-					AND run.status IN ('pending', 'running')) AS indeterminate`;
-			const fullStop = delivery?.indeterminate === 1;
-			const interruptResult = yield* Effect.result(
-				engine.dispatchEffect({
-					type: fullStop ? "end_session" : "interrupt_turn",
-					...(!fullStop && snapshot.turnIds.length > 0
-						? { turnIds: snapshot.turnIds }
-						: {}),
-					commandId: input.commandId,
-					sessionId: input.sessionId,
-				}),
+					AND run.status IN ('pending', 'running')) AS indeterminate`)[0]
+				?.indeterminate === 1;
+		const interruptResult = yield* Effect.result(
+			engine.dispatchEffect({
+				type: fullStop ? "end_session" : "interrupt_turn",
+				...(!fullStop && snapshot.turnIds.length > 0
+					? { turnIds: snapshot.turnIds }
+					: {}),
+				commandId: input.commandId,
+				sessionId: input.sessionId,
+			}),
+		);
+		const processGone =
+			interruptResult._tag === "Failure" &&
+			interruptResult.failure._tag === "ProviderInstanceFailure" &&
+			interruptResult.failure.code === "provider_process_gone";
+		if (interruptResult._tag === "Failure" && !processGone) {
+			log.warn(
+				`client=${input.clientId} session=${input.sessionId} engine interrupt_turn failed:`,
+				formatErrorDetail(interruptResult.failure),
 			);
-			if (interruptResult._tag === "Failure") {
-				log.warn(
-					`client=${input.clientId} session=${input.sessionId} engine interrupt_turn failed:`,
-					formatErrorDetail(interruptResult.failure),
-				);
-				return yield* Effect.fail(interruptResult.failure);
-			}
-			// An ordinary turn interrupt keeps the Claude SDK's pending steer alive.
-			if (!fullStop) return;
+			return yield* Effect.fail(interruptResult.failure);
 		}
+		// An ordinary turn interrupt keeps the Claude SDK's pending steer alive.
+		if (!usesOpenCode && !fullStop && !processGone) return;
 		const ingestion = yield* ProviderRuntimeIngestionTag;
 		yield* settleSessionRuns(
 			sql,

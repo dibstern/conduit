@@ -389,7 +389,7 @@ function controlProvider(instance: ProviderInstance, kind: ControlKind) {
 describe("OrchestrationEngine durable controls", () => {
 	for (const kind of ["permission", "question"] as const) {
 		it.effect(
-			`${kind} recovery replays legacy answers but leaves outbox-owned answers for the sole outbox executor`,
+			`${kind} recovery registers legacy and outbox-owned answers without delivering either`,
 			() =>
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
@@ -461,15 +461,9 @@ describe("OrchestrationEngine durable controls", () => {
 									});
 						const response = yield* Effect.forkChild(request);
 						yield* Deferred.await(registered);
-						if (!owned) {
-							expect(yield* Fiber.join(response)).toEqual(
-								kind === "permission" ? { decision: "once" } : { Next: "yes" },
-							);
-						} else {
-							yield* TestClock.adjust("1 millis");
-							expect(response.pollUnsafe()).toBeUndefined();
-							yield* Fiber.interrupt(response);
-						}
+						yield* TestClock.adjust("1 millis");
+						expect(response.pollUnsafe()).toBeUndefined();
+						yield* Fiber.interrupt(response);
 					}
 				}).pipe(
 					Effect.provide(
@@ -484,7 +478,7 @@ describe("OrchestrationEngine durable controls", () => {
 
 	for (const kind of CONTROL_KINDS) {
 		it.effect(
-			`${kind} rejects stripping the accepted process target when replayed through the compatibility path`,
+			`${kind} reuses the accepted process target when replayed without an explicit target`,
 			() =>
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
@@ -499,13 +493,11 @@ describe("OrchestrationEngine durable controls", () => {
 					const result = yield* Effect.result(
 						engine.dispatchEffect(unqualified),
 					);
-					expect(result._tag).toBe("Failure");
-					if (result._tag === "Failure")
-						expect(result.failure).toMatchObject({
-							_tag: "CommandFingerprintMismatch",
-							commandId: command.commandId,
-						});
+					expect(result._tag).toBe("Success");
 					expect(controlProvider(instance, kind)).toHaveBeenCalledOnce();
+					expect(
+						yield* sql`SELECT json_extract(payload_json, '$.providerProcessId') AS provider_process_id FROM provider_command_outbox WHERE command_id = ${command.commandId}`,
+					).toEqual([{ provider_process_id: "process-1" }]);
 				}).pipe(Effect.provide(makeFixtureLayer())),
 		);
 
@@ -773,7 +765,7 @@ describe("OrchestrationEngine durable controls", () => {
 		);
 
 		it.effect(
-			`${kind} replays the stored typed provider failure after its accepting waiter detaches`,
+			`${kind} replays a nonretryable typed provider failure after its accepting waiter detaches`,
 			() =>
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
@@ -792,7 +784,9 @@ describe("OrchestrationEngine durable controls", () => {
 										providerId: "opencode",
 										operation: "control",
 										code: "auth_required",
-										cause: new Error("Control delivery denied"),
+										cause: Object.assign(new Error("Control delivery denied"), {
+											retryable: false,
+										}),
 									}),
 								),
 							),
@@ -1447,10 +1441,10 @@ describe("OrchestrationEngine durable receipts", () => {
 					expect.soft(observed.acceptedRuns).toEqual([]);
 				}).pipe(Effect.provide(makeFixtureLayer())),
 		);
-	for (const durable of [false, true])
+	for (const explicitProcessTarget of [false, true])
 		for (const targetProviderId of [undefined, "account-b"] as const)
 			it.effect(
-				`ends ${targetProviderId ? "explicitly targeted B" : "running A"} after rebinding from Claude A to Cursor B (durable=${durable})`,
+				`ends ${targetProviderId ? "explicitly targeted B" : "running A"} after rebinding from Claude A to Cursor B (explicitProcessTarget=${explicitProcessTarget})`,
 				() =>
 					Effect.gen(function* () {
 						const sql = yield* SqlClient.SqlClient;
@@ -1504,7 +1498,9 @@ describe("OrchestrationEngine durable receipts", () => {
 							commandId: "end-rebound-session",
 							sessionId: "session-1",
 							...(targetProviderId ? { targetProviderId } : {}),
-							...(durable ? { providerProcessId: "process-1" } : {}),
+							...(explicitProcessTarget
+								? { providerProcessId: "process-1" }
+								: {}),
 						});
 						const selected = targetProviderId ? cursor : claude;
 						const other = targetProviderId ? claude : cursor;
@@ -1521,22 +1517,20 @@ describe("OrchestrationEngine durable receipts", () => {
 								extraFolders: [],
 								shellEnv: {},
 							},
-							...(durable
-								? [
-										{
-											commandId: "end-rebound-session",
-											providerProcessId: "process-1",
-										},
-									]
-								: []),
+							{
+								commandId: "end-rebound-session",
+								providerProcessId: explicitProcessTarget
+									? "process-1"
+									: "absent:end-rebound-session",
+							},
 						);
 						expect(other.endSessionEffect).not.toHaveBeenCalled();
 					}).pipe(Effect.provide(makeFixtureLayer())),
 			);
-	for (const durable of [false, true])
+	for (const explicitProcessTarget of [false, true])
 		for (const fallback of [false, true])
 			it.effect(
-				`reaches controls after their admitted account is tombstoned (fallback=${fallback}, durable=${durable})`,
+				`reaches controls after their admitted account is tombstoned (fallback=${fallback}, explicitProcessTarget=${explicitProcessTarget})`,
 				() =>
 					Effect.gen(function* () {
 						const sql = yield* SqlClient.SqlClient;
@@ -1693,7 +1687,9 @@ describe("OrchestrationEngine durable receipts", () => {
 							const outcome = yield* Effect.result(
 								engine.dispatchEffect({
 									...command,
-									...(durable ? { providerProcessId: "control-process" } : {}),
+									...(explicitProcessTarget
+										? { providerProcessId: "control-process" }
+										: {}),
 								}),
 							);
 							expect.soft(outcome).toMatchObject({
@@ -1710,35 +1706,24 @@ describe("OrchestrationEngine durable receipts", () => {
 						};
 						expect
 							.soft(instance.interruptTurnEffect)
-							.toHaveBeenCalledExactlyOnceWith(
-								"session-1",
-								undefined,
-								call,
-								...(durable
-									? [
-											{
-												commandId: "control-stop",
-												providerProcessId: "control-process",
-											},
-										]
-									: []),
-							);
+							.toHaveBeenCalledExactlyOnceWith("session-1", undefined, call, {
+								commandId: "control-stop",
+								providerProcessId: explicitProcessTarget
+									? "control-process"
+									: "absent:control-stop",
+							});
 						expect
 							.soft(instance.resolvePermissionEffect)
 							.toHaveBeenCalledExactlyOnceWith(
 								"session-1",
 								"control-permission",
 								"once",
-								durable ? "control-process" : undefined,
+								"control-process",
 								call,
-								...(durable
-									? [
-											{
-												commandId: "control-allow",
-												providerProcessId: "control-process",
-											},
-										]
-									: []),
+								{
+									commandId: "control-allow",
+									providerProcessId: "control-process",
+								},
 							);
 						expect
 							.soft(instance.resolveQuestionEffect)
@@ -1747,15 +1732,11 @@ describe("OrchestrationEngine durable receipts", () => {
 								"control-question",
 								{},
 								call,
-								...(durable
-									? [
-											{
-												commandId: "control-answer",
-												providerProcessId: "control-process",
-												operation: "reply",
-											},
-										]
-									: []),
+								{
+									commandId: "control-answer",
+									providerProcessId: "control-process",
+									operation: "reply",
+								},
 							);
 						yield* sql`UPDATE provider_runs SET status = 'completed' WHERE id = 'control-run'`;
 						for (const targetProviderId of [undefined, account.id]) {
@@ -1765,7 +1746,9 @@ describe("OrchestrationEngine durable receipts", () => {
 									commandId: `control-end-settled-${targetProviderId}`,
 									sessionId: "session-1",
 									...(targetProviderId ? { targetProviderId } : {}),
-									...(durable ? { providerProcessId: "control-process" } : {}),
+									...(explicitProcessTarget
+										? { providerProcessId: "control-process" }
+										: {}),
 								}),
 							);
 							expect.soft(outcome).toMatchObject({ _tag: "Success" });
@@ -1776,28 +1759,20 @@ describe("OrchestrationEngine durable receipts", () => {
 								index,
 								"session-1",
 								call,
-								...(durable
-									? [
-											expect.objectContaining({
-												providerProcessId: "control-process",
-											}),
-										]
-									: []),
+								expect.objectContaining({
+									providerProcessId: explicitProcessTarget
+										? "control-process"
+										: expect.stringMatching(/^absent:control-end/),
+								}),
 							);
 						}
-						if (durable) {
-							const rows = yield* sql<{
-								payload_json: string;
-							}>`SELECT payload_json FROM provider_command_outbox WHERE effect_type != 'send_turn'`;
-							expect(rows).toHaveLength(8);
-							for (const row of rows) {
-								expect(row.payload_json).not.toContain(
-									"synthetic-admitted-key",
-								);
-								expect(row.payload_json).not.toContain(
-									"synthetic-fallback-key",
-								);
-							}
+						const rows = yield* sql<{
+							payload_json: string;
+						}>`SELECT payload_json FROM provider_command_outbox WHERE effect_type != 'send_turn'`;
+						expect(rows).toHaveLength(8);
+						for (const row of rows) {
+							expect(row.payload_json).not.toContain("synthetic-admitted-key");
+							expect(row.payload_json).not.toContain("synthetic-fallback-key");
 						}
 						if (fallback) {
 							engine.bindSession("session-1", "control-fallback");
@@ -1809,7 +1784,9 @@ describe("OrchestrationEngine durable receipts", () => {
 								type: "end_session",
 								commandId: "control-end-next-account",
 								sessionId: "session-1",
-								...(durable ? { providerProcessId: "control-process" } : {}),
+								...(explicitProcessTarget
+									? { providerProcessId: "control-process" }
+									: {}),
 							});
 							expect(instance.endSessionEffect).toHaveBeenLastCalledWith(
 								"session-1",
@@ -1818,18 +1795,16 @@ describe("OrchestrationEngine durable receipts", () => {
 									account: nextAccount,
 									extraFolders: [],
 								},
-								...(durable
-									? [
-											{
-												commandId: "control-end-next-account",
-												providerProcessId: "control-process",
-											},
-										]
-									: []),
+								{
+									commandId: "control-end-next-account",
+									providerProcessId: explicitProcessTarget
+										? "control-process"
+										: "absent:control-end-next-account",
+								},
 							);
 						}
 						reviewEvidence[
-							`tombstonedControls:fallback=${fallback}:durable=${durable}`
+							`tombstonedControls:fallback=${fallback}:explicitProcessTarget=${explicitProcessTarget}`
 						] = call;
 					}).pipe(Effect.provide(makeFixtureLayer())),
 			);

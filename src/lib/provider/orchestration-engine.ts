@@ -22,6 +22,7 @@ import type { SqlError } from "effect/sql/SqlError";
 import { type Account, AccountSchema } from "../contracts/account.js";
 import type { SessionScope } from "../contracts/session-scope.js";
 import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
+import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
 import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
@@ -530,28 +531,25 @@ export class OrchestrationEngine {
 	): Effect.Effect<OrchestrationResult, OrchestrationError> {
 		return Effect.gen({ self: this }, function* () {
 			yield* this.ensureMutatingCommandHasId(command);
-			// Caller consolidation is a separate slice. Existing unqualified
-			// controls retain their current path until they capture a process.
-			if (
-				this.durable &&
-				command.type !== "send_turn" &&
-				command.type !== "discover" &&
-				command.providerProcessId !== undefined
-			) {
-				return yield* this.handleDurableControlEffect(command, this.durable);
-			}
 			if (
 				this.durable &&
 				command.type !== "send_turn" &&
 				command.type !== "discover"
 			) {
-				const receipt = yield* this.durable.receipts
-					.checkReceipt(command.commandId)
-					.pipe(Effect.orDie);
-				if (receipt)
-					return yield* Effect.fail(
-						new CommandFingerprintMismatch({ commandId: command.commandId }),
-					);
+				// Retries keep the process captured by the original acceptance.
+				const [stored] = yield* this.durable.sql<{
+					provider_process_id: string | null;
+				}>`SELECT provider_process_id FROM provider_command_outbox WHERE command_id = ${command.commandId} AND project_key = ${this.durable.projectId} AND effect_type <> 'send_turn' LIMIT 1`.pipe(
+					Effect.orDie,
+				);
+				const providerProcessId =
+					command.providerProcessId ??
+					stored?.provider_process_id ??
+					(yield* this.resolveControlProcessEffect(command));
+				return yield* this.handleDurableControlEffect(
+					{ ...command, providerProcessId },
+					this.durable,
+				);
 			}
 			if (!command.commandId) {
 				return yield* this.runCommandEffect(command);
@@ -643,6 +641,66 @@ export class OrchestrationEngine {
 			: this.handleInlineSendTurnEffect(command);
 	}
 
+	private resolveControlProcessEffect(
+		command:
+			| InterruptTurnCommand
+			| ResolvePermissionCommand
+			| ResolveQuestionCommand
+			| EndSessionCommand,
+	): Effect.Effect<string, OrchestrationError> {
+		return Effect.gen({ self: this }, function* () {
+			if (
+				this.durable &&
+				(command.type === "resolve_permission" ||
+					command.type === "resolve_question")
+			) {
+				const [prompt] = yield* this.durable.sql<{
+					provider_process_id: string | null;
+				}>`SELECT provider_process_id FROM pending_approvals WHERE id = ${command.requestId} AND session_id = ${command.sessionId}`.pipe(
+					Effect.orDie,
+				);
+				if (prompt?.provider_process_id) return prompt.provider_process_id;
+			}
+			const providerId =
+				command.type === "end_session" && command.targetProviderId
+					? command.targetProviderId
+					: yield* this.requireProviderForSessionEffect(command.sessionId);
+			const call = yield* this.resolveSessionCallContextEffect(
+				command.sessionId,
+				command.type === "end_session" ? command.account : undefined,
+				command.type === "interrupt_turn" && command.turnIds
+					? { turnIds: command.turnIds }
+					: command.type === "end_session"
+						? {
+								includeSettledForProviderId:
+									command.targetProviderId ?? command.account?.id ?? providerId,
+								...(command.targetProviderId
+									? { providerId: command.targetProviderId }
+									: {}),
+							}
+						: undefined,
+			);
+			const instance = yield* this.getProviderInstanceEffect(
+				providerId,
+				call?.account,
+			);
+			if (instance.getControlProcessIdEffect)
+				return (
+					(yield* instance.getControlProcessIdEffect(command.sessionId)) ??
+					`absent:${command.commandId}`
+				);
+			const instances = yield* Effect.serviceOption(OpenCodeInstancesTag);
+			if (Option.isSome(instances)) {
+				const running = yield* instances.value
+					.ifRunning(call?.account.id ?? providerId, call?.workspaceRoot)
+					.pipe(Effect.scoped);
+				if (Option.isSome(running) && running.value.promptProcessId)
+					return running.value.promptProcessId;
+			}
+			return `absent:${command.commandId}`;
+		});
+	}
+
 	private handleDurableControlEffect(
 		command:
 			| InterruptTurnCommand
@@ -714,7 +772,15 @@ export class OrchestrationEngine {
 							const [session] = yield* durable.sql<{
 								id: string;
 							}>`SELECT id FROM sessions WHERE id = ${command.sessionId} AND project_id = ${durable.projectId}`;
-							if (!session)
+							const deleted =
+								!session &&
+								command.type === "end_session" &&
+								command.targetProviderId
+									? yield* durable.sql`SELECT 1 FROM events
+									WHERE project_id = ${durable.projectId} AND type = 'session.deleted' AND session_id = ${command.sessionId}
+										AND NOT EXISTS (SELECT 1 FROM sessions WHERE id = ${command.sessionId}) LIMIT 1`
+									: [];
+							if (!session && deleted.length === 0)
 								return yield* Effect.fail(
 									new StaleCommandRejected({
 										commandId: command.commandId,
@@ -782,6 +848,7 @@ export class OrchestrationEngine {
 						),
 					);
 				const { providerId, newlyAccepted } = acceptance;
+				if (newlyAccepted) durable.reactor.registerControl(command.commandId);
 				if (
 					newlyAccepted &&
 					(command.type === "end_session" ||
@@ -799,6 +866,14 @@ export class OrchestrationEngine {
 									operation: command.type,
 									cause,
 								}),
+					),
+					// An already absent process satisfies End. Its durable receipt
+					// still records cancellation, while deletion/continuation can finish.
+					Effect.catch((error) =>
+						command.type === "end_session" &&
+						error.code === "provider_process_gone"
+							? Effect.void
+							: Effect.fail(error),
 					),
 				);
 				const owned =

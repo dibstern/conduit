@@ -20,6 +20,7 @@ import {
 	bindTurnTimelineSink,
 	observeTurnTimelineFrame,
 } from "../../domain/daemon/Services/turn-timeline.js";
+import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import { PendingInteractionServiceTag } from "../../domain/relay/Services/pending-interaction-service.js";
 import {
 	type ProviderRuntimeIngestionError,
@@ -37,6 +38,7 @@ import {
 	ClaudeEventPersistEffectTag,
 	type ClaudeEventPersistFailure,
 } from "../../persistence/effect/claude-event-persist-effect.js";
+import { makeRetireReplacedProcessPrompts } from "../../persistence/effect/retire-pending-prompts.js";
 import type { BackgroundTaskTransition } from "../../session/background-liveness.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import { ProviderInstanceFailure } from "../errors.js";
@@ -209,6 +211,24 @@ export class RunnerProviderInstance implements ProviderInstance {
 			);
 		}
 		const accounts = yield* this.deps.accounts;
+		const project = yield* Effect.serviceOption(PersistenceProjectTag);
+		if (Option.isSome(project)) {
+			const retire = yield* makeRetireReplacedProcessPrompts;
+			const sessions = yield* sql<{
+				id: string;
+				provider: string;
+			}>`SELECT id, provider FROM sessions WHERE project_id = ${project.value.projectId}`;
+			for (const session of sessions) {
+				const driver = Result.getOrUndefined(
+					resolveAccount(accounts, { _tag: "Id", id: session.provider }),
+				)?.driver;
+				if (
+					!claimed.has(session.id) &&
+					(driver ?? session.provider) === this.providerId
+				)
+					yield* retire(null, { sessionId: session.id });
+			}
+		}
 		yield* settleUnclaimedRunnerCommands(
 			sql,
 			claimed,
@@ -294,6 +314,9 @@ export class RunnerProviderInstance implements ProviderInstance {
 						providerId: this.providerId,
 						operation: failure.operation,
 						cause: Object.assign(new Error(failure.message), failure),
+						...(failure.code === "provider_process_gone"
+							? { code: failure.code }
+							: {}),
 					}),
 			),
 		);
@@ -310,6 +333,15 @@ export class RunnerProviderInstance implements ProviderInstance {
 
 	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
 		return this.runner.hasLiveProcessEffect(sessionId);
+	}
+
+	getControlProcessIdEffect(
+		sessionId: string,
+	): Effect.Effect<string | undefined> {
+		return (
+			this.runner.getControlProcessIdEffect?.(sessionId) ??
+			Effect.succeed(undefined)
+		);
 	}
 
 	getNativeSessionEffect(
@@ -461,7 +493,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 		sessionId: string,
 		turnIds?: readonly string[],
 		call?: ProviderCall,
-		_control?: ProviderControlContext,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		// A bound Stop must leave a pre-warm for a replacement turn alone.
 		return (
@@ -473,6 +505,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 				this.commandEffect({
 					type: "interrupt",
 					sessionId,
+					...(control ? { control } : {}),
 					...(call ? { call } : {}),
 					...(turnIds !== undefined ? { turnIds } : {}),
 				}),
@@ -499,11 +532,12 @@ export class RunnerProviderInstance implements ProviderInstance {
 		decision: PermissionDecision,
 		_providerProcessId?: string,
 		call?: ProviderCall,
-		_control?: ProviderControlContext,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.commandEffect({
 			type: "resolve-permission",
 			sessionId,
+			...(control ? { control } : {}),
 			...(call ? { call } : {}),
 			requestId,
 			decision,
@@ -514,11 +548,12 @@ export class RunnerProviderInstance implements ProviderInstance {
 		requestId: string,
 		answers: Record<string, unknown>,
 		call?: ProviderCall,
-		_control?: ProviderControlContext,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.commandEffect({
 			type: "resolve-question",
 			sessionId,
+			...(control ? { control } : {}),
 			...(call ? { call } : {}),
 			requestId,
 			answers,
@@ -555,13 +590,14 @@ export class RunnerProviderInstance implements ProviderInstance {
 	endSessionEffect(
 		sessionId: string,
 		call?: ProviderCall,
-		_control?: ProviderControlContext,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return FiberMap.remove(this.preWarmFibers, sessionId).pipe(
 			Effect.andThen(
 				this.commandEffect({
 					type: "end-session",
 					sessionId,
+					...(control ? { control } : {}),
 					...(call ? { call } : {}),
 				}),
 			),
@@ -650,28 +686,11 @@ export class RunnerProviderInstance implements ProviderInstance {
 						? yield* Deferred.make<void>()
 						: undefined;
 					if (registered) this.recoveredRequests.set(requestKey, registered);
+					// Registration and UI waiters belong here; only the outbox delivers answers.
 					const request = Effect.suspend(() =>
 						output.type === "permission-request"
-							? sink.requestPermission(output.request).pipe(
-									Effect.flatMap((response) =>
-										this.runner.executeEffect({
-											type: "answer-permission",
-											sinkId: output.sinkId,
-											requestId: output.request.requestId,
-											response,
-										}),
-									),
-								)
-							: sink.requestQuestion(output.request).pipe(
-									Effect.flatMap((answers) =>
-										this.runner.executeEffect({
-											type: "answer-question",
-											sinkId: output.sinkId,
-											requestId: output.request.requestId,
-											answers,
-										}),
-									),
-								),
+							? sink.requestPermission(output.request).pipe(Effect.asVoid)
+							: sink.requestQuestion(output.request).pipe(Effect.asVoid),
 					);
 					yield* FiberMap.run(
 						this.interactionFibers,

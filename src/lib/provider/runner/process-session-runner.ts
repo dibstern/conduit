@@ -379,6 +379,7 @@ export const makeProcessSessionRunner = (
 			});
 		const children = new Map<string, RunnerChild>();
 		const candidates = new Set<RunnerChild>();
+		const quarantined = new Map<string, SessionFailure>();
 		// Liveness only: evicted children whose OS process may not have exited
 		// yet. Pruned lazily by pid, never consulted for ownership.
 		const exiting = new Set<RunnerChild>();
@@ -490,6 +491,23 @@ export const makeProcessSessionRunner = (
 				if (entry.endingReleased)
 					yield* Deferred.succeed(entry.endingReleased, undefined);
 			});
+		const quarantine = (entry: RunnerChild, cause: SessionFailure) =>
+			Effect.gen(function* () {
+				const failure: SessionFailure = {
+					...cause,
+					code: "runner_quarantined",
+					message: `Session ${entry.sessionId} is quarantined: ${cause.message}. Runner ${entry.runnerId} (pid ${entry.pid}) is still alive. Stop it and restart Conduit before sending again.`,
+					retryable: false,
+				};
+				// Retain the entry, registration and spool. Neither a failed send nor
+				// a late socket callback may replace this process or retire its prompts.
+				quarantined.set(entry.sessionId, failure);
+				entry.failure = failure;
+				entry.recovering = false;
+				entry.connection?.destroy();
+				yield* releaseEntryWaiters(entry, Cause.fail(failure));
+				log.warn(failure.message);
+			});
 		const detach = (entry: RunnerChild) => {
 			entry.connection?.destroy();
 			entry.child?.unref();
@@ -562,6 +580,14 @@ export const makeProcessSessionRunner = (
 						if (owner?.run_id) reservations.add(owner.run_id);
 					}
 				yield* Deferred.await(entry.stopped);
+				const exitedPid = entry.pid ?? entry.child?.pid;
+				if (!closing && exitedPid !== undefined && !runnerPidAlive(exitedPid)) {
+					const current = children.get(sessionId);
+					yield* retireReplacedPrompts(
+						current && current !== entry ? current.runnerId : null,
+						{ sessionId, expiredProcessId: entry.runnerId },
+					);
+				}
 				if (process.env["NODE_ENV"] === "test")
 					yield* Effect.sleep(
 						Number(process.env["CONDUIT_TEST_RUNNER_FAILURE_DELAY_MS"] ?? 0),
@@ -1222,6 +1248,16 @@ export const makeProcessSessionRunner = (
 		});
 
 		class ProcessSessionRunner implements SessionRunner {
+			getControlProcessIdEffect(
+				sessionId: string,
+			): Effect.Effect<string | undefined> {
+				return Effect.sync(() => {
+					const entry = children.get(sessionId);
+					return entry && !entry.failure && !entry.stopping
+						? entry.runnerId
+						: undefined;
+				});
+			}
 			readonly recoverEffect = Effect.gen(function* () {
 				if (closing)
 					return yield* Effect.fail(
@@ -1326,11 +1362,12 @@ export const makeProcessSessionRunner = (
 							yield* Deferred.fail(entry.ready, failure);
 							yield* stop(entry);
 							if (runnerPidAlive(registration.pid))
-								return yield* Effect.fail(failure);
+								return yield* quarantine(entry, failure);
 							if (!abandoned && sql && ingestion) {
-								// No runner remains current, so retire every pending prompt in this session.
+								// Only this runner's interactions lost their owner.
 								yield* retireReplacedPrompts(null, {
 									sessionId: registration.sessionId,
+									expiredProcessId: registration.runnerId,
 								}).pipe(
 									Effect.mapError((cause) =>
 										runnerFailure("refuse runner interactions", cause),
@@ -1386,7 +1423,7 @@ export const makeProcessSessionRunner = (
 							}
 							// Keep its registration, spool and approval ownership intact.
 							// Startup must not orphan approvals or launch a second runner.
-							return yield* Effect.fail(failure);
+							return yield* quarantine(entry, failure);
 						}
 						if (abandoned) {
 							entry.recovering = false;
@@ -1395,8 +1432,16 @@ export const makeProcessSessionRunner = (
 								closing ? Effect.void : stop(entry),
 							).pipe(
 								Effect.ensuring(Deferred.succeed(entry.drained, undefined)),
-								Effect.ensuring(Effect.sync(() => candidates.delete(entry))),
 							);
+							if (runnerPidAlive(registration.pid))
+								return yield* quarantine(
+									entry,
+									runnerFailure(
+										"recover runner",
+										"Abandoned runner survived stop",
+									),
+								);
+							candidates.delete(entry);
 							return;
 						}
 						const commands = sql
@@ -1696,7 +1741,23 @@ export const makeProcessSessionRunner = (
 									return yield* Effect.fail(
 										runnerFailure(command.type, "Runners are shutting down"),
 									);
+								const refusal = quarantined.get(sessionId);
+								if (refusal) return yield* Effect.fail(refusal);
 								const existing = children.get(sessionId);
+								if (
+									command.control &&
+									(!existing ||
+										existing.runnerId !== command.control.providerProcessId ||
+										existing.failure ||
+										existing.stopping)
+								)
+									return yield* Effect.fail({
+										...runnerFailure(
+											command.type,
+											"The target provider process is no longer running",
+										),
+										code: "provider_process_gone",
+									});
 								if (
 									outputOwner &&
 									(command.type === "answer-permission" ||
@@ -1908,6 +1969,21 @@ export const makeProcessSessionRunner = (
 						entry.draftPreWarm = true;
 					const connection = yield* Deferred.await(entry.ready);
 					if (
+						command.control &&
+						(children.get(sessionId) !== entry ||
+							entry.runnerId !== command.control.providerProcessId ||
+							entry.failure ||
+							entry.stopping ||
+							connection.closed)
+					)
+						return yield* Effect.fail({
+							...runnerFailure(
+								command.type,
+								"The target provider process is no longer running",
+							),
+							code: "provider_process_gone",
+						});
+					if (
 						command.type === "pre-warm" &&
 						(entry.failure ||
 							entry.recovering ||
@@ -1992,7 +2068,10 @@ export const makeProcessSessionRunner = (
 								: command;
 					if (command.type === "send-turn") entry.draftPreWarm = false;
 					let commandId =
-						command.type === "send-turn" ? command.input.inputId : randomUUID();
+						command.control?.commandId ??
+						(command.type === "send-turn"
+							? command.input.inputId
+							: randomUUID());
 					if (
 						command.type === "send-turn" &&
 						sql &&

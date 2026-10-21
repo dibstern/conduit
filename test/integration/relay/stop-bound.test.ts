@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Fiber, Layer, Stream } from "effect";
+import { Context, Effect, Fiber, Layer, Option, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
@@ -145,7 +145,9 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 		() =>
 			Effect.gen(function* () {
 				const scratch = yield* scratchDirectory;
-				const api = makeMockOpenCodeAPI();
+				const api = makeMockOpenCodeAPI({
+					promptProcessId: "opencode:stop-bound-original",
+				});
 				let failOriginalSend: ((cause: Error) => void) | undefined;
 				api.session.prompt = vi
 					.fn(() => Promise.reject<void>(new Error("replacement send failed")))
@@ -155,7 +157,13 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 								failOriginalSend = reject;
 							}),
 					);
-				api.session.abort = vi.fn(() => new Promise<void>(() => {}));
+				let acknowledgeAbort: (() => void) | undefined;
+				api.session.abort = vi.fn(
+					() =>
+						new Promise<void>((resolve) => {
+							acknowledgeAbort = resolve;
+						}),
+				);
 				yield* Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
 					const inbox = yield* SessionInboxTag;
@@ -200,6 +208,18 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 					).toBe("accepted");
 					yield* TestClock.adjust(STOP_ABORT_WAIT_MS - 1);
 					expect(api.session.abort).toHaveBeenCalledOnce();
+					expect(
+						yield* sql`SELECT effect_type, provider_process_id, status FROM provider_command_outbox WHERE command_id = 'stop-original'`,
+					).toEqual([
+						{
+							effect_type: "interrupt_turn",
+							provider_process_id: "opencode:stop-bound-original",
+							status: "running",
+						},
+					]);
+					expect(
+						yield* sql`SELECT status FROM command_receipts WHERE command_id = 'stop-original'`,
+					).toEqual([{ status: "side_effect_requested" }]);
 					expect(api.session.prompt).toHaveBeenCalledOnce();
 					expect(turns.turnFences("session-1").stopping).toBe(true);
 					expect(
@@ -258,6 +278,8 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 					expect(
 						yield* sql`SELECT status, error_code FROM provider_command_outbox WHERE command_id = 'original'`,
 					).toEqual([{ status: "failed", error_code: "interrupted" }]);
+					acknowledgeAbort?.();
+					yield* flushDispatch;
 					vi.mocked(api.session.abort).mockResolvedValue(undefined);
 					const endReplacement = yield* turns.beginStop({
 						clientId: "client-1",
@@ -300,13 +322,76 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 			}),
 	);
 
+	it.effect(
+		"commits Stop against the captured process and cancels it before selecting a replacement",
+		() =>
+			Effect.gen(function* () {
+				const scratch = yield* scratchDirectory;
+				const api = makeMockOpenCodeAPI({
+					promptProcessId: "opencode:captured-process",
+				});
+				const replacement = makeMockOpenCodeAPI({
+					promptProcessId: "opencode:replacement-process",
+				});
+				const ifRunning = vi
+					.fn(() => Effect.succeed(Option.some(replacement)))
+					.mockImplementationOnce(() => Effect.succeed(Option.some(api)));
+				const use = vi.fn(() => Effect.succeed(replacement));
+				const fixture = stopLayer(api, scratch).pipe(
+					Layer.tap((context) =>
+						Effect.sync(() => {
+							const instances = Context.get(context, OpenCodeInstancesTag);
+							vi.spyOn(instances, "ifRunning").mockImplementation(ifRunning);
+							vi.spyOn(instances, "use").mockImplementation(use);
+						}),
+					),
+				);
+				yield* Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const turns = yield* ProviderTurnServiceTag;
+					const stopped = yield* turns.beginStop({
+						clientId: "client-1",
+						sessionId: "session-1",
+						commandId: "stop-replaced-process",
+					});
+					expect(yield* Effect.result(stopped)).toMatchObject({
+						_tag: "Success",
+					});
+					expect(
+						yield* sql`SELECT provider_process_id, status, error_code FROM provider_command_outbox WHERE command_id = 'stop-replaced-process'`,
+					).toEqual([
+						{
+							provider_process_id: "opencode:captured-process",
+							status: "cancelled",
+							error_code: "provider_process_gone",
+						},
+					]);
+					expect(
+						yield* sql`SELECT status, error_code, json_extract(error, '$.causeMessage') AS reason FROM command_receipts WHERE command_id = 'stop-replaced-process'`,
+					).toEqual([
+						{
+							status: "side_effect_failed",
+							error_code: "provider_process_gone",
+							reason: expect.any(String),
+						},
+					]);
+					expect(ifRunning).toHaveBeenCalledTimes(2);
+					expect(use).not.toHaveBeenCalled();
+					expect(api.session.abort).not.toHaveBeenCalled();
+					expect(replacement.session.abort).not.toHaveBeenCalled();
+				}).pipe(Effect.provide(fixture));
+			}),
+	);
+
 	// Work claimed after Stop must survive retirement of the captured cohort.
 	it.effect(
 		"retires only the snapshot when a continuation is claimed before ingestion",
 		() =>
 			Effect.gen(function* () {
 				const scratch = yield* scratchDirectory;
-				const api = makeMockOpenCodeAPI();
+				const api = makeMockOpenCodeAPI({
+					promptProcessId: "opencode:stop-snapshot",
+				});
 				api.session.abort = vi.fn(() => new Promise<void>(() => {}));
 				yield* Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
@@ -363,7 +448,7 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 								Effect.andThen(sql`INSERT INTO provider_command_outbox (
 							request_sequence, command_id, project_key, session_id, provider_id,
 							effect_type, payload_json, run_id, status, attempt_count, requested_at, updated_at
-						) VALUES (2, 'continuation', 'test-project', 'session-1', 'opencode',
+						) VALUES ((SELECT COALESCE(MAX(request_sequence), 0) + 1 FROM provider_command_outbox), 'continuation', 'test-project', 'session-1', 'opencode',
 							'send_turn', '{"inputId":"continuation"}', 'continuation-run', 'running', 1, 1, 1)`),
 								Effect.andThen(ingestBatch(events, options)),
 							),
@@ -395,7 +480,7 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 						yield* sql`SELECT status FROM sessions WHERE id = 'session-1'`,
 					).toEqual([{ status: "busy" }]);
 					expect(
-						yield* sql`SELECT command_id, status FROM provider_command_outbox ORDER BY request_sequence`,
+						yield* sql`SELECT command_id, status FROM provider_command_outbox WHERE effect_type = 'send_turn' ORDER BY request_sequence`,
 					).toEqual([
 						{ command_id: "original", status: "failed" },
 						{ command_id: "continuation", status: "running" },

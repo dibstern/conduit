@@ -42,6 +42,12 @@ export type OpenCodeInstanceEvent = {
 /** Valid only inside the scope that acquired it. */
 export type OpenCodeClient = OpenCodeAPI;
 
+/** Durable controls may select only the process that accepted their prompt/run. */
+export const OpenCodeControlTarget = Context.Reference<string | undefined>(
+	"OpenCodeControlTarget",
+	{ defaultValue: () => undefined },
+);
+
 export class OpenCodeUnavailable extends Data.TaggedError(
 	"OpenCodeUnavailable",
 )<{
@@ -52,6 +58,7 @@ export class OpenCodeUnavailable extends Data.TaggedError(
 		| "spawn-failed"
 		| "unreachable";
 	readonly message: string;
+	readonly code?: "provider_process_gone";
 }> {}
 
 /** The background SDK boundary wraps this expected rejection in a fiber failure. */

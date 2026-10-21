@@ -240,7 +240,7 @@ describe("Claude session process runner", () => {
 		expect(
 			harness.marks.some(
 				(mark) =>
-					mark.kind === "runner-command" && mark.type === "answer-permission",
+					mark.kind === "runner-command" && mark.type === "resolve-permission",
 			),
 		).toBe(true);
 		const history = await browser.history(sessionId);
@@ -685,7 +685,6 @@ describe("Claude session process runner", () => {
 				},
 				{ timeout: 10_000 },
 			);
-			const terminal = persisted(harness, sessionId);
 			// Repeated browser cancellation cannot interrupt the completed first
 			// turn or add another terminal event after notification cleanup.
 			await Effect.runPromise(
@@ -699,6 +698,7 @@ describe("Claude session process runner", () => {
 					(event) => event.type === "turn.interrupted",
 				),
 			).toHaveLength(1);
+			const terminal = persisted(harness, sessionId);
 			await harness.kill();
 			await harness.restart();
 			await harness.connect(sessionId);

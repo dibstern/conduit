@@ -340,7 +340,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 			...(scenario === "uncommitted-ask"
 				? { holdRunnerOutput: "permission-request" as const }
 				: scenario === "committed-answer"
-					? { holdRunnerOutput: "answer-permission" as const }
+					? { holdRunnerOutput: "resolve-permission" as const }
 					: {}),
 		});
 		harnesses.push(harness);
@@ -355,8 +355,10 @@ describe("Claude runners survive server replacement through built dist", () => {
 				: await before.waitFor(
 						(message) => message["type"] === "permission_pending",
 					);
-		if (scenario === "committed-answer" && request)
-			await before.answerApproval(request, "allow_always");
+		const committedAnswer =
+			scenario === "committed-answer" && request
+				? before.answerApproval(request, "allow_always").catch(() => undefined)
+				: undefined;
 		if (scenario === "uncommitted-ask" || scenario === "committed-answer")
 			await vi.waitFor(
 				() =>
@@ -373,6 +375,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 			await harness.waitForExit();
 		} else await harness.kill();
 		await pending;
+		await committedAnswer;
 		expect(existsSync(runner.socketPath)).toBe(true);
 		await harness.restart();
 		const after = await harness.connect(sessionId);

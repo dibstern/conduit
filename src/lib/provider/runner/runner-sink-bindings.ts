@@ -393,6 +393,7 @@ export class RunnerSinkBindings {
 		sessionId: string,
 		requestId: string,
 		decision: PermissionDecision,
+		response?: PermissionResponse,
 	): Effect.Effect<boolean, SessionFailure> {
 		return Effect.gen({ self: this }, function* () {
 			const binding = Array.from(this.sinkBindings.values()).find(
@@ -400,13 +401,17 @@ export class RunnerSinkBindings {
 					binding.sessionId === sessionId && binding.permissions.has(requestId),
 			);
 			if (!binding) return false;
-			yield* binding.sink.resolvePermission(requestId, { decision }).pipe(
-				Effect.mapError((cause) => ({
-					operation: "resolvePermission",
-					message: cause.message,
-					name: cause.name,
-				})),
-			);
+			yield* binding.sink
+				.resolvePermission(requestId, response ?? { decision })
+				.pipe(
+					Effect.mapError((cause) => ({
+						operation: "resolvePermission",
+						message: cause.message,
+						name: cause.name,
+					})),
+				);
+			const waiter = binding.permissions.get(requestId);
+			if (waiter) yield* Deferred.succeed(waiter, response ?? { decision });
 			return true;
 		});
 	}
@@ -414,6 +419,7 @@ export class RunnerSinkBindings {
 		sessionId: string,
 		requestId: string,
 		answers: Record<string, unknown>,
+		operation?: "reply" | "reject",
 	): Effect.Effect<boolean, SessionFailure> {
 		return Effect.gen({ self: this }, function* () {
 			const binding = Array.from(this.sinkBindings.values()).find(
@@ -428,6 +434,15 @@ export class RunnerSinkBindings {
 					name: cause.name,
 				})),
 			);
+			const waiter = binding.questions.get(requestId);
+			if (waiter) {
+				if (operation === "reject")
+					yield* Deferred.fail(waiter, {
+						operation: "requestQuestion",
+						message: "Question rejected",
+					});
+				else yield* Deferred.succeed(waiter, answers);
+			}
 			return true;
 		});
 	}

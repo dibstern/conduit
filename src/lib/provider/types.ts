@@ -382,6 +382,12 @@ export interface ProviderNativeSession {
  * - No streamEvents -- instance pushes via EventSink, no output stream needed
  */
 export interface ProviderInstance {
+	/** Liveness includes quarantined runners that cannot accept controls. */
+	readonly hasLiveProcessEffect?: (sessionId: string) => Effect.Effect<boolean>;
+	/** Process identity captured at control acceptance, without starting work. */
+	readonly getControlProcessIdEffect?: (
+		sessionId: string,
+	) => Effect.Effect<string | undefined>;
 	/** Unique identifier for this provider (e.g. "opencode", "claude") */
 	readonly providerId: string;
 	/** Native identity used for a locally placed input before provider acceptance. */

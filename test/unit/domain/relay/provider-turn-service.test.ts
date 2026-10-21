@@ -2659,14 +2659,15 @@ describe("ProviderTurnService", () => {
 	);
 
 	it.effect(
-		"uses OpenCode abort for an unbound session and clears processing timeout",
+		"dispatches Stop for an unbound session through the engine and clears processing timeout",
 		() => {
 			const api = partialFake<OpenCodeAPI>({
 				session: partialFake<OpenCodeAPI["session"]>({
 					abort: vi.fn(async () => undefined),
 				}),
 			});
-			const { layer } = serviceLayer({ api });
+			const engine = makeEngine();
+			const { layer } = serviceLayer({ api, engine });
 
 			return Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -2680,7 +2681,12 @@ describe("ProviderTurnService", () => {
 				yield* interruptTurn();
 
 				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
-				expect(api.session.abort).toHaveBeenCalledWith("session-1");
+				expect(engine.dispatchEffect).toHaveBeenCalledWith({
+					type: "interrupt_turn",
+					commandId: "cmd-interrupt-default",
+					sessionId: "session-1",
+				});
+				expect(api.session.abort).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(layer));
 		},
 	);
@@ -3010,9 +3016,8 @@ describe("ProviderTurnService", () => {
 					]);
 					const interrupt = yield* Effect.forkChild(interruptTurn());
 					yield* Deferred.await(issued);
-					expect(
-						providerId === "opencode" ? abort : dispatchEffect,
-					).toHaveBeenCalledOnce();
+					expect(dispatchEffect).toHaveBeenCalledOnce();
+					expect(abort).not.toHaveBeenCalled();
 					expect(
 						yield* sql`SELECT status FROM provider_runs ORDER BY id`,
 					).toEqual([

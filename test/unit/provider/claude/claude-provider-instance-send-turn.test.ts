@@ -674,7 +674,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			toolInput: Record<string, unknown>,
 			options: { signal: AbortSignal; toolUseID: string },
 		) => Promise<unknown>;
-		await canUseTool(
+		const permission = canUseTool(
 			"Bash",
 			{ command: "pwd" },
 			{
@@ -682,6 +682,20 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				toolUseID: "tool-session-two",
 			},
 		);
+		await waitForAssertion(() =>
+			expect(sink2.requestPermission).toHaveBeenCalledOnce(),
+		);
+		await Effect.runPromise(
+			instance.resolvePermissionEffect(
+				"session-two",
+				"tool-session-two",
+				"once",
+			),
+		);
+		await expect(permission).resolves.toEqual({
+			behavior: "allow",
+			updatedInput: { command: "pwd" },
+		});
 
 		expect(sink1.requestPermission).not.toHaveBeenCalled();
 		expect(sink2.requestPermission).toHaveBeenCalledTimes(1);
@@ -3896,13 +3910,32 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			}),
 		);
 		expect(rejected.status).toBe("error");
-		const fallback = await Effect.runPromise(
+		const fallbackPromise = Effect.runPromise(
 			instance.sendTurnEffect({
 				...input,
 				startFreshNativeSession: true,
 				nativeResumeFallback: true,
 			}),
 		);
+		await waitForAssertion(() =>
+			expect(sink.requestPermission).toHaveBeenCalledOnce(),
+		);
+		await Effect.runPromise(
+			instance.resolvePermissionEffect(
+				input.sessionId,
+				"fallback-permission",
+				"once",
+			),
+		);
+		await waitForAssertion(() =>
+			expect(sink.requestQuestion).toHaveBeenCalledOnce(),
+		);
+		await Effect.runPromise(
+			instance.resolveQuestionEffect(input.sessionId, "fallback-question", {
+				"0": "Yes",
+			}),
+		);
+		const fallback = await fallbackPromise;
 		expect(fallback.status).toBe("completed");
 		expect(sink.requestPermission).toHaveBeenCalledOnce();
 		expect(sink.requestQuestion).toHaveBeenCalledOnce();
