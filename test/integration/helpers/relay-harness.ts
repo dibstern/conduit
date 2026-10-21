@@ -6,6 +6,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
+import {
+	type DrainReport,
+	EventRetentionTag,
+} from "../../../src/lib/domain/persistence/Services/event-retention.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
 	type ReplayParityReport,
@@ -34,6 +38,9 @@ export interface RelayHarness {
 
 	/** Replay the durable event log and compare its live read model. */
 	checkReplayParity(): Promise<ReplayParityReport>;
+
+	/** Reclaim deleted sessions through the project's production retention service. */
+	drainEventRetention(): Promise<DrainReport>;
 
 	/** Stop the relay and clean up */
 	stop(): Promise<void>;
@@ -129,8 +136,20 @@ export async function createRelayHarness(
 						"version",
 						"session_sidebar.row.version",
 						"sessions.history_complete",
+						// A child's drained wake event need not survive its ancestor.
+						// These read annotations are outside the log (ADR-0013).
+						"sessions.woken_at",
+						"sessions.woken_reason",
+						"session_sidebar.row.snooze.woken_at",
+						"session_sidebar.row.snooze.woken_reason",
 					],
 				}),
+			);
+		},
+
+		drainEventRetention(): Promise<DrainReport> {
+			return stack.effectRuntime.runtime.runPromise(
+				Effect.flatMap(EventRetentionTag, (retention) => retention.drain()),
 			);
 		},
 

@@ -27,6 +27,8 @@ import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-
 import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
 import type { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
 import type { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
+import type { ProviderStateEffectTag } from "../persistence/effect/provider-state-effect.js";
+import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import type { SSEEvent } from "../relay/opencode-events.js";
 import { loadRelaySettings } from "../relay/relay-settings.js";
 import { defaultClaudeSubagentSdk } from "./claude/claude-subagent-materializer.js";
@@ -151,6 +153,8 @@ const createOrchestrationComponentsEffect = (
 	| ProviderRuntimeIngestionTag
 	| EventStoreEffectTag
 	| ProjectionRunnerEffectTag
+	| ProviderStateEffectTag
+	| ReadQueryEffectTag
 > =>
 	Effect.gen(function* () {
 		const registry = new ProviderRegistry();
@@ -370,6 +374,8 @@ export const makeOrchestrationRuntimeLayer = (
 	| ProviderRuntimeIngestionTag
 	| EventStoreEffectTag
 	| ProjectionRunnerEffectTag
+	| ProviderStateEffectTag
+	| ReadQueryEffectTag
 > => {
 	const componentsLayer = Layer.effect(
 		OrchestrationComponentsTag,

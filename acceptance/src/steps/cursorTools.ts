@@ -59,6 +59,16 @@ function publish(page: Page, added: HistoryMessagePart[]): void {
 		{
 			id: "cursor-tools-user",
 			role: "user",
+			// The send's inputId lets this placed prompt replace the browser's copy.
+			inputId: String(
+				requireRpcControl(page)
+					.getRequests()
+					.find(
+						(request) =>
+							request.tag === "input.submit" &&
+							request.payload["text"] === "Render Cursor tools",
+					)?.payload["inputId"],
+			),
 			time: { created: toolsClock.getTime() - 5_000 },
 			parts: [
 				{

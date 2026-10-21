@@ -22,6 +22,7 @@ import {
 	NEVER_CUT_TOOL_NAMES,
 	PREVIEW_CODE_POINTS,
 } from "../tool-wire-projection.js";
+import { inheritForkHistory } from "./inherit-fork-history.js";
 import { rerootSession } from "./sidebar-projection.js";
 
 export class ProjectionError extends Data.TaggedError("ProjectionError")<{
@@ -435,6 +436,13 @@ export const makeSessionProjector = defineProjector(() => ({
 	project: (event, ctx) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
+			if (event.type === "session.created") {
+				for (const id of [event.data.parentId, event.data.forkedFrom]) {
+					if (id === undefined) continue;
+					const [row] = yield* sql`SELECT id FROM sessions WHERE id = ${id}`;
+					if (!row) return { stamped: [], removed: [], collections: [] };
+				}
+			}
 			const written: string[] = [];
 			// Families this event can take members from, which naming the
 			// sessions it wrote does not reach.
@@ -547,6 +555,10 @@ export const makeSessionProjector = defineProjector(() => ({
 				);
 				written.push(...rows.map((row) => row.id));
 			}
+			const inheritsHistory =
+				event.type === "session.created" && event.data.inheritsHistory === true;
+			if (event.type === "session.created" && inheritsHistory)
+				yield* inheritForkHistory(event, ctx.version);
 			// Only these two write a parent.
 			if (event.type === "session.created" || event.type === "session.forked")
 				left.push(...(yield* rerootSession(event.data.sessionId, ctx.version)));
@@ -562,7 +574,9 @@ export const makeSessionProjector = defineProjector(() => ({
 								"approvals",
 								"inputs",
 							] as const)
-						: touch.collections,
+						: inheritsHistory
+							? ([...touch.collections, "messages"] as const)
+							: touch.collections,
 				sidebar: [...touch.stamped, ...touch.removed, ...left],
 			};
 		}).pipe(
@@ -1995,7 +2009,8 @@ export const makeProviderProjector = defineProjector(() => ({
 				return owners(
 					yield* sql<OwnedRow>`
 						INSERT OR IGNORE INTO session_providers (id, session_id, provider, status, activated_at)
-						VALUES (${`${event.data.sessionId}:initial`}, ${event.data.sessionId}, ${event.data.provider}, 'active', ${event.createdAt})
+						SELECT ${`${event.data.sessionId}:initial`}, id, ${event.data.provider}, 'active', ${event.createdAt}
+						FROM sessions WHERE id = ${event.data.sessionId}
 						RETURNING session_id`,
 				);
 			}

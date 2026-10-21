@@ -33,7 +33,7 @@ export function createScrollController(
 	let userDetached = $state(false);
 	let pinned = true;
 	let programmaticScrollCount = 0; // counter — prevents false detach from our own scrolls
-	let resetTimerScheduled = false; // guards against scheduling multiple reset timers
+	let resetTimerScheduled = false; // guards against scheduling multiple reset frames
 	let jumpFrame: number | null = null;
 
 	function cancelJump(): void {
@@ -53,21 +53,17 @@ export function createScrollController(
 		programmaticScrollCount++;
 		pinned = true;
 		container.scrollTop = container.scrollHeight;
-		// Safety reset: setTimeout(0) fires in the NEXT task, which is after
-		// the current rendering cycle (scroll events + rAF). This means:
-		//   scrollToBottom() → scroll events fire → rAF fires → setTimeout fires
-		// By the time the timer fires, all scroll events from this
-		// scrollToBottom() call have been processed and have consumed their
-		// counter slots. The reset cleans up any unconsumed slots (e.g. when
-		// scrollToBottom() didn't change position and no event fired).
-		// Unlike rAF, setTimeout(0) won't fire BETWEEN scroll events, so
-		// it can't zero the counter while events are still pending.
+		// Clear unconsumed slots (a scroll that moved nothing fires no event) on
+		// the next frame. A frame dispatches scroll events before it runs rAF
+		// callbacks, so this always lands after our own event. setTimeout(0) does
+		// not: it can run before the frame, and then rows that render in between
+		// make our own scroll read as the reader leaving the bottom.
 		if (!resetTimerScheduled) {
 			resetTimerScheduled = true;
-			setTimeout(() => {
+			requestAnimationFrame(() => {
 				programmaticScrollCount = 0;
 				resetTimerScheduled = false;
-			}, 0);
+			});
 		}
 	}
 

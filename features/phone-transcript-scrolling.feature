@@ -27,3 +27,14 @@ Scenario: A message from another device follows a transcript parked at the botto
   Then the jump-to-latest control is not visible
   When another device sends the message Sent from my laptop while the phone watches.
   Then the transcript is pinned to the bottom
+
+# Rows that render a beat after a follow scroll, but before its scroll event,
+# must not read as the reader scrolling away.
+Scenario: Late-rendering rows do not detach a transcript that is following
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  And the transcript is pinned to the bottom
+  And the transcript grows by 130 pixels just after First from my laptop. lands
+  When another device sends the message First from my laptop.
+  And another device sends the message Second from my laptop.
+  Then the transcript is pinned to the bottom
