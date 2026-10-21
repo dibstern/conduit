@@ -627,6 +627,7 @@ function query(params: {
 	let taskStopHolding = false;
 	let taskStopHeldRequest: string | undefined;
 	let taskTurnInterrupted = false;
+	let interruptibleTurn = false;
 	let closed = false;
 	let promptIndex = 0;
 	let initializationFinished = false;
@@ -924,6 +925,8 @@ function query(params: {
 							.map((block) => block.text)
 							.join("");
 			const request = currentRequest(prompt);
+			interruptibleTurn =
+				request.startsWith("stall-") || request === "terminal-replay-interrupt";
 			const userUuid = input.uuid ?? randomUUID();
 			if (request === "fail-before-intake")
 				throw new Error("Harness SDK iterator failed before intake");
@@ -1715,12 +1718,19 @@ function query(params: {
 					});
 				}
 			yield stream(sessionId, { type: "content_block_stop", index: 0 });
+			if (interruptibleTurn) {
+				if (request === "terminal-replay-interrupt")
+					mark({ kind: "assistant-held", prompt, queryId });
+				// A control receipt is separate from the native result that ends
+				// these interrupted turns.
+				while (!taskTurnInterrupted && !closed)
+					await new Promise<void>((done) => setTimeout(done, 20));
+				if (closed) return;
+			}
 			const correctionError = request === "task-stop-correction-error";
-			if (
-				(taskTurnInterrupted && request.startsWith("task-stop-foreground")) ||
-				correctionError
-			) {
+			if (taskTurnInterrupted || correctionError) {
 				taskTurnInterrupted = false;
+				interruptibleTurn = false;
 				if (request.includes("correction-duplicate") && proof)
 					while (
 						!existsSync(
@@ -1771,6 +1781,9 @@ function query(params: {
 					permission_denials: [],
 					user_message_uuid: userUuid,
 				};
+				// Exercise recreation after a native terminal and stream end, rather
+				// than depending on Stop to dispose a still-running query.
+				if (request.startsWith("stall-")) return;
 				if (request.includes("correction-steer-boundary") && proof) {
 					mark({
 						kind: "task-stop-turn",
@@ -1789,14 +1802,6 @@ function query(params: {
 				}
 				continue;
 			}
-			if (request.startsWith("stall-"))
-				await new Promise<void>((done) => {
-					params.options?.abortController?.signal.addEventListener(
-						"abort",
-						() => done(),
-						{ once: true },
-					);
-				});
 			const workspaceHintPrefix = "workspace-hint-tools ";
 			const workspaceHintRequest = request
 				.split("\n")
@@ -2205,11 +2210,6 @@ function query(params: {
 					content: [{ type: "text", text: chunks.join("") }],
 				},
 			} as unknown as SDKMessage;
-			if (request === "terminal-replay-interrupt") {
-				mark({ kind: "assistant-held", prompt, queryId });
-				while (!closed) await new Promise<void>((done) => setTimeout(done, 20));
-				return;
-			}
 			if (request.startsWith("task-stop-foreground"))
 				mark({
 					kind: "task-stop-turn",
@@ -2592,7 +2592,7 @@ function query(params: {
 				});
 				throw new Error("Fixture interrupt rejected");
 			}
-			if (taskStopHolding) taskTurnInterrupted = true;
+			if (taskStopHolding || interruptibleTurn) taskTurnInterrupted = true;
 			mark({
 				kind: "query-interrupted",
 				queryId,

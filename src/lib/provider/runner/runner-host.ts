@@ -622,7 +622,19 @@ export const runSessionRunner = (
 								),
 								Effect.matchCauseEffect({
 									onFailure: (cause) =>
-										Effect.sync(() => {
+										Effect.gen(function* () {
+											if (
+												process.env["NODE_ENV"] === "test" &&
+												command.type === "end-session" &&
+												command.control?.retireRunIds
+											) {
+												const gate = join(
+													dirname(socketPath),
+													"conduit-test-hold-retirement-reply",
+												);
+												while (existsSync(gate))
+													yield* Effect.sleep("20 millis");
+											}
 											completedCommands.set(message.commandId, {
 												commandId: message.commandId,
 												failure: runnerFailure(

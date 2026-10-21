@@ -2208,6 +2208,25 @@ export const makeProcessSessionRunner = (
 									)
 								: Effect.succeed(true);
 						if (!(yield* cohortRunning)) return;
+						// A native rejection can arrive after the reply deadline. Terminal
+						// facts already committed by this runner still forbid killing its
+						// successor, even if the run projection has not caught up.
+						const cohortUnconfirmed =
+							sql && command.control?.retireRunIds
+								? sql<{ running: number }>`SELECT EXISTS (
+									SELECT 1 FROM provider_runs owner
+									WHERE owner.session_id = ${sessionId} AND owner.id IN ${sql.in(command.control.retireRunIds)}
+									AND owner.status IN ('pending', 'running') AND NOT EXISTS (
+										SELECT 1 FROM events terminal WHERE terminal.session_id = owner.session_id
+										AND json_extract(terminal.metadata, '$.runId') = owner.id
+										AND terminal.type IN ('turn.completed', 'turn.error', 'turn.interrupted')
+									)) AS running`.pipe(
+										Effect.map(([row]) => row?.running === 1),
+										Effect.mapError((cause) =>
+											runnerFailure("retirement terminal facts", cause),
+										),
+									)
+								: cohortRunning;
 						const settlement = settleExitedRuns(
 							sessionId,
 							entry,
@@ -2230,7 +2249,7 @@ export const makeProcessSessionRunner = (
 									Option.isSome(exit.value) &&
 									!exit.value.value
 										? Effect.void
-										: cohortRunning.pipe(
+										: cohortUnconfirmed.pipe(
 												Effect.flatMap((running) =>
 													running ? stop(entry) : Effect.void,
 												),
@@ -2239,12 +2258,15 @@ export const makeProcessSessionRunner = (
 								Effect.result,
 							);
 						if (
-							(ended._tag === "Success" &&
+							!entry.stopping &&
+							((ended._tag === "Success" &&
 								Option.isSome(ended.success) &&
 								!ended.success.value) ||
-							!(yield* cohortRunning)
+								!(yield* cohortUnconfirmed))
 						)
 							return;
+						// A terminal committed during shutdown cannot skip dead-runner cleanup.
+						if (entry.stopping) yield* Deferred.await(entry.stopped);
 						const pid = entry.pid ?? entry.child?.pid;
 						if (pid !== undefined && runnerPidAlive(pid)) {
 							const failure = runnerFailure(

@@ -133,9 +133,13 @@ describe("runner answer timeout reconciliation", () => {
 	}, 60_000);
 
 	it.each([
-		false,
-		true,
-	])("keeps a consumed answer resolved after timeout, replace runner during reconciliation=%s", async (replaceRunner) => {
+		{ replaceRunner: false, legacyStatus: false },
+		{ replaceRunner: true, legacyStatus: false },
+		{ replaceRunner: false, legacyStatus: true },
+	])("keeps a consumed answer resolved after timeout, replace runner during reconciliation=$replaceRunner, legacy status=$legacyStatus", async ({
+		replaceRunner,
+		legacyStatus,
+	}) => {
 		const harness = await ProcessHarness.start({ restartProof: true });
 		harnesses.push(harness);
 		const browser = await harness.connect();
@@ -159,7 +163,7 @@ describe("runner answer timeout reconciliation", () => {
 			dirname(runner.socketPath),
 			"conduit-test-hold-command-status-reply",
 		);
-		if (replaceRunner) writeFileSync(statusGate, "hold");
+		if (replaceRunner || legacyStatus) writeFileSync(statusGate, "hold");
 		const db = new Database(harness.daemonStorePath());
 		const commandId = randomUUID();
 		const originalRun = db
@@ -205,7 +209,7 @@ describe("runner answer timeout reconciliation", () => {
 					).toHaveLength(1),
 				{ timeout: 10_000 },
 			);
-			if (replaceRunner) {
+			if (replaceRunner || legacyStatus) {
 				await vi.waitFor(
 					() =>
 						expect(
@@ -217,6 +221,8 @@ describe("runner answer timeout reconciliation", () => {
 						).toBe(true),
 					{ timeout: 40_000 },
 				);
+			}
+			if (replaceRunner) {
 				process.kill(runner.pid, "SIGKILL");
 				await vi.waitFor(() =>
 					expect(() => process.kill(runner.pid, 0)).toThrow(),
@@ -234,6 +240,7 @@ describe("runner answer timeout reconciliation", () => {
 					]),
 				{ timeout: 40_000 },
 			);
+			rmSync(statusGate, { force: true });
 			rmSync(gate);
 			await answer;
 			await send;
@@ -277,15 +284,20 @@ describe("runner answer timeout reconciliation", () => {
 			).toHaveLength(1);
 			passed = true;
 		} finally {
+			rmSync(statusGate, { force: true });
 			writeFileSync(
-				replaceRunner
-					? "/tmp/82tn27-3-answer-reconciliation-restart.json"
-					: "/tmp/82tn27-3-answer-reconciliation.json",
+				legacyStatus
+					? "/tmp/82tn27-3-answer-reconciliation-legacy-status.json"
+					: replaceRunner
+						? "/tmp/82tn27-3-answer-reconciliation-restart.json"
+						: "/tmp/82tn27-3-answer-reconciliation.json",
 				JSON.stringify(
 					{
-						scenario: replaceRunner
-							? "consumed-answer-runner-restart-during-reconciliation"
-							: "consumed-answer-late-reply",
+						scenario: legacyStatus
+							? "consumed-answer-unanswered-command-status"
+							: replaceRunner
+								? "consumed-answer-runner-restart-during-reconciliation"
+								: "consumed-answer-late-reply",
 						passed,
 						sessionId,
 						runner,

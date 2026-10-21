@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -376,15 +376,23 @@ describe("Stop delivery preserves its captured cohort", () => {
 	}, 90_000);
 
 	it.each([
-		false,
-		true,
-	])("a delayed retirement preserves its successor, projection delayed=%s", async (projectionDelayed) => {
-		const scenario = projectionDelayed
-			? "delayed-retirement-native-cohort-check"
-			: "delayed-retirement-retained-successor";
-		const proofPath = projectionDelayed
-			? "/tmp/82tn27-3-repair-f3-native-proof.json"
-			: "/tmp/82tn27-3-repair-f3-proof.json";
+		{ projectionDelayed: false, replyDelayed: false },
+		{ projectionDelayed: true, replyDelayed: false },
+		{ projectionDelayed: true, replyDelayed: true },
+	])("a delayed retirement preserves its successor, projection delayed=$projectionDelayed, reply delayed=$replyDelayed", async ({
+		projectionDelayed,
+		replyDelayed,
+	}) => {
+		const scenario = replyDelayed
+			? "delayed-retirement-native-reply"
+			: projectionDelayed
+				? "delayed-retirement-native-cohort-check"
+				: "delayed-retirement-retained-successor";
+		const proofPath = replyDelayed
+			? "/tmp/82tn27-3-repair-f6-native-reply-proof.json"
+			: projectionDelayed
+				? "/tmp/82tn27-3-repair-f3-native-proof.json"
+				: "/tmp/82tn27-3-repair-f3-proof.json";
 		writeProviderCommandOutboxProof(import.meta.url, [
 			{ scenario, passed: false },
 		]);
@@ -404,6 +412,10 @@ describe("Stop delivery preserves its captured cohort", () => {
 		);
 		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (runner?.kind !== "runner-started") throw new Error("Missing runner");
+		const replyGate = join(
+			dirname(runner.socketPath),
+			"conduit-test-hold-retirement-reply",
+		);
 		const db = new Database(harness.daemonStorePath());
 		const commandId = randomUUID();
 		const successorId = randomUUID();
@@ -486,6 +498,8 @@ describe("Stop delivery preserves its captured cohort", () => {
 				captureRunner("after-restart");
 				recovered = await harness.connect(sessionId);
 			}
+			if (replyDelayed)
+				writeFileSync(replyGate, "hold beyond the End deadline");
 			db.exec("DROP TRIGGER hold_retirement");
 			await vi.waitFor(
 				() =>
@@ -516,6 +530,7 @@ describe("Stop delivery preserves its captured cohort", () => {
 				{ status: projectionDelayed ? "running" : "completed" },
 				{ status: "running" },
 			]);
+			rmSync(replyGate, { force: true });
 			if (projectionDelayed) {
 				db.exec("DROP TRIGGER delay_terminal_projection");
 				db.prepare(
@@ -530,6 +545,7 @@ describe("Stop delivery preserves its captured cohort", () => {
 			await recovered.send(sessionId, "after-stale-retirement");
 			passed = true;
 		} finally {
+			rmSync(replyGate, { force: true });
 			captureRunner("finally");
 			const runnersLog = join(harness.configDir, "runners.log");
 			writeFileSync(
@@ -538,6 +554,7 @@ describe("Stop delivery preserves its captured cohort", () => {
 					{
 						scenario,
 						projectionDelayed,
+						replyDelayed,
 						passed,
 						processProof: harness.proof(),
 						sdkMarks: sdkProof(harness),
