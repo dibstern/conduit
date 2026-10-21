@@ -20,7 +20,10 @@ import {
 } from "../Services/session-event-bus.js";
 import { SessionManagerServiceLive } from "../Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../Services/session-manager-state.js";
-import { makeOverridesStateLive } from "../Services/session-overrides-state.js";
+import {
+	makeOverridesStateLive,
+	type OverridesStateTag,
+} from "../Services/session-overrides-state.js";
 import { makeSessionRegistryStateLive } from "../Services/session-registry-state.js";
 import {
 	makePollerPubSubLive,
@@ -45,6 +48,8 @@ export const makeRelayStateLive = (
 		readonly testSendLimit?: number;
 		/** Daemon relays borrow the daemon bus; standalone relays own a local bus. */
 		readonly sessionEventBusLayer?: Layer.Layer<SessionEventBusTag>;
+		/** Borrowing relays must leave session overrides and timers with the daemon. */
+		readonly overridesStateLayer?: Layer.Layer<OverridesStateTag>;
 	} = {},
 ) => {
 	const sessionEventBusLayer =
@@ -68,7 +73,7 @@ export const makeRelayStateLive = (
 				ProjectSettingsLive,
 				Layer.provideMerge(
 					sessionManagerStateAndServiceLive,
-					makeOverridesStateLive(),
+					options.overridesStateLayer ?? makeOverridesStateLive(),
 				),
 			),
 		),

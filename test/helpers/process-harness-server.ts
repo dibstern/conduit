@@ -433,6 +433,101 @@ async function main(): Promise<void> {
 				}),
 		});
 	}
+	if (existsSync(join(root, "daemon-overrides-proof.json"))) {
+		const { OrchestrationEngine } = (await import(
+			pathToFileURL(
+				join(codeRoot, "lib/provider", `orchestration-engine.${extension}`),
+			).href
+		)) as typeof import("../../src/lib/provider/orchestration-engine.js");
+		const overrides = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/relay/Services",
+					`session-overrides-state.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/relay/Services/session-overrides-state.js");
+		const record = (entry: Record<string, unknown>) =>
+			appendFileSync(
+				join(root, "daemon-overrides.ndjson"),
+				`${JSON.stringify({ ...entry, at: Date.now() })}\n`,
+			);
+		const resolveCall = OrchestrationEngine.prototype.resolveCallContextEffect;
+		const seeded = new Set<string>();
+		Object.assign(OrchestrationEngine.prototype, {
+			resolveCallContextEffect(
+				this: InstanceType<typeof OrchestrationEngine>,
+				request: Parameters<typeof resolveCall>[0],
+			) {
+				const engine = this;
+				return Effect.gen(function* () {
+					const sessionId = request.sessionId;
+					if (sessionId) {
+						const fixture = JSON.parse(
+							readFileSync(join(root, "daemon-overrides-proof.json"), "utf8"),
+						) as {
+							seedSession?: string;
+							armSession?: string;
+							inspectSessions?: string[];
+							timeoutMs: number;
+						};
+						if (fixture.armSession === sessionId && !seeded.has(sessionId)) {
+							seeded.add(sessionId);
+							yield* overrides.setAgent(sessionId, "session-only-agent");
+							yield* overrides.startProcessingTimeout(
+								sessionId,
+								fixture.timeoutMs,
+								() => Effect.sync(() => record({ kind: "timeout", sessionId })),
+							);
+						}
+						// Inject transient state at the real relay context. Durable picks
+						// would otherwise hide replacement with startup restoration.
+						if (fixture.seedSession === sessionId && !seeded.has(sessionId)) {
+							seeded.add(sessionId);
+							yield* overrides.setAgent(sessionId, "session-only-agent");
+							const timeout = (yield* Ref.get(
+								yield* overrides.OverridesStateTag,
+							)).processingTimeouts.get(sessionId);
+							if (!timeout)
+								return yield* Effect.die(
+									new Error("Running turn has no timeout"),
+								);
+							yield* overrides.startProcessingTimeout(
+								sessionId,
+								fixture.timeoutMs,
+								() =>
+									Effect.sync(() =>
+										record({ kind: "timeout", sessionId }),
+									).pipe(Effect.andThen(timeout.callback())),
+							);
+						}
+						record({
+							kind: "state",
+							sessionId,
+							defaultAgent: yield* overrides.getDefaultAgent(),
+							overrides: yield* overrides.getOverrides(sessionId),
+							timeoutActive:
+								yield* overrides.hasActiveProcessingTimeout(sessionId),
+							entries: yield* Effect.forEach(
+								fixture.inspectSessions ?? [],
+								(id) =>
+									Effect.gen(function* () {
+										return {
+											sessionId: id,
+											overrides: yield* overrides.getOverrides(id),
+											timeoutActive:
+												yield* overrides.hasActiveProcessingTimeout(id),
+										};
+									}),
+							),
+						});
+					}
+					return yield* resolveCall.call(engine, request);
+				});
+			},
+		});
+	}
 	if (existsSync(join(root, "project-context-proof"))) {
 		const { OrchestrationEngine } = (await import(
 			pathToFileURL(

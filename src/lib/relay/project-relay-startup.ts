@@ -1,4 +1,4 @@
-import { Effect, Exit, Option, Schedule, Scope } from "effect";
+import { Context, Effect, Exit, Option, Schedule, Scope } from "effect";
 import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
@@ -30,7 +30,7 @@ import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import { restoreSessionSettings } from "../domain/relay/Services/session-model-settings.js";
 import {
-	type OverridesStateTag,
+	OverridesStateTag,
 	setDefaultModel,
 	setDefaultPermissionMode,
 	setDefaultVariant,
@@ -129,15 +129,21 @@ function acquireStartupServices(inputs: StartupInputs) {
 		});
 		const statusSnapshot = yield* RelayStatusSnapshotTag;
 		const sseStream = yield* SSEStreamTag;
-		// Defaults come from settings; legacy pick repair uses only stored history.
-		if (initialDefaultModel) {
-			yield* setDefaultModel(initialDefaultModel);
-		}
-		if (initialDefaultVariant) {
-			yield* setDefaultVariant(initialDefaultVariant);
-		}
-		if (relaySettings.defaultPermissionMode !== undefined) {
-			yield* setDefaultPermissionMode(relaySettings.defaultPermissionMode);
+		// The daemon seeds its defaults once. A borrowing relay must not replay
+		// its startup snapshot over a default changed by another project.
+		if (
+			Option.isNone(
+				Context.getOption(
+					config.daemonConfigContext ?? Context.empty(),
+					OverridesStateTag,
+				),
+			)
+		) {
+			if (initialDefaultModel) yield* setDefaultModel(initialDefaultModel);
+			if (initialDefaultVariant)
+				yield* setDefaultVariant(initialDefaultVariant);
+			if (relaySettings.defaultPermissionMode !== undefined)
+				yield* setDefaultPermissionMode(relaySettings.defaultPermissionMode);
 		}
 		// Recover pending state before initialization advances projector cursors.
 		yield* restoreClaudeQuestionsFromStore;

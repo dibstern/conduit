@@ -144,7 +144,7 @@ import {
 } from "../domain/relay/Services/session-event-bus.js";
 import { SessionInboxLive } from "../domain/relay/Services/session-inbox.js";
 import type { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
-import type { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
+import { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
 import {
 	SessionSetupLive,
 	type SessionSetupTag,
@@ -965,9 +965,18 @@ export function createProjectRelayLayers({
 	// baseLayers are defined here; wiringLayers (PermissionTimeoutLive,
 	// SessionLifecycleWiringLive) are added after monitoring state exists
 	// (provides sseTracker, getMonitoringState).
+	const sharedOverrides = Context.getOption(
+		config.daemonConfigContext ?? Context.empty(),
+		OverridesStateTag,
+	);
 	const relayStateAndBridges = Layer.provideMerge(
 		makeRelayStateLive({
 			sessionEventBusLayer,
+			...(Option.isSome(sharedOverrides) && {
+				overridesStateLayer: Layer.succeedContext(
+					Context.make(OverridesStateTag, sharedOverrides.value),
+				),
+			}),
 			...(testSendLimit !== undefined && { testSendLimit }),
 		}),
 		bridgeLayers,

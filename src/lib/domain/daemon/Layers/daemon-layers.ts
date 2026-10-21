@@ -43,6 +43,7 @@ import {
 	captureClaudeLaunchLogin,
 } from "../../../provider/claude/claude-sdk-env.js";
 import { CursorAccountResourcesLive } from "../../../provider/cursor/cursor-account-resources.js";
+import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import {
 	ServerBuildUpdateLive,
 	serverExitCode,
@@ -56,6 +57,7 @@ import {
 	releaseInputDraftClaims,
 } from "../../relay/Services/input-drafts.js";
 import { SessionEventBusLive } from "../../relay/Services/session-event-bus.js";
+import { makeOverridesStateLive } from "../../relay/Services/session-overrides-state.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
 	DaemonHttpRequestHandlerTag,
@@ -720,6 +722,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provide(EnsureCertsLive),
 	);
 	const services = Layer.mergeAll(
+		Layer.suspend(() => makeOverridesStateLive(loadRelaySettings(configDir))),
 		CategorySetLive(configDir),
 		AuthManagerFromConfigLive,
 		tlsCertWithDeps,

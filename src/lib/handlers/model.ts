@@ -374,16 +374,21 @@ export const getModelsResponse = (
 					yield* globalSync.withPermits(1)(
 						Effect.gen(function* () {
 							const state = yield* Ref.get(yield* OverridesStateTag);
+							const previous = state.nativeDefaultModels.get(config.slug);
 							if (
-								state.nativeDefaultModel?.providerID ===
-									nativeDefault?.providerID &&
-								state.nativeDefaultModel?.modelID === nativeDefault?.modelID
+								previous?.providerID === nativeDefault?.providerID &&
+								previous?.modelID === nativeDefault?.modelID
 							)
 								return;
-							yield* Ref.update(yield* OverridesStateTag, (current) => ({
-								...current,
-								nativeDefaultModel: nativeDefault,
-							}));
+							yield* Ref.update(yield* OverridesStateTag, (current) => {
+								const nativeDefaultModels = new Map(
+									current.nativeDefaultModels,
+								);
+								if (nativeDefault)
+									nativeDefaultModels.set(config.slug, nativeDefault);
+								else nativeDefaultModels.delete(config.slug);
+								return { ...current, nativeDefaultModels };
+							});
 							if (state.defaultModel === undefined)
 								yield* publishProjectSetting({
 									_tag: "defaultModel",

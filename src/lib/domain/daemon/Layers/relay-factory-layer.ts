@@ -55,6 +55,7 @@ import {
 } from "../../relay/Services/project-management-service.js";
 import { ScanServiceTag } from "../../relay/Services/scan-service.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
+import { OverridesStateTag } from "../../relay/Services/session-overrides-state.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
 import { CategorySet } from "../Services/category-set.js";
@@ -213,6 +214,7 @@ export const RelayFactoryLive = (
 			const categories = yield* Effect.serviceOption(CategorySet);
 			const sessionDirectory = yield* Effect.serviceOption(SessionDirectory);
 			const projectContext = yield* Effect.serviceOption(ProjectContext);
+			const overrides = yield* Effect.serviceOption(OverridesStateTag);
 			const storeContext = yield* persistenceStoreContext;
 			const sharedDrafts = yield* Effect.serviceOption(InputDraftsTag);
 			const inputDrafts = Option.isSome(sharedDrafts)
@@ -548,6 +550,11 @@ export const RelayFactoryLive = (
 										),
 										Context.add(SessionActivityTag, activity),
 										Context.add(SessionEventBusTag, sessionEventBus),
+										Context.merge(
+											Option.isSome(overrides)
+												? Context.make(OverridesStateTag, overrides.value)
+												: Context.empty(),
+										),
 										Context.add(InputDraftsTag, inputDrafts),
 										Context.add(DaemonEventBusTag, eventBus),
 										Context.add(ProjectRegistryTag, projectRegistry),

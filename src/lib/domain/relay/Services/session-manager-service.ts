@@ -125,6 +125,7 @@ import {
 	unsnoozeSession,
 } from "./session-manager-triage.js";
 import {
+	clearSession,
 	getDefaultPermissionMode,
 	OverridesStateTag,
 	setContextWindow,
@@ -622,6 +623,11 @@ export const deleteSession = (
 			),
 		);
 		if (!applied) return false;
+		const overrides = yield* Effect.serviceOption(OverridesStateTag);
+		if (overrides._tag === "Some")
+			yield* Effect.forEach(deleted, (id) => clearSession(id), {
+				discard: true,
+			}).pipe(Effect.provideService(OverridesStateTag, overrides.value));
 
 		// The delete took the whole lineage, so the cache must forget the whole
 		// lineage: an edge naming a session that no longer exists would put a
@@ -1295,6 +1301,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 								Effect.provideService(SqlClient.SqlClient, sql),
 								Effect.provideService(InputDraftsTag, drafts),
 								Effect.provideService(ConfigTag, config),
+								Effect.provideService(OverridesStateTag, overrides),
 								Effect.provideService(SessionWorkspaceTag, workspace),
 								Effect.provideService(LoggerTag, log),
 								Effect.provideService(RelayStatusSnapshotTag, snapshot),

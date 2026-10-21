@@ -19,7 +19,12 @@ import {
 	Layer,
 	Ref,
 } from "effect";
+import {
+	parseDefaultModel,
+	type RelaySettings,
+} from "../../../relay/relay-settings.js";
 import type { SessionPermissionMode } from "../../../shared-types.js";
+import { ConfigTag } from "./services.js";
 
 export interface ModelOverride {
 	providerID: string;
@@ -35,10 +40,11 @@ export interface SessionState {
 }
 
 export interface OverridesState {
-	sessions: Map<string, SessionState>;
+	sessions: Map<string, SessionState & { readonly projectId?: string }>;
 	processingTimeouts: Map<
 		string,
 		{
+			readonly projectId?: string;
 			readonly callback: () => Effect.Effect<void>;
 			readonly token: symbol;
 			readonly fired?: boolean;
@@ -46,7 +52,7 @@ export interface OverridesState {
 	>;
 	processingTimeoutFibers: FiberMap.FiberMap<string, void>;
 	defaultModel: ModelOverride | undefined;
-	nativeDefaultModel: ModelOverride | undefined;
+	nativeDefaultModels: Map<string, ModelOverride>;
 	defaultAgent: string | undefined;
 	defaultVariant: string;
 	defaultPermissionMode: SessionPermissionMode;
@@ -60,37 +66,51 @@ export class OverridesStateTag extends Context.Service<
 	Ref.Ref<OverridesState>
 >()("OverridesState") {}
 
-export const makeOverridesStateLive = (): Layer.Layer<OverridesStateTag> =>
+export const makeOverridesStateLive = (
+	settings: RelaySettings = {},
+): Layer.Layer<OverridesStateTag> =>
 	Layer.effect(
 		OverridesStateTag,
 		Effect.gen(function* () {
 			const processingTimeoutFibers = yield* FiberMap.make<string, void>();
+			const defaultModel = parseDefaultModel(settings.defaultModel);
 			return yield* Ref.make<OverridesState>({
 				sessions: new Map(),
 				processingTimeouts: new Map(),
 				processingTimeoutFibers,
-				defaultModel: undefined,
-				nativeDefaultModel: undefined,
+				defaultModel,
+				nativeDefaultModels: new Map(),
 				defaultAgent: undefined,
-				defaultVariant: "",
-				defaultPermissionMode: "ask",
+				defaultVariant:
+					defaultModel && settings.defaultModel
+						? (settings.defaultVariants?.[settings.defaultModel] ?? "")
+						: "",
+				defaultPermissionMode: settings.defaultPermissionMode ?? "ask",
 				defaultContextWindow: "",
 			});
 		}),
 	);
 
-/** Get or create a session entry. Pure — returns a new Map when creating. */
-const getOrCreate = (
-	sessions: Map<string, SessionState>,
+/** Session entries keep their owner even when updated outside a relay context. */
+const updateSession = (
 	sessionId: string,
-): [Map<string, SessionState>, SessionState] => {
-	const existing = sessions.get(sessionId);
-	if (existing) return [sessions, existing];
-	const fresh: SessionState = {};
-	const next = new Map(sessions);
-	next.set(sessionId, fresh);
-	return [next, fresh];
-};
+	update: (entry: SessionState) => SessionState,
+) =>
+	Effect.gen(function* () {
+		const ref = yield* OverridesStateTag;
+		const config = yield* Effect.serviceOption(ConfigTag);
+		yield* Ref.update(ref, (state) => {
+			const entry = state.sessions.get(sessionId) ?? {};
+			const sessions = new Map(state.sessions);
+			sessions.set(sessionId, {
+				...update(entry),
+				...(entry.projectId === undefined && config._tag === "Some"
+					? { projectId: config.value.slug }
+					: {}),
+			});
+			return { ...state, sessions };
+		});
+	});
 
 const isCurrentProcessingTimeout = (
 	ref: Ref.Ref<OverridesState>,
@@ -147,7 +167,13 @@ export const getDefaultModel = () =>
 	Effect.gen(function* () {
 		const ref = yield* OverridesStateTag;
 		const state = yield* Ref.get(ref);
-		return state.defaultModel ?? state.nativeDefaultModel;
+		const config = yield* Effect.serviceOption(ConfigTag);
+		return (
+			state.defaultModel ??
+			(config._tag === "Some"
+				? state.nativeDefaultModels.get(config.value.slug)
+				: undefined)
+		);
 	});
 
 /** Set the global default agent. */
@@ -215,15 +241,7 @@ export const getDefaultContextWindow = () =>
 
 /** Set the model stored for a session. */
 export const setModel = (sessionId: string, model: ModelOverride) =>
-	Effect.gen(function* () {
-		const ref = yield* OverridesStateTag;
-		yield* Ref.update(ref, (state) => {
-			const [sessions, entry] = getOrCreate(state.sessions, sessionId);
-			const next = new Map(sessions);
-			next.set(sessionId, { ...entry, model });
-			return { ...state, sessions: next };
-		});
-	});
+	updateSession(sessionId, (entry) => ({ ...entry, model }));
 
 /** Get the session model; missing picks never inherit a default. */
 export const getModel = (sessionId: string) =>
@@ -235,15 +253,7 @@ export const getModel = (sessionId: string) =>
 
 /** Set the agent override for a session. */
 export const setAgent = (sessionId: string, agent: string) =>
-	Effect.gen(function* () {
-		const ref = yield* OverridesStateTag;
-		yield* Ref.update(ref, (state) => {
-			const [sessions, entry] = getOrCreate(state.sessions, sessionId);
-			const next = new Map(sessions);
-			next.set(sessionId, { ...entry, agent });
-			return { ...state, sessions: next };
-		});
-	});
+	updateSession(sessionId, (entry) => ({ ...entry, agent }));
 
 /** Get the agent override for a session. */
 export const getAgent = (sessionId: string) =>
@@ -269,15 +279,7 @@ export const clearAgent = (sessionId: string) =>
 
 /** Set the variant (thinking level) for a session. Empty string clears. */
 export const setVariant = (sessionId: string, variant: string) =>
-	Effect.gen(function* () {
-		const ref = yield* OverridesStateTag;
-		yield* Ref.update(ref, (state) => {
-			const [sessions, entry] = getOrCreate(state.sessions, sessionId);
-			const next = new Map(sessions);
-			next.set(sessionId, { ...entry, variant });
-			return { ...state, sessions: next };
-		});
-	});
+	updateSession(sessionId, (entry) => ({ ...entry, variant }));
 
 /** Get the session effort. */
 export const getVariant = (sessionId: string) =>
@@ -291,16 +293,7 @@ export const getVariant = (sessionId: string) =>
 export const setPermissionMode = (
 	sessionId: string,
 	mode: SessionPermissionMode,
-) =>
-	Effect.gen(function* () {
-		const ref = yield* OverridesStateTag;
-		yield* Ref.update(ref, (state) => {
-			const [sessions, entry] = getOrCreate(state.sessions, sessionId);
-			const next = new Map(sessions);
-			next.set(sessionId, { ...entry, permissionMode: mode });
-			return { ...state, sessions: next };
-		});
-	});
+) => updateSession(sessionId, (entry) => ({ ...entry, permissionMode: mode }));
 
 /**
  * Get the approval mode for a session. A session that has never chosen a mode
@@ -320,15 +313,7 @@ export const getPermissionMode = (
 
 /** Set the context window for a session. Empty string clears. */
 export const setContextWindow = (sessionId: string, contextWindow: string) =>
-	Effect.gen(function* () {
-		const ref = yield* OverridesStateTag;
-		yield* Ref.update(ref, (state) => {
-			const [sessions, entry] = getOrCreate(state.sessions, sessionId);
-			const next = new Map(sessions);
-			next.set(sessionId, { ...entry, contextWindow });
-			return { ...state, sessions: next };
-		});
-	});
+	updateSession(sessionId, (entry) => ({ ...entry, contextWindow }));
 
 /** Get the session context window. */
 export const getContextWindow = (sessionId: string) =>
@@ -359,6 +344,37 @@ export const clearSession = (sessionId: string) =>
 		yield* FiberMap.remove(timeoutFibers, sessionId);
 	});
 
+/** Permanent removal clears project state; relay replacement never calls this. */
+export const clearProject = (projectId: string) =>
+	Effect.gen(function* () {
+		const ref = yield* OverridesStateTag;
+		const { timeoutFibers, sessionIds } = yield* Ref.modify(ref, (state) => {
+			const sessions = new Map(state.sessions);
+			for (const [id, entry] of sessions)
+				if (entry.projectId === projectId) sessions.delete(id);
+			const processingTimeouts = new Map(state.processingTimeouts);
+			const sessionIds: string[] = [];
+			for (const [id, entry] of processingTimeouts) {
+				if (entry.projectId !== projectId) continue;
+				processingTimeouts.delete(id);
+				sessionIds.push(id);
+			}
+			const nativeDefaultModels = new Map(state.nativeDefaultModels);
+			nativeDefaultModels.delete(projectId);
+			return [
+				{ timeoutFibers: state.processingTimeoutFibers, sessionIds },
+				{ ...state, sessions, processingTimeouts, nativeDefaultModels },
+			] as const;
+		});
+		yield* Effect.forEach(
+			sessionIds,
+			(id) => FiberMap.remove(timeoutFibers, id),
+			{
+				discard: true,
+			},
+		);
+	});
+
 /**
  * Start a processing timeout for a session.
  * Cancels any existing timeout fiber, then forks a new fiber that
@@ -371,10 +387,19 @@ export const startProcessingTimeout = (
 ) =>
 	Effect.gen(function* () {
 		const ref = yield* OverridesStateTag;
+		const config = yield* Effect.serviceOption(ConfigTag);
 		const token = Symbol(sessionId);
 		const timeoutFibers = yield* Ref.modify(ref, (state) => {
 			const next = new Map(state.processingTimeouts);
-			next.set(sessionId, { callback: onTimeout, token });
+			const projectId =
+				config._tag === "Some"
+					? config.value.slug
+					: state.sessions.get(sessionId)?.projectId;
+			next.set(sessionId, {
+				...(projectId === undefined ? {} : { projectId }),
+				callback: onTimeout,
+				token,
+			});
 			return [
 				state.processingTimeoutFibers,
 				{ ...state, processingTimeouts: next },
@@ -409,7 +434,7 @@ export const resetProcessingTimeout = (
 			}
 			const token = Symbol(sessionId);
 			const next = new Map(state.processingTimeouts);
-			next.set(sessionId, { callback: entry.callback, token });
+			next.set(sessionId, { ...entry, token, fired: false });
 			return [
 				{
 					callback: entry.callback,
@@ -487,5 +512,8 @@ export const getOverrides = (sessionId: string) =>
 	Effect.gen(function* () {
 		const ref = yield* OverridesStateTag;
 		const state = yield* Ref.get(ref);
-		return state.sessions.get(sessionId);
+		const entry = state.sessions.get(sessionId);
+		if (!entry) return undefined;
+		const { projectId: _, ...overrides } = entry;
+		return overrides;
 	});

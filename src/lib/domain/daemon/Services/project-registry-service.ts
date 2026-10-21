@@ -83,6 +83,10 @@ import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import type { StoredProject } from "../../../types.js";
 import { InputDraftsTag } from "../../relay/Services/input-drafts.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
+import {
+	clearProject,
+	OverridesStateTag,
+} from "../../relay/Services/session-overrides-state.js";
 import { isConduitWorktreePath } from "../Layers/worktree-layer.js";
 import {
 	ConfigPersistenceTag,
@@ -637,6 +641,11 @@ export const remove = (slug: string) =>
 				yield* Effect.gen(function* () {
 					// Relay disposal only detaches; removal ends every registered runner afterwards.
 					yield* relayCache.invalidate(slug);
+					const overrides = yield* Effect.serviceOption(OverridesStateTag);
+					if (Option.isSome(overrides))
+						yield* clearProject(slug).pipe(
+							Effect.provideService(OverridesStateTag, overrides.value),
+						);
 					const state = yield* Ref.get(yield* DaemonStateTag);
 					yield* stopRegisteredRunners(
 						removed.value.project.folders[0],
