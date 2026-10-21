@@ -90,6 +90,7 @@ export const makeRetireReplacedProcessPrompts = Effect.gen(function* () {
 		return (_currentProcessId: string | null, _scope: Scope) =>
 			Effect.succeed(0);
 	const context = (yield* Effect.context<never>()).pipe(
+		Context.omit(PendingInteractionServiceTag),
 		Context.add(SqlClient.SqlClient, sql.value),
 		Context.add(EventStoreEffectTag, eventStore.value),
 		Context.add(ProjectionRunnerEffectTag, projector.value),

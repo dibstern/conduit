@@ -2,13 +2,19 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
-import { Effect, Layer } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, expect, it, vi } from "vitest";
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
-import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import { ProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
+	PendingInteractionServiceLive,
+	PendingInteractionServiceTag,
+} from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import {
+	makeProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionLive,
+} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
@@ -46,10 +52,16 @@ afterEach(async () => {
 
 // Failures: the relay's project rejects A's retained runner, restored bindings
 // lose A's input/run identity, or a partial registry scan settles B's command.
+// Retirement must clear A's old cache entries while preserving its current and
+// legacy prompts and B's cache; a repeated refusal recovery must stay empty.
 it.each([
-	false,
-	true,
-])("adopts a previous-layout runner by stored session provenance with two projects registered, shared root %s", async (sharedRoot) => {
+	{ sharedRoot: false, exits: false },
+	{ sharedRoot: true, exits: false },
+	{ sharedRoot: false, exits: true },
+])("adopts a previous-layout runner by stored session provenance with two projects registered, shared root $sharedRoot, exits $exits", async ({
+	sharedRoot,
+	exits,
+}) => {
 	const fixture = ProcessHarness.create({ dist: "dist", restartProof: true });
 	harness = fixture;
 	const projectB = sharedRoot
@@ -155,13 +167,31 @@ it.each([
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
 					// All project persistence services belong to B at construction.
-					// Only output ingestion follows A, as supplied by the recovery caller.
+					// Recovery supplies A's writer only at invocation, including exit cleanup.
 					yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, created_at, provider_process_id)
 						VALUES ('stale-a-question', ${sessionA}, 'question', 'pending', 1, 'old-a'),
 							('stale-a-permission', ${sessionA}, 'permission', 'pending', 1, 'old-a'),
 							('current-a', ${sessionA}, 'question', 'pending', 1, ${runnerA.runnerId}),
 							('legacy-a', ${sessionA}, 'question', 'pending', 1, NULL),
 							('stale-b', ${sessionB}, 'question', 'pending', 1, 'old-b')`;
+					const constructionPending = yield* PendingInteractionServiceTag;
+					yield* constructionPending.recoverPendingQuestions([
+						{ requestId: "stale-b", sessionId: sessionB, questions: [] },
+					]);
+					const ownerPendingContext = yield* Layer.build(
+						Layer.fresh(PendingInteractionServiceLive),
+					);
+					const ownerPending = Context.get(
+						ownerPendingContext,
+						PendingInteractionServiceTag,
+					);
+					yield* ownerPending.recoverPendingQuestions(
+						["stale-a-question", "current-a", "legacy-a"].map((requestId) => ({
+							requestId,
+							sessionId: sessionA,
+							questions: [],
+						})),
+					);
 					// Startup may reclaim the store; open the independent reader afterward.
 					db = new Database(fixture.daemonStorePath(), { readonly: true });
 					const runner = yield* makeClaudeProviderRuntime({
@@ -172,7 +202,15 @@ it.each([
 							projectId: "project-b",
 						}),
 					);
-					yield* runner.recoverRunnerEffect;
+					const ownerIngestion = yield* Layer.build(
+						makeProviderRuntimeIngestionLive().pipe(
+							Layer.provide(ownerPersistence),
+						),
+					);
+					yield* runner.recoverRunnerEffect.pipe(
+						Effect.provide(ownerIngestion),
+						Effect.provide(ownerPendingContext),
+					);
 					expect(yield* runner.hasLiveProcessEffect(sessionA)).toBe(true);
 					expect(yield* runner.hasLiveProcessEffect(sessionB)).toBe(false);
 					expect(commandB()).toEqual(beforeB);
@@ -185,6 +223,16 @@ it.each([
 						{ id: "stale-a-question", status: "resolved" },
 						{ id: "stale-b", status: "pending" },
 					]);
+					expect(
+						(yield* ownerPending.listPendingQuestions(sessionA))
+							.map(({ requestId }) => requestId)
+							.sort(),
+					).toEqual(["current-a", "legacy-a"]);
+					expect(
+						(yield* constructionPending.listPendingQuestions(sessionB)).map(
+							({ requestId }) => requestId,
+						),
+					).toEqual(["stale-b"]);
 					yield* settleUnclaimedRunnerCommands(
 						sql,
 						new Set([sessionA]),
@@ -196,7 +244,12 @@ it.each([
 					expect(
 						discoverRunners(fixture.projectDir, fixture.configDir),
 					).toContainEqual({ ...legacyRegistration, driverKind: "claude" });
-					writeFileSync(join(fixture.root, "release-upgrade-turn"), "release");
+					if (exits) process.kill(runnerA.pid, "SIGKILL");
+					else
+						writeFileSync(
+							join(fixture.root, "release-upgrade-turn"),
+							"release",
+						);
 					yield* Effect.tryPromise(() =>
 						vi.waitFor(
 							() => {
@@ -206,7 +259,7 @@ it.each([
 											"SELECT status FROM provider_command_outbox WHERE session_id = ?",
 										)
 										.all(sessionA),
-								).toEqual([{ status: "completed" }]);
+								).toEqual([{ status: exits ? "failed" : "completed" }]);
 							},
 							{ timeout: 10_000 },
 						),
@@ -224,7 +277,7 @@ it.each([
 				Effect.provide(
 					Layer.mergeAll(
 						persistence,
-						ProviderRuntimeIngestionLive.pipe(Layer.provide(ownerPersistence)),
+						ProviderRuntimeIngestionLive.pipe(Layer.provide(persistence)),
 						PendingInteractionServiceLive,
 						makeOverridesStateLive(),
 					),
@@ -241,20 +294,29 @@ it.each([
 				"SELECT status FROM command_receipts WHERE session_id = ? AND command_type = 'send_turn'",
 			)
 			.all(sessionA);
-		expect(completedA).toEqual([{ status: "completed" }]);
-		expect(receiptsA).toEqual([{ status: "side_effect_completed" }]);
+		expect(completedA).toEqual([{ status: exits ? "failed" : "completed" }]);
+		expect(receiptsA).toEqual([
+			{ status: exits ? "side_effect_failed" : "side_effect_completed" },
+		]);
+		expect(
+			db
+				.prepare("SELECT status FROM provider_runs WHERE session_id = ?")
+				.all(sessionA),
+		).toEqual([{ status: exits ? "error" : "completed" }]);
 		const afterPartialScanB = commandB();
 		vi.unstubAllEnvs();
 		db.close();
+		writeFileSync(join(fixture.root, "release-upgrade-turn"), "release");
 		await fixture.restart();
 		db = new Database(fixture.daemonStorePath(), { readonly: true });
 		await vi.waitFor(
 			() => expect(commandB()).toMatchObject([{ status: "completed" }]),
 			{ timeout: 10_000 },
 		);
-		expect(
-			discoverRunners(fixture.projectDir, fixture.configDir),
-		).toContainEqual({ ...legacyRegistration, driverKind: "claude" });
+		if (!exits)
+			expect(
+				discoverRunners(fixture.projectDir, fixture.configDir),
+			).toContainEqual({ ...legacyRegistration, driverKind: "claude" });
 		expect(discoverRunners(projectB, fixture.configDir)).toContainEqual(
 			runnerB,
 		);
@@ -265,6 +327,7 @@ it.each([
 		).toHaveLength(2);
 		proof = {
 			sharedRoot,
+			exits,
 			registeredProjects: registered.projects.map((project) => project.slug),
 			sessionA,
 			sessionB,
@@ -335,7 +398,28 @@ it("retires prompts through the stored owner when adoption is refused and sends 
 					workspaceRoot: fixture.projectDir,
 					daemonConfigDir: fixture.configDir,
 				});
+				const ownerIngestion = yield* Layer.build(
+					makeProviderRuntimeIngestionLive().pipe(
+						Layer.provide(ownerPersistence),
+					),
+				);
+				const ownerPendingContext = yield* Layer.build(
+					Layer.fresh(PendingInteractionServiceLive),
+				);
+				const ownerPending = Context.get(
+					ownerPendingContext,
+					PendingInteractionServiceTag,
+				);
+				yield* ownerPending.recoverPendingQuestions([
+					{
+						requestId: "legacy-question",
+						sessionId,
+						questions: [{ question: "Retired?" }],
+					},
+				]);
 				yield* runner.recoverRunnerEffect.pipe(
+					Effect.provide(ownerIngestion),
+					Effect.provide(ownerPendingContext),
 					Effect.provideService(PersistenceProjectTag, {
 						projectId: "process-test",
 					}),
@@ -348,9 +432,22 @@ it("retires prompts through the stored owner when adoption is refused and sends 
 					{ status: "resolved" },
 					{ status: "resolved" },
 				]);
+				expect(yield* ownerPending.listPendingQuestions(sessionId)).toEqual([]);
+				// Retrying with an empty registry and no pending SQL rows stays empty.
+				yield* runner.recoverRunnerEffect.pipe(
+					Effect.provide(ownerIngestion),
+					Effect.provide(ownerPendingContext),
+					Effect.provideService(PersistenceProjectTag, {
+						projectId: "process-test",
+					}),
+				);
+				expect(yield* ownerPending.listPendingQuestions(sessionId)).toEqual([]);
 				expect(
 					yield* sql`SELECT status FROM provider_command_outbox WHERE session_id = ${sessionId}`,
 				).toEqual([{ status: "failed" }]);
+				expect(
+					yield* sql`SELECT status FROM provider_runs WHERE session_id = ${sessionId}`,
+				).toEqual([{ status: "error" }]);
 				expect(
 					yield* sql`SELECT project_id FROM events WHERE session_id = ${sessionId} AND type IN ('question.resolved', 'permission.resolved')`,
 				).toEqual([
@@ -363,7 +460,7 @@ it("retires prompts through the stored owner when adoption is refused and sends 
 			Effect.provide(
 				Layer.mergeAll(
 					persistence,
-					ProviderRuntimeIngestionLive.pipe(Layer.provide(ownerPersistence)),
+					ProviderRuntimeIngestionLive.pipe(Layer.provide(persistence)),
 					PendingInteractionServiceLive,
 					makeOverridesStateLive(),
 				),

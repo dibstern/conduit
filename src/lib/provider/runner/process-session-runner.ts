@@ -14,7 +14,14 @@ import {
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
-import { ProviderRuntimeIngestionTag } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
+	type PendingInteractionService,
+	PendingInteractionServiceTag,
+} from "../../domain/relay/Services/pending-interaction-service.js";
+import {
+	type ProviderRuntimeIngestion,
+	ProviderRuntimeIngestionTag,
+} from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ConfigTag } from "../../domain/relay/Services/services.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
@@ -77,6 +84,9 @@ interface RunnerChild {
 	listening?: boolean;
 	startupTimedOut?: boolean;
 	recovering?: boolean;
+	/** Exit callbacks run in the construction runtime, after recovery returns. */
+	readonly ingestion?: ProviderRuntimeIngestion | undefined;
+	readonly pendingInteractions?: PendingInteractionService | undefined;
 	pid?: number | undefined;
 	child?: ChildProcess;
 	connection?: RunnerSocket;
@@ -364,7 +374,17 @@ export const makeProcessSessionRunner = (
 		const observeProcess = (sessionId: string, entry: RunnerChild) =>
 			Effect.gen(function* () {
 				if (observedProcesses.get(sessionId) === entry.runnerId) return;
-				yield* retireReplacedPrompts(entry.runnerId, { sessionId }).pipe(
+				const retirement = retireReplacedPrompts(entry.runnerId, { sessionId });
+				yield* (
+					entry.pendingInteractions
+						? retirement.pipe(
+								Effect.provideService(
+									PendingInteractionServiceTag,
+									entry.pendingInteractions,
+								),
+							)
+						: retirement
+				).pipe(
 					Effect.mapError((cause) =>
 						runnerFailure("retire replaced runner prompts", cause),
 					),
@@ -542,9 +562,10 @@ export const makeProcessSessionRunner = (
 				([, binding]) => binding.sessionId === sessionId,
 			);
 			const commands = [...(entry.pendingSendCommands ?? [])];
+			const sessionIngestion = entry.ingestion ?? ingestion;
 			const settleExitedRuns = Effect.gen(function* () {
 				const reservations = new Set<string>();
-				if (sql && ingestion)
+				if (sql && sessionIngestion)
 					for (const [commandId, attempt] of commands) {
 						const [owner] = yield* sql<{
 							run_id: string | null;
@@ -572,7 +593,7 @@ export const makeProcessSessionRunner = (
 							const pid = entry.pid ?? entry.child?.pid;
 							if (
 								!sql ||
-								!ingestion ||
+								!sessionIngestion ||
 								!reservations.size ||
 								closing ||
 								entry.recovering ||
@@ -595,7 +616,7 @@ export const makeProcessSessionRunner = (
 								sql,
 								sessionId,
 								failure.message,
-								(events) => ingestion.ingestBatch(events),
+								(events) => sessionIngestion.ingestBatch(events),
 								{ errorCode: "runner_stopped", owners: [...owners.values()] },
 							);
 						}),
@@ -1047,11 +1068,16 @@ export const makeProcessSessionRunner = (
 				),
 			);
 
-		const createEntry = (sessionId: string): Effect.Effect<RunnerChild> =>
+		const createEntry = (
+			sessionId: string,
+			owner?: Pick<RunnerChild, "ingestion" | "pendingInteractions">,
+		): Effect.Effect<RunnerChild> =>
 			Effect.gen(function* () {
 				const runnerId = randomBytes(6).toString("hex");
 				return {
 					sessionId,
+					ingestion: owner?.ingestion,
+					pendingInteractions: owner?.pendingInteractions,
 					verified: false,
 					runnerId,
 					ready: yield* Deferred.make<RunnerSocket, SessionFailure>(),
@@ -1087,7 +1113,7 @@ export const makeProcessSessionRunner = (
 			eligible,
 			runFork,
 			create: (sessionId, old) =>
-				createEntry(sessionId).pipe(
+				createEntry(sessionId, old).pipe(
 					Effect.tap((entry) =>
 						Effect.sync(() => {
 							entry.candidate = true;
@@ -1227,6 +1253,16 @@ export const makeProcessSessionRunner = (
 					PersistenceProjectTag,
 				);
 				const config = yield* Effect.serviceOption(ConfigTag);
+				const recoveryIngestion = yield* Effect.serviceOption(
+					ProviderRuntimeIngestionTag,
+				);
+				const recoveryPending = yield* Effect.serviceOption(
+					PendingInteractionServiceTag,
+				);
+				const sessionIngestion =
+					recoveryIngestion._tag === "Some"
+						? recoveryIngestion.value
+						: ingestion;
 				for (const registration of discoverRunners(
 					config._tag === "Some" ? config.value.projectDir : deps.workspaceRoot,
 					configDir,
@@ -1259,6 +1295,11 @@ export const makeProcessSessionRunner = (
 						candidate: abandoned,
 						stopping: false,
 						recovering: true,
+						ingestion: sessionIngestion,
+						pendingInteractions:
+							recoveryPending._tag === "Some"
+								? recoveryPending.value
+								: undefined,
 						ending: 0,
 						idleExiting: false,
 						commandsInFlight: 0,
@@ -1332,7 +1373,7 @@ export const makeProcessSessionRunner = (
 							yield* stop(entry);
 							if (runnerPidAlive(registration.pid))
 								return yield* Effect.fail(failure);
-							if (!abandoned && sql && ingestion) {
+							if (!abandoned && sql && sessionIngestion) {
 								// No runner remains current, so retire every pending prompt in this session.
 								yield* retireReplacedPrompts(null, {
 									sessionId: registration.sessionId,
@@ -1354,7 +1395,7 @@ export const makeProcessSessionRunner = (
 									sql,
 									registration.sessionId,
 									failure.message,
-									(events) => ingestion.ingestBatch(events),
+									(events) => sessionIngestion.ingestBatch(events),
 									{ errorCode: "runner_stopped", owners },
 								).pipe(
 									Effect.mapError((cause) =>
