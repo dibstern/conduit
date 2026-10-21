@@ -2,6 +2,7 @@
 // manage sessions through the relay WebSocket interface.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -11,11 +12,20 @@ describe("Integration: Session Lifecycle", () => {
 	let harness: RelayHarness;
 
 	beforeEach(async () => {
+		__setProbeOverrideForTesting(async () => ({
+			models: [],
+			commands: [],
+			agents: [],
+		}));
 		harness = await createRelayHarness();
 	}, 30_000);
 
 	afterEach(async () => {
-		if (harness) await harness.stop();
+		try {
+			if (harness) await harness.stop();
+		} finally {
+			__setProbeOverrideForTesting(undefined);
+		}
 	});
 
 	it("create session and receive its id from RPC", async () => {
