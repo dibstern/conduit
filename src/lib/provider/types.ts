@@ -59,6 +59,13 @@ export interface ProviderControlContext {
 	readonly operation?: "reply" | "reject";
 }
 
+export type ProviderControlCommandStatus =
+	| "not_received"
+	| "running"
+	| "completed"
+	| "failed"
+	| "gone";
+
 export interface QuestionRequest {
 	readonly requestId: string;
 	readonly runId?: string;
@@ -390,6 +397,11 @@ export interface ProviderInstance {
 	readonly getControlProcessIdEffect?: (
 		sessionId: string,
 	) => Effect.Effect<string | undefined, ProviderInstanceFailure>;
+	/** Reconcile a committed command on its original process without starting work. */
+	readonly getControlCommandStatusEffect?: (
+		sessionId: string,
+		control: ProviderControlContext,
+	) => Effect.Effect<ProviderControlCommandStatus, ProviderInstanceFailure>;
 	/** Unique identifier for this provider (e.g. "opencode", "claude") */
 	readonly providerId: string;
 	/** Native identity used for a locally placed input before provider acceptance. */

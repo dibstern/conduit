@@ -25,7 +25,7 @@ describe("Stop delivery preserves its captured cohort", () => {
 	});
 
 	it("a delayed empty Stop preserves a newer foreground turn across restart", async () => {
-		writeProviderCommandOutboxProof([
+		writeProviderCommandOutboxProof(import.meta.url, [
 			{ scenario: "delayed-empty-stop-newer-turn", passed: false },
 		]);
 		const harness = await ProcessHarness.start({ restartProof: true });
@@ -130,7 +130,7 @@ describe("Stop delivery preserves its captured cohort", () => {
 					2,
 				),
 			);
-			writeProviderCommandOutboxProof([
+			writeProviderCommandOutboxProof(import.meta.url, [
 				JSON.parse(
 					readFileSync("/tmp/82tn27-3-repair-f2-proof.json", "utf8"),
 				) as Record<string, unknown>,
@@ -230,7 +230,7 @@ describe("Stop delivery preserves its captured cohort", () => {
 			).toEqual([]);
 			passed = true;
 		} finally {
-			writeProviderCommandOutboxProof([
+			writeProviderCommandOutboxProof(import.meta.url, [
 				{
 					scenario: "delayed-empty-stop-pending-steer",
 					passed,
@@ -350,7 +350,7 @@ describe("Stop delivery preserves its captured cohort", () => {
 			).toEqual([{ status: "completed" }, { status: "pending" }]);
 			passed = true;
 		} finally {
-			writeProviderCommandOutboxProof([
+			writeProviderCommandOutboxProof(import.meta.url, [
 				{
 					scenario: "delayed-empty-stop-opencode-successor",
 					passed,
@@ -385,7 +385,9 @@ describe("Stop delivery preserves its captured cohort", () => {
 		const proofPath = projectionDelayed
 			? "/tmp/82tn27-3-repair-f3-native-proof.json"
 			: "/tmp/82tn27-3-repair-f3-proof.json";
-		writeProviderCommandOutboxProof([{ scenario, passed: false }]);
+		writeProviderCommandOutboxProof(import.meta.url, [
+			{ scenario, passed: false },
+		]);
 		const harness = await ProcessHarness.start({ restartProof: true });
 		harnesses.push(harness);
 		const browser = await harness.connect();
@@ -573,7 +575,7 @@ describe("Stop delivery preserves its captured cohort", () => {
 					2,
 				),
 			);
-			writeProviderCommandOutboxProof([
+			writeProviderCommandOutboxProof(import.meta.url, [
 				JSON.parse(readFileSync(proofPath, "utf8")) as Record<string, unknown>,
 			]);
 			db.close();
@@ -583,7 +585,9 @@ describe("Stop delivery preserves its captured cohort", () => {
 	it("a delayed retirement preserves a successor before SDK intake", async () => {
 		const scenario = "delayed-retirement-pending-intake";
 		const proofPath = "/tmp/82tn27-3-repair-f3-intake-proof.json";
-		writeProviderCommandOutboxProof([{ scenario, passed: false }]);
+		writeProviderCommandOutboxProof(import.meta.url, [
+			{ scenario, passed: false },
+		]);
 		const harness = await ProcessHarness.start({ restartProof: true });
 		harnesses.push(harness);
 		const browser = await harness.connect();
@@ -728,13 +732,13 @@ describe("Stop delivery preserves its captured cohort", () => {
 				),
 			};
 			writeFileSync(proofPath, JSON.stringify(proof, null, 2));
-			writeProviderCommandOutboxProof([proof]);
+			writeProviderCommandOutboxProof(import.meta.url, [proof]);
 			db.close();
 		}
 	}, 110_000);
 
 	it("bounds replacement of a live question when interrupt never acknowledges", async () => {
-		writeProviderCommandOutboxProof([
+		writeProviderCommandOutboxProof(import.meta.url, [
 			{ scenario: "question-replacement-unacknowledged-stop", passed: false },
 		]);
 		const harness = await ProcessHarness.start({ restartProof: true });
@@ -847,7 +851,7 @@ describe("Stop delivery preserves its captured cohort", () => {
 					2,
 				),
 			);
-			writeProviderCommandOutboxProof([
+			writeProviderCommandOutboxProof(import.meta.url, [
 				JSON.parse(
 					readFileSync("/tmp/82tn27-3-repair-f4-proof.json", "utf8"),
 				) as Record<string, unknown>,
@@ -861,7 +865,7 @@ describe("Stop delivery preserves its captured cohort", () => {
 			scenario: "question-replacement-acknowledged-stop",
 			passed: false,
 		};
-		writeProviderCommandOutboxProof([record]);
+		writeProviderCommandOutboxProof(import.meta.url, [record]);
 		const harness = await ProcessHarness.start({ restartProof: true });
 		harnesses.push(harness);
 		const browser = await harness.connect();
@@ -926,7 +930,7 @@ describe("Stop delivery preserves its captured cohort", () => {
 				),
 				restartMarks: harness.proof().generations,
 			});
-			writeProviderCommandOutboxProof([record]);
+			writeProviderCommandOutboxProof(import.meta.url, [record]);
 			db.close();
 		}
 	}, 60_000);

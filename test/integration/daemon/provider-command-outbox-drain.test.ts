@@ -7,6 +7,7 @@ import { Deferred, Effect, Fiber, Layer, Ref } from "effect";
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	OpenCodeInstancesTag,
 	OpenCodeUnavailable,
@@ -32,6 +33,7 @@ import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
 import {
 	OrchestrationEngine,
+	type OrchestrationEngineOptions,
 	type SendTurnCommand,
 } from "../../../src/lib/provider/orchestration-engine.js";
 import { CommandReadModelRepository } from "../../../src/lib/provider/orchestration-read-model.js";
@@ -42,6 +44,7 @@ import type {
 	TurnResult,
 } from "../../../src/lib/provider/types.js";
 import {
+	makeMockAccountDirectory,
 	makeMockOpenCodeAPI,
 	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
@@ -78,6 +81,7 @@ describe("durable control outbox scheduling", () => {
 		projectId = "control-project",
 		sessionId = "control-session",
 		wrapWrite?: (write: CommitAndSignal["write"]) => CommitAndSignal["write"],
+		options: Pick<OrchestrationEngineOptions, "accountDirectory"> = {},
 	) {
 		return Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -89,6 +93,7 @@ describe("durable control outbox scheduling", () => {
 				projectId,
 			).bootstrap();
 			const result = new OrchestrationEngine({
+				...options,
 				registry: new ProviderRegistry([instance]),
 				durableCommands: {
 					sql,
@@ -294,12 +299,22 @@ describe("durable control outbox scheduling", () => {
 	// A long runner answer may still succeed before its deadline. After timeout,
 	// its late native reply must not settle it twice or hold the next control.
 	it.each([
-		{ timeout: false, kind: "permission" },
-		{ timeout: true, kind: "permission" },
-		{ timeout: true, kind: "question" },
-	] as const)("bounds runner answers and ignores late replies, timeout=$timeout, kind=$kind", async ({
+		{ timeout: false, kind: "permission", runnerState: "not_received" },
+		{ timeout: true, kind: "permission", runnerState: "not_received" },
+		{ timeout: true, kind: "question", runnerState: "not_received" },
+		{ timeout: true, kind: "permission", runnerState: "running" },
+		{ timeout: true, kind: "question", runnerState: "running" },
+		{ timeout: true, kind: "permission", runnerState: "completed" },
+		{ timeout: true, kind: "question", runnerState: "completed" },
+		{ timeout: true, kind: "permission", runnerState: "failed" },
+		{ timeout: true, kind: "question", runnerState: "gone" },
+		{ timeout: true, kind: "permission", runnerState: "uncertain" },
+		{ timeout: true, kind: "question", runnerState: "unresponsive" },
+		{ timeout: true, kind: "permission", runnerState: "named-account" },
+	] as const)("bounds runner answers and reconciles late replies, timeout=$timeout, kind=$kind, runner=$runnerState", async ({
 		timeout,
 		kind,
+		runnerState,
 	}) => {
 		await Effect.runPromise(
 			Effect.scoped(
@@ -327,10 +342,52 @@ describe("durable control outbox scheduling", () => {
 						...provider(() => Effect.never),
 						providerId: "claude",
 						getControlProcessIdEffect: () => Effect.succeed("shared-process"),
+						getControlCommandStatusEffect: vi.fn((sessionId, control) => {
+							expect(sessionId).toBe("control-session");
+							expect(control).toEqual({
+								commandId: "deadline-answer",
+								providerProcessId: "shared-process",
+							});
+							if (runnerState === "unresponsive") return Effect.never;
+							return runnerState === "uncertain"
+								? Effect.fail(
+										new ProviderInstanceFailure({
+											providerId: "claude",
+											operation: "reconcileControl",
+											cause: new Error("Runner unavailable"),
+										}),
+									)
+								: Effect.succeed(
+										runnerState === "named-account" ? "completed" : runnerState,
+									);
+						}),
 						resolvePermissionEffect: answer,
 						resolveQuestionEffect: answer,
 					};
-					const accepting = yield* engine(instance, () => now);
+					const accepting = yield* engine(
+						instance,
+						() => now,
+						undefined,
+						undefined,
+						undefined,
+						runnerState === "named-account"
+							? {
+									accountDirectory: makeMockAccountDirectory([
+										{
+											driver: "claude",
+											id: AccountIdSchema.make("named-claude-account"),
+											name: "Named Claude",
+											folder: configuredClaudeConfigDir(
+												"/tmp/control-test-claude",
+											),
+											usageEligible: true,
+										},
+									]),
+								}
+							: {},
+					);
+					if (runnerState === "named-account")
+						accepting.bindSession("control-session", "named-claude-account");
 					yield* Effect.addFinalizer(() => accepting.shutdownEffect());
 					yield* sql.unsafe(
 						"CREATE TABLE control_terminals (command_id TEXT, status TEXT)",
@@ -375,6 +432,10 @@ describe("durable control outbox scheduling", () => {
 					if (timeout) {
 						now += 1;
 						yield* TestClock.adjust(1);
+						if (runnerState === "unresponsive") {
+							now += 1000;
+							yield* TestClock.adjust(1000);
+						}
 					} else reply();
 					const outcome = yield* Fiber.join(delivery);
 					expect(outcome).toMatchObject(
@@ -430,13 +491,20 @@ describe("durable control outbox scheduling", () => {
 						{ command_id: "after-answer", count: 1 },
 						{ command_id: "deadline-answer", count: 1 },
 					]);
+					const shouldReopen =
+						timeout && ["not_received", "gone"].includes(runnerState);
 					expect(yield* sql`SELECT status FROM pending_approvals`).toEqual([
-						{ status: timeout ? "pending" : "resolved" },
+						{ status: shouldReopen ? "pending" : "resolved" },
 					]);
+					expect(instance.getControlCommandStatusEffect).toHaveBeenCalledTimes(
+						timeout ? 1 : 0,
+					);
 					const reopened =
 						yield* sql`SELECT type FROM events WHERE json_extract(metadata, '$.source') = 'conduit.control-reconciliation'`;
-					expect(reopened).toEqual(timeout ? [{ type: `${kind}.asked` }] : []);
-					if (timeout) {
+					expect(reopened).toEqual(
+						shouldReopen ? [{ type: `${kind}.asked` }] : [],
+					);
+					if (shouldReopen) {
 						yield* accepting.dispatchEffect({
 							...command,
 							commandId: "fresh-answer",
@@ -448,13 +516,24 @@ describe("durable control outbox scheduling", () => {
 						expect(
 							yield* sql`SELECT status FROM command_receipts WHERE command_id = 'fresh-answer'`,
 						).toEqual([{ status: "side_effect_completed" }]);
+					} else if (timeout) {
+						expect(
+							yield* Effect.result(
+								accepting.dispatchEffect({
+									...command,
+									commandId: "fresh-answer",
+								}),
+							),
+						).toMatchObject({ _tag: "Failure" });
+						expect(nativeCalls).toBe(1);
 					}
 					writeFileSync(
-						`/tmp/82tn27-3-round4-${kind}-timeout-${timeout}.json`,
+						`/tmp/82tn27-3-round5-${kind}-timeout-${timeout}-${runnerState}.json`,
 						JSON.stringify(
 							{
 								timeout,
 								kind,
+								runnerState,
 								reopened,
 								nativeCalls,
 								outcome,

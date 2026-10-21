@@ -12,7 +12,9 @@ import { writeProviderCommandOutboxProof } from "../../helpers/provider-command-
 
 const recoveryEvidence: Record<string, unknown>[] = [];
 
-afterAll(() => writeProviderCommandOutboxProof(recoveryEvidence));
+afterAll(() =>
+	writeProviderCommandOutboxProof(import.meta.url, recoveryEvidence),
+);
 
 function sdkProof(harness: ProcessHarness) {
 	return readFileSync(join(harness.root, "sdk-proof.ndjson"), "utf8")

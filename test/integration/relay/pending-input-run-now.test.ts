@@ -72,7 +72,9 @@ import { makeSSEEvent } from "../../helpers/sse-factories.js";
 
 const commandOutboxEvidence: Record<string, unknown>[] = [];
 
-afterAll(() => writeProviderCommandOutboxProof(commandOutboxEvidence));
+afterAll(() =>
+	writeProviderCommandOutboxProof(import.meta.url, commandOutboxEvidence),
+);
 
 function signal<T>() {
 	let resolve: (value: T) => void = () => {};
@@ -853,16 +855,31 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 								}).pipe(Effect.timeout("500 millis"));
 								expect(sent).toEqual(["running"]);
 								yield* Effect.sync(() => releaseRegistration.resolve());
+								yield* sql`SELECT 1 FROM provider_command_outbox control
+									JOIN command_receipts receipt ON receipt.command_id = control.command_id
+									WHERE control.session_id = ${sessionId} AND control.effect_type = 'interrupt_turn'
+									AND control.status = 'completed' AND receipt.status = 'side_effect_completed'`.pipe(
+									Effect.delay("1 millis"),
+									Effect.repeat({ until: (rows) => rows.length === 1 }),
+									Effect.timeout("3 seconds"),
+								);
+								expect(stopRequests).toEqual([]);
+								yield* awaitCondition(() => sent.length === 2);
+								expect(providerTurns.turnFences(sessionId).stopping).toBe(
+									false,
+								);
+							} else {
+								yield* awaitCondition(() => stopRequests.length === 1);
+								if (provider === "opencode") {
+									expect(providerTurns.turnFences(sessionId).stopping).toBe(
+										true,
+									);
+									yield* finish();
+								}
+								yield* Effect.sleep("30 millis");
 							}
-							yield* awaitCondition(() => stopRequests.length === 1);
-							if (provider === "opencode") {
-								expect(providerTurns.turnFences(sessionId).stopping).toBe(true);
-								if (scenario !== "recover-registration-race") yield* finish();
-							}
-							yield* Effect.sleep("30 millis");
 							expect(sent).toEqual(
-								provider === "claude" &&
-									scenario === "recover-registration-race"
+								scenario === "recover-registration-race"
 									? ["running", "selected"]
 									: ["running"],
 							);
@@ -870,6 +887,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 							yield* awaitCondition(() => sent.length === 2);
 							expect(sent).toEqual(["running", "selected"]);
 							expect(abortedAtRelease).not.toContain("selected");
+							expect(activeTurns.get(sessionId)?.inputId).toBe("selected");
 							yield* finish();
 							evidence["unfinishedReservationRecovered"] = true;
 							return;
@@ -1068,14 +1086,13 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 								images: [image],
 								delivery: scenario === "manual-stop-steer" ? "steer" : "queue",
 							}).pipe(Effect.timeout("500 millis"));
-						if (
-							[
-								"natural-completion-race",
-								"slow-run-now",
-								"manual-stop-send",
-								"manual-stop-steer",
-							].includes(scenario)
-						) {
+						const terminalBeforeAcknowledgement = [
+							"natural-completion-race",
+							"slow-run-now",
+							"manual-stop-send",
+							"manual-stop-steer",
+						].includes(scenario);
+						if (terminalBeforeAcknowledgement) {
 							if (activeTurns.get(sessionId)?.inputId === "running")
 								yield* finish();
 							// Cross the former timeout with the old turn already terminal.
@@ -1086,9 +1103,17 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 							);
 						} else yield* Effect.sleep("20 millis");
 						if (provider === "claude") {
-							expect(sent).toEqual(["running"]);
-							yield* Effect.sync(() => releaseStop.resolve());
+							if (!terminalBeforeAcknowledgement) {
+								expect(sent).toEqual(["running"]);
+								yield* Effect.sync(() => releaseStop.resolve());
+							}
 							yield* awaitCondition(() => sent.length === 2);
+							if (terminalBeforeAcknowledgement) {
+								expect(providerTurns.turnFences(sessionId).stopping).toBe(
+									false,
+								);
+								expect(activeTurns.get(sessionId)?.inputId).toBe("selected");
+							}
 						}
 						expect(sent).toEqual(
 							provider === "claude" ? ["running", "selected"] : ["running"],

@@ -26,7 +26,12 @@ import {
 	sessionRunOwnersQuery,
 	settleSessionRuns,
 } from "../session-run-settlement.js";
-import type { ProviderNativeSession, TurnResult } from "../types.js";
+import type {
+	ProviderControlCommandStatus,
+	ProviderControlContext,
+	ProviderNativeSession,
+	TurnResult,
+} from "../types.js";
 import { connectRunner } from "./runner-connection.js";
 import {
 	type RunnerSocket,
@@ -1269,6 +1274,50 @@ export const makeProcessSessionRunner = (
 		});
 
 		class ProcessSessionRunner implements SessionRunner {
+			getControlCommandStatusEffect(
+				sessionId: string,
+				control: ProviderControlContext,
+			): Effect.Effect<ProviderControlCommandStatus, SessionFailure> {
+				return Effect.gen(function* () {
+					const entry = children.get(sessionId);
+					if (entry && entry.runnerId !== control.providerProcessId)
+						return "gone";
+					const unavailable = () =>
+						runnerFailure(
+							"get control command status",
+							"The original runner command state is unavailable",
+						);
+					if (!entry) return yield* Effect.fail(unavailable());
+					const pid = entry.pid ?? entry.child?.pid;
+					if (pid !== undefined && !runnerPidAlive(pid)) return "gone";
+					const connection = entry.connection;
+					if (
+						!connection ||
+						connection.closed ||
+						entry.failure ||
+						entry.stopping
+					)
+						return yield* Effect.fail(unavailable());
+					const status = yield* Effect.result(
+						connection.commandStatusEffect(control.commandId),
+					);
+					const current = children.get(sessionId);
+					if (current && current.runnerId !== control.providerProcessId)
+						return "gone";
+					if (pid !== undefined && !runnerPidAlive(pid)) return "gone";
+					if (status._tag === "Failure")
+						return yield* Effect.fail(status.failure);
+					if (
+						current !== entry ||
+						entry.connection !== connection ||
+						connection.closed ||
+						entry.failure ||
+						entry.stopping
+					)
+						return yield* Effect.fail(unavailable());
+					return status.success;
+				});
+			}
 			getControlProcessIdEffect(
 				sessionId: string,
 			): Effect.Effect<string | undefined> {

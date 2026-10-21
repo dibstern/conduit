@@ -149,7 +149,7 @@ describe("durable answers across daemon replacement", () => {
 			);
 			passed = true;
 		} finally {
-			writeProviderCommandOutboxProof([
+			writeProviderCommandOutboxProof(import.meta.url, [
 				{
 					scenario: pending
 						? "legacy-empty-stop-pending-replay"

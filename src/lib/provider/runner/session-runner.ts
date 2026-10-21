@@ -13,6 +13,7 @@ import type {
 	PermissionResponse,
 	PreWarmSessionInput,
 	ProviderCall,
+	ProviderControlCommandStatus,
 	ProviderControlContext,
 	ProviderNativeSession,
 	QuestionRequest,
@@ -187,6 +188,10 @@ export interface SessionRunner {
 	readonly getControlProcessIdEffect?: (
 		sessionId: string,
 	) => Effect.Effect<string | undefined>;
+	readonly getControlCommandStatusEffect?: (
+		sessionId: string,
+		control: ProviderControlContext,
+	) => Effect.Effect<ProviderControlCommandStatus, SessionFailure>;
 	/** Native execution and pending intake, independent of an intake reply. */
 	hasActiveTurnsEffect?(sessionId: string): Effect.Effect<boolean>;
 	readonly recoverEffect?: Effect.Effect<void, SessionFailure>;

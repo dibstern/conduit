@@ -1,13 +1,8 @@
-import {
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	statSync,
-	writeFileSync,
-} from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { basename } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const artifact = "test-results/82tn27-command-outbox.json";
-const copy = "/tmp/82tn27-command-outbox.json";
+const scenariosByFile = new Map<string, Map<string, Record<string, unknown>>>();
 
 function scenarioKey(record: Record<string, unknown>): string {
 	if (typeof record["scenario"] === "string") return record["scenario"];
@@ -21,36 +16,16 @@ function scenarioKey(record: Record<string, unknown>): string {
 	);
 }
 
-/** Run contributing test files sequentially; this merge does not lock across processes. */
+/** Each test file owns its artifact and accumulates its records in memory. */
 export function writeProviderCommandOutboxProof(
+	testFile: string,
 	records: readonly Record<string, unknown>[],
 ): void {
 	if (records.length === 0) return;
-	const previousPath = existsSync(artifact)
-		? artifact
-		: existsSync(copy)
-			? copy
-			: undefined;
-	const previous = previousPath
-		? (
-				JSON.parse(readFileSync(previousPath, "utf8")) as {
-					scenarios: Record<string, unknown>[];
-				}
-			).scenarios
-		: [];
-	const previousTimestamp = previousPath
-		? statSync(previousPath).mtime.toISOString()
-		: undefined;
-	const merged = new Map(
-		previous.map((record) => [
-			scenarioKey(record),
-			{
-				...record,
-				passed: record["passed"] === true,
-				timestamp: record["timestamp"] ?? previousTimestamp,
-			},
-		]),
-	);
+	const source = basename(fileURLToPath(testFile), ".test.ts");
+	const merged =
+		scenariosByFile.get(source) ?? new Map<string, Record<string, unknown>>();
+	scenariosByFile.set(source, merged);
 	const timestamp = new Date().toISOString();
 	for (const record of records)
 		merged.set(scenarioKey(record), {
@@ -60,6 +35,6 @@ export function writeProviderCommandOutboxProof(
 		});
 	mkdirSync("test-results", { recursive: true });
 	const json = JSON.stringify({ scenarios: [...merged.values()] }, null, 2);
-	writeFileSync(artifact, json);
-	writeFileSync(copy, json);
+	writeFileSync(`test-results/82tn27-command-outbox-${source}.json`, json);
+	writeFileSync(`/tmp/82tn27-command-outbox-${source}.json`, json);
 }

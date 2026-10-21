@@ -1331,11 +1331,13 @@ export class ProviderSideEffectReactor {
 							break;
 					}
 				});
-				// An unanswered native interrupt becomes obsolete when its captured
-				// cohort ends. Release the control through the ordinary receipt path;
-				// provider terminals alone still own the turn's outcome.
+				// Runner controls are bound to their captured turns. OpenCode's abort
+				// is session-wide and can still cancel replacement work after a terminal.
 				const delivery = (
-					stopRunning
+					stopRunning &&
+					instance.getControlProcessIdEffect &&
+					!getProviderDriver(account?.driver ?? instance.providerId)
+						?.runsOpenCodeServer
 						? Effect.raceFirst(
 								deliver,
 								Effect.repeat(stopRunning, {
@@ -1847,7 +1849,7 @@ export class ProviderSideEffectReactor {
 		);
 	}
 
-	/** Only confirmed consumption keeps an unconfirmed terminal answer resolved. */
+	/** Reopen runner answers only after confirming they were not consumed. */
 	private readFailedControlPrompt(row: ProviderCommandOutboxRow): Effect.Effect<
 		| {
 				readonly event: CanonicalEvent<"permission.asked" | "question.asked">;
@@ -1911,22 +1913,45 @@ export class ProviderSideEffectReactor {
 								options,
 							),
 			};
+			const call = yield* (
+				this.options.resolveSessionCallContext?.(row.session_id, undefined, {
+					prompt: {
+						id: payload.requestId,
+						kind:
+							payload.type === "resolve_permission" ? "permission" : "question",
+					},
+				}) ?? Effect.succeed(undefined)
+			).pipe(Effect.catch(() => Effect.succeed(undefined)));
+			const account =
+				call?.account ??
+				(this.options.accountDirectory
+					? yield* this.options.accountDirectory
+							.resolve({ _tag: "Id", id: row.provider_id })
+							.pipe(Effect.catch(() => Effect.succeed(undefined)))
+					: undefined);
+			const instance = this.options.registry.getInstance(
+				account?.driver ?? row.provider_id,
+			);
+			if (!instance) return undefined;
+			if (instance.getControlCommandStatusEffect) {
+				const status = yield* instance
+					.getControlCommandStatusEffect(row.session_id, {
+						commandId: row.command_id,
+						providerProcessId: payload.providerProcessId,
+					})
+					.pipe(
+						Effect.timeoutOption("1 second"),
+						Effect.catch(() => Effect.succeed(Option.none())),
+					);
+				// A missing reply or a failed command does not prove nonconsumption.
+				return Option.isSome(status) &&
+					(status.value === "not_received" || status.value === "gone")
+					? reopened
+					: undefined;
+			}
 			return yield* Effect.gen({ self: this }, function* () {
 				const instances = yield* Effect.serviceOption(OpenCodeInstancesTag);
 				if (Option.isNone(instances)) return reopened;
-				const call = yield* this.options.resolveSessionCallContext?.(
-					row.session_id,
-					undefined,
-					{
-						prompt: {
-							id: payload.requestId,
-							kind:
-								payload.type === "resolve_permission"
-									? "permission"
-									: "question",
-						},
-					},
-				) ?? Effect.succeed(undefined);
 				const running = yield* instances.value.ifRunning(
 					call?.account.id ?? row.provider_id,
 					call?.workspaceRoot,

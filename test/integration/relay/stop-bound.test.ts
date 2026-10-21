@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
@@ -139,86 +139,146 @@ const flushDispatch = Effect.promise<void>(
 );
 
 describe("Stop bound through SQLite ingestion and durable dispatch", () => {
-	it.effect(
-		"an acknowledged OpenCode Stop waits for its terminal and preserves natural completion",
-		() =>
-			Effect.gen(function* () {
-				const scratch = yield* scratchDirectory;
-				const api = makeMockOpenCodeAPI({
-					promptProcessId: "opencode:silent-stop",
-				});
-				yield* Effect.gen(function* () {
-					const sql = yield* SqlClient.SqlClient;
-					const persist = yield* ClaudeEventPersistEffectTag;
-					const turns = yield* ProviderTurnServiceTag;
-					yield* persist.persistEvents([
-						canonicalEvent(
-							"run.requested",
-							"session-1",
-							{ inputId: "original", runId: "original-run" },
-							{ metadata: { runId: "original-run" } },
-						),
-						canonicalEvent(
-							"message.created",
-							"session-1",
-							{
-								sessionId: "session-1",
-								messageId: "original",
-								role: "user",
-								inputId: "original",
-							},
-							{ metadata: { runId: "original-run" } },
-						),
-						canonicalEvent(
-							"run.started",
-							"session-1",
-							{
-								inputId: "original",
-								requestedRunId: "original-run",
-								userMessageId: "original",
-							},
-							{ metadata: { runId: "original-run" } },
-						),
-						canonicalEvent(
-							"session.status",
-							"session-1",
-							{ sessionId: "session-1", status: "busy" },
-							{ metadata: { runId: "original-run" } },
-						),
-					]);
-					const stopped = yield* turns.beginStop({
-						clientId: "client-1",
-						sessionId: "session-1",
-						commandId: "silent-stop",
+	for (const acknowledgement of [
+		"before-terminal",
+		"after-terminal",
+		"never",
+	] as const) {
+		it.effect(
+			`OpenCode Stop preserves natural completion and fences its pending abort, acknowledgement=${acknowledgement}`,
+			() =>
+				Effect.gen(function* () {
+					const scratch = yield* scratchDirectory;
+					const api = makeMockOpenCodeAPI({
+						promptProcessId: "opencode:silent-stop",
 					});
-					yield* TestClock.adjust(100);
-					expect(api.session.abort).toHaveBeenCalledOnce();
-					expect(
-						yield* sql`SELECT status FROM provider_runs WHERE id = 'original-run'`,
-					).toEqual([{ status: "running" }]);
-					expect(
-						yield* sql`SELECT type FROM events WHERE type = 'turn.interrupted'`,
-					).toEqual([]);
-					expect(turns.turnFences("session-1").stopping).toBe(true);
-					yield* persist.persistEvents([
-						canonicalEvent(
-							"session.status",
-							"session-1",
-							{ sessionId: "session-1", status: "idle" },
-							{ provider: "opencode", metadata: { runId: "original-run" } },
-						),
-					]);
-					yield* TestClock.adjust(100);
-					yield* stopped;
-					expect(
-						yield* sql`SELECT status FROM provider_runs WHERE id = 'original-run'`,
-					).toEqual([{ status: "completed" }]);
-					expect(
-						yield* sql`SELECT type FROM events WHERE type = 'turn.interrupted'`,
-					).toEqual([]);
-				}).pipe(Effect.provide(stopLayer(api, scratch)));
-			}),
-	);
+					let acknowledgeAbort = () => {};
+					if (acknowledgement !== "before-terminal")
+						api.session.abort = vi.fn(
+							() =>
+								new Promise<void>((resolve) => {
+									acknowledgeAbort = resolve;
+								}),
+						);
+					yield* Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						const persist = yield* ClaudeEventPersistEffectTag;
+						const turns = yield* ProviderTurnServiceTag;
+						yield* persist.persistEvents([
+							canonicalEvent(
+								"run.requested",
+								"session-1",
+								{ inputId: "original", runId: "original-run" },
+								{ metadata: { runId: "original-run" } },
+							),
+							canonicalEvent(
+								"message.created",
+								"session-1",
+								{
+									sessionId: "session-1",
+									messageId: "original",
+									role: "user",
+									inputId: "original",
+								},
+								{ metadata: { runId: "original-run" } },
+							),
+							canonicalEvent(
+								"run.started",
+								"session-1",
+								{
+									inputId: "original",
+									requestedRunId: "original-run",
+									userMessageId: "original",
+								},
+								{ metadata: { runId: "original-run" } },
+							),
+							canonicalEvent(
+								"session.status",
+								"session-1",
+								{ sessionId: "session-1", status: "busy" },
+								{ metadata: { runId: "original-run" } },
+							),
+						]);
+						const stopped = yield* turns.beginStop({
+							clientId: "client-1",
+							sessionId: "session-1",
+							commandId: "silent-stop",
+						});
+						yield* TestClock.adjust(100);
+						expect(api.session.abort).toHaveBeenCalledOnce();
+						expect(
+							yield* sql`SELECT status FROM provider_runs WHERE id = 'original-run'`,
+						).toEqual([{ status: "running" }]);
+						expect(
+							yield* sql`SELECT type FROM events WHERE type = 'turn.interrupted'`,
+						).toEqual([]);
+						expect(turns.turnFences("session-1").stopping).toBe(true);
+						const inbox = yield* SessionInboxTag;
+						yield* inbox.start;
+						yield* inbox.submit({
+							clientId: "client-1",
+							sessionId: "session-1",
+							inputId: "replacement",
+							delivery: "queue",
+							request: { text: "replacement" },
+						});
+						yield* persist.persistEvents([
+							canonicalEvent(
+								"turn.completed",
+								"session-1",
+								{ messageId: "" },
+								{ provider: "opencode", metadata: { runId: "original-run" } },
+							),
+							canonicalEvent(
+								"session.status",
+								"session-1",
+								{ sessionId: "session-1", status: "idle" },
+								{ provider: "opencode", metadata: { runId: "original-run" } },
+							),
+						]);
+						yield* TestClock.adjust(100);
+						if (acknowledgement !== "before-terminal") {
+							expect(turns.turnFences("session-1").stopping).toBe(true);
+							expect(api.session.prompt).not.toHaveBeenCalled();
+							expect(
+								yield* sql`SELECT status FROM provider_command_outbox WHERE command_id = 'silent-stop'`,
+							).toEqual([{ status: "running" }]);
+							if (acknowledgement === "after-terminal") acknowledgeAbort();
+							else yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
+						}
+						yield* stopped;
+						yield* TestClock.adjust(500);
+						yield* flushDispatch;
+						expect(api.session.prompt).toHaveBeenCalledOnce();
+						expect(turns.turnFences("session-1").stopping).toBe(false);
+						expect(
+							yield* sql`SELECT status FROM provider_runs WHERE id = 'original-run'`,
+						).toEqual([{ status: "completed" }]);
+						expect(
+							yield* sql`SELECT type FROM events WHERE type = 'turn.interrupted'`,
+						).toEqual([]);
+						const terminals =
+							yield* sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.interrupted', 'turn.error') AND json_extract(metadata, '$.runId') = 'original-run'`;
+						expect(terminals).toHaveLength(1);
+						writeFileSync(
+							`/tmp/82tn27-3-round5-opencode-${acknowledgement}.json`,
+							JSON.stringify(
+								{
+									acknowledgement,
+									terminals,
+									nativeStops: vi.mocked(api.session.abort).mock.calls.length,
+									replacementStarts: vi.mocked(api.session.prompt).mock.calls
+										.length,
+									runs: yield* sql`SELECT id, status FROM provider_runs`,
+								},
+								null,
+								2,
+							),
+						);
+					}).pipe(Effect.provide(stopLayer(api, scratch)));
+				}),
+		);
+	}
 
 	// Before the first echo, only the outbox admission keeps the inbox busy.
 	it.effect(

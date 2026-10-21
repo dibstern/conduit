@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
@@ -24,7 +24,39 @@ function sdkProof(harness: ProcessHarness) {
 }
 
 afterAll(() => {
-	writeProviderCommandOutboxProof(evidence);
+	writeProviderCommandOutboxProof(import.meta.url, evidence);
+});
+
+it("keeps proof records in separate artifacts for each contributing test file", () => {
+	const sources = ["proof-writer-a", "proof-writer-b"];
+	try {
+		for (const source of sources)
+			writeProviderCommandOutboxProof(
+				new URL(`./${source}.test.ts`, import.meta.url).href,
+				[{ scenario: source, passed: true }],
+			);
+		for (const source of sources) {
+			const path = `/tmp/82tn27-command-outbox-${source}.json`;
+			const proof = JSON.parse(readFileSync(path, "utf8")) as {
+				scenarios: Record<string, unknown>[];
+			};
+			expect(proof.scenarios).toEqual([
+				{ scenario: source, passed: true, timestamp: expect.any(String) },
+			]);
+			expect(
+				readFileSync(
+					`test-results/82tn27-command-outbox-${source}.json`,
+					"utf8",
+				),
+			).toBe(readFileSync(path, "utf8"));
+		}
+	} finally {
+		for (const source of sources)
+			for (const directory of ["test-results", "/tmp"])
+				rmSync(`${directory}/82tn27-command-outbox-${source}.json`, {
+					force: true,
+				});
+	}
 });
 
 describe("command outbox crash proof through the real daemon and stub SDK", () => {

@@ -49,6 +49,7 @@ import type {
 	PreWarmSessionInput,
 	ProviderCall,
 	ProviderCapabilities,
+	ProviderControlCommandStatus,
 	ProviderControlContext,
 	ProviderInstance,
 	ProviderNativeSession,
@@ -386,6 +387,30 @@ export class RunnerProviderInstance implements ProviderInstance {
 		return (
 			this.runner.getSessionFailureEffect?.(sessionId) ??
 			Effect.succeed(undefined)
+		);
+	}
+
+	getControlCommandStatusEffect(
+		sessionId: string,
+		control: ProviderControlContext,
+	): Effect.Effect<ProviderControlCommandStatus, ProviderInstanceFailure> {
+		return (
+			this.runner.getControlCommandStatusEffect?.(sessionId, control) ??
+			Effect.fail(
+				sessionFailure(
+					"get control command status",
+					"Runner cannot reconcile commands",
+				),
+			)
+		).pipe(
+			Effect.mapError(
+				(failure) =>
+					new ProviderInstanceFailure({
+						providerId: this.providerId,
+						operation: failure.operation,
+						cause: Object.assign(new Error(failure.message), failure),
+					}),
+			),
 		);
 	}
 
