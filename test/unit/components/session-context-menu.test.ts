@@ -166,6 +166,7 @@ describe("session triage menu", () => {
 						"session-ctx-snooze",
 						"session-ctx-pin",
 						"session-ctx-mark-unread",
+						"session-ctx-archive",
 						"session-ctx-auto-settle",
 						"session-ctx-rename",
 						"session-ctx-fork",
@@ -179,6 +180,7 @@ describe("session triage menu", () => {
 						"session-ctx-snooze",
 						"session-ctx-pin",
 						"session-ctx-mark-unread",
+						"session-ctx-archive",
 						"divider",
 						"session-ctx-rename",
 						"session-ctx-fork",
@@ -249,30 +251,44 @@ describe("session triage menu", () => {
 		anchor.remove();
 		input.remove();
 	});
-	it("puts Settle and Pin above Rename, with a divider", async () => {
+	it("puts triage above Archive and Rename, with a divider", async () => {
 		openMenu({ id: "a", title: "Alpha" });
 		await screen.findByTestId("session-ctx-rename");
-		const firstFour = [
+		const firstFive = [
 			...screen
 				.getByRole("menu")
 				.querySelectorAll('[role="menuitem"], [role="menuitemcheckbox"]'),
-		].slice(0, 4);
-		expect(firstFour.map((item) => item.getAttribute("data-testid"))).toEqual([
+		].slice(0, 5);
+		expect(firstFive.map((item) => item.getAttribute("data-testid"))).toEqual([
 			"session-ctx-settle",
 			"session-ctx-auto-settle",
 			"session-ctx-snooze",
 			"session-ctx-pin",
+			"session-ctx-mark-unread",
 		]);
 		for (const [index, label] of [
 			"Settle",
 			"Auto-settle when idle",
 			"Snooze…",
 			"Pin to top",
+			"Mark unread",
 		].entries()) {
-			expect(firstFour[index]?.textContent).toContain(label);
+			expect(firstFive[index]?.textContent).toContain(label);
 		}
-		expect(screen.getAllByRole("separator").length).toBeGreaterThan(0);
-		expect(screen.getByTestId("session-ctx-rename")).toBeTruthy();
+		const entries = [
+			...screen
+				.getByRole("menu")
+				.querySelectorAll(
+					'[role="menuitem"], [role="menuitemcheckbox"], [role="separator"]',
+				),
+		];
+		const archiveIndex = entries.indexOf(
+			screen.getByTestId("session-ctx-archive"),
+		);
+		expect(entries[archiveIndex - 1]).toBe(
+			screen.getByTestId("session-ctx-mark-unread"),
+		);
+		expect(entries[archiveIndex + 1]?.getAttribute("role")).toBe("separator");
 		await fireEvent.click(screen.getByTestId("session-ctx-settle"));
 		expect(rpc).toHaveBeenCalledWith(
 			"SetSessionSettled",

@@ -8,7 +8,7 @@ import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PROVIDER_DRIVERS } from "../../../src/lib/contracts/provider-instance.js";
-import { AddInstance } from "../../../src/lib/contracts/ws-rpc.js";
+
 import {
 	type ProcessBrowser,
 	ProcessHarness,
@@ -138,9 +138,11 @@ describe("Cursor questions through the built daemon and detached runner", () => 
 				CONDUIT_CURSOR_SDK_CAPTURE: capturePath,
 			},
 		});
-		const added = await fixture.requestRpc(
-			new AddInstance({ name: "Cursor question replay", driver: "cursor" }),
-		);
+		const added = await fixture.requestRpc({
+			_tag: "AddInstance",
+			name: "Cursor question replay",
+			driver: "cursor",
+		});
 		if (!added.addedInstanceId) throw new Error("Missing Cursor account");
 		const browser = await fixture.connect();
 		sessionId = await browser.createSession(
@@ -164,7 +166,7 @@ describe("Cursor questions through the built daemon and detached runner", () => 
 	async function ask(browser: ProcessBrowser, id: string) {
 		const cursor = browser.frames.length;
 		await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId: id,
 				originId: browser.originId,
 				inputId: randomUUID(),

@@ -1,5 +1,4 @@
-import { randomUUID } from "node:crypto";
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
 import { isRecord } from "../../utils.js";
 import {
 	type ClaudeAdapterError,
@@ -144,7 +143,7 @@ function stringField(value: unknown): string {
 function abortSignalEffect(
 	signal: AbortSignal,
 ): Effect.Effect<never, ClaudeRuntimeError> {
-	return Effect.async<never, ClaudeRuntimeError>((resume) => {
+	return Effect.callback<never, ClaudeRuntimeError>((resume) => {
 		if (signal.aborted) {
 			resume(Effect.fail(new ClaudeRuntimeError({ message: "Aborted" })));
 			return;
@@ -206,39 +205,48 @@ export class ClaudePermissionService {
 			});
 		}
 		const questions = toQuestionRequestQuestions(toolInput ?? {});
-		return sink
-			.requestQuestion({
-				requestId: options.toolUseID,
-				toolUseId: options.toolUseID,
-				questions,
-			})
-			.pipe(
-				Effect.disconnect,
-				Effect.map((answers) => ({
-					behavior: "allow" as const,
-					updatedInput: {
-						...(toolInput ?? {}),
-						answers: toClaudeQuestionAnswers(questions, answers),
-					},
-				})),
-				Effect.raceFirst(
-					Effect.disconnect(
-						// abortSignalEffect signals abort by failing, so map that failure.
-						abortSignalEffect(options.signal).pipe(
-							Effect.orElseSucceed(() => ({
-								behavior: "deny" as const,
-								message: "Turn interrupted",
-							})),
+		return Effect.uninterruptibleMask((restore) =>
+			Effect.gen(function* () {
+				const request = yield* Effect.forkDetach(
+					restore(
+						sink.requestQuestion({
+							requestId: options.requestId ?? options.toolUseID,
+							toolUseId: options.toolUseID,
+							questions,
+						}),
+					),
+					{ startImmediately: true },
+				);
+				return yield* restore(
+					Fiber.join(request).pipe(
+						Effect.map((answers) => ({
+							behavior: "allow" as const,
+							updatedInput: {
+								...(toolInput ?? {}),
+								answers: toClaudeQuestionAnswers(questions, answers),
+							},
+						})),
+						Effect.raceFirst(
+							// abortSignalEffect signals abort by failing, so map that failure.
+							abortSignalEffect(options.signal).pipe(
+								Effect.orElseSucceed(() => ({
+									behavior: "deny" as const,
+									message: "Turn interrupted",
+								})),
+							),
 						),
 					),
-				),
-				Effect.catchAll(() =>
-					Effect.succeed({
-						behavior: "deny" as const,
-						message: "Question request failed.",
-					}),
-				),
-			);
+				).pipe(
+					Effect.ensuring(Effect.sync(() => request.interruptUnsafe())),
+					Effect.catch(() =>
+						Effect.succeed({
+							behavior: "deny" as const,
+							message: "Question request failed.",
+						}),
+					),
+				);
+			}),
+		);
 	}
 
 	private handleToolPermissionEffect(
@@ -247,8 +255,8 @@ export class ClaudePermissionService {
 		toolInput: Record<string, unknown>,
 		options: CanUseToolOptions,
 	): Effect.Effect<PermissionResult, ClaudeAdapterError> {
-		return Effect.gen(this, function* () {
-			const requestId = randomUUID();
+		return Effect.gen({ self: this }, function* () {
+			const requestId = options.requestId ?? options.toolUseID;
 			const createdAt = new Date().toISOString();
 			const sink = ctx.eventSink ?? this.deps.sink;
 			if (!sink) {
@@ -268,39 +276,49 @@ export class ClaudePermissionService {
 			};
 			ctx.pendingApprovals.set(requestId, pending);
 
-			const response = yield* sink
-				.requestPermission({
-					requestId,
-					sessionId: ctx.sessionId,
-					turnId: ctx.currentTurnId ?? "",
-					toolName,
-					toolInput: toolInput ?? {},
-					providerItemId: options.toolUseID,
-					...(options.suggestions != null
-						? { permissionSuggestions: options.suggestions }
-						: {}),
-					...(options.title != null ? { permissionTitle: options.title } : {}),
-					...(options.displayName != null
-						? { permissionDisplayName: options.displayName }
-						: {}),
-					...(options.description != null
-						? { permissionDescription: options.description }
-						: {}),
-					...(options.decisionReason != null
-						? { permissionReason: options.decisionReason }
-						: {}),
-				})
-				.pipe(
-					Effect.disconnect,
-					Effect.raceFirst(
-						Effect.disconnect(abortSignalEffect(options.signal)),
-					),
-					Effect.ensuring(
-						Effect.sync(() => {
-							ctx.pendingApprovals.delete(requestId);
-						}),
-					),
-				);
+			const response = yield* Effect.uninterruptibleMask((restore) =>
+				Effect.gen(function* () {
+					const request = yield* Effect.forkDetach(
+						restore(
+							sink.requestPermission({
+								requestId,
+								sessionId: ctx.sessionId,
+								turnId: ctx.currentTurnId ?? "",
+								toolName,
+								toolInput: toolInput ?? {},
+								providerItemId: options.toolUseID,
+								...(options.suggestions != null
+									? { permissionSuggestions: options.suggestions }
+									: {}),
+								...(options.title != null
+									? { permissionTitle: options.title }
+									: {}),
+								...(options.displayName != null
+									? { permissionDisplayName: options.displayName }
+									: {}),
+								...(options.description != null
+									? { permissionDescription: options.description }
+									: {}),
+								...(options.decisionReason != null
+									? { permissionReason: options.decisionReason }
+									: {}),
+							}),
+						),
+						{ startImmediately: true },
+					);
+					return yield* restore(
+						Fiber.join(request).pipe(
+							Effect.raceFirst(abortSignalEffect(options.signal)),
+						),
+					).pipe(Effect.ensuring(Effect.sync(() => request.interruptUnsafe())));
+				}),
+			).pipe(
+				Effect.ensuring(
+					Effect.sync(() => {
+						ctx.pendingApprovals.delete(requestId);
+					}),
+				),
+			);
 
 			const decision =
 				response && typeof response === "object" && "decision" in response

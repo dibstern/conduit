@@ -34,6 +34,7 @@
 	];
 
 	const repeat = createRepeatTimer();
+	$effect(() => repeat.stop);
 	let gesture = $state<{
 		pointerId: number;
 		/** Where the next step is measured from. */

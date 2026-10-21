@@ -6,6 +6,7 @@ import {
 	PubSub,
 	Queue,
 	Ref,
+	Semaphore,
 	Stream,
 } from "effect";
 import { hashPin } from "../../../auth.js";
@@ -51,6 +52,11 @@ import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
 import { getVersion } from "../../../version.js";
 import { makeCategoryTuning } from "../../relay/Services/category-tuning.js";
 import { findFolders } from "../../relay/Services/directory-listing-service.js";
+import {
+	InputDraftsTag,
+	makeInputDrafts,
+} from "../../relay/Services/input-drafts.js";
+import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { readSurfacingFeedback } from "../../relay/Services/surfacing-feedback.js";
 import { AuthManagerTag } from "../../server/Layers/auth-middleware.js";
@@ -59,6 +65,7 @@ import { CategorySet } from "../Services/category-set.js";
 import {
 	type ConfigPersistenceTag,
 	requestConfigSave,
+	saveConfig,
 } from "../Services/config-persistence-service.js";
 import {
 	commitDaemonRuntimeConfig,
@@ -68,6 +75,7 @@ import { DaemonHandleTag } from "../Services/daemon-handle.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {
 	findOpenCodeSession,
+	listArchivedSessions,
 	listDaemonSessions,
 	resolveDaemonOpenCodeSession,
 	resolveDaemonSession,
@@ -97,14 +105,15 @@ import {
 	allProjects,
 	broadcastProjectList,
 	type ProjectRegistryTag,
-	type ProjectSaveLockTag,
+	ProjectSaveLockTag,
 	projectInfos,
 	removeProjectFromEffectRegistry,
 	resolveSessionMode,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
 import { SessionActivityTag } from "../Services/session-activity.js";
-import type { SessionDirectory } from "../Services/session-directory.js";
+import { SessionDirectory } from "../Services/session-directory.js";
+import { subscribeDaemonShell } from "../Services/shell-subscription.js";
 import { Usage } from "../Services/usage.js";
 import type { UserAvatar } from "../Services/user-avatar.js";
 import { KeepAwakeTag } from "./keep-awake-layer.js";
@@ -115,12 +124,12 @@ import {
 	type TailscaleCliTag,
 } from "./tailscale-serve-layer.js";
 
-export class DaemonWsRpcHandlersTag extends Context.Tag("DaemonWsRpcHandlers")<
+export class DaemonWsRpcHandlersTag extends Context.Service<
 	DaemonWsRpcHandlersTag,
 	DaemonRpcHandlers
->() {}
+>()("DaemonWsRpcHandlers") {}
 
-export const DaemonWsRpcHandlersLive = Layer.scoped(
+export const DaemonWsRpcHandlersLive = Layer.effect(
 	DaemonWsRpcHandlersTag,
 	Effect.gen(function* () {
 		const { configDir } = yield* Ref.get(yield* DaemonStateTag);
@@ -145,9 +154,17 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			| TailscaleCliTag
 		>();
 		const activity = yield* SessionActivityTag;
+		const sessionEventBus = yield* SessionEventBusTag;
 		const context = Context.add(baseContext, SessionActivityTag, activity).pipe(
+			Context.add(SessionEventBusTag, sessionEventBus),
 			Context.merge(yield* persistenceStoreContext),
 		);
+		const shellContext = Context.merge(context, yield* PersistenceStore);
+		const sharedDrafts = yield* Effect.serviceOption(InputDraftsTag);
+		const drafts = Option.isSome(sharedDrafts)
+			? sharedDrafts.value
+			: yield* makeInputDrafts.pipe(Effect.provide(yield* PersistenceStore));
+		const directory = yield* SessionDirectory;
 		const bus = yield* DaemonEventBusTag;
 		const cache = yield* RelayCacheTag;
 		const handle = yield* DaemonHandleTag;
@@ -160,14 +177,14 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			cwd: configDir,
 		}).pipe(Effect.provide(yield* PersistenceStore));
 		// Serialize process changes together with their config/persistence updates.
-		const keepAwakeLock = yield* Effect.makeSemaphore(1);
-		const tailscaleServeLock = yield* Effect.makeSemaphore(1);
+		const keepAwakeLock = yield* Semaphore.make(1);
+		const tailscaleServeLock = yield* Semaphore.make(1);
 		const auth = yield* AuthManagerTag;
 		const browserConnections = yield* BrowserRpcConnectionsTag;
 		const invalidateBrowsers = () => {
 			for (const invalidate of browserConnections) invalidate();
 		};
-		// Every open SubscribeInstances / SubscribeProjects stream, across all
+		// Every open SubscribeInstances / SubscribeShell stream, across all
 		// connections and projects (conduit-test-ni8.14). A change wakes each
 		// one following that list; it re-reads the list itself.
 		const listSubscribers = new Set<{
@@ -178,7 +195,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		// them when it sees a new value (conduit-test-ni8.16.2).
 		let sessionsRevision = 0;
 		const subscription = yield* PubSub.subscribe(bus);
-		yield* Stream.fromQueue(subscription).pipe(
+		yield* Stream.fromSubscription(subscription).pipe(
 			Stream.runForEach((event) => {
 				if (event._tag === "GlobalSettingChanged")
 					return Effect.gen(function* () {
@@ -204,7 +221,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 					return Effect.sync(() => {
 						for (const subscriber of listSubscribers)
 							if (subscriber.list === list)
-								Queue.unsafeOffer(subscriber.changed, undefined);
+								Queue.offerUnsafe(subscriber.changed, undefined);
 					});
 				return Effect.void;
 			}),
@@ -321,7 +338,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				| DaemonConfigRefTag
 			>,
 		) =>
-			Stream.unwrapScoped(
+			Stream.unwrap(
 				Effect.gen(function* () {
 					const subscriber = { list, changed: yield* Queue.sliding<void>(1) };
 					yield* Effect.acquireRelease(
@@ -336,6 +353,35 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			);
 
 		return {
+			SubscribeDrafts: () =>
+				drafts.listDrafts().pipe(
+					Stream.mapError(
+						(error) =>
+							new WsRpcError({
+								message: `Could not list drafts: ${error.message}`,
+							}),
+					),
+				),
+			SubscribeInputDraft: (request) =>
+				Stream.unwrap(
+					Effect.gen(function* () {
+						if ("session" in request.key) {
+							const owner = yield* directory
+								.projectOf(request.key.session)
+								.pipe(
+									Effect.mapError(
+										(error) => new WsRpcError({ message: error.message }),
+									),
+								);
+							if (Option.isNone(owner))
+								return yield* new WsRpcError({
+									code: "unknown-session",
+									message: `Unknown session: ${request.key.session}`,
+								});
+						}
+						return drafts.subscribe(request.key);
+					}),
+				),
 			SubscribeInstances: () =>
 				followList(
 					"instances",
@@ -347,23 +393,35 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			SubscribeUsage: () =>
 				usage.readings.pipe(Stream.map((readings) => ({ readings }))),
-			SubscribeProjects: () =>
-				followList(
-					"projects",
-					Effect.gen(function* () {
-						const projects = yield* projectInfos;
-						const { newSessionProject } = yield* Ref.get(
-							yield* DaemonConfigRefTag,
-						);
-						return {
-							projects,
-							...(newSessionProject !== undefined && { newSessionProject }),
-						};
-					}),
+			SubscribeShell: (request) =>
+				subscribeDaemonShell(
+					request,
+					followList(
+						"projects",
+						Effect.gen(function* () {
+							const projects = yield* projectInfos;
+							const { newSessionProject, projectOrder } = yield* Ref.get(
+								yield* DaemonConfigRefTag,
+							);
+							return {
+								_tag: "projects" as const,
+								projects,
+								...(newSessionProject !== undefined && { newSessionProject }),
+								...(projectOrder !== undefined && { projectOrder }),
+							};
+						}),
+					),
+				).pipe(
+					Stream.provideContext(shellContext),
+					Stream.mapError((error) =>
+						error instanceof WsRpcError
+							? error
+							: new WsRpcError({ message: formatErrorDetail(error) }),
+					),
 				),
 			sessionCreated: (projectSlug) =>
 				run(rememberNewSessionProject(projectSlug)).pipe(
-					Effect.catchAll((error) =>
+					Effect.catch((error) =>
 						Effect.logWarning(
 							`Could not remember the new-session project: ${error.message}`,
 						),
@@ -440,7 +498,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 									else invalidateBrowsers();
 								});
 							}
-							yield* requestConfigSave;
+							yield* saveConfig;
 							return { ok: true as const };
 						}),
 					).pipe(Effect.uninterruptible);
@@ -463,7 +521,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 							...config,
 							keepAwake: request.enabled,
 						}));
-						yield* requestConfigSave;
+						yield* saveConfig;
 						return { ok: true as const, supported, active };
 					}).pipe(Effect.uninterruptible, keepAwakeLock.withPermits(1)),
 				),
@@ -471,7 +529,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(
 					Effect.gen(function* () {
 						yield* applyTailscaleServe(request.enabled);
-						yield* requestConfigSave;
+						yield* saveConfig;
 						return { ok: true as const };
 					}).pipe(Effect.uninterruptible, tailscaleServeLock.withPermits(1)),
 				),
@@ -490,7 +548,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 							...config,
 							...updates,
 						}));
-						yield* requestConfigSave;
+						yield* saveConfig;
 						return { ok: true as const };
 					}).pipe(Effect.uninterruptible, keepAwakeLock.withPermits(1)),
 				),
@@ -536,7 +594,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 							...config,
 							shuttingDown: true,
 						}));
-						yield* requestConfigSave;
+						yield* saveConfig;
 						return { ok: true as const };
 					}),
 				),
@@ -584,9 +642,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						...(request.sessionMode !== undefined && {
 							sessionMode: request.sessionMode,
 						}),
-						...(request.groupingMode !== undefined && {
-							groupingMode: request.groupingMode,
-						}),
 					});
 					// Saving without a slug adds a project; its first session goes there.
 					if (request.slug === undefined && kind !== "existing")
@@ -608,6 +663,27 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 							: new WsRpcError({ message: formatErrorDetail(error) }),
 					),
 				),
+			SetProjectOrder: (request) =>
+				run(
+					Effect.flatMap(ProjectSaveLockTag, (lock) =>
+						lock.withPermits(1)(
+							Effect.gen(function* () {
+								const registered = new Set(
+									(yield* allProjects).map(({ slug }) => slug),
+								);
+								const projectOrder = [...new Set(request.projectOrder)].filter(
+									(slug) => registered.has(slug),
+								);
+								yield* commitDaemonRuntimeConfig((current) => ({
+									...current,
+									projectOrder,
+								}));
+								yield* PubSub.publish(bus, DaemonEvent.ProjectsChanged());
+								yield* saveConfig;
+							}),
+						),
+					),
+				),
 			RemoveProject: (request) =>
 				run(
 					Effect.gen(function* () {
@@ -615,6 +691,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 							(project) => project.slug === request.slug,
 						);
 						yield* removeProjectFromEffectRegistry(request.slug);
+						yield* saveConfig;
 						// Removed folders feed the dialog's "recent" suggestions. Reversed
 						// so the main folder ends up first; a failed write must not fail
 						// the removal.
@@ -645,6 +722,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 								?.runsOpenCodeServer
 						)
 							yield* Effect.scoped(openCodeInstances.use(request.instanceId));
+						yield* saveConfig;
 						return {
 							projectSlug: request.projectSlug,
 							instances: yield* instanceList,
@@ -660,6 +738,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 								?.runsOpenCodeServer
 						)
 							yield* openCodeInstances.stop(request.instanceId);
+						yield* saveConfig;
 						return {
 							projectSlug: request.projectSlug,
 							instances: yield* instanceList,
@@ -756,19 +835,16 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				}),
 			SetAutoSettleSetting: (request) =>
 				run(wsRpcHandlers.SetAutoSettleSetting(request)),
+			GetAutoDeleteArchivedSetting: (request) =>
+				run(wsRpcHandlers.GetAutoDeleteArchivedSetting(request)),
+			SetAutoDeleteArchivedSetting: (request) =>
+				run(wsRpcHandlers.SetAutoDeleteArchivedSetting(request)),
 			GetWorktreeCleanupSetting: (request) =>
 				run(wsRpcHandlers.GetWorktreeCleanupSetting(request)),
 			SetWorktreeCleanupSetting: (request) =>
 				run(wsRpcHandlers.SetWorktreeCleanupSetting(request)),
 			CleanUpWorktreesNow: (request) =>
 				run(wsRpcHandlers.CleanUpWorktreesNow(request)),
-			GetDefaultGroupingMode: (_request) =>
-				run(
-					Effect.sync(() => ({
-						mode:
-							loadRelaySettings(configDir).defaultGroupingMode ?? "repository",
-					})),
-				),
 			GetTerminalKeys: (_request) =>
 				run(
 					Effect.sync(() => ({
@@ -814,23 +890,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				}),
 			ReplaceCategorySet: ({ expectedVersion, nextSet }) =>
 				categorySet.replace(expectedVersion, nextSet),
-			SetDefaultGroupingMode: ({ mode }) =>
-				run(
-					Effect.gen(function* () {
-						yield* Effect.try(() =>
-							saveRelaySettings({ defaultGroupingMode: mode }, configDir),
-						);
-						yield* PubSub.publish(
-							bus,
-							DaemonEvent.GlobalSettingChanged({
-								originSlug: "",
-								tag: "defaultGroupingMode",
-							}),
-						);
-						yield* PubSub.publish(bus, DaemonEvent.ProjectsChanged());
-						return { mode };
-					}),
-				),
 			GetUsageLimitsSetting: (request) =>
 				run(wsRpcHandlers.GetUsageLimitsSetting(request)),
 			SetUsageLimitsSetting: (request) =>
@@ -853,10 +912,13 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			ListDaemonSessions: (request) =>
 				run(
-					listDaemonSessions(configDir, {
+					listDaemonSessions({
 						...(request.limit !== undefined ? { limit: request.limit } : {}),
 						...(request.roots !== undefined ? { roots: request.roots } : {}),
 						...(request.search !== undefined ? { search: request.search } : {}),
+						...(request.includeArchived !== undefined
+							? { includeArchived: request.includeArchived }
+							: {}),
 						...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
 						...(request.scope !== undefined ? { scope: request.scope } : {}),
 						...(request.exclude !== undefined
@@ -868,6 +930,13 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 							...result,
 						})),
 					),
+				),
+			ListArchivedSessions: (request) =>
+				run(
+					listArchivedSessions({
+						...(request.limit !== undefined ? { limit: request.limit } : {}),
+						...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
+					}),
 				),
 			ResolveSession: (request) =>
 				run(

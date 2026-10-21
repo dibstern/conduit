@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Clock, Effect, Schema } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	SurfacingFeedbackEntrySchema,
 	type SurfacingMark,
@@ -40,7 +40,7 @@ export const readSurfacingFeedback = (projectId?: string) =>
 			LEFT JOIN message_parts mp ON mp.id = sm.part_id AND mp.message_id = m.id
 			WHERE ${projectId === undefined ? sql`1 = 1` : sql`s.project_id = ${projectId}`}
 			ORDER BY sm.created_at DESC, sm.part_id`;
-		return yield* Schema.decodeUnknown(
+		return yield* Schema.decodeUnknownEffect(
 			Schema.Array(SurfacingFeedbackEntrySchema),
 		)(
 			rows.map((row) => ({
@@ -103,7 +103,7 @@ export const makeSurfacingFeedback = Effect.gen(function* () {
 				const next =
 					mark === null
 						? null
-						: yield* Schema.decodeUnknown(SurfacingMarkSchema)(mark);
+						: yield* Schema.decodeUnknownEffect(SurfacingMarkSchema)(mark);
 				if (next?.direction === "retype" && !next.category)
 					return yield* new WsRpcError({
 						message: "Retype requires a category",

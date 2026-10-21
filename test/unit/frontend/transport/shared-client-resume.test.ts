@@ -1,5 +1,13 @@
-import type { Rpc } from "@effect/rpc";
-import { Effect, Fiber, Layer, ManagedRuntime, Schema, Stream } from "effect";
+import {
+	Effect,
+	Fiber,
+	Layer,
+	ManagedRuntime,
+	Schema,
+	Scope,
+	Stream,
+} from "effect";
+import type { Rpc } from "effect/rpc";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
 	SubscribeShell,
@@ -13,10 +21,9 @@ import { makeRpcStream, serveRpc } from "../../../helpers/rpc-wire.js";
 
 const Request = Schema.Struct({
 	_tag: Schema.Literal("Request"),
-	id: Schema.String,
+	id: Schema.Union([Schema.String, Schema.Number]),
 	tag: Schema.String,
 	payload: Schema.Struct({
-		projectSlug: Schema.String,
 		resumeFromSequence: Schema.optional(Schema.Number),
 	}),
 });
@@ -28,7 +35,9 @@ const sockets: FakeWebSocket[] = [];
 class FakeWebSocket extends EventTarget {
 	readyState = 0;
 	readonly requests: (typeof Request.Type)[] = [];
-	readonly runtime = ManagedRuntime.make(Layer.scope);
+	readonly runtime = ManagedRuntime.make(
+		Layer.effect(Scope.Scope, Effect.acquireRelease(Scope.make(), Scope.close)),
+	);
 	readonly feed = Effect.runSync(
 		makeRpcStream<Rpc.SuccessChunk<typeof SubscribeShell>, WsRpcError>(),
 	);
@@ -133,7 +142,6 @@ describe("shared client resume over WebSockets", () => {
 			);
 			const first = await nextSubscription();
 			expect(first.request.payload).toEqual({
-				projectSlug: "alpha",
 				...options,
 			});
 			expect(observed).toEqual([]);
@@ -141,7 +149,6 @@ describe("shared client resume over WebSockets", () => {
 			const resumed = await nextSubscription();
 			expect(resumed.socket).not.toBe(first.socket);
 			expect(resumed.request.payload).toEqual({
-				projectSlug: "alpha",
 				...options,
 			});
 			await resumed.socket.emit(
@@ -176,7 +183,7 @@ describe("shared client resume over WebSockets", () => {
 				),
 			);
 			const first = await nextSubscription();
-			expect(first.request.payload).toEqual({ projectSlug: "alpha" });
+			expect(first.request.payload).toEqual({});
 			await first.socket.emit(
 				{ _tag: "snapshot", rows: [], sequence: 11 },
 				{ _tag: "synchronized" },
@@ -191,7 +198,6 @@ describe("shared client resume over WebSockets", () => {
 			// 13 is open: its already delivered member must be suppressed while
 			// its undelivered sibling still reaches the same consumer.
 			expect(resumed.request.payload).toEqual({
-				projectSlug: "alpha",
 				resumeFromSequence: 12,
 			});
 			const history = [

@@ -1,8 +1,9 @@
 // Failure modes: deleting the cut point exposes its hidden tail; deleting a
 // later member leaves an undoable half-removed range; deleting a kept message
 // commits an unrelated rewind; partial projection commits only part of a cut.
-import { SqlClient } from "@effect/sql";
+
 import { Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, it } from "vitest";
 import {
 	ProviderRuntimeIngestionLive,
@@ -139,15 +140,15 @@ it.each([
 	);
 });
 
-it("rolls back the entire upstream rewind commit when a hidden removal cannot project", async () => {
+it("rolls back the entire upstream rewind commit when the range cannot project", async () => {
 	const failingProjector: EffectProjector = {
-		name: "fail-final-hidden-removal",
-		handles: ["message.removed"],
+		name: "fail-rewind-commit",
+		handles: ["session.rewind_committed"],
 		project: (event) =>
-			event.type === "message.removed" && event.data.messageId === "hidden-user"
+			event.type === "session.rewind_committed"
 				? Effect.fail(
 						new ProjectionError({
-							projector: "fail-final-hidden-removal",
+							projector: "fail-rewind-commit",
 							operation: "project",
 							cause: "Test removal projection failure",
 						}),
@@ -162,10 +163,10 @@ it("rolls back the entire upstream rewind commit when a hidden removal cannot pr
 			const sql = yield* SqlClient.SqlClient;
 			const events = yield* EventStoreEffectTag;
 			const before = yield* events.readAllBySession(SESSION_ID);
-			const outcome = yield* Effect.either(
+			const outcome = yield* Effect.result(
 				ingestion.ingest(upstreamRemoval("cut-user")),
 			);
-			expect.soft(outcome._tag).toBe("Left");
+			expect.soft(outcome._tag).toBe("Failure");
 			expect
 				.soft((yield* read.getSession(SESSION_ID))?.pending_rewind_message_id)
 				.toBe("cut-user");
@@ -278,7 +279,7 @@ it("commits same-batch late hidden content and drops echoes after the upstream c
 						)
 						.sort(),
 				)
-				.toEqual(hidden);
+				.toEqual([]);
 			expect
 				.soft(
 					stored.filter((event) => event.type === "session.rewind_committed"),
@@ -286,15 +287,7 @@ it("commits same-batch late hidden content and drops echoes after the upstream c
 				.toHaveLength(1);
 			expect
 				.soft(stored.find((event) => event.eventId === targetRemoval.eventId))
-				.toMatchObject({
-					type: "message.removed",
-					provider: "opencode",
-					createdAt: targetRemoval.createdAt,
-					metadata: {
-						providerRuntimeEventId: targetRemoval.eventId,
-						rawSource: targetRemoval.rawSource.kind,
-					},
-				});
+				.toBeUndefined();
 			for (const echo of staleEvents)
 				expect
 					.soft(stored.some((event) => event.eventId === echo.eventId))

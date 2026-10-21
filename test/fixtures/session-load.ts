@@ -5,6 +5,7 @@
 // is deterministic, so byte counts are stable from run to run.
 
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import type {
 	CanonicalEvent,
 	EventPayloadMap,
@@ -225,6 +226,8 @@ export const HEAVY_FINAL_TEXT = "Heavy session complete: all steps verified.";
  * does not exist. `families` scales the store; the heavy session is always
  * added and is the newest root. `projectId` must match the project whose
  * relay reads the store, or its scoped lists hide every seeded session.
+ * `seen` marks every seeded session read, as a store whose history the user
+ * has already opened; unread rows otherwise sort above every idle one.
  */
 export const seedSessionLoadFixture = async (
 	filename: string,
@@ -232,6 +235,7 @@ export const seedSessionLoadFixture = async (
 		readonly families?: number;
 		readonly heavyTurns?: number;
 		readonly projectId?: string;
+		readonly seen?: boolean;
 	} = {},
 ): Promise<SessionLoadFixture> => {
 	const families = options.families ?? 2500;
@@ -243,9 +247,11 @@ export const seedSessionLoadFixture = async (
 			let count = 0;
 			const write = (batch: readonly CanonicalEvent[]) =>
 				commit(batch, { publish: false }).pipe(
-					Effect.tap(() => {
-						count += batch.length;
-					}),
+					Effect.tap(() =>
+						Effect.sync(() => {
+							count += batch.length;
+						}),
+					),
 				);
 			for (let first = 0; first < families; first += 500) {
 				yield* write(
@@ -261,6 +267,21 @@ export const seedSessionLoadFixture = async (
 				heavyStart,
 			))
 				yield* write(batch);
+			// One stamped write, as markSeen makes per row: ten thousand of those
+			// cost minutes of commits before the test has started.
+			if (options.seen) {
+				const sql = yield* SqlClient.SqlClient;
+				yield* commit.write((_project, stamp) =>
+					stamp((version) =>
+						sql<{ id: string }>`
+							UPDATE sessions SET seen_version = last_turn_end_version, version = ${version}
+							WHERE last_turn_end_version IS NOT NULL AND (parent_id IS NULL OR side_thread = 1)
+							RETURNING id`.pipe(
+							Effect.map((rows) => rows.map((row) => row.id)),
+						),
+					),
+				);
+			}
 			return count;
 		}).pipe(
 			Effect.provide(

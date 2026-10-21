@@ -1,7 +1,6 @@
 import { resolve } from "node:path";
 import { z } from "zod";
 import { WorkspaceMoveError } from "../contracts/session-workspace.js";
-import { OpenCodeUseWorktree } from "../contracts/ws-rpc.js";
 import { sendRpcRequest } from "../daemon/daemon-rpc-client.js";
 
 /** Loaded only by OpenCode servers spawned by Conduit. */
@@ -23,14 +22,12 @@ export default async function ConduitWorktreePlugin() {
 					if (!socketPath || !instanceId)
 						return "Workspace move refused: the Conduit daemon connection is not configured.";
 					try {
-						const { directory } = await sendRpcRequest(
-							socketPath,
-							new OpenCodeUseWorktree({
-								instanceId,
-								providerSessionId: context.sessionID,
-								path: resolve(context.directory, path),
-							}),
-						);
+						const { directory } = await sendRpcRequest(socketPath, {
+							_tag: "OpenCodeUseWorktree",
+							instanceId,
+							providerSessionId: context.sessionID,
+							path: resolve(context.directory, path),
+						});
 						return `Session workspace moved to ${directory}.`;
 					} catch (error) {
 						if (error instanceof WorkspaceMoveError) {

@@ -163,8 +163,8 @@ describe("Shared OpenCode stream reconnect", () => {
 				SSEStreamLive.pipe(
 					Layer.provide(
 						Layer.mergeAll(
-							Layer.succeed(OpenCodeInstancesTag, instances),
-							Layer.succeed(ConfigTag, makeMockConfig({ projectDir })),
+							Layer.succeed(OpenCodeInstancesTag)(instances),
+							Layer.succeed(ConfigTag)(makeMockConfig({ projectDir })),
 						),
 					),
 				),
@@ -255,7 +255,7 @@ describe("Shared OpenCode stream reconnect", () => {
 		try {
 			const instances = await runtime.runPromise(OpenCodeInstancesTag);
 			const client = await runtime.runPromise(
-				instances.useIfRunning("opencode").pipe(Scope.extend(scope)),
+				instances.useIfRunning("opencode").pipe(Scope.provide(scope)),
 			);
 			expect(Option.isSome(client)).toBe(true);
 			await vi.advanceTimersByTimeAsync(120_001);

@@ -1,9 +1,9 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Option, Ref, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { listDaemonSessions } from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
@@ -63,7 +63,7 @@ describe("Session Rows read paths", () => {
 		["local_bash", "monitoring"],
 		["workflow", "working"],
 	] as const) {
-		it.scoped(
+		it.effect(
 			`shares ${attention} activity and hint dismissals across all four readers`,
 			() => {
 				const configDir = mkdtempSync(join(tmpdir(), "conduit-session-rows-"));
@@ -78,7 +78,7 @@ describe("Session Rows read paths", () => {
 						),
 					);
 					const activity = yield* makeSessionActivity;
-					const activityLayer = Layer.succeed(SessionActivityTag, activity);
+					const activityLayer = Layer.succeed(SessionActivityTag)(activity);
 					const persistence = makePersistenceEffectLayer(
 						join(configDir, "events.db"),
 						slug,
@@ -93,11 +93,10 @@ describe("Session Rows read paths", () => {
 						store,
 						activityLayer,
 						SessionEventBusLive,
-						Layer.succeed(
-							ConfigTag,
+						Layer.succeed(ConfigTag)(
 							makeMockConfig({ configDir, projectDir, slug }),
 						),
-						Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+						Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 						makeProjectRegistryLive([{ slug, title: "Project", folders }]),
 					);
 					yield* Effect.gen(function* () {
@@ -154,11 +153,15 @@ describe("Session Rows read paths", () => {
 						const cache = createSessionGitCache(async () => undefined);
 						const readAll = Effect.gen(function* () {
 							const relay = yield* operations.serviceListSessions();
-							const shell = yield* Stream.runHead(subscribeShell());
+							const shell = yield* Stream.runHead(
+								subscribeShell().pipe(
+									Stream.filter((frame) => frame._tag !== "projects"),
+								),
+							);
 							const family = yield* Stream.runHead(
 								subscribeSessionFamily({ sessionId }),
 							);
-							const daemon = yield* listDaemonSessions(configDir, {}, cache);
+							const daemon = yield* listDaemonSessions({}, cache);
 							expect(daemon.availability).toEqual([
 								{ projectSlug: slug, available: true },
 							]);
@@ -192,7 +195,7 @@ describe("Session Rows read paths", () => {
 								workspaceHint: undefined,
 							});
 						}
-					}).pipe(Effect.provide(layer));
+					}).pipe(Effect.provide(layer, { local: true }));
 				});
 			},
 		);

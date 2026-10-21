@@ -26,7 +26,7 @@ import {
 	ProjectSaveRejected,
 	type SaveProjectInput,
 } from "../../../contracts/ws-rpc.js";
-import type { PersistenceStore } from "../../../persistence/effect/live.js";
+import { PersistenceStore } from "../../../persistence/effect/live.js";
 import {
 	daemonStorePath,
 	projectStorageDir,
@@ -39,6 +39,10 @@ import {
 	DaemonSessionQueryServiceTag,
 } from "../../relay/Services/daemon-session-query-service.js";
 import {
+	InputDraftsTag,
+	makeInputDrafts,
+} from "../../relay/Services/input-drafts.js";
+import {
 	InstanceManagementServiceError,
 	InstanceManagementServiceTag,
 } from "../../relay/Services/instance-management-service.js";
@@ -49,13 +53,17 @@ import {
 	type SaveProjectResult,
 } from "../../relay/Services/project-management-service.js";
 import { ScanServiceTag } from "../../relay/Services/scan-service.js";
+import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
 import { CategorySet } from "../Services/category-set.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
-import { listDaemonSessions as listEffectDaemonSessions } from "../Services/daemon-session-reader.js";
+import {
+	listArchivedSessions,
+	listDaemonSessions as listEffectDaemonSessions,
+} from "../Services/daemon-session-reader.js";
 import { DaemonStoreAvailability } from "../Services/daemon-store-availability.js";
 import type { InstanceHealthCheckTag } from "../Services/instance-health-service.js";
 import {
@@ -73,6 +81,7 @@ import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js"
 import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	type broadcastProjectList,
+	getEffectiveWorktreeCleanup,
 	projectInfos as getEffectProjectInfos,
 	openCodeInstanceFor,
 	ProjectRegistryTag,
@@ -103,10 +112,10 @@ export class RelayFactoryError extends Data.TaggedError("RelayFactoryError")<{
  * available until the server layer has built. Both the relay factory and
  * daemon-main read from this Ref.
  */
-export class HttpServerRefTag extends Context.Tag("HttpServerRef")<
+export class HttpServerRefTag extends Context.Service<
 	HttpServerRefTag,
 	Ref.Ref<http.Server | null>
->() {}
+>()("HttpServerRef") {}
 
 /**
  * Layer that creates an HttpServerRef initialized to null.
@@ -137,22 +146,22 @@ export interface RelayFactoryProjectControls {
 		input: SaveProjectInput,
 	) => Effect.Effect<
 		Omit<SaveProjectResult, "projects">,
-		| Effect.Effect.Error<ReturnType<typeof saveProject>>
-		| Effect.Effect.Error<typeof broadcastProjectList>
+		| Effect.Error<ReturnType<typeof saveProject>>
+		| Effect.Error<typeof broadcastProjectList>
 	>;
 	readonly removeProject: (
 		slug: string,
 	) => Effect.Effect<
 		void,
-		| Effect.Effect.Error<ReturnType<typeof removeProjectFromEffectRegistry>>
-		| Effect.Effect.Error<typeof broadcastProjectList>
+		| Effect.Error<ReturnType<typeof removeProjectFromEffectRegistry>>
+		| Effect.Error<typeof broadcastProjectList>
 	>;
 }
 
-export class RelayFactoryTag extends Context.Tag("RelayFactory")<
+export class RelayFactoryTag extends Context.Service<
 	RelayFactoryTag,
 	RelayFactory
->() {}
+>()("RelayFactory") {}
 
 /**
  * Create a Layer providing RelayFactoryTag.
@@ -182,6 +191,7 @@ export const RelayFactoryLive = (
 	| InstanceHealthCheckTag
 	| DaemonEventBusTag
 	| SessionActivityTag
+	| SessionEventBusTag
 	| ConfigPersistenceTag
 	| PortScannerTag
 	| PushManagerTag
@@ -196,6 +206,10 @@ export const RelayFactoryLive = (
 			const categories = yield* Effect.serviceOption(CategorySet);
 			const sessionDirectory = yield* Effect.serviceOption(SessionDirectory);
 			const storeContext = yield* persistenceStoreContext;
+			const sharedDrafts = yield* Effect.serviceOption(InputDraftsTag);
+			const inputDrafts = Option.isSome(sharedDrafts)
+				? sharedDrafts.value
+				: yield* makeInputDrafts.pipe(Effect.provide(yield* PersistenceStore));
 			const unavailable = yield* DaemonStoreAvailability;
 			const configRef = yield* DaemonConfigRefTag;
 			const envResolver = Option.getOrUndefined(
@@ -206,6 +220,7 @@ export const RelayFactoryLive = (
 			const instanceState = yield* InstanceManagerStateTag;
 			const eventBus = yield* DaemonEventBusTag;
 			const activity = yield* SessionActivityTag;
+			const sessionEventBus = yield* SessionEventBusTag;
 			const cleanupQueue = yield* Effect.serviceOption(WorktreeCleanupQueueTag);
 			const configPersistence = yield* ConfigPersistenceTag;
 			const portScanner = yield* PortScannerTag;
@@ -232,8 +247,15 @@ export const RelayFactoryLive = (
 			const daemonSessionQueryAdapter = Context.make(
 				DaemonSessionQueryServiceTag,
 				{
+					listArchived: (options) =>
+						listArchivedSessions(options).pipe(
+							Effect.provide(daemonContext),
+							Effect.mapError(
+								(cause) => new DaemonSessionQueryServiceError({ cause }),
+							),
+						),
 					list: (options) =>
-						listEffectDaemonSessions(configDir, options).pipe(
+						listEffectDaemonSessions(options).pipe(
 							Effect.provide(daemonContext),
 							Effect.mapError(
 								(cause) => new DaemonSessionQueryServiceError({ cause }),
@@ -286,6 +308,7 @@ export const RelayFactoryLive = (
 									? Effect.asVoid(Effect.scoped(openCodeInstances.use(id)))
 									: Effect.void,
 							),
+							Effect.andThen(configPersistence.flush),
 							Effect.provide(daemonContext),
 							Effect.mapError(
 								(cause) =>
@@ -298,6 +321,7 @@ export const RelayFactoryLive = (
 						),
 					stop: (id) =>
 						openCodeInstances.stop(id).pipe(
+							Effect.andThen(configPersistence.flush),
 							Effect.mapError(
 								(cause) =>
 									new InstanceManagementServiceError({
@@ -344,12 +368,6 @@ export const RelayFactoryLive = (
 					Effect.gen(function* () {
 						const listProjects = getEffectProjectInfos.pipe(
 							Effect.provide(daemonContext),
-							Effect.map((projects) =>
-								projects.map(({ group, ...project }) => ({
-									...project,
-									...(group === undefined ? {} : { group }),
-								})),
-							),
 							Effect.mapError(
 								(cause) =>
 									new ProjectManagementServiceError({
@@ -504,6 +522,8 @@ export const RelayFactoryLive = (
 												: Context.empty(),
 										),
 										Context.add(SessionActivityTag, activity),
+										Context.add(SessionEventBusTag, sessionEventBus),
+										Context.add(InputDraftsTag, inputDrafts),
 										Context.add(DaemonEventBusTag, eventBus),
 										Context.add(ProjectRegistryTag, projectRegistry),
 										Context.add(PortScannerTag, portScanner),
@@ -547,6 +567,15 @@ export const RelayFactoryLive = (
 													projectSlug: project.slug,
 												}).pipe(Effect.asVoid)
 											: Effect.void,
+									getWorktreeCleanup: () =>
+										getEffectiveWorktreeCleanup(project.slug).pipe(
+											Effect.provideService(
+												ProjectRegistryTag,
+												projectRegistry,
+											),
+											Effect.provideService(DaemonConfigRefTag, configRef),
+											Effect.orElseSucceed(() => "off" as const),
+										),
 									publishGlobalSetting: (tag) =>
 										PubSub.publish(
 											eventBus,
@@ -585,7 +614,7 @@ export const RelayFactoryLive = (
 												reason: `Failed to stop cancelled relay for project "${project.slug}"`,
 												cause,
 											}),
-									}).pipe(Effect.catchAll((error) => Effect.logError(error)));
+									}).pipe(Effect.catch((error) => Effect.logError(error)));
 								}),
 							),
 						);

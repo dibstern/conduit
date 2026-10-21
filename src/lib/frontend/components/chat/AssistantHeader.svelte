@@ -3,6 +3,7 @@
 	import type { AssistantMessage } from "../../types.js";
 	import { getModelDisplayName } from "../../stores/discovery.svelte.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
+	import { selection } from "../../stores/selection.svelte.js";
 	import { followFork, sessionState } from "../../stores/session.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
@@ -50,11 +51,12 @@
 		const projectSlug = getCurrentSlug();
 		if (!projectSlug) return;
 		const sourceSessionId = sessionId ?? sessionState.currentId;
+		const from = selection.scope;
 		void rpc("ForkSession", {
 			...(sourceSessionId ? { sessionId: sourceSessionId } : { projectSlug }),
 			originId: getBrowserClientId(),
 			messageId: forkMessageId,
-		}).then(followFork).catch(toastFailure("Failed to fork session"));
+		}).then((response) => followFork(from, response)).catch(toastFailure("Failed to fork session"));
 	}
 
 	onDestroy(() => clearTimeout(copyResetTimer));

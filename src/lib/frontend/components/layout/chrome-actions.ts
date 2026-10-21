@@ -31,6 +31,7 @@ export type SettingsSection =
 	| "models"
 	| "claude"
 	| "surfacing"
+	| "archived"
 	| "usage"
 	| "server";
 

@@ -11,10 +11,8 @@ import {
 	sessionMessages,
 	setMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import {
-	clearSessionState,
-	sessionState,
-} from "../../../src/lib/frontend/stores/session.svelte.js";
+import { clearSessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 import { applySessionChange } from "./session-fixtures.js";
 
@@ -39,7 +37,7 @@ beforeEach(() => {
 	clearSessionState();
 	sessionActivity.clear();
 	sessionMessages.clear();
-	sessionState.currentId = "s";
+	openSessionForSetup("s", "project-a");
 });
 
 it("the row's compaction shows a notice until the row clears it", () => {

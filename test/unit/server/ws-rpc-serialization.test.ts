@@ -3,15 +3,16 @@
  * success schema would reach a user's browser as a crash no RpcTest-based test
  * could catch: that helper bypasses serialization. Keep JSON on both sides here.
  */
-import { Socket, SocketServer } from "@effect/platform";
+
+import { Effect, Layer, Schema, Stream } from "effect";
 import {
 	Rpc,
 	RpcClient,
 	RpcGroup,
 	RpcSerialization,
 	RpcServer,
-} from "@effect/rpc";
-import { Effect, Layer, Schema, Stream } from "effect";
+} from "effect/rpc";
+import { Socket, SocketServer } from "effect/socket";
 import { describe, expect, it } from "vitest";
 import * as Contracts from "../../../src/lib/contracts/ws-rpc.js";
 import { PermissionId } from "../../../src/lib/shared-types.js";
@@ -284,12 +285,12 @@ const group = RpcGroup.make(
 	Contracts.SubscribeSessionTodos,
 	Contracts.SubscribeProjectSettings,
 	Contracts.SubscribePtys,
-	Rpc.fromTaggedRequest(Contracts.PtyInput),
-	Rpc.fromTaggedRequest(Contracts.SetDefaultPermissionMode),
-	Rpc.fromTaggedRequest(Contracts.GetClaudeSettings),
-	Rpc.fromTaggedRequest(Contracts.SetClaudeSettings),
-	Rpc.fromTaggedRequest(Contracts.ResolveClaudeSettings),
-	Rpc.fromTaggedRequest(Contracts.RewindSession),
+	Contracts.PtyInput,
+	Contracts.SetDefaultPermissionMode,
+	Contracts.GetClaudeSettings,
+	Contracts.SetClaudeSettings,
+	Contracts.ResolveClaudeSettings,
+	Contracts.RewindSession,
 );
 const handlers = group.toLayer({
 	SubscribeApprovals: (payload) => {
@@ -376,7 +377,7 @@ const handlers = group.toLayer({
 		return Rpc.fork(Stream.fromIterable(projectSettingsEnvelopes));
 	},
 	SubscribeShell: (payload) => {
-		expect(payload).toEqual({ projectSlug: "project", resumeFromSequence: 39 });
+		expect(payload).toEqual({ resumeFromSequence: 39 });
 		return Rpc.fork(
 			Stream.fromIterable(shellEnvelopes).pipe(Stream.rechunk(1)),
 		);
@@ -386,7 +387,7 @@ const handlers = group.toLayer({
 const connect = Effect.gen(function* () {
 	const connection = yield* makeFakeSocketServer;
 	yield* RpcServer.make(group, { concurrency: 32 }).pipe(
-		Effect.provide(RpcServer.layerProtocolSocketServer),
+		Effect.provide(RpcServer.layerProtocolSocketServer, { local: true }),
 		Effect.provideService(SocketServer.SocketServer, connection.socketServer),
 		Effect.provide(handlers),
 		Effect.provide(RpcSerialization.layerJson),
@@ -394,7 +395,7 @@ const connect = Effect.gen(function* () {
 	);
 	const protocol = yield* Layer.build(
 		RpcClient.layerProtocolSocket().pipe(
-			Layer.provide(Layer.succeed(Socket.Socket, connection.clientSocket)),
+			Layer.provide(Layer.succeed(Socket.Socket)(connection.clientSocket)),
 			Layer.provide(RpcSerialization.layerJson),
 		),
 	);
@@ -409,17 +410,14 @@ describe("RPC serialization over a per-connection SocketServer", () => {
 				Effect.gen(function* () {
 					const { client, clientFrames, serverFrames } = yield* connect;
 					const result = yield* Stream.runCollect(
-						client.SubscribeShell({
-							projectSlug: "project",
-							resumeFromSequence: 39,
-						}),
+						client.SubscribeShell({ resumeFromSequence: 39 }),
 					);
 					expect(Array.from(result)).toEqual(shellEnvelopes);
 					expect(clientFrames.map((frame) => JSON.parse(frame))).toContainEqual(
 						expect.objectContaining({
 							_tag: "Request",
 							tag: "SubscribeShell",
-							payload: { projectSlug: "project", resumeFromSequence: 39 },
+							payload: { resumeFromSequence: 39 },
 						}),
 					);
 					for (const envelope of shellEnvelopes) {
@@ -542,23 +540,26 @@ it("ResolveClaudeSettings preserves display values and provenance", async () => 
 	// A supplied Id must win over a stale wire field. These explicit-account
 	// requests cannot represent a driver default without changing its meaning.
 	const requests = [
-		new Contracts.ResolveClaudeSettings({
+		{
+			_tag: "ResolveClaudeSettings",
 			projectSlug: "project",
 			instanceId: "stale-account",
 			accountRef: { _tag: "Id", id: "claude-1" },
-		}),
-		new Contracts.ContinueSession({
+		},
+		{
+			_tag: "ContinueSession",
 			sessionId: "session-1",
 			instanceId: "stale-account",
 			expectedInstanceId: "source-account",
 			accountRef: { _tag: "Id", id: "claude-1" },
-		}),
-		new Contracts.PreviewContinuation({
+		},
+		{
+			_tag: "PreviewContinuation",
 			sessionId: "session-1",
 			instanceId: "stale-account",
 			accountRef: { _tag: "Id", id: "claude-1" },
-		}),
-	];
+		},
+	] as const;
 	const wireRequests = requests.map((request) =>
 		Schema.encodeSync(Contracts.WsRpcRequest)(request),
 	);

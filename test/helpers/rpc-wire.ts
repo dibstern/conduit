@@ -1,22 +1,21 @@
 import {
-	RpcClient,
-	type RpcMessage,
-	RpcSerialization,
-	RpcServer,
-} from "@effect/rpc";
-import { RpcClientError } from "@effect/rpc/RpcClientError";
-import {
-	Chunk,
+	Cause,
 	Deferred,
 	Effect,
 	Fiber,
 	Layer,
-	Mailbox,
 	Option,
 	Queue,
 	Stream,
-	Take,
 } from "effect";
+import {
+	RpcClient,
+	type RpcMessage,
+	RpcSerialization,
+	RpcServer,
+} from "effect/rpc";
+import { RpcClientError } from "effect/rpc/RpcClientError";
+import { SocketCloseError } from "effect/socket/Socket";
 import { WsRpcGroup } from "../../src/lib/contracts/ws-rpc.js";
 import type { WsRpcConnect } from "../../src/lib/frontend/transport/shared-client.js";
 import { type StubTable, stubWsRpc } from "./stub-ws-rpc.js";
@@ -31,19 +30,19 @@ export const serveRpc = (
 			yield* Deferred.make<
 				(frame: RpcMessage.FromClientEncoded) => Effect.Effect<void>
 			>();
-		const disconnects = yield* Mailbox.make<number>();
-		const parser = RpcSerialization.json.unsafeMake();
+		const disconnects = yield* Queue.make<number>();
+		const parser = RpcSerialization.json.makeUnsafe();
 		const protocol = RpcServer.Protocol.of({
 			run: (handle) =>
 				Deferred.succeed(ready, (frame) => handle(0, frame)).pipe(
-					Effect.zipRight(Effect.never),
+					Effect.andThen(Effect.never),
 				),
 			disconnects,
 			send: (_clientId, frame) =>
 				Effect.suspend(() => {
 					const json = parser.encode(frame);
 					if (typeof json !== "string")
-						return Effect.dieMessage("Expected JSON RPC serialization");
+						return Effect.die(new Error("Expected JSON RPC serialization"));
 					return send(json);
 				}),
 			end: () => Effect.void,
@@ -52,13 +51,15 @@ export const serveRpc = (
 			supportsAck: false,
 			supportsTransferables: false,
 			supportsSpanPropagation: false,
+			supportsNotifications: false,
+			codecFor: RpcSerialization.json.codecFor,
 		});
 		yield* RpcServer.make(WsRpcGroup).pipe(
 			Effect.provide(stubWsRpc(table)),
 			Effect.provideService(RpcServer.Protocol, protocol),
 			Effect.forkScoped,
 		);
-		const handle = yield* ready;
+		const handle = yield* Deferred.await(ready);
 		return (json: string) =>
 			Effect.forEach(
 				parser.decode(json),
@@ -86,16 +87,18 @@ export function makeRpcWire(
 	}[] = [];
 	const connect: WsRpcConnect = ({ trafficClass }) =>
 		Effect.gen(function* () {
-			const parser = RpcSerialization.json.unsafeMake();
-			const receiving = new Set<Fiber.RuntimeFiber<void>>();
-			const protocol = RpcClient.Protocol.make((write) =>
+			const parser = RpcSerialization.json.makeUnsafe();
+			const receiving = new Set<Fiber.Fiber<void>>();
+			const protocol = RpcClient.Protocol.make((write, clientIds) =>
 				Effect.gen(function* () {
+					let clientId = 0;
 					const handle = yield* serveRpc(table, (json) =>
 						Effect.gen(function* () {
-							const fiber = yield* Effect.fork(
+							const fiber = yield* Effect.forkChild(
 								Effect.forEach(
 									parser.decode(json),
-									(frame) => write(frame as RpcMessage.FromServerEncoded),
+									(frame) =>
+										write(clientId, frame as RpcMessage.FromServerEncoded),
 									{ discard: true },
 								),
 							);
@@ -108,34 +111,45 @@ export function makeRpcWire(
 					connections.push({
 						trafficClass,
 						drop: Effect.suspend(() =>
-							write({
-								_tag: "ClientProtocolError",
-								error: new RpcClientError({
-									reason: "Protocol",
-									message: "socket closed",
-								}),
-							}),
+							Effect.forEach(
+								clientIds,
+								(id) =>
+									write(id, {
+										_tag: "ClientProtocolError",
+										error: new RpcClientError({
+											reason: new SocketCloseError({
+												code: 1006,
+												closeReason: "socket closed",
+											}),
+										}),
+									}),
+								{ discard: true },
+							),
 						),
 						tearDown: Effect.suspend(() =>
 							Effect.forEach(receiving, Fiber.interrupt, { discard: true }),
 						),
 					});
 					return {
-						send: (frame: RpcMessage.FromClientEncoded) =>
+						send: (id: number, frame: RpcMessage.FromClientEncoded) =>
 							Effect.suspend(() => {
+								clientId = id;
 								if (frame._tag === "Request")
 									requests.push({ ...frame, trafficClass });
 								if (frame._tag === "Interrupt")
-									interrupted.push(frame.requestId);
+									interrupted.push(String(frame.requestId));
 								const json = parser.encode(frame);
 								if (typeof json !== "string")
-									return Effect.dieMessage("Expected JSON RPC serialization");
+									return Effect.die(
+										new Error("Expected JSON RPC serialization"),
+									);
 								return (options?.beforeSend?.(frame) ?? Effect.void).pipe(
-									Effect.zipRight(handle(json)),
+									Effect.andThen(handle(json)),
 								);
 							}),
 						supportsAck: false,
 						supportsTransferables: false,
+						codecFor: RpcSerialization.json.codecFor,
 					};
 				}),
 			);
@@ -152,17 +166,14 @@ export function makeRpcWire(
 /** Queue-backed values, failures and completion for a stream stub. */
 export const makeRpcStream = <A, E>() =>
 	Effect.gen(function* () {
-		const queue = yield* Queue.unbounded<Take.Take<A, E>>();
+		const queue = yield* Queue.make<A, E | Cause.Done>();
 		return {
-			stream: Stream.fromQueue(queue).pipe(Stream.flattenTake),
+			stream: Stream.fromQueue(queue),
 			emit: (...values: readonly A[]) =>
-				Queue.offer(queue, Take.chunk(Chunk.fromIterable(values))).pipe(
-					Effect.asVoid,
-				),
-			fail: (error: E) =>
-				Queue.offer(queue, Take.fail(error)).pipe(Effect.asVoid),
+				Queue.offerAll(queue, values).pipe(Effect.asVoid),
+			fail: (error: E) => Queue.fail(queue, error).pipe(Effect.asVoid),
 			die: (defect: unknown) =>
-				Queue.offer(queue, Take.die(defect)).pipe(Effect.asVoid),
-			end: Queue.offer(queue, Take.end).pipe(Effect.asVoid),
+				Queue.failCause(queue, Cause.die(defect)).pipe(Effect.asVoid),
+			end: Queue.end(queue).pipe(Effect.asVoid),
 		};
 	});

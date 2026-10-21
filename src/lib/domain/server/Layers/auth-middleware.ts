@@ -1,17 +1,13 @@
-import {
-	HttpRouter,
-	HttpServerRequest,
-	HttpServerResponse,
-} from "@effect/platform";
 import { Context, Effect, Layer, Option, Ref } from "effect";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { AuthManager, type AuthResult } from "../../../auth.js";
 import { getClientIp } from "../../../server/http-utils.js";
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
 
-export class AuthManagerTag extends Context.Tag("AuthManager")<
+export class AuthManagerTag extends Context.Service<
 	AuthManagerTag,
 	AuthManagerService
->() {}
+>()("AuthManager") {}
 
 export interface AuthManagerService {
 	readonly hasPin: () => Effect.Effect<boolean>;
@@ -131,7 +127,7 @@ export const withAuthGate = <E, R>(
 		}
 
 		if (req.url.startsWith("/api/") || req.url.includes("/api/")) {
-			return HttpServerResponse.unsafeJson(
+			return HttpServerResponse.jsonUnsafe(
 				{ error: { code: "AUTH_REQUIRED", message: "PIN required" } },
 				{ status: 401 },
 			);
@@ -147,7 +143,7 @@ const authHandler = Effect.gen(function* () {
 	const auth = yield* AuthManagerTag;
 	const req = yield* HttpServerRequest.HttpServerRequest;
 
-	const body = yield* Effect.catchAll(req.json, () => Effect.succeed(null));
+	const body = yield* Effect.catch(req.json, () => Effect.succeed(null));
 	if (body === null || typeof body !== "object") {
 		return yield* HttpServerResponse.json(
 			{ ok: false, error: "Invalid JSON body" },
@@ -196,9 +192,7 @@ const authHandler = Effect.gen(function* () {
 	);
 }).pipe(Effect.withSpan("auth.post"));
 
-export const authRoute = HttpRouter.empty.pipe(
-	HttpRouter.post("/auth", authHandler),
-);
+export const authRoute = HttpRouter.add("POST", "/auth", authHandler);
 
 const authStatusHandler = Effect.gen(function* () {
 	const auth = yield* AuthManagerTag;
@@ -224,6 +218,8 @@ const authStatusHandler = Effect.gen(function* () {
 	});
 }).pipe(Effect.withSpan("auth.status"));
 
-export const authStatusRoute = HttpRouter.empty.pipe(
-	HttpRouter.get("/api/auth/status", authStatusHandler),
+export const authStatusRoute = HttpRouter.add(
+	"GET",
+	"/api/auth/status",
+	authStatusHandler,
 );

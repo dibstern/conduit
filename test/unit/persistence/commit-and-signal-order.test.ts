@@ -1,6 +1,13 @@
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Fiber, Layer, Stream } from "effect";
+import {
+	Deferred,
+	Effect,
+	Option as Effect4PollOption,
+	Fiber,
+	Layer,
+	Stream,
+} from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { makeSessionStateProjectionNotifierLive } from "../../../src/lib/domain/relay/Layers/session-state-projection-notifier-layer.js";
 import { WebSocketHandlerTag } from "../../../src/lib/domain/relay/Services/services.js";
@@ -53,9 +60,8 @@ describe("commit advance ordering", () => {
 				}).pipe(
 					Layer.provide(
 						Layer.merge(
-							Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-							Layer.succeed(
-								SessionManagerServiceTag,
+							Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+							Layer.succeed(SessionManagerServiceTag)(
 								makeMockSessionManagerService(),
 							),
 						),
@@ -68,12 +74,18 @@ describe("commit advance ordering", () => {
 						canonicalEvent("turn.completed", "git-session", {
 							messageId: "assistant-1",
 						}),
-					]).pipe(Effect.fork);
+					]).pipe(Effect.forkChild);
 					yield* Deferred.await(refreshStarted);
-					expect((yield* Fiber.poll(call))._tag).toBe("Some");
+					expect(
+						(yield* Effect.sync(() =>
+							Effect4PollOption.fromUndefinedOr(call.pollUnsafe()),
+						))._tag,
+					).toBe("Some");
 					releaseRefresh?.();
 					yield* Fiber.join(call);
-				}).pipe(Effect.provide(Layer.merge(testLayer, notifier)));
+				}).pipe(
+					Effect.provide(Layer.merge(testLayer, notifier), { local: true }),
+				);
 			}),
 	);
 	it.effect("publishes committed events before invoking the notifier", () =>
@@ -85,7 +97,7 @@ describe("commit advance ordering", () => {
 				publish: (events) =>
 					Effect.sync(() => {
 						order.push("publish");
-					}).pipe(Effect.zipRight(bus.publish(events))),
+					}).pipe(Effect.andThen(bus.publish(events))),
 			};
 			const writer = yield* makeCommitAndSignal.pipe(
 				Effect.provideService(SessionEventBusTag, recordingBus),
@@ -96,7 +108,7 @@ describe("commit advance ordering", () => {
 				}),
 			);
 			expect(order).toEqual(["publish", "notify"]);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 	it.effect("does not notify while recover replays the event log", () => {
 		const sessionStateProjected = vi.fn(() => Effect.void);
@@ -110,7 +122,7 @@ describe("commit advance ordering", () => {
 			Effect.provideService(SessionStateProjectionNotifierTag, {
 				sessionStateProjected,
 			}),
-			Effect.provide(testLayer),
+			Effect.provide(testLayer, { local: true }),
 		);
 	});
 
@@ -141,7 +153,7 @@ describe("commit advance ordering", () => {
 					"committed",
 					"session.created",
 				);
-			}).pipe(Effect.provide(testLayer));
+			}).pipe(Effect.provide(testLayer, { local: true }));
 		},
 	);
 
@@ -160,7 +172,7 @@ describe("commit advance ordering", () => {
 				Effect.provideService(SessionStateProjectionNotifierTag, {
 					sessionStateProjected,
 				}),
-				Effect.provide(testLayer),
+				Effect.provide(testLayer, { local: true }),
 			);
 		},
 	);
@@ -173,10 +185,10 @@ describe("commit advance ordering", () => {
 			const rows = yield* sql<{ title: string }>`
 				SELECT title FROM sessions WHERE id = 'without-notifier'`;
 			expect(rows).toEqual([{ title: "without-notifier" }]);
-		}).pipe(Effect.provide(testLayer)),
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
-	it.scoped(
+	it.effect(
 		"allows afterCommit to commit again after publishing its own advance",
 		() =>
 			Effect.gen(function* () {
@@ -192,10 +204,10 @@ describe("commit advance ordering", () => {
 				expect(Array.from(received, (advance) => advance.version)).toEqual([
 					1, 2,
 				]);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
-	it.scoped(
+	it.effect(
 		"publishes in commit order across writers while afterCommit is stalled",
 		() =>
 			Effect.gen(function* () {
@@ -208,11 +220,11 @@ describe("commit advance ordering", () => {
 				const entered = yield* Deferred.make<void>();
 				const release = yield* Deferred.make<void>();
 				const first = yield* firstWriter([created("a")], {
-					afterCommit: Effect.zipRight(
+					afterCommit: Effect.andThen(
 						Deferred.succeed(entered, undefined),
 						Deferred.await(release),
 					),
-				}).pipe(Effect.fork);
+				}).pipe(Effect.forkChild);
 				yield* Deferred.await(entered);
 				yield* secondWriter([created("b")]);
 				yield* Deferred.succeed(release, undefined);
@@ -221,6 +233,6 @@ describe("commit advance ordering", () => {
 				expect(Array.from(received, (advance) => advance.version)).toEqual([
 					1, 2,
 				]);
-			}).pipe(Effect.provide(testLayer)),
+			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });

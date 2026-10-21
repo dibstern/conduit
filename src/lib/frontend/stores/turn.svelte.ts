@@ -7,6 +7,7 @@ import type {
 	SteerBlocker,
 } from "../../contracts/stored-event.js";
 import { WorktreeCreationError } from "../../contracts/worktree.js";
+import { DraftAlreadySent } from "../../contracts/ws-rpc.js";
 import { stopBackgroundTasks } from "../components/session/background-tasks.svelte.js";
 import { toastFailure } from "../transport/rpc-errors.js";
 import { rpc } from "../transport/ws-rpc-client.js";
@@ -18,14 +19,20 @@ import {
 	sessionMessages,
 } from "./chat.svelte.js";
 import { getBrowserClientId } from "./client-identity.js";
-import { getDriverTraits, getInstanceById } from "./instance.svelte.js";
-import { permissionsState } from "./permissions.svelte.js";
-import { getCurrentSlug } from "./router.svelte.js";
 import {
-	findSession,
-	sessionState,
-	switchToSession,
-} from "./session.svelte.js";
+	getAvailableInstances,
+	getDraftPick,
+	getEffectiveInstanceId,
+} from "./discovery.svelte.js";
+import {
+	getDriverTraits,
+	getInstanceById,
+	instanceState,
+} from "./instance.svelte.js";
+import { permissionsState } from "./permissions.svelte.js";
+import { getDraftProject, projectState } from "./project-state.svelte.js";
+import { selection } from "./selection.svelte.js";
+import { findSession, sessionState } from "./session.svelte.js";
 import { dismissToast, showToast, uiState } from "./ui.svelte.js";
 import { usageState } from "./usage.svelte.js";
 import { rateLimitChatSend } from "./ws-send.svelte.js";
@@ -34,13 +41,14 @@ export type SendOutcome =
 	| { readonly kind: "started" }
 	| { readonly kind: "waiting" }
 	| { readonly kind: "refused"; readonly reason: SteerBlocker }
-	| { readonly kind: "failed" };
+	| { readonly kind: "failed"; readonly alreadySent?: boolean };
 
 type SendInput = {
 	readonly text: string;
 	readonly images?: readonly string[];
 	readonly delivery: InputDelivery;
 	readonly inputId?: string;
+	readonly from?: typeof selection.scope;
 } & (
 	| { readonly sessionId: string }
 	| {
@@ -52,7 +60,6 @@ type SendInput = {
 				readonly sessionId: string;
 				readonly title: string;
 			};
-			readonly onCreated: (sessionId: string) => void;
 	  }
 );
 
@@ -66,16 +73,37 @@ const refusals = new SvelteMap<string, { readonly reason: SteerBlocker }>();
 let creatingDrafts = $state(0);
 let dismissTaskStopToast: (() => void) | undefined;
 
-export function turn(sessionId: string | null) {
+export function turn() {
+	const shown = selection.shown;
+	const sessionId = shown.kind === "placed" ? shown.sessionId : null;
+	const draft =
+		shown.kind === "draft" ||
+		(shown.kind === "none" && selection.scope !== null);
+	const draftProject = draft
+		? projectState.projects.find(
+				(project) => project.slug === getDraftProject(),
+			)
+		: undefined;
 	return {
 		working:
 			sessionId === null
-				? creatingDrafts > 0
+				? draft && creatingDrafts > 0
 				: getSessionPhase(sessionId) !== "idle" ||
 					[...intents.values()].some(
 						(intent) => intent.sessionId === sessionId,
 					),
 		refusal: sessionId === null ? null : (refusals.get(sessionId) ?? null),
+		ready:
+			shown.kind === "placed" ||
+			(draft &&
+				!(
+					(draftProject?.folders.length ?? 0) > 1 &&
+					getAvailableInstances().find(
+						(instance) => instance.id === getEffectiveInstanceId(),
+					)?.capabilities?.supportsMultiFolder === false
+				) &&
+				(getDraftPick() !== undefined ||
+					(instanceState.loaded && !getEffectiveInstanceId()))),
 	};
 }
 
@@ -185,11 +213,8 @@ export async function stop(sessionId: string): Promise<void> {
 }
 
 export async function send(input: SendInput): Promise<SendOutcome> {
+	const from = input.from === undefined ? selection.scope : input.from;
 	const inputId = input.inputId ?? crypto.randomUUID();
-	const projectSlug =
-		"sessionId" in input
-			? (findSession(input.sessionId)?.projectSlug ?? getCurrentSlug())
-			: undefined;
 	let sessionId: string | undefined;
 	let creating = false;
 	try {
@@ -202,7 +227,7 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 				...(input.images?.length ? { images: input.images } : {}),
 				originId: getBrowserClientId(),
 			});
-			input.onCreated(created.sessionId);
+			selection.follow(from, created.sessionId, "push");
 			return { kind: "started" };
 		}
 		if ("draft" in input) {
@@ -227,8 +252,15 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 		if (input.delivery !== "steer" && predictsHandoff(sessionId))
 			intents.set(inputId, intent);
 		refusals.delete(sessionId);
-		if ("draft" in input) input.onCreated?.(sessionId);
+		if ("draft" in input) {
+			// follow records the session's project and only moves a sender who
+			// stayed put; the composer's promotion then lands on the same path.
+			selection.follow(from, sessionId, "push");
+			input.onCreated?.(sessionId);
+		}
 		const sentToSessionId = sessionId;
+		const sentFrom =
+			"draft" in input && from ? { ...from, sessionId: sentToSessionId } : from;
 		const reply = await new Promise<
 			Awaited<ReturnType<typeof rpc<"input.submit">>>
 		>((resolve, reject) =>
@@ -255,18 +287,8 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 			refusals.set(sessionId, { reason: reply.reason });
 			return { kind: "refused", reason: reply.reason };
 		}
-		// Preserve the existing fork redirect, including its navigation guard.
-		if (reply.sessionId !== sentToSessionId) {
-			if (sessionState.currentId === sentToSessionId)
-				switchToSession(
-					reply.sessionId,
-					projectSlug ??
-						("draft" in input ? input.draft.projectSlug : undefined) ??
-						undefined,
-					undefined,
-					{ replace: true },
-				);
-		}
+		if (reply.sessionId !== sentToSessionId)
+			selection.follow(sentFrom, reply.sessionId, "replace");
 		return {
 			kind:
 				reply.handedOff && input.delivery !== "steer" ? "started" : "waiting",
@@ -284,7 +306,10 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 						: "Failed to create session"
 					: "Failed to send message",
 		)(error);
-		return { kind: "failed" };
+		return {
+			kind: "failed",
+			...(Schema.is(DraftAlreadySent)(error) ? { alreadySent: true } : {}),
+		};
 	} finally {
 		pendingReplies.delete(inputId);
 		settledInputs.delete(inputId);

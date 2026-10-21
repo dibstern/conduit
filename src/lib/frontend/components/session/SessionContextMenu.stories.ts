@@ -91,6 +91,17 @@ export const LongHeader: Story = {
 		projectLabel: "Conduit",
 		branch: "fix/reconnect-double-subscribe",
 	},
+	play: async () => {
+		const menu = await within(document.body).findByRole("menu", {
+			name: "Session actions",
+		});
+		await waitFor(() => {
+			const bounds = menu.getBoundingClientRect();
+			expect(bounds.left).toBeGreaterThanOrEqual(0);
+			expect(bounds.right).toBeLessThanOrEqual(window.innerWidth);
+			expect(menu.scrollWidth).toBeLessThanOrEqual(menu.clientWidth);
+		});
+	},
 };
 
 export const PhoneSheet: Story = {

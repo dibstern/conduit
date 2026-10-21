@@ -16,10 +16,7 @@ import { createServer as createHttpsServer } from "node:https";
 import { homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import {
-	Cause,
 	Context,
 	Data,
 	Effect,
@@ -30,6 +27,8 @@ import {
 	Option,
 	Schedule,
 } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { AuthManager } from "../auth.js";
 import { type GlobalSettingTag, WsRpcError } from "../contracts/ws-rpc.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
@@ -59,6 +58,7 @@ import {
 	makeStandaloneHttpRouterRequestHandler,
 	type RouterProjectInfo,
 } from "../domain/server/Layers/http-router-layer.js";
+import * as Failure from "../effect/failure-classification.js";
 import { ENV } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
 import { withCachedProjectGit } from "../git/session-git.js";
@@ -74,6 +74,7 @@ import {
 	RoutedWsRpcWebSocketHandlerTag,
 	type RpcWebSocketHandlerShape,
 } from "../server/ws-rpc-handler.js";
+import { archiveIdleSessions } from "../session/auto-archive-sweep.js";
 import { settleIdleSessions } from "../session/auto-settle-sweep.js";
 import type { ConnectionHealth, ProjectRelayConfig } from "../types.js";
 import { generateSlug } from "../utils.js";
@@ -300,6 +301,14 @@ export interface ProjectRelay {
 		idleWindowMs: number,
 		now: number,
 	): Effect.Effect<number, SqlError | SessionManagerError>;
+	archiveIdleSessions(
+		idleWindowMs: number,
+		now: number,
+	): Effect.Effect<number, SqlError | SessionManagerError>;
+	deleteArchivedSessions(
+		windowMs: number,
+		now: number,
+	): Effect.Effect<number, SqlError | SessionManagerError>;
 	wsHandler: WebSocketHandlerShape;
 	rpcWsHandler: RpcWebSocketHandlerShape;
 	sseStream: SSEStreamPort;
@@ -368,6 +377,8 @@ export interface RelayStackConfig {
 }
 
 export interface RelayStack {
+	deleteArchivedSessions: ProjectRelay["deleteArchivedSessions"];
+	archiveIdleSessions: ProjectRelay["archiveIdleSessions"];
 	server: EffectRelayServer;
 	wsHandler: WebSocketHandlerShape;
 	rpcWsHandler: RpcWebSocketHandlerShape;
@@ -457,8 +468,8 @@ export async function createProjectRelay(
 		}
 	}
 
-	// Publisher and viewer callbacks in the Layer graph run after startup supplies the handler.
-	let wsHandler: WebSocketHandlerShape;
+	// Startup supplies the handler, but runner adoption can publish before it does.
+	let wsHandler: WebSocketHandlerShape | undefined;
 
 	const layers = createProjectRelayLayers({
 		config,
@@ -487,8 +498,8 @@ export async function createProjectRelay(
 		Effect.flatMap(ContinuationTag, (continuation) =>
 			Effect.zip(
 				continuation.sweepDueContinuations().pipe(
-					Effect.catchAllCause((cause) =>
-						Cause.isInterruptedOnly(cause)
+					Effect.catchCause((cause) =>
+						Failure.isInterruptedOnly(cause)
 							? Effect.interrupt
 							: Effect.logError("Continuation sweep failed", cause),
 					),
@@ -546,13 +557,36 @@ export async function createProjectRelay(
 			settleIdleSessions(
 				{
 					projectDir: config.projectDir,
-					hasViewer: (id) => wsHandler.getClientsForSession(id).length > 0,
+					hasViewer: (id) =>
+						startup.wsHandler.getClientsForSession(id).length > 0,
 					hasLiveBackgroundWork: startup.activity.background.hasLiveWork,
-					setSettled: (id, mergedHead) =>
+					setSettled: (id) =>
 						startup.sessionManagerService.setSessionSettled(id, {
 							settled: true,
 							automatic: true,
-							...(mergedHead !== undefined ? { mergedHead } : {}),
+						}),
+				},
+				idleWindowMs,
+				now,
+			).pipe(
+				Effect.provideService(SqlClient.SqlClient, startup.sql),
+				Effect.provideService(
+					PersistenceProjectTag,
+					startup.persistenceProject,
+				),
+			),
+		deleteArchivedSessions: (windowMs, now) =>
+			startup.sessionManagerService.deleteArchivedSessions(windowMs, now),
+		archiveIdleSessions: (idleWindowMs, now) =>
+			archiveIdleSessions(
+				{
+					hasLiveBackgroundWork: startup.activity.background.hasLiveWork,
+					setArchived: (id) =>
+						startup.sessionManagerService.setSessionArchived(id, {
+							archived: true,
+							automatic: true,
+							idleWindowMs,
+							now,
 						}),
 				},
 				idleWindowMs,
@@ -590,7 +624,7 @@ export async function createProjectRelay(
 				layers.relayManagedRuntime
 					.runFork(Fiber.interrupt(continuationSweep))
 					.addObserver((exit) => {
-						if (Exit.isFailure(exit)) reject(Cause.squash(exit.cause));
+						if (Exit.isFailure(exit)) reject(Failure.squashCause(exit.cause));
 						else resolve();
 					});
 			});
@@ -746,8 +780,7 @@ export async function createRelayStack(
 				dirname(config.persistenceDbPath),
 				`${slug}.events.db`,
 			);
-			const parentContext = (await relay.effectRuntime.runtime.runtime())
-				.context;
+			const parentContext = await relay.effectRuntime.runtime.context();
 			const daemonContext = Context.pick(
 				DaemonConfigRefTag,
 				ConfigPersistenceTag,
@@ -844,7 +877,7 @@ export async function createRelayStack(
 	// standalone WS connections bypassed PIN auth).
 
 	const rpcRuntime = ManagedRuntime.make(
-		Layer.scoped(
+		Layer.effect(
 			RoutedWsRpcWebSocketHandlerTag,
 			makeRoutedWsRpcWebSocketHandler(
 				(slug) =>
@@ -855,7 +888,7 @@ export async function createRelayStack(
 						return context
 							? context.pipe(
 									Effect.mapError(unavailable),
-									Effect.catchAllDefect(() => Effect.fail(unavailable())),
+									Effect.catchDefect(() => Effect.fail(unavailable())),
 								)
 							: Effect.fail(unavailable());
 					}),
@@ -869,14 +902,14 @@ export async function createRelayStack(
 						Effect.gen(function* () {
 							for (const mounted of [...relays.values()]) {
 								const runtime =
-									yield* mounted.effectRuntime.runtime.runtimeEffect.pipe(
+									yield* mounted.effectRuntime.runtime.contextEffect.pipe(
 										Effect.mapError(
 											(cause) =>
 												new SessionDirectoryReadError({ sessionId, cause }),
 										),
 									);
 								const owner = yield* Context.get(
-									runtime.context,
+									runtime,
 									SessionDirectory,
 								).projectOf(sessionId);
 								if (Option.isSome(owner)) return owner;
@@ -938,6 +971,9 @@ export async function createRelayStack(
 	return {
 		server,
 		effectRuntime: relay.effectRuntime,
+		archiveIdleSessions: relay.archiveIdleSessions,
+		deleteArchivedSessions: relay.deleteArchivedSessions,
+		settleIdleSessions: relay.settleIdleSessions,
 		wsHandler: relay.wsHandler,
 		rpcWsHandler: relay.rpcWsHandler,
 		sseStream: relay.sseStream,
@@ -945,7 +981,6 @@ export async function createRelayStack(
 		translator: relay.translator,
 		orchestration: relay.orchestration,
 		initialSessionId: relay.initialSessionId,
-		settleIdleSessions: relay.settleIdleSessions,
 
 		getPort() {
 			const addr = httpServer.address();

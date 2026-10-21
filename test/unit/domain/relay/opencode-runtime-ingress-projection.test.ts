@@ -4,8 +4,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	afterEach,
 	beforeEach,
@@ -36,7 +36,6 @@ import type { Message } from "../../../../src/lib/instance/sdk-types.js";
 import { makeCommitAndSignal } from "../../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
-import { ProjectorCursorEffectTag } from "../../../../src/lib/persistence/effect/projector-cursor-effect.js";
 import {
 	createAllEffectProjectors,
 	type EffectProjector,
@@ -88,7 +87,7 @@ function makeFailFirstBusLayer(
 	outcome: Effect.Effect<never>,
 ): Layer.Layer<SessionEventBusTag> {
 	let published = 0;
-	return Layer.succeed(SessionEventBusTag, {
+	return Layer.succeed(SessionEventBusTag)({
 		publish: () => (published++ === 0 ? outcome : Effect.void),
 		publishAdvance: () => Effect.void,
 		subscribe: () => Effect.succeed(Stream.empty),
@@ -131,6 +130,7 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		fetchSessionMessages?: Parameters<
 			typeof makeEffectOpenCodeRuntimeIngress
 		>[1],
+		backfillRetryDelayMs?: number,
 	) {
 		if (!dir) {
 			dir = mkdtempSync(join(tmpdir(), "conduit-runtime-ingress-projection-"));
@@ -141,7 +141,13 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		const nextRuntime = makeRuntime(dbPath, projectors, sessionEventBusLayer);
 		runtime = nextRuntime;
 		hook = await nextRuntime.runPromise(
-			makeEffectOpenCodeRuntimeIngress(log, fetchSessionMessages),
+			makeEffectOpenCodeRuntimeIngress(
+				log,
+				fetchSessionMessages,
+				undefined,
+				undefined,
+				backfillRetryDelayMs,
+			),
 		);
 	}
 
@@ -596,7 +602,11 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 			}),
 		);
 
-		expect(result.ok).toBe(true);
+		expect(result).toMatchObject({
+			ok: true,
+			eventsWritten: 2,
+			sessionSeeded: true,
+		});
 		if (!result.ok) return;
 
 		const stored = await readStored();
@@ -1310,12 +1320,12 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		});
 	}
 
-	async function historyFlag() {
+	async function historyFlag(sessionId = SESSION_ID) {
 		return currentRuntime().runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				const rows = yield* sql<{ history_complete: number }>`
-					SELECT history_complete FROM sessions WHERE id = ${SESSION_ID}`;
+					SELECT history_complete FROM sessions WHERE id = ${sessionId}`;
 				return rows[0]?.history_complete;
 			}),
 		);
@@ -1694,19 +1704,23 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		}
 		await disposeRuntime();
 		let fetches = 0;
-		await startRuntime(createAllEffectProjectors(), undefined, () =>
-			Effect.sync(() => {
-				fetches++;
-				return [
-					{
-						id: messageId,
-						sessionID: SESSION_ID,
-						role: "assistant",
-						time: { created, ...(settled ? { completed: created + 1 } : {}) },
-						parts: [{ id: partId, type: "text", text: restText }],
-					},
-				];
-			}),
+		await startRuntime(
+			createAllEffectProjectors(),
+			undefined,
+			() =>
+				Effect.sync(() => {
+					fetches++;
+					return [
+						{
+							id: messageId,
+							sessionID: SESSION_ID,
+							role: "assistant",
+							time: { created, ...(settled ? { completed: created + 1 } : {}) },
+							parts: [{ id: partId, type: "text", text: restText }],
+						},
+					];
+				}),
+			10,
 		);
 		await ingest(
 			makeSSEEvent("session.status", {
@@ -1717,7 +1731,7 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		await waitForCondition(async () => fetches > 0);
 		if (expected === 1)
 			await waitForCondition(async () => (await historyFlag()) === 1);
-		else await new Promise((resolve) => setTimeout(resolve, 200));
+		else await waitForCondition(async () => fetches >= 2);
 		expect(await historyFlag()).toBe(expected);
 	});
 
@@ -1859,24 +1873,39 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 
 	it("counts stale REST fetches toward the pending attempt cap", async () => {
 		let fetches = 0;
+		const probeSessionId = "sess-retry-probe";
 		await disposeRuntime();
-		await startRuntime(createAllEffectProjectors(), undefined, () =>
-			Effect.promise(async () => {
-				fetches++;
-				await ingest(
-					makeSSEEvent("session.status", {
-						sessionID: SESSION_ID,
-						status: { type: "busy" },
-					}),
-				);
-				return [];
-			}),
+		await startRuntime(
+			createAllEffectProjectors(),
+			undefined,
+			(sessionId) =>
+				sessionId === probeSessionId
+					? Effect.sleep("80 millis").pipe(Effect.as([]))
+					: Effect.promise(async () => {
+							fetches++;
+							await ingest(
+								makeSSEEvent("session.status", {
+									sessionID: SESSION_ID,
+									status: { type: "busy" },
+								}),
+							);
+							return [];
+						}),
+			10,
 		);
 		await ingest(makeSSEEvent("session.created", { info: { id: SESSION_ID } }));
-		await new Promise((resolve) => setTimeout(resolve, 8_000));
-		expect(fetches).toBeLessThanOrEqual(3);
+		await waitForCondition(async () => log.warn.mock.calls.length === 3);
+		// The probe commits after the capped session's next retry would be due.
+		await ingest(
+			makeSSEEvent("session.created", { info: { id: probeSessionId } }),
+			probeSessionId,
+		);
+		await waitForCondition(
+			async () => (await historyFlag(probeSessionId)) === 1,
+		);
+		expect(fetches).toBe(3);
 		expect(await historyFlag()).toBe(0);
-	}, 12_000);
+	});
 
 	it("limits concurrent REST history requests across sessions", async () => {
 		let active = 0;
@@ -2077,7 +2106,7 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		let fetches = 0;
 		let armed = false;
 		let reconnected = false;
-		const bus = Layer.succeed(SessionEventBusTag, {
+		const bus = Layer.succeed(SessionEventBusTag)({
 			publish: () => Effect.void,
 			publishAdvance: () =>
 				Effect.sync(() => {
@@ -2169,41 +2198,6 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		await ingest(snapshot);
 
 		expect(await readPartText("part-publish-int")).toEqual([{ text: "hello" }]);
-	});
-
-	it("batch progress advances after successful projection", async () => {
-		await ingestOk(
-			makeSSEEvent("message.created", {
-				sessionID: SESSION_ID,
-				messageID: "msg-001",
-				info: { role: "assistant", parts: [] },
-			}),
-		);
-
-		const stored = await readStored();
-		expect(
-			stored.map((event) => ({ sequence: event.sequence, type: event.type })),
-		).toEqual([
-			{ sequence: 1, type: "session.created" },
-			{ sequence: 2, type: "message.created" },
-		]);
-		const expectedLastSequence = stored[1]?.sequence;
-
-		const cursors = await currentRuntime().runPromise(
-			Effect.gen(function* () {
-				const cursorRepo = yield* ProjectorCursorEffectTag;
-				return yield* cursorRepo.listAll();
-			}),
-		);
-		const cursorByName = new Map(
-			cursors.map((cursor) => [cursor.projectorName, cursor.lastAppliedSeq]),
-		);
-		expect(
-			cursorByName.get("@batch:approval,input,message,provider,session,turn"),
-		).toBe(expectedLastSequence);
-		expect(cursorByName.get("session")).toBe(0);
-		expect(cursorByName.get("message")).toBe(0);
-		expect(cursorByName.get("provider")).toBe(0);
 	});
 
 	it("text.delta creates a text part in message_parts", async () => {

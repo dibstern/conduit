@@ -7,7 +7,7 @@ import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AddInstance } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 interface TraceRow {
@@ -277,9 +277,11 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 					kind === "images" || kind === "missing-method" ? "2000" : "0",
 			},
 		});
-		const account = await harness.requestRpc(
-			new AddInstance({ name: "Cursor steer replay", driver: "cursor" }),
-		);
+		const account = await harness.requestRpc({
+			_tag: "AddInstance",
+			name: "Cursor steer replay",
+			driver: "cursor",
+		});
 		if (!account.addedInstanceId) throw new Error("Missing Cursor account");
 		const browser = await harness.connect();
 		sessionId = await browser.createSession(
@@ -294,7 +296,7 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 		);
 		const firstId = randomUUID();
 		await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId,
 				originId: browser.originId,
 				inputId: firstId,
@@ -453,7 +455,7 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 				: TEXT;
 		expect(
 			await Effect.runPromise(
-				browser.rpc.input.submit({
+				browser.rpc["input.submit"]({
 					sessionId: id,
 					originId: browser.originId,
 					inputId,
@@ -519,7 +521,7 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 		const queuedId = randomUUID();
 		expect(
 			await Effect.runPromise(
-				browser.rpc.input.submit({
+				browser.rpc["input.submit"]({
 					sessionId: id,
 					originId: browser.originId,
 					inputId: queuedId,
@@ -531,7 +533,7 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 		const inputId = randomUUID();
 		expect(
 			await Effect.runPromise(
-				browser.rpc.input.submit({
+				browser.rpc["input.submit"]({
 					sessionId: id,
 					originId: browser.originId,
 					inputId,
@@ -580,11 +582,11 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 	}, 240_000);
 
 	it("attributes an error after delivered steering to the latest user input", async () => {
-		const { fixture, browser, id } = await start("delivered-error");
+		const { fixture, browser, id, firstId } = await start("delivered-error");
 		const inputId = randomUUID();
 		expect(
 			await Effect.runPromise(
-				browser.rpc.input.submit({
+				browser.rpc["input.submit"]({
 					sessionId: id,
 					originId: browser.originId,
 					inputId,
@@ -616,10 +618,11 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 				retryable: true,
 			}),
 		]);
+		// A steered turn's end names the send that started it (conduit-test-i633.3).
 		expect(
 			state.sessions.find((session) => session.id === id)
 				?.last_turn_end_input_id,
-		).toBe(inputId);
+		).toBe(firstId);
 		expect(
 			state.events.filter(
 				(event) =>
@@ -640,7 +643,7 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 		const inputId = randomUUID();
 		expect(
 			await Effect.runPromise(
-				browser.rpc.input.submit({
+				browser.rpc["input.submit"]({
 					sessionId: id,
 					originId: browser.originId,
 					inputId,
@@ -705,7 +708,7 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 		for (const inputId of [firstSteerId, secondSteerId]) {
 			expect(
 				await Effect.runPromise(
-					browser.rpc.input.submit({
+					browser.rpc["input.submit"]({
 						sessionId: id,
 						originId: browser.originId,
 						inputId,
@@ -757,7 +760,7 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 		const inputId = randomUUID();
 		expect(
 			await Effect.runPromise(
-				browser.rpc.input.submit({
+				browser.rpc["input.submit"]({
 					sessionId: id,
 					originId: browser.originId,
 					inputId,
@@ -828,7 +831,7 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 		const inputId = randomUUID();
 		expect(
 			await Effect.runPromise(
-				browser.rpc.input.submit({
+				browser.rpc["input.submit"]({
 					sessionId: id,
 					originId: browser.originId,
 					inputId,

@@ -12,8 +12,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Effect, Layer, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, it } from "vitest";
 import {
 	AlertLedgerLive,
@@ -44,7 +44,7 @@ import {
 	type RelayMessage,
 } from "../../../src/lib/shared-types.js";
 
-const silentBus = Layer.succeed(SessionEventBusTag, {
+const silentBus = Layer.succeed(SessionEventBusTag)({
 	publish: () => Effect.void,
 	publishAdvance: () => Effect.void,
 	subscribe: () => Effect.succeed(Stream.empty),
@@ -62,7 +62,10 @@ const withStore = <A>(
 		silentBus,
 	);
 	return Effect.runPromise(
-		body.pipe(Effect.provide(Layer.merge(layer, silentBus)), Effect.orDie),
+		body.pipe(
+			Effect.provide(Layer.merge(layer, silentBus), { local: true }),
+			Effect.orDie,
+		),
 	).finally(() => rmSync(dir, { recursive: true, force: true }));
 };
 
@@ -150,7 +153,7 @@ it("pushes one ding however many pipelines notice the same completed turn", asyn
 			yield* send; // SSE
 			yield* send; // message poller
 			yield* send; // status-poller safety net
-		}).pipe(Effect.provide(AlertLedgerLive)),
+		}).pipe(Effect.provide(AlertLedgerLive, { local: true })),
 	);
 	expect(r.pushed).toEqual(["opencode-done"]);
 });
@@ -182,7 +185,7 @@ it("uses the originating alert identity after the next turn exists", async () =>
 				r.log,
 				{ sessionId: "s1" },
 			);
-		}).pipe(Effect.provide(AlertLedgerLive)),
+		}).pipe(Effect.provide(AlertLedgerLive, { local: true })),
 	);
 	expect(payloads.map((payload) => payload["alertId"])).toEqual([
 		"turn-1",
@@ -206,7 +209,7 @@ it("does not re-ask a question that reconnect recovery re-emits", async () => {
 			yield* sendPushForEventEffect(r.pushManager, askUser("tool-b"), r.log, {
 				sessionId: "s1",
 			});
-		}).pipe(Effect.provide(AlertLedgerLive)),
+		}).pipe(Effect.provide(AlertLedgerLive, { local: true })),
 	);
 	expect(r.pushed).toEqual(["opencode-ask", "opencode-ask"]);
 });
@@ -225,7 +228,7 @@ it("treats two permission requests as two alerts and one replayed as none", asyn
 			yield* sendPushForEventEffect(r.pushManager, permission("p1"), r.log, {
 				sessionId: "s1",
 			});
-		}).pipe(Effect.provide(AlertLedgerLive)),
+		}).pipe(Effect.provide(AlertLedgerLive, { local: true })),
 	);
 	// Two live permissions are two alerts, and neither pushes the other out of
 	// the ledger — which is what makes reconnect recovery, that re-emits every
@@ -246,7 +249,7 @@ it("does not record a push that failed as delivered", async () => {
 			yield* sendPushForEventEffect(r.pushManager, done, r.log, {
 				sessionId: "s1",
 			});
-		}).pipe(Effect.provide(AlertLedgerLive)),
+		}).pipe(Effect.provide(AlertLedgerLive, { local: true })),
 	);
 	expect(r.pushed).toEqual(["opencode-done"]);
 	expect(r.warned.join("\n")).toContain("push endpoint gone");
@@ -282,7 +285,7 @@ it("leaves a claim behind the moment the ledger is wired in", async () => {
 				alert_key: string;
 				anchor: string;
 			}>`SELECT alert_key, anchor FROM sent_alerts WHERE session_id = 's1'`;
-		}).pipe(Effect.provide(AlertLedgerLive)),
+		}).pipe(Effect.provide(AlertLedgerLive, { local: true })),
 	);
 	expect(claimed).toEqual([{ alert_key: "done", anchor: "turn-1" }]);
 });
@@ -307,7 +310,7 @@ it("waits for a working ledger after a storage failure before delivering", async
 				sessionId: "s1",
 			});
 			expect(r.pushed).toEqual(["opencode-done"]);
-		}).pipe(Effect.provide(AlertLedgerLive)),
+		}).pipe(Effect.provide(AlertLedgerLive, { local: true })),
 	);
 });
 
@@ -320,7 +323,7 @@ it("is reachable from the tag, so the relay can hand it in", async () => {
 				{ sessionId: "s1", kind: "done", originId: "turn-1" },
 				Effect.void,
 			);
-		}).pipe(Effect.provide(AlertLedgerLive)),
+		}).pipe(Effect.provide(AlertLedgerLive, { local: true })),
 	);
 	expect(seen).toBe(true);
 });
@@ -395,7 +398,7 @@ it("keeps no claim when the real adapter answers 503 for every device", async ()
 					expect(claims[0]?.n).toBe(0);
 					expect(sent).toEqual([]);
 					expect(r.warned.join("\n")).toContain("reached no device");
-				}).pipe(Effect.provide(AlertLedgerLive)),
+				}).pipe(Effect.provide(AlertLedgerLive, { local: true })),
 			);
 		},
 	);
@@ -430,7 +433,7 @@ it("retries after a network error and does not re-push the device that already g
 						n: number;
 					}>`SELECT COUNT(*) AS n FROM sent_alerts WHERE session_id = 's1'`;
 					expect(claims[0]?.n).toBe(2);
-				}).pipe(Effect.provide(AlertLedgerLive)),
+				}).pipe(Effect.provide(AlertLedgerLive, { local: true })),
 			);
 		},
 	);
@@ -453,7 +456,7 @@ it("does not claim a ding for a session with no subscribed device", async () => 
 						n: number;
 					}>`SELECT COUNT(*) AS n FROM sent_alerts WHERE session_id = 's1'`;
 					expect(claims[0]?.n).toBe(0);
-				}).pipe(Effect.provide(AlertLedgerLive)),
+				}).pipe(Effect.provide(AlertLedgerLive, { local: true })),
 			);
 		},
 	);
@@ -477,7 +480,7 @@ it("releases the claim when a partial send degrades to reaching nobody", async (
 			yield* sendPushForEventEffect(r.pushManager, done, r.log, {
 				sessionId: "s1",
 			});
-		}).pipe(Effect.provide(AlertLedgerLive)),
+		}).pipe(Effect.provide(AlertLedgerLive, { local: true })),
 	);
 	// Two attempts: the first left no claim behind, so the second was allowed.
 	expect(r.pushed).toEqual(["opencode-done", "opencode-done"]);

@@ -24,13 +24,10 @@ import { CategorySet } from "../Services/category-set.js";
 
 const persistedCategorySetSchema = Schema.Struct({
 	...CategorySetSchema.fields,
-	criteriaVersions: Schema.optionalWith(
-		Schema.Record({
-			key: Schema.String,
-			value: Schema.Array(Schema.NonNegativeInt),
-		}),
-		{ default: () => ({}) },
-	),
+	criteriaVersions: Schema.Record(
+		Schema.String,
+		Schema.Array(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+	).pipe(Schema.withDecodingDefaultType(Effect.sync(() => ({})))),
 });
 
 export function validateCategories(
@@ -109,7 +106,7 @@ export const CategorySetLive = (configDir: string) =>
 					let loaded: typeof persistedCategorySetSchema.Type;
 					try {
 						loaded = Schema.decodeUnknownSync(
-							Schema.parseJson(persistedCategorySetSchema),
+							Schema.fromJsonString(persistedCategorySetSchema),
 						)(readFileSync(filename, "utf8"));
 						// Persisted custom labels may have changed since their ids were created.
 						validateCategories(loaded.categories, loaded);

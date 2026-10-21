@@ -589,6 +589,9 @@
 				>
 			{/key}
 		{/if}
+		{#if session.archivedAt != null}
+			<Badge data-testid="session-archived-badge" class="leading-none">Archived</Badge>
+		{/if}
 		{#if pinned}
 			<span class="shrink-0 text-status-pinned" title="Pinned session">
 				<Icon name="pin" size={11} />

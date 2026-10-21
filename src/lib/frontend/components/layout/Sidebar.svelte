@@ -13,6 +13,7 @@
 	import { setSessionScope } from "../../stores/session-scope.js";
 	import { applyProjectList, getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import type { SaveProjectResponse } from "../../transport/ws-rpc.js";
+	import { selection } from "../../stores/selection.svelte.js";
 	import { sessionList } from "../../stores/session-list.svelte.js";
 	import { featureFlags } from "../../stores/feature-flags.svelte.js";
 	import Menu from "../ui/Menu.svelte";
@@ -43,8 +44,7 @@
 			params.delete(DRAFT_PROJECT_PARAM);
 			navigate(`/?${params}`);
 		} else {
-			params.set(DRAFT_PROJECT_PARAM, response.savedSlug);
-			navigate(`/new?${params}`);
+			selection.openDraft(response.savedSlug);
 		}
 		addProjectOpen = false;
 	}
@@ -55,12 +55,11 @@
 	);
 
 	// Opens a draft; the session is created by its first send. Pins the
-	// prefilled project in the URL so a reload keeps it.
+	// prefilled project in the URL so a reload, or a later change to the
+	// defaults, keeps it.
 	function handleNewSession() {
-		const params = getCurrentSearchParams();
-		const project = getDraftProject();
-		if (project) params.set(DRAFT_PROJECT_PARAM, project);
-		navigate(`/new?${params}`);
+		const shown = selection.shown;
+		selection.openDraft(getDraftProject(shown.kind === "placed" ? shown.project : null));
 	}
 
 	// Sidebar width: collapsed → 0, otherwise user-set width.

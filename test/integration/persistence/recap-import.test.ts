@@ -12,9 +12,12 @@ import {
 	sourceChecksums,
 } from "../../helpers/daemon-store-import-manifest.js";
 
-// Failure modes: cached recaps disappear on import, or their per-turn version
-// numbers are offset as though they belonged to the global read-model clock.
-it("imports cached recap chains without changing their version numbers or source store", async () => {
+// Failure modes: a pre-merge redesign or goal ledger is refused, cached recaps
+// disappear, or their per-turn versions are treated as the read-model clock.
+it.each([
+	"redesign",
+	"goal",
+] as const)("imports pre-merge %s recaps without changing their versions or source store", async (lineage) => {
 	const root = mkdtempSync(join(tmpdir(), "conduit-recap-import-"));
 	try {
 		const configDir = join(root, "daemon");
@@ -39,6 +42,20 @@ it("imports cached recap chains without changing their version numbers or source
 					`Cached version ${version} [#1]`,
 				);
 			expected = db.prepare("SELECT * FROM turn_recaps ORDER BY version").all();
+			// Recreate the deployed suffix without assigning later migrations old IDs.
+			if (lineage === "redesign") {
+				db.exec(`ALTER TABLE sessions DROP COLUMN goal_stuck;
+					DELETE FROM effect_sql_migrations WHERE name = 'sessions_goal_stuck'`);
+			}
+			const shift = lineage === "redesign" ? 1 : 6;
+			db.exec(`DROP TABLE input_drafts;
+				CREATE TEMP TABLE redesign_migrations AS
+				SELECT migration_id - ${shift} AS migration_id, name, created_at
+				FROM effect_sql_migrations WHERE migration_id > 68;
+				DELETE FROM effect_sql_migrations WHERE migration_id >= ${69 - shift};
+				INSERT INTO effect_sql_migrations (migration_id, name, created_at)
+				SELECT migration_id, name, created_at FROM redesign_migrations;
+				DROP TABLE redesign_migrations`);
 		} finally {
 			db.close();
 		}
@@ -46,6 +63,10 @@ it("imports cached recap chains without changing their version numbers or source
 		const results = await Effect.runPromise(
 			importRegisteredProjectStores(configDir, [first, source]),
 		);
+		expect(
+			results.map(({ outcome }) => outcome),
+			JSON.stringify(results),
+		).toEqual(["seeded", "imported"]);
 		const imported = new Database(daemonStorePath(configDir), {
 			readonly: true,
 		});
@@ -59,8 +80,14 @@ it("imports cached recap chains without changing their version numbers or source
 			);
 			mkdirSync("test-results/recap", { recursive: true });
 			writeFileSync(
-				"test-results/recap/import.json",
-				JSON.stringify({ results, recaps, sourceUnchanged: true }, null, 2),
+				lineage === "redesign"
+					? "test-results/recap/import.json"
+					: "test-results/recap/import-goal.json",
+				JSON.stringify(
+					{ lineage, results, recaps, sourceUnchanged: true },
+					null,
+					2,
+				),
 			);
 		} finally {
 			imported.close();

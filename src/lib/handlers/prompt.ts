@@ -4,10 +4,12 @@ import {
 	validateAttachmentDataUrls,
 } from "../attachment-data-url.js";
 import type { InputDelivery, SteerBlocker } from "../contracts/stored-event.js";
+import type { InputDraftKey } from "../contracts/ws-rpc.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
-import { publishInputDraft } from "../domain/relay/Services/input-drafts.js";
+import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
 import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
 import {
+	ConfigTag,
 	LoggerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
@@ -15,25 +17,10 @@ import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 
-// Stores the last draft per session so that a tab switching to it (e.g. on a
-// different device) reads the current draft in its ViewSession response.
-
-const sessionInputDrafts = new Map<string, string>();
-
 interface LegacyMessagePayload {
 	text: string;
 	images?: string[];
 	commandId?: string;
-}
-
-/** Get the stored input draft for a session (empty string if none). */
-export function getSessionInputDraft(sessionId: string): string {
-	return sessionInputDrafts.get(sessionId) ?? "";
-}
-
-/** Clear the stored input draft for a session (e.g. after sending a message). */
-export function clearSessionInputDraft(sessionId: string): void {
-	sessionInputDrafts.delete(sessionId);
 }
 
 export interface SendMessageToSessionInput {
@@ -101,28 +88,17 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			...(sessionModel ? { model: sessionModel } : {}),
 			...(input.delivery === "steer" ? { delivery: input.delivery } : {}),
 		});
-		// Talking to a settled or snoozed session brings it back. Triage bookkeeping must
-		// never stop the message itself, so a failure here is only logged.
-		yield* Effect.gen(function* () {
-			yield* sessionManagerService
-				.unsnoozeSession(activeId)
-				.pipe(
-					Effect.catchAll((error) =>
-						Effect.sync(() =>
-							log.warn(`Failed to un-snooze ${activeId}: ${String(error)}`),
-						),
+		// Restore all triage state under one lock. Bookkeeping failures are logged
+		// inside the service so they never prevent delivery of the message.
+		yield* sessionManagerService
+			.restoreSessionForSend(activeId)
+			.pipe(
+				Effect.catch((error) =>
+					Effect.sync(() =>
+						log.warn(`Failed to restore ${activeId} on send: ${String(error)}`),
 					),
-				);
-			yield* sessionManagerService.setSessionSettled(activeId, {
-				settled: false,
-			});
-		}).pipe(
-			Effect.catchAll((error) =>
-				Effect.sync(() =>
-					log.warn(`Failed to un-settle ${activeId}: ${String(error)}`),
 				),
-			),
-		);
+			);
 		log.info(
 			`client=${clientId} session=${activeId} → ${text.slice(0, 80)}${text.length > 80 ? "…" : ""}`,
 		);
@@ -163,8 +139,10 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 				sessionId: activeId,
 				refused: submitted.refused,
 			} satisfies SendMessageToSessionResult;
-		if (originalActiveId !== activeId) clearSessionInputDraft(originalActiveId);
-		clearSessionInputDraft(activeId);
+		const drafts = yield* InputDraftsTag;
+		if (originalActiveId !== activeId)
+			yield* drafts.clearSent(originalActiveId, text);
+		yield* drafts.clearSent(activeId, text);
 		return {
 			sessionId: activeId,
 			handedOff: submitted.handedOff,
@@ -215,22 +193,17 @@ export {
 	undoSessionRewind,
 } from "../domain/relay/Services/session-rewind.js";
 
-export const syncInputDraftForSession = ({
-	sessionId,
+export const syncInputDraft = ({
+	key,
 	text,
 	from,
 }: {
-	sessionId: string;
+	key: InputDraftKey;
 	text: string;
 	from?: string;
 }) =>
 	Effect.gen(function* () {
-		// Store the draft so a tab switching to the session reads it
-		if (text) {
-			sessionInputDrafts.set(sessionId, text);
-		} else {
-			sessionInputDrafts.delete(sessionId);
-		}
-
-		yield* publishInputDraft({ sessionId, text, ...(from ? { from } : {}) });
+		const drafts = yield* InputDraftsTag;
+		const projectId = "draft" in key ? (yield* ConfigTag).slug : undefined;
+		yield* drafts.write(key, text, from, projectId);
 	});

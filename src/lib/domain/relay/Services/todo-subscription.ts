@@ -14,8 +14,8 @@
 // neither changes the list, so an upsert that would repeat what this
 // subscriber already holds is dropped.
 
-import type { SqlError } from "@effect/sql/SqlError";
 import { Effect, Ref, Stream } from "effect";
+import type { SqlError } from "effect/sql/SqlError";
 import type { SessionTodos } from "../../../contracts/ws-rpc.js";
 import {
 	type ReadQueryEffectError,

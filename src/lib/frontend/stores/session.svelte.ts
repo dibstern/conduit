@@ -3,7 +3,6 @@
 
 import { SvelteMap } from "svelte/reactivity";
 import { busySessionIds as calculateBusySessionIds } from "../../session-busy.js";
-import { getScopeGroupKey } from "../../session-scope.js";
 import type { BackgroundTask } from "../../shared-types.js";
 import {
 	isBusy,
@@ -41,22 +40,18 @@ import {
 import {
 	clearDraftSelection,
 	followSessionModelSettings,
+	handlePermissionModeInfo,
 	refreshCatalogs,
 } from "./discovery.svelte.js";
 import { goalDetails, sessionGoals } from "./goal.svelte.js";
-import { getProjectGroup } from "./project-state.svelte.js";
-import {
-	attachedProjectState,
-	getCurrentSlug,
-	replaceRoute,
-} from "./router.svelte.js";
+import { attachedProjectState, getCurrentSlug } from "./router.svelte.js";
 import { markSessionDeleted, selection } from "./selection.svelte.js";
 import { restoreServerUpdateBanner } from "./server-status.svelte.js";
 import type { SessionGrouping, SessionStatusFilter } from "./session-scope.js";
 import { getSessionScope, getSessionStatusFilter } from "./session-scope.js";
 import { clearTodoState } from "./todo.svelte.js";
 import { applyTurnRow, deleteTurn, rebaseTurns } from "./turn.svelte.js";
-import { showToast, updateContextPercent } from "./ui.svelte.js";
+import { showToast } from "./ui.svelte.js";
 import { projectAttachedListeners } from "./ws-listeners.js";
 
 // Re-exported so chat.svelte.ts need not import the subscription directly,
@@ -143,12 +138,7 @@ const clientSession = $state({
 		forkPointTimestamp?: number;
 	} | null,
 	searchQuery: "",
-	daemonSessions: [] as SessionInfo[],
-	daemonSettledCounts: undefined as ListDaemonSessionsResponse["settledCounts"],
-	daemonUnavailableProjects: [] as string[],
-	daemonCursor: null as ListDaemonSessionsResponse["nextCursor"],
-	daemonHasMore: false,
-	daemonLoading: false,
+	searchIncludeArchived: false,
 	searchResults: null as SessionInfo[] | null,
 	searchSettledCounts: undefined as ListDaemonSessionsResponse["settledCounts"],
 	searchCursor: null as ListDaemonSessionsResponse["nextCursor"],
@@ -182,21 +172,6 @@ export const sessionState = {
 	},
 	get familySessions(): readonly Immutable<SessionInfo>[] {
 		return familySessions;
-	},
-	get daemonSessions(): readonly SessionInfo[] {
-		return clientSession.daemonSessions;
-	},
-	get daemonUnavailableProjects(): readonly string[] {
-		return clientSession.daemonUnavailableProjects;
-	},
-	get daemonCursor() {
-		return clientSession.daemonCursor;
-	},
-	get daemonHasMore() {
-		return clientSession.daemonHasMore;
-	},
-	get daemonLoading() {
-		return clientSession.daemonLoading;
 	},
 	get searchResults(): readonly SessionInfo[] | null {
 		return clientSession.searchResults;
@@ -234,12 +209,11 @@ export const sessionState = {
 			? clientSession.announcedFork
 			: null;
 	},
-	set currentId(id: string | null) {
-		if (id) selection.open(id);
-		else replaceRoute("/");
-	},
 	get searchQuery(): string {
 		return clientSession.searchQuery;
+	},
+	get searchIncludeArchived(): boolean {
+		return clientSession.searchIncludeArchived;
 	},
 	set searchQuery(query: string) {
 		setSearchQuery(query);
@@ -248,9 +222,6 @@ export const sessionState = {
 
 /** A deletion owns only its id; selection follows the tombstone. */
 export function leaveDeletedSession(id: string): void {
-	clientSession.daemonSessions = clientSession.daemonSessions.filter(
-		(row) => row.id !== id,
-	);
 	if (clientSession.searchResults)
 		clientSession.searchResults = clientSession.searchResults.filter(
 			(row) => row.id !== id,
@@ -363,7 +334,6 @@ $effect.root(() => {
 	$effect(() => {
 		const rows = [
 			...sessionState.rootSessions,
-			...sessionState.daemonSessions,
 			...(sessionState.searchResults ?? []),
 		];
 		const now = sessionState.now;
@@ -545,12 +515,23 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 	if (next === familyApplied) return;
 	const previousRows = familyApplied.rows;
 	const reconnect = familyApplied.floor !== undefined;
-	// A child is not a shell row, so its settings follow the family feed.
+	// Children and archived roots have no shell row; their family owns settings.
 	const currentId = sessionState.currentId;
 	const viewed = currentId === null ? undefined : next.rows.get(currentId);
 	const previous = viewed && previousRows.get(viewed.id);
-	if (viewed?.parentID && viewed !== previous)
+	if (
+		viewed &&
+		(viewed.parentID !== undefined || viewed.archivedAt != null) &&
+		viewed !== previous
+	) {
 		followSessionModelSettings(viewed, previous);
+		if (
+			viewed.archivedAt != null &&
+			viewed.permissionMode !== undefined &&
+			viewed.permissionMode !== previous?.permissionMode
+		)
+			handlePermissionModeInfo({ mode: viewed.permissionMode });
+	}
 	familyApplied = next;
 	if (change._tag === "upsert") applyTurnRow(change.item);
 	if (change._tag === "remove" && change.deleted === true) {
@@ -558,27 +539,32 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 		forgetSession(change.id);
 		deleteTurn(change.id);
 	}
-	// The shell feed carries roots only, so a child's family row is the only
-	// status it has. Key on parentID, not shell membership: a root that gains a
-	// parent leaves the shell, and its family row is the one kept current.
+	// Children and archived roots follow status here while live roots use shell.
 	if (change._tag === "snapshot") {
 		if (reconnect) rebaseTurns([...previousRows.keys(), ...next.rows.keys()]);
 		// A bounded rebase can omit a child that finished while disconnected.
 		for (const row of previousRows.values()) {
-			if (row.parentID === undefined || next.rows.has(row.id)) continue;
+			if (
+				(row.parentID === undefined && row.archivedAt == null) ||
+				next.rows.has(row.id)
+			)
+				continue;
 			if (isBusy(row)) followSessionBusy(row.id, false);
 			followSessionCompaction(row.id, undefined);
 			followSessionRetry(row.id, undefined);
 		}
 		for (const row of next.rows.values()) {
 			applyTurnRow(row);
-			if (row.parentID === undefined) continue;
+			if (row.parentID === undefined && row.archivedAt == null) continue;
 			followSessionBusy(row.id, isBusy(row), row.lastTurnEndVersion);
 			followSessionCompaction(row.id, row.compacting);
 			followSessionRetry(row.id, row.retrying);
 		}
 	}
-	if (change._tag === "upsert" && change.item.parentID !== undefined) {
+	if (
+		change._tag === "upsert" &&
+		(change.item.parentID !== undefined || change.item.archivedAt != null)
+	) {
 		const previousRow = previousRows.get(change.item.id);
 		const busy = isBusy(change.item);
 		if (
@@ -598,108 +584,8 @@ export function resetSessionFamily(): void {
 	familyApplied = emptySubscription();
 }
 
-/** How many cross-project rows one page asks for. Exported so the caller that
- *  fetches the first page uses the same size as the sentinel that fetches the
- *  rest -- a first page smaller than the viewport would never scroll, and so
- *  would never ask for a second. */
+/** Rows shown per browse page and requested per search page. */
 export const DAEMON_SESSION_PAGE_SIZE = 30;
-
-/** Bumped by anything that invalidates in-flight browse pages. A response
- *  carrying a stale token is dropped rather than appended, so a project switch
- *  cannot splice another project's page onto the new list. */
-let daemonBrowseToken = 0;
-
-/** Fetches the first cross-project page for the current scope, replacing
- *  whatever was listed. Run on connect and again whenever the scope changes. */
-export async function loadDaemonSessions(): Promise<void> {
-	const projectSlug = getCurrentSlug();
-	if (!projectSlug) return;
-	daemonBrowseToken += 1;
-	const token = daemonBrowseToken;
-	const scope = getSessionScope();
-	try {
-		const response = await rpc("ListDaemonSessions", {
-			projectSlug,
-			limit: DAEMON_SESSION_PAGE_SIZE,
-			// The sidebar shows other projects' roots only; this project's roots
-			// come from the shell feed. Pages of rows that never render keep the
-			// scroll sentinel in view, so the pager would walk the whole store.
-			roots: true,
-			exclude: projectSlug,
-			...(scope === null ? {} : { scope }),
-		});
-		if (token === daemonBrowseToken) applyListDaemonSessionsResponse(response);
-	} catch {
-		// The local project's rows arrive separately; the list stays usable.
-	}
-}
-
-/** Applies a FIRST page: replaces the accumulator rather than appending. */
-export function applyListDaemonSessionsResponse(
-	response: ListDaemonSessionsResponse,
-): void {
-	daemonBrowseToken += 1;
-	clientSession.daemonSessions = [...response.sessions];
-	clientSession.daemonSettledCounts = response.settledCounts;
-	clientSession.daemonCursor = response.nextCursor;
-	clientSession.daemonHasMore = response.hasMore;
-	clientSession.daemonLoading = false;
-	clientSession.daemonUnavailableProjects = response.availability
-		.filter((entry) => !entry.available)
-		.map((entry) => entry.projectSlug);
-}
-
-/** Appends the next cross-project page. No-ops at the end of the list and while
- *  a page is already in flight, which is what stops the scroll sentinel from
- *  re-requesting an exhausted cursor forever. */
-export async function loadMoreDaemonSessions(): Promise<void> {
-	const projectSlug = getCurrentSlug();
-	const cursor = sessionState.daemonCursor;
-	if (
-		!projectSlug ||
-		cursor === null ||
-		!sessionState.daemonHasMore ||
-		sessionState.daemonLoading
-	) {
-		return;
-	}
-	const token = daemonBrowseToken;
-	clientSession.daemonLoading = true;
-	try {
-		const scope = getSessionScope();
-		const response = await rpc("ListDaemonSessions", {
-			projectSlug,
-			limit: DAEMON_SESSION_PAGE_SIZE,
-			cursor,
-			roots: true,
-			exclude: projectSlug,
-			...(scope === null ? {} : { scope }),
-		});
-		if (token !== daemonBrowseToken) return;
-		// Dedupe by id. The keyset cursor does not re-emit rows, but a session
-		// whose updated_at moves between two requests can land on both pages, and
-		// a repeated key throws out of Svelte's keyed {#each}.
-		const seen = new Set(sessionState.daemonSessions.map((row) => row.id));
-		const incoming = response.sessions.filter(
-			(session) => !seen.has(session.id),
-		);
-		clientSession.daemonSessions = [
-			...sessionState.daemonSessions,
-			...incoming,
-		];
-		clientSession.daemonCursor = response.nextCursor;
-		clientSession.daemonSettledCounts = response.settledCounts;
-		clientSession.daemonHasMore = response.hasMore;
-		clientSession.daemonUnavailableProjects = response.availability
-			.filter((entry) => !entry.available)
-			.map((entry) => entry.projectSlug);
-	} catch {
-		// Keep the rows already on screen and leave hasMore alone, so scrolling
-		// again retries rather than declaring the list finished.
-	} finally {
-		if (token === daemonBrowseToken) clientSession.daemonLoading = false;
-	}
-}
 
 /** The query the server is currently answering. Distinct from
  *  sessionState.searchQuery, which is what the user has typed this instant:
@@ -708,6 +594,7 @@ let activeSearch: {
 	query: string;
 	roots: boolean;
 	scope: string | null;
+	includeArchived: boolean;
 } | null = null;
 let daemonSearchToken = 0;
 
@@ -722,7 +609,12 @@ export async function searchSessions(
 		return;
 	}
 	daemonSearchToken += 1;
-	activeSearch = { query: trimmed, roots, scope: getSessionScope() };
+	activeSearch = {
+		query: trimmed,
+		roots,
+		scope: getSessionScope(),
+		includeArchived: clientSession.searchIncludeArchived,
+	};
 	clientSession.searchCursor = null;
 	clientSession.searchHasMore = false;
 	// Results are left on screen until the new page lands. Blanking them first
@@ -751,6 +643,18 @@ export function clearSessionSearch(): void {
 	clientSession.searchCursor = null;
 	clientSession.searchHasMore = false;
 	clientSession.searchLoading = false;
+	clientSession.searchIncludeArchived = false;
+}
+
+export async function setSearchIncludeArchived(value: boolean): Promise<void> {
+	clientSession.searchIncludeArchived = value;
+	if (!value && clientSession.searchResults) {
+		clientSession.searchResults = clientSession.searchResults.filter(
+			(session) => session.archivedAt == null,
+		);
+	}
+	if (activeSearch)
+		await searchSessions(activeSearch.query, activeSearch.roots);
 }
 
 async function runSearchPage(token: number, replace: boolean): Promise<void> {
@@ -765,13 +669,14 @@ async function runSearchPage(token: number, replace: boolean): Promise<void> {
 			roots: search.roots,
 			search: search.query,
 			limit: DAEMON_SESSION_PAGE_SIZE,
+			...(search.includeArchived ? { includeArchived: true } : {}),
 			...(search.scope === null ? {} : { scope: search.scope }),
 			...(cursor === null ? {} : { cursor }),
 		});
 		if (token !== daemonSearchToken) return;
 		applySearchResultsResponse(response, replace);
 	} catch {
-		// Same as browse paging: keep what is shown, allow a retry.
+		// Keep the previous search page visible and allow a retry.
 	} finally {
 		if (token === daemonSearchToken) clientSession.searchLoading = false;
 	}
@@ -801,7 +706,10 @@ export function applySearchResultsResponse(
  * This tab forked: select the fork and keep its lineage until the family row
  * arrives. Only the forking tab announces it.
  */
-export function followFork(response: ForkSessionResponse): void {
+export function followFork(
+	from: typeof selection.scope,
+	response: ForkSessionResponse,
+): void {
 	clientSession.announcedFork = {
 		sessionId: response.sessionId,
 		forkedFrom: response.forkedFrom,
@@ -813,8 +721,7 @@ export function followFork(response: ForkSessionResponse): void {
 	showToast(
 		`Forked from "${findSession(response.forkedFrom)?.title || "session"}"`,
 	);
-	if (sessionState.currentId !== response.sessionId)
-		switchToSession(response.sessionId, response.projectSlug);
+	selection.follow(from, response.sessionId, "push");
 }
 
 // Components should wrap these in $derived() for reactive caching.
@@ -825,7 +732,6 @@ export function findSession(id: string): Immutable<SessionInfo> | undefined {
 		serverSessions.get(id) ??
 		familySessions.find((row) => row.id === id) ??
 		rootSessions.find((row) => row.id === id) ??
-		sessionState.daemonSessions.find((row) => row.id === id) ??
 		sessionState.searchResults?.find((row) => row.id === id)
 	);
 }
@@ -890,90 +796,58 @@ function lastChangedAt(session: Immutable<SessionInfo>): number {
 	return typeof at === "number" ? at : at ? Date.parse(at) : 0;
 }
 
-function projectMatchesScope(slug: string, scope: string | null): boolean {
-	const groupKey = getScopeGroupKey(scope);
-	return (
-		scope === null ||
-		(groupKey === null
-			? slug === scope
-			: getProjectGroup(slug)?.key === groupKey)
-	);
-}
-
-/** Browse keeps local counts live; search totals use the server's title matching. */
+/** Browse totals come from the complete shell feed; paged search has server totals. */
 export function getSettledSessionCount(): { count: number; exact: boolean } {
 	const scope = getSessionScope();
-	const currentSlug = getCurrentSlug();
 	const searching = sessionState.searchResults !== null;
 	const status = getSessionStatusFilter();
-	const matches = (row: SessionInfo) =>
-		!row.parentID &&
-		!row.sideThread &&
-		row.pinnedAt == null &&
-		row.settledAt != null &&
-		projectMatchesScope(row.projectSlug, scope) &&
-		(status === null || sessionMatchesStatus(withReadMark(row), status));
-	const totals = searching
-		? clientSession.searchSettledCounts
-		: clientSession.daemonSettledCounts;
-	// A chip filters attention in the browser. Until its pages arrive, report a
-	// lower bound rather than treating the unfiltered shelf total as a match count.
+	const totals = clientSession.searchSettledCounts;
 	const queryReady = searching || sessionState.searchQuery.trim().length === 0;
-	if (status === null && queryReady && totals !== undefined) {
+	if (searching && status === null && totals !== undefined) {
 		return {
-			count:
-				(searching ? 0 : sessionState.rootSessions.filter(matches).length) +
-				totals
-					.filter(
-						(entry) =>
-							(searching || entry.projectSlug !== currentSlug) &&
-							projectMatchesScope(entry.projectSlug, scope),
-					)
-					.reduce((sum, entry) => sum + entry.count, 0),
+			count: totals
+				.filter((entry) => scope === null || entry.projectSlug === scope)
+				.reduce((sum, entry) => sum + entry.count, 0),
 			exact: true,
 		};
 	}
 	return {
-		count: getFilteredSessions().filter(matches).length,
+		count: getFilteredSessions().filter(
+			(row) =>
+				!row.parentID &&
+				!row.sideThread &&
+				row.pinnedAt == null &&
+				row.settledAt != null &&
+				(status === null || sessionMatchesStatus(row, status)),
+		).length,
 		exact:
 			queryReady &&
-			(searching ? !sessionState.searchHasMore : !sessionState.daemonHasMore),
+			(searching ? !sessionState.searchHasMore : sessionState.settled),
 	};
 }
 
 /** The sidebar and its search show root sessions only. */
 export function getFilteredSessions(): SessionInfo[] {
 	const scope = getSessionScope();
-	const currentSlug = getCurrentSlug();
 	const inScope = (session: SessionInfo) =>
-		projectMatchesScope(session.projectSlug, scope);
+		scope === null || session.projectSlug === scope;
 	let sessions: SessionInfo[];
 	if (sessionState.searchResults !== null) {
-		const searchSlug = currentSlug;
-		// Root rows carry the subtree rollup, so local search hits use the
-		// current shell row rather than a possibly older search result.
+		// The live feed holds every visible unarchived root, so a hit uses its live
+		// row, and an unarchived hit missing from the feed was hidden or removed
+		// after the search ran. Archived hits only exist in search results.
 		const liveRoots = new Map(
 			sessionState.rootSessions.map((session) => [session.id, session]),
 		);
 		sessions = sessionState.searchResults.flatMap((session) => {
 			if (!isFamilyRoot(session) || !inScope(session)) return [];
-			if (session.projectSlug !== searchSlug) {
-				return [session];
-			}
-			const liveSession = liveRoots.get(session.id);
-			return liveSession ? [liveSession] : [];
+			const live = liveRoots.get(session.id);
+			if (live) return [live];
+			return session.archivedAt === undefined ? [] : [session];
 		});
 	} else {
-		const localSessions = sessionState.rootSessions;
 		const query = sessionState.searchQuery.toLowerCase().trim();
-		// Foreign rows stay in while a query is active and get title-filtered with
-		// the rest. The server search they will be replaced by now covers every
-		// project too, so the local filter and the landing results agree -- which is
-		// why these no longer have to stand down to avoid flashing in and out.
-		const foreignSessions = sessionState.daemonSessions.filter(
-			(session) => session.projectSlug !== currentSlug && isFamilyRoot(session),
-		);
-		sessions = [...localSessions, ...foreignSessions].filter(inScope);
+		sessions = sessionState.rootSessions.filter(inScope);
 		if (query)
 			sessions = sessions.filter((s) => s.title.toLowerCase().includes(query));
 	}
@@ -1021,17 +895,7 @@ export function groupSessionsByDate(
 /** Set the sidebar's immediate local filter while the server query debounces. */
 export function setSearchQuery(query: string): void {
 	clientSession.searchQuery = query;
-}
-
-/** Expand-step shim: callers still use the old signature until i633.7. */
-export function switchToSession(
-	sessionId: string,
-	_projectSlug?: string,
-	_view?: typeof rpc<"ViewSession">,
-	options?: { replace?: boolean },
-): void {
-	if (options?.replace) replaceRoute(`/s/${sessionId}`);
-	else selection.open(sessionId);
+	if (!query.trim()) clearSessionSearch();
 }
 
 /** Per-session UI state follows what selection shows, including leaving it. */
@@ -1049,7 +913,6 @@ export function followShownSession(
 	if (clientSession.announcedFork?.sessionId !== sessionId)
 		clientSession.announcedFork = null;
 	if (previousId !== sessionId) {
-		updateContextPercent(0);
 		clearTodoState();
 	}
 }
@@ -1081,12 +944,5 @@ export function clearSessionState(): void {
 	setSearchQuery("");
 	resetSessionFamily();
 	readMarks.clear();
-	clientSession.daemonSessions = [];
-	clientSession.daemonSettledCounts = undefined;
-	clientSession.daemonUnavailableProjects = [];
-	clientSession.daemonCursor = null;
-	clientSession.daemonHasMore = false;
-	clientSession.daemonLoading = false;
-	daemonBrowseToken++;
 	clearSessionSearch();
 }

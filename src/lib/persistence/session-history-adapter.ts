@@ -65,6 +65,12 @@ function snapshotRowToHistory(
 					)
 				: undefined;
 		const projected = projectedParts.get(part.id);
+		// The RPC wire rejects an own undefined property, so drop the provider's
+		// metadata and add back only the filtered metadata when there is one.
+		const { metadata: _providerMetadata, ...providerState } = {
+			...state,
+			metadata,
+		};
 		return {
 			...part,
 			id: part.id,
@@ -74,8 +80,8 @@ function snapshotRowToHistory(
 				? {}
 				: {
 						state: {
-							...state,
-							metadata,
+							...providerState,
+							...(metadata === undefined ? {} : { metadata }),
 							...projectTool({
 								name:
 									"tool" in part && typeof part.tool === "string"
@@ -232,7 +238,7 @@ function partSurfacing(
 			? {}
 			: {
 					surfacingMark: Schema.decodeUnknownSync(
-						Schema.parseJson(SurfacingMarkSchema),
+						Schema.fromJsonString(SurfacingMarkSchema),
 					)(row.surfacing_mark),
 				};
 	if (row.surfacing_ordinal == null) return mark;

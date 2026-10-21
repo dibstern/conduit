@@ -23,12 +23,14 @@ export function makeRunnerIdleExit(
 				return;
 			// Resolve configuration on the background sweep, never on send or output.
 			const loaded = loadDaemonConfigResult(configDir);
-			if (loaded._tag === "Left" && loaded.left._tag !== "NotFound") {
-				console.error(loaded.left.message);
+			if (loaded._tag === "Failure" && loaded.failure._tag !== "NotFound") {
+				console.error(loaded.failure.message);
 				return;
 			}
 			const days =
-				loaded._tag === "Right" ? loaded.right.autoSettleAfterDays : undefined;
+				loaded._tag === "Success"
+					? loaded.success.autoSettleAfterDays
+					: undefined;
 			const idleWindowMs =
 				testIdleWindowMs !== undefined
 					? testIdleWindowMs

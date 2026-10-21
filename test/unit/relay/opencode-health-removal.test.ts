@@ -106,10 +106,10 @@ it.each([
 		),
 		DaemonEventBusLive,
 		ConfigPersistenceNoopLive,
-		Layer.succeed(InstanceHealthCheckTag, {
+		Layer.succeed(InstanceHealthCheckTag)({
 			check: () =>
 				Deferred.succeed(entered, undefined).pipe(
-					Effect.zipRight(Effect.never),
+					Effect.andThen(Effect.never),
 					Effect.onInterrupt(() => Effect.sync(() => interrupted())),
 				),
 		}),

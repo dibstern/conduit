@@ -1,13 +1,13 @@
 import { Schema } from "effect";
 import type { SessionScope } from "./session-scope.js";
 
-const ReadModelCollectionSchema = Schema.Literal(
+const ReadModelCollectionSchema = Schema.Literals([
 	"messages",
 	"sessions",
 	"sidebar",
 	"approvals",
 	"inputs",
-);
+]);
 
 export type ReadModelCollection = typeof ReadModelCollectionSchema.Type;
 

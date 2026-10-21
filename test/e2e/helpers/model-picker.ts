@@ -18,3 +18,14 @@ export async function openPickerRoot(
 	const back = page.getByTestId("picker-back");
 	if (await back.isVisible()) await back.click();
 }
+
+/**
+ * Opens the phone Composer sheet, where the checkout row and its workspace
+ * notices live. A sheet that is already open stays open.
+ */
+export async function openComposerSheet(page: Page): Promise<void> {
+	const sheet = page.getByTestId("composer-more-sheet");
+	if (!(await sheet.isVisible()))
+		await page.getByRole("button", { name: /^Composer options:/ }).click();
+	await expect(sheet).toBeVisible();
+}

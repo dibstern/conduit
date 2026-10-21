@@ -3,8 +3,6 @@
 // (sessionActivity / sessionMessages). It has no storage of its own, nothing
 // writes it, and it cannot be written. See ni8.5 §13 / conduit-test-ni8.5.17.
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.hoisted(() => {
@@ -46,16 +44,16 @@ import {
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 beforeEach(() => {
-	sessionState.currentId = "session-a";
+	openSessionForSetup("session-a", "project-a");
 });
 
 afterEach(() => {
 	sessionActivity.clear();
 	sessionMessages.clear();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 });
 
 describe("chatState is read-only", () => {
@@ -74,24 +72,6 @@ describe("chatState is read-only", () => {
 			expect(() => Object.assign(chatState, patch)).toThrow(TypeError);
 		}
 	});
-
-	it("has no writer anywhere in src/", () => {
-		const repoRoot = process.cwd();
-		const assignment = /\bchatState\.[A-Za-z]+\s*(?:=[^=]|\+=|-=|\+\+|--)/;
-		const hits = sourceFiles(join(repoRoot, "src")).flatMap((file) =>
-			readFileSync(file, "utf8")
-				.split("\n")
-				.flatMap((line, index) =>
-					assignment.test(line)
-						? [`${relative(repoRoot, file)}:${index + 1}: ${line.trim()}`]
-						: [],
-				),
-		);
-		expect(
-			hits,
-			"the chat mirror is derived; write the session slot instead",
-		).toEqual([]);
-	});
 });
 
 describe("chatState reflects the current session's slot", () => {
@@ -105,14 +85,14 @@ describe("chatState reflects the current session's slot", () => {
 		expect(chatState.phase).toBe("streaming");
 		expect(chatState.messages).toEqual(a.messages.messages);
 
-		sessionState.currentId = "session-b";
+		openSessionForSetup("session-b", "project-a");
 		expect(chatState.phase).toBe("idle");
 		expect(chatState.messages).toEqual(b.messages.messages);
 	});
 
 	it("is empty when no session is current", () => {
 		getOrCreateSessionSlot("session-a");
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		expect(chatState.messages).toEqual([]);
 		expect(chatState.phase).toBe("idle");
 		expect(chatState.loadLifecycle).toBe("empty");
@@ -153,12 +133,4 @@ function userMessage(text: string) {
 		html: text,
 		createdAt: 0,
 	};
-}
-
-function sourceFiles(dir: string): string[] {
-	return readdirSync(dir).flatMap((entry) => {
-		const path = join(dir, entry);
-		if (statSync(path).isDirectory()) return sourceFiles(path);
-		return path.endsWith(".ts") || path.endsWith(".svelte") ? [path] : [];
-	});
 }

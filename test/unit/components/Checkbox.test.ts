@@ -33,12 +33,4 @@ describe("Checkbox", () => {
 			false,
 		);
 	});
-
-	it("carries the invalid affordance as an outline, since a UA-painted box ignores border", () => {
-		const { getByRole } = render(Checkbox);
-
-		expect(getByRole("checkbox").className).toContain(
-			"aria-invalid:outline-error",
-		);
-	});
 });

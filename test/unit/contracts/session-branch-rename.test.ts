@@ -10,7 +10,7 @@ import { RenameSessionBranch } from "../../../src/lib/contracts/ws-rpc.js";
 describe("session branch rename contracts", () => {
 	it("accepts an empty name at the RPC boundary so Git validation supplies the folder", () => {
 		expect(
-			Schema.decodeUnknownSync(RenameSessionBranch)({
+			Schema.decodeUnknownSync(RenameSessionBranch.payloadSchema)({
 				_tag: "RenameSessionBranch",
 				projectSlug: "project",
 				sessionId: "session",

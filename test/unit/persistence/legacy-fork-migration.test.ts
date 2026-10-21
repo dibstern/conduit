@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect, Schema } from "effect";
+import { SqlClient } from "effect/sql";
 import { describe, expect, it } from "vitest";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -19,6 +19,11 @@ import { SidebarRowSchema } from "../../../src/lib/persistence/sidebar-row.js";
 const throughLineage = Object.fromEntries(
 	Object.entries(effectMigrationEntries).filter(
 		([key]) => key <= "0061_sessions_lineage",
+	),
+);
+const throughForkRepair = Object.fromEntries(
+	Object.entries(effectMigrationEntries).filter(
+		([key]) => key <= "0062_legacy_forks",
 	),
 );
 const T0 = 1_000;
@@ -163,7 +168,7 @@ const sidebar = Effect.gen(function* () {
 			version: _version,
 			lastActivity: _lastActivity,
 			...content
-		} = Schema.decodeUnknownSync(Schema.parseJson(SidebarRowSchema))(row);
+		} = Schema.decodeUnknownSync(Schema.fromJsonString(SidebarRowSchema))(row);
 		return { session_id, ...content };
 	});
 });
@@ -188,7 +193,7 @@ describe("legacy Fork migration", () => {
 					yield* sql`SELECT unread FROM sessions WHERE id = 'fork'`,
 				).toEqual([{ unread: 1 }]);
 
-				yield* makeEffectSqlMigrator();
+				yield* makeEffectSqlMigrator(throughForkRepair);
 
 				expect((yield* placement).map((row) => Object.values(row))).toEqual([
 					["event-fork", null, "source", 0, "event-fork", null, null, null],
@@ -242,11 +247,7 @@ describe("legacy Fork migration", () => {
 				const unchanged = ["source", "subagent", "modern-fork", "unrelated"];
 				expect(
 					yield* sql`SELECT * FROM sessions WHERE id IN ('source', 'subagent', 'modern-fork', 'unrelated') ORDER BY id`,
-				).toEqual(
-					before
-						.filter((row) => unchanged.includes(String(row.id)))
-						.map((row) => ({ ...row, goal_stuck: null })),
-				);
+				).toEqual(before.filter((row) => unchanged.includes(String(row.id))));
 				expect((yield* sidebar).map(({ session_id }) => session_id)).toEqual([
 					"event-fork",
 					"fork",
@@ -291,7 +292,7 @@ describe("legacy Fork migration", () => {
 				const rows =
 					yield* sql`SELECT * FROM session_sidebar ORDER BY session_id`;
 				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 60`;
-				yield* makeEffectSqlMigrator();
+				yield* makeEffectSqlMigrator(throughForkRepair);
 				expect(yield* sql`SELECT * FROM sessions ORDER BY id`).toEqual(
 					migrated,
 				);
@@ -309,7 +310,7 @@ describe("legacy Fork migration", () => {
 		const migrated = await Effect.runPromise(
 			Effect.gen(function* () {
 				yield* seedLegacy;
-				yield* makeEffectSqlMigrator();
+				yield* makeEffectSqlMigrator(throughForkRepair);
 				return { placement: yield* placement, sidebar: yield* sidebar };
 			}).pipe(Effect.provide(SqliteClient.layer({ filename: ":memory:" }))),
 		);
@@ -339,7 +340,7 @@ describe("legacy Fork migration", () => {
 					('side', 'opencode', 'source', 1, 'source', 8, 1, 1)`;
 				yield* sql`UPDATE read_model_counter SET value = 42 WHERE id = 1`;
 				yield* refreshSidebar(["source"], 42);
-				yield* makeEffectSqlMigrator();
+				yield* makeEffectSqlMigrator(throughForkRepair);
 				expect(
 					yield* sql`SELECT id, parent_id, forked_from, side_thread, root_id, version FROM sessions ORDER BY id`,
 				).toEqual([
@@ -383,9 +384,9 @@ describe("legacy Fork migration", () => {
 				const rows =
 					yield* sql`SELECT * FROM session_sidebar ORDER BY session_id`;
 				for (let run = 0; run < 2; run++) {
-					yield* makeEffectSqlMigrator();
+					yield* makeEffectSqlMigrator(throughForkRepair);
 					expect(yield* sql`SELECT * FROM sessions ORDER BY id`).toEqual(
-						before.map((row) => ({ ...row, goal_stuck: null })),
+						before,
 					);
 					expect(
 						yield* sql`SELECT * FROM session_sidebar ORDER BY session_id`,

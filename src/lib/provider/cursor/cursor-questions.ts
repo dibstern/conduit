@@ -1,10 +1,10 @@
-import { Effect, Either, Schema } from "effect";
+import { Effect, Result, Schema } from "effect";
 import { createEventId } from "../../persistence/events.js";
 import type { EventSink } from "../types.js";
 import type { CursorTurnEvents } from "./cursor-turn-events.js";
 import type { CursorCustomTool } from "./sdk-port.js";
 
-const decodeQuestions = Schema.decodeUnknownEither(
+const decodeQuestions = Schema.decodeUnknownResult(
 	Schema.Struct({
 		questions: Schema.NonEmptyArray(
 			Schema.Struct({
@@ -70,7 +70,7 @@ export function cursorAskUserTool(
 		execute(args, context) {
 			if (signal.aborted) return Promise.resolve(CANCELLED);
 			const decoded = decodeQuestions(args);
-			if (Either.isLeft(decoded))
+			if (Result.isFailure(decoded))
 				return Promise.resolve(
 					"Invalid ask_user arguments: supply nonempty questions with header, question and options.",
 				);
@@ -81,7 +81,7 @@ export function cursorAskUserTool(
 				// cancel/close do not stop custom callbacks in SDK 1.0.37.
 				const onAbort = () => resolve(CANCELLED);
 				signal.addEventListener("abort", onAbort, { once: true });
-				const aborted = Effect.async<string>((resume) => {
+				const aborted = Effect.callback<string>((resume) => {
 					const abort = () => resume(Effect.succeed(CANCELLED));
 					if (signal.aborted) abort();
 					else signal.addEventListener("abort", abort, { once: true });
@@ -95,7 +95,7 @@ export function cursorAskUserTool(
 							.requestQuestion({
 								requestId: callId,
 								toolUseId: callId,
-								questions: decoded.right.questions.map((question) => ({
+								questions: decoded.success.questions.map((question) => ({
 									...question,
 									multiSelect: question.multiSelect ?? false,
 									custom: question.custom ?? true,
@@ -107,7 +107,7 @@ export function cursorAskUserTool(
 							})
 							.pipe(
 								Effect.map((answers) => JSON.stringify(answers)),
-								Effect.catchAll(() =>
+								Effect.catch(() =>
 									Effect.succeed("Question request failed or was cancelled."),
 								),
 								Effect.raceFirst(aborted),

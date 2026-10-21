@@ -3,7 +3,6 @@
 // Uses callback pattern for high-throughput PTY output (not reactive).
 
 import { Effect, Fiber, Stream } from "effect";
-import type { RuntimeFiber } from "effect/Fiber";
 import { SvelteMap } from "svelte/reactivity";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
@@ -321,7 +320,7 @@ export function applyPtyEnvelope(envelope: PtyEnvelope): void {
 
 let viewedProject: string | null = null;
 let generation = 0;
-let fiber: RuntimeFiber<void, never> | null = null;
+let fiber: Fiber.Fiber<void, never> | null = null;
 
 /**
  * Follow `project`'s terminals: subscribe for that project (an explicit

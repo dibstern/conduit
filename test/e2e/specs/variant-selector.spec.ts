@@ -145,6 +145,11 @@ test.describe("Effort row", () => {
 		await expect(
 			page.locator("[data-testid^='picker-effort-option-']"),
 		).toHaveCount(4);
+		await expect(
+			page
+				.getByRole("radiogroup", { name: "Effort", exact: true })
+				.getByRole("radio", { checked: true }),
+		).toHaveCount(0);
 	});
 
 	test("selecting a level checks it and keeps the picker open", async ({
@@ -201,6 +206,32 @@ test.describe("Effort selection updates UI", () => {
 			"false",
 		);
 	});
+
+	test("a server-cleared variant restores Default and clears the picker selection", async ({
+		page,
+		baseURL,
+	}) => {
+		const control = await setupWithVariants(page, baseURL);
+		await openEffort(page);
+		await effortOption(page, "max").click();
+		await expect(badge(page)).toContainText("Max");
+		await expect(badge(page)).toBeEnabled();
+
+		control.sendMessage({
+			type: "variant_info",
+			variant: "",
+			variants: ["low", "medium", "high", "max"],
+		});
+		await expect(badge(page)).toContainText("Default");
+		await expect(
+			page
+				.getByRole("radiogroup", { name: "Effort", exact: true })
+				.getByRole("radio", { checked: true }),
+		).toHaveCount(0);
+		expect(control.rpcCalls).toEqual([
+			expect.objectContaining({ sessionId: "sess-var-001", variant: "max" }),
+		]);
+	});
 });
 
 test.describe("Effort selection sends RPC request", () => {
@@ -213,6 +244,7 @@ test.describe("Effort selection sends RPC request", () => {
 		await expect
 			.poll(() => control.rpcCalls.at(-1))
 			.toMatchObject({ sessionId: "sess-var-001", variant: "high" });
+		expect(control.rpcCalls.at(-1)).not.toHaveProperty("projectSlug");
 	});
 
 	test("each selection sends its own SwitchVariant", async ({
@@ -223,10 +255,14 @@ test.describe("Effort selection sends RPC request", () => {
 
 		await openEffort(page);
 		await effortOption(page, "low").click();
+		await expect(badge(page)).toContainText("Low");
+		await expect(badge(page)).toBeEnabled();
 		await expect
 			.poll(() => control.rpcCalls.at(-1))
 			.toMatchObject({ sessionId: "sess-var-001", variant: "low" });
 		await effortOption(page, "max").click();
+		await expect(badge(page)).toContainText("Max");
+		await expect(badge(page)).toBeEnabled();
 		await expect
 			.poll(() => control.rpcCalls.map((call) => call["variant"]))
 			.toEqual(["low", "max"]);

@@ -111,6 +111,7 @@ const copiedTables = [
 	"provider_state",
 	"tool_content",
 	"sent_alerts",
+	"input_drafts",
 	"projection_failures",
 	"session_git_published",
 	"session_pick_backfill",
@@ -126,6 +127,17 @@ const singletonTables = [
 	"daemon_store_imports",
 	"sqlite_sequence",
 ];
+// Historical redesign and goal ledgers before their migrations were appended to main.
+// Accept only these historical mappings; arbitrary ids still mean a newer schema.
+const deployedRedesignMigrationIds = new Map<string, readonly number[]>([
+	["goal_check_metadata", [63, 64, 68]],
+	["message_part_surfacing", [64, 65, 69]],
+	["sessions_settled_shelf_index", [65, 66, 70]],
+	["surfacing_marks", [66, 67, 71]],
+	["message_part_read", [67, 68, 72]],
+	["turn_recaps", [68, 69, 73]],
+	["sessions_goal_stuck", [69]],
+]);
 const runnerTables: Readonly<Record<string, string>> = {
 	claude_runner_cursors: `CREATE TABLE claude_runner_cursors (
 		runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL,
@@ -549,11 +561,13 @@ function sessionIds(db: DatabaseSync, schema: string): string {
 			columns(db, schema, table)
 				.filter(
 					({ name }) =>
-						name === "session_id" || (table === "sessions" && name === "id"),
+						name === "session_id" ||
+						(table === "sessions" && name === "id") ||
+						(table === "input_drafts" && name === "draft_key"),
 				)
 				.map(
 					({ name }) =>
-						`SELECT ${quote(name)} AS id FROM ${schema}.${quote(table)}`,
+						`SELECT ${quote(name)} AS id FROM ${schema}.${quote(table)}${table === "input_drafts" ? " WHERE kind = 'session'" : ""}`,
 				),
 		)
 		.join(" UNION ");
@@ -602,6 +616,10 @@ function excludeSharedSessions(
 		};
 		for (const table of tables(db, "main")) {
 			const conditions = columns(db, "main", table).flatMap(({ name }) => {
+				if (table === "input_drafts" && name === "draft_key")
+					return [
+						"kind = 'session' AND draft_key IN (SELECT id FROM shared_sessions)",
+					];
 				const ids =
 					table === "sessions" && name === "id"
 						? "shared_sessions"
@@ -796,6 +814,11 @@ function copyProject(
 		if (table === "messages")
 			expressions["last_applied_seq"] = eventNumber(
 				"last_applied_seq",
+				offsets.event,
+			);
+		if (table === "message_parts")
+			expressions["result_event_seq"] = eventNumber(
+				"result_event_seq",
 				offsets.event,
 			);
 		if (table === "command_receipts") {
@@ -1119,7 +1142,10 @@ function withNormalisedSource(
 										(key) =>
 											Number.parseInt(key, 10) === entry.migration_id &&
 											key.slice(key.indexOf("_") + 1) === entry.name,
-									)
+									) &&
+									!deployedRedesignMigrationIds
+										.get(entry.name)
+										?.includes(entry.migration_id)
 								)
 									reject(
 										project,
@@ -1514,20 +1540,20 @@ export const importRegisteredProjectStores = (
 				);
 			for (const { project } of sized) {
 				const result = yield* seedDaemonStore(configDir, project, options).pipe(
-					Effect.either,
+					Effect.result,
 				);
-				if (result._tag === "Right") {
+				if (result._tag === "Success") {
 					const completed = yield* attempt(project, () =>
-						finishBackup(configDir, project, options, result.right),
-					).pipe(Effect.either);
+						finishBackup(configDir, project, options, result.success),
+					).pipe(Effect.result);
 					results.set(
 						project.projectId,
-						completed._tag === "Right"
-							? (completed.right ?? result.right)
-							: failed(project, completed.left),
+						completed._tag === "Success"
+							? (completed.success ?? result.success)
+							: failed(project, completed.failure),
 					);
-					if (result.right.outcome === "seeded") break;
-				} else results.set(project.projectId, failed(project, result.left));
+					if (result.success.outcome === "seeded") break;
+				} else results.set(project.projectId, failed(project, result.failure));
 			}
 		}
 		// Retained sources cannot seed, even if there are no registered histories.
@@ -1543,32 +1569,32 @@ export const importRegisteredProjectStores = (
 			if (results.has(project.projectId)) continue;
 			const marked = yield* attempt(project, () =>
 				finishBackup(configDir, project, options),
-			).pipe(Effect.either);
-			if (marked._tag === "Left") {
-				results.set(project.projectId, failed(project, marked.left));
+			).pipe(Effect.result);
+			if (marked._tag === "Failure") {
+				results.set(project.projectId, failed(project, marked.failure));
 				continue;
 			}
-			if (marked.right) {
-				results.set(project.projectId, marked.right);
+			if (marked.success) {
+				results.set(project.projectId, marked.success);
 				continue;
 			}
 			const result = yield* importProjectStore(
 				configDir,
 				project,
 				options,
-			).pipe(Effect.either);
-			if (result._tag === "Left") {
-				results.set(project.projectId, failed(project, result.left));
+			).pipe(Effect.result);
+			if (result._tag === "Failure") {
+				results.set(project.projectId, failed(project, result.failure));
 				continue;
 			}
 			const completed = yield* attempt(project, () =>
-				finishBackup(configDir, project, options, result.right),
-			).pipe(Effect.either);
+				finishBackup(configDir, project, options, result.success),
+			).pipe(Effect.result);
 			results.set(
 				project.projectId,
-				completed._tag === "Right"
-					? (completed.right ?? result.right)
-					: failed(project, completed.left),
+				completed._tag === "Success"
+					? (completed.success ?? result.success)
+					: failed(project, completed.failure),
 			);
 		}
 		const ordered = projects.flatMap((project) => {

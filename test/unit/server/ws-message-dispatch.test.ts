@@ -38,6 +38,7 @@ import { applyInputDraft } from "../../../src/lib/frontend/stores/input-draft.js
 import { clearInstanceState } from "../../../src/lib/frontend/stores/instance.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { ToolMessage } from "../../../src/lib/frontend/types.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
@@ -52,13 +53,11 @@ beforeEach(() => {
 		...sessionState.sessions.values(),
 		{ id: "s1", title: "", status: "idle" },
 	]);
-	sessionState.currentId = "s1";
+	openSessionForSetup("s1", "project-a");
 	_ta = testActivity();
 	tm = testMessages();
 	clearInstanceState();
-	inputSyncState.text = "";
-	inputSyncState.lastFrom = "";
-	inputSyncState.lastUpdated = 0;
+	inputSyncState.received = null;
 	showBannerMock.mockClear();
 	removeBannerMock.mockClear();
 	showToastMock.mockClear();
@@ -70,35 +69,44 @@ afterEach(() => {
 	_ta = testActivity();
 	tm = testMessages();
 	clearInstanceState();
-	inputSyncState.text = "";
-	inputSyncState.lastFrom = "";
-	inputSyncState.lastUpdated = 0;
+	inputSyncState.received = null;
 });
 
 describe("input draft follower", () => {
 	it("ignores draft echoes from this browser tab", () => {
-		inputSyncState.text = "before";
-		inputSyncState.lastUpdated = 10;
+		const before = {
+			_tag: "ServerTextReceived" as const,
+			key: { session: "s1" },
+			text: "before",
+		};
+		inputSyncState.received = before;
 
-		applyInputDraft({
-			_tag: "draft",
-			text: "self echo",
-			from: getBrowserClientId(),
-		});
+		applyInputDraft(
+			{
+				_tag: "draft",
+				text: "self echo",
+				from: getBrowserClientId(),
+			},
+			{ session: "s1" },
+		);
 
-		expect(inputSyncState.text).toBe("before");
-		expect(inputSyncState.lastUpdated).toBe(10);
+		expect(inputSyncState.received).toEqual(before);
 	});
 
 	it("applies drafts from another browser tab", () => {
-		applyInputDraft({
-			_tag: "draft",
-			text: "other tab draft",
-			from: "browser-tab-b",
-		});
+		applyInputDraft(
+			{
+				_tag: "draft",
+				text: "other tab draft",
+				from: "browser-tab-b",
+			},
+			{ session: "s1" },
+		);
 
-		expect(inputSyncState.text).toBe("other tab draft");
-		expect(inputSyncState.lastFrom).toBe("browser-tab-b");
-		expect(inputSyncState.lastUpdated).toBeGreaterThan(0);
+		expect(inputSyncState.received).toEqual({
+			_tag: "ServerTextReceived",
+			key: { session: "s1" },
+			text: "other tab draft",
+		});
 	});
 });

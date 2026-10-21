@@ -15,7 +15,6 @@ import {
 } from "../../stores/discovery.svelte.js";
 import { featureFlags } from "../../stores/feature-flags.svelte.js";
 import {
-	applyDetectProxyResponse,
 	applyInstanceListResponse,
 	getCachedInstances,
 } from "../../stores/instance.svelte.js";
@@ -26,7 +25,7 @@ import {
 	applyUsageLimitsSetting,
 	applyUsageReadings,
 } from "../../stores/usage.svelte.js";
-import { connectedSocket, failRpc } from "../../stories/sockets.js";
+import { connectedSocket, replyRpc } from "../../stories/sockets.js";
 import SettingsPanel from "./SettingsPanel.svelte";
 
 function resetState() {
@@ -142,7 +141,10 @@ const meta = {
 		// Mount-time reads wait on an open socket instead of failing whenever the
 		// real dial gives up; proxy detection settles at once as "not found".
 		const restoreSocket = connectedSocket();
-		const restoreDetectProxy = failRpc("DetectProxy");
+		const restoreDetectProxy = replyRpc("DetectProxy", () => ({
+			found: false,
+			port: 8317,
+		}));
 		resetState();
 		return () => {
 			sessionViewState.compact = compact;
@@ -339,18 +341,17 @@ export const WorktreeCleanup: Story = {
 	play: async ({ canvasElement }) => {
 		const body = within(canvasElement.ownerDocument.body);
 		const disclosure = body.getByRole("button", {
-			name: /^Worktree cleanup.*Settled and merged$/,
+			name: /^Worktree cleanup.*When nothing is missing$/,
 		});
 		await userEvent.click(disclosure);
 		await expect(disclosure).toHaveAttribute("aria-expanded", "true");
 		await scrollSettingsIntoView(disclosure, "start");
 		await expect(
 			body.getByTestId("settings-cleanup-on-settle"),
-		).toHaveAttribute("data-value", "merged");
-		await expect(body.getByTestId("settings-cleanup-idle")).toHaveAttribute(
-			"data-value",
-			"never",
-		);
+		).toHaveAttribute("data-value", "nothing-missing");
+		await expect(
+			body.getByTestId("settings-cleanup-settled-after"),
+		).toHaveAttribute("data-value", "never");
 		await expect(
 			body.getByTestId("settings-cleanup-keep-when"),
 		).toHaveAttribute("data-value", "uncommitted-changes");
@@ -1000,6 +1001,7 @@ export const InstancesEmpty: Story = {
 				(instance) => instance.driver === "claude",
 			),
 		});
+		return replyRpc("DetectProxy", () => ({ found: true, port: 8317 }));
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -1007,7 +1009,6 @@ export const InstancesEmpty: Story = {
 			"opencode serve --port 4098",
 		);
 		const guides = canvas.getByTestId("opencode-setup-guides");
-		applyDetectProxyResponse({ found: true, port: 8317 });
 		await waitFor(() =>
 			expect(guides).toHaveTextContent("Direct key · CCS ✓ · Custom"),
 		);

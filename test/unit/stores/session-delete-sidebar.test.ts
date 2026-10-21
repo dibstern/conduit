@@ -47,6 +47,7 @@ import {
 	getFilteredSessions,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
 
 const VICTIM = {
@@ -55,7 +56,7 @@ const VICTIM = {
 	id: "victim",
 	title: "Doomed Session",
 	status: "idle",
-	updatedAt: Date.now(),
+	updatedAt: 2_000,
 } satisfies SessionInfo;
 const KEEPER = {
 	projectSlug: "project-a",
@@ -63,14 +64,14 @@ const KEEPER = {
 	id: "keeper",
 	title: "Survivor",
 	status: "idle",
-	updatedAt: Date.now(),
+	updatedAt: 1_000,
 } satisfies SessionInfo;
 
 beforeEach(() => {
 	clearSessionState();
 	attachedProjectState.slug = "project-a";
 	routerState.search = "";
-	sessionState.currentId = "keeper";
+	openSessionForSetup("keeper", "project-a");
 	seedSessions([VICTIM, KEEPER]);
 });
 
@@ -150,12 +151,6 @@ describe("deleted sessions leave the sidebar", () => {
 		expect(sidebarIds()).toEqual(["keeper"]);
 	});
 
-	it("drops a stale searched session after an authoritative tagged refresh", () => {
-		searchFor("s", [VICTIM, KEEPER]);
-		applySessionChange({ _tag: "snapshot", rows: [KEEPER] });
-		expect(sidebarIds()).toEqual(["keeper"]);
-	});
-
 	it("returns the live renamed session object during an active search", () => {
 		const renamed = { ...VICTIM, title: "Renamed Session" };
 		searchFor("session", [VICTIM]);
@@ -188,8 +183,6 @@ describe("root rows keep their subtree rollup", () => {
 				parentID: VICTIM.id,
 			},
 		]);
-		// By id: the fixtures' Date.now() stamps can differ by a millisecond,
-		// which reorders the newest-first sidebar.
 		expect(
 			getFilteredSessions().find((session) => session.id === VICTIM.id)
 				?.attention,

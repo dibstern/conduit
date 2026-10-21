@@ -72,6 +72,7 @@ export interface OpenCodeAPIOptions {
 	baseUrl: string;
 	authHeaders: Record<string, string>;
 	processIdentity?: string | undefined;
+	promptProcessId?: string | undefined;
 }
 
 /**
@@ -83,6 +84,7 @@ export interface OpenCodeAPIOptions {
  */
 export class OpenCodeAPI {
 	readonly processIdentity: string;
+	readonly promptProcessId: string | undefined;
 	private readonly client: OpencodeClient;
 	private readonly _baseUrl: string;
 	private readonly _authHeaders: Record<string, string>;
@@ -100,6 +102,7 @@ export class OpenCodeAPI {
 
 	constructor(options: OpenCodeAPIOptions) {
 		this.processIdentity = options.processIdentity ?? options.baseUrl;
+		this.promptProcessId = options.promptProcessId;
 		this.client = options.sdk;
 		this._baseUrl = options.baseUrl;
 		this._authHeaders = options.authHeaders;
@@ -261,23 +264,35 @@ class SessionNamespace {
 		title?: string;
 		parentID?: string;
 		id?: string;
+		directory?: string;
 	}): Promise<SessionDetail> {
 		if (options?.id !== undefined) {
 			const id = options.id;
+			const scope =
+				options.directory === undefined ? {} : { directory: options.directory };
 			// v2 accepts the id reserved for a worktree launch. Read the legacy
 			// shape used by the existing event and history adapters afterwards.
 			return this.api.sdk(
 				"session.create",
 				decodeSessionDetailResponse,
 				async () => {
-					const created = await this.api._sdk.v2.session.create({ id });
+					const created = await this.api._sdk.v2.session.create({
+						id,
+						...(options.directory === undefined
+							? {}
+							: { location: { directory: options.directory } }),
+					});
 					if (created.error !== undefined) return created;
 					return options.title
 						? this.api._sdk.session.update({
 								sessionID: id,
 								title: options.title,
+								...scope,
 							})
-						: this.api._sdk.session.get({ sessionID: id });
+						: this.api._sdk.session.get({
+								sessionID: id,
+								...scope,
+							});
 				},
 			);
 		}
@@ -384,6 +399,9 @@ class SessionNamespace {
 		await this.api.sdk("session.prompt", decodeOpenCodeUndefinedResponse, () =>
 			this.api._sdk.session.promptAsync({
 				sessionID: sessionId,
+				...(options.messageId !== undefined
+					? { messageID: options.messageId }
+					: {}),
 				...(options.directory !== undefined
 					? { directory: options.directory }
 					: {}),

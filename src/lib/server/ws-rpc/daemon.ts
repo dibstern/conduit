@@ -9,6 +9,7 @@ export const daemonOnlyHandlers = {
 	GetMessageSurfacing: (_request) => daemonRequired("GetMessageSurfacing"),
 	UpdateMessageSurfacing: (_request) =>
 		daemonRequired("UpdateMessageSurfacing"),
+	SetProjectOrder: (_request) => daemonRequired("SetProjectOrder"),
 	GetStatus: (_request) => daemonRequired("GetStatus"),
 	SetPin: (_request): Effect.Effect<never, WsRpcError | SetPinRejected> =>
 		daemonRequired("SetPin"),
@@ -26,10 +27,6 @@ export const daemonOnlyHandlers = {
 	GetInstanceStatus: (_request) => daemonRequired("GetInstanceStatus"),
 	OpenCodeUseWorktree: (_request) => daemonRequired("OpenCodeUseWorktree"),
 	ResolveSessionMode: (_request) => daemonRequired("ResolveSessionMode"),
-	SetDefaultGroupingMode: (_request) =>
-		daemonRequired("SetDefaultGroupingMode"),
-	GetDefaultGroupingMode: (_request) =>
-		daemonRequired("GetDefaultGroupingMode"),
 	SetTerminalKeys: (_request) => daemonRequired("SetTerminalKeys"),
 	GetTerminalKeys: (_request) => daemonRequired("GetTerminalKeys"),
 	GetCategorySet: (_request) => daemonRequired("GetCategorySet"),
@@ -42,6 +39,7 @@ export const daemonOnlyHandlers = {
 	WsRpcHandlerMap,
 	| "GetMessageSurfacing"
 	| "UpdateMessageSurfacing"
+	| "SetProjectOrder"
 	| "GetStatus"
 	| "SetPin"
 	| "SetKeepAwake"
@@ -58,8 +56,6 @@ export const daemonOnlyHandlers = {
 	| "GetInstanceStatus"
 	| "OpenCodeUseWorktree"
 	| "ResolveSessionMode"
-	| "SetDefaultGroupingMode"
-	| "GetDefaultGroupingMode"
 	| "SetTerminalKeys"
 	| "GetTerminalKeys"
 	| "GetCategorySet"

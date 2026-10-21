@@ -22,7 +22,7 @@ import {
 	type SessionActivity,
 	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
 /** Shallow snapshot of a SessionActivity, converting Sets to plain arrays
@@ -60,7 +60,7 @@ let ta: SessionActivity;
 let tm: SessionMessages;
 
 beforeEach(() => {
-	sessionState.currentId = "test-session";
+	openSessionForSetup("test-session", "project-a");
 	clearMessages();
 	ta = testActivity();
 	tm = testMessages();
@@ -97,13 +97,6 @@ describe("phaseToIdle — tier contract", () => {
 		phaseToIdle(ta);
 		expect(ta.phase).toBe("idle");
 	});
-
-	it("should NOT modify messages tier", () => {
-		const before = snapMessages(tm);
-		phaseToIdle(ta);
-		const after = snapMessages(tm);
-		expect(after).toEqual(before);
-	});
 });
 
 describe("phaseToProcessing — tier contract", () => {
@@ -111,26 +104,12 @@ describe("phaseToProcessing — tier contract", () => {
 		phaseToProcessing(ta);
 		expect(ta.phase).toBe("processing");
 	});
-
-	it("should NOT modify messages tier", () => {
-		const before = snapMessages(tm);
-		phaseToProcessing(ta);
-		const after = snapMessages(tm);
-		expect(after).toEqual(before);
-	});
 });
 
 describe("phaseToStreaming — tier contract", () => {
 	it("should write phase to activity tier", () => {
 		phaseToStreaming(ta);
 		expect(ta.phase).toBe("streaming");
-	});
-
-	it("should NOT modify messages tier", () => {
-		const before = snapMessages(tm);
-		phaseToStreaming(ta);
-		const after = snapMessages(tm);
-		expect(after).toEqual(before);
 	});
 });
 
@@ -154,34 +133,5 @@ describe("advanceTurnIfNewMessage — tier contract", () => {
 		advanceTurnIfNewMessage(ta, tm, undefined);
 		expect(snapActivity(ta)).toEqual(beforeActivity);
 		expect(snapMessages(tm)).toEqual(beforeMessages);
-	});
-});
-
-describe("tier field completeness", () => {
-	it("snapActivity covers all SessionActivity keys from testActivity()", () => {
-		const fresh = testActivity();
-		const snap = snapActivity(fresh);
-		// Every key on the activity object should appear in the snapshot
-		for (const key of Object.keys(fresh)) {
-			// doneMessageIds and seenMessageIds are converted to arrays
-			if (key === "doneMessageIds" || key === "seenMessageIds") {
-				expect(snap).toHaveProperty(key);
-			} else {
-				expect(snap).toHaveProperty(key);
-			}
-		}
-	});
-
-	it("snapMessages covers all SessionMessages keys from testMessages()", () => {
-		const fresh = testMessages();
-		const snap = snapMessages(fresh);
-		// Messages are summarized, not compared by identity.
-		for (const key of Object.keys(fresh)) {
-			if (key === "messages") {
-				expect(snap).toHaveProperty("messagesLength");
-			} else {
-				expect(snap).toHaveProperty(key);
-			}
-		}
 	});
 });

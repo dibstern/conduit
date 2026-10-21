@@ -8,6 +8,7 @@ import { generateUuid } from "../utils/format.js";
 const SIDEBAR_STORAGE_KEY = "sidebar-collapsed";
 const SETTLED_SHELF_STORAGE_KEY = "settled-shelf-open";
 const SNOOZED_SHELF_STORAGE_KEY = "snoozed-shelf-open";
+const DRAFTS_TRAY_STORAGE_KEY = "drafts-tray-open";
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
 const TERMINAL_SETTINGS_SEEN_KEY = "terminal-settings-seen";
 
@@ -35,6 +36,8 @@ export const uiState = $state({
 	sidebarCollapsed: safeGetItem(SIDEBAR_STORAGE_KEY) === "true",
 	settledShelfOpen: safeGetItem(SETTLED_SHELF_STORAGE_KEY) === "true",
 	snoozedShelfOpen: safeGetItem(SNOOZED_SHELF_STORAGE_KEY) === "true",
+	// Open unless the user closed it: drafts are their own unsent text.
+	draftsTrayOpen: safeGetItem(DRAFTS_TRAY_STORAGE_KEY) !== "false",
 	// Cleanup and bulk settle share one row-selection mode, entered from either sidebar surface.
 	selectMode: false,
 	sidebarWidth: Number(safeGetItem(SIDEBAR_WIDTH_KEY)) || SIDEBAR_DEFAULT_WIDTH,
@@ -79,9 +82,6 @@ export const uiState = $state({
 	// Image lightbox
 	lightboxSrc: null as string | null,
 
-	// Context usage
-	contextPercent: 0,
-
 	// Client count
 	clientCount: 0,
 
@@ -92,14 +92,6 @@ export const uiState = $state({
 });
 
 // Components should wrap in $derived() for reactive caching.
-
-/** Get the context bar color class based on usage percentage. */
-export function getContextColor(): string {
-	if (uiState.contextPercent >= 80) return "ctx-red";
-	if (uiState.contextPercent >= 50) return "ctx-yellow";
-	if (uiState.contextPercent > 0) return "ctx-green";
-	return "";
-}
 
 export function collapseSidebar(): void {
 	uiState.sidebarCollapsed = true;
@@ -150,6 +142,15 @@ export function setSnoozedShelfOpen(open: boolean): void {
 	}
 }
 
+export function setDraftsTrayOpen(open: boolean): void {
+	uiState.draftsTrayOpen = open;
+	try {
+		localStorage.setItem(DRAFTS_TRAY_STORAGE_KEY, String(open));
+	} catch {
+		/* Storage may be unavailable; keep the in-memory preference. */
+	}
+}
+
 export function markTerminalSettingsSeen(): void {
 	uiState.terminalSettingsSeen = true;
 	try {
@@ -194,7 +195,18 @@ export function showToast(
 	};
 	// At most two cards, so the stack never climbs over the transcript. Older
 	// toasts are dropped, actions and all, rather than queued out of sight.
-	uiState.toasts = [...uiState.toasts, toast].slice(-2);
+	uiState.toasts = [
+		...uiState.toasts.filter(
+			(existing) =>
+				existing.variant !== toast.variant ||
+				existing.title !== toast.title ||
+				existing.body !== toast.body ||
+				existing.emphasis !== toast.emphasis ||
+				existing.actions.some((action) => action.kind !== "dismiss") ||
+				toast.actions.some((action) => action.kind !== "dismiss"),
+		),
+		toast,
+	].slice(-2);
 
 	// Auto-dismiss
 	setTimeout(() => {
@@ -322,10 +334,6 @@ export function closeFileViewer(): void {
 	uiState.fileViewerRoot = null;
 }
 
-export function updateContextPercent(percent: number): void {
-	uiState.contextPercent = Math.max(0, Math.min(100, percent));
-}
-
 export function setClientCount(count: number): void {
 	uiState.clientCount = count;
 }
@@ -338,7 +346,6 @@ export function resetProjectUI(): void {
 	uiState.planContent = null;
 	uiState.planApproval = null;
 	uiState.lightboxSrc = null;
-	uiState.contextPercent = 0;
 	uiState.fileViewerOpen = false;
 	uiState.fileViewerPath = null;
 	uiState.fileViewerRoot = null;

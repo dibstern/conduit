@@ -8,7 +8,6 @@ import {
 	resetChatState,
 } from "../../stores/chat.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
-import { sessionState } from "../../stores/session.svelte.js";
 import {
 	mockAssistantSimple,
 	mockAssistantWithCode,
@@ -22,6 +21,7 @@ import {
 	mockToolRunning,
 	mockUserMessage,
 } from "../../stories/mocks.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import { turnFixtureMessages } from "../../stories/turn-fixtures.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import type { ChatMessage } from "../../types.js";
@@ -37,7 +37,6 @@ let sequence = 0;
 
 function seed(messages: ChatMessage[], processing = false) {
 	resetChatState();
-	sessionState.currentId = testId;
 	// The reply header names the provider of the viewed session's account.
 	instanceState.instances = [mockClaudeAccount];
 	applySessionChange({
@@ -52,6 +51,7 @@ function seed(messages: ChatMessage[], processing = false) {
 		],
 		sequence: ++sequence,
 	});
+	openSessionForSetup(testId, "conduit");
 	const activity = getOrCreateSessionActivity(testId);
 	const chat = getOrCreateSessionMessages(testId);
 	chat.messages = [...messages];
@@ -180,10 +180,10 @@ export const AdjacentRepliesLight: Story = {
 	globals: { theme: "light" },
 };
 
-function liveTranscript(phone = false) {
-	const root = document.getElementById("storybook-root");
-	const style = root?.getAttribute("style");
-	root?.setAttribute(
+// The canvas, not #storybook-root: the Vitest runner mounts stories elsewhere.
+function liveTranscript(root: HTMLElement, phone = false) {
+	const style = root.getAttribute("style");
+	root.setAttribute(
 		"style",
 		`display:flex;height:640px;width:${phone ? "393px" : "100%"};max-width:100%;overflow:hidden`,
 	);
@@ -205,13 +205,13 @@ function liveTranscript(phone = false) {
 		true,
 	);
 	return () => {
-		if (style === null || style === undefined) root?.removeAttribute("style");
-		else root?.setAttribute("style", style);
+		if (style === null) root.removeAttribute("style");
+		else root.setAttribute("style", style);
 	};
 }
 
 export const LiveTurnVisible: Story = {
-	beforeEach: () => liveTranscript(),
+	beforeEach: ({ canvasElement }) => liveTranscript(canvasElement),
 	play: async ({ canvasElement }) => {
 		await expect(
 			within(canvasElement).getByTestId("turn-live-head"),
@@ -228,7 +228,7 @@ export const LiveTurnVisibleLight: Story = {
 
 export const JumpToLive: Story = {
 	tags: ["viewport-capture"],
-	beforeEach: () => liveTranscript(),
+	beforeEach: ({ canvasElement }) => liveTranscript(canvasElement),
 	play: async ({ canvasElement }) => {
 		const transcript = canvasElement.querySelector("#messages");
 		if (!(transcript instanceof HTMLElement))
@@ -251,7 +251,7 @@ export const JumpToLiveLight: Story = {
 export const JumpToLivePhone: Story = {
 	...JumpToLive,
 	parameters: { phone: true },
-	beforeEach: () => liveTranscript(true),
+	beforeEach: ({ canvasElement }) => liveTranscript(canvasElement, true),
 };
 export const JumpToLivePhoneLight: Story = {
 	...JumpToLivePhone,

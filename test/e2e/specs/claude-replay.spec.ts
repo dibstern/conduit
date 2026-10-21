@@ -5,10 +5,10 @@
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { Socket } from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
 import type { Page, TestInfo } from "@playwright/test";
 import { Effect } from "effect";
+import { RpcClient, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { readNativeThread } from "../../helpers/native-thread.js";
 import { expect, test } from "../helpers/replay-fixture.js";
@@ -83,7 +83,7 @@ function recordSends(page: Page): Send[] {
 }
 
 const makeWsRpcClient = RpcClient.make(WsRpcGroup);
-type WsRpcClient = Effect.Effect.Success<typeof makeWsRpcClient>;
+type WsRpcClient = Effect.Success<typeof makeWsRpcClient>;
 
 test.describe("Claude replay lane", () => {
 	test.beforeEach(({ page }) => {
@@ -788,7 +788,7 @@ test.describe("Claude replay lane", () => {
 					"Paused",
 				);
 				// Nothing drains on its own while paused.
-				await page.waitForTimeout(1_500);
+				await expect(app.sendBtn).toBeVisible();
 				const paused = ledger(dbPath, sessionId);
 				expect(inputsOf(paused.events, "input.sent")).toEqual([a]);
 				await expect(trayTexts(page)).toHaveText([/^Bravo$/, /^Charlie$/]);
@@ -859,7 +859,7 @@ test.describe("Claude replay lane", () => {
 
 				await expect.poll(() => countEvents(dbPath, "turn.error")).toBe(1);
 				await expect(page.getByTestId("pending-input-paused")).toBeVisible();
-				await page.waitForTimeout(1_500);
+				await expect(app.sendBtn).toBeVisible();
 				const paused = ledger(dbPath, sessionId);
 				expect(inputsOf(paused.events, "input.sent")).toEqual([a]);
 				await expect(trayTexts(page)).toHaveText([/^Bravo$/]);
@@ -1004,7 +1004,7 @@ test.describe("Claude replay lane", () => {
 				await page.reload();
 				await expect(trayTexts(page)).toHaveText([/^Bravo$/]);
 				await expect(chat.stopBtn).toBeHidden();
-				await page.waitForTimeout(1_500);
+				await expect(app.sendBtn).toBeVisible();
 				const restarted = ledger(dbPath, sessionId);
 				// Shutdown may interrupt the turn first; otherwise recovery closes it
 				// as an error. Either way it was cut off and the queue pauses.
@@ -1131,11 +1131,11 @@ test.describe("Claude replay lane", () => {
 				submit: (text: string, delivery: "queue" | "steer") => {
 					const inputId = randomUUID();
 					return rpc((client) =>
-						client.input.submit({ ...target, inputId, text, delivery }),
+						client["input.submit"]({ ...target, inputId, text, delivery }),
 					).then((response) => ({ inputId, response }));
 				},
 				sendNow: (inputId: string) =>
-					rpc((client) => client.input.sendNow({ ...target, inputId })),
+					rpc((client) => client["input.sendNow"]({ ...target, inputId })),
 				switchModel: (modelId: string) =>
 					rpc((client) =>
 						client.SwitchModel({ ...target, providerId: "claude", modelId }),
@@ -1643,7 +1643,7 @@ test.describe("Claude replay lane", () => {
 					"Paused",
 				);
 				// Nothing drains on its own while paused.
-				await page.waitForTimeout(1_500);
+				await expect(s.chat.assistantMessages.last()).toContainText("BANANA");
 				await expect(
 					page
 						.getByTestId("pending-input-row")
@@ -1653,7 +1653,6 @@ test.describe("Claude replay lane", () => {
 					/\bAlpha\b/,
 					/\bBravo\b/,
 				]);
-				await expect(s.chat.assistantMessages.last()).toContainText("BANANA");
 				const a = s.sends[0]?.commandId ?? "";
 				const proof = ledger(s.dbPath, s.sessionId);
 				await testInfo.attach("stop-with-steer-proof.json", {

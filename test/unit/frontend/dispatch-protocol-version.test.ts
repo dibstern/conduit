@@ -118,7 +118,7 @@ describe("server status: protocol version", () => {
 		expect(mocks.showBanner).toHaveBeenCalledWith(
 			expect.objectContaining({ id: "stale-daemon" }),
 		);
-		expect(fiber.unsafePoll()).toBeNull();
+		expect(fiber.pollUnsafe()).toBeUndefined();
 		await Effect.runPromise(Fiber.interrupt(fiber));
 	});
 

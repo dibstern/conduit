@@ -29,6 +29,18 @@ Scenario: send files without a typed message
   And I send the composer message
   Then the composer submits both files with their original bytes and names
 
+Scenario: recover a failed file-only send without losing attachments
+  Given the conduit app is served with the connected mockup
+  And a session already exists on the Claude harness
+  When I open the composer add menu
+  And I choose the text and PDF attachments
+  And the next composer submission fails
+  And I send the composer message
+  Then the failed file-only send keeps both files ready to retry
+  When I send the composer message
+  Then the composer retries both files with their original bytes and names
+  And the composer file chips are cleared
+
 Scenario: remove a file before sending
   Given the conduit app is served with the connected mockup
   And a session already exists on the Claude harness

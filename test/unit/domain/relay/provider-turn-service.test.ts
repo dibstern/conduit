@@ -1,19 +1,18 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient, Statement } from "@effect/sql";
-import { SqlError } from "@effect/sql/SqlError";
 import { describe, it } from "@effect/vitest";
 import {
-	Chunk,
 	Deferred,
 	Effect,
-	Either,
+	Result as Either,
 	Fiber,
 	Layer,
 	Stream,
-	TestClock,
 } from "effect";
+import { SqlClient, Statement } from "effect/sql";
+import { SqlError } from "effect/sql/SqlError";
+import { TestClock } from "effect/testing";
 import { afterEach, expect, vi } from "vitest";
 import {
 	MessageVersion,
@@ -24,7 +23,9 @@ import {
 	AccountDirectory,
 	AccountDirectoryFromConfigLive,
 } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
+import { OpenCodeInstancesTag } from "../../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SessionWorkspaceLive } from "../../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import { AlertsLive } from "../../../../src/lib/domain/relay/Services/alerts.js";
 import {
 	PendingInteractionServiceLive,
@@ -99,6 +100,7 @@ import {
 	makeMockOpenCodeModelService,
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
+	makeOpenCodeInstancesStub,
 } from "../../../helpers/mock-factories.js";
 import { partialFake } from "../../../helpers/partial-fake.js";
 import { providerRuntimeEvent } from "../../../helpers/provider-runtime-event.js";
@@ -286,6 +288,8 @@ const makePersistService = (
 	persistEvents: vi.fn(() => Effect.void),
 	persistUserMessage,
 	ensureClaudeSubagentSession: vi.fn(() => Effect.void),
+	readClaudeSubagentTranscript: () =>
+		Effect.succeed({ messages: [], parts: [] }),
 });
 
 const makeProviderState = (
@@ -353,7 +357,7 @@ const serviceLayer = (input: {
 	readonly titleService?: SessionTitleService;
 	readonly api?: OpenCodeAPI;
 	readonly configDir?: string;
-	readonly accountDirectory?: AccountDirectory["Type"];
+	readonly accountDirectory?: AccountDirectory["Service"];
 }) => {
 	const wsHandler = makeMockWebSocketHandler({
 		getClientsForSession: vi.fn(() => ["client-1"]),
@@ -361,24 +365,26 @@ const serviceLayer = (input: {
 	const log = makeMockLogger();
 	const sessionManagerService = makeMockSessionManagerService();
 	const ingestion = input.ingestion ?? makeIngestion();
+	const api = input.api ?? makeMockOpenCodeAPI();
 	let baseLayer = Layer.mergeAll(
 		input.accountDirectory !== undefined
-			? Layer.succeed(AccountDirectory, input.accountDirectory)
+			? Layer.succeed(AccountDirectory)(input.accountDirectory)
 			: input.configDir === undefined
-				? Layer.succeed(AccountDirectory, makeMockAccountDirectory())
+				? Layer.succeed(AccountDirectory)(makeMockAccountDirectory())
 				: AccountDirectoryFromConfigLive(
 						input.configDir,
 						configuredClaudeConfigDir("/isolated-provider-home/.claude"),
 					),
-		Layer.succeed(OpenCodeAPITag, input.api ?? makeMockOpenCodeAPI()),
-		Layer.succeed(
-			OpenCodeModelServiceTag,
+		Layer.succeed(OpenCodeAPITag)(api),
+		Layer.succeed(OpenCodeInstancesTag)(
+			makeOpenCodeInstancesStub({ opencode: api }),
+		),
+		Layer.succeed(OpenCodeModelServiceTag)(
 			makeMockOpenCodeModelService(openCodeCatalog),
 		),
-		Layer.succeed(WebSocketHandlerTag, wsHandler),
-		Layer.succeed(LoggerTag, log),
-		Layer.succeed(
-			ConfigTag,
+		Layer.succeed(WebSocketHandlerTag)(wsHandler),
+		Layer.succeed(LoggerTag)(log),
+		Layer.succeed(ConfigTag)(
 			makeMockConfig({
 				projectDir: MOCK_PROJECT_DIR,
 				...(input.configDir === undefined
@@ -386,36 +392,37 @@ const serviceLayer = (input: {
 					: { configDir: input.configDir }),
 			}),
 		),
-		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+		Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
 		PendingInteractionServiceLive,
 		makeOverridesStateLive(),
 		makePersistenceEffectLayer(":memory:", "test-project"),
-		Layer.succeed(
-			ClaudeEventPersistEffectTag,
+		Layer.succeed(ClaudeEventPersistEffectTag)(
 			input.persist ?? makePersistService(() => Effect.void),
 		),
-		Layer.succeed(OrchestrationEngineTag, input.engine ?? makeEngine()),
-		Layer.succeed(ProviderRuntimeIngestionTag, ingestion),
+		Layer.succeed(OrchestrationEngineTag)(input.engine ?? makeEngine()),
+		Layer.succeed(ProviderRuntimeIngestionTag)(ingestion),
 		AlertsLive,
-		Layer.succeed(
-			SessionTitleServiceTag,
+		Layer.succeed(SessionTitleServiceTag)(
 			input.titleService ?? makeTitleService(),
 		),
 	);
 	if (input.readQuery) {
 		baseLayer = Layer.merge(
 			baseLayer,
-			Layer.succeed(ReadQueryEffectTag, input.readQuery),
+			Layer.succeed(ReadQueryEffectTag)(input.readQuery),
 		);
 	}
 	if (input.providerState) {
 		baseLayer = Layer.merge(
 			baseLayer,
-			Layer.succeed(ProviderStateEffectTag, input.providerState),
+			Layer.succeed(ProviderStateEffectTag)(input.providerState),
 		);
 	}
 	return {
-		layer: Layer.provideMerge(ProviderTurnServiceLive, baseLayer),
+		layer: Layer.provideMerge(
+			ProviderTurnServiceLive,
+			Layer.provideMerge(SessionWorkspaceLive, baseLayer),
+		),
 		wsHandler,
 		log,
 		sessionManagerService,
@@ -477,7 +484,7 @@ describe("ProviderTurnService", () => {
 				VALUES ('session-1', 'claude', 'Stored session', 1, 1)`,
 		);
 
-		it.scoped(
+		it.effect(
 			"lifts and wakes the inbox in memory when the abort fails",
 			() => {
 				const dispatchEffect = vi.fn(() =>
@@ -490,12 +497,12 @@ describe("ProviderTurnService", () => {
 					yield* seedSession;
 					const lifts = yield* service.fenceLifts;
 					const failed = yield* interruptTurn().pipe(Effect.flip);
-					expect(failed._tag).toBe("ProviderNotRegistered");
+					expect(failed).toMatchObject({ _tag: "ProviderNotRegistered" });
 					expect(service.turnFences("session-1").stopping).toBe(false);
 					// No store write stands between the lift and the drain.
-					expect(
-						Chunk.toArray(yield* Stream.runCollect(Stream.take(lifts, 1))),
-					).toEqual(["session-1"]);
+					expect(yield* Stream.runCollect(Stream.take(lifts, 1))).toEqual([
+						"session-1",
+					]);
 					// A repeated Stop issues a fresh abort instead of awaiting the failed one.
 					yield* interruptTurn().pipe(Effect.flip);
 					expect(dispatchEffect).toHaveBeenCalledTimes(2);
@@ -513,7 +520,7 @@ describe("ProviderTurnService", () => {
 					yield* seedSession;
 					let injected = false;
 					const failed = yield* interruptTurn().pipe(
-						Statement.withTransformer((statement) => {
+						Effect.provideService(Statement.CurrentTransformer, (statement) => {
 							const [query] = statement.compile();
 							const lookup =
 								missingTable === "turns"
@@ -527,10 +534,10 @@ describe("ProviderTurnService", () => {
 								sql.unsafe("SELECT * FROM unavailable_identity"),
 							);
 						}),
-						Effect.either,
+						Effect.result,
 					);
 					expect(injected).toBe(true);
-					expect(failed._tag).toBe("Left");
+					expect(failed._tag).toBe("Failure");
 					expect(service.turnFences("session-1").stopping).toBe(false);
 					yield* interruptTurn();
 					expect(engine.dispatchEffect).toHaveBeenCalledOnce();
@@ -547,7 +554,7 @@ describe("ProviderTurnService", () => {
 						providerId: "claude",
 						dispatchEffect: vi.fn(() =>
 							Deferred.succeed(issued, undefined).pipe(
-								Effect.zipRight(Effect.never),
+								Effect.andThen(Effect.never),
 							),
 						),
 					});
@@ -558,7 +565,7 @@ describe("ProviderTurnService", () => {
 						yield* seedSession;
 						yield* sql`INSERT INTO turns (id, session_id, state, user_message_id, requested_at)
 							VALUES ('turn-1', 'session-1', 'running', 'input-1', 1)`;
-						const stopped = yield* Effect.fork(interruptTurn());
+						const stopped = yield* Effect.forkChild(interruptTurn());
 						yield* Deferred.await(issued);
 						yield* TestClock.adjust(STOP_ABORT_WAIT_MS - 1);
 						expect(service.turnFences("session-1").stopping).toBe(true);
@@ -592,7 +599,7 @@ describe("ProviderTurnService", () => {
 				yield* seedSession;
 				yield* sql`INSERT INTO turns (id, session_id, state, user_message_id, requested_at)
 					VALUES ('turn-1', 'session-1', 'running', 'input-1', 1)`;
-				const stopped = yield* Effect.fork(interruptTurn());
+				const stopped = yield* Effect.forkChild(interruptTurn());
 				// A live background task acknowledges before the interrupted result.
 				yield* TestClock.adjust(1_000);
 				expect(engine.dispatchEffect).toHaveBeenCalledOnce();
@@ -626,7 +633,7 @@ describe("ProviderTurnService", () => {
 					yield* admit(2, "queued-steer");
 					let continued = false;
 					yield* interruptTurn().pipe(
-						Statement.withTransformer((statement) => {
+						Effect.provideService(Statement.CurrentTransformer, (statement) => {
 							const [query] = statement.compile();
 							if (continued || !query.includes("AS input_id"))
 								return Effect.succeed(statement);
@@ -651,28 +658,28 @@ describe("ProviderTurnService", () => {
 
 					// The bound retires only the snapshotted turns, never a later admission's.
 					// A continuation commits just before the retirement does.
-					const retirements: Array<Either.Either<void, SqlError>> = [];
+					const retirements: Array<Either.Result<void, SqlError>> = [];
 					vi.mocked(ingestion.ingestBatch).mockImplementation(
 						(_events, options) =>
 							admit(4, "late-continuation").pipe(
 								Effect.orDie,
-								Effect.zipRight(
-									Effect.either(options?.beforeCommit ?? Effect.void),
+								Effect.andThen(
+									Effect.result(options?.beforeCommit ?? Effect.void),
 								),
 								Effect.tap((result) =>
 									Effect.sync(() => retirements.push(result)),
 								),
-								Effect.flatten,
+								Effect.flatMap(Effect.fromResult),
 								Effect.as(1),
 							),
 					);
 					yield* sql`INSERT INTO turns (id, session_id, state, user_message_id, requested_at)
 						VALUES ('stuck-turn', 'session-1', 'running', 'continuation', 2)`;
-					const stopped = yield* Effect.fork(interruptTurn());
+					const stopped = yield* Effect.forkChild(interruptTurn());
 					yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
 					yield* Fiber.join(stopped);
 					expect(ingestion.ingestBatch).toHaveBeenCalledOnce();
-					expect(retirements).toEqual([Either.left(expect.any(SqlError))]);
+					expect(retirements).toEqual([Either.fail(expect.any(SqlError))]);
 				}).pipe(Effect.provide(layer));
 			},
 		);
@@ -727,47 +734,6 @@ describe("ProviderTurnService", () => {
 			);
 		}
 	}
-
-	it.effect(
-		"passes Claude provider output to the required ingestion service",
-		() =>
-			Effect.gen(function* () {
-				let capturedSink: EventSink | undefined;
-				const dispatchEffect = vi.fn((command) => {
-					if (command.type === "send_turn") {
-						capturedSink = command.input.eventSink;
-						return Effect.succeed(completedTurn());
-					}
-					return Effect.void;
-				}) as unknown as OrchestrationEngine["dispatchEffect"];
-				const engine = makeEngine({
-					providerId: "claude",
-					dispatchEffect,
-				});
-				const ingestion = makeIngestion();
-				const { layer } = serviceLayer({ engine, ingestion });
-
-				yield* sendTurn().pipe(Effect.provide(layer));
-
-				const sink = capturedSink;
-				expect(sink).toBeDefined();
-				if (!sink) return;
-
-				const event = providerRuntimeEvent(
-					"text.delta",
-					"session-1",
-					{
-						messageId: "msg-1",
-						partId: "part-1",
-						text: "hello",
-					},
-					{ eventId: "evt-required-ingestion", providerId: "claude" },
-				);
-				const result = yield* Effect.either(sink.push(event));
-				expect(result._tag).toBe("Right");
-				expect(ingestion.ingest).toHaveBeenCalledWith(event);
-			}),
-	);
 
 	it.effect(
 		"sends the stored Claude model with explicit empty effort and context window",
@@ -948,24 +914,17 @@ describe("ProviderTurnService", () => {
 					},
 				});
 
-				yield* command.input.eventSink.push(
-					providerRuntimeEvent(
-						"text.delta",
-						"session-1",
-						{
-							messageId: "assistant-1",
-							partId: "assistant-1-0",
-							text: "hello",
-						},
-						{ providerId: "claude" },
-					),
+				const event = providerRuntimeEvent(
+					"text.delta",
+					"session-1",
+					{ messageId: "assistant-1", partId: "assistant-1-0", text: "hello" },
+					{ providerId: "claude", eventId: "evt-required-ingestion" },
 				);
-				expect(ingestion.ingest).toHaveBeenCalledWith(
-					expect.objectContaining({
-						type: "text.delta",
-						sessionId: "session-1",
-					}),
+				const result = yield* Effect.result(
+					command.input.eventSink.push(event),
 				);
+				expect(result._tag).toBe("Success");
+				expect(ingestion.ingest).toHaveBeenCalledWith(event, undefined);
 			}).pipe(Effect.provide(layer));
 		},
 	);
@@ -1502,6 +1461,9 @@ describe("ProviderTurnService", () => {
 			const { layer } = serviceLayer({ api });
 
 			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions (id, provider, title, created_at, updated_at)
+					VALUES ('session-1', 'opencode', 'Unbound session', 1, 1)`;
 				yield* startProcessingTimeout(
 					"session-1",
 					"2 minutes",

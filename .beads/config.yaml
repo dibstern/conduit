@@ -55,5 +55,13 @@
 # - github.token    → use GITHUB_TOKEN env var instead
 
 dolt.shared-server: true
+# Beads data for every project lives in the private beads-data repo, one ref each
+# (refs/dolt/conduit). The ref is stored on the Dolt remote, not here, and bd bootstrap
+# only reads refs/dolt/data, so a fresh machine needs: dolt clone --ref refs/dolt/conduit
 sync:
-    remote: "git+https://github.com/dibstern/conduit.git"
+    remote: "git+https://github.com/dibstern/beads-data.git"
+
+# Worktrees share the main checkout's Dolt database, so a backup per
+# worktree duplicates ~200 MB. Off by default; the main checkout's untracked
+# .beads/config.local.yaml turns it back on and points it at one shared dir.
+backup.enabled: false

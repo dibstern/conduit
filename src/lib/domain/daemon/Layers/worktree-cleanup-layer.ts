@@ -1,7 +1,6 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import {
-	Cause,
 	Clock,
 	Deferred,
 	Effect,
@@ -9,32 +8,31 @@ import {
 	Option,
 	PubSub,
 	Queue,
-	Ref,
 	Schedule,
 } from "effect";
-import {
-	DEFAULT_WORKTREE_CLEANUP,
-	type WorktreeCleanupEntry,
-	type WorktreeCleanupReport,
+import type {
+	WorktreeCleanupEntry,
+	WorktreeCleanupReport,
 } from "../../../contracts/worktree.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
+import { stopQuiescentSettledAgents } from "../../../session/stop-settled-agents.js";
+import { worktreeCleanupCandidateFilter } from "../../../session/worktree-cleanup-rules.js";
 import { cleanUpProjectWorktrees } from "../../../session/worktree-cleanup-sweep.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	allProjects,
+	getEffectiveWorktreeCleanup,
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
-import {
-	isWorktreeCleanupEnabled,
-	readColdWorktreeCleanupCandidates,
-} from "../Services/worktree-cleanup-reader.js";
+import { readColdWorktreeCleanupCandidates } from "../Services/worktree-cleanup-reader.js";
 import { WorktreeCleanupQueueTag } from "../Services/worktree-cleanup-service.js";
 
 export const WorktreeCleanupLive = () =>
-	Layer.scopedDiscard(
+	Layer.effectDiscard(
 		Effect.gen(function* () {
 			const configRef = yield* DaemonConfigRefTag;
 			const registry = yield* ProjectRegistryTag;
@@ -42,11 +40,6 @@ export const WorktreeCleanupLive = () =>
 			const bus = yield* DaemonEventBusTag;
 			const storeContext = yield* persistenceStoreContext;
 			const requests = yield* WorktreeCleanupQueueTag;
-			const getSetting = Ref.get(configRef).pipe(
-				Effect.map(
-					(config) => config.worktreeCleanup ?? DEFAULT_WORKTREE_CLEANUP,
-				),
-			);
 			const getProjectFolders = allProjects.pipe(
 				Effect.provideService(ProjectRegistryTag, registry),
 				Effect.flatMap((projects) =>
@@ -71,22 +64,53 @@ export const WorktreeCleanupLive = () =>
 						kept: [],
 						failed: [],
 					};
-					if (!isWorktreeCleanupEnabled(yield* getSetting)) return report;
+					const now = yield* Clock.currentTimeMillis;
 					const projects = (yield* allProjects.pipe(
 						Effect.provideService(ProjectRegistryTag, registry),
 					)).filter(
 						(project) => slugs === undefined || slugs.has(project.slug),
 					);
-					const now = yield* Clock.currentTimeMillis;
 					for (const project of projects) {
 						yield* Effect.gen(function* () {
+							const getSetting = getEffectiveWorktreeCleanup(project.slug).pipe(
+								Effect.provideService(ProjectRegistryTag, registry),
+								Effect.provideService(DaemonConfigRefTag, configRef),
+								Effect.catchTag("ProjectNotFound", () =>
+									Effect.succeed("off" as const),
+								),
+							);
 							let relay = Option.getOrUndefined(
 								yield* cache.peek(project.slug),
 							);
+							if (relay !== undefined) {
+								const context = relay.rpcWsHandler.context;
+								if (context === undefined)
+									return yield* Effect.fail(
+										new Error("Project relay context is unavailable"),
+									);
+								yield* stopQuiescentSettledAgents(now).pipe(
+									Effect.provide(yield* context),
+									Effect.catchCause((cause) =>
+										Failure.isInterruptedOnly(cause)
+											? Effect.failCause(cause)
+											: Effect.logWarning(
+													"Could not stop settled project agents",
+													{
+														projectSlug: project.slug,
+														cause: Failure.renderCause(cause),
+													},
+												),
+									),
+								);
+							}
+							const setting = yield* getSetting;
+							if (setting === "off") return;
+							if (worktreeCleanupCandidateFilter(setting, now) === undefined)
+								return;
 							if (relay === undefined) {
 								const paths = yield* readColdWorktreeCleanupCandidates(
 									project,
-									yield* getSetting,
+									setting,
 									now,
 								).pipe(Effect.provide(storeContext));
 								if (paths.length === 0) return;
@@ -118,8 +142,8 @@ export const WorktreeCleanupLive = () =>
 							if (projectReport.removed.length > 0)
 								yield* PubSub.publish(bus, DaemonEvent.DaemonSessionsChanged());
 						}).pipe(
-							Effect.catchAllCause((cause) => {
-								if (Cause.isInterruptedOnly(cause))
+							Effect.catchCause((cause) => {
+								if (Failure.isInterruptedOnly(cause))
 									return Effect.failCause(cause);
 								report.failed.push({
 									projectSlug: project.slug,
@@ -129,7 +153,10 @@ export const WorktreeCleanupLive = () =>
 								});
 								return Effect.logWarning(
 									"worktree cleanup failed for project",
-									{ projectSlug: project.slug, cause: Cause.pretty(cause) },
+									{
+										projectSlug: project.slug,
+										cause: Failure.renderCause(cause),
+									},
 								);
 							}),
 						);
@@ -149,7 +176,7 @@ export const WorktreeCleanupLive = () =>
 			// One worker owns all removals; requests arriving during a run form the next batch.
 			yield* Effect.gen(function* () {
 				const first = yield* Queue.take(requests);
-				const batch = [first, ...(yield* Queue.takeAll(requests))];
+				const batch = [first, ...(yield* Queue.clear(requests))];
 				const slugs = batch.some(({ projectSlug }) => projectSlug === undefined)
 					? undefined
 					: new Set(
@@ -158,12 +185,12 @@ export const WorktreeCleanupLive = () =>
 							),
 						);
 				const report = yield* sweep(slugs).pipe(
-					Effect.catchAllCause((cause) =>
-						Cause.isInterruptedOnly(cause)
+					Effect.catchCause((cause) =>
+						Failure.isInterruptedOnly(cause)
 							? Effect.failCause(cause)
 							: Effect.logWarning(
 									"worktree cleanup sweep failed",
-									Cause.pretty(cause),
+									Failure.renderCause(cause),
 								).pipe(
 									Effect.as({
 										removed: [],

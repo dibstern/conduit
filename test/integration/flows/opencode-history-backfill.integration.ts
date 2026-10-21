@@ -8,9 +8,9 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	defaultDaemonConfig,
@@ -1530,19 +1530,31 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
-		mock.setExactResponse("GET", `/session/${SESSION_ID}/message`, 200, [
+		const restPath = `/session/${SESSION_ID}/message`;
+		mock.setExactResponse("GET", restPath, 200, [
+			u1,
 			{
-				info: assistantInfo("msg_a1", T0 + 2_000, T0 + 5_000),
+				info: assistantInfo("msg_a1", T0 + 2_000),
 				parts: [textPart("msg_a1", "answer")],
 			},
 		]);
 		stack = await startStack(mock, dbPath);
 		streamLiveAssistant(mock, "msg_a1", T0 + 2_000, "answer");
-		await waitFor(
-			async () => (await messageRows(dbPath))[0]?.is_streaming === 1,
-			"streaming row",
-		);
+		await waitFor(async () => {
+			const rows = await messageRows(dbPath);
+			return (
+				rows.find((row) => row.id === "msg_u1")?.is_backfilled === 1 &&
+				rows.find((row) => row.id === "msg_a1")?.is_streaming === 1
+			);
+		}, "settled REST user and streaming assistant");
 		expect(await historyComplete(dbPath)).toBe(false);
+		mock.setExactResponse("GET", restPath, 200, [
+			u1,
+			{
+				info: assistantInfo("msg_a1", T0 + 2_000, T0 + 5_000),
+				parts: [textPart("msg_a1", "answer")],
+			},
+		]);
 		mock.emitTestEvent("message.updated", {
 			sessionID: SESSION_ID,
 			info: assistantInfo("msg_a1", T0 + 2_000, T0 + 5_000),
@@ -1891,7 +1903,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 		]);
 	}, 60_000);
 
-	it("leaves provider-ahead unsettled REST history pending", async () => {
+	it("imports settled provider-ahead history while leaving the live assistant pending", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-ahead-")),
 			"events.sqlite",
@@ -1905,12 +1917,17 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 		]);
 		stack = await startStack(mock, dbPath);
 		streamLiveAssistant(mock, "msg_a2", ahead + 1_000, "live answer");
-		await waitFor(
-			async () => (await projectedTexts(dbPath))["msg_a2"] === "live answer",
-			"live message",
-		);
+		await waitFor(async () => {
+			const texts = await projectedTexts(dbPath);
+			return (
+				texts["msg_u1"] === "first question" &&
+				texts["msg_a2"] === "live answer"
+			);
+		}, "settled REST user and live assistant");
 		const rows = await messageRows(dbPath);
-		expect(rows.map((row) => row.id)).toEqual(["msg_a2"]);
+		expect(rows.map((row) => row.id)).toEqual(["msg_u1", "msg_a2"]);
+		expect(rows[0]).toMatchObject({ is_backfilled: 1, is_streaming: 0 });
+		expect(rows[1]).toMatchObject({ is_backfilled: 0, is_streaming: 1 });
 		expect(await historyComplete(dbPath)).toBe(false);
 	}, 60_000);
 

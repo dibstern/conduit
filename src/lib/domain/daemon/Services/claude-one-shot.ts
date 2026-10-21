@@ -133,7 +133,7 @@ export const makeClaudeOneShot = (options: {
 }) => {
 	const queryFactory = options.queryFactory ?? ((params) => sdkQuery(params));
 	return {
-		ask: <A, I>(prompt: string, schema: Schema.Schema<A, I>, model: string) =>
+		ask: <A, I>(prompt: string, schema: Schema.Codec<A, I>, model: string) =>
 			Effect.gen(function* () {
 				const abortController = new AbortController();
 				const text = yield* Effect.tryPromise({
@@ -182,10 +182,10 @@ export const makeClaudeOneShot = (options: {
 				if (!text) {
 					return yield* new ClaudeOneShotFailure({ reason: "empty" });
 				}
-				return yield* Schema.decodeUnknown(schema)(text).pipe(
+				return yield* Schema.decodeUnknownEffect(schema)(text).pipe(
 					// Preserve plain-text replies; structured schemas decode JSON internally.
-					Effect.orElse(() =>
-						Schema.decodeUnknown(Schema.parseJson(schema))(text),
+					Effect.catch(() =>
+						Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(text),
 					),
 					Effect.mapError(
 						(cause) => new ClaudeOneShotFailure({ reason: "schema", cause }),

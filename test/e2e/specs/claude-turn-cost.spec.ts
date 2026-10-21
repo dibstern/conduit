@@ -45,6 +45,7 @@ test.describe("Claude turn cost", () => {
 		if (!replayer) throw new Error("No Claude replayer");
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
+		// A turn with tools bills in its step log, so open every log first.
 		const shownCosts = page
 			.locator(".turn-meta > span")
 			.filter({ hasText: /^\$/ });
@@ -101,6 +102,7 @@ test.describe("Claude turn cost", () => {
 			await app.sendMessage("Launch the background work");
 			await replayer.held();
 			await expect.poll(() => stored().results.length).toBe(1);
+			await chat.expandTurnActivity();
 			await expect(shownCosts).toHaveText(["$0.2982"]);
 			await record("first-result");
 
@@ -109,6 +111,7 @@ test.describe("Claude turn cost", () => {
 				.poll(() => stored().results.length, { timeout: 60_000 })
 				.toBe(4);
 			await chat.waitForStreamingComplete();
+			await chat.expandTurnActivity();
 			await expect(shownCosts.last()).toHaveText("$0.4128");
 			expect(stored().turns).toHaveLength(1);
 			expect(stored().turns[0]?.cost).toBeCloseTo(0.4127606, 12);
@@ -116,17 +119,20 @@ test.describe("Claude turn cost", () => {
 
 			await harness.restart();
 			await gotoRelay(page, relayUrl);
+			await chat.expandTurnActivity();
 			await expect(shownCosts.last()).toHaveText("$0.4128");
 			await app.sendMessage("Reply with only: ok, still here.");
 			await expect
 				.poll(() => stored().results.length, { timeout: 30_000 })
 				.toBe(5);
 			await chat.waitForStreamingComplete();
+			await chat.expandTurnActivity();
 			await expect(shownCosts.last()).toHaveText("$0.0070");
 			await record("resumed-result");
 
 			// Check the persisted transcript on a fresh browser load as well as live.
 			await gotoRelay(page, relayUrl);
+			await chat.expandTurnActivity();
 			await expect(shownCosts).toHaveText(["$0.4128", "$0.0070"]);
 			await record("reloaded");
 			const final = stored();

@@ -3,9 +3,9 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcTest } from "@effect/rpc";
-import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import { RpcTest } from "effect/rpc";
+import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -215,7 +215,7 @@ describe("Integration: attachment delivery through the relay", () => {
 					);
 					const inputId = randomUUID();
 					expect(
-						yield* client.input.submit({
+						yield* client["input.submit"]({
 							sessionId,
 							inputId,
 							text: "",
@@ -346,18 +346,16 @@ describe("Integration: attachment delivery through the relay", () => {
 				]) {
 					for (const method of ["input.submit", "StartSideThread"] as const) {
 						const inputId = randomUUID();
-						const result = yield* Effect.either(
+						const result = yield* Effect.result(
 							method === "input.submit"
-								? client.input
-										.submit({
-											sessionId,
-											inputId,
-											text: "Review",
-											images: [invalid.url],
-											delivery: "queue",
-											originId: inputId,
-										})
-										.pipe(Effect.asVoid)
+								? client["input.submit"]({
+										sessionId,
+										inputId,
+										text: "Review",
+										images: [invalid.url],
+										delivery: "queue",
+										originId: inputId,
+									}).pipe(Effect.asVoid)
 								: client
 										.StartSideThread({
 											sessionId,
@@ -369,9 +367,9 @@ describe("Integration: attachment delivery through the relay", () => {
 										})
 										.pipe(Effect.asVoid),
 						);
-						expect(result._tag).toBe("Left");
-						if (result._tag === "Left")
-							expect(String(result.left)).toMatch(invalid.error);
+						expect(result._tag).toBe("Failure");
+						if (result._tag === "Failure")
+							expect(String(result.failure)).toMatch(invalid.error);
 						expect(
 							yield* sql`SELECT input_id FROM pending_inputs WHERE input_id = ${inputId}`,
 						).toHaveLength(0);

@@ -7,6 +7,7 @@ import {
 	FiberMap,
 	Schedule,
 	Schema,
+	Semaphore,
 	Stream,
 	SubscriptionRef,
 } from "effect";
@@ -41,20 +42,20 @@ export interface UsageService {
 	) => Effect.Effect<string | undefined>;
 }
 
-export class Usage extends Context.Tag("Usage")<Usage, UsageService>() {}
+export class Usage extends Context.Service<Usage, UsageService>()("Usage") {}
 
 const usageHistorySeriesSchema = Schema.Struct({
-	resetsAt: Schema.optional(Schema.Number.pipe(Schema.finite())),
+	resetsAt: Schema.optional(Schema.Number.check(Schema.isFinite())),
 	points: Schema.Array(UsageHistoryPointSchema),
 });
 
-export const UsageHistorySnapshotSchema = Schema.Record({
-	key: Schema.String,
-	value: Schema.Struct({
+export const UsageHistorySnapshotSchema = Schema.Record(
+	Schema.String,
+	Schema.Struct({
 		five_hour: Schema.optional(usageHistorySeriesSchema),
 		seven_day: Schema.optional(usageHistorySeriesSchema),
 	}),
-});
+);
 export type UsageHistorySnapshot = typeof UsageHistorySnapshotSchema.Type;
 
 export function forecastUsage(
@@ -119,20 +120,20 @@ export const makeUsage = (options: {
 		let history = yield* (
 			historyStore?.load ?? Effect.succeed<UsageHistorySnapshot>({})
 		).pipe(
-			Effect.catchAllCause((cause) =>
+			Effect.catchCause((cause) =>
 				Effect.logWarning("Usage history load failed", { cause }).pipe(
 					Effect.as<UsageHistorySnapshot>({}),
 				),
 			),
 		);
 		let savedHistory = history;
-		const historySaveLock = yield* Effect.makeSemaphore(1);
+		const historySaveLock = yield* Semaphore.make(1);
 		const current = yield* SubscriptionRef.make<readonly UsageReading[]>([]);
-		const lock = yield* Effect.makeSemaphore(1);
-		const subscriberLock = yield* Effect.makeSemaphore(1);
+		const lock = yield* Semaphore.make(1);
+		const subscriberLock = yield* Semaphore.make(1);
 		const turnRefreshes = yield* FiberMap.make<string, void>();
 		let subscribers = 0;
-		let sampler: Fiber.RuntimeFiber<void> | undefined;
+		let sampler: Fiber.Fiber<void> | undefined;
 		const inFlight = new Map<string, Deferred.Deferred<UsageReading>>();
 		const latest = new Map<string, UsageReading>();
 		const read = (accountId: string, accounts: readonly UsageAccount[]) =>
@@ -157,16 +158,16 @@ export const makeUsage = (options: {
 												: "Claude account is not configured",
 										});
 							}).pipe(
-								Effect.timeoutTo({
+								Effect.timeoutOrElse({
 									duration: "5 seconds",
-									onTimeout: (): UsageRead => ({
-										status: "unknown",
-										windows: [],
-										reason: "Usage read timed out",
-									}),
-									onSuccess: (value) => value,
+									orElse: () =>
+										Effect.succeed<UsageRead>({
+											status: "unknown",
+											windows: [],
+											reason: "Usage read timed out",
+										}),
 								}),
-								Effect.catchAllCause(() =>
+								Effect.catchCause(() =>
 									Effect.succeed<UsageRead>({
 										status: "unknown",
 										windows: [],
@@ -312,7 +313,7 @@ export const makeUsage = (options: {
 										savedHistory = snapshot;
 									}),
 								),
-								Effect.catchAllCause((cause) =>
+								Effect.catchCause((cause) =>
 									Effect.logWarning("Usage history save failed", { cause }),
 								),
 								// Async filesystem writes outlive interruption; retain the
@@ -325,7 +326,7 @@ export const makeUsage = (options: {
 					? readings.filter((reading) => liveIds.has(reading.accountId))
 					: readings;
 			});
-		const readings = Stream.unwrapScoped(
+		const readings = Stream.unwrap(
 			Effect.gen(function* () {
 				const subscriptionScope = yield* Effect.scope;
 				yield* Effect.acquireRelease(
@@ -355,7 +356,7 @@ export const makeUsage = (options: {
 						),
 				);
 				let initial = true;
-				return current.changes.pipe(
+				return SubscriptionRef.changes(current).pipe(
 					Stream.tap(() => {
 						if (!initial) return Effect.void;
 						initial = false;
@@ -376,7 +377,7 @@ export const makeUsage = (options: {
 						turnRefreshes,
 						accountId,
 						Effect.sleep("10 seconds").pipe(
-							Effect.zipRight(refresh([accountId])),
+							Effect.andThen(refresh([accountId])),
 							Effect.asVoid,
 						),
 					).pipe(Effect.asVoid);

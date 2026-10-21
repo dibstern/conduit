@@ -1,18 +1,18 @@
 import { mkdirSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
+import { NodePath } from "@effect/platform-node";
 import {
-	Cause,
 	Data,
 	Deferred,
 	Effect,
-	Either,
 	Exit,
 	HashMap,
 	Layer,
 	ManagedRuntime,
 	Ref,
+	Result,
 } from "effect";
 import {
 	getProviderDriver,
@@ -20,6 +20,8 @@ import {
 } from "../../../contracts/provider-instance.js";
 import {
 	type DaemonConfig,
+	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
+	DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	defaultDaemonConfig,
 	loadDaemonConfigStartupResult,
@@ -29,6 +31,7 @@ import type {
 	DaemonStatus,
 } from "../../../daemon/daemon-types.js";
 import { isDaemonRunning } from "../../../daemon/daemon-utils.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import { DEFAULT_CONFIG_DIR, DEFAULT_PORT } from "../../../env.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { setLogFile, setLogFormat, setLogLevel } from "../../../logger.js";
@@ -152,6 +155,14 @@ const buildInitialRuntimeConfig = (
 			persisted?.autoSettleAfterDays === undefined
 				? DEFAULT_AUTO_SETTLE_AFTER_DAYS
 				: persisted.autoSettleAfterDays,
+		autoArchiveAfterDays:
+			persisted?.autoArchiveAfterDays === undefined
+				? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS
+				: persisted.autoArchiveAfterDays,
+		autoDeleteArchivedAfterDays:
+			persisted?.autoDeleteArchivedAfterDays === undefined
+				? DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS
+				: persisted.autoDeleteArchivedAfterDays,
 		...(persisted?.worktreeCleanup !== undefined && {
 			worktreeCleanup: persisted.worktreeCleanup,
 		}),
@@ -165,6 +176,9 @@ const buildInitialRuntimeConfig = (
 		...(keepAwakeArgs !== undefined && { keepAwakeArgs }),
 		...(persisted?.newSessionProject !== undefined && {
 			newSessionProject: persisted.newSessionProject,
+		}),
+		...(persisted?.projectOrder !== undefined && {
+			projectOrder: persisted.projectOrder,
 		}),
 		startTime: Date.now(),
 		persistedSessionCounts: persistedSessionCounts(persisted),
@@ -182,7 +196,7 @@ const runRuntimeEffect = <R, A, E>(
 					resolve(exit.value);
 					return;
 				}
-				reject(Cause.squash(exit.cause));
+				reject(Failure.squashCause(exit.cause));
 			},
 		});
 	});
@@ -224,10 +238,10 @@ export async function startForegroundDaemon(
 		options.claudeConfigDir,
 	);
 	const loaded = loadDaemonConfigStartupResult(configDir);
-	if (Either.isLeft(loaded) && loaded.left._tag !== "NotFound") {
-		throw loaded.left;
+	if (Result.isFailure(loaded) && loaded.failure._tag !== "NotFound") {
+		throw loaded.failure;
 	}
-	const persisted = Either.isRight(loaded) ? loaded.right.config : null;
+	const persisted = Result.isSuccess(loaded) ? loaded.success.config : null;
 	const initialConfig = buildInitialRuntimeConfig(options, persisted);
 	const socketPath = options.socketPath ?? join(configDir, "relay.sock");
 	// Check before acquiring runtime resources or replacing a stale RPC socket.
@@ -421,26 +435,33 @@ export async function startForegroundDaemon(
 			: {},
 		persistedConfig: persisted ?? defaultDaemonConfig(),
 		persistedConfigNeedsMigration:
-			Either.isLeft(loaded) || loaded.right.needsMigration,
+			Result.isFailure(loaded) || loaded.success.needsMigration,
 	};
 
 	// A native file lock excludes concurrent owners even across a stale RPC socket.
 	// SQLite releases it on process death; no process identity or stale lock cleanup is needed.
-	const serverLease = Layer.scopedDiscard(
+	const serverLease = Layer.effectDiscard(
 		Effect.acquireRelease(
 			Effect.try({
 				try: () => {
-					const lease = new Database(join(configDir, "server.lock.sqlite"), {
-						timeout: 0,
-					});
+					const lease = new DatabaseSync(
+						join(configDir, "server.lock.sqlite"),
+						{
+							timeout: 0,
+						},
+					);
 					try {
 						lease.exec("BEGIN IMMEDIATE");
 						return lease;
 					} catch (cause) {
 						lease.close();
+						// node:sqlite reports the SQLite result code as errcode; the primary
+						// code (low byte) is SQLITE_BUSY (5) or SQLITE_LOCKED (6).
 						if (
-							cause instanceof Database.SqliteError &&
-							cause.code === "SQLITE_BUSY"
+							cause instanceof Error &&
+							"errcode" in cause &&
+							typeof cause.errcode === "number" &&
+							[5, 6].includes(cause.errcode & 0xff)
 						) {
 							throw new ForegroundDaemonStartError({
 								reason: `a server is already running for ${configDir}`,
@@ -459,7 +480,7 @@ export async function startForegroundDaemon(
 							? Array.from(HashMap.values(yield* Ref.get(projectState)))
 							: [];
 						// Registrations include detached runners whose relay never started.
-						yield* Effect.validateAll(
+						yield* Effect.validate(
 							registered,
 							({ project }) =>
 								stopRegisteredRunners(project.folders[0], configDir),
@@ -475,7 +496,10 @@ export async function startForegroundDaemon(
 		),
 	);
 	runtime = ManagedRuntime.make(
-		makeDaemonLive(liveOptions).pipe(Layer.provide(serverLease)),
+		makeDaemonLive(liveOptions).pipe(
+			Layer.provide(NodePath.layer),
+			Layer.provide(serverLease),
+		),
 	);
 	try {
 		handle = await runRuntimeEffect(runtime, DaemonHandleTag);
@@ -518,8 +542,8 @@ export async function startForegroundDaemon(
 							yield* relayCache.get(project.slug);
 						}
 					}).pipe(
-						Effect.catchAllCause((cause) =>
-							Cause.isInterruptedOnly(cause)
+						Effect.catchCause((cause) =>
+							Failure.isInterruptedOnly(cause)
 								? Effect.failCause(cause)
 								: Effect.logError(
 										`Failed to recover relay for project "${project.slug}"`,
@@ -528,6 +552,7 @@ export async function startForegroundDaemon(
 						),
 					);
 				}
+				yield* (yield* ConfigPersistenceTag).flush;
 			}),
 		);
 		await refreshSnapshots();

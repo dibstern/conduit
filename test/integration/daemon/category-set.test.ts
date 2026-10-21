@@ -11,9 +11,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Effect, Either, Exit } from "effect";
+import { Effect, Result as Either, Exit } from "effect";
+import { RpcTest } from "effect/rpc";
 import { afterEach, beforeEach, expect } from "vitest";
 import {
 	type Category,
@@ -70,7 +70,7 @@ describe("CategorySet daemon RPC", () => {
 			),
 		);
 
-	it.scoped(
+	it.effect(
 		"serves the tuning contract without a project or provider call",
 		() =>
 			Effect.gen(function* () {
@@ -97,10 +97,10 @@ describe("CategorySet daemon RPC", () => {
 					canTest: false,
 				});
 				expect(
-					yield* rpc.ProposeCategoryTuning({}).pipe(Effect.either),
+					yield* rpc.ProposeCategoryTuning({}).pipe(Effect.result),
 				).toMatchObject({
-					_tag: "Left",
-					left: {
+					_tag: "Failure",
+					failure: {
 						message:
 							"Raise or lower at least 5 messages before proposing changes.",
 					},
@@ -112,7 +112,7 @@ describe("CategorySet daemon RPC", () => {
 			),
 	);
 
-	it.scoped(
+	it.effect(
 		"re-levels an existing verdict through replace, persists, and reloads",
 		() =>
 			Effect.gen(function* () {
@@ -143,7 +143,7 @@ describe("CategorySet daemon RPC", () => {
 			}),
 	);
 
-	it.scoped("allows only one of two writes based on the same version", () =>
+	it.effect("allows only one of two writes based on the same version", () =>
 		Effect.gen(function* () {
 			const rpc = yield* client();
 			const initial = yield* rpc.GetCategorySet({});
@@ -154,13 +154,13 @@ describe("CategorySet daemon RPC", () => {
 							expectedVersion: initial.version,
 							nextSet: initial,
 						})
-						.pipe(Effect.either),
+						.pipe(Effect.result),
 				),
 				{ concurrency: 2 },
 			);
-			expect(results.filter(Either.isRight)).toHaveLength(1);
-			const failed = results.find(Either.isLeft);
-			expect(failed?.left).toMatchObject({
+			expect(results.filter(Either.isSuccess)).toHaveLength(1);
+			const failed = results.find(Either.isFailure);
+			expect(failed?.failure).toMatchObject({
 				_tag: "CategorySetRejected",
 				reason: "stale_version",
 				currentVersion: initial.version + 1,
@@ -168,7 +168,7 @@ describe("CategorySet daemon RPC", () => {
 		}),
 	);
 
-	it.scoped(
+	it.effect(
 		"adds, edits and deletes customs while built-ins can retire and restore",
 		() =>
 			Effect.gen(function* () {
@@ -204,7 +204,7 @@ describe("CategorySet daemon RPC", () => {
 			}),
 	);
 
-	it.scoped("rejects invalid sets without changing disk or memory", () =>
+	it.effect("rejects invalid sets without changing disk or memory", () =>
 		Effect.gen(function* () {
 			const rpc = yield* client();
 			const initial = yield* rpc.GetCategorySet({});
@@ -254,7 +254,7 @@ describe("CategorySet daemon RPC", () => {
 		}),
 	);
 
-	it.scoped(
+	it.effect(
 		"quarantines malformed and invalid persisted sets before using defaults",
 		() =>
 			Effect.gen(function* () {
@@ -280,7 +280,7 @@ describe("CategorySet daemon RPC", () => {
 			}),
 	);
 
-	it.scoped("does not publish a new version when the atomic write fails", () =>
+	it.effect("does not publish a new version when the atomic write fails", () =>
 		Effect.gen(function* () {
 			const rpc = yield* client();
 			const initial = yield* rpc.GetCategorySet({});
@@ -291,14 +291,14 @@ describe("CategorySet daemon RPC", () => {
 					expectedVersion: initial.version,
 					nextSet: initial,
 				})
-				.pipe(Effect.either);
-			expect(Either.isLeft(result)).toBe(true);
+				.pipe(Effect.result);
+			expect(Either.isFailure(result)).toBe(true);
 			expect(yield* rpc.GetCategorySet({})).toEqual(initial);
 			expect(readdirSync(join(root, "surfacing"))).toEqual(["categories.json"]);
 		}),
 	);
 
-	it.scoped("isolates current and replace results from caller mutations", () =>
+	it.effect("isolates current and replace results from caller mutations", () =>
 		Effect.gen(function* () {
 			const service = yield* CategorySet;
 			const snapshot = yield* service.current();

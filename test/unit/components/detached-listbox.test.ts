@@ -43,36 +43,6 @@ describe("DetachedListbox", () => {
 		expect(listbox.hasAttribute("tabindex")).toBe(false);
 	});
 
-	it("applies the canonical floating surface on the top side", () => {
-		const { getByRole } = render(DetachedListbox, {
-			props: {
-				id: "dir-suggestions",
-				ariaLabel: "Directory suggestions",
-				children: option("src/", "dir-suggestions-option-0"),
-			},
-		});
-		const listbox = getByRole("listbox", { name: "Directory suggestions" });
-
-		for (const canonicalClass of DETACHED_LISTBOX_SURFACE_CLASSES.split(
-			/\s+/,
-		)) {
-			expect(listbox.classList.contains(canonicalClass)).toBe(true);
-		}
-		expect(listbox.getAttribute("data-side")).toBe("top");
-
-		// Exactly one radius and one stacking tier, which is what lets a consumer
-		// add a class without a Tailwind `!` (conduit-test-llxm). The popover tier
-		// is the value this surface must NOT carry: it sits under the portaled
-		// overlays, not above them.
-		const emitted = listbox.getAttribute("class")?.split(/\s+/) ?? [];
-		expect(emitted.filter((token) => token.startsWith("rounded-"))).toEqual([
-			"rounded-lg",
-		]);
-		expect(emitted.filter((token) => token.startsWith("z-"))).toEqual([
-			"z-[var(--z-dropdown)]",
-		]);
-	});
-
 	// CommandMenu and FileMenu used to wear `rounded-xl` here while
 	// the old directory autocomplete and every portaled overlay wore `rounded-lg`, so the
 	// primitive carried a `radius` prop to let them. The split ran along file

@@ -33,6 +33,7 @@ interface ReplayOptions {
 	claudeReplay: ClaudeReplayPlan | undefined;
 	/** Optional isolated project, prepared before the harness creates a session. */
 	projectDir: string | undefined;
+	daemonSessionQueries: boolean;
 }
 
 /** Fixtures provided to tests */
@@ -52,12 +53,17 @@ export const test = base.extend<ReplayFixtures & ReplayOptions>({
 	recording: ["chat-simple", { option: true }],
 	claudeReplay: [undefined, { option: true }],
 	projectDir: [undefined, { option: true }],
+	daemonSessionQueries: [false, { option: true }],
 
 	// Per-test harness lifecycle
-	harness: async ({ recording, claudeReplay, projectDir }, use) => {
+	harness: async (
+		{ recording, claudeReplay, projectDir, daemonSessionQueries },
+		use,
+	) => {
 		const harness = await createReplayHarness(recording, {
 			...(claudeReplay ? { claudeReplay } : {}),
 			...(projectDir ? { projectDir } : {}),
+			daemonSessionQueries,
 		});
 		try {
 			await use(harness);
@@ -140,7 +146,11 @@ export function answerSubscribeInstances(
 			const requestId = String(frame.id);
 			answered.add(requestId);
 			ws.send(
-				JSON.stringify({ _tag: "Chunk", requestId, values: [{ instances }] }),
+				JSON.stringify({
+					_tag: "Chunk",
+					requestId: frame.id,
+					values: [{ instances }],
+				}),
 			);
 			return true;
 		}

@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import type { SqlError } from "effect/sql/SqlError";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { createEventId } from "../../../persistence/events.js";
@@ -26,6 +27,15 @@ export const makeFailTurn = Effect.gen(function* () {
 		code: string,
 		/** The failed send's user message, so a turn that never ran ends too. */
 		userMessageId?: string,
+		{
+			beforeCommit,
+			beforeProject,
+			settleSession = true,
+		}: {
+			beforeCommit?: Effect.Effect<void, SqlError>;
+			beforeProject?: Effect.Effect<void, SqlError>;
+			settleSession?: boolean;
+		} = {},
 	): Effect.Effect<void> => {
 		const errorId = createEventId();
 		const event = <K extends ProviderRuntimeEvent["type"]>(
@@ -42,27 +52,40 @@ export const makeFailTurn = Effect.gen(function* () {
 			createdAt: Date.now(),
 			data,
 		});
-		return ingestion
-			.ingestBatch([
-				// Its own id: no assistant message of this turn may exist, and the
-				// mapper would otherwise fall back to the previous turn's.
-				event(errorId, "turn.error", {
-					messageId: errorId,
-					error,
-					code,
-					...(userMessageId ? { userMessageId } : {}),
+		const events = [
+			// Its own id: no assistant message of this turn may exist, and the
+			// mapper would otherwise fall back to the previous turn's.
+			event(errorId, "turn.error", {
+				messageId: errorId,
+				error,
+				code,
+				...(userMessageId ? { userMessageId } : {}),
+			}),
+			...(settleSession
+				? [
+						event(createEventId(), "session.status", {
+							sessionId,
+							status: "idle",
+						}),
+					]
+				: []),
+		];
+		return (
+			beforeCommit || beforeProject
+				? ingestion.ingestBatch(events, {
+						...(beforeCommit ? { beforeCommit } : {}),
+						...(beforeProject ? { beforeProject } : {}),
+					})
+				: ingestion.ingestBatch(events)
+		).pipe(
+			Effect.asVoid,
+			Effect.catch((cause) =>
+				Effect.sync(() => {
+					log.warn(
+						`session=${sessionId} Could not record turn failure: ${formatErrorDetail(cause)}`,
+					);
 				}),
-				event(createEventId(), "session.status", { sessionId, status: "idle" }),
-			])
-			.pipe(
-				Effect.asVoid,
-				Effect.catchAll((cause) =>
-					Effect.sync(() => {
-						log.warn(
-							`session=${sessionId} Could not record turn failure: ${formatErrorDetail(cause)}`,
-						);
-					}),
-				),
-			);
+			),
+		);
 	};
 });

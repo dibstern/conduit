@@ -357,7 +357,7 @@ export class RunnerSocket {
 		key: string,
 		message: RunnerMessage,
 	): Effect.Effect<A, SessionFailure> {
-		return Effect.async<A, SessionFailure>((resume) => {
+		return Effect.callback<A, SessionFailure>((resume) => {
 			const retryOnIdle =
 				message.type === "command" && message.command.type === "send-turn";
 			if (this.idleExiting && retryOnIdle) {
@@ -385,7 +385,7 @@ export class RunnerSocket {
 					resume(
 						reply.failure
 							? precedingOutputs.pipe(
-									Effect.zipRight(Effect.fail(reply.failure)),
+									Effect.andThen(Effect.fail(reply.failure)),
 								)
 							: Effect.succeed(reply.result as A),
 					);

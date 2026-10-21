@@ -47,6 +47,13 @@ dolt-server.lock
 dolt-server.port
 dolt-server.activity
 
+# bd 1.3 runtime state (migration gate locks, pull marker, proxied-server mode)
+*.gate.lock*
+last_pull
+proxieddb/
+dolt-server-config.yaml
+proxied_server_client_info.json
+
 # Corrupt backup directories (created by bd doctor --fix recovery)
 *.corrupt.backup/
 
@@ -68,3 +75,6 @@ bd.db
 # They would override fork protection in .git/info/exclude.
 # Config files (metadata.json, config.yaml) are tracked by git by default
 # since no pattern above ignores them.
+
+# Per-checkout overrides (e.g. backup.enabled in the main checkout only)
+config.local.yaml

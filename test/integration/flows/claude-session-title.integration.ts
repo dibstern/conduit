@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -95,12 +95,12 @@ const makeTitleServiceLayer = (input: {
 	Layer.provideMerge(
 		makeSessionTitleServiceLive({ queryFactory: input.queryFactory }),
 		Layer.mergeAll(
-			Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-			Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-			Layer.succeed(LoggerTag, makeMockLogger()),
-			Layer.succeed(ConfigTag, makeMockConfig({ projectDir: process.cwd() })),
-			Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-			Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
+			Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+			Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+			Layer.succeed(LoggerTag)(makeMockLogger()),
+			Layer.succeed(ConfigTag)(makeMockConfig({ projectDir: process.cwd() })),
+			Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+			Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()),
 			makePersistenceEffectLayer(input.filename, "test-project"),
 		),
 	);

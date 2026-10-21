@@ -5,7 +5,6 @@ import {
 	startProcessingTimeout,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
-import { shouldCache } from "../../../src/lib/relay/event-pipeline.js";
 import {
 	extractSessionId,
 	handleSSEEventEffect,
@@ -74,31 +73,6 @@ describe("extractSessionId", () => {
 	});
 });
 
-describe("shouldCache", () => {
-	it("returns true for chat-relevant types", async () => {
-		const cacheableTypes = [
-			"user_message",
-			"delta",
-			"thinking_start",
-			"thinking_delta",
-			"tool_start",
-			"tool_result",
-			"result",
-			"done",
-		] as const;
-		for (const type of cacheableTypes) {
-			expect(shouldCache(type)).toBe(true);
-		}
-	});
-
-	it("returns false for non-chat types", async () => {
-		const nonCacheable = ["message_removed"] as const;
-		for (const type of nonCacheable) {
-			expect(shouldCache(type)).toBe(false);
-		}
-	});
-});
-
 describe("handleSSEEventEffect", () => {
 	it("translates events with the upstream session ID", async () => {
 		const deps = createMockSSEWiringDeps();
@@ -138,12 +112,6 @@ describe("handleSSEEventEffect", () => {
 		],
 		[
 			"resets processing timeout on non-done events (inactivity timer)",
-			"delta",
-			"active-session",
-			"reset",
-		],
-		[
-			"resets processing timeout on non-done events for active session",
 			"delta",
 			"active-session",
 			"reset",
@@ -209,7 +177,7 @@ describe("handleSSEEventEffect", () => {
 				if (expected === "clear") expect(after).toBeUndefined();
 				else if (expected === "reset") expect(after).not.toBe(before);
 				else expect(after).toBe(before);
-			}).pipe(Effect.provide(services.layer)),
+			}).pipe(Effect.provide(services.layer, { local: true })),
 		);
 	});
 

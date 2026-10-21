@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import { createSession } from "../helpers/e2e-harness.js";
 
 export class SidebarPage {
 	readonly page: Page;
@@ -36,22 +37,16 @@ export class SidebarPage {
 			.click();
 	}
 
-	/** `+` opens a draft; the session exists once its first message is sent. */
+	/** Seed unrelated replay scenarios through the real RPC, then open the row. */
 	async createNewSession(text = "New session"): Promise<void> {
-		await this.newSessionBtn.click();
-		await expect(this.page).toHaveURL(/\/new\?/);
-		await this.page.locator("#input").fill(text);
-		await this.page.locator("#send").click();
-		await expect(this.page).toHaveURL(/\/s\/[^/?]+(?:\?.*)?$/);
-		// The reply leaves the row done-unread, and the first touch on it later
-		// regroups it under the caller. Settle it now, the way a user does, by
-		// picking the row (only reachable where the list shares the screen).
-		const id = new URL(this.page.url()).pathname.split("/").pop();
-		const row = this.sessionList.locator(`[data-session-id="${id}"]`);
-		await expect(row).toHaveAttribute("aria-label", /^Done/);
-		if (!(await row.isVisible())) return;
-		await row.locator(".session-item-title").click();
-		await expect(row).not.toHaveAttribute("aria-label", /^Done/);
+		const id = await createSession(
+			Number(new URL(this.page.url()).port),
+			"opencode",
+			undefined,
+			text,
+		);
+		await this.clickSession(id);
+		await expect(this.page).toHaveURL(new RegExp(`/s/${id}(?:\\?.*)?$`));
 	}
 
 	async searchSessions(query: string): Promise<void> {

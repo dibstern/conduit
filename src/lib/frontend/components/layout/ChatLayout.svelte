@@ -36,8 +36,6 @@
 		SIDEBAR_MAX_WIDTH,
 	} from "../../stores/ui.svelte.js";
 	import {
-		onNavigateToSession,
-		clearNavigateToSession,
 		initSWMessageListener,
 		reconcilePushActive,
 	} from "../../stores/ws-notifications.js";
@@ -48,8 +46,8 @@
 	import { attachedProjectState, getCurrentRoute, getCurrentSlug, getCurrentSearchParams, routerState } from "../../stores/router.svelte.js";
 	import { clearMessages, draftSendIn } from "../../stores/chat.svelte.js";
 	import { terminalState, destroyAll, viewPtys } from "../../stores/terminal.svelte.js";
-	import { clearSessionState, findSession, sessionState, switchToSession } from "../../stores/session.svelte.js";
-	import { attachSessionList, detachSessionList, drawSavedShell, onShellSynchronized } from "../../stores/session-list.svelte.js";
+	import { clearSessionSearch, findSession, resetSessionFamily, sessionState } from "../../stores/session.svelte.js";
+	import { attachSessionList, detachSessionList, drawSavedShell } from "../../stores/session-list.svelte.js";
 	import { attachApprovals, detachApprovals } from "../../stores/approvals.js";
 	import { selection, watchSelection } from "../../stores/selection.svelte.js";
 	import { openSavedShell } from "../../stores/saved-shell.js";
@@ -58,7 +56,7 @@
 	import { viewProjectSettings } from "../../stores/project-settings.js";
 	import { viewAlerts } from "../../stores/alerts.js";
 	import { clearFileTreeState, fileTreeState } from "../../stores/file-tree.svelte.js";
-	import { applyProjectList, followDaemonLists, getDraftProject, projectState } from "../../stores/project.svelte.js";
+	import { followDaemonLists, getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { FILES_PANE_MIN_WIDTH, isBarCollapsed, sessionViewState, setFilesOpen, setFilesPaneWidth, watchCompactViewport } from "../../stores/session-view.svelte.js";
 	import { featureFlags, initFeatureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
@@ -124,6 +122,21 @@
 		);
 	});
 	const topClearance = $derived(sessionViewState.compact && !phoneListScreen ? chromeHeight : 0);
+
+	// The transcript keeps clearance for the open bar while the bar is
+	// collapsed. The island floats over the transcript either way, so the only
+	// cost is a little extra room above the first message, and the bar
+	// toggling mid-swipe never changes the transcript's geometry: at the top,
+	// a shrinking padding can only be absorbed by moving the content under the
+	// finger, as scrollTop cannot go negative.
+	function measureChrome(chrome: HTMLElement) {
+		const observer = new ResizeObserver(() => {
+			const collapsed = chrome.querySelector('#session-bar[data-collapsed="true"]') !== null;
+			chromeHeight = collapsed ? Math.max(chromeHeight, chrome.offsetHeight) : chrome.offsetHeight;
+		});
+		observer.observe(chrome);
+		return () => observer.disconnect();
+	}
 
 	const layoutClass = $derived.by(() => {
 		let cls = "flex h-dvh";
@@ -382,7 +395,8 @@
 		};
 		if (loadProject) readShell(loadProject);
 		else readShell(lastProject);
-		// A page load starts clean; only a change of project clears state.
+		// The daemon shell starts even with no registered or attached project.
+		attachSessionList(loadProject ?? lastProject ?? "");
 		let previousSlug = attachedProjectState.slug;
 		const hydrateProject = (slug: string) => {
 			attachGeneration++;
@@ -391,7 +405,8 @@
 			} catch { /* device storage is optional */ }
 			if (previousSlug !== null && slug !== previousSlug) {
 				clearMessages();
-				clearSessionState();
+				clearSessionSearch();
+				resetSessionFamily();
 				destroyAll();
 				clearDiscoveryState();
 				clearTodoState();
@@ -399,34 +414,18 @@
 				resetProjectUI();
 			}
 			previousSlug = slug;
-			// Request initial state from server
-			// First page only. The cross-project read is keyset-paged now; the
-			// sidebar's scroll sentinel asks for the rest.
+			// Keep the daemon shell while switching project-owned subscriptions.
 			attachSessionList(slug);
 			attachApprovals(slug);
 		};
 		const unsubscribe = onProjectAttached(hydrateProject);
 		if (previousSlug !== null) hydrateProject(previousSlug);
-		const unsubscribeShell = onShellSynchronized((slug) => {
-			if (slug !== previousSlug) return;
-			const generation = attachGeneration;
-			void rpc("GetProjects", { projectSlug: slug })
-				.then((response) => {
-					if (generation === attachGeneration) applyProjectList(response);
-				})
-				.catch((error) => {
-					if (generation === attachGeneration) toastFailure("Failed to load projects")(error);
-				});
-		});
-		onNavigateToSession((sessionId) => switchToSession(sessionId));
 		initSWMessageListener();
 		return () => {
 			attachGeneration++;
 			detachSessionList();
 			detachApprovals();
 			unsubscribe();
-			unsubscribeShell();
-			clearNavigateToSession();
 		};
 	});
 
@@ -554,6 +553,17 @@
 	});
 
 	$effect(() => {
+		function handleNewSessionShortcut(event: KeyboardEvent) {
+			if (event.defaultPrevented || event.repeat || event.altKey || !event.shiftKey || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "n") return;
+			event.preventDefault();
+			const shown = selection.shown;
+			selection.openDraft(getDraftProject(shown.kind === "placed" ? shown.project : null));
+		}
+		window.addEventListener("keydown", handleNewSessionShortcut);
+		return () => window.removeEventListener("keydown", handleNewSessionShortcut);
+	});
+
+	$effect(() => {
 		function handleViewShortcut(event: KeyboardEvent) {
 			const view = matchSessionViewShortcut(event);
 			if (!view || event.defaultPrevented) return;
@@ -630,7 +640,7 @@
 		class:select-none={isResizing || isSidebarResizing || isPaneResizing}
 		style={vvHeight ? `height: ${vvHeight}px;` : ""}
 	>
-		<div id="session-chrome" bind:offsetHeight={chromeHeight}>
+		<div id="session-chrome" {@attach measureChrome}>
 			{#if !phoneListScreen && !sessionViewState.compact}<Banners presentation="session-header" />{/if}
 			<!-- The list screen has its own bar in Sidebar; keep one session bar
 			     mounted across breakpoint changes so its state follows the viewport. -->

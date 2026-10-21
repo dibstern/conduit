@@ -3,10 +3,11 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
-import * as Statement from "@effect/sql/Statement";
+import { DatabaseSync } from "node:sqlite";
 import Database from "better-sqlite3";
 import { Effect, Layer, ManagedRuntime, Ref, Stream } from "effect";
+import { SqlClient } from "effect/sql";
+import * as Statement from "effect/sql/Statement";
 import {
 	afterAll,
 	afterEach,
@@ -38,6 +39,7 @@ import { ProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Serv
 import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import { resolveOrphanedClaudePermissions } from "../../../src/lib/domain/relay/Services/resolve-orphaned-claude-permissions.js";
 import {
+	AgentLivenessTag,
 	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
@@ -547,10 +549,10 @@ describe("shared-store relay project scope", () => {
 					SessionSetupLive.pipe(
 						Layer.provide(
 							Layer.mergeAll(
-								Layer.succeed(ConfigTag, config()),
-								Layer.succeed(LoggerTag, makeMockLogger()),
-								Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-								Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+								Layer.succeed(ConfigTag)(config()),
+								Layer.succeed(LoggerTag)(makeMockLogger()),
+								Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
+								Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 							),
 						),
 					),
@@ -618,7 +620,7 @@ describe("shared-store relay project scope", () => {
 		const rows = await store.runtime.runPromise(
 			readColdWorktreeCleanupCandidates(
 				{ slug: A, folders: [store.root] },
-				{ ...DEFAULT_WORKTREE_CLEANUP, whenMerged: true },
+				DEFAULT_WORKTREE_CLEANUP,
 				NOW,
 			),
 		);
@@ -636,7 +638,7 @@ describe("shared-store relay project scope", () => {
 		const before = daemonStoreManifest(store.filename);
 		const removed: string[] = [];
 		const unused = () => Effect.die("Unexpected cleanup service call");
-		const worktrees: WorktreeServiceTag["Type"] = {
+		const worktrees: WorktreeServiceTag["Service"] = {
 			withCheckoutUse: (effect) => effect,
 			renameBranch: unused,
 			runSetup: () => Stream.empty,
@@ -655,7 +657,7 @@ describe("shared-store relay project scope", () => {
 					return undefined;
 				}),
 		};
-		const workspace: SessionWorkspaceTag["Type"] = {
+		const workspace: SessionWorkspaceTag["Service"] = {
 			preview: unused,
 			renameBranch: unused,
 			withLaunch: (effect) => effect,
@@ -666,7 +668,7 @@ describe("shared-store relay project scope", () => {
 			record: unused,
 			claudeWorktreeState: unused,
 		};
-		const inbox: SessionInboxTag["Type"] = {
+		const inbox: SessionInboxTag["Service"] = {
 			withSession: (_session, effect) => effect,
 			submit: unused,
 			cancel: unused,
@@ -674,14 +676,18 @@ describe("shared-store relay project scope", () => {
 			steerDeclined: unused,
 			start: Effect.void,
 		};
-		const localPty: LocalPtyServiceTag["Type"] = {
+		const localPty: LocalPtyServiceTag["Service"] = {
 			list: () => Effect.succeed([]),
 			attach: unused,
 			create: unused,
 		};
 		await store.runtime.runPromise(
 			cleanUpProjectWorktrees(
-				Effect.succeed({ ...DEFAULT_WORKTREE_CLEANUP, onSettle: "any" }),
+				Effect.succeed({
+					...DEFAULT_WORKTREE_CLEANUP,
+					onSettle: "keep",
+					settledAfterDays: 0,
+				}),
 				Effect.succeed([]),
 				NOW,
 			).pipe(
@@ -696,6 +702,7 @@ describe("shared-store relay project scope", () => {
 				),
 				Effect.provideService(WebSocketHandlerTag, makeMockWebSocketHandler()),
 				Effect.provideService(BackgroundLivenessTag, () => undefined),
+				Effect.provideService(AgentLivenessTag, () => Effect.succeed(false)),
 			),
 		);
 		record(
@@ -768,8 +775,8 @@ describe("shared-store relay project scope", () => {
 						SSEStreamLive.pipe(
 							Layer.provide(
 								Layer.mergeAll(
-									Layer.succeed(ConfigTag, config()),
-									Layer.succeed(OpenCodeInstancesTag, instances),
+									Layer.succeed(ConfigTag)(config()),
+									Layer.succeed(OpenCodeInstancesTag)(instances),
 								),
 							),
 						),
@@ -924,7 +931,7 @@ describe("shared-store relay project scope", () => {
 			}).pipe(
 				Effect.provide(
 					SessionGitLive.pipe(
-						Layer.provide(Layer.succeed(ConfigTag, config())),
+						Layer.provide(Layer.succeed(ConfigTag)(config())),
 					),
 				),
 			),
@@ -1052,8 +1059,8 @@ describe("shared-store relay project scope", () => {
 					sessionId: id(B, "settings"),
 					title: "wrong owner",
 				});
-				const single = yield* Effect.either(eventStore.append(foreign));
-				const batch = yield* Effect.either(
+				const single = yield* Effect.result(eventStore.append(foreign));
+				const batch = yield* Effect.result(
 					eventStore.appendBatch([
 						canonicalEvent("session.created", "new-alpha-session", {
 							sessionId: "new-alpha-session",
@@ -1092,12 +1099,12 @@ describe("shared-store relay project scope", () => {
 			Number(result.own.projectId === A) +
 				Number(result.unknown.projectId === A),
 		);
-		expect(result.single._tag).toBe("Left");
-		expect(result.batch._tag).toBe("Left");
+		expect(result.single._tag).toBe("Failure");
+		expect(result.batch._tag).toBe("Failure");
 		expect(result.leakedBatch).toBe(0);
 		for (const outcome of [result.single, result.batch])
-			if (outcome._tag === "Left") {
-				expect(outcome.left).toMatchObject({
+			if (outcome._tag === "Failure") {
+				expect(outcome.failure).toMatchObject({
 					_tag: "EventStoreError",
 					operation: "appendOwnership",
 					sessionId: id(B, "settings"),
@@ -1116,13 +1123,13 @@ describe("shared-store relay project scope", () => {
 					yield* sql`INSERT INTO scope_writer_probe (id, value) VALUES (1, 0)`;
 				}),
 			);
-			const competitor = new Database(store.filename, { timeout: 0 });
+			const competitor = new DatabaseSync(store.filename, { timeout: 0 });
 			let attempted = false;
 			let competitorBlocked = false;
 			let ownershipLookups = 0;
 			try {
 				const outcome = await store.runtime.runPromise(
-					Effect.either(
+					Effect.result(
 						Effect.gen(function* () {
 							if (operation === "append") {
 								const eventStore = yield* EventStoreEffectTag;
@@ -1159,7 +1166,7 @@ describe("shared-store relay project scope", () => {
 								});
 							}
 						}).pipe(
-							Statement.withTransformer((statement) =>
+							Effect.provideService(Statement.CurrentTransformer, (statement) =>
 								Effect.sync(() => {
 									const [query] = statement.compile();
 									if (
@@ -1184,8 +1191,8 @@ describe("shared-store relay project scope", () => {
 											if (
 												typeof error !== "object" ||
 												error === null ||
-												!("code" in error) ||
-												error.code !== "SQLITE_BUSY"
+												!("errcode" in error) ||
+												error.errcode !== 5
 											)
 												throw error;
 											competitorBlocked = true;
@@ -1204,7 +1211,7 @@ describe("shared-store relay project scope", () => {
 						"UPDATE scope_writer_probe SET value = value + 1 WHERE id = 1",
 					)
 					.run();
-				expect(outcome._tag, JSON.stringify(outcome)).toBe("Right");
+				expect(outcome._tag, JSON.stringify(outcome)).toBe("Success");
 				expect(attempted).toBe(true);
 				expect(competitorBlocked).toBe(true);
 				expect(

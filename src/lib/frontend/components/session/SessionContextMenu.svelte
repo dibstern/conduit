@@ -85,7 +85,7 @@
 		ariaLabel="Session actions"
 		side="bottom"
 		align="end"
-		class="min-w-[180px]"
+		class="min-w-[180px] {presentation === 'menu' ? 'max-w-[calc(100vw-16px)]' : ''}"
 		data-testid={presentation === "sheet" ? "session-action-sheet" : "session-ctx-menu"}
 		footer={presentation === "sheet" && extras.length > 0 ? sheetFooter : undefined}
 		sheetBottomPadding={extras.length > 0 ? 12 : 22}
@@ -96,7 +96,7 @@
 		{:else}
 			<div data-testid="session-ctx-header" class="border-b border-border px-3 py-2 font-sans">
 				<div class="line-clamp-2 whitespace-normal break-words text-sm font-semibold text-text">{session.title || "New Session"}</div>
-				{#if projectLabel || branch}<div class="mt-1 flex gap-2 text-xs text-text-dimmer">{#if projectLabel}<span>{projectLabel}</span>{/if}{#if branch}<span>{branch}</span>{/if}</div>{/if}
+				{#if projectLabel || branch}<div class="mt-1 flex gap-2 text-xs text-text-dimmer">{#if projectLabel}<span class="min-w-0 truncate">{projectLabel}</span>{/if}{#if branch}<span class="min-w-0 truncate">{branch}</span>{/if}</div>{/if}
 			</div>
 			<SessionCommandItems {commands} onselect={select} />
 		{/if}

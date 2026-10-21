@@ -1,15 +1,15 @@
-import { SqlClient } from "@effect/sql";
 import { Data, Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
-import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { LoggerTag } from "./services.js";
 import { SessionInboxTag } from "./session-inbox.js";
 import { hasActiveProcessingTimeout } from "./session-overrides-state.js";
+import { SessionWorkspaceTag } from "./session-workspace.js";
 
 export class RewindTargetNotFound extends Data.TaggedError(
 	"RewindTargetNotFound",
@@ -89,12 +89,11 @@ export const rewindSessionToMessage = ({
 				if (PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
 					yield* Effect.scoped(
 						Effect.gen(function* () {
-							const instances =
-								yield* Effect.serviceOption(OpenCodeInstancesTag);
-							const client =
-								instances._tag === "Some"
-									? yield* instances.value.use(account.id)
-									: yield* OpenCodeAPITag;
+							const directory = yield* (yield* SessionWorkspaceTag).get(
+								sessionId,
+							);
+							const instances = yield* OpenCodeInstancesTag;
+							const client = yield* instances.use(account.id, directory);
 							yield* Effect.tryPromise(() =>
 								client.session.revert(sessionId, { messageID: messageId }),
 							);
@@ -142,12 +141,11 @@ export const undoSessionRewind = ({
 				if (PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
 					yield* Effect.scoped(
 						Effect.gen(function* () {
-							const instances =
-								yield* Effect.serviceOption(OpenCodeInstancesTag);
-							const client =
-								instances._tag === "Some"
-									? yield* instances.value.use(account.id)
-									: yield* OpenCodeAPITag;
+							const directory = yield* (yield* SessionWorkspaceTag).get(
+								sessionId,
+							);
+							const instances = yield* OpenCodeInstancesTag;
+							const client = yield* instances.use(account.id, directory);
 							yield* Effect.tryPromise(() =>
 								client.session.unrevert(sessionId),
 							);

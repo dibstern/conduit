@@ -4,7 +4,6 @@ import {
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
-	applyListDaemonSessionsResponse,
 	applySearchResultsResponse,
 	clearSessionState,
 	getSettledSessionCount,
@@ -19,7 +18,7 @@ import type {
 	SessionStatusFilter,
 } from "../../../src/lib/frontend/stores/session-scope.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
-import { seedDaemonSessions, seedRootSessions } from "./session-fixtures.js";
+import { applySessionSnapshot, seedRootSessions } from "./session-fixtures.js";
 
 const now = new Date(2030, 9, 7, 12).getTime();
 const at = (day: number, hour: number) =>
@@ -168,23 +167,26 @@ describe("projectSessionList", () => {
 		attachedProjectState.slug = "local";
 		routerState.search = "?p=a";
 		seedRootSessions([]);
-		seedDaemonSessions([
-			row("wanted", {
-				title: "Fix sidebar",
-				projectSlug: "a",
-				attention: "working",
-			}),
-			row("wrong-project", {
-				title: "Fix elsewhere",
-				projectSlug: "b",
-				attention: "working",
-			}),
-			row("wrong-title", {
-				title: "Review",
-				projectSlug: "a",
-				attention: "working",
-			}),
-		]);
+		applySessionSnapshot(
+			[
+				row("wanted", {
+					title: "Fix sidebar",
+					projectSlug: "a",
+					attention: "working",
+				}),
+				row("wrong-project", {
+					title: "Fix elsewhere",
+					projectSlug: "b",
+					attention: "working",
+				}),
+				row("wrong-title", {
+					title: "Review",
+					projectSlug: "a",
+					attention: "working",
+				}),
+			],
+			"partial",
+		);
 		sessionState.searchQuery = "Fix";
 		expect(
 			ids(
@@ -194,7 +196,7 @@ describe("projectSessionList", () => {
 			),
 		).toEqual(["wanted"]);
 		sessionState.searchQuery = "";
-		seedDaemonSessions([]);
+
 		routerState.search = "";
 	});
 });
@@ -268,16 +270,15 @@ describe("settled shelf counts", () => {
 	});
 
 	it("keeps browse totals live and treats the first debounced search as partial", () => {
-		seedRootSessions([row("local", { title: "Ö work", settledAt: 10 })]);
-		applyListDaemonSessionsResponse({
-			sessions: [],
-			settledCounts: [{ projectSlug: "foreign", count: 130 }],
-			availability: [],
-			hasMore: false,
-			nextCursor: null,
-		});
+		const foreign = Array.from({ length: 130 }, (_, index) =>
+			row(`foreign-${index}`, { projectSlug: "foreign", settledAt: 10 }),
+		);
+		seedRootSessions([
+			row("local", { title: "Ö work", settledAt: 10 }),
+			...foreign,
+		]);
 		expect(getSettledSessionCount()).toEqual({ count: 131, exact: true });
-		seedRootSessions([]);
+		seedRootSessions(foreign);
 		expect(getSettledSessionCount()).toEqual({ count: 130, exact: true });
 		sessionState.searchQuery = "ö";
 		expect(getSettledSessionCount()).toEqual({ count: 0, exact: false });

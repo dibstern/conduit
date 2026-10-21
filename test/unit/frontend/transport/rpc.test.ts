@@ -1,5 +1,5 @@
-import { RpcClientError } from "@effect/rpc/RpcClientError";
 import { Cause, Effect, Exit, Fiber, ManagedRuntime, Stream } from "effect";
+import { RpcClientError } from "effect/rpc/RpcClientError";
 import { afterEach, beforeEach, expect, expectTypeOf, it, vi } from "vitest";
 import { AccountUnroutable } from "../../../../src/lib/contracts/limit-recovery.js";
 import { WsRpcError } from "../../../../src/lib/contracts/ws-rpc.js";
@@ -104,7 +104,7 @@ it("rejects with the declared error instance and exposes tag narrowing in Effect
 		},
 	});
 	const result = await runtime.runPromise(
-		Effect.either(
+		Effect.result(
 			rpcEffect("input.submit", {
 				sessionId: "s1",
 				inputId: "i1",
@@ -113,10 +113,13 @@ it("rejects with the declared error instance and exposes tag narrowing in Effect
 			}),
 		),
 	);
-	if (result._tag === "Left" && result.left._tag === "AccountUnroutable") {
-		expectTypeOf(result.left).toEqualTypeOf<AccountUnroutable>();
-		expect(result.left).toBeInstanceOf(AccountUnroutable);
-		expect(result.left.ref).toEqual({
+	if (
+		result._tag === "Failure" &&
+		result.failure._tag === "AccountUnroutable"
+	) {
+		expectTypeOf(result.failure).toEqualTypeOf<AccountUnroutable>();
+		expect(result.failure).toBeInstanceOf(AccountUnroutable);
+		expect(result.failure.ref).toEqual({
 			_tag: "DriverDefault",
 			driver: "claude",
 		});
@@ -146,7 +149,7 @@ it("rejects an in-flight call on socket drop instead of hanging", async () => {
 
 it.each([
 	"server bug",
-	new Cause.InterruptedException(),
+	Cause.squash(Cause.interrupt()),
 ])("normalizes a non-declared throw to the client error: %s", async (error) => {
 	wire.stub({
 		ListWorktrees: () => {
@@ -172,9 +175,10 @@ it("keeps caller cancellation as an interruption", async () => {
 		rpcEffect("ListWorktrees", { projectSlug: "alpha" }),
 	);
 	await wire.request("ListWorktrees");
-	expect(
-		Exit.isInterrupted(await Effect.runPromise(Fiber.interrupt(fiber))),
-	).toBe(true);
+	await Effect.runPromise(Fiber.interrupt(fiber));
+	expect(Exit.hasInterrupts(await Effect.runPromise(Fiber.await(fiber)))).toBe(
+		true,
+	);
 });
 
 it("delivers a subscription and a unary response on the same client", async () => {
@@ -191,7 +195,7 @@ it("delivers a subscription and a unary response on the same client", async () =
 			const clients = yield* WsRpcClients;
 			const sockets = yield* clients.forProject("alpha");
 			return yield* Stream.runHead(
-				sockets.subscriptions.inputDraft({ sessionId: "s1" }),
+				sockets.subscriptions.inputDraft({ key: { session: "s1" } }),
 			);
 		}),
 	);
@@ -217,9 +221,9 @@ function contractTypes() {
 		import("../../../../src/lib/contracts/ws-rpc.js").SubmitInputResponse
 	>();
 	// @ts-expect-error Stream tags cannot be called as unary RPCs.
-	rpc("SubscribeShell", { projectSlug: "alpha" });
+	rpc("SubscribeShell", {});
 	// @ts-expect-error The Effect call also accepts only unary tags.
-	rpcEffect("SubscribeInputDraft", { sessionId: "s1" });
+	rpcEffect("SubscribeInputDraft", { key: { session: "s1" } });
 	// @ts-expect-error Contract payload fields are required.
 	rpc("input.submit", { sessionId: "s1", text: "" });
 	// @ts-expect-error Unknown payload fields must not be accepted.

@@ -9,11 +9,7 @@ import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	AddInstance,
-	ForkSessionForSession,
-	ListDaemonSessions,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { splitAtForkPoint } from "../../../src/lib/frontend/utils/fork-split.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import { discoverCursorEffect } from "../../../src/lib/provider/cursor/cursor-runner-driver.js";
@@ -164,9 +160,11 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 				},
 			});
 		await restart();
-		const { addedInstanceId } = await fixture.requestRpc(
-			new AddInstance({ name: "Cursor fork replay", driver: "cursor" }),
-		);
+		const { addedInstanceId } = await fixture.requestRpc({
+			_tag: "AddInstance",
+			name: "Cursor fork replay",
+			driver: "cursor",
+		});
 		if (!addedInstanceId) throw new Error("Missing Cursor account");
 		const browser = await fixture.connect();
 		sourceId = await browser.createSession(name, addedInstanceId, "cursor", {
@@ -275,12 +273,11 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 			expect(sourceIdentity).toBeDefined();
 			expect(before.tools.length).toBeGreaterThan(0);
 			const expectedAgent = freshCapturedAgent(trace);
-			const { sessionId: forkId } = await fixture.requestRpc(
-				new ForkSessionForSession({
-					originId: browser.originId,
-					sessionId: id,
-				}),
-			);
+			const { sessionId: forkId } = await fixture.requestRpc({
+				_tag: "ForkSession",
+				originId: browser.originId,
+				sessionId: id,
+			});
 			expect(forkId).not.toBe(id);
 			const forkBeforeSend = state(fixture, forkId);
 			const digest = forkBeforeSend.digest;
@@ -298,13 +295,12 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 			expect(
 				forkBeforeSend.messages.map(({ role, text }) => ({ role, text })),
 			).toEqual(before.messages.map(({ role, text }) => ({ role, text })));
-			const listed = await fixture.requestRpc(
-				new ListDaemonSessions({
-					projectSlug: "process-test",
-					scope: "process-test",
-					roots: false,
-				}),
-			);
+			const listed = await fixture.requestRpc({
+				_tag: "ListDaemonSessions",
+				projectSlug: "process-test",
+				scope: "process-test",
+				roots: false,
+			});
 			const forkRow = listed.sessions.find(
 				({ id: sessionId }) => sessionId === forkId,
 			);
@@ -450,13 +446,12 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 			await completed(fixture, id, 2);
 			const before = state(fixture, id).events;
 			freshCapturedAgent(trace);
-			const { sessionId: forkId } = await fixture.requestRpc(
-				new ForkSessionForSession({
-					originId: browser.originId,
-					sessionId: id,
-					messageId: firstAnswer.id,
-				}),
-			);
+			const { sessionId: forkId } = await fixture.requestRpc({
+				_tag: "ForkSession",
+				originId: browser.originId,
+				sessionId: id,
+				messageId: firstAnswer.id,
+			});
 			const fork = state(fixture, forkId);
 			expect(fork.digest).toContain(early);
 			expect(fork.digest).not.toContain(later);
@@ -500,12 +495,11 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 			await completed(fixture, id, 1);
 			const before = state(fixture, id).events;
 			freshCapturedAgent(trace);
-			const { sessionId: forkId } = await fixture.requestRpc(
-				new ForkSessionForSession({
-					originId: browser.originId,
-					sessionId: id,
-				}),
-			);
+			const { sessionId: forkId } = await fixture.requestRpc({
+				_tag: "ForkSession",
+				originId: browser.originId,
+				sessionId: id,
+			});
 			const digest = state(fixture, forkId).digest;
 			if (!digest) throw new Error("Missing bounded fork digest");
 			expect(digest.length).toBeLessThanOrEqual(32_000);
@@ -569,12 +563,11 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 			await completed(fixture, id, 1);
 			const before = state(fixture, id).events;
 			freshCapturedAgent(trace);
-			const { sessionId: forkId } = await fixture.requestRpc(
-				new ForkSessionForSession({
-					originId: browser.originId,
-					sessionId: id,
-				}),
-			);
+			const { sessionId: forkId } = await fixture.requestRpc({
+				_tag: "ForkSession",
+				originId: browser.originId,
+				sessionId: id,
+			});
 			const digest = state(fixture, forkId).digest;
 			if (!digest) throw new Error("Missing fork digest before rejected send");
 			const replay = rows(trace);

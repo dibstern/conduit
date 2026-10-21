@@ -21,28 +21,20 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { isDeepStrictEqual, parseArgs } from "node:util";
-import { Reactivity } from "@effect/experimental";
-import { SqlClient } from "@effect/sql";
-import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import Database from "better-sqlite3";
-import { Effect, Layer } from "effect";
-import { PersistenceProjectTag } from "../src/lib/domain/persistence/Services/persistence-service.js";
-import { makeEventStoreEffect } from "../src/lib/persistence/effect/event-store-effect.js";
-import { makeEffectSqlMigrator } from "../src/lib/persistence/effect/migrations.js";
-import { makeProjectionRunnerEffect } from "../src/lib/persistence/effect/projection-runner-effect.js";
-import {
-	makeProjectorCursorEffect,
-	ProjectorCursorEffectTag,
-} from "../src/lib/persistence/effect/projector-cursor-effect.js";
+import { Effect } from "effect";
 import {
 	createAllEffectProjectors,
-	UNPROJECTED_CANONICAL_EVENT_TYPES,
+	UNPROJECTED,
 } from "../src/lib/persistence/effect/projectors-effect.js";
-import { makeReadQueryEffect } from "../src/lib/persistence/effect/read-query-effect.js";
+import {
+	compareProjectionStores,
+	initializeReplayStore,
+	replayProjectionTables as projectedTables,
+	replayProjectionStore,
+} from "../src/lib/persistence/replay-parity.js";
 import { rewriteStore } from "../src/lib/persistence/rewrite-store.js";
-import { messageRowsToHistory } from "../src/lib/persistence/session-history-adapter.js";
-import { makeClaudeRunnerReceiptStore } from "../src/lib/provider/claude/claude-runner-receipts.js";
 
 const { values } = parseArgs({
 	options: {
@@ -85,19 +77,6 @@ function guardDisk(phase: string, budgetBytes: number, record = true): void {
 }
 
 type Row = Record<string, string | number | null>;
-const projectedTables = [
-	"sessions",
-	"messages",
-	"message_parts",
-	"turns",
-	"session_providers",
-	"pending_approvals",
-	"pending_inputs",
-	"session_goal_checks",
-	"message_tombstones",
-	"message_part_tombstones",
-	"session_sidebar",
-] as const;
 type SessionCount = { session_id: string; event_count: number };
 type EventMetric = {
 	type: string;
@@ -114,9 +93,9 @@ type ThinkingDifference = {
 	after: number;
 };
 
-function metrics(db: Database.Database): EventMetric[] {
+function metrics(db: DatabaseSync): EventMetric[] {
 	return db
-		.prepare<[], EventMetric>(`
+		.prepare(`
 		SELECT type, COUNT(*) AS rows,
 			SUM(length(CAST(data AS BLOB)) + length(CAST(metadata AS BLOB))) AS json_bytes,
 			SUM(length(CAST(data AS BLOB)) + length(CAST(metadata AS BLOB))
@@ -124,15 +103,15 @@ function metrics(db: Database.Database): EventMetric[] {
 				+ COALESCE(length(project_id), 0) + 24) AS payload_bytes
 		FROM events GROUP BY type ORDER BY type
 	`)
-		.all();
+		.all() as EventMetric[];
 }
 
-function removedMetrics(db: Database.Database): EventMetric[] {
+function removedMetrics(db: DatabaseSync): EventMetric[] {
 	// Measure the exact numbered migration predicate, rather than duplicating it.
 	const statement = migrationSql.trim().replace(/;$/, "");
 	assert(statement.includes("DELETE FROM events\n"));
 	return db
-		.prepare<[], EventMetric>(
+		.prepare(
 			`${statement.replace(
 				"DELETE FROM events\n",
 				`SELECT type, COUNT(*) AS rows,
@@ -142,161 +121,56 @@ function removedMetrics(db: Database.Database): EventMetric[] {
 				+ COALESCE(length(project_id), 0) + 24) AS payload_bytes FROM events\n`,
 			)} GROUP BY type ORDER BY type`,
 		)
-		.all();
+		.all() as EventMetric[];
 }
 
-function rows(db: Database.Database, table: string): Row[] {
-	return db.prepare<[], Row>(`SELECT * FROM ${table} ORDER BY rowid`).all();
-}
-
-function sqliteLayer(filename: string) {
-	return SqliteNode.layer({ filename }).pipe(Layer.provide(Reactivity.layer));
-}
-
-async function initialize(filename: string): Promise<void> {
-	await Effect.runPromise(
-		Effect.gen(function* () {
-			const sql = yield* SqlClient.SqlClient;
-			yield* sql.unsafe("PRAGMA foreign_keys = OFF");
-			yield* makeEffectSqlMigrator();
-			yield* makeClaudeRunnerReceiptStore(sql);
-		}).pipe(Effect.provide(sqliteLayer(filename)), Effect.scoped),
-	);
-}
-
-async function replay(filename: string, sessions: SessionCount[]) {
-	let projected = 0;
-	const projectors = createAllEffectProjectors().map((projector) => ({
-		...projector,
-		project: (
-			event: Parameters<typeof projector.project>[0],
-			context: Parameters<typeof projector.project>[1],
-		) => {
-			projected++;
-			// Interrupt, rather than fail, so recover cannot swallow a disk failure.
-			// Initial guards budget whole stores; pages reserve only upcoming writes.
-			const diskGuard =
-				projected % 500 === 1
-					? Effect.try(() =>
-							guardDisk("projection page", 1024 ** 3, false),
-						).pipe(
-							Effect.catchAll((error) =>
-								Effect.sync(() =>
-									console.error(
-										`Projection disk guard stopped replay: ${String(error.cause)}`,
-									),
-								).pipe(Effect.zipRight(Effect.interrupt)),
-							),
-						)
-					: Effect.void;
-			return diskGuard.pipe(Effect.zipRight(projector.project(event, context)));
-		},
-	}));
-	return Effect.runPromise(
-		Effect.gen(function* () {
-			const sql = yield* SqlClient.SqlClient;
-			const cursor = yield* makeProjectorCursorEffect.pipe(
-				Effect.provideService(PersistenceProjectTag, {
-					projectId: "compaction-parity",
-				}),
-			);
-			const runner = yield* makeProjectionRunnerEffect(projectors).pipe(
-				Effect.provideService(ProjectorCursorEffectTag, cursor),
-			);
-			const recovery = yield* runner.recover();
-			const failures = yield* runner.getFailures();
-			const persistedFailures = yield* sql<{
-				count: number;
-			}>`SELECT COUNT(*) AS count FROM projection_failures`;
-			assert.equal(failures.length, 0, "Recovery skipped a projection");
-			assert.equal(
-				persistedFailures[0]?.count,
-				0,
-				"Recovery persisted skipped projections",
-			);
-			const restart = yield* runner.recover();
-			assert.equal(
-				restart.totalReplayed,
-				0,
-				"Persisted projector cursors did not catch up",
-			);
-			const query = yield* makeReadQueryEffect;
-			const store = yield* makeEventStoreEffect.pipe(
-				Effect.provideService(PersistenceProjectTag, {
-					projectId: "compaction-parity",
-				}),
-			);
-			const histories = [];
-			for (const session of sessions) {
-				const messages = yield* query.getSessionMessagesWithParts(
-					session.session_id,
-				);
-				histories.push({
-					sessionId: session.session_id,
-					history: messageRowsToHistory(messages, {
-						pageSize: messages.length,
-					}),
-				});
-				const expected = yield* sql<{
-					next: number;
-				}>`SELECT MAX(stream_version) + 1 AS next FROM events WHERE session_id = ${session.session_id}`;
-				assert.equal(
-					yield* store.getNextStreamVersion(session.session_id),
-					expected[0]?.next,
-				);
-			}
-			return {
-				recovery,
-				failures: failures.length,
-				restartReplayed: restart.totalReplayed,
-				histories,
-			};
-		}).pipe(Effect.provide(sqliteLayer(filename)), Effect.scoped),
-	);
+function rows(db: DatabaseSync, table: string): Row[] {
+	return db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all() as Row[];
 }
 
 const temporaryDirectory = mkdtempSync("/tmp/conduit-compaction-parity-");
 const beforeFilename = join(temporaryDirectory, "before.db");
 const afterFilename = join(temporaryDirectory, "after.db");
-const source = new Database(sourceFilename, {
-	readonly: true,
-	fileMustExist: true,
+const source = new DatabaseSync(sourceFilename, {
+	readOnly: true,
+	timeout: 5000,
 });
 try {
-	source.pragma("temp_store = MEMORY");
+	source.exec("PRAGMA temp_store = MEMORY");
 	const sourceBytes = statSync(sourceFilename).size;
 	const sessions = values.session
-		? source
-				.prepare<[string], SessionCount>(
+		? (source
+				.prepare(
 					"SELECT session_id, COUNT(*) AS event_count FROM events WHERE session_id = ? GROUP BY session_id",
 				)
-				.all(values.session)
-		: source
-				.prepare<[], SessionCount>(`
+				.all(values.session) as SessionCount[])
+		: (source
+				.prepare(`
 		SELECT session_id, COUNT(*) AS event_count FROM events
 		GROUP BY session_id ORDER BY event_count DESC, session_id LIMIT 20
 	`)
-				.all();
+				.all() as SessionCount[]);
 	assert.equal(sessions.length, values.session ? 1 : 20);
 	const sessionIds = sessions.map((session) => session.session_id);
 	const placeholders = sessionIds.map(() => "?").join(",");
 	const extract = source
-		.prepare<string[], { rows: number; json_bytes: number }>(`
+		.prepare(`
 		SELECT COUNT(*) AS rows,
 			SUM(length(CAST(data AS BLOB)) + length(CAST(metadata AS BLOB))) AS json_bytes
 		FROM events WHERE session_id IN (${placeholders})
 	`)
-		.get(...sessionIds);
+		.get(...sessionIds) as { rows: number; json_bytes: number } | undefined;
 	assert(extract);
 	const extractionBudget = extract.json_bytes * 2 + extract.rows * 256;
 	guardDisk("create fresh schema", 16 * 1024 ** 2);
-	await initialize(beforeFilename);
+	await Effect.runPromise(initializeReplayStore(beforeFilename));
 	guardDisk("extract heaviest sessions", extractionBudget);
-	const before = new Database(beforeFilename);
+	const before = new DatabaseSync(beforeFilename, { timeout: 5000 });
 	try {
-		before.pragma("foreign_keys = OFF");
-		before.pragma("temp_store = MEMORY");
-		before.transaction(() => {
+		before.exec("PRAGMA foreign_keys = OFF");
+		before.exec("PRAGMA temp_store = MEMORY");
+		before.exec("BEGIN");
+		try {
 			for (const table of [
 				"sessions",
 				"events",
@@ -305,16 +179,18 @@ try {
 				"claude_runner_cursors",
 			]) {
 				const sourceColumns = new Set(
-					source
-						.prepare<[], { name: string }>(`PRAGMA table_info(${table})`)
-						.all()
-						.map((column) => column.name),
+					(
+						source.prepare(`PRAGMA table_info(${table})`).all() as {
+							name: string;
+						}[]
+					).map((column) => column.name),
 				);
-				const columns = before
-					.prepare<[], { name: string; hidden: number }>(
-						`PRAGMA table_xinfo(${table})`,
-					)
-					.all()
+				const columns = (
+					before.prepare(`PRAGMA table_xinfo(${table})`).all() as {
+						name: string;
+						hidden: number;
+					}[]
+				)
 					.filter(
 						(column) => column.hidden === 0 && sourceColumns.has(column.name),
 					)
@@ -329,20 +205,27 @@ try {
 						SELECT s.parent_id FROM sessions s JOIN lineage l ON s.id = l.id WHERE s.parent_id IS NOT NULL
 						) SELECT ${columns.join(",")} FROM sessions WHERE id IN (SELECT id FROM lineage)`
 						: `SELECT ${columns.join(",")} FROM ${table}${table === "claude_runner_cursors" ? "" : ` WHERE session_id IN (${placeholders})`}${table === "events" ? " ORDER BY sequence" : ""}`;
-				const insert = before.prepare<Row>(
+				const insert = before.prepare(
 					`INSERT INTO ${table} (${columns.join(",")}) VALUES (${columns.map((column) => `@${column}`).join(",")})`,
 				);
 				let inserted = 0;
 				for (const row of source
-					.prepare<string[], Row>(selection)
-					.iterate(...(table === "claude_runner_cursors" ? [] : sessionIds))) {
+					.prepare(selection)
+					.iterate(
+						...(table === "claude_runner_cursors" ? [] : sessionIds),
+					) as Iterable<Row>) {
 					if (inserted++ % 10000 === 0)
 						guardDisk("extraction page", extractionBudget, false);
 					insert.run(row);
 				}
 			}
-		})();
-		before.pragma("wal_checkpoint(TRUNCATE)");
+
+			before.exec("COMMIT");
+		} catch (cause) {
+			before.exec("ROLLBACK");
+			throw cause;
+		}
+		before.exec("PRAGMA wal_checkpoint(TRUNCATE)");
 	} finally {
 		before.close();
 	}
@@ -353,22 +236,22 @@ try {
 	guardDisk("copy subset", subsetBeforeBytes);
 	copyFileSync(beforeFilename, afterFilename);
 	guardDisk("logical migration", subsetBeforeBytes * 2);
-	const compacted = new Database(afterFilename);
+	const compacted = new DatabaseSync(afterFilename, { timeout: 5000 });
 	let subsetBeforeMetrics: EventMetric[];
 	let subsetAfterMetrics: EventMetric[];
 	let resumeCounts: Record<string, number>;
 	let subagentThinkingRows: number;
 	let migrationDurationMs: number;
 	try {
-		compacted.pragma("temp_store = MEMORY");
+		compacted.exec("PRAGMA temp_store = MEMORY");
 		subsetBeforeMetrics = metrics(compacted);
 		const subagent = compacted
-			.prepare<[], { rows: number }>(`
+			.prepare(`
 			SELECT COUNT(*) AS rows FROM events
 			WHERE type IN ('thinking.start', 'thinking.delta', 'thinking.end')
 				AND json_extract(metadata, '$.rawSource') = 'claude.subagent.transcript'
 		`)
-			.get();
+			.get() as { rows: number } | undefined;
 		subagentThinkingRows = subagent?.rows ?? 0;
 		if (!values.session) {
 			assert(
@@ -384,7 +267,7 @@ try {
 		for (const metric of subsetBeforeMetrics) {
 			assert(
 				handledTypes.has(metric.type) ||
-					UNPROJECTED_CANONICAL_EVENT_TYPES.includes(metric.type),
+					Object.hasOwn(UNPROJECTED, metric.type),
 				`Unhandled historical type: ${metric.type}`,
 			);
 		}
@@ -402,7 +285,14 @@ try {
 			]),
 		);
 		const migrationStartedAt = performance.now();
-		compacted.transaction(() => compacted.exec(migrationSql))();
+		compacted.exec("BEGIN");
+		try {
+			compacted.exec(migrationSql);
+			compacted.exec("COMMIT");
+		} catch (cause) {
+			compacted.exec("ROLLBACK");
+			throw cause;
+		}
 		migrationDurationMs = Math.round(performance.now() - migrationStartedAt);
 		console.error(
 			`Subset logical migration completed in ${migrationDurationMs} ms`,
@@ -415,15 +305,21 @@ try {
 			);
 		}
 		subsetAfterMetrics = metrics(compacted);
-		compacted.pragma("wal_checkpoint(TRUNCATE)");
+		compacted.exec("PRAGMA wal_checkpoint(TRUNCATE)");
 	} finally {
 		compacted.close();
 	}
 	guardDisk("physical subset rewrite", subsetBeforeBytes * 2);
 	const rewritten = await Effect.runPromise(rewriteStore(afterFilename));
-	const checked = new Database(afterFilename, { readonly: true });
+	const checked = new DatabaseSync(afterFilename, {
+		readOnly: true,
+		timeout: 5000,
+	});
 	try {
-		assert.equal(checked.pragma("quick_check", { simple: true }), "ok");
+		assert.equal(
+			checked.prepare("PRAGMA quick_check").get()?.["quick_check"],
+			"ok",
+		);
 	} finally {
 		checked.close();
 	}
@@ -438,13 +334,23 @@ try {
 	guardDisk("replay both fresh read models", replayBudget);
 	// Independent stores can replay together; await both scopes before cleanup.
 	const replayResults = await Promise.allSettled([
-		replay(beforeFilename, sessions).then((result) => {
+		Effect.runPromise(
+			replayProjectionStore(beforeFilename, sessionIds, {
+				projectId: "compaction-parity",
+				guardDisk: () => guardDisk("projection page", 1024 ** 3, false),
+			}),
+		).then((result) => {
 			console.error(
 				`Original replay completed: ${result.recovery.totalReplayed} projector applications`,
 			);
 			return result;
 		}),
-		replay(afterFilename, sessions).then((result) => {
+		Effect.runPromise(
+			replayProjectionStore(afterFilename, sessionIds, {
+				projectId: "compaction-parity",
+				guardDisk: () => guardDisk("projection page", 1024 ** 3, false),
+			}),
+		).then((result) => {
 			console.error(
 				`Compacted replay completed: ${result.recovery.totalReplayed} projector applications`,
 			);
@@ -460,8 +366,14 @@ try {
 		throw new Error("Compacted replay failed", { cause: afterResult.reason });
 	const beforeReplay = beforeResult.value;
 	const afterReplay = afterResult.value;
-	const originalRead = new Database(beforeFilename, { readonly: true });
-	const compactedRead = new Database(afterFilename, { readonly: true });
+	const originalRead = new DatabaseSync(beforeFilename, {
+		readOnly: true,
+		timeout: 5000,
+	});
+	const compactedRead = new DatabaseSync(afterFilename, {
+		readOnly: true,
+		timeout: 5000,
+	});
 	const differences: ThinkingDifference[] = [];
 	const rowCounts: Record<string, { before: number; after: number }> = {};
 	const unexpected: {
@@ -471,141 +383,77 @@ try {
 		sessionId: string | number | null;
 	}[] = [];
 	try {
-		const originalOwners = new Map(
-			originalRead
-				.prepare<[], { id: string; session_id: string }>(
-					"SELECT id, session_id FROM messages",
-				)
-				.all()
-				.map((row) => [row.id, row.session_id]),
-		);
-		const compactedOwners = new Map(
-			compactedRead
-				.prepare<[], { id: string; session_id: string }>(
-					"SELECT id, session_id FROM messages",
-				)
-				.all()
-				.map((row) => [row.id, row.session_id]),
-		);
-		const rowOwner = (table: string, row: Row, owners: Map<string, string>) =>
-			row["session_id"] ??
-			(table === "sessions" ? row["id"] : undefined) ??
-			(typeof row["message_id"] === "string"
-				? owners.get(row["message_id"])
-				: undefined) ??
-			null;
-		for (const table of projectedTables) {
-			const primaryKeys = originalRead
-				.prepare<[], { name: string; pk: number }>(
-					`PRAGMA table_info(${table})`,
-				)
-				.all()
-				.filter((column) => column.pk > 0);
-			assert.equal(primaryKeys.length, 1, `${table} needs one primary key`);
-			const primaryKey = primaryKeys[0]?.name;
-			assert(primaryKey);
-			const originalRows = rows(originalRead, table);
-			const compactedRows = rows(compactedRead, table);
-			const afterById = new Map(
-				compactedRows.map((row) => [row[primaryKey], row]),
+		for (const result of [beforeReplay, afterReplay]) {
+			assert.equal(result.failures, 0, "Recovery skipped a projection");
+			assert.equal(
+				result.restartReplayed,
+				0,
+				"Persisted projector cursors did not catch up",
 			);
-			assert.equal(afterById.size, compactedRows.length);
-			rowCounts[table] = {
-				before: originalRows.length,
-				after: compactedRows.length,
-			};
-			const beforeIds = new Set(originalRows.map((row) => row[primaryKey]));
-			assert.equal(beforeIds.size, originalRows.length);
-			for (const added of compactedRows.filter(
-				(row) => !beforeIds.has(row[primaryKey]),
-			)) {
+			assert.deepEqual(result.streamVersionDifferences, []);
+		}
+		const parity = compareProjectionStores(originalRead, compactedRead);
+		for (const [table, count] of Object.entries(parity.counts.tables)) {
+			rowCounts[table] = { before: count.expected, after: count.actual };
+		}
+		for (const diff of parity.diffs) {
+			const row = diff.expected ?? diff.actual;
+			assert(row);
+			const sessionId =
+				row["session_id"] ??
+				(diff.table === "sessions" ? row["id"] : undefined) ??
+				(typeof row["message_id"] === "string"
+					? (diff.expected ? originalRead : compactedRead)
+							.prepare("SELECT session_id FROM messages WHERE id = ?")
+							.get(row["message_id"])?.["session_id"]
+					: null) ??
+				null;
+			assert(typeof sessionId === "string" || sessionId === null);
+			for (const field of diff.fields) {
 				unexpected.push({
-					table,
-					field: "row_added",
-					rowId: added[primaryKey] ?? null,
-					sessionId: rowOwner(table, added, compactedOwners),
+					table: diff.table,
+					field,
+					rowId: diff.key,
+					sessionId,
 				});
-			}
-			for (const originalRow of originalRows) {
-				const compactedRow = afterById.get(originalRow[primaryKey]);
-				if (!compactedRow) {
-					unexpected.push({
-						table,
-						field: "row_removed",
-						rowId: originalRow[primaryKey] ?? null,
-						sessionId: rowOwner(table, originalRow, originalOwners),
-					});
-					continue;
-				}
-				for (const [field, value] of Object.entries(originalRow)) {
-					if (field === "version" || value === compactedRow[field]) continue;
-					if (
-						table === "session_sidebar" &&
-						field === "row" &&
-						typeof value === "string" &&
-						typeof compactedRow[field] === "string"
-					) {
-						const originalSidebar: unknown = JSON.parse(value);
-						const compactedSidebar: unknown = JSON.parse(compactedRow[field]);
-						assert(
-							originalSidebar !== null &&
-								typeof originalSidebar === "object" &&
-								!Array.isArray(originalSidebar) &&
-								"version" in originalSidebar,
-						);
-						assert(
-							compactedSidebar !== null &&
-								typeof compactedSidebar === "object" &&
-								!Array.isArray(compactedSidebar) &&
-								"version" in compactedSidebar,
-						);
-						const { version: originalVersion, ...originalVisible } =
-							originalSidebar;
-						const { version: compactedVersion, ...compactedVisible } =
-							compactedSidebar;
-						assert.equal(typeof originalVersion, "number");
-						assert.equal(typeof compactedVersion, "number");
-						if (isDeepStrictEqual(originalVisible, compactedVisible)) continue;
-					}
-					unexpected.push({
-						table,
-						field,
-						rowId: originalRow[primaryKey] ?? null,
-						sessionId: rowOwner(table, originalRow, originalOwners),
-					});
-					if (
-						!(
-							table === "message_parts" &&
-							originalRow["type"] === "thinking" &&
-							field === "updated_at"
-						)
-					) {
-						continue;
-					}
+				if (
+					diff.table === "message_parts" &&
+					row["type"] === "thinking" &&
+					field === "updated_at"
+				) {
+					const before = diff.expected?.[field];
+					const after = diff.actual?.[field];
+					assert(typeof before === "number" && typeof after === "number");
 					assert(
-						typeof value === "number" &&
-							typeof compactedRow[field] === "number",
+						typeof row["id"] === "string" &&
+							typeof row["message_id"] === "string" &&
+							sessionId,
 					);
-					assert(
-						typeof originalRow["id"] === "string" &&
-							typeof originalRow["message_id"] === "string",
-					);
-					const owner = originalRead
-						.prepare<[string], { session_id: string }>(
-							"SELECT session_id FROM messages WHERE id = ?",
-						)
-						.get(originalRow["message_id"]);
-					assert(owner);
 					differences.push({
-						sessionId: owner.session_id,
-						messageId: originalRow["message_id"],
-						partId: originalRow["id"],
-						field: "updated_at",
-						before: value,
-						after: compactedRow[field],
+						sessionId,
+						messageId: row["message_id"],
+						partId: row["id"],
+						field,
+						before,
+						after,
 					});
 				}
 			}
+		}
+		for (const pointer of parity.danglingPartPointers) {
+			const ownerQuery =
+				"SELECT m.session_id FROM message_parts p JOIN messages m ON m.id = p.message_id WHERE p.id = ?";
+			const owner =
+				originalRead.prepare(ownerQuery).get(pointer.partId) ??
+				compactedRead.prepare(ownerQuery).get(pointer.partId);
+			const sessionId = owner?.["session_id"];
+			assert(typeof sessionId === "string" || sessionId === undefined);
+			unexpected.push({
+				table: "message_parts",
+				field: "result_event_seq",
+				rowId: pointer.partId,
+				sessionId: sessionId ?? null,
+			});
 		}
 		for (const table of ["provider_state", "claude_runner_cursors"]) {
 			assert.deepEqual(
@@ -682,14 +530,14 @@ try {
 	);
 	const storage = values.session
 		? { table_bytes: 0, index_bytes: 0 }
-		: source
-				.prepare<[], { table_bytes: number; index_bytes: number }>(`
+		: (source
+				.prepare(`
 		SELECT SUM(CASE WHEN name = 'events' THEN pgsize ELSE 0 END) AS table_bytes,
 			SUM(CASE WHEN name <> 'events' THEN pgsize ELSE 0 END) AS index_bytes
 		FROM dbstat WHERE name = 'events'
 			OR name IN (SELECT name FROM sqlite_schema WHERE type = 'index' AND tbl_name = 'events')
 	`)
-				.get();
+				.get() as { table_bytes: number; index_bytes: number } | undefined);
 	assert(storage);
 	const estimatedSavingsBytes = Math.round(
 		(storage.table_bytes * removedPayloadBytes) / totalPayloadBytes +

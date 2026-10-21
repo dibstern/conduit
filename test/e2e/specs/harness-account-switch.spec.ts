@@ -8,7 +8,10 @@ import {
 import { join, resolve } from "node:path";
 import { Effect, Fiber, Schema, Stream } from "effect";
 import type { SessionInfo } from "../../../src/lib/contracts/ws-rpc.js";
-import { handoffMessagesLine } from "../../../src/lib/frontend/utils/continuation.js";
+import {
+	handoffMessagesLine,
+	usageForecastTime,
+} from "../../../src/lib/frontend/utils/continuation.js";
 import { formatSnoozeTime } from "../../../src/lib/frontend/utils/format.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
 import { openPickerRoot } from "../helpers/model-picker.js";
@@ -80,7 +83,7 @@ test("a just-added Claude account can run a session immediately", async ({
 	);
 	const prompt = "immediate-account-session";
 	await Effect.runPromise(
-		browser.rpc.input.submit({
+		browser.rpc["input.submit"]({
 			sessionId,
 			text: prompt,
 			inputId: "immediate-account-send",
@@ -220,13 +223,11 @@ for (const stale of [false, true]) {
 			);
 			const observed: SessionInfo[] = [];
 			const subscription = Effect.runFork(
-				Stream.runForEach(
-					browser.rpc.SubscribeShell({ projectSlug }),
-					(envelope) =>
-						Effect.sync(() => {
-							if (envelope._tag === "snapshot") observed.push(...envelope.rows);
-							if (envelope._tag === "upsert") observed.push(envelope.item);
-						}),
+				Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
+					Effect.sync(() => {
+						if (envelope._tag === "snapshot") observed.push(...envelope.rows);
+						if (envelope._tag === "upsert") observed.push(envelope.item);
+					}),
 				),
 			);
 			const latest = () =>
@@ -234,7 +235,7 @@ for (const stale of [false, true]) {
 			const proofMarks = () => readProofMarks(harness.root);
 			const send = (text: string, commandId: string) =>
 				Effect.runPromise(
-					browser.rpc.input.submit({
+					browser.rpc["input.submit"]({
 						sessionId,
 						text,
 						inputId: commandId,
@@ -422,24 +423,23 @@ for (const dismiss of [false, true]) {
 			if (!slug) throw new Error("No project slug");
 			const observed: { sequence: number; session: SessionInfo }[] = [];
 			const subscription = Effect.runFork(
-				Stream.runForEach(
-					browser.rpc.SubscribeShell({ projectSlug: slug }),
-					(envelope) =>
-						Effect.sync(() => {
-							if (envelope._tag === "snapshot")
-								for (const session of envelope.rows)
-									observed.push({ sequence: envelope.sequence, session });
-							if (envelope._tag === "upsert")
-								observed.push({
-									sequence: envelope.sequence,
-									session: envelope.item,
-								});
-						}),
+				Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
+					Effect.sync(() => {
+						if (envelope._tag === "snapshot")
+							for (const session of envelope.rows)
+								observed.push({ sequence: envelope.sequence, session });
+						if (envelope._tag === "upsert")
+							observed.push({
+								sequence: envelope.sequence,
+								session: envelope.item,
+							});
+					}),
 				),
 			);
 			const snapshot = () =>
 				Effect.runPromise(
-					browser.rpc.SubscribeShell({ projectSlug: slug }).pipe(
+					browser.rpc.SubscribeShell({}).pipe(
+						Stream.filter((frame) => frame._tag !== "projects"),
 						Stream.take(1),
 						Stream.runCollect,
 						Effect.map((envelopes) => Array.from(envelopes)[0]),
@@ -454,11 +454,10 @@ for (const dismiss of [false, true]) {
 				await openPickerRoot(page, picker);
 				await page.getByTestId("picker-harness-claude").click();
 				await page.getByTestId(`picker-account-${account.id}`).click();
-				// An account starts on its own default; this fixture configures none.
 				await page.getByTestId("picker-row-model").click();
 				await page
 					.getByTestId("model-picker-list")
-					.locator('[data-model-id="harness"]')
+					.locator('[data-provider-id="claude"][data-model-id="harness"]')
 					.click();
 				await page.keyboard.press("Escape");
 				const cutOffText =
@@ -504,7 +503,7 @@ for (const dismiss of [false, true]) {
 				const cutOffTag = page.getByTestId("cut-off-tag");
 				await test.step("limited-session strip and cut-off tag", async () => {
 					const phone = testInfo.project.name === "mobile";
-					const resets = `Resets at ${formatSnoozeTime(1791370800 * 1000)}.`;
+					const resets = `Resets at ${usageForecastTime(1791370800 * 1000, Date.now())}.`;
 					await expect(strip.getByTestId("usage-limit-title")).toHaveText(
 						"Account 1 hit its weekly limit.",
 					);
@@ -719,24 +718,23 @@ for (const decision of [
 		);
 		const observed: { sequence: number; session: SessionInfo }[] = [];
 		const subscription = Effect.runFork(
-			Stream.runForEach(
-				browser.rpc.SubscribeShell({ projectSlug }),
-				(envelope) =>
-					Effect.sync(() => {
-						if (envelope._tag === "snapshot")
-							for (const session of envelope.rows)
-								observed.push({ sequence: envelope.sequence, session });
-						if (envelope._tag === "upsert")
-							observed.push({
-								sequence: envelope.sequence,
-								session: envelope.item,
-							});
-					}),
+			Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
+				Effect.sync(() => {
+					if (envelope._tag === "snapshot")
+						for (const session of envelope.rows)
+							observed.push({ sequence: envelope.sequence, session });
+					if (envelope._tag === "upsert")
+						observed.push({
+							sequence: envelope.sequence,
+							session: envelope.item,
+						});
+				}),
 			),
 		);
 		const snapshot = () =>
 			Effect.runPromise(
-				browser.rpc.SubscribeShell({ projectSlug }).pipe(
+				browser.rpc.SubscribeShell({}).pipe(
+					Stream.filter((frame) => frame._tag !== "projects"),
 					Stream.take(1),
 					Stream.runCollect,
 					Effect.map((envelopes) => Array.from(envelopes)[0]),
@@ -751,7 +749,7 @@ for (const decision of [
 			// Release background duplicates before taking stable gate snapshots.
 			writeFileSync(join(harness.root, "release-limit-repeats"), "release");
 			await Effect.runPromise(
-				browser.rpc.input.submit({
+				browser.rpc["input.submit"]({
 					sessionId,
 					text: cutOffText,
 					inputId: `cut-off-${decision}`,
@@ -807,7 +805,7 @@ for (const decision of [
 				throw new Error("No native cut-off session");
 			if (decision === "busy") {
 				await Effect.runPromise(
-					browser.rpc.input.submit({
+					browser.rpc["input.submit"]({
 						sessionId,
 						text: "upgrade-long-turn",
 						inputId: "held-turn",
@@ -867,7 +865,7 @@ for (const decision of [
 										decision === "stale" ? "stale-account" : instanceId,
 									originId: browser.originId,
 								})
-								.pipe(Effect.either),
+								.pipe(Effect.result),
 						);
 			evidence["before"] = before;
 			evidence["result"] = result;
@@ -889,9 +887,9 @@ for (const decision of [
 				stale: "StaleSwitch",
 			};
 			if (decision in refusal) {
-				expect(result?._tag).toBe("Left");
-				if (result?._tag !== "Left") throw new Error("Expected refusal");
-				expect(result.left._tag).toBe(
+				expect(result?._tag).toBe("Failure");
+				if (result?._tag !== "Failure") throw new Error("Expected refusal");
+				expect(result.failure._tag).toBe(
 					refusal[decision as keyof typeof refusal],
 				);
 				const after = await snapshot();
@@ -901,7 +899,7 @@ for (const decision of [
 					await tryAgain.click();
 					await expect(
 						page.locator('.toast-card[data-variant="error"]'),
-					).toContainText(result.left.message);
+					).toContainText(result.failure.message);
 					await expect(strip).toBeVisible();
 					await expect(tryAgain).toBeEnabled();
 					await page.screenshot({ path: join(artifacts, "02-refused.png") });
@@ -912,7 +910,7 @@ for (const decision of [
 						.some((call) => call.prompt === "Continue where you left off."),
 				).toBe(false);
 			} else {
-				if (result) expect(result._tag).toBe("Right");
+				if (result) expect(result._tag).toBe("Success");
 				if (decision === "hang")
 					expect(Date.now() - started).toBeGreaterThanOrEqual(4_900);
 				await expect.poll(() => latest()?.limitRecovery?.continued).toBe(true);
@@ -1124,13 +1122,11 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 		);
 		const observed: SessionInfo[] = [];
 		const subscription = Effect.runFork(
-			Stream.runForEach(
-				browser.rpc.SubscribeShell({ projectSlug }),
-				(envelope) =>
-					Effect.sync(() => {
-						if (envelope._tag === "snapshot") observed.push(...envelope.rows);
-						if (envelope._tag === "upsert") observed.push(envelope.item);
-					}),
+			Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
+				Effect.sync(() => {
+					if (envelope._tag === "snapshot") observed.push(...envelope.rows);
+					if (envelope._tag === "upsert") observed.push(envelope.item);
+				}),
 			),
 		);
 		const latest = () => observed.filter((row) => row.id === sessionId).at(-1);
@@ -1151,7 +1147,7 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 			"usage-limit-account-1-no-reset: finish the original request";
 		const send = (text: string, commandId: string) =>
 			Effect.runPromise(
-				browser.rpc.input.submit({
+				browser.rpc["input.submit"]({
 					sessionId,
 					text,
 					inputId: commandId,
@@ -1191,6 +1187,9 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 				const names = settings.getByTestId("usage-limit-account-name");
 				await expect(names.nth(0)).toHaveText("Account 2");
 				await expect(names.nth(1)).toHaveText("Account 3");
+				// Phones hide the drag handles until Edit order is pressed.
+				if (testInfo.project.name === "mobile")
+					await settings.getByTestId("usage-settings-reorder").click();
 				// Drag Account 3 above Account 2 with the mouse. The rows slide into the
 				// saved order as it loads, and hover's stability check can pass mid-slide,
 				// so wait for the slide to finish before measuring the handles. The quota
@@ -1484,19 +1483,17 @@ for (const scenario of [
 		const observed: { sequence: number; session: SessionInfo }[] = [];
 		const subscribe = () =>
 			Effect.runFork(
-				Stream.runForEach(
-					browser.rpc.SubscribeShell({ projectSlug }),
-					(envelope) =>
-						Effect.sync(() => {
-							if (envelope._tag === "snapshot")
-								for (const session of envelope.rows)
-									observed.push({ sequence: envelope.sequence, session });
-							if (envelope._tag === "upsert")
-								observed.push({
-									sequence: envelope.sequence,
-									session: envelope.item,
-								});
-						}),
+				Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
+					Effect.sync(() => {
+						if (envelope._tag === "snapshot")
+							for (const session of envelope.rows)
+								observed.push({ sequence: envelope.sequence, session });
+						if (envelope._tag === "upsert")
+							observed.push({
+								sequence: envelope.sequence,
+								session: envelope.item,
+							});
+					}),
 				),
 			);
 		let subscription = subscribe();
@@ -1504,7 +1501,8 @@ for (const scenario of [
 			observed.filter((row) => row.session.id === sessionId).at(-1)?.session;
 		const snapshot = () =>
 			Effect.runPromise(
-				browser.rpc.SubscribeShell({ projectSlug }).pipe(
+				browser.rpc.SubscribeShell({}).pipe(
+					Stream.filter((frame) => frame._tag !== "projects"),
 					Stream.take(1),
 					Stream.runCollect,
 					Effect.map((envelopes) => Array.from(envelopes)[0]),
@@ -1531,7 +1529,7 @@ for (const scenario of [
 			const at = Math.floor(Date.now() / 1000) + (ui ? 20 : 10);
 			writeFileSync(join(configDir, "conduit-test-resets-at"), String(at));
 			await Effect.runPromise(
-				browser.rpc.input.submit({
+				browser.rpc["input.submit"]({
 					sessionId,
 					text: "usage-limit-account-1: finish the original request after reset",
 					inputId: `cut-off-${scenario}`,
@@ -1590,7 +1588,7 @@ for (const scenario of [
 				.poll(() => latest()?.limitRecovery)
 				.toEqual({ ...limited, scheduledAt: at });
 			if (ui) {
-				const resetLabel = formatSnoozeTime(at * 1000);
+				const resetLabel = usageForecastTime(at * 1000, Date.now());
 				await expect(strip).toHaveAttribute("data-state", "waiting");
 				await expect(page.getByTestId("usage-limit-title")).toHaveText(
 					mobile
@@ -1883,19 +1881,17 @@ for (const scenario of ["auto", "restart", "no-reset", "off"] as const) {
 		);
 		const observed: { sequence: number; session: SessionInfo }[] = [];
 		const subscription = Effect.runFork(
-			Stream.runForEach(
-				browser.rpc.SubscribeShell({ projectSlug }),
-				(envelope) =>
-					Effect.sync(() => {
-						if (envelope._tag === "snapshot")
-							for (const session of envelope.rows)
-								observed.push({ sequence: envelope.sequence, session });
-						if (envelope._tag === "upsert")
-							observed.push({
-								sequence: envelope.sequence,
-								session: envelope.item,
-							});
-					}),
+			Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
+				Effect.sync(() => {
+					if (envelope._tag === "snapshot")
+						for (const session of envelope.rows)
+							observed.push({ sequence: envelope.sequence, session });
+					if (envelope._tag === "upsert")
+						observed.push({
+							sequence: envelope.sequence,
+							session: envelope.item,
+						});
+				}),
 			),
 		);
 		const latest = () =>
@@ -1915,7 +1911,7 @@ for (const scenario of ["auto", "restart", "no-reset", "off"] as const) {
 			writeFileSync(join(configDir, "conduit-test-quota"), "available");
 			const noReset = scenario === "no-reset";
 			await Effect.runPromise(
-				browser.rpc.input.submit({
+				browser.rpc["input.submit"]({
 					sessionId,
 					text: noReset
 						? "usage-limit-account-1-no-reset: finish the original request"
@@ -1965,7 +1961,7 @@ for (const scenario of ["auto", "restart", "no-reset", "off"] as const) {
 			await expect
 				.poll(() => latest()?.limitRecovery)
 				.toEqual({ ...limited, scheduledAt: at, auto: true });
-			const resetLabel = formatSnoozeTime(at * 1000);
+			const resetLabel = usageForecastTime(at * 1000, Date.now());
 			await expect(strip).toHaveAttribute("data-state", "waiting");
 			await expect(page.getByTestId("usage-limit-title")).toHaveText(
 				mobile
@@ -2068,7 +2064,7 @@ test("scenario 12: changing agents sends a budgeted hidden handoff to a fresh na
 		if (!slug) throw new Error("SaveProject did not return the project's slug");
 		await app.goto(`${harness.baseUrl}/?p=${encodeURIComponent(slug)}`);
 		await page.locator("#new-session-btn:visible").click();
-		await expect(page).toHaveURL(/\/new\?/);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
 		const picker = page.locator(
 			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 		);
@@ -2078,11 +2074,10 @@ test("scenario 12: changing agents sends a budgeted hidden handoff to a fresh na
 			await expect(page.getByTestId(`picker-account-${id}`)).toBeVisible();
 		await capture("01-accounts");
 		await page.getByTestId(`picker-account-${account.id}`).click();
-		// An account starts on its own default; this fixture configures none.
 		await page.getByTestId("picker-row-model").click();
 		await page
 			.getByTestId("model-picker-list")
-			.locator('[data-model-id="harness"]')
+			.locator('[data-provider-id="claude"][data-model-id="harness"]')
 			.click();
 		await page.keyboard.press("Escape");
 		await expect(picker).toHaveAttribute("data-instance-id", account.id);
@@ -2254,18 +2249,17 @@ test("scenario 13: the new agent reads omitted history through the registered MC
 		if (!slug) throw new Error("SaveProject did not return the project's slug");
 		await app.goto(`${harness.baseUrl}/?p=${encodeURIComponent(slug)}`);
 		await page.locator("#new-session-btn:visible").click();
-		await expect(page).toHaveURL(/\/new\?/);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+\?/);
 		const picker = page.locator(
 			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 		);
 		await openPickerRoot(page, picker);
 		await page.getByTestId("picker-harness-claude").click();
 		await page.getByTestId(`picker-account-${addedInstanceId}`).click();
-		// An account starts on its own default; this fixture configures none.
 		await page.getByTestId("picker-row-model").click();
 		await page
 			.getByTestId("model-picker-list")
-			.locator('[data-model-id="harness"]')
+			.locator('[data-provider-id="claude"][data-model-id="harness"]')
 			.click();
 		await page.keyboard.press("Escape");
 
@@ -2532,26 +2526,25 @@ for (const behavior of [
 		);
 		const observed: { sequence: number; session: SessionInfo }[] = [];
 		const subscription = Effect.runFork(
-			Stream.runForEach(
-				browser.rpc.SubscribeShell({ projectSlug }),
-				(envelope) =>
-					Effect.sync(() => {
-						if (envelope._tag === "snapshot")
-							for (const session of envelope.rows)
-								observed.push({ sequence: envelope.sequence, session });
-						if (envelope._tag === "upsert")
-							observed.push({
-								sequence: envelope.sequence,
-								session: envelope.item,
-							});
-					}),
+			Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
+				Effect.sync(() => {
+					if (envelope._tag === "snapshot")
+						for (const session of envelope.rows)
+							observed.push({ sequence: envelope.sequence, session });
+					if (envelope._tag === "upsert")
+						observed.push({
+							sequence: envelope.sequence,
+							session: envelope.item,
+						});
+				}),
 			),
 		);
 		const latest = () =>
 			observed.filter((row) => row.session.id === sessionId).at(-1)?.session;
 		const snapshot = () =>
 			Effect.runPromise(
-				browser.rpc.SubscribeShell({ projectSlug }).pipe(
+				browser.rpc.SubscribeShell({}).pipe(
+					Stream.filter((frame) => frame._tag !== "projects"),
 					Stream.take(1),
 					Stream.runCollect,
 					Effect.map((envelopes) => Array.from(envelopes)[0]),
@@ -2559,7 +2552,7 @@ for (const behavior of [
 			);
 		const send = (text: string, commandId: string) =>
 			Effect.runPromise(
-				browser.rpc.input.submit({
+				browser.rpc["input.submit"]({
 					sessionId,
 					text,
 					inputId: commandId,
@@ -2630,30 +2623,30 @@ for (const behavior of [
 						instanceId: target.id,
 						originId: browser.originId,
 					})
-					.pipe(Effect.either),
+					.pipe(Effect.result),
 			);
 			evidence["preview"] = preview;
 			expect(await snapshot()).toEqual(before);
 			expect(harness.claudeOptions()).toHaveLength(callsBefore);
 			if (behavior === "too-large") {
 				expect(preview).toMatchObject({
-					_tag: "Left",
-					left: { _tag: "HandoffTooLarge", message: expect.any(String) },
+					_tag: "Failure",
+					failure: { _tag: "HandoffTooLarge", message: expect.any(String) },
 				});
 			} else {
-				expect(preview._tag).toBe("Right");
-				if (preview._tag !== "Right") throw new Error("Preview failed");
-				expect(preview.right).toMatchObject({
+				expect(preview._tag).toBe("Success");
+				if (preview._tag !== "Success") throw new Error("Preview failed");
+				expect(preview.success).toMatchObject({
 					included: expect.any(Number),
 					omitted: expect.any(Number),
 					firstMessageIncluded: true,
 					tokens: expect.any(Number),
 				});
-				expect(preview.right.included).toBeGreaterThanOrEqual(2);
-				expect(preview.right.included + preview.right.omitted).toBe(
+				expect(preview.success.included).toBeGreaterThanOrEqual(2);
+				expect(preview.success.included + preview.success.omitted).toBe(
 					historyBefore.messages.length - (hasCutOff ? 1 : 0),
 				);
-				expect(preview.right.tokens).toBeGreaterThan(0);
+				expect(preview.success.tokens).toBeGreaterThan(0);
 			}
 			writeFileSync(
 				join(target.configDir, "conduit-test-quota"),
@@ -2704,10 +2697,10 @@ for (const behavior of [
 							expectedInstanceId: source.id,
 							originId: browser.originId,
 						})
-						.pipe(Effect.either),
+						.pipe(Effect.result),
 				);
 			const switchFromStrip = async () => {
-				if (preview._tag !== "Right") throw new Error("Preview failed");
+				if (preview._tag !== "Success") throw new Error("Preview failed");
 				await page.getByTestId("usage-limit-switch-account").click();
 				const row = page.locator(
 					`[data-testid="account-switch-option"][data-account="${target.id}"]`,
@@ -2729,14 +2722,14 @@ for (const behavior of [
 				);
 				// The count the dialog shows is the preview's, the handoff's own budget.
 				await expect(page.getByTestId("handoff-message-count")).toHaveText(
-					handoffMessagesLine(preview.right, mobile),
+					handoffMessagesLine(preview.success, mobile),
 				);
 				await page.screenshot({ path: join(artifacts, "02-confirm.png") });
 				await page.getByTestId("handoff-confirm").click();
 				await expect(dialog).toHaveCount(0);
 				if (behavior !== "unavailable") {
 					await expect(strip).toHaveCount(0);
-					return { _tag: "Right" } as const;
+					return { _tag: "Success" } as const;
 				}
 				const toast = page.locator('.toast-card[data-variant="error"]');
 				await expect(toast).toContainText("Couldn't switch to Account 2");
@@ -2744,8 +2737,8 @@ for (const behavior of [
 				await page.screenshot({ path: join(artifacts, "03-refused.png") });
 				// The typed refusal behind the toast; asking again changes nothing either.
 				const refused = await continueSession();
-				if (refused._tag === "Left")
-					await expect(toast).toContainText(refused.left.message);
+				if (refused._tag === "Failure")
+					await expect(toast).toContainText(refused.failure.message);
 				return refused;
 			};
 			const switching = viaStrip ? switchFromStrip() : continueSession();
@@ -2761,6 +2754,9 @@ for (const behavior of [
 				queuedSend.catch((error) => {
 					evidence["queuedSendError"] = String(error);
 				});
+				// A later RPC on the same connection gives the held submit a chance to run.
+				const heldStop = await snapshot();
+				// The submit's permit wait has no public signal; retain a real pending-observation window.
 				expect(
 					await Promise.race([
 						queuedSend.then(() => true),
@@ -2769,15 +2765,15 @@ for (const behavior of [
 				).toBe(false);
 				expect(harness.claudeOptions()).toHaveLength(callsBefore);
 				expect(latest()?.resumes ?? []).toHaveLength(0);
-				evidence["heldStop"] = await snapshot();
+				evidence["heldStop"] = heldStop;
 				writeFileSync(join(harness.root, "release-switch-stop"), "release");
 			}
 			const result = await switching;
 			evidence["result"] = result;
 			if (["unavailable", "limited", "too-large"].includes(behavior)) {
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: {
+					_tag: "Failure",
+					failure: {
 						_tag:
 							behavior === "too-large"
 								? "HandoffTooLarge"
@@ -2792,7 +2788,7 @@ for (const behavior of [
 				expect(harness.claudeOptions()).toHaveLength(callsBefore);
 				return;
 			}
-			expect(result._tag).toBe("Right");
+			expect(result._tag).toBe("Success");
 			expect(
 				await Effect.runPromise(browser.rpc.GetAgents({ sessionId })),
 			).toMatchObject({ instanceId: target.id });
@@ -2930,7 +2926,7 @@ for (const behavior of [
 					]);
 				const forkPrompt = `Continue the ${behavior} fork.`;
 				await Effect.runPromise(
-					browser.rpc.input.submit({
+					browser.rpc["input.submit"]({
 						sessionId: fork.sessionId,
 						text: forkPrompt,
 						inputId: `continue-${behavior}`,
@@ -2998,8 +2994,8 @@ for (const behavior of [
 				await expect.poll(() => latest()?.status).toBe("idle");
 				expect(latest()?.resumes).toHaveLength(1);
 				// The limited turn still wrote the handoff into account 2's native
-				// session, so a later continuation there resumes it natively.
-				expect(await receipt()).toMatchObject({
+				// session. Its receipt commits separately after the idle event.
+				await expect.poll(receipt).toMatchObject({
 					handoff: { instanceId: target.id, firstMessageIncluded: true },
 				});
 			} else {
@@ -3049,10 +3045,10 @@ for (const behavior of [
 				if (
 					behavior !== "die-once" &&
 					behavior !== "fork-uncovered" &&
-					preview._tag === "Right"
+					preview._tag === "Success"
 				) {
 					const delivered = (await receipt()).handoff;
-					expect(delivered).toMatchObject(preview.right);
+					expect(delivered).toMatchObject(preview.success);
 				}
 				await expect.poll(() => latest()?.limitRecovery).toBeNull();
 				await expect.poll(() => latest()?.status).toBe("idle");
@@ -3188,7 +3184,7 @@ test("story 16: composer account cards switch the session, not the project", asy
 	);
 	const observed: SessionInfo[] = [];
 	const subscription = Effect.runFork(
-		Stream.runForEach(browser.rpc.SubscribeShell({ projectSlug }), (envelope) =>
+		Stream.runForEach(browser.rpc.SubscribeShell({}), (envelope) =>
 			Effect.sync(() => {
 				if (envelope._tag === "snapshot") observed.push(...envelope.rows);
 				if (envelope._tag === "upsert") observed.push(envelope.item);
@@ -3198,7 +3194,7 @@ test("story 16: composer account cards switch the session, not the project", asy
 	const latest = () => observed.filter((row) => row.id === sessionId).at(-1);
 	const send = (text: string, commandId: string) =>
 		Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId,
 				text,
 				inputId: commandId,

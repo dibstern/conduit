@@ -8,6 +8,9 @@
 import type { SurfacingMark } from "../contracts/category-set.js";
 import type { ProjectSetupState } from "../contracts/project-setup.js";
 import type { InputCut, Utf8Bytes } from "../contracts/tool-wire.js";
+
+export type { DraftListItem } from "../contracts/ws-rpc.js";
+
 import type {
 	AskUserQuestion,
 	FileEntry,

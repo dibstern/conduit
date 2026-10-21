@@ -96,16 +96,18 @@
 		const bar = tabBarEl;
 		const inline = inlineKeysEl;
 		const slot = keysSlotEl;
-		// Reobserve the bar's children when its optional controls change.
+		// Reobserve when tabs or optional controls change.
 		canCreate;
 		folders.length;
+		tabs;
+		pendingTitle;
 		if (!bar || !inline || !slot || typeof ResizeObserver === "undefined") return;
 		const measure = () => {
 			const style = getComputedStyle(bar);
 			let required =
 				Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight);
 			for (const child of bar.children) {
-				required += child.getBoundingClientRect().width;
+				required += child === tabListEl ? child.scrollWidth : child.getBoundingClientRect().width;
 				// The right controls' auto margin fills spare space, not natural width.
 				if (child !== slot.parentElement) {
 					const childStyle = getComputedStyle(child);
@@ -138,6 +140,19 @@
 	let renameValue: string = $state("");
 	let renameInputEl = $state<HTMLInputElement>();
 	let tabListEl: HTMLDivElement | null = $state(null);
+
+	$effect(() => {
+		activeTabId;
+		const list = tabListEl;
+		const active = list?.querySelector<HTMLElement>('[aria-selected="true"]');
+		if (!list || !active) return;
+		const observer = new ResizeObserver(() => {
+			active.scrollIntoView({ block: "nearest", inline: "nearest" });
+		});
+		observer.observe(list);
+		observer.observe(active);
+		return () => observer.disconnect();
+	});
 
 	const FONT_SIZE_MIN = 6;
 	const FONT_SIZE_MAX = 24;
@@ -361,13 +376,13 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			bind:this={tabBarEl}
-			class="term-tab-bar flex items-center gap-0 px-1 bg-bg border-b border-border shrink-0 overflow-x-auto min-h-9"
+			class="term-tab-bar flex items-center gap-0 px-1 bg-bg border-b border-border shrink-0 min-h-9"
 			ontouchstart={onTabBarTouchStart}
 		>
 			<!-- Tab buttons -->
 			<div
 				bind:this={tabListEl}
-				class="flex items-center shrink-0"
+				class="flex items-center min-w-0 overflow-x-auto"
 				role="tablist"
 				aria-label="Terminal sessions"
 			>

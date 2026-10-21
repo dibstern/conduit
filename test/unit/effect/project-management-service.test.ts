@@ -11,7 +11,7 @@ import { makeMockConfig } from "../../helpers/mock-factories.js";
 describe("standalone ProjectManagementServiceLive", () => {
 	const layer = ProjectManagementServiceLive.pipe(
 		Layer.provide(
-			Layer.succeed(ConfigTag, makeMockConfig({ slug: "standalone" })),
+			Layer.succeed(ConfigTag)(makeMockConfig({ slug: "standalone" })),
 		),
 	);
 
@@ -27,18 +27,18 @@ describe("standalone ProjectManagementServiceLive", () => {
 		Effect.gen(function* () {
 			const service = yield* ProjectManagementServiceTag;
 			expect(
-				yield* Effect.either(service.save({ folders: ["/work/new"] })),
+				yield* Effect.result(service.save({ folders: ["/work/new"] })),
 			).toMatchObject({
-				_tag: "Left",
-				left: {
+				_tag: "Failure",
+				failure: {
 					_tag: "ProjectManagementNotSupported",
 					operation: "save",
 					message: "Saving projects is not supported in this mode",
 				},
 			});
-			expect(yield* Effect.either(service.remove("missing"))).toMatchObject({
-				_tag: "Left",
-				left: {
+			expect(yield* Effect.result(service.remove("missing"))).toMatchObject({
+				_tag: "Failure",
+				failure: {
 					_tag: "ProjectManagementNotSupported",
 					operation: "remove",
 					message: "Removing projects is not supported in this mode",

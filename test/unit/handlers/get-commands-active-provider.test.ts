@@ -29,10 +29,9 @@ import { withDispatchEffect } from "../../helpers/orchestration-engine-test-doub
 
 function openCodeSettingsLayer(client: OpenCodeAPI) {
 	const apiLayer = Layer.mergeAll(
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-		Layer.succeed(OpenCodeAPITag, client),
-		Layer.succeed(
-			OpenCodeInstancesTag,
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+		Layer.succeed(OpenCodeAPITag)(client),
+		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({ opencode: client }),
 		),
 	);
@@ -40,12 +39,11 @@ function openCodeSettingsLayer(client: OpenCodeAPI) {
 		apiLayer,
 		Layer.mergeAll(
 			OpenCodeSettingsServiceLive.pipe(Layer.provide(apiLayer)),
-			Layer.succeed(LoggerTag, makeHandlerLogger()),
-			Layer.succeed(
-				ConfigTag,
+			Layer.succeed(LoggerTag)(makeHandlerLogger()),
+			Layer.succeed(ConfigTag)(
 				makeMockConfig({ projectDir: "/primary-folder" }),
 			),
-			Layer.succeed(SessionWorkspaceTag, {
+			Layer.succeed(SessionWorkspaceTag)({
 				renameBranch: () => Effect.die("unused"),
 				get: () => Effect.succeed("/session-worktree"),
 				move: () => Effect.succeed("/session-worktree"),
@@ -89,24 +87,29 @@ describe("getCommandsForSession active provider", () => {
 
 		const layer = Layer.mergeAll(
 			openCodeSettingsLayer(client),
-			Layer.succeed(OrchestrationEngineTag, engine),
-			Layer.succeed(LoggerTag, makeHandlerLogger()),
+			Layer.succeed(OrchestrationEngineTag)(engine),
+			Layer.succeed(LoggerTag)(makeHandlerLogger()),
 		);
 
 		return getCommandsForSession("session-1").pipe(
-			Effect.provide(layer),
-			Effect.tap((commands) => {
-				expect(engine.dispatchEffect).toHaveBeenCalledWith({
-					type: "discover",
-					providerId: "claude",
-					account: expect.objectContaining({ driver: "claude", id: "claude" }),
-					workspaceRoot: "/session-worktree",
-				});
-				expect(client.app.commands).not.toHaveBeenCalled();
-				expect(commands).toEqual([
-					{ name: "init", description: "Init Claude", args: "[path]" },
-				]);
-			}),
+			Effect.provide(layer, { local: true }),
+			Effect.tap((commands) =>
+				Effect.sync(() => {
+					expect(engine.dispatchEffect).toHaveBeenCalledWith({
+						type: "discover",
+						providerId: "claude",
+						account: expect.objectContaining({
+							driver: "claude",
+							id: "claude",
+						}),
+						workspaceRoot: "/session-worktree",
+					});
+					expect(client.app.commands).not.toHaveBeenCalled();
+					expect(commands).toEqual([
+						{ name: "init", description: "Init Claude", args: "[path]" },
+					]);
+				}),
+			),
 		);
 	});
 
@@ -124,16 +127,18 @@ describe("getCommandsForSession active provider", () => {
 
 			const layer = Layer.mergeAll(
 				openCodeSettingsLayer(client),
-				Layer.succeed(OrchestrationEngineTag, engine),
+				Layer.succeed(OrchestrationEngineTag)(engine),
 			);
 
 			return getCommandsForSession("session-1").pipe(
-				Effect.provide(layer),
-				Effect.tap((commands) => {
-					expect(engine.dispatchEffect).not.toHaveBeenCalled();
-					expect(client.app.commands).toHaveBeenCalledOnce();
-					expect(commands).toEqual(opencodeCommands);
-				}),
+				Effect.provide(layer, { local: true }),
+				Effect.tap((commands) =>
+					Effect.sync(() => {
+						expect(engine.dispatchEffect).not.toHaveBeenCalled();
+						expect(client.app.commands).toHaveBeenCalledOnce();
+						expect(commands).toEqual(opencodeCommands);
+					}),
+				),
 			);
 		},
 	);
@@ -146,15 +151,17 @@ describe("getCommandsForSession active provider", () => {
 
 		const layer = Layer.mergeAll(
 			openCodeSettingsLayer(client),
-			Layer.succeed(OrchestrationEngineTag, withDispatchEffect({})),
+			Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({})),
 		);
 
 		return getCommandsForSession(undefined).pipe(
-			Effect.provide(layer),
-			Effect.tap((commands) => {
-				expect(client.app.commands).toHaveBeenCalledOnce();
-				expect(commands).toEqual(opencodeCommands);
-			}),
+			Effect.provide(layer, { local: true }),
+			Effect.tap((commands) =>
+				Effect.sync(() => {
+					expect(client.app.commands).toHaveBeenCalledOnce();
+					expect(commands).toEqual(opencodeCommands);
+				}),
+			),
 		);
 	});
 
@@ -191,27 +198,29 @@ describe("getCommandsForSession active provider", () => {
 
 			const layer = Layer.mergeAll(
 				openCodeSettingsLayer(client),
-				Layer.succeed(OrchestrationEngineTag, engine),
-				Layer.succeed(LoggerTag, makeHandlerLogger()),
+				Layer.succeed(OrchestrationEngineTag)(engine),
+				Layer.succeed(LoggerTag)(makeHandlerLogger()),
 			);
 
 			return getCommandsForSession(undefined).pipe(
-				Effect.provide(layer),
-				Effect.tap((commands) => {
-					expect(client.app.commands).toHaveBeenCalledOnce();
-					expect(engine.dispatchEffect).toHaveBeenCalledWith({
-						type: "discover",
-						providerId: "claude",
-						account: expect.objectContaining({
-							driver: "claude",
-							id: "claude",
-						}),
-						workspaceRoot: "/primary-folder",
-					});
-					expect(commands).toEqual([
-						{ name: "init", description: "Init Claude", args: "[path]" },
-					]);
-				}),
+				Effect.provide(layer, { local: true }),
+				Effect.tap((commands) =>
+					Effect.sync(() => {
+						expect(client.app.commands).toHaveBeenCalledOnce();
+						expect(engine.dispatchEffect).toHaveBeenCalledWith({
+							type: "discover",
+							providerId: "claude",
+							account: expect.objectContaining({
+								driver: "claude",
+								id: "claude",
+							}),
+							workspaceRoot: "/primary-folder",
+						});
+						expect(commands).toEqual([
+							{ name: "init", description: "Init Claude", args: "[path]" },
+						]);
+					}),
+				),
 			);
 		},
 	);
@@ -230,19 +239,21 @@ describe("getCommandsForSession active provider", () => {
 
 		const layer = Layer.mergeAll(
 			openCodeSettingsLayer(client),
-			Layer.succeed(OrchestrationEngineTag, engine),
-			Layer.succeed(LoggerTag, log),
+			Layer.succeed(OrchestrationEngineTag)(engine),
+			Layer.succeed(LoggerTag)(log),
 		);
 
 		return getCommandsForSession("session-1").pipe(
-			Effect.provide(layer),
-			Effect.tap((commands) => {
-				expect(client.app.commands).not.toHaveBeenCalled();
-				expect(log.warn).toHaveBeenCalledWith(
-					expect.stringContaining("Failed to discover Claude commands"),
-				);
-				expect(commands).toEqual([]);
-			}),
+			Effect.provide(layer, { local: true }),
+			Effect.tap((commands) =>
+				Effect.sync(() => {
+					expect(client.app.commands).not.toHaveBeenCalled();
+					expect(log.warn).toHaveBeenCalledWith(
+						expect.stringContaining("Failed to discover Claude commands"),
+					);
+					expect(commands).toEqual([]);
+				}),
+			),
 		);
 	});
 });

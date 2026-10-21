@@ -11,10 +11,10 @@ export interface RelayStatusSnapshotService {
 	readonly setIsProcessing: (isProcessing: boolean) => Effect.Effect<void>;
 }
 
-export class RelayStatusSnapshotTag extends Context.Tag("RelayStatusSnapshot")<
+export class RelayStatusSnapshotTag extends Context.Service<
 	RelayStatusSnapshotTag,
 	RelayStatusSnapshotService
->() {}
+>()("RelayStatusSnapshot") {}
 
 export const makeRelayStatusSnapshot = (): RelayStatusSnapshotService => {
 	let snapshot: RelayStatusSnapshot = { sessionCount: 0, isProcessing: false };

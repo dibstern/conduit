@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Deferred, Effect, Exit, Fiber, Scope } from "effect";
@@ -26,11 +26,6 @@ import {
 	makeBaseSendTurnInput,
 	makeSuccessResult,
 } from "../../../helpers/mock-sdk.js";
-
-const REPO_ROOT = process.cwd();
-const CLAUDE_PROVIDER_DIR = "src/lib/provider/claude";
-
-const source = (path: string) => readFileSync(join(REPO_ROOT, path), "utf8");
 
 function makeBlockingQuery(
 	streamStarted: Deferred.Deferred<void>,
@@ -156,43 +151,6 @@ describe("Claude provider runtime boundary", () => {
 		}
 	});
 
-	it("wires the persisted override getter into the scoped constructor", () => {
-		const wiring = source("src/lib/provider/orchestration-wiring.ts");
-		const getters = wiring.match(
-			/claudeSettingsOverrides: \(\) =>\s*loadRelaySettings\(options\.configDir\)\.claudeSettings/g,
-		);
-
-		expect(getters).toHaveLength(1);
-	});
-
-	it("keeps live Claude turn state out of the provider instance facade", () => {
-		const providerInstance = source(
-			`${CLAUDE_PROVIDER_DIR}/claude-provider-instance.ts`,
-		);
-
-		expect(providerInstance).toContain("ClaudeProviderRuntime");
-		expect(providerInstance).not.toContain("sessions = new Map");
-		expect(providerInstance).not.toContain("sessionLocks");
-		expect(providerInstance).not.toContain("turnDeferredQueues");
-		expect(providerInstance).not.toContain("endedSessionStreams");
-	});
-
-	it("keeps Claude runtime state Effect-owned", () => {
-		const runtime = source(`${CLAUDE_PROVIDER_DIR}/claude-provider-runtime.ts`);
-
-		expect(runtime).toContain("ClaudeProviderRuntimeTag");
-		expect(runtime).toContain("Ref.Ref<ClaudeProviderRuntimeState>");
-		expect(runtime).toContain("HashMap.HashMap<string, ClaudeSessionContext>");
-		expect(runtime).toContain("FiberMap.FiberMap<string");
-		expect(runtime).not.toContain("streamConsumer");
-	});
-
-	it("removes stream consumer promises from session context", () => {
-		const types = source(`${CLAUDE_PROVIDER_DIR}/types.ts`);
-
-		expect(types).not.toContain("streamConsumer");
-	});
-
 	it("uses only the default SDK settings without an overrides getter", async () => {
 		const capturedSettings: SDKOptions["settings"][] = [];
 		const instance = makeTestClaudeProviderInstance({
@@ -308,7 +266,7 @@ describe("Claude provider runtime boundary", () => {
 				}).pipe(Effect.provideService(Scope.Scope, scope));
 				const instance = runtime;
 
-				const turnFiber = yield* Effect.fork(
+				const turnFiber = yield* Effect.forkChild(
 					instance
 						.sendTurnEffect(
 							makeBaseSendTurnInput({
@@ -316,12 +274,13 @@ describe("Claude provider runtime boundary", () => {
 								model: { providerId: "claude", modelId: "sonnet" },
 							}),
 						)
-						.pipe(Effect.either),
+						.pipe(Effect.result),
 				);
 				yield* Deferred.await(streamStarted).pipe(
-					Effect.timeoutFail({
+					Effect.timeoutOrElse({
 						duration: "1 second",
-						onTimeout: () => new Error("Claude stream did not start"),
+						orElse: () =>
+							Effect.fail((() => new Error("Claude stream did not start"))()),
 					}),
 				);
 
@@ -331,7 +290,7 @@ describe("Claude provider runtime boundary", () => {
 				expect(query.interrupt).toHaveBeenCalledTimes(1);
 				expect(query.close).toHaveBeenCalledTimes(1);
 				expect(getClaudeRuntimeSessionCountForTest(instance)).toBe(0);
-				expect(turnResult._tag).toBe("Left");
+				expect(turnResult._tag).toBe("Failure");
 			}),
 		);
 	});
@@ -354,7 +313,7 @@ describe("Claude provider runtime boundary", () => {
 						},
 					});
 					const instance = runtime;
-					const turn = yield* Effect.fork(
+					const turn = yield* Effect.forkChild(
 						instance
 							.sendTurnEffect(
 								makeBaseSendTurnInput({
@@ -362,7 +321,7 @@ describe("Claude provider runtime boundary", () => {
 									model: { providerId: "claude", modelId: "sonnet" },
 								}),
 							)
-							.pipe(Effect.either),
+							.pipe(Effect.result),
 					);
 					yield* Deferred.await(started);
 					expect(options?.perTaskStopAffordance).toBe(true);
@@ -373,10 +332,10 @@ describe("Claude provider runtime boundary", () => {
 					vi.mocked(query.stopTask).mockRejectedValueOnce(
 						new Error("SDK unavailable"),
 					);
-					const failure = yield* Effect.either(
+					const failure = yield* Effect.result(
 						instance.stopTaskEffect("task-stop", "shell"),
 					);
-					expect(failure._tag).toBe("Left");
+					expect(failure._tag).toBe("Failure");
 					expect(query.close).not.toHaveBeenCalled();
 					// Composer Stop retains its existing teardown behavior.
 					yield* instance.interruptTurnEffect("task-stop");

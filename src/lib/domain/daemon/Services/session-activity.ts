@@ -11,6 +11,7 @@ import {
 import { makeSessionBackgroundLiveness } from "../../../session/background-liveness.js";
 import { makeSessionCompactions } from "../../../session/session-compactions.js";
 import { makeSessionRetries } from "../../../session/session-retries.js";
+import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 
 export interface SessionActivity {
@@ -22,17 +23,17 @@ export interface SessionActivity {
 	readonly subscribe: Effect.Effect<Stream.Stream<string>, never, Scope.Scope>;
 }
 
-export class SessionActivityTag extends Context.Tag("SessionActivity")<
+export class SessionActivityTag extends Context.Service<
 	SessionActivityTag,
 	SessionActivity
->() {}
+>()("SessionActivity") {}
 
 /** Daemon-owned transient state; project relays only borrow its readers and writers. */
 export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 	function* () {
 		const changes = yield* PubSub.unbounded<string>();
 		const changed = (sessionId: string): void => {
-			changes.unsafeOffer(sessionId);
+			PubSub.publishUnsafe(changes, sessionId);
 		};
 		const compactions = makeSessionCompactions();
 		const retries = makeSessionRetries();
@@ -78,23 +79,34 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 			},
 			hintDismissals,
 			changed,
-			subscribe: Stream.fromPubSub(changes, { scoped: true }),
+			subscribe: Effect.map(PubSub.subscribe(changes), Stream.fromSubscription),
 		} satisfies SessionActivity;
 	},
 );
 
 /** Wake on changes, coalescing a burst into one leading and one trailing refresh. */
-export const SessionActivityDaemonLive = Layer.scoped(
+export const SessionActivityDaemonLive = Layer.effect(
 	SessionActivityTag,
 	Effect.gen(function* () {
 		const activity = yield* makeSessionActivity;
 		const bus = yield* DaemonEventBusTag;
+		const advances = yield* (yield* SessionEventBusTag).subscribeAdvances();
 		const changes = yield* activity.subscribe;
 		const pending = yield* Effect.acquireRelease(
 			Queue.sliding<void>(1),
 			Queue.shutdown,
 		);
 		yield* changes.pipe(
+			Stream.runForEach(() => Queue.offer(pending, undefined)),
+			Effect.forkScoped,
+		);
+		// Durable sidebar changes and transient activity share one daemon refresh
+		// cadence. A dropped advance may have contained a sidebar change.
+		yield* advances.pipe(
+			Stream.filter(
+				(advance) =>
+					advance.dropped === true || advance.collections.includes("sidebar"),
+			),
 			Stream.runForEach(() => Queue.offer(pending, undefined)),
 			Effect.forkScoped,
 		);
@@ -106,7 +118,7 @@ export const SessionActivityDaemonLive = Layer.scoped(
 				const delay = lastPublished + 1000 - now;
 				if (delay > 0) yield* Effect.sleep(delay);
 				// Everything received during the wait is represented by this read.
-				yield* Queue.takeAll(pending);
+				yield* Queue.clear(pending);
 				yield* PubSub.publish(bus, DaemonEvent.DaemonSessionsChanged());
 				lastPublished = yield* Clock.currentTimeMillis;
 			}

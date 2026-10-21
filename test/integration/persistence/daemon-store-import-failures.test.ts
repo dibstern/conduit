@@ -18,6 +18,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import Database from "better-sqlite3";
 import { Effect, ManagedRuntime } from "effect";
 import { afterAll, afterEach, beforeEach, expect, it } from "vitest";
@@ -353,9 +354,9 @@ for (const mode of ["seeded", "imported"] as const) {
 	it(`S10 committed WAL frames through a symlink are included when ${mode}`, async () => {
 		if (mode === "imported") await seed();
 		const project = await fixture(root, "wal");
-		const writer = new Database(project.sourcePath);
+		const writer = new DatabaseSync(project.sourcePath);
 		try {
-			writer.pragma("wal_autocheckpoint = 0");
+			writer.exec("PRAGMA wal_autocheckpoint = 0");
 			writer.exec("BEGIN; SELECT COUNT(*) FROM events");
 			await append(project, "wal_only");
 			writer.exec("COMMIT");
@@ -389,16 +390,19 @@ for (const mode of ["seeded", "imported"] as const) {
 	});
 }
 
-it("S5 a known migration id with an unknown name is newer-schema", async () => {
+it.each([
+	"UPDATE effect_sql_migrations SET name = 'future_replacement' WHERE migration_id = 60",
+	"UPDATE effect_sql_migrations SET migration_id = 9999 WHERE name = 'goal_check_metadata'",
+	"UPDATE effect_sql_migrations SET migration_id = 0 WHERE name = 'goal_check_metadata'",
+])("S5 refuses an unknown ledger mapping: %s", async (mutation) => {
 	const project = await fixture(root, "renamed-ledger");
-	edit(
-		project.sourcePath,
-		"UPDATE effect_sql_migrations SET name = 'future_replacement' WHERE migration_id = 60",
-	);
+	edit(project.sourcePath, mutation);
+	const before = sourceChecksums(project.sourcePath);
 	expect(await run("S5", project)).toMatchObject({
 		outcome: "failed",
 		error: { kind: "newer-schema" },
 	});
+	expect(sourceChecksums(project.sourcePath)).toEqual(before);
 });
 
 const shared = [
@@ -442,6 +446,7 @@ it("C1 excludes a shared session from every populated scoped table and imports i
 		"provider_state",
 		"tool_content",
 		"sent_alerts",
+		"input_drafts",
 		"projection_failures",
 		"session_pick_backfill",
 		"claude_runner_permission_replies",

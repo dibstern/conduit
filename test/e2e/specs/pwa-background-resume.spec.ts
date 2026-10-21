@@ -6,7 +6,6 @@
 import type { Page } from "@playwright/test";
 import { WS_PROTOCOL_VERSION } from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
-import { sendMockInputDraft } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 const SESSION_ID = "sess-pwa";
@@ -109,34 +108,5 @@ test.describe("PWA background/resume", () => {
 		// relay says lands and the only way out is a reload.
 		ws.sendMessage({ type: "client_count", count: 7 });
 		await expect(badge).toHaveText("7", { timeout: 5_000 });
-	});
-
-	test("does not clobber typed text with a stale server draft", async ({
-		page,
-		relayUrl,
-	}) => {
-		await mockRelayWebSocket(page, {
-			initMessages,
-			responses: new Map(),
-		});
-
-		await page.goto(new URL(`/s/${SESSION_ID}`, relayUrl).href);
-		await page
-			.locator("#connect-overlay")
-			.waitFor({ state: "hidden", timeout: 15_000 });
-
-		const composer = page.locator("#input");
-		await composer.fill("the newest thing I typed");
-
-		// Another tab's draft lags the last keystrokes by at least the 300 ms
-		// sync debounce.
-		await sendMockInputDraft(page, SESSION_ID, {
-			text: "the newest thi",
-			from: "other",
-		});
-		// The typed draft must remain unchanged through the stale sync window.
-		await page.waitForTimeout(500);
-
-		await expect(composer).toHaveValue("the newest thing I typed");
 	});
 });

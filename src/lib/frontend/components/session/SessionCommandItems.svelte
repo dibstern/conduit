@@ -68,7 +68,7 @@
 {/snippet}
 
 {#if presentation !== "menu"}
-	<LabelledGridGroup label="Triage" compact={presentation === "popover"}>
+	<LabelledGridGroup label="Triage" columns={triage.length > 4 ? 5 : 4} compact={presentation === "popover"}>
 		{#each triage as item (item.testId)}{@render tile(item)}{/each}
 	</LabelledGridGroup>
 	{#if session}<AutoSettleRow {session} {now} />{/if}

@@ -381,7 +381,7 @@ for (const mode of [
 			await expect(
 				page.getByText("That worktree no longer exists.", { exact: true }),
 			).toBeVisible();
-			await expect(page).toHaveURL(/\/new\?project=e2e-replay$/);
+			await expect(page).toHaveURL(/\/draft\/[^/?]+\?project=e2e-replay$/);
 			await expect(page.locator("#input")).toHaveValue("Keep this prompt");
 			expect(rpc.getRequests().some(({ tag }) => tag === "input.submit")).toBe(
 				false,

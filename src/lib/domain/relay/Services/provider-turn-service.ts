@@ -1,19 +1,19 @@
-import { SqlClient } from "@effect/sql";
-import { SqlError } from "@effect/sql/SqlError";
 import {
 	Context,
 	Deferred,
 	Effect,
-	type Either,
 	Exit,
 	FiberMap,
 	Layer,
 	Option,
 	PubSub,
+	type Result,
 	Schedule,
 	type Scope,
 	Stream,
 } from "effect";
+import { SqlClient } from "effect/sql";
+import { SqlError, UnknownError } from "effect/sql/SqlError";
 import type { Account } from "../../../contracts/account.js";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
 import type { InputDelivery } from "../../../contracts/stored-event.js";
@@ -30,6 +30,7 @@ import {
 	createEventId,
 } from "../../../persistence/events.js";
 import type { AccountDirectory } from "../../daemon/Services/account-directory.js";
+import type { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import type { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type { AlertsTag } from "./alerts.js";
 import type {
@@ -42,7 +43,6 @@ import {
 } from "./provider-runtime-ingestion-service.js";
 import {
 	ProviderTurnDispatchFibersTag,
-	ProviderTurnTimeoutRuntimeTag,
 	sendTurn,
 } from "./provider-turn-dispatch.js";
 import {
@@ -59,9 +59,10 @@ import type {
 import type { SessionManagerServiceTag } from "./session-manager-service.js";
 import {
 	clearProcessingTimeout,
-	OverridesStateTag,
+	type OverridesStateTag,
 } from "./session-overrides-state.js";
 import type { SessionTitleServiceTag } from "./session-title-service.js";
+import type { SessionWorkspaceTag } from "./session-workspace.js";
 
 export interface ProviderTurnServiceSendInput {
 	/** Continuation admission may already have resolved this immutable snapshot. */
@@ -112,7 +113,7 @@ export interface ProviderTurnServiceInterruptInput {
 export const STOP_ABORT_WAIT_MS = 30_000;
 
 type StopFailure =
-	| Effect.Effect.Error<ReturnType<typeof interruptTurn>>
+	| Effect.Error<ReturnType<typeof interruptTurn>>
 	| ProviderRuntimeIngestionError
 	| SqlError;
 
@@ -136,20 +137,20 @@ export interface ProviderTurnService {
 		answers?: Record<string, unknown>,
 	) => Effect.Effect<
 		void,
-		Effect.Effect.Error<ReturnType<typeof completeRecoveredQuestion>>
+		Effect.Error<ReturnType<typeof completeRecoveredQuestion>>
 	>;
 	readonly prepareTurnSession: (
 		input: ProviderTurnServicePrepareInput,
 	) => Effect.Effect<
 		string,
-		Effect.Effect.Error<ReturnType<typeof prepareTurnSession>>,
+		Effect.Error<ReturnType<typeof prepareTurnSession>>,
 		OverridesStateTag
 	>;
 	readonly sendTurn: (
 		input: ProviderTurnServiceSendInput,
 	) => Effect.Effect<
 		void,
-		Effect.Effect.Error<ReturnType<typeof sendTurn>>,
+		Effect.Error<ReturnType<typeof sendTurn>>,
 		OverridesStateTag
 	>;
 	/** Install the session's Stop fence and fork its abort, or join the Stop in
@@ -161,14 +162,16 @@ export interface ProviderTurnService {
 	) => Effect.Effect<Effect.Effect<void, StopFailure>>;
 }
 
-export class ProviderTurnServiceTag extends Context.Tag("ProviderTurnService")<
+export class ProviderTurnServiceTag extends Context.Service<
 	ProviderTurnServiceTag,
 	ProviderTurnService
->() {}
+>()("ProviderTurnService") {}
 
 const makeProviderTurnService = Effect.gen(function* () {
-	const context = yield* Effect.context<
+	const providedContext = yield* Effect.context<
 		| AccountDirectory
+		| OpenCodeInstancesTag
+		| SessionWorkspaceTag
 		| OpenCodeAPITag
 		| WebSocketHandlerTag
 		| LoggerTag
@@ -188,12 +191,6 @@ const makeProviderTurnService = Effect.gen(function* () {
 		| EventStoreEffectTag
 		| ProjectionRunnerEffectTag
 	>();
-	const runtime = yield* Effect.runtime<OverridesStateTag>();
-	const overridesRef = yield* OverridesStateTag;
-	const providedContext = Context.add(context, ProviderTurnTimeoutRuntimeTag, {
-		runtime,
-		overridesRef,
-	});
 	const sql = yield* SqlClient.SqlClient;
 	const ingestion = yield* ProviderRuntimeIngestionTag;
 	const scope = yield* Effect.scope;
@@ -207,11 +204,11 @@ const makeProviderTurnService = Effect.gen(function* () {
 	const lift = (sessionId: string) => PubSub.publish(lifts, sessionId);
 	const abort = (
 		input: ProviderTurnServiceInterruptInput,
-		cutoff: Either.Either<{ turn: number; admission: number }, SqlError>,
+		cutoff: Result.Result<{ turn: number; admission: number }, SqlError>,
 	) =>
 		Effect.gen(function* () {
 			// Read under the inbox permit: a continuation admitted since is not ours.
-			const { turn: lastTurn, admission } = yield* cutoff;
+			const { turn: lastTurn, admission } = yield* Effect.fromResult(cutoff);
 			const [turn] = yield* sql<{ input_id: string | null }>`
 				SELECT COALESCE((SELECT json_extract(payload_json, '$.inputId')
 					FROM provider_command_outbox
@@ -259,7 +256,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 				// and no one signal covers them. Advances need the optional session
 				// bus and only name projected sessions, so an admission or a direct
 				// write would go unseen. The read is cheap and lasts only while stopping.
-				Effect.zipRight(
+				Effect.andThen(
 					Effect.repeat(running, {
 						while: (still) => still,
 						schedule: Schedule.spaced("100 millis"),
@@ -285,10 +282,11 @@ const makeProviderTurnService = Effect.gen(function* () {
 			// The projection ends whichever turn is open, so a continuation admitted
 			// since the last check would end with it. Re-check in the transaction.
 			// Transaction spans can proxy the error; its cause token keeps its identity.
-			const superseded = new SqlError({
+			const supersededReason = new UnknownError({
 				message: "Stop retirement superseded",
 				cause: Symbol("Stop retirement superseded"),
 			});
+			const superseded = new SqlError({ reason: supersededReason });
 			yield* ingestion
 				.ingestBatch(
 					[
@@ -310,7 +308,8 @@ const makeProviderTurnService = Effect.gen(function* () {
 				.pipe(
 					Effect.catchIf(
 						(error) =>
-							error._tag === "SqlError" && error.cause === superseded.cause,
+							error._tag === "SqlError" &&
+							error.reason.cause === supersededReason.cause,
 						() => Effect.void,
 					),
 				);
@@ -325,15 +324,15 @@ const makeProviderTurnService = Effect.gen(function* () {
 				}),
 				(hold) =>
 					Effect.sync(() => accountSwitches.delete(sessionId)).pipe(
-						Effect.zipRight(Deferred.succeed(hold, undefined)),
-						Effect.zipRight(lift(sessionId)),
+						Effect.andThen(Deferred.succeed(hold, undefined)),
+						Effect.andThen(lift(sessionId)),
 					),
 			).pipe(Effect.asVoid),
 		turnFences: (sessionId) => ({
 			stopping: stopping.has(sessionId),
 			switching: accountSwitches.has(sessionId),
 		}),
-		fenceLifts: Effect.map(PubSub.subscribe(lifts), Stream.fromQueue),
+		fenceLifts: Effect.map(PubSub.subscribe(lifts), Stream.fromSubscription),
 		completeRecoveredQuestion: (question, result, answers) =>
 			completeRecoveredQuestion(question, result, answers).pipe(
 				Effect.provide(providedContext),
@@ -365,17 +364,17 @@ const makeProviderTurnService = Effect.gen(function* () {
 						(SELECT COALESCE(MAX(request_sequence), 0) FROM provider_command_outbox
 							WHERE session_id = ${input.sessionId}) AS admission`.pipe(
 						Effect.map(([row]) => row ?? { turn: 0, admission: 0 }),
-						Effect.either,
+						Effect.result,
 					);
 					const done = yield* Deferred.make<void, StopFailure>();
 					stopping.set(input.sessionId, done);
 					yield* abort(input, cutoff).pipe(
 						Effect.onExit((exit) =>
 							Effect.sync(() => stopping.delete(input.sessionId)).pipe(
-								Effect.zipRight(Deferred.done(done, exit)),
+								Effect.andThen(Deferred.done(done, exit)),
 								// Scope close interrupts the worker; nothing is left to drain.
-								Effect.zipRight(
-									Exit.isInterrupted(exit)
+								Effect.andThen(
+									Exit.hasInterrupts(exit)
 										? Effect.void
 										: lift(input.sessionId),
 								),
@@ -392,7 +391,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 	return service;
 });
 
-const ProviderTurnDispatchFibersLive = Layer.scoped(
+const ProviderTurnDispatchFibersLive = Layer.effect(
 	ProviderTurnDispatchFibersTag,
 	FiberMap.make<string, void, unknown>(),
 );
@@ -401,6 +400,8 @@ export const ProviderTurnServiceLive: Layer.Layer<
 	ProviderTurnServiceTag,
 	never,
 	| AccountDirectory
+	| OpenCodeInstancesTag
+	| SessionWorkspaceTag
 	| OpenCodeAPITag
 	| WebSocketHandlerTag
 	| LoggerTag
@@ -418,6 +419,6 @@ export const ProviderTurnServiceLive: Layer.Layer<
 	| SqlClient.SqlClient
 	| EventStoreEffectTag
 	| ProjectionRunnerEffectTag
-> = Layer.scoped(ProviderTurnServiceTag, makeProviderTurnService).pipe(
+> = Layer.effect(ProviderTurnServiceTag, makeProviderTurnService).pipe(
 	Layer.provide(ProviderTurnDispatchFibersLive),
 );

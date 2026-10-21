@@ -10,9 +10,9 @@ import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, it } from "vitest";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
@@ -98,7 +98,7 @@ it("batch progress survives restart and a kill before COMMIT without skipping a 
 						}),
 					]);
 					yield* commit([delta("A")]);
-					const failed = yield* Effect.either(
+					const failed = yield* Effect.result(
 						commit([retry], {
 							beforeCommit: Effect.sync(() => {
 								copyFileSync(filename, killed);
@@ -112,7 +112,7 @@ it("batch progress survives restart and a kill before COMMIT without skipping a 
 							),
 						}),
 					);
-					expect(failed._tag).toBe("Left");
+					expect(failed._tag).toBe("Failure");
 					expect(
 						yield* sql`SELECT last_applied_seq FROM projector_cursors WHERE projector_name LIKE '@batch:%'`,
 					).toEqual([{ last_applied_seq: 3 }]);
@@ -340,7 +340,7 @@ it.each([
 	const dir = mkdtempSync(join(tmpdir(), "conduit-atomic-publish-"));
 	const filename = join(dir, "events.db");
 	const observed: unknown[] = [];
-	const bus = Layer.succeed(SessionEventBusTag, {
+	const bus = Layer.succeed(SessionEventBusTag)({
 		publish: () =>
 			Effect.gen(function* () {
 				const rows = yield* Effect.gen(function* () {
@@ -406,10 +406,10 @@ it.each([
 					Layer.mergeAll(
 						persistence,
 						bus,
-						Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-						Layer.succeed(ConfigTag, makeMockConfig()),
-						Layer.succeed(LoggerTag, makeMockLogger()),
-						Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+						Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+						Layer.succeed(ConfigTag)(makeMockConfig()),
+						Layer.succeed(LoggerTag)(makeMockLogger()),
+						Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 					),
 				),
 			),
@@ -441,7 +441,7 @@ it("failed establishment validation rolls back the seed, event and projections",
 				const manager = yield* SessionManagerServiceTag;
 				const store = yield* EventStoreEffectTag;
 				const readQuery = yield* ReadQueryEffectTag;
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					manager.establishOpenCodeSession(
 						{
 							id: "failed-establishment",
@@ -454,9 +454,9 @@ it("failed establishment validation rolls back the seed, event and projections",
 						MANAGED_OPENCODE_ACCOUNT_ID,
 					),
 				);
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left")
-					expect(result.left.operation).toBe(
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure")
+					expect(result.failure.operation).toBe(
 						"establishOpenCodeSession.project",
 					);
 				expect(

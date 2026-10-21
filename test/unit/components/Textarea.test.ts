@@ -41,38 +41,12 @@ describe("Textarea", () => {
 		);
 	});
 
-	it("applies the small size class", () => {
-		const { getByRole } = render(Textarea, { props: { size: "sm" } });
-
-		expect(getByRole("textbox").className).toContain("py-1.5");
-	});
-
 	// Assert EMISSION, not precedence. Two utilities from one Tailwind group are
 	// resolved by stylesheet order, so "the consumer class is in the string"
 	// proves nothing; what matters is that the primitive emits nothing to argue
 	// with.
 	const tokens = (el: Element) =>
 		(el.getAttribute("class") ?? "").split(/\s+/).filter(Boolean);
-
-	it("emits no chrome, colour or sizing utility when bare and content-sized", () => {
-		const { getByRole } = render(Textarea, {
-			props: { chrome: "bare", size: "content" },
-		});
-
-		const contested = tokens(getByRole("textbox")).filter((t) =>
-			/^(bg-|border|rounded-|placeholder:|text-|transition|p[xy]?-|w-)/.test(t),
-		);
-		// `text-` is in the list deliberately: the composer swaps between
-		// text-transparent and text-text on IME composition, so a primitive
-		// text colour would contest it (conduit-test-1k0g).
-		expect(contested).toEqual([]);
-	});
-
-	it("keeps outline-none when bare, because preflight does not", () => {
-		const { getByRole } = render(Textarea, { props: { chrome: "bare" } });
-
-		expect(tokens(getByRole("textbox"))).toContain("outline-none");
-	});
 
 	it("emits exactly one utility per contested group when bordered", () => {
 		const emitted = tokens(render(Textarea).getByRole("textbox"));

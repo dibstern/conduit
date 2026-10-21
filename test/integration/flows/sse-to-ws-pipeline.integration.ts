@@ -3,15 +3,7 @@
 // SSE -> persisted projections -> SubscribeSessionDetail and SubscribeShell.
 
 import Database from "better-sqlite3";
-import {
-	afterAll,
-	beforeAll,
-	beforeEach,
-	describe,
-	expect,
-	it,
-	vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TurnErrorPayload } from "../../../src/lib/contracts/stored-event.js";
 import {
 	createRelayHarness,
@@ -21,34 +13,17 @@ import {
 describe("Integration: SSE to RPC Pipeline", () => {
 	let harness: RelayHarness;
 
-	beforeAll(async () => {
-		harness = await createRelayHarness();
-	}, 30_000);
-
-	afterAll(async () => {
-		if (harness) await harness.stop();
-	});
-
 	beforeEach(async () => {
+		harness = await createRelayHarness();
 		harness.mock.resetQueues();
 		await harness.stack.client.app.path();
 		await vi.waitFor(() => {
 			expect(harness.stack.sseStream.getHealth().connected).toBe(true);
 		});
-	});
+	}, 30_000);
 
-	it("SSE stream is running after relay startup", async () => {
-		// The SSE stream connect() is fire-and-forget, so isConnected() may
-		// not be true immediately. But it should be running (this.running=true).
-		// The best proof is that SSE events actually flow — tested below.
-		// Here we just verify the stream was started successfully.
-		const consumer = harness.stack.sseStream;
-		// The stream object exists and was wired up
-		expect(consumer).toBeTruthy();
-
-		await vi.waitFor(() => {
-			expect(consumer.getHealth().connected).toBe(true);
-		});
+	afterEach(async () => {
+		if (harness) await harness.stop();
 	});
 
 	it("sending a prompt starts a turn that completes", async () => {

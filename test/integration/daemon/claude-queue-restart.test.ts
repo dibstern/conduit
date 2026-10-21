@@ -83,7 +83,7 @@ describe("queued input across a restart", () => {
 		);
 		const queuedId = randomUUID();
 		await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId,
 				originId: browser.originId,
 				inputId: queuedId,

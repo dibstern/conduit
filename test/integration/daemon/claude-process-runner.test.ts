@@ -151,6 +151,7 @@ describe("Claude session process runner", () => {
 			(message) => message["type"] === "permission_pending",
 			cursor,
 		);
+		expect(request["toolName"]).toBe("Bash");
 		expect(request["toolInput"]).toEqual({
 			command: "printf harness-approved",
 		});
@@ -454,9 +455,14 @@ describe("Claude session process runner", () => {
 		if (first?.kind !== "runner-started")
 			throw new Error("Missing runner proof");
 		process.kill(first.pid, "SIGKILL");
-		await vi.waitFor(() => expect(() => process.kill(first.pid, 0)).toThrow(), {
-			timeout: 5000,
-		});
+		await vi.waitFor(
+			() => {
+				expect(() => process.kill(first.pid, 0)).toThrow();
+				// The daemon removes the socket after observing the child exit.
+				expect(existsSync(first.socketPath)).toBe(false);
+			},
+			{ timeout: 5000 },
+		);
 		try {
 			const result = await browser.send(sessionId, "after-runner-exit");
 			expect(result.chunks.join("")).toBe(

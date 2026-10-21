@@ -1,9 +1,11 @@
-import { SqlClient } from "@effect/sql";
 import { it } from "@effect/vitest";
 import { Context, Deferred, Effect, Fiber, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { AccountDirectory } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
+import { OpenCodeInstancesTag } from "../../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SessionWorkspaceLive } from "../../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import { AlertsLive } from "../../../../src/lib/domain/relay/Services/alerts.js";
 import { PendingInteractionServiceLive } from "../../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import {
@@ -46,16 +48,20 @@ import {
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
 	makeMockWebSocketHandler,
+	makeOpenCodeInstancesStub,
 } from "../../../helpers/mock-factories.js";
 
 const persistence = makePersistenceEffectLayer(":memory:", "test-project");
-const services = Layer.mergeAll(
-	Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+const api = makeMockOpenCodeAPI();
+const baseServices = Layer.mergeAll(
+	Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 	persistence,
 	makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
-	Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
-	Layer.succeed(
-		OpenCodeModelServiceTag,
+	Layer.succeed(OpenCodeAPITag)(api),
+	Layer.succeed(OpenCodeInstancesTag)(
+		makeOpenCodeInstancesStub({ opencode: api }),
+	),
+	Layer.succeed(OpenCodeModelServiceTag)(
 		makeMockOpenCodeModelService({
 			providers: [
 				{
@@ -68,18 +74,18 @@ const services = Layer.mergeAll(
 			connected: ["opencode"],
 		}),
 	),
-	Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-	Layer.succeed(LoggerTag, makeMockLogger()),
-	Layer.succeed(
-		ConfigTag,
+	Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+	Layer.succeed(LoggerTag)(makeMockLogger()),
+	Layer.succeed(ConfigTag)(
 		makeMockConfig({ configDir: "/tmp/conduit-rewind-commit-no-config" }),
 	),
-	Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
-	Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()),
+	Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()),
+	Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
 	PendingInteractionServiceLive,
 	makeOverridesStateLive(),
 	AlertsLive,
 );
+const services = Layer.provideMerge(SessionWorkspaceLive, baseServices);
 
 const backfill = (
 	messageId: string,
@@ -97,7 +103,7 @@ const backfill = (
 
 // Late provider/backfill rows can arrive after preparation but before acceptance.
 // They must receive tombstones with the original suffix and resist later import.
-it.scoped(
+it.effect(
 	"commits a late hidden backfill with the rewind and prevents resurrection",
 	() =>
 		Effect.gen(function* () {

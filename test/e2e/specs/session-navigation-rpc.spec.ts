@@ -1,4 +1,5 @@
 import { writeFile } from "node:fs/promises";
+import { Stream } from "effect";
 import {
 	type GetFileListResponse,
 	WsRpcError,
@@ -30,9 +31,25 @@ const rows = [
 async function setup(
 	page: import("@playwright/test").Page,
 	stubs: StubTable = {},
-	sessionRows: Array<(typeof rows)[number] & { projectSlug?: string }> = rows,
+	sessionRows: Array<
+		(typeof rows)[number] & { projectSlug?: string; accountId?: string }
+	> = rows,
+	folders: string[] = ["/tmp/e2e-replay"],
 ) {
 	const rpc = await mockWsRpc(page, {
+		streams: {
+			SubscribeInputDraft: ({ key }) => {
+				const { session } = key as { session?: string };
+				return [
+					{
+						_tag: "synchronized",
+						...(session && {
+							text: session === seed ? "Seed draft" : `Draft for ${session}`,
+						}),
+					},
+				];
+			},
+		},
 		stubs: {
 			GetModels: () => ({
 				projectSlug,
@@ -56,10 +73,7 @@ async function setup(
 				handedOff: true,
 			}),
 			ResolveSession: () => ({ projectSlug }),
-			ViewSession: ({ sessionId }) => ({
-				ok: true,
-				draft: sessionId === seed ? "Seed draft" : `Draft for ${sessionId}`,
-			}),
+			ViewSession: () => ({ ok: true }),
 			CreateSession: () => ({ projectSlug, sessionId: created }),
 			ForkSession: () => ({ projectSlug, sessionId: forked, forkedFrom: seed }),
 			DeleteSession: () => ({ ok: true }),
@@ -84,7 +98,7 @@ async function setup(
 					{
 						slug: projectSlug,
 						title: projectSlug,
-						folders: ["/tmp/e2e-replay"],
+						folders,
 					},
 					{
 						slug: otherProject,
@@ -155,6 +169,9 @@ test("cold session navigation reuses attach resolution; warm navigation needs no
 				),
 			)
 			.map((request) => request.tag);
+	const coldOutput = testInfo.outputPath("cold-navigation-requests.json");
+	await writeFile(coldOutput, `${JSON.stringify(cold, null, 2)}\n`);
+	await testInfo.attach("cold-navigation-requests", { path: coldOutput });
 	expect(placement(cold)).toEqual(["AttachProject", "SubscribeSessionDetail"]);
 	expect(
 		cold.find((request) => request.tag === "AttachProject")?.payload,
@@ -254,6 +271,60 @@ test("a cold session link waits for attach placement before scoped reads", async
 		`${JSON.stringify({ beforePlacement, placed: rpc.getRequests(), route: page.url() }, null, 2)}\n`,
 	);
 	await testInfo.attach("cold-session-placement", { path: output });
+});
+
+test("a failed cold attach still reports the failure after the shell reveals its owner", async ({
+	page,
+	harness,
+}, testInfo) => {
+	let rejectAttach!: (error: WsRpcError) => void;
+	const { rpc } = await setup(
+		page,
+		{
+			AttachProject: () =>
+				new Promise<never>((_resolve, reject) => {
+					rejectAttach = reject;
+				}),
+		},
+		[],
+	);
+	const url = `${harness.relayBaseUrl}/s/${seed}`;
+	await page.goto(url);
+	const attach = await rpc.waitForRequest(
+		(request) => request.tag === "AttachProject",
+	);
+	expect(attach.payload).toMatchObject({ sessionId: seed });
+	rpc.setShellRows([
+		{
+			id: seed,
+			title: "Unavailable session",
+			status: "idle",
+			projectSlug: otherProject,
+		},
+	]);
+	await expect(
+		page.locator(`#session-list [data-session-id="${seed}"]`),
+	).toContainText("Unavailable session");
+	rejectAttach(new WsRpcError({ message: "Project is unavailable" }));
+	await expect(
+		page.getByText("Failed to switch projects", { exact: true }),
+	).toBeVisible();
+	await expect(
+		page.getByText("Project is unavailable", { exact: true }),
+	).toBeVisible();
+	await expect(page).toHaveURL(url);
+	expect(
+		rpc.getRequests().filter(({ tag }) => tag === "AttachProject"),
+	).toEqual([attach]);
+	expect(
+		rpc.getRequests().filter(({ tag }) => tag === "SubscribeSessionDetail"),
+	).toEqual([]);
+	const output = testInfo.outputPath("failed-cold-session-attach.json");
+	await writeFile(
+		output,
+		`${JSON.stringify({ requests: rpc.getRequests(), route: page.url() }, null, 2)}\n`,
+	);
+	await testInfo.attach("failed-cold-session-attach", { path: output });
 });
 
 test("an unknown session link goes home with a not-found notice", async ({
@@ -527,17 +598,13 @@ test("a delayed project attach keeps the target session's transcript and files",
 				request.payload["sessionId"] === target,
 		),
 	).toEqual([]);
-	const projectReadsBeforeAttach = rpc
-		.getRequests()
-		.filter((request) => request.tag === "GetProjects").length;
 	finishAttach({ projectSlug: otherProject, sessionSlug: null });
-	await expect
-		.poll(
-			() =>
-				rpc.getRequests().filter((request) => request.tag === "GetProjects")
-					.length,
-		)
-		.toBeGreaterThan(projectReadsBeforeAttach);
+	// The attach reply is what releases the target's scoped reads.
+	await rpc.waitForRequest(
+		(request) =>
+			request.tag === "SubscribeSessionDetail" &&
+			request.payload["sessionId"] === target,
+	);
 	if (
 		(await page
 			.getByTestId("views-rail-files")
@@ -590,6 +657,85 @@ test("choosing a project scope from home attaches that project", async ({
 	).not.toHaveProperty("sessionId");
 });
 
+test("a first send from home places the session in the chosen draft project", async ({
+	page,
+	harness,
+}) => {
+	const { rpc } = await setup(page, {
+		AttachProject: (payload) => ({
+			projectSlug:
+				"projectSlug" in payload
+					? (payload.projectSlug ?? projectSlug)
+					: projectSlug,
+			sessionSlug: null,
+		}),
+		GetModels: (payload) => ({
+			projectSlug:
+				"projectSlug" in payload ? payload.projectSlug : otherProject,
+			instanceId: "opencode",
+			defaultOpenCodeInstanceId: "opencode",
+			providers: [
+				{
+					id: "anthropic",
+					name: "Anthropic",
+					configured: true,
+					models: [
+						{ id: "claude-sonnet-4", name: "Sonnet", provider: "anthropic" },
+					],
+				},
+			],
+			active: { provider: "anthropic", model: "claude-sonnet-4" },
+		}),
+		CreateSession: (payload) => {
+			expect(payload.projectSlug).toBe(otherProject);
+			return { projectSlug: otherProject, sessionId: created };
+		},
+		"input.submit": ({ sessionId }) => ({
+			ok: true,
+			sessionId,
+			handedOff: true,
+		}),
+		ViewSession: () => ({ ok: true }),
+		ResolveSession: () => new Promise(() => {}),
+	});
+	await page.goto(
+		`${harness.relayBaseUrl}/?p=${projectSlug}&project=${otherProject}`,
+	);
+	await rpc.waitForRequest(
+		(request) =>
+			request.tag === "AttachProject" &&
+			request.payload["projectSlug"] === projectSlug,
+	);
+	await rpc.waitForRequest(
+		(request) =>
+			request.tag === "GetModels" &&
+			request.payload["projectSlug"] === otherProject,
+	);
+	await page.locator("#input").fill("Send from home into the chosen project");
+	await page.locator("#send").click();
+	const create = await rpc.waitForRequest(
+		(request) => request.tag === "CreateSession",
+	);
+	expect(create.payload["projectSlug"]).toBe(otherProject);
+	await expect(page).toHaveURL(new RegExp(`/s/${created}(?:\\?|$)`));
+	await rpc.waitForRequest(
+		(request) =>
+			request.tag === "ViewSession" && request.payload["sessionId"] === created,
+	);
+	await rpc.waitForRequest(
+		(request) =>
+			request.tag === "AttachProject" &&
+			request.payload["projectSlug"] === otherProject,
+	);
+	expect(
+		rpc.getRequests().filter((request) => request.tag === "ResolveSession"),
+	).toEqual([]);
+	await page
+		.locator("#input")
+		.fill("The placed session accepts another message");
+	await expect(page.locator("#send")).toBeEnabled();
+});
+
 test("a draft's first send creates the session in its project and sends into it", async ({
 	page,
 	harness,
@@ -599,7 +745,7 @@ test("a draft's first send creates the session in its project and sends into it"
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	await page.locator("#new-session-btn").click();
 	await expect(page).toHaveURL(
-		new RegExp(`/new\\?(?:.*&)?project=${projectSlug}`),
+		new RegExp(`/draft/[^/?]+\\?(?:.*&)?project=${projectSlug}`),
 	);
 	await expect(page.locator("#input")).toHaveValue("");
 	expect(
@@ -636,7 +782,11 @@ test("a draft's first send shows working before its session row arrives", async 
 			new Promise((resolve) => {
 				accept = resolve;
 			}),
-		ViewSession: () => ({ ok: true, draft: "" }),
+		SubscribeInputDraft: () =>
+			Stream.concat(
+				Stream.make({ _tag: "synchronized", text: "" }),
+				Stream.never,
+			),
 	});
 	await page.goto(`${harness.relayBaseUrl}/new?project=${projectSlug}`);
 	await page.locator("#input").fill("First draft send");
@@ -651,6 +801,496 @@ test("a draft's first send shows working before its session row arrives", async 
 		contentType: "image/png",
 	});
 	accept({ ok: true, sessionId: created, handedOff: true });
+});
+
+test("an unplaced session disables send until it is resolved", async ({
+	page,
+	harness,
+}) => {
+	let placed!: (reply: { projectSlug: string }) => void;
+	const { rpc } = await setup(page, {
+		ResolveSession: () =>
+			new Promise((resolve) => {
+				placed = resolve;
+			}),
+		ViewSession: () => ({ ok: true }),
+	});
+	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await expect(page.locator("#input")).toBeVisible();
+	await page.evaluate(() => {
+		window.history.pushState(null, "", "/s/session-unplaced-send");
+		window.dispatchEvent(new PopStateEvent("popstate"));
+	});
+	await rpc.waitForRequest((request) => request.tag === "ResolveSession");
+	await page.locator("#input").fill("Cannot send before placement");
+	await expect(page.locator("#send")).toBeDisabled();
+	expect(
+		rpc.getRequests().filter((request) => request.tag === "input.submit"),
+	).toEqual([]);
+	placed({ projectSlug });
+	await expect(page.locator("#send")).toBeEnabled();
+});
+
+test("a draft with no model pick for its account cannot send", async ({
+	page,
+	harness,
+}) => {
+	const { rpc } = await setup(page, {
+		GetModels: () => ({ projectSlug, providers: [] }),
+	});
+	rpc.setProjectSetting({
+		_tag: "harnessDefaults",
+		opencode: { status: "missing" },
+	});
+	await page.goto(`${harness.relayBaseUrl}/new?project=${projectSlug}`);
+	await page.locator("#input").fill("Wait for a model pick");
+	await expect(page.locator("#send")).toBeDisabled();
+	expect(
+		rpc.getRequests().filter((request) => request.tag === "CreateSession"),
+	).toEqual([]);
+});
+
+test("a draft on an account without multi-folder support cannot send", async ({
+	page,
+	harness,
+}) => {
+	const { rpc } = await setup(page, {}, rows, [
+		"/tmp/e2e-replay",
+		"/tmp/second-root",
+	]);
+	rpc.setDaemonList("SubscribeInstances", {
+		instances: [
+			{
+				id: "opencode",
+				name: "OpenCode",
+				driver: "opencode",
+				port: 0,
+				managed: false,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 1,
+				isDefault: true,
+				capabilities: { supportsMultiFolder: false, supportsWorktree: false },
+			},
+		],
+	});
+	await page.goto(`${harness.relayBaseUrl}/new?project=${projectSlug}`);
+	await page.locator("#input").fill("Cannot send multiple folders");
+	await expect(page.locator("#send")).toBeDisabled();
+	expect(
+		rpc.getRequests().filter((request) => request.tag === "CreateSession"),
+	).toEqual([]);
+	rpc.setDaemonList("SubscribeInstances", {
+		instances: [
+			{
+				id: "opencode",
+				name: "OpenCode",
+				driver: "opencode",
+				port: 0,
+				managed: false,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 1,
+				isDefault: true,
+				capabilities: { supportsMultiFolder: true, supportsWorktree: false },
+			},
+		],
+	});
+	await expect(page.locator("#send")).toBeEnabled();
+});
+
+test("send stays disabled while switching the account before the send", async ({
+	page,
+	harness,
+}) => {
+	let switched!: (reply: { ok: true }) => void;
+	const { rpc } = await setup(
+		page,
+		{
+			GetUsageLimitsSetting: () => ({
+				usageLimits: {
+					autoResume: false,
+					autoSwitch: true,
+					warnAt: 80,
+					order: ["claude-one", "claude-two"],
+				},
+			}),
+			ContinueSession: () =>
+				new Promise((resolve) => {
+					switched = resolve;
+				}),
+			ViewSession: () => ({ ok: true }),
+			"input.submit": ({ sessionId }) => ({
+				ok: true,
+				sessionId,
+				handedOff: true,
+			}),
+		},
+		rows.map((row) => ({ ...row, accountId: "claude-one" })),
+	);
+	rpc.setDaemonList("SubscribeInstances", {
+		instances: ["claude-one", "claude-two"].map((id, index) => ({
+			id,
+			name: id,
+			driver: "claude",
+			usageEligible: true,
+			available: true,
+			port: 0,
+			managed: false,
+			status: "healthy",
+			restartCount: 0,
+			createdAt: 1,
+			isDefault: index === 0,
+		})),
+	});
+	rpc.setUsageReadings([
+		{
+			accountId: "claude-one",
+			harness: "claude",
+			status: "limited",
+			windows: [
+				{
+					kind: "five_hour",
+					utilization: 100,
+					resetsAt: new Date(Date.now() + 3_600_000).toISOString(),
+				},
+			],
+			readAt: Date.now(),
+			stale: false,
+		},
+		{
+			accountId: "claude-two",
+			harness: "claude",
+			status: "available",
+			windows: [{ kind: "five_hour", utilization: 20 }],
+			readAt: Date.now(),
+			stale: false,
+		},
+	]);
+	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await page.locator("#input").fill("Switch then send");
+	await expect(page.locator("#send")).toHaveAttribute(
+		"data-send-mode",
+		"switch",
+	);
+	await expect(page.locator("#send")).toBeEnabled();
+	await page.locator("#send").click();
+	const request = await rpc.waitForRequest(
+		(request) => request.tag === "ContinueSession",
+	);
+	expect(request.payload).toMatchObject({
+		sessionId: seed,
+		instanceId: "claude-two",
+		expectedInstanceId: "claude-one",
+	});
+	await expect(page.locator("#send")).toBeDisabled();
+	await expect(page.locator("#input")).toHaveValue("Switch then send");
+	expect(
+		rpc.getRequests().filter((request) => request.tag === "input.submit"),
+	).toEqual([]);
+	switched({ ok: true });
+	await rpc.waitForRequest((request) => request.tag === "input.submit");
+});
+
+test("a placed session only enables send for nonempty input", async ({
+	page,
+	harness,
+}) => {
+	const { rpc } = await setup(page, { ViewSession: () => ({ ok: true }) });
+	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	// The seed session restores a saved draft; wait for it so the empty check
+	// below cannot pass before the draft arrives.
+	await expect(page.locator("#input")).toHaveValue("Seed draft");
+	await expect(page.locator("#send")).toBeEnabled();
+	await page.locator("#input").fill("");
+	await expect(page.locator("#send")).toBeDisabled();
+	await page.locator("#input").fill("   ");
+	await expect(page.locator("#send")).toBeDisabled();
+	await page.locator("#input").fill("Send this");
+	await expect(page.locator("#send")).toBeEnabled();
+	await page.locator("#input").fill("");
+	await expect(page.locator("#send")).toBeDisabled();
+	expect(
+		rpc.getRequests().filter((request) => request.tag === "input.submit"),
+	).toEqual([]);
+});
+
+test("a draft's first send places the session before any navigation frame", async ({
+	page,
+	harness,
+}, testInfo) => {
+	const { rpc } = await setup(page, {
+		"input.submit": ({ sessionId }) => ({
+			ok: true,
+			sessionId,
+			handedOff: true,
+		}),
+		ViewSession: () => ({ ok: true }),
+		ResolveSession: () => new Promise(() => {}),
+	});
+	await page.goto(`${harness.relayBaseUrl}/new?project=${projectSlug}`);
+	await page.locator("#input").fill("First send without a session row");
+	const frames = page.evaluate(async () => {
+		const samples: Array<{
+			path: string;
+			composer: boolean;
+			home: boolean;
+			stop: boolean;
+		}> = [];
+		let placedFrames = 0;
+		const until = performance.now() + 15_000;
+		while (placedFrames < 5 && performance.now() < until) {
+			await new Promise<void>((resolve) =>
+				requestAnimationFrame(() => resolve()),
+			);
+			if (location.pathname === "/s/session-created") placedFrames++;
+			samples.push({
+				path: location.pathname,
+				composer: document.querySelector("#input") !== null,
+				home: document.querySelector('[data-testid="draft-empty"]') !== null,
+				stop: document.querySelector("#stop") !== null,
+			});
+		}
+		return samples;
+	});
+	await page.locator("#send").click();
+	await expect(page).toHaveURL(new RegExp(`/s/${created}$`));
+	await rpc.waitForRequest(
+		(request) =>
+			request.tag === "ViewSession" && request.payload["sessionId"] === created,
+	);
+	await page.locator("#input").fill("Ready for the next message");
+	await expect(page.locator("#send")).toBeEnabled();
+	const sampled = await frames;
+	expect(sampled.some((frame) => frame.path === `/s/${created}`)).toBe(true);
+	expect(
+		sampled.every(
+			(frame) =>
+				frame.path.startsWith("/draft/") ||
+				(frame.path === `/s/${created}` &&
+					frame.composer &&
+					!frame.home &&
+					frame.stop),
+		),
+	).toBe(true);
+	expect(
+		rpc.getRequests().filter((request) => request.tag === "ResolveSession"),
+	).toEqual([]);
+	const output = testInfo.outputPath("draft-first-send-frames.json");
+	await writeFile(output, `${JSON.stringify(sampled, null, 2)}\n`);
+	await testInfo.attach("draft-first-send-frames", {
+		path: output,
+		contentType: "application/json",
+	});
+	await page.goBack();
+	await expect(page).toHaveURL(
+		new RegExp(`/draft/[^/?]+\\?(?:.*&)?project=${projectSlug}`),
+	);
+});
+
+for (const changed of ["unchanged", "text", "images"] as const) {
+	test(`a side-thread start follows the parent and ${changed === "unchanged" ? "clears the unchanged" : `keeps edited ${changed} in the`} composer on Back`, async ({
+		page,
+		harness,
+	}) => {
+		let started!: (reply: { sessionId: string }) => void;
+		const { rpc } = await setup(page, {
+			StartSideThread: () =>
+				new Promise((resolve) => {
+					started = resolve;
+				}),
+			ViewSession: () => ({ ok: true }),
+			// No stored draft; the mock does not persist the parent's cleared draft.
+			SubscribeInputDraft: () =>
+				Stream.concat(Stream.make({ _tag: "synchronized" }), Stream.never),
+		});
+		await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+		await expect(page.locator("#input")).toBeVisible();
+		await page.locator("#input").fill("$btw What changed?");
+		await page.locator("#send").click();
+		const request = await rpc.waitForRequest(
+			(request) => request.tag === "StartSideThread",
+		);
+		expect(request.payload).toEqual({
+			_tag: "StartSideThread",
+			sessionId: seed,
+			title: "What changed?",
+			inputId: expect.any(String),
+			text: "What changed?",
+			originId: expect.any(String),
+		});
+		expect(
+			rpc.getRequests().filter((request) => request.tag === "input.submit"),
+		).toEqual([]);
+		if (changed === "text")
+			await page.locator("#input").fill("Keep this edited parent prompt");
+		if (changed === "images") {
+			await page.locator("#attach-btn").click();
+			const chooser = page.waitForEvent("filechooser");
+			await page.locator("#attach-photos").click();
+			await (await chooser).setFiles({
+				name: "kept.png",
+				mimeType: "image/png",
+				buffer: Buffer.from(
+					"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2ioAAAAASUVORK5CYII=",
+					"base64",
+				),
+			});
+			await expect(
+				page.locator('#image-preview img[alt="kept.png"]'),
+			).toBeVisible();
+		}
+		started({ sessionId: forked });
+		await expect(page).toHaveURL(new RegExp(`/s/${forked}$`));
+		await expect(page.locator("#input")).toHaveValue("");
+		if (changed === "images")
+			await expect(
+				page.locator('#image-preview img[alt="kept.png"]'),
+			).toBeVisible();
+		await expect(page.locator("#stop")).toBeHidden();
+		await page.goBack();
+		await expect(page).toHaveURL(new RegExp(`/s/${seed}$`));
+		await expect(page.locator("#input")).toHaveValue(
+			changed === "text"
+				? "Keep this edited parent prompt"
+				: changed === "images"
+					? "$btw What changed?"
+					: "",
+		);
+	});
+}
+
+test("a side-thread reply after opening another session leaves its route and composer alone", async ({
+	page,
+	harness,
+}) => {
+	let started!: (reply: { sessionId: string }) => void;
+	const { rpc } = await setup(page, {
+		StartSideThread: () =>
+			new Promise((resolve) => {
+				started = resolve;
+			}),
+	});
+	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await expect(page.locator("#input")).toHaveValue("Seed draft");
+	await page.locator("#input").fill("$btw Delayed side thread");
+	await page.locator("#send").click();
+	await rpc.waitForRequest((request) => request.tag === "StartSideThread");
+	await page.evaluate((path) => {
+		window.history.pushState(null, "", path);
+		window.dispatchEvent(new PopStateEvent("popstate"));
+	}, `/s/${survivor}`);
+	await expect(page.locator("#input")).toHaveValue(`Draft for ${survivor}`);
+	await page.locator("#input").fill("New text in the other session");
+	started({ sessionId: forked });
+	await page.evaluate(async () => {
+		for (let frame = 0; frame < 10; frame++)
+			await new Promise<void>((resolve) =>
+				requestAnimationFrame(() => resolve()),
+			);
+	});
+	await expect(page).toHaveURL(new RegExp(`/s/${survivor}$`));
+	await expect(page.locator("#input")).toHaveValue(
+		"New text in the other session",
+	);
+	await rpc.waitForRequest(
+		(request) =>
+			request.tag === "SyncInputDraft" &&
+			(request.payload["key"] as { session?: string })?.session === survivor &&
+			request.payload["text"] === "New text in the other session",
+	);
+});
+
+test("a side-thread prepared after opening another session still belongs to its parent", async ({
+	page,
+	harness,
+}) => {
+	let loaded!: (reply: {
+		projectSlug: string;
+		path: string;
+		content: string;
+	}) => void;
+	let started!: (reply: { sessionId: string }) => void;
+	const { rpc } = await setup(page, {
+		GetFileContent: () =>
+			new Promise((resolve) => {
+				loaded = resolve;
+			}),
+		StartSideThread: () =>
+			new Promise((resolve) => {
+				started = resolve;
+			}),
+	});
+	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await expect(page.locator("#input")).toHaveValue("Seed draft");
+	await page.locator("#input").fill("$btw Explain @notes.md");
+	await page.locator("#send").click();
+	await rpc.waitForRequest((request) => request.tag === "GetFileContent");
+	await page.evaluate((path) => {
+		window.history.pushState(null, "", path);
+		window.dispatchEvent(new PopStateEvent("popstate"));
+	}, `/s/${survivor}`);
+	await expect(page.locator("#input")).toHaveValue(`Draft for ${survivor}`);
+	await page.locator("#input").fill("Keep the other session prompt");
+	loaded({
+		projectSlug,
+		path: "notes.md",
+		content: "Reference content for the parent",
+	});
+	const request = await rpc.waitForRequest(
+		(request) => request.tag === "StartSideThread",
+	);
+	expect(request.payload).toMatchObject({
+		sessionId: seed,
+		title: "Explain @notes.md",
+	});
+	expect(request.payload["text"]).toContain("Reference content for the parent");
+	started({ sessionId: forked });
+	await page.evaluate(async () => {
+		for (let frame = 0; frame < 10; frame++)
+			await new Promise<void>((resolve) =>
+				requestAnimationFrame(() => resolve()),
+			);
+	});
+	await expect(page).toHaveURL(new RegExp(`/s/${survivor}$`));
+	await expect(page.locator("#input")).toHaveValue(
+		"Keep the other session prompt",
+	);
+});
+
+test("a redirect after opening another session leaves its route and composer alone", async ({
+	page,
+	harness,
+}) => {
+	let accept!: (reply: {
+		ok: true;
+		sessionId: string;
+		handedOff: boolean;
+	}) => void;
+	const { rpc } = await setup(page, {
+		"input.submit": () =>
+			new Promise((resolve) => {
+				accept = resolve;
+			}),
+	});
+	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await expect(page.locator("#input")).toHaveValue("Seed draft");
+	await page.locator("#send").click();
+	await rpc.waitForRequest((request) => request.tag === "input.submit");
+	await page.evaluate((path) => {
+		window.history.pushState(null, "", path);
+		window.dispatchEvent(new PopStateEvent("popstate"));
+	}, `/s/${survivor}`);
+	await expect(page.locator("#input")).toHaveValue(`Draft for ${survivor}`);
+	accept({ ok: true, sessionId: materialized, handedOff: true });
+	await page.evaluate(async () => {
+		for (let frame = 0; frame < 10; frame++)
+			await new Promise<void>((resolve) =>
+				requestAnimationFrame(() => resolve()),
+			);
+	});
+	await expect(page).toHaveURL(new RegExp(`/s/${survivor}$`));
+	await expect(page.locator("#input")).toHaveValue(`Draft for ${survivor}`);
 });
 
 test("a failed send restores composer text and shows the RPC failure toast", async ({
@@ -799,17 +1439,120 @@ test("an inbox-queued reply clears guessed working and renders the queued messag
 test("ForkSession response selects the fork and restores its draft", async ({
 	page,
 	harness,
-}) => {
+}, testInfo) => {
 	const { rpc } = await setup(page);
 	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
-	const item = page.locator(`[data-session-id="${seed}"]`);
+	const item = page.locator(`#session-list [data-session-id="${seed}"]`);
 	await item.hover();
 	await item.locator(".session-more-btn").click();
 	await page.getByTestId("session-ctx-fork").click();
 	await rpc.waitForRequest((request) => request.tag === "ForkSession");
 	await expect(page).toHaveURL(new RegExp(`/s/${forked}$`));
 	await expect(page.locator("#input")).toHaveValue(`Draft for ${forked}`);
+	await page.goBack();
+	await expect(page).toHaveURL(new RegExp(`/s/${seed}$`));
+	await expect(page.locator("#input")).toHaveValue("Seed draft");
+	await testInfo.attach("fork-back-to-parent", {
+		body: await page.screenshot(),
+		contentType: "image/png",
+	});
+});
+
+test("a fork reply after opening another session leaves its route and composer alone", async ({
+	page,
+	harness,
+}, testInfo) => {
+	let completeFork!: (reply: {
+		projectSlug: string;
+		sessionId: string;
+		forkedFrom: string;
+	}) => void;
+	const { rpc } = await setup(page, {
+		ForkSession: () =>
+			new Promise((resolve) => {
+				completeFork = resolve;
+			}),
+	});
+	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await expect(page.locator("#input")).toHaveValue("Seed draft");
+	const item = page.locator(`#session-list [data-session-id="${seed}"]`);
+	await item.hover();
+	await item.locator(".session-more-btn").click();
+	await page.getByTestId("session-ctx-fork").click();
+	await rpc.waitForRequest((request) => request.tag === "ForkSession");
+	await page
+		.locator(`#session-list [data-session-id="${survivor}"]`)
+		.click({ position: { x: 48, y: 12 } });
+	await expect(page.locator("#input")).toHaveValue(`Draft for ${survivor}`);
+	await page.locator("#input").fill("Keep the other session open");
+	completeFork({ projectSlug, sessionId: forked, forkedFrom: seed });
+	await expect(
+		page.getByRole("status").filter({ hasText: 'Forked from "Current"' }),
+	).toBeVisible();
+	await expect(page).toHaveURL(new RegExp(`/s/${survivor}$`));
+	await expect(page.locator("#input")).toHaveValue(
+		"Keep the other session open",
+	);
+	expect(
+		rpc
+			.getRequests()
+			.filter(
+				(request) =>
+					request.tag === "ViewSession" &&
+					request.payload["sessionId"] === forked,
+			),
+	).toEqual([]);
+	await testInfo.attach("late-fork-keeps-selection", {
+		body: await page.screenshot(),
+		contentType: "image/png",
+	});
+});
+
+test("New session pushes from a session and replaces an existing draft entry", async ({
+	page,
+	harness,
+}, testInfo) => {
+	const { rpc } = await setup(page);
+	await page.goto(`${harness.relayBaseUrl}/s/${seed}?keep=draft-history`);
+	await expect(page.locator("#input")).toHaveValue("Seed draft");
+	await page.locator("#new-session-btn").click();
+	await expect(page).toHaveURL(
+		new RegExp(`/draft/[^/?]+\\?keep=draft-history&project=${projectSlug}`),
+	);
+	const draftPath = new URL(page.url()).pathname;
+	await expect(page.getByTestId("draft-project-chip")).toContainText(
+		projectSlug,
+	);
+	await page.goBack();
+	await expect(page).toHaveURL(
+		`${harness.relayBaseUrl}/s/${seed}?keep=draft-history`,
+	);
+	await page.goForward();
+	// An unpinned draft is a valid link; New pins the project's default.
+	await page.evaluate((path) => {
+		window.history.replaceState(null, "", `${path}?keep=draft-history`);
+		window.dispatchEvent(new PopStateEvent("popstate"));
+	}, draftPath);
+	await expect(page.getByTestId("draft-project-chip")).toContainText(
+		projectSlug,
+	);
+	await page.locator("#new-session-btn").click();
+	await expect(page).toHaveURL(
+		`${harness.relayBaseUrl}${draftPath}?keep=draft-history&project=${projectSlug}`,
+	);
+	await page.goBack();
+	await expect(page).toHaveURL(
+		`${harness.relayBaseUrl}/s/${seed}?keep=draft-history`,
+	);
+	await expect(page.locator("#input")).toHaveValue("Seed draft");
+	expect(
+		rpc.getRequests().filter((request) => request.tag === "CreateSession"),
+	).toEqual([]);
+	await testInfo.attach("draft-back-to-session", {
+		body: await page.screenshot(),
+		contentType: "image/png",
+	});
 });
 
 test("deleting the viewed session selects the next sidebar row and replaces history", async ({
@@ -899,7 +1642,12 @@ test("input.submit response selects a materialized OpenCode session", async ({
 	harness,
 }, testInfo) => {
 	const { rpc } = await setup(page);
-	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await page.goto(`${harness.relayBaseUrl}/s/${survivor}`);
+	await expect(page.locator("#input")).toHaveValue(`Draft for ${survivor}`);
+	await page.evaluate((path) => {
+		window.history.pushState(null, "", path);
+		window.dispatchEvent(new PopStateEvent("popstate"));
+	}, `/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
 	await page.locator("#input").fill("Dispatch to OpenCode");
 	rpc.upsertShellRow({
@@ -909,9 +1657,9 @@ test("input.submit response selects a materialized OpenCode session", async ({
 		lastTurnEndVersion: 200,
 		lastTurnEndInputId: "older-input",
 	});
-	await expect(page.locator(`[data-session-id="${seed}"]`)).toContainText(
-		"Source with history",
-	);
+	await expect(
+		page.locator(`#session-list [data-session-id="${seed}"]`),
+	).toContainText("Source with history");
 	await page.locator("#send").click();
 	const submitted = await rpc.waitForRequest(
 		(request) => request.tag === "input.submit",
@@ -934,5 +1682,5 @@ test("input.submit response selects a materialized OpenCode session", async ({
 		contentType: "image/png",
 	});
 	await page.goBack();
-	await expect(page).not.toHaveURL(new RegExp(`/s/${seed}$`));
+	await expect(page).toHaveURL(new RegExp(`/s/${survivor}$`));
 });

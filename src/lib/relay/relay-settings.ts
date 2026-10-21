@@ -16,8 +16,6 @@ import { TerminalKeysSetting } from "../contracts/terminal-keys.js";
 import type { ModelOverride } from "../domain/relay/Services/session-overrides-state.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 import {
-	type GroupingMode,
-	GroupingModeSchema,
 	type SessionPermissionMode,
 	SessionPermissionModeSchema,
 } from "../shared-types.js";
@@ -34,7 +32,6 @@ export interface RelaySettings {
 	defaultSessionMode?: DefaultSessionMode;
 	/** The mode the last composer-created session started in, read when the default is "last". */
 	lastSessionMode?: SessionMode;
-	defaultGroupingMode?: GroupingMode;
 	terminalKeys?: TerminalKeysSetting;
 	defaultVariants?: Record<string, string>;
 	/** Model keys ("<providerId>/<modelId>") hidden from the model dropdown. */
@@ -59,7 +56,6 @@ function stripComments(text: string): string {
 const isSessionPermissionMode = Schema.is(SessionPermissionModeSchema);
 const isDefaultSessionMode = Schema.is(DefaultSessionModeSchema);
 const isSessionMode = Schema.is(SessionModeSchema);
-const isGroupingMode = Schema.is(GroupingModeSchema);
 
 /**
  * Load relay settings from the config directory.
@@ -69,13 +65,16 @@ export function loadRelaySettings(configDir?: string): RelaySettings {
 	try {
 		const dir = resolveDir(configDir);
 		const raw = readFileSync(join(dir, SETTINGS_FILE), "utf-8");
-		const settings = JSON.parse(stripComments(raw)) as RelaySettings;
+		const settings = JSON.parse(stripComments(raw)) as RelaySettings & {
+			/** Retired with Project Groups (ADR-0011); dropped on the next save. */
+			defaultGroupingMode?: unknown;
+		};
 		// The file is hand-editable. Drop unknown modes so consumers use their defaults.
 		const {
 			defaultPermissionMode,
 			defaultSessionMode,
 			lastSessionMode,
-			defaultGroupingMode,
+			defaultGroupingMode: _retired,
 			terminalKeys,
 			...rest
 		} = settings;
@@ -91,8 +90,6 @@ export function loadRelaySettings(configDir?: string): RelaySettings {
 				isDefaultSessionMode(defaultSessionMode) && { defaultSessionMode }),
 			...(lastSessionMode !== undefined &&
 				isSessionMode(lastSessionMode) && { lastSessionMode }),
-			...(defaultGroupingMode !== undefined &&
-				isGroupingMode(defaultGroupingMode) && { defaultGroupingMode }),
 			...(decodedTerminalKeys._tag === "Some" && {
 				terminalKeys: decodedTerminalKeys.value,
 			}),
@@ -135,9 +132,6 @@ export function saveRelaySettings(
 	}
 	if (settings.lastSessionMode !== undefined) {
 		merged.lastSessionMode = settings.lastSessionMode;
-	}
-	if (settings.defaultGroupingMode !== undefined) {
-		merged.defaultGroupingMode = settings.defaultGroupingMode;
 	}
 	if (settings.terminalKeys !== undefined) {
 		merged.terminalKeys = settings.terminalKeys;

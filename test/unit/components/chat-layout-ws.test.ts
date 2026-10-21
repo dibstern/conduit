@@ -111,6 +111,7 @@ vi.mock("../../../src/lib/frontend/stores/selection.svelte.js", async () => {
 	return {
 		watchSelection: vi.fn(() => () => {}),
 		selection: {
+			open: vi.fn(),
 			get shown() {
 				const route = getCurrentRoute();
 				return route.page === "chat" && route.sessionId
@@ -128,8 +129,6 @@ vi.mock("../../../src/lib/frontend/stores/ws-listeners.js", () => ({
 	}),
 }));
 vi.mock("../../../src/lib/frontend/stores/ws-notifications.js", () => ({
-	onNavigateToSession: vi.fn(),
-	clearNavigateToSession: vi.fn(),
 	initSWMessageListener: vi.fn(),
 	reconcilePushActive: vi.fn(async () => {}),
 }));
@@ -189,8 +188,6 @@ vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
 	},
 	clearSessionState: vi.fn(),
 	findSession: vi.fn(),
-	loadDaemonSessions: vi.fn(async () => {}),
-	switchToSession: vi.fn(),
 }));
 
 vi.mock("../../../src/lib/frontend/stores/session-list.svelte.js", () => ({
@@ -199,7 +196,6 @@ vi.mock("../../../src/lib/frontend/stores/session-list.svelte.js", () => ({
 	onShellSynchronized: vi.fn(() => () => {}),
 	sessionList: { groups: [], settled: false, status: { _tag: "cold" } },
 	currentSearchQuery: vi.fn(() => null),
-	refreshSessionList: vi.fn(async () => {}),
 }));
 
 vi.mock("../../../src/lib/frontend/stores/approvals.js", () => ({
@@ -210,6 +206,18 @@ vi.mock("../../../src/lib/frontend/stores/approvals.js", () => ({
 vi.mock("../../../src/lib/frontend/stores/permissions.svelte.js", () => ({
 	clearAllPermissions: vi.fn(),
 }));
+
+// These layout tests set compact state directly. The breakpoint listener has
+// its own coverage in session-view-compact.test.ts.
+vi.mock(
+	"../../../src/lib/frontend/stores/session-view.svelte.js",
+	async (importOriginal) => ({
+		...(await importOriginal<
+			typeof import("../../../src/lib/frontend/stores/session-view.svelte.js")
+		>()),
+		watchCompactViewport: vi.fn(() => () => {}),
+	}),
+);
 
 vi.mock("../../../src/lib/frontend/stores/terminal.svelte.js", () => ({
 	terminalState: { panelOpen: false, unreadPtyIds: new Set() },
@@ -328,12 +336,12 @@ import {
 	replaceRoute,
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	attachSessionList,
 	detachSessionList,
 } from "../../../src/lib/frontend/stores/session-list.svelte.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 function attach(slug: string): void {
 	attachedProjectState.slug = slug;
@@ -366,7 +374,7 @@ describe("ChatLayout RPC lifecycle", () => {
 		routerState.path = "/";
 		routerState.search = "";
 		routerState.sessionNotFound = false;
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		sessionViewState.compact = false;
 		vi.mocked(resolveSession).mockResolvedValue({
 			projectSlug: "test-project",
@@ -404,13 +412,6 @@ describe("ChatLayout RPC lifecycle", () => {
 		sessionViewState.compact = false;
 		flushSync();
 		expect(taskDrawer.task).toBeNull();
-	});
-
-	it("attaches the shell feed on project attach", async () => {
-		render(ChatLayout);
-
-		attach("test-project");
-		expect(attachSessionList).toHaveBeenCalledExactlyOnceWith("test-project");
 	});
 
 	it("uses the route-driven full-screen list layout on compact viewports", () => {
@@ -454,15 +455,6 @@ describe("ChatLayout RPC lifecycle", () => {
 		render(ChatLayout);
 		attach("test-project");
 		expect(clearMessages).not.toHaveBeenCalled();
-		expect(attachSessionList).toHaveBeenCalledExactlyOnceWith("test-project");
-	});
-
-	it("reattaches the shell after a remount with its retained project", () => {
-		render(ChatLayout).unmount();
-		attachedProjectState.slug = "test-project";
-		vi.clearAllMocks();
-		render(ChatLayout);
-		expect(attachSessionList).toHaveBeenCalledExactlyOnceWith("test-project");
 	});
 
 	it("rehydrates once on a reconnect attach to the same project without resetting", () => {

@@ -2,17 +2,21 @@
 // Subscribes to DaemonEventBus session lifecycle events.
 
 import { Data, Effect, FiberMap, Layer, Option, Ref, Stream } from "effect";
-import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
 import { DaemonEventBusTag } from "../domain/daemon/Services/daemon-pubsub.js";
-import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
+import type { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import {
 	LoggerTag,
 	PollerManagerTag,
 	type StatusPollerShape,
 	StatusPollerTag,
 } from "../domain/relay/Services/services.js";
+import {
+	makeSessionOpenCodeClient,
+	type SessionWorkspaceTag,
+} from "../domain/relay/Services/session-workspace.js";
 import type { Message } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
+import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import {
 	type createTranslator,
 	rebuildTranslatorFromHistoryOrThrow,
@@ -94,10 +98,12 @@ export const makeSessionLifecycleWiringLive = (
 	| StatusPollerTag
 	| LoggerTag
 	| DaemonEventBusTag
+	| SessionWorkspaceTag
+	| ReadQueryEffectTag
 > =>
-	Layer.scopedDiscard(
+	Layer.effectDiscard(
 		Effect.gen(function* () {
-			const instances = yield* OpenCodeInstancesTag;
+			const sessionClient = yield* makeSessionOpenCodeClient;
 			const pollerManager = yield* PollerManagerTag;
 			const statusPoller = yield* StatusPollerTag;
 			const log = yield* LoggerTag;
@@ -127,8 +133,20 @@ export const makeSessionLifecycleWiringLive = (
 									Effect.gen(function* () {
 										// Lifecycle history reads are background work, including
 										// the events published when a Claude session is created.
-										const client = yield* instances.ifRunning(
-											MANAGED_OPENCODE_ACCOUNT_ID,
+										const client = yield* sessionClient(event.sessionId).pipe(
+											Effect.catchTag("OpenCodeUnavailable", (error) =>
+												error.reason === "not-running"
+													? Effect.succeed(Option.none())
+													: Effect.fail(error),
+											),
+											Effect.mapError(
+												(cause) =>
+													new SessionLifecycleHistoryRebuildError({
+														sessionId: event.sessionId,
+														operation: "rebuildTranslatorFromHistory",
+														cause,
+													}),
+											),
 										);
 										if (Option.isNone(client)) return;
 										yield* handleSessionCreated(event.sessionId, {
@@ -181,6 +199,7 @@ export const makeSessionLifecycleWiringLive = (
 						return Effect.void;
 					}),
 				),
+				{ uninterruptible: "inherit" },
 			);
 		}),
 	);

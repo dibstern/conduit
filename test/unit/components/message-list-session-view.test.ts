@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MessageList from "../../../src/lib/frontend/components/chat/MessageList.svelte";
 import { getOrCreateSessionSlot } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { permissionsState } from "../../../src/lib/frontend/stores/permissions.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { seedSessionsWithFamily } from "../stores/session-fixtures.js";
 
 vi.mock(
@@ -28,7 +28,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("MessageList session-view publication", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
-		sessionState.currentId = "session-view-first";
+		openSessionForSetup("session-view-first", "project-a");
 		getOrCreateSessionSlot("session-view-first").messages.loadLifecycle =
 			"ready";
 	});
@@ -108,7 +108,7 @@ describe("MessageList session-view publication", () => {
 
 		getOrCreateSessionSlot("session-view-next").messages.loadLifecycle =
 			lifecycle;
-		sessionState.currentId = "session-view-next";
+		openSessionForSetup("session-view-next", "project-a");
 		flushSync();
 		expect(sessionViewState.atBottom).toBe(true);
 	});
@@ -212,7 +212,7 @@ describe("MessageList pending questions", () => {
 	});
 
 	it("shows questions from the viewed session's family", () => {
-		sessionState.currentId = "root-a";
+		openSessionForSetup("root-a", "project-a");
 		const { container } = render(MessageList);
 		flushSync();
 		expect(container.textContent).toContain("Question from A?");
@@ -221,7 +221,7 @@ describe("MessageList pending questions", () => {
 
 	it("hides another family's questions after switching to an unrelated root", () => {
 		// Optimistic switch: the old family is still loaded when B renders.
-		sessionState.currentId = "root-b";
+		openSessionForSetup("root-b", "project-a");
 		const { container } = render(MessageList);
 		flushSync();
 		expect(container.textContent).not.toContain("Question from A");

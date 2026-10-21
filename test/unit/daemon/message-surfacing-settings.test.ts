@@ -7,9 +7,9 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber } from "effect";
+import { RpcTest } from "effect/rpc";
 import { afterEach, expect, vi } from "vitest";
 import {
 	UpdateMessageSurfacing,
@@ -299,10 +299,10 @@ describe("message surfacing settings", () => {
 				transport.mockImplementationOnce(
 					async () => new Response("fake-rejected", { status: 401 }),
 				);
-				const failure = yield* Effect.either(
+				const failure = yield* Effect.result(
 					settings.update({ apiKey: "fake-rejected", enabled: true }),
 				);
-				expect(failure._tag).toBe("Left");
+				expect(failure._tag).toBe("Failure");
 				expect(JSON.stringify(failure)).not.toContain("fake-rejected");
 				expect(yield* settings.get).toMatchObject({
 					enabled: false,
@@ -324,7 +324,7 @@ describe("message surfacing settings", () => {
 				transport.mockImplementationOnce(
 					async () => new Response(null, { status: 401 }),
 				);
-				yield* Effect.either(settings.post({ state: "test" }));
+				yield* Effect.result(settings.post({ state: "test" }));
 				expect(yield* settings.get).toMatchObject({
 					active: false,
 					key: { source: "stored", rejected: true },
@@ -333,7 +333,7 @@ describe("message surfacing settings", () => {
 					env: {},
 					transport,
 				});
-				yield* Effect.either(restarted.post({}));
+				yield* Effect.result(restarted.post({}));
 				yield* restarted.update({ enabled: false });
 				yield* restarted.update({ enabled: true });
 				expect(yield* restarted.get).toMatchObject({
@@ -365,23 +365,23 @@ describe("message surfacing settings", () => {
 					transport.mockImplementationOnce(() =>
 						Effect.runPromise(
 							Deferred.succeed(runtimeStarted, undefined).pipe(
-								Effect.zipRight(Deferred.await(runtimeReply)),
+								Effect.andThen(Deferred.await(runtimeReply)),
 							),
 						),
 					);
-					const request = yield* Effect.fork(settings.post({}));
+					const request = yield* Effect.forkChild(settings.post({}));
 					yield* Deferred.await(runtimeStarted);
 					const replacementStarted = yield* Deferred.make<void>();
 					const replacementReply = yield* Deferred.make<Response>();
 					transport.mockImplementationOnce(() =>
 						Effect.runPromise(
 							Deferred.succeed(replacementStarted, undefined).pipe(
-								Effect.zipRight(Deferred.await(replacementReply)),
+								Effect.andThen(Deferred.await(replacementReply)),
 							),
 						),
 					);
-					const replacement = yield* Effect.fork(
-						settings.update({ apiKey: "fake-rejected" }).pipe(Effect.either),
+					const replacement = yield* Effect.forkChild(
+						settings.update({ apiKey: "fake-rejected" }).pipe(Effect.result),
 					);
 					yield* Deferred.await(replacementStarted);
 					const cleanupStarted = yield* Deferred.make<void>();
@@ -393,7 +393,7 @@ describe("message surfacing settings", () => {
 								cancel() {
 									return Effect.runPromise(
 										Deferred.succeed(cleanupStarted, undefined).pipe(
-											Effect.zipRight(Deferred.await(cleanupFinished)),
+											Effect.andThen(Deferred.await(cleanupFinished)),
 										),
 									);
 								},
@@ -409,17 +409,17 @@ describe("message surfacing settings", () => {
 							() => new Promise<void>((resolve) => setImmediate(resolve)),
 						);
 					}
-					yield* Fiber.interruptFork(request);
-					yield* Effect.yieldNow();
+					yield* Effect.sync(() => request.interruptUnsafe());
+					yield* Effect.yieldNow;
 					yield* Deferred.succeed(cleanupFinished, undefined);
 					yield* Deferred.succeed(
 						replacementReply,
 						new Response(null, { status: 401 }),
 					);
 					expect(yield* Fiber.join(replacement)).toMatchObject({
-						_tag: "Left",
+						_tag: "Failure",
 					});
-					expect(Exit.isInterrupted(yield* Fiber.await(request))).toBe(true);
+					expect(Exit.hasInterrupts(yield* Fiber.await(request))).toBe(true);
 					expect(yield* settings.get).toMatchObject({
 						active: false,
 						key: { source: "stored", rejected: true },
@@ -432,7 +432,7 @@ describe("message surfacing settings", () => {
 						active: false,
 						key: { source: "stored", rejected: true },
 					});
-					yield* Effect.either(restarted.post({}));
+					yield* Effect.result(restarted.post({}));
 					expect(transport).toHaveBeenCalledTimes(3);
 				}),
 		);
@@ -458,12 +458,12 @@ describe("message surfacing settings", () => {
 					key: { source: "env", rejected: false },
 				});
 				expect(
-					(yield* Effect.either(settings.update({ apiKey: null })))._tag,
-				).toBe("Left");
+					(yield* Effect.result(settings.update({ apiKey: null })))._tag,
+				).toBe("Failure");
 				transport.mockImplementationOnce(
 					async () => new Response(null, { status: 401 }),
 				);
-				yield* Effect.either(settings.post({}));
+				yield* Effect.result(settings.post({}));
 				expect(yield* settings.get).toMatchObject({
 					active: false,
 					key: { source: "env", rejected: true },
@@ -478,10 +478,10 @@ describe("message surfacing settings", () => {
 				});
 				for (const apiKey of [null, "fake-replacement"]) {
 					expect(
-						(yield* Effect.either(restarted.update({ apiKey })))._tag,
-					).toBe("Left");
+						(yield* Effect.result(restarted.update({ apiKey })))._tag,
+					).toBe("Failure");
 				}
-				yield* Effect.either(restarted.post({}));
+				yield* Effect.result(restarted.post({}));
 				expect(transport).toHaveBeenCalledTimes(2);
 				expect(
 					readFileSync(join(dir, "credentials/typesafe"), "utf8"),
@@ -514,8 +514,8 @@ describe("message surfacing settings", () => {
 					transport,
 				});
 				expect(
-					(yield* Effect.either(unsafe.update({ apiKey: "fake-secret" })))._tag,
-				).toBe("Left");
+					(yield* Effect.result(unsafe.update({ apiKey: "fake-secret" })))._tag,
+				).toBe("Failure");
 				expect(transport).not.toHaveBeenCalled();
 				const settings = yield* makeMessageSurfacingSettings(directory(), {
 					env: {},
@@ -523,10 +523,10 @@ describe("message surfacing settings", () => {
 						throw new Error("fake-secret in an upstream error");
 					},
 				});
-				const failure = yield* Effect.either(
+				const failure = yield* Effect.result(
 					settings.update({ apiKey: "fake-secret" }),
 				);
-				expect(failure._tag).toBe("Left");
+				expect(failure._tag).toBe("Failure");
 				expect(JSON.stringify(failure)).not.toContain("fake-secret");
 			}),
 	);
@@ -554,22 +554,22 @@ describe("message surfacing settings", () => {
 							started();
 						}),
 				);
-				const request = yield* Effect.fork(
-					settings.post({}).pipe(Effect.either),
+				const request = yield* Effect.forkChild(
+					settings.post({}).pipe(Effect.result),
 				);
 				yield* Effect.promise(() => pending);
 				yield* settings.update({ enabled: false, apiKey: "fake-new" });
 				complete(new Response(null, { status: 401 }));
-				yield* request.await;
+				yield* Fiber.await(request);
 				expect(yield* settings.get).toMatchObject({
 					enabled: false,
 					key: { source: "stored", rejected: false },
 				});
-				yield* Effect.either(settings.post({}));
+				yield* Effect.result(settings.post({}));
 				expect(transport).toHaveBeenCalledTimes(3);
 			}),
 	);
-	it.scoped(
+	it.effect(
 		"routes RPCs without a project, guards key writes and returns only status",
 		() =>
 			Effect.gen(function* () {
@@ -596,10 +596,12 @@ describe("message surfacing settings", () => {
 					active: false,
 					recap: { model: "opus", when: "on-request" },
 				});
-				const denied = yield* Effect.either(
+				const denied = yield* Effect.result(
 					handlers
 						.UpdateMessageSurfacing(
-							new UpdateMessageSurfacing({ apiKey: "fake-secret" }),
+							UpdateMessageSurfacing.payloadSchema.make({
+								apiKey: "fake-secret",
+							}),
 						)
 						.pipe(
 							Effect.provideService(RpcCaller, {
@@ -609,8 +611,10 @@ describe("message surfacing settings", () => {
 						),
 				);
 				expect(denied).toMatchObject({
-					_tag: "Left",
-					left: { message: "Saving a TypeSafe key requires TLS or loopback" },
+					_tag: "Failure",
+					failure: {
+						message: "Saving a TypeSafe key requires TLS or loopback",
+					},
 				});
 				for (const caller of [
 					{ kind: "cli" } as const,
@@ -621,7 +625,9 @@ describe("message surfacing settings", () => {
 				]) {
 					const result = yield* handlers
 						.UpdateMessageSurfacing(
-							new UpdateMessageSurfacing({ apiKey: "fake-secret" }),
+							UpdateMessageSurfacing.payloadSchema.make({
+								apiKey: "fake-secret",
+							}),
 						)
 						.pipe(Effect.provideService(RpcCaller, caller));
 					expect(result).toMatchObject({

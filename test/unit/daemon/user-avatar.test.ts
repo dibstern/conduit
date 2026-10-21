@@ -14,7 +14,14 @@ import {
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "@effect/vitest";
-import { Context, Effect, Either, Layer, Option, Schema } from "effect";
+import {
+	Context,
+	Effect,
+	Result as Either,
+	Layer,
+	Option,
+	Schema,
+} from "effect";
 import {
 	type Avatar,
 	AvatarChoiceSchema,
@@ -49,7 +56,7 @@ import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/clau
 import { settingsHandlers } from "../../../src/lib/server/ws-rpc/settings.js";
 
 describe("user avatar", () => {
-	it.scoped(
+	it.effect(
 		"resolves global identity, persists a seed across reload and preserves it on another save",
 		() =>
 			Effect.gen(function* () {
@@ -106,7 +113,7 @@ describe("user avatar", () => {
 				);
 				const responses: Avatar[] = [];
 				const first = yield* settingsHandlers
-					.GetAvatar(new GetAvatar({}))
+					.GetAvatar(GetAvatar.payloadSchema.make({}))
 					.pipe(Effect.provide(context));
 				responses.push(first);
 				expect(first).toEqual({
@@ -117,7 +124,9 @@ describe("user avatar", () => {
 				responses.push(
 					yield* settingsHandlers
 						.SetAvatar(
-							new SetAvatar({ choice: { kind: "shape", seed: -2147483648 } }),
+							SetAvatar.payloadSchema.make({
+								choice: { kind: "shape", seed: -2147483648 },
+							}),
 						)
 						.pipe(Effect.provide(context)),
 				);
@@ -175,7 +184,7 @@ describe("user avatar", () => {
 			}),
 	);
 
-	it.scoped(
+	it.effect(
 		"reads changed pictures each time and keeps an unavailable Mac choice",
 		() =>
 			Effect.gen(function* () {
@@ -210,7 +219,7 @@ describe("user avatar", () => {
 			}),
 	);
 
-	it.scoped("reports persistence failures through the RPC", () =>
+	it.effect("reports persistence failures through the RPC", () =>
 		Effect.gen(function* () {
 			const context = yield* Layer.build(
 				UserAvatarLive.pipe(
@@ -226,12 +235,14 @@ describe("user avatar", () => {
 					),
 				),
 			);
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				settingsHandlers
-					.SetAvatar(new SetAvatar({ choice: { kind: "initial" } }))
+					.SetAvatar(
+						SetAvatar.payloadSchema.make({ choice: { kind: "initial" } }),
+					)
 					.pipe(Effect.provide(context)),
 			);
-			expect(Either.isLeft(result) && result.left.message).toContain(
+			expect(Either.isFailure(result) && result.failure.message).toContain(
 				"disk full",
 			);
 		}),
@@ -245,7 +256,9 @@ describe("user avatar", () => {
 			{ kind: "shape", seed: -2147483649 },
 		])
 			expect(
-				Either.isLeft(Schema.decodeUnknownEither(AvatarChoiceSchema)(choice)),
+				Either.isFailure(
+					Schema.decodeUnknownResult(AvatarChoiceSchema)(choice),
+				),
 			).toBe(true);
 		expect(
 			Schema.decodeUnknownSync(AvatarChoiceSchema)({
@@ -255,7 +268,7 @@ describe("user avatar", () => {
 		).toEqual({ kind: "preset", id: "orb-pink" });
 	});
 
-	it.scoped("the platform adapter returns a bounded JPEG or none", () =>
+	it.effect("the platform adapter returns a bounded JPEG or none", () =>
 		Effect.gen(function* () {
 			const picture = yield* AccountPicture.pipe(
 				Effect.flatMap((service) => service.read),

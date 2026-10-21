@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { describe, expect, it } from "vitest";
 import {
 	InMemoryProviderSessionBindingReadModel,
@@ -87,7 +87,7 @@ describe("provider binding revisions", () => {
 			filename: join(dir, "events.db"),
 		}).pipe(
 			Layer.merge(
-				Layer.scopedDiscard(
+				Layer.effectDiscard(
 					Effect.addFinalizer(() =>
 						Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 					),
@@ -118,7 +118,7 @@ describe("provider binding revisions", () => {
 			filename: join(dir, "events.db"),
 		}).pipe(
 			Layer.merge(
-				Layer.scopedDiscard(
+				Layer.effectDiscard(
 					Effect.addFinalizer(() =>
 						Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 					),
@@ -149,7 +149,7 @@ describe("provider binding revisions", () => {
 			filename: join(dir, "events.db"),
 		}).pipe(
 			Layer.merge(
-				Layer.scopedDiscard(
+				Layer.effectDiscard(
 					Effect.addFinalizer(() =>
 						Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 					),
@@ -223,7 +223,7 @@ describe("provider binding revisions", () => {
 			filename: join(dir, "events.db"),
 		}).pipe(
 			Layer.merge(
-				Layer.scopedDiscard(
+				Layer.effectDiscard(
 					Effect.addFinalizer(() =>
 						Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 					),

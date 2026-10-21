@@ -415,9 +415,10 @@ describe("Ticket 1.3 — Event Translator PBT", () => {
 
 						// Same event again — should emit tool_start
 						const result = translator.translate(event);
-						if (result.ok && result.messages.length === 1) {
-							expect(result.messages[0]?.type).toBe("tool_start");
-						}
+						expect(result).toMatchObject({
+							ok: true,
+							messages: [{ type: "tool_start" }],
+						});
 					},
 				),
 				{ seed: SEED, numRuns: NUM_RUNS, endOnFailure: true },

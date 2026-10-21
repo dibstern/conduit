@@ -4,16 +4,29 @@
 no_auto_install: true
 
 pre-commit:
+  parallel: true
   commands:
     lint:
       # Biome sees only the files being committed, so another session's
       # unformatted work in progress cannot block this commit.
-      run: pnpm exec biome check --no-errors-on-unmatched --files-ignore-unknown=true {staged_files} && pnpm lint:rules
+      run: pnpm exec biome check --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
+    lint-rules:
+      run: pnpm lint:rules
     typecheck:
-      run: pnpm check
+      run: pnpm exec tsgo --noEmit
+    typecheck-frontend:
+      run: pnpm check:frontend
+    typecheck-svelte:
+      run: pnpm check:svelte
     test:
       env:
         NODE_OPTIONS: "--max-old-space-size=8192"
-      run: pnpm test
+      # Lefthook omits deleted files; unrelated inputs pass with no tests.
+      run: pnpm exec vitest related --run {staged_files}
+    test-guards:
+      env:
+        NODE_OPTIONS: "--max-old-space-size=8192"
+      # No file template: guards also run for docs-only and deletion-only commits.
+      run: pnpm exec vitest run --project guards
     build:
       run: pnpm build

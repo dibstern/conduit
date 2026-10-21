@@ -155,7 +155,7 @@ describe("AuthManager concurrent pinHash safety", () => {
 				// Fork 10 writers concurrently updating pinHash
 				const writerFibers = yield* Effect.all(
 					hashes.map((hash) =>
-						Effect.fork(
+						Effect.forkChild(
 							Ref.update(configRef, (c) => ({
 								...c,
 								pinHash: hash,
@@ -168,7 +168,7 @@ describe("AuthManager concurrent pinHash safety", () => {
 				const readResults: Array<string | null> = [];
 				const readerFibers = yield* Effect.all(
 					Array.from({ length: 10 }, () =>
-						Effect.fork(
+						Effect.forkChild(
 							auth.getPinHash().pipe(
 								Effect.tap((pin) =>
 									Effect.sync(() => {

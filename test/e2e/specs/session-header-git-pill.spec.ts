@@ -1,5 +1,6 @@
 import type { Page, TestInfo } from "@playwright/test";
 import { WorkspaceMoveError } from "../../../src/lib/contracts/session-workspace.js";
+import { inspectTouchTarget } from "../../../src/lib/frontend/stories/touch-target.js";
 import type {
 	SessionGit,
 	SessionWorkspace,
@@ -218,6 +219,12 @@ for (const mode of [
 				await expect(trigger.locator('[data-part="project"]')).toHaveCount(0);
 			await expect(trigger.locator('[data-part="branch"]')).toHaveText("main");
 			await expect(trigger.locator('[data-part="dirty"]')).toBeVisible();
+			await expect(trigger.locator('[data-part="dirty"]')).toHaveText(
+				"Uncommitted changes",
+			);
+			await expect(trigger.locator('[data-part="dirty"] .sr-only')).toHaveText(
+				"Uncommitted changes",
+			);
 			const dot = await trigger.locator('[data-part="dirty"]').boundingBox();
 			expect(dot?.width).toBe(6);
 			expect(dot?.height).toBe(6);
@@ -426,6 +433,9 @@ for (const mode of [
 			);
 			await expect(trigger.locator('[data-icon="folder"] svg')).toBeVisible();
 			await expect(trigger.locator('[data-part="branch"]')).toHaveCount(0);
+			await expect(
+				trigger.locator('[title="Uncommitted changes"]'),
+			).toHaveCount(0);
 			await trigger.click();
 			await expect(
 				page.getByRole("menuitem", { name: "Copy branch name" }),
@@ -497,7 +507,7 @@ for (const mode of [
 				await trigger.click();
 				await expect(
 					page.getByRole("menuitem", { name: "Move to worktree…" }),
-				).toHaveCount(supportsWorktree === false ? 0 : 1);
+				).toHaveCount(supportsWorktree === true ? 1 : 0);
 			});
 		}
 
@@ -564,25 +574,44 @@ for (const mode of [
 					"/workspace/spm-architecture-deepening-with-a-very-long-project-name",
 				git: { branch: "docs/architecture-deepening-design", dirty: true },
 			});
-			const project = trigger.locator('[data-part="project"]');
-			if (mode.hasTouch) {
-				await expect(project).toBeVisible();
-				expect((await project.boundingBox())?.width).toBeGreaterThan(10);
-			} else await expect(project).toHaveCount(0);
-			const branch = trigger.locator('[data-part="branch"]');
-			await expect(branch).toBeVisible();
-			expect((await branch.boundingBox())?.width).toBeGreaterThan(10);
-			const checkoutBox = await trigger.boundingBox();
-			const composerBox = await page.locator("#input-area").boundingBox();
-			expect(checkoutBox).not.toBeNull();
-			expect(composerBox).not.toBeNull();
-			if (!checkoutBox || !composerBox)
-				throw new Error("Composer checkout missing");
-			expect(checkoutBox.x).toBeGreaterThanOrEqual(composerBox.x);
-			expect(checkoutBox.x + checkoutBox.width).toBeLessThanOrEqual(
-				composerBox.x + composerBox.width,
-			);
-			await capture(page, testInfo, `${mode.name}-long-names`);
+			for (const viewport of [
+				mode.viewport,
+				...(mode.hasTouch ? [{ width: 320, height: 640 }] : []),
+			]) {
+				await page.setViewportSize(viewport);
+				const project = trigger.locator('[data-part="project"]');
+				if (mode.hasTouch) {
+					await expect(project).toBeVisible();
+					expect((await project.boundingBox())?.width).toBeGreaterThan(10);
+				} else await expect(project).toHaveCount(0);
+				const branch = trigger.locator('[data-part="branch"]');
+				await expect(branch).toBeVisible();
+				expect((await branch.boundingBox())?.width).toBeGreaterThan(10);
+				const checkoutBox = await trigger.boundingBox();
+				const composerBox = await page.locator("#input-area").boundingBox();
+				expect(checkoutBox).not.toBeNull();
+				expect(composerBox).not.toBeNull();
+				if (!checkoutBox || !composerBox)
+					throw new Error("Composer checkout missing");
+				expect(checkoutBox.x).toBeGreaterThanOrEqual(composerBox.x);
+				expect(checkoutBox.x + checkoutBox.width).toBeLessThanOrEqual(
+					composerBox.x + composerBox.width,
+				);
+				for (const part of mode.hasTouch ? ["project", "branch"] : ["branch"]) {
+					const height = await trigger
+						.locator(`[data-part="${part}"]`)
+						.evaluate((element) => ({
+							actual: element.getBoundingClientRect().height,
+							line: Number.parseFloat(getComputedStyle(element).lineHeight),
+						}));
+					expect(height.actual).toBeLessThanOrEqual(height.line + 1);
+				}
+				await capture(
+					page,
+					testInfo,
+					`${mode.name}-long-names-${viewport.width}px`,
+				);
+			}
 		});
 
 		test("detached HEAD shows the commit glyph and short SHA", async ({
@@ -682,6 +711,8 @@ for (const mode of [
 			expect(layout.branchWidth).toBeGreaterThan(10);
 			expect(layout.contained).toBe(true);
 			if (mode.hasTouch) {
+				await page.keyboard.press("Escape");
+				await expect(trigger).toBeHidden();
 				const back = page.getByTestId("session-bar-back");
 				await expect(back).toHaveAccessibleName("Sessions");
 				const backBox = await back.boundingBox();
@@ -696,13 +727,18 @@ for (const mode of [
 				expect(moreBox).not.toBeNull();
 				if (!backBox || !groupBox || !moreBox)
 					throw new Error("Header control missing");
-				expect(backBox.width).toBeGreaterThanOrEqual(44);
-				expect(backBox.height).toBeGreaterThanOrEqual(44);
+				// Final's phone header uses a compact pill with a larger touch area
+				// (4e611586, conduit-test-aoqb.5).
+				const target = await back.evaluate(inspectTouchTarget, 44);
+				expect(target.width).toBeGreaterThanOrEqual(44);
+				expect(target.height).toBeGreaterThanOrEqual(44);
+				expect(target.missing, JSON.stringify(target.failures)).toBe(0);
 				expect(backBox.x + backBox.width).toBeLessThanOrEqual(groupBox.x);
 				expect(groupBox.x + groupBox.width).toBeLessThanOrEqual(moreBox.x);
 				expect(moreBox.x + moreBox.width).toBeLessThanOrEqual(
 					mode.viewport.width,
 				);
+				await page.getByTestId("composer-words-sheet-trigger").tap();
 			}
 			await capture(page, testInfo, `${mode.name}-long-operation`);
 		});

@@ -73,7 +73,7 @@ export const makeClaudeThreadRead = Effect.gen(function* () {
 			const nextCursor = page.messages[limit]?.id;
 			return { items, ...(nextCursor === undefined ? {} : { nextCursor }) };
 		}).pipe(
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.succeed<ClaudeThreadReadResult>(
 					error._tag === "TranscriptPageCursorNotFoundError"
 						? {

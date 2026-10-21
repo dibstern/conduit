@@ -1,13 +1,12 @@
 // The route owns the open session; replies only place the id they answered.
 import { untrack } from "svelte";
 import { SvelteMap } from "svelte/reactivity";
+import type { InputDraftKey } from "../../contracts/ws-rpc.js";
 import { effectiveWorkingDirectory } from "../../session/session-workspace.js";
-import { getScopeGroupKey } from "../../session-scope.js";
 import { getIsConnected } from "../transport/connection-status.svelte.js";
 import { toastFailure } from "../transport/rpc-errors.js";
 import { WsRpcError } from "../transport/ws-rpc.js";
 import { rpc } from "../transport/ws-rpc-client.js";
-import { handleInputSyncReceived } from "./chat.svelte.js";
 import { getBrowserClientId } from "./client-identity.js";
 import {
 	applyGetFileTreeResponse,
@@ -19,10 +18,13 @@ import { viewInputDraft } from "./input-draft.js";
 import { getDraftProject, projectState } from "./project-state.svelte.js";
 import {
 	attachedProjectState,
+	DRAFT_PROJECT_PARAM,
 	getCurrentRoute,
 	getCurrentSearchParams,
 	getCurrentSessionId,
+	getNewDraftId,
 	navigate,
+	normalizeRoute,
 	replaceRoute,
 	routerState,
 } from "./router.svelte.js";
@@ -93,13 +95,17 @@ const scope = $derived<{
 			: shown.kind === "none" &&
 					getCurrentRoute().page === "chat" &&
 					attachedProjectState.slug
-				? { project: attachedProjectState.slug, sessionId: null }
+				? {
+						project: getDraftProject() ?? attachedProjectState.slug,
+						sessionId: null,
+					}
 				: null,
 );
 const wantedProject = $derived.by(() => {
 	if (shown.kind === "placed" || shown.kind === "draft") return shown.project;
-	const listScope = getSessionScope();
-	return getScopeGroupKey(listScope) === null ? listScope : null;
+	if (shown.kind === "none" && scope && getDraftProject() !== null)
+		return scope.project;
+	return getSessionScope();
 });
 
 export const selection = {
@@ -108,12 +114,36 @@ export const selection = {
 	},
 	openDraft(project: string | null): void {
 		const route = getCurrentRoute();
+		const draftId = getNewDraftId();
 		const params = getCurrentSearchParams();
-		if (project) params.set("project", project);
-		else params.delete("project");
-		const path = `/new${params.size ? `?${params}` : ""}`;
-		if (route.page === "chat" && route.draft) replaceRoute(path);
+		if (project) params.set(DRAFT_PROJECT_PARAM, project);
+		else params.delete(DRAFT_PROJECT_PARAM);
+		const path = `/draft/${draftId}${params.size ? `?${params}` : "?"}`;
+		if (route.page === "chat" && route.draftId === draftId) replaceRoute(path);
 		else navigate(path);
+	},
+	moveDraft(project: string | null): void {
+		const route = getCurrentRoute();
+		if (route.page !== "chat" || !route.draftId) {
+			selection.openDraft(project);
+			return;
+		}
+		const params = getCurrentSearchParams();
+		if (project) params.set(DRAFT_PROJECT_PARAM, project);
+		else params.delete(DRAFT_PROJECT_PARAM);
+		replaceRoute(`/draft/${route.draftId}${params.size ? `?${params}` : "?"}`);
+	},
+	follow(
+		from: typeof scope,
+		sessionId: string,
+		history: "push" | "replace",
+	): void {
+		if (!from) return;
+		placement.set(sessionId, { project: from.project });
+		if (scope?.project !== from.project || scope.sessionId !== from.sessionId)
+			return;
+		if (history === "replace") replaceRoute(`/s/${sessionId}`);
+		else navigate(`/s/${sessionId}`);
 	},
 	get shown(): Shown {
 		return shown;
@@ -131,8 +161,17 @@ export function markSessionDeleted(sessionId: string): void {
 /** The shell owns this lifecycle, as it does catalog and subscription lifetimes. */
 export function watchSelection(): () => void {
 	return $effect.root(() => {
+		// Standalone shells and component fixtures do not mount App's route normalizer.
+		$effect.pre(() => {
+			const route = getCurrentRoute();
+			if (route.page === "chat" && route.draft && !route.draftId)
+				untrack(normalizeRoute);
+		});
 		let alive = true;
 		const attaching = new Set<string>();
+		// An attach by session id places that session itself, so a row placing
+		// it while the reply is out must not send a second attach.
+		let sessionAttach = $state<string | null>(null);
 		const resolving = new Set<string>();
 		let attachedOnce = attachedProjectState.slug !== null;
 		let previousAttached = attachedProjectState.slug;
@@ -218,11 +257,15 @@ export function watchSelection(): () => void {
 			const current = shown;
 			const route = getCurrentRoute();
 			const connected = getIsConnected();
+			const pendingSession = sessionAttach;
 			untrack(() => {
 				if (previousAttached !== null && attached === null)
 					attachedOnce = false;
 				previousAttached = attached;
 				if (!connected || route.page !== "chat") return;
+				const routeSessionId = route.sessionId ?? null;
+				if (pendingSession !== null && pendingSession === routeSessionId)
+					return;
 				const sessionId =
 					current.kind === "placing" || current.kind === "drawn"
 						? current.sessionId
@@ -231,9 +274,14 @@ export function watchSelection(): () => void {
 					(wanted !== null && wanted !== attached) ||
 					(!attachedOnce && attached === null)
 				) {
-					const key = JSON.stringify([wanted, sessionId]);
+					// Learning this session's project must not start another attach.
+					const key = JSON.stringify([
+						routeSessionId ? null : wanted,
+						routeSessionId,
+					]);
 					if (attaching.has(key)) return;
 					attaching.add(key);
+					if (sessionId) sessionAttach = sessionId;
 					void rpc("AttachProject", {
 						originId: getBrowserClientId(),
 						...(sessionId
@@ -243,11 +291,13 @@ export function watchSelection(): () => void {
 								: {}),
 					})
 						.then(({ projectSlug, sessionSlug }) => {
+							attaching.delete(key);
 							if (!alive) return;
 							// Place only this reply's id; a delete always wins over a late reply.
 							const matches =
-								wantedProject === wanted &&
-								(!sessionId || getCurrentSessionId() === sessionId);
+								getCurrentSessionId() === routeSessionId &&
+								(wantedProject === wanted ||
+									(sessionId !== null && wantedProject === sessionSlug));
 							if (sessionId && placement.get(sessionId) !== "deleted")
 								placement.set(
 									sessionId,
@@ -267,12 +317,16 @@ export function watchSelection(): () => void {
 								if (placement.get(sessionId) !== "deleted")
 									placement.set(sessionId, "missing");
 							} else if (
-								wantedProject === wanted &&
-								(!sessionId || getCurrentSessionId() === sessionId)
+								getCurrentSessionId() === routeSessionId &&
+								(routeSessionId !== null || wantedProject === wanted)
 							)
 								toastFailure("Failed to switch projects")(error);
 						})
-						.finally(() => attaching.delete(key));
+						.finally(() => {
+							attaching.delete(key);
+							if (sessionId && sessionAttach === sessionId)
+								sessionAttach = null;
+						});
 					return;
 				}
 				if (!sessionId || resolving.has(sessionId)) return;
@@ -308,30 +362,14 @@ export function watchSelection(): () => void {
 		);
 		$effect(() => {
 			const key = placedKey;
-			let viewing = true;
 			untrack(() => {
 				if (!key || shown.kind !== "placed") return;
 				const current = shown;
 				void rpc("ViewSession", {
 					sessionId: current.sessionId,
 					originId: getBrowserClientId(),
-				})
-					.then(({ draft }) => {
-						if (
-							alive &&
-							viewing &&
-							draft !== undefined &&
-							shown.kind === "placed" &&
-							shown.sessionId === current.sessionId &&
-							shown.project === current.project
-						)
-							handleInputSyncReceived({ text: draft });
-					})
-					.catch(toastFailure("Failed to open session"));
+				}).catch(toastFailure("Failed to open session"));
 			});
-			return () => {
-				viewing = false;
-			};
 		});
 		let feedKey: string | null | undefined;
 		const feedScopeKey = $derived(
@@ -349,9 +387,33 @@ export function watchSelection(): () => void {
 				const id = key && current.kind === "placed" ? current.sessionId : null;
 				viewTranscript(project, id);
 				viewTodos(project, id);
-				viewInputDraft(project, id);
 				viewFamily(project, id);
 			});
+		});
+		const inputDraftScope = $derived.by<{
+			project: string;
+			key: InputDraftKey;
+		} | null>(() => {
+			const route = getCurrentRoute();
+			if (route.page === "chat" && route.draftId)
+				return {
+					project: getDraftProject() ?? attachedProjectState.slug ?? "",
+					key: { draft: route.draftId },
+				};
+			return shown.kind === "placed" &&
+				shown.project === attachedProjectState.slug
+				? { project: shown.project, key: { session: shown.sessionId } }
+				: null;
+		});
+		let followedDraft: string | undefined;
+		$effect(() => {
+			const current = inputDraftScope;
+			const key = JSON.stringify(current);
+			if (key === followedDraft) return;
+			followedDraft = key;
+			untrack(() =>
+				viewInputDraft(current?.project ?? "", current?.key ?? null),
+			);
 		});
 		$effect(() => () => {
 			viewTranscript("", null);

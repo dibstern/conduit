@@ -276,8 +276,10 @@ test("returning to a session after a rewind or its undo resumes it", async ({
 				{ timeout: 30_000 },
 			)
 			.toBe(true);
-		// Anything a mismatch would trigger has landed by now.
-		await page.waitForTimeout(1_500);
+		// An interactive transcript proves the resume checksum was accepted.
+		await expect(
+			messages.locator(":scope > div:not([inert]) .msg-assistant").first(),
+		).toBeVisible();
 		const requests = detailRequests(sessionId, sentFrom);
 		const envelopes = detailEnvelopes(requests, receivedFrom);
 		const cold = await coldOpen(sessionId, shown);

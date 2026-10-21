@@ -119,6 +119,35 @@ export const composerHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "tap send with the keyboard open",
+		match: /^I tap the send button with the keyboard open$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			const cdp = await page.context().newCDPSession(page);
+			await cdp.send("Emulation.setTouchEmulationEnabled", {
+				enabled: true,
+				maxTouchPoints: 1,
+			});
+			// An iPhone home-indicator inset, which iOS keeps at full size while the keyboard is up.
+			await cdp.send("Emulation.setSafeAreaInsetsOverride", {
+				insets: { bottom: 34, bottomMax: 34 },
+			});
+			await page.locator("#input-area textarea").focus();
+			const box = await page.locator("#send").boundingBox();
+			if (!box) throw new Error("Send button is not visible");
+			const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+			await cdp.send("Input.dispatchTouchEvent", {
+				type: "touchStart",
+				touchPoints: [point],
+			});
+			await cdp.send("Input.dispatchTouchEvent", {
+				type: "touchEnd",
+				touchPoints: [],
+			});
+			await cdp.detach();
+		},
+	},
+	{
 		name: "assert command menu entries",
 		match: /^the command menu (offers|does not offer) (\S+)$/,
 		run: async ({ world, match }) => {

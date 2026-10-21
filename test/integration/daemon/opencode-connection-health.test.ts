@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { RpcTest } from "@effect/rpc";
 import Database from "better-sqlite3";
-import { Effect, Either, HashMap, Ref, Stream } from "effect";
+import { Effect, Result as Either, HashMap, Ref, Stream } from "effect";
+import { RpcTest } from "effect/rpc";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
 import {
@@ -287,7 +287,7 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 		const inputId = randomUUID();
 		evidence["newInputId"] = inputId;
 		const admitted = await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId,
 				originId: browser.originId,
 				inputId,
@@ -414,7 +414,7 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 		expect(primary?.pid).not.toBe(secondary?.pid);
 		await browser.followSessions();
 		await Effect.runPromise(
-			unrelated.rpc.input.submit({
+			unrelated.rpc["input.submit"]({
 				sessionId: claudeId,
 				originId: unrelated.originId,
 				inputId: randomUUID(),
@@ -466,7 +466,9 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 			instanceId,
 		);
 		await permissionBrowser.waitFor(
-			(message) => message["requestId"] === "rqbc-4-permission",
+			(message) =>
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+				"rqbc-4-permission",
 		);
 		await fixture.addOpenCodePrompt(
 			"question",
@@ -485,7 +487,9 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 			instanceId,
 		);
 		await questionBrowser.waitFor(
-			(message) => message["toolId"] === "rqbc-4-question",
+			(message) =>
+				fixture.providerRequestIdForPrompt(String(message["toolId"])) ===
+				"rqbc-4-question",
 		);
 		const ids = [
 			busyId,
@@ -584,7 +588,7 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 			"stopped",
 		);
 		// Four 750ms fallback intervals expose repeated non-starting-client
-		// warnings, including the rows deliberately kept busy for user answers.
+		// warnings, including the sessions still awaiting user answers.
 		await new Promise<void>((done) => setTimeout(done, 3_000));
 		const afterStop = sessionState();
 		const warnings = pollerWarnings();
@@ -598,13 +602,12 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 					message["type"] === "session_row" &&
 					ids.includes(String(message["id"])),
 			);
-		// Main changes only process state, leaving the ordinary busy row busy
-		// and an already-running viewed fallback poller warning every 750ms.
+		// Stopping settles runtime status; pending prompts still hold user waits.
 		expect.soft(afterStop.statuses).toEqual({
 			[busyId]: "idle",
 			[retryId]: "idle",
-			[permissionId]: "busy",
-			[questionId]: "busy",
+			[permissionId]: "idle",
+			[questionId]: "idle",
 			[otherInstanceId]: "busy",
 			[claudeId]: "busy",
 		});

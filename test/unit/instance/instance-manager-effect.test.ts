@@ -21,7 +21,7 @@ const testLayer = makeInstanceManagerStateLive(undefined, [], {
 );
 
 describe("InstanceManager Effect", () => {
-	it.scoped("addInstance registers instance in state", () =>
+	it.effect("addInstance registers instance in state", () =>
 		Effect.gen(function* () {
 			yield* addInstance({
 				id: "inst-1",
@@ -35,7 +35,7 @@ describe("InstanceManager Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.scoped("removeInstance clears instance from state", () =>
+	it.effect("removeInstance clears instance from state", () =>
 		Effect.gen(function* () {
 			yield* addInstance({
 				id: "inst-1",
@@ -50,7 +50,7 @@ describe("InstanceManager Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.scoped("enforces max instance limit", () =>
+	it.effect("enforces max instance limit", () =>
 		Effect.gen(function* () {
 			const exit = yield* Effect.exit(
 				Effect.gen(function* () {
@@ -68,7 +68,7 @@ describe("InstanceManager Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.scoped("add-remove-add at max instances succeeds", () =>
+	it.effect("add-remove-add at max instances succeeds", () =>
 		Effect.gen(function* () {
 			for (let i = 0; i < 5; i++) {
 				yield* addInstance({
@@ -91,7 +91,7 @@ describe("InstanceManager Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 
-	it.scoped("max instance error has correct tag for catchTag", () =>
+	it.effect("max instance error has correct tag for catchTag", () =>
 		Effect.gen(function* () {
 			const result = yield* Effect.gen(function* () {
 				for (let i = 0; i < 6; i++) {

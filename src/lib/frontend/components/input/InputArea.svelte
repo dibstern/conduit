@@ -1,10 +1,6 @@
 <!-- Auto-expanding textarea with send/stop button, attach menu, agent/model pills. -->
 <!-- Command menu triggered by "/" prefix. -->
 
-<script module lang="ts">
-	let draftId = crypto.randomUUID();
-</script>
-
 <script lang="ts">
 	import Popover from "../ui/Popover.svelte";
 	import ComposerFrame from "../ui/ComposerFrame.svelte";
@@ -42,7 +38,7 @@
 	import PastePreview from "../chat/PastePreview.svelte";
 	import PendingInputTray from "./PendingInputTray.svelte";
 	import { openSideThreads } from "../session/side-threads.svelte.js";
-	import { currentChat, draftSend, inputSyncState, isProcessing, registerInputDraft, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
+	import { currentChat, draftSend, isProcessing, registerInputDraft, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
 	import { send, stop, turn as readTurn } from "../../stores/turn.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { approvals } from "../../stores/composer-settings.svelte.js";
@@ -67,11 +63,12 @@
 	} from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, prepareFileAttachment } from "./input-utils.js";
 	import { parseAttachmentDataUrl } from "../../../attachment-data-url.js";
-	import { findSession, isSessionSnoozed, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { findSession, isSessionSnoozed, sessionState } from "../../stores/session.svelte.js";
 	import { selection } from "../../stores/selection.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { getCurrentRoute, getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { connectionState } from "../../transport/connection-status.svelte.js";
+	import { createComposerDraft } from "../../stores/composer-draft/runner.svelte.js";
 	import { fade } from "svelte/transition";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { getDriverTraits, instanceState } from "../../stores/instance.svelte.js";
@@ -112,7 +109,14 @@
 		composerMoreOpen = false;
 	});
 
-	let inputText = $state("");
+	const composerDraft = createComposerDraft({
+		key: () => {
+			const route = getCurrentRoute();
+			return route.page !== "chat" ? null : route.sessionId ? { session: route.sessionId } : route.draftId ? { draft: route.draftId } : null;
+		},
+		projectSlug: getDraftProject,
+		hasAttachments: () => pendingAttachments.length > 0 || readingAttachments > 0,
+	});
 	let draftWorktree = $state<WorktreeInfo | null>(null);
 	let draftNewWorktree = $state(false);
 	let draftWorktreeBase = $state<string | null>(null);
@@ -120,7 +124,8 @@
 	let draftSessionMode = $state<Awaited<ReturnType<typeof rpc<"ResolveSessionMode">>> | undefined>();
 	let pendingDraftSessionMode: Promise<void> | undefined;
 	const draftRoute = $derived(getCurrentRoute());
-	const draftContext = $derived(`${getDraftProject() ?? ""}:${sessionState.currentId ?? ""}:${draftRoute.page === "chat" && draftRoute.draft ? "draft" : "session"}`);
+	const draftId = $derived(draftRoute.page === "chat" ? draftRoute.draftId : undefined);
+	const draftContext = $derived(`${getDraftProject() ?? ""}:${sessionState.currentId ?? ""}:${draftId ?? "session"}`);
 	const sessionModeContext = $derived(`${draftContext}:${sessionState.currentId ? "" : getEffectiveInstanceId()}`);
 	$effect(() => {
 		draftContext;
@@ -143,11 +148,11 @@
 		return () => { current = false; };
 	});
 	const supportsGoal = $derived(discoveryState.currentTraits?.supportsGoalState === true);
-	const isGoalCommand = $derived(supportsGoal && /^[/$]goal(?:\s|$)/.test(inputText));
+	const isGoalCommand = $derived(supportsGoal && /^[/$]goal(?:\s|$)/.test(composerDraft.text));
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
-	const referenceEditor = referenceEditing({ read: () => inputText, write: (text) => { inputText = text; }, context: () => draftContext, element: () => textareaEl, changed: handleInput });
-	const referenceView = $derived(projectReferences(inputText));
-	$effect(() => provideComposerDraft({ sessionId: () => sessionState.currentId, draft: () => inputText, insert: (reference) => { if (!readOnlySubagent) referenceEditor.insert(reference); }, remove: referenceEditor.remove }));
+	const referenceEditor = referenceEditing({ read: () => composerDraft.text, write: (text) => { composerDraft.text = text; }, context: () => draftContext, element: () => textareaEl, changed: handleInput });
+	const referenceView = $derived(projectReferences(composerDraft.text));
+	$effect(() => provideComposerDraft({ sessionId: () => sessionState.currentId, draft: () => composerDraft.text, insert: (reference) => { if (!readOnlySubagent) referenceEditor.insert(reference); }, remove: referenceEditor.remove }));
 	let fieldScroller: HTMLDivElement | undefined = $state();
 	let composerFocused = $state(false);
 	let pendingAttachments = $state<PendingAttachment[]>([]);
@@ -178,7 +183,7 @@
 		const timer = setTimeout(() => { goalNow = Date.now(); }, endedAt + 10_000 - now + 1);
 		return () => clearTimeout(timer);
 	});
-	const turnControl = $derived(readTurn(sessionState.currentId));
+	const turnControl = $derived(readTurn());
 	const working = $derived(turnControl.working);
 	$effect(() => {
 		requestSessionPreWarm(readOnlySubagent ? null : sessionState.currentId);
@@ -186,7 +191,7 @@
 	});
 	function draftSessionPayload(projectSlug: string | null) {
 		const displayed = getDraftPick();
-		if (!projectSlug || !displayed) return undefined;
+		if (!projectSlug || !displayed || !draftId) return undefined;
 		return {
 			projectSlug,
 			originId: getBrowserClientId(),
@@ -276,124 +281,15 @@
 			composerPresentation ? `Reply to ${composerPresentation.label}…` : "Reply…",
 	);
 
-	// Each session keeps its own unsent input text. Switching sessions saves the
-	// current draft and restores the target session's draft (or empty string).
-
-	const inputDrafts = new Map<string, string>();
-	// undefined until the first run, so a fresh load restores its draft too.
-	let previousSessionId: string | null | undefined ;
-
-	// The new-session draft has no server-side store, so it lives here to
-	// survive a reload: a half-typed first prompt must not vanish.
-	const NEW_SESSION_DRAFT_KEY = "conduit:new-session-draft";
-	function readNewSessionDraft(): string {
-		try {
-			return localStorage.getItem(NEW_SESSION_DRAFT_KEY) ?? "";
-		} catch {
-			return "";
-		}
-	}
-	function storeNewSessionDraft(text: string) {
-		try {
-			if (text) localStorage.setItem(NEW_SESSION_DRAFT_KEY, text);
-			else localStorage.removeItem(NEW_SESSION_DRAFT_KEY);
-		} catch {
-			// Storage can be unavailable (private mode); the draft just won't persist.
-		}
-	}
-	const reloadRestoredDrafts = new Set<string>();
-	// Extend the existing draft map across a reload, including drafts typed
-	// before a session exists. Session drafts also keep using the server RPC.
-	const reloadDraftKey = "conduit-reload-drafts";
-	try {
-		const saved = sessionStorage.getItem(reloadDraftKey);
-		if (saved) {
-			for (const [id, text] of JSON.parse(saved) as [string, string][]) {
-				inputDrafts.set(id, text);
-				reloadRestoredDrafts.add(id);
-			}
-			sessionStorage.removeItem(reloadDraftKey);
-		}
-	} catch {
-		// A restricted browser can still use the existing server draft sync.
-	}
-
-	$effect(() => {
-		const currentId = sessionState.currentId;
-		untrack(() => {
-			if (currentId !== previousSessionId) {
-				// Save draft for the session we're leaving
-				if (previousSessionId) {
-					inputDrafts.set(previousSessionId, inputText);
-				}
-				// Restore draft for the session we're entering
-				inputText = currentId
-					? (inputDrafts.get(currentId) ?? "")
-					: readNewSessionDraft();
-				previousSessionId = currentId;
-				lastLocalEditAt = reloadRestoredDrafts.delete(currentId ?? "") ? Date.now() : 0;
-				// Cancel any pending outgoing sync from the previous session
-				if (inputSyncTimer) {
-					clearTimeout(inputSyncTimer);
-					inputSyncTimer = null;
-				}
-			}
-		});
-	});
-
-	// Input sync (cross-tab)
-
-	/** Track which sync we last applied to avoid re-applying our own. */
-	let lastSyncApplied = 0;
-
-	/** When the local user last typed, so stale syncs can be told apart. */
-	let lastLocalEditAt = 0;
-
-	// A sync is already behind by our own 300ms debounce plus a round trip, so
-	// one that lands right after a keystroke describes text older than what is
-	// on screen. Applying it deletes what the user just typed.
-	const SYNC_GRACE_MS = 1_000;
-
-	/** Receive input sync from another tab viewing the same session. */
-	$effect(() => {
-		if (inputSyncState.lastUpdated <= lastSyncApplied) return;
-		lastSyncApplied = inputSyncState.lastUpdated;
-		if (inputSyncState.reloadPending) return;
-		if (Date.now() - lastLocalEditAt < SYNC_GRACE_MS) return;
-		inputText = inputSyncState.text;
-	});
-
 	// + opens a draft ready to type into.
 	$effect(() => {
 		const route = getCurrentRoute();
 		if (route.page === "chat" && route.draft) untrack(() => textareaEl?.focus());
 	});
 
-	/** Timer for debounced outgoing input sync. */
-	let inputSyncTimer: ReturnType<typeof setTimeout> | null = null;
+	$effect(() => registerInputDraft(addToDraft));
 
-	$effect(() => registerInputDraft({ insert: addToDraft, persist: async () => {
-		if (inputSyncTimer) {
-			clearTimeout(inputSyncTimer);
-			inputSyncTimer = null;
-		}
-		let savedText: string;
-		let savedSessionId: string | null;
-		do {
-			savedText = inputText;
-			savedSessionId = sessionState.currentId;
-			await syncInputDraft(savedText);
-		} while (inputText !== savedText || sessionState.currentId !== savedSessionId);
-		// Cancelling the debounce above dropped any pending new-session draft write.
-		if (!sessionState.currentId) storeNewSessionDraft(inputText);
-		// Attachments live only in this composer. Defer reload until sent or removed.
-		if (pendingAttachments.length > 0 || readingAttachments > 0) return false;
-		inputDrafts.set(sessionState.currentId ?? "", inputText);
-		sessionStorage.setItem(reloadDraftKey, JSON.stringify([...inputDrafts]));
-		return true;
-	}}));
-
-	const commandMatch = $derived(extractCommandQuery(inputText, cursorPos));
+	const commandMatch = $derived(extractCommandQuery(composerDraft.text, cursorPos));
 	const commandMenuVisible = $derived(commandMatch !== null);
 	const commandQuery = $derived(commandMatch?.query ?? "");
 	const conduitCommandNames = new Set<string>(
@@ -432,7 +328,7 @@
 	$effect(() => {
 		if (!previewOpen || !referenceView.references.length) return;
 		let current = true;
-		void withReferences(toProviderCommands(inputText.trim(), providerBuiltinNameSet), composerProjectSlug).then((text) => {
+		void withReferences(toProviderCommands(composerDraft.text.trim(), providerBuiltinNameSet), composerProjectSlug).then((text) => {
 			if (current) preview = serializeReferences(text);
 		});
 		return () => {
@@ -451,7 +347,7 @@
 		new Set([...discoveryState.commands.filter((c) => c.builtin && !conduitCommandNames.has(c.name)).map((c) => c.name), ...(supportsGoal ? ["goal"] : [])]),
 	);
 
-	const atQuery = $derived(extractAtQuery(inputText, cursorPos));
+	const atQuery = $derived(extractAtQuery(composerDraft.text, cursorPos));
 	const fileMenuVisible = $derived(
 		!commandMenuVisible && atQuery !== null,
 	);
@@ -510,14 +406,7 @@
 		if (plainText) enteredPlainText = true;
 	});
 
-	const draftProject = $derived(projectState.projects.find((project) => project.slug === getDraftProject()));
-	const unsupportedDraftFolders = $derived(
-		!sessionState.currentId && (draftProject?.folders.length ?? 0) > 1 &&
-		getAvailableInstances().find((instance) => instance.id === getEffectiveInstanceId())?.capabilities?.supportsMultiFolder === false,
-	);
-	// A session drawn from its saved page takes sends once the server places it.
-	const unplaced = $derived(selection.shown.kind === "placing" || selection.shown.kind === "drawn");
-	const canSend = $derived(readingAttachments === 0 && !readOnlySubagent && !unsupportedDraftFolders && !unplaced && (sessionState.currentId !== null || getDraftPick() !== undefined || (instanceState.loaded && !getEffectiveInstanceId())) && (inputText.trim().length > 0 || pendingAttachments.length > 0));
+	const canSend = $derived(readingAttachments === 0 && !readOnlySubagent && turnControl.ready && (composerDraft.text.trim().length > 0 || pendingAttachments.length > 0));
 	const sendButtonLabel = $derived(
 		sendMode === "at-reset"
 			? `Send at ${sendAtTime}`
@@ -525,7 +414,7 @@
 				? `Send on ${switchTarget.name}`
 			: permissionsState.pendingQuestions.some((question) => question.sessionId === sessionState.currentId)
 				? "Reply"
-				: isProcessing()
+				: working
 					? "Queue message"
 					: "Send",
 	);
@@ -539,7 +428,7 @@
 	});
 	const sendButtonTitle = $derived(
 		isGoalCommand ? "Set goal"
-		: steer === "ready" ? `${sendButtonLabel} · ⌘/Ctrl+Enter or ⌘/Ctrl+click to ${inputText.trimStart().startsWith("/") ? "stop the turn and run it" : "steer"}`
+		: steer === "ready" ? `${sendButtonLabel} · ⌘/Ctrl+Enter or ⌘/Ctrl+click to ${composerDraft.text.trimStart().startsWith("/") ? "stop the turn and run it" : "steer"}`
 		: steer === "prompt_open" ? `${sendButtonLabel} · Answer the open prompt before steering`
 		: sendButtonLabel,
 	);
@@ -618,32 +507,14 @@
 		);
 	}
 
-	async function syncInputDraft(text: string): Promise<void> {
-		const sessionId = sessionState.currentId;
-		if (!sessionId) return;
-		await rpc("SyncInputDraft", {
-			sessionId,
-			text,
-			originId: getBrowserClientId(),
-		});
-	}
-
 	function handleInput() {
 		if (textareaEl) {
 			cursorPos = referenceEditor.selection().start;
 		}
+		composerDraft.edited();
 		void tick().then(revealCaret);
-		lastLocalEditAt = Date.now();
 		steerRefusal = null;
 		dismissedRefusal = turnControl.refusal;
-
-		// Debounced outgoing input sync to other tabs
-		if (inputSyncTimer) clearTimeout(inputSyncTimer);
-		inputSyncTimer = setTimeout(() => {
-			inputSyncTimer = null;
-			if (sessionState.currentId) void syncInputDraft(inputText).catch(() => undefined);
-			else storeNewSessionDraft(inputText);
-		}, 300);
 	}
 
 	/**
@@ -717,9 +588,9 @@
 		if (referenceEditor.keydown(e)) return;
 		if (e.key === "Escape" && isGoalCommand) {
 			e.preventDefault();
-			inputText = inputText.replace(/^[/$]goal\s*/, "");
+			composerDraft.text = composerDraft.text.replace(/^[/$]goal\s*/, "");
 			handleInput();
-			cursorPos = inputText.length;
+			cursorPos = composerDraft.text.length;
 			return;
 		}
 		// Forward keyboard events to CommandMenu when visible
@@ -758,14 +629,14 @@
 		const projectSlug = composerProjectSlug;
 		const expectedInstanceId = accountId;
 		if (!sessionId || !projectSlug || !expectedInstanceId || !canSend || switchingAccount) return false;
-		const draft = inputText;
+		const draft = composerDraft.text;
 		const images = pendingAttachments;
 		switchingAccount = true;
 		try {
 			if (!(await switchSessionAccount({ sessionId, instanceId, expectedInstanceId }))) return false;
 			await tick();
 			// Navigation or edits during the handoff leave the draft for its owner.
-			if (sessionState.currentId !== sessionId || composerProjectSlug !== projectSlug || inputText !== draft || pendingAttachments !== images) return false;
+			if (sessionState.currentId !== sessionId || composerProjectSlug !== projectSlug || composerDraft.text !== draft || pendingAttachments !== images) return false;
 			return await sendMessage(undefined, delivery);
 		} finally {
 			switchingAccount = false;
@@ -785,6 +656,7 @@
 
 	async function startSideThread(question: string | undefined): Promise<boolean> {
 		if (startingSideThread) return false;
+		const from = selection.scope;
 		const parentSessionId = sessionState.currentId;
 		const projectSlug = parentSessionId ? findSession(parentSessionId)?.projectSlug ?? getCurrentSlug() : null;
 		if (!parentSessionId) {
@@ -797,7 +669,7 @@
 			clearComposer();
 			return false;
 		}
-		const draftText = inputText;
+		const draftText = composerDraft.text;
 		const draftImages = pendingAttachments;
 		const draft = JSON.stringify([parentSessionId, draftText, draftImages.map((image) => image.dataUrl)]);
 		if (sideThreadAttempt?.draft !== draft) sideThreadAttempt = { draft, inputId: crypto.randomUUID() };
@@ -806,19 +678,21 @@
 		try {
 			const images = draftImages.map((image) => image.dataUrl);
 			const outcome = await send({
+				from,
 				sideThread: { sessionId: parentSessionId, title: question },
 				delivery: "queue",
 				inputId,
 				text: serializeReferences(await withReferences(toProviderCommands(question, providerBuiltinNameSet), projectSlug)),
 				...(images.length > 0 ? { images } : {}),
-				onCreated: (sessionId) => {
-					sideThreadAttempt = undefined;
-					if (sessionState.currentId === parentSessionId && inputText === draftText && pendingAttachments === draftImages) {
-						clearComposer();
-						switchToSession(sessionId, projectSlug ?? undefined);
-					}
-				},
 			});
+			if (outcome.kind === "started") {
+				sideThreadAttempt = undefined;
+				const cleared = composerDraft.sideThreadSent(parentSessionId, draftText, pendingAttachments === draftImages);
+				if (cleared.cleared) {
+					if (cleared.active) cursorPos = 0;
+					pendingAttachments = [];
+				}
+			}
 			return outcome.kind === "started" || outcome.kind === "waiting";
 		} finally {
 			startingSideThread = false;
@@ -847,13 +721,12 @@
 	}
 
 	async function sendMessage(textOverride?: string, delivery: InputDelivery = "queue"): Promise<boolean> {
-		if (readingAttachments > 0 || readOnlySubagent || unsupportedDraftFolders || unplaced) return false;
+		if (readingAttachments > 0 || readOnlySubagent || !turnControl.ready) return false;
 		if (textOverride === undefined && pendingAttachments.some((attachment) => !attachment.dataUrl.startsWith("data:image/")) && !getProviderDriver(composerDriver)?.supportsFileAttachments) {
 			attachmentError = "File attachments are available with Claude and OpenCode. Choose one of those harnesses before sending these files.";
 			return false;
 		}
-		if (!sessionState.currentId && getEffectiveInstanceId() && !getDraftPick()) return false;
-		let text = textOverride ?? inputText.trim();
+		let text = textOverride ?? composerDraft.text.trim();
 		if (!text && (textOverride !== undefined || pendingAttachments.length === 0)) return false;
 		if (textOverride === undefined) {
 			const match = text.match(/^\$(\S+)(?:\s+([\s\S]*))?$/);
@@ -905,7 +778,7 @@
 					showToast("Select model", { variant: "error" });
 					return false;
 				}
-				draft = { ...payload, ...(draftNewWorktree ? { newWorktree: true } : {}) };
+				draft = { ...payload, draftText: composerDraft.text, ...(draftNewWorktree ? { newWorktree: true } : {}) };
 				requestDraftPreWarm();
 				draftSend.message = {
 					type: "user", uuid: crypto.randomUUID(), text: messageText, createdAt: Date.now(),
@@ -918,40 +791,38 @@
 				};
 				draftSend.sessionId = null;
 			}
-			const unsent = { text: inputText, images: pendingAttachments };
+			const unsentImages = pendingAttachments;
 			if (!isProcessing()) requestScrollOnNextContent();
 			steerRefusal = null;
 			dismissedRefusal = null;
-			if (textOverride === undefined && delivery !== "steer") clearComposer();
+			const clearOnSend = textOverride === undefined && delivery !== "steer";
+			const unsentDraft = composerDraft.sendStarted(clearOnSend);
+			if (clearOnSend) {
+				pendingAttachments = [];
+				cursorPos = 0;
+			}
+			const destination = draft ? {
+				draft,
+				onCreated: (sessionId: string) => composerDraft.created(unsentDraft, sessionId),
+			} : sentFromSessionId ? { sessionId: sentFromSessionId } : undefined;
+			if (!destination) return false;
 			const outcome = await send({
 				text: messageText,
 				delivery,
 				...(imageUrls ? { images: imageUrls } : {}),
-				...(draft ? {
-					draft,
-					onCreated: (sessionId: string) => {
-						draftId = crypto.randomUUID();
-						storeNewSessionDraft("");
-						// Don't yank someone who opened another session during creation.
-						if (!sessionState.currentId) switchToSession(sessionId, projectSlug ?? undefined);
-					},
-				} : { sessionId: sentFromSessionId! }),
+				...destination,
 			});
 			const sentToSessionId = sentFromSessionId ?? draftSend.sessionId;
 			if (outcome.kind === "failed" || outcome.kind === "refused") {
-				const sameScope = sentToSessionId ? sessionState.currentId === sentToSessionId
-					: !sessionState.currentId && getDraftProject() === projectSlug;
-				if (textOverride === undefined && sameScope && !inputText && pendingAttachments.length === 0) {
-					inputText = unsent.text;
-					cursorPos = unsent.text.length;
-					pendingAttachments = unsent.images;
+				if (composerDraft.sendFailed(unsentDraft, sentToSessionId, textOverride === undefined, outcome.kind === "failed" && outcome.alreadySent === true)) {
+					cursorPos = composerDraft.text.length;
+					pendingAttachments = unsentImages;
 				}
 				return false;
 			}
-			if (delivery === "steer") {
-				if (sessionState.currentId !== sentToSessionId) {
-					if (sentToSessionId) inputDrafts.delete(sentToSessionId);
-				} else if (textOverride === undefined) clearComposer();
+			if (composerDraft.sendSucceeded(sentToSessionId, delivery === "steer", textOverride === undefined)) {
+				pendingAttachments = [];
+				cursorPos = 0;
 			}
 			return true;
 		} finally {
@@ -962,19 +833,8 @@
 	function clearComposer() {
 		pendingAttachments = [];
 		attachmentError = "";
-		inputText = "";
+		composerDraft.clear();
 		cursorPos = 0;
-		if (sessionState.currentId) {
-			inputDrafts.delete(sessionState.currentId);
-		}
-		// Cancel any pending debounced draft sync (it would re-sync the old
-		// draft text to the server after we just cleared it) and send an
-		// immediate empty sync so the server-side draft store is cleared too.
-		if (inputSyncTimer) {
-			clearTimeout(inputSyncTimer);
-			inputSyncTimer = null;
-		}
-		void syncInputDraft("").catch(() => undefined);
 	}
 
 	async function undoGoalClear() {
@@ -1020,11 +880,11 @@
 
 	function handleAttachSetGoal(condition = "") {
 		if (!discoveryState.currentTraits?.supportsGoalState) return;
-		inputText = `$goal ${condition}`;
-		cursorPos = inputText.length;
+		composerDraft.text = `$goal ${condition}`;
+		cursorPos = composerDraft.text.length;
 		requestAnimationFrame(() => {
 			textareaEl?.focus();
-			textareaEl?.setSelectionRange(inputText.length, inputText.length);
+			textareaEl?.setSelectionRange(composerDraft.text.length, composerDraft.text.length);
 			handleInput();
 		});
 	}
@@ -1078,9 +938,9 @@
 
 	/** Ask replies and queued edits use the same unsent composer draft. */
 	function addToDraft(text: string, images: readonly string[] = []) {
-		inputText = inputText.trim() ? `${inputText.trimEnd()}\n\n${text}` : text;
+		composerDraft.text = composerDraft.text.trim() ? `${composerDraft.text.trimEnd()}\n\n${text}` : text;
 		handleInput();
-		cursorPos = inputText.length;
+		cursorPos = composerDraft.text.length;
 		pendingAttachments = [
 			...pendingAttachments,
 			...images.map((dataUrl) => {
@@ -1100,12 +960,12 @@
 		// User can then type arguments and press Enter to send.
 		let newCursorPos: number;
 		if (commandMatch) {
-			const before = inputText.slice(0, commandMatch.start);
-			const after = inputText.slice(commandMatch.end);
+			const before = composerDraft.text.slice(0, commandMatch.start);
+			const after = composerDraft.text.slice(commandMatch.end);
 			newCursorPos = commandMatch.start + command.length;
-			inputText = before + command + after;
+			composerDraft.text = before + command + after;
 		} else {
-			inputText = command;
+			composerDraft.text = command;
 			newCursorPos = command.length;
 		}
 		// Move cursor to end of inserted command and focus the textarea. tick, not a
@@ -1123,21 +983,21 @@
 
 	function handleCommandClose() {
 		if (commandMatch) {
-			const before = inputText.slice(0, commandMatch.start);
-			const after = inputText.slice(commandMatch.end);
-			inputText = before + after;
+			const before = composerDraft.text.slice(0, commandMatch.start);
+			const after = composerDraft.text.slice(commandMatch.end);
+			composerDraft.text = before + after;
 		} else {
-			inputText = "";
+			composerDraft.text = "";
 		}
 	}
 
 	function handleFileSelect(path: string) {
 		if (!atQuery || !textareaEl) return;
 
-		const before = inputText.slice(0, atQuery.start);
-		const after = inputText.slice(atQuery.end);
+		const before = composerDraft.text.slice(0, atQuery.start);
+		const after = composerDraft.text.slice(atQuery.end);
 		const insertion = buildMentionInsertion(path);
-		inputText = before + insertion + after;
+		composerDraft.text = before + insertion + after;
 
 		// Move cursor to after the inserted path
 		const newCursorPos = atQuery.start + insertion.length;
@@ -1153,9 +1013,9 @@
 	function handleFileMenuClose() {
 		// Remove the @ trigger character
 		if (atQuery) {
-			const before = inputText.slice(0, atQuery.start);
-			const after = inputText.slice(atQuery.end);
-			inputText = before + after;
+			const before = composerDraft.text.slice(0, atQuery.start);
+			const after = composerDraft.text.slice(atQuery.end);
+			composerDraft.text = before + after;
 		}
 	}
 
@@ -1164,7 +1024,7 @@
 		function handleGlobalEsc(e: KeyboardEvent) {
 			if (
 				e.key === "Escape" &&
-				!inputText.trim() &&
+				!composerDraft.text.trim() &&
 				!commandMenuVisible &&
 				!fileMenuVisible &&
 				subagentBackBarRef
@@ -1265,12 +1125,14 @@
 
 <!-- While the textarea is focused the keyboard covers the home indicator, but iOS
      keeps env(safe-area-inset-bottom) at full size, leaving a dead gap above the
-     keyboard. Drop the inset then. -->
+     keyboard. Drop the inset then. Restore it only once the keyboard has slid away:
+     tapping a composer button blurs the textarea on mousedown, and restoring the
+     inset at once lifts the button out from under the finger before the click. -->
 <div
 	id="input-area"
 	{@attach publishComposerClearance}
 	data-compact={sessionViewState.compact}
-	class="shrink-0 px-[32px] pt-[8px] pb-[calc(env(safe-area-inset-bottom,0px)+22px)] has-[textarea:focus]:pb-[22px] max-md:px-[12px] max-md:pt-[6px] max-md:pb-[calc(env(safe-area-inset-bottom,0px)+8px)] max-md:has-[textarea:focus]:pb-[8px]"
+	class="shrink-0 px-[32px] pt-[8px] transition-[padding-bottom] duration-0 delay-250 has-[textarea:focus]:delay-0 pb-[calc(env(safe-area-inset-bottom,0px)+22px)] has-[textarea:focus]:pb-[22px] max-md:px-[12px] max-md:pt-[6px] max-md:pb-[calc(env(safe-area-inset-bottom,0px)+8px)] max-md:has-[textarea:focus]:pb-[8px]"
 >
 	<div id="input-wrapper" bind:this={composerWrapperEl} bind:clientWidth={sessionViewState.composerWidth} class="max-w-[760px] mx-auto relative">
 		<!-- The listbox shares the composer's measured edges, including phone gutters. -->
@@ -1399,7 +1261,7 @@
 						     so there is still just one scroll position in play. -->
 						<div class="relative {plainText ? 'h-[120px]' : ''}" style:min-height={`max(${composerPreferences.controls === "words" ? 24 : sessionViewState.compact ? 34 : 36}px, var(--composer-placeholder-height, 0px))`}>
 							<SkillHighlightBackdrop
-								text={plainText ? "" : inputText}
+								text={plainText ? "" : composerDraft.text}
 								onremove={referenceEditor.remove}
 								commandNames={commandNameSet}
 								builtinNames={builtinNameSet}

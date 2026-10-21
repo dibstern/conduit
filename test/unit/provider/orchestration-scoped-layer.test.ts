@@ -9,6 +9,7 @@ import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/op
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { OrchestrationEngineTag } from "../../../src/lib/domain/relay/Services/services.js";
+import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
@@ -53,8 +54,7 @@ describe("orchestration scoped layer", () => {
 			makeOrchestrationRuntimeLayer().pipe(
 				Layer.provide(
 					Layer.mergeAll(
-						Layer.succeed(
-							AccountDirectory,
+						Layer.succeed(AccountDirectory)(
 							makeAccountDirectory(
 								Effect.succeed(
 									accountsStateFromInstances(
@@ -67,10 +67,21 @@ describe("orchestration scoped layer", () => {
 								),
 							),
 						),
-						Layer.succeed(OpenCodeAPITag, openCodeApi),
+						Layer.succeed(OpenCodeAPITag)(openCodeApi),
+						Layer.succeed(SessionWorkspaceTag)({
+							get: () => Effect.die("Unexpected workspace lookup"),
+							withLaunch: (effect) => effect,
+							preview: () => Effect.die("Unexpected workspace preview"),
+							renameBranch: () => Effect.die("Unexpected workspace rename"),
+							move: () => Effect.die("Unexpected workspace move"),
+							inherit: () => Effect.die("Unexpected workspace inheritance"),
+							resolve: () => Effect.die("Unexpected workspace resolution"),
+							record: () => Effect.die("Unexpected workspace recording"),
+							claudeWorktreeState: () =>
+								Effect.die("Unexpected Claude workspace lookup"),
+						}),
 						persistence,
-						Layer.succeed(
-							OpenCodeInstancesTag,
+						Layer.succeed(OpenCodeInstancesTag)(
 							makeOpenCodeInstancesStub({ opencode: openCodeApi }),
 						),
 						makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),

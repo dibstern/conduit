@@ -65,11 +65,22 @@ describe("Toast", () => {
 	});
 
 	beforeEach(() => {
+		vi.stubGlobal("matchMedia", (media: string) => ({
+			media,
+			matches: false,
+			addEventListener: vi.fn(),
+			removeEventListener: vi.fn(),
+		}));
 		uiState.toasts = [];
+		// jsdom has no matchMedia; Toast watches the phone breakpoint (desktop here).
+		vi.stubGlobal("matchMedia", (media: string) =>
+			Object.assign(new EventTarget(), { media, matches: false }),
+		);
 	});
 
 	afterEach(() => {
 		cleanup();
+		vi.unstubAllGlobals();
 		uiState.toasts = [];
 	});
 

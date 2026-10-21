@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import { ClaudeEventPersistEffectTag } from "../../persistence/effect/claude-event-persist-effect.js";
 import { requeueFailedSteers } from "../../persistence/effect/input-requeue-effect.js";
@@ -41,7 +41,7 @@ export const runningRunnerCommands = (
 		);
 	});
 
-type RunningCommand = Effect.Effect.Success<
+type RunningCommand = Effect.Success<
 	ReturnType<typeof runningRunnerCommands>
 >[number];
 
@@ -100,10 +100,10 @@ export const recoverRunnerCommands = <T extends SessionTurn, E = never>(
 					row.state !== "pending" &&
 					row.state !== "running",
 				wait: Effect.gen(function* () {
-					const execution = yield* Effect.either(options.replay(row, input));
+					const execution = yield* Effect.result(options.replay(row, input));
 					if (options.closing()) return;
-					if (execution._tag === "Left") {
-						yield* options.failTurn(sinkId, execution.left);
+					if (execution._tag === "Failure") {
+						yield* options.failTurn(sinkId, execution.failure);
 						return yield* settleRunnerCommand(
 							sql,
 							projectId,
@@ -111,10 +111,10 @@ export const recoverRunnerCommands = <T extends SessionTurn, E = never>(
 							row.command_id,
 							row.attempt_count,
 							undefined,
-							execution.left,
+							execution.failure,
 						);
 					}
-					const result = execution.right;
+					const result = execution.success;
 					if (result?.status === "completed" && options.onCompleted)
 						yield* options.onCompleted(row, input, result);
 					yield* settleRunnerCommand(
@@ -192,6 +192,62 @@ export const settleUnclaimedRunnerCommands = <E>(
 		}
 	});
 
+/** Only durable writes: safe inside ingestion's CommitAndSignal transaction. */
+export const settleRunnerCommandState = (
+	sql: SqlClient.SqlClient,
+	projectId: string,
+	sessionId: string,
+	commandId: string,
+	attempt: number,
+	result?: TurnResult,
+	failure?: SessionFailure,
+) =>
+	Effect.gen(function* () {
+		const rows = yield* sql<{
+			project_key: string;
+			attempt_count: number;
+		}>`SELECT project_key, attempt_count FROM provider_command_outbox WHERE project_key = ${projectId} AND command_id = ${commandId} AND session_id = ${sessionId} AND status = 'running' AND attempt_count = ${attempt}`;
+		const row = rows[0];
+		if (!row) return;
+		const succeeded = !failure && result?.status === "completed";
+		const retryable =
+			result?.status !== "steer-declined" &&
+			(failure?.retryable === true ||
+				(result?.error?.retryable === true &&
+					result.error.retryHandled !== true));
+		const errorCode = succeeded
+			? null
+			: result?.status === "steer-declined"
+				? result.status
+				: String(
+						failure?.code ??
+							result?.error?.code ??
+							result?.status ??
+							"provider_failure",
+					);
+		const now = Date.now();
+		const retryAt = retryable
+			? now + Math.min(1000 * 2 ** row.attempt_count, 30_000)
+			: null;
+		if (succeeded && result?.providerStateUpdates.length) {
+			const providerState = yield* makeProviderStateEffect.pipe(
+				Effect.provideService(SqlClient.SqlClient, sql),
+				Effect.provideService(PersistenceProjectTag, {
+					projectId,
+				}),
+			);
+			yield* providerState.saveUpdates(
+				sessionId,
+				result.providerStateUpdates.map(({ key, value }) => ({
+					key,
+					value: String(value),
+				})),
+			);
+		}
+		yield* sql`UPDATE provider_command_outbox SET status = ${succeeded ? "completed" : retryable ? "retryable_failed" : "failed"}, error_code = ${errorCode}, next_attempt_at = ${retryAt}, updated_at = ${now} WHERE project_key = ${projectId} AND command_id = ${commandId} AND session_id = ${sessionId} AND status = 'running' AND attempt_count = ${attempt}`;
+		yield* sql`UPDATE command_receipts SET status = ${succeeded ? "side_effect_completed" : "side_effect_failed"}, error_code = ${errorCode}, updated_at = ${now} WHERE project_key = ${projectId} AND command_id = ${commandId}`;
+	});
+
 export const settleRunnerCommand = (
 	sql: SqlClient.SqlClient,
 	projectId: string,
@@ -203,54 +259,17 @@ export const settleRunnerCommand = (
 ) =>
 	sql
 		.withTransaction(
-			Effect.gen(function* () {
-				const rows = yield* sql<{
-					project_key: string;
-					attempt_count: number;
-				}>`SELECT project_key, attempt_count FROM provider_command_outbox WHERE project_key = ${projectId} AND command_id = ${commandId} AND session_id = ${sessionId} AND status = 'running' AND attempt_count = ${attempt}`;
-				const row = rows[0];
-				if (!row) return;
-				const succeeded = !failure && result?.status === "completed";
-				const retryable =
-					result?.status !== "steer-declined" &&
-					(failure?.retryable === true ||
-						(result?.error?.retryable === true &&
-							result.error.retryHandled !== true));
-				const errorCode = succeeded
-					? null
-					: result?.status === "steer-declined"
-						? result.status
-						: String(
-								failure?.code ??
-									result?.error?.code ??
-									result?.status ??
-									"provider_failure",
-							);
-				const now = Date.now();
-				const retryAt = retryable
-					? now + Math.min(1000 * 2 ** row.attempt_count, 30_000)
-					: null;
-				if (succeeded && result?.providerStateUpdates.length) {
-					const providerState = yield* makeProviderStateEffect.pipe(
-						Effect.provideService(SqlClient.SqlClient, sql),
-						Effect.provideService(PersistenceProjectTag, {
-							projectId,
-						}),
-					);
-					yield* providerState.saveUpdates(
-						sessionId,
-						result.providerStateUpdates.map(({ key, value }) => ({
-							key,
-							value: String(value),
-						})),
-					);
-				}
-				yield* sql`UPDATE provider_command_outbox SET status = ${succeeded ? "completed" : retryable ? "retryable_failed" : "failed"}, error_code = ${errorCode}, next_attempt_at = ${retryAt}, updated_at = ${now} WHERE project_key = ${projectId} AND command_id = ${commandId} AND session_id = ${sessionId} AND status = 'running' AND attempt_count = ${attempt}`;
-				yield* sql`UPDATE command_receipts SET status = ${succeeded ? "side_effect_completed" : "side_effect_failed"}, error_code = ${errorCode}, updated_at = ${now} WHERE project_key = ${projectId} AND command_id = ${commandId}`;
-			}),
+			settleRunnerCommandState(
+				sql,
+				projectId,
+				sessionId,
+				commandId,
+				attempt,
+				result,
+				failure,
+			),
 		)
 		.pipe(
-			Effect.asVoid,
 			Effect.tap(() =>
 				Effect.gen(function* () {
 					const persist = yield* Effect.serviceOption(

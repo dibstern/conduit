@@ -1,14 +1,10 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Stream } from "effect";
+import { RpcTest } from "effect/rpc";
 import { afterEach, expect, vi } from "vitest";
-import {
-	CreateSession,
-	WsRpcError,
-	WsRpcGroup,
-} from "../../../src/lib/contracts/ws-rpc.js";
+import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
@@ -21,7 +17,7 @@ afterEach(() => {
 });
 
 describe("daemon RPC handlers", () => {
-	it.scoped(
+	it.effect(
 		"rejects session creation without a project even with a daemon default",
 		() =>
 			Effect.gen(function* () {
@@ -36,25 +32,26 @@ describe("daemon RPC handlers", () => {
 				).pipe(
 					Effect.provide(
 						makeRoutedWsRpcServerLayer(resolve, handlers, "conduit"),
+						{ local: true },
 					),
 				);
-				const malformed = new CreateSession(
+				const malformed = {
+					_tag: "CreateSession" as const,
+					originId: "daemon-client",
+				};
+				const result = yield* Effect.result(
 					// @ts-expect-error CreateSession requires an explicit projectSlug.
-					{ originId: "daemon-client" },
-					{ disableValidation: true },
-				);
-				const result = yield* Effect.either(
 					createSession(malformed, Headers.empty),
 				);
 				expect(result).toMatchObject({
-					_tag: "Left",
-					left: { message: "projectSlug is required" },
+					_tag: "Failure",
+					failure: { message: "projectSlug is required" },
 				});
 				expect(resolve).not.toHaveBeenCalled();
-			}).pipe(Effect.provide(makeDaemonRpcTestLayer())),
+			}).pipe(Effect.provide(makeDaemonRpcTestLayer(), { local: true })),
 	);
 
-	it.scoped(
+	it.effect(
 		"serves daemon operations without a project or relay context",
 		() => {
 			const directory = mkdtempSync("/tmp/rpc-first-project-");
@@ -63,7 +60,9 @@ describe("daemon RPC handlers", () => {
 			return Effect.gen(function* () {
 				const handlers = yield* DaemonWsRpcHandlersTag;
 				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
-					Effect.provide(makeRoutedWsRpcServerLayer(resolve, handlers)),
+					Effect.provide(makeRoutedWsRpcServerLayer(resolve, handlers), {
+						local: true,
+					}),
 				);
 				expect((yield* client.GetProjects({})).projects).toEqual([]);
 				const added = yield* client.SaveProject({
@@ -88,10 +87,10 @@ describe("daemon RPC handlers", () => {
 				).toEqual([]);
 				expect((yield* client.ListDaemonSessions({})).sessions).toEqual([]);
 				expect(
-					yield* Effect.either(client.ResolveSession({ sessionId: "missing" })),
+					yield* Effect.result(client.ResolveSession({ sessionId: "missing" })),
 				).toMatchObject({
-					_tag: "Left",
-					left: { _tag: "WsRpcError", message: "Unknown session: missing" },
+					_tag: "Failure",
+					failure: { _tag: "WsRpcError", message: "Unknown session: missing" },
 				});
 				expect((yield* client.ScanNow({})).active).toEqual([]);
 				expect(
@@ -105,10 +104,10 @@ describe("daemon RPC handlers", () => {
 					(yield* client.GetAutoSettleSetting({})).autoSettleAfterDays,
 				).toBe(7);
 				expect(
-					(yield* Effect.either(
+					(yield* Effect.result(
 						client.SetAutoSettleSetting({ autoSettleAfterDays: 91 }),
 					))._tag,
-				).toBe("Left");
+				).toBe("Failure");
 				expect(
 					(yield* client.GetAutoSettleSetting({})).autoSettleAfterDays,
 				).toBe(7);
@@ -161,11 +160,11 @@ describe("daemon RPC handlers", () => {
 						.instances,
 				).toEqual([]);
 				expect(resolve).not.toHaveBeenCalled();
-			}).pipe(Effect.provide(makeDaemonRpcTestLayer()));
+			}).pipe(Effect.provide(makeDaemonRpcTestLayer(), { local: true }));
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"removes a project until the directory is explicitly added again",
 		() => {
 			const directory = mkdtempSync("/tmp/rpc-removed-project-");
@@ -178,6 +177,7 @@ describe("daemon RPC handlers", () => {
 							() => Effect.die("Unexpected routing"),
 							handlers,
 						),
+						{ local: true },
 					),
 				);
 				yield* client.RemoveProject({ slug: "gone" });
@@ -191,12 +191,13 @@ describe("daemon RPC handlers", () => {
 					makeDaemonRpcTestLayer([
 						{ slug: "gone", title: "gone", folders: [directory] },
 					]),
+					{ local: true },
 				),
 			);
 		},
 	);
 
-	it.scoped(
+	it.effect(
 		"publishes project and instance changes to list subscribers without starting relays",
 		() => {
 			const directory = mkdtempSync("/tmp/rpc-project-broadcast-");
@@ -233,13 +234,16 @@ describe("daemon RPC handlers", () => {
 							() => Effect.die("Unexpected routing"),
 							handlers,
 						),
+						{ local: true },
 					),
 				);
 				const projectLists: (readonly { slug: string; title: string }[])[] = [];
 				const instanceLists: (readonly { id: string }[])[] = [];
 				yield* Effect.forkScoped(
-					Stream.runForEach(client.SubscribeProjects({}), ({ projects }) =>
-						Effect.sync(() => projectLists.push(projects)),
+					Stream.runForEach(client.SubscribeShell({}), (frame) =>
+						Effect.sync(() => {
+							if (frame._tag === "projects") projectLists.push(frame.projects);
+						}),
 					),
 				);
 				yield* Effect.forkScoped(
@@ -273,9 +277,13 @@ describe("daemon RPC handlers", () => {
 				expect(firstRelay.stop).not.toHaveBeenCalled();
 				expect(factory).not.toHaveBeenCalled();
 				expect((yield* cache.peek("a"))._tag).toBe("Some");
-			}).pipe(Effect.provide(makeDaemonRpcTestLayer(projects, factory)));
+			}).pipe(
+				Effect.provide(makeDaemonRpcTestLayer(projects, factory), {
+					local: true,
+				}),
+			);
 		},
 	);
 });
 
-import { Headers } from "@effect/platform";
+import { Headers } from "effect/http";

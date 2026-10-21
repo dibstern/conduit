@@ -9,17 +9,17 @@ import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 // sidebar's shell subscription; otherwise the row stays live in the browser,
 // and a later manual settle is a server-side no-op that still shows its toast.
 
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Fiber, Layer, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
 	ConfigTag,
@@ -57,68 +57,28 @@ describe("SessionManagerService settle signal", () => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-settle-signal-"));
 			const projectDir = join(dir, "project");
 			const worktree = join(dir, "worktree");
-			const git = (cwd: string, ...args: string[]) =>
-				execFileSync("git", args, {
-					cwd,
-					encoding: "utf8",
-					stdio: ["ignore", "pipe", "pipe"],
-				}).trim();
-			git(dir, "init", "-b", "main", projectDir);
-			git(projectDir, "config", "user.name", "Settle test");
-			git(projectDir, "config", "user.email", "settle@example.test");
-			git(
-				projectDir,
-				"-c",
-				"core.hooksPath=/dev/null",
-				"commit",
-				"--allow-empty",
-				"-qm",
-				"initial",
-			);
-			git(projectDir, "worktree", "add", "-b", "feature", worktree);
-			writeFileSync(join(worktree, "feature.txt"), "work");
-			git(worktree, "add", "feature.txt");
-			git(
-				worktree,
-				"-c",
-				"core.hooksPath=/dev/null",
-				"commit",
-				"-qm",
-				"feature",
-			);
-			git(
-				projectDir,
-				"-c",
-				"core.hooksPath=/dev/null",
-				"merge",
-				"--no-ff",
-				"-qm",
-				"merge",
-				"feature",
-			);
-			const mergedHead = git(worktree, "rev-parse", "HEAD");
-			const configLayer = Layer.succeed(
-				ConfigTag,
+			mkdirSync(projectDir);
+			mkdirSync(worktree);
+			const configLayer = Layer.succeed(ConfigTag)(
 				makeMockConfig({ configDir: dir, projectDir }),
 			);
-			const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
+			const loggerLayer = Layer.succeed(LoggerTag)(makeMockLogger());
 			const openCodeApi = makeMockOpenCodeAPI();
 			// Same wiring as project-relay-layers: one shared bus for the
 			// persistence stack and the relay services.
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				Layer.provideMerge(SessionManagerServiceLive, SessionWorkspaceLive),
 				Layer.mergeAll(
-					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					makeSessionManagerStateLive(),
-					Layer.succeed(OpenCodeAPITag, openCodeApi),
+					Layer.succeed(OpenCodeAPITag)(openCodeApi),
 					loggerLayer,
 					configLayer,
-					Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+					Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 					Layer.effect(SessionActivityTag, makeSessionActivity),
 					RelayStatusSnapshotLive,
 					makeOverridesStateLive(),
-					Layer.succeed(
-						OpenCodeInstancesTag,
+					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: openCodeApi }),
 					),
 					DaemonEventBusLive,
@@ -129,8 +89,7 @@ describe("SessionManagerService settle signal", () => {
 						undefined,
 						SessionEventBusLive,
 					),
-					Layer.succeed(
-						OrchestrationEngineTag,
+					Layer.succeed(OrchestrationEngineTag)(
 						new OrchestrationEngine({ registry: new ProviderRegistry() }),
 					),
 				),
@@ -167,7 +126,7 @@ describe("SessionManagerService settle signal", () => {
 
 				const seen: SessionInfo[] = [];
 				let synchronized = false;
-				const shell = yield* Effect.fork(
+				const shell = yield* Effect.forkChild(
 					Stream.runForEach(subscribeShell(), (envelope) =>
 						Effect.sync(() => {
 							if (envelope._tag === "synchronized") synchronized = true;
@@ -184,7 +143,6 @@ describe("SessionManagerService settle signal", () => {
 							service.setSessionSettled("ses-idle", {
 								settled: true,
 								automatic: true,
-								mergedHead,
 							}),
 						),
 					),
@@ -193,15 +151,30 @@ describe("SessionManagerService settle signal", () => {
 					(yield* store.readAllBySession("ses-idle"))
 						.filter((event) => event.type === "session.settled")
 						.map((event) => event.data),
-				).toEqual([{ sessionId: "ses-idle", automatic: true, mergedHead }]);
-				// Manual settlement must consume the same merge before a wake-up, too.
+				).toEqual([{ sessionId: "ses-idle", automatic: true }]);
+				// A manual settle of a worktree session must finish without running git.
 				yield* service.setSessionSettled("ses-idle", { settled: false });
-				yield* service.setSessionSettled("ses-idle", { settled: true });
+				const hangingGitDir = join(dir, "bin");
+				mkdirSync(hangingGitDir);
+				writeFileSync(join(hangingGitDir, "git"), "#!/bin/sh\nsleep 5\n", {
+					mode: 0o755,
+				});
+				const path = process.env["PATH"];
+				process.env["PATH"] = `${hangingGitDir}:${path}`;
+				const started = Date.now();
+				yield* service.setSessionSettled("ses-idle", { settled: true }).pipe(
+					Effect.ensuring(
+						Effect.sync(() => {
+							process.env["PATH"] = path;
+						}),
+					),
+				);
+				expect(Date.now() - started).toBeLessThan(1_000);
 				expect(
 					(yield* store.readAllBySession("ses-idle"))
 						.filter((event) => event.type === "session.settled")
 						.at(-1)?.data,
-				).toEqual({ sessionId: "ses-idle", automatic: false, mergedHead });
+				).toEqual({ sessionId: "ses-idle", automatic: false });
 
 				const deadline = Date.now() + 1_000;
 				const settledUpsert = () =>

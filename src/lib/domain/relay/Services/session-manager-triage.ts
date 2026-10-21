@@ -1,16 +1,18 @@
-import { SqlClient } from "@effect/sql";
-import { Effect, Option, Schema } from "effect";
-import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
-import { daemonSessionGitCache } from "../../../git/session-git.js";
+import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
-import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
-import { ConfigTag } from "./services.js";
+import { shouldArchiveIdleSession } from "../../../session/auto-archive-policy.js";
+import { readPersistedAutoArchiveFacts } from "../../../session/auto-archive-sweep.js";
+import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
 import { markSeen, markUnread } from "./session-attention.js";
 import { applySessionCommand } from "./session-command.js";
 import { SessionManagerError } from "./session-manager-error.js";
-import type { SetSessionSettledOptions } from "./session-manager-service.js";
+import type {
+	SetSessionArchivedOptions,
+	SetSessionSettledOptions,
+} from "./session-manager-service.js";
 
 /**
  * Rename a session through Conduit's event store for Claude rows, otherwise via the API.
@@ -70,7 +72,7 @@ const readSessionForTriage = (sessionId: string) =>
 
 export const setSessionSettled = (
 	sessionId: string,
-	{ settled, automatic = false, mergedHead }: SetSessionSettledOptions,
+	{ settled, automatic = false }: SetSessionSettledOptions,
 ) =>
 	Effect.gen(function* () {
 		const row = yield* readSessionForTriage(sessionId);
@@ -88,25 +90,6 @@ export const setSessionSettled = (
 			});
 		}
 		if ((row.settled_at !== null) === settled) return unsnoozed;
-		let consumedHead = mergedHead;
-		if (settled && consumedHead === undefined && row.workspace !== null) {
-			const config = yield* ConfigTag;
-			const workspace = Schema.decodeUnknownOption(
-				Schema.parseJson(SessionWorkspaceSchema),
-			)(row.workspace);
-			if (Option.isSome(workspace)) {
-				const directory = effectiveWorkingDirectory(
-					config.projectDir,
-					workspace.value,
-				);
-				if (directory !== config.projectDir) {
-					const git = yield* Effect.tryPromise(() =>
-						daemonSessionGitCache.refresh(directory),
-					).pipe(Effect.orElseSucceed(() => undefined));
-					consumedHead = git?.mergedHead;
-				}
-			}
-		}
 		yield* applySessionCommand(
 			settled
 				? {
@@ -114,9 +97,6 @@ export const setSessionSettled = (
 						data: {
 							sessionId,
 							automatic,
-							...(consumedHead !== undefined
-								? { mergedHead: consumedHead }
-								: {}),
 						},
 					}
 				: { type: "session.unsettled", data: { sessionId } },
@@ -128,6 +108,56 @@ export const setSessionSettled = (
 				new SessionManagerError({ operation: "setSessionSettled", cause }),
 		),
 		Effect.withSpan("session.setSessionSettled", { attributes: { sessionId } }),
+	);
+
+export const setSessionArchived = (
+	sessionId: string,
+	options: SetSessionArchivedOptions,
+) =>
+	Effect.gen(function* () {
+		const row = yield* readSessionForTriage(sessionId);
+		if (!row || (row.archived_at != null) === options.archived) return false;
+		if (options.archived && options.automatic) {
+			const { projectId } = yield* EventStoreEffectTag;
+			const activity = yield* SessionActivityTag;
+			const facts = (yield* readPersistedAutoArchiveFacts(
+				projectId,
+				options.now,
+				sessionId,
+			)).get(sessionId);
+			if (
+				!facts ||
+				!shouldArchiveIdleSession(
+					{
+						...facts,
+						hasLiveBackgroundWork: activity.background.hasLiveWork(sessionId),
+					},
+					options.now,
+					options.idleWindowMs,
+				)
+			)
+				return false;
+		}
+		yield* applySessionCommand(
+			options.archived
+				? {
+						type: "session.archived",
+						data: { sessionId, automatic: options.automatic === true },
+					}
+				: {
+						type: "session.unarchived",
+						data: { sessionId, cause: options.cause ?? "manual" },
+					},
+		);
+		return true;
+	}).pipe(
+		Effect.mapError(
+			(cause) =>
+				new SessionManagerError({ operation: "setSessionArchived", cause }),
+		),
+		Effect.withSpan("session.setSessionArchived", {
+			attributes: { sessionId },
+		}),
 	);
 
 export const setSessionPinned = (sessionId: string, pinned: boolean) =>

@@ -431,54 +431,26 @@ export function draftSendIn(sessionId: string | null): UserMessage | null {
 	return draftSend.sessionId === sessionId ? draftSend.message : null;
 }
 
-// Tracks the last input text received from another tab viewing the same session.
+// Compatibility exports for transport consumers and the build-reload contract.
+export {
+	handleInputSyncReceived,
+	inputSyncState,
+	persistInputDraft,
+	registerInputDraftPersistence,
+} from "./composer-draft/runner.svelte.js";
 
-export const inputSyncState = $state({
-	/** The synced input text. */
-	text: "",
-	/** Client ID that originated the sync (empty string if unknown). */
-	lastFrom: "",
-	/** Timestamp of the last sync update (monotonic, for change detection). */
-	lastUpdated: 0,
-	/** A reconnect's older server draft must not replace text being saved. */
-	reloadPending: false,
-});
-
-let inputDraftHook:
-	| {
-			persist: () => Promise<boolean>;
-			insert: (text: string) => void;
-	  }
-	| undefined;
-
-/** The mounted composer owns draft insertion and persistence. */
-export function registerInputDraft(
-	draft: NonNullable<typeof inputDraftHook>,
-): () => void {
-	inputDraftHook = draft;
+// The mounted composer owns insertion; persistence belongs to its keyed draft runner.
+let inputDraftInsert: ((text: string) => void) | undefined;
+export function registerInputDraft(insert: (text: string) => void): () => void {
+	inputDraftInsert = insert;
 	return () => {
-		if (inputDraftHook === draft) inputDraftHook = undefined;
+		if (inputDraftInsert === insert) inputDraftInsert = undefined;
 	};
 }
 
-/** Append text using the composer's normal edit, focus, and draft-sync path. */
+/** Append ask-reply text using the composer's normal edit and draft-sync path. */
 export function insertInputDraft(text: string): void {
-	inputDraftHook?.insert(text);
-}
-
-/** False defers reload to keep pending attachments in the mounted composer. */
-export async function persistInputDraft(): Promise<boolean> {
-	return (await inputDraftHook?.persist()) ?? true;
-}
-
-/** Apply a draft typed in another tab, or the one read at session switch. */
-export function handleInputSyncReceived(msg: {
-	text?: string | undefined;
-	from?: string | undefined;
-}): void {
-	inputSyncState.text = msg.text ?? "";
-	inputSyncState.lastFrom = msg.from ?? "";
-	inputSyncState.lastUpdated = Date.now();
+	inputDraftInsert?.(text);
 }
 
 /** Get the number of messages in current conversation. */

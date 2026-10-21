@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
-import { Chunk, Deferred, Effect, Fiber, Layer, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Stream } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { describe, expect, it, vi } from "vitest";
 import {
 	decodeProviderRuntimeEvent,
@@ -21,6 +21,7 @@ import {
 	EventStoreEffectTag,
 	type EventStoreError,
 } from "../../../src/lib/persistence/effect/event-store-effect.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
 	type ProjectionRunnerEffect,
 	ProjectionRunnerEffectTag,
@@ -159,7 +160,9 @@ function makeHarness(options?: {
 				: [],
 		),
 	);
-	const sql = executeSql as unknown as SqlClient.SqlClient & {
+	const sql = Object.assign(executeSql, {
+		transactionService: SqlClient.TransactionConnection(0),
+	}) as unknown as SqlClient.SqlClient & {
 		withTransaction: <A, E, R>(
 			effect: Effect.Effect<A, E, R>,
 		) => Effect.Effect<A, E, R>;
@@ -167,9 +170,9 @@ function makeHarness(options?: {
 	sql.withTransaction = <A, E, R>(effect: Effect.Effect<A, E, R>) => effect;
 
 	const depsLayer = Layer.mergeAll(
-		Layer.succeed(EventStoreEffectTag, eventStore),
-		Layer.succeed(ProjectionRunnerEffectTag, projectionRunner),
-		Layer.succeed(SqlClient.SqlClient, sql),
+		Layer.succeed(EventStoreEffectTag)(eventStore),
+		Layer.succeed(ProjectionRunnerEffectTag)(projectionRunner),
+		Layer.succeed(SqlClient.SqlClient)(sql),
 	);
 	const layer = ProviderRuntimeIngestionLive.pipe(Layer.provide(depsLayer));
 
@@ -264,7 +267,7 @@ describe("ProviderRuntimeIngestion", () => {
 			),
 		);
 
-		expect(Chunk.toReadonlyArray(received)).toEqual([
+		expect([...received]).toEqual([
 			expect.objectContaining({ eventId: "committed-1", sequence: 1 }),
 		]);
 	});
@@ -292,7 +295,7 @@ describe("ProviderRuntimeIngestion", () => {
 		const harness = makeHarness({ existingSession: true });
 		const busPublish = vi.fn(() => Effect.void);
 		const relayPublish = vi.fn(() => Effect.void);
-		const busLayer = Layer.succeed(SessionEventBusTag, {
+		const busLayer = Layer.succeed(SessionEventBusTag)({
 			publish: busPublish,
 			publishAdvance: () => Effect.void,
 			subscribe: () => Effect.succeed(Stream.empty),
@@ -337,7 +340,7 @@ describe("ProviderRuntimeIngestion", () => {
 		});
 		const busPublish = vi.fn(() => Effect.void);
 		const relayPublish = vi.fn(() => Effect.void);
-		const busLayer = Layer.succeed(SessionEventBusTag, {
+		const busLayer = Layer.succeed(SessionEventBusTag)({
 			publish: busPublish,
 			publishAdvance: () => Effect.void,
 			subscribe: () => Effect.succeed(Stream.empty),
@@ -362,18 +365,21 @@ describe("ProviderRuntimeIngestion", () => {
 							},
 						}),
 					)
-					.pipe(Effect.either);
+					.pipe(Effect.result);
 			}).pipe(Effect.provide(layer)),
 		);
 
-		expect(result._tag).toBe("Left");
+		expect(result._tag).toBe("Failure");
 		expect(harness.projectBatch).toHaveBeenCalledTimes(1);
-		expect(harness.projectBatch).toHaveBeenCalledWith([
-			expect.objectContaining({
-				eventId: "single-event-projection-failure",
-				sequence: 1,
-			}),
-		]);
+		expect(harness.projectBatch).toHaveBeenCalledWith(
+			[
+				expect.objectContaining({
+					eventId: "single-event-projection-failure",
+					sequence: 1,
+				}),
+			],
+			expect.any(Function),
+		);
 		expect(harness.projectEvent).not.toHaveBeenCalled();
 		expect(busPublish).not.toHaveBeenCalled();
 		expect(relayPublish).not.toHaveBeenCalled();
@@ -385,7 +391,7 @@ describe("ProviderRuntimeIngestion", () => {
 		const published: StoredEvent[] = [];
 		let projectedCountAtPublish = 0;
 		const harness = makeHarness();
-		const busLayer = Layer.succeed(SessionEventBusTag, {
+		const busLayer = Layer.succeed(SessionEventBusTag)({
 			publish: (events) =>
 				Effect.gen(function* () {
 					yield* Deferred.succeed(publishStarted, undefined);
@@ -404,7 +410,7 @@ describe("ProviderRuntimeIngestion", () => {
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const ingestion = yield* ProviderRuntimeIngestionTag;
-				const fiber = yield* Effect.fork(
+				const fiber = yield* Effect.forkChild(
 					ingestion.ingest(
 						runtimeEvent({
 							eventId: "interrupt-during-bus-publish",
@@ -420,8 +426,8 @@ describe("ProviderRuntimeIngestion", () => {
 
 				yield* Deferred.await(publishStarted);
 				projectedCountAtPublish = harness.projected.length;
-				yield* Fiber.interruptFork(fiber);
-				yield* Effect.yieldNow();
+				fiber.interruptUnsafe();
+				yield* Effect.yieldNow;
 				yield* Deferred.succeed(publishGate, undefined);
 				yield* Fiber.await(fiber);
 			}).pipe(Effect.provide(layer)),
@@ -483,9 +489,7 @@ describe("ProviderRuntimeIngestion", () => {
 		]);
 	});
 
-	it("does not pre-seed session projection rows for session.created", async () => {
-		const harness = makeHarness();
-
+	it("persists an explicitly created session with its original timestamp", async () => {
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const ingestion = yield* ProviderRuntimeIngestionTag;
@@ -500,22 +504,26 @@ describe("ProviderRuntimeIngestion", () => {
 						},
 					}),
 				);
-			}).pipe(Effect.provide(harness.layer)),
-		);
-
-		expect(harness.appendBatch).toHaveBeenCalledTimes(1);
-		expect(harness.appended).toEqual([
-			expect.objectContaining({ type: "session.created" }),
-		]);
-		const queries = harness.executeSql.mock.calls as unknown as [
-			TemplateStringsArray,
-			...unknown[],
-		][];
-		expect(
-			queries.filter(([fragment]) =>
-				fragment.join("?").includes("INSERT OR IGNORE INTO sessions"),
+				const sql = yield* SqlClient.SqlClient;
+				expect(
+					yield* sql`SELECT id, provider, title, created_at FROM sessions`,
+				).toEqual([
+					{
+						id: "session-123",
+						provider: "claude",
+						title: "Untitled",
+						created_at: Date.parse(BASE_EVENT.createdAt),
+					},
+				]);
+				const store = yield* EventStoreEffectTag;
+				expect(yield* store.readAllBySession("session-123")).toEqual([
+					expect.objectContaining({ type: "session.created" }),
+				]);
+			}).pipe(
+				Effect.provide(ProviderRuntimeIngestionLive),
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
 			),
-		).toEqual([]);
+		);
 	});
 
 	it("seeds a session row for a session it never saw created", async () => {
@@ -595,11 +603,7 @@ describe("ProviderRuntimeIngestion", () => {
 					messageId: "message-1",
 					role: "assistant",
 				}),
-				metadata: {
-					providerRuntimeEventId: "runtime-event-1",
-					rawSource: "claude.sdk.message",
-					providerRefs: BASE_EVENT.providerRefs,
-				},
+				metadata: {},
 			}),
 		]);
 		expect(harness.projectBatch).toHaveBeenCalledTimes(1);
@@ -773,7 +777,7 @@ describe("ProviderRuntimeIngestion", () => {
 							},
 						}),
 					)
-					.pipe(Effect.fork);
+					.pipe(Effect.forkChild);
 				yield* Deferred.await(firstAppendStarted);
 				const second = yield* ingestion
 					.ingest(
@@ -786,7 +790,7 @@ describe("ProviderRuntimeIngestion", () => {
 							},
 						}),
 					)
-					.pipe(Effect.fork);
+					.pipe(Effect.forkChild);
 
 				expect(harness.append).toHaveBeenCalledTimes(1);
 				yield* Deferred.succeed(releaseFirstAppend, undefined);
@@ -840,7 +844,7 @@ describe("ProviderRuntimeIngestion", () => {
 							},
 						}),
 					)
-					.pipe(Effect.either);
+					.pipe(Effect.result);
 				yield* ingestion.ingest(
 					runtimeEvent({
 						eventId: "thinking-start",

@@ -25,7 +25,7 @@ import {
 import {
 	cancelSessionById,
 	sendMessageToSession,
-	syncInputDraftForSession,
+	syncInputDraft,
 } from "../../handlers/prompt.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import { ProviderRegistryTag } from "../../provider/provider-registry.js";
@@ -43,7 +43,7 @@ const inboxCommand = <E>(
 				? { ok: true as const }
 				: { ok: false as const, reason: outcome },
 		),
-		Effect.catchAll((error) =>
+		Effect.catch((error) =>
 			Effect.fail(
 				new WsRpcError({ message: `${name} failed: ${String(error)}` }),
 			),
@@ -54,22 +54,22 @@ export const conversationHandlers = {
 	ExplainAsk: (request) =>
 		RecapServiceTag.pipe(
 			Effect.flatMap((service) => service.explainAsk(request)),
-			Effect.catchAll(mapRpcFailure("ExplainAsk")),
+			Effect.catch(mapRpcFailure("ExplainAsk")),
 		),
 	ListRecaps: (request) =>
 		RecapServiceTag.pipe(
 			Effect.flatMap((service) => service.list(request)),
-			Effect.catchAll(mapRpcFailure("ListRecaps")),
+			Effect.catch(mapRpcFailure("ListRecaps")),
 		),
 	GenerateRecap: (request) =>
 		RecapServiceTag.pipe(
 			Effect.flatMap((service) => service.generate(request)),
-			Effect.catchAll(mapRpcFailure("GenerateRecap")),
+			Effect.catch(mapRpcFailure("GenerateRecap")),
 		),
 	StopBackgroundTask: (request) =>
 		stopBackgroundTaskById(request.sessionId, request.taskId).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchAll(mapRpcFailure("StopBackgroundTask")),
+			Effect.catch(mapRpcFailure("StopBackgroundTask")),
 		),
 	SwitchPermissionMode: (request) =>
 		Effect.gen(function* () {
@@ -116,7 +116,7 @@ export const conversationHandlers = {
 			}).pipe(
 				Effect.tapError(() =>
 					persistSessionPermissionMode(request.sessionId, previousMode).pipe(
-						Effect.catchAll((compensationError) =>
+						Effect.catch((compensationError) =>
 							Effect.sync(() => {
 								log.error(
 									`session=${request.sessionId} Failed to restore permission mode to ${previousMode} after SwitchPermissionMode failure`,
@@ -127,7 +127,7 @@ export const conversationHandlers = {
 					),
 				),
 			);
-		}).pipe(Effect.catchAll(mapRpcFailure("SwitchPermissionMode"))),
+		}).pipe(Effect.catch(mapRpcFailure("SwitchPermissionMode"))),
 	RespondPermission: (request) =>
 		handlePermissionResponse(request.originId, {
 			requestId: request.requestId as PermissionId,
@@ -144,7 +144,7 @@ export const conversationHandlers = {
 				: {}),
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.fail(
 					new WsRpcError({
 						message: `RespondPermission failed: ${String(error)}`,
@@ -159,7 +159,7 @@ export const conversationHandlers = {
 			answers: request.answers,
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchAll(mapRpcFailure("AnswerQuestion")),
+			Effect.catch(mapRpcFailure("AnswerQuestion")),
 		),
 	RejectQuestion: (request) =>
 		handleQuestionReject(request.originId, {
@@ -167,7 +167,7 @@ export const conversationHandlers = {
 			commandId: request.commandId,
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchAll(mapRpcFailure("RejectQuestion")),
+			Effect.catch(mapRpcFailure("RejectQuestion")),
 		),
 	"input.submit": (request) =>
 		Effect.gen(function* () {
@@ -198,7 +198,7 @@ export const conversationHandlers = {
 						handedOff: sent.handedOff,
 					};
 		}).pipe(
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.fail(
 					error instanceof AccountUnroutable
 						? error
@@ -226,13 +226,19 @@ export const conversationHandlers = {
 			}),
 		),
 	SyncInputDraft: (request) =>
-		syncInputDraftForSession({
-			sessionId: request.sessionId,
-			text: request.text,
-			...(request.originId ? { from: request.originId } : {}),
+		Effect.gen(function* () {
+			if ("draft" in request.key && request.projectSlug === undefined)
+				return yield* new WsRpcError({
+					message: "projectSlug is required for a draft write",
+				});
+			yield* syncInputDraft({
+				key: request.key,
+				text: request.text,
+				...(request.originId ? { from: request.originId } : {}),
+			});
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.fail(
 					new WsRpcError({
 						message: `SyncInputDraft failed: ${String(error)}`,
@@ -243,7 +249,7 @@ export const conversationHandlers = {
 	CancelSession: (request) =>
 		cancelSessionById("rpc", request.sessionId, request.commandId).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catchAll(mapRpcFailure("CancelSession")),
+			Effect.catch(mapRpcFailure("CancelSession")),
 		),
 } satisfies Pick<
 	WsRpcHandlerMap,

@@ -10,10 +10,10 @@ import {
 	clearSessionState,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import {
 	clearSessionSearch,
-	seedDaemonSessions,
 	seedFamilySessions,
 	seedRootSessions,
 } from "../stores/session-fixtures.js";
@@ -55,10 +55,10 @@ describe("SessionList fork", () => {
 			{ id: "other", title: "Other work" },
 		]);
 		seedFamilySessions([...sessionState.rootSessions]);
-		seedDaemonSessions([]);
+
 		sessionState.searchQuery = "";
 		clearSessionSearch();
-		sessionState.currentId = "open";
+		openSessionForSetup("open", "current-project");
 		routerState.path = "/s/open";
 		routerState.search = "";
 	});

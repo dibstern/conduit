@@ -1,5 +1,5 @@
 import { getBrowserClientId } from "../../stores/client-identity.js";
-import { getCurrentSlug } from "../../stores/router.svelte.js";
+import { selection } from "../../stores/selection.svelte.js";
 import { followFork, isSessionSnoozed } from "../../stores/session.svelte.js";
 import { refreshListedSessions } from "../../stores/session-list.svelte.js";
 import { openSnoozePicker } from "../../stores/snooze-picker.svelte.js";
@@ -30,6 +30,7 @@ export type SessionCommand = {
 	icon:
 		| "undo"
 		| "check"
+		| "archive"
 		| "moon"
 		| "pin-off"
 		| "pin"
@@ -135,22 +136,16 @@ export function runSessionCommandShortcut(
 	else command.run(() => (origin instanceof HTMLElement ? origin : null));
 }
 
-function isForeignSession(session: SessionInfo): boolean {
-	return (
-		session.projectSlug != null && session.projectSlug !== getCurrentSlug()
-	);
-}
-
 // The server routes each call to the session's project.
 function rpcInput(session: SessionInfo) {
 	return { sessionId: session.id, originId: getBrowserClientId() };
 }
 
-// This socket only hears live updates for its own project.
-function refreshIfForeign(session: SessionInfo): Promise<void> {
-	return isForeignSession(session)
-		? refreshListedSessions()
-		: Promise.resolve();
+// Browse follows the shell; search also needs its server totals refreshed.
+function refreshSearch(): void {
+	void refreshListedSessions().catch(
+		toastFailure("Couldn't refresh session search"),
+	);
 }
 
 async function settle(session: SessionInfo, settled: boolean) {
@@ -158,7 +153,7 @@ async function settle(session: SessionInfo, settled: boolean) {
 	if (!input) return;
 	try {
 		await rpc("SetSessionSettled", { ...input, settled });
-		await refreshIfForeign(session);
+		refreshSearch();
 		if (settled)
 			showToast(`Moved “${session.title || "New Session"}” to Settled`, {
 				duration: 5000,
@@ -166,7 +161,7 @@ async function settle(session: SessionInfo, settled: boolean) {
 					label: "Undo",
 					run: () => {
 						void rpc("SetSessionSettled", { ...input, settled: false })
-							.then(() => refreshIfForeign(session))
+							.then(refreshSearch)
 							.catch(toastFailure("Couldn't undo"));
 					},
 				},
@@ -181,7 +176,7 @@ async function pin(session: SessionInfo, pinned: boolean) {
 	if (!input) return;
 	try {
 		await rpc("SetSessionPinned", { ...input, pinned });
-		await refreshIfForeign(session);
+		refreshSearch();
 		if (pinned)
 			showToast(`Pinned “${session.title || "New Session"}” to the top`, {
 				duration: 5000,
@@ -189,7 +184,7 @@ async function pin(session: SessionInfo, pinned: boolean) {
 					label: "Undo",
 					run: () => {
 						void rpc("SetSessionPinned", { ...input, pinned: false })
-							.then(() => refreshIfForeign(session))
+							.then(refreshSearch)
 							.catch(toastFailure("Couldn't undo"));
 					},
 				},
@@ -199,15 +194,30 @@ async function pin(session: SessionInfo, pinned: boolean) {
 	}
 }
 
+async function archive(
+	session: SessionInfo,
+	archived: boolean,
+): Promise<boolean> {
+	const input = rpcInput(session);
+	if (!input) return false;
+	try {
+		await rpc("SetSessionArchived", { ...input, archived });
+		refreshSearch();
+		return true;
+	} catch (error) {
+		toastFailure(
+			archived ? "Couldn't archive session" : "Couldn't unarchive session",
+		)(error);
+		return false;
+	}
+}
+
 async function autoSettle(session: SessionInfo, disabled: boolean) {
 	const input = rpcInput(session);
 	if (!input) return;
 	try {
 		const outlook = await rpc("SetSessionAutoSettle", { ...input, disabled });
-		// The switch settles from the write reply, without waiting for the list.
-		void refreshIfForeign(session).catch(
-			toastFailure("Couldn't change auto-settle"),
-		);
+		refreshSearch();
 		return outlook;
 	} catch (error) {
 		toastFailure("Couldn't change auto-settle")(error);
@@ -223,7 +233,7 @@ async function rename(session: SessionInfo, title: string) {
 			sessionId: input.sessionId,
 			title,
 		});
-		await refreshIfForeign(session);
+		refreshSearch();
 	} catch (error) {
 		toastFailure("Couldn't rename session")(error);
 	}
@@ -236,7 +246,7 @@ async function snooze(session: SessionInfo, until: number | null, now: number) {
 	const previousUntil = session.snoozedUntil ?? null;
 	try {
 		await rpc("SnoozeSession", { ...input, until });
-		await refreshIfForeign(session);
+		refreshSearch();
 		showToast(
 			until === null
 				? `Snoozed “${session.title || "New Session"}” until something happens`
@@ -249,9 +259,7 @@ async function snooze(session: SessionInfo, until: number | null, now: number) {
 						const undo = wasSnoozed
 							? rpc("SnoozeSession", { ...input, until: previousUntil })
 							: rpc("UnsnoozeSession", input);
-						void undo
-							.then(() => refreshIfForeign(session))
-							.catch(toastFailure("Couldn't undo"));
+						void undo.then(refreshSearch).catch(toastFailure("Couldn't undo"));
 					},
 				},
 			},
@@ -266,7 +274,7 @@ async function unsnooze(session: SessionInfo) {
 	if (!input) return;
 	try {
 		await rpc("UnsnoozeSession", input);
-		await refreshIfForeign(session);
+		refreshSearch();
 	} catch (error) {
 		toastFailure("Couldn't unsnooze session")(error);
 	}
@@ -275,10 +283,10 @@ async function unsnooze(session: SessionInfo) {
 async function remove(
 	session: SessionInfo,
 	returnFocus?: () => HTMLElement | null,
-) {
+): Promise<boolean> {
 	const title = session.title || "New Session";
 	const input = rpcInput(session);
-	if (!input) return;
+	if (!input) return false;
 	let targets: Awaited<ReturnType<typeof confirmSessionDeletion>>;
 	try {
 		targets = await confirmSessionDeletion(
@@ -290,33 +298,31 @@ async function remove(
 		showToast("Couldn't inspect worktrees. The session was kept.", {
 			variant: "warn",
 		});
-		return;
+		return false;
 	}
 	const target = targets?.[0];
-	if (!target) return;
+	if (!target) return false;
 	let result: Awaited<ReturnType<typeof rpc<"DeleteSession">>>;
 	try {
 		result = await rpc("DeleteSession", target);
 	} catch (error) {
 		toastFailure(`Couldn't delete "${title}"`, "warn")(error);
-		return;
+		return false;
 	}
-	void refreshIfForeign(session).catch(() =>
-		showToast("Session deleted. Couldn't refresh the session list.", {
-			variant: "warn",
-		}),
-	);
+	refreshSearch();
 	if (result.worktreeWarnings?.length)
 		showToast(`Session deleted. ${result.worktreeWarnings.join("; ")}`, {
 			variant: "warn",
 		});
+	return true;
 }
 
 function fork(session: SessionInfo) {
 	const input = rpcInput(session);
 	if (!input) return;
+	const from = selection.scope;
 	void rpc("ForkSession", input)
-		.then(followFork)
+		.then((response) => followFork(from, response))
 		.catch(toastFailure("Failed to fork session"));
 }
 
@@ -337,6 +343,7 @@ function commitTomorrow(session: SessionInfo) {
 
 export const sessionCommandActions = {
 	settle,
+	archive,
 	remove,
 	pin,
 	autoSettle,
@@ -507,6 +514,15 @@ export function getSessionCommands(
 				void toggleSessionRead(session);
 			},
 		});
+	items.push({
+		testId: "session-ctx-archive",
+		label: session.archivedAt != null ? "Unarchive" : "Archive",
+		section: "triage",
+		icon: "archive",
+		run: () => {
+			void archive(session, session.archivedAt == null);
+		},
+	});
 	items.push(
 		...(host.select
 			? [

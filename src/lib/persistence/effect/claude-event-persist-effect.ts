@@ -1,6 +1,7 @@
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
-import { Context, Data, Effect, Either, Schema } from "effect";
+import { createHash } from "node:crypto";
+import { Context, Data, Effect, Result, Schema } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { parseAttachmentDataUrl } from "../../attachment-data-url.js";
 import type { KnownProviderDriverKind } from "../../contracts/provider-instance.js";
 import {
@@ -8,6 +9,7 @@ import {
 	sessionPickEvents,
 	storedSessionPick,
 } from "../../domain/relay/Services/session-pick.js";
+import type { ClaudeSubagentTranscriptSnapshot } from "../../provider/claude/types.js";
 import {
 	isPickRejection,
 	type PickRejection,
@@ -85,11 +87,19 @@ export interface ClaudeEventPersistEffect {
 		readonly instanceId?: string;
 		readonly modelId?: string;
 	}) => Effect.Effect<void, ClaudeEventPersistFailure | PickRejection>;
+
+	readonly readClaudeSubagentTranscript: (
+		childSessionId: string,
+	) => Effect.Effect<
+		ClaudeSubagentTranscriptSnapshot,
+		ClaudeEventPersistFailure
+	>;
 }
 
-export class ClaudeEventPersistEffectTag extends Context.Tag(
-	"ClaudeEventPersistEffect",
-)<ClaudeEventPersistEffectTag, ClaudeEventPersistEffect>() {}
+export class ClaudeEventPersistEffectTag extends Context.Service<
+	ClaudeEventPersistEffectTag,
+	ClaudeEventPersistEffect
+>()("ClaudeEventPersistEffect") {}
 
 /**
  * Terminal events that may act on an existing read-model session without a
@@ -118,15 +128,66 @@ export const makeAppendEventsWithClaudeTurnCosts = Effect.gen(function* () {
 			if (
 				!events.some(
 					(event) =>
-						event.provider === "claude" &&
-						event.type === "turn.completed" &&
-						event.data.providerCostTotalUsd !== undefined,
+						event.metadata.rawSource === "claude.subagent.transcript" ||
+						(event.provider === "claude" &&
+							event.type === "turn.completed" &&
+							event.data.providerCostTotalUsd !== undefined),
 				)
 			)
 				return yield* eventStore.appendBatch(events);
 
 			const stored: StoredEvent[] = [];
+			const seenTranscriptIds = new Set<string>();
 			for (const event of events) {
+				if (event.metadata.rawSource === "claude.subagent.transcript") {
+					if (seenTranscriptIds.has(event.eventId)) continue;
+					seenTranscriptIds.add(event.eventId);
+					const [existing] =
+						yield* sql`SELECT event_id FROM events WHERE event_id = ${event.eventId}`;
+					if (existing) {
+						// A message replacement can cascade-delete parts while their
+						// events remain. Append the restoration after that replacement
+						// so replay reproduces the live projection.
+						let restore = false;
+						if (event.type === "message.created") {
+							const rows =
+								yield* sql`SELECT id FROM messages WHERE id = ${event.data.messageId} AND session_id = ${event.sessionId}`;
+							restore = rows.length === 0;
+						} else if ("partId" in event.data) {
+							const [part] = yield* sql<{
+								text: string | null;
+								status: string | null;
+							}>`
+								SELECT text, status FROM message_parts WHERE id = ${event.data.partId}`;
+							restore =
+								!part ||
+								((event.type === "text.delta" ||
+									event.type === "thinking.delta") &&
+									!part.text &&
+									event.data.text.length > 0) ||
+								((event.type === "thinking.end" ||
+									event.type === "tool.completed") &&
+									part.status !== "completed" &&
+									part.status !== "error");
+						}
+						if (restore) {
+							const [latest] = yield* sql<{ sequence: number | null }>`
+								SELECT MAX(sequence) AS sequence FROM events WHERE session_id = ${event.sessionId}`;
+							const eventId = Schema.decodeSync(EventId)(
+								`evt_${createHash("sha256")
+									.update(
+										JSON.stringify([event.eventId, latest?.sequence ?? 0]),
+									)
+									.digest("hex")
+									.slice(0, 24)}`,
+							);
+							stored.push(
+								...(yield* eventStore.appendBatch([{ ...event, eventId }])),
+							);
+						}
+						continue;
+					}
+				}
 				let normalized = event;
 				if (
 					event.provider === "claude" &&
@@ -252,6 +313,27 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 			cause instanceof ClaudeSessionLifecycleError
 				? cause
 				: new ClaudeEventPersistEffectError({ operation, cause });
+
+	const readClaudeSubagentTranscript: ClaudeEventPersistEffect["readClaudeSubagentTranscript"] =
+		(childSessionId) =>
+			sql
+				.withTransaction(
+					Effect.gen(function* () {
+						const messages = yield* sql<
+							ClaudeSubagentTranscriptSnapshot["messages"][number]
+						>`
+				SELECT id, role FROM messages
+				WHERE session_id = ${childSessionId} AND role IN ('user', 'assistant')`;
+						const parts = yield* sql<
+							ClaudeSubagentTranscriptSnapshot["parts"][number]
+						>`
+				SELECT p.id, p.message_id AS messageId, p.type, p.text, p.status
+				FROM message_parts p JOIN messages m ON m.id = p.message_id
+				WHERE m.session_id = ${childSessionId}`;
+						return { messages, parts };
+					}),
+				)
+				.pipe(Effect.mapError(mapPersistError("readClaudeSubagentTranscript")));
 
 	const persistEvent = (
 		event: CanonicalEvent,
@@ -468,15 +550,15 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 								provider,
 								storedSessionPick(parent, provider),
 							);
-							if (Either.isLeft(pick)) return yield* pick.left;
+							if (Result.isFailure(pick)) return yield* pick.failure;
 							pickEvents = sessionPickEvents(
 								input.childSessionId,
 								input.modelId
 									? {
-											...pick.right,
-											model: { ...pick.right.model, modelId: input.modelId },
+											...pick.success,
+											model: { ...pick.success.model, modelId: input.modelId },
 										}
-									: pick.right,
+									: pick.success,
 							);
 						}
 						if (!existingChild) yield* seedClaudeSubagentSession(input);
@@ -522,5 +604,6 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 		persistEvents,
 		persistUserMessage,
 		ensureClaudeSubagentSession,
+		readClaudeSubagentTranscript,
 	} satisfies ClaudeEventPersistEffect;
 });

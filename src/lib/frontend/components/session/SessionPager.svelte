@@ -5,14 +5,16 @@
 
 <script lang="ts">
 	import { onDestroy, onMount } from "svelte";
-	import { currentSearchQuery, sessionList } from "../../stores/session-list.svelte.js";
+	import { browsePage, currentSearchQuery, sessionList } from "../../stores/session-list.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 
 	let {
 		sentinelEl,
+		hasMore,
 	}: {
 		sentinelEl?: HTMLElement;
+		hasMore: boolean;
 	} = $props();
 
 	let observer: IntersectionObserver | null = null;
@@ -34,10 +36,11 @@
 
 	// The observer reports only changes. A page that leaves the sentinel on
 	// screen (few rows, or most of them in a collapsed shelf) would never ask
-	// for the next one, so re-observe whenever a cursor moves: that re-reports
-	// whether the sentinel is still in view.
+	// for the next one, so re-observe whenever the visible limit or cursor moves.
+	// That re-reports whether the sentinel is still in view.
 	$effect(() => {
-		void sessionState.daemonCursor;
+		void hasMore;
+		void browsePage.limit;
 		void sessionState.searchCursor;
 		if (!observer || !sentinelEl) return;
 		observer.unobserve(sentinelEl);
@@ -48,11 +51,9 @@
 		observer?.disconnect();
 	});
 
-	// Search and browse are separate accumulators with separate cursors, so the
-	// one sentinel drives whichever list is on screen. Both loaders no-op at
-	// their own end and while a page is in flight, so a sentinel that stays
-	// visible does not spin.
+	// Search asks the server for another page; browse reveals rows already held.
 	function loadMore() {
+		if (!hasMore) return;
 		const query = currentSearchQuery();
 		if (query !== null) {
 			void query.loadMore();

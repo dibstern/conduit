@@ -1,8 +1,8 @@
 import { Context, Effect, HashMap, Layer, Option, Ref } from "effect";
 import { getAllIPs, getTailscaleIP } from "../../../cli/tls.js";
-import type {
-	ProjectSaveRejected,
-	SaveProjectInput,
+import {
+	type ProjectSaveRejected,
+	type SaveProjectInput,
 	WsRpcError,
 } from "../../../contracts/ws-rpc.js";
 import type { DaemonLifecycleContext } from "../../../daemon/daemon-lifecycle.js";
@@ -57,10 +57,10 @@ export interface EffectDaemonHandle {
 	readonly getInstances: () => Effect.Effect<ReadonlyArray<OpenCodeInstance>>;
 }
 
-export class DaemonHandleTag extends Context.Tag("DaemonHandle")<
+export class DaemonHandleTag extends Context.Service<
 	DaemonHandleTag,
 	EffectDaemonHandle
->() {}
+>()("DaemonHandle") {}
 
 const sortedStatusProjects = (
 	projects: DaemonStatus["projects"],
@@ -128,6 +128,11 @@ export const DaemonHandleLive: Layer.Layer<
 					Effect.provideService(ProjectSaveLockTag, projectSaveLock),
 				);
 				yield* persistence.requestSave;
+				yield* persistence.flush.pipe(
+					Effect.mapError(
+						(error) => new WsRpcError({ message: error.message }),
+					),
+				);
 				return result;
 			}).pipe(Effect.withSpan("daemonHandle.saveProject"));
 
@@ -137,12 +142,19 @@ export const DaemonHandleLive: Layer.Layer<
 					Effect.provideService(ProjectRegistryTag, projectRef),
 				);
 				yield* removeProjectFromEffectRegistry(slug).pipe(
+					Effect.provideService(PersistenceStore, store),
+					Effect.provideService(DaemonStoreAvailability, unavailable),
 					Effect.provideService(ProjectRegistryTag, projectRef),
 					Effect.provideService(ProjectSaveLockTag, projectSaveLock),
 					Effect.provideService(DaemonEventBusTag, bus),
 					Effect.provideService(RelayCacheTag, relayCache),
 					Effect.provideService(ConfigPersistenceTag, persistence),
 					Effect.provideService(DaemonStateTag, daemonState),
+				);
+				yield* persistence.flush.pipe(
+					Effect.mapError(
+						(error) => new WsRpcError({ message: error.message }),
+					),
 				);
 			}).pipe(Effect.withSpan("daemonHandle.removeProject"));
 

@@ -4,10 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-	AddInstance,
-	CreateSession,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import type { ProviderInfo } from "../../../src/lib/shared-types.js";
 import {
 	ProcessHarness,
@@ -148,9 +145,11 @@ describe("Cursor discovery through the built daemon and SDK trace port", () => {
 					CONDUIT_CURSOR_SDK_CAPTURE: capturePath,
 				},
 			});
-			const added = await fixture.requestRpc(
-				new AddInstance({ name: "Cursor", driver: "cursor" }),
-			);
+			const added = await fixture.requestRpc({
+				_tag: "AddInstance",
+				name: "Cursor",
+				driver: "cursor",
+			});
 			const accountId = added.addedInstanceId;
 			if (!accountId) throw new Error("Missing Cursor account");
 			const browser = await fixture.connect();
@@ -311,16 +310,15 @@ describe("Cursor discovery through the built daemon and SDK trace port", () => {
 				.flatMap(({ models }) => models);
 			const model = opencodeModels[0];
 			if (!model) throw new Error("Missing OpenCode catalog");
-			const { sessionId: opencodeId } = await fixture.requestRpc(
-				new CreateSession({
-					projectSlug: "process-test",
-					title: "OpenCode unaffected",
-					originId: browser.originId,
-					providerId: "opencode",
-					permissionMode: "ask",
-					model: { providerId: model.provider, modelId: model.id },
-				}),
-			);
+			const { sessionId: opencodeId } = await fixture.requestRpc({
+				_tag: "CreateSession",
+				projectSlug: "process-test",
+				title: "OpenCode unaffected",
+				originId: browser.originId,
+				providerId: "opencode",
+				permissionMode: "ask",
+				model: { providerId: model.provider, modelId: model.id },
+			});
 			const opencode = await browser.send(
 				opencodeId,
 				"Say hello in one sentence.",

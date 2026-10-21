@@ -57,8 +57,8 @@ iteration prefix and persists `{since,lastAt,count}` in nullable
 `sessions.goal_stuck` before the same version stamp is published. Raw timestamps
 supply displayed bounds. Met, cleared and replaced goals clear the header;
 pauses retain it. Read queries expose it as `SessionInfo.goalStuck`. Migration
-`0068_sessions_goal_stuck.sql` uses Effect registry key `0069`, following the
-existing code-only migration offset. Rebuilds derive the same state from events.
+`0073_sessions_goal_stuck.sql` uses Effect registry key `0075`, following main's
+SQL and Effect migration chains. Rebuilds derive the same state from events.
 
 `goal-summary-input.ts` keys summaries by session and goal identity, canonical
 lifecycle fields and transition epoch, consecutive-deduplicated causal blocker

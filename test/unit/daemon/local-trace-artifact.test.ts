@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Logger, LogLevel } from "effect";
+import { Effect, Layer, References } from "effect";
 import { expect, vi } from "vitest";
 import { makePinoLoggerLive } from "../../../src/lib/domain/daemon/Layers/pino-logger-layer.js";
 import {
@@ -452,7 +452,7 @@ describe("local trace artifact sink", () => {
 });
 
 describe("local trace artifact Effect tracer", () => {
-	it.scoped(
+	it.effect(
 		"writes completed Effect spans to the local NDJSON artifact",
 		() => {
 			const dir = makeTempDir();
@@ -501,6 +501,7 @@ describe("local trace artifact Effect tracer", () => {
 						bufferSize: 1,
 						minMs: 0,
 					}),
+					{ local: true },
 				),
 			);
 		},
@@ -522,6 +523,7 @@ describe("local trace artifact Effect tracer", () => {
 								bufferSize: 50,
 								minMs: 0,
 							}),
+							{ local: true },
 						),
 					),
 				),
@@ -541,7 +543,7 @@ describe("local trace artifact Effect tracer", () => {
 		}
 	});
 
-	it.scoped(
+	it.effect(
 		"keeps Pino logging active while Logger.tracerLogger records span events",
 		() => {
 			const root = {
@@ -565,7 +567,7 @@ describe("local trace artifact Effect tracer", () => {
 			return Effect.gen(function* () {
 				try {
 					yield* Effect.logInfo("inside span").pipe(
-						Logger.withMinimumLogLevel(LogLevel.Info),
+						Effect.provideService(References.MinimumLogLevel, "Info"),
 						Effect.withSpan("span.with.log"),
 					);
 					const record = yield* waitForRecord(
@@ -600,12 +602,13 @@ describe("local trace artifact Effect tracer", () => {
 						// biome-ignore lint/suspicious/noExplicitAny: mock shape satisfies the subset of PinoLogger used by the bridge
 						makePinoLoggerLive(root as any),
 					),
+					{ local: true },
 				),
 			);
 		},
 	);
 
-	it.scoped("records parentSpanId and sanitized links", () => {
+	it.effect("records parentSpanId and sanitized links", () => {
 		const dir = makeTempDir();
 		const path = join(dir, "server.trace.ndjson");
 		return Effect.gen(function* () {
@@ -615,7 +618,6 @@ describe("local trace artifact Effect tracer", () => {
 					yield* Effect.withSpan("child.linked", {
 						links: [
 							{
-								_tag: "SpanLink" as const,
 								span: parent,
 								attributes: {
 									relationship: "parent",
@@ -671,11 +673,12 @@ describe("local trace artifact Effect tracer", () => {
 					bufferSize: 1,
 					sessionId: "debug-session",
 				}),
+				{ local: true },
 			),
 		);
 	});
 
-	it.scoped("records provider-payload-safe Failure exits", () => {
+	it.effect("records provider-payload-safe Failure exits", () => {
 		const dir = makeTempDir();
 		const path = join(dir, "server.trace.ndjson");
 		return Effect.gen(function* () {
@@ -709,11 +712,12 @@ describe("local trace artifact Effect tracer", () => {
 					maxFiles: 2,
 					bufferSize: 1,
 				}),
+				{ local: true },
 			),
 		);
 	});
 
-	it.scoped("records Interrupted exits", () => {
+	it.effect("records Interrupted exits", () => {
 		const dir = makeTempDir();
 		const path = join(dir, "server.trace.ndjson");
 		return Effect.gen(function* () {
@@ -739,6 +743,7 @@ describe("local trace artifact Effect tracer", () => {
 					maxFiles: 2,
 					bufferSize: 1,
 				}),
+				{ local: true },
 			),
 		);
 	});

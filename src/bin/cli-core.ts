@@ -1,6 +1,7 @@
 // Command router and main entry point. The thin entry point (cli.ts) calls
 // run() with process.argv. Command handlers and utilities live in sibling modules.
 
+import { BUILD_ID } from "../lib/build-id.js";
 import { getTailscaleIP } from "../lib/cli/tls.js";
 import type { WsRpcRequest } from "../lib/contracts/ws-rpc.js";
 import {
@@ -8,11 +9,17 @@ import {
 	sendRpcRequest,
 } from "../lib/daemon/daemon-rpc-client.js";
 import type { DaemonOptions } from "../lib/daemon/daemon-types.js";
-import { isDaemonRunning } from "../lib/daemon/daemon-utils.js";
+import {
+	isDaemonRunning,
+	readDaemonBuild,
+} from "../lib/daemon/daemon-utils.js";
 import {
 	type ForegroundDaemonHandle,
 	startForegroundDaemon,
 } from "../lib/domain/daemon/Layers/daemon-foreground.js";
+import { formatErrorDetail } from "../lib/errors.js";
+import { isProcessAlive } from "../lib/instance/managed-opencode-process.js";
+import { isRecord } from "../lib/utils.js";
 import {
 	type CommandContext,
 	handleAdd,
@@ -104,6 +111,59 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 		getAddr,
 		getTsIP,
 	};
+
+	// A daemon from another build may speak an RPC wire this CLI cannot decode,
+	// so no command sends RPC to a mismatched daemon. The build comes from the
+	// plain file beside the socket. On a mismatch, stop sends SIGTERM to the
+	// recorded pid and waits for it to exit; every other command, --status
+	// included, exits 1. Exempt: serve and doctor (own startup checks), help,
+	// and service (install/uninstall replace the daemon). "dev" builds and
+	// daemons that predate the file never mismatch.
+	const daemonBuild =
+		options?.sendRPC === undefined &&
+		!["serve", "doctor", "help", "service"].includes(args.command)
+			? readDaemonBuild(DEFAULT_SOCKET_PATH)
+			: undefined;
+	if (
+		daemonBuild !== undefined &&
+		daemonBuild.buildId !== "dev" &&
+		BUILD_ID !== "dev" &&
+		daemonBuild.buildId !== BUILD_ID
+	) {
+		if (args.command === "stop") {
+			if (!(await checkDaemon())) return handleStop(context);
+			try {
+				process.kill(daemonBuild.pid, "SIGTERM");
+			} catch (err) {
+				if (!isRecord(err) || err["code"] !== "ESRCH") {
+					stderr.write(`Failed to stop daemon: ${formatErrorDetail(err)}\n`);
+					exit(1);
+					return;
+				}
+			}
+			const deadline = Date.now() + 30_000;
+			while (isProcessAlive(daemonBuild.pid)) {
+				if (Date.now() > deadline) {
+					stderr.write(
+						`Failed to stop daemon: pid ${daemonBuild.pid} still running after 30s.\n`,
+					);
+					exit(1);
+					return;
+				}
+				await new Promise((resolve) => setTimeout(resolve, 100));
+			}
+			stdout.write("Server stopped.\n");
+			return;
+		}
+		stderr.write(
+			`Build mismatch: this CLI is build ${BUILD_ID}, the running server is build ${daemonBuild.buildId}.\n`,
+		);
+		stderr.write(
+			"Restart the server: conduit stop, then conduit serve (an installed service restarts by itself).\n",
+		);
+		exit(1);
+		return;
+	}
 
 	switch (args.command) {
 		case "service":

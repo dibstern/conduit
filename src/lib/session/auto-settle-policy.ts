@@ -27,8 +27,8 @@ export interface AutoSettleFacts {
 	readonly unread: boolean;
 	readonly autoSettleDisabledAt: number | null;
 	readonly unsettledAt: number | null;
-	readonly mergedHead?: string | undefined;
-	readonly settledMergedHead?: string | undefined;
+	readonly createdAt: number | null;
+	readonly mergedAt?: number | undefined;
 }
 
 export function getAutoSettleOutlook(
@@ -68,8 +68,13 @@ export function getAutoSettleOutlook(
 		return { kind: "paused", reason: "working" };
 
 	if (
-		facts.mergedHead !== undefined &&
-		facts.mergedHead !== facts.settledMergedHead
+		facts.mergedAt !== undefined &&
+		facts.mergedAt >
+			Math.max(
+				facts.createdAt ?? Number.NEGATIVE_INFINITY,
+				facts.latestUserMessageAt ?? Number.NEGATIVE_INFINITY,
+				facts.unsettledAt ?? Number.NEGATIVE_INFINITY,
+			)
 	)
 		return { kind: "due" };
 
@@ -103,6 +108,7 @@ export function sessionRowToAutoSettleFacts(
 		| "unread"
 		| "autoSettleDisabledAt"
 		| "unsettledAt"
+		| "createdAt"
 	>,
 ): AutoSettleFacts {
 	return {
@@ -116,5 +122,6 @@ export function sessionRowToAutoSettleFacts(
 		unread: row?.unread === 1,
 		autoSettleDisabledAt: row?.auto_settle_disabled_at ?? null,
 		unsettledAt: row?.unsettled_at ?? null,
+		createdAt: row?.created_at ?? null,
 	};
 }

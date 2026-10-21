@@ -1,5 +1,5 @@
-import type { Rpc, RpcGroup } from "@effect/rpc";
 import { Schema } from "effect";
+import type { Rpc, RpcGroup } from "effect/rpc";
 import { type WsRpcError, WsRpcGroup } from "../../contracts/ws-rpc.js";
 import { showToast } from "../stores/ui.svelte.js";
 
@@ -13,6 +13,7 @@ export const copy: {
 		| ((error: Extract<DeclaredError, { _tag: T }>) => string)
 		| null;
 } = {
+	DraftAlreadySent: (error) => error.message,
 	WorkspaceMoveError: (error) =>
 		({
 			missing: "That worktree no longer exists.",
@@ -46,7 +47,7 @@ export const copy: {
 
 const isDeclared = Schema.is(
 	Schema.Union(
-		...Array.from(WsRpcGroup.requests.values(), (rpc) => rpc.errorSchema),
+		Array.from(WsRpcGroup.requests.values(), (rpc) => rpc.errorSchema),
 	),
 );
 

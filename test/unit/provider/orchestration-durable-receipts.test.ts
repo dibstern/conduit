@@ -1,7 +1,8 @@
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { describe, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Deferred, Effect, Fiber } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
+import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import {
 	decodeProviderRuntimeEvent,
@@ -122,6 +123,61 @@ function receiptRow(sql: SqlClient.SqlClient, commandId: string) {
 }
 
 describe("OrchestrationEngine durable receipts", () => {
+	// A drain must not steal the commit-to-claim gap, replace the caller's
+	// result/sink/signal, or impose the receipt poll timeout on a long live turn.
+	it.effect("keeps a committed live command out of overlapping drains", () =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const committed = yield* Deferred.make<void>();
+			const allowClaim = yield* Deferred.make<void>();
+			const started = yield* Deferred.make<void>();
+			const finish = yield* Deferred.make<void>();
+			const registry = new ProviderRegistry();
+			const instance = makeStubInstance("opencode");
+			const command = sendTurnCommand();
+			let signal: AbortSignal | undefined;
+			const result: TurnResult = { ...COMPLETED, cost: 7 };
+			instance.sendTurnEffect.mockImplementation(
+				(input: SendTurnCommand["input"]) =>
+					Effect.gen(function* () {
+						signal = input.abortSignal;
+						yield* Deferred.succeed(started, undefined);
+						yield* Deferred.await(finish);
+						return result;
+					}),
+			);
+			registry.registerInstance(instance);
+			const engine = new OrchestrationEngine({
+				registry,
+				durableCommands: yield* makeDurableOptions({ sql }),
+			});
+			const live = yield* Effect.forkChild(
+				engine.dispatchEffect({
+					...command,
+					onAccepted: Deferred.succeed(committed, undefined).pipe(
+						Effect.andThen(Deferred.await(allowClaim)),
+					),
+				}),
+			);
+			yield* Deferred.await(committed);
+			const drain = yield* Effect.forkChild(engine.drainSideEffects());
+			yield* TestClock.adjust("16 minutes");
+			expect(instance.sendTurnEffect).not.toHaveBeenCalled();
+			yield* Fiber.join(drain);
+			yield* Deferred.succeed(allowClaim, undefined);
+			yield* Deferred.await(started);
+			expect(signal).toBe(command.input.abortSignal);
+			yield* TestClock.adjust("16 minutes");
+			expect(live.pollUnsafe()).toBeUndefined();
+			yield* Deferred.succeed(finish, undefined);
+			expect(yield* Fiber.join(live)).toEqual(result);
+			yield* engine.drainSideEffects();
+			expect(instance.sendTurnEffect).toHaveBeenCalledTimes(1);
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
+	);
+
 	// Caller-supplied command ids are globally unique keys, not ownership proof.
 	it.effect("rejects replay of another project's orphaned command", () =>
 		Effect.gen(function* () {
@@ -149,8 +205,8 @@ describe("OrchestrationEngine durable receipts", () => {
 				registry,
 				durableCommands: yield* makeDurableOptions({ sql }),
 			});
-			const result = yield* Effect.either(engine.dispatchEffect(command));
-			expect(result._tag).toBe("Left");
+			const result = yield* Effect.result(engine.dispatchEffect(command));
+			expect(result._tag).toBe("Failure");
 			expect(
 				JSON.stringify({
 					receipts: yield* sql`SELECT * FROM command_receipts`,
@@ -327,13 +383,13 @@ describe("OrchestrationEngine durable receipts", () => {
 				}),
 			});
 
-			const failed = yield* Effect.either(
+			const failed = yield* Effect.result(
 				engine.dispatchEffect(sendTurnCommand()),
 			);
 
-			expect(failed._tag).toBe("Left");
-			if (failed._tag === "Left") {
-				expect(failed.left._tag).toBe("CommandIdGenerationFailed");
+			expect(failed._tag).toBe("Failure");
+			if (failed._tag === "Failure") {
+				expect(failed.failure._tag).toBe("CommandIdGenerationFailed");
 			}
 			expect(instance.sendTurnEffect).not.toHaveBeenCalled();
 			expect(yield* receiptRow(sql, "cmd-durable-1")).toBeUndefined();
@@ -399,13 +455,13 @@ describe("OrchestrationEngine durable receipts", () => {
 					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 
-				const rejected = yield* Effect.either(
+				const rejected = yield* Effect.result(
 					secondEngine.dispatchEffect(sendTurnCommand({ prompt: "changed" })),
 				);
 
-				expect(rejected._tag).toBe("Left");
-				if (rejected._tag === "Left") {
-					expect(rejected.left._tag).toBe("CommandFingerprintMismatch");
+				expect(rejected._tag).toBe("Failure");
+				if (rejected._tag === "Failure") {
+					expect(rejected.failure._tag).toBe("CommandFingerprintMismatch");
 				}
 				expect(secondInstance.sendTurnEffect).not.toHaveBeenCalled();
 
@@ -417,10 +473,10 @@ describe("OrchestrationEngine durable receipts", () => {
 					registry: thirdRegistry,
 					durableCommands: yield* makeDurableOptions({ sql }),
 				});
-				const rejectedAgain = yield* Effect.either(
+				const rejectedAgain = yield* Effect.result(
 					thirdEngine.dispatchEffect(sendTurnCommand({ prompt: "changed" })),
 				);
-				expect(rejectedAgain._tag).toBe("Left");
+				expect(rejectedAgain._tag).toBe("Failure");
 				expect(thirdInstance.sendTurnEffect).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
@@ -501,10 +557,10 @@ describe("OrchestrationEngine durable receipts", () => {
 					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 
-				const first = yield* Effect.either(
+				const first = yield* Effect.result(
 					engine.dispatchEffect(sendTurnCommand()),
 				);
-				expect(first._tag).toBe("Left");
+				expect(first._tag).toBe("Failure");
 				expect(providerCalls).toBe(1);
 
 				const retry = yield* engine.dispatchEffect(sendTurnCommand());
@@ -564,7 +620,7 @@ describe("OrchestrationEngine durable receipts", () => {
 					registry: secondRegistry,
 					durableCommands: yield* makeDurableOptions({ sql }),
 				});
-				yield* Effect.either(secondEngine.dispatchEffect(sendTurnCommand()));
+				yield* Effect.result(secondEngine.dispatchEffect(sendTurnCommand()));
 				expect(secondInstance.sendTurnEffect).toHaveBeenCalled();
 			}).pipe(
 				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
@@ -739,10 +795,10 @@ describe("OrchestrationEngine durable receipts", () => {
 					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 
-				const result = yield* Effect.either(engine.dispatchEffect(command));
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left") {
-					expect((result.left as { _tag: string })._tag).toBe(
+				const result = yield* Effect.result(engine.dispatchEffect(command));
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure") {
+					expect((result.failure as { _tag: string })._tag).toBe(
 						"CommandFingerprintMismatch",
 					);
 				}
@@ -773,13 +829,13 @@ describe("OrchestrationEngine durable receipts", () => {
 					durableCommands: yield* makeDurableOptions({ sql }),
 				});
 
-				const rejected = yield* Effect.either(
+				const rejected = yield* Effect.result(
 					engine.dispatchEffect(sendTurnCommand()),
 				);
 
-				expect(rejected._tag).toBe("Left");
-				if (rejected._tag === "Left") {
-					expect(rejected.left._tag).toBe("StaleCommandRejected");
+				expect(rejected._tag).toBe("Failure");
+				if (rejected._tag === "Failure") {
+					expect(rejected.failure._tag).toBe("StaleCommandRejected");
 				}
 				expect(instance.sendTurnEffect).not.toHaveBeenCalled();
 				expect(yield* receiptRow(sql, "cmd-durable-1")).toBeUndefined();

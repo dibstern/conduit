@@ -572,12 +572,22 @@ async function dwellAndViewport(
 		const viewport = A.viewportSize();
 		if (!viewport) throw new Error("window A has no viewport");
 		await A.setViewportSize({ width: viewport.width, height: 300 });
-		await transcript(A).evaluate((el) => {
-			el.scrollTop = 0;
-			// Establish the detached state before the paused-clock interaction.
-			el.dispatchEvent(new Event("scroll"));
-			el.dispatchEvent(new Event("scroll"));
-		});
+		// ResizeObserver re-pins a following transcript. Finish that render cycle
+		// before scrolling, so its pending programmatic scrolls cannot swallow ours.
+		await A.evaluate(
+			() =>
+				new Promise<void>((resolve) =>
+					requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+				),
+		);
+		await transcript(A).evaluate(
+			(el) =>
+				new Promise<void>((resolve) => {
+					el.addEventListener("scroll", () => resolve(), { once: true });
+					el.scrollTop = 0;
+				}),
+		);
+		await expect(A.locator("#scroll-btn")).toBeVisible();
 		await expect(A.locator("[data-turn-end]")).not.toBeInViewport();
 		await paused(A, async () => {
 			await transcript(A).click({ position: { x: 24, y: 24 } });
@@ -849,8 +859,8 @@ async function droppedReport(
 		await expect(dot(B, ctx.sessionId)).toHaveCount(0);
 		await proxy.reconnect();
 		await expect(dot(A, ctx.sessionId)).toHaveCount(0, { timeout: 20_000 });
-		// Negative observation window: a stray flush would follow the reconnect's session list.
-		await A.waitForTimeout(1_000);
+		// Let reconnect callbacks run after the fresh shell snapshot clears the dot.
+		await A.clock.runFor(1_000);
 		expect(proxy.reports()).toBe(3);
 		await ctx.report.record(
 			"dropped after B's pick",

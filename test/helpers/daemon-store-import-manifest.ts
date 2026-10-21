@@ -8,9 +8,9 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { SqlClient } from "@effect/sql";
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { Effect, ManagedRuntime } from "effect";
+import { SqlClient } from "effect/sql";
 import { defaultDaemonConfig } from "../../src/lib/daemon/config-persistence.js";
 import { makeCommitAndSignal } from "../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../src/lib/persistence/effect/event-store-effect.js";
@@ -189,7 +189,7 @@ export function projectManifest(
 	projectId: string,
 	source?: ProjectManifest,
 ): ProjectManifest {
-	const db = new Database(filename, { readonly: true, fileMustExist: true });
+	const db = new DatabaseSync(filename, { readOnly: true, timeout: 5000 });
 	try {
 		const legacyOwner = source === undefined ? " OR project_id IS NULL" : "";
 		const names = db
@@ -430,14 +430,18 @@ export interface StoreImportPosition {
 }
 
 export function storeImportPosition(filename: string): StoreImportPosition {
-	const db = new Database(filename, { readonly: true, fileMustExist: true });
+	const db = new DatabaseSync(filename, { readOnly: true, timeout: 5000 });
 	try {
 		return db
 			.prepare(`SELECT
 			COALESCE((SELECT MAX(sequence) FROM events), 0) AS eventSequence,
 			(SELECT value FROM read_model_counter WHERE id = 1) AS readModelVersion,
 			COALESCE((SELECT MAX(request_sequence) FROM provider_command_outbox), 0) AS outboxSequence`)
-			.get() as StoreImportPosition;
+			.get() as {
+			eventSequence: number;
+			readModelVersion: number;
+			outboxSequence: number;
+		};
 	} finally {
 		db.close();
 	}
@@ -451,7 +455,7 @@ export function daemonStoreAssertions(
 		readonly before: StoreImportPosition;
 	},
 ) {
-	const db = new Database(filename, { readonly: true, fileMustExist: true });
+	const db = new DatabaseSync(filename, { readOnly: true, timeout: 5000 });
 	try {
 		const names = db
 			.prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -585,7 +589,7 @@ export function sourceChecksums(filename: string): {
 }
 
 export function storeTableCounts(filename: string): Record<string, number> {
-	const db = new Database(filename, { readonly: true, fileMustExist: true });
+	const db = new DatabaseSync(filename, { readOnly: true, timeout: 5000 });
 	try {
 		return Object.fromEntries(
 			(
@@ -618,7 +622,7 @@ export function daemonStoreManifest(filename: string): {
 	tables: Readonly<Record<string, readonly Row[]>>;
 	hash: string;
 } {
-	const db = new Database(filename, { readonly: true, fileMustExist: true });
+	const db = new DatabaseSync(filename, { readOnly: true, timeout: 5000 });
 	try {
 		const names = db
 			.prepare(
@@ -1206,6 +1210,7 @@ export async function createProjectStoreFixture(
 				// These primary/legacy records have no current canonical event producer.
 				yield* sql`INSERT INTO tool_content VALUES (${`${id}_blob`}, ${id}, 'saved tool result', 1000)`;
 				yield* sql`INSERT INTO sent_alerts VALUES (${id}, 'turn-finished', ${assistant}, 1000, 'delivered', 'fixture-claim')`;
+				yield* sql`INSERT INTO input_drafts (draft_key, project_id, kind, text, updated_at) VALUES (${id}, ${projectId}, 'session', 'saved composer draft', 1000)`;
 				yield* sql`INSERT INTO session_pick_backfill VALUES (${id}, 'driver_unresolved')`;
 				yield* sql`INSERT INTO session_git_published VALUES (${`/fixture/${projectId}`}, '{"branch":"fixture"}')`;
 				yield* sql`INSERT INTO session_goal_checks (event_id, session_id, condition, set_at, iterations, reason, created_at) VALUES (${`${id}_goal_check`}, ${id}, 'complete', 1000, 2, 'continue', 1000)`;

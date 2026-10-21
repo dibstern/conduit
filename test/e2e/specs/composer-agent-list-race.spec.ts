@@ -58,7 +58,7 @@ test("a late agent list from the previous session leaves the new session's agent
 			}),
 		},
 	});
-	await mockRelayWebSocket(page, {
+	const ws = await mockRelayWebSocket(page, {
 		initMessages,
 		responses: new Map(),
 		initDelay: 0,
@@ -99,8 +99,9 @@ test("a late agent list from the previous session leaves the new session's agent
 
 	release();
 	await expect.poll(() => heldReplySent).toBe(true);
-	// The reply is sent right after the flag flips; give the client a beat to apply it.
-	await page.waitForTimeout(500);
+	// A later socket message proves the app had the chance to apply A's late reply.
+	ws.sendMessage({ type: "client_count", count: 7 });
+	await expect(page.locator("#client-count-badge")).toHaveText("7");
 
 	await expect(agentRow).toContainText("B Review");
 	await expect(agentRow).not.toContainText("A Build");

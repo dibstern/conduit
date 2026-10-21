@@ -13,7 +13,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Layer, ManagedRuntime } from "effect";
 import {
 	afterEach,
 	assert,
@@ -23,7 +23,7 @@ import {
 	it,
 	vi,
 } from "vitest";
-import { AttachProject, GetStatus } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
 	type ForegroundDaemonHandle,
@@ -74,8 +74,8 @@ describe("daemon project readiness and socket routing", () => {
 				makeWsTransportLive({ noServer: true }),
 			),
 		);
-		const rpcWsHandler = await Effect.runPromise(
-			makeWsRpcWebSocketHandler({ runtime }).pipe(Effect.provide(runtime)),
+		const rpcWsHandler = await runtime.runPromise(
+			makeWsRpcWebSocketHandler({ runtime }),
 		);
 		const relay = createMockProjectRelay({ rpcWsHandler });
 
@@ -103,19 +103,19 @@ describe("daemon project readiness and socket routing", () => {
 			const runningDaemon = d;
 
 			await runningDaemon.addProject(projectDir);
-			const registering = await sendRpcRequest(
-				join(tmpDir, "relay.sock"),
-				new GetStatus({}),
-			);
+			const registering = await sendRpcRequest(join(tmpDir, "relay.sock"), {
+				_tag: "GetStatus",
+			});
 			expect(
 				registering.projects.find((project) => project.slug === slug)?.status,
 			).toBe("registering");
 			expect(createProjectRelayMock).not.toHaveBeenCalled();
 			let attachmentSettled = false;
-			const attachment = sendRpcRequest(
-				join(tmpDir, "relay.sock"),
-				new AttachProject({ projectSlug: slug, originId: "waiting-client" }),
-			).finally(() => {
+			const attachment = sendRpcRequest(join(tmpDir, "relay.sock"), {
+				_tag: "AttachProject",
+				projectSlug: slug,
+				originId: "waiting-client",
+			}).finally(() => {
 				attachmentSettled = true;
 			});
 
@@ -130,7 +130,10 @@ describe("daemon project readiness and socket routing", () => {
 			).toBe("registering");
 
 			releaseRelay();
-			expect(await attachment).toEqual({ projectSlug: slug });
+			expect(await attachment).toEqual({
+				projectSlug: slug,
+				sessionSlug: null,
+			});
 
 			await vi.waitFor(() => {
 				expect(
@@ -139,10 +142,9 @@ describe("daemon project readiness and socket routing", () => {
 						.projects.find((project) => project.slug === slug)?.status,
 				).toBe("ready");
 			});
-			const ready = await sendRpcRequest(
-				join(tmpDir, "relay.sock"),
-				new GetStatus({}),
-			);
+			const ready = await sendRpcRequest(join(tmpDir, "relay.sock"), {
+				_tag: "GetStatus",
+			});
 			expect(
 				ready.projects.find((project) => project.slug === slug)?.status,
 			).toBe("ready");
@@ -213,10 +215,11 @@ describe("daemon project readiness and socket routing", () => {
 			await d.addProject(directory);
 			expect(createProjectRelayMock).not.toHaveBeenCalled();
 			await expect(
-				sendRpcRequest(
-					join(tmpDir, "relay.sock"),
-					new AttachProject({ projectSlug: slug, originId: "failed-client" }),
-				),
+				sendRpcRequest(join(tmpDir, "relay.sock"), {
+					_tag: "AttachProject",
+					projectSlug: slug,
+					originId: "failed-client",
+				}),
 			).rejects.toMatchObject({
 				_tag: "WsRpcError",
 				message: expect.stringContaining(`Project "${slug}" unavailable`),
@@ -229,10 +232,9 @@ describe("daemon project readiness and socket routing", () => {
 					.projects.find((entry) => entry.slug === slug);
 				expect(project?.status).toBe("error");
 			});
-			const failed = await sendRpcRequest(
-				join(tmpDir, "relay.sock"),
-				new GetStatus({}),
-			);
+			const failed = await sendRpcRequest(join(tmpDir, "relay.sock"), {
+				_tag: "GetStatus",
+			});
 			expect(
 				failed.projects.find((project) => project.slug === slug)?.status,
 			).toBe("error");
@@ -319,7 +321,7 @@ describe("instance status broadcast", () => {
 		// The daemon wires status_changed events internally.
 		// Verify getInstances works and the daemon was started successfully.
 		const instances = daemon.getInstances();
-		expect(instances).toHaveLength(1);
+		expect(instances.map(({ id }) => id)).toEqual(["opencode", "claude"]);
 		const instance = instances[0];
 		assert.exists(instance, "expected an OpenCode instance");
 		expect(instance.id).toBe("opencode");
@@ -356,8 +358,11 @@ describe("instance status broadcast", () => {
 			opencodeUrl,
 		});
 
-		// The default instance was added as unmanaged, so health polling
-		// starts immediately (every 5s). Wait for it to transition to healthy.
+		// External instances are probed on first use too.
+		await sendRpcRequest(join(tmpDir, "relay.sock"), {
+			_tag: "StartInstance",
+			instanceId: "opencode",
+		});
 		await new Promise<void>((resolve) => {
 			const check = setInterval(() => {
 				const inst = daemon?.getInstances()[0];
@@ -373,7 +378,7 @@ describe("instance status broadcast", () => {
 		});
 
 		const instances = daemon.getInstances();
-		expect(instances).toHaveLength(1);
+		expect(instances.map(({ id }) => id)).toEqual(["opencode", "claude"]);
 		const instance = instances[0];
 		assert.exists(instance, "expected an OpenCode instance");
 		expect(instance.id).toBe("opencode");

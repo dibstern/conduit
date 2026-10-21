@@ -5,13 +5,13 @@ import {
 	DEFAULT_TERMINAL_KEYS,
 	type TerminalKeyAction,
 } from "../../../src/lib/contracts/terminal-keys.js";
-import { GetTerminalKeys } from "../../../src/lib/contracts/ws-rpc.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 import { chooseSettingsOption } from "../helpers/settings.js";
 import { startByteDump } from "../helpers/terminal-bytes.js";
 import {
 	confirmationsShown,
 	countConfirmations,
+	finger,
 	flick,
 	openPhoneTerminal,
 	row,
@@ -352,7 +352,7 @@ test("Terminal settings persist each change and update a second device live", as
 		await expect(
 			page.getByTestId("settings-terminal-option-key"),
 		).toHaveAttribute("data-value", "meta");
-		const saved = await harness.requestRpc(new GetTerminalKeys({}));
+		const saved = await harness.requestRpc({ _tag: "GetTerminalKeys" });
 		expect(saved.terminalKeys).toEqual({
 			bar: {
 				show: false,
@@ -448,7 +448,7 @@ test("a desktop row edit reaches an open phone and persists after reload", async
 				.getByTestId("terminal-row-key-0")
 				.getByRole("button", { name: "Home, flick up for Copy", exact: true }),
 		).toHaveText("home");
-		const saved = await harness.requestRpc(new GetTerminalKeys({}));
+		const saved = await harness.requestRpc({ _tag: "GetTerminalKeys" });
 		expect(saved.terminalKeys.row.keys[0]).toEqual({ tap: "home", up: "copy" });
 		await testInfo.attach("saved phone row", {
 			body: JSON.stringify(saved, null, 2),
@@ -474,7 +474,7 @@ test("stored Terminal settings without a row decode to the default phone row", a
 		join(harness.configDir, "settings.jsonc"),
 		JSON.stringify({ terminalKeys: legacy }),
 	);
-	const saved = await harness.requestRpc(new GetTerminalKeys({}));
+	const saved = await harness.requestRpc({ _tag: "GetTerminalKeys" });
 	expect(saved.terminalKeys).toEqual({
 		...legacy,
 		row: DEFAULT_TERMINAL_KEYS.row,
@@ -671,6 +671,37 @@ test.describe("Phone row", () => {
 			body: await page.screenshot(),
 			contentType: "image/png",
 		});
+	});
+
+	test("hiding the phone row from another device stops a held arrow", async ({
+		page,
+		sessionUrl,
+		harness,
+	}, testInfo) => {
+		await openPhoneTerminal(page, sessionUrl);
+		const dump = await startByteDump(page, testInfo);
+		const touch = await finger(
+			page,
+			row(page).getByRole("group", { name: "Arrows" }),
+		);
+		try {
+			await touch.moveTo(35, 0);
+			await harness.requestRpc({
+				_tag: "SetTerminalKeys",
+				terminalKeys: {
+					...DEFAULT_TERMINAL_KEYS,
+					row: { ...DEFAULT_TERMINAL_KEYS.row, show: false },
+				},
+			});
+			await expect(row(page)).toHaveCount(0);
+			await dump.group();
+			await page.waitForTimeout(650);
+			const [before, after] = await dump.finish();
+			expect(before).toContain("1b 5b 43");
+			expect(after).toBe("");
+		} finally {
+			await touch.lift();
+		}
 	});
 
 	test("the remaining actions send their terminal bytes from phone keys", async ({

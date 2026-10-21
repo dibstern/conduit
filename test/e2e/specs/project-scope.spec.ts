@@ -13,6 +13,7 @@ import {
 	mockWsRpc,
 	type RpcMockControl,
 	sendMockDaemonList,
+	sendMockProjects,
 } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
 
@@ -93,6 +94,7 @@ async function setupWithProjectManagement(
 				],
 			}),
 			ListDaemonSessions: async (params) => {
+				// Keep paging in flight so project switching exercises its cancellation race.
 				await new Promise((resolve) => setTimeout(resolve, 150));
 				const limit = Number(params["limit"] ?? Infinity);
 				const cursor = params["cursor"] as { id: string } | undefined;
@@ -127,8 +129,7 @@ async function setupWithProjectManagement(
 						projectSlug: "myapp",
 						sessionSlug: "sessionId" in params ? "myapp" : null,
 					};
-				// A real attach takes a round trip or two; an instant answer would
-				// hide anything that races it.
+				// Attach must overlap paging to expose socket-reconnect and cancellation races.
 				await new Promise((resolve) => setTimeout(resolve, 300));
 				return {
 					projectSlug: String(params["projectSlug"]),
@@ -175,31 +176,18 @@ async function setupWithProjectManagement(
 				};
 			},
 		},
-		// Each shell subscription carries only its own project's rows, as the
-		// daemon's does; one broadcast stream would leak the next project's rows
-		// into the previous project's still-open feed.
 		streams: {
-			SubscribeShell: (params) => [
+			SubscribeShell: () => [
 				{
 					_tag: "snapshot",
 					sequence: 1,
-					rows: sessions
-						.filter((session) => session.projectSlug === params["projectSlug"])
-						.map((session) => ({ accountId: null, ...session })),
+					rows: sessions.map((session) => ({ accountId: null, ...session })),
 				},
 				{ _tag: "synchronized" },
 			],
 		},
 	});
-	rpc.setShellRows(
-		sessions.filter(
-			(session) =>
-				session.projectSlug ===
-				(new URL(path, baseURL ?? "http://localhost:4173").searchParams.get(
-					"p",
-				) ?? "myapp"),
-		),
-	);
+	rpc.setShellRows(sessions);
 	const control = await mockRelayWebSocket(page, {
 		initMessages: singleInstanceInitMessages.filter(
 			(message) => message.type !== "shell_snapshot",
@@ -323,7 +311,45 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 		baseURL,
 		"/new?project=myapp",
 	);
-	// A draft sends only once it holds a model pick: Claude's default.
+	// 7a8e7be7 requires a configured default account; 2ba9fc5b requires a
+	// held catalog pick before sending, independently of folder support.
+	control.rpc.setStubs({
+		GetModels: () => ({
+			projectSlug: "myapp",
+			defaultOpenCodeInstanceId: "opencode",
+			providers: ["claude", "anthropic"].map((provider) => ({
+				id: provider,
+				name: provider,
+				configured: true,
+				models: [{ id: "sonnet", name: "Sonnet", provider }],
+			})),
+		}),
+	});
+	control.rpc.setProjectSetting({
+		_tag: "defaultModel",
+		variant: "",
+	});
+	control.rpc.setProjectSetting({
+		_tag: "harnessDefaults",
+		claude: {
+			status: "ok",
+			pick: {
+				providerId: "claude",
+				modelId: "sonnet",
+				effort: "",
+				contextWindow: "",
+			},
+		},
+		opencode: {
+			status: "ok",
+			pick: {
+				providerId: "anthropic",
+				modelId: "sonnet",
+				effort: "",
+				contextWindow: "",
+			},
+		},
+	});
 	control.rpc.setProjectSetting({
 		_tag: "providerModels",
 		accountId: "claude",
@@ -332,34 +358,14 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 				id: "claude",
 				name: "Claude",
 				configured: true,
-				models: [
-					{ id: "claude-sonnet-4-5", name: "Sonnet 4.5", provider: "claude" },
-				],
+				models: [{ id: "sonnet", name: "Sonnet", provider: "claude" }],
 			},
 		],
-	});
-	control.rpc.setProjectSetting({
-		_tag: "harnessDefaults",
-		claude: {
-			status: "ok",
-			pick: {
-				providerId: "claude",
-				modelId: "claude-sonnet-4-5",
-				effort: "",
-				contextWindow: "",
-			},
-		},
-	});
-	control.rpc.setProjectSetting({
-		_tag: "defaultModel",
-		model: "claude-sonnet-4-5",
-		provider: "claude",
-		variant: "",
 	});
 	sendMockDaemonList(page, "SubscribeInstances", {
 		instances: capabilityInstances,
 	});
-	sendMockDaemonList(page, "SubscribeProjects", {
+	sendMockProjects(page, {
 		projects: baseProjects().map((project) =>
 			project.slug === "myapp"
 				? { ...project, folders: ["/src/myapp", "/src/server"] }
@@ -424,8 +430,9 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 		instances: capabilityInstances.map(
 			({ capabilities: _capabilities, ...instance }) => instance,
 		),
+		providerCapabilities: {},
 	});
-	sendMockDaemonList(page, "SubscribeProjects", {
+	sendMockProjects(page, {
 		projects: baseProjects().map((project) =>
 			project.slug === "myapp"
 				? { ...project, folders: ["/src/myapp", "/src/server"] }
@@ -439,8 +446,11 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 		page.getByRole("button", { name: "Send", exact: true }),
 	).toBeEnabled();
 	await startChip.click();
-	await expect(startMenu).toContainText("New worktree");
-	await expect(startMenu).not.toContainText("Not supported by");
+	await expect(
+		startMenu.getByRole("menuitem", {
+			name: "New worktree Requires a Git folder",
+		}),
+	).toHaveAttribute("aria-disabled", "true");
 	await page.keyboard.press("Escape");
 	await page.screenshot({
 		path: testInfo.outputPath("unknown-provider-start.png"),
@@ -498,11 +508,9 @@ test("direct project URL scopes the list and another URL switches projects", asy
 	baseURL,
 }) => {
 	const control = await setupWithProjectManagement(page, baseURL, "/?p=mylib");
-	await control.rpc.waitForRequest(
-		(request) =>
-			request.tag === "ListDaemonSessions" &&
-			request.payload["scope"] === "mylib",
-	);
+	expect(
+		control.rpc.getRequests().filter(({ tag }) => tag === "ListDaemonSessions"),
+	).toHaveLength(0);
 	await expect(page.getByTestId("session-scope-chip")).toHaveText("mylib");
 	const sessions = page.locator("#session-list .session-item");
 	await expect(sessions).toHaveCount(1);
@@ -526,11 +534,9 @@ test("direct project URL scopes the list and another URL switches projects", asy
 	]);
 	await page.goto(`${baseURL ?? "http://localhost:4173"}/?p=myapp`);
 	await waitForChatReady(page);
-	await control.rpc.waitForRequest(
-		(request) =>
-			request.tag === "ListDaemonSessions" &&
-			request.payload["scope"] === "myapp",
-	);
+	expect(
+		control.rpc.getRequests().filter(({ tag }) => tag === "ListDaemonSessions"),
+	).toHaveLength(0);
 	await expect(page.getByTestId("session-scope-chip")).toHaveText("myapp");
 	await expect(sessions).toHaveCount(1);
 	await expect(sessions.first()).toContainText("Test session");
@@ -632,6 +638,7 @@ test("switching projects while the list pages does not fail the switch", async (
 		many,
 	);
 	for (const target of ["mylib", "myapp", "mylib"]) {
+		const requestsBefore = control.rpc.getRequests().length;
 		await page.getByTestId("session-scope-chip").click();
 		await page
 			.getByRole("menuitemradio", { name: new RegExp(`^${target}\\b`) })
@@ -642,7 +649,23 @@ test("switching projects while the list pages does not fail the switch", async (
 				request.payload["projectSlug"] === target,
 		);
 		await expect(page.getByTestId("session-scope-chip")).toHaveText(target);
-		await page.waitForTimeout(800);
+		await expect
+			.poll(() =>
+				control.rpc
+					.getRequests()
+					.slice(requestsBefore)
+					.some(
+						(request) =>
+							request.tag === "GetFileTree" &&
+							request.payload["projectSlug"] === target,
+					),
+			)
+			.toBe(true);
+		await expect(
+			page.locator("#session-list .session-item").filter({
+				hasText: target === "myapp" ? "Test session" : "Library session",
+			}),
+		).toBeVisible();
 	}
 	await expect(page.getByText("Failed to switch projects")).toHaveCount(0);
 });
@@ -652,6 +675,7 @@ test("switching projects attaches once and loads the new project's file tree", a
 	baseURL,
 }) => {
 	const control = await setupWithProjectManagement(page, baseURL);
+	const connectionsBefore = control.rpc.connections;
 	await page.getByTestId("session-scope-chip").click();
 	await scopeRow(page, "mylib").click();
 	await control.rpc.waitForRequest(
@@ -659,9 +683,12 @@ test("switching projects attaches once and loads the new project's file tree", a
 			request.tag === "GetFileTree" &&
 			request.payload["projectSlug"] === "mylib",
 	);
-	// A switch that reopens the sockets fails the in-flight attach and retries it
-	// on every reconnect, so give a loop time to show.
-	await page.waitForTimeout(1000);
+	await expect(page.getByTestId("session-scope-chip")).toHaveText("mylib");
+	const sessions = page.locator("#session-list .session-item");
+	await expect(sessions).toHaveCount(1);
+	await expect(sessions).toContainText("Library session");
+	await expect(page.locator(".connect-overlay")).toBeHidden();
+	expect(control.rpc.connections).toBe(connectionsBefore);
 	const attaches = control.rpc
 		.getRequests()
 		.filter(
@@ -708,8 +735,8 @@ test.describe("Project Delete", () => {
 		await page.click("#confirm-modal button:has-text('Cancel')");
 		await expect(page.locator("#confirm-modal")).not.toBeVisible();
 
-		// No RemoveProject RPC may arrive during this observation window.
-		await page.waitForTimeout(300);
+		await page.getByTestId("session-scope-chip").click();
+		await expect(scopeRow(page, "mylib")).toBeVisible();
 		const removeRequests = control.rpc
 			.getRequests()
 			.filter((request) => request.tag === "RemoveProject");
@@ -723,8 +750,11 @@ test.describe("Project Delete", () => {
 		await setupWithProjectManagement(page, baseURL);
 		await page.getByTestId("session-scope-chip").click();
 		await expect(scopeRow(page, "myapp")).toBeVisible();
-		await scopeRow(page, "mylib").focus();
-		await page.keyboard.press("Delete");
+		await expect(
+			page.getByRole("menu", { name: "Project scope" }),
+		).toBeFocused();
+		await scopeRow(page, "mylib").press("Delete");
+		await expect(page.locator("#confirm-modal")).toBeVisible();
 		await page.click("#confirm-modal button:has-text('Remove')");
 		await expect(page.locator("#confirm-modal")).not.toBeVisible();
 

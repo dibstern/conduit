@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { afterAll, describe, expect, it } from "vitest";
-import { AddInstance } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 interface TraceRow {
@@ -140,9 +140,11 @@ describe("Cursor tool traces through the built daemon and detached runner", () =
 			runnerStartupTimeoutMs: TIMEOUT,
 			serviceEnvironment: { CONDUIT_CURSOR_SDK_TRACE: tracePath },
 		});
-		const added = await harness.requestRpc(
-			new AddInstance({ name: "Cursor tool replay", driver: "cursor" }),
-		);
+		const added = await harness.requestRpc({
+			_tag: "AddInstance",
+			name: "Cursor tool replay",
+			driver: "cursor",
+		});
 		if (!added.addedInstanceId) throw new Error("Missing Cursor account");
 		const browser = await harness.connect();
 		const sessionId = await browser.createSession(

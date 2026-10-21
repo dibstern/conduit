@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { Effect, ManagedRuntime } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it } from "vitest";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
@@ -24,7 +24,7 @@ const projectionTables = [
 ] as const;
 
 function seedLegacyDatabase(filename: string): void {
-	const db = new Database(filename);
+	const db = new DatabaseSync(filename);
 	try {
 		seedLegacyEventStore(db, 9);
 		db.prepare(
@@ -34,55 +34,55 @@ function seedLegacyDatabase(filename: string): void {
 			const turnId = `${sessionId}-turn`;
 			const messageId = `${sessionId}-message`;
 			db.prepare(`INSERT INTO sessions (id, provider, parent_id, created_at, updated_at)
-				 VALUES (?, 'opencode', ?, 100, 100)`).run([
+				 VALUES (?, 'opencode', ?, 100, 100)`).run(
 				sessionId,
 				sessionId === childId ? parentId : null,
-			]);
+			);
 			db.prepare(
 				"INSERT INTO turns (id, session_id, requested_at) VALUES (?, ?, 100)",
-			).run([turnId, sessionId]);
+			).run(turnId, sessionId);
 			db.prepare(`INSERT INTO messages (id, session_id, turn_id, role, text, created_at, updated_at)
-				 VALUES (?, ?, ?, 'user', 'hello', 100, 100)`).run([
+				 VALUES (?, ?, ?, 'user', 'hello', 100, 100)`).run(
 				messageId,
 				sessionId,
 				turnId,
-			]);
+			);
 			db.prepare(`INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at)
-				 VALUES (?, ?, 'text', 'hello', 0, 100, 100)`).run([
+				 VALUES (?, ?, 'text', 'hello', 0, 100, 100)`).run(
 				`${sessionId}-part`,
 				messageId,
-			]);
+			);
 			db.prepare(`INSERT INTO pending_approvals (id, session_id, turn_id, type, created_at)
-				 VALUES (?, ?, ?, 'permission', 100)`).run([
+				 VALUES (?, ?, ?, 'permission', 100)`).run(
 				`${sessionId}-approval`,
 				sessionId,
 				turnId,
-			]);
+			);
 			db.prepare(`INSERT INTO activities (id, session_id, turn_id, tone, kind, summary, created_at)
-				 VALUES (?, ?, ?, 'info', 'tool', 'Running tool', 100)`).run([
+				 VALUES (?, ?, ?, 'info', 'tool', 'Running tool', 100)`).run(
 				`${sessionId}-activity`,
 				sessionId,
 				turnId,
-			]);
+			);
 			db.prepare(`INSERT INTO session_providers (id, session_id, provider, activated_at)
-				 VALUES (?, ?, 'opencode', 100)`).run([
+				 VALUES (?, ?, 'opencode', 100)`).run(
 				`${sessionId}-provider`,
 				sessionId,
-			]);
+			);
 			db.prepare(`INSERT INTO tool_content (tool_id, session_id, content, created_at)
-				 VALUES (?, ?, 'tool output', 100)`).run([
+				 VALUES (?, ?, 'tool output', 100)`).run(
 				`${sessionId}-tool`,
 				sessionId,
-			]);
+			);
 			db.prepare(
 				"INSERT INTO provider_state (session_id, key, value) VALUES (?, 'state', '{}')",
-			).run([sessionId]);
+			).run(sessionId);
 			db.prepare(`INSERT INTO events (event_id, session_id, stream_version, type, data, metadata, provider, created_at)
-				 VALUES (?, ?, 0, 'session.status', ?, '{}', 'opencode', 100)`).run([
+				 VALUES (?, ?, 0, 'session.status', ?, '{}', 'opencode', 100)`).run(
 				`${sessionId}-event`,
 				sessionId,
 				JSON.stringify({ sessionId, status: "idle" }),
-			]);
+			);
 		}
 	} finally {
 		db.close();

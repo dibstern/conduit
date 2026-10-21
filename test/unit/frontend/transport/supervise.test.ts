@@ -4,20 +4,19 @@
 // only what a consumer sees: the envelopes, the statuses, and when the
 // subscription is asked for again.
 
-import type { Rpc } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import {
-	Chunk,
 	Duration,
 	Effect,
 	Fiber,
 	Layer,
 	Logger,
-	LogLevel,
+	type LogLevel,
 	Queue,
 	Stream,
-	TestClock,
 } from "effect";
+import type { Rpc } from "effect/rpc";
+import { TestClock } from "effect/testing";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import {
 	type SubscribeShell,
@@ -93,23 +92,18 @@ const superviseShell = Effect.gen(function* () {
 });
 
 /** Lets every runnable fiber settle before asserting that nothing happened. */
-const settle = Effect.repeatN(Effect.yieldNow(), 50);
-
-/** Waits until the supervisor is parked on its backoff timer. */
-const untilWaiting = Effect.gen(function* () {
-	while (Chunk.isEmpty(yield* TestClock.sleeps())) yield* Effect.yieldNow();
-});
+const settle = Effect.repeat(Effect.yieldNow, { times: 50 });
 
 /**
  * Asserts the feed is asked for again exactly `millis` after it went down:
  * not a moment sooner, and without needing anything but the clock.
  */
 const restartsAfter = (
-	feed: Effect.Effect.Success<typeof superviseShell>,
+	feed: Effect.Success<typeof superviseShell>,
 	millis: number,
 ) =>
 	Effect.gen(function* () {
-		yield* untilWaiting;
+		yield* settle;
 		yield* TestClock.adjust(Duration.millis(millis - 1));
 		yield* settle;
 		expect(yield* feed.pending).toBe(0);
@@ -132,7 +126,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("supervise", () => {
-	it.scoped(
+	it.effect(
 		"reports cold, then catching up, then live as the feed arrives",
 		() =>
 			Effect.gen(function* () {
@@ -158,7 +152,7 @@ describe("supervise", () => {
 				expect(feed.received).toEqual([snapshot, synchronized]);
 			}),
 	);
-	it.scoped(
+	it.effect(
 		"restarts after a server error on a 1s x1.5 backoff capped at 10s",
 		() =>
 			Effect.gen(function* () {
@@ -183,7 +177,7 @@ describe("supervise", () => {
 				expect(feed.received).toEqual([snapshot, synchronized]);
 			}),
 	);
-	it.scoped("starts the backoff over once the feed has caught up again", () =>
+	it.effect("starts the backoff over once the feed has caught up again", () =>
 		Effect.gen(function* () {
 			const feed = yield* superviseShell;
 			yield* Effect.flatMap(feed.request, (served) => served.fail("busy"));
@@ -200,7 +194,7 @@ describe("supervise", () => {
 		}),
 	);
 
-	it.scoped("treats the feed ending as a failure and restarts it", () =>
+	it.effect("treats the feed ending as a failure and restarts it", () =>
 		Effect.gen(function* () {
 			const feed = yield* superviseShell;
 			const served = yield* feed.request;
@@ -230,22 +224,22 @@ describe("supervise", () => {
 		}),
 	);
 
-	it.scoped("restarts after a defect, logging it as an error", () =>
+	it.effect("restarts after a defect, logging it as an error", () =>
 		Effect.gen(function* () {
 			const logged: LogLevel.LogLevel[] = [];
 			const feed = yield* superviseShell.pipe(
 				Effect.provide(
-					Logger.replace(
-						Logger.defaultLogger,
+					Logger.layer([
 						Logger.make(({ logLevel }) => {
 							logged.push(logLevel);
 						}),
-					),
+					]),
+					{ local: true },
 				),
 			);
 			yield* Effect.flatMap(feed.request, (served) => served.die("boom"));
 			yield* restartsAfter(feed, 1000);
-			expect(logged).toEqual([LogLevel.Error]);
+			expect(logged).toEqual(["Error"]);
 			expect(feed.statuses.at(-1)).toMatchObject({ _tag: "failing" });
 		}),
 	);
@@ -264,22 +258,22 @@ describe("supervise", () => {
 	};
 
 	for (const [trigger, wake] of Object.entries(wakeUps)) {
-		it.scoped(`restarts at once on ${trigger}`, () =>
+		it.effect(`restarts at once on ${trigger}`, () =>
 			Effect.gen(function* () {
 				const feed = yield* superviseShell;
 				yield* Effect.flatMap(feed.request, (served) => served.fail("busy"));
-				yield* untilWaiting;
+				yield* settle;
 				wake();
 				yield* feed.request;
 			}),
 		);
 	}
 
-	it.scoped("keeps waiting through a tab hiding or a fresh page load", () =>
+	it.effect("keeps waiting through a tab hiding or a fresh page load", () =>
 		Effect.gen(function* () {
 			const feed = yield* superviseShell;
 			yield* Effect.flatMap(feed.request, (served) => served.fail("busy"));
-			yield* untilWaiting;
+			yield* settle;
 			document.dispatchEvent(new Event("visibilitychange"));
 			window.dispatchEvent(
 				Object.assign(new Event("pageshow"), { persisted: false }),
@@ -289,7 +283,7 @@ describe("supervise", () => {
 		}),
 	);
 
-	it.scoped("stops for good when the consumer lets go", () =>
+	it.effect("stops for good when the consumer lets go", () =>
 		Effect.gen(function* () {
 			const feed = yield* superviseShell;
 			const served = yield* feed.request;
@@ -303,11 +297,11 @@ describe("supervise", () => {
 		}),
 	);
 
-	it.scoped("stops for good when the consumer lets go mid-backoff", () =>
+	it.effect("stops for good when the consumer lets go mid-backoff", () =>
 		Effect.gen(function* () {
 			const feed = yield* superviseShell;
 			yield* Effect.flatMap(feed.request, (served) => served.fail("busy"));
-			yield* untilWaiting;
+			yield* settle;
 			yield* Fiber.interrupt(feed.consumer);
 			yield* TestClock.adjust(Duration.minutes(1));
 			retryFeedsNow();

@@ -13,6 +13,7 @@
 // sending. Every other ⌘ combination goes to the program as Meta.
 
 import type { Terminal } from "@xterm/xterm";
+import { on } from "svelte/events";
 import {
 	DEFAULT_TERMINAL_KEYS,
 	TERMINAL_MODIFIERS,
@@ -442,15 +443,19 @@ export function createTerminalKeys({
 			terminal.element?.addEventListener("paste", onPaste, true);
 			const onFocus = (event: FocusEvent) =>
 				(inputFocused = event.type === "focus");
-			terminal.textarea?.addEventListener("focus", onFocus);
-			terminal.textarea?.addEventListener("blur", onFocus);
+			// Removing a focused tab can dispatch blur during a Svelte render.
+			// Svelte's listener runs the state update outside that render context.
+			const stopFocus =
+				terminal.textarea && on(terminal.textarea, "focus", onFocus);
+			const stopBlur =
+				terminal.textarea && on(terminal.textarea, "blur", onFocus);
 			return () => {
 				stopOptions();
 				data.dispose();
 				selection.dispose();
 				terminal.element?.removeEventListener("paste", onPaste, true);
-				terminal.textarea?.removeEventListener("focus", onFocus);
-				terminal.textarea?.removeEventListener("blur", onFocus);
+				stopFocus?.();
+				stopBlur?.();
 				if (terminal.textarea === document.activeElement) inputFocused = false;
 				if (terminals.get(ptyId) === terminal) terminals.delete(ptyId);
 			};

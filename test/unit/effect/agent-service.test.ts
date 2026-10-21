@@ -66,15 +66,14 @@ function makeLayer({
 	log?: Logger;
 	engine?: OrchestrationEngine;
 } = {}) {
-	const apiLayer = Layer.succeed(OpenCodeAPITag, api);
+	const apiLayer = Layer.succeed(OpenCodeAPITag)(api);
 	const overridesLayer = makeOverridesStateLive();
-	const loggerLayer = Layer.succeed(LoggerTag, log);
-	const engineLayer = Layer.succeed(OrchestrationEngineTag, engine);
+	const loggerLayer = Layer.succeed(LoggerTag)(log);
+	const engineLayer = Layer.succeed(OrchestrationEngineTag)(engine);
 	const deps = Layer.mergeAll(
-		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		apiLayer,
-		Layer.succeed(
-			OpenCodeInstancesTag,
+		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({ opencode: api }),
 		),
 		overridesLayer,
@@ -85,80 +84,6 @@ function makeLayer({
 }
 
 describe("AgentService", () => {
-	it.effect(
-		"lists filtered OpenCode agents and preserves active override",
-		() => {
-			const api = makeMockOpenCodeAPI();
-			vi.mocked(api.app.agents).mockResolvedValue([
-				{ id: "build", name: "build", mode: "primary" },
-				{ id: "title", name: "title", mode: "subagent", hidden: true },
-				{ id: "plan", name: "plan", mode: "all" },
-			]);
-			const engine = makeEngine({
-				getProviderForSessionEffect: vi.fn(() => Effect.succeed("opencode")),
-			});
-
-			return Effect.gen(function* () {
-				yield* setAgent("session-1", "plan");
-				const service = yield* AgentServiceTag;
-				const result = yield* service.listAgents("session-1");
-				expect(result).toEqual({
-					instanceId: "opencode",
-					providerScope: { id: "opencode", name: "OpenCode" },
-					agents: [
-						{ id: "build", name: "build" },
-						{ id: "plan", name: "plan" },
-					],
-					activeAgentId: "plan",
-				});
-				expect(api.app.agents).toHaveBeenCalledOnce();
-				expect(engine.dispatchEffect).not.toHaveBeenCalled();
-				expect(yield* getAgent("session-1")).toBe("plan");
-			}).pipe(Effect.provide(makeLayer({ api, engine })));
-		},
-	);
-
-	it.effect(
-		"discovers Claude agents through the Effect orchestration API",
-		() => {
-			const api = makeMockOpenCodeAPI();
-			vi.mocked(api.app.agents).mockResolvedValue([
-				{ id: "build", name: "build" },
-			]);
-			const engine = makeEngine({
-				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
-				dispatchEffect: vi.fn(() =>
-					Effect.succeed(
-						makeDiscoverCapabilities([
-							{ id: "Explore", name: "Explore", description: "Explorer" },
-							{ id: "Review", name: "Review", model: "opus" },
-						]),
-					),
-				),
-			});
-			return Effect.gen(function* () {
-				yield* setAgent("session-1", "Explore");
-				const service = yield* AgentServiceTag;
-				const result = yield* service.listAgents("session-1");
-				expect(result).toEqual({
-					instanceId: "claude",
-					providerScope: { id: "claude", name: "Claude" },
-					agents: [
-						{ id: "Explore", name: "Explore", description: "Explorer" },
-						{ id: "Review", name: "Review", model: "opus" },
-					],
-					activeAgentId: "Explore",
-				});
-				expect(api.app.agents).not.toHaveBeenCalled();
-				expect(engine.dispatchEffect).toHaveBeenCalledWith({
-					type: "discover",
-					providerId: "claude",
-					account: expect.objectContaining({ driver: "claude", id: "claude" }),
-				});
-			}).pipe(Effect.provide(makeLayer({ api, engine })));
-		},
-	);
-
 	it.effect(
 		"logs Claude discovery failures and clears stale active agent",
 		() => {

@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 /** The sticky modifiers, in the order the bar shows them. */
 export const TERMINAL_MODIFIERS = ["ctrl", "opt", "cmd", "shift"] as const;
@@ -23,42 +23,66 @@ export const TERMINAL_KEY_ACTIONS = [
 export type TerminalKeyAction = (typeof TERMINAL_KEY_ACTIONS)[number];
 
 const RowKey = Schema.Struct({
-	tap: Schema.Literal(...TERMINAL_KEY_ACTIONS),
-	up: Schema.Literal(...TERMINAL_KEY_ACTIONS),
+	tap: Schema.Literals([...TERMINAL_KEY_ACTIONS]),
+	up: Schema.Literals([...TERMINAL_KEY_ACTIONS]),
 });
 const TerminalKeysRow = Schema.Struct({
-	show: Schema.optionalWith(Schema.Boolean, { default: () => true }),
-	hints: Schema.optionalWith(Schema.Boolean, { default: () => true }),
-	keys: Schema.optionalWith(Schema.Tuple(RowKey, RowKey, RowKey, RowKey), {
-		default: () => [
-			{ tap: "paste", up: "copy" },
-			{ tap: "esc", up: "tab" },
-			{ tap: "ctrl", up: "cmd" },
-			{ tap: "opt", up: "shift" },
-		],
-	}),
+	show: Schema.Boolean.pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => true)),
+	),
+	hints: Schema.Boolean.pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => true)),
+	),
+	keys: Schema.Tuple([RowKey, RowKey, RowKey, RowKey]).pipe(
+		Schema.withDecodingDefaultType(
+			Effect.sync(() => [
+				{ tap: "paste", up: "copy" },
+				{ tap: "esc", up: "tab" },
+				{ tap: "ctrl", up: "cmd" },
+				{ tap: "opt", up: "shift" },
+			]),
+		),
+	),
 });
 
 const TerminalKeysBar = Schema.Struct({
-	show: Schema.optionalWith(Schema.Boolean, { default: () => true }),
-	paste: Schema.optionalWith(Schema.Boolean, { default: () => true }),
-	escTab: Schema.optionalWith(Schema.Boolean, { default: () => true }),
-	modifiers: Schema.optionalWith(Schema.Boolean, { default: () => true }),
-	arrows: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+	show: Schema.Boolean.pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => true)),
+	),
+	paste: Schema.Boolean.pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => true)),
+	),
+	escTab: Schema.Boolean.pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => true)),
+	),
+	modifiers: Schema.Boolean.pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => true)),
+	),
+	arrows: Schema.Boolean.pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => true)),
+	),
 });
 
 export const TerminalKeysSetting = Schema.Struct({
-	bar: Schema.optionalWith(TerminalKeysBar, {
-		default: () => Schema.decodeSync(TerminalKeysBar)({}),
-	}),
-	row: Schema.optionalWith(TerminalKeysRow, {
-		default: () => Schema.decodeSync(TerminalKeysRow)({}),
-	}),
-	optionKey: Schema.optionalWith(Schema.Literal("characters", "meta"), {
-		default: () => "characters" as const,
-	}),
-	tapTwiceToLock: Schema.optionalWith(Schema.Boolean, { default: () => true }),
-	pasteAsOneBlock: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+	bar: TerminalKeysBar.pipe(
+		Schema.withDecodingDefaultType(
+			Effect.sync(() => Schema.decodeSync(TerminalKeysBar)({})),
+		),
+	),
+	row: TerminalKeysRow.pipe(
+		Schema.withDecodingDefaultType(
+			Effect.sync(() => Schema.decodeSync(TerminalKeysRow)({})),
+		),
+	),
+	optionKey: Schema.Literals(["characters", "meta"]).pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => "characters" as const)),
+	),
+	tapTwiceToLock: Schema.Boolean.pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => true)),
+	),
+	pasteAsOneBlock: Schema.Boolean.pipe(
+		Schema.withDecodingDefaultType(Effect.sync(() => true)),
+	),
 });
 export type TerminalKeysSetting = typeof TerminalKeysSetting.Type;
 

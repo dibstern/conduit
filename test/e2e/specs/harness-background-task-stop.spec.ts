@@ -359,7 +359,7 @@ test("a steering message survives Stop all and runs after the original result", 
 	const steps = recorder(page, harness, testInfo);
 	try {
 		const accepted = await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				sessionId,
 				originId: browser.originId,
 				inputId: randomUUID(),
@@ -496,8 +496,11 @@ test("Stop all works after the foreground result and leaves the same query usabl
 		release(harness, "task-stop-confirm-all");
 		await expect(page.getByTestId("background-tasks-row")).toBeHidden();
 		await expect(
+			page.getByRole("button", { name: /^\d+ background tasks?$/ }),
+		).toHaveCount(0);
+		await expect(
 			sidebarRow,
-			"Stop all ended the tasks but the sidebar still says monitoring",
+			"Stop all left the sidebar row monitoring",
 		).not.toHaveAttribute("aria-label", /^Monitoring/);
 		assertTurnUntouched(harness, queryId);
 		await steps.record("idle-tasks-confirmed-stopped");

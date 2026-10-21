@@ -1,7 +1,10 @@
 import type { Page, TestInfo } from "@playwright/test";
 import { Stream } from "effect";
 import { AccountUnroutable } from "../../../src/lib/contracts/limit-recovery.js";
-import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
+import {
+	DraftAlreadySent,
+	WsRpcError,
+} from "../../../src/lib/contracts/ws-rpc.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
 import { detailRowsOf } from "../../helpers/detail-rows.js";
 import type { StubTable } from "../../helpers/stub-ws-rpc.js";
@@ -56,12 +59,16 @@ async function openSession(
 		},
 	];
 	const rpc = await mockWsRpc(page, {
+		streams: {
+			SubscribeInputDraft: () => [{ _tag: "synchronized", text: draft }],
+		},
 		stubs: {
 			ResolveSession: () => ({ projectSlug }),
-			ViewSession: () => ({ ok: true, draft }),
+			ViewSession: () => ({ ok: true }),
 			InspectSessionWorktrees: () => ({
 				worktrees: [],
 				removeWorktrees: false,
+				onDelete: "ask",
 			}),
 			ListDaemonSessions: () => ({
 				sessions: rows,
@@ -303,60 +310,77 @@ test("Side Thread AccountUnroutable keeps the question in the composer", async (
 	await capture(page, testInfo, "side-thread-refusal-screen");
 });
 
-test("create AccountUnroutable keeps the new session draft", async ({
-	page,
-	harness,
-}, testInfo) => {
-	const models = {
-		projectSlug,
-		instanceId: "opencode",
-		defaultOpenCodeInstanceId: "opencode",
-		providers: [
-			{
-				id: "anthropic",
-				name: "Anthropic",
-				configured: true,
-				models: [
-					{ id: "test-model", name: "Test model", provider: "anthropic" },
-				],
+for (const failure of ["AccountUnroutable", "DraftAlreadySent"] as const)
+	test(`create ${failure} handles the draft refusal`, async ({
+		page,
+		harness,
+	}, testInfo) => {
+		const models = {
+			projectSlug,
+			instanceId: "opencode",
+			defaultOpenCodeInstanceId: "opencode",
+			providers: [
+				{
+					id: "anthropic",
+					name: "Anthropic",
+					configured: true,
+					models: [
+						{ id: "test-model", name: "Test model", provider: "anthropic" },
+					],
+				},
+			],
+			active: { model: "test-model", provider: "anthropic" },
+		};
+		const rpc = await openSession(page, harness.relayBaseUrl, {
+			CreateSession: ({ draftId }) => {
+				if (failure === "DraftAlreadySent")
+					throw new DraftAlreadySent({ draftId: draftId ?? "missing-draft" });
+				throw unroutable;
 			},
-		],
-		active: { model: "test-model", provider: "anthropic" },
-	};
-	const rpc = await openSession(page, harness.relayBaseUrl, {
-		CreateSession: () => {
-			throw unroutable;
-		},
-		GetModels: () => models,
-		SubscribeDraftModels: () => Stream.make(models),
+			GetModels: () => models,
+			SubscribeDraftModels: () => Stream.make(models),
+		});
+		rpc.setDaemonList("SubscribeInstances", {
+			instances: singleInstanceList["instances"],
+		});
+		rpc.setProjectSetting({
+			_tag: "defaultModel",
+			model: "test-model",
+			provider: "anthropic",
+			variant: "",
+		});
+		await page.locator("#new-session-btn").click();
+		await expect(page).toHaveURL(
+			new RegExp(`/draft/[^/?]+\\?(?:.*&)?project=${projectSlug}`),
+		);
+		await expect(page.locator("#model-display")).toContainText("Test model");
+		await page.locator("#input").fill(draft);
+		await page.locator("#send").click();
+		const create = await rpc.waitForRequest(
+			({ tag }) => tag === "CreateSession",
+		);
+		const toast = page.getByTestId("toast").filter({
+			hasText:
+				failure === "DraftAlreadySent"
+					? "This draft was already sent"
+					: "Failed to create session",
+		});
+		await expect(toast).toBeVisible();
+		if (failure === "AccountUnroutable")
+			await expect(toast).toContainText(unroutable.message);
+		await expect(page.locator("#input")).toHaveValue(
+			failure === "DraftAlreadySent" ? "" : draft,
+		);
+		await expect(page).toHaveURL(
+			new RegExp(`/draft/[^/?]+\\?(?:.*&)?project=${projectSlug}`),
+		);
+		await capture(page, testInfo, "create-refusal-screen");
+		if (failure === "DraftAlreadySent") {
+			rpc.promoteInputDraft(String(create.payload["draftId"]), target, draft);
+			await expect(page).toHaveURL(new RegExp(`/s/${target}$`));
+			await capture(page, testInfo, "create-refusal-followed-promotion");
+		}
 	});
-	rpc.setDaemonList("SubscribeInstances", {
-		instances: singleInstanceList["instances"],
-	});
-	rpc.setProjectSetting({
-		_tag: "defaultModel",
-		model: "test-model",
-		provider: "anthropic",
-		variant: "",
-	});
-	await page.locator("#new-session-btn").click();
-	await expect(page).toHaveURL(
-		new RegExp(`/new\\?(?:.*&)?project=${projectSlug}`),
-	);
-	await expect(page.locator("#model-display")).toContainText("Test model");
-	await page.locator("#input").fill(draft);
-	await page.locator("#send").click();
-	await rpc.waitForRequest(({ tag }) => tag === "CreateSession");
-	const toast = page
-		.getByTestId("toast")
-		.filter({ hasText: "Failed to create session" });
-	await expect(toast).toContainText(unroutable.message);
-	await expect(page.locator("#input")).toHaveValue(draft);
-	await expect(page).toHaveURL(
-		new RegExp(`/new\\?(?:.*&)?project=${projectSlug}`),
-	);
-	await capture(page, testInfo, "create-refusal-screen");
-});
 
 test("cut-off dismissal refusal keeps the tag visible with its server reason", async ({
 	page,
@@ -475,7 +499,9 @@ test("warm session resolution refusal shows its server reason and keeps the curr
 			.getRequests()
 			.filter(
 				({ tag, payload }) =>
-					payload["sessionId"] === missing &&
+					(payload["sessionId"] === missing ||
+						(payload["key"] as { session?: string } | undefined)?.session ===
+							missing) &&
 					[
 						"ViewSession",
 						"SubscribeSessionDetail",

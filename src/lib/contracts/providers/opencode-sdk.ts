@@ -15,7 +15,7 @@ import type {
 	SessionMessageResponse as SdkSessionMessageResponse,
 	SessionStatus as SdkSessionStatus,
 } from "@opencode-ai/sdk/v2/types";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 type AssertExtends<_A extends B, B> = true;
 type OptionalKeys<T> = {
@@ -42,7 +42,7 @@ const OpenCodeFileDiffSchema = Schema.Struct({
 	patch: Schema.optional(Schema.String),
 	additions: Schema.Number,
 	deletions: Schema.Number,
-	status: Schema.optional(Schema.Literal("added", "deleted", "modified")),
+	status: Schema.optional(Schema.Literals(["added", "deleted", "modified"])),
 });
 
 const OpenCodeSessionTimeSchema = Schema.Struct({
@@ -101,7 +101,7 @@ export const OpenCodeSessionDetailSchema = Schema.Struct({
 			Schema.Struct({
 				permission: Schema.String,
 				pattern: Schema.String,
-				action: Schema.Literal("allow", "deny", "ask"),
+				action: Schema.Literals(["allow", "deny", "ask"]),
 			}),
 		),
 	),
@@ -117,7 +117,7 @@ export const OpenCodeSessionDetailListResponseSchema = Schema.Array(
 	OpenCodeSessionDetailSchema,
 );
 
-export const OpenCodeSessionStatusSchema = Schema.Union(
+export const OpenCodeSessionStatusSchema = Schema.Union([
 	Schema.Struct({ type: Schema.Literal("idle") }),
 	Schema.Struct({ type: Schema.Literal("busy") }),
 	Schema.Struct({
@@ -126,17 +126,17 @@ export const OpenCodeSessionStatusSchema = Schema.Union(
 		message: Schema.String,
 		next: Schema.Number,
 	}),
-);
+]);
 
 export type OpenCodeSessionStatus = Schema.Schema.Type<
 	typeof OpenCodeSessionStatusSchema
 >;
 export type SessionStatus = OpenCodeSessionStatus;
 
-export const OpenCodeSessionStatusMapSchema = Schema.Record({
-	key: Schema.String,
-	value: OpenCodeSessionStatusSchema,
-});
+export const OpenCodeSessionStatusMapSchema = Schema.Record(
+	Schema.String,
+	OpenCodeSessionStatusSchema,
+);
 
 type _OpenCodeSdkSessionStatusCoversSchema = AssertExtends<
 	SdkSessionStatus,
@@ -164,7 +164,7 @@ export const OpenCodePtySchema = Schema.Struct({
 	command: Schema.String,
 	args: Schema.Array(Schema.String),
 	cwd: Schema.String,
-	status: Schema.Literal("running", "exited"),
+	status: Schema.Literals(["running", "exited"]),
 	pid: Schema.Number,
 });
 
@@ -186,7 +186,7 @@ export const OpenCodeFileNodeSchema = Schema.Struct({
 	name: Schema.String,
 	path: Schema.optional(Schema.String),
 	absolute: Schema.optional(Schema.String),
-	type: Schema.Literal("file", "directory"),
+	type: Schema.Literals(["file", "directory"]),
 	ignored: Schema.optional(Schema.Boolean),
 });
 
@@ -219,7 +219,7 @@ const OpenCodeFileContentPatchSchema = Schema.Struct({
 });
 
 export const OpenCodeFileContentSchema = Schema.Struct({
-	type: Schema.Literal("text", "binary"),
+	type: Schema.Literals(["text", "binary"]),
 	content: Schema.String,
 	diff: Schema.optional(Schema.String),
 	patch: Schema.optional(OpenCodeFileContentPatchSchema),
@@ -258,10 +258,10 @@ type _OpenCodeFindFilesCoversSdkFindFiles = AssertExtends<
 export const OpenCodeFindFilesArrayResponseSchema =
 	OpenCodeFindFilesResponseSchema;
 
-export const OpenCodeConfigResponseSchema = Schema.Record({
-	key: Schema.String,
-	value: Schema.Unknown,
-});
+export const OpenCodeConfigResponseSchema = Schema.Record(
+	Schema.String,
+	Schema.Unknown,
+);
 
 export type OpenCodeConfigResponse = Schema.Schema.Type<
 	typeof OpenCodeConfigResponseSchema
@@ -275,7 +275,7 @@ type _OpenCodeSdkConfigIsRecordResponse = AssertExtends<
 export const OpenCodeAgentSchema = Schema.Struct({
 	name: Schema.String,
 	description: Schema.optional(Schema.String),
-	mode: Schema.optional(Schema.Literal("subagent", "primary", "all")),
+	mode: Schema.optional(Schema.Literals(["subagent", "primary", "all"])),
 	builtIn: Schema.optional(Schema.Boolean),
 	native: Schema.optional(Schema.Boolean),
 	hidden: Schema.optional(Schema.Boolean),
@@ -291,12 +291,8 @@ export const OpenCodeAgentSchema = Schema.Struct({
 	),
 	variant: Schema.optional(Schema.NullOr(Schema.String)),
 	prompt: Schema.optional(Schema.String),
-	tools: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.Boolean }),
-	),
-	options: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-	),
+	tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
+	options: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
 	maxSteps: Schema.optional(Schema.Number),
 	steps: Schema.optional(Schema.Number),
 });
@@ -310,7 +306,7 @@ export const OpenCodeCommandSchema = Schema.Struct({
 	description: Schema.optional(Schema.String),
 	agent: Schema.optional(Schema.String),
 	model: Schema.optional(Schema.String),
-	source: Schema.optional(Schema.Literal("command", "mcp", "skill")),
+	source: Schema.optional(Schema.Literals(["command", "mcp", "skill"])),
 	template: Schema.String,
 	subtask: Schema.optional(Schema.Boolean),
 });
@@ -361,38 +357,41 @@ export const OpenCodeProjectListResponseSchema = Schema.Array(
 );
 export const OpenCodeCurrentProjectResponseSchema = OpenCodeProjectSchema;
 
-const OpenCodeOpaquePropertiesSchema = Schema.Record({
-	key: Schema.String,
-	value: Schema.Unknown,
-});
+const OpenCodeOpaquePropertiesSchema = Schema.Record(
+	Schema.String,
+	Schema.Unknown,
+);
 
-const OpenCodeProviderModelSchema = Schema.Struct({
-	id: Schema.String,
-	name: Schema.String,
-	limit: Schema.Struct({
-		context: Schema.Number,
-		output: Schema.Number,
-	}),
-	variants: Schema.optional(
-		Schema.Record({
-			key: Schema.String,
-			value: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+const OpenCodeProviderModelSchema = Schema.StructWithRest(
+	Schema.Struct({
+		id: Schema.String,
+		name: Schema.String,
+		limit: Schema.Struct({
+			context: Schema.Number,
+			output: Schema.Number,
 		}),
-	),
-}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema));
-
-const OpenCodeProviderListEntrySchema = Schema.Struct({
-	name: Schema.String,
-	id: Schema.String,
-	models: Schema.Record({
-		key: Schema.String,
-		value: OpenCodeProviderModelSchema,
+		variants: Schema.optional(
+			Schema.Record(
+				Schema.String,
+				Schema.Record(Schema.String, Schema.Unknown),
+			),
+		),
 	}),
-}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema));
+	[OpenCodeOpaquePropertiesSchema],
+);
+
+const OpenCodeProviderListEntrySchema = Schema.StructWithRest(
+	Schema.Struct({
+		name: Schema.String,
+		id: Schema.String,
+		models: Schema.Record(Schema.String, OpenCodeProviderModelSchema),
+	}),
+	[OpenCodeOpaquePropertiesSchema],
+);
 
 export const OpenCodeProviderListResponseSchema = Schema.Struct({
 	all: Schema.Array(OpenCodeProviderListEntrySchema),
-	default: Schema.Record({ key: Schema.String, value: Schema.String }),
+	default: Schema.Record(Schema.String, Schema.String),
 	connected: Schema.Array(Schema.String),
 });
 // SDK 1.17.18 also declares provider api/env/npm and model release_date,
@@ -423,7 +422,7 @@ const OpenCodeUnknownErrorSchema = Schema.Struct({
 
 const OpenCodeMessageOutputLengthErrorSchema = Schema.Struct({
 	name: Schema.Literal("MessageOutputLengthError"),
-	data: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+	data: Schema.Record(Schema.String, Schema.Unknown),
 });
 
 const OpenCodeMessageAbortedErrorSchema = Schema.Struct({
@@ -438,13 +437,13 @@ const OpenCodeApiErrorSchema = Schema.Struct({
 		statusCode: Schema.optional(Schema.Number),
 		isRetryable: Schema.Boolean,
 		responseHeaders: Schema.optional(
-			Schema.Record({ key: Schema.String, value: Schema.String }),
+			Schema.Record(Schema.String, Schema.String),
 		),
 		responseBody: Schema.optional(Schema.String),
 	}),
 });
 
-const OpenCodeMessageErrorSchema = Schema.Union(
+const OpenCodeMessageErrorSchema = Schema.Union([
 	OpenCodeProviderAuthErrorSchema,
 	OpenCodeUnknownErrorSchema,
 	OpenCodeMessageOutputLengthErrorSchema,
@@ -465,7 +464,7 @@ const OpenCodeMessageErrorSchema = Schema.Union(
 		name: Schema.Literal("ContentFilterError"),
 		data: Schema.Struct({ message: Schema.String }),
 	}),
-);
+]);
 
 const OpenCodeTokensSchema = Schema.Struct({
 	input: Schema.Number,
@@ -492,9 +491,7 @@ const OpenCodeUserMessageSchema = Schema.Struct({
 	agent: Schema.String,
 	model: OpenCodeModelRefSchema,
 	system: Schema.optional(Schema.String),
-	tools: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.Boolean }),
-	),
+	tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
 });
 
 const OpenCodeAssistantMessageSchema = Schema.Struct({
@@ -520,10 +517,10 @@ const OpenCodeAssistantMessageSchema = Schema.Struct({
 	finish: Schema.optional(Schema.String),
 });
 
-export const OpenCodeMessageSchema = Schema.Union(
+export const OpenCodeMessageSchema = Schema.Union([
 	OpenCodeUserMessageSchema,
 	OpenCodeAssistantMessageSchema,
-);
+]);
 
 export type OpenCodeMessage = Schema.Schema.Type<typeof OpenCodeMessageSchema>;
 
@@ -537,11 +534,12 @@ type _OpenCodeMessageCoversSdkMessage = AssertExtends<
 	| Omit<Extract<SdkMessage, { role: "assistant" }>, "agent">
 >;
 
-export const OpenCodePartSchema = Schema.Struct({
-	id: Schema.String,
-	type: Schema.String,
-}).pipe(
-	Schema.extend(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+export const OpenCodePartSchema = Schema.StructWithRest(
+	Schema.Struct({
+		id: Schema.String,
+		type: Schema.String,
+	}),
+	[Schema.Record(Schema.String, Schema.Unknown)],
 );
 
 export type OpenCodePart = Schema.Schema.Type<typeof OpenCodePartSchema>;
@@ -612,8 +610,9 @@ type _OpenCodeSdkContainsConsumedEventTypes = AssertExtends<
 	OpenCodeSdkEventType
 >;
 
-const OpenCodeEventBasePropertiesSchema = Schema.Struct({}).pipe(
-	Schema.extend(OpenCodeOpaquePropertiesSchema),
+const OpenCodeEventBasePropertiesSchema = Schema.StructWithRest(
+	Schema.Struct({}),
+	[OpenCodeOpaquePropertiesSchema],
 );
 
 const OpenCodeMessageCreatedEventSchema = Schema.Struct({
@@ -623,102 +622,137 @@ const OpenCodeMessageCreatedEventSchema = Schema.Struct({
 
 const OpenCodePartDeltaEventSchema = Schema.Struct({
 	type: Schema.Literal("message.part.delta"),
-	properties: Schema.Struct({
-		sessionID: Schema.optional(Schema.String),
-		messageID: Schema.optional(Schema.String),
-		partID: Schema.String,
-		field: Schema.String,
-		delta: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			sessionID: Schema.optional(Schema.String),
+			messageID: Schema.optional(Schema.String),
+			partID: Schema.String,
+			field: Schema.String,
+			delta: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodePartUpdatedEventSchema = Schema.Struct({
 	type: Schema.Literal("message.part.updated"),
-	properties: Schema.Struct({
-		partID: Schema.optional(Schema.String),
-		messageID: Schema.optional(Schema.String),
-		part: OpenCodePartSchema,
-		delta: Schema.optional(Schema.String),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			partID: Schema.optional(Schema.String),
+			messageID: Schema.optional(Schema.String),
+			part: OpenCodePartSchema,
+			delta: Schema.optional(Schema.String),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodePartRemovedEventSchema = Schema.Struct({
 	type: Schema.Literal("message.part.removed"),
-	properties: Schema.Struct({
-		sessionID: Schema.String,
-		partID: Schema.String,
-		messageID: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			sessionID: Schema.String,
+			partID: Schema.String,
+			messageID: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeMessageUpdatedEventSchema = Schema.Struct({
 	type: Schema.Literal("message.updated"),
-	properties: Schema.Struct({ info: OpenCodeMessageSchema }).pipe(
-		Schema.extend(OpenCodeOpaquePropertiesSchema),
+	properties: Schema.StructWithRest(
+		Schema.Struct({ info: OpenCodeMessageSchema }),
+		[OpenCodeOpaquePropertiesSchema],
 	),
 });
 
 const OpenCodeMessageRemovedEventSchema = Schema.Struct({
 	type: Schema.Literal("message.removed"),
-	properties: Schema.Struct({
-		sessionID: Schema.String,
-		messageID: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			sessionID: Schema.String,
+			messageID: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionStatusEventSchema = Schema.Struct({
 	type: Schema.Literal("session.status"),
-	properties: Schema.Struct({
-		sessionID: Schema.String,
-		status: OpenCodeSessionStatusSchema,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			sessionID: Schema.String,
+			status: OpenCodeSessionStatusSchema,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
-const OpenCodeEventErrorSchema = Schema.Struct({
-	name: Schema.String,
-	data: Schema.Struct({
-		message: Schema.optional(Schema.String),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
-}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema));
+const OpenCodeEventErrorSchema = Schema.StructWithRest(
+	Schema.Struct({
+		name: Schema.String,
+		data: Schema.StructWithRest(
+			Schema.Struct({
+				message: Schema.optional(Schema.String),
+			}),
+			[OpenCodeOpaquePropertiesSchema],
+		),
+	}),
+	[OpenCodeOpaquePropertiesSchema],
+);
 
 const OpenCodeSessionErrorEventSchema = Schema.Struct({
 	type: Schema.Literal("session.error"),
-	properties: Schema.Struct({
-		sessionID: Schema.optional(Schema.String),
-		error: Schema.optional(OpenCodeEventErrorSchema),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			sessionID: Schema.optional(Schema.String),
+			error: Schema.optional(OpenCodeEventErrorSchema),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodePermissionAskedEventSchema = Schema.Struct({
 	type: Schema.Literal("permission.asked"),
-	properties: Schema.Struct({
-		id: Schema.String,
-		permission: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			id: Schema.String,
+			permission: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodePermissionRepliedEventSchema = Schema.Struct({
 	type: Schema.Literal("permission.replied"),
 	// The v2 event matches the wire: { sessionID, requestID, reply }.
-	properties: Schema.Struct({
-		sessionID: Schema.String,
-		requestID: Schema.String,
-		reply: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			sessionID: Schema.String,
+			requestID: Schema.String,
+			reply: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeQuestionAskedEventSchema = Schema.Struct({
 	type: Schema.Literal("question.asked"),
-	properties: Schema.Struct({
-		id: Schema.String,
-		questions: Schema.Array(Schema.Unknown),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			id: Schema.String,
+			questions: Schema.Array(Schema.Unknown),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionUpdatedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.updated"),
-	properties: Schema.Struct({ info: OpenCodeSessionSchema }).pipe(
-		Schema.extend(OpenCodeOpaquePropertiesSchema),
+	properties: Schema.StructWithRest(
+		Schema.Struct({ info: OpenCodeSessionSchema }),
+		[OpenCodeOpaquePropertiesSchema],
 	),
 });
 
@@ -734,56 +768,66 @@ const OpenCodeTodoSchema = Schema.Struct({
 
 const OpenCodeTodoUpdatedEventSchema = Schema.Struct({
 	type: Schema.Literal("todo.updated"),
-	properties: Schema.Struct({
-		sessionID: Schema.String,
-		todos: Schema.Array(OpenCodeTodoSchema),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			sessionID: Schema.String,
+			todos: Schema.Array(OpenCodeTodoSchema),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodePtyCreatedEventSchema = Schema.Struct({
 	type: Schema.Literal("pty.created"),
-	properties: Schema.Struct({ info: OpenCodePtySchema }).pipe(
-		Schema.extend(OpenCodeOpaquePropertiesSchema),
+	properties: Schema.StructWithRest(
+		Schema.Struct({ info: OpenCodePtySchema }),
+		[OpenCodeOpaquePropertiesSchema],
 	),
 });
 
 const OpenCodePtyExitedEventSchema = Schema.Struct({
 	type: Schema.Literal("pty.exited"),
-	properties: Schema.Struct({
-		id: Schema.String,
-		exitCode: Schema.Number,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			id: Schema.String,
+			exitCode: Schema.Number,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodePtyDeletedEventSchema = Schema.Struct({
 	type: Schema.Literal("pty.deleted"),
-	properties: Schema.Struct({ id: Schema.String }).pipe(
-		Schema.extend(OpenCodeOpaquePropertiesSchema),
-	),
+	properties: Schema.StructWithRest(Schema.Struct({ id: Schema.String }), [
+		OpenCodeOpaquePropertiesSchema,
+	]),
 });
 
 const OpenCodeFileEditedEventSchema = Schema.Struct({
 	type: Schema.Literal("file.edited"),
-	properties: Schema.Struct({ file: Schema.String }).pipe(
-		Schema.extend(OpenCodeOpaquePropertiesSchema),
-	),
+	properties: Schema.StructWithRest(Schema.Struct({ file: Schema.String }), [
+		OpenCodeOpaquePropertiesSchema,
+	]),
 });
 
 const OpenCodeFileWatcherUpdatedEventSchema = Schema.Struct({
 	type: Schema.Literal("file.watcher.updated"),
-	properties: Schema.Struct({
-		// Conduit reads only `file`; `event` is provider-owned and unread, kept
-		// optional so a new watcher event kind cannot fail-close (grill #10).
-		file: Schema.String,
-		event: Schema.optional(Schema.Literal("add", "change", "unlink")),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			// Conduit reads only `file`; `event` is provider-owned and unread, kept
+			// optional so a new watcher event kind cannot fail-close (grill #10).
+			file: Schema.String,
+			event: Schema.optional(Schema.Literals(["add", "change", "unlink"])),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeInstallationUpdateAvailableEventSchema = Schema.Struct({
 	type: Schema.Literal("installation.update-available"),
-	properties: Schema.Struct({ version: Schema.String }).pipe(
-		Schema.extend(OpenCodeOpaquePropertiesSchema),
-	),
+	properties: Schema.StructWithRest(Schema.Struct({ version: Schema.String }), [
+		OpenCodeOpaquePropertiesSchema,
+	]),
 });
 
 // Documentation-modeled from the live server /doc. Most of these events are
@@ -791,683 +835,912 @@ const OpenCodeInstallationUpdateAvailableEventSchema = Schema.Struct({
 // data surface is explicit and discoverable.
 const OpenCodeCatalogUpdatedEventSchema = Schema.Struct({
 	type: Schema.Literal("catalog.updated"),
-	properties: Schema.Struct({}).pipe(
-		Schema.extend(OpenCodeOpaquePropertiesSchema),
-	),
+	properties: Schema.StructWithRest(Schema.Struct({}), [
+		OpenCodeOpaquePropertiesSchema,
+	]),
 });
 
 const OpenCodeCommandExecutedEventSchema = Schema.Struct({
 	type: Schema.Literal("command.executed"),
-	properties: Schema.Struct({
-		name: Schema.String,
-		sessionID: Schema.String,
-		arguments: Schema.String,
-		messageID: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			name: Schema.String,
+			sessionID: Schema.String,
+			arguments: Schema.String,
+			messageID: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeGlobalDisposedEventSchema = Schema.Struct({
 	type: Schema.Literal("global.disposed"),
-	properties: Schema.Struct({}).pipe(
-		Schema.extend(OpenCodeOpaquePropertiesSchema),
-	),
+	properties: Schema.StructWithRest(Schema.Struct({}), [
+		OpenCodeOpaquePropertiesSchema,
+	]),
 });
 
 const OpenCodeInstallationUpdatedEventSchema = Schema.Struct({
 	type: Schema.Literal("installation.updated"),
-	properties: Schema.Struct({
-		version: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			version: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeIntegrationConnectionUpdatedEventSchema = Schema.Struct({
 	type: Schema.Literal("integration.connection.updated"),
-	properties: Schema.Struct({
-		integrationID: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			integrationID: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeIntegrationUpdatedEventSchema = Schema.Struct({
 	type: Schema.Literal("integration.updated"),
-	properties: Schema.Struct({}).pipe(
-		Schema.extend(OpenCodeOpaquePropertiesSchema),
-	),
+	properties: Schema.StructWithRest(Schema.Struct({}), [
+		OpenCodeOpaquePropertiesSchema,
+	]),
 });
 
 const OpenCodeLspUpdatedEventSchema = Schema.Struct({
 	type: Schema.Literal("lsp.updated"),
-	properties: Schema.Struct({}).pipe(
-		Schema.extend(OpenCodeOpaquePropertiesSchema),
-	),
+	properties: Schema.StructWithRest(Schema.Struct({}), [
+		OpenCodeOpaquePropertiesSchema,
+	]),
 });
 
 const OpenCodeMcpBrowserOpenFailedEventSchema = Schema.Struct({
 	type: Schema.Literal("mcp.browser.open.failed"),
-	properties: Schema.Struct({
-		mcpName: Schema.String,
-		url: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			mcpName: Schema.String,
+			url: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeMcpToolsChangedEventSchema = Schema.Struct({
 	type: Schema.Literal("mcp.tools.changed"),
-	properties: Schema.Struct({
-		server: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			server: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeModelsDevRefreshedEventSchema = Schema.Struct({
 	type: Schema.Literal("models-dev.refreshed"),
-	properties: Schema.Struct({}).pipe(
-		Schema.extend(OpenCodeOpaquePropertiesSchema),
-	),
+	properties: Schema.StructWithRest(Schema.Struct({}), [
+		OpenCodeOpaquePropertiesSchema,
+	]),
 });
 
 const OpenCodePermissionV2AskedEventSchema = Schema.Struct({
 	type: Schema.Literal("permission.v2.asked"),
-	properties: Schema.Struct({
-		id: Schema.String,
-		sessionID: Schema.String,
-		action: Schema.String,
-		resources: Schema.Array(Schema.String),
-		save: Schema.optional(Schema.Array(Schema.String)),
-		metadata: Schema.optional(Schema.Unknown),
-		source: Schema.optional(Schema.Unknown),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			id: Schema.String,
+			sessionID: Schema.String,
+			action: Schema.String,
+			resources: Schema.Array(Schema.String),
+			save: Schema.optional(Schema.Array(Schema.String)),
+			metadata: Schema.optional(Schema.Unknown),
+			source: Schema.optional(Schema.Unknown),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodePermissionV2RepliedEventSchema = Schema.Struct({
 	type: Schema.Literal("permission.v2.replied"),
-	properties: Schema.Struct({
-		sessionID: Schema.String,
-		requestID: Schema.String,
-		reply: Schema.Unknown,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			sessionID: Schema.String,
+			requestID: Schema.String,
+			reply: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodePluginAddedEventSchema = Schema.Struct({
 	type: Schema.Literal("plugin.added"),
-	properties: Schema.Struct({
-		id: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			id: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeProjectDirectoriesUpdatedEventSchema = Schema.Struct({
 	type: Schema.Literal("project.directories.updated"),
-	properties: Schema.Struct({
-		projectID: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			projectID: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeProjectUpdatedEventSchema = Schema.Struct({
 	type: Schema.Literal("project.updated"),
-	properties: Schema.Struct({
-		id: Schema.String,
-		worktree: Schema.String,
-		vcs: Schema.optional(Schema.Unknown),
-		name: Schema.optional(Schema.String),
-		icon: Schema.optional(Schema.Unknown),
-		commands: Schema.optional(Schema.Unknown),
-		time: Schema.Unknown,
-		sandboxes: Schema.Array(Schema.String),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			id: Schema.String,
+			worktree: Schema.String,
+			vcs: Schema.optional(Schema.Unknown),
+			name: Schema.optional(Schema.String),
+			icon: Schema.optional(Schema.Unknown),
+			commands: Schema.optional(Schema.Unknown),
+			time: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
+			sandboxes: Schema.Array(Schema.String),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodePtyUpdatedEventSchema = Schema.Struct({
 	type: Schema.Literal("pty.updated"),
-	properties: Schema.Struct({
-		info: OpenCodePtySchema,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			info: OpenCodePtySchema,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeQuestionRejectedEventSchema = Schema.Struct({
 	type: Schema.Literal("question.rejected"),
-	properties: Schema.Struct({
-		sessionID: Schema.String,
-		requestID: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			sessionID: Schema.String,
+			requestID: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeQuestionRepliedEventSchema = Schema.Struct({
 	type: Schema.Literal("question.replied"),
-	properties: Schema.Struct({
-		sessionID: Schema.String,
-		requestID: Schema.String,
-		answers: Schema.Array(Schema.Unknown),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			sessionID: Schema.String,
+			requestID: Schema.String,
+			answers: Schema.Array(Schema.Unknown),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeQuestionV2AskedEventSchema = Schema.Struct({
 	type: Schema.Literal("question.v2.asked"),
-	properties: Schema.Struct({
-		id: Schema.String,
-		sessionID: Schema.String,
-		questions: Schema.Array(Schema.Unknown),
-		tool: Schema.optional(Schema.Unknown),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			id: Schema.String,
+			sessionID: Schema.String,
+			questions: Schema.Array(Schema.Unknown),
+			tool: Schema.optional(Schema.Unknown),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeQuestionV2RejectedEventSchema = Schema.Struct({
 	type: Schema.Literal("question.v2.rejected"),
-	properties: Schema.Struct({
-		sessionID: Schema.String,
-		requestID: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			sessionID: Schema.String,
+			requestID: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeQuestionV2RepliedEventSchema = Schema.Struct({
 	type: Schema.Literal("question.v2.replied"),
-	properties: Schema.Struct({
-		sessionID: Schema.String,
-		requestID: Schema.String,
-		answers: Schema.Array(Schema.Unknown),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			sessionID: Schema.String,
+			requestID: Schema.String,
+			answers: Schema.Array(Schema.Unknown),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeReferenceUpdatedEventSchema = Schema.Struct({
 	type: Schema.Literal("reference.updated"),
-	properties: Schema.Struct({}).pipe(
-		Schema.extend(OpenCodeOpaquePropertiesSchema),
-	),
+	properties: Schema.StructWithRest(Schema.Struct({}), [
+		OpenCodeOpaquePropertiesSchema,
+	]),
 });
 
 const OpenCodeServerConnectedEventSchema = Schema.Struct({
 	type: Schema.Literal("server.connected"),
-	properties: Schema.Struct({}).pipe(
-		Schema.extend(OpenCodeOpaquePropertiesSchema),
-	),
+	properties: Schema.StructWithRest(Schema.Struct({}), [
+		OpenCodeOpaquePropertiesSchema,
+	]),
 });
 
 const OpenCodeServerInstanceDisposedEventSchema = Schema.Struct({
 	type: Schema.Literal("server.instance.disposed"),
-	properties: Schema.Struct({
-		directory: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			directory: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionCompactedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.compacted"),
-	properties: Schema.Struct({
-		sessionID: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			sessionID: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionCreatedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.created"),
-	properties: Schema.Struct({
-		sessionID: Schema.String,
-		info: OpenCodeSessionSchema,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			sessionID: Schema.String,
+			info: OpenCodeSessionSchema,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionDeletedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.deleted"),
-	properties: Schema.Struct({
-		sessionID: Schema.String,
-		info: OpenCodeSessionSchema,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			sessionID: Schema.String,
+			info: OpenCodeSessionSchema,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionDiffEventSchema = Schema.Struct({
 	type: Schema.Literal("session.diff"),
-	properties: Schema.Struct({
-		sessionID: Schema.String,
-		diff: Schema.Array(Schema.Unknown),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			sessionID: Schema.String,
+			diff: Schema.Array(Schema.Unknown),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionIdleEventSchema = Schema.Struct({
 	type: Schema.Literal("session.idle"),
-	properties: Schema.Struct({
-		sessionID: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			sessionID: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextAgentSwitchedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.agent.switched"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		messageID: Schema.String,
-		agent: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			messageID: Schema.String,
+			agent: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextCompactionDeltaEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.compaction.delta"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		messageID: Schema.String,
-		text: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			messageID: Schema.String,
+			text: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextCompactionEndedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.compaction.ended"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		messageID: Schema.String,
-		reason: Schema.Literal("auto", "manual"),
-		text: Schema.String,
-		recent: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			messageID: Schema.String,
+			reason: Schema.Literals(["auto", "manual"]),
+			text: Schema.String,
+			recent: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextCompactionStartedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.compaction.started"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		messageID: Schema.String,
-		reason: Schema.Literal("auto", "manual"),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			messageID: Schema.String,
+			reason: Schema.Literals(["auto", "manual"]),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextContextUpdatedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.context.updated"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		messageID: Schema.String,
-		text: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			messageID: Schema.String,
+			text: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextModelSwitchedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.model.switched"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		messageID: Schema.String,
-		model: OpenCodeModelRefSchema,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			messageID: Schema.String,
+			model: OpenCodeModelRefSchema,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextMovedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.moved"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		location: Schema.Unknown,
-		subdirectory: Schema.optional(Schema.String),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			location: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
+			subdirectory: Schema.optional(Schema.String),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextPromptAdmittedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.prompt.admitted"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		messageID: Schema.String,
-		prompt: Schema.Unknown,
-		delivery: Schema.Literal("steer", "queue"),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			messageID: Schema.String,
+			prompt: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
+			delivery: Schema.Literals(["steer", "queue"]),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextPromptedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.prompted"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		messageID: Schema.String,
-		prompt: Schema.Unknown,
-		delivery: Schema.Literal("steer", "queue"),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			messageID: Schema.String,
+			prompt: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
+			delivery: Schema.Literals(["steer", "queue"]),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextReasoningDeltaEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.reasoning.delta"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		assistantMessageID: Schema.String,
-		reasoningID: Schema.String,
-		delta: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			assistantMessageID: Schema.String,
+			reasoningID: Schema.String,
+			delta: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextReasoningEndedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.reasoning.ended"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		assistantMessageID: Schema.String,
-		reasoningID: Schema.String,
-		text: Schema.String,
-		providerMetadata: Schema.optional(Schema.Unknown),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			assistantMessageID: Schema.String,
+			reasoningID: Schema.String,
+			text: Schema.String,
+			providerMetadata: Schema.optional(Schema.Unknown),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextReasoningStartedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.reasoning.started"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		assistantMessageID: Schema.String,
-		reasoningID: Schema.String,
-		providerMetadata: Schema.optional(Schema.Unknown),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			assistantMessageID: Schema.String,
+			reasoningID: Schema.String,
+			providerMetadata: Schema.optional(Schema.Unknown),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextRetriedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.retried"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		attempt: Schema.Number,
-		error: Schema.Unknown,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			attempt: Schema.Number,
+			error: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextRevertClearedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.revert.cleared"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextRevertCommittedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.revert.committed"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		messageID: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			messageID: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextRevertStagedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.revert.staged"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		revert: Schema.Unknown,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			revert: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextShellEndedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.shell.ended"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		callID: Schema.String,
-		output: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			callID: Schema.String,
+			output: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextShellStartedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.shell.started"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		messageID: Schema.String,
-		callID: Schema.String,
-		command: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			messageID: Schema.String,
+			callID: Schema.String,
+			command: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextStepEndedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.step.ended"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		assistantMessageID: Schema.String,
-		finish: Schema.String,
-		cost: Schema.Number,
-		tokens: Schema.Unknown,
-		snapshot: Schema.optional(Schema.String),
-		files: Schema.optional(Schema.Array(Schema.String)),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			assistantMessageID: Schema.String,
+			finish: Schema.String,
+			cost: Schema.Number,
+			tokens: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
+			snapshot: Schema.optional(Schema.String),
+			files: Schema.optional(Schema.Array(Schema.String)),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextStepFailedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.step.failed"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		assistantMessageID: Schema.String,
-		error: Schema.Unknown,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			assistantMessageID: Schema.String,
+			error: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextStepStartedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.step.started"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		assistantMessageID: Schema.String,
-		agent: Schema.String,
-		model: OpenCodeModelRefSchema,
-		snapshot: Schema.optional(Schema.String),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			assistantMessageID: Schema.String,
+			agent: Schema.String,
+			model: OpenCodeModelRefSchema,
+			snapshot: Schema.optional(Schema.String),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextSyntheticEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.synthetic"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		messageID: Schema.String,
-		text: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			messageID: Schema.String,
+			text: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextTextDeltaEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.text.delta"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		assistantMessageID: Schema.String,
-		textID: Schema.String,
-		delta: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			assistantMessageID: Schema.String,
+			textID: Schema.String,
+			delta: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextTextEndedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.text.ended"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		assistantMessageID: Schema.String,
-		textID: Schema.String,
-		text: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			assistantMessageID: Schema.String,
+			textID: Schema.String,
+			text: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextTextStartedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.text.started"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		assistantMessageID: Schema.String,
-		textID: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			assistantMessageID: Schema.String,
+			textID: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextToolCalledEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.tool.called"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		assistantMessageID: Schema.String,
-		callID: Schema.String,
-		tool: Schema.String,
-		input: Schema.Unknown,
-		provider: Schema.Unknown,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			assistantMessageID: Schema.String,
+			callID: Schema.String,
+			tool: Schema.String,
+			input: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
+			provider: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextToolFailedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.tool.failed"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		assistantMessageID: Schema.String,
-		callID: Schema.String,
-		error: Schema.Unknown,
-		result: Schema.optional(Schema.Unknown),
-		provider: Schema.Unknown,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			assistantMessageID: Schema.String,
+			callID: Schema.String,
+			error: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
+			result: Schema.optional(Schema.Unknown),
+			provider: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextToolInputDeltaEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.tool.input.delta"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		assistantMessageID: Schema.String,
-		callID: Schema.String,
-		delta: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			assistantMessageID: Schema.String,
+			callID: Schema.String,
+			delta: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextToolInputEndedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.tool.input.ended"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		assistantMessageID: Schema.String,
-		callID: Schema.String,
-		text: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			assistantMessageID: Schema.String,
+			callID: Schema.String,
+			text: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextToolInputStartedEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.tool.input.started"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		assistantMessageID: Schema.String,
-		callID: Schema.String,
-		name: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			assistantMessageID: Schema.String,
+			callID: Schema.String,
+			name: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextToolProgressEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.tool.progress"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		assistantMessageID: Schema.String,
-		callID: Schema.String,
-		structured: Schema.Unknown,
-		content: Schema.Array(Schema.Unknown),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			assistantMessageID: Schema.String,
+			callID: Schema.String,
+			structured: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
+			content: Schema.Array(Schema.Unknown),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeSessionNextToolSuccessEventSchema = Schema.Struct({
 	type: Schema.Literal("session.next.tool.success"),
-	properties: Schema.Struct({
-		timestamp: Schema.Number,
-		sessionID: Schema.String,
-		assistantMessageID: Schema.String,
-		callID: Schema.String,
-		structured: Schema.Unknown,
-		content: Schema.Array(Schema.Unknown),
-		outputPaths: Schema.optional(Schema.Array(Schema.String)),
-		result: Schema.optional(Schema.Unknown),
-		provider: Schema.Unknown,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			timestamp: Schema.Number,
+			sessionID: Schema.String,
+			assistantMessageID: Schema.String,
+			callID: Schema.String,
+			structured: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
+			content: Schema.Array(Schema.Unknown),
+			outputPaths: Schema.optional(Schema.Array(Schema.String)),
+			result: Schema.optional(Schema.Unknown),
+			provider: Schema.Unknown.pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+			),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeTuiCommandExecuteEventSchema = Schema.Struct({
 	type: Schema.Literal("tui.command.execute"),
-	properties: Schema.Struct({
-		command: Schema.Union(
-			Schema.Literal(
-				"session.list",
-				"session.new",
-				"session.share",
-				"session.interrupt",
-				"session.compact",
-				"session.page.up",
-				"session.page.down",
-				"session.line.up",
-				"session.line.down",
-				"session.half.page.up",
-				"session.half.page.down",
-				"session.first",
-				"session.last",
-				"prompt.clear",
-				"prompt.submit",
-				"agent.cycle",
-			),
-			Schema.String,
-		),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			command: Schema.Union([
+				Schema.Literals([
+					"session.list",
+					"session.new",
+					"session.share",
+					"session.interrupt",
+					"session.compact",
+					"session.page.up",
+					"session.page.down",
+					"session.line.up",
+					"session.line.down",
+					"session.half.page.up",
+					"session.half.page.down",
+					"session.first",
+					"session.last",
+					"prompt.clear",
+					"prompt.submit",
+					"agent.cycle",
+				]),
+				Schema.String,
+			]),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeTuiPromptAppendEventSchema = Schema.Struct({
 	type: Schema.Literal("tui.prompt.append"),
-	properties: Schema.Struct({
-		text: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			text: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeTuiSessionSelectEventSchema = Schema.Struct({
 	type: Schema.Literal("tui.session.select"),
-	properties: Schema.Struct({
-		sessionID: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			sessionID: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeTuiToastShowEventSchema = Schema.Struct({
 	type: Schema.Literal("tui.toast.show"),
-	properties: Schema.Struct({
-		title: Schema.optional(Schema.String),
-		message: Schema.String,
-		variant: Schema.Literal("info", "success", "warning", "error"),
-		duration: Schema.optional(Schema.Number),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			title: Schema.optional(Schema.String),
+			message: Schema.String,
+			variant: Schema.Literals(["info", "success", "warning", "error"]),
+			duration: Schema.optional(Schema.Number),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeVcsBranchUpdatedEventSchema = Schema.Struct({
 	type: Schema.Literal("vcs.branch.updated"),
-	properties: Schema.Struct({
-		branch: Schema.optional(Schema.String),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			branch: Schema.optional(Schema.String),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeWorkspaceFailedEventSchema = Schema.Struct({
 	type: Schema.Literal("workspace.failed"),
-	properties: Schema.Struct({
-		message: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			message: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeWorkspaceReadyEventSchema = Schema.Struct({
 	type: Schema.Literal("workspace.ready"),
-	properties: Schema.Struct({
-		name: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			name: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeWorkspaceStatusEventSchema = Schema.Struct({
 	type: Schema.Literal("workspace.status"),
-	properties: Schema.Struct({
-		workspaceID: Schema.String,
-		status: Schema.Literal("connected", "connecting", "disconnected", "error"),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			workspaceID: Schema.String,
+			status: Schema.Literals([
+				"connected",
+				"connecting",
+				"disconnected",
+				"error",
+			]),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeWorktreeFailedEventSchema = Schema.Struct({
 	type: Schema.Literal("worktree.failed"),
-	properties: Schema.Struct({
-		message: Schema.String,
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			message: Schema.String,
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
 const OpenCodeWorktreeReadyEventSchema = Schema.Struct({
 	type: Schema.Literal("worktree.ready"),
-	properties: Schema.Struct({
-		name: Schema.String,
-		branch: Schema.optional(Schema.String),
-	}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema)),
+	properties: Schema.StructWithRest(
+		Schema.Struct({
+			name: Schema.String,
+			branch: Schema.optional(Schema.String),
+		}),
+		[OpenCodeOpaquePropertiesSchema],
+	),
 });
 
-export const OpenCodeEventSchema = Schema.Union(
+export const OpenCodeEventSchema = Schema.Union([
 	OpenCodeMessageCreatedEventSchema,
 	OpenCodePartDeltaEventSchema,
 	OpenCodePartUpdatedEventSchema,
@@ -1558,7 +1831,7 @@ export const OpenCodeEventSchema = Schema.Union(
 	OpenCodeWorkspaceStatusEventSchema,
 	OpenCodeWorktreeFailedEventSchema,
 	OpenCodeWorktreeReadyEventSchema,
-);
+]);
 
 export type OpenCodeEvent = Schema.Schema.Type<typeof OpenCodeEventSchema>;
 
@@ -1573,21 +1846,23 @@ export const OpenCodeQuestionReplyRequestSchema = Schema.Struct({
 
 export const OpenCodeBooleanResponseSchema = Schema.Boolean;
 const OpenCodeEmptyObjectResponseSchema = Schema.Struct({}).pipe(
-	Schema.filter((value) =>
-		Object.keys(value).length === 0
-			? undefined
-			: "expected empty object for void OpenCode response",
+	Schema.check(
+		Schema.makeFilter((value) =>
+			Object.keys(value).length === 0
+				? undefined
+				: "expected empty object for void OpenCode response",
+		),
 	),
 );
 
-export const OpenCodeUndefinedResponseSchema = Schema.Union(
+export const OpenCodeUndefinedResponseSchema = Schema.Union([
 	Schema.Undefined,
 	OpenCodeEmptyObjectResponseSchema,
-);
+]);
 
 // v2 documents boolean replies; older servers also return void envelopes.
 export const decodeOpenCodeQuestionActionResponse = Schema.decodeUnknownSync(
-	Schema.Union(Schema.Boolean, OpenCodeUndefinedResponseSchema),
+	Schema.Union([Schema.Boolean, OpenCodeUndefinedResponseSchema]),
 );
 
 export const OpenCodeFileEntryListResponseSchema = Schema.Array(
@@ -1610,14 +1885,17 @@ const OpenCodeSkillSchema = Schema.Struct({
 export const OpenCodeSkillListResponseSchema =
 	Schema.Array(OpenCodeSkillSchema);
 
-export const OpenCodePendingPermissionSchema = Schema.Struct({
-	id: Schema.String,
-	sessionID: Schema.String,
-	permission: Schema.String,
-	patterns: Schema.optional(Schema.Array(Schema.String)),
-	metadata: Schema.optional(OpenCodeOpaquePropertiesSchema),
-	always: Schema.optional(Schema.Array(Schema.String)),
-}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema));
+export const OpenCodePendingPermissionSchema = Schema.StructWithRest(
+	Schema.Struct({
+		id: Schema.String,
+		sessionID: Schema.String,
+		permission: Schema.String,
+		patterns: Schema.optional(Schema.Array(Schema.String)),
+		metadata: Schema.optional(OpenCodeOpaquePropertiesSchema),
+		always: Schema.optional(Schema.Array(Schema.String)),
+	}),
+	[OpenCodeOpaquePropertiesSchema],
+);
 
 export type OpenCodePendingPermission = Schema.Schema.Type<
 	typeof OpenCodePendingPermissionSchema
@@ -1627,11 +1905,14 @@ export const OpenCodePendingPermissionListResponseSchema = Schema.Array(
 	OpenCodePendingPermissionSchema,
 );
 
-export const OpenCodePendingQuestionSchema = Schema.Struct({
-	id: Schema.String,
-	sessionID: Schema.String,
-	questions: Schema.Array(Schema.Unknown),
-}).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema));
+export const OpenCodePendingQuestionSchema = Schema.StructWithRest(
+	Schema.Struct({
+		id: Schema.String,
+		sessionID: Schema.String,
+		questions: Schema.Array(Schema.Unknown),
+	}),
+	[OpenCodeOpaquePropertiesSchema],
+);
 
 export const OpenCodePendingQuestionListResponseSchema = Schema.Array(
 	OpenCodePendingQuestionSchema,

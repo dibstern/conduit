@@ -7,7 +7,7 @@ import type {
 import type { WsRpcError } from "../../../contracts/ws-rpc.js";
 
 /** The daemon's only category writer. Replacements are complete, versioned sets. */
-export class CategorySet extends Context.Tag("CategorySet")<
+export class CategorySet extends Context.Service<
 	CategorySet,
 	{
 		readonly current: () => Effect.Effect<CategorySetSnapshot>;
@@ -19,4 +19,4 @@ export class CategorySet extends Context.Tag("CategorySet")<
 			nextSet: CategorySetContents,
 		) => Effect.Effect<CategorySetSnapshot, CategorySetRejected | WsRpcError>;
 	}
->() {}
+>()("CategorySet") {}

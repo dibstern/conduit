@@ -60,6 +60,7 @@ import {
 	makeUsage,
 	Usage,
 } from "../../src/lib/domain/daemon/Services/usage.js";
+import { SessionEventBusLive } from "../../src/lib/domain/relay/Services/session-event-bus.js";
 import { AuthManagerFromConfigLive } from "../../src/lib/domain/server/Layers/auth-middleware.js";
 import {
 	makePersistenceStoreLayer,
@@ -80,7 +81,10 @@ export const makeDaemonStoreTestLayer = (filename = ":memory:") =>
 	Layer.effect(
 		PersistenceStore,
 		Effect.context<PersistenceStoreContext>(),
-	).pipe(Layer.provideMerge(makePersistenceStoreLayer(filename)));
+	).pipe(
+		Layer.provideMerge(makePersistenceStoreLayer(filename)),
+		Layer.merge(SessionEventBusLive),
+	);
 
 export const makeDaemonRpcTestLayer = (
 	projects: ReadonlyArray<StoredProject> = [],
@@ -124,10 +128,10 @@ export const makeDaemonRpcTestLayer = (
 		DaemonEventBusLive,
 		BrowserRpcConnectionsLive,
 		options.tailscaleCli ??
-			Layer.succeed(TailscaleCliTag, {
+			Layer.succeed(TailscaleCliTag)({
 				exec: () => Effect.succeed('{"BackendState":"Stopped"}'),
 			}),
-		Layer.succeed(RpcCaller, { kind: "cli" }),
+		Layer.succeed(RpcCaller)({ kind: "cli" }),
 		InstanceHealthCheckLive,
 		DaemonConfigRefLive({
 			...makeDaemonConfigFromOptions({ port: 0 }),
@@ -164,11 +168,11 @@ export const makeDaemonRpcTestLayer = (
 				options.launchLogin ??
 				configuredClaudeConfigDir("/tmp/daemon-rpc-fixture/claude"),
 		}),
-		Layer.scoped(
+		Layer.effect(
 			Usage,
 			makeUsage({ accounts: Effect.succeed([]), readers: {} }),
 		),
-		Layer.succeed(PortScannerTag, {
+		Layer.succeed(PortScannerTag)({
 			getKnownPorts: () => Effect.succeed(new Set<number>()),
 			scanNow: () => Effect.succeed({ discovered: [], lost: [], active: [] }),
 		}),

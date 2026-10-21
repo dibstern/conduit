@@ -45,12 +45,14 @@ export const makeClaudeTitleGenerator = (options: {
 									: generationFailureReason(failure.cause),
 						}),
 				),
-				Effect.timeoutFail({
+				Effect.timeoutOrElse({
 					duration: TITLE_GENERATION_TIMEOUT,
-					onTimeout: () =>
-						new SessionTitleGenerationFailure({
-							reason: "Timed out waiting for Claude title generation",
-						}),
+					orElse: () =>
+						Effect.fail(
+							new SessionTitleGenerationFailure({
+								reason: "Timed out waiting for Claude title generation",
+							}),
+						),
 				}),
 			);
 };

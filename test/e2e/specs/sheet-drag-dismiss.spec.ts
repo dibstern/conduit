@@ -32,7 +32,10 @@ async function dragDown(
 			type: "touchMove",
 			touchPoints: [{ x, y: startY + (distance * step) / steps }],
 		});
-		await page.waitForTimeout(16);
+		await page.evaluate(
+			() =>
+				new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+		);
 	}
 	const end = async () => {
 		await cdp.send("Input.dispatchTouchEvent", {
@@ -50,7 +53,10 @@ async function openTitleSheet(page: Page, relayUrl: string): Promise<Locator> {
 	await page.getByTestId("session-bar-title-menu").tap();
 	const sheet = page.getByTestId("session-action-sheet");
 	await expect(sheet).toBeVisible();
-	await page.waitForTimeout(150);
+	await expect(page.getByTestId("menu-sheet-scrim")).toHaveCSS(
+		"pointer-events",
+		"auto",
+	);
 	return sheet;
 }
 
@@ -73,9 +79,10 @@ test("phone: a short drag springs the session sheet back open", async ({
 }) => {
 	const sheet = await openTitleSheet(page, relayUrl);
 	const { top } = await dragDown(page, sheet, 30);
-	await page.waitForTimeout(400);
 	await expect(sheet).toBeVisible();
-	expect((await sheet.boundingBox())?.y).toBeCloseTo(top, 0);
+	await expect
+		.poll(async () => (await sheet.boundingBox())?.y)
+		.toBeCloseTo(top, 0);
 });
 
 test("phone: dragging a scrolled sheet body scrolls without dismissing", async ({

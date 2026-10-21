@@ -17,10 +17,10 @@ export interface PtyManagerState {
 }
 
 /** Tag for the mutable PTY session HashMap Ref in the Effect Context. */
-export class PtyManagerStateTag extends Context.Tag("PtyManagerState")<
+export class PtyManagerStateTag extends Context.Service<
 	PtyManagerStateTag,
 	Ref.Ref<PtyManagerState>
->() {}
+>()("PtyManagerState") {}
 
 export const PtyManagerStateLive: Layer.Layer<PtyManagerStateTag> =
 	Layer.effect(

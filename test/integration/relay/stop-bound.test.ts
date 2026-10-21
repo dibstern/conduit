@@ -1,14 +1,16 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
-import { Effect, Fiber, Layer, Stream, TestClock } from "effect";
+import { Effect, Fiber, Layer, Stream } from "effect";
+import { SqlClient } from "effect/sql";
+import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { Usage } from "../../../src/lib/domain/daemon/Services/usage.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import {
 	makeProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
@@ -17,7 +19,14 @@ import {
 	ProviderTurnServiceTag,
 	STOP_ABORT_WAIT_MS,
 } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
-import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import {
+	ConfigTag,
+	LoggerTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
+import {
+	SessionEventBusLive,
+	SessionEventBusTag,
+} from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import {
 	SessionInboxLive,
 	SessionInboxTag,
@@ -33,6 +42,7 @@ import {
 	MOCK_OPENCODE_GPT4_CATALOG,
 	makeMockAccountDirectory,
 	makeMockConfig,
+	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeMockOpenCodeModelService,
 	makeOpenCodeInstancesStub,
@@ -53,6 +63,7 @@ const stopLayer = (api: OpenCodeAPI, scratch: string) => {
 		workspaceRoot: scratch,
 		shellEnv: () => ({}),
 	}).pipe(
+		Layer.provideMerge(SessionWorkspaceLive),
 		Layer.provideMerge(
 			Layer.mergeAll(
 				persistence,
@@ -60,13 +71,18 @@ const stopLayer = (api: OpenCodeAPI, scratch: string) => {
 				Layer.succeed(AccountDirectory, accounts),
 				Layer.succeed(OpenCodeAPITag, api),
 				Layer.succeed(
+					ConfigTag,
+					makeMockConfig({ projectDir: scratch, configDir: scratch }),
+				),
+				Layer.succeed(LoggerTag, makeMockLogger()),
+				Layer.succeed(
 					OpenCodeInstancesTag,
 					makeOpenCodeInstancesStub({ opencode: api }),
 				),
 			),
 		),
 	);
-	return Layer.unwrapScoped(
+	return Layer.unwrap(
 		Effect.gen(function* () {
 			const wired = yield* getOrchestrationLayer;
 			return SessionInboxLive.pipe(
@@ -107,7 +123,10 @@ const stopLayer = (api: OpenCodeAPI, scratch: string) => {
 				),
 			);
 		}),
-	).pipe(Layer.provideMerge(orchestration));
+	).pipe(
+		Layer.provideMerge(orchestration),
+		Layer.provideMerge(SessionEventBusLive),
+	);
 };
 
 const scratchDirectory = Effect.acquireRelease(
@@ -121,7 +140,7 @@ const flushDispatch = Effect.promise<void>(
 
 describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 	// Before the first echo, only the outbox admission keeps the inbox busy.
-	it.scoped(
+	it.effect(
 		"keeps the replacement queued after the bound until the pre-echo send fails",
 		() =>
 			Effect.gen(function* () {
@@ -141,6 +160,9 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 					const sql = yield* SqlClient.SqlClient;
 					const inbox = yield* SessionInboxTag;
 					const turns = yield* ProviderTurnServiceTag;
+					const events = yield* (yield* SessionEventBusTag).subscribe({
+						sessionId: "session-1",
+					});
 					yield* inbox.start;
 					yield* inbox.submit({
 						clientId: "client-1",
@@ -195,6 +217,15 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 					expect(failOriginalSend).toBeDefined();
 					failOriginalSend?.(new Error("original send failed"));
 					yield* flushDispatch;
+					// Wait for the replacement's committed failure, across inbox dispatch.
+					yield* events.pipe(
+						Stream.filter(
+							(event) =>
+								event.type === "turn.error" &&
+								event.data.userMessageId === "replacement",
+						),
+						Stream.runHead,
+					);
 					expect(api.session.prompt).toHaveBeenCalledTimes(2);
 					expect(api.session.prompt).toHaveBeenLastCalledWith(
 						"session-1",
@@ -219,7 +250,7 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 	);
 
 	// A continuation can supersede retirement after the worker's last read.
-	it.scoped(
+	it.effect(
 		"succeeds when the real ingestion transaction rolls retirement back",
 		() =>
 			Effect.gen(function* () {
@@ -247,7 +278,7 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 							effect_type, payload_json, status, attempt_count, requested_at, updated_at
 						) VALUES (2, 'continuation', 'test-project', 'session-1', 'opencode',
 							'send_turn', '{"inputId":"continuation"}', 'running', 0, 1, 1)`.pipe(
-								Effect.zipRight(ingestBatch(events, options)),
+								Effect.andThen(ingestBatch(events, options)),
 							),
 						);
 					const stopped = yield* turns.beginStop({
@@ -255,10 +286,12 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 						sessionId: "session-1",
 						commandId: "stop-original",
 					});
-					const completion = yield* Effect.fork(stopped.pipe(Effect.either));
+					const completion = yield* Effect.forkChild(
+						stopped.pipe(Effect.result),
+					);
 					yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
 					expect(yield* Fiber.join(completion)).toMatchObject({
-						_tag: "Right",
+						_tag: "Success",
 					});
 					expect(retirement).toHaveBeenCalledOnce();
 					expect(

@@ -2,10 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { type IncomingHttpHeaders, IncomingMessage } from "node:http";
 import { Socket as NetSocket } from "node:net";
 import { TLSSocket } from "node:tls";
-import { SocketServer } from "@effect/platform";
-import { Rpc, RpcGroup, RpcSerialization, RpcServer } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Queue } from "effect";
+import { RpcGroup, RpcSerialization, RpcServer } from "effect/rpc";
+import { SocketServer } from "effect/socket";
 import { afterEach, expect, vi } from "vitest";
 import WebSocket, { WebSocketServer } from "ws";
 import { UpdateMessageSurfacing } from "../../../src/lib/contracts/ws-rpc.js";
@@ -43,11 +43,9 @@ describe("message surfacing RPC security", () => {
 			},
 		},
 	]) {
-		it.scoped(`redacts encoded validation failures for ${name}`, () =>
+		it.effect(`redacts encoded validation failures for ${name}`, () =>
 			Effect.gen(function* () {
-				const group = RpcGroup.make(
-					Rpc.fromTaggedRequest(UpdateMessageSurfacing),
-				);
+				const group = RpcGroup.make(UpdateMessageSurfacing);
 				const update = vi.fn(() =>
 					Effect.die("Invalid payload reached handler"),
 				);
@@ -63,20 +61,23 @@ describe("message surfacing RPC security", () => {
 					Effect.forkScoped,
 				);
 				const responses = yield* Queue.unbounded<unknown>();
-				yield* connection.clientSocket
-					.runRaw((data) =>
-						Queue.offer(
-							responses,
-							JSON.parse(
-								typeof data === "string"
-									? data
-									: new TextDecoder().decode(data),
-							),
-						),
-					)
-					.pipe(Effect.forkScoped);
+				yield* Effect.gen(function* () {
+					const reader = yield* connection.clientSocket.reader;
+					while (true) {
+						const chunks = yield* reader.pull;
+						for (const data of chunks)
+							yield* Queue.offer(
+								responses,
+								JSON.parse(
+									typeof data === "string"
+										? data
+										: new TextDecoder().decode(data),
+								),
+							);
+					}
+				}).pipe(Effect.forkScoped);
 				const write = yield* connection.clientSocket.writer;
-				yield* write(
+				yield* write.write(
 					JSON.stringify({
 						_tag: "Request",
 						id: "1",
@@ -186,7 +187,7 @@ describe("message surfacing RPC security", () => {
 		},
 	];
 	for (const { name, peer, headers, tls, allowed } of cases) {
-		it.scoped(`guards a key save through ${name}`, () => {
+		it.effect(`guards a key save through ${name}`, () => {
 			const dir = mkdtempSync("/tmp/surfacing-rpc-");
 			directories.push(dir);
 			return Effect.gen(function* () {
@@ -234,18 +235,20 @@ describe("message surfacing RPC security", () => {
 				);
 				const result = yield* handlers
 					.UpdateMessageSurfacing(
-						new UpdateMessageSurfacing({ apiKey: "fake-secret-canary" }),
+						UpdateMessageSurfacing.payloadSchema.make({
+							apiKey: "fake-secret-canary",
+						}),
 					)
-					.pipe(Effect.provideService(RpcCaller, caller), Effect.either);
+					.pipe(Effect.provideService(RpcCaller, caller), Effect.result);
 				expect(result).toMatchObject(
 					allowed
 						? {
-								_tag: "Right",
-								right: { key: { source: "stored", rejected: false } },
+								_tag: "Success",
+								success: { key: { source: "stored", rejected: false } },
 							}
 						: {
-								_tag: "Left",
-								left: {
+								_tag: "Failure",
+								failure: {
 									message: "Saving a TypeSafe key requires TLS or loopback",
 								},
 							},

@@ -2,17 +2,16 @@
 // Uses @effect/platform FileSystem for testability and atomic writes with
 // coalesced saves to avoid write contention under rapid state changes.
 
-import { FileSystem } from "@effect/platform";
-import { Context, Effect, Ref } from "effect";
+import { Context, Effect, FileSystem, Ref } from "effect";
 import { migrateProjectFolders } from "../../../daemon/config-persistence.js";
 import type { DaemonState } from "./daemon-state.js";
 import { DaemonStateTag } from "./daemon-state.js";
 
 /** Path to the daemon.json config file on disk. */
-export class PersistencePathTag extends Context.Tag("PersistencePath")<
+export class PersistencePathTag extends Context.Service<
 	PersistencePathTag,
 	string
->() {}
+>()("PersistencePath") {}
 
 /** Serialize persisted fields of DaemonState to a JSON-safe object. */
 function serializeState(state: DaemonState) {
@@ -53,16 +52,16 @@ const atomicWrite = (
 		if (dirPath.length > 0) {
 			yield* fs
 				.makeDirectory(dirPath, { recursive: true })
-				.pipe(Effect.catchAll(() => Effect.void));
+				.pipe(Effect.catch(() => Effect.void));
 		}
 
 		yield* fs.writeFileString(tmpPath, data).pipe(
-			Effect.catchAll((err) => {
+			Effect.catch((err) => {
 				return Effect.logWarning(`Failed to write temp file: ${err.message}`);
 			}),
 		);
 		yield* fs.rename(tmpPath, targetPath).pipe(
-			Effect.catchAll((err) => {
+			Effect.catch((err) => {
 				return Effect.logWarning(`Failed to rename temp file: ${err.message}`);
 			}),
 		);
@@ -98,7 +97,7 @@ const doSave = (
 
 			if (resaveNeeded) {
 				// Yield to scheduler before re-entering, ensuring stack safety
-				yield* Effect.yieldNow();
+				yield* Effect.yieldNow;
 			} else {
 				shouldContinue = false;
 			}

@@ -3,6 +3,7 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { MessageVersion } from "../../../src/lib/contracts/tool-wire.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import type { PollerManagerShape } from "../../../src/lib/domain/relay/Services/services.js";
 import {
@@ -81,21 +82,21 @@ function makeSessionMetadataLayer(options: {
 
 	const baseLayer = Layer.mergeAll(
 		makePersistenceEffectLayer(":memory:", "test-project"),
-		Layer.succeed(OpenCodeAPITag, api),
-		Layer.succeed(WebSocketHandlerTag, wsHandler),
-		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
-		Layer.succeed(LoggerTag, logger),
-		Layer.succeed(ConfigTag, makeMockConfig()),
+		Layer.succeed(OpenCodeAPITag)(api),
+		Layer.succeed(WebSocketHandlerTag)(wsHandler),
+		Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+		Layer.succeed(LoggerTag)(logger),
+		Layer.succeed(ConfigTag)(makeMockConfig()),
 		PendingInteractionServiceLive,
-		Layer.succeed(StatusPollerTag, statusPoller),
-		Layer.succeed(PollerManagerTag, pollerManager),
+		Layer.succeed(StatusPollerTag)(statusPoller),
+		Layer.succeed(PollerManagerTag)(pollerManager),
 		makeOverridesStateLive(),
 	);
 
 	return {
 		api,
 		logger,
-		layer: baseLayer,
+		layer: Layer.provideMerge(InputDraftsLive, baseLayer),
 	};
 }
 
@@ -126,7 +127,7 @@ describe("session handler metadata", () => {
 						settled: true,
 					});
 					expect(service.setSessionPinned).toHaveBeenCalledWith("s1", false);
-				}).pipe(Effect.provide(layer));
+				}).pipe(Effect.provide(layer, { local: true }));
 			},
 		);
 	}
@@ -261,17 +262,20 @@ describe("session handler metadata", () => {
 					Effect.provide(
 						Layer.merge(
 							layer,
-							Layer.succeed(ReadQueryEffectTag, readQueryEffect),
+							Layer.succeed(ReadQueryEffectTag)(readQueryEffect),
 						),
+						{ local: true },
 					),
-					Effect.tap((result) => {
-						expect(loadPreRenderedHistory).not.toHaveBeenCalled();
-						expect(result).toMatchObject({
-							messages: [{ id: "msg-projected-1", isBackfilled: true }],
-							hasMore: false,
-						});
-						expect(result).not.toHaveProperty("total");
-					}),
+					Effect.tap((result) =>
+						Effect.sync(() => {
+							expect(loadPreRenderedHistory).not.toHaveBeenCalled();
+							expect(result).toMatchObject({
+								messages: [{ id: "msg-projected-1", isBackfilled: true }],
+								hasMore: false,
+							});
+							expect(result).not.toHaveProperty("total");
+						}),
+					),
 				);
 			},
 		);
@@ -281,10 +285,12 @@ describe("session handler metadata", () => {
 		const { api, layer } = makeSessionMetadataLayer({});
 
 		return handleViewSession("client-1", { sessionId: "session-1" }).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(api.session.get).not.toHaveBeenCalled();
-			}),
+			Effect.provide(layer, { local: true }),
+			Effect.tap(() =>
+				Effect.sync(() => {
+					expect(api.session.get).not.toHaveBeenCalled();
+				}),
+			),
 		);
 	});
 
@@ -307,12 +313,14 @@ describe("session handler metadata", () => {
 			});
 
 			return handleViewSession("client-1", { sessionId: "session-1" }).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					// Approvals come from the approvals subscription, not a replay.
-					expect(api.permission.list).not.toHaveBeenCalled();
-					expect(logger.warn).not.toHaveBeenCalled();
-				}),
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() =>
+					Effect.sync(() => {
+						// Approvals come from the approvals subscription, not a replay.
+						expect(api.permission.list).not.toHaveBeenCalled();
+						expect(logger.warn).not.toHaveBeenCalled();
+					}),
+				),
 			);
 		},
 	);
@@ -326,10 +334,12 @@ describe("session handler metadata", () => {
 				yield* setDefaultModel({ providerID: "openai", modelID: "gpt-4" });
 				yield* handleViewSession("client-1", { sessionId: "session-1" });
 			}).pipe(
-				Effect.provide(layer),
-				Effect.tap(() => {
-					expect(api.session.get).not.toHaveBeenCalled();
-				}),
+				Effect.provide(layer, { local: true }),
+				Effect.tap(() =>
+					Effect.sync(() => {
+						expect(api.session.get).not.toHaveBeenCalled();
+					}),
+				),
 			);
 		},
 	);
@@ -351,11 +361,13 @@ describe("viewing a session", () => {
 			sessionManagerService: service,
 		});
 		return handleViewSession("client-1", { sessionId: "session-1" }).pipe(
-			Effect.provide(layer),
-			Effect.tap(() => {
-				expect(markSessionRead).not.toHaveBeenCalled();
-				expect(markSessionSeen).not.toHaveBeenCalled();
-			}),
+			Effect.provide(layer, { local: true }),
+			Effect.tap(() =>
+				Effect.sync(() => {
+					expect(markSessionRead).not.toHaveBeenCalled();
+					expect(markSessionSeen).not.toHaveBeenCalled();
+				}),
+			),
 		);
 	});
 });

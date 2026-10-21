@@ -124,7 +124,7 @@ function setAccounts(
 				: {}),
 		})),
 	});
-	rpc.setDaemonList("SubscribeProjects", {
+	rpc.setProjects({
 		projects: [{ slug: "myapp", title: "myapp", folders: ["/src/myapp"] }],
 	});
 	// A Claude default model makes the claude account current outside a session.

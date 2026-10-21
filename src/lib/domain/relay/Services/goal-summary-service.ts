@@ -1,5 +1,13 @@
-import { SqlClient } from "@effect/sql";
-import { Clock, Context, Deferred, Effect, Layer, Schema } from "effect";
+import {
+	Clock,
+	Context,
+	Deferred,
+	Effect,
+	Layer,
+	Schema,
+	Semaphore,
+} from "effect";
+import { SqlClient } from "effect/sql";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import { type GoalSummary, WsRpcError } from "../../../contracts/ws-rpc.js";
 import {
@@ -25,7 +33,7 @@ import {
 import { MessageSurfacingSettings } from "../../daemon/Services/message-surfacing-settings.js";
 import { ConfigTag } from "./services.js";
 
-export class GoalSummaryServiceTag extends Context.Tag("GoalSummaryService")<
+export class GoalSummaryServiceTag extends Context.Service<
 	GoalSummaryServiceTag,
 	{
 		readonly metadata: (
@@ -38,7 +46,7 @@ export class GoalSummaryServiceTag extends Context.Tag("GoalSummaryService")<
 			sessionId: string,
 		) => Effect.Effect<GoalSummary, WsRpcError>;
 	}
->() {}
+>()("GoalSummaryService") {}
 
 interface CachedSummary {
 	readonly key: string;
@@ -50,7 +58,7 @@ interface CachedSummary {
 export const makeGoalSummaryServiceLive = (
 	options: { readonly queryFactory?: ClaudeOneShotQueryFactory } = {},
 ) =>
-	Layer.scoped(
+	Layer.effect(
 		GoalSummaryServiceTag,
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -58,7 +66,7 @@ export const makeGoalSummaryServiceLive = (
 			const settings = yield* MessageSurfacingSettings;
 			const config = yield* ConfigTag;
 			const scope = yield* Effect.scope;
-			const reservation = yield* Effect.makeSemaphore(1);
+			const reservation = yield* Semaphore.make(1);
 			const cache = new Map<string, CachedSummary>();
 			const inFlight = new Map<
 				string,
@@ -190,7 +198,7 @@ export const makeGoalSummaryServiceLive = (
 							inFlight.set(key, deferred);
 							const run = Effect.gen(function* () {
 								const daemonConfig = yield* Effect.suspend(() =>
-									loadDaemonConfigResult(config.configDir),
+									Effect.fromResult(loadDaemonConfigResult(config.configDir)),
 								).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)));
 								const launch = yield* Effect.try(() =>
 									resolveClaudeLaunchConfig(daemonConfig),
@@ -198,8 +206,8 @@ export const makeGoalSummaryServiceLive = (
 								const workspace =
 									input.workspace === null
 										? null
-										: yield* Schema.decodeUnknown(
-												Schema.parseJson(SessionWorkspaceSchema),
+										: yield* Schema.decodeUnknownEffect(
+												Schema.fromJsonString(SessionWorkspaceSchema),
 											)(input.workspace);
 								const text = yield* makeClaudeOneShot({
 									...launch,
@@ -247,24 +255,26 @@ export const makeGoalSummaryServiceLive = (
 												message: "Could not generate goal summary",
 											}),
 								),
-								Effect.timeoutFail({
+								Effect.timeoutOrElse({
 									duration: "60 seconds",
-									onTimeout: () =>
-										new WsRpcError({
-											message: "Timed out waiting for goal summary",
-										}),
+									orElse: () =>
+										Effect.fail(
+											new WsRpcError({
+												message: "Timed out waiting for goal summary",
+											}),
+										),
 								}),
 							);
 							// Relay ownership keeps one disconnected opener from cancelling the
 							// shared request. The timeout and relay scope still abort SDK work.
 							yield* run.pipe(
-								Effect.exit,
-								Effect.flatMap((exit) => Deferred.done(deferred, exit)),
 								Effect.ensuring(
 									Effect.sync(() => {
 										inFlight.delete(key);
 									}),
 								),
+								Effect.exit,
+								Effect.flatMap((exit) => Deferred.done(deferred, exit)),
 								Effect.interruptible,
 								Effect.forkIn(scope),
 							);

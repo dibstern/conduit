@@ -1,4 +1,4 @@
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import { LoggerTag } from "../domain/relay/Services/services.js";
 import { selectSessionContextWindow } from "../domain/relay/Services/session-model-settings.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
@@ -42,10 +42,10 @@ export const switchContextWindowForSession = (
 			},
 			catalog,
 		);
-		if (Either.isLeft(resolved)) return yield* resolved.left;
-		const model = findCatalogModel(harness, resolved.right.model, catalog);
+		if (Result.isFailure(resolved)) return yield* resolved.failure;
+		const model = findCatalogModel(harness, resolved.success.model, catalog);
 		const options = model ? [...offeredOptions(model).contextWindows] : [];
-		const contextWindow = resolved.right.contextWindow;
+		const contextWindow = resolved.success.contextWindow;
 		yield* selectSessionContextWindow(sessionId, contextWindow);
 		yield* applyLiveSessionSettings(sessionId);
 

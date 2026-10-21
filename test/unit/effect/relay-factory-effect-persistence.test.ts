@@ -48,13 +48,13 @@ vi.mock("../../../src/lib/relay/relay-stack.js", () => ({
 
 const NoopAuxiliaryDaemonServices = Layer.mergeAll(
 	makeDaemonStoreTestLayer(),
-	Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
+	Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub()),
 	InstanceHealthCheckLive,
-	Layer.succeed(PortScannerTag, {
+	Layer.succeed(PortScannerTag)({
 		getKnownPorts: () => Effect.succeed(new Set<number>()),
 		scanNow: () => Effect.succeed({ discovered: [], lost: [], active: [] }),
 	}),
-	Layer.succeed(PushManagerTag, {
+	Layer.succeed(PushManagerTag)({
 		subscribe: () => Effect.void,
 		unsubscribe: () => Effect.void,
 		broadcast: () => Effect.void,
@@ -232,12 +232,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						folders: [projectDir],
 						missing: false,
 						repositoryIdentities: {},
-						effectiveGroupingMode: "repository",
-						group: {
-							key: '["project","effect-project"]',
-							label: "Effect Project",
-							needsProjectQualifier: false,
-						},
 					},
 				]);
 				expect(instances).toEqual([
@@ -287,7 +281,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				Layer.provide(
 					Layer.mergeAll(
 						InstanceHealthCheckLive,
-						Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
+						Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub()),
 						DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
 						ConfigPersistenceNoopLive,
 						DaemonEventBusLive,
@@ -363,12 +357,12 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						port: 4322,
 					}),
 				);
-				const missing = yield* Effect.either(
+				const missing = yield* Effect.result(
 					service.update("missing", { name: "Missing" }),
 				);
 				expect(missing).toMatchObject({
-					_tag: "Left",
-					left: {
+					_tag: "Failure",
+					failure: {
 						_tag: "InstanceManagementServiceError",
 						operation: "update",
 						cause: { _tag: "AccountChangeRejected", id: "missing" },
@@ -438,12 +432,12 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 							"/isolated-test-home/.claude",
 						),
 					}),
-					Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
-					Layer.succeed(PortScannerTag, {
+					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub()),
+					Layer.succeed(PortScannerTag)({
 						getKnownPorts: () => Effect.succeed(new Set([4321, 4322])),
 						scanNow: () => Effect.succeed(scanResult),
 					}),
-					Layer.succeed(PushManagerTag, {
+					Layer.succeed(PushManagerTag)({
 						subscribe: () => Effect.void,
 						unsubscribe: () => Effect.void,
 						broadcast: () => Effect.void,
@@ -543,7 +537,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 			yield* Ref.set(httpServerRef, server);
 
 			const factory = yield* RelayFactoryTag;
-			const fiber = yield* Effect.fork(
+			const fiber = yield* Effect.forkChild(
 				factory.create({
 					slug: "effect-project",
 					title: "Effect Project",
@@ -666,12 +660,12 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				expect(projects).toContainEqual(
 					expect.objectContaining({ slug: added.slug, title: "Added Project" }),
 				);
-				const invalid = yield* Effect.either(
+				const invalid = yield* Effect.result(
 					service.save({ folders: [join(dir, "missing")] }),
 				);
 				expect(invalid).toMatchObject({
-					_tag: "Left",
-					left: { _tag: "ProjectSaveRejected" },
+					_tag: "Failure",
+					failure: { _tag: "ProjectSaveRejected" },
 				});
 				projects = yield* service.remove(added.slug);
 				expect(projects.some((project) => project.slug === added.slug)).toBe(

@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, HashMap, Layer, Option, Ref } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
@@ -18,6 +18,8 @@ import {
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
+import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
 	ConfigTag,
@@ -103,32 +105,31 @@ describe("SessionManager Effect", () => {
 		mockApi: ReturnType<typeof makeMockApi>,
 		configDir?: string,
 	) => {
-		const configLayer = Layer.succeed(
-			ConfigTag,
+		const configLayer = Layer.succeed(ConfigTag)(
 			makeMockConfig(configDir ? { configDir } : {}),
 		);
-		const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
-		return Layer.mergeAll(
+		const loggerLayer = Layer.succeed(LoggerTag)(makeMockLogger());
+		const dependencies = Layer.mergeAll(
 			configDir === undefined
-				? Layer.succeed(AccountDirectory, makeMockAccountDirectory())
+				? Layer.succeed(AccountDirectory)(makeMockAccountDirectory())
 				: AccountDirectoryFromConfigLive(
 						configDir,
 						configuredClaudeConfigDir(join(configDir, "login")),
 					),
 			makeSessionManagerStateLive(),
-			Layer.succeed(OpenCodeAPITag, mockApi),
+			Layer.succeed(OpenCodeAPITag)(mockApi),
 			makePersistenceEffectLayer(":memory:", "test-project"),
 			configLayer,
 			loggerLayer,
-			Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
+			Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 			Layer.effect(SessionActivityTag, makeSessionActivity),
 			RelayStatusSnapshotLive,
 			makeOverridesStateLive(),
-			Layer.succeed(
-				OpenCodeInstancesTag,
+			Layer.succeed(OpenCodeInstancesTag)(
 				makeOpenCodeInstancesStub({ opencode: mockApi }),
 			),
 		);
+		return Layer.provideMerge(SessionWorkspaceLive, dependencies);
 	};
 
 	const makeLiveServiceLayer = (
@@ -150,18 +151,17 @@ describe("SessionManager Effect", () => {
 			: undefined;
 
 		return Layer.provideMerge(
-			SessionManagerServiceLive,
+			Layer.provideMerge(SessionManagerServiceLive, SessionWorkspaceLive),
 			Layer.mergeAll(
 				Layer.fresh(makeTestLayer(mockApi, configDir)),
-				Layer.succeed(LoggerTag, makeMockLogger()),
+				Layer.succeed(LoggerTag)(makeMockLogger()),
 				DaemonEventBusLive,
 				persistenceLayer,
-				Layer.succeed(
-					OrchestrationEngineTag,
+				Layer.succeed(OrchestrationEngineTag)(
 					new OrchestrationEngine({ registry: new ProviderRegistry() }),
 				),
 				...(readQueryOverride
-					? [Layer.succeed(ReadQueryEffectTag, readQueryOverride)]
+					? [Layer.succeed(ReadQueryEffectTag)(readQueryOverride)]
 					: []),
 				...(projectionRunnerOverride ? [projectionRunnerOverride] : []),
 			),
@@ -229,7 +229,7 @@ describe("SessionManager Effect", () => {
 			}));
 
 			// Delete
-			yield* deleteSession("s1");
+			yield* deleteSession("s1").pipe(Effect.provide(InputDraftsLive));
 
 			const state = yield* Ref.get(ref);
 			const result = {
@@ -361,26 +361,28 @@ describe("SessionManager Effect", () => {
 				INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
 				VALUES (${sessionId}, 'test-project', 'claude', 'Claude Session', 'idle', 1000, 1000)`;
 
-			const result = yield* Effect.either(
+			const result = yield* Effect.result(
 				service.renameSession(sessionId, "Useful title"),
 			);
 
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expect(result.left).toBeInstanceOf(SessionManagerError);
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure") {
+				expect(result.failure).toBeInstanceOf(SessionManagerError);
 				// Rename now runs through the command seam, so the projector failure
 				// arrives wrapped in the seam's error rather than a rename-specific one.
-				expect(result.left.operation).toBe("renameSession");
-				expect(result.left.cause).toBeInstanceOf(SessionCommandError);
-				if (result.left.cause instanceof SessionCommandError) {
-					expect(result.left.cause.operation).toBe("session.renamed.commit");
-					expect(result.left.cause.cause).toBeInstanceOf(ProjectionRunnerError);
-					if (result.left.cause.cause instanceof ProjectionRunnerError) {
-						expect(result.left.cause.cause.cause).toBeInstanceOf(
+				expect(result.failure.operation).toBe("renameSession");
+				expect(result.failure.cause).toBeInstanceOf(SessionCommandError);
+				if (result.failure.cause instanceof SessionCommandError) {
+					expect(result.failure.cause.operation).toBe("session.renamed.commit");
+					expect(result.failure.cause.cause).toBeInstanceOf(
+						ProjectionRunnerError,
+					);
+					if (result.failure.cause.cause instanceof ProjectionRunnerError) {
+						expect(result.failure.cause.cause.cause).toBeInstanceOf(
 							ProjectionError,
 						);
-						if (result.left.cause.cause.cause instanceof ProjectionError) {
-							expect(result.left.cause.cause.cause.cause).toBe(rootCause);
+						if (result.failure.cause.cause.cause instanceof ProjectionError) {
+							expect(result.failure.cause.cause.cause.cause).toBe(rootCause);
 						}
 					}
 				}
@@ -642,11 +644,11 @@ describe("SessionManager Effect", () => {
 			return Effect.gen(function* () {
 				const service = yield* SessionManagerServiceTag;
 
-				const result = yield* Effect.either(
+				const result = yield* Effect.result(
 					service.renameSession(sessionId, "API title"),
 				);
 
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe("Failure");
 				expect(mockApi.session.update).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.provide(layer),
@@ -777,7 +779,7 @@ describe("SessionManager Effect", () => {
 			const layer = () =>
 				Layer.mergeAll(
 					makePersistenceEffectLayer(filename, "test-project"),
-					Layer.succeed(ConfigTag, makeMockConfig({ configDir: dir })),
+					Layer.succeed(ConfigTag)(makeMockConfig({ configDir: dir })),
 					AccountDirectoryFromConfigLive(
 						dir,
 						configuredClaudeConfigDir(join(dir, "login")),
@@ -913,7 +915,9 @@ describe("SessionManager Effect", () => {
 				});
 				expect(before.map((s) => s.id)).toContain("ses-doomed");
 
-				yield* deleteSession("ses-doomed");
+				yield* deleteSession("ses-doomed").pipe(
+					Effect.provide(InputDraftsLive),
+				);
 
 				const after = yield* listSessions("test-project", undefined, {
 					slug: "test-project",
@@ -947,7 +951,9 @@ describe("SessionManager Effect", () => {
 					('ses-parent', 'test-project', 'claude', 'Parent', 'idle', NULL, 1000, 1000),
 					('ses-child', 'test-project', 'claude', 'Subagent', 'idle', 'ses-parent', 1000, 1000)`;
 
-				yield* deleteSession("ses-parent");
+				yield* deleteSession("ses-parent").pipe(
+					Effect.provide(InputDraftsLive),
+				);
 
 				const after = yield* listSessions("test-project", undefined, {
 					slug: "test-project",

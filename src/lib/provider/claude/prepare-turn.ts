@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
 import { Data, Effect, Schema } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	type HandoffSummary,
 	HandoffTooLarge,
@@ -39,7 +39,7 @@ export { HandoffTooLarge } from "../../contracts/limit-recovery.js";
 export class ContinuationNotReady extends Data.TaggedError(
 	"ContinuationNotReady",
 )<{
-	readonly reason: string;
+	readonly message: string;
 }> {}
 
 interface PrepareTurnOptions extends ClaudeLaunchConfig {
@@ -48,7 +48,8 @@ interface PrepareTurnOptions extends ClaudeLaunchConfig {
 	readonly modelContextWindow?: number | undefined;
 	readonly agent?: string | undefined;
 	readonly userMessageId?: string | undefined;
-	readonly continuation?: boolean | undefined;
+	/** The cut-off this turn continues, from the continuation command itself. */
+	readonly continuation?: { readonly cutOffMessageId: string } | undefined;
 	readonly nativeResumeFallback?: boolean | undefined;
 	readonly rewind?: SendTurnInput["rewind"];
 	readonly sessionForkSdk?: ClaudeSessionForkSdk | undefined;
@@ -70,8 +71,10 @@ function planTurn(input: {
 	readonly instanceId: string;
 	readonly nativeThread: NativeThread | undefined;
 	readonly hasAccountSwitch: boolean;
+	readonly hasWorkspaceMove: boolean;
 	readonly deliveredAgent: string | undefined;
 	readonly limitRecovery: LimitRecovery | null;
+	readonly cutOffDismissed: boolean;
 	readonly messages?: readonly MessageWithParts[];
 	readonly userText: string;
 	readonly options: PrepareTurnOptions;
@@ -81,9 +84,11 @@ function planTurn(input: {
 	| ContinuationNotReady
 	| { readonly _tag: "ReadHistory"; readonly deliveredThrough?: number } {
 	const { nativeThread, options, userText } = input;
-	if (options.continuation && !input.limitRecovery?.cutOffMessageId)
+	// Only Dismiss closes a continuation. The continuation's own reply clears
+	// limit_recovery, and a restart or retry must still be able to re-plan it.
+	if (options.continuation && input.cutOffDismissed)
 		return new ContinuationNotReady({
-			reason: "The cut-off request is no longer open.",
+			message: "The cut-off request was dismissed.",
 		});
 	// A cut-off remains an open request until Dismiss or a real assistant reply.
 	const note =
@@ -151,7 +156,7 @@ function planTurn(input: {
 		!options.nativeResumeFallback
 	)
 		return new ContinuationNotReady({
-			reason: "The cut-off request has no native session to resume.",
+			message: "The cut-off request has no native session to resume.",
 		});
 	const requiresFreshSession =
 		sameLiveAccount && (!sameLiveAgent || !live?.resumeSessionId);
@@ -178,13 +183,16 @@ function planTurn(input: {
 					resumeSessionId,
 				}
 			: undefined;
-	// A receipt from another or unknown folder may be unresumable on this login.
+	// A receipt from another or unknown login folder may be unresumable. So may
+	// one from before a workspace move: Claude finds transcripts only from their
+	// own cwd or a live sibling worktree, and the old worktree may be gone.
 	// Catch up so a rejected native resume can fall back to a fresh handoff.
 	const root = options.workspaceRoot ?? process.cwd();
 	const catchingUp =
 		!!resuming &&
 		!!nativeThread &&
 		(input.hasAccountSwitch ||
+			input.hasWorkspaceMove ||
 			nativeThread.configDir === undefined ||
 			!sameClaudeLogin(
 				{ configDir: nativeThread.configDir, root },
@@ -368,7 +376,7 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 						needsCanonicalHandoff = true;
 					} else {
 						const testModule = yield* loadClaudeSdkTestModule.pipe(
-							Effect.catchAll(() => Effect.succeed(undefined)),
+							Effect.catch(() => Effect.succeed(undefined)),
 						);
 						const sdk =
 							testModule?.claudeSdk.fork ??
@@ -379,7 +387,7 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 								dir: workspaceRoot,
 								configDir: resumeConfigDir,
 							}),
-						).pipe(Effect.catchAll(() => Effect.succeed([])));
+						).pipe(Effect.catch(() => Effect.succeed([])));
 						needsCanonicalHandoff =
 							resolveRewindUpToUuid(
 								transcript,
@@ -413,19 +421,42 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 								OR ${nativeThread?.deliveredThrough ?? null} IS NULL
 								AND json_extract(data, '$.newProvider') = ${instanceId})
 						LIMIT 1`;
+				const workspaceMoves = nativeThread
+					? yield* sql<{ moved: number }>`
+						SELECT 1 AS moved FROM events
+						WHERE session_id = ${sessionId} AND type = 'session.workspace_changed'
+							AND sequence > ${nativeThread.deliveredThrough}
+						LIMIT 1`
+					: [];
+				const cutOff = options.continuation?.cutOffMessageId ?? null;
+				// A message can be cut off again after an earlier Dismiss; only a
+				// dismissal after its latest cut-off closes it.
+				const dismissals =
+					cutOff === null
+						? []
+						: yield* sql<{ dismissed: number }>`
+						SELECT 1 AS dismissed FROM events
+						WHERE session_id = ${sessionId} AND type = 'session.cut_off_dismissed'
+							AND json_extract(data, '$.cutOffMessageId') = ${cutOff}
+							AND sequence > COALESCE((SELECT MAX(sequence) FROM events
+								WHERE session_id = ${sessionId} AND type = 'session.usage_limited'
+									AND json_extract(data, '$.cutOffMessageId') = ${cutOff}), 0)
+						LIMIT 1`;
 				const input = {
 					projectId: state.projectId,
 					sessionId,
 					instanceId,
 					nativeThread,
 					hasAccountSwitch: accountSwitches.length > 0,
+					hasWorkspaceMove: workspaceMoves.length > 0,
 					deliveredAgent: providerState[`claudeAgent:${instanceId}`],
 					limitRecovery:
 						session?.limit_recovery == null
 							? null
-							: Schema.decodeUnknownSync(Schema.parseJson(LimitRecoverySchema))(
-									session.limit_recovery,
-								),
+							: Schema.decodeUnknownSync(
+									Schema.fromJsonString(LimitRecoverySchema),
+								)(session.limit_recovery),
+					cutOffDismissed: dismissals.length > 0,
 					userText: userText ?? "",
 					options: turnOptions,
 				};
@@ -444,9 +475,7 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 					}
 					// The current user event is already committed by the send path. Its
 					// text belongs only at the end of the SDK prompt, outside the handoff.
-					const cutOffMessageId = options.continuation
-						? input.limitRecovery?.cutOffMessageId
-						: undefined;
+					const cutOffMessageId = options.continuation?.cutOffMessageId;
 					const cutOffMessage = cutOffMessageId
 						? messages.find(
 								(message) =>
@@ -455,7 +484,7 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 						: undefined;
 					if (options.continuation && !cutOffMessage)
 						return yield* new ContinuationNotReady({
-							reason: "The cut-off request is no longer available.",
+							message: "The cut-off request is no longer available.",
 						});
 					let history = messages;
 					if (plan.deliveredThrough !== undefined) {
@@ -518,20 +547,21 @@ export const sendPreparedClaudeTurn = <
 			input.instanceId,
 			input.userText,
 		);
-		const result = yield* Effect.either(
+		const result = yield* Effect.result(
 			input.send(prepared, input.options.nativeResumeFallback === true),
 		);
-		const failure = result._tag === "Left" ? result.left : result.right?.error;
+		const failure =
+			result._tag === "Failure" ? result.failure : result.success?.error;
 		if (
 			input.options.rewind !== undefined ||
 			!prepared.resumeSessionId ||
 			!prepared.handoff ||
-			(result._tag === "Right" && !result.right?.nativeResumeRejected) ||
+			(result._tag === "Success" && !result.success?.nativeResumeRejected) ||
 			!isClaudeResumeFailure(failure)
 		)
-			return result._tag === "Left"
-				? yield* Effect.fail(result.left)
-				: result.right;
+			return result._tag === "Failure"
+				? yield* Effect.fail(result.failure)
+				: result.success;
 		const sql = yield* SqlClient.SqlClient;
 		// Keep other accounts' receipts intact. The marker also gives this one
 		// fallback its own runner deduplication key, including after a restart.

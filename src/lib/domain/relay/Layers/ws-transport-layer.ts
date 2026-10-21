@@ -12,10 +12,10 @@ export interface WsTransport {
 	) => Effect.Effect<import("ws").WebSocket, Error>;
 }
 
-export class WsTransportTag extends Context.Tag("WsTransport")<
+export class WsTransportTag extends Context.Service<
 	WsTransportTag,
 	WsTransport
->() {}
+>()("WsTransport") {}
 
 interface WsTransportConfig {
 	noServer: boolean;
@@ -33,7 +33,7 @@ const defaultPerMessageDeflate = {
 export const makeWsTransportLive = (
 	config: WsTransportConfig,
 ): Layer.Layer<WsTransportTag> =>
-	Layer.scoped(
+	Layer.effect(
 		WsTransportTag,
 		Effect.gen(function* () {
 			const ws = yield* Effect.try({
@@ -61,7 +61,7 @@ export const makeWsTransportLive = (
 				socket: Duplex,
 				head: Buffer,
 			): Effect.Effect<import("ws").WebSocket, Error> =>
-				Effect.async<import("ws").WebSocket, Error>((resume) => {
+				Effect.callback<import("ws").WebSocket, Error>((resume) => {
 					let resumed = false;
 					const onError = (err: Error) => {
 						if (resumed) return;

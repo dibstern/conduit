@@ -1,8 +1,7 @@
 // Manages the list of registered projects and the current project slug.
 
 import { Effect, Fiber, Stream } from "effect";
-import type { RuntimeFiber } from "effect/Fiber";
-import { getScopeGroupKey } from "../../session-scope.js";
+import type { ShellEnvelope } from "../../contracts/ws-rpc.js";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
 import { supervise } from "../transport/supervise.js";
@@ -12,15 +11,13 @@ import type {
 } from "../transport/ws-rpc.js";
 import { rpc } from "../transport/ws-rpc-client.js";
 import type { ProjectInfo } from "../types.js";
+import { draftList } from "./draft-list.svelte.js";
 import { applyInstanceListResponse } from "./instance.svelte.js";
 import { projectState } from "./project-state.svelte.js";
 import {
 	attachedProjectState,
-	getCurrentSearchParams,
 	getCurrentSlug,
 	replaceRoute,
-	routerState,
-	SCOPE_PARAM,
 } from "./router.svelte.js";
 import { applyServerStatus, serverStatusFeed } from "./server-status.svelte.js";
 import { confirm } from "./ui.svelte.js";
@@ -28,13 +25,21 @@ import { applyUsageLimitsSetting, applyUsageReadings } from "./usage.svelte.js";
 
 export { getDraftProject, projectState } from "./project-state.svelte.js";
 
-/** Apply a full project list from a subscription or RPC reply. */
+/** Project mutation replies only update the attached project hint. */
 export function applyProjectList(
 	response: Pick<ProjectMutationResponse, "projects" | "current">,
 ): void {
-	const projects = toProjectInfoList(response.projects);
-	projectState.projects = projects;
 	if (response.current != null) projectState.currentSlug = response.current;
+}
+
+/** The shell feed owns the registered project list. */
+export function applyShellProjects(
+	frame: Extract<ShellEnvelope, { readonly _tag: "projects" }>,
+): void {
+	const projects = toProjectInfoList(frame.projects);
+	projectState.projects = projects;
+	projectState.newSessionProject = frame.newSessionProject ?? null;
+	projectState.projectOrder = frame.projectOrder ?? [];
 
 	// Removing the attached project returns to the session list.
 	if (
@@ -42,12 +47,7 @@ export function applyProjectList(
 		!projects.some((p) => p.slug === attachedProjectState.slug)
 	) {
 		attachedProjectState.slug = null;
-		// A repository scope survives removal of its attached checkout, including
-		// when the last member leaves and the group key becomes unknown.
-		const scope = getCurrentSearchParams().get(SCOPE_PARAM);
-		replaceRoute(
-			getScopeGroupKey(scope) === null ? "/?" : `/${routerState.search}`,
-		);
+		replaceRoute("/?");
 	}
 }
 
@@ -75,8 +75,8 @@ export async function confirmRemoveProjects(
 		getCurrentSlug(),
 		...projectState.projects.map((project) => project.slug),
 	].find((slug) => slug != null && !slugs.includes(slug));
-	// One at a time: each reply carries the whole project list, so concurrent
-	// replies could land out of order and resurrect a removed project.
+	// Remove one at a time so a later request cannot route through a project
+	// whose removal is still in flight.
 	void (async () => {
 		for (const slug of slugs) {
 			applyProjectList(
@@ -94,23 +94,18 @@ const toProjectInfoList = (
 		slug: project.slug,
 		title: project.title,
 		folders: project.folders,
+		...(project.addedAt !== undefined ? { addedAt: project.addedAt } : {}),
 		...(project.setupScript !== undefined
 			? { setupScript: project.setupScript }
 			: {}),
 		...(project.sessionMode !== undefined
 			? { sessionMode: project.sessionMode }
 			: {}),
-		...(project.groupingMode !== undefined
-			? { groupingMode: project.groupingMode }
-			: {}),
-		...(project.effectiveGroupingMode !== undefined
-			? { effectiveGroupingMode: project.effectiveGroupingMode }
-			: {}),
-		...(project.group !== undefined ? { group: project.group } : {}),
 		...(project.repositoryIdentities != null
 			? { repositoryIdentities: project.repositoryIdentities }
 			: {}),
 		...(project.git != null ? { git: project.git } : {}),
+		...(project.missing !== undefined ? { missing: project.missing } : {}),
 		...(project.unavailableReason !== undefined
 			? { unavailableReason: project.unavailableReason }
 			: {}),
@@ -121,10 +116,10 @@ const toProjectInfoList = (
 
 let following = false;
 let generation = 0;
-let fiber: RuntimeFiber<void, never> | null = null;
+let fiber: Fiber.Fiber<void, never> | null = null;
 
 /**
- * Follow the daemon-global project, instance, usage and status lists over the
+ * Follow the daemon-global instance, usage and status lists over the
  * tab's one socket pair. None is project-scoped, so a project switch must not
  * re-follow: each new usage subscription re-reads every account's limits.
  */
@@ -156,12 +151,10 @@ export function followDaemonLists(on: boolean): void {
 					Effect.flatMap(clients.forProject(""), ({ subscriptions, control }) =>
 						Effect.all(
 							[
-								follow(subscriptions.projects, (list) => {
-									applyProjectList(list);
-									projectState.newSessionProject =
-										list.newSessionProject ?? null;
-								}),
 								follow(subscriptions.instances, applyInstanceListResponse),
+								follow(subscriptions.drafts, (rows) => {
+									draftList.rows = rows;
+								}),
 								Stream.runForEach(
 									supervise(
 										Stream.suspend(subscriptions.usage),
@@ -179,7 +172,7 @@ export function followDaemonLists(on: boolean): void {
 															applyUsageLimitsSetting(usageLimits);
 													}),
 												),
-												Effect.catchAll(() => Effect.void),
+												Effect.catch(() => Effect.void),
 											);
 										}),
 								),

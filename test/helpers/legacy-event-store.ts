@@ -2,7 +2,7 @@
 // can prove the Effect migrator still adopts stores that exist in the wild.
 
 import { createHash } from "node:crypto";
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import {
 	BACKFILL_COMPACTION_MESSAGES_MIGRATION,
 	CURRENT_EVENT_STORE_MIGRATION,
@@ -57,7 +57,7 @@ const REBUILDS_FOREIGN_KEYS_ID = 10;
 
 /** Applies legacy migrations 1..`through` and records them in `_migrations`. */
 export function seedLegacyEventStore(
-	db: Database.Database,
+	db: DatabaseSync,
 	through = legacyMigrations.length,
 ): void {
 	db.exec(`CREATE TABLE IF NOT EXISTS _migrations (
@@ -73,12 +73,13 @@ export function seedLegacyEventStore(
 		const sql = readMigrationSql(file);
 		const rebuildsForeignKeys = id === REBUILDS_FOREIGN_KEYS_ID;
 		// PRAGMA foreign_keys is a no-op inside a transaction.
-		if (rebuildsForeignKeys) db.pragma("foreign_keys = OFF");
-		db.transaction(() => {
+		if (rebuildsForeignKeys) db.exec("PRAGMA foreign_keys = OFF");
+		db.exec("BEGIN");
+		try {
 			db.exec(sql);
 			if (rebuildsForeignKeys) {
-				const violations = db.pragma("foreign_key_check");
-				if (Array.isArray(violations) && violations.length > 0) {
+				const violations = db.prepare("PRAGMA foreign_key_check").all();
+				if (violations.length > 0) {
 					throw new Error(`Legacy migration ${id} broke foreign keys`);
 				}
 			}
@@ -88,7 +89,12 @@ export function seedLegacyEventStore(
 				createHash("sha256").update(sql).digest("hex"),
 				Date.now(),
 			);
-		})();
-		if (rebuildsForeignKeys) db.pragma("foreign_keys = ON");
+			db.exec("COMMIT");
+		} catch (cause) {
+			db.exec("ROLLBACK");
+			throw cause;
+		} finally {
+			if (rebuildsForeignKeys) db.exec("PRAGMA foreign_keys = ON");
+		}
 	}
 }

@@ -91,15 +91,22 @@ export const SESSION_PROJECT_SCOPE_MIGRATION = "0058_session_project_scope.sql";
 export const DAEMON_STORE_IMPORTS_MIGRATION = "0059_daemon_store_imports.sql";
 export const SESSIONS_LINEAGE_MIGRATION = "0060_sessions_lineage.sql";
 export const LEGACY_FORKS_MIGRATION = "0061_legacy_forks.sql";
-export const GOAL_CHECK_METADATA_MIGRATION = "0062_goal_check_metadata.sql";
+export const SESSIONS_ARCHIVED_MIGRATION = "0062_sessions_archived.sql";
+export const PROMPT_PROVIDER_REFERENCE_MIGRATION =
+	"0063_prompt_provider_reference.sql";
+export const TOOL_RESULT_EVENT_REFS_MIGRATION =
+	"0064_tool_result_event_refs.sql";
+export const PROJECT_TREE_DATA_MIGRATION = "0065_project_tree_data.sql";
+export const INPUT_DRAFTS_MIGRATION = "0066_input_drafts.sql";
+export const GOAL_CHECK_METADATA_MIGRATION = "0067_goal_check_metadata.sql";
 export const MESSAGE_PART_SURFACING_MIGRATION =
-	"0063_message_part_surfacing.sql";
+	"0068_message_part_surfacing.sql";
 export const SESSIONS_SETTLED_SHELF_INDEX_MIGRATION =
-	"0064_sessions_settled_shelf_index.sql";
-export const SURFACING_MARKS_MIGRATION = "0065_surfacing_marks.sql";
-export const MESSAGE_PART_READ_MIGRATION = "0066_message_part_read.sql";
-export const TURN_RECAPS_MIGRATION = "0067_turn_recaps.sql";
-export const SESSIONS_GOAL_STUCK_MIGRATION = "0068_sessions_goal_stuck.sql";
+	"0069_sessions_settled_shelf_index.sql";
+export const SURFACING_MARKS_MIGRATION = "0070_surfacing_marks.sql";
+export const MESSAGE_PART_READ_MIGRATION = "0071_message_part_read.sql";
+export const TURN_RECAPS_MIGRATION = "0072_turn_recaps.sql";
+export const SESSIONS_GOAL_STUCK_MIGRATION = "0073_sessions_goal_stuck.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

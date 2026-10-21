@@ -11,9 +11,9 @@ import {
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Either } from "effect";
+import { Result as Either } from "effect";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { StartInstance } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { stopManagedOpenCode } from "../../../src/lib/instance/managed-opencode-process.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
@@ -45,14 +45,19 @@ describe("managed OpenCode survives server replacement", () => {
 	/** Managed OpenCode spawns on first use, not with the server. */
 	const firstUse = () => {
 		if (!harness) throw new Error("No process harness");
-		return harness.requestRpc(
-			new StartInstance({ instanceId: "managed-test" }),
-		);
+		return harness.requestRpc({
+			_tag: "StartInstance",
+			instanceId: "managed-test",
+		});
 	};
 	const startManaged = async (
 		options: Parameters<typeof ProcessHarness.start>[0] = {},
 	) => {
-		harness = await ProcessHarness.start({ managedOpenCode: true, ...options });
+		harness = await ProcessHarness.start({
+			managedOpenCode: true,
+			managedOpenCodeStopGraceMs: 100,
+			...options,
+		});
 		await firstUse();
 		return harness;
 	};
@@ -649,6 +654,7 @@ describe("managed OpenCode survives server replacement", () => {
 	it("retains fixture cleanup ownership when its supervisor cannot authenticate and retries", async () => {
 		harness = await ProcessHarness.start({
 			managedOpenCode: true,
+			managedOpenCodeStopGraceMs: 100,
 			pauseOpenCodeSupervisor: true,
 		});
 		await expect(firstUse()).rejects.toThrow();
@@ -1018,6 +1024,7 @@ process.kill(process.pid, "SIGKILL");`,
 	it("retries cleanup on explicit shutdown after failed startup control recovers", async () => {
 		harness = await ProcessHarness.start({
 			managedOpenCode: true,
+			managedOpenCodeStopGraceMs: 100,
 			pauseOpenCodeSupervisor: true,
 		});
 		await expect(firstUse()).rejects.toThrow();

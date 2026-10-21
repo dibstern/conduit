@@ -16,7 +16,14 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Either, Layer, Option, Record, Stream } from "effect";
+import {
+	Effect,
+	Result as Either,
+	Layer,
+	Option,
+	Record,
+	Stream,
+} from "effect";
 import { afterAll, vi } from "vitest";
 import type { Account } from "../../src/lib/contracts/account.js";
 import {
@@ -387,6 +394,8 @@ export function createMockProjectRelay(
 		syncGlobalSetting: () => Effect.void,
 		refreshGlobalDefaults: () => Effect.void,
 		settleIdleSessions: () => Effect.succeed(0),
+		archiveIdleSessions: () => Effect.succeed(0),
+		deleteArchivedSessions: () => Effect.succeed(0),
 		wsHandler: makeMockWebSocketHandler(),
 		rpcWsHandler: {
 			handleUpgrade: vi.fn(),
@@ -544,6 +553,7 @@ export function makeOpenCodeInstancesStub(
 		use,
 		borrow: use,
 		ifRunning: (instanceId) => Effect.option(use(instanceId)),
+		isManagedStopped: () => Effect.succeed(false),
 		useIfRunning: (instanceId) => Effect.option(use(instanceId)),
 		stop: () => Effect.void,
 	};
@@ -697,6 +707,9 @@ export function makeMockSessionManagerService(
 		markSessionUnread: vi.fn(() => Effect.void),
 		markSessionSeen: vi.fn(() => Effect.succeed(false)),
 		setSessionSettled: vi.fn(() => Effect.succeed(false)),
+		setSessionArchived: vi.fn(() => Effect.succeed(false)),
+		deleteArchivedSessions: vi.fn(() => Effect.succeed(0)),
+		restoreSessionForSend: vi.fn(() => Effect.void),
 		setSessionPinned: vi.fn(() => Effect.succeed(false)),
 		snoozeSession: vi.fn(() => Effect.succeed(false)),
 		unsnoozeSession: vi.fn(() => Effect.succeed(false)),
@@ -845,14 +858,14 @@ export function makeMockAccountDirectory(
 			name: "OpenCode",
 		},
 	],
-): AccountDirectory["Type"] {
+): AccountDirectory["Service"] {
 	return makeAccountDirectory(
 		Effect.succeed({
 			accounts,
 			launchLogin: configuredClaudeConfigDir("/isolated-test-login"),
 			maxAccounts: 5,
 			defaults: Record.map(PROVIDER_DRIVERS, (_, driver) =>
-				Option.fromNullable(
+				Option.fromNullishOr(
 					accounts.find((account) => account.driver === driver)?.id,
 				),
 			),
@@ -966,7 +979,7 @@ const makeTestInstanceManagementService = (
  * Every field is optional — defaults are used for omitted fields.
  */
 export interface TestHandlerLayerOptions {
-	accountDirectory?: AccountDirectory["Type"];
+	accountDirectory?: AccountDirectory["Service"];
 	api?: OpenCodeAPI;
 	openCodeModelService?: OpenCodeModelService;
 	wsHandler?: WebSocketHandlerShape;
@@ -1050,13 +1063,12 @@ export function makeTestHandlerLayer(
 	};
 	const instanceMgmt = opts?.instanceMgmt;
 	const overridesStateLayer = makeOverridesStateLive();
-	const openCodeApiLayer = Layer.succeed(OpenCodeAPITag, api);
-	const configLayer = Layer.succeed(ConfigTag, config);
-	const accountDirectoryLayer = Layer.succeed(
-		AccountDirectory,
+	const openCodeApiLayer = Layer.succeed(OpenCodeAPITag)(api);
+	const configLayer = Layer.succeed(ConfigTag)(config);
+	const accountDirectoryLayer = Layer.succeed(AccountDirectory)(
 		opts?.accountDirectory ?? makeMockAccountDirectory(),
 	);
-	const loggerLayer = Layer.succeed(LoggerTag, log);
+	const loggerLayer = Layer.succeed(LoggerTag)(log);
 	const activityLayer = Layer.effect(SessionActivityTag, makeSessionActivity);
 	const backgroundLayer = Layer.effect(
 		BackgroundLivenessTag,
@@ -1065,15 +1077,13 @@ export function makeTestHandlerLayer(
 			(activity) => activity.background.backgroundOf,
 		),
 	).pipe(Layer.provide(activityLayer));
-	const orchestrationLayer = Layer.succeed(
-		OrchestrationEngineTag,
+	const orchestrationLayer = Layer.succeed(OrchestrationEngineTag)(
 		opts?.orchestrationEngine ??
 			withDispatchEffect({
 				dispatch: vi.fn(async () => ({ models: [], commands: [] })),
 			}),
 	);
-	const providerRegistryLayer = Layer.succeed(
-		ProviderRegistryTag,
+	const providerRegistryLayer = Layer.succeed(ProviderRegistryTag)(
 		opts?.providerRegistry ?? new ProviderRegistry(),
 	);
 	const basePersistenceLayer =
@@ -1081,23 +1091,24 @@ export function makeTestHandlerLayer(
 		makePersistenceEffectLayer(":memory:", "test-project");
 	const seedEvents = opts?.seedEvents;
 	const persistenceLayer = seedEvents
-		? basePersistenceLayer.pipe(
-				Layer.tap((context) =>
-					Effect.flatMap(makeCommitAndSignal, (commit) =>
-						commit(seedEvents),
-					).pipe(Effect.provide(context), Effect.orDie),
+		? Layer.suspend(() =>
+				basePersistenceLayer.pipe(
+					Layer.tap((context) =>
+						Effect.flatMap(makeCommitAndSignal, (commit) =>
+							commit(seedEvents),
+						).pipe(Effect.provide(context), Effect.orDie),
+					),
 				),
 			)
 		: basePersistenceLayer;
 	const providerTurnPersistenceLayer = Layer.mergeAll(
 		persistenceLayer,
 		...(opts?.readQueryEffect
-			? [Layer.succeed(ReadQueryEffectTag, opts.readQueryEffect)]
+			? [Layer.succeed(ReadQueryEffectTag)(opts.readQueryEffect)]
 			: []),
 		...(opts?.claudeEventPersistEffect
 			? [
-					Layer.succeed(
-						ClaudeEventPersistEffectTag,
+					Layer.succeed(ClaudeEventPersistEffectTag)(
 						opts.claudeEventPersistEffect,
 					),
 				]
@@ -1108,20 +1119,20 @@ export function makeTestHandlerLayer(
 	);
 	const sessionManagerOrchestrationLayer = Layer.succeed(
 		OrchestrationEngineTag,
+	)(
 		opts?.orchestrationEngine ??
 			new OrchestrationEngine({ registry: new ProviderRegistry() }),
 	);
-	const wsHandlerLayer = Layer.succeed(WebSocketHandlerTag, wsHandler);
+	const wsHandlerLayer = Layer.succeed(WebSocketHandlerTag)(wsHandler);
 	const configured =
 		config.configDir === undefined
-			? Either.right(defaultDaemonConfig())
+			? Either.succeed(defaultDaemonConfig())
 			: loadDaemonConfigResult(config.configDir);
 	const configuredInstances =
-		Either.isLeft(configured) && configured.left._tag === "NotFound"
+		Either.isFailure(configured) && configured.failure._tag === "NotFound"
 			? []
 			: (Either.getOrThrow(configured).instances ?? []);
-	const openCodeInstancesLayer = Layer.succeed(
-		OpenCodeInstancesTag,
+	const openCodeInstancesLayer = Layer.succeed(OpenCodeInstancesTag)(
 		makeOpenCodeInstancesStub({
 			opencode: api,
 			...Object.fromEntries(
@@ -1131,21 +1142,19 @@ export function makeTestHandlerLayer(
 			),
 		}),
 	);
-	const ptyManagerLayer = Layer.succeed(PtyManagerTag, ptyManager);
-	const connectPtyUpstreamLayer = Layer.succeed(
-		ConnectPtyUpstreamTag,
+	const ptyManagerLayer = Layer.succeed(PtyManagerTag)(ptyManager);
+	const connectPtyUpstreamLayer = Layer.succeed(ConnectPtyUpstreamTag)(
 		connectPtyUpstream,
 	);
-	const localPtyLayer = Layer.succeed(LocalPtyServiceTag, localPty);
-	const sessionTitleServiceLayer = Layer.succeed(
-		SessionTitleServiceTag,
+	const localPtyLayer = Layer.succeed(LocalPtyServiceTag)(localPty);
+	const sessionTitleServiceLayer = Layer.succeed(SessionTitleServiceTag)(
 		sessionTitleService,
 	);
 	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
 		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
 	);
 	const openCodeModelServiceLayer = opts?.openCodeModelService
-		? Layer.succeed(OpenCodeModelServiceTag, opts.openCodeModelService)
+		? Layer.succeed(OpenCodeModelServiceTag)(opts.openCodeModelService)
 		: OpenCodeModelServiceLive.pipe(
 				Layer.provide(
 					Layer.mergeAll(
@@ -1160,7 +1169,7 @@ export function makeTestHandlerLayer(
 		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
 	);
 	const projectManagementServiceLayer = opts?.projectManagementService
-		? Layer.succeed(ProjectManagementServiceTag, opts.projectManagementService)
+		? Layer.succeed(ProjectManagementServiceTag)(opts.projectManagementService)
 		: ProjectManagementServiceLive.pipe(
 				Layer.provide(
 					Layer.mergeAll(configLayer, openCodeSettingsServiceLayer),
@@ -1196,16 +1205,28 @@ export function makeTestHandlerLayer(
 			),
 		),
 	);
+	const sessionWorkspaceLayer = SessionWorkspaceLive.pipe(
+		Layer.provide(
+			Layer.mergeAll(
+				openCodeApiLayer,
+				configLayer,
+				loggerLayer,
+				providerTurnPersistenceLayer,
+				accountDirectoryLayer,
+			),
+		),
+	);
 	const sessionManagerServiceLayer = opts?.sessionManagerService
-		? Layer.succeed(SessionManagerServiceTag, opts.sessionManagerService)
+		? Layer.succeed(SessionManagerServiceTag)(opts.sessionManagerService)
 		: SessionManagerServiceLive.pipe(
 				Layer.provide(
 					Layer.mergeAll(
 						openCodeApiLayer,
 						makeSessionManagerStateLive(),
+						sessionWorkspaceLayer,
 						activityLayer,
-						Layer.succeed(LoggerTag, log),
-						Layer.succeed(StatusPollerTag, statusPoller),
+						Layer.succeed(LoggerTag)(log),
+						Layer.succeed(StatusPollerTag)(statusPoller),
 						DaemonEventBusLive,
 						configLayer,
 						accountDirectoryLayer,
@@ -1221,14 +1242,15 @@ export function makeTestHandlerLayer(
 	const instanceManagementServiceLayer =
 		instanceMgmt == null
 			? Layer.empty
-			: Layer.succeed(
-					InstanceManagementServiceTag,
+			: Layer.succeed(InstanceManagementServiceTag)(
 					makeTestInstanceManagementService(instanceMgmt),
 				);
 	const providerTurnServiceLayer = ProviderTurnServiceLive.pipe(
 		Layer.provide(
 			Layer.mergeAll(
 				openCodeApiLayer,
+				openCodeInstancesLayer,
+				sessionWorkspaceLayer,
 				openCodeModelServiceLayer,
 				wsHandlerLayer,
 				loggerLayer,
@@ -1250,16 +1272,7 @@ export function makeTestHandlerLayer(
 		openCodeApiLayer,
 		activityLayer,
 		backgroundLayer,
-		SessionWorkspaceLive.pipe(
-			Layer.provide(
-				Layer.mergeAll(
-					openCodeApiLayer,
-					configLayer,
-					loggerLayer,
-					providerTurnPersistenceLayer,
-				),
-			),
-		),
+		sessionWorkspaceLayer,
 		openCodeInstancesLayer,
 		openCodeFileServiceLayer,
 		openCodeModelServiceLayer,
@@ -1284,13 +1297,13 @@ export function makeTestHandlerLayer(
 		ProjectSettingsLive,
 		RpcSubscriptionScopeLive,
 		AlertsLive,
-		InputDraftsLive,
+		InputDraftsLive.pipe(Layer.provide(persistenceLayer)),
 		ptyManagerLayer,
 		configLayer,
 		accountDirectoryLayer,
 		loggerLayer,
-		Layer.succeed(StatusPollerTag, statusPoller),
-		Layer.succeed(PollerManagerTag, pollerManager),
+		Layer.succeed(StatusPollerTag)(statusPoller),
+		Layer.succeed(PollerManagerTag)(pollerManager),
 		sessionTitleServiceLayer,
 		connectPtyUpstreamLayer,
 		orchestrationLayer,
@@ -1300,7 +1313,7 @@ export function makeTestHandlerLayer(
 		persistenceLayer,
 		...(instanceMgmt == null
 			? []
-			: [Layer.succeed(InstanceMgmtTag, instanceMgmt)]),
+			: [Layer.succeed(InstanceMgmtTag)(instanceMgmt)]),
 	).pipe(Layer.provide(accountDirectoryLayer));
 }
 
@@ -1404,9 +1417,8 @@ export const PassThroughSessionInbox = Layer.effect(
 /** Drops every event: for tests whose turns never reach the store. */
 export const NoopProviderRuntimeIngestionLive = Layer.succeed(
 	ProviderRuntimeIngestionTag,
-	{
-		ingest: () => Effect.succeed(0),
-		ingestBatch: () => Effect.succeed(0),
-		drain: () => Effect.void,
-	},
-);
+)({
+	ingest: () => Effect.succeed(0),
+	ingestBatch: () => Effect.succeed(0),
+	drain: () => Effect.void,
+});

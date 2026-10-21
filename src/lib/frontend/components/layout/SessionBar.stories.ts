@@ -38,7 +38,12 @@ import {
 } from "../../stores/terminal.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
-import { connectedSocket, replyRpc } from "../../stories/sockets.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
+import {
+	connectedSocket,
+	connectingSocket,
+	replyRpc,
+} from "../../stories/sockets.js";
 import { inspectTouchTarget } from "../../stories/touch-target.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import type { rpc } from "../../transport/ws-rpc-client.js";
@@ -194,7 +199,7 @@ const meta = {
 			{ slug: "conduit", title: "conduit", folders: ["/src/conduit"] },
 		];
 		seedSessions([mockSession, mockSessionLongTitle]);
-		sessionState.currentId = mockSession.id;
+		openSessionForSetup(mockSession.id, "conduit");
 		// The bar reads its collapse rule from this store, and Storybook shares
 		// module-level state across story files. Pin the expanded state so only
 		// the story that wants the collapse gets it.
@@ -208,9 +213,12 @@ const meta = {
 		sessionSkillsState.loads = [];
 		uiState.clientCount = 1;
 		destroyAll();
-		// An RPC in a play function dials the control socket, and every dial,
-		// retries included, probes the attached project's relay status. Answer
-		// that probe; anything else still reaches the network guard.
+		// The skills chip's read dials the control socket on mount. Keep it
+		// connecting, so the sheet stories' connectedSocket() can open the
+		// socket the RPC client then keeps for the rest of the file.
+		const restoreSocket = connectingSocket();
+		// Every dial, retries included, probes the attached project's relay
+		// status. Answer that probe; anything else still reaches the network guard.
 		const guardedFetch = globalThis.fetch;
 		globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) =>
 			String(input instanceof Request ? input.url : input).endsWith(
@@ -221,6 +229,7 @@ const meta = {
 		return () => {
 			clearDiscoveryState();
 			globalThis.fetch = guardedFetch;
+			restoreSocket();
 			attachedProjectState.slug = null;
 			goalDetails.open = detailsOpen;
 			sessionState.now = now;
@@ -729,7 +738,7 @@ export const OpeningTerminalClearsBadge: Story = {
 function showState(overrides: Partial<typeof mockSession>) {
 	const session = { ...mockSession, ...overrides };
 	seedSessions([session]);
-	sessionState.currentId = session.id;
+	openSessionForSetup(session.id, "conduit");
 }
 
 export const Settled: Story = {
@@ -808,8 +817,7 @@ export const NeedsAttention: Story = {
 
 export const LongTitle: Story = {
 	beforeEach: () => {
-		sessionState.currentId = mockSessionLongTitle.id;
-		routerState.path = `/s/${mockSessionLongTitle.id}`;
+		openSessionForSetup(mockSessionLongTitle.id, "conduit");
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -832,8 +840,7 @@ export const LongTitle: Story = {
 export const NarrowestPhone: Story = {
 	args: { width: 320 },
 	beforeEach: () => {
-		sessionState.currentId = mockSessionLongTitle.id;
-		routerState.path = `/s/${mockSessionLongTitle.id}`;
+		openSessionForSetup(mockSessionLongTitle.id, "conduit");
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -1244,8 +1251,7 @@ export const PhoneIslandLongTitle: Story = {
 	...LongTitle,
 	args: { island: true },
 	beforeEach: () => {
-		sessionState.currentId = mockSessionLongTitle.id;
-		routerState.path = `/s/${mockSessionLongTitle.id}`;
+		openSessionForSetup(mockSessionLongTitle.id, "conduit");
 		sessionViewState.barOpen = false;
 	},
 };
@@ -1498,8 +1504,7 @@ export const DesktopLongTitleNarrow: Story = {
 	args: { width: 480 },
 	beforeEach: () => {
 		sessionViewState.compact = false;
-		sessionState.currentId = mockSessionLongTitle.id;
-		routerState.path = `/s/${mockSessionLongTitle.id}`;
+		openSessionForSetup(mockSessionLongTitle.id, "conduit");
 	},
 	play: async ({ canvasElement }) => {
 		const bar = within(canvasElement).getByTestId("session-bar");
@@ -1533,8 +1538,7 @@ export const DesktopNoSession: Story = {
 	args: { width: "full" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
-		sessionState.currentId = null;
-		routerState.path = "/";
+		openSessionForSetup(null);
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);

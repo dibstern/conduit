@@ -14,9 +14,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
-import { SqlError } from "@effect/sql/SqlError";
 import { Deferred, Effect, Fiber, Layer, Logger, ManagedRuntime } from "effect";
+import { SqlClient } from "effect/sql";
+import { SqlError } from "effect/sql/SqlError";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -417,19 +417,18 @@ describe("workspace hint resolution against real worktrees", () => {
 		initialize(folders.nestedRepo);
 		initialize(folders.otherRepo);
 		const dependencies = Layer.mergeAll(
-			Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+			Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 			makePersistenceEffectLayer(join(root, "events.db"), "test-project").pipe(
 				Layer.provideMerge(SessionWorkspaceHintStateLive),
 			),
-			Layer.succeed(
-				ConfigTag,
+			Layer.succeed(ConfigTag)(
 				makeMockConfig({
 					projectDir: folders.main,
 					configDir: join(root, "config"),
 				}),
 			),
-			Layer.succeed(LoggerTag, makeMockLogger()),
-			Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+			Layer.succeed(LoggerTag)(makeMockLogger()),
+			Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 		);
 		const runtime = ManagedRuntime.make(
 			SessionWorkspaceLive.pipe(Layer.provideMerge(dependencies)),
@@ -763,7 +762,7 @@ describe("workspace hint resolution against real worktrees", () => {
 					);
 					yield* Deferred.await(publishing);
 					// The SQL commit has succeeded, but its row notification is held.
-					yield* Fiber.interruptFork(dismissal);
+					yield* Effect.sync(() => dismissal.interruptUnsafe());
 					yield* Deferred.succeed(release, undefined);
 					yield* Fiber.await(dismissal);
 					expect(yield* read.getSession(sessionId)).toMatchObject({
@@ -833,13 +832,13 @@ describe("workspace hint resolution against real worktrees", () => {
 								),
 							),
 						).pipe(
-							Effect.catchAllDefect((defect) => {
+							Effect.catchDefect((defect) => {
 								if (!(defect instanceof SqlError)) return Effect.die(defect);
 								expect(bodyCompleted).toBe(true);
 								// Effect SQL makes COMMIT errors defects and leaves SQLite's
 								// transaction open. Close it and surface the real error to the
 								// reactor's normal error path without changing client identity.
-								return sql`ROLLBACK`.pipe(Effect.zipRight(Effect.fail(defect)));
+								return sql`ROLLBACK`.pipe(Effect.andThen(Effect.fail(defect)));
 							}),
 						);
 					};
@@ -900,17 +899,17 @@ describe("workspace hint resolution against real worktrees", () => {
 						expect(familyRow?.item.workspaceHint).toBeUndefined();
 					}).pipe(
 						Effect.provide(
-							Logger.replace(
-								Logger.defaultLogger,
+							Logger.layer([
+								Logger.tracerLogger,
 								Logger.make(({ message }) => {
 									if (
 										String(message).startsWith(
 											"Could not observe workspace hint",
 										)
 									)
-										Deferred.unsafeDone(failed, Effect.void);
+										Deferred.doneUnsafe(failed, Effect.void);
 								}),
-							),
+							]),
 						),
 						Effect.ensuring(
 							Effect.sync(() =>
@@ -940,10 +939,10 @@ describe("workspace hint resolution against real worktrees", () => {
 				expect(
 					yield* workspace
 						.move("s-opencode", folders.b, "user")
-						.pipe(Effect.either),
+						.pipe(Effect.result),
 				).toMatchObject({
-					_tag: "Left",
-					left: { reason: "unsupported-provider" },
+					_tag: "Failure",
+					failure: { reason: "unsupported-provider" },
 				});
 				yield* commit([
 					canonicalEvent("session.workspace_hint_changed", "s-opencode", {
@@ -953,18 +952,18 @@ describe("workspace hint resolution against real worktrees", () => {
 				expect(
 					yield* workspace
 						.move("s-opencode", folders.c, "user")
-						.pipe(Effect.either),
+						.pipe(Effect.result),
 				).toMatchObject({
-					_tag: "Left",
-					left: { reason: "unsupported-provider" },
+					_tag: "Failure",
+					failure: { reason: "unsupported-provider" },
 				});
 				expect(
 					yield* workspace
 						.resolve("s-opencode", folders.b, "launch")
-						.pipe(Effect.either),
+						.pipe(Effect.result),
 				).toMatchObject({
-					_tag: "Left",
-					left: { reason: "unsupported-provider" },
+					_tag: "Failure",
+					failure: { reason: "unsupported-provider" },
 				});
 				expect(yield* workspace.move("s-opencode", folders.b, "user")).toBe(
 					folders.b,

@@ -4,17 +4,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { Effect, ManagedRuntime, Schema } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, it } from "vitest";
-import {
-	GetCategorySet,
-	GetSurfacingLedger,
-	ProposeCategoryTuning,
-	ReplaceCategorySet,
-	ScoreCategorySet,
-	UpdateMessageSurfacing,
-} from "../../../src/lib/contracts/ws-rpc.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -28,14 +20,11 @@ it(
 			for await (const chunk of request)
 				chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
 			const body = Schema.decodeUnknownSync(
-				Schema.parseJson(
+				Schema.fromJsonString(
 					Schema.Struct({
 						questions: Schema.Struct({
 							category: Schema.Struct({
-								criteria: Schema.Record({
-									key: Schema.String,
-									value: Schema.Unknown,
-								}),
+								criteria: Schema.Record(Schema.String, Schema.Unknown),
 							}),
 						}),
 					}),
@@ -100,17 +89,22 @@ it(
 					TYPESAFE_API_KEY: "fake-tuning-key",
 				},
 			});
-			await harness.requestRpc(new UpdateMessageSurfacing({ enabled: true }));
-			const current = await harness.requestRpc(new GetCategorySet({}));
-			const ledger = await harness.requestRpc(new GetSurfacingLedger({}));
+			await harness.requestRpc({
+				_tag: "UpdateMessageSurfacing",
+				enabled: true,
+			});
+			const current = await harness.requestRpc({ _tag: "GetCategorySet" });
+			const ledger = await harness.requestRpc({ _tag: "GetSurfacingLedger" });
 			expect(ledger).toHaveLength(5);
 			expect(ledger[0]).toMatchObject({
 				sessionTitle: "Feedback proof",
 				requestExcerpt: "Fix the queue regression",
 			});
-			const before = await harness.requestRpc(
-				new ScoreCategorySet({ set: current, estimateOnly: true }),
-			);
+			const before = await harness.requestRpc({
+				_tag: "ScoreCategorySet",
+				set: current,
+				estimateOnly: true,
+			});
 			expect(before).toMatchObject({
 				agree: 0,
 				total: 5,
@@ -123,7 +117,7 @@ it(
 				),
 			};
 			expect(
-				await harness.requestRpc(new ScoreCategorySet({ set: weights })),
+				await harness.requestRpc({ _tag: "ScoreCategorySet", set: weights }),
 			).toMatchObject({ agree: 5, jevCalls: 0, complete: true });
 			expect(requests).toHaveLength(0);
 			const criteria = {
@@ -133,9 +127,11 @@ it(
 						: category,
 				),
 			};
-			const estimate = await harness.requestRpc(
-				new ScoreCategorySet({ set: criteria, estimateOnly: true }),
-			);
+			const estimate = await harness.requestRpc({
+				_tag: "ScoreCategorySet",
+				set: criteria,
+				estimateOnly: true,
+			});
 			expect(estimate).toMatchObject({
 				requiredCalls: 55,
 				jevCalls: 0,
@@ -143,9 +139,10 @@ it(
 				canTest: true,
 			});
 			expect(requests).toHaveLength(0);
-			const scored = await harness.requestRpc(
-				new ScoreCategorySet({ set: criteria }),
-			);
+			const scored = await harness.requestRpc({
+				_tag: "ScoreCategorySet",
+				set: criteria,
+			});
 			expect(scored).toMatchObject({
 				agree: 5,
 				requiredCalls: 0,
@@ -157,42 +154,45 @@ it(
 				before.levels.map(({ partId }) => partId),
 			);
 			expect(
-				await harness.requestRpc(new ScoreCategorySet({ set: criteria })),
+				await harness.requestRpc({ _tag: "ScoreCategorySet", set: criteria }),
 			).toMatchObject({ jevCalls: 0, complete: true });
 			expect(requests).toHaveLength(55);
-			const proposed = await harness.requestRpc(new ProposeCategoryTuning({}));
+			const proposed = await harness.requestRpc({
+				_tag: "ProposeCategoryTuning",
+			});
 			expect(proposed.hunks).toHaveLength(1);
-			expect(await harness.requestRpc(new GetCategorySet({}))).toEqual(current);
-			const again = await harness.requestRpc(
-				new ProposeCategoryTuning({ avoid: proposed.hunks }),
+			expect(await harness.requestRpc({ _tag: "GetCategorySet" })).toEqual(
+				current,
 			);
+			const again = await harness.requestRpc({
+				_tag: "ProposeCategoryTuning",
+				avoid: proposed.hunks,
+			});
 			expect(again.hunks[0]?.id).not.toBe(proposed.hunks[0]?.id);
 			const claudeCalls = harness
 				.claudeTitles()
 				.filter(({ prompt }) => prompt.includes('"currentSet"'));
 			expect(claudeCalls).toHaveLength(2);
 			expect(claudeCalls.at(-1)?.prompt).toContain(proposed.hunks[0]?.id);
-			const applied = await harness.requestRpc(
-				new ReplaceCategorySet({
-					expectedVersion: proposed.baseVersion,
-					nextSet: {
-						categories: current.categories.map(
-							(category) =>
-								proposed.hunks.find(
-									({ categoryId }) => categoryId === category.id,
-								)?.after ?? category,
-						),
-					},
-				}),
-			);
+			const applied = await harness.requestRpc({
+				_tag: "ReplaceCategorySet",
+				expectedVersion: proposed.baseVersion,
+				nextSet: {
+					categories: current.categories.map(
+						(category) =>
+							proposed.hunks.find(
+								({ categoryId }) => categoryId === category.id,
+							)?.after ?? category,
+					),
+				},
+			});
 			expect(applied.version).toBe(current.version + 1);
 			await expect(
-				harness.requestRpc(
-					new ReplaceCategorySet({
-						expectedVersion: current.version,
-						nextSet: current,
-					}),
-				),
+				harness.requestRpc({
+					_tag: "ReplaceCategorySet",
+					expectedVersion: current.version,
+					nextSet: current,
+				}),
 			).rejects.toBeDefined();
 			Object.assign(observations, {
 				marks: ledger.length,

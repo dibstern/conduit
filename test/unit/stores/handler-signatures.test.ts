@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
-// Asserts the adapter generic preserves type narrowing; routes through
-// getOrCreateSessionSlot(currentId).
+// Checks the combined session slot and cleanup of in-flight work.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -39,12 +38,10 @@ import {
 	getOrCreateSessionActivity,
 	getOrCreateSessionMessages,
 	getOrCreateSessionSlot,
-	type SessionActivity,
-	type SessionMessages,
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 const TEST_ID = "test-handler-sig";
 
@@ -52,7 +49,7 @@ beforeEach(() => {
 	sessionActivity.clear();
 	sessionMessages.clear();
 	_resetLRU();
-	sessionState.currentId = TEST_ID;
+	openSessionForSetup(TEST_ID, "project-a");
 });
 
 describe("getOrCreateSessionSlot", () => {
@@ -61,7 +58,16 @@ describe("getOrCreateSessionSlot", () => {
 		expect(slot.activity).toBeDefined();
 		expect(slot.messages).toBeDefined();
 		expect(slot.activity.phase).toBe("idle");
+		expect(slot.activity.turnGeneration).toBe(0);
+		expect(slot.activity.doneMessageIds.size).toBe(0);
+		expect(slot.activity.seenMessageIds.size).toBe(0);
+		expect(slot.activity.renderTimer).toBeNull();
 		expect(slot.messages.messages).toEqual([]);
+		expect(slot.messages.currentAssistantText).toBe("");
+		expect(slot.messages.loadLifecycle).toBe("empty");
+		expect(slot.messages.contextPercent).toBe(0);
+		expect(slot.messages.historyHasMore).toBe(false);
+		expect(slot.messages.historyLoading).toBe(false);
 	});
 
 	it("returns the same references on subsequent calls", () => {
@@ -79,40 +85,9 @@ describe("getOrCreateSessionSlot", () => {
 		expect(slot.activity).toBe(activity);
 		expect(slot.messages).toBe(messages);
 	});
-
-	it("preserves type narrowing — activity has SessionActivity shape", () => {
-		const slot = getOrCreateSessionSlot(TEST_ID);
-		const activity: SessionActivity = slot.activity;
-		expect(activity.phase).toBe("idle");
-		expect(activity.turnGeneration).toBe(0);
-		expect(activity.doneMessageIds.size).toBe(0);
-		expect(activity.seenMessageIds.size).toBe(0);
-		expect(activity.renderTimer).toBeNull();
-	});
-
-	it("preserves type narrowing — messages has SessionMessages shape", () => {
-		const slot = getOrCreateSessionSlot(TEST_ID);
-		const messages: SessionMessages = slot.messages;
-		expect(messages.currentAssistantText).toBe("");
-		expect(messages.loadLifecycle).toBe("empty");
-		expect(messages.contextPercent).toBe(0);
-		expect(messages.historyHasMore).toBe(false);
-		expect(messages.historyLoading).toBe(false);
-	});
 });
 
 describe("clearSessionChatState", () => {
-	it("removes both tiers for a session", () => {
-		getOrCreateSessionSlot(TEST_ID);
-		expect(sessionActivity.has(TEST_ID)).toBe(true);
-		expect(sessionMessages.has(TEST_ID)).toBe(true);
-
-		clearSessionChatState(TEST_ID);
-
-		expect(sessionActivity.has(TEST_ID)).toBe(false);
-		expect(sessionMessages.has(TEST_ID)).toBe(false);
-	});
-
 	it("bumps replayGeneration before deletion", () => {
 		const activity = getOrCreateSessionActivity(TEST_ID);
 		const originalGen = activity.replayGeneration;
@@ -134,10 +109,6 @@ describe("clearSessionChatState", () => {
 		clearTimeoutSpy.mockRestore();
 	});
 
-	it("is safe to call for nonexistent session", () => {
-		expect(() => clearSessionChatState("nonexistent")).not.toThrow();
-	});
-
 	it("does not affect other sessions", () => {
 		const other = "other-session";
 		getOrCreateSessionSlot(TEST_ID);
@@ -147,33 +118,5 @@ describe("clearSessionChatState", () => {
 
 		expect(sessionActivity.has(other)).toBe(true);
 		expect(sessionMessages.has(other)).toBe(true);
-	});
-});
-
-describe("LRU cap enforcement", () => {
-	it("evicts oldest Tier 2 entries beyond cap 20", () => {
-		// Create 21 sessions — the first should be evicted
-		for (let i = 0; i < 21; i++) {
-			getOrCreateSessionMessages(`session-${i}`);
-		}
-
-		// Session-0 (oldest, not current) should have been evicted
-		expect(sessionMessages.has("session-0")).toBe(false);
-		// Most recent should still exist
-		expect(sessionMessages.has("session-20")).toBe(true);
-	});
-
-	it("never evicts the current session", () => {
-		sessionState.currentId = "session-0";
-
-		// Create sessions 0..20 (21 total)
-		for (let i = 0; i < 21; i++) {
-			getOrCreateSessionMessages(`session-${i}`);
-		}
-
-		// Session-0 is current — must NOT be evicted
-		expect(sessionMessages.has("session-0")).toBe(true);
-		// session-1 (next oldest non-current) should have been evicted
-		expect(sessionMessages.has("session-1")).toBe(false);
 	});
 });

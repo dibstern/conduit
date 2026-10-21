@@ -3,10 +3,8 @@ import { resolve } from "node:path";
 import { test as base, expect, type Page } from "@playwright/test";
 import { Schema } from "effect";
 import {
-	GetStatus,
 	type GetStatusResponse,
 	GetStatusResponseSchema,
-	RemoveProject,
 	RpcLogLevelSchema,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { isRecord } from "../../../src/lib/utils.js";
@@ -23,7 +21,10 @@ const test = base.extend<{ harness: ProcessHarness }>({
 			});
 			try {
 				await harness.restart({ startupTimeoutMs: 60_000 });
-				await harness.requestRpc(new RemoveProject({ slug: "process-test" }));
+				await harness.requestRpc({
+					_tag: "RemoveProject",
+					slug: "process-test",
+				});
 				await use(harness);
 			} finally {
 				writeFileSync(testInfo.outputPath("daemon.log"), harness.logTail);
@@ -55,10 +56,11 @@ function observeStatus(page: Page): GetStatusResponse[] {
 				if (
 					isRecord(message) &&
 					message["_tag"] === "Request" &&
-					typeof message["id"] === "string" &&
+					(typeof message["id"] === "string" ||
+						typeof message["id"] === "number") &&
 					typeof message["tag"] === "string"
 				)
-					requests.set(message["id"], message["tag"]);
+					requests.set(String(message["id"]), message["tag"]);
 			}
 		});
 		socket.on("framereceived", ({ payload }) => {
@@ -67,8 +69,7 @@ function observeStatus(page: Page): GetStatusResponse[] {
 				if (
 					!isRecord(message) ||
 					message["_tag"] !== "Exit" ||
-					typeof message["requestId"] !== "string" ||
-					requests.get(message["requestId"]) !== "GetStatus"
+					requests.get(String(message["requestId"])) !== "GetStatus"
 				)
 					continue;
 				const exit = message["exit"];
@@ -139,7 +140,7 @@ test("Log level updates daemon status and survives reopening Settings", async ({
 	await expect.poll(() => reads.at(-1)?.logLevel).toBe(nextLevel);
 	await expect(select).toBeEnabled();
 	await expect(select).toHaveAttribute("data-value", nextLevel);
-	expect((await harness.requestRpc(new GetStatus({}))).logLevel).toBe(
+	expect((await harness.requestRpc({ _tag: "GetStatus" })).logLevel).toBe(
 		nextLevel,
 	);
 	await expect(logs.getByRole("alert")).toHaveCount(0);

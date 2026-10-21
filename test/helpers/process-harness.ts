@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 import {
 	appendFileSync,
 	chmodSync,
@@ -17,24 +18,24 @@ import {
 import { createServer as createHttpServer, type Server } from "node:http";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
-import { userInfo } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { Socket } from "@effect/platform";
-import { RpcClient, type RpcGroup, RpcSerialization } from "@effect/rpc";
+import Database from "better-sqlite3";
 import {
 	Cause,
 	Context,
 	Effect,
-	Either,
+	Result as Either,
 	Exit,
 	Fiber,
 	Layer,
 	ManagedRuntime,
-	ParseResult,
+	Schema,
 	Stream,
 } from "effect";
-import type { Request } from "effect/Request";
+import { RpcClient, type RpcGroup, RpcSerialization } from "effect/rpc";
+import { Socket } from "effect/socket";
 import WebSocket from "ws";
 import {
 	AccountIdSchema,
@@ -42,10 +43,7 @@ import {
 	type ProviderDriverKind,
 } from "../../src/lib/contracts/provider-instance.js";
 import {
-	GetInstances,
-	GetStatus,
 	type PtyEnvelope,
-	Shutdown,
 	WsRpcGroup,
 	type WsRpcRequest,
 } from "../../src/lib/contracts/ws-rpc.js";
@@ -87,14 +85,16 @@ import {
 export { responseChunks };
 
 const TIMEOUT_MS = 15_000;
+// Loaded four-worker runs reached 22.9s. Leave 5s within the 30s hook deadline.
+const STARTUP_TIMEOUT_MS = 25_000;
 
-class BrowserRpc extends Context.Tag("ProcessHarnessBrowserRpc")<
+class BrowserRpc extends Context.Service<
 	BrowserRpc,
 	RpcClient.RpcClient<
 		RpcGroup.Rpcs<typeof WsRpcGroup>,
-		import("@effect/rpc/RpcClientError").RpcClientError
+		import("effect/rpc/RpcClientError").RpcClientError
 	>
->() {}
+>()("ProcessHarnessBrowserRpc") {}
 
 function browserRpcRuntime(
 	port: number,
@@ -104,7 +104,7 @@ function browserRpcRuntime(
 	const protocol = RpcClient.layerProtocolSocket().pipe(
 		Layer.provide(Socket.layerWebSocket(`ws://127.0.0.1:${port}/rpc`)),
 		Layer.provide(
-			Layer.succeed(Socket.WebSocketConstructor, (url) => {
+			Layer.succeed(Socket.WebSocketConstructor)((url) => {
 				const socket = new WebSocket(url);
 				socket.once("error", (error) => onDisconnect?.(error));
 				socket.once("close", () =>
@@ -114,15 +114,14 @@ function browserRpcRuntime(
 			}),
 		),
 		Layer.provide(
-			Layer.succeed(
-				RpcSerialization.RpcSerialization,
+			Layer.succeed(RpcSerialization.RpcSerialization)(
 				diagnostics?.serialization(`ws://127.0.0.1:${port}/rpc`) ??
 					RpcSerialization.json,
 			),
 		),
 	);
 	return ManagedRuntime.make(
-		Layer.scoped(BrowserRpc, RpcClient.make(WsRpcGroup)).pipe(
+		Layer.effect(BrowserRpc, RpcClient.make(WsRpcGroup)).pipe(
 			Layer.provide(protocol),
 		),
 	);
@@ -136,6 +135,7 @@ interface Generation {
 	signal?: NodeJS.Signals | null;
 	exitCode?: number | null;
 	fakeSdkActive?: boolean;
+	startupMs?: number;
 }
 
 export interface BrowserFrame {
@@ -213,9 +213,10 @@ export class ProcessHarness {
 		private readonly blockCapabilitiesProbe = false,
 		capabilityModels?: readonly ModelInfo[],
 		private readonly restartProof = false,
-		private readonly holdRunnerAck = false,
+		private readonly holdRunnerAck: boolean | "place-user-message" = false,
 		private readonly holdRunnerOutput?:
 			| "permission-request"
+			| "question-request"
 			| "answer-permission"
 			| "send-turn",
 		private buildId?: string,
@@ -251,6 +252,7 @@ export class ProcessHarness {
 		private readonly opencodeBorrowIdleTimeoutMs?: number,
 		private readonly opencodeInitiallyIdle = false,
 		private readonly draftPreWarmTtlMs?: number,
+		private readonly managedOpenCodeStopGraceMs?: number,
 	) {
 		this.root = realpathSync(mkdtempSync(rootPrefix));
 		this.rpcDiagnostics = new RpcDecodeDiagnostics(
@@ -436,7 +438,7 @@ Object.assign(ClaudeDriver, { create: deps => {
   const projectGate = join(deps.workspaceRoot, ".conduit", "recovery-gated");
   const gate = existsSync(projectGate) ? projectGate : join(root, "capabilities-probe-gated");
   return waitForGate(gate, deps.workspaceRoot).pipe(
-    Effect.zipRight(create({ ...deps, capabilitiesService: { get: () => Effect.succeed(
+    Effect.andThen(create({ ...deps, capabilitiesService: { get: () => Effect.succeed(
       existsSync(join(root, "capabilities-probe-result.json"))
         ? JSON.parse(readFileSync(join(root, "capabilities-probe-result.json"), "utf8"))
         : { models: [], agents: [], commands: [] }
@@ -446,7 +448,7 @@ Object.assign(ClaudeDriver, { create: deps => {
       Object.assign(instance, { recoverEffect: () => {
         const failureGate = join(deps.workspaceRoot, ".conduit", "recovery-fail-after-adoption");
         return recover().pipe(
-          Effect.zipRight(waitForGate(failureGate, deps.workspaceRoot)),
+          Effect.andThen(waitForGate(failureGate, deps.workspaceRoot)),
           Effect.tap(() => Effect.sync(() => {
             if (!existsSync(failureGate)) return;
             writeFileSync(failureGate + "-failed", "original recovery completed before fixture failure");
@@ -476,6 +478,49 @@ Object.assign(ClaudeDriver, { create: deps => {
 		return join(this.configDir, "events.db");
 	}
 
+	/**
+	 * Turn off auto-settle and auto-archive before the next start. A seeded
+	 * store of old, read sessions is otherwise due for both all at once.
+	 */
+	disableIdlePolicies(): void {
+		writeFileSync(
+			join(this.configDir, "daemon.json"),
+			JSON.stringify({
+				...Either.getOrThrow(loadDaemonConfigResult(this.configDir)),
+				autoSettleAfterDays: null,
+				autoArchiveAfterDays: null,
+			}),
+		);
+	}
+
+	promptIdForProviderRequest(providerRequestId: string): string | undefined {
+		const db = new Database(this.daemonStorePath(), { readonly: true });
+		try {
+			return db
+				.prepare<[string], { id: string }>(
+					"SELECT id FROM pending_approvals WHERE provider_request_id = ? ORDER BY created_at DESC LIMIT 1",
+				)
+				.get(providerRequestId)?.id;
+		} finally {
+			db.close();
+		}
+	}
+
+	providerRequestIdForPrompt(promptId: string): string | undefined {
+		const db = new Database(this.daemonStorePath(), { readonly: true });
+		try {
+			return (
+				db
+					.prepare<[string], { provider_request_id: string | null }>(
+						"SELECT provider_request_id FROM pending_approvals WHERE id = ?",
+					)
+					.get(promptId)?.provider_request_id ?? undefined
+			);
+		} finally {
+			db.close();
+		}
+	}
+
 	/** Offline source for startup-import fixtures, never a daemon runtime store. */
 	legacyProjectStorePath(slug = "process-test"): string {
 		return join(projectStorageDir(this.configDir, slug), "events.db");
@@ -500,6 +545,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			queryInitializationDelayMs?: number;
 			/** Keep draft reservation expiry observable without a ten-minute wait. */
 			draftPreWarmTtlMs?: number;
+			/** Test-only SIGTERM grace for the fixture-owned managed process group. */
+			managedOpenCodeStopGraceMs?: number;
 			queryInitializationFailures?: number;
 			blockCapabilitiesProbe?: boolean;
 			capabilityModels?: readonly ModelInfo[];
@@ -511,9 +558,10 @@ Object.assign(ClaudeDriver, { create: deps => {
 			logLevel?: "warn";
 			/** Stand in for a login service: respawn exited daemons on the same port. */
 			respawnOnExit?: boolean;
-			holdRunnerAck?: boolean;
+			holdRunnerAck?: boolean | "place-user-message";
 			holdRunnerOutput?:
 				| "permission-request"
+				| "question-request"
 				| "answer-permission"
 				| "send-turn";
 			buildId?: string;
@@ -566,6 +614,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			options.opencodeBorrowIdleTimeoutMs,
 			options.opencodeInitiallyIdle,
 			options.draftPreWarmTtlMs,
+			options.managedOpenCodeStopGraceMs,
 		);
 	}
 
@@ -605,12 +654,14 @@ Object.assign(ClaudeDriver, { create: deps => {
 					| "CONDUIT_SERVICE"
 					| "TYPESAFE_BASE_URL"
 					| "TYPESAFE_API_KEY"
+					| "CONDUIT_OUTBOX_DRAIN_INTERVAL_MS"
 					| "CONDUIT_TAILSCALE_BIN"
 					| "CONDUIT_BUILD_READY_PATH"
 					| "NODE_OPTIONS"
 					| "CONDUIT_SERVER_BUILD_ID"
 					| "CONDUIT_SLOW_RPC_MS"
 					| "CONDUIT_TEST_ADVANCE_BUS_CAPACITY"
+					| "CONDUIT_TEST_RPC_DEFECT"
 					| "CONDUIT_TRACE_ENABLED"
 					| "CONDUIT_TRACE_FILE"
 					| "CONDUIT_TRACE_MAX_BYTES"
@@ -763,9 +814,11 @@ Object.assign(ClaudeDriver, { create: deps => {
 				});
 			});
 		}
+		const startupAt = performance.now();
 		const child = spawn(
 			process.execPath,
 			[
+				"--disable-warning=DEP0205",
 				"--import",
 				pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href,
 				"--import",
@@ -799,6 +852,9 @@ Object.assign(ClaudeDriver, { create: deps => {
 				cwd: this.projectDir,
 				env: (this.environment = {
 					...options.serviceEnvironment,
+					// Bootstrap once, including configs replaced by a fixture before start.
+					CONDUIT_TEST_REGISTER_PROJECT:
+						this.generations.length === 0 ? "1" : "0",
 					...(options.keepPort && this.port
 						? { CONDUIT_TEST_PORT: String(this.port) }
 						: {}),
@@ -814,6 +870,11 @@ Object.assign(ClaudeDriver, { create: deps => {
 					SHELL: "/bin/sh",
 					XDG_CONFIG_HOME: join(this.root, "config"),
 					XDG_CACHE_HOME: join(this.root, "cache"),
+					// Reuse V8 compilation across fixtures and workers, including tsx's
+					// loader thread. Per-fixture HOME/XDG directories stay isolated.
+					NODE_COMPILE_CACHE:
+						process.env["NODE_COMPILE_CACHE"] ??
+						join(tmpdir(), "conduit-process-harness-compile-cache"),
 					XDG_DATA_HOME: join(this.root, "data"),
 					CONDUIT_CONFIG_DIR: join(this.root, "config"),
 					...(this.opencodeBorrowIdleTimeoutMs === undefined
@@ -843,6 +904,13 @@ Object.assign(ClaudeDriver, { create: deps => {
 							}
 						: {}),
 					CONDUIT_TEST_CLAUDE_QUERY_MODULE: sdkModule,
+					...(this.managedOpenCodeStopGraceMs === undefined
+						? {}
+						: {
+								CONDUIT_TEST_OPENCODE_STOP_GRACE_MS: String(
+									this.managedOpenCodeStopGraceMs,
+								),
+							}),
 					...(options.setupTimeoutMs === undefined
 						? {}
 						: {
@@ -1011,7 +1079,12 @@ Object.assign(ClaudeDriver, { create: deps => {
 							}
 						: {}),
 					...(this.holdRunnerAck
-						? { CONDUIT_TEST_HOLD_RUNNER_ACK: "text.delta" }
+						? {
+								CONDUIT_TEST_HOLD_RUNNER_ACK:
+									this.holdRunnerAck === true
+										? "text.delta"
+										: this.holdRunnerAck,
+							}
 						: {}),
 					...(this.holdRunnerOutput && this.generations.length === 0
 						? { CONDUIT_TEST_HOLD_RUNNER_OUTPUT: this.holdRunnerOutput }
@@ -1036,6 +1109,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 		});
 		let generation: Generation | undefined;
 		let fakeSdkActive = false;
+		let probeProjectDir = this.projectDir;
+		const fakeSdkProjects = new Set<string>();
 		this.exit = new Promise<void>((done) => {
 			child.once("exit", (exitCode, signal) => {
 				if (generation) Object.assign(generation, { exitCode, signal });
@@ -1058,7 +1133,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			const timer = setTimeout(() => {
 				finished = true;
 				fail(new Error(`Server startup timeout\n${this.logs}`));
-			}, options.startupTimeoutMs ?? TIMEOUT_MS);
+			}, options.startupTimeoutMs ?? STARTUP_TIMEOUT_MS);
 			const onExit = () => {
 				finished = true;
 				clearTimeout(timer);
@@ -1077,7 +1152,11 @@ Object.assign(ClaudeDriver, { create: deps => {
 				clearTimeout(timer);
 				child.off("exit", onExit);
 				child.off("error", onError);
-				generation = { ...value, fakeSdkActive };
+				generation = {
+					...value,
+					fakeSdkActive,
+					startupMs: Math.round(performance.now() - startupAt),
+				};
 				this.port = generation.port;
 				this.generations.push(generation);
 				done();
@@ -1090,10 +1169,13 @@ Object.assign(ClaudeDriver, { create: deps => {
 				} else if (value["kind"] === "fake-sdk-active") {
 					if (
 						value["module"] === sdkModule &&
-						value["projectDir"] === this.projectDir
+						typeof value["projectDir"] === "string"
 					) {
-						fakeSdkActive = true;
-						if (generation) generation.fakeSdkActive = true;
+						fakeSdkProjects.add(value["projectDir"]);
+						if (value["projectDir"] === probeProjectDir) {
+							fakeSdkActive = true;
+							if (generation) generation.fakeSdkActive = true;
+						}
 					}
 				} else {
 					this.marks.push(value as unknown as ProcessMark);
@@ -1103,8 +1185,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 				void (async () => {
 					while (!finished) {
 						try {
-							const status = await this.requestRpc(new GetStatus({}));
-							const instances = await this.requestRpc(new GetInstances({}));
+							const status = await this.requestRpc({ _tag: "GetStatus" });
+							const instances = await this.requestRpc({ _tag: "GetInstances" });
 							if (
 								child.pid &&
 								(options.exactCliArgs || status.port === this.port)
@@ -1136,11 +1218,26 @@ Object.assign(ClaudeDriver, { create: deps => {
 		// Project registration is lazy. Attach without sending a prompt so the
 		// selected build must acknowledge its live fake factories before use.
 		if (options.skipBrowserProbe || this.realSdk) return;
+		const { projects: registered } = await this.requestRpc({
+			_tag: "GetProjects",
+		});
+		const projects = registered.filter(
+			(project) => !project.missing && project.unavailableReason === undefined,
+		);
+		const project =
+			projects.find((project) => project.slug === "process-test") ??
+			projects[0];
+		// The ready handshake and daemon RPC succeeded. With no available project,
+		// there is no relay to activate, so the project SDK probe is inapplicable.
+		if (!project) return;
+		probeProjectDir = project.folders[0];
+		fakeSdkActive = fakeSdkProjects.has(probeProjectDir);
+		if (generation) generation.fakeSdkActive = fakeSdkActive;
 		const probe = await ProcessBrowser.connect(
 			this.port,
 			undefined,
 			undefined,
-			undefined,
+			project.slug,
 			undefined,
 			this.rpcDiagnostics,
 		);
@@ -1433,7 +1530,30 @@ Object.assign(ClaudeDriver, { create: deps => {
 		await this.stop(signal, 10_000);
 	}
 
-	async runCli(args: string[]): Promise<{
+	/** Fixture IPC and browser RPC travel independently; wait on the mark itself. */
+	async waitForMark(
+		predicate: (mark: ProcessMark) => boolean,
+		cursor = 0,
+	): Promise<ProcessMark> {
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+		try {
+			for (;;) {
+				const mark = this.marks.slice(cursor).find(predicate);
+				if (mark) return mark;
+				if (!this.child) throw new Error("No server to receive fixture marks");
+				await once(this.child, "message", { signal: controller.signal });
+			}
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+
+	async runCli(
+		args: string[],
+		/** A cold CLI start can exceed the default bound on a loaded machine. */
+		options: { timeoutMs?: number } = {},
+	): Promise<{
 		pid: number | undefined;
 		code: number | null;
 		signal: NodeJS.Signals | null;
@@ -1466,7 +1586,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			const timer = setTimeout(() => {
 				timedOut = true;
 				child.kill("SIGKILL");
-			}, TIMEOUT_MS);
+			}, options.timeoutMs ?? TIMEOUT_MS);
 			child.once("error", (cause) => {
 				clearTimeout(timer);
 				fail(cause);
@@ -1492,7 +1612,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 		let rpcFailure: unknown;
 		if (child.exitCode === null && child.signalCode === null) {
 			try {
-				await this.requestRpc(new Shutdown({}));
+				await this.requestRpc({ _tag: "Shutdown" });
 			} catch (cause) {
 				// A startup failure can remove IPC before its owned child exits.
 				rpcFailure = cause;
@@ -1602,24 +1722,22 @@ Object.assign(ClaudeDriver, { create: deps => {
 	}
 
 	/** Keep the original IPC error, and retain its undecoded payload for proof. */
-	async requestRpc<R extends WsRpcRequest>(
+	requestRpc<R extends WsRpcRequest>(
 		request: R,
-	): Promise<Request.Success<R>> {
+	): ReturnType<typeof sendRpcRequest<R>> {
 		const endpoint = join(this.configDir, "relay.sock");
-		try {
-			return await sendRpcRequest(endpoint, request);
-		} catch (error) {
-			if (ParseResult.isParseError(error)) {
+		return sendRpcRequest(endpoint, request).catch((error: unknown) => {
+			if (Schema.isSchemaError(error)) {
 				this.rpcDiagnostics.capture(
 					endpoint,
 					request._tag,
-					JSON.stringify("actual" in error.issue ? error.issue.actual : null) ??
+					JSON.stringify("input" in error.issue ? error.issue.input : null) ??
 						"null",
 					error,
 				);
 			}
 			throw error;
-		}
+		});
 	}
 
 	proof() {
@@ -1654,14 +1772,14 @@ Object.assign(ClaudeDriver, { create: deps => {
 
 	private rememberManagedOpenCode(): void {
 		const loaded = loadDaemonConfigResult(this.configDir);
-		if (loaded._tag === "Left") {
-			// Config-safety scenarios deliberately damage this file. Record the
-			// read failure and retain already authenticated process ownership.
-			if (loaded.left._tag !== "NotFound")
-				this.configReadErrors.add(loaded.left.message);
-			return;
-		}
-		for (const instance of loaded.right.instances ?? []) {
+		// Config-safety scenarios deliberately damage this file. Record the read
+		// failure, retain already authenticated ownership, and still read the
+		// fixture ledger: its children need termination proof either way.
+		if (loaded._tag === "Failure" && loaded.failure._tag !== "NotFound")
+			this.configReadErrors.add(loaded.failure.message);
+		const instances =
+			loaded._tag === "Success" ? (loaded.success.instances ?? []) : [];
+		for (const instance of instances) {
 			if (
 				instance.managed &&
 				instance.driver !== "claude" &&
@@ -1786,9 +1904,10 @@ Object.assign(ClaudeDriver, { create: deps => {
 					"release",
 				);
 			}
-			for (const project of Either.getOrThrowWith(
+			// A deliberately damaged config has no project gates to release;
+			// rememberManagedOpenCode records the read failure.
+			for (const project of Either.getOrUndefined(
 				loadDaemonConfigResult(this.configDir),
-				(error) => error,
 			)?.projects ?? []) {
 				if (!project.path.startsWith(`${this.root}/`)) continue;
 				for (const name of ["recovery-gated", "recovery-fail-after-adoption"]) {
@@ -1983,18 +2102,18 @@ export class ProcessBrowser {
 	>();
 	private closed = false;
 	private failure: Error | undefined;
-	private ptys: Fiber.RuntimeFiber<void, unknown> | undefined;
-	private approvals: Fiber.RuntimeFiber<void, unknown> | undefined;
-	private projectSettings: Fiber.RuntimeFiber<void, unknown> | undefined;
-	private sessions: Fiber.RuntimeFiber<void, unknown> | undefined;
+	private ptys: Fiber.Fiber<void, unknown> | undefined;
+	private approvals: Fiber.Fiber<void, unknown> | undefined;
+	private projectSettings: Fiber.Fiber<void, unknown> | undefined;
+	private sessions: Fiber.Fiber<void, unknown> | undefined;
 	private sessionsReady: Promise<void> | undefined;
 	private readonly details = new Map<string, Promise<void>>();
-	private readonly detailFibers = new Set<Fiber.RuntimeFiber<void, unknown>>();
+	private readonly detailFibers = new Set<Fiber.Fiber<void, unknown>>();
 	private readonly families = new Map<string, Promise<void>>();
-	private readonly familyFibers = new Set<Fiber.RuntimeFiber<void, unknown>>();
+	private readonly familyFibers = new Set<Fiber.Fiber<void, unknown>>();
 	private constructor(
 		private readonly runtime: ManagedRuntime.ManagedRuntime<BrowserRpc, never>,
-		readonly rpc: BrowserRpc["Type"],
+		readonly rpc: BrowserRpc["Service"],
 		originId: string,
 		private readonly projectSlug: string,
 		private readonly followRows: boolean,
@@ -2056,7 +2175,7 @@ export class ProcessBrowser {
 	private watch<A, E>(
 		stream: Stream.Stream<A, E>,
 		record: (envelope: A) => Effect.Effect<void, unknown>,
-	): Fiber.RuntimeFiber<void, unknown> {
+	): Fiber.Fiber<void, unknown> {
 		return this.runtime.runFork(
 			Stream.runForEach(stream, record).pipe(
 				Effect.onExit((exit) =>
@@ -2157,30 +2276,29 @@ export class ProcessBrowser {
 		if (this.sessionsReady) return this.sessionsReady;
 		this.sessionsReady = (async () => {
 			const cursor = this.frames.length;
-			this.sessions = this.watch(
-				this.rpc.SubscribeShell({ projectSlug: this.projectSlug }),
-				(envelope) =>
-					Effect.gen(this, function* () {
-						this.record({ type: "shell", ...envelope });
-						if (envelope._tag === "snapshot")
-							this.record({ type: "session_snapshot" });
-						const rows =
-							envelope._tag === "snapshot"
-								? envelope.rows
-								: envelope._tag === "upsert"
-									? [envelope.item]
-									: [];
-						for (const row of rows)
-							this.record({ ...row, type: "session_row" });
-						if (this.followRows)
-							yield* Effect.forEach(
-								rows,
-								(row) => Effect.promise(() => this.followSession(row.id)),
-								{ discard: true },
-							);
-						if (envelope._tag === "remove")
-							this.record({ type: "session_removed", id: envelope.id });
-					}),
+			this.sessions = this.watch(this.rpc.SubscribeShell({}), (envelope) =>
+				Effect.gen({ self: this }, function* () {
+					this.record({ type: "shell", ...envelope });
+					if (envelope._tag === "snapshot")
+						this.record({ type: "session_snapshot" });
+					const rows =
+						envelope._tag === "snapshot"
+							? envelope.rows
+							: envelope._tag === "upsert"
+								? [envelope.item]
+								: [];
+					for (const row of rows) this.record({ ...row, type: "session_row" });
+					// The feed spans every project; following another project's
+					// rows would tie this browser to that project's lifetime.
+					if (this.followRows)
+						yield* Effect.forEach(
+							rows.filter((row) => row.projectSlug === this.projectSlug),
+							(row) => Effect.promise(() => this.followSession(row.id)),
+							{ discard: true },
+						);
+					if (envelope._tag === "remove")
+						this.record({ type: "session_removed", id: envelope.id });
+				}),
 			);
 			await this.waitFor(
 				(message) =>
@@ -2248,7 +2366,7 @@ export class ProcessBrowser {
 						sessionId,
 					}),
 					(envelope) =>
-						Effect.gen(this, function* () {
+						Effect.gen({ self: this }, function* () {
 							this.record({ type: "family", familyOf: sessionId, ...envelope });
 							const rows =
 								envelope._tag === "snapshot"
@@ -2525,11 +2643,12 @@ export class ProcessBrowser {
 			knownMessages.set(owner, ids);
 		}
 		const cursor = this.frames.length;
+		const inputId = randomUUID();
 		const result = await this.run(
-			this.rpc.input.submit({
+			this.rpc["input.submit"]({
 				sessionId,
 				originId: this.originId,
-				inputId: randomUUID(),
+				inputId,
 				delivery,
 				text: prompt,
 			}),
@@ -2538,7 +2657,13 @@ export class ProcessBrowser {
 		// A queued submit is never refused; only a steer can be.
 		if (!result.ok) throw new Error(`submit refused: ${result.reason}`);
 		await this.followSession(result.sessionId);
-		const done = await this.waitForTurnEnd(result.sessionId, cursor, timeoutMs);
+		const done = await this.waitForTurnEnd(
+			result.sessionId,
+			cursor,
+			timeoutMs,
+			// A steered input shares the running turn's original input identity.
+			delivery === "queue" ? inputId : undefined,
+		);
 		// The detail source currently emits projected messages, not StoredEvents.
 		// A fresh typed history read fences the final text against shell completion.
 		const history = await this.history(result.sessionId);
@@ -2558,12 +2683,14 @@ export class ProcessBrowser {
 		return { chunks, done };
 	}
 
-	/** Wait for a completed/failed turn's shell version to advance past cursor.
+	/** Wait for a completed/failed turn's shell version to advance past cursor,
+	 * optionally matching the input that started it so a late prior end cannot win.
 	 * The current read model does not advance this field on interruption. */
 	waitForTurnEnd(
 		sessionId: string,
 		cursor = 0,
 		timeoutMs = TIMEOUT_MS,
+		inputId?: string,
 	): Promise<Record<string, unknown>> {
 		const endedBefore = Math.max(
 			-1,
@@ -2579,6 +2706,7 @@ export class ProcessBrowser {
 			(message) =>
 				message["type"] === "session_row" &&
 				message["id"] === sessionId &&
+				(inputId === undefined || message["lastTurnEndInputId"] === inputId) &&
 				(message["status"] === "idle" || message["status"] === "error") &&
 				Number(message["lastTurnEndVersion"] ?? -1) > endedBefore,
 			cursor,
@@ -2654,7 +2782,7 @@ export class ProcessBrowser {
 	/** The tray's Send now, and Resume on the oldest queued input. */
 	async sendNow(sessionId: string, inputId: string): Promise<void> {
 		const result = await this.run(
-			this.rpc.input.sendNow({
+			this.rpc["input.sendNow"]({
 				sessionId,
 				originId: this.originId,
 				inputId,

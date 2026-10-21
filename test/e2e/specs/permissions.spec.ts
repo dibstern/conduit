@@ -93,8 +93,14 @@ test.describe("Permissions", () => {
 			"Create a file called /tmp/e2e-test-diff.txt with the text 'hello world'",
 		);
 		await perm.waitForCard(30_000);
+		const conduitId = await page
+			.locator("[data-request-id]")
+			.first()
+			.getAttribute("data-request-id");
+		expect(conduitId).toBeTruthy();
+		expect(conduitId).not.toBe(request.id);
 		await expect(
-			page.locator(`[data-request-id="${request.id}"] .permission-card`),
+			page.locator(`[data-request-id="${conduitId}"] .permission-card`),
 		).toBeVisible();
 		const updatePath = `/session/${sessionId}`;
 		const replyPath = `/session/${sessionId}/permissions/${request.id}`;

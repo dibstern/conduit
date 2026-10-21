@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 vi.hoisted(() => {
 	Object.defineProperty(globalThis, "localStorage", {
@@ -18,7 +19,6 @@ import {
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { todoState } from "../../../src/lib/frontend/stores/todo.svelte.js";
-import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { applySessionRemoved, seedSessions } from "./session-fixtures.js";
 
 const replaceState = vi.fn();
@@ -55,7 +55,7 @@ describe("session deletion routes", () => {
 			{ id: "victim-with-survivor", title: "Victim", status: "idle" },
 			...rows,
 		]);
-		sessionState.currentId = "victim-with-survivor";
+		openSessionForSetup("victim-with-survivor");
 		routerState.path = "/s/victim-with-survivor";
 		applySessionRemoved("victim-with-survivor");
 		expect(sessionState.sessions.has("victim-with-survivor")).toBe(false);
@@ -70,7 +70,7 @@ describe("session deletion routes", () => {
 			{ id: "other-victim", title: "Victim", status: "idle" },
 			...rows,
 		]);
-		sessionState.currentId = "first";
+		openSessionForSetup("first");
 		routerState.path = "/s/first";
 		applySessionRemoved("other-victim");
 		expect(sessionState.currentId).toBe("first");
@@ -80,9 +80,8 @@ describe("session deletion routes", () => {
 
 	it("records the last deletion without navigating or clearing view state", () => {
 		seedSessions([{ id: "last-victim", title: "Victim", status: "idle" }]);
-		sessionState.currentId = "last-victim";
+		openSessionForSetup("last-victim");
 		routerState.path = "/s/last-victim";
-		uiState.contextPercent = 75;
 		todoState.items = [{ id: "one", subject: "old", status: "pending" }];
 		applySessionRemoved("last-victim");
 		expect(sessionState.sessions.has("last-victim")).toBe(false);
@@ -90,7 +89,6 @@ describe("session deletion routes", () => {
 		expect(routerState.path).toBe("/s/last-victim");
 		expect(replaceState).not.toHaveBeenCalled();
 		expect(routerState.sessionNotFound).toBe(false);
-		expect(uiState.contextPercent).toBe(75);
 		expect(todoState.items).toEqual([
 			{ id: "one", subject: "old", status: "pending" },
 		]);

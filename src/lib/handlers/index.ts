@@ -6,17 +6,16 @@ export {
 	switchVariantForSession,
 } from "./model.js";
 export {
-	clearSessionInputDraft,
-	getSessionInputDraft,
 	handleMessage,
 	rewindSessionToMessage,
-	syncInputDraftForSession,
+	syncInputDraft,
 } from "./prompt.js";
 export { reloadProviderSessionForClient } from "./reload.js";
 export {
 	loadMoreHistoryForSession,
 	markSessionUnreadForClient,
 	renameSessionForClient,
+	setSessionArchivedForClient,
 	setSessionAutoSettleForClient,
 	setSessionPinnedForClient,
 	setSessionSettledForClient,

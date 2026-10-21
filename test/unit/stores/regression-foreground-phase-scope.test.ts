@@ -10,23 +10,23 @@ import {
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	applyTranscriptEnvelope,
 	deriveTranscriptMessages,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { detailUpserts } from "../../helpers/detail-rows.js";
 
 afterEach(() => {
 	sessionActivity.clear();
 	sessionMessages.clear();
-	sessionState.currentId = null;
+	openSessionForSetup(null);
 });
 
 it("keeps a background session's row in its own slot", () => {
 	const foreground = getOrCreateSessionSlot("A");
 	const background = getOrCreateSessionSlot("B");
-	sessionState.currentId = "A";
+	openSessionForSetup("A", "project-a");
 	phaseToProcessing(background.activity);
 	const entry = {
 		project: "test",
@@ -66,7 +66,7 @@ it("keeps a background session's row in its own slot", () => {
 
 it("the row going idle finalizes the visible turn once", () => {
 	const { activity, messages } = getOrCreateSessionSlot("A");
-	sessionState.currentId = "A";
+	openSessionForSetup("A", "project-a");
 	phaseToProcessing(activity);
 	const entry = detailUpserts(
 		{

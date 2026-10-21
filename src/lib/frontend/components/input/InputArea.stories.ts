@@ -33,7 +33,9 @@ import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { turn as readTurn } from "../../stores/turn.svelte.js";
 import { usageState } from "../../stores/usage.svelte.js";
 import { mockClaudeAccount, mockOpenCodeAccount } from "../../stories/mocks.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import { connectedSocket } from "../../stories/sockets.js";
+import { connectionState } from "../../transport/connection-status.svelte.js";
 import { runTransportEffect } from "../../transport/runtime.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import { WsRpcClients } from "../../transport/shared-client.js";
@@ -164,12 +166,12 @@ const meta = {
 	component: InputArea,
 	tags: ["autodocs"],
 	parameters: { layout: "fullscreen" },
-	beforeEach: () => {
+	beforeEach: async () => {
 		const sessions = [...sessionState.sessions.values()];
 		const instances = instanceState.instances;
 		setComposerPreferences({ controls: "icons", contextWarning: 80 });
 		seedSessionAccount(mockOpenCodeAccount);
-		sessionState.currentId = testId;
+		openSessionForSetup(testId, "conduit");
 		phaseToIdle(getOrCreateSessionActivity(testId));
 		getOrCreateSessionMessages(testId).contextPercent = 0;
 		setupDiscovery();
@@ -179,6 +181,10 @@ const meta = {
 		// A real socket never opens under a static server and would hold every
 		// later dial in "Connecting".
 		const restoreSocket = connectedSocket();
+		await runTransportEffect(
+			Effect.flatMap(WsRpcClients, (clients) => clients.forProject("conduit")),
+		);
+		await waitFor(() => expect(connectionState.status).toBe("connected"));
 		return () => {
 			restoreSocket();
 			instanceState.instances = instances;
@@ -462,11 +468,6 @@ function setupWords(canvasElement: HTMLElement, phone: boolean) {
 	const compact = sessionViewState.compact;
 	const composerWidth = sessionViewState.composerWidth;
 	const style = canvasElement.getAttribute("style");
-	// The app dials its RPC socket at startup. Left to the picker's first read,
-	// the dial flips the composer to "Connecting" and takes the picker away.
-	void runTransportEffect(
-		Effect.flatMap(WsRpcClients, (clients) => clients.forProject("conduit")),
-	);
 	Object.defineProperty(window, "innerWidth", {
 		configurable: true,
 		value: phone ? 393 : 1440,
@@ -1404,7 +1405,7 @@ function narrowComposer(
 					await userEvent.click(send);
 					await waitFor(() => expect(textarea).toHaveValue(""));
 					if (mode !== "limited") {
-						await waitFor(() => expect(readTurn(testId).working).toBe(true));
+						await waitFor(() => expect(readTurn().working).toBe(true));
 					}
 					composer.dataset["sendVisibilityProof"] = JSON.stringify({
 						width,

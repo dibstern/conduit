@@ -1,6 +1,7 @@
 import { describe, it } from "@effect/vitest";
-import { Effect, Exit } from "effect";
-import { expect } from "vitest";
+import { Cause, Effect, Exit, Fiber } from "effect";
+import { TestClock } from "effect/testing";
+import { expect, vi } from "vitest";
 
 import { fetchWithRetry } from "../../../src/lib/domain/relay/Services/retry-fetch.js";
 import { OpenCodeConnectionError } from "../../../src/lib/errors.js";
@@ -9,7 +10,9 @@ describe("Effect-based retry fetch", () => {
 	it.live("succeeds on first attempt when server responds 200", () =>
 		Effect.gen(function* () {
 			const result = yield* Effect.exit(
-				fetchWithRetry("http://localhost:0/does-not-exist"),
+				fetchWithRetry("http://localhost:0/does-not-exist", undefined, {
+					retryDelay: 0,
+				}),
 			);
 			expect(Exit.isFailure(result)).toBe(true); // Connection refused is expected
 		}),
@@ -18,19 +21,15 @@ describe("Effect-based retry fetch", () => {
 	it.live("returns typed OpenCodeConnectionError on failure", () =>
 		Effect.gen(function* () {
 			const result = yield* Effect.exit(
-				fetchWithRetry("http://localhost:0/does-not-exist"),
+				fetchWithRetry("http://localhost:0/does-not-exist", undefined, {
+					retryDelay: 0,
+				}),
 			);
 			expect(Exit.isFailure(result)).toBe(true);
 			if (Exit.isFailure(result)) {
-				const cause = result.cause;
-				// Extract the error from the Cause
-				const errors: OpenCodeConnectionError[] = [];
-				const collectErrors = (c: typeof cause): void => {
-					if (c._tag === "Fail") {
-						errors.push(c.error as OpenCodeConnectionError);
-					}
-				};
-				collectErrors(cause);
+				const errors = result.cause.reasons
+					.filter(Cause.isFailReason)
+					.map((reason) => reason.error);
 				expect(errors.length).toBe(1);
 				expect(errors[0]).toBeInstanceOf(OpenCodeConnectionError);
 			}
@@ -39,38 +38,40 @@ describe("Effect-based retry fetch", () => {
 
 	it.live("does not retry on timeout errors", () =>
 		Effect.gen(function* () {
-			const start = Date.now();
+			const baseFetch = vi
+				.fn<typeof fetch>()
+				.mockRejectedValue(new DOMException("timed out", "AbortError"));
 			const result = yield* Effect.exit(
-				fetchWithRetry("http://10.255.255.1/timeout", undefined, {
+				fetchWithRetry("http://example.com/timeout", undefined, {
 					timeout: 500,
 					retries: 2,
-					retryDelay: 100,
+					retryDelay: 0,
+					baseFetch,
 				}),
 			);
-			const elapsed = Date.now() - start;
 			expect(Exit.isFailure(result)).toBe(true);
-			// Should not retry on timeout — total time should be close to 500ms,
-			// not 500 + retries * delay
-			expect(elapsed).toBeLessThan(2000);
+			expect(baseFetch).toHaveBeenCalledOnce();
 		}),
 	);
 
-	it.live("retries on connection refused errors", () =>
+	it.effect("retries on connection refused errors", () =>
 		Effect.gen(function* () {
-			// We can verify retry behavior by checking that the effect takes
-			// longer than a single attempt (due to retry delays)
-			const start = Date.now();
-			const result = yield* Effect.exit(
+			const baseFetch = vi
+				.fn<typeof fetch>()
+				.mockRejectedValue(new Error("ECONNREFUSED"));
+			const fiber = yield* Effect.forkChild(
 				fetchWithRetry("http://localhost:0/does-not-exist", undefined, {
 					retries: 1,
 					retryDelay: 50,
-				}),
+					baseFetch,
+				}).pipe(Effect.exit),
 			);
-			const elapsed = Date.now() - start;
+			yield* TestClock.adjust("49 millis");
+			expect(baseFetch).toHaveBeenCalledOnce();
+			yield* TestClock.adjust("1 millis");
+			const result = yield* Fiber.join(fiber);
 			expect(Exit.isFailure(result)).toBe(true);
-			// With 1 retry and 50ms delay, should take at least ~50ms
-			// (linear backoff: 50ms for first retry)
-			expect(elapsed).toBeGreaterThanOrEqual(40);
+			expect(baseFetch).toHaveBeenCalledTimes(2);
 		}),
 	);
 
@@ -81,27 +82,36 @@ describe("Effect-based retry fetch", () => {
 		expect(typeof effect.pipe).toBe("function");
 	});
 
-	it.live("uses linear backoff matching legacy behavior", () =>
+	it.effect("uses linear backoff matching legacy behavior", () =>
 		Effect.gen(function* () {
-			// Linear backoff: delay * 1, delay * 2, delay * 3
-			// With retryDelay=100 and retries=2, total delay should be ~300ms (100 + 200)
-			const start = Date.now();
-			yield* Effect.exit(
+			const baseFetch = vi
+				.fn<typeof fetch>()
+				.mockRejectedValue(new Error("ECONNREFUSED"));
+			const fiber = yield* Effect.forkChild(
 				fetchWithRetry("http://localhost:0/does-not-exist", undefined, {
 					retries: 2,
 					retryDelay: 100,
-				}),
+					baseFetch,
+				}).pipe(Effect.exit),
 			);
-			const elapsed = Date.now() - start;
-			// Linear: 100 + 200 = 300ms. Should be >= 250ms (with tolerance)
-			expect(elapsed).toBeGreaterThanOrEqual(200);
+			yield* TestClock.adjust("99 millis");
+			expect(baseFetch).toHaveBeenCalledOnce();
+			yield* TestClock.adjust("1 millis");
+			expect(baseFetch).toHaveBeenCalledTimes(2);
+			yield* TestClock.adjust("199 millis");
+			expect(baseFetch).toHaveBeenCalledTimes(2);
+			yield* TestClock.adjust("1 millis");
+			expect(Exit.isFailure(yield* Fiber.join(fiber))).toBe(true);
+			expect(baseFetch).toHaveBeenCalledTimes(3);
 		}),
 	);
 
 	it.live("accepts RequestInfo | URL input type", () =>
 		Effect.gen(function* () {
 			const url = new URL("http://localhost:0/test");
-			const result = yield* Effect.exit(fetchWithRetry(url));
+			const result = yield* Effect.exit(
+				fetchWithRetry(url, undefined, { retryDelay: 0 }),
+			);
 			expect(Exit.isFailure(result)).toBe(true); // Connection refused expected
 		}),
 	);

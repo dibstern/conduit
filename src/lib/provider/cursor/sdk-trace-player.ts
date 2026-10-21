@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { setTimeout } from "node:timers/promises";
-import { Either, Schema } from "effect";
+import { Result, Schema } from "effect";
 import { CursorSdkFailure, cursorSdkFailure } from "./sdk-error.js";
 import type {
 	CursorAgent,
@@ -69,7 +69,7 @@ function persistedRun(value: unknown): CursorPersistedRun | undefined {
 	};
 }
 
-const decodeModels = Schema.decodeUnknownEither(
+const decodeModels = Schema.decodeUnknownResult(
 	Schema.Array(
 		Schema.Struct({
 			id: Schema.String,
@@ -674,13 +674,13 @@ export function createTraceCursorSdkPort(
 			const data = result("models.list");
 			const models = object(data) ? data["models"] : data;
 			const decoded = decodeModels(models);
-			if (Either.isLeft(decoded)) {
+			if (Result.isFailure(decoded)) {
 				throw new CursorSdkFailure({
 					operation: "models.list",
 					reason: "Invalid Cursor model list trace",
 				});
 			}
-			return decoded.right;
+			return decoded.success;
 		},
 		async openStore(storePath) {
 			let disposed: Promise<void> | undefined;

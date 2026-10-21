@@ -1,6 +1,7 @@
 import { describe, it } from "@effect/vitest";
-import { Duration, Effect, TestClock } from "effect";
-import { expect } from "vitest";
+import { Duration, Effect } from "effect";
+import { TestClock } from "effect/testing";
+import { expect, vi } from "vitest";
 
 import {
 	delayed,
@@ -9,11 +10,29 @@ import {
 } from "../../../src/lib/domain/relay/Services/resource.js";
 
 describe("Effect resource utilities", () => {
-	it("trackedFetch is a callable that returns a scoped effect", () => {
-		// Verify the utility exists and is callable — actual fetch
-		// would require a network request, so we just check the shape.
-		expect(typeof trackedFetch).toBe("function");
-		expect(trackedFetch.length).toBe(2); // (url, init?)
+	it("trackedFetch aborts in-flight requests when its scope closes", async () => {
+		const baseFetch = vi.spyOn(globalThis, "fetch");
+		const started = new Promise<AbortSignal | undefined>((resolve) => {
+			baseFetch.mockImplementation((_url, init) => {
+				resolve(init?.signal ?? undefined);
+				return new Promise<Response>(() => {});
+			});
+		});
+		try {
+			const signal = await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						yield* Effect.forkScoped(trackedFetch("http://example.com"));
+						const signal = yield* Effect.promise(() => started);
+						expect(signal?.aborted).toBe(false);
+						return signal;
+					}),
+				),
+			);
+			expect(signal?.aborted).toBe(true);
+		} finally {
+			baseFetch.mockRestore();
+		}
 	});
 
 	it.effect("repeating clears interval on scope close", () =>

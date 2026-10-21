@@ -1,3 +1,4 @@
+import { openComposerSheet } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
@@ -85,6 +86,12 @@ for (const viewport of [
 				responses: new Map(),
 			});
 			await page.goto(`${harness.relayBaseUrl}/s/${session.id}`);
+			// Phones keep the checkout in the Composer sheet; its row flags the mismatch.
+			const phone = viewport.width < 768;
+			if (phone) {
+				await expect(page.getByTestId("composer-more-attention")).toBeVisible();
+				await openComposerSheet(page);
+			}
 			const checkout = page.getByTestId("composer-checkout");
 			await checkout.click();
 			const mismatch = page
@@ -105,7 +112,10 @@ for (const viewport of [
 						.filter(({ tag }) => tag === "MoveSessionWorkspace")
 						.map(({ payload }) => payload),
 				)
-				.toMatchObject([{ sessionId: session.id, path: target }]);
+				.toEqual([
+					{ _tag: "MoveSessionWorkspace", sessionId: session.id, path: target },
+				]);
+			if (phone) await openComposerSheet(page);
 			await checkout.click();
 			await expect(mismatch).toBeVisible();
 			// The shell feed clears the mismatch without a session-family update.

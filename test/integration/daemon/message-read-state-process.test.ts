@@ -8,10 +8,7 @@ import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { Effect, ManagedRuntime, Schema } from "effect";
 import { expect, it } from "vitest";
-import {
-	SessionDetailItemSchema,
-	SetMessagesRead,
-} from "../../../src/lib/contracts/ws-rpc.js";
+import { SessionDetailItemSchema } from "../../../src/lib/contracts/ws-rpc.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -168,9 +165,7 @@ it(
 			]) {
 				requests.push(invalid);
 				await expect(
-					harness.requestRpc(
-						new SetMessagesRead(invalid, { disableValidation: true }),
-					),
+					harness.requestRpc({ _tag: "SetMessagesRead", ...invalid }),
 				).rejects.toBeDefined();
 			}
 			await Effect.runPromise(

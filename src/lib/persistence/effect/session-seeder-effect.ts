@@ -1,6 +1,6 @@
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Effect } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 
 /** Canonical deletions survive reloads; sidebar tombstones also name cascaded children. */

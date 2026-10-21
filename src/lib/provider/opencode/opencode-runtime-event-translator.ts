@@ -557,11 +557,17 @@ export class OpenCodeRuntimeEventTranslator {
 			);
 			if (suffix != null || (existing === undefined && partText === "")) {
 				return [
-					opencodeRuntimeEvent("text.delta", sessionId, event, {
-						messageId,
-						partId,
-						text: suffix ?? "",
-					}),
+					{
+						...opencodeRuntimeEvent("text.delta", sessionId, event, {
+							messageId,
+							partId,
+							text: suffix ?? "",
+						}),
+						...(("synthetic" in rawPart && rawPart.synthetic === true) ||
+						("ignored" in rawPart && rawPart.ignored === true)
+							? { metadata: { synthetic: true } }
+							: {}),
+					},
 				];
 			}
 		}
@@ -710,8 +716,8 @@ export class OpenCodeRuntimeEventTranslator {
 		const messageId = msg.id ?? "";
 		const events: ProviderRuntimeEvent[] = [];
 		if (this.markMessageSeen(state, messageId)) {
-			events.push(
-				opencodeRuntimeEvent("message.created", sessionId, event, {
+			events.push({
+				...opencodeRuntimeEvent("message.created", sessionId, event, {
 					messageId,
 					role: msg.role,
 					sessionId,
@@ -722,7 +728,11 @@ export class OpenCodeRuntimeEventTranslator {
 						? this.userEchoInputId(sessionId, messageId)
 						: {}),
 				}),
-			);
+				// Keep receipt time for session activity; message provenance uses provider time.
+				...(msg.time?.created !== undefined
+					? { metadata: { providerCreatedAt: msg.time.created } }
+					: {}),
+			});
 		}
 
 		if (msg.role === "user" || msg.time?.completed == null) {

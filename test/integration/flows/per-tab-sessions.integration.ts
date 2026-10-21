@@ -98,6 +98,14 @@ describe("Integration: Per-Tab Sessions", () => {
 		client1.clearReceived();
 		client2.clearReceived();
 		await client1.renameSession(sessionId, "Renamed for both tabs");
+		for (const client of [client1, client2]) {
+			await client.waitFor("family", {
+				predicate: (msg) =>
+					msg["_tag"] === "upsert" &&
+					(msg["item"] as { id?: string; title?: string }).id === sessionId &&
+					(msg["item"] as { title?: string }).title === "Renamed for both tabs",
+			});
+		}
 
 		const renamed = (s: { id: string; title?: string }) =>
 			s.id === sessionId && s.title === "Renamed for both tabs";
@@ -200,6 +208,23 @@ describe("Integration: Per-Tab Sessions", () => {
 		);
 
 		client2.clearReceived();
+		harness.mock.setExactResponse("GET", "/provider", 200, {
+			all: [
+				{
+					id: "per-tab-test-provider",
+					name: "Per-tab test provider",
+					models: {
+						"per-tab-test-model": {
+							id: "per-tab-test-model",
+							name: "Per-tab test model",
+							limit: { context: 200_000, output: 8_192 },
+						},
+					},
+				},
+			],
+			default: { "per-tab-test-provider": "per-tab-test-model" },
+			connected: ["per-tab-test-provider"],
+		});
 		await client1.switchModel(
 			"per-tab-test-model",
 			"per-tab-test-provider",

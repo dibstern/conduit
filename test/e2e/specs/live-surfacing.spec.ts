@@ -47,6 +47,7 @@ console.log("verified");
 				harness.relayPort,
 				"opencode",
 				undefined,
+				undefined,
 				"e2e-test",
 			);
 			harness.trackSession(sessionId);

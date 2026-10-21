@@ -1,5 +1,6 @@
 import { describe, it } from "@effect/vitest";
-import { Effect, Fiber, Layer, TestClock } from "effect";
+import { Effect, Fiber, Layer } from "effect";
+import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/message-surfacing.js";
@@ -127,21 +128,21 @@ const waitForCalls = (
 	calls: number,
 ) =>
 	Effect.gen(function* () {
-		while (query.mock.calls.length < calls) yield* Effect.yieldNow();
+		while (query.mock.calls.length < calls) yield* Effect.yieldNow;
 	});
 const expectError = (
 	effect: Effect.Effect<unknown, unknown>,
 	message: string,
 ) =>
 	Effect.gen(function* () {
-		expect(yield* Effect.either(effect)).toMatchObject({
-			_tag: "Left",
-			left: { _tag: "WsRpcError", message },
+		expect(yield* Effect.result(effect)).toMatchObject({
+			_tag: "Failure",
+			failure: { _tag: "WsRpcError", message },
 		});
 	});
 
 describe("GoalSummaryService", () => {
-	it.scoped(
+	it.effect(
 		"reads never generate and reopening the same blocker makes zero additional calls",
 		() => {
 			const f = fixture();
@@ -163,7 +164,7 @@ describe("GoalSummaryService", () => {
 			}).pipe(Effect.provide(f.live));
 		},
 	);
-	it.scoped(
+	it.effect(
 		"a changed blocker generates once and model changes invalidate the cache",
 		() => {
 			const f = fixture();
@@ -187,16 +188,16 @@ describe("GoalSummaryService", () => {
 			}).pipe(Effect.provide(f.live));
 		},
 	);
-	it.scoped("two concurrent opens share one model call", () => {
+	it.effect("two concurrent opens share one model call", () => {
 		const f = fixture();
 		const release = f.hold();
 		return Effect.gen(function* () {
 			yield* seed();
 			const service = yield* GoalSummaryServiceTag;
-			const first = yield* Effect.fork(service.generate("summary-goal"));
+			const first = yield* Effect.forkChild(service.generate("summary-goal"));
 			yield* waitForCalls(f.query, 1);
-			const second = yield* Effect.fork(service.generate("summary-goal"));
-			yield* Effect.yieldNow();
+			const second = yield* Effect.forkChild(service.generate("summary-goal"));
+			yield* Effect.yieldNow;
 			release();
 			expect(yield* Fiber.join(second)).toEqual(yield* Fiber.join(first));
 			expect(f.query).toHaveBeenCalledTimes(1);
@@ -214,13 +215,15 @@ describe("GoalSummaryService", () => {
 			false,
 		],
 	] as const)
-		it.scoped(name, () => {
+		it.effect(name, () => {
 			const f = fixture();
 			const release = f.hold();
 			return Effect.gen(function* () {
 				yield* seed();
 				const service = yield* GoalSummaryServiceTag;
-				const pending = yield* Effect.fork(service.generate("summary-goal"));
+				const pending = yield* Effect.forkChild(
+					service.generate("summary-goal"),
+				);
 				yield* waitForCalls(f.query, 1);
 				yield* check(4, nextReason);
 				release();
@@ -230,13 +233,13 @@ describe("GoalSummaryService", () => {
 				);
 			}).pipe(Effect.provide(f.live));
 		});
-	it.scoped("an older generation cannot overwrite a newer goal summary", () => {
+	it.effect("an older generation cannot overwrite a newer goal summary", () => {
 		const f = fixture("Old evidence");
 		const release = f.hold();
 		return Effect.gen(function* () {
 			yield* seed();
 			const service = yield* GoalSummaryServiceTag;
-			const old = yield* Effect.fork(service.generate("summary-goal"));
+			const old = yield* Effect.forkChild(service.generate("summary-goal"));
 			yield* waitForCalls(f.query, 1);
 			yield* check(4, progress);
 			f.unhold();
@@ -248,7 +251,7 @@ describe("GoalSummaryService", () => {
 		}).pipe(Effect.provide(f.live));
 	});
 	for (const mode of ["off", "disabled"] as const)
-		it.scoped(
+		it.effect(
 			`summaries off reject without calling Claude and report summaryEnabled false (${mode})`,
 			() => {
 				const f = fixture();
@@ -268,7 +271,7 @@ describe("GoalSummaryService", () => {
 				}).pipe(Effect.provide(f.live));
 			},
 		);
-	it.scoped("no checks reject without calling Claude", () => {
+	it.effect("no checks reject without calling Claude", () => {
 		const f = fixture();
 		return Effect.gen(function* () {
 			yield* seed("summary-goal", 0);
@@ -280,7 +283,7 @@ describe("GoalSummaryService", () => {
 			expect(f.query).toHaveBeenCalledTimes(0);
 		}).pipe(Effect.provide(f.live));
 	});
-	it.scoped(
+	it.effect(
 		"query and empty failures return short plain RPC errors and allow retry",
 		() => {
 			const f = fixture();
@@ -304,7 +307,7 @@ describe("GoalSummaryService", () => {
 			}).pipe(Effect.provide(f.live));
 		},
 	);
-	it.scoped(
+	it.effect(
 		"a timed out query is aborted after sixty seconds and allows retry",
 		() => {
 			const f = fixture();
@@ -312,14 +315,14 @@ describe("GoalSummaryService", () => {
 			return Effect.gen(function* () {
 				yield* seed();
 				const service = yield* GoalSummaryServiceTag;
-				const pending = yield* Effect.fork(
-					Effect.either(service.generate("summary-goal")),
+				const pending = yield* Effect.forkChild(
+					Effect.result(service.generate("summary-goal")),
 				);
 				yield* waitForCalls(f.query, 1);
 				yield* TestClock.adjust("60 seconds");
 				expect(yield* Fiber.join(pending)).toMatchObject({
-					_tag: "Left",
-					left: { message: "Timed out waiting for goal summary" },
+					_tag: "Failure",
+					failure: { message: "Timed out waiting for goal summary" },
 				});
 				expect(
 					f.query.mock.calls[0]?.[0].options?.abortController?.signal.aborted,
@@ -330,7 +333,7 @@ describe("GoalSummaryService", () => {
 			}).pipe(Effect.provide(f.live));
 		},
 	);
-	it.scoped(
+	it.effect(
 		"cancelling one opener does not cancel another opener's shared generation",
 		() => {
 			const f = fixture();
@@ -338,10 +341,12 @@ describe("GoalSummaryService", () => {
 			return Effect.gen(function* () {
 				yield* seed();
 				const service = yield* GoalSummaryServiceTag;
-				const first = yield* Effect.fork(service.generate("summary-goal"));
+				const first = yield* Effect.forkChild(service.generate("summary-goal"));
 				yield* waitForCalls(f.query, 1);
-				const second = yield* Effect.fork(service.generate("summary-goal"));
-				yield* Effect.yieldNow();
+				const second = yield* Effect.forkChild(
+					service.generate("summary-goal"),
+				);
+				yield* Effect.yieldNow;
 				yield* Fiber.interrupt(first);
 				release();
 				expect((yield* Fiber.join(second)).stale).toBe(false);
@@ -349,7 +354,7 @@ describe("GoalSummaryService", () => {
 			}).pipe(Effect.provide(f.live));
 		},
 	);
-	it.scoped(
+	it.effect(
 		"pause, resume, completion, clearing and replacement invalidate the cached summary",
 		() => {
 			const f = fixture();
@@ -397,7 +402,7 @@ describe("GoalSummaryService", () => {
 			}).pipe(Effect.provide(f.live));
 		},
 	);
-	it.scoped(
+	it.effect(
 		"pause and resume between opens invalidate an otherwise unchanged active goal",
 		() => {
 			const f = fixture();
@@ -419,7 +424,7 @@ describe("GoalSummaryService", () => {
 			}).pipe(Effect.provide(f.live));
 		},
 	);
-	it.scoped(
+	it.effect(
 		"least recently used goal summaries are evicted after two hundred identities",
 		() => {
 			const f = fixture();
@@ -437,7 +442,7 @@ describe("GoalSummaryService", () => {
 			}).pipe(Effect.provide(f.live));
 		},
 	);
-	it.scoped(
+	it.effect(
 		"summaries use the recap model and daemon default Claude login",
 		() => {
 			const f = fixture();

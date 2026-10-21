@@ -1,11 +1,9 @@
-// Routes: /auth, /setup, / (session list), /new (draft session), /s/:sessionId.
-
-import { getScopeGroupKey } from "../../session-scope.js";
+// Routes: /auth, /setup, / (session list), /draft/:draftId, /s/:sessionId.
 
 export type Route =
 	| { page: "auth" }
 	| { page: "setup" }
-	| { page: "chat"; sessionId?: string; draft?: true };
+	| { page: "chat"; sessionId?: string; draft?: true; draftId?: string };
 
 export interface RouteTransition {
 	from: string;
@@ -29,10 +27,10 @@ function splitPath(path: string): { pathname: string; search: string } {
 	return { pathname, search: query ? `?${query}` : "" };
 }
 
-/** The sidebar's project or repository scope (`?p=<scope>`). Read and written through
+/** The sidebar's project scope (`?p=<scope>`). Read and written through
  *  stores/session-scope.ts; declared here because navigation has to carry it. */
 export const SCOPE_PARAM = "p";
-/** The project a draft (/new) will be created in; separate from the list scope. */
+/** The project a draft will be created in; separate from the list scope. */
 export const DRAFT_PROJECT_PARAM = "project";
 export const STATUS_PARAM = "status";
 export const GROUP_PARAM = "group";
@@ -61,6 +59,18 @@ function carryScope(pathname: string, search: string): string {
 // trace "how did I end up on this page?" in the browser console.
 
 const transitionLog: RouteTransition[] = [];
+
+let lastDraft: { id: string; text: string } | null = null;
+
+/** The composer reports its draft so routing needs no access to draft storage. */
+export function noteDraftNavigation(draft: typeof lastDraft): void {
+	lastDraft = draft;
+}
+
+/** Starting again reuses an empty draft and leaves a nonempty draft at its own URL. */
+export function getNewDraftId(): string {
+	return lastDraft?.text === "" ? lastDraft.id : crypto.randomUUID();
+}
 
 function recordTransition(from: string, to: string): void {
 	transitionLog.push({ from, to, timestamp: Date.now() });
@@ -110,6 +120,10 @@ export function getCurrentRoute(): Route {
 	if (path === "/new" || path === "/new/") {
 		return { page: "chat", draft: true };
 	}
+	const draftMatch = path.match(/^\/draft\/([^/]+)\/?$/);
+	if (draftMatch?.[1]) {
+		return { page: "chat", draft: true, draftId: draftMatch[1] };
+	}
 
 	// Legacy session links remain readable until App normalizes the address.
 	const sessionMatch = path.match(/^(?:\/p\/[^/]+)?\/s\/([^/]+)\/?$/);
@@ -128,28 +142,40 @@ export function getCurrentRoute(): Route {
 /** Replace old bookmarks and unknown paths without adding a history entry. */
 export function normalizeRoute(): void {
 	const path = routerState.path;
+	const params = getCurrentSearchParams();
+	const retiredScope = params.get(SCOPE_PARAM)?.startsWith("/group/");
+	if (retiredScope) params.delete(SCOPE_PARAM);
+	const search = retiredScope
+		? params.size
+			? `?${params}`
+			: ""
+		: routerState.search;
+	if (path === "/new" || path === "/new/") {
+		replaceRoute(`/draft/${getNewDraftId()}${search || "?"}`);
+		return;
+	}
 	const legacySession = path.match(/^\/p\/[^/]+\/s\/([^/]+)\/?$/);
 	if (legacySession) {
-		replaceRoute(`/s/${legacySession[1]}${routerState.search}`);
+		replaceRoute(`/s/${legacySession[1]}${search || "?"}`);
 		return;
 	}
 	const legacyProject = path.match(/^\/p\/([^/]+)\/?$/);
 	if (legacyProject?.[1]) {
-		const params = getCurrentSearchParams();
 		params.set(SCOPE_PARAM, legacyProject[1]);
 		replaceRoute(`/?${params}`);
 		return;
 	}
-	if (!/^\/(?:s\/[^/]+\/?|new\/?|auth\/?|setup\/?)?$/.test(path)) {
-		replaceRoute(`/${routerState.search}`);
+	if (!/^\/(?:(?:s|draft)\/[^/]+\/?|auth\/?|setup\/?)?$/.test(path)) {
+		replaceRoute(`/${search || "?"}`);
+	} else if (search !== routerState.search) {
+		replaceRoute(`${path}${search || "?"}`);
 	}
 }
 
 /** Use the daemon's attached project, or the route hint before the first attach. */
 export function getCurrentSlug(): string | null {
 	if (attachedProjectState.slug !== null) return attachedProjectState.slug;
-	const scope = getCurrentSearchParams().get(SCOPE_PARAM);
-	return getScopeGroupKey(scope) === null ? scope : null;
+	return getCurrentSearchParams().get(SCOPE_PARAM);
 }
 
 /** Get the current session ID from the URL (null if not present). */
@@ -169,6 +195,12 @@ export function getCurrentSearchParams(): URLSearchParams {
  */
 export function getSessionHref(sessionId: string): string {
 	return `/s/${sessionId}`;
+}
+
+export function getDraftHref(draftId: string, projectSlug: string): string {
+	const params = getCurrentSearchParams();
+	params.set(DRAFT_PROJECT_PARAM, projectSlug);
+	return `/draft/${encodeURIComponent(draftId)}?${params}`;
 }
 
 /** Whether this history entry was pushed from the app's session-list route. */

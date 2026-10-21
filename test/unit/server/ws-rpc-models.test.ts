@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Option, Queue, Stream } from "effect";
+import { RpcTest } from "effect/rpc";
 import { expect, vi } from "vitest";
 import type { ClaudeAccount } from "../../../src/lib/contracts/account.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
@@ -51,13 +51,14 @@ const readClaudeCatalog = Effect.gen(function* () {
 	return yield* client
 		.SubscribeProjectSettings({ projectSlug: "project-a" })
 		.pipe(
-			Stream.mapConcat((envelope) =>
+			Stream.map((envelope) =>
 				envelope._tag === "snapshot"
 					? envelope.rows
 					: envelope._tag === "upsert"
 						? [envelope.item]
 						: [],
 			),
+			Stream.flattenIterable,
 			Stream.filter((setting) => setting._tag === "providerModels"),
 			Stream.map((setting) => setting.providers),
 			Stream.runHead,
@@ -202,10 +203,11 @@ describe("WsRpcServerLayer GetModels", () => {
 						Layer.provideMerge(
 							Layer.merge(
 								makeTestHandlerLayer({ api, orchestrationEngine }),
-								Layer.succeed(ReadQueryEffectTag, readQuery),
+								Layer.succeed(ReadQueryEffectTag)(readQuery),
 							),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -235,10 +237,11 @@ describe("WsRpcServerLayer GetModels", () => {
 					Layer.provideMerge(
 						Layer.merge(
 							makeTestHandlerLayer(),
-							Layer.succeed(ReadQueryEffectTag, readQuery),
+							Layer.succeed(ReadQueryEffectTag)(readQuery),
 						),
 					),
 				),
+				{ local: true },
 			),
 		);
 	});
@@ -269,10 +272,11 @@ describe("WsRpcServerLayer GetModels", () => {
 						Layer.provideMerge(
 							Layer.merge(
 								makeTestHandlerLayer(),
-								Layer.succeed(ReadQueryEffectTag, readQuery),
+								Layer.succeed(ReadQueryEffectTag)(readQuery),
 							),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -446,6 +450,7 @@ describe("WsRpcServerLayer GetModels", () => {
 							),
 						),
 					),
+					{ local: true },
 				),
 				Effect.ensuring(
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
@@ -594,6 +599,7 @@ describe("WsRpcServerLayer GetModels", () => {
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -739,6 +745,7 @@ describe("WsRpcServerLayer GetModels", () => {
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -775,6 +782,7 @@ describe("WsRpcServerLayer GetModels", () => {
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},
@@ -860,6 +868,7 @@ describe("WsRpcServerLayer GetModels", () => {
 							}),
 						),
 					),
+					{ local: true },
 				),
 			);
 		},

@@ -1,5 +1,5 @@
-import { SqlClient } from "@effect/sql";
-import { Effect, HashMap, type Option, Ref } from "effect";
+import { type Context, Effect, HashMap, type Option, Ref } from "effect";
+import { SqlClient } from "effect/sql";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import type {
 	SessionDetail,
@@ -159,7 +159,7 @@ export const makeSessionListOperations = ({
 	stateRef: Ref.Ref<SessionManagerState>;
 	readQuery: ReadQueryEffect;
 	sql: SqlClient.SqlClient;
-	accounts: AccountDirectory["Type"];
+	accounts: Context.Service.Shape<typeof AccountDirectory>;
 	statusPollerOption: Option.Option<StatusPollerShape>;
 	activity: SessionActivity;
 	snapshot: RelayStatusSnapshotService;

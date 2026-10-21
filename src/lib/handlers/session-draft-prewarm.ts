@@ -16,7 +16,7 @@ import {
 } from "./session.js";
 
 export const resolveDraftLaunchInput = (
-	creation: Effect.Effect.Success<ReturnType<typeof resolveSessionCreation>>,
+	creation: Effect.Success<ReturnType<typeof resolveSessionCreation>>,
 	worktreePath?: string,
 ) =>
 	Effect.gen(function* () {
@@ -36,7 +36,7 @@ export const resolveDraftLaunchInput = (
 	});
 
 /** Hints must never turn a catalog, filesystem or provider failure into a UI error. */
-export const preWarmDraft = (request: PreWarmDraft) =>
+export const preWarmDraft = (request: typeof PreWarmDraft.payloadSchema.Type) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
 		yield* Effect.gen(function* () {
@@ -73,7 +73,7 @@ export const preWarmDraft = (request: PreWarmDraft) =>
 				);
 			}
 		}).pipe(
-			Effect.catchAllCause((cause) =>
+			Effect.catchCause((cause) =>
 				Effect.sync(() => log.debug(`Draft pre-warm failed: ${String(cause)}`)),
 			),
 		);

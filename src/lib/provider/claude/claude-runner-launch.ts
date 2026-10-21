@@ -6,7 +6,7 @@ import {
 	resolveSettings as sdkResolveSettings,
 	tool,
 } from "@anthropic-ai/claude-agent-sdk";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import { z } from "zod";
 import {
 	loadDaemonConfigResult,
@@ -23,7 +23,10 @@ import type {
 	RunnerLiveQueryConfiguration,
 	RunnerSettingsSnapshot,
 } from "../runner/runner-upgrade.js";
-import type { SessionFailure } from "../runner/session-runner.js";
+import type {
+	SessionFailure,
+	SessionRunner,
+} from "../runner/session-runner.js";
 import {
 	type ClaudeSessionRunnerDeps,
 	makeClaudeSessionRunner,
@@ -100,6 +103,7 @@ export const makeClaudeRunnerLaunch = (
 		let daemonConfigDir: string | undefined;
 		let launchSettings: RunnerSettingsSnapshot["claudeSettingsOverrides"];
 		let resumeSessionId: string | undefined;
+		let sessionRunner: SessionRunner | undefined;
 		let liveConfiguration: RunnerLiveQueryConfiguration | undefined;
 		const createQuery: NonNullable<ClaudeSessionRunnerDeps["queryFactory"]> = (
 			params,
@@ -255,6 +259,9 @@ export const makeClaudeRunnerLaunch = (
 				(JSON.parse(
 					JSON.stringify({
 						input: { ...launchInput, configDir },
+						...(snapshot?.workspaceDirectories
+							? { workspaceDirectories: snapshot.workspaceDirectories }
+							: {}),
 						...((frozenSnapshot?.claudeSettingsOverrides ?? launchSettings)
 							? {
 									claudeSettingsOverrides:
@@ -311,7 +318,7 @@ export const makeClaudeRunnerLaunch = (
 		};
 		const defaultLaunchConfig = () =>
 			resolveClaudeLaunchConfig(
-				Either.getOrElse(loadDaemonConfigResult(daemonConfigDir), (error) => {
+				Result.getOrElse(loadDaemonConfigResult(daemonConfigDir), (error) => {
 					if (error._tag === "NotFound") return null;
 					throw error;
 				}),
@@ -328,7 +335,7 @@ export const makeClaudeRunnerLaunch = (
 			makeRunner: (config, emit) =>
 				Effect.gen(function* () {
 					daemonConfigDir = config.daemonConfigDir;
-					return yield* makeClaudeSessionRunner(
+					sessionRunner = yield* makeClaudeSessionRunner(
 						{
 							...config,
 							shellEnv: () => shellEnv,
@@ -363,6 +370,19 @@ export const makeClaudeRunnerLaunch = (
 						(output) => {
 							if (
 								output.type === "event" &&
+								output.event.sessionId === sessionId &&
+								output.event.type === "turn.completed"
+							) {
+								const nativeSessionId =
+									output.event.providerRefs.providerSessionId;
+								if (nativeSessionId && nativeSessionId !== resumeSessionId) {
+									resumeSessionId = nativeSessionId;
+									// Completion can immediately trigger another send.
+									reportUpgradeState();
+								}
+							}
+							if (
+								output.type === "event" &&
 								output.event.type === "workspace.changed" &&
 								snapshot
 							) {
@@ -395,9 +415,28 @@ export const makeClaudeRunnerLaunch = (
 									if (frozenSnapshot) frozenSnapshot = snapshot;
 								}
 							}
-							return emit(output);
+							if (
+								output.type !== "event" ||
+								output.event.sessionId !== sessionId
+							)
+								return emit(output);
+							return Effect.gen(function* () {
+								const cursor = yield* sessionRunner?.getResumeSessionIdEffect?.(
+									sessionId,
+								) ?? Effect.succeed(undefined);
+								if (
+									cursor !== undefined &&
+									(cursor ?? undefined) !== resumeSessionId
+								) {
+									resumeSessionId = cursor ?? undefined;
+									// A client may send again as soon as it sees this event.
+									reportUpgradeState();
+								}
+								return yield* emit(output);
+							});
 						},
 					);
+					return sessionRunner;
 				}),
 			acceptCommand: (command) => {
 				if (command.type === "send-turn" || command.type === "pre-warm")
@@ -436,6 +475,7 @@ export const makeClaudeRunnerLaunch = (
 						...(input.permissionMode
 							? { permissionMode: input.permissionMode }
 							: {}),
+						...(input.sideThread ? { sideThread: true } : {}),
 						...(input.variant ? { variant: input.variant } : {}),
 						...(input.contextWindow
 							? { contextWindow: input.contextWindow }

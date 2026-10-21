@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { test as base, expect, type Page } from "@playwright/test";
-import { GetStatus, RemoveProject } from "../../../src/lib/contracts/ws-rpc.js";
+
 import { ProcessHarness } from "../../helpers/process-harness.js";
 import { AppPage } from "../page-objects/app.page.js";
 
@@ -39,7 +39,10 @@ const test = base.extend<{
 			});
 			try {
 				await harness.restart({ startupTimeoutMs: 60_000, serviceEnvironment });
-				await harness.requestRpc(new RemoveProject({ slug: "process-test" }));
+				await harness.requestRpc({
+					_tag: "RemoveProject",
+					slug: "process-test",
+				});
 				await use(harness);
 			} finally {
 				writeFileSync(testInfo.outputPath("daemon.log"), harness.logTail);
@@ -86,7 +89,7 @@ test("Access toggles Tailscale Serve, keeps it across a restart, and shows read-
 	harness,
 	serviceEnvironment,
 }, testInfo) => {
-	const initial = await harness.requestRpc(new GetStatus({}));
+	const initial = await harness.requestRpc({ _tag: "GetStatus" });
 	expect(initial.tailscaleServeAvailable).toBe(true);
 	expect(initial.tailscaleServeEnabled ?? false).toBe(false);
 	await new AppPage(page).goto(harness.baseUrl);
@@ -102,7 +105,8 @@ test("Access toggles Tailscale Serve, keeps it across a restart, and shows read-
 	await expect(page.getByTestId("server-tailscale-error")).toHaveCount(0);
 	const url = `https://fake.tailnet.ts.net:${initial.port}`;
 	await expect(toggle).toContainText(url);
-	const saved = await harness.requestRpc(new GetStatus({}));
+	const saved = await harness.requestRpc({ _tag: "GetStatus" });
+	expect(saved.projects).toEqual([]);
 	expect(saved.tailscaleServeEnabled).toBe(true);
 	expect(saved.tailscaleServe).toEqual({ url });
 
@@ -113,7 +117,12 @@ test("Access toggles Tailscale Serve, keeps it across a restart, and shows read-
 		keepPort: true,
 		startupTimeoutMs: 60_000,
 		serviceEnvironment,
+		// The fixture removed the default project, so there is no relay to probe.
+		skipBrowserProbe: true,
 	});
+	expect((await harness.requestRpc({ _tag: "GetStatus" })).projects).toEqual(
+		[],
+	);
 	await page.reload();
 	await openServerSettings(page);
 	await expect(toggle).toHaveAttribute("aria-checked", "true");

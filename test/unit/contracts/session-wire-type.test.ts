@@ -20,9 +20,11 @@ describe("session wire type", () => {
 		null,
 		"",
 	])("rejects CreateSession projectSlug %s", (projectSlug) => {
-		expectTypeOf<CreateSession["projectSlug"]>().toEqualTypeOf<string>();
+		expectTypeOf<
+			(typeof CreateSession.payloadSchema.Type)["projectSlug"]
+		>().toEqualTypeOf<string>();
 		expect(() =>
-			Schema.decodeUnknownSync(CreateSession)({
+			Schema.decodeUnknownSync(CreateSession.payloadSchema)({
 				_tag: "CreateSession",
 				originId: "browser-client",
 				projectSlug,

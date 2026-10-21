@@ -6,6 +6,7 @@ import { requireRelayControl } from "./shared.js";
 
 const transcriptMessageTops = new WeakMap<Page, number>();
 const rememberedSessionViews = new WeakMap<Page, string[]>();
+const transcriptAnchors = new WeakMap<Page, { top: number; gap: number }>();
 
 export const sessionPresentationHandlers: StepHandler[] = [
 	{
@@ -126,6 +127,96 @@ export const sessionPresentationHandlers: StepHandler[] = [
 			const sign = match[1] === "up" ? -1 : 1;
 			await world.page.locator("#messages").hover();
 			await world.page.mouse.wheel(0, sign * Number(match[2]));
+		},
+	},
+	{
+		// A real touch scroll, not a wheel: Chromium drops a scrollTop write made
+		// mid-touch-scroll, which a wheel never shows.
+		name: "swipe transcript by touch",
+		match: /^I swipe the transcript towards (older|newer) by ([0-9]+) pixels$/,
+		run: async ({ world, match }) => {
+			const box = await world.page.locator("#messages").boundingBox();
+			if (!box) throw new Error("transcript has no box");
+			const cdp = await world.page.context().newCDPSession(world.page);
+			await cdp.send("Emulation.setTouchEmulationEnabled", {
+				enabled: true,
+				maxTouchPoints: 1,
+			});
+			await cdp.send("Input.synthesizeScrollGesture", {
+				x: box.x + box.width / 2,
+				y: box.y + box.height / 2,
+				yDistance: (match[1] === "older" ? 1 : -1) * Number(match[2]),
+				gestureSourceType: "touch",
+				speed: 600,
+			});
+			await cdp.detach();
+		},
+	},
+	{
+		name: "remember where the transcript content sits",
+		match: /^I remember where the transcript content sits$/,
+		run: async ({ world }) => {
+			const anchor = await world.page
+				.locator("#messages")
+				.evaluate(async (el) => {
+					// A wheel scroll animates, so wait until the offset holds still.
+					let last = Number.NaN;
+					for (
+						let still = 0;
+						still < 5;
+						still = el.scrollTop === last ? still + 1 : 0
+					) {
+						last = el.scrollTop;
+						await new Promise((resolve) => requestAnimationFrame(resolve));
+					}
+					const box = el.getBoundingClientRect();
+					const target = document.elementFromPoint(
+						box.left + 30,
+						box.top + el.clientHeight / 2,
+					);
+					if (!target || target === el || !el.contains(target))
+						return undefined;
+					for (const old of el.querySelectorAll("[data-test-anchor]"))
+						old.removeAttribute("data-test-anchor");
+					target.setAttribute("data-test-anchor", "");
+					return {
+						top: target.getBoundingClientRect().top,
+						gap: el.scrollHeight - el.scrollTop - el.clientHeight,
+					};
+				});
+			if (!anchor)
+				throw new Error(
+					"no transcript content at the middle of the transcript",
+				);
+			transcriptAnchors.set(world.page, anchor);
+		},
+	},
+	{
+		name: "transcript content moved",
+		match:
+			/^the transcript content moved (?:([0-9]+) pixels|its remembered distance from the bottom) towards (older|newer)$/,
+		run: async ({ world, match }) => {
+			const before = transcriptAnchors.get(world.page);
+			if (!before)
+				throw new Error("transcript content position was not remembered");
+			// Let a trailing frame (resize observers, scroll clamps) land first.
+			await world.page.evaluate(
+				() =>
+					new Promise((resolve) =>
+						requestAnimationFrame(() => requestAnimationFrame(resolve)),
+					),
+			);
+			const after = await world.page
+				.locator("#messages [data-test-anchor]")
+				.evaluate((el) => el.getBoundingClientRect().top);
+			const distance = match[1] === undefined ? before.gap : Number(match[1]);
+			const expected =
+				before.top + (match[2] === "older" ? distance : -distance);
+			if (Math.abs(after - expected) > 3) {
+				throw new Error(
+					`transcript content is at ${after}, expected ${expected} (started at ${before.top})`,
+				);
+			}
 		},
 	},
 	{
@@ -261,6 +352,14 @@ export const sessionPresentationHandlers: StepHandler[] = [
 		match: /^the transcript is visible at the remembered scroll position$/,
 		run: async ({ world }) => {
 			await world.page.locator("#messages").waitFor({ state: "visible" });
+			// The top clearance trails a bar resize by a frame (it is measured by a
+			// ResizeObserver), so let it land before measuring.
+			await world.page.evaluate(
+				() =>
+					new Promise((resolve) =>
+						requestAnimationFrame(() => requestAnimationFrame(resolve)),
+					),
+			);
 			const before = transcriptMessageTops.get(world.page);
 			const after = await world.page
 				.locator("#messages .msg-user")
@@ -278,6 +377,18 @@ export const sessionPresentationHandlers: StepHandler[] = [
 			await world.page.locator("#messages").evaluate((el) => {
 				el.scrollTo({ top: el.scrollHeight });
 			});
+		},
+	},
+	{
+		// Sets scrollTop directly: a wheel would also toggle the bar, and the
+		// scenario needs the bar change to come only from the step after this.
+		name: "park transcript just above the bottom",
+		match: /^the transcript is parked ([0-9]+) pixels above the bottom$/,
+		run: async ({ world, match }) => {
+			const gap = Number(match[1]);
+			await world.page.locator("#messages").evaluate((el, gap) => {
+				el.scrollTop = el.scrollHeight - el.clientHeight - gap;
+			}, gap);
 		},
 	},
 	{

@@ -2,8 +2,6 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
-import { SqlError } from "@effect/sql/SqlError";
 import {
 	Deferred,
 	Effect,
@@ -13,6 +11,8 @@ import {
 	Queue,
 	Stream,
 } from "effect";
+import { SqlClient } from "effect/sql";
+import { SqlError, UnknownError } from "effect/sql/SqlError";
 import {
 	afterEach,
 	beforeEach,
@@ -100,6 +100,7 @@ describe("selected OpenCode stop through the relay graph", () => {
 			use: () => Effect.succeed(client),
 			borrow: () => Effect.succeed(client),
 			useIfRunning: () => Effect.succeed(Option.none()),
+			isManagedStopped: () => Effect.succeed(false),
 			ifRunning: () => Effect.succeed(Option.none()),
 			stop: (instanceId) =>
 				Queue.offer(events, {
@@ -216,13 +217,13 @@ describe("selected OpenCode stop through the relay graph", () => {
 					rows
 						.map((row) => ({
 							...row,
-							status:
-								row.id.endsWith("work") &&
-								(stoppedId === selectedId
+							status: (
+								stoppedId === selectedId
 									? row.provider === selectedId || row.provider === "opencode"
-									: row.provider === stoppedId)
-									? "idle"
-									: "busy",
+									: row.provider === stoppedId
+							)
+								? "idle"
+								: "busy",
 						}))
 						.sort((a, b) => a.id.localeCompare(b.id)),
 				);
@@ -322,11 +323,13 @@ function makeFakeIngress(options?: {
 				ingestOptions?: { readonly afterCommit?: Effect.Effect<void> },
 			) =>
 				(options?.ingestBatch?.(events) ?? Effect.succeed(events.length)).pipe(
-					Effect.tap(() => {
-						for (const event of events)
-							if (event.type === "session.created")
-								projected.add(event.sessionId);
-					}),
+					Effect.tap(() =>
+						Effect.sync(() => {
+							for (const event of events)
+								if (event.type === "session.created")
+									projected.add(event.sessionId);
+						}),
+					),
 					// Stand in for the durable boundary: only a batch that committed
 					// runs afterCommit.
 					Effect.tap(() => ingestOptions?.afterCommit ?? Effect.void),
@@ -373,57 +376,6 @@ describe("EffectOpenCodeRuntimeIngress", () => {
 		if (dir) rmSync(dir, { recursive: true, force: true });
 	});
 
-	it("persists and projects translated SSE events through Effect services", async () => {
-		if (!hook || !runtime) throw new Error("test runtime not initialized");
-		const result = await Effect.runPromise(
-			hook.onSSEEventEffect(
-				makeSSEEvent("message.created", {
-					sessionID: SESSION_ID,
-					messageID: "msg-effect-001",
-					info: { role: "assistant", parts: [] },
-				}),
-				SESSION_ID,
-				"opencode",
-			),
-		);
-
-		if (!result.ok) throw new Error(result.error ?? result.reason);
-		expect(result).toMatchObject({
-			ok: true,
-			eventsWritten: 2,
-			sessionSeeded: true,
-		});
-
-		const rows = runtime.runSync(
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				return yield* sql<{
-					session_provider: string;
-					message_id: string;
-					message_role: string;
-					event_count: number;
-				}>`
-					SELECT
-						sessions.provider AS session_provider,
-						messages.id AS message_id,
-						messages.role AS message_role,
-						(SELECT COUNT(*) FROM events WHERE session_id = ${SESSION_ID}) AS event_count
-					FROM sessions
-					JOIN messages ON messages.session_id = sessions.id
-					WHERE sessions.id = ${SESSION_ID}`;
-			}),
-		);
-
-		expect(rows).toEqual([
-			{
-				session_provider: "opencode",
-				message_id: "msg-effect-001",
-				message_role: "assistant",
-				event_count: 2,
-			},
-		]);
-	});
-
 	it.each([
 		"opencode",
 		"managed-test",
@@ -451,8 +403,8 @@ describe("EffectOpenCodeRuntimeIngress", () => {
 							ingestion.ingestBatch(events, {
 								...options,
 								beforeCommit: Deferred.succeed(entered, undefined).pipe(
-									Effect.zipRight(Deferred.await(release)),
-									Effect.zipRight(options.beforeCommit ?? Effect.void),
+									Effect.andThen(Deferred.await(release)),
+									Effect.andThen(options.beforeCommit ?? Effect.void),
 								),
 							}),
 					}),
@@ -743,7 +695,12 @@ describe("EffectOpenCodeRuntimeIngress ProviderRuntimeIngestion boundary", () =>
 		const { hook } = makeFakeIngress({
 			ingestBatch: () =>
 				Effect.fail(
-					new SqlError({ message: "SQLITE_BUSY: database is locked" }),
+					new SqlError({
+						reason: new UnknownError({
+							cause: new Error("SQLITE_BUSY: database is locked"),
+							message: "SQLITE_BUSY: database is locked",
+						}),
+					}),
 				),
 		});
 		const event = makeSSEEvent("message.created", {

@@ -20,10 +20,10 @@ export interface ToolContentService {
 	) => Effect.Effect<readonly ToolDetail[], ToolContentServiceError>;
 }
 
-export class ToolContentServiceTag extends Context.Tag("ToolContentService")<
+export class ToolContentServiceTag extends Context.Service<
 	ToolContentServiceTag,
 	ToolContentService
->() {}
+>()("ToolContentService") {}
 
 export const ToolContentServiceLive: Layer.Layer<
 	ToolContentServiceTag,

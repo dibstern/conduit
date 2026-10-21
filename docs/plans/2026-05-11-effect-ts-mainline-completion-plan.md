@@ -8,7 +8,7 @@
 
 **Tech Stack:** `effect 3.21.x`, `@effect/platform`, `@effect/platform-node`, `@effect/rpc@0.75.1`, `@effect/sql`, `@effect/sql-sqlite-node`, `@effect/vitest`, Vitest, Svelte 5, Node.js, SQLite.
 
-**Effect Version Policy:** Finish this migration on the current Effect 3.x stack. Do not introduce `effect@4.0.0-beta.*` or v4-only `effect/unstable/*` imports during this plan. The Effect v4 migration is a separate post-migration track after the guardrail checklist is complete and the architecture is Effect-owned.
+**Effect Version Policy:** Finish this migration on the current Effect 3.x stack. Do not introduce `effect@4.0.0-beta.*` or v4-only `effect/unstable/*` imports during this plan. The Effect v4 migration is a separate post-migration track after the guardrail checklist is complete and the architecture is Effect-owned. (Superseded 2026-10-18: Effect 4 is now current; see conduit-test-16c8.)
 
 **Live Progress:** Use `docs/plans/2026-05-14-effect-ts-mainline-live-progress.md` for current checklist state. `docs/plans/2026-05-11-effect-ts-mainline-completion-progress.md` is a historical evidence log and should not be loaded or appended for routine slice updates.
 
@@ -86,7 +86,7 @@ As of the 2026-05-14 planning refresh, the target is the hybrid relay architectu
 - A command gate queues or backpressures incoming commands until replay, subscriptions, and reactors are ready. No command should race a half-started relay.
 - A relay event bus can fan out in-process events to reactors, but the plan must specify whether it is bounded, sliding, dropping, or replay-backed. The durable event store is the recovery path.
 - Effect RPC over WebSocket is the target browser protocol on the current Effect 3.x stack. Shared contracts replace hand-maintained frontend/server decoder drift.
-- Effect v4 remains post-migration. Do not spend the mainline completion effort on beta package churn while ownership boundaries are still incomplete.
+- Effect v4 remains post-migration. Do not spend the mainline completion effort on beta package churn while ownership boundaries are still incomplete. (Superseded 2026-10-18: Effect 4 is now current; see conduit-test-16c8.)
 
 ---
 

@@ -12,7 +12,7 @@ import { Schema } from "effect";
  * `satisfies readonly (keyof Settings)[]` accepts any string whatsoever and
  * would assert nothing here. `autoMode` in particular is absent from the
  * published types and exists only in the CLI bundle. The list is pinned by
- * test instead — see test/unit/provider/claude/claude-sdk-settings.test.ts.
+ * test instead — see test/unit/provider/claude/claude-sdk-settings.guard.test.ts.
  */
 export const CLAUDE_TRUST_TIERED_SETTINGS_KEYS: readonly string[] = [
 	"permissions",
@@ -44,32 +44,32 @@ export type JsonValue =
 	| readonly JsonValue[]
 	| { readonly [key: string]: JsonValue };
 
-export const JsonValueSchema: Schema.Schema<JsonValue> = Schema.suspend(
-	(): Schema.Schema<JsonValue> =>
-		Schema.Union(
+export const JsonValueSchema: Schema.Codec<JsonValue> = Schema.suspend(
+	(): Schema.Codec<JsonValue> =>
+		Schema.Union([
 			Schema.Null,
 			Schema.Boolean,
-			Schema.JsonNumber,
+			Schema.Finite,
 			Schema.String,
 			Schema.Array(JsonValueSchema),
-			Schema.Record({ key: Schema.String, value: JsonValueSchema }),
-		),
+			Schema.Record(Schema.String, JsonValueSchema),
+		]),
 );
 
-export const ClaudeSettingsOverridesSchema = Schema.Record({
-	key: Schema.String,
-	value: JsonValueSchema,
-});
+export const ClaudeSettingsOverridesSchema = Schema.Record(
+	Schema.String,
+	JsonValueSchema,
+);
 export type ClaudeSettingsOverrides = typeof ClaudeSettingsOverridesSchema.Type;
 
 const ClaudeDisplaySettingSchema = Schema.Struct({
 	value: Schema.optional(JsonValueSchema),
 	source: Schema.optional(
-		Schema.Literal("user", "project", "local", "managed", "flag"),
+		Schema.Literals(["user", "project", "local", "managed", "flag"]),
 	),
 	path: Schema.optional(Schema.String),
 	policyOrigin: Schema.optional(
-		Schema.Literal(
+		Schema.Literals([
 			"helper",
 			"remote",
 			"plist",
@@ -77,14 +77,14 @@ const ClaudeDisplaySettingSchema = Schema.Struct({
 			"file",
 			"parent",
 			"hkcu",
-		),
+		]),
 	),
 });
 
-export const ResolvedClaudeSettingsSchema = Schema.Record({
-	key: Schema.Literal(...CLAUDE_DISPLAYABLE_SETTINGS_KEYS),
-	value: ClaudeDisplaySettingSchema,
-});
+export const ResolvedClaudeSettingsSchema = Schema.Record(
+	Schema.Literals([...CLAUDE_DISPLAYABLE_SETTINGS_KEYS]),
+	ClaudeDisplaySettingSchema,
+);
 export type ResolvedClaudeSettings = typeof ResolvedClaudeSettingsSchema.Type;
 
 export class ClaudeSettingsTrustBoundaryError extends Schema.TaggedError<ClaudeSettingsTrustBoundaryError>()(
@@ -98,14 +98,14 @@ export class ClaudeSettingsTrustBoundaryError extends Schema.TaggedError<ClaudeS
 export class ClaudeSettingsResolveError extends Schema.TaggedError<ClaudeSettingsResolveError>()(
 	"ClaudeSettingsResolveError",
 	{
-		reason: Schema.Literal(
+		reason: Schema.Literals([
 			"timeout",
 			"non-zero-exit",
 			"invalid-json",
 			"invalid-result",
 			"spawn-failed",
 			"output-too-large",
-		),
+		]),
 		message: Schema.String,
 	},
 ) {}

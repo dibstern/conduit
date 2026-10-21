@@ -5,7 +5,6 @@ import { Schema } from "effect";
 import {
 	type GetStatusResponse,
 	GetStatusResponseSchema,
-	RemoveProject,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import { getVersion } from "../../../src/lib/version.js";
@@ -26,7 +25,10 @@ const test = base.extend<{ harness: ProcessHarness; supervised: boolean }>({
 					startupTimeoutMs: 60_000,
 					serviceEnvironment: { CONDUIT_SERVICE: supervised ? "1" : "0" },
 				});
-				await harness.requestRpc(new RemoveProject({ slug: "process-test" }));
+				await harness.requestRpc({
+					_tag: "RemoveProject",
+					slug: "process-test",
+				});
 				await use(harness);
 			} finally {
 				writeFileSync(testInfo.outputPath("daemon.log"), harness.logTail);
@@ -63,11 +65,12 @@ function observeStatus(page: Page) {
 			for (const message of Array.isArray(parsed) ? parsed : [parsed]) {
 				if (!isRecord(message) || message["_tag"] !== "Request") continue;
 				if (
-					typeof message["id"] !== "string" ||
+					(typeof message["id"] !== "string" &&
+						typeof message["id"] !== "number") ||
 					typeof message["tag"] !== "string"
 				)
 					continue;
-				requests.set(message["id"], message["tag"]);
+				requests.set(String(message["id"]), message["tag"]);
 				if (isRecord(message["payload"]))
 					calls.push({ tag: message["tag"], payload: message["payload"] });
 			}
@@ -78,10 +81,12 @@ function observeStatus(page: Page) {
 				if (
 					!isRecord(message) ||
 					message["_tag"] !== "Exit" ||
-					typeof message["requestId"] !== "string"
+					(typeof message["requestId"] !== "string" &&
+						typeof message["requestId"] !== "number")
 				)
 					continue;
-				if (requests.get(message["requestId"]) !== "GetStatus") continue;
+				if (requests.get(String(message["requestId"])) !== "GetStatus")
+					continue;
 				const exit = message["exit"];
 				if (isRecord(exit) && exit["_tag"] === "Success") {
 					reads.push(
@@ -228,22 +233,24 @@ test("Server status reloads after two supervised restarts, with desktop and phon
 		animations: "disabled",
 	});
 	await page.setViewportSize({ width: 390, height: 844 });
-	// Both boxes from one frame: the settings sheet can still be moving, and two
-	// separate reads can straddle the move.
-	const [text, actions] = await page.evaluate(() =>
-		["server-status-details", "server-status-actions"].map((id) => {
-			const box = document
-				.querySelector(`[data-testid="${id}"]`)
-				?.getBoundingClientRect();
-			return (
-				box && { x: box.x, y: box.y, width: box.width, height: box.height }
-			);
-		}),
-	);
-	if (!text || !actions) throw new Error("Status card layout is missing");
-	expect(actions.y).toBeGreaterThanOrEqual(text.y + text.height);
-	expect(actions.x).toBeCloseTo(text.x, 0);
-	expect(actions.width).toBeCloseTo(text.width, 0);
+	// Resizing can return before the browser applies the responsive layout.
+	await expect(async () => {
+		// Read both boxes in one frame while the settings sheet is moving.
+		const [text, actions] = await page.evaluate(() =>
+			["server-status-details", "server-status-actions"].map((id) => {
+				const box = document
+					.querySelector(`[data-testid="${id}"]`)
+					?.getBoundingClientRect();
+				return (
+					box && { x: box.x, y: box.y, width: box.width, height: box.height }
+				);
+			}),
+		);
+		if (!text || !actions) throw new Error("Status card layout is missing");
+		expect(actions.y).toBeGreaterThanOrEqual(text.y + text.height);
+		expect(actions.x).toBeCloseTo(text.x, 0);
+		expect(actions.width).toBeCloseTo(text.width, 0);
+	}).toPass({ timeout: 10_000 });
 	await card.screenshot({
 		path: resolve(artifacts, `${testInfo.project.name}-390px.png`),
 		animations: "disabled",

@@ -1,5 +1,18 @@
 # Conduit project model
 
+## Project
+
+A **Project** is a named, saved set of one or more Project Folders and the only
+way sessions are grouped (ADR-0011). Its first folder is the main folder, which
+no other project may use as its main folder; other folders can be shared.
+Every session belongs to one project for life, and projects never merge.
+Conduit is never "in" a project: the `?p=<slug>` Scope names a project but is
+not app state.
+
+The **Scratch Project** is the hidden project behind New Session's "No
+project". Each scratch session runs in its own `<configDir>/scratch/<session
+id>/` folder. Only an unsent draft can switch between it and a real project.
+
 ## Project Provenance
 
 A stored event or durable command belongs to the project's stable slug, its
@@ -40,35 +53,23 @@ save. The daemon's project registry layer refreshes every stored folder before
 HTTP/RPC consumers start, so remote changes are reflected after restart. Identity
 discovery is best-effort and never rejects a project save or daemon startup.
 
-## Project Group
+## Session list Scope
 
-A **Project Group** contains the projects sharing a grouping key under their
-effective grouping mode. The primary Project Folder alone determines the group;
-attaching another folder does not change it. The daemon stores an optional
-`groupingMode` override on each project. Unset overrides inherit the global
-`defaultGroupingMode` in persisted settings, which defaults to `repository`.
+The session list's **Scope** is one project or all projects. The URL's `p`
+parameter selects a project by slug; omitting it shows all projects. Each scope
+selection adds a browser history entry. `project:` search tokens select one
+project. Unknown project slugs show an empty list without widening the scope.
+Search, paging and live rows all filter by the project's slug alone.
 
-`repository` keys on Repository Identity, `repository+subfolder` adds the primary
-folder's path relative to its repository root, and `off` gives the project its
-own group. A primary folder without an identity also stands alone. Repository
-groups use one repository display name; standalone projects use their title.
-Session rows add the project title only when the group has multiple projects,
-even when those titles are identical.
+Projects whose main folders share a Repository Identity remain separate projects.
+Session rows show their project title. The sidebar's arrangement can group rows
+by status, project or time; project arrangement has one heading per project,
+titled with that project's title. Repository Identity remains a folder fact and
+appears in the project dialog.
 
-The shared pure `computeProjectGroups` function derives group keys, labels and
-qualifier decisions for the daemon and frontend. It leaves ordering to the
-daemon. Project and global grouping edits publish a fresh project list so rows
-relabel on every client without a reload.
-
-The session list's **Scope** is one project or one Project Group. Its only state
-is the URL's `p` parameter: a plain slug selects that project, while
-`/group/<group key>` selects every project with that key. Only groups with more
-than one project get a repository choice in the chip's menu; their projects
-remain available for further narrowing. Each selection adds a browser history
-entry. `project:` search tokens select projects only. A missing group key has
-the same empty result as an unknown project slug, without widening the scope.
-Daemon search and paging select projects by the computed groups before reading
-sessions; frontend live rows use those same computed memberships.
+Old repository-group scope links are replaced with the unscoped URL when the
+router reads them. Retired grouping settings in existing configuration are
+ignored on load and dropped on the next save. No projects or sessions merge.
 
 ## Session Workspace
 
@@ -100,7 +101,40 @@ branch only after successful checkout removal and a merged check. Detached
 checkouts are kept unless their commits are known to be merged into the default
 branch.
 
-Worktree sessions use their own branch's merged signal to settle through the sidebar's automatic rule, keep their workspace and worktrees, and return to Active when messaged, with that merge ignored for the resumed work.
+Cleanup also keeps a checkout while its session's Claude runner owns a live
+process, including while stopping, exiting after idle, or being adopted after a
+daemon restart. Clean up now reports "Agent process is running". This guard is
+separate from quiescence and applies again at removal time, including immediate
+removal after deletion when ending the agent fails. It reads the relay's runner
+pool, never discovers runners from disk. OpenCode sessions have no Claude runner
+and are unaffected. Every cleanup run first stops live agents of quiescent
+settled sessions, even when cleanup is Off. The sweep can then remove eligible
+checkouts in the same run.
+
+Automatic worktree cleanup applies only after a session settles or is deleted.
+The default settle rule removes a checkout when nothing is missing: its inspected
+head is an ancestor of local main or master, or origin/HEAD when set, and it has
+no tracked changes or untracked, non-ignored files. This includes clean branches
+with no new commits; squash merges are kept. This rule always protects
+uncommitted and untracked files, even when the user's keep level protects only
+tracked changes.
+
+An optional settled-age rule removes checkouts after the configured number of
+days since settling, even with unmerged commits. Never disables it; Right away
+makes the next cleanup run eligible. This rule and the delete rule use the user's
+keep level. The settled-age rule takes precedence when due. Automatic cleanup
+keeps branches so a checkout can be recreated on the next message. Active
+sessions are never removed merely for inactivity, merging, or having no commits.
+
+Each project can use the global cleanup rules, turn cleanup Off, or supply a full
+Custom rules override in Settings. Overrides live in the project's daemon.json
+entry, never in conduit.json, and each cleanup run reads the current effective
+rules again before removal. Off projects still stop quiescent settled agents,
+but Clean up now neither removes nor reports their worktrees.
+
+Worktree sessions use their own branch's merged signal to settle through the
+sidebar's automatic rule and return to Active when messaged, with that merge
+ignored for the resumed work.
 
 Conduit's Worktree daemon service creates a checkout under
 `<configDir>/worktrees/<project>/<session>/<folder>` before the session exists,

@@ -1,17 +1,20 @@
 // The only projection runner. Uses SqlClient.withTransaction for writes.
 
-import { SqlClient } from "@effect/sql";
-import type { SqlError } from "@effect/sql/SqlError";
-import { Context, Data, Effect, Exit } from "effect";
+import { Context, Data, Effect, Exit, Ref, Semaphore } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
 import type { StoredEvent } from "../events.js";
+import type { EventStoreError } from "./event-store-effect.js";
 import { ProjectorCursorEffectTag } from "./projector-cursor-effect.js";
 import {
 	type EffectProjector,
 	mergeTouches,
 	type ProjectionContext,
 	type ProjectionTouch,
+	stampMessage,
 } from "./projectors-effect.js";
+import { SessionRollupProjects } from "./session-rollup-projects.js";
 import { refreshSidebar } from "./sidebar-projection.js";
 import {
 	decodeStoredEventRow,
@@ -45,6 +48,10 @@ export interface RecoveryResult {
 	readonly durationMs: number;
 }
 
+type SessionDeletionExpansion = (
+	event: Extract<StoredEvent, { type: "session.deleted" }>,
+) => Effect.Effect<readonly StoredEvent[], EventStoreError | SqlError>;
+
 export interface ProjectionRunnerEffect {
 	/**
 	 * Apply events and report how far the read model moved, which sessions moved
@@ -66,6 +73,8 @@ export interface ProjectionRunnerEffect {
 
 	readonly projectBatch: (
 		events: readonly StoredEvent[],
+		/** Append markers before each original delete; project them after the batch. */
+		expandDeletion?: SessionDeletionExpansion,
 	) => Effect.Effect<
 		ReadModelAdvance,
 		ProjectionRunnerError | SqlError,
@@ -98,9 +107,10 @@ export interface ProjectionRunnerEffect {
 	readonly markRecovered: () => Effect.Effect<void>;
 }
 
-export class ProjectionRunnerEffectTag extends Context.Tag(
-	"ProjectionRunnerEffect",
-)<ProjectionRunnerEffectTag, ProjectionRunnerEffect>() {}
+export class ProjectionRunnerEffectTag extends Context.Service<
+	ProjectionRunnerEffectTag,
+	ProjectionRunnerEffect
+>()("ProjectionRunnerEffect") {}
 
 export const makeProjectionRunnerEffect = (
 	projectors: readonly EffectProjector[],
@@ -108,7 +118,11 @@ export const makeProjectionRunnerEffect = (
 	Effect.gen(function* () {
 		const cursorRepo = yield* ProjectorCursorEffectTag;
 		const sql = yield* SqlClient.SqlClient;
-		const recoveryLock = yield* Effect.makeSemaphore(1);
+		const projects = yield* SessionRollupProjects;
+		const rollupProjectIds = projects
+			? Ref.get(projects)
+			: Effect.succeed(undefined);
+		const recoveryLock = yield* Semaphore.make(1);
 		const batchCursorName =
 			BATCH_CURSOR_PREFIX +
 			projectors
@@ -239,7 +253,11 @@ export const makeProjectionRunnerEffect = (
 					}
 
 					const touched = mergeTouches(touches);
-					yield* refreshSidebar(touched.sidebar ?? [], version);
+					yield* refreshSidebar(
+						touched.sidebar ?? [],
+						version,
+						yield* rollupProjectIds,
+					);
 					return {
 						version,
 						projectIds: [event.projectId],
@@ -252,6 +270,7 @@ export const makeProjectionRunnerEffect = (
 
 		const projectBatch = (
 			events: readonly StoredEvent[],
+			expandDeletion?: SessionDeletionExpansion,
 		): Effect.Effect<
 			ReadModelAdvance,
 			ProjectionRunnerError | SqlError,
@@ -276,6 +295,7 @@ export const makeProjectionRunnerEffect = (
 				// Event order decides the outcome, so the touches are folded, not
 				// unioned — see projectEvent.
 				const touches: ProjectionTouch[] = [];
+				const expandedEvents = [...events];
 
 				// One transaction for the whole batch (S9): a translation that produced
 				// several events lands all-or-nothing, so the read model never shows a
@@ -288,23 +308,45 @@ export const makeProjectionRunnerEffect = (
 				const { version, touched } = yield* sql.withTransaction(
 					Effect.gen(function* () {
 						const version = yield* nextVersion;
-						const ctx: ProjectionContext = { version, replaying };
-						for (const event of events) {
+						const deferredMessageStamps = new Set<string>();
+						const ctx: ProjectionContext = {
+							version,
+							replaying,
+							deferredMessageStamps,
+						};
+						for (const [index, event] of expandedEvents.entries()) {
+							if (
+								index < events.length &&
+								event.type === "session.deleted" &&
+								expandDeletion
+							)
+								expandedEvents.push(...(yield* expandDeletion(event)));
 							const matching = projectorsByEventType.get(event.type) ?? [];
 							for (const projector of matching) {
 								touches.push(yield* projector.project(event, ctx));
 							}
 						}
+						// Last, so each message is stamped once, as the batch left it.
+						touches.push(
+							yield* stampMessage([...deferredMessageStamps], { version }),
+						);
 
 						// Projection and this watermark commit together. Enrollment
 						// cursors stay fixed so a newly added projector still starts at 0.
 						yield* cursorRepo.upsert(
 							batchCursorName,
-							events.reduce((max, event) => Math.max(max, event.sequence), 0),
+							expandedEvents.reduce(
+								(max, event) => Math.max(max, event.sequence),
+								0,
+							),
 						);
 						// Once for the batch: a refresh reads whole families.
 						const touched = mergeTouches(touches);
-						yield* refreshSidebar(touched.sidebar ?? [], version);
+						yield* refreshSidebar(
+							touched.sidebar ?? [],
+							version,
+							yield* rollupProjectIds,
+						);
 						return { version, touched };
 					}).pipe(
 						Effect.mapError(
@@ -319,7 +361,9 @@ export const makeProjectionRunnerEffect = (
 
 				return {
 					version,
-					projectIds: [...new Set(events.map((event) => event.projectId))],
+					projectIds: [
+						...new Set(expandedEvents.map((event) => event.projectId)),
+					],
 					sessionIds: touched.stamped,
 					removedSessionIds: touched.removed,
 					collections: touched.collections,
@@ -425,13 +469,13 @@ export const makeProjectionRunnerEffect = (
 											(projectorCursors.get(projector.name) ?? 0),
 									);
 									if (pending.length === 0) continue;
-									const decoded = yield* Effect.either(
+									const decoded = yield* Effect.result(
 										decodeProjectionEventRow(eventRow),
 									);
 									// Commit the valid prefix before surfacing a decode error,
 									// preserving progress already made by the old replay loop.
-									if (decoded._tag === "Left") return decoded.left;
-									const storedEvent = decoded.right;
+									if (decoded._tag === "Failure") return decoded.failure;
+									const storedEvent = decoded.success;
 									for (const projector of pending) {
 										const projected = yield* withReplaySavepoint(
 											Effect.gen(function* () {
@@ -441,14 +485,18 @@ export const makeProjectionRunnerEffect = (
 													replaying: true,
 												});
 												// This savepoint isolates one projector/event pair.
-												yield* refreshSidebar(touched.sidebar ?? [], version);
+												yield* refreshSidebar(
+													touched.sidebar ?? [],
+													version,
+													yield* rollupProjectIds,
+												);
 												yield* cursorRepo.upsert(
 													projector.name,
 													eventRow.sequence,
 												);
 											}),
 										).pipe(
-											Effect.catchAll((err) =>
+											Effect.catch((err) =>
 												Effect.gen(function* () {
 													const failure = recordFailure(
 														projector,
@@ -481,10 +529,10 @@ export const makeProjectionRunnerEffect = (
 													);
 												}),
 											),
-											Effect.either,
+											Effect.result,
 										);
 										// A failure to persist the skip must leave this event pending.
-										if (projected._tag === "Left") return projected.left;
+										if (projected._tag === "Failure") return projected.failure;
 
 										projectorCursors.set(projector.name, eventRow.sequence);
 										totalReplayed++;

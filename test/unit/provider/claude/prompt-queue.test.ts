@@ -1,5 +1,4 @@
 // test/unit/provider/claude/prompt-queue.test.ts
-import { readFileSync } from "node:fs";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import {
@@ -45,26 +44,6 @@ async function close(queue: PromptQueueController): Promise<void> {
 }
 
 describe("EffectPromptQueue", () => {
-	it("keeps producer operations free of local runtime bridges", () => {
-		const source = readFileSync(
-			"src/lib/provider/claude/effect-prompt-queue.ts",
-			"utf8",
-		);
-		expect(source).not.toMatch(/Effect\.run(?:Promise|Sync)/);
-	});
-
-	it("exposes Effect-returning producer operations", async () => {
-		const q = await makeQueue();
-
-		const enqueueEffect = q.enqueue(msg("effectful"));
-		expect(Effect.isEffect(enqueueEffect)).toBe(true);
-		await Effect.runPromise(enqueueEffect);
-
-		const closeEffect = q.close();
-		expect(Effect.isEffect(closeEffect)).toBe(true);
-		await Effect.runPromise(closeEffect);
-	});
-
 	it("yields messages in enqueue order", async () => {
 		const q = await makeQueue();
 		await enqueue(q, msg("one"));

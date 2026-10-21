@@ -24,7 +24,7 @@
 	} from "../../utils/turns.js";
 	import { isSubagentToolName, subagentSessionId } from "../../utils/subagent-tools.js";
 	import { clock } from "../../stores/clock.svelte.js";
-	import { switchToSession } from "../../stores/session.svelte.js";
+	import { selection } from "../../stores/selection.svelte.js";
 	import { openTask } from "../session/background-tasks.svelte.js";
 	import type { BackgroundTask } from "../../../shared-types.js";
 	import { partStyle } from "./activity-style.js";
@@ -75,7 +75,7 @@
 
 	function openChildSession(description: string) {
 		if (!childSession) return;
-		if (!launch || typeof taskId !== "string") return switchToSession(childSession);
+		if (!launch || typeof taskId !== "string") return selection.open(childSession);
 		// Transcript step uuids read "<message id>/<part id>".
 		const [messageId = part.uuid, partId] = part.uuid.split(/\/(.*)/s);
 		openTask({ id: taskId, sessionId: childSession, description }, { messageId, partId });
@@ -198,8 +198,6 @@
 		{/if}
 	</div>
 {:else if part.type === "thinking"}
-	<!-- .thinking-* and .done are E2E hooks: the visual-mockup spec rewrites the
-	     verb and the duration through them to keep screenshots deterministic. -->
 	<div class="thinking-block thinking-item" class:done={part.done} data-part={part.uuid}>
 		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" aria-expanded={expanded} onclick={() => (expanded = !expanded)}>
 			<span class="shrink-0 text-text-dimmer">

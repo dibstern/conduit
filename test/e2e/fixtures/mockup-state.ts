@@ -17,37 +17,39 @@ export interface MockMessage {
 	[key: string]: unknown;
 }
 
+export const defaultInstances = [
+	{
+		id: "claude",
+		name: "Claude",
+		driver: "claude",
+		isDefault: true,
+		usageEligible: true,
+		port: 0,
+		managed: false,
+		status: "healthy",
+		restartCount: 0,
+		createdAt: 1,
+	},
+	{
+		id: "opencode",
+		name: "OpenCode",
+		driver: "opencode",
+		isDefault: true,
+		port: 4096,
+		managed: true,
+		status: "healthy",
+		restartCount: 0,
+		createdAt: 1,
+	},
+];
+
 /** Shared epoch for canned mock data and the acceptance browser clock. */
 export const MOCK_NOW_MS = Date.UTC(2026, 0, 1, 9, 41, 0);
 
 export const initMessages: MockMessage[] = [
 	{
 		type: "instance_list",
-		instances: [
-			{
-				id: "claude",
-				name: "Claude",
-				driver: "claude",
-				isDefault: true,
-				usageEligible: true,
-				port: 0,
-				managed: false,
-				status: "healthy",
-				restartCount: 0,
-				createdAt: 1,
-			},
-			{
-				id: "opencode",
-				name: "OpenCode",
-				driver: "opencode",
-				isDefault: true,
-				port: 4096,
-				managed: true,
-				status: "healthy",
-				restartCount: 0,
-				createdAt: 1,
-			},
-		],
+		instances: defaultInstances,
 	},
 	{
 		type: "status",

@@ -1,20 +1,19 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
-import { encodeGroupScope } from "../../../session-scope.js";
+import { draftList } from "../../stores/draft-list.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
-import { getProjectGroup } from "../../stores/project-state.svelte.js";
 import {
 	attachedProjectState,
 	routerState,
 } from "../../stores/router.svelte.js";
 import {
-	applyListDaemonSessionsResponse,
 	clearSessionState,
 	sessionState,
 	setSearchQuery,
 } from "../../stores/session.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { mockSessionsAllGroups } from "../../stories/mocks.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import type { SessionInfo } from "../../types.js";
 import SessionList from "./SessionList.svelte";
@@ -40,18 +39,20 @@ function seedDaemonSessions(
 		status?: SessionInfo["status"];
 	})[],
 ) {
-	applyListDaemonSessionsResponse({
-		sessions: rows.map((row) => ({ status: "idle", ...row })),
-		availability: [],
-		hasMore: false,
-		nextCursor: null,
-	});
+	for (const row of rows)
+		applySessionChange({
+			_tag: "upsert",
+			item: { status: "idle", ...row },
+			sequence: ++sequence,
+		});
 }
 
 function resetSessionState() {
 	uiState.selectMode = false;
 	uiState.settledShelfOpen = false;
 	uiState.snoozedShelfOpen = false;
+	uiState.draftsTrayOpen = true;
+	draftList.rows = [];
 	clearSessionState();
 	// Storybook shares module state across stories, and the scope lives in the
 	// router, so a scoped story would otherwise scope every story after it.
@@ -272,13 +273,103 @@ export const PinnedAndSettledShelfOpen: Story = {
 	},
 };
 
+const pinnedSession = {
+	projectSlug: "conduit",
+	accountId: null,
+	id: "pinned",
+	title: "Review authentication",
+	attention: "needs-approval",
+	pinnedAt: Date.now() - 300_000,
+} as const;
+
+function seedDrafts() {
+	const now = Date.now();
+	sessionState.now = now;
+	projectState.projects = [
+		...projectState.projects,
+		{ slug: "api", title: "api", folders: ["/src/api"] },
+	];
+	draftList.rows = [
+		{
+			draftId: "d1",
+			projectSlug: "conduit",
+			firstLine: "Plan the next release, starting with the drafts work",
+			updatedAt: now - 120_000,
+		},
+		{
+			draftId: "d2",
+			projectSlug: "api",
+			firstLine:
+				"Refactor the relay stack so each provider adapter owns its own poller",
+			updatedAt: now - 3_600_000,
+		},
+		{
+			draftId: "d3",
+			projectSlug: "conduit",
+			firstLine: "Why does the replay suite flake on the second run?",
+			updatedAt: now - 86_400_000,
+		},
+	];
+	const ages = [0, 2 * 3_600_000, 19 * 3_600_000, 86_400_000];
+	seedSessions([
+		...mockSessionsAllGroups.slice(0, 4).map((session, index) => ({
+			...session,
+			createdAt: now - (ages[index] ?? 0),
+			updatedAt: now - (ages[index] ?? 0),
+			unread: false,
+		})),
+		pinnedSession,
+		{
+			projectSlug: "conduit",
+			accountId: null,
+			id: "drafts-settled",
+			title: "Completed release prep",
+			settledAt: now - 86_400_000,
+			updatedAt: now - 86_400_000,
+		},
+	]);
+}
+
+export const DraftsTrayOpen: Story = {
+	name: "Drafts tray open",
+	beforeEach: seedDrafts,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("drafts-tray-toggle")).toHaveAttribute(
+			"aria-expanded",
+			"true",
+		);
+		await expect(canvas.getAllByTestId("draft-row")).toHaveLength(3);
+		await expect(canvas.getByTestId("drafts-tray-clear")).toHaveTextContent(
+			"Clear all",
+		);
+	},
+};
+
+export const DraftsTrayCollapsed: Story = {
+	name: "Drafts tray collapsed",
+	beforeEach: () => {
+		uiState.draftsTrayOpen = false;
+		seedDrafts();
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.queryByTestId("draft-row")).not.toBeInTheDocument();
+		await expect(
+			canvas.queryByTestId("drafts-tray-clear"),
+		).not.toBeInTheDocument();
+		await expect(canvas.getByTestId("drafts-tray-toggle")).toHaveTextContent(
+			"Plan the next release",
+		);
+	},
+};
+
 export const WithItems: Story = {
 	beforeEach: () => {
 		seedSessions([...mockSessionsAllGroups]);
 		const firstSession = mockSessionsAllGroups[0];
 		if (firstSession !== undefined) {
-			sessionState.currentId = firstSession.id;
-			routerState.path = `/s/${sessionState.currentId}`;
+			openSessionForSetup(firstSession.id, "conduit");
 		}
 	},
 };
@@ -457,16 +548,17 @@ export const ShelvesWithMore: Story = {
 };
 
 export const SettledCountBeforeRows: Story = {
-	name: "Settled count before its page loads",
+	name: "Settled count before its shelf opens",
 	beforeEach: () => {
-		seedSessions([]);
-		applyListDaemonSessionsResponse({
-			sessions: [],
-			settledCounts: [{ projectSlug: "acme", count: 14 }],
-			availability: [{ projectSlug: "acme", available: true }],
-			hasMore: true,
-			nextCursor: null,
-		});
+		seedSessions(
+			Array.from({ length: 14 }, (_, i) => ({
+				id: `count-before-rows-${i}`,
+				accountId: null,
+				projectSlug: "acme",
+				title: `Settled task ${i + 1}`,
+				settledAt: SNOOZE_STORY_NOW - (i + 1) * 3_600_000,
+			})),
+		);
 	},
 	play: async ({ canvasElement }) => {
 		await expect(
@@ -513,6 +605,11 @@ export const Searching: Story = {
 	beforeEach: () => {
 		seedSessions([...mockSessionsAllGroups]);
 		setSearchQuery("dark");
+	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByRole("textbox", { name: "Search sessions" }),
+		).toHaveValue("dark");
 	},
 };
 
@@ -566,8 +663,7 @@ export const ScopePickerOpen: Story = {
 	},
 };
 
-function seedRepositoryScope(projectOnly: boolean) {
-	projectState.defaultGroupingMode = "repository";
+function seedCheckoutScope(projectOnly: boolean) {
 	projectState.projects = [
 		{
 			slug: "conduit",
@@ -599,7 +695,7 @@ function seedRepositoryScope(projectOnly: boolean) {
 			projectSlug: "conduit",
 			accountId: null,
 			id: "scope-main",
-			title: "Implement repository scope",
+			title: "Implement project scope",
 			attention: "working",
 		},
 	]);
@@ -612,68 +708,67 @@ function seedRepositoryScope(projectOnly: boolean) {
 			projectSlug: "conduit-review",
 		},
 	]);
-	const group = getProjectGroup("conduit");
-	routerState.search = `?${new URLSearchParams({ p: projectOnly ? "conduit" : encodeGroupScope(group?.key ?? "") })}`;
+	routerState.search = projectOnly ? "?p=conduit" : "";
 }
 
-export const RepositoryScope: Story = {
-	name: "Repository scope, both checkouts",
-	beforeEach: () => seedRepositoryScope(false),
+export const SharedRepositoryProjects: Story = {
+	name: "All projects, shared repository",
+	beforeEach: () => seedCheckoutScope(false),
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(canvas.getByTestId("session-scope-chip")).toHaveTextContent(
-			"Conduit",
+			"All projects",
 		);
-		await expect(canvas.getByText("Implement repository scope")).toBeVisible();
+		await expect(canvas.getByText("Implement project scope")).toBeVisible();
 		await expect(canvas.getByText("Review the scope menu")).toBeVisible();
 	},
 };
 
-export const ProjectWithinRepositoryScope: Story = {
-	name: "Project within repository scope",
-	beforeEach: () => seedRepositoryScope(true),
+export const CheckoutScope: Story = {
+	name: "One checkout scope",
+	beforeEach: () => seedCheckoutScope(true),
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(canvas.getByTestId("session-scope-chip")).toHaveTextContent(
-			"Conduit · Main checkout",
+			"Main checkout",
 		);
-		await expect(canvas.getByText("Implement repository scope")).toBeVisible();
+		await expect(canvas.getByText("Implement project scope")).toBeVisible();
 		await expect(
 			canvas.queryByText("Review the scope menu"),
 		).not.toBeInTheDocument();
 	},
 };
 
-export const RepositoryScopePickerOpen: Story = {
-	name: "Repository scope menu",
+export const SharedRepositoryPickerOpen: Story = {
+	name: "Shared repository project choices",
 	tags: ["viewport-capture"],
-	beforeEach: () => seedRepositoryScope(false),
+	beforeEach: () => seedCheckoutScope(false),
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByTestId("session-scope-chip"));
 		const menu = within(canvasElement.ownerDocument.body);
 		await expect(
-			await menu.findByRole("menuitemradio", { name: "Conduit" }),
+			await menu.findByRole("menuitemradio", { name: /All projects/ }),
 		).toHaveAttribute("aria-checked", "true");
 		await expect(menu.getByText("project:conduit-review")).toBeVisible();
 	},
 };
 
-export const ProjectWithinRepositoryScopePickerOpen: Story = {
-	name: "Project within repository scope menu",
+export const CheckoutScopePickerOpen: Story = {
+	name: "Selected checkout scope menu",
 	tags: ["viewport-capture"],
-	beforeEach: () => seedRepositoryScope(true),
+	beforeEach: () => seedCheckoutScope(true),
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByTestId("session-scope-chip"));
 		const menu = within(canvasElement.ownerDocument.body);
 		await expect(
 			await menu.findByRole("menuitemradio", {
-				name: /Conduit · Main checkout/,
+				name: /Main checkout/,
 			}),
 		).toHaveAttribute("aria-checked", "true");
 		await expect(
-			menu.getByRole("menuitemradio", { name: "Conduit" }),
+			menu.getByRole("menuitemradio", { name: /All projects/ }),
 		).toHaveAttribute("aria-checked", "false");
 	},
 };

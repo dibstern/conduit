@@ -161,17 +161,17 @@ describe("OpenCodeProviderInstance.discoverEffect()", () => {
 		instance = new OpenCodeProviderInstance({ client });
 
 		const result = await Effect.runPromise(
-			Effect.either(instance.discoverEffect()),
+			Effect.result(instance.discoverEffect()),
 		);
 
-		expect(result._tag).toBe("Left");
-		if (result._tag === "Left") {
-			expect(result.left).toMatchObject({
+		expect(result._tag).toBe("Failure");
+		if (result._tag === "Failure") {
+			expect(result.failure).toMatchObject({
 				_tag: "ProviderInstanceFailure",
 				providerId: "opencode",
 				operation: "discover",
 			});
-			expect(result.left.message).toContain("network error");
+			expect(result.failure.message).toContain("network error");
 		}
 	});
 

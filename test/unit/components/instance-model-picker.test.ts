@@ -14,11 +14,9 @@ import {
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { applyInstanceListResponse } from "../../../src/lib/frontend/stores/instance.svelte.js";
 import { attachedProjectState } from "../../../src/lib/frontend/stores/router.svelte.js";
-import {
-	clearSessionState,
-	sessionState,
-} from "../../../src/lib/frontend/stores/session.svelte.js";
+import { clearSessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { ProviderInfo } from "../../../src/lib/frontend/types.js";
 import { seedRootSessions } from "../stores/session-fixtures.js";
 
@@ -176,7 +174,7 @@ describe("InstanceModelPicker", () => {
 			variant: "",
 		});
 		handleModelList({ providers: [CLAUDE_PROVIDER] });
-		sessionState.currentId = "session-1";
+		openSessionForSetup("session-1", "project-a");
 		applyGetModelsResponse(
 			{
 				projectSlug: "project-a",
@@ -203,7 +201,7 @@ describe("InstanceModelPicker", () => {
 		null,
 		"session-1",
 	])("keeps held draft and session models when the project default updates (%s)", async (sessionId) => {
-		sessionState.currentId = sessionId;
+		openSessionForSetup(sessionId, "project-a");
 		if (!sessionId) {
 			selectInstance("claude");
 			chooseModel({ modelId: "claude-sonnet-4-7", providerId: "claude" });
@@ -225,7 +223,7 @@ describe("InstanceModelPicker", () => {
 		null,
 		"session-1",
 	])("uses Claude context metadata when OpenCode has the same model id (%s)", async (sessionId) => {
-		sessionState.currentId = sessionId;
+		openSessionForSetup(sessionId, "project-a");
 		handleModelList({
 			providers: [
 				{

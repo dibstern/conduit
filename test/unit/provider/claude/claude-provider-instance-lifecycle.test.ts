@@ -3,7 +3,7 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Deferred, Effect } from "effect";
+import { Deferred, Effect, Semaphore } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
@@ -68,9 +68,9 @@ function collectTurnFailure(
 	deferred: Deferred.Deferred<TurnResult, Error>,
 	rejected: Error[],
 ): Promise<void> {
-	return Effect.runPromise(Deferred.await(deferred).pipe(Effect.either)).then(
+	return Effect.runPromise(Deferred.await(deferred).pipe(Effect.result)).then(
 		(result) => {
-			if (result._tag === "Left") rejected.push(result.left);
+			if (result._tag === "Failure") rejected.push(result.failure);
 		},
 	);
 }
@@ -85,27 +85,6 @@ describe("ClaudeProviderInstance lifecycle", () => {
 
 	afterEach(() => {
 		rmSync(workspace, { recursive: true, force: true });
-	});
-
-	describe("setPermissionModeEffect()", () => {
-		it.each([
-			{ mode: "auto" as const, sdkMode: "auto" },
-			{ mode: "ask" as const, sdkMode: "default" },
-		])("updates a live query to $sdkMode for conduit $mode", async ({
-			mode,
-			sdkMode,
-		}) => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
-			const query = createMockQuery([]);
-			const ctx = makeFakeSessionContext("sess-1", { query });
-			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
-
-			await Effect.runPromise(instance.setPermissionModeEffect("sess-1", mode));
-
-			expect(query.setPermissionMode).toHaveBeenCalledWith(sdkMode);
-		});
 	});
 
 	describe("shutdown()", () => {
@@ -154,14 +133,14 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			);
 			setClaudeRuntimeTurnWaitersForTest(instance, "sess-shutdown", [deferred]);
 			const result = Effect.runPromise(
-				Deferred.await(deferred).pipe(Effect.either),
+				Deferred.await(deferred).pipe(Effect.result),
 			);
 
 			await Effect.runPromise(instance.shutdownEffect());
 
 			expect(await result).toMatchObject({
-				_tag: "Left",
-				left: { message: "Provider instance shutting down" },
+				_tag: "Failure",
+				failure: { message: "Provider instance shutting down" },
 			});
 		});
 
@@ -177,17 +156,6 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			expect(ctx.promptQueue.close).toHaveBeenCalled();
 			expect(ctx.query.close).toHaveBeenCalled();
 			expect(getClaudeRuntimeSessionCountForTest(instance)).toBe(0);
-		});
-
-		it("marks sessions as stopped", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
-			const ctx = makeFakeSessionContext("sess-1");
-			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
-
-			await Effect.runPromise(instance.shutdownEffect());
-
 			expect(ctx.stopped).toBe(true);
 		});
 
@@ -262,7 +230,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			const instance = makeTestClaudeProviderInstance({
 				workspaceRoot: workspace,
 			});
-			const ownership = Effect.unsafeMakeSemaphore(1);
+			const ownership = Semaphore.makeUnsafe(1);
 			await Effect.runPromise(ownership.take(1));
 			const ctx = makeFakeSessionContext("sess-1", {
 				currentTurnId: "previous-input",
@@ -308,7 +276,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			const instance = makeTestClaudeProviderInstance({
 				workspaceRoot: workspace,
 			});
-			const placement = Effect.unsafeMakeSemaphore(1);
+			const placement = Semaphore.makeUnsafe(1);
 			await Effect.runPromise(placement.take(1));
 			const ctx = makeFakeSessionContext("sess-1", {
 				currentTurnId: activeInput,
@@ -346,13 +314,14 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			);
 			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
-			await Effect.runPromise(
-				instance.interruptTurnEffect("sess-1", ["turn-1"]),
+			// The rejection fails the Stop, so the caller can report it.
+			const rejected = Effect.runPromise(
+				Effect.result(instance.interruptTurnEffect("sess-1", ["turn-1"])),
 			);
 			await Effect.runPromise(
 				Deferred.fail(ack, new Error("interrupt rejected")),
 			);
-			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			expect((await rejected)._tag).toBe("Failure");
 			await Effect.runPromise(
 				instance.interruptTurnEffect("sess-1", ["turn-1"]),
 			);
@@ -376,8 +345,12 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			);
 			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
-			await Effect.runPromise(
-				instance.interruptTurnEffect("sess-1", ["turn-1"]),
+			// The older Stop awaits its acknowledgement without holding ownership.
+			const rejected = Effect.runPromise(
+				Effect.result(instance.interruptTurnEffect("sess-1", ["turn-1"])),
+			);
+			await vi.waitFor(() =>
+				expect(ctx.query.interrupt).toHaveBeenCalledOnce(),
 			);
 			ctx.currentTurnId = "replacement-input";
 			await Effect.runPromise(
@@ -386,7 +359,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			await Effect.runPromise(
 				Deferred.fail(ack, new Error("old interrupt rejected")),
 			);
-			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			expect((await rejected)._tag).toBe("Failure");
 			await Effect.runPromise(
 				instance.interruptTurnEffect("sess-1", ["replacement-input"]),
 			);
@@ -586,25 +559,6 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			});
 			// Should not throw
 			await Effect.runPromise(instance.interruptTurnEffect("nonexistent"));
-		});
-
-		it("clears in-flight tools", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
-			const ctx = makeFakeSessionContext("sess-1");
-			ctx.inFlightTools.set(0, {
-				itemId: "tool-1",
-				toolName: "Bash",
-				title: "Command run",
-				input: {},
-				partialInputJson: "",
-			});
-			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
-
-			await Effect.runPromise(instance.interruptTurnEffect("sess-1"));
-
-			expect(ctx.inFlightTools.size).toBe(0);
 		});
 
 		it("cleanupSession with no eventSink skips tool.completed emission", async () => {

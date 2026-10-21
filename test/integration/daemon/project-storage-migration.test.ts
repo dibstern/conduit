@@ -10,11 +10,7 @@ import {
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	ListDaemonSessions,
-	RemoveProject,
-	SaveProject,
-} from "../../../src/lib/contracts/ws-rpc.js";
+
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
 	projectStorageDir,
@@ -137,6 +133,7 @@ describe("project storage migration through the daemon", () => {
 			JSON.stringify({
 				...config,
 				configVersion: undefined,
+				worktreeCleanup: undefined,
 				projects: config.projects.map(({ folders, ...project }) => ({
 					...project,
 					directory: folders[0],
@@ -223,10 +220,10 @@ describe("project storage migration through the daemon", () => {
 		mkdirSync(ownerFile);
 
 		await harness.restart({ skipBrowserProbe: true });
-		const blocked = await sendRpcRequest(
-			socket(harness),
-			new ListDaemonSessions({ scope: "process-test" }),
-		);
+		const blocked = await sendRpcRequest(socket(harness), {
+			_tag: "ListDaemonSessions",
+			scope: "process-test",
+		});
 		expect(blocked.sessions).toEqual([]);
 		expect(blocked.availability).toEqual(
 			expect.arrayContaining([
@@ -254,15 +251,18 @@ describe("project storage migration through the daemon", () => {
 
 	it("adopts a preserved Claude runner against migrated history", async () => {
 		scenario = "runner-adoption";
-		harness = await ProcessHarness.start({
+		harness = ProcessHarness.create({
 			restartProof: true,
 			holdRunnerAck: true,
 		});
+		await harness.restart({ runnerStartupTimeoutMs: 25_000 });
 		const before = await harness.connect();
 		const sessionId = await before.createSession("Runner migration");
 		// The restart fixture lets IPC disconnect settle between chunk marks.
 		const prompt = "restart-migration-replay";
-		const pending = before.send(sessionId, prompt).catch(() => undefined);
+		const pending = before
+			.send(sessionId, prompt, 30_000)
+			.catch(() => undefined);
 		await before.waitFor(
 			(message) =>
 				message["type"] === "transcript_message" &&
@@ -270,8 +270,12 @@ describe("project storage migration through the daemon", () => {
 				(message["parts"] as HistoryMessage["parts"])?.some(
 					(part) => part.type === "text" && Boolean(part.text),
 				) === true,
+			0,
+			30_000,
 		);
-		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
+		const runner = await harness.waitForMark(
+			(mark) => mark.kind === "runner-started",
+		);
 		if (runner?.kind !== "runner-started")
 			throw new Error("Missing preserved runner");
 		const pendingStore = new Database(storageDb(harness), { readonly: true });
@@ -322,17 +326,17 @@ describe("project storage migration through the daemon", () => {
 		expect(existsSync(storageDb(harness))).toBe(true);
 		expect(existsSync(`${legacyDb(harness)}.migrated`)).toBe(true);
 		evidence = { ...evidence, migrated: true };
-	}, 60_000);
+	}, 90_000);
 
 	it("keeps removed history and reuses it when the same folder returns", async () => {
 		scenario = "reuse";
 		harness = await ProcessHarness.start();
 		const directory = join(harness.root, "reusable-project");
 		mkdirSync(directory);
-		const added = await sendRpcRequest(
-			socket(harness),
-			new SaveProject({ folders: [directory] }),
-		);
+		const added = await sendRpcRequest(socket(harness), {
+			_tag: "SaveProject",
+			folders: [directory],
+		});
 		const slug = added.savedSlug;
 		if (!slug) throw new Error("SaveProject returned no slug");
 		const before = await harness.connect(undefined, undefined, slug);
@@ -340,12 +344,12 @@ describe("project storage migration through the daemon", () => {
 		await before.send(sessionId, "retained-history");
 		const history = await before.history(sessionId);
 		expect(existsSync(join(directory, ".conduit"))).toBe(false);
-		await sendRpcRequest(socket(harness), new RemoveProject({ slug }));
+		await sendRpcRequest(socket(harness), { _tag: "RemoveProject", slug });
 		expect(existsSync(storageDb(harness))).toBe(true);
-		const readded = await sendRpcRequest(
-			socket(harness),
-			new SaveProject({ folders: [directory] }),
-		);
+		const readded = await sendRpcRequest(socket(harness), {
+			_tag: "SaveProject",
+			folders: [directory],
+		});
 		expect(readded.savedSlug).toBe(slug);
 		const after = await harness.connect(sessionId, undefined, slug);
 		expect(await after.history(sessionId)).toEqual(history);
@@ -360,24 +364,24 @@ describe("project storage migration through the daemon", () => {
 		const second = join(harness.root, "second", "shared");
 		mkdirSync(first, { recursive: true });
 		mkdirSync(second, { recursive: true });
-		const firstProject = await sendRpcRequest(
-			socket(harness),
-			new SaveProject({ folders: [first] }),
-		);
+		const firstProject = await sendRpcRequest(socket(harness), {
+			_tag: "SaveProject",
+			folders: [first],
+		});
 		const firstSlug = firstProject.savedSlug;
 		if (!firstSlug) throw new Error("First SaveProject returned no slug");
 		const browser = await harness.connect(undefined, undefined, firstSlug);
 		const sessionId = await browser.createSession("Private history");
 		await browser.send(sessionId, "first-folder-only");
-		await sendRpcRequest(
-			socket(harness),
-			new RemoveProject({ slug: firstSlug }),
-		);
+		await sendRpcRequest(socket(harness), {
+			_tag: "RemoveProject",
+			slug: firstSlug,
+		});
 
-		const secondProject = await sendRpcRequest(
-			socket(harness),
-			new SaveProject({ folders: [second] }),
-		);
+		const secondProject = await sendRpcRequest(socket(harness), {
+			_tag: "SaveProject",
+			folders: [second],
+		});
 		const secondSlug = secondProject.savedSlug;
 		if (!secondSlug) throw new Error("Second SaveProject returned no slug");
 		expect(secondSlug).not.toBe(firstSlug);
@@ -389,7 +393,14 @@ describe("project storage migration through the daemon", () => {
 			() => expect(readProjectStorageOwner(configDir, secondSlug)).toBe(second),
 			{ timeout: 15_000 },
 		);
-		expect(await other.history(sessionId)).toEqual([]);
+		await expect(other.history(sessionId)).rejects.toMatchObject({
+			code: "unknown-session",
+		});
+		const isolated = await sendRpcRequest(socket(harness), {
+			_tag: "ListDaemonSessions",
+			scope: secondSlug,
+		});
+		expect(isolated.sessions).toEqual([]);
 		expect(existsSync(join(second, ".conduit"))).toBe(false);
 		evidence = {
 			first,

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { expect } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRpcControl } from "./shared.js";
 
@@ -14,6 +15,68 @@ const files = [
 }));
 
 export const composerFilesHandlers: StepHandler[] = [
+	{
+		name: "fail the first file-only submission",
+		match: /^the next composer submission fails$/,
+		run: async ({ world }) => {
+			let failNext = true;
+			requireRpcControl(world.page).setStubs({
+				"input.submit": ({ sessionId }) => {
+					if (failNext) {
+						failNext = false;
+						throw new WsRpcError({
+							message: "File delivery failed. Try again.",
+						});
+					}
+					return { ok: true, sessionId, handedOff: true };
+				},
+			});
+		},
+	},
+	{
+		name: "assert failed file-only send restores attachments",
+		match: /^the failed file-only send keeps both files ready to retry$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("toast")).toContainText(
+				"File delivery failed. Try again.",
+			);
+			const chips = world.page.getByTestId("file-attachment-chip");
+			await expect(chips).toHaveCount(files.length);
+			for (const file of files)
+				await expect(chips.filter({ hasText: file.name })).toBeVisible();
+			await expect(world.page.locator("#input")).toHaveValue("");
+			await expect(
+				world.page.getByRole("button", { name: "Send", exact: true }),
+			).toBeEnabled();
+			await test.info().attach("restored-file-only-send.png", {
+				body: await world.page
+					.locator("#input-area")
+					.screenshot({ animations: "disabled" }),
+				contentType: "image/png",
+			});
+		},
+	},
+	{
+		name: "assert file-only retry preserves payload",
+		match:
+			/^the composer retries both files with their original bytes and names$/,
+		run: async ({ world }) => {
+			const submissions = () =>
+				requireRpcControl(world.page)
+					.getRequests()
+					.filter((entry) => entry.tag === "input.submit");
+			await expect.poll(() => submissions().length).toBe(2);
+			for (const request of submissions()) {
+				expect(request.payload["text"]).toBe("");
+				expect(request.payload["images"]).toEqual(
+					files.map(
+						(file) =>
+							`data:${file.mimeType};name=${file.name};base64,${file.buffer.toString("base64")}`,
+					),
+				);
+			}
+		},
+	},
 	{
 		name: "select files on unsupported harness",
 		match: /^I select Add Files on the unsupported harness$/,

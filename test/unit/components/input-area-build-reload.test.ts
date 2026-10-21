@@ -12,9 +12,13 @@ import {
 	phaseToIdle,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { attachedProjectState } from "../../../src/lib/frontend/stores/router.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+import { connectionState } from "../../../src/lib/frontend/transport/connection-status.svelte.js";
 import { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
-import { seedDaemonSessions } from "../stores/session-fixtures.js";
+import {
+	applySessionSnapshot,
+	seedSessions,
+} from "../stores/session-fixtures.js";
 
 vi.mock(
 	"../../../src/lib/frontend/transport/ws-rpc-client.js",
@@ -22,7 +26,7 @@ vi.mock(
 		...(await original<
 			typeof import("../../../src/lib/frontend/transport/ws-rpc-client.js")
 		>()),
-		rpc: vi.fn(async () => ({ ok: true })),
+		rpc: vi.fn(() => Promise.resolve({ ok: true })),
 	}),
 );
 
@@ -47,9 +51,8 @@ async function enterText(textarea: HTMLTextAreaElement, text: string) {
 	await fireEvent.input(textarea);
 }
 
-async function receiveDraft(text: string) {
-	vi.setSystemTime(Date.now() + 1);
-	handleInputSyncReceived({ text, from: "other-tab" });
+async function receiveDraft(text: string, initial = false) {
+	handleInputSyncReceived({ key: { session: sessionId }, text, initial });
 	await tick();
 }
 
@@ -82,15 +85,11 @@ describe("InputArea build reload recovery", () => {
 		vi.setSystemTime(new Date("2026-10-02T00:00:00Z"));
 		vi.mocked(rpc).mockReset().mockResolvedValue({ ok: true });
 		sessionStorage.clear();
-		sessionState.currentId = sessionId;
+		openSessionForSetup(sessionId, "test");
 		attachedProjectState.slug = "test";
+		connectionState.status = "connected";
 		phaseToIdle(getOrCreateSessionActivity(sessionId));
-		Object.assign(inputSyncState, {
-			text: "",
-			lastFrom: "",
-			lastUpdated: 0,
-			reloadPending: false,
-		});
+		handleInputSyncReceived({ key: { session: sessionId }, initial: true });
 		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
 			callback(0);
 			return 0;
@@ -103,9 +102,10 @@ describe("InputArea build reload recovery", () => {
 		vi.clearAllTimers();
 		vi.useRealTimers();
 		vi.unstubAllGlobals();
-		sessionState.currentId = null;
+		openSessionForSetup(null);
 		attachedProjectState.slug = null;
-		seedDaemonSessions([]);
+		connectionState.status = "";
+		seedSessions([]);
 		sessionStorage.clear();
 	});
 
@@ -128,7 +128,7 @@ describe("InputArea build reload recovery", () => {
 		await vi.advanceTimersByTimeAsync(300);
 		expect(rpc).toHaveBeenCalledWith(
 			"SyncInputDraft",
-			expect.objectContaining({ sessionId, text }),
+			expect.objectContaining({ key: { session: sessionId }, text }),
 		);
 		expect(
 			vi.mocked(rpc).mock.calls.some(([tag]) => tag === "input.submit"),
@@ -136,9 +136,10 @@ describe("InputArea build reload recovery", () => {
 	});
 
 	it("syncs a loaded foreign session draft by session id", async () => {
-		seedDaemonSessions([
-			{ id: sessionId, title: "Foreign session", projectSlug: "dotfiles" },
-		]);
+		applySessionSnapshot(
+			[{ id: sessionId, title: "Foreign session", projectSlug: "dotfiles" }],
+			"partial",
+		);
 		const { getByRole } = render(InputArea);
 		const textarea = getByRole("textbox", {
 			name: "Message",
@@ -148,14 +149,14 @@ describe("InputArea build reload recovery", () => {
 		expect(rpc).toHaveBeenCalledWith(
 			"SyncInputDraft",
 			expect.objectContaining({
-				sessionId,
+				key: { session: sessionId },
 				text: "draft for dotfiles",
 			}),
 		);
 	});
 
 	it("stops a loaded foreign session by session id", async () => {
-		seedDaemonSessions([
+		seedSessions([
 			{
 				id: sessionId,
 				title: "Foreign session",
@@ -192,10 +193,19 @@ describe("InputArea build reload recovery", () => {
 		await expect(persistInputDraft()).resolves.toBe(true);
 		expect(
 			JSON.parse(sessionStorage.getItem(reloadDraftKey) ?? "null"),
-		).toContainEqual([sessionId, "draft with an image"]);
+		).toContainEqual({
+			key: { session: sessionId },
+			text: "draft with an image",
+			acked: "draft with an image",
+		});
 	});
 
 	it("defers if an image is attached while the draft RPC is pending", async () => {
+		const { getByRole } = render(InputArea);
+		const textarea = getByRole("textbox", {
+			name: "Message",
+		}) as HTMLTextAreaElement;
+		await enterText(textarea, "draft before reload");
 		let finishSave: (() => void) | undefined;
 		vi.mocked(rpc).mockImplementationOnce(
 			() =>
@@ -203,8 +213,7 @@ describe("InputArea build reload recovery", () => {
 					finishSave = () => resolve({ ok: true });
 				}),
 		);
-		render(InputArea);
-		await tick();
+		await enterText(textarea, "latest draft before reload");
 		const preparation = persistInputDraft();
 		const deferred = expect(preparation).resolves.toBe(false);
 		await attachImage();
@@ -229,45 +238,57 @@ describe("InputArea build reload recovery", () => {
 			name: "Message",
 		}) as HTMLTextAreaElement;
 		await enterText(textarea, cached);
-		sessionState.currentId = "other-session";
+		openSessionForSetup("other-session", "test");
 		await tick();
-		sessionState.currentId = sessionId;
+		openSessionForSetup(sessionId, "test");
 		await tick();
 
-		await receiveDraft("newer draft from another tab");
+		await receiveDraft("newer draft from another tab", true);
 		expect(textarea.value).toBe("newer draft from another tab");
 	});
 
-	it("protects a reload-restored draft only on its first restoration", async () => {
+	it("ignores a legacy reload backup without throwing", async () => {
 		sessionStorage.setItem(
 			reloadDraftKey,
 			JSON.stringify([[sessionId, "saved before reload"]]),
 		);
+		inputSyncState.received = null;
 		const { getByRole } = render(InputArea);
 		const textarea = getByRole("textbox", {
 			name: "Message",
 		}) as HTMLTextAreaElement;
-		await receiveDraft("older server draft");
-		expect(textarea.value).toBe("saved before reload");
+		await receiveDraft("older server draft", true);
+		expect(textarea.value).toBe("older server draft");
 		expect(sessionStorage.getItem(reloadDraftKey)).toBeNull();
 
-		sessionState.currentId = "other-session";
+		openSessionForSetup("other-session", "test");
 		await tick();
-		sessionState.currentId = sessionId;
+		openSessionForSetup(sessionId, "test");
 		await tick();
-		await receiveDraft("newer draft from another tab");
+		await receiveDraft("newer draft from another tab", true);
 		expect(textarea.value).toBe("newer draft from another tab");
 	});
 
-	it("still protects a real local edit from an older incoming sync", async () => {
+	it("protects an unacknowledged edit until its sync succeeds", async () => {
 		const { getByRole } = render(InputArea);
 		const textarea = getByRole("textbox", {
 			name: "Message",
 		}) as HTMLTextAreaElement;
+		let finishSave: (() => void) | undefined;
+		vi.mocked(rpc).mockImplementationOnce(
+			() =>
+				new Promise<{ ok: true }>((resolve) => {
+					finishSave = () => resolve({ ok: true });
+				}),
+		);
 		await enterText(textarea, "just typed");
 		await receiveDraft("older server draft");
 		expect(textarea.value).toBe("just typed");
 		vi.setSystemTime(Date.now() + 1_001);
+		await receiveDraft("later remote edit");
+		expect(textarea.value).toBe("just typed");
+		finishSave?.();
+		await tick();
 		await receiveDraft("later remote edit");
 		expect(textarea.value).toBe("later remote edit");
 	});

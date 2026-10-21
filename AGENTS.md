@@ -51,7 +51,7 @@ pnpm test:all > test-output.log 2>&1 || (echo "Tests failed, see test-output.log
 
 Read `docs/agent-guide/testing.md` before choosing broader verification. Use the narrowest integration, E2E, daemon, multi-instance, or visual command that matches the changed surface.
 
-`pnpm test:unit` always checks that selected committed Darwin and Linux Storybook baselines contain palette colours recomputed from the source theme. `pnpm test:all` adds the strict Darwin Storybook visual suite as the final local pre-release gate; run the same full sweep before a release.
+`pnpm test:unit` always checks that selected committed Darwin and Linux Storybook baselines contain palette colours recomputed from the source theme. Release CI (`npm-release.yml`) is the authoritative release gate and runs all `pnpm test:all` groups through `scripts/test-all.sh`, including strict Darwin Storybook visuals on macOS. Run one group locally with `bash scripts/test-all.sh <group>`; see `docs/agent-guide/testing.md` for groups and prerequisites.
 
 ### Visual Acceptance Gate (UBM pipeline)
 

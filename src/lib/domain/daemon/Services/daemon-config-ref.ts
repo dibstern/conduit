@@ -14,7 +14,11 @@ import {
 	DEFAULT_WORKTREE_CLEANUP,
 	type WorktreeCleanup,
 } from "../../../contracts/worktree.js";
-import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../../daemon/config-persistence.js";
+import {
+	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
+	DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS,
+	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
+} from "../../../daemon/config-persistence.js";
 import type { DaemonStatus } from "../../../daemon/daemon-types.js";
 
 export interface DaemonRuntimeConfig {
@@ -28,31 +32,34 @@ export interface DaemonRuntimeConfig {
 	readonly keepAwake: boolean;
 	readonly avatar?: AvatarChoice;
 	readonly autoSettleAfterDays?: number | null;
+	readonly autoArchiveAfterDays?: number | null;
+	readonly autoDeleteArchivedAfterDays?: number | null;
 	readonly worktreeCleanup?: WorktreeCleanup;
 	readonly usageLimits?: UsageLimitsSetting;
 	readonly cursorUsageBinding?: CursorUsageBinding;
 	readonly keepAwakeCommand: string | undefined;
 	readonly keepAwakeArgs: string[] | undefined;
 	readonly newSessionProject?: string;
+	readonly projectOrder?: readonly string[];
 	readonly shuttingDown: boolean;
 	readonly startTime: number;
 	readonly hostExplicit: boolean;
 	readonly persistedSessionCounts: ReadonlyMap<string, number>;
 }
 
-export class DaemonConfigRefTag extends Context.Tag("DaemonConfigRef")<
+export class DaemonConfigRefTag extends Context.Service<
 	DaemonConfigRefTag,
 	Ref.Ref<DaemonRuntimeConfig>
->() {}
+>()("DaemonConfigRef") {}
 
 export interface DaemonConfigMirror {
 	readonly set: (config: DaemonRuntimeConfig) => Effect.Effect<void>;
 }
 
-export class DaemonConfigMirrorTag extends Context.Tag("DaemonConfigMirror")<
+export class DaemonConfigMirrorTag extends Context.Service<
 	DaemonConfigMirrorTag,
 	DaemonConfigMirror
->() {}
+>()("DaemonConfigMirror") {}
 
 export const DaemonConfigMirrorLive = (mirror: DaemonConfigMirror) =>
 	Layer.succeed(DaemonConfigMirrorTag, mirror);
@@ -86,12 +93,15 @@ export const makeDaemonConfigFromOptions = (options: {
 	keepAwake?: boolean;
 	avatar?: AvatarChoice;
 	autoSettleAfterDays?: number | null;
+	autoArchiveAfterDays?: number | null;
+	autoDeleteArchivedAfterDays?: number | null;
 	worktreeCleanup?: WorktreeCleanup;
 	usageLimits?: UsageLimitsSetting;
 	cursorUsageBinding?: CursorUsageBinding;
 	keepAwakeCommand?: string;
 	keepAwakeArgs?: string[];
 	newSessionProject?: string;
+	projectOrder?: readonly string[];
 	startTime?: number;
 	persistedSessionCounts?: ReadonlyMap<string, number>;
 }): DaemonRuntimeConfig => ({
@@ -109,6 +119,14 @@ export const makeDaemonConfigFromOptions = (options: {
 		options.autoSettleAfterDays === undefined
 			? DEFAULT_AUTO_SETTLE_AFTER_DAYS
 			: options.autoSettleAfterDays,
+	autoArchiveAfterDays:
+		options.autoArchiveAfterDays === undefined
+			? DEFAULT_AUTO_ARCHIVE_AFTER_DAYS
+			: options.autoArchiveAfterDays,
+	autoDeleteArchivedAfterDays:
+		options.autoDeleteArchivedAfterDays === undefined
+			? DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS
+			: options.autoDeleteArchivedAfterDays,
 	worktreeCleanup: options.worktreeCleanup ?? DEFAULT_WORKTREE_CLEANUP,
 	...(options.usageLimits !== undefined && {
 		usageLimits: options.usageLimits,
@@ -120,6 +138,9 @@ export const makeDaemonConfigFromOptions = (options: {
 	keepAwakeArgs: options.keepAwakeArgs,
 	...(options.newSessionProject !== undefined && {
 		newSessionProject: options.newSessionProject,
+	}),
+	...(options.projectOrder !== undefined && {
+		projectOrder: options.projectOrder,
 	}),
 	shuttingDown: false,
 	startTime: options.startTime ?? Date.now(),

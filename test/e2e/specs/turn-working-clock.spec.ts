@@ -38,11 +38,12 @@ const CLOCK = /^(?:\d+h\s*)?(?:\d+m\s*)?\d+s$/;
 async function sampleLiveClock(page: Page, samples: number) {
 	const readings: Clocks[] = [];
 	for (let i = 0; i < samples; i++) {
+		const previous = readings.at(-1)?.activity;
 		await expect
 			.poll(
 				async () => {
 					const clocks = await readClocks(page);
-					return clocks.activity !== null;
+					return clocks.activity !== null && clocks.activity !== previous;
 				},
 				{ timeout: 45_000 },
 			)
@@ -51,7 +52,6 @@ async function sampleLiveClock(page: Page, samples: number) {
 		readings.push(clocks);
 		expect(clocks.activity).toMatch(CLOCK);
 		await expect(page.getByTestId("composer-status-header")).toHaveCount(0);
-		await page.waitForTimeout(700);
 	}
 	return readings;
 }
@@ -166,6 +166,7 @@ test.describe("Turn working clock", () => {
 	});
 
 	test("Stop ends the clock for good", async ({ page, relayUrl }, testInfo) => {
+		await page.clock.install();
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
 		await app.goto(relayUrl);
@@ -176,6 +177,7 @@ test.describe("Turn working clock", () => {
 		await chat.stopBtn.click();
 		const stoppedAt = Date.now();
 		await chat.waitForStreamingComplete();
+		await expect(app.sendBtn).toBeVisible();
 		await expect(page.getByTestId("composer-status-header")).toHaveCount(0);
 
 		const header = page
@@ -187,7 +189,8 @@ test.describe("Turn working clock", () => {
 		expect(settled).toBeLessThanOrEqual(
 			Math.ceil((stoppedAt - sentAt) / 1000) + 1,
 		);
-		await page.waitForTimeout(3_000);
+		// Advance three clock ticks so an incorrectly running clock can update.
+		await page.clock.fastForward(3_000);
 		expect(workedSeconds(await header.innerText())).toBe(settled);
 
 		await gotoRelay(page, page.url());
@@ -217,6 +220,7 @@ test.describe("Turn working clock", () => {
 			page,
 			relayUrl,
 		}, testInfo) => {
+			await page.clock.install();
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
 			await app.goto(relayUrl);
@@ -274,7 +278,8 @@ test.describe("Turn working clock", () => {
 			expect(workedB).toBeLessThanOrEqual(
 				Math.ceil((stoppedAt - takeover) / 1000) + 2,
 			);
-			await page.waitForTimeout(3_000);
+			// Advance three clock ticks so incorrectly running clocks can update.
+			await page.clock.fastForward(3_000);
 			expect(await worked()).toEqual([workedA, workedB]);
 
 			// History agrees: both turns settled, and the running one is the

@@ -7,7 +7,7 @@
 		options,
 		value,
 		onChange,
-		onReselect,
+		onActivate,
 		item,
 		label,
 		lockedReason,
@@ -22,8 +22,8 @@
 		options: readonly { value: T; label: string; locked?: boolean; lockedReason?: string | undefined }[];
 		value: T;
 		onChange: (value: T) => void;
-		/** A click on the already selected option, which a radio group does not report. */
-		onReselect?: (value: T) => void;
+		/** Explicit activation, even when the option is already selected. */
+		onActivate?: ((value: T) => void) | undefined;
 		item: Snippet<[{ value: T; label: string; locked?: boolean }, boolean]>;
 		label: string;
 		lockedReason?: string;
@@ -103,7 +103,10 @@
 				: variant === "cards"
 					? `block min-w-0 rounded-[10px] text-left focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2 ${itemClass}`
 					: itemClass}
-			onclick={() => { if (option.value === value && !option.locked) onReselect?.(option.value); }}
+			onclick={() => { if (!option.locked) onActivate?.(option.value); }}
+			onkeydowncapture={(event) => {
+				if (event.key === " " && !option.locked) onActivate?.(option.value);
+			}}
 		>
 			{@render item(option, option.value === value)}
 		</RadioGroup.Item>

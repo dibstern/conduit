@@ -6,9 +6,9 @@
 // fewer than five marks call Claude. Exercise the real SQLite and client seams.
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import { it } from "@effect/vitest";
 import { Effect, Layer, ManagedRuntime } from "effect";
+import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import {
 	type Category,
@@ -232,7 +232,7 @@ it("reuses persisted verdict criteria after weight-only saves and full service r
 	}
 });
 
-it.scoped("reads title and request in the newest-first ledger", () => {
+it.effect("reads title and request in the newest-first ledger", () => {
 	const f = fixture();
 	return Effect.gen(function* () {
 		yield* seed;
@@ -247,7 +247,7 @@ it.scoped("reads title and request in the newest-first ledger", () => {
 	}).pipe(Effect.provide(f.layer));
 });
 
-it.scoped(
+it.effect(
 	"scores persisted verdicts and weights for free; estimates and caches criteria on one stable sample",
 	() => {
 		const f = fixture();
@@ -321,7 +321,7 @@ it.scoped(
 	},
 );
 
-it.scoped(
+it.effect(
 	"scores the saved set from persisted verdicts after a definition edit",
 	() => {
 		let saved = current;
@@ -352,7 +352,7 @@ it.scoped(
 	},
 );
 
-it.scoped(
+it.effect(
 	"reuses verdicts by their saved criteria across definition and weight-only saves",
 	() => {
 		let saved = current;
@@ -406,7 +406,7 @@ it.scoped(
 	},
 );
 
-it.scoped("never caches incomplete Jev output, and allows a paid retry", () => {
+it.effect("never caches incomplete Jev output, and allows a paid retry", () => {
 	const f = fixture();
 	const validPost = f.post.getMockImplementation();
 	f.post.mockImplementation(() =>
@@ -443,7 +443,7 @@ it.scoped("never caches incomplete Jev output, and allows a paid retry", () => {
 	}).pipe(Effect.provide(f.layer));
 });
 
-it.scoped(
+it.effect(
 	"rejects malformed, stale, identity-changing and empty proposal hunks",
 	() => {
 		const f = fixture();
@@ -466,14 +466,14 @@ it.scoped(
 						result: JSON.stringify({ hunks: [invalid], rationale: "Invalid" }),
 					};
 				});
-				expect((yield* Effect.either(tuning.propose({})))._tag).toBe("Left");
+				expect((yield* Effect.result(tuning.propose({})))._tag).toBe("Failure");
 			}
 			expect(f.replace).not.toHaveBeenCalled();
 		}).pipe(Effect.provide(f.layer));
 	},
 );
 
-it.scoped(
+it.effect(
 	"reports unavailable scores honestly without a key or with failed persisted verdicts",
 	() => {
 		const f = fixture(false);
@@ -503,7 +503,7 @@ it.scoped(
 	},
 );
 
-it.scoped(
+it.effect(
 	"proposes explicit retirement dependencies so each addition can be scored at the active-category cap",
 	() => {
 		const custom: Category = {
@@ -587,7 +587,7 @@ it.scoped(
 	},
 );
 
-it.scoped(
+it.effect(
 	"proposes validated edits through one-shot Opus with avoid and never stores them",
 	() => {
 		const f = fixture();
@@ -617,7 +617,7 @@ it.scoped(
 			expect(f.replace).not.toHaveBeenCalled();
 			const sql = yield* SqlClient.SqlClient;
 			yield* sql`DELETE FROM surfacing_marks WHERE part_id = 'p1'`;
-			expect((yield* Effect.either(tuning.propose({})))._tag).toBe("Left");
+			expect((yield* Effect.result(tuning.propose({})))._tag).toBe("Failure");
 			expect(f.query).toHaveBeenCalledTimes(2);
 		}).pipe(Effect.provide(f.layer));
 	},

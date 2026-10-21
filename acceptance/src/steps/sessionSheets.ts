@@ -210,6 +210,15 @@ export const sessionSheetsHandlers: StepHandler[] = [
 				nodes.map((node) => node.getBoundingClientRect().top),
 			);
 			expect(new Set(tops).size).toBe(1);
+			const triageTiles = triage.locator("[data-menu-tile]");
+			await expect(triageTiles.last()).toHaveAttribute(
+				"data-testid",
+				"session-ctx-archive",
+			);
+			const triageTops = await triageTiles.evaluateAll((nodes) =>
+				nodes.map((node) => node.getBoundingClientRect().top),
+			);
+			expect(new Set(triageTops).size).toBe(1);
 			const triageBox = await triage.boundingBox();
 			const autoBox = await auto.boundingBox();
 			const sessionBox = await session.boundingBox();

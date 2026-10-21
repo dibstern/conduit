@@ -5,23 +5,30 @@ export interface ConfigSnapshot {
 	readonly build: Effect.Effect<DaemonConfig, Error>;
 }
 
-export class ConfigSnapshotTag extends Context.Tag("ConfigSnapshot")<
+export class ConfigSnapshotTag extends Context.Service<
 	ConfigSnapshotTag,
 	ConfigSnapshot
->() {}
+>()("ConfigSnapshot") {}
 
 export interface ConfigPersistence {
 	readonly requestSave: Effect.Effect<void>;
 	readonly flush: Effect.Effect<void, Error>;
 }
 
-export class ConfigPersistenceTag extends Context.Tag("ConfigPersistence")<
+export class ConfigPersistenceTag extends Context.Service<
 	ConfigPersistenceTag,
 	ConfigPersistence
->() {}
+>()("ConfigPersistence") {}
 
 export const requestConfigSave = ConfigPersistenceTag.pipe(
 	Effect.flatMap((persistence) => persistence.requestSave),
+);
+
+/** Wait for the serialized write containing this request before acknowledging it. */
+export const saveConfig = ConfigPersistenceTag.pipe(
+	Effect.flatMap((persistence) =>
+		persistence.requestSave.pipe(Effect.andThen(persistence.flush)),
+	),
 );
 
 export const ConfigPersistenceNoopLive = Layer.succeed(ConfigPersistenceTag, {

@@ -222,7 +222,7 @@
 		if (!["effort", "context", "thinking", "fast"].includes(kind)) return [];
 		const options = row.values.map(({ value, label }) => ({
 			value,
-			label: kind === "effort" ? (value === "medium" ? "med" : value) :
+			label: kind === "effort" ? value :
 				kind === "thinking" || kind === "fast" ? (value === "true" ? "On" : "Off") : label,
 			testId: `picker-${kind}-option-${value}`,
 			disabled: effort.pending || !parameterCombination(row.id, value),
@@ -257,7 +257,7 @@
 	})));
 	const effortSegments = $derived(parameterEffort?.options ?? (parameters ? [] : effort.options.map((variant) => ({
 		value: variant,
-		label: variant === "medium" ? "med" : variant,
+		label: variant,
 		testId: `picker-effort-option-${variant}`,
 		disabled: effort.pending,
 	}))));
@@ -626,7 +626,7 @@
 							options={accountCards}
 							value={selectedLogoInstanceId ?? ""}
 							onChange={handleAccountSelect}
-							onReselect={(id) => { if (!locked) selectInstance(id); }}
+							onActivate={locked ? undefined : selectInstance}
 							label={accountLabel}
 							lockedReason={hasAccountUsage ? "" : "Harness is fixed for this session"}
 							itemWidth={108}
@@ -940,7 +940,7 @@
 		{#if phone && attention}<span data-testid="composer-more-attention" class="size-[6px] shrink-0 rounded-full bg-status-ask" aria-hidden="true"></span>{/if}
 		{#if contextLabel}<span data-testid="picker-selected-context" class="shrink-0 font-mono text-[11.5px] text-text-muted">{contextLabel}</span>{/if}
 		{#if variant === "words"}
-			{@const effortWord = parameters ? parameterEffortWord : effort.current === "medium" ? "med" : effort.current}
+			{@const effortWord = parameters ? parameterEffortWord : effort.current}
 			{#if effortWord}<span aria-hidden="true">·</span><span class="shrink-0">{effortWord}</span>{/if}
 			<span aria-hidden="true">·</span>{@render phoneMode?.()}
 		{/if}

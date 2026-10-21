@@ -1,5 +1,5 @@
-import type { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
+import type { SqlClient } from "effect/sql";
 import { canonicalEvent } from "../events.js";
 
 /** Read inside the ingestion write boundary, immediately before appending. */
@@ -28,19 +28,12 @@ export const readPendingRewindCommit = (
 			return undefined;
 		const metadata = { provider: session.provider };
 		return {
+			removedMessageIds: removed.map((message) => message.id),
 			rewind: {
 				resumeSessionAt: messages[cut - 1]?.id ?? null,
 				targetMessageId: session.pending_rewind_message_id,
 			},
 			events: [
-				...removed.map((message) =>
-					canonicalEvent(
-						"message.removed",
-						sessionId,
-						{ messageId: message.id },
-						metadata,
-					),
-				),
 				canonicalEvent(
 					"session.rewind_committed",
 					sessionId,

@@ -20,9 +20,12 @@ const capabilityModels = ["sonnet", "claude-sonnet-4"].map((id) => ({
 
 async function sessionSnapshot(browser: ProcessBrowser, sessionId: string) {
 	const envelopes = await Effect.runPromise(
-		browser.rpc
-			.SubscribeShell({ projectSlug: "process-test" })
-			.pipe(Stream.take(1), Stream.runCollect, Effect.timeout("5 seconds")),
+		browser.rpc.SubscribeShell({}).pipe(
+			Stream.filter((frame) => frame._tag !== "projects"),
+			Stream.take(1),
+			Stream.runCollect,
+			Effect.timeout("5 seconds"),
+		),
 	);
 	const snapshot = [...envelopes][0];
 	if (snapshot?._tag !== "snapshot") throw new Error("Missing shell snapshot");
@@ -251,10 +254,10 @@ describe("Claude turn status before the model streams", () => {
 		const [previous] = persisted(harness, sessionId).turnRows;
 		// The fake SDK holds this prompt, then ends it with a bare result.
 		const sent = browser.send(sessionId, "local-work-turn");
+		await harness.waitForMark((mark) => mark.kind === "pre-assistant-held");
 		await vi.waitFor(() => {
-			expect(
-				harness?.marks.some((mark) => mark.kind === "pre-assistant-held"),
-			).toBe(true);
+			if (!harness) throw new Error("Missing harness");
+			expect(persisted(harness, sessionId).session.status).toBe("busy");
 		}, 15_000);
 		const held = persisted(harness, sessionId);
 		writeFileSync(join(harness.root, "release-local-work"), "release");
@@ -298,6 +301,68 @@ describe("Claude turn status before the model streams", () => {
 		]);
 	}, 60_000);
 
+	it("keeps consecutive inputs on their own turns after a bare result", async () => {
+		harness = await ProcessHarness.start({
+			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
+			restartProof: true,
+			capabilityModels,
+		});
+		const fixture = harness;
+		const browser = await fixture.connect();
+		const sessionId = await browser.createSession("Bare result admission");
+		await browser.send(sessionId, "before-local-work");
+		writeFileSync(join(fixture.root, "release-local-work"), "release");
+		const inputIds: string[] = [];
+		const observations: Array<{
+			prompt: string;
+			turns: Array<{ input: number; state: string }>;
+			endedInput: number;
+		}> = [];
+		try {
+			// Send again as soon as the public idle row arrives, while the prior
+			// result's publication and runner acknowledgement may still be finishing.
+			for (let cycle = 0; cycle < 8; cycle++) {
+				for (const prompt of ["local-work-turn", `after-local-work-${cycle}`]) {
+					const inputId = randomUUID();
+					inputIds.push(inputId);
+					const cursor = browser.frames.length;
+					await Effect.runPromise(
+						browser.rpc["input.submit"]({
+							sessionId,
+							originId: browser.originId,
+							inputId,
+							delivery: "queue",
+							text: prompt,
+						}),
+					);
+					await browser.waitForTurnEnd(sessionId, cursor);
+					const state = persisted(fixture, sessionId);
+					observations.push({
+						prompt,
+						turns: state.turnRows.map((turn) => ({
+							input: inputIds.indexOf(turn.input_id ?? "") + 1,
+							state: turn.state,
+						})),
+						endedInput:
+							inputIds.indexOf(state.session.last_turn_end_input_id ?? "") + 1,
+					});
+					expect(state.session.last_turn_end_input_id).toBe(inputId);
+					expect(state.turnRows).toHaveLength(inputIds.length + 1);
+					expect(state.turnRows.at(-1)).toMatchObject({
+						id: inputId,
+						state: "completed",
+					});
+				}
+			}
+		} finally {
+			mkdirSync("test-results", { recursive: true });
+			writeFileSync(
+				"test-results/82tn23-claude-bare-result-admission.json",
+				`${JSON.stringify(observations, null, 2)}\n`,
+			);
+		}
+	}, 60_000);
+
 	it("keeps a turn busy and its queue held across a mid-turn permission-mode change", async () => {
 		harness = await ProcessHarness.start({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
@@ -323,20 +388,18 @@ describe("Claude turn status before the model streams", () => {
 		const sent = browser
 			.send(sessionId, prompt, 30_000)
 			.catch((error: unknown) => ({ error: String(error) }));
+		await harness.waitForMark(
+			(mark) => mark.kind === "assistant-held" && mark.prompt === prompt,
+		);
 		await vi.waitFor(() => {
 			if (!harness) throw new Error("Missing harness");
 			expect(persisted(harness, sessionId).session.status).toBe("busy");
-			expect(
-				harness.marks.some(
-					(mark) => mark.kind === "emit" && mark.prompt === prompt,
-				),
-			).toBe(true);
 		}, 15_000);
 		await Effect.runPromise(
 			browser.rpc.SwitchPermissionMode({ ...payload, mode: "full" }),
 		);
-		// The SDK's own report of the change: its status message is the one
-		// that used to read as idle.
+		// The SDK's own report of the new mode, rather than the relay's request.
+		// Runtime-event conversion no longer stores the translator rawSource.
 		await vi.waitFor(() => {
 			if (!harness) throw new Error("Missing harness");
 			const db = new Database(harness.daemonStorePath(), { readonly: true });
@@ -344,7 +407,7 @@ describe("Claude turn status before the model streams", () => {
 				expect(
 					db
 						.prepare(
-							"SELECT 1 FROM events WHERE session_id = ? AND type = 'session.permission_mode_changed' AND metadata LIKE '%claude.sdk.translator%'",
+							"SELECT 1 FROM events WHERE session_id = ? AND type = 'session.permission_mode_changed' AND provider = 'claude' AND json_extract(data, '$.mode') = 'full' AND json_extract(metadata, '$.source') IS NOT 'relay'",
 						)
 						.get(sessionId),
 				).toBeDefined();
@@ -354,7 +417,7 @@ describe("Claude turn status before the model streams", () => {
 		}, 15_000);
 		const inputId = randomUUID();
 		await Effect.runPromise(
-			browser.rpc.input.submit({
+			browser.rpc["input.submit"]({
 				...payload,
 				inputId,
 				delivery: "queue",

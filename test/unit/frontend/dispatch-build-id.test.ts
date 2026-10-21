@@ -1,4 +1,5 @@
 import { Effect, Stream } from "effect";
+import type { Rpc } from "effect/rpc";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
 	RestartWithConfig,
@@ -19,12 +20,13 @@ const mocks = vi.hoisted(() => ({
 	showToast: vi.fn(),
 	restartWithConfig:
 		vi.fn<
-			(input: Omit<RestartWithConfig, "_tag">) => Effect.Effect<{
+			(
+				input: Omit<Rpc.Payload<typeof RestartWithConfig>, "_tag">,
+			) => Effect.Effect<{
 				readonly ok: true;
 			}>
 		>(),
 	reload: vi.fn(),
-	inputSyncState: { reloadPending: false },
 }));
 
 vi.mock("../../../src/lib/build-id.js", () => ({ BUILD_ID: "A" }));
@@ -41,7 +43,6 @@ vi.mock(
 			typeof import("../../../src/lib/frontend/stores/chat.svelte.js")
 		>()),
 		persistInputDraft: mocks.persistInputDraft,
-		inputSyncState: mocks.inputSyncState,
 	}),
 );
 vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
@@ -49,7 +50,6 @@ vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 	showBanner: mocks.showBanner,
 	removeBanner: mocks.removeBanner,
 	setClientCount: vi.fn(),
-	updateContextPercent: vi.fn(),
 }));
 vi.mock("../../../src/lib/frontend/transport/runtime.js", async () => {
 	const { Effect } = await import("effect");
@@ -62,13 +62,13 @@ vi.mock("../../../src/lib/frontend/transport/runtime.js", async () => {
 				Effect.provideService(effect, WsRpcClients, {
 					wake: Effect.void,
 					forProject: () => {
-						const control = (
+						const control = ((
 							tag: string,
-							input: Omit<RestartWithConfig, "_tag">,
+							input: Omit<Rpc.Payload<typeof RestartWithConfig>, "_tag">,
 						) => {
 							expect(tag).toBe("RestartWithConfig");
 							return mocks.restartWithConfig(input);
-						};
+						}) as WsRpcSockets["control"];
 						return Effect.succeed({ control } as WsRpcSockets);
 					},
 				}),
@@ -91,7 +91,6 @@ describe("build ID dispatch", () => {
 		mocks.restartWithConfig
 			.mockReset()
 			.mockImplementation(() => Effect.succeed({ ok: true as const }));
-		mocks.inputSyncState.reloadPending = false;
 		const entries = new Map<string, string>();
 		vi.stubGlobal("sessionStorage", {
 			getItem: (key: string) => entries.get(key) ?? null,
@@ -337,7 +336,6 @@ describe("build ID dispatch", () => {
 		await vi.runAllTimersAsync();
 
 		expect(mocks.reload).not.toHaveBeenCalled();
-		expect(mocks.inputSyncState.reloadPending).toBe(false);
 		expect(mocks.showBanner).toHaveBeenCalledWith(
 			expect.objectContaining({
 				id: "build-mismatch",
@@ -360,7 +358,6 @@ describe("build ID dispatch", () => {
 		expect(mocks.showBanner).toHaveBeenCalledWith(
 			expect.objectContaining({ id: "build-mismatch" }),
 		);
-		expect(mocks.inputSyncState.reloadPending).toBe(false);
 		expect(sessionStorage.getItem("conduit-build-reload:B")).toBeNull();
 
 		handshake();

@@ -1,17 +1,21 @@
 // Notification → Session Navigation (Replay E2E)
-// Full-pipeline test: real relay + MockOpenCodeServer (no WS mock).
+// Real relay alert delivery and notification clicks over the typed RPC mock.
 //
 // Proves the complete path:
 //   SSE event → relay event pipeline → alert on SubscribeAlerts →
-//   frontend receives it → SW message → switchToSession → ViewSession RPC.
+//   frontend receives it → SW message → selection.open → ViewSession RPC.
 //
 // Uses the `chat-simple` recording with `injectSSEEvents()` to inject
 // events that trigger notification broadcasts for unwatched sessions.
 
+import { writeFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import type { OpenCodeRecording } from "../fixtures/recorded/types.js";
 import { createSession } from "../helpers/e2e-harness.js";
 import { loadOpenCodeRecording } from "../helpers/recorded-loader.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { mockWsRpc } from "../helpers/rpc-mock.js";
+import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 /** Extract the session ID used in prompt_async calls from a recording. */
 function findTargetSessionId(recording: OpenCodeRecording): string | undefined {
@@ -46,12 +50,244 @@ function isErrorAlertFor(frame: string, sessionId: string): boolean {
 test.use({ recording: "chat-simple" });
 
 test.describe("Notification → session navigation (replay)", () => {
+	for (const project of ["e2e-replay", "another-project"]) {
+		test(`a service worker notification for ${project} opens its session without URL navigation`, async ({
+			page,
+			harness,
+		}, testInfo) => {
+			const parent = "notification-parent";
+			const target = "notification-target";
+			const rpc = await mockWsRpc(page, {
+				streams: {
+					SubscribeInputDraft: ({ key }) => [
+						{
+							_tag: "synchronized",
+							...((key as { session?: string }).session && {
+								text: `Shown ${(key as { session?: string }).session}`,
+							}),
+						},
+					],
+				},
+				stubs: {
+					AttachProject: (payload) => ({
+						projectSlug:
+							"projectSlug" in payload
+								? (payload.projectSlug ?? "e2e-replay")
+								: "e2e-replay",
+						sessionSlug: "sessionId" in payload ? "e2e-replay" : null,
+					}),
+					ResolveSession: () => ({ projectSlug: project }),
+				},
+			});
+			await mockRelayWebSocket(page, {
+				initMessages: [
+					{
+						type: "project_list",
+						projects: ["e2e-replay", "another-project"].map((slug) => ({
+							slug,
+							title: slug,
+							folders: [`/tmp/${slug}`],
+						})),
+						current: "e2e-replay",
+					},
+					{
+						type: "shell_snapshot",
+						roots: true,
+						sessions: [
+							{
+								id: parent,
+								title: "Parent",
+								status: "idle",
+								updatedAt: Date.now(),
+							},
+						],
+					},
+				],
+				responses: new Map(),
+			});
+			await page.goto(`${harness.relayBaseUrl}/s/${parent}`);
+			await expect(page.locator("#input")).toHaveValue(`Shown ${parent}`);
+			const documentNavigations: string[] = [];
+			page.on("request", (request) => {
+				if (request.resourceType() === "document")
+					documentNavigations.push(request.url());
+			});
+			await page.evaluate(
+				({ sessionId, slug }) => {
+					navigator.serviceWorker.dispatchEvent(
+						new MessageEvent("message", {
+							data: {
+								type: "navigate_to_session",
+								sessionId,
+								slug,
+								url: "/?notification-url-must-not-be-used",
+							},
+						}),
+					);
+				},
+				{ sessionId: target, slug: project },
+			);
+			await expect(page).toHaveURL(`${harness.relayBaseUrl}/s/${target}`);
+			await expect(page.locator("#input")).toHaveValue(`Shown ${target}`);
+			const viewed = rpc
+				.getRequests()
+				.filter(
+					(request) =>
+						request.tag === "ViewSession" &&
+						request.payload["sessionId"] === target,
+				);
+			expect(viewed).toHaveLength(1);
+			expect(documentNavigations).toEqual([]);
+			await page.goBack();
+			await expect(page).toHaveURL(`${harness.relayBaseUrl}/s/${parent}`);
+			await testInfo.attach("notification-back-to-parent", {
+				body: await page.screenshot(),
+				contentType: "image/png",
+			});
+		});
+	}
+
+	test("an in-project browser notification click opens the notified session", async ({
+		page,
+		harness,
+	}, testInfo) => {
+		await page.addInitScript(() => {
+			class TestNotification {
+				static permission = "granted";
+				onclick: (() => void) | null = null;
+				constructor() {
+					document.documentElement.dataset["notificationCreated"] = "true";
+					window.addEventListener("click-test-notification", () =>
+						this.onclick?.(),
+					);
+				}
+				close() {}
+			}
+			Object.defineProperty(window, "Notification", {
+				value: TestNotification,
+			});
+			Object.defineProperty(navigator.serviceWorker, "getRegistration", {
+				value: () => Promise.resolve(undefined),
+			});
+		});
+		const rpc = await mockWsRpc(page, {
+			streams: {
+				SubscribeInputDraft: ({ key }) => [
+					{
+						_tag: "synchronized",
+						...((key as { session?: string }).session && {
+							text: `Shown ${(key as { session?: string }).session}`,
+						}),
+					},
+				],
+			},
+		});
+		await mockRelayWebSocket(page, {
+			initMessages: [
+				{
+					type: "project_list",
+					projects: [
+						{
+							slug: "e2e-replay",
+							title: "e2e-replay",
+							folders: ["/tmp/e2e-replay"],
+						},
+					],
+					current: "e2e-replay",
+				},
+				{
+					type: "shell_snapshot",
+					roots: true,
+					sessions: ["notification-parent", "notification-target"].map(
+						(id) => ({ id, title: id, status: "idle", updatedAt: Date.now() }),
+					),
+				},
+			],
+			responses: new Map(),
+		});
+		await page.goto(`${harness.relayBaseUrl}/s/notification-parent`);
+		await expect(page.locator("#input")).toHaveValue(
+			"Shown notification-parent",
+		);
+		await expect.poll(() => rpc.hasStream("SubscribeAlerts")).toBe(true);
+		rpc.sendAlert({
+			_tag: "alert",
+			kind: "done",
+			alertId: "browser-click",
+			sessionId: "notification-target",
+		});
+		await expect(page.locator("html")).toHaveAttribute(
+			"data-notification-created",
+			"true",
+		);
+		await page.evaluate(() =>
+			window.dispatchEvent(new Event("click-test-notification")),
+		);
+		await expect(page).toHaveURL(
+			`${harness.relayBaseUrl}/s/notification-target`,
+		);
+		await expect(page.locator("#input")).toHaveValue(
+			"Shown notification-target",
+		);
+		await rpc.waitForRequest(
+			(request) =>
+				request.tag === "ViewSession" &&
+				request.payload["sessionId"] === "notification-target",
+		);
+		await testInfo.attach("browser-notification-target", {
+			body: await page.screenshot(),
+			contentType: "image/png",
+		});
+	});
+
 	test("an alert fires for unwatched session error", async ({
 		page,
 		relayUrl,
 		mockServer,
 		harness,
-	}) => {
+	}, testInfo) => {
+		await page.addInitScript(() => {
+			const notifications: { onclick: (() => void) | null }[] = [];
+			class TestNotification {
+				static permission = "granted";
+				onclick: (() => void) | null = null;
+				constructor() {
+					notifications.push(this);
+					document.documentElement.dataset["notificationCount"] = String(
+						notifications.length,
+					);
+				}
+				close() {}
+			}
+			Object.defineProperty(window, "Notification", {
+				value: TestNotification,
+			});
+			Object.defineProperty(navigator.serviceWorker, "getRegistration", {
+				value: () => Promise.resolve(undefined),
+			});
+			window.addEventListener("click-test-notification", (event) => {
+				notifications[(event as CustomEvent<number>).detail]?.onclick?.();
+			});
+			// Preserve real receipt locks and observe when every delivery attempt ends.
+			const request = navigator.locks.request;
+			let settled = 0;
+			Object.defineProperty(navigator.locks, "request", {
+				value: (...args: Parameters<LockManager["request"]>) => {
+					const result: Promise<unknown> = Reflect.apply(
+						request,
+						navigator.locks,
+						args,
+					);
+					if (args[0].startsWith("conduit-alert:"))
+						void result.then(() => {
+							document.documentElement.dataset["notificationSettled"] = String(
+								++settled,
+							);
+						});
+					return result;
+				},
+			});
+		});
 		// Capture all WS frames (received and sent) before navigating.
 		const receivedFrames: string[] = [];
 		const sentFrames: string[] = [];
@@ -107,7 +343,7 @@ test.describe("Notification → session navigation (replay)", () => {
 
 		// Simulate SW notification click → navigate_to_session.
 		// In a real flow: push notification click → SW notificationclick →
-		// SW posts navigate_to_session → frontend listener → switchToSession()
+		// SW posts navigate_to_session → frontend listener → selection.open()
 		await page.evaluate(
 			({ sessionId, slug }) => {
 				if ("serviceWorker" in navigator) {
@@ -146,6 +382,173 @@ test.describe("Notification → session navigation (replay)", () => {
 
 		// Verify URL updated to include /s/<target-session-id>
 		await expect(page).toHaveURL(new RegExp(`/s/${TARGET}`));
+		await expect(page.locator("html")).toHaveAttribute(
+			"data-notification-settled",
+			"1",
+		);
+		await expect(page.locator("html")).toHaveAttribute(
+			"data-notification-count",
+			"1",
+		);
+
+		const completionStarted = Date.now();
+		// The recording's sticky POST response would reuse the viewed session.
+		mockServer.setExactResponse("POST", "/session", 200, {
+			id: "ses_notification_completions",
+			title: "Notification completions",
+			projectID: "e2e-replay",
+			directory: process.cwd(),
+			version: "1",
+			time: { created: Date.now(), updated: Date.now() },
+		});
+		mockServer.setMessagePages("ses_notification_completions", [], []);
+		const completionSession = await createSession(
+			harness.relayPort,
+			"opencode",
+		);
+		expect(completionSession).not.toBe(TARGET);
+		const completed = (
+			messageId: string,
+			finish = "stop",
+			summary = false,
+		) => ({
+			type: "message.updated",
+			properties: {
+				info: {
+					id: messageId,
+					role: "assistant",
+					sessionID: completionSession,
+					time: { created: Date.now(), completed: Date.now() + 1 },
+					finish,
+					summary,
+					tokens: { input: 1, output: 1, cache: { read: 0, write: 0 } },
+				},
+			},
+		});
+		const status = (type: "busy" | "idle") => ({
+			type: "session.status",
+			properties: { sessionID: completionSession, status: { type } },
+		});
+		mockServer.injectSSEEvents([
+			status("busy"),
+			completed("assistant-tool", "tool-calls"),
+			completed("assistant-summary", "stop", true),
+		]);
+		for (let update = 0; update < 3; update++) {
+			mockServer.injectSSEEvents([completed("assistant-one")]);
+			await expect
+				.poll(
+					() => {
+						const db = new DatabaseSync(harness.eventsDbPath, {
+							readOnly: true,
+						});
+						try {
+							return db
+								.prepare(
+									"SELECT count(*) AS count FROM events WHERE session_id = ? AND type = 'turn.completed'",
+								)
+								.get(completionSession)?.["count"];
+						} finally {
+							db.close();
+						}
+					},
+					{
+						message:
+							"provider completion persisted before notification delivery",
+					},
+				)
+				.toBe(update + 3);
+			await expect(page.locator("html")).toHaveAttribute(
+				"data-notification-settled",
+				String(update + 2),
+			);
+		}
+		await expect(page.locator("html")).toHaveAttribute(
+			"data-notification-count",
+			"2",
+		);
+		mockServer.injectSSEEvents([
+			status("idle"),
+			status("busy"),
+			completed("assistant-two"),
+			status("idle"),
+		]);
+		await expect(page.locator("html")).toHaveAttribute(
+			"data-notification-settled",
+			"5",
+		);
+		await expect(page.locator("html")).toHaveAttribute(
+			"data-notification-count",
+			"3",
+		);
+		const identities = receivedFrames.flatMap((frame) => {
+			const message: {
+				values?: {
+					_tag?: string;
+					kind?: string;
+					sessionId?: string;
+					alertId?: string;
+				}[];
+			} = JSON.parse(frame);
+			return (message.values ?? [])
+				.filter(
+					(value) =>
+						value._tag === "alert" &&
+						value.kind === "done" &&
+						value.sessionId === completionSession,
+				)
+				.map((value) => value.alertId);
+		});
+		expect(identities).toEqual([
+			...Array.from({ length: 3 }, () =>
+				JSON.stringify([completionSession, "assistant-one", "done"]),
+			),
+			JSON.stringify([completionSession, "assistant-two", "done"]),
+		]);
+		for (const index of [1, 2]) {
+			const beforeClick = sentFrames.length;
+			await page.evaluate(
+				(index) =>
+					window.dispatchEvent(
+						new CustomEvent("click-test-notification", { detail: index }),
+					),
+				index,
+			);
+			await expect(page).toHaveURL(new RegExp(`/s/${completionSession}`));
+			await expect
+				.poll(() =>
+					sentFrames.slice(beforeClick).some((frame) => {
+						const message: { tag?: string; payload?: { sessionId?: string } } =
+							JSON.parse(frame);
+						return (
+							message.tag === "ViewSession" &&
+							message.payload?.sessionId === completionSession
+						);
+					}),
+				)
+				.toBe(true);
+			await page.goBack();
+			await expect(page).toHaveURL(new RegExp(`/s/${TARGET}`));
+		}
+		const notificationReport = testInfo.outputPath(
+			"notification-identities.json",
+		);
+		writeFileSync(
+			notificationReport,
+			JSON.stringify(
+				{
+					sessionId: completionSession,
+					identities,
+					notifications: 2,
+					ms: Date.now() - completionStarted,
+				},
+				null,
+				2,
+			),
+		);
+		await testInfo.attach("notification-identities", {
+			path: notificationReport,
+		});
 	});
 
 	test("no alert when session HAS viewers", async ({
@@ -203,13 +606,13 @@ test.describe("Notification → session navigation (replay)", () => {
 							(msg["payload"] as { sessionId?: unknown } | undefined)
 								?.sessionId === watchedId,
 					)
-					.map((msg) => msg["id"]);
+					.map((msg) => String(msg["id"]));
 				return receivedFrames
 					.map(parse)
 					.some(
 						(msg) =>
 							msg["_tag"] === "Exit" &&
-							requestIds.includes(msg["requestId"]) &&
+							requestIds.includes(String(msg["requestId"])) &&
 							(msg["exit"] as { _tag?: unknown } | undefined)?._tag ===
 								"Success",
 					);
@@ -235,11 +638,19 @@ test.describe("Notification → session navigation (replay)", () => {
 			},
 		]);
 
-		// No notification for the watched session may arrive during this window.
-		await page.waitForTimeout(1500);
+		// The error must reach the watched session before its missing alert means anything.
+		await expect
+			.poll(() =>
+				receivedFrames
+					.slice(frameCountBefore)
+					.some((frame) => frame.includes("Error on watched session")),
+			)
+			.toBe(true);
 
 		// Filter frames received AFTER injection for an error alert targeting
 		// the watched session. There should be none.
+		// Suppressed alerts expose no completion signal after the SSE handler's async policy lookup.
+		await page.waitForTimeout(1500);
 		const newFrames = receivedFrames.slice(frameCountBefore);
 		expect(newFrames.filter((f) => isErrorAlertFor(f, watchedId))).toEqual([]);
 	});

@@ -1,4 +1,3 @@
-import { GetStatus, SetPin } from "../../../src/lib/contracts/ws-rpc.js";
 /**
  * Integration test: Daemon start/stop lifecycle cleans up all async work.
  *
@@ -105,7 +104,7 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 		expect(before.status).toBe(302);
 		expect(before.headers.get("location")).toBe("/auth");
 		expect(
-			await sendRpcRequest(options.socketPath, new SetPin({ pin: "1234" })),
+			await sendRpcRequest(options.socketPath, { _tag: "SetPin", pin: "1234" }),
 		).toEqual({ ok: true });
 		await expect
 			.poll(() => {
@@ -117,7 +116,7 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 			.toMatchObject({ pinHash: hashPin("1234") });
 
 		expect(
-			await sendRpcRequest(options.socketPath, new SetPin({ pin: null })),
+			await sendRpcRequest(options.socketPath, { _tag: "SetPin", pin: null }),
 		).toEqual({ ok: true });
 
 		const after = await fetch(baseUrl, { redirect: "manual" });
@@ -126,7 +125,7 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 		expect(after.headers.get("location")).not.toBe("/auth");
 		expect(await httpStatus(`${baseUrl}/api/projects`)).toBe(200);
 		expect(
-			await sendRpcRequest(options.socketPath, new GetStatus({})),
+			await sendRpcRequest(options.socketPath, { _tag: "GetStatus" }),
 		).toMatchObject({
 			pinEnabled: false,
 		});
@@ -149,7 +148,7 @@ describe("Daemon lifecycle (real services, real timers)", () => {
 		expect(restarted.headers.get("location")).not.toBe("/auth");
 		expect(await httpStatus(`${restartedUrl}/api/projects`)).toBe(200);
 		expect(
-			await sendRpcRequest(options.socketPath, new GetStatus({})),
+			await sendRpcRequest(options.socketPath, { _tag: "GetStatus" }),
 		).toMatchObject({
 			pinEnabled: false,
 		});

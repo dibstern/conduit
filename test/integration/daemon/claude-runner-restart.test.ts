@@ -156,7 +156,9 @@ describe("Claude runners survive server replacement through built dist", () => {
 		const sessionId = await browser.createSession("Adopted idle runner");
 		await browser.setAutoSettle(null);
 		await browser.send(sessionId, "before-adopted-idle");
-		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
+		const runner = await harness.waitForMark(
+			(mark) => mark.kind === "runner-started" && mark.sessionId === sessionId,
+		);
 		if (runner?.kind !== "runner-started")
 			throw new Error("Missing original runner proof");
 		expect(
@@ -531,6 +533,24 @@ describe("Claude runners survive server replacement through built dist", () => {
 		try {
 			await harness.kill();
 			await pending;
+			// Server exit does not fence the runner's socket-close callback.
+			await vi.waitFor(
+				() =>
+					expect(
+						sdkProof(harness).some(
+							(mark) =>
+								mark["kind"] === "runner-detached" &&
+								mark["pid"] === runner.pid,
+						),
+					).toBe(true),
+				{ timeout: 15_000 },
+			);
+			const detached = sdkProof(harness)
+				.filter(
+					(mark) =>
+						mark["kind"] === "runner-detached" && mark["pid"] === runner.pid,
+				)
+				.at(-1);
 			const socket = createConnection(runner.socketPath);
 			const greeted = new Promise<{
 				hello: RunnerHello;
@@ -578,7 +598,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 					.pipe(Effect.timeout("15 seconds")),
 			);
 			cachedFailure = await Effect.runPromise(
-				Effect.either(
+				Effect.result(
 					direct.commandEffect(
 						command.command_id,
 						{
@@ -594,11 +614,23 @@ describe("Claude runners survive server replacement through built dist", () => {
 					),
 				).pipe(Effect.timeout("15 seconds")),
 			);
-			expect(cachedFailure).toMatchObject({ _tag: "Left" });
+			expect(cachedFailure).toMatchObject({ _tag: "Failure" });
 			await new Promise<void>((resolve) => {
 				socket.once("close", resolve);
 				direct?.destroy();
 			});
+			await vi.waitFor(
+				() =>
+					expect(
+						sdkProof(harness).some(
+							(mark) =>
+								mark["kind"] === "runner-detached" &&
+								mark["pid"] === runner.pid &&
+								mark["at"] !== detached?.["at"],
+						),
+					).toBe(true),
+				{ timeout: 15_000 },
+			);
 			renameSync(runner.socketPath, upstreamPath);
 			await new Promise<void>((resolve, reject) => {
 				proxy.once("error", reject);
@@ -885,7 +917,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 			);
 			const steer = "recovery-steer";
 			const submitted = await Effect.runPromise(
-				after.rpc.input.submit({
+				after.rpc["input.submit"]({
 					sessionId,
 					inputId: randomUUID(),
 					originId: after.originId,
@@ -894,16 +926,16 @@ describe("Claude runners survive server replacement through built dist", () => {
 				}),
 			);
 			expect(submitted.ok).toBe(true);
+			await harness.waitForMark(
+				(mark) => mark.kind === "receipt" && mark.prompt === steer,
+			);
 			await vi.waitFor(
 				() =>
 					expect(
-						harness.marks.some(
-							(mark) => mark.kind === "receipt" && mark.prompt === steer,
-						),
-					).toBe(true),
+						persisted(harness, sessionId).commands.map(({ status }) => status),
+					).toEqual(["running", "running"]),
 				{ timeout: 15_000 },
 			);
-			await new Promise<void>((done) => setTimeout(done, 100));
 			expect(
 				sdkProof(harness).filter(
 					(mark) => mark["kind"] === "query" || mark["kind"] === "enqueue",

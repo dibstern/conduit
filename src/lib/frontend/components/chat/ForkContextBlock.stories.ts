@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
 import { createRawSnippet } from "svelte";
-import { sessionState } from "../../stores/session.svelte.js";
+import { openSessionForSetup } from "../../stories/session-setup.js";
 import ForkContextBlock from "./ForkContextBlock.svelte";
 
 const inheritedConversation = createRawSnippet(() => ({
@@ -29,7 +29,7 @@ const meta = {
 		children: { control: false },
 	},
 	beforeEach: () => {
-		sessionState.currentId = storySessionId;
+		openSessionForSetup(storySessionId, "conduit");
 		sessionStorage.removeItem(storageKey);
 	},
 } satisfies Meta<typeof ForkContextBlock>;

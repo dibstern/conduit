@@ -30,7 +30,7 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 	},
 	"message.removed": {
 		produced: false,
-		reason: "OpenCode SSE or relay-owned rewind commits; not SDK translation",
+		reason: "OpenCode SSE message removal; not SDK translation",
 	},
 	"message.part.removed": {
 		produced: false,
@@ -71,7 +71,7 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 	},
 	"session.rewind_committed": {
 		produced: false,
-		reason: "Relay-owned send admission commits the cut",
+		reason: "Relay-owned cut committed at send admission or upstream removal",
 	},
 	"session.provider_changed": {
 		produced: false,
@@ -150,6 +150,8 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 	},
 	"session.settled": { produced: false, reason: "Relay-owned triage state" },
 	"session.unsettled": { produced: false, reason: "Relay-owned triage state" },
+	"session.archived": { produced: false, reason: "Relay-owned triage state" },
+	"session.unarchived": { produced: false, reason: "Relay-owned triage state" },
 	"session.pinned": { produced: false, reason: "Relay-owned triage state" },
 	"session.unpinned": { produced: false, reason: "Relay-owned triage state" },
 	"session.snoozed": { produced: false, reason: "Relay-owned triage state" },

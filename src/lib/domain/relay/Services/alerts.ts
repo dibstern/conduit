@@ -10,10 +10,10 @@
 import { Context, Effect, Layer, PubSub, Stream } from "effect";
 import type { Alert, AlertsEnvelope } from "../../../contracts/ws-rpc.js";
 
-export class AlertsTag extends Context.Tag("Alerts")<
+export class AlertsTag extends Context.Service<
 	AlertsTag,
 	PubSub.PubSub<Alert>
->() {}
+>()("Alerts") {}
 
 export const AlertsLive: Layer.Layer<AlertsTag> = Layer.effect(
 	AlertsTag,
@@ -28,11 +28,11 @@ export const subscribeAlerts = (): Stream.Stream<
 	never,
 	AlertsTag
 > =>
-	Stream.unwrapScoped(
-		Effect.map(Effect.flatMap(AlertsTag, PubSub.subscribe), (dequeue) =>
+	Stream.unwrap(
+		Effect.map(Effect.flatMap(AlertsTag, PubSub.subscribe), (subscription) =>
 			Stream.concat(
 				Stream.make<AlertsEnvelope[]>({ _tag: "synchronized" }),
-				Stream.fromQueue(dequeue),
+				Stream.fromSubscription(subscription),
 			),
 		),
 	);
