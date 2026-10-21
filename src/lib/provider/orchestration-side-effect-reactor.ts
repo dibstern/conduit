@@ -1580,7 +1580,7 @@ function isRetryableProviderFailure(error: unknown): boolean {
 
 function providerFailureCode(error: unknown): string {
 	if (error instanceof ProviderInstanceFailure) {
-		return providerFailureCode(error.cause);
+		return error.code ?? providerFailureCode(error.cause);
 	}
 	if (isRecord(error)) {
 		const code = error["code"];

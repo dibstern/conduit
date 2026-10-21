@@ -74,6 +74,7 @@ interface CursorSession {
 		| undefined;
 	run?: CursorRun | undefined;
 	busy: boolean;
+	inputIds?: Set<string> | undefined;
 	cancelRequested: boolean;
 	questionAbort?: AbortController | undefined;
 	onCancel?: (() => void) | undefined;
@@ -227,7 +228,8 @@ export class CursorRunnerPayload implements RunnerPayload {
 							this.onTurnStateChanged?.(false);
 					}),
 				),
-				Effect.forkIn(this.scope),
+				// Reserve session/input identity before a following interrupt command.
+				Effect.forkIn(this.scope, { startImmediately: true }),
 			);
 			return yield* Effect.raceFirst(
 				Deferred.await(intake),
@@ -304,6 +306,10 @@ export class CursorRunnerPayload implements RunnerPayload {
 					? yield* session.steer(input, sink, claim)
 					: this.result(session, "steer-declined", 0);
 			session.busy = true;
+			session.inputIds = new Set([
+				input.inputId,
+				...(input.continuation ? [input.continuation.cutOffMessageId] : []),
+			]);
 			this.onTurnStateChanged?.(true);
 			session.cancelRequested = false;
 			const questionAbort = new AbortController();
@@ -397,6 +403,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 								},
 							});
 							currentInputId = inputId;
+							session.inputIds?.add(inputId);
 							events.currentUserMessageId = inputId;
 							if (events.runId && pending.input.runId)
 								yield* events.push("run.started", {
@@ -543,9 +550,12 @@ export class CursorRunnerPayload implements RunnerPayload {
 											})
 										: this.sdk),
 								{
-									...(input.shellEnv ??
-										this.deps.environment?.() ??
-										process.env),
+									NODE_ENV: process.env["NODE_ENV"],
+									...(input.account
+										? {}
+										: (input.shellEnv ??
+											this.deps.environment?.() ??
+											process.env)),
 									...input.account?.env,
 								},
 							),
@@ -1056,6 +1066,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 							Effect.sync(() => {
 								acceptingUpdates = false;
 								session.busy = false;
+								session.inputIds = undefined;
 								session.run = undefined;
 								session.questionAbort = undefined;
 								session.onCancel = undefined;
@@ -1135,9 +1146,14 @@ export class CursorRunnerPayload implements RunnerPayload {
 		});
 	}
 
-	interrupt(sessionId: string) {
+	interrupt(sessionId: string, turnIds?: readonly string[]) {
 		return Effect.suspend(() => {
 			const session = this.sessions.get(sessionId);
+			if (
+				turnIds !== undefined &&
+				!turnIds.some((inputId) => session?.inputIds?.has(inputId))
+			)
+				return Effect.void;
 			if (session) {
 				session.cancelRequested = true;
 				session.questionAbort?.abort();

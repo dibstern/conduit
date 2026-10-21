@@ -11,11 +11,12 @@ import {
 	DaemonEventBusTag,
 } from "../../domain/daemon/Services/daemon-pubsub.js";
 import { makeCursorAuth } from "./cursor-auth.js";
+import { resolveCursorCredential } from "./cursor-credential.js";
 import {
 	createCursorSdkPort,
 	cursorCredentialStorePath,
 } from "./cursor-sdk.js";
-import type { CursorSdkPort } from "./sdk-port.js";
+import type { CursorCredential, CursorSdkPort } from "./sdk-port.js";
 import { adoptLegacyCursorCredential } from "./sdk-real.js";
 
 export class CursorAccountResources extends Context.Service<
@@ -24,6 +25,10 @@ export class CursorAccountResources extends Context.Service<
 		{
 			readonly sdk: CursorSdkPort;
 			readonly auth: Effect.Success<ReturnType<typeof makeCursorAuth>>;
+			readonly credential: Effect.Effect<
+				CursorCredential | undefined,
+				WsRpcError
+			>;
 		},
 		WsRpcError
 	>
@@ -40,7 +45,7 @@ export const CursorAccountResourcesLive = (
 			const directory = yield* AccountDirectory;
 			const bus = yield* DaemonEventBusTag;
 			const legacyDefault = yield* directory.defaultFor("cursor");
-			yield* Effect.tryPromise({
+			const compatibilityStorePath = yield* Effect.tryPromise({
 				try: () =>
 					adoptLegacyCursorCredential(
 						cursorCredentialStorePath(
@@ -69,6 +74,20 @@ export const CursorAccountResourcesLive = (
 							}),
 						);
 					const sdk = createCursorSdkPort({ id, configDir });
+					// Preserve the original default's login without transferring it
+					// to another named account when the selected default changes.
+					const ambient =
+						cursorCredentialStorePath(id, configDir) === compatibilityStorePath;
+					const credential = Effect.tryPromise({
+						try: () =>
+							resolveCursorCredential(sdk, {
+								NODE_ENV: process.env["NODE_ENV"],
+								...(ambient ? process.env : {}),
+								...account?.env,
+							}),
+						catch: () =>
+							new WsRpcError({ message: "Cursor credential lookup failed" }),
+					});
 					const auth = yield* makeCursorAuth(
 						() =>
 							PubSub.publish(bus, DaemonEvent.InstancesChanged()).pipe(
@@ -76,10 +95,10 @@ export const CursorAccountResourcesLive = (
 							),
 						{
 							port: sdk,
-							env: { ...process.env, ...account?.env },
+							credential,
 						},
 					);
-					return { sdk, auth };
+					return { sdk, auth, credential };
 				}),
 			);
 		}),

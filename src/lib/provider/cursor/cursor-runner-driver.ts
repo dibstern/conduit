@@ -17,6 +17,7 @@ import { discoverCursorSkillsEffect } from "./cursor-skill-discovery.js";
 import { cursorTurnError } from "./sdk-error.js";
 import type {
 	CursorAgent,
+	CursorCredential,
 	CursorModel,
 	CursorRun,
 	CursorSdkPort,
@@ -139,13 +140,20 @@ export const discoverCursorEffect = (
 	account?: Account,
 	workspaceRoot?: string,
 	shellEnv?: Readonly<Record<string, string | undefined>>,
+	credentialEffect?: Effect.Effect<CursorCredential | undefined, unknown>,
 ): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> =>
 	Effect.gen(function* () {
 		const resources = yield* Effect.serviceOption(CursorAccountResources);
 		if (!port && account && resources._tag === "Some") {
 			return yield* resources.value
-				.use(account.id, ({ sdk }) =>
-					discoverCursorEffect(sdk, account, workspaceRoot, shellEnv),
+				.use(account.id, ({ sdk, credential }) =>
+					discoverCursorEffect(
+						sdk,
+						account,
+						workspaceRoot,
+						shellEnv,
+						credential,
+					),
 				)
 				.pipe(
 					Effect.mapError((cause) =>
@@ -156,7 +164,11 @@ export const discoverCursorEffect = (
 				);
 		}
 		const adapter = yield* Effect.try({
-			try: () => port ?? (defaultPort ??= createCursorSdkPort()),
+			try: () =>
+				port ??
+				(account
+					? createCursorSdkPort({ id: account.id })
+					: (defaultPort ??= createCursorSdkPort())),
 			catch: () => discoveryFailure("Cursor SDK could not load"),
 		});
 		const runtime = yield* Effect.tryPromise({
@@ -167,14 +179,20 @@ export const discoverCursorEffect = (
 			return yield* Effect.fail(
 				discoveryFailure(runtime.reason ?? "Cursor SDK could not load"),
 			);
-		const credential = yield* Effect.tryPromise({
-			try: () =>
+		const credential = yield* (
+			credentialEffect ??
+			Effect.tryPromise(() =>
 				resolveCursorCredential(adapter, {
-					...(shellEnv ?? process.env),
+					NODE_ENV: process.env["NODE_ENV"],
+					...(account ? {} : (shellEnv ?? process.env)),
 					...account?.env,
 				}),
-			catch: () => discoveryFailure("Cursor credential lookup failed"),
-		});
+			)
+		).pipe(
+			Effect.mapError(() =>
+				discoveryFailure("Cursor credential lookup failed"),
+			),
+		);
 		if (!credential)
 			return yield* Effect.fail(
 				discoveryFailure(
@@ -278,7 +296,10 @@ export const makeCursorRunnerDriver = (
 				call?.shellEnv,
 			),
 		generateTextEffect: (input) => {
-			const generate = (adapter: CursorSdkPort) =>
+			const generate = (
+				adapter: CursorSdkPort,
+				credentialEffect?: Effect.Effect<CursorCredential | undefined, unknown>,
+			) =>
 				Effect.gen(function* () {
 					const account =
 						input.account.driver === "cursor" &&
@@ -289,12 +310,13 @@ export const makeCursorRunnerDriver = (
 										"Cursor text generation requires a Cursor account and model",
 									),
 								);
-					const credential = yield* Effect.tryPromise(() =>
-						resolveCursorCredential(adapter, {
-							...process.env,
-							...account.env,
-						}),
-					);
+					const credential = yield* credentialEffect ??
+						Effect.tryPromise(() =>
+							resolveCursorCredential(adapter, {
+								NODE_ENV: process.env["NODE_ENV"],
+								...account.env,
+							}),
+						);
 					if (!credential)
 						return yield* Effect.fail(
 							new ProviderInstanceFailure({
@@ -304,7 +326,13 @@ export const makeCursorRunnerDriver = (
 								cause: new Error("Cursor authentication required"),
 							}),
 						);
-					const catalog = yield* discoverCursorEffect(adapter, account);
+					const catalog = yield* discoverCursorEffect(
+						adapter,
+						account,
+						undefined,
+						undefined,
+						Effect.succeed(credential),
+					);
 					const model = catalog.models.find(
 						({ id }) => id === input.model.modelId,
 					);
@@ -461,7 +489,9 @@ export const makeCursorRunnerDriver = (
 				});
 			return (
 				resources
-					? resources.use(input.account.id, ({ sdk }) => generate(sdk))
+					? resources.use(input.account.id, ({ sdk, credential }) =>
+							generate(sdk, credential),
+						)
 					: Effect.try(
 							() =>
 								port ??
@@ -485,108 +515,138 @@ export const makeCursorRunnerDriver = (
 				),
 			);
 		},
-		prepareTurnEffect: (input) =>
-			Effect.gen(function* () {
-				const catalog = yield* discover(
-					input.account,
-					input.workspaceRoot,
-					input.shellEnv,
-				).pipe(
-					Effect.catch((failure) =>
-						// The runner owns the auth error and its durable turn terminal.
-						failure.code === "auth_required"
-							? Effect.succeed({ models: [] })
-							: Effect.fail(failure),
-					),
-				);
-				const model = catalog.models.find(
-					({ id }) => id === input.model?.modelId,
-				);
-				const variants = model?.variants ?? {};
-				const selected = input.variant ? variants[input.variant] : undefined;
-				if (model && input.variant && !selected)
-					return yield* Effect.fail(
-						discoveryFailure("Cursor model parameter choice is not offered"),
+		prepareTurnEffect: (input) => {
+			const prepare = (
+				adapter: CursorSdkPort,
+				credentialEffect: Effect.Effect<CursorCredential | undefined, unknown>,
+			) =>
+				Effect.gen(function* () {
+					const credential = yield* credentialEffect.pipe(
+						Effect.mapError(() =>
+							discoveryFailure("Cursor credential lookup failed"),
+						),
 					);
-				const variant =
-					selected ??
-					Object.values(variants).find(
-						(variant) => variant["isDefault"] === true,
+					if (!credential)
+						return yield* Effect.fail(
+							discoveryFailure(
+								"Cursor authentication required. Log in to Cursor in Settings.",
+								true,
+							),
+						);
+					const catalog = yield* discoverCursorEffect(
+						adapter,
+						input.account,
+						input.workspaceRoot,
+						input.shellEnv,
+						Effect.succeed(credential),
+					).pipe(
+						Effect.catch((failure) =>
+							// The runner owns the auth error and its durable turn terminal.
+							failure.code === "auth_required"
+								? Effect.succeed({ models: [] })
+								: Effect.fail(failure),
+						),
 					);
-				const params = variant?.["params"] ?? [];
-				const digest = yield* Effect.gen(function* () {
-					const supplied = input.providerState["cursor.forkDigest"];
-					if (typeof supplied === "string" || !persistence) return supplied;
-					const { read, state } = persistence;
-					const stored = (yield* state.getState(input.sessionId))[
-						"cursor.forkDigest"
-					];
-					if (stored !== undefined) return stored;
-					const session = yield* read.getSession(input.sessionId);
-					if (
-						!session?.forked_from &&
-						!(session?.side_thread === 1 && session.parent_id)
-					)
-						return undefined;
-					const inherited = (yield* read.getSessionMessagesWithParts(
-						input.sessionId,
-					)).filter((message) => message.is_inherited === 1);
-					if (inherited.length === 0) return undefined;
-					const rendered = renderCursorForkDigest(inherited);
-					// Persist before the runner hop. Rejected sends and recovered commands
-					// reuse this snapshot; forkSeedPending still owns seed settlement.
-					yield* state.saveUpdates(input.sessionId, [
-						{ key: "cursor.forkDigest", value: rendered },
-					]);
-					return rendered;
-				}).pipe(
-					Effect.mapError(
-						(cause) =>
-							new ProviderInstanceFailure({
-								providerId: "cursor",
-								operation: "fork seed",
-								cause,
-							}),
-					),
-				);
-				const credential =
-					resources && input.account
-						? yield* resources
-								.use(input.account.id, ({ sdk }) =>
-									Effect.tryPromise({
-										try: () =>
-											resolveCursorCredential(sdk, {
-												...(input.shellEnv ?? process.env),
-												...input.account?.env,
-											}),
-										catch: () =>
-											discoveryFailure("Cursor credential lookup failed"),
-									}),
-								)
-								.pipe(
-									Effect.mapError((cause) =>
-										cause instanceof ProviderInstanceFailure
-											? cause
-											: discoveryFailure(cause.message),
-									),
-								)
-						: undefined;
-				return {
-					...(credential
-						? { cursorCredential: { ...credential, apiKey: credential.apiKey } }
-						: {}),
-					input: {
-						...input,
-						instanceId: input.account?.id ?? input.instanceId ?? "cursor",
-						providerState: {
-							...input.providerState,
-							"cursor.modelParams": params,
-							...(typeof digest === "string"
-								? { "cursor.forkDigest": digest }
-								: {}),
+					const model = catalog.models.find(
+						({ id }) => id === input.model?.modelId,
+					);
+					const variants = model?.variants ?? {};
+					const selected = input.variant ? variants[input.variant] : undefined;
+					if (model && input.variant && !selected)
+						return yield* Effect.fail(
+							discoveryFailure("Cursor model parameter choice is not offered"),
+						);
+					const variant =
+						selected ??
+						Object.values(variants).find(
+							(variant) => variant["isDefault"] === true,
+						);
+					const params = variant?.["params"] ?? [];
+					const digest = yield* Effect.gen(function* () {
+						const supplied = input.providerState["cursor.forkDigest"];
+						if (typeof supplied === "string" || !persistence) return supplied;
+						const { read, state } = persistence;
+						const stored = (yield* state.getState(input.sessionId))[
+							"cursor.forkDigest"
+						];
+						if (stored !== undefined) return stored;
+						const session = yield* read.getSession(input.sessionId);
+						if (
+							!session?.forked_from &&
+							!(session?.side_thread === 1 && session.parent_id)
+						)
+							return undefined;
+						const inherited = (yield* read.getSessionMessagesWithParts(
+							input.sessionId,
+						)).filter((message) => message.is_inherited === 1);
+						if (inherited.length === 0) return undefined;
+						const rendered = renderCursorForkDigest(inherited);
+						// Persist before the runner hop. Rejected sends and recovered commands
+						// reuse this snapshot; forkSeedPending still owns seed settlement.
+						yield* state.saveUpdates(input.sessionId, [
+							{ key: "cursor.forkDigest", value: rendered },
+						]);
+						return rendered;
+					}).pipe(
+						Effect.mapError(
+							(cause) =>
+								new ProviderInstanceFailure({
+									providerId: "cursor",
+									operation: "fork seed",
+									cause,
+								}),
+						),
+					);
+					return {
+						cursorCredential: { ...credential, apiKey: credential.apiKey },
+						input: {
+							...input,
+							instanceId: input.account?.id ?? input.instanceId ?? "cursor",
+							providerState: {
+								...input.providerState,
+								"cursor.modelParams": params,
+								...(typeof digest === "string"
+									? { "cursor.forkDigest": digest }
+									: {}),
+							},
 						},
-					},
-				};
-			}),
+					};
+				});
+			if (resources && input.account)
+				return resources
+					.use(input.account.id, ({ sdk, credential }) =>
+						prepare(sdk, credential),
+					)
+					.pipe(
+						Effect.mapError((cause) =>
+							cause instanceof ProviderInstanceFailure
+								? cause
+								: discoveryFailure(cause.message),
+						),
+					);
+			return Effect.try(
+				() =>
+					port ??
+					createCursorSdkPort(
+						input.account
+							? { id: input.account.id, configDir: daemonConfigDir }
+							: undefined,
+					),
+			).pipe(
+				Effect.mapError(() => discoveryFailure("Cursor SDK could not load")),
+				Effect.flatMap((sdk) =>
+					prepare(
+						sdk,
+						Effect.tryPromise(() =>
+							resolveCursorCredential(sdk, {
+								NODE_ENV: process.env["NODE_ENV"],
+								...(input.account ? {} : (input.shellEnv ?? process.env)),
+								...input.account?.env,
+							}),
+						),
+					),
+				),
+			);
+		},
 	};
 };
