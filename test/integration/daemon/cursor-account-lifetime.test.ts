@@ -1,7 +1,14 @@
 // Failure modes: intake releases demand before native completion, invalidation
-// cancels another account, and retained native turns lose demand on restart.
+// cancels another account, retained native turns lose demand on restart, and
+// released historical bindings resurrect demand or reopen removed accounts.
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import Database from "better-sqlite3";
@@ -43,18 +50,221 @@ afterEach(async ({ task }) => {
 		remainingRunners: fixture.remainingRunnerPids(),
 		evidence,
 	});
+	mkdirSync("test-results/82tn9-5", { recursive: true });
 	writeFileSync(
-		"/tmp/82tn9-5-review2-fix/lifetime.json",
+		"test-results/82tn9-5/lifetime.json",
 		JSON.stringify({ scenarios }, null, 2),
 	);
 	harness = undefined;
 });
 
 it.each([
-	false,
-	true,
-])("retains native turn demand and cancels only the removed account (restart=%s)", async (restart) => {
-	evidence = { restart, accountIdleGraceMs: 100 };
+	{ legacy: false, removeBeforeRestart: false },
+	{ legacy: true, removeBeforeRestart: false },
+	{ legacy: false, removeBeforeRestart: true },
+	{ legacy: true, removeBeforeRestart: true },
+])("does not revive completed turn demand on restart (%j)", async ({
+	legacy,
+	removeBeforeRestart,
+}) => {
+	evidence = { legacy, removeBeforeRestart };
+	harness = ProcessHarness.create({
+		dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
+		runnerLifecycle: { idleTimeoutMs: null },
+	});
+	const fixture = harness;
+	const capture = join(fixture.root, "capture.jsonl");
+	const serviceEnvironment = {
+		CURSOR_API_KEY: "",
+		CONDUIT_CURSOR_SDK_TRACE: resolve(
+			"test/fixtures/cursor-sdk-traces/auth-login.jsonl",
+		),
+		CONDUIT_CURSOR_SDK_CAPTURE: capture,
+		CONDUIT_TEST_RUNNER_HELLO_WITHOUT_BINDING_RELEASE_STATE: legacy ? "1" : "",
+	};
+	await fixture.restart({ startupTimeoutMs: 90_000, serviceEnvironment });
+	const { addedInstanceId: accountId } = await fixture.requestRpc({
+		_tag: "AddInstance",
+		name: "Completed owner",
+		driver: "cursor",
+		env: { CURSOR_API_KEY: "[REDACTED:completed]" },
+	});
+	if (!accountId) throw new Error("No account allocated");
+	const browser = await fixture.connect();
+	const sessionId = await browser.createSession(
+		"Completed",
+		accountId,
+		"cursor",
+		{
+			modelId: "composer-2.5",
+			contextWindow: "",
+			permissionMode: "full",
+		},
+	);
+	await browser.send(sessionId, "Say hello", 90_000);
+	await vi.waitFor(() =>
+		expect(
+			captureRows(capture).some(({ kind }) => kind === "store.disposed"),
+		).toBe(true),
+	);
+	const runnerPids = fixture.remainingRunnerPids();
+	expect(runnerPids).toHaveLength(1);
+	if (removeBeforeRestart)
+		await fixture.requestRpc({ _tag: "RemoveInstance", instanceId: accountId });
+	await fixture.terminate();
+	await fixture.restart({ startupTimeoutMs: 30_000, serviceEnvironment });
+	expect(fixture.remainingRunnerPids()).toEqual(runnerPids);
+	const { projects } = await fixture.requestRpc({ _tag: "GetProjects" });
+	expect(
+		projects.find(({ slug }) => slug === "process-test")?.unavailableReason,
+	).toBeUndefined();
+	const recovered = await fixture.connect();
+	await recovered.createSession("Recovered project");
+	if (!removeBeforeRestart) {
+		const removing = fixture.requestRpc({
+			_tag: "RemoveInstance",
+			instanceId: accountId,
+		});
+		void removing.catch(() => {});
+		const inventory = fixture.requestRpc({ _tag: "GetInstances" });
+		void inventory.catch(() => {});
+		let finished = false;
+		try {
+			finished = await Promise.race([
+				Promise.all([removing, inventory]).then(() => true),
+				setTimeout(3000, false),
+			]);
+			evidence = { ...evidence, removalCompleted: finished, runnerPids };
+			expect(
+				finished,
+				"account removal and inventory must finish while the idle runner survives",
+			).toBe(true);
+		} finally {
+			// Unblock a failing regression without touching any process outside this fixture.
+			if (!finished) {
+				for (const pid of fixture.remainingRunnerPids())
+					process.kill(pid, "SIGTERM");
+				await Promise.allSettled([removing, inventory]);
+			}
+		}
+	}
+	expect(fixture.remainingRunnerPids()).toEqual(runnerPids);
+	evidence = { ...evidence, projectRecovered: true, runnerPids };
+}, 120_000);
+
+it("finishes a live binding for a deleted account without blocking project recovery", async () => {
+	evidence = { phase: "live-deleted-account" };
+	harness = ProcessHarness.create({
+		dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
+		runnerLifecycle: { idleTimeoutMs: null },
+	});
+	const fixture = harness;
+	const trace = join(fixture.root, "cursor.jsonl");
+	const capture = join(fixture.root, "capture.jsonl");
+	const gate = join(fixture.root, "stream.gate");
+	writeFileSync(
+		trace,
+		readFileSync(
+			resolve("test/fixtures/cursor-sdk-traces/auth-login.jsonl"),
+			"utf8",
+		).replaceAll('"status":"finished"', '"status":"cancelled"'),
+	);
+	writeFileSync(gate, "hold");
+	const serviceEnvironment = {
+		CURSOR_API_KEY: "",
+		CONDUIT_CURSOR_SDK_TRACE: trace,
+		CONDUIT_CURSOR_SDK_CAPTURE: capture,
+		CONDUIT_TEST_CURSOR_STREAM_GATE: gate,
+	};
+	await fixture.restart({ startupTimeoutMs: 90_000, serviceEnvironment });
+	const { addedInstanceId: accountId } = await fixture.requestRpc({
+		_tag: "AddInstance",
+		name: "Deleted owner",
+		driver: "cursor",
+		env: { CURSOR_API_KEY: "[REDACTED:deleted]" },
+	});
+	if (!accountId) throw new Error("No account allocated");
+	const browser = await fixture.connect();
+	const sessionId = await browser.createSession(
+		"Deleted owner",
+		accountId,
+		"cursor",
+		{
+			modelId: "composer-2.5",
+			contextWindow: "",
+			permissionMode: "full",
+		},
+	);
+	void browser.send(sessionId, "Say hello", 90_000).catch(() => {});
+	await vi.waitFor(
+		() =>
+			expect(
+				captureRows(capture).some(({ kind }) => kind === "run.handle"),
+			).toBe(true),
+		{ timeout: 30_000 },
+	);
+	await fixture.terminate();
+	// Simulate removing the admitted account while its detached runner survives.
+	const configPath = join(fixture.configDir, "daemon.json");
+	const config: { instances: { id: string }[] } = JSON.parse(
+		readFileSync(configPath, "utf8"),
+	);
+	writeFileSync(
+		configPath,
+		JSON.stringify({
+			...config,
+			instances: config.instances.filter(({ id }) => id !== accountId),
+		}),
+	);
+	const beforeAdoption = captureRows(capture).filter(
+		({ kind }) => kind === "credential.store.call",
+	).length;
+	await fixture.restart({ startupTimeoutMs: 30_000, serviceEnvironment });
+	const { projects } = await fixture.requestRpc({ _tag: "GetProjects" });
+	expect(
+		projects.find(({ slug }) => slug === "process-test")?.unavailableReason,
+	).toBeUndefined();
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
+	try {
+		await vi.waitFor(() =>
+			expect(
+				db
+					.prepare<[string], { state: string }>(
+						"SELECT state FROM turns WHERE session_id = ? ORDER BY rowid DESC LIMIT 1",
+					)
+					.get(sessionId)?.state,
+			).toBe("error"),
+		);
+		const terminal = db
+			.prepare<[string], { data: string }>(
+				"SELECT data FROM events WHERE session_id = ? AND type = 'turn.error' ORDER BY sequence DESC LIMIT 1",
+			)
+			.get(sessionId);
+		expect(JSON.parse(terminal?.data ?? "{}")).toMatchObject({
+			code: "account_unavailable",
+			error: expect.stringContaining(accountId),
+		});
+	} finally {
+		db.close();
+		rmSync(gate);
+	}
+	const recovered = await fixture.connect();
+	await recovered.createSession("Recovered project");
+	expect(
+		captureRows(capture).filter(({ kind }) => kind === "credential.store.call"),
+	).toHaveLength(beforeAdoption);
+	evidence = { ...evidence, projectRecovered: true, terminal: "error" };
+}, 120_000);
+
+it.each([
+	{ restart: false, legacy: false },
+	{ restart: true, legacy: false },
+	{ restart: true, legacy: true },
+])("retains native turn demand and cancels only the removed account (%j)", async ({
+	restart,
+	legacy,
+}) => {
+	evidence = { restart, legacy, accountIdleGraceMs: 100 };
 	harness = ProcessHarness.create({
 		dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 		runnerLifecycle: { idleTimeoutMs: 100 },
@@ -85,6 +295,7 @@ it.each([
 		CONDUIT_CURSOR_SDK_CAPTURE: capture,
 		CONDUIT_TEST_CURSOR_AUTH_STATE: auth,
 		CONDUIT_TEST_CURSOR_STREAM_GATE: gate,
+		CONDUIT_TEST_RUNNER_HELLO_WITHOUT_BINDING_RELEASE_STATE: legacy ? "1" : "",
 	};
 	await fixture.restart({
 		startupTimeoutMs: 90_000,

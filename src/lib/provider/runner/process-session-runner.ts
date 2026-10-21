@@ -875,6 +875,7 @@ export const makeProcessSessionRunner = (
 							let messageId = "";
 							let pending = false;
 							let accountId: string | undefined;
+							let activeTurn = false;
 							if (sql) {
 								const rows = yield* sql<{
 									provider_id: string;
@@ -883,9 +884,10 @@ export const makeProcessSessionRunner = (
 									status: string;
 									attempt_count: number;
 									assistant_message_id: string | null;
+									turn_state: string | null;
 								}>`SELECT outbox.provider_id, COALESCE(json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS input_id,
 									COALESCE(reservation.joined_into, reservation.id) AS run_id,
-									outbox.status, outbox.attempt_count, turns.assistant_message_id
+									outbox.status, outbox.attempt_count, turns.assistant_message_id, turns.state AS turn_state
 									FROM provider_command_outbox outbox
 									LEFT JOIN provider_runs reservation ON reservation.session_id = outbox.session_id
 										AND reservation.id = outbox.run_id
@@ -900,6 +902,9 @@ export const makeProcessSessionRunner = (
 								const row = rows[0];
 								if (row) {
 									accountId = row.provider_id;
+									activeTurn =
+										row.turn_state === "pending" ||
+										row.turn_state === "running";
 									inputId = row.input_id ?? undefined;
 									runId = row.run_id ?? undefined;
 									// Acknowledged events will not replay after adoption.
@@ -926,13 +931,49 @@ export const makeProcessSessionRunner = (
 								accepted: true,
 								releaseRequested: false,
 							});
-							yield* retainAccount(
-								binding.sinkId,
-								accountId ?? hello.upgradeState?.snapshot?.input.account?.id,
-								sessionId,
-								inputId,
-								connection,
-							);
+							// Historical sinks remain available for output replay, but their
+							// native lifetime ended. Older runners report only the history.
+							if (
+								binding.released === false ||
+								(binding.released === undefined && activeTurn)
+							) {
+								const retained = yield* Effect.result(
+									retainAccount(
+										binding.sinkId,
+										accountId ??
+											hello.upgradeState?.snapshot?.input.account?.id,
+										sessionId,
+										inputId,
+										connection,
+									),
+								);
+								if (retained._tag === "Failure") {
+									if (retained.failure.code !== "account_unavailable")
+										return yield* Effect.fail(retained.failure);
+									yield* failRunnerTurn(
+										(output) => emit(output, sessionId),
+										binding.sinkId,
+										{
+											sessionId,
+											...(inputId ? { inputId } : {}),
+											runId,
+											messageId,
+										},
+										retained.failure,
+										driver.driverKind,
+									);
+									releaseSink(binding.sinkId);
+									runFork(
+										connection
+											.commandEffect(randomUUID(), {
+												type: "interrupt",
+												sessionId,
+												...(inputId ? { turnIds: [inputId] } : {}),
+											})
+											.pipe(Effect.ignore, Effect.asVoid),
+									);
+								}
+							}
 						}
 						for (const pending of entry.candidate
 							? []

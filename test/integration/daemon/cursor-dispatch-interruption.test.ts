@@ -1,17 +1,25 @@
 // Failure modes: a same-tick bound interrupt overtakes native session admission,
 // or a stale input's delayed interrupt cancels a replacement native turn.
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { it } from "@effect/vitest";
 import { Cause, Deferred, Effect, Exit, Fiber, Result } from "effect";
-import { expect } from "vitest";
+import { beforeEach, expect } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { makeCursorSessionRunner } from "../../../src/lib/provider/cursor/cursor-runner-payload.js";
 import { createTraceCursorSdkPort } from "../../../src/lib/provider/cursor/sdk-trace-player.js";
 import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/process-session-runner.js";
 import { connectRunner } from "../../../src/lib/provider/runner/runner-connection.js";
+
+beforeEach(() => mkdirSync("test-results/82tn9-5", { recursive: true }));
 
 it.live(
 	"honors a bound interrupt in the same scheduler tick as command dispatch",
@@ -102,7 +110,7 @@ it.live(
 					Deferred.await(terminal).pipe(Effect.timeout("1 second")),
 				);
 				writeFileSync(
-					"/tmp/82tn9-5-review2-fix/lifetime-dispatch-race.json",
+					"test-results/82tn9-5/lifetime-dispatch-race.json",
 					JSON.stringify(
 						{
 							cancellations,
@@ -185,7 +193,7 @@ it.live.each(["opening", "preparation"] as const)(
 					? Cause.findError(outcome.cause)
 					: undefined;
 				writeFileSync(
-					`/tmp/82tn9-5-review2-fix/lifetime-${phase}.json`,
+					`test-results/82tn9-5/lifetime-${phase}.json`,
 					JSON.stringify({ prepared, outcome, failure }, null, 2),
 				);
 				expect(failure).toMatchObject({

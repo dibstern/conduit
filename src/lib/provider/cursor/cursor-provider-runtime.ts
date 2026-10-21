@@ -37,13 +37,29 @@ export const makeCursorProviderRuntime = (deps: RunnerProviderInstanceDeps) =>
 									accountId: string,
 									work: Effect.Effect<void>,
 								) =>
-									resources.value
-										.use(accountId, () => work)
-										.pipe(
-											Effect.mapError((cause) =>
-												runnerFailure("retain account", cause),
-											),
+									Effect.gen(function* () {
+										const accounts = yield* deps.accounts;
+										if (
+											!accounts.accounts.some(
+												(account) =>
+													account.id === accountId &&
+													account.driver === "cursor",
+											)
+										)
+											return yield* Effect.fail({
+												operation: "retain account",
+												message: `Cursor account "${accountId}" is unavailable`,
+												code: "account_unavailable",
+												retryable: false,
+											});
+										return yield* resources.value.use(accountId, () => work);
+									}).pipe(
+										Effect.mapError((cause) =>
+											"operation" in cause
+												? cause
+												: runnerFailure("retain account", cause),
 										),
+									),
 							}
 						: {}),
 					coldUpgrade: true,
