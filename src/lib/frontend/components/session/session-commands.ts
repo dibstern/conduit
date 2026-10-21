@@ -1,7 +1,12 @@
 import { getBrowserClientId } from "../../stores/client-identity.js";
 import { selection } from "../../stores/selection.svelte.js";
-import { followFork, isSessionSnoozed } from "../../stores/session.svelte.js";
+import {
+	followFork,
+	isSessionSnoozed,
+	sessionState,
+} from "../../stores/session.svelte.js";
 import { refreshListedSessions } from "../../stores/session-list.svelte.js";
+import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { openSnoozePicker } from "../../stores/snooze-picker.svelte.js";
 import { showToast } from "../../stores/ui.svelte.js";
 import { toastFailure } from "../../transport/rpc-errors.js";
@@ -9,7 +14,7 @@ import { rpc } from "../../transport/ws-rpc-client.js";
 import type { SessionInfo } from "../../types.js";
 import { copyToClipboard } from "../../utils/clipboard.js";
 import { formatSnoozeTime } from "../../utils/format.js";
-import { toggleSessionRead } from "../../utils/session-read.js";
+import { backToSessions, toggleSessionRead } from "../../utils/session-read.js";
 import { getSnoozePresets } from "../../utils/snooze.js";
 import { getSessionActionState } from "../../utils/swipe.js";
 import { confirmSessionDeletion } from "./session-deletion.js";
@@ -151,9 +156,18 @@ function refreshSearch(): void {
 async function settle(session: SessionInfo, settled: boolean) {
 	const input = rpcInput(session);
 	if (!input) return;
+	const returnToList =
+		sessionViewState.compact && sessionState.currentId === session.id;
 	try {
 		await rpc("SetSessionSettled", { ...input, settled });
 		refreshSearch();
+		if (
+			settled &&
+			returnToList &&
+			sessionViewState.compact &&
+			sessionState.currentId === session.id
+		)
+			backToSessions();
 		if (settled)
 			showToast(`Moved “${session.title || "New Session"}” to Settled`, {
 				duration: 5000,
@@ -215,9 +229,21 @@ async function archive(
 async function autoSettle(session: SessionInfo, disabled: boolean) {
 	const input = rpcInput(session);
 	if (!input) return;
+	const wasSettled = session.settledAt != null;
+	const returnToList =
+		sessionViewState.compact && sessionState.currentId === session.id;
 	try {
 		const outlook = await rpc("SetSessionAutoSettle", { ...input, disabled });
 		refreshSearch();
+		if (
+			!wasSettled &&
+			!disabled &&
+			outlook.kind === "settled" &&
+			returnToList &&
+			sessionViewState.compact &&
+			sessionState.currentId === session.id
+		)
+			backToSessions();
 		return outlook;
 	} catch (error) {
 		toastFailure("Couldn't change auto-settle")(error);

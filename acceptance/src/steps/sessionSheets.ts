@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
@@ -6,6 +7,11 @@ import { requireRpcControl, setSessionRowStatus } from "./shared.js";
 
 const sheetSelector =
 	'[data-testid="session-bar-island-menu"], [data-testid="session-action-sheet"]';
+
+const heldSettles = new WeakMap<
+	Page,
+	{ url: string; release(): Promise<void> }
+>();
 
 /** Holds a touch on a session-list row until its phone sheet opens. */
 export async function longPressSessionRow(
@@ -34,6 +40,169 @@ export async function longPressSessionRow(
 }
 
 export const sessionSheetsHandlers: StepHandler[] = [
+	{
+		name: "hold settle reply",
+		match: /^the settle reply is held as (success|failure)$/,
+		run: ({ world, match }) => {
+			const page = world.page;
+			const rpc = requireRpcControl(page);
+			let resolve!: () => void;
+			const pending = new Promise<void>((done) => {
+				resolve = done;
+			});
+			let delivered = false;
+			const previous = rpc.onReply;
+			rpc.onReply = (request) => {
+				previous?.(request);
+				if (request.tag === "SetSessionSettled") delivered = true;
+			};
+			rpc.setStubs({
+				SetSessionSettled: async ({ sessionId, settled }) => {
+					expect(settled).toBe(true);
+					await pending;
+					if (match[1] === "failure")
+						throw new WsRpcError({ message: "Relay unavailable" });
+					setSessionRowStatus(page, sessionId, "idle", {
+						settledAt: PINNED_CLOCK_MS,
+					});
+					return { ok: true };
+				},
+			});
+			heldSettles.set(page, {
+				url: page.url(),
+				release: async () => {
+					resolve();
+					await expect.poll(() => delivered).toBe(true);
+					await page.evaluate(
+						() =>
+							new Promise<void>((done) =>
+								requestAnimationFrame(() =>
+									requestAnimationFrame(() => done()),
+								),
+							),
+					);
+				},
+			});
+		},
+	},
+	{
+		name: "settle from open session",
+		match:
+			/^I settle the open session using (header|overflow|shortcut|transcript key)$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			const sessionId = new URL(page.url()).pathname.split("/")[2];
+			if (match[1] === "header") {
+				await page.getByTestId("session-bar-settle").click();
+			} else if (match[1] === "overflow") {
+				await page
+					.locator(
+						'[data-testid="session-bar-island-overflow"], [data-testid="session-bar-overflow"]',
+					)
+					.click();
+				await page.getByTestId("session-ctx-settle").click();
+			} else if (match[1] === "transcript key") {
+				await page.locator("#messages").focus();
+				await page.keyboard.press("s");
+			} else {
+				await page.keyboard.press("ControlOrMeta+Shift+s");
+			}
+			const request = await requireRpcControl(page).waitForRequest(
+				(request) => request.tag === "SetSessionSettled",
+			);
+			expect(request.payload).toMatchObject({ sessionId, settled: true });
+		},
+	},
+	{
+		name: "release settle reply",
+		match: /^the held settle reply is released$/,
+		run: async ({ world }) => {
+			const held = heldSettles.get(world.page);
+			if (!held) throw new Error("No held settle reply");
+			await held.release();
+		},
+	},
+	{
+		name: "open session while settle is pending",
+		match:
+			/^I open (another session while settling|the settling session before the reply)$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			const held = heldSettles.get(page);
+			if (!held) throw new Error("No held settle reply");
+			if (match[1] === "another session while settling") {
+				setSessionRowStatus(page, "ses_settle_other", "idle", {
+					title: "Another session",
+					projectSlug: "myapp",
+				});
+				await page.getByTestId("session-bar-back").click();
+			}
+			await page
+				.locator(
+					'#session-list .session-item[data-session-id="ses_settle_other"]',
+				)
+				.click();
+			await expect(page).toHaveURL(/\/s\/ses_settle_other$/);
+			held.url = page.url();
+		},
+	},
+	{
+		name: "settle another session from sidebar",
+		match:
+			/^I settle another session using the (row key|bulk bar|phone sheet|phone bulk bar)$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			setSessionRowStatus(page, "ses_settle_other", "idle", {
+				title: "Another session",
+				projectSlug: "myapp",
+			});
+			const row = page.locator(
+				'#session-list .session-item[data-session-id="ses_settle_other"]',
+			);
+			if (match[1] === "row key") {
+				await row.focus();
+				await page.keyboard.press("s");
+			} else {
+				if (match[1]?.startsWith("phone"))
+					await longPressSessionRow(page, "ses_settle_other");
+				else await row.click({ button: "right" });
+				if (match[1] === "phone sheet")
+					await page.getByTestId("session-ctx-settle").click();
+				else {
+					await page.getByTestId("session-ctx-select").click();
+					await page.getByTestId("select-bar-settle").click();
+				}
+			}
+			const request = await requireRpcControl(page).waitForRequest(
+				(request) => request.tag === "SetSessionSettled",
+			);
+			expect(request.payload).toMatchObject({
+				sessionId: "ses_settle_other",
+				settled: true,
+			});
+		},
+	},
+	{
+		name: "assert settle keeps open session",
+		match: /^the viewed session stays open$/,
+		run: async ({ world }) => {
+			const url = heldSettles.get(world.page)?.url;
+			if (!url) throw new Error("No held settle reply");
+			await expect(world.page).toHaveURL(url);
+			await expect(world.page.getByTestId("session-bar")).toBeVisible();
+		},
+	},
+	{
+		name: "assert settle error",
+		match: /^settling shows the relay error$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByText("Couldn't settle session Relay unavailable", {
+					exact: true,
+				}),
+			).toBeVisible();
+		},
+	},
 	{
 		name: "clear session sheet branch",
 		match: /^the session sheet branch is unknown$/,

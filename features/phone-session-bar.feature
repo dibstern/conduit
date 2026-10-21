@@ -44,6 +44,104 @@ Scenario: Back returns to the session list
   When I tap back to the session list
   Then the session list is open
 
+Scenario Outline: Settling the open phone session returns to the list only after success
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  And the phone session sheet state is idle
+  And the settle reply is held as success
+  When I settle the open session using <entry>
+  Then the viewed session stays open
+  When the held settle reply is released
+  Then the session list is open
+
+Examples:
+  | entry          |
+  | header         |
+  | overflow       |
+  | shortcut       |
+  | transcript key |
+
+Scenario Outline: A failed settle keeps the open phone session
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  And the phone session sheet state is idle
+  And the settle reply is held as failure
+  When I settle the open session using <entry>
+  Then the viewed session stays open
+  When the held settle reply is released
+  Then the viewed session stays open
+  And settling shows the relay error
+
+Examples:
+  | entry          |
+  | header         |
+  | overflow       |
+  | shortcut       |
+  | transcript key |
+
+Scenario Outline: Settling on desktop keeps the viewed session open
+  Given the conduit app is served with the long-transcript mockup
+  And the phone session sheet state is idle
+  And the settle reply is held as success
+  When I settle the open session using <entry>
+  Then the viewed session stays open
+  When the held settle reply is released
+  Then the viewed session stays open
+
+Examples:
+  | entry          |
+  | header         |
+  | overflow       |
+  | shortcut       |
+  | transcript key |
+
+Scenario: A delayed settle never leaves a newer phone session
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  And the phone session sheet state is idle
+  And the settle reply is held as success
+  When I settle the open session using header
+  And I open another session while settling
+  And the held settle reply is released
+  Then the viewed session stays open
+
+Scenario Outline: Settling another sidebar session keeps the viewed session open
+  Given the conduit app is served with the long-transcript mockup
+  And the settle reply is held as success
+  When I settle another session using the <entry>
+  And the held settle reply is released
+  Then the viewed session stays open
+
+Examples:
+  | entry    |
+  | row key  |
+  | bulk bar |
+
+Scenario Outline: Settling another phone list session stays in the list
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  And the settle reply is held as success
+  When I tap back to the session list
+  And I settle another session using the <entry>
+  And the held settle reply is released
+  Then the session list is open
+  And no session sheet is open
+
+Examples:
+  | entry          |
+  | phone sheet    |
+  | phone bulk bar |
+
+Scenario: Settling from the phone list keeps a session opened before the reply
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  And the settle reply is held as success
+  When I tap back to the session list
+  And I settle another session using the phone sheet
+  And I open the settling session before the reply
+  And the held settle reply is released
+  Then the viewed session stays open
+
 Scenario: Switching to terminal from the session bar shows the terminal
   Given the viewport is a phone
   And the conduit app is served with the long-transcript mockup

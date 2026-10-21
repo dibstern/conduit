@@ -9,6 +9,29 @@ Scenario: The default mock outlook is deterministic without scenario seeding
   Then the auto-settle status line is On · turned off for all sessions in Settings
   And the session sheet stays open with Auto-settle on
 
+Scenario: Enabling Auto-settle returns to the list when the write reports the open session settled
+  Given the conduit app is served with the long-transcript mockup
+  And the phone session sheet state is auto_off
+  And the auto-settle read returns off
+  And the auto-settle write is held as settled
+  When I open the overflow session sheet
+  And I toggle Auto-settle in the session sheet
+  Then auto-settle is saving with disabled false
+  When the held auto-settle write is released
+  Then the session list is open
+
+Scenario: Enabling Auto-settle on an already settled session keeps the sheet open
+  Given the conduit app is served with the long-transcript mockup
+  And the phone session sheet state is settled
+  And the auto-settle read returns off
+  And the auto-settle write is held as settled
+  When I open the overflow session sheet
+  And I toggle Auto-settle in the session sheet
+  Then auto-settle is saving with disabled false
+  When the held auto-settle write is released
+  Then the session sheet stays open with Auto-settle on
+  And the auto-settle status line is On · session is settled
+
 Scenario Outline: Every server outlook has exact copy
   Given the conduit app is served with the long-transcript mockup
   And the phone session sheet state is idle
