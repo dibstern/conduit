@@ -496,13 +496,24 @@ class PermissionNamespace {
 		sessionId: string,
 		permissionId: string,
 		response: "once" | "always" | "reject",
+		directory?: string,
 	): Promise<void> {
-		await this.api.sdk("permission.reply", decodeOpenCodeBooleanResponse, () =>
-			this.api._sdk.permission.respond({
-				sessionID: sessionId,
-				permissionID: permissionId,
-				response,
-			}),
+		await this.api.sdk(
+			"permission.reply",
+			decodeOpenCodeBooleanResponse,
+			() => {
+				const request = {
+					sessionID: sessionId,
+					permissionID: permissionId,
+					response,
+					...(directory === undefined ? {} : { directory }),
+				};
+				return directory === undefined
+					? this.api._sdk.permission.respond(request)
+					: this.api._sdk.permission.respond(request, {
+							headers: { "x-opencode-directory": null },
+						});
+			},
 		);
 	}
 }

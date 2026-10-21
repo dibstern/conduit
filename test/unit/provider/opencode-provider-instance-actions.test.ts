@@ -47,7 +47,10 @@ describe("OpenCodeProviderInstance action methods", () => {
 
 	beforeEach(() => {
 		client = makeStubClient();
-		instance = new OpenCodeProviderInstance({ client });
+		instance = new OpenCodeProviderInstance({
+			client,
+			clientForSession: () => Effect.succeed(client),
+		});
 	});
 
 	describe("interruptTurnEffect", () => {
@@ -66,7 +69,10 @@ describe("OpenCodeProviderInstance action methods", () => {
 					prompt: vi.fn(async () => {}),
 				},
 			});
-			instance = new OpenCodeProviderInstance({ client });
+			instance = new OpenCodeProviderInstance({
+				client,
+				clientForSession: () => Effect.succeed(client),
+			});
 
 			const result = await Effect.runPromise(
 				Effect.result(instance.interruptTurnEffect("bad-session")),
@@ -94,6 +100,7 @@ describe("OpenCodeProviderInstance action methods", () => {
 				"s1",
 				"perm-1",
 				"once",
+				"/workspace",
 			);
 			expect(client.permission.list).not.toHaveBeenCalled();
 			expect(client.session.update).not.toHaveBeenCalled();
@@ -103,6 +110,7 @@ describe("OpenCodeProviderInstance action methods", () => {
 			instance = new OpenCodeProviderInstance({
 				client,
 				workspaceRoot: "/workspace",
+				clientForSession: () => Effect.succeed(client),
 			});
 			vi.mocked(client.permission.list).mockResolvedValue([
 				{
@@ -143,6 +151,7 @@ describe("OpenCodeProviderInstance action methods", () => {
 				"s1",
 				"perm-2",
 				"once",
+				"/workspace",
 			);
 			expect(calls).toEqual(["update", "reply"]);
 		});
@@ -166,6 +175,7 @@ describe("OpenCodeProviderInstance action methods", () => {
 				"s1",
 				"missing-perm",
 				"once",
+				"/workspace",
 			);
 		});
 
@@ -188,6 +198,7 @@ describe("OpenCodeProviderInstance action methods", () => {
 				"s1",
 				"perm-2",
 				"once",
+				"/workspace",
 			);
 		});
 
@@ -200,6 +211,7 @@ describe("OpenCodeProviderInstance action methods", () => {
 				"s1",
 				"perm-3",
 				"reject",
+				"/workspace",
 			);
 			expect(client.permission.list).not.toHaveBeenCalled();
 			expect(client.session.update).not.toHaveBeenCalled();
@@ -246,7 +258,10 @@ describe("OpenCodeProviderInstance action methods", () => {
 					list: vi.fn(async () => []),
 				},
 			});
-			instance = new OpenCodeProviderInstance({ client });
+			instance = new OpenCodeProviderInstance({
+				client,
+				clientForSession: () => Effect.succeed(client),
+			});
 
 			const result = await Effect.runPromise(
 				instance
@@ -320,7 +335,10 @@ describe("OpenCodeProviderInstance action methods", () => {
 					list: vi.fn(async () => []),
 				},
 			});
-			instance = new OpenCodeProviderInstance({ client });
+			instance = new OpenCodeProviderInstance({
+				client,
+				clientForSession: () => Effect.succeed(client),
+			});
 
 			const result = await Effect.runPromise(
 				instance
@@ -368,6 +386,7 @@ describe("OpenCodeProviderInstance action methods", () => {
 				"bound-s",
 				"perm-1",
 				"once",
+				"/workspace",
 			);
 			expect(client.permission.reply).not.toHaveBeenCalled();
 		});
@@ -396,6 +415,7 @@ describe("OpenCodeProviderInstance action methods", () => {
 				"bound-s",
 				"perm-1",
 				"once",
+				"/workspace",
 			);
 			expect(client.permission.list).not.toHaveBeenCalled();
 			expect(client.session.update).not.toHaveBeenCalled();
