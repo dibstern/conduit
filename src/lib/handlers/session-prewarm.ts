@@ -65,6 +65,7 @@ export const preWarmSession = (sessionId: string, resolvedAccount?: Account) =>
 						workspaceRoot: folders.workspaceRoot,
 						extraFolders: folders.extraFolders,
 						prepareShellEnv: true,
+						requireRoutableAccount: true,
 					});
 					const prepareTurn = yield* makePrepareTurn({
 						configDir: account.folder,

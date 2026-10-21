@@ -37,6 +37,7 @@ export const resolveDraftLaunchInput = (
 				workspaceRoot: folders.workspaceRoot,
 				extraFolders: folders.extraFolders,
 				prepareShellEnv: true,
+				requireRoutableAccount: true,
 			});
 		return {
 			...buildSessionLaunchInput(

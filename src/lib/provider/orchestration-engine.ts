@@ -185,6 +185,8 @@ export interface ProviderCallRequest {
 	readonly workspaceRoot?: string;
 	readonly extraFolders?: readonly string[];
 	readonly prepareShellEnv?: boolean;
+	/** Launches require the admitted identity; controls retain it without env if unroutable. */
+	readonly requireRoutableAccount?: boolean;
 }
 
 export interface OrchestrationEngineOptions {
@@ -383,6 +385,8 @@ export class OrchestrationEngine {
 		sessionId: string,
 		account?: Account,
 		target?: {
+			readonly providerId?: string;
+			readonly includeSettledForProviderId?: string;
 			readonly runId?: string;
 			readonly turnIds?: readonly string[];
 			readonly prompt?: {
@@ -393,6 +397,9 @@ export class OrchestrationEngine {
 	) {
 		return Effect.gen({ self: this }, function* () {
 			if (!this.resolveCallContext) return undefined;
+			const hasRunTarget = Boolean(
+				target?.runId || target?.turnIds || target?.prompt,
+			);
 			if (this.durable) {
 				const sql = this.durable.sql;
 				let targetRuns = sql`SELECT NULL`;
@@ -422,9 +429,10 @@ export class OrchestrationEngine {
 					JOIN provider_runs r ON r.id = o.run_id
 					WHERE o.project_key = ${this.durable.projectId}
 						AND o.session_id = ${sessionId} AND r.session_id = ${sessionId} AND o.effect_type = 'send_turn'
-						AND ${target ? sql`r.id IN (${targetRuns})` : sql`r.status IN ('pending', 'running')`}
-					ORDER BY CASE WHEN r.status = 'running' THEN 0 ELSE 1 END, o.request_sequence DESC
-					LIMIT ${target ? 2 : 1}`.pipe(
+						AND ${hasRunTarget ? sql`r.id IN (${targetRuns})` : target?.includeSettledForProviderId ? sql`(r.status IN ('pending', 'running') OR COALESCE(json_extract(o.payload_json, '$.account.id'), o.provider_id) = ${target.includeSettledForProviderId})` : sql`r.status IN ('pending', 'running')`}
+						AND ${target?.providerId ? sql`COALESCE(json_extract(o.payload_json, '$.account.id'), o.provider_id) = ${target.providerId}` : sql`1 = 1`}
+					ORDER BY CASE r.status WHEN 'running' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END, o.request_sequence DESC
+					LIMIT ${hasRunTarget ? 2 : 1}`.pipe(
 					Effect.mapError(
 						(cause) =>
 							new ProviderInstanceFailure({
@@ -442,7 +450,9 @@ export class OrchestrationEngine {
 					: Option.none();
 				if (
 					Option.isSome(admitted) &&
-					(!account || admitted.value.account.id === account.id)
+					(!account ||
+						target?.providerId ||
+						admitted.value.account.id === account.id)
 				) {
 					const currentAccount = this.accountDirectory
 						? yield* this.accountDirectory
@@ -455,13 +465,21 @@ export class OrchestrationEngine {
 						: undefined;
 					return yield* this.resolveCallContext({
 						...admitted.value,
-						account: { ...admitted.value.account, env: currentAccount?.env },
+						account: {
+							...admitted.value.account,
+							env:
+								currentAccount?.id === admitted.value.account.id &&
+								currentAccount.driver === admitted.value.account.driver
+									? currentAccount.env
+									: undefined,
+						},
 					});
 				}
 			}
-			if (target) return undefined;
+			if (hasRunTarget) return undefined;
 			return yield* this.resolveCallContext({
 				sessionId,
+				...(target?.providerId ? { providerId: target.providerId } : {}),
 				...(account ? { account } : {}),
 			});
 		});
@@ -1024,6 +1042,7 @@ export class OrchestrationEngine {
 					? { workspaceRoot: command.workspaceRoot }
 					: {}),
 				prepareShellEnv: true,
+				requireRoutableAccount: true,
 			});
 			const instance = yield* this.getProviderInstanceEffect(
 				command.providerId,
@@ -1076,15 +1095,17 @@ export class OrchestrationEngine {
 				return;
 			}
 			const endSession = Effect.gen({ self: this }, function* () {
-				const call = yield* command.targetProviderId && !command.account
-					? this.resolveCallContextEffect({
-							sessionId: command.sessionId,
-							providerId: command.targetProviderId,
-						})
-					: this.resolveSessionCallContextEffect(
-							command.sessionId,
-							command.account,
-						);
+				const call = yield* this.resolveSessionCallContextEffect(
+					command.sessionId,
+					command.account,
+					{
+						includeSettledForProviderId:
+							command.targetProviderId ?? command.account?.id ?? providerId,
+						...(command.targetProviderId
+							? { providerId: command.targetProviderId }
+							: {}),
+					},
+				);
 				const instance = yield* this.getProviderInstanceEffect(
 					providerId,
 					call?.account ?? command.account,

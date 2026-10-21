@@ -11,6 +11,7 @@ import {
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { AccountSchema } from "../contracts/account.js";
+import { AccountUnroutable } from "../contracts/limit-recovery.js";
 import { getProviderDriver } from "../contracts/provider-instance.js";
 import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { mark } from "../domain/daemon/Services/turn-timeline.js";
@@ -855,12 +856,13 @@ export class ProviderSideEffectReactor {
 							},
 						})
 						.pipe(Effect.mapError(storeFailure("placeContinuation")));
+				const admittedAccount = liveContext?.account ?? payload.account;
 				const currentAccount = this.options.accountDirectory
 					? yield* this.options.accountDirectory
 							.resolve({
 								_tag: "Id",
 								id:
-									payload.account?.id ?? payload.instanceId ?? row.provider_id,
+									admittedAccount?.id ?? payload.instanceId ?? row.provider_id,
 							})
 							.pipe(
 								Effect.mapError(
@@ -873,7 +875,21 @@ export class ProviderSideEffectReactor {
 								),
 							)
 					: undefined;
-				const admittedAccount = liveContext?.account ?? payload.account;
+				if (
+					admittedAccount &&
+					this.options.accountDirectory &&
+					(currentAccount?.id !== admittedAccount.id ||
+						currentAccount.driver !== admittedAccount.driver)
+				)
+					return yield* Effect.fail(
+						new ProviderInstanceFailure({
+							providerId: row.provider_id,
+							operation: "resolveReplayAccount",
+							cause: new AccountUnroutable({
+								ref: { _tag: "Id", id: admittedAccount.id },
+							}),
+						}),
+					);
 				const account = admittedAccount
 					? {
 							...admittedAccount,
@@ -892,6 +908,7 @@ export class ProviderSideEffectReactor {
 								workspaceRoot: payload.workspaceRoot,
 								extraFolders: payload.extraFolders,
 								prepareShellEnv: true,
+								requireRoutableAccount: true,
 							})
 						: undefined;
 				const shellEnv = liveContext?.shellEnv ?? call?.shellEnv;

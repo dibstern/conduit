@@ -12,6 +12,7 @@ import {
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { type Account, AccountSchema } from "../../../contracts/account.js";
+import { AccountUnroutable } from "../../../contracts/limit-recovery.js";
 import {
 	PROVIDER_DRIVERS,
 	type ProviderDriverKind,
@@ -38,6 +39,7 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
+import { ProviderInstanceFailure } from "../../../provider/errors.js";
 import { openCodeInputMessageId } from "../../../provider/opencode/opencode-input-message-id.js";
 import { createRelayEventSink } from "../../../provider/relay-event-sink.js";
 import {
@@ -508,9 +510,54 @@ const handleDispatchFailure = (
 
 const prepareEngineTurnInput = (
 	resolvedInput: ProviderTurnServiceSendInput,
-	account: Account,
+	initialAccount: Account,
 ) =>
 	Effect.gen(function* () {
+		// The committed turn owns its account even before a runner has a snapshot.
+		let account = initialAccount;
+		if (resolvedInput.steer) {
+			const sql = yield* SqlClient.SqlClient;
+			const [turn] = yield* sql<{ account_json: string | null }>`
+				SELECT json_extract(o.payload_json, '$.account') AS account_json
+				FROM provider_command_outbox o JOIN provider_runs r ON r.id = o.run_id
+				WHERE o.session_id = ${resolvedInput.sessionId} AND o.effect_type = 'send_turn'
+					AND r.status IN ('pending', 'running')
+				ORDER BY CASE WHEN r.status = 'running' THEN 0 ELSE 1 END, o.request_sequence DESC LIMIT 1`;
+			if (turn?.account_json) {
+				const admittedAccount = yield* Schema.decodeUnknownEffect(
+					Schema.fromJsonString(AccountSchema),
+				)(turn.account_json);
+				const currentAccount = yield* (yield* AccountDirectory)
+					.resolve({ _tag: "Id", id: admittedAccount.id })
+					.pipe(
+						Effect.mapError(
+							(cause) =>
+								new ProviderInstanceFailure({
+									providerId: admittedAccount.driver,
+									operation: "resolveSteeringAccount",
+									cause,
+								}),
+						),
+					);
+				if (
+					currentAccount.id !== admittedAccount.id ||
+					currentAccount.driver !== admittedAccount.driver
+				)
+					return yield* Effect.fail(
+						new ProviderInstanceFailure({
+							providerId: admittedAccount.driver,
+							operation: "resolveSteeringAccount",
+							cause: new AccountUnroutable({
+								ref: { _tag: "Id", id: admittedAccount.id },
+							}),
+						}),
+					);
+				account = {
+					...admittedAccount,
+					env: currentAccount.env,
+				};
+			}
+		}
 		const driver = account.driver;
 		const providerId = account.id;
 		const traits: ProviderDriverTraits = PROVIDER_DRIVERS[driver];
@@ -654,25 +701,6 @@ const prepareEngineTurnInput = (
 				}
 			}
 		}
-		// The committed turn owns its account even before a runner has a snapshot.
-		let turnAccount = account;
-		if (resolvedInput.steer) {
-			const sql = yield* SqlClient.SqlClient;
-			const [turn] = yield* sql<{ account_json: string | null }>`
-				SELECT json_extract(payload_json, '$.account') AS account_json
-				FROM provider_command_outbox
-				WHERE session_id = ${resolvedInput.sessionId} AND effect_type = 'send_turn'
-					AND json_extract(payload_json, '$.account.id') = ${account.id}
-				ORDER BY request_sequence DESC LIMIT 1`;
-			if (turn?.account_json) {
-				turnAccount = {
-					...(yield* Schema.decodeUnknownEffect(
-						Schema.fromJsonString(AccountSchema),
-					)(turn.account_json)),
-					env: account.env,
-				};
-			}
-		}
 		const sendTurnInput: SendTurnInput = {
 			sessionId: resolvedInput.sessionId,
 			inputId,
@@ -686,7 +714,7 @@ const prepareEngineTurnInput = (
 			history: [],
 			providerState,
 			...buildSessionLaunchInput(
-				turnAccount,
+				account,
 				settings,
 				yield* getPermissionMode(resolvedInput.sessionId),
 				folders,
@@ -694,10 +722,11 @@ const prepareEngineTurnInput = (
 			),
 			...(yield* (yield* OrchestrationEngineTag).resolveCallContextEffect({
 				sessionId: resolvedInput.sessionId,
-				account: turnAccount,
+				account: account,
 				workspaceRoot: folders.workspaceRoot,
 				extraFolders: folders.extraFolders,
 				prepareShellEnv: true,
+				requireRoutableAccount: true,
 			})),
 			...(traits.supportsGoalState && sessionRow
 				? { goalState: sessionGoalState(sessionRow) }
@@ -908,7 +937,7 @@ const sendViaEngine = (
 		yield* dispatchEngineTurn(
 			input,
 			providerId,
-			account,
+			prepared.sendTurnInput.account ?? account,
 			prepared.sendTurnInput,
 			prepared.workspaceMoveSequence,
 		);

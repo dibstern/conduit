@@ -6,6 +6,7 @@ import { Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect";
 import { SqlClient, Statement } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { afterEach, expect, vi } from "vitest";
+import { accountsStateFromInstances } from "../../../../src/lib/account-directory.js";
 import {
 	AccountIdSchema,
 	type ClaudeAccount,
@@ -18,6 +19,7 @@ import type { DaemonConfig } from "../../../../src/lib/daemon/config-persistence
 import {
 	AccountDirectory,
 	AccountDirectoryFromConfigLive,
+	AccountDirectoryStateLive,
 } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { Usage } from "../../../../src/lib/domain/daemon/Services/usage.js";
@@ -511,179 +513,252 @@ const interruptTurn = () =>
 	});
 
 describe("ProviderTurnService", () => {
-	it.effect(
-		"steers with current account credentials and the admitted account folder",
-		() => {
-			const account: ClaudeAccount = {
-				id: AccountIdSchema.make("steering-account"),
-				name: "Steering account",
-				driver: "claude",
-				folder: configuredClaudeConfigDir("/tmp/82tn9-current-folder"),
-				usageEligible: false,
-				env: { ANTHROPIC_API_KEY: "synthetic-current-steering-key" },
-			};
-			const admitted: ClaudeAccount = {
-				...account,
-				folder: configuredClaudeConfigDir("/tmp/82tn9-admitted-folder"),
-				env: { ANTHROPIC_API_KEY: "synthetic-admitted-steering-key" },
-			};
-			const registered = [admitted];
-			const extraFolder = mkdtempSync(join(tmpdir(), "82tn9-steering-extra-"));
-			tempConfigDirs.push(extraFolder);
-			const accountDirectory = makeMockAccountDirectory(registered);
-			const { liveLayer } = serviceLayer({
-				accountDirectory,
-			});
-			return Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				const commit = yield* makeCommitAndSignal;
-				yield* commit([
-					canonicalEvent("session.created", "session-1", {
-						sessionId: "session-1",
-						provider: account.id,
-						title: "Steering credentials",
-					}),
-				]);
-				yield* sql`UPDATE sessions SET model_provider = 'claude', model_id = 'claude-sonnet-4-5', variant = '', context_window = '' WHERE id = 'session-1'`;
-				const running = yield* Deferred.make<SendTurnInput>();
-				const steering = yield* Deferred.make<SendTurnInput>();
-				const release = yield* Deferred.make<void>();
-				const ended = yield* Deferred.make<void>();
-				let ownerRunId: string | undefined;
-				const instance = partialFake<ProviderInstance>({
-					providerId: "claude",
-					sendTurnEffect: (input) =>
-						Effect.gen(function* () {
-							const runId = ownerRunId ?? input.runId;
-							if (!runId || !input.runId)
-								throw new Error("Missing steering run reservation");
-							ownerRunId = runId;
-							yield* input.eventSink.push(
-								providerRuntimeEvent(
-									"run.started",
-									input.sessionId,
-									{ inputId: input.inputId, requestedRunId: input.runId },
-									{ runId, eventId: `started:${input.inputId}` },
+	for (const mode of ["refresh", "rebound", "other-driver", "removed"] as const)
+		it.effect(
+			mode === "removed"
+				? "rejects steering after the admitted account is removed with a fallback available"
+				: `steers with current account credentials and the admitted account folder (${mode})`,
+			() => {
+				const account: ClaudeAccount = {
+					id: AccountIdSchema.make("steering-account"),
+					name: "Steering account",
+					driver: "claude",
+					folder: configuredClaudeConfigDir("/tmp/82tn9-current-folder"),
+					usageEligible: false,
+					env: { ANTHROPIC_API_KEY: "synthetic-current-steering-key" },
+				};
+				const admitted: ClaudeAccount = {
+					...account,
+					folder: configuredClaudeConfigDir("/tmp/82tn9-admitted-folder"),
+					env: { ANTHROPIC_API_KEY: "synthetic-admitted-steering-key" },
+				};
+				const extraFolder = mkdtempSync(
+					join(tmpdir(), "82tn9-steering-extra-"),
+				);
+				tempConfigDirs.push(extraFolder);
+				return Effect.gen(function* () {
+					const accountDirectory = yield* AccountDirectory.pipe(
+						Effect.provide(
+							AccountDirectoryStateLive(
+								accountsStateFromInstances(
+									[
+										admitted,
+										{
+											id: "steering-fallback",
+											name: "Fallback",
+											driver: mode === "other-driver" ? "cursor" : "claude",
+											env: { ANTHROPIC_API_KEY: "synthetic-fallback-key" },
+										},
+									],
+									admitted.folder,
+									5,
+									{ defaultAccountIds: { claude: admitted.id } },
 								),
+							),
+						),
+					);
+					const { liveLayer } = serviceLayer({ accountDirectory });
+					return yield* Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						const commit = yield* makeCommitAndSignal;
+						yield* commit([
+							canonicalEvent("session.created", "session-1", {
+								sessionId: "session-1",
+								provider: account.id,
+								title: "Steering credentials",
+							}),
+						]);
+						yield* sql`UPDATE sessions SET model_provider = 'claude', model_id = 'claude-sonnet-4-5', variant = '', context_window = '' WHERE id = 'session-1'`;
+						const running = yield* Deferred.make<SendTurnInput>();
+						const steering = yield* Deferred.make<SendTurnInput>();
+						const release = yield* Deferred.make<void>();
+						const ended = yield* Deferred.make<void>();
+						let ownerRunId: string | undefined;
+						const instance = partialFake<ProviderInstance>({
+							providerId: "claude",
+							sendTurnEffect: (input) =>
+								Effect.gen(function* () {
+									const runId = ownerRunId ?? input.runId;
+									if (!runId || !input.runId)
+										throw new Error("Missing steering run reservation");
+									ownerRunId = runId;
+									yield* input.eventSink.push(
+										providerRuntimeEvent(
+											"run.started",
+											input.sessionId,
+											{ inputId: input.inputId, requestedRunId: input.runId },
+											{ runId, eventId: `started:${input.inputId}` },
+										),
+									);
+									if (input.inputId === "running-input") {
+										yield* Deferred.succeed(running, input);
+										yield* Deferred.await(release);
+										yield* input.eventSink.push(
+											providerRuntimeEvent(
+												"turn.completed",
+												input.sessionId,
+												{ messageId: "" },
+												{ runId },
+											),
+										);
+										yield* Deferred.succeed(ended, undefined);
+										return completedTurn();
+									}
+									yield* Deferred.succeed(steering, input);
+									return completedTurn({ status: "joined" });
+								}).pipe(
+									Effect.mapError(
+										(cause) =>
+											new ProviderInstanceFailure({
+												providerId: "claude",
+												operation: "sendTurn",
+												cause,
+											}),
+									),
+								),
+						});
+						let sequence = 0;
+						const engine = new OrchestrationEngine({
+							registry: new ProviderRegistry([instance]),
+							accountDirectory,
+							durableCommands: {
+								sql,
+								projectKey: "test-project",
+								write: commit.write,
+								snapshot: yield* new CommandReadModelRepository(
+									sql,
+									"test-project",
+								).bootstrap(),
+								ingestion: yield* ProviderRuntimeIngestionTag,
+								persistUserMessage: (yield* ClaudeEventPersistEffectTag)
+									.persistUserMessage,
+								now: () => 1000,
+								generateId: () => `steering-dispatch-${++sequence}`,
+							},
+						});
+						const dispatch = vi.spyOn(engine, "dispatchEffect");
+						yield* Effect.gen(function* () {
+							const service = yield* ProviderTurnServiceTag;
+							yield* service.sendTurn(
+								defaultInput({ commandId: "running-input" }),
 							);
-							if (input.inputId === "running-input") {
-								yield* Deferred.succeed(running, input);
-								yield* Deferred.await(release);
-								yield* input.eventSink.push(
-									providerRuntimeEvent(
-										"turn.completed",
-										input.sessionId,
-										{ messageId: "" },
-										{ runId },
+							const first = yield* Deferred.await(running);
+							const runningStatus =
+								yield* (yield* ReadQueryEffectTag).getSessionStatus(
+									"session-1",
+								);
+							if (mode === "removed") {
+								const state = yield* accountDirectory.apply({
+									_tag: "Remove",
+									id: account.id,
+								});
+								expect(state.deleted).toContainEqual({
+									id: account.id,
+									driver: "claude",
+								});
+								expect(
+									(yield* accountDirectory.resolve({
+										_tag: "Id",
+										id: account.id,
+									})).id,
+								).toBe("steering-fallback");
+								const outcome = yield* Effect.result(
+									service.sendTurn(
+										defaultInput({ commandId: "steering-input", steer: true }),
 									),
 								);
-								yield* Deferred.succeed(ended, undefined);
-								return completedTurn();
+								expect.soft(outcome).toMatchObject({
+									_tag: "Failure",
+									failure: {
+										_tag: "ProviderInstanceFailure",
+										message: expect.stringContaining(account.id),
+									},
+								});
+								expect
+									.soft(
+										dispatch.mock.calls.filter(
+											([command]) => command.type === "send_turn",
+										),
+									)
+									.toHaveLength(1);
+								yield* Deferred.succeed(release, undefined);
+								yield* Deferred.await(ended);
+								return;
 							}
-							yield* Deferred.succeed(steering, input);
-							return completedTurn({ status: "joined" });
+							yield* accountDirectory.apply({
+								_tag: "Update",
+								id: account.id,
+								updates: { configDir: account.folder.path, env: account.env },
+							});
+							if (mode === "rebound" || mode === "other-driver") {
+								engine.bindSession("session-1", "steering-fallback");
+								yield* sql`UPDATE sessions SET provider = 'steering-fallback' WHERE id = 'session-1'`;
+							}
+							yield* service.sendTurn(
+								defaultInput({ commandId: "steering-input", steer: true }),
+							);
+							const command = dispatch.mock.calls
+								.map(([command]) => command)
+								.find(
+									(command) =>
+										command.type === "send_turn" &&
+										command.commandId === "steering-input",
+								);
+							if (!command || command.type !== "send_turn")
+								throw new Error("Missing steering dispatch");
+							const delivered = yield* Deferred.await(steering);
+							const observed = {
+								runningStatus,
+								dispatchAccount: command.input.account,
+								account: delivered.account,
+								workspaceRoot: delivered.workspaceRoot,
+								extraFolders: delivered.extraFolders,
+							};
+							mkdirSync("test-results/process-harness", { recursive: true });
+							writeFileSync(
+								`test-results/process-harness/82tn-9-credentials-steering-${mode}.json`,
+								JSON.stringify(observed, null, 2),
+							);
+							expect.soft(runningStatus).toBe("busy");
+							expect
+								.soft(command.input.account)
+								.toEqual({ ...admitted, env: account.env });
+							expect
+								.soft(delivered.account)
+								.toEqual({ ...admitted, env: account.env });
+							expect.soft(delivered.workspaceRoot).toBe(first.workspaceRoot);
+							expect.soft(delivered.extraFolders).toEqual(first.extraFolders);
+							expect.soft(delivered.extraFolders).toEqual([extraFolder]);
+							yield* Deferred.succeed(release, undefined);
+							yield* Deferred.await(ended);
+							expect(
+								yield* sql`SELECT status FROM command_receipts ORDER BY command_id`,
+							).toEqual([
+								{ status: "side_effect_completed" },
+								{ status: "side_effect_completed" },
+							]);
 						}).pipe(
-							Effect.mapError(
-								(cause) =>
-									new ProviderInstanceFailure({
-										providerId: "claude",
-										operation: "sendTurn",
-										cause,
-									}),
-							),
-						),
-				});
-				let sequence = 0;
-				const engine = new OrchestrationEngine({
-					registry: new ProviderRegistry([instance]),
-					accountDirectory,
-					durableCommands: {
-						sql,
-						projectKey: "test-project",
-						write: commit.write,
-						snapshot: yield* new CommandReadModelRepository(
-							sql,
-							"test-project",
-						).bootstrap(),
-						ingestion: yield* ProviderRuntimeIngestionTag,
-						persistUserMessage: (yield* ClaudeEventPersistEffectTag)
-							.persistUserMessage,
-						now: () => 1000,
-						generateId: () => `steering-dispatch-${++sequence}`,
-					},
-				});
-				const dispatch = vi.spyOn(engine, "dispatchEffect");
-				yield* Effect.gen(function* () {
-					const service = yield* ProviderTurnServiceTag;
-					yield* service.sendTurn(defaultInput({ commandId: "running-input" }));
-					const first = yield* Deferred.await(running);
-					const runningStatus =
-						yield* (yield* ReadQueryEffectTag).getSessionStatus("session-1");
-					registered[0] = account;
-					yield* service.sendTurn(
-						defaultInput({ commandId: "steering-input", steer: true }),
-					);
-					const delivered = yield* Deferred.await(steering);
-					const command = dispatch.mock.calls
-						.map(([command]) => command)
-						.find(
-							(command) =>
-								command.type === "send_turn" &&
-								command.commandId === "steering-input",
-						);
-					if (!command || command.type !== "send_turn")
-						throw new Error("Missing steering dispatch");
-					const observed = {
-						runningStatus,
-						dispatchAccount: command.input.account,
-						account: delivered.account,
-						workspaceRoot: delivered.workspaceRoot,
-						extraFolders: delivered.extraFolders,
-					};
-					mkdirSync("test-results/process-harness", { recursive: true });
-					writeFileSync(
-						"test-results/process-harness/82tn-9-credentials-steering.json",
-						JSON.stringify(observed, null, 2),
-					);
-					expect.soft(runningStatus).toBe("busy");
-					expect
-						.soft(command.input.account)
-						.toEqual({ ...admitted, env: account.env });
-					expect
-						.soft(delivered.account)
-						.toEqual({ ...admitted, env: account.env });
-					expect.soft(delivered.workspaceRoot).toBe(first.workspaceRoot);
-					expect.soft(delivered.extraFolders).toEqual(first.extraFolders);
-					expect.soft(delivered.extraFolders).toEqual([extraFolder]);
-					yield* Deferred.succeed(release, undefined);
-					yield* Deferred.await(ended);
-					expect(
-						yield* sql`SELECT status FROM command_receipts ORDER BY command_id`,
-					).toEqual([
-						{ status: "side_effect_completed" },
-						{ status: "side_effect_completed" },
-					]);
-				}).pipe(
-					Effect.provide(
-						ProviderTurnServiceLive.pipe(
-							Layer.provide(
-								Layer.mergeAll(
-									Layer.succeed(OrchestrationEngineTag)(engine),
-									Layer.succeed(ConfigTag)(
-										makeMockConfig({
-											projectDir: MOCK_PROJECT_DIR,
-											extraFolders: [extraFolder],
-										}),
+							Effect.provide(
+								ProviderTurnServiceLive.pipe(
+									Layer.provide(
+										Layer.mergeAll(
+											Layer.succeed(OrchestrationEngineTag)(engine),
+											Layer.succeed(ConfigTag)(
+												makeMockConfig({
+													projectDir: MOCK_PROJECT_DIR,
+													extraFolders: [extraFolder],
+												}),
+											),
+										),
 									),
+									Layer.fresh,
 								),
 							),
-							Layer.fresh,
-						),
-					),
-				);
-			}).pipe(Effect.provide(liveLayer));
-		},
-	);
+						);
+					}).pipe(Effect.provide(liveLayer));
+				});
+			},
+		);
 	it.effect(
 		"pauses queued handoffs rejected before a provider reservation exists",
 		() => {

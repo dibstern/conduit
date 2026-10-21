@@ -8,6 +8,7 @@ import { resolve } from "node:path";
 import { Context, Effect, Layer, Option, Schema, type Scope } from "effect";
 import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/account.js";
+import { AccountUnroutable } from "../contracts/limit-recovery.js";
 import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
 import { SessionWorkspaceSchema } from "../contracts/session-workspace.js";
 import {
@@ -230,15 +231,10 @@ const createOrchestrationComponentsEffect = (
 				daemonConfig?.projects.find(
 					(project) => resolve(project.path) === resolve(directory),
 				);
-			resolver.register(directory, config?.shellEnv);
-			shellEnv = (projectDir) => {
-				resolver.register(projectDir, config?.shellEnv);
-				return resolver.get(projectDir);
-			};
-			prepareShellEnv = (projectDir) => {
-				resolver.register(projectDir, config?.shellEnv);
-				return resolver.waitUntilReady(projectDir);
-			};
+			resolver.register(directory, config?.shellEnv, projectId);
+			shellEnv = (projectDir) => resolver.get(projectDir, projectId);
+			prepareShellEnv = (projectDir) =>
+				resolver.waitUntilReady(projectDir, projectId);
 		}
 		const read = yield* ReadQueryEffectTag;
 		const projectRoot = options.workspaceRoot ?? process.cwd();
@@ -248,17 +244,40 @@ const createOrchestrationComponentsEffect = (
 			request: ProviderCallRequest,
 		): Effect.Effect<ProviderCall, ProviderInstanceFailure> =>
 			Effect.gen(function* () {
-				const account =
-					request.account ??
-					(yield* accountDirectory.resolve({
+				const currentAccount = yield* accountDirectory
+					.resolve({
 						_tag: "Id",
 						id:
+							request.account?.id ??
 							request.providerId ??
 							(yield* sessionBindingReadModel.getProviderForSession(
 								request.sessionId,
 							)) ??
 							"opencode",
-					}));
+					})
+					.pipe(
+						Effect.catchTag("AccountUnroutable", (cause) =>
+							request.account && !request.requireRoutableAccount
+								? Effect.succeed({ ...request.account, env: undefined })
+								: Effect.fail(cause),
+						),
+					);
+				const matches =
+					!request.account ||
+					(currentAccount.id === request.account.id &&
+						currentAccount.driver === request.account.driver);
+				if (request.account && request.requireRoutableAccount && !matches)
+					return yield* Effect.fail(
+						new AccountUnroutable({
+							ref: { _tag: "Id", id: request.account.id },
+						}),
+					);
+				const account = request.account
+					? {
+							...request.account,
+							env: matches ? currentAccount.env : undefined,
+						}
+					: currentAccount;
 				const session = request.sessionId
 					? yield* read.getSession(request.sessionId)
 					: undefined;

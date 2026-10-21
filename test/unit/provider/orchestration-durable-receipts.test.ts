@@ -16,7 +16,11 @@ import {
 	decodeProviderRuntimeEvent,
 	type ProviderRuntimeEvent,
 } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
-import { makeAccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import {
+	AccountDirectory,
+	AccountDirectoryStateLive,
+	makeAccountDirectory,
+} from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
@@ -322,9 +326,14 @@ describe("OrchestrationEngine durable receipts", () => {
 					});
 				}).pipe(Effect.provide(makeFixtureLayer())),
 		);
-	for (const driver of ["claude", "cursor"] as const)
+	for (const [driver, retry] of [
+		["claude", false],
+		["cursor", false],
+		["claude", true],
+		["cursor", true],
+	] as const)
 		it.effect(
-			`fails redelivery terminally when the admitted ${driver} account was removed`,
+			`fails ${retry ? "retry" : "redelivery"} terminally when the admitted ${driver} account was removed`,
 			() =>
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
@@ -345,19 +354,33 @@ describe("OrchestrationEngine durable receipts", () => {
 								}
 							: { driver }),
 					};
-					let registered = true;
-					const accountDirectory = makeAccountDirectory(
-						Effect.sync(() => ({
-							...accountsStateFromInstances(
-								[],
-								configuredClaudeConfigDir("/tmp/82tn9-default"),
+					const accountDirectory = yield* AccountDirectory.pipe(
+						Effect.provide(
+							AccountDirectoryStateLive(
+								accountsStateFromInstances(
+									[
+										account,
+										{
+											id: `fallback-${driver}`,
+											name: "Fallback account",
+											driver,
+											env: {
+												CURSOR_API_KEY: "synthetic-fallback-key",
+												ANTHROPIC_API_KEY: "synthetic-fallback-key",
+											},
+										},
+									],
+									configuredClaudeConfigDir("/tmp/82tn9-default"),
+									5,
+									{ defaultAccountIds: { [driver]: account.id } },
+								),
 							),
-							accounts: registered ? [account] : [],
-						})),
+						),
 					);
 					const instance = makeStubInstance(driver);
+					let now = 1000;
 					const durableCommands = {
-						...(yield* makeDurableOptions({ sql })),
+						...(yield* makeDurableOptions({ sql, now: () => now })),
 						persistUserMessage: (yield* ClaudeEventPersistEffectTag)
 							.persistUserMessage,
 					};
@@ -399,10 +422,37 @@ describe("OrchestrationEngine durable receipts", () => {
 					expect(
 						yield* sql`SELECT status FROM provider_command_outbox`,
 					).toEqual([{ status: "pending" }]);
-					registered = false;
+					if (retry) {
+						instance.sendTurnEffect.mockImplementationOnce(() =>
+							Effect.fail(
+								new ProviderInstanceFailure({
+									providerId: driver,
+									operation: "sendTurn",
+									cause: {
+										retryable: true,
+										message: "Synthetic pre-intake failure",
+									},
+								}),
+							),
+						);
+						yield* engine.drainSideEffects();
+						expect(
+							yield* sql`SELECT status FROM provider_command_outbox`,
+						).toEqual([{ status: "retryable_failed" }]);
+					}
+					const removed = yield* accountDirectory.apply({
+						_tag: "Remove",
+						id: account.id,
+					});
+					expect(removed.deleted).toContainEqual({ id: account.id, driver });
+					expect(
+						(yield* accountDirectory.resolve({ _tag: "Id", id: account.id }))
+							.id,
+					).toBe(`fallback-${driver}`);
 					const replay = new OrchestrationEngine(options);
+					now += 3_600_000;
 					yield* replay.drainSideEffects();
-					yield* TestClock.adjust("1 hour");
+					now += 3_600_000;
 					yield* replay.drainSideEffects();
 					const observed = {
 						launches: instance.sendTurnEffect.mock.calls.length,
@@ -422,23 +472,331 @@ describe("OrchestrationEngine durable receipts", () => {
 							yield* sql`SELECT event_id FROM events WHERE type = 'run.started'`,
 					};
 					reviewEvidence[`removedAccount:${driver}`] = observed;
-					expect.soft(observed.launches).toBe(0);
-					expect
-						.soft(observed.outbox)
-						.toEqual([
-							{ status: "failed", attempt_count: 1, next_attempt_at: null },
-						]);
+					expect.soft(observed.launches).toBe(retry ? 1 : 0);
+					expect.soft(observed.outbox).toEqual([
+						{
+							status: "failed",
+							attempt_count: retry ? 2 : 1,
+							next_attempt_at: null,
+						},
+					]);
 					expect
 						.soft(observed.receipts)
 						.toEqual([{ status: "side_effect_failed" }]);
-					expect.soft(observed.runs).toEqual([{ status: "error" }]);
+					expect
+						.soft(observed.runs)
+						.toEqual(
+							retry
+								? [{ status: "error" }, { status: "error" }]
+								: [{ status: "error" }],
+						);
 					expect.soft(observed.turns).toEqual([{ state: "error" }]);
 					expect.soft(observed.inbox).toEqual([{ state: "removed" }]);
 					expect.soft(observed.sessionStatus).not.toBe("busy");
 					expect
 						.soft(observed.errors)
-						.toEqual([{ text: expect.stringContaining(account.id) }]);
+						.toContainEqual({ text: expect.stringContaining(account.id) });
 					expect.soft(observed.acceptedRuns).toEqual([]);
+				}).pipe(Effect.provide(makeFixtureLayer())),
+		);
+	for (const targetProviderId of [undefined, "account-b"] as const)
+		it.effect(
+			`ends ${targetProviderId ? "explicitly targeted B" : "running A"} after rebinding from Claude A to Cursor B`,
+			() =>
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const accountA: Account = {
+						id: AccountIdSchema.make("account-a"),
+						name: "A",
+						driver: "claude",
+						usageEligible: false,
+						folder: configuredClaudeConfigDir("/tmp/82tn9-account-a"),
+					};
+					const accountB: Account = {
+						id: AccountIdSchema.make("account-b"),
+						name: "B",
+						driver: "cursor",
+						usageEligible: false,
+					};
+					const claude = makeStubInstance("claude");
+					const cursor = makeStubInstance("cursor");
+					const engine = new OrchestrationEngine({
+						registry: new ProviderRegistry([claude, cursor]),
+						durableCommands: yield* makeDurableOptions({ sql }),
+						resolveCallContext: (request) =>
+							Effect.succeed({
+								projectId: "test-project",
+								sessionId: request.sessionId,
+								account: request.account ?? accountB,
+								workspaceRoot: request.workspaceRoot ?? "/pending-b",
+								extraFolders: request.extraFolders ?? [],
+								shellEnv: {},
+							}),
+					});
+					engine.bindSession("session-1", accountA.id);
+					for (const [sequence, runId, status, account, workspaceRoot] of [
+						[1, "run-a", "running", accountA, "/running-a"],
+						[2, "run-b", "pending", accountB, "/pending-b"],
+					] as const) {
+						yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES (${runId}, 'session-1', ${status}, 1000)`;
+						const payload = JSON.stringify({
+							projectId: "test-project",
+							sessionId: "session-1",
+							account,
+							workspaceRoot,
+							extraFolders: [],
+						});
+						yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, attempt_count, requested_at, updated_at)
+						VALUES (${sequence}, ${`send-${runId}`}, 'test-project', 'session-1', ${account.driver}, 'send_turn', ${payload}, ${runId}, ${status}, 0, 1000, 1000)`;
+					}
+					engine.bindSession("session-1", accountB.id);
+					yield* engine.dispatchEffect({
+						type: "end_session",
+						commandId: "end-rebound-session",
+						sessionId: "session-1",
+						...(targetProviderId ? { targetProviderId } : {}),
+					});
+					const selected = targetProviderId ? cursor : claude;
+					const other = targetProviderId ? claude : cursor;
+					expect(selected.endSessionEffect).toHaveBeenCalledExactlyOnceWith(
+						"session-1",
+						{
+							projectId: "test-project",
+							sessionId: "session-1",
+							account: {
+								...(targetProviderId ? accountB : accountA),
+								env: undefined,
+							},
+							workspaceRoot: targetProviderId ? "/pending-b" : "/running-a",
+							extraFolders: [],
+							shellEnv: {},
+						},
+					);
+					expect(other.endSessionEffect).not.toHaveBeenCalled();
+				}).pipe(Effect.provide(makeFixtureLayer())),
+		);
+	for (const fallback of [false, true])
+		it.effect(
+			`reaches controls after their admitted account is tombstoned (fallback=${fallback})`,
+			() =>
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const directory = yield* AccountDirectory.pipe(
+						Effect.provide(
+							AccountDirectoryStateLive(
+								accountsStateFromInstances(
+									[
+										{
+											id: "control-account",
+											name: "Control account",
+											driver: "cursor",
+											env: { CURSOR_API_KEY: "synthetic-admitted-key" },
+										},
+										...(fallback
+											? [
+													{
+														id: "control-fallback",
+														name: "Fallback",
+														driver: "cursor" as const,
+														env: { CURSOR_API_KEY: "synthetic-fallback-key" },
+													},
+												]
+											: []),
+									],
+									configuredClaudeConfigDir("/tmp/82tn9-default"),
+									5,
+									{ defaultAccountIds: { cursor: "control-account" } },
+								),
+							),
+						),
+					);
+					const account = yield* directory.resolve({
+						_tag: "Id",
+						id: "control-account",
+					});
+					const instance = makeStubInstance("cursor");
+					const engine = new OrchestrationEngine({
+						registry: new ProviderRegistry([instance]),
+						accountDirectory: directory,
+						durableCommands: yield* makeDurableOptions({ sql }),
+						resolveCallContext: (request) =>
+							Effect.gen(function* () {
+								return {
+									projectId: "test-project",
+									sessionId: request.sessionId,
+									account:
+										request.account ??
+										(yield* directory.resolve({
+											_tag: "Id",
+											id: request.providerId ?? account.id,
+										})),
+									workspaceRoot: request.workspaceRoot ?? "/tmp/82tn9-project",
+									extraFolders: request.extraFolders ?? [],
+									shellEnv: {},
+								};
+							}).pipe(
+								Effect.mapError(
+									(cause) =>
+										new ProviderInstanceFailure({
+											providerId: "cursor",
+											operation: "resolveCallContext",
+											cause,
+										}),
+								),
+							),
+					});
+					engine.bindSession("session-1", account.id);
+					yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('control-run', 'session-1', 'running', 1000)`;
+					const payload = JSON.stringify({
+						projectId: "test-project",
+						sessionId: "session-1",
+						account,
+						workspaceRoot: "/tmp/82tn9-project",
+						extraFolders: ["/tmp/82tn9-extra"],
+					});
+					yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, attempt_count, requested_at, updated_at)
+				VALUES (1, 'control-send', 'test-project', 'session-1', 'cursor', 'send_turn', ${payload}, 'control-run', 'running', 0, 1000, 1000)`;
+					yield* (yield* makeCommitAndSignal)([
+						canonicalEvent(
+							"permission.asked",
+							"session-1",
+							{
+								id: "control-permission",
+								sessionId: "session-1",
+								toolName: "Bash",
+								input: {},
+							},
+							{ metadata: { runId: "control-run" } },
+						),
+						canonicalEvent(
+							"question.asked",
+							"session-1",
+							{ id: "control-question", sessionId: "session-1", questions: [] },
+							{ metadata: { runId: "control-run" } },
+						),
+					]);
+					const removed = yield* directory.apply({
+						_tag: "Remove",
+						id: account.id,
+					});
+					expect(removed.deleted).toContainEqual({
+						id: account.id,
+						driver: account.driver,
+					});
+					for (const command of [
+						{
+							type: "interrupt_turn",
+							commandId: "control-stop",
+							sessionId: "session-1",
+						},
+						{
+							type: "resolve_permission",
+							commandId: "control-allow",
+							sessionId: "session-1",
+							requestId: "control-permission",
+							decision: "once",
+						},
+						{
+							type: "resolve_question",
+							commandId: "control-answer",
+							sessionId: "session-1",
+							requestId: "control-question",
+							answers: {},
+						},
+						{
+							type: "end_session",
+							commandId: "control-end",
+							sessionId: "session-1",
+						},
+						{
+							type: "end_session",
+							commandId: "control-end-targeted",
+							sessionId: "session-1",
+							targetProviderId: account.id,
+						},
+						{
+							type: "end_session",
+							commandId: "control-end-targeted-with-account",
+							sessionId: "session-1",
+							targetProviderId: account.id,
+							account: fallback
+								? yield* directory.resolve({ _tag: "Id", id: account.id })
+								: account,
+						},
+					] as const) {
+						const outcome = yield* Effect.result(
+							engine.dispatchEffect(command),
+						);
+						expect.soft(outcome).toMatchObject({
+							_tag: "Success",
+						});
+					}
+					const call = {
+						projectId: "test-project",
+						sessionId: "session-1",
+						account: { ...account, env: undefined },
+						workspaceRoot: "/tmp/82tn9-project",
+						extraFolders: ["/tmp/82tn9-extra"],
+						shellEnv: {},
+					};
+					expect
+						.soft(instance.interruptTurnEffect)
+						.toHaveBeenCalledExactlyOnceWith("session-1", undefined, call);
+					expect
+						.soft(instance.resolvePermissionEffect)
+						.toHaveBeenCalledExactlyOnceWith(
+							"session-1",
+							"control-permission",
+							"once",
+							undefined,
+							call,
+						);
+					expect
+						.soft(instance.resolveQuestionEffect)
+						.toHaveBeenCalledExactlyOnceWith(
+							"session-1",
+							"control-question",
+							{},
+							call,
+						);
+					yield* sql`UPDATE provider_runs SET status = 'completed' WHERE id = 'control-run'`;
+					for (const targetProviderId of [undefined, account.id]) {
+						const outcome = yield* Effect.result(
+							engine.dispatchEffect({
+								type: "end_session",
+								commandId: `control-end-settled-${targetProviderId}`,
+								sessionId: "session-1",
+								...(targetProviderId ? { targetProviderId } : {}),
+							}),
+						);
+						expect.soft(outcome).toMatchObject({ _tag: "Success" });
+					}
+					expect.soft(instance.endSessionEffect).toHaveBeenCalledTimes(5);
+					for (let index = 1; index <= 5; index++)
+						expect
+							.soft(instance.endSessionEffect)
+							.toHaveBeenNthCalledWith(index, "session-1", call);
+					if (fallback) {
+						engine.bindSession("session-1", "control-fallback");
+						const nextAccount = yield* directory.resolve({
+							_tag: "Id",
+							id: "control-fallback",
+						});
+						yield* engine.dispatchEffect({
+							type: "end_session",
+							commandId: "control-end-next-account",
+							sessionId: "session-1",
+						});
+						expect(instance.endSessionEffect).toHaveBeenLastCalledWith(
+							"session-1",
+							{
+								...call,
+								account: nextAccount,
+								extraFolders: [],
+							},
+						);
+					}
+					reviewEvidence[`tombstonedControls:fallback=${fallback}`] = call;
 				}).pipe(Effect.provide(makeFixtureLayer())),
 		);
 	it.effect(
