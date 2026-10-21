@@ -38,7 +38,7 @@ Examples:
 
 Scenario Outline: Dragging a project saves the order to the daemon
   Given the conduit app is served with the connected mockup
-  And the viewport is a desktop
+  And the viewport is a <viewport>
   And the sidebar has the project tree fixture
   When I select All projects in the session list
   And I group the sessions by project
@@ -46,13 +46,15 @@ Scenario Outline: Dragging a project saves the order to the daemon
   And I drag the <moved> project above the <target> project
   Then the daemon saves the project order <order>
   And the project tree lists <order>
+  And the Atlas project title lines up with its session titles
   And the session-list region visually matches <baseline> at <threshold> percent
   When I reload the project tree
   Then the project tree lists <order>
 
 Examples:
-  | moved  | target | order                       | baseline                   | threshold |
-  | Beacon | Delta  | Beacon, Delta, Comet, Atlas | project-tree-manual-desktop | 98        |
+  | viewport | moved  | target | order                       | baseline                    | threshold |
+  | desktop  | Beacon | Delta  | Beacon, Delta, Comet, Atlas | project-tree-manual-desktop | 98        |
+  | phone    | Beacon | Delta  | Beacon, Delta, Comet, Atlas | project-tree-manual-phone   | 98        |
 
 Scenario Outline: A collapsed project stays collapsed on this device after a reload
   Given the conduit app is served with the connected mockup
