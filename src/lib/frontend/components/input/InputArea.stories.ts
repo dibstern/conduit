@@ -442,6 +442,7 @@ export const OverflowingInsert: Story = {
 		const rows = () => mirror.getBoundingClientRect().height;
 		const flush = () => new Promise(requestAnimationFrame);
 		await flush();
+		await document.fonts.ready;
 		const height = rows();
 		while (rows() === height) {
 			textarea.setSelectionRange(lineStart, lineStart);
