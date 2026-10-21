@@ -92,6 +92,7 @@
 	{@const subject = part.name === "Skill" ? skillName(part) : toolSubject(part)}
 	{@const tag = toolTags(part)[0]}
 	{@const isSkill = part.name === "Skill"}
+	{@const hasLiveOutput = typeof part.metadata?.['output'] === "string"}
 	{@const cursorDetail = typeof part.metadata?.['cursorToolType'] === "string" && (part.metadata['fileChange'] || part.metadata['plan'] || part.metadata['computerUse'] || part.metadata['media'] || part.metadata['output'] !== undefined || ensureCanonical(part.name, part.input).tool === "Unknown")}
 	<!-- A compact row is still this tool's rendering, so it answers to the same
 	     .tool-item / data-tool-status hooks the expanded card used to. -->
@@ -186,7 +187,7 @@
 		{/if}
 		{#if !launch && expanded && isSkill}
 			<div class="ml-[22px] mr-[4px] my-[4px]"><SkillDoc name={subject} /></div>
-		{:else if !launch && expanded && (part.result || command || cursorDetail)}
+		{:else if !launch && expanded && (part.result || command || hasLiveOutput || cursorDetail)}
 			<ToolFullDetail message={part} class="ml-[22px] mr-[4px] mb-[4px]">
 				{#snippet children(tool)}
 					{@const fullCommand = toolCommand(tool)}

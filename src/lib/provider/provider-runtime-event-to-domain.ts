@@ -778,6 +778,17 @@ function eventMetadata(event: ProviderRuntimeEvent): EventMetadata {
 			: undefined;
 	return {
 		...runtimeMetadata(event.metadata),
+		...(event.providerId === "codex"
+			? {
+					providerRefs: Object.fromEntries(
+						Object.entries(event.providerRefs).filter(
+							(entry): entry is [string, string] =>
+								typeof entry[1] === "string",
+						),
+					),
+					...(event.turnId ? { correlationId: event.turnId } : {}),
+				}
+			: {}),
 		// Only these two kinds have readers: projectors branch on opencode.rest,
 		// and subagent persistence and its verify script on the transcript kind.
 		...(event.rawSource.kind === "opencode.rest" ||
@@ -832,6 +843,9 @@ function normalizeToolInput(
 		return {
 			tool: "Bash",
 			command: input["command"],
+			...(typeof input["workingDirectory"] === "string"
+				? { workingDirectory: input["workingDirectory"] }
+				: {}),
 			...(typeof input["description"] === "string"
 				? { description: input["description"] }
 				: {}),
@@ -863,6 +877,18 @@ function normalizeToolInput(
 function canonicalToolInput(
 	input: Record<string, unknown>,
 ): CanonicalToolInput | undefined {
+	if (
+		input["tool"] === "Patch" &&
+		typeof input["patch"] === "string" &&
+		Array.isArray(input["filePaths"]) &&
+		input["filePaths"].every((path): path is string => typeof path === "string")
+	) {
+		return {
+			tool: "Patch",
+			patch: input["patch"],
+			filePaths: input["filePaths"],
+		};
+	}
 	if (input["tool"] === "Read" && typeof input["filePath"] === "string") {
 		return {
 			tool: "Read",
@@ -952,7 +978,11 @@ function canonicalToolInput(
 		return { tool: "Skill", name: input["name"] };
 	}
 	if (input["tool"] === "AskUserQuestion") {
-		return { tool: "AskUserQuestion", questions: input["questions"] };
+		return {
+			tool: "AskUserQuestion",
+			questions: input["questions"],
+			...(input["delivery"] === "async" ? { delivery: "async" as const } : {}),
+		};
 	}
 	if (
 		input["tool"] === "Unknown" &&

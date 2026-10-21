@@ -53,7 +53,7 @@ export function failRunnerTurn(
 		terminal: boolean;
 	},
 	failure: SessionFailure,
-	driverKind = "claude",
+	driverKind: string,
 ) {
 	return Effect.gen(function* () {
 		if (process.env["NODE_ENV"] === "test")

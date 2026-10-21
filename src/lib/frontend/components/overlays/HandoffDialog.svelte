@@ -1,5 +1,5 @@
 <!--
-  HandoffDialog — what a switch to another Claude account carries over, from
+  HandoffDialog — what a switch to another account carries over, from
   the same budget the handoff itself uses, so the message count is the real one.
 
   With `confirm` it is the step before a manual switch: a swap card from the
@@ -10,7 +10,7 @@
 <script lang="ts">
 	import SheetChrome from "../ui/SheetChrome.svelte";
 	import type { HandoffSummary, UsageReading } from "../../../contracts/limit-recovery.js";
-	import { getInstanceById } from "../../stores/instance.svelte.js";
+	import { getDriverTraits, getInstanceById } from "../../stores/instance.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { handoffMessagesLine, quotaReading } from "../../utils/continuation.js";
 	import AccountDot from "../ui/AccountDot.svelte";
@@ -49,10 +49,21 @@
 	const titleId = $props.id();
 	const compact = $derived(sessionViewState.compact);
 	const nameOf = (instanceId: string) => getInstanceById(instanceId)?.name ?? instanceId;
+	const nativeThread = $derived(summary?.continuationKind === "native-thread");
+	const providerName = $derived(getDriverTraits(getInstanceById(to)?.driver)?.usageHarness === "codex" ? "Codex" : "Claude");
+	const codexDigest = $derived(providerName === "Codex" && summary?.continuationKind === "transcript-digest");
 
 	// Each row is its words and an optional dim aside.
 	const rows = $derived.by((): { carries: [string, string?][]; drops: [string, string?][] } => {
 		if (summary === null) return { carries: [], drops: [] };
+		if (nativeThread) return {
+			carries: [["Same Codex thread and conversation history"], ["Model, mode and session settings"]],
+			drops: [],
+		};
+		if (codexDigest) return {
+			carries: [["A condensed copy of the conversation so far"], ["Model, mode and session settings"]],
+			drops: [],
+		};
 		const messages = handoffMessagesLine(summary, compact);
 		return compact
 			? {
@@ -65,7 +76,7 @@
 						["Command output and errors"],
 						["Files touched, plans and the working directory"],
 						["Model, mode and session settings"],
-						["Older or oversized messages", "Claude can read them on request"],
+						["Older or oversized messages", `${providerName} can read them on request`],
 					],
 					drops: [
 						["Thinking / reasoning blocks"],
@@ -92,7 +103,7 @@
 	<div data-testid={testid} class="min-w-0 flex-1">
 		<h3 class={compact ? "sr-only" : "mb-[4px] text-[10px] font-semibold uppercase tracking-[0.06em] text-text-dimmer"}>{heading}</h3>
 		<ul>
-			{#each items as item, index (index)}{@render row(mark, item, index === 0 && mark === "✓" ? "handoff-message-count" : undefined)}{/each}
+			{#each items as item, index (index)}{@render row(mark, item, index === 0 && mark === "✓" && !codexDigest ? "handoff-message-count" : undefined)}{/each}
 		</ul>
 	</div>
 {/snippet}
@@ -113,8 +124,10 @@
 			{confirm ? `Continue on ${nameOf(to)}?` : "What carried over?"}
 		</h2>
 		{#if confirm}
-			{#if !compact}
-				<p>The conversation is handed to a fresh session on this account, {confirm.cutOff ? "then Claude picks up the cut-off request." : "along with your next message."}</p>
+			{#if nativeThread}
+				<p data-testid="handoff-native-resume">Codex resumes the same thread and its conversation history on this account.</p>
+			{:else if !compact}
+				<p>The conversation is handed to a fresh session on this account, {confirm.cutOff ? `then ${providerName} picks up the cut-off request.` : "along with your next message."}</p>
 			{/if}
 			<Surface variant="quiet" radius="none" data-testid="handoff-swap" class="my-[10px] flex items-center gap-[10px] rounded-[10px] px-[10px] py-[8px] {compact ? 'flex-wrap' : ''}">
 				<AccountDot instanceId={confirm.from} />
@@ -128,15 +141,19 @@
 			</Surface>
 		{:else}
 			<p>
-				The conversation was handed to a fresh session on <b class="font-semibold text-text">{nameOf(to)}</b>{summary === null ? ". Nothing has gone across yet: the handoff counts once Claude finishes a reply there." : "."}
+				{#if nativeThread}The conversation continued on <b class="font-semibold text-text">{nameOf(to)}</b> in the same Codex thread, with its full history.
+				{:else if codexDigest}<b class="font-semibold text-text">{nameOf(to)}</b> couldn't open the original Codex thread, so Conduit started a new one with a condensed copy of the conversation so far.
+				{:else if providerName === "Codex" && summary === null}The conversation continued on <b class="font-semibold text-text">{nameOf(to)}</b>.
+				{:else}The conversation was handed to a fresh session on <b class="font-semibold text-text">{nameOf(to)}</b>{summary === null ? `. Nothing has gone across yet: the handoff counts once ${providerName} finishes a reply there.` : "."}{/if}
 			</p>
 		{/if}
 		{#if summary !== null}
 			<div class="mt-[12px] mb-[4px] flex {compact ? 'flex-col' : 'gap-[14px]'}">
 				{@render column("Carries over", "✓", rows.carries, "handoff-carries")}
-				{@render column("Doesn't carry over", "✕", rows.drops, "handoff-drops")}
+				{#if rows.drops.length > 0}{@render column("Doesn't carry over", "✕", rows.drops, "handoff-drops")}{/if}
 			</div>
 		{/if}
+		{#if nativeThread && confirm}<p data-testid="handoff-native-fallback" class="mt-2 text-text-muted">If {nameOf(to)} can't open this thread, Conduit starts a new one with a condensed copy of the conversation so far.</p>{/if}
 		<div class="mt-[12px] flex gap-[6px] {compact ? '' : 'justify-end'}">
 			{#if confirm}
 				<Button variant="ghost" size="content" data-testid="handoff-cancel" class={buttonClass} onclick={onclose}>Cancel</Button>

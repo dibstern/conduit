@@ -42,6 +42,32 @@ export const ProjectedLive: Story = {
 		duration: 250000,
 	},
 };
+export const RunningCodexBash: Story = {
+	args: {
+		part: {
+			type: "tool",
+			uuid: "codex-command",
+			id: "codex-command",
+			name: "Bash",
+			status: "running",
+			input: { tool: "Bash", command: "printf 'first line\\nsecond line\\n'" },
+			metadata: { output: "first line\nsecond line\n" },
+		},
+		live: true,
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const row = canvas.getByRole("button");
+		await userEvent.click(row);
+		await expect(row).toHaveAttribute("aria-expanded", "true");
+		await expect(canvasElement.querySelector(".tool-result")).toHaveTextContent(
+			"printf",
+		);
+		await expect(canvasElement.querySelector(".tool-result")).toHaveTextContent(
+			/first line\s+second line/,
+		);
+	},
+};
 export const Message: Story = {
 	args: { part: mockAssistantSimple, duration: 12000 },
 };

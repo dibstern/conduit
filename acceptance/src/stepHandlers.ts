@@ -3,6 +3,7 @@ import type { AcceptanceLifecycle, StepHandler } from "./runtime.js";
 import { askContextHandlers } from "./steps/askContext.js";
 import { backgroundTasksHandlers } from "./steps/backgroundTasks.js";
 import { claudeSettingsHandlers } from "./steps/claudeSettings.js";
+import { codexAsyncQuestionHandlers } from "./steps/codexAsyncQuestion.js";
 import { composerHandlers } from "./steps/composer.js";
 import { composerAccountsHandlers } from "./steps/composerAccounts.js";
 import { composerContextWarningHandlers } from "./steps/composerContextWarning.js";
@@ -103,6 +104,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...composerSendAtResetHandlers,
 	...cursorModelParametersHandlers,
 	...cursorQuestionHandlers,
+	...codexAsyncQuestionHandlers,
 	...cursorSkillsHandlers,
 	...cursorSteerHandlers,
 	...cursorTurnHandlers,

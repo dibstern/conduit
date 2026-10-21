@@ -55,6 +55,7 @@ export interface ClaudeEventPersistEffect {
 		sessionId: string,
 		handoff: SessionHandoffDeliveredPayload,
 		commandId: string,
+		provider?: string,
 	) => Effect.Effect<void, ClaudeEventPersistFailure>;
 
 	readonly persistEvent: (
@@ -395,7 +396,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 			.pipe(Effect.mapError(mapPersistError("persistEvent")));
 
 	const persistHandoffDelivered: ClaudeEventPersistEffect["persistHandoffDelivered"] =
-		(sessionId, handoff, commandId) =>
+		(sessionId, handoff, commandId, provider = "claude") =>
 			Effect.gen(function* () {
 				yield* requireSession(sessionId, "persistEvent", "existing-session");
 				const event = canonicalEvent(
@@ -403,9 +404,9 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 					sessionId,
 					handoff,
 					{
-						provider: "claude",
+						provider,
 						eventId: Schema.decodeSync(EventId)(
-							`evt_claude_handoff_delivered_${commandId}`,
+							`evt_${provider}_handoff_delivered_${commandId}`,
 						),
 					},
 				);

@@ -316,6 +316,22 @@ export class RunnerSinkBindings {
 			? sink.runnerSinkId
 			: undefined;
 	}
+	withdrawInteraction(
+		sink: EventSink,
+		requestId: string,
+		kind: "permission" | "question",
+	): Effect.Effect<void, SessionFailure> {
+		const sinkId = this.sinkId(sink);
+		const binding = sinkId ? this.sinkBindings.get(sinkId) : undefined;
+		return binding && sinkId
+			? this.emitForSession(binding.sessionId, {
+					type: "cancel-interaction",
+					sinkId,
+					requestId,
+					kind,
+				}).pipe(Effect.asVoid)
+			: Effect.void;
+	}
 	releaseSinkEffect(sink: EventSink | undefined): Effect.Effect<void> {
 		return Effect.gen({ self: this }, function* () {
 			if (

@@ -173,6 +173,7 @@ export function runnerHelloFailure(
 			"runner hello",
 			`Runner protocol mismatch: ${peer} speaks version ${hello.protocolVersion}, expected ${RUNNER_PROTOCOL_VERSION} (peer build ${hello.buildId}, local build ${BUILD_ID})`,
 		);
+	// Runner builds predating driverKind were all Claude.
 	if (
 		expectedDriverKind !== undefined &&
 		(hello.driverKind ?? "claude") !== expectedDriverKind

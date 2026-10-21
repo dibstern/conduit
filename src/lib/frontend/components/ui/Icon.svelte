@@ -114,6 +114,7 @@
   import ClaudeMark from './marks/ClaudeMark.svelte';
   import OpenCodeMark from './marks/OpenCodeMark.svelte';
   import CursorMark from './marks/CursorMark.svelte';
+  import CodexMark from './marks/CodexMark.svelte';
 
   // Map of kebab-case icon name to Svelte component.
   // Keys match the names used in data-lucide="..." attributes in the vanilla HTML.
@@ -241,6 +242,7 @@
     'claude': ClaudeMark,
     'opencode': OpenCodeMark,
     'cursor': CursorMark,
+    'codex': CodexMark,
   };
 
   let {

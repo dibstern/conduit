@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect } from "storybook/test";
 import type { PermissionId, PermissionRequest } from "../../types.js";
 import PermissionCard from "./PermissionCard.svelte";
 
@@ -50,6 +51,22 @@ export const WithToolInput: Story = {
 
 export const EditFileInput: Story = {
 	args: { request: mockPermissionEditFile },
+};
+
+export const MultipleFiles: Story = {
+	args: {
+		request: {
+			...mockPermissionEditFile,
+			toolInput: {
+				file_path: "/src/lib/auth.ts",
+				filePaths: ["/src/lib/auth.ts", "/src/lib/session.ts"],
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		await expect(canvasElement).toHaveTextContent("/src/lib/auth.ts");
+		await expect(canvasElement).toHaveTextContent("/src/lib/session.ts");
+	},
 };
 
 export const Hover: Story = {

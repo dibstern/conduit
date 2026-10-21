@@ -36,6 +36,7 @@ import {
 	ClaudeDriver,
 	type ClaudeProviderInstanceDeps,
 } from "./claude/index.js";
+import { makeCodexProviderRuntime } from "./codex/codex-provider-runtime.js";
 import { makeCursorProviderRuntime } from "./cursor/cursor-provider-runtime.js";
 import {
 	OpenCodeDriver,
@@ -276,6 +277,16 @@ const createOrchestrationComponentsEffect = (
 		registry.registerInstance(claudeInstance);
 		registry.registerInstance(
 			yield* makeCursorProviderRuntime({
+				workspaceRoot: options.workspaceRoot ?? process.cwd(),
+				accounts: accountDirectory.snapshot,
+				...(options.configDir !== undefined
+					? { daemonConfigDir: options.configDir }
+					: {}),
+				persistUserMessage: persist.persistUserMessage,
+			}),
+		);
+		registry.registerInstance(
+			yield* makeCodexProviderRuntime({
 				workspaceRoot: options.workspaceRoot ?? process.cwd(),
 				accounts: accountDirectory.snapshot,
 				...(options.configDir !== undefined

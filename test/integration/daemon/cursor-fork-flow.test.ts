@@ -32,11 +32,11 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { ProviderStateEffectTag } from "../../../src/lib/persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { renderCursorForkDigest } from "../../../src/lib/provider/cursor/cursor-fork-digest.js";
 import { makeCursorRunnerDriver } from "../../../src/lib/provider/cursor/cursor-runner-driver.js";
 import { makeCursorSessionRunner } from "../../../src/lib/provider/cursor/cursor-runner-payload.js";
 import { teeCursorSdkPort } from "../../../src/lib/provider/cursor/sdk-trace.js";
 import { createTraceCursorSdkPort } from "../../../src/lib/provider/cursor/sdk-trace-player.js";
+import { renderForkDigest } from "../../../src/lib/provider/fork-digest.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,
@@ -157,7 +157,7 @@ it("creates Cursor forks and Side Threads locally and seeds their current inheri
 					});
 					// Change only the copied rows between creation and the first turn.
 					yield* sql`UPDATE message_parts SET text = 'Fork-local context at first turn' WHERE id = ${`question:text_${side.id}`}`;
-					const expectedDigest = renderCursorForkDigest(
+					const expectedDigest = renderForkDigest(
 						yield* read.getSessionMessagesWithParts(side.id),
 					);
 					expect(expectedDigest).toContain("Fork-local context at first turn");
@@ -225,7 +225,7 @@ it("creates Cursor forks and Side Threads locally and seeds their current inheri
 						expectedDigest,
 						secondTurnDigest: null,
 					});
-					const forkDigest = renderCursorForkDigest(
+					const forkDigest = renderForkDigest(
 						yield* read.getSessionMessagesWithParts(fork.id),
 					);
 					const forkFirst = yield* send(fork.id, "Fork request");

@@ -49,11 +49,13 @@ import type { TurnSettings } from "../../../provider/turn-settings.js";
 import { turnEndedAlert } from "../../../relay/turn-ended-alert.js";
 import type { makeSessionCompactions } from "../../../session/session-compactions.js";
 import type { makeSessionRetries } from "../../../session/session-retries.js";
+import { QuestionApprovalSchema } from "../../../shared-types.js";
 import type { RelayMessage } from "../../../types.js";
 import { isRecord } from "../../../utils.js";
 import type { UsageService } from "../../daemon/Services/usage.js";
 import { ContinuationLive, ContinuationTag } from "./continuation.js";
 import { InputDraftsLive, InputDraftsTag } from "./input-drafts.js";
+import type { PendingInteractionService } from "./pending-interaction-service.js";
 import { announceBackgroundWork } from "./session-attention.js";
 import { sessionPickEvents } from "./session-pick.js";
 
@@ -118,6 +120,10 @@ export interface ProviderRuntimeRelayPublisher {
 }
 
 export interface ProviderRuntimeIngestionLiveOptions {
+	readonly pendingInteractions?: Pick<
+		PendingInteractionService,
+		"recordQuestionRequest"
+	>;
 	/** Resolve before any permit; the returned writer joins the ingestion receipt commit. */
 	readonly workspaceChanged?: (
 		event: Extract<ProviderRuntimeEvent, { type: "workspace.changed" }>,
@@ -362,6 +368,48 @@ export const makeProviderRuntimeIngestionLive = (
 							});
 							const afterCommit = Effect.gen(function* () {
 								if (appended) {
+									if (options.pendingInteractions) {
+										for (const event of domainEvents) {
+											if (
+												event.type !== "question.asked" ||
+												event.data.delivery !== "async"
+											)
+												continue;
+											const questions = Schema.decodeUnknownOption(
+												QuestionApprovalSchema.fields.questions,
+											)(event.data.questions);
+											if (questions._tag === "None") {
+												yield* Effect.logWarning(
+													`Invalid async question ${event.data.id}`,
+												);
+												continue;
+											}
+											yield* options.pendingInteractions.recordQuestionRequest({
+												requestId: event.data.id,
+												sessionId: event.sessionId ?? event.data.sessionId,
+												delivery: "async",
+												questions: questions.value,
+												...(event.data.providerProcessId
+													? { providerProcessId: event.data.providerProcessId }
+													: {}),
+												...(event.data.providerRequestId
+													? { providerRequestId: event.data.providerRequestId }
+													: {}),
+												...(event.data.providerId
+													? { providerId: event.data.providerId }
+													: {}),
+												...(event.data.toolUseId
+													? { toolCallId: event.data.toolUseId }
+													: {}),
+												...(event.data.messageId
+													? { messageId: event.data.messageId }
+													: {}),
+												...(event.data.partId
+													? { partId: event.data.partId }
+													: {}),
+											});
+										}
+									}
 									for (const id of draftsToForget)
 										yield* drafts
 											.forget(id)

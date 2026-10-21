@@ -442,6 +442,8 @@ export interface AskUserQuestion {
 	options: { label: string; description?: string }[];
 	multiSelect: boolean;
 	custom?: boolean;
+	isOther?: boolean;
+	isSecret?: boolean;
 }
 
 export interface UsageInfo {
@@ -616,6 +618,8 @@ const AskUserQuestionSchema = Schema.Struct({
 	),
 	multiSelect: Schema.Boolean,
 	custom: Schema.optional(Schema.Boolean),
+	isOther: Schema.optional(Schema.Boolean),
+	isSecret: Schema.optional(Schema.Boolean),
 });
 
 const UsageInfoSchema = Schema.Struct({
@@ -691,6 +695,7 @@ export const QuestionApprovalSchema = Schema.TaggedStruct("question", {
 	questions: Schema.Array(AskUserQuestionSchema),
 	toolUseId: Schema.optional(Schema.String),
 	providerId: Schema.optional(Schema.String),
+	delivery: Schema.optional(Schema.Literal("async")),
 });
 
 export const ApprovalSchema = Schema.Union([
@@ -840,7 +845,7 @@ export interface OpenCodeInstance {
 	cursorUsageSource?: "token" | "keychain" | "can_enable" | "unsupported";
 	available?: boolean;
 	unavailableReason?: string;
-	unavailableCode?: "auth_required";
+	unavailableCode?: "auth_required" | "codex_version_unsupported";
 	id: string;
 	name: string;
 	port: number;

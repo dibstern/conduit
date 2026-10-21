@@ -203,14 +203,21 @@ export function usageDisplay(
 	const month = reading.windows.find((window) => window.kind === "month");
 	const threshold = warnAt === "off" ? Number.POSITIVE_INFINITY : warnAt;
 	const binding =
-		fiveHour &&
-		sevenDay &&
-		fiveHour.utilization >= threshold &&
-		sevenDay.utilization >= threshold
-			? sevenDay
-			: fiveHour && (!sevenDay || fiveHour.utilization >= sevenDay.utilization)
-				? fiveHour
-				: (sevenDay ?? month);
+		reading.harness === "codex"
+			? reading.windows.reduce<UsageWindow | undefined>(
+					(best, window) =>
+						!best || window.utilization > best.utilization ? window : best,
+					undefined,
+				)
+			: fiveHour &&
+					sevenDay &&
+					fiveHour.utilization >= threshold &&
+					sevenDay.utilization >= threshold
+				? sevenDay
+				: fiveHour &&
+						(!sevenDay || fiveHour.utilization >= sevenDay.utilization)
+					? fiveHour
+					: (sevenDay ?? month);
 	const used = binding?.utilization;
 	const limited =
 		reading.status === "limited" || (used !== undefined && used >= 100);

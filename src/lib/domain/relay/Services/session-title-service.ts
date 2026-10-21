@@ -1,9 +1,10 @@
-import { Context, Effect, HashSet, Layer, Match, Ref, Schema } from "effect";
+import { Context, Effect, HashSet, Layer, Ref, Schema } from "effect";
 import { SqlClient } from "effect/sql";
+import type { Account } from "../../../contracts/account.js";
+import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import {
 	AUTO_TITLE_SOURCE,
 	isPlaceholderTitle,
-	type SessionTitleModel,
 } from "../../../contracts/session-title.js";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import {
@@ -14,6 +15,7 @@ import * as Failure from "../../../effect/failure-classification.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
+import type { SessionRow } from "../../../persistence/read-model-types.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
@@ -22,6 +24,7 @@ import {
 	type ClaudeTitleQueryFactory,
 	makeClaudeTitleGenerator,
 } from "./claude-title-generator.js";
+import { makeCodexTitleGenerator } from "./codex-title-generator.js";
 import { ConfigTag, LoggerTag } from "./services.js";
 import { applySessionCommand } from "./session-command.js";
 import {
@@ -29,10 +32,6 @@ import {
 	SessionTitleGenerationFailure,
 	type TitleGenerator,
 } from "./title-generator.js";
-
-function resolveSessionTitleModel(): SessionTitleModel {
-	return { harness: "claude", model: "opus" };
-}
 
 export function sanitizeGeneratedTitle(raw: string): string | undefined {
 	const cleaned = raw
@@ -128,9 +127,12 @@ export const makeSessionTitleServiceLive = (
 			const now = options.now ?? (() => new Date());
 			const primaryFolder = config.projectDir;
 
-			const generateTitle = (sessionId: string, message: string) =>
+			const generateTitle = (
+				session: SessionRow | undefined,
+				message: string,
+				account: Account | undefined,
+			) =>
 				Effect.gen(function* () {
-					const session = yield* readQuery.getSession(sessionId);
 					const workspace =
 						session?.workspace == null
 							? null
@@ -138,24 +140,30 @@ export const makeSessionTitleServiceLive = (
 									Schema.fromJsonString(SessionWorkspaceSchema),
 								)(session.workspace);
 					const cwd = effectiveWorkingDirectory(primaryFolder, workspace);
-					const daemonConfig = yield* Effect.suspend(() =>
-						Effect.fromResult(loadDaemonConfigResult(config.configDir)),
-					).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)));
-					const generator: TitleGenerator = Match.value(
-						resolveSessionTitleModel(),
-					).pipe(
-						Match.discriminator("harness")("claude", ({ model }) =>
-							makeClaudeTitleGenerator({
-								model,
-								...resolveClaudeLaunchConfig(daemonConfig),
-								log,
-								...(options.queryFactory === undefined
-									? {}
-									: { queryFactory: options.queryFactory }),
-							}),
-						),
-						Match.exhaustive,
-					);
+					let generator: TitleGenerator;
+					if (
+						account &&
+						PROVIDER_DRIVERS[account.driver].titleGenerator === "codex-exec"
+					) {
+						generator = makeCodexTitleGenerator({
+							account,
+							configDir: config.configDir,
+							sessionModel: session?.model_id,
+							log,
+						});
+					} else {
+						const daemonConfig = yield* Effect.suspend(() =>
+							Effect.fromResult(loadDaemonConfigResult(config.configDir)),
+						).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)));
+						generator = makeClaudeTitleGenerator({
+							model: "opus",
+							...resolveClaudeLaunchConfig(daemonConfig),
+							log,
+							...(options.queryFactory === undefined
+								? {}
+								: { queryFactory: options.queryFactory }),
+						});
+					}
 					const rawTitle = yield* generator({
 						prompt: buildTitlePrompt(message),
 						cwd,
@@ -226,8 +234,12 @@ export const makeSessionTitleServiceLive = (
 				readonly message: string;
 			}) =>
 				Effect.gen(function* () {
+					const session = yield* readQuery.getSession(input.sessionId);
+					const account = (yield* accounts.snapshot).accounts.find(
+						(candidate) => candidate.id === session?.provider,
+					);
 					const titleResult = yield* Effect.result(
-						generateTitle(input.sessionId, input.message),
+						generateTitle(session, input.message, account),
 					);
 					if (titleResult._tag === "Success") {
 						yield* applyTitleIfStillDefault(
@@ -238,6 +250,15 @@ export const makeSessionTitleServiceLive = (
 					}
 
 					const reason = titleResult.failure.reason;
+					if (
+						account &&
+						PROVIDER_DRIVERS[account.driver].titleGenerator === "codex-exec"
+					) {
+						log.warn(
+							`SESSION_TITLE_GENERATION_FAILED sessionId=${input.sessionId} reason=${reason}`,
+						);
+						return;
+					}
 					const fallbackTitle = formatTitleFallback(now());
 					const applied = yield* applyTitleIfStillDefault(
 						input.sessionId,

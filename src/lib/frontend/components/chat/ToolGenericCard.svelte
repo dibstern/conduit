@@ -60,6 +60,7 @@
 	);
 
 	const bashCommand = $derived(toolCommand(message));
+	const hasLiveOutput = $derived(typeof message.metadata?.['output'] === "string");
 	const movedToBackground = $derived(message.metadata?.['movedToBackground'] === true);
 	const cursorDetail = $derived(typeof message.metadata?.['cursorToolType'] === "string" && (message.metadata['fileChange'] || message.metadata['plan'] || message.metadata['computerUse'] || message.metadata['media'] || message.metadata['output'] !== undefined || ensureCanonical(message.name, message.input).tool === "Unknown"));
 
@@ -113,7 +114,7 @@
 	</div>
 	{/if}
 
-	{#if expanded && (message.result || bashCommand || cursorDetail)}
+	{#if expanded && (message.result || bashCommand || hasLiveOutput || cursorDetail)}
 		<ToolFullDetail {message} {...loadDetails && { load: loadDetails }} class="mx-2.5 mt-1 mb-1">
 			{#snippet children(tool)}
 				{@const command = toolCommand(tool)}

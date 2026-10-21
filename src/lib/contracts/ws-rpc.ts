@@ -333,7 +333,9 @@ export const OpenCodeInstanceSchema = Schema.Struct({
 	),
 	available: Schema.optional(Schema.Boolean),
 	unavailableReason: Schema.optional(Schema.String),
-	unavailableCode: Schema.optional(Schema.Literal("auth_required")),
+	unavailableCode: Schema.optional(
+		Schema.Literals(["auth_required", "codex_version_unsupported"]),
+	),
 	capabilities: Schema.optional(
 		Schema.suspend(() => ProviderSessionCapabilitiesSchema),
 	),
@@ -1225,6 +1227,58 @@ export const CancelCursorLogin = Rpc.make("CancelCursorLogin", {
 export const LogoutCursor = Rpc.make("LogoutCursor", {
 	payload: Schema.TaggedStruct("LogoutCursor", {}),
 	success: CursorAuthStateSchema,
+	error: WsRpcError,
+});
+
+export const CodexAuthStateSchema = Schema.Struct({
+	accountId: Schema.String,
+	source: Schema.Literals(["environment", "codex-login", "none"]),
+	status: Schema.Literals(["logged-in", "logged-out", "error"]),
+	email: Schema.optional(Schema.String),
+	error: Schema.optional(Schema.String),
+	login: Schema.Struct({
+		state: Schema.Literals([
+			"idle",
+			"pending",
+			"complete",
+			"cancelled",
+			"timed-out",
+			"error",
+		]),
+		method: Schema.optional(Schema.Literals(["browser", "device-code"])),
+		url: Schema.optional(Schema.String),
+		verificationUrl: Schema.optional(Schema.String),
+		userCode: Schema.optional(Schema.String),
+		loginId: Schema.optional(Schema.String),
+		deadlineAtMs: Schema.optional(Schema.Number),
+		error: Schema.optional(Schema.String),
+	}),
+});
+export type CodexAuthState = typeof CodexAuthStateSchema.Type;
+
+export const GetCodexAuth = Rpc.make("GetCodexAuth", {
+	payload: Schema.TaggedStruct("GetCodexAuth", { accountId: NonEmptyString }),
+	success: CodexAuthStateSchema,
+	error: WsRpcError,
+});
+export const StartCodexLogin = Rpc.make("StartCodexLogin", {
+	payload: Schema.TaggedStruct("StartCodexLogin", {
+		accountId: NonEmptyString,
+		method: Schema.Literals(["browser", "device-code"]),
+	}),
+	success: CodexAuthStateSchema,
+	error: WsRpcError,
+});
+export const CancelCodexLogin = Rpc.make("CancelCodexLogin", {
+	payload: Schema.TaggedStruct("CancelCodexLogin", {
+		accountId: NonEmptyString,
+	}),
+	success: CodexAuthStateSchema,
+	error: WsRpcError,
+});
+export const LogoutCodex = Rpc.make("LogoutCodex", {
+	payload: Schema.TaggedStruct("LogoutCodex", { accountId: NonEmptyString }),
+	success: CodexAuthStateSchema,
 	error: WsRpcError,
 });
 
@@ -2668,6 +2722,8 @@ export const ForkSession = Rpc.make("ForkSession", {
 	payload: Schema.TaggedStruct("ForkSession", {
 		projectSlug: NonEmptyString,
 		originId: NonEmptyString,
+		/** Destination account; defaults to the parent's account. */
+		instanceId: Schema.optional(NonEmptyString),
 
 		messageId: Schema.optional(NonEmptyString),
 	}),
@@ -2680,6 +2736,8 @@ export const ForkSessionForSession = Rpc.make(ForkSession._tag, {
 	payload: Schema.TaggedStruct(ForkSession._tag, {
 		originId: NonEmptyString,
 		sessionId: NonEmptyString,
+		/** Destination account; defaults to the parent's account. */
+		instanceId: Schema.optional(NonEmptyString),
 		messageId: Schema.optional(NonEmptyString),
 	}),
 	success: ForkSession.successSchema,
@@ -2963,6 +3021,10 @@ const wsRpcRequests = [
 	StartCursorLogin,
 	CancelCursorLogin,
 	LogoutCursor,
+	GetCodexAuth,
+	StartCodexLogin,
+	CancelCodexLogin,
+	LogoutCodex,
 	GetInstanceStatus,
 	{
 		requests: [AttachProjectForSession, AttachProject],

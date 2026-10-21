@@ -53,6 +53,7 @@
 	let singleSelected = $state(new Map<number, string>());
 
 	const canSubmit = $derived(isValidSubmission(selections, request.questions));
+	const isAsync = $derived(request.delivery === "async");
 	const canSkip = $derived(
 		getDriverTraits(request.providerId)?.supportsQuestionSkip ?? true,
 	);
@@ -186,10 +187,14 @@
 			originId: getBrowserClientId(),
 			commandId: crypto.randomUUID(),
 			toolId: request.toolId,
-		}).catch((error) => {
-			if (resolved === "skipped") resolved = null;
-			errorMessage = failureLine(error, "Could not skip this question.");
-		});
+		})
+			.then(() => {
+				if (isAsync) removeQuestion(request.toolId);
+			})
+			.catch((error) => {
+				if (resolved === "skipped") resolved = null;
+				errorMessage = failureLine(error, isAsync ? "Could not dismiss this question." : "Could not skip this question.");
+			});
 		resolved = "skipped";
 	}
 
@@ -207,9 +212,18 @@
 	data-question-tool-id={request.toolId}
 >
 	<Surface variant="raised" radius="lg" class="question-card p-[12px]">
-		<div class="question-title text-[13px] font-semibold mb-[8px] text-text-secondary">
-			Input Required
-		</div>
+		{#if isAsync}
+			<div class="flex items-center justify-between gap-[8px] mb-[8px]">
+				<div class="question-title text-[13px] font-semibold text-text-secondary">Answer anytime</div>
+				{#if !resolved}
+					<Button variant="ghost" size="sm" icon="x" iconOnly ariaLabel="Dismiss question" touchTarget onclick={handleSkip} />
+				{/if}
+			</div>
+		{:else}
+			<div class="question-title text-[13px] font-semibold mb-[8px] text-text-secondary">
+				Input Required
+			</div>
+		{/if}
 
 		{#if synthetic && !resolved}
 			<div class="question-synthetic-warning text-[12px] text-text-muted bg-bg-surface border border-border-subtle rounded-[6px] px-[12px] py-[8px] mb-[12px] leading-[1.6]">
@@ -312,7 +326,7 @@
 					</div>
 				{/if}
 
-				{#if q.custom}
+				{#if q.custom || q.isSecret}
 					<div class="question-custom mt-[6px]">
 						{#if q.options.length > 0}
 							{@const customOptId = `${inputName}-custom-radio`}
@@ -380,6 +394,8 @@
 						{/if}
 						<TextInput
 							id={`${inputName}-custom`}
+							type={q.isSecret ? "password" : "text"}
+							autocomplete={q.isSecret ? "off" : undefined}
 							aria-label="Type your answer"
 							class="mt-[4px]"
 							placeholder="Type your answer"
@@ -421,7 +437,7 @@
 				>
 					Submit
 				</Button>
-				{#if canSkip}
+				{#if canSkip && !isAsync}
 					<Button
 						variant="secondary"
 						size="content"
@@ -450,7 +466,7 @@
 			<div class="question-resolved text-[13px] py-[8px]">
 				{#if resolved === "skipped"}
 					<span class="question-resolved-skip text-error"
-						>Skipped &#x2717;</span
+						>{isAsync ? "Dismissed" : "Skipped ✗"}</span
 					>
 				{:else}
 					<span class="question-resolved-ok text-success"

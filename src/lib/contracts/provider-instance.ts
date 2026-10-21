@@ -19,6 +19,8 @@ export const ProviderSessionCapabilitiesSchema = Schema.Struct({
 export type ProviderSessionCapabilities =
 	typeof ProviderSessionCapabilitiesSchema.Type;
 
+export const PROVIDER_USAGE_HARNESSES = ["claude", "cursor", "codex"] as const;
+
 export interface ProviderDriverTraits {
 	/** Composer provider-seam tests pin plain text and PDF delivery. */
 	readonly supportsFileAttachments: boolean;
@@ -42,11 +44,13 @@ export interface ProviderDriverTraits {
 	/** OpenCode's SDK/API and SSE lifecycle pin server-owned operations. */
 	readonly runsOpenCodeServer: boolean;
 	/** account-usage.integration.ts pins the account sampler's usage harness. */
-	readonly usageHarness: "claude" | "cursor" | undefined;
+	readonly usageHarness: (typeof PROVIDER_USAGE_HARNESSES)[number] | undefined;
 	/** permissions-processing-timeout-effect.test.ts pins service-owned approvals/questions. */
 	readonly interactionSink: "permission-asking" | "auto-approving";
 	/** orchestration-side-effect-reactor.test.ts pins native-thread preparation and replay. */
 	readonly supportsNativeResume: boolean;
+	/** codex-fork.test.ts pins a send that reverts native history before confirming the rewind. */
+	readonly revertsConversationNatively: boolean;
 	/** session-workspace-fork.test.ts and cursor-fork.test.ts pin native versus digest seeding. */
 	readonly forkStrategy: "native" | "transcript-digest";
 	/** provider-turn-service.test.ts pins cumulative tokens from stored history metadata. */
@@ -75,9 +79,15 @@ export interface ProviderDriverTraits {
 	readonly steering: "native" | "queue";
 	/** provider-instance.test.ts pins false until restart-safe prompt replies are captured. */
 	readonly promptsSurviveRestart: boolean;
-	/** cursor-subagents.test.ts pins child transcripts that cannot be resumed. */
+	/** Child transcripts reject direct user input when the provider owns their lifecycle. */
 	readonly readOnlySubagents: boolean;
+	/** Native follow-up turns reuse their original child task card. */
+	readonly reusesSubagentCards: boolean;
+	/** codex-title.test.ts pins account-local title generation without MCP startup. */
+	readonly titleGenerator: "claude" | "codex-exec";
 }
+
+export type UsageHarness = NonNullable<ProviderDriverTraits["usageHarness"]>;
 
 /** Driver contracts pinned by provider captures, independent of implementations. */
 export const PROVIDER_DRIVERS = {
@@ -99,6 +109,7 @@ export const PROVIDER_DRIVERS = {
 		usageHarness: "claude",
 		interactionSink: "permission-asking",
 		supportsNativeResume: true,
+		revertsConversationNatively: false,
 		forkStrategy: "native",
 		needsPriorHistoryMetadata: true,
 		accountKind: "config-directory",
@@ -116,6 +127,8 @@ export const PROVIDER_DRIVERS = {
 		// provider-instance.test.ts pins false; no restart-safe approval/question reply capture yet.
 		promptsSurviveRestart: false,
 		readOnlySubagents: false,
+		reusesSubagentCards: false,
+		titleGenerator: "claude",
 	},
 	// The multi-folder-project replay pins external_directory session rules.
 	// Managed launches/recreation are pinned by opencode-launch-worktree.test.ts.
@@ -136,6 +149,7 @@ export const PROVIDER_DRIVERS = {
 		usageHarness: undefined,
 		interactionSink: "auto-approving",
 		supportsNativeResume: false,
+		revertsConversationNatively: false,
 		forkStrategy: "native",
 		needsPriorHistoryMetadata: false,
 		accountKind: "server",
@@ -155,6 +169,8 @@ export const PROVIDER_DRIVERS = {
 		// provider-instance.test.ts pins false; no restart-safe approval/question reply capture yet.
 		promptsSurviveRestart: false,
 		readOnlySubagents: false,
+		reusesSubagentCards: false,
+		titleGenerator: "claude",
 	},
 	cursor: {
 		supportsFileAttachments: false,
@@ -172,6 +188,7 @@ export const PROVIDER_DRIVERS = {
 		usageHarness: "cursor", // Retain the existing Cursor usage identity.
 		interactionSink: "auto-approving", // cursor-session-config allows gated calls; sandbox is the interim boundary.
 		supportsNativeResume: false, // cursor-recovery.test.ts pins owned-store resume; cross-account native-thread transfer is unproven.
+		revertsConversationNatively: false,
 		forkStrategy: "transcript-digest", // cursor-fork.test.ts pins isolated agents seeded from bounded, redacted history.
 		needsPriorHistoryMetadata: false, // No cumulative-history contract is established.
 		accountKind: "config-directory", // Keep runner account configuration separate from servers.
@@ -188,8 +205,46 @@ export const PROVIDER_DRIVERS = {
 		// methods, declined/image/pending steers and crash recovery through the inbox.
 		steering: "native",
 		readOnlySubagents: true, // cursor-subagents.test.ts pins rejection of child input.
+		reusesSubagentCards: false,
+		titleGenerator: "claude",
 		// cursor-question.test.ts pins an ask_user wait answered after daemon restart on the retained runner.
 		promptsSurviveRestart: true,
+	},
+	codex: {
+		supportsFileAttachments: false, // Codex UserInput supports text and images, without file attachments.
+		composerModeControl: "permission-mode", // codex-session-config pins the per-turn sandbox.
+		permissionModes: ["ask", "acceptEdits", "auto", "full", "plan"], // Per-turn sandbox, reviewer and collaboration settings are pinned by Codex traces.
+		supportsQuestionSkip: false, // Question responses need a captured Codex contract.
+		supportsFileRewind: false, // thread/revert restores conversation history only.
+		sessionCapabilities: {
+			supportsMultiFolder: false, // The captured thread/start contract consumes one cwd.
+			supportsWorktree: false, // Worktree support needs a captured Codex contract.
+			supportsNewWorktree: false, // The first slice does not launch worktrees.
+			supportsTaskStop: false, // The first slice only interrupts whole turns.
+		},
+		runsOpenCodeServer: false, // Codex owns an app-server child in its detached runner.
+		usageHarness: "codex", // account/rateLimits supplies main and model-specific allowances.
+		interactionSink: "permission-asking", // Codex approval and blocking-question requests wait in the detached runner.
+		supportsNativeResume: false, // Codex resumes through its runner-owned thread identity.
+		revertsConversationNatively: true, // thread/revert runs before the next turn/start.
+		forkStrategy: "native", // thread/fork uses a completed native turn, with digest fallback.
+		needsPriorHistoryMetadata: false, // thread/tokenUsage/updated supplies the context meter directly.
+		accountKind: "config-directory", // CODEX_HOME selects the account's codex login.
+		defaultAccountSource: "selection", // AccountDirectory owns the selected Codex account.
+		catalogSource: "discovery", // model/list supplies the Codex catalog.
+		modelIdFormat: "provider-qualified", // model/list supplies native model ids without context suffixes.
+		streamsSessionLifecycle: true, // turn/completed supplies terminal events through the runner.
+		usesLocalSessions: true, // The daemon creates sessions before thread/start.
+		interruptViaEngine: true, // turn/interrupt is dispatched through the retained runner.
+		supportsGoalState: true, // Native thread goals hold one conduit turn across successors.
+		worktreeMoves: "tool-directive", // Codex never declares workspace moves through OpenCode.
+		emitsMessageParentIds: false, // The first slice consumes no native message lineage.
+		// steer.jsonl and steer-race.jsonl pin echoed delivery and inbox requeue.
+		steering: "native",
+		promptsSurviveRestart: true, // Detached runner ownership survives daemon restarts.
+		readOnlySubagents: true, // Native child threads stream through their parent app-server; input stays on the parent.
+		reusesSubagentCards: true,
+		titleGenerator: "codex-exec",
 	},
 } as const satisfies { readonly [driver: string]: ProviderDriverTraits };
 
@@ -208,7 +263,7 @@ export function isKnownDriverKind(
 export const BrowserDriverTraitsSchema = Schema.Struct({
 	sessionCapabilities: ProviderSessionCapabilitiesSchema,
 	runsOpenCodeServer: Schema.Boolean,
-	usageHarness: Schema.optional(Schema.Literals(["claude", "cursor"])),
+	usageHarness: Schema.optional(Schema.Literals(PROVIDER_USAGE_HARNESSES)),
 	composerModeControl: Schema.Literals(["agent", "permission-mode"]),
 	accountKind: Schema.Literals(["config-directory", "server"]),
 	catalogSource: Schema.Literals(["discovery", "server"]),

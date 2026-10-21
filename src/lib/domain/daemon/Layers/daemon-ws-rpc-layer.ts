@@ -31,6 +31,8 @@ import { getRecent } from "../../../daemon/recent-projects.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { getLogLevel } from "../../../logger.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
+import { makeCodexAuth } from "../../../provider/codex/codex-auth.js";
+import { discoverCodex } from "../../../provider/codex/codex-discovery.js";
 import { makeCursorAuth } from "../../../provider/cursor/cursor-auth.js";
 import {
 	loadRelaySettings,
@@ -60,7 +62,7 @@ import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { readSurfacingFeedback } from "../../relay/Services/surfacing-feedback.js";
 import { AuthManagerTag } from "../../server/Layers/auth-middleware.js";
-import type { AccountDirectory } from "../Services/account-directory.js";
+import { AccountDirectory } from "../Services/account-directory.js";
 import { CategorySet } from "../Services/category-set.js";
 import {
 	type ConfigPersistenceTag,
@@ -302,6 +304,38 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				yield* PubSub.publish(bus, DaemonEvent.ProjectsChanged());
 				yield* requestConfigSave;
 			});
+		const codexAccountLock = yield* Semaphore.make(1);
+		// A deleted Codex account is a choice to keep, not a gap to refill.
+		const codexAccountKnown = Effect.gen(function* () {
+			const { accounts, deleted } = yield* (yield* AccountDirectory).snapshot;
+			return [...accounts, ...deleted].some(({ driver }) => driver === "codex");
+		});
+		const ensureCodexAccount = codexAccountLock.withPermits(1)(
+			Effect.gen(function* () {
+				if (yield* codexAccountKnown) return;
+				const discovered = yield* discoverCodex().pipe(
+					Effect.catch((failure) =>
+						Effect.logDebug(
+							"Codex default account discovery unavailable",
+							failure,
+						).pipe(Effect.as(undefined)),
+					),
+				);
+				if (!discovered?.signedIn) return;
+				if (yield* codexAccountKnown) return;
+				yield* addInstance({ name: "Codex", driver: "codex" });
+				yield* persistConfig;
+				yield* PubSub.publish(bus, DaemonEvent.InstancesChanged());
+			}).pipe(
+				Effect.catch((failure) =>
+					Effect.logWarning(
+						"Codex default account could not be added",
+						failure,
+					),
+				),
+			),
+		);
+		yield* run(ensureCodexAccount).pipe(Effect.forkIn(yield* Effect.scope));
 		const instanceList = Effect.gen(function* () {
 			yield* PubSub.publish(bus, DaemonEvent.InstancesChanged());
 			return Array.from(yield* discoverInstances);
@@ -321,6 +355,24 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 					yield* PubSub.publish(bus, DaemonEvent.InstancesChanged());
 				}),
 			),
+		);
+		const codexAuth = yield* makeCodexAuth(
+			configDir,
+			(accountId) =>
+				run(
+					Effect.gen(function* () {
+						const account = yield* (yield* AccountDirectory).resolve({
+							_tag: "Id",
+							id: accountId,
+						});
+						if (account.driver === "codex") return account;
+						return yield* Effect.fail(
+							new WsRpcError({ message: "A Codex account is required." }),
+						);
+					}),
+				),
+			() =>
+				PubSub.publish(bus, DaemonEvent.InstancesChanged()).pipe(Effect.asVoid),
 		);
 		// Join the subscriber set BEFORE the first read, so a change landing
 		// between the two still wakes this stream: snapshot, then a fresh list
@@ -612,6 +664,11 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 			StartCursorLogin: () => cursorAuth.start,
 			CancelCursorLogin: () => cursorAuth.cancel,
 			LogoutCursor: () => cursorAuth.logout,
+			GetCodexAuth: (request) => codexAuth.read(request.accountId),
+			StartCodexLogin: (request) =>
+				codexAuth.start(request.accountId, request.method),
+			CancelCodexLogin: (request) => codexAuth.cancel(request.accountId),
+			LogoutCodex: (request) => codexAuth.logout(request.accountId),
 			GetInstanceStatus: (request) =>
 				run(
 					getInstance(request.instanceId).pipe(

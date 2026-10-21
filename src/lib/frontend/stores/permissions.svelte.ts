@@ -14,8 +14,8 @@ import type {
 } from "../types.js";
 import { sessionState } from "./session.svelte.js";
 
-// This store has no client half: every entry is a request the server is waiting
-// on, as the approvals subscription (ni8.9) reports it. Which option the user
+// This store has no client half: every entry is a pending request reported by
+// the approvals subscription (ni8.9). Which option the user
 // has highlighted lives in the card component until it is submitted.
 
 export const permissionsState = $state({
@@ -63,11 +63,14 @@ const toQuestion = (
 	sessionId: approval.sessionId,
 	...(approval.toolUseId != null && { toolUseId: approval.toolUseId }),
 	...(approval.providerId != null && { providerId: approval.providerId }),
+	...(approval.delivery != null && { delivery: approval.delivery }),
 	questions: approval.questions.map((question) => ({
 		question: question.question,
 		header: question.header,
 		multiSelect: question.multiSelect,
 		...(question.custom != null && { custom: question.custom }),
+		...(question.isOther != null && { isOther: question.isOther }),
+		...(question.isSecret != null && { isSecret: question.isSecret }),
 		options: question.options.map(({ label, description }) => ({
 			label,
 			...(description != null && { description }),
@@ -97,7 +100,10 @@ export function applyApprovalEnvelope(change: Change<Approval>): Approval[] {
 	if (next === before) return [];
 	publish(next);
 	return [...next.rows].flatMap(([id, approval]) =>
-		before.rows.has(id) ? [] : [approval],
+		before.rows.has(id) ||
+		(approval._tag === "question" && approval.delivery === "async")
+			? []
+			: [approval],
 	);
 }
 
@@ -112,11 +118,13 @@ export function isApprovalPending(id: string): boolean {
 export function getPendingCount(): number {
 	return (
 		permissionsState.pendingPermissions.length +
-		permissionsState.pendingQuestions.length
+		permissionsState.pendingQuestions.filter(
+			(question) => question.delivery !== "async",
+		).length
 	);
 }
 
-/** Get whether there are any pending permissions or questions. */
+/** Get whether any pending permissions or questions need user attention. */
 export function getHasPending(): boolean {
 	return getPendingCount() > 0;
 }

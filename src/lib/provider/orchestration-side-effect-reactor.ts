@@ -765,6 +765,7 @@ export class ProviderSideEffectReactor {
 								instanceId,
 							},
 							row.command_id,
+							driver,
 						)
 						.pipe(Effect.mapError(storeFailure("handoffDelivered")));
 				}

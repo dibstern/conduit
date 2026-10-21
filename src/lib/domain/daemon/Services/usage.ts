@@ -17,6 +17,7 @@ import {
 	UsageHistoryPointSchema,
 	type UsageReading,
 } from "../../../contracts/limit-recovery.js";
+import type { UsageHarness } from "../../../contracts/provider-instance.js";
 import type {
 	UsageAccount,
 	UsageRead,
@@ -29,6 +30,12 @@ export interface UsageService {
 		enabled: boolean,
 	) => Effect.Effect<{ enabled: boolean; reason?: string }>;
 	readonly readings: Stream.Stream<readonly UsageReading[]>;
+	/** Merge a provider's sparse live windows into the account sampler's stream. */
+	readonly update?: (
+		accountId: string,
+		harness: UsageHarness,
+		reading: UsageRead,
+	) => Effect.Effect<void>;
 	/** The latest completed reading, without probing or starting the sampler. */
 	readonly latest: (
 		accountId: string,
@@ -104,9 +111,7 @@ export const makeUsage = (options: {
 		accountId: string,
 	) => Effect.Effect<UsageAccount["harness"] | undefined>;
 	readonly order?: Effect.Effect<readonly string[]>;
-	readonly readers: Readonly<
-		Partial<Record<UsageAccount["harness"], UsageReader>>
-	>;
+	readonly readers: Readonly<Record<UsageHarness, UsageReader>>;
 	readonly history?: {
 		readonly load: Effect.Effect<UsageHistorySnapshot, unknown>;
 		readonly save: (
@@ -115,6 +120,9 @@ export const makeUsage = (options: {
 	};
 }) =>
 	Effect.gen(function* () {
+		// Stored readings can name harnesses that no current driver declares.
+		const readers: Readonly<Record<string, UsageReader | undefined>> =
+			options.readers;
 		const scope = yield* Effect.scope;
 		const historyStore = options.history;
 		let history = yield* (
@@ -136,6 +144,7 @@ export const makeUsage = (options: {
 		let sampler: Fiber.Fiber<void> | undefined;
 		const inFlight = new Map<string, Deferred.Deferred<UsageReading>>();
 		const latest = new Map<string, UsageReading>();
+		const liveVersions = new Map<string, number>();
 		const read = (accountId: string, accounts: readonly UsageAccount[]) =>
 			Effect.gen(function* () {
 				const account = accounts.find((account) => account.id === accountId);
@@ -146,8 +155,9 @@ export const makeUsage = (options: {
 							if (existing) return existing;
 							const pending = yield* Deferred.make<UsageReading>();
 							inFlight.set(accountId, pending);
+							const liveVersion = liveVersions.get(accountId) ?? 0;
 							const reading = Effect.suspend(() => {
-								const reader = account && options.readers[account.harness];
+								const reader = account && readers[account.harness];
 								return account && reader
 									? reader.read(account)
 									: Effect.succeed<UsageRead>({
@@ -182,8 +192,9 @@ export const makeUsage = (options: {
 											reading.status === "limited"
 												? reading.windows.map((window) => {
 														if (
-															window.kind !== "five_hour" &&
-															window.kind !== "seven_day"
+															account?.harness === "codex" ||
+															(window.kind !== "five_hour" &&
+																window.kind !== "seven_day")
 														)
 															return window;
 														const parsedReset =
@@ -249,7 +260,10 @@ export const makeUsage = (options: {
 														};
 													})
 												: reading.windows;
-										const value: UsageReading = {
+										const value: UsageReading = ((liveVersions.get(accountId) ??
+											0) !== liveVersion
+											? latest.get(accountId)
+											: undefined) ?? {
 											...reading,
 											windows,
 											accountId,
@@ -412,6 +426,49 @@ export const makeUsage = (options: {
 			});
 		return {
 			readings,
+			update: (accountId, harness, reading) =>
+				Effect.gen(function* () {
+					if (
+						!(yield* options.accounts).some(
+							(account) =>
+								account.id === accountId && account.harness === harness,
+						)
+					)
+						return;
+					const readAt = yield* Clock.currentTimeMillis;
+					const previous = latest.get(accountId);
+					const windows = [...(previous?.windows ?? [])];
+					for (const window of reading.windows) {
+						const index = windows.findIndex((value) =>
+							window.id ? value.id === window.id : value.kind === window.kind,
+						);
+						if (index < 0) windows.push(window);
+						else
+							windows[index] = {
+								...windows[index],
+								...window,
+								...(window.kind === "custom" && !window.label
+									? { kind: windows[index]?.kind ?? window.kind }
+									: {}),
+							};
+					}
+					latest.set(accountId, {
+						...previous,
+						...reading,
+						accountId,
+						harness,
+						windows,
+						readAt,
+						stale: false,
+						status: windows.some((window) => window.utilization >= 100)
+							? "limited"
+							: windows.length
+								? "available"
+								: reading.status,
+					});
+					liveVersions.set(accountId, (liveVersions.get(accountId) ?? 0) + 1);
+					yield* SubscriptionRef.set(current, [...latest.values()]);
+				}),
 			latest: (accountId) => Effect.sync(() => latest.get(accountId)),
 			refresh,
 			turnEnded,

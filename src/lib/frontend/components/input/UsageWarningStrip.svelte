@@ -1,4 +1,4 @@
-<!-- Warn before the composer's Claude account reaches its plan limit. Dismissals
+<!-- Warn before the composer's account reaches its plan limit. Dismissals
      stay in memory per session or draft project until 95% or a new window. -->
 <script module lang="ts">
 	import { SvelteMap } from "svelte/reactivity";
@@ -13,6 +13,7 @@
 <script lang="ts">
 	import { clock } from "../../stores/clock.svelte.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
+	import { getDriverTraits, getInstanceById } from "../../stores/instance.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
 	import type { Immutable, SessionInfo } from "../../types.js";
@@ -27,8 +28,8 @@
 	let { session, projectSlug }: { session: Immutable<SessionInfo> | undefined; projectSlug: string } = $props();
 
 	const key = $derived(session?.id ?? projectSlug);
-	const claudeAccounts = $derived(getClaudeAccounts(projectSlug));
 	const accountId = $derived(composerAccountId(session));
+	const claudeAccounts = $derived(getClaudeAccounts(projectSlug, getDriverTraits(getInstanceById(accountId ?? "")?.driver)?.usageHarness === "codex" ? "codex" : "claude"));
 	const reading = $derived(claudeAccounts.readingOf(accountId));
 	const severalAccounts = $derived(claudeAccounts.hasAlternative(accountId));
 	const alternatives = $derived(claudeAccounts.configuredAccounts.filter((account) =>

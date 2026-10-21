@@ -23,6 +23,7 @@ import {
 	type AutoTitleSource,
 	UNTITLED_SESSION_TITLE,
 } from "../../../contracts/session-title.js";
+import { DEFAULT_CONFIG_DIR } from "../../../env.js";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import {
 	type CommitAndSignalProject,
@@ -47,7 +48,12 @@ import {
 } from "../../../persistence/fork-history.js";
 import { sameClaudeLogin } from "../../../provider/claude/claude-sdk-env.js";
 import { CLAUDE_FORK_SOURCE_KEY } from "../../../provider/claude/claude-session-fork.js";
+import { prepareCodexAccount } from "../../../provider/codex/codex-home.js";
+import { resolveCodexForkSource } from "../../../provider/codex/codex-native-history.js";
+import { writeCodexSessionIdentity } from "../../../provider/codex/codex-session-store.js";
+import { codexUpstreamAdapter } from "../../../provider/codex/codex-session-upstream.js";
 import { cursorUpstreamAdapter } from "../../../provider/cursor/cursor-session-upstream.js";
+import { renderForkDigest } from "../../../provider/fork-digest.js";
 import { sideThreadPermissionRules } from "../../../provider/opencode-provider-instance.js";
 import {
 	PickRequired,
@@ -55,6 +61,7 @@ import {
 } from "../../../provider/turn-settings.js";
 import { storedWorkingDirectory } from "../../../session/session-workspace.js";
 import type { SessionPermissionMode } from "../../../shared-types.js";
+import { assertNever } from "../../../utils.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
@@ -240,9 +247,12 @@ export const sessionUpstreamAdapter = (
 				return openCodeUpstreamAdapter(api);
 			case "claude":
 				return claudeUpstreamAdapter;
-			case "cursor": {
+			case "cursor":
+			case "codex": {
 				const config = yield* Effect.serviceOption(ConfigTag);
-				return cursorUpstreamAdapter(
+				const adapter =
+					provider === "codex" ? codexUpstreamAdapter : cursorUpstreamAdapter;
+				return adapter(
 					config._tag === "Some" && config.value.configDir !== undefined
 						? {
 								workspaceRoot: config.value.projectDir,
@@ -251,6 +261,8 @@ export const sessionUpstreamAdapter = (
 						: undefined,
 				);
 			}
+			default:
+				return assertNever(provider);
 		}
 	});
 
@@ -709,10 +721,14 @@ const forkRefusalError = (parentId: string, refusal: ForkRefusal) => {
 	});
 };
 
-/** Route forks by the persisted parent provider, before contacting a runtime. */
+/** Resolve the fork's destination before contacting a runtime. */
 const forkSessionInWorkspace = (
 	parentSessionId: string,
-	options?: { messageId?: string; side?: { title: string; inputId: string } },
+	options?: {
+		messageId?: string;
+		instanceId?: string;
+		side?: { title: string; inputId: string };
+	},
 ) =>
 	Effect.gen(function* () {
 		const readOption = yield* Effect.serviceOption(ReadQueryEffectTag);
@@ -722,11 +738,27 @@ const forkSessionInWorkspace = (
 				? yield* readOption.value.getSession(parentSessionId)
 				: undefined;
 		const accounts = yield* AccountDirectory;
-		const account = yield* accounts.resolve(
+		const sourceAccount = yield* accounts.resolve(
 			parent === undefined
 				? { _tag: "DriverDefault", driver: "opencode" }
 				: { _tag: "Id", id: parent.provider },
 		);
+		const account = options?.instanceId
+			? yield* accounts.resolve({ _tag: "Id", id: options.instanceId })
+			: sourceAccount;
+		const sameDriver = account.driver === sourceAccount.driver;
+		const involvesCodex =
+			account.driver === "codex" || sourceAccount.driver === "codex";
+		if (
+			!sameDriver &&
+			(!involvesCodex || PROVIDER_DRIVERS[account.driver].runsOpenCodeServer)
+		)
+			return yield* new SessionCommandError({
+				operation: "session.forked.unsupported_account",
+				cause: `${sourceAccount.driver} to ${account.driver}`,
+				message:
+					"Cross-provider forks require Codex and a transcript destination",
+			});
 		if (options?.side) {
 			if (!parent) {
 				return yield* new SessionCommandError({
@@ -795,15 +827,6 @@ const forkSessionInWorkspace = (
 		}
 		const digestFork =
 			PROVIDER_DRIVERS[account.driver].forkStrategy === "transcript-digest";
-		if (
-			!digestFork &&
-			(!PROVIDER_DRIVERS[account.driver].supportsNativeResume ||
-				!("folder" in account))
-		)
-			return yield* new SessionCommandError({
-				operation: "session.forked.unsupported_account",
-				cause: account.driver,
-			});
 		if (!parent)
 			return yield* new SessionCommandError({
 				operation: "session.forked.parent_not_found",
@@ -830,28 +853,38 @@ const forkSessionInWorkspace = (
 		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 		const native = yield* Effect.gen(function* () {
 			if (digestFork) return undefined;
-			const state = yield* Effect.serviceOption(ProviderStateEffectTag);
-			if (state._tag === "None")
-				return yield* new SessionCommandError({
-					operation: "session.forked.claude",
-					cause: "Claude fork requires provider state persistence",
-				});
-			if (!("folder" in account))
-				return yield* new SessionCommandError({
-					operation: "session.forked.unsupported_account",
-					cause: account.driver,
-				});
-			if (config._tag === "None" || config.value.claudeSdk === undefined)
-				return yield* new SessionCommandError({
-					operation: "session.forked.claude",
-					cause: "Claude fork requires project SDK configuration",
-				});
-			return {
-				account,
-				config: config.value,
-				sdk: config.value.claudeSdk,
-				state: state.value,
-			};
+			switch (account.driver) {
+				case "claude": {
+					const state = yield* Effect.serviceOption(ProviderStateEffectTag);
+					if (state._tag === "None")
+						return yield* new SessionCommandError({
+							operation: "session.forked.claude",
+							cause: "Claude fork requires provider state persistence",
+						});
+					if (config._tag === "None" || config.value.claudeSdk === undefined)
+						return yield* new SessionCommandError({
+							operation: "session.forked.claude",
+							cause: "Claude fork requires project SDK configuration",
+						});
+					return {
+						account,
+						config: config.value,
+						sdk: config.value.claudeSdk,
+						state: state.value,
+					};
+				}
+				case "opencode":
+				case "cursor":
+					return yield* new SessionCommandError({
+						operation: "session.forked.unsupported_account",
+						cause: account.driver,
+					});
+				case "codex":
+					// Like Claude, defer native launch until the inherited cut is durable.
+					return undefined;
+				default:
+					return assertNever(account);
+			}
 		});
 		const commitAndSignal = yield* makeCommitAndSignal.pipe(
 			Effect.provideService(EventStoreEffectTag, eventStore.value),
@@ -869,22 +902,86 @@ const forkSessionInWorkspace = (
 		);
 		const side = options?.side;
 		const title = side ? sideThreadTitle(side.title) : `${parent.title} (fork)`;
+		const relayConfig = config;
 		const fork = yield* Effect.gen(function* () {
 			if (!native) {
 				const id = randomUUID();
-				const pick = yield* Effect.fromResult(
-					resolveServerSessionPick(
-						account.driver,
-						storedSessionPick(parent, account.driver),
-					),
-				);
+				const configDir =
+					relayConfig._tag === "Some"
+						? (relayConfig.value.configDir ?? DEFAULT_CONFIG_DIR)
+						: DEFAULT_CONFIG_DIR;
+				const codex =
+					account.driver === "codex" && sourceAccount.driver === "codex"
+						? yield* Effect.gen(function* () {
+								const { home } = yield* prepareCodexAccount(account, configDir);
+								const forkSource = yield* resolveCodexForkSource(
+									parentSessionId,
+									source.boundary.messageId,
+									home,
+									configDir,
+								).pipe(Effect.provideService(SqlClient.SqlClient, sql.value));
+								const cwd =
+									workspace._tag === "Some"
+										? yield* workspace.value.get(parentSessionId)
+										: relayConfig._tag === "Some"
+											? relayConfig.value.projectDir
+											: process.cwd();
+								return forkSource ? { home, forkSource, cwd } : undefined;
+							}).pipe(
+								Effect.mapError(
+									(cause) =>
+										new SessionCommandError({
+											operation: "session.forked.codex",
+											cause,
+										}),
+								),
+							)
+						: undefined;
+				const pick = yield* sameDriver
+					? Effect.fromResult(
+							resolveServerSessionPick(
+								account.driver,
+								storedSessionPick(parent, account.driver),
+							),
+						)
+					: loadServerSessionPick(account.driver, account.id);
 				return {
 					id,
 					provider: account.id,
 					driver: account.driver,
 					pick,
 					providerSessionId: undefined,
-					saveProviderState: undefined,
+					saveProviderState: codex
+						? () =>
+								Effect.gen(function* () {
+									const inherited =
+										(yield* readOption.value.getSessionMessagesWithParts(
+											id,
+										)).filter((message) => message.is_inherited === 1);
+									const resumeFallbackDigest = renderForkDigest(inherited);
+									yield* Effect.try({
+										try: () =>
+											writeCodexSessionIdentity(configDir, id, {
+												threadId: codex.forkSource.threadId,
+												codexHome: codex.home,
+												cwd: codex.cwd,
+												controllerPid: process.pid,
+												forkSeedPending: false,
+												resumeFallbackDigest,
+												forkSource: {
+													threadId: codex.forkSource.threadId,
+													lastTurnId: codex.forkSource.lastTurnId,
+												},
+												inheritedThreadIds: codex.forkSource.inheritedThreadIds,
+											}),
+										catch: (cause) =>
+											new SessionCommandError({
+												operation: "session.forked.codex",
+												cause,
+											}),
+									});
+								})
+						: undefined,
 				};
 			}
 			const { account: nativeAccount, config, state } = native;
@@ -901,30 +998,34 @@ const forkSessionInWorkspace = (
 					id: instanceId,
 				});
 				if (
-					!PROVIDER_DRIVERS[historical.driver].supportsNativeResume ||
-					!("folder" in historical)
-				)
-					continue;
-				const thread = yield* state.nativeThread(
-					parentSessionId,
-					historical.id,
-				);
-				if (
-					thread &&
-					(thread.configDir === undefined ||
-						sameClaudeLogin(
-							{ configDir: thread.configDir, root: config.projectDir },
-							{ configDir: historical.folder, root: config.projectDir },
-						)) &&
-					thread.firstSequence <= source.boundary.sequence &&
-					source.boundary.sequence <= thread.deliveredThrough &&
-					(!selected || thread.firstSequence > selected.thread.firstSequence)
-				)
-					selected = { account: historical, thread };
+					historical.driver === "claude" &&
+					(options?.instanceId === undefined || historical.id === account.id)
+				) {
+					const thread = yield* state.nativeThread(
+						parentSessionId,
+						historical.id,
+					);
+					if (
+						thread &&
+						(thread.configDir === undefined ||
+							sameClaudeLogin(
+								{ configDir: thread.configDir, root: config.projectDir },
+								{ configDir: historical.folder, root: config.projectDir },
+							)) &&
+						thread.firstSequence <= source.boundary.sequence &&
+						source.boundary.sequence <= thread.deliveredThrough &&
+						(!selected || thread.firstSequence > selected.thread.firstSequence)
+					)
+						selected = { account: historical, thread };
+				}
 			}
 			const forkAccount = selected?.account ?? nativeAccount;
 			const provider = forkAccount.id;
-			const pick = yield* loadServerSessionPick("claude", provider, parent);
+			const pick = yield* loadServerSessionPick(
+				"claude",
+				provider,
+				sameDriver ? parent : undefined,
+			);
 			const thread = selected?.thread;
 			const forkPointSequence = source.boundary.sequence;
 			const parentThread =
@@ -1056,7 +1157,11 @@ const forkSessionInWorkspace = (
 /** A fork's first launch cannot read its row before workspace inheritance. */
 export const forkSession = (
 	parentSessionId: string,
-	options?: { messageId?: string; side?: { title: string; inputId: string } },
+	options?: {
+		messageId?: string;
+		instanceId?: string;
+		side?: { title: string; inputId: string };
+	},
 ) =>
 	Effect.gen(function* () {
 		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);

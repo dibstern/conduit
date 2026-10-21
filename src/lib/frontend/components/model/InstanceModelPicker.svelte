@@ -109,7 +109,7 @@
 			selectedInstance?.driver ?? discoveryState.currentDriver,
 	);
 	const selectedTraits = $derived(getDriverTraits(selectedDriver));
-	const hasAccountUsage = $derived(selectedTraits?.usageHarness === "claude");
+	const canSwitchAccounts = $derived(selectedTraits?.usageHarness === "claude" || selectedTraits?.usageHarness === "codex");
 	const accountLabel = $derived(selectedTraits?.accountKind === "config-directory" ? "Account" : "Instance");
 	const selectedLabel = $derived(
 		selectedInstance?.label ?? (locked ? "Account unavailable" : "Add account"),
@@ -143,8 +143,8 @@
 			? findSession(sessionState.currentId)?.projectSlug ?? ""
 			: getDraftProject() ?? "",
 	);
-	const accounts = $derived(getClaudeAccounts(accountProjectSlug));
-	const switchingTo = $derived(hasAccountUsage && accounts.handoff.kind !== "idle" && accounts.handoff.sessionId === sessionState.currentId ? accounts.switchingTo : null);
+	const accounts = $derived(getClaudeAccounts(accountProjectSlug, selectedTraits?.usageHarness === "codex" ? "codex" : "claude"));
+	const switchingTo = $derived(canSwitchAccounts && accounts.handoff.kind !== "idle" && accounts.handoff.sessionId === sessionState.currentId ? accounts.switchingTo : null);
 	const wordAccountName = $derived(selectedInstance ? accounts.nameOf(switchingTo ?? selectedLogoInstanceId, selectedInstance.label) : selectedLabel);
 	let presentedRequest = $state<number | undefined>();
 	const handoff = $derived(accounts.pendingHandoff?.requestId === presentedRequest ? accounts.pendingHandoff : undefined);
@@ -153,7 +153,7 @@
 		| { kind: "status"; status: InstanceStatus }
 	);
 	const accountCards = $derived.by<AccountCard[]>(() => {
-		if (hasAccountUsage) {
+		if (canSwitchAccounts) {
 			return [...accounts.accounts].sort((a, b) => Number(b.isDefault === true) - Number(a.isDefault === true)).map((account) => {
 				// Cards show every account's own usage; only the lock depends on the open session.
 				const availability = accounts.availabilityOf(account.id, "");
@@ -428,7 +428,7 @@
 		const card = accountCards.find((card) => card.value === id);
 		if (!card || card.locked) return;
 		if (locked) {
-			if (hasAccountUsage && sessionState.currentId) {
+			if (canSwitchAccounts && sessionState.currentId) {
 				closePicker();
 				void accounts.beginSwitch(sessionState.currentId, id, selectedLogoInstanceId);
 				presentedRequest = accounts.handoff.kind === "previewing" ? accounts.handoff.requestId : undefined;
@@ -619,7 +619,7 @@
 					<section data-testid="picker-account-section" tabindex="-1" aria-label={accountLabel} class="pb-[6px] outline-none">
 						<div class="flex items-center justify-between px-[10px] pt-[8px] pb-[6px] text-[12px] font-medium text-text-muted">
 							<span>{accountLabel}</span>
-							<span data-testid="picker-account-section-caption">{hasAccountUsage ? "5-hour use" : "status"}</span>
+							<span data-testid="picker-account-section-caption">{selectedTraits?.usageHarness === "claude" ? "5-hour use" : canSwitchAccounts ? "usage" : "status"}</span>
 						</div>
 						<OptionRow
 							variant="cards"
@@ -628,7 +628,7 @@
 							onChange={handleAccountSelect}
 							onActivate={locked ? undefined : selectInstance}
 							label={accountLabel}
-							lockedReason={hasAccountUsage ? "" : "Harness is fixed for this session"}
+							lockedReason={canSwitchAccounts ? "" : "Harness is fixed for this session"}
 							itemWidth={108}
 							testId="picker-account-options"
 							itemTestId={(id) => `picker-account-${id}`}
@@ -677,7 +677,7 @@
 								{/if}
 							{/snippet}
 						</OptionRow>
-						{#if locked && hasAccountUsage}
+						{#if locked && canSwitchAccounts}
 							<div data-testid="picker-account-note" class="mx-[4px] mt-[8px] border-t border-border-subtle pt-[6px] text-[10.5px] text-text-muted">You'll see what carries over before anything changes.</div>
 						{/if}
 					</section>

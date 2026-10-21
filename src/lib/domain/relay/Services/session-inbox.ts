@@ -82,6 +82,8 @@ export interface InboxView {
 	readonly known: boolean;
 	/** The session's provider can take an input mid-turn. */
 	readonly providerSteers: boolean;
+	/** Native Codex goal controls can run without interrupting the held turn. */
+	readonly nativeGoalCommands?: boolean;
 	/** A permission or question prompt waits on the user. */
 	readonly promptOpen: boolean;
 	/** The request of the latest handoff, which the running turn runs on. */
@@ -194,7 +196,13 @@ const steer = (
 ): InboxDecision => {
 	const reason = steerBlocker(view, input.request);
 	if (reason) return { _tag: "Rejected", reason };
-	if (input.request.text.trimStart().startsWith("/"))
+	if (
+		input.request.text.trimStart().startsWith("/") &&
+		!(
+			view.nativeGoalCommands &&
+			/^\/goal(?:\s|$)/.test(input.request.text.trim())
+		)
+	)
 		return interruptForInput(sessionId, input, events);
 	return {
 		_tag: "Accepted",
@@ -451,7 +459,8 @@ export const SessionInboxLive = Layer.effect(
 						AND NOT json_extract(limit_recovery, '$.continued')
 						FROM sessions WHERE id = ${sessionId}) AS scheduled,
 					(SELECT COUNT(*) FROM pending_approvals
-						WHERE session_id = ${sessionId} AND status = 'pending') AS open_prompts,
+						WHERE session_id = ${sessionId} AND status = 'pending'
+							AND (type <> 'question' OR COALESCE(json_extract(details, '$.delivery'), '') <> 'async')) AS open_prompts,
 					(SELECT state FROM turns WHERE session_id = ${sessionId}
 						ORDER BY requested_at DESC, rowid DESC LIMIT 1) AS last_turn,
 					(EXISTS (SELECT 1 FROM turns WHERE session_id = ${sessionId}
@@ -561,6 +570,8 @@ export const SessionInboxLive = Layer.effect(
 					scheduled: facts?.scheduled === 1,
 					known,
 					providerSteers: providerSteers(Option.getOrUndefined(account)),
+					nativeGoalCommands:
+						Option.getOrUndefined(account)?.driver === "codex",
 					promptOpen: (facts?.open_prompts ?? 0) > 0,
 					running,
 				} satisfies InboxView;

@@ -111,7 +111,14 @@ export const StatusPollerLive: Layer.Layer<
 				]).pipe(
 					Effect.map(
 						([questions, permissions]) =>
-							new Set([...questions, ...permissions].map((p) => p.sessionId)),
+							new Set(
+								[
+									...questions.filter(
+										(question) => question.delivery !== "async",
+									),
+									...permissions,
+								].map((p) => p.sessionId),
+							),
 					),
 				),
 			injectCorrectiveEvent: (sessionId: string, status: string) =>

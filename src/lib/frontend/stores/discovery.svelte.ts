@@ -157,7 +157,10 @@ export interface InstanceOption {
 	readonly status?: InstanceStatus;
 	readonly available?: boolean | undefined;
 	readonly unavailableReason?: string | undefined;
-	readonly unavailableCode?: "auth_required" | undefined;
+	readonly unavailableCode?:
+		| "auth_required"
+		| "codex_version_unsupported"
+		| undefined;
 	readonly capabilities?: ProviderSessionCapabilities | undefined;
 }
 

@@ -101,6 +101,7 @@ describe("orchestration scoped layer", () => {
 		}
 
 		expect(opencodeShutdown).toHaveBeenCalledTimes(1);
-		expect(runnerShutdown).toHaveBeenCalledTimes(2);
+		// Claude, Cursor and Codex each register a runner-backed instance.
+		expect(runnerShutdown).toHaveBeenCalledTimes(3);
 	});
 });

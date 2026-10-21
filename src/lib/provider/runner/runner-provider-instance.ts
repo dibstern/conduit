@@ -14,12 +14,19 @@ import {
 	resolve as resolveAccount,
 } from "../../account-directory.js";
 import type { Account } from "../../contracts/account.js";
-import type { KnownProviderDriverKind } from "../../contracts/provider-instance.js";
+import {
+	type KnownProviderDriverKind,
+	PROVIDER_DRIVERS,
+} from "../../contracts/provider-instance.js";
 import type { DaemonConfigLoadError } from "../../daemon/config-persistence.js";
 import {
 	bindTurnTimelineSink,
 	observeTurnTimelineFrame,
 } from "../../domain/daemon/Services/turn-timeline.js";
+import {
+	Usage,
+	type UsageService,
+} from "../../domain/daemon/Services/usage.js";
 import { PendingInteractionServiceTag } from "../../domain/relay/Services/pending-interaction-service.js";
 import {
 	type ProviderRuntimeIngestionError,
@@ -119,6 +126,7 @@ export const makeRunnerProviderInstance = (
 ): Effect.Effect<RunnerProviderInstance, never, Scope.Scope> =>
 	Effect.gen(function* () {
 		const providerScope = yield* Effect.scope;
+		const usage = Option.getOrUndefined(yield* Effect.serviceOption(Usage));
 		const abortFibers = yield* FiberMap.make<string, void, never>();
 		const interactionFibers = yield* FiberMap.make<string, void, never>();
 		const preWarmFibers = yield* FiberMap.make<
@@ -145,6 +153,7 @@ export const makeRunnerProviderInstance = (
 			preWarmFibers,
 			providerScope,
 			shutdown,
+			usage,
 		);
 		yield* Effect.addFinalizer(() => shutdown.pipe(Effect.ignore));
 		return instance;
@@ -270,6 +279,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 		>,
 		private readonly providerScope: Scope.Scope,
 		private readonly shutdown: Effect.Effect<void, ProviderInstanceFailure>,
+		private readonly usage?: UsageService,
 	) {
 		this.providerId = driver.driverKind;
 	}
@@ -340,7 +350,12 @@ export class RunnerProviderInstance implements ProviderInstance {
 						// local write; the runner places a held send when the SDK
 						// starts it (command_lifecycle: started). A continuation places
 						// nothing: it resumes the cut-off message's turn.
-						if (inFlight === 0 && !input.continuation)
+						if (
+							inFlight === 0 &&
+							!input.continuation &&
+							(!input.rewind ||
+								!PROVIDER_DRIVERS[this.providerId].revertsConversationNatively)
+						)
 							yield* this.placeUserMessageEffect({
 								sessionId,
 								inputId: input.inputId,
@@ -637,6 +652,14 @@ export class RunnerProviderInstance implements ProviderInstance {
 	): Effect.Effect<SessionOutputReply, SessionFailure> {
 		return Effect.gen({ self: this }, function* () {
 			observeTurnTimelineFrame(output);
+			if (output.type === "account-usage") {
+				yield* this.usage?.update?.(
+					output.accountId,
+					output.harness,
+					output.reading,
+				) ?? Effect.void;
+				return;
+			}
 			if (output.type === "background-task") {
 				this.deps.onBackgroundTask?.(output.transition);
 				return;
@@ -758,10 +781,19 @@ export class RunnerProviderInstance implements ProviderInstance {
 							}) ?? Effect.void,
 					).pipe(Effect.catchCause(() => Effect.void));
 				case "cancel-interaction":
-					return yield* FiberMap.remove(
+					yield* FiberMap.remove(
 						this.interactionFibers,
 						`${output.sinkId}:${output.requestId}`,
 					);
+					if (output.kind && sink.withdrawInteraction)
+						yield* sink
+							.withdrawInteraction(output.requestId, output.kind)
+							.pipe(
+								Effect.mapError((cause) =>
+									sessionFailure("withdrawInteraction", cause),
+								),
+							);
+					return;
 				case "release-sink":
 					for (const [key] of Array.from(this.interactionFibers)) {
 						if (key.startsWith(`${output.sinkId}:`)) {

@@ -170,7 +170,14 @@ export const makeDaemonRpcTestLayer = (
 		}),
 		Layer.effect(
 			Usage,
-			makeUsage({ accounts: Effect.succeed([]), readers: {} }),
+			makeUsage({
+				accounts: Effect.succeed([]),
+				readers: {
+					codex: { read: () => Effect.die("Unexpected Codex usage read") },
+					claude: { read: () => Effect.die("Unexpected Claude usage read") },
+					cursor: { read: () => Effect.die("Unexpected Cursor usage read") },
+				},
+			}),
 		),
 		Layer.succeed(PortScannerTag)({
 			getKnownPorts: () => Effect.succeed(new Set<number>()),

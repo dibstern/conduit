@@ -19,6 +19,7 @@ import {
 	PROVIDER_DRIVERS,
 } from "./contracts/provider-instance.js";
 import type { DaemonConfig } from "./daemon/config-persistence.js";
+import { assertNever } from "./utils.js";
 
 export { MANAGED_OPENCODE_ACCOUNT_ID };
 export type { AccountChange } from "./contracts/account.js";
@@ -104,48 +105,62 @@ export function accountsStateFromInstances(
 ): AccountsState {
 	const accounts = instances.map((instance): Account => {
 		const id = AccountIdSchema.make(instance.id);
-		if (getProviderDriver(instance.driver)?.accountKind === "server")
-			return {
-				driver: "opencode",
-				usageEligible: false,
-				id,
-				name: instance.name,
-				...(instance.managed && instance.id !== MANAGED_OPENCODE_ACCOUNT_ID
-					? { url: `http://localhost:${instance.port ?? 0}` }
-					: instance.url === undefined
-						? {}
-						: { url: instance.url }),
-				port: instance.port ?? 0,
-				managed: instance.managed ?? false,
-				...(instance.env === undefined ? {} : { env: instance.env }),
-				...(instance.configDir === undefined
-					? {}
-					: { configuredFolder: instance.configDir }),
-			};
 		const configuredFolder = instance.configDir?.trim() || undefined;
-		if (instance.driver === "cursor")
-			return {
-				driver: instance.driver,
-				id,
-				name: instance.name,
-				...(configuredFolder === undefined ? {} : { configuredFolder }),
-				...(instance.env === undefined ? {} : { env: instance.env }),
-				usageEligible: Boolean(instance.env?.["CURSOR_AUTH_TOKEN"]?.trim()),
-			};
-		return {
-			driver: "claude",
-			id,
-			name: instance.name,
-			folder:
-				configuredFolder === undefined
-					? launchLogin
-					: { _tag: "Configured", path: configuredFolder },
-			...(configuredFolder === undefined ? {} : { configuredFolder }),
-			...(instance.env === undefined ? {} : { env: instance.env }),
-			usageEligible:
-				!instance.env?.["ANTHROPIC_API_KEY"] &&
-				!instance.env?.["ANTHROPIC_AUTH_TOKEN"],
-		};
+		switch (instance.driver) {
+			case "opencode":
+				return {
+					driver: "opencode",
+					usageEligible: false,
+					id,
+					name: instance.name,
+					...(instance.managed && instance.id !== MANAGED_OPENCODE_ACCOUNT_ID
+						? { url: `http://localhost:${instance.port ?? 0}` }
+						: instance.url === undefined
+							? {}
+							: { url: instance.url }),
+					port: instance.port ?? 0,
+					managed: instance.managed ?? false,
+					...(instance.env === undefined ? {} : { env: instance.env }),
+					...(instance.configDir === undefined
+						? {}
+						: { configuredFolder: instance.configDir }),
+				};
+			case "cursor":
+				return {
+					driver: instance.driver,
+					id,
+					name: instance.name,
+					...(configuredFolder === undefined ? {} : { configuredFolder }),
+					...(instance.env === undefined ? {} : { env: instance.env }),
+					usageEligible: Boolean(instance.env?.["CURSOR_AUTH_TOKEN"]?.trim()),
+				};
+			case "codex":
+				return {
+					driver: "codex",
+					id,
+					name: instance.name,
+					...(configuredFolder === undefined ? {} : { configuredFolder }),
+					...(instance.env === undefined ? {} : { env: instance.env }),
+					usageEligible: true,
+				};
+			case "claude":
+				return {
+					driver: "claude",
+					id,
+					name: instance.name,
+					folder:
+						configuredFolder === undefined
+							? launchLogin
+							: { _tag: "Configured", path: configuredFolder },
+					...(configuredFolder === undefined ? {} : { configuredFolder }),
+					...(instance.env === undefined ? {} : { env: instance.env }),
+					usageEligible:
+						!instance.env?.["ANTHROPIC_API_KEY"] &&
+						!instance.env?.["ANTHROPIC_AUTH_TOKEN"],
+				};
+			default:
+				return assertNever(instance.driver);
+		}
 	});
 	return {
 		launchLogin,

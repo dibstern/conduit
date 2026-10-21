@@ -70,8 +70,9 @@
 		: undefined);
 	const shown = $derived.by(() => {
 		const tool = full ?? message;
-		return presentation?.output !== undefined && tool.result === undefined && tool.status !== "error"
-			? { ...tool, result: presentation.output }
+		const output = message.metadata?.['output'];
+		return typeof output === "string" && tool.result === undefined && tool.status !== "error"
+			? { ...tool, result: output }
 			: tool;
 	});
 	const input = $derived(hasPresentation ? ensureCanonical(shown.name, shown.input) : undefined);

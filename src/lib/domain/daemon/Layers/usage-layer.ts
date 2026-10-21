@@ -8,6 +8,7 @@ import {
 	type ClaudeUsageReaderOptions,
 	makeClaudeUsageReader,
 } from "../../../provider/claude/claude-usage-probe.js";
+import { makeCodexUsageReader } from "../../../provider/codex/codex-usage.js";
 import { makeCursorUsage } from "../../../provider/cursor/cursor-usage.js";
 import { usageAccounts } from "../../../provider/usage-reader.js";
 import { AccountDirectory } from "../Services/account-directory.js";
@@ -132,6 +133,7 @@ export const UsageLive = (options: ClaudeUsageReaderOptions = {}) =>
 							: undefined;
 					}),
 				readers: {
+					codex: makeCodexUsageReader(initial.configDir),
 					cursor: cursor.reader,
 					claude: makeClaudeUsageReader({
 						...options,

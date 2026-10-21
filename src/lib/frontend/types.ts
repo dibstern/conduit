@@ -289,6 +289,8 @@ export interface QuestionRequest {
 	toolUseId?: string;
 	/** Provider that owns this question, when known. */
 	providerId?: string;
+	/** Async questions remain answerable while the agent keeps working. */
+	delivery?: "async";
 	questions: AskUserQuestion[];
 }
 
