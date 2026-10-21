@@ -161,7 +161,12 @@ describe("Integration: Claude Side Thread launch fence", () => {
 			}
 			await client.rpcCall((rpc) => rpc.PreWarmSession({ sessionId: side.id }));
 			warmed = launches.at(-1);
-			expect(warmed?.options.resume).toBe(side.id);
+			expect(warmed?.options).toMatchObject({
+				resume: expect.any(String),
+				forkSession: true,
+				sessionId: side.id,
+			});
+			expect(warmed?.options.resume).not.toBe(side.id);
 			expect(warmed?.options.permissionMode).toBe(sdkPermissionMode);
 			if (launch !== "unfenced pre-warm") {
 				expect(warmed?.options.systemPrompt).toBe(
@@ -192,7 +197,17 @@ describe("Integration: Claude Side Thread launch fence", () => {
 			changedPermissions ? "full" : "ask",
 		);
 		const sideLaunch = launches.at(-1)?.options;
-		expect(sideLaunch?.resume).toBe(side.sessionId);
+		if (launch === "unfenced pre-warm") {
+			expect(sideLaunch?.resume).toBe(side.sessionId);
+			expect(sideLaunch?.forkSession).toBeUndefined();
+		} else {
+			expect(sideLaunch).toMatchObject({
+				resume: expect.any(String),
+				forkSession: true,
+				sessionId: side.sessionId,
+			});
+			expect(sideLaunch?.resume).not.toBe(side.sessionId);
+		}
 		expect(sideLaunch?.systemPrompt).toBe(`${worktreeLine}\n${sideThreadLine}`);
 		expect(sideLaunch?.disallowedTools).toContain("SendMessage");
 		expect(sideLaunch?.permissionMode).toBe(sdkPermissionMode);
@@ -220,7 +235,12 @@ describe("Integration: Claude Side Thread launch fence", () => {
 		await client.sendMessage("Continue the task", { sessionId: forkId });
 		expect((await forkEnd).attention).not.toBe("error");
 		const forkLaunch = launches.at(-1)?.options;
-		expect(forkLaunch?.resume).toBe(forkId);
+		expect(forkLaunch).toMatchObject({
+			resume: expect.any(String),
+			forkSession: true,
+			sessionId: forkId,
+		});
+		expect(forkLaunch?.resume).not.toBe(forkId);
 		expect(forkLaunch?.systemPrompt).toBe(worktreeLine);
 		expect(forkLaunch?.disallowedTools).toBeUndefined();
 		expect(forkLaunch?.permissionMode).toBe("bypassPermissions");

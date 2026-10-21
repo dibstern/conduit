@@ -7,8 +7,11 @@ import { getProviderDriver } from "../../contracts/provider-instance.js";
 import {
 	type ClaudeAdapterError,
 	ClaudeBoundaryError,
+	ClaudeResumeRefused,
 	ClaudeRuntimeError,
 } from "../event-sink-errors.js";
+import { makeClaudeForkQuery } from "./claude-fork-query.js";
+import type { ReadClaudeGoalStatus } from "./claude-goal-tracker.js";
 import type { ClaudePermissionBridge } from "./claude-permission-bridge.js";
 import type { ClaudeProviderInstanceDeps } from "./claude-provider-runtime.js";
 import { buildClaudeQueryOptions } from "./claude-query-options.js";
@@ -141,6 +144,13 @@ function immutableOptions(options: SDKOptions) {
 		canUseTool: _permission,
 		...launch
 	} = options;
+	if (launch.forkSession) {
+		if (launch.sessionId) launch.resume = launch.sessionId;
+		else delete launch.resume;
+		delete launch.sessionId;
+		delete launch.forkSession;
+		delete launch.resumeSessionAt;
+	}
 	return launch;
 }
 
@@ -199,6 +209,8 @@ export function inheritedSettingsFingerprint(
 export const makeClaudeWarmedQueryOwner = (
 	queryFactory: NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>,
 	prepareQuery?: () => Promise<void>,
+	readGoalStatus?: ReadClaudeGoalStatus,
+	onNativeSessionId?: (sessionId: string, nativeSessionId: string) => void,
 ) =>
 	Effect.gen(function* () {
 		const initializing = yield* FiberMap.make<symbol, void>();
@@ -262,7 +274,17 @@ export const makeClaudeWarmedQueryOwner = (
 											message: "Claude session is not ready",
 										};
 							const empty = yield* makeClaudeEmptyQuery(
-								queryFactory,
+								(params) =>
+									input.clearInheritedGoal
+										? makeClaudeForkQuery(
+												(prompt) => queryFactory({ ...params, prompt }),
+												params.prompt,
+												input,
+												readGoalStatus,
+												(nativeId) =>
+													onNativeSessionId?.(input.sessionId, nativeId),
+											)
+										: queryFactory(params),
 								(abortController) => {
 									const options = buildClaudeQueryOptions(
 										input,
@@ -303,7 +325,12 @@ export const makeClaudeWarmedQueryOwner = (
 								Effect.tryPromise({
 									try: () => resource.query.initializationResult(),
 									catch: (cause) =>
-										new ClaudeBoundaryError({ operation: "preWarm", cause }),
+										cause instanceof ClaudeResumeRefused
+											? cause
+											: new ClaudeBoundaryError({
+													operation: "preWarm",
+													cause,
+												}),
 								}).pipe(
 									Effect.timeoutOrElse({
 										duration: "10 seconds",
