@@ -49,10 +49,9 @@ export const composerFilesHandlers: StepHandler[] = [
 				world.page.getByRole("button", { name: "Send", exact: true }),
 			).toBeEnabled();
 			const path = "acceptance/visual/artifacts/restored-file-only-send.png";
-			await world.page.locator("#input-area").screenshot({
-				path,
-				animations: "disabled",
-			});
+			await world.page
+				.locator("#input-area")
+				.screenshot({ path, animations: "disabled" });
 			world.artifacts.push(path);
 		},
 	},

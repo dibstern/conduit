@@ -169,11 +169,18 @@ export const transcriptFeedHandlers: StepHandler[] = [
 		match: /^the server places the sent message in the new session$/,
 		run: async ({ world }) => {
 			const text = sentTexts.get(world.page) ?? "";
-			requireRpcControl(world.page).setDetailRows(
+			const rpc = requireRpcControl(world.page);
+			const request = await rpc.waitForRequest(
+				(candidate) =>
+					candidate.tag === "input.submit" &&
+					candidate.payload["text"] === text,
+			);
+			rpc.setDetailRows(
 				"sess-first-send",
 				detailRowsOf({
 					id: "msg-first-send",
 					role: "user",
+					inputId: String(request.payload["inputId"]),
 					time: { created: 1 },
 					parts: [{ id: "part-first-send", type: "text", text }],
 				}),

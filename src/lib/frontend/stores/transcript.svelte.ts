@@ -23,9 +23,9 @@ import { renderMarkdown } from "../utils/markdown.js";
 import {
 	advanceTurnIfNewMessage,
 	clearSessionChatState,
-	draftSend,
 	getOrCreateSessionSlot,
 	historyState,
+	localSends,
 	type PendingInput,
 	restoreContextFromMessages,
 	type SessionMessages,
@@ -685,12 +685,17 @@ function install(
 		entry,
 		slot.messages.messages,
 	);
-	// The placed send takes over from the draft's copy in the same frame.
-	if (
-		draftSend.sessionId === sessionId &&
-		slot.messages.messages.some((message) => message.type === "user")
-	)
-		draftSend.message = null;
+	// The placed send, or its tray row, takes over from the local copy in the
+	// same frame.
+	for (const [inputId, send] of localSends)
+		if (
+			send.sessionId === sessionId &&
+			(entry.rows.some(
+				(row) => row.role === "user" && row.inputId === inputId,
+			) ||
+				entry.pending.some((input) => input.inputId === inputId))
+		)
+			localSends.delete(inputId);
 	slot.messages.historyHasMore = entry.hasMore;
 	slot.messages.loadLifecycle = "ready";
 	if (sessionState.currentId === sessionId)
