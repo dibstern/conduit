@@ -1,7 +1,7 @@
 // Tests session management operations: create, switch, rename, delete, and
 // manage sessions through the relay WebSocket interface.
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -10,11 +10,11 @@ import {
 describe("Integration: Session Lifecycle", () => {
 	let harness: RelayHarness;
 
-	beforeAll(async () => {
+	beforeEach(async () => {
 		harness = await createRelayHarness();
 	}, 30_000);
 
-	afterAll(async () => {
+	afterEach(async () => {
 		if (harness) await harness.stop();
 	});
 
@@ -62,6 +62,7 @@ describe("Integration: Session Lifecycle", () => {
 		client.clearReceived();
 		const switchMsg = await client.createSession("Switch Target");
 		expect(switchMsg["id"]).toBeTruthy();
+		expect(switchMsg["id"]).not.toBe(firstId);
 		client.clearReceived();
 
 		// Now switch back to the first session
@@ -141,6 +142,7 @@ describe("Integration: Session Lifecycle", () => {
 		client.clearReceived();
 		const switchMsg = await client.createSession("Reset State Test");
 		expect(switchMsg["id"]).toBeTruthy();
+		expect(switchMsg["id"]).not.toBe(firstId);
 
 		// Now switch back to the first session.
 		client.clearReceived();
