@@ -177,7 +177,7 @@
 	const summarySettings = $derived(surfacingConfig.status.recap);
 	const summariesOn = $derived(surfacingConfig.status.summariesEnabled && summarySettings.model !== "off");
 	const summaryEnabled = $derived(summariesOn && final && !!sessionId);
-	const summaryLabel = $derived(recap.generating ? "✦ Summarising…" : recap.versions.length ? "✦ Summary" : "✦ Summarize");
+	const summaryLabel = $derived(recap.generating ? "✦ Summarizing…" : "✦ Summary");
 	$effect(() => {
 		const id = storeTurnId;
 		const session = sessionId;
@@ -493,8 +493,8 @@
 
 <!-- Phones open the summary from its own row under the strip; wider screens use the head chip. -->
 {#snippet summaryPanel(view: ReturnType<typeof surfaceTurn>, onhover: (ordinal: number | null) => void)}
-	<Button variant="ghost" size="content" align="start" tone="inherit" touchTarget class="min-[600px]:hidden w-full min-h-[40px] gap-[8px] py-[8px] text-[13px]" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>
-		<span>{summaryLabel}</span>{#if recap.versions.length && summaryNew > 0}<span class="text-accent font-mono text-[12px]">{summaryNew} new</span>{/if}<Icon name="chevron-right" size={14} class="ml-auto text-text-muted" />
+	<Button variant="ghost" size="content" align="start" tone="default" touchTarget class="min-[600px]:hidden w-full mt-[10px] h-[38px] rounded-[11px] bg-bg pl-[12px] pr-[8px] gap-[8px] text-[14px] font-medium" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>
+		<span class="mr-auto">{summaryLabel}</span>{#if recap.versions.length && summaryNew > 0}<span class="text-accent font-mono text-[12px]">{summaryNew} new</span>{/if}<Icon name="chevron-right" size={14} class="text-text-dimmer" />
 	</Button>
 	<SurfacingSummary versions={recap.versions} selected={recap.current} open={summaryVisible} phone={phone.current} {live} {view}
 		plainCitations={!surfacingActive}
@@ -519,18 +519,18 @@
 			<div data-testid={live ? "turn-live-head" : undefined} class="flex items-center gap-[6px] min-w-0">
 				<Tooltip bind:open={detailsOpen}>
 					{#snippet trigger({ props })}
-						<Button {...props} variant="ghost" size="content" tone="secondary" hoverFill="none" align="start" touchTarget
+						<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" align="start" touchTarget
 							class="turn-activity-toggle gap-[6px] text-[13px] min-w-0" aria-expanded={expanded}
 							onclick={() => { openTurn(); expanded = !expanded; }}>
 							{#if live}<Icon name="loader-circle" size={13} class="animate-spin shrink-0 text-accent" />
-							{:else}<Icon name={expanded ? "chevron-down" : "chevron-right"} size={14} class="shrink-0 text-text-muted" />{/if}
-							<span class="font-semibold">{live ? "Working" : "Worked"}</span>
+							{:else}<Icon name={expanded ? "chevron-down" : "chevron-right"} size={14} class="shrink-0 text-text-dimmer" />{/if}
+							<span class="text-[14px] font-semibold text-text">{live ? "Working" : "Worked"}</span>
 							{#if live && !turn.user}
-								<span class="text-[12px] text-text-muted" data-testid="turn-live-elapsed">(no prompt to time from)</span>
+								<span class="text-[12px] text-text-dimmer" data-testid="turn-live-elapsed">(no prompt to time from)</span>
 							{:else if duration !== undefined}
-								<span class="turn-duration font-mono text-[12px] text-text-muted shrink-0" data-testid={live ? "turn-live-elapsed" : undefined}>{live && duration < 1000 ? "0s" : fmtDuration(duration)}</span>
+								<span class="turn-duration font-mono text-[12px] text-text-dimmer shrink-0" data-testid={live ? "turn-live-elapsed" : undefined}>{live && duration < 1000 ? "0s" : fmtDuration(duration)}</span>
 							{/if}
-							{#if phrase}<span class="truncate text-[12px] text-text-muted {minimised ? 'max-[599px]:hidden' : ''}">· {phrase}</span>{/if}
+							{#if phrase}<span class="truncate text-[12px] text-text-muted {surfacingActive || minimised ? 'max-[599px]:hidden' : ''}">· {phrase}</span>{/if}
 						</Button>
 					{/snippet}
 					<div class="max-w-[340px] flex flex-col gap-[6px] text-[12px]">
@@ -548,11 +548,11 @@
 						{#if surfacingActive && surface.openAsk}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium bg-status-ask/18 text-status-ask" data-testid="surfacing-ask-chip" onclick={() => revealMessage(surface.openAsk)}>? #{surface.openAsk.surfacingOrdinal}</Button>{/if}
 						{#if surfacingActive && surface.hasReadState}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium {surface.unreadCount ? 'bg-accent/18 text-accent' : 'bg-chip text-text-secondary'}" data-testid="surfacing-head-unread" onclick={() => revealMessage(surface.nextUnread?.part ?? null)}>{surface.unreadCount ? `${surface.unreadCount} unread` : "All read ✓"}</Button>{/if}
 						{#if surfacingActive}{@render surfacingRegions.headChips?.(surface)}{/if}
-						{#if summaryEnabled}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="{minimised ? '' : 'max-[599px]:hidden'} shrink-0 h-[24px] rounded-full px-[9px] text-[12px] bg-chip text-text-secondary" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>{#if minimised}<span class="max-[599px]:sr-only">{summaryLabel}</span><span class="min-[600px]:hidden" aria-hidden="true">✦</span>{:else}{summaryLabel}{/if}{#if recap.versions.length && summaryNew > 0}<span class="text-accent {minimised ? 'max-[599px]:hidden' : ''}">· {summaryNew} new</span>{/if}</Button>{/if}
+						{#if summaryEnabled}<Button variant="ghost" size="content" tone="default" hoverFill="none" touchTarget class="{minimised ? '' : 'max-[599px]:hidden'} shrink-0 h-[24px] rounded-full px-[9px] text-[13px] leading-[normal] font-medium bg-chip" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>{#if minimised}<span class="max-[599px]:sr-only">{summaryLabel}</span><span class="min-[600px]:hidden" aria-hidden="true">✦</span>{:else}{summaryLabel}{/if}{#if recap.versions.length && summaryNew > 0}<span class="text-accent {minimised ? 'max-[599px]:hidden' : ''}">· {summaryNew} new</span>{/if}</Button>{/if}
 					</div>
 				{/if}
-				{#if onsummarize}<span class="hidden md:contents"><Button variant="accent-soft" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px] shrink-0" onclick={onsummarize}>✦ Summarize</Button></span>{/if}
-				{#if surfacingActive}<Button variant="ghost" size="content" tone="muted" touchTarget class="ml-auto shrink-0 -my-[2px] h-[24px] w-[24px]" data-testid="surfacing-minimise-toggle" ariaLabel={minimised ? "Expand turn" : "Minimise turn"} aria-expanded={!minimised} onclick={toggleMinimised}><Icon name={minimised ? "chevron-down" : "chevron-up"} size={14} /></Button>{/if}
+					{#if onsummarize}<span class="hidden md:contents"><Button variant="accent-soft" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px] shrink-0" onclick={onsummarize}>✦ Summary</Button></span>{/if}
+				{#if surfacingActive}<Button variant="ghost" size="content" tone="inherit" touchTarget class="ml-auto shrink-0 -my-[2px] h-[24px] w-[24px] text-text-dimmer" data-testid="surfacing-minimise-toggle" ariaLabel={minimised ? "Expand turn" : "Minimise turn"} aria-expanded={!minimised} onclick={toggleMinimised}><Icon name={minimised ? "chevron-down" : "chevron-up"} size={14} /></Button>{/if}
 			</div>
 			{#if minimised}
 				<MinimisedTurn view={surface} onopen={openMinimisedMessage}>
@@ -580,8 +580,8 @@
 			{#if summaryEnabled}{@render summaryPanel(surface, hoverCitation)}{/if}
 			{/if}
 			{#if onsummarize && !minimised}
-				<Button variant="ghost-accent" size="content" align="start" touchTarget class="md:hidden w-full gap-[8px] py-[8px] text-[13px]" onclick={onsummarize}>
-					<span>✦ Summarize</span><Icon name="chevron-right" size={14} class="ml-auto" />
+				<Button variant="ghost" size="content" tone="default" align="start" touchTarget class="md:hidden w-full mt-[10px] h-[38px] rounded-[11px] bg-bg pl-[12px] pr-[8px] gap-[8px] text-[14px] font-medium" onclick={onsummarize}>
+					<span>✦ Summary</span><Icon name="chevron-right" size={14} class="ml-auto text-text-dimmer" />
 				</Button>
 			{/if}
 		</div>
@@ -595,7 +595,7 @@
 					{@const i = expanded ? index : earlierCount + index}
 					{@const latestLiveStep = live && i === segment.activity.length - 1}
 					<div data-log-part={part.uuid} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
-						<ActivityRow {part} {liveTasks} {taskListedAt} live={latestLiveStep} duration={durations?.[i]} highlight={part.uuid === focusUuid} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} />
+						<ActivityRow {part} {liveTasks} {taskListedAt} runningTasks={running} live={latestLiveStep} duration={durations?.[i]} highlight={part.uuid === focusUuid} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} />
 						{#if surfacingActive && expanded && part.type === "assistant"}
 							{@const pin = surface.messages.find((message) => message.part.uuid === part.uuid)}
 							{#if pin}

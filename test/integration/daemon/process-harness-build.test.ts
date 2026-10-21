@@ -57,7 +57,7 @@ describe("process harness supplied builds", () => {
 		);
 		const runtimePath = join(
 			dist,
-			"src/lib/provider/claude/claude-provider-runtime.js",
+			"src/lib/provider/claude/claude-runner-payload.js",
 		);
 		const runtime = readFileSync(runtimePath, "utf8");
 		const sdkImport =

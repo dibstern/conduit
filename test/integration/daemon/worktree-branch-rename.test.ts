@@ -688,6 +688,25 @@ process.exit(result.status ?? 1);
 			{ shim: true },
 		);
 		const session = await create("Concurrent rename and delete");
+		const observer = new Database(fixture.daemonStorePath());
+		try {
+			// Capture committed receipts before deletion can reclaim event history.
+			observer.exec(`
+				CREATE TABLE test_branch_rename_receipts (
+					sequence INTEGER PRIMARY KEY, session_id TEXT NOT NULL,
+					type TEXT NOT NULL, data TEXT NOT NULL
+				);
+				CREATE TRIGGER test_capture_branch_rename AFTER INSERT ON events
+				WHEN NEW.type = 'session.workspace_changed'
+					AND json_extract(NEW.data, '$.cause') = 'branch-rename'
+				BEGIN
+					INSERT INTO test_branch_rename_receipts (sequence, session_id, type, data)
+					VALUES (NEW.sequence, NEW.session_id, NEW.type, NEW.data);
+				END;
+			`);
+		} finally {
+			observer.close();
+		}
 		const primaryPath = checkout(session, fixture.projectDir);
 		const secondaryPath = checkout(session, secondary);
 		const oldName = git(primaryPath, "branch", "--show-current");
@@ -782,13 +801,32 @@ process.exit(result.status ?? 1);
 					),
 				).toBe("main");
 			}
-			expect(state().workspaceEvents.at(-1)?.data).toMatchObject({
-				cause: "branch-rename",
-				ownership: [
-					expect.objectContaining({ branchName }),
-					expect.objectContaining({ branchName }),
-				],
-			});
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				const receipts = db
+					.prepare(
+						"SELECT sequence, session_id, type, data FROM test_branch_rename_receipts WHERE session_id = ? ORDER BY sequence",
+					)
+					.all(session.id) as Array<{
+					sequence: number;
+					session_id: string;
+					type: string;
+					data: string;
+				}>;
+				evidence["branchRenameReceipts"] = receipts;
+				expect(receipts).toHaveLength(1);
+				expect(
+					JSON.parse(receipts.at(-1)?.data ?? "null") as unknown,
+				).toMatchObject({
+					cause: "branch-rename",
+					ownership: [
+						expect.objectContaining({ branchName }),
+						expect.objectContaining({ branchName }),
+					],
+				});
+			} finally {
+				db.close();
+			}
 		} finally {
 			writeFileSync(join(fixture.root, "release-rename"), "release\n");
 			await Promise.allSettled([

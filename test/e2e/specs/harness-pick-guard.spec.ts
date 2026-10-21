@@ -34,6 +34,7 @@ import type {
 } from "../../helpers/process-harness.js";
 import { openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
+import { closeSettings } from "../helpers/settings.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
@@ -777,7 +778,6 @@ async function expectShown(picker: Locator, pick: Pick): Promise<void> {
 }
 
 async function openModelsSettings(page: Page): Promise<void> {
-	// The title menu holds no Settings; a phone's island has its own overflow.
 	await page
 		.getByTestId("session-bar-overflow")
 		.or(page.getByTestId("session-bar-island-overflow"))
@@ -1110,7 +1110,7 @@ test.describe("session composer owns its stored pick", () => {
 				try {
 					await openModelsSettings(page);
 					await held.wait;
-					await page.getByTestId("settings-close-btn").click();
+					await closeSettings(page);
 					await openPickerRoot(page, picker);
 					if (change === "effort")
 						await page.getByTestId("picker-effort-option-high").click();

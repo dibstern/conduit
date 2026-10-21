@@ -505,9 +505,10 @@ for (const mode of [
 					git: { branch: "main" },
 				});
 				await trigger.click();
+				// An omitted override uses Claude's enabled driver capability.
 				await expect(
 					page.getByRole("menuitem", { name: "Move to worktree…" }),
-				).toHaveCount(supportsWorktree === true ? 1 : 0);
+				).toHaveCount(supportsWorktree === false ? 0 : 1);
 			});
 		}
 

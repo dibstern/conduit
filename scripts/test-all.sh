@@ -3,7 +3,8 @@
 # Exits non-zero if ANY step failed.
 # Usage: bash scripts/test-all.sh [static|vitest|build|e2e|storybook|visual ...]
 #
-# Single groups retain their original commands, order and output locations.
+# Every selected group keeps its tests and stage order. The timed create test
+# runs separately from other harness cases at one worker.
 # Multiple groups overlap static checks with builds, then integration/contract
 # with strict visuals. All dist/ writers finish before readers; E2E runs alone.
 # Lane logs and ordered stage timings survive in the printed temporary run dir.
@@ -110,6 +111,25 @@ run_group() {
   esac
 }
 
+# Keep the timed create contract separate from unrelated harness workers.
+# Both selections are mandatory, even when the regular selection fails.
+run_harness_playwright() {
+  local config="$1"
+  local selection='creates reach every sidebar under streaming write load$'
+  local output_dir="${log_dir:-test-results}/artifacts/harness"
+  local report_dir="${PLAYWRIGHT_HTML_OUTPUT_DIR:-playwright-report}"
+  local regular_rc=0 latency_rc=0
+  env CONDUIT_TEST_DIST=dist PLAYWRIGHT_HTML_OUTPUT_DIR="$report_dir/regular" \
+    pnpm exec playwright test --config "$config" --grep-invert "$selection" \
+      --output "$output_dir/regular" || regular_rc=$?
+  echo "Harness regular phase exit: $regular_rc"
+  env CONDUIT_TEST_DIST=dist PLAYWRIGHT_HTML_OUTPUT_DIR="$report_dir/create-latency" \
+    pnpm exec playwright test --config "$config" test/e2e/specs/harness-create-latency.spec.ts \
+      --grep "$selection" --workers=1 --output "$output_dir/create-latency" || latency_rc=$?
+  echo "Harness create-latency phase exit: $latency_rc"
+  [[ "$regular_rc" -eq 0 && "$latency_rc" -eq 0 ]]
+}
+
 run_playwright() {
   local label="$1" suite="$2" config="$3"
   local args=()
@@ -119,7 +139,7 @@ run_playwright() {
   fi
   # Keep the original env commands visible for single-group invocations.
   case "$suite" in
-    harness) run "$label" env CONDUIT_TEST_DIST=dist pnpm exec playwright test --config "$config" ${args[@]+"${args[@]}"} ;;
+    harness) run "$label" run_harness_playwright "$config" ;;
     visual) run "$label" env VISUAL_STRICT=1 pnpm exec playwright test --config "$config" ${args[@]+"${args[@]}"} ;;
     *) run "$label" pnpm exec playwright test --config "$config" ${args[@]+"${args[@]}"} ;;
   esac

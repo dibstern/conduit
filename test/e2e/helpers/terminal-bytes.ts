@@ -28,11 +28,15 @@ data = b""
 try:
     while not data.endswith(bytes([${MARKER}])):
         data += os.read(0, 1024)
+    groups = data[:-1].split(bytes([${SEPARATOR}]))
+    with open(out, "w") as log:
+        log.write("\\n".join(g.hex(" ") for g in groups))
 finally:
     termios.tcsetattr(0, termios.TCSADRAIN, old)
-    sys.stdout.write(off + "\\r\\nBYTE-DUMP-DONE\\r\\n")
-groups = data[:-1].split(bytes([${SEPARATOR}]))
-open(out, "w").write("\\n".join(g.hex(" ") for g in groups))
+    sys.stdout.write(off)
+    sys.stdout.flush()
+sys.stdout.write("\\r\\nBYTE-DUMP-DONE\\r\\n")
+sys.stdout.flush()
 `;
 
 export type ByteDumpModes = {

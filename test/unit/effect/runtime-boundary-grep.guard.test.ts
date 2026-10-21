@@ -79,97 +79,6 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 		reason: "storybook/mock fixture text, not executable production code",
 	},
 	{
-		path: "src/lib/frontend/components/session/SessionItem.stories.ts",
-		snippetPattern: /Session row is missing/,
-		reason:
-			"storybook play() guard that narrows the row query, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/session/GitIdentity.stories.ts",
-		snippetPattern: /Missing checkout (wrapper|labels|branch|slot)/,
-		reason:
-			"storybook play() guards that narrow the checkout queries, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/chat/MessageList.stories.ts",
-		snippetPattern: /Reply header \$\{id\} is missing|Transcript is missing/,
-		reason:
-			"storybook play() guards that narrow the transcript queries, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/chat/SurfacingSummary.stories.ts",
-		snippetPattern: /Recap prose moved/,
-		reason:
-			"storybook play() guard that narrows the recap prose query, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/input/InputArea.stories.ts",
-		snippetPattern: /Composer is missing/,
-		reason:
-			"storybook play() guard that narrows the composer query, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/input/InputArea.stories.ts",
-		snippetPattern: /Ended goal is missing/,
-		reason:
-			"storybook play() guard that narrows goal fixture state, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/input/InputArea.stories.ts",
-		snippetPattern: /composer layers not found/,
-		reason:
-			"storybook play() guard that narrows the composer layer queries, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/input/InputArea.stories.ts",
-		snippetPattern:
-			/Claude driver traits are missing|Composer (story|stage) session is missing|Send is missing|Words summary focus target is missing|Waiting tray actions are missing/,
-		reason:
-			"storybook fixture and play() guards that narrow story state and the send query, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/layout/SessionBar.stories.ts",
-		snippetPattern: /Checking spinner is missing/,
-		reason:
-			"storybook play() guard that narrows the spinner query, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/model/ModelVariant.stories.ts",
-		snippetPattern: /The effort meter is missing/,
-		reason:
-			"storybook play() guard that narrows the meter query, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/ui/Icon.stories.ts",
-		snippetPattern: /Pause icon is missing/,
-		reason:
-			"storybook play() guard that narrows the icon query, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/model/InstanceModelPicker.stories.ts",
-		snippetPattern: /The picker sheet handle is missing/,
-		reason:
-			"storybook play() guard that narrows the sheet handle query, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/ui/Menu.stories.ts",
-		snippetPattern: /The shared sheet chrome is missing/,
-		reason:
-			"storybook play() guard that narrows the sheet chrome query, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/ui/PhoneSheet.stories.ts",
-		snippetPattern: /Sheet body or footer is missing/,
-		reason:
-			"storybook play() guard that narrows the sheet body and footer query, not executable production code",
-	},
-	{
-		path: "src/lib/frontend/components/ui/HoldMenu.stories.ts",
-		snippetPattern: /Missing in-menu dismiss layer/,
-		reason:
-			"storybook play() guard that narrows the dismiss layer query, not executable production code",
-	},
-	{
 		path: "src/lib/frontend/components/input/input-utils.ts",
 		snippetPattern: /GIF exceeds the 5 MB encoded size limit/,
 		reason: "browser attachment validation failure surfaced to UI caller",
@@ -421,15 +330,19 @@ describe("Effect runtime boundary grep", () => {
 	});
 
 	it("keeps Claude runtime fibers session-owned instead of daemon-owned", () => {
-		const path = "src/lib/provider/claude/claude-provider-runtime.ts";
-		const source = readFileSync(join(REPO_ROOT, path), "utf8");
+		for (const path of [
+			"src/lib/provider/claude/claude-provider-runtime.ts",
+			"src/lib/provider/claude/claude-runner-payload.ts",
+		]) {
+			const source = readFileSync(join(REPO_ROOT, path), "utf8");
 
-		expect(source.match(/\bforkDaemon\b/g) ?? []).toEqual([]);
+			expect(source.match(/\bforkDaemon\b/g) ?? []).toEqual([]);
+		}
 	});
 
 	it("instruments Claude provider runtime Effect operations", () => {
-		const runtime = readFileSync(
-			join(REPO_ROOT, "src/lib/provider/claude/claude-provider-runtime.ts"),
+		const payload = readFileSync(
+			join(REPO_ROOT, "src/lib/provider/claude/claude-runner-payload.ts"),
 			"utf8",
 		);
 		const permission = readFileSync(
@@ -447,14 +360,14 @@ describe("Effect runtime boundary grep", () => {
 			"claude.interrupt",
 			"claude.shutdown",
 		]) {
-			expect(runtime).toContain(`Effect.withSpan("${span}"`);
+			expect(payload).toContain(`Effect.withSpan("${span}"`);
 		}
 		for (const field of [
 			"providerId: this.providerId",
 			"sessionId",
 			"turnId",
 		]) {
-			expect(runtime).toContain(field);
+			expect(payload).toContain(field);
 		}
 		expect(permission).toContain('Effect.withSpan("claude.permission"');
 		expect(permission).toContain('providerId: "claude"');
@@ -486,6 +399,8 @@ describe("Effect runtime boundary grep", () => {
 
 	it("keeps remaining production plain Error throws explicitly reclassified", () => {
 		const hits = productionSourceFiles(SRC_LIB).flatMap((file) => {
+			// Story play() invariants do not run in production.
+			if (file.endsWith(".stories.ts")) return [];
 			const relPath = relative(REPO_ROOT, file);
 			const lines = readFileSync(file, "utf8").split("\n");
 			return lines.flatMap((line, index) =>

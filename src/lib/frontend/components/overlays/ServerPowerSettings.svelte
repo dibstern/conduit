@@ -73,6 +73,7 @@
 <SettingsGroup id="server-power" title="Power" testId="server-power-settings">
 	<SettingsRow
 		label="Keep computer awake"
+		icon="power"
 		description={status ? status.keepAwakeCommand === null ? "Not available on this computer" : "Stops this computer sleeping while conduit runs" : serverStatus.error ? "Could not load power status." : "Loading power status…"}
 		checked={status?.keepAwake ?? false}
 		disabled={!status || status.keepAwakeCommand === null || saving}
@@ -82,7 +83,7 @@
 		<SettingsRow label="Command">
 			{#snippet control()}
 				<span class="min-w-0 break-all font-mono text-[12px] text-text" data-testid="server-power-command-value">{status.keepAwakeCommand}</span>
-				<Button touchTarget variant="secondary" size="sm" data-testid="server-power-edit" aria-expanded={openForm === "keep-awake-command"} aria-controls="server-power-form" disabled={saving} onclick={toggleCommandForm}>Edit</Button>
+				<Button touchTarget variant="settings" size="content" data-testid="server-power-edit" aria-expanded={openForm === "keep-awake-command"} aria-controls="server-power-form" disabled={saving} onclick={toggleCommandForm}>Edit</Button>
 			{/snippet}
 		</SettingsRow>
 		{#if openForm === "keep-awake-command"}
@@ -106,8 +107,8 @@
 					</label>
 				</div>
 				<div class="flex flex-wrap items-center justify-end gap-1.5">
-					<Button touchTarget variant="secondary" size="sm" data-testid="server-power-cancel" disabled={saving} onclick={() => { error = null; onToggleForm("keep-awake-command"); }}>Cancel</Button>
-					<Button touchTarget variant="primary" size="sm" type="submit" data-testid="server-power-save" disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
+					<Button touchTarget variant="settings" size="content" data-testid="server-power-cancel" disabled={saving} onclick={() => { error = null; onToggleForm("keep-awake-command"); }}>Cancel</Button>
+					<Button touchTarget variant="settings" tone="accent" size="content" type="submit" data-testid="server-power-save" disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
 				</div>
 			</form>
 		{/if}

@@ -19,6 +19,7 @@ import { ProjectionRunnerEffectTag } from "./projection-runner-effect.js";
 import { mergeTouches } from "./projectors-effect.js";
 import { SessionRollupProjects } from "./session-rollup-projects.js";
 import { SessionStateProjectionNotifierTag } from "./session-state-projection-notifier.js";
+import { readSessionWorktreeOwnershipSnapshot } from "./session-worktree-ownership.js";
 import { refreshSidebar } from "./sidebar-projection.js";
 
 export type CommitAndSignalFailure =
@@ -224,6 +225,24 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 										const advance = yield* projectionRunner
 											.projectBatch(events, endedRunEvents, (event) =>
 												Effect.gen(function* () {
+													// Direct provider/born-dead writers can bypass session commands.
+													// Capture their own marker inside this same deletion transaction.
+													if (
+														event.sessionId === event.data.sessionId &&
+														event.data.worktreeOwnership === undefined
+													) {
+														const worktreeOwnership =
+															yield* readSessionWorktreeOwnershipSnapshot(
+																eventStore.projectId,
+																event.sessionId,
+															).pipe(
+																Effect.provideService(SqlClient.SqlClient, sql),
+															);
+														if (worktreeOwnership)
+															yield* sql`UPDATE events SET data = json_set(data, '$.worktreeOwnership', json(${JSON.stringify(worktreeOwnership)}))
+																WHERE sequence = ${event.sequence} AND project_id = ${eventStore.projectId}
+																AND session_id = ${event.data.sessionId}`;
+													}
 													// Earlier events in this batch have projected. Capture the
 													// current subtree before the root's cascade erases it.
 													const subtree = yield* sql.unsafe<{ id: string }>(
@@ -234,20 +253,39 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 														({ id }) => !marked.has(id),
 													);
 													for (const { id } of descendants) marked.add(id);
-													const appended = yield* eventStore.appendBatch(
-														descendants.map(({ id }) =>
-															canonicalEvent(
-																"session.deleted",
-																id,
-																{ sessionId: id },
-																{
-																	provider: event.provider,
-																	createdAt: event.createdAt,
-																	metadata: event.metadata,
-																},
-															),
-														),
+													const descendantMarkers = yield* Effect.forEach(
+														descendants,
+														({ id }) =>
+															Effect.gen(function* () {
+																const worktreeOwnership =
+																	yield* readSessionWorktreeOwnershipSnapshot(
+																		eventStore.projectId,
+																		id,
+																	).pipe(
+																		Effect.provideService(
+																			SqlClient.SqlClient,
+																			sql,
+																		),
+																	);
+																return canonicalEvent(
+																	"session.deleted",
+																	id,
+																	{
+																		sessionId: id,
+																		...(worktreeOwnership
+																			? { worktreeOwnership }
+																			: {}),
+																	},
+																	{
+																		provider: event.provider,
+																		createdAt: event.createdAt,
+																		metadata: event.metadata,
+																	},
+																);
+															}),
 													);
+													const appended =
+														yield* eventStore.appendBatch(descendantMarkers);
 													markers.push(...appended);
 													return appended;
 												}),

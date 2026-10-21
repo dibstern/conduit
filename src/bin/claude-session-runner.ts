@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { NodeRuntime } from "@effect/platform-node";
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import { Effect } from "effect";
 import { makeClaudeRunnerLaunch } from "../lib/provider/claude/claude-runner-launch.js";
 import { makeCursorRunnerLaunch } from "../lib/provider/cursor/cursor-runner-launch.js";

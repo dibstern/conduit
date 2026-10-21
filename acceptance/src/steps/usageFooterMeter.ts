@@ -1159,6 +1159,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			const footer = world.page.getByTestId("usage-footer-phone");
 			await expect(footer).toBeVisible();
+			const expectedRows = requireRpcControl(world.page).shellRows?.length;
 			await expect
 				.poll(async () => {
 					await world.page
@@ -1166,7 +1167,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 						.evaluate((element) => {
 							element.scrollTop = element.scrollHeight;
 						});
-					return footer.evaluate((element) => {
+					return footer.evaluate((element, rowCount) => {
 						const bounds = element.getBoundingClientRect();
 						const button = document
 							.querySelector("#new-session-btn")
@@ -1183,6 +1184,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 							item.getBoundingClientRect(),
 						).filter((box) => box.width > 0 && box.height > 0);
 						return {
+							allRowsLoaded: lastRow?.length === rowCount,
 							scrollable: scroller.scrollHeight > scroller.clientHeight,
 							dockAtBottom: Math.round(bounds.bottom) === window.innerHeight,
 							buttonAboveDock: button.bottom <= bounds.top,
@@ -1195,9 +1197,10 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 										(box.bottom <= button.top || box.top >= button.bottom),
 								),
 						};
-					});
+					}, expectedRows);
 				})
 				.toEqual({
+					allRowsLoaded: true,
 					scrollable: true,
 					dockAtBottom: true,
 					buttonAboveDock: true,

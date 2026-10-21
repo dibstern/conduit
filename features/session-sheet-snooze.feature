@@ -20,7 +20,6 @@ Scenario Outline: Tap opens a sticky list in every phone sheet
 Examples:
   | entry    |
   | overflow |
-  | chevron  |
   | list     |
 
 Scenario: The submenu-open key focuses the first time
@@ -140,9 +139,5 @@ Examples:
   | theme | entry    | width | height | baseline                                | threshold |
   | dark  | overflow | 390   | 844    | session-sheet-snooze-held-dark           | 98        |
   | light | overflow | 390   | 844    | session-sheet-snooze-held-light          | 98        |
-  | dark  | chevron  | 390   | 844    | session-sheet-snooze-chevron-held-dark   | 98        |
-  | light | chevron  | 390   | 844    | session-sheet-snooze-chevron-held-light  | 98        |
   | dark  | overflow | 375   | 667    | session-sheet-snooze-held-se-dark        | 98        |
   | light | overflow | 375   | 667    | session-sheet-snooze-held-se-light       | 98        |
-  | dark  | chevron  | 375   | 667    | session-sheet-snooze-chevron-held-se-dark | 98        |
-  | light | chevron  | 375   | 667    | session-sheet-snooze-chevron-held-se-light| 98        |

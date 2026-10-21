@@ -371,7 +371,12 @@ describe("Multi-folder git through the built daemon", () => {
 					)
 					.all()
 					.map(({ directory }) => directory);
-				return { sessions, published };
+				const secondaryDirty = db
+					.prepare<[string], { dirty: 0 | 1 | null }>(
+						"SELECT json_extract(git, '$.dirty') AS dirty FROM session_git_published WHERE directory = ?",
+					)
+					.get(secondary)?.dirty;
+				return { sessions, published, secondaryDirty };
 			} finally {
 				db.close();
 			}
@@ -416,18 +421,22 @@ describe("Multi-folder git through the built daemon", () => {
 			},
 			{ timeout: 20_000 },
 		);
-		// Wait for every folder's initial publication before checking that an
-		// unchanged restart produces no stamps.
+		// Publish every folder and the library's known dirty state before checking
+		// that an unchanged restart produces no stamps.
 		await vi.waitFor(
-			() =>
-				expect(readGitState().published).toEqual(
+			() => {
+				const state = readGitState();
+				expect(state.published).toEqual(
 					expect.arrayContaining([
 						fixture.projectDir,
 						secondary,
 						scratch,
 						worktree,
 					]),
-				),
+				);
+				expect(state.secondaryDirty).toBe(1);
+				evidence["initialPublishedSecondaryDirty"] = state.secondaryDirty;
+			},
 			{ timeout: 20_000 },
 		);
 		await sendRpcRequest(socket, {

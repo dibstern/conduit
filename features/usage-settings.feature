@@ -29,7 +29,7 @@ Examples:
   | normal | Claude Max · updated 2m ago · Refresh | 41%      | 22%  | resets in 3h 05m (5:30 pm)             | resets Thu 9 am | absent                                                                                                                                                                                 | usage-settings-single-desktop       | 98        |
   | warn5  | Claude Max · updated 2m ago · Refresh | 86%      | 58%  | resets in 3h 05m (5:30 pm)             | resets Thu 9 am | absent                                                                                                                                                                                 | usage-settings-single-warn5-desktop | 98        |
   | warnWk | Claude Max · updated 2m ago · Refresh | 30%      | 91%  | resets in 3h 05m (5:30 pm)             | resets Thu 9 am | absent                                                                                                                                                                                 | usage-settings-single-warn-week-desktop | 98        |
-  | limit  | Claude Max · updated 2m ago · Refresh | 100%     | 71%  | limit reached · resets 3:13 pm         | resets Thu 9 am | absent                                                                                                                                                                                 | usage-settings-single-limit-desktop | 98        |
+  | limit  | Claude Max · updated 2m ago · Refresh | 3:13 pm  | 71%  | limit reached · resets 3:13 pm         | resets Thu 9 am | absent                                                                                                                                                                                 | usage-settings-single-limit-desktop | 98        |
   | none   | Claude                                | absent   | absent | absent                              | absent          | No plan limits for this login. Conduit reads them from a Claude subscription sign-in; API keys, Bedrock, Vertex and proxy routes don't report them. | usage-settings-single-none-desktop  | 98        |
 
 Scenario Outline: one account has a full-screen Usage screen on phones
@@ -58,7 +58,7 @@ Examples:
   | normal | Claude Max · updated 2m ago · Refresh | 41%      | 22%  | resets in 3h 05m (5:30 pm)             | resets Thu 9 am | absent                                                                                                                                                                                 | usage-settings-single-phone       | 98        |
   | warn5  | Claude Max · updated 2m ago · Refresh | 86%      | 58%  | resets in 3h 05m (5:30 pm)             | resets Thu 9 am | absent                                                                                                                                                                                 | usage-settings-single-warn5-phone | 98        |
   | warnWk | Claude Max · updated 2m ago · Refresh | 30%      | 91%  | resets in 3h 05m (5:30 pm)             | resets Thu 9 am | absent                                                                                                                                                                                 | usage-settings-single-warn-week-phone | 98        |
-  | limit  | Claude Max · updated 2m ago · Refresh | 100%     | 71%  | limit reached · resets 3:13 pm         | resets Thu 9 am | absent                                                                                                                                                                                 | usage-settings-single-limit-phone | 98        |
+  | limit  | Claude Max · updated 2m ago · Refresh | 3:13 pm  | 71%  | limit reached · resets 3:13 pm         | resets Thu 9 am | absent                                                                                                                                                                                 | usage-settings-single-limit-phone | 98        |
   | none   | Claude                                | absent   | absent | absent                              | absent          | No plan limits for this login. Conduit reads them from a Claude subscription sign-in; API keys, Bedrock, Vertex and proxy routes don't report them. | usage-settings-single-none-phone  | 98        |
 
 Scenario Outline: several accounts share ordered cards on desktop
@@ -74,7 +74,7 @@ Scenario Outline: several accounts share ordered cards on desktop
   And the Usage account claude windows show 5h <fiveHour> and Week <week>
   And the Usage account claude five_hour reset reads <fiveHourReset>
   And the Usage account claude seven_day reset reads <weekReset>
-  And the Usage account work status reads ok in muted
+  And the Usage account work status reads Available in muted
   And the Usage account work windows show 5h 12% and Week 48%
   And the Usage account spare windows show 5h 0% and Week 9%
   And the Usage account spare five_hour reset reads not open
@@ -88,10 +88,10 @@ Scenario Outline: several accounts share ordered cards on desktop
 
 Examples:
   | state  | headline                                                                                                              | colour | status           | statusColour | fiveHour | week   | fiveHourReset         | weekReset        | emptyMessage                                                                                                           | baseline                              | threshold |
-  | normal | All 3 accounts are on pace to stay under their limits.                                                                 | muted  | ok               | muted        | 41%      | 22%    | in 3h 05m             | Thu 9 am        | absent                                                                                                                 | usage-settings-multiple-desktop       | 98        |
-  | warn5  | All 3 accounts are on pace to stay under their limits.                                                                 | muted  | 5h 86%           | amber        | 86%      | 58%    | in 3h 05m             | Thu 9 am        | absent                                                                                                                 | usage-settings-multiple-warn5-desktop | 98        |
-  | warnWk | All 3 accounts are on pace to stay under their limits.                                                                 | muted  | week 91%         | amber        | 30%      | 91%    | in 3h 05m             | Thu 9 am        | absent                                                                                                                 | usage-settings-multiple-warn-week-desktop | 98        |
-  | limit  | Personal is limited until 3:13 pm. Work, next in the switch order, has 88% of its 5h window left.                       | red    | limited · 3:13   | red          | 100%     | 71%    | 3:13 pm               | Thu 9 am        | absent                                                                                                                 | usage-settings-multiple-limit-desktop | 98        |
+  | normal | All 3 accounts are on pace to stay under their limits.                                                                 | muted  | Current                  | green        | 41%      | 22%    | in 3h 05m             | Thu 9 am        | absent                                                                                                                 | usage-settings-multiple-desktop       | 98        |
+  | warn5  | All 3 accounts are on pace to stay under their limits.                                                                 | muted  | 86% of 5-hour window     | amber        | 86%      | 58%    | in 3h 05m             | Thu 9 am        | absent                                                                                                                 | usage-settings-multiple-warn5-desktop | 98        |
+  | warnWk | All 3 accounts are on pace to stay under their limits.                                                                 | muted  | 91% of weekly window     | amber        | 30%      | 91%    | in 3h 05m             | Thu 9 am        | absent                                                                                                                 | usage-settings-multiple-warn-week-desktop | 98        |
+  | limit  | Personal is limited until 3:13 pm. Work, next in the switch order, has 88% of its 5h window left.                       | red    | Limited until 3:13 pm     | red          | 3:13 pm  | 71%    | absent                | Thu 9 am        | absent                                                                                                                 | usage-settings-multiple-limit-desktop | 98        |
   | none   | Personal has no plan data. Work and Spare are on pace to stay under their limits.                                     | muted  | no plan data     | muted        | absent   | absent | absent                | absent          | No plan data for this login (API key, Bedrock, Vertex or proxy). Auto-switch can still pick it.                           | usage-settings-multiple-none-desktop  | 98        |
 
 Scenario Outline: several account cards and limit controls fit the phone screen
@@ -123,10 +123,10 @@ Scenario Outline: several account cards and limit controls fit the phone screen
 
 Examples:
   | state  | headline                                                                                                              | colour | status           | statusColour | fiveHour | week   | fiveHourReset         | weekReset        | emptyMessage                                                                                                           | baseline                            | threshold |
-  | normal | All 3 accounts are on pace to stay under their limits.                                                                 | muted  | ok               | muted        | 41%      | 22%    | in 3h 05m             | Thu 9 am        | absent                                                                                                                 | usage-settings-multiple-phone       | 98        |
-  | warn5  | All 3 accounts are on pace to stay under their limits.                                                                 | muted  | 5h 86%           | amber        | 86%      | 58%    | in 3h 05m             | Thu 9 am        | absent                                                                                                                 | usage-settings-multiple-warn5-phone | 98        |
-  | warnWk | All 3 accounts are on pace to stay under their limits.                                                                 | muted  | week 91%         | amber        | 30%      | 91%    | in 3h 05m             | Thu 9 am        | absent                                                                                                                 | usage-settings-multiple-warn-week-phone | 98        |
-  | limit  | Personal is limited until 3:13 pm. Work, next in the switch order, has 88% of its 5h window left.                       | red    | limited · 3:13   | red          | 100%     | 71%    | 3:13 pm               | Thu 9 am        | absent                                                                                                                 | usage-settings-multiple-limit-phone | 98        |
+  | normal | All 3 accounts are on pace to stay under their limits.                                                                 | muted  | Current                  | green        | 41%      | 22%    | in 3h 05m             | Thu 9 am        | absent                                                                                                                 | usage-settings-multiple-phone       | 98        |
+  | warn5  | All 3 accounts are on pace to stay under their limits.                                                                 | muted  | 86% of 5-hour window     | amber        | 86%      | 58%    | in 3h 05m             | Thu 9 am        | absent                                                                                                                 | usage-settings-multiple-warn5-phone | 98        |
+  | warnWk | All 3 accounts are on pace to stay under their limits.                                                                 | muted  | 91% of weekly window     | amber        | 30%      | 91%    | in 3h 05m             | Thu 9 am        | absent                                                                                                                 | usage-settings-multiple-warn-week-phone | 98        |
+  | limit  | Personal is limited until 3:13 pm. Work, next in the switch order, has 88% of its 5h window left.                       | red    | Limited until 3:13 pm     | red          | 3:13 pm  | 71%    | absent                | Thu 9 am        | absent                                                                                                                 | usage-settings-multiple-limit-phone | 98        |
   | none   | Personal has no plan data. Work and Spare are on pace to stay under their limits.                                     | muted  | no plan data     | muted        | absent   | absent | absent                | absent          | No plan data for this login (API key, Bedrock, Vertex or proxy). Auto-switch can still pick it.                           | usage-settings-multiple-none-phone  | 98        |
 
 Scenario Outline: one account shows only its reported model weeks without reset lines
@@ -135,16 +135,16 @@ Scenario Outline: one account shows only its reported model weeks without reset 
   And the Usage account claude has model windows Fable <fable>% and Sonnet 6%
   When I open settings to the Usage section
   Then the Usage single-account windows show 5h 41% and Week 22%
-  And the Usage single-account model rows show Fable <fable>% and Sonnet 6% without reset lines
+  And the Usage single-account model rows show Fable <fable>% and Sonnet 6% with values <fableValue> and 6% without reset lines
   And the Usage account claude remains available
   And the usage-settings region visually matches <baseline> at <threshold> percent
 
 Examples:
-  | viewport | fable | baseline                                   | threshold |
-  | desktop  | 12    | usage-settings-single-models-desktop       | 98        |
-  | phone    | 12    | usage-settings-single-models-phone         | 98        |
-  | desktop  | 100   | usage-settings-single-model-limit-desktop  | 98        |
-  | phone    | 100   | usage-settings-single-model-limit-phone    | 98        |
+  | viewport | fable | fableValue | baseline                                   | threshold |
+  | desktop  | 12    | 12%        | usage-settings-single-models-desktop       | 98        |
+  | phone    | 12    | 12%        | usage-settings-single-models-phone         | 98        |
+  | desktop  | 100   | 9:00 am    | usage-settings-single-model-limit-desktop  | 98        |
+  | phone    | 100   | 9:00 am    | usage-settings-single-model-limit-phone    | 98        |
 
 Scenario Outline: an account without model windows shows no extra rows
   Given the viewport is a <viewport>
@@ -168,7 +168,7 @@ Scenario Outline: desktop cards show model weeks without changing account limits
   And the Usage account work model line reads absent
   And the Usage account spare model line reads absent
   And the Usage account claude remains available
-  And the Usage account claude status reads ok in muted
+  And the Usage account claude status reads Current in green
   And the Usage settings headline reads All 3 accounts are on pace to stay under their limits. in muted
   And the account order reads Personal, Work, Spare
   And the usage-settings region visually matches <baseline> at <threshold> percent
@@ -193,7 +193,7 @@ Scenario Outline: phone cards and chips keep account limits separate from model 
   And the Usage account work model line reads absent
   And the Usage account spare model line reads absent
   And the Usage account claude remains available
-  And the Usage account claude status reads ok in muted
+  And the Usage account claude status reads Current in green
   And the Usage settings headline reads All 3 accounts are on pace to stay under their limits. in muted
   And the account order reads Personal, Work, Spare
   And the usage-settings region visually matches <baseline> at <threshold> percent
@@ -229,9 +229,9 @@ Scenario: the reached five-hour limit binds even when the weekly window warns
   When the usage footer claude seven_day reading is 91% resetting at 2026-01-08T09:00:00Z
   And I open settings to the Usage section
   Then the Usage settings headline reads Personal is limited until 3:13 pm. Work, next in the switch order, has 88% of its 5h window left. in red
-  And the Usage account claude status reads limited · 3:13 in red
-  And the Usage account claude windows show 5h 100% and Week 91%
-  And the Usage account claude five_hour reset reads 3:13 pm
+  And the Usage account claude status reads Limited until 3:13 pm in red
+  And the Usage account claude windows show 5h 3:13 pm and Week 91%
+  And the Usage account claude five_hour reset reads absent
   And the Usage account claude seven_day reset reads Thu 9 am
 
 Scenario: no eligible successor omits the switch recommendation
@@ -368,8 +368,8 @@ Scenario Outline: auto-switch retains its toggles and accessible reordering in U
   When I open settings to the Usage section
   Then the Auto-switch account toggle is off and reads <description>
   And the account order reads team-max, work2claude, personal
-  And the account work2claude shows limited · 9:00 quota
-  And the account personal shows ok quota
+  And the account work2claude shows Limited until 9:00 am quota
+  And the account personal shows Available quota
   And the Usage account self windows show 5h 38% and Week —
   And the account team-max shows no plan data quota
   And the Usage no-data card team reads No plan data for this login (API key, Bedrock, Vertex or proxy). Auto-switch can still pick it.
@@ -407,7 +407,7 @@ Scenario: Refresh all names every account and the oldest reading sets the update
   Then the Usage settings subheader reads 3 accounts · updated 2m ago · Refresh all
   When I press Refresh all in Usage settings
   Then the QuotaForAccounts RPC refreshes the attached project
-  And the Usage account claude status reads week 91% in amber
+  And the Usage account claude status reads 91% of weekly window in amber
   And the Usage settings subheader reads 3 accounts · updated just now · Refresh all
 
 Scenario: the desktop footer opens the Usage section directly

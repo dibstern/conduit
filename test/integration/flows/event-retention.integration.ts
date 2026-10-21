@@ -919,7 +919,11 @@ describe("EventRetention through the relay", () => {
 				["idx_events_lineage_parent", "idx_events_lineage_forked_from"],
 			],
 		] as const) {
-			const plan = plans.find(({ query }) => query.includes(queryText));
+			const plan = plans.find(({ query }) =>
+				name === "preflight"
+					? query.trimStart().startsWith(queryText)
+					: query.includes(queryText),
+			);
 			expect(plan, name).toBeDefined();
 			for (const index of indexes)
 				expect(

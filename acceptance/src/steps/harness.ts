@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { closeSettings } from "../../../test/e2e/helpers/settings.js";
 import { DESKTOP_VIEWPORT, PHONE_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
@@ -215,7 +216,7 @@ export const harnessHandlers: StepHandler[] = [
 			await world.page
 				.getByTestId(`settings-composer-controls-${match[1]}`)
 				.click();
-			await world.page.getByTestId("settings-close-btn").click();
+			await closeSettings(world.page);
 			await expect(world.page.locator("#settings-panel")).toBeHidden();
 		},
 	},

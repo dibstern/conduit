@@ -117,11 +117,11 @@ export const sessionSheetSnoozeHandlers: StepHandler[] = [
 				"pick",
 				"indefinite",
 			]);
-			await expect(row(world.page, "1h")).toContainText("10:41 AM");
-			await expect(row(world.page, "3h")).toContainText("12:41 PM");
-			await expect(row(world.page, "evening")).toContainText("6:00 PM");
-			await expect(row(world.page, "tomorrow")).toContainText("Fri 9:00 AM");
-			await expect(row(world.page, "next-week")).toContainText("Mon 9:00 AM");
+			await expect(row(world.page, "1h")).toContainText("10:41 am");
+			await expect(row(world.page, "3h")).toContainText("12:41 pm");
+			await expect(row(world.page, "evening")).toContainText("6:00 pm");
+			await expect(row(world.page, "tomorrow")).toContainText("Fri 9:00 am");
+			await expect(row(world.page, "next-week")).toContainText("Mon 9:00 am");
 			await expect(row(world.page, "indefinite").locator("small")).toHaveCount(
 				0,
 			);

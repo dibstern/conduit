@@ -102,7 +102,7 @@
 			if (!textarea.value && textarea.placeholder) {
 				probe.style.width = `${Math.max(0, textarea.clientWidth - horizontalPadding)}px`;
 				probe.style.whiteSpace = "pre-wrap";
-				element.style.setProperty("--composer-placeholder-height", `${probe.scrollHeight + verticalPadding}px`);
+				element.style.setProperty("--composer-placeholder-height", `${probe.getBoundingClientRect().height + verticalPadding}px`);
 			} else {
 				element.style.removeProperty("--composer-placeholder-height");
 			}
@@ -157,6 +157,10 @@
 		min-width: 0;
 	}
 
+	[data-rows="1"] {
+		align-items: center;
+	}
+
 	[data-slot="field"] {
 		min-height: var(--composer-placeholder-height, 0px);
 	}
@@ -197,7 +201,7 @@
 		grid-template-columns: auto minmax(0, 1fr) auto;
 		align-items: center;
 		column-gap: 2px;
-		row-gap: 6px;
+		row-gap: 0;
 	}
 
 	.split-footer > [data-slot="controls"] {
@@ -206,8 +210,23 @@
 	}
 
 	.split-footer > [data-slot="send"] {
+		margin-left: 6px;
 		justify-content: flex-end;
 		gap: 2px;
+	}
+
+	/* Centre the font's x-height on the icons, rather than its line box.
+	   Geist and Geist Mono have different baseline-to-x-height offsets. */
+	.split-footer :global(.model-label),
+	.split-footer :global([data-testid="composer-effort-label"]) {
+		translate: 0 -0.8px;
+	}
+
+	.split-footer :global([data-testid="picker-selected-context"]),
+	.split-footer :global([data-testid="composer-checkout"] [data-part="project"]),
+	.split-footer :global([data-testid="composer-checkout"] [data-part="branch"]),
+	.split-footer :global([data-testid="composer-checkout"] span[aria-hidden="true"]:not(:has(svg))) {
+		translate: 0 -0.6px;
 	}
 	/* An empty controls slot leaves the grid, so send sits beside the field. */
 	.composer-layout:has(> [data-slot="controls"]:empty) {

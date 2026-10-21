@@ -828,6 +828,9 @@ describe("Settling stops quiescent agents through the built daemon", () => {
 				events.filter(({ type }) => type === "session.deleted"),
 			).toHaveLength(1);
 			expect(
+				events.filter(({ type }) => type === "session.provider_cleanup_failed"),
+			).toHaveLength(1);
+			expect(
 				events.find(({ type }) => type === "session.provider_cleanup_failed")
 					?.data,
 			).toContain("Fixture end_session failure");

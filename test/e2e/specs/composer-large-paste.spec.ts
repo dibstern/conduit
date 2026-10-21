@@ -92,14 +92,17 @@ for (const at of ["end", "middle"] as const) {
 		await expect(textarea).not.toHaveClass(/text-transparent/);
 
 		// Every line fits the width, so the caret's line sits at a known offset.
-		// The pitch comes from the layout: WebKit rounds the 18.85px line height.
+		// ComposerFrame uses 22.5px lines with asymmetric padding here; derive
+		// native pitch from content height after subtracting both paddings.
 		await expect
 			.poll(() =>
 				textarea.evaluate((el: HTMLTextAreaElement, caretLine) => {
-					const padding = parseFloat(getComputedStyle(el).paddingTop);
+					const style = getComputedStyle(el);
+					const paddingTop = parseFloat(style.paddingTop);
+					const paddingBottom = parseFloat(style.paddingBottom);
 					const lines = el.value.split("\n").length;
-					const pitch = (el.scrollHeight - 2 * padding) / lines;
-					const top = padding + caretLine * pitch;
+					const pitch = (el.scrollHeight - paddingTop - paddingBottom) / lines;
+					const top = paddingTop + caretLine * pitch;
 					return (
 						el.scrollTop > 0 &&
 						top >= el.scrollTop &&
@@ -149,11 +152,15 @@ test("@large-paste typing into a pasted log dump never lays the draft out again"
 	// necessarily the field's bottom padding below it.
 	expect(
 		await textarea.evaluate((el: HTMLTextAreaElement) => {
-			const padding = parseFloat(getComputedStyle(el).paddingBottom);
+			const style = getComputedStyle(el);
+			const paddingTop = parseFloat(style.paddingTop);
+			const paddingBottom = parseFloat(style.paddingBottom);
 			const pitch =
-				(el.scrollHeight - 2 * padding) / el.value.split("\n").length;
+				(el.scrollHeight - paddingTop - paddingBottom) /
+				el.value.split("\n").length;
 			return (
-				el.scrollHeight - el.clientHeight - el.scrollTop <= padding + pitch / 2
+				el.scrollHeight - el.clientHeight - el.scrollTop <=
+				paddingBottom + pitch / 2
 			);
 		}),
 	).toBe(true);

@@ -48,6 +48,27 @@ export const SessionWorktreeOwnershipSchema = Schema.Struct({
 export type SessionWorktreeOwnership =
 	typeof SessionWorktreeOwnershipSchema.Type;
 
+/** Minimal operational evidence retained after the session's history is reclaimed. */
+export const SessionWorktreeOwnershipSnapshotSchema = Schema.Union([
+	Schema.Struct({
+		_tag: Schema.Literal("Owned"),
+		ownership: Schema.Array(SessionWorktreeOwnershipSchema),
+		discoveryPaths: Schema.Array(Schema.String),
+	}),
+	Schema.Struct({
+		_tag: Schema.Literal("Legacy"),
+		worktrees: Schema.Record(Schema.String, Schema.String),
+		discoveryPaths: Schema.Array(Schema.String),
+	}),
+	Schema.Struct({
+		_tag: Schema.Literal("Conflict"),
+		reason: Schema.Literals(["launch", "branch-rename", "malformed"]),
+		discoveryPaths: Schema.Array(Schema.String),
+	}),
+]);
+export type SessionWorktreeOwnershipSnapshot =
+	typeof SessionWorktreeOwnershipSnapshotSchema.Type;
+
 export const SessionWorktreeInspectionSchema = Schema.Struct({
 	folder: Schema.String,
 	path: Schema.String,

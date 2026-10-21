@@ -40,10 +40,11 @@
 			{...props}
 			variant="toolbar"
 			size="content"
+			touchTarget
 			iconOnly
 			icon="arrow-up-down"
 			iconSize={17}
-			class={compact ? "shrink-0 min-h-[44px] min-w-[44px] justify-center rounded-lg" : "h-8 w-8 rounded-md"}
+			class="size-[24px] shrink-0 rounded-[8px]"
 			title="Group sessions"
 			ariaLabel="Group sessions"
 			data-testid="session-group-button"

@@ -67,14 +67,15 @@
 <SettingsGroup id="server-security" title="Security" testId="server-security-settings">
 	<SettingsRow
 		label="PIN"
+		icon="lock"
 		description={status ? status.pinEnabled ? "On · asked once on each new device" : "Off · anyone who can reach this address can open conduit" : serverStatus.error ? "Could not load PIN status." : "Loading PIN status…"}
 	>
 		{#snippet control()}
 			{#if status?.pinEnabled}
-				<Button touchTarget variant="secondary" tone="accent" size="sm" data-testid="server-pin-change-btn" aria-expanded={openForm === "pin-change"} aria-controls="server-pin-form" disabled={saving} onclick={() => onToggleForm("pin-change")}>Change</Button>
-				<Button touchTarget variant="secondary" size="sm" data-testid="server-pin-remove-btn" aria-expanded={openForm === "pin-remove"} aria-controls="server-pin-form" disabled={saving} onclick={() => onToggleForm("pin-remove")}>Remove</Button>
+				<Button touchTarget variant="settings" size="content" data-testid="server-pin-change-btn" aria-expanded={openForm === "pin-change"} aria-controls="server-pin-form" disabled={saving} onclick={() => onToggleForm("pin-change")}>Change…</Button>
+				<Button touchTarget variant="settings" size="content" data-testid="server-pin-remove-btn" aria-expanded={openForm === "pin-remove"} aria-controls="server-pin-form" disabled={saving} onclick={() => onToggleForm("pin-remove")}>Remove</Button>
 			{:else if status}
-				<Button touchTarget variant="secondary" tone="accent" size="sm" data-testid="server-pin-set-btn" aria-expanded={openForm === "pin-set"} aria-controls="server-pin-form" disabled={saving} onclick={() => onToggleForm("pin-set")}>Set PIN</Button>
+				<Button touchTarget variant="settings" size="content" data-testid="server-pin-set-btn" aria-expanded={openForm === "pin-set"} aria-controls="server-pin-form" disabled={saving} onclick={() => onToggleForm("pin-set")}>Set PIN</Button>
 			{/if}
 		{/snippet}
 	</SettingsRow>
@@ -114,8 +115,8 @@
 			{/if}
 			<div class="flex flex-wrap items-center justify-end gap-1.5">
 				{#if error}<p id="server-pin-error" data-testid="server-pin-error" role="alert" class="mr-auto text-[12px] text-error">{error}</p>{/if}
-				<Button touchTarget variant="secondary" size="sm" data-testid="server-pin-cancel" disabled={saving} onclick={() => { if (pinForm) onToggleForm(pinForm); }}>Cancel</Button>
-				<Button touchTarget variant={pinForm === "pin-remove" ? "danger" : "primary"} size="sm" type="submit" data-testid="server-pin-save" disabled={saving}>{saving ? "Saving…" : pinForm === "pin-remove" ? "Remove PIN" : "Save PIN"}</Button>
+				<Button touchTarget variant="settings" size="content" data-testid="server-pin-cancel" disabled={saving} onclick={() => { if (pinForm) onToggleForm(pinForm); }}>Cancel</Button>
+				<Button touchTarget variant="settings" tone={pinForm === "pin-remove" ? "error" : "accent"} size="content" type="submit" data-testid="server-pin-save" disabled={saving}>{saving ? "Saving…" : pinForm === "pin-remove" ? "Remove PIN" : "Save PIN"}</Button>
 			</div>
 		</form>
 	{/if}

@@ -221,15 +221,46 @@ test.describe("Claude replay lane", () => {
 				viewport: page.viewportSize(),
 			});
 			try {
-				const pages = [page, await context.newPage()];
+				const pages = [page, await context.newPage()] as const;
 				const sends = pages.map(recordSends);
-				const apps = pages.map((p) => new AppPage(p));
+				const apps = [new AppPage(pages[0]), new AppPage(pages[1])] as const;
 				const chats = pages.map((p) => new ChatPage(p));
+				let firstSubmitSucceeded = false;
+				page.on("websocket", (socket) => {
+					let submitRequestId: number | undefined;
+					socket.on("framesent", ({ payload }) => {
+						const frame: { _tag?: string; tag?: string; id?: number } =
+							JSON.parse(String(payload));
+						if (frame._tag === "Request" && frame.tag === "input.submit")
+							submitRequestId = frame.id;
+					});
+					socket.on("framereceived", ({ payload }) => {
+						const frame: {
+							_tag?: string;
+							requestId?: number;
+							exit?: { _tag?: string; value?: { ok?: boolean } };
+						} = JSON.parse(String(payload));
+						if (
+							submitRequestId !== undefined &&
+							frame._tag === "Exit" &&
+							frame.requestId === submitRequestId &&
+							frame.exit?._tag === "Success" &&
+							frame.exit.value?.ok === true
+						)
+							firstSubmitSucceeded = true;
+					});
+				});
 				for (const app of apps) await app.goto(relayUrl);
 
-				// Sent back to back, the second send normally lands mid-turn, so the runner
-				// holds it and places it when the SDK reports it started.
-				for (const app of apps) await app.sendMessage("Same");
+				// Clean mirrors accept shared draft clears (35934e94). Observe the
+				// first send's clear before composing the second identical input.
+				await apps[0].input.fill("Same");
+				await expect(apps[1].input).toHaveValue("Same");
+				await apps[0].sendMessage("Same");
+				// input.submit replies after the prompt handler's clearSent finishes.
+				await expect.poll(() => firstSubmitSucceeded).toBe(true);
+				await expect(apps[1].input).toHaveValue("");
+				await apps[1].sendMessage("Same");
 				for (const recorded of sends) {
 					await expect.poll(() => recorded.length).toBe(1);
 				}
@@ -2123,9 +2154,23 @@ test.describe("Claude replay lane", () => {
 						)?.resumeSessionId,
 				)
 				.toBeTruthy();
-			await page.getByTestId("session-bar-title-menu").click();
+			await page.getByTestId("session-bar-overflow").click();
 			await page.getByTestId("session-ctx-fork").click();
 			await expect(page).not.toHaveURL(new RegExp(`${parentPath}$`));
+			const forkId = new URL(page.url()).pathname.split("/").at(-1) ?? "";
+			const readForkTurns = () =>
+				queryDb<{ state: string; text: string; is_inherited: number }>(
+					harness.eventsDbPath ?? "",
+					`SELECT t.state, m.text, m.is_inherited FROM turns t
+					 JOIN messages m ON m.id = t.user_message_id AND m.session_id = t.session_id
+					 WHERE t.session_id = ? ORDER BY m.created_at, m.id`,
+					forkId,
+				);
+			await expect
+				.poll(readForkTurns)
+				.toEqual([
+					{ state: "completed", text: "Parent turn", is_inherited: 1 },
+				]);
 			await expect(page.locator(".fork-divider")).toContainText("Forked from");
 			await page.locator(".fork-context-toggle").click();
 			const history = page.locator(".fork-context-messages");
@@ -2138,10 +2183,63 @@ test.describe("Claude replay lane", () => {
 			await expect(chat.userMessages).toHaveCount(2);
 			await expect(chat.assistantMessages).toHaveText([/pong/i, /pong/i]);
 			await chat.waitForStreamingComplete();
-			// The fork copies the parent's completed turn before adding its own.
+			// Inherited history is copied into read models, not completion events.
 			await expect
 				.poll(() => countEvents(harness.eventsDbPath, "turn.completed"))
-				.toBe(3);
+				.toBe(2);
+			const parentId = parentPath.split("/").at(-1);
+			if (!parentId || !forkId || !harness.eventsDbPath)
+				throw new Error("Missing fork history identity or event store");
+			const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
+			try {
+				const parentMessages = db
+					.prepare(`SELECT role, text FROM messages
+						WHERE session_id = ? ORDER BY created_at, id`)
+					.all(parentId);
+				expect(parentMessages).toHaveLength(2);
+				expect(
+					db
+						.prepare(`SELECT role, text FROM messages
+						WHERE session_id = ? AND is_inherited = 1
+						ORDER BY created_at, id`)
+						.all(forkId),
+				).toEqual(parentMessages);
+				expect(
+					db
+						.prepare(`SELECT t.state, t.run_id FROM turns t
+						JOIN messages m ON m.id = t.user_message_id AND m.session_id = t.session_id
+						WHERE t.session_id = ? AND m.is_inherited = 1`)
+						.all(forkId),
+				).toEqual([{ state: "completed", run_id: null }]);
+				expect(
+					db
+						.prepare(`SELECT t.state, t.run_id, r.status AS run_status FROM turns t
+						JOIN messages m ON m.id = t.user_message_id AND m.session_id = t.session_id
+						JOIN provider_runs r ON r.id = t.run_id AND r.session_id = t.session_id
+						WHERE t.session_id = ? AND m.is_inherited = 0`)
+						.all(forkId),
+				).toEqual([
+					{
+						state: "completed",
+						run_id: expect.any(String),
+						run_status: "completed",
+					},
+				]);
+				expect(
+					db
+						.prepare(`SELECT status FROM provider_runs
+						WHERE session_id = ?`)
+						.all(forkId),
+				).toEqual([{ status: "completed" }]);
+				expect(
+					db
+						.prepare(`SELECT session_id FROM events
+						WHERE type = 'turn.completed' ORDER BY sequence`)
+						.all(),
+				).toEqual([{ session_id: parentId }, { session_id: forkId }]);
+			} finally {
+				db.close();
+			}
 			await expect(history.locator(".msg-user")).toContainText("Parent turn");
 			await expect(history).not.toContainText("Fork turn");
 			await testInfo.attach("claude-fork-replay", {

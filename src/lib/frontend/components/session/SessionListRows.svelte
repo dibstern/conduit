@@ -19,6 +19,7 @@
 	import { sessionCommandActions } from "./session-commands.js";
 	import SessionItem from "./SessionItem.svelte";
 	import DraftItem from "./DraftItem.svelte";
+	import DraftPencil from "./DraftPencil.svelte";
 	import { projectDisplayName, projectAccent } from "./session-list-project.js";
 	import SessionPager from "./SessionPager.svelte";
 	import Button from "../ui/Button.svelte";
@@ -105,17 +106,18 @@
 	     per section because the row is about to grow: the shelves and the
 	     per-row commands each land in their own ticket, and copies would mean one
 	     edit each with any divergence between them invisible. -->
-	{#snippet sessionRow(s: SessionInfo, underProject = false)}
+	{#snippet sessionRow(s: SessionInfo, underProject = false, inPinnedGroup = false)}
 		{@const settled = s.pinnedAt == null && s.settledAt != null}
 		{@const snoozed = !settled && s.pinnedAt == null && isSessionSnoozed(s, sessionState.now)}
 		{@const primary = projectState.projects.find((project) => project.slug === s.projectSlug)?.folders[0]}
 		<SessionItem
 			session={s}
 			pinned={s.pinnedAt != null}
+			{inPinnedGroup}
 			{settled}
 			{snoozed}
 			settledAt={settled ? formatTimeAgo(s.settledAt) : undefined}
-			snoozedUntilText={snoozed ? formatSnoozeTime(s.snoozedUntil ?? null, sessionState.now) : undefined}
+			snoozedUntilText={snoozed ? formatSnoozeTime(s.snoozedUntil ?? null, sessionState.now, "short") : undefined}
 			now={sessionState.now}
 			href={getSessionHref(s.id)}
 			projectLabel={underProject ? undefined : getProjectLabel(s)}
@@ -202,26 +204,26 @@
 	<div id="session-list-scroller" class="flex-1 overflow-y-auto px-[6px] pb-[8px]" role="region" aria-label="Sessions" tabindex="0" onscroll={(event) => { heldSessionId = null; scrolled = event.currentTarget.scrollTop > 0; }}>
 		{#if drafts.length > 0}
 			<!-- Boxed so unsent drafts never read as sessions; collapsed, the header previews the newest. -->
-			<div class="mx-[2px] mt-[8px] mb-[2px] rounded-[12px] border border-border bg-bg-raised p-[3px]" data-testid="drafts-tray">
+			<div class="mx-[2px] mt-[8px] mb-[2px] rounded-[12px] border border-border bg-bg-raised p-[3px] leading-[1.4]" data-testid="drafts-tray">
 				<div class="flex items-center rounded-[9px] hover:bg-hover">
 					<TextButton
 						tone={uiState.draftsTrayOpen ? "inherit" : "muted"}
-						class="flex min-w-0 flex-1 items-center gap-[6px] min-h-[44px] md:min-h-0 px-[8px] py-[6px] text-[12.5px] leading-[1.4] font-sans {uiState.draftsTrayOpen ? 'font-semibold text-text' : 'font-medium'}"
+						class="flex min-w-0 flex-1 items-center gap-[6px] min-h-[44px] md:min-h-0 px-[8px] py-[6px] text-[12.5px] leading-[1.4] font-sans enabled:hover:opacity-100 {uiState.draftsTrayOpen ? 'font-semibold text-text' : 'font-medium enabled:hover:text-text-muted'}"
 						data-testid="drafts-tray-toggle"
 						aria-expanded={uiState.draftsTrayOpen}
 						aria-controls="drafts-tray-rows"
 						onclick={() => setDraftsTrayOpen(!uiState.draftsTrayOpen)}
 					>
 						<Icon name={uiState.draftsTrayOpen ? "chevron-down" : "chevron-right"} size={12} />
-						<span class="flex text-text-dimmer"><Icon name="pencil-line" size={12} /></span>
+						<span class="flex text-text-dimmer"><DraftPencil size={12} /></span>
 						<span>Drafts</span>
-						<span class="font-mono text-[10.5px] font-normal tabular-nums text-text-dimmer">{drafts.length}</span>
+						<span class="font-mono text-mono-time text-text-dimmer">{drafts.length}</span>
 						{#if !uiState.draftsTrayOpen}
 							<span class="w-0 min-w-0 flex-1 truncate text-left font-normal text-text-dimmer">· {drafts[0]?.firstLine.trim() || "Untitled draft"}</span>
 						{/if}
 					</TextButton>
 					{#if uiState.draftsTrayOpen}
-						<TextButton tone="dimmer" class="shrink-0 min-h-[44px] md:min-h-0 px-[8px] py-[6px] text-[11.5px] leading-[1.4] font-medium font-sans hover:text-error" data-testid="drafts-tray-clear" onclick={() => drafts.forEach(discardDraft)}>Clear all</TextButton>
+						<TextButton tone="dimmer" class="shrink-0 min-h-[44px] md:min-h-0 px-[8px] py-[6px] text-[11.5px] leading-[1.4] font-medium font-sans enabled:hover:text-error" data-testid="drafts-tray-clear" onclick={() => drafts.forEach(discardDraft)}>Clear all</TextButton>
 					{/if}
 				</div>
 				<div id="drafts-tray-rows" class={uiState.draftsTrayOpen ? "pb-px" : ""}>
@@ -235,7 +237,7 @@
 		{/if}
 		{#if arrangement.pinned.length > 0}
 			<div class="session-group-label flex items-center gap-[6px] pt-[12px] pb-[4px] px-[10px] text-[12px] font-medium text-text-dimmer font-sans"><span>Pinned</span>{" "}<span class="font-mono text-[11px] font-normal">{fullArrangement.pinned.length}</span></div>
-			{#each arrangement.pinned as s (s.id)}{@render sessionRow(s)}{/each}
+			{#each arrangement.pinned as s (s.id)}{@render sessionRow(s, false, true)}{/each}
 		{/if}
 		{#if isEmpty && drafts.length === 0 && !sessionState.settled}
 			<!-- First load: session-shaped rows breathe in a top-to-bottom wave. -->
@@ -299,7 +301,7 @@
 							{@render sessionRow(s)}
 						{/each}
 						{#if !searching && !selectMode && !settledExpanded && settledMore > 0}
-							<TextButton tone="dimmer" class="min-h-[44px] md:min-h-[30px] px-[34px] text-[12px]" data-testid="settled-shelf-more" onclick={() => { settledExpanded = true; }}>+ {settledMore} more</TextButton>
+							<TextButton tone="dimmer" class="min-h-[44px] md:min-h-[30px] px-[34px] text-[12px]" data-testid="settled-shelf-more" onclick={() => { settledExpanded = true; }}>{settledMore} more</TextButton>
 						{/if}
 					{/if}
 				</div>
@@ -323,7 +325,7 @@
 							{@render sessionRow(s)}
 						{/each}
 						{#if !searching && !selectMode && !snoozedExpanded && fullArrangement.snoozed.length > 2}
-							<TextButton tone="dimmer" class="min-h-[44px] md:min-h-[30px] px-[34px] text-[12px]" data-testid="snoozed-shelf-more" onclick={() => { snoozedExpanded = true; }}>+ {fullArrangement.snoozed.length - 2} more</TextButton>
+							<TextButton tone="dimmer" class="min-h-[44px] md:min-h-[30px] px-[34px] text-[12px]" data-testid="snoozed-shelf-more" onclick={() => { snoozedExpanded = true; }}>{fullArrangement.snoozed.length - 2} more</TextButton>
 						{/if}
 					{/if}
 				</div>

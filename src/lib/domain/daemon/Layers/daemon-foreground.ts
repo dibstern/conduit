@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { NodePath } from "@effect/platform-node";
+import * as NodePath from "@effect/platform-node/NodePath";
 import {
 	Data,
 	Deferred,

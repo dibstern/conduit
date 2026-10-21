@@ -157,7 +157,7 @@
 				<p class="summary-error">{error}</p>
 			</div>
 		{:else if generating}
-			<div class="summary-actions"><span class="summary-busy" role="status"><Icon name="loader-circle" size={13} class="animate-spin" />Summarising…</span></div>
+			<div class="summary-actions"><span class="summary-busy" role="status"><Icon name="loader-circle" size={13} class="animate-spin" />Summarizing…</span></div>
 		{:else if newer > 0 && latest || !selected}
 			<div class="summary-actions">
 				<Button variant="accent-soft" size="content" touchTarget class="h-[28px] rounded-full px-[12px] text-[13px] font-medium" data-testid="surfacing-summary-new" onclick={() => ongenerate(latest ? "new" : "whole")}>{latest ? `✦ Summarize ${newer} new · since ${writtenAt(latest)}` : `✦ Summarize ${live ? "so far" : "turn"} · ${view.numbers.length}`}</Button>
@@ -165,21 +165,11 @@
 			</div>
 		{/if}
 		{#if selected}
-			<p class="summary-prose select-text" class:regenerating={generating} bind:this={proseEl}>
-				{#each chunks as chunk}
-					{@const message = chunk.message}
-					{#if message}
-						{#if citationPopover && !plainCitations}
-							<Popover open={readingOrdinal === message.number} onopenchange={(nextOpen) => nextOpen ? cite(message.number) : closeCitation()} ariaLabel={`Cited message #${message.number}`} side="top" class="max-w-[380px]" onCloseAutoFocus={(event) => { if (handedOff) event.preventDefault(); handedOff = false; }}>
-								{#snippet trigger({ props })}{@render citationButton(message, props)}{/snippet}
-								{@render citationReader()}
-							</Popover>
-						{:else}
-							{@render citationButton(message, { onclick: (event: MouseEvent) => { citationTrigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null; cite(message.number); } })}
-						{/if}
-					{:else if chunk.code}<code>{chunk.text}</code>{:else}{chunk.text}{/if}
-				{/each}
-			</p>
+			<p class="summary-prose select-text" class:regenerating={generating} bind:this={proseEl}>{#each chunks as chunk}{@const message = chunk.message}{#if message}{#if citationPopover && !plainCitations}<Popover
+				open={readingOrdinal === message.number} onopenchange={(nextOpen) => nextOpen ? cite(message.number) : closeCitation()}
+				ariaLabel={`Cited message #${message.number}`} side="top" class="max-w-[380px]"
+				onCloseAutoFocus={(event) => { if (handedOff) event.preventDefault(); handedOff = false; }}
+			>{#snippet trigger({ props })}{@render citationButton(message, props)}{/snippet}{@render citationReader()}</Popover>{:else}{@render citationButton(message, { onclick: (event: MouseEvent) => { citationTrigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null; cite(message.number); } })}{/if}{:else if chunk.code}<code>{chunk.text}</code>{:else}{chunk.text}{/if}{/each}</p>
 			<div class="summary-foot">
 				<span class="mr-auto"><span class="desk-only">{`${selected.model.charAt(0).toUpperCase()}${selected.model.slice(1)} · `}</span>{`${view.numbers.filter(({ number }) => number >= selected.firstOrdinal && number <= selected.lastOrdinal).length} updates`}<span class="desk-only">{` · ${(selected.durationMs / 1000).toFixed(1)}s`}</span>{" · "}<span class="desk-only">{"written at "}</span>{writtenAt(selected)}</span>
 				{#if onquote}<SurfacingReplyActions source="recap-{selected.version}" within={proseEl} onreply={(excerpt) => { if (excerpt) { onquote(excerpt); afterReply(true); } }} />{/if}

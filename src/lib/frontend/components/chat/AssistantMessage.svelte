@@ -54,6 +54,8 @@
 		const vars = {
 			darkMode: themeState.resolved === "dark",
 			background: get("--color-code-bg", "#141416"),
+			edgeLabelBackground: get("--color-code-bg", "#141416"),
+			clusterBkg: get("--color-bg-alt", "#232327"),
 			// Under theme "base", primaryColor IS the node fill, so it must be a
 			// surface token. Nodes read as panels; accent is reserved for emphasis.
 			primaryColor: get("--color-bg-alt", "#232327"),
@@ -189,8 +191,13 @@
 			const text = code.textContent ?? "";
 			const lines = text.split("\n");
 			const diff = language === "diff" || language === "patch";
-			const diffPath = diff ? lines.find((line) => line.startsWith("+++ "))?.slice(4).replace(/^b\//, "") : undefined;
-			const filename = code.dataset["filename"] ?? (diffPath === "/dev/null" ? undefined : diffPath);
+			const oldPathIndex = diff ? lines.findIndex((line) => line.startsWith("--- ")) : -1;
+			const newPathIndex = diff ? lines.findIndex((line) => line.startsWith("+++ ")) : -1;
+			const diffPath = newPathIndex < 0 ? undefined : lines[newPathIndex]?.slice(4).replace(/^b\//, "");
+			const filename = code.dataset["filename"] ?? (diffPath === "/dev/null" ? lines[oldPathIndex]?.slice(4).replace(/^a\//, "") : diffPath);
+			if (filename && oldPathIndex >= 0 && newPathIndex === oldPathIndex + 1) {
+				code.textContent = lines.filter((_, index) => index !== oldPathIndex && index !== newPathIndex).join("\n");
+			}
 			const header = document.createElement("div");
 			header.className = "code-header";
 			pre.prepend(header);
@@ -220,6 +227,9 @@
 			for (const block of blocks) {
 				if (!block.isConnected || block.dataset["highlighted"] || block.classList.contains("hljs")) continue;
 				hljs.highlightElement(block);
+				if (block.matches(".language-diff, .language-patch")) {
+					block.innerHTML = block.innerHTML.replace(/\n$/, "").split("\n").map((line) => `<span class="diff-line">${line || " "}</span>`).join("");
+				}
 			}
 		};
 		// A cold import resumes all waiting messages together; spread the work out again.

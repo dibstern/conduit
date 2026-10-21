@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Fiber, Layer, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, expect, it, vi } from "vitest";
 import {
@@ -373,11 +373,17 @@ for (const mode of [
 									yield* sql`INSERT INTO provider_command_outbox (command_id, project_key, session_id, provider_id, effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at) VALUES ('B', 'test-project', 's', 'test', 'send_turn', 'run-B', ${JSON.stringify({ ...input, inputId: "B", prompt: "B", history: [] })}, 'pending', 0, 1, 1)`;
 									yield* sql`INSERT INTO command_receipts (command_id, session_id, project_key, command_type, status, created_at, updated_at) VALUES ('B', 's', 'test-project', 'send_turn', 'side_effect_requested', 1, 1)`;
 									let admissionChecked = false;
+									const admissionWaiting = yield* Deferred.make<void>();
 									const provider: ProviderInstance = {
 										providerId: "test",
 										generateTextEffect: () => Effect.die("not used"),
 										inputAdmission: {
 											...runner.inputAdmission,
+											changes: runner.inputAdmission.changes.pipe(
+												Effect.tap(() =>
+													Deferred.succeed(admissionWaiting, undefined),
+												),
+											),
 											isHeld: (sessionId) => {
 												// Hello establishes the hold after this admission read.
 												if (mode === "adoption-race" && !admissionChecked) {
@@ -436,7 +442,8 @@ for (const mode of [
 									const waiting = yield* Effect.forkChild(
 										reactor.runCommand("B"),
 									);
-									yield* Effect.sleep("10 millis");
+									// Adoption subscribes only after the held attempt is requeued.
+									yield* Deferred.await(admissionWaiting);
 									expect(
 										yield* sql`SELECT status, attempt_count FROM provider_command_outbox WHERE command_id = 'B'`,
 									).toEqual([

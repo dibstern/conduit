@@ -62,15 +62,14 @@ for (const [viewportName, viewport] of [
 				new URL("/s/settings-general?p=e2e-replay", relayUrl).toString(),
 			);
 			const listOverflow = page.getByTestId("list-bar-overflow");
-			const titleMenu = page.getByTestId("session-bar-title-menu");
 			if (await listOverflow.isVisible()) {
 				await listOverflow.click();
 				await page.getByTestId("list-overflow-settings").click();
-			} else if (await titleMenu.isVisible()) {
-				await titleMenu.click();
-				await page.getByTestId("session-title-settings").click();
 			} else {
-				await page.getByTestId("session-bar-overflow").click();
+				await page
+					.getByTestId("session-bar-overflow")
+					.or(page.getByTestId("session-bar-island-overflow"))
+					.click();
 				await page.getByTestId("overflow-settings").click();
 			}
 			const panel = page.locator("#settings-panel");

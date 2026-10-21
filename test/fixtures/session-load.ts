@@ -253,9 +253,11 @@ export const seedSessionLoadFixture = async (
 						}),
 					),
 				);
-			for (let first = 0; first < families; first += 500) {
+			// Bound the nested projection savepoint's journal. Large transactions
+			// make SQLite walk retained journal pages after every row statement.
+			for (let first = 0; first < families; first += 50) {
 				yield* write(
-					Array.from({ length: Math.min(500, families - first) }, (_, offset) =>
+					Array.from({ length: Math.min(50, families - first) }, (_, offset) =>
 						family(first + offset),
 					).flat(),
 				);

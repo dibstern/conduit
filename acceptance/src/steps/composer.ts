@@ -237,7 +237,7 @@ export const composerHandlers: StepHandler[] = [
 		match: /^the subagent parent link is visible$/,
 		run: async ({ world }) => {
 			await world.page
-				.getByRole("button", { name: /PARENT/ })
+				.getByRole("button", { name: /Parent/ })
 				.waitFor({ state: "visible" });
 		},
 	},
@@ -365,7 +365,7 @@ export const composerHandlers: StepHandler[] = [
 				.poll(() =>
 					button.evaluate((element, tone) => {
 						const probe = document.createElement("span");
-						probe.style.color = `var(--color-${tone === "full" ? "error" : tone === "edits" || tone === "auto" ? "status-ask" : "text-secondary"})`;
+						probe.style.color = `var(--color-p-${tone})`;
 						document.body.append(probe);
 						const expected = getComputedStyle(probe).color;
 						probe.remove();

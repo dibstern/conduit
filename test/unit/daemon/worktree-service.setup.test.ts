@@ -11,9 +11,16 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { scheduler } from "node:timers/promises";
 import { Effect, Fiber, Stream } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	onTestFinished,
+	vi,
+} from "vitest";
 import { makeWorktreeLive } from "../../../src/lib/domain/daemon/Layers/worktree-layer.js";
 import { WorktreeServiceTag } from "../../../src/lib/domain/daemon/Services/worktree-service.js";
 
@@ -97,40 +104,58 @@ describe("daemon Worktree setup runner", () => {
 	});
 
 	it("times out a hanging script and kills the entire process group", async () => {
-		// Host load can delay shell startup beyond 100ms. Let both processes start
-		// before advancing the same timeout, so this proves group termination.
 		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-		const fiber = Effect.runFork(
-			setupEffect(
-				"echo $$ > shell.pid; sleep 60 & echo $! > child.pid; wait",
-				{ ...process.env, SHELL: "/bin/sh" },
-				100,
+		let markReady = () => {};
+		const ready = new Promise<void>((resolve) => {
+			markReady = resolve;
+		});
+		const running = Effect.runFork(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service
+					.runSetup(
+						directory,
+						"echo $$ > shell.pid; sleep 60 & echo $! > child.pid; printf 'ready\\n'; wait",
+						{ ...process.env, SHELL: "/bin/sh" },
+					)
+					.pipe(
+						Stream.tap((update) =>
+							Effect.sync(() => {
+								if (update._tag === "output") markReady();
+							}),
+						),
+						Stream.runCollect,
+					),
+			).pipe(
+				Effect.provide(makeWorktreeLive(fixture, { setupTimeoutMs: 100 })),
 			),
 		);
+		onTestFinished(async () => {
+			vi.useRealTimers();
+			await Effect.runPromise(Fiber.interrupt(running));
+		});
 		try {
-			const childPidFile = join(directory, "child.pid");
-			const readyDeadline = performance.now() + 2_000;
-			while (
-				!existsSync(childPidFile) ||
-				!readFileSync(childPidFile, "utf8").trim()
-			) {
-				if (performance.now() >= readyDeadline) {
-					throw new Error("Setup fixture did not report its child PID");
-				}
-				await scheduler.yield();
-			}
-			await vi.advanceTimersByTimeAsync(100);
-			const updates = await Effect.runPromise(Fiber.join(fiber));
+			// Let the real shell create both descendants before advancing its deadline.
+			await Promise.race([
+				ready,
+				Effect.runPromise(Fiber.await(running)).then(() => {
+					throw new Error("Setup finished before emitting readiness");
+				}),
+			]);
+			await vi.advanceTimersByTimeAsync(99);
+			expect(running.pollUnsafe()).toBeUndefined();
+			await vi.advanceTimersByTimeAsync(1);
+			const updates = await Effect.runPromise(Fiber.join(running));
 			expect(updates.at(-1)).toMatchObject({
 				_tag: "finished",
 				status: "timed_out",
 			});
+			vi.useRealTimers();
+			await expectStopped(join(directory, "shell.pid"));
+			await expectStopped(join(directory, "child.pid"));
 		} finally {
 			vi.useRealTimers();
-			await Effect.runPromise(Fiber.interrupt(fiber));
+			await Effect.runPromise(Fiber.interrupt(running));
 		}
-		await expectStopped(join(directory, "shell.pid"));
-		await expectStopped(join(directory, "child.pid"));
 	});
 
 	it("caps large output once without splitting a UTF-8 character", async () => {

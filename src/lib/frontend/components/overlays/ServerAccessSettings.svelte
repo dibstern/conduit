@@ -35,10 +35,12 @@
 <SettingsGroup id="server-access" title="Access" testId="server-access-settings">
 	<SettingsRow
 		label="Tailscale Serve"
+		icon="globe"
 		ariaLabel="Toggle Tailscale Serve"
 		checked={status?.tailscaleServeEnabled ?? false}
 		disabled={!available || saving}
 		description={caption}
+		descriptionMono={available && Boolean(caption)}
 		onchange={() => void toggleTailscaleServe()}
 	/>
 	{#if error}<p data-testid="server-tailscale-error" role="alert" class="px-3 py-2 text-[12px] text-error">{error}</p>{/if}

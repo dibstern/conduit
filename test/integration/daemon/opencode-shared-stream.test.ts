@@ -732,10 +732,15 @@ describe("daemon shared OpenCode global stream", () => {
 		await removeProject(fixture, "process-test");
 		const cursor = fixture.opencodeRequests().length;
 		evidence["removedAt"] = Date.now();
-		await vi.waitFor(() => expect(livePids()).toEqual([]), {
-			timeout: 15_000,
-			interval: 250,
-		});
+		await vi.waitFor(
+			async () => {
+				expect(livePids()).toEqual([]);
+				expect((await b.instanceStatus("opencode")).instance?.status).toBe(
+					"stopped",
+				);
+			},
+			{ timeout: 15_000, interval: 250 },
+		);
 		const removedDirectoryRequests = fixture
 			.opencodeRequests()
 			.slice(cursor)

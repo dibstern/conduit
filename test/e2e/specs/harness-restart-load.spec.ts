@@ -856,6 +856,24 @@ test("opens the heavy session after a restart under load", async ({
 			await page.locator("#messages > :not(:has(#scroll-btn))").allInnerTexts()
 		).join("\n");
 	};
+	await expect
+		.poll(() => opener.evaluate(() => localStorage.getItem("conduit-avatar")))
+		.not.toBeNull();
+	const avatarProfile = await opener.evaluate(() =>
+		localStorage.getItem("conduit-avatar"),
+	);
+	for (const device of [opener, cold]) {
+		await expect
+			.poll(() => device.evaluate(() => localStorage.getItem("conduit-avatar")))
+			.toBe(avatarProfile);
+		// These two completed turns belong to the fixture's Claude session.
+		const headers = device.locator("#messages .assistant-header");
+		await expect(headers).toHaveCount(2);
+		await expect(headers.getByText("Claude", { exact: true })).toHaveText([
+			"Claude",
+			"Claude",
+		]);
+	}
 	const [resumedTranscript, coldTranscript] = [
 		await transcriptOf(opener),
 		await transcriptOf(cold),

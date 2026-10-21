@@ -27,7 +27,7 @@
 </script>
 
 {#if !compact}
-	<div data-testid="background-tasks-row" bind:clientWidth={width} class="flex min-h-[44px] min-w-0 basis-full items-center gap-[8px] border-t border-border text-[12.5px] text-text-secondary">
+	<div data-testid="background-tasks-row" bind:clientWidth={width} class="flex min-h-[36px] min-w-0 basis-full items-center gap-[8px] pl-[20px] pr-[16px] border-t border-border-subtle text-[12.5px] text-text-secondary">
 		<Icon name="loader-circle" size={12} class="shrink-0 motion-safe:animate-spin" />
 		<Button variant="ghost" size="content" tone="secondary" touchTarget class="shrink-0" data-testid="background-tasks-toggle" aria-expanded={tasksPanel.open} aria-controls="background-tasks-panel" onclick={togglePanel}>{tasks.length} background {tasks.length === 1 ? "task" : "tasks"}</Button>
 		{#each shown as task (task.id)}

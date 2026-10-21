@@ -374,7 +374,7 @@ describe("a send claimed before daemon SIGKILL", () => {
 				);
 				expect(state.inbox.busy).toBe(true);
 				if (!echoed) {
-					expect(state.sessionStatus).toBe("idle");
+					expect(state.sessionStatus).toBe("busy");
 					expect(state.inbox.in_flight).toBe(true);
 				}
 				expect(state.providerPromptCount).toBe(1);
