@@ -114,7 +114,6 @@ interface ProviderCommandOutboxRow {
 	readonly run_id: string | null;
 	readonly provider_process_id: string | null;
 	readonly attempt_count: number;
-	readonly requested_at: number;
 }
 
 interface SendTurnOutboxPayload
@@ -298,7 +297,8 @@ export class ProviderSideEffectReactor {
 								.sql`UPDATE provider_command_outbox SET status = 'pending', next_attempt_at = NULL
 					WHERE project_key = ${this.options.projectId} AND effect_type <> 'send_turn' AND status = 'running'
 						AND attempt_count < ${maxControlAttempts}
-						AND command_id NOT IN ${this.options.sql.in([...this.acceptedControls])}`,
+						AND command_id NOT IN ${this.options.sql.in([...this.acceptedControls])}
+						AND command_id NOT IN ${this.options.sql.in([...this.executingControls])}`,
 						)
 						.pipe(Effect.mapError(storeFailure("recoverControls")));
 					this.recoveryPrepared = true;
@@ -949,7 +949,7 @@ export class ProviderSideEffectReactor {
 			const nowMs = yield* this.currentTimeMillis();
 			return yield* this.options.sql<ProviderCommandOutboxRow>`
 			SELECT request_sequence, command_id, project_key, session_id, provider_id,
-			       effect_type, payload_json, run_id, provider_process_id, attempt_count, requested_at
+			       effect_type, payload_json, run_id, provider_process_id, attempt_count
 			FROM provider_command_outbox AS candidate
 			WHERE project_key = ${this.options.projectId}
 				AND (${sessionId ?? null} IS NULL OR session_id = ${sessionId ?? null})
@@ -1020,7 +1020,7 @@ export class ProviderSideEffectReactor {
 					))
 					AND (status = 'pending' OR (status = 'retryable_failed' AND next_attempt_at <= ${updatedAt}))
 				RETURNING request_sequence, command_id, project_key, session_id, provider_id,
-					effect_type, payload_json, run_id, provider_process_id, attempt_count, requested_at`;
+					effect_type, payload_json, run_id, provider_process_id, attempt_count`;
 					if (claimed?.run_id === runId) {
 						const store = yield* makeEventStoreEffect.pipe(
 							Effect.provideService(SqlClient.SqlClient, this.options.sql),
@@ -1177,16 +1177,14 @@ export class ProviderSideEffectReactor {
 				const instance = yield* this.options.registry.getInstanceEffect(
 					account?.driver ?? row.provider_id,
 				);
-				// Keep FIFO, but give runner controls a durable reply deadline. Stop
-				// escalation gets a small grace to enqueue retirement behind this head.
-				// Recovery must never grant the same command another full waiting period.
-				const replyRemaining = getProviderDriver(
-					account?.driver ?? instance.providerId,
-				)?.runsOpenCodeServer
-					? undefined
-					: (stop?.deadlineAt ?? row.requested_at + STOP_ABORT_WAIT_MS) +
-						runnerControlReplyGraceMs -
-						(yield* this.currentTimeMillis());
+				// Bound provider execution in this daemon run, never time queued or
+				// offline. Forced retirement owns its bounded process-termination path.
+				const replyTimeout =
+					getProviderDriver(account?.driver ?? instance.providerId)
+						?.runsOpenCodeServer ||
+					(payload.type === "end_session" && payload.retireProcess)
+						? undefined
+						: STOP_ABORT_WAIT_MS + runnerControlReplyGraceMs;
 				const timedOut = () =>
 					new ProviderInstanceFailure({
 						providerId: row.provider_id,
@@ -1194,8 +1192,6 @@ export class ProviderSideEffectReactor {
 						code: "provider_control_timeout",
 						cause: new Error("Provider control reply deadline exceeded"),
 					});
-				if (replyRemaining !== undefined && replyRemaining <= 0)
-					return yield* timedOut();
 				const context = {
 					commandId: row.command_id,
 					providerProcessId: row.provider_process_id,
@@ -1361,11 +1357,11 @@ export class ProviderSideEffectReactor {
 							: failure,
 					),
 				);
-				yield* replyRemaining === undefined
+				yield* replyTimeout === undefined
 					? delivery
 					: delivery.pipe(
 							Effect.timeoutOrElse({
-								duration: replyRemaining,
+								duration: replyTimeout,
 								orElse: () => Effect.fail(timedOut()),
 							}),
 						);
@@ -1638,7 +1634,7 @@ export class ProviderSideEffectReactor {
 	> {
 		return this.options.sql<ProviderCommandOutboxRow>`
 			SELECT request_sequence, command_id, project_key, session_id, provider_id,
-			       effect_type, payload_json, run_id, provider_process_id, attempt_count, requested_at
+			       effect_type, payload_json, run_id, provider_process_id, attempt_count
 			FROM provider_command_outbox
 			WHERE project_key = ${this.options.projectId}
 				AND command_id = ${commandId} AND status IN ('pending', 'retryable_failed')
@@ -1765,7 +1761,10 @@ export class ProviderSideEffectReactor {
 			failure.retryable &&
 			row.attempt_count < maxControlAttempts;
 		return (
-			failure && !retryable && failure.code === undefined
+			failure &&
+			!retryable &&
+			(failure.code === undefined ||
+				failure.code === "provider_control_timeout")
 				? this.readFailedControlPrompt(row)
 				: Effect.succeed(undefined)
 		).pipe(

@@ -419,8 +419,8 @@ describe("Stop waits for provider confirmation", () => {
 			if (restart) {
 				await harness.kill();
 				await stop;
-				// Let the reply deadline expire while the daemon is down. Recovery
-				// must fail this claim immediately instead of granting another wait.
+				// Downtime does not spend the control's execution budget. Re-dispatch
+				// gets a fresh clock even though the durable Stop deadline has passed.
 				await vi.waitFor(
 					() => expect(Date.now()).toBeGreaterThan(snapshot.deadlineAt + 6000),
 					{
@@ -434,7 +434,9 @@ describe("Stop waits for provider confirmation", () => {
 			await vi.waitFor(
 				() => expect(() => process.kill(runner.pid, 0)).toThrow(),
 				{
-					timeout: Math.max(0, snapshot.deadlineAt - Date.now()) + 8000,
+					timeout: restart
+						? 43_000
+						: Math.max(0, snapshot.deadlineAt - Date.now()) + 8000,
 					interval: 100,
 				},
 			);
@@ -558,17 +560,23 @@ describe("Stop waits for provider confirmation", () => {
 			);
 			db.close();
 		}
-	}, 75_000);
+	}, 110_000);
 
 	it.each([
-		false,
-		true,
-	])("recovers an acknowledged Stop after daemon restart before its terminal, startup after deadline=%s", async (afterDeadline) => {
+		{ afterDeadline: false, retirementQueued: false },
+		{ afterDeadline: true, retirementQueued: false },
+		{ afterDeadline: true, retirementQueued: true },
+	])("recovers an acknowledged Stop after daemon restart before its terminal, startup after deadline=$afterDeadline, retirement queued=$retirementQueued", async ({
+		afterDeadline,
+		retirementQueued,
+	}) => {
 		const commandId = randomUUID();
 		const record: Record<string, unknown> = {
-			scenario: afterDeadline
-				? "acknowledged-stop-startup-after-deadline"
-				: "acknowledged-stop-restarted-before-deadline",
+			scenario: retirementQueued
+				? "queued-retirement-restarted-past-control-timeout"
+				: afterDeadline
+					? "acknowledged-stop-startup-after-deadline"
+					: "acknowledged-stop-restarted-before-deadline",
 			afterDeadline,
 			commandId,
 			passed: false,
@@ -595,6 +603,10 @@ describe("Stop waits for provider confirmation", () => {
 		if (runner?.kind !== "runner-started") throw new Error("Missing runner");
 		const db = new Database(harness.daemonStorePath());
 		try {
+			if (retirementQueued)
+				db.exec(`CREATE TRIGGER hold_retirement BEFORE UPDATE OF status ON provider_command_outbox
+					WHEN NEW.command_id = '${commandId}:retire' AND NEW.status = 'running'
+					BEGIN SELECT RAISE(IGNORE); END`);
 			const stop = Effect.runPromise(
 				browser.rpc.CancelSession({ sessionId, commandId }),
 			).catch(() => undefined);
@@ -634,18 +646,53 @@ describe("Stop waits for provider confirmation", () => {
 				)
 				.get(sessionId) as { data: string };
 			expect(JSON.parse(intent.data)).toMatchObject({ stop: original.stop });
+			let resumeAfter = original.stop.deadlineAt;
+			if (retirementQueued) {
+				await vi.waitFor(
+					() =>
+						expect(
+							db
+								.prepare(
+									"SELECT status FROM provider_command_outbox WHERE command_id = ?",
+								)
+								.get(`${commandId}:retire`),
+						).toEqual({ status: "pending" }),
+					{ timeout: 35_000, interval: 100 },
+				);
+				const retirement = db
+					.prepare(
+						"SELECT requested_at FROM provider_command_outbox WHERE command_id = ?",
+					)
+					.get(`${commandId}:retire`) as { requested_at: number };
+				resumeAfter = retirement.requested_at + 36_000;
+				record["retirementRequestedAt"] = retirement.requested_at;
+				expect(
+					sdkProof(harness).filter(
+						(mark) => mark["commandId"] === `${commandId}:retire`,
+					),
+				).toEqual([]);
+			}
 			await harness.kill();
+			record["stoppedAt"] = Date.now();
 			await Promise.all([send, stop]);
 			if (afterDeadline)
 				await vi.waitFor(
-					() => expect(Date.now()).toBeGreaterThan(original.stop.deadlineAt),
-					{ timeout: 35_000, interval: 100 },
+					() => expect(Date.now()).toBeGreaterThan(resumeAfter),
+					{ timeout: 40_000, interval: 100 },
 				);
+			if (retirementQueued) db.exec("DROP TRIGGER hold_retirement");
+			record["restartedAt"] = Date.now();
 			await harness.restart();
-			const restartedBrowser = await harness.connect(sessionId);
-			const duplicateStop = Effect.runPromise(
-				restartedBrowser.rpc.CancelSession({ sessionId, commandId }),
-			).catch(() => undefined);
+			// An already-committed retirement must recover without a client
+			// reissuing Stop. The other cases separately exercise that replay.
+			const restartedBrowser = retirementQueued
+				? undefined
+				: await harness.connect(sessionId);
+			const duplicateStop = restartedBrowser
+				? Effect.runPromise(
+						restartedBrowser.rpc.CancelSession({ sessionId, commandId }),
+					).catch(() => undefined)
+				: Promise.resolve();
 			if (!afterDeadline) {
 				await harness.kill();
 				await duplicateStop;
@@ -679,9 +726,20 @@ describe("Stop waits for provider confirmation", () => {
 					)
 					.all(`${commandId}:retire`),
 			).toEqual([{ command_id: `${commandId}:retire` }]);
+			// Process exit can precede the receipt commit. Observe that commit
+			// before the second restart, which checks completed-command replay.
+			await vi.waitFor(() =>
+				expect(
+					db
+						.prepare(
+							"SELECT status, error_code FROM provider_command_outbox WHERE command_id = ?",
+						)
+						.get(`${commandId}:retire`),
+				).toEqual({ status: "completed", error_code: null }),
+			);
 			await harness.kill();
 			await harness.restart();
-			await harness.connect(sessionId);
+			if (!retirementQueued) await harness.connect(sessionId);
 			expect(
 				db
 					.prepare(
@@ -699,12 +757,26 @@ describe("Stop waits for provider confirmation", () => {
 			expect(
 				sdkProof(harness).filter((mark) => mark["kind"] === "query-closed"),
 			).toHaveLength(1);
+			expect(
+				db
+					.prepare(
+						"SELECT type FROM events WHERE session_id = ? AND type IN ('turn.completed', 'turn.interrupted', 'turn.error')",
+					)
+					.all(sessionId),
+			).toHaveLength(1);
+			expect(
+				db
+					.prepare(
+						"SELECT status, error_code FROM provider_command_outbox WHERE command_id = ?",
+					)
+					.get(`${commandId}:retire`),
+			).toEqual({ status: "completed", error_code: null });
 			record["passed"] = true;
 		} finally {
 			Object.assign(record, {
 				commands: db
 					.prepare(
-						"SELECT command_id, effect_type, payload_json, provider_process_id, status, error_code FROM provider_command_outbox WHERE session_id = ? AND effect_type <> 'send_turn' ORDER BY request_sequence",
+						"SELECT command_id, effect_type, payload_json, provider_process_id, status, error_code, requested_at, updated_at FROM provider_command_outbox WHERE session_id = ? AND effect_type <> 'send_turn' ORDER BY request_sequence",
 					)
 					.all(sessionId),
 				runs: db
@@ -726,7 +798,12 @@ describe("Stop waits for provider confirmation", () => {
 				"/tmp/82tn27-3-repair-f1-proof.json",
 				JSON.stringify({ scenarios: recoveryEvidence }, null, 2),
 			);
+			if (retirementQueued)
+				writeFileSync(
+					"/tmp/82tn27-3-round4-retirement-restart.json",
+					JSON.stringify(record, null, 2),
+				);
 			db.close();
 		}
-	}, 100_000);
+	}, 135_000);
 });

@@ -142,12 +142,165 @@ describe("durable control outbox scheduling", () => {
 		};
 	}
 
+	it.each([
+		{ kind: "permission", claimed: false, replay: false },
+		{ kind: "question", claimed: false, replay: false },
+		{ kind: "permission", claimed: true, replay: false },
+		{ kind: "question", claimed: true, replay: false },
+		{ kind: "permission", claimed: false, replay: true },
+	] as const)("delivers a $kind after downtime past the control timeout with a fresh execution clock, claimed=$claimed, replay=$replay", async ({
+		kind,
+		claimed,
+		replay,
+	}) => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const entered = yield* Deferred.make<void>();
+					const reentered = yield* Deferred.make<void>();
+					let now = 1000;
+					let recovering = false;
+					let nativeCalls = 0;
+					let reply: () => void = () => {
+						throw new Error("Recovered answer has not started");
+					};
+					const answer = () =>
+						Effect.gen(function* () {
+							nativeCalls++;
+							if (!recovering) {
+								yield* Deferred.succeed(entered, undefined);
+								return yield* Effect.never;
+							}
+							yield* Deferred.succeed(reentered, undefined);
+							yield* Effect.callback<void>((resume) => {
+								reply = () => resume(Effect.void);
+							});
+						});
+					const instance: ProviderInstance = {
+						...provider(() => Effect.never),
+						providerId: "claude",
+						getControlProcessIdEffect: () => Effect.succeed("shared-process"),
+						resolvePermissionEffect: answer,
+						resolveQuestionEffect: answer,
+					};
+					const stopAfterCommit =
+						(write: CommitAndSignal["write"]): CommitAndSignal["write"] =>
+						(body, options) =>
+							write(body, options).pipe(
+								Effect.tap((result) =>
+									result &&
+									typeof result === "object" &&
+									"newlyAccepted" in result &&
+									result.newlyAccepted === true
+										? Effect.die("stopped after commit")
+										: Effect.void,
+								),
+							);
+					const accepting = yield* engine(
+						instance,
+						() => now,
+						undefined,
+						undefined,
+						claimed ? undefined : stopAfterCommit,
+					);
+					yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('card', 'control-session', ${kind}, 'pending', 'shared-process', 'native-answer', 1)`;
+					const command = {
+						commandId: "answer-across-restart",
+						sessionId: "control-session",
+						requestId: "card",
+						providerProcessId: "shared-process",
+						...(kind === "permission"
+							? {
+									type: "resolve_permission" as const,
+									decision: "once" as const,
+								}
+							: {
+									type: "resolve_question" as const,
+									answers: { "0": "Continue" },
+								}),
+					};
+					const interrupted = yield* Effect.forkChild(
+						Effect.exit(accepting.dispatchEffect(command)),
+					);
+					if (claimed) {
+						yield* Deferred.await(entered);
+						yield* Fiber.interrupt(interrupted);
+					} else expect((yield* Fiber.join(interrupted))._tag).toBe("Failure");
+					yield* accepting.shutdownEffect();
+					const before =
+						yield* sql`SELECT command_id, payload_json, status, requested_at FROM provider_command_outbox`;
+					expect(before).toMatchObject([
+						{ status: claimed ? "running" : "pending", requested_at: 1000 },
+					]);
+					now += 40_000;
+					yield* TestClock.adjust(40_000);
+					recovering = true;
+					const restarted = yield* engine(instance, () => now);
+					yield* Effect.addFinalizer(() => restarted.shutdownEffect());
+					const drain = yield* Effect.forkChild(
+						replay
+							? restarted.dispatchEffect(command)
+							: restarted.drainSideEffects(),
+					);
+					yield* Effect.raceFirst(Deferred.await(reentered), Fiber.join(drain));
+					expect(nativeCalls).toBe(claimed ? 2 : 1);
+					// Startup recovery may first meet a command already re-dispatched
+					// by a client or the recovered Stop worker in this daemon run.
+					yield* restarted.drainSideEffects();
+					now += 34_999;
+					yield* TestClock.adjust(34_999);
+					expect(
+						yield* sql`SELECT status FROM provider_command_outbox`,
+					).toEqual([{ status: "running" }]);
+					reply();
+					yield* Fiber.join(drain);
+					expect(
+						yield* sql`SELECT status, error_code FROM command_receipts`,
+					).toEqual([{ status: "side_effect_completed", error_code: null }]);
+					expect(yield* sql`SELECT status FROM pending_approvals`).toEqual([
+						{ status: "resolved" },
+					]);
+					expect(
+						yield* sql`SELECT payload_json, requested_at FROM provider_command_outbox`,
+					).toEqual(
+						before.map(({ payload_json, requested_at }) => ({
+							payload_json,
+							requested_at,
+						})),
+					);
+					writeFileSync(
+						`/tmp/82tn27-3-round4-${kind}-restart-${claimed}-${replay}.json`,
+						JSON.stringify(
+							{
+								kind,
+								claimed,
+								replay,
+								before,
+								nativeCalls,
+								now,
+								after:
+									yield* sql`SELECT command_id, status, error_code, attempt_count, requested_at FROM provider_command_outbox`,
+							},
+							null,
+							2,
+						),
+					);
+				}),
+			).pipe(Effect.provide(fixture()), Effect.provide(TestClock.layer())),
+		);
+	});
+
 	// A long runner answer may still succeed before its deadline. After timeout,
 	// its late native reply must not settle it twice or hold the next control.
 	it.each([
-		false,
-		true,
-	])("bounds runner answers and ignores late replies, timeout=%s", async (timeout) => {
+		{ timeout: false, kind: "permission" },
+		{ timeout: true, kind: "permission" },
+		{ timeout: true, kind: "question" },
+	] as const)("bounds runner answers and ignores late replies, timeout=$timeout, kind=$kind", async ({
+		timeout,
+		kind,
+	}) => {
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
@@ -157,18 +310,25 @@ describe("durable control outbox scheduling", () => {
 						throw new Error("Answer has not started");
 					};
 					let now = 1000;
+					let nativeCalls = 0;
+					const answer = () =>
+						Effect.suspend(() =>
+							++nativeCalls > 1
+								? Effect.void
+								: Deferred.succeed(entered, undefined).pipe(
+										Effect.andThen(
+											Effect.callback<void>((resume) => {
+												reply = () => resume(Effect.void);
+											}),
+										),
+									),
+						);
 					const instance: ProviderInstance = {
 						...provider(() => Effect.never),
 						providerId: "claude",
 						getControlProcessIdEffect: () => Effect.succeed("shared-process"),
-						resolvePermissionEffect: () =>
-							Deferred.succeed(entered, undefined).pipe(
-								Effect.andThen(
-									Effect.callback<void>((resume) => {
-										reply = () => resume(Effect.void);
-									}),
-								),
-							),
+						resolvePermissionEffect: answer,
+						resolveQuestionEffect: answer,
 					};
 					const accepting = yield* engine(instance, () => now);
 					yield* Effect.addFinalizer(() => accepting.shutdownEffect());
@@ -178,14 +338,21 @@ describe("durable control outbox scheduling", () => {
 					yield* sql.unsafe(`CREATE TRIGGER record_control_terminal AFTER UPDATE OF status ON provider_command_outbox
 						WHEN NEW.status IN ('completed', 'failed', 'cancelled')
 						BEGIN INSERT INTO control_terminals VALUES (NEW.command_id, NEW.status); END`);
-					yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('card', 'control-session', 'permission', 'pending', 'shared-process', 'native-answer', 1)`;
+					yield* sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at) VALUES ('card', 'control-session', ${kind}, 'pending', 'shared-process', 'native-answer', 1)`;
 					const command = {
-						type: "resolve_permission" as const,
 						commandId: "deadline-answer",
 						sessionId: "control-session",
 						requestId: "card",
-						decision: "once" as const,
 						providerProcessId: "shared-process",
+						...(kind === "permission"
+							? {
+									type: "resolve_permission" as const,
+									decision: "once" as const,
+								}
+							: {
+									type: "resolve_question" as const,
+									answers: { "0": "Continue" },
+								}),
 					};
 					const delivery = yield* Effect.forkChild(
 						Effect.result(accepting.dispatchEffect(command)),
@@ -263,11 +430,33 @@ describe("durable control outbox scheduling", () => {
 						{ command_id: "after-answer", count: 1 },
 						{ command_id: "deadline-answer", count: 1 },
 					]);
+					expect(yield* sql`SELECT status FROM pending_approvals`).toEqual([
+						{ status: timeout ? "pending" : "resolved" },
+					]);
+					const reopened =
+						yield* sql`SELECT type FROM events WHERE json_extract(metadata, '$.source') = 'conduit.control-reconciliation'`;
+					expect(reopened).toEqual(timeout ? [{ type: `${kind}.asked` }] : []);
+					if (timeout) {
+						yield* accepting.dispatchEffect({
+							...command,
+							commandId: "fresh-answer",
+						});
+						expect(nativeCalls).toBe(2);
+						expect(yield* sql`SELECT status FROM pending_approvals`).toEqual([
+							{ status: "resolved" },
+						]);
+						expect(
+							yield* sql`SELECT status FROM command_receipts WHERE command_id = 'fresh-answer'`,
+						).toEqual([{ status: "side_effect_completed" }]);
+					}
 					writeFileSync(
-						`/tmp/82tn27-3-round3-answer-timeout-${timeout}.json`,
+						`/tmp/82tn27-3-round4-${kind}-timeout-${timeout}.json`,
 						JSON.stringify(
 							{
 								timeout,
+								kind,
+								reopened,
+								nativeCalls,
 								outcome,
 								receipt: settled,
 								terminals,
