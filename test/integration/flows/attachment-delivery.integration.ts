@@ -83,6 +83,7 @@ describe("Integration: attachment delivery through the relay", () => {
 				new Response(JSON.stringify(value), {
 					headers: { "Content-Type": "application/json" },
 				});
+			if (pathname === "/global/health") return json({ healthy: true });
 			if (pathname === "/path")
 				return json({
 					state: root,

@@ -1193,6 +1193,12 @@ export class MockOpenCodeServer {
 			this.getActiveQueue(this.exactQueues, exact) ??
 			this.getActiveQueue(this.normalizedQueues, normalized);
 
+		if (!queue && method === "GET" && basePath === "/global/health") {
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end(JSON.stringify({ healthy: true }));
+			return;
+		}
+
 		// OpenCode answers an abort with `true`, busy or idle, and recordings
 		// rarely capture one. Stop now fails when the abort does.
 		if (
