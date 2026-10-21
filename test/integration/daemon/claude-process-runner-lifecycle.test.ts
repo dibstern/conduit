@@ -76,7 +76,12 @@ function snapshot(harness: ProcessHarness, sessionId: string) {
 				.all(sessionId),
 			approvals: db
 				.prepare(
-					"SELECT id, type, status, decision FROM pending_approvals WHERE session_id = ?",
+					"SELECT id, type, status, decision, provider_process_id FROM pending_approvals WHERE session_id = ?",
+				)
+				.all(sessionId),
+			promptResolutions: db
+				.prepare(
+					"SELECT type, json_extract(data, '$.id') AS id, json_extract(metadata, '$.source') AS source FROM events WHERE session_id = ? AND type IN ('permission.resolved', 'question.resolved') ORDER BY sequence",
 				)
 				.all(sessionId),
 			queued: db
@@ -1097,77 +1102,109 @@ describe("built-dist Claude runner lifecycle", () => {
 	}, 30_000);
 
 	it.each([
-		"protocol version",
-		"run ownership",
-	] as const)("settles a live runner refused at adoption for %s and sends again", async (reason) => {
-		const { harness, browser, sessionId } = await start({
-			runnerHelloAfterFirst: true,
-			...(reason === "protocol version"
-				? { runnerHelloProtocolVersion: 999 }
-				: { runnerHelloWithoutRunIds: true }),
-		});
-		const pending = browser.send(sessionId, "approval-adoption-refusal");
-		void pending.catch(() => undefined);
-		await browser.waitFor((frame) => frame["type"] === "permission_pending");
-		const runner = started(harness);
-		expect(testRunnerAlive(runner.pid)).toBe(true);
-		expect(snapshot(harness, sessionId).turns).toEqual([{ state: "running" }]);
-		await harness.kill();
-		expect(testRunnerAlive(runner.pid)).toBe(true);
-		await harness.restart();
-		const restored = await harness.connect(sessionId);
-		await restored.view(sessionId);
-		await vi.waitFor(
-			() => {
-				const state = snapshot(harness, sessionId);
-				expect(state.session).toEqual({ status: "idle" });
-				expect(state.turns).toEqual([{ state: "error" }]);
-				expect(state.commands).toEqual([{ status: "failed" }]);
-				expect(state.receipts).toEqual([{ status: "side_effect_failed" }]);
-				expect(state.errorOwners).toEqual(state.runReservations);
-				expect(state.approvals).toEqual([
-					expect.objectContaining({ status: "resolved" }),
+		["protocol version", "permission"],
+		["run ownership", "permission"],
+		["protocol version", "question"],
+		["run ownership", "question"],
+	] as const)(
+		"settles a live runner refused at adoption for %s with a pending %s and sends again",
+		async (reason, prompt) => {
+			const { harness, browser, sessionId } = await start({
+				runnerHelloAfterFirst: true,
+				...(reason === "protocol version"
+					? { runnerHelloProtocolVersion: 999 }
+					: { runnerHelloWithoutRunIds: true }),
+			});
+			const pending = browser.send(
+				sessionId,
+				`${prompt === "permission" ? "approval" : "question"}-adoption-refusal`,
+			);
+			void pending.catch(() => undefined);
+			await browser.waitFor((frame) => frame["type"] === `${prompt}_pending`);
+			const runner = started(harness);
+			expect(testRunnerAlive(runner.pid)).toBe(true);
+			const before = snapshot(harness, sessionId);
+			expect(before.turns).toEqual([{ state: "running" }]);
+			expect(before.approvals).toEqual([
+				expect.objectContaining({
+					type: prompt,
+					status: "pending",
+					provider_process_id: discoverRunners(
+						harness.projectDir,
+						harness.configDir,
+					).find((entry) => entry.pid === runner.pid)?.runnerId,
+				}),
+			]);
+			await harness.kill();
+			expect(testRunnerAlive(runner.pid)).toBe(true);
+			await harness.restart();
+			const restored = await harness.connect(sessionId);
+			await restored.view(sessionId);
+			await vi.waitFor(
+				() => {
+					const state = snapshot(harness, sessionId);
+					expect(state.session).toEqual({ status: "idle" });
+					expect(state.turns).toEqual([{ state: "error" }]);
+					expect(state.commands).toEqual([{ status: "failed" }]);
+					expect(state.receipts).toEqual([{ status: "side_effect_failed" }]);
+					expect(state.errorOwners).toEqual(state.runReservations);
+					expect(state.approvals).toEqual([
+						expect.objectContaining({ status: "resolved" }),
+					]);
+					expect(state.promptResolutions).toEqual([
+						{
+							type: `${prompt}.resolved`,
+							id: expect.any(String),
+							source: "provider-process-expired",
+						},
+					]);
+					expect(
+						state.events.filter((event) =>
+							/^turn\.(error|completed|interrupted)$/.test(event.type),
+						),
+					).toHaveLength(1);
+					expect(testRunnerAlive(runner.pid)).toBe(false);
+				},
+				{ timeout: 10_000 },
+			);
+			const failure =
+				reason === "protocol version"
+					? /protocol.*mismatch.*999/i
+					: /predates run ownership.*build/i;
+			expect(JSON.stringify(harness.proof())).toMatch(failure);
+			expect(harness.logTail).not.toMatch(/Failed to create relay/);
+			const state = snapshot(harness, sessionId);
+			expect(
+				JSON.stringify(
+					state.events.filter((event) => event.type === "turn.error"),
+				),
+			).toMatch(failure);
+			const reply = await restored.send(sessionId, "after-adoption-refusal");
+			expect(reply.done["status"]).toBe("idle");
+			expect(reply.chunks.join("")).toBe(
+				responseChunks("after-adoption-refusal").join(""),
+			);
+			expect(started(harness).pid).not.toBe(runner.pid);
+			await vi.waitFor(() => {
+				const after = snapshot(harness, sessionId);
+				expect(after.queued).toEqual([]);
+				expect(after.turns).toEqual([
+					{ state: "error" },
+					{ state: "completed" },
+				]);
+				expect(after.commands).toEqual([
+					{ status: "failed" },
+					{ status: "completed" },
 				]);
 				expect(
-					state.events.filter((event) =>
+					after.events.filter((event) =>
 						/^turn\.(error|completed|interrupted)$/.test(event.type),
 					),
-				).toHaveLength(1);
-				expect(testRunnerAlive(runner.pid)).toBe(false);
-			},
-			{ timeout: 10_000 },
-		);
-		const failure =
-			reason === "protocol version"
-				? /protocol.*mismatch.*999/i
-				: /predates run ownership.*build/i;
-		expect(JSON.stringify(harness.proof())).toMatch(failure);
-		expect(harness.logTail).not.toMatch(/Failed to create relay/);
-		const state = snapshot(harness, sessionId);
-		expect(
-			JSON.stringify(
-				state.events.filter((event) => event.type === "turn.error"),
-			),
-		).toMatch(failure);
-		const reply = await restored.send(sessionId, "after-adoption-refusal");
-		expect(reply.chunks.join("")).toBe(
-			responseChunks("after-adoption-refusal").join(""),
-		);
-		expect(started(harness).pid).not.toBe(runner.pid);
-		await vi.waitFor(() => {
-			const after = snapshot(harness, sessionId);
-			expect(after.turns).toEqual([{ state: "error" }, { state: "completed" }]);
-			expect(after.commands).toEqual([
-				{ status: "failed" },
-				{ status: "completed" },
-			]);
-			expect(
-				after.events.filter((event) =>
-					/^turn\.(error|completed|interrupted)$/.test(event.type),
-				),
-			).toHaveLength(2);
-		});
-	}, 40_000);
+				).toHaveLength(2);
+			});
+		},
+		40_000,
+	);
 
 	it("fails the owning turn and requeues its unstarted steer when startup refuses the protocol", async () => {
 		const { harness, browser, sessionId } = await start({

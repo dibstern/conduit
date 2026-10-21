@@ -14,7 +14,6 @@ import {
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
-import { PendingInteractionServiceTag } from "../../domain/relay/Services/pending-interaction-service.js";
 import { ProviderRuntimeIngestionTag } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
@@ -1284,6 +1283,14 @@ export const makeProcessSessionRunner = (
 							if (runnerPidAlive(registration.pid))
 								return yield* Effect.fail(failure);
 							if (!abandoned && sql && ingestion) {
+								// No runner remains current, so retire the stopped runner's prompts too.
+								yield* retireReplacedPrompts("", {
+									sessionId: registration.sessionId,
+								}).pipe(
+									Effect.mapError((cause) =>
+										runnerFailure("refuse runner interactions", cause),
+									),
+								);
 								const { owners } = yield* sessionRunOwnersQuery(
 									sql,
 									registration.sessionId,
@@ -1304,21 +1311,6 @@ export const makeProcessSessionRunner = (
 										runnerFailure("refuse runner", cause),
 									),
 								);
-								const pending = yield* Effect.serviceOption(
-									PendingInteractionServiceTag,
-								);
-								if (pending._tag === "Some")
-									yield* pending.value
-										.cancelSessionInteractions(
-											registration.sessionId,
-											failure.message,
-											{ recoverQuestions: false },
-										)
-										.pipe(
-											Effect.mapError((cause) =>
-												runnerFailure("refuse runner interactions", cause),
-											),
-										);
 							}
 							entry.recovering = false;
 							entry.failure = failure;
