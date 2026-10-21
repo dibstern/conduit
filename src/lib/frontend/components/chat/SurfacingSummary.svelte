@@ -157,7 +157,7 @@
 				<p class="summary-error">{error}</p>
 			</div>
 		{:else if generating}
-			<div class="summary-actions"><span class="summary-busy" role="status"><Icon name="loader-circle" size={13} class="animate-spin" />Summarising…</span></div>
+			<div class="summary-actions"><span class="summary-busy" role="status"><Icon name="loader-circle" size={13} class="animate-spin" />Summarizing…</span></div>
 		{:else if newer > 0 && latest || !selected}
 			<div class="summary-actions">
 				<Button variant="accent-soft" size="content" touchTarget class="h-[28px] rounded-full px-[12px] text-[13px] font-medium" data-testid="surfacing-summary-new" onclick={() => ongenerate(latest ? "new" : "whole")}>{latest ? `✦ Summarize ${newer} new · since ${writtenAt(latest)}` : `✦ Summarize ${live ? "so far" : "turn"} · ${view.numbers.length}`}</Button>

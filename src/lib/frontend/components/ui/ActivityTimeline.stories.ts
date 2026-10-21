@@ -13,14 +13,14 @@ const meta = {
 				left: 0,
 				width: 34,
 				label: "Read src/unread.ts · 4s",
-				tone: "neutral",
+				tone: "explore",
 			},
 			{
 				id: "thought",
 				left: 34.2,
 				width: 20,
 				label: "Thought for 3s",
-				tone: "dim",
+				tone: "thinking",
 			},
 			{
 				id: "error",

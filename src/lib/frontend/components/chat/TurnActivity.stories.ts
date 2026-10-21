@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 import { Utf8Bytes } from "../../../contracts/tool-wire.js";
 import { turnFixtureMessages } from "../../stories/turn-fixtures.js";
 import type { ChatMessage, ToolMessage } from "../../types.js";
@@ -56,9 +56,9 @@ export const Settled: Story = {
 			],
 			[
 				parts.find((part) => part.type === "tool" && part.name === "Read"),
-				"--color-seg",
+				"--color-act-explore",
 			],
-			[parts.find((part) => part.type === "thinking"), "--color-seg-dim"],
+			[parts.find((part) => part.type === "thinking"), "--color-act-thinking"],
 		] as const;
 		for (const [part, token] of paints) {
 			if (!part) throw new Error(`Missing fixture for ${token}`);
@@ -93,6 +93,22 @@ export const Expanded: Story = {
 		await expect(
 			canvasElement.querySelector(".step-log .turn-meta"),
 		).toBeVisible();
+		const colours = new Set<string>();
+		for (const part of settledSegment.activity) {
+			if (part.type === "system") continue;
+			const segment = canvasElement.querySelector(
+				`[data-step-id="${part.uuid}"]`,
+			);
+			const icon = canvasElement.querySelector(
+				`[data-part="${part.uuid}"] button > span:first-child`,
+			);
+			if (!segment || !icon)
+				throw new Error(`Missing activity paint for ${part.uuid}`);
+			const colour = getComputedStyle(segment).backgroundColor;
+			await expect(getComputedStyle(icon).color).toBe(colour);
+			colours.add(colour);
+		}
+		await expect(colours.size).toBeGreaterThanOrEqual(6);
 	},
 };
 
@@ -114,12 +130,16 @@ export const SummaryRow: Story = {
 		turn: live,
 		segment: liveSegment,
 		final: true,
-		onsummarize: () => undefined,
+		onsummarize: fn(),
 	},
-	play: async ({ canvasElement }) => {
-		await expect(
-			within(canvasElement).getByRole("button", { name: "✦ Summarize" }),
-		).toBeVisible();
+	play: async ({ canvasElement, args }) => {
+		const button = within(canvasElement).getByRole("button", {
+			name: "✦ Summary",
+		});
+		await expect(button).toBeVisible();
+		await userEvent.click(button);
+		await expect(args["onsummarize"]).toHaveBeenCalledOnce();
+		button.blur();
 	},
 };
 

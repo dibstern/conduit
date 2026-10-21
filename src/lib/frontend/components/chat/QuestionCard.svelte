@@ -255,10 +255,9 @@
 												(e.target as HTMLInputElement)
 													.checked,
 											)}
-										class="mt-[2px]"
 									/>
 									<span
-										class="question-option-content flex flex-col gap-[2px]"
+										class="question-option-content flex min-w-0 flex-col gap-[2px]"
 									>
 										<span
 											class="question-option-label text-[13px] font-medium text-text"
@@ -266,7 +265,7 @@
 										>
 										{#if opt.description}
 											<span
-												class="question-option-desc text-[12px] text-text-muted"
+												class="question-option-desc text-[12px] font-normal text-text-muted"
 												>{opt.description}</span
 											>
 										{/if}
@@ -290,10 +289,9 @@
 												qIdx,
 												opt.label,
 											)}
-										class="mt-[2px]"
 									/>
 									<span
-										class="question-option-content flex flex-col gap-[2px]"
+										class="question-option-content flex min-w-0 flex-col gap-[2px]"
 									>
 										<span
 											class="question-option-label text-[13px] font-medium text-text"
@@ -301,7 +299,7 @@
 										>
 										{#if opt.description}
 											<span
-												class="question-option-desc text-[12px] text-text-muted"
+												class="question-option-desc text-[12px] font-normal text-text-muted"
 												>{opt.description}</span
 											>
 										{/if}
@@ -336,10 +334,9 @@
 												(e.target as HTMLInputElement)
 													.checked,
 											)}
-										class="mt-[2px]"
 									/>
 									<span
-										class="question-option-content flex flex-col gap-[2px]"
+										class="question-option-content flex min-w-0 flex-col gap-[2px]"
 									>
 										<span
 											class="question-option-label text-[13px] font-medium text-text"
@@ -365,10 +362,9 @@
 												qIdx,
 												"__custom__",
 											)}
-										class="mt-[2px]"
 									/>
 									<span
-										class="question-option-content flex flex-col gap-[2px]"
+										class="question-option-content flex min-w-0 flex-col gap-[2px]"
 									>
 										<span
 											class="question-option-label text-[13px] font-medium text-text"
@@ -462,18 +458,35 @@
 <style>
 	.question-form :global(.question-option) {
 		border: 0;
+		min-height: 0;
+		align-items: baseline;
+		font-weight: 500;
 	}
 	.question-form :global(.question-option:has(input:checked)) {
 		background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+	}
+	@media (pointer: coarse) {
+		.question-form :global(.question-option) {
+			min-height: 44px;
+			flex-wrap: wrap;
+			align-content: center;
+		}
+		.question-form :global(.question-option-content) {
+			flex: 1;
+		}
 	}
 	.question-form :global(input[type="radio"]),
 	.question-form :global(input[type="checkbox"]) {
 		appearance: none;
 		position: relative;
+		margin: 0;
+		font: inherit;
 		width: 13px;
 		height: 13px;
 		border: 1.5px solid var(--color-text-dimmer);
 		background: transparent;
+		/* A replaced control's baseline is its bottom edge. Center it on the font's x-height. */
+		transform: translateY(calc(50% - 0.5ex));
 	}
 	.question-form :global(input[type="radio"]) {
 		border-radius: 50%;

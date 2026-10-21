@@ -1,6 +1,8 @@
 <script module lang="ts">
 	const TONES = {
-		neutral: "bg-seg", dim: "bg-seg-dim", edit: "bg-seg-edit", fail: "bg-seg-fail",
+		explore: "bg-act-explore", edit: "bg-seg-edit", shell: "bg-act-shell",
+		fetch: "bg-act-fetch", task: "bg-act-task", other: "bg-act-other",
+		thinking: "bg-act-thinking", text: "bg-act-text", fail: "bg-seg-fail",
 		compaction: "bg-text", live: "bg-accent",
 	} as const;
 </script>

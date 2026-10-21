@@ -101,8 +101,8 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"same running tool fixture, dispatched to ToolGenericCard",
 	"chat-toolgenericcard--with-tags | chat-toolitem--read-with-offset-limit":
 		"same Read-with-offset fixture, dispatched to ToolGenericCard",
-	"chat-toolitem--question-answered | chat-toolquestioncard--default":
-		"ToolItem dispatches the same answered fixture as ToolQuestionCard Default",
+	"chat-toolitem--question-answered | chat-toolquestioncard--claude-answer | chat-toolquestioncard--default | chat-toolquestioncard--structured-answers":
+		"ToolItem dispatches the answered fixture; its array result, Claude text and structured metadata all normalize to the same Staging option and Chosen capsule",
 	"chat-toolitem--question-pending | chat-toolquestioncard--waiting-without-question-data":
 		"same pending question without data, dispatched to ToolQuestionCard",
 	"chat-toolitem--question-running | chat-toolquestioncard--active":
@@ -166,6 +166,18 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 	// the root through 320/180/360px in both, so one frame is the expected result.
 	"session-gitidentity--control-block-resize | session-gitidentity--control-grid-resize":
 		"the same resize assertions under block and grid parents end in one identical 360px frame",
+
+	// Final restyle fixtures with matching terminal frames and distinct play assertions.
+	"chat-subagentbackbar--default | chat-subagentbackbar--hover":
+		"Hover spreads Default and adds pseudo-hover; the Parent capsule explicitly uses hoverFill=none, so its appearance stays the same",
+	"input-inputarea--running-no-change | input-inputarea--working-queued":
+		"RunningNoChange spreads WorkingQueued without overriding its fixture or play assertions",
+	"input-inputarea--running-no-change-light | input-inputarea--working-queued-light":
+		"both light stories inherit the same WorkingQueued fixture and play assertions",
+	"layout-chatlayout--phone-top-colour | layout-chatlayout--sidebar-collapsed":
+		"on phone both show the same session with its sidebar collapsed; PhoneTopColour additionally asserts matching top-edge, header and browser theme colours, then restores the theme",
+	"ui-activitytimeline--default | ui-activitytimeline--touch-scrub":
+		"TouchScrub changes aria-valuetext and emits onjump; without emphasis both stories paint the same segments",
 };
 
 const BASELINE_DIRECTORY = resolve(
