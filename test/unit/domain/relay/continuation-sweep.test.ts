@@ -174,6 +174,7 @@ const withSwitchServices = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
 	const registry = new ProviderRegistry([
 		{
 			providerId: "claude",
+			generateTextEffect: () => Effect.die("not used"),
 			discoverEffect: () => Effect.die("Continuation never discovers"),
 			sendTurnEffect: () => Effect.die("Turns use ProviderTurnService"),
 			interruptTurnEffect: () => Effect.void,
