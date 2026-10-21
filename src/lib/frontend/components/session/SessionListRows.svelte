@@ -65,7 +65,7 @@
 		onrenamestart: (id: string) => void;
 		onrenameend: () => void;
 	} = $props();
-	/** Manual order drags projects by a handle in the header's left padding. */
+	/** Manual order drags projects by a handle column before each header. */
 	const sortable = $derived(reorderable && projectTreeState.sort === "manual");
 	let heldSessionId = $state<string | null>(null);
 	let sentinelEl: HTMLElement | undefined = $state();
@@ -183,7 +183,8 @@
 	{/snippet}
 
 	{#snippet projectRows(node: ProjectTreeNode)}
-		<div id="project-tree-rows-{node.slug}" class="pl-[17px] pb-1" data-testid="project-tree-rows">
+		<!-- In Manual sort the 24px handle replaces the header's 11px padding, so rows move by the difference. -->
+		<div id="project-tree-rows-{node.slug}" class="{sortable ? 'pl-[30px]' : 'pl-[17px]'} pb-1" data-testid="project-tree-rows">
 			{#each node.shown as s (s.id)}{@render sessionRow(s, true)}{/each}
 			{#if node.empty && !node.collapsed}
 				<div class="py-1 pl-[36px] text-xs text-text-dimmer font-sans" data-testid="project-tree-empty">No sessions</div>
