@@ -628,7 +628,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 				.poll(() =>
 					mode.evaluate((element, tone) => {
 						const probe = document.createElement("span");
-						probe.style.color = `var(--color-${tone === "full" ? "error" : `p-${tone}`})`;
+						probe.style.color = `var(--color-p-${tone})`;
 						element.append(probe);
 						const expected = getComputedStyle(probe).color;
 						probe.remove();

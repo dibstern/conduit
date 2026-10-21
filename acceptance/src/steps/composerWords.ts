@@ -115,7 +115,7 @@ export const composerWordsHandlers: StepHandler[] = [
 				.poll(() =>
 					mode.evaluate((element, mode) => {
 						const probe = document.createElement("span");
-						probe.style.color = `var(--color-${mode === "full" ? "error" : `p-${mode}`})`;
+						probe.style.color = `var(--color-p-${mode})`;
 						element.append(probe);
 						const expected = getComputedStyle(probe).color;
 						probe.remove();
