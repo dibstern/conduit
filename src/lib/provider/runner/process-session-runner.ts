@@ -380,6 +380,7 @@ export const makeProcessSessionRunner = (
 		const children = new Map<string, RunnerChild>();
 		const candidates = new Set<RunnerChild>();
 		const quarantined = new Map<string, SessionFailure>();
+		let recovering = false;
 		// Liveness only: evicted children whose OS process may not have exited
 		// yet. Pruned lazily by pid, never consulted for ownership.
 		const exiting = new Set<RunnerChild>();
@@ -1103,6 +1104,8 @@ export const makeProcessSessionRunner = (
 			});
 		const eligible = (sessionId: string, entry: RunnerChild) =>
 			!closing &&
+			!recovering &&
+			!quarantined.has(sessionId) &&
 			children.get(sessionId) === entry &&
 			!entry.failure &&
 			!entry.recovering &&
@@ -1259,6 +1262,8 @@ export const makeProcessSessionRunner = (
 				});
 			}
 			readonly recoverEffect = Effect.gen(function* () {
+				// Discover every surviving candidate before scheduling replacements.
+				recovering = true;
 				if (closing)
 					return yield* Effect.fail(
 						runnerFailure("recover runner", "Runners are shutting down"),
@@ -1631,7 +1636,16 @@ export const makeProcessSessionRunner = (
 						}),
 					);
 				}
-			});
+			}).pipe(
+				Effect.onExit((exit) =>
+					Effect.sync(() => {
+						recovering = false;
+						if (Exit.isSuccess(exit))
+							for (const [sessionId, entry] of children)
+								upgrade(sessionId, entry);
+					}),
+				),
+			);
 			hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
 				return Effect.sync(() => {
 					// Before hello only the spawned child's pid is known.
@@ -1647,6 +1661,10 @@ export const makeProcessSessionRunner = (
 						[...candidates, ...exiting].some(owns)
 					);
 				});
+			}
+
+			getSessionFailureEffect(sessionId: string) {
+				return Effect.sync(() => quarantined.get(sessionId));
 			}
 
 			getNativeSessionEffect(

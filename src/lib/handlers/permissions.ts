@@ -41,6 +41,7 @@ import {
 	createCommandId,
 } from "../persistence/events.js";
 import { ProviderRegistryTag } from "../provider/provider-registry.js";
+import { RunnerProviderInstance } from "../provider/runner/runner-provider-instance.js";
 import { saveRelaySettings } from "../relay/relay-settings.js";
 import {
 	type PermissionId,
@@ -126,6 +127,20 @@ const readPromptReference = (
 					AND json_extract(data, '$.id') = pending_approvals.id
 				 ORDER BY sequence LIMIT 1) AS run_id
 			FROM pending_approvals WHERE id = ${id} AND type = ${type}`;
+		if (stored?.status === "pending") {
+			// A missing waiter cannot expire an ask still owned by a quarantined runner.
+			const registry = Option.getOrUndefined(
+				yield* Effect.serviceOption(ProviderRegistryTag),
+			);
+			for (const providerId of registry?.listProviders() ?? []) {
+				const provider = registry?.getInstance(providerId);
+				if (!(provider instanceof RunnerProviderInstance)) continue;
+				const failure = yield* provider.getSessionFailureEffect(
+					stored.session_id,
+				);
+				if (failure) return yield* new WsRpcError({ message: failure.message });
+			}
+		}
 		if (stored?.status === "resolved") {
 			const [expired] = yield* sql.value`
 				SELECT 1 FROM events WHERE session_id = ${stored.session_id}
