@@ -81,7 +81,7 @@ describe("durable controls on quarantined runners", () => {
 					).toEqual({
 						status: "side_effect_failed",
 						error_code: "provider_process_unavailable",
-						error: expect.stringContaining("target provider process"),
+						error: expect.stringContaining("quarantined"),
 					});
 				},
 				{ timeout: 15_000 },

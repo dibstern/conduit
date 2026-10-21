@@ -83,6 +83,7 @@ const makeEngine = (
 			getControlProcessIdEffect: () => Effect.succeed("process-1"),
 			discoverEffect: () => Effect.never,
 			sendTurnEffect: () => Effect.never,
+			generateTextEffect: () => Effect.die("Not used by controls"),
 			interruptTurnEffect: () => Effect.void,
 			resolvePermissionEffect,
 			resolveQuestionEffect: () => Effect.void,

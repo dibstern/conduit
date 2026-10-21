@@ -384,10 +384,10 @@ export interface ProviderNativeSession {
 export interface ProviderInstance {
 	/** Liveness includes quarantined runners that cannot accept controls. */
 	readonly hasLiveProcessEffect?: (sessionId: string) => Effect.Effect<boolean>;
-	/** Process identity captured at control acceptance, without starting work. */
+	/** Process identity captured without starting work; refuses unavailable sessions. */
 	readonly getControlProcessIdEffect?: (
 		sessionId: string,
-	) => Effect.Effect<string | undefined>;
+	) => Effect.Effect<string | undefined, ProviderInstanceFailure>;
 	/** Unique identifier for this provider (e.g. "opencode", "claude") */
 	readonly providerId: string;
 	/** Native identity used for a locally placed input before provider acceptance. */

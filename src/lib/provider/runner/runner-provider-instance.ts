@@ -344,11 +344,19 @@ export class RunnerProviderInstance implements ProviderInstance {
 
 	getControlProcessIdEffect(
 		sessionId: string,
-	): Effect.Effect<string | undefined> {
-		return (
-			this.runner.getControlProcessIdEffect?.(sessionId) ??
-			Effect.succeed(undefined)
-		);
+	): Effect.Effect<string | undefined, ProviderInstanceFailure> {
+		return Effect.gen({ self: this }, function* () {
+			const failure = yield* this.getSessionFailureEffect(sessionId);
+			if (failure)
+				return yield* new ProviderInstanceFailure({
+					providerId: this.providerId,
+					operation: "getControlProcessId",
+					code: "provider_process_unavailable",
+					cause: new Error(failure.message),
+				});
+			return yield* this.runner.getControlProcessIdEffect?.(sessionId) ??
+				Effect.succeed(undefined);
+		});
 	}
 
 	getSessionFailureEffect(sessionId: string) {
