@@ -17,9 +17,9 @@ Scenario Outline: Stop explains how the daemon starts again
   When I cancel the Server Stop confirmation
 
 Examples:
-  | supervision  | restart | warning                                                                                |
-  | supervised   | visible | Every browser disconnects. The login service will start it straight back.               |
-  | unsupervised | hidden  | Every browser disconnects. Start it again from the terminal with conduit serve.          |
+  | supervision  | restart | warning                                                                                   |
+  | supervised   | visible | Every browser disconnects. Start it again from the terminal with conduit service install. |
+  | unsupervised | hidden  | Every browser disconnects. Start it again from the terminal with conduit serve.           |
 
 Scenario: opening Stop closes the instance editor
   When I open settings to the Server section

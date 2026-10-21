@@ -59,7 +59,7 @@
 				<p class="text-[13.5px] font-semibold text-text">Stop conduit?</p>
 				<p class="text-[12px] text-text-muted">
 					{#if status.supervised}
-						Every browser disconnects. The login service will start it straight back.
+						Every browser disconnects. Start it again from the terminal with <code class="font-mono">conduit service install</code>.
 					{:else}
 						Every browser disconnects. Start it again from the terminal with <code class="font-mono">conduit serve</code>.
 					{/if}
