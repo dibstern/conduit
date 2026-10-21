@@ -56,8 +56,9 @@ const SESSIONS = [
 		tools: 2,
 	},
 ];
+// Compat tools: the only rendered delta is "✦ Summarize" -> "✦ Summary".
 const RENDERED_HISTORY_HASH =
-	"a218d9e2d912f5b8b95e6d4faad258d3029dd8f04411da161861e5a7d419e781";
+	"3069bd754aae87d05dc3f8afef4c9663e5b2ff65546ddfc7f6ad0fdbda5cee77";
 /** The fixture's history rows; its other tables are recorded, not pinned. */
 const FIXTURE_ROWS = {
 	sessions: 3,
