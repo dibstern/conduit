@@ -465,6 +465,16 @@
 	.question-form :global(.question-option:has(input:checked)) {
 		background: color-mix(in srgb, var(--color-accent) 16%, transparent);
 	}
+	@media (pointer: coarse) {
+		.question-form :global(.question-option) {
+			min-height: 44px;
+			flex-wrap: wrap;
+			align-content: center;
+		}
+		.question-form :global(.question-option-content) {
+			flex: 1;
+		}
+	}
 	.question-form :global(input[type="radio"]),
 	.question-form :global(input[type="checkbox"]) {
 		appearance: none;

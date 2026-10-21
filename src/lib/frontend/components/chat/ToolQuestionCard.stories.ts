@@ -72,12 +72,21 @@ export const Default: Story = {
 				Math.abs(controlRect.top + controlRect.height / 2 - xCenter),
 			).toBeLessThanOrEqual(0.5);
 			const style = getComputedStyle(option);
-			const expectedHeight =
-				content.getBoundingClientRect().height +
-				parseFloat(style.paddingTop) +
-				parseFloat(style.paddingBottom);
+			const row = option.getBoundingClientRect();
+			const contentRect = content.getBoundingClientRect();
+			const expectedHeight = Math.max(
+				window.matchMedia("(pointer: coarse)").matches ? 44 : 0,
+				contentRect.height +
+					parseFloat(style.paddingTop) +
+					parseFloat(style.paddingBottom),
+			);
+			await expect(Math.abs(row.height - expectedHeight)).toBeLessThanOrEqual(
+				0.5,
+			);
 			await expect(
-				Math.abs(option.getBoundingClientRect().height - expectedHeight),
+				Math.abs(
+					contentRect.top + contentRect.height / 2 - row.top - row.height / 2,
+				),
 			).toBeLessThanOrEqual(0.5);
 		}
 	},
