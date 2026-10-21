@@ -3,8 +3,28 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { Effect } from "effect";
+import { Deferred, Effect, Fiber, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+	ProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionTag,
+} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import {
+	OrchestrationEngine,
+	type SendTurnCommand,
+} from "../../../src/lib/provider/orchestration-engine.js";
+import { CommandReadModelRepository } from "../../../src/lib/provider/orchestration-read-model.js";
+import type { ProviderCommandStoreFailure } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
+import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import type {
+	ProviderInstance,
+	TurnResult,
+} from "../../../src/lib/provider/types.js";
+import { createMockEventSink } from "../../helpers/mock-sdk.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 interface OutboxState {
@@ -16,6 +36,382 @@ interface OutboxState {
 const artifactDirectory =
 	process.env["CONDUIT_TEST_ARTIFACT_DIR"] ??
 	join(tmpdir(), "conduit-integration-artifacts");
+
+// These scheduling cases exercise the real engine, writer and SQLite store
+// without starting a daemon or moving the legacy browser control callers.
+describe("durable control outbox scheduling", () => {
+	function fixture() {
+		const persistence = makePersistenceEffectLayer(
+			":memory:",
+			"control-project",
+		);
+		return Layer.merge(
+			persistence,
+			ProviderRuntimeIngestionLive.pipe(Layer.provide(persistence)),
+		);
+	}
+
+	function engine(instance: ProviderInstance) {
+		return Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const ingestion = yield* ProviderRuntimeIngestionTag;
+			const commit = yield* makeCommitAndSignal;
+			yield* sql`INSERT OR IGNORE INTO sessions (id, project_id, provider, created_at, updated_at) VALUES ('control-session', 'control-project', 'opencode', 1000, 1000)`;
+			const snapshot = yield* new CommandReadModelRepository(
+				sql,
+				"control-project",
+			).bootstrap();
+			const result = new OrchestrationEngine({
+				registry: new ProviderRegistry([instance]),
+				durableCommands: {
+					sql,
+					ingestion,
+					snapshot,
+					projectKey: "control-project",
+					now: () => 1000,
+					generateId: () => "control-dispatch",
+					write: commit.write,
+				},
+			});
+			result.bindSession("control-session", "opencode");
+			return result;
+		});
+	}
+
+	function provider(
+		send: ProviderInstance["sendTurnEffect"],
+	): ProviderInstance {
+		return {
+			providerId: "opencode",
+			discoverEffect: () => Effect.die("Not used by controls"),
+			sendTurnEffect: send,
+			interruptTurnEffect: vi.fn(() => Effect.void),
+			resolvePermissionEffect: vi.fn(() => Effect.void),
+			resolveQuestionEffect: vi.fn(() => Effect.void),
+			endSessionEffect: vi.fn(() => Effect.void),
+			shutdownEffect: () => Effect.void,
+		};
+	}
+
+	function send(): SendTurnCommand {
+		return {
+			type: "send_turn",
+			commandId: "blocked-send",
+			providerId: "opencode",
+			input: {
+				sessionId: "control-session",
+				inputId: "blocked-input",
+				prompt: "Wait for a control",
+				history: [],
+				providerState: {},
+				workspaceRoot: "/tmp/control-project",
+				extraFolders: [],
+				configDir: configuredClaudeConfigDir("/tmp/control-test-claude"),
+				folderSource: "account",
+				eventSink: createMockEventSink(),
+				abortSignal: new AbortController().signal,
+			},
+		};
+	}
+
+	for (const background of [false, true]) {
+		it(`delivers a control while a blocked ${background ? "background send holds the session drain lease" : "foreground send still runs"}`, async () => {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const sendStarted = yield* Deferred.make<void>();
+					const sendRelease = yield* Deferred.make<void>();
+					const accepted = yield* Deferred.make<void>();
+					const allowForeground = yield* Deferred.make<void>();
+					const instance = provider(() =>
+						Deferred.succeed(sendStarted, undefined).pipe(
+							Effect.andThen(Deferred.await(sendRelease)),
+							Effect.as({
+								status: "completed",
+								cost: 0,
+								tokens: { input: 0, output: 0 },
+								durationMs: 0,
+								providerStateUpdates: [],
+							} satisfies TurnResult),
+						),
+					);
+					const foreground = yield* engine(instance);
+					const draining = background ? yield* engine(instance) : foreground;
+					const runningSend = yield* Effect.forkChild(
+						foreground.dispatchEffect({
+							...send(),
+							...(background
+								? {
+										onAccepted: Deferred.succeed(accepted, undefined).pipe(
+											Effect.andThen(Deferred.await(allowForeground)),
+										),
+									}
+								: {}),
+						}),
+					);
+					let drain: Fiber.Fiber<void, ProviderCommandStoreFailure> | undefined;
+					if (background) {
+						yield* Deferred.await(accepted);
+						drain = yield* Effect.forkChild(draining.drainSideEffects());
+					}
+					yield* Deferred.await(sendStarted);
+					const control = {
+						type: "interrupt_turn" as const,
+						commandId: "control-behind-send",
+						sessionId: "control-session",
+						providerProcessId: "process-1",
+						turnIds: ["blocked-input"],
+					};
+					yield* draining
+						.dispatchEffect(control)
+						.pipe(Effect.timeout("2 seconds"));
+					expect(runningSend.pollUnsafe()).toBeUndefined();
+					expect(
+						vi.mocked(instance.interruptTurnEffect),
+					).toHaveBeenCalledExactlyOnceWith(
+						"control-session",
+						["blocked-input"],
+						{
+							commandId: "control-behind-send",
+							providerProcessId: "process-1",
+						},
+					);
+					expect(
+						yield* sql`SELECT effect_type, status FROM provider_command_outbox WHERE command_id = 'control-behind-send'`,
+					).toEqual([{ effect_type: "interrupt_turn", status: "completed" }]);
+					expect(yield* sql`SELECT id FROM provider_runs`).toHaveLength(1);
+					const proof = {
+						case: background
+							? "control-passes-drain-lease"
+							: "control-passes-live-send",
+						controlId: control.commandId,
+						providerProcessId: control.providerProcessId,
+						sendStillRunning: runningSend.pollUnsafe() === undefined,
+						outbox:
+							yield* sql`SELECT command_id, effect_type, status, run_id FROM provider_command_outbox ORDER BY request_sequence`,
+					};
+					mkdirSync(artifactDirectory, { recursive: true });
+					writeFileSync(
+						join(artifactDirectory, `${proof.case}.json`),
+						`${JSON.stringify(proof, null, 2)}\n`,
+					);
+					if (drain) yield* Fiber.interrupt(drain);
+					yield* Fiber.interrupt(runningSend);
+				}).pipe(Effect.provide(fixture())),
+			);
+		});
+	}
+
+	it("delivers competing controls for one process in acceptance order", async () => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const entered = yield* Deferred.make<void>();
+				const release = yield* Deferred.make<void>();
+				const calls: string[] = [];
+				const instance = provider(() =>
+					Effect.die("A control must not send a turn"),
+				);
+				vi.mocked(instance.interruptTurnEffect).mockImplementation(() =>
+					Effect.sync(() => calls.push("interrupt")).pipe(
+						Effect.andThen(Deferred.succeed(entered, undefined)),
+						Effect.andThen(Deferred.await(release)),
+					),
+				);
+				vi.mocked(instance.endSessionEffect).mockImplementation(() =>
+					Effect.sync(() => {
+						calls.push("end");
+					}),
+				);
+				const orchestration = yield* engine(instance);
+				const first = yield* Effect.forkChild(
+					orchestration.dispatchEffect({
+						type: "interrupt_turn",
+						commandId: "control-first",
+						sessionId: "control-session",
+						providerProcessId: "process-1",
+					}),
+				);
+				yield* Deferred.await(entered);
+				const second = yield* Effect.forkChild(
+					orchestration.dispatchEffect({
+						type: "end_session",
+						commandId: "control-second",
+						sessionId: "control-session",
+						providerProcessId: "process-1",
+						targetProviderId: "opencode",
+					}),
+				);
+				yield* Effect.sleep("20 millis");
+				expect(calls).toEqual(["interrupt"]);
+				expect(second.pollUnsafe()).toBeUndefined();
+				yield* Deferred.succeed(release, undefined);
+				yield* Fiber.join(first);
+				yield* Fiber.join(second);
+				expect(calls).toEqual(["interrupt", "end"]);
+				expect(
+					yield* sql`SELECT command_id, status FROM provider_command_outbox ORDER BY request_sequence`,
+				).toEqual([
+					{ command_id: "control-first", status: "completed" },
+					{ command_id: "control-second", status: "completed" },
+				]);
+				expect(yield* sql`SELECT id FROM provider_runs`).toEqual([]);
+			}).pipe(Effect.provide(fixture())),
+		);
+	});
+
+	it("contains a control claim store failure without interrupting a sibling background send", async () => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const accepted = yield* Deferred.make<void>();
+				const holdForeground = yield* Deferred.make<void>();
+				const releaseSend = yield* Deferred.make<void>();
+				let sendEntered = false;
+				let sendInterrupted = false;
+				const instance = provider(() =>
+					Effect.sync(() => {
+						sendEntered = true;
+					}).pipe(
+						Effect.andThen(Deferred.await(releaseSend)),
+						Effect.as({
+							status: "completed",
+							cost: 0,
+							tokens: { input: 0, output: 0 },
+							durationMs: 0,
+							providerStateUpdates: [],
+						} satisfies TurnResult),
+						Effect.onInterrupt(() =>
+							Effect.sync(() => {
+								sendInterrupted = true;
+							}),
+						),
+					),
+				);
+				const accepting = yield* engine(instance);
+				const draining = yield* engine(instance);
+				yield* sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at) VALUES ('fault-session', 'control-project', 'opencode', 1000, 1000)`;
+				accepting.bindSession("fault-session", "opencode");
+				yield* sql`CREATE TRIGGER hold_control_claim BEFORE UPDATE OF status ON provider_command_outbox WHEN NEW.command_id = 'fault-control' AND NEW.status = 'running' BEGIN SELECT RAISE(IGNORE); END`;
+				const original = yield* Effect.forkChild(
+					accepting.dispatchEffect({
+						...send(),
+						onAccepted: Deferred.succeed(accepted, undefined).pipe(
+							Effect.andThen(Deferred.await(holdForeground)),
+						),
+					}),
+				);
+				yield* Deferred.await(accepted);
+				const control = {
+					type: "interrupt_turn" as const,
+					commandId: "fault-control",
+					sessionId: "fault-session",
+					providerProcessId: "fault-process",
+				};
+				const waiting = yield* Effect.forkChild(
+					accepting.dispatchEffect(control),
+				);
+				yield* Effect.sleep("20 millis");
+				expect(
+					yield* sql`SELECT status FROM provider_command_outbox WHERE command_id = 'fault-control'`,
+				).toEqual([{ status: "pending" }]);
+				yield* sql`DROP TRIGGER hold_control_claim`;
+				yield* sql`CREATE TRIGGER fail_control_claim BEFORE UPDATE OF status ON provider_command_outbox WHEN NEW.command_id = 'fault-control' AND NEW.status = 'running' BEGIN SELECT RAISE(ABORT, 'injected control claim store failure'); END`;
+				const drain = yield* Effect.forkChild(
+					Effect.result(draining.drainSideEffects()),
+				);
+				yield* Effect.sleep("30 millis");
+				const beforeRelease = drain.pollUnsafe();
+				yield* Deferred.succeed(releaseSend, undefined);
+				const result = yield* Fiber.join(drain);
+				yield* sql`DROP TRIGGER fail_control_claim`;
+				yield* Fiber.interrupt(waiting);
+				yield* Fiber.interrupt(original);
+				expect(result._tag).toBe("Success");
+				expect(beforeRelease).toBeUndefined();
+				expect(sendEntered).toBe(true);
+				expect(sendInterrupted).toBe(false);
+				expect(instance.interruptTurnEffect).not.toHaveBeenCalled();
+			}).pipe(Effect.provide(fixture())),
+		);
+	});
+
+	it("canceling a duplicate waiter cannot release the background executor's process order", async () => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const entered = yield* Deferred.make<void>();
+				const release = yield* Deferred.make<void>();
+				const calls: string[] = [];
+				const instance = provider(() =>
+					Effect.die("Controls cannot create sends"),
+				);
+				vi.mocked(instance.interruptTurnEffect).mockImplementation(() =>
+					Effect.sync(() => {
+						calls.push("interrupt");
+					}).pipe(
+						Effect.andThen(Deferred.succeed(entered, undefined)),
+						Effect.andThen(Deferred.await(release)),
+					),
+				);
+				vi.mocked(instance.endSessionEffect).mockImplementation(() =>
+					Effect.sync(() => {
+						calls.push("end");
+					}),
+				);
+				const accepting = yield* engine(instance);
+				const background = yield* engine(instance);
+				const replaying = yield* engine(instance);
+				yield* sql`CREATE TRIGGER hold_first_control BEFORE UPDATE OF status ON provider_command_outbox WHEN NEW.command_id = 'background-owned-control' AND NEW.status = 'running' BEGIN SELECT RAISE(IGNORE); END`;
+				const command = {
+					type: "interrupt_turn" as const,
+					commandId: "background-owned-control",
+					sessionId: "control-session",
+					providerProcessId: "process-1",
+				};
+				const firstWaiter = yield* Effect.forkChild(
+					Effect.result(accepting.dispatchEffect(command)),
+				);
+				yield* Effect.sleep("20 millis");
+				expect(
+					yield* sql`SELECT status FROM provider_command_outbox WHERE command_id = 'background-owned-control'`,
+				).toEqual([{ status: "pending" }]);
+				yield* sql`DROP TRIGGER hold_first_control`;
+				const drain = yield* Effect.forkChild(background.drainSideEffects());
+				yield* Deferred.await(entered);
+				const duplicate = yield* Effect.forkChild(
+					replaying.dispatchEffect(command),
+				);
+				yield* Effect.sleep("20 millis");
+				yield* Fiber.interrupt(duplicate);
+				const second = yield* Effect.forkChild(
+					replaying.dispatchEffect({
+						type: "end_session",
+						commandId: "after-background-control",
+						sessionId: "control-session",
+						providerProcessId: "process-1",
+						targetProviderId: "opencode",
+					}),
+				);
+				yield* Effect.sleep("20 millis");
+				const callsBeforeRelease = [...calls];
+				const secondBeforeRelease = second.pollUnsafe();
+				yield* Deferred.succeed(release, undefined);
+				yield* Fiber.join(drain);
+				yield* Fiber.join(second);
+				const outcome = yield* Effect.result(replaying.dispatchEffect(command));
+				yield* Fiber.interrupt(firstWaiter);
+				expect(callsBeforeRelease).toEqual(["interrupt"]);
+				expect(secondBeforeRelease).toBeUndefined();
+				expect(outcome._tag).toBe("Success");
+				expect(calls).toEqual(["interrupt", "end"]);
+				expect(
+					yield* sql`SELECT status FROM command_receipts WHERE command_id = 'background-owned-control'`,
+				).toEqual([{ status: "side_effect_completed" }]);
+			}).pipe(Effect.provide(fixture())),
+		);
+	});
+});
 
 // Failure modes: no startup drain, an early retry, duplicate execution while
 // immediate dispatch overlaps polling, a store error kills or hot-loops the

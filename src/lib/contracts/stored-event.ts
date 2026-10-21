@@ -995,6 +995,15 @@ export const CanonicalEvents = {
 	"session.resume_cancelled": live(
 		Schema.Struct({}) as Schema.Codec<Record<string, never>>,
 	),
+	"interrupt.requested": live(
+		Schema.Struct({
+			providerProcessId: Schema.String,
+			turnIds: Schema.optionalKey(Schema.Array(Schema.String)),
+		}),
+	),
+	"session.end_requested": live(
+		Schema.Struct({ providerProcessId: Schema.String }),
+	),
 	"permission.asked": live(
 		Schema.Struct({
 			id: Schema.String,

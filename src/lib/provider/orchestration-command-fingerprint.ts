@@ -12,6 +12,7 @@ import {
 	DURABLE_COMMAND_FINGERPRINT_VERSION,
 	type DurableCommandFingerprint,
 	type DurableCommandFingerprintField,
+	type ProviderControlPayload,
 } from "./orchestration-command-contracts.js";
 import type { SendTurnCommand } from "./orchestration-engine.js";
 
@@ -128,4 +129,11 @@ export function fingerprintHash(
 	fingerprint: DurableCommandFingerprint,
 ): string {
 	return `sha256:${sha256Hex(canonicalJson(fingerprint))}`;
+}
+
+/** Control identity includes the captured process and the complete answer. */
+export function controlFingerprintHash(
+	payload: ProviderControlPayload,
+): string {
+	return `sha256:${sha256Hex(canonicalJson(payload))}`;
 }

@@ -2328,6 +2328,10 @@ export type UnprojectedReasons<T extends LiveEventType> = [T] extends [never]
 
 // Every unhandled live event needs a reason; handled or retired entries are stale.
 export const UNPROJECTED: UnprojectedReasons<Unhandled> = {
+	"interrupt.requested":
+		"Control intent; delivery acknowledgement does not end a run",
+	"session.end_requested":
+		"Control intent; provider lifecycle owns session retirement",
 	"session.provider_cleanup_failed":
 		"Audit receipt for failed upstream cleanup; no materialized projection needed",
 	"session.handoff_delivered":

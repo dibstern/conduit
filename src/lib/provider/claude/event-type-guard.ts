@@ -207,6 +207,14 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 		reason:
 			"Relay-owned: the Session Inbox commits it when a queued input is removed",
 	},
+	"interrupt.requested": {
+		produced: false,
+		reason: "Committed by the provider control outbox",
+	},
+	"session.end_requested": {
+		produced: false,
+		reason: "Committed by the provider control outbox",
+	},
 	"input.interrupt_requested": {
 		produced: false,
 		reason:

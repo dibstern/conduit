@@ -42,7 +42,8 @@ export const makeRecoveredEventSink = (options: {
 					const waiter = yield* pending.beginPermissionRequest(request);
 					const resolved = yield* sql<{
 						data: string;
-					}>`SELECT data FROM events WHERE session_id = ${sessionId} AND type = 'permission.resolved' AND json_extract(data, '$.id') = ${request.requestId} ORDER BY sequence DESC LIMIT 1`;
+					}>`SELECT data FROM events WHERE session_id = ${sessionId} AND type = 'permission.resolved' AND json_extract(data, '$.id') = ${request.requestId}
+						AND json_extract(metadata, '$.source') IS NOT 'conduit.control-outbox' ORDER BY sequence DESC LIMIT 1`;
 					if (resolved[0]) {
 						const stored = JSON.parse(
 							resolved[0].data,
@@ -73,7 +74,8 @@ export const makeRecoveredEventSink = (options: {
 					const waiter = yield* pending.beginQuestionRequest(request);
 					const resolved = yield* sql<{
 						data: string;
-					}>`SELECT data FROM events WHERE session_id = ${sessionId} AND type = 'question.resolved' AND json_extract(data, '$.id') = ${request.requestId} ORDER BY sequence DESC LIMIT 1`;
+					}>`SELECT data FROM events WHERE session_id = ${sessionId} AND type = 'question.resolved' AND json_extract(data, '$.id') = ${request.requestId}
+						AND json_extract(metadata, '$.source') IS NOT 'conduit.control-outbox' ORDER BY sequence DESC LIMIT 1`;
 					if (resolved[0]) {
 						const response = JSON.parse(
 							resolved[0].data,
