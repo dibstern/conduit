@@ -80,6 +80,8 @@ export interface ProjectStoreImportResult {
 		| "source-changed"
 		| "failed";
 	readonly importedEvents?: number;
+	/** Exact copied rows; skipped imports must never release live draft claims. */
+	readonly importedDraftKeys?: readonly string[];
 	readonly sharedSessions?: readonly string[];
 	readonly error?: DaemonStoreImportError;
 	readonly backup?: string;
@@ -1053,6 +1055,10 @@ function importOne(
 					db,
 					"SELECT COUNT(*) AS value FROM source.events",
 				),
+				importedDraftKeys: rows<{ draft_key: string }>(
+					db,
+					"SELECT draft_key FROM source.input_drafts",
+				).map(({ draft_key }) => draft_key),
 				sharedSessions,
 			};
 		});

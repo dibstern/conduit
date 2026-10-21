@@ -64,6 +64,7 @@ import {
 	importProjectStoreWithBackup,
 	type ProjectStoreImportResult,
 } from "../../../persistence/migrations/daemon-store-import.js";
+import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
 import { migrateProjectStorageForProject } from "../../../persistence/migrations/project-storage-migration.js";
 import {
 	chooseProjectSlug,
@@ -77,6 +78,10 @@ import {
 import { stopRegisteredRunners } from "../../../provider/runner/process-session-runner.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import type { StoredProject } from "../../../types.js";
+import {
+	InputDraftsTag,
+	releaseInputDraftClaims,
+} from "../../relay/Services/input-drafts.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { isConduitWorktreePath } from "../Layers/worktree-layer.js";
 import {
@@ -1301,6 +1306,41 @@ export const saveProject = (input: SaveProjectInput) =>
 										),
 									),
 							).pipe(
+								// The reservation must close before using the shared SQL client.
+								// Reconcile before addWithoutRelay makes these sessions routable.
+								Effect.tap((result) =>
+									Effect.gen(function* () {
+										if (result.error) return;
+										const draftKeys = result.importedDraftKeys ?? [];
+										if (draftKeys.length > 0)
+											yield* releaseInputDraftClaims(draftKeys).pipe(
+												Effect.provideService(SqlClient.SqlClient, sql),
+											);
+										const blocked =
+											unavailable.size === 0
+												? []
+												: yield* sql`SELECT 1 FROM sessions
+										WHERE project_id IN ${sql.in([...unavailable.keys()])} LIMIT 1`;
+										if (blocked.length > 0) {
+											yield* Effect.logWarning(
+												"Deferring fork lineage import while stored projects are unavailable",
+											);
+										} else {
+											// Shared mode resolves all owners from SQLite, including retained projects.
+											yield* migrateForkLineage(
+												configDir,
+												{ projects: [] },
+												sql,
+											);
+										}
+										if (draftKeys.length > 0) {
+											const drafts =
+												yield* Effect.serviceOption(InputDraftsTag);
+											if (Option.isSome(drafts))
+												yield* drafts.value.invalidateList();
+										}
+									}),
+								),
 								Effect.catch((cause) =>
 									Effect.succeed<ProjectStoreImportResult>({
 										projectId: slug,

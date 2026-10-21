@@ -36,6 +36,11 @@ import {
 import { startForegroundDaemon } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { DaemonStoreAvailability } from "../../../src/lib/domain/daemon/Services/daemon-store-availability.js";
+import { saveProject } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import {
+	InputDraftsTag,
+	makeInputDrafts,
+} from "../../../src/lib/domain/relay/Services/input-drafts.js";
 import {
 	makePersistenceProjectLayer,
 	PersistenceStore,
@@ -144,8 +149,231 @@ function eventCounts(filename: string, projectSlug: string) {
 	}
 }
 
+async function runtimeImportFixture() {
+	const root = realpathSync(
+		mkdtempSync(join(tmpdir(), "conduit-import-review-")),
+	);
+	const configDir = join(root, "config");
+	mkdirSync(configDir);
+	const unavailable = new Map<string, string>();
+	const runtime = ManagedRuntime.make(
+		makeDaemonRpcTestLayer([], undefined, { configDir }).pipe(
+			Layer.provideMerge(Layer.succeed(DaemonStoreAvailability)(unavailable)),
+		),
+	);
+	const store = await runtime.runPromise(PersistenceStore);
+	const sql = Context.get(store, SqlClient.SqlClient);
+	const drafts = await Effect.runPromise(
+		makeInputDrafts.pipe(Effect.provide(store)),
+	);
+	return {
+		root,
+		configDir,
+		unavailable,
+		sql,
+		drafts,
+		runtime,
+		save: (folder: string) =>
+			runtime.runPromise(
+				saveProject({ folders: [folder] }).pipe(
+					Effect.provideService(InputDraftsTag, drafts),
+				),
+			),
+		close: async () => {
+			await runtime.dispose();
+			rmSync(root, { recursive: true, force: true });
+		},
+	};
+}
+
 describe("legacy history added after daemon startup", () => {
 	const evidence: Record<string, unknown> = {};
+
+	it.each([
+		false,
+		true,
+	])("reconciles unresolved Fork lineage before publication, stored project unavailable: %s", async (blocked) => {
+		const fixture = await runtimeImportFixture();
+		const { root, configDir, sql, runtime, unavailable } = fixture;
+		const folder = join(root, "fork-history");
+		const archive = join(configDir, "fork-metadata-unresolved.json");
+		try {
+			for (const sessionId of ["fork-source", "imported-fork"])
+				await createProjectStoreFixture(root, "fork-history", {
+					sourcePath: join(folder, ".conduit", "events.db"),
+					sessionId,
+					transcript: { title: sessionId, prompt: "Prompt", reply: "Reply" },
+				});
+			const lineage = {
+				"imported-fork": {
+					parentID: "fork-source",
+					forkMessageId: "fork-source_assistant",
+				},
+			};
+			writeFileSync(archive, JSON.stringify(lineage));
+			// Only unavailable projects with stored rows defer global reconciliation.
+			unavailable.set("unavailable-history", "History import failed (corrupt)");
+			if (blocked)
+				await runtime.runPromise(sql`INSERT INTO sessions
+					(id, project_id, provider, root_id, created_at, updated_at)
+					VALUES ('blocked-session', 'unavailable-history', 'claude', 'blocked-session', 1, 1)`);
+			const saved = await fixture.save(folder);
+			expect(saved.project.slug).toBe("fork-history");
+			const rows = await runtime.runPromise(sql`SELECT forked_from,
+				fork_point_event, fork_point_timestamp FROM sessions WHERE id = 'imported-fork'`);
+			const state = { rows, unresolvedArchiveRetained: existsSync(archive) };
+			evidence[blocked ? "forkLineageDeferred" : "forkLineageReconciled"] =
+				state;
+			expect.soft(rows).toEqual([
+				{
+					forked_from: blocked ? null : "fork-source",
+					fork_point_event: blocked ? null : "fork-source_assistant",
+					fork_point_timestamp: blocked ? null : 1000,
+				},
+			]);
+			expect.soft(state.unresolvedArchiveRetained).toBe(blocked);
+		} finally {
+			writeImportArtifact("test-results/82tn28-runtime-import.json", evidence);
+			await fixture.close();
+		}
+	});
+
+	it("releases only imported draft claims and discards imported empty claims", async () => {
+		const fixture = await runtimeImportFixture();
+		const { root, sql, drafts, runtime } = fixture;
+		const folder = join(root, "draft-history");
+		try {
+			const source = await createProjectStoreFixture(root, "draft-history", {
+				sourcePath: join(folder, ".conduit", "events.db"),
+				transcript: { prompt: "Prompt", reply: "Reply" },
+			});
+			const db = new Database(source.sourcePath);
+			try {
+				db.prepare(`INSERT INTO input_drafts
+					(draft_key, project_id, kind, text, updated_at, promoted_session_id)
+					VALUES (?, 'draft-history', 'draft', ?, 1000, ?)`).run(
+					"imported-claimed",
+					"Recovered thought",
+					":input-draft-claim:",
+				);
+				db.prepare(`INSERT INTO input_drafts
+					(draft_key, project_id, kind, text, updated_at, promoted_session_id)
+					VALUES ('imported-empty', 'draft-history', 'draft', '', 1000, ':input-draft-claim:')`).run();
+			} finally {
+				db.close();
+			}
+			// The same project slug does not make these live claims abandoned.
+			await runtime.runPromise(
+				drafts.write(
+					{ draft: "live-claimed" },
+					"Sending now",
+					undefined,
+					"draft-history",
+				),
+			);
+			expect(
+				await runtime.runPromise(drafts.claim("live-claimed", "draft-history")),
+			).toBe(true);
+			expect(
+				await runtime.runPromise(drafts.claim("live-empty", "draft-history")),
+			).toBe(true);
+			await fixture.save(folder);
+			const listed = await runtime.runPromise(
+				Stream.runCollect(drafts.listDrafts().pipe(Stream.take(1))),
+			);
+			const emptyRows = await runtime.runPromise(
+				sql`SELECT draft_key FROM input_drafts WHERE draft_key IN ('imported-empty', 'live-empty') ORDER BY draft_key`,
+			);
+			const claimed = await runtime.runPromise(
+				drafts.claim("imported-claimed", "draft-history"),
+			);
+			const liveClaimedAgain = await runtime.runPromise(
+				drafts.claim("live-claimed", "draft-history"),
+			);
+			const liveEmptyClaimedAgain = await runtime.runPromise(
+				drafts.claim("live-empty", "draft-history"),
+			);
+			evidence["draftClaimRecovery"] = {
+				listed,
+				emptyRows,
+				claimed,
+				liveClaimedAgain,
+				liveEmptyClaimedAgain,
+			};
+			expect
+				.soft(listed[0]?.map((draft) => draft.draftId))
+				.toEqual(["imported-claimed"]);
+			expect.soft(claimed).toBe(true);
+			expect.soft(emptyRows).toEqual([{ draft_key: "live-empty" }]);
+			expect.soft(liveClaimedAgain).toBe(false);
+			expect.soft(liveEmptyClaimedAgain).toBe(false);
+		} finally {
+			writeImportArtifact("test-results/82tn28-runtime-import.json", evidence);
+			await fixture.close();
+		}
+	});
+
+	it("notifies a listDrafts subscriber opened before the runtime import", async () => {
+		const root = realpathSync(
+			mkdtempSync(join(tmpdir(), "conduit-import-subscriber-")),
+		);
+		const folder = join(root, "subscribed-drafts");
+		const snapshots: string[][] = [];
+		let daemon: Awaited<ReturnType<typeof startForegroundDaemon>> | undefined;
+		let subscriber: Fiber.Fiber<void, unknown> | undefined;
+		try {
+			daemon = await startForegroundDaemon({
+				configDir: join(root, "config"),
+				socketPath: join(root, "relay.sock"),
+				port: 0,
+				host: "127.0.0.1",
+				keepAwake: false,
+				smartDefault: false,
+			});
+			const port = daemon.getStatus().port;
+			subscriber = Effect.runFork(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const client = yield* RpcClient.make(WsRpcGroup);
+						yield* Stream.runForEach(client.SubscribeDrafts({}), (rows) =>
+							Effect.sync(() => {
+								snapshots.push(rows.map((row) => row.draftId));
+							}),
+						);
+					}),
+				).pipe(Effect.provide(browserProtocol(port))),
+			);
+			await vi.waitFor(() => expect(snapshots).toEqual([[]]));
+			const source = await createProjectStoreFixture(
+				root,
+				"subscribed-drafts",
+				{
+					sourcePath: join(folder, ".conduit", "events.db"),
+					transcript: { prompt: "Prompt", reply: "Reply" },
+				},
+			);
+			const db = new Database(source.sourcePath);
+			try {
+				db.prepare(`INSERT INTO input_drafts (draft_key, project_id, kind, text, updated_at)
+					VALUES ('imported-visible', 'subscribed-drafts', 'draft', 'Visible without reconnect', 1000)`).run();
+			} finally {
+				db.close();
+			}
+			await browserCall(port, (client) =>
+				client.SaveProject({ folders: [folder] }),
+			);
+			await vi.waitFor(
+				() => expect(snapshots).toContainEqual(["imported-visible"]),
+				{ timeout: 3000 },
+			);
+		} finally {
+			evidence["draftSubscriberImport"] = { snapshots };
+			writeImportArtifact("test-results/82tn28-runtime-import.json", evidence);
+			if (subscriber) await Effect.runPromise(Fiber.interrupt(subscriber));
+			await daemon?.stop();
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
 
 	it("publishes imported history immediately, preserves it on restart, and isolates corrupt history", async () => {
 		const root = realpathSync(

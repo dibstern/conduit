@@ -46,7 +46,7 @@ const Sidecar = Schema.Record(
  */
 export const migrateForkLineage = (
 	configDir: string,
-	config: DaemonConfig,
+	config: Pick<DaemonConfig, "projects">,
 	sharedSql?: SqlClient.SqlClient,
 ) =>
 	Effect.gen(function* () {

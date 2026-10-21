@@ -43,6 +43,7 @@ export interface InputDrafts {
 	) => Effect.Effect<void, SqlError>;
 	readonly subscribe: (key: InputDraftKey) => Stream.Stream<InputDraftEnvelope>;
 	readonly listDrafts: () => Stream.Stream<readonly DraftListItem[], SqlError>;
+	readonly invalidateList: () => Effect.Effect<void>;
 	readonly forget: (sessionId: string) => Effect.Effect<void, SqlError>;
 }
 
@@ -59,17 +60,22 @@ const kindOf = (key: InputDraftKey) => ("session" in key ? "session" : "draft");
 const claimMarker = ":input-draft-claim:";
 
 /** No in-flight create can survive the daemon process that owned its claim. */
-export const releaseInputDraftClaims = Effect.gen(function* () {
-	const sql = yield* SqlClient.SqlClient;
-	yield* sql.withTransaction(
-		Effect.gen(function* () {
-			yield* sql`DELETE FROM input_drafts
-				WHERE promoted_session_id = ${claimMarker} AND text = ''`;
-			yield* sql`UPDATE input_drafts SET promoted_session_id = NULL
-				WHERE promoted_session_id = ${claimMarker}`;
-		}),
-	);
-});
+export const releaseInputDraftClaims = (draftKeys?: readonly string[]) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const imported =
+			draftKeys === undefined
+				? sql.literal("1")
+				: sql`draft_key IN (SELECT value FROM json_each(${JSON.stringify(draftKeys)}))`;
+		yield* sql.withTransaction(
+			Effect.gen(function* () {
+				yield* sql`DELETE FROM input_drafts
+					WHERE promoted_session_id = ${claimMarker} AND text = '' AND ${imported}`;
+				yield* sql`UPDATE input_drafts SET promoted_session_id = NULL
+					WHERE promoted_session_id = ${claimMarker} AND ${imported}`;
+			}),
+		);
+	});
 
 export const makeInputDrafts: Effect.Effect<
 	InputDrafts,
@@ -344,6 +350,8 @@ export const makeInputDrafts: Effect.Effect<
 					);
 				}),
 			),
+		invalidateList: () =>
+			PubSub.publish(draftChanges, undefined).pipe(Effect.asVoid),
 		listDrafts: () =>
 			Stream.unwrap(
 				Effect.gen(function* () {
