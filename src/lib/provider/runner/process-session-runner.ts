@@ -78,6 +78,7 @@ interface RunnerChild {
 	readonly runnerId: string;
 	verified: boolean;
 	listening?: boolean;
+	startupTimedOut?: boolean;
 	recovering?: boolean;
 	pid?: number | undefined;
 	child?: ChildProcess;
@@ -710,7 +711,7 @@ export const makeProcessSessionRunner = (
 					Effect.logError("Could not settle exited runner runs", cause),
 				),
 			);
-			if (!entry.idleExiting)
+			if (!entry.idleExiting && !entry.startupTimedOut)
 				log.error(
 					`${runnerLabel} failed for session ${sessionId}: ${failure.message}`,
 				);
@@ -1216,7 +1217,14 @@ export const makeProcessSessionRunner = (
 						pid: child.pid,
 						socketPath: entry.socketPath,
 					});
-				child.once("exit", () => {
+				const startupStartedAt = performance.now();
+				let startupTimeoutElapsedMs: number | undefined;
+				let listeningAfterMs: number | undefined;
+				child.once("exit", (exitCode, signal) => {
+					if (startupTimeoutElapsedMs !== undefined)
+						log.error(
+							`${runnerLabel} failed for session ${sessionId}: Runner startup timed out pid=${child.pid} timeoutMs=${startupTimeoutMs} elapsedMs=${startupTimeoutElapsedMs} readinessReceivedAfterMs=${listeningAfterMs ?? "none"} readinessLate=${listeningAfterMs !== undefined && listeningAfterMs >= startupTimeoutMs} exitCode=${exitCode} signal=${signal}`,
+						);
 					entry.connection?.destroy();
 					failed(
 						sessionId,
@@ -1226,19 +1234,32 @@ export const makeProcessSessionRunner = (
 					removeRunner(entry.socketPath);
 				});
 				yield* Effect.callback<void, SessionFailure>((resume) => {
-					const timer = setTimeout(
-						() =>
-							resume(
-								Effect.fail(
-									runnerFailure("spawn runner", "Runner startup timed out"),
-								),
-							),
-						startupTimeoutMs,
-					);
-					const failed = (cause: unknown) => {
+					let timeoutCheck: NodeJS.Immediate | undefined;
+					let settled = false;
+					const cleanup = () => {
 						clearTimeout(timer);
+						clearImmediate(timeoutCheck);
+						child.off("error", failed);
+						child.off("exit", exited);
+					};
+					const failed = (cause: unknown) => {
+						if (settled) return;
+						settled = true;
+						cleanup();
 						resume(Effect.fail(runnerFailure("spawn runner", cause)));
 					};
+					const timer = setTimeout(() => {
+						// A starved event loop can run this timer before reading queued IPC.
+						// Give readiness one poll before committing the timeout failure.
+						timeoutCheck = setImmediate(() => {
+							if (settled || entry.listening) return;
+							entry.startupTimedOut = true;
+							startupTimeoutElapsedMs = Math.round(
+								performance.now() - startupStartedAt,
+							);
+							failed("Runner startup timed out");
+						});
+					}, startupTimeoutMs);
 					child.once("error", failed);
 					const exited = () => failed("Runner exited before listening");
 					child.once("exit", exited);
@@ -1256,12 +1277,16 @@ export const makeProcessSessionRunner = (
 						)
 							return;
 						entry.listening = true;
-						clearTimeout(timer);
-						child.off("error", failed);
-						child.off("exit", exited);
+						listeningAfterMs = Math.round(performance.now() - startupStartedAt);
+						if (settled) return;
+						settled = true;
+						cleanup();
 						resume(Effect.void);
 					});
-					return Effect.sync(() => clearTimeout(timer));
+					return Effect.sync(() => {
+						settled = true;
+						cleanup();
+					});
 				});
 				return yield* attach(sessionId, entry);
 			}).pipe(
