@@ -7,7 +7,8 @@
 <span class="skill-pill composer-pill" class:goal-token={goal}>{@render children()}</span>
 
 <style>
-	/* Cancel the pill's padding so the transparent textarea caret stays aligned. */
+	/* Keep the inline geometry, including shaping at punctuation boundaries.
+	   Clip only the paint so the draft's spaces remain clear. */
 	.composer-pill {
 		background:
 			linear-gradient(
@@ -21,12 +22,13 @@
 		background-size: 250% 100%, auto;
 		background-position: 0% 0%, 0% 0%;
 		margin: 0 -4px;
+		background-clip: content-box;
 		animation: skill-shimmer 0.7s ease-out 1;
 	}
 
 	.goal-token {
 		color: var(--color-status-goal);
-		background: color-mix(in srgb, var(--color-status-goal) 16%, transparent);
+		background: color-mix(in srgb, var(--color-status-goal) 16%, transparent) content-box;
 	}
 
 	@keyframes skill-shimmer {
