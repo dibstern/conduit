@@ -428,6 +428,7 @@ describe("Cursor authentication through the built daemon and detached runners", 
 			_tag: "AddInstance",
 			name: "Cursor environment",
 			driver: "cursor",
+			env: { CURSOR_API_KEY: "[REDACTED:environment]" },
 		});
 		expect(added.instances.filter(({ driver }) => driver === "cursor")).toEqual(
 			[expect.objectContaining({ available: true })],

@@ -192,6 +192,12 @@ export interface SessionRunner {
 	attachSessionsEffect?(
 		sessionIds: readonly string[],
 	): Effect.Effect<void, SessionFailure>;
+	/** Retains the admitted account before preparation and through native cleanup. */
+	withTurnEffect?<A, E, R>(
+		input: SessionTurn,
+		sinkId: string,
+		work: Effect.Effect<A, E, R>,
+	): Effect.Effect<A, E | SessionFailure, R>;
 	/** Native execution and pending intake, independent of an intake reply. */
 	hasActiveTurnsEffect?(sessionId: string): Effect.Effect<boolean>;
 	readonly recoverEffect?: Effect.Effect<void, SessionFailure>;
