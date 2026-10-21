@@ -431,8 +431,11 @@ export class RunnerProviderInstance implements ProviderInstance {
 		return this.driver.generateTextEffect(input);
 	}
 
-	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
-		return this.runner.hasLiveProcessEffect(sessionId);
+	hasLiveProcessEffect(
+		sessionId: string,
+		processId?: string,
+	): Effect.Effect<boolean> {
+		return this.runner.hasLiveProcessEffect(sessionId, processId);
 	}
 
 	getSessionFailureEffect(sessionId: string) {
