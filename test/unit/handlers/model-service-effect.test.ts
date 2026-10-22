@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, layer } from "@effect/vitest";
 import {
+	Cause,
 	Deferred,
 	Effect,
 	Fiber,
@@ -24,6 +25,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { loadModelCatalog } from "../../../src/lib/domain/relay/Services/model-catalog.js";
 import {
 	ProjectSettingsLive,
 	ProjectSettingsTag,
@@ -76,6 +78,24 @@ import { withDispatchEffect } from "../../helpers/orchestration-engine-test-doub
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
 layer(Layer.mergeAll(Layer.succeed(AccountDirectory)(makeMockAccountDirectory()), makePersistenceEffectLayer(":memory:", "test-project"), Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()), Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()), Layer.succeed(ConfigTag)(makeMockConfig()), ProjectSettingsLive, RpcSubscriptionScopeLive))("persistent handler runtime", (it) => {
 describe("model handlers with Effect-native model service", () => {
+	it.effect("preserves OpenCode discovery failures instead of returning an empty catalog", () => {
+		const failure = new Cause.UnknownError(
+			new Error("OpenCode request timed out"),
+			"An error occurred in Effect.tryPromise",
+		);
+		return Effect.gen(function* () {
+			const result = yield* Effect.result(loadModelCatalog("opencode"));
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure") expect(result.failure).toBe(failure);
+		}).pipe(
+			Effect.provideService(LoggerTag, makeMockLogger()),
+			Effect.provideService(OpenCodeModelServiceTag, {
+				listProviders: () => Effect.fail(failure),
+				cachedProviders: () => Effect.succeedNone,
+				persistDefaultModel: () => Effect.void,
+			}),
+		);
+	});
 	it.effect(
 		"loads providers and relay-owned active-session model info without requiring the Promise OpenCode API tag",
 		() => {
