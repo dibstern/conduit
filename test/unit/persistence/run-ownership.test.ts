@@ -134,6 +134,62 @@ describe("run terminal ownership", () => {
 			await harness.query("SELECT finish FROM messages WHERE id = 'c'"),
 		).toEqual([{ finish: "interrupted" }]);
 	});
+	// A background task finishing after its run ended wakes Claude into a new
+	// turn under the same run id; that turn's end is new output to read.
+	it("marks a seen session unread when its ended run wakes into another turn", async () => {
+		harness = makeEffectProjectionHarness();
+		await harness.query(
+			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES ('s', 'claude', 'test', 'idle', 1, 1)",
+		);
+		const facts: Array<[string, object]> = [
+			[
+				"message.created",
+				{ messageId: "a", sessionId: "s", role: "user", inputId: "a" },
+			],
+			["run.requested", { runId: "r1", inputId: "a" }],
+			["run.started", { inputId: "a", requestedRunId: "r1" }],
+			[
+				"message.created",
+				{ messageId: "m1", sessionId: "s", role: "assistant" },
+			],
+			["turn.completed", { messageId: "m1" }],
+		];
+		const project = (from: number, batch: Array<[string, object]>) =>
+			harness.reproject(
+				batch.map(
+					([type, data], index) =>
+						({
+							eventId: createEventId(),
+							type,
+							sessionId: "s",
+							projectId: "test-project",
+							provider: "claude",
+							createdAt: from + index,
+							sequence: from + index,
+							streamVersion: from + index,
+							metadata: { runId: "r1" },
+							data,
+						}) as StoredEvent,
+				),
+			);
+		await project(1, facts);
+		await harness.query(
+			"UPDATE sessions SET seen_version = last_turn_end_version WHERE id = 's'",
+		);
+		await project(6, [
+			["session.status", { sessionId: "s", status: "busy" }],
+			[
+				"message.created",
+				{ messageId: "m2", sessionId: "s", role: "assistant" },
+			],
+			["turn.completed", { messageId: "m2" }],
+		]);
+		expect(
+			await harness.query(
+				"SELECT last_turn_end_version, unread FROM sessions WHERE id = 's'",
+			),
+		).toEqual([{ last_turn_end_version: 8, unread: 1 }]);
+	});
 	it("places a delayed acceptance on its already-ended run without touching a newer run", async () => {
 		harness = makeEffectProjectionHarness();
 		await harness.query(
