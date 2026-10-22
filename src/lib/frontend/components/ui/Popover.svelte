@@ -9,7 +9,7 @@
 	import { type Snippet, tick, untrack } from "svelte";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { dimThemeColor } from "../../stores/theme.svelte.js";
-	import { dragToDismiss } from "../../actions/drag-to-dismiss.js";
+	import { dragToDismiss, sheetScrimStyle } from "../../actions/drag-to-dismiss.js";
 	import SheetChrome from "./SheetChrome.svelte";
 	import {
 		backgroundInert,
@@ -205,7 +205,7 @@
 {/snippet}
 
 {#snippet scrim()}
-	<button type="button" tabindex="-1" aria-label="Close details" data-testid={sheetScrim?.testId ?? "popover-sheet-scrim"} class="pointer-events-auto fixed inset-0 z-[var(--z-sheet)] border-0 bg-backdrop p-0" style:z-index={sheetScrim?.zIndex} style:opacity={1 - scrimFade.progress} style:transition={scrimFade.settling ? "opacity 220ms linear" : undefined} onclick={() => handleOpenChange(false)} use:exemptFromBackgroundInert></button>
+	<button type="button" tabindex="-1" aria-label="Close details" data-testid={sheetScrim?.testId ?? "popover-sheet-scrim"} class="pointer-events-auto fixed inset-0 z-[var(--z-sheet)] border-0 bg-backdrop p-0" style:z-index={sheetScrim?.zIndex} style={sheetScrimStyle(scrimFade)} onclick={() => handleOpenChange(false)} use:exemptFromBackgroundInert></button>
 {/snippet}
 
 <BitsPopover.Root bind:open onOpenChange={handleOpenChange}>

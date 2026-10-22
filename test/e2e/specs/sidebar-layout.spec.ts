@@ -3,6 +3,7 @@
 // - Mobile: session list and session are separate routes
 // Uses real relay backed by MockOpenCodeServer.
 
+import { PNG } from "pngjs";
 import { createSession } from "../helpers/e2e-harness.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
@@ -400,11 +401,13 @@ test.describe("Sidebar Layout — Desktop", () => {
 			if (await toggle.count()) await toggle.click();
 		}
 		const headings = page.locator(
-			"#session-list-scroller > div.session-group-label",
+			"#session-list-scroller > .session-group-label",
 		);
 		expect(await headings.count()).toBeGreaterThan(0);
 		for (const heading of await headings.all()) {
-			const label = (await heading.locator("span").first().innerText()).trim();
+			const label = (
+				await heading.locator("[data-group-label]").innerText()
+			).trim();
 			expect(label).not.toBe(label.toUpperCase());
 			const renderedRows = await heading.evaluate((element) => {
 				let count = 0;
@@ -502,10 +505,13 @@ test.describe("Sidebar Layout — Desktop", () => {
 		const menu = page.getByTestId("session-bar-overflow-menu");
 		await expect(menu).toBeVisible();
 		// The session commands lead; the global actions sit in the footer.
-		const globals = menu.locator('[role="menuitem"][data-testid^="overflow-"]');
+		const globals = menu.locator('[data-testid^="overflow-"]');
 		await expect(globals).toHaveCount(3);
 		for (const [index, name] of ["Share", "Settings", "Debug panel"].entries())
 			await expect(globals.nth(index)).toHaveAccessibleName(name);
+		await expect(
+			menu.getByRole("menuitemcheckbox", { name: "Debug panel" }),
+		).toHaveAttribute("aria-checked", "true");
 		await page.keyboard.press("Escape");
 		await expect(menu).toBeHidden();
 		await expect(more).toBeFocused();
@@ -1099,12 +1105,13 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(page.getByTestId("session-filter-clear")).toHaveCount(0);
 		await measure("#sidebar");
 		await page.getByTestId("session-filter-chip-needs-you").click();
-		await page.getByTestId("list-bar-overflow").click();
-		await expect(page.getByTestId("list-overflow-settings")).toBeVisible();
-		await expect(page.getByTestId("list-overflow-select")).toHaveCount(0);
-		await expect(page.getByTestId("list-overflow-resume")).toHaveCount(0);
-		await measure("[role=menu]");
-		await page.keyboard.press("Escape");
+		const settingsButton = page.getByTestId("list-bar-settings");
+		await expect(settingsButton).toHaveAccessibleName("Settings");
+		await expect(settingsButton.locator("svg.lucide-settings")).toBeVisible();
+		await settingsButton.click();
+		await expect(page.locator("#settings-panel")).toBeVisible();
+		await page.getByTestId("settings-close-btn").click();
+		await expect(page.locator("#settings-panel")).toHaveCount(0);
 		await page.getByTestId("session-scope-chip").click();
 		await page.getByRole("menuitem", { name: "Add a project…" }).click();
 		const addProject = page.getByRole("dialog", {
@@ -1165,14 +1172,14 @@ test.describe("Sidebar Layout — Mobile", () => {
 	test("mobile: list bar titles the list once, with its unsettled count", async ({
 		page,
 		relayUrl,
-	}) => {
+	}, testInfo) => {
 		await new AppPage(page).goto(new URL("/", relayUrl).toString());
 		await expect(
 			page.locator("#session-list .session-item").first(),
 		).toBeVisible();
 
-		await expect(page.getByTestId("list-bar-title")).toHaveText(
-			/^Sessions\s*\d+$/,
+		await expect(page.getByTestId("list-bar-title")).toHaveAccessibleName(
+			/^Sessions \d+$/,
 		);
 		await expect(page.getByTestId("list-bar-title")).toHaveCSS(
 			"font-size",
@@ -1182,6 +1189,22 @@ test.describe("Sidebar Layout — Mobile", () => {
 			"font-weight",
 			"700",
 		);
+		const mark = page.getByTestId("list-bar-mark");
+		await expect(mark).toHaveCSS("border-radius", "7px");
+		const accent = await mark.evaluate(
+			(element) => getComputedStyle(element).backgroundColor,
+		);
+		const image = PNG.sync.read(
+			await mark.screenshot({
+				path: testInfo.outputPath("session-list-mark.png"),
+				scale: "css",
+			}),
+		);
+		expect([image.width, image.height]).toEqual([26, 26]);
+		const topCap = (image.width + Math.floor(image.width / 2)) * 4;
+		expect(
+			`rgb(${Array.from(image.data.subarray(topCap, topCap + 3)).join(", ")})`,
+		).toBe(accent);
 		await expect(page.getByTestId("list-bar-select")).toBeVisible();
 		const compose = page.locator("#sidebar-header #new-session-btn");
 		await expect(compose).toBeVisible();
@@ -1190,9 +1213,9 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(
 			page.locator("#sidebar-header").getByTestId("session-group-button"),
 		).toHaveCount(0);
-		await expect(page.locator("#sidebar").getByText(/^sessions$/i)).toHaveCount(
-			0,
-		);
+		await expect(
+			page.locator("#sidebar").getByRole("heading", { name: /^Sessions \d+$/ }),
+		).toHaveCount(1);
 	});
 
 	test("mobile: focusing search suggests the project scopes and their tokens", async ({

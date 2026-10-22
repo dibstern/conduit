@@ -490,12 +490,22 @@ export const makeSessionProjector = defineProjector(() => ({
 				)
 					return { stamped: [], removed: [], collections: [] };
 				if (event.type === "session.status" && !open) {
-					if (event.data.status === "busy" || event.data.status === "retry")
-						return { stamped: [], removed: [], collections: [] };
 					const newer =
 						yield* sql`SELECT 1 FROM provider_runs WHERE session_id = ${event.sessionId}
 						AND id <> ${runId} AND status IN ('pending', 'running') LIMIT 1`;
 					if (newer.length)
+						return { stamped: [], removed: [], collections: [] };
+					// A background task can wake Claude into a turn on its ended run;
+					// that busy is the only sign it is working. Take it only where
+					// the run's later idle stays a plain status, never dropped as a
+					// second terminal, so it cannot leave the session stuck busy.
+					if (
+						(event.data.status === "busy" || event.data.status === "retry") &&
+						runTerminalStatus(
+							{ type: "session.status", data: { status: "idle" } },
+							event.provider,
+						) !== undefined
+					)
 						return { stamped: [], removed: [], collections: [] };
 				}
 			}
@@ -1995,8 +2005,22 @@ export const makeTurnProjector = defineProjector(() => ({
 						(SELECT turn_id FROM messages WHERE id = ${event.data.messageId}
 						 AND session_id = ${event.sessionId}))`;
 			}
-			if (!["pending", "running"].includes(run.status))
+			if (!["pending", "running"].includes(run.status)) {
+				// A background task finishing after its run ended wakes Claude into
+				// a new turn under the same run. Its end is new output to read,
+				// unless a newer run owns the session or it repeats a counted reply.
+				if (isEventType(event, "turn.completed"))
+					yield* sql`UPDATE sessions SET updated_at = ${event.createdAt},
+						last_turn_end_version = ${event.streamVersion}
+						WHERE id = ${event.sessionId}
+						AND ${event.streamVersion} > COALESCE(last_turn_end_version, -1)
+						AND NOT EXISTS (SELECT 1 FROM provider_runs WHERE session_id = ${event.sessionId}
+							AND status IN ('pending', 'running'))
+						AND EXISTS (SELECT 1 FROM messages m JOIN provider_runs r ON r.id = ${runId}
+							WHERE m.id = ${event.data.messageId} AND m.session_id = ${event.sessionId}
+							AND m.created_at > r.completed_at)`;
 				return { sessions: [event.sessionId], messages: [] };
+			}
 
 			const terminal = runTerminalStatus(event, event.provider);
 			if (terminal) {

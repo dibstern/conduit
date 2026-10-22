@@ -21,7 +21,10 @@
 	let searchQuery = $state("");
 	let trigger: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
 	const selectedLabel = $derived(target.accounts.find((account) => account.id === target.pick.account)?.label ?? "Claude account");
-	const summary = $derived(`${selectedLabel} · ${selection.displayName}${target.pick.effort ? ` · ${target.pick.effort}` : ""}`);
+	const parameterSummary = $derived(selection.parameters && !selection.variantUnavailable
+		? selection.parameterRows.map((row) => `${row.title}: ${row.label}`).join(" · ")
+		: target.pick.effort);
+	const summary = $derived(`${selectedLabel} · ${selection.displayName}${parameterSummary ? ` · ${parameterSummary}` : ""}`);
 </script>
 
 <SettingsRow label="Title generation" description="Used to generate session titles for every project." testId="settings-title-generation">

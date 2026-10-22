@@ -27,7 +27,7 @@
 	{#each splitCitations(text, view.numbers) as chunk}
 		{#if chunk.message}
 			{@const message = chunk.message}
-			<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="ask-cite" data-testid="ask-cite-{message.number}" data-unread={message.part.surfacingRead === false} data-followed={followed.includes(message.number)} data-ask={view.openAsk?.uuid === message.part.uuid} ariaLabel={`Go to message #${message.number}`} onclick={() => follow(message.part)}>#{message.number}</Button>
+			<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="ask-cite" style={message.colour ? `--surface-colour:${message.colour}` : undefined} data-category-colour={!!message.colour} data-testid="ask-cite-{message.number}" data-unread={message.part.surfacingRead === false} data-followed={followed.includes(message.number)} data-ask={view.openAsk?.uuid === message.part.uuid} ariaLabel={`Go to message #${message.number}`} onclick={() => follow(message.part)}>#{message.number}</Button>
 		{:else if chunk.code}<code>{chunk.text}</code>{:else}{chunk.text}{/if}
 	{/each}
 {/snippet}
@@ -87,8 +87,10 @@
 	.explain-error { margin-top:6px; color:var(--color-error); font-size:12px; }
 	.ask-context :global(code) { padding:1px 5px; border-radius:5px; background:var(--color-chip); font:12px var(--font-mono); }
 	.ask-context :global(.ask-cite) { display:inline-flex; align-items:center; justify-content:center; margin-left:2px; padding:0 6px; border-radius:999px; background:var(--color-chip); color:var(--color-text-secondary); font:500 11px/18px var(--font-mono); vertical-align:1px; }
-	.ask-context :global([data-ask="true"]) { background:color-mix(in srgb,var(--color-status-ask) 18%,transparent); color:var(--color-status-ask); }
-	.ask-context :global([data-unread="true"]:not([data-ask="true"])) { background:color-mix(in srgb,var(--color-accent) 18%,transparent); color:var(--color-accent); }
+	.ask-context :global([data-category-colour="true"]) { background:color-mix(in srgb,var(--surface-colour) 14%,transparent); color:var(--surface-colour); }
+	.ask-context :global([data-unread="true"][data-category-colour="true"]) { box-shadow:inset 0 -2px var(--color-accent); }
+	.ask-context :global([data-unread="true"]:not([data-category-colour="true"]):not([data-ask="true"])) { background:color-mix(in srgb,var(--color-accent) 18%,transparent); color:var(--color-accent); }
 	.ask-context :global([data-followed="true"]) { outline:1px dashed currentColor; outline-offset:-1px; background:transparent; }
-	.ask-context :global(.ask-cite:hover), .ask-context :global(.ask-cite:focus-visible) { background:var(--color-accent); color:var(--color-bg); }
+	.ask-context :global([data-category-colour="true"]:hover), .ask-context :global([data-category-colour="true"]:focus-visible) { outline:1px solid currentColor; outline-offset:-1px; }
+	.ask-context :global(.ask-cite:not([data-category-colour="true"]):hover), .ask-context :global(.ask-cite:not([data-category-colour="true"]):focus-visible) { background:var(--color-accent); color:var(--color-bg); }
 </style>

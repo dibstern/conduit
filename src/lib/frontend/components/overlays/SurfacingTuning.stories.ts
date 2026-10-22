@@ -2,7 +2,10 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { Schema } from "effect";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import { surfacingTuningFixture } from "../../../../../test/e2e/fixtures/surfacing-tuning.js";
-import { CategorySetContentsSchema } from "../../../contracts/category-set.js";
+import {
+	BUILTIN_CATEGORIES,
+	CategorySetContentsSchema,
+} from "../../../contracts/category-set.js";
 import { CategoryTuningHunkSchema } from "../../../contracts/category-tuning.js";
 import {
 	ProposeCategoryTuning,
@@ -40,6 +43,22 @@ const meta = {
 			key: name.startsWith("No Key") ? "none" : "valid",
 			unjudged: name.startsWith("No Key Unjudged"),
 		});
+		if (name.startsWith("All Categories")) {
+			const record = fixture.records[0];
+			if (!record) throw new Error("Missing feedback fixture record");
+			fixture.records.splice(
+				0,
+				fixture.records.length,
+				...BUILTIN_CATEGORIES.map((category, index) => ({
+					...record,
+					partId: `category-colours-${category.id}`,
+					ordinal: index + 1,
+					text: category.criteria.what,
+					probabilities: { [category.id]: 1 },
+					mark: { level: "key" as const, direction: "raise" as const },
+				})),
+			);
+		}
 		if (name.startsWith("Proposing")) fixture.setProposalState("pending");
 		if (name.startsWith("Failed")) fixture.setProposalState("failed");
 		if (name.startsWith("No Changes")) fixture.setProposalState("empty");
@@ -113,6 +132,9 @@ const feedback: Play = async ({ canvasElement }) => {
 			0,
 		);
 	if (fixture.records.length) {
+		for (const record of body.getAllByTestId("surfacing-ledger-record")) {
+			await expect(record).not.toHaveTextContent(/\batKey\b/);
+		}
 		const tiles = body.getByTestId("surfacing-feedback-tiles");
 		for (const value of tiles.querySelectorAll("b")) {
 			await expect(getComputedStyle(value).color).toBe(
@@ -236,6 +258,23 @@ export const FewMarksLight: Story = {
 };
 export const Ledger: Story = { play: feedback };
 export const LedgerLight: Story = { ...Ledger, globals: { theme: "light" } };
+export const AllCategories: Story = {
+	play: async (context) => {
+		await feedback(context);
+		const grid = within(context.canvasElement.ownerDocument.body).getByTestId(
+			"surfacing-feedback-grid",
+		);
+		const glyphs = grid.querySelectorAll("tbody td:first-child [aria-hidden]");
+		await expect(glyphs).toHaveLength(9);
+		await expect(
+			new Set([...glyphs].map((glyph) => getComputedStyle(glyph).color)).size,
+		).toBe(9);
+	},
+};
+export const AllCategoriesLight: Story = {
+	...AllCategories,
+	globals: { theme: "light" },
+};
 export const NoKey: Story = {
 	play: async (context) => {
 		await review(context);

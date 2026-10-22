@@ -13,6 +13,7 @@
 	ariaLabel: item.label,
 	testId: item.testId,
 	icon: item.icon,
+	...(item.checked === undefined ? {} : { checked: item.checked }),
 	...(item.tag ? { tag: item.tag } : {}),
-	onselect: () => onselect(item.run),
+	onselect: () => item.checked === undefined ? onselect(item.run) : item.run(),
 }))} />

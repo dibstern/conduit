@@ -84,10 +84,7 @@ const CASES: Record<string, string[]> = {
 	"session list": [
 		`ready=${READY}`,
 		`back=${click("#session-bar-back")}`,
-		`list-menu-open=${menu("#list-bar-more", true)}`,
-		`list-menu-close=${menu("#list-bar-more", false)}`,
-		`settings-menu-open=${menu("#list-bar-more", true)}`,
-		`settings-open=${settings(`${q('[data-testid="list-overflow-settings"]')}.click();`, true)}`,
+		`settings-open=${settings(`${q("#list-bar-settings")}.click();`, true)}`,
 		`settings-close=${settings(`${q('[data-testid="settings-close-btn"]')}.click();`, false)}`,
 	],
 	// The status bar keeps the colour sampled when a fullscreen dialog opened
@@ -95,8 +92,7 @@ const CASES: Record<string, string[]> = {
 	"settings, theme switched while open": [
 		`ready=${READY}`,
 		`back=${click("#session-bar-back")}`,
-		`settings-menu-open=${menu("#list-bar-more", true)}`,
-		`settings-open=${settings(`${q('[data-testid="list-overflow-settings"]')}.click();`, true)}`,
+		`settings-open=${settings(`${q("#list-bar-settings")}.click();`, true)}`,
 		`light=${LIGHT}`,
 	],
 	// Proves the probe can see the blur: without the strip it must show.

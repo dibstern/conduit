@@ -27,7 +27,7 @@
 	<SheetFooter actions={[
 		{ label: "Share", icon: "share", onselect: () => { picked = "Share"; } },
 		{ label: "Settings", icon: "settings", onselect: () => { picked = "Settings"; } },
-		{ label: "Debug", icon: "bug", tag: "dev", onselect: () => { picked = "Debug"; } },
+		{ label: "Debug", ariaLabel: "Debug panel", icon: "bug", checked: enabled, onselect: () => { enabled = !enabled; } },
 	]} />
 {/snippet}
 

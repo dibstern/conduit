@@ -54,7 +54,7 @@
 	const contextSegments = $derived(selection.contextSegments);
 	const effortSegments = $derived(selection.effortSegments);
 	const displayName = $derived(selection.displayName);
-	const contextLabel = $derived(suppliedContextLabel ?? (target.loading ? "" : parameterContext?.label ?? selectedContext?.label ?? modelContextLabel(target.activeModel)));
+	const contextLabel = $derived(parameterContext?.label ?? suppliedContextLabel ?? (target.loading ? "" : selectedContext?.label ?? modelContextLabel(target.activeModel)));
 	const harnesses = $derived([...new Set(target.accounts.map((account) => account.driver))].map((driver) => ({
 		value: driver,
 		label: getProviderPresentation(driver)?.label ?? driver.charAt(0).toUpperCase() + driver.slice(1),
@@ -165,7 +165,7 @@
 					<span class="min-w-0 truncate text-text-secondary">{displayName}</span>
 					<Icon name="chevron-right" size={13} class="shrink-0 text-text-muted" />
 				</Button>
-				{#if contextLabel}
+				{#if parameterContext || contextLabel}
 					<div data-testid="picker-row-context" tabindex="-1" class="flex min-h-[36px] flex-wrap items-center gap-[10px] px-[10px] py-[6px] text-[13.5px] max-md:min-h-[50px]">
 						<Icon name="gauge" size={16} class="shrink-0 text-text-muted" />
 						<span class="flex-1">Context</span>

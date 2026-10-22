@@ -35,6 +35,7 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 					: ["healthy-oc", instanceId]
 				).map((id) => ({
 					id,
+					colorSlot: id === "healthy-oc" ? 3 : 0,
 					name: id,
 					driver:
 						id === instanceId && name === "Claude" ? "claude" : "opencode",
@@ -93,6 +94,7 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 							...instances,
 							{
 								id: instanceId,
+								colorSlot: claude ? 0 : 3,
 								name: instanceId,
 								driver: claude ? "claude" : "opencode",
 								isDefault: false,

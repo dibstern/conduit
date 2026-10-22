@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import { showToast } from "../../stores/ui.svelte.js";
+import { wsDebugState } from "../../stores/ws-debug.svelte.js";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
 import { connectedSocket, replyRpc } from "../../stories/sockets.js";
 import type { SessionInfo } from "../../types.js";
@@ -441,11 +442,30 @@ export const PhoneDebugFooter: Story = {
 		await phoneMenu();
 		const debug = await within(document.body).findByTestId("overflow-debug");
 		await expect(debug).toHaveAccessibleName("Debug panel");
-		await expect(debug).toHaveTextContent(/Debug\s*dev/);
+		await expect(debug).toHaveRole("switch");
+		await expect(debug).toHaveAttribute("aria-checked", "false");
+		await userEvent.click(within(debug).getByText("Debug", { exact: true }));
+		await expect(debug).toHaveAttribute("aria-checked", "true");
+		await expect(await phoneMenu()).toBeVisible();
 	},
 };
 export const PhoneDebugFooterLight: Story = {
 	...PhoneDebugFooter,
+	globals: { theme: "light" },
+};
+export const DesktopDebugMenu: Story = {
+	args: { withFooter: true, debug: true },
+	play: async () => {
+		const debug = await within(document.body).findByRole("menuitemcheckbox", {
+			name: "Debug panel",
+		});
+		await expect(debug).toHaveAttribute("aria-checked", "false");
+		wsDebugState.panelOpen = true;
+		await waitFor(() => expect(debug).toHaveAttribute("aria-checked", "true"));
+	},
+};
+export const DesktopDebugMenuLight: Story = {
+	...DesktopDebugMenu,
 	globals: { theme: "light" },
 };
 export const PhoneDisabledReason: Story = {

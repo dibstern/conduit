@@ -111,6 +111,21 @@ function setAccounts(
 	let instances = accounts.map(([id, name, driver = "claude"]) => ({
 		id,
 		name,
+		colorSlot:
+			Math.max(
+				0,
+				[
+					"claude",
+					"work",
+					"spare",
+					"unreadable",
+					"chatgpt",
+					"cursor",
+					"api-key",
+					"hidden",
+					"opencode",
+				].indexOf(id),
+			) % 6,
 		driver,
 		isDefault: id === "claude" || id === "opencode" || id === "cursor",
 		usageEligible: driver !== "opencode" && id !== "api-key",

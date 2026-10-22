@@ -216,6 +216,7 @@ describe("account config migration", () => {
 		).toEqual([
 			{
 				id: "claude",
+				colorSlot: 0,
 				name: "Claude",
 				driver: "claude",
 				port: 0,

@@ -10,7 +10,9 @@ test.use({
 
 async function sectionBefore(row: Locator) {
 	return row.evaluate((element) => {
-		let previous = element.previousElementSibling;
+		let previous =
+			element.closest('[id$="-shelf-rows"]')?.previousElementSibling ??
+			element.previousElementSibling;
 		while (previous && !previous.classList.contains("session-group-label")) {
 			previous = previous.previousElementSibling;
 		}

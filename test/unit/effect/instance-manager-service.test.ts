@@ -312,6 +312,7 @@ describe("InstanceManager — missing methods", () => {
 						{
 							id: "remote-1",
 							name: "Remote Instance",
+							colorSlot: 0,
 							port: 4096,
 							managed: false,
 							url: "https://opencode.example.test",
@@ -340,6 +341,7 @@ describe("InstanceManager — missing methods", () => {
 					{
 						id: "work-claude",
 						name: "Work Claude",
+						colorSlot: 0,
 						port: 0,
 						managed: false,
 						driver: "claude",

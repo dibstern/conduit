@@ -6,13 +6,13 @@
   removes the token with Backspace or Delete in the textarea itself.
 -->
 <script lang="ts">
-	let { label, ask = false, title, onremove }: { label: string; ask?: boolean; title: string; onremove: () => void } = $props();
+	let { label, colour, ask = false, title, onremove }: { label: string; colour?: string | undefined; ask?: boolean; title: string; onremove: () => void } = $props();
 
 	const cut = $derived(label.lastIndexOf("×"));
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<span class="reference-token" class:ask data-testid="surfacing-ref-token" {title}>{label.slice(0, cut)}<span class="remove" data-testid="surfacing-ref-remove" title="Remove reference" onpointerdown={(event) => event.preventDefault()} onclick={onremove}>×</span>{label.slice(cut + 1)}</span>
+<span class="reference-token" class:category={!!colour} class:ask style:--category-colour={colour} data-testid="surfacing-ref-token" {title}>{label.slice(0, cut)}<span class="remove" data-testid="surfacing-ref-remove" title="Remove reference" onpointerdown={(event) => event.preventDefault()} onclick={onremove}>×</span>{label.slice(cut + 1)}</span>
 
 <style>
 	/* Vertical padding paints a 26px chip without moving a glyph; the label's
@@ -24,8 +24,12 @@
 		-webkit-box-decoration-break: clone;
 		box-decoration-break: clone;
 	}
+	.category {
+		color: var(--category-colour);
+		background: color-mix(in srgb, var(--category-colour) 14%, transparent);
+	}
 	.ask {
-		background: color-mix(in srgb, var(--color-status-ask) 16%, transparent);
+		background: color-mix(in srgb, var(--color-cat-ask) 16%, transparent);
 	}
 	.remove {
 		position: relative;
