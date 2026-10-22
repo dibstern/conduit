@@ -185,7 +185,6 @@ describe("transcript feed interface", () => {
 			schema: 1,
 			sessionId: "A",
 			project: "project",
-			buildId: "test",
 			protocolVersion: 1,
 			openedAt: 1,
 			snapshot: {
@@ -205,7 +204,6 @@ describe("transcript feed interface", () => {
 			schema: 1,
 			sessionId: "A",
 			project: "project",
-			buildId: "test",
 			protocolVersion: 1,
 			openedAt: 1,
 			snapshot: {

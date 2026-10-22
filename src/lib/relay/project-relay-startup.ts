@@ -285,6 +285,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 		const readOpenCodeStatuses = (instanceId: string, sessionId: string) =>
 			Effect.gen(function* () {
 				const { directory, hasWorkspace } = yield* workspace.withLaunch(
+					sessionId,
 					Effect.gen(function* () {
 						// A reset clears the workspace row but remains an explicit move.
 						const [row] = yield* sql<{ has_workspace: number }>`

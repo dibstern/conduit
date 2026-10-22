@@ -157,7 +157,7 @@ const switchClientToSession = (
 			const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 			const start = Effect.sync(() => pollerManager.startPolling(sessionId));
 			yield* workspace._tag === "Some"
-				? workspace.value.withLaunch(start)
+				? workspace.value.withLaunch(sessionId, start)
 				: start;
 		}
 	});
@@ -389,8 +389,9 @@ export const deleteSessionForClient = ({
 				});
 			return warnings;
 		});
+		// Deletion cascades to descendants and checks every session sharing its checkouts.
 		return yield* workspace._tag === "Some"
-			? workspace.value.withLaunch(deletion)
+			? workspace.value.withProjectLaunch(deletion)
 			: deletion;
 	});
 

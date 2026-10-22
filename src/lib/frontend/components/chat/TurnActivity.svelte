@@ -437,6 +437,23 @@
 		return [at, span].filter(Boolean).join(" · ");
 	}
 
+	// While live, the newest steps already show, and opening the log inserts
+	// the earlier ones above them. The scroll controller can't see that growth,
+	// so hold the newest step where the reader saw it. Closing needs no help:
+	// the header the reader just clicked stays put.
+	async function toggleLog() {
+		openTurn();
+		const uuid = showTicker && !expanded ? segment.activity.at(-1)?.uuid : undefined;
+		const newestTop = () => uuid === undefined ? undefined : panelEl?.querySelector(`[data-log-part="${CSS.escape(uuid)}"]`)?.getBoundingClientRect().top;
+		const before = newestTop();
+		expanded = !expanded;
+		if (before === undefined) return;
+		await tick();
+		const after = newestTop();
+		const scroller = panelEl?.closest("#messages");
+		if (after !== undefined && scroller) scroller.scrollTop += after - before;
+	}
+
 	async function jumpTo(i: number) {
 		const part = segment.activity[i];
 		if (!part) return;
@@ -521,7 +538,7 @@
 					{#snippet trigger({ props })}
 						<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" align="start" touchTarget
 							class="turn-activity-toggle gap-[6px] text-[13px] min-w-0" aria-expanded={expanded}
-							onclick={() => { openTurn(); expanded = !expanded; }}>
+							onclick={toggleLog}>
 							{#if live}<Icon name="loader-circle" size={13} class="animate-spin shrink-0 text-accent" />
 							{:else}<Icon name={expanded ? "chevron-down" : "chevron-right"} size={14} class="shrink-0 text-text-dimmer" />{/if}
 							<span class="text-[14px] font-semibold text-text">{live ? "Working" : "Worked"}</span>

@@ -129,15 +129,16 @@ const singletonTables = [
 	"daemon_store_imports",
 	"sqlite_sequence",
 ];
-// Deployed redesign ledgers before their migrations were appended to main.
+// Historical redesign and goal ledgers before their migrations were appended to main.
 // Accept only these historical mappings; arbitrary ids still mean a newer schema.
 const deployedRedesignMigrationIds = new Map<string, readonly number[]>([
-	["goal_check_metadata", [64, 68]],
-	["message_part_surfacing", [65, 69]],
-	["sessions_settled_shelf_index", [66, 70]],
-	["surfacing_marks", [67, 71]],
-	["message_part_read", [68, 72]],
-	["turn_recaps", [69, 73]],
+	["goal_check_metadata", [63, 64, 68]],
+	["message_part_surfacing", [64, 65, 69]],
+	["sessions_settled_shelf_index", [65, 66, 70]],
+	["surfacing_marks", [66, 67, 71]],
+	["message_part_read", [67, 68, 72]],
+	["turn_recaps", [68, 69, 73]],
+	["sessions_goal_stuck", [69]],
 ]);
 const runnerTables: Readonly<Record<string, string>> = {
 	claude_runner_cursors: `CREATE TABLE claude_runner_cursors (

@@ -567,6 +567,65 @@ test.describe("Scroll Controller — Streaming", () => {
 		wsMock.sendMessage({ type: "done", code: 0 });
 	});
 
+	test("showing and hiding a live step log keeps the newest steps on screen", async ({
+		page,
+		relayUrl,
+	}, testInfo) => {
+		const wsMock = await mockRelayWebSocket(page, {
+			initMessages: createInitMessages(TURN_COUNT),
+			responses: new Map(),
+		});
+		await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+		await page
+			.locator("#connect-overlay")
+			.waitFor({ state: "hidden", timeout: 15_000 });
+		await waitForInitialMessages(page);
+
+		// A live turn with many steps and no reply yet shows only its newest
+		// steps until the reader opens the full log.
+		wsMock.sendMessage({ type: "user_message", text: "Run every check" });
+		wsMock.sendMessage({ type: "status", status: "processing" });
+		const steps = 30;
+		for (let i = 0; i < steps; i++) {
+			const id = `call_check_${i}`;
+			wsMock.sendMessage({ type: "tool_start", id, name: "Bash" });
+			wsMock.sendMessage({
+				type: "tool_executing",
+				id,
+				name: "Bash",
+				input: { command: `check ${i}` },
+			});
+			wsMock.sendMessage({
+				type: "tool_result",
+				id,
+				content: `check ${i} ok`,
+				is_error: false,
+			});
+		}
+		const turn = page.locator("#messages .turn-activity").last();
+		const newest = turn.locator("[data-log-part]").last();
+		await expect(newest).toContainText(`check ${steps - 1}`);
+		await waitForStableScroll(page);
+		await expect(newest).toBeInViewport();
+
+		const toggle = turn.locator(".turn-activity-toggle");
+		for (const expanded of ["true", "false", "true"]) {
+			await toggle.click();
+			await expect(toggle).toHaveAttribute("aria-expanded", expanded);
+			await waitForStableScroll(page);
+			await expect(
+				newest,
+				`newest step on screen after aria-expanded=${expanded}`,
+			).toBeInViewport();
+		}
+		await expect(turn.locator("[data-log-part]")).toHaveCount(steps);
+		await page.screenshot({
+			path: testInfo.outputPath("step-log-shown-again.png"),
+		});
+
+		wsMock.sendMessage({ type: "done", code: 0 });
+	});
+
 	test("wheel-up detaches during streaming, button appears, no snap-back", async ({
 		page,
 		relayUrl,

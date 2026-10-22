@@ -1,4 +1,11 @@
-import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import Database from "better-sqlite3";
@@ -173,6 +180,11 @@ describe("Project provenance through the built daemon", () => {
 		if (!harness) return;
 		const fixture = harness;
 		try {
+			evidence["process"] = fixture.proof();
+			const runnerLog = join(fixture.configDir, "runners.log");
+			evidence["runnerLogTail"] = existsSync(runnerLog)
+				? readFileSync(runnerLog).subarray(-8_000).toString()
+				: "";
 			evidence["errors"] =
 				task.result?.errors?.map(({ message }) => message) ?? [];
 			await fixture.dispose();

@@ -675,7 +675,8 @@ describe("shared-store relay project scope", () => {
 		const workspace: SessionWorkspaceTag["Service"] = {
 			preview: unused,
 			renameBranch: unused,
-			withLaunch: (effect) => effect,
+			withLaunch: (_sessionId, effect) => effect,
+			withProjectLaunch: (effect) => effect,
 			get: unused,
 			move: unused,
 			inherit: unused,

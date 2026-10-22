@@ -33,6 +33,7 @@ import {
 	DraftPreWarmTag,
 	draftLaunchKey,
 } from "../../domain/relay/Services/draft-prewarm.js";
+import { GoalSummaryServiceTag } from "../../domain/relay/Services/goal-summary-service.js";
 import { InputDraftsTag } from "../../domain/relay/Services/input-drafts.js";
 import {
 	BackgroundLivenessTag,
@@ -211,10 +212,9 @@ export const sessionsHandlers = {
 		Effect.gen(function* () {
 			const workspace = yield* SessionWorkspaceTag;
 			return {
-				directory: yield* workspace.move(
+				directory: yield* workspace.withLaunch(
 					request.sessionId,
-					request.path,
-					"user",
+					workspace.move(request.sessionId, request.path, "user"),
 				),
 			};
 		}).pipe(
@@ -239,6 +239,7 @@ export const sessionsHandlers = {
 			const config = yield* ConfigTag;
 			const workspace = yield* SessionWorkspaceTag;
 			return yield* workspace.withLaunch(
+				request.sessionId,
 				workspace
 					.move(request.sessionId, config.projectDir, "user")
 					.pipe(Effect.map((directory) => ({ directory }))),
@@ -274,8 +275,35 @@ export const sessionsHandlers = {
 					message: "Goal details are available only for Claude sessions",
 				});
 			}
-			return yield* read.getGoalDetails(request.sessionId);
+			const summaries = yield* GoalSummaryServiceTag;
+			return yield* (yield* SqlClient.SqlClient).withTransaction(
+				Effect.gen(function* () {
+					const details = yield* read.getGoalDetails(request.sessionId);
+					const summary = yield* summaries.metadata(request.sessionId);
+					return { ...details, ...summary };
+				}),
+			);
 		}).pipe(Effect.catch(mapRpcFailure("GetGoalDetails"))),
+	GenerateGoalSummary: (request) =>
+		Effect.gen(function* () {
+			const read = yield* ReadQueryEffectTag;
+			const session = yield* read.getSession(request.sessionId);
+			if (!session) {
+				return yield* new WsRpcError({
+					message: `Session ${request.sessionId} not found`,
+				});
+			}
+			const account = yield* (yield* AccountDirectory).resolve({
+				_tag: "Id",
+				id: session.provider,
+			});
+			if (!PROVIDER_DRIVERS[account.driver].supportsGoalState) {
+				return yield* new WsRpcError({
+					message: "Goal summaries are available only for Claude sessions",
+				});
+			}
+			return yield* (yield* GoalSummaryServiceTag).generate(request.sessionId);
+		}).pipe(Effect.catch(mapRpcFailure("GenerateGoalSummary"))),
 	PreWarmSession: (request) =>
 		preWarmSession(request.sessionId).pipe(
 			Effect.catch(mapRpcFailure("PreWarmSession")),
@@ -641,6 +669,7 @@ export const sessionsHandlers = {
 					const worktrees = yield* WorktreeServiceTag;
 					const sessionId = createLocalSessionId();
 					const session = yield* workspace.withLaunch(
+						sessionId,
 						Effect.uninterruptibleMask((restore) =>
 							Effect.gen(function* () {
 								// The id belongs to this launch, but no session exists until Git succeeds.
@@ -702,11 +731,12 @@ export const sessionsHandlers = {
 				const session = yield* Effect.uninterruptibleMask((restore) =>
 					Effect.gen(function* () {
 						const reservedSessionId = yield* takeReservation;
+						const sessionId =
+							reservedSessionId ??
+							(path === undefined ? undefined : createLocalSessionId());
 						const create = createSessionForClient({
 							...options,
-							...(reservedSessionId === undefined
-								? {}
-								: { sessionId: reservedSessionId }),
+							...(sessionId === undefined ? {} : { sessionId }),
 							...(path === undefined
 								? {}
 								: {
@@ -718,7 +748,9 @@ export const sessionsHandlers = {
 									}),
 						});
 						return yield* restore(
-							path === undefined ? create : workspace.withLaunch(create),
+							path === undefined || sessionId === undefined
+								? create
+								: workspace.withLaunch(sessionId, create),
 						).pipe(
 							Effect.onError(() =>
 								reservedSessionId && drafts._tag === "Some"
@@ -1000,6 +1032,7 @@ export const sessionsHandlers = {
 } satisfies Pick<
 	WsRpcHandlerMap,
 	| "GetGoalDetails"
+	| "GenerateGoalSummary"
 	| "PreWarmSession"
 	| "PreWarmDraft"
 	| "ResolveSession"

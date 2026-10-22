@@ -640,7 +640,6 @@ describe("session selection at the browser RPC wire", () => {
 		drawSavedShell({
 			schema: 1,
 			project: "stale",
-			buildId: "test",
 			protocolVersion: 1,
 			savedAt: 1,
 			rows: [
