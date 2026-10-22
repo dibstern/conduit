@@ -5,6 +5,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PROVIDER_DRIVERS } from "../../../src/lib/contracts/provider-instance.js";
@@ -120,6 +121,74 @@ describe("Codex control through the daemon and detached runner", () => {
 		);
 	}
 
+	function expectFailedRun(
+		fixture: ProcessHarness,
+		id: string,
+		accepted: boolean,
+	) {
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
+		try {
+			const commands = db
+				.prepare<[string], { inputId: string; runId: string }>(
+					"SELECT json_extract(payload_json, '$.inputId') AS inputId, run_id AS runId FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
+				)
+				.all(id);
+			expect(commands).toHaveLength(1);
+			const command = commands[0];
+			if (!command) throw new Error("Missing failed Codex send reservation");
+			expect(command.runId).toEqual(expect.any(String));
+			expect(
+				db
+					.prepare<
+						[string],
+						{ id: string; status: string; started_at: number | null }
+					>(
+						"SELECT id, status, started_at FROM provider_runs WHERE session_id = ? ORDER BY requested_at, rowid",
+					)
+					.all(id),
+			).toEqual([
+				{
+					id: command.runId,
+					status: "error",
+					started_at: accepted ? expect.any(Number) : null,
+				},
+			]);
+			expect(
+				db
+					.prepare<
+						[string],
+						{
+							input_id: string;
+							state: string;
+							run_id: string | null;
+							started_at: number | null;
+						}
+					>(
+						"SELECT m.input_id, t.state, t.run_id, t.started_at FROM turns t JOIN messages m ON m.id = t.user_message_id WHERE t.session_id = ? ORDER BY t.requested_at, t.rowid",
+					)
+					.all(id),
+			).toEqual([
+				{
+					input_id: command.inputId,
+					state: "error",
+					run_id: command.runId,
+					started_at: accepted ? expect.any(Number) : null,
+				},
+			]);
+			const { events } = snapshot(fixture, id);
+			expect(events.filter(({ type }) => type === "run.started")).toHaveLength(
+				accepted ? 1 : 0,
+			);
+			expect(events.filter(({ type }) => type === "turn.error")).toEqual([
+				expect.objectContaining({
+					metadata: expect.objectContaining({ runId: command.runId }),
+				}),
+			]);
+		} finally {
+			db.close();
+		}
+	}
+
 	async function submit(
 		browser: ProcessBrowser,
 		id: string,
@@ -228,6 +297,8 @@ describe("Codex control through the daemon and detached runner", () => {
 		async () => {
 			expect(PROVIDER_DRIVERS.codex.steering).toBe("native");
 			const { fixture, browser, id } = await start("steer");
+			// Release the RPC acknowledgement while holding its later user echo.
+			writeFileSync(gatePath, "591");
 			await submit(browser, id, "Say hello");
 			await vi.waitFor(
 				() =>
@@ -239,6 +310,40 @@ describe("Codex control through the daemon and detached runner", () => {
 				{ timeout: TIMEOUT },
 			);
 			await submit(browser, id, STEER, "steer");
+			await vi.waitFor(
+				() => {
+					const { events } = snapshot(fixture, id);
+					const requested = events.find(
+						({ type, data }) =>
+							type === "run.requested" && data["inputId"] === "fixture-steer",
+					);
+					const initial = events.find(({ type }) => type === "run.started");
+					expect(requested).toBeDefined();
+					expect(initial?.metadata["runId"]).toBeTypeOf("string");
+					expect(events).toContainEqual(
+						expect.objectContaining({
+							type: "run.started",
+							metadata: expect.objectContaining({
+								runId: initial?.metadata["runId"],
+							}),
+							data: expect.objectContaining({
+								inputId: "fixture-steer",
+								requestedRunId: requested?.data["runId"],
+							}),
+						}),
+					);
+				},
+				{ timeout: TIMEOUT },
+			);
+			expect(
+				captured().filter(
+					(row) =>
+						row.message?.method === "item/completed" &&
+						(row.message.params?.["item"] as { clientId?: string })
+							?.clientId === "fixture-steer",
+				),
+			).toEqual([]);
+			writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
 			await states(fixture, id, ["completed", "completed"]);
 			const starts = requests().filter(
 				(row) => row.message?.method === "turn/start",
@@ -358,12 +463,18 @@ describe("Codex control through the daemon and detached runner", () => {
 				{ timeout: TIMEOUT },
 			);
 			const stopping = cancel(browser, id);
-			await states(fixture, id, ["interrupted"]);
+			await states(fixture, id, ["pending"]);
+			expect(
+				snapshot(fixture, id).events.filter(
+					({ type }) => type === "run.started",
+				),
+			).toEqual([]);
 			expect(
 				requests().filter((row) => row.message?.method === "turn/interrupt"),
 			).toHaveLength(0);
 			writeFileSync(gatePath, "1");
 			await stopping;
+			await states(fixture, id, ["interrupted"]);
 			await vi.waitFor(
 				() =>
 					expect(
@@ -536,6 +647,7 @@ describe("Codex control through the daemon and detached runner", () => {
 			const threadId = seed(fixture, id, fixtureRows("resume-missing"));
 			await browser.send(id, "Say hello", TIMEOUT);
 			await states(fixture, id, ["error"]);
+			expectFailedRun(fixture, id, false);
 			expect(requests().map((row) => row.message?.method)).toEqual([
 				"initialize",
 				"initialized",
@@ -571,6 +683,7 @@ describe("Codex control through the daemon and detached runner", () => {
 			const { fixture, browser, id } = await start(scenario);
 			await browser.send(id, "Say hello", TIMEOUT);
 			await states(fixture, id, ["error"]);
+			expectFailedRun(fixture, id, true);
 			expect(snapshot(fixture, id).events).toContainEqual(
 				expect.objectContaining({
 					type: "turn.error",

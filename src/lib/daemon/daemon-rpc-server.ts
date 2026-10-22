@@ -1,7 +1,8 @@
 import { lstatSync, unlinkSync } from "node:fs";
 import { chmod, lstat, rename, rm, writeFile } from "node:fs/promises";
 import type { Socket as NetSocket } from "node:net";
-import { NodeSocket, NodeSocketServer } from "@effect/platform-node";
+import * as NodeSocket from "@effect/platform-node/NodeSocket";
+import * as NodeSocketServer from "@effect/platform-node/NodeSocketServer";
 import { Context, Effect, Layer, Option } from "effect";
 import { RpcSerialization, RpcServer } from "effect/rpc";
 import { SocketServer } from "effect/socket";

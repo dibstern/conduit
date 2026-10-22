@@ -30,14 +30,16 @@
 	/* After the focus outline, so focusing never hides the goal. */
 	.composer-frame[data-goal="solid"] { outline: 1px solid var(--color-status-goal); }
 	.composer-frame[data-goal="dashed"] { outline: 1px dashed var(--color-status-goal); }
-	.composer-frame :global(.composer-text-metrics) { font-size: 15px; line-height: 24px; padding: 2px 0 10px; }
+	/* The design's placeholder ink starts 19px from the top. Move one pixel
+	   from above the text to below it without changing the frame or footer. */
+	.composer-frame :global(.composer-text-metrics) { font-size: 15px; line-height: 22.5px; padding: 1px 0 15px; }
 	[data-words="true"] :global(.composer-text-metrics) { padding: 0 4px; }
 	[data-words="true"] :global(#image-preview) { padding-inline: 8px; }
 	.composer-frame[data-compact="true"][data-words="false"] { padding: 10px 8px 8px 14px; }
-	[data-compact="true"][data-words="false"] :global(.composer-text-metrics) { padding-bottom: 8px; }
+	[data-compact="true"][data-words="false"] :global(.composer-text-metrics) { padding-bottom: 9px; }
 	@media (max-width: 767px) {
 		.composer-frame[data-words="false"] { padding: 10px 8px 8px 14px; }
-		[data-words="false"] :global(.composer-text-metrics) { padding-bottom: 8px; }
+		[data-words="false"] :global(.composer-text-metrics) { padding-bottom: 9px; }
 	}
 	@container composer (max-width: 440px) {
 		:global([data-testid="picker-selected-context"]) { display: none; }

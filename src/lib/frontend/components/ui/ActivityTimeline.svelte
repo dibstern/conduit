@@ -1,7 +1,8 @@
 <script module lang="ts">
 	const TONES = {
-		muted: "bg-text-muted", secondary: "bg-text-secondary", thinking: "bg-thinking",
-		success: "bg-success", agent: "bg-harness-claude", error: "bg-error",
+		explore: "bg-act-explore", edit: "bg-seg-edit", shell: "bg-act-shell",
+		fetch: "bg-act-fetch", task: "bg-act-task", other: "bg-act-other",
+		thinking: "bg-act-thinking", text: "bg-act-text", fail: "bg-seg-fail",
 		compaction: "bg-text", live: "bg-accent",
 	} as const;
 </script>
@@ -104,7 +105,7 @@
 			<span
 				data-step-id={segment.id}
 				aria-hidden="true"
-				class="absolute top-1/2 h-[4px] -translate-y-1/2 rounded-[1px] transition-opacity {TONES[segment.tone]} {segment.running ? 'animate-pulse' : ''} {highlighted === index || emphasis?.has(index) ? 'opacity-100' : emphasis ? 'opacity-20' : 'opacity-60'}"
+				class="absolute top-1/2 h-[4px] -translate-y-1/2 rounded-[1px] transition-opacity {TONES[segment.tone]} {segment.running ? 'animate-pulse' : ''} {highlighted === index || emphasis?.has(index) || !emphasis ? 'opacity-100' : 'opacity-20'}"
 				style="left: {segment.left}%; width: {segment.width}%;"
 			></span>
 		{/each}

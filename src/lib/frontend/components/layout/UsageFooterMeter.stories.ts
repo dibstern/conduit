@@ -303,6 +303,25 @@ export const States: Story = {
 		await expect(
 			canvas.getByTestId("usage-footer-bar-stale-five_hour"),
 		).toBeEmptyDOMElement();
+		const dots = ["personal", "work", "lab", "stale"].map(
+			(id) =>
+				getComputedStyle(canvas.getByTestId(`usage-footer-dot-${id}`))
+					.backgroundColor,
+		);
+		await expect(new Set(dots).size).toBe(dots.length);
+		await expect(
+			getComputedStyle(
+				canvas.getByTestId("usage-footer-column-claude-five_hour"),
+			).color,
+		).toBe(
+			getComputedStyle(canvas.getByTestId("usage-footer-value-stale-five_hour"))
+				.color,
+		);
+		await expect(
+			getComputedStyle(
+				canvas.getByTestId("usage-footer-value-personal-five_hour"),
+			).fontSize,
+		).toBe("11px");
 	},
 };
 
@@ -425,6 +444,13 @@ export const PhoneHiddenCodexAccount: Story = {
 		await expect(
 			canvas.getByTestId("usage-phone-more-count"),
 		).toHaveTextContent("+1 Codex account");
+		const probe = document.createElement("span");
+		probe.className = "text-text-dimmer";
+		canvasElement.append(probe);
+		await expect(
+			getComputedStyle(canvas.getByTestId("usage-phone-more-count")).color,
+		).toBe(getComputedStyle(probe).color);
+		probe.remove();
 	},
 };
 

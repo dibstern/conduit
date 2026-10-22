@@ -37,7 +37,10 @@ import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
 import { synthesizeSnapshotEvent } from "../../../../src/lib/provider/opencode/opencode-history-backfill.js";
 import { OrchestrationEngine } from "../../../../src/lib/provider/orchestration-engine.js";
 import { CommandReadModelRepository } from "../../../../src/lib/provider/orchestration-read-model.js";
-import { ProviderRegistry } from "../../../../src/lib/provider/provider-registry.js";
+import {
+	ProviderRegistry,
+	ProviderRegistryTag,
+} from "../../../../src/lib/provider/provider-registry.js";
 import type { ProviderInstance } from "../../../../src/lib/provider/types.js";
 import {
 	makeMockAccountDirectory,
@@ -152,6 +155,7 @@ it.effect(
 			const sentPrompts: string[] = [];
 			const provider: ProviderInstance = {
 				providerId: "opencode",
+				generateTextEffect: () => Effect.die("not used"),
 				discoverEffect: () => Effect.die("This send supplies its model"),
 				sendTurnEffect: (input) =>
 					Effect.gen(function* () {
@@ -175,6 +179,7 @@ it.effect(
 				registry: new ProviderRegistry([provider]),
 				accountDirectory: makeMockAccountDirectory(),
 				durableCommands: {
+					ingestion: yield* ProviderRuntimeIngestionTag,
 					sql,
 					projectKey: "test-project",
 					snapshot: yield* new CommandReadModelRepository(
@@ -193,6 +198,10 @@ it.effect(
 			});
 			const context = yield* Layer.build(ProviderTurnServiceLive).pipe(
 				Effect.provideService(OrchestrationEngineTag, engine),
+				Effect.provideService(
+					ProviderRegistryTag,
+					new ProviderRegistry([provider]),
+				),
 			);
 			const turns = Context.get(context, ProviderTurnServiceTag);
 			const send = yield* turns

@@ -448,7 +448,10 @@ async function main(): Promise<void> {
 					) as import("../../src/lib/provider/claude/claude-capabilities-probe.js").ProbeResult)
 				: { models: [], agents: [], commands: [] };
 		};
-	if (existsSync(join(root, "capabilities-probe-gated"))) {
+	if (
+		existsSync(join(root, "capabilities-probe-gated")) ||
+		existsSync(join(root, "capabilities-probe-result.json"))
+	) {
 		const { ClaudeDriver } = (await import(
 			pathToFileURL(
 				join(

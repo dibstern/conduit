@@ -18,8 +18,10 @@ export const makeCodexRunnerLaunch = (
 					workspaceRoot: config.workspaceRoot,
 					daemonConfigDir: config.daemonConfigDir ?? DEFAULT_CONFIG_DIR,
 					environment: () => environment,
+					onAbandonedRun: (inputId) => callbacks.retireAfterCommand?.(inputId),
 				},
 				emit,
+				callbacks.turnStateChanged,
 			),
 		upgradeState: () => ({ ...(resumeSessionId ? { resumeSessionId } : {}) }),
 		acceptCommand: (command) => {

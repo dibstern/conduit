@@ -38,13 +38,10 @@ export class RunnerSinkBindings {
 		string,
 		Cause.Cause<SessionFailure>
 	>();
-	/** The first send's abort signal stays linked for the query's lifetime. */
-	private readonly sessionAbortSources = new Map<string, EventSink>();
 	private readonly sinkBindings = new Map<
 		string,
 		{
 			readonly sessionId: string;
-			readonly finished: Deferred.Deferred<void>;
 			readonly sink: EventSink;
 			readonly abortController: AbortController;
 			readonly permissions: Map<
@@ -171,11 +168,7 @@ export class RunnerSinkBindings {
 		}).pipe(permit.withPermits(1));
 	}
 
-	makeSessionSink(
-		sinkId: string,
-		sessionId: string,
-		finished: Deferred.Deferred<void>,
-	): EventSink {
+	makeSessionSink(sinkId: string, sessionId: string): EventSink {
 		const permissions = new Map<
 			string,
 			Deferred.Deferred<PermissionResponse, SessionFailure>
@@ -288,7 +281,6 @@ export class RunnerSinkBindings {
 		};
 		this.sinkBindings.set(sinkId, {
 			sessionId,
-			finished,
 			sink,
 			abortController: new AbortController(),
 			permissions,
@@ -368,34 +360,6 @@ export class RunnerSinkBindings {
 		return Array.from(this.sinkBindings.values()).some(
 			(binding) => binding.sessionId === sessionId,
 		);
-	}
-	awaitSessionSends(sessionId: string): Effect.Effect<void> {
-		return Effect.forEach(
-			Array.from(this.sinkBindings.values()).filter(
-				(binding) => binding.sessionId === sessionId,
-			),
-			(binding) => Deferred.await(binding.finished),
-			{ discard: true },
-		);
-	}
-	sessionSendsFinished(sessionId: string): Effect.Effect<boolean> {
-		return Effect.forEach(
-			Array.from(this.sinkBindings.values()).filter(
-				(binding) => binding.sessionId === sessionId,
-			),
-			(binding) => Deferred.isDone(binding.finished),
-		).pipe(Effect.map((finished) => finished.every(Boolean)));
-	}
-	retainAbortSource(sessionId: string, sink: EventSink): void {
-		this.retainSink(sink);
-		this.sessionAbortSources.set(sessionId, sink);
-	}
-	releaseAbortSource(sessionId: string): Effect.Effect<void> {
-		return Effect.suspend(() => {
-			const source = this.sessionAbortSources.get(sessionId);
-			this.sessionAbortSources.delete(sessionId);
-			return this.releaseSinkEffect(source);
-		});
 	}
 	settle(
 		command: Extract<

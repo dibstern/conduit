@@ -37,46 +37,43 @@
 					<span class="h-[8px] w-[8px] shrink-0 rounded-full bg-fill-green ring-[3px] ring-fill-green/20"></span>
 					Running
 				</div>
-				<div class="mt-px flex flex-wrap items-center gap-x-1 gap-y-1 text-[12px] leading-[1.4] text-text-muted">
-					<span>conduit <span data-testid="server-status-version">{status.version}</span></span>
-					<span aria-hidden="true">·</span>
-					<span data-testid="server-status-uptime">up {uptime(status.uptime)}</span>
-					<span aria-hidden="true">·</span>
-					<span data-testid="server-status-port">port {status.port}</span>
-					<span aria-hidden="true">·</span>
-					<span data-testid="server-status-browsers">{status.clientCount} browser{status.clientCount === 1 ? "" : "s"} connected</span>
+				<div class="mt-px flex flex-wrap items-center gap-x-1 gap-y-1 text-[12px] leading-[1.4] text-text-dimmer">
+					<span class="whitespace-nowrap">conduit <span data-testid="server-status-version">{status.version}</span></span>
+					<span class="whitespace-nowrap"><span aria-hidden="true">·</span>{" "}<span data-testid="server-status-uptime">up {uptime(status.uptime)}</span></span>
+					<span class="whitespace-nowrap"><span aria-hidden="true">·</span>{" "}<span data-testid="server-status-port">port {status.port}</span></span>
+					<span class="whitespace-nowrap" data-testid="server-status-browsers"><span aria-hidden="true">·</span>{" "}{status.clientCount} browser{status.clientCount === 1 ? "" : "s"} connected</span>
 				</div>
 				{#if !status.supervised}
 					<p class="mt-1 text-[12px] text-text-muted">Start conduit again from the terminal with <code class="font-mono">conduit serve</code>.</p>
 				{/if}
 			</div>
-			<div class="flex w-full gap-1.5 md:w-auto md:shrink-0" data-testid="server-status-actions">
+			<div class="flex w-full gap-[6px] md:w-auto md:shrink-0" data-testid="server-status-actions">
 				{#if status.supervised}
-					<Button touchTarget variant="secondary" size="sm" class="flex-1 md:flex-none" data-testid="server-restart-btn" disabled={busy} onclick={restartServer}>{restarting ? "Restarting…" : "Restart"}</Button>
+					<Button touchTarget variant="settings" size="content" icon="refresh-cw" iconSize={13} class="flex-1 md:flex-none max-md:h-[34px] max-md:text-[14px]" data-testid="server-restart-btn" disabled={busy} onclick={restartServer}>{restarting ? "Restarting…" : "Restart"}</Button>
 				{/if}
-				<Button touchTarget variant="danger-outline" size="sm" class="flex-1 md:flex-none" data-testid="server-shutdown-btn" aria-expanded={openForm === "shutdown"} disabled={busy} onclick={() => onToggleForm("shutdown")}>Shut down</Button>
+				<Button touchTarget variant="settings" tone="error" size="content" icon="power" iconSize={13} class="flex-1 md:flex-none max-md:h-[34px] max-md:text-[14px]" data-testid="server-shutdown-btn" aria-expanded={openForm === "shutdown"} disabled={busy} onclick={() => onToggleForm("shutdown")}>Stop</Button>
 			</div>
 		</div>
 		{#if openForm === "shutdown"}
 			<div class="flex flex-col gap-3 px-[14px] py-3" data-server-form data-testid="server-shutdown-confirmation">
-				<p class="text-[13.5px] font-semibold text-text">Shut down conduit?</p>
+				<p class="text-[13.5px] font-semibold text-text">Stop conduit?</p>
 				<p class="text-[12px] text-text-muted">
 					{#if status.supervised}
-						Every browser disconnects. The login service will start it straight back.
+						Every browser disconnects. Start it again from the terminal with <code class="font-mono">conduit service install</code>.
 					{:else}
 						Every browser disconnects. Start it again from the terminal with <code class="font-mono">conduit serve</code>.
 					{/if}
 				</p>
 				<div class="flex justify-end gap-1.5">
-					<Button touchTarget variant="secondary" size="sm" data-testid="server-shutdown-cancel" disabled={serverStatus.shutdownInFlight} onclick={() => onToggleForm("shutdown")}>Cancel</Button>
-					<Button touchTarget variant="danger" size="sm" data-testid="server-shutdown-confirm" disabled={busy} onclick={confirmShutdown}>{serverStatus.shutdownInFlight ? "Shutting down…" : "Shut down"}</Button>
+					<Button touchTarget variant="settings" size="content" data-testid="server-shutdown-cancel" disabled={serverStatus.shutdownInFlight} onclick={() => onToggleForm("shutdown")}>Cancel</Button>
+					<Button touchTarget variant="settings" tone="error" size="content" data-testid="server-shutdown-confirm" disabled={busy} onclick={confirmShutdown}>{serverStatus.shutdownInFlight ? "Stopping…" : "Stop"}</Button>
 				</div>
 			</div>
 		{/if}
 	{:else}
 		<div class="flex items-center justify-between gap-3 px-3 py-3">
 			<p>{serverStatus.error ? "Could not load server status." : "Loading server status…"}</p>
-			{#if serverStatus.error}<Button touchTarget variant="secondary" size="sm" disabled={serverStatus.loading} onclick={refreshServerStatus}>Retry</Button>{/if}
+			{#if serverStatus.error}<Button touchTarget variant="settings" size="content" disabled={serverStatus.loading} onclick={refreshServerStatus}>Retry</Button>{/if}
 		</div>
 	{/if}
 </SettingsGroup>

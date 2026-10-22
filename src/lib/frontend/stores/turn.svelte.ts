@@ -85,11 +85,13 @@ export function turn() {
 				(project) => project.slug === getDraftProject(),
 			)
 		: undefined;
+
 	return {
 		working:
 			sessionId === null
 				? draft && creatingDrafts > 0
-				: getSessionPhase(sessionId) !== "idle" ||
+				: (getSessionPhase(sessionId) !== "idle" &&
+						findSession(sessionId)?.canStop !== false) ||
 					[...intents.values()].some(
 						(intent) => intent.sessionId === sessionId,
 					),

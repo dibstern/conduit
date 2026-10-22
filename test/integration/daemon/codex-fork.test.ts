@@ -3,6 +3,7 @@
 // goal successor, undo changes native history, or a failed revert commits locally.
 // A fork of a fork must retain inherited boundaries; a missing fork source must
 // seed the frozen digest once, while unrelated fork errors must remain failures.
+import { randomUUID } from "node:crypto";
 import {
 	mkdirSync,
 	readFileSync,
@@ -856,23 +857,52 @@ describe("Codex native forks and conversation rewind through the daemon", () => 
 				expect(requests("thread/revert")).toEqual([]);
 				if (scenario === "undo")
 					await Effect.runPromise(browser.rpc.UndoRewind({ sessionId: id }));
-				await browser.send(id, "Continue after rewind", TIMEOUT);
 				if (scenario === "rewind-revert-failed") {
-					expect(snapshot(fixture, id).events).toContainEqual(
-						expect.objectContaining({
-							type: "turn.error",
-							data: expect.objectContaining({
-								error: expect.stringContaining(
-									"Codex conversation rewind failed",
+					const inputId = randomUUID();
+					await fixture.requestRpc({
+						_tag: "input.submit",
+						sessionId: id,
+						inputId,
+						delivery: "queue",
+						text: "Continue after rewind",
+					});
+					// A failed revert has no placed input to advance shell completion.
+					await vi.waitFor(
+						() => {
+							const { events } = snapshot(fixture, id);
+							const requested = events.find(
+								({ type, data }) =>
+									type === "run.requested" && data["inputId"] === inputId,
+							);
+							expect(requested).toBeDefined();
+							expect(events).toContainEqual(
+								expect.objectContaining({
+									type: "turn.error",
+									metadata: expect.objectContaining({
+										runId: requested?.data["runId"],
+									}),
+									data: expect.objectContaining({
+										error: expect.stringContaining(
+											"Codex conversation rewind failed",
+										),
+									}),
+								}),
+							);
+							expect(
+								events.filter(
+									({ type, data }) =>
+										type === "message.created" && data["messageId"] === inputId,
 								),
-							}),
-						}),
+							).toEqual([]);
+						},
+						{ timeout: TIMEOUT },
 					);
 					expect(persisted(fixture, id)?.pending_rewind_message_id).toBe(
 						target.id,
 					);
 					expect(requests("turn/start")).toHaveLength(3);
 				} else {
+					await browser.send(id, "Continue after rewind", TIMEOUT);
 					expect(persisted(fixture, id)?.pending_rewind_message_id).toBeNull();
 					expect(requests("thread/revert")).toEqual(
 						scenario === "undo"

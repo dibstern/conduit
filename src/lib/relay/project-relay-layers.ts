@@ -96,6 +96,7 @@ import {
 } from "../domain/relay/Services/daemon-session-query-service.js";
 import { DirectoryListingServiceLive } from "../domain/relay/Services/directory-listing-service.js";
 import { DraftPreWarmLive } from "../domain/relay/Services/draft-prewarm.js";
+import { HandoffReceiptsLive } from "../domain/relay/Services/handoff-receipts.js";
 import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
 import {
 	InstanceManagementServiceLive,
@@ -475,6 +476,8 @@ export function createProjectRelayLayers({
 						onBackgroundWorkChanged(transition.sessionId);
 				},
 				claudeQueryFactory: claudeSdk.query,
+				claudeGenerateTextQueryFactory:
+					config.titleQuery ?? claudeSdk.titleQuery,
 				claudeSessionForkSdk: claudeSdk.fork,
 				...(config.claudeSdk?.subagentSdk && {
 					claudeSubagentSdk: config.claudeSdk.subagentSdk,
@@ -784,6 +787,8 @@ export function createProjectRelayLayers({
 		instanceManagementLayer,
 	);
 	const providerOrchestrationLayer = orchestrationRuntimeLayer.pipe(
+		// Recovery can publish a completed run while orchestration is adopted.
+		Layer.provide(HandoffReceiptsLive),
 		Layer.provide(providerOrchestrationDeps),
 	);
 	const agentLivenessLayer = Layer.effect(
@@ -960,7 +965,6 @@ export function createProjectRelayLayers({
 	const relayStateAndBridges = Layer.provideMerge(
 		makeRelayStateLive({
 			sessionEventBusLayer,
-			titleQueryFactory: config.titleQuery ?? claudeSdk.titleQuery,
 			...(testSendLimit !== undefined && { testSendLimit }),
 		}),
 		bridgeLayers,

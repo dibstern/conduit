@@ -6,7 +6,7 @@
 	import { getDriverTraits } from "../../stores/instance.svelte.js";
 	import { getDraftProject } from "../../stores/project.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
-	import { composerAccountId } from "../../stores/usage.svelte.js";
+	import { composerAccountId, orderedUsageAccounts } from "../../stores/usage.svelte.js";
 	import { accountColorClass } from "../../utils/account-color.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 
@@ -61,7 +61,7 @@
 			data-testid="harness-logo-badge"
 			data-account={instanceId}
 			data-state={spinning ? "spinning" : "idle"}
-			class="badge font-mono {accountColorClass(instanceId)}"
+			class="badge font-mono {accountColorClass(instanceId, orderedUsageAccounts())}"
 		>{spinning ? "" : letter}</span>
 	{/if}
 </span>

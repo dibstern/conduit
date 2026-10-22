@@ -24,6 +24,8 @@
 <script lang="ts">
 	import { onDestroy, type Snippet } from "svelte";
 	import { provideDialogTarget } from "./dialog-context.js";
+	import { dimThemeColor } from "../../stores/theme.svelte.js";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 
 	let {
 		open,
@@ -58,6 +60,10 @@
 	} = $props();
 
 	let dialogEl = $state<HTMLDialogElement | null>(null);
+	$effect(() => {
+		if (open && dialogEl && (placement === "sheet" || sessionViewState.compact && placement !== "fullscreen")) return dimThemeColor();
+		return undefined;
+	});
 	provideDialogTarget(() => dialogEl);
 	const tabbableSelector = 'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
 

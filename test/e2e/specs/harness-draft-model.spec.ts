@@ -9,6 +9,7 @@ import type {
 } from "../../helpers/process-harness.js";
 import { openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
+import { closeSettings } from "../helpers/settings.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
@@ -531,7 +532,7 @@ test("opening model settings in a session keeps the session's model", async ({
 	await expect(panel, "the tab applied its models reply").toContainText(
 		"No models available",
 	);
-	await page.getByTestId("settings-close-btn").click();
+	await closeSettings(page);
 	await expect(
 		picker,
 		"the picker still shows the session's model",

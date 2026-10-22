@@ -17,6 +17,7 @@ import {
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	AccountDirectory,
 	AccountDirectoryFromConfigLive,
@@ -299,7 +300,7 @@ describe("model handlers with Effect-native model service", () => {
 				yield* Effect.forEach(fibers, Fiber.join);
 				const selectedResponses = yield* Effect.forEach(selected, Fiber.join);
 				for (const { response, catalog } of selectedResponses) {
-					expect(response.providers).toEqual([]);
+					expect(response.providers).toEqual(catalog?.providers ?? []);
 					expect(catalog).toMatchObject({ providers: fails ? [] : [{ id: "claude", models: [{ id: "sonnet" }] }] });
 					expect(response.active).toEqual(fails ? undefined : { provider: "claude", model: "sonnet" });
 					expect(response.variant).toEqual({ variant: fails ? "" : "high", variants: fails ? [] : ["high"] });
@@ -383,7 +384,7 @@ describe("model handlers with Effect-native model service", () => {
 				);
 				yield* Deferred.await(refreshSubscribed);
 				const refreshed = yield* getModelsResponse({ instanceId: "claude" });
-				expect(refreshed.providers).toEqual([]);
+				expect(refreshed.providers).toMatchObject([{ id: "claude", models: [{ id: "opus" }] }]);
 				expect(Option.getOrThrow(yield* Fiber.join(refreshedUpdate))).toMatchObject({
 					_tag: "upsert", item: { _tag: "providerModels", providers: [{ id: "claude", models: [{ id: "opus" }] }] },
 				});
@@ -392,6 +393,46 @@ describe("model handlers with Effect-native model service", () => {
 					refreshedSnapshot.value.rows.some((row) => row._tag === "providerModels" && row.providers[0]?.models[0]?.id === "opus")).toBe(true);
 			}).pipe(Effect.provide(deps, { local: true }));
 		});
+	});
+
+	it.effect("publishes the default Cursor catalog on a project's first model read", () => {
+		const discovered: string[] = [];
+		const engine = withDispatchEffect({
+			dispatchEffect: (command: unknown) => Effect.sync(() => {
+				const { providerId } = command as { readonly providerId: string };
+				discovered.push(providerId);
+				return {
+					models: [{ id: `${providerId}-model`, name: "Model", providerId }], commands: [],
+					supportsTools: true, supportsThinking: true, supportsPermissions: false,
+					supportsQuestions: true, supportsAttachments: false, supportsFork: true, supportsRevert: false,
+				};
+			}),
+		});
+		const deps = Layer.mergeAll(
+			Layer.succeed(AccountDirectory)(makeMockAccountDirectory([
+				{ driver: "claude", id: AccountIdSchema.make("claude"), name: "Claude", folder: configuredClaudeConfigDir(join(tmpdir(), "conduit-test-login")), usageEligible: true },
+				{ driver: "cursor", id: AccountIdSchema.make("cursor"), name: "Cursor", usageEligible: false },
+			])),
+			Layer.succeed(OpenCodeModelServiceTag)({
+				listProviders: () => Effect.succeed({ connected: [], defaults: {}, providers: [] }),
+				cachedProviders: () => Effect.succeedNone,
+				persistDefaultModel: () => Effect.void,
+			}),
+			Layer.succeed(OrchestrationEngineTag)(engine),
+			Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+			Layer.succeed(LoggerTag)(makeMockLogger()),
+			makeOverridesStateLive(), ProjectSettingsLive, RpcSubscriptionScopeLive,
+		);
+		return Effect.gen(function* () {
+			yield* getModelsResponse();
+			yield* FiberMap.awaitEmpty((yield* ProjectSettingsTag).modelDiscovery);
+			const live = yield* Ref.get((yield* ProjectSettingsTag).live);
+			expect(live["providerModels:cursor"]).toMatchObject({ providers: [{ id: "cursor", models: [{ id: "cursor-model" }] }] });
+			// A published catalog is not rediscovered on every read.
+			yield* getModelsResponse();
+			yield* FiberMap.awaitEmpty((yield* ProjectSettingsTag).modelDiscovery);
+			expect(discovered.filter((id) => id === "cursor")).toHaveLength(1);
+		}).pipe(Effect.provide(deps, { local: true }));
 	});
 
 	it.effect(

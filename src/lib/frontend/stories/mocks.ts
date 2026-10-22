@@ -630,7 +630,7 @@ export const mockQuestionAnswered: ToolMessage = {
 			},
 		],
 	},
-	result: '["Yes, fix it (Recommended)"]',
+	result: '["Staging"]',
 	isError: false,
 };
 

@@ -1,8 +1,9 @@
 import { Context } from "effect";
 
-/** Fixed at startup. Standalone and per-file consumers have no import blocks. */
-export const DaemonStoreAvailability = Context.Reference<
-	ReadonlyMap<string, string>
->("DaemonStoreAvailability", {
-	defaultValue: (): ReadonlyMap<string, string> => new Map(),
-});
+/** Shared import failures. Runtime registration adds failures before publication. */
+export const DaemonStoreAvailability = Context.Reference<Map<string, string>>(
+	"DaemonStoreAvailability",
+	{
+		defaultValue: (): Map<string, string> => new Map(),
+	},
+);

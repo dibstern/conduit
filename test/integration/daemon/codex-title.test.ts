@@ -1,8 +1,9 @@
 // Failure modes: Claude-only title routing, leaking named-account credentials,
-// starting configured MCP servers, parsing progress instead of the final answer,
-// and replacing the default title after a failed background request.
+// starting configured MCP servers, running inside the project, ignoring the
+// selected title model, parsing progress instead of the final answer,
+// and writing anything but the dated fallback after a failed request.
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppServerTraceReport } from "../../../src/lib/provider/codex/app-server/trace-player.js";
@@ -22,7 +23,6 @@ interface TitleInvocation {
 	home: string;
 	environmentKeys: string[];
 	stdin: string;
-	schema?: unknown;
 }
 
 describe("Codex session titles through the built daemon", () => {
@@ -57,8 +57,6 @@ const path = require("node:path");
   let stdin = "";
   for await (const chunk of process.stdin) stdin += chunk;
   const record = { argv, cwd: process.cwd(), home: process.env.CODEX_HOME, environmentKeys: Object.keys(process.env), stdin };
-  const schemaIndex = argv.indexOf("--output-schema");
-  if (schemaIndex !== -1) record.schema = JSON.parse(fs.readFileSync(argv[schemaIndex + 1], "utf8"));
   fs.appendFileSync(${JSON.stringify(invocationPath)}, JSON.stringify(record) + "\n");
   if (argv[0] === "mcp" && argv[1] === "list") {
     const config = fs.readFileSync(path.join(process.env.CODEX_HOME, "config.toml"), "utf8");
@@ -71,7 +69,7 @@ const path = require("node:path");
   console.log(JSON.stringify({ title: "Wrong progress title" }));
   const outputIndex = argv.indexOf("--output-last-message");
   if (outputIndex === -1) throw new Error("Missing final-message output");
-  fs.writeFileSync(argv[outputIndex + 1], JSON.stringify({ title: "Fix OAuth Callback Loop" }));
+  fs.writeFileSync(argv[outputIndex + 1], "Fix OAuth Callback Loop\n");
 })().catch(error => { console.error(error); process.exitCode = 1; });
 `,
 		);
@@ -118,6 +116,19 @@ const path = require("node:path");
 			"codex",
 			{ modelId: MODEL, contextWindow: "", permissionMode: "ask" },
 		);
+		const selection = {
+			account: { _tag: "Id", id: added.addedInstanceId },
+			providerId: "codex",
+			modelId: MODEL,
+			effort: "low",
+		} as const;
+		expect(
+			await fixture.requestRpc({
+				_tag: "SetTitleGeneration",
+				projectSlug: "process-test",
+				selection,
+			}),
+		).toMatchObject({ selection, status: "ok" });
 		writeFileSync(
 			tracePath,
 			`${fixtureRows("basic")
@@ -182,21 +193,15 @@ const path = require("node:path");
 					"--ephemeral",
 					"-s",
 					"read-only",
-					"--output-schema",
 					"--skip-git-repo-check",
 					"-c",
 					"mcp_servers.docs.enabled=false",
 					"mcp_servers.git-helper.enabled=false",
+					'model_reasoning_effort="low"',
 				]),
 			);
-			// The expensive session model gives way to this account's configured default.
-			expect(exec.argv).not.toContain("--model");
-			expect(exec.schema).toEqual({
-				type: "object",
-				properties: { title: { type: "string" } },
-				required: ["title"],
-				additionalProperties: false,
-			});
+			// The title selection, not the session or account default, picks the model.
+			expect(exec.argv[exec.argv.indexOf("--model") + 1]).toBe(MODEL);
 			expect(exec.argv.at(-1)).toBe("-");
 			expect(exec.stdin).toContain(
 				"<message>\nPlease fix the OAuth callback loop.\n</message>",
@@ -204,7 +209,13 @@ const path = require("node:path");
 			expect(discovery?.stdin).toBe("");
 			for (const invocation of [discovery, exec]) {
 				expect(invocation?.home).toBe(home);
-				expect(invocation?.cwd).toBe(fixture.projectDir);
+				// An empty scratch folder keeps project instructions out of the call.
+				expect(
+					relative(
+						join(fixture.configDir, "text-generation"),
+						invocation?.cwd ?? "",
+					),
+				).toMatch(/^codex-[^/]+\/work$/);
 				for (const key of [
 					"OPENAI_API_KEY",
 					"CODEX_API_KEY",
@@ -213,12 +224,13 @@ const path = require("node:path");
 					expect(invocation?.environmentKeys).not.toContain(key);
 			}
 			expect(existsSync(join(fixture.root, "claude-titles.jsonl"))).toBe(false);
+			expect(existsSync(exec.cwd)).toBe(false);
 		},
 		TIMEOUT * 3,
 	);
 
 	it(
-		"keeps the default title when Codex title generation fails",
+		"falls back to a dated title when Codex title generation fails",
 		async () => {
 			const { fixture, id } = await start("failure", true);
 			await vi.waitFor(
@@ -230,7 +242,10 @@ const path = require("node:path");
 					({ argv }) => argv[0] === "exec",
 				),
 			).toHaveLength(1);
-			expect(title(fixture, id)).toBe("Untitled");
+			// A failed request leaves the dated fallback, never generated text.
+			expect(title(fixture, id)).toMatch(
+				/^Session \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/,
+			);
 		},
 		TIMEOUT * 3,
 	);

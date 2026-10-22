@@ -9,39 +9,27 @@
 	import HandoffDialog from "../overlays/HandoffDialog.svelte";
 	import Button from "../ui/Button.svelte";
 	import Dialog from "../ui/Dialog.svelte";
-	import SegmentedControl from "../ui/SegmentedControl.svelte";
+	import ModelSelectionPanel from "./ModelSelectionPanel.svelte";
+	import { composerModelSelectionTarget as target } from "./composer-model-selection-target.svelte.js";
+	import { createModelSelectionState, modelContextLabel } from "./model-selection.svelte.js";
 	import OptionRow from "../ui/OptionRow.svelte";
 	import AccountDot from "../ui/AccountDot.svelte";
 	import QuotaMeter from "../ui/QuotaMeter.svelte";
 	// biome-ignore lint/style/useImportType: ModelVariant is used as a value for bind:this
 	import ModelVariant from "./ModelVariant.svelte";
 	import { dismiss } from "../../actions/use-dismiss.svelte.js";
-	import {
-		model as composerModel,
-		contextWindow,
-		effort,
-	} from "../../stores/composer-settings.svelte.js";
+	import { effort } from "../../stores/composer-settings.svelte.js";
 	import {
 		applyDefaultModelSet,
 		refreshCatalogs,
 		chooseAgent,
 		chooseDefaultModel,
 		discoveryState,
-		draftModelInventory,
 		formatAgentLabel,
 		getActiveAgent,
-		getActiveModel,
-		modelMatchesId,
 		getVisibleAgents,
-		getAvailableInstances,
-		getEffectiveInstanceId,
-		getProviderGroupsForInstance,
-		getSessionDriver,
-		getSessionPick,
 		formatModelName,
 		type InstanceOption,
-		isProviderConfigured,
-		selectInstance,
 		viewDraftModels,
 	} from "../../stores/discovery.svelte.js";
 	import { currentChat } from "../../stores/chat.svelte.js";
@@ -60,9 +48,8 @@
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { openSettings } from "../layout/chrome-actions.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
-	import type { AgentInfo, Immutable, InstanceStatus, ModelCost, ModelInfo, ProviderGroup } from "../../types.js";
+	import type { AgentInfo, Immutable, InstanceStatus, ModelInfo } from "../../types.js";
 	import Surface from "../ui/Surface.svelte";
-	import TextInput from "../ui/TextInput.svelte";
 
 	let { variant = "icons", phoneControls, phoneMode }: {
 		variant?: "icons" | "words" | undefined;
@@ -90,24 +77,19 @@
 		view === "root" ? "Harness & model" : view === "agent" ? "Agent" : "Model",
 	);
 
-	const instances = $derived(getAvailableInstances());
+	const instances = $derived(target.accounts);
 
 	/** The server's effective account for the active session. */
 	const boundInstanceId = $derived(
 		sessionState.currentId ? findSession(sessionState.currentId)?.accountId ?? undefined : undefined,
 	);
 	const locked = $derived(sessionState.currentId !== null);
-	const sessionLoading = $derived(!!sessionState.currentId && getSessionPick(sessionState.currentId) === undefined);
-	const selectedId = $derived(locked ? boundInstanceId : getEffectiveInstanceId());
-	const draftModelLoading = $derived(!locked && draftModelInventory.instanceId === selectedId && draftModelInventory.loading);
+	const sessionLoading = $derived(target.loading);
+	const selectedId = $derived(target.pick.account);
 	const selectedInstance = $derived(
 		instances.find((i) => i.id === selectedId) ?? null,
 	);
-	const selectedDriver = $derived(
-		// A session shows only its own stored harness: never the draft default, and nothing until its pick loads.
-		sessionState.currentId ? (sessionLoading ? undefined : getSessionDriver(sessionState.currentId)) :
-			selectedInstance?.driver ?? discoveryState.currentDriver,
-	);
+	const selectedDriver = $derived(target.pick.driver);
 	const selectedTraits = $derived(getDriverTraits(selectedDriver));
 	const canSwitchAccounts = $derived(selectedTraits?.usageHarness === "claude" || selectedTraits?.usageHarness === "codex");
 	const accountLabel = $derived(selectedTraits?.accountKind === "config-directory" ? "Account" : "Instance");
@@ -177,70 +159,17 @@
 	});
 	const hasAccountWord = $derived(!phone);
 
-	const scopedGroups = $derived(getProviderGroupsForInstance(selectedId));
-	const filteredGroups = $derived.by(() => {
-		const query = searchQuery.trim().toLowerCase();
-		if (!query && !favoritesOnly) return scopedGroups;
-		return scopedGroups
-			.map((g) => ({
-				provider: g.provider,
-				models: g.models.filter(
-					(m) =>
-						(!favoritesOnly || isDefaultModel(m)) &&
-						stripDateSuffix(formatModelName(m)).toLowerCase().includes(query),
-				),
-			}))
-			.filter((g) => g.models.length > 0);
-	});
-
-	const activeModelId = $derived(discoveryState.currentModelId);
-	const activeProviderId = $derived(discoveryState.currentProviderId);
-	const activeModel = $derived(
-		getActiveModel(activeModelId, activeProviderId),
-	);
-	const parameters = $derived(activeModel?.parameters);
-	const defaultCombination = $derived(
-		parameters?.combinations.find((entry) => entry.isDefault) ?? parameters?.combinations[0],
-	);
-	const combination = $derived(
-		parameters?.combinations.find((entry) => entry.variant === effort.current) ?? defaultCombination,
-	);
-	function parameterCombination(id: string, value: string) {
-		if (!combination) return undefined;
-		const values = { ...combination.values, [id]: value };
-		return parameters?.combinations.find((entry) =>
-			Object.keys(entry.values).length === Object.keys(values).length &&
-			Object.entries(values).every(([key, value]) => entry.values[key] === value),
-		);
-	}
-	function selectParameter(id: string, value: string) {
-		const next = parameterCombination(id, value);
-		if (next && !effort.pending) effort.select(next.variant);
-	}
-	const parameterRows = $derived((parameters?.rows ?? []).flatMap((row) => {
-		const kind = ["effort", "reasoning", "reasoning_effort"].includes(row.id) ? "effort" : row.id;
-		if (!["effort", "context", "thinking", "fast"].includes(kind)) return [];
-		const options = row.values.map(({ value, label }) => ({
-			value,
-			label: kind === "effort" ? value :
-				kind === "thinking" || kind === "fast" ? (value === "true" ? "On" : "Off") : label,
-			testId: `picker-${kind}-option-${value}`,
-			disabled: effort.pending || !parameterCombination(row.id, value),
-		}));
-		const value = combination?.values[row.id] ?? "";
-		return [{ id: row.id, kind, options, value, label: options.find((option) => option.value === value)?.label ?? value }];
-	}));
-	const parameterEffort = $derived(parameterRows.find((row) => row.kind === "effort"));
-	const parameterContext = $derived(parameterRows.find((row) => row.kind === "context"));
-	const parameterToggles = $derived(parameterRows.filter((row) => row.kind === "thinking" || row.kind === "fast"));
-	const parameterEffortWord = $derived.by(() => {
-		const thinking = parameterRows.find((row) => row.kind === "thinking");
-		const fast = parameterRows.find((row) => row.kind === "fast")?.value === "true";
-		const label = parameterEffort?.label ?? (thinking ? (thinking.value === "true" ? "Thinking" : "No thinking") : "");
-		return label ? `${label}${fast ? " · Fast" : ""}` : fast ? "Fast" : "Standard";
-	});
-	const contextOptions = $derived(contextWindow.options);
-	const selectedContext = $derived(contextWindow.current);
+	const selection = createModelSelectionState(() => target);
+	const activeModelId = $derived(selection.activeModelId);
+	const activeProviderId = $derived(selection.activeProviderId);
+	const activeModel = $derived(selection.activeModel);
+	const parameters = $derived(selection.parameters);
+	const defaultCombination = $derived(selection.defaultCombination);
+	const parameterContext = $derived(selection.parameterContext);
+	const parameterEffortWord = $derived(selection.parameterEffortWord);
+	const contextOptions = $derived(selection.contextOptions);
+	const selectedContext = $derived(selection.selectedContext);
+	const displayName = $derived(selection.displayName);
 	const contextLabel = $derived(sessionLoading ? "" : parameterContext?.label ?? selectedContext?.label ??
 		(sessionState.currentId && contextOptions.length ? "Default" : modelContextLabel(activeModel)));
 	// Phones show the context word only when it differs from the default.
@@ -249,18 +178,6 @@
 		: selectedContext !== null && !selectedContext.isDefault)));
 	const contextPercent = $derived(currentChat().contextPercent);
 	const contextWarning = $derived(isContextWarning(contextPercent, composerPreferences.contextWarning));
-	const contextSegments = $derived(parameterContext?.options ?? contextOptions.map((option) => ({
-		value: option.value,
-		label: option.label,
-		testId: `picker-context-option-${option.value}`,
-		disabled: contextWindow.pending,
-	})));
-	const effortSegments = $derived(parameterEffort?.options ?? (parameters ? [] : effort.options.map((variant) => ({
-		value: variant,
-		label: variant,
-		testId: `picker-effort-option-${variant}`,
-		disabled: effort.pending,
-	}))));
 	$effect(() => {
 		// Refetch once each turn ends.
 		const endedGeneration = currentChat().endedGeneration;
@@ -271,22 +188,6 @@
 		untrack(() => { void refreshCatalogs(); });
 	});
 
-	/** Display name for the trigger button, with date suffix stripped.
-	 *  Grouped models (Bedrock geo routing) append the active scope label. */
-	const displayName = $derived.by(() => {
-		if (draftModelLoading) return "Loading…";
-		if (activeModel) {
-			const base = stripDateSuffix(formatModelName(activeModel));
-			const scope = activeModel.routingOptions?.find(
-				(option) => option.value === activeModelId,
-			);
-			return scope ? `${base} · ${scope.label}` : base;
-		}
-		if (activeModelId) {
-			return stripDateSuffix(activeModelId);
-		}
-		return sessionLoading ? "Loading…" : "Select model";
-	});
 
 	const visibleAgents = $derived(needsAccount ? [] : getVisibleAgents());
 	const activeAgent = $derived(needsAccount ? undefined : getActiveAgent() ?? visibleAgents[0]);
@@ -324,42 +225,6 @@
 		return instances.find((instance) => instance.driver === driver && instance.isDefault);
 	}
 
-	/** Strip date suffixes like -20250514 from model names. */
-	function stripDateSuffix(name: string): string {
-		return name.replace(/-\d{8}$/, "");
-	}
-
-	function modelContextLabel(model: Immutable<ModelInfo> | undefined): string {
-		if (model?.contextWindowOptions?.length) {
-			return model.contextWindowOptions.map((option) => option.label).join(" / ");
-		}
-		const limit = model?.limit?.context;
-		if (!limit) return "";
-		return limit >= 1_000_000 ? `${limit / 1_000_000}M` : `${Math.round(limit / 1_000)}K`;
-	}
-
-	/** Format cost for display as per 1K tokens. */
-	function formatCost(cost?: ModelCost): string {
-		if (!cost) return "";
-		const parts: string[] = [];
-		if (cost.input != null) {
-			parts.push(`$${formatCostValue(cost.input * 1000)}/1K in`);
-		}
-		if (cost.output != null) {
-			parts.push(`$${formatCostValue(cost.output * 1000)}/1K out`);
-		}
-		return parts.join(", ");
-	}
-
-	function formatCostValue(value: number): string {
-		if (value === 0) return "0";
-		return Number.parseFloat(value.toFixed(6)).toString();
-	}
-
-	function isActiveModel(model: Immutable<ModelInfo>): boolean {
-		return modelMatchesId(model, activeModelId);
-	}
-
 	function isDefaultModel(model: Immutable<ModelInfo>): boolean {
 		return (
 			model.id === discoveryState.defaultModelId &&
@@ -369,19 +234,6 @@
 
 	function isInstanceDisabled(instance: InstanceOption): boolean {
 		return locked && instance.id !== boundInstanceId;
-	}
-
-	function providerSectionClass(group: Immutable<ProviderGroup>): string {
-		const base = "model-provider";
-		if (!isProviderConfigured(group.provider)) {
-			return `${base} model-provider-disabled opacity-45`;
-		}
-		return base;
-	}
-
-	function modelItemClass(model: Immutable<ModelInfo>): string {
-		const base = "model-item flex-1 leading-[1.4]";
-		return isActiveModel(model) ? `${base} model-item-active` : base;
 	}
 
 	function togglePicker(e: MouseEvent, section: PickerSection = "harness") {
@@ -414,7 +266,7 @@
 		if (isInstanceDisabled(instance)) return;
 		view = "root";
 		if (instance.id === selectedId && discoveryState.hasInstanceChoice) return;
-		selectInstance(instance.id);
+		target.selectAccount(instance.id);
 		searchQuery = "";
 	}
 
@@ -437,16 +289,6 @@
 		}
 		const instance = instances.find((instance) => instance.id === id);
 		if (instance) handleInstanceSelect(instance);
-	}
-
-	function handleModelClick(model: Immutable<ModelInfo>, e: MouseEvent, modelId?: string) {
-		e.stopPropagation();
-		const targetId = modelId ?? model.id;
-		composerModel.select({
-			modelId: targetId,
-			providerId: model.provider,
-		});
-		view = "root";
 	}
 
 	function handleSetDefault(model: Immutable<ModelInfo>, e: MouseEvent) {
@@ -551,28 +393,18 @@
 			? 'w-full min-h-0 px-[6px]'
 			: 'absolute bottom-[calc(100%+8px)] right-0 w-[404px] max-w-[90vw] max-h-[min(70vh,480px)] rounded-[16px] p-[6px] z-[var(--z-popover)]'}"
 	>
-		<div class="flex shrink-0 items-center gap-[6px] px-[10px] pt-[8px] pb-[6px]">
-			{#if view !== "root"}
-				<Button
-					bind:element={backEl}
-					variant="ghost"
-					size="content"
-					iconOnly
-					icon="chevron-left"
-					iconSize={16}
-					ariaLabel="Back"
-					data-testid="picker-back"
-					class="h-7 w-7 rounded-lg"
-					onclick={() => { view = "root"; searchQuery = ""; }}
-				/>
-			{/if}
-			<h2 id={titleId} class="text-[12px] font-semibold text-text">{title}</h2>
+		<ModelSelectionPanel
+			{target} {titleId} {title} {contextLabel} {selectedLabel} {groupHeadingId}
+			storedEffortLabel={sessionState.currentId ? target.pick.effort : null}
+			bind:view bind:searchQuery bind:searchEl bind:backEl
+			filterModel={favoritesOnly ? isDefaultModel : undefined}
+		>
+			{#snippet subtitle()}
 			{#if view === "root"}
 				<span data-testid="picker-subtitle" class="ml-auto text-[12px] text-text-muted">{locked ? "this session" : "new session"}</span>
 			{/if}
-		</div>
-		<div class="min-h-0 overflow-y-auto">
-			{#if view === "root"}
+			{/snippet}
+			{#snippet accountControls()}
 				{#if harnesses.length > 1 || harnesses.some((harness) => harness.unavailableReason) || (harnesses.length > 0 && !harnesses.some((harness) => harness.value === selectedDriver))}
 					<section data-testid="picker-harness-section" aria-label="Harness" class="pb-[6px]">
 						<div class="flex items-center justify-between px-[10px] pt-[8px] pb-[6px] text-[12px] font-medium text-text-muted">
@@ -626,7 +458,7 @@
 							options={accountCards}
 							value={selectedLogoInstanceId ?? ""}
 							onChange={handleAccountSelect}
-							onActivate={locked ? undefined : selectInstance}
+							onActivate={locked ? undefined : target.selectAccount}
 							label={accountLabel}
 							lockedReason={canSwitchAccounts ? "" : "Harness is fixed for this session"}
 							itemWidth={108}
@@ -691,72 +523,14 @@
 				{#if accountCards.length > 1}
 					<div aria-hidden="true" class="mx-[8px] my-[4px] h-px bg-border-chip opacity-70"></div>
 				{/if}
-				<Button
-					variant="picker-row"
-					size="content"
-					layout="flow"
-					data-testid="picker-row-model"
-					onclick={() => { view = "model"; }}
-				>
-					<Icon name="zap" size={16} class="shrink-0 text-text-muted" />
-					<span class="flex-1">Model</span>
-					<span class="min-w-0 truncate text-text-secondary">{displayName}</span>
-					<Icon name="chevron-right" size={13} class="shrink-0 text-text-muted" />
-				</Button>
-				{#if contextLabel}
-					<div data-testid="picker-row-context" tabindex="-1" class="flex min-h-[36px] flex-wrap items-center gap-[10px] px-[10px] py-[6px] text-[13.5px] max-md:min-h-[50px]">
-						<Icon name="gauge" size={16} class="shrink-0 text-text-muted" />
-						<span class="flex-1">Context</span>
-						{#if contextSegments.length > 1}
-							<SegmentedControl
-								bind:value={() => parameterContext?.value ?? selectedContext?.value ?? "", (value) => parameterContext ? selectParameter(parameterContext.id, value) : contextWindow.select(contextOptions.find((option) => option.value === value) ?? null)}
-								options={contextSegments}
-								variant="joined"
-								class="flex-wrap"
-								label="Context window"
-							/>
-						{:else}
-							<span class="min-w-0 text-text-secondary">{contextLabel}</span>
-						{/if}
+
+			{/snippet}
+			{#snippet contextUsage()}
 						{#if contextPercent > 0}
 							<span data-testid="picker-context-usage" data-warning={contextWarning ? "true" : undefined} class="shrink-0 text-[11px] {contextWarning ? 'text-status-amber' : 'text-text-muted'}">{Math.round(contextPercent)}% used</span>
 						{/if}
-					</div>
-				{/if}
-				{#if parameters ? parameterEffort : effortSegments.length > 0 || (sessionState.currentId && effort.current)}
-					<div data-testid="picker-row-effort" aria-disabled={effortSegments.length === 0 || undefined} tabindex="-1" class="flex min-h-[36px] flex-wrap items-center gap-[10px] px-[10px] py-[6px] text-[13.5px] max-md:min-h-[50px]">
-						<Icon name="settings-2" size={16} class="shrink-0 text-text-muted" />
-						<span class="flex-1">Effort</span>
-						{#if effortSegments.length > (parameters ? 1 : 0)}
-							<SegmentedControl
-								bind:value={() => parameterEffort?.value ?? effort.current ?? "", (value) => parameterEffort ? selectParameter(parameterEffort.id, value) : effort.select(value)}
-								options={effortSegments}
-								variant="joined"
-								class="flex-wrap"
-								label="Effort"
-							/>
-						{:else}
-							<span class="min-w-0 text-text-secondary">{parameterEffort?.label ?? effort.current}</span>
-						{/if}
-					</div>
-				{/if}
-				{#each parameterToggles as row (row.id)}
-					<div data-testid="picker-row-{row.kind}" tabindex="-1" class="flex min-h-[36px] flex-wrap items-center gap-[10px] px-[10px] py-[6px] text-[13.5px] max-md:min-h-[50px]">
-						<Icon name={row.kind === "thinking" ? "brain" : "zap"} size={16} class="shrink-0 text-text-muted" />
-						<span class="flex-1">{row.kind === "thinking" ? "Thinking" : "Fast"}</span>
-						{#if row.options.length > 1}
-							<SegmentedControl
-								bind:value={() => row.value, (value) => selectParameter(row.id, value)}
-								options={row.options}
-								variant="joined"
-								class="flex-wrap"
-								label={row.kind === "thinking" ? "Thinking" : "Fast"}
-							/>
-						{:else}
-							<span class="min-w-0 text-text-secondary">{row.label}</span>
-						{/if}
-					</div>
-				{/each}
+			{/snippet}
+			{#snippet rootExtras()}
 				{#if planLocked}
 					<div data-testid="picker-row-agent" data-locked="plan" class="flex min-h-[36px] items-center gap-[10px] px-[10px] py-[6px] text-[13.5px] max-md:min-h-[50px]">
 						<Icon name="user" size={16} class="shrink-0 text-text-muted" />
@@ -784,7 +558,9 @@
 						<span class="min-w-0 truncate text-text-secondary">{agentLabel(activeAgent)}</span>
 					</div>
 				{/if}
-			{:else if view === "agent"}
+
+			{/snippet}
+			{#snippet extraView()}
 				{#each visibleAgents as agent (agent.id)}
 					{@const selected = agent.id === activeAgent?.id}
 					<Button
@@ -803,19 +579,9 @@
 						{#if selected}<Icon name="check" size={16} class="text-accent" />{/if}
 					</Button>
 				{/each}
-			{:else}
-				<div class="mx-[10px] flex items-center gap-2 border-b border-border py-2.5 text-text-muted">
-					<Icon name="search" size={13} class="shrink-0" />
-					<TextInput
-						bind:element={searchEl}
-						data-testid="model-picker-search"
-						bind:value={searchQuery}
-						chrome="focus-only"
-						size="content"
-						aria-label="Search {selectedLabel} models"
-						placeholder="Search {selectedLabel} models…"
-						class="min-w-0 flex-1 text-[13px] text-text font-sans placeholder:text-text-dimmer"
-					/>
+
+			{/snippet}
+			{#snippet modelToolbar()}
 					<Button
 						variant="toolbar"
 						size="content"
@@ -830,67 +596,20 @@
 						class="h-7 w-7 rounded-lg"
 						onclick={() => { favoritesOnly = !favoritesOnly; }}
 					/>
-				</div>
-				<div data-testid="model-picker-list" class="py-1.5" aria-busy={draftModelLoading}>
+			{/snippet}
+			{#snippet modelNotice()}
 					{#if locked}
 						<div class="mx-[4px] my-1.5 flex items-start gap-2 rounded-[10px] bg-chip px-[10px] py-2 text-[12px] leading-[1.4] text-text-muted">
 							<Icon name="lock" size={12} class="shrink-0" />
 							<span>Harness fixed at creation — showing <b class="font-semibold text-text-secondary">{selectedLabel}</b> only. Model switching within it is allowed.</span>
 						</div>
 					{/if}
-					{#if draftModelLoading}
-						<div class="model-empty px-1 py-4 text-center text-base text-text-dimmer">Loading models…</div>
-					{:else if filteredGroups.length === 0}
-						<div class="model-empty px-1 py-4 text-center text-base text-text-dimmer">{searchQuery.trim() ? "No models match" : "No models available"}</div>
-					{:else}
-						{#each filteredGroups as group (group.provider.id)}
-							<div class={providerSectionClass(group)} role="group" aria-labelledby="{groupHeadingId}-{group.provider.id}">
-								<div id="{groupHeadingId}-{group.provider.id}" class="model-provider-header px-[10px] py-2 text-[12px] font-medium text-text-muted">
-									{group.provider.name || group.provider.id}{#if !isProviderConfigured(group.provider)}<span class="font-normal normal-case tracking-normal">{" (not configured)"}</span>{/if}
-								</div>
-								{#each group.models as model (model.id)}
-									{@const cost = formatCost(model.cost)}
-									{@const windows = modelContextLabel(model)}
-									<div class="flex items-center gap-1">
-										<Button
-											variant="picker-row"
-											size="content"
-											layout="flow"
-											class={modelItemClass(model)}
-											data-model-id={model.id}
-											data-provider-id={model.provider}
-											aria-current={isActiveModel(model) ? "true" : undefined}
-											onclick={(e) => handleModelClick(model, e)}
-										>
-											<Icon name="zap" size={16} class="shrink-0 text-text-muted" />
-											<span class="model-item-name min-w-0 flex-1">
-												{stripDateSuffix(formatModelName(model))}
-												{#if isDefaultModel(model)}<span class="ml-1 text-xs font-normal text-text-muted">(default)</span>{/if}
-											</span>
-											{#if windows || cost}
-												<span class="min-w-0 text-right font-mono text-[10.5px] font-normal text-text-muted">
-													{#if windows}<span class="model-item-context block">{windows}</span>{/if}
-													{#if cost}<span class="model-item-cost block">{cost}</span>{/if}
-												</span>
-											{/if}
-											{#if isActiveModel(model)}<Icon name="check" size={16} class="model-check shrink-0 text-accent" />{/if}
-										</Button>
-										{#if model.routingOptions}
-											<span class="model-routing flex shrink-0 flex-wrap items-center gap-0.5">
-												{#each model.routingOptions as option (option.value)}
-											{@const routed = option.value === discoveryState.currentModelId}
-													<Button
-														variant="toolbar"
-														size="content"
-														class="rounded px-1.5 py-0.5 text-xs duration-100 {routed ? 'bg-bg font-semibold' : 'hover:bg-bg hover:text-text-secondary'}"
-														title="Route via {option.label}{option.isDefault ? ' (default)' : ''}"
-														data-routing-value={option.value}
-														data-active={routed ? "" : undefined}
-														onclick={(e) => handleModelClick(model, e, option.value)}
-													>{option.label}</Button>
-												{/each}
-											</span>
-										{/if}
+
+			{/snippet}
+			{#snippet modelLabelSuffix(model: Immutable<ModelInfo>)}
+{#if isDefaultModel(model)}<span class="ml-1 text-xs font-normal text-text-muted">(default)</span>{/if}
+			{/snippet}
+			{#snippet modelAction(model: Immutable<ModelInfo>)}
 										{#if !isDefaultModel(model)}
 											<Button
 												variant="toolbar"
@@ -909,11 +628,8 @@
 												<span class="sr-only">Default model</span>
 											</span>
 										{/if}
-									</div>
-								{/each}
-							</div>
-						{/each}
-					{/if}
+			{/snippet}
+			{#snippet modelFooter()}
 					<div class="mx-[4px] mt-1 border-t border-border pt-1">
 						<Button
 							variant="toolbar"
@@ -926,9 +642,8 @@
 							<span>Reload skills &amp; commands</span>
 						</Button>
 					</div>
-				</div>
-			{/if}
-		</div>
+			{/snippet}
+		</ModelSelectionPanel>
 	</Surface>
 	</SheetChrome>
 {/snippet}
@@ -938,13 +653,13 @@
 		{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={variant === "words" ? 15 : 18} surface="box" />{/if}
 		<span class="model-label min-w-0 truncate">{displayName}</span>
 		{#if phone && attention}<span data-testid="composer-more-attention" class="size-[6px] shrink-0 rounded-full bg-status-ask" aria-hidden="true"></span>{/if}
-		{#if contextLabel}<span data-testid="picker-selected-context" class="shrink-0 font-mono text-[11.5px] text-text-muted">{contextLabel}</span>{/if}
+		{#if contextLabel}<span data-testid="picker-selected-context" class="shrink-0 {variant === 'words' ? '' : 'font-mono text-[11.5px] text-text-muted'}">{contextLabel}</span>{/if}
 		{#if variant === "words"}
 			{@const effortWord = parameters ? parameterEffortWord : effort.current}
 			{#if effortWord}<span aria-hidden="true">·</span><span class="shrink-0">{effortWord}</span>{/if}
 			<span aria-hidden="true">·</span>{@render phoneMode?.()}
 		{/if}
-		<span data-testid="model-chip-chevron" class="inline-flex shrink-0 text-text-muted"><Icon name="chevron-down" size={12} /></span>
+		<span data-testid="model-chip-chevron" class="inline-flex shrink-0 {variant === 'words' ? 'text-text-dimmer' : 'text-text-muted'}"><Icon name="chevron-down" size={12} /></span>
 	{/snippet}
 	<Button
 		{...props}
@@ -1016,7 +731,7 @@
 				aria-controls={pickerOpen ? "model-picker" : undefined}
 				onclick={(event) => togglePicker(event, "account")}
 			><span class="block min-w-0 truncate">{wordAccountName}{switchingTo ? "…" : ""}</span></Button>
-			<span aria-hidden="true" class="text-border-chip">·</span>
+			<span aria-hidden="true" class="text-text-dimmer">·</span>
 		{/if}
 		<Button
 			variant="composer-word"
@@ -1041,23 +756,23 @@
 			<span class="block min-w-0 truncate">{displayName}</span>
 		</Button>
 		{#if showContextWord}
-			<span aria-hidden="true" class="text-border-chip">·</span>
+			<span aria-hidden="true" class="text-text-dimmer">·</span>
 			<Button
 				variant="composer-word"
 				size="content"
 				data-testid="composer-word-context"
-				class="shrink-0 text-[11.5px] font-normal font-sans"
+				class="shrink-0"
 				ariaLabel={`Context window: ${contextLabel}. Open harness and model options`}
 				aria-haspopup="dialog"
 				aria-expanded={pickerOpen}
 				aria-controls={pickerOpen ? "model-picker" : undefined}
 				onclick={(event) => togglePicker(event, "model")}
 			>
-				<span class="border-b border-dotted border-border-chip">{contextLabel}</span>
+				<span>{contextLabel}</span>
 			</Button>
 		{/if}
 		{#if effort.options.length > 0 || (sessionState.currentId && effort.current)}
-			<span aria-hidden="true" class="text-border-chip">·</span>
+			<span aria-hidden="true" class="text-text-dimmer">·</span>
 		{/if}
 	{:else if !phone || !phoneControls}
 		{@render modelTrigger({ props: {} })}
@@ -1105,18 +820,18 @@
 		<ModelVariant bind:this={variantRef} onOpen={closePicker} variant={variant === "icons" ? "control" : variant} wordLabel={parameters ? parameterEffortWord : undefined} />
 	{/if}
 	{#if variant === "words" && !phone && selectedTraits?.composerModeControl === "agent"}
-		<span aria-hidden="true" class="text-border-chip">·</span>
+		<span aria-hidden="true" class="text-text-dimmer">·</span>
 		<Button
 			variant="composer-word"
 			size="content"
 			data-testid="composer-word-agent"
-			class="shrink-0 text-[11.5px] font-normal font-sans"
+			class="shrink-0"
 			ariaLabel={`Agent: ${activeAgent ? agentLabel(activeAgent) : "Default"}. Open agent options`}
 			aria-haspopup="dialog"
 			aria-expanded={pickerOpen}
 			aria-controls={pickerOpen ? "model-picker" : undefined}
 			onclick={(event) => togglePicker(event, "agent")}
-		><span class="border-b border-dotted border-border-chip">{activeAgent ? agentLabel(activeAgent).toLowerCase() : "default"}</span></Button>
+		><span>{activeAgent ? agentLabel(activeAgent).toLowerCase() : "default"}</span></Button>
 	{/if}
 
 	{#if pickerOpen}

@@ -5,7 +5,10 @@ import type {
 	UsageReading,
 } from "../../../src/lib/contracts/limit-recovery.js";
 import { QuotaForAccounts } from "../../../src/lib/contracts/ws-rpc.js";
-import { chooseSettingsOption } from "../../../test/e2e/helpers/settings.js";
+import {
+	chooseSettingsOption,
+	closeSettings,
+} from "../../../test/e2e/helpers/settings.js";
 import type { StepHandler } from "../runtime.js";
 import { seedUsageLimits } from "./providerInstances.js";
 import { mockInstances, requireRpcControl } from "./shared.js";
@@ -102,7 +105,12 @@ async function assertWindows(
 					? "5h"
 					: "Week",
 		);
-		const used = value === "—" ? 0 : Number.parseInt(value, 10);
+		const used =
+			value === "—"
+				? 0
+				: value.endsWith("%")
+					? Number.parseInt(value, 10)
+					: 100;
 		const fillToken =
 			value === "—"
 				? "--color-border-chip"
@@ -772,7 +780,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert full-width single account windows and labels",
-		match: /^the Usage single-account windows show 5h (\S+) and Week (\S+)$/,
+		match: /^the Usage single-account windows show 5h (.+) and Week (.+)$/,
 		run: ({ world, match }) =>
 			assertWindows(
 				world.page,
@@ -784,7 +792,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert side-by-side card windows and values",
-		match: /^the Usage account (\S+) windows show 5h (\S+) and Week (\S+)$/,
+		match: /^the Usage account (\S+) windows show 5h (.+) and Week (.+)$/,
 		run: ({ world, match }) =>
 			assertWindows(
 				world.page,
@@ -797,7 +805,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 	{
 		name: "assert reported single-account model rows, bars and absent reset lines",
 		match:
-			/^the Usage single-account model rows show Fable (\d+)% and Sonnet (\d+)% without reset lines$/,
+			/^the Usage single-account model rows show Fable (\d+)% and Sonnet (\d+)% with values (.+) and (.+) without reset lines$/,
 		run: async ({ world, match }) => {
 			const rows = world.page.getByTestId("usage-settings-single-model-row");
 			await expect(rows).toHaveCount(2);
@@ -814,7 +822,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 					`This week · ${model}`,
 				);
 				await expect(row.getByTestId("usage-settings-model-value")).toHaveText(
-					`${used}%`,
+					match[index + 3] ?? "",
 				);
 				await expect(row.locator('[data-testid$="-reset"]')).toHaveCount(0);
 				await expect(row.locator(":scope > div")).toHaveCount(2);
@@ -1011,7 +1019,8 @@ export const usageSettingsHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert account status text and severity colour",
-		match: /^the Usage account (\S+) status reads (.+) in (muted|amber|red)$/,
+		match:
+			/^the Usage account (\S+) status reads (.+) in (muted|green|amber|red)$/,
 		run: async ({ world, match }) => {
 			const status = world.page.getByTestId(
 				`usage-settings-status-${match[1]}`,
@@ -1025,7 +1034,9 @@ export const usageSettingsHandlers: StepHandler[] = [
 						? "--color-error"
 						: match[3] === "amber"
 							? "--color-fill-amber"
-							: "--color-text-dimmer",
+							: match[3] === "green"
+								? "--color-success"
+								: "--color-text-dimmer",
 				),
 			);
 		},
@@ -1140,7 +1151,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 		name: "close Usage settings to inspect the footer",
 		match: /^I close settings$/,
 		run: async ({ world }) => {
-			await world.page.getByTestId("settings-close-btn").click();
+			await closeSettings(world.page);
 			await expect(world.page.locator("#settings-panel")).not.toBeVisible();
 		},
 	},
@@ -1344,7 +1355,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 		name: "click the desktop footer to open Usage",
 		match: /^I click the desktop usage footer$/,
 		run: async ({ world }) => {
-			await world.page.getByTestId("usage-footer-meter").click();
+			await world.page.getByTestId("usage-footer-settings").click();
 		},
 	},
 	{

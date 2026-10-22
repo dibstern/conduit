@@ -1,12 +1,19 @@
 import { Effect } from "effect";
+import { SqlClient } from "effect/sql";
 import type { Account } from "../../../contracts/account.js";
 import {
 	PROVIDER_DRIVERS,
 	type ProviderDriverTraits,
 } from "../../../contracts/provider-instance.js";
 import { formatErrorDetail } from "../../../errors.js";
+import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
+import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
-import { createEventId } from "../../../persistence/events.js";
+import { canonicalEvent, createEventId } from "../../../persistence/events.js";
+import {
+	sessionRunOwnersQuery,
+	settleSessionRuns,
+} from "../../../provider/session-run-settlement.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import {
@@ -128,11 +135,12 @@ const resolvePendingClaudeQuestions = (
 			yield* pendingInteractionService.markQuestionResolved(question.requestId);
 		}
 		if (pendingQuestions.some((question) => !question.recovered)) {
-			yield* interruptTurn({
+			const stop = {
 				clientId: input.clientId,
 				sessionId: input.sessionId,
 				commandId: `${input.commandId}:interrupt-for-question`,
-			});
+			};
+			yield* interruptTurn(stop, yield* prepareStop(stop));
 		}
 	});
 
@@ -247,48 +255,171 @@ const interruptLegacyTurn = (input: ProviderTurnServiceInterruptInput) =>
 			);
 			return yield* Effect.fail(abortResult.failure);
 		}
+		return true;
+	});
+
+export const prepareStop = (input: ProviderTurnServiceInterruptInput) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const commit = yield* makeCommitAndSignal;
+		const store = yield* EventStoreEffectTag;
+		const providerId =
+			yield* (yield* OrchestrationEngineTag).getProviderForSessionEffect(
+				input.sessionId,
+			);
+		const account = providerId
+			? yield* (yield* AccountDirectory).resolve({ _tag: "Id", id: providerId })
+			: undefined;
+		const keepsPendingSteers = account
+			? PROVIDER_DRIVERS[account.driver].keepsPendingSteersOnInterrupt
+			: false;
+		// Close unused reservations and return handoffs in one transaction,
+		// serialized against the claim UPDATE so the drain cannot steal them.
+		const { owners, retainedSteers } = yield* commit.write((project) =>
+			Effect.gen(function* () {
+				const snapshot = yield* sessionRunOwnersQuery(sql, input.sessionId, {
+					confirmedStop: true,
+					excludeRetainedSteers: keepsPendingSteers,
+				});
+				const rows = yield* sql<{
+					command_id: string;
+					run_id: string;
+					provider_id: string;
+					status: string;
+					sent_sequence: number | null;
+				}>`SELECT command.command_id, command.run_id, command.provider_id, command.status,
+				(SELECT MAX(sequence) FROM events WHERE session_id = command.session_id
+					AND type = 'input.sent' AND json_extract(data, '$.inputId') = command.command_id) AS sent_sequence
+				FROM provider_command_outbox command
+				WHERE command.session_id = ${input.sessionId} AND command.effect_type = 'send_turn'
+					AND command.status IN ('pending', 'retryable_failed')`;
+				const events = rows.flatMap((row) => [
+					...(row.status === "pending"
+						? [
+								canonicalEvent(
+									"turn.interrupted",
+									input.sessionId,
+									{
+										messageId: "",
+										reason: "Stopped before delivery",
+										code: "interrupted",
+									},
+									{
+										provider: row.provider_id,
+										metadata: { runId: row.run_id },
+									},
+								),
+							]
+						: []),
+					...(row.sent_sequence === null
+						? []
+						: [
+								canonicalEvent(
+									"input.requeued",
+									input.sessionId,
+									{
+										sessionId: input.sessionId,
+										inputId: row.command_id,
+										sentSequence: row.sent_sequence,
+										reason: "failed",
+									},
+									{ metadata: { runId: row.run_id } },
+								),
+							]),
+				]);
+				if (events.length) yield* project(yield* store.appendBatch(events));
+				// These attempts already ended through their native terminal. Return
+				// their retry schedule to the inbox, as recommit would withdraw it.
+				yield* sql`DELETE FROM provider_command_outbox WHERE session_id = ${input.sessionId}
+					AND effect_type = 'send_turn' AND status = 'retryable_failed'`;
+				return snapshot;
+			}),
+		);
+
+		const identities =
+			owners.length === 0
+				? []
+				: yield* sql<{ input_id: string | null }>`
+			SELECT COALESCE(json_extract(command.payload_json, '$.continuation.cutOffMessageId'),
+				json_extract(command.payload_json, '$.inputId'), command.command_id) AS input_id
+			FROM provider_command_outbox command JOIN provider_runs requested
+				ON requested.id = command.run_id AND requested.session_id = command.session_id
+			WHERE command.session_id = ${input.sessionId} AND command.effect_type = 'send_turn'
+				AND command.status = 'running' AND COALESCE(requested.joined_into, requested.id)
+				IN ${sql.in(owners.map(({ runId }) => runId))}
+			UNION SELECT COALESCE(message.input_id, turn.user_message_id) AS input_id
+			FROM turns turn LEFT JOIN messages message
+				ON message.id = turn.user_message_id AND message.session_id = turn.session_id
+			WHERE turn.session_id = ${input.sessionId}
+				AND turn.run_id IN ${sql.in(owners.map(({ runId }) => runId))}`;
+		return {
+			owners,
+			retainedSteers,
+			turnIds: [
+				...new Set(
+					identities.flatMap(({ input_id }) => (input_id ? [input_id] : [])),
+				),
+			],
+		};
 	});
 
 export const interruptTurn = (
 	input: ProviderTurnServiceInterruptInput,
-	turnIds?: readonly string[],
+	snapshot: Effect.Success<ReturnType<typeof prepareStop>>,
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
 		log.info(`client=${input.clientId} session=${input.sessionId} Aborting`);
 		yield* clearProcessingTimeout(input.sessionId);
+		const sql = yield* SqlClient.SqlClient;
 
 		const engine = yield* OrchestrationEngineTag;
 		const providerId = yield* engine.getProviderForSessionEffect(
 			input.sessionId,
 		);
-		if (!providerId) {
-			yield* interruptLegacyTurn(input);
-			return;
-		}
-		const account = yield* (yield* AccountDirectory).resolve({
-			_tag: "Id",
-			id: providerId,
-		});
-		if (PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
-			yield* interruptLegacyTurn(input);
-			return;
-		}
-		if (!PROVIDER_DRIVERS[account.driver].interruptViaEngine) return;
-
-		const interruptResult = yield* Effect.result(
-			engine.dispatchEffect({
-				type: "interrupt_turn",
-				commandId: input.commandId,
-				sessionId: input.sessionId,
-				...(turnIds ? { turnIds } : {}),
-			}),
-		);
-		if (interruptResult._tag === "Failure") {
-			log.warn(
-				`client=${input.clientId} session=${input.sessionId} engine interrupt_turn failed:`,
-				formatErrorDetail(interruptResult.failure),
+		const account = providerId
+			? yield* (yield* AccountDirectory).resolve({ _tag: "Id", id: providerId })
+			: undefined;
+		if (!account || PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
+			if (!(yield* interruptLegacyTurn(input))) return;
+		} else {
+			if (!PROVIDER_DRIVERS[account.driver].interruptViaEngine) return;
+			const [delivery] = yield* (yield* SqlClient.SqlClient)<{
+				indeterminate: number;
+			}>`
+				SELECT EXISTS (SELECT 1 FROM provider_command_outbox command
+					JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id
+					WHERE command.session_id = ${input.sessionId} AND command.effect_type = 'send_turn'
+					AND command.status = 'running' AND command.error_code = 'delivery_indeterminate'
+						AND run.id IN ${sql.in(snapshot.owners.map(({ runId }) => runId))}
+					AND run.status IN ('pending', 'running')) AS indeterminate`;
+			const fullStop = delivery?.indeterminate === 1;
+			const interruptResult = yield* Effect.result(
+				engine.dispatchEffect({
+					type: fullStop ? "end_session" : "interrupt_turn",
+					...(!fullStop && snapshot.turnIds.length > 0
+						? { turnIds: snapshot.turnIds }
+						: {}),
+					commandId: input.commandId,
+					sessionId: input.sessionId,
+				}),
 			);
-			yield* Effect.fail(interruptResult.failure);
+			if (interruptResult._tag === "Failure") {
+				log.warn(
+					`client=${input.clientId} session=${input.sessionId} engine interrupt_turn failed:`,
+					formatErrorDetail(interruptResult.failure),
+				);
+				return yield* Effect.fail(interruptResult.failure);
+			}
+			// An ordinary turn interrupt keeps the Claude SDK's pending steer alive.
+			if (!fullStop) return;
 		}
+		const ingestion = yield* ProviderRuntimeIngestionTag;
+		yield* settleSessionRuns(
+			sql,
+			input.sessionId,
+			"Stopped by the user",
+			(events) => ingestion.ingestBatch(events),
+			{ owners: snapshot.owners },
+		);
 	});

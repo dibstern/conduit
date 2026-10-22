@@ -55,6 +55,7 @@ COPYFILE_DISABLE=1 tar -C "$repo_root" --exclude=node_modules --exclude=dist --e
   --exclude=.aws --exclude=.conduit --exclude=.opencode \
   --exclude=.env --exclude='.env.*' --exclude=.scratch --exclude=.worktrees \
   --exclude=test-results --exclude=./test/e2e/linux-service/artifacts \
+  --exclude=./test/e2e/macos-service/artifacts \
   -cf - . | tar -C "$context/repo" -xf -
 cp "$script_dir/Dockerfile" "$context/Dockerfile"
 step='building Linux dependencies and the real CLI'

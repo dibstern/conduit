@@ -369,7 +369,11 @@ describe("Cursor model parameters, instance catalog cache and reroute", () => {
 		const history = await browser.history(id);
 		const user = history.find(({ role }) => role === "user");
 		expect(user).toBeDefined();
-		expect(user).not.toHaveProperty("modelExecution");
+		// Intake links the user message to its turn, including that turn's model.
+		expect(user?.modelExecution).toEqual({
+			requestedModel: "sonnet",
+			actualModel: "sonnet",
+		});
 		const refreshed = await fixture.connect(id);
 		const liveUser = await refreshed.waitFor(
 			(message) =>
@@ -377,7 +381,7 @@ describe("Cursor model parameters, instance catalog cache and reroute", () => {
 				message["sessionId"] === id &&
 				message["id"] === user?.id,
 		);
-		expect(liveUser).not.toHaveProperty("modelExecution");
+		expect(liveUser["modelExecution"]).toEqual(user?.modelExecution);
 		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			const turn = db
@@ -392,13 +396,13 @@ describe("Cursor model parameters, instance catalog cache and reroute", () => {
 						"SELECT turn_id FROM messages WHERE session_id = ? AND role = 'user'",
 					)
 					.get(id),
-			).toEqual({ turn_id: null });
+			).toEqual({ turn_id: user?.id });
 			evidence = {
 				...evidence,
 				resolvedTurnModel: turn?.actual_model,
-				historyUserHasModelExecution: false,
-				liveUserHasModelExecution: false,
-				userTurnLinkUnchanged: true,
+				historyUserHasModelExecution: true,
+				liveUserHasModelExecution: true,
+				userTurnLinkOwned: true,
 			};
 		} finally {
 			db.close();

@@ -56,7 +56,7 @@ import { AppServerExited } from "./app-server/transport.js";
 import { invalidateCodexAuth } from "./codex-discovery.js";
 import { prepareCodexAccount } from "./codex-home.js";
 import { CodexInteractions } from "./codex-interactions.js";
-import { codexRuntimeEvent, recordCodexTurnRefs } from "./codex-item-mapper.js";
+import { codexRuntimeEvent } from "./codex-item-mapper.js";
 import { codexSessionConfig } from "./codex-session-config.js";
 import {
 	readCodexSessionIdentity,
@@ -84,11 +84,12 @@ export interface CodexRunnerDeps {
 	readonly workspaceRoot: string;
 	readonly daemonConfigDir: string;
 	readonly environment?: () => Readonly<Record<string, string | undefined>>;
+	readonly onAbandonedRun?: (inputId: string) => void;
 }
 
 type ChildUpdate =
 	| { readonly notification: AppServerNotification }
-	| { readonly interrupted: true }
+	| { readonly interrupted: ActiveTurn }
 	| { readonly failure: unknown };
 
 interface CodexChild {
@@ -100,20 +101,13 @@ interface CodexChild {
 
 interface ActiveTurn {
 	state: CodexTurnState;
+	readonly sink: EventSink;
+	readonly inputIds: Set<string>;
 	readonly interactions: CodexInteractions;
 	readonly started: Deferred.Deferred<string | undefined>;
 	readonly cancelled: Deferred.Deferred<void>;
 	cancelRequested: boolean;
 	submitted: boolean;
-	readonly steers: Map<
-		string,
-		{
-			readonly input: SessionTurn;
-			readonly sinkId: string;
-			readonly finished: Deferred.Deferred<boolean, SessionFailure>;
-		}
-	>;
-	readonly userItems: Set<string>;
 	interruptSent: boolean;
 }
 
@@ -171,12 +165,72 @@ export class CodexRunnerPayload implements RunnerPayload {
 			output: SessionOutput,
 		) => Effect.Effect<SessionOutputReply, SessionFailure>,
 		private readonly scope: Scope.Scope,
+		private readonly onTurnStateChanged?: (inFlight: boolean) => void,
 	) {}
 
 	sendTurn(
 		input: SessionTurn,
 		sink: EventSink,
 		signal: AbortSignal,
+	): Effect.Effect<TurnResult, SessionFailure> {
+		return Effect.gen({ self: this }, function* () {
+			const intake = yield* Deferred.make<TurnResult, SessionFailure>();
+			let handed = false;
+			const claim = () => {
+				if (signal.aborted) return false;
+				handed = true;
+				return true;
+			};
+			this.sinks.retainSink(sink);
+			yield* this.runTurn(input, sink, claim, intake).pipe(
+				Effect.onExit((exit) =>
+					Exit.isFailure(exit)
+						? Effect.sync(() => this.deps.onAbandonedRun?.(input.inputId))
+						: Effect.void,
+				),
+				Effect.exit,
+				Effect.flatMap((exit) => Deferred.done(intake, exit)),
+				Effect.ensuring(this.sinks.releaseSinkEffect(sink)),
+				Effect.ensuring(
+					Effect.sync(() => {
+						if (!this.sessions.get(input.sessionId)?.busy)
+							this.onTurnStateChanged?.(false);
+					}),
+				),
+				Effect.forkIn(this.scope),
+			);
+			return yield* Effect.raceFirst(
+				Deferred.await(intake),
+				Effect.callback<TurnResult>((resume) => {
+					const onAbort = () =>
+						resume(
+							Effect.succeed({
+								status: handed ? "indeterminate" : "cancelled",
+								cost: 0,
+								tokens: { input: 0, output: 0 },
+								durationMs: 0,
+								providerStateUpdates: [],
+							}),
+						);
+					if (signal.aborted) onAbort();
+					else signal.addEventListener("abort", onAbort, { once: true });
+					return Effect.sync(() =>
+						signal.removeEventListener("abort", onAbort),
+					);
+				}),
+			);
+		});
+	}
+
+	hasActiveTurnsEffect(sessionId: string): Effect.Effect<boolean> {
+		return Effect.sync(() => this.sessions.get(sessionId)?.busy === true);
+	}
+
+	private runTurn(
+		input: SessionTurn,
+		sink: EventSink,
+		claim: () => boolean,
+		intake: Deferred.Deferred<TurnResult, SessionFailure>,
 	): Effect.Effect<TurnResult, SessionFailure> {
 		return Effect.gen({ self: this }, function* () {
 			let session = this.sessions.get(input.sessionId);
@@ -239,7 +293,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 				};
 				this.sessions.set(input.sessionId, session);
 			}
-			if (session.busy) return yield* this.steer(session, input, sink);
+			if (session.busy) return yield* this.steer(session, input, sink, claim);
 			const current = session;
 			// Keep the outcome durable until a different input supersedes it.
 			if (current.continuationInputId !== input.inputId) {
@@ -254,11 +308,14 @@ export class CodexRunnerPayload implements RunnerPayload {
 					: undefined;
 			}
 			current.busy = true;
+			this.onTurnStateChanged?.(true);
 			const now = yield* Clock.currentTimeMillis;
 			const active: ActiveTurn = {
+				sink,
 				state: createCodexTurnState({
 					sessionId: input.sessionId,
-					turnId: input.inputId,
+					runId: input.runId,
+					turnId: input.continuation?.cutOffMessageId ?? input.inputId,
 					messageId: createEventId(),
 					providerId: "codex",
 					threadId: current.threadId ?? input.sessionId,
@@ -266,12 +323,14 @@ export class CodexRunnerPayload implements RunnerPayload {
 					...(input.goalState ? { goalState: input.goalState } : {}),
 					tokenUsageBaseline: current.tokenUsageTotal,
 				}),
+				inputIds: new Set([
+					input.inputId,
+					...(input.continuation ? [input.continuation.cutOffMessageId] : []),
+				]),
 				started: yield* Deferred.make<string | undefined>(),
 				cancelled: yield* Deferred.make<void>(),
-				cancelRequested: signal.aborted,
+				cancelRequested: false,
 				submitted: false,
-				steers: new Map(),
-				userItems: new Set(),
 				interruptSent: false,
 				interactions: new CodexInteractions(
 					sink,
@@ -351,8 +410,43 @@ export class CodexRunnerPayload implements RunnerPayload {
 				active.state = { ...active.state, items };
 				return sink.push(metadata ? { ...event, metadata } : event);
 			};
+			let accepted = false;
+			const acceptInput = () =>
+				Effect.gen({ self: this }, function* () {
+					if (accepted) return;
+					accepted = true;
+					if (input.runId)
+						yield* push("run.started", {
+							inputId: input.inputId,
+							requestedRunId: input.runId,
+							...(input.continuation
+								? { userMessageId: input.continuation.cutOffMessageId }
+								: {}),
+						});
+					yield* push("session.status", {
+						sessionId: input.sessionId,
+						status: "busy",
+					});
+					yield* push("message.created", {
+						sessionId: input.sessionId,
+						messageId: active.state.items.messageId,
+						role: "assistant",
+						parentID: active.state.items.turnId,
+					});
+					yield* Deferred.succeed(
+						intake,
+						this.result(
+							{ status: "accepted", tokens: { input: 0, output: 0 } },
+							0,
+						),
+					);
+				});
 			const apply = (update: CodexTurnUpdate) =>
 				Effect.gen(function* () {
+					const continuationKind =
+						current.continuationInputId === input.inputId
+							? current.continuationKind
+							: undefined;
 					active.state = update.state;
 					current.tokenUsageTotal =
 						update.state.items.tokenUsageTotal ?? current.tokenUsageTotal;
@@ -363,21 +457,18 @@ export class CodexRunnerPayload implements RunnerPayload {
 							active.started,
 							active.state.executingTurnId,
 						);
-					if (!active.state.executingTurnId || update.outcome) {
-						for (const pending of active.steers.values())
-							yield* Deferred.succeed(pending.finished, false);
-					}
 					if (update.outcome) {
 						current.busy = false;
 						yield* Deferred.succeed(active.started, undefined);
-						for (const pending of active.steers.values())
-							yield* Deferred.succeed(pending.finished, false);
 					}
 					if (
 						update.outcome?.error?.code === "auth_required" &&
 						current.codexHome
 					)
 						invalidateCodexAuth(current.codexHome);
+					let usageLimited:
+						| ProviderRuntimeEventPayloadMap["session.usage_limited"]
+						| undefined;
 					if (update.outcome?.error?.code === "usage_limited") {
 						const buckets = [...current.rateLimits.values()];
 						const bucket =
@@ -414,35 +505,37 @@ export class CodexRunnerPayload implements RunnerPayload {
 						current.child = undefined;
 						current.rateLimits.clear();
 						if (child) yield* Scope.close(child.scope, Exit.void);
-						yield* push(
-							"session.usage_limited",
-							{
-								instanceId: input.account?.id ?? input.instanceId ?? "codex",
-								cutOffMessageId:
-									input.continuation?.cutOffMessageId ?? input.inputId,
-								rateLimitType: limitId,
-								...(resets.length ? { resetsAt: Math.max(...resets) } : {}),
-							},
-							{ modelId: input.model?.modelId },
+						usageLimited = {
+							instanceId: input.account?.id ?? input.instanceId ?? "codex",
+							cutOffMessageId:
+								input.continuation?.cutOffMessageId ?? input.inputId,
+							rateLimitType: limitId,
+							...(resets.length ? { resetsAt: Math.max(...resets) } : {}),
+						};
+					}
+					for (const event of update.events) {
+						// Native message reference refreshes clear an earlier recovery marker.
+						if (event.type === "turn.error" && usageLimited)
+							yield* push("session.usage_limited", usageLimited, {
+								modelId: input.model?.modelId,
+							});
+						yield* sink.push(
+							event.type === "turn.completed"
+								? {
+										...event,
+										data: {
+											...(event.data as ProviderRuntimeEventPayloadMap["turn.completed"]),
+											providerStateUpdates: [],
+											...(continuationKind ? { continuationKind } : {}),
+										},
+									}
+								: event,
 						);
 					}
-					for (const event of update.events) yield* sink.push(event);
 					return update.outcome;
 				});
 			return yield* Effect.scoped(
 				Effect.gen({ self: this }, function* () {
-					const abort = Effect.callback<void>((resume) => {
-						const onAbort = () => resume(Effect.void);
-						if (signal.aborted) onAbort();
-						else signal.addEventListener("abort", onAbort, { once: true });
-						return Effect.sync(() =>
-							signal.removeEventListener("abort", onAbort),
-						);
-					});
-					yield* abort.pipe(
-						Effect.andThen(this.interrupt(input.sessionId)),
-						Effect.forkScoped,
-					);
 					const outcome = yield* Effect.gen({ self: this }, function* () {
 						const sinkId = this.sinks.sinkId(sink);
 						const admitInput = () =>
@@ -454,19 +547,11 @@ export class CodexRunnerPayload implements RunnerPayload {
 										input: {
 											sessionId: input.sessionId,
 											inputId: input.inputId,
+											...(input.runId ? { runId: input.runId } : {}),
 											text: input.text ?? input.prompt,
 											...(input.images?.length ? { images: input.images } : {}),
 										},
 									});
-								yield* push("session.status", {
-									sessionId: input.sessionId,
-									status: "busy",
-								});
-								yield* push("message.created", {
-									sessionId: input.sessionId,
-									messageId: active.state.items.messageId,
-									role: "assistant",
-								});
 							});
 						if (!input.rewind) yield* admitInput();
 						if (!input.model)
@@ -503,7 +588,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 							}),
 							Deferred.await(active.cancelled).pipe(Effect.as(undefined)),
 						);
-						if (!child || signal.aborted || active.cancelRequested)
+						if (!child || active.cancelRequested)
 							return yield* apply(interruptCodexTurn(active.state, Date.now()));
 						if (!current.threadId)
 							return yield* Effect.fail({
@@ -547,6 +632,11 @@ export class CodexRunnerPayload implements RunnerPayload {
 								});
 						}
 						if (input.rewind) yield* admitInput();
+						if (!claim())
+							return {
+								status: "cancelled" as const,
+								tokens: { input: 0, output: 0 },
+							};
 						const compact = input.prompt.trim() === "/compact";
 						if (compact)
 							active.state = { ...active.state, manualCompaction: true };
@@ -602,7 +692,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 						const effort = input.providerState["codex.effort"];
 						const skill = decodeSkillInput(input.providerState["codex.skill"]);
 						// No yield between checking cancellation and submitting the turn.
-						if (signal.aborted || active.cancelRequested)
+						if (active.cancelRequested)
 							return yield* apply(interruptCodexTurn(active.state, Date.now()));
 						active.submitted = true;
 						if (compact) {
@@ -650,19 +740,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 								},
 								TurnStartResponseSchema,
 							);
-							active.state = acceptCodexTurn(
-								active.state,
-								accepted.turn.id,
-								accepted.turn.startedAt,
-							);
-							const refs = recordCodexTurnRefs(active.state.items);
-							active.state = { ...active.state, items: refs.items };
-							for (const event of refs.events) yield* sink.push(event);
-							if (active.state.executingTurnId)
-								yield* Deferred.succeed(
-									active.started,
-									active.state.executingTurnId,
-								);
+							active.state = acceptCodexTurn(active.state, accepted.turn.id);
 							if (activateGoal && !active.cancelRequested)
 								yield* child.client.request(
 									"thread/goal/set",
@@ -714,13 +792,15 @@ export class CodexRunnerPayload implements RunnerPayload {
 								if (outcome) return outcome;
 								continue;
 							}
-							if ("interrupted" in update)
+							if ("interrupted" in update) {
+								if (update.interrupted !== active) continue;
 								return yield* apply(
 									interruptCodexTurn(
 										active.state,
 										yield* Clock.currentTimeMillis,
 									),
 								);
+							}
 							if ("failure" in update)
 								return yield* Effect.fail(update.failure);
 							const decoded = decodeNotification(update.notification);
@@ -749,57 +829,13 @@ export class CodexRunnerPayload implements RunnerPayload {
 								continue;
 							}
 							if (
-								(decoded.method === "item/started" ||
-									decoded.method === "item/completed") &&
-								decoded.params.turnId === active.state.executingTurnId &&
+								decoded.method === "turn/started" &&
 								decoded.params.threadId === current.threadId &&
-								decoded.params.item.type === "userMessage" &&
-								!("raw" in decoded.params.item)
-							) {
-								const item = decoded.params.item;
-								const firstUserItem = active.userItems.size === 0;
-								if (!active.userItems.has(item.id)) {
-									active.userItems.add(item.id);
-									const pending = item.clientId
-										? active.steers.get(item.clientId)
-										: firstUserItem
-											? undefined
-											: [...active.steers.values()].find(
-													({ input }) =>
-														input.prompt ===
-														item.content
-															.flatMap((part) =>
-																part.type === "text" ? [part.text] : [],
-															)
-															.join(""),
-												);
-									if (pending) {
-										yield* this.emit({
-											type: "place-user-message",
-											sinkId: pending.sinkId,
-											input: {
-												sessionId: input.sessionId,
-												inputId: pending.input.inputId,
-												text: pending.input.text ?? pending.input.prompt,
-												...(pending.input.images?.length
-													? { images: pending.input.images }
-													: {}),
-											},
-										});
-										yield* push(
-											"message.created",
-											{
-												sessionId: input.sessionId,
-												messageId: pending.input.inputId,
-												role: "user",
-											},
-											{ source: "codex.native-turn" },
-										);
-										yield* Deferred.succeed(pending.finished, true);
-										active.steers.delete(pending.input.inputId);
-									}
-								}
-							}
+								(decoded.params.turn.id === active.state.acceptedTurnId ||
+									(active.state.manualCompaction &&
+										!active.state.acceptedTurnId))
+							)
+								yield* acceptInput();
 							const result = yield* apply(
 								handleCodexTurnNotification(
 									active.state,
@@ -837,7 +873,6 @@ export class CodexRunnerPayload implements RunnerPayload {
 							status: "idle",
 						});
 					return this.result(
-						current,
 						outcome ?? {
 							status: "error",
 							tokens: active.state.items.tokens,
@@ -862,8 +897,6 @@ export class CodexRunnerPayload implements RunnerPayload {
 				Effect.ensuring(
 					Effect.gen(function* () {
 						yield* active.interactions.interrupt();
-						for (const pending of active.steers.values())
-							yield* Deferred.succeed(pending.finished, false);
 						if (current.active === active) {
 							current.busy = false;
 							current.active = undefined;
@@ -875,38 +908,40 @@ export class CodexRunnerPayload implements RunnerPayload {
 		});
 	}
 
-	interrupt(sessionId: string): Effect.Effect<void, SessionFailure> {
+	interrupt(
+		sessionId: string,
+		turnIds?: readonly string[],
+	): Effect.Effect<void, SessionFailure> {
 		return Effect.gen({ self: this }, function* () {
 			const session = this.sessions.get(sessionId);
 			if (!session) return;
-			session.subagents?.beginInterrupt();
 			const active = session.active;
+			if (turnIds && !turnIds.some((id) => active?.inputIds.has(id))) return;
+			session.subagents?.beginInterrupt();
 			if (!active) {
 				yield* this.interruptChildren(session);
 				return;
 			}
+			const child = session.child;
+			const threadId = session.threadId;
+			const children = session.subagents?.runningTurns ?? [];
 			active.cancelRequested = true;
 			active.state = { ...active.state, interruptRequested: true };
 			yield* Deferred.succeed(active.cancelled, undefined);
 			yield* active.interactions.interrupt();
 			if (!active.submitted) return;
 			yield* Deferred.await(active.started);
-			if (
-				active.state.settled ||
-				active.interruptSent ||
-				!session.child ||
-				!session.threadId
-			) {
-				yield* this.interruptChildren(session);
+			if (session.active && session.active !== active) return;
+			if (active.state.settled || active.interruptSent || !child || !threadId) {
+				yield* this.interruptChildren(session, children, active.sink, child);
 				return;
 			}
 			active.interruptSent = true;
-			const children = session.subagents?.runningTurns ?? [];
 			if (active.state.goalState.goal || active.state.goalActivationPending)
-				yield* session.child.client
+				yield* child.client
 					.request(
 						"thread/goal/set",
-						{ threadId: session.threadId, status: "paused", origin: "user" },
+						{ threadId, status: "paused", origin: "user" },
 						ThreadGoalSetResponseSchema,
 					)
 					.pipe(
@@ -920,14 +955,14 @@ export class CodexRunnerPayload implements RunnerPayload {
 					);
 			const turnId = active.state.executingTurnId;
 			if (!turnId) {
-				yield* this.interruptChildren(session, children);
-				yield* Queue.offer(session.child.updates, { interrupted: true });
+				yield* this.interruptChildren(session, children, active.sink, child);
+				yield* Queue.offer(child.updates, { interrupted: active });
 				return;
 			}
-			yield* session.child.client
+			yield* child.client
 				.request(
 					"turn/interrupt",
-					{ threadId: session.threadId, turnId },
+					{ threadId, turnId },
 					TurnInterruptResponseSchema,
 				)
 				.pipe(
@@ -938,19 +973,21 @@ export class CodexRunnerPayload implements RunnerPayload {
 						}),
 					),
 				);
-			yield* this.interruptChildren(session, children);
-			yield* Queue.offer(session.child.updates, { interrupted: true });
+			yield* this.interruptChildren(session, children, active.sink, child);
+			yield* Queue.offer(child.updates, { interrupted: active });
 		});
 	}
 
 	private interruptChildren(
 		session: CodexSession,
 		turns = session.subagents?.runningTurns ?? [],
+		ownerSink?: EventSink,
+		child = session.child,
 	) {
 		return Effect.gen(function* () {
 			for (const target of turns) {
-				if (session.child)
-					yield* session.child.client
+				if (child)
+					yield* child.client
 						.request("turn/interrupt", target, TurnInterruptResponseSchema)
 						.pipe(
 							Effect.catch((cause) =>
@@ -963,7 +1000,11 @@ export class CodexRunnerPayload implements RunnerPayload {
 							),
 						);
 			}
-			yield* session.subagents?.interrupt() ?? Effect.void;
+			yield* session.subagents?.interrupt(
+				"interrupted",
+				undefined,
+				ownerSink,
+			) ?? Effect.void;
 		}).pipe(
 			Effect.mapError(
 				(cause): SessionFailure => ({
@@ -982,6 +1023,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 		session: CodexSession,
 		input: SessionTurn,
 		sink: EventSink,
+		claim: () => boolean,
 	): Effect.Effect<TurnResult, SessionFailure> {
 		return Effect.scoped(
 			Effect.gen({ self: this }, function* () {
@@ -994,11 +1036,69 @@ export class CodexRunnerPayload implements RunnerPayload {
 				};
 				const active = session.active;
 				const sinkId = this.sinks.sinkId(sink);
+				const acceptSteer = () =>
+					Effect.gen({ self: this }, function* () {
+						if (!active || !sinkId) return declined;
+						if (!input.continuation)
+							yield* this.emit({
+								type: "place-user-message",
+								sinkId,
+								input: {
+									sessionId: input.sessionId,
+									inputId: input.inputId,
+									...(input.runId ? { runId: input.runId } : {}),
+									text: input.text ?? input.prompt,
+									...(input.images?.length ? { images: input.images } : {}),
+								},
+							});
+						if (input.runId && active.state.items.runId) {
+							const [items, event] = codexRuntimeEvent(
+								{ ...active.state.items, now: Date.now() },
+								"run.started",
+								{
+									inputId: input.inputId,
+									requestedRunId: input.runId,
+									...(input.continuation
+										? { userMessageId: input.continuation.cutOffMessageId }
+										: {}),
+								},
+							);
+							active.state = { ...active.state, items };
+							yield* sink.push(event);
+						}
+						const [items, event] = codexRuntimeEvent(
+							{ ...active.state.items, now: Date.now() },
+							"message.created",
+							{
+								sessionId: input.sessionId,
+								messageId: input.continuation?.cutOffMessageId ?? input.inputId,
+								role: "user",
+							},
+						);
+						active.state = { ...active.state, items };
+						yield* sink.push({
+							...event,
+							metadata: { source: "codex.native-turn" },
+						});
+						if (active.state.settled) {
+							const [items, event] = codexRuntimeEvent(
+								{ ...active.state.items, now: Date.now() },
+								"session.status",
+								{ sessionId: input.sessionId, status: "idle" },
+							);
+							active.state = { ...active.state, items };
+							yield* sink.push(event);
+						}
+						return { ...declined, status: "accepted" as const };
+					});
 				if (
 					input.prompt.trim() === "/compact" ||
 					active?.state.manualCompaction
 				)
 					return declined;
+				if (active && !active.state.settled && !active.cancelRequested)
+					yield* Deferred.await(active.started);
+				if (session.active !== active) return declined;
 				const command = parseCodexGoalCommand(input.prompt);
 				if (
 					active &&
@@ -1007,15 +1107,8 @@ export class CodexRunnerPayload implements RunnerPayload {
 					command &&
 					sinkId
 				) {
-					yield* this.emit({
-						type: "place-user-message",
-						sinkId,
-						input: {
-							sessionId: input.sessionId,
-							inputId: input.inputId,
-							text: input.text ?? input.prompt,
-						},
-					});
+					if (!claim()) return { ...declined, status: "cancelled" as const };
+					active.inputIds.add(input.inputId);
 					const facts = yield* this.goalCommand(session, command).pipe(
 						Effect.mapError(
 							(cause): SessionFailure => ({
@@ -1026,7 +1119,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 					);
 					if (command.type === "show" && facts && session.child)
 						yield* Queue.offer(session.child.updates, { notification: facts });
-					return { ...declined, status: "joined" };
+					return yield* acceptSteer();
 				}
 				if (
 					!active ||
@@ -1038,9 +1131,9 @@ export class CodexRunnerPayload implements RunnerPayload {
 					!sinkId
 				)
 					return declined;
-				const finished = yield* Deferred.make<boolean, SessionFailure>();
-				active.steers.set(input.inputId, { input, sinkId, finished });
-				yield* session.child.client
+				if (!claim()) return { ...declined, status: "cancelled" as const };
+				active.inputIds.add(input.inputId);
+				const delivered = yield* session.child.client
 					.request(
 						"turn/steer",
 						{
@@ -1055,13 +1148,18 @@ export class CodexRunnerPayload implements RunnerPayload {
 						TurnSteerResponseSchema,
 					)
 					.pipe(
-						Effect.catch(() => Deferred.succeed(finished, false)),
-						Effect.forkScoped,
+						Effect.as(true),
+						Effect.orElseSucceed(() => false),
 					);
-				const delivered = yield* Deferred.await(finished);
-				active.steers.delete(input.inputId);
-				return { ...declined, status: delivered ? "joined" : "steer-declined" };
+				return delivered ? yield* acceptSteer() : declined;
 			}),
+		).pipe(
+			Effect.mapError(
+				(cause): SessionFailure => ({
+					operation: "steer",
+					message: turnFailure(cause).message,
+				}),
+			),
 		);
 	}
 
@@ -1160,9 +1258,42 @@ export class CodexRunnerPayload implements RunnerPayload {
 				});
 				const client = yield* connectAppServer(transport, {
 					clientInfo: { name: "conduit", title: "Conduit", version: "1.0.0" },
-					onServerRequest: (method, params, id) =>
-						session.subagents?.request(method, params, id) ??
-						session.active?.interactions.request(method, params, id),
+					onServerRequest: (method, params, id) => {
+						const active = session.active;
+						const interaction: Effect.Effect<unknown, unknown> | undefined =
+							active?.interactions.request(method, params, id);
+						const foreignRootTurn =
+							active?.state.items.nativeTurnId !== undefined &&
+							isRecord(params) &&
+							params["threadId"] !== active.state.items.threadId &&
+							params["turnId"] === active.state.items.nativeTurnId;
+						const childRequest = foreignRootTurn
+							? undefined
+							: session.subagents?.request(method, params, id);
+						if (childRequest) return childRequest;
+						if (!active || !interaction) return undefined;
+						if (
+							isRecord(params) &&
+							(params["threadId"] !== active.state.items.threadId ||
+								(params["turnId"] != null &&
+									active.state.items.nativeTurnId !== undefined &&
+									params["turnId"] !== active.state.items.nativeTurnId))
+						)
+							return interaction;
+						// Callbacks can overtake the matching notification's durable intake.
+						return Deferred.await(active.started).pipe(
+							Effect.flatMap((turnId) =>
+								!turnId ||
+								session.active !== active ||
+								active.cancelRequested ||
+								active.state.settled
+									? active.interactions
+											.interrupt()
+											.pipe(Effect.andThen(interaction))
+									: interaction,
+							),
+						);
+					},
 				});
 				const updates = yield* Queue.unbounded<ChildUpdate>();
 				const child: CodexChild = { scope, client, updates, dead: false };
@@ -1404,8 +1535,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 	}
 
 	private result(
-		session: CodexSession,
-		outcome: NonNullable<CodexTurnUpdate["outcome"]>,
+		outcome: Pick<TurnResult, "status" | "tokens" | "error">,
 		durationMs: number,
 	): TurnResult {
 		return {
@@ -1415,23 +1545,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 			...(outcome.error
 				? { error: { ...outcome.error, retryHandled: true } }
 				: {}),
-			...(session.continuationKind
-				? {
-						handoff: {
-							continuationKind: session.continuationKind,
-							included: 0,
-							omitted: 0,
-							firstMessageIncluded: false,
-							tokens: 0,
-						},
-					}
-				: {}),
-			providerStateUpdates: session.threadId
-				? [
-						{ key: "codex.threadId", value: session.threadId },
-						{ key: "codex.cwd", value: session.cwd },
-					]
-				: [],
+			providerStateUpdates: [],
 		};
 	}
 }
@@ -1441,12 +1555,19 @@ export const makeCodexSessionRunner = (
 	emit: (
 		output: SessionOutput,
 	) => Effect.Effect<SessionOutputReply, SessionFailure>,
+	onTurnStateChanged?: (inFlight: boolean) => void,
 ) =>
 	makeInProcessSessionRunner(
 		(sinks) =>
 			Effect.gen(function* () {
 				const scope = yield* Effect.scope;
-				return new CodexRunnerPayload(deps, sinks, emit, scope);
+				return new CodexRunnerPayload(
+					deps,
+					sinks,
+					emit,
+					scope,
+					onTurnStateChanged,
+				);
 			}),
 		emit,
 	);

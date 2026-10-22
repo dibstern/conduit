@@ -25,6 +25,8 @@ export const SidebarRowSchema = Schema.Struct({
 			Schema.Literals(["approval", "question", "error", "turn"]),
 		),
 	}),
+	/** Capability-independent Stop targets; absence means false for older rows. */
+	onlyRetainedSteers: Schema.optionalKey(Schema.Boolean),
 	/**
 	 * The root's summary with its family rolled up, without what is applied at
 	 * read time: background work and snooze state. Its attention and

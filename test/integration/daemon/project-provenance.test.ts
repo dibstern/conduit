@@ -257,21 +257,27 @@ describe("Project provenance through the built daemon", () => {
 					{ status: "completed", attempt_count: 1 },
 				]),
 			);
-			await browser.deleteSession(sessionId);
 			const manifest = provenance(fixture, slug);
-			for (const table of manifest.tables)
-				for (const row of table.rows)
-					expect(row.project, table.table).toBe(slug);
 			expect(manifest.events).toEqual(
 				expect.arrayContaining([
 					{ type: "session.created", project_id: slug, count: 1 },
-					{ type: "session.deleted", project_id: slug, count: 1 },
 					{ type: "permission.asked", project_id: slug, count: 1 },
 					{ type: "permission.resolved", project_id: slug, count: 1 },
 					{ type: "input.admitted", project_id: slug, count: 2 },
 					{ type: "input.sent", project_id: slug, count: 2 },
 				]),
 			);
+			await browser.deleteSession(sessionId);
+			await vi.waitFor(() =>
+				expect(provenance(fixture, slug).events).toEqual([
+					{ type: "session.deleted", project_id: slug, count: 1 },
+				]),
+			);
+			const afterDeletion = provenance(fixture, slug);
+			for (const snapshot of [manifest, afterDeletion])
+				for (const table of snapshot.tables)
+					for (const row of table.rows)
+						expect(row.project, table.table).toBe(slug);
 			for (const command of outbox(fixture, slug)) {
 				expect(
 					fixture.marks.filter(
@@ -291,6 +297,7 @@ describe("Project provenance through the built daemon", () => {
 			projects.push({
 				projectId: slug,
 				...manifest,
+				afterDeletion,
 				executions: {
 					send: 2,
 					approve: approvalExecutions,

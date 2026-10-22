@@ -3,6 +3,7 @@
 // and deleted accounts reappearing after a daemon restart.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import Database from "better-sqlite3";
 import { Effect, Fiber, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -174,6 +175,50 @@ describe("Codex turns through the real daemon and detached runner", () => {
 			expect(reply.chunks.join("")).toBe(TEXT);
 			await expectTurns(fixture, id);
 			const { events } = snapshot(fixture, id);
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				const commands = db
+					.prepare<[string], { inputId: string; runId: string }>(
+						"SELECT json_extract(payload_json, '$.inputId') AS inputId, run_id AS runId FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
+					)
+					.all(id);
+				expect(commands).toHaveLength(1);
+				const command = commands[0];
+				if (!command) throw new Error("Missing reserved Codex send");
+				expect(command.runId).toEqual(expect.any(String));
+				expect(events).toContainEqual(
+					expect.objectContaining({
+						type: "run.started",
+						metadata: expect.objectContaining({ runId: command.runId }),
+						data: expect.objectContaining({
+							inputId: command.inputId,
+							requestedRunId: command.runId,
+						}),
+					}),
+				);
+				expect(events).toContainEqual(
+					expect.objectContaining({
+						type: "turn.completed",
+						metadata: expect.objectContaining({ runId: command.runId }),
+					}),
+				);
+				expect(
+					db
+						.prepare<[string], { id: string; status: string }>(
+							"SELECT id, status FROM provider_runs WHERE session_id = ? ORDER BY requested_at, rowid",
+						)
+						.all(id),
+				).toEqual([{ id: command.runId, status: "completed" }]);
+				expect(
+					db
+						.prepare<[string], { state: string; run_id: string | null }>(
+							"SELECT state, run_id FROM turns WHERE session_id = ? ORDER BY requested_at, rowid",
+						)
+						.all(id),
+				).toEqual([{ state: "completed", run_id: command.runId }]);
+			} finally {
+				db.close();
+			}
 			expect(
 				events.filter(({ type }) => type === "text.delta").length,
 			).toBeGreaterThan(1);

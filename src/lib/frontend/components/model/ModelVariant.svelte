@@ -93,7 +93,7 @@
 				openPicker("effort");
 				if (composerPickerState.request && event.currentTarget instanceof HTMLElement) composerPickerState.request.opener = event.currentTarget;
 			}}
-		><span class="border-b border-dotted border-border-chip">{wordLabel ?? (currentVariant || "default")}</span></Button>
+		><span>{wordLabel ?? (currentVariant || "default")}</span></Button>
 {:else if showEffort && variant === "control" && sessionViewState.composerWidth >= 480}
 	<Button
 		variant="composer-model"

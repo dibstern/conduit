@@ -63,7 +63,7 @@ export const createOpenCodeReconciler = (options: {
 	const pending = new Map<string, Set<string>>();
 	// A removed and re-added directory must not accept its previous reads.
 	const generations = new Map<string, symbol>();
-	// Order of each session's latest streamed status. A status read answers
+	// Order of each session's latest status or input intake. A status read answers
 	// with the state when it was sent, so it must not overwrite a session whose
 	// status streamed in after that.
 	let statusOrder = 0;
@@ -190,6 +190,25 @@ export const createOpenCodeReconciler = (options: {
 				else keys.delete(`${kind}:${id}`);
 				setPending(directory, keys);
 				settle();
+				return;
+			}
+			if (event.type === "message.updated") {
+				const info = event.properties?.["info"];
+				if (
+					typeof info === "object" &&
+					info !== null &&
+					"role" in info &&
+					info.role === "user" &&
+					"sessionID" in info &&
+					typeof info.sessionID === "string"
+				) {
+					const changed =
+						statusChanged.get(directory) ?? new Map<string, number>();
+					statusChanged.set(
+						directory,
+						changed.set(info.sessionID, ++statusOrder),
+					);
+				}
 				return;
 			}
 			if (event.type !== "session.status") return;

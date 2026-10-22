@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { SessionPermissionMode } from "../../types.js";
+	import { PERMISSION_MODE_COLOURS } from "../../permission-modes.js";
 	import Button from "./Button.svelte";
 	import Icon from "./Icon.svelte";
 	import PermissionShield from "./PermissionShield.svelte";
@@ -11,7 +12,7 @@
 		loading?: boolean;
 		[key: string]: unknown;
 	} = $props();
-	const tone = $derived(mode === "full" ? "var(--color-error)" : mode === "acceptEdits" || mode === "auto" ? "var(--color-status-ask)" : "var(--color-text-secondary)");
+	const tone = $derived(PERMISSION_MODE_COLOURS[mode]);
 	const word = $derived({ dontAsk: "never", plan: "plan", ask: "ask", acceptEdits: "edits", auto: "auto", full: "full" }[mode]);
 </script>
 

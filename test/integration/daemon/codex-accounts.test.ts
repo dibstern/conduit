@@ -180,15 +180,32 @@ describe("Codex accounts through the built daemon and detached runners", () => {
 				{ timeout: TIMEOUT, interval: 100 },
 			);
 			const delivered = db
-				.prepare<[string, string], { id: string; data: string }>(
-					"SELECT event_id AS id, data FROM events WHERE session_id = ? AND type = 'session.handoff_delivered' AND json_extract(data, '$.instanceId') = ? ORDER BY sequence",
+				.prepare<[string], { id: string; data: string }>(
+					"SELECT event_id AS id, data FROM events WHERE session_id = ? AND type = 'session.handoff_delivered' ORDER BY sequence",
 				)
-				.all(sessionId, accountId);
+				.all(sessionId);
 			expect(delivered).toHaveLength(1);
+			const commands = db
+				.prepare<[string, string], { command_id: string }>(
+					`SELECT DISTINCT o.command_id FROM provider_command_outbox o
+					 JOIN events e ON e.session_id = o.session_id AND json_extract(e.metadata, '$.runId') = o.run_id
+					 WHERE o.session_id = ? AND o.effect_type = 'send_turn' AND o.status = 'completed'
+					 AND e.type = 'turn.completed' AND json_extract(e.data, '$.continuationKind') = ?
+					 AND json_type(o.payload_json, '$.handoff') IS NULL`,
+				)
+				.all(sessionId, continuationKind);
+			expect(commands).toHaveLength(1);
+			expect(delivered[0]?.id).toBe(
+				`evt_codex_handoff_delivered_${commands[0]?.command_id}`,
+			);
 			expect(delivered[0]?.id).toBe(handoff?.eventId);
 			expect(JSON.parse(delivered[0]?.data ?? "null")).toMatchObject({
 				continuationKind,
 				instanceId: accountId,
+				included: 0,
+				omitted: 0,
+				firstMessageIncluded: false,
+				tokens: 0,
 			});
 			writeFileSync(
 				join(artifactRoot, `${continuationKind}-handoff.json`),

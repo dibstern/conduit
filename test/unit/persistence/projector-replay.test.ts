@@ -42,6 +42,7 @@ it("preserves every read model from the recorded Claude event log", async () => 
 			"messages",
 			"message_parts",
 			"turns",
+			"provider_runs",
 			"session_providers",
 			"pending_approvals",
 			"pending_inputs",

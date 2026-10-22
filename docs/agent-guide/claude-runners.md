@@ -114,13 +114,39 @@ Protocol mismatches still refuse adoption. A different build with the same
 protocol is adopted and scheduled for upgrade after a turn ends. An adopted idle
 runner upgrades without waiting for another prompt.
 
+A runner whose hello lacks `stampsRunIds` is adopted only to finish retained
+work. The same hello decision holds new sends and steers in the existing
+inbox/outbox until it retires through end-session restart; Stop, approval and
+question answers, and task Stop still reach it. Idle legacy runners retire
+immediately, and explicit Stop retires them after its claimed cohort settles.
+Adoption and retirement each log the session, runner and build identities.
+
+A temporary daemon-side output adapter restores the run from each retained
+sink's exact command attempt and current outbox reservation. It stamps root
+messages, tools, usage and terminals before persistence, and restores the
+assistant parent reference to that command's turn for ordinary message
+finalization. Child-session events keep their own ownership. After prior output commits, recovery uses the
+preparation wrapper's final result, so a recoverable native-resume rejection
+cannot end the run before fallback. Authorized fallback sinks retain the
+original command attempt and turn under both input and command aliases. The
+final result emits an owned terminal only if its run is still open; it never
+synthesizes intake.
+Folded steer output follows its actual sink, which the genuine main-build trace
+observes as the steer's sink. A `joined` result never ends a joined target. A
+separate reservation follows the sole retained reply's actual terminal, even
+when that terminal arrives later. The old wire format names no joined target;
+ambiguous retained cohorts stay open until confirmed retirement or death
+settles them as an upgrade error. Projection settles turns, outbox and receipts
+atomically; recovery has no separate legacy completion. This adapter and the compatibility
+hold are removed together by 82tn.31.5.
+
 Project folder changes rebuild the relay. At send admission, the server compares
 an existing runner's launch snapshot with the current main and extra folders.
 An idle, quiescent runner with different folders drains through end-session;
 the send starts a new runner with its last reported resume cursor. A busy runner
 serves the current send and switches on a later send after it becomes idle.
-Pre-warm skips an existing runner with different folders. An adopted runner
-without a launch snapshot continues normally. Changing the main folder also
+Pre-warm skips an existing runner with different folders. An adopted runner that stamps run ids
+continues normally without a launch snapshot. Changing the main folder also
 stops runners registered under the old folder, since their runtime directory
 uses its hash.
 File mentions, the file browser, terminal cwd and Conduit's Claude settings lookup

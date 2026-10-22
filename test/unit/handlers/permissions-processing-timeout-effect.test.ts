@@ -31,6 +31,10 @@ import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import {
+	ProviderRegistry,
+	ProviderRegistryTag,
+} from "../../../src/lib/provider/provider-registry.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	makeMockAccountDirectory,
@@ -70,7 +74,13 @@ describe("permission/question processing timeouts through Effect state", () => {
 				"test-project",
 			);
 			const layer = Layer.provideMerge(
-				Layer.provideMerge(ProviderTurnServiceLive, SessionWorkspaceLive),
+				Layer.provideMerge(
+					ProviderTurnServiceLive,
+					Layer.merge(
+						SessionWorkspaceLive,
+						Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()),
+					),
+				),
 				Layer.mergeAll(
 					AlertsLive,
 					Layer.succeed(OpenCodeAPITag)(client),
@@ -103,6 +113,32 @@ describe("permission/question processing timeouts through Effect state", () => {
 						title: "Question session",
 						provider: "opencode",
 					}),
+					canonicalEvent("message.created", "session-1", {
+						messageId: "input-1",
+						sessionId: "session-1",
+						role: "user",
+						inputId: "input-1",
+					}),
+					canonicalEvent("run.requested", "session-1", {
+						runId: "run-1",
+						inputId: "input-1",
+					}),
+					canonicalEvent(
+						"run.started",
+						"session-1",
+						{ inputId: "input-1", requestedRunId: "run-1" },
+						{ metadata: { runId: "run-1" } },
+					),
+					canonicalEvent(
+						"question.asked",
+						"session-1",
+						{
+							id: "que-1",
+							sessionId: "session-1",
+							questions: [{ text: "Continue?" }],
+						},
+						{ metadata: { runId: "run-1" } },
+					),
 				]);
 				yield* handleAskUserResponse("client-1", {
 					toolId: "que-1",
@@ -118,7 +154,7 @@ describe("permission/question processing timeouts through Effect state", () => {
 	);
 
 	it.effect(
-		"restarts the processing timeout after rejecting a question",
+		"does not arm an unowned timeout after rejecting an unrecorded question",
 		() => {
 			const client = makeHandlerOpenCodeAPI({
 				question: { reject: vi.fn(async () => undefined) },
@@ -142,7 +178,7 @@ describe("permission/question processing timeouts through Effect state", () => {
 			return Effect.gen(function* () {
 				yield* handleQuestionReject("client-1", { toolId: "que-1" });
 
-				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(true);
+				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
 			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);

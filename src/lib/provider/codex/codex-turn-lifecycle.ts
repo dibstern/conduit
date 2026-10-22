@@ -58,6 +58,7 @@ export interface CodexTurnUpdate {
 
 export function createCodexTurnState(input: {
 	readonly sessionId: string;
+	readonly runId?: string | undefined;
 	readonly turnId: string;
 	readonly messageId: string;
 	readonly providerId: string;
@@ -329,9 +330,9 @@ function handleNotification(
 		const { status, error } = notification.params.turn;
 		if (state.successorDeadline !== undefined) return { state, events: [] };
 		next = { ...next, executingTurnId: undefined };
-		if (state.interruptRequested) return interruptCodexTurn(next, now);
 		if (
 			status === "completed" &&
+			!state.interruptRequested &&
 			!next.manualCompaction &&
 			(next.goalActive || next.goalActivationPending)
 		) {
@@ -475,10 +476,10 @@ function settle(
 					})
 				: codexRuntimeEvent(closedItems, "turn.error", {
 						messageId: closedItems.messageId,
-						userMessageId: closedItems.turnId,
 						error: error?.message ?? "Codex turn failed",
 						code: error?.code ?? "provider_error",
 						retryable: error?.retryable ?? false,
+						retryHandled: true,
 					});
 	return {
 		state: {

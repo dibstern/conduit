@@ -1,5 +1,5 @@
 import { createConnection, type Socket as NetSocket } from "node:net";
-import { NodeSocket } from "@effect/platform-node";
+import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import { Effect, Exit, Option, Schedule } from "effect";
 import {
 	type Rpc,

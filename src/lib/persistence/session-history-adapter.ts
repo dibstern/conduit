@@ -262,7 +262,15 @@ function partSurfacing(
 
 function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 	if (row.type === "text" && row.metadata != null) {
-		const value = parseObjectJson(row.metadata)?.["setup"];
+		const metadata = parseObjectJson(row.metadata);
+		if (metadata?.["notice"] === true)
+			return {
+				id: row.id,
+				type: "notice",
+				text: row.text,
+				time: { start: row.created_at },
+			};
+		const value = metadata?.["setup"];
 		if (value && typeof value === "object" && !Array.isArray(value)) {
 			const setup = Schema.decodeUnknownOption(ProjectSetupStateSchema)(
 				Object.fromEntries(

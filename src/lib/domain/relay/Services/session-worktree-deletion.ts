@@ -6,8 +6,9 @@ import {
 	type SessionWorktreeInspection,
 	type SessionWorktreeOwnership,
 } from "../../../contracts/session-workspace.js";
-import { SessionWorkspaceChangedPayloadSchema } from "../../../contracts/stored-event.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
+import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
+import { readSessionWorktreeOwnershipSnapshot } from "../../../persistence/effect/session-worktree-ownership.js";
 import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
 import { DaemonSessionQueryServiceTag } from "./daemon-session-query-service.js";
 import { AgentLivenessTag, ConfigTag } from "./services.js";
@@ -88,65 +89,49 @@ export const worktreeUsers = (sessionId: string) =>
 export const readSessionWorktreeOwnership = (
 	sessionId: string,
 	includeLegacy = true,
+	projectSlug?: string,
 ) =>
 	Effect.gen(function* () {
-		const sql = yield* SqlClient.SqlClient;
-		const events = yield* sql<{
-			data: string;
-		}>`SELECT data FROM events WHERE session_id = ${sessionId} AND type = 'session.workspace_changed' AND ((json_extract(data, '$.cause') = 'launch' AND json_extract(data, '$.origin') = 'conduit') OR json_extract(data, '$.cause') = 'branch-rename') ORDER BY sequence`;
-		if (events.length === 0) return [];
+		const store = yield* Effect.serviceOption(EventStoreEffectTag);
+		const config = yield* Effect.serviceOption(ConfigTag);
+		const projectId =
+			projectSlug ??
+			(store._tag === "Some"
+				? store.value.projectId
+				: config._tag === "Some"
+					? config.value.slug
+					: undefined);
+		if (projectId === undefined)
+			return yield* new SessionCommandError({
+				operation: "worktree.inspect",
+				cause: "Worktree inspection requires a project.",
+			});
+		const snapshot = yield* readSessionWorktreeOwnershipSnapshot(
+			projectId,
+			sessionId,
+		);
+		if (!snapshot) return [];
+		if (snapshot._tag === "Conflict")
+			return yield* new SessionCommandError({
+				operation: "worktree.inspect",
+				cause:
+					snapshot.reason === "launch"
+						? "Conflicting launch ownership records. Worktrees will be kept."
+						: snapshot.reason === "branch-rename"
+							? "Branch rename does not match launch ownership. Worktrees will be kept."
+							: "Malformed worktree ownership records. Worktrees will be kept.",
+			});
 		const service = yield* Effect.serviceOption(WorktreeServiceTag);
 		if (service._tag === "None")
 			return yield* new SessionCommandError({
 				operation: "worktree.inspect",
 				cause: "Worktree inspection is unavailable.",
 			});
-		const launches = yield* Effect.forEach(events, ({ data }) =>
-			Schema.decodeUnknownEffect(
-				Schema.fromJsonString(SessionWorkspaceChangedPayloadSchema),
-			)(data),
-		);
+		if (snapshot._tag === "Owned") return [...snapshot.ownership];
 		const ownership = new Map<string, SessionWorktreeOwnership>();
-		const legacy = new Map<string, string>();
-		for (const launch of launches) {
-			for (const owned of launch.ownership ?? []) {
-				const previous = ownership.get(owned.path);
-				if (launch.cause === "branch-rename") {
-					if (
-						!previous ||
-						previous.folder !== owned.folder ||
-						previous.head !== owned.head
-					)
-						return yield* new SessionCommandError({
-							operation: "worktree.inspect",
-							cause:
-								"Branch rename does not match launch ownership. Worktrees will be kept.",
-						});
-					ownership.set(owned.path, owned);
-					continue;
-				}
-				if (
-					previous &&
-					(previous.folder !== owned.folder ||
-						previous.branchName !== owned.branchName ||
-						previous.head !== owned.head)
-				)
-					return yield* new SessionCommandError({
-						operation: "worktree.inspect",
-						cause:
-							"Conflicting launch ownership records. Worktrees will be kept.",
-					});
-				ownership.set(owned.path, owned);
-			}
-			if (launch.ownership === undefined)
-				for (const [folder, path] of Object.entries(launch.worktrees))
-					legacy.set(folder, path);
-		}
-		for (const [folder, path] of includeLegacy &&
-		launches.every((launch) => launch.ownership === undefined)
-			? legacy
+		for (const [folder, path] of includeLegacy
+			? Object.entries(snapshot.worktrees)
 			: []) {
-			const config = yield* Effect.serviceOption(ConfigTag);
 			if (config._tag === "None")
 				return yield* new SessionCommandError({
 					operation: "worktree.inspect",

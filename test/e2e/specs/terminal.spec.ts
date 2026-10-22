@@ -107,16 +107,59 @@ test.describe("Phone terminal controls", () => {
 		await tabs.evaluate((node) => {
 			node.scrollLeft = 0;
 		});
-		const touch = await finger(page, tabs, { x: 0.35, y: 0 });
-		await touch.moveTo(-120, 0);
-		await touch.lift();
-		await expect
-			.poll(() => tabs.evaluate((node) => node.scrollLeft))
-			.toBeGreaterThan(0);
-		// Chromium rounds the scroll limit to whole pixels, unlike tab widths.
-		await expect(tabs.getByRole("tab").last()).toBeInViewport({ ratio: 0.99 });
-		for (const control of controls)
-			await expect(control).toBeInViewport({ ratio: 1 });
+		const readScrollGeometry = (node: Element) => {
+			const rectangle = ({ x, y, width, height }: DOMRect) => ({
+				x,
+				y,
+				width,
+				height,
+			});
+			const strip = node.getBoundingClientRect();
+			const terminalTabs = node.querySelectorAll('[role="tab"]');
+			const lastTab = terminalTabs
+				.item(terminalTabs.length - 1)
+				?.getBoundingClientRect();
+			return {
+				clientWidth: node.clientWidth,
+				scrollWidth: node.scrollWidth,
+				scrollLeft: node.scrollLeft,
+				strip: rectangle(strip),
+				lastTab: lastTab ? rectangle(lastTab) : null,
+			};
+		};
+		const initialScroll = await tabs.evaluate(readScrollGeometry);
+		const panDistance = -0.75 * initialScroll.clientWidth;
+		try {
+			const touch = await finger(page, tabs, { x: 0.35, y: 0 });
+			await touch.moveTo(panDistance, 0);
+			await touch.lift();
+			await expect
+				.poll(() => tabs.evaluate((node) => node.scrollLeft))
+				.toBeGreaterThan(0);
+			// Chromium rounds the scroll limit to whole pixels, unlike tab widths.
+			await expect(tabs.getByRole("tab").last()).toBeInViewport({
+				ratio: 0.99,
+			});
+			for (const control of controls)
+				await expect(control).toBeInViewport({ ratio: 1 });
+		} finally {
+			const finalScroll = await tabs
+				.evaluate(readScrollGeometry)
+				.catch((error: unknown) => ({ error: String(error) }));
+			await testInfo.attach("phone terminal tab scroll geometry", {
+				body: JSON.stringify(
+					{
+						initial: initialScroll,
+						scrollRange: initialScroll.scrollWidth - initialScroll.clientWidth,
+						requestedPanDistance: panDistance,
+						final: finalScroll,
+					},
+					null,
+					2,
+				),
+				contentType: "application/json",
+			});
+		}
 
 		// Arrow navigation reveals the focused tab; Delete closes it.
 		await tabs.getByRole("tab").first().focus();

@@ -119,6 +119,23 @@ export const RaiseWhy: Story = {
 		await expect(
 			canvas.getAllByTestId("surfacing-mark-reason-chip"),
 		).toHaveLength(3);
+		const pin = canvas
+			.getByTestId("surfacing-pin-26")
+			.querySelector(".pin-chip");
+		const label = canvas
+			.getByTestId("surfacing-msg-card")
+			.querySelector(".type-label");
+		const glyph = label?.querySelector(".glyph");
+		if (!pin || !label || !glyph)
+			throw new Error("Missing neutral pin or type label");
+		const expected = new Option().style;
+		expected.color = getComputedStyle(pin).getPropertyValue("--color-text");
+		await expect(getComputedStyle(pin).backgroundColor).toBe(expected.color);
+		await expect(getComputedStyle(label).color).toBe(expected.color);
+		expected.color = getComputedStyle(glyph).getPropertyValue(
+			"--color-text-dimmer",
+		);
+		await expect(getComputedStyle(glyph).color).toBe(expected.color);
 	},
 };
 export const RaiseWhyLight: Story = {

@@ -83,18 +83,29 @@ for (const mode of [
 			relayUrl,
 		}, testInfo) => {
 			await gotoRelay(page, relayUrl);
+			const sessionId = await page
+				.locator("#session-list .session-item.active")
+				.getAttribute("data-session-id");
+			if (!sessionId) throw new Error("missing open session id");
+			const row = page.locator(
+				`#session-list .session-item[data-session-id="${sessionId}"]`,
+			);
 			const messages = page.locator("#messages");
 			await messages.focus();
 			await page.keyboard.press("s");
+			if (mode.name === "phone") {
+				await expect(page.getByTestId("session-bar")).toBeHidden();
+				await page.getByTestId("settled-shelf-toggle").click();
+				await expect(row).toHaveAttribute("aria-label", /^Settled,/);
+				await row.click();
+			}
 			await expect(page.getByTestId("session-bar-state-chip")).toBeVisible();
 			await page.locator("#input").focus();
 			await page.keyboard.press("ControlOrMeta+Shift+E");
 			await expect(page.getByTestId("session-bar-state-chip")).toHaveCount(0);
 			await messages.focus();
 			await page.keyboard.press("p");
-			await expect(
-				page.locator('#session-list [title="Pinned session"]'),
-			).toHaveCount(1);
+			await expect(row).toHaveAttribute("aria-label", /(?:^|, )Pinned(?:,|$)/);
 			await page.keyboard.press("ControlOrMeta+Shift+E");
 			await expect(
 				page.getByRole("status").filter({ hasText: "Unpin to settle" }),
@@ -111,12 +122,18 @@ for (const mode of [
 				.getByTestId("session-bar")
 				.screenshot({ path: testInfo.outputPath("header-unpin.png") });
 			await headerCommand.click();
-			await expect(
-				page.locator('#session-list [title="Pinned session"]'),
-			).toHaveCount(0);
+			await expect(row).not.toHaveAttribute(
+				"aria-label",
+				/(?:^|, )Pinned(?:,|$)/,
+			);
 			await expect(headerCommand).toHaveAccessibleName("Settle");
 			await headerCommand.click();
-			await expect(page.getByTestId("session-bar-state-chip")).toBeVisible();
+			if (mode.name === "phone") {
+				await expect(page.getByTestId("session-bar")).toBeHidden();
+				await expect(row).toHaveAttribute("aria-label", /^Settled,/);
+			} else {
+				await expect(page.getByTestId("session-bar-state-chip")).toBeVisible();
+			}
 		});
 
 		test("transcript commands target the open session while composer letters remain text", async ({
@@ -160,14 +177,19 @@ for (const mode of [
 			relayUrl,
 		}) => {
 			await gotoRelay(page, new URL("/", relayUrl).toString());
-			const row = page.locator("#session-list .session-item").first();
-			await expect(row).toBeVisible();
+			const firstRow = page.locator("#session-list .session-item").first();
+			await expect(firstRow).toBeVisible();
+			const sessionId = await firstRow.getAttribute("data-session-id");
+			if (!sessionId) throw new Error("missing focused session id");
+			const row = page.locator(
+				`#session-list .session-item[data-session-id="${sessionId}"]`,
+			);
 			await row.focus();
 			await page.keyboard.press("p");
-			await expect(row.locator('[title="Pinned session"]')).toHaveCount(1);
+			await expect(row).toHaveAccessibleName(/(?:^|, )Pinned(?:,|$)/);
 			await row.focus();
 			await page.keyboard.press("p");
-			await expect(row.locator('[title="Pinned session"]')).toHaveCount(0);
+			await expect(row).not.toHaveAccessibleName(/(?:^|, )Pinned(?:,|$)/);
 			await row.focus();
 			await page.keyboard.press("z");
 			await expect(page.getByTestId("snooze-option-indefinite")).toBeVisible();

@@ -122,9 +122,10 @@
 	});
 </script>
 
+<div class={className}>
 {#if presentation?.fileChange}
 	{@const change = presentation.fileChange}
-	<div data-testid="tool-file-change" class="mx-2.5 my-1 overflow-x-auto">
+	<div data-testid="tool-file-change" class="my-1 overflow-x-auto">
 		<div class="font-mono text-xs text-text-secondary">{change.filePath}</div>
 		<div class="diff-stats flex gap-3 text-xs">
 			{#if change.linesAdded !== undefined}<span class="text-success">+{change.linesAdded}</span>{/if}
@@ -135,7 +136,7 @@
 		{#if input?.tool === "Write"}<pre class="tool-result font-mono text-xs whitespace-pre-wrap text-text-secondary">{input.content}</pre>{/if}
 	</div>
 {:else if presentation?.plan}
-	<section data-testid="tool-plan" class="mx-2.5 my-1">
+	<section data-testid="tool-plan" class="my-1">
 		{#if presentation.plan.title}<h3 class="text-sm font-medium">{presentation.plan.title}</h3>{/if}
 		<div class="md-content text-xs">{@html renderMarkdown(presentation.plan.content)}</div>
 	</section>
@@ -143,14 +144,14 @@
 	{@render children(shown)}
 {/if}
 {#if presentation?.computerUse}
-	<ol data-testid="tool-computer-actions" class="mx-2.5 my-1 list-decimal list-inside font-mono text-xs text-text-secondary">
+	<ol data-testid="tool-computer-actions" class="my-1 list-decimal list-inside font-mono text-mono-xs text-text-secondary">
 		{#each presentation.computerUse.actions as action}
 			<li>{JSON.stringify(action)}</li>
 		{/each}
 	</ol>
 {/if}
 {#each presentation?.media ?? [] as media}
-	<div data-testid="tool-media" class="mx-2.5 my-1">
+	<div data-testid="tool-media" class="my-1">
 		{#if media.url?.startsWith("data:image/") && media.mime.startsWith("image/")}
 			<img src={media.url} alt={presentation?.computerUse ? "Computer screenshot" : media.path ?? "Generated image"} class="max-w-full rounded" />
 		{:else if media.url?.startsWith("data:video/") && media.mime.startsWith("video/")}
@@ -161,21 +162,21 @@
 	</div>
 {/each}
 {#if presentation?.movedToBackground}
-	<div data-testid="tool-moved-to-background" class="mx-2.5 text-xs text-text-muted">Moved to background. The command may still be running.</div>
+	<div data-testid="tool-moved-to-background" class="text-xs text-text-muted">Moved to background. The command may still be running.</div>
 {:else if presentation?.exitCode !== undefined}
-	<div data-testid="tool-exit-code" class="mx-2.5 text-xs text-text-muted">Exit code {presentation.exitCode}</div>
+	<div data-testid="tool-exit-code" class="text-xs text-text-muted">Exit code {presentation.exitCode}</div>
 {/if}
 {#if presentation?.truncated}
-	<div data-testid="tool-truncated" class="mx-2.5 text-xs text-text-muted">Output truncated</div>
+	<div data-testid="tool-truncated" class="text-xs text-text-muted">Output truncated</div>
 {/if}
 {#if input?.tool === "Unknown"}
-	<details class="mx-2.5 my-1 text-xs text-text-muted">
+	<details class="my-1 text-xs text-text-muted">
 		<summary class="cursor-pointer">Arguments</summary>
 		<pre class="font-mono whitespace-pre-wrap break-all">{JSON.stringify(input.raw, null, 2)}</pre>
 	</details>
 {/if}
 {#if cut && !full}
-	<div class="tool-full-detail flex items-center gap-2 text-xs text-text-dimmer {className}">
+	<div class="tool-full-detail flex items-center gap-2 text-xs text-text-dimmer">
 		{#if failed}
 			<span>{failureLine(failure, `Couldn't load the full ${cut}.`)}</span>
 			<Button
@@ -191,3 +192,4 @@
 		{/if}
 	</div>
 {/if}
+</div>

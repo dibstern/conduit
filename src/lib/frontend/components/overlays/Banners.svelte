@@ -144,16 +144,17 @@
 {#if visibleBanners.length > 0}
 	<div class="banners flex flex-col">
 		{#each visibleBanners as banner (banner.id)}
+			{@const leadEnd = banner.text.indexOf(". ")}
 			<div
 				class="banner flex items-center {presentation === 'session-header' ? 'min-h-[34px] gap-[8px] pl-[20px] pr-[12px] py-[5px] text-[12.5px] text-text' : `gap-2 px-4 py-2 text-xs border-b ${bannerTone(banner.variant)}`} {getVariantClasses(banner.variant)}"
 				data-banner-id={banner.id}
 				data-banner-variant={banner.variant}
 			>
 				<span class="banner-icon shrink-0 {presentation === 'session-header' ? bannerTone(banner.variant) : ''}">
-					<Icon name={banner.icon} size={14} />
+					<Icon name={presentation === "session-header" && banner.variant === "skip-permissions" ? "lock" : banner.icon} size={presentation === "session-header" ? 16 : 14} />
 				</span>
 				<span class="banner-text flex-1 min-w-0">
-					{banner.text}
+					{#if presentation === "session-header" && leadEnd !== -1}<b class="font-semibold">{banner.text.slice(0, leadEnd + 1)}</b>{" "}{banner.text.slice(leadEnd + 2)}{:else}{banner.text}{/if}
 				</span>
 				{#if banner.link}
 					<a

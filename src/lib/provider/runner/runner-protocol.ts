@@ -65,6 +65,8 @@ export interface RunnerHello {
 	// Runners that predate stop-task acknowledge it without stopping anything,
 	// and they also speak this protocol version, so the daemon needs the flag.
 	readonly stopsTasks?: true;
+	/** Every event produced by a send carries its conduit run identity. */
+	readonly stampsRunIds?: true;
 	readonly taggedConfigDir?: true;
 	readonly bindings?: readonly {
 		readonly sinkId: string;
@@ -231,6 +233,12 @@ export class RunnerSocket {
 	private failure: SessionFailure | undefined;
 	private idleExiting = false;
 	private peerTaggedConfigDir = false;
+	/** Temporary old-runner adapter, installed by the hello compatibility decision. */
+	legacyResult?: (
+		commandId: string,
+		attempt: number | undefined,
+		result: TurnResult | undefined,
+	) => Effect.Effect<void, SessionFailure>;
 
 	constructor(
 		private readonly socket: Socket,
@@ -383,6 +391,19 @@ export class RunnerSocket {
 						reply.failure && message.type === "command"
 							? (this.beforeCommandFailure?.() ?? Effect.void)
 							: Effect.void;
+					if (
+						this.legacyResult &&
+						!reply.failure &&
+						message.type === "command" &&
+						message.command.type === "send-turn"
+					) {
+						resume(
+							(this.beforeCommandFailure?.() ?? Effect.void).pipe(
+								Effect.as(reply.result as A),
+							),
+						);
+						return;
+					}
 					resume(
 						reply.failure
 							? precedingOutputs.pipe(

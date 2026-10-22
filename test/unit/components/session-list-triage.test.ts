@@ -199,7 +199,7 @@ describe("session triage list", () => {
 		expect(localStorage.getItem("snoozed-shelf-open")).toBe("true");
 		const row = screen.getByText("Sleeping work").closest("a");
 		expect(row?.querySelector(".session-item-meta")?.textContent).toBe(
-			formatSnoozeTime(until, sessionState.now),
+			formatSnoozeTime(until, sessionState.now, "short"),
 		);
 		expect(row?.querySelector(".session-item-status")).toBeNull();
 	});
@@ -240,7 +240,7 @@ describe("session triage list", () => {
 		const { container } = render(SessionList);
 		expect(screen.getAllByText(/^Settled task/)).toHaveLength(2);
 		expect(screen.getByTestId("settled-shelf-more").textContent).toContain(
-			"+ 2 more",
+			"2 more",
 		);
 		await fireEvent.click(screen.getByTestId("settled-shelf-more"));
 		expect(screen.getAllByText(/^Settled task/)).toHaveLength(4);

@@ -116,8 +116,10 @@ export class CodexInteractions {
 							{ answers: {} },
 							Effect.gen({ self: this }, function* () {
 								if (!this.matches(request)) return { answers: {} };
+								const runId = this.state().runId;
 								const answers = yield* this.sink.requestQuestion({
 									requestId: request.itemId,
+									...(runId ? { runId } : {}),
 									toolUseId: request.itemId,
 									questions: request.questions.map((question) => ({
 										question: question.question,
@@ -242,8 +244,10 @@ export class CodexInteractions {
 				)
 					return yield* decline("required field is absent from the schema");
 				if (!fields.length) {
+					const runId = this.state().runId;
 					const { decision } = yield* this.sink.requestPermission({
 						requestId,
+						...(runId ? { runId } : {}),
 						providerItemId: requestId,
 						sessionId: this.state().sessionId,
 						turnId: this.state().turnId,
@@ -302,8 +306,10 @@ export class CodexInteractions {
 						return yield* decline(`unsupported options for ${name}`);
 					parsed.push({ name, field: value, options });
 				}
+				const runId = this.state().runId;
 				const answers = yield* this.sink.requestQuestion({
 					requestId,
+					...(runId ? { runId } : {}),
 					toolUseId: requestId,
 					questions: parsed.map(({ name, field, options }) => ({
 						header: field.title ?? name,
@@ -463,8 +469,10 @@ export class CodexInteractions {
 											"command" in request ? (request.command ?? "") : "",
 										cwd: "cwd" in request ? request.cwd : undefined,
 									};
+						const runId = this.state().runId;
 						const { decision } = yield* this.sink.requestPermission({
 							requestId,
+							...(runId ? { runId } : {}),
 							providerItemId: request.itemId,
 							sessionId: this.state().sessionId,
 							turnId: this.state().turnId,

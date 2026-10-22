@@ -74,6 +74,14 @@ export const ExpandedResult: Story = {
 		await expect(canvasElement.querySelector(".tool-result")).toHaveTextContent(
 			"authenticate(token: string)",
 		);
+		const header = canvasElement.querySelector(".tool-header");
+		const result = canvasElement.querySelector(".tool-result");
+		if (!header || !result) throw new Error("Missing expanded tool result");
+		expect(
+			result.getBoundingClientRect().left - header.getBoundingClientRect().left,
+		).toBe(22);
+		expect(getComputedStyle(result).borderWidth).toBe("0px");
+		expect(getComputedStyle(result).fontSize).toBe("11.04px");
 	},
 };
 
@@ -147,6 +155,27 @@ export const Hover: Story = {
 export const Final: Story = {
 	args: { message: { ...mockToolCompleted, createdAt: 1000, endedAt: 6200 } },
 	globals: { theme: "dark" },
+	play: async ({ canvasElement }) => {
+		const row = canvasElement.querySelector(".tool-header");
+		const verb = canvasElement.querySelector(".tool-name");
+		const argument = canvasElement.querySelector(".tool-desc");
+		const time = canvasElement.querySelector("time");
+		if (!row || !verb || !argument || !time)
+			throw new Error("Missing tool row");
+		expect(row.getBoundingClientRect().height).toBe(26);
+		expect(getComputedStyle(verb).fontSize).toBe("12.5px");
+		expect(getComputedStyle(verb).fontWeight).toBe("400");
+		expect(getComputedStyle(argument).fontSize).toBe("11.5px");
+		expect(getComputedStyle(time).fontSize).toBe("10.12px");
+		const expected = document.createElement("span").style;
+		expected.color =
+			getComputedStyle(verb).getPropertyValue("--color-text-muted");
+		expect(getComputedStyle(verb).color).toBe(expected.color);
+		expected.color = getComputedStyle(argument).getPropertyValue(
+			"--color-text-dimmer",
+		);
+		expect(getComputedStyle(argument).color).toBe(expected.color);
+	},
 };
 export const FinalLight: Story = { ...Final, globals: { theme: "light" } };
 export const ExpandedResultLight: Story = {

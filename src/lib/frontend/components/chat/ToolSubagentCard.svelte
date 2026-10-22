@@ -111,10 +111,10 @@
 		title={subagentSessionId ? "Open subagent session" : undefined}
 	>
 		<span class="tool-status-icon shrink-0 text-text-dimmer"><Icon name="git-fork" size={14} /></span>
-		<span class="shrink-0 font-semibold">{toolVerb(message, running ? "present" : "past")}</span>
+		<span class="tool-name shrink-0 font-normal text-text-muted">{toolVerb(message, running ? "present" : "past")}</span>
 		<Badge variant="tag" size="sm" class="agent-title shrink-0 font-mono capitalize select-text">{agentLabel}</Badge>
-		<span class="subagent-link flex-1 min-w-0 truncate font-mono text-[12.5px] select-text">{agentDescription}</span>
-		{#if duration !== undefined}<time class="ml-auto shrink-0 font-mono text-[12px] text-text-dimmer">{fmtDuration(duration)}</time>{/if}
+		<span class="subagent-link flex-1 min-w-0 truncate font-mono text-mono-code text-text-dimmer select-text">{agentDescription}</span>
+		{#if duration !== undefined}<time class="ml-auto shrink-0 font-mono text-mono-time text-text-dimmer">{fmtDuration(duration)}</time>{/if}
 		{#if running}<BlockGrid cols={4} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
 		{:else if message.status === "error" || message.isError || childOutcome === "failed"}<span class="shrink-0 text-error"><Icon name="circle-alert" size={12} /></span>{/if}
 

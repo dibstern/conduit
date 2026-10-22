@@ -538,7 +538,7 @@ describe("Claude session process runner", () => {
 	it.each([
 		"interrupt",
 		"interrupt-before-snapshot",
-	] as const)("settles a notification-driven parent turn without a send waiter on %s", async (action) => {
+	] as const)("stops notification activity without reopening its completed turn on %s", async (action) => {
 		const harness = await ProcessHarness.start({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 			restartProof: true,
@@ -563,8 +563,10 @@ describe("Claude session process runner", () => {
 		writeFileSync(join(harness.root, "release-notification-parent"), "release");
 		await vi.waitFor(() => {
 			const state = persisted(harness, sessionId);
-			expect(state.session.status).toBe("busy");
-			expect(state.turns).toMatchObject([{ state: "running" }]);
+			// Run ownership contract, docs/plans/2026-10-19-run-ownership.md:5,15:
+			// delayed output retains its ended run; adapter activity cannot make it busy.
+			expect(state.session.status).toBe("idle");
+			expect(state.turns).toMatchObject([{ state: "completed" }]);
 			expect(
 				state.events.some(
 					(event) =>
@@ -577,24 +579,52 @@ describe("Claude session process runner", () => {
 			).toBe(true);
 		});
 		const held = persisted(harness, sessionId);
-		if (action === "interrupt-before-snapshot") {
-			await vi.waitFor(() =>
-				expect(
-					sdkProof(harness).some(
-						(mark) =>
-							mark.kind === "notification-turn" && mark.phase === "stream-held",
-					),
-				).toBe(true),
-			);
-			const streamHeld = sdkProof(harness).find(
+		const notification = held.events.find(
+			(event) =>
+				event.type === "text.delta" &&
+				typeof event.data === "object" &&
+				event.data !== null &&
+				"text" in event.data &&
+				event.data.text === "Notification parent message.",
+		);
+		if (
+			!notification ||
+			typeof notification.data !== "object" ||
+			notification.data === null ||
+			!("messageId" in notification.data)
+		)
+			throw new Error("Missing notification message");
+		const notificationMessageId = notification.data.messageId;
+		const heldPhase =
+			action === "interrupt-before-snapshot" ? "stream-held" : "held";
+		await vi.waitFor(() =>
+			expect(
+				sdkProof(harness).some(
+					(mark) =>
+						mark.kind === "notification-turn" &&
+						mark.phase === heldPhase &&
+						mark.messageId === notificationMessageId,
+				),
+			).toBe(true),
+		);
+		const activity = sdkProof(harness).find(
+			(mark) =>
+				mark.kind === "notification-turn" &&
+				mark.phase === heldPhase &&
+				mark.messageId === notificationMessageId,
+		);
+		if (activity?.kind !== "notification-turn")
+			throw new Error("Missing held notification proof");
+		expect(
+			sdkProof(harness).some(
 				(mark) =>
-					mark.kind === "notification-turn" && mark.phase === "stream-held",
-			);
-			if (streamHeld?.kind !== "notification-turn")
-				throw new Error("Missing pre-snapshot notification proof");
-			expect(streamHeld.snapshotUuid).toEqual(expect.any(String));
-			expect(streamHeld.snapshotUuid).not.toBe(streamHeld.messageId);
-			expect(held.turns[0]?.assistant_message_id).toBe(streamHeld.messageId);
+					mark.kind === "query-closed" && mark.queryId === activity.queryId,
+			),
+		).toBe(false);
+		if (action === "interrupt-before-snapshot") {
+			expect(activity.snapshotUuid).toEqual(expect.any(String));
+			expect(activity.snapshotUuid).not.toBe(activity.messageId);
+			expect(notificationMessageId).toBe(activity.messageId);
 			expect(
 				sdkProof(harness).filter(
 					(mark) =>
@@ -625,7 +655,14 @@ describe("Claude session process runner", () => {
 				() => {
 					const state = persisted(harness, sessionId);
 					expect(state.session.status).toBe("idle");
-					expect(state.turns).toMatchObject([{ state: "interrupted" }]);
+					expect(
+						sdkProof(harness).filter(
+							(mark) =>
+								mark.kind === "query-closed" &&
+								mark.queryId === activity.queryId,
+						),
+					).toHaveLength(1);
+					expect(state.turns).toMatchObject([{ state: "completed" }]);
 					expect(state.turns[0]?.assistant_message_id).toBe(
 						held.turns[0]?.assistant_message_id,
 					);
@@ -635,7 +672,7 @@ describe("Claude session process runner", () => {
 					).toEqual([
 						expect.objectContaining({
 							data: expect.objectContaining({
-								messageId: held.turns[0]?.assistant_message_id,
+								messageId: notificationMessageId,
 							}),
 						}),
 					]);

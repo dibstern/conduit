@@ -51,6 +51,7 @@ import {
 	SessionEventBusLive,
 	type SessionEventBusTag,
 } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { subscribeSessionFamily } from "../../../src/lib/domain/relay/Services/session-family-subscription.js";
 import { persistSessionPermissionMode } from "../../../src/lib/domain/relay/Services/session-manager-permission-mode.js";
 import { deleteSession } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
@@ -346,6 +347,153 @@ const takeN = <A>(q: Queue.Queue<A>, n: number): Effect.Effect<A[]> =>
 const SID = "session-shell";
 
 describe("subscribeShell", () => {
+	for (const kind of ["root", "child", "side-thread"] as const) {
+		it.effect(
+			"Stop availability advances the live sidebar when a retained steer becomes indeterminate or is placed" +
+				(kind === "root" ? "" : ` (${kind})`),
+			() =>
+				Effect.gen(function* () {
+					yield* recoverProjections;
+					const sql = yield* SqlClient.SqlClient;
+					const write = yield* makeCommitAndSignal;
+					const meta = (runId: string) => ({
+						provider: "claude",
+						metadata: { runId },
+					});
+					yield* write([
+						...(kind === "root"
+							? [sessionCreated(SID)]
+							: [
+									sessionCreated("parent"),
+									canonicalEvent("session.created", SID, {
+										sessionId: SID,
+										title: "Child",
+										provider: "claude",
+										parentId: "parent",
+										sideThread: kind === "side-thread",
+									}),
+								]),
+						canonicalEvent(
+							"run.requested",
+							SID,
+							{ runId: "reply-run", inputId: "reply" },
+							meta("reply-run"),
+						),
+						canonicalEvent(
+							"message.created",
+							SID,
+							{
+								sessionId: SID,
+								messageId: "reply",
+								inputId: "reply",
+								role: "user",
+							},
+							meta("reply-run"),
+						),
+						canonicalEvent(
+							"run.started",
+							SID,
+							{ inputId: "reply", requestedRunId: "reply-run" },
+							meta("reply-run"),
+						),
+						canonicalEvent("input.admitted", SID, {
+							sessionId: SID,
+							inputId: "steer",
+							delivery: "steer",
+							request: { text: "Correction" },
+						}),
+						canonicalEvent("input.sent", SID, {
+							sessionId: SID,
+							inputId: "steer",
+							steer: true,
+						}),
+						canonicalEvent(
+							"run.requested",
+							SID,
+							{ runId: "steer-run", inputId: "steer" },
+							meta("steer-run"),
+						),
+					]);
+					yield* write.write((_, stamp) =>
+						Effect.gen(function* () {
+							yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at)
+					VALUES (1, 'steer', 'test-project', ${SID}, 'claude', 'send_turn', 'steer-run', '{}', 'running', 1, 1, 1)`;
+							yield* stamp((version) =>
+								sql<{
+									id: string;
+								}>`UPDATE sessions SET version = ${version} WHERE id = ${SID} RETURNING id`.pipe(
+									Effect.map((rows) => rows.map(({ id }) => id)),
+								),
+							);
+						}),
+					);
+					const q = yield* Queue.unbounded<Envelope<SessionInfo>>();
+					const stream =
+						kind === "root"
+							? subscribeShell()
+							: subscribeSessionFamily({ sessionId: SID });
+					yield* Stream.runForEach(stream, (envelope) =>
+						envelope._tag === "projects" ||
+						(envelope._tag === "upsert" && envelope.item.id !== SID)
+							? Effect.void
+							: Queue.offer(q, envelope),
+					).pipe(Effect.forkScoped);
+					yield* takeN(q, 2);
+					yield* write([
+						canonicalEvent(
+							"turn.completed",
+							SID,
+							{ messageId: "reply-answer" },
+							meta("reply-run"),
+						),
+					]);
+					expect(yield* Queue.take(q)).toMatchObject({
+						_tag: "upsert",
+						item: { id: SID, status: "busy", canStop: false },
+					});
+					yield* write.write((_, stamp) =>
+						Effect.gen(function* () {
+							yield* sql`UPDATE provider_command_outbox SET error_code = 'delivery_indeterminate' WHERE command_id = 'steer'`;
+							yield* stamp((version) =>
+								sql<{
+									id: string;
+								}>`UPDATE sessions SET version = ${version} WHERE id = ${SID} RETURNING id`.pipe(
+									Effect.map((rows) => rows.map(({ id }) => id)),
+								),
+							);
+						}),
+					);
+					yield* Effect.yieldNow;
+					yield* Effect.yieldNow;
+					expect(yield* Queue.size(q)).toBe(1);
+					expect(yield* Queue.take(q)).toMatchObject({
+						_tag: "upsert",
+						item: { id: SID, status: "busy", canStop: true },
+					});
+					yield* write([
+						canonicalEvent(
+							"message.created",
+							SID,
+							{
+								sessionId: SID,
+								messageId: "steer",
+								inputId: "steer",
+								role: "user",
+							},
+							meta("steer-run"),
+						),
+					]);
+					expect(yield* Queue.take(q)).toMatchObject({
+						_tag: "upsert",
+						item: { id: SID, status: "busy", canStop: true },
+					});
+					expect(
+						yield* sql`SELECT status, started_at FROM provider_runs WHERE id = 'steer-run'`,
+					).toEqual([{ status: "pending", started_at: null }]);
+				}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+		);
+	}
+
 	it.effect(
 		"a project's sidebar ignores another project's committed advance",
 		() =>
@@ -608,11 +756,25 @@ describe("subscribeShell", () => {
 			yield* commit([
 				...forkSourceEvents("claude-parent"),
 				messageCreated("claude-parent", "ui-tip", 1000),
+				canonicalEvent("run.requested", "claude-parent", {
+					runId: "parent-run",
+					inputId: "ui-tip",
+				}),
+				canonicalEvent(
+					"run.started",
+					"claude-parent",
+					{ inputId: "ui-tip", requestedRunId: "parent-run" },
+					{ metadata: { runId: "parent-run" } },
+				),
 				canonicalEvent(
 					"turn.completed",
 					"claude-parent",
 					{ messageId: "ui-tip" },
-					{ provider: "claude", createdAt: at() },
+					{
+						provider: "claude",
+						createdAt: at(),
+						metadata: { runId: "parent-run" },
+					},
 				),
 			]);
 			const state = yield* ProviderStateEffectTag;
@@ -1347,12 +1509,36 @@ describe("subscribeShell", () => {
 				yield* recoverProjections;
 				yield* commitThroughSeam([
 					sessionCreated(SID),
-					messageCreated(SID, "m1"),
+					canonicalEvent("run.requested", SID, {
+						runId: "seen-run",
+						inputId: "m1",
+					}),
+					canonicalEvent(
+						"message.created",
+						SID,
+						{
+							sessionId: SID,
+							messageId: "m1",
+							inputId: "m1",
+							role: "user",
+						},
+						{
+							provider: "claude",
+							createdAt: at(),
+							metadata: { runId: "seen-run" },
+						},
+					),
+					canonicalEvent(
+						"run.started",
+						SID,
+						{ inputId: "m1", requestedRunId: "seen-run" },
+						{ metadata: { runId: "seen-run" } },
+					),
 					canonicalEvent(
 						"turn.completed",
 						SID,
 						{ messageId: "m1" },
-						{ provider: "claude" },
+						{ provider: "claude", metadata: { runId: "seen-run" } },
 					),
 				]);
 

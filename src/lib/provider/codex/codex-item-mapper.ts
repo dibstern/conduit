@@ -202,6 +202,7 @@ function toolCompletion(
 
 export interface CodexItemState {
 	readonly sessionId: string;
+	readonly runId?: string | undefined;
 	readonly turnId: string;
 	readonly messageId: string;
 	readonly providerId: string;
@@ -696,6 +697,7 @@ export function codexRuntimeEvent<
 			type,
 			providerId: state.providerId,
 			sessionId: state.sessionId,
+			...(state.runId ? { runId: state.runId } : {}),
 			turnId: state.turnId,
 			providerRefs: {
 				providerSessionId: state.threadId,
@@ -722,6 +724,7 @@ export function recordCodexTurnRefs(state: CodexItemState, completed = false) {
 			sessionId: state.sessionId,
 			messageId,
 			role,
+			...(role === "assistant" ? { parentID: state.turnId } : {}),
 		});
 		next = items;
 		events.push({
@@ -742,6 +745,7 @@ function codexMessageSnapshot(
 		id: state.messageId,
 		sessionID: state.sessionId,
 		role: "assistant",
+		parentID: state.turnId,
 		parts: state.parts.map((part) =>
 			part.kind === "tool"
 				? {

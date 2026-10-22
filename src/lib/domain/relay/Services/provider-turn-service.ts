@@ -13,9 +13,8 @@ import {
 	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
-import { SqlError, UnknownError } from "effect/sql/SqlError";
+import type { SqlError } from "effect/sql/SqlError";
 import type { Account } from "../../../contracts/account.js";
-import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
 import type { InputDelivery } from "../../../contracts/stored-event.js";
 import type {
 	ClaudeEventPersistEffectTag,
@@ -25,10 +24,9 @@ import type { EventStoreEffectTag } from "../../../persistence/effect/event-stor
 import type { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import type { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
 import type { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
-import {
-	type CanonicalEvent,
-	createEventId,
-} from "../../../persistence/events.js";
+import type { CanonicalEvent } from "../../../persistence/events.js";
+import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
+import { settleSessionRuns } from "../../../provider/session-run-settlement.js";
 import type { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import type { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import type { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
@@ -48,6 +46,7 @@ import {
 import {
 	completeRecoveredQuestion,
 	interruptTurn,
+	prepareStop,
 	prepareTurnSession,
 } from "./provider-turn-session.js";
 import type {
@@ -114,6 +113,7 @@ export const STOP_ABORT_WAIT_MS = 30_000;
 
 type StopFailure =
 	| Effect.Error<ReturnType<typeof interruptTurn>>
+	| Effect.Error<ReturnType<typeof prepareStop>>
 	| ProviderRuntimeIngestionError
 	| SqlError;
 
@@ -156,7 +156,7 @@ export interface ProviderTurnService {
 	/** Install the session's Stop fence and fork its abort, or join the Stop in
 	 *  flight. Call under the inbox session permit: that orders the Stop against
 	 *  every handoff, and its admission cut-off excludes later ones from the
-	 *  abort. The returned effect awaits the stopped turn's end. */
+	 *  abort. Every caller awaits the same stopped turn's end or interrupt failure. */
 	readonly beginStop: (
 		input: ProviderTurnServiceInterruptInput,
 	) => Effect.Effect<Effect.Effect<void, StopFailure>>;
@@ -191,6 +191,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 		| EventStoreEffectTag
 		| ProjectionRunnerEffectTag
 	>();
+	const registry = yield* Effect.serviceOption(ProviderRegistryTag);
 	const sql = yield* SqlClient.SqlClient;
 	const ingestion = yield* ProviderRuntimeIngestionTag;
 	const scope = yield* Effect.scope;
@@ -204,58 +205,24 @@ const makeProviderTurnService = Effect.gen(function* () {
 	const lift = (sessionId: string) => PubSub.publish(lifts, sessionId);
 	const abort = (
 		input: ProviderTurnServiceInterruptInput,
-		cutoff: Result.Result<{ turn: number; admission: number }, SqlError>,
+		cutoff: Result.Result<
+			Effect.Success<ReturnType<typeof prepareStop>>,
+			Effect.Error<ReturnType<typeof prepareStop>>
+		>,
 	) =>
 		Effect.gen(function* () {
-			// Read under the inbox permit: a continuation admitted since is not ours.
-			const { turn: lastTurn, admission } = yield* Effect.fromResult(cutoff);
-			const [turn] = yield* sql<{ input_id: string | null }>`
-				SELECT COALESCE((SELECT json_extract(payload_json, '$.inputId')
-					FROM provider_command_outbox
-					WHERE session_id = ${input.sessionId} AND effect_type = 'send_turn'
-					AND request_sequence <= ${admission}
-					AND (json_extract(payload_json, '$.inputId') = turns.user_message_id
-						OR json_extract(payload_json, '$.continuation.cutOffMessageId') = turns.user_message_id)
-					ORDER BY request_sequence DESC LIMIT 1), user_message_id) AS input_id
-				FROM turns WHERE session_id = ${input.sessionId} AND rowid <= ${lastTurn}
-				ORDER BY requested_at DESC, rowid DESC LIMIT 1`;
-			const admitted = yield* sql<{ input_id: string }>`
-				SELECT json_extract(payload_json, '$.inputId') AS input_id
-				FROM provider_command_outbox WHERE session_id = ${input.sessionId}
-				AND effect_type = 'send_turn' AND status IN ('pending', 'running', 'retryable_failed')
-				AND request_sequence <= ${admission}
-				ORDER BY request_sequence DESC`;
-			// SDK started precedes message placement. Include admissions even with
-			// an older projected turn; the runtime confirms which one is active.
-			const turnIds = [
-				...new Set(
-					[...admitted.map((row) => row.input_id), turn?.input_id].filter(
-						(id): id is string => typeof id === "string",
-					),
-				),
-			];
-			// The Stop lasts until the stopped work ends, not until the provider
-			// acknowledges it. A later admission owns whatever activity remains.
-			const later = sql`EXISTS (SELECT 1 FROM provider_command_outbox
-				WHERE session_id = ${input.sessionId} AND effect_type = 'send_turn'
-				AND request_sequence > ${admission})`;
-			// A pre-echo admission keeps the inbox busy until its executor settles.
-			// Retirement must not release it while that executor can still send.
-			const running = sql<{ running: number }>`SELECT NOT ${later}
-				AND (EXISTS (SELECT 1 FROM turns WHERE session_id = ${input.sessionId}
-						AND state IN ('pending', 'running'))
-					OR EXISTS (SELECT 1 FROM sessions WHERE id = ${input.sessionId}
-						AND status IN ('busy', 'retry'))) AS running`.pipe(
-				Effect.map(([row]) => row?.running === 1),
-			);
-			const ended = yield* interruptTurn(
-				input,
-				turnIds.length > 0 ? turnIds : undefined,
-			).pipe(
-				// Polled: the predicate spans turns, session status and the outbox,
-				// and no one signal covers them. Advances need the optional session
-				// bus and only name projected sessions, so an admission or a direct
-				// write would go unseen. The read is cheap and lasts only while stopping.
+			const snapshot = yield* Effect.fromResult(cutoff);
+			if (snapshot.owners.length === 0 && snapshot.retainedSteers) return;
+			const running =
+				snapshot.owners.length === 0
+					? Effect.succeed(false)
+					: sql<{ running: number }>`
+			SELECT EXISTS (SELECT 1 FROM provider_runs WHERE session_id = ${input.sessionId}
+				AND id IN ${sql.in(snapshot.owners.map(({ runId }) => runId))}
+				AND status IN ('pending', 'running')) AS running`.pipe(
+							Effect.map(([row]) => row?.running === 1),
+						);
+			const ended = yield* interruptTurn(input, snapshot).pipe(
 				Effect.andThen(
 					Effect.repeat(running, {
 						while: (still) => still,
@@ -265,54 +232,15 @@ const makeProviderTurnService = Effect.gen(function* () {
 				Effect.timeoutOption(STOP_ABORT_WAIT_MS),
 			);
 			if (Option.isSome(ended) || !(yield* running)) return;
-			// The provider never ended the turn. Retire it, so it holds no admission.
-			const event = <K extends ProviderRuntimeEvent["type"]>(
-				type: K,
-				data: Record<string, unknown>,
-			) => ({
-				eventId: createEventId(),
-				type,
-				providerId: "conduit",
-				sessionId: input.sessionId,
-				providerRefs: {},
-				rawSource: { kind: "conduit.stop-bound" },
-				createdAt: Date.now(),
-				data,
-			});
-			// The projection ends whichever turn is open, so a continuation admitted
-			// since the last check would end with it. Re-check in the transaction.
-			// Transaction spans can proxy the error; its cause token keeps its identity.
-			const supersededReason = new UnknownError({
-				message: "Stop retirement superseded",
-				cause: Symbol("Stop retirement superseded"),
-			});
-			const superseded = new SqlError({ reason: supersededReason });
-			yield* ingestion
-				.ingestBatch(
-					[
-						event("turn.interrupted", { messageId: "" }),
-						event("session.status", {
-							sessionId: input.sessionId,
-							status: "idle",
-						}),
-					],
-					{
-						beforeCommit: Effect.gen(function* () {
-							const [row] = yield* sql<{
-								later: number;
-							}>`SELECT ${later} AS later`;
-							if (row?.later === 1) return yield* Effect.fail(superseded);
-						}),
-					},
-				)
-				.pipe(
-					Effect.catchIf(
-						(error) =>
-							error._tag === "SqlError" &&
-							error.reason.cause === supersededReason.cause,
-						() => Effect.void,
-					),
-				);
+			// Explicit Stop retirement uses the same owned settlement as confirmed
+			// native Stop. It can never consume a reservation claimed afterwards.
+			yield* settleSessionRuns(
+				sql,
+				input.sessionId,
+				"Stopped by the user",
+				(events) => ingestion.ingestBatch(events),
+				{ owners: snapshot.owners },
+			);
 		});
 	const service: ProviderTurnService = {
 		holdUserTurnsForAccountSwitch: (sessionId) =>
@@ -358,17 +286,26 @@ const makeProviderTurnService = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const existing = stopping.get(input.sessionId);
 					if (existing) return Deferred.await(existing);
-					const cutoff = yield* sql<{ turn: number; admission: number }>`SELECT
-						(SELECT COALESCE(MAX(rowid), 0) FROM turns
-							WHERE session_id = ${input.sessionId}) AS turn,
-						(SELECT COALESCE(MAX(request_sequence), 0) FROM provider_command_outbox
-							WHERE session_id = ${input.sessionId}) AS admission`.pipe(
-						Effect.map(([row]) => row ?? { turn: 0, admission: 0 }),
+					const cutoff = yield* prepareStop(input).pipe(
+						Effect.provide(providedContext),
 						Effect.result,
 					);
 					const done = yield* Deferred.make<void, StopFailure>();
 					stopping.set(input.sessionId, done);
 					yield* abort(input, cutoff).pipe(
+						Effect.tap(() =>
+							registry._tag === "Some"
+								? Effect.forEach(
+										registry.value.listProviders(),
+										(id) =>
+											registry.value
+												.getInstance(id)
+												?.inputAdmission?.afterStop?.(input.sessionId) ??
+											Effect.void,
+										{ discard: true },
+									)
+								: Effect.void,
+						),
 						Effect.onExit((exit) =>
 							Effect.sync(() => stopping.delete(input.sessionId)).pipe(
 								Effect.andThen(Deferred.done(done, exit)),

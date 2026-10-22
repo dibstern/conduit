@@ -17,6 +17,7 @@ import {
 	readCodexSessionIdentity,
 	writeCodexSessionIdentity,
 } from "./codex-session-store.js";
+import { generateCodexText } from "./codex-text-generation.js";
 
 const decodeParameters = Schema.decodeUnknownResult(
 	Schema.Array(Schema.Struct({ id: Schema.String, value: Schema.String })),
@@ -34,6 +35,7 @@ export const makeCodexRunnerDriver = (
 	driverKind: "codex",
 	discoverEffect: (directory, account) =>
 		discoverCodexEffect(account, directory ?? workspaceRoot, configDir),
+	generateTextEffect: (input) => generateCodexText(input, configDir),
 	prepareTurnEffect: (input) =>
 		Effect.gen(function* () {
 			const continuationHistory =

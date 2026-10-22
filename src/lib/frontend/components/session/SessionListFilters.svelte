@@ -19,6 +19,10 @@
 	} = $props();
 	const grouping = $derived(getSessionGrouping());
 	const statusFilter = $derived(getSessionStatusFilter());
+	let chipsWidth = $state(0);
+	let chipsContentWidth = $state(0);
+	let chipsScrollLeft = $state(0);
+	const fadeChips = $derived(chipsContentWidth - chipsWidth - chipsScrollLeft > 1);
 	const filterChips: { value: SessionStatusFilter; label: string }[] = [
 		{ value: "needs-you", label: "Needs you" },
 		{ value: "running", label: "Running" },
@@ -27,7 +31,7 @@
 
 </script>
 
-	<div id="session-search" class="shrink-0 px-[10px] md:pb-[8px]">
+	<div id="session-search" class="shrink-0 px-[10px] pb-[8px]">
 		<SessionSearchField
 			value={localSearchValue}
 			oninput={onsearchinput}
@@ -36,9 +40,16 @@
 		/>
 	</div>
 	<div class="flex shrink-0 items-center gap-[5px] px-[10px] pb-[4px]">
-			<!-- Vertical padding lives here, not on the row: it is the room the
-			     chips' 44px hit areas need inside this scroll container. -->
-			<div class="flex min-w-0 flex-1 items-center gap-[5px] py-[10px] md:py-0 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+			<!-- Keep the 44px pseudo-element targets inside the scroller without
+			     making their extra hit area part of the visible row's spacing. -->
+			<div
+				bind:clientWidth={chipsWidth}
+				onscroll={(event) => { chipsScrollLeft = event.currentTarget.scrollLeft; }}
+				data-testid="session-filter-chips"
+				class="min-w-0 flex-1 -my-[10px] py-[10px] md:my-0 md:py-0 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+				style:mask-image={fadeChips ? "linear-gradient(to right, var(--color-text) calc(100% - 18px), transparent)" : undefined}
+			>
+			<div bind:clientWidth={chipsContentWidth} class="flex w-max items-center gap-[5px]">
 				{#if grouping !== "status"}
 					<Button
 						variant="filter"
@@ -66,6 +77,7 @@
 						{chip.label} <span class="font-mono text-[11px] font-normal {active ? 'text-status-ask' : 'text-text-dimmer'}">{count}</span>
 					</Button>
 				{/each}
+			</div>
 			</div>
 			<SessionGroupMenu compact={sessionViewState.compact} />
 	</div>

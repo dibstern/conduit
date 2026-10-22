@@ -1,10 +1,5 @@
 /**
- * The session bar's global actions, shared by its title and overflow menus.
- *
- * They live here rather than being written twice because each one is a
- * contract with code somewhere else in the app: an event name, or a
- * multi-step sequence. A duplicated event name typo is silent, and a
- * duplicated sequence drifts.
+ * The session bar overflow's global actions.
  */
 
 import { getBrowserClientId } from "../../stores/client-identity.js";

@@ -111,6 +111,11 @@ test.describe("Claude turn cost", () => {
 				.poll(() => stored().results.length, { timeout: 60_000 })
 				.toBe(4);
 			await chat.waitForStreamingComplete();
+			await expect(
+				chat.assistantMessages.filter({
+					hasText: "The top-level 40-second shell finished.",
+				}),
+			).toBeVisible();
 			await chat.expandTurnActivity();
 			await expect(shownCosts.last()).toHaveText("$0.4128");
 			expect(stored().turns).toHaveLength(1);

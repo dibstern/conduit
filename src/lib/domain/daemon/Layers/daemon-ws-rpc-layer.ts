@@ -220,11 +220,17 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 								? "instances"
 								: undefined;
 				if (list !== undefined)
-					return Effect.sync(() => {
+					return Effect.gen(function* () {
 						for (const subscriber of listSubscribers)
 							if (subscriber.list === list)
 								Queue.offerUnsafe(subscriber.changed, undefined);
-					});
+						if (event._tag === "InstancesChanged")
+							for (const project of yield* allProjects) {
+								const relay = yield* cache.peek(project.slug);
+								if (Option.isSome(relay))
+									yield* relay.value.syncGlobalSetting("titleGeneration");
+							}
+					}).pipe(Effect.provide(context));
 				return Effect.void;
 			}),
 			Effect.forkScoped,

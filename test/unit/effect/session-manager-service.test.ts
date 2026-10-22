@@ -2127,6 +2127,7 @@ describe("SessionManagerService", () => {
 			}> = [];
 			const providerInstance: ProviderInstance = {
 				providerId: "opencode",
+				generateTextEffect: () => Effect.die("not used"),
 				discoverEffect: () =>
 					Effect.succeed({
 						models: [],
@@ -2931,11 +2932,36 @@ describe("SessionManagerService", () => {
 					},
 					{ provider: "opencode", createdAt: 10 },
 				),
+				canonicalEvent("run.requested", "session-1", {
+					runId: "unread-run",
+					inputId: "input-1",
+				}),
 				canonicalEvent(
-					"turn.completed",
+					"message.created",
 					"session-1",
-					{ messageId: "message-1" },
-					{ provider: "opencode", createdAt: 20 },
+					{
+						sessionId: "session-1",
+						messageId: "input-1",
+						inputId: "input-1",
+						role: "user",
+					},
+					{ metadata: { runId: "unread-run" } },
+				),
+				canonicalEvent(
+					"run.started",
+					"session-1",
+					{ inputId: "input-1", requestedRunId: "unread-run" },
+					{ metadata: { runId: "unread-run" } },
+				),
+				canonicalEvent(
+					"session.status",
+					"session-1",
+					{ sessionId: "session-1", status: "idle" },
+					{
+						provider: "opencode",
+						createdAt: 20,
+						metadata: { runId: "unread-run" },
+					},
 				),
 			]) {
 				const stored = yield* store.append(event);

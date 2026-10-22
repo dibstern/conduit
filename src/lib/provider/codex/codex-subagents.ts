@@ -34,6 +34,8 @@ interface TurnOwner {
 	readonly set: (state: CodexTurnState) => void;
 	readonly sink: EventSink;
 	readonly permissionMode: SessionPermissionMode | undefined;
+	readonly rootRunId?: string | undefined;
+	readonly rootTurnId?: string | undefined;
 }
 
 interface ChildThread {
@@ -77,7 +79,11 @@ export class CodexSubagents {
 	) {}
 
 	attach(owner: TurnOwner) {
-		this.parent = owner;
+		this.parent = {
+			...owner,
+			rootRunId: owner.get().items.runId,
+			rootTurnId: owner.get().items.turnId,
+		};
 		this.stopping = false;
 	}
 
@@ -267,7 +273,7 @@ export class CodexSubagents {
 			}
 			const child = this.children.get(threadId);
 			if (!child) {
-				if (!owner) {
+				if (!owner && threadId !== this.parent.get().items.threadId) {
 					// A fast child may emit before spawnAgent supplies its receiver ID.
 					const queued = this.pending.get(threadId) ?? [];
 					queued.push(notification);
@@ -287,7 +293,12 @@ export class CodexSubagents {
 						child.state.items.nativeTurnId === notification.params.turn.id
 					)
 						return true;
-					child.owner = { ...child.owner, sink: this.parent.sink };
+					child.owner = {
+						...child.owner,
+						sink: this.parent.sink,
+						rootRunId: this.parent.rootRunId,
+						rootTurnId: this.parent.rootTurnId,
+					};
 					this.sinks.retainSink(child.owner.sink);
 					child.retained = true;
 					child.turn = { state: this.newState(child.sessionId, threadId) };
@@ -295,14 +306,22 @@ export class CodexSubagents {
 					child.result = "";
 					child.userItems.clear();
 					child.interactions = this.interactions(child.owner, () => child);
-					yield* this.begin(child);
 					yield* this.card(child);
 				}
+				const firstStart = child.state.acceptedTurnId === undefined;
 				child.state = acceptCodexTurn(
 					child.state,
 					notification.params.turn.id,
 					Date.now(),
 				);
+				if (firstStart) {
+					const runId = createEventId();
+					child.state = {
+						...child.state,
+						items: { ...child.state.items, runId },
+					};
+					yield* this.begin(child);
+				}
 				const key = `${threadId}\0${notification.params.turn.id}`;
 				const ready = this.registrations.get(key);
 				this.registrations.delete(key);
@@ -369,13 +388,19 @@ export class CodexSubagents {
 	interrupt(
 		status: "interrupted" | "error" = "interrupted",
 		message = "Codex app-server exited",
+		ownerSink?: EventSink,
 	) {
 		return Effect.gen({ self: this }, function* () {
 			if (this.stopping) status = "interrupted";
-			for (const ready of this.registrations.values())
-				yield* Deferred.fail(ready, new Error("Codex children interrupted"));
-			this.registrations.clear();
-			for (const child of this.children.values()) {
+			if (!ownerSink) {
+				for (const ready of this.registrations.values())
+					yield* Deferred.fail(ready, new Error("Codex children interrupted"));
+				this.registrations.clear();
+			}
+			const children = [...this.children.values()].filter(
+				(child) => !ownerSink || child.owner.sink === ownerSink,
+			);
+			for (const child of children) {
 				yield* child.interactions.interrupt();
 				if (child.state.settled) {
 					yield* this.release(child);
@@ -427,8 +452,9 @@ export class CodexSubagents {
 			owner.permissionMode,
 			() => ({
 				...read().state.items,
+				runId: owner.rootRunId,
 				sessionId: this.parentSessionId,
-				turnId: this.parent?.get().items.turnId ?? owner.get().items.turnId,
+				turnId: owner.rootTurnId ?? owner.get().items.turnId,
 			}),
 			(requestId, kind) =>
 				this.sinks.withdrawInteraction(owner.sink, requestId, kind),
@@ -519,7 +545,6 @@ export class CodexSubagents {
 				},
 				owner.sink,
 			);
-			yield* this.begin(child);
 			const unlinked = owner
 				.get()
 				.items.parts.filter(
@@ -540,25 +565,29 @@ export class CodexSubagents {
 	}
 
 	private begin(child: ChildThread) {
-		return this.push(child, "message.created", {
-			sessionId: child.sessionId,
-			messageId: child.state.items.turnId,
-			role: "user",
-		}).pipe(
-			Effect.andThen(
-				this.push(child, "session.status", {
-					sessionId: child.sessionId,
-					status: "busy",
-				}),
-			),
-			Effect.andThen(
-				this.push(child, "message.created", {
-					sessionId: child.sessionId,
-					messageId: child.state.items.messageId,
-					role: "assistant",
-				}),
-			),
-		);
+		return Effect.gen({ self: this }, function* () {
+			const runId = child.state.items.runId;
+			if (!runId) return;
+			yield* this.push(child, "message.created", {
+				sessionId: child.sessionId,
+				messageId: child.state.items.turnId,
+				role: "user",
+			});
+			yield* this.push(child, "run.started", {
+				inputId: child.state.items.turnId,
+				requestedRunId: runId,
+			});
+			yield* this.push(child, "session.status", {
+				sessionId: child.sessionId,
+				status: "busy",
+			});
+			yield* this.push(child, "message.created", {
+				sessionId: child.sessionId,
+				messageId: child.state.items.messageId,
+				role: "assistant",
+				parentID: child.state.items.turnId,
+			});
+		});
 	}
 
 	private push<

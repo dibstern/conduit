@@ -77,14 +77,14 @@ export interface ProviderDriverTraits {
 	readonly emitsMessageParentIds: boolean;
 	/** steer-during-tool-folds.jsonl pins native delivery; otherwise inputs stay queued. */
 	readonly steering: "native" | "queue";
+	/** Ordinary interrupt preserves unplaced native steers. */
+	readonly keepsPendingSteersOnInterrupt: boolean;
 	/** provider-instance.test.ts pins false until restart-safe prompt replies are captured. */
 	readonly promptsSurviveRestart: boolean;
 	/** Child transcripts reject direct user input when the provider owns their lifecycle. */
 	readonly readOnlySubagents: boolean;
 	/** Native follow-up turns reuse their original child task card. */
 	readonly reusesSubagentCards: boolean;
-	/** codex-title.test.ts pins account-local title generation without MCP startup. */
-	readonly titleGenerator: "claude" | "codex-exec";
 }
 
 export type UsageHarness = NonNullable<ProviderDriverTraits["usageHarness"]>;
@@ -124,11 +124,11 @@ export const PROVIDER_DRIVERS = {
 		emitsMessageParentIds: false,
 		// steer-during-tool-folds.jsonl and claude-steer-recovery.test.ts pin native delivery and requeue.
 		steering: "native",
+		keepsPendingSteersOnInterrupt: true,
 		// provider-instance.test.ts pins false; no restart-safe approval/question reply capture yet.
 		promptsSurviveRestart: false,
 		readOnlySubagents: false,
 		reusesSubagentCards: false,
-		titleGenerator: "claude",
 	},
 	// The multi-folder-project replay pins external_directory session rules.
 	// Managed launches/recreation are pinned by opencode-launch-worktree.test.ts.
@@ -166,11 +166,11 @@ export const PROVIDER_DRIVERS = {
 		// (test/fixtures/opencode-wire-traces/classic-prompt-during-tool.json).
 		// Flip to native only after approval, image and subagent captures on OpenCode 1.19.1.
 		steering: "queue",
+		keepsPendingSteersOnInterrupt: false,
 		// provider-instance.test.ts pins false; no restart-safe approval/question reply capture yet.
 		promptsSurviveRestart: false,
 		readOnlySubagents: false,
 		reusesSubagentCards: false,
-		titleGenerator: "claude",
 	},
 	cursor: {
 		supportsFileAttachments: false,
@@ -204,9 +204,9 @@ export const PROVIDER_DRIVERS = {
 		// steer.jsonl pins native text delivery; cursor-steer.test.ts pins missing
 		// methods, declined/image/pending steers and crash recovery through the inbox.
 		steering: "native",
+		keepsPendingSteersOnInterrupt: false,
 		readOnlySubagents: true, // cursor-subagents.test.ts pins rejection of child input.
 		reusesSubagentCards: false,
-		titleGenerator: "claude",
 		// cursor-question.test.ts pins an ask_user wait answered after daemon restart on the retained runner.
 		promptsSurviveRestart: true,
 	},
@@ -241,10 +241,10 @@ export const PROVIDER_DRIVERS = {
 		emitsMessageParentIds: false, // The first slice consumes no native message lineage.
 		// steer.jsonl and steer-race.jsonl pin echoed delivery and inbox requeue.
 		steering: "native",
+		keepsPendingSteersOnInterrupt: false, // turn/steer immediately targets expectedTurnId on the active native turn.
 		promptsSurviveRestart: true, // Detached runner ownership survives daemon restarts.
 		readOnlySubagents: true, // Native child threads stream through their parent app-server; input stays on the parent.
 		reusesSubagentCards: true,
-		titleGenerator: "codex-exec",
 	},
 } as const satisfies { readonly [driver: string]: ProviderDriverTraits };
 

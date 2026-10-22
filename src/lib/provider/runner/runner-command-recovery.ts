@@ -1,7 +1,6 @@
 import { Effect, Result } from "effect";
 import { resolve } from "../../account-directory.js";
 import type { ProviderStateEffect } from "../../persistence/effect/provider-state-effect.js";
-import type { TurnResult } from "../types.js";
 import type { ProcessRunnerDriver } from "./process-session-runner.js";
 import type { RunnerProviderInstanceDeps } from "./runner-provider-instance.js";
 import { recoverRunnerCommands } from "./runner-recovery.js";
@@ -13,11 +12,6 @@ export const makeRunnerCommandRecovery =
 		readonly accounts: RunnerProviderInstanceDeps["accounts"];
 		readonly state: ProviderStateEffect;
 		readonly providerStateKeys: readonly string[];
-		readonly onCompleted?: (
-			commandId: string,
-			input: SessionTurn,
-			result: TurnResult,
-		) => Effect.Effect<unknown, unknown>;
 	}): ProcessRunnerDriver["recoverCommands"] =>
 	(
 		sql,
@@ -33,6 +27,7 @@ export const makeRunnerCommandRecovery =
 			// Admission precedes first-turn preparation. Restore state saved before the runner hop.
 			const stored = yield* options.state.getState(sessionId);
 			return yield* recoverRunnerCommands(sql, sessionId, options.driverKind, {
+				legacyResult: connection.legacyResult,
 				driverForAccount: (id) =>
 					Result.getOrUndefined(resolve(accounts, { _tag: "Id", id }))?.driver,
 				decodeInput: (row) => {
@@ -57,8 +52,6 @@ export const makeRunnerCommandRecovery =
 				resolveSinkId,
 				closing,
 				failTurn,
-				onCompleted: (row, input, result) =>
-					options.onCompleted?.(row.command_id, input, result) ?? Effect.void,
 				replay: (row, input) =>
 					connection.commandEffect(
 						row.command_id,

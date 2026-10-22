@@ -228,6 +228,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			| "question.resolved",
 		data: Record<string, unknown>,
 		onPrompt?: (id: string) => Effect.Effect<void>,
+		runId?: string,
 	): Effect.Effect<void> =>
 		Effect.gen(function* () {
 			const receipt = yield* currentRunnerOutput;
@@ -244,6 +245,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					rawSource: { kind: "relay.event-sink" },
 					createdAt: Date.now(),
 					data,
+					...(runId ? { runId } : {}),
 				},
 				onPrompt,
 			);
@@ -431,6 +433,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 									});
 								awaitResponse = pending.awaitResponse;
 							}),
+						request.runId,
 					);
 					return yield* awaitResponse;
 				});
@@ -445,10 +448,17 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 									decision: "reject",
 								});
 							}
-							yield* recordInteraction("permission.resolved", {
-								id: request.requestId,
-								decision: Exit.isSuccess(exit) ? exit.value.decision : "reject",
-							}).pipe(
+							yield* recordInteraction(
+								"permission.resolved",
+								{
+									id: request.requestId,
+									decision: Exit.isSuccess(exit)
+										? exit.value.decision
+										: "reject",
+								},
+								undefined,
+								request.runId,
+							).pipe(
 								Effect.provideService(
 									currentRunnerPermissionReply,
 									Exit.isSuccess(exit) && conduitId
@@ -542,6 +552,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 								);
 								awaitAnswers = pending.awaitAnswers;
 							}),
+						request.runId,
 					);
 					return yield* awaitAnswers;
 				});
@@ -552,18 +563,23 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 						Effect.gen(function* () {
 							if (detachingInteractions && Exit.isFailure(exit)) return;
 							if (Exit.isSuccess(exit)) {
-								return yield* recordInteraction("question.resolved", {
-									id: request.requestId,
-									// Keep the live reply intact; every durable consumer gets this copy.
-									answers: Object.fromEntries(
-										Object.entries(exit.value).map(([index, answer]) => [
-											index,
-											request.questions[Number(index)]?.isSecret
-												? "[redacted]"
-												: answer,
-										]),
-									),
-								});
+								return yield* recordInteraction(
+									"question.resolved",
+									{
+										id: request.requestId,
+										// Keep the live reply intact; every durable consumer gets this copy.
+										answers: Object.fromEntries(
+											Object.entries(exit.value).map(([index, answer]) => [
+												index,
+												request.questions[Number(index)]?.isSecret
+													? "[redacted]"
+													: answer,
+											]),
+										),
+									},
+									undefined,
+									request.runId,
+								);
 							}
 							const failure = Failure.firstFailure(exit.cause);
 							const keptForRecovery =
@@ -576,10 +592,15 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 									conduitId,
 									{},
 								);
-							return yield* recordInteraction("question.resolved", {
-								id: request.requestId,
-								answers: {},
-							});
+							return yield* recordInteraction(
+								"question.resolved",
+								{
+									id: request.requestId,
+									answers: {},
+								},
+								undefined,
+								request.runId,
+							);
 						}),
 					),
 				);

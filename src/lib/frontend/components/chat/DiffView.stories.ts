@@ -36,6 +36,30 @@ export const Mixed: Story = {
 			"import { foo } from './foo';\nimport { baz } from './baz';\nimport { qux } from './qux';\n\nfunction process(data) {\n  const intermediate = foo(data);\n  const result = baz(intermediate);\n  return qux(result);\n}",
 		filename: "src/process.ts",
 	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const card = canvasElement.querySelector(".diff-container");
+		const header = canvasElement.querySelector(".code-block-header");
+		const tab = canvas.getByRole("tab", { name: "Unified" });
+		if (!card || !header) throw new Error("Missing diff frame");
+		expect(getComputedStyle(card).borderRadius).toBe("12px");
+		expect(header.getBoundingClientRect().height).toBe(36);
+		expect(header.contains(tab)).toBe(true);
+		expect(tab.getBoundingClientRect().height).toBe(24);
+		expect(
+			Number.parseFloat(getComputedStyle(tab).borderRadius),
+		).toBeGreaterThanOrEqual(tab.getBoundingClientRect().height / 2);
+		expect(getComputedStyle(tab).borderWidth).toBe("0px");
+		expect(getComputedStyle(tab).backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+		expect(
+			getComputedStyle(canvasElement.querySelector(".diff-text") ?? card)
+				.fontSize,
+		).toBe("11.5px");
+		const viewer = canvasElement.querySelector(".diff-viewer");
+		expect(viewer?.getBoundingClientRect().top).toBe(
+			header.getBoundingClientRect().bottom,
+		);
+	},
 };
 
 export const LargeDiff: Story = {

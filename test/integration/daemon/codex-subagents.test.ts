@@ -299,12 +299,18 @@ describe("Codex read-only children through the daemon and detached runner", () =
 			);
 			await submit(browser, id);
 			const child = await waitChild(fixture, id);
-			expect(child).toMatchObject({
-				parent_id: id,
-				provider: accountId,
-				provider_sid: CHILD_THREAD,
-				status: "busy",
-			});
+			await vi.waitFor(
+				() =>
+					expect(
+						sessions(fixture).find((row) => row.id === child.id),
+					).toMatchObject({
+						parent_id: id,
+						provider: accountId,
+						provider_sid: CHILD_THREAD,
+						status: "busy",
+					}),
+				{ timeout: TIMEOUT, interval: 100 },
+			);
 			await vi.waitFor(
 				() =>
 					expect(
@@ -332,6 +338,41 @@ describe("Codex read-only children through the daemon and detached runner", () =
 			expect(
 				childEvents.filter(({ type }) => type === "turn.completed"),
 			).toHaveLength(1);
+			const parentRunId = snapshot(fixture, id).events.find(
+				({ type }) => type === "run.started",
+			)?.metadata["runId"];
+			const childRunId = childEvents.find(
+				({ type }) => type === "turn.completed",
+			)?.metadata["runId"];
+			expect(parentRunId).toEqual(expect.any(String));
+			expect(childRunId).toEqual(expect.any(String));
+			expect(childRunId).not.toBe(parentRunId);
+			expect(childEvents).toContainEqual(
+				expect.objectContaining({
+					type: "run.started",
+					metadata: expect.objectContaining({ runId: childRunId }),
+					data: expect.objectContaining({ requestedRunId: childRunId }),
+				}),
+			);
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				expect(
+					db
+						.prepare<[string], { id: string; status: string }>(
+							"SELECT id, status FROM provider_runs WHERE session_id = ? ORDER BY requested_at, rowid",
+						)
+						.all(child.id),
+				).toEqual([{ id: childRunId, status: "completed" }]);
+				expect(
+					db
+						.prepare<[string], { state: string; run_id: string | null }>(
+							"SELECT state, run_id FROM turns WHERE session_id = ? ORDER BY requested_at, rowid",
+						)
+						.all(child.id),
+				).toEqual([{ state: "completed", run_id: childRunId }]);
+			} finally {
+				db.close();
+			}
 			const childHistory = await browser.history(child.id);
 			expect(childHistory).toContainEqual(
 				expect.objectContaining({ role: "user" }),

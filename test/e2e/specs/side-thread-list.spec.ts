@@ -208,7 +208,10 @@ test.describe("Side Threads list", () => {
 			harness.eventsDbPath,
 		);
 		await chat.subagentBackBtn.click();
-		await page.getByTestId("session-bar-title-menu").click();
+		await page
+			.getByTestId("session-bar-overflow")
+			.or(page.getByTestId("session-bar-island-overflow"))
+			.click();
 		await page.getByRole("menuitem", { name: /^Delete/ }).click();
 		await page.getByTestId("confirm-modal-action").click();
 

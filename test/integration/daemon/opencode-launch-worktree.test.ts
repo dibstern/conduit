@@ -281,10 +281,26 @@ describe("Managed real OpenCode launch workspace execution", () => {
 		}
 		const browser = await fixture.connect();
 		// Cold plugin/model configuration can outlast the daemon's /path probe.
-		await vi.waitFor(() => browser.startInstance("managed-test"), {
-			timeout: 60_000,
-			interval: 500,
-		});
+		await vi.waitFor(
+			async () => {
+				await browser.startInstance("managed-test");
+				const models = await browser.getModels("managed-test");
+				evidence["models"] = models;
+				expect(
+					models.providers
+						.find(({ id }) => id === "workspace-test")
+						?.models.map(({ id }) => id),
+				).toContain("cwd");
+				expect(models.active).toEqual({
+					provider: "workspace-test",
+					model: "cwd",
+				});
+			},
+			{
+				timeout: 60_000,
+				interval: 500,
+			},
+		);
 		const { instances } = await browser.instances();
 		expect(
 			instances.find(({ id }) => id === "managed-test")?.capabilities,

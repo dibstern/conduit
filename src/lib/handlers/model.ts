@@ -9,12 +9,15 @@ import {
 	Result,
 } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../account-directory.js";
+import type { Account } from "../contracts/account.js";
 import type { AccountUnroutable } from "../contracts/limit-recovery.js";
 import {
 	getProviderDriver,
 	type KnownProviderDriverKind,
+	KnownProviderDriverKindSchema,
 	PROVIDER_DRIVERS,
 } from "../contracts/provider-instance.js";
+import type { TitleGenerationSelection } from "../contracts/title-generation.js";
 import type { GetModelsResponse } from "../contracts/ws-rpc.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import {
@@ -26,7 +29,8 @@ import {
 	ProjectSettingsTag,
 	publishGlobalProjectSetting,
 	publishProjectSetting,
-	refreshHarnessDefaults,
+	readTitleGenerationState,
+	refreshModelSettings,
 } from "../domain/relay/Services/project-settings.js";
 import {
 	ConfigTag,
@@ -55,6 +59,7 @@ import { formatErrorDetail } from "../errors.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { isSameModelIdentity } from "../provider/claude/claude-api-model-id.js";
 import { ProviderRegistryTag } from "../provider/provider-registry.js";
+import { resolveTitleGeneration } from "../provider/title-generation.js";
 import {
 	catalogFromProviderList,
 	findCatalogModel,
@@ -71,6 +76,10 @@ import {
 	saveRelaySettings,
 } from "../relay/relay-settings.js";
 import type { ProviderInfo } from "../shared-types.js";
+
+const DISCOVERY_DRIVERS = KnownProviderDriverKindSchema.literals.filter(
+	(driver) => PROVIDER_DRIVERS[driver].catalogSource === "discovery",
+);
 
 export class RelaySettingsSaveError extends Data.TaggedError(
 	"RelaySettingsSaveError",
@@ -278,41 +287,56 @@ export const getModelsResponse = (
 				: getProviderDriver(account?.driver)?.catalogSource === "discovery"
 					? account
 					: Option.getOrUndefined(yield* directory.defaultFor("claude"));
-		const { modelDiscovery } = yield* ProjectSettingsTag;
+		const { modelDiscovery, live } = yield* ProjectSettingsTag;
+		const discover = (discovered: Account) =>
+			engine
+				.dispatchEffect({
+					type: "discover",
+					providerId: discovered.id,
+					account: discovered,
+				})
+				.pipe(
+					Effect.flatMap((capabilities) =>
+						publishDiscoveredModels(capabilities.models, discovered),
+					),
+					Effect.catch((error) =>
+						Effect.gen(function* () {
+							yield* publishDiscoveredModels([], discovered);
+							log.warn(
+								`${discovered.driver} provider discovery failed during model refresh: ${formatErrorDetail(error)}`,
+							);
+						}),
+					),
+					Effect.asVoid,
+					// Admission may return an interrupted placeholder when another
+					// caller wins. Read the map afterward to await the actual discovery.
+					(effect) =>
+						FiberMap.run(modelDiscovery, discovered.id, effect, {
+							onlyIfMissing: true,
+						}).pipe(
+							Effect.andThen(FiberMap.get(modelDiscovery, discovered.id)),
+							Effect.map(Option.getOrUndefined),
+						),
+				);
 		const modelDiscoveryFiber =
-			claudeAccount === undefined
-				? undefined
-				: yield* engine
-						.dispatchEffect({
-							type: "discover",
-							providerId: claudeAccount.id,
-							account: claudeAccount,
-						})
-						.pipe(
-							Effect.flatMap((capabilities) =>
-								publishDiscoveredModels(capabilities.models, claudeAccount),
-							),
-							Effect.catch((error) =>
-								Effect.gen(function* () {
-									yield* publishDiscoveredModels([], claudeAccount);
-									log.warn(
-										`${claudeAccount.driver} provider discovery failed during model refresh: ${formatErrorDetail(error)}`,
-									);
-								}),
-							),
-							Effect.asVoid,
-							// Admission may return an interrupted placeholder when another
-							// caller wins. Read the map afterward to await the actual discovery.
-							(effect) =>
-								FiberMap.run(modelDiscovery, claudeAccount.id, effect, {
-									onlyIfMissing: true,
-								}).pipe(
-									Effect.andThen(
-										FiberMap.get(modelDiscovery, claudeAccount.id),
-									),
-									Effect.map(Option.getOrUndefined),
-								),
-						);
+			claudeAccount === undefined ? undefined : yield* discover(claudeAccount);
+		// Catalogues live in memory per project, so after a restart a driver's default
+		// account (Cursor) has none until something reads it. Fill it in the background
+		// so pickers and settings list its models without first selecting it. A read
+		// scoped to an OpenCode account discovers nothing, like the selected pick above.
+		const published = yield* Ref.get(live);
+		const warms = getProviderDriver(instanceDriver)?.catalogSource !== "server";
+		for (const driver of warms ? DISCOVERY_DRIVERS : []) {
+			const fallback = Option.getOrUndefined(
+				yield* directory.defaultFor(driver),
+			);
+			if (
+				fallback &&
+				fallback.id !== claudeAccount?.id &&
+				published[`providerModels:${fallback.id}`] === undefined
+			)
+				yield* discover(fallback);
+		}
 
 		const inventoryInstanceId =
 			(getProviderDriver(activeDriver)?.catalogSource === "server"
@@ -337,7 +361,7 @@ export const getModelsResponse = (
 			);
 			if (openCodeProviderResult._tag === "Success") {
 				nativeDefaultModel = openCodeProviderResult.success.nativeDefaultModel;
-				yield* refreshHarnessDefaults;
+				yield* refreshModelSettings;
 				const nativeDefault = parseDefaultModel(
 					openCodeProviderResult.success.nativeDefaultModel,
 				);
@@ -426,6 +450,10 @@ export const getModelsResponse = (
 		);
 		const selectedDriver: KnownProviderDriverKind =
 			activeDriver ?? instanceDriver ?? modelDriver;
+		const accountCatalogRequested =
+			instanceId !== undefined &&
+			activeId === undefined &&
+			getProviderDriver(instanceDriver)?.catalogSource === "discovery";
 		let catalogues = yield* Ref.get((yield* ProjectSettingsTag).live);
 		let claudeCatalog = claudeAccount
 			? (catalogues[`providerModels:${claudeAccount.id}`] ??
@@ -524,7 +552,9 @@ export const getModelsResponse = (
 			...((activeAccount?.id ?? instanceId) === undefined
 				? {}
 				: { instanceId: activeAccount?.id ?? instanceId }),
-			providers,
+			providers: accountCatalogRequested
+				? (claudeCatalog?.providers ?? [])
+				: providers,
 			...(activeModel
 				? {
 						active: {
@@ -783,6 +813,51 @@ export const setHarnessDefaultForRelay = (input: {
 		);
 		yield* publishGlobalProjectSetting("harnessDefaults");
 		return { pick: { ...model, effort, contextWindow }, status: "ok" } as const;
+	});
+
+export const getTitleGenerationForRelay = readTitleGenerationState;
+
+export const setTitleGenerationForRelay = (
+	selection: TitleGenerationSelection | null,
+) =>
+	Effect.gen(function* () {
+		const config = yield* ConfigTag;
+		let saved = selection;
+		if (selection !== null) {
+			const directory = yield* AccountDirectory;
+			const accounts = yield* directory.snapshot;
+			const candidate = resolveTitleGeneration(
+				selection,
+				accounts,
+				() => undefined,
+			);
+			if (candidate.status !== "unverified")
+				return yield* Effect.fail(
+					new Error(candidate.problem ?? "Invalid title generation selection"),
+				);
+			const account = yield* directory.resolve(candidate.pick.account);
+			const catalog = yield* loadModelCatalog(account.driver, account.id, {
+				startIfStopped: true,
+			});
+			const resolved = resolveTitleGeneration(
+				selection,
+				accounts,
+				() => catalog,
+			);
+			if (resolved.status !== "ok")
+				return yield* Effect.fail(
+					new Error(
+						resolved.problem ?? "Title generation catalog is unavailable",
+					),
+				);
+			saved = resolved.pick;
+		}
+		yield* saveRelaySettingsEffect(
+			{ titleGeneration: saved },
+			config.configDir,
+		);
+		yield* publishGlobalProjectSetting("titleGeneration");
+		return yield* readTitleGenerationState;
 	});
 
 export interface SwitchVariantInput {

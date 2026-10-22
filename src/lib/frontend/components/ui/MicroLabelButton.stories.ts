@@ -64,8 +64,12 @@ export const Words: Story = {
 		const button = canvas.getByRole("button", { name: args["accessibleName"] });
 		const label = canvas.getByText("ask");
 		await expect(button.querySelector(".glyph")).toBeNull();
-		await expect(getComputedStyle(label).fontSize).toBe("11.5px");
-		await expect(getComputedStyle(label).borderBottomStyle).toBe("dotted");
+		const labelStyle = getComputedStyle(label);
+		await expect(labelStyle.fontSize).toBe("12px");
+		await expect(labelStyle.textDecorationLine).toBe("underline");
+		await expect(labelStyle.textDecorationStyle).toBe("dotted");
+		await expect(labelStyle.textUnderlineOffset).toBe("4px");
+		await expect(labelStyle.textDecorationThickness).toBe("1px");
 		await userEvent.click(button);
 		await expect(onTap).toHaveBeenCalledTimes(1);
 		button.focus();

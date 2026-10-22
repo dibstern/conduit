@@ -167,6 +167,32 @@ describe("OpenCode status reads fenced by streamed status", () => {
 	});
 
 	it.each([
+		"poll",
+		"reconcile",
+	])("a %s ignores idle sampled before a native user input was accepted", async (readKind) => {
+		const statuses = deferred<Record<string, SessionStatus>>();
+		const client = pollClient(statuses.promise);
+		await reconciler.reconcile(client, [directory]);
+		reconciler.observe(directory, status("s", "busy"));
+		const read =
+			readKind === "reconcile"
+				? reconciler.reconcile(client, [directory])
+				: Promise.resolve();
+		if (readKind === "poll") await vi.advanceTimersByTimeAsync(10);
+		expect(client.session.statuses).toHaveBeenCalledTimes(2);
+		reconciler.observe(directory, {
+			id: "native-user",
+			type: "message.updated",
+			properties: { info: { id: "u", sessionID: "s", role: "user" } },
+		});
+		statuses.resolve({});
+		await read;
+		await vi.advanceTimersByTimeAsync(0);
+		expect(emitted()).toEqual([]);
+		expect(reconciler.active()).toBe(true);
+	});
+
+	it.each([
 		{
 			name: "a stale idle after busy -> idle -> busy",
 			sent: [["s", "busy"]],

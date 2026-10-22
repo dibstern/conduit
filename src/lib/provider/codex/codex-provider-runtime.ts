@@ -5,7 +5,6 @@ import {
 	SessionUsageLimitedPayloadSchema,
 } from "../../contracts/stored-event.js";
 import { Usage } from "../../domain/daemon/Services/usage.js";
-import { ClaudeEventPersistEffectTag } from "../../persistence/effect/claude-event-persist-effect.js";
 import { ProviderStateEffectTag } from "../../persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import { makeProcessSessionRunner } from "../runner/process-session-runner.js";
@@ -27,7 +26,6 @@ export const makeCodexProviderRuntime = (deps: RunnerProviderInstanceDeps) =>
 		const read = yield* ReadQueryEffectTag;
 		const state = yield* ProviderStateEffectTag;
 		const sql = yield* SqlClient.SqlClient;
-		const persist = yield* ClaudeEventPersistEffectTag;
 		const usage = Option.getOrUndefined(yield* Effect.serviceOption(Usage));
 		return yield* makeRunnerProviderInstance(
 			deps,
@@ -128,18 +126,6 @@ export const makeCodexProviderRuntime = (deps: RunnerProviderInstanceDeps) =>
 							accounts: deps.accounts,
 							state,
 							providerStateKeys: ["codex.forkDigest"],
-							onCompleted: (commandId, input, result) =>
-								result.handoff
-									? persist.persistHandoffDelivered(
-											input.sessionId,
-											{
-												...result.handoff,
-												instanceId: input.instanceId ?? "codex",
-											},
-											commandId,
-											"codex",
-										)
-									: Effect.void,
 						}),
 					},
 				),

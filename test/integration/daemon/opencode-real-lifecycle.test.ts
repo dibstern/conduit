@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
 	accessSync,
 	constants,
@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
+import { createInterface } from "node:readline";
 import { Result as Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
@@ -88,7 +89,7 @@ describe("Managed real OpenCode lifecycle", () => {
 		binary,
 	};
 	const snapshots: Array<
-		{ step: string; at: number } & ReturnType<typeof tree>
+		{ step: string; at: number } & Awaited<ReturnType<typeof tree>>
 	> = [];
 
 	/**
@@ -96,24 +97,59 @@ describe("Managed real OpenCode lifecycle", () => {
 	 * supervisor's group around `<root>/bin/opencode*`, plus any descendant
 	 * that left the group.
 	 */
-	function tree(fixture: ProcessHarness) {
-		const rows = execFileSync("ps", ["-axo", "pid=,ppid=,pgid=,command="], {
-			encoding: "utf8",
-		})
-			.split("\n")
-			.flatMap((line) => {
-				const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/.exec(line);
-				return match
-					? [
-							{
+	async function tree(fixture: ProcessHarness) {
+		// A shared host's command listing can exceed execFileSync's stdout buffer.
+		const child = spawn("ps", ["-axo", "pid=,ppid=,pgid=,command="], {
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		const stderr: Buffer[] = [];
+		let stderrBytes = 0;
+		child.stderr.on("data", (chunk: Buffer) => {
+			const kept = chunk.subarray(0, Math.max(0, 4096 - stderrBytes));
+			if (kept.length) stderr.push(kept);
+			stderrBytes += kept.length;
+		});
+		const closed = new Promise<void>((done, reject) => {
+			child.once("error", reject);
+			child.once("close", (code, signal) => {
+				if (code === 0) done();
+				else
+					reject(
+						new Error(
+							`ps exited ${code ?? signal}: ${Buffer.concat(stderr).toString("utf8")}`,
+						),
+					);
+			});
+		});
+		const rows: Array<{
+			pid: number;
+			ppid: number;
+			pgid: number;
+			command: string;
+		}> = [];
+		const lines = createInterface({ input: child.stdout });
+		try {
+			await Promise.all([
+				(async () => {
+					for await (const line of lines) {
+						const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+						if (match)
+							rows.push({
 								pid: Number(match[1]),
 								ppid: Number(match[2]),
 								pgid: Number(match[3]),
 								command: match[4] ?? "",
-							},
-						]
-					: [];
-			});
+							});
+					}
+				})(),
+				closed,
+			]);
+		} finally {
+			lines.close();
+			if (child.exitCode === null && child.signalCode === null)
+				child.kill("SIGTERM");
+			await closed.catch(() => {});
+		}
 		const launcher = join(fixture.root, "bin", "opencode");
 		const groups = new Set(
 			rows
@@ -140,8 +176,8 @@ describe("Managed real OpenCode lifecycle", () => {
 		};
 	}
 
-	function snapshot(fixture: ProcessHarness, step: string) {
-		const taken = { step, at: Date.now(), ...tree(fixture) };
+	async function snapshot(fixture: ProcessHarness, step: string) {
+		const taken = { step, at: Date.now(), ...(await tree(fixture)) };
 		snapshots.push(taken);
 		return taken;
 	}
@@ -210,7 +246,7 @@ describe("Managed real OpenCode lifecycle", () => {
 				await fixture.dispose();
 				fixture.assertNoRunners();
 			} finally {
-				evidence["afterDispose"] = tree(fixture);
+				evidence["afterDispose"] = await tree(fixture);
 				mkdirSync("test-results", { recursive: true });
 				writeFileSync(
 					"test-results/pa3r-10-real-lifecycle.json",
@@ -248,13 +284,13 @@ describe("Managed real OpenCode lifecycle", () => {
 		// Background paths (pollers, status, attach) get time to (wrongly)
 		// start it.
 		await sleep(3_000);
-		const attached = snapshot(fixture, "attached");
+		const attached = await snapshot(fixture, "attached");
 		expect(attached.processes).toEqual([]);
 		expect(fixture.opencodeRequests()).toEqual([]);
 
 		// 1. Lazy spawn: the first OpenCode session starts exactly one.
 		const sessionA = await a.createSession("Real A", instanceId, "opencode");
-		const first = snapshot(fixture, "first-session");
+		const first = await snapshot(fixture, "first-session");
 		expect(first.binaries).toHaveLength(1);
 		const port = Either.getOrThrowWith(
 			loadDaemonConfigResult(fixture.configDir),
@@ -265,7 +301,7 @@ describe("Managed real OpenCode lifecycle", () => {
 
 		// 2. A session in the second project reuses the process and stream.
 		const sessionB = await b.createSession("Real B", instanceId, "opencode");
-		const second = snapshot(fixture, "second-session");
+		const second = await snapshot(fixture, "second-session");
 		expect(second.binaries).toEqual(first.binaries);
 		await vi.waitFor(() =>
 			expect(streamOpens(fixture)).toEqual([
@@ -340,11 +376,14 @@ describe("Managed real OpenCode lifecycle", () => {
 		// 4. Idle stop: no use is open and nothing is busy, so after the
 		// grace period the whole process tree goes and the stream closes.
 		const idleFrom = Date.now();
-		await vi.waitFor(() => expect(tree(fixture).processes).toEqual([]), {
-			timeout: 30_000,
-			interval: 250,
-		});
-		const stopped = snapshot(fixture, "idle-stopped");
+		await vi.waitFor(
+			async () => expect((await tree(fixture)).processes).toEqual([]),
+			{
+				timeout: 30_000,
+				interval: 250,
+			},
+		);
+		const stopped = await snapshot(fixture, "idle-stopped");
 		evidence["stopAfterMs"] = stopped.at - idleFrom;
 		const connections = fixture.opencodeStreamConnections();
 		expect(connections).toEqual([

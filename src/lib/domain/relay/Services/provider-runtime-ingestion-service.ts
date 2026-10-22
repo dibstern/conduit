@@ -103,6 +103,7 @@ export interface ProviderRuntimeIngestion {
 			readonly beforeProject?: Effect.Effect<void, SqlError>;
 			readonly beforeCommit?: Effect.Effect<void, SqlError>;
 			readonly afterCommit?: Effect.Effect<void>;
+			readonly endedRunEvents?: Set<string>;
 		},
 	) => Effect.Effect<number, ProviderRuntimeIngestionError>;
 	readonly drain: () => Effect.Effect<void>;
@@ -176,6 +177,7 @@ export const makeProviderRuntimeIngestionLive = (
 					readonly beforeProject?: Effect.Effect<void, SqlError>;
 					readonly beforeCommit?: Effect.Effect<void, SqlError>;
 					readonly afterCommit?: Effect.Effect<void>;
+					readonly endedRunEvents?: Set<string>;
 					readonly onPrompt?: (id: string) => Effect.Effect<void>;
 				} = {},
 			): Effect.Effect<number, ProviderRuntimeIngestionError> =>
@@ -330,6 +332,8 @@ export const makeProviderRuntimeIngestionLive = (
 							}
 
 							let appended = true;
+							const endedRunEvents =
+								ingestOptions.endedRunEvents ?? new Set<string>();
 							const draftsToForget = new Set<string>();
 							const acceptedLimits: string[] = [];
 							const completedAccounts = new Set<string>();
@@ -438,6 +442,7 @@ export const makeProviderRuntimeIngestionLive = (
 							});
 							const commitOptions = {
 								publish: ingestOptions.publishToBus ?? true,
+								endedRunEvents,
 								afterCommit,
 							};
 							yield* commitAndSignal
@@ -693,7 +698,9 @@ export const makeProviderRuntimeIngestionLive = (
 								ingestOptions.publishToRelay !== false
 							) {
 								yield* publishRelayMessages(
-									domainEvents,
+									domainEvents.filter((event) =>
+										endedRunEvents.has(event.eventId),
+									),
 									options.relayPublisher,
 								);
 							}

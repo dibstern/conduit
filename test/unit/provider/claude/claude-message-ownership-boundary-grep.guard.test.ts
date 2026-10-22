@@ -17,7 +17,7 @@ const CHILD_METADATA_WRITE =
 // and transport wiring do not invoke operations.
 const IMPLEMENTATION_CALLS = [
 	{
-		file: "src/lib/provider/claude/claude-provider-runtime.ts",
+		file: "src/lib/provider/claude/claude-runner-payload.ts",
 		calls: ['emit({ type: "ensure-subagent-session"'],
 		// Runner transport emits only the ownership module's lineage command.
 	},

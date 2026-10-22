@@ -30,6 +30,7 @@ import type {
 } from "../../contracts/providers/provider-runtime-event.js";
 import type { SessionGoalChangedPayload } from "../../contracts/stored-event.js";
 import { createLogger, type Logger } from "../../logger.js";
+import { runTerminalStatus } from "../../persistence/effect/projectors-effect.js";
 import type { CanonicalToolInput } from "../../persistence/events.js";
 import { createEventId } from "../../persistence/events.js";
 import { isRecord } from "../../utils.js";
@@ -43,6 +44,7 @@ import {
 	type ReadClaudeGoalStatus,
 	readClaudeGoalStatus,
 } from "./claude-goal-tracker.js";
+import { claudeProviderStateUpdates } from "./claude-runtime-state.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
 import { fromSdkPermissionMode } from "./permission-mode-map.js";
 import type {
@@ -89,13 +91,11 @@ export function claudeTurnErrorEvent(
 	sessionId: string,
 	messageId: string,
 	cause: unknown,
-	userMessageId?: string,
 ): ProviderRuntimeEvent {
 	return makeProviderRuntimeEvent("turn.error", sessionId, {
 		messageId,
 		error: cause instanceof Error ? cause.message : String(cause),
 		code: "provider_error",
-		...(userMessageId ? { userMessageId } : {}),
 	});
 }
 
@@ -448,7 +448,11 @@ export class ClaudeEventTranslator {
 		messageId: string,
 	): Effect.Effect<void, EventSinkError> {
 		return Effect.suspend(() => {
-			if (messageId.length === 0 || this.announcedMessageIds.has(messageId)) {
+			if (
+				messageId.length === 0 ||
+				this.announcedMessageIds.has(messageId) ||
+				ctx.messageRunIds?.has(messageId)
+			) {
 				return Effect.void;
 			}
 			this.announcedMessageIds.add(messageId);
@@ -459,6 +463,11 @@ export class ClaudeEventTranslator {
 					messageId,
 					role: "assistant",
 					sessionId: ctx.sessionId,
+					...(ctx.currentRunId && ctx.currentUserMessageId
+						? { parentID: ctx.currentUserMessageId }
+						: ctx.acceptedOutputOwner
+							? { parentID: ctx.acceptedOutputOwner.userMessageId }
+							: {}),
 				}),
 			);
 		});
@@ -544,6 +553,7 @@ export class ClaudeEventTranslator {
 				}),
 			);
 			ctx.turnInFlight = false;
+			ctx.currentRunId = undefined;
 			ctx.activeAssistantMessageId = "";
 			this.resetInFlightState();
 		});
@@ -617,9 +627,24 @@ export class ClaudeEventTranslator {
 		ctx: ClaudeSessionContext,
 		message: SDKMessage,
 		receivedAt?: number,
+		terminalRunIds: readonly string[] = [],
 	): Effect.Effect<void, EventSinkError> {
 		return this.collectWrites(() =>
-			this.translateMessage(ctx, message, receivedAt),
+			this.translateMessage(ctx, message, receivedAt, terminalRunIds),
+		);
+	}
+
+	/** A result owned by another run cannot reset the current run's live state. */
+	translateDetachedResult(
+		ctx: ClaudeSessionContext,
+		result: SDKResultMessage,
+		terminalRunIds: readonly string[] = [],
+	): Effect.Effect<void, EventSinkError> {
+		return new ClaudeEventTranslator(this.deps).translate(
+			ctx,
+			result,
+			undefined,
+			terminalRunIds,
 		);
 	}
 
@@ -627,6 +652,7 @@ export class ClaudeEventTranslator {
 		ctx: ClaudeSessionContext,
 		message: SDKMessage,
 		receivedAt?: number,
+		terminalRunIds: readonly string[] = [],
 	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen({ self: this }, function* () {
 			// Capture SDK session id for resume cursor on any message.
@@ -660,7 +686,7 @@ export class ClaudeEventTranslator {
 				case "user":
 					return yield* this.translateUserToolResults(ctx, message);
 				case "result":
-					return yield* this.translateResult(ctx, message);
+					return yield* this.translateResult(ctx, message, terminalRunIds);
 				case "tool_progress":
 					return yield* this.translateToolProgress(ctx, message);
 				default:
@@ -674,19 +700,20 @@ export class ClaudeEventTranslator {
 	translateError(
 		ctx: ClaudeSessionContext,
 		cause: unknown,
+		runId = ctx.currentRunId,
 	): Effect.Effect<void, EventSinkError> {
 		return this.collectWrites(() =>
 			Effect.gen({ self: this }, function* () {
 				const errorMsg = cause instanceof Error ? cause.message : String(cause);
 				yield* this.pushGoalChange(ctx, ctx.goalTracker?.pause(errorMsg));
-				yield* this.push(
-					ctx,
-					claudeTurnErrorEvent(
+				yield* this.push(ctx, {
+					...claudeTurnErrorEvent(
 						ctx.sessionId,
 						this.currentAssistantMessageId || "",
 						cause,
 					),
-				);
+					...(runId ? { runId } : {}),
+				});
 				yield* this.endTurn(ctx);
 			}),
 		);
@@ -887,6 +914,12 @@ export class ClaudeEventTranslator {
 							: {}),
 						actualModel: message.model,
 					};
+					if (!ctx.currentRunId && ctx.currentTurnId) {
+						ctx.pendingRunModel = {
+							inputId: ctx.currentTurnId,
+							model: modelEvidence,
+						};
+					}
 					yield* this.push(
 						ctx,
 						makeProviderRuntimeEvent(
@@ -1480,6 +1513,7 @@ export class ClaudeEventTranslator {
 							? (rawInput as Record<string, unknown>)
 							: {};
 					const blockId = block.id ?? randomUUID();
+					this.rememberToolOwner(ctx, blockId, this.currentAssistantMessageId);
 					const tool: ToolInFlight = {
 						itemId: blockId,
 						toolName,
@@ -1671,6 +1705,11 @@ export class ClaudeEventTranslator {
 
 			const content = message.message.content;
 			if (!Array.isArray(content)) return;
+			for (const block of content) {
+				if (block.type === "tool_use") {
+					this.rememberToolOwner(ctx, block.id, messageId);
+				}
+			}
 
 			const readableBlocks = content.filter(
 				(block) =>
@@ -1809,6 +1848,7 @@ export class ClaudeEventTranslator {
 	private translateResult(
 		ctx: ClaudeSessionContext,
 		result: SDKResultMessage,
+		terminalRunIds: readonly string[],
 	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen({ self: this }, function* () {
 			if (
@@ -1821,12 +1861,13 @@ export class ClaudeEventTranslator {
 			yield* this.settleGoal(ctx);
 			if (isInterruptedResult(result, ctx.interruptRequested)) {
 				yield* this.pushGoalChange(ctx, ctx.goalTracker?.pause("Interrupted"));
-				yield* this.push(
+				yield* this.pushResult(
 					ctx,
 					makeProviderRuntimeEvent("turn.interrupted", ctx.sessionId, {
 						// The SDK uuid names no turn; empty means "the running one".
 						messageId: this.currentAssistantMessageId || "",
 					}),
+					terminalRunIds,
 				);
 				yield* this.endTurn(ctx);
 				return;
@@ -1835,13 +1876,14 @@ export class ClaudeEventTranslator {
 			if (result.subtype !== "success") {
 				const errors = result.errors.join("; ") || "Unknown error";
 				yield* this.pushGoalChange(ctx, ctx.goalTracker?.pause(errors));
-				yield* this.push(
+				yield* this.pushResult(
 					ctx,
 					makeProviderRuntimeEvent("turn.error", ctx.sessionId, {
 						// The SDK uuid names no turn; empty ends the running one.
 						messageId: this.currentAssistantMessageId || "",
 						error: errors,
 					}),
+					terminalRunIds,
 				);
 				yield* this.endTurn(ctx);
 				return;
@@ -1859,7 +1901,7 @@ export class ClaudeEventTranslator {
 			if (result.is_error) {
 				const errorText = result.result || "Provider returned an error";
 				yield* this.pushGoalChange(ctx, ctx.goalTracker?.pause(errorText));
-				yield* this.push(
+				yield* this.pushResult(
 					ctx,
 					makeProviderRuntimeEvent("turn.error", ctx.sessionId, {
 						// The SDK uuid names no turn; empty ends the running one.
@@ -1867,6 +1909,7 @@ export class ClaudeEventTranslator {
 						error: errorText,
 						code: "provider_error",
 					}),
+					terminalRunIds,
 				);
 				yield* this.endTurn(ctx);
 				return;
@@ -1936,7 +1979,7 @@ export class ClaudeEventTranslator {
 				...(effectiveWindow ? { contextWindow: effectiveWindow } : {}),
 			};
 
-			yield* this.push(
+			yield* this.pushResult(
 				ctx,
 				makeProviderRuntimeEvent("turn.completed", ctx.sessionId, {
 					messageId:
@@ -1953,9 +1996,42 @@ export class ClaudeEventTranslator {
 					...(contextTokens !== undefined ? { contextTokens } : {}),
 					tokens,
 					duration: result.duration_ms,
+					providerStateUpdates: claudeProviderStateUpdates(ctx, true).map(
+						({ key, value }) => ({ key, value: String(value) }),
+					),
 				}),
+				terminalRunIds,
 			);
 			yield* this.endTurn(ctx);
+		});
+	}
+
+	private pushResult<
+		K extends "turn.completed" | "turn.error" | "turn.interrupted",
+	>(
+		ctx: ClaudeSessionContext,
+		event: ProviderRuntimeEvent & {
+			readonly type: K;
+			readonly data: ProviderRuntimeEventPayloadMap[K];
+		},
+		terminalRunIds: readonly string[],
+	): Effect.Effect<void, EventSinkError> {
+		return Effect.gen({ self: this }, function* () {
+			yield* this.push(ctx, event);
+			if (!runTerminalStatus(event, PROVIDER)) return;
+			for (const runId of new Set(terminalRunIds)) {
+				if (runId === (event.runId ?? ctx.currentRunId)) continue;
+				yield* this.push(ctx, {
+					...event,
+					eventId: createEventId(),
+					runId,
+					providerRefs: {},
+					data:
+						event.type === "turn.completed"
+							? { messageId: "" }
+							: { ...event.data, messageId: "" },
+				});
+			}
 		});
 	}
 
@@ -2027,13 +2103,64 @@ export class ClaudeEventTranslator {
 		});
 	}
 
+	private rememberToolOwner(
+		ctx: ClaudeSessionContext,
+		partId: string,
+		messageId: string,
+	): void {
+		// Task metadata can arrive after this run ends. Capture the launch, even
+		// when its first canonical tool.started will be emitted in a later run.
+		if (messageId && !ctx.toolMessageIds?.has(partId))
+			(ctx.toolMessageIds ??= new Map()).set(partId, messageId);
+		const runId =
+			ctx.messageRunIds?.get(messageId) ??
+			ctx.currentRunId ??
+			ctx.acceptedOutputOwner?.runId;
+		if (runId && !ctx.toolRunIds?.has(partId))
+			(ctx.toolRunIds ??= new Map()).set(partId, runId);
+	}
+
 	private push(
 		ctx: ClaudeSessionContext,
 		event: ProviderRuntimeEvent,
 	): Effect.Effect<void, EventSinkError> {
 		const sink = this.deps.getSink(ctx);
 		if (!sink) return Effect.void;
-		const write = sink.push(event);
+		const messageId = isRecord(event.data)
+			? event.data["messageId"]
+			: undefined;
+		const partId = isRecord(event.data) ? event.data["partId"] : undefined;
+		const outputRunId = ctx.currentRunId ?? ctx.acceptedOutputOwner?.runId;
+		if (
+			event.type === "message.created" &&
+			typeof messageId === "string" &&
+			outputRunId
+		) {
+			(ctx.messageRunIds ??= new Map()).set(messageId, outputRunId);
+		}
+		if (
+			(event.type === "tool.started" ||
+				event.type === "tool.running" ||
+				event.type === "tool.completed") &&
+			typeof partId === "string"
+		) {
+			const ownerMessageId = ctx.toolMessageIds?.get(partId);
+			if (ownerMessageId && isRecord(event.data))
+				event = {
+					...event,
+					data: { ...event.data, messageId: ownerMessageId },
+				};
+		}
+		const runId =
+			event.runId ??
+			(event.type.startsWith("turn.")
+				? outputRunId
+				: event.type.startsWith("tool.") && typeof partId === "string"
+					? ctx.toolRunIds?.get(partId)
+					: typeof messageId === "string"
+						? ctx.messageRunIds?.get(messageId)
+						: outputRunId);
+		const write = sink.push(runId ? { ...event, runId } : event);
 		if (!this.bufferedWrites) return write;
 		this.bufferedWrites.push(write);
 		return Effect.void;

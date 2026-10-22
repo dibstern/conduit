@@ -19,7 +19,6 @@ export const sessionPresentationHandlers: StepHandler[] = [
 				"session-skills-chip",
 				"side-threads-control",
 				"session-bar-settle",
-				"session-bar-title-menu",
 				"session-bar-unread-chip",
 				"session-bar-state-chip",
 				"session-goal-subtitle",
@@ -606,6 +605,17 @@ export const sessionPresentationHandlers: StepHandler[] = [
 			) {
 				throw new Error(`desktop overflow actions: ${JSON.stringify(actions)}`);
 			}
+			const resumeLabel = menu.getByText("Copy resume", { exact: true });
+			await expect(resumeLabel).toBeVisible();
+			await expect
+				.poll(() =>
+					resumeLabel.evaluate(
+						(label) =>
+							label.scrollWidth <= label.clientWidth &&
+							label.scrollHeight <= label.clientHeight,
+					),
+				)
+				.toBe(true);
 		},
 	},
 	{

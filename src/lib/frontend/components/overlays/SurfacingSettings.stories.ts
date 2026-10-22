@@ -87,10 +87,27 @@ type Story = StoryObj<typeof meta>;
 const general: NonNullable<Story["play"]> = async ({ canvasElement }) => {
 	const body = within(canvasElement.ownerDocument.body);
 	await expect(await body.findByTestId("surfacing-key-state")).toBeVisible();
+	for (const badge of [
+		body.getByText("Experimental"),
+		body.getByTestId("surfacing-key-state"),
+	]) {
+		await expect(badge.getBoundingClientRect().height).toBe(22);
+		await expect(getComputedStyle(badge).fontSize).toBe("12px");
+		await expect(getComputedStyle(badge).fontWeight).toBe("500");
+		await expect(
+			parseFloat(getComputedStyle(badge).borderRadius),
+		).toBeGreaterThanOrEqual(11);
+	}
 	await expect(
 		body.getByRole("switch", { name: "Jev categorisation & escalation" }),
 	).toHaveAttribute("aria-checked", "false");
 	await expect(body.getByTestId("surfacing-disclosure")).toBeVisible();
+	await expect(
+		getComputedStyle(body.getByTestId("surfacing-disclosure")).color,
+	).toBe(
+		getComputedStyle(body.getByRole("heading", { name: "Jev", level: 3 }))
+			.color,
+	);
 	if (fixture.settings.key.source === "env")
 		await expect(body.queryByTestId("surfacing-key-input")).toBeNull();
 };
@@ -181,6 +198,48 @@ const categories: NonNullable<Story["play"]> = async (context) => {
 	await expect(
 		body.getByTestId("surfacing-category-row-finding"),
 	).toBeVisible();
+	const add = body.getByTestId("surfacing-category-add");
+	await context.canvasElement.ownerDocument.fonts.ready;
+	const fonts = await context.canvasElement.ownerDocument.fonts.load(
+		'500 12.5px "Geist"',
+		"Add category",
+	);
+	await expect(fonts.length).toBeGreaterThan(0);
+	for (const font of fonts) await expect(font.status).toBe("loaded");
+	const addStyle = getComputedStyle(add);
+	await expect(add.getBoundingClientRect().height).toBe(26);
+	await expect(getComputedStyle(add).borderTopWidth).toBe("0px");
+	await expect(getComputedStyle(add).fontSize).toBe("12.5px");
+	await expect(addStyle.fontFamily).toMatch(/^"?Geist"?,/);
+	await expect(addStyle.fontWeight).toBe("500");
+	await expect(addStyle.paddingLeft).toBe("12px");
+	await expect(addStyle.paddingRight).toBe("12px");
+	await expect(addStyle.columnGap).toBe("5px");
+	await expect(addStyle.whiteSpace).toBe("nowrap");
+	const icon = add.querySelector("svg");
+	const text = Array.from(add.childNodes).find(
+		(node) =>
+			node.nodeType === Node.TEXT_NODE &&
+			node.textContent?.trim() === "Add category",
+	);
+	const header = add.parentElement?.parentElement;
+	if (!icon || !text || !header)
+		throw new Error("Add category contents or heading is missing");
+	await expect(icon.getBoundingClientRect().width).toBe(13);
+	await expect(icon.getBoundingClientRect().height).toBe(13);
+	const range = context.canvasElement.ownerDocument.createRange();
+	range.selectNode(text);
+	const textBox = range.getBoundingClientRect();
+	const addBox = add.getBoundingClientRect();
+	await expect(addBox.width).toBeCloseTo(textBox.width + 24 + 13 + 5, 1);
+	await expect(textBox.top).toBeGreaterThanOrEqual(addBox.top);
+	await expect(textBox.bottom).toBeLessThanOrEqual(addBox.bottom);
+	await expect(addBox.left).toBeGreaterThanOrEqual(
+		header.getBoundingClientRect().left,
+	);
+	await expect(addBox.right).toBeLessThanOrEqual(
+		header.getBoundingClientRect().right,
+	);
 	await userEvent.click(
 		body.getByRole("button", { name: "Raise Finding weight" }),
 	);

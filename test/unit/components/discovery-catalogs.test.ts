@@ -75,7 +75,10 @@ const agents = (name: string): GetAgentsResponse => ({
 
 let runtime: ManagedRuntime.ManagedRuntime<WsRpcClients, never>;
 let stop: (() => void) | undefined;
-let modelReads: ReturnType<typeof pending<GetModelsResponse>>[];
+let modelReads: (ReturnType<typeof pending<GetModelsResponse>> & {
+	instanceId: string | undefined;
+	sessionId: string | undefined;
+})[];
 let agentReads: ReturnType<typeof pending<GetAgentsResponse>>[];
 let commandReads: ReturnType<typeof pending<GetCommandsResponse>>[];
 let settingsRead: ReturnType<typeof pending<ProjectSettingsEnvelope>>;
@@ -137,8 +140,10 @@ beforeEach(() => {
 				Stream.concat(Stream.never),
 			);
 		},
-		GetModels: () => {
-			const read = pending<GetModelsResponse>();
+		GetModels: (payload) => {
+			const { instanceId } = payload;
+			const sessionId = "sessionId" in payload ? payload.sessionId : undefined;
+			const read = { ...pending<GetModelsResponse>(), instanceId, sessionId };
 			modelReads.push(read);
 			return read.promise;
 		},
@@ -243,7 +248,17 @@ describe("discovery catalogs over the RPC wire", () => {
 				.getAllByRole("menuitemradio")
 				.map((option) => option.textContent?.trim()),
 		).toEqual(["Claude Sonnet 4"]);
-		await vi.waitFor(() => expect(modelReads).toHaveLength(1));
+		// The title row reads its selected account independently of the open session.
+		await vi.waitFor(() =>
+			expect(modelReads).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						instanceId: "claude",
+						sessionId: undefined,
+					}),
+				]),
+			),
+		);
 	});
 
 	it.each([
@@ -273,10 +288,18 @@ describe("discovery catalogs over the RPC wire", () => {
 			defaultOpenCodeInstanceId: "one",
 		});
 		const oldRead = discovery.refreshCatalogs();
-		await vi.waitFor(() => expect(modelReads).toHaveLength(1));
+		await vi.waitFor(() => {
+			expect(modelReads).toHaveLength(1);
+			expect(agentReads).toHaveLength(1);
+			expect(commandReads).toHaveLength(1);
+		});
 		discovery.selectInstance("two");
 		const newRead = discovery.refreshCatalogs();
-		await vi.waitFor(() => expect(modelReads).toHaveLength(2));
+		await vi.waitFor(() => {
+			expect(modelReads).toHaveLength(2);
+			expect(agentReads).toHaveLength(2);
+			expect(commandReads).toHaveLength(2);
+		});
 		const reply = models("Y", "two");
 		modelReads[1]?.resolve({
 			...reply,

@@ -4830,6 +4830,7 @@ async function replay(root: string, selected: readonly Scenario[]) {
 				await mkdir(home, { recursive: true, mode: 0o700 });
 				const config = join(root, `runner-${kind}-config`);
 				const sessionId = `account-switch-${kind}-replay`;
+				const runId = `run-${kind}-replay`;
 				const runnerTrace = kind === "native-thread" ? trace : fallback;
 				const runnerTracePath = kind === "native-thread" ? path : fallbackPath;
 				writeCodexSessionIdentity(config, sessionId, {
@@ -4855,6 +4856,7 @@ async function replay(root: string, selected: readonly Scenario[]) {
 				const result = await Effect.runPromise(
 					Effect.scoped(
 						Effect.gen(function* () {
+							const finished = yield* Deferred.make<void>();
 							const runner = yield* makeCodexSessionRunner(
 								{
 									workspaceRoot: "/workspace",
@@ -4867,17 +4869,20 @@ async function replay(root: string, selected: readonly Scenario[]) {
 									}),
 								},
 								(output) =>
-									Effect.sync(() => {
+									Effect.gen(function* () {
 										outputs.push(output);
+										if (output.type === "release-sink")
+											yield* Deferred.succeed(finished, undefined);
 										return {};
 									}),
 							);
-							return yield* runner.executeEffect({
+							const intake = yield* runner.executeEffect({
 								type: "send-turn",
 								sinkId: "replay-sink",
 								aborted: false,
 								input: {
 									sessionId,
+									runId,
 									inputId: "replay-input",
 									prompt: "Say hello",
 									continuation: { cutOffMessageId: "cut-off-message" },
@@ -4889,17 +4894,26 @@ async function replay(root: string, selected: readonly Scenario[]) {
 									permissionMode: "ask",
 								},
 							});
+							yield* Deferred.await(finished).pipe(
+								Effect.timeout("10 seconds"),
+							);
+							return intake;
 						}),
 					),
 				);
-				assert.equal(result.status, "completed");
-				assert.equal(result.handoff?.continuationKind, kind);
-				assert(
-					result.providerStateUpdates.some(
-						({ key, value }) =>
-							key === "codex.threadId" &&
-							value === (kind === "native-thread" ? threadId : freshId),
-					),
+				assert.equal(result.status, "accepted");
+				assert.equal(result.handoff, undefined);
+				const terminal = outputs.find(
+					(output) =>
+						output.type === "event" && output.event.type === "turn.completed",
+				);
+				assert(terminal?.type === "event");
+				assert.equal(terminal.event.runId, runId);
+				assert.equal(terminal.event.data.continuationKind, kind);
+				assert.deepEqual(terminal.event.data.providerStateUpdates, []);
+				assert.equal(
+					terminal.event.providerRefs.providerSessionId,
+					kind === "native-thread" ? threadId : freshId,
 				);
 				assert(
 					!outputs.some(
@@ -4939,7 +4953,7 @@ async function replay(root: string, selected: readonly Scenario[]) {
 				assert.deepEqual(runnerReport["mismatches"], []);
 				assert.deepEqual(runnerReport["unconsumed"], []);
 				console.log(
-					`${scenario}: runner returned ${kind} handoff without synthetic messages`,
+					`${scenario}: runner completed ${kind} handoff through an owned terminal without synthetic messages`,
 				);
 			}
 		}

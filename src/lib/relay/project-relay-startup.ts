@@ -250,8 +250,12 @@ function acquireStartupServices(inputs: StartupInputs) {
 		const opencodeRuntimeIngress = yield* makeEffectOpenCodeRuntimeIngress(
 			log.child("opencode-runtime-ingress"),
 			readOpenCodeMessages,
-			(sessionId, messageId) =>
-				orchestration.openCodeInstance.inputIdForUserEcho(sessionId, messageId),
+			(sessionId, messageId, compaction) =>
+				orchestration.openCodeInstance.inputIdForUserEcho(
+					sessionId,
+					messageId,
+					compaction,
+				),
 			(instanceId, parentId) =>
 				Effect.gen(function* () {
 					const parent = parentId
@@ -280,25 +284,74 @@ function acquireStartupServices(inputs: StartupInputs) {
 			"opencode",
 			(id) => accounts.accounts.find((account) => account.id === id)?.driver,
 		);
-		const recoverOpenCodeCommands = opencodeRuntimeIngress.recoverCommands(
-			recoveryCommands,
-			(instanceId, sessionId) =>
-				Effect.gen(function* () {
-					const directory = yield* workspace.withLaunch(
-						workspace.get(sessionId),
-					);
-					const client = yield* instances.ifRunning(instanceId, directory);
-					if (Option.isNone(client))
-						return (yield* instances.isManagedStopped(instanceId))
-							? ("stopped" as const)
-							: undefined;
-					return yield* Effect.tryPromise({
-						try: () => client.value.session.statuses(),
-						catch: (cause) => cause,
-					});
-				}).pipe(Effect.scoped),
-			yield* makeFailTurn,
+		const readOpenCodeStatuses = (instanceId: string, sessionId: string) =>
+			Effect.gen(function* () {
+				const { directory, hasWorkspace } = yield* workspace.withLaunch(
+					Effect.gen(function* () {
+						// A reset clears the workspace row but remains an explicit move.
+						const [row] = yield* sql<{ has_workspace: number }>`
+							SELECT workspace IS NOT NULL OR EXISTS (
+								SELECT 1 FROM events WHERE session_id = ${sessionId}
+								AND type = 'session.workspace_changed' AND json_extract(data, '$.cause') != 'branch-rename'
+							) AS has_workspace FROM sessions WHERE id = ${sessionId}`;
+						return {
+							directory: yield* workspace.get(sessionId),
+							hasWorkspace: row?.has_workspace === 1,
+						};
+					}),
+				);
+				const client = yield* instances.ifRunning(instanceId, directory);
+				if (Option.isNone(client))
+					return (yield* instances.isManagedStopped(instanceId))
+						? ("stopped" as const)
+						: undefined;
+				return yield* Effect.tryPromise({
+					try: async () => {
+						const statuses = await client.value.session.statuses();
+						if (statuses[sessionId] !== undefined) return statuses;
+						// OpenCode omits idle sessions. Validate the native identity
+						// before using an omission as proof of idle.
+						const session = await client.value.session.get(sessionId);
+						if (session.id !== sessionId || !session.directory) return statuses;
+						if (session.directory !== directory) {
+							// An explicit workspace can outlive stale native detail. Both
+							// scopes must be idle; a native-only default cannot override it.
+							if (!hasWorkspace) return statuses;
+							const nativeStatuses = await client.value.session.statuses(
+								session.directory,
+							);
+							const nativeStatus = nativeStatuses[sessionId];
+							if (nativeStatus && nativeStatus.type !== "idle")
+								return { ...statuses, [sessionId]: nativeStatus };
+							const current = await client.value.session.get(sessionId);
+							if (
+								current.id !== sessionId ||
+								current.directory !== session.directory
+							)
+								return statuses;
+						}
+						return { ...statuses, [sessionId]: { type: "idle" as const } };
+					},
+					catch: (cause) => cause,
+				});
+			}).pipe(Effect.scoped);
+		const recoverObservedRuns = opencodeRuntimeIngress.recoverObservedRuns(
+			readOpenCodeStatuses,
+			[
+				MANAGED_OPENCODE_ACCOUNT_ID,
+				...accounts.accounts
+					.filter((account) => account.driver === "opencode")
+					.map((account) => account.id),
+			],
 		);
+		const recoverOpenCodeCommands = opencodeRuntimeIngress
+			.recoverCommands(
+				recoveryCommands,
+				readOpenCodeStatuses,
+				yield* makeFailTurn,
+			)
+			.pipe(Effect.andThen(recoverObservedRuns));
+
 		layers.setHistoryIngress(opencodeRuntimeIngress);
 		if (config.signal?.aborted) {
 			return yield* Effect.fail(
@@ -334,15 +387,9 @@ type AcquiredStartupServices = Effect.Success<
 >;
 
 function wireStartupCallbacks(services: AcquiredStartupServices) {
-	const { orchestration, sseStream } = services;
 	return Effect.gen(function* () {
 		yield* services.statusPoller.on("changed", () => {
 			services.runFork(services.recoverOpenCodeCommands);
-		});
-		yield* Effect.sync(() => {
-			orchestration.wireSSEToInstance((event, handler) => {
-				sseStream.on(event, handler);
-			});
 		});
 	});
 }
@@ -417,7 +464,6 @@ function startSseConsumers(
 		statusPoller,
 		opencodeRuntimeIngress,
 		sseStream,
-		orchestration,
 	} = services;
 	return Effect.gen(function* () {
 		const terminal = yield* OpenCodeTerminalServiceTag;
@@ -451,19 +497,14 @@ function startSseConsumers(
 		};
 		yield* wireSSEConsumerEffect(sseConsumerDeps, sseStream);
 		// Other OpenCode instances delivering events for this project join the
-		// SAME pipeline — turn completion via wireSSEToInstance,
-		// streaming/persistence via wireSSEConsumerEffect. Pending prompt and
+		// SAME streaming and durable completion pipeline via wireSSEConsumerEffect.
+		// Pending prompt and
 		// status recovery runs per instance stream in OpenCode Instances, and
 		// the ingress translator reset stays owned by the selected instance's
 		// reconnects so another instance's (re)connect cannot reset in-flight
 		// default-session ingestion state.
 		yield* sseStream.wireInstanceStreams((stream, instanceId) =>
 			Effect.gen(function* () {
-				yield* Effect.sync(() =>
-					orchestration.wireSSEToInstance((event, handler) => {
-						stream.on(event, handler);
-					}),
-				);
 				yield* wireSSEConsumerEffect(
 					{
 						...sseConsumerDeps,
@@ -496,6 +537,14 @@ export async function startProjectRelay(inputs: StartupInputs) {
 				yield* Effect.gen(function* () {
 					yield* startSseConsumers(inputs, services, monitoring);
 					yield* services.recoverOpenCodeCommands;
+					// An unavailable provider may later be idle without ever producing
+					// a status transition. Retry only the frozen startup claims.
+					yield* Effect.forkIn(
+						services.recoverOpenCodeCommands.pipe(
+							Effect.repeat(Schedule.spaced("1 second")),
+						),
+						relayManagedRuntime.scope,
+					);
 					yield* (yield* SessionSetupTag).recover;
 					const makeInteractions = yield* makeEventSinkFactory;
 					// Recovery must settle crashed turns before an outbox claim can

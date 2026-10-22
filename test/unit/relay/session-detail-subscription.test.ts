@@ -160,13 +160,43 @@ const messageCreated = (
 	sessionId: string,
 	messageId: string,
 	role: "user" | "assistant",
+	owner?: { readonly runId: string; readonly parentID?: string },
 ): CanonicalEvent =>
 	canonicalEvent(
 		"message.created",
 		sessionId,
-		{ messageId, role, sessionId },
-		{ provider: "claude", createdAt: at() },
+		{
+			messageId,
+			role,
+			sessionId,
+			...(owner?.parentID ? { parentID: owner.parentID } : {}),
+			...(owner && role === "user" ? { inputId: messageId } : {}),
+		},
+		{
+			provider: "claude",
+			createdAt: at(),
+			...(owner ? { metadata: { runId: owner.runId } } : {}),
+		},
 	);
+const acceptedInput = (
+	sessionId: string,
+	inputId: string,
+	runId: string,
+): readonly CanonicalEvent[] => [
+	canonicalEvent(
+		"run.requested",
+		sessionId,
+		{ inputId, runId },
+		{ provider: "claude", createdAt: at(), metadata: { runId } },
+	),
+	messageCreated(sessionId, inputId, "user", { runId }),
+	canonicalEvent(
+		"run.started",
+		sessionId,
+		{ inputId, requestedRunId: runId },
+		{ provider: "claude", createdAt: at(), metadata: { runId } },
+	),
+];
 const textDelta = (
 	sessionId: string,
 	messageId: string,
@@ -656,18 +686,46 @@ describe("subscribeSessionDetail", () => {
 			yield* recoverProjections;
 			yield* commit([
 				sessionCreated(SID),
-				messageCreated(SID, "m0", "user"),
+				...acceptedInput(SID, "m0", "resume-run"),
 				textDelta(SID, "m0", "m0-0", "held by the client"),
 			]);
 			const cursor = yield* readModelVersion;
 
 			// Two messages land while the client is away.
 			yield* commit([
-				messageCreated(SID, "m1", "assistant"),
+				canonicalEvent(
+					"message.created",
+					SID,
+					{
+						sessionId: SID,
+						messageId: "m1",
+						role: "assistant",
+						parentID: "m0",
+					},
+					{
+						provider: "claude",
+						createdAt: at(),
+						metadata: { runId: "resume-run" },
+					},
+				),
 				textDelta(SID, "m1", "m1-0", "missed"),
 			]);
 			yield* commit([
-				messageCreated(SID, "m2", "assistant"),
+				canonicalEvent(
+					"message.created",
+					SID,
+					{
+						sessionId: SID,
+						messageId: "m2",
+						role: "assistant",
+						parentID: "m0",
+					},
+					{
+						provider: "claude",
+						createdAt: at(),
+						metadata: { runId: "resume-run" },
+					},
+				),
 				textDelta(SID, "m2", "m2-0", "also missed"),
 			]);
 			const version = yield* readModelVersion;
@@ -1139,7 +1197,7 @@ describe("subscribeSessionDetail", () => {
 							yield* Ref.update(published, (all) => [...all, ...events]);
 						}),
 					publishAdvance: () => Effect.void,
-					subscribe: () => Effect.die(new Error("unused in this test")),
+					subscribe: () => Effect.succeed(Stream.empty),
 					subscribeAdvances: () => Effect.die(new Error("unused in this test")),
 				};
 
@@ -1680,9 +1738,19 @@ describe("transcript states carried by the detail feed alone", () => {
 			yield* recoverProjections;
 			yield* commit([
 				sessionCreated(SID),
-				messageCreated(SID, "m1", "assistant"),
-				ev("thinking.start", { messageId: "m1", partId: "t1" }),
-				ev("turn.interrupted", { messageId: "m1" }),
+				...acceptedInput(SID, "m0", "interrupted-run"),
+				messageCreated(SID, "m1", "assistant", {
+					runId: "interrupted-run",
+					parentID: "m0",
+				}),
+				{
+					...ev("thinking.start", { messageId: "m1", partId: "t1" }),
+					metadata: { runId: "interrupted-run" },
+				},
+				{
+					...ev("turn.interrupted", { messageId: "m1" }),
+					metadata: { runId: "interrupted-run" },
+				},
 			]);
 			const { q } = yield* openDetail({ sessionId: SID });
 			expect(chatOf(yield* takeN(q, 2))).toMatchObject([
@@ -1737,25 +1805,33 @@ describe("transcript states carried by the detail feed alone", () => {
 			yield* recoverProjections;
 			yield* commit([
 				sessionCreated(SID),
-				messageCreated(SID, "m1", "assistant"),
+				...acceptedInput(SID, "m0", "error-run"),
+				messageCreated(SID, "m1", "assistant", {
+					runId: "error-run",
+					parentID: "m0",
+				}),
 				toolStarted(SID, "m1", "p1"),
 			]);
 			const { q } = yield* openDetail({ sessionId: SID });
 			const opening = yield* takeN(q, 2);
 
 			yield* commit([
-				ev("turn.error", {
-					messageId: "m1",
-					error: "Rate limited",
-					code: "provider_error",
-				}),
+				{
+					...ev("turn.error", {
+						messageId: "m1",
+						error: "Rate limited",
+						code: "provider_error",
+					}),
+					metadata: { runId: "error-run" },
+				},
 			]);
-			// The turn's message moved, and the error is a message with its part.
-			const errored = yield* takeN(q, 3);
+			// The owned input and answer move, and the error is a message with its part.
+			const errored = yield* takeN(q, 4);
 			expect(namesOf(errored)).toEqual([
+				"m0",
 				"m1",
-				"turn-error-4/turn-error-part-4",
-				"turn-error-4",
+				"turn-error-7/turn-error-part-7",
+				"turn-error-7",
 			]);
 			const live = [...opening, ...errored];
 			const expected = [

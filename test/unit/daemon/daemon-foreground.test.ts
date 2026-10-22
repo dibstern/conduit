@@ -12,6 +12,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { startForegroundDaemon } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
+import { ENV } from "../../../src/lib/env.js";
 
 async function listen(server: Server): Promise<number> {
 	return new Promise((resolve) => {
@@ -192,55 +193,72 @@ describe("startForegroundDaemon", () => {
 	it("authenticates default instance health checks with OpenCode credentials", async () => {
 		const previousPassword = process.env["OPENCODE_SERVER_PASSWORD"];
 		const previousUsername = process.env["OPENCODE_SERVER_USERNAME"];
-		process.env["OPENCODE_SERVER_PASSWORD"] = "health-secret";
-		process.env["OPENCODE_SERVER_USERNAME"] = "opencode";
-
-		const healthServer = fakeOpenCode(
-			[],
-			expectedBasicAuth("opencode", "health-secret"),
-		);
-		const opencodePort = await listen(healthServer);
-		const root = mkdtempSync(join(tmpdir(), "conduit-foreground-auth-health-"));
-		const configDir = join(root, "config");
-		const staticDir = join(root, "static");
-		const socketPath = join(root, "relay.sock");
-		mkdirSync(staticDir);
-		writeFileSync(join(staticDir, "index.html"), "<html>ok</html>", {
-			flag: "w",
-		});
-
-		const daemon = await startForegroundDaemon({
-			port: 0,
-			configDir,
-			socketPath,
-			staticDir,
-			opencodeUrl: `http://127.0.0.1:${opencodePort}`,
-			tlsEnabled: false,
-			smartDefault: false,
-			logLevel: "error",
-			logFormat: "json",
-		});
+		const previousStartupPassword = ENV.opencodePassword;
+		const previousStartupUsername = ENV.opencodeUsername;
 
 		try {
-			await sendRpcRequest(socketPath, {
-				_tag: "StartInstance",
-				instanceId: "opencode",
+			process.env["OPENCODE_SERVER_PASSWORD"] = "health-secret";
+			process.env["OPENCODE_SERVER_USERNAME"] = "opencode";
+			Object.assign(ENV, {
+				opencodePassword: "health-secret",
+				opencodeUsername: "opencode",
 			});
-			await vi.waitFor(() => {
-				expect(daemon.getInstances()).toEqual([
-					expect.objectContaining({
-						id: "opencode",
-						managed: false,
-						port: opencodePort,
-						status: "healthy",
-					}),
-					expect.objectContaining({ id: "claude", driver: "claude" }),
-				]);
+
+			const healthServer = fakeOpenCode(
+				[],
+				expectedBasicAuth("opencode", "health-secret"),
+			);
+			const opencodePort = await listen(healthServer);
+			const root = mkdtempSync(
+				join(tmpdir(), "conduit-foreground-auth-health-"),
+			);
+			const configDir = join(root, "config");
+			const staticDir = join(root, "static");
+			const socketPath = join(root, "relay.sock");
+			mkdirSync(staticDir);
+			writeFileSync(join(staticDir, "index.html"), "<html>ok</html>", {
+				flag: "w",
 			});
+
+			const daemon = await startForegroundDaemon({
+				port: 0,
+				configDir,
+				socketPath,
+				staticDir,
+				opencodeUrl: `http://127.0.0.1:${opencodePort}`,
+				tlsEnabled: false,
+				smartDefault: false,
+				logLevel: "error",
+				logFormat: "json",
+			});
+
+			try {
+				await sendRpcRequest(socketPath, {
+					_tag: "StartInstance",
+					instanceId: "opencode",
+				});
+				await vi.waitFor(() => {
+					expect(daemon.getInstances()).toEqual([
+						expect.objectContaining({
+							id: "opencode",
+							managed: false,
+							port: opencodePort,
+							status: "healthy",
+						}),
+						expect.objectContaining({ id: "claude", driver: "claude" }),
+					]);
+				});
+			} finally {
+				await daemon.stop();
+				healthServer.closeAllConnections();
+				await closeServer(healthServer);
+				rmSync(root, { recursive: true, force: true });
+			}
 		} finally {
-			await daemon.stop();
-			healthServer.closeAllConnections();
-			await closeServer(healthServer);
+			Object.assign(ENV, {
+				opencodePassword: previousStartupPassword,
+				opencodeUsername: previousStartupUsername,
+			});
 			if (previousPassword === undefined) {
 				delete process.env["OPENCODE_SERVER_PASSWORD"];
 			} else {
@@ -251,7 +269,6 @@ describe("startForegroundDaemon", () => {
 			} else {
 				process.env["OPENCODE_SERVER_USERNAME"] = previousUsername;
 			}
-			rmSync(root, { recursive: true, force: true });
 		}
 	});
 

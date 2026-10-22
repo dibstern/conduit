@@ -4,7 +4,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Context, Deferred, Effect, Logger, ManagedRuntime } from "effect";
 import { SqlError, UnknownError } from "effect/sql/SqlError";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	type DrainReport,
 	EventRetentionTag,
@@ -19,6 +19,7 @@ import {
 } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -38,16 +39,28 @@ describe("event retention scheduling", () => {
 	const cleanup: (() => Promise<void>)[] = [];
 	const evidence: Record<string, unknown> = {};
 
+	beforeEach(() => {
+		__setProbeOverrideForTesting(async () => ({
+			models: [],
+			commands: [],
+			agents: [],
+		}));
+	});
+
 	afterEach(async () => {
-		await harness?.stop();
-		harness = undefined;
-		for (const dispose of cleanup.splice(0).reverse()) await dispose();
-		vi.restoreAllMocks();
-		mkdirSync("test-results/event-retention", { recursive: true });
-		writeFileSync(
-			"test-results/event-retention/scheduling.json",
-			`${JSON.stringify(evidence, null, 2)}\n`,
-		);
+		try {
+			await harness?.stop();
+			harness = undefined;
+			for (const dispose of cleanup.splice(0).reverse()) await dispose();
+			vi.restoreAllMocks();
+			mkdirSync("test-results/event-retention", { recursive: true });
+			writeFileSync(
+				"test-results/event-retention/scheduling.json",
+				`${JSON.stringify(evidence, null, 2)}\n`,
+			);
+		} finally {
+			__setProbeOverrideForTesting(undefined);
+		}
 	});
 
 	// Failure modes: lost kicks behind publication/callbacks, concurrent drains,

@@ -322,6 +322,15 @@ describe("legacy Fork migration", () => {
 				for (const event of events) {
 					yield* runner.projectEvent(yield* store.append(event));
 				}
+				// The legacy store already knew this attention position. Its old
+				// unowned terminal cannot reconstruct a provider run during replay.
+				const sql = yield* SqlClient.SqlClient;
+				const [counter] = yield* sql<{ value: number }>`
+					UPDATE read_model_counter SET value = value + 1 WHERE id = 1 RETURNING value`;
+				yield* sql`UPDATE sessions SET last_turn_end_version =
+					(SELECT stream_version FROM events WHERE session_id = 'fork' AND type = 'turn.completed'),
+					version = ${counter?.value ?? 0} WHERE id = 'fork'`;
+				yield* refreshSidebar(["fork"], counter?.value ?? 0);
 				return { placement: yield* placement, sidebar: yield* sidebar };
 			}).pipe(
 				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),

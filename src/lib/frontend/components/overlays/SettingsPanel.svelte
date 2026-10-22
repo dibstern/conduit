@@ -88,7 +88,7 @@
 	<div
 		id="settings-panel"
 		class:phone={sessionViewState.compact}
-		class="settings-panel bg-settings-bg ring-1 ring-border rounded-[16px] shadow-settings-dialog flex flex-col overflow-hidden font-sans leading-[1.35]"
+		class="settings-panel bg-settings-bg ring-1 ring-border rounded-[16px] shadow-settings-dialog flex flex-col overflow-hidden font-sans leading-[1.5]"
 	>
 		<div class="settings-header shrink-0 bg-settings-rail {sessionViewState.compact ? 'grid grid-cols-[90px_minmax(0,1fr)_90px] items-center px-[8px]' : 'flex h-[52px] items-center px-[12px] pl-[20px] border-b border-settings-separator'}">
 			{#if listHidden}
@@ -112,9 +112,11 @@
 				{listHidden ? surfacingPage?.title ?? sectionLabel : "Settings"}
 			</h2>
 			{#if sessionViewState.compact && !listHidden}
-				<Button variant="ghost" tone="accent" hoverFill="none" size="content" class="min-h-[44px] min-w-[44px] justify-self-end text-[15px]" data-testid="settings-close-btn" ariaLabel="Close settings" onclick={() => onClose?.()}>Done</Button>
+				<Button variant="ghost" tone="accent" hoverFill="none" size="content" touchTarget class="min-h-[44px] justify-self-end text-[15px] font-semibold" data-testid="settings-close-btn" ariaLabel="Close settings" onclick={() => onClose?.()}>Done</Button>
+			{:else if !sessionViewState.compact}
+				<Button iconOnly ariaLabel="Close settings" icon="x" iconSize={13} variant="chip" tone="muted" size="content" class="size-[32px] rounded-[50%]" data-testid="settings-close-btn" onclick={() => onClose?.()} />
 			{:else}
-				<Button iconOnly ariaLabel="Close settings" icon="x" iconSize={16} variant="ghost" tone="muted" hoverFill="none" size="content" class={sessionViewState.compact ? 'min-h-[44px] min-w-[44px] justify-self-end' : 'size-[28px]'} data-testid="settings-close-btn" onclick={() => onClose?.()} />
+				<span></span>
 			{/if}
 		</div>
 
@@ -143,7 +145,7 @@
 								<span data-testid="settings-server-dot" class="inline-block size-[7px] shrink-0 rounded-full {instanceStatusColor(unhealthyInstance.status)}"></span>
 							{/if}
 							{#if sessionViewState.compact}
-								<Icon name="chevron-right" size={14} class="text-text-dimmer" />
+								<Icon name="chevron-right" size={14} class="text-settings-icon" />
 							{/if}
 						{/snippet}
 					</Tabs>
@@ -156,8 +158,8 @@
 					{#if !sessionViewState.compact}
 						<div class="mb-[16px] flex flex-wrap items-baseline gap-x-[10px]">
 							<h2 class="text-[17px] font-semibold tracking-[-0.01em] text-text">{sectionLabel}</h2>
-							{#if shown === "usage"}<p class="text-[12.5px] text-text-muted">This computer's accounts</p>{/if}
-							{#if shown === "surfacing"}<p class="text-[12.5px] text-text-muted">Which mid-turn messages surface, and how</p>{/if}
+							{#if shown === "usage"}<p class="text-[12.5px] text-text-dimmer">This computer's accounts</p>{/if}
+							{#if shown === "surfacing"}<p class="text-[12.5px] text-text-dimmer">Which mid-turn messages surface, and how</p>{/if}
 						</div>
 					{/if}
 					<div class="flex flex-col">
@@ -218,7 +220,7 @@
 	}
 	.phone .settings-header {
 		height: 44px;
-		background: var(--color-settings-bg);
+		background: var(--color-bg);
 	}
 	.phone .settings-content {
 		padding: 4px 14px 26px;

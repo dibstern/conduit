@@ -1,7 +1,9 @@
 import {
+	copyFileSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	writeFileSync,
 } from "node:fs";
@@ -16,6 +18,7 @@ import { formatSnoozeTime } from "../../../src/lib/frontend/utils/format.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
 import { openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
+import { closeSettings } from "../helpers/settings.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 import { PermissionPage } from "../page-objects/permission.page.js";
@@ -1270,7 +1273,7 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 						'[data-testid="quota-meter"][data-state="checking"]',
 					),
 				).toHaveCount(0);
-				await page.getByTestId("settings-close-btn").click();
+				await closeSettings(page);
 				await expect(page.locator("#settings-panel")).toBeHidden();
 			}
 			const before = proofMarks().length;
@@ -1738,7 +1741,7 @@ for (const scenario of [
 				const dividerAboveReply = async (): Promise<void> => {
 					await expect(strip).toHaveCount(0);
 					await expect(divider).toHaveText(
-						`↻ Resumed on Reset account after reset · ${formatSnoozeTime(resume.at)}`,
+						`↻ Resumed on Reset account after reset · ${await page.evaluate(formatSnoozeTime, resume.at)}`,
 					);
 					await expect(reply).toBeVisible();
 					const [dividerBox, replyBox] = await Promise.all([
@@ -2000,7 +2003,7 @@ for (const scenario of ["auto", "restart", "no-reset", "off"] as const) {
 			if (!resume) throw new Error("No reset resume");
 			await expect(strip).toHaveCount(0);
 			await expect(page.getByTestId("transcript-divider")).toHaveText(
-				`↻ Resumed on Reset account after reset · ${formatSnoozeTime(resume.at)}`,
+				`↻ Resumed on Reset account after reset · ${await page.evaluate(formatSnoozeTime, resume.at)}`,
 			);
 			await expect(
 				page
@@ -2493,10 +2496,9 @@ for (const behavior of [
 		}
 		const [source, target] = accounts;
 		if (!source || !target) throw new Error("Two accounts are required");
+		const projectDir = mkdtempSync(join(harness.root, "switch-project-"));
 		const { savedSlug: projectSlug } = await Effect.runPromise(
-			browser.rpc.SaveProject({
-				folders: [mkdtempSync(join(harness.root, "switch-project-"))],
-			}),
+			browser.rpc.SaveProject({ folders: [projectDir] }),
 		);
 		if (!projectSlug) throw new Error("No switch project slug");
 		// Project RPCs reset config persistence's debounce. Wait on disk once,
@@ -2877,6 +2879,10 @@ for (const behavior of [
 				);
 				if (behavior !== "fork-uncovered" && nativeParent?.kind !== "query")
 					throw new Error("No native parent query");
+				const queriesBeforeFork = proofMarks().filter(
+					(mark) => mark.kind === "query",
+				);
+				const callsBeforeFork = harness.claudeOptions();
 				const fork = await Effect.runPromise(
 					browser.rpc.ForkSession({
 						sessionId,
@@ -2911,19 +2917,17 @@ for (const behavior of [
 				const nativeForks = proofMarks().filter(
 					(mark) => mark.kind === "native-fork",
 				);
-				if (behavior === "fork-uncovered") expect(nativeForks).toHaveLength(0);
-				else
-					expect(nativeForks).toEqual([
-						expect.objectContaining({
-							parentSessionId:
-								nativeParent?.kind === "query"
-									? nativeParent.sessionId
-									: undefined,
-							sessionId: fork.sessionId,
-							configDir: expectedAccount.configDir,
-							upToMessageId: point.id,
-						}),
-					]);
+				// conduit-test-hiuf.6: creation is provider-free; first input forks natively.
+				expect(nativeForks).toHaveLength(0);
+				expect(proofMarks().filter((mark) => mark.kind === "query")).toEqual(
+					queriesBeforeFork,
+				);
+				expect(harness.claudeOptions()).toEqual(callsBeforeFork);
+				const childTranscriptPath = join(
+					expectedAccount.configDir,
+					`conduit-test-transcript-${fork.sessionId}.ndjson`,
+				);
+				expect(existsSync(childTranscriptPath)).toBe(false);
 				const forkPrompt = `Continue the ${behavior} fork.`;
 				await Effect.runPromise(
 					browser.rpc["input.submit"]({
@@ -2941,12 +2945,25 @@ for (const behavior of [
 							.find((call) => call.prompt?.endsWith(forkPrompt)),
 					)
 					.toBeDefined();
-				const call = harness
+				const forkCalls = harness
 					.claudeOptions()
-					.find((call) => call.prompt?.endsWith(forkPrompt));
+					.filter((call) => call.prompt?.endsWith(forkPrompt));
+				expect(forkCalls).toHaveLength(1);
+				const call = forkCalls[0];
 				expect(call?.configDir).toBe(expectedAccount.configDir);
+				expect(call?.options).toMatchObject({
+					cwd: projectDir,
+					env: { CLAUDE_CONFIG_DIR: expectedAccount.configDir },
+				});
 				if (behavior === "fork-uncovered") {
 					expect(call?.resumeId).toBeNull();
+					for (const key of [
+						"resume",
+						"forkSession",
+						"sessionId",
+						"resumeSessionAt",
+					])
+						expect(call?.options).not.toHaveProperty(key);
 					expect(call?.prompt).toContain(handoffMarker);
 					expect(call?.prompt).toContain(first);
 					expect(call?.prompt).toContain(cutOff);
@@ -2960,9 +2977,98 @@ for (const behavior of [
 					).toBeLessThanOrEqual(16_000);
 					expect(call?.prompt).toMatch(/omitted [1-9]\d* messages/);
 				} else {
-					expect(call?.resumeId).toBe(fork.sessionId);
+					if (nativeParent?.kind !== "query")
+						throw new Error("No native parent query");
+					const parentTranscript = readFileSync(
+						join(
+							expectedAccount.configDir,
+							`conduit-test-transcript-${nativeParent.sessionId}.ndjson`,
+						),
+						"utf8",
+					)
+						.split("\n")
+						.filter(Boolean)
+						.map(
+							(line) =>
+								JSON.parse(line) as {
+									type: string;
+									uuid: string;
+									session_id: string;
+									message?: { id?: string; content?: unknown };
+								},
+						);
+					// These fixture turns have one assistant record. Match its visible
+					// message ID and text independently of the production cut resolver.
+					const cutIndex = parentTranscript.findIndex(
+						(entry) =>
+							entry.type === "assistant" &&
+							(entry.uuid === point.id || entry.message?.id === point.id),
+					);
+					const cut = parentTranscript[cutIndex];
+					if (!cut) throw new Error("Fork point absent from native parent");
+					evidence["nativeFork"] = { parentTranscript, cut, cutIndex, call };
+					expect(cut.message?.content).toEqual([
+						{ type: "text", text: point.text },
+					]);
+					expect(call?.resumeId).toBe(nativeParent.sessionId);
+					expect(call?.options).toMatchObject({
+						resume: nativeParent.sessionId,
+						forkSession: true,
+						sessionId: fork.sessionId,
+						resumeSessionAt: cut.uuid,
+					});
 					expect(call?.prompt).toBe(forkPrompt);
+					await expect
+						.poll(() => readFileSync(childTranscriptPath, "utf8"))
+						.toContain(`done(${forkPrompt})`);
+					const childTranscript = readFileSync(childTranscriptPath, "utf8")
+						.split("\n")
+						.filter(Boolean)
+						.map(
+							(line) => JSON.parse(line) as (typeof parentTranscript)[number],
+						);
+					evidence["nativeFork"] = {
+						parentTranscript,
+						cut,
+						cutIndex,
+						call,
+						childTranscript,
+					};
+					expect(childTranscript.slice(0, cutIndex + 1)).toEqual(
+						parentTranscript.slice(0, cutIndex + 1).map((entry) => ({
+							...entry,
+							session_id: fork.sessionId,
+						})),
+					);
+					// Exact suffix excludes every later parent record and extra input.
+					expect(childTranscript.slice(cutIndex + 1)).toEqual([
+						expect.objectContaining({
+							type: "user",
+							session_id: fork.sessionId,
+							parentUuid: cut.uuid,
+							uuid: `continue-${behavior}`,
+							message: expect.objectContaining({
+								content: [{ type: "text", text: forkPrompt }],
+							}),
+						}),
+						expect.objectContaining({
+							type: "assistant",
+							session_id: fork.sessionId,
+							parentUuid: `continue-${behavior}`,
+							message: expect.objectContaining({
+								content: [
+									{
+										type: "text",
+										text: `Echo(${forkPrompt}): stream(${forkPrompt}) done(${forkPrompt}).`,
+									},
+								],
+							}),
+						}),
+					]);
 				}
+				expect(
+					proofMarks().filter((mark) => mark.kind === "native-fork"),
+				).toHaveLength(0);
 				evidence["fork"] = {
 					fork,
 					point,
@@ -3110,6 +3216,21 @@ for (const behavior of [
 		} finally {
 			writeFileSync(join(harness.root, "release-switch-stop"), "release");
 			writeFileSync(join(harness.root, "release-switch-turn"), "release");
+			if (behavior.startsWith("fork-")) {
+				const transcripts = join(artifacts, "native-transcripts");
+				mkdirSync(transcripts, { recursive: true });
+				for (const account of accounts)
+					for (const file of readdirSync(account.configDir).filter((name) =>
+						name.startsWith("conduit-test-transcript-"),
+					))
+						copyFileSync(
+							join(account.configDir, file),
+							join(transcripts, `${account.id}-${file}`),
+						);
+				for (const file of ["sdk-proof.ndjson", "claude-options.jsonl"])
+					if (existsSync(join(harness.root, file)))
+						copyFileSync(join(harness.root, file), join(artifacts, file));
+			}
 			evidence["observed"] = observed;
 			evidence["sdkCalls"] = harness.claudeOptions();
 			evidence["sdkMarks"] = harness.marks;
