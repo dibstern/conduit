@@ -43,6 +43,9 @@ Scenario: Back returns to the session list
   And the conduit app is served with the long-transcript mockup
   When I tap back to the session list
   Then the session list is open
+  And the phone session list has a 44 pixel Settings cog
+  When I tap the phone session list Settings cog
+  Then settings opens at the section list
 
 Scenario Outline: Settling the open phone session returns to the list only after success
   Given the viewport is a phone

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, userEvent, waitFor, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { featureFlags } from "../../stores/feature-flags.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
@@ -293,7 +293,28 @@ export const Phone: Story = {
 		const title = canvas.getByTestId("list-bar-title");
 		await expect(title).toHaveStyle({ fontSize: "22px", fontWeight: "700" });
 		await expect(canvas.getByTestId("list-bar-select")).toBeVisible();
-		await expect(canvas.getByTestId("list-bar-overflow")).toBeVisible();
+		const settings = canvas.getByTestId("list-bar-settings");
+		await expect(settings).toBeVisible();
+		await expect(settings).toHaveAccessibleName("Settings");
+		await expect(settings).toHaveAttribute("title", "Settings");
+		await expect(settings.querySelector(".lucide-settings")).not.toBeNull();
+		await expect(settings.getBoundingClientRect().width).toBe(44);
+		await expect(settings.getBoundingClientRect().height).toBe(44);
+		const opened = fn();
+		const originalDebug = featureFlags.debug;
+		window.addEventListener("settings:open", opened);
+		try {
+			for (const debug of [false, true]) {
+				featureFlags.debug = debug;
+				opened.mockClear();
+				await userEvent.click(settings);
+				await expect(opened).toHaveBeenCalledOnce();
+				await expect(opened.mock.calls[0]?.[0].detail).toBeNull();
+			}
+		} finally {
+			featureFlags.debug = originalDebug;
+			window.removeEventListener("settings:open", opened);
+		}
 		await expect(
 			canvas.queryByRole("button", { name: "Close sidebar" }),
 		).toBeNull();
@@ -319,35 +340,6 @@ export const Phone: Story = {
 };
 
 export const PhoneLight: Story = { ...Phone, globals: { theme: "light" } };
-
-export const PhoneOverflow: Story = {
-	...Phone,
-	tags: ["viewport-capture"],
-	beforeEach: () => {
-		sessionViewState.compact = true;
-		uiState.sidebarWidth = 393;
-		featureFlags.debug = true;
-	},
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		await userEvent.click(canvas.getByTestId("list-bar-overflow"));
-		const menu = within(document.body).getByRole("menu", {
-			name: "More actions",
-		});
-		await expect(
-			within(menu).getByRole("menuitem", { name: "Settings" }),
-		).toBeVisible();
-		await expect(
-			within(menu).getByRole("menuitem", { name: "Debug panel" }),
-		).toBeVisible();
-		await expect(within(menu).getAllByRole("menuitem")).toHaveLength(2);
-	},
-};
-
-export const PhoneOverflowLight: Story = {
-	...PhoneOverflow,
-	globals: { theme: "light" },
-};
 
 export const PhoneSelect: Story = {
 	...Phone,
