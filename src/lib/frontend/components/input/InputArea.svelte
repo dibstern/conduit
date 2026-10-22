@@ -64,7 +64,7 @@
 	} from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, prepareFileAttachment } from "./input-utils.js";
 	import { parseAttachmentDataUrl } from "../../../attachment-data-url.js";
-	import { findSession, isSessionSnoozed, sessionState } from "../../stores/session.svelte.js";
+	import { findSession, isBusy, isSessionSnoozed, sessionState } from "../../stores/session.svelte.js";
 	import { selection } from "../../stores/selection.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { getCurrentRoute, getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
@@ -462,6 +462,39 @@
 		const reason = currentChat().transcript?.steer;
 		if (!isProcessing() || reason === undefined || reason === "no_steering") return undefined;
 		return reason ?? "ready";
+	});
+	// [DEBUG-st33r] Temporary Steer diagnosis, remove after: when a queued row has had
+	// no Steer for 1.5s while the session is busy, report steer's inputs to the daemon
+	// log. A string, so streaming updates that leave it unchanged do not reset the timer.
+	const debugSteerReport = $derived.by(() => {
+		const chat = currentChat();
+		const id = sessionState.currentId;
+		const transcript = chat.transcript;
+		const listBusy = isBusy(findSession(id ?? ""));
+		if (!transcript?.pending.some((input) => input.state === "queued") || steer !== undefined || !(working || listBusy)) return null;
+		return JSON.stringify({
+			id,
+			shown: selection.shown.kind === "placed" ? selection.shown.sessionId : selection.shown.kind,
+			working,
+			listBusy,
+			processing: isProcessing(),
+			phase: chat.phase,
+			loadLifecycle: chat.loadLifecycle,
+			steerRow: transcript.steer === undefined ? "undefined" : transcript.steer,
+			feed: transcript.status,
+			paused: transcript.paused,
+			pending: transcript.pending.map((input) => input.state),
+			ua: navigator.userAgent.slice(0, 90),
+		});
+	});
+	$effect(() => {
+		const report = debugSteerReport;
+		if (report === null) return;
+		const timer = setTimeout(() => {
+			const socket = new WebSocket(`${location.origin.replace(/^http/, "ws")}/__debug-st33r?d=${encodeURIComponent(report)}`);
+			socket.onerror = () => {};
+		}, 1500);
+		return () => clearTimeout(timer);
 	});
 	const sendButtonTitle = $derived(
 		isGoalCommand ? "Set goal"

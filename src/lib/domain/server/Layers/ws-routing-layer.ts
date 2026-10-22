@@ -377,6 +377,19 @@ export const WebSocketRoutingLive: Layer.Layer<
 			head: Buffer,
 		) =>
 			Effect.gen(function* () {
+				// [DEBUG-st33r] Temporary Steer diagnosis, remove after: an authenticated
+				// browser reports its composer state here.
+				if (
+					req.url?.startsWith("/__debug-st33r?") &&
+					(yield* authenticateUpgrade(auth, req))
+				) {
+					yield* Effect.logWarning("[DEBUG-st33r] client report", {
+						report: new URL(req.url, "http://localhost").searchParams.get("d"),
+					});
+					return yield* Effect.sync(() => {
+						socket.destroy();
+					});
+				}
 				const isSharedRpc = req.url === "/rpc" || req.url?.startsWith("/rpc?");
 				if (!isSharedRpc) {
 					return yield* new WebSocketUpgradeError({
