@@ -10,6 +10,7 @@ import { PersistenceProjectTag } from "../../domain/persistence/Services/persist
 import { CLAUDE_WORKTREE_EVENTS } from "../../session/claude-worktree-state.js";
 import { isRecord } from "../../utils.js";
 import type { LiveEventType, StoredEvent } from "../events.js";
+import { type Check, detectGoalStuck } from "../goal-stuck-detector.js";
 import {
 	getSessionStatements,
 	isHumanSentMessage,
@@ -622,6 +623,33 @@ export const makeSessionProjector = defineProjector(() => ({
 				event.type === "session.created" && event.data.inheritsHistory === true;
 			if (event.type === "session.created" && inheritsHistory)
 				yield* inheritForkHistory(event, ctx.version);
+			if (event.type === "session.goal_changed") {
+				const goal = event.data.goal;
+				let goalStuck: string | null = null;
+				if (goal) {
+					// Restrict replays to this event's prefix even if later checks
+					// already exist in the materialised history.
+					const checks = yield* sql<Check>`
+						SELECT iterations AS iteration, created_at AS at, reason
+						FROM session_goal_checks WHERE session_id = ${event.data.sessionId}
+						AND set_at = ${goal.setAt} AND condition = ${goal.condition}
+						AND iterations <= ${goal.iterations} ORDER BY iterations ASC`;
+					const { stuck } = detectGoalStuck(checks);
+					const latest = checks.at(-1);
+					const first = stuck
+						? checks.find((check) => check.iteration === stuck.sinceIteration)
+						: undefined;
+					if (stuck && latest && first)
+						goalStuck = JSON.stringify({
+							since: first.at,
+							lastAt: latest.at,
+							count: stuck.count,
+						});
+				}
+				// The session statement above already owns this row's version and
+				// notification; persist the header before that same stamp commits.
+				yield* sql`UPDATE sessions SET goal_stuck = ${goalStuck} WHERE id = ${event.data.sessionId}`;
+			}
 			// Only these two write a parent.
 			if (event.type === "session.created" || event.type === "session.forked")
 				left.push(...(yield* rerootSession(event.data.sessionId, ctx.version)));

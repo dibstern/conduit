@@ -33,6 +33,7 @@ import {
 	DraftPreWarmTag,
 	draftLaunchKey,
 } from "../../domain/relay/Services/draft-prewarm.js";
+import { GoalSummaryServiceTag } from "../../domain/relay/Services/goal-summary-service.js";
 import { InputDraftsTag } from "../../domain/relay/Services/input-drafts.js";
 import {
 	BackgroundLivenessTag,
@@ -274,8 +275,35 @@ export const sessionsHandlers = {
 					message: "Goal details are available only for Claude sessions",
 				});
 			}
-			return yield* read.getGoalDetails(request.sessionId);
+			const summaries = yield* GoalSummaryServiceTag;
+			return yield* (yield* SqlClient.SqlClient).withTransaction(
+				Effect.gen(function* () {
+					const details = yield* read.getGoalDetails(request.sessionId);
+					const summary = yield* summaries.metadata(request.sessionId);
+					return { ...details, ...summary };
+				}),
+			);
 		}).pipe(Effect.catch(mapRpcFailure("GetGoalDetails"))),
+	GenerateGoalSummary: (request) =>
+		Effect.gen(function* () {
+			const read = yield* ReadQueryEffectTag;
+			const session = yield* read.getSession(request.sessionId);
+			if (!session) {
+				return yield* new WsRpcError({
+					message: `Session ${request.sessionId} not found`,
+				});
+			}
+			const account = yield* (yield* AccountDirectory).resolve({
+				_tag: "Id",
+				id: session.provider,
+			});
+			if (!PROVIDER_DRIVERS[account.driver].supportsGoalState) {
+				return yield* new WsRpcError({
+					message: "Goal summaries are available only for Claude sessions",
+				});
+			}
+			return yield* (yield* GoalSummaryServiceTag).generate(request.sessionId);
+		}).pipe(Effect.catch(mapRpcFailure("GenerateGoalSummary"))),
 	PreWarmSession: (request) =>
 		preWarmSession(request.sessionId).pipe(
 			Effect.catch(mapRpcFailure("PreWarmSession")),
@@ -1000,6 +1028,7 @@ export const sessionsHandlers = {
 } satisfies Pick<
 	WsRpcHandlerMap,
 	| "GetGoalDetails"
+	| "GenerateGoalSummary"
 	| "PreWarmSession"
 	| "PreWarmDraft"
 	| "ResolveSession"
