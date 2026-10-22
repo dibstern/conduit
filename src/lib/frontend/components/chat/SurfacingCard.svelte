@@ -72,7 +72,7 @@
 	let drag: { id: number; x: number; y: number; moved: boolean; pin?: SurfacePin } | null = null;
 	let suppressClick = false;
 	let cardBodyEl: HTMLDivElement | undefined = $state();
-	const levelOptions = $derived(SURFACE_LEVELS.map((value) => ({
+	const levelOptions = $derived(SURFACE_LEVELS.filter((value) => value === "final" || value === "all" || view.counts[value] > 0).map((value) => ({
 		value,
 		label: SURFACE_LABELS[value],
 		...(value === "balanced" ? { shortLabel: "Bal" } : {}),

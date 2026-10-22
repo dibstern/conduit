@@ -110,20 +110,19 @@ export function surfaceTurn(input: {
 			},
 		];
 	});
-	const counts = {
-		final: 0,
-		key: messages.filter((message) => rank[message.level] >= rank.key).length,
-		balanced: messages.filter((message) => rank[message.level] >= rank.balanced)
-			.length,
-		all: messages.filter((message) => rank[message.level] >= rank.all).length,
-	};
-	const visible =
-		input.level === "final"
+	const visibleAt = (level: SurfaceLevel) =>
+		level === "final"
 			? []
 			: messages.filter(
-					(message) =>
-						message.pending || rank[message.level] >= rank[input.level],
+					(message) => message.pending || rank[message.level] >= rank[level],
 				);
+	const counts = {
+		final: 0,
+		key: visibleAt("key").length,
+		balanced: visibleAt("balanced").length,
+		all: visibleAt("all").length,
+	};
+	const visible = visibleAt(input.level);
 	const picked = messages.find(
 		({ part }) =>
 			part.uuid === input.picked &&
