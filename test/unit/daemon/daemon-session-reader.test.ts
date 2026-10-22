@@ -162,6 +162,63 @@ afterEach(() => {
 });
 
 describe("listDaemonSessions", () => {
+	it.effect("releases SQL before awaiting git refresh", () => {
+		const root = makeTemporaryRoot();
+		const project = join(root, "project");
+		makeProjectStore(project, [
+			{ id: "session", title: "Settled", updatedAt: 1, settledAt: 100 },
+		]);
+		let release!: () => void;
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const readGit = vi.fn(async () => {
+			await held;
+			return { branch: "fresh" };
+		});
+		return Effect.scoped(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const listing = yield* Effect.forkChild(
+					listDaemonSessions({}, createSessionGitCache(readGit)),
+				);
+				yield* Effect.tryPromise(() =>
+					vi.waitFor(() => expect(readGit).toHaveBeenCalledOnce(), {
+						timeout: 5_000,
+					}),
+				);
+				const unrelated = yield* Effect.forkChild(
+					sql`SELECT id FROM sessions WHERE id = 'session'`,
+				);
+				yield* Effect.tryPromise(() =>
+					vi.waitFor(() => expect(unrelated.pollUnsafe()).toBeDefined(), {
+						timeout: 5_000,
+					}),
+				);
+				expect(yield* Fiber.join(unrelated)).toEqual([{ id: "session" }]);
+				expect(listing.pollUnsafe()).toBeUndefined();
+				yield* sql`UPDATE sessions SET settled_at = NULL WHERE id = 'session'`;
+				release();
+				const result = yield* Fiber.join(listing);
+				expect(result.settledCounts).toEqual([
+					{ projectSlug: "project", count: 1 },
+				]);
+				expect(result.sessions).toMatchObject([
+					{ id: "session", settledAt: 100, git: { branch: "fresh" } },
+				]);
+			}).pipe(Effect.ensuring(Effect.sync(release))),
+		).pipe(
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
+			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
+			Effect.provide(
+				makeProjectRegistryLive([
+					{ slug: "project", title: "Project", folders: [project] },
+				]),
+			),
+		);
+	});
+
 	for (const read of ["list", "binding"] as const) {
 		it.effect(
 			`imports a legacy project store at startup before its scoped ${read} read`,
