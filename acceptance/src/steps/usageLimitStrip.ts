@@ -1,5 +1,9 @@
 import { expect, type Page } from "@playwright/test";
-import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
+import { assignAccountColorSlots } from "../../../src/lib/account-directory.js";
+import {
+	AccountStillLimited,
+	type UsageReading,
+} from "../../../src/lib/contracts/limit-recovery.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
@@ -9,6 +13,7 @@ import {
 	requireRpcControl,
 	setSessionRowStatus,
 } from "./shared.js";
+import { clockTimes } from "./usageSettings.js";
 
 const cutOffMessageId = "msg-cut-off";
 
@@ -51,34 +56,46 @@ export function setClaudeAccounts(
 	accounts: readonly (readonly [id: string, name: string])[],
 ): void {
 	// Like the daemon, replacing Claude accounts leaves other drivers' accounts listed.
+	const otherInstances = (mockInstances.get(page) ?? []).filter(
+		(instance) => instance["driver"] !== "claude",
+	);
 	const instances = [
-		...(mockInstances.get(page) ?? []).filter(
-			(instance) => instance["driver"] !== "claude",
+		...otherInstances,
+		...assignAccountColorSlots(
+			accounts.map(([id, name], index) => ({
+				id,
+				name,
+				isDefault: index === 0,
+				port: 0,
+				managed: false,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 1,
+				driver: "claude",
+				usageEligible: true,
+			})),
+			otherInstances.map((instance) => ({
+				colorSlot:
+					typeof instance["colorSlot"] === "number"
+						? instance["colorSlot"]
+						: undefined,
+			})),
 		),
-		...accounts.map(([id, name], index) => ({
-			id,
-			name,
-			isDefault: index === 0,
-			port: 0,
-			managed: false,
-			status: "healthy",
-			restartCount: 0,
-			createdAt: 1,
-			driver: "claude",
-			usageEligible: true,
-		})),
 	];
 	mockInstances.set(page, instances);
 	requireRpcControl(page).setDaemonList("SubscribeInstances", { instances });
 }
 
-type StripAction = "Try again" | "Resume at reset" | "Cancel auto-resume";
+type StripAction = "I used a reset" | "Resume at reset" | "Cancel auto-resume";
 
 const stripActions: Record<
 	StripAction,
 	{ testId: string; rpc: "ContinueSession" | "CancelContinuation" }
 > = {
-	"Try again": { testId: "usage-limit-try-again", rpc: "ContinueSession" },
+	"I used a reset": {
+		testId: "usage-limit-used-reset",
+		rpc: "ContinueSession",
+	},
 	"Resume at reset": {
 		testId: "usage-limit-resume-at-reset",
 		rpc: "ContinueSession",
@@ -162,6 +179,8 @@ export const usageLimitStripHandlers: StepHandler[] = [
 			const limitRecovery = {
 				instanceId: match[2],
 				rateLimitType: match[1],
+				// The limit lands just before the scenario's clock, after any reading it seeded.
+				limitedAt: (clockTimes.get(world.page) ?? PINNED_CLOCK_MS) - 2_000,
 				...(resets === "none" ? {} : { resetsAt: Date.parse(resets) / 1000 }),
 				cutOffMessageId,
 				rearms: 0,
@@ -177,6 +196,7 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		run: ({ world }) => {
 			const { cutOffMessageId: _, ...limitRecovery } =
 				limits.get(world.page) ?? {};
+			limits.set(world.page, limitRecovery);
 			projectLimit(world.page, limitRecovery);
 		},
 	},
@@ -271,12 +291,12 @@ export const usageLimitStripHandlers: StepHandler[] = [
 	{
 		name: "press a usage limit strip action",
 		match:
-			/^I press (Try again|Resume at reset|Cancel auto-resume) on the usage limit strip$/,
+			/^I press (I used a reset|Resume at reset|Cancel auto-resume) on the usage limit strip$/,
 		run: async ({ world, match }) => {
 			const action = stripActions[match[1] as StripAction];
-			requireRpcControl(world.page).setStubs({
-				[action.rpc]: () => ({ ok: true }),
-			});
+			const rpc = requireRpcControl(world.page);
+			if (!rpc.stubs[action.rpc])
+				rpc.setStubs({ [action.rpc]: () => ({ ok: true }) });
 			await world.page.getByTestId(action.testId).click();
 		},
 	},
@@ -309,7 +329,7 @@ export const usageLimitStripHandlers: StepHandler[] = [
 	{
 		name: "assert a usage limit strip action",
 		match:
-			/^the (usage limit strip|queued usage recovery) (shows|has no) (Try again|Resume at reset|Cancel auto-resume)$/,
+			/^the (usage limit strip|queued usage recovery) (shows|has no) (I used a reset|Resume at reset|Cancel auto-resume)$/,
 		run: async ({ world, match }) => {
 			const recovery = world.page.getByTestId(
 				match[1] === "queued usage recovery"
@@ -331,20 +351,66 @@ export const usageLimitStripHandlers: StepHandler[] = [
 				recovery.boundingBox(),
 			]);
 			if (!buttonBox || !stripBox) throw new Error("No button or strip box");
-			// Desktop and the queued tray: natural-width actions in the trailing slot.
-			// Phone strip: actions share a full-width second row.
-			const stretched =
-				match[1] === "usage limit strip" &&
-				(world.page.viewportSize()?.width ?? 1280) < 768;
-			if (stretched) {
-				const actions = await recovery.getByRole("button").count();
-				expect(buttonBox.width).toBeGreaterThan(
-					(stripBox.width - 30) / actions - 6,
+			expect(buttonBox.x).toBeGreaterThanOrEqual(stripBox.x);
+			expect(buttonBox.x + buttonBox.width).toBeLessThanOrEqual(
+				stripBox.x + stripBox.width,
+			);
+		},
+	},
+	{
+		name: "assert continued recovery has no actions",
+		match: /^the usage limit strip has no actions$/,
+		run: async ({ world }) => {
+			const strip = world.page.getByTestId("usage-limit-strip");
+			await expect(strip).toBeVisible();
+			await expect(strip.getByRole("button")).toHaveCount(0);
+			await expect(strip.getByRole("link")).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert reset action order and phone rows",
+		match:
+			/^the (usage limit strip|queued usage recovery) keeps reset actions in order$/,
+		run: async ({ world, match }) => {
+			const strip = world.page.getByTestId(
+				match[1] === "queued usage recovery"
+					? "pending-input-waiting"
+					: "usage-limit-strip",
+			);
+			const buttons = strip.getByRole("button");
+			const names = (await buttons.allTextContents()).map((name) =>
+				name.trim(),
+			);
+			const order = [
+				"Switch account",
+				"Resume at reset",
+				"Cancel auto-resume",
+				"I used a reset",
+			];
+			expect(names).toEqual(order.filter((name) => names.includes(name)));
+			const actions = strip.locator("button, a");
+			await expect(actions.last()).toHaveText("Use a reset on Claude ↗");
+			if ((world.page.viewportSize()?.width ?? 1280) >= 768) return;
+			const boxes = await Promise.all(
+				Array.from({ length: await buttons.count() }, (_, index) =>
+					buttons.nth(index).boundingBox(),
+				),
+			);
+			const link = await strip
+				.getByTestId("usage-limit-reset-link")
+				.boundingBox();
+			const stripBox = await strip.boundingBox();
+			const first = boxes[0];
+			if (!first || !link || !stripBox || boxes.some((box) => !box))
+				throw new Error("No reset action boxes");
+			for (const box of boxes) {
+				if (!box) continue;
+				expect(box.x).toBeGreaterThanOrEqual(stripBox.x - 1);
+				expect(box.x + box.width).toBeLessThanOrEqual(
+					stripBox.x + stripBox.width + 1,
 				);
-			} else
-				expect(
-					stripBox.x + stripBox.width - (buttonBox.x + buttonBox.width),
-				).toBeLessThan(16);
+				expect(link.y).toBeGreaterThanOrEqual(box.y + box.height);
+			}
 		},
 	},
 	{
@@ -360,15 +426,23 @@ export const usageLimitStripHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert the usage limit strip state",
-		match: /^the usage limit strip is (limited|waiting)$/,
+		match:
+			/^the (usage limit strip|queued usage recovery) is (limited|can resume at reset|waiting|held|looks reset)$/,
 		run: async ({ world, match }) => {
-			const strip = world.page.getByTestId("usage-limit-strip");
-			await expect(strip).toHaveAttribute("data-state", match[1] ?? "");
+			const strip = world.page.getByTestId(
+				match[1] === "queued usage recovery"
+					? "pending-input-waiting"
+					: "usage-limit-strip",
+			);
+			await expect(strip).toHaveAttribute(
+				"data-state",
+				(match[2] ?? "").replaceAll(" ", "_"),
+			);
+			if (match[1] === "queued usage recovery") return;
 			// Recovery tabs use the shared strip's tint instead of a detached border.
-			const tone =
-				match[1] === "waiting"
-					? "var(--color-status-ask)"
-					: "var(--color-error)";
+			const tone = ["waiting", "held", "looks reset"].includes(match[2] ?? "")
+				? "var(--color-status-ask)"
+				: "var(--color-error)";
 			const expected = await strip.evaluate((el, mix) => {
 				const probe = document.createElement("span");
 				probe.style.backgroundColor = `color-mix(in srgb, ${mix} 13%, var(--color-bg-surface))`;
@@ -378,6 +452,71 @@ export const usageLimitStripHandlers: StepHandler[] = [
 				return colour;
 			}, tone);
 			await expect(strip).toHaveCSS("background-color", expected);
+		},
+	},
+	{
+		name: "publish a Usage Reading after or before the limit",
+		match:
+			/^the reset Usage Reading for (\S+) is (fresh|stale|older|unknown|signed-out) at ([0-9]+) percent$/,
+		run: ({ world, match }) => {
+			const reading: UsageReading = {
+				accountId: match[1] ?? "",
+				harness: "claude",
+				status:
+					match[2] === "signed-out"
+						? "unavailable"
+						: match[2] === "unknown"
+							? "unknown"
+							: Number(match[3]) >= 100
+								? "limited"
+								: "available",
+				readAt: PINNED_CLOCK_MS - (match[2] === "older" ? 3_000 : 1_000),
+				stale: match[2] === "stale",
+				windows: [
+					{
+						kind: "seven_day",
+						utilization: Number(match[3]),
+						resetsAt: "2026-01-05T09:00:00Z",
+					},
+				],
+			};
+			requireRpcControl(world.page).setUsageReadings([reading]);
+		},
+	},
+	{
+		name: "assert the external reset link",
+		match:
+			/^the (usage limit strip|queued usage recovery) links to Claude usage settings in a new tab$/,
+		run: async ({ world, match }) => {
+			const strip = world.page.getByTestId(
+				match[1] === "queued usage recovery"
+					? "pending-input-waiting"
+					: "usage-limit-strip",
+			);
+			const link = strip.getByRole("link", {
+				name: "Use a reset on Claude ↗",
+				exact: true,
+			});
+			await expect(link).toHaveAttribute(
+				"href",
+				"https://claude.ai/settings/usage",
+			);
+			await expect(link).toHaveAttribute("target", "_blank");
+			await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+		},
+	},
+	{
+		name: "the account is still limited when the user asks to Resume",
+		match: /^the daemon refuses the reset with the (.+) until (\S+)$/,
+		run: ({ world, match }) => {
+			requireRpcControl(world.page).setStubs({
+				ContinueSession: () => {
+					throw new AccountStillLimited({
+						label: match[1] ?? "",
+						until: Date.parse(match[2] ?? ""),
+					});
+				},
+			});
 		},
 	},
 	{
@@ -650,7 +789,7 @@ export const usageLimitStripHandlers: StepHandler[] = [
 	{
 		name: "assert an account dot colour",
 		match:
-			/^the (account picker|handoff dialog|transcript divider) shows (\S+) with a (violet|teal|blue) dot$/,
+			/^the (account picker|handoff dialog|transcript divider) shows (\S+) with a (blue|green|pink) dot$/,
 		run: async ({ world, match }) => {
 			const region = world.page.getByTestId(
 				{
@@ -666,9 +805,9 @@ export const usageLimitStripHandlers: StepHandler[] = [
 			).toHaveCSS(
 				"background-color",
 				{
-					violet: "rgb(176, 140, 255)",
-					teal: "rgb(47, 211, 192)",
-					blue: "rgb(142, 155, 255)",
+					blue: "rgb(90, 169, 245)",
+					green: "rgb(62, 207, 142)",
+					pink: "rgb(244, 105, 196)",
 				}[match[3] ?? ""] ?? "",
 			);
 		},

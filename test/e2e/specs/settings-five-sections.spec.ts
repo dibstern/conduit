@@ -28,10 +28,9 @@ const sections = [
 ] as const;
 
 async function openSettingsPanel(page: Page): Promise<void> {
-	const listOverflow = page.getByTestId("list-bar-overflow");
-	if (await listOverflow.isVisible()) {
-		await listOverflow.click();
-		await page.getByTestId("list-overflow-settings").click();
+	const listSettings = page.getByTestId("list-bar-settings");
+	if (await listSettings.isVisible()) {
+		await listSettings.click();
 		return;
 	}
 	await page

@@ -40,6 +40,7 @@
 		duration,
 		highlight = false,
 		messageNumber,
+		messageCategory,
 		live = false,
 		runningTasks = new Set<string>(),
 	}: {
@@ -49,6 +50,7 @@
 		duration?: number | undefined;
 		highlight?: boolean;
 		messageNumber?: number | undefined;
+		messageCategory?: { glyph: string; colour: string | undefined } | undefined;
 		live?: boolean;
 		/** Shared with the strip so status overrides use the same snapshot. */
 		runningTasks?: ReadonlySet<string>;
@@ -259,7 +261,7 @@
 {:else}
 	<div data-part={part.uuid} data-message-number={messageNumber} data-highlighted={highlight || undefined}>
 		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="activity" class={highlight ? "bg-selection" : ""} aria-expanded={expanded} onclick={(event) => { if (!hasRowSelection(event)) expanded = !expanded; }}>
-			{#if messageNumber !== undefined}<span class="shrink-0 font-mono text-mono-xs {style.text}">#{messageNumber}</span>
+			{#if messageNumber !== undefined}<span class="shrink-0 font-mono text-mono-xs {style.text}" style:color={messageCategory?.colour}>{#if messageCategory}<span aria-hidden="true">{messageCategory.glyph}</span>{" "}{/if}#{messageNumber}</span>
 			{:else}<span class="shrink-0 {style.text}"><Icon name={style.icon} size={14} /></span>{/if}
 			<span class="flex-1 truncate italic text-text-secondary">{firstLine(part.rawText, 120)}</span>
 			{#if meta}<span class="activity-time shrink-0 font-mono text-mono-time text-text-dimmer">{meta}</span>{/if}

@@ -11,7 +11,7 @@
 		exemptFromBackgroundInert,
 		registerOpenSurface,
 	} from "./actions/use-background-inert.svelte.js";
-	import { dragToDismiss, sheetGlide, sheetPosition, settleMs } from "../../actions/drag-to-dismiss.js";
+	import { dragToDismiss, sheetGlide, sheetPosition, settleMs, sheetScrimStyle } from "../../actions/drag-to-dismiss.js";
 	import {
 		FLOATING_MENU_CONTENT_CLASSES,
 		FINAL_MENU_CONTENT_CLASSES,
@@ -118,6 +118,7 @@
 		const onClick = props["onclick"] as ((event: MouseEvent) => void) | undefined;
 		return {
 			...props,
+			...(presentation === "sheet" && footer ? { "aria-haspopup": "dialog" } : {}),
 			// A mouse press opens the sheet at once; its release must not pick the
 			// row that has just slid under the pointer.
 			onpointerdown: (event: PointerEvent) => {
@@ -251,16 +252,27 @@
 	<DropdownMenu.Portal {...portalProps}>
 		{#if presentation === "sheet"}
 			<div class={sheetEdge === "top" ? "pointer-events-none fixed inset-x-0 bottom-0 z-[var(--z-sheet)] overflow-hidden" : "contents"} style:top={sheetEdge === "top" ? "var(--sheet-top, 0px)" : undefined} use:sheetPosition={sheetEdge}>
-			{#if open}<div aria-hidden="true" data-testid="menu-sheet-scrim" class="{sheetEdge === 'top' ? 'absolute' : 'fixed'} inset-0 z-[var(--z-sheet)] bg-backdrop" class:pointer-events-none={!scrimInteractive} class:pointer-events-auto={scrimInteractive} style:opacity={1 - scrimFade.progress} style:transition={scrimFade.settling ? "opacity 220ms linear" : undefined} transition:fade|global={{ duration: sheetEdge === "top" ? settleMs() : 0 }} use:exemptFromBackgroundInert></div>{/if}
+			{#if open}<div aria-hidden="true" data-testid="menu-sheet-scrim" class="{sheetEdge === 'top' ? 'absolute' : 'fixed'} inset-0 z-[var(--z-sheet)] bg-backdrop" class:pointer-events-none={!scrimInteractive} class:pointer-events-auto={scrimInteractive} style={sheetScrimStyle(scrimFade)} transition:fade|global={{ duration: sheetEdge === "top" ? settleMs() : 0 }} use:exemptFromBackgroundInert></div>{/if}
 			<DropdownMenu.ContentStatic {...sheetContentProps}>
 				{#snippet child({ props })}
 					<!-- Keep the bits-ui focus target on the menu shell. SheetChrome gives the
 					     scrolling body a keyboard target too; Bits intercepts Tab inside the menu.
 					     Svelte cannot see role="menu" through the spread. -->
 					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-					<div {...props} id={contentId} data-sheet-edge={sheetEdge} tabindex={0} bind:this={contentNode} onclickcapture={swallowOpeningClick} onpointerdowncapture={(event: PointerEvent) => { openingClickDeadline = 0; (props["onpointerdowncapture"] as ((event: PointerEvent) => void) | undefined)?.(event); }} use:exemptFromBackgroundInert use:dragToDismiss={{ edge: sheetEdge, ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }} transition:sheetGlide|global={{ edge: sheetEdge, onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
+					<div {...props} role={footer ? "dialog" : "menu"} aria-orientation={footer ? undefined : "vertical"} id={contentId} data-sheet-edge={sheetEdge} tabindex={0} bind:this={contentNode} onclickcapture={swallowOpeningClick} onkeydowncapture={(event: KeyboardEvent) => {
+						// Bits dismisses menus on Tab; dialog footers need native button traversal.
+						if (footer && event.key === "Tab") event.stopPropagation();
+						(props["onkeydowncapture"] as ((event: KeyboardEvent) => void) | undefined)?.(event);
+					}} onpointerdowncapture={(event: PointerEvent) => { openingClickDeadline = 0; (props["onpointerdowncapture"] as ((event: PointerEvent) => void) | undefined)?.(event); }} use:exemptFromBackgroundInert use:dragToDismiss={{ edge: sheetEdge, ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }} transition:sheetGlide|global={{ edge: sheetEdge, onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
 						<SheetChrome edge={sheetEdge} maxHeight={sheetEdge === "top" ? "max(0px, calc(100dvh - var(--sheet-top, 0px) - 64px))" : "90dvh"} {footer} bottomPadding={sheetBottomPadding} class={className} menuBody>
-							{@render children()}
+							{#if footer}
+								<!-- Menu commands and footer switches have different required ARIA parents. -->
+								<div role="menu" aria-label={ariaLabel} aria-orientation="vertical" data-state={open ? "open" : "closed"}>
+									{@render children()}
+								</div>
+							{:else}
+								{@render children()}
+							{/if}
 						</SheetChrome>
 					</div>
 				{/snippet}

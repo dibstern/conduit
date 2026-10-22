@@ -74,8 +74,9 @@ export const categoryIdFromLabel = (label: string): string =>
 		.replace(/[^\p{L}\p{N}]+/gu, "-")
 		.replace(/^-|-$/g, "");
 
-// Final prototype taxonomy and dark-theme colours. Routine stays implicit.
-export const BUILTIN_CATEGORIES: readonly Category[] = [
+// Built-in colours are legacy metadata; the frontend themes own their display.
+// Routine stays implicit.
+export const BUILTIN_CATEGORIES = [
 	{
 		id: "ask",
 		origin: "builtin",
@@ -172,7 +173,9 @@ export const BUILTIN_CATEGORIES: readonly Category[] = [
 		retired: false,
 		criteria: { what: "reports a completed deliverable or full gate" },
 	},
-];
+] as const satisfies readonly Category[];
+
+export type BuiltinCategoryId = (typeof BUILTIN_CATEGORIES)[number]["id"];
 
 export const DEFAULT_CATEGORY_SET: CategorySet = {
 	version: 1,

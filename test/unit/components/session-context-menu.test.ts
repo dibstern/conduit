@@ -151,11 +151,11 @@ describe("session triage menu", () => {
 			},
 		);
 		await screen.findByTestId("extra-share");
-		const menu = screen.getByRole("menu");
+		const menu = screen.getByRole(presentation === "sheet" ? "dialog" : "menu");
 		expect(
 			[
 				...menu.querySelectorAll(
-					'[role="menuitem"], [role="menuitemcheckbox"], [role="separator"]',
+					'[role="menuitem"], [role="menuitemcheckbox"], [role="separator"], [role="button"]',
 				),
 			].map((item) => item.getAttribute("data-testid") ?? "divider"),
 		).toEqual(

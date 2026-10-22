@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import type { Rpc, RpcGroup } from "effect/rpc";
 import { type WsRpcError, WsRpcGroup } from "../../contracts/ws-rpc.js";
 import { showToast } from "../stores/ui.svelte.js";
+import { usageForecastTime } from "../utils/continuation.js";
 
 type DeclaredError = Exclude<
 	Rpc.Error<RpcGroup.Rpcs<typeof WsRpcGroup>>,
@@ -36,6 +37,8 @@ export const copy: {
 	SessionBusy: (error) => error.message,
 	StaleSwitch: (error) => error.message,
 	AccountUnavailable: (error) => error.message,
+	AccountStillLimited: (error) =>
+		`Claude still shows the ${error.label} until ${usageForecastTime(error.until, Date.now())}.`,
 	DriverMismatch: (error) => error.message,
 	HandoffTooLarge: (error) => error.message,
 	AccountChangeRejected: (error) => error.message,

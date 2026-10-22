@@ -2,8 +2,8 @@
   QuotaMeter — how much of an account's usage quota is spent: a 4px track whose
   fill is the share used, with a mono caption beside it.
 
-  The fill is the secondary ink until 80% is used, amber from there and red at
-  100%, where the default caption says the account is limited. Two states have
+  The fill is the secondary ink until 80% is used, amber from there and red when
+  Account Limit says the account is limited. Two states have
   no number: `checking` (the probe is still running) dims the empty track, and
   `unknown` (the probe could not tell) leaves it empty at full strength, so a
   pending row and a row that will never get a number read differently.
@@ -17,9 +17,9 @@
 
 	type QuotaUsed = number | "checking" | "unknown";
 
-	function tone(used: QuotaUsed, warnAt: number | "off"): "normal" | "high" | "full" | "checking" | "unknown" {
+	function tone(used: QuotaUsed, warnAt: number | "off", limited: boolean): "normal" | "high" | "full" | "checking" | "unknown" {
 		if (typeof used !== "number") return used;
-		return used >= 100 ? "full" : used >= (warnAt === "off" ? 80 : warnAt) ? "high" : "normal";
+		return limited ? "full" : used >= (warnAt === "off" ? 80 : warnAt) ? "high" : "normal";
 	}
 
 	const FILL_CLASSES = {
@@ -38,10 +38,10 @@
 	const USAGE_FILL_CLASSES = { normal: "bg-text-secondary", high: "bg-status-ask", full: "bg-status-red" } as const;
 	const USAGE_CAPTION_CLASSES = { normal: "text-text-secondary", high: "text-status-ask", full: "text-status-red", checking: "text-text-dimmer", unknown: "text-text-dimmer" } as const;
 
-	function defaultCaption(used: QuotaUsed): string {
+	function defaultCaption(used: QuotaUsed, limited: boolean): string {
 		if (used === "checking") return "checking…";
 		if (used === "unknown") return "quota unknown";
-		return used >= 100 ? "limited" : `${Math.max(0, Math.round(100 - used))}% left`;
+		return limited ? "limited" : `${Math.max(0, Math.round(100 - used))}% left`;
 	}
 </script>
 
@@ -50,6 +50,7 @@
 		used,
 		caption,
 		warnAt = 80,
+		limited = false,
 		size = "md",
 		track = true,
 		variant = "headroom",
@@ -64,6 +65,8 @@
 		/** Replaces the default caption, e.g. "limited · Mon 9:00". */
 		caption?: string | undefined;
 		warnAt?: number | "off";
+		/** Whether Account Limit says to wait for this account or window. */
+		limited?: boolean;
 		size?: keyof typeof TRACK_WIDTH_CLASSES | undefined;
 		/** false keeps only the caption, for rows too narrow for the track. */
 		track?: boolean | undefined;
@@ -78,7 +81,7 @@
 		class?: string | undefined;
 	} = $props();
 
-	const level = $derived(tone(used, warnAt));
+	const level = $derived(tone(used, warnAt, limited));
 	const share = $derived(typeof used === "number" ? Math.max(0, Math.min(100, used)) : 0);
 </script>
 
@@ -90,7 +93,7 @@
 			{/if}
 		</span>
 	{/if}
-	<span data-testid={captionTestId} class="whitespace-nowrap font-mono {variant === 'usage' ? 'text-[11px]' : 'text-[10.5px]'} {variant === 'usage' ? USAGE_CAPTION_CLASSES[level === 'high' && warnAt === 'off' ? 'normal' : level] : CAPTION_CLASSES[level]}">{caption ?? defaultCaption(used)}</span>
+	<span data-testid={captionTestId} class="whitespace-nowrap font-mono {variant === 'usage' ? 'text-[11px]' : 'text-[10.5px]'} {variant === 'usage' ? USAGE_CAPTION_CLASSES[level === 'high' && warnAt === 'off' ? 'normal' : level] : CAPTION_CLASSES[level]}">{caption ?? defaultCaption(used, limited)}</span>
 </span>
 
 <style>

@@ -43,6 +43,9 @@ Scenario: Back returns to the session list
   And the conduit app is served with the long-transcript mockup
   When I tap back to the session list
   Then the session list is open
+  And the phone session list has a 44 pixel Settings cog
+  When I tap the phone session list Settings cog
+  Then settings opens at the section list
 
 Scenario Outline: Settling the open phone session returns to the list only after success
   Given the viewport is a phone
@@ -79,14 +82,14 @@ Examples:
   | shortcut       |
   | transcript key |
 
-Scenario Outline: Settling on desktop keeps the viewed session open
+Scenario Outline: Settling the open desktop session returns to the list only after success
   Given the conduit app is served with the long-transcript mockup
   And the phone session sheet state is idle
   And the settle reply is held as success
   When I settle the open session using <entry>
   Then the viewed session stays open
   When the held settle reply is released
-  Then the viewed session stays open
+  Then the session list is open
 
 Examples:
   | entry          |

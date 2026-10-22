@@ -244,10 +244,7 @@ describe("Claude rewind through the detached runner and real relay", () => {
 				}),
 			),
 		);
-		expect(continuation).toMatchObject({
-			_tag: "Failure",
-			failure: { _tag: "SessionBusy" },
-		});
+		expect(continuation).toMatchObject({ _tag: "Success" });
 		expect(pendingRewind(browser, sessionId)).toBe(target.id);
 		expect(persisted(harness, sessionId)).toEqual(pendingBeforeContinue);
 		expect(queries(harness)).toHaveLength(1);

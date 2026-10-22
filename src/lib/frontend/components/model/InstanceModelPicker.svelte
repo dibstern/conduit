@@ -142,7 +142,7 @@
 				return {
 					value: account.id,
 					label: accounts.nameOf(account.id),
-					locked: availability.kind === "limited" || (locked && account.id === selectedLogoInstanceId),
+					locked: availability.kind === "limited" || availability.kind === "signed-out" || (locked && account.id === selectedLogoInstanceId),
 					kind: "usage",
 					availability,
 				};
@@ -860,7 +860,7 @@
 		summary={handoff.summary}
 		confirm={{
 			from: handoff.from,
-			fromQuota: accounts.fromQuota(handoff),
+			fromQuota: accounts.quotaOf(handoff.from),
 			quota: accounts.quotaOf(handoff.to),
 			cutOff: handoff.limit?.cutOffMessageId !== undefined,
 			busy: accounts.switching,

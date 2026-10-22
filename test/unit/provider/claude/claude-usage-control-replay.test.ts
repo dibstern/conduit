@@ -70,7 +70,10 @@ it.each([
 						}),
 					},
 				});
-				const [result] = yield* service.refresh(["captured-account"]);
+				const [result] = yield* service.refresh({
+					accountIds: ["captured-account"],
+					maxAge: 0,
+				});
 				expect(result?.status).toBe(status);
 				expect(result?.windows).toEqual(
 					status === "unknown"

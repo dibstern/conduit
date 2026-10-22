@@ -405,6 +405,14 @@ describe("createClaudeTraceReplayer", () => {
 		const replayer = createClaudeTraceReplayer({
 			turns: ["pong-thinking-text-turn"],
 		});
+		expect(() =>
+			replayer.sdk.query({
+				configDir: configuredClaudeConfigDir("/accounts/replay"),
+				prompt: promptQueue().iterable,
+				options: { resume: "unknown", forkSession: true, sessionId: SENT_C },
+			}),
+		).toThrow(/unknown session/);
+		expect(replayer.forks).toEqual([]);
 		const prompts = promptQueue();
 		const query = replayer.sdk.query({
 			configDir: configuredClaudeConfigDir("/accounts/replay"),

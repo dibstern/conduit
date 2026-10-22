@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, userEvent, waitFor, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { featureFlags } from "../../stores/feature-flags.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
@@ -22,11 +22,17 @@ const meta = {
 	tags: ["autodocs"],
 	parameters: { layout: "fullscreen" },
 	beforeEach: () => {
+		const groupsOpen = { ...uiState.sessionGroupsOpen };
+		const storedGroups = (["pinned", "running", "idle"] as const).map(
+			(group) =>
+				[group, localStorage.getItem(`session-group-${group}-open`)] as const,
+		);
 		uiState.sidebarCollapsed = false;
 		uiState.sidebarWidth = 300;
 		uiState.selectMode = false;
 		uiState.settledShelfOpen = false;
 		uiState.snoozedShelfOpen = false;
+		uiState.sessionGroupsOpen = { pinned: true, running: true, idle: true };
 		sessionViewState.compact = false;
 		featureFlags.debug = false;
 		instanceState.instances = [];
@@ -43,6 +49,12 @@ const meta = {
 		applySessionChange({ _tag: "snapshot", rows: [], sequence: Date.now() });
 		applySessionChange({ _tag: "synchronized" });
 		return () => {
+			uiState.sessionGroupsOpen = groupsOpen;
+			for (const [group, open] of storedGroups) {
+				const key = `session-group-${group}-open`;
+				if (open === null) localStorage.removeItem(key);
+				else localStorage.setItem(key, open);
+			}
 			uiState.selectMode = false;
 			sessionViewState.compact = false;
 			featureFlags.debug = false;
@@ -52,6 +64,48 @@ const meta = {
 
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+async function expectSessionTitle(canvasElement: HTMLElement) {
+	const canvas = within(canvasElement);
+	const heading = canvas.getByTestId("list-bar-title");
+	const mark = canvas.getByTestId("list-bar-mark");
+	const label = canvas.getByText("Sessions", { exact: true });
+	const count = canvas.getByTestId("list-bar-count");
+	const compact = sessionViewState.compact;
+	await expect(heading).toHaveAccessibleName(`Sessions ${count.textContent}`);
+	await expect(mark).toBeVisible();
+	await expect(mark).toHaveAttribute("aria-hidden", "true");
+	await expect(mark).not.toHaveAttribute("tabindex");
+	await expect(mark.closest("a, button")).toBeNull();
+	await expect(mark).toHaveStyle({
+		width: compact ? "26px" : "20px",
+		height: compact ? "26px" : "20px",
+		borderRadius: compact ? "7px" : "5px",
+		color: "rgb(255, 255, 255)",
+	});
+	const glyph = mark.querySelector("svg");
+	await expect(glyph).toHaveStyle({
+		width: compact ? "15px" : "12px",
+		height: compact ? "15px" : "12px",
+	});
+	const accent = new Option().style;
+	accent.color = getComputedStyle(mark).getPropertyValue("--color-accent");
+	await expect(getComputedStyle(mark).backgroundColor).toBe(accent.color);
+	const markBox = mark.getBoundingClientRect();
+	const textRange = document.createRange();
+	textRange.selectNodeContents(label);
+	const textBox = textRange.getBoundingClientRect();
+	await expect(
+		Math.abs(
+			markBox.top + markBox.height / 2 - textBox.top - textBox.height / 2,
+		),
+	).toBeLessThanOrEqual(1);
+	await expect(textBox.left - markBox.right).toBe(compact ? 10 : 8);
+	await expect(label.parentElement).toBe(count.parentElement);
+	const textGroup = count.parentElement;
+	if (!textGroup) throw new TypeError("Session title text group is missing");
+	await expect(getComputedStyle(textGroup).alignItems).toBe("baseline");
+}
 
 function seedFinalSidebar(phone = false, singleAccount = false) {
 	sessionViewState.compact = phone;
@@ -116,17 +170,21 @@ function seedFinalSidebar(phone = false, singleAccount = false) {
 	});
 	applySessionChange({ _tag: "synchronized" });
 	openSessionForSetup("typed", "conduit");
-	const accounts = singleAccount
-		? ["personal"]
-		: ["personal", "work", "lab", "codex"];
-	instanceState.instances = accounts.map((id) => ({
+	const accounts = [
+		{ id: "personal", colorSlot: 0 },
+		{ id: "work", colorSlot: 1 },
+		{ id: "lab", colorSlot: 2 },
+		{ id: "codex", colorSlot: 4 },
+	].filter(({ id }) => !singleAccount || id === "personal");
+	instanceState.instances = accounts.map(({ id, colorSlot }) => ({
 		...mockClaudeAccount,
 		id,
+		colorSlot,
 		name: id,
 		usageEligible: true,
 	}));
 	applyUsageReadings(
-		accounts.map((accountId, i) => ({
+		accounts.map(({ id: accountId }, i) => ({
 			accountId,
 			harness: accountId === "codex" ? ("codex" as const) : ("claude" as const),
 			status:
@@ -145,13 +203,29 @@ function seedFinalSidebar(phone = false, singleAccount = false) {
 	);
 }
 
+function fitSidebarToViewport() {
+	const root = document.getElementById("storybook-root");
+	root?.setAttribute("style", "height:100vh");
+	return () => root?.removeAttribute("style");
+}
+
 export const Final: Story = {
-	beforeEach: () => seedFinalSidebar(),
+	beforeEach: () => {
+		seedFinalSidebar();
+		return fitSidebarToViewport();
+	},
 	play: async ({ canvasElement }) => {
+		await expectSessionTitle(canvasElement);
 		const canvas = within(canvasElement);
 		await expect(canvas.getByText("Fix token refresh race")).toBeVisible();
 		await expect(canvas.getByTestId("usage-footer-row-work")).toBeVisible();
 		await expect(canvas.getByTestId("settled-shelf-toggle")).toBeVisible();
+		if (!sessionViewState.compact) {
+			await expect(
+				canvas.getByTestId("usage-footer-settings").getBoundingClientRect()
+					.bottom,
+			).toBeLessThanOrEqual(innerHeight);
+		}
 		await expect(canvas.queryByTitle("Pinned session")).not.toBeInTheDocument();
 		if (!sessionViewState.compact) {
 			const toggle = canvas.getByRole("button", { name: "Close sidebar" });
@@ -210,6 +284,15 @@ export const Final: Story = {
 			await expect(pill.top).toBe(46);
 			await expect(chip.getBoundingClientRect().top - pill.bottom).toBe(8);
 			await expect(getComputedStyle(chip, "::before").minHeight).toBe("44px");
+			const scroller = canvas.getByRole("region", { name: "Sessions" });
+			scroller.scrollTop = scroller.scrollHeight;
+			await expect(
+				canvas.getByTestId("snoozed-shelf-toggle").getBoundingClientRect()
+					.bottom,
+			).toBeLessThanOrEqual(
+				canvas.getByTestId("usage-footer-phone").getBoundingClientRect().top,
+			);
+			scroller.scrollTop = 0;
 		}
 	},
 };
@@ -222,9 +305,7 @@ export const FinalPhone: Story = {
 	beforeEach: () => {
 		seedFinalSidebar(true);
 		// Phone-tall, so the list scrolls under a pinned usage dock as in the app.
-		const root = document.getElementById("storybook-root");
-		root?.setAttribute("style", "height:100vh");
-		return () => root?.removeAttribute("style");
+		return fitSidebarToViewport();
 	},
 };
 export const FinalPhoneLight: Story = {
@@ -258,6 +339,7 @@ export const NeedsYouSingleAccountLight: Story = {
 
 export const Default: Story = {
 	play: async ({ canvasElement }) => {
+		await expectSessionTitle(canvasElement);
 		const canvas = within(canvasElement);
 		const compose = canvas.getByRole("button", { name: "New session" });
 		await expect(compose).toBeVisible();
@@ -272,6 +354,34 @@ export const Default: Story = {
 		await expect(
 			canvas.queryByRole("button", { name: "File browser" }),
 		).toBeNull();
+		const originalWidth = uiState.sidebarWidth;
+		try {
+			for (const width of [180, 200]) {
+				uiState.sidebarWidth = width;
+				await waitFor(() =>
+					expect(
+						canvasElement.querySelector("#sidebar")?.getBoundingClientRect()
+							.width,
+					).toBe(width),
+				);
+				const label = canvas.getByText("Sessions", { exact: true });
+				const count = canvas.getByTestId("list-bar-count");
+				await expect(count.getBoundingClientRect().right).toBeLessThanOrEqual(
+					canvas.getByTestId("list-bar-select").getBoundingClientRect().left,
+				);
+				await expect(getComputedStyle(label).textOverflow).toBe("ellipsis");
+				await expect(label.scrollWidth).toBeGreaterThan(label.clientWidth);
+				await expectSessionTitle(canvasElement);
+			}
+		} finally {
+			uiState.sidebarWidth = originalWidth;
+			await waitFor(() =>
+				expect(
+					canvasElement.querySelector("#sidebar")?.getBoundingClientRect()
+						.width,
+				).toBe(originalWidth),
+			);
+		}
 	},
 };
 
@@ -291,9 +401,31 @@ export const Phone: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const title = canvas.getByTestId("list-bar-title");
+		await expectSessionTitle(canvasElement);
 		await expect(title).toHaveStyle({ fontSize: "22px", fontWeight: "700" });
 		await expect(canvas.getByTestId("list-bar-select")).toBeVisible();
-		await expect(canvas.getByTestId("list-bar-overflow")).toBeVisible();
+		const settings = canvas.getByTestId("list-bar-settings");
+		await expect(settings).toBeVisible();
+		await expect(settings).toHaveAccessibleName("Settings");
+		await expect(settings).toHaveAttribute("title", "Settings");
+		await expect(settings.querySelector(".lucide-settings")).not.toBeNull();
+		await expect(settings.getBoundingClientRect().width).toBe(44);
+		await expect(settings.getBoundingClientRect().height).toBe(44);
+		const opened = fn();
+		const originalDebug = featureFlags.debug;
+		window.addEventListener("settings:open", opened);
+		try {
+			for (const debug of [false, true]) {
+				featureFlags.debug = debug;
+				opened.mockClear();
+				await userEvent.click(settings);
+				await expect(opened).toHaveBeenCalledOnce();
+				await expect(opened.mock.calls[0]?.[0].detail).toBeNull();
+			}
+		} finally {
+			featureFlags.debug = originalDebug;
+			window.removeEventListener("settings:open", opened);
+		}
 		await expect(
 			canvas.queryByRole("button", { name: "Close sidebar" }),
 		).toBeNull();
@@ -320,44 +452,24 @@ export const Phone: Story = {
 
 export const PhoneLight: Story = { ...Phone, globals: { theme: "light" } };
 
-export const PhoneOverflow: Story = {
-	...Phone,
-	tags: ["viewport-capture"],
-	beforeEach: () => {
-		sessionViewState.compact = true;
-		uiState.sidebarWidth = 393;
-		featureFlags.debug = true;
-	},
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		await userEvent.click(canvas.getByTestId("list-bar-overflow"));
-		const menu = within(document.body).getByRole("menu", {
-			name: "More actions",
-		});
-		await expect(
-			within(menu).getByRole("menuitem", { name: "Settings" }),
-		).toBeVisible();
-		await expect(
-			within(menu).getByRole("menuitem", { name: "Debug panel" }),
-		).toBeVisible();
-		await expect(within(menu).getAllByRole("menuitem")).toHaveLength(2);
-	},
-};
-
-export const PhoneOverflowLight: Story = {
-	...PhoneOverflow,
-	globals: { theme: "light" },
-};
-
 export const PhoneSelect: Story = {
 	...Phone,
-	beforeEach: () => seedFinalSidebar(true, true),
+	beforeEach: () => {
+		seedFinalSidebar(true, true);
+		return fitSidebarToViewport();
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(canvas.getByText("Typed session list")).toBeVisible();
 		await userEvent.click(canvas.getByTestId("list-bar-select"));
 		await expect(canvas.getByText("0 selected")).toBeVisible();
 		await expect(canvas.getByTestId("select-bar-delete")).toBeDisabled();
+		for (const action of ["settle", "snooze", "pin", "delete"]) {
+			await expect(
+				canvas.getByTestId(`select-bar-${action}`).getBoundingClientRect()
+					.bottom,
+			).toBeLessThanOrEqual(innerHeight);
+		}
 		await expect(
 			canvas.getByRole("button", { name: "New session" }),
 		).toBeVisible();

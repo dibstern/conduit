@@ -18,6 +18,8 @@ import {
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { Account } from "../../../contracts/account.js";
+import { accountLimit } from "../../../contracts/account-limit.js";
+import { LimitRecoverySchema } from "../../../contracts/limit-recovery.js";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import { advanceTouchesScope } from "../../../contracts/read-model-advance.js";
 import {
@@ -36,6 +38,7 @@ import {
 } from "../../../persistence/effect/claude-event-persist-effect.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
+import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import { inboxRunStatusQuery } from "../../../persistence/inbox-run-status-query.js";
 import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
@@ -74,7 +77,7 @@ export interface InboxView {
 	readonly switching?: boolean;
 	/** A legacy runner is draining before replacement. */
 	readonly legacyRunner?: boolean;
-	/** A turn was stopped or failed since the latest handoff or reset release. */
+	/** Existing queued inputs are paused in the shared inbox read model. */
 	readonly stoppedSinceHandoff: boolean;
 	/** A usage limit cut a request off, and it is neither answered nor dismissed. */
 	readonly limited: boolean;
@@ -406,6 +409,7 @@ export const SessionInboxLive = Layer.effect(
 		const accounts = yield* AccountDirectory;
 		const sql = yield* SqlClient.SqlClient;
 		const eventStore = yield* EventStoreEffectTag;
+		const read = yield* ReadQueryEffectTag;
 		const persist = yield* ClaudeEventPersistEffectTag;
 		const providerTurnService = yield* ProviderTurnServiceTag;
 		const overrides = yield* OverridesStateTag;
@@ -451,20 +455,20 @@ export const SessionInboxLive = Layer.effect(
 							Effect.map((request) => ({ inputId: row.input_id, request })),
 						),
 				);
-				// A reset-only release restarts an input admitted after an earlier
-				// Stop, as an idle Submit would. A Stop after admission still wins.
+				const inboxState = yield* read.readInboxState(sessionId);
 				const [facts] = yield* sql<{
 					run_status: string | null;
 					provider: string | null;
 					limited: number;
 					scheduled: number;
 					open_prompts: number;
-					stopped: number;
+					limit_recovery: string | null;
 					interrupt_requested: string | null;
 					running: string | null;
 				}>`WITH latest_run AS (${inboxRunStatusQuery(sql, sessionId)}) SELECT
 					(SELECT status FROM latest_run) AS run_status,
 					(SELECT provider FROM sessions WHERE id = ${sessionId}) AS provider,
+					(SELECT limit_recovery FROM sessions WHERE id = ${sessionId}) AS limit_recovery,
 					(SELECT json_extract(limit_recovery, '$.cutOffMessageId') IS NOT NULL
 						FROM sessions WHERE id = ${sessionId}) AS limited,
 					(SELECT json_extract(limit_recovery, '$.scheduledAt') IS NOT NULL
@@ -473,7 +477,6 @@ export const SessionInboxLive = Layer.effect(
 					(SELECT COUNT(*) FROM pending_approvals
 						WHERE session_id = ${sessionId} AND status = 'pending'
 							AND (type <> 'question' OR COALESCE(json_extract(details, '$.delivery'), '') <> 'async')) AS open_prompts,
-					(SELECT stopped FROM latest_run) AS stopped,
 					(SELECT pending.input_id FROM pending_inputs pending
 						WHERE pending.session_id = ${sessionId} AND pending.state = 'queued'
 						AND EXISTS (SELECT 1 FROM events
@@ -506,19 +509,18 @@ export const SessionInboxLive = Layer.effect(
 				const reading = Option.isSome(account)
 					? yield* usage.latest(account.value.id)
 					: undefined;
-				const now = (yield* Clock.currentTimeMillis) / 1000;
-				const resets =
-					reading?.status === "limited"
-						? reading.windows
-								.filter(
-									(window) =>
-										(window.kind === "five_hour" ||
-											window.kind === "seven_day") &&
-										window.utilization >= 100,
-								)
-								.map((window) => Date.parse(window.resetsAt ?? "") / 1000)
-								.filter((at) => Number.isFinite(at) && at > now)
-						: [];
+				const recovery =
+					facts?.limit_recovery == null
+						? undefined
+						: yield* Schema.decodeUnknownEffect(
+								Schema.fromJsonString(LimitRecoverySchema),
+							)(facts.limit_recovery).pipe(Effect.orDie);
+				const limit = accountLimit({
+					asker: "user",
+					...(reading === undefined ? {} : { reading }),
+					...(recovery === undefined ? {} : { recovery }),
+					now: yield* Clock.currentTimeMillis,
+				});
 				const fences = providerTurnService.turnFences(sessionId);
 				const legacyRunner = admissions.some((admission) =>
 					admission.isHeld(sessionId),
@@ -538,9 +540,10 @@ export const SessionInboxLive = Layer.effect(
 					stopping: fences.stopping,
 					switching: fences.switching,
 					legacyRunner,
-					stoppedSinceHandoff: facts?.stopped === 1,
+					stoppedSinceHandoff: inboxState?.paused === true,
 					limited: facts?.limited === 1,
-					usageResetsAt: resets.length > 0 ? Math.max(...resets) : undefined,
+					usageResetsAt:
+						limit.kind === "wait-until" ? limit.until / 1_000 : undefined,
 					scheduled: facts?.scheduled === 1,
 					known,
 					providerSteers: providerSteers(Option.getOrUndefined(account)),
@@ -716,41 +719,11 @@ export const SessionInboxLive = Layer.effect(
 					);
 				});
 
-		const scheduleReset = (sessionId: string, view: InboxView) =>
-			Effect.gen(function* () {
-				if (
-					view.usageResetsAt === undefined ||
-					view.scheduled ||
-					view.provider === undefined
-				)
-					return;
-				// A cancellation after the last Submit stays cancelled. A new input
-				// can schedule again; the sweep's reset release is not a user cancel.
-				const [cancelled] = yield* sql<{ n: number }>`SELECT EXISTS (
-					SELECT 1 FROM events WHERE session_id = ${sessionId}
-						AND type = 'session.resume_cancelled'
-						AND COALESCE(json_extract(metadata, '$.source'), '') <> 'inbox-reset'
-						AND sequence > COALESCE((SELECT MAX(sequence) FROM events
-							WHERE session_id = ${sessionId}
-							AND type IN ('input.admitted', 'session.resume_scheduled')), 0)) AS n`;
-				if (cancelled?.n === 1) return;
-				yield* continuation
-					.requestContinuation(sessionId, {
-						instanceId: view.provider,
-						expectedInstanceId: view.provider,
-						reason: "reset",
-						at: view.usageResetsAt,
-						onlyIfUnscheduled: true,
-					})
-					.pipe(Effect.provide(continuationContext));
-			});
-
 		const drain = (sessionId: string) =>
 			serialised(sessionId)(
 				Effect.gen(function* () {
 					const view = yield* readView(sessionId);
 					if (view.queued.length === 0) return;
-					yield* scheduleReset(sessionId, view);
 					const reserved = view.interruptRequested;
 					if (
 						reserved &&
@@ -863,8 +836,22 @@ export const SessionInboxLive = Layer.effect(
 						// A queued input handed off ahead of this one has no requesting client.
 						const own = decision.handoff?.inputId === input.inputId;
 						yield* commit(input.sessionId, decision, own ? input : DRAINED);
-						if (!decision.handoff && decision.events.length > 0)
-							yield* scheduleReset(input.sessionId, view);
+						if (
+							!decision.handoff &&
+							decision.events.length > 0 &&
+							view.usageResetsAt !== undefined &&
+							!view.scheduled &&
+							view.provider !== undefined
+						)
+							yield* continuation
+								.requestContinuation(input.sessionId, {
+									instanceId: view.provider,
+									expectedInstanceId: view.provider,
+									reason: "reset",
+									at: view.usageResetsAt,
+									onlyIfUnscheduled: true,
+								})
+								.pipe(Effect.provide(continuationContext));
 						return decision;
 					}),
 				).pipe(

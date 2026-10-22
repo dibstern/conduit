@@ -1205,7 +1205,12 @@ export async function mockWsRpc(
 			void Effect.runPromise(Scope.close(scope, Exit.void));
 		};
 		control.registerSocket(ws, cleanup);
-		ws.onClose(onClose);
+		// A handler turns off Playwright's close forwarding, so finish a
+		// page-initiated close here or the page socket stays CLOSING and never redials.
+		ws.onClose(() => {
+			onClose();
+			ws.close().catch(() => undefined);
+		});
 		page.once("close", onClose);
 		const requests = new Map<string, EffectRpcRequest[]>();
 		const submissions = new Map<string, Record<string, unknown>>();

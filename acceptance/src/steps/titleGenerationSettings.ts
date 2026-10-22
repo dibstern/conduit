@@ -20,6 +20,7 @@ export const titleGenerationSettingsHandlers: StepHandler[] = [
 				...(mockInstances.get(world.page) ?? []),
 				{
 					id: "claude-work",
+					colorSlot: 1,
 					name: "Work Claude",
 					driver: "claude",
 					isDefault: false,

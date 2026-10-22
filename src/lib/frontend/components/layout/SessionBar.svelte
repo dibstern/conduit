@@ -231,6 +231,7 @@
 	function handleGoalDetailsKeydown(event: KeyboardEvent) {
 		if (event.key !== "Escape" || (!goalDetails.open && !tasksPanel.open && !sideThreadsPanel.open) || uiState.confirmDialog) return;
 		if (goalDetails.open && sessionViewState.compact && !tasksPanel.open && !sideThreadsPanel.open) return;
+		if (sideThreadsPanel.open && sessionViewState.compact) return;
 		event.preventDefault();
 		event.stopPropagation();
 		if (sideThreadsPanel.open) {

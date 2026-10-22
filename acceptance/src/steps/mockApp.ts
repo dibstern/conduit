@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import { Schema } from "effect";
+import { nextAccountColorSlot } from "../../../src/lib/account-directory.js";
 import type { ClaudeSettingsOverrides } from "../../../src/lib/contracts/claude-settings.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/message-surfacing.js";
 import {
@@ -284,7 +285,8 @@ export const mockAppHandlers: StepHandler[] = [
 				if (!entry) throw new Error(`Unknown mock Harness: ${label}`);
 				return entry;
 			});
-			const instances = configured.map(([name, driver]) => ({
+			const instances = configured.map(([name, driver], colorSlot) => ({
+				colorSlot,
 				id: driver,
 				name,
 				driver,
@@ -580,6 +582,7 @@ export const mockAppHandlers: StepHandler[] = [
 					id: "claude",
 					name: "Claude",
 					driver: "claude",
+					colorSlot: 0,
 					isDefault: true,
 					usageEligible: true,
 					port: 0,
@@ -592,6 +595,7 @@ export const mockAppHandlers: StepHandler[] = [
 					id: "opencode",
 					name: "OpenCode",
 					driver: "opencode",
+					colorSlot: 3,
 					isDefault: true,
 					port: 4096,
 					managed: true,
@@ -833,6 +837,14 @@ export const mockAppHandlers: StepHandler[] = [
 						const inst: Record<string, unknown> = {
 							id: instanceSlug(name),
 							name,
+							colorSlot: nextAccountColorSlot(
+								list.map((instance) => ({
+									colorSlot:
+										typeof instance["colorSlot"] === "number"
+											? instance["colorSlot"]
+											: undefined,
+								})),
+							),
 							port: typeof payload["port"] === "number" ? payload["port"] : 0,
 							managed: payload["managed"] === true,
 							status: "healthy",

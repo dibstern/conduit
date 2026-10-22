@@ -1,8 +1,7 @@
 <!--
-  Pull-down listing the open session's Side Threads, newest first. Opened from
-  the header's Side Threads control or by a bare `$btw`. The same shape as
-  BackgroundTasksPanel: full width under the header on phones, a popover on
-  desktop, anchored right under the control it hangs from.
+  Lists the open session's Side Threads, newest first. Opened from the header's
+  Side Threads control or by a bare `$btw`: a drop-down sheet on phones and a popover
+  anchored under the control on desktop.
 -->
 <script lang="ts" module>
 	import { sessionAttention, sessionState } from "../../stores/session.svelte.js";

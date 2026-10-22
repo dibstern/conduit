@@ -27,6 +27,7 @@ import {
 	type AccountChange,
 	type AccountsState,
 	accountsStateFromInstances,
+	assignAccountColorSlots,
 } from "../../../account-directory.js";
 import { DEFAULT_OPENCODE_URL } from "../../../constants.js";
 import {
@@ -322,19 +323,25 @@ export function makeInstanceManagerStateLive(
 		accountsState === undefined
 			? []
 			: accountsStateFromInstances(
-					seeded
-						.filter(
-							(instance) =>
-								getProviderDriver(instance.driver ?? "opencode")
-									?.runsOpenCodeServer &&
-								!accountsState.accounts.some(
-									(account) => account.id === instance.id,
-								) &&
-								!accountsState.deleted.some(
-									(account) => account.id === instance.id,
-								),
-						)
-						.map((instance) => ({ ...instance, driver: "opencode" as const })),
+					assignAccountColorSlots(
+						seeded
+							.filter(
+								(instance) =>
+									getProviderDriver(instance.driver ?? "opencode")
+										?.runsOpenCodeServer &&
+									!accountsState.accounts.some(
+										(account) => account.id === instance.id,
+									) &&
+									!accountsState.deleted.some(
+										(account) => account.id === instance.id,
+									),
+							)
+							.map((instance) => ({
+								...instance,
+								driver: "opencode" as const,
+							})),
+						accountsState.accounts,
+					),
 					accountsState.launchLogin,
 				).accounts;
 	return makeOpenCodeRuntimeStateLive(config, seeded, options).pipe(
@@ -606,6 +613,9 @@ export const getInstances = Effect.gen(function* () {
 				...(runtime ?? { status: "healthy", restartCount: 0, createdAt: 0 }),
 				id: account.id,
 				name: account.name,
+				...(account.colorSlot === undefined
+					? {}
+					: { colorSlot: account.colorSlot }),
 				driver: account.driver,
 				port:
 					account.driver === "opencode"
@@ -778,6 +788,9 @@ export function persistedInstanceConfigs(
 		return {
 			id: account.id,
 			name: account.name,
+			...(account.colorSlot === undefined
+				? {}
+				: { colorSlot: account.colorSlot }),
 			driver: account.driver,
 			port:
 				account.driver === "opencode"
