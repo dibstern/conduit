@@ -201,7 +201,20 @@ export const resolveSessionFolders = (
 			{ id: session.id, workspace: state },
 			config,
 		);
-		if (missing) {
+		// A deleted branch can never be recreated, so a fresh turn continues in
+		// the main folder. The "missing" cause tells the UI the session moved.
+		if (
+			missing?.reason === "branch-missing" &&
+			fallbackMissingWorktree &&
+			workspace._tag === "Some" &&
+			existsSync(config.projectDir)
+		) {
+			workspaceRoot = yield* workspace.value.withLaunch(
+				session.id,
+				workspace.value.move(session.id, config.projectDir, "missing"),
+			);
+			state = null;
+		} else if (missing) {
 			const branch =
 				missing.folders?.find(({ reason }) => reason === "branch-missing")
 					?.branch ?? missing.branch;
