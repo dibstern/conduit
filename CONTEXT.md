@@ -262,3 +262,38 @@ resets the dismissal. The hint works for writes back to the main checkout too.
 
 The checkout pill shows the folder suggestion with Move and Dismiss actions on
 desktop. Phones show an accessible icon and put both actions in the pill menu.
+
+## Turn Launcher
+
+**Turn Launcher** resolves everything a turn needs before it is sent: the
+provider instance, account, config dir, shell environment, settings and resume
+plan. It reads them from the stored turn command and the current Daemon
+Settings. First delivery and runner recovery both launch through it and differ
+only in how they send the prepared turn, so a recovered turn is planned exactly
+like a first delivery.
+
+## Turn Settlement
+
+**Turn Settlement** records a turn's result in one transaction: provider resume
+state, outbox and receipt. What it saves follows the result, never the provider
+driver. A failed save fails the turn instead of being logged. A turn that
+joined one already running only completes its receipt. The reactor, dispatch
+and runner recovery all settle through it.
+
+## Sidebar Overlay
+
+**Sidebar Overlay** is sidebar state that is deliberately not a canonical
+event: background-work liveness, a dismissed Workspace Hint and Git status.
+The commit step finds sidebar changes by comparing rows, so it cannot see an
+overlay change. Overlays are announced through the commit module's one overlay
+operation, which bumps the row's version and wakes subscribers. No other code
+stamps a version or moves `session_sidebar` markers for an overlay.
+
+## Daemon Settings
+
+**Daemon Settings** is the one module that owns `daemon.json` while the daemon
+runs. Its single `update(patch)` writes the file atomically, then updates
+memory, then replies; callers never choose when a change reaches disk. Other
+code reads settings from the module, never from the file. The CLI changes
+settings over RPC when the daemon is up and writes the file only when it is
+down.
