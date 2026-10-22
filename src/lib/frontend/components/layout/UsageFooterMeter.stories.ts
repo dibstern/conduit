@@ -69,8 +69,11 @@ const meta = {
 		docs: { story: { inline: false, height: "640px" } },
 	},
 	beforeEach: () => {
+		const realNow = Date.now;
+		Date.now = () => new Date(2026, 0, 1, 1).getTime();
 		seed();
 		return () => {
+			Date.now = realNow;
 			applyUsageReadings([]);
 			applyUsageLimitsSetting(DEFAULT_USAGE_LIMITS);
 			openSessionForSetup(null);

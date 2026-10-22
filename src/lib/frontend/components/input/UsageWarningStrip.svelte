@@ -11,13 +11,14 @@
 </script>
 
 <script lang="ts">
+	import { accountLimit } from "../../../contracts/account-limit.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
 	import { getDriverTraits, getInstanceById } from "../../stores/instance.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
 	import type { Immutable, SessionInfo } from "../../types.js";
-	import { quotaBlocksSwitch, usageForecastTime, usageWarning } from "../../utils/continuation.js";
+	import { usageForecastTime, usageWarning } from "../../utils/continuation.js";
 	import { openSettings } from "../layout/chrome-actions.js";
 	import Button from "../ui/Button.svelte";
 	import ComposerStrip from "../ui/ComposerStrip.svelte";
@@ -32,8 +33,14 @@
 	const claudeAccounts = $derived(getClaudeAccounts(projectSlug, getDriverTraits(getInstanceById(accountId ?? "")?.driver)?.usageHarness === "codex" ? "codex" : "claude"));
 	const reading = $derived(claudeAccounts.readingOf(accountId));
 	const severalAccounts = $derived(claudeAccounts.hasAlternative(accountId));
-	const alternatives = $derived(claudeAccounts.configuredAccounts.filter((account) =>
-		account.id !== accountId && !quotaBlocksSwitch(claudeAccounts.quotaOf(account.id) ?? claudeAccounts.readingOf(account.id))));
+	const alternatives = $derived(claudeAccounts.configuredAccounts.filter((account) => {
+		const reading = claudeAccounts.quotaOf(account.id) ?? claudeAccounts.readingOf(account.id);
+		return account.id !== accountId && accountLimit({
+			asker: "user",
+			...(reading ? { reading } : {}),
+			now: clock.now,
+		}).kind === "go";
+	}));
 	const compactSwitchLabel = $derived(alternatives.length === 1 ? `Switch to ${alternatives[0]?.name}` : "Switch account");
 	const warning = $derived(usageWarning(reading, usageState.limits.warnAt, claudeAccounts.nameOf(accountId), severalAccounts, clock.now));
 	const limited = $derived(session?.limitRecovery && !session.limitRecovery.switched);

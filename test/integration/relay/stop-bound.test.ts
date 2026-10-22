@@ -92,7 +92,7 @@ const stopLayer = (api: OpenCodeAPI, scratch: string) => {
 						Layer.succeed(Usage, {
 							readings: Stream.empty,
 							latest: () => Effect.succeed(undefined),
-							refresh: () => Effect.succeed([]),
+							refresh: (_options) => Effect.succeed([]),
 							turnEnded: () => Effect.void,
 							pickFailover: () => Effect.succeed(undefined),
 						}),

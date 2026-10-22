@@ -880,7 +880,7 @@ describe("shared-store relay project scope", () => {
 						readings: Stream.empty,
 						latest: () => Effect.succeed(undefined),
 						turnEnded: () => Effect.void,
-						refresh: () =>
+						refresh: (_options) =>
 							Effect.succeed([usageReading("claude", { status: "available" })]),
 						pickFailover: () => Effect.succeed(undefined),
 					}),

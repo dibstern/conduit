@@ -8,6 +8,7 @@
   single Close. A modal on desktop, a bottom sheet with condensed rows on phones.
 -->
 <script lang="ts">
+	import { clock } from "../../stores/clock.svelte.js";
 	import SheetChrome from "../ui/SheetChrome.svelte";
 	import type { HandoffSummary, UsageReading } from "../../../contracts/limit-recovery.js";
 	import { getDriverTraits, getInstanceById } from "../../stores/instance.svelte.js";
@@ -132,12 +133,12 @@
 			<Surface variant="quiet" radius="none" data-testid="handoff-swap" class="my-[10px] flex items-center gap-[10px] rounded-[10px] px-[10px] py-[8px] {compact ? 'flex-wrap' : ''}">
 				<AccountDot instanceId={confirm.from} />
 				<span>{nameOf(confirm.from)}</span>
-				<QuotaMeter {...quotaReading(confirm.fromQuota)} track={false} />
+				<QuotaMeter {...quotaReading(confirm.fromQuota, clock.now)} track={false} />
 				<span aria-hidden="true" class="text-text-dimmer">→</span><span class="sr-only">to</span>
 				<AccountDot instanceId={to} />
 				<b class="font-semibold text-text">{nameOf(to)}</b>
 				<span class="flex-1"></span>
-				<QuotaMeter {...quotaReading(confirm.quota)} size="lg" track={!compact} />
+				<QuotaMeter {...quotaReading(confirm.quota, clock.now)} size="lg" track={!compact} />
 			</Surface>
 		{:else}
 			<p>

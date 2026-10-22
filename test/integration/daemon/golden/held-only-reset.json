@@ -1,0 +1,108 @@
+{
+	"events": [
+		{
+			"type": "session.created",
+			"payload": {
+				"title": "Held Messages",
+				"provider": "claude"
+			}
+		},
+		{
+			"type": "input.admitted",
+			"payload": {
+				"delivery": "queue",
+				"request": {
+					"text": "first"
+				}
+			}
+		},
+		{
+			"type": "session.resume_scheduled",
+			"payload": {
+				"instanceId": "claude",
+				"by": "user"
+			}
+		},
+		{
+			"type": "input.admitted",
+			"payload": {
+				"delivery": "queue",
+				"request": {
+					"text": "second"
+				}
+			}
+		},
+		{
+			"type": "session.resumed",
+			"payload": {
+				"reason": "reset",
+				"instanceId": "claude"
+			}
+		},
+		{
+			"type": "input.sent",
+			"payload": {}
+		},
+		{
+			"type": "message.created",
+			"payload": {
+				"role": "user"
+			}
+		},
+		{
+			"type": "session.status",
+			"payload": {
+				"status": "busy"
+			}
+		},
+		{
+			"type": "message.created",
+			"payload": {
+				"role": "assistant"
+			}
+		},
+		{
+			"type": "turn.completed",
+			"payload": {}
+		},
+		{
+			"type": "session.status",
+			"payload": {
+				"status": "idle"
+			}
+		},
+		{
+			"type": "input.sent",
+			"payload": {}
+		},
+		{
+			"type": "message.created",
+			"payload": {
+				"role": "user"
+			}
+		},
+		{
+			"type": "session.status",
+			"payload": {
+				"status": "busy"
+			}
+		},
+		{
+			"type": "message.created",
+			"payload": {
+				"role": "assistant"
+			}
+		},
+		{
+			"type": "turn.completed",
+			"payload": {}
+		},
+		{
+			"type": "session.status",
+			"payload": {
+				"status": "idle"
+			}
+		}
+	],
+	"usageChecks": 0
+}

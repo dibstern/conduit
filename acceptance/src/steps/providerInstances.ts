@@ -31,6 +31,9 @@ import {
 	requireRpcControl,
 } from "./shared.js";
 
+// Account Limit ignores pre-limit readings, so seeded usage predates projected limits.
+const SEEDED_USAGE_READ_AT_MS = PINNED_CLOCK_MS - 60_000;
+
 const usageLimits = (
 	autoResume: boolean,
 	autoSwitch = false,
@@ -151,7 +154,7 @@ function seedAccountDirectory(page: Page): void {
 					harness: "claude",
 					status: "available",
 					windows: [{ kind: "five_hour", utilization: 20 }],
-					readAt: PINNED_CLOCK_MS,
+					readAt: SEEDED_USAGE_READ_AT_MS,
 					stale: false,
 				})),
 		);
@@ -1228,7 +1231,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 						harness: "claude",
 						status: "available",
 						windows: [{ kind: "five_hour", utilization: 20 }],
-						readAt: Date.now(),
+						readAt: SEEDED_USAGE_READ_AT_MS,
 						stale: false,
 					})),
 			});

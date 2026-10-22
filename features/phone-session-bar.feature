@@ -82,14 +82,14 @@ Examples:
   | shortcut       |
   | transcript key |
 
-Scenario Outline: Settling on desktop keeps the viewed session open
+Scenario Outline: Settling the open desktop session returns to the list only after success
   Given the conduit app is served with the long-transcript mockup
   And the phone session sheet state is idle
   And the settle reply is held as success
   When I settle the open session using <entry>
   Then the viewed session stays open
   When the held settle reply is released
-  Then the viewed session stays open
+  Then the session list is open
 
 Examples:
   | entry          |
