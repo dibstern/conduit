@@ -877,7 +877,17 @@
 		if (await sendMessage(`/goal ${facts.endedGoal.condition}`)) undoneClearKey = key;
 	}
 
+	// A send from idle starts a turn, and Stop then takes Send's slot, so a repeat tap on
+	// Send would land on Stop. Mid-turn, Stop is already showing and nothing moves.
+	// performance.now, not Date.now: acceptance pins Date.
+	let idleSendClickedAt = -Infinity;
+
+	function handleStopClick() {
+		if (sessionState.currentId && performance.now() - idleSendClickedAt >= 1500) void stop(sessionState.currentId);
+	}
+
 	function handleSendClick(e: MouseEvent) {
+		idleSendClickedAt = working ? -Infinity : performance.now();
 		sendComposer(steer && (e.metaKey || e.ctrlKey) ? "steer" : "queue");
 	}
 
@@ -1505,7 +1515,7 @@
 					{/if}
 					{/if}
 					{#if working}
-						<Button variant="inverse" size="composer-action" id="stop" title={steerPending ? "Stop generating · A pending steer still runs" : "Stop generating"} ariaLabel="Stop generating" onclick={() => { if (sessionState.currentId) void stop(sessionState.currentId); }} touchTarget class="ml-[3px]">
+						<Button variant="inverse" size="composer-action" id="stop" title={steerPending ? "Stop generating · A pending steer still runs" : "Stop generating"} ariaLabel="Stop generating" onclick={handleStopClick} touchTarget class="ml-[3px]">
 							<i data-testid="stop-square" class="block size-[10px] rounded-[2px] bg-current"></i>
 						</Button>
 					{/if}
