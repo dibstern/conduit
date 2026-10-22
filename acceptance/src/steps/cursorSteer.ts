@@ -141,7 +141,7 @@ export const cursorSteerHandlers: StepHandler[] = [
 			await expect(row.locator("button").first()).toContainText(
 				"Moved to background",
 			);
-			await expect(row.locator(".tool-result")).toHaveCount(0);
+			await expect(row.locator(".shell-detail")).toHaveCount(0);
 		},
 	},
 	{
@@ -163,7 +163,7 @@ export const cursorSteerHandlers: StepHandler[] = [
 			).toHaveText("Moved to background. The command may still be running.");
 			await expect(
 				world.page.locator(
-					`.tool-item[data-tool-id="${shellId}"] .tool-result`,
+					`.tool-item[data-tool-id="${shellId}"] .shell-detail`,
 				),
 			).toContainText("sleep 10");
 		},

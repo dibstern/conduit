@@ -72,13 +72,69 @@ export const RunningCodexBash: Story = {
 		const row = canvas.getByRole("button");
 		await userEvent.click(row);
 		await expect(row).toHaveAttribute("aria-expanded", "true");
-		await expect(canvasElement.querySelector(".tool-result")).toHaveTextContent(
-			"printf",
-		);
-		await expect(canvasElement.querySelector(".tool-result")).toHaveTextContent(
-			/first line\s+second line/,
-		);
+		await expect(
+			canvasElement.querySelector(".shell-command"),
+		).toHaveTextContent("printf");
+		await expect(
+			canvasElement.querySelector(".shell-output"),
+		).toHaveTextContent(/first line\s+second line/);
 	},
+};
+
+export const ExpandedBash: Story = {
+	args: {
+		part: {
+			type: "tool",
+			uuid: "split-shell",
+			id: "split-shell",
+			name: "Bash",
+			status: "completed",
+			input: {
+				command: `ROOT=/tmp cat <<'EOF'\n$BODY stays plain --flag\nEOF\nprintf '%s' $ROOT/file && ls -la | head -c 100 # inspect`,
+			},
+			result: `${Array.from({ length: 12 }, (_, i) => `Output line ${i + 1}: ${"wrapped output ".repeat(6)}`).join("\n")}\nShell cwd was reset to /tmp/project`,
+			metadata: { exitCode: 0 },
+			createdAt: 100,
+			endedAt: 540,
+		},
+	},
+	globals: { theme: "dark" },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const row = canvas.getByRole("button");
+		await userEvent.click(row);
+		await expect(
+			canvasElement.querySelector(".shell-command .heredoc"),
+		).toHaveTextContent("'EOF'");
+		await expect(
+			canvasElement.querySelector(".shell-footer"),
+		).toHaveTextContent("✓ exit 0 · 440ms");
+		await expect(
+			canvas.getByTitle("Shell cwd was reset to /tmp/project"),
+		).toHaveTextContent("cwd reset");
+		await expect(
+			canvasElement.querySelector(".shell-output"),
+		).not.toHaveTextContent("Shell cwd was reset");
+		const more = await canvas.findByRole("button", { name: "Show all output" });
+		await expect(more).toBeVisible();
+		await userEvent.click(more);
+		await expect(canvasElement.querySelector(".shell-output")).not.toHaveClass(
+			"clipped",
+		);
+		await expect(
+			canvas.queryByRole("button", { name: "Show all output" }),
+		).not.toBeInTheDocument();
+		const range = document.createRange();
+		range.selectNodeContents(row);
+		window.getSelection()?.addRange(range);
+		row.click();
+		await expect(row).toHaveAttribute("aria-expanded", "true");
+		window.getSelection()?.removeAllRanges();
+	},
+};
+export const ExpandedBashLight: Story = {
+	...ExpandedBash,
+	globals: { theme: "light" },
 };
 export const Message: Story = {
 	args: { part: mockAssistantSimple, duration: 12000 },
