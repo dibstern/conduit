@@ -61,6 +61,10 @@ const NATIVE_THREAD_PREFIX = "nativeThread:";
 export const nativeThreadKey = (instanceId: string): string =>
 	`${NATIVE_THREAD_PREFIX}${instanceId}`;
 
+/** The receipt a catch-up held past a slash command still owes, until delivered. */
+export const heldCatchUpKey = (instanceId: string): string =>
+	`claude.heldCatchUp:${instanceId}`;
+
 export interface ProviderStateEffect {
 	readonly projectId: string;
 	readonly nativeThread: (

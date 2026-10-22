@@ -1,7 +1,5 @@
 /** Opt-in live contract capture for OpenCode text generation (ADR-0002). */
-import { spawn } from "node:child_process";
 import {
-	copyFileSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -10,10 +8,16 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { createServer, type Server } from "node:http";
-import { homedir } from "node:os";
+import { userInfo } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
+import { Effect, Exit, Scope } from "effect";
 import { describe, expect, it } from "vitest";
+import {
+	MANAGED_OPENCODE_ACCOUNT_ID,
+	type OpenCodeAccount,
+} from "../../../src/lib/contracts/account.js";
+import { openCodeTextServerEffect } from "../../../src/lib/provider/opencode-text-server.js";
 import { RecordingProxy } from "../../helpers/recording-proxy.js";
 import type { OpenCodeRecording } from "../fixtures/recorded/types.js";
 
@@ -22,6 +26,17 @@ const fixtureDir = join(
 	import.meta.dirname,
 	"../../fixtures/opencode-wire-traces",
 );
+// Global test setup replaces HOME; keep the reviewer's real shared auth.
+const dataHome =
+	process.env["XDG_DATA_HOME"] ?? join(userInfo().homedir, ".local", "share");
+const account: OpenCodeAccount = {
+	driver: "opencode",
+	id: MANAGED_OPENCODE_ACCOUNT_ID,
+	name: "Title capture",
+	usageEligible: false,
+	managed: true,
+	env: { XDG_DATA_HOME: dataHome },
+};
 const object = (value: unknown): Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value)
 		? (value as Record<string, unknown>)
@@ -55,38 +70,27 @@ const listen = (server: Server) =>
 
 describe.skipIf(!enabled)("OpenCode title generation live capture", () => {
 	it("captures one isolated synchronous text request and its deletion", async () => {
-		const root = realpathSync(mkdtempSync("/tmp/conduit-title-wire-"));
-		const project = join(root, "project");
-		const scratch = join(
-			root,
-			"conduit-config",
-			"text-generation",
-			"run-capture",
-		);
-		for (const dir of ["home", "data/opencode", "config", "state", "cache"])
-			mkdirSync(join(root, dir), { recursive: true });
-		mkdirSync(project);
-		mkdirSync(scratch, { recursive: true });
-		const sentinel = "PROJECT_INSTRUCTIONS_MUST_NOT_REACH_TITLE_GENERATION";
-		writeFileSync(join(project, "AGENTS.md"), sentinel);
-		const authPath = join(
-			process.env["XDG_DATA_HOME"] ?? join(homedir(), ".local", "share"),
-			"opencode",
-			"auth.json",
-		);
-		if (existsSync(authPath))
-			copyFileSync(authPath, join(root, "data", "opencode", "auth.json"));
+		const authPath = join(dataHome, "opencode", "auth.json");
 		if (!existsSync(authPath) && !process.env["OPENROUTER_API_KEY"])
 			throw new Error(
 				"No usable OpenRouter auth is available for live capture",
 			);
-
+		const root = realpathSync(mkdtempSync("/tmp/conduit-title-wire-"));
+		const project = join(root, "project");
+		mkdirSync(project);
+		const sentinel = "PROJECT_INSTRUCTIONS_MUST_NOT_REACH_TITLE_GENERATION";
+		writeFileSync(join(project, "AGENTS.md"), sentinel);
 		const upstreamRequests: unknown[] = [];
 		const providerProxy = createServer(async (req, res) => {
 			try {
 				const chunks: Buffer[] = [];
 				for await (const chunk of req) chunks.push(Buffer.from(chunk));
 				const body = Buffer.concat(chunks);
+				if (body.length > 0 && upstreamRequests.length >= 2) {
+					res.writeHead(429);
+					res.end("Live capture allows at most two model requests");
+					return;
+				}
 				if (body.length > 0) upstreamRequests.push(JSON.parse(body.toString()));
 				const headers = new Headers();
 				for (const [name, value] of Object.entries(req.headers))
@@ -121,45 +125,7 @@ describe.skipIf(!enabled)("OpenCode title generation live capture", () => {
 			}
 		});
 		const providerUrl = await listen(providerProxy);
-		const env = {
-			...process.env,
-			HOME: join(root, "home"),
-			XDG_DATA_HOME: join(root, "data"),
-			XDG_CONFIG_HOME: join(root, "config"),
-			XDG_STATE_HOME: join(root, "state"),
-			XDG_CACHE_HOME: join(root, "cache"),
-			OPENCODE_SERVER_PASSWORD: "",
-			OPENCODE_CONFIG: "",
-			OPENCODE_CONFIG_DIR: "",
-			OPENCODE_DISABLE_DEFAULT_PLUGINS: "true",
-			OPENCODE_DISABLE_CLAUDE_CODE: "true",
-			OPENCODE_CONFIG_CONTENT: JSON.stringify({
-				plugin: [],
-				mcp: {},
-				instructions: [],
-				share: "disabled",
-				autoupdate: false,
-				provider: {
-					openrouter: { options: { baseURL: `${providerUrl}/api/v1` } },
-				},
-			}),
-		};
-		const child = spawn(
-			"opencode",
-			["serve", "--hostname", "127.0.0.1", "--port", "0"],
-			{
-				cwd: scratch,
-				env,
-				stdio: ["ignore", "pipe", "pipe"],
-			},
-		);
-		let output = "";
-		child.stdout.on("data", (chunk: Buffer) => {
-			output = (output + chunk.toString()).slice(-16_000);
-		});
-		child.stderr.on("data", (chunk: Buffer) => {
-			output = (output + chunk.toString()).slice(-16_000);
-		});
+		const scope = Effect.runSync(Scope.make());
 		const streams: { controller: AbortController; pump: Promise<void> }[] = [];
 		const envelopes: { stream: string; data: unknown }[] = [];
 		let proxy: RecordingProxy | undefined;
@@ -173,20 +139,16 @@ describe.skipIf(!enabled)("OpenCode title generation live capture", () => {
 			  ) => Promise<{ status: number; body: unknown }>)
 			| undefined;
 		try {
-			const deadline = Date.now() + 30_000;
-			let url: string | undefined;
-			while (Date.now() < deadline) {
-				url = /http:\/\/127\.0\.0\.1:\d+/.exec(output)?.[0];
-				if (
-					url &&
-					(await fetch(`${url}/global/health`).catch(() => undefined))?.ok
-				)
-					break;
-				if (child.exitCode !== null || child.signalCode !== null)
-					throw new Error(`OpenCode exited: ${output}`);
-				await pause(100);
-			}
-			if (!url) throw new Error(`OpenCode did not start: ${output}`);
+			const server = await Effect.runPromise(
+				openCodeTextServerEffect(account, {
+					provider: {
+						openrouter: { options: { baseURL: `${providerUrl}/api/v1` } },
+					},
+				}).pipe(Effect.provideService(Scope.Scope, scope)),
+			);
+			const scratch = server.cwd;
+			const url = server.client.getBaseUrl();
+			const authHeaders = server.client.getAuthHeaders();
 			proxy = new RecordingProxy(url);
 			await proxy.start();
 			const proxyUrl = proxy.url;
@@ -196,6 +158,7 @@ describe.skipIf(!enabled)("OpenCode title generation live capture", () => {
 					{
 						method,
 						headers: {
+							...authHeaders,
 							"content-type": "application/json",
 							"accept-encoding": "identity",
 						},
@@ -215,6 +178,7 @@ describe.skipIf(!enabled)("OpenCode title generation live capture", () => {
 			] as const) {
 				const controller = new AbortController();
 				const response = await fetch(`${proxyUrl}${path}`, {
+					headers: authHeaders,
 					signal: controller.signal,
 				});
 				const reader = response.body?.getReader();
@@ -250,6 +214,7 @@ describe.skipIf(!enabled)("OpenCode title generation live capture", () => {
 				agents.body.some((value: unknown) => object(value)["name"] === "title");
 			const catalogResponse = await fetch(
 				`${url}/config/providers?directory=${encodeURIComponent(scratch)}`,
+				{ headers: authHeaders },
 			);
 			const catalog = object(await catalogResponse.json());
 			const providers = Array.isArray(catalog["providers"])
@@ -280,7 +245,7 @@ describe.skipIf(!enabled)("OpenCode title generation live capture", () => {
 			);
 			const model =
 				free.find((value) => value["id"] === "liquid/lfm-2.5-2.6b:free") ??
-				[...(free.length > 0 ? free : models)].sort(
+				[...free].sort(
 					(a, b) =>
 						Number(object(a["cost"])["input"] ?? Infinity) +
 						Number(object(a["cost"])["output"] ?? Infinity) -
@@ -288,7 +253,7 @@ describe.skipIf(!enabled)("OpenCode title generation live capture", () => {
 						Number(object(b["cost"])["output"] ?? Infinity),
 				)[0];
 			if (!model)
-				throw new Error("OpenRouter has no discovered text-chat model");
+				throw new Error("OpenRouter has no discovered free text-chat model");
 			await request("GET", "/provider");
 			const created = await request("POST", "/session", {
 				title: "Conduit temporary text generation",
@@ -322,7 +287,11 @@ describe.skipIf(!enabled)("OpenCode title generation live capture", () => {
 				project,
 			);
 			await pause(100);
-			const health = object(await (await fetch(`${url}/global/health`)).json());
+			const health = object(
+				await (
+					await fetch(`${url}/global/health`, { headers: authHeaders })
+				).json(),
+			);
 			const recording: OpenCodeRecording = {
 				name: "title-generation",
 				recordedAt: new Date().toISOString(),
@@ -353,6 +322,7 @@ describe.skipIf(!enabled)("OpenCode title generation live capture", () => {
 				afterDelete,
 				projectSessions,
 				root,
+				serverRoot: server.root,
 				scratch,
 				project,
 				providerRequests: upstreamRequests.length,
@@ -391,19 +361,7 @@ describe.skipIf(!enabled)("OpenCode title generation live capture", () => {
 			await Promise.all(streams.map((stream) => stream.pump));
 			proxy?.reset();
 			await proxy?.stop();
-			if (child.exitCode === null && child.signalCode === null) {
-				child.kill("SIGTERM");
-				await Promise.race([
-					new Promise<void>((resolve) => child.once("exit", () => resolve())),
-					pause(3_000),
-				]);
-				if (child.exitCode === null && child.signalCode === null) {
-					child.kill("SIGKILL");
-					await new Promise<void>((resolve) =>
-						child.once("exit", () => resolve()),
-					);
-				}
-			}
+			await Effect.runPromise(Scope.close(scope, Exit.void));
 			providerProxy.closeAllConnections();
 			await new Promise<void>((resolve) =>
 				providerProxy.close(() => resolve()),
@@ -413,55 +371,7 @@ describe.skipIf(!enabled)("OpenCode title generation live capture", () => {
 	}, 180_000);
 
 	it("captures a reserved session lifecycle without prompting", async () => {
-		const root = realpathSync(mkdtempSync("/tmp/conduit-title-lifecycle-"));
-		const scratch = join(
-			root,
-			"conduit-config",
-			"text-generation",
-			"run-capture",
-		);
-		for (const directory of [
-			"home",
-			"data",
-			"config",
-			"state",
-			"cache",
-			"conduit-config/text-generation/run-capture",
-		])
-			mkdirSync(join(root, directory), { recursive: true });
-		const child = spawn(
-			"opencode",
-			["serve", "--hostname", "127.0.0.1", "--port", "0"],
-			{
-				cwd: scratch,
-				stdio: ["ignore", "pipe", "pipe"],
-				env: {
-					...process.env,
-					HOME: join(root, "home"),
-					XDG_DATA_HOME: join(root, "data"),
-					XDG_CONFIG_HOME: join(root, "config"),
-					XDG_STATE_HOME: join(root, "state"),
-					XDG_CACHE_HOME: join(root, "cache"),
-					OPENCODE_SERVER_PASSWORD: "",
-					OPENCODE_CONFIG: "",
-					OPENCODE_CONFIG_DIR: "",
-					OPENCODE_DISABLE_DEFAULT_PLUGINS: "true",
-					OPENCODE_DISABLE_CLAUDE_CODE: "true",
-					OPENCODE_CONFIG_CONTENT: JSON.stringify({
-						plugin: [],
-						mcp: {},
-						instructions: [],
-						share: "disabled",
-						autoupdate: false,
-					}),
-				},
-			},
-		);
-		let output = "";
-		for (const stream of [child.stdout, child.stderr])
-			stream.on("data", (chunk: Buffer) => {
-				output = (output + chunk.toString()).slice(-16_000);
-			});
+		const scope = Effect.runSync(Scope.make());
 		let proxy: RecordingProxy | undefined;
 		const sessionId = `ses_title_${Date.now().toString(16)}`;
 		let request:
@@ -472,21 +382,17 @@ describe.skipIf(!enabled)("OpenCode title generation live capture", () => {
 			  ) => Promise<{ status: number; body: unknown }>)
 			| undefined;
 		try {
-			let url: string | undefined;
-			const deadline = Date.now() + 30_000;
-			while (Date.now() < deadline) {
-				url = /http:\/\/127\.0\.0\.1:\d+/.exec(output)?.[0];
-				if (
-					url &&
-					(await fetch(`${url}/global/health`).catch(() => undefined))?.ok
-				)
-					break;
-				if (child.exitCode !== null || child.signalCode !== null)
-					throw new Error(`OpenCode exited: ${output}`);
-				await pause(100);
-			}
-			if (!url) throw new Error(`OpenCode did not start: ${output}`);
-			const doc = object(await (await fetch(`${url}/doc`)).json());
+			const server = await Effect.runPromise(
+				openCodeTextServerEffect(account, {}).pipe(
+					Effect.provideService(Scope.Scope, scope),
+				),
+			);
+			const scratch = server.cwd;
+			const url = server.client.getBaseUrl();
+			const authHeaders = server.client.getAuthHeaders();
+			const doc = object(
+				await (await fetch(`${url}/doc`, { headers: authHeaders })).json(),
+			);
 			const paths = object(doc["paths"]);
 			const create = object(
 				object(
@@ -508,6 +414,7 @@ describe.skipIf(!enabled)("OpenCode title generation live capture", () => {
 					{
 						method,
 						headers: {
+							...authHeaders,
 							"content-type": "application/json",
 							"accept-encoding": "identity",
 						},
@@ -551,7 +458,11 @@ describe.skipIf(!enabled)("OpenCode title generation live capture", () => {
 				200,
 			);
 			expect((await request("GET", `/session/${sessionId}`)).status).toBe(404);
-			const health = object(await (await fetch(`${url}/global/health`)).json());
+			const health = object(
+				await (
+					await fetch(`${url}/global/health`, { headers: authHeaders })
+				).json(),
+			);
 			const recording: OpenCodeRecording = {
 				name: "title-session-lifecycle",
 				recordedAt: new Date().toISOString(),
@@ -568,20 +479,7 @@ describe.skipIf(!enabled)("OpenCode title generation live capture", () => {
 			if (request)
 				await request("DELETE", `/session/${sessionId}`).catch(() => undefined);
 			await proxy?.stop();
-			if (child.exitCode === null && child.signalCode === null) {
-				child.kill("SIGTERM");
-				await Promise.race([
-					new Promise<void>((resolve) => child.once("exit", () => resolve())),
-					pause(3_000),
-				]);
-				if (child.exitCode === null && child.signalCode === null) {
-					child.kill("SIGKILL");
-					await new Promise<void>((resolve) =>
-						child.once("exit", () => resolve()),
-					);
-				}
-			}
-			rmSync(root, { recursive: true, force: true });
+			await Effect.runPromise(Scope.close(scope, Exit.void));
 		}
 	}, 60_000);
 });

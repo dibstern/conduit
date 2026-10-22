@@ -395,6 +395,8 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				| PersistenceStore
 				| DaemonConfigRefTag
 			>,
+			// Sent once before the first `read`, while it is still slow to resolve.
+			preview?: typeof read,
 		) =>
 			Stream.unwrap(
 				Effect.gen(function* () {
@@ -404,9 +406,12 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 						() => Effect.sync(() => listSubscribers.delete(subscriber)),
 					);
 					return Stream.concat(
-						Stream.succeed(undefined),
-						Stream.fromQueue(subscriber.changed),
-					).pipe(Stream.mapEffect(() => run(read)));
+						preview ? Stream.fromEffect(run(preview)) : Stream.empty,
+						Stream.concat(
+							Stream.succeed(undefined),
+							Stream.fromQueue(subscriber.changed),
+						).pipe(Stream.mapEffect(() => run(read))),
+					);
 				}),
 			);
 
@@ -440,15 +445,21 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 						return drafts.subscribe(request.key);
 					}),
 				),
-			SubscribeInstances: () =>
-				followList(
+			SubscribeInstances: () => {
+				const toWire = (
+					instances: Effect.Success<typeof discoverInstances>,
+				) => ({
+					instances: Array.from(instances),
+					providerCapabilities: PROVIDER_SESSION_CAPABILITIES,
+					providerTraits: PROVIDER_DRIVERS,
+				});
+				// Accounts show at once; Codex/Cursor availability probes can take seconds.
+				return followList(
 					"instances",
-					Effect.map(discoverInstances, (instances) => ({
-						instances: Array.from(instances),
-						providerCapabilities: PROVIDER_SESSION_CAPABILITIES,
-						providerTraits: PROVIDER_DRIVERS,
-					})),
-				),
+					Effect.map(discoverInstances, toWire),
+					Effect.map(getInstances, toWire),
+				);
+			},
 			SubscribeUsage: () =>
 				usage.readings.pipe(Stream.map((readings) => ({ readings }))),
 			SubscribeShell: (request) =>

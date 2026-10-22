@@ -780,7 +780,7 @@
 
 	{#if phone && phoneControls}
 		<!-- Keep the effort owner mounted so Ctrl+T also works with the sheet closed. -->
-		<ModelVariant bind:this={variantRef} onOpen={closePicker} variant="row">
+		<ModelVariant bind:this={variantRef} onOpen={closePicker} variant="row" wordLabel={parameters ? parameterEffortWord : undefined}>
 			{#snippet children(effortRow)}
 				{#snippet rows()}
 					<Button

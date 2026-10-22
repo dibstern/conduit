@@ -1,9 +1,10 @@
 import {
 	lstatSync,
 	mkdirSync,
+	readdirSync,
 	readlinkSync,
+	rmSync,
 	symlinkSync,
-	unlinkSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -56,7 +57,7 @@ export function codexAccountHome(
 	);
 }
 
-/** Named homes share rollouts and user configuration, never credentials or caches. */
+/** Named homes share conduit's own rollouts and ambient user configuration, never CLI history, credentials or caches. */
 export const prepareCodexAccount = (
 	account?: CodexHomeAccount,
 	configDir = DEFAULT_CONFIG_DIR,
@@ -77,11 +78,12 @@ export const prepareCodexAccount = (
 					inheritedEnv["CODEX_HOME"] || join(homedir(), ".codex"),
 				);
 				mkdirSync(home, { recursive: true, mode: 0o700 });
-				for (const name of ["sessions", "skills"])
-					mkdirSync(join(base, name), { recursive: true, mode: 0o700 });
+				const sessions = join(configDir, "codex", "sessions");
+				mkdirSync(sessions, { recursive: true, mode: 0o700 });
+				mkdirSync(join(base, "skills"), { recursive: true, mode: 0o700 });
 				for (const name of ["sessions", "config.toml", "skills", "AGENTS.md"]) {
 					const path = join(home, name);
-					const target = join(base, name);
+					const target = name === "sessions" ? sessions : join(base, name);
 					const existing = lstatSync(path, { throwIfNoEntry: false });
 					if (existing && !existing.isSymbolicLink()) {
 						log.warn("codex.shared_path_conflict", {
@@ -93,7 +95,28 @@ export const prepareCodexAccount = (
 					}
 					if (existing && resolve(dirname(path), readlinkSync(path)) === target)
 						continue;
-					if (existing) unlinkSync(path);
+					if (existing) {
+						// force: a concurrent prepare of the same account may relink first.
+						rmSync(path, { force: true });
+						if (name === "sessions") {
+							const removedStateFiles: string[] = [];
+							for (const entry of readdirSync(home, { withFileTypes: true })) {
+								if (
+									entry.isFile() &&
+									/^state_.*\.sqlite(?:-wal|-shm)?$/.test(entry.name)
+								) {
+									rmSync(join(home, entry.name), { force: true });
+									removedStateFiles.push(entry.name);
+								}
+							}
+							log.info("codex.sessions_relinked", {
+								accountId: account.id,
+								path,
+								target,
+								removedStateFiles,
+							});
+						}
+					}
 					try {
 						symlinkSync(
 							target,

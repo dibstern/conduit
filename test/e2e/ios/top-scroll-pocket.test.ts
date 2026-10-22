@@ -58,6 +58,9 @@ const GROW = `const filler = document.createElement("div"); filler.style.height 
 // Scrolled up, the sticky "scroll to bottom" button renders; that is what
 // made WebKit read the box painted over the strip.
 const SCROLL_UP = `document.getElementById("messages").scrollTop = 1500; ${SETTLE} if (getComputedStyle(document.getElementById("scroll-btn")).display === "none") throw new Error("still following"); return "detached";`;
+// Swaps the theme in place; theme-color follows --color-bg as initTheme() would set it.
+// Returns the new --color-bg, which the status bar must take on.
+const LIGHT = `document.documentElement.classList.replace("dark-theme", "light-theme"); const bg = getComputedStyle(document.documentElement).getPropertyValue("--color-bg").trim(); const hex = Object.assign(document.createElement("canvas").getContext("2d"), { fillStyle: bg }).fillStyle; ${q('meta[name="theme-color"]')}.content = bg; return hex;`;
 const COLLAPSE = `document.getElementById("messages").dispatchEvent(new WheelEvent("wheel", { deltaY: 120 })); ${SETTLE} if (document.getElementById("session-bar").dataset.collapsed !== "true") throw new Error("island did not collapse"); return "collapsed";`;
 
 const CASES: Record<string, string[]> = {
@@ -86,6 +89,15 @@ const CASES: Record<string, string[]> = {
 		`settings-menu-open=${menu("#list-bar-more", true)}`,
 		`settings-open=${settings(`${q('[data-testid="list-overflow-settings"]')}.click();`, true)}`,
 		`settings-close=${settings(`${q('[data-testid="settings-close-btn"]')}.click();`, false)}`,
+	],
+	// The status bar keeps the colour sampled when a fullscreen dialog opened
+	// unless the dialog has its own top-edge strip (Dialog.svelte).
+	"settings, theme switched while open": [
+		`ready=${READY}`,
+		`back=${click("#session-bar-back")}`,
+		`settings-menu-open=${menu("#list-bar-more", true)}`,
+		`settings-open=${settings(`${q('[data-testid="list-overflow-settings"]')}.click();`, true)}`,
+		`light=${LIGHT}`,
 	],
 	// Proves the probe can see the blur: without the strip it must show.
 	control: [
@@ -199,6 +211,13 @@ describe.skipIf(!RUN)("iOS top scroll pocket (WKWebView probe app)", () => {
 			);
 			const labels = steps.map((step) => step.slice(0, step.indexOf("=")));
 			expect(Object.keys(result.timelines)).toEqual(labels);
+			const light = result.lines.find((line) =>
+				line.startsWith("PROBE light "),
+			);
+			if (light)
+				expect(light, "status bar colour after the theme switch").toContain(
+					`c=${light.match(/js=(\S+)/)?.[1]}/1.00`,
+				);
 			if (name === "control")
 				expect(result.timelines["menu-close"]).toContain("S");
 			else

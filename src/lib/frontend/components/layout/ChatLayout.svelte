@@ -609,7 +609,7 @@
 		scroll-to-bottom button), and then it hides the strip. Guarded by
 		test/e2e/specs/phone-top-edge.spec.ts and test/e2e/ios/top-scroll-pocket.test.ts.
 	-->
-	<div id="compact-top-edge" aria-hidden="true"></div>
+	<div id="compact-top-edge" class="top-edge-strip" aria-hidden="true"></div>
 
 	<!-- Fixed and full-viewport, so it lives outside #app: the phone list screen
 	     hides #app but still needs to show the connection state. -->

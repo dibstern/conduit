@@ -157,6 +157,29 @@ export const sessionPresentationHandlers: StepHandler[] = [
 			await world.page.mouse.wheel(0, sign * Number(match[2]));
 		},
 	},
+	// DEBUG-touch7: temporary real-touch swipe, remove after diagnosis.
+	{
+		name: "DEBUG-touch7 swipe transcript",
+		match:
+			/^DEBUG I swipe the transcript towards (older|newer) by ([0-9]+) pixels(?: at speed ([0-9]+))?$/,
+		run: async ({ world, match }) => {
+			const box = await world.page.locator("#messages").boundingBox();
+			if (!box) throw new Error("no #messages box");
+			const cdp = await world.page.context().newCDPSession(world.page);
+			await cdp.send("Emulation.setTouchEmulationEnabled", {
+				enabled: true,
+				maxTouchPoints: 1,
+			});
+			await cdp.send("Input.synthesizeScrollGesture", {
+				x: box.x + box.width / 2,
+				y: box.y + box.height / 2,
+				yDistance: (match[1] === "older" ? 1 : -1) * Number(match[2]),
+				gestureSourceType: "touch",
+				speed: Number(match[3] ?? 800),
+			});
+			await world.page.waitForTimeout(400);
+		},
+	},
 	{
 		// A real touch scroll, not a wheel: Chromium drops a scrollTop write made
 		// mid-touch-scroll, which a wheel never shows.

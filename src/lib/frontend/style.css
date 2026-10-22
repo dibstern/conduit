@@ -105,6 +105,9 @@
 	--shadow-settings-segment: 0 1px 2px rgba(0, 0, 0, 0.2);
 	--shadow-settings-dialog: 0 24px 60px rgba(0, 0, 0, 0.3);
 	--shadow-popover: 0 22px 60px rgba(0, 0, 0, 0.45);
+	/* Pulled in so none of it reaches above the island: the status bar takes the
+	   page's top-edge colour, so any shadow up there reads as a seam under it. */
+	--shadow-island: 0 24px 40px -16px rgba(0, 0, 0, 0.45);
 	--shadow-composer: 0 0 0 1px #2b2b31;
 
 	--color-thinking: #a1a1aa;
@@ -327,6 +330,7 @@
 	--color-settings-icon: #9b9ba4;
 	--shadow-settings-dialog: 0 24px 60px rgba(0, 0, 0, 0.1);
 	--shadow-popover: 0 22px 60px rgba(0, 0, 0, 0.14);
+	--shadow-island: 0 24px 40px -16px rgba(0, 0, 0, 0.14);
 	--shadow-settings-segment:
 		0 1px 2px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
 	--shadow-composer:
@@ -807,7 +811,7 @@ body:has(dialog:modal) {
 	backdrop-filter: blur(14px);
 	box-shadow:
 		0 0 0 1px var(--color-border-chip),
-		var(--shadow-popover);
+		var(--shadow-island);
 }
 
 #app.phone-session #session-bar[data-collapsed="true"] #session-bar-title-row {
@@ -1000,16 +1004,13 @@ body:has(dialog:modal) {
 	}
 }
 
-#compact-top-edge {
-	display: none;
-}
-
-/* See the comment on the element in ChatLayout.svelte. `pointer-events: none`
-   is safe: WebKit's sampler first hit-tests ignoring pointer-events. z-index 1
-   paints it over #app, which comes later and would otherwise be hit first;
-   #session-chrome (z-dropdown) still paints over it. */
-#layout.layout-compact #compact-top-edge {
-	display: block;
+/* The phone top edge iOS 26 samples for the status bar colour: see the comment
+   on #compact-top-edge in ChatLayout.svelte. Fullscreen dialogs carry their own
+   (Dialog.svelte). `pointer-events: none` is safe: WebKit's sampler first
+   hit-tests ignoring pointer-events. z-index 1 paints it over #app, which comes
+   later and would otherwise be hit first; #session-chrome (z-dropdown) still
+   paints over it. */
+.top-edge-strip {
 	position: fixed;
 	top: 0;
 	left: 0;
@@ -1018,6 +1019,10 @@ body:has(dialog:modal) {
 	z-index: 1;
 	background: var(--color-bg);
 	pointer-events: none;
+}
+
+#layout:not(.layout-compact) #compact-top-edge {
+	display: none;
 }
 
 /* #app is hidden on the phone list, so stay under its icon buttons (positioned), whose

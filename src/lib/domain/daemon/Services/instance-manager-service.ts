@@ -663,31 +663,36 @@ export const discoverInstances = Effect.gen(function* () {
 			unavailableCode?: "auth_required" | "codex_version_unsupported";
 		}
 	>();
-	for (const account of accounts) {
-		const discover =
-			account.driver === "codex"
-				? discoverCodexEffect(account, undefined, configDir)
-				: account.driver === "cursor"
-					? discoverCursorEffect(undefined, account)
-					: undefined;
-		if (!discover) continue;
-		const result = yield* Effect.result(discover);
-		availability.set(
-			account.id,
-			result._tag === "Success"
-				? { available: true }
-				: {
-						available: false,
-						unavailableReason:
-							result.failure.cause instanceof Error
-								? result.failure.cause.message
-								: "Provider discovery failed",
-						...(result.failure.code
-							? { unavailableCode: result.failure.code }
-							: {}),
-					},
-		);
-	}
+	yield* Effect.forEach(
+		accounts,
+		(account) =>
+			Effect.gen(function* () {
+				const discover =
+					account.driver === "codex"
+						? discoverCodexEffect(account, undefined, configDir)
+						: account.driver === "cursor"
+							? discoverCursorEffect(undefined, account)
+							: undefined;
+				if (!discover) return;
+				const result = yield* Effect.result(discover);
+				availability.set(
+					account.id,
+					result._tag === "Success"
+						? { available: true }
+						: {
+								available: false,
+								unavailableReason:
+									result.failure.cause instanceof Error
+										? result.failure.cause.message
+										: "Provider discovery failed",
+								...(result.failure.code
+									? { unavailableCode: result.failure.code }
+									: {}),
+							},
+				);
+			}),
+		{ concurrency: "unbounded", discard: true },
+	);
 	return instances.map((instance) => ({
 		...instance,
 		...availability.get(instance.id),
