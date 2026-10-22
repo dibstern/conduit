@@ -155,6 +155,7 @@
 		"highlight.js": "^11.11.1",
 		"http-server": "^14.1.1",
 		"mermaid": "^11.12.3",
+		"opencode-ai": "1.19.1",
 		"pixelmatch": "^7.1.0",
 		"pngjs": "^7.0.0",
 		"sharp": "^0.34.5",

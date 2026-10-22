@@ -291,7 +291,7 @@ or short successful spans outside the debugged session indicate broken request
 logging or file sampling. Missing short spans for the debugged session indicate
 broken session tracing.
 
-`opencode-real-lifecycle.test.ts` runs the real `opencode` (PATH or `CONDUIT_TEST_REAL_OPENCODE`; skipped unless it
+`opencode-real-lifecycle.test.ts` runs the pinned `opencode-ai` executable (`CONDUIT_TEST_REAL_OPENCODE` overrides it; skipped unless it
 matches `@opencode-ai/sdk`) behind a logging proxy, never prompting: lazy spawn, one process and `/global/event` stream
 for two projects, per-project routing, idle stop. Evidence: `test-results/pa3r-10-real-lifecycle.json`.
 
