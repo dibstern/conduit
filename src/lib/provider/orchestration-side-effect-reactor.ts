@@ -1268,18 +1268,31 @@ export class ProviderSideEffectReactor {
 										}),
 								),
 							);
+						const failure = (cause: unknown) =>
+							new ProviderInstanceFailure({
+								providerId: row.provider_id,
+								operation: row.effect_type,
+								cause,
+							});
+						// The question lives in the session's workspace, which a fork may not share with the relay.
+						const session = yield* Effect.tryPromise({
+							try: () => client.session.get(row.session_id),
+							catch: failure,
+						});
+						if (!session.directory)
+							return yield* Effect.fail(
+								failure(
+									`OpenCode session "${row.session_id}" has no stored directory`,
+								),
+							);
+						const directory = session.directory;
 						yield* Effect.tryPromise({
 							try: () =>
 								client.question.reject(
 									payload.nativeRequestId ?? payload.requestId,
-									call?.workspaceRoot,
+									directory,
 								),
-							catch: (cause) =>
-								new ProviderInstanceFailure({
-									providerId: row.provider_id,
-									operation: row.effect_type,
-									cause,
-								}),
+							catch: failure,
 						});
 						return REACTOR_COMPLETED_RESULT;
 					}

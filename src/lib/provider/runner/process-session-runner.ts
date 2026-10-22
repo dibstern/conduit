@@ -12,6 +12,7 @@ import {
 	Fiber,
 	FiberSet,
 	Option,
+	Schedule,
 	Semaphore,
 } from "effect";
 import { SqlClient } from "effect/sql";
@@ -30,6 +31,7 @@ import { createLogger } from "../../logger.js";
 import { ClaudeEventPersistEffectTag } from "../../persistence/effect/claude-event-persist-effect.js";
 import { makeRetireReplacedProcessPrompts } from "../../persistence/effect/retire-pending-prompts.js";
 import { isRecord } from "../../utils.js";
+import { STOP_ABORT_WAIT_MS } from "../orchestration-command-contracts.js";
 import {
 	type RunSettlementOwner,
 	sessionRunOwnersQuery,
@@ -719,6 +721,25 @@ export const makeProcessSessionRunner = (
 				yield* releaseEntryWaiters(entry, Cause.fail(failure));
 				log.warn(failure.message);
 			});
+		const retireOrphan = (entry: RunnerChild) =>
+			Effect.gen(function* () {
+				const ownsEntry = () =>
+					entry.candidate
+						? candidates.has(entry)
+						: children.get(entry.sessionId) === entry;
+				if (closing || !ownsEntry()) return;
+				yield* stop(entry).pipe(
+					Effect.ensuring(Deferred.succeed(entry.drained, undefined)),
+				);
+				if (closing || !ownsEntry()) return;
+				if (entry.pid !== undefined && runnerPidAlive(entry.pid))
+					return yield* quarantine(
+						entry,
+						runnerFailure("recover runner", "Abandoned runner survived stop"),
+					);
+				evict(entry.sessionId, entry);
+				candidates.delete(entry);
+			});
 		const detach = (entry: RunnerChild) => {
 			entry.connection?.destroy();
 			entry.child?.unref();
@@ -911,6 +932,7 @@ export const makeProcessSessionRunner = (
 				const workspaceRoot =
 					entry.launch?.workspaceRoot ??
 					(yield* deps.projectRootForSession(sessionId)) ??
+					entry.registrationRoot ??
 					// Abandoned runners need only an identity hello before retirement.
 					(entry.candidate ? configDir : undefined);
 				if (!workspaceRoot)
@@ -1787,6 +1809,28 @@ export const makeProcessSessionRunner = (
 									),
 								))[0]
 							: undefined;
+						const outstandingEnd =
+							sql && !persisted
+								? (yield* sql<{
+										command_id: string;
+										project_key: string;
+									}>`SELECT command_id, project_key FROM provider_command_outbox
+										WHERE session_id = ${registration.sessionId}
+											AND provider_process_id = ${registration.runnerId}
+											AND effect_type = 'end_session'
+											AND status IN ('pending', 'running', 'retryable_failed')
+										ORDER BY request_sequence LIMIT 1`.pipe(
+										Effect.mapError((cause) =>
+											runnerFailure("recover runner cleanup", cause),
+										),
+									))[0]
+								: undefined;
+						const cleanupRoot = outstandingEnd
+							? yield* deps.projectRootForSession(
+									registration.sessionId,
+									outstandingEnd.project_key,
+								)
+							: undefined;
 						if (
 							!deps.recoveryForSession &&
 							persisted &&
@@ -1805,13 +1849,17 @@ export const makeProcessSessionRunner = (
 								: recoveryIngestion._tag === "Some"
 									? recoveryIngestion.value
 									: yield* ingestionForSession(registration.sessionId));
-						// Draft warms are not durable; verify their identity before stopping them.
+						// A committed End still owns its exact runner after session deletion.
+						// Other orphaned warms need only an identity hello before stopping.
 						let abandoned =
-							(sql !== undefined && !persisted) ||
+							(sql !== undefined && !persisted && !outstandingEnd) ||
 							registration.role === "candidate" ||
 							children.has(registration.sessionId);
 						const entry: RunnerChild = {
 							...registration,
+							...(outstandingEnd
+								? { registrationRoot: cleanupRoot ?? configDir }
+								: {}),
 							verified: false,
 							candidate: abandoned,
 							stopping: false,
@@ -1851,6 +1899,29 @@ export const makeProcessSessionRunner = (
 								else children.set(registration.sessionId, entry);
 							}),
 						);
+						if (sql && outstandingEnd && !abandoned)
+							runFork(
+								sql<{ pending: number }>`SELECT EXISTS (
+									SELECT 1 FROM provider_command_outbox
+									WHERE command_id = ${outstandingEnd.command_id}
+										AND project_key = ${outstandingEnd.project_key}
+										AND session_id = ${registration.sessionId}
+										AND provider_process_id = ${registration.runnerId}
+										AND effect_type = 'end_session'
+										AND status IN ('pending', 'running', 'retryable_failed')
+								) AS pending`.pipe(
+									Effect.map(([row]) => row?.pending === 1),
+									// A failed read provides no terminal proof. The grace still bounds it.
+									Effect.catch(() => Effect.succeed(true)),
+									Effect.repeat({
+										while: (pending) => pending,
+										schedule: Schedule.spaced("100 millis"),
+									}),
+									// Give the captured End the same grace as native control delivery.
+									Effect.timeoutOption(STOP_ABORT_WAIT_MS),
+									Effect.andThen(retireOrphan(entry)),
+								),
+							);
 						const ensureRecovering = Effect.suspend(() =>
 							!closing &&
 							!entry.stopping &&
@@ -1983,20 +2054,10 @@ export const makeProcessSessionRunner = (
 							if (abandoned) {
 								entry.recovering = false;
 								yield* Deferred.succeed(entry.ready, connected.success);
-								yield* Effect.suspend(() =>
-									closing ? Effect.void : stop(entry),
-								).pipe(
+								// Shutdown skips retirement; waiters must still be released.
+								yield* retireOrphan(entry).pipe(
 									Effect.ensuring(Deferred.succeed(entry.drained, undefined)),
 								);
-								if (runnerPidAlive(registration.pid))
-									return yield* quarantine(
-										entry,
-										runnerFailure(
-											"recover runner",
-											"Abandoned runner survived stop",
-										),
-									);
-								candidates.delete(entry);
 								return;
 							}
 							const commands =

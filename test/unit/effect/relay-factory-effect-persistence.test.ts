@@ -50,6 +50,7 @@ vi.mock("../../../src/lib/relay/relay-stack.js", () => ({
 
 const NoopProviderAdaptersLive = Layer.sync(ProviderAdapters, () => ({
 	registry: new ProviderRegistry(),
+	shutdown: Effect.void,
 	recoveryProjects: [],
 	registerProject: () => Effect.void,
 	projectFailed: () => Effect.void,

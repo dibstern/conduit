@@ -81,6 +81,10 @@ export const makeProviderAdaptersLive = (
 			const instances = yield* OpenCodeInstancesTag;
 			const activity = yield* SessionActivityTag;
 			const registry = new ProviderRegistry();
+			const shutdown = yield* Effect.cached(
+				Effect.suspend(() => registry.shutdownAllEffect()),
+			);
+			yield* Effect.addFinalizer(() => shutdown);
 			// Registering a replacement must wait for the old borrow's detach.
 			const projectBorrows = yield* Semaphore.make(1);
 			let recovered = false;
@@ -406,7 +410,6 @@ export const makeProviderAdaptersLive = (
 					{ read, state },
 				),
 			);
-			yield* Effect.addFinalizer(() => registry.shutdownAllEffect());
 			const configuredAccounts = yield* accounts.snapshot;
 			// A crash can leave admitted work without a runner registration, even
 			// after its account was removed. Those projects also lend recovery state.
@@ -474,6 +477,7 @@ export const makeProviderAdaptersLive = (
 			);
 			return {
 				registry,
+				shutdown,
 				recoveryProjects,
 				recover: Fiber.join(recovery),
 				projectFailed,

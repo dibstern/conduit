@@ -356,7 +356,7 @@ export const DaemonWiringLive: Layer.Layer<
 		const persistence = yield* ConfigPersistenceTag;
 		const adapters = yield* ProviderAdapters;
 		// Drain native terminals while project borrows and their sinks remain live.
-		yield* Effect.addFinalizer(() => adapters.registry.shutdownAllEffect());
+		yield* Effect.addFinalizer(() => adapters.shutdown);
 		const sub = yield* PubSub.subscribe(bus);
 
 		yield* Effect.forkScoped(

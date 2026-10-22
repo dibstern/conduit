@@ -1868,6 +1868,7 @@ function query(params: {
 					holdBeforeResult?: boolean;
 					failAfterTools?: boolean;
 				};
+				interruptibleTurn = turn.holdBeforeResult === true;
 				const tools: readonly {
 					name: string;
 					input: Record<string, unknown>;
@@ -1937,7 +1938,7 @@ function query(params: {
 					if (!optionsFile)
 						throw new Error("Missing workspace hint fixture gate");
 					const release = join(dirname(optionsFile), "workspace-hint-release");
-					while (!existsSync(release) && !closed)
+					while (!existsSync(release) && !closed && !taskTurnInterrupted)
 						await new Promise<void>((done) => setTimeout(done, 20));
 					if (closed) return;
 				}
@@ -2041,6 +2042,7 @@ function query(params: {
 			// A long Bash call. With a proof directory it stays running until the
 			// spec releases its result; without one it completes straight away.
 			if (request.startsWith("tool-long-")) {
+				interruptibleTurn = true;
 				const toolUseID = randomUUID();
 				yield stream(sessionId, {
 					type: "content_block_start",
@@ -2054,7 +2056,12 @@ function query(params: {
 				});
 				yield stream(sessionId, { type: "content_block_stop", index: 1 });
 				const release = proof && join(dirname(proof), "release-tool-long");
-				while (release && !existsSync(release) && !closed)
+				while (
+					release &&
+					!existsSync(release) &&
+					!closed &&
+					!taskTurnInterrupted
+				)
 					await new Promise<void>((done) => setTimeout(done, 20));
 				if (closed) return;
 				yield {
@@ -2068,8 +2075,8 @@ function query(params: {
 							{
 								type: "tool_result",
 								tool_use_id: toolUseID,
-								content: LONG_RESULT,
-								is_error: false,
+								content: taskTurnInterrupted ? "Tool interrupted" : LONG_RESULT,
+								is_error: taskTurnInterrupted,
 							},
 						],
 					},
@@ -2309,17 +2316,24 @@ function query(params: {
 					queryId,
 					at: process.hrtime.bigint().toString(),
 				});
+			// Interrupting a held tool ends through a native result, independently
+			// of the interrupt acknowledgement, just like the earlier held turns.
+			const interrupted = taskTurnInterrupted;
+			taskTurnInterrupted = false;
+			interruptibleTurn = false;
 			yield {
 				type: "result",
-				subtype: "success",
+				subtype: interrupted ? "error_during_execution" : "success",
 				uuid: randomUUID(),
 				session_id: sessionId,
-				is_error: false,
+				is_error: interrupted,
 				duration_ms: 0,
 				duration_api_ms: 0,
 				num_turns: 1,
-				result: chunks.join(""),
-				stop_reason: "end_turn",
+				...(interrupted
+					? { errors: ["Execution ended"], user_message_uuid: userUuid }
+					: { result: chunks.join("") }),
+				stop_reason: interrupted ? null : "end_turn",
 				total_cost_usd: 0,
 				usage: {
 					input_tokens: 1,

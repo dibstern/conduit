@@ -108,6 +108,7 @@ describe("RelayFactoryTag", () => {
 	const configLayer = Layer.mergeAll(
 		Layer.sync(ProviderAdapters, () => ({
 			registry: new ProviderRegistry(),
+			shutdown: Effect.void,
 			recoveryProjects: [],
 			registerProject: () => Effect.void,
 			projectFailed: () => Effect.void,

@@ -37,6 +37,8 @@ export class ProviderAdapters extends Context.Service<
 	ProviderAdapters,
 	{
 		readonly registry: ProviderRegistry;
+		/** Shared by early terminal drain and the owner's acquisition finalizer. */
+		readonly shutdown: Effect.Effect<void>;
 		/** Startup relays that must lend their services before recovery can run. */
 		readonly recoveryProjects: readonly string[];
 		readonly registerProject: (

@@ -132,7 +132,7 @@ export async function createTestProjectRelay(config: ProjectRelayConfig) {
 			stop: async () => {
 				try {
 					await runtime.runPromise(
-						Context.get(context, ProviderAdapters).registry.shutdownAllEffect(),
+						Context.get(context, ProviderAdapters).shutdown,
 					);
 					await relay.stop();
 				} finally {
@@ -167,7 +167,7 @@ export async function createTestRelayStack(config: RelayStackConfig) {
 			stop: async () => {
 				try {
 					await runtime.runPromise(
-						Context.get(context, ProviderAdapters).registry.shutdownAllEffect(),
+						Context.get(context, ProviderAdapters).shutdown,
 					);
 					await stack.stop();
 				} finally {
