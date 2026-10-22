@@ -22,11 +22,17 @@ const meta = {
 	tags: ["autodocs"],
 	parameters: { layout: "fullscreen" },
 	beforeEach: () => {
+		const groupsOpen = { ...uiState.sessionGroupsOpen };
+		const storedGroups = (["pinned", "running", "idle"] as const).map(
+			(group) =>
+				[group, localStorage.getItem(`session-group-${group}-open`)] as const,
+		);
 		uiState.sidebarCollapsed = false;
 		uiState.sidebarWidth = 300;
 		uiState.selectMode = false;
 		uiState.settledShelfOpen = false;
 		uiState.snoozedShelfOpen = false;
+		uiState.sessionGroupsOpen = { pinned: true, running: true, idle: true };
 		sessionViewState.compact = false;
 		featureFlags.debug = false;
 		instanceState.instances = [];
@@ -43,6 +49,12 @@ const meta = {
 		applySessionChange({ _tag: "snapshot", rows: [], sequence: Date.now() });
 		applySessionChange({ _tag: "synchronized" });
 		return () => {
+			uiState.sessionGroupsOpen = groupsOpen;
+			for (const [group, open] of storedGroups) {
+				const key = `session-group-${group}-open`;
+				if (open === null) localStorage.removeItem(key);
+				else localStorage.setItem(key, open);
+			}
 			uiState.selectMode = false;
 			sessionViewState.compact = false;
 			featureFlags.debug = false;
