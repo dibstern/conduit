@@ -329,10 +329,10 @@
 	function followLatest() { picked = null; folded = false; }
 	const replies = $derived(messageReplies(sessionId));
 	// Reply toggles: a message already replied to in the draft takes its reference back out.
-	function messageReference(pin: Pick<SurfacePin, "label" | "glyph" | "time" | "part">, ordinal: number, excerpt?: string): ReplyReference {
-		return { kind: excerpt === undefined ? "message" : "excerpt", ordinal, category: pin.label, glyph: pin.glyph, time: pin.time, text: excerpt ?? pin.part.rawText };
+	function messageReference(pin: Pick<SurfacePin, "label" | "glyph" | "time" | "part" | "builtinCategory">, ordinal: number, excerpt?: string): ReplyReference {
+		return { kind: excerpt === undefined ? "message" : "excerpt", ordinal, category: pin.label, builtinCategory: pin.builtinCategory, glyph: pin.glyph, time: pin.time, text: excerpt ?? pin.part.rawText };
 	}
-	function replyTo(pin: Pick<SurfacePin, "number" | "label" | "glyph" | "time" | "part">, excerpt?: string) {
+	function replyTo(pin: Pick<SurfacePin, "number" | "label" | "glyph" | "time" | "part" | "builtinCategory">, excerpt?: string) {
 		if (!sessionId || pin.number === undefined) return;
 		const replied = excerpt === undefined ? replies.get(pin.number) : undefined;
 		if (replied !== undefined) removeComposerReference(sessionId, replied);
@@ -623,8 +623,9 @@
 				{#each logMounted ? segment.activity : ticker as part, index (part.uuid)}
 					{@const i = logMounted ? index : earlierCount + index}
 					{@const latestLiveStep = live && i === segment.activity.length - 1}
+					{@const category = judged && part.type === "assistant" ? surface.messages.find((message) => message.part.uuid === part.uuid) : undefined}
 					<div data-log-part={part.uuid} hidden={!expanded && i < earlierCount} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
-						<ActivityRow {part} {liveTasks} {taskListedAt} runningTasks={running} live={latestLiveStep} duration={durations?.[i]} highlight={part.uuid === focusUuid} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} />
+						<ActivityRow {part} {liveTasks} {taskListedAt} runningTasks={running} live={latestLiveStep} duration={durations?.[i]} highlight={part.uuid === focusUuid} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} messageCategory={category?.builtinCategory ? category : undefined} />
 						{#if judged && expanded && part.type === "assistant"}
 							{@const pin = surface.messages.find((message) => message.part.uuid === part.uuid)}
 							{#if pin}

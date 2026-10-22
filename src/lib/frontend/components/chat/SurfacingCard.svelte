@@ -179,7 +179,7 @@
 {#if view.card}
 	{@const card = view.card}
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-	<section bind:this={cardEl} class="surfacing-msg-card" class:ask={card.category === "ask" && !card.pending} style:--surface-colour={card.colour} data-testid="surfacing-msg-card" data-part={card.part.uuid} data-ordinal={card.number} aria-label={card.name} tabindex="-1" onkeydown={oncommand}>
+	<section bind:this={cardEl} class="surfacing-msg-card" class:ask={card.category === "ask" && !card.pending} style:--surface-colour={card.colour} style:--category-tint={card.builtinCategory ? "14%" : undefined} data-testid="surfacing-msg-card" data-part={card.part.uuid} data-ordinal={card.number} aria-label={card.name} tabindex="-1" onkeydown={oncommand}>
 		<div class="card-head" data-surfacing-region="card-head">
 			<span class="type-label"><span class="glyph">{card.glyph}</span> {card.label}</span>
 			{#if view.openAsk?.uuid === card.part.uuid}<span class="needs-reply">Needs reply</span>{/if}
@@ -215,7 +215,7 @@
 			{@const seen = group.members.every((member) => member.read === true) && !group.members.some((member) => member.part.uuid === view.openAsk?.uuid)}
 			{@const unread = group.members.some((member) => member.read === false && !member.pending && member !== view.card && member.part.uuid !== view.openAsk?.uuid)}
 			<Button variant="ghost" size="content" hoverFill="none" class="absolute h-[32px] rounded-full {group.row ? 'bottom-[27px] max-md:bottom-[43px]' : 'bottom-[3px] max-md:bottom-[5px]'}" style="left:{group.left}px;width:{group.width}px;--pin-tick:{group.tick}px" data-x={group.x} data-surface-part={group.leader.part.uuid} data-testid={group.members.length > 1 ? "surfacing-group" : `surfacing-pin-${pin.number ?? `pending-${pin.part.uuid}`}`} data-row={group.row} data-group-members={group.members.map((member) => member.number ?? "pending").join(",")} data-group-leader={group.leader.number} data-cited={cited} ariaLabel={group.members.length > 1 ? `Group of ${group.members.length}, led by #${group.leader.number} ${group.leader.label}${current ? `; showing ${pin.name}` : ""}` : pin.name} aria-pressed={current} onclick={(event) => { if (event.detail === 0 || !suppressClick) pickGroup(group); }}>
-				<span class="pin-chip" class:upper={group.row === 1} class:current class:cited class:open-ask={view.openAsk?.uuid === pin.part.uuid} class:pending={pin.pending} class:below={view.belowLevel && view.card === pin} class:seen={seen} style:--surface-colour={pin.colour} data-number={pin.number} data-category={pin.category}><span class="glyph">{pin.glyph}</span>{pin.number ?? ""}{#if pin.part.surfacingMark}<sup class="mark-glyph {pin.part.surfacingMark.direction ?? 'raise'}">{MARK_GLYPHS[pin.part.surfacingMark.direction ?? "raise"]}</sup>{/if}{#if group.members.length > 1}<small>+{group.members.length - 1}</small>{/if}{#if unread}<i class="unread-dot"></i>{/if}</span>
+				<span class="pin-chip" class:builtin={!!pin.builtinCategory} class:upper={group.row === 1} class:current class:cited class:open-ask={view.openAsk?.uuid === pin.part.uuid} class:pending={pin.pending} class:below={view.belowLevel && view.card === pin} class:seen={seen} style:--surface-colour={pin.colour} data-number={pin.number} data-category={pin.category}><span class="glyph">{pin.glyph}</span>{pin.number ?? ""}{#if pin.part.surfacingMark}<sup class="mark-glyph {pin.part.surfacingMark.direction ?? 'raise'}">{MARK_GLYPHS[pin.part.surfacingMark.direction ?? "raise"]}</sup>{/if}{#if group.members.length > 1}<small>+{group.members.length - 1}</small>{/if}{#if unread}<i class="unread-dot"></i>{/if}</span>
 			</Button>
 		{/each}
 		{/if}
@@ -249,7 +249,7 @@
 	.surfacing-msg-card.ask { margin-top:10px; padding:11px 13px 12px; box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--color-status-ask) 40%,transparent); }
 	.ask .card-body { margin-top:6px; font-size:14px; line-height:1.55; }
 	.card-head { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
-	.type-label,.needs-reply { padding:2px 7px; border-radius:999px; font-size:11px; font-weight:600; background:color-mix(in srgb,var(--surface-colour,var(--color-text-dimmer)) 16%,transparent); color:var(--surface-colour,var(--color-text)); }
+	.type-label,.needs-reply { padding:2px 7px; border-radius:999px; font-size:11px; font-weight:600; background:color-mix(in srgb,var(--surface-colour,var(--color-text-dimmer)) var(--category-tint,16%),transparent); color:var(--surface-colour,var(--color-text)); }
 	.needs-reply { color:var(--color-status-ask); background:color-mix(in srgb,var(--color-status-ask) 16%,transparent); }
 	.card-at { margin-left:auto; font:11.5px var(--font-mono); color:var(--color-text-muted); white-space:nowrap; }
 	.read-toggle { display:inline-flex; align-items:center; gap:5px; min-height:32px; font-size:12px; color:var(--color-text-muted); cursor:pointer; }
@@ -273,13 +273,17 @@
 	.current { background:var(--surface-colour,var(--color-text)); color:var(--color-bg); }
 	.current .glyph,.current small { color:inherit; }
 	.cited { translate:0 -4px; box-shadow:0 0 0 1.5px var(--color-accent),0 4px 10px rgba(var(--shadow-rgb),.2); color:var(--color-text); }
+	.current.builtin.cited:not(.below) { color:var(--color-bg); }
 	.seen:not(.current) { background:color-mix(in srgb,var(--color-chip) 55%,transparent); color:var(--color-text-dimmer); }
 	.seen:not(.current) .glyph { opacity:.7; }
+	.seen.builtin:not(.current) { background:color-mix(in srgb,var(--surface-colour) 14%,var(--color-turn-bg)); }
+	.seen.builtin:not(.current) .glyph { opacity:1; }
 	.open-ask:not(.current) { background:color-mix(in srgb,var(--color-status-ask) 14%,var(--color-turn-bg)); box-shadow:inset 0 0 0 1.5px var(--color-status-ask); color:var(--color-status-ask); }
 	.open-ask::before { content:""; position:absolute; inset:-4px; border-radius:999px; box-shadow:0 0 0 1.5px color-mix(in srgb,var(--color-status-ask) 45%,transparent); animation:ask-pulse 1.6s ease-in-out infinite; }
 	.pending { background:none; outline:1px dashed var(--color-accent); outline-offset:-1px; color:var(--color-accent); }
 	.below { background:var(--color-turn-bg); outline:1px dashed var(--color-text); outline-offset:-1px; color:var(--color-text); }
 	.below .glyph { color:var(--color-text-dimmer); }
+	.below.builtin .glyph { color:var(--surface-colour); }
 	.unread-dot { position:absolute; top:-2px; right:-2px; width:7px; height:7px; border-radius:50%; background:var(--color-accent); box-shadow:0 0 0 1.5px var(--color-turn-bg); }
 	.card-caret { position:absolute; top:-6px; width:12px; height:12px; background:var(--color-bg); transform:translateX(-50%) rotate(45deg); }
 	.surface-strip { position:relative; }

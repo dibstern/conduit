@@ -103,7 +103,7 @@
 </script>
 
 {#snippet citationButton(message: SurfaceTurn["numbers"][number], props: Record<string, unknown>)}
-	<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="recap-cite" data-testid="surfacing-recap-cite-{message.number}" data-unread={!plainCitations && message.part.surfacingRead === false} data-followed={!plainCitations && followed.includes(message.number)} data-ask={!plainCitations && view.openAsk?.uuid === message.part.uuid} ariaLabel={`#${message.number}${!plainCitations && message.part.surfacingRead === false ? ", unread" : ""}`} onpointerenter={() => onhover?.(message.number)} onpointerleave={() => onhover?.(null)} onfocus={() => onhover?.(message.number)} onblur={() => onhover?.(null)}>#{message.number}</Button>
+	<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="recap-cite" style={!plainCitations && message.colour ? `--surface-colour:${message.colour}` : undefined} data-category-colour={!plainCitations && !!message.colour} data-testid="surfacing-recap-cite-{message.number}" data-unread={!plainCitations && message.part.surfacingRead === false} data-followed={!plainCitations && followed.includes(message.number)} data-ask={!plainCitations && view.openAsk?.uuid === message.part.uuid} ariaLabel={`#${message.number}${!plainCitations && message.part.surfacingRead === false ? ", unread" : ""}`} onpointerenter={() => onhover?.(message.number)} onpointerleave={() => onhover?.(null)} onfocus={() => onhover?.(message.number)} onblur={() => onhover?.(null)}>#{message.number}</Button>
 {/snippet}
 
 {#snippet citationReader()}
@@ -217,10 +217,12 @@
 	.summary-prose code { padding:1px 5px; border-radius:5px; background:var(--color-chip); font:12px var(--font-mono); }
 	.regenerating { opacity:.45; }
 	.summary-prose :global(.recap-cite) { display:inline-flex; align-items:center; justify-content:center; margin-left:2px; padding:0 6px; border-radius:999px; background:var(--color-chip); color:var(--color-text-secondary); font:500 11px/18px var(--font-mono); vertical-align:1px; }
-	.summary-prose :global([data-ask="true"]) { background:color-mix(in srgb,var(--color-status-ask) 18%,transparent); color:var(--color-status-ask); }
-	.summary-prose :global([data-unread="true"]:not([data-ask="true"])) { background:color-mix(in srgb,var(--color-accent) 18%,transparent); color:var(--color-accent); }
+	.summary-prose :global([data-category-colour="true"]) { background:color-mix(in srgb,var(--surface-colour) 14%,transparent); color:var(--surface-colour); }
+	.summary-prose :global([data-unread="true"][data-category-colour="true"]) { box-shadow:inset 0 -2px var(--color-accent); }
+	.summary-prose :global([data-unread="true"]:not([data-category-colour="true"]):not([data-ask="true"])) { background:color-mix(in srgb,var(--color-accent) 18%,transparent); color:var(--color-accent); }
 	.summary-prose :global([data-followed="true"]) { outline:1px dashed currentColor; outline-offset:-1px; background:transparent; }
-	.summary-prose :global(.recap-cite:hover), .summary-prose :global(.recap-cite:focus-visible) { background:var(--color-accent); color:var(--color-bg); }
+	.summary-prose :global([data-category-colour="true"]:hover), .summary-prose :global([data-category-colour="true"]:focus-visible) { outline:1px solid currentColor; outline-offset:-1px; }
+	.summary-prose :global(.recap-cite:not([data-category-colour="true"]):hover), .summary-prose :global(.recap-cite:not([data-category-colour="true"]):focus-visible) { background:var(--color-accent); color:var(--color-bg); }
 	.summary-busy { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 12px; border-radius:999px; background:var(--color-chip); color:var(--color-text-secondary); font-size:13px; font-weight:500; }
 	.summary-foot { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:10px; padding-top:9px; border-top:1px solid var(--color-border-subtle); color:var(--color-text-muted); font:11.5px var(--font-mono); }
 	.summary-fail { display:flex; align-items:center; gap:8px; margin-top:10px; color:var(--color-error); font-size:13px; }
