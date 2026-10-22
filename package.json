@@ -117,12 +117,12 @@
 		"zod": "4.3.6"
 	},
 	"optionalDependencies": {
-		"@cursor/sdk": "1.0.37",
-		"@cursor/sdk-darwin-arm64": "1.0.37",
-		"@cursor/sdk-darwin-x64": "1.0.37",
-		"@cursor/sdk-linux-arm64": "1.0.37",
-		"@cursor/sdk-linux-x64": "1.0.37",
-		"@cursor/sdk-win32-x64": "1.0.37"
+		"@cursor/sdk": "1.0.40",
+		"@cursor/sdk-darwin-arm64": "1.0.40",
+		"@cursor/sdk-darwin-x64": "1.0.40",
+		"@cursor/sdk-linux-arm64": "1.0.40",
+		"@cursor/sdk-linux-x64": "1.0.40",
+		"@cursor/sdk-win32-x64": "1.0.40"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.4",

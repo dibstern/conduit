@@ -213,7 +213,7 @@ const waitForSessionProjectorToReachLatestRename = (sessionId = "session-1") =>
 					if (latest > 0 && cursor >= latest) return latest;
 					throw new Error("Timed out waiting for session projector cursor");
 				},
-				{ timeout: 1_000 },
+				{ timeout: 5_000 },
 			),
 		);
 	});

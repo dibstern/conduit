@@ -68,7 +68,7 @@ describe("provider SDK version locks", () => {
 		).version;
 
 		expect(installedVersion).toBe(pinnedVersion);
-		expect(pinnedVersion).toBe("1.0.37");
+		expect(pinnedVersion).toBe("1.0.40");
 	});
 
 	// conduit-test-o6r: @anthropic-ai/sdk is a transitive dep (via the Claude

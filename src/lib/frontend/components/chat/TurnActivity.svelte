@@ -78,6 +78,10 @@
 	} = $props();
 
 	let expanded = $state(false);
+	// Once shown, the full log stays mounted and hiding it only hides it:
+	// remounting hundreds of rows made showing a long turn's log slow, and
+	// reset each row's own open state.
+	let logMounted = $state(false);
 	let skillsOpen = $state(false);
 	let hovered = $state<number | null>(null);
 	let focusUuid = $state<string | null>(null);
@@ -447,6 +451,7 @@
 		const newestTop = () => uuid === undefined ? undefined : panelEl?.querySelector(`[data-log-part="${CSS.escape(uuid)}"]`)?.getBoundingClientRect().top;
 		const before = newestTop();
 		expanded = !expanded;
+		logMounted ||= expanded;
 		if (before === undefined) return;
 		await tick();
 		const after = newestTop();
@@ -459,7 +464,7 @@
 		if (!part) return;
 		onjump?.();
 		openTurn();
-		expanded = true;
+		expanded = logMounted = true;
 		focusUuid = part.uuid;
 		await tick();
 		panelEl?.querySelector(`[data-part="${CSS.escape(part.uuid)}"]`)?.scrollIntoView({ block: "nearest" });
@@ -602,16 +607,16 @@
 				</Button>
 			{/if}
 		</div>
-		{#if !minimised && (expanded || showTicker)}
-			<div class="step-log mt-[6px]" data-testid={live ? "turn-live-activity" : undefined}>
+		{#if !minimised && (logMounted || showTicker)}
+			<div class="step-log mt-[6px]" hidden={!expanded && !showTicker} data-testid={live ? "turn-live-activity" : undefined}>
 				{#if !expanded && earlierCount > 0}
 					<Button variant="ghost" size="content" tone="muted" hoverFill="none" align="start" touchTarget
-						class="py-[8px] text-[12px]" onclick={() => (expanded = true)}>+ {earlierCount} earlier messages</Button>
+						class="py-[8px] text-[12px]" onclick={() => (expanded = logMounted = true)}>+ {earlierCount} earlier messages</Button>
 				{/if}
-				{#each expanded ? segment.activity : ticker as part, index (part.uuid)}
-					{@const i = expanded ? index : earlierCount + index}
+				{#each logMounted ? segment.activity : ticker as part, index (part.uuid)}
+					{@const i = logMounted ? index : earlierCount + index}
 					{@const latestLiveStep = live && i === segment.activity.length - 1}
-					<div data-log-part={part.uuid} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
+					<div data-log-part={part.uuid} hidden={!expanded && i < earlierCount} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
 						<ActivityRow {part} {liveTasks} {taskListedAt} runningTasks={running} live={latestLiveStep} duration={durations?.[i]} highlight={part.uuid === focusUuid} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} />
 						{#if surfacingActive && expanded && part.type === "assistant"}
 							{@const pin = surface.messages.find((message) => message.part.uuid === part.uuid)}
