@@ -16,6 +16,7 @@
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import Textarea from "../ui/Textarea.svelte";
+	import FilePicker from "../ui/FilePicker.svelte";
 	import TwoRowComposerLayout from "../ui/TwoRowComposerLayout.svelte";
 	import AttachMenu from "./AttachMenu.svelte";
 	// biome-ignore lint/style/useImportType: CommandMenu is used as a value for bind:this
@@ -159,6 +160,9 @@
 	const supportsGoal = $derived(discoveryState.currentTraits?.supportsGoalState === true);
 	const isGoalCommand = $derived(supportsGoal && /^[/$]goal(?:\s|$)/.test(composerDraft.text));
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
+	let cameraPicker: FilePicker | undefined = $state();
+	let photosPicker: FilePicker | undefined = $state();
+	let filesPicker: FilePicker | undefined = $state();
 	const referenceEditor = referenceEditing({ read: () => composerDraft.text, write: (text) => { composerDraft.text = text; }, context: () => draftContext, element: () => textareaEl, changed: handleInput });
 	const referenceView = $derived(projectReferences(composerDraft.text));
 	$effect(() => provideComposerDraft({ sessionId: () => sessionState.currentId, draft: () => composerDraft.text, insert: (reference) => { if (!readOnlySubagent) referenceEditor.insert(reference); }, remove: referenceEditor.remove }));
@@ -887,21 +891,11 @@
 	}
 
 	function handleAttachCamera() {
-		const fileInput = document.createElement("input");
-		fileInput.type = "file";
-		fileInput.accept = "image/*";
-		fileInput.capture = "environment";
-		fileInput.onchange = () => processSelectedFiles(fileInput.files);
-		fileInput.click();
+		cameraPicker?.open();
 	}
 
 	function handleAttachPhotos() {
-		const fileInput = document.createElement("input");
-		fileInput.type = "file";
-		fileInput.accept = "image/*";
-		fileInput.multiple = true;
-		fileInput.onchange = () => processSelectedFiles(fileInput.files);
-		fileInput.click();
+		photosPicker?.open();
 	}
 
 	function handleAttachFiles() {
@@ -909,11 +903,7 @@
 			attachmentError = "File attachments are available with Claude and OpenCode. Choose one of those harnesses before attaching files.";
 			return;
 		}
-		const fileInput = document.createElement("input");
-		fileInput.type = "file";
-		fileInput.multiple = true;
-		fileInput.onchange = () => processSelectedFiles(fileInput.files);
-		fileInput.click();
+		filesPicker?.open();
 	}
 
 	function handleAttachSetGoal(condition = "") {
@@ -944,13 +934,12 @@
 	});
 
 	/** All picker entries share one attachment row and one send path. */
-	async function processSelectedFiles(files: FileList | null) {
-		if (!files || files.length === 0) return;
+	async function processSelectedFiles(files: File[]) {
 		const context = sessionModeContext;
 		attachmentError = "";
 		readingAttachments++;
 		try {
-			for (const file of Array.from(files)) {
+			for (const file of files) {
 				try {
 					const { dataUrl, resized } = await prepareFileAttachment(file);
 					if (context !== sessionModeContext) return;
@@ -1576,6 +1565,9 @@
 		{/if}
 		{/if}
 	</div>
+	<FilePicker bind:this={cameraPicker} accept="image/*" capture="environment" onpick={processSelectedFiles} />
+	<FilePicker bind:this={photosPicker} accept="image/*" multiple onpick={processSelectedFiles} />
+	<FilePicker bind:this={filesPicker} multiple onpick={processSelectedFiles} />
 </div>
 
 <style>
