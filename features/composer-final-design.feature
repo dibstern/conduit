@@ -24,6 +24,25 @@ Examples:
   | baseline                   | threshold |
   | composer-final-idle-phone  | 98        |
 
+Scenario: phone footer effort and checkout open their existing sheets directly
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the Claude harness
+  And the composer uses icons controls
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / account-chip as worktree
+  When I set effort to high
+  Then the phone footer effort meter names High
+  When I tap the phone footer effort control
+  Then the icons control opens the picker at Effort
+  And the picker is a phone bottom sheet
+  And the phone composer sheet is closed
+  When I close the model picker
+  And I tap the phone footer checkout control
+  Then the checkout menu is a phone bottom sheet
+  And the composer checkout menu shows conduit and account-chip in full
+  And the phone composer sheet is closed
+
 Scenario Outline: the phone model pill opens the Composer sheet
   Given the conduit app is served with the connected mockup
   And the viewport is a phone

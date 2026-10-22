@@ -356,8 +356,16 @@ export const ReplyMultiple: Story = {
 export const ReplyReferencesPhone: Story = {
 	globals: { viewport: { value: "mobile1", isRotated: false } },
 	beforeEach: ({ canvasElement }) => setupWords(canvasElement, true),
-	play: async ({ canvasElement }) =>
-		showReferences(canvasElement, [replyAsk], "Claude"),
+	play: async ({ canvasElement }) => {
+		const scroller = within(canvasElement).getByRole("textbox", {
+			name: "Message",
+		}).parentElement?.parentElement;
+		if (!scroller) throw new Error("composer scroller not found");
+		// The phone fixture also runs in a desktop viewport, where native gutters vary.
+		scroller.style.scrollbarWidth = "none";
+		expect(scroller.offsetWidth).toBe(scroller.clientWidth);
+		await showReferences(canvasElement, [replyAsk], "Claude");
+	},
 };
 export const ReplyAtomicEditing: Story = {
 	play: async ({ canvasElement }) => {
@@ -415,6 +423,9 @@ export const OverflowingInsert: Story = {
 		);
 		const scroller = textarea.parentElement?.parentElement;
 		if (!mirror || !scroller) throw new Error("composer layers not found");
+		// Pin the wrap boundary independently of the platform's native scrollbar width.
+		scroller.style.scrollbarWidth = "none";
+		expect(scroller.offsetWidth).toBe(scroller.clientWidth);
 		textarea.focus();
 		// The native editing path (unlike userEvent, which sets the value from JS).
 		document.execCommand(
@@ -465,7 +476,12 @@ export const OverflowingInsert: Story = {
 	},
 };
 
-function setupWords(canvasElement: HTMLElement, phone: boolean) {
+function setupWords(
+	canvasElement: HTMLElement,
+	phone: boolean,
+	phoneWidth = 393,
+	modelName = "Sonnet 5",
+) {
 	const width = Object.getOwnPropertyDescriptor(window, "innerWidth");
 	const path = routerState.path;
 	const sessions = [...sessionState.sessions.values()];
@@ -477,12 +493,12 @@ function setupWords(canvasElement: HTMLElement, phone: boolean) {
 	const style = canvasElement.getAttribute("style");
 	Object.defineProperty(window, "innerWidth", {
 		configurable: true,
-		value: phone ? 393 : 1440,
+		value: phone ? phoneWidth : 1440,
 	});
 	window.dispatchEvent(new Event("resize"));
 	canvasElement.setAttribute(
 		"style",
-		`display:flex;flex-direction:column;justify-content:flex-end;min-height:100vh;max-width:${phone ? "393px" : "none"}`,
+		`display:flex;flex-direction:column;justify-content:flex-end;min-height:100vh;max-width:${phone ? `${phoneWidth}px` : "none"}`,
 	);
 	const claudeTraits = getProviderDriver("claude");
 	if (!claudeTraits) throw new Error("Claude driver traits are missing");
@@ -541,7 +557,7 @@ function setupWords(canvasElement: HTMLElement, phone: boolean) {
 					models: [
 						{
 							id: "claude-sonnet-5",
-							name: "Sonnet 5",
+							name: modelName,
 							provider: "claude",
 							variants: ["low", "medium", "high", "xhigh", "max"],
 							contextWindowOptions,
@@ -1575,7 +1591,7 @@ export const FinalIconsDesktop: Story = {
 		setComposerPreferences({ controls: "icons" });
 		return cleanup;
 	},
-	play: async ({ canvasElement }) => {
+	play: async ({ canvasElement, parameters }) => {
 		const canvas = within(canvasElement);
 		await canvas.findByTestId("model-picker-trigger");
 		await document.fonts.ready;
@@ -1588,7 +1604,7 @@ export const FinalIconsDesktop: Story = {
 		const phone = sessionViewState.composerTier === "phone";
 		const compactMetrics = phone || matchMedia("(max-width: 767px)").matches;
 		await expect(frame.getBoundingClientRect().height).toBeCloseTo(
-			compactMetrics ? 84.5 : 94.5,
+			phone ? 94.5 : compactMetrics ? 84.5 : 94.5,
 			1,
 		);
 		if (!phone) {
@@ -1599,6 +1615,89 @@ export const FinalIconsDesktop: Story = {
 			await expect(
 				sendButton.getBoundingClientRect().left - checkout.right,
 			).toBeCloseTo(8, 1);
+		}
+		const effort = canvas.queryByTestId("variant-badge");
+		if (phone || sessionViewState.composerWidth >= 480) {
+			await expect(effort).toBeVisible();
+			await expect(effort).toHaveAccessibleName(
+				"Effort: High. Open effort options",
+			);
+		} else {
+			await expect(effort).toBeNull();
+		}
+		const checkoutControl = canvas.getByTestId("composer-checkout");
+		await expect(checkoutControl).toBeVisible();
+		if (phone) {
+			await expect(canvas.queryByTestId("composer-effort-label")).toBeNull();
+			const footer = canvas.getByTestId("composer-icons-left");
+			await expect(footer.scrollWidth).toBeLessThanOrEqual(footer.clientWidth);
+			const controls = [
+				canvasElement.querySelector("#attach-btn"),
+				canvas.getByTestId("model-picker-trigger"),
+				effort,
+				canvas.getByTestId("permission-mode-badge"),
+				checkoutControl,
+				sendButton,
+			];
+			const boxes = controls.map((control) => {
+				if (!control) throw new Error("Phone footer control missing");
+				const rect = control.getBoundingClientRect();
+				const target = getComputedStyle(control, "::before");
+				const width = Math.max(
+					rect.width,
+					target.display === "none"
+						? 0
+						: Number.parseFloat(target.minWidth) || 0,
+				);
+				const height = Math.max(
+					rect.height,
+					target.display === "none"
+						? 0
+						: Number.parseFloat(target.minHeight) || 0,
+				);
+				return new DOMRect(
+					rect.x + (rect.width - width) / 2,
+					rect.y + (rect.height - height) / 2,
+					width,
+					height,
+				);
+			});
+			for (const [index, box] of boxes.entries()) {
+				await expect(box.width).toBeGreaterThanOrEqual(44);
+				await expect(box.height).toBeGreaterThanOrEqual(44);
+				await expect(box.top).toBeCloseTo(boxes[0]?.top ?? 0, 1);
+				if (index > 0)
+					await expect(box.left).toBeGreaterThanOrEqual(
+						boxes[index - 1]?.right ?? 0,
+					);
+				await expect(box.right).toBeLessThanOrEqual(
+					frame.getBoundingClientRect().right,
+				);
+			}
+			await expect(
+				checkoutControl.getBoundingClientRect().width,
+			).toBeLessThanOrEqual(110);
+			const modelLabel =
+				canvasElement.querySelector<HTMLElement>(".model-label");
+			if (!modelLabel) throw new Error("Model label missing");
+			await expect(getComputedStyle(modelLabel).textOverflow).toBe("ellipsis");
+			if (window.innerWidth === 320 || parameters["longModel"] === true) {
+				await expect(modelLabel.scrollWidth).toBeGreaterThan(
+					modelLabel.clientWidth,
+				);
+			}
+			await expect(modelLabel.clientWidth).toBeGreaterThanOrEqual(20);
+			const branch = checkoutControl.querySelector<HTMLElement>(
+				'[data-part="branch"]',
+			);
+			if (window.innerWidth === 320) {
+				await expect(branch).toBeNull();
+			} else {
+				await expect(branch).toBeVisible();
+				if (!branch) throw new Error("Branch label missing");
+				await expect(getComputedStyle(branch).textOverflow).toBe("ellipsis");
+				await expect(branch.scrollWidth).toBeGreaterThan(branch.clientWidth);
+			}
 		}
 		await expect(attach.getBoundingClientRect().width).toBe(16);
 		const rowCentre =
@@ -1621,6 +1720,13 @@ export const FinalIconsDesktop: Story = {
 			const bars = [...meter.children].map((bar) =>
 				bar.getBoundingClientRect(),
 			);
+			for (const [index, bar] of bars.entries()) {
+				await expect(bar.bottom).toBeCloseTo(bars[0]?.bottom ?? 0, 1);
+				if (index > 0)
+					await expect(bar.height).toBeGreaterThan(
+						bars[index - 1]?.height ?? 0,
+					);
+			}
 			const centre =
 				(Math.min(...bars.map((bar) => bar.top)) +
 					Math.max(...bars.map((bar) => bar.bottom))) /
@@ -1671,6 +1777,35 @@ export const FinalIconsDesktop: Story = {
 		await userEvent.clear(input);
 		await expect(sendButton).toBeDisabled();
 		await expect(getComputedStyle(sendButton).opacity).toBe("0.5");
+		if (!phone && matchMedia("(min-width: 768px)").matches) {
+			const maxWidth = canvasElement.style.maxWidth;
+			canvasElement.style.maxWidth = "560px";
+			try {
+				await waitFor(() =>
+					expect(sessionViewState.composerTier).toBe("narrow"),
+				);
+				const mediumEffort = canvas.getByTestId("variant-badge");
+				const mediumCheckout = canvas.getByTestId("composer-checkout");
+				await expect(mediumEffort).toBeVisible();
+				await expect(mediumCheckout).toBeVisible();
+				await expect(canvas.queryByTestId("composer-effort-label")).toBeNull();
+				await expect(mediumCheckout.getBoundingClientRect().right).toBeLessThan(
+					sendButton.getBoundingClientRect().left,
+				);
+				const centre =
+					sendButton.getBoundingClientRect().top +
+					sendButton.getBoundingClientRect().height / 2;
+				for (const control of [mediumEffort, mediumCheckout]) {
+					const box = control.getBoundingClientRect();
+					await expect(
+						Math.abs(box.top + box.height / 2 - centre),
+					).toBeLessThanOrEqual(0.5);
+				}
+			} finally {
+				canvasElement.style.maxWidth = maxWidth;
+				await waitFor(() => expect(sessionViewState.composerTier).toBe("wide"));
+			}
+		}
 	},
 };
 export const FinalIconsDesktopLight: Story = {
@@ -1691,6 +1826,32 @@ export const FinalIconsPhoneLight: Story = {
 	globals: { theme: "light" },
 };
 
+export const FinalIconsPhone320: Story = {
+	...FinalIconsPhone,
+	beforeEach: ({ canvasElement }) => {
+		const cleanup = setupWords(canvasElement, true, 320);
+		setComposerPreferences({ controls: "icons" });
+		return cleanup;
+	},
+};
+export const FinalIconsPhone320Light: Story = {
+	...FinalIconsPhone320,
+	globals: { theme: "light" },
+};
+export const FinalIconsPhoneLongModel: Story = {
+	...FinalIconsPhone,
+	parameters: { phone: true, longModel: true },
+	beforeEach: ({ canvasElement }) => {
+		const cleanup = setupWords(
+			canvasElement,
+			true,
+			393,
+			"A very long custom model name",
+		);
+		setComposerPreferences({ controls: "icons" });
+		return cleanup;
+	},
+};
 function setupDollarMenu(canvasElement: HTMLElement, phone = false) {
 	const cleanup = setupWords(canvasElement, phone);
 	setComposerPreferences({ controls: "icons" });
@@ -2315,4 +2476,58 @@ export const LimitedPhoneLight: Story = {
 	...LimitedPhone,
 	tags: ["viewport-capture"],
 	globals: { theme: "light" },
+};
+
+export const FinalIconsPhoneActions320: Story = {
+	...LimitedPhone,
+	beforeEach: ({ canvasElement }) => {
+		const cleanup = setupComposerStage(canvasElement, "limited", true);
+		canvasElement.style.maxWidth = "320px";
+		return cleanup;
+	},
+	play: async (context) => {
+		await Limited.play?.(context);
+		const { canvasElement } = context;
+		const canvas = within(canvasElement);
+		phaseToProcessing(getOrCreateSessionActivity(testId));
+		const input = canvas.getByRole<HTMLTextAreaElement>("textbox", {
+			name: "Message",
+		});
+		// Explicit short lines keep this layout check independent of native scrollbar gutters.
+		await userEvent.clear(input);
+		await userEvent.type(
+			input,
+			"Check the footer{Shift>}{Enter}{/Shift}Keep both actions",
+		);
+		await expect(input).toHaveValue("Check the footer\nKeep both actions");
+		await waitFor(() => {
+			expect(canvasElement.querySelector(".mirror")?.textContent).toBe(
+				"Check the footer\nKeep both actions",
+			);
+			const field = canvasElement
+				.querySelector('[data-slot="field"]')
+				?.getBoundingClientRect();
+			const inputBounds = input.getBoundingClientRect();
+			const send = canvasElement
+				.querySelector("#send")
+				?.getBoundingClientRect();
+			const stop = canvas
+				.getByRole("button", { name: "Stop generating" })
+				.getBoundingClientRect();
+			const options = canvas
+				.getByTestId("composer-send-menu-trigger")
+				.getBoundingClientRect();
+			if (!field || !send) throw new Error("Phone composer missing");
+			expect(send.width).toBe(34);
+			expect(send.height).toBe(34);
+			expect(options.width).toBe(44);
+			expect(options.height).toBe(44);
+			expect(options.right).toBeLessThanOrEqual(stop.left);
+			expect(inputBounds.right).toBeLessThanOrEqual(options.left);
+			expect(stop.bottom).toBeLessThanOrEqual(send.top);
+			expect(
+				canvas.getByTestId("composer-checkout").getBoundingClientRect().right,
+			).toBeLessThanOrEqual(send.left - 5);
+		});
+	},
 };

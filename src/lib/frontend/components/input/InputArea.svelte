@@ -1272,7 +1272,7 @@
 			{#if pendingAttachments.length > 0}
 				<PastePreview images={pendingAttachments} onRemove={removePendingAttachment} />
 			{/if}
-			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout" splitFooter={composerPreferences.controls === "icons"} singleRow={composerPreferences.controls === "words"}>
+			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout" data-phone-icons={composerPreferences.controls === "icons" && sessionViewState.composerTier === "phone" ? "" : undefined} splitFooter={composerPreferences.controls === "icons"} singleRow={composerPreferences.controls === "words"}>
 				{#snippet field()}
 					<!-- Textarea row.
 					     The composer grows with its text and then scrolls, and both of those
@@ -1389,7 +1389,7 @@
 						<div
 							in:fade={{ duration: 180 }}
 							id="input-bottom-right"
-							data-testid={sessionViewState.composerTier !== "phone" ? "composer-icons-left" : undefined}
+							data-testid="composer-icons-left"
 							class="flex w-full items-center min-w-0 gap-[2px]"
 						>
 							<!-- Harness instance + model picker -->
@@ -1398,11 +1398,12 @@
 							<!-- Approvals (permission mode) selector -->
 							<PermissionModeSelector />
 							<span class="grow"></span>
-							{#if composerPreferences.controls === "icons" && sessionViewState.composerTier !== "phone" && !settingsPending && currentSession && composerDirectory}
+							{#if !settingsPending && currentSession && composerDirectory}
 								{@const session = currentSession}
 								{#key session.id}
 									<GitIdentity
 										presentation="control"
+										compact={sessionViewState.composerTier === "phone"}
 										directory={composerDirectory}
 										git={composerGit}
 										workspaceCause={session.workspace?.cause}
@@ -1439,6 +1440,7 @@
 							icon={sendMode === "switch" ? "arrow-up" : "clock"}
 							iconSize={13}
 							id="send"
+							touchTarget={sessionViewState.composerTier === "phone" && composerPreferences.controls === "icons"}
 							data-goal={isGoalCommand ? "true" : "false"}
 							data-send-mode={sendMode}
 							type="button"
@@ -1495,7 +1497,7 @@
 							{@render sendAtLabel()}
 						</Button>
 					{:else if isGoalCommand}
-						<Button variant="goal" size="composer-action" icon="target" iconSize={16} id="send" data-goal="true" data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel="Set goal" onclick={handleSendClick} touchTarget class="send-btn">Set goal</Button>
+						<Button variant="goal" size="composer-action" icon="target" iconSize={16} id="send" data-goal="true" data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel="Set goal" onclick={handleSendClick} touchTarget class="send-btn"><span data-part="goal-label">Set goal</span></Button>
 					{:else}
 						<Button variant="inverse" size="composer-action" iconOnly icon="arrow-up" iconSize={17} id="send" data-goal="false" data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel={sendButtonLabel} onclick={handleSendClick} touchTarget class="send-btn" />
 					{/if}

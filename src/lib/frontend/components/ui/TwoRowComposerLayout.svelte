@@ -215,6 +215,43 @@
 		gap: 2px;
 	}
 
+	/* Reserve the hit areas in layout so adjacent phone controls cannot steal taps. */
+	.split-footer[data-phone-icons] { column-gap: 1px; }
+	[data-phone-icons] > [data-slot="leading"],
+	[data-phone-icons] > [data-slot="controls"],
+	[data-phone-icons] > [data-slot="send"] { min-height: 44px; display: flex; align-items: center; }
+	[data-phone-icons] > [data-slot="leading"] { min-width: 44px; }
+	[data-phone-icons] > [data-slot="send"] { margin-left: 0; min-width: 44px; justify-content: center; }
+	[data-phone-icons] :global(#input-bottom-right),
+	[data-phone-icons] :global(#model-display) { gap: 0; }
+	[data-phone-icons] :global(#model-display) { flex: 0 1000000 auto; min-width: 52px; }
+	[data-phone-icons] :global(#model-display:has([data-testid="variant-badge"])) { min-width: 96px; }
+	[data-phone-icons] :global(.model-btn),
+	[data-phone-icons] :global([data-testid="variant-badge"]),
+	[data-phone-icons] :global([data-testid="permission-mode-badge"]),
+	[data-phone-icons] :global([data-testid="composer-checkout"]) {
+		min-width: 44px;
+		padding-inline: 4px;
+		justify-content: center;
+	}
+	[data-phone-icons] :global(.model-btn) { min-width: 52px; padding-inline: 0; gap: 0; }
+	[data-phone-icons] :global(.git-pill.compact) { min-width: 44px; }
+	[data-phone-icons] :global(button::before) { display: block; }
+	/* Seven 44px targets cannot share a 320px footer. Extra turn actions use
+	   the field row, whose reserved space also sizes the highlight backdrop. */
+	[data-phone-icons]:has(:global(#send)):has(:global(#stop)) > [data-slot="field"],
+	[data-phone-icons]:has(:global([data-testid="composer-send-control"])) > [data-slot="field"] { padding-right: 44px; min-height: 44px; }
+	[data-phone-icons]:has(:global(#send)):has(:global(#stop)):has(:global([data-testid="composer-send-control"])) > [data-slot="field"] { padding-right: 88px; }
+	[data-phone-icons]:has(:global(#send)) :global(#stop),
+	[data-phone-icons] :global([data-testid="composer-send-menu-trigger"]) { position: absolute; top: 0; right: 0; margin: 0; width: 44px; height: 44px; }
+	[data-phone-icons]:has(:global(#stop)) :global([data-testid="composer-send-menu-trigger"]) { right: 44px; }
+	[data-phone-icons] :global([data-testid="composer-send-control"]) { display: contents; position: static; }
+	[data-phone-icons] :global([data-testid="composer-send-control"] #send) { width: 34px; height: 34px; padding: 0; border-radius: 999px; background: var(--color-inverse-bg); color: var(--color-inverse-text); }
+	[data-phone-icons] :global([data-testid="composer-send-switch-label"]) { display: none; }
+	[data-phone-icons] :global(#send[data-goal="true"]) { width: 34px; padding: 0; }
+	[data-phone-icons] :global([data-part="goal-label"]) { display: none; }
+	[data-phone-icons] :global([data-testid="composer-send-menu-trigger"]) { min-width: 44px; border: 0; border-radius: 999px; background: var(--color-chip); color: var(--color-text-secondary); }
+
 	/* Centre the font's x-height on the icons, rather than its line box.
 	   Geist and Geist Mono have different baseline-to-x-height offsets. */
 	.split-footer :global(.model-label),

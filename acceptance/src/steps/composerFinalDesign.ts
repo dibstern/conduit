@@ -179,6 +179,72 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "tap inline phone footer control",
+		match: /^I tap the phone footer (effort|checkout) control$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			const cdp = await page.context().newCDPSession(page);
+			await cdp.send("Emulation.setTouchEmulationEnabled", {
+				enabled: true,
+				maxTouchPoints: 1,
+			});
+			const control = page.getByTestId(
+				match[1] === "effort" ? "variant-badge" : "composer-checkout",
+			);
+			await expect(control).toBeVisible();
+			await expect(control).toBeEnabled();
+			const bounds = await box(control);
+			await cdp.send("Input.dispatchTouchEvent", {
+				type: "touchStart",
+				touchPoints: [
+					{
+						x: bounds.x + bounds.width / 2,
+						y: bounds.y + bounds.height / 2,
+					},
+				],
+			});
+			await cdp.send("Input.dispatchTouchEvent", {
+				type: "touchEnd",
+				touchPoints: [],
+			});
+			await cdp.detach();
+		},
+	},
+	{
+		name: "assert inline phone effort meter label",
+		match: /^the phone footer effort meter names (.+)$/,
+		run: async ({ world, match }) => {
+			const effort = world.page.getByTestId("variant-badge");
+			await expect(effort).toHaveAccessibleName(
+				`Effort: ${match[1]}. Open effort options`,
+			);
+			await expect(effort.locator(".effort-meter")).toBeVisible();
+			await expect(effort).toHaveText("");
+		},
+	},
+	{
+		name: "assert inline phone checkout opens a bottom sheet",
+		match: /^the checkout menu is a phone bottom sheet$/,
+		run: async ({ world }) => {
+			const viewport = world.page.viewportSize();
+			if (!viewport || viewport.width >= 768)
+				throw new Error("Phone viewport is required");
+			const menu = world.page.getByTestId("composer-checkout-menu");
+			await expect(menu).toBeVisible();
+			await expect(world.page.getByTestId("menu-sheet-scrim")).toBeVisible();
+			await expect
+				.poll(async () => {
+					const bounds = await box(menu);
+					return (
+						Math.abs(bounds.x) <= 1 &&
+						Math.abs(bounds.width - viewport.width) <= 2 &&
+						Math.abs(bounds.y + bounds.height - viewport.height) <= 2
+					);
+				})
+				.toBe(true);
+		},
+	},
+	{
 		name: "assert Final phone controls",
 		match: /^the phone icons controls show one model chip and the shield$/,
 		run: async ({ world }) => {
@@ -190,12 +256,9 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 			);
 			await expect(layout.getByTestId("permission-mode-badge")).toBeVisible();
 			await expect(layout.getByTestId("permission-mode-badge")).toHaveText("");
-			for (const id of [
-				"composer-more",
-				"variant-badge",
-				"composer-harness-trigger",
-				"composer-checkout",
-			])
+			await expect(layout.getByTestId("variant-badge")).toBeVisible();
+			await expect(layout.getByTestId("variant-badge")).toHaveText("");
+			for (const id of ["composer-more", "composer-harness-trigger"])
 				await expect(layout.getByTestId(id)).toHaveCount(0);
 			const input = await box(world.page.locator("#input"));
 			const model = await box(layout.getByTestId("model-picker-trigger"));
