@@ -346,6 +346,7 @@ export const sessionRowsToSessionInfoList = (
 			...(row.auto_settle_disabled_at != null
 				? { autoSettleDisabled: true }
 				: {}),
+			...(row.jev != null ? { jev: row.jev } : {}),
 			...(row.pinned_at !== null ? { pinnedAt: row.pinned_at } : {}),
 			...deriveSessionSnooze(row, opts.now),
 			attention,

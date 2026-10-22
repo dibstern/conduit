@@ -119,6 +119,7 @@ import {
 	renameSession,
 	setSessionArchived,
 	setSessionAutoSettleDisabled,
+	setSessionJev,
 	setSessionPinned,
 	setSessionSettled,
 	snoozeSession,
@@ -751,6 +752,10 @@ export interface SessionManagerService {
 	setSessionAutoSettleDisabled(
 		sessionId: string,
 		disabled: boolean,
+	): Effect.Effect<boolean, SessionManagerError>;
+	setSessionJev(
+		sessionId: string,
+		jev: "on" | "off" | null,
 	): Effect.Effect<boolean, SessionManagerError>;
 	setSessionPinned(
 		sessionId: string,
@@ -1397,6 +1402,10 @@ export const SessionManagerServiceLive: Layer.Layer<
 					withSessionCommandServices(
 						setSessionAutoSettleDisabled(sessionId, disabled),
 					),
+				),
+			setSessionJev: (sessionId, jev) =>
+				triageLock.withPermits(1)(
+					withSessionCommandServices(setSessionJev(sessionId, jev)),
 				),
 			setSessionPinned: (sessionId, pinned) =>
 				triageLock.withPermits(1)(

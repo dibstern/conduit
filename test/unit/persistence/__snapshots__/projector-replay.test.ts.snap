@@ -242,6 +242,7 @@ exports[`preserves every read model from the recorded Claude event log 1`] = `
       "goal_stuck": null,
       "history_complete": 0,
       "id": "ses_c2d8cd521bc14f9f8f7700096bbf1d23",
+      "jev": null,
       "last_message_at": 1789525211224,
       "last_turn_end_input_id": null,
       "last_turn_end_version": null,

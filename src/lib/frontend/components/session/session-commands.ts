@@ -1,4 +1,8 @@
 import { getBrowserClientId } from "../../stores/client-identity.js";
+import {
+	messageSurfacing,
+	sessionJevEnabled,
+} from "../../stores/message-surfacing.svelte.js";
 import { selection } from "../../stores/selection.svelte.js";
 import {
 	followFork,
@@ -549,6 +553,47 @@ export function getSessionCommands(
 			void archive(session, session.archivedAt == null);
 		},
 	});
+	const status = messageSurfacing.status;
+	if (status.key.source !== "none" && !status.key.rejected) {
+		const jevOn = sessionJevEnabled(session);
+		const setJev = (jev: "on" | "off" | null) => {
+			const input = rpcInput(session);
+			if (!input) return;
+			void rpc("SetSessionJev", { ...input, jev })
+				.then(refreshSearch)
+				.catch(toastFailure("Couldn't change Jev"));
+		};
+		items.push({
+			testId: "session-ctx-jev",
+			label: "Jev",
+			section: "manage",
+			icon: "zap",
+			detail:
+				session.jev == null
+					? `Default · ${jevOn ? "on" : "off"}`
+					: jevOn
+						? "On"
+						: "Off",
+			options: {
+				title: "Jev",
+				hint: "For this session",
+				items: (["on", "off", null] as const).map((jev) => ({
+					id: `jev-${jev ?? "default"}`,
+					icon: jev === "on" ? "zap" : jev === "off" ? "circle" : "settings",
+					label:
+						jev === null
+							? `Default (${status.enabled ? "on" : "off"})`
+							: jev === "on"
+								? "On"
+								: "Off",
+					selected: (session.jev ?? null) === jev,
+					run: () => setJev(jev),
+				})),
+			},
+			// A tap on the phone tile flips Jev; holding it offers Default too.
+			run: () => setJev(jevOn ? "off" : "on"),
+		});
+	}
 	items.push(
 		...(host.select
 			? [

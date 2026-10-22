@@ -11,7 +11,8 @@
 	import { numberTurnMessages } from "../../../turn-message-numbers.js";
 	import { TurnRecapState } from "../../stores/turn-recap.svelte.js";
 	import SurfacingSummary from "./SurfacingSummary.svelte";
-	import { messageSurfacing, sessionSurfaceLevel, setSessionSurfaceLevel, touchSurfaceSession, makeSurfaceDefault } from "../../stores/message-surfacing.svelte.js";
+	import { messageSurfacing, sessionJevEnabled, sessionSurfaceLevel, setSessionSurfaceLevel, touchSurfaceSession, makeSurfaceDefault } from "../../stores/message-surfacing.svelte.js";
+	import { findSession } from "../../stores/session.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { surfaceTurn, surfaceTime, type SurfaceLevel, type SurfacePart, type SurfacePin } from "../../utils/surface-turn.js";
 	import SurfacingCard, { type SurfacingRegions } from "./SurfacingCard.svelte";
@@ -134,7 +135,7 @@
 	});
 
 	const surfacingConfig = $derived(surfacing ?? messageSurfacing);
-	const surfacingActive = $derived(surfacingConfig.status.active && surfacingConfig.status.enabled && surfacingConfig.status.key.source !== "none" && !surfacingConfig.status.key.rejected);
+	const surfacingActive = $derived(sessionJevEnabled(sessionId ? findSession(sessionId) : undefined, surfacingConfig.status));
 	const override = $derived(sessionSurfaceLevel(sessionId));
 	const level = $derived(override ?? surfacingConfig.status.defaultLevel);
 	const recap = new TurnRecapState();

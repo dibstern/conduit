@@ -171,6 +171,10 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 		produced: false,
 		reason: "Relay-owned triage state",
 	},
+	"session.jev_set": {
+		produced: false,
+		reason: "Relay-owned Jev preference",
+	},
 	"session.unsnoozed": { produced: false, reason: "Relay-owned triage state" },
 	"permission.asked": {
 		produced: false,

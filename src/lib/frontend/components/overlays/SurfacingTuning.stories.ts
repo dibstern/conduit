@@ -138,8 +138,7 @@ const feedback: Play = async ({ canvasElement }) => {
 		const tiles = body.getByTestId("surfacing-feedback-tiles");
 		for (const value of tiles.querySelectorAll("b")) {
 			await expect(getComputedStyle(value).color).toBe(
-				getComputedStyle(body.getByRole("heading", { name: "Surfacing" }))
-					.color,
+				getComputedStyle(body.getByRole("heading", { name: "Jev" })).color,
 			);
 		}
 		const groupLabel = body.getByRole("heading", {

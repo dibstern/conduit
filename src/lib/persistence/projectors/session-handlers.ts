@@ -457,6 +457,13 @@ export const sessionHandlers = {
 		},
 	],
 
+	"session.jev_set": (event) => [
+		{
+			sql: "UPDATE sessions SET jev = ? WHERE id = ?",
+			params: [event.data.jev, event.data.sessionId],
+		},
+	],
+
 	"session.unsnoozed": (event) => [
 		{
 			sql: `UPDATE sessions SET snoozed_at = NULL, snoozed_until = NULL,

@@ -3,7 +3,7 @@ import { expect, type Locator, type Page } from "@playwright/test";
 /** Return through the phone settings pages before using Done. */
 export async function closeSettings(page: Page): Promise<void> {
 	const surfacingBack = page.getByRole("button", {
-		name: "Back to Surfacing",
+		name: "Back to Jev",
 		exact: true,
 	});
 	if (await surfacingBack.isVisible()) await surfacingBack.click();

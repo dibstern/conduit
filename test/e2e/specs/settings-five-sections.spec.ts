@@ -21,7 +21,7 @@ const sections = [
 		"Claude",
 		"[data-testid=claude-setting-defaultPermissionMode-select]",
 	],
-	["surfacing", "Surfacing", "[data-testid=surfacing-settings-general]"],
+	["surfacing", "Jev", "[data-testid=surfacing-settings-general]"],
 	["archived", "Archived", "section[aria-label='Archived sessions']"],
 	["usage", "Usage", "#usage-settings"],
 	["server", "Server", "#instances-settings"],
