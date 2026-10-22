@@ -40,6 +40,7 @@ function seed(
 		instances: rows.map((reading) => ({
 			...mockClaudeAccount,
 			id: reading.accountId,
+			colorSlot: (accounts as readonly string[]).indexOf(reading.accountId),
 			name: reading.accountId,
 			usageEligible: true,
 		})),

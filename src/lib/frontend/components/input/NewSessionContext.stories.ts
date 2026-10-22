@@ -28,6 +28,7 @@ function seed(
 	instanceState.instances = [
 		{
 			id: "folder-provider",
+			colorSlot: 0,
 			name: "Folder provider",
 			driver,
 			isDefault: true,

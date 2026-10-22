@@ -142,6 +142,24 @@ test.describe("phone session island", () => {
 		for (const action of ["share", "settings", "debug"]) {
 			await expect(sheet.getByTestId(`overflow-${action}`)).toBeVisible();
 		}
+		const debug = sheet.getByRole("switch", { name: "Debug panel" });
+		await expect(debug).toHaveAttribute("aria-checked", "false");
+		for (const part of [
+			debug.getByText("Debug", { exact: true }),
+			debug.locator("svg").first(),
+			debug.locator("[data-switch]"),
+		]) {
+			const box = await part.boundingBox();
+			if (!box) throw new Error("Debug tap point is missing");
+			const wasChecked = (await debug.getAttribute("aria-checked")) === "true";
+			await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+			await expect(debug).toHaveAttribute("aria-checked", String(!wasChecked));
+			if (wasChecked) await expect(page.locator(".debug-panel")).toBeHidden();
+			else await expect(page.locator(".debug-panel")).toBeVisible();
+			await expect(sheet).toBeVisible();
+		}
+		await debug.tap();
+		await expect(debug).toHaveAttribute("aria-checked", "false");
 		const content = (await sheet.textContent()) ?? "";
 		for (const [before, after] of [
 			["Views", "Chat"],

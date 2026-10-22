@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { assignAccountColorSlots } from "../../../src/lib/account-directory.js";
 import {
 	AccountStillLimited,
 	type UsageReading,
@@ -55,22 +56,31 @@ export function setClaudeAccounts(
 	accounts: readonly (readonly [id: string, name: string])[],
 ): void {
 	// Like the daemon, replacing Claude accounts leaves other drivers' accounts listed.
+	const otherInstances = (mockInstances.get(page) ?? []).filter(
+		(instance) => instance["driver"] !== "claude",
+	);
 	const instances = [
-		...(mockInstances.get(page) ?? []).filter(
-			(instance) => instance["driver"] !== "claude",
+		...otherInstances,
+		...assignAccountColorSlots(
+			accounts.map(([id, name], index) => ({
+				id,
+				name,
+				isDefault: index === 0,
+				port: 0,
+				managed: false,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 1,
+				driver: "claude",
+				usageEligible: true,
+			})),
+			otherInstances.map((instance) => ({
+				colorSlot:
+					typeof instance["colorSlot"] === "number"
+						? instance["colorSlot"]
+						: undefined,
+			})),
 		),
-		...accounts.map(([id, name], index) => ({
-			id,
-			name,
-			isDefault: index === 0,
-			port: 0,
-			managed: false,
-			status: "healthy",
-			restartCount: 0,
-			createdAt: 1,
-			driver: "claude",
-			usageEligible: true,
-		})),
 	];
 	mockInstances.set(page, instances);
 	requireRpcControl(page).setDaemonList("SubscribeInstances", { instances });
@@ -779,7 +789,7 @@ export const usageLimitStripHandlers: StepHandler[] = [
 	{
 		name: "assert an account dot colour",
 		match:
-			/^the (account picker|handoff dialog|transcript divider) shows (\S+) with a (violet|teal|blue) dot$/,
+			/^the (account picker|handoff dialog|transcript divider) shows (\S+) with a (blue|green|pink) dot$/,
 		run: async ({ world, match }) => {
 			const region = world.page.getByTestId(
 				{
@@ -795,9 +805,9 @@ export const usageLimitStripHandlers: StepHandler[] = [
 			).toHaveCSS(
 				"background-color",
 				{
-					violet: "rgb(176, 140, 255)",
-					teal: "rgb(47, 211, 192)",
-					blue: "rgb(142, 155, 255)",
+					blue: "rgb(90, 169, 245)",
+					green: "rgb(62, 207, 142)",
+					pink: "rgb(244, 105, 196)",
 				}[match[3] ?? ""] ?? "",
 			);
 		},

@@ -36,6 +36,11 @@ export const uiState = $state({
 	sidebarCollapsed: safeGetItem(SIDEBAR_STORAGE_KEY) === "true",
 	settledShelfOpen: safeGetItem(SETTLED_SHELF_STORAGE_KEY) === "true",
 	snoozedShelfOpen: safeGetItem(SNOOZED_SHELF_STORAGE_KEY) === "true",
+	sessionGroupsOpen: {
+		pinned: safeGetItem("session-group-pinned-open") !== "false",
+		running: safeGetItem("session-group-running-open") !== "false",
+		idle: safeGetItem("session-group-idle-open") !== "false",
+	},
 	// Open unless the user closed it: drafts are their own unsent text.
 	draftsTrayOpen: safeGetItem(DRAFTS_TRAY_STORAGE_KEY) !== "false",
 	// Cleanup and bulk settle share one row-selection mode, entered from either sidebar surface.
@@ -128,6 +133,18 @@ export function setSettledShelfOpen(open: boolean): void {
 	uiState.settledShelfOpen = open;
 	try {
 		localStorage.setItem(SETTLED_SHELF_STORAGE_KEY, String(open));
+	} catch {
+		/* Storage may be unavailable; keep the in-memory preference. */
+	}
+}
+
+export function setSessionGroupOpen(
+	group: keyof typeof uiState.sessionGroupsOpen,
+	open: boolean,
+): void {
+	uiState.sessionGroupsOpen[group] = open;
+	try {
+		localStorage.setItem(`session-group-${group}-open`, String(open));
 	} catch {
 		/* Storage may be unavailable; keep the in-memory preference. */
 	}

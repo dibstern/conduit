@@ -54,6 +54,7 @@ export const harnessHandlers: StepHandler[] = [
 				{
 					id: "cursor-work",
 					name: "Cursor work",
+					colorSlot: 4,
 					driver: "cursor",
 					isDefault: true,
 					usageEligible: false,

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, waitFor } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import {
 	applyGetModelsResponse,
 	clearDiscoveryState,
@@ -185,6 +185,21 @@ export const Default: Story = {
 			// A new session starts on the project's default model.
 			expect(context.canvasElement.textContent).not.toContain("Select model");
 		});
+		if (window.innerWidth >= 768) return;
+		const body = within(context.canvasElement.ownerDocument.body);
+		const settings = body.getByTestId("list-bar-settings");
+		await expect(settings.getBoundingClientRect().width).toBe(44);
+		await expect(settings.getBoundingClientRect().height).toBe(44);
+		await userEvent.click(settings);
+		await expect(body.getByRole("dialog", { name: "Settings" })).toBeVisible();
+		await expect(body.getByTestId("avatar-change-root")).toBeVisible();
+		await userEvent.click(body.getByTestId("settings-close-btn"));
+		await waitFor(() =>
+			expect(body.queryByRole("dialog", { name: "Settings" })).toBeNull(),
+		);
+		(
+			context.canvasElement.ownerDocument.activeElement as HTMLElement | null
+		)?.blur();
 	},
 };
 

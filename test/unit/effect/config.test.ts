@@ -121,6 +121,7 @@ describe("DaemonConfigSchema", () => {
 			expect(result.success.instances).toEqual([
 				{
 					id: "claude",
+					colorSlot: 0,
 					name: "Claude",
 					driver: "claude",
 					port: 0,

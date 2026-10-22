@@ -250,6 +250,7 @@ const replyAsk: ReplyReference = {
 	kind: "message",
 	ordinal: 24,
 	category: "Ask",
+	builtinCategory: "ask",
 	glyph: "?",
 	time: "31:02",
 	text: "The phone sidebar baseline shifts 2px because the unread badge now paints before the first frame. Recapture it, or keep the old paint order?",
@@ -347,6 +348,7 @@ export const ReplyMultiple: Story = {
 				kind: "excerpt",
 				ordinal: 18,
 				category: "Decision",
+				builtinCategory: "decision",
 				glyph: "◆",
 				time: "22:40",
 				text: "one subscribeSessionSummaries stream",
@@ -354,10 +356,33 @@ export const ReplyMultiple: Story = {
 		]),
 };
 export const ReplyReferencesPhone: Story = {
+	tags: ["visual-phone-viewport"],
 	globals: { viewport: { value: "mobile1", isRotated: false } },
 	beforeEach: ({ canvasElement }) => setupWords(canvasElement, true),
 	play: async ({ canvasElement }) =>
 		showReferences(canvasElement, [replyAsk], "Claude"),
+};
+
+export const ReplyCustomLookalike: Story = {
+	play: async ({ canvasElement }) => {
+		await showReferences(canvasElement, [
+			{
+				...replyAsk,
+				builtinCategory: undefined,
+				category: "Decision",
+				glyph: "◆",
+			},
+		]);
+		const chip = within(canvasElement).getByTestId("surfacing-ref-token");
+		await expect(getComputedStyle(chip).color).toBe(
+			getComputedStyle(canvasElement.querySelector(".mirror") as HTMLElement)
+				.color,
+		);
+	},
+};
+export const ReplyCustomLookalikeLight: Story = {
+	...ReplyCustomLookalike,
+	globals: { theme: "light" },
 };
 export const ReplyAtomicEditing: Story = {
 	play: async ({ canvasElement }) => {
@@ -439,24 +464,17 @@ export const OverflowingInsert: Story = {
 			});
 		await expectCaretOnLastLineVisible();
 
-		// A mid-word insert that wraps its word onto a new last line: the text
-		// after the caret decides where the caret lands. Pad a final line until
-		// its word sits on the wrap boundary, then grow the word from its middle.
+		// Fixed input straddles the wrap at both viewport widths, independently
+		// of scrollbar gutters. Text after the caret decides where it lands.
 		const word = "bbbbbbbb";
-		document.execCommand("insertText", false, `\n ${word}`);
-		const lineStart = textarea.value.length - word.length - 1;
+		const prefix = "a".repeat(
+			window.matchMedia("(width < 48rem)").matches ? 31 : 78,
+		);
+		document.execCommand("insertText", false, `\n${prefix} ${word}`);
 		const rows = () => mirror.getBoundingClientRect().height;
-		const flush = () => new Promise(requestAnimationFrame);
-		await flush();
+		await new Promise(requestAnimationFrame);
 		await document.fonts.ready;
 		const height = rows();
-		while (rows() === height) {
-			textarea.setSelectionRange(lineStart, lineStart);
-			document.execCommand("insertText", false, "a");
-			await flush();
-		}
-		document.execCommand("delete");
-		await flush();
 		const middle = textarea.value.length - word.length / 2;
 		textarea.setSelectionRange(middle, middle);
 		document.execCommand("insertText", false, "bbbb");
@@ -498,6 +516,7 @@ function setupWords(canvasElement: HTMLElement, phone: boolean) {
 		{
 			id: "claude",
 			name: "personal",
+			colorSlot: 0,
 			driver: "claude",
 			isDefault: true,
 			port: 0,
@@ -1398,6 +1417,7 @@ function narrowComposer(
 					{
 						...mockClaudeAccount,
 						id: "work",
+						colorSlot: 1,
 						name: "work",
 						isDefault: false,
 						usageEligible: true,
@@ -1838,11 +1858,13 @@ function setupComposerStage(
 		...instanceState.instances.map((account) => ({
 			...account,
 			name: limited ? "lab" : stage === "usage" ? "work" : "personal",
+			colorSlot: limited ? 2 : stage === "usage" ? 1 : 0,
 			usageEligible: true,
 		})),
 		{
 			...mockClaudeAccount,
 			id: "standby",
+			colorSlot: limited || stage === "usage" ? 0 : 1,
 			name: "personal",
 			isDefault: false,
 			usageEligible: true,
@@ -1852,6 +1874,7 @@ function setupComposerStage(
 					{
 						...mockClaudeAccount,
 						id: "lab",
+						colorSlot: 2,
 						name: "lab",
 						isDefault: false,
 						usageEligible: true,

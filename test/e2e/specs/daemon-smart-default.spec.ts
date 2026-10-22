@@ -32,6 +32,7 @@ const SMART_DEFAULT_OPENCODE_URL = process.env["OPENCODE_URL"];
 
 interface SmartDaemonInfo {
 	daemon: ForegroundDaemonHandle;
+	socketPath: string;
 	port: number;
 	baseUrl: string;
 	projectUrl: string;
@@ -62,13 +63,14 @@ const test = base.extend<{
 
 		const staticDir = resolve(import.meta.dirname, "../../../dist/frontend");
 		const tmpDir = mkdtempSync(join(tmpdir(), "e2e-smart-default-"));
+		const socketPath = join(tmpDir, "relay.sock");
 
 		// KEY: no opencodeUrl, smartDefault: true (the default)
 		const daemon = await startForegroundDaemon({
 			port: 0,
 			host: "127.0.0.1",
 			configDir: tmpDir,
-			socketPath: join(tmpDir, "relay.sock"),
+			socketPath,
 			staticDir,
 			logLevel: "error",
 			// No opencodeUrl! Smart default should auto-detect.
@@ -83,13 +85,13 @@ const test = base.extend<{
 
 		// Startup never probes: the smart default resolves on first use, here
 		// Start Instance (what `conduit instance start opencode` sends).
-		await sendRpcRequest(join(tmpDir, "relay.sock"), {
+		await sendRpcRequest(socketPath, {
 			_tag: "StartInstance",
 			instanceId: "opencode",
 		});
 
 		try {
-			await use({ daemon, port, baseUrl, projectUrl });
+			await use({ daemon, socketPath, port, baseUrl, projectUrl });
 		} finally {
 			await daemon.stop();
 			try {
@@ -114,13 +116,14 @@ test.describe("Smart Default Detection", () => {
 	test("auto-detects running OpenCode and creates unmanaged default instance", async ({
 		smartDaemon,
 	}) => {
-		const { daemon } = smartDaemon;
-		const instances = daemon.getInstances();
+		const { socketPath } = smartDaemon;
+		// RPC awaits current state; daemon.getInstances() returns a cached snapshot.
+		const { instances } = await sendRpcRequest(socketPath, {
+			_tag: "GetInstances",
+		});
 
 		// Should have exactly one "opencode" instance
-		const defaultInst = instances.find(
-			(i: { id: string }) => i.id === "opencode",
-		);
+		const defaultInst = instances.find((i) => i.id === "opencode");
 		expect(defaultInst).toBeDefined();
 		if (!defaultInst) throw new Error("expected default instance");
 		expect(defaultInst.name).toBe("Default");

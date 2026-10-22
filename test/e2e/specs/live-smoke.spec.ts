@@ -4,7 +4,11 @@
 // and valid API credentials.
 
 import { expect, test } from "@playwright/test";
-import { createE2EHarness, type E2EHarness } from "../helpers/e2e-harness.js";
+import {
+	createE2EHarness,
+	createSession,
+	type E2EHarness,
+} from "../helpers/e2e-harness.js";
 import {
 	type SpawnedOpenCode,
 	spawnOpenCode,
@@ -30,9 +34,17 @@ test.describe("Live Smoke", () => {
 	test("send prompt and receive pong", async ({ page }) => {
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
+		// Standalone relays do not provide the daemon's draft placement RPCs.
+		const sessionId = await createSession(
+			harness.relayPort,
+			"opencode",
+			undefined,
+			undefined,
+			"e2e-test",
+		);
+		harness.trackSession(sessionId);
 
-		// Navigate to the relay SPA and wait for WS connection
-		await app.goto(`${harness.relayBaseUrl}/?p=e2e-test`);
+		await app.goto(`${harness.relayBaseUrl}/s/${sessionId}?p=e2e-test`);
 
 		// Send a simple prompt
 		await app.sendMessage("Reply with just the word pong");

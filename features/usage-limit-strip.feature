@@ -391,8 +391,8 @@ Scenario Outline: Switch account lists each account's fresh quota and pre-select
   And the account picker row for team-max reads limited · 2:30 pm and cannot be picked
   And the account picker pre-selects personal
   And the account picker shows claude with a blue dot
-  And the account picker shows self with a teal dot
-  And the account picker shows team with a violet dot
+  And the account picker shows self with a green dot
+  And the account picker shows team with a pink dot
 
 Examples:
   | viewport | quota       | caption       |
@@ -416,7 +416,7 @@ Scenario Outline: switching confirms what carries over, hands the session over a
   And the handoff dialog carries <messages>
   And the swap card hands work2claude at limited · Mon 9:00 am to personal at 77% left
   And the handoff dialog shows claude with a blue dot
-  And the handoff dialog shows self with a teal dot
+  And the handoff dialog shows self with a green dot
   When I press Switch and continue
   Then the ContinueSession RPC switches the current session from claude to self
   And the handoff dialog is closed
@@ -425,7 +425,7 @@ Scenario Outline: switching confirms what carries over, hands the session over a
   And the cut-off tag is visible
   When the session resumes on self from claude by user and replies All provider tests pass now.
   Then the transcript divider reading <divider> sits directly above the reply All provider tests pass now.
-  And the transcript divider shows self with a teal dot
+  And the transcript divider shows self with a green dot
   And the What carried over? link sits <link> under the divider
   When I open What carried over? on the transcript divider
   Then the handoff dialog is read-only and carries <messages>
@@ -537,7 +537,7 @@ Scenario Outline: auto-switch matches frame G: a divider and a toast say the ses
   When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
   And the session resumes on self from claude by auto-switch and replies All provider tests pass now.
   Then the transcript divider reading <divider> sits directly above the reply All provider tests pass now.
-  And the transcript divider shows self with a teal dot
+  And the transcript divider shows self with a green dot
   And a toast titled Switched to personal says work2claude reached its weekly limit.
   And the toast offers What carried over? at the left and Settings at the right
   And the layout region visually matches <baseline> at <threshold> percent

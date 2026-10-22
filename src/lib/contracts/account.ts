@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { AccountColorSlotSchema } from "./account-color.js";
 import { ClaudeConfigDirSchema } from "./claude-config-dir.js";
 
 export const AccountIdSchema = Schema.String.pipe(Schema.brand("AccountId"));
@@ -16,6 +17,7 @@ export const ClaudeAccountSchema = Schema.Struct({
 	driver: Schema.Literal("claude"),
 	id: Schema.suspend(() => AccountIdSchema),
 	name: Schema.String,
+	colorSlot: Schema.optional(AccountColorSlotSchema),
 	configuredFolder: Schema.optional(Schema.String),
 	folder: ClaudeConfigDirSchema,
 	env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
@@ -27,6 +29,7 @@ export const OpenCodeAccountSchema = Schema.Struct({
 	driver: Schema.Literal("opencode"),
 	id: Schema.suspend(() => AccountIdSchema),
 	name: Schema.String,
+	colorSlot: Schema.optional(AccountColorSlotSchema),
 	usageEligible: Schema.Literal(false),
 	url: Schema.optional(Schema.String),
 	port: Schema.optional(Schema.Number),
@@ -40,6 +43,7 @@ export const CursorAccountSchema = Schema.Struct({
 	driver: Schema.Literal("cursor"),
 	id: Schema.suspend(() => AccountIdSchema),
 	name: Schema.String,
+	colorSlot: Schema.optional(AccountColorSlotSchema),
 	configuredFolder: Schema.optional(Schema.String),
 	env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 	usageEligible: Schema.Boolean,
@@ -50,6 +54,7 @@ export const CodexAccountSchema = Schema.Struct({
 	driver: Schema.Literal("codex"),
 	id: Schema.suspend(() => AccountIdSchema),
 	name: Schema.String,
+	colorSlot: Schema.optional(AccountColorSlotSchema),
 	configuredFolder: Schema.optional(Schema.String),
 	env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 	usageEligible: Schema.Boolean,

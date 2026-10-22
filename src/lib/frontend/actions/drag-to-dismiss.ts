@@ -2,10 +2,12 @@ import type { Action } from "svelte/action";
 
 type DragToDismissOptions = {
 	ondismiss: () => void;
+	/** Forms can lock dismissal while a save is in flight. */
+	enabled?: boolean | undefined;
 	/** 0 at rest, 1 fully dragged off; `settling` is true while the sheet animates on its own. */
 	onprogress?: (progress: number, settling: boolean) => void;
 	/** How far down the sheet travels to be put away: off screen unless it collapses into something. */
-	dismissOffset?: () => number;
+	dismissOffset?: (() => number) | undefined;
 };
 
 /** A sheet released past this fraction of its height, or flicked faster, completes the move. */
@@ -15,6 +17,15 @@ const SETTLE_MS = 220;
 
 export const settleMs = () =>
 	matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : SETTLE_MS;
+
+export const sheetScrimStyle = ({
+	progress,
+	settling,
+}: {
+	progress: number;
+	settling: boolean;
+}) =>
+	`opacity: ${1 - progress}; transition: ${settling ? `opacity ${SETTLE_MS}ms linear` : "none"}`;
 
 /**
  * Offsets a sheet `offset` px below its resting place, of `away` px to be put
@@ -76,6 +87,7 @@ export const dragToDismiss: Action<HTMLElement, DragToDismissOptions> = (
 	function onStart(event: TouchEvent) {
 		const touch = event.touches[0];
 		tracking =
+			options.enabled !== false &&
 			event.touches.length === 1 &&
 			touch !== undefined &&
 			dismissTimer === undefined;
@@ -139,6 +151,12 @@ export const dragToDismiss: Action<HTMLElement, DragToDismissOptions> = (
 	return {
 		update(next) {
 			options = next;
+			if (options.enabled === false) {
+				clearTimeout(dismissTimer);
+				dismissTimer = undefined;
+				place(0, true);
+				tracking = dragging = false;
+			}
 		},
 		destroy() {
 			clearTimeout(dismissTimer);
