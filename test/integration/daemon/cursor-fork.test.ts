@@ -22,13 +22,13 @@ import type {
 	MessagePartRow,
 	MessageWithParts,
 } from "../../../src/lib/persistence/read-model-types.js";
-import { renderCursorForkDigest } from "../../../src/lib/provider/cursor/cursor-fork-digest.js";
 import { discoverCursorEffect } from "../../../src/lib/provider/cursor/cursor-runner-driver.js";
 import {
 	cursorSessionStorePath,
 	readCursorSessionIdentity,
 } from "../../../src/lib/provider/cursor/cursor-session-recovery.js";
 import { createTraceCursorSdkPort } from "../../../src/lib/provider/cursor/sdk-trace-player.js";
+import { renderForkDigest } from "../../../src/lib/provider/fork-digest.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -55,7 +55,7 @@ function inheritedDigest(fixture: ProcessHarness, sessionId: string) {
 					"SELECT * FROM message_parts WHERE message_id = ? ORDER BY sort_order",
 				)
 				.all(message.id);
-		return renderCursorForkDigest(messages);
+		return renderForkDigest(messages);
 	} finally {
 		db.close();
 	}

@@ -126,7 +126,9 @@ const resolvePendingClaudeQuestions = (
 		// replying instead of answering interrupts it and resolves the question.
 		// Each path records question.resolved, which takes the card down.
 		const pendingQuestions =
-			yield* pendingInteractionService.listPendingQuestions(input.sessionId);
+			(yield* pendingInteractionService.listPendingQuestions(
+				input.sessionId,
+			)).filter((question) => question.delivery !== "async");
 		for (const question of pendingQuestions) {
 			if (!question.recovered) continue;
 			yield* completeRecoveredQuestion(question, null);

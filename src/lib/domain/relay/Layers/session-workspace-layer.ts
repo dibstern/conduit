@@ -49,7 +49,32 @@ export const SessionWorkspaceLive = Layer.effect(
 		const commitAndSignal = yield* makeCommitAndSignal;
 		// Capture the relay context so command commits retain its event bus.
 		const services = yield* Effect.context<Dependencies>();
-		const launches = yield* Semaphore.make(1);
+		// One permit per session operation; all permits exclude the whole project.
+		// Keep this finite: Infinity - Infinity would break semaphore accounting.
+		const projectPermits = Number.MAX_SAFE_INTEGER;
+		const launches = yield* Semaphore.make(projectPermits);
+		const sessions = new Map<
+			string,
+			{ readonly lock: Semaphore.Semaphore; users: number }
+		>();
+		const withLaunch: SessionWorkspace["withLaunch"] = (sessionId, effect) =>
+			Effect.acquireUseRelease(
+				Effect.sync(() => {
+					let entry = sessions.get(sessionId);
+					if (!entry) {
+						entry = { lock: Semaphore.makeUnsafe(1), users: 0 };
+						sessions.set(sessionId, entry);
+					}
+					// Count waiters too, including those waiting for the project permit.
+					entry.users++;
+					return entry;
+				}),
+				(entry) => launches.withPermits(1)(entry.lock.withPermits(1)(effect)),
+				(entry) =>
+					Effect.sync(() => {
+						if (--entry.users === 0) sessions.delete(sessionId);
+					}),
+			);
 		const folders = [config.projectDir, ...(config.extraFolders ?? [])];
 		const readWorkspace = (sessionId: string) =>
 			Effect.gen(function* () {
@@ -375,9 +400,11 @@ export const SessionWorkspaceLive = Layer.effect(
 			);
 		};
 		return {
-			withLaunch: launches.withPermits(1),
+			withLaunch,
+			withProjectLaunch: launches.withPermits(projectPermits),
 			renameBranch: (sessionId, branchName) =>
-				launches.withPermits(1)(
+				withLaunch(
+					sessionId,
 					Effect.gen(function* () {
 						const { workspace } = yield* readWorkspace(sessionId);
 						const ownership = yield* readSessionWorktreeOwnership(

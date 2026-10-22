@@ -110,6 +110,7 @@ function snapshotRowToHistory(
 		...parsed,
 		id: parsed.id,
 		role: parsed.role,
+		...(row.turn_id == null ? {} : { turnId: row.turn_id }),
 		parts,
 		...(row.context_tokens != null
 			? { contextTokens: row.context_tokens }
@@ -140,13 +141,14 @@ const TOOL_STATUSES = new Map<string, ToolStatus>([
 	["error", "error"],
 ]);
 
-/** The tool metadata the browser reads: a subagent's session, a settled
- *  status, and a launching row's task, outcome, step, times and usage.
+/** The tool metadata the browser reads: live output, a subagent's session,
+ *  a settled status, and a launching row's task, outcome, step, times and usage.
  *  Everything else stays on the server — an OpenCode edit's metadata alone
  *  holds the whole file twice over. */
 const BROWSER_METADATA_KEYS = new Set([
 	"status",
 	"childSessionId",
+	"subagentResult",
 	"sessionId",
 	"providerTaskId",
 	"backgrounded",
@@ -190,7 +192,7 @@ function browserMetadata(
 			([key, value]) =>
 				(BROWSER_METADATA_KEYS.has(key) ||
 					(cursor && CURSOR_PRESENTATION_KEYS.has(key)) ||
-					(cursor && inFlight && key === "output")) &&
+					(inFlight && key === "output" && typeof value === "string")) &&
 				(typeof value === "string" ||
 					typeof value === "number" ||
 					typeof value === "boolean" ||
@@ -419,6 +421,7 @@ export function messageRowsToHistory(
 		return {
 			id: row.id,
 			role: row.role as "user" | "assistant",
+			...(row.turn_id == null ? {} : { turnId: row.turn_id }),
 			...(row.is_backfilled === 1 ? { isBackfilled: true } : {}),
 			...(row.input_id ? { inputId: row.input_id } : {}),
 			...(row.steered === 1 ? { steered: true } : {}),

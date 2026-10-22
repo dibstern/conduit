@@ -1,0 +1,13 @@
+{"scenario":"login-browser","codexVersion":"0.162.1","recordedAt":"2026-10-21T19:46:24.972Z"}
+{"dir":"out","at":2,"message":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"conduit-trace-recorder","version":"1.0.0","title":null},"capabilities":{"experimentalApi":true}}}}
+{"dir":"in","at":124,"message":{"id":1,"result":{"userAgent":"conduit-trace-recorder/0.162.1 (Mac OS 26.6.2; arm64) unknown (conduit-trace-recorder; 1.0.0)","codexHome":"/trace-root/account-home","platformFamily":"unix","platformOs":"macos"}}}
+{"dir":"in","at":124,"message":{"method":"remoteControl/status/changed","params":{"status":"disabled","serverName":"test-host","installationId":"00000000-0000-0000-0000-000000000000","environmentId":null},"emittedAtMs":1792611985095}}
+{"dir":"out","at":126,"message":{"jsonrpc":"2.0","method":"initialized"}}
+{"dir":"out","at":126,"message":{"jsonrpc":"2.0","id":2,"method":"account/read","params":{"refreshToken":false}}}
+{"dir":"in","at":131,"message":{"id":2,"result":{"account":null,"requiresOpenaiAuth":true,"workspaceRouting":null}}}
+{"dir":"out","at":132,"message":{"jsonrpc":"2.0","id":3,"method":"account/login/start","params":{"type":"chatgpt"}}}
+{"dir":"in","at":133,"message":{"id":3,"result":{"type":"chatgpt","loginId":"31c576a5-0866-47f7-8715-c3101a7fe556","authUrl":"https://auth.openai.com/authorize?client_id=fixture&state=fixture"}}}
+{"dir":"in","at":1000,"message":{"method":"account/login/completed","params":{"loginId":"31c576a5-0866-47f7-8715-c3101a7fe556","success":true,"error":null}}}
+{"dir":"in","at":1000,"message":{"method":"account/updated","params":{"authMode":"chatgpt","planType":"plus"}}}
+{"dir":"out","at":1001,"message":{"jsonrpc":"2.0","id":10,"method":"account/read","params":{"refreshToken":false}}}
+{"dir":"in","at":1002,"message":{"id":10,"result":{"account":{"type":"chatgpt","email":"codex-replay@example.test","planType":"plus"},"requiresOpenaiAuth":true}}}

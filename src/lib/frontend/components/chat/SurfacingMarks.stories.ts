@@ -58,6 +58,7 @@ const activity: ActivityPart[] = [
 const segment: Segment = { activity, reply: [] };
 const turn: Turn = {
 	id: "marks-turn",
+	storeId: "marks-turn",
 	user: {
 		type: "user",
 		uuid: "marks-user",

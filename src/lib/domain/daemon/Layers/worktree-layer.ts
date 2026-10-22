@@ -121,6 +121,8 @@ export const makeWorktreeLive = (
 	options: {
 		readonly gitExecutable?: string;
 		readonly gitTimeoutMs?: number;
+		/** `worktree add` checks out the whole tree, which takes far longer in a large repo. */
+		readonly checkoutTimeoutMs?: number;
 		readonly setupTimeoutMs?: number;
 	} = {},
 ) =>
@@ -248,8 +250,12 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 						(cleanup) => Effect.sync(cleanup),
 					),
 				);
-			const git = (folder: string, args: readonly string[], input?: string) =>
-				Effect.tryPromise({
+			const git = (folder: string, args: readonly string[], input?: string) => {
+				const timeoutMs =
+					args[0] === "worktree" && args[1] === "add"
+						? (options.checkoutTimeoutMs ?? 10 * 60_000)
+						: (options.gitTimeoutMs ?? 30_000);
+				return Effect.tryPromise({
 					try: async (signal) => {
 						const env: NodeJS.ProcessEnv = { ...process.env };
 						for (const name of Object.keys(env))
@@ -264,7 +270,7 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 								cwd: folder,
 								env,
 								encoding: "utf8",
-								timeout: options.gitTimeoutMs ?? 30_000,
+								timeout: timeoutMs,
 								maxBuffer: 1_048_576,
 								signal,
 							},
@@ -288,10 +294,16 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 							reason: "git-failed",
 							message: hasCode(cause, "ENOENT")
 								? "Git executable was not found. Install Git to create a worktree."
-								: `Git ${args[0]} failed: ${detail.slice(0, 2_000)}`,
+								: typeof cause === "object" &&
+										cause !== null &&
+										"killed" in cause &&
+										cause.killed === true
+									? `Git ${args[0]} timed out after ${Math.round(timeoutMs / 1_000)}s`
+									: `Git ${args[0]} failed: ${detail.slice(0, 2_000)}`,
 						});
 					},
 				});
+			};
 			const filesystem = <A>(path: string, operation: () => Promise<A>) =>
 				Effect.tryPromise({
 					try: operation,

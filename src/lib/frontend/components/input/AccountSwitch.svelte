@@ -1,6 +1,6 @@
 <!--
-  AccountSwitch — moves one Claude session to another account: a picker of the
-  Claude accounts with each one's quota checked fresh on every open, then the
+  AccountSwitch — moves one session to another account of the same provider:
+  accounts with each one's quota checked fresh on every open, then the
   handoff confirm, then ContinueSession on the chosen account. The usage-limit
   strip's Switch account brings its own trigger; only the session moves, never
   the project's binding.
@@ -14,6 +14,7 @@
 	import type { Snippet } from "svelte";
 	import type { LimitRecovery } from "../../../contracts/limit-recovery.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
+	import { getDriverTraits, getInstanceById } from "../../stores/instance.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { quotaBlocksSwitch, quotaReading } from "../../utils/continuation.js";
 	import HandoffDialog from "../overlays/HandoffDialog.svelte";
@@ -44,7 +45,7 @@
 	} = $props();
 
 	const compact = $derived(sessionViewState.compact);
-	const claudeAccounts = $derived(getClaudeAccounts(projectSlug));
+	const claudeAccounts = $derived(getClaudeAccounts(projectSlug, getDriverTraits(getInstanceById(account)?.driver)?.usageHarness === "codex" ? "codex" : "claude"));
 	const accounts = $derived(claudeAccounts.configuredAccounts);
 
 	let pickerOpen = $state(false);

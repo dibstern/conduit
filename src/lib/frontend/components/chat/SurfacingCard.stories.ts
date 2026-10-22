@@ -83,6 +83,7 @@ const activity: ActivityPart[] = descriptions.flatMap(
 const segment: Segment = { activity, reply: [] };
 const turn: Turn = {
 	id: "jev-story-turn",
+	storeId: "jev-story-turn",
 	user: {
 		type: "user",
 		uuid: "jev-story-user",

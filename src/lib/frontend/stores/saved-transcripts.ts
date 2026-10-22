@@ -13,8 +13,11 @@
 //   it never holds up the first subscribe.
 // - A write exceeds the quota or the transaction aborts: the old record, if
 //   any, stays as it was; a transaction is all or nothing.
-// - A record from another build, protocol or schema version, or one that no
-//   longer decodes: deleted on read, never drawn.
+// - A record from another protocol or schema version, or one that no longer
+//   decodes: deleted on read, never drawn.
+// - A record from another build: drawn, since its protocol and schema still
+//   match. The server refuses a point from another build and its snapshot
+//   replaces the page, so a deploy costs one snapshot, not a cold open.
 // - A record from another store (reset, fresh install): the server refuses
 //   its resume point and sends a fresh snapshot, which replaces it.
 // - A store restored from a backup: the server sends a snapshot older than
@@ -26,7 +29,6 @@
 //   the record must be exactly what the server sent at one version.
 
 import { Option, Schema } from "effect";
-import { BUILD_ID } from "../../build-id.js";
 import {
 	type ResumePoint,
 	SessionDetailEnvelopeSchema,
@@ -49,7 +51,6 @@ const SavedTranscript = Schema.Struct({
 	schema: Schema.Literal(1),
 	sessionId: Schema.String,
 	project: Schema.String,
-	buildId: Schema.String,
 	protocolVersion: Schema.Number,
 	openedAt: Schema.Number,
 	snapshot: SavedSnapshot,
@@ -61,7 +62,6 @@ const decode = (stored: unknown): SavedTranscript | undefined =>
 		Option.filter(
 			Schema.decodeUnknownOption(SavedTranscript)(stored),
 			(record) =>
-				record.buildId === BUILD_ID &&
 				record.protocolVersion === WS_PROTOCOL_VERSION &&
 				record.snapshot.resumePoint !== undefined,
 		),
@@ -191,7 +191,6 @@ export const saveTranscript = (
 					schema: 1,
 					sessionId,
 					project,
-					buildId: BUILD_ID,
 					protocolVersion: WS_PROTOCOL_VERSION,
 					openedAt: Date.now(),
 					snapshot,

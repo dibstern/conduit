@@ -84,6 +84,10 @@
 			if (typeof cmd === "string") return cmd;
 		}
 		if (toolName === "edit" || toolName === "write" || toolName === "read") {
+			const paths = toolInput["filePaths"];
+			if (Array.isArray(paths) && paths.length > 0 && paths.every((path) => typeof path === "string")) {
+				return paths.join("\n");
+			}
 			const path =
 				toolInput["file_path"] ?? toolInput["path"] ?? toolInput["file"];
 			if (typeof path === "string") return path;

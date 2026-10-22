@@ -179,7 +179,7 @@ export const bindTurnTimelineSink = (sinkId: string, key: TurnKey): void => {
 };
 
 export const observeTurnTimelineFrame = (output: SessionOutput): void => {
-	if (!active || output.type === "background-task") return;
+	if (!active || !("sinkId" in output)) return;
 	const id = active.sinks.get(output.sinkId);
 	const turn = id === undefined ? undefined : active.pending.get(id);
 	if (!turn) return;

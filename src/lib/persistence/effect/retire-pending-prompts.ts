@@ -28,6 +28,7 @@ export const retirePendingPrompts = (prompts: readonly PendingPrompt[]) =>
 						JOIN sessions s ON s.id = pa.session_id
 						WHERE pa.id = ${prompt.id} AND pa.session_id = ${prompt.sessionId}
 							AND pa.type = ${prompt.type} AND pa.status = 'pending'
+							AND COALESCE(json_extract(pa.details, '$.delivery'), '') <> 'async'
 							AND s.project_id = ${eventStore.projectId}`;
 					if (rows.length > 0) remaining.push(prompt);
 				}
@@ -99,6 +100,7 @@ export const makeRetireReplacedProcessPrompts = Effect.gen(function* () {
 			}>`SELECT pa.id, pa.session_id, pa.type FROM pending_approvals pa
 				JOIN sessions s ON s.id = pa.session_id
 				WHERE pa.status = 'pending' AND pa.provider_process_id IS NOT NULL
+					AND COALESCE(json_extract(pa.details, '$.delivery'), '') <> 'async'
 					AND pa.provider_process_id <> ${currentProcessId}
 					AND s.project_id = ${eventStore.value.projectId}
 					AND ${"sessionId" in scope ? client`pa.session_id = ${scope.sessionId}` : client`s.provider IN ${client.in(scope.providerInstanceIds)}`}`;

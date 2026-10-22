@@ -123,7 +123,7 @@ export const worktreeFixture = () => {
 	};
 	const createEffect = (
 		branchName?: string,
-		options?: { gitExecutable?: string; gitTimeoutMs?: number },
+		options?: Parameters<typeof makeWorktreeLive>[1],
 		folders: readonly WorktreeFolder[] = [context.folder],
 		baseBranches?: Readonly<Record<string, string>>,
 	) =>
@@ -132,7 +132,7 @@ export const worktreeFixture = () => {
 		).pipe(Effect.provide(makeWorktreeLive(context.configDir, options)));
 	const creationError = async (
 		branchName?: string,
-		options?: { gitExecutable?: string; gitTimeoutMs?: number },
+		options?: Parameters<typeof makeWorktreeLive>[1],
 		folders: readonly WorktreeFolder[] = [context.folder],
 		baseBranches?: Readonly<Record<string, string>>,
 	) => {

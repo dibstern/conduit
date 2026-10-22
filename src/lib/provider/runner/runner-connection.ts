@@ -150,6 +150,7 @@ export const connectRunner = (options: {
 					if (message.type === "hello") {
 						if (greeted) return;
 						const helloFailure = runnerHelloFailure(message, "runner");
+						// Runner builds predating driverKind were all Claude.
 						if (
 							helloFailure ||
 							message.runnerId !== options.runnerId ||
@@ -441,6 +442,7 @@ export const connectRunner = (options: {
 			socket.once("connect", () =>
 				connection.write({
 					type: "hello",
+					// Runner builds predating driverKind were all Claude.
 					driverKind: options.driverKind ?? "claude",
 					protocolVersion:
 						process.env["NODE_ENV"] === "test" &&

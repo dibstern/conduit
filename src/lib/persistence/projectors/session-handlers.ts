@@ -735,9 +735,10 @@ export const sessionHandlers = {
 	"permission.asked": (event) => [
 		wakeSession(event.data.sessionId, event.createdAt, "approval"),
 	],
-	"question.asked": (event) => [
-		wakeSession(event.data.sessionId, event.createdAt, "question"),
-	],
+	"question.asked": (event) =>
+		event.data.delivery === "async"
+			? []
+			: [wakeSession(event.data.sessionId, event.createdAt, "question")],
 
 	// (P8) Denormalize last_message_at on the session. Owned by
 	// SessionProjector (not MessageProjector) to keep all session-table

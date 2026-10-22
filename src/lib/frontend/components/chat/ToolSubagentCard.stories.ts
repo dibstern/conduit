@@ -58,3 +58,41 @@ export const Final: Story = {
 	},
 };
 export const FinalLight: Story = { ...Final, globals: { theme: "light" } };
+
+export const CodexCompleted: Story = {
+	args: {
+		message: {
+			...mockToolSubagentCompleted,
+			input: {
+				tool: "Task",
+				description: "Inspect the patch",
+				prompt: "Inspect the patch",
+				subagentType: "Codex",
+				taskId: "codex-subagent-example",
+			},
+			metadata: {
+				subagentModel: "gpt-6.1-sol",
+				subagentResult:
+					"The patch handles child approvals and keeps their transcript separate.",
+			},
+		},
+	},
+};
+
+export const CodexFailed: Story = {
+	args: {
+		message: {
+			...mockToolSubagentCompleted,
+			input: {
+				tool: "Task",
+				description: "Inspect the patch",
+				subagentType: "Codex",
+				taskId: "codex-subagent-example",
+			},
+			metadata: {
+				outcome: "failed",
+				subagentResult: "Codex child failed: provider disconnected.",
+			},
+		},
+	},
+};

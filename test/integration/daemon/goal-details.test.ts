@@ -17,6 +17,7 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import {
 	ReadQueryEffectTag,
 	sessionGoalState,
+	sessionRowsToSessionInfoList,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { ClaudeEventTranslator } from "../../../src/lib/provider/claude/claude-event-translator.js";
@@ -29,6 +30,96 @@ import { partialFake } from "../../helpers/partial-fake.js";
 const testLayer = makePersistenceEffectLayer(":memory:", "test-project");
 
 describe("daemon goal details data path", () => {
+	it.effect(
+		"projects a stuck header after three SDK checks and clears it when met",
+		() =>
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				const read = yield* ReadQueryEffectTag;
+				const sessionId = "synthetic-stuck-header";
+				yield* commit([
+					canonicalEvent(
+						"session.created",
+						sessionId,
+						{ sessionId, title: "Synthetic goal", provider: "claude" },
+						{ provider: "claude", createdAt: 1 },
+					),
+				]);
+				let at = 100;
+				const sink = partialFake<EventSink>({
+					push: (event) =>
+						event.type === "session.goal_changed"
+							? commit(
+									translateProviderRuntimeEventToDomain(event).events.map(
+										(fact) => ({ ...fact, createdAt: (at += 100) }),
+									),
+								).pipe(Effect.asVoid)
+							: Effect.void,
+				});
+				const ctx = partialFake<ClaudeSessionContext>({
+					sessionId,
+					workspaceRoot: "/tmp/synthetic-goal",
+					startedAt: "2026-10-20T00:00:00Z",
+					pendingApprovals: new Map(),
+					pendingQuestions: new Map(),
+					inFlightTools: new Map(),
+					eventSink: sink,
+					resumeSessionId: "synthetic-sdk-goal",
+					turnCount: 0,
+					stopped: false,
+				});
+				const translator = new ClaudeEventTranslator({ getSink: () => sink });
+				for (let iterations = 1; iterations <= 3; iterations++) {
+					yield* translator.translate(
+						ctx,
+						decodeClaudeSDKMessage({
+							type: "active_goal",
+							uuid: `synthetic-check-${iterations}`,
+							session_id: "synthetic-sdk-goal",
+							value: {
+								condition: "Publish the synthetic release",
+								iterations,
+								set_at: 100,
+								tokens_at_start: 0,
+								last_reason:
+									"Synthetic release review approval is missing and prevents publication.",
+							},
+						}),
+					);
+					const row = yield* read.getSession(sessionId);
+					if (!row) throw new Error("Missing synthetic goal session");
+					expect(sessionRowsToSessionInfoList([row])[0]?.goalStuck).toEqual(
+						iterations < 3 ? undefined : { since: 200, lastAt: 400, count: 3 },
+					);
+				}
+				yield* commit([
+					canonicalEvent(
+						"session.goal_changed",
+						sessionId,
+						{
+							sessionId,
+							goal: null,
+							ended: "met",
+							endedGoal: {
+								condition: "Publish the synthetic release",
+								iterations: 4,
+								setAt: 100,
+								tokensAtStart: 0,
+								lastReason: "The synthetic release is published.",
+							},
+							endedAt: 500,
+						},
+						{ provider: "claude", createdAt: 500 },
+					),
+				]);
+				const row = yield* read.getSession(sessionId);
+				if (!row) throw new Error("Missing completed synthetic goal session");
+				expect(
+					sessionRowsToSessionInfoList([row])[0]?.goalStuck,
+				).toBeUndefined();
+			}).pipe(Effect.provide(testLayer)),
+	);
+
 	it.effect(
 		"persists the reported judge and check turn through completion and hydration",
 		() =>

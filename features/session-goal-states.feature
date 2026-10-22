@@ -30,13 +30,13 @@ Examples:
   | condition             | reason                  | baseline                         | threshold |
   | All 38 scenarios pass | 35 of 38 scenarios pass | session-goal-not-yet-working-phone | 98        |
 
-Scenario Outline: An idle failed check has an amber subtitle
+Scenario Outline: An idle failed check keeps a teal Pursuing subtitle
   Given the viewport is a phone
   And the conduit app is served with the matching-model mockup
   When Claude sets the goal <condition>
   And Claude reports the goal check <reason>
   And Claude is idle
-  Then the amber session goal subtitle reads Pursuing · <condition>
+  Then the session goal subtitle reads Pursuing · <condition>
   And the composer status header is not visible
   And the composer has a violet goal border
   And the layout region visually matches <baseline> at <threshold> percent

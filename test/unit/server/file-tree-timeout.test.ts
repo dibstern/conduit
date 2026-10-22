@@ -15,7 +15,11 @@ import {
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { getFileTreeEntries } from "../../../src/lib/handlers/files.js";
 import { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { filesHandlers } from "../../../src/lib/server/ws-rpc/files.js";
 import {
 	makeMockConfig,
@@ -24,6 +28,104 @@ import {
 } from "../../helpers/mock-factories.js";
 
 describe("file tree time limits", () => {
+	// Failure modes: folder resolution can stall outside the deadline; a slow
+	// resolution can give the walk a fresh budget; timeout can lose partial entries
+	// or resolved roots, omit its warning, or leave the resolver running.
+	for (const resolution of ["stalled", "slow"] as const) {
+		it.effect(
+			`includes ${resolution} session-folder resolution in the RPC's 15-second deadline`,
+			() => {
+				const log = makeMockLogger();
+				const resolutionStopped = vi.fn();
+				const list = vi.fn((path: string) =>
+					path === "."
+						? Effect.succeed(
+								["a", "b", "c"].map((name) => ({ name, type: "directory" })),
+							)
+						: Effect.never,
+				);
+				return Effect.gen(function* () {
+					const eventStore = yield* EventStoreEffectTag;
+					const projections = yield* ProjectionRunnerEffectTag;
+					const read = yield* ReadQueryEffectTag;
+					yield* projections.recover();
+					yield* projections.projectEvent(
+						yield* eventStore.append(
+							canonicalEvent("session.created", "existing", {
+								sessionId: "existing",
+								title: "Existing session",
+								provider: "claude",
+							}),
+						),
+					);
+					const fiber = yield* Effect.forkScoped(
+						filesHandlers
+							.GetFileTree({
+								_tag: "GetFileTree",
+								sessionId: "existing",
+							})
+							.pipe(
+								Effect.provideService(ReadQueryEffectTag, {
+									...read,
+									getSession: (sessionId) =>
+										(resolution === "stalled"
+											? Effect.never
+											: Effect.sleep("10 seconds").pipe(
+													Effect.andThen(read.getSession(sessionId)),
+												)
+										).pipe(Effect.ensuring(Effect.sync(resolutionStopped))),
+								}),
+							),
+					);
+					yield* TestClock.adjust("14999 millis");
+					expect(fiber.pollUnsafe()).toBeUndefined();
+					yield* TestClock.adjust("1 millis");
+					expect(fiber.pollUnsafe()).toBeDefined();
+					const result = yield* Fiber.join(fiber);
+					expect(result).toEqual({
+						projectSlug: "private-project",
+						entries: resolution === "stalled" ? [] : ["a/", "b/", "c/"],
+						...(resolution === "slow"
+							? {
+									roots: [
+										{ root: "/tmp", label: "tmp" },
+										{ root: "/", label: "/" },
+									],
+								}
+							: {}),
+					});
+					expect(resolutionStopped).toHaveBeenCalledTimes(1);
+					expect(log.warn).toHaveBeenCalledWith(
+						expect.stringMatching(
+							/^File tree deadline reached: .+ after 15000 ms$/,
+						),
+					);
+					if (resolution === "stalled") expect(list).not.toHaveBeenCalled();
+				}).pipe(
+					Effect.scoped,
+					Effect.provideService(LoggerTag, log),
+					Effect.provideService(OpenCodeFileServiceTag, {
+						list,
+						read: () => Effect.succeed({ content: "" }),
+					}),
+					Effect.provideService(
+						ConfigTag,
+						makeMockConfig({
+							slug: "private-project",
+							projectDir: "/tmp",
+							extraFolders: ["/"],
+						}),
+					),
+					Effect.provide(AlertsLive, { local: true }),
+					Effect.provide(
+						makePersistenceEffectLayer(":memory:", "private-project"),
+						{ local: true },
+					),
+				);
+			},
+		);
+	}
+
 	it.effect("preserves breadth-first order and gitignore filtering", () =>
 		Effect.gen(function* () {
 			expect(yield* getFileTreeEntries()).toEqual([

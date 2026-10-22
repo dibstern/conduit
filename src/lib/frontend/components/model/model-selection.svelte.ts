@@ -1,5 +1,6 @@
 import { formatModelName } from "../../stores/discovery.svelte.js";
 import type { Immutable, ModelCost, ModelInfo } from "../../types.js";
+import { resolveModelParameters } from "./model-parameters.js";
 import type { ModelSelectionTarget } from "./model-selection-target.js";
 
 /** Shared reactive presentation for the panel and its trigger. */
@@ -11,61 +12,22 @@ export function createModelSelectionState(
 	const activeProviderId = $derived(target.pick.providerId);
 	const activeModel = $derived(target.activeModel);
 	const parameters = $derived(activeModel?.parameters);
-	const defaultCombination = $derived(
-		parameters?.combinations.find((entry) => entry.isDefault) ??
-			parameters?.combinations[0],
+	const parameterState = $derived(
+		resolveModelParameters(parameters, target.pick.effort),
 	);
-	const combination = $derived(
-		parameters?.combinations.find(
-			(entry) => entry.variant === target.pick.effort,
-		) ?? defaultCombination,
-	);
-	function parameterCombination(id: string, value: string) {
-		if (!combination) return undefined;
-		const values = { ...combination.values, [id]: value };
-		return parameters?.combinations.find(
-			(entry) =>
-				Object.keys(entry.values).length === Object.keys(values).length &&
-				Object.entries(values).every(
-					([key, value]) => entry.values[key] === value,
-				),
-		);
-	}
+	const defaultCombination = $derived(parameterState.defaultCombination);
 	function selectParameter(id: string, value: string) {
-		const next = parameterCombination(id, value);
+		const next = parameterState.parameterCombination(id, value);
 		if (next && !target.pending.effort) target.selectEffort(next.variant);
 	}
 	const parameterRows = $derived(
-		(parameters?.rows ?? []).flatMap((row) => {
-			const kind = ["effort", "reasoning", "reasoning_effort"].includes(row.id)
-				? "effort"
-				: row.id;
-			if (!["effort", "context", "thinking", "fast"].includes(kind)) return [];
-			const options = row.values.map(({ value, label }) => ({
-				value,
-				label:
-					kind === "effort"
-						? value
-						: kind === "thinking" || kind === "fast"
-							? value === "true"
-								? "On"
-								: "Off"
-							: label,
-				testId: `picker-${kind}-option-${value}`,
-				disabled: target.pending.effort || !parameterCombination(row.id, value),
-			}));
-			const value = combination?.values[row.id] ?? "";
-			return [
-				{
-					id: row.id,
-					kind,
-					options,
-					value,
-					label:
-						options.find((option) => option.value === value)?.label ?? value,
-				},
-			];
-		}),
+		parameterState.rows.map((row) => ({
+			...row,
+			options: row.options.map((option) => ({
+				...option,
+				disabled: target.pending.effort || option.disabled,
+			})),
+		})),
 	);
 	const parameterEffort = $derived(
 		parameterRows.find((row) => row.kind === "effort"),
