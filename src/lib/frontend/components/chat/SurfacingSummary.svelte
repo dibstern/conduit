@@ -214,7 +214,7 @@
 	/* Matches .md-content a, so a URL reads the same here as in the chat. */
 	.summary-prose a { color:var(--color-accent); text-decoration:none; }
 	.summary-prose a:hover { text-decoration:underline; }
-	.summary-prose code { padding:1px 5px; border-radius:5px; background:var(--color-chip); font:12px var(--font-mono); }
+	.summary-prose code { padding:1px 3.5px; border-radius:4px; background:var(--color-chip); font:13px var(--font-mono); }
 	.regenerating { opacity:.45; }
 	.summary-prose :global(.recap-cite) { display:inline-flex; align-items:center; justify-content:center; margin-left:2px; padding:0 6px; border-radius:999px; background:var(--color-chip); color:var(--color-text-secondary); font:500 11px/18px var(--font-mono); vertical-align:1px; }
 	.summary-prose :global([data-ask="true"]) { background:color-mix(in srgb,var(--color-status-ask) 18%,transparent); color:var(--color-status-ask); }

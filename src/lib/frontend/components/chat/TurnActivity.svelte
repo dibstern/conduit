@@ -3,6 +3,7 @@
      Resting on the turn prefetches tool details; a strip tap opens its log row. -->
 <script lang="ts">
 	import { onDestroy, tick, untrack } from "svelte";
+	import { on } from "svelte/events";
 	import type { AskExplanation } from "../../../contracts/ask-explanation.js";
 	import SurfacingAskContext from "./SurfacingAskContext.svelte";
 	import { MediaQuery } from "svelte/reactivity";
@@ -469,6 +470,11 @@
 		await tick();
 		panelEl?.querySelector(`[data-part="${CSS.escape(part.uuid)}"]`)?.scrollIntoView({ block: "nearest" });
 	}
+
+	// Safari only paints :active when a touch listener covers the target.
+	function enableTouchActive(node: HTMLDivElement) {
+		return { destroy: on(node, "touchstart", () => {}, { passive: true }) };
+	}
 </script>
 
 {#snippet markLabel(pin: SurfacePin)}
@@ -610,7 +616,7 @@
 			{/if}
 		</div>
 		{#if !minimised && (logMounted || showTicker)}
-			<div class="step-log mt-[6px]" hidden={!expanded && !showTicker} data-testid={live ? "turn-live-activity" : undefined}>
+			<div class="step-log mt-[6px]" use:enableTouchActive hidden={!expanded && !showTicker} data-testid={live ? "turn-live-activity" : undefined}>
 				{#if !expanded && earlierCount > 0}
 					<Button variant="ghost" size="content" tone="muted" hoverFill="none" align="start" touchTarget
 						class="py-[8px] text-[12px]" onclick={() => (expanded = logMounted = true)}>+ {earlierCount} earlier messages</Button>
@@ -666,6 +672,7 @@
 </div>
 
 <style>
+	.step-log :global(::selection) { background:var(--color-accent-bg); color:inherit; }
 	.surface-head-chips { display:contents; }
 	.turn-activity[data-minimised="true"] .turn-duration { min-width:0; flex-shrink:1; overflow:hidden; text-overflow:ellipsis; }
 	.mark-toast { display:flex; align-items:center; gap:10px; width:fit-content; max-width:100%; min-height:34px; margin:10px auto 2px; padding:4px 5px 4px 14px; border-radius:999px; background:var(--color-inverse-bg); color:var(--color-inverse-text); font-size:13px; box-shadow:0 8px 24px rgb(0 0 0 / .22); }
