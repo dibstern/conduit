@@ -19,6 +19,8 @@
 <script lang="ts">
 	import { tokenizeSkills } from "../../../skill-recognition.js";
 	import { referenceLabel } from "../../../composer-references.js";
+	import { BUILTIN_CATEGORIES } from "../../../contracts/category-set.js";
+	import { categoryColour } from "../../utils/category-colour.js";
 	import ComposerToken from "../ui/ComposerToken.svelte";
 	import ComposerReferenceToken from "../ui/ComposerReferenceToken.svelte";
 
@@ -38,7 +40,7 @@
 	aria-hidden="true"
 	class="composer-text-metrics mirror pointer-events-none relative text-text"
 	class:opacity-0={dimmed}
->{#each segments as seg (seg.key)}{#if seg.kind === "reference" && seg.reference}<ComposerReferenceToken label={referenceLabel(seg.reference)} ask={"ordinal" in seg.reference && seg.reference.category === "Ask"} title={seg.reference.text} onremove={() => onremove?.(seg.start ?? 0)} />{:else if seg.kind === "skill"}<ComposerToken goal={/^[/$]goal$/.test(seg.text)}>{seg.text}</ComposerToken>{:else if seg.kind === "unknown"}<span class="skill-unknown">{seg.text}</span>{:else}{seg.text}{/if}{/each}</div>
+>{#each segments as seg (seg.key)}{#if seg.kind === "reference" && seg.reference}{@const reference = seg.reference}{@const category = "ordinal" in reference ? BUILTIN_CATEGORIES.find(({ id }) => id === reference.builtinCategory) : undefined}<ComposerReferenceToken label={referenceLabel(reference)} colour={categoryColour(category)} ask={"ordinal" in reference && !reference.builtinCategory && reference.category === "Ask"} title={reference.text} onremove={() => onremove?.(seg.start ?? 0)} />{:else if seg.kind === "skill"}<ComposerToken goal={/^[/$]goal$/.test(seg.text)}>{seg.text}</ComposerToken>{:else if seg.kind === "unknown"}<span class="skill-unknown">{seg.text}</span>{:else}{seg.text}{/if}{/each}</div>
 
 <style>
 	/* A zero-width space forcing a final line box, which the row's height depends

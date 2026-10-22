@@ -132,7 +132,6 @@ export const MixedRead: Story = {
 			canvas.queryByTestId("surfacing-mark-read"),
 		).not.toBeInTheDocument();
 		for (const selector of [
-			'.pin-chip[data-category="finding"] .glyph',
 			".pin-chip.seen:not(.current)",
 			".surface-axis",
 			".turn-duration",
@@ -146,6 +145,16 @@ export const MixedRead: Story = {
 			expected.color = style.getPropertyValue("--color-text-dimmer");
 			await expect(style.color).toBe(expected.color);
 		}
+		const finding = canvasElement.querySelector(
+			'.pin-chip[data-category="finding"] .glyph',
+		);
+		if (!finding) throw new Error("Missing Finding glyph");
+		const inkColour = new Option().style;
+		inkColour.color = getComputedStyle(finding).getPropertyValue(
+			"--color-cat-finding",
+		);
+		await expect(getComputedStyle(finding).color).toBe(inkColour.color);
+		await expect(getComputedStyle(finding).opacity).toBe("1");
 		const verb = canvas.getByText("Worked", { exact: true });
 		const ink = new Option().style;
 		ink.color = getComputedStyle(verb).getPropertyValue("--color-text");

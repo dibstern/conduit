@@ -260,7 +260,25 @@
 	--radius-panel: 10px;
 }
 
+/* These tokens are referenced dynamically by category id, so retain every one. */
+@theme static {
+	--color-cat-ask: var(--color-status-ask);
+	--color-cat-blocked: var(--color-status-red);
+	--color-cat-risk: var(--color-status-risk);
+	--color-cat-scope: #b399ff;
+	--color-cat-replan: #42c8ef;
+	--color-cat-correction: #a2cf50;
+	--color-cat-decision: #689cff;
+	--color-cat-finding: #239c94;
+	--color-cat-milestone: var(--color-status-green);
+}
+
 :root.light-theme {
+	--color-cat-scope: #7a40d0;
+	--color-cat-replan: #007db3;
+	--color-cat-correction: #537c00;
+	--color-cat-decision: #255fcb;
+	--color-cat-finding: #087f76;
 	/* Minimal HSL lightness lifts preserve the two contrast tiers on opaque
 	   surfaces and rendered tints. See theme-contrast.test.ts. */
 	--color-accent-glow: rgba(76, 91, 212, 0.15);

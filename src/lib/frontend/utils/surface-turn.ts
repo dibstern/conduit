@@ -5,6 +5,7 @@ import {
 } from "../../contracts/category-set.js";
 import type { MessageSurfacingPreferences } from "../../contracts/message-surfacing.js";
 import type { AssistantMessage } from "../types.js";
+import { categoryColour } from "./category-colour.js";
 import type { ActivityPart } from "./turns.js";
 
 export type SurfaceLevel = MessageSurfacingPreferences["defaultLevel"];
@@ -69,12 +70,6 @@ export function surfaceTurn(input: {
 		const time = surfaceTime((part.createdAt ?? input.start) - input.start);
 		const number = part.surfacingOrdinal;
 		const label = pending ? "Waiting for Jev" : (category?.label ?? "Message");
-		const colours: Readonly<Record<string, string>> = {
-			ask: "var(--color-status-ask)",
-			blocked: "var(--color-error)",
-			risk: "var(--color-status-risk)",
-			milestone: "var(--color-success)",
-		};
 		return [
 			{
 				part: message,
@@ -85,12 +80,10 @@ export function surfaceTurn(input: {
 				...result,
 				x: (position?.left ?? 0) + (position?.width ?? 0) / 2,
 				label,
+				builtinCategory:
+					category?.origin === "builtin" ? category.id : undefined,
 				glyph: pending ? "…" : (category?.glyph ?? "·"),
-				colour: pending
-					? "var(--color-accent)"
-					: category?.origin === "custom"
-						? category.colour
-						: colours[result.category ?? ""],
+				colour: pending ? "var(--color-accent)" : categoryColour(category),
 				read: message.surfacingRead,
 				name: `${number === undefined ? "Pending" : `#${number}`} ${label}, ${time}${message.surfacingRead === undefined ? "" : message.surfacingRead ? ", read" : ", unread"}`,
 			},
@@ -224,7 +217,13 @@ export function surfaceTurn(input: {
 					level,
 					belowLevel: rank[level] < rank[input.level],
 					label: category?.label ?? "Message",
+					builtinCategory:
+						category?.origin === "builtin" ? category.id : undefined,
 					glyph: category?.glyph ?? "·",
+					colour:
+						category?.origin === "builtin"
+							? categoryColour(category)
+							: undefined,
 					time: surfaceTime((part.createdAt ?? input.start) - input.start),
 				},
 			];
