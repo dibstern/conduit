@@ -1,14 +1,9 @@
-import {
-	closeSync,
-	fsyncSync,
-	mkdirSync,
-	openSync,
-	readFileSync,
-	renameSync,
-	writeFileSync,
-} from "node:fs";
 import { join } from "node:path";
 import { isRecord } from "../../utils.js";
+import {
+	readRunnerIdentityFile,
+	writeRunnerIdentityFile,
+} from "../runner/runner-identity-file.js";
 import { CursorSdkFailure } from "./sdk-error.js";
 
 export interface CursorSessionIdentity {
@@ -29,18 +24,10 @@ export function readCursorSessionIdentity(
 	configDir: string,
 	sessionId: string,
 ): CursorSessionIdentity | undefined {
-	let value: unknown;
-	try {
-		value = JSON.parse(
-			readFileSync(
-				join(cursorSessionStorePath(configDir, sessionId), "session.json"),
-				"utf8",
-			),
-		);
-	} catch (cause) {
-		if (isRecord(cause) && cause["code"] === "ENOENT") return undefined;
-		throw cause;
-	}
+	const value = readRunnerIdentityFile(
+		cursorSessionStorePath(configDir, sessionId),
+	);
+	if (value === undefined) return undefined;
 	if (
 		!isRecord(value) ||
 		typeof value["agentId"] !== "string" ||
@@ -71,19 +58,8 @@ export function writeCursorSessionIdentity(
 	sessionId: string,
 	identity: CursorSessionIdentity,
 ): void {
-	const directory = cursorSessionStorePath(configDir, sessionId);
-	mkdirSync(directory, { recursive: true, mode: 0o700 });
-	const path = join(directory, "session.json");
-	const temporary = `${path}.${process.pid}.tmp`;
-	writeFileSync(temporary, JSON.stringify(identity), {
-		mode: 0o600,
-		flush: true,
-	});
-	renameSync(temporary, path);
-	const descriptor = openSync(directory, "r");
-	try {
-		fsyncSync(descriptor);
-	} finally {
-		closeSync(descriptor);
-	}
+	writeRunnerIdentityFile(
+		cursorSessionStorePath(configDir, sessionId),
+		identity,
+	);
 }

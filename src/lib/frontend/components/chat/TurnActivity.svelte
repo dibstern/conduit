@@ -78,6 +78,10 @@
 	} = $props();
 
 	let expanded = $state(false);
+	// Once shown, the full log stays mounted and hiding it only hides it:
+	// remounting hundreds of rows made showing a long turn's log slow, and
+	// reset each row's own open state.
+	let logMounted = $state(false);
 	let skillsOpen = $state(false);
 	let hovered = $state<number | null>(null);
 	let focusUuid = $state<string | null>(null);
@@ -153,7 +157,7 @@
 		return parts.slice(0, Math.max(0, index)).reverse().find((part): part is SurfacePart => part.type === "assistant" && !!part.rawText.trim()) ?? null;
 	}
 	async function explainAsk(pin: SurfacePin) {
-		if (!sessionId || !pin.part.partId || generatingAsk || askExplanations[pin.part.uuid]) return;
+		if (!sessionId || !storeTurnId || !pin.part.partId || generatingAsk || askExplanations[pin.part.uuid]) return;
 		const identity = askIdentity;
 		generatingAsk = pin.part.uuid;
 		askError = null;
@@ -167,7 +171,7 @@
 		}
 	}
 	/** The event store keys a turn by its user message id; turn.id is that row's transcript uuid. */
-	const storeTurnId = $derived(turn.user?.messageId ?? turn.id);
+	const storeTurnId = $derived(turn.storeId ?? turn.user?.messageId);
 	// jsdom has no matchMedia; real browsers always do.
 	const phone = typeof matchMedia === "function" ? new MediaQuery("(max-width: 599px)") : { current: false };
 	let summaryOpen = $state<boolean | null>(null);
@@ -176,7 +180,7 @@
 	let citedOrdinal = $state<number | null>(null);
 	const summarySettings = $derived(surfacingConfig.status.recap);
 	const summariesOn = $derived(surfacingConfig.status.summariesEnabled && summarySettings.model !== "off");
-	const summaryEnabled = $derived(summariesOn && final && !!sessionId);
+	const summaryEnabled = $derived(summariesOn && final && !!sessionId && !!storeTurnId);
 	const summaryLabel = $derived(recap.generating ? "✦ Summarizing…" : "✦ Summary");
 	$effect(() => {
 		const id = storeTurnId;
@@ -184,7 +188,7 @@
 		const active = summaryEnabled;
 		const watch = latestTurn;
 		// A turn can settle while its asynchronous automatic recap is still running.
-		if (active && session) return untrack(() => recap.connect(session, id, watch));
+		if (active && session && id) return untrack(() => recap.connect(session, id, watch));
 		return;
 	});
 	$effect(() => {
@@ -281,7 +285,7 @@
 		generateSummary(recap.retry?.scope ?? (recap.versions.length && summaryNew > 0 ? "new" : "whole"), recap.retry?.sourceVersion);
 	}
 	function generateSummary(scope: "whole" | "new", sourceVersion?: number) {
-		if (!sessionId || !summaryEnabled) return;
+		if (!sessionId || !storeTurnId || !summaryEnabled) return;
 		summaryOpen = true;
 		void recap.generate(sessionId, storeTurnId, scope, sourceVersion);
 	}
@@ -447,6 +451,7 @@
 		const newestTop = () => uuid === undefined ? undefined : panelEl?.querySelector(`[data-log-part="${CSS.escape(uuid)}"]`)?.getBoundingClientRect().top;
 		const before = newestTop();
 		expanded = !expanded;
+		logMounted ||= expanded;
 		if (before === undefined) return;
 		await tick();
 		const after = newestTop();
@@ -459,7 +464,7 @@
 		if (!part) return;
 		onjump?.();
 		openTurn();
-		expanded = true;
+		expanded = logMounted = true;
 		focusUuid = part.uuid;
 		await tick();
 		panelEl?.querySelector(`[data-part="${CSS.escape(part.uuid)}"]`)?.scrollIntoView({ block: "nearest" });
@@ -602,16 +607,16 @@
 				</Button>
 			{/if}
 		</div>
-		{#if !minimised && (expanded || showTicker)}
-			<div class="step-log mt-[6px]" data-testid={live ? "turn-live-activity" : undefined}>
+		{#if !minimised && (logMounted || showTicker)}
+			<div class="step-log mt-[6px]" hidden={!expanded && !showTicker} data-testid={live ? "turn-live-activity" : undefined}>
 				{#if !expanded && earlierCount > 0}
 					<Button variant="ghost" size="content" tone="muted" hoverFill="none" align="start" touchTarget
-						class="py-[8px] text-[12px]" onclick={() => (expanded = true)}>+ {earlierCount} earlier messages</Button>
+						class="py-[8px] text-[12px]" onclick={() => (expanded = logMounted = true)}>+ {earlierCount} earlier messages</Button>
 				{/if}
-				{#each expanded ? segment.activity : ticker as part, index (part.uuid)}
-					{@const i = expanded ? index : earlierCount + index}
+				{#each logMounted ? segment.activity : ticker as part, index (part.uuid)}
+					{@const i = logMounted ? index : earlierCount + index}
 					{@const latestLiveStep = live && i === segment.activity.length - 1}
-					<div data-log-part={part.uuid} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
+					<div data-log-part={part.uuid} hidden={!expanded && i < earlierCount} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
 						<ActivityRow {part} {liveTasks} {taskListedAt} runningTasks={running} live={latestLiveStep} duration={durations?.[i]} highlight={part.uuid === focusUuid} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} />
 						{#if surfacingActive && expanded && part.type === "assistant"}
 							{@const pin = surface.messages.find((message) => message.part.uuid === part.uuid)}

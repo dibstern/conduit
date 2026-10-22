@@ -97,6 +97,12 @@ const sweepFixture = Effect.gen(function* () {
 	const usage = yield* makeUsage({
 		accounts: Effect.succeed([{ id: "claude", harness: "claude" }]),
 		readers: {
+			codex: {
+				read: () => Effect.succeed({ status: "unavailable", windows: [] }),
+			},
+			cursor: {
+				read: () => Effect.succeed({ status: "unavailable", windows: [] }),
+			},
 			claude: {
 				read: () =>
 					Effect.gen(function* () {

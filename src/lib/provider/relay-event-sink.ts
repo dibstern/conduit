@@ -496,6 +496,8 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					header: q.header,
 					options: q.options,
 					multiSelect: q.multiSelect ?? false,
+					...(q.isOther != null && { isOther: q.isOther }),
+					...(q.isSecret != null && { isSecret: q.isSecret }),
 				}));
 				let conduitId: string | undefined;
 				let awaitAnswers: Effect.Effect<
@@ -514,6 +516,8 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					options: q.options,
 					multiSelect: q.multiSelect ?? false,
 					custom: q.custom ?? true,
+					...(q.isOther != null && { isOther: q.isOther }),
+					...(q.isSecret != null && { isSecret: q.isSecret }),
 				}));
 				const ask = Effect.gen(function* () {
 					yield* recordInteraction(
@@ -563,7 +567,15 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 									"question.resolved",
 									{
 										id: request.requestId,
-										answers: exit.value,
+										// Keep the live reply intact; every durable consumer gets this copy.
+										answers: Object.fromEntries(
+											Object.entries(exit.value).map(([index, answer]) => [
+												index,
+												request.questions[Number(index)]?.isSecret
+													? "[redacted]"
+													: answer,
+											]),
+										),
 									},
 									undefined,
 									request.runId,

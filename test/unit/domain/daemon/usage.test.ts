@@ -63,6 +63,15 @@ import type {
 } from "../../../../src/lib/provider/usage-reader.js";
 import { makeMockAccountDirectory } from "../../../helpers/mock-factories.js";
 
+const unavailableReader: UsageReader = {
+	read: () =>
+		Effect.succeed({
+			status: "unavailable",
+			windows: [],
+			reason: "Usage reader is not available for this harness",
+		}),
+};
+
 it.effect("returns each account's cache until its maximum age is reached", () =>
 	Effect.gen(function* () {
 		const calls: string[] = [];
@@ -72,6 +81,8 @@ it.effect("returns each account's cache until its maximum age is reached", () =>
 				{ id: "account-2", harness: "claude" },
 			]),
 			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
 				claude: {
 					read: (account) =>
 						Effect.sync(() => {
@@ -109,6 +120,8 @@ it.effect(
 			const service = yield* makeUsage({
 				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
 				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
 					claude: {
 						read: () =>
 							Effect.suspend(() => {
@@ -143,6 +156,8 @@ it.effect("turn end re-reads a full account without subscribers", () =>
 		const service = yield* makeUsage({
 			accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
 			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
 				claude: {
 					read: () =>
 						Effect.sync(() => ({
@@ -179,6 +194,8 @@ it.effect(
 			const service = yield* makeUsage({
 				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
 				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
 					claude: {
 						read: () =>
 							Effect.sync(() => ({
@@ -232,6 +249,8 @@ it.effect("does not sample with no subscribers", () =>
 		yield* makeUsage({
 			accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
 			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
 				claude: {
 					read: () =>
 						Effect.sync(() => {
@@ -254,6 +273,8 @@ it.effect(
 			const service = yield* makeUsage({
 				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
 				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
 					claude: {
 						read: () =>
 							Effect.sync(() => ({
@@ -272,6 +293,53 @@ it.effect(
 		}),
 );
 
+it.effect(
+	"emits the current snapshot before refreshing an expired subscription",
+	() =>
+		Effect.gen(function* () {
+			let calls = 0;
+			const service = yield* makeUsage({
+				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
+				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
+					claude: {
+						read: () =>
+							Effect.sync(() => ({
+								status: "available",
+								windows: [{ kind: "five_hour", utilization: ++calls * 10 }],
+							})),
+					},
+				},
+			});
+			const previous = yield* service.refresh({ maxAge: 0 });
+			yield* TestClock.adjust("5 minutes");
+			const snapshots = yield* Stream.runCollect(
+				Stream.take(service.readings, 2),
+			);
+			expect([...snapshots]).toEqual([
+				previous,
+				[
+					{
+						...previous[0],
+						readAt: 300_000,
+						windows: [
+							{
+								kind: "five_hour",
+								utilization: 20,
+								history: [
+									{ at: 0, utilization: 10 },
+									{ at: 300_000, utilization: 20 },
+								],
+							},
+						],
+					},
+				],
+			]);
+			expect(calls).toBe(2);
+		}),
+);
+
 it.effect("shares a five-minute sampler until the last subscriber leaves", () =>
 	Effect.gen(function* () {
 		const calls: string[] = [];
@@ -281,6 +349,8 @@ it.effect("shares a five-minute sampler until the last subscriber leaves", () =>
 				{ id: "account-2", harness: "claude" },
 			]),
 			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
 				claude: {
 					read: (account) =>
 						Effect.sync(() => {
@@ -322,6 +392,8 @@ it.effect("debounces watched turn ends per account", () =>
 				{ id: "account-2", harness: "claude" },
 			]),
 			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
 				claude: {
 					read: (account) =>
 						Effect.sync(() => {
@@ -361,6 +433,8 @@ it.effect("keeps five-minute sample times independent of read duration", () =>
 		const service = yield* makeUsage({
 			accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
 			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
 				claude: {
 					read: () =>
 						Effect.gen(function* () {
@@ -403,7 +477,11 @@ it.effect(
 			};
 			const service = yield* makeUsage({
 				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
-				readers: { claude: reader },
+				readers: {
+					claude: reader,
+					codex: unavailableReader,
+					cursor: unavailableReader,
+				},
 			});
 			const [previous] = yield* service.refresh({ maxAge: 0 });
 			failed = true;
@@ -436,7 +514,11 @@ it.effect("retains a cached limit for failover after a read times out", () =>
 		const service = yield* makeUsage({
 			accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
 			accountHarness: () => Effect.succeed("claude"),
-			readers: { claude: reader },
+			readers: {
+				claude: reader,
+				codex: unavailableReader,
+				cursor: unavailableReader,
+			},
 		});
 		const [previous] = yield* service.refresh({ maxAge: 0 });
 		timedOut = true;
@@ -459,7 +541,11 @@ it.effect("treats a harness without a reader as unavailable", () =>
 				{ id: "codex-1", harness: "codex" },
 				{ id: "cursor-1", harness: "cursor" },
 			]),
-			readers: {},
+			readers: {
+				claude: unavailableReader,
+				codex: unavailableReader,
+				cursor: unavailableReader,
+			},
 		});
 		expect(yield* service.refresh({ maxAge: 0 })).toMatchObject([
 			{
@@ -519,7 +605,11 @@ it.effect(
 					{ id: "account-5", harness: "claude" },
 				]),
 				order: Ref.get(order),
-				readers: { claude: reader },
+				readers: {
+					claude: reader,
+					codex: unavailableReader,
+					cursor: unavailableReader,
+				},
 			});
 			expect(yield* service.pickFailover("account-1")).toBe("account-5");
 			expect(read).toEqual([
@@ -559,6 +649,8 @@ it.effect("never picks unknown or stale accounts for failover", () =>
 			]),
 			order: Effect.succeed(["unknown", "stale", "ready"]),
 			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
 				claude: {
 					read: (account) =>
 						Effect.suspend(() =>
@@ -610,7 +702,11 @@ it.effect(
 				accounts: Effect.succeed([
 					{ id: "account-1", harness: "claude", configDir: "/account-1" },
 				]),
-				readers: { claude: reader },
+				readers: {
+					claude: reader,
+					codex: unavailableReader,
+					cursor: unavailableReader,
+				},
 			});
 			const first = yield* Effect.forkChild(
 				service.refresh({ accountIds: ["account-1"], maxAge: 0 }),
@@ -681,7 +777,11 @@ it.effect(
 			};
 			const service = yield* makeUsage({
 				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
-				readers: { claude: reader },
+				readers: {
+					claude: reader,
+					codex: unavailableReader,
+					cursor: unavailableReader,
+				},
 			});
 			const first = yield* Effect.forkChild(
 				service.refresh({ accountIds: ["account-1"], maxAge: 0 }),
@@ -727,7 +827,11 @@ it.effect(
 			};
 			const service = yield* makeUsage({
 				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
-				readers: { claude: reader },
+				readers: {
+					claude: reader,
+					codex: unavailableReader,
+					cursor: unavailableReader,
+				},
 			});
 			expect(yield* service.refresh({ maxAge: 0 })).toEqual([
 				{
@@ -757,7 +861,11 @@ it.effect(
 			};
 			const service = yield* makeUsage({
 				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
-				readers: { claude: reader },
+				readers: {
+					claude: reader,
+					codex: unavailableReader,
+					cursor: unavailableReader,
+				},
 			});
 			expect(
 				yield* service.refresh({
@@ -865,6 +973,8 @@ it.effect(
 			const service = yield* makeUsage({
 				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
 				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
 					claude: {
 						read: () =>
 							Effect.succeed({
@@ -907,6 +1017,8 @@ it.effect("forecasts a steady low burn separately for each window", () =>
 		const service = yield* makeUsage({
 			accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
 			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
 				claude: {
 					read: () =>
 						Effect.gen(function* () {
@@ -958,6 +1070,8 @@ it.effect("forecasts a fast burn reaching the limit before reset", () =>
 		const service = yield* makeUsage({
 			accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
 			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
 				claude: {
 					read: () =>
 						Clock.currentTimeMillis.pipe(
@@ -994,6 +1108,8 @@ it.effect("loads history once and forecasts immediately after a restart", () =>
 				{ id: "account-1", harness: "claude" as const },
 			]),
 			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
 				claude: {
 					read: () =>
 						Clock.currentTimeMillis.pipe(
@@ -1051,6 +1167,8 @@ for (const reset of ["later reset time", "utilization drop"] as const) {
 			const service = yield* makeUsage({
 				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
 				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
 					claude: {
 						read: () =>
 							Effect.sync(() => ({
@@ -1095,6 +1213,8 @@ it.effect(
 					{ id: "account-2", harness: "claude" },
 				]),
 				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
 					claude: {
 						read: (account) =>
 							Effect.sync(() => ({
@@ -1165,6 +1285,8 @@ it.effect(
 			const service = yield* makeUsage({
 				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
 				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
 					claude: {
 						read: () =>
 							Effect.succeed({
@@ -1212,6 +1334,8 @@ it.effect("serializes saves without losing concurrent account history", () =>
 				{ id: "account-2", harness: "claude" },
 			]),
 			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
 				claude: {
 					read: () =>
 						Effect.succeed({
@@ -1263,6 +1387,8 @@ it.effect(
 			const service = yield* makeUsage({
 				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
 				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
 					claude: {
 						read: () =>
 							Effect.sync(() => ({

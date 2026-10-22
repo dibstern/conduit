@@ -156,6 +156,9 @@ export const DEFAULT_USAGE_LIMITS: UsageLimitsSetting = {
 };
 
 export const HandoffSummarySchema = Schema.Struct({
+	continuationKind: Schema.optional(
+		Schema.Literals(["native-thread", "transcript-digest"]),
+	),
 	included: Schema.Number.check(
 		Schema.isInt(),
 		Schema.isGreaterThanOrEqualTo(0),
@@ -170,6 +173,11 @@ export const HandoffSummarySchema = Schema.Struct({
 export type HandoffSummary = typeof HandoffSummarySchema.Type;
 
 const usageWindowFields = {
+	/** Stable identity and display label for providers with multiple allowances. */
+	id: Schema.optional(Schema.String),
+	label: Schema.optional(Schema.String),
+	limitId: Schema.optional(Schema.String),
+	modelId: Schema.optional(Schema.String),
 	utilization: Schema.Number.pipe(
 		Schema.check(Schema.isFinite()),
 		Schema.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
@@ -200,7 +208,7 @@ export type UsageForecast = typeof UsageForecastSchema.Type;
 
 export const UsageWindowSchema = Schema.Union([
 	Schema.Struct({
-		kind: Schema.Literals(["five_hour", "seven_day", "month"]),
+		kind: Schema.Literals(["five_hour", "seven_day", "month", "custom"]),
 		...usageWindowFields,
 		history: Schema.optional(Schema.Array(UsageHistoryPointSchema)),
 		forecast: Schema.optional(UsageForecastSchema),

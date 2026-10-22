@@ -986,6 +986,15 @@ export const makeMessageProjector = defineProjector(() => ({
 						typeof state === "object" && state !== null && !Array.isArray(state)
 							? state
 							: undefined;
+					// The daemon owns async answers; the runner's snapshot still has
+					// the original unanswered tool output after a user responds.
+					const keepAsyncAnswer = sql`message_parts.tool_name = 'AskUserQuestion'
+						AND json_extract(message_parts.input, '$.delivery') = 'async'
+						AND EXISTS (SELECT 1 FROM pending_approvals pa
+							WHERE pa.session_id = ${event.sessionId} AND pa.type = 'question'
+								AND pa.status = 'resolved' AND json_extract(pa.details, '$.delivery') = 'async'
+								AND json_extract(pa.details, '$.messageId') = excluded.message_id
+								AND json_extract(pa.details, '$.partId') = excluded.id)`;
 					yield* sql`
 						INSERT INTO message_parts
 						(id, message_id, type, text, tool_name, call_id, input, result, result_event_seq, result_bytes,
@@ -1003,8 +1012,10 @@ export const makeMessageProjector = defineProjector(() => ({
 						 ${encodeJson(part)}, ${ctx.version})
 						ON CONFLICT (id) DO UPDATE SET
 							type = excluded.type, text = excluded.text, tool_name = excluded.tool_name,
-							call_id = excluded.call_id, input = excluded.input, result = excluded.result,
-							result_event_seq = excluded.result_event_seq, result_bytes = excluded.result_bytes,
+							call_id = excluded.call_id, input = excluded.input,
+							result = CASE WHEN ${keepAsyncAnswer} THEN message_parts.result ELSE excluded.result END,
+							result_event_seq = CASE WHEN ${keepAsyncAnswer} THEN message_parts.result_event_seq ELSE excluded.result_event_seq END,
+							result_bytes = CASE WHEN ${keepAsyncAnswer} THEN message_parts.result_bytes ELSE excluded.result_bytes END,
 							status = excluded.status, duration = NULL, sort_order = excluded.sort_order,
 							created_at = excluded.created_at, updated_at = excluded.updated_at,
 							metadata = excluded.metadata, rest_payload = excluded.rest_payload, version = excluded.version
@@ -1253,6 +1264,9 @@ export const makeMessageProjector = defineProjector(() => ({
 			// name whichever message is streaming when it lands (a background task
 			// finishing after its turn), and that message's refetch misses this part.
 			if (isEventType(event, "tool.running")) {
+				const resumed =
+					getProviderDriver(event.provider)?.reusesSubagentCards === true &&
+					event.data.metadata?.["subagentResumed"] === true;
 				const rows = yield* sql<{ metadata: string | null }>`
 					SELECT metadata FROM message_parts WHERE id = ${event.data.partId}`;
 				const metadata = yield* mergeMetadata(
@@ -1264,9 +1278,13 @@ export const makeMessageProjector = defineProjector(() => ({
 				yield* sql`
 					UPDATE message_parts
 					SET status = CASE
+							WHEN ${resumed} THEN 'running'
 							WHEN status IN ('completed', 'error') THEN status
 							ELSE 'running'
 						END,
+						result = CASE WHEN ${resumed} THEN NULL ELSE result END,
+						result_bytes = CASE WHEN ${resumed} THEN NULL ELSE result_bytes END,
+						result_event_seq = CASE WHEN ${resumed} THEN NULL ELSE result_event_seq END,
 						input = COALESCE(${event.data.input === undefined ? null : encodeJson(event.data.input)}, input),
 						metadata = ${metadata},
 						updated_at = ${event.createdAt},
@@ -1703,6 +1721,15 @@ export const makeTurnProjector = defineProjector(() => ({
 	],
 	project: (event, ctx) =>
 		Effect.gen(function* () {
+			// Codex confirms existing message headers to retain native turn refs.
+			// Replaying those confirmations must not recreate a user turn.
+			if (
+				event.provider === "codex" &&
+				isEventType(event, "message.created") &&
+				(event.metadata.source === "codex.native-turn" ||
+					event.metadata.source === "codex.native-turn.completed")
+			)
+				return { sessions: [], messages: [] };
 			const sql = yield* SqlClient.SqlClient;
 			if (isEventType(event, "run.requested")) {
 				yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
@@ -1820,6 +1847,8 @@ export const makeTurnProjector = defineProjector(() => ({
 			if (
 				event.metadata.rawSource !== "opencode.rest" &&
 				"messageId" in event.data &&
+				// Display snapshots cannot suppress an explicitly owned run terminal.
+				!(runId && runTerminalStatus(event, event.provider)) &&
 				!(isEventType(event, "turn.completed") && event.data.userMessageId)
 			) {
 				const rows = yield* sql<{

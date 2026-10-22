@@ -12,6 +12,9 @@ export const usageAccounts = (accounts: readonly Account[]): UsageAccount[] =>
 					{
 						id: account.id,
 						harness,
+						...(account.driver === "codex" && account.configuredFolder
+							? { configDir: account.configuredFolder }
+							: {}),
 						...("folder" in account ? { folder: account.folder } : {}),
 						...(account.env ? { env: account.env } : {}),
 					},

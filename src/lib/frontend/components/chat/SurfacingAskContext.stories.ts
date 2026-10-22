@@ -47,6 +47,7 @@ const segment: Segment = {
 const empty: Segment = { activity: segment.activity.slice(-1), reply: [] };
 const turn: Turn = {
 	id: "ask-turn",
+	storeId: "ask-turn",
 	user: {
 		type: "user",
 		uuid: "ask-turn",

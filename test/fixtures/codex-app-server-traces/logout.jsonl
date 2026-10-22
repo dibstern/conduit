@@ -1,0 +1,11 @@
+{"scenario":"logout","codexVersion":"0.162.1","recordedAt":"2026-10-21T19:46:25.139Z"}
+{"dir":"out","at":1,"message":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"conduit-trace-recorder","version":"1.0.0","title":null},"capabilities":{"experimentalApi":true}}}}
+{"dir":"in","at":37,"message":{"id":1,"result":{"userAgent":"conduit-trace-recorder/0.162.1 (Mac OS 26.6.2; arm64) unknown (conduit-trace-recorder; 1.0.0)","codexHome":"/trace-root/account-home","platformFamily":"unix","platformOs":"macos"}}}
+{"dir":"out","at":38,"message":{"jsonrpc":"2.0","method":"initialized"}}
+{"dir":"in","at":38,"message":{"method":"remoteControl/status/changed","params":{"status":"disabled","serverName":"test-host","installationId":"00000000-0000-0000-0000-000000000000","environmentId":null},"emittedAtMs":1792611985176}}
+{"dir":"out","at":38,"message":{"jsonrpc":"2.0","id":2,"method":"account/logout"}}
+{"dir":"in","at":92,"message":{"id":2,"result":{}}}
+{"dir":"out","at":92,"message":{"jsonrpc":"2.0","id":3,"method":"account/read","params":{"refreshToken":false}}}
+{"dir":"in","at":92,"message":{"method":"account/updated","params":{"authMode":null,"planType":null},"emittedAtMs":1792611985230}}
+{"dir":"in","at":98,"message":{"id":3,"result":{"account":null,"requiresOpenaiAuth":true,"workspaceRouting":null}}}
+{"dir":"exit","at":127,"code":0,"signal":null}

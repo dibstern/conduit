@@ -3,6 +3,7 @@ import type {
 	HandoffSummary,
 	LimitRecovery,
 	UsageReading,
+	UsageWindow,
 } from "../../contracts/limit-recovery.js";
 import { rpc } from "../transport/ws-rpc-client.js";
 import {
@@ -11,7 +12,6 @@ import {
 } from "../utils/account-switch.js";
 import {
 	accountQuota,
-	type PlanUsageWindow,
 	planUsageWindows,
 	quotaReading,
 	usageDisplay,
@@ -57,11 +57,15 @@ class ClaudeAccounts {
 	private previewTicket = 0;
 	private inFlightTarget = $state<string | null>(null);
 
-	constructor(readonly projectSlug: string) {}
+	constructor(
+		readonly projectSlug: string,
+		readonly harness: "claude" | "codex",
+	) {}
 
 	get configuredAccounts() {
 		return instanceState.instances.filter(
-			(instance) => getDriverTraits(instance.driver)?.usageHarness === "claude",
+			(instance) =>
+				getDriverTraits(instance.driver)?.usageHarness === this.harness,
 		);
 	}
 
@@ -69,7 +73,10 @@ class ClaudeAccounts {
 		return this.configuredAccounts;
 	}
 
-	nameOf(instanceId: string | undefined, fallback = "Claude"): string {
+	nameOf(
+		instanceId: string | undefined,
+		fallback = this.harness === "codex" ? "Codex" : "Claude",
+	): string {
 		return getInstanceById(instanceId ?? "")?.name ?? fallback;
 	}
 
@@ -80,12 +87,15 @@ class ClaudeAccounts {
 	readingOf(instanceId: string | undefined): UsageReading | undefined {
 		return usageState.readings.find(
 			(reading) =>
-				reading.accountId === instanceId && reading.harness === "claude",
+				reading.accountId === instanceId && reading.harness === this.harness,
 		);
 	}
 
 	quotaOf(instanceId: string): UsageReading | undefined {
-		return accountQuota(this.quotas, instanceId);
+		const quota = accountQuota(this.quotas, instanceId);
+		return quota === undefined || quota.harness === this.harness
+			? quota
+			: { ...quota, harness: this.harness };
 	}
 
 	/** Closing or changing the composer must not invalidate a picker's read. */
@@ -112,7 +122,9 @@ class ClaudeAccounts {
 			// A failed read leaves accounts for the user to choose explicitly.
 		}
 		const quotas = new Map(
-			checked.map((reading) => [reading.accountId, reading]),
+			checked
+				.filter((reading) => reading.harness === this.harness)
+				.map((reading) => [reading.accountId, reading]),
 		);
 		if (ticket === this.quotaTicket) this.quotas = quotas;
 		// A picker's refresh must not discard the send menu's own fresh result.
@@ -169,18 +181,21 @@ class ClaudeAccounts {
 						: this.sendQuotas.get(account.id);
 				const { limit, usageUnknown } = this.accountLimitFor(reading);
 				if (limit.kind !== "go") return [];
-				const fullest =
-					reading &&
-					planUsageWindows(reading).reduce<PlanUsageWindow | undefined>(
-						(best, window) =>
-							best === undefined ||
-							window.utilization > best.utilization ||
-							(window.utilization === best.utilization &&
-								window.kind === "five_hour")
-								? window
-								: best,
-						undefined,
-					);
+				const windows = reading
+					? this.harness === "codex"
+						? reading.windows
+						: planUsageWindows(reading)
+					: [];
+				const fullest = windows.reduce<UsageWindow | undefined>(
+					(best, window) =>
+						best === undefined ||
+						window.utilization > best.utilization ||
+						(window.utilization === best.utilization &&
+							window.kind === "five_hour")
+							? window
+							: best,
+					undefined,
+				);
 				return [
 					{
 						id: account.id,
@@ -297,11 +312,15 @@ class ClaudeAccounts {
 
 const projects = new Map<string, ClaudeAccounts>();
 
-export function getClaudeAccounts(projectSlug: string): ClaudeAccounts {
-	let accounts = projects.get(projectSlug);
+export function getClaudeAccounts(
+	projectSlug: string,
+	harness: "claude" | "codex" = "claude",
+): ClaudeAccounts {
+	const key = `${harness}:${projectSlug}`;
+	let accounts = projects.get(key);
 	if (!accounts) {
-		accounts = new ClaudeAccounts(projectSlug);
-		projects.set(projectSlug, accounts);
+		accounts = new ClaudeAccounts(projectSlug, harness);
+		projects.set(key, accounts);
 	}
 	return accounts;
 }

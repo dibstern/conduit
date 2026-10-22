@@ -84,7 +84,7 @@
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import { requestDraftPreWarm, requestSessionPreWarm } from "../../utils/session-prewarm.js";
-	import { usageForecastTime, usageWarning } from "../../utils/continuation.js";
+	import { planUsageWindows, usageForecastTime, usageWarning } from "../../utils/continuation.js";
 	import { switchSessionAccount } from "../../utils/account-switch.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
@@ -251,7 +251,6 @@
 	const composerProject = $derived(projectState.projects.find((project) => project.slug === composerProjectSlug));
 	const composerDirectory = $derived(composerProject ? effectiveWorkingDirectory(composerProject.folders[0], currentSession?.workspace) : undefined);
 	const composerGit = $derived(currentSession?.workspace ? currentSession.git : currentSession?.git ?? composerProject?.git);
-	const claudeAccounts = $derived(getClaudeAccounts(composerProjectSlug));
 	const accountId = $derived(composerAccountId(currentSession));
 	const composerInstance = $derived(getAvailableInstances().find((instance) => instance.id === accountId));
 	// Wait for accounts and session placement before showing settings. Catalog
@@ -263,6 +262,7 @@
 	);
 	const composerDriver = $derived(composerInstance?.driver);
 	const composerTraits = $derived(getDriverTraits(composerDriver));
+	const claudeAccounts = $derived(getClaudeAccounts(composerProjectSlug, composerTraits?.usageHarness === "codex" ? "codex" : "claude"));
 	const composerPresentation = $derived(getProviderPresentation(composerDriver));
 	const readOnlySubagent = $derived(
 		getProviderDriver(composerDriver)?.readOnlySubagents === true && !!sessionState.currentParentId &&
@@ -272,6 +272,7 @@
 	const composerNotice = $derived(composerNotices?.[approvals.current?.mode ?? "ask"]);
 	const supportsWorktree = $derived(composerInstance?.capabilities?.supportsWorktree ?? instanceState.providerCapabilities[composerDriver ?? ""]?.supportsWorktree);
 	const usageReading = $derived(claudeAccounts.readingOf(accountId));
+	const usageWindows = $derived(usageReading?.harness === "codex" ? usageReading.windows : usageReading ? planUsageWindows(usageReading) : []);
 	let sendMenuOpen = $state(false);
 	let switchingAccount = $state(false);
 	const hasOtherClaudeAccount = $derived(claudeAccounts.hasAlternative(accountId));
@@ -303,6 +304,12 @@
 		: sendAccounts.find((account) => account.usageEligible && !account.usageUnknown));
 	const sendMode = $derived.by(() => {
 		if (sendsAt !== undefined) return sendPick?.mode ?? (usageState.limits.autoSwitch && switchTarget ? "switch" : "at-reset");
+		if (composerTraits?.usageHarness === "codex") {
+			const warnAt = usageState.limits.warnAt;
+			return usageReading?.status === "available" && warnAt !== "off" &&
+				usageWindows.some((window) => window.utilization >= warnAt && window.utilization < 100)
+				? "warning" : "normal";
+		}
 		return usageWarning(usageReading, usageState.limits.warnAt, claudeAccounts.nameOf(accountId), hasOtherClaudeAccount, clock.now)
 			? "warning" : "normal";
 	});
@@ -458,7 +465,7 @@
 			? `Send at ${sendAtTime}`
 			: sendMode === "switch" && switchTarget
 				? `Send on ${switchTarget.name}`
-			: permissionsState.pendingQuestions.some((question) => question.sessionId === sessionState.currentId)
+			: permissionsState.pendingQuestions.some((question) => question.sessionId === sessionState.currentId && question.delivery !== "async")
 				? "Reply"
 				: working
 					? "Queue message"
@@ -1493,7 +1500,7 @@
 								<MenuItem density="compact" data-testid="composer-send-menu-account" data-account={option.id} data-selected={sendMode === "switch" && switchTarget?.id === option.id ? "true" : undefined} disabled={switchingAccount} class="rounded-[7px] {sendMode === 'switch' && switchTarget?.id === option.id ? 'bg-border-chip' : ''}" onselect={() => { composerDraft.sendPick = { mode: "switch", accountId: option.id }; }}>
 									<AccountDot instanceId={option.id} size={7} />
 									<span class="flex-1">Send now on {option.name}</span>
-									<span class="font-mono text-[10.5px] text-text-dimmer">{#if option.usageUnknown}usage unknown{:else if option.fullest}{option.fullest.kind === "five_hour" ? "5h" : "wk"} {Math.round(option.fullest.utilization)}%{/if}</span>
+									<span class="font-mono text-[10.5px] text-text-dimmer">{#if option.usageUnknown}usage unknown{:else if option.fullest}{composerTraits?.usageHarness === "codex" ? option.fullest.label ?? "usage" : option.fullest.kind === "five_hour" ? "5h" : "wk"} {Math.round(option.fullest.utilization)}%{/if}</span>
 								</MenuItem>
 							{/each}
 							<div data-testid="composer-send-menu-note" class="mt-[3px] border-t border-border px-[6px] pt-[5px] pb-[3px] font-mono text-[10.5px] text-text-dimmer whitespace-normal">Another account takes over the session, as Switch account does.</div>

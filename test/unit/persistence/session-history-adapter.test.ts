@@ -350,6 +350,83 @@ describe("messageRowsToHistory", () => {
 		expect(JSON.stringify([row, snapshot]).length).toBeLessThan(2_000);
 	});
 
+	it.each([
+		{
+			name: "provider-neutral running output",
+			status: "running",
+			metadata: {
+				output: "first line\n",
+				codexItemType: "commandExecution",
+				fileChange: { filePath: "/private.txt", diff: "private" },
+			},
+			expected: { output: "first line\n" },
+		},
+		{
+			name: "Cursor running output and presentation",
+			status: "running",
+			metadata: {
+				cursorToolType: "shellToolCall",
+				output: "first line\n",
+				truncated: true,
+			},
+			expected: {
+				cursorToolType: "shellToolCall",
+				output: "first line\n",
+				truncated: true,
+			},
+		},
+		{
+			name: "settled output omitted from metadata",
+			status: "completed",
+			metadata: { output: "stale live output" },
+			expected: undefined,
+		},
+		{
+			name: "non-string output omitted from metadata",
+			status: "running",
+			metadata: { output: 42 },
+			expected: undefined,
+		},
+	])("filters $name identically for rows and snapshots", ({
+		status,
+		metadata,
+		expected,
+	}) => {
+		const [row, snapshot] = messageRowsToHistory(
+			[
+				makeMessageWithParts("row", {
+					role: "assistant",
+					parts: [
+						makePartRow("row-tool", "row", {
+							type: "tool",
+							tool_name: "Bash",
+							status,
+							metadata: JSON.stringify(metadata),
+						}),
+					],
+				}),
+				makeMessageWithParts("snapshot", {
+					role: "assistant",
+					rest_payload: JSON.stringify({
+						id: "snapshot",
+						role: "assistant",
+						parts: [
+							{
+								id: "snapshot-tool",
+								type: "tool",
+								tool: "Bash",
+								state: { status, metadata },
+							},
+						],
+					}),
+				}),
+			],
+			{ pageSize: 50 },
+		).messages;
+		expect(row?.parts?.[0]?.state?.["metadata"]).toEqual(expected);
+		expect(snapshot?.parts?.[0]?.state?.["metadata"]).toEqual(expected);
+	});
+
 	// The projector stores an announced tool as "started"; read as nothing, the
 	// browser would show a pending question as already answered.
 	it("reads a started tool as pending", () => {

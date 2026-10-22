@@ -217,15 +217,21 @@ export function usageDisplay(
 			? windows.find(
 					(window) => accountLimitWindowLabel(window) === limit.label,
 				)
-			: fiveHour &&
-					sevenDay &&
-					fiveHour.utilization >= threshold &&
-					sevenDay.utilization >= threshold
-				? sevenDay
+			: reading.harness === "codex"
+				? windows.reduce<UsageWindow | undefined>(
+						(best, window) =>
+							!best || window.utilization > best.utilization ? window : best,
+						undefined,
+					)
 				: fiveHour &&
-						(!sevenDay || fiveHour.utilization >= sevenDay.utilization)
-					? fiveHour
-					: (sevenDay ?? month));
+						sevenDay &&
+						fiveHour.utilization >= threshold &&
+						sevenDay.utilization >= threshold
+					? sevenDay
+					: fiveHour &&
+							(!sevenDay || fiveHour.utilization >= sevenDay.utilization)
+						? fiveHour
+						: (sevenDay ?? month));
 	const used = binding?.utilization;
 	return {
 		level: limited

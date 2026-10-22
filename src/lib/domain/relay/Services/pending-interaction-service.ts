@@ -50,6 +50,7 @@ export interface PendingPermissionRequestInput {
 
 export interface PendingQuestionInput {
 	readonly requestId: string;
+	readonly delivery?: "async";
 	readonly providerProcessId?: string;
 	readonly providerRequestId?: string;
 	readonly sessionId: string;
@@ -67,10 +68,14 @@ export interface PendingQuestionItemInput {
 	readonly header?: string;
 	readonly options?: readonly unknown[];
 	readonly multiSelect?: boolean;
+	readonly custom?: boolean | undefined;
+	readonly isOther?: boolean | undefined;
+	readonly isSecret?: boolean | undefined;
 }
 
 export interface PendingQuestion {
 	readonly requestId: string;
+	readonly delivery?: "async";
 	readonly providerProcessId?: string;
 	readonly providerRequestId?: string;
 	readonly sessionId: string;
@@ -88,6 +93,9 @@ export interface PendingQuestionItem {
 	readonly header?: string;
 	readonly options?: readonly unknown[];
 	readonly multiSelect?: boolean;
+	readonly custom?: boolean;
+	readonly isOther?: boolean;
+	readonly isSecret?: boolean;
 }
 
 export interface ResolvedPermissionDecision {
@@ -243,6 +251,7 @@ export const makePendingInteractionServiceLive = (
 
 			const toPendingQuestion = (state: QuestionState): PendingQuestion => ({
 				requestId: state.requestId,
+				...(state.delivery ? { delivery: state.delivery } : {}),
 				...(state.providerProcessId
 					? { providerProcessId: state.providerProcessId }
 					: {}),
@@ -324,6 +333,7 @@ export const makePendingInteractionServiceLive = (
 					const timestamp = input.timestamp ?? (yield* Clock.currentTimeMillis);
 					const entry: QuestionState = {
 						requestId: input.requestId,
+						...(input.delivery ? { delivery: input.delivery } : {}),
 						...(input.providerProcessId
 							? { providerProcessId: input.providerProcessId }
 							: {}),
@@ -339,6 +349,13 @@ export const makePendingInteractionServiceLive = (
 								: {}),
 							...(question.multiSelect != null
 								? { multiSelect: question.multiSelect }
+								: {}),
+							...(question.custom != null ? { custom: question.custom } : {}),
+							...(question.isOther != null
+								? { isOther: question.isOther }
+								: {}),
+							...(question.isSecret != null
+								? { isSecret: question.isSecret }
 								: {}),
 						})),
 						...(input.toolCallId != null
@@ -455,6 +472,7 @@ export const makePendingInteractionServiceLive = (
 						for (const [id, entry] of current) {
 							if (
 								entry.sessionId === sessionId &&
+								entry.delivery !== "async" &&
 								(!options?.requestIds || options.requestIds.has(id))
 							) {
 								cancelled.push(entry);

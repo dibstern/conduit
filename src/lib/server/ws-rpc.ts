@@ -94,7 +94,17 @@ const daemonOnlyStreamHandlers = {
 const streamHandlers = {
 	SubscribeRecaps: (request) =>
 		Stream.unwrap(
-			Effect.map(RecapServiceTag, (service) => service.subscribe(request)),
+			Effect.map(RecapServiceTag, (service) =>
+				service.subscribe(request).pipe(
+					Stream.mapError(
+						(error) =>
+							new WsRpcError({
+								message: error.message,
+								...(error.code === undefined ? {} : { code: error.code }),
+							}),
+					),
+				),
+			),
 		),
 	SubscribeShell: (request) =>
 		subscribeShell({
@@ -515,11 +525,12 @@ export const makeRoutedWsRpcServerLayer = <
 							);
 							return Stream.fromQueue(queue).pipe(
 								Stream.flattenArray,
-								Failure.mapStreamFailures(
-									(error) =>
-										new WsRpcError({
-											message: `Subscription failed: ${String(error)}`,
-										}),
+								Failure.mapStreamFailures((error) =>
+									error instanceof WsRpcError
+										? error
+										: new WsRpcError({
+												message: `Subscription failed: ${String(error)}`,
+											}),
 								),
 							);
 						}),

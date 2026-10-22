@@ -6,6 +6,7 @@
 	import type { LimitRecovery } from "../../../contracts/limit-recovery.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
+	import { getDriverTraits, getInstanceById } from "../../stores/instance.svelte.js";
 	import { findSession } from "../../stores/session.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { usageState } from "../../stores/usage.svelte.js";
@@ -26,13 +27,13 @@
 	}: { limitRecovery: LimitRecovery; sessionId: string; projectSlug: string; presentation?: "strip" | "tray" } = $props();
 
 	let busy = $state(false);
-	const claudeAccounts = $derived(getClaudeAccounts(projectSlug));
 	const accountId = $derived(findSession(sessionId)?.accountId ?? undefined);
+	const claudeAccounts = $derived(getClaudeAccounts(projectSlug, getDriverTraits(getInstanceById(accountId ?? "")?.driver)?.usageHarness === "codex" ? "codex" : "claude"));
 
 	const account = $derived(
 		accountId ? claudeAccounts.nameOf(accountId, accountId) : "Account unavailable",
 	);
-	// Switch account needs another Claude account to go to.
+	// Switch account needs another account of the same provider.
 	const canSwitch = $derived(
 		accountId !== undefined && claudeAccounts.hasAlternative(accountId),
 	);
@@ -93,7 +94,7 @@
 	async function continueAt(at?: number): Promise<void> {
 		const currentAccountId = accountId;
 		if (!currentAccountId) {
-			showToast("No account is available for this session. Add a Claude account in Settings before continuing.", { variant: "error" });
+			showToast("No account is available for this session. Add an account in Settings before continuing.", { variant: "error" });
 			return;
 		}
 		return run(

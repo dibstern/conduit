@@ -33,6 +33,9 @@
 		"check:frontend": "tsgo --noEmit --project src/lib/frontend/tsconfig.json",
 		"check:svelte": "svelte-check --tsconfig ./src/lib/frontend/tsconfig.json --output human --fail-on-warnings",
 		"lint": "biome check . && pnpm lint:rules",
+		"codex:record-traces": "tsx scripts/record-codex-app-server-trace.ts",
+		"codex:replay-traces": "tsx scripts/record-codex-app-server-trace.ts --replay",
+		"codex:schema-drift": "tsx scripts/check-codex-app-server-schema.ts",
 		"lint:rules": "node scripts/check-design-tokens.mjs && node scripts/check-component-ownership.mjs && node scripts/check-class-token-drop.mjs && node scripts/check-dismissal-models.mjs && node scripts/check-svelte-imports.mjs && node scripts/check-account-boundaries.mjs && node scripts/check-driver-dispatch.mjs && node scripts/check-cursor-sdk-boundary.mjs && node scripts/check-cause-inspection.mjs",
 		"verify": "node scripts/verify.mjs",
 		"format": "biome check --write .",
@@ -114,12 +117,12 @@
 		"zod": "4.3.6"
 	},
 	"optionalDependencies": {
-		"@cursor/sdk": "1.0.37",
-		"@cursor/sdk-darwin-arm64": "1.0.37",
-		"@cursor/sdk-darwin-x64": "1.0.37",
-		"@cursor/sdk-linux-arm64": "1.0.37",
-		"@cursor/sdk-linux-x64": "1.0.37",
-		"@cursor/sdk-win32-x64": "1.0.37"
+		"@cursor/sdk": "1.0.40",
+		"@cursor/sdk-darwin-arm64": "1.0.40",
+		"@cursor/sdk-darwin-x64": "1.0.40",
+		"@cursor/sdk-linux-arm64": "1.0.40",
+		"@cursor/sdk-linux-x64": "1.0.40",
+		"@cursor/sdk-win32-x64": "1.0.40"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.4",

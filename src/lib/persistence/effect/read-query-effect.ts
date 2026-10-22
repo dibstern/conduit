@@ -1011,6 +1011,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		FROM (
 			SELECT id, created_at, resolved_at FROM pending_approvals
 			WHERE session_id = t.session_id
+				AND (type <> 'question' OR COALESCE(json_extract(details, '$.delivery'), '') <> 'async')
 				AND created_at >= t.requested_at
 				AND (t.completed_at IS NULL OR created_at <= t.completed_at)
 			ORDER BY created_at ASC, id ASC
@@ -1424,6 +1425,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				SELECT session_id, type, COUNT(*) AS pending_count
 				FROM pending_approvals
 				WHERE status = 'pending'
+					AND (type <> 'question' OR COALESCE(json_extract(details, '$.delivery'), '') <> 'async')
 					AND session_id IN (SELECT id FROM sessions WHERE project_id IN ${sql.in(projectIds)})
 				GROUP BY session_id, type`;
 		}).pipe(
@@ -2106,6 +2108,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						SELECT session_id, type, COUNT(*) AS pending_count
 						FROM pending_approvals
 						WHERE status = 'pending'
+							AND (type <> 'question' OR COALESCE(json_extract(details, '$.delivery'), '') <> 'async')
 							AND session_id IN (SELECT value FROM json_each(${JSON.stringify(family.map((row) => row.id))}))
 						GROUP BY session_id, type`;
 					const pending = pendingApprovalCountsByType(approvals);
@@ -2459,7 +2462,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							> COALESCE((SELECT MAX(sequence) FROM events
 								WHERE session_id = ${sessionId} AND type = 'session.cut_off_dismissed'), 0))) AS paused,
 				EXISTS (SELECT 1 FROM pending_approvals
-					WHERE session_id = ${sessionId} AND status = 'pending') AS prompt_open
+					WHERE session_id = ${sessionId} AND status = 'pending'
+						AND (type <> 'question' OR COALESCE(json_extract(details, '$.delivery'), '') <> 'async')) AS prompt_open
 			FROM sessions WHERE id = ${sessionId}
 				AND EXISTS (SELECT 1 FROM pending_inputs WHERE session_id = ${sessionId})`.pipe(
 			Effect.map(([row]) =>

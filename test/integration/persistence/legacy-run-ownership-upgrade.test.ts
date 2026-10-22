@@ -257,7 +257,7 @@ it.each([
 								userMessageId: "legacy-input",
 							});
 							proof.recoveredTerminalLegacyTurn = true;
-							return failRunnerTurn(emit, sinkId, turn, failure);
+							return failRunnerTurn(emit, sinkId, turn, failure, "claude");
 						},
 					);
 				expect(

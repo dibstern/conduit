@@ -129,7 +129,8 @@ function predictsHandoff(sessionId: string): boolean {
 			(permission) => permission.sessionId === sessionId,
 		) &&
 		!permissionsState.pendingQuestions.some(
-			(question) => question.sessionId === sessionId,
+			(question) =>
+				question.sessionId === sessionId && question.delivery !== "async",
 		) &&
 		!inbox?.pending.length &&
 		!inbox?.paused &&

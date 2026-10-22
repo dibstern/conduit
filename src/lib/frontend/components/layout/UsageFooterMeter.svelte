@@ -8,7 +8,7 @@
 	import { applyInstanceListResponse, getInstanceById } from "../../stores/instance.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import { composerAccountId, orderedUsageAccounts, usageState } from "../../stores/usage.svelte.js";
-	import { usageDisplay } from "../../utils/continuation.js";
+	import { usageDisplay, usageResetTime } from "../../utils/continuation.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import AccountDot from "../ui/AccountDot.svelte";
@@ -37,7 +37,8 @@
 		return shown.length > 0 ? shown : accounts.slice(0, 1);
 	});
 	const folded = $derived(accounts.filter((reading) => !docked.includes(reading)));
-	const single = $derived(accounts.length === 1 ? accounts.find((reading) => reading.windows.some((window) => window.kind in windowLabels)) : undefined);
+	const single = $derived(accounts.length === 1 && groupsOf(accounts)[0]?.rows.length === 1 ? accounts.find((reading) => reading.windows.some((window) => window.kind in windowLabels)) : undefined);
+	const grid = $derived(accounts.length > 1 || (accounts[0]?.harness === "codex" && !single && accounts[0].windows.length > 0));
 	let sheetOpen = $state(false);
 	let sheet: HTMLElement | undefined = $state();
 	let dock: HTMLElement | undefined = $state();
@@ -103,9 +104,26 @@
 
 	function groupsOf(rows: readonly UsageReading[]) {
 		return harnesses.flatMap((harness) => {
-			const group = rows.filter((row) => row.harness === harness);
+			const group = rows.filter((reading) => reading.harness === harness).flatMap((reading) => {
+				const accountName = getInstanceById(reading.accountId)?.name ?? reading.accountId;
+				const limitIds = harness === "codex" ? [...new Set(reading.windows.map((window) => window.limitId ?? "codex"))] : [];
+				return (limitIds.length > 0 ? limitIds : ["codex"]).map((limitId) => {
+					const windows = harness === "codex" ? reading.windows.filter((window) => (window.limitId ?? "codex") === limitId) : reading.windows;
+					const main = limitId === "codex";
+					// The reader's label is the backend limit name followed by its window duration.
+					const limitName = windows.find((window) => window.label)?.label?.replace(/ (?:5h|Week|\d+m|primary|secondary)$/, "") ?? limitId;
+					return {
+						id: main ? reading.accountId : `${reading.accountId}-${limitId}`,
+						main,
+						name: main ? accountName : `${accountName} · ${limitName}`,
+						reading: { ...reading, windows },
+						detail: harness === "codex" ? windows.filter((window) => window.kind === "custom").map((window) => `${window.label ?? window.kind}: ${Math.round(window.utilization)}%`).join(" · ") : "",
+					};
+				});
+			});
 			if (group.length === 0) return [];
-			const columns = kinds.filter((kind) => group.some((row) => row.windows.some((window) => window.kind === kind)));
+			const supported: readonly WindowKind[] = harness === "codex" ? ["five_hour", "seven_day"] : kinds;
+			const columns = supported.filter((kind) => group.some((row) => row.reading.windows.some((window) => window.kind === kind)));
 			return [{ harness, rows: group, columns: columns.length > 0 ? columns : harness === "cursor" ? ["month" as const] : ["five_hour" as const, "seven_day" as const] }];
 		});
 	}
@@ -137,12 +155,14 @@
 	{/if}
 {/snippet}
 
-{#snippet cell(prefix: string, reading: UsageReading, kind: WindowKind, layout = "")}
+{#snippet cell(prefix: string, reading: UsageReading, kind: WindowKind, layout = "", rowId = reading.accountId)}
 	{@const window = reading.windows.find((window) => window.kind === kind)}
 	{@const display = window && reading.status !== "unknown" && reading.status !== "unavailable" ? displayWindow(reading, window) : undefined}
+	{@const reset = window && usageResetTime(window.resetsAt, kind === "seven_day")}
 	<span
-		data-testid="{prefix}-cell-{reading.accountId}-{kind}"
+		data-testid="{prefix}-cell-{rowId}-{kind}"
 		data-level={display?.level === "limited" ? "danger" : display?.level === "warn" ? "warning" : display?.level === "ok" ? "normal" : "unknown"}
+		title={reading.harness === "codex" && window ? `${window.label ?? windowLabels[kind]}: ${display ? `${Math.round(window.utilization)}%` : "—"}${reset ? ` · Resets ${reset}` : ""}` : undefined}
 		class="flex min-w-0 items-center whitespace-nowrap {layout}"
 	>
 		<QuotaMeter
@@ -153,8 +173,8 @@
 			variant="usage"
 			trackWidth={layout === "spanning-window" ? 88 : 26}
 			gap={6}
-			trackTestId="{prefix}-bar-{reading.accountId}-{kind}"
-			captionTestId="{prefix}-value-{reading.accountId}-{kind}"
+			trackTestId="{prefix}-bar-{rowId}-{kind}"
+			captionTestId="{prefix}-value-{rowId}-{kind}"
 		/>
 	</span>
 {/snippet}
@@ -165,7 +185,7 @@
 	{@const rowClass = "account-row px-[6px]"}
 	{#each groupsOf(rows) as group, groupIndex (group.harness)}
 		<div data-testid="{prefix}-group-{group.harness}" class="meter-group w-full {groupIndex > 0 ? 'mt-[6px]' : ''}">
-			{#if group.harness !== continues && (size === "sidebar" || prefix === "usage-sheet")}
+			{#if group.harness !== continues && (size === "sidebar" || prefix === "usage-sheet" || accounts.length === 1)}
 				<div class="{rowClass} grid items-center gap-[6px] text-text-dimmer {size === 'sidebar' ? 'h-[22px] text-[11.5px]' : 'h-[28px] text-[12.5px]'}">
 					<span data-testid="{prefix}-heading-{group.harness}" class="font-semibold text-text-secondary">{harnessLabels[group.harness]}</span>
 					{#each group.columns as kind, index (kind)}
@@ -173,7 +193,8 @@
 					{/each}
 				</div>
 			{/if}
-			{#each group.rows as reading (reading.accountId)}
+			{#each group.rows as row (row.id)}
+				{@const reading = row.reading}
 				<!-- data-default retains the current-account highlight; the star uses the instance's isDefault. -->
 				{@const isDefault = reading.accountId === currentAccount}
 				{@const accountName = getInstanceById(reading.accountId)?.name ?? reading.accountId}
@@ -181,20 +202,20 @@
 				{@const canSelect = interactive && getProviderDriver(getInstanceById(reading.accountId)?.driver)?.defaultAccountSource === "selection"}
 				{#snippet rowContent()}
 					<span class="flex min-w-0 items-center gap-[6px]">
-						<AccountDot instanceId={reading.accountId} size={7} data-testid="{prefix}-dot-{reading.accountId}" />
-						<span data-testid="{prefix}-name-{reading.accountId}" class="min-w-0 truncate {isDefault ? 'text-text' : 'text-text-secondary'}">{accountName}</span>
-						{@render defaultMarker(prefix, reading.accountId)}
+						<AccountDot instanceId={reading.accountId} size={7} data-testid="{prefix}-dot-{row.id}" />
+						<span data-testid="{prefix}-name-{row.id}" class="min-w-0 truncate {isDefault ? 'text-text' : 'text-text-secondary'}">{row.name}</span>
+						{#if row.main}{@render defaultMarker(prefix, reading.accountId)}{/if}
 					</span>
 					{#each group.columns as kind, index (kind)}
-						{@render cell(prefix, reading, kind, group.columns.length === 1 ? 'spanning-window' : index === 1 ? 'second-window' : '')}
+						{@render cell(prefix, reading, kind, group.columns.length === 1 ? 'spanning-window' : index === 1 ? 'second-window' : '', row.id)}
 					{/each}
 				{/snippet}
 				{#if canSelect}
-					<TextButton tone="inherit" data-testid="{prefix}-row-{reading.accountId}" data-default={isDefault} title={isDefault ? "Current account" : undefined} aria-label="Make {accountName} the default {harnessLabels[group.harness]} account" onclick={() => makeDefault(reading.accountId)} class="{rowClass} grid w-full items-center gap-[6px] rounded-[7px] text-left {prefix === 'usage-sheet' ? 'h-[34px] text-[14px]' : size === 'phone' ? 'h-[30px] text-[13px]' : 'h-[24px] text-[12px]'} {isDefault ? 'bg-chip' : ''}">
+					<TextButton tone="inherit" data-testid="{prefix}-row-{row.id}" data-default={isDefault} title={[isDefault ? "Current account" : "", row.detail].filter(Boolean).join(" · ") || undefined} aria-label="Make {accountName} the default {harnessLabels[group.harness]} account" onclick={() => makeDefault(reading.accountId)} class="{rowClass} grid w-full items-center gap-[6px] rounded-[7px] text-left {prefix === 'usage-sheet' ? 'h-[34px] text-[14px]' : size === 'phone' ? 'h-[30px] text-[13px]' : 'h-[24px] text-[12px]'} {isDefault ? 'bg-chip' : ''}">
 						{@render rowContent()}
 					</TextButton>
 				{:else}
-					<div data-testid="{prefix}-row-{reading.accountId}" data-default={isDefault} title={isDefault ? "Current account" : undefined} class="{rowClass} grid w-full items-center gap-[6px] rounded-[7px] text-left {prefix === 'usage-sheet' ? 'h-[34px] text-[14px]' : size === 'phone' ? 'h-[30px] text-[13px]' : 'h-[24px] text-[12px]'} {isDefault ? 'bg-chip' : ''}">
+					<div data-testid="{prefix}-row-{row.id}" data-default={isDefault} title={[isDefault ? "Current account" : "", row.detail].filter(Boolean).join(" · ") || undefined} class="{rowClass} grid w-full items-center gap-[6px] rounded-[7px] text-left {prefix === 'usage-sheet' ? 'h-[34px] text-[14px]' : size === 'phone' ? 'h-[30px] text-[13px]' : 'h-[24px] text-[12px]'} {isDefault ? 'bg-chip' : ''}">
 						{@render rowContent()}
 					</div>
 				{/if}
@@ -238,14 +259,14 @@
 		bind:this={dock}
 		data-testid="usage-footer-phone"
 		bind:clientHeight={height}
-		style:display={accounts.length > 1 || single ? undefined : "none"}
+		style:display={grid || single ? undefined : "none"}
 		class="usage-phone-dock shrink-0 rounded-t-[18px] border-t border-border-subtle bg-sidebar-bg px-[12px] pt-[12px] text-[13px]"
 	>
 		{#if single}
 			<TextButton tone="inherit" data-testid="usage-phone-single" aria-label="Open Usage settings" onclick={() => openSettings("usage")} class="flex min-h-[44px] w-full items-center gap-[8px] whitespace-nowrap px-[6px] text-left text-[11.5px]">
 				{@render singleLine("usage-phone-column")}
 			</TextButton>
-		{:else if accounts.length > 1}
+		{:else if grid}
 			<TextButton
 				tone="inherit"
 				data-testid="usage-phone-dock"
@@ -278,14 +299,14 @@
 				<div class={folded.length > 0 ? "sheet-rest" : undefined}>
 					{@render meter(folded, "usage-sheet", "phone", continuedHarness)}
 					<div class="mx-[6px] mt-[10px] flex items-center justify-between border-t border-border-subtle pt-[8px] text-[12.5px] text-text-muted">
-						<span>{accounts.length} accounts</span>
+						<span>{accounts.length} {accounts.length === 1 ? "account" : "accounts"}</span>
 						<TextButton tone="accent" data-testid="usage-sheet-settings" onclick={() => { sheetOpen = false; openSettings("usage"); }} class="min-h-[44px] font-medium">Usage settings ›</TextButton>
 					</div>
 				</div>
 			</SheetChrome>
 		</div>
 	</Dialog>
-{:else if single || accounts.length > 1}
+{:else if single || grid}
 	<div data-testid="usage-footer-meter" class="flex shrink-0 flex-col border-t border-border-subtle px-[8px] pt-[8px] pb-[10px] text-left text-[12px]">
 		{#if single}
 			<!-- A lone account is already its harness default, so the row is not a button. -->

@@ -272,7 +272,7 @@ export const sessionsHandlers = {
 			});
 			if (!PROVIDER_DRIVERS[account.driver].supportsGoalState) {
 				return yield* new WsRpcError({
-					message: "Goal details are available only for Claude sessions",
+					message: "This provider does not support goal details",
 				});
 			}
 			const summaries = yield* GoalSummaryServiceTag;
@@ -894,6 +894,9 @@ export const sessionsHandlers = {
 				clientId: request.originId,
 				...("sessionId" in request ? { sessionId: request.sessionId } : {}),
 				...(request.messageId != null ? { messageId: request.messageId } : {}),
+				...(request.instanceId != null
+					? { instanceId: request.instanceId }
+					: {}),
 			}).pipe(
 				Effect.flatMap((session) =>
 					session == null

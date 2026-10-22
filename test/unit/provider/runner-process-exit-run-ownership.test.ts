@@ -544,6 +544,7 @@ for (const [
 							messageId: "",
 						},
 						runnerFailure("runner exit", "runner stopped"),
+						"claude",
 					);
 					expect(
 						yield* sql`SELECT state, run_id FROM turns WHERE id = ${userMessageId}`,
