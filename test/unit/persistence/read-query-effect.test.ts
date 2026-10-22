@@ -39,6 +39,321 @@ const scope = { projectIds: ["test-project"] } as const;
 
 const testLayer = EffectSqliteClient.layer({ filename: ":memory:" });
 
+it.effect(
+	"shows a pending run reservation as working without inventing intake",
+	() =>
+		Effect.gen(function* () {
+			const commit = yield* makeCommitAndSignal;
+			const read = yield* ReadQueryEffectTag;
+			const sql = yield* SqlClient.SqlClient;
+			yield* commit([
+				canonicalEvent("session.created", "reserved", {
+					sessionId: "reserved",
+					provider: "claude",
+					title: "Preparing the first input",
+				}),
+				canonicalEvent(
+					"run.requested",
+					"reserved",
+					{ runId: "reservation", inputId: "input" },
+					{ metadata: { runId: "reservation" } },
+				),
+			]);
+			for (const rows of [
+				yield* read.listSessionInfos(scope),
+				(yield* read.readSessionList(scope)).rows.map(({ item }) => item),
+				(yield* read.readSessionList(scope, {
+					familyOf: "reserved",
+					viewed: "reserved",
+				})).rows.map(({ item }) => item),
+			]) {
+				expect(rows.find(({ id }) => id === "reserved")).toMatchObject({
+					status: "busy",
+					processing: true,
+					attention: "working",
+				});
+			}
+			expect(yield* sql`SELECT status, started_at FROM provider_runs`).toEqual([
+				{ status: "pending", started_at: null },
+			]);
+			yield* commit([
+				canonicalEvent(
+					"message.created",
+					"reserved",
+					{ sessionId: "reserved", messageId: "input", role: "user" },
+					{ metadata: { runId: "reservation" } },
+				),
+			]);
+			expect(yield* sql`SELECT state, started_at FROM turns`).toEqual([
+				{ state: "pending", started_at: null },
+			]);
+			expect(
+				yield* sql`SELECT type FROM events WHERE type = 'run.started'`,
+			).toEqual([]);
+			yield* commit([
+				canonicalEvent(
+					"turn.error",
+					"reserved",
+					{ messageId: "", error: "Preparation failed" },
+					{ provider: "claude", metadata: { runId: "reservation" } },
+				),
+			]);
+			for (const rows of [
+				yield* read.listSessionInfos(scope),
+				(yield* read.readSessionList(scope)).rows.map(({ item }) => item),
+			]) {
+				const row = rows.find(({ id }) => id === "reserved");
+				expect(row).toMatchObject({ status: "idle", attention: "error" });
+				expect(row).not.toHaveProperty("processing");
+			}
+			yield* commit([
+				canonicalEvent(
+					"run.requested",
+					"reserved",
+					{ runId: "reservation", inputId: "input" },
+					{ metadata: { runId: "reservation" } },
+				),
+			]);
+			expect(yield* read.getSessionStatus("reserved")).toBe("idle");
+			expect(yield* sql`SELECT status, started_at FROM provider_runs`).toEqual([
+				{ status: "error", started_at: null },
+			]);
+			yield* commit([
+				canonicalEvent("run.requested", "reserved", {
+					runId: "fresh",
+					inputId: "fresh-input",
+				}),
+			]);
+			expect((yield* read.listSessionInfos(scope))[0]).toMatchObject({
+				status: "busy",
+				processing: true,
+				attention: "working",
+			});
+			yield* commit([
+				canonicalEvent("run.requested", "reserved", {
+					runId: "waiting",
+					inputId: "waiting-input",
+				}),
+				canonicalEvent(
+					"turn.completed",
+					"reserved",
+					{ messageId: "" },
+					{ provider: "claude", metadata: { runId: "fresh" } },
+				),
+			]);
+			expect(yield* read.getSessionStatus("reserved")).toBe("busy");
+			yield* commit([
+				canonicalEvent(
+					"turn.completed",
+					"reserved",
+					{ messageId: "" },
+					{ provider: "claude", metadata: { runId: "waiting" } },
+				),
+			]);
+			expect(yield* read.getSessionStatus("reserved")).toBe("idle");
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project"), {
+				local: true,
+			}),
+		),
+);
+
+it.effect(
+	"rolls a child's pending reservation into its Side Thread without crossing that edge",
+	() =>
+		Effect.gen(function* () {
+			const commit = yield* makeCommitAndSignal;
+			const read = yield* ReadQueryEffectTag;
+			yield* commit([
+				canonicalEvent("session.created", "root", {
+					sessionId: "root",
+					provider: "claude",
+					title: "Root",
+				}),
+				canonicalEvent("session.created", "side", {
+					sessionId: "side",
+					provider: "claude",
+					title: "Side Thread",
+					parentId: "root",
+					sideThread: true,
+				}),
+				canonicalEvent("session.created", "agent", {
+					sessionId: "agent",
+					provider: "claude",
+					title: "Foreground child",
+					parentId: "side",
+				}),
+				canonicalEvent(
+					"run.requested",
+					"agent",
+					{ runId: "child-run", inputId: "child-input" },
+					{ metadata: { runId: "child-run" } },
+				),
+			]);
+			for (const rows of [
+				yield* read.listSessionInfos(scope),
+				(yield* read.readSessionList(scope, {
+					familyOf: "root",
+					viewed: "side",
+				})).rows.map(({ item }) => item),
+			]) {
+				expect(rows.find(({ id }) => id === "agent")).toMatchObject({
+					status: "busy",
+					processing: true,
+					attention: "working",
+				});
+				expect(rows.find(({ id }) => id === "side")).toMatchObject({
+					status: "idle",
+					processing: true,
+					attention: "working",
+				});
+				const root = rows.find(({ id }) => id === "root");
+				expect(root).toMatchObject({ status: "idle", attention: "idle" });
+				expect(root).not.toHaveProperty("processing");
+			}
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project"), {
+				local: true,
+			}),
+		),
+);
+
+for (const terminal of ["turn.error", "turn.interrupted"] as const) {
+	it.effect(
+		`browser inbox pause survives a pre-stop steer's completion after ${terminal} and resolves joined runs and reset order`,
+		() =>
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				const read = yield* ReadQueryEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				yield* commit([
+					canonicalEvent("session.created", "inbox", {
+						sessionId: "inbox",
+						provider: "claude",
+						title: "Queue",
+					}),
+					canonicalEvent("input.admitted", "inbox", {
+						sessionId: "inbox",
+						inputId: "queued",
+						delivery: "queue",
+						request: { text: "next" },
+					}),
+					canonicalEvent(
+						"run.requested",
+						"inbox",
+						{ runId: "failed", inputId: "unplaced" },
+						{ createdAt: 100 },
+					),
+					canonicalEvent(
+						"run.requested",
+						"inbox",
+						{ runId: "pending-steer", inputId: "bravo" },
+						{ createdAt: 200 },
+					),
+					canonicalEvent(
+						terminal,
+						"inbox",
+						{ messageId: "", error: "Stopped" },
+						{
+							provider: "claude",
+							metadata: { runId: "failed" },
+							createdAt: 300,
+						},
+					),
+				]);
+				expect(
+					yield* sql`SELECT id FROM turns WHERE session_id = 'inbox'`,
+				).toEqual([]);
+				expect(yield* read.readInboxState("inbox")).toMatchObject({
+					paused: true,
+				});
+				yield* commit([
+					canonicalEvent(
+						"run.started",
+						"inbox",
+						{ requestedRunId: "pending-steer", inputId: "bravo" },
+						{ metadata: { runId: "pending-steer" }, createdAt: 400 },
+					),
+				]);
+				expect(yield* read.readInboxState("inbox")).toMatchObject({
+					paused: true,
+				});
+				yield* commit([
+					canonicalEvent(
+						"turn.completed",
+						"inbox",
+						{ messageId: "" },
+						{
+							provider: "claude",
+							metadata: { runId: "pending-steer" },
+							createdAt: 500,
+						},
+					),
+				]);
+				expect(yield* read.readInboxState("inbox")).toMatchObject({
+					paused: true,
+				});
+				yield* commit([
+					canonicalEvent("run.requested", "inbox", {
+						runId: "active",
+						inputId: "active-input",
+					}),
+					canonicalEvent(
+						"run.started",
+						"inbox",
+						{ requestedRunId: "active", inputId: "active-input" },
+						{ metadata: { runId: "active" } },
+					),
+				]);
+				expect(yield* read.readInboxState("inbox")).toMatchObject({
+					paused: false,
+				});
+				yield* commit([
+					canonicalEvent("run.requested", "inbox", {
+						runId: "steer",
+						inputId: "steer-input",
+					}),
+					canonicalEvent(
+						"run.started",
+						"inbox",
+						{ requestedRunId: "steer", inputId: "steer-input" },
+						{ metadata: { runId: "active" } },
+					),
+					canonicalEvent(
+						"turn.error",
+						"inbox",
+						{ messageId: "", error: "Stopped after steer" },
+						{ provider: "claude", metadata: { runId: "active" } },
+					),
+				]);
+				expect(yield* read.readInboxState("inbox")).toMatchObject({
+					paused: true,
+				});
+				yield* commit([
+					canonicalEvent("input.admitted", "inbox", {
+						sessionId: "inbox",
+						inputId: "after-stop",
+						delivery: "queue",
+						request: { text: "after reset" },
+					}),
+					canonicalEvent(
+						"session.resume_cancelled",
+						"inbox",
+						{},
+						{ metadata: { source: "inbox-reset" } },
+					),
+				]);
+				expect(yield* read.readInboxState("inbox")).toMatchObject({
+					paused: false,
+				});
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project"), {
+					local: true,
+				}),
+			),
+	);
+}
+
 describe("typed session row derivations", () => {
 	// Unread is the generated column alone (ADR-0004, Scope).
 	it.effect("takes unread from the generated column", () =>
@@ -1550,6 +1865,45 @@ describe("ReadQueryEffect.readSessionTranscriptPage", () => {
 				expect(first.hasMore).toBe(true);
 			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
+
+	it.effect(
+		"starts a steer's clock when it was sent, not when the turn it joined ends",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				yield* seedSession("s1");
+				const sql = yield* SqlClient.SqlClient;
+				// The steer joins the running turn, so both settle together.
+				yield* sql`
+					INSERT INTO turns (id, session_id, state, user_message_id, requested_at, completed_at)
+					VALUES
+					('first', 's1', 'completed', 'first', 1000, 9000),
+					('steer', 's1', 'completed', 'steer', 2000, 9000),
+					('queued', 's1', 'completed', 'queued', 3000, 12000)`;
+				yield* sql`
+					INSERT INTO messages
+					(id, session_id, role, text, created_at, updated_at, steered)
+					VALUES
+					('first', 's1', 'user', 'first', 1000, 1000, 0),
+					('steer', 's1', 'user', 'steer', 2000, 2000, 1),
+					('queued', 's1', 'user', 'queued', 3000, 3000, 0)`;
+				const readQuery = yield* makeReadQueryEffect;
+				const page = yield* readQuery.readSessionTranscriptPage("s1", {
+					limit: 10,
+				});
+				expect(
+					page.messages.map((message) => [
+						message.id,
+						message.turnTiming?.startedAt,
+					]),
+				).toEqual([
+					["first", 1000],
+					["steer", 2000],
+					// A queued prompt still waits for the turn ahead of it.
+					["queued", 9000],
+				]);
+			}).pipe(Effect.provide(testLayer, { local: true })),
+	);
 });
 
 // The session list reads (ni8.5 T-1)
@@ -1897,10 +2251,20 @@ describe("ReadQueryEffect.readInboxState", () => {
 							{ createdAt: 3 },
 						),
 						canonicalEvent(
+							"run.requested",
+							"stopped",
+							{ runId: "earlier-run", inputId: "earlier-input" },
+							{ createdAt: 4 },
+						),
+						canonicalEvent(
 							"turn.interrupted",
 							"stopped",
 							{ messageId: "reply" },
-							{ createdAt: 4 },
+							{
+								provider: "claude",
+								metadata: { runId: "earlier-run" },
+								createdAt: 5,
+							},
 						),
 						canonicalEvent(
 							"input.admitted",
@@ -1911,13 +2275,13 @@ describe("ReadQueryEffect.readInboxState", () => {
 								delivery: "queue",
 								request: { text: "wait" },
 							},
-							{ createdAt: 5 },
+							{ createdAt: 6 },
 						),
 						canonicalEvent(
 							"session.resume_scheduled",
 							"stopped",
 							{ instanceId: "claude", at: 10, by: "user" },
-							{ createdAt: 6 },
+							{ createdAt: 7 },
 						),
 					]);
 					expect(yield* read.readInboxState("stopped")).toMatchObject({
@@ -1929,13 +2293,13 @@ describe("ReadQueryEffect.readInboxState", () => {
 									"session.resumed",
 									"stopped",
 									{ instanceId: "claude", reason: "reset" },
-									{ createdAt: 7 },
+									{ createdAt: 8 },
 								)
 							: canonicalEvent(
 									"session.resume_cancelled",
 									"stopped",
 									{},
-									{ createdAt: 7, metadata: { source: "inbox-reset" } },
+									{ createdAt: 8, metadata: { source: "inbox-reset" } },
 								),
 					]);
 					expect(yield* read.readInboxState("stopped")).toMatchObject({
@@ -1943,10 +2307,20 @@ describe("ReadQueryEffect.readInboxState", () => {
 					});
 					yield* commit([
 						canonicalEvent(
+							"run.requested",
+							"stopped",
+							{ runId: "later-run", inputId: "later-input" },
+							{ createdAt: 9 },
+						),
+						canonicalEvent(
 							"turn.interrupted",
 							"stopped",
 							{ messageId: "reply" },
-							{ createdAt: 8 },
+							{
+								provider: "claude",
+								metadata: { runId: "later-run" },
+								createdAt: 10,
+							},
 						),
 					]);
 					expect(yield* read.readInboxState("stopped")).toMatchObject({

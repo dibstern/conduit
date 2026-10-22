@@ -19,6 +19,7 @@
 	import { menuDensityContextKey, type MenuDensityContext } from "./menu-context.js";
 	import { getDialogTarget } from "./dialog-context.js";
 	import SheetChrome from "./SheetChrome.svelte";
+	import { dimThemeColor } from "../../stores/theme.svelte.js";
 
 	const SCRIM_ACTIVATION_DELAY_MS = 50;
 
@@ -157,6 +158,10 @@
 
 	$effect(() => {
 		if (open) return registerOpenSurface(() => handleOpenChange(false));
+		return undefined;
+	});
+	$effect(() => {
+		if (open && presentation === "sheet") return dimThemeColor();
 		return undefined;
 	});
 	$effect(() => {

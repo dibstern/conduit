@@ -44,7 +44,12 @@ it("pushes canonical terminal alerts, preserves replay identity, and suppresses 
 				["child", "m3"],
 			] as const) {
 				const alert = turnEndedAlert(
-					canonicalEvent("turn.completed", sessionId, { messageId }),
+					canonicalEvent(
+						"turn.completed",
+						sessionId,
+						{ messageId },
+						{ provider: "claude", metadata: { runId: `run-${messageId}` } },
+					),
 				);
 				if (!alert) throw new Error("expected turn-ended alert");
 				yield* publishProviderRelayMessage(alert, deps).pipe(

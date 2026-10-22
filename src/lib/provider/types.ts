@@ -3,7 +3,7 @@
 // Instances are execution-only — they don't own sessions, messages, or history.
 // Conduit owns all state. Instances turn prompts into event streams.
 
-import type { Effect, Scope } from "effect";
+import type { Effect, Scope, Stream } from "effect";
 import type { Account } from "../contracts/account.js";
 import type { ProviderSessionCapabilities } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
@@ -28,6 +28,7 @@ export type PermissionDecision = "once" | "always" | "reject";
 
 export interface PermissionRequest {
 	readonly requestId: string;
+	readonly runId?: string;
 	readonly toolName: string;
 	readonly toolInput: Record<string, unknown>;
 	readonly sessionId: string;
@@ -50,6 +51,7 @@ export interface PermissionResponse {
 
 export interface QuestionRequest {
 	readonly requestId: string;
+	readonly runId?: string;
 	readonly toolUseId?: string;
 	readonly questions: Array<{
 		question: string;
@@ -104,11 +106,13 @@ export interface EventSink {
 }
 
 /**
- * `joined`: the provider folded this input into a turn another input owns.
- * That input's result finalises the turn; a joined input finalises nothing.
+ * `accepted` acknowledges intake; terminal outcomes acknowledge the durable receipt.
+ * `joined` remains for legacy replies. Only a projected run terminal ends work.
  * `steer-declined`: the provider did not run this input as a steer.
  */
 export type TurnStatus =
+	| "accepted"
+	| "indeterminate"
 	| "completed"
 	| "error"
 	| "interrupted"
@@ -156,7 +160,8 @@ export interface TurnResult {
 	readonly cost: number;
 	readonly tokens: TurnTokens;
 	readonly durationMs: number;
-	readonly error?: TurnError;
+	/** Durable receipts also carry Conduit's persisted command failure codes. */
+	readonly error?: Omit<TurnError, "code"> & { readonly code: string };
 	/** Claude rejected the resume at startup, before emitting system/init. */
 	readonly nativeResumeRejected?: boolean;
 	readonly providerStateUpdates: readonly ProviderStateUpdate[];
@@ -207,7 +212,10 @@ export interface HistoryMessage {
 }
 
 export interface SendTurnInput {
-	/** Per-send identity, shared by the outbox command and Claude message/turn. */
+	/** Durable run reservation created by the send_turn outbox transaction. */
+	readonly runId?: string;
+	/** Durable acknowledgement of this reservation's intake or pre-intake end. */
+	readonly awaitIntake?: Effect.Effect<TurnResult, ProviderInstanceFailure>;
 	readonly inputId: string;
 	/**
 	 * Resume an open cut-off with a hidden control prompt on its native thread.
@@ -342,8 +350,14 @@ export interface ProviderNativeSession {
 	readonly resumeSessionId?: string | undefined;
 }
 
+export interface InputAdmission {
+	readonly isHeld: (sessionId: string) => boolean;
+	readonly changes: Effect.Effect<Stream.Stream<string>, never, Scope.Scope>;
+	readonly afterStop?: (sessionId: string) => Effect.Effect<void>;
+}
+
 /**
- * ProviderInstance -- the 7-method contract for provider execution.
+ * ProviderInstance -- the contract for provider execution.
  *
  * Implementations wrap a provider's REST/SDK surface and translate provider
  * events into provider runtime events via the EventSink. Instances do not own
@@ -355,8 +369,12 @@ export interface ProviderNativeSession {
  * - No streamEvents -- instance pushes via EventSink, no output stream needed
  */
 export interface ProviderInstance {
+	/** A retained runner must upgrade before accepting another input. */
+	readonly inputAdmission?: InputAdmission | undefined;
 	/** Unique identifier for this provider (e.g. "opencode", "claude") */
 	readonly providerId: string;
+	/** Native identity used for a locally placed input before provider acceptance. */
+	readonly userMessageIdForInput?: (inputId: string) => string;
 
 	/** Query the provider for available models, commands, and capabilities */
 	discoverEffect(
@@ -364,6 +382,19 @@ export interface ProviderInstance {
 		account?: Account,
 		options?: { readonly refresh?: boolean },
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure>;
+
+	/**
+	 * Generate ephemeral text in an empty config-directory scratch folder.
+	 * No tools, hooks, MCP servers or project instructions may reach this call.
+	 * Interruption must stop the query and release its temporary resources.
+	 */
+	generateTextEffect(input: {
+		readonly account: Account;
+		readonly model: ModelSelection;
+		readonly effort: string;
+		readonly instructions: string;
+		readonly prompt: string;
+	}): Effect.Effect<string, ProviderInstanceFailure>;
 
 	/** Send a user turn to the provider and stream response events via EventSink */
 	sendTurnEffect(

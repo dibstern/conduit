@@ -16,6 +16,7 @@ import {
 } from "../fixtures/mockup-state.js";
 import { openPickerRoot } from "../helpers/model-picker.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
+import { closeSettings } from "../helpers/settings.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 type Page = import("@playwright/test").Page;
@@ -227,7 +228,7 @@ test.describe("Claude defaults", () => {
 					.getByTestId("instance-row-personal")
 					.getByTestId("default-account-marker"),
 			).toBeVisible();
-			await client.getByTestId("settings-close-btn").click();
+			await closeSettings(client);
 			await expect(
 				client
 					.locator('#input-area [data-testid="harness-logo"]:visible')
@@ -359,7 +360,7 @@ test.describe("Claude defaults", () => {
 		});
 	}
 
-	test("a model-only Claude pick follows the default account when it changes", async ({
+	test("a model-only Claude pick follows the default account and keeps its model", async ({
 		page,
 		baseURL,
 	}, testInfo) => {
@@ -381,7 +382,7 @@ test.describe("Claude defaults", () => {
 				.getByTestId("instance-row-personal")
 				.getByTestId("default-account-marker"),
 		).toBeVisible();
-		await page.getByTestId("settings-close-btn").click();
+		await closeSettings(page);
 		await expect(
 			page.locator('#input-area [data-testid="harness-logo"]:visible').first(),
 		).toHaveAttribute("data-account", "personal");
@@ -513,7 +514,9 @@ async function mockInstanceRpc(page: Page): Promise<RpcMockControl> {
 			StopInstance: (params) =>
 				Schema.decodeUnknownSync(InstanceListResponseSchema)({
 					projectSlug: String(params["projectSlug"] ?? "myapp"),
-					instances: instancesWith({ personal: "unhealthy", work: "stopped" }),
+					instances: instancesWith({
+						[String(params["instanceId"])]: "stopped",
+					}),
 				}),
 			RemoveInstance: (params) =>
 				Schema.decodeUnknownSync(InstanceListResponseSchema)({
@@ -546,7 +549,7 @@ async function mockInstanceRpc(page: Page): Promise<RpcMockControl> {
 
 /**
  * Settings lives in the list overflow on a phone's list, and in the session
- * bar (or phone island) overflow otherwise; a draft has no session title sheet.
+ * bar (or phone island) overflow otherwise.
  */
 async function openSettingsPanel(page: Page): Promise<void> {
 	const listOverflow = page.getByTestId("list-bar-overflow");
@@ -766,7 +769,11 @@ test.describe("Instance Management Settings", () => {
 		await expect(
 			page.getByRole("button", { name: "Start", exact: true }),
 		).toHaveCount(0);
-		await expect(page.getByText("Stop")).toBeVisible();
+		await expect(
+			page
+				.locator("#instance-settings-list")
+				.getByRole("button", { name: "Stop", exact: true }),
+		).toBeVisible();
 		await expect(page.getByTestId("edit-instance-btn")).toBeVisible();
 		await expect(page.getByText("Remove")).toBeVisible();
 	});
@@ -792,14 +799,22 @@ test.describe("Instance Management Settings", () => {
 		const control = await setupMultiInstance(page, baseURL);
 		await openSettingsPanel(page);
 		await page.getByTestId("settings-tab-server").click();
-		await page.locator("#instance-settings-list").getByText("Personal").click();
-		await page.click("button:has-text('Stop')");
+		const personal = page.getByTestId("instance-row-personal");
+		await personal.getByRole("button").first().click();
+		await personal.getByRole("button", { name: "Stop", exact: true }).click();
 		const request = await control.rpc.waitForRequest(
 			(req) => req.tag === "StopInstance",
 		);
 		expect(request.payload).toMatchObject({
 			instanceId: "personal",
 		});
+		await expect(personal.getByText("stopped", { exact: true })).toBeVisible();
+		await expect(
+			personal.getByRole("button", { name: "Start", exact: true }),
+		).toBeVisible();
+		await expect(
+			personal.getByRole("button", { name: "Stop", exact: true }),
+		).toHaveCount(0);
 	});
 
 	test("remove button shows confirmation then sends RemoveInstance RPC", async ({
@@ -922,7 +937,7 @@ test.describe("ConnectOverlay: Instance Actions", () => {
 		await page.getByTestId("settings-tab-server").click();
 		pushInstances(control.rpc, { personal: "unhealthy" });
 		await expect(instanceDot(page, "Personal")).toHaveClass(/bg-red-500/);
-		await page.getByTestId("settings-close-btn").click();
+		await closeSettings(page);
 		await disconnectControl(page, control.rpc);
 		const overlay = page.locator("#connect-overlay");
 		await expect(overlay).toBeVisible({ timeout: 5_000 });
@@ -940,7 +955,7 @@ test.describe("ConnectOverlay: Instance Actions", () => {
 		await page.getByTestId("settings-tab-server").click();
 		pushInstances(control.rpc, { personal: "unhealthy" });
 		await expect(instanceDot(page, "Personal")).toHaveClass(/bg-red-500/);
-		await page.getByTestId("settings-close-btn").click();
+		await closeSettings(page);
 		await disconnectControl(page, control.rpc);
 		const overlay = page.locator("#connect-overlay");
 		await expect(overlay).toBeVisible({ timeout: 5_000 });

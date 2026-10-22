@@ -472,14 +472,20 @@ export const SessionWorkspaceLive = Layer.effect(
 				readWorkspace(sessionId).pipe(
 					Effect.flatMap(({ workspace }) =>
 						Effect.gen(function* () {
-							// Native ingress can seed a row before its workspace is known.
-							// Explicit moves, including resets to the project, always win.
+							// Native sessions retain their first observed directory until an
+							// explicit workspace move, including a reset, overrides it.
 							if (
-								nativeDirectory !== undefined &&
 								workspace === null &&
 								(yield* latestMove(sessionId)).length === 0
-							)
-								return nativeDirectory;
+							) {
+								if (nativeDirectory !== undefined) return nativeDirectory;
+								const [native] = yield* sql<{ directory: string | null }>`
+									SELECT json_extract(metadata, '$.nativeDirectory') AS directory FROM events
+									WHERE session_id = ${sessionId} AND type = 'session.created'
+									AND json_type(metadata, '$.nativeDirectory') = 'text'
+									ORDER BY sequence DESC LIMIT 1`;
+								if (native?.directory) return native.directory;
+							}
 							return effectiveWorkingDirectory(config.projectDir, workspace);
 						}).pipe(
 							Effect.mapError(

@@ -421,6 +421,139 @@ describe("MockOpenCodeServer", () => {
 		}
 	});
 
+	it.each([
+		undefined,
+		"msg_conduit_input_a",
+	])("preserves prompt identity in SSE and REST with messageID %s", async (messageID) => {
+		const user = { id: "msg_recorded", role: "user", sessionID: "ses_1" };
+		const part = {
+			id: "part_1",
+			messageID: user.id,
+			sessionID: "ses_1",
+			type: "text",
+			text: user.id,
+		};
+		const assistant = {
+			id: "msg_answer",
+			role: "assistant",
+			sessionID: "ses_1",
+			parentID: user.id,
+		};
+		const replay = new MockOpenCodeServer({
+			name: "client-message-identity",
+			recordedAt: "2026-03-01",
+			opencodeVersion: "1.3.0",
+			interactions: [
+				{
+					kind: "rest",
+					method: "POST",
+					path: "/session/ses_1/prompt_async",
+					status: 204,
+					responseBody: null,
+				},
+				{
+					kind: "sse",
+					type: "message.updated",
+					properties: { info: user },
+					delayMs: 0,
+				},
+				{
+					kind: "sse",
+					type: "message.part.updated",
+					properties: { part },
+					delayMs: 0,
+				},
+				{
+					kind: "sse",
+					type: "message.updated",
+					properties: { info: assistant },
+					delayMs: 0,
+				},
+				{
+					kind: "rest",
+					method: "GET",
+					path: `/session/ses_1/message/${user.id}`,
+					status: 200,
+					responseBody: { info: user, parts: [part] },
+				},
+				{
+					kind: "rest",
+					method: "POST",
+					path: "/session/ses_1/prompt_async",
+					status: 204,
+					responseBody: null,
+				},
+				{
+					kind: "sse",
+					type: "message.removed",
+					properties: { sessionID: "ses_1", messageID: user.id },
+					delayMs: 0,
+				},
+			],
+		});
+		await replay.start();
+		const controller = new AbortController();
+		try {
+			const stream = await fetch(`${replay.url}/event`, {
+				signal: controller.signal,
+			});
+			const events: Array<{
+				type: string;
+				properties?: Record<string, unknown>;
+			}> = [];
+			const collecting = collectSseEvents(stream.body?.getReader(), events);
+			await fetch(`${replay.url}/session/ses_1/prompt_async`, {
+				method: "POST",
+				body: JSON.stringify({ messageID }),
+			});
+			await vi.waitFor(() => expect(events).toHaveLength(4));
+			const expectedId = messageID ?? user.id;
+			expect(events.slice(1)).toEqual([
+				{
+					type: "message.updated",
+					properties: { info: { ...user, id: expectedId } },
+				},
+				{
+					type: "message.part.updated",
+					properties: { part: { ...part, messageID: expectedId } },
+				},
+				{
+					type: "message.updated",
+					properties: { info: { ...assistant, parentID: expectedId } },
+				},
+			]);
+			const expectedUser = {
+				info: { ...user, id: expectedId },
+				parts: [{ ...part, messageID: expectedId }],
+			};
+			expect(
+				await (await fetch(`${replay.url}/session/ses_1/message`)).json(),
+			).toEqual([
+				expectedUser,
+				{ info: { ...assistant, parentID: expectedId }, parts: [] },
+			]);
+			expect(
+				await (
+					await fetch(`${replay.url}/session/ses_1/message/${expectedId}`)
+				).json(),
+			).toEqual(expectedUser);
+			await fetch(`${replay.url}/session/ses_1/prompt_async`, {
+				method: "POST",
+				body: "{}",
+			});
+			await vi.waitFor(() => expect(events).toHaveLength(5));
+			expect(events[4]).toEqual({
+				type: "message.removed",
+				properties: { sessionID: "ses_1", messageID: expectedId },
+			});
+			controller.abort();
+			await collecting;
+		} finally {
+			controller.abort();
+			await replay.stop();
+		}
+	});
+
 	it("flushPendingSse emits all segments without requiring prompt_async", async () => {
 		const controller = new AbortController();
 		const sseRes = await fetch(`${mock.url}/event`, {

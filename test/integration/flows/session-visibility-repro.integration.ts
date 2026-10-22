@@ -10,15 +10,7 @@
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
-import {
-	afterAll,
-	beforeAll,
-	beforeEach,
-	describe,
-	expect,
-	it,
-	vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 import { SessionManager } from "../../../src/lib/session/session-manager.js";
@@ -174,6 +166,13 @@ function paginationSse(
 				},
 			}),
 		);
+		if (role === "assistant")
+			interactions.push(
+				sse("session.status", {
+					sessionID: sessionId,
+					status: { type: "idle" },
+				}),
+			);
 	}
 	return interactions;
 }
@@ -371,6 +370,13 @@ async function runPaginationDifferential(count: number) {
 			}));
 
 		return {
+			promptMessageId: (
+				JSON.parse(
+					paginationHarness.mock.requestBodies.find((request) =>
+						request.path.includes("/prompt_async"),
+					)?.body ?? "{}",
+				) as { messageID: string }
+			).messageID,
 			restSummary: summarize(rest.messages),
 			servedSummary: summarize(served.messages),
 			projectedSummary: summarize(projectedRest.messages),
@@ -395,20 +401,12 @@ async function runPaginationDifferential(count: number) {
 describe("Integration: Session Visibility Repros", () => {
 	let harness: RelayHarness;
 
-	beforeAll(async () => {
+	beforeEach(async () => {
 		harness = await createRelayHarness("chat-simple");
 	}, 30_000);
 
-	afterAll(async () => {
+	afterEach(async () => {
 		if (harness) await harness.stop();
-	});
-
-	beforeEach(async () => {
-		harness.mock.resetQueues();
-		await harness.stack.client.app.path();
-		await vi.waitFor(() => {
-			expect(harness.stack.sseStream.getHealth().connected).toBe(true);
-		});
 	});
 
 	it("second client connecting with ?session= gets populated history after a turn", async () => {
@@ -462,9 +460,7 @@ describe("Integration: Session Visibility Repros", () => {
 	it("OpenCode session: first send keeps message visible, refreshes its family, and survives a second tab", async () => {
 		const client1 = await harness.connectWsClient();
 		await client1.waitForInitialState();
-		// A relay-owned detour, not the initial session: resetQueues() re-armed
-		// the POST /session entry relay startup consumed, so the OpenCode
-		// session below receives the initial session's id.
+		// A relay-owned detour exercises an explicit OpenCode choice afterwards.
 		const detour = await client1.createSession("Detour", {
 			instanceId: "claude",
 		});
@@ -1166,7 +1162,8 @@ describe("Integration: Session Visibility Repros", () => {
 		expect(result.projectedHasMore).toBe(true);
 		expect(result.olderSummary).toEqual(result.projectedOlderSummary);
 		expect(result.olderSummary).toHaveLength(6);
-		expect(result.olderSummary[0]?.id).toBe("msg-001");
+		expect(result.promptMessageId).toMatch(/^msg_conduit_/);
+		expect(result.olderSummary[0]?.id).toBe(result.promptMessageId);
 		expect(result.olderSummary[5]?.id).toBe("msg-006");
 		expect(result.olderHasMore).toBe(false);
 		expect(result.projectedOlderHasMore).toBe(false);

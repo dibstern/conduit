@@ -3,9 +3,10 @@ import type {
 	UsageReading,
 	UsageWindow,
 } from "../../../src/lib/contracts/limit-recovery.js";
+import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
-import { openModelPicker, requireRpcControl } from "./shared.js";
+import { mockInstances, openModelPicker, requireRpcControl } from "./shared.js";
 
 const states = {
 	normal: [41, 22],
@@ -101,7 +102,7 @@ function setAccounts(
 	accounts: readonly (readonly [
 		id: string,
 		name: string,
-		driver?: "claude" | "opencode",
+		driver?: "claude" | "opencode" | "cursor",
 	])[],
 ): void {
 	const rpc = requireRpcControl(page);
@@ -115,22 +116,39 @@ function setAccounts(
 			},
 		}),
 	});
-	rpc.setDaemonList("SubscribeInstances", {
-		instances: accounts.map(([id, name, driver = "claude"]) => ({
-			id,
-			name,
-			driver,
-			isDefault: id === "claude" || id === "opencode",
-			usageEligible: driver === "claude" && id !== "api-key",
-			port: 0,
-			managed: false,
-			status: "healthy",
-			restartCount: 0,
-			createdAt: 1,
-			...(id === "api-key"
-				? { env: { ANTHROPIC_API_KEY: "fixture-key" } }
-				: {}),
-		})),
+	let instances = accounts.map(([id, name, driver = "claude"]) => ({
+		id,
+		name,
+		driver,
+		isDefault: id === "claude" || id === "opencode" || id === "cursor",
+		usageEligible: driver !== "opencode" && id !== "api-key",
+		port: 0,
+		managed: false,
+		status: "healthy" as const,
+		restartCount: 0,
+		createdAt: 1,
+		...(id === "api-key" ? { env: { ANTHROPIC_API_KEY: "fixture-key" } } : {}),
+	}));
+	mockInstances.set(page, instances);
+	rpc.setDaemonList("SubscribeInstances", { instances });
+	rpc.setStubs({
+		SetDefault: ({ instanceId }) => {
+			const current = instances;
+			const selected = current.find(
+				(instance) => instance["id"] === instanceId,
+			);
+			const updated = current.map((instance) => ({
+				...instance,
+				isDefault:
+					instance["driver"] === selected?.["driver"]
+						? instance["id"] === instanceId
+						: instance["isDefault"],
+			}));
+			instances = updated;
+			mockInstances.set(page, updated);
+			rpc.setDaemonList("SubscribeInstances", { instances: updated });
+			return { instances: updated };
+		},
 	});
 	rpc.setProjects({
 		projects: [{ slug: "myapp", title: "myapp", folders: ["/src/myapp"] }],
@@ -216,6 +234,122 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "choose the default account from a usage row",
+		match: /^I make (\S+) the default from the (desktop meter|phone sheet)$/,
+		run: async ({ world, match }) => {
+			const prefix =
+				match[2] === "phone sheet" ? "usage-sheet" : "usage-footer";
+			const row = world.page.getByTestId(`${prefix}-row-${match[1]}`);
+			const instance = mockInstances
+				.get(world.page)
+				?.find((item) => item["id"] === match[1]);
+			await expect(row).toHaveRole("button");
+			await expect(row).toHaveAccessibleName(
+				`Make ${instance?.["name"]} the default ${instance?.["driver"] === "cursor" ? "Cursor" : "Claude"} account`,
+			);
+			await row.focus();
+			await world.page.keyboard.press("Enter");
+		},
+	},
+	{
+		name: "assert default account markers independently of the current account",
+		match:
+			/^the (desktop meter|phone sheet) marks (\S+) as default(?: instead of (\S+))?$/,
+		run: async ({ world, match }) => {
+			const prefix =
+				match[1] === "phone sheet" ? "usage-sheet" : "usage-footer";
+			await expect(
+				world.page.getByTestId(`${prefix}-default-${match[2]}`),
+			).toBeVisible();
+			if (match[3])
+				await expect(
+					world.page.getByTestId(`${prefix}-default-${match[3]}`),
+				).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert exact default RPC count and payload",
+		match: /^the meter has sent (\d+) SetDefault requests for (\S+)$/,
+		run: async ({ world, match }) => {
+			const rpc = requireRpcControl(world.page);
+			// Flush the click's browser work before checking that a no-op sent nothing.
+			await world.page.evaluate(
+				() =>
+					new Promise<void>((resolve) =>
+						requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+					),
+			);
+			const requests = rpc
+				.getRequests()
+				.filter((request) => request.tag === "SetDefault");
+			expect(requests).toHaveLength(Number(match[1]));
+			for (const request of requests)
+				expect(request.payload["instanceId"]).toBe(match[2]);
+		},
+	},
+	{
+		name: "assert managed usage rows are not interactive",
+		match: /^the (desktop meter|phone sheet) row (\S+) is not a button$/,
+		run: async ({ world, match }) => {
+			const prefix =
+				match[1] === "phone sheet" ? "usage-sheet" : "usage-footer";
+			const row = world.page.getByTestId(`${prefix}-row-${match[2]}`);
+			await expect(row).toBeVisible();
+			await expect(row).not.toHaveRole("button");
+			expect(
+				await row.evaluate((element) => (element as HTMLElement).tabIndex),
+			).toBe(-1);
+			await expect(row.locator("button, [tabindex='0']")).toHaveCount(0);
+		},
+	},
+	{
+		name: "fail the usage meter's default mutation",
+		match: /^changing the usage meter default fails$/,
+		run: ({ world }) => {
+			requireRpcControl(world.page).setStubs({
+				SetDefault: () => {
+					throw new WsRpcError({ message: "Failed to change default account" });
+				},
+			});
+		},
+	},
+	{
+		name: "assert a default mutation failure is visible",
+		match: /^the usage meter default failure toast is visible$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("toast")).toBeVisible();
+			await expect(world.page.getByTestId("toast")).toContainText(
+				"Failed to change default account",
+			);
+		},
+	},
+	{
+		name: "open Usage settings from the separate desktop affordance",
+		match: /^I open Usage settings from the desktop meter$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("usage-footer-settings").click();
+			await expect(world.page.locator("#usage-limit-settings")).toBeVisible();
+		},
+	},
+	{
+		name: "open an untouched new session draft",
+		match: /^I open an untouched usage draft$/,
+		run: async ({ world }) => {
+			await world.page.locator("#new-session-btn:visible").click();
+		},
+	},
+	{
+		name: "assert the effective composer account after a default change",
+		match: /^the usage composer still selects (\S+)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.locator(
+					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
+				),
+			).toHaveAttribute("data-instance-id", match[1] ?? "");
+		},
+	},
+	{
 		name: "seed a single account's usage footer",
 		match: /^the usage footer has one Claude account in the (\S+) state$/,
 		run: ({ world, match }) => {
@@ -283,7 +417,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 			/^the usage footer has several accounts with an (unknown|unavailable) Claude reading$/,
 		run: ({ world, match }) => {
 			setAccounts(world.page, [
-				["cursor", "Cursor", "opencode"],
+				["cursor", "Cursor", "cursor"],
 				["spare", "Spare"],
 				["work", "Work"],
 				["unreadable", "Unreadable"],
@@ -328,11 +462,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 						: "claude";
 			setAccounts(world.page, [
 				["claude", "Personal"],
-				[
-					"hidden",
-					match[2] ?? "",
-					harness === "claude" ? "claude" : "opencode",
-				],
+				["hidden", match[2] ?? "", harness === "codex" ? "opencode" : harness],
 			]);
 			requireRpcControl(world.page).setUsageReadings([
 				singleReading("normal"),
@@ -1096,6 +1226,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			const footer = world.page.getByTestId("usage-footer-phone");
 			await expect(footer).toBeVisible();
+			const expectedRows = requireRpcControl(world.page).shellRows?.length;
 			await expect
 				.poll(async () => {
 					await world.page
@@ -1103,7 +1234,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 						.evaluate((element) => {
 							element.scrollTop = element.scrollHeight;
 						});
-					return footer.evaluate((element) => {
+					return footer.evaluate((element, rowCount) => {
 						const bounds = element.getBoundingClientRect();
 						const button = document
 							.querySelector("#new-session-btn")
@@ -1120,6 +1251,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 							item.getBoundingClientRect(),
 						).filter((box) => box.width > 0 && box.height > 0);
 						return {
+							allRowsLoaded: lastRow?.length === rowCount,
 							scrollable: scroller.scrollHeight > scroller.clientHeight,
 							dockAtBottom: Math.round(bounds.bottom) === window.innerHeight,
 							buttonAboveDock: button.bottom <= bounds.top,
@@ -1132,9 +1264,10 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 										(box.bottom <= button.top || box.top >= button.bottom),
 								),
 						};
-					});
+					}, expectedRows);
 				})
 				.toEqual({
+					allRowsLoaded: true,
 					scrollable: true,
 					dockAtBottom: true,
 					buttonAboveDock: true,

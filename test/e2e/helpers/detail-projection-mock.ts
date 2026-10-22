@@ -316,6 +316,9 @@ export function projectLegacyRelayMessage(
 						: nextTimestamp(state),
 			},
 			parts: [{ id: `${id}-text`, type: "text", text: event["text"] }],
+			...(typeof event["inputId"] === "string"
+				? { inputId: event["inputId"] }
+				: {}),
 			...(event["steered"] === true ? { steered: true } : {}),
 		});
 		return true;

@@ -497,7 +497,7 @@ describe("SessionOverrides Effect", () => {
 			yield* TestClock.adjust(Duration.millis(20_001));
 			expect(called.value).toBe(true);
 			expect((yield* Ref.get(ref)).sessions).toBe(settings);
-			expect((yield* Ref.get(ref)).processingTimeouts.size).toBe(0);
+			expect((yield* Ref.get(ref)).processingTimeouts.size).toBe(1);
 			yield* startProcessingTimeout(
 				"sess-1",
 				Duration.millis(TIMEOUT_MS),
@@ -507,6 +507,32 @@ describe("SessionOverrides Effect", () => {
 			expect((yield* Ref.get(ref)).sessions).toBe(settings);
 			expect((yield* Ref.get(ref)).processingTimeouts.size).toBe(0);
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
+	);
+
+	it.effect(
+		"activity re-arms a fired silence notice, but silence alone does not",
+		() =>
+			Effect.gen(function* () {
+				let notices = 0;
+				yield* startProcessingTimeout("sess-1", "2 minutes", () =>
+					Effect.sync(() => {
+						notices++;
+					}),
+				);
+				yield* TestClock.adjust("2 minutes");
+				expect(notices).toBe(1);
+				expect(yield* hasActiveProcessingTimeout("sess-1")).toBe(false);
+				yield* TestClock.adjust("4 minutes");
+				expect(notices).toBe(1);
+				yield* resetProcessingTimeout("sess-1", "2 minutes");
+				expect(yield* hasActiveProcessingTimeout("sess-1")).toBe(true);
+				yield* TestClock.adjust("2 minutes");
+				expect(notices).toBe(2);
+				yield* clearProcessingTimeout("sess-1");
+				yield* resetProcessingTimeout("sess-1", "2 minutes");
+				yield* TestClock.adjust("2 minutes");
+				expect(notices).toBe(2);
+			}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
 	it.effect("resetProcessingTimeout is no-op when no timer active", () =>

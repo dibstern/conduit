@@ -113,7 +113,9 @@ const observers: {
 
 async function settle() {
 	flushSync();
-	await new Promise<void>((resolve) => setTimeout(resolve, 0));
+	// The scroll controller forgets its own scrolls on the next frame, so a
+	// test scroll before then would read as ours.
+	await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 	flushSync();
 }
 

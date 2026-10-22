@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
@@ -20,6 +21,7 @@ import {
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
+import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import type { SDKMessage } from "../../../src/lib/provider/claude/types.js";
 import type { OpenCodeRecording } from "../../e2e/fixtures/recorded/types.js";
 import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";
@@ -103,7 +105,11 @@ function persistedCompactions(harness: RelayHarness, sessionId: string) {
 }
 
 function saveEvidence(name: string, evidence: unknown): void {
-	const directory = join("test-results", "opencode-compaction");
+	const directory = join(
+		process.env["CONDUIT_TEST_ARTIFACT_DIR"] ??
+			join(tmpdir(), "conduit-integration-artifacts"),
+		"review5-opencode-compaction",
+	);
 	mkdirSync(directory, { recursive: true });
 	writeFileSync(
 		join(directory, `${name}.json`),
@@ -115,18 +121,44 @@ describe("Integration: OpenCode compaction through the relay", () => {
 	let harness: RelayHarness | undefined;
 
 	beforeEach(() => {
+		// Use the built-in fallback catalogue without launching a real Claude query.
+		__setProbeOverrideForTesting(async () => ({
+			models: [],
+			commands: [],
+			agents: [],
+		}));
 		vi.stubGlobal("window", {
 			history: { pushState: vi.fn(), replaceState: vi.fn() },
 		});
 	});
 
-	afterEach(async () => {
-		await harness?.stop();
-		harness = undefined;
-		resetChatState();
-		clearDiscoveryState();
-		openSessionForSetup(null);
-		vi.unstubAllGlobals();
+	afterEach(async ({ task }) => {
+		try {
+			if (harness && task.result?.errors?.length) {
+				const events = await Effect.runPromise(
+					Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						return yield* sql`SELECT sequence, type, data, metadata FROM events ORDER BY sequence DESC LIMIT 40`;
+					}).pipe(
+						Effect.provide(
+							SqliteClient.layer({ filename: harness.eventsDbPath }),
+						),
+					),
+				);
+				saveEvidence("failure-events", events);
+			}
+		} finally {
+			try {
+				await harness?.stop();
+			} finally {
+				__setProbeOverrideForTesting(undefined);
+				harness = undefined;
+				resetChatState();
+				clearDiscoveryState();
+				openSessionForSetup(null);
+				vi.unstubAllGlobals();
+			}
+		}
 	});
 
 	it.each([
@@ -233,9 +265,13 @@ describe("Integration: OpenCode compaction through the relay", () => {
 			),
 		);
 		await client.sendMessage("/compact");
-		const row = await client.waitForTurnEnd(sessionId);
-		expect(row.attention).toBe("error");
-		expect(row.compacting).toBeUndefined();
+		const notice = await client.waitForTranscriptMessage(
+			(message) =>
+				message.parts?.some(
+					(part) => part.type === "error" && part.text?.includes("model pick"),
+				) === true,
+			sessionId,
+		);
 		const errors = await Effect.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -253,7 +289,20 @@ describe("Integration: OpenCode compaction through the relay", () => {
 				/\/(?:summarize|prompt_async|message)$/.test(request.path),
 			),
 		).toBe(false);
-		saveEvidence("pick-required", { row, errors });
+		const runs = await Effect.runPromise(
+			Effect.gen(function* () {
+				return yield* (yield* SqlClient.SqlClient)`SELECT status, started_at,
+					(SELECT COUNT(*) FROM turns WHERE run_id = provider_runs.id
+						AND state = 'error' AND started_at IS NULL) AS failed_inputs
+					FROM provider_runs WHERE session_id = ${sessionId}`;
+			}).pipe(
+				Effect.provide(SqliteClient.layer({ filename: relay.eventsDbPath })),
+			),
+		);
+		expect(runs).toEqual([
+			{ status: "error", started_at: null, failed_inputs: 1 },
+		]);
+		saveEvidence("pick-required", { notice, errors, runs });
 	});
 
 	it("keeps Claude context when compact_boundary omits post_tokens", async () => {
@@ -465,6 +514,10 @@ describe("Integration: OpenCode compaction through the relay", () => {
 			"big-pickle",
 			"mimo-v2-omni-free",
 		].entries()) {
+			let finishSummarize = () => {};
+			relay.mock.summarizeHold = new Promise<void>((resolve) => {
+				finishSummarize = resolve;
+			});
 			if (index > 0) await client.switchModel(modelID, "opencode", sessionId);
 			client.clearReceived();
 			const inputId = randomUUID();
@@ -495,6 +548,21 @@ describe("Integration: OpenCode compaction through the relay", () => {
 						/\/(?:prompt_async|message)$/.test(candidate.path),
 					),
 			).toBe(false);
+			if (index > 0)
+				relay.mock.injectSSEEvents([
+					{
+						type: "message.part.updated",
+						properties: {
+							part: {
+								id: "prt_compact_0",
+								sessionID: sessionId,
+								messageID: "msg_compact_0",
+								type: "compaction",
+								auto: false,
+							},
+						},
+					},
+				]);
 			// summarize has no recorded prompt stream; deliver its busy event
 			// before waiting for the shell to report a running turn.
 			relay.mock.injectSSEEvents([
@@ -539,43 +607,54 @@ describe("Integration: OpenCode compaction through the relay", () => {
 					cache: { read: 0, write: 0 },
 				},
 			};
-			relay.mock.injectSSEEvents(
-				[
-					{
-						type: "message.updated",
-						properties: {
-							info: {
-								id: properties.messageID,
-								sessionID: sessionId,
-								role: "user",
-								time: { created: Date.now() },
-								agent: "build",
-								model: { providerID: "opencode", modelID },
-							},
+			relay.mock.injectSSEEvents([
+				{
+					type: "message.updated",
+					properties: {
+						info: {
+							id: `msg_unrelated_tui_${index}`,
+							sessionID: sessionId,
+							role: "user",
+							time: { created: Date.now() },
 						},
 					},
-					{
-						type: "message.part.updated",
-						properties: {
-							part: {
-								id: `prt_compact_${index}`,
-								sessionID: sessionId,
-								messageID: properties.messageID,
-								type: "compaction",
-								auto: false,
-							},
+				},
+				{
+					type: "message.updated",
+					properties: {
+						info: {
+							id: properties.messageID,
+							sessionID: sessionId,
+							role: "user",
+							time: { created: Date.now() },
+							agent: "build",
+							model: { providerID: "opencode", modelID },
 						},
 					},
-					{ type: "message.updated", properties: { info: summaryInfo } },
-					{
-						type: "session.status",
-						properties: { sessionID: sessionId, status: { type: "busy" } },
+				},
+				{
+					type: "message.part.updated",
+					properties: {
+						part: {
+							id: `prt_compact_${index}`,
+							sessionID: sessionId,
+							messageID: properties.messageID,
+							type: "compaction",
+							auto: false,
+						},
 					},
-				].filter(
-					(event) =>
-						mode !== "summary-only" || event.type !== "message.part.updated",
-				),
+				},
+				{ type: "message.updated", properties: { info: summaryInfo } },
+				{
+					type: "session.status",
+					properties: { sessionID: sessionId, status: { type: "busy" } },
+				},
+			]);
+			const unrelated = await client.waitForTranscriptMessage(
+				(message) => message.id === `msg_unrelated_tui_${index}`,
+				sessionId,
 			);
+			expect(unrelated.inputId).toBeUndefined();
 			if (mode !== "legacy-only" && mode !== "summary-only") {
 				relay.mock.injectSSEEvents([
 					{ type: "session.next.compaction.started", properties },
@@ -671,6 +750,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 				summary,
 				notice,
 			]);
+			finishSummarize();
 			expect(row.status).toBe("idle");
 			expect(row.compacting).toBeUndefined();
 			const echo = await client.waitForTranscriptMessage(
@@ -811,7 +891,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		);
 	});
 
-	it("clears busy and compaction state when summarize fails", async () => {
+	it("keeps a failed submitted summarize indeterminate until Stop", async () => {
 		const relay = await createRelayHarness(recording(500), {
 			defaultModel: "opencode/big-pickle",
 		});
@@ -823,9 +903,6 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		seedNativeUserTurn(relay, sessionId, "big-pickle");
 		client.clearReceived();
 		await client.sendMessage("/compact");
-		const row = await client.waitForTurnEnd();
-		expect(row.attention).toBe("error");
-		expect(row.compacting).toBeUndefined();
 		const notice = await client.waitForTranscriptMessage(
 			(message) =>
 				message.parts?.some(
@@ -838,7 +915,35 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		expect(JSON.parse(stored.events[0]?.data ?? "null")).toMatchObject({
 			state: "failed",
 		});
-		saveEvidence("summarize-failed", { row, notice, stored });
+		const state = () =>
+			Effect.runPromise(
+				Effect.gen(function* () {
+					return yield* (yield* SqlClient.SqlClient)`SELECT run.status, run.started_at, command.error_code FROM provider_runs run
+				JOIN provider_command_outbox command ON command.run_id = run.id WHERE run.session_id = ${sessionId}`;
+				}).pipe(
+					Effect.provide(SqliteClient.layer({ filename: relay.eventsDbPath })),
+				),
+			);
+		await expect.poll(state).toEqual([
+			{
+				status: "pending",
+				started_at: null,
+				error_code: "delivery_indeterminate",
+			},
+		]);
+		relay.mock.setExactResponse(
+			"POST",
+			`/session/${sessionId}/abort`,
+			200,
+			true,
+		);
+		await client.cancelSession(sessionId);
+		await expect
+			.poll(state)
+			.toEqual([
+				{ status: "interrupted", started_at: null, error_code: "interrupted" },
+			]);
+		saveEvidence("summarize-failed", { notice, stored, state: await state() });
 	});
 
 	it("translates delta-first progress and a provider compaction error", async () => {
@@ -851,6 +956,10 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		const sessionId = client.getActiveSessionId();
 		if (!sessionId) throw new Error("No OpenCode session was created");
 		seedNativeUserTurn(relay, sessionId, "big-pickle");
+		let finishSummarize = () => {};
+		relay.mock.summarizeHold = new Promise<void>((resolve) => {
+			finishSummarize = resolve;
+		});
 		await client.sendMessage("/compact");
 		await expect
 			.poll(() =>
@@ -871,6 +980,29 @@ describe("Integration: OpenCode compaction through the relay", () => {
 					messageID: "msg_failed_compact",
 					timestamp: Date.now(),
 					text: "Partial summary",
+				},
+			},
+			{
+				type: "message.updated",
+				properties: {
+					info: {
+						id: "msg_failed_compact",
+						sessionID: sessionId,
+						role: "user",
+						time: { created: Date.now() },
+					},
+				},
+			},
+			{
+				type: "message.part.updated",
+				properties: {
+					part: {
+						id: "prt_failed_compact",
+						sessionID: sessionId,
+						messageID: "msg_failed_compact",
+						type: "compaction",
+						auto: false,
+					},
 				},
 			},
 			{
@@ -895,6 +1027,12 @@ describe("Integration: OpenCode compaction through the relay", () => {
 				) === true,
 		);
 		const stored = await persistedCompactions(relay, sessionId);
+		const echo = await client.waitForTranscriptMessage(
+			(message) =>
+				message.id === "msg_failed_compact" && message.inputId !== undefined,
+			sessionId,
+		);
+		finishSummarize();
 		expect(stored.events.map((event) => JSON.parse(event.data))).toEqual([
 			{
 				sessionId,
@@ -902,6 +1040,6 @@ describe("Integration: OpenCode compaction through the relay", () => {
 				detail: "Compaction failed: Summary unavailable",
 			},
 		]);
-		saveEvidence("provider-compaction-error", { notice, stored });
+		saveEvidence("provider-compaction-error", { notice, stored, echo });
 	});
 });

@@ -45,7 +45,27 @@ const START = Date.UTC(2026, 9, 1);
 const event =
 	(sessionId: string, createdAt = START) =>
 	<T extends LiveEventType>(type: T, data: EventPayloadMap[T]) =>
-		canonicalEvent(type, sessionId, data, { provider: "claude", createdAt });
+		canonicalEvent(type, sessionId, data, {
+			provider: "claude",
+			createdAt,
+			metadata: { runId: `${sessionId}-run` },
+		});
+
+const startedTurn = (sessionId: string) => {
+	const own = event(sessionId);
+	const inputId = `${sessionId}-input`;
+	const runId = `${sessionId}-run`;
+	return [
+		own("run.requested", { inputId, runId }),
+		own("message.created", {
+			sessionId,
+			messageId: inputId,
+			inputId,
+			role: "user",
+		}),
+		own("run.started", { inputId, requestedRunId: runId }),
+	];
+};
 
 const seed = (filename: string, events: readonly CanonicalEvent[]) =>
 	Effect.runPromise(
@@ -106,10 +126,12 @@ test("a recreated message resumes without its old parts or a checksum repair", a
 				providerSessionId: sessionId,
 			}),
 		),
+		...startedTurn(SESSION),
 		initial("message.created", {
 			sessionId: SESSION,
 			messageId: MESSAGE,
 			role: "assistant",
+			parentID: `${SESSION}-input`,
 		}),
 		initial("text.delta", {
 			messageId: MESSAGE,
@@ -122,10 +144,12 @@ test("a recreated message resumes without its old parts or a checksum repair", a
 			text: `${TEXT_B}\n\n`,
 		}),
 		initial("turn.completed", { messageId: MESSAGE }),
+		...startedTurn(OTHER),
 		other("message.created", {
 			sessionId: OTHER,
 			messageId: "other-M",
 			role: "assistant",
+			parentID: `${OTHER}-input`,
 		}),
 		other("text.delta", {
 			messageId: "other-M",
@@ -188,6 +212,7 @@ test("a recreated message resumes without its old parts or a checksum repair", a
 			sessionId: SESSION,
 			messageId: MESSAGE,
 			role: "assistant",
+			parentID: `${SESSION}-input`,
 		}),
 		recreated("text.delta", {
 			messageId: MESSAGE,
@@ -301,10 +326,12 @@ test("an open recreated message catches up through overflow without replacing it
 				providerSessionId: sessionId,
 			}),
 		),
+		...startedTurn(SESSION),
 		initial("message.created", {
 			sessionId: SESSION,
 			messageId: MESSAGE,
 			role: "assistant",
+			parentID: `${SESSION}-input`,
 		}),
 		initial("text.delta", {
 			messageId: MESSAGE,
@@ -410,6 +437,7 @@ test("an open recreated message catches up through overflow without replacing it
 			sessionId: SESSION,
 			messageId: MESSAGE,
 			role: "assistant",
+			parentID: `${SESSION}-input`,
 		}),
 		recreated("text.delta", {
 			messageId: MESSAGE,

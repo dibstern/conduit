@@ -53,12 +53,15 @@ import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/p
 import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/projectors-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { ProviderRegistryLive } from "../../../src/lib/provider/provider-registry.js";
+import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
+import { partialFake } from "../../helpers/partial-fake.js";
 
 const versionOf = (sessionId: string) =>
 	Effect.gen(function* () {
@@ -88,11 +91,6 @@ const announcedDuring = <A, E, R>(action: Effect.Effect<A, E, R>) =>
 		);
 		return [...seen].flatMap((advance) => [...advance.sessionIds]);
 	});
-
-/** One assistant message is all the title generator reads. */
-async function* assistantTitle(text: string): AsyncIterable<unknown> {
-	yield { type: "assistant", message: { content: [{ type: "text", text }] } };
-}
 
 /** The poller layer with real persistence behind it. */
 const makeStatusPollerLayer = (dbPath: string) => {
@@ -323,9 +321,9 @@ it("persistSessionPermissionMode advances the version of the session it edits", 
 	});
 });
 
-it("the status poller's staleness write advances the version", async () => {
+it("the status poller advances an orphan status observation without ending a run", async () => {
 	await withTempDb(async (dbPath) => {
-		// Busy for far longer than the 30-minute threshold.
+		// This stale observation has no owned work; cleanup cannot end a run.
 		const layer = makeStatusPollerLayer(dbPath);
 		await Effect.runPromise(
 			Effect.scoped(
@@ -347,14 +345,102 @@ it("the status poller's staleness write advances the version", async () => {
 	});
 });
 
+for (const accepted of [false, true]) {
+	it(`the status poller's stale idle cannot end an owned ${accepted ? "running" : "pending"} run`, async () => {
+		await withTempDb(async (dbPath) => {
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						yield* (yield* ProjectionRunnerEffectTag).recover();
+						yield* seedBusySession("stale", 0);
+						const sql = yield* SqlClient.SqlClient;
+						const owner = {
+							provider: "opencode",
+							createdAt: 1000,
+							metadata: { runId: "stale-run" },
+						};
+						yield* (yield* makeCommitAndSignal)([
+							canonicalEvent(
+								"run.requested",
+								"stale",
+								{ runId: "stale-run", inputId: "stale-input" },
+								owner,
+							),
+							canonicalEvent(
+								"message.created",
+								"stale",
+								{
+									sessionId: "stale",
+									messageId: "stale-input",
+									inputId: "stale-input",
+									role: "user",
+								},
+								owner,
+							),
+							...(accepted
+								? [
+										canonicalEvent(
+											"run.started",
+											"stale",
+											{ requestedRunId: "stale-run", inputId: "stale-input" },
+											owner,
+										),
+									]
+								: []),
+						]);
+						yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, attempt_count, requested_at, updated_at, run_id)
+					VALUES (1, 'stale-input', 'test-project', 'stale', 'opencode', 'send_turn', '{"inputId":"stale-input"}', ${accepted ? "running" : "pending"}, ${accepted ? 1 : 0}, 1000, 1000, 'stale-run')`;
+						yield* sql`INSERT INTO command_receipts (command_id, session_id, command_type, project_key, status, created_at, updated_at)
+					VALUES ('stale-input', 'stale', 'send_turn', 'test-project', 'side_effect_requested', 1000, 1000)`;
+						const version = yield* versionOf("stale");
+						const announced = yield* announcedDuring(
+							(yield* StatusPollerTag).notifySSEIdle("stale"),
+						);
+						expect(yield* versionOf("stale")).toBe(version);
+						expect(announced).toEqual([]);
+						expect(
+							yield* sql`SELECT status, last_turn_end_version FROM sessions WHERE id = 'stale'`,
+						).toEqual([{ status: "busy", last_turn_end_version: null }]);
+						expect(
+							yield* sql`SELECT status, completed_at FROM provider_runs`,
+						).toEqual([
+							{ status: accepted ? "running" : "pending", completed_at: null },
+						]);
+						expect(yield* sql`SELECT state, completed_at FROM turns`).toEqual([
+							{ state: accepted ? "running" : "pending", completed_at: null },
+						]);
+						expect(
+							yield* sql`SELECT status FROM provider_command_outbox`,
+						).toEqual([{ status: accepted ? "running" : "pending" }]);
+						expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
+							{ status: "side_effect_requested" },
+						]);
+						expect(
+							yield* sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
+						).toEqual([]);
+					}),
+				).pipe(
+					Effect.provide(makeStatusPollerLayer(dbPath), { local: true }),
+					Effect.orDie,
+				),
+			);
+		});
+	});
+}
+
 it("the auto-title rename advances the version of the session it renames", async () => {
 	await withTempDb(async (dbPath) => {
 		const bus = makeSessionEventBusLive();
 		const layer = Layer.provideMerge(
-			makeSessionTitleServiceLive({
-				queryFactory: () => assistantTitle("Investigate The OAuth Loop"),
-			}),
+			makeSessionTitleServiceLive(),
 			Layer.mergeAll(
+				ProviderRegistryLive([
+					partialFake<ProviderInstance>({
+						providerId: "claude",
+						generateTextEffect: () =>
+							Effect.succeed("Investigate The OAuth Loop"),
+					}),
+				]),
 				Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
 				bus,
 				makePersistenceEffectLayer(

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 // Failure modes: duplicate provider sends after replay, lost pre-send agent identity,
 // orphaned active runs, force against a live controller, divergent restart events,
 // idle/upgrade interrupting a turn, unbounded send journals, premature pruning,
@@ -71,13 +72,14 @@ function persisted(fixture: ProcessHarness, sessionId: string) {
 					[string],
 					{
 						command_id: string;
+						run_id: string;
 						attempt_count: number;
 						status: string;
 						error_code: string | null;
 						payload_json: string;
 					}
 				>(
-					"SELECT command_id, attempt_count, status, error_code, payload_json FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
+					"SELECT command_id, run_id, attempt_count, status, error_code, payload_json FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
 				)
 				.all(sessionId),
 			sessions: db
@@ -327,7 +329,10 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 						type: "send-turn",
 						aborted: false,
 						sinkId,
-						input: JSON.parse(command.payload_json) as SessionTurn,
+						input: {
+							...(JSON.parse(command.payload_json) as SessionTurn),
+							runId: command.run_id,
+						},
 					},
 				});
 			await Effect.runPromise(
@@ -639,7 +644,16 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 				capture,
 				source: "workspace-resume:held-store-copy",
 			});
-			await browser.send(other, "What code word did I give you?", TIMEOUT);
+			// This failure precedes intake, so it has no answered-input completion.
+			await Effect.runPromise(
+				browser.rpc["input.submit"]({
+					sessionId: other,
+					originId: browser.originId,
+					inputId: randomUUID(),
+					delivery: "queue",
+					text: "What code word did I give you?",
+				}),
+			);
 			await turns(fixture, other, ["error"]);
 			expect(
 				persisted(fixture, other).events.find(
@@ -769,7 +783,10 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 				{ timeout: TIMEOUT },
 			);
 			const unfinished = journal(fixture, other);
-			expect(unfinished[0]).not.toHaveProperty("completedAt");
+			expect(unfinished[0]).toMatchObject({
+				completedAt: expect.any(Number),
+				result: { status: "accepted" },
+			});
 			await browser.deleteSession(id);
 			await vi.waitFor(
 				() => {

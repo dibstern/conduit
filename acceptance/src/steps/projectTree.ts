@@ -3,7 +3,10 @@ import type {
 	ProjectInfo,
 	SessionInfo,
 } from "../../../src/lib/shared-types.js";
-import { chooseSettingsOption } from "../../../test/e2e/helpers/settings.js";
+import {
+	chooseSettingsOption,
+	closeSettings,
+} from "../../../test/e2e/helpers/settings.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRpcControl } from "./shared.js";
@@ -182,6 +185,26 @@ export const projectTreeHandlers: StepHandler[] = [
 		},
 	},
 	{
+		// Manual sort adds a handle column; it must not shift a project's header
+		// away from the sessions listed under it.
+		name: "project title lines up with its sessions",
+		match: /^the (\w+) project title lines up with its session titles$/,
+		run: async ({ world, match }) => {
+			const title = match[1] ?? "";
+			const [project, session] = await Promise.all([
+				header(world.page, title)
+					.getByTestId("project-tree-title")
+					.boundingBox(),
+				rows(world.page, title)
+					.locator(".session-title-inner")
+					.first()
+					.boundingBox(),
+			]);
+			if (!project || !session) throw new Error(`${title} is not laid out`);
+			expect(Math.abs(project.x - session.x)).toBeLessThanOrEqual(3);
+		},
+	},
+	{
 		// A real pointer drag on the handle, released once the lifted project's
 		// centre is above the target's: the list swaps at that midpoint.
 		name: "drag a project above another",
@@ -308,7 +331,7 @@ export const projectTreeHandlers: StepHandler[] = [
 				page.getByTestId("settings-project-tree-rows"),
 				match[1] ?? "",
 			);
-			await page.getByTestId("settings-close-btn").click();
+			await closeSettings(page);
 			await expect(page.locator("#settings-panel")).toBeHidden();
 		},
 	},

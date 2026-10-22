@@ -427,6 +427,25 @@ describe("Missing session worktrees through the built daemon", () => {
 			);
 			rmSync(main, { recursive: true, force: true });
 			await browser.send(sessionId, "Cannot launch.");
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				const turn = db
+					.prepare(`SELECT turns.state, turns.started_at,
+					provider_runs.id AS run_id, provider_runs.status,
+					provider_runs.started_at AS run_started_at
+					FROM turns JOIN provider_runs ON provider_runs.id = turns.run_id
+					WHERE turns.session_id = ?`)
+					.get(sessionId);
+				expect(turn).toEqual({
+					state: "error",
+					started_at: null,
+					run_id: expect.any(String),
+					status: "error",
+					run_started_at: null,
+				});
+			} finally {
+				db.close();
+			}
 			expect(
 				events(fixture, sessionId)
 					.filter(({ type }) => type === "turn.error")

@@ -131,24 +131,22 @@ test("bulk Pin changes two rows with one toast and Undo restores both", async ({
 		"Pin 2 sessions",
 	);
 	await page.getByTestId("select-bar-pin").click();
-	for (const id of ids)
-		await expect(
-			page
-				.locator(`#session-list [data-session-id="${id}"]`)
-				.getByTitle("Pinned session"),
-		).toBeVisible();
+	for (const id of ids) {
+		const row = page.locator(`#session-list [data-session-id="${id}"]`);
+		await expect(row).toBeVisible();
+		await expect(row).toHaveAccessibleName(/(?:^|, )Pinned(?:,|$)/);
+	}
 	const toast = page
 		.getByRole("status")
 		.filter({ hasText: "Pinned 2 sessions" });
 	await expect(toast).toHaveCount(1);
 	// The newest toast stacks on top, so pick this one's Undo by its text.
 	await toast.getByTestId("toast-action").click();
-	for (const id of ids)
-		await expect(
-			page
-				.locator(`#session-list [data-session-id="${id}"]`)
-				.getByTitle("Pinned session"),
-		).toHaveCount(0);
+	for (const id of ids) {
+		const row = page.locator(`#session-list [data-session-id="${id}"]`);
+		await expect(row).toBeVisible();
+		await expect(row).not.toHaveAccessibleName(/(?:^|, )Pinned(?:,|$)/);
+	}
 });
 
 test("two pinned rows show Unpin in select mode", async ({
@@ -177,12 +175,11 @@ test("two pinned rows show Unpin in select mode", async ({
 	await expect(page.getByTestId("select-bar-settle")).toBeDisabled();
 	await expect(page.getByTestId("select-bar-snooze")).toBeDisabled();
 	await page.getByTestId("select-bar-pin").click();
-	for (const id of ids)
-		await expect(
-			page
-				.locator(`#session-list [data-session-id="${id}"]`)
-				.getByTitle("Pinned session"),
-		).toHaveCount(0);
+	for (const id of ids) {
+		const row = page.locator(`#session-list [data-session-id="${id}"]`);
+		await expect(row).toBeVisible();
+		await expect(row).not.toHaveAccessibleName(/(?:^|, )Pinned(?:,|$)/);
+	}
 	await expect(
 		page.getByRole("status").filter({ hasText: "Unpinned 2 sessions" }),
 	).toHaveCount(1);
@@ -243,7 +240,8 @@ test("bulk Settle skips a pinned row", async ({ page, relayUrl, harness }) => {
 		"Settle 1 session",
 	);
 	await page.getByTestId("select-bar-settle").click();
-	await expect(pinned.getByTitle("Pinned session")).toBeVisible();
+	await expect(pinned).toBeVisible();
+	await expect(pinned).toHaveAccessibleName(/(?:^|, )Pinned(?:,|$)/);
 	await expect(
 		page.locator(`#settled-shelf-rows [data-session-id="${pinnedId}"]`),
 	).toHaveCount(0);

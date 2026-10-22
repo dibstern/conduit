@@ -53,6 +53,7 @@
 	const single = $derived(accounts[0]);
 	const sessionId = $derived(getCurrentSessionId());
 	const sessionAccountId = $derived(sessionId ? findSession(sessionId)?.accountId : undefined);
+	const currentAccountId = $derived(sessionAccountId ?? getEffectiveInstanceId());
 	const forecastAccount = $derived(sessionId
 		? accounts.find((account) => account.accountId === sessionAccountId)
 		: accounts.find((account) => account.accountId === getEffectiveInstanceId()) ?? accounts.reduce<UsageReading | undefined>((fullest, account) =>
@@ -154,12 +155,12 @@
 		if (!hasPlanData(account)) return "no plan data";
 		const display = usageDisplay(account, usageState.limits.warnAt, now);
 		if (display.level === "limited") {
-			const time = usageResetTime(display.binding?.resetsAt).replace(/ (am|pm)$/, "");
-			return time ? `limited · ${time}` : "limited";
+			const time = usageResetTime(display.binding?.resetsAt);
+			return time ? `Limited until ${time}` : "Limited";
 		}
 		return display.level === "warn" && display.binding
-			? `${display.binding.kind === "seven_day" ? "week" : "5h"} ${Math.round(display.binding.utilization)}%`
-			: "ok";
+			? `${Math.round(display.binding.utilization)}% of ${display.binding.kind === "seven_day" ? "weekly" : "5-hour"} window`
+			: account.accountId === currentAccountId ? "Current" : "Available";
 	}
 
 	function nextAccount(account: UsageReading): UsageReading | undefined {
@@ -212,7 +213,7 @@
 
 {#snippet meter(account: UsageReading, window: UsageWindow | undefined, label: string, prefix: string, full: boolean)}
 	{@const display = usageDisplay(window ? account : undefined, usageState.limits.warnAt, now, window)}
-	{@const value = window ? `${Math.round(window.utilization)}%` : "—"}
+	{@const value = window ? display.level === "limited" ? usageResetTime(window.resetsAt, window.kind === "seven_day") || `${Math.round(window.utilization)}%` : `${Math.round(window.utilization)}%` : "—"}
 	{@const valueTone = display.level === "limited" ? "text-error" : display.level === "warn" ? "text-fill-amber" : "text-text-secondary"}
 	{#if full}
 		<div class="mb-[3px] flex items-baseline gap-[6px] text-[11px]">
@@ -231,7 +232,9 @@
 	{@const prefix = full ? `usage-settings-single-${kind}` : `usage-settings-card-${account.accountId}-${kind}`}
 	<div class={full ? "min-w-0" : "w-[70px] shrink-0 self-start pt-[6px] max-md:w-[62px]"}>
 		{@render meter(account, window, label, prefix, full)}
-		<div data-testid="{prefix}-reset" class="text-text-dimmer {full ? 'mt-[3px] font-mono text-[10.5px]' : 'truncate text-[10.5px] leading-[13px]'}">{resetLine(account, window, full)}</div>
+		{#if full || !window || !usageWindowLimited(account, window, now) || !usageResetTime(window.resetsAt)}
+			<div data-testid="{prefix}-reset" class="text-text-dimmer {full ? 'mt-[3px] font-mono text-[10.5px]' : 'truncate text-[10.5px] leading-[13px]'}">{resetLine(account, window, full)}</div>
+		{/if}
 	</div>
 {/snippet}
 
@@ -251,7 +254,7 @@
 	<SettingsGroup title="Claude plan usage">
 		{#snippet actions()}
 			{#if several}
-				<div aria-hidden="true" class="flex gap-[10px] pr-[10px] text-[12px] font-medium text-text-muted max-md:text-[13px]">
+				<div aria-hidden="true" class="flex gap-[10px] pr-[10px] text-[12px] font-medium text-text-dimmer max-md:text-[13px]">
 					<span class="w-[70px] max-md:w-[62px]">5-hour</span><span class="w-[70px] max-md:w-[62px]">Week</span>
 				</div>
 			{:else}
@@ -271,7 +274,7 @@
 						<span data-testid="usage-limit-account-name" class="min-w-0 truncate font-medium text-text">{nameOf(account)}</span>
 						{#if hasPlanData(account) && account.planLabel}<Badge variant="tag" size="xs" class="shrink-0 font-mono" data-testid="usage-settings-plan-{account.accountId}">{account.planLabel}</Badge>{/if}
 					</div>
-					<div data-testid="usage-settings-status-{account.accountId}" class="mt-[2px] truncate text-[12px] {level === 'limited' ? 'text-error' : level === 'warn' ? 'text-fill-amber' : 'text-text-dimmer'}">{statusOf(account)}</div>
+					<div data-testid="usage-settings-status-{account.accountId}" class="mt-[2px] truncate text-[12px] {level === 'limited' ? 'text-error' : level === 'warn' ? 'text-fill-amber' : hasPlanData(account) && account.accountId === currentAccountId ? 'text-success' : 'text-text-dimmer'}">{statusOf(account)}</div>
 				</div>
 				{#if hasPlanData(account)}
 					{@render windowRow(account, "five_hour", "5h", false)}

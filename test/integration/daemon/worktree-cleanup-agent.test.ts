@@ -793,7 +793,7 @@ describe("Settling stops quiescent agents through the built daemon", () => {
 	}, 120_000);
 
 	it("keeps the worktree during immediate deletion when end_session fails with its runner alive", async () => {
-		const { fixture, socket, create, send } = await start({ logLevel: "warn" });
+		const { fixture, socket, create, send } = await start();
 		const session = await create("delete failed end-session");
 		const runner = await send(session.sessionId);
 		writeFileSync(
@@ -813,30 +813,27 @@ describe("Settling stops quiescent agents through the built daemon", () => {
 		expect(
 			readFileSync(join(fixture.root, "end-session-failures.ndjson"), "utf8"),
 		).toContain(session.sessionId);
-		evidence["providerCleanupFailure"] = await vi.waitFor(() => {
-			const failure = fixture.logTail
-				.split("\n")
-				.find((line) =>
-					line.includes(
-						`Provider cleanup failed: session=${session.sessionId} `,
-					),
-				);
-			expect(failure).toContain("end_session:");
-			expect(failure).toContain("Fixture end_session failure");
-			return failure;
-		});
 		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			const events = db
 				.prepare(
-					"SELECT type, data FROM events WHERE session_id = ? AND type = 'session.deleted' ORDER BY sequence",
+					"SELECT type, data FROM events WHERE session_id = ? AND type IN ('session.deleted', 'session.provider_cleanup_failed') ORDER BY sequence",
 				)
 				.all(session.sessionId) as Array<{ type: string; data: string }>;
 			evidence["deleteEvents"] = events.map(({ type, data }) => ({
 				type,
 				data: JSON.parse(data) as unknown,
 			}));
-			expect(events).toHaveLength(1);
+			expect(
+				events.filter(({ type }) => type === "session.deleted"),
+			).toHaveLength(1);
+			expect(
+				events.filter(({ type }) => type === "session.provider_cleanup_failed"),
+			).toHaveLength(1);
+			expect(
+				events.find(({ type }) => type === "session.provider_cleanup_failed")
+					?.data,
+			).toContain("Fixture end_session failure");
 		} finally {
 			db.close();
 		}

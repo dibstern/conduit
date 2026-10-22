@@ -17,9 +17,9 @@ describe("formatSnoozeTime", () => {
 	test.each([
 		{
 			locale: "en-US",
-			today: "3:40 PM",
-			tomorrow: "Tue 9:00 AM",
-			later: "12 Oct 9:00 AM",
+			today: "3:40 pm",
+			tomorrow: "Tue 9:00 am",
+			later: "12 Oct 9:00 am",
 		},
 		{
 			locale: "en-GB",

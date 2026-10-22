@@ -343,6 +343,13 @@ describe("WsRpcServerLayer GetModels", () => {
 					["match-session", matchSink, "claude-sonnet-5[1m]"] as const,
 					["drift-session", driftSink, "claude-fable-4-0"] as const,
 				]) {
+					const requested = yield* eventStore.append(
+						canonicalEvent("run.requested", sessionId, {
+							runId: `${sessionId}-run`,
+							inputId: `${sessionId}-user`,
+						}),
+					);
+					yield* projectionRunner.projectEvent(requested);
 					yield* sink.push(
 						providerRuntimeEvent(
 							"message.created",
@@ -396,6 +403,13 @@ describe("WsRpcServerLayer GetModels", () => {
 						queryFactory: vi.fn(() =>
 							createMockQuery([
 								initMessage,
+								{
+									type: "command_lifecycle",
+									command_uuid: `${sessionId}-user`,
+									state: "started",
+									session_id: `${sessionId}-sdk`,
+									uuid: "00000000-0000-0000-0000-000000000002",
+								},
 								makeSuccessResult({ session_id: `${sessionId}-sdk` }),
 							]),
 						),
@@ -405,7 +419,8 @@ describe("WsRpcServerLayer GetModels", () => {
 						configDir: account.folder,
 						folderSource: "account",
 						sessionId,
-						inputId: `${sessionId}-turn`,
+						inputId: `${sessionId}-user`,
+						runId: `${sessionId}-run`,
 						prompt: "Use Sonnet with a 1M context window",
 						history: [],
 						providerState: {},
@@ -703,7 +718,10 @@ describe("WsRpcServerLayer GetModels", () => {
 					},
 				]);
 				for (const response of responses)
-					expect(response.providers).toEqual([]);
+					expect(response.providers).toEqual(
+						catalogs.find((row) => row.accountId === response.instanceId)
+							?.providers,
+					);
 				expect(api.provider.list).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.scoped,

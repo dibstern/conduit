@@ -819,7 +819,6 @@ export async function createProjectStoreFixture(
 							id,
 							{
 								messageId: assistant,
-								userMessageId: user,
 								cost: 0,
 								duration: 20,
 								tokens: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
@@ -1119,7 +1118,6 @@ export async function createProjectStoreFixture(
 				id,
 				{
 					messageId: `${id}_failed`,
-					userMessageId: user,
 					error: "Fixture error",
 					code: "FIXTURE",
 				},
@@ -1134,15 +1132,19 @@ export async function createProjectStoreFixture(
 				const sql = yield* SqlClient.SqlClient;
 				if (options.eventSequenceStart !== undefined)
 					yield* sql`INSERT INTO sqlite_sequence (name, seq) VALUES ('events', ${options.eventSequenceStart})`;
-				const write = yield* makeCommitAndSignal;
+				const store = yield* EventStoreEffectTag;
+				// Replay deleted history without kicking live commit retention.
 				// Equal timestamps exercise turns' and pending_inputs' rowid tie-breaks.
-				for (const event of events) yield* write([event]);
+				for (const event of events) {
+					yield* store.append(event);
+					yield* runner.recover();
+				}
 				const [move] = yield* sql<{
 					sequence: number;
 				}>`SELECT sequence FROM events WHERE session_id = ${id} AND type = 'session.workspace_changed'`;
 				if (!move)
 					return yield* Effect.die(new Error("Missing fixture workspace move"));
-				yield* write([
+				yield* store.append(
 					canonicalEvent(
 						"input.sent",
 						id,
@@ -1153,7 +1155,8 @@ export async function createProjectStoreFixture(
 						},
 						time,
 					),
-				]);
+				);
+				yield* runner.recover();
 				const state = yield* ProviderStateEffectTag;
 				yield* state.saveUpdates(id, [
 					{
@@ -1169,7 +1172,7 @@ export async function createProjectStoreFixture(
 				const thread = (yield* state.getState(id))["nativeThread:opencode"];
 				const repository = new DurableCommandCommitRepository(sql, projectId);
 				const requestSequence = options.outboxSequence ?? 7;
-				yield* repository.commit({
+				const committed = yield* repository.commit({
 					events: [],
 					readModelRows: [],
 					receipt: {
@@ -1198,6 +1201,7 @@ export async function createProjectStoreFixture(
 						},
 					],
 				});
+				yield* runner.projectBatch(committed);
 				const receipts = yield* makeRunnerReceiptStore(sql);
 				yield* receipts.attach(`${projectId}_runner`, "fixture-attachment");
 				yield* receipts.acknowledge(
@@ -1221,7 +1225,6 @@ export async function createProjectStoreFixture(
 				yield* sql`UPDATE provider_command_meta SET last_applied_sequence = ${move.sequence} WHERE project_key = ${projectId}`;
 				yield* sql`INSERT INTO projection_failures (projector_name, event_sequence, event_type, session_id, error, failed_at) VALUES ('fixture-diagnostic', ${move.sequence}, 'session.workspace_changed', ${id}, 'historical diagnostic', 1000)`;
 				if (options.unprojected) {
-					const store = yield* EventStoreEffectTag;
 					yield* store.append(
 						canonicalEvent(
 							"session.renamed",

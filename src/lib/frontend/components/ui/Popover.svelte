@@ -8,6 +8,7 @@
 	} from "bits-ui";
 	import { type Snippet, tick, untrack } from "svelte";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
+	import { dimThemeColor } from "../../stores/theme.svelte.js";
 	import { dragToDismiss } from "../../actions/drag-to-dismiss.js";
 	import SheetChrome from "./SheetChrome.svelte";
 	import {
@@ -128,6 +129,10 @@
 	$effect(() => {
 		if (!open || !sheet) scrimFade = { progress: 0, settling: false };
 	});
+	$effect(() => {
+		if (open && sheet) return dimThemeColor();
+		return undefined;
+	});
 
 	const portalProps: PopoverPortalProps = $derived.by(() => {
 		const target = dialogTarget?.() ?? portalTo;
@@ -204,19 +209,17 @@
 {/snippet}
 
 <BitsPopover.Root bind:open onOpenChange={handleOpenChange}>
+	<!-- Keep the trigger, conditional and portal adjacent so citations have no space before punctuation. -->
 	<BitsPopover.Trigger bind:ref={triggerEl}>
 		{#snippet child({ props })}
 			{@render trigger({ props })}
 		{/snippet}
 	</BitsPopover.Trigger>{#if sheet && open && sheetEl && sheetScrim?.portalTo !== undefined}
-		<!-- Register after the modal boundary so the scrim remains interactive.
-		     Abuts the trigger: inline triggers sit in pre-wrap prose, where whitespace renders. -->
+		<!-- Register after the modal boundary so the scrim remains interactive. -->
 		<BitsPopover.Portal to={sheetScrim.portalTo}>
 			{@render scrim()}
 		</BitsPopover.Portal>
-	{/if}
-
-	<BitsPopover.Portal {...portalProps}>
+	{/if}<BitsPopover.Portal {...portalProps}>
 		{#if sheet}
 			{#if open && (!modal || sheetEl) && sheetScrim?.portalTo === undefined}{@render scrim()}{/if}
 			<BitsPopover.ContentStatic {...sheetContentProps} bind:ref={sheetEl}>

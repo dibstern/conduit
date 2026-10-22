@@ -856,18 +856,28 @@ test("opens the heavy session after a restart under load", async ({
 			await page.locator("#messages > :not(:has(#scroll-btn))").allInnerTexts()
 		).join("\n");
 	};
-	const resumedTranscript = await transcriptOf(opener);
-	let coldTranscript = "";
-	// Chat identity can arrive after the message content on a cold device.
 	await expect
-		.poll(
-			async () => {
-				coldTranscript = await transcriptOf(cold);
-				return coldTranscript;
-			},
-			{ timeout: 30_000 },
-		)
-		.toBe(resumedTranscript);
+		.poll(() => opener.evaluate(() => localStorage.getItem("conduit-avatar")))
+		.not.toBeNull();
+	const avatarProfile = await opener.evaluate(() =>
+		localStorage.getItem("conduit-avatar"),
+	);
+	for (const device of [opener, cold]) {
+		await expect
+			.poll(() => device.evaluate(() => localStorage.getItem("conduit-avatar")))
+			.toBe(avatarProfile);
+		// These two completed turns belong to the fixture's Claude session.
+		const headers = device.locator("#messages .assistant-header");
+		await expect(headers).toHaveCount(2);
+		await expect(headers.getByText("Claude", { exact: true })).toHaveText([
+			"Claude",
+			"Claude",
+		]);
+	}
+	const [resumedTranscript, coldTranscript] = [
+		await transcriptOf(opener),
+		await transcriptOf(cold),
+	];
 	const longTurn = {
 		calls: LONG_TURN_CALLS,
 		liveFrames: turnFrames.length,

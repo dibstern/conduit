@@ -40,6 +40,8 @@ import { EventStoreEffectTag } from "../../../persistence/effect/event-store-eff
 import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
+import { inboxRunStatusQuery } from "../../../persistence/inbox-run-status-query.js";
+import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { Usage } from "../../daemon/Services/usage.js";
 import { type Continuation, ContinuationTag } from "./continuation.js";
@@ -67,12 +69,14 @@ export interface InboxView {
 	readonly interruptRequested?: InboxInput | undefined;
 	/** An input was handed off as a steer and has not started yet. */
 	readonly steering: boolean;
-	/** A turn is open, a handoff is in flight, or a prompt waits on the user. */
+	/** A run is open, or Stop/account switching fences the next handoff. */
 	readonly busy: boolean;
 	/** A Stop's abort is in flight, including after its turn becomes terminal. */
 	readonly stopping?: boolean;
 	/** A continuation is moving the session to another account. */
 	readonly switching?: boolean;
+	/** A legacy runner is draining before replacement. */
+	readonly legacyRunner?: boolean;
 	/** Existing queued inputs are paused in the shared inbox read model. */
 	readonly stoppedSinceHandoff: boolean;
 	/** A usage limit cut a request off, and it is neither answered nor dismissed. */
@@ -228,7 +232,8 @@ export function decideInbox(
 			view.limited ||
 			view.usageResetsAt !== undefined ||
 			view.scheduled);
-	const idle = !view.busy && !view.steering;
+	// An unanswered prompt blocks a new handoff even when no owned run is open.
+	const idle = !view.busy && !view.steering && !view.promptOpen;
 	switch (command._tag) {
 		case "Submit": {
 			if (view.known) return { _tag: "Accepted", events: [] };
@@ -244,6 +249,7 @@ export function decideInbox(
 					? interruptForInput(sessionId, { inputId, request }, [admitted])
 					: { _tag: "Accepted", events: [admitted] };
 			// The switch's continuation owns the next turn; a steer would join the old one.
+			if (view.legacyRunner) return { _tag: "Accepted", events: [admitted] };
 			if (view.switching) return { _tag: "Accepted", events: [admitted] };
 			if (!idle && command.delivery === "steer")
 				return steer(sessionId, view, { inputId, request }, [admitted]);
@@ -288,6 +294,7 @@ export function decideInbox(
 					? { _tag: "Rejected", reason: "prompt_open" }
 					: interruptForInput(sessionId, input, []);
 			// It keeps its place and drains after the switch's continuation.
+			if (view.legacyRunner) return { _tag: "Accepted", events: [] };
 			if (view.switching) return { _tag: "Accepted", events: [] };
 			// A busy session takes it as a steer; refused, it keeps its place.
 			if (!idle) return steer(sessionId, view, input, []);
@@ -406,6 +413,13 @@ export const SessionInboxLive = Layer.effect(
 			yield* Effect.context<
 				Effect.Services<ReturnType<Continuation["requestContinuation"]>>
 			>();
+		const registry = yield* Effect.serviceOption(ProviderRegistryTag);
+		const admissions = Option.isSome(registry)
+			? registry.value.listProviders().flatMap((id) => {
+					const admission = registry.value.getInstance(id)?.inputAdmission;
+					return admission ? [admission] : [];
+				})
+			: [];
 		const permits = new Map<string, Semaphore.Semaphore>();
 		const serialised = (sessionId: string) => {
 			let permit = permits.get(sessionId);
@@ -435,18 +449,16 @@ export const SessionInboxLive = Layer.effect(
 				);
 				const inboxState = yield* read.readInboxState(sessionId);
 				const [facts] = yield* sql<{
-					status: string | null;
+					run_status: string | null;
 					provider: string | null;
 					limited: number;
 					scheduled: number;
 					open_prompts: number;
-					last_turn: string | null;
 					limit_recovery: string | null;
 					interrupt_requested: string | null;
 					running: string | null;
-					in_flight: number;
-				}>`SELECT
-					(SELECT status FROM sessions WHERE id = ${sessionId}) AS status,
+				}>`WITH latest_run AS (${inboxRunStatusQuery(sql, sessionId)}) SELECT
+					(SELECT status FROM latest_run) AS run_status,
 					(SELECT provider FROM sessions WHERE id = ${sessionId}) AS provider,
 					(SELECT limit_recovery FROM sessions WHERE id = ${sessionId}) AS limit_recovery,
 					(SELECT json_extract(limit_recovery, '$.cutOffMessageId') IS NOT NULL
@@ -456,8 +468,6 @@ export const SessionInboxLive = Layer.effect(
 						FROM sessions WHERE id = ${sessionId}) AS scheduled,
 					(SELECT COUNT(*) FROM pending_approvals
 						WHERE session_id = ${sessionId} AND status = 'pending') AS open_prompts,
-					(SELECT state FROM turns WHERE session_id = ${sessionId}
-						ORDER BY requested_at DESC, rowid DESC LIMIT 1) AS last_turn,
 					(SELECT pending.input_id FROM pending_inputs pending
 						WHERE pending.session_id = ${sessionId} AND pending.state = 'queued'
 						AND EXISTS (SELECT 1 FROM events
@@ -469,14 +479,7 @@ export const SessionInboxLive = Layer.effect(
 						JOIN pending_inputs pending ON pending.input_id = outbox.command_id
 						WHERE outbox.session_id = ${sessionId}
 						AND outbox.effect_type = 'send_turn'
-						ORDER BY outbox.request_sequence DESC LIMIT 1) AS running,
-					EXISTS (SELECT 1 FROM provider_command_outbox outbox
-						JOIN pending_inputs pending ON pending.input_id = outbox.command_id
-						WHERE outbox.session_id = ${sessionId}
-						AND outbox.effect_type = 'send_turn'
-						AND outbox.status IN ('pending', 'running', 'retryable_failed')
-						AND NOT EXISTS (SELECT 1 FROM messages
-							WHERE messages.input_id = outbox.command_id)) AS in_flight`;
+						ORDER BY outbox.request_sequence DESC LIMIT 1) AS running`;
 				const known =
 					inputId === undefined
 						? false
@@ -485,7 +488,6 @@ export const SessionInboxLive = Layer.effect(
 								OR EXISTS (SELECT 1 FROM messages
 									WHERE input_id = ${inputId} OR id = ${inputId}) AS n`)[0]
 								?.n === 1;
-				const lastTurn = facts?.last_turn ?? null;
 				const running =
 					facts?.running == null
 						? undefined
@@ -511,6 +513,9 @@ export const SessionInboxLive = Layer.effect(
 					now: yield* Clock.currentTimeMillis,
 				});
 				const fences = providerTurnService.turnFences(sessionId);
+				const legacyRunner = admissions.some((admission) =>
+					admission.isHeld(sessionId),
+				);
 				return {
 					provider: facts?.provider ?? undefined,
 					queued,
@@ -521,14 +526,11 @@ export const SessionInboxLive = Layer.effect(
 					busy:
 						fences.stopping ||
 						fences.switching ||
-						facts?.status === "busy" ||
-						facts?.status === "retry" ||
-						(facts?.open_prompts ?? 0) > 0 ||
-						lastTurn === "pending" ||
-						lastTurn === "running" ||
-						facts?.in_flight === 1,
+						facts?.run_status === "pending" ||
+						facts?.run_status === "running",
 					stopping: fences.stopping,
 					switching: fences.switching,
+					legacyRunner,
 					stoppedSinceHandoff: inboxState?.paused === true,
 					limited: facts?.limited === 1,
 					usageResetsAt:
@@ -538,6 +540,7 @@ export const SessionInboxLive = Layer.effect(
 					providerSteers: providerSteers(Option.getOrUndefined(account)),
 					promptOpen: (facts?.open_prompts ?? 0) > 0,
 					running,
+					...(legacyRunner ? { busy: true } : {}),
 				} satisfies InboxView;
 			});
 
@@ -643,10 +646,8 @@ export const SessionInboxLive = Layer.effect(
 						events,
 					})
 					.pipe(Effect.provideService(OverridesStateTag, overrides));
-				// sendTurn reports a failure it could not place (no provider, no
-				// model) to the session and leaves no trace, so a queued input would
-				// be retried on every advance. Place it as a failed turn instead: it
-				// leaves the tray, and the queue behind it pauses.
+				// An unplaced failed handoff remains queued. Record it once so it
+				// pauses the remaining queue instead of retrying on every advance.
 				if (!wasQueued) return;
 				const [unsent] = yield* sql<{ n: number }>`SELECT 1 AS n
 					FROM pending_inputs WHERE input_id = ${handoff.inputId} AND state = 'queued'`;
@@ -654,25 +655,13 @@ export const SessionInboxLive = Layer.effect(
 				log.warn(
 					`session=${sessionId} input=${handoff.inputId} queued handoff failed before it was sent; pausing the queue`,
 				);
-				const meta = provider ? { provider: provider.provider } : {};
 				yield* persist.persistUserMessage(sessionId, request.text, {
 					messageId: handoff.inputId,
 					inputId: handoff.inputId,
+					...(provider ? { provider: provider.provider } : {}),
 					...(request.images ? { images: request.images } : {}),
-					...meta,
+					failure: { message: "This queued message could not be sent" },
 				});
-				yield* persist.persistEvent(
-					canonicalEvent(
-						"turn.error",
-						sessionId,
-						{
-							messageId: handoff.inputId,
-							userMessageId: handoff.inputId,
-							error: "This queued message could not be sent",
-						},
-						meta,
-					),
-				);
 			});
 
 		// Input ids are unique across sessions. Only coalesce requests while the
@@ -772,6 +761,18 @@ export const SessionInboxLive = Layer.effect(
 		const advances = yield* bus.subscribeAdvances();
 		const lifts = yield* providerTurnService.fenceLifts;
 		const ready = yield* Deferred.make<void>();
+		for (const admission of admissions) {
+			const changes = yield* admission.changes;
+			yield* Effect.forkScoped(
+				Deferred.await(ready).pipe(
+					Effect.andThen(
+						Stream.runForEach(changes, (sessionId) =>
+							drainSessions([sessionId]),
+						),
+					),
+				),
+			);
+		}
 		yield* Effect.forkScoped(
 			Deferred.await(ready).pipe(
 				Effect.andThen(

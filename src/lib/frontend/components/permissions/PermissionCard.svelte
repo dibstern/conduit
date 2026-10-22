@@ -207,11 +207,12 @@
 	data-request-id={request.requestId}
 >
 		<Surface
-			variant="raised"
+			variant="bare"
 			radius="lg"
-			class="permission-card p-3"
+			class="permission-card bg-bg-alt p-3"
 	>
-		<div class="text-base font-medium mb-2 text-text">
+		<div class="flex items-center gap-[6px] text-base font-medium mb-2 text-text">
+			{#if !resolved}<span class="permission-waiting-marker size-[6px] shrink-0 rounded-full bg-status-ask" aria-hidden="true"></span>{/if}
 			{heading}
 		</div>
 
@@ -231,7 +232,7 @@
 		{/if}
 
 		{#if !isPlanApproval}
-			<div class="font-mono text-xs text-accent mb-1 break-all select-text">
+			<div class="text-xs text-text-secondary mb-1 break-all select-text">
 				{toolLabel}
 			</div>
 		{:else if planMarkdown}
@@ -245,68 +246,47 @@
 
 		{#if inputDisplay}
 			<div
-				class="font-mono text-xs text-text-secondary mb-2.5 bg-code-bg rounded-md p-2 max-h-[150px] overflow-y-auto whitespace-pre-wrap break-all select-text"
+				class="font-mono text-mono-xs text-text-secondary mb-2.5 bg-code-bg rounded-md p-2 max-h-[150px] overflow-y-auto whitespace-pre-wrap break-all select-text"
 			>
 				{inputDisplay}
 			</div>
 		{/if}
 
-		{#if !resolved && isPlanApproval}
-			<!-- No "always" affordance: remembering an ExitPlanMode approval would
-			     auto-exit every future plan, permanently defeating plan mode. -->
-			<div class="perm-actions flex gap-2 max-sm:flex-col">
-				<button
-					class="min-h-[48px] flex-1 px-4 py-2 rounded-lg border cursor-pointer font-sans text-sm font-medium bg-success/10 border-success/20 text-success hover:bg-success/15"
-					onclick={handleAllow}
-				>
-					Approve Plan
-				</button>
-				<button
-					class="min-h-[48px] flex-1 px-4 py-2 rounded-lg border border-border cursor-pointer font-sans text-sm font-medium text-text-secondary hover:bg-bg"
-					onclick={handleDeny}
-				>
-					Keep Planning
-				</button>
-			</div>
-		{:else if !resolved}
-			<div class="perm-actions flex gap-2 max-sm:flex-col">
+		{#if !resolved}
+			<div class="perm-actions flex flex-wrap gap-[8px] mt-[12px] mb-[8px]">
 				<Button
-					variant="success-soft"
-					size="content"
-					class="min-h-[48px] flex-1 px-4 py-2 rounded-lg font-sans text-sm font-medium"
+					variant="capsule-primary"
+					size="phone-card-action"
+					touchTarget="always"
+					class="font-sans font-medium"
 					onclick={handleAllow}
 				>
-					Allow
+					{isPlanApproval ? "Approve Plan" : "Allow"}
 				</Button>
-				<!-- Normalized onto plain `success-soft`. This used to sit
-				     one notch softer than its Allow sibling on all three colours, to
-				     de-emphasise the more consequential choice. Aligned rather than
-				     given a variant of its own, on two grounds: it was a single-file
-				     recipe, which Button.svelte:39-42 says stays local, and the dimming
-				     ran the wrong way for contrast — `text-success/70` over a
-				     `bg-success/[0.08]` surface was the least readable label on the
-				     card. If Always Allow genuinely needs de-emphasis, that is a
-				     hierarchy question for the card, not an opacity nudge on one
-				     button. -->
+				<!-- Remembering ExitPlanMode would automatically exit every future plan. -->
+				{#if !isPlanApproval}
 				<Button
-					variant="success-soft"
-					size="content"
-					class="min-h-[48px] flex-1 px-4 py-2 rounded-lg font-sans text-sm font-medium"
+					variant="chip"
+					size="phone-card-action"
+					touchTarget="always"
+					class="font-sans font-medium"
 					onclick={handleAlwaysAllow}
 					aria-expanded={hasClaudeRememberOptions || hasPatterns ? showAlwaysOptions : undefined}
 				>
-					{hasClaudeRememberOptions ? "Remember" : "Always Allow"}{hasClaudeRememberOptions ||
+					{hasClaudeRememberOptions ? "Remember" : "Always allow"}{hasClaudeRememberOptions ||
 					hasPatterns
 						? " \u25BE"
 						: ""}
 				</Button>
+				{/if}
 				<Button
-					variant="danger-outline"
-					size="content"
-					class="min-h-[48px] flex-1 px-4 py-2 rounded-lg font-sans text-sm font-medium"
+					variant="chip"
+					size="phone-card-action"
+					touchTarget="always"
+					class="font-sans font-medium"
 					onclick={handleDeny}
 				>
-					Deny
+					{isPlanApproval ? "Keep Planning" : "Deny"}
 				</Button>
 			</div>
 
@@ -320,11 +300,11 @@
 								size="content"
 								layout="flow"
 								tone="inherit"
-								hoverFill="success-faint"
-								class="w-full text-left px-3 py-2 rounded-lg border border-border font-sans text-xs hover:border-success/15"
+								hoverFill="text"
+								class="w-full text-left px-3 py-2 rounded-lg bg-chip font-sans text-xs"
 								onclick={() => handleRememberDestination(option.destination)}
 							>
-								<span class="block font-medium text-success/80">
+								<span class="block font-medium text-text-secondary">
 									{option.label}
 								</span>
 								<span class="block text-text-secondary mt-0.5">
@@ -339,11 +319,11 @@
 							size="content"
 							layout="flow"
 							tone="inherit"
-							hoverFill="success-faint"
-							class="w-full text-left px-3 py-2 rounded-lg border border-success/15 font-sans text-xs font-medium text-success/80"
+							hoverFill="text"
+							class="w-full text-left px-3 py-2 rounded-full bg-chip font-sans text-xs font-medium text-text-secondary"
 							onclick={handleAlwaysAllowTool}
 						>
-							All <span class="font-mono">{request.toolName}</span> operations
+							All <span class="font-mono text-mono-xs">{request.toolName}</span> operations
 						</Button>
 						{#each alwaysPatterns as pattern}
 							<Button
@@ -351,8 +331,8 @@
 								size="content"
 								layout="flow"
 								tone="inherit"
-								hoverFill="success-faint"
-								class="w-full text-left px-3 py-2 rounded-lg border border-border font-mono text-xs text-text-secondary hover:text-success/80 hover:border-success/15 break-all select-text"
+								hoverFill="text"
+								class="w-full text-left px-3 py-2 rounded-full bg-chip font-mono text-mono-xs text-text-secondary break-all select-text"
 								onclick={() => handleAlwaysAllowPattern(pattern)}
 							>
 								{pattern}

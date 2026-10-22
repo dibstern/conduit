@@ -30,7 +30,7 @@ import type {
 import {
 	type ClaudeSessionRunnerDeps,
 	makeClaudeSessionRunner,
-} from "./claude-provider-runtime.js";
+} from "./claude-runner-payload.js";
 import {
 	type ClaudeRunnerFileSettings,
 	captureClaudeRunnerFileSettings,
@@ -375,6 +375,8 @@ export const makeClaudeRunnerLaunch = (
 							onSubagentFinalizationComplete: reportUpgradeState,
 							onTurnStateChanged: (_sessionId, inFlight) =>
 								callbacks.turnStateChanged(inFlight),
+							onAbandonedRun: (inputId) =>
+								callbacks.retireAfterCommand?.(inputId),
 							onNativeSessionId: (_sessionId, nativeId) => {
 								if (nativeId === resumeSessionId) return;
 								resumeSessionId = nativeId;

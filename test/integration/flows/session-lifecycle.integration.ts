@@ -1,7 +1,9 @@
 // Tests session management operations: create, switch, rename, delete, and
 // manage sessions through the relay WebSocket interface.
 
+import { Option, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -11,11 +13,20 @@ describe("Integration: Session Lifecycle", () => {
 	let harness: RelayHarness;
 
 	beforeAll(async () => {
+		__setProbeOverrideForTesting(async () => ({
+			models: [],
+			commands: [],
+			agents: [],
+		}));
 		harness = await createRelayHarness();
 	}, 30_000);
 
 	afterAll(async () => {
-		if (harness) await harness.stop();
+		try {
+			if (harness) await harness.stop();
+		} finally {
+			__setProbeOverrideForTesting(undefined);
+		}
 	});
 
 	it("create session and receive its id from RPC", async () => {
@@ -62,6 +73,7 @@ describe("Integration: Session Lifecycle", () => {
 		client.clearReceived();
 		const switchMsg = await client.createSession("Switch Target");
 		expect(switchMsg["id"]).toBeTruthy();
+		expect(switchMsg["id"]).not.toBe(firstId);
 		client.clearReceived();
 
 		// Now switch back to the first session
@@ -95,10 +107,8 @@ describe("Integration: Session Lifecycle", () => {
 		await client.close();
 	});
 
-	it("delete a session", async ({ onTestFinished }) => {
-		const deleteHarness = await createRelayHarness();
-		onTestFinished(() => deleteHarness.stop());
-		const client = await deleteHarness.connectWsClient();
+	it("delete a session", async () => {
+		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		client.clearReceived();
 
@@ -121,7 +131,7 @@ describe("Integration: Session Lifecycle", () => {
 		await client.close();
 	});
 
-	it("switching session restores its draft and family", async () => {
+	it("restores the saved draft after switching back", async () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
@@ -143,17 +153,18 @@ describe("Integration: Session Lifecycle", () => {
 		client.clearReceived();
 		const switchMsg = await client.createSession("Reset State Test");
 		expect(switchMsg["id"]).toBeTruthy();
+		expect(switchMsg["id"]).not.toBe(firstId);
 
 		// Now switch back to the first session.
 		client.clearReceived();
 		const switched = await client.switchSession(firstId);
 		expect(switched["id"]).toBe(firstId);
-		await client.subscribeInputDraft(firstId);
-		const draft = await client.waitFor("input_draft", {
-			predicate: (message) =>
-				message["_tag"] === "synchronized" && message["sessionId"] === firstId,
-		});
-		expect(draft["text"]).toBe("Unsent draft");
+		const draft = await client.rpcCall((rpc) =>
+			Stream.runHead(rpc.SubscribeInputDraft({ key: { session: firstId } })),
+		);
+		expect(draft).toEqual(
+			Option.some({ _tag: "synchronized", text: "Unsent draft" }),
+		);
 
 		await client.close();
 	});

@@ -65,7 +65,8 @@
 				"completed_at": 1799999999112,
 				"requested_model": "sonnet",
 				"expected_model": "sonnet",
-				"actual_model": "claude-sonnet-4-6"
+				"actual_model": "claude-sonnet-4-6",
+				"run_id": null
 			},
 			{
 				"id": "turn-3-user_FORK",
@@ -81,7 +82,8 @@
 				"completed_at": 1799999999312,
 				"requested_model": "sonnet",
 				"expected_model": "sonnet",
-				"actual_model": "claude-sonnet-4-6"
+				"actual_model": "claude-sonnet-4-6",
+				"run_id": null
 			},
 			{
 				"id": "turn-4-user_FORK",
@@ -97,7 +99,8 @@
 				"completed_at": 1800000000000,
 				"requested_model": "sonnet",
 				"expected_model": "sonnet",
-				"actual_model": "claude-sonnet-4-6"
+				"actual_model": "claude-sonnet-4-6",
+				"run_id": null
 			}
 		],
 		"messages": [
@@ -627,7 +630,8 @@
 				"completed_at": 1799999999112,
 				"requested_model": "sonnet",
 				"expected_model": "sonnet",
-				"actual_model": "claude-sonnet-4-6"
+				"actual_model": "claude-sonnet-4-6",
+				"run_id": null
 			}
 		],
 		"messages": [
@@ -873,7 +877,8 @@
 				"completed_at": 1799999999112,
 				"requested_model": "sonnet",
 				"expected_model": "sonnet",
-				"actual_model": "claude-sonnet-4-6"
+				"actual_model": "claude-sonnet-4-6",
+				"run_id": null
 			},
 			{
 				"id": "turn-3-user_FORK",
@@ -889,7 +894,8 @@
 				"completed_at": 1799999999312,
 				"requested_model": "sonnet",
 				"expected_model": "sonnet",
-				"actual_model": "claude-sonnet-4-6"
+				"actual_model": "claude-sonnet-4-6",
+				"run_id": null
 			}
 		],
 		"messages": [

@@ -167,7 +167,7 @@ export async function serveModelCatalog(
 						}
 					: {}),
 				providers: claude
-					? []
+					? response.providers.filter((provider) => provider.id === "claude")
 					: response.providers.filter((provider) => provider.id !== "claude"),
 			};
 		},

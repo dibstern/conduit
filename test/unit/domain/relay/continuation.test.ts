@@ -456,6 +456,7 @@ for (const boundId of ["claude-sdk", "unknown-account", "opencode"] as const) {
 			{
 				providerId: "claude",
 				discoverEffect: () => Effect.die("Prewarm must not discover"),
+				generateTextEffect: () => Effect.die("not used"),
 				sendTurnEffect: () => Effect.die("Prewarm must not send a turn"),
 				preWarmSessionEffect: (input) =>
 					Effect.sync(() => {

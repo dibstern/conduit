@@ -57,7 +57,7 @@ Scenario Outline: E1 desktop icons mode uses the existing approvals menu
   When I set approvals to auto
   Then the approvals menu is closed
   And the mode shield names Auto
-  And the mode shield uses the warning tone
+  And the mode shield uses the auto tone
   And the composer region visually matches <baseline> at <threshold> percent
 
 Examples:

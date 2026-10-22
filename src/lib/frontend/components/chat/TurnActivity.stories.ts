@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 import { Utf8Bytes } from "../../../contracts/tool-wire.js";
 import { turnFixtureMessages } from "../../stories/turn-fixtures.js";
 import type { ChatMessage, ToolMessage } from "../../types.js";
@@ -43,6 +43,38 @@ type Story = StoryObj<typeof meta>;
 /** Counts and duration stay in the head; the bill lives in its hover and log. */
 export const Settled: Story = {
 	args: { turn: settled, segment: settledSegment, final: true },
+	play: async ({ canvasElement }) => {
+		const parts = settledSegment.activity;
+		const paints = [
+			[
+				parts.find((part) => part.type === "tool" && part.name === "Edit"),
+				"--color-seg-edit",
+			],
+			[
+				parts.find((part) => part.type === "tool" && part.status === "error"),
+				"--color-seg-fail",
+			],
+			[
+				parts.find((part) => part.type === "tool" && part.name === "Read"),
+				"--color-act-explore",
+			],
+			[parts.find((part) => part.type === "thinking"), "--color-act-thinking"],
+		] as const;
+		for (const [part, token] of paints) {
+			if (!part) throw new Error(`Missing fixture for ${token}`);
+			const segment = canvasElement.querySelector(
+				`[data-step-id="${part.uuid}"]`,
+			);
+			if (!segment) throw new Error(`Missing segment ${part.uuid}`);
+			const style = getComputedStyle(segment);
+			const expected = new Option().style;
+			expected.backgroundColor = style.getPropertyValue(token);
+			await expect(expected.backgroundColor).not.toBe("");
+			await expect(style.backgroundColor).toBe(expected.backgroundColor);
+			await expect(style.opacity).toBe("1");
+			await expect(segment.getBoundingClientRect().height).toBe(4);
+		}
+	},
 };
 
 export const SettledLight: Story = { ...Settled, globals: { theme: "light" } };
@@ -61,6 +93,22 @@ export const Expanded: Story = {
 		await expect(
 			canvasElement.querySelector(".step-log .turn-meta"),
 		).toBeVisible();
+		const colours = new Set<string>();
+		for (const part of settledSegment.activity) {
+			if (part.type === "system") continue;
+			const segment = canvasElement.querySelector(
+				`[data-step-id="${part.uuid}"]`,
+			);
+			const icon = canvasElement.querySelector(
+				`[data-part="${part.uuid}"] button > span:first-child`,
+			);
+			if (!segment || !icon)
+				throw new Error(`Missing activity paint for ${part.uuid}`);
+			const colour = getComputedStyle(segment).backgroundColor;
+			await expect(getComputedStyle(icon).color).toBe(colour);
+			colours.add(colour);
+		}
+		await expect(colours.size).toBeGreaterThanOrEqual(6);
 	},
 };
 
@@ -82,12 +130,16 @@ export const SummaryRow: Story = {
 		turn: live,
 		segment: liveSegment,
 		final: true,
-		onsummarize: () => undefined,
+		onsummarize: fn(),
 	},
-	play: async ({ canvasElement }) => {
-		await expect(
-			within(canvasElement).getByRole("button", { name: "✦ Summarize" }),
-		).toBeVisible();
+	play: async ({ canvasElement, args }) => {
+		const button = within(canvasElement).getByRole("button", {
+			name: "✦ Summary",
+		});
+		await expect(button).toBeVisible();
+		await userEvent.click(button);
+		await expect(args["onsummarize"]).toHaveBeenCalledOnce();
+		button.blur();
 	},
 };
 

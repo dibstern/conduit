@@ -3,6 +3,7 @@ import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { Fragment } from "effect/sql/Statement";
 import type { SessionScope } from "../../contracts/session-scope.js";
+import { inboxRunStatusQuery } from "../inbox-run-status-query.js";
 import { SessionRollupProjects } from "./session-rollup-projects.js";
 
 export type { SessionScope } from "../../contracts/session-scope.js";
@@ -986,13 +987,15 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		yield* Effect.serviceOption(SessionWorkspaceHintStateTag),
 	);
 	// A prompt queued behind a running turn starts working when that turn
-	// ends, not when it was sent: waiting in the queue is not work.
+	// ends, not when it was sent: waiting in the queue is not work. A steer
+	// joins the running turn and settles with it, so it starts when sent.
 	const turnMetadataColumns = sql`
 		CASE WHEN (SELECT provider FROM sessions WHERE id = messages.session_id) = 'claude'
 			THEN turns.cost ELSE NULL END AS turn_cost,
-		MAX(t.requested_at, COALESCE((SELECT MAX(p.completed_at) FROM turns p
-			WHERE p.session_id = t.session_id AND p.requested_at < t.requested_at), 0)
-		) AS turn_started_at,
+		CASE WHEN messages.steered = 1 THEN t.requested_at
+			ELSE MAX(t.requested_at, COALESCE((SELECT MAX(p.completed_at) FROM turns p
+				WHERE p.session_id = t.session_id AND p.requested_at < t.requested_at), 0))
+		END AS turn_started_at,
 		t.completed_at AS turn_completed_at,
 		(SELECT json_group_array(json_object(
 			'id', pa.id, 'from', pa.created_at, 'to', pa.resolved_at
@@ -2415,38 +2418,32 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			provider: string;
 			version: number;
 		}>`
+			WITH latest_run AS (${inboxRunStatusQuery(sql, sessionId)})
 			SELECT version, provider,
 				EXISTS (SELECT 1 FROM pending_inputs
 					WHERE session_id = ${sessionId} AND state = 'queued')
-				AND (EXISTS (SELECT 1 FROM turns WHERE session_id = ${sessionId}
-					AND state IN ('interrupted', 'error')
-					AND completed_at >= COALESCE(
-						(SELECT MAX(requested_at) FROM provider_command_outbox
-							WHERE session_id = ${sessionId} AND effect_type = 'send_turn'),
-						(SELECT MAX(requested_at) FROM turns WHERE session_id = ${sessionId}),
-						0)) AND NOT EXISTS (
+				AND (((SELECT stopped FROM latest_run) AND NOT EXISTS (
 					SELECT 1 FROM events admitted JOIN events resumed
 						ON resumed.session_id = admitted.session_id
 					WHERE admitted.session_id = ${sessionId} AND admitted.type = 'input.admitted'
-						AND (resumed.type = 'session.resumed'
-							OR (resumed.type = 'session.resume_cancelled'
-								AND json_extract(resumed.metadata, '$.source') = 'inbox-reset'))
+						AND resumed.type = 'session.resumed'
 						AND resumed.sequence > admitted.sequence
 						AND admitted.sequence > COALESCE((SELECT MAX(sequence) FROM events
 							WHERE session_id = ${sessionId}
-							AND type IN ('turn.interrupted', 'turn.error')), 0))
-					OR EXISTS (SELECT 1 FROM events requeued WHERE session_id = ${sessionId}
-						AND type = 'input.requeued' AND json_extract(data, '$.reason') = 'failed'
-						AND sequence = (SELECT MIN(first.sequence) FROM events first
-							WHERE first.session_id = ${sessionId} AND first.type = 'input.requeued'
-							AND json_extract(first.data, '$.sentSequence') = json_extract(requeued.data, '$.sentSequence'))
-						AND json_extract(data, '$.sentSequence') = (SELECT MAX(sent.sequence) FROM events sent
-							WHERE sent.session_id = ${sessionId} AND sent.type = 'input.sent'
-							AND json_extract(sent.data, '$.inputId') = json_extract(requeued.data, '$.inputId'))
-						AND sequence > COALESCE((SELECT MAX(sequence) FROM events
-							WHERE session_id = ${sessionId} AND (type IN ('input.sent', 'session.resumed')
-								OR (type = 'session.resume_cancelled'
-									AND json_extract(metadata, '$.source') = 'inbox-reset'))), 0))
+							AND type IN ('turn.interrupted', 'turn.error')), 0)
+						AND resumed.sequence > COALESCE((SELECT MAX(requeued.sequence) FROM events requeued
+							WHERE requeued.session_id = ${sessionId} AND requeued.type = 'input.requeued'
+								AND json_extract(requeued.data, '$.reason') = 'failed'
+								AND requeued.sequence = (SELECT MIN(first.sequence) FROM events first
+									WHERE first.session_id = ${sessionId} AND first.type = 'input.requeued'
+									AND json_extract(first.data, '$.sentSequence') = json_extract(requeued.data, '$.sentSequence'))
+								AND json_extract(requeued.data, '$.sentSequence') = (SELECT MAX(sent.sequence) FROM events sent
+									WHERE sent.session_id = ${sessionId} AND sent.type = 'input.sent'
+									AND json_extract(sent.data, '$.inputId') = json_extract(requeued.data, '$.inputId'))
+								AND requeued.sequence > COALESCE((SELECT MAX(sequence) FROM events
+									WHERE session_id = ${sessionId} AND (type = 'input.sent'
+										OR (type = 'session.resume_cancelled'
+											AND json_extract(metadata, '$.source') = 'inbox-reset'))), 0)), 0)))
 					OR json_extract(limit_recovery, '$.cutOffMessageId') IS NOT NULL
 					OR (NOT json_extract(limit_recovery, '$.continued')
 						AND COALESCE((SELECT MAX(sequence) FROM events

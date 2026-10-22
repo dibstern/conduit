@@ -36,6 +36,7 @@ import {
 	openPanel,
 	terminalState,
 } from "../../stores/terminal.svelte.js";
+import { dimThemeColor, setThemeMode } from "../../stores/theme.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
 import { openSessionForSetup } from "../../stories/session-setup.js";
@@ -250,7 +251,6 @@ export const Default: Story = {
 		);
 		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
 		expect(canvas.queryByTestId("session-bar-attention")).toBeNull();
-		expect(canvas.getByTestId("session-bar-title-menu")).toBeVisible();
 		expect(canvas.getByTestId("session-bar-island-overflow")).toBeVisible();
 		expect(canvas.queryByTestId("session-bar-overflow")).toBeNull();
 		expect(canvas.queryByTestId("session-bar-views")).toBeNull();
@@ -657,12 +657,13 @@ export const ViewsSheetOpen: Story = {
 	beforeEach: answerAutoSettle,
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const trigger = canvas.getByTestId("session-bar-island-overflow");
-		// Bits restores the body's pointer events after the previous sheet unmounts.
 		await waitFor(() =>
-			expect(getComputedStyle(trigger).pointerEvents).toBe("auto"),
+			expect(
+				getComputedStyle(canvas.getByTestId("session-bar-island-overflow"))
+					.pointerEvents,
+			).toBe("auto"),
 		);
-		await userEvent.click(trigger);
+		await userEvent.click(canvas.getByTestId("session-bar-island-overflow"));
 		const sheet = await sessionSheet("session-bar-island-menu");
 		await expect(sheet).toBeVisible();
 		// Accessible names, in order: the shortcut hints are aria-hidden.
@@ -893,8 +894,7 @@ const mockInstances: OpenCodeInstance[] = [
 ];
 
 /**
- * The collapsed bar keeps its overflow while the expanded bar uses the title
- * and Views sheets.
+ * The collapsed bar keeps the same overflow sheet as the expanded bar.
  */
 export const OverflowMenuOpen: Story = {
 	args: { island: true },
@@ -928,24 +928,6 @@ export const OverflowMenuOpen: Story = {
 		).toHaveAttribute("aria-checked", "true");
 		// Debug is behind its feature flag.
 		expect(within(menu).queryByTestId("overflow-debug")).toBeNull();
-	},
-};
-
-export const TitleChevronSheet: Story = {
-	tags: ["viewport-capture"],
-	beforeEach: [
-		answerAutoSettle,
-		() => {
-			sessionViewState.compact = true;
-		},
-	],
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		await userEvent.click(canvas.getByTestId("session-bar-title-menu"));
-		const menu = await sessionSheet("session-action-sheet");
-		await expect(menu).toHaveClass(/bottom-0/);
-		await expect(within(menu).getByTestId("session-ctx-settle")).toBeVisible();
-		await expect(within(menu).getByTestId("session-title-share")).toBeVisible();
 	},
 };
 
@@ -1128,7 +1110,6 @@ export const PhoneTop: Story = {
 			"session-skills-chip",
 			"side-threads-control",
 			"session-bar-settle",
-			"session-bar-title-menu",
 			"session-bar-unread-chip",
 			"session-bar-island-overflow",
 			"session-goal-subtitle",
@@ -1141,7 +1122,6 @@ export const PhoneTop: Story = {
 					"session-skills-chip",
 					"side-threads-control",
 					"session-bar-settle",
-					"session-bar-title-menu",
 					"session-bar-unread-chip",
 					"session-goal-subtitle",
 				].includes(id)
@@ -1217,6 +1197,28 @@ export const PhoneGoalSheet: Story = {
 		await userEvent.click(goal);
 		const sheet = await canvas.findByTestId("goal-details");
 		await waitFor(() => expect(sheet).toHaveTextContent("Sonnet 5 judges"));
+		const theme = document.documentElement.classList.contains("light-theme")
+			? "light"
+			: "dark";
+		document.querySelector('meta[name="theme-color"]')?.remove();
+		const release = dimThemeColor();
+		try {
+			for (const mode of ["dark", "light"] as const) {
+				setThemeMode(mode);
+				expect(
+					document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+						?.content,
+				).toBe(mode === "dark" ? "#0b0c0e" : "#b0b1b3");
+			}
+		} finally {
+			release();
+			release();
+			setThemeMode(theme);
+		}
+		expect(
+			document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+				?.content,
+		).toBe(theme === "dark" ? "#0b0c0e" : "#b0b1b3");
 		const box = sheet.getBoundingClientRect();
 		expect(box.x).toBe(0);
 		expect(box.width).toBe(393);
@@ -1237,6 +1239,13 @@ export const PhoneGoalSheet: Story = {
 			expect(canvas.queryByTestId("goal-details")).toBeNull();
 			expect(goal).toHaveFocus();
 			expect(getComputedStyle(goal).pointerEvents).toBe("auto");
+			const restoredColour = new Option().style;
+			restoredColour.color =
+				document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+					?.content ?? "";
+			expect(restoredColour.color).toBe(
+				theme === "dark" ? "rgb(17, 17, 19)" : "rgb(255, 255, 255)",
+			);
 		});
 		await userEvent.click(goal);
 		await userEvent.click(canvas.getByTestId("goal-details-scrim"));
@@ -1319,7 +1328,8 @@ export const DesktopNoCheckout: Story = {
 		expect(bar.getBoundingClientRect().height).toBe(52);
 		expect(
 			canvas.getByTestId("session-bar-overflow").getBoundingClientRect().height,
-		).toBeGreaterThanOrEqual(44);
+		).toBe(30);
+		expectTouchTarget(canvas.getByTestId("session-bar-overflow"));
 		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
 		expect(canvas.queryByTitle("Uncommitted changes")).toBeNull();
 		await expect(canvas.getByTestId("session-bar-settle")).toBeVisible();
@@ -1392,6 +1402,9 @@ export const DesktopWithSkills: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		expect(
+			canvas.getByTestId("session-skills-chip").querySelector("svg"),
+		).toHaveClass("lucide-sparkles");
 		await userEvent.click(
 			canvas.getByRole("button", { name: "2 skills used" }),
 		);
@@ -1569,6 +1582,38 @@ export const DesktopUnread: Story = {
 		showState(session);
 	},
 	play: async ({ canvasElement }) => {
+		const chip = within(canvasElement)
+			.getByTestId("session-bar-unread-chip")
+			.querySelector("span");
+		const primary = within(canvasElement).getByTestId("session-bar-settle");
+		expect(chip).not.toBeNull();
+		const expected = document.createElement("span");
+		canvasElement.append(expected);
+		expect(getComputedStyle(chip ?? primary).backgroundColor).toMatch(
+			/\/ 0\.16\)/,
+		);
+		expect(getComputedStyle(primary).backgroundColor).toMatch(/\/ 0\.18\)/);
+		expected.style.borderBottomColor = "var(--color-border-subtle)";
+		expect(
+			getComputedStyle(within(canvasElement).getByTestId("session-bar"))
+				.borderBottomColor,
+		).toBe(getComputedStyle(expected).borderBottomColor);
+		expected.remove();
+		const connection =
+			canvasElement.querySelector<HTMLElement>("#session-bar-connection") ??
+			canvasElement;
+		expect(connection.id).toBe("session-bar-connection");
+		// Geist Mono's font face applies the design's .92 scale once.
+		expect(getComputedStyle(connection).fontSize).toBe("12px");
+		expect(
+			connection.querySelector("#status")?.getBoundingClientRect().width,
+		).toBe(7);
+		expect(getComputedStyle(connection).gap).toBe("5px");
+		expect(
+			canvasElement
+				.querySelector("#session-bar-more svg")
+				?.getBoundingClientRect().width,
+		).toBe(16);
 		await expect(
 			within(canvasElement).getByTestId("session-bar-unread-chip"),
 		).toBeVisible();
@@ -1698,8 +1743,7 @@ export const BannersRowExpands: Story = {
 	},
 };
 
-// The desktop chips once spilled out of the title column: the ▾ painted over
-// them, and at this width they ran on over the skills chip and the identity.
+// Desktop task chips stay within the title column at narrow widths.
 export const DesktopBackgroundTasks: Story = {
 	args: { width: 700 },
 	// The chip ages fail contrast (conduit-test-srt8); every other rule stays on.
@@ -1743,28 +1787,50 @@ export const DesktopBackgroundTasks: Story = {
 		const canvas = within(canvasElement);
 		const tasks = canvas.getByTestId("background-tasks-row");
 		const box = (el: Element) => el.getBoundingClientRect();
+		const bar = box(canvas.getByTestId("session-bar"));
+		expect(box(tasks).top - bar.top).toBe(52);
+		expect(box(tasks).bottom).toBe(bar.bottom);
+		const chip = canvas.getAllByTestId("background-task-chip")[0] ?? tasks;
+		const label = chip.querySelector("button span");
+		expect(label).not.toBeNull();
+		if (!label) throw new Error("Background task label is missing");
+		const fonts = await canvasElement.ownerDocument.fonts.load(
+			'400 11.5px "Geist Mono"',
+			label.textContent ?? "",
+		);
+		expect(fonts.length).toBeGreaterThan(0);
+		for (const font of fonts) expect(font.status).toBe("loaded");
+		const labelStyle = getComputedStyle(label);
+		expect(labelStyle.fontFamily).toContain("Geist Mono");
+		expect(labelStyle.fontSize).toBe("11.5px");
+		expect(labelStyle.fontWeight).toBe("400");
+		expect(labelStyle.lineHeight).toBe("normal");
+		const chipStyle = getComputedStyle(chip);
+		expect(box(chip).height).toBe(22);
+		expect(chipStyle.paddingLeft).toBe("9px");
+		expect(chipStyle.paddingRight).toBe("4px");
+		expect(chipStyle.columnGap).toBe("6px");
+		const range = canvasElement.ownerDocument.createRange();
+		range.selectNodeContents(label);
+		const textBox = range.getBoundingClientRect();
+		expect((textBox.top + textBox.bottom) / 2).toBeCloseTo(
+			(box(chip).top + box(chip).bottom) / 2,
+			1,
+		);
+		expect(textBox.top).toBeGreaterThanOrEqual(box(chip).top);
+		expect(textBox.bottom).toBeLessThanOrEqual(box(chip).bottom);
 		const overlaps = (a: DOMRect, b: DOMRect) =>
 			a.left < b.right &&
 			b.left < a.right &&
 			a.top < b.bottom &&
 			b.top < a.bottom;
 		const chips = box(tasks.firstElementChild ?? tasks);
-		// The ▾'s hit target overhangs by design; its icon is what must clear.
-		const menuIcon = canvas
-			.getByTestId("session-bar-title-menu")
-			.querySelector("svg");
 		for (const el of [
-			menuIcon,
-			...[
-				"session-bar-title",
-				"session-skills-chip",
-				"session-bar-overflow",
-			].map((id) => canvas.getByTestId(id)),
-		])
-			expect(
-				overlaps(chips, box(el ?? tasks)),
-				el?.outerHTML.slice(0, 60),
-			).toBe(false);
+			"session-bar-title",
+			"session-skills-chip",
+			"session-bar-overflow",
+		].map((id) => canvas.getByTestId(id)))
+			expect(overlaps(chips, box(el)), el.outerHTML.slice(0, 60)).toBe(false);
 		expect(canvas.getAllByTestId("background-task-chip")).toHaveLength(2);
 		await expect(canvas.getByTestId("background-tasks-more")).toHaveTextContent(
 			"+1",
@@ -1774,6 +1840,12 @@ export const DesktopBackgroundTasks: Story = {
 		expect(
 			chips.top - box(canvas.getByTestId("session-bar-title")).bottom,
 		).toBeGreaterThanOrEqual(6);
+		await waitFor(() =>
+			expect(
+				getComputedStyle(canvas.getByTestId("background-tasks-more"))
+					.pointerEvents,
+			).toBe("auto"),
+		);
 		await userEvent.click(canvas.getByTestId("background-tasks-more"));
 		await expect(canvas.getByTestId("background-tasks-panel")).toBeVisible();
 		await userEvent.keyboard("{Escape}");
@@ -1805,8 +1877,33 @@ export const BackgroundTasks: Story = {
 		expect(tasks.getBoundingClientRect().top).toBeGreaterThanOrEqual(
 			canvas.getByTestId("session-bar-title").getBoundingClientRect().bottom,
 		);
+		await waitFor(() =>
+			expect(
+				getComputedStyle(canvas.getByTestId("background-tasks-toggle"))
+					.pointerEvents,
+			).toBe("auto"),
+		);
 		await userEvent.click(canvas.getByTestId("background-tasks-toggle"));
 		await expect(canvas.getByTestId("background-tasks-panel")).toBeVisible();
+		const theme = document.documentElement.classList.contains("light-theme")
+			? "light"
+			: "dark";
+		for (const mode of ["dark", "light"] as const) {
+			setThemeMode(mode);
+			await waitFor(() =>
+				expect(
+					getComputedStyle(canvas.getByTestId("background-tasks-scrim"))
+						.backgroundColor,
+				).toBe(
+					mode === "dark" ? "rgba(6, 7, 9, 0.55)" : "rgba(22, 26, 33, 0.34)",
+				),
+			);
+			expect(
+				document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+					?.content,
+			).toBe(mode === "dark" ? "#0b0c0e" : "#b0b1b3");
+		}
+		setThemeMode(theme);
 		sessionViewState.atBottom = true;
 		sessionViewState.barOpen = false;
 		await tick();
@@ -1816,6 +1913,18 @@ export const BackgroundTasks: Story = {
 		);
 		await userEvent.keyboard("{Escape}");
 		await expect(canvas.getByTestId("background-tasks-toggle")).toHaveFocus();
+		await waitFor(() =>
+			expect(
+				getComputedStyle(canvas.getByTestId("background-tasks-toggle"))
+					.pointerEvents,
+			).toBe("auto"),
+		);
+		await waitFor(() =>
+			expect(
+				document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+					?.content,
+			).toBe(theme === "dark" ? "#111113" : "#ffffff"),
+		);
 		await userEvent.click(canvas.getByTestId("background-tasks-toggle"));
 		await expect(canvas.getByTestId("background-tasks-panel")).toBeVisible();
 	},
@@ -1907,6 +2016,17 @@ export const SideThreadsOpen: Story = {
 	beforeEach: () => setupSideThreads(sideThreadRows),
 	play: async ({ canvasElement }) => {
 		await assertSideThreadRows(canvasElement);
+		const theme = document.documentElement.classList.contains("light-theme")
+			? "light"
+			: "dark";
+		expect(
+			getComputedStyle(within(canvasElement).getByTestId("side-threads-scrim"))
+				.backgroundColor,
+		).toBe(theme === "dark" ? "rgba(6, 7, 9, 0.55)" : "rgba(22, 26, 33, 0.34)");
+		expect(
+			document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+				?.content,
+		).toBe(theme === "dark" ? "#0b0c0e" : "#b0b1b3");
 		const panel = within(canvasElement).getByTestId("side-threads-panel");
 		const bar = within(canvasElement).getByTestId("session-bar");
 		// The phone sheet spans the bar.
@@ -2004,6 +2124,9 @@ export const DesktopSnoozed: Story = {
 		await expect(canvas.getByTestId("session-bar-settle")).toHaveTextContent(
 			/^Until /,
 		);
+		expect(canvas.getByTestId("session-bar-settle").textContent).not.toMatch(
+			/\b[AP]M\b/,
+		);
 	},
 };
 
@@ -2076,6 +2199,15 @@ export const DesktopGoalPursuing: Story = {
 		await expect(canvas.getByTestId("session-bar-settle")).toHaveTextContent(
 			"Pin to top",
 		);
+		expect(
+			getComputedStyle(canvas.getByTestId("session-bar-title")).lineHeight,
+		).toBe("21.75px");
+		expect(
+			getComputedStyle(canvas.getByTestId("session-goal-subtitle")).lineHeight,
+		).toBe("18.75px");
+		expect(
+			canvas.getByTestId("session-bar").getBoundingClientRect().height,
+		).toBeCloseTo(55.5, 1);
 	},
 };
 
@@ -2133,6 +2265,9 @@ export const DesktopGoalMet: Story = {
 			canvas.getByTestId("session-goal-subtitle").textContent?.trim(),
 		).toBe("Goal met · All 38 scenarios pass");
 		await expect(canvas.getByTestId("session-bar-unread-chip")).toBeVisible();
+		expect(
+			canvas.getByTestId("session-goal-subtitle").querySelector("svg"),
+		).toHaveClass("lucide-circle-check");
 		await expect(canvas.getByTestId("session-bar-settle")).toHaveTextContent(
 			"Settle",
 		);
@@ -2187,6 +2322,15 @@ export const DesktopSidebarCollapsed: Story = {
 		const badgeStyle = getComputedStyle(
 			canvas.getByTestId("session-bar-attention"),
 		);
+		expect(
+			canvas.getByTestId("session-bar-back").getBoundingClientRect().height,
+		).toBe(28);
+		expect(
+			canvas.getByTestId("session-bar-attention").getBoundingClientRect()
+				.height,
+		).toBe(17);
+		expect(badgeStyle.fontSize).toBe("10.5px");
+		expectTouchTarget(canvas.getByTestId("session-bar-back"));
 		const expected = new Option().style;
 		expected.backgroundColor = badgeStyle.getPropertyValue("--color-fill-ask");
 		expect(badgeStyle.backgroundColor).toBe(expected.backgroundColor);
@@ -2208,6 +2352,14 @@ export const DesktopBanners: Story = {
 		const canvas = within(canvasElement);
 		const banners = canvas.getAllByTestId("banner-action");
 		await expect(banners).toHaveLength(2);
+		const lead = canvasElement.querySelector(".banner-text b");
+		expect(lead).not.toBeNull();
+		expect(getComputedStyle(lead ?? canvasElement).fontWeight).toBe("600");
+		expect(
+			canvasElement.querySelector(
+				'[data-banner-variant="skip-permissions"] svg',
+			),
+		).toHaveClass("lucide-lock");
 		expect(banners[1]?.getBoundingClientRect().bottom).toBeLessThanOrEqual(
 			canvas.getByTestId("session-bar").getBoundingClientRect().top,
 		);
@@ -2316,6 +2468,9 @@ export const DesktopSnoozeList: Story = {
 			within(list).getByRole("menuitem", { name: "Until something happens" }),
 		).toBeVisible();
 		expect(list).not.toHaveTextContent("slide to a time");
+		for (const detail of list.querySelectorAll(".hold-menu-detail")) {
+			expect(detail.textContent).not.toMatch(/\b[AP]M\b/);
+		}
 	},
 };
 
@@ -2495,6 +2650,12 @@ export const DesktopTaskControls: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		expect(
+			canvas.getByTestId("background-tasks-row").getBoundingClientRect().height,
+		).toBe(36);
+		for (const chip of canvas.getAllByTestId("background-task-chip")) {
+			expect(chip.getBoundingClientRect().height).toBe(22);
+		}
 		await userEvent.click(
 			canvas.getByRole("button", { name: "Stop Run tests" }),
 		);

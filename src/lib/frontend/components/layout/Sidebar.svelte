@@ -161,7 +161,7 @@
 				variant="toolbar"
 				size="content"
 				iconOnly
-				icon="panel-left-close"
+				icon="panel-left"
 				iconSize={18}
 				class="size-[28px] shrink-0 rounded-[8px]"
 				title="Close sidebar"

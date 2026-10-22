@@ -134,7 +134,9 @@ it("persists the existing session title through the daemon process harness", asy
 			expect(harness.claudeTitles()).toEqual([
 				{
 					prompt: expect.stringContaining(`<message>\n${message}\n</message>`),
-					cwd: harness.projectDir,
+					cwd: expect.stringContaining(
+						join(harness.configDir, "text-generation", "run-"),
+					),
 				},
 			]);
 			mkdirSync("test-results", { recursive: true });

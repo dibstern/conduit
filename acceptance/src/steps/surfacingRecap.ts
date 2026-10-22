@@ -221,7 +221,7 @@ export const surfacingRecapHandlers: StepHandler[] = [
 		match: /^the summary has finished generating$/,
 		run: async ({ world }) => {
 			await expect(summary(world.page)).toHaveAttribute("aria-busy", "false");
-			await expect(summary(world.page)).not.toContainText("Summarising…");
+			await expect(summary(world.page)).not.toContainText("Summarizing…");
 		},
 	},
 	{
@@ -295,7 +295,7 @@ export const surfacingRecapHandlers: StepHandler[] = [
 					exact: true,
 				}),
 			).toBeDisabled();
-			await expect(summary(world.page)).toContainText("Summarising…");
+			await expect(summary(world.page)).toContainText("Summarizing…");
 		},
 	},
 	{
@@ -368,10 +368,10 @@ export const surfacingRecapHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert unwritten summary action",
-		match: /^the turn offers Summarize without a summary$/,
+		match: /^the turn offers Summary without a summary$/,
 		run: async ({ world }) => {
 			await expect(summary(world.page)).toBeHidden();
-			await expect(summaryTrigger(world.page)).toContainText("Summarize");
+			await expect(summaryTrigger(world.page)).toContainText("Summary");
 		},
 	},
 	{

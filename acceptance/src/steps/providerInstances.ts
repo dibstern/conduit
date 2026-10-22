@@ -19,6 +19,7 @@ import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/clau
 import { isRecord } from "../../../src/lib/utils.js";
 import { dualDriverProviders } from "../../../test/e2e/fixtures/mockup-state.js";
 import { MOCK_SERVER_STATUS } from "../../../test/e2e/helpers/rpc-mock.js";
+import { closeSettings } from "../../../test/e2e/helpers/settings.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
@@ -837,7 +838,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 				"port 2633",
 			);
 			await expect(world.page.getByTestId("server-status-browsers")).toHaveText(
-				"2 browsers connected",
+				"· 2 browsers connected",
 			);
 		},
 	},
@@ -851,8 +852,8 @@ export const providerInstancesHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "open Server shutdown confirmation",
-		match: /^I open the Server Shut down confirmation$/,
+		name: "open Server Stop confirmation",
+		match: /^I open the Server Stop confirmation$/,
 		run: async ({ world }) => {
 			await world.page.getByTestId("server-shutdown-btn").click();
 			await expect(
@@ -861,8 +862,8 @@ export const providerInstancesHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert shutdown warning",
-		match: /^the Server Shut down warning says (.+)$/,
+		name: "assert Stop warning",
+		match: /^the Server Stop warning says (.+)$/,
 		run: async ({ world, match }) => {
 			await expect(
 				world.page.getByTestId("server-shutdown-confirmation"),
@@ -870,8 +871,8 @@ export const providerInstancesHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "cancel Server shutdown confirmation",
-		match: /^I cancel the Server Shut down confirmation$/,
+		name: "cancel Server Stop confirmation",
+		match: /^I cancel the Server Stop confirmation$/,
 		run: async ({ world }) => {
 			await world.page.getByTestId("server-shutdown-cancel").click();
 			await expect(
@@ -1031,7 +1032,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 				.getByTestId("instance-form")
 				.waitFor({ state: "hidden", timeout: 5_000 });
 			// Close settings so the composer/model-picker is interactable next.
-			await page.getByTestId("settings-close-btn").click();
+			await closeSettings(page);
 			await page
 				.locator("#settings-panel")
 				.waitFor({ state: "hidden", timeout: 5_000 });

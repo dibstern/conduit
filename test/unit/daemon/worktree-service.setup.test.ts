@@ -12,7 +12,15 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Fiber, Stream } from "effect";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	onTestFinished,
+	vi,
+} from "vitest";
 import { makeWorktreeLive } from "../../../src/lib/domain/daemon/Layers/worktree-layer.js";
 import { WorktreeServiceTag } from "../../../src/lib/domain/daemon/Services/worktree-service.js";
 
@@ -96,19 +104,58 @@ describe("daemon Worktree setup runner", () => {
 	});
 
 	it("times out a hanging script and kills the entire process group", async () => {
-		const updates = await Effect.runPromise(
-			setupEffect(
-				"echo $$ > shell.pid; sleep 60 & echo $! > child.pid; wait",
-				{ ...process.env, SHELL: "/bin/sh" },
-				100,
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		let markReady = () => {};
+		const ready = new Promise<void>((resolve) => {
+			markReady = resolve;
+		});
+		const running = Effect.runFork(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service
+					.runSetup(
+						directory,
+						"echo $$ > shell.pid; sleep 60 & echo $! > child.pid; printf 'ready\\n'; wait",
+						{ ...process.env, SHELL: "/bin/sh" },
+					)
+					.pipe(
+						Stream.tap((update) =>
+							Effect.sync(() => {
+								if (update._tag === "output") markReady();
+							}),
+						),
+						Stream.runCollect,
+					),
+			).pipe(
+				Effect.provide(makeWorktreeLive(fixture, { setupTimeoutMs: 100 })),
 			),
 		);
-		expect(updates.at(-1)).toMatchObject({
-			_tag: "finished",
-			status: "timed_out",
+		onTestFinished(async () => {
+			vi.useRealTimers();
+			await Effect.runPromise(Fiber.interrupt(running));
 		});
-		await expectStopped(join(directory, "shell.pid"));
-		await expectStopped(join(directory, "child.pid"));
+		try {
+			// Let the real shell create both descendants before advancing its deadline.
+			await Promise.race([
+				ready,
+				Effect.runPromise(Fiber.await(running)).then(() => {
+					throw new Error("Setup finished before emitting readiness");
+				}),
+			]);
+			await vi.advanceTimersByTimeAsync(99);
+			expect(running.pollUnsafe()).toBeUndefined();
+			await vi.advanceTimersByTimeAsync(1);
+			const updates = await Effect.runPromise(Fiber.join(running));
+			expect(updates.at(-1)).toMatchObject({
+				_tag: "finished",
+				status: "timed_out",
+			});
+			vi.useRealTimers();
+			await expectStopped(join(directory, "shell.pid"));
+			await expectStopped(join(directory, "child.pid"));
+		} finally {
+			vi.useRealTimers();
+			await Effect.runPromise(Fiber.interrupt(running));
+		}
 	});
 
 	it("caps large output once without splitting a UTF-8 character", async () => {

@@ -920,22 +920,22 @@ describe("foreground conduit serve", () => {
 		}
 	}, 60_000);
 
-	// Startup recovery never asks OpenCode; a first use held on /path must not
-	// block project removal either.
-	it("removes a project promptly while a first OpenCode use is held on /path", async () => {
+	// Startup recovery leaves the OpenCode event stream closed. Holding first use
+	// on /global/event must not block project removal.
+	it("removes a project promptly while a first OpenCode use is held on /global/event", async () => {
 		harness = await ProcessHarness.start({ dist: DIST, foregroundCli: true });
 		const removed = await warmProject("process-test");
 		await harness.signal("SIGINT");
 		expect(alive(removed.runner.pid)).toBe(true);
-		const gate = join(harness.root, "opencode-path-gated");
+		const gate = join(harness.root, "opencode-event-gated");
 		const release = `${gate}-release`;
 		const evidence: Record<string, unknown> = {
-			removeDuringHeldOpenCodePath: true,
+			removeDuringHeldOpenCodeEvent: true,
 			runner: removed.runner,
 			deadlineMs: 6000,
 		};
 		scenarios.push(evidence);
-		writeFileSync(gate, "hold only the fixture OpenCode path response");
+		writeFileSync(gate, "hold only the fixture OpenCode event stream");
 		let pendingRemoval: Promise<unknown> | undefined;
 		let firstUse: Promise<unknown> | undefined;
 		let timer: ReturnType<typeof setTimeout> | undefined;
@@ -949,7 +949,8 @@ describe("foreground conduit serve", () => {
 			await vi.waitFor(() => expect(existsSync(`${gate}-started`)).toBe(true), {
 				timeout: 5000,
 			});
-			evidence["pathRequest"] = readFileSync(`${gate}-started`, "utf8");
+			evidence["eventRequest"] = readFileSync(`${gate}-started`, "utf8");
+			expect(evidence["eventRequest"]).toBe("/global/event");
 			const started = Date.now();
 			const request = sendRpcRequest(join(harness.configDir, "relay.sock"), {
 				_tag: "RemoveProject",
@@ -961,10 +962,10 @@ describe("foreground conduit serve", () => {
 				new Promise<never>((_done, fail) => {
 					timer = setTimeout(() => {
 						evidence["elapsedMs"] = Date.now() - started;
-						evidence["timedOutWhilePathHeld"] = !existsSync(release);
+						evidence["timedOutWhileEventHeld"] = !existsSync(release);
 						fail(
 							new Error(
-								"RemoveProject did not complete within 6000ms while OpenCode /path was held",
+								"RemoveProject did not complete within 6000ms while OpenCode /global/event was held",
 							),
 						);
 					}, 6000);
@@ -981,12 +982,12 @@ describe("foreground conduit serve", () => {
 			await vi.waitFor(() => expect(alive(removed.runner.pid)).toBe(false), {
 				timeout: 1000,
 			});
-			evidence["runnerTerminatedWhilePathHeld"] = true;
+			evidence["runnerTerminatedWhileEventHeld"] = true;
 		} finally {
 			clearTimeout(timer);
 			writeFileSync(
 				release,
-				"release OpenCode path before joining fixture cleanup",
+				"release OpenCode event stream before joining fixture cleanup",
 			);
 			await pendingRemoval?.catch(() => undefined);
 			await firstUse?.catch(() => undefined);

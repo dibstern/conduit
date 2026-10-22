@@ -15,7 +15,7 @@
 		consumeScrollRequest,
 		createEmptySessionMessages,
 		currentChat,
-		draftSendIn,
+		localSendsIn,
 		getSessionPhase,
 		isLlmActive,
 		isProcessing,
@@ -258,6 +258,7 @@
 		const _len = chat.messages.length;
 		// A detail upsert can grow the final bubble without changing the count.
 		const _latest = chat.messages.at(-1);
+		const _localLen = localSends.length;
 		const _permLen = primary ? permissionsState.pendingPermissions.length : localPermissions.length;
 		const _questionLen = primary ? 0 : orphanQuestions.length;
 		const isActive = untrack(() => processing);
@@ -368,19 +369,19 @@
 			: undefined,
 	);
 	$effect(() => {
-		if (!processing || chat.loadLifecycle !== "ready" || turns.at(-1)?.user) return;
+		const turn = turns.at(-1);
+		if (!processing || chat.loadLifecycle !== "ready" || !turn || turn.user) return;
 		const sessionId = viewedSessionId;
 		if (!sessionId) return;
-		const key = JSON.stringify([sessionId, turns.at(-1)?.id ?? null]);
+		const key = JSON.stringify([sessionId, turn.id]);
 		if (reportedMissingPrompts.has(key)) return;
 		reportedMissingPrompts.add(key);
-		const lastRow = chat.transcript?.rows.at(-1);
 		const last = chat.messages.at(-1);
 		console.error("[turn-clock] Working session has no prompt to time from", {
 			sessionId,
 			messageCount: chat.messages.length,
-			lastMessageRole: lastRow?.role ?? last?.type ?? null,
-			lastMessageId: lastRow?.id ?? (last && "messageId" in last ? last.messageId ?? last.uuid : last?.uuid) ?? null,
+			lastMessageRole: last?.type ?? null,
+			lastMessageId: (last && "messageId" in last ? last.messageId ?? last.uuid : last?.uuid) ?? null,
 		});
 	});
 	const localPermissions = $derived(getLocalPermissions(viewedSessionId));
@@ -493,9 +494,10 @@
 	// Turns render from chat.messages, which can still hold items from before the
 	// transcript reset. A cold open shows only the skeleton, never those leftovers.
 	const coldOpen = $derived(feed === "catchingUp" && !hasRows);
-	// A draft's first send shows until its new session places it, so the pane
-	// is not empty and never skeletons over it.
-	const firstSend = $derived(primary ? draftSendIn(sessionState.currentId) : null);
+	// Sends show from the click until the server places them. A draft's first
+	// send starts the pane, so it is not empty and never skeletons over it.
+	const localSends = $derived(primary ? localSendsIn(sessionState.currentId) : []);
+	const firstSend = $derived(localSends.some((send) => send.opensSession));
 	// A cold pane has not heard from the feed, so it cannot yet claim the start.
 	const startConfirmed = $derived(transcript != null && transcript.hwm !== null);
 
@@ -688,11 +690,11 @@
 	{/if}
 	{@render resumed(END_OF_TRANSCRIPT)}
 	</div>
-	{#if firstSend}
+	{#each localSends as send (send.message.uuid)}
 		<div class="msg-container">
-			<UserMessage message={firstSend} />
+			<UserMessage message={send.message} />
 		</div>
-	{/if}
+	{/each}
 	{#if emptyLiveTurn}
 		{@render turnItem(emptyLiveTurn)}
 	{/if}

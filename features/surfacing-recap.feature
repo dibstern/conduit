@@ -71,7 +71,7 @@ Scenario Outline: On request creates a summary only after Summarize
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a live turn with no summaries
-  Then the turn offers Summarize without a summary
+  Then the turn offers Summary without a summary
   And no recap generation was requested
   When I open the turn summary
   Then the empty summary offers Summarize and its settings

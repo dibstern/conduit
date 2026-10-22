@@ -228,10 +228,12 @@ test.describe("Subagent navigation", () => {
 		// A settled turn collapses into a Worked head over its activity timeline
 		// (aoqb.2); the link to the child session is on the subagent's row in
 		// the step log its head expands (5517789f).
-		for (const head of await page
-			.getByRole("button", { name: /^Worked .*subagent/ })
-			.all())
-			await head.click();
+		// Wait for all three subagent turns before sampling the loaded transcript.
+		const subagentHeads = page.getByRole("button", {
+			name: /^Worked .*subagent/,
+		});
+		await expect(subagentHeads).toHaveCount(3);
+		for (const head of await subagentHeads.all()) await head.click();
 		const subagentLink = page
 			.getByRole("button", {
 				name: /^Delegated Explore synthesis pipeline code/,

@@ -146,3 +146,71 @@ Scenario: a five-hour limit without its reset time keeps a percentage
   Then the single usage footer shows 5h 100% and Week 71%
   And the usage footer claude five_hour meter is warning at 100 percent
   And the usage footer has no horizontal clipping
+
+Scenario: account buttons change only the new-session default
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And a session already exists on the Claude harness
+  And the usage footer has several accounts with an unknown Claude reading
+  Then the desktop meter marks claude as default instead of work
+  When I make claude the default from the desktop meter
+  Then the meter has sent 0 SetDefault requests for claude
+  When I make work the default from the desktop meter
+  Then the meter has sent 1 SetDefault requests for work
+  And the desktop meter marks work as default instead of claude
+  And the usage footer claude row is the highlighted current account
+  And the usage composer still selects claude
+  When I make work the default from the desktop meter
+  Then the meter has sent 1 SetDefault requests for work
+  When I open Usage settings from the desktop meter
+  And I open settings to the Server section
+  Then only the Work Claude account has the default marker
+
+Scenario: managed defaults offer no account button
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And a session already exists on the Claude harness
+  And the usage footer has several accounts with an unknown Claude reading
+  Then the desktop meter row chatgpt is not a button
+
+Scenario: a failed default change shows a toast and keeps the marker
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And a session already exists on the Claude harness
+  And the usage footer has several accounts with an unknown Claude reading
+  Given changing the usage meter default fails
+  When I make work the default from the desktop meter
+  Then the usage meter default failure toast is visible
+  And the desktop meter marks claude as default instead of work
+
+Scenario: an untouched draft follows the meter default
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And a session already exists on the Claude harness
+  And the usage footer has several accounts with an unknown Claude reading
+  When I open an untouched usage draft
+  Then the usage composer still selects claude
+  When I make work the default from the desktop meter
+  Then the usage composer still selects work
+  And the usage footer work row is the highlighted current account
+
+Scenario: an explicit draft account survives a meter default change
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And a session already exists on the Claude harness
+  And the usage footer has several accounts with an unknown Claude reading
+  When I pick spare for a new session draft
+  And I make work the default from the desktop meter
+  Then the usage composer still selects spare
+  And the usage footer spare row is the highlighted current account
+  And the desktop meter marks work as default instead of claude
+
+Scenario: changing a Cursor default preserves the Claude default
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And a session already exists on the Claude harness
+  And the usage footer has a Claude account and a hidden Cursor account named Team
+  When I make hidden the default from the desktop meter
+  Then the meter has sent 1 SetDefault requests for hidden
+  And the desktop meter marks hidden as default
+  And the desktop meter marks claude as default

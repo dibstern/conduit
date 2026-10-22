@@ -18,7 +18,12 @@ export const makeCursorProviderRuntime = (deps: RunnerProviderInstanceDeps) =>
 		const state = yield* ProviderStateEffectTag;
 		return yield* makeRunnerProviderInstance(
 			deps,
-			makeCursorRunnerDriver(deps.workspaceRoot, undefined, { read, state }),
+			makeCursorRunnerDriver(
+				deps.workspaceRoot,
+				undefined,
+				{ read, state },
+				deps.daemonConfigDir,
+			),
 			(emit) =>
 				makeProcessSessionRunner(deps, emit, {
 					driverKind: "cursor",
@@ -49,6 +54,7 @@ export const makeCursorProviderRuntime = (deps: RunnerProviderInstanceDeps) =>
 								"cursor.forkDigest"
 							];
 							return yield* recoverRunnerCommands(sql, sessionId, "cursor", {
+								legacyResult: connection.legacyResult,
 								driverForAccount: (id) =>
 									Result.getOrUndefined(resolve(accounts, { _tag: "Id", id }))
 										?.driver,

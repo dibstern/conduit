@@ -150,15 +150,16 @@ describe("merged Effect projection", () => {
 		);
 	});
 
-	it("keeps latest cost and adds per-execution tokens", async () => {
+	it("keeps OpenCode message accounting while its run is active", async () => {
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				yield* makeEffectSqlMigrator();
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at)
 				VALUES ('session', 'claude', 1, 1)`;
-				yield* sql`INSERT INTO turns (id, session_id, state, assistant_message_id, requested_at)
-				VALUES ('turn', 'session', 'running', 'answer', 1)`;
+				yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('r', 'session', 'running', 1)`;
+				yield* sql`INSERT INTO turns (id, session_id, state, assistant_message_id, requested_at, run_id)
+				VALUES ('turn', 'session', 'running', 'answer', 1, 'r')`;
 				for (const [sequence, cost, input] of [
 					[1, 2.5, 10],
 					[2, 3.5, 4],
@@ -169,10 +170,15 @@ describe("merged Effect projection", () => {
 							"session",
 							{
 								messageId: "answer",
+								userMessageId: "turn",
 								cost,
 								tokens: { input, output: 1 },
 							},
-							{ provider: "claude", createdAt: 200 + sequence },
+							{
+								provider: "opencode",
+								createdAt: 200 + sequence,
+								metadata: { runId: "r" },
+							},
 						),
 						sequence,
 						projectId: "test-project",

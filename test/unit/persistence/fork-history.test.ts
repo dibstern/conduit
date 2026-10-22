@@ -8,6 +8,7 @@ import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ProviderStateEffectTag } from "../../../src/lib/persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import {
 	type CanonicalEvent,
@@ -162,6 +163,456 @@ const seed = (events: readonly CanonicalEvent[] = history) =>
 	});
 
 describe("readForkSource", () => {
+	it.effect("copies Cursor history without inheriting its native agent", () =>
+		Effect.gen(function* () {
+			const commit = yield* makeCommitAndSignal;
+			const state = yield* ProviderStateEffectTag;
+			const options = {
+				provider: "cursor",
+				metadata: {
+					runId: "run",
+					nativeDirectory: "/parent",
+					providerRefs: { providerSessionId: "parent-agent" },
+				},
+			};
+			yield* seed([
+				canonicalEvent("session.created", "parent", {
+					sessionId: "parent",
+					provider: "cursor",
+					title: "Parent",
+				}),
+				canonicalEvent(
+					"run.requested",
+					"parent",
+					{ runId: "run", inputId: "input" },
+					options,
+				),
+				canonicalEvent(
+					"message.created",
+					"parent",
+					{
+						sessionId: "parent",
+						messageId: "input",
+						role: "user",
+						inputId: "input",
+					},
+					options,
+				),
+				canonicalEvent(
+					"run.started",
+					"parent",
+					{ inputId: "input", requestedRunId: "run" },
+					options,
+				),
+				canonicalEvent(
+					"message.created",
+					"parent",
+					{
+						sessionId: "parent",
+						messageId: "reply",
+						role: "assistant",
+						parentID: "input",
+					},
+					options,
+				),
+				canonicalEvent(
+					"turn.completed",
+					"parent",
+					{
+						messageId: "reply",
+						cost: 1.25,
+						tokens: { input: 10, output: 20 },
+						providerSessionId: "parent-agent",
+						providerStateUpdates: [
+							{ key: "cursor.agentId", value: "parent-agent" },
+							{ key: "cursor.cwd", value: "/parent" },
+						],
+					},
+					options,
+				),
+			]);
+			expect(yield* state.getState("parent")).toMatchObject({
+				"cursor.agentId": "parent-agent",
+			});
+			const source = yield* readForkSource("parent", { sideThread: false });
+			yield* commit([
+				canonicalEvent("session.created", "fork", {
+					sessionId: "fork",
+					provider: "cursor",
+					title: "Fork",
+					forkedFrom: "parent",
+					inheritsHistory: true,
+					forkPointMessageId: source.boundary.messageId,
+					forkPointTimestamp: source.boundary.createdAt,
+				}),
+			]);
+			// This is the state the first Cursor send uses to choose resumeAgent.
+			expect(yield* state.getState("fork")).toEqual({});
+			const query = yield* ReadQueryEffectTag;
+			expect((yield* query.getSessionMessagesWithParts("fork")).length).toBe(2);
+			const sql = yield* SqlClient.SqlClient;
+			expect(
+				yield* sql`SELECT state, cost, tokens_in, tokens_out FROM turns WHERE session_id = 'fork'`,
+			).toEqual([
+				{ state: "completed", cost: 1.25, tokens_in: 10, tokens_out: 20 },
+			]);
+			const fresh = { provider: "cursor", metadata: { runId: "fresh" } };
+			yield* commit([
+				canonicalEvent(
+					"run.requested",
+					"fork",
+					{ runId: "fresh", inputId: "fresh" },
+					fresh,
+				),
+				canonicalEvent(
+					"message.created",
+					"fork",
+					{
+						sessionId: "fork",
+						messageId: "fresh",
+						role: "user",
+						inputId: "fresh",
+					},
+					fresh,
+				),
+				canonicalEvent(
+					"run.started",
+					"fork",
+					{ inputId: "fresh", requestedRunId: "fresh" },
+					fresh,
+				),
+				canonicalEvent(
+					"turn.completed",
+					"fork",
+					{
+						messageId: "fresh",
+						providerStateUpdates: [
+							{ key: "cursor.agentId", value: "fork-agent" },
+						],
+					},
+					fresh,
+				),
+			]);
+			expect(yield* state.getState("fork")).toEqual({
+				"cursor.agentId": "fork-agent",
+			});
+		}).pipe(Effect.provide(testLayer, { local: true })),
+	);
+
+	it.effect(
+		"copies an owned pre-intake failure with no assistant message",
+		() =>
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				const sql = yield* SqlClient.SqlClient;
+				const options = { provider: "claude", metadata: { runId: "run" } };
+				yield* seed([
+					canonicalEvent(
+						"run.requested",
+						"parent",
+						{ runId: "run", inputId: "input" },
+						options,
+					),
+					canonicalEvent(
+						"message.created",
+						"parent",
+						{
+							sessionId: "parent",
+							messageId: "input",
+							role: "user",
+							inputId: "input",
+						},
+						options,
+					),
+					canonicalEvent(
+						"turn.error",
+						"parent",
+						{ messageId: "", error: "iterator failed before intake" },
+						options,
+					),
+				]);
+				const source = yield* readForkSource("parent", {
+					messageId: "input",
+					sideThread: false,
+				});
+				yield* commit([
+					canonicalEvent("session.created", "fork", {
+						sessionId: "fork",
+						provider: "claude",
+						title: "Fork",
+						forkedFrom: "parent",
+						inheritsHistory: true,
+						forkPointMessageId: source.boundary.messageId,
+						forkPointTimestamp: source.boundary.createdAt,
+					}),
+				]);
+				expect(
+					yield* sql`SELECT state, started_at FROM turns WHERE session_id = 'fork'`,
+				).toEqual([{ state: "error", started_at: null }]);
+				expect(
+					yield* sql`SELECT status FROM provider_runs WHERE session_id = 'fork'`,
+				).toEqual([]);
+			}).pipe(Effect.provide(testLayer, { local: true })),
+	);
+
+	it.effect(
+		"does not inherit execution when a fork cuts inside an open run",
+		() =>
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				const sql = yield* SqlClient.SqlClient;
+				const options = {
+					provider: "claude",
+					metadata: { runId: "open" },
+					createdAt: 1,
+				};
+				yield* seed([
+					canonicalEvent(
+						"run.requested",
+						"parent",
+						{ runId: "open", inputId: "input" },
+						options,
+					),
+					canonicalEvent(
+						"message.created",
+						"parent",
+						{ sessionId: "parent", messageId: "input", role: "user" },
+						options,
+					),
+					canonicalEvent(
+						"run.started",
+						"parent",
+						{ requestedRunId: "open", inputId: "input" },
+						options,
+					),
+					canonicalEvent(
+						"message.created",
+						"parent",
+						{ sessionId: "parent", messageId: "answer", role: "assistant" },
+						{ ...options, createdAt: 2 },
+					),
+				]);
+				const source = yield* readForkSource("parent", {
+					messageId: "answer",
+					sideThread: false,
+				});
+				yield* commit([
+					canonicalEvent("session.created", "fork", {
+						sessionId: "fork",
+						title: "Fork",
+						provider: "claude",
+						forkedFrom: "parent",
+						inheritsHistory: true,
+						forkPointMessageId: source.boundary.messageId,
+						forkPointTimestamp: source.boundary.createdAt,
+					}),
+				]);
+				expect(
+					yield* sql`SELECT id FROM provider_runs WHERE session_id = 'fork'`,
+				).toEqual([]);
+				expect(
+					yield* sql`SELECT run_id FROM turns WHERE session_id = 'fork'`,
+				).toEqual([{ run_id: null }]);
+			}).pipe(Effect.provide(testLayer, { local: true })),
+	);
+
+	// A fork preserves final turn facts and acceptance without copying execution.
+	// Joined inputs remain closed history and do not inherit live reservations.
+	for (const [provider, terminal, state] of [
+		["claude", "turn.completed", "completed"],
+		["claude", "turn.error", "error"],
+		["claude", "turn.interrupted", "interrupted"],
+		["opencode", "session.status", "completed"],
+	] as const) {
+		it.effect(
+			`copies ${provider} ${state} turn states without execution and permits fresh fork work`,
+			() =>
+				Effect.gen(function* () {
+					const commit = yield* makeCommitAndSignal;
+					const sql = yield* SqlClient.SqlClient;
+					const options = (runId: string, createdAt: number) => ({
+						provider,
+						metadata: { runId },
+						createdAt,
+					});
+					yield* seed([
+						canonicalEvent(
+							"run.requested",
+							"parent",
+							{ runId: "a", inputId: "a" },
+							options("a", 1),
+						),
+						canonicalEvent(
+							"message.created",
+							"parent",
+							{
+								sessionId: "parent",
+								messageId: "a",
+								role: "user",
+								inputId: "a",
+							},
+							options("a", 2),
+						),
+						canonicalEvent(
+							"run.started",
+							"parent",
+							{ inputId: "a", requestedRunId: "a" },
+							options("a", 3),
+						),
+						canonicalEvent(
+							"run.requested",
+							"parent",
+							{ runId: "b", inputId: "b" },
+							options("b", 4),
+						),
+						canonicalEvent(
+							"message.created",
+							"parent",
+							{
+								sessionId: "parent",
+								messageId: "b",
+								role: "user",
+								inputId: "b",
+							},
+							options("b", 5),
+						),
+						canonicalEvent(
+							"run.started",
+							"parent",
+							{ inputId: "b", requestedRunId: "b" },
+							options("a", 6),
+						),
+						canonicalEvent(
+							"run.requested",
+							"parent",
+							{ runId: "unplaced", inputId: "unplaced" },
+							options("unplaced", 7),
+						),
+						canonicalEvent(
+							"message.created",
+							"parent",
+							{ sessionId: "parent", messageId: "answer", role: "assistant" },
+							options("a", 8),
+						),
+						...(terminal === "session.status"
+							? [
+									canonicalEvent(
+										terminal,
+										"parent",
+										{ sessionId: "parent", status: "idle" },
+										options("a", 9),
+									),
+								]
+							: terminal === "turn.error"
+								? [
+										canonicalEvent(
+											terminal,
+											"parent",
+											{ messageId: "answer", error: "failed" },
+											options("a", 9),
+										),
+									]
+								: [
+										canonicalEvent(
+											terminal,
+											"parent",
+											{ messageId: "answer" },
+											options("a", 9),
+										),
+									]),
+					]);
+					const source = yield* readForkSource("parent", {
+						messageId: "answer",
+						sideThread: false,
+					});
+					yield* commit([
+						canonicalEvent("session.created", "fork", {
+							sessionId: "fork",
+							provider,
+							title: "Fork",
+							forkedFrom: "parent",
+							inheritsHistory: true,
+							forkPointMessageId: source.boundary.messageId,
+							forkPointTimestamp: source.boundary.createdAt,
+						}),
+					]);
+					expect(
+						yield* sql`SELECT id, state, run_id, started_at, completed_at FROM turns WHERE session_id = 'fork' ORDER BY id`,
+					).toEqual([
+						{
+							id: "a_fork",
+							state,
+							run_id: null,
+							started_at: 3,
+							completed_at: 9,
+						},
+						{
+							id: "b_fork",
+							state,
+							run_id: null,
+							started_at: 6,
+							completed_at: 9,
+						},
+					]);
+					expect(
+						yield* sql`SELECT id, status, joined_into FROM provider_runs WHERE session_id = 'fork' ORDER BY id`,
+					).toEqual([]);
+					yield* commit([
+						canonicalEvent(
+							"run.requested",
+							"fork",
+							{ runId: "fresh", inputId: "fresh" },
+							options("fresh", 10),
+						),
+						canonicalEvent(
+							"message.created",
+							"fork",
+							{
+								sessionId: "fork",
+								messageId: "fresh",
+								role: "user",
+								inputId: "fresh",
+							},
+							options("fresh", 11),
+						),
+						canonicalEvent(
+							"run.started",
+							"fork",
+							{ inputId: "fresh", requestedRunId: "fresh" },
+							options("fresh", 12),
+						),
+						...(provider === "opencode"
+							? [
+									canonicalEvent(
+										"session.status",
+										"fork",
+										{ sessionId: "fork", status: "idle" },
+										options("fresh", 13),
+									),
+								]
+							: [
+									canonicalEvent(
+										"turn.completed",
+										"fork",
+										{ messageId: "fresh" },
+										options("fresh", 13),
+									),
+								]),
+					]);
+					expect(
+						yield* sql`SELECT state, run_id, started_at, completed_at FROM turns WHERE id = 'fresh'`,
+					).toEqual([
+						{
+							state: "completed",
+							run_id: "fresh",
+							started_at: 12,
+							completed_at: 13,
+						},
+					]);
+				}).pipe(Effect.provide(testLayer, { local: true })),
+		);
+	}
+
 	// Failure modes: verdicts disappear, retain parent ids, extend an explicit
 	// cutoff, attach to an uncopied part, arrive before text, or leak past the
 	// source snapshot. Null probabilities and later verdict revisions must survive.
@@ -405,14 +856,37 @@ describe("readForkSource", () => {
 describe("Side Thread boundaries", () => {
 	it.effect("cuts at the last visible reply in the last completed turn", () =>
 		Effect.gen(function* () {
-			yield* seed(history.slice(0, 13));
+			const owner = {
+				provider: "claude",
+				metadata: { runId: "completed-run" },
+				createdAt: 100,
+			};
+			yield* seed([
+				history[0],
+				canonicalEvent(
+					"run.requested",
+					"parent",
+					{ runId: "completed-run", inputId: "msg_user_1" },
+					owner,
+				),
+				...history.slice(1, 13).map((event) => ({
+					...event,
+					provider: owner.provider,
+					metadata: owner.metadata,
+				})),
+			]);
 			const commit = yield* makeCommitAndSignal;
 			yield* commit([
 				canonicalEvent(
 					"message.created",
 					"parent",
-					{ sessionId: "parent", messageId: "last-reply", role: "assistant" },
-					{ createdAt: 113 },
+					{
+						sessionId: "parent",
+						messageId: "last-reply",
+						role: "assistant",
+						parentID: "msg_user_1",
+					},
+					{ ...owner, createdAt: 113 },
 				),
 				canonicalEvent(
 					"turn.completed",

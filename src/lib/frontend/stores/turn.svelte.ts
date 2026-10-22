@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { untrack } from "svelte";
-import { SvelteMap } from "svelte/reactivity";
+import { SvelteMap, SvelteSet } from "svelte/reactivity";
+import { parseAttachmentDataUrl } from "../../attachment-data-url.js";
 import { accountLimit } from "../../contracts/account-limit.js";
 import { WorkspaceMoveError } from "../../contracts/session-workspace.js";
 import type {
@@ -14,9 +15,9 @@ import { toastFailure } from "../transport/rpc-errors.js";
 import { rpc } from "../transport/ws-rpc-client.js";
 import type { SessionInfo } from "../types.js";
 import {
-	draftSend,
 	getOrCreateSessionSlot,
 	getSessionPhase,
+	localSends,
 	sessionMessages,
 } from "./chat.svelte.js";
 import { getBrowserClientId } from "./client-identity.js";
@@ -72,7 +73,8 @@ const intents = new SvelteMap<string, Intent>();
 const pendingReplies = new Map<string, Intent>();
 const settledInputs = new Set<string>();
 const refusals = new SvelteMap<string, { readonly reason: SteerBlocker }>();
-let creatingDrafts = $state(0);
+/** Drafts whose CreateSession is in flight, by draft id. */
+const creatingDrafts = new SvelteSet<string | undefined>();
 let dismissTaskStopToast: (() => void) | undefined;
 
 export function turn() {
@@ -86,11 +88,13 @@ export function turn() {
 				(project) => project.slug === getDraftProject(),
 			)
 		: undefined;
+
 	return {
 		working:
 			sessionId === null
-				? draft && creatingDrafts > 0
-				: getSessionPhase(sessionId) !== "idle" ||
+				? draft && creatingDrafts.has(selection.scope?.draftId)
+				: (getSessionPhase(sessionId) !== "idle" &&
+						findSession(sessionId)?.canStop !== false) ||
 					[...intents.values()].some(
 						(intent) => intent.sessionId === sessionId,
 					),
@@ -225,6 +229,26 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 	const inputId = input.inputId ?? crypto.randomUUID();
 	let sessionId: string | undefined;
 	let creating = false;
+	const message = {
+		type: "user",
+		uuid: inputId,
+		text: input.text,
+		createdAt: Date.now(),
+		...(input.images?.length
+			? {
+					attachments: input.images.map((url) => {
+						const { mime, name, size } = parseAttachmentDataUrl(url);
+						return {
+							id: crypto.randomUUID(),
+							name: name ?? "Attachment",
+							mime,
+							url,
+							size,
+						};
+					}),
+				}
+			: {}),
+	} as const;
 	try {
 		if ("sideThread" in input) {
 			const created = await rpc("StartSideThread", {
@@ -240,13 +264,19 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 		}
 		if ("draft" in input) {
 			creating = true;
-			creatingDrafts++;
+			const draftId = from?.draftId;
+			creatingDrafts.add(draftId);
+			localSends.set(inputId, {
+				sessionId: null,
+				draftId,
+				message,
+				opensSession: true,
+			});
 			try {
 				const created = await rpc("CreateSession", input.draft);
 				sessionId = created.sessionId;
-				draftSend.sessionId = sessionId;
 			} finally {
-				creatingDrafts--;
+				creatingDrafts.delete(draftId);
 			}
 			creating = false;
 		} else sessionId = input.sessionId;
@@ -260,6 +290,14 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 		if (input.delivery !== "steer" && predictsHandoff(sessionId))
 			intents.set(inputId, intent);
 		refusals.delete(sessionId);
+		// A send that will start a turn shows at once; a queued one shows in
+		// the tray, and a steer stays in the composer until it lands.
+		if ("draft" in input || intents.has(inputId))
+			localSends.set(inputId, {
+				sessionId,
+				message,
+				opensSession: "draft" in input,
+			});
 		if ("draft" in input) {
 			// follow records the session's project and only moves a sender who
 			// stayed put; the composer's promotion then lands on the same path.
@@ -268,7 +306,9 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 		}
 		const sentToSessionId = sessionId;
 		const sentFrom =
-			"draft" in input && from ? { ...from, sessionId: sentToSessionId } : from;
+			"draft" in input && from
+				? { project: from.project, sessionId: sentToSessionId }
+				: from;
 		const reply = await new Promise<
 			Awaited<ReturnType<typeof rpc<"input.submit">>>
 		>((resolve, reject) =>
@@ -291,19 +331,23 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 				baseline: reply.sessionId === sessionId ? intent.baseline : 0,
 			});
 		if (!reply.ok) {
-			if (draftSend.sessionId === sessionId) draftSend.message = null;
+			localSends.delete(inputId);
 			refusals.set(sessionId, { reason: reply.reason });
 			return { kind: "refused", reason: reply.reason };
 		}
-		if (reply.sessionId !== sentToSessionId)
+		if (reply.sessionId !== sentToSessionId) {
+			const shown = localSends.get(inputId);
+			if (shown)
+				localSends.set(inputId, { ...shown, sessionId: reply.sessionId });
 			selection.follow(sentFrom, reply.sessionId, "replace");
+		}
 		return {
 			kind:
 				reply.handedOff && input.delivery !== "steer" ? "started" : "waiting",
 		};
 	} catch (error) {
 		intents.delete(inputId);
-		if (creating || draftSend.sessionId === sessionId) draftSend.message = null;
+		localSends.delete(inputId);
 		toastFailure(
 			"sideThread" in input
 				? "Failed to start Side Thread"

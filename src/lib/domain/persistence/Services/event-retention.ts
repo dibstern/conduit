@@ -1,9 +1,14 @@
 import { Context, Effect, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
+import {
+	readSessionWorktreeOwnershipSnapshot,
+	WORKTREE_CLEANUP_PATHS_SQL,
+} from "../../../persistence/effect/session-worktree-ownership.js";
 import { PersistenceProjectTag } from "./persistence-service.js";
 
 export interface DrainReport {
+	/** Touched deleted sessions whose reclaimable history is now exhausted. */
 	readonly sessionsFreed: number;
 	readonly eventsFreed: number;
 	/** Logical bytes in the deleted rows' text columns, without page reclamation. */
@@ -39,15 +44,10 @@ export const EVENT_RETENTION_HOLD_SQL = `
 export const makeEventRetention = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const { projectId } = yield* PersistenceProjectTag;
-	// Match cleanup discovery and readSessionWorktreeOwnership, including the
-	// launches that validate subsequent branch renames. These are not lineage holds.
-	const keptEvent = sql.literal(`(
-		(type = 'session.deleted' AND json_extract(data, '$.sessionId') IS session_id)
-		OR (type = 'session.workspace_changed' AND (
-			(json_extract(data, '$.cause') IS 'launch' AND json_extract(data, '$.origin') IS 'conduit')
-			OR json_extract(data, '$.cause') IS 'branch-rename'
-		))
-	)`);
+
+	// Cleanup failures remain queryable audit receipts after history reclamation.
+	const retainedMetadata = sql`
+		e.type = 'session.provider_cleanup_failed'`;
 
 	const candidates = () => sql<{ session_id: string }>`
 		SELECT DISTINCT marker.session_id FROM events marker
@@ -55,9 +55,11 @@ export const makeEventRetention = Effect.gen(function* () {
 			AND json_extract(marker.data, '$.sessionId') = marker.session_id
 			AND NOT EXISTS (SELECT 1 FROM sessions WHERE id = marker.session_id)
 			AND EXISTS (
-				SELECT 1 FROM events other
-				WHERE other.project_id = ${projectId} AND other.session_id = marker.session_id
-					AND NOT ${keptEvent}
+				SELECT 1 FROM events e
+				WHERE e.project_id = ${projectId} AND e.session_id = marker.session_id
+					AND (e.type <> 'session.deleted'
+						OR json_extract(e.data, '$.sessionId') IS NOT e.session_id)
+					AND NOT (${retainedMetadata})
 			) ORDER BY marker.session_id`;
 	const holders = (sessionId: string) =>
 		sql.unsafe<{ holder_session_id: string; bound: number }>(
@@ -80,7 +82,9 @@ export const makeEventRetention = Effect.gen(function* () {
 				const reclaimable = yield* sql`SELECT 1 FROM events e
 					WHERE e.project_id = ${projectId} AND e.session_id = ${sessionId}
 						AND e.sequence > ${bound}
-						AND NOT ${keptEvent}
+						AND (e.type <> 'session.deleted'
+							OR json_extract(e.data, '$.sessionId') IS NOT e.session_id)
+						AND NOT (${retainedMetadata})
 					LIMIT 1`;
 				if (reclaimable.length === 0) continue;
 				while (true) {
@@ -88,13 +92,41 @@ export const makeEventRetention = Effect.gen(function* () {
 						Effect.gen(function* () {
 							// Both read-model checks can only block deletion. The marker
 							// remains the only positive evidence that this session is dead.
-							const eligible = yield* sql`SELECT 1 FROM events
+							const eligible = yield* sql<{ missing_ownership: number }>`
+								SELECT json_type(data, '$.worktreeOwnership') IS NULL AS missing_ownership FROM events
 								WHERE project_id = ${projectId} AND session_id = ${sessionId}
 									AND type = 'session.deleted'
 									AND json_extract(data, '$.sessionId') = session_id
-									AND NOT EXISTS (SELECT 1 FROM sessions WHERE id = ${sessionId})
-								LIMIT 1`;
+									AND NOT EXISTS (SELECT 1 FROM sessions WHERE id = ${sessionId})`;
 							if (eligible.length === 0) return [];
+							if (eligible.some((marker) => marker.missing_ownership !== 0)) {
+								// Capture older markers before reclaiming their launch/rename evidence.
+								const ownership = yield* readSessionWorktreeOwnershipSnapshot(
+									projectId,
+									sessionId,
+								).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+								if (ownership) {
+									const paths = yield* sql.unsafe<{ path: string }>(
+										`SELECT DISTINCT path FROM (${WORKTREE_CLEANUP_PATHS_SQL}) WHERE session_id = ?`,
+										[projectId, sessionId],
+									);
+									const snapshot = {
+										...ownership,
+										discoveryPaths: [
+											...new Set([
+												...ownership.discoveryPaths,
+												...paths.map(({ path }) => path),
+											]),
+										],
+									};
+									yield* sql`UPDATE events
+										SET data = json_set(data, '$.worktreeOwnership', json(${JSON.stringify(snapshot)}))
+										WHERE project_id = ${projectId} AND session_id = ${sessionId}
+											AND type = 'session.deleted'
+											AND json_extract(data, '$.sessionId') = session_id
+											AND json_type(data, '$.worktreeOwnership') IS NULL`;
+								}
+							}
 							const holding = yield* holders(sessionId);
 							const bound = Math.max(0, ...holding.map((row) => row.bound));
 							return yield* sql<{ sequence: number; bytes: number }>`
@@ -103,7 +135,9 @@ export const makeEventRetention = Effect.gen(function* () {
 										SELECT e.sequence FROM events e
 										WHERE e.project_id = ${projectId} AND e.session_id = ${sessionId}
 											AND e.sequence > ${bound}
-											AND NOT ${keptEvent}
+											AND (e.type <> 'session.deleted'
+												OR json_extract(e.data, '$.sessionId') IS NOT e.session_id)
+											AND NOT (${retainedMetadata})
 										AND NOT EXISTS (
 											SELECT 1 FROM message_parts part
 												JOIN messages message ON message.id = part.message_id
@@ -144,7 +178,9 @@ export const makeEventRetention = Effect.gen(function* () {
 				SELECT COUNT(*) AS count FROM events e
 				WHERE e.project_id = ${projectId} AND e.session_id = ${sessionId}
 					AND e.sequence > ${bound}
-					AND NOT ${keptEvent}
+					AND (e.type <> 'session.deleted'
+						OR json_extract(e.data, '$.sessionId') IS NOT e.session_id)
+					AND NOT (${retainedMetadata})
 					AND EXISTS (
 						SELECT 1 FROM message_parts part
 						JOIN messages message ON message.id = part.message_id
@@ -176,9 +212,11 @@ export const makeEventRetention = Effect.gen(function* () {
 						AND json_extract(marker.data, '$.sessionId') = marker.session_id
 				)
 				AND NOT EXISTS (
-					SELECT 1 FROM events other
-					WHERE other.project_id = ${projectId} AND other.session_id = touched.value
-						AND NOT ${keptEvent}
+					SELECT 1 FROM events e
+					WHERE e.project_id = ${projectId} AND e.session_id = touched.value
+						AND (e.type <> 'session.deleted'
+							OR json_extract(e.data, '$.sessionId') IS NOT e.session_id)
+						AND NOT (${retainedMetadata})
 				)`;
 		return {
 			sessionsFreed: freed?.count ?? 0,

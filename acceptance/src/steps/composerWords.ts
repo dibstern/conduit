@@ -1,4 +1,5 @@
 import { expect } from "@playwright/test";
+import { closeSettings } from "../../../test/e2e/helpers/settings.js";
 import type { StepHandler } from "../runtime.js";
 import { seedComposerPickerCatalog } from "./composerPicker.js";
 import { requireRpcControl } from "./shared.js";
@@ -114,7 +115,7 @@ export const composerWordsHandlers: StepHandler[] = [
 				.poll(() =>
 					mode.evaluate((element, mode) => {
 						const probe = document.createElement("span");
-						probe.style.color = `var(--color-${mode === "full" ? "error" : mode === "edits" || mode === "auto" ? "status-ask" : "text-secondary"})`;
+						probe.style.color = `var(--color-p-${mode})`;
 						element.append(probe);
 						const expected = getComputedStyle(probe).color;
 						probe.remove();
@@ -179,7 +180,7 @@ export const composerWordsHandlers: StepHandler[] = [
 					}),
 				)
 				.toBe("words");
-			await world.page.getByTestId("settings-close-btn").click();
+			await closeSettings(world.page);
 			await expect(world.page.locator("#settings-panel")).toBeHidden();
 		},
 	},

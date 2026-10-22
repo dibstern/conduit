@@ -269,7 +269,7 @@ export const cursorForkHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			await world.page.locator("#input").fill(forkPrompt);
 			await world.page.locator("#send").click();
-			await requireRpcControl(world.page).waitForRequest(
+			const request = await requireRpcControl(world.page).waitForRequest(
 				(request) =>
 					request.tag === "input.submit" &&
 					request.payload["sessionId"] === forkId &&
@@ -281,6 +281,7 @@ export const cursorForkHandlers: StepHandler[] = [
 				sessionId: forkId,
 				messageId: "fork-question",
 				text: forkPrompt,
+				inputId: request.payload["inputId"],
 			});
 			setSessionRowStatus(world.page, forkId, "busy");
 			relay.sendMessage({

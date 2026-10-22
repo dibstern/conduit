@@ -756,9 +756,13 @@ Object.assign(ClaudeDriver, { create: deps => {
 			// Keep CLI smart-default discovery on a reachable, fixture-owned endpoint.
 			const server = createHttpServer(async (request, response) => {
 				const path = request.url?.split("?")[0];
-				const gate = join(this.root, "opencode-path-gated");
-				if (path === "/path" && existsSync(gate)) {
-					writeFileSync(`${gate}-started`, request.url ?? "/path");
+				const gate = join(this.root, "opencode-event-gated");
+				if (
+					request.method === "GET" &&
+					path === "/global/event" &&
+					existsSync(gate)
+				) {
+					writeFileSync(`${gate}-started`, request.url ?? "/global/event");
 					while (!existsSync(`${gate}-release`) && !response.destroyed)
 						await new Promise<void>((done) => setTimeout(done, 10));
 					if (response.destroyed) return;
@@ -1240,7 +1244,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			undefined,
 			undefined,
 			project.slug,
-			undefined,
+			false,
 			this.rpcDiagnostics,
 		);
 		try {
@@ -1897,8 +1901,9 @@ Object.assign(ClaudeDriver, { create: deps => {
 			const signalSaveGate = join(this.root, "signal-config-rename-gated");
 			if (existsSync(signalSaveGate))
 				writeFileSync(`${signalSaveGate}-release`, "cleanup");
-			const pathGate = join(this.root, "opencode-path-gated");
-			if (existsSync(pathGate)) writeFileSync(`${pathGate}-release`, "cleanup");
+			const eventGate = join(this.root, "opencode-event-gated");
+			if (existsSync(eventGate))
+				writeFileSync(`${eventGate}-release`, "cleanup");
 			if (this.blockCapabilitiesProbe) {
 				writeFileSync(join(this.root, "capabilities-probe-release"), "release");
 				writeFileSync(
@@ -1922,7 +1927,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			failures.push(cause);
 		}
 		try {
-			if (this.generations.length > 0) await this.shutdown();
+			if (this.generations.some(({ pid }) => pid === this.child?.pid))
+				await this.shutdown();
 			else await this.stop("SIGTERM");
 		} catch (cause) {
 			failures.push(cause);
@@ -2685,9 +2691,8 @@ export class ProcessBrowser {
 		return { chunks, done };
 	}
 
-	/** Wait for a completed/failed turn's shell version to advance past cursor,
-	 * optionally matching the input that started it so a late prior end cannot win.
-	 * The current read model does not advance this field on interruption. */
+	/** Wait for an ended turn and an idle shell, proving the exact input's end
+	 * even when the shell coalesces several native completions. */
 	waitForTurnEnd(
 		sessionId: string,
 		cursor = 0,
@@ -2708,7 +2713,22 @@ export class ProcessBrowser {
 			(message) =>
 				message["type"] === "session_row" &&
 				message["id"] === sessionId &&
-				(inputId === undefined || message["lastTurnEndInputId"] === inputId) &&
+				(inputId === undefined ||
+					message["lastTurnEndInputId"] === inputId ||
+					// Shell rows coalesce: a fast successor can replace this input's
+					// end before its idle row arrives. Its own durable transcript
+					// timing still proves completion; another input's end never does.
+					this.frames.slice(cursor).some(({ message: row }) => {
+						const timing = row["turnTiming"] as
+							| { endedAt?: number }
+							| undefined;
+						return (
+							row["type"] === "transcript_message" &&
+							row["sessionId"] === sessionId &&
+							row["inputId"] === inputId &&
+							timing?.endedAt !== undefined
+						);
+					})) &&
 				(message["status"] === "idle" || message["status"] === "error") &&
 				Number(message["lastTurnEndVersion"] ?? -1) > endedBefore,
 			cursor,

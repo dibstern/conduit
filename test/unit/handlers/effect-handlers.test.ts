@@ -129,10 +129,6 @@ import {
 } from "../../../src/lib/handlers/session.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";
-import {
-	type ClaudeEventPersistEffect,
-	ClaudeEventPersistEffectTag,
-} from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -338,17 +334,7 @@ function mockConfig(
 }
 
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
-const persistentHandlerPersistence = Layer.merge(
-	makePersistenceEffectLayer(":memory:", "test-project"),
-	Layer.succeed(ClaudeEventPersistEffectTag)({
-		persistHandoffDelivered: () => Effect.void,
-		persistEvent: () => Effect.void,
-		persistEvents: () => Effect.void,
-		persistUserMessage: () => Effect.void,
-		ensureClaudeSubagentSession: () => Effect.void,
-		readClaudeSubagentTranscript: () => Effect.succeed({ messages: [], parts: [] }),
-	} satisfies ClaudeEventPersistEffect),
-);
+const persistentHandlerPersistence = makePersistenceEffectLayer(":memory:", "test-project");
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
 layer(Layer.provideMerge(SessionWorkspaceLive, Layer.mergeAll(Layer.succeed(OpenCodeAPITag)(makeHandlerOpenCodeAPI()), Layer.succeed(AccountDirectory)(makeMockAccountDirectory()), AlertsLive, InputDraftsLive.pipe(Layer.provide(persistentHandlerPersistence)), persistentHandlerPersistence, makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistentHandlerPersistence)), Layer.succeed(AgentServiceTag)(makeMockAgentService()), Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()), PendingInteractionServiceLive, Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()), Layer.succeed(ConfigTag)(mockConfig()), Layer.succeed(LoggerTag)(mockLogger()), ProjectSettingsLive, RpcSubscriptionScopeLive)))("persistent handler runtime", (it) => {
 describe("GetAgents", () => {
@@ -1961,6 +1947,7 @@ describe("handlePermissionResponse", () => {
 				const releaseSend = yield* Deferred.make<void>();
 				const instance: ProviderInstance = {
 					providerId: "claude",
+					generateTextEffect: () => Effect.die("not used"),
 					discoverEffect: vi.fn(() =>
 						Effect.succeed({
 							models: [],
@@ -3713,7 +3700,6 @@ describe("handleMessage", () => {
 			const sessionManagerService = makeMockSessionManagerService({
 				createSession: serviceCreateSession,
 			});
-			const ingestBatch = vi.fn(() => Effect.succeed(0));
 			const config = mockConfig();
 			const client = makeHandlerOpenCodeAPI();
 			const readQuery = {
@@ -3798,16 +3784,16 @@ describe("handleMessage", () => {
 					PendingInteractionServiceLive,
 					Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 					Layer.succeed(ReadQueryEffectTag)(readQuery),
-					Layer.succeed(ProviderRuntimeIngestionTag)({
-						ingest: () => Effect.succeed(0),
-						ingestBatch,
-						drain: () => Effect.void,
-					}),
 					makeOverridesStateLive(),
 				),
 			);
 
 			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* (yield* ProjectionRunnerEffectTag).projectEvent(yield* (yield* EventStoreEffectTag).append(canonicalEvent(
+					"session.created", "ses-local-placeholder",
+					{ sessionId: "ses-local-placeholder", title: "Untitled", provider: "claude" },
+				)));
 				yield* setModel("ses-local-placeholder", {
 					providerID: "opencode",
 					modelID: "big-pickle",
@@ -3825,13 +3811,19 @@ describe("handleMessage", () => {
 				expect(engine.bindSession).not.toHaveBeenCalled();
 				expect(ws.setClientSession).not.toHaveBeenCalled();
 				expect(engine.dispatchEffect).not.toHaveBeenCalled();
-				expect(ingestBatch).toHaveBeenCalledWith(expect.arrayContaining([
-					expect.objectContaining({
-						type: "turn.error",
-						sessionId: "ses-local-placeholder",
-						data: expect.objectContaining({ code: "PICK_REQUIRED" }),
-					}),
-				]));
+				const events = yield* sql<{ type: string; run_id: string | null; code: string | null }>`
+					SELECT type, json_extract(metadata, '$.runId') AS run_id,
+						json_extract(data, '$.code') AS code FROM events
+					WHERE session_id = 'ses-local-placeholder' AND type <> 'session.created' ORDER BY sequence`;
+				const [run] = yield* sql<{ id: string; status: string; started_at: number | null }>`
+					SELECT id, status, started_at FROM provider_runs WHERE session_id = 'ses-local-placeholder'`;
+				expect(run).toEqual({ id: expect.any(String), status: "error", started_at: null });
+				expect(events).toEqual([
+					{ type: "run.requested", run_id: run?.id, code: null },
+					{ type: "message.created", run_id: run?.id, code: null },
+					{ type: "text.delta", run_id: null, code: null },
+					{ type: "turn.error", run_id: run?.id, code: "PICK_REQUIRED" },
+				]);
 			}).pipe(Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }));
 		},
 	);
@@ -3878,9 +3870,12 @@ describe("handleMessage", () => {
 
 			return Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				yield* sql`INSERT INTO sessions
-					(id, project_id, provider, title, status, created_at, updated_at, model_id, model_provider, variant, context_window)
-					VALUES ('session-rejected', 'test-project', 'claude', 'Rejected session', 'idle', 0, 0, 'sonnet', 'claude', '', '')`;
+				yield* (yield* ProjectionRunnerEffectTag).projectEvent(yield* (yield* EventStoreEffectTag).append(canonicalEvent(
+					"session.created", "session-rejected",
+					{ sessionId: "session-rejected", title: "Rejected session", provider: "claude" },
+				)));
+				yield* sql`UPDATE sessions SET model_id = 'sonnet', model_provider = 'claude', variant = '', context_window = ''
+					WHERE id = 'session-rejected'`;
 				yield* sendMessageToSession({
 					clientId: "client-1",
 					sessionId: "session-rejected",
@@ -3891,8 +3886,7 @@ describe("handleMessage", () => {
 				expect(yield* hasActiveProcessingTimeout("session-rejected")).toBe(
 					false,
 				);
-				// The failure is recorded as the turn's error; the relay's failed
-				// `done` idles the composer from there.
+				// The owned failure closes the unaccepted run and its placed turn.
 				const failures = yield* sql<{ code: string; error: string }>`
 					SELECT json_extract(data, '$.code') AS code,
 						json_extract(data, '$.error') AS error
@@ -3900,6 +3894,17 @@ describe("handleMessage", () => {
 					WHERE session_id = 'session-rejected' AND type = 'turn.error'`;
 				expect(failures).toEqual([
 					{ code: "SEND_FAILED", error: expect.any(String) },
+				]);
+				const [run] = yield* sql<{ id: string; status: string; started_at: number | null }>`
+					SELECT id, status, started_at FROM provider_runs WHERE session_id = 'session-rejected'`;
+				expect(run).toEqual({ id: expect.any(String), status: "error", started_at: null });
+				expect(yield* sql`
+					SELECT type, json_extract(metadata, '$.runId') AS run_id FROM events
+					WHERE session_id = 'session-rejected' AND type <> 'session.created' ORDER BY sequence`).toEqual([
+					{ type: "run.requested", run_id: run?.id },
+					{ type: "message.created", run_id: run?.id },
+					{ type: "text.delta", run_id: null },
+					{ type: "turn.error", run_id: run?.id },
 				]);
 			}).pipe(Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }));
 		},

@@ -189,36 +189,51 @@ describe("EventRetention through the relay", () => {
 	async function transcript(sessionId: string) {
 		const messageId = `answer_${sessionId}_${randomUUID()}`;
 		const userMessageId = `user_${messageId}`;
+		const runId = `run_${messageId}`;
 		const commit =
 			await harness.stack.effectRuntime.runtime.runPromise(makeCommitAndSignal);
 		await harness.stack.effectRuntime.runtime.runPromise(
-			commit([
-				canonicalEvent("message.created", sessionId, {
-					sessionId,
-					messageId: userMessageId,
-					role: "user",
-				}),
-				canonicalEvent("message.created", sessionId, {
-					sessionId,
-					messageId,
-					parentID: userMessageId,
-					role: "assistant",
-				}),
-				canonicalEvent("tool.started", sessionId, {
-					messageId,
-					partId: `tool_${messageId}`,
-					callId: `call_${messageId}`,
-					toolName: "Read",
-					input: { tool: "Read", filePath: "/fixture" },
-				}),
-				canonicalEvent("tool.completed", sessionId, {
-					messageId,
-					partId: `tool_${messageId}`,
-					result: "result ".repeat(4000),
-					duration: 1,
-				}),
-				canonicalEvent("turn.completed", sessionId, { messageId }),
-			]),
+			commit(
+				[
+					canonicalEvent("run.requested", sessionId, {
+						runId,
+						inputId: userMessageId,
+					}),
+					canonicalEvent("message.created", sessionId, {
+						sessionId,
+						messageId: userMessageId,
+						role: "user",
+					}),
+					canonicalEvent("run.started", sessionId, {
+						inputId: userMessageId,
+						requestedRunId: runId,
+					}),
+					canonicalEvent("message.created", sessionId, {
+						sessionId,
+						messageId,
+						parentID: userMessageId,
+						role: "assistant",
+					}),
+					canonicalEvent("tool.started", sessionId, {
+						messageId,
+						partId: `tool_${messageId}`,
+						callId: `call_${messageId}`,
+						toolName: "Read",
+						input: { tool: "Read", filePath: "/fixture" },
+					}),
+					canonicalEvent("tool.completed", sessionId, {
+						messageId,
+						partId: `tool_${messageId}`,
+						result: "result ".repeat(4000),
+						duration: 1,
+					}),
+					canonicalEvent("turn.completed", sessionId, { messageId }),
+				].map((event) => ({
+					...event,
+					provider: "claude",
+					metadata: { runId },
+				})),
+			),
 		);
 	}
 
@@ -904,7 +919,11 @@ describe("EventRetention through the relay", () => {
 				["idx_events_lineage_parent", "idx_events_lineage_forked_from"],
 			],
 		] as const) {
-			const plan = plans.find(({ query }) => query.includes(queryText));
+			const plan = plans.find(({ query }) =>
+				name === "preflight"
+					? query.trimStart().startsWith(queryText)
+					: query.includes(queryText),
+			);
 			expect(plan, name).toBeDefined();
 			for (const index of indexes)
 				expect(

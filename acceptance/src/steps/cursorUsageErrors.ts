@@ -1,16 +1,34 @@
+import type { Page } from "@playwright/test";
 import { expect } from "@playwright/test";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import type { StepHandler } from "../runtime.js";
-import { requireRelayControl, setSessionRowStatus } from "./shared.js";
+import {
+	requireRelayControl,
+	requireRpcControl,
+	setSessionRowStatus,
+} from "./shared.js";
 
 const sessionId = "sess-first-send";
+
+// The placed prompt carries the send's inputId, so it replaces the browser's
+// own copy as the real server's does.
+const sentInputId = async (page: Page, text: string) =>
+	String(
+		(
+			await requireRpcControl(page).waitForRequest(
+				(request) =>
+					request.tag === "input.submit" && request.payload["text"] === text,
+			)
+		).payload["inputId"],
+	);
 
 export const cursorUsageErrorsHandlers: StepHandler[] = [
 	{
 		name: "report completed Cursor usage",
 		match:
 			/^the Cursor relay reports a completed turn with (unavailable|[0-9.]+) cost$/,
-		run: ({ world, match }) => {
+		run: async ({ world, match }) => {
+			const inputId = await sentInputId(world.page, "Explain usage");
 			const message: HistoryMessage = {
 				id: "cursor-usage-assistant",
 				role: "assistant",
@@ -38,6 +56,7 @@ export const cursorUsageErrorsHandlers: StepHandler[] = [
 						{
 							id: "cursor-usage-user",
 							role: "user",
+							inputId,
 							time: { created: 1_000 },
 							parts: [
 								{
@@ -109,7 +128,8 @@ export const cursorUsageErrorsHandlers: StepHandler[] = [
 	{
 		name: "report Cursor provider error",
 		match: /^the Cursor relay fails with (.+) and (.+)$/,
-		run: ({ world, match }) => {
+		run: async ({ world, match }) => {
+			const inputId = await sentInputId(world.page, "Try this turn");
 			requireRelayControl(world.page).sendMessage({
 				type: "mock_transcript_snapshot",
 				sessionId,
@@ -118,6 +138,7 @@ export const cursorUsageErrorsHandlers: StepHandler[] = [
 						{
 							id: "cursor-error-user",
 							role: "user",
+							inputId,
 							time: { created: 1_000 },
 							parts: [
 								{
@@ -158,7 +179,7 @@ export const cursorUsageErrorsHandlers: StepHandler[] = [
 		name: "assert Cursor provider diagnostic and retry guidance",
 		match: /^the Cursor error notice contains (.+)$/,
 		run: async ({ world, match }) => {
-			const notice = world.page.locator("#messages .glow-tool-error");
+			const notice = world.page.getByTestId("system-error-notice");
 			await expect(notice).toBeVisible();
 			await expect(notice).toContainText(match[1] ?? "");
 		},
@@ -167,9 +188,9 @@ export const cursorUsageErrorsHandlers: StepHandler[] = [
 		name: "assert no Cursor error notice",
 		match: /^the Cursor transcript has no error notice$/,
 		run: async ({ world }) => {
-			await expect(
-				world.page.locator("#messages .glow-tool-error"),
-			).toHaveCount(0);
+			await expect(world.page.getByTestId("system-error-notice")).toHaveCount(
+				0,
+			);
 		},
 	},
 ];

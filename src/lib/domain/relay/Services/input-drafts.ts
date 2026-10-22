@@ -16,6 +16,7 @@ import type {
 	InputDraftEnvelope,
 	InputDraftKey,
 } from "../../../contracts/ws-rpc.js";
+import { inputDraftClaimMarker } from "../../../persistence/input-drafts.js";
 
 export type { InputDraftKey } from "../../../contracts/ws-rpc.js";
 
@@ -43,6 +44,7 @@ export interface InputDrafts {
 	) => Effect.Effect<void, SqlError>;
 	readonly subscribe: (key: InputDraftKey) => Stream.Stream<InputDraftEnvelope>;
 	readonly listDrafts: () => Stream.Stream<readonly DraftListItem[], SqlError>;
+	readonly invalidateList: () => Effect.Effect<void>;
 	readonly forget: (sessionId: string) => Effect.Effect<void, SqlError>;
 }
 
@@ -55,21 +57,19 @@ const keyOf = (key: InputDraftKey) =>
 	"session" in key ? key.session : key.draft;
 const kindOf = (key: InputDraftKey) => ("session" in key ? "session" : "draft");
 
-// Session ids are always ses_<UUID>; this reserved value can never name one.
-const claimMarker = ":input-draft-claim:";
-
 /** No in-flight create can survive the daemon process that owned its claim. */
-export const releaseInputDraftClaims = Effect.gen(function* () {
-	const sql = yield* SqlClient.SqlClient;
-	yield* sql.withTransaction(
-		Effect.gen(function* () {
-			yield* sql`DELETE FROM input_drafts
-				WHERE promoted_session_id = ${claimMarker} AND text = ''`;
-			yield* sql`UPDATE input_drafts SET promoted_session_id = NULL
-				WHERE promoted_session_id = ${claimMarker}`;
-		}),
-	);
-});
+export const releaseInputDraftClaims = () =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		yield* sql.withTransaction(
+			Effect.gen(function* () {
+				yield* sql`DELETE FROM input_drafts
+					WHERE promoted_session_id = ${inputDraftClaimMarker} AND text = ''`;
+				yield* sql`UPDATE input_drafts SET promoted_session_id = NULL
+					WHERE promoted_session_id = ${inputDraftClaimMarker}`;
+			}),
+		);
+	});
 
 export const makeInputDrafts: Effect.Effect<
 	InputDrafts,
@@ -115,7 +115,7 @@ export const makeInputDrafts: Effect.Effect<
 			readRow(key).pipe(
 				Effect.map((row) =>
 					row?.promoted_session_id != null &&
-					row.promoted_session_id !== claimMarker
+					row.promoted_session_id !== inputDraftClaimMarker
 						? undefined
 						: row?.text,
 				),
@@ -236,8 +236,8 @@ export const makeInputDrafts: Effect.Effect<
 		claim: (draftId, projectId) =>
 			sql<{ text: string }>`INSERT INTO input_drafts
 				(draft_key, project_id, kind, text, updated_at, promoted_session_id)
-				VALUES (${draftId}, ${projectId}, 'draft', '', ${Date.now()}, ${claimMarker})
-				ON CONFLICT (draft_key) DO UPDATE SET promoted_session_id = ${claimMarker}
+				VALUES (${draftId}, ${projectId}, 'draft', '', ${Date.now()}, ${inputDraftClaimMarker})
+				ON CONFLICT (draft_key) DO UPDATE SET promoted_session_id = ${inputDraftClaimMarker}
 				WHERE input_drafts.kind = 'draft' AND input_drafts.promoted_session_id IS NULL
 				RETURNING text`.pipe(
 				Effect.tap((rows) =>
@@ -254,11 +254,11 @@ export const makeInputDrafts: Effect.Effect<
 						const deleted = yield* sql<{
 							draft_key: string;
 						}>`DELETE FROM input_drafts WHERE draft_key = ${draftId}
-						AND promoted_session_id = ${claimMarker} AND text = '' RETURNING draft_key`;
+						AND promoted_session_id = ${inputDraftClaimMarker} AND text = '' RETURNING draft_key`;
 						const released = yield* sql<{
 							draft_key: string;
 						}>`UPDATE input_drafts SET promoted_session_id = NULL
-						WHERE draft_key = ${draftId} AND promoted_session_id = ${claimMarker} RETURNING draft_key`;
+						WHERE draft_key = ${draftId} AND promoted_session_id = ${inputDraftClaimMarker} RETURNING draft_key`;
 						return deleted.length > 0 || released.length > 0;
 					}),
 				)
@@ -273,7 +273,7 @@ export const makeInputDrafts: Effect.Effect<
 				sql<{ draft_key: string }>`UPDATE input_drafts
 				SET promoted_session_id = ${sessionId}, text = '', updated_at = ${Date.now()}
 				WHERE draft_key = ${draftId} AND kind = 'draft'
-				AND promoted_session_id = ${claimMarker} RETURNING draft_key`.pipe(
+				AND promoted_session_id = ${inputDraftClaimMarker} RETURNING draft_key`.pipe(
 					Effect.tap((rows) =>
 						rows.length > 0
 							? PubSub.publish(draftChanges, undefined)
@@ -307,7 +307,7 @@ export const makeInputDrafts: Effect.Effect<
 							const promotedSessionId =
 								"draft" in key &&
 								row?.promoted_session_id != null &&
-								row.promoted_session_id !== claimMarker
+								row.promoted_session_id !== inputDraftClaimMarker
 									? row.promoted_session_id
 									: undefined;
 							const sameKey = (change: { readonly key: InputDraftKey }) =>
@@ -344,6 +344,8 @@ export const makeInputDrafts: Effect.Effect<
 					);
 				}),
 			),
+		invalidateList: () =>
+			PubSub.publish(draftChanges, undefined).pipe(Effect.asVoid),
 		listDrafts: () =>
 			Stream.unwrap(
 				Effect.gen(function* () {

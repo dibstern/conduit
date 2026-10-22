@@ -41,6 +41,8 @@ const LIGHT_STORY_IDS = new Set([
 	"session-sessionlist--select-mode",
 	// The drafts tray is a raised box whose border and fill differ per theme.
 	"session-sessionlist--drafts-tray-open",
+	"session-sessionlist--drafts-tray-collapsed",
+	"session-draftitem--one-line",
 	// Row tiers and hover actions expose status colours and action contrast.
 	"session-sessionitem--needs-approval",
 	"session-sessionitem--needs-reply",

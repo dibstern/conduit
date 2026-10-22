@@ -19,7 +19,6 @@ export const sessionPresentationHandlers: StepHandler[] = [
 				"session-skills-chip",
 				"side-threads-control",
 				"session-bar-settle",
-				"session-bar-title-menu",
 				"session-bar-unread-chip",
 				"session-bar-state-chip",
 				"session-goal-subtitle",
@@ -118,6 +117,35 @@ export const sessionPresentationHandlers: StepHandler[] = [
 				text,
 			});
 			await world.page.locator("#messages").getByText(text).waitFor();
+		},
+	},
+	{
+		// Stands in for live-turn rows that render a beat after the message that
+		// triggered the follow scroll, before the browser dispatches its scroll event.
+		name: "transcript grows after a message lands",
+		match: /^the transcript grows by ([0-9]+) pixels just after (.+) lands$/,
+		run: async ({ world, match }) => {
+			await world.page.evaluate(
+				([px, text]) => {
+					const list = document.querySelector("#messages");
+					if (!list) throw new Error("no #messages");
+					const observer = new MutationObserver(() => {
+						if (!list.textContent?.includes(text)) return;
+						observer.disconnect();
+						setTimeout(() => {
+							const pad = document.createElement("div");
+							pad.style.height = `${px}px`;
+							list.appendChild(pad);
+						}, 0);
+					});
+					observer.observe(list, {
+						childList: true,
+						subtree: true,
+						characterData: true,
+					});
+				},
+				[Number(match[1]), match[2] ?? ""] as const,
+			);
 		},
 	},
 	{
@@ -577,6 +605,17 @@ export const sessionPresentationHandlers: StepHandler[] = [
 			) {
 				throw new Error(`desktop overflow actions: ${JSON.stringify(actions)}`);
 			}
+			const resumeLabel = menu.getByText("Copy resume", { exact: true });
+			await expect(resumeLabel).toBeVisible();
+			await expect
+				.poll(() =>
+					resumeLabel.evaluate(
+						(label) =>
+							label.scrollWidth <= label.clientWidth &&
+							label.scrollHeight <= label.clientHeight,
+					),
+				)
+				.toBe(true);
 		},
 	},
 	{

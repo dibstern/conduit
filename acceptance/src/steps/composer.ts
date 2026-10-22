@@ -188,15 +188,19 @@ export const composerHandlers: StepHandler[] = [
 
 			// The composer hands the provider its own spelling of $goal.
 			const sent = message.replace(/^\$goal\b/, "/goal");
-			await rpcControl.waitForRequest(
+			const request = await rpcControl.waitForRequest(
 				(request) =>
 					request.tag === "input.submit" && request.payload["text"] === sent,
 			);
-			// Stand in for the adapter placing the sent message (the browser keeps
-			// no copy of its own), then finish the turn the send started, as the
+			// Stand in for the adapter placing the sent message, which replaces the
+			// browser's own copy, then finish the turn the send started, as the
 			// relay's done does.
 			await relayControl.sendMessages([
-				{ type: "user_message", text: sent },
+				{
+					type: "user_message",
+					text: sent,
+					inputId: request.payload["inputId"],
+				},
 				{ type: "done", code: 0 },
 			]);
 		},
@@ -233,7 +237,7 @@ export const composerHandlers: StepHandler[] = [
 		match: /^the subagent parent link is visible$/,
 		run: async ({ world }) => {
 			await world.page
-				.getByRole("button", { name: /PARENT/ })
+				.getByRole("button", { name: /Parent/ })
 				.waitFor({ state: "visible" });
 		},
 	},
@@ -361,7 +365,7 @@ export const composerHandlers: StepHandler[] = [
 				.poll(() =>
 					button.evaluate((element, tone) => {
 						const probe = document.createElement("span");
-						probe.style.color = `var(--color-${tone === "full" ? "error" : tone === "edits" || tone === "auto" ? "status-ask" : "text-secondary"})`;
+						probe.style.color = `var(--color-p-${tone})`;
 						document.body.append(probe);
 						const expected = getComputedStyle(probe).color;
 						probe.remove();

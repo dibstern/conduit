@@ -40,6 +40,8 @@ it.each([
 		vi.fn<typeof fetch>(async (input, init) => {
 			const request = new Request(input, init);
 			const path = new URL(request.url).pathname;
+			if (path === "/global/health" && request.method === "GET")
+				return Response.json({ healthy: true, version: "1.0.0" });
 			if (path === "/global/event") {
 				let ended = false;
 				const body = new ReadableStream<Uint8Array>({
@@ -66,6 +68,7 @@ it.each([
 					headers: { "content-type": "text/event-stream" },
 				});
 			}
+			if (path === "/global/health") return Response.json({ healthy: true });
 			if (path === "/path")
 				return Response.json({
 					state: "/",

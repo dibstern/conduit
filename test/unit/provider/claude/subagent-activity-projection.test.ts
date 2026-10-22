@@ -59,6 +59,7 @@ function makeCtx(): ClaudeSessionContext {
 		startedAt: "2026-08-12T00:00:00.000Z",
 		promptQueue: {
 			enqueue: () => Effect.void,
+			recall: () => Effect.succeed(false),
 			close: () => Effect.void,
 			async *[Symbol.asyncIterator]() {},
 		},

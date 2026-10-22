@@ -106,6 +106,7 @@
 		snoozedUntilText,
 		now = Date.now(),
 		pinned = false,
+		inPinnedGroup = false,
 		onswitchsession,
 		ontoggleselection,
 		oncontextmenu: oncontextmenuProp,
@@ -139,6 +140,7 @@
 		snoozedUntilText?: string | undefined;
 		now?: number;
 		pinned?: boolean;
+		inPinnedGroup?: boolean;
 		onswitchsession?: (id: string) => void;
 		ontoggleselection?: (id: string) => void;
 		oncontextmenu?: (session: SessionInfo, anchor: HTMLElement, trigger?: "touch") => void;
@@ -558,7 +560,7 @@
 	<!-- Title line -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<span
-		class="session-item-title col-start-2 row-start-1 flex items-center gap-1.5 overflow-hidden font-sans {titleClass}"
+		class="session-item-title col-start-2 row-start-1 flex items-center gap-1.5 overflow-hidden leading-[1.5] font-sans {titleClass}"
 		ondblclick={handleDblClick}
 	>
 		{#if isRenaming}
@@ -590,9 +592,9 @@
 			{/key}
 		{/if}
 		{#if session.archivedAt != null}
-			<Badge data-testid="session-archived-badge" class="leading-none">Archived</Badge>
+			<span data-testid="session-archived-badge" class="shrink-0 text-[10px] font-medium text-text-dimmer">Archived</span>
 		{/if}
-		{#if pinned}
+		{#if pinned && !inPinnedGroup}
 			<span class="shrink-0 text-status-pinned" title="Pinned session">
 				<Icon name="pin" size={11} />
 			</span>
@@ -602,7 +604,7 @@
 
 	{#if contextText}
 		<span
-			class="session-item-context col-start-2 col-span-2 row-start-2 flex items-center gap-[5px] text-[12.5px] md:text-[11.5px] leading-[17px] text-text-dimmer overflow-hidden whitespace-nowrap font-sans"
+			class="session-item-context col-start-2 col-span-2 row-start-2 flex items-center gap-[5px] text-[12.5px] md:text-[11.5px] leading-[1.5] text-text-dimmer overflow-hidden whitespace-nowrap font-sans"
 		>
 			{#if projectLabel}<ProjectMark accent={projectAccent} />{/if}
 			<span class="shrink-0">{projectLabel}</span>

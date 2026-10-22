@@ -23,17 +23,17 @@ import {
 	ConfigTag,
 	LoggerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
-import {
-	SessionEventBusLive,
-	SessionEventBusTag,
-} from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import {
 	SessionInboxLive,
 	SessionInboxTag,
 } from "../../../src/lib/domain/relay/Services/session-inbox.js";
 import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { inboxRunStatusQuery } from "../../../src/lib/persistence/inbox-run-status-query.js";
 import {
 	getOrchestrationLayer,
 	makeOrchestrationRuntimeLayer,
@@ -141,7 +141,7 @@ const flushDispatch = Effect.promise<void>(
 describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 	// Before the first echo, only the outbox admission keeps the inbox busy.
 	it.effect(
-		"keeps the replacement queued after the bound until the pre-echo send fails",
+		"plain Stop retires its cohort at the bound and releases a concurrent Run now",
 		() =>
 			Effect.gen(function* () {
 				const scratch = yield* scratchDirectory;
@@ -160,9 +160,6 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 					const sql = yield* SqlClient.SqlClient;
 					const inbox = yield* SessionInboxTag;
 					const turns = yield* ProviderTurnServiceTag;
-					const events = yield* (yield* SessionEventBusTag).subscribe({
-						sessionId: "session-1",
-					});
 					yield* inbox.start;
 					yield* inbox.submit({
 						clientId: "client-1",
@@ -173,6 +170,9 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 					});
 					yield* flushDispatch;
 					expect(api.session.prompt).toHaveBeenCalledOnce();
+					const [original] = yield* sql<{ run_id: string }>`SELECT run_id
+						FROM provider_command_outbox WHERE command_id = 'original'`;
+					expect(original?.run_id).toEqual(expect.any(String));
 					expect(yield* sql`SELECT id FROM turns`).toEqual([]);
 					expect(yield* sql`SELECT id FROM messages`).toEqual([]);
 					const stopped = yield* inbox.withSession(
@@ -190,6 +190,14 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 						delivery: "queue",
 						request: { text: "replacement" },
 					});
+					expect(
+						yield* inbox.sendNow({
+							clientId: "client-1",
+							sessionId: "session-1",
+							inputId: "replacement",
+							interrupt: true,
+						}),
+					).toBe("accepted");
 					yield* TestClock.adjust(STOP_ABORT_WAIT_MS - 1);
 					expect(api.session.abort).toHaveBeenCalledOnce();
 					expect(api.session.prompt).toHaveBeenCalledOnce();
@@ -201,30 +209,37 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 					yield* stopped;
 					yield* flushDispatch;
 					expect(turns.turnFences("session-1").stopping).toBe(false);
-					expect(api.session.prompt).toHaveBeenCalledOnce();
-					expect(
-						yield* sql`SELECT input_id FROM pending_inputs WHERE state = 'queued'`,
-					).toEqual([{ input_id: "replacement" }]);
 					expect(
 						yield* sql`SELECT status, error_code FROM provider_command_outbox
 						WHERE command_id = 'original'`,
-					).toEqual([{ status: "running", error_code: null }]);
+					).toEqual([{ status: "failed", error_code: "interrupted" }]);
 					expect(
 						yield* sql`SELECT status, error_code FROM command_receipts
 						WHERE command_id = 'original'`,
-					).toEqual([{ status: "side_effect_requested", error_code: null }]);
-					expect(yield* sql`SELECT id FROM messages`).toEqual([]);
+					).toEqual([
+						{ status: "side_effect_failed", error_code: "interrupted" },
+					]);
+					expect(
+						yield* sql`SELECT status, started_at FROM provider_runs WHERE id = ${original?.run_id}`,
+					).toEqual([{ status: "interrupted", started_at: null }]);
+					yield* sql`SELECT 1 FROM turns WHERE user_message_id = 'msg_conduit_original'`.pipe(
+						Effect.repeat({ until: (rows) => rows.length === 1 }),
+					);
+					expect(
+						yield* sql`SELECT state, run_id, started_at FROM turns WHERE user_message_id = 'msg_conduit_original'`,
+					).toEqual([
+						{
+							state: "interrupted",
+							run_id: original?.run_id,
+							started_at: null,
+						},
+					]);
+					// A late transport error cannot reopen the reservation retired by Stop.
 					expect(failOriginalSend).toBeDefined();
 					failOriginalSend?.(new Error("original send failed"));
-					yield* flushDispatch;
-					// Wait for the replacement's committed failure, across inbox dispatch.
-					yield* events.pipe(
-						Stream.filter(
-							(event) =>
-								event.type === "turn.error" &&
-								event.data.userMessageId === "replacement",
-						),
-						Stream.runHead,
+					yield* sql`SELECT 1 FROM provider_command_outbox WHERE command_id = 'replacement'
+						AND error_code = 'delivery_indeterminate'`.pipe(
+						Effect.repeat({ until: (rows) => rows.length === 1 }),
 					);
 					expect(api.session.prompt).toHaveBeenCalledTimes(2);
 					expect(api.session.prompt).toHaveBeenLastCalledWith(
@@ -232,11 +247,26 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 						expect.objectContaining({ text: "replacement" }),
 					);
 					expect(
-						yield* sql`SELECT input_id, text FROM messages
-						WHERE session_id = 'session-1' AND role = 'user' ORDER BY rowid`,
-					).toEqual([
-						{ input_id: "original", text: "original" },
-						{ input_id: "replacement", text: "replacement" },
+						yield* inbox.sendNow({
+							clientId: "client-1",
+							sessionId: "session-1",
+							inputId: "replacement",
+							interrupt: true,
+						}),
+					).toBe("already_started");
+					expect(api.session.prompt).toHaveBeenCalledTimes(2);
+					expect(
+						yield* sql`SELECT status, error_code FROM provider_command_outbox WHERE command_id = 'original'`,
+					).toEqual([{ status: "failed", error_code: "interrupted" }]);
+					vi.mocked(api.session.abort).mockResolvedValue(undefined);
+					const endReplacement = yield* turns.beginStop({
+						clientId: "client-1",
+						sessionId: "session-1",
+						commandId: "confirmed-stop-replacement",
+					});
+					yield* endReplacement;
+					expect(yield* inboxRunStatusQuery(sql, "session-1")).toEqual([
+						{ status: "interrupted", stopped: 1 },
 					]);
 					expect(
 						yield* sql`SELECT command_id, status FROM provider_command_outbox
@@ -245,13 +275,34 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 						{ command_id: "original", status: "failed" },
 						{ command_id: "replacement", status: "failed" },
 					]);
+					expect(
+						yield* sql`SELECT status, started_at FROM provider_runs ORDER BY rowid`,
+					).toEqual([
+						{ status: "interrupted", started_at: null },
+						{ status: "interrupted", started_at: null },
+					]);
+					expect(
+						yield* sql`SELECT command_id, status, error_code FROM command_receipts
+						WHERE command_id IN ('original', 'replacement') ORDER BY rowid`,
+					).toEqual([
+						{
+							command_id: "original",
+							status: "side_effect_failed",
+							error_code: "interrupted",
+						},
+						{
+							command_id: "replacement",
+							status: "side_effect_failed",
+							error_code: "interrupted",
+						},
+					]);
 				}).pipe(Effect.provide(stopLayer(api, scratch)));
 			}),
 	);
 
-	// A continuation can supersede retirement after the worker's last read.
+	// Work claimed after Stop must survive retirement of the captured cohort.
 	it.effect(
-		"succeeds when the real ingestion transaction rolls retirement back",
+		"retires only the snapshot when a continuation is claimed before ingestion",
 		() =>
 			Effect.gen(function* () {
 				const scratch = yield* scratchDirectory;
@@ -261,23 +312,59 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 					const sql = yield* SqlClient.SqlClient;
 					const turns = yield* ProviderTurnServiceTag;
 					const ingestion = yield* ProviderRuntimeIngestionTag;
-					yield* sql`INSERT INTO turns (id, session_id, state, user_message_id, requested_at)
-					VALUES ('turn-1', 'session-1', 'running', 'original', 1)`;
-					yield* sql`UPDATE sessions SET status = 'busy' WHERE id = 'session-1'`;
+					const persist = yield* ClaudeEventPersistEffectTag;
+					const ownedInput = (inputId: string) => [
+						canonicalEvent(
+							"run.requested",
+							"session-1",
+							{ inputId, runId: `${inputId}-run` },
+							{ metadata: { runId: `${inputId}-run` } },
+						),
+						canonicalEvent(
+							"message.created",
+							"session-1",
+							{
+								sessionId: "session-1",
+								messageId: inputId,
+								role: "user",
+								inputId,
+							},
+							{ metadata: { runId: `${inputId}-run` } },
+						),
+						canonicalEvent(
+							"run.started",
+							"session-1",
+							{
+								inputId,
+								requestedRunId: `${inputId}-run`,
+								userMessageId: inputId,
+							},
+							{ metadata: { runId: `${inputId}-run` } },
+						),
+						canonicalEvent(
+							"session.status",
+							"session-1",
+							{ sessionId: "session-1", status: "busy" },
+							{ metadata: { runId: `${inputId}-run` } },
+						),
+					];
+					yield* persist.persistEvents(ownedInput("original"));
 					yield* sql`INSERT INTO provider_command_outbox (
 					request_sequence, command_id, project_key, session_id, provider_id,
-					effect_type, payload_json, status, attempt_count, requested_at, updated_at
+					effect_type, payload_json, run_id, status, attempt_count, requested_at, updated_at
 				) VALUES (1, 'original', 'test-project', 'session-1', 'opencode',
-					'send_turn', '{"inputId":"original"}', 'running', 0, 1, 1)`;
+					'send_turn', '{"inputId":"original"}', 'original-run', 'running', 1, 1, 1)`;
 					const ingestBatch = ingestion.ingestBatch;
 					const retirement = vi
 						.spyOn(ingestion, "ingestBatch")
 						.mockImplementation((events, options) =>
-							sql`INSERT INTO provider_command_outbox (
+							persist.persistEvents(ownedInput("continuation")).pipe(
+								Effect.orDie,
+								Effect.andThen(sql`INSERT INTO provider_command_outbox (
 							request_sequence, command_id, project_key, session_id, provider_id,
-							effect_type, payload_json, status, attempt_count, requested_at, updated_at
+							effect_type, payload_json, run_id, status, attempt_count, requested_at, updated_at
 						) VALUES (2, 'continuation', 'test-project', 'session-1', 'opencode',
-							'send_turn', '{"inputId":"continuation"}', 'running', 0, 1, 1)`.pipe(
+							'send_turn', '{"inputId":"continuation"}', 'continuation-run', 'running', 1, 1, 1)`),
 								Effect.andThen(ingestBatch(events, options)),
 							),
 						);
@@ -295,19 +382,29 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 					});
 					expect(retirement).toHaveBeenCalledOnce();
 					expect(
-						yield* sql`SELECT state FROM turns WHERE id = 'turn-1'`,
-					).toEqual([{ state: "running" }]);
+						yield* sql`SELECT user_message_id, state FROM turns ORDER BY rowid`,
+					).toEqual([
+						{ user_message_id: "original", state: "interrupted" },
+						{ user_message_id: "continuation", state: "running" },
+					]);
 					expect(
-						yield* sql`SELECT type FROM events WHERE type = 'turn.interrupted'`,
-					).toEqual([]);
+						yield* sql`SELECT json_extract(metadata, '$.runId') AS run_id FROM events
+							WHERE type = 'turn.interrupted'`,
+					).toEqual([{ run_id: "original-run" }]);
 					expect(
 						yield* sql`SELECT status FROM sessions WHERE id = 'session-1'`,
 					).toEqual([{ status: "busy" }]);
 					expect(
 						yield* sql`SELECT command_id, status FROM provider_command_outbox ORDER BY request_sequence`,
 					).toEqual([
-						{ command_id: "original", status: "running" },
+						{ command_id: "original", status: "failed" },
 						{ command_id: "continuation", status: "running" },
+					]);
+					expect(
+						yield* sql`SELECT id, status FROM provider_runs ORDER BY rowid`,
+					).toEqual([
+						{ id: "original-run", status: "interrupted" },
+						{ id: "continuation-run", status: "running" },
 					]);
 					expect(turns.turnFences("session-1").stopping).toBe(false);
 				}).pipe(Effect.provide(stopLayer(api, scratch)));
