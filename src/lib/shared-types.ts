@@ -556,6 +556,8 @@ export interface ModelExecution {
  */
 export interface HistoryMessage {
 	id: string;
+	/** Canonical turns.id, including when the prompt is outside this page. */
+	turnId?: string;
 	role: "user" | "assistant";
 	/** True when reconstructed from provider REST history rather than observed live. */
 	isBackfilled?: boolean;

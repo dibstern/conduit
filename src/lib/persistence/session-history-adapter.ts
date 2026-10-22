@@ -110,6 +110,7 @@ function snapshotRowToHistory(
 		...parsed,
 		id: parsed.id,
 		role: parsed.role,
+		...(row.turn_id == null ? {} : { turnId: row.turn_id }),
 		parts,
 		...(row.context_tokens != null
 			? { contextTokens: row.context_tokens }
@@ -420,6 +421,7 @@ export function messageRowsToHistory(
 		return {
 			id: row.id,
 			role: row.role as "user" | "assistant",
+			...(row.turn_id == null ? {} : { turnId: row.turn_id }),
 			...(row.is_backfilled === 1 ? { isBackfilled: true } : {}),
 			...(row.input_id ? { inputId: row.input_id } : {}),
 			...(row.steered === 1 ? { steered: true } : {}),

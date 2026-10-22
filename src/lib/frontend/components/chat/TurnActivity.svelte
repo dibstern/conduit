@@ -157,7 +157,7 @@
 		return parts.slice(0, Math.max(0, index)).reverse().find((part): part is SurfacePart => part.type === "assistant" && !!part.rawText.trim()) ?? null;
 	}
 	async function explainAsk(pin: SurfacePin) {
-		if (!sessionId || !pin.part.partId || generatingAsk || askExplanations[pin.part.uuid]) return;
+		if (!sessionId || !storeTurnId || !pin.part.partId || generatingAsk || askExplanations[pin.part.uuid]) return;
 		const identity = askIdentity;
 		generatingAsk = pin.part.uuid;
 		askError = null;
@@ -171,7 +171,7 @@
 		}
 	}
 	/** The event store keys a turn by its user message id; turn.id is that row's transcript uuid. */
-	const storeTurnId = $derived(turn.user?.messageId ?? turn.id);
+	const storeTurnId = $derived(turn.storeId ?? turn.user?.messageId);
 	// jsdom has no matchMedia; real browsers always do.
 	const phone = typeof matchMedia === "function" ? new MediaQuery("(max-width: 599px)") : { current: false };
 	let summaryOpen = $state<boolean | null>(null);
@@ -180,7 +180,7 @@
 	let citedOrdinal = $state<number | null>(null);
 	const summarySettings = $derived(surfacingConfig.status.recap);
 	const summariesOn = $derived(surfacingConfig.status.summariesEnabled && summarySettings.model !== "off");
-	const summaryEnabled = $derived(summariesOn && final && !!sessionId);
+	const summaryEnabled = $derived(summariesOn && final && !!sessionId && !!storeTurnId);
 	const summaryLabel = $derived(recap.generating ? "✦ Summarizing…" : "✦ Summary");
 	$effect(() => {
 		const id = storeTurnId;
@@ -188,7 +188,7 @@
 		const active = summaryEnabled;
 		const watch = latestTurn;
 		// A turn can settle while its asynchronous automatic recap is still running.
-		if (active && session) return untrack(() => recap.connect(session, id, watch));
+		if (active && session && id) return untrack(() => recap.connect(session, id, watch));
 		return;
 	});
 	$effect(() => {
@@ -285,7 +285,7 @@
 		generateSummary(recap.retry?.scope ?? (recap.versions.length && summaryNew > 0 ? "new" : "whole"), recap.retry?.sourceVersion);
 	}
 	function generateSummary(scope: "whole" | "new", sourceVersion?: number) {
-		if (!sessionId || !summaryEnabled) return;
+		if (!sessionId || !storeTurnId || !summaryEnabled) return;
 		summaryOpen = true;
 		void recap.generate(sessionId, storeTurnId, scope, sourceVersion);
 	}

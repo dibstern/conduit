@@ -413,6 +413,7 @@ export const HistoryMessagePartSchema = Schema.Struct({
 
 export const HistoryMessageSchema = Schema.Struct({
 	id: Schema.String,
+	turnId: Schema.optionalKey(Schema.String),
 	role: Schema.Literals(["user", "assistant"]),
 	isBackfilled: Schema.optional(Schema.Boolean),
 	inputId: Schema.optional(Schema.String),
@@ -1108,7 +1109,7 @@ export type RpcLogLevel = typeof RpcLogLevelSchema.Type;
 
 export class WsRpcError extends Schema.TaggedError<WsRpcError>()("WsRpcError", {
 	message: Schema.String,
-	code: Schema.optional(Schema.Literal("unknown-session")),
+	code: Schema.optional(Schema.Literals(["unknown-session", "unknown-turn"])),
 }) {}
 
 export class DraftAlreadySent extends Schema.TaggedError<DraftAlreadySent>()(
