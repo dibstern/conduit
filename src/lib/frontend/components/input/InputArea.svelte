@@ -262,7 +262,6 @@
 	const composerProject = $derived(projectState.projects.find((project) => project.slug === composerProjectSlug));
 	const composerDirectory = $derived(composerProject ? effectiveWorkingDirectory(composerProject.folders[0], currentSession?.workspace) : undefined);
 	const composerGit = $derived(currentSession?.workspace ? currentSession.git : currentSession?.git ?? composerProject?.git);
-	const claudeAccounts = $derived(getClaudeAccounts(composerProjectSlug));
 	const accountId = $derived(composerAccountId(currentSession));
 	const composerInstance = $derived(getAvailableInstances().find((instance) => instance.id === accountId));
 	// Wait for accounts and session placement before showing settings. Catalog
@@ -274,6 +273,7 @@
 	);
 	const composerDriver = $derived(composerInstance?.driver);
 	const composerTraits = $derived(getDriverTraits(composerDriver));
+	const claudeAccounts = $derived(getClaudeAccounts(composerProjectSlug, composerTraits?.usageHarness === "codex" ? "codex" : "claude"));
 	const composerPresentation = $derived(getProviderPresentation(composerDriver));
 	const readOnlySubagent = $derived(
 		getProviderDriver(composerDriver)?.readOnlySubagents === true && !!sessionState.currentParentId &&
@@ -283,6 +283,7 @@
 	const composerNotice = $derived(composerNotices?.[approvals.current?.mode ?? "ask"]);
 	const supportsWorktree = $derived(composerInstance?.capabilities?.supportsWorktree ?? instanceState.providerCapabilities[composerDriver ?? ""]?.supportsWorktree);
 	const usageReading = $derived(claudeAccounts.readingOf(accountId));
+	const usageWindows = $derived(usageReading?.harness === "codex" ? usageReading.windows : usageReading ? planUsageWindows(usageReading) : []);
 	let sendMenuOpen = $state(false);
 	let switchingAccount = $state(false);
 	const hasOtherClaudeAccount = $derived(claudeAccounts.hasAlternative(accountId));
@@ -290,7 +291,7 @@
 	const switchTarget = $derived(sendAccounts[0]);
 	const sendsAt = $derived.by(() => {
 		if (usageReading?.status !== "limited") return undefined;
-		const resets = planUsageWindows(usageReading)
+		const resets = usageWindows
 			.filter((window) => window.utilization >= 100)
 			.map((window) => Date.parse(window.resetsAt ?? ""))
 			.filter((at) => at > clock.now);
@@ -300,7 +301,7 @@
 		if (sendsAt !== undefined) return usageState.limits.autoSwitch && switchTarget ? "switch" : "at-reset";
 		const warnAt = usageState.limits.warnAt;
 		return usageReading?.status === "available" && warnAt !== "off" &&
-			planUsageWindows(usageReading).some((window) => window.utilization >= warnAt && window.utilization < 100)
+			usageWindows.some((window) => window.utilization >= warnAt && window.utilization < 100)
 			? "warning" : "normal";
 	});
 	const sendAtTime = $derived(usageForecastTime(sendsAt, clock.now));
@@ -460,7 +461,7 @@
 			? `Send at ${sendAtTime}`
 			: sendMode === "switch" && switchTarget
 				? `Send on ${switchTarget.name}`
-			: permissionsState.pendingQuestions.some((question) => question.sessionId === sessionState.currentId)
+			: permissionsState.pendingQuestions.some((question) => question.sessionId === sessionState.currentId && question.delivery !== "async")
 				? "Reply"
 				: working
 					? "Queue message"
@@ -696,7 +697,8 @@
 		return sendMode === "switch" && switchTarget ? sendOnAccount(switchTarget.id, delivery) : sendMessage(undefined, delivery);
 	}
 
-	let creatingSession = false;
+	// One create per draft; another draft may start its own meanwhile.
+	const creatingDrafts = new Set<string | undefined>();
 	let startingSideThread = false;
 	// A retry of the same draft reuses its input id, so a reply lost to a
 	// dropped socket returns the Side Thread it made instead of a second one.
@@ -794,8 +796,9 @@
 
 		const sentFromSessionId = sessionState.currentId;
 		const projectSlug = sentFromSessionId ? findSession(sentFromSessionId)?.projectSlug ?? getCurrentSlug() : getDraftProject();
-		if (!sentFromSessionId && creatingSession) return false;
-		if (!sentFromSessionId) creatingSession = true;
+		const draftId = selection.scope?.draftId;
+		if (!sentFromSessionId && creatingDrafts.has(draftId)) return false;
+		if (!sentFromSessionId) creatingDrafts.add(draftId);
 		try {
 			let draft: Parameters<typeof rpc<"CreateSession">>[1] | undefined;
 			if (!sentFromSessionId) {
@@ -868,7 +871,7 @@
 			}
 			return true;
 		} finally {
-			if (!sentFromSessionId) creatingSession = false;
+			if (!sentFromSessionId) creatingDrafts.delete(draftId);
 		}
 	}
 
@@ -886,7 +889,17 @@
 		if (await sendMessage(`/goal ${facts.endedGoal.condition}`)) undoneClearKey = key;
 	}
 
+	// A send from idle starts a turn, and Stop then takes Send's slot, so a repeat tap on
+	// Send would land on Stop. Mid-turn, Stop is already showing and nothing moves.
+	// performance.now, not Date.now: acceptance pins Date.
+	let idleSendClickedAt = -Infinity;
+
+	function handleStopClick() {
+		if (sessionState.currentId && performance.now() - idleSendClickedAt >= 1500) void stop(sessionState.currentId);
+	}
+
 	function handleSendClick(e: MouseEvent) {
+		idleSendClickedAt = working ? -Infinity : performance.now();
 		sendComposer(steer && (e.metaKey || e.ctrlKey) ? "steer" : "queue");
 	}
 
@@ -1478,7 +1491,7 @@
 								<MenuItem density="compact" data-testid="composer-send-menu-account" data-account={option.id} disabled={!canSend || switchingAccount} class="rounded-[7px]" onselect={() => void sendOnAccount(option.id)}>
 									<AccountDot instanceId={option.id} size={7} />
 									<span class="flex-1">Send now on {option.name}</span>
-									<span class="font-mono text-[10.5px] text-text-dimmer">{option.fullest.kind === "five_hour" ? "5h" : "wk"} {Math.round(option.fullest.utilization)}%</span>
+									<span class="font-mono text-[10.5px] text-text-dimmer">{composerTraits?.usageHarness === "codex" ? option.fullest.label ?? "usage" : option.fullest.kind === "five_hour" ? "5h" : "wk"} {Math.round(option.fullest.utilization)}%</span>
 								</MenuItem>
 							{/each}
 							<div data-testid="composer-send-menu-note" class="mt-[3px] border-t border-border px-[6px] pt-[5px] pb-[3px] font-mono text-[10.5px] text-text-dimmer whitespace-normal">Another account takes over the session, as Switch account does.</div>
@@ -1499,7 +1512,7 @@
 					{/if}
 					{/if}
 					{#if working}
-						<Button variant="inverse" size="composer-action" id="stop" title={steerPending ? "Stop generating · A pending steer still runs" : "Stop generating"} ariaLabel="Stop generating" onclick={() => { if (sessionState.currentId) void stop(sessionState.currentId); }} touchTarget class="ml-[3px]">
+						<Button variant="inverse" size="composer-action" id="stop" title={steerPending ? "Stop generating · A pending steer still runs" : "Stop generating"} ariaLabel="Stop generating" onclick={handleStopClick} touchTarget class="ml-[3px]">
 							<i data-testid="stop-square" class="block size-[10px] rounded-[2px] bg-current"></i>
 						</Button>
 					{/if}

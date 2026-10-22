@@ -1,0 +1,68 @@
+{
+	"bead": "conduit-test-mebm",
+	"spec": "test/e2e/specs/step-log-toggle-perf.spec.ts",
+	"method": "Production vite build served by test/e2e/playwright-replay.config.ts, Chromium desktop 1440x900. Time from an in-page click on the step log toggle to the frame after the next paint (double requestAnimationFrame). 320 varied steps (7 tool kinds, thinking, interim text, errors) on a settled turn and on a live turn. The first show is measured once; then 7 hide/show runs. Milliseconds.",
+	"cause": "Hiding the log unmounted every row except the 3-row ticker, so every show remounted all 320 rows. The profile of a show at 1x: about 57 ms of JS in the Svelte flush (DOM creation, Button rest-props spread, lucide Icon svg), then about 29 ms of style, layout and paint. Collapsed rows render no detail or markdown, so that cost is absent.",
+	"fix": "TurnActivity keeps the full log mounted once it has been shown and hides it with the hidden attribute (display:none), so showing it again only restyles and lays out the rows.",
+	"target": "Show again under 160 ms median at 4x CPU throttle. The spec reports timings and asserts them only with STEP_LOG_PERF_ASSERT=1; it always asserts the regression itself, that a hide and show keeps the row elements and a row's open state. Under 100 ms at 4x is not reachable without content-visibility or virtualization; at 1x both before and after are already under 100 ms.",
+	"before": {
+		"cpuThrottle1x": {
+			"settled": {
+				"firstShow": 63,
+				"show": { "median": 48, "max": 52 },
+				"hide": { "median": 25, "max": 28 }
+			},
+			"live": {
+				"firstShow": 45,
+				"show": { "median": 49, "max": 54 },
+				"hide": { "median": 22, "max": 24 }
+			}
+		},
+		"cpuThrottle4x": {
+			"settled": {
+				"firstShow": 313,
+				"show": { "median": 238, "max": 288 },
+				"hide": { "median": 30, "max": 35 }
+			},
+			"live": {
+				"firstShow": 262,
+				"show": { "median": 246, "max": 270 },
+				"hide": { "median": 38, "max": 45 }
+			}
+		}
+	},
+	"after": {
+		"cpuThrottle1x": {
+			"settled": {
+				"firstShow": 66,
+				"show": { "median": 23, "max": 33 },
+				"hide": { "median": 24, "max": 26 }
+			},
+			"live": {
+				"firstShow": 50,
+				"show": { "median": 25, "max": 34 },
+				"hide": { "median": 22, "max": 28 }
+			}
+		},
+		"cpuThrottle4x": {
+			"settled": {
+				"firstShow": 340,
+				"show": { "median": 109, "max": 117 },
+				"hide": { "median": 22, "max": 29 }
+			},
+			"live": {
+				"firstShow": 273,
+				"show": { "median": 125, "max": 136 },
+				"hide": { "median": 30, "max": 31 }
+			}
+		}
+	},
+	"rejected": {
+		"contentVisibilityAuto": {
+			"note": "content-visibility:auto with contain-intrinsic-size:auto 30px on rows. On top of the fix at 4x: show 43 settled / 56 live, first show 232 / 192. Alone at 4x: show 186 / 178. Rejected because src/lib/frontend/style.css records its removal: Safari ignores contain-intrinsic-size:auto and the transcript snaps back while scrolling."
+		},
+		"transcriptHistory": {
+			"note": "40 earlier turns made no difference (show 47 ms vs 49 ms at 1x)."
+		}
+	}
+}

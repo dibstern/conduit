@@ -10,7 +10,11 @@ import {
 	Schema,
 } from "effect";
 import { SqlClient } from "effect/sql";
-import type { AccountRef, ClaudeAccount } from "../../../contracts/account.js";
+import type {
+	Account,
+	AccountRef,
+	ClaudeAccount,
+} from "../../../contracts/account.js";
 import {
 	AccountUnavailable,
 	type ContinuationError,
@@ -22,7 +26,6 @@ import {
 	SessionBusy,
 	StaleSwitch,
 } from "../../../contracts/limit-recovery.js";
-import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import { loadDaemonConfigResult } from "../../../daemon/config-persistence.js";
 import { preWarmSession } from "../../../handlers/session-prewarm.js";
 import {
@@ -41,6 +44,7 @@ import {
 } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
 import { makePrepareTurn } from "../../../provider/claude/prepare-turn.js";
+import { assertNever } from "../../../utils.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
 import { Usage } from "../../daemon/Services/usage.js";
@@ -100,6 +104,28 @@ const previewContinuationForAccount = (
 		);
 	});
 
+const continuationPlanner = (account: Account) => {
+	switch (account.driver) {
+		case "claude":
+			return (session: Parameters<typeof previewContinuationForAccount>[0]) =>
+				previewContinuationForAccount(session, account);
+		case "codex":
+			return (_session: Parameters<typeof previewContinuationForAccount>[0]) =>
+				Effect.succeed({
+					continuationKind: "native-thread" as const,
+					included: 0,
+					omitted: 0,
+					firstMessageIncluded: false,
+					tokens: 0,
+				} satisfies HandoffSummary);
+		case "opencode":
+		case "cursor":
+			return undefined;
+		default:
+			return assertNever(account);
+	}
+};
+
 /** The confirmation uses the same planner as delivery, without a live runner. */
 export const previewContinuation = (
 	sessionId: string,
@@ -120,13 +146,10 @@ export const previewContinuation = (
 			accountRef._tag === "Id" && session.provider === accountRef.id
 				? account
 				: yield* directory.resolve({ _tag: "Id", id: session.provider });
-		if (
-			!PROVIDER_DRIVERS[account.driver].supportsNativeResume ||
-			!PROVIDER_DRIVERS[source.driver].supportsNativeResume ||
-			!("folder" in account)
-		)
+		const planner = continuationPlanner(account);
+		if (!planner || source.driver !== account.driver)
 			return yield* new DriverMismatch({ sessionId, instanceId });
-		return yield* previewContinuationForAccount(session, account);
+		return yield* planner(session);
 	});
 
 export interface Continuation {
@@ -209,13 +232,17 @@ export const makeContinuation = Effect.gen(function* () {
 		recovery?.scheduledAt === expected.scheduledAt &&
 		recovery?.instanceId === expected.instanceId &&
 		recovery?.cutOffMessageId === expected.cutOffMessageId;
-	const cancelledEvent = (sessionId: string, releaseQueue = false) =>
+	const cancelledEvent = (
+		sessionId: string,
+		driver: string,
+		releaseQueue = false,
+	) =>
 		canonicalEvent(
 			"session.resume_cancelled",
 			sessionId,
 			{},
 			{
-				provider: "claude",
+				provider: driver,
 				...(releaseQueue ? { metadata: { source: "inbox-reset" } } : {}),
 			},
 		);
@@ -223,9 +250,12 @@ export const makeContinuation = Effect.gen(function* () {
 		commit.write((project) =>
 			Effect.gen(function* () {
 				const rows = yield* sql<{
+					driver: string;
 					limit_recovery: string | null;
-				}>`SELECT limit_recovery FROM sessions WHERE id = ${sessionId}`;
-				const value = rows[0]?.limit_recovery;
+				}>`SELECT limit_recovery, (SELECT provider FROM events WHERE session_id = ${sessionId} AND type = 'session.resume_scheduled' ORDER BY sequence DESC LIMIT 1) AS driver FROM sessions WHERE id = ${sessionId}`;
+				const session = rows[0];
+				if (!session) return;
+				const value = session.limit_recovery;
 				const recovery = value == null ? null : decodeRecovery(value);
 				if (
 					recovery?.scheduledAt === undefined ||
@@ -236,6 +266,7 @@ export const makeContinuation = Effect.gen(function* () {
 					yield* store.appendBatch([
 						cancelledEvent(
 							sessionId,
+							session.driver,
 							expected !== undefined && expected.cutOffMessageId === undefined,
 						),
 					]),
@@ -283,11 +314,8 @@ export const makeContinuation = Effect.gen(function* () {
 							_tag: "Id",
 							id: initialSession.provider,
 						});
-			if (
-				!PROVIDER_DRIVERS[account.driver].supportsNativeResume ||
-				!PROVIDER_DRIVERS[source.driver].supportsNativeResume ||
-				!("folder" in account)
-			)
+			const planner = continuationPlanner(account);
+			if (!planner || source.driver !== account.driver)
 				return yield* new DriverMismatch({
 					sessionId,
 					instanceId: options.instanceId,
@@ -380,16 +408,43 @@ export const makeContinuation = Effect.gen(function* () {
 								options.at === undefined
 									? yield* restore(
 											Effect.flatMap(Usage, (usage) =>
-												usage
-													.refresh([account.id])
-													.pipe(Effect.map((readings) => readings[0])),
+												usage.refresh([account.id]).pipe(
+													Effect.map((readings) => {
+														const reading = readings[0];
+														if (account.driver === "codex" && reading) {
+															const recovery = initial.limit_recovery
+																? decodeRecovery(initial.limit_recovery)
+																: undefined;
+															const limitId =
+																recovery?.rateLimitType ?? "codex";
+															const windows = reading.windows.filter(
+																(window) => window.limitId === limitId,
+															);
+															return {
+																...reading,
+																windows,
+																status:
+																	reading.status === "unknown" ||
+																	reading.status === "unavailable"
+																		? reading.status
+																		: windows.some(
+																					(window) => window.utilization >= 100,
+																				)
+																			? ("limited" as const)
+																			: ("available" as const),
+															};
+														}
+														return reading;
+													}),
+												),
 											),
 										)
 									: undefined;
 							const exhausted =
 								decision?.windows.filter(
 									(window) =>
-										(window.kind === "five_hour" ||
+										(account.driver === "codex" ||
+											window.kind === "five_hour" ||
 											window.kind === "seven_day") &&
 										window.utilization >= 100,
 								) ?? [];
@@ -430,13 +485,20 @@ export const makeContinuation = Effect.gen(function* () {
 										!due &&
 										decision &&
 										(decision.status === "limited" ||
-											decision.status === "unavailable")
+											decision.status === "unavailable" ||
+											(account.driver === "codex" &&
+												source.id !== account.id &&
+												decision.status === "unknown"))
 									)
 										return yield* new AccountUnavailable({
 											instanceId: account.id,
 											reason:
-												decision.status === "unavailable"
-													? (decision.reason ?? "Claude account is unavailable")
+												decision.status === "unavailable" ||
+												decision.status === "unknown"
+													? (decision.reason ??
+														(account.driver === "codex"
+															? "Codex sign-in could not be verified. Try again."
+															: "Claude account is unavailable"))
 													: `Account is still limited (${limit?.kind ?? "usage"}).`,
 										});
 									const recovery =
@@ -451,7 +513,9 @@ export const makeContinuation = Effect.gen(function* () {
 											!(yield* stillCutOff(sessionId, recovery))
 										) {
 											yield* project(
-												yield* store.appendBatch([cancelledEvent(sessionId)]),
+												yield* store.appendBatch([
+													cancelledEvent(sessionId, source.driver),
+												]),
 											);
 											return;
 										}
@@ -478,7 +542,7 @@ export const makeContinuation = Effect.gen(function* () {
 														at: options.at,
 													},
 													{
-														provider: "claude",
+														provider: source.driver,
 														...(policy && {
 															metadata: { source: "limit-policy" },
 														}),
@@ -506,17 +570,17 @@ export const makeContinuation = Effect.gen(function* () {
 															at: resetsAt ?? due.now + 300,
 														},
 														{
-															provider: "claude",
+															provider: source.driver,
 															metadata: { source: "continuation-sweep" },
 														},
 													)
-												: cancelledEvent(sessionId);
+												: cancelledEvent(sessionId, source.driver);
 										yield* project(yield* store.appendBatch([event]));
 										return;
 									}
 									if (switched) {
 										// Complete every refusal decision before any canonical write.
-										yield* previewContinuationForAccount(session, account);
+										yield* planner(session);
 										yield* applySessionCommand(
 											{
 												type: "session.provider_changed",
@@ -539,7 +603,7 @@ export const makeContinuation = Effect.gen(function* () {
 														reason: options.reason,
 														instanceId: session.provider,
 													},
-													{ provider: "claude" },
+													{ provider: source.driver },
 												),
 											]),
 										);
@@ -586,7 +650,7 @@ export const makeContinuation = Effect.gen(function* () {
 											instanceId: account.id,
 											from: continued.previousInstanceId,
 										},
-										{ provider: "claude" },
+										{ provider: source.driver },
 									),
 								]);
 							}
@@ -815,10 +879,13 @@ export const makeContinuation = Effect.gen(function* () {
 		commit.write((project) =>
 			Effect.gen(function* () {
 				const rows = yield* sql<{
+					driver: string;
 					cut_off: string | null;
 					scheduled_at: number | null;
-				}>`SELECT json_extract(limit_recovery, '$.cutOffMessageId') AS cut_off, json_extract(limit_recovery, '$.scheduledAt') AS scheduled_at FROM sessions WHERE id = ${sessionId}`;
-				const cutOffMessageId = rows[0]?.cut_off;
+				}>`SELECT (SELECT provider FROM events WHERE session_id = ${sessionId} AND type = 'session.resume_scheduled' ORDER BY sequence DESC LIMIT 1) AS driver, json_extract(limit_recovery, '$.cutOffMessageId') AS cut_off, json_extract(limit_recovery, '$.scheduledAt') AS scheduled_at FROM sessions WHERE id = ${sessionId}`;
+				const session = rows[0];
+				if (!session) return;
+				const cutOffMessageId = session.cut_off;
 				const events = [
 					...(cutOffMessageId == null
 						? []
@@ -830,7 +897,9 @@ export const makeContinuation = Effect.gen(function* () {
 									{ provider: "claude" },
 								),
 							]),
-					...(rows[0]?.scheduled_at == null ? [] : [cancelledEvent(sessionId)]),
+					...(session.scheduled_at == null
+						? []
+						: [cancelledEvent(sessionId, session.driver)]),
 				];
 				if (events.length === 0) return;
 				yield* project(yield* store.appendBatch(events));

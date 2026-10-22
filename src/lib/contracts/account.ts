@@ -46,10 +46,21 @@ export const CursorAccountSchema = Schema.Struct({
 });
 export type CursorAccount = typeof CursorAccountSchema.Type;
 
+export const CodexAccountSchema = Schema.Struct({
+	driver: Schema.Literal("codex"),
+	id: Schema.suspend(() => AccountIdSchema),
+	name: Schema.String,
+	configuredFolder: Schema.optional(Schema.String),
+	env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+	usageEligible: Schema.Boolean,
+});
+export type CodexAccount = typeof CodexAccountSchema.Type;
+
 export const AccountSchema = Schema.Union([
 	ClaudeAccountSchema,
 	OpenCodeAccountSchema,
 	CursorAccountSchema,
+	CodexAccountSchema,
 ]);
 export type Account = typeof AccountSchema.Type;
 export type AccountListItem = Account & { readonly isDefault: boolean };
@@ -80,6 +91,13 @@ const validPort = Schema.Number.pipe(
 
 /** Driver-specific add rules are decoded by the directory, inside its commit. */
 export const AccountAddInputSchema = Schema.Union([
+	Schema.Struct({
+		...addFields,
+		driver: Schema.Literal("codex"),
+		managed: Schema.optional(Schema.Literal(false)),
+		port: Schema.optional(Schema.Never),
+		url: Schema.optional(Schema.Never),
+	}),
 	Schema.Struct({
 		...addFields,
 		driver: Schema.Literal("cursor"),
@@ -170,7 +188,7 @@ export const AccountAddInputSchema = Schema.Union([
 export const AccountRefSchema = Schema.Union([
 	Schema.TaggedStruct("Id", { id: Schema.String }),
 	Schema.TaggedStruct("DriverDefault", {
-		driver: Schema.Literals(["claude", "opencode", "cursor"]),
+		driver: Schema.Literals(["claude", "opencode", "cursor", "codex"]),
 	}),
 ]);
 export type AccountRef = typeof AccountRefSchema.Type;

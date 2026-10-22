@@ -13,12 +13,14 @@
 		height,
 		island = false,
 		getGoalDetails,
+		generateGoalSummary,
 		banners,
 	}: {
 		width?: number | "full";
 		height?: number;
 		island?: boolean;
 		getGoalDetails?: (input: Parameters<typeof rpc<"GetGoalDetails">>[1]) => ReturnType<typeof rpc<"GetGoalDetails">>;
+		generateGoalSummary?: (input: Parameters<typeof rpc<"GenerateGoalSummary">>[1]) => ReturnType<typeof rpc<"GenerateGoalSummary">>;
 		banners?: BannerConfig[];
 	} = $props();
 </script>
@@ -26,10 +28,10 @@
 <div id={island ? "app" : undefined} class="max-w-full {island ? 'phone-session relative min-h-[180px] bg-bg' : ''}" style:width={width === "full" ? "100%" : `${width}px`} style:height={height ? `${height}px` : undefined} style:contain={height ? "layout" : undefined}>
 	{#if island}
 		<!-- Mirrors ChatLayout: the phone chrome stack overlays the chat area. -->
-		<div id="session-chrome"><SessionBar {getGoalDetails} /><Banners /></div>
+		<div id="session-chrome"><SessionBar {getGoalDetails} {generateGoalSummary} /><Banners /></div>
 		<div id="chat-area" class="island-transcript relative pt-16 pl-4 text-sm text-text-muted">Transcript</div>
 	{:else}
 		{#if banners}<Banners {banners} presentation="session-header" />{/if}
-		<SessionBar {getGoalDetails} />
+		<SessionBar {getGoalDetails} {generateGoalSummary} />
 	{/if}
 </div>

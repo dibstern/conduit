@@ -24,6 +24,7 @@ import {
 } from "../events.js";
 import { makeCommitAndSignal } from "./commit-and-signal.js";
 import { EventStoreEffectTag } from "./event-store-effect.js";
+import { heldCatchUpKey } from "./provider-state-effect.js";
 import { isSessionDeleted } from "./session-seeder-effect.js";
 
 export class ClaudeEventPersistEffectError extends Data.TaggedError(
@@ -55,6 +56,7 @@ export interface ClaudeEventPersistEffect {
 		sessionId: string,
 		handoff: SessionHandoffDeliveredPayload,
 		commandId: string,
+		provider?: string,
 	) => Effect.Effect<void, ClaudeEventPersistFailure>;
 
 	readonly persistEvent: (
@@ -404,7 +406,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 			.pipe(Effect.mapError(mapPersistError("persistEvent")));
 
 	const persistHandoffDelivered: ClaudeEventPersistEffect["persistHandoffDelivered"] =
-		(sessionId, handoff, commandId) =>
+		(sessionId, handoff, commandId, provider = "claude") =>
 			Effect.gen(function* () {
 				yield* requireSession(sessionId, "persistEvent", "existing-session");
 				const event = canonicalEvent(
@@ -412,9 +414,9 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 					sessionId,
 					handoff,
 					{
-						provider: "claude",
+						provider,
 						eventId: Schema.decodeSync(EventId)(
-							`evt_claude_handoff_delivered_${commandId}`,
+							`evt_${provider}_handoff_delivered_${commandId}`,
 						),
 					},
 				);
@@ -428,6 +430,9 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 							FROM events WHERE event_id = ${event.eventId} LIMIT 1`;
 						if (existing.length > 0) return;
 						yield* project(yield* eventStore.appendBatch([event]));
+						if (handoff.instanceId)
+							yield* sql`DELETE FROM provider_state WHERE session_id = ${sessionId}
+							AND key = ${heldCatchUpKey(handoff.instanceId)}`;
 					}),
 				);
 			}).pipe(Effect.mapError(mapPersistError("persistHandoffDelivered")));

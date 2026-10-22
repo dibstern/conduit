@@ -72,6 +72,7 @@ const all = readSegment(messages.map(([ordinal]) => ordinal));
 const unread = readSegment([]);
 const turn: Turn = {
 	id: "read-story-turn",
+	storeId: "read-story-turn",
 	user: {
 		type: "user",
 		uuid: "read-story-user",

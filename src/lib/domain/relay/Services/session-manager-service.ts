@@ -1328,7 +1328,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 								}),
 						),
 					);
-				return workspace.withLaunch(
+				return workspace.withProjectLaunch(
 					Option.isSome(retentionScheduler)
 						? Effect.provideService(
 								sweep,

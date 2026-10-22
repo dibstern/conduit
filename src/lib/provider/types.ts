@@ -53,12 +53,15 @@ export interface QuestionRequest {
 	readonly requestId: string;
 	readonly runId?: string;
 	readonly toolUseId?: string;
+	readonly delivery?: "async";
 	readonly questions: Array<{
 		question: string;
 		header: string;
 		options: Array<{ label: string; description: string }>;
 		multiSelect?: boolean;
 		custom?: boolean;
+		isOther?: boolean;
+		isSecret?: boolean;
 	}>;
 }
 
@@ -89,6 +92,11 @@ export interface EventSink {
 	resolveQuestion(
 		requestId: string,
 		answers: Record<string, unknown>,
+	): Effect.Effect<void, EventSinkError>;
+	/** Clear a provider-withdrawn request even when recovery restored no waiter. */
+	withdrawInteraction?(
+		requestId: string,
+		kind: "permission" | "question",
 	): Effect.Effect<void, EventSinkError>;
 	cancelSessionInteractions?(
 		reason: string,
@@ -131,6 +139,9 @@ export interface TurnTokens {
 
 export type TurnErrorCode =
 	| "auth_required"
+	| "usage_limited"
+	| "context_overflow"
+	| "codex_thread_missing"
 	| "agent_busy"
 	| "rate_limited"
 	| "model_unavailable"
@@ -138,6 +149,7 @@ export type TurnErrorCode =
 	| "sandbox_unavailable"
 	| "send_failed"
 	| "provider_error"
+	| "provider_unavailable"
 	| "interrupted"
 	| "timeout"
 	| "unknown";

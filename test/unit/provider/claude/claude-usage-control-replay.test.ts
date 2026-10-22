@@ -43,6 +43,8 @@ it.each([
 						},
 					]),
 					readers: {
+						codex: { read: () => Effect.die("Unexpected Codex usage read") },
+						cursor: { read: () => Effect.die("Unexpected Cursor usage read") },
 						claude: makeClaudeUsageReader({
 							queryFactory: ({ options }) => {
 								expect(options?.env?.["CLAUDE_CONFIG_DIR"]).toBe(

@@ -1,3 +1,4 @@
+import { resolveModelParameters } from "../components/model/model-parameters.js";
 import { PERMISSION_MODES } from "../permission-modes.js";
 import { toastFailure } from "../transport/rpc-errors.js";
 import { rpc } from "../transport/ws-rpc-client.js";
@@ -14,6 +15,7 @@ import {
 	discoveryState,
 	followSessionPickChange,
 	getActiveContextWindowOptions,
+	getActiveModel,
 	getActiveModelVariants,
 	getEffectiveInstanceId,
 	getProviderGroupsForInstance,
@@ -129,6 +131,23 @@ export const effort: ComposerSetting<string> = {
 		);
 	},
 	cycle() {
+		const parameters = resolveModelParameters(
+			getActiveModel()?.parameters,
+			effort.current,
+		);
+		const row = parameters.rows.find((row) => row.kind === "effort");
+		if (row) {
+			const options = row.options.filter((option) => !option.disabled);
+			const next =
+				options[
+					(options.findIndex((option) => option.value === row.value) + 1) %
+						options.length
+				];
+			const combination =
+				next && parameters.parameterCombination(row.id, next.value);
+			if (combination) effort.select(combination.variant);
+			return;
+		}
 		const options = effort.options;
 		const next =
 			options[(options.indexOf(effort.current ?? "") + 1) % options.length];

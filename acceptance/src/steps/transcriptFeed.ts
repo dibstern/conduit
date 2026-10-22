@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { detailRowsOf } from "../../../test/helpers/detail-rows.js";
 import type { StepHandler } from "../runtime.js";
 import {
@@ -13,6 +13,23 @@ const sendFrames = new WeakMap<Page, Frame[]>();
 const sentTexts = new WeakMap<Page, string>();
 
 export const transcriptFeedHandlers: StepHandler[] = [
+	{
+		name: "assert transcript has no horizontal overflow",
+		match: /^the transcript does not scroll sideways$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("system-error-notice")).toBeVisible();
+			const { scrollWidth, clientWidth } = await world.page
+				.locator("#messages")
+				.evaluate((element) => ({
+					scrollWidth: element.scrollWidth,
+					clientWidth: element.clientWidth,
+				}));
+			expect(
+				scrollWidth,
+				`Transcript scrollWidth ${scrollWidth} exceeds clientWidth ${clientWidth}`,
+			).toBeLessThanOrEqual(clientWidth + 1);
+		},
+	},
 	{
 		name: "set transcript feed behaviour",
 		match: /^the transcript feed will (synchronize|stall|hold|fail)$/,

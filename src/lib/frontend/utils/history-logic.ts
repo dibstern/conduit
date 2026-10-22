@@ -32,6 +32,7 @@ export interface HistoryConversionCache {
 		HistoryMessagePart,
 		{
 			messageId: string | undefined;
+			turnId: string | undefined;
 			createdAt: number | undefined;
 			settled: boolean;
 			isReply: boolean;
@@ -176,6 +177,7 @@ function convertAssistantParts(
 	completed = true,
 	messageOrder?: ChatMessage["messageOrder"],
 	cache?: HistoryConversionCache,
+	turnId?: string,
 ): ChatMessage[] {
 	const result: ChatMessage[] = [];
 	// One fork point per message, on the text the transcript shows as the reply.
@@ -188,6 +190,7 @@ function convertAssistantParts(
 		if (
 			cached &&
 			cached.messageId === messageId &&
+			cached.turnId === turnId &&
 			cached.createdAt === createdAt &&
 			cached.settled === settled &&
 			cached.isReply === isReply &&
@@ -370,11 +373,16 @@ function convertAssistantParts(
 		}
 		for (let i = first; i < result.length; i++) {
 			const item = result[i];
-			if (item && messageOrder !== undefined)
-				result[i] = { ...item, messageOrder };
+			if (item && (messageOrder !== undefined || turnId !== undefined))
+				result[i] = {
+					...item,
+					...(messageOrder === undefined ? {} : { messageOrder }),
+					...(turnId === undefined ? {} : { turnId }),
+				};
 		}
 		cache?.parts.set(part, {
 			messageId,
+			turnId,
 			createdAt,
 			settled,
 			isReply,
@@ -470,6 +478,7 @@ export function historyToChatMessages(
 						!uuidFor || msg.time?.completed !== undefined,
 						messageOrder,
 						cache,
+						msg.turnId,
 					),
 				);
 			}
@@ -526,10 +535,15 @@ export function historyToChatMessages(
 				} satisfies ResultMessage);
 			}
 		}
-		return messageOrder === undefined
-			? result
-			: result.map((part) =>
-					part.messageOrder === messageOrder ? part : { ...part, messageOrder },
-				);
+		return result.map((part) =>
+			(messageOrder === undefined || part.messageOrder === messageOrder) &&
+			part.turnId === msg.turnId
+				? part
+				: {
+						...part,
+						...(messageOrder === undefined ? {} : { messageOrder }),
+						turnId: msg.turnId,
+					},
+		);
 	});
 }

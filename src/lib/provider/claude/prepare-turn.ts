@@ -7,6 +7,7 @@ import {
 	LimitRecoverySchema,
 } from "../../contracts/limit-recovery.js";
 import {
+	heldCatchUpKey,
 	type NativeThread,
 	nativeThreadKey,
 	ProviderStateEffectTag,
@@ -71,6 +72,8 @@ export interface PreparedTurn {
 	readonly configDir: ClaudeConfigDir;
 	readonly prompt: string;
 	readonly handoff?: HandoffSummary;
+	/** A slash command skipped the catch-up it owed; hold it from this receipt. */
+	readonly heldCatchUpFrom?: number;
 	readonly nativeThread?: NativeThread;
 }
 
@@ -82,6 +85,7 @@ function planTurn(input: {
 	readonly nativeThread: NativeThread | undefined;
 	readonly hasAccountSwitch: boolean;
 	readonly hasWorkspaceMove: boolean;
+	readonly hasHeldCatchUp: boolean;
 	readonly deliveredAgent: string | undefined;
 	readonly limitRecovery: LimitRecovery | null;
 	readonly cutOffDismissed: boolean;
@@ -100,9 +104,13 @@ function planTurn(input: {
 		return new ContinuationNotReady({
 			message: "The cut-off request was dismissed.",
 		});
+	// The SDK runs a slash command only when it opens the prompt, and the rest of
+	// the text is its arguments, so nothing hidden may precede or follow it.
+	const isCommand =
+		!options.continuation && /^\/[A-Za-z0-9][\w:-]*(?![\w:/-])/.test(userText);
 	// A cut-off remains an open request until Dismiss or a real assistant reply.
 	const note =
-		input.limitRecovery?.cutOffMessageId && userText
+		input.limitRecovery?.cutOffMessageId && userText && !isCommand
 			? "[Conduit still-open note] The earlier request was cut off by a usage limit and is still open; some of its work may already be done.\n\n"
 			: "";
 	const live = options.nativeResumeFallback ? undefined : options.liveSession;
@@ -203,6 +211,7 @@ function planTurn(input: {
 		!!nativeThread &&
 		(input.hasAccountSwitch ||
 			input.hasWorkspaceMove ||
+			input.hasHeldCatchUp ||
 			nativeThread.configDir === undefined ||
 			!sameClaudeLogin(
 				{ configDir: nativeThread.configDir, root },
@@ -247,6 +256,11 @@ function planTurn(input: {
 						},
 					}
 				: {}),
+		};
+	if (isCommand)
+		return {
+			...prepared,
+			heldCatchUpFrom: catchingUp ? (nativeThread?.deliveredThrough ?? 0) : 0,
 		};
 	const window = options.modelContextWindow ?? 128000;
 	const cap = Math.max(1024, Math.min(64000, options.tokenCap ?? 16000));
@@ -350,9 +364,23 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 				const forkState = session?.forked_from
 					? yield* state.getState(sessionId)
 					: undefined;
-				const recordedThread = options.nativeResumeFallback
+				const [held] = yield* sql<{ value: string }>`SELECT value
+					FROM provider_state
+					WHERE session_id = ${sessionId} AND key = ${heldCatchUpKey(instanceId)}`;
+				const receipt = options.nativeResumeFallback
 					? undefined
 					: yield* state.nativeThread(sessionId, instanceId);
+				// A held catch-up still owes everything after the receipt it was held at.
+				const recordedThread =
+					receipt && held
+						? {
+								...receipt,
+								deliveredThrough: Math.min(
+									receipt.deliveredThrough,
+									Number(held.value),
+								),
+							}
+						: receipt;
 				const liveSession =
 					options.liveSession?.instanceId === instanceId
 						? options.liveSession
@@ -617,6 +645,7 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 					nativeThread,
 					hasAccountSwitch: accountSwitches.length > 0,
 					hasWorkspaceMove: workspaceMoves.length > 0,
+					hasHeldCatchUp: held !== undefined,
 					deliveredAgent: providerState[`claudeAgent:${instanceId}`],
 					limitRecovery:
 						session?.limit_recovery == null
@@ -717,9 +746,14 @@ export const sendPreparedClaudeTurn = <
 		);
 		const send = (prepared: PreparedTurn, fallback: boolean) =>
 			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				// The earliest hold wins; only a delivered catch-up releases it.
+				if (prepared.heldCatchUpFrom !== undefined)
+					yield* sql`INSERT INTO provider_state (session_id, key, value)
+					VALUES (${input.sessionId}, ${heldCatchUpKey(input.instanceId)}, ${String(prepared.heldCatchUpFrom)})
+					ON CONFLICT (session_id, key) DO NOTHING`;
 				// Intake returns before completion; retain the receipt facts for the owned run's end.
 				if (input.commandId && prepared.handoff) {
-					const sql = yield* SqlClient.SqlClient;
 					yield* sql`UPDATE provider_command_outbox
 					SET payload_json = json_set(payload_json, '$.handoff', json(${JSON.stringify({ ...prepared.handoff, instanceId: input.instanceId })}))
 					WHERE command_id = ${input.commandId} AND session_id = ${input.sessionId} AND status = 'running'`;

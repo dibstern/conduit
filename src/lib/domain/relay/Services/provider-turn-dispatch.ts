@@ -177,6 +177,7 @@ export const resolveSessionFolders = (
 		const savedWorkspace =
 			workspace._tag === "Some" && read._tag === "Some"
 				? yield* workspace.value.withLaunch(
+						session.id,
 						Effect.gen(function* () {
 							const row = yield* read.value.getSession(session.id);
 							if (!row)
@@ -200,7 +201,20 @@ export const resolveSessionFolders = (
 			{ id: session.id, workspace: state },
 			config,
 		);
-		if (missing) {
+		// A deleted branch can never be recreated, so a fresh turn continues in
+		// the main folder. The "missing" cause tells the UI the session moved.
+		if (
+			missing?.reason === "branch-missing" &&
+			fallbackMissingWorktree &&
+			workspace._tag === "Some" &&
+			existsSync(config.projectDir)
+		) {
+			workspaceRoot = yield* workspace.value.withLaunch(
+				session.id,
+				workspace.value.move(session.id, config.projectDir, "missing"),
+			);
+			state = null;
+		} else if (missing) {
 			const branch =
 				missing.folders?.find(({ reason }) => reason === "branch-missing")
 					?.branch ?? missing.branch;
@@ -253,10 +267,9 @@ export const resolveSessionFolders = (
 						},
 					),
 				);
-			workspaceRoot = yield* workspace.value.move(
+			workspaceRoot = yield* workspace.value.withLaunch(
 				session.id,
-				config.projectDir,
-				"missing",
+				workspace.value.move(session.id, config.projectDir, "missing"),
 			);
 			state = null;
 		}
@@ -379,6 +392,18 @@ const restoreFailedPlacement = (
 					input.commandId,
 				);
 				return false;
+			}
+			if (driver === "codex" && runId) {
+				const [failedRewind] = yield* sql`
+					SELECT 1 FROM provider_command_outbox o
+					JOIN provider_runs r ON r.id = o.run_id AND r.session_id = o.session_id
+					WHERE o.session_id = ${input.sessionId} AND o.run_id = ${runId}
+						AND o.effect_type = 'send_turn'
+						AND json_extract(o.payload_json, '$.inputId') = ${input.commandId}
+						AND json_type(o.payload_json, '$.rewind') = 'object'
+						AND r.status = 'error' AND r.started_at IS NULL LIMIT 1`;
+				// A failed native revert must leave its input unplaced.
+				if (failedRewind) return false;
 			}
 			const persist = yield* ClaudeEventPersistEffectTag;
 			yield* persist

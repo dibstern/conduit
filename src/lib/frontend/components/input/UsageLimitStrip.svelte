@@ -3,12 +3,13 @@
      actions: no close button, it leaves when the server nulls the field. Once a
      resume at reset is scheduled it turns amber and counts down to it. The
      actions sit at the right of the row, on a wrapped second row on phones.
-     With another Claude account to go to, Switch account leads both states. -->
+     With another account of the same provider, Switch account leads both states. -->
 <script lang="ts">
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import type { LimitRecovery } from "../../../contracts/limit-recovery.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
+	import { getDriverTraits, getInstanceById } from "../../stores/instance.svelte.js";
 	import { findSession } from "../../stores/session.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
@@ -28,13 +29,13 @@
 	}: { limitRecovery: LimitRecovery; sessionId: string; projectSlug: string; presentation?: "strip" | "tray" } = $props();
 
 	let busy = $state(false);
-	const claudeAccounts = $derived(getClaudeAccounts(projectSlug));
 	const accountId = $derived(findSession(sessionId)?.accountId ?? undefined);
+	const claudeAccounts = $derived(getClaudeAccounts(projectSlug, getDriverTraits(getInstanceById(accountId ?? "")?.driver)?.usageHarness === "codex" ? "codex" : "claude"));
 
 	const account = $derived(
 		accountId ? claudeAccounts.nameOf(accountId, accountId) : "Account unavailable",
 	);
-	// Switch account needs another Claude account to go to.
+	// Switch account needs another account of the same provider.
 	const canSwitch = $derived(
 		accountId !== undefined && claudeAccounts.hasAlternative(accountId),
 	);
@@ -85,7 +86,7 @@
 	async function continueAt(at?: number): Promise<void> {
 		const currentAccountId = accountId;
 		if (!currentAccountId) {
-			showToast("No account is available for this session. Add a Claude account in Settings before continuing.", { variant: "error" });
+			showToast("No account is available for this session. Add an account in Settings before continuing.", { variant: "error" });
 			return;
 		}
 		return run(

@@ -80,6 +80,7 @@ export const refreshSidebar = (
 				SELECT a.session_id, a.type, COUNT(*) AS pending_count
 				FROM pending_approvals a JOIN sessions s ON s.id = a.session_id
 				WHERE a.status = 'pending'
+				AND (a.type <> 'question' OR COALESCE(json_extract(a.details, '$.delivery'), '') <> 'async')
 				AND s.root_id IN (SELECT value FROM json_each(${roots}))
 				${projectIds === undefined ? sql.literal("") : sql`AND s.project_id IN ${sql.in(projectIds)}`}
 				GROUP BY a.session_id, a.type`,

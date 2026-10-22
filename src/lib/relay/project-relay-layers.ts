@@ -96,6 +96,7 @@ import {
 } from "../domain/relay/Services/daemon-session-query-service.js";
 import { DirectoryListingServiceLive } from "../domain/relay/Services/directory-listing-service.js";
 import { DraftPreWarmLive } from "../domain/relay/Services/draft-prewarm.js";
+import { makeGoalSummaryServiceLive } from "../domain/relay/Services/goal-summary-service.js";
 import { HandoffReceiptsLive } from "../domain/relay/Services/handoff-receipts.js";
 import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
 import {
@@ -107,7 +108,10 @@ import {
 	OpenCodeHistoryReconcileTag,
 	OpenCodeSessionCreationGateTag,
 } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
-import { PendingInteractionServiceLive } from "../domain/relay/Services/pending-interaction-service.js";
+import {
+	PendingInteractionServiceLive,
+	PendingInteractionServiceTag,
+} from "../domain/relay/Services/pending-interaction-service.js";
 import {
 	ProjectManagementServiceLive,
 	ProjectManagementServiceTag,
@@ -174,6 +178,7 @@ import { ClaudeProviderInstance } from "../provider/claude/claude-provider-insta
 import { captureClaudeLaunchLogin } from "../provider/claude/claude-sdk-env.js";
 import { defaultClaudeSessionForkSdk } from "../provider/claude/claude-session-fork.js";
 import { makeClaudeUsageReader } from "../provider/claude/claude-usage-probe.js";
+import { codexUsageReader } from "../provider/codex/codex-usage.js";
 import {
 	makeOrchestrationRuntimeLayer,
 	type OrchestrationRuntimeLayerOptions,
@@ -508,6 +513,7 @@ export function createProjectRelayLayers({
 									: undefined;
 							}),
 						readers: {
+							codex: codexUsageReader,
 							cursor: cursor.reader,
 							claude: makeClaudeUsageReader({
 								queryFactory: claudeSdk.query,
@@ -634,6 +640,7 @@ export function createProjectRelayLayers({
 			),
 		),
 	);
+	const pendingInteractionServiceLayer = PendingInteractionServiceLive;
 	const providerRuntimeIngestionLayer = Layer.unwrap(
 		Effect.gen(function* () {
 			const ledger = yield* AlertLedgerTag;
@@ -642,6 +649,7 @@ export function createProjectRelayLayers({
 			const log = yield* LoggerTag;
 			const workspace = yield* SessionWorkspaceTag;
 			return makeProviderRuntimeIngestionLive({
+				pendingInteractions: yield* PendingInteractionServiceTag,
 				usage: yield* Usage,
 				workspaceChanged: (event) =>
 					Effect.gen(function* () {
@@ -739,6 +747,7 @@ export function createProjectRelayLayers({
 				sessionWorkspaceLayer,
 				sessionEventBusLayer,
 				alertLedgerLayer,
+				pendingInteractionServiceLayer,
 				// The same reference makeRelayStateLive merges, so it memoizes to the
 				// one PubSub SubscribeAlerts reads.
 				AlertsLive,
@@ -764,8 +773,8 @@ export function createProjectRelayLayers({
 				Layer.sync(InstanceManagementServiceTag, () => service),
 		},
 	);
-	const pendingInteractionServiceLayer = PendingInteractionServiceLive;
 	const providerOrchestrationDeps = Layer.mergeAll(
+		usageLayer,
 		daemonConfigLayer,
 		sessionWorkspaceLayer,
 		openCodeApiLayer,
@@ -995,9 +1004,14 @@ export function createProjectRelayLayers({
 			),
 		),
 	);
-	const relayStateWithRecaps = makeRecapServiceLive({
-		queryFactory: config.titleQuery ?? claudeSdk.titleQuery,
-	}).pipe(
+	const relayStateWithRecaps = Layer.merge(
+		makeRecapServiceLive({
+			queryFactory: config.titleQuery ?? claudeSdk.titleQuery,
+		}),
+		makeGoalSummaryServiceLive({
+			queryFactory: config.titleQuery ?? claudeSdk.titleQuery,
+		}),
+	).pipe(
 		Layer.provideMerge(relayStateBridgesAndStatus),
 		Layer.provide(recapSettingsLayer),
 	);

@@ -149,6 +149,36 @@ test("bulk Pin changes two rows with one toast and Undo restores both", async ({
 	}
 });
 
+test("bulk Unread marks two rows, then the verb flips to Read", async ({
+	page,
+	relayUrl,
+	harness,
+}) => {
+	const rows = await rowsReady(page, relayUrl, harness.relayPort);
+	const ids = (
+		await rows.evaluateAll((elements) =>
+			elements.map((element) => element.getAttribute("data-session-id")),
+		)
+	).slice(-2) as string[];
+	await selectRows(page, ids);
+	const unread = page.getByTestId("select-bar-unread");
+	await expect(unread).toHaveAccessibleName("Mark 2 sessions unread");
+	await unread.click();
+	await expect(
+		page.getByRole("status").filter({ hasText: "Marked 2 sessions unread" }),
+	).toHaveCount(1);
+
+	await selectRows(page, ids);
+	await expect(unread).toHaveAccessibleName("Mark 2 sessions read");
+	await expect(unread).toContainText("Read");
+	await unread.click();
+	await expect(
+		page.getByRole("status").filter({ hasText: "Marked 2 sessions read" }),
+	).toHaveCount(1);
+	await selectRows(page, ids);
+	await expect(unread).toHaveAccessibleName("Mark 2 sessions unread");
+});
+
 test("two pinned rows show Unpin in select mode", async ({
 	page,
 	relayUrl,
@@ -337,7 +367,7 @@ test("phone header and long-press sheet enter select mode", async ({
 	await page.getByTestId("list-bar-select").click();
 	await expect(page.getByTestId("select-bar")).toBeVisible();
 	await expect(page.getByTestId("select-bar")).toBeInViewport();
-	for (const action of ["settle", "snooze", "pin", "delete"]) {
+	for (const action of ["settle", "snooze", "pin", "unread", "delete"]) {
 		await expect(page.getByTestId(`select-bar-${action}`)).toBeDisabled();
 		await expect(page.getByTestId(`select-bar-${action}`)).toHaveCSS(
 			"opacity",
@@ -354,7 +384,7 @@ test("phone header and long-press sheet enter select mode", async ({
 	}));
 	expect(geometry.overflows).toBe(false);
 	expect(geometry.pageOverflows).toBe(false);
-	expect(geometry.buttons).toHaveLength(4);
+	expect(geometry.buttons).toHaveLength(5);
 	expect(new Set(geometry.buttons.map((button) => button.top)).size).toBe(1);
 	for (const button of geometry.buttons)
 		expect(button.height).toBeGreaterThanOrEqual(44);
