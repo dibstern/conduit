@@ -1865,6 +1865,45 @@ describe("ReadQueryEffect.readSessionTranscriptPage", () => {
 				expect(first.hasMore).toBe(true);
 			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
+
+	it.effect(
+		"starts a steer's clock when it was sent, not when the turn it joined ends",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				yield* seedSession("s1");
+				const sql = yield* SqlClient.SqlClient;
+				// The steer joins the running turn, so both settle together.
+				yield* sql`
+					INSERT INTO turns (id, session_id, state, user_message_id, requested_at, completed_at)
+					VALUES
+					('first', 's1', 'completed', 'first', 1000, 9000),
+					('steer', 's1', 'completed', 'steer', 2000, 9000),
+					('queued', 's1', 'completed', 'queued', 3000, 12000)`;
+				yield* sql`
+					INSERT INTO messages
+					(id, session_id, role, text, created_at, updated_at, steered)
+					VALUES
+					('first', 's1', 'user', 'first', 1000, 1000, 0),
+					('steer', 's1', 'user', 'steer', 2000, 2000, 1),
+					('queued', 's1', 'user', 'queued', 3000, 3000, 0)`;
+				const readQuery = yield* makeReadQueryEffect;
+				const page = yield* readQuery.readSessionTranscriptPage("s1", {
+					limit: 10,
+				});
+				expect(
+					page.messages.map((message) => [
+						message.id,
+						message.turnTiming?.startedAt,
+					]),
+				).toEqual([
+					["first", 1000],
+					["steer", 2000],
+					// A queued prompt still waits for the turn ahead of it.
+					["queued", 9000],
+				]);
+			}).pipe(Effect.provide(testLayer, { local: true })),
+	);
 });
 
 // The session list reads (ni8.5 T-1)
