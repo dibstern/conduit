@@ -15,8 +15,9 @@
 //   saved record;
 // - a saved page that every open only catches up from is never replaced, so
 //   each open re-sends every change made since it was saved;
-// - a record from another build, or one that no longer decodes, is drawn, or
-//   its resume point is sent;
+// - a record that no longer decodes is drawn, or its resume point is sent;
+// - after a deploy, a record from the old build is not drawn, so every open
+//   is cold, or its resume point is honoured by the new build;
 // - a resume point minted by another store (reset, fresh install) or for
 //   another session is honoured, so the server sends deltas against rows it
 //   never had;
@@ -523,7 +524,7 @@ test("a session opened from its saved page ends where a cold open does", async (
 
 	// First open: cold, and its snapshot is saved once synchronized.
 	const tab = await openTab();
-	const first = await run(
+	await run(
 		"first-open",
 		visit(tab, SESSION, replyEnd("base", 1), {
 			settled: (saved) => saved[SESSION] !== undefined,
@@ -725,17 +726,37 @@ test("a session opened from its saved page ends where a cold open does", async (
 		expected: { advanced: true },
 	});
 
-	// A record from another build is dropped unread and replaced.
+	// A deploy: the server restarts on another build, and the record was
+	// written by the old one (an older record also carries its buildId). The
+	// saved page is still drawn at once; its point is sent and refused, and a
+	// snapshot replaces both the page and the record.
 	await edit(tab, SESSION, { buildId: "stale-build" });
+	const beforeDeploy = (await atOrigin(tab, (page) => records(page)))[SESSION]
+		?.resumePoint;
+	await harness.terminate();
+	await harness.restart({
+		keepPort: true,
+		skipBrowserProbe: true,
+		serviceEnvironment: { CONDUIT_SERVER_BUILD_ID: "next-build" },
+	});
 	await run(
-		"build-id-changed",
+		"build-changed",
 		visit(tab, SESSION, shown, {
+			drawnHeld: shown,
 			settled: (saved) =>
 				saved[SESSION] !== undefined &&
-				saved[SESSION].buildId === first.verdicts.record?.buildId,
+				saved[SESSION].resumePoint !== beforeDeploy,
 		}),
-		{ ...clean, ...cold, settled: true },
+		{
+			...clean,
+			resumePointSent: true,
+			detailSnapshots: 1,
+			drawnBeforeReply: drawnFirst,
+			settled: true,
+		},
 	);
+	await harness.terminate();
+	await restart();
 
 	// A record that no longer decodes is dropped and replaced.
 	await edit(tab, SESSION, { snapshot: { garbage: true } });
@@ -917,7 +938,7 @@ test("a session opened from its saved page ends where a cold open does", async (
 		...clean,
 		...resumed,
 	});
-	await edit(full, SESSION, { buildId: "stale-build" });
+	await edit(full, SESSION, { protocolVersion: -1 });
 	await run(
 		"quota-failed-save",
 		visit(full, SESSION, shown, {

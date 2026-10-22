@@ -605,7 +605,6 @@ describe("session selection at the browser RPC wire", () => {
 			schema: 1,
 			sessionId: "saved",
 			project: "A",
-			buildId: "test",
 			protocolVersion: 1,
 			openedAt: 1,
 			snapshot: { _tag: "snapshot", sequence: 1, rows: [], hasMore: false },
@@ -680,7 +679,6 @@ describe("session selection at the browser RPC wire", () => {
 			schema: 1,
 			sessionId: `foreign-saved-${project}`,
 			project: "A",
-			buildId: "test",
 			protocolVersion: 1,
 			openedAt: 1,
 			snapshot: {
