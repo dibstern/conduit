@@ -35,6 +35,7 @@ const LIGHT_STORY_IDS = new Set([
 	"file-sidebarfilepanel--expanded-directory",
 	// Populated and open-shelf lists expose grouping, borders, and nested surfaces.
 	"session-sessionlist--with-items",
+	"session-sessionlist--all-groups",
 	"session-sessionlist--pinned-and-settled-shelf-open",
 	"session-sessionlist--grouped-by-project",
 	// Select mode tints the header, rows, and action bar with the accent.

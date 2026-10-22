@@ -12,7 +12,7 @@
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { touch } from "../../utils/attention.js";
 	import { setSessionStatusFilter, type SessionStatusFilter } from "../../stores/session-scope.js";
-	import { setDraftsTrayOpen, setSettledShelfOpen, setSnoozedShelfOpen, uiState } from "../../stores/ui.svelte.js";
+	import { setDraftsTrayOpen, setSessionGroupOpen, setSettledShelfOpen, setSnoozedShelfOpen, uiState } from "../../stores/ui.svelte.js";
 	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
 	import { toggleSessionRead } from "../../utils/session-read.js";
 	import { openSnoozePicker } from "../../stores/snooze-picker.svelte.js";
@@ -36,7 +36,7 @@
 		type ProjectTreeNode,
 	} from "../../stores/project-tree.svelte.js";
 
-	let { arrangement, fullArrangement, settledCount, drafts = [], tree, reorderable, isEmpty, emptyMessage, statusFilter, searching, filteredLength, snoozedShelfOpen, settledShelfOpen, pagerPending, unavailableProjectLabels, selectMode, selectedSessionIds, menuOpenId, renamingSessionId, getProjectLabel, getProjectAccent, oncontextmenu, ontoggleselection, onrenamestart, onrenameend }: {
+	let { arrangement, fullArrangement, settledCount, drafts = [], tree, reorderable, isEmpty, emptyMessage, statusFilter, searching, filteredLength, groupsOpen, snoozedShelfOpen, settledShelfOpen, pagerPending, unavailableProjectLabels, selectMode, selectedSessionIds, menuOpenId, renamingSessionId, getProjectLabel, getProjectAccent, oncontextmenu, ontoggleselection, onrenamestart, onrenameend }: {
 		arrangement: SessionProjection;
 		fullArrangement: SessionProjection;
 		settledCount: { count: number; exact: boolean };
@@ -50,6 +50,7 @@
 		statusFilter: SessionStatusFilter | null;
 		searching: boolean;
 		filteredLength: number;
+		groupsOpen: typeof uiState.sessionGroupsOpen;
 		snoozedShelfOpen: boolean;
 		settledShelfOpen: boolean;
 		pagerPending: boolean;
@@ -95,6 +96,21 @@
 		if (session.id !== sessionState.currentId) selection.open(session.id);
 	}
 </script>
+
+	{#snippet groupHeader(group: "pinned" | "running" | "idle" | "settled" | "snoozed", label: string, count: number, open: boolean, ontoggle: () => void, exact = true)}
+		<TextButton
+			tone="dimmer"
+			class="session-group-label mt-[6px] flex w-full items-center gap-[6px] min-h-[30px] max-md:min-h-[44px] pointer-coarse:min-h-[44px] rounded-[8px] px-[8px] text-[12.5px] leading-[18px] font-medium font-sans"
+			data-testid="{group}-shelf-toggle"
+			aria-expanded={open}
+			aria-controls="{group}-shelf-rows"
+			onclick={() => { if (!searching) ontoggle(); }}
+		>
+			<Icon name={open ? "chevron-down" : "chevron-right"} size={12} />
+			<SessionStatusGlyph pinned={group === "pinned"} settled={group === "settled"} snoozed={group === "snoozed"} attention={group === "running" ? "working" : "idle"} animate={false} />
+			<span data-group-label>{label}</span>{" "}<span class="font-mono text-[11px] font-normal">{count}{exact ? "" : "+"}</span>
+		</TextButton>
+	{/snippet}
 
 	<!-- Scrollable session list content -->
 	<!-- The region scrolls and has no tabbable descendant, so it must be focusable or a
@@ -236,8 +252,12 @@
 			</div>
 		{/if}
 		{#if arrangement.pinned.length > 0}
-			<div class="session-group-label flex items-center gap-[6px] pt-[12px] pb-[4px] px-[10px] text-[12px] font-medium text-text-dimmer font-sans"><span>Pinned</span>{" "}<span class="font-mono text-[11px] font-normal">{fullArrangement.pinned.length}</span></div>
-			{#each arrangement.pinned as s (s.id)}{@render sessionRow(s, false, true)}{/each}
+			{@render groupHeader("pinned", "Pinned", fullArrangement.pinned.length, groupsOpen.pinned, () => setSessionGroupOpen("pinned", !uiState.sessionGroupsOpen.pinned))}
+			<div id="pinned-shelf-rows">
+				{#if groupsOpen.pinned}
+					{#each arrangement.pinned as s (s.id)}{@render sessionRow(s, false, true)}{/each}
+				{/if}
+			</div>
 		{/if}
 		{#if isEmpty && drafts.length === 0 && !sessionState.settled}
 			<!-- First load: session-shaped rows breathe in a top-to-bottom wave. -->
@@ -274,27 +294,26 @@
 				{#each tree as node (node.slug)}{@render projectHeader(node)}{@render projectRows(node)}{/each}
 			{:else}
 				{#each arrangement.sections as section (section.key)}
-					<div class="session-group-label flex items-center gap-[6px] pt-[12px] pb-[4px] px-[10px] text-[12px] font-medium text-text-dimmer font-sans">
-						<span>{section.label}</span>{" "}<span class="font-mono text-[11px] font-normal">{fullArrangement.sections.find((group) => group.key === section.key)?.sessions.length ?? section.sessions.length}</span>
-					</div>
-					{#each section.sessions as s (s.id)}
-						{@render sessionRow(s)}
-					{/each}
+					{#if section.key === "running" || section.key === "idle"}
+						{@const group = section.key}
+						{@render groupHeader(group, section.label, fullArrangement.sections.find((section) => section.key === group)?.sessions.length ?? section.sessions.length, groupsOpen[group], () => setSessionGroupOpen(group, !uiState.sessionGroupsOpen[group]))}
+						<div id="{group}-shelf-rows">
+							{#if groupsOpen[group]}
+								{#each section.sessions as s (s.id)}{@render sessionRow(s)}{/each}
+							{/if}
+						</div>
+					{:else}
+						<div class="session-group-label flex items-center gap-[6px] pt-[12px] pb-[4px] px-[10px] text-[12px] font-medium text-text-dimmer font-sans">
+							<span>{section.label}</span>{" "}<span class="font-mono text-[11px] font-normal">{fullArrangement.sections.find((group) => group.key === section.key)?.sessions.length ?? section.sessions.length}</span>
+						</div>
+						{#each section.sessions as s (s.id)}
+							{@render sessionRow(s)}
+						{/each}
+					{/if}
 				{/each}
 			{/if}
 			{#if settledCount.count > 0}
-				<TextButton
-					tone="dimmer"
-					class="session-group-label mt-[6px] flex w-full items-center gap-[6px] min-h-[44px] md:min-h-[30px] rounded-[8px] px-[8px] text-[12.5px] font-medium font-sans"
-					data-testid="settled-shelf-toggle"
-					aria-expanded={settledShelfOpen}
-					aria-controls="settled-shelf-rows"
-					onclick={() => { if (searching) return; settledExpanded = false; setSettledShelfOpen(!uiState.settledShelfOpen); }}
-				>
-					<Icon name={settledShelfOpen ? "chevron-down" : "chevron-right"} size={12} />
-					<SessionStatusGlyph settled />
-					<span>Settled</span>{" "}<span class="font-mono text-[11px] font-normal">{settledCount.count}{settledCount.exact ? "" : "+"}</span>
-				</TextButton>
+				{@render groupHeader("settled", "Settled", settledCount.count, settledShelfOpen, () => { settledExpanded = false; setSettledShelfOpen(!uiState.settledShelfOpen); }, settledCount.exact)}
 				<div id="settled-shelf-rows">
 					{#if settledShelfOpen}
 						{#each searching || selectMode || settledExpanded ? arrangement.settled : arrangement.settled.slice(0, 2) as s (s.id)}
@@ -307,18 +326,7 @@
 				</div>
 			{/if}
 			{#if arrangement.snoozed.length > 0}
-				<TextButton
-					tone="dimmer"
-					class="session-group-label mt-[6px] flex w-full items-center gap-[6px] min-h-[44px] md:min-h-[30px] rounded-[8px] px-[8px] text-[12.5px] font-medium font-sans"
-					data-testid="snoozed-shelf-toggle"
-					aria-expanded={snoozedShelfOpen}
-					aria-controls="snoozed-shelf-rows"
-					onclick={() => { if (searching) return; snoozedExpanded = false; setSnoozedShelfOpen(!uiState.snoozedShelfOpen); }}
-				>
-					<Icon name={snoozedShelfOpen ? "chevron-down" : "chevron-right"} size={12} />
-					<SessionStatusGlyph snoozed />
-					<span>Snoozed</span>{" "}<span class="font-mono text-[11px] font-normal">{fullArrangement.snoozed.length}</span>
-				</TextButton>
+				{@render groupHeader("snoozed", "Snoozed", fullArrangement.snoozed.length, snoozedShelfOpen, () => { snoozedExpanded = false; setSnoozedShelfOpen(!uiState.snoozedShelfOpen); })}
 				<div id="snoozed-shelf-rows">
 					{#if snoozedShelfOpen}
 						{#each searching || selectMode || snoozedExpanded ? arrangement.snoozed : arrangement.snoozed.slice(0, 2) as s (s.id)}

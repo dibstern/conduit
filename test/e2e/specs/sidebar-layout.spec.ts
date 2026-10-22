@@ -400,11 +400,13 @@ test.describe("Sidebar Layout — Desktop", () => {
 			if (await toggle.count()) await toggle.click();
 		}
 		const headings = page.locator(
-			"#session-list-scroller > div.session-group-label",
+			"#session-list-scroller > .session-group-label",
 		);
 		expect(await headings.count()).toBeGreaterThan(0);
 		for (const heading of await headings.all()) {
-			const label = (await heading.locator("span").first().innerText()).trim();
+			const label = (
+				await heading.locator("[data-group-label]").innerText()
+			).trim();
 			expect(label).not.toBe(label.toUpperCase());
 			const renderedRows = await heading.evaluate((element) => {
 				let count = 0;
