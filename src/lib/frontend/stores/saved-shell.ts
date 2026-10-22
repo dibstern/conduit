@@ -1,7 +1,7 @@
 // Display-only sidebar rows. Storage failures and incompatible records cost a
-// cold sidebar; these rows are never a shell subscription's resume base.
+// cold sidebar; these rows are never a shell subscription's resume base, so a
+// record from an older build is still drawn until the live rows replace it.
 import { Option, Schema } from "effect";
-import { BUILD_ID } from "../../build-id.js";
 import { SessionInfoSchema } from "../../contracts/ws-rpc.js";
 import { WS_PROTOCOL_VERSION } from "../../shared-types.js";
 import type { SessionInfo } from "../types.js";
@@ -14,7 +14,6 @@ const READ_WAIT_MS = 150;
 const SavedShell = Schema.Struct({
 	schema: Schema.Literal(1),
 	project: Schema.String,
-	buildId: Schema.String,
 	protocolVersion: Schema.Number,
 	savedAt: Schema.Number,
 	rows: Schema.Array(SessionInfoSchema),
@@ -26,7 +25,6 @@ const decode = (stored: unknown): SavedShell | undefined =>
 		Option.filter(
 			Schema.decodeUnknownOption(SavedShell)(stored),
 			(record) =>
-				record.buildId === BUILD_ID &&
 				record.protocolVersion === WS_PROTOCOL_VERSION &&
 				record.rows.every((row) => row.projectSlug === record.project),
 		),
@@ -118,7 +116,6 @@ export const saveShell = (
 		const record = Schema.encodeSync(SavedShell)({
 			schema: 1,
 			project,
-			buildId: BUILD_ID,
 			protocolVersion: WS_PROTOCOL_VERSION,
 			savedAt,
 			rows: rows.filter((row) => row.projectSlug === project),

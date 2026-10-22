@@ -34,6 +34,30 @@ export const Running: Story = {
 	args: { message: mockToolRunning },
 };
 
+export const RunningCodexBash: Story = {
+	args: {
+		message: {
+			type: "tool",
+			uuid: "codex-command",
+			id: "codex-command",
+			name: "Bash",
+			status: "running",
+			input: { tool: "Bash", command: "printf 'first line\\nsecond line\\n'" },
+			metadata: { output: "first line\nsecond line\n" },
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("button"));
+		await expect(canvasElement.querySelector(".tool-result")).toHaveTextContent(
+			"printf",
+		);
+		await expect(canvasElement.querySelector(".tool-result")).toHaveTextContent(
+			/first line\s+second line/,
+		);
+	},
+};
+
 export const ErrorState: Story = {
 	args: { message: mockToolError },
 };

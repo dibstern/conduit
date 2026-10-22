@@ -129,6 +129,7 @@ describe("Bound project provenance", () => {
 			"0076_events_forked_from_index",
 			"0077_message_parts_result_event_seq_index",
 			"0078_provider_run_ownership",
+			"0079_sessions_goal_stuck",
 		]);
 	});
 

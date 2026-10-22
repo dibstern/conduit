@@ -12,6 +12,7 @@ import type { ProjectSettingsTag } from "../domain/relay/Services/project-settin
 import { makeEventSinkFactory } from "../domain/relay/Services/provider-turn-dispatch.js";
 import { RelayStatusSnapshotTag } from "../domain/relay/Services/relay-status-snapshot.js";
 import { resolveOrphanedClaudePermissions } from "../domain/relay/Services/resolve-orphaned-claude-permissions.js";
+import { restoreAsyncQuestionsFromStore } from "../domain/relay/Services/restore-async-questions.js";
 import { restoreClaudeQuestionsFromStore } from "../domain/relay/Services/restore-claude-questions.js";
 import {
 	type ConfigTag,
@@ -137,6 +138,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 		}
 		// Recover pending state before initialization advances projector cursors.
 		yield* restoreClaudeQuestionsFromStore;
+		yield* restoreAsyncQuestionsFromStore;
 		const orchestration = yield* getOrchestrationLayer;
 		for (const providerId of orchestration.registry.listProviders()) {
 			const instance =
@@ -285,6 +287,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 		const readOpenCodeStatuses = (instanceId: string, sessionId: string) =>
 			Effect.gen(function* () {
 				const { directory, hasWorkspace } = yield* workspace.withLaunch(
+					sessionId,
 					Effect.gen(function* () {
 						// A reset clears the workspace row but remains an explicit move.
 						const [row] = yield* sql<{ has_workspace: number }>`

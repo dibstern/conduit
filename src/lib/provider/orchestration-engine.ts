@@ -591,6 +591,7 @@ export class OrchestrationEngine {
 		| CommandPayloadSerializationFailed
 	> {
 		const driver = command.input.account?.driver ?? command.providerId;
+		const traits = getProviderDriver(driver);
 		// The rewind range and request sequence share ingestion's write boundary:
 		// a backfill accepted before this write must be removed by this commit.
 		const commit = Effect.gen(function* () {
@@ -610,7 +611,9 @@ export class OrchestrationEngine {
 				try: () =>
 					JSON.stringify({
 						...payload,
-						...(getProviderDriver(driver)?.supportsNativeResume && pendingRewind
+						...((traits?.supportsNativeResume ||
+							traits?.revertsConversationNatively) &&
+						pendingRewind
 							? { rewind: pendingRewind.rewind }
 							: {}),
 						dispatchId,
@@ -630,7 +633,13 @@ export class OrchestrationEngine {
 					nowMs,
 					requestSequence,
 					payloadJson,
-					events: [...(pendingRewind?.events ?? []), ...(command.events ?? [])],
+					// A native revert confirms the removal itself, after it succeeds.
+					events: [
+						...(traits?.revertsConversationNatively
+							? []
+							: (pendingRewind?.events ?? [])),
+						...(command.events ?? []),
+					],
 				}),
 			);
 		});

@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { DEFAULT_USAGE_LIMITS } from "../../../contracts/limit-recovery.js";
+import type { CodexAuthState } from "../../../contracts/ws-rpc.js";
 import {
 	composerPreferences,
 	setComposerPreferences,
@@ -1148,6 +1149,98 @@ export const ClaudeAccountExpanded: Story = {
 		await expect(accountBox.bottom).toBeLessThanOrEqual(viewport.bottom);
 	},
 };
+
+function codexSignIn(login: CodexAuthState["login"]): Story {
+	return {
+		args: { initialTab: "server" },
+		beforeEach: () => {
+			populateInstances();
+			applyInstanceListResponse({
+				instances: [
+					...getCachedInstances(),
+					{
+						id: "work-codex",
+						name: "Work Codex",
+						driver: "codex",
+						port: 0,
+						managed: false,
+						status: "healthy",
+						restartCount: 0,
+						createdAt: 1_772_011_860_000,
+					},
+				],
+			});
+			return replyRpc(
+				"GetCodexAuth",
+				() =>
+					({
+						accountId: "work-codex",
+						source: "none",
+						status: "logged-out",
+						login,
+					}) satisfies CodexAuthState,
+			);
+		},
+		play: async ({ canvasElement }) => {
+			const canvas = within(canvasElement);
+			const account = within(canvas.getByTestId("instance-row-work-codex"));
+			await userEvent.click(
+				account.getByRole("button", { name: /Work Codex/ }),
+			);
+			await expect(account.getByTestId("codex-auth-status")).toHaveTextContent(
+				"Not signed in",
+			);
+			if (login.state === "pending") {
+				await expect(account.getByTestId("codex-login-link")).toHaveAttribute(
+					"href",
+					login.verificationUrl ?? login.url,
+				);
+				await expect(account.getByTestId("codex-login-cancel")).toBeVisible();
+				if (login.userCode) {
+					await expect(
+						account.getByTestId("codex-login-code"),
+					).toHaveTextContent(login.userCode);
+					await expect(
+						account.getByTestId("codex-login-copy-code"),
+					).toBeVisible();
+				}
+			} else if (login.state === "error") {
+				await expect(
+					account.getByTestId("codex-login-result"),
+				).toHaveTextContent(login.error ?? "");
+			} else {
+				await expect(account.getByTestId("codex-login-browser")).toBeVisible();
+				await expect(
+					account.getByTestId("codex-login-device-code"),
+				).toBeVisible();
+			}
+			await scrollSettingsIntoView(
+				account.getByTestId("codex-auth-account"),
+				"center",
+			);
+		},
+	};
+}
+
+export const CodexSignInIdle: Story = codexSignIn({ state: "idle" });
+export const CodexSignInBrowserPending: Story = codexSignIn({
+	state: "pending",
+	method: "browser",
+	url: "https://auth.openai.com/authorize?state=storybook",
+	deadlineAtMs: 1_772_012_460_000,
+});
+export const CodexSignInDeviceCodePending: Story = codexSignIn({
+	state: "pending",
+	method: "device-code",
+	verificationUrl: "https://auth.openai.com/codex/device",
+	userCode: "ABCD-EFGH",
+	deadlineAtMs: 1_772_012_460_000,
+});
+export const CodexSignInError: Story = codexSignIn({
+	state: "error",
+	method: "device-code",
+	error: "Could not complete sign-in. Start again to get a new code.",
+});
 
 export const DefaultClaudeAccountEdit: Story = {
 	args: { initialTab: "server" },

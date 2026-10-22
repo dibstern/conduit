@@ -389,6 +389,7 @@ const CanonicalToolInputSchema = Schema.Union([
 	}),
 	Schema.Struct({
 		tool: Schema.Literal("AskUserQuestion"),
+		delivery: Schema.optionalKey(Schema.Literal("async")),
 		questions: Schema.Unknown.pipe(
 			Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
 		),
@@ -432,6 +433,9 @@ export const PermissionAskedDetailsSchema = Schema.Struct({
 export const QuestionAskedDetailsSchema = Schema.Struct({
 	toolUseId: optionalString,
 	providerId: optionalString,
+	delivery: Schema.optionalKey(Schema.Literal("async")),
+	messageId: optionalString,
+	partId: optionalString,
 });
 
 // The snapshot decoder deliberately validates only identity, role and part
@@ -635,6 +639,9 @@ export const CanonicalEvents = {
 	"turn.completed": live(
 		Schema.Struct({
 			messageId: Schema.String,
+			continuationKind: Schema.optionalKey(
+				Schema.Literals(["native-thread", "transcript-digest"]),
+			),
 			providerStateUpdates: Schema.optionalKey(
 				Schema.Array(
 					Schema.Struct({ key: Schema.String, value: Schema.String }),
@@ -950,6 +957,9 @@ export const CanonicalEvents = {
 	),
 	"session.handoff_delivered": live(
 		Schema.Struct({
+			continuationKind: Schema.optional(
+				Schema.Literals(["native-thread", "transcript-digest"]),
+			),
 			included: Schema.Number.check(
 				Schema.isInt(),
 				Schema.isGreaterThanOrEqualTo(0),

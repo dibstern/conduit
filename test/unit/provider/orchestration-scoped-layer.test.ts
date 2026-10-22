@@ -70,7 +70,8 @@ describe("orchestration scoped layer", () => {
 						Layer.succeed(OpenCodeAPITag)(openCodeApi),
 						Layer.succeed(SessionWorkspaceTag)({
 							get: () => Effect.die("Unexpected workspace lookup"),
-							withLaunch: (effect) => effect,
+							withLaunch: (_sessionId, effect) => effect,
+							withProjectLaunch: (effect) => effect,
 							preview: () => Effect.die("Unexpected workspace preview"),
 							renameBranch: () => Effect.die("Unexpected workspace rename"),
 							move: () => Effect.die("Unexpected workspace move"),
@@ -101,6 +102,7 @@ describe("orchestration scoped layer", () => {
 		}
 
 		expect(opencodeShutdown).toHaveBeenCalledTimes(1);
-		expect(runnerShutdown).toHaveBeenCalledTimes(2);
+		// Claude, Cursor and Codex each register a runner-backed instance.
+		expect(runnerShutdown).toHaveBeenCalledTimes(3);
 	});
 });

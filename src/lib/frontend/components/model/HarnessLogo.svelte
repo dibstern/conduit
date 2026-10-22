@@ -22,19 +22,20 @@
 	const projectSlug = $derived(
 		session ? session.projectSlug : getDraftProject() ?? "",
 	);
-	const accounts = $derived(getClaudeAccounts(projectSlug));
 	const instances = $derived(getAvailableInstances());
 	const traits = $derived(getDriverTraits(driver));
+	const accounts = $derived(getClaudeAccounts(projectSlug, traits?.usageHarness === "codex" ? "codex" : "claude"));
+	const canSwitchAccounts = $derived(traits?.usageHarness === "claude" || traits?.usageHarness === "codex");
 	const presentation = $derived(getProviderPresentation(driver));
 	const badged = $derived(
-		instanceId !== undefined && (traits?.usageHarness === "claude" ? accounts.accounts.length >= 2 : instances.filter((instance) => instance.driver === driver).length >= 2),
+		instanceId !== undefined && (canSwitchAccounts ? accounts.accounts.length >= 2 : instances.filter((instance) => instance.driver === driver).length >= 2),
 	);
 	const letter = $derived(accounts.nameOf(
 		instanceId,
 		traits?.accountKind === "config-directory" ? presentation?.label ?? driver : instances.find((instance) => instance.id === instanceId)?.label ?? driver,
 	).charAt(0).toUpperCase());
 	const spinning = $derived(
-		traits?.usageHarness === "claude" && accounts.switchingTo !== null &&
+		canSwitchAccounts && accounts.switchingTo !== null &&
 		accounts.handoff.kind !== "idle" && accounts.handoff.sessionId === sessionState.currentId &&
 		(instanceId === accounts.switchingTo || instanceId === composerAccountId(session)),
 	);

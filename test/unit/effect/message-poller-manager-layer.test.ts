@@ -75,7 +75,8 @@ async function buildLayerHarness(options?: {
 		Layer.succeed(SessionWorkspaceTag)(
 			partialFake<SessionWorkspaceTag["Service"]>({
 				get: workspaceGet,
-				withLaunch: (effect) => effect,
+				withLaunch: (_sessionId, effect) => effect,
+				withProjectLaunch: (effect) => effect,
 			}),
 		),
 		Layer.succeed(ReadQueryEffectTag)(

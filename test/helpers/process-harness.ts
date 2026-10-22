@@ -65,7 +65,10 @@ import type {
 	ProviderAgentInfo,
 } from "../../src/lib/provider/types.js";
 import type { RelaySettings } from "../../src/lib/relay/relay-settings.js";
-import type { PtyInfo } from "../../src/lib/shared-types.js";
+import type {
+	PtyInfo,
+	SessionPermissionMode,
+} from "../../src/lib/shared-types.js";
 import { stopPtyHost } from "../../src/lib/terminal/pty-host-client.js";
 import { isRecord } from "../../src/lib/utils.js";
 import type { ClaudeTraceName } from "../e2e/helpers/claude-trace-replayer.js";
@@ -239,13 +242,13 @@ export class ProcessHarness {
 			/** Pause result delivery until the test writes claude-replay-release. */
 			readonly holdBeforeResult?: boolean;
 			/** Enable relay diagnostics when a replay checks warning logs. */
-			readonly logLevel?: "warn";
+			readonly logLevel?: "warn" | "info";
 		},
 		private readonly claudeCaptureDir?: string,
 		realOpenCode?: string,
 		capabilityAgents?: readonly ProviderAgentInfo[],
 		private continuationSweepIntervalMs?: number,
-		private readonly logLevel?: "warn",
+		private readonly logLevel?: "warn" | "info",
 		relaySettings?: RelaySettings,
 		private readonly respawnOnExit = false,
 		managedOpenCodeId = "managed-test",
@@ -555,7 +558,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			restartProof?: boolean;
 			continuationSweepIntervalMs?: number;
 			/** Enable warning diagnostics for provider lifecycle regressions. */
-			logLevel?: "warn";
+			logLevel?: "warn" | "info";
 			/** Stand in for a login service: respawn exited daemons on the same port. */
 			respawnOnExit?: boolean;
 			holdRunnerAck?: boolean | "place-user-message";
@@ -669,6 +672,17 @@ Object.assign(ClaudeDriver, { create: deps => {
 					| "CONDUIT_TRACE_SESSION"
 					| "CONDUIT_CURSOR_SDK_TRACE"
 					| "CONDUIT_CURSOR_SDK_CAPTURE"
+					| "CONDUIT_CODEX_APP_SERVER_TRACE"
+					| "CONDUIT_TEST_CODEX_TRACE_MAP"
+					| "CONDUIT_TEST_CODEX_TRANSPORTS"
+					| "OPENAI_API_KEY"
+					| "CODEX_API_KEY"
+					| "CODEX_ACCESS_TOKEN"
+					| "CONDUIT_TEST_CODEX_USAGE_TRACE"
+					| "CONDUIT_CODEX_APP_SERVER_TRACE_GATE"
+					| "CONDUIT_CODEX_APP_SERVER_CAPTURE"
+					| "CONDUIT_CODEX_APP_SERVER_TRACE_REPORT"
+					| "CONDUIT_CODEX_BINARY"
 					| "CONDUIT_TEST_CURSOR_CLOSE_DELAY_MS"
 					| "CONDUIT_TEST_CURSOR_DISPOSE_DELAY_MS"
 					| "CONDUIT_TEST_CURSOR_AUTH_STATE"
@@ -2499,7 +2513,7 @@ export class ProcessBrowser {
 			modelId?: string;
 			variant?: string;
 			contextWindow?: string;
-			permissionMode?: "ask" | "full";
+			permissionMode?: SessionPermissionMode;
 			worktreePath?: string;
 		} = {},
 	): Promise<string> {
@@ -2554,12 +2568,13 @@ export class ProcessBrowser {
 		};
 	}
 
-	async createPty(): Promise<PtyInfo> {
+	async createPty(accountId?: string): Promise<PtyInfo> {
 		const cursor = this.frames.length;
 		await this.run(
 			this.rpc.CreatePty({
 				projectSlug: this.projectSlug,
 				originId: this.originId,
+				...(accountId ? { accountId } : {}),
 			}),
 		);
 		const message = await this.waitFor(

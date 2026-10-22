@@ -11,7 +11,7 @@ const ALWAYS_SKIP = new Set([".git", ".svn", ".hg"]);
 const MAX_DEPTH = 10;
 const MAX_ENTRIES = 5_000;
 const FILE_TREE_FOLDER_TIMEOUT_MS = 5_000;
-const FILE_TREE_TIMEOUT_MS = 15_000;
+export const FILE_TREE_TIMEOUT_MS = 15_000;
 
 /** Load .gitignore rules via Effect. */
 const loadGitignore = (directory?: string, startIfStopped = true) =>
@@ -72,55 +72,63 @@ export const getFileContentResponse = (filePath: string, directory?: string) =>
 		};
 	});
 
-export const getFileTreeEntries = (directory?: string) =>
+export const getFileTreeEntries = (
+	directory?: string,
+	requestStartedAt?: number,
+) =>
 	Effect.gen(function* () {
 		const files = yield* OpenCodeFileServiceTag;
 		const log = yield* LoggerTag;
 
 		const entries: string[] = [];
-		const startedAt = yield* Clock.currentTimeMillis;
+		const now = yield* Clock.currentTimeMillis;
+		const startedAt = requestStartedAt ?? now;
+		const remainingMs = FILE_TREE_TIMEOUT_MS - (now - startedAt);
 		let currentPath = ".gitignore";
 
 		const walkResult = yield* Effect.result(
-			Effect.gen(function* () {
-				const ig = yield* loadGitignore(directory, false);
-				const queue: Array<{ dir: string; depth: number }> = [
-					{ dir: ".", depth: 0 },
-				];
+			remainingMs <= 0
+				? Effect.succeed(Option.none())
+				: Effect.gen(function* () {
+						const ig = yield* loadGitignore(directory, false);
+						const queue: Array<{ dir: string; depth: number }> = [
+							{ dir: ".", depth: 0 },
+						];
 
-				while (queue.length > 0 && entries.length < MAX_ENTRIES) {
-					const next = queue.shift();
-					if (next === undefined) break;
-					const { dir, depth } = next;
-					currentPath = dir;
-					const folderStartedAt = yield* Clock.currentTimeMillis;
-					const items = yield* files
-						.list(dir, directory, { startIfStopped: false })
-						.pipe(Effect.timeoutOption(FILE_TREE_FOLDER_TIMEOUT_MS));
-					if (Option.isNone(items)) {
-						const elapsed = (yield* Clock.currentTimeMillis) - folderStartedAt;
-						log.warn(
-							`File tree folder timed out: ${JSON.stringify(dir)} after ${elapsed} ms`,
-						);
-						continue;
-					}
-
-					for (const item of items.value) {
-						if (ALWAYS_SKIP.has(item.name)) continue;
-						const path = dir === "." ? item.name : `${dir}/${item.name}`;
-						if (isIgnored(ig, path, item.type)) continue;
-
-						if (item.type === "directory") {
-							entries.push(`${path}/`);
-							if (depth < MAX_DEPTH) {
-								queue.push({ dir: path, depth: depth + 1 });
+						while (queue.length > 0 && entries.length < MAX_ENTRIES) {
+							const next = queue.shift();
+							if (next === undefined) break;
+							const { dir, depth } = next;
+							currentPath = dir;
+							const folderStartedAt = yield* Clock.currentTimeMillis;
+							const items = yield* files
+								.list(dir, directory, { startIfStopped: false })
+								.pipe(Effect.timeoutOption(FILE_TREE_FOLDER_TIMEOUT_MS));
+							if (Option.isNone(items)) {
+								const elapsed =
+									(yield* Clock.currentTimeMillis) - folderStartedAt;
+								log.warn(
+									`File tree folder timed out: ${JSON.stringify(dir)} after ${elapsed} ms`,
+								);
+								continue;
 							}
-						} else {
-							entries.push(path);
+
+							for (const item of items.value) {
+								if (ALWAYS_SKIP.has(item.name)) continue;
+								const path = dir === "." ? item.name : `${dir}/${item.name}`;
+								if (isIgnored(ig, path, item.type)) continue;
+
+								if (item.type === "directory") {
+									entries.push(`${path}/`);
+									if (depth < MAX_DEPTH) {
+										queue.push({ dir: path, depth: depth + 1 });
+									}
+								} else {
+									entries.push(path);
+								}
+							}
 						}
-					}
-				}
-			}).pipe(Effect.timeoutOption(FILE_TREE_TIMEOUT_MS)),
+					}).pipe(Effect.timeoutOption(remainingMs)),
 		);
 
 		const elapsed = (yield* Clock.currentTimeMillis) - startedAt;

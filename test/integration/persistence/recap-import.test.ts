@@ -12,9 +12,12 @@ import {
 	sourceChecksums,
 } from "../../helpers/daemon-store-import-manifest.js";
 
-// Failure modes: the pre-merge redesign ledger is refused, cached recaps
+// Failure modes: a pre-merge redesign or goal ledger is refused, cached recaps
 // disappear, or their per-turn versions are treated as the read-model clock.
-it("imports pre-merge redesign recaps without changing their versions or source store", async () => {
+it.each([
+	"redesign",
+	"goal",
+] as const)("imports pre-merge %s recaps without changing their versions or source store", async (lineage) => {
 	const root = mkdtempSync(join(tmpdir(), "conduit-recap-import-"));
 	try {
 		const configDir = join(root, "daemon");
@@ -39,14 +42,19 @@ it("imports pre-merge redesign recaps without changing their versions or source 
 					`Cached version ${version} [#1]`,
 				);
 			expected = db.prepare("SELECT * FROM turn_recaps ORDER BY version").all();
-			// rd/mainmerge predates durable drafts and numbers this suffix one lower.
-			// Its ledger ends at turn_recaps; later main migrations never ran there.
+			// Recreate the deployed suffix without assigning later migrations old IDs.
+			if (lineage === "redesign") {
+				db.exec(`ALTER TABLE sessions DROP COLUMN goal_stuck;
+					DELETE FROM effect_sql_migrations WHERE name = 'sessions_goal_stuck'`);
+			}
+			const shift = lineage === "redesign" ? 1 : 6;
 			db.exec(`DROP TABLE input_drafts;
 				CREATE TEMP TABLE redesign_migrations AS
-				SELECT migration_id - 1 AS migration_id, name, created_at
+				SELECT CASE WHEN name = 'sessions_goal_stuck' THEN 69 ELSE migration_id - ${shift} END AS migration_id, name, created_at
 				FROM effect_sql_migrations WHERE migration_id > 68
-				AND migration_id <= (SELECT migration_id FROM effect_sql_migrations WHERE name = 'turn_recaps');
-				DELETE FROM effect_sql_migrations WHERE migration_id >= 68;
+				AND (migration_id <= (SELECT migration_id FROM effect_sql_migrations WHERE name = 'turn_recaps')
+					OR (name = 'sessions_goal_stuck' AND '${lineage}' = 'goal'));
+				DELETE FROM effect_sql_migrations WHERE migration_id >= ${69 - shift};
 				INSERT INTO effect_sql_migrations (migration_id, name, created_at)
 				SELECT migration_id, name, created_at FROM redesign_migrations;
 				DROP TABLE redesign_migrations`);
@@ -74,8 +82,14 @@ it("imports pre-merge redesign recaps without changing their versions or source 
 			);
 			mkdirSync("test-results/recap", { recursive: true });
 			writeFileSync(
-				"test-results/recap/import.json",
-				JSON.stringify({ results, recaps, sourceUnchanged: true }, null, 2),
+				lineage === "redesign"
+					? "test-results/recap/import.json"
+					: "test-results/recap/import-goal.json",
+				JSON.stringify(
+					{ lineage, results, recaps, sourceUnchanged: true },
+					null,
+					2,
+				),
 			);
 		} finally {
 			imported.close();

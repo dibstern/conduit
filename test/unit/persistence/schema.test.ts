@@ -42,6 +42,7 @@ describe("Schema Migration", () => {
 					[76, "events_forked_from_index"],
 					[77, "message_parts_result_event_seq_index"],
 					[78, "provider_run_ownership"],
+					[79, "sessions_goal_stuck"],
 				]);
 				for (const [filter, count] of [
 					["", 2],
@@ -104,6 +105,7 @@ describe("Schema Migration", () => {
 					[76, "events_forked_from_index"],
 					[77, "message_parts_result_event_seq_index"],
 					[78, "provider_run_ownership"],
+					[79, "sessions_goal_stuck"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`

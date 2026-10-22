@@ -304,6 +304,17 @@ export const SessionGitSchema = Schema.Struct({
 	folders: Schema.optionalKey(Schema.Array(SessionFolderGitSchema)),
 });
 
+/** A run of consecutive goal checks that report the same blocker, found by code without a model call. */
+export const GoalStuckSchema = Schema.Struct({
+	/** Time of the first check in the run. */
+	since: Schema.Number,
+	/** Time of the latest check in the run. */
+	lastAt: Schema.Number,
+	/** Checks in the run, including the first. */
+	count: Schema.Int.check(Schema.isGreaterThanOrEqualTo(2)),
+});
+export type GoalStuck = typeof GoalStuckSchema.Type;
+
 /** One wire shape for projected sessions and daemon-wide lists. */
 export const SessionInfoSchema = Schema.Struct({
 	id: Schema.String,
@@ -321,6 +332,8 @@ export const SessionInfoSchema = Schema.Struct({
 	messageCount: Schema.optional(Schema.Number),
 	processing: Schema.optional(Schema.Boolean),
 	goalState: Schema.optional(SessionGoalChangedPayloadSchema),
+	/** The current goal's stuck run, derived by code from its checks; absent when the latest checks are not repeating one blocker, and for met or cleared goals. */
+	goalStuck: Schema.optional(GoalStuckSchema),
 	limitRecovery: Schema.optional(Schema.NullOr(LimitRecoverySchema)),
 	resumes: Schema.optional(Schema.Array(SessionResumeSchema)),
 	/** The approval mode this session was last switched to; absent until one is. */
@@ -444,6 +457,8 @@ export interface AskUserQuestion {
 	options: { label: string; description?: string }[];
 	multiSelect: boolean;
 	custom?: boolean;
+	isOther?: boolean;
+	isSecret?: boolean;
 }
 
 export interface UsageInfo {
@@ -618,6 +633,8 @@ const AskUserQuestionSchema = Schema.Struct({
 	),
 	multiSelect: Schema.Boolean,
 	custom: Schema.optional(Schema.Boolean),
+	isOther: Schema.optional(Schema.Boolean),
+	isSecret: Schema.optional(Schema.Boolean),
 });
 
 const UsageInfoSchema = Schema.Struct({
@@ -693,6 +710,7 @@ export const QuestionApprovalSchema = Schema.TaggedStruct("question", {
 	questions: Schema.Array(AskUserQuestionSchema),
 	toolUseId: Schema.optional(Schema.String),
 	providerId: Schema.optional(Schema.String),
+	delivery: Schema.optional(Schema.Literal("async")),
 });
 
 export const ApprovalSchema = Schema.Union([
@@ -842,7 +860,7 @@ export interface OpenCodeInstance {
 	cursorUsageSource?: "token" | "keychain" | "can_enable" | "unsupported";
 	available?: boolean;
 	unavailableReason?: string;
-	unavailableCode?: "auth_required";
+	unavailableCode?: "auth_required" | "codex_version_unsupported";
 	id: string;
 	name: string;
 	port: number;

@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Option, Ref, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Option, Ref, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
@@ -60,6 +60,61 @@ const snapshotRow = (snapshot: Option.Option<Envelope<SessionInfo>>) => {
 };
 
 describe("Session Rows read paths", () => {
+	for (const scope of ["project", "projects"] as const) {
+		it.effect(
+			`keeps the companion count and ${scope} page consistent across a queued write`,
+			() =>
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const readQuery = yield* ReadQueryEffectTag;
+					yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, settled_at, created_at, updated_at)
+						VALUES ('settled', 'project', 'opencode', 'Settled', 'idle', 100, 1, 1)`;
+					const project = { slug: "project", folders: ["/tmp"] as const };
+					const rows = yield* makeSessionRows(
+						scope === "project" ? project : { projects: () => [project] },
+					);
+					const counted = yield* Deferred.make<void>();
+					const writing = yield* Deferred.make<void>();
+					// Fork outside the listing so the writer cannot inherit its transaction.
+					const writer = yield* Effect.forkChild(
+						Effect.gen(function* () {
+							yield* Deferred.await(counted);
+							yield* Deferred.succeed(writing, undefined);
+							yield* sql`UPDATE sessions SET settled_at = NULL WHERE id = 'settled'`;
+						}),
+					);
+					const result = yield* rows.listWith(
+						undefined,
+						readQuery.countSettledSessions({ projectIds: ["project"] }).pipe(
+							Effect.tap(() =>
+								Effect.gen(function* () {
+									yield* Deferred.succeed(counted, undefined);
+									yield* Deferred.await(writing);
+									yield* Effect.yieldNow;
+								}),
+							),
+						),
+					);
+					expect(result.companion).toBe(1);
+					expect(result.sessions).toMatchObject([
+						{ id: "settled", projectSlug: "project", settledAt: 100 },
+					]);
+					yield* Fiber.join(writer);
+					expect(
+						yield* readQuery.countSettledSessions({ projectIds: ["project"] }),
+					).toBe(0);
+				}).pipe(
+					Effect.provide(
+						Layer.mergeAll(
+							makePersistenceEffectLayer(":memory:", "project"),
+							Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+							Layer.effect(SessionActivityTag, makeSessionActivity),
+						),
+					),
+				),
+		);
+	}
+
 	for (const provider of ["claude", "cursor", "opencode"]) {
 		it.effect(
 			`Stop availability follows durable membership and delivery on ${provider}`,

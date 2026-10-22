@@ -17,6 +17,7 @@ import * as Failure from "../../../effect/failure-classification.js";
 import { DEFAULT_CONFIG_DIR } from "../../../env.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { makeClaudeTerminalEnv } from "../../../provider/claude/claude-sdk-env.js";
+import { prepareCodexAccount } from "../../../provider/codex/codex-home.js";
 import {
 	type PtyUpstream,
 	trackedPtyInfo,
@@ -441,12 +442,23 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 			create: (clientId: string, cwd = config.projectDir, account) =>
 				Effect.gen(function* () {
 					const session = wsHandler.getClientSession(clientId) ?? "?";
+					const codex =
+						account?.driver === "codex"
+							? yield* prepareCodexAccount(account, config.configDir).pipe(
+									Effect.mapError(
+										(cause) =>
+											new TerminalServiceError({ operation: "create", cause }),
+									),
+								)
+							: undefined;
 					const createResult = yield* Effect.result(
 						localPty.create({
 							cwd,
 							...(account?.driver === "claude"
 								? { env: makeClaudeTerminalEnv({ configDir: account.folder }) }
-								: {}),
+								: codex
+									? { env: codex.env }
+									: {}),
 							...(cwd !== config.projectDir
 								? { projectDir: config.projectDir }
 								: {}),
@@ -474,8 +486,9 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 							worktrees._tag === "Some"
 								? worktrees.value.withCheckoutUse(create)
 								: create;
+						// A terminal can target any checkout, independently of its browser's session.
 						return yield* workspace._tag === "Some"
-							? workspace.value.withLaunch(spawn)
+							? workspace.value.withProjectLaunch(spawn)
 							: spawn;
 					}),
 				),
