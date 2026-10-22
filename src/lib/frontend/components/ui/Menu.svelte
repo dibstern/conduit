@@ -10,7 +10,7 @@
 		exemptFromBackgroundInert,
 		registerOpenSurface,
 	} from "./actions/use-background-inert.svelte.js";
-	import { dragToDismiss } from "../../actions/drag-to-dismiss.js";
+	import { dragToDismiss, sheetScrimStyle } from "../../actions/drag-to-dismiss.js";
 	import {
 		FLOATING_MENU_CONTENT_CLASSES,
 		FINAL_MENU_CONTENT_CLASSES,
@@ -248,7 +248,7 @@
 
 	<DropdownMenu.Portal {...portalProps}>
 		{#if presentation === "sheet"}
-			{#if open}<div aria-hidden="true" data-testid="menu-sheet-scrim" class="fixed inset-0 z-[var(--z-sheet)] bg-backdrop" class:pointer-events-none={!scrimInteractive} style:opacity={1 - scrimFade.progress} style:transition={scrimFade.settling ? "opacity 220ms linear" : undefined} use:exemptFromBackgroundInert></div>{/if}
+			{#if open}<div aria-hidden="true" data-testid="menu-sheet-scrim" class="fixed inset-0 z-[var(--z-sheet)] bg-backdrop" class:pointer-events-none={!scrimInteractive} style={sheetScrimStyle(scrimFade)} use:exemptFromBackgroundInert></div>{/if}
 			<DropdownMenu.ContentStatic {...sheetContentProps}>
 				{#snippet child({ props })}
 					<!-- Keep the bits-ui focus target on the menu shell. SheetChrome gives the
