@@ -38,3 +38,14 @@ Scenario: Late-rendering rows do not detach a transcript that is following
   When another device sends the message First from my laptop.
   And another device sends the message Second from my laptop.
   Then the transcript is pinned to the bottom
+
+# Sending is a request to see the reply: it must bring back a reader who had
+# drifted a little above the bottom, and keep following from there.
+Scenario: Sending while scrolled up returns to the bottom
+  Given the viewport is a desktop
+  And the conduit app is served with the long-transcript mockup
+  When I scroll the transcript up by 150 pixels
+  Then the jump-to-latest control is visible
+  When I type Check the build into the composer
+  And I send the composer message
+  Then the transcript is pinned to the bottom
