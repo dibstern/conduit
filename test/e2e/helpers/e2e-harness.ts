@@ -93,6 +93,13 @@ export async function createE2EHarness(opts?: {
 
 	const staticDir = path.resolve(import.meta.dirname, "../../../dist/frontend");
 	const dbDir = mkdtempSync(path.join(tmpdir(), "e2e-live-relay-"));
+	await saveDaemonConfig(
+		{
+			...defaultDaemonConfig(),
+			avatar: { kind: "initial" },
+		},
+		dbDir,
+	);
 
 	const startStack = (port: number) =>
 		createRelayStack({
