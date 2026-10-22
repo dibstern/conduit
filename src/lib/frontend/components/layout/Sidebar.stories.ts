@@ -53,6 +53,48 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+async function expectSessionTitle(canvasElement: HTMLElement) {
+	const canvas = within(canvasElement);
+	const heading = canvas.getByTestId("list-bar-title");
+	const mark = canvas.getByTestId("list-bar-mark");
+	const label = canvas.getByText("Sessions", { exact: true });
+	const count = canvas.getByTestId("list-bar-count");
+	const compact = sessionViewState.compact;
+	await expect(heading).toHaveAccessibleName(`Sessions ${count.textContent}`);
+	await expect(mark).toBeVisible();
+	await expect(mark).toHaveAttribute("aria-hidden", "true");
+	await expect(mark).not.toHaveAttribute("tabindex");
+	await expect(mark.closest("a, button")).toBeNull();
+	await expect(mark).toHaveStyle({
+		width: compact ? "26px" : "20px",
+		height: compact ? "26px" : "20px",
+		borderRadius: compact ? "7px" : "5px",
+		color: "rgb(255, 255, 255)",
+	});
+	const glyph = mark.querySelector("svg");
+	await expect(glyph).toHaveStyle({
+		width: compact ? "15px" : "12px",
+		height: compact ? "15px" : "12px",
+	});
+	const accent = new Option().style;
+	accent.color = getComputedStyle(mark).getPropertyValue("--color-accent");
+	await expect(getComputedStyle(mark).backgroundColor).toBe(accent.color);
+	const markBox = mark.getBoundingClientRect();
+	const textRange = document.createRange();
+	textRange.selectNodeContents(label);
+	const textBox = textRange.getBoundingClientRect();
+	await expect(
+		Math.abs(
+			markBox.top + markBox.height / 2 - textBox.top - textBox.height / 2,
+		),
+	).toBeLessThanOrEqual(1);
+	await expect(textBox.left - markBox.right).toBe(compact ? 10 : 8);
+	await expect(label.parentElement).toBe(count.parentElement);
+	const textGroup = count.parentElement;
+	if (!textGroup) throw new TypeError("Session title text group is missing");
+	await expect(getComputedStyle(textGroup).alignItems).toBe("baseline");
+}
+
 function seedFinalSidebar(phone = false, singleAccount = false) {
 	sessionViewState.compact = phone;
 	uiState.sidebarWidth = phone ? 390 : 260;
@@ -148,6 +190,7 @@ function seedFinalSidebar(phone = false, singleAccount = false) {
 export const Final: Story = {
 	beforeEach: () => seedFinalSidebar(),
 	play: async ({ canvasElement }) => {
+		await expectSessionTitle(canvasElement);
 		const canvas = within(canvasElement);
 		await expect(canvas.getByText("Fix token refresh race")).toBeVisible();
 		await expect(canvas.getByTestId("usage-footer-row-work")).toBeVisible();
@@ -258,6 +301,7 @@ export const NeedsYouSingleAccountLight: Story = {
 
 export const Default: Story = {
 	play: async ({ canvasElement }) => {
+		await expectSessionTitle(canvasElement);
 		const canvas = within(canvasElement);
 		const compose = canvas.getByRole("button", { name: "New session" });
 		await expect(compose).toBeVisible();
@@ -272,6 +316,34 @@ export const Default: Story = {
 		await expect(
 			canvas.queryByRole("button", { name: "File browser" }),
 		).toBeNull();
+		const originalWidth = uiState.sidebarWidth;
+		try {
+			for (const width of [180, 200]) {
+				uiState.sidebarWidth = width;
+				await waitFor(() =>
+					expect(
+						canvasElement.querySelector("#sidebar")?.getBoundingClientRect()
+							.width,
+					).toBe(width),
+				);
+				const label = canvas.getByText("Sessions", { exact: true });
+				const count = canvas.getByTestId("list-bar-count");
+				await expect(count.getBoundingClientRect().right).toBeLessThanOrEqual(
+					canvas.getByTestId("list-bar-select").getBoundingClientRect().left,
+				);
+				await expect(getComputedStyle(label).textOverflow).toBe("ellipsis");
+				await expect(label.scrollWidth).toBeGreaterThan(label.clientWidth);
+				await expectSessionTitle(canvasElement);
+			}
+		} finally {
+			uiState.sidebarWidth = originalWidth;
+			await waitFor(() =>
+				expect(
+					canvasElement.querySelector("#sidebar")?.getBoundingClientRect()
+						.width,
+				).toBe(originalWidth),
+			);
+		}
 	},
 };
 
@@ -291,6 +363,7 @@ export const Phone: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const title = canvas.getByTestId("list-bar-title");
+		await expectSessionTitle(canvasElement);
 		await expect(title).toHaveStyle({ fontSize: "22px", fontWeight: "700" });
 		await expect(canvas.getByTestId("list-bar-select")).toBeVisible();
 		await expect(canvas.getByTestId("list-bar-overflow")).toBeVisible();

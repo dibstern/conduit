@@ -3,6 +3,7 @@
 // - Mobile: session list and session are separate routes
 // Uses real relay backed by MockOpenCodeServer.
 
+import { PNG } from "pngjs";
 import { createSession } from "../helpers/e2e-harness.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
@@ -1165,14 +1166,14 @@ test.describe("Sidebar Layout — Mobile", () => {
 	test("mobile: list bar titles the list once, with its unsettled count", async ({
 		page,
 		relayUrl,
-	}) => {
+	}, testInfo) => {
 		await new AppPage(page).goto(new URL("/", relayUrl).toString());
 		await expect(
 			page.locator("#session-list .session-item").first(),
 		).toBeVisible();
 
-		await expect(page.getByTestId("list-bar-title")).toHaveText(
-			/^Sessions\s*\d+$/,
+		await expect(page.getByTestId("list-bar-title")).toHaveAccessibleName(
+			/^Sessions \d+$/,
 		);
 		await expect(page.getByTestId("list-bar-title")).toHaveCSS(
 			"font-size",
@@ -1182,6 +1183,22 @@ test.describe("Sidebar Layout — Mobile", () => {
 			"font-weight",
 			"700",
 		);
+		const mark = page.getByTestId("list-bar-mark");
+		await expect(mark).toHaveCSS("border-radius", "7px");
+		const accent = await mark.evaluate(
+			(element) => getComputedStyle(element).backgroundColor,
+		);
+		const image = PNG.sync.read(
+			await mark.screenshot({
+				path: testInfo.outputPath("session-list-mark.png"),
+				scale: "css",
+			}),
+		);
+		expect([image.width, image.height]).toEqual([26, 26]);
+		const topCap = (image.width + Math.floor(image.width / 2)) * 4;
+		expect(
+			`rgb(${Array.from(image.data.subarray(topCap, topCap + 3)).join(", ")})`,
+		).toBe(accent);
 		await expect(page.getByTestId("list-bar-select")).toBeVisible();
 		const compose = page.locator("#sidebar-header #new-session-btn");
 		await expect(compose).toBeVisible();
@@ -1190,9 +1207,9 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(
 			page.locator("#sidebar-header").getByTestId("session-group-button"),
 		).toHaveCount(0);
-		await expect(page.locator("#sidebar").getByText(/^sessions$/i)).toHaveCount(
-			0,
-		);
+		await expect(
+			page.locator("#sidebar").getByRole("heading", { name: /^Sessions \d+$/ }),
+		).toHaveCount(1);
 	});
 
 	test("mobile: focusing search suggests the project scopes and their tokens", async ({
