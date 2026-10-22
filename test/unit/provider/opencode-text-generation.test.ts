@@ -1,13 +1,9 @@
 // Failure modes: wrong account/directory/model/effort, inherited instructions or
 // plugins/MCP, tools reaching the model, rejected/empty replies, cancellation
 // while prompting or acquiring, and failed cleanup leaking temporary sessions.
-import {
-	existsSync,
-	mkdtempSync,
-	readdirSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import * as childProcess from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Exit, Fiber } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -15,10 +11,10 @@ import {
 	AccountIdSchema,
 	type OpenCodeAccount,
 } from "../../../src/lib/contracts/account.js";
+import * as managedProcess from "../../../src/lib/instance/managed-opencode-process.js";
 import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
 import { replayOpenCodeText } from "../../helpers/opencode-text-generation.js";
 
-const roots: string[] = [];
 const account = {
 	driver: "opencode",
 	id: AccountIdSchema.make("titles"),
@@ -26,24 +22,33 @@ const account = {
 	usageEligible: false,
 } as const;
 function setup() {
-	const configDir = mkdtempSync("/tmp/opencode-title-replay-");
-	roots.push(configDir);
 	const replay = replayOpenCodeText();
-	const clients: ReturnType<typeof replay.client>[] = [];
-	let cwd = "";
+	const spawn = vi
+		.spyOn(managedProcess, "spawnManagedOpenCode")
+		.mockResolvedValue({
+			pid: 123456,
+			process: new childProcess.ChildProcess(),
+			processIdentity: {
+				supervisorPid: 123455,
+				controlPort: 12344,
+				token: "test-token",
+			},
+		});
+	vi.spyOn(managedProcess, "commitManagedOpenCodeSpawn").mockResolvedValue();
+	vi.spyOn(managedProcess, "probeOpenCodeHealth").mockResolvedValue({});
+	vi.spyOn(managedProcess, "stopManagedOpenCode").mockResolvedValue(true);
+	vi.spyOn(managedProcess, "availableOpenCodePort").mockResolvedValue(12345);
+	vi.spyOn(globalThis, "fetch").mockImplementation((input, init) =>
+		replay.transport.fetch(input, init),
+	);
 	const clientForAccount = vi.fn(
 		(selected: OpenCodeAccount, directory?: string) => {
 			expect(selected).toEqual(account);
-			cwd = directory ?? "";
-			expect(readdirSync(cwd)).toEqual([]);
-			const client = replay.client(cwd);
-			clients.push(client);
-			return Effect.succeed(client);
+			return Effect.succeed(replay.client(directory ?? ""));
 		},
 	);
 	const instance = new OpenCodeProviderInstance({
 		client: replay.client("/project"),
-		configDir,
 		clientForAccount,
 	});
 	const input = {
@@ -55,18 +60,16 @@ function setup() {
 	};
 	return {
 		...replay,
-		configDir,
-		clients,
+		spawn,
 		clientForAccount,
 		instance,
 		input,
-		cwd: () => cwd,
+		cwd: () => String(spawn.mock.calls[0]?.[4]?.cwd ?? ""),
 	};
 }
 afterEach(() => {
 	vi.restoreAllMocks();
-	for (const root of roots.splice(0))
-		rmSync(root, { recursive: true, force: true });
+	vi.unstubAllEnvs();
 });
 
 describe("OpenCode ephemeral text generation from captured traffic", () => {
@@ -76,7 +79,7 @@ describe("OpenCode ephemeral text generation from captured traffic", () => {
 			await Effect.runPromise(run.instance.generateTextEffect(run.input)),
 		).toBe(run.reply);
 		expect(run.clientForAccount).toHaveBeenCalledOnce();
-		expect(run.cwd()).toContain(join(run.configDir, "text-generation", "run-"));
+		expect(run.cwd()).toContain(join(tmpdir(), "conduit-title-"));
 		expect(existsSync(run.cwd())).toBe(false);
 		const prompt = run.requests.find(
 			(request) =>
@@ -101,12 +104,11 @@ describe("OpenCode ephemeral text generation from captured traffic", () => {
 
 	it("deletes the session when the prompt transport fails", async () => {
 		const run = setup();
-		run.clientForAccount.mockImplementation((_, directory) => {
-			const client = run.client(directory ?? "");
-			vi.spyOn(client.session, "promptText").mockRejectedValue(
-				new Error("transport failed"),
-			);
-			return Effect.succeed(client);
+		const replayFetch = run.transport.fetch;
+		vi.spyOn(run.transport, "fetch").mockImplementation((input, init) => {
+			if (new URL(new Request(input, init).url).pathname.endsWith("/message"))
+				return Promise.reject(new Error("transport failed"));
+			return replayFetch(input, init);
 		});
 		const exit = await Effect.runPromiseExit(
 			run.instance.generateTextEffect(run.input),
@@ -115,7 +117,7 @@ describe("OpenCode ephemeral text generation from captured traffic", () => {
 		expect(
 			run.requests.filter((request) => request.method === "DELETE"),
 		).toHaveLength(1);
-		expect(readdirSync(join(run.configDir, "text-generation"))).toEqual([]);
+		expect(existsSync(run.cwd())).toBe(false);
 	});
 
 	it("cleans up its reserved id even when the create response is lost", async () => {
@@ -150,7 +152,7 @@ describe("OpenCode ephemeral text generation from captured traffic", () => {
 					new URL(request.url).pathname === `/session/${id}`,
 			),
 		).toBe(true);
-		expect(readdirSync(join(run.configDir, "text-generation"))).toEqual([]);
+		expect(existsSync(run.cwd())).toBe(false);
 	});
 
 	it("waits for in-flight creation before interrupt cleanup", async () => {
@@ -192,7 +194,7 @@ describe("OpenCode ephemeral text generation from captured traffic", () => {
 		expect(
 			run.requests.filter((request) => request.method === "DELETE"),
 		).toHaveLength(1);
-		expect(readdirSync(join(run.configDir, "text-generation"))).toEqual([]);
+		expect(existsSync(run.cwd())).toBe(false);
 	});
 
 	it("still deletes when abort fails, and reports cleanup failure", async () => {
@@ -216,7 +218,7 @@ describe("OpenCode ephemeral text generation from captured traffic", () => {
 		expect(
 			run.requests.filter((request) => request.method === "DELETE"),
 		).toHaveLength(1);
-		expect(readdirSync(join(run.configDir, "text-generation"))).toEqual([]);
+		expect(existsSync(run.cwd())).toBe(false);
 	});
 
 	it("interrupts an in-flight prompt and still aborts and deletes the session", async () => {
@@ -252,24 +254,60 @@ describe("OpenCode ephemeral text generation from captured traffic", () => {
 		expect(
 			run.requests.filter((request) => request.method === "DELETE"),
 		).toHaveLength(1);
-		expect(readdirSync(join(run.configDir, "text-generation"))).toEqual([]);
+		expect(existsSync(run.cwd())).toBe(false);
 	});
 
-	it("rejects inherited AGENTS.md before creating a temporary session", async () => {
+	it("spawns with an empty config and cwd, replacing inherited config with provider selection only", async () => {
 		const run = setup();
-		writeFileSync(
-			join(run.configDir, "AGENTS.md"),
-			"Do not send this to a title model.",
+		vi.stubEnv("OPENCODE_CONFIG", "/hostile/opencode.json");
+		vi.stubEnv("OPENCODE_CONFIG_DIR", "/hostile/config");
+		vi.stubEnv("OPENCODE_CONFIG_CONTENT", '{"plugin":["worktree-plugin"]}');
+		vi.stubEnv("OPENCODE_AUTH_CONTENT", '{"test":"stale-auth"}');
+		const config = {
+			provider: { custom: { options: { apiKey: "test-secret" } } },
+			enabled_providers: ["custom"],
+			disabled_providers: ["other"],
+			plugin: ["worktree-plugin"],
+			instructions: ["AGENTS.md"],
+			agent: { injected: {} },
+			mcp: { injected: {} },
+		};
+		run.clientForAccount.mockImplementation(() => {
+			const client = run.client("");
+			vi.spyOn(client.config, "get").mockResolvedValue(config);
+			return Effect.succeed(client);
+		});
+		run.spawn.mockImplementationOnce(
+			async (_id, _port, env, _root, options) => {
+				expect(readdirSync(String(env["XDG_CONFIG_HOME"]))).toEqual([]);
+				expect(readdirSync(String(options?.cwd))).toEqual([]);
+				expect(env).not.toHaveProperty("OPENCODE_CONFIG");
+				expect(env).not.toHaveProperty("OPENCODE_CONFIG_DIR");
+				expect(env).not.toHaveProperty("OPENCODE_AUTH_CONTENT");
+				expect(options?.inheritEnv).toBe(false);
+				expect(env["OPENCODE_DISABLE_PROJECT_CONFIG"]).toBe("1");
+				expect(env["OPENCODE_DISABLE_CLAUDE_CODE"]).toBe("1");
+				expect(env["OPENCODE_DISABLE_EXTERNAL_SKILLS"]).toBe("1");
+				expect(env["OPENCODE_PURE"]).toBe("1");
+				expect(JSON.parse(String(env["OPENCODE_CONFIG_CONTENT"]))).toEqual({
+					provider: config.provider,
+					enabled_providers: config.enabled_providers,
+					disabled_providers: config.disabled_providers,
+				});
+				return {
+					pid: 123456,
+					process: new childProcess.ChildProcess(),
+					processIdentity: {
+						supervisorPid: 123455,
+						controlPort: 12344,
+						token: "test-token",
+					},
+				};
+			},
 		);
-		expect(
-			Exit.isFailure(
-				await Effect.runPromiseExit(run.instance.generateTextEffect(run.input)),
-			),
-		).toBe(true);
-		expect(run.requests.some((request) => request.method === "POST")).toBe(
-			false,
-		);
-		expect(readdirSync(join(run.configDir, "text-generation"))).toEqual([]);
+		await Effect.runPromise(run.instance.generateTextEffect(run.input));
+		expect(run.spawn).toHaveBeenCalledOnce();
+		expect(existsSync(run.cwd())).toBe(false);
 	});
 
 	it("rejects the wrong harness before resolving a client", async () => {

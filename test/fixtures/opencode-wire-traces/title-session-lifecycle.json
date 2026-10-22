@@ -1,22 +1,22 @@
 {
 	"name": "title-session-lifecycle",
-	"recordedAt": "2026-10-20T14:59:15.095Z",
+	"recordedAt": "2026-10-22T01:44:00.350Z",
 	"opencodeVersion": "1.18.34",
 	"interactions": [
 		{
 			"kind": "rest",
 			"method": "POST",
-			"path": "/api/session?directory=%2Fprivate%2Ftmp%2Fconduit-title-lifecycle-BSRr3K%2Fconduit-config%2Ftext-generation%2Frun-capture",
+			"path": "/api/session?directory=%2Fvar%2Ffolders%2Fw8%2Fdy5dn1nx2pl4xn0hhtlj4ybh0000gn%2FT%2Fconduit-title-Ht4WSz%2Fwork",
 			"requestBody": {
-				"id": "ses_title_1a159d2cd19",
+				"id": "ses_title_1a161476f55",
 				"location": {
-					"directory": "/private/tmp/conduit-title-lifecycle-BSRr3K/conduit-config/text-generation/run-capture"
+					"directory": "/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/conduit-title-Ht4WSz/work"
 				}
 			},
 			"status": 200,
 			"responseBody": {
 				"data": {
-					"id": "ses_title_1a159d2cd19",
+					"id": "ses_title_1a161476f55",
 					"projectID": "global",
 					"cost": 0,
 					"tokens": {
@@ -29,21 +29,21 @@
 						}
 					},
 					"time": {
-						"created": 1792508353728,
-						"updated": 1792508353728
+						"created": 1792633439895,
+						"updated": 1792633439895
 					},
-					"title": "New session - 2026-10-20T14:59:13.728Z",
+					"title": "New session - 2026-10-22T01:43:59.895Z",
 					"location": {
-						"directory": "/private/tmp/conduit-title-lifecycle-BSRr3K/conduit-config/text-generation/run-capture"
+						"directory": "/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/conduit-title-Ht4WSz/work"
 					},
-					"subpath": "private/tmp/conduit-title-lifecycle-BSRr3K/conduit-config/text-generation/run-capture"
+					"subpath": "var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/conduit-title-Ht4WSz/work"
 				}
 			}
 		},
 		{
 			"kind": "rest",
 			"method": "PATCH",
-			"path": "/session/ses_title_1a159d2cd19?directory=%2Fprivate%2Ftmp%2Fconduit-title-lifecycle-BSRr3K%2Fconduit-config%2Ftext-generation%2Frun-capture",
+			"path": "/session/ses_title_1a161476f55?directory=%2Fvar%2Ffolders%2Fw8%2Fdy5dn1nx2pl4xn0hhtlj4ybh0000gn%2FT%2Fconduit-title-Ht4WSz%2Fwork",
 			"requestBody": {
 				"title": "Conduit ephemeral text generation",
 				"permission": [
@@ -56,11 +56,11 @@
 			},
 			"status": 200,
 			"responseBody": {
-				"id": "ses_title_1a159d2cd19",
-				"slug": "proud-island",
+				"id": "ses_title_1a161476f55",
+				"slug": "playful-nebula",
 				"projectID": "global",
-				"directory": "/private/tmp/conduit-title-lifecycle-BSRr3K/conduit-config/text-generation/run-capture",
-				"path": "private/tmp/conduit-title-lifecycle-BSRr3K/conduit-config/text-generation/run-capture",
+				"directory": "/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/conduit-title-Ht4WSz/work",
+				"path": "var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/conduit-title-Ht4WSz/work",
 				"cost": 0,
 				"tokens": {
 					"input": 0,
@@ -74,8 +74,8 @@
 				"title": "Conduit ephemeral text generation",
 				"version": "1.18.34",
 				"time": {
-					"created": 1792508353728,
-					"updated": 1792508353862
+					"created": 1792633439895,
+					"updated": 1792633440289
 				},
 				"permission": [
 					{
@@ -89,14 +89,14 @@
 		{
 			"kind": "rest",
 			"method": "GET",
-			"path": "/session/ses_title_1a159d2cd19?directory=%2Fprivate%2Ftmp%2Fconduit-title-lifecycle-BSRr3K%2Fconduit-config%2Ftext-generation%2Frun-capture",
+			"path": "/session/ses_title_1a161476f55?directory=%2Fvar%2Ffolders%2Fw8%2Fdy5dn1nx2pl4xn0hhtlj4ybh0000gn%2FT%2Fconduit-title-Ht4WSz%2Fwork",
 			"status": 200,
 			"responseBody": {
-				"id": "ses_title_1a159d2cd19",
-				"slug": "proud-island",
+				"id": "ses_title_1a161476f55",
+				"slug": "playful-nebula",
 				"projectID": "global",
-				"directory": "/private/tmp/conduit-title-lifecycle-BSRr3K/conduit-config/text-generation/run-capture",
-				"path": "private/tmp/conduit-title-lifecycle-BSRr3K/conduit-config/text-generation/run-capture",
+				"directory": "/var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/conduit-title-Ht4WSz/work",
+				"path": "var/folders/w8/dy5dn1nx2pl4xn0hhtlj4ybh0000gn/T/conduit-title-Ht4WSz/work",
 				"cost": 0,
 				"tokens": {
 					"input": 0,
@@ -110,8 +110,8 @@
 				"title": "Conduit ephemeral text generation",
 				"version": "1.18.34",
 				"time": {
-					"created": 1792508353728,
-					"updated": 1792508353862
+					"created": 1792633439895,
+					"updated": 1792633440289
 				},
 				"permission": [
 					{
@@ -125,26 +125,26 @@
 		{
 			"kind": "rest",
 			"method": "POST",
-			"path": "/session/ses_title_1a159d2cd19/abort?directory=%2Fprivate%2Ftmp%2Fconduit-title-lifecycle-BSRr3K%2Fconduit-config%2Ftext-generation%2Frun-capture",
+			"path": "/session/ses_title_1a161476f55/abort?directory=%2Fvar%2Ffolders%2Fw8%2Fdy5dn1nx2pl4xn0hhtlj4ybh0000gn%2FT%2Fconduit-title-Ht4WSz%2Fwork",
 			"status": 200,
 			"responseBody": true
 		},
 		{
 			"kind": "rest",
 			"method": "DELETE",
-			"path": "/session/ses_title_1a159d2cd19?directory=%2Fprivate%2Ftmp%2Fconduit-title-lifecycle-BSRr3K%2Fconduit-config%2Ftext-generation%2Frun-capture",
+			"path": "/session/ses_title_1a161476f55?directory=%2Fvar%2Ffolders%2Fw8%2Fdy5dn1nx2pl4xn0hhtlj4ybh0000gn%2FT%2Fconduit-title-Ht4WSz%2Fwork",
 			"status": 200,
 			"responseBody": true
 		},
 		{
 			"kind": "rest",
 			"method": "GET",
-			"path": "/session/ses_title_1a159d2cd19?directory=%2Fprivate%2Ftmp%2Fconduit-title-lifecycle-BSRr3K%2Fconduit-config%2Ftext-generation%2Frun-capture",
+			"path": "/session/ses_title_1a161476f55?directory=%2Fvar%2Ffolders%2Fw8%2Fdy5dn1nx2pl4xn0hhtlj4ybh0000gn%2FT%2Fconduit-title-Ht4WSz%2Fwork",
 			"status": 404,
 			"responseBody": {
 				"name": "NotFoundError",
 				"data": {
-					"message": "Session not found: ses_title_1a159d2cd19"
+					"message": "Session not found: ses_title_1a161476f55"
 				}
 			}
 		}
