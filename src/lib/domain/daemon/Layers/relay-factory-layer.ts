@@ -57,6 +57,7 @@ import {
 import { ScanServiceTag } from "../../relay/Services/scan-service.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { OverridesStateTag } from "../../relay/Services/session-overrides-state.js";
+import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
 import { AccountResourceScopesTag } from "../Services/account-resource-scopes.js";
@@ -226,6 +227,7 @@ export const RelayFactoryLive = (
 			const sessionDirectory = yield* Effect.serviceOption(SessionDirectory);
 			const projectContext = yield* Effect.serviceOption(ProjectContext);
 			const overrides = yield* Effect.serviceOption(OverridesStateTag);
+			const sessionWorkspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 			const storeContext = yield* persistenceStoreContext;
 			const sharedDrafts = yield* Effect.serviceOption(InputDraftsTag);
 			const inputDrafts = Option.isSome(sharedDrafts)
@@ -541,72 +543,86 @@ export const RelayFactoryLive = (
 									daemonConfigContext: Context.make(
 										DaemonConfigRefTag,
 										configRef,
-									).pipe(
-										Context.add(ConfigPersistenceTag, configPersistence),
-										Context.add(ConfigSnapshotTag, configSnapshot),
-										Context.add(AccountDirectory, accounts),
-										Context.merge(
-											Option.isSome(claudeAccounts)
-												? Context.make(
-														ClaudeAccountScopes,
-														claudeAccounts.value,
-													)
-												: Context.empty(),
+									)
+										.pipe(
+											Context.add(ConfigPersistenceTag, configPersistence),
+											Context.add(ConfigSnapshotTag, configSnapshot),
+											Context.add(AccountDirectory, accounts),
+											Context.merge(
+												Option.isSome(claudeAccounts)
+													? Context.make(
+															ClaudeAccountScopes,
+															claudeAccounts.value,
+														)
+													: Context.empty(),
+											),
+											Context.merge(
+												Option.isSome(accountResources)
+													? Context.make(
+															AccountResourceScopesTag,
+															accountResources.value,
+														)
+													: Context.empty(),
+											),
+											Context.add(ProviderAdapters, providerAdapters),
+											Context.merge(
+												Option.isSome(cursorResources)
+													? Context.make(
+															CursorAccountResources,
+															cursorResources.value,
+														)
+													: Context.empty(),
+											),
+											Context.merge(
+												Option.isSome(surfacing)
+													? Context.make(
+															MessageSurfacingSettings,
+															surfacing.value,
+														)
+													: Context.empty(),
+											),
+											Context.merge(
+												Option.isSome(categories)
+													? Context.make(CategorySet, categories.value)
+													: Context.empty(),
+											),
+											Context.add(SessionActivityTag, activity),
+											Context.add(SessionEventBusTag, sessionEventBus),
+											Context.merge(
+												Option.isSome(overrides)
+													? Context.make(OverridesStateTag, overrides.value)
+													: Context.empty(),
+											),
+											Context.add(InputDraftsTag, inputDrafts),
+											Context.add(DaemonEventBusTag, eventBus),
+											Context.add(ProjectRegistryTag, projectRegistry),
+											Context.merge(
+												Option.isSome(sessionWorkspace)
+													? Context.make(
+															SessionWorkspaceTag,
+															sessionWorkspace.value,
+														)
+													: Context.empty(),
+											),
+											Context.merge(
+												Option.isSome(projectContext)
+													? Context.make(ProjectContext, projectContext.value)
+													: Context.empty(),
+											),
+											Context.add(PortScannerTag, portScanner),
+											Context.merge(storeContext),
+											Context.merge(daemonServices),
+										)
+										.pipe(
+											Context.merge(
+												Option.isSome(sessionDirectory)
+													? Context.make(
+															SessionDirectory,
+															sessionDirectory.value,
+														)
+													: Context.empty(),
+											),
 										),
-										Context.merge(
-											Option.isSome(accountResources)
-												? Context.make(
-														AccountResourceScopesTag,
-														accountResources.value,
-													)
-												: Context.empty(),
-										),
-										Context.add(ProviderAdapters, providerAdapters),
-										Context.merge(
-											Option.isSome(cursorResources)
-												? Context.make(
-														CursorAccountResources,
-														cursorResources.value,
-													)
-												: Context.empty(),
-										),
-										Context.merge(
-											Option.isSome(surfacing)
-												? Context.make(
-														MessageSurfacingSettings,
-														surfacing.value,
-													)
-												: Context.empty(),
-										),
-										Context.merge(
-											Option.isSome(categories)
-												? Context.make(CategorySet, categories.value)
-												: Context.empty(),
-										),
-										Context.add(SessionActivityTag, activity),
-										Context.add(SessionEventBusTag, sessionEventBus),
-										Context.merge(
-											Option.isSome(overrides)
-												? Context.make(OverridesStateTag, overrides.value)
-												: Context.empty(),
-										),
-										Context.add(InputDraftsTag, inputDrafts),
-										Context.add(DaemonEventBusTag, eventBus),
-										Context.add(ProjectRegistryTag, projectRegistry),
-										Context.merge(
-											Option.isSome(projectContext)
-												? Context.make(ProjectContext, projectContext.value)
-												: Context.empty(),
-										),
-										Context.add(PortScannerTag, portScanner),
-										Context.merge(storeContext),
-										Context.merge(daemonServices),
-										Context.merge(
-											Option.isSome(sessionDirectory)
-												? Context.make(SessionDirectory, sessionDirectory.value)
-												: Context.empty(),
-										),
-									),
 									openCodeInstances,
 									...(Option.isSome(worktreeService)
 										? {

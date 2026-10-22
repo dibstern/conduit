@@ -37,6 +37,8 @@ export interface SessionWorkspace {
 	readonly preview: (
 		account: Account,
 		path: string,
+		/** Required for daemon-owned previews before a session exists. */
+		projectId?: string,
 	) => Effect.Effect<
 		RecordedWorkspace,
 		WorkspaceMoveError | SessionCommandError
@@ -45,15 +47,17 @@ export interface SessionWorkspace {
 		sessionId: string,
 		branchName: string,
 	) => Effect.Effect<void, WorktreeBranchRenameError | SessionCommandError>;
-	/** Serialize launch-folder reads with draft and fork workspace initialization. */
+	/** Serialize launch-folder reads within the caller's project context. */
 	readonly withLaunch: <A, E, R>(
 		effect: Effect.Effect<A, E, R>,
 	) => Effect.Effect<A, E, R>;
+	/** Daemon registration removal retires its cached launch permit. */
+	readonly forgetProject?: (projectId: string) => void;
 	readonly get: (
 		sessionId: string,
 		/** Native directory before the session declares a stored workspace. */
 		nativeDirectory?: string,
-		/** A daemon call resolves the owning project's current primary folder. */
+		/** Legacy hint; the service resolves the session's owning project. */
 		mainFolder?: string,
 	) => Effect.Effect<string, SessionCommandError>;
 	readonly move: (
@@ -81,7 +85,7 @@ export interface SessionWorkspace {
 		ResolvedWorkspaceTarget,
 		WorkspaceMoveError | SessionCommandError
 	>;
-	/** Re-read and record through the command seam, optionally joining a caller's commit. */
+	/** Re-read and record through the commit seam, optionally joining a caller's commit. */
 	readonly record: (
 		sessionId: string,
 		target: ResolvedWorkspaceTarget,

@@ -25,10 +25,11 @@ export const resolveDraftLaunchInput = (
 ) =>
 	Effect.gen(function* () {
 		const workspace = yield* SessionWorkspaceTag;
+		const config = yield* ConfigTag;
 		const state =
 			worktreePath === undefined
 				? null
-				: yield* workspace.preview(creation.account, worktreePath);
+				: yield* workspace.preview(creation.account, worktreePath, config.slug);
 		const folders = yield* resolveLaunchFolders(state);
 		const call =
 			yield* (yield* OrchestrationEngineTag).resolveCallContextEffect({
