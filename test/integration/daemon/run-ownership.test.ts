@@ -11,6 +11,7 @@ import {
 	type ProcessBrowser,
 	ProcessHarness,
 } from "../../helpers/process-harness.js";
+import { resolveRealOpenCode } from "../../helpers/real-opencode.js";
 
 function turns(fixture: ProcessHarness, sessionId: string) {
 	const db = new Database(fixture.daemonStorePath(), { readonly: true });
@@ -551,9 +552,7 @@ describe("provider run ownership through the isolated daemon", () => {
 		const fixture = ProcessHarness.create({
 			managedOpenCode: true,
 			managedOpenCodeId: MANAGED_OPENCODE_ACCOUNT_ID,
-			realOpenCode:
-				process.env["CONDUIT_TEST_REAL_OPENCODE"] ??
-				"/tmp/82tn7-opencode-1.19.1/package/bin/opencode",
+			realOpenCode: resolveRealOpenCode(),
 		});
 		harness = fixture;
 		modelServer = createServer(async (request, response) => {
