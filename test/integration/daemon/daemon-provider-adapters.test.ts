@@ -25,6 +25,7 @@ interface AdapterObservation {
 		| "recovery-start"
 		| "recovery-end"
 		| "outbox-drain"
+		| "engine-drain-started"
 		| "account-scope-use"
 		| "invalidation-start"
 		| "invalidation-end";
@@ -36,6 +37,7 @@ interface AdapterObservation {
 	workspaceRoot?: string;
 	extraFolders?: string[];
 	resourceIdentity?: number;
+	engineIdentity?: number;
 }
 
 // Failure modes: project-local adapters/recovery, a project finalizer closing a
@@ -793,7 +795,7 @@ describe("daemon-owned provider adapters", () => {
 		).toEqual([fixture.projectDir, extra]);
 		expect(() => process.kill(started.pid, 0)).not.toThrow();
 		browser = await fixture.connect(sessionId);
-		await fixture.requestRpc({
+		const stop = fixture.requestRpc({
 			_tag: "CancelSession",
 			sessionId,
 			commandId: randomUUID(),
@@ -815,6 +817,7 @@ describe("daemon-owned provider adapters", () => {
 			),
 		).toBe(true);
 		writeFileSync(join(fixture.root, "release-tool-long"), "release");
+		await stop;
 		expect(
 			(
 				await browser.send(
@@ -949,9 +952,13 @@ describe("daemon-owned provider adapters", () => {
 			"cursor",
 		]);
 		const drains = restarted.filter(({ kind }) => kind === "outbox-drain");
-		expect(new Set(drains.map(({ projectId }) => projectId))).toEqual(
-			new Set(["process-test", "project-b"]),
-		);
+		expect(
+			new Set(drains.map(({ engineIdentity }) => engineIdentity)).size,
+		).toBe(1);
+		expect(drains.every(({ projectId }) => projectId === undefined)).toBe(true);
+		expect(
+			restarted.filter(({ kind }) => kind === "engine-drain-started"),
+		).toHaveLength(1);
 		const firstDrain = restarted.findIndex(
 			({ kind }) => kind === "outbox-drain",
 		);
@@ -973,7 +980,7 @@ describe("daemon-owned provider adapters", () => {
 				),
 			).toBe(true);
 		}
-		await Promise.all(
+		const stops = Promise.all(
 			sessions.map(({ sessionId }) =>
 				fixture.requestRpc({
 					_tag: "CancelSession",
@@ -1002,6 +1009,7 @@ describe("daemon-owned provider adapters", () => {
 			{ timeout: 10_000 },
 		);
 		writeFileSync(join(fixture.root, "release-tool-long"), "release");
+		await stops;
 		for (const { sessionId, projectId, pid } of sessions) {
 			const browser = await fixture.connect(sessionId, undefined, projectId);
 			expect(

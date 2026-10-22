@@ -480,8 +480,10 @@ export class RunnerSocket {
 		});
 	}
 
-	destroy(): void {
-		this.socket.destroy();
+	destroy(failure?: SessionFailure): void {
+		this.socket.destroy(
+			failure ? Object.assign(new Error(failure.message), failure) : undefined,
+		);
 	}
 
 	refuse(failure: SessionFailure): void {

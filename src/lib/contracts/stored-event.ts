@@ -329,6 +329,23 @@ const TokensSchema = Schema.Struct({
 	contextWindow: Schema.optionalKey(Schema.Number),
 });
 
+const CompletionPayloadSchema = Schema.Struct({
+	messageId: Schema.String,
+	providerStateUpdates: Schema.optionalKey(
+		Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.String })),
+	),
+	/** Names the turn when no assistant message of its own answered it. */
+	userMessageId: Schema.optionalKey(Schema.String),
+	cost: Schema.optionalKey(Schema.Number),
+	/** Claude's session running total; cost is its delta at persistence time. */
+	providerCostTotalUsd: Schema.optionalKey(Schema.Number),
+	providerSessionId: Schema.optionalKey(Schema.String).pipe(SessionRef(false)),
+	/** Input and cache tokens in the final main request, excluding output. */
+	contextTokens: Schema.optionalKey(Schema.Number),
+	tokens: Schema.optionalKey(TokensSchema),
+	duration: Schema.optionalKey(Schema.Number),
+});
+
 const CanonicalToolInputSchema = Schema.Union([
 	Schema.Struct({
 		tool: Schema.Literal("Read"),
@@ -641,28 +658,9 @@ export const CanonicalEvents = {
 			userMessageId: Schema.optionalKey(Schema.String),
 		}),
 	),
-	"turn.completed": live(
-		Schema.Struct({
-			messageId: Schema.String,
-			providerStateUpdates: Schema.optionalKey(
-				Schema.Array(
-					Schema.Struct({ key: Schema.String, value: Schema.String }),
-				),
-			),
-			/** Names the turn when no assistant message of its own answered it. */
-			userMessageId: Schema.optionalKey(Schema.String),
-			cost: Schema.optionalKey(Schema.Number),
-			/** Claude's session running total; cost is its delta at persistence time. */
-			providerCostTotalUsd: Schema.optionalKey(Schema.Number),
-			providerSessionId: Schema.optionalKey(Schema.String).pipe(
-				SessionRef(false),
-			),
-			/** Input and cache tokens in the final main request, excluding output. */
-			contextTokens: Schema.optionalKey(Schema.Number),
-			tokens: Schema.optionalKey(TokensSchema),
-			duration: Schema.optionalKey(Schema.Number),
-		}),
-	),
+	"turn.completed": live(CompletionPayloadSchema),
+	/** Accounting for a background message after its run's terminal. */
+	"message.completed": live(CompletionPayloadSchema),
 	"turn.notice": live(Schema.Struct({ text: Schema.String })),
 	"turn.error": live(
 		Schema.Struct({

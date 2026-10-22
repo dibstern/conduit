@@ -109,9 +109,11 @@ describe("RelayFactoryTag", () => {
 		Layer.sync(ProviderAdapters, () => ({
 			registry: new ProviderRegistry(),
 			shutdown: Effect.void,
+			projectContext: () => Option.none(),
 			recoveryProjects: [],
 			registerProject: () => Effect.void,
 			projectFailed: () => Effect.void,
+			recoverDetachedSession: () => Effect.void,
 			recover: Effect.void,
 		})),
 		makeDaemonStoreTestLayer(),

@@ -24,6 +24,11 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 	"tool.running": { produced: true },
 	"tool.completed": { produced: true },
 	"turn.completed": { produced: true },
+	"message.completed": {
+		produced: false,
+		reason:
+			"Persistence separates late message accounting from the run terminal",
+	},
 	"turn.error": { produced: true },
 	"turn.interrupted": { produced: true },
 	"turn.notice": {

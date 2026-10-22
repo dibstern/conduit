@@ -1,3 +1,4 @@
+import { ok } from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,17 +21,23 @@ import {
 	OpenCodeApiError,
 	OpenCodeConnectionError,
 } from "../../../src/lib/errors.js";
+import { bindEventStoreEffect } from "../../../src/lib/persistence/effect/bind-event-store-effect.js";
 import {
 	type CommitAndSignal,
 	makeCommitAndSignal,
 } from "../../../src/lib/persistence/effect/commit-and-signal.js";
-import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
+import {
+	EventStoreEffectTag,
+	makeUnboundEventStoreEffect,
+} from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { SessionRollupProjects } from "../../../src/lib/persistence/effect/session-rollup-projects.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
+import { DurableCommandCommitRepository } from "../../../src/lib/provider/orchestration-command-commit.js";
+import { decideDurableSendTurnCommand } from "../../../src/lib/provider/orchestration-decider.js";
 import {
 	OrchestrationEngine,
 	type OrchestrationEngineOptions,
@@ -101,7 +108,13 @@ describe("durable control outbox scheduling", () => {
 		return Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const ingestion = yield* ProviderRuntimeIngestionTag;
-			const commit = yield* makeCommitAndSignal;
+			const store = bindEventStoreEffect(
+				yield* makeUnboundEventStoreEffect,
+				projectId,
+			);
+			const commit = yield* makeCommitAndSignal.pipe(
+				Effect.provideService(EventStoreEffectTag, store),
+			);
 			yield* sql`INSERT OR IGNORE INTO sessions (id, project_id, provider, created_at, updated_at) VALUES (${sessionId}, ${projectId}, ${instance.providerId}, 1000, 1000)`;
 			const snapshot = yield* new CommandReadModelRepository(
 				sql,
@@ -563,6 +576,439 @@ describe("durable control outbox scheduling", () => {
 					);
 				}),
 			).pipe(Effect.provide(fixture()), Effect.provide(TestClock.layer())),
+		);
+	});
+
+	// A live process may own an earlier attempt. Only the current claim protects
+	// pending intake; a readiness race must also yield to the next scheduled drain.
+	it.each([
+		{ driver: "claude", claimed: false },
+		{ driver: "cursor", claimed: false },
+		{ driver: "claude", claimed: true },
+		{ driver: "cursor", claimed: true },
+	])("classifies $driver retries by their current claim with a live runner (claimed=$claimed)", async ({
+		driver,
+		claimed,
+	}) => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const commit = yield* makeCommitAndSignal;
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				const instance: ProviderInstance = {
+					...provider(() => Effect.die("Refused sends must not execute")),
+					providerId: driver,
+					hasLiveProcessEffect: () => Effect.succeed(true),
+				};
+				yield* commit([
+					canonicalEvent("session.created", "retry-session", {
+						sessionId: "retry-session",
+						provider: driver,
+						title: "Retry before intake",
+					}),
+				]);
+				const repository = new DurableCommandCommitRepository(
+					sql,
+					"control-project",
+				);
+				for (const sequence of [1, 2]) {
+					yield* commit.write((project) =>
+						repository
+							.commit(
+								decideDurableSendTurnCommand({
+									commandId: "retry",
+									sessionId: "retry-session",
+									providerId: driver,
+									fingerprintHash: "retry-fixture",
+									nowMs: sequence,
+									requestSequence: sequence,
+									events: [],
+									payloadJson: JSON.stringify({
+										sessionId: "retry-session",
+										inputId: "retry",
+										prompt: "Retry before intake",
+										workspaceRoot: "/tmp/control-project",
+										extraFolders: [],
+										providerState: {},
+									}),
+								}),
+							)
+							.pipe(Effect.flatMap(project)),
+					);
+					if (sequence === 1) {
+						yield* sql`UPDATE provider_command_outbox SET status = 'failed', attempt_count = 1`;
+						yield* sql`UPDATE provider_runs SET status = 'error', completed_at = 2`;
+					}
+				}
+				if (claimed)
+					yield* sql`UPDATE provider_command_outbox SET status = 'running', attempt_count = 2 WHERE request_sequence = 2`;
+				const orchestration = new OrchestrationEngine({
+					registry: new ProviderRegistry([instance]),
+					durableCommands: {
+						sql,
+						ingestion,
+						write: commit.write,
+						projectKey: "control-project",
+						snapshot: yield* new CommandReadModelRepository(
+							sql,
+							"control-project",
+						).bootstrap(),
+						now: () => 1000,
+						generateId: () => "unused",
+						isProjectReady: () =>
+							Effect.fail(
+								new ProviderInstanceFailure({
+									providerId: driver,
+									operation: "executeCommand",
+									code: "project_unavailable",
+									cause: "unavailable",
+								}),
+							),
+					},
+				});
+				const drained = yield* orchestration
+					.drainSideEffects()
+					.pipe(Effect.timeoutOption("100 millis"));
+				expect(drained._tag).toBe("Some");
+				const rows =
+					yield* sql`SELECT command.status, command.attempt_count, run.status AS run_status,
+				run.started_at, receipt.status AS receipt_status FROM provider_command_outbox command
+				JOIN provider_runs run ON run.id = command.run_id JOIN command_receipts receipt ON receipt.command_id = command.command_id
+				WHERE command.request_sequence = 2`;
+				expect(rows).toEqual([
+					{
+						status: claimed ? "running" : "failed",
+						attempt_count: claimed ? 2 : 1,
+						run_status: claimed ? "pending" : "error",
+						started_at: null,
+						receipt_status: claimed
+							? "side_effect_requested"
+							: "side_effect_failed",
+					},
+				]);
+				expect(
+					yield* sql`SELECT type FROM events WHERE type = 'turn.error'`,
+				).toHaveLength(claimed ? 0 : 1);
+				expect(instance.endSessionEffect).not.toHaveBeenCalled();
+			}).pipe(Effect.provide(fixture())),
+		);
+	});
+
+	it("defers an unchanged outbox head to the next drain after project readiness changes", async () => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const commit = yield* makeCommitAndSignal;
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				const sendTurn = vi.fn(() =>
+					Effect.succeed({
+						status: "completed" as const,
+						cost: 0,
+						tokens: { input: 0, output: 0 },
+						durationMs: 0,
+						providerStateUpdates: [],
+					}),
+				);
+				const instance = provider(sendTurn);
+				yield* sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at) VALUES ('control-session', 'control-project', 'opencode', 1, 1)`;
+				yield* sql`INSERT INTO command_receipts (command_id, project_key, session_id, status, created_at) VALUES ('retry', 'control-project', 'control-session', 'side_effect_requested', 1)`;
+				yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, attempt_count, requested_at, updated_at)
+				VALUES (1, 'retry', 'control-project', 'control-session', 'opencode', 'send_turn', ${JSON.stringify({ sessionId: "control-session", inputId: "retry", prompt: "Readiness race", workspaceRoot: "/tmp", extraFolders: [], providerState: {} })}, 'pending', 1, 1, 1)`;
+				let checks = 0;
+				let ready = false;
+				const orchestration = new OrchestrationEngine({
+					registry: new ProviderRegistry([instance]),
+					durableCommands: {
+						sql,
+						ingestion,
+						write: commit.write,
+						projectKey: "control-project",
+						snapshot: yield* new CommandReadModelRepository(
+							sql,
+							"control-project",
+						).bootstrap(),
+						now: () => 1000,
+						generateId: () => "unused",
+						isProjectReady: () => {
+							checks++;
+							return ready || checks % 2 === 1
+								? Effect.succeed(true)
+								: Effect.fail(
+										new ProviderInstanceFailure({
+											providerId: "opencode",
+											operation: "executeCommand",
+											code: "project_unavailable",
+											cause: "readiness changed",
+										}),
+									);
+						},
+					},
+				});
+				const drained = yield* orchestration
+					.drainSideEffects()
+					.pipe(Effect.timeoutOption("100 millis"));
+				expect(drained._tag).toBe("Some");
+				expect(checks).toBe(3);
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "pending", attempt_count: 1 }]);
+				expect(sendTurn).not.toHaveBeenCalled();
+				ready = true;
+				yield* orchestration.drainSideEffects();
+				expect(sendTurn).toHaveBeenCalledTimes(1);
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "running", attempt_count: 2 }]);
+				yield* orchestration.drainSideEffects();
+				expect(sendTurn).toHaveBeenCalledTimes(1);
+			}).pipe(Effect.provide(fixture())),
+		);
+	});
+
+	it("rejects a foreign project's command id while its original send is in flight", async () => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				const commit = yield* makeCommitAndSignal;
+				const entered = yield* Deferred.make<void>();
+				const calls: string[] = [];
+				const instance = provider((input) =>
+					Effect.gen(function* () {
+						calls.push(input.sessionId);
+						yield* Deferred.succeed(entered, undefined);
+						return yield* Effect.never;
+					}),
+				);
+				yield* sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at) VALUES
+					('control-session', 'control-project', 'opencode', 1000, 1000),
+					('other-session', 'other-project', 'opencode', 1000, 1000)`;
+				const accepting = new OrchestrationEngine({
+					registry: new ProviderRegistry([instance]),
+					projectOfSession: (sessionId) =>
+						sql<{
+							project_id: string;
+						}>`SELECT project_id FROM sessions WHERE id = ${sessionId}`.pipe(
+							Effect.orDie,
+							Effect.map(([row]) => row?.project_id ?? "missing-project"),
+						),
+					durableCommands: {
+						sql,
+						ingestion,
+						snapshot: yield* new CommandReadModelRepository(sql).bootstrap(),
+						now: () => 1000,
+						generateId: () => "held-dispatch",
+						write: commit.write,
+					},
+				});
+				const original = send();
+				const first = yield* accepting
+					.dispatchEffect(original)
+					.pipe(Effect.forkChild);
+				yield* Effect.gen(function* () {
+					yield* Deferred.await(entered);
+					const foreign = yield* Effect.result(
+						accepting.dispatchEffect({
+							...original,
+							input: {
+								...original.input,
+								sessionId: "other-session",
+								projectId: "other-project",
+								workspaceRoot: "/tmp/other-project",
+							},
+						}),
+					).pipe(Effect.timeoutOption("100 millis"));
+					expect(foreign).toMatchObject({
+						_tag: "Some",
+						value: {
+							_tag: "Failure",
+							failure: { _tag: "CommandFingerprintMismatch" },
+						},
+					});
+					expect(calls).toEqual(["control-session"]);
+					expect(
+						yield* sql`SELECT project_key, status, attempt_count FROM provider_command_outbox WHERE command_id = ${original.commandId}`,
+					).toEqual([
+						{
+							project_key: "control-project",
+							status: "running",
+							attempt_count: 1,
+						},
+					]);
+				}).pipe(Effect.ensuring(Fiber.interrupt(first)));
+			}).pipe(Effect.provide(fixture())),
+		);
+	});
+
+	it("does not treat another engine's receipt replay waiter as an owned send", async () => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				const commit = yield* makeCommitAndSignal;
+				const entered = yield* Deferred.make<void>();
+				const replayEntered = yield* Deferred.make<void>();
+				let providerCalls = 0;
+				const instance = provider(() =>
+					Effect.gen(function* () {
+						providerCalls++;
+						yield* Deferred.succeed(entered, undefined);
+						return yield* Effect.never;
+					}),
+				);
+				const accepting = yield* engine(instance);
+				const command = send();
+				const first = yield* accepting
+					.dispatchEffect(command)
+					.pipe(Effect.forkChild);
+				yield* Effect.gen(function* () {
+					yield* Deferred.await(entered);
+					const replaying = new OrchestrationEngine({
+						registry: new ProviderRegistry([instance]),
+						durableCommands: {
+							sql,
+							ingestion: {
+								...ingestion,
+								ingest: (event, onPrompt) =>
+									Effect.gen(function* () {
+										// Stop receipt replay before it settles A's still-held send.
+										if (event.rawSource.kind === "conduit.command-replay") {
+											yield* Deferred.succeed(replayEntered, undefined);
+											yield* Effect.never;
+										}
+										return yield* ingestion.ingest(event, onPrompt);
+									}),
+							},
+							snapshot: yield* new CommandReadModelRepository(
+								sql,
+								"control-project",
+							).bootstrap(),
+							projectKey: "control-project",
+							now: () => 1000,
+							generateId: () => "replayed-dispatch",
+							write: commit.write,
+						},
+					});
+					const replay = yield* replaying
+						.dispatchEffect(command)
+						.pipe(Effect.forkChild);
+					yield* Effect.gen(function* () {
+						yield* Deferred.await(replayEntered);
+						const [attempt] = yield* sql<{
+							request_sequence: number;
+							attempt_count: number;
+						}>`SELECT request_sequence, attempt_count FROM provider_command_outbox WHERE command_id = ${command.commandId} ORDER BY request_sequence DESC LIMIT 1`;
+						ok(attempt);
+						const evidence = {
+							providerCalls,
+							acceptingOwns: accepting.ownsPendingSend(
+								command.input.sessionId,
+								command.commandId,
+								attempt.request_sequence,
+								attempt.attempt_count,
+							),
+							replayingOwns: replaying.ownsPendingSend(
+								command.input.sessionId,
+								command.commandId,
+								attempt.request_sequence,
+								attempt.attempt_count,
+							),
+							commands:
+								yield* sql`SELECT status, attempt_count FROM provider_command_outbox WHERE command_id = ${command.commandId}`,
+						};
+						mkdirSync("test-results", { recursive: true });
+						writeFileSync(
+							"test-results/82tn10-4-fix5-waiter-ownership.json",
+							JSON.stringify(evidence, null, 2),
+						);
+						expect(evidence.providerCalls).toBe(1);
+						expect(evidence.commands).toEqual([
+							{ status: "running", attempt_count: 1 },
+						]);
+						expect(evidence.acceptingOwns).toBe(true);
+						expect(evidence.replayingOwns).toBe(false);
+					}).pipe(Effect.ensuring(Fiber.interrupt(replay)));
+				}).pipe(Effect.ensuring(Fiber.interrupt(first)));
+			}).pipe(Effect.provide(fixture())),
+		);
+	});
+
+	it("owns a claimed send while its committed claim is still publishing", async () => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const claimCommitted = yield* Deferred.make<void>();
+				const releasePublication = yield* Deferred.make<void>();
+				let providerCalls = 0;
+				const command = send();
+				const wrapWrite =
+					(write: CommitAndSignal["write"]): CommitAndSignal["write"] =>
+					(body, options) =>
+						write(body, options).pipe(
+							Effect.tap(() =>
+								Effect.gen(function* () {
+									const [running] =
+										yield* sql`SELECT 1 FROM provider_command_outbox WHERE command_id = ${command.commandId} AND status = 'running'`.pipe(
+											Effect.orDie,
+										);
+									if (!running) return;
+									// The real write committed; publication has not returned to markRunning.
+									yield* Deferred.succeed(claimCommitted, undefined);
+									yield* Deferred.await(releasePublication);
+								}),
+							),
+						);
+				const accepting = yield* engine(
+					provider(() =>
+						Effect.gen(function* () {
+							providerCalls++;
+							return yield* Effect.never;
+						}),
+					),
+					undefined,
+					undefined,
+					undefined,
+					wrapWrite,
+				);
+				const execution = yield* accepting
+					.dispatchEffect(command)
+					.pipe(Effect.forkChild);
+				yield* Effect.gen(function* () {
+					yield* Deferred.await(claimCommitted);
+					const [attempt] = yield* sql<{
+						request_sequence: number;
+						attempt_count: number;
+					}>`SELECT request_sequence, attempt_count FROM provider_command_outbox WHERE command_id = ${command.commandId} ORDER BY request_sequence DESC LIMIT 1`;
+					ok(attempt);
+					const evidence = {
+						providerCalls,
+						ownsClaim: accepting.ownsPendingSend(
+							command.input.sessionId,
+							command.commandId,
+							attempt.request_sequence,
+							attempt.attempt_count,
+						),
+						commands:
+							yield* sql`SELECT status, attempt_count FROM provider_command_outbox WHERE command_id = ${command.commandId}`,
+					};
+					mkdirSync("test-results", { recursive: true });
+					writeFileSync(
+						"test-results/82tn10-4-fix5-claim-publication.json",
+						JSON.stringify(evidence, null, 2),
+					);
+					expect(evidence.providerCalls).toBe(0);
+					expect(evidence.commands).toEqual([
+						{ status: "running", attempt_count: 1 },
+					]);
+					expect(evidence.ownsClaim).toBe(true);
+				}).pipe(
+					Effect.ensuring(
+						Deferred.succeed(releasePublication, undefined).pipe(
+							Effect.andThen(Fiber.interrupt(execution)),
+						),
+					),
+				);
+			}).pipe(Effect.provide(fixture())),
 		);
 	});
 
@@ -1141,16 +1587,18 @@ describe("durable control outbox scheduling", () => {
 				yield* restarted.drainSideEffects();
 				yield* restartedOther.drainSideEffects();
 				expect(
-					yield* sql`SELECT command_id, status, attempt_count, next_attempt_at FROM provider_command_outbox ORDER BY request_sequence`,
+					yield* sql`SELECT command_id, project_key, status, attempt_count, next_attempt_at FROM provider_command_outbox ORDER BY request_sequence`,
 				).toEqual([
 					{
 						command_id: "bad-answer",
+						project_key: "control-project",
 						status: "failed",
 						attempt_count: 1,
 						next_attempt_at: null,
 					},
 					{
 						command_id: "later-stop",
+						project_key: "other-project",
 						status: "completed",
 						attempt_count: 1,
 						next_attempt_at: null,
@@ -1863,7 +2311,7 @@ describe("durable control outbox scheduling", () => {
 		false,
 		true,
 	])("keeps URL-only answer retries in their admitting runtime, restarted=%s", async (restart) => {
-		const api = makeMockOpenCodeAPI({
+		const api = makeControlApi({
 			promptProcessId: "url-process",
 			controlReplaySafe: false,
 		});
@@ -2105,7 +2553,7 @@ describe("durable control outbox scheduling", () => {
 		null,
 		"url-process",
 	])("cancels replay without a verifiable process identity: %s", async (processId) => {
-		const api = makeMockOpenCodeAPI({
+		const api = makeControlApi({
 			promptProcessId: "url-process",
 			controlReplaySafe: false,
 		});
@@ -2144,7 +2592,7 @@ describe("durable control outbox scheduling", () => {
 	});
 
 	it("delivers question rejection through the outbox to the fenced OpenCode client", async () => {
-		const api = makeMockOpenCodeAPI({
+		const api = makeControlApi({
 			promptProcessId: "question-process",
 			controlReplaySafe: true,
 		});
@@ -2165,7 +2613,7 @@ describe("durable control outbox scheduling", () => {
 				});
 				expect(api.question.reject).toHaveBeenCalledExactlyOnceWith(
 					"native-question",
-					undefined,
+					"/tmp/control-project",
 				);
 				expect(instance.resolveQuestionEffect).not.toHaveBeenCalled();
 				expect(

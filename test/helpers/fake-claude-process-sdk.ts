@@ -1115,7 +1115,11 @@ function query(params: {
 				yield stream(sessionId, { type: "content_block_stop", index: 9 });
 			}
 			// Native resume validation precedes intake, as it does in the CLI.
-			if (request === "load-stream-stop-before-intake" && proof) {
+			if (
+				(request === "load-stream-stop-before-intake" ||
+					request === "relay-replacement-before-intake") &&
+				proof
+			) {
 				mark({ kind: "intake-held", prompt, queryId, inputId: userUuid });
 				while (
 					!existsSync(join(dirname(proof), "release-stop-intake")) &&

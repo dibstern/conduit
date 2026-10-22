@@ -743,8 +743,16 @@ async function main(): Promise<void> {
 			},
 		});
 	}
-	if (existsSync(join(root, "daemon-adapters-proof"))) {
-		const proofPath = join(root, "daemon-adapters.ndjson");
+	if (
+		existsSync(join(root, "daemon-adapters-proof")) ||
+		existsSync(join(root, "daemon-engine-proof"))
+	) {
+		const proofPath = join(
+			root,
+			existsSync(join(root, "daemon-engine-proof"))
+				? "daemon-engine.ndjson"
+				: "daemon-adapters.ndjson",
+		);
 		const record = (entry: Record<string, unknown>) =>
 			appendFileSync(
 				proofPath,
@@ -915,6 +923,16 @@ async function main(): Promise<void> {
 					constructorName: instance.constructor.name,
 				});
 				const send = instance.sendTurnEffect.bind(instance);
+				const interrupt = instance.interruptTurnEffect.bind(instance);
+				instance.interruptTurnEffect = (...args) =>
+					Effect.gen(function* () {
+						const gate = join(root, "hold-control-delivery");
+						if (existsSync(gate)) {
+							record({ kind: "control-gap" });
+							while (existsSync(gate)) yield* Effect.sleep("10 millis");
+						}
+						return yield* interrupt(...args);
+					});
 				instance.sendTurnEffect = (input) =>
 					Effect.suspend(() => {
 						record({
@@ -928,7 +946,31 @@ async function main(): Promise<void> {
 							extraFolders: input.extraFolders,
 							shellMarker: input.shellEnv?.["PROJECT_OWNER"],
 						});
-						return send(input);
+						return Effect.gen(function* () {
+							const gate = join(root, "hold-provider-intake");
+							if (
+								existsSync(gate) &&
+								readFileSync(gate, "utf8") === input.sessionId
+							) {
+								record({ kind: "provider-intake-gap" });
+								while (existsSync(gate)) yield* Effect.sleep("10 millis");
+							}
+							return yield* send(input).pipe(
+								Effect.catch((error) => {
+									if (error.code !== "runner_detached")
+										return Effect.fail(error);
+									return Effect.gen(function* () {
+										const gate = join(root, "hold-detachment-error");
+										if (existsSync(gate)) {
+											record({ kind: "detachment-error-gap" });
+											while (existsSync(gate)) yield* Effect.sleep("10 millis");
+										}
+										record({ kind: "detachment-error-released" });
+										return yield* Effect.fail(error);
+									});
+								}),
+							);
+						});
 					});
 				const shutdown = instance.shutdownEffect.bind(instance);
 				instance.shutdownEffect = () =>
@@ -937,6 +979,37 @@ async function main(): Promise<void> {
 						return shutdown();
 					});
 				if (instance instanceof RunnerProviderInstance) {
+					const attach = instance.attachSessionsEffect.bind(instance);
+					instance.attachSessionsEffect = (...args) =>
+						Effect.gen(function* () {
+							record({
+								kind: "attachment",
+								driver: instance.providerId,
+								sessionIds: args[0],
+							});
+							const gate = join(root, "hold-attachment");
+							if (
+								instance.providerId === "claude" &&
+								existsSync(gate) &&
+								args[0].includes(readFileSync(gate, "utf8"))
+							) {
+								record({ kind: "attachment-gap" });
+								while (existsSync(gate)) yield* Effect.sleep("10 millis");
+								if (existsSync(join(root, "fail-attachment")))
+									return yield* Effect.die(
+										new Error("Fixture attachment failure"),
+									);
+							}
+							yield* attach(...args);
+							if (existsSync(join(root, "repeat-attachment"))) {
+								yield* attach(...args);
+								record({
+									kind: "attachment-repeated",
+									driver: instance.providerId,
+									sessionIds: args[0],
+								});
+							}
+						});
 					const recover = instance.recoverProjectContextsEffect.bind(instance);
 					instance.recoverProjectContextsEffect = (...args) =>
 						Effect.suspend(() => {
@@ -962,12 +1035,167 @@ async function main(): Promise<void> {
 			return register.call(this, instance);
 		};
 		let nextIdentity = 0;
+		const engines = new WeakMap<object, number>();
+		let nextEngineIdentity = 0;
+		const engineIdentity = (engine: object) => {
+			let identity = engines.get(engine);
+			if (identity === undefined) {
+				identity = ++nextEngineIdentity;
+				engines.set(engine, identity);
+				record({ kind: "engine-observed", engineIdentity: identity });
+			}
+			return identity;
+		};
+		subscribe("conduit.orchestration.engine", (message) => {
+			const event = message as { event: string; engine: object };
+			record({
+				kind: `engine-${event.event}`,
+				engineIdentity: engineIdentity(event.engine),
+			});
+		});
+		const dispatch = OrchestrationEngine.prototype.dispatchEffect;
+		Object.assign(OrchestrationEngine.prototype, {
+			dispatchEffect(
+				this: InstanceType<typeof OrchestrationEngine>,
+				command: import("../../src/lib/provider/orchestration-engine.js").OrchestrationCommand,
+			) {
+				record({
+					kind: "engine-command",
+					engineIdentity: engineIdentity(this),
+					commandId: command.commandId,
+					commandType: command.type,
+				});
+				return dispatch.call(this, command).pipe(
+					Effect.onExit((exit) =>
+						Effect.sync(() =>
+							record({
+								kind: "engine-command-exit",
+								commandId: command.commandId,
+								outcome: exit._tag,
+							}),
+						),
+					),
+				);
+			},
+		});
 		const drain = OrchestrationEngine.prototype.drainSideEffects;
+		const ownsPending = OrchestrationEngine.prototype.ownsPendingSend;
+		OrchestrationEngine.prototype.ownsPendingSend = function (...args) {
+			const owned = ownsPending.apply(this, args);
+			record({
+				kind: "pending-send-owner",
+				sessionId: args[0],
+				commandId: args[1],
+				owned,
+			});
+			return owned;
+		};
+		const { RelayCacheTag } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/daemon/Services",
+					`relay-cache.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/daemon/Services/relay-cache.js");
+		const { InputDraftsTag } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/relay/Services",
+					`input-drafts.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/relay/Services/input-drafts.js");
+		const { AccountDirectory } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/daemon/Services",
+					`account-directory.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/daemon/Services/account-directory.js");
+		let relayGateInstalled = false;
 		OrchestrationEngine.prototype.drainSideEffects = function (...args) {
 			return Effect.gen({ self: this }, function* () {
+				const detach = join(root, "detach-relay");
+				if (existsSync(detach)) {
+					const slug = readFileSync(detach, "utf8");
+					renameSync(detach, `${detach}.done`);
+					const cache = yield* Effect.serviceOption(RelayCacheTag);
+					if (cache._tag === "Some") {
+						yield* cache.value.invalidate(slug);
+						record({ kind: "relay-gap", projectId: slug });
+					}
+				}
+				if (!relayGateInstalled) {
+					const accounts = yield* Effect.serviceOption(AccountDirectory);
+					if (accounts._tag === "Some") {
+						const resolve = accounts.value.resolve;
+						const gated: typeof resolve = (...args) =>
+							Effect.gen(function* () {
+								const gate = join(root, "hold-claimed-account");
+								if (existsSync(gate)) {
+									const db = new DatabaseSync(
+										join(root, "config", "events.db"),
+									);
+									const claimed = db
+										.prepare(
+											"SELECT status FROM provider_command_outbox WHERE command_id = ?",
+										)
+										.get(readFileSync(gate, "utf8"));
+									db.close();
+									const entered = join(root, "claimed-account-entered");
+									if (
+										claimed?.["status"] === "running" &&
+										!existsSync(entered)
+									) {
+										writeFileSync(entered, "");
+										record({ kind: "claimed-account-gap" });
+										while (existsSync(gate)) yield* Effect.sleep("10 millis");
+									}
+								}
+								return yield* resolve(...args);
+							});
+						Object.assign(accounts.value, { resolve: gated });
+					}
+					const drafts = yield* Effect.serviceOption(InputDraftsTag);
+					if (drafts._tag === "Some") {
+						const invalidate = drafts.value.invalidateList;
+						Object.assign(drafts.value, {
+							invalidateList: () =>
+								Effect.gen(function* () {
+									const gate = join(root, "hold-import-publication");
+									if (existsSync(gate)) {
+										record({ kind: "import-gap" });
+										while (existsSync(gate)) yield* Effect.sleep("10 millis");
+									}
+									return yield* invalidate();
+								}),
+						});
+					}
+					const service = yield* Effect.serviceOption(RelayCacheTag);
+					if (service._tag === "Some") {
+						const cache = service.value;
+						const get = cache.get;
+						cache.get = (slug) =>
+							Effect.gen(function* () {
+								const gate = join(root, `hold-relay-${slug}`);
+								if (existsSync(gate)) {
+									record({ kind: "relay-gap", projectId: slug });
+									while (existsSync(gate)) yield* Effect.sleep("10 millis");
+								}
+								return yield* get(slug);
+							});
+						relayGateInstalled = true;
+					}
+				}
 				const project = yield* Effect.serviceOption(PersistenceProjectTag);
 				record({
 					kind: "outbox-drain",
+					engineIdentity: engineIdentity(this),
 					...(project._tag === "Some"
 						? { projectId: project.value.projectId }
 						: {}),

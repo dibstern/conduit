@@ -226,6 +226,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 			RunnerProviderInstanceDeps["recoveryForSession"]
 		>,
 		sessionIds?: ReadonlySet<string>,
+		ownsPendingSend?: OrchestrationEngine["ownsPendingSend"],
 	) =>
 		Effect.gen({ self: this }, function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -317,10 +318,18 @@ export class RunnerProviderInstance implements ProviderInstance {
 				(id) =>
 					accounts.accounts.find((account) => account.id === id)?.driver ??
 					accounts.deleted.find((account) => account.id === id)?.driver,
-				(sinkId, turn, failure) =>
+				(sinkId, turn, failure, beforeProject) =>
 					Effect.gen({ self: this }, function* () {
 						const recovery = yield* recoveryForSession(turn.sessionId);
 						if (!recovery) return;
+						const requestIds = new Set([
+							...(yield* recovery.pending.listPendingPermissions(
+								turn.sessionId,
+							)).map((request) => request.requestId),
+							...(yield* recovery.pending.listPendingQuestions(
+								turn.sessionId,
+							)).map((request) => request.requestId),
+						]);
 						let persistenceError: ProviderRuntimeIngestionError | undefined;
 						yield* failRunnerTurn(
 							(output) =>
@@ -330,13 +339,18 @@ export class RunnerProviderInstance implements ProviderInstance {
 										yield* recovery.ingestion.ingestBatch([output.event], {
 											publishToBus: false,
 											publishToRelay: false,
+											...(output.event.type === "turn.error"
+												? {
+														beforeProject,
+														beforeCommit:
+															recovery.pending.cancelSessionInteractions(
+																turn.sessionId,
+																failure.message,
+																{ recoverQuestions: false, requestIds },
+															),
+													}
+												: {}),
 										});
-									} else if (output.type === "cancel-interactions") {
-										yield* recovery.pending.cancelSessionInteractions(
-											turn.sessionId,
-											output.reason,
-											{ recoverQuestions: false },
-										);
 									}
 									return {};
 								}).pipe(
@@ -366,6 +380,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 					}),
 				recoveryForSession,
 				sessionIds,
+				ownsPendingSend,
 			);
 		});
 
@@ -404,8 +419,13 @@ export class RunnerProviderInstance implements ProviderInstance {
 		recoveryForSession: NonNullable<
 			RunnerProviderInstanceDeps["recoveryForSession"]
 		>,
+		ownsPendingSend?: OrchestrationEngine["ownsPendingSend"],
 	) {
-		return this.recoverWithContexts(recoveryForSession, new Set(sessionIds));
+		return this.recoverWithContexts(
+			recoveryForSession,
+			new Set(sessionIds),
+			ownsPendingSend,
+		);
 	}
 
 	private commandEffect(
@@ -424,7 +444,8 @@ export class RunnerProviderInstance implements ProviderInstance {
 						providerId: this.providerId,
 						operation: failure.operation,
 						cause: Object.assign(new Error(failure.message), failure),
-						...(failure.code === "provider_process_gone"
+						...(failure.code === "provider_process_gone" ||
+						(command.type === "send-turn" && failure.code === "runner_detached")
 							? { code: failure.code }
 							: {}),
 					}),

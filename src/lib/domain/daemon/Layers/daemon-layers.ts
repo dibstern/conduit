@@ -135,6 +135,7 @@ import {
 	ConfigSnapshotFromEffectStateLive,
 	makeConfigWriterLive,
 } from "./config-persistence-layer.js";
+import { DaemonOrchestrationLive } from "./daemon-orchestration-layer.js";
 import { makeDaemonSharedStoreLayer } from "./daemon-shared-store-layer.js";
 import {
 	DaemonWsRpcHandlersLive,
@@ -896,8 +897,11 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			);
 		}),
 	).pipe(Layer.provideMerge(withWorktrees));
-	const registries = RelayFactoryLive(configDir).pipe(
+	const withOrchestration = DaemonOrchestrationLive.pipe(
 		Layer.provideMerge(withSessionWorkspace),
+	);
+	const registries = RelayFactoryLive(configDir).pipe(
+		Layer.provideMerge(withOrchestration),
 	);
 
 	const withRelayCache = makeRelayCacheLayer().pipe(

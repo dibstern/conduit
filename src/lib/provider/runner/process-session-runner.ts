@@ -99,6 +99,7 @@ interface RunnerChild {
 	/** Exit callbacks run in the construction runtime, after recovery returns. */
 	readonly ingestion?: ProviderRuntimeIngestion | undefined;
 	readonly pendingInteractions?: PendingInteractionService | undefined;
+	awaitingProject?: boolean;
 	pid?: number | undefined;
 	child?: ChildProcess;
 	connection?: RunnerSocket;
@@ -458,7 +459,13 @@ export const makeProcessSessionRunner = (
 		const observeProcess = (sessionId: string, entry: RunnerChild) =>
 			Effect.gen(function* () {
 				if (observedProcesses.get(sessionId) === entry.runnerId) return;
-				const retirement = retireReplacedPrompts(entry.runnerId, { sessionId });
+				const retirement = deps.recoveryForSession
+					? (yield* deps.recoveryForSession(sessionId))?.retirePrompts(
+							entry.runnerId,
+						)
+					: legacyRetirePrompts?.(entry.runnerId, { sessionId });
+				// A skipped retirement must remain eligible when project services return.
+				if (!retirement) return;
 				yield* (
 					entry.pendingInteractions
 						? retirement.pipe(
@@ -740,8 +747,8 @@ export const makeProcessSessionRunner = (
 				evict(entry.sessionId, entry);
 				candidates.delete(entry);
 			});
-		const detach = (entry: RunnerChild) => {
-			entry.connection?.destroy();
+		const detach = (entry: RunnerChild, failure?: SessionFailure) => {
+			entry.connection?.destroy(failure);
 			entry.child?.unref();
 			if (entry.child?.connected) entry.child.disconnect();
 		};
@@ -933,8 +940,8 @@ export const makeProcessSessionRunner = (
 					entry.launch?.workspaceRoot ??
 					(yield* deps.projectRootForSession(sessionId)) ??
 					entry.registrationRoot ??
-					// Abandoned runners need only an identity hello before retirement.
-					(entry.candidate ? configDir : undefined);
+					// Orphans and withheld projects need only a verified identity hello.
+					(entry.candidate || entry.awaitingProject ? configDir : undefined);
 				if (!workspaceRoot)
 					return yield* Effect.fail(
 						runnerFailure(
@@ -976,6 +983,9 @@ export const makeProcessSessionRunner = (
 						);
 					},
 					emit: (received) => {
+						// Keep output in the runner's spool until its project can ingest it.
+						// The verified connection still permits native retirement meanwhile.
+						if (entry.awaitingProject) return Effect.interrupt;
 						const operation = Effect.suspend(() => {
 							// A retired query's shutdown notices must not clear its replacement.
 							if (
@@ -1036,6 +1046,13 @@ export const makeProcessSessionRunner = (
 										),
 									);
 								});
+							yield* ensureAttached();
+							entry.buildId = hello.buildId;
+							entry.stopsTasks = hello.stopsTasks === true;
+							entry.rebindsAccount = hello.rebindsAccount === true;
+							entry.upgrade.state = hello.upgradeState;
+							// Identity and native controls suffice until the project can reattach.
+							if (entry.awaitingProject) return;
 							// Warming candidates have not replaced the active process yet.
 							if (!entry.candidate)
 								yield* lock.withPermits(1)(
@@ -1055,10 +1072,6 @@ export const makeProcessSessionRunner = (
 									)
 								: undefined;
 							yield* acknowledgeSends(sessionId, entry, connection);
-							entry.buildId = hello.buildId;
-							entry.stopsTasks = hello.stopsTasks === true;
-							entry.rebindsAccount = hello.rebindsAccount === true;
-							entry.upgrade.state = hello.upgradeState;
 							const restoreAccounts: Effect.Effect<void, SessionFailure>[] = [];
 							for (const binding of entry.candidate
 								? []
@@ -1532,6 +1545,7 @@ export const makeProcessSessionRunner = (
 			children.get(sessionId) === entry &&
 			!entry.failure &&
 			!entry.recovering &&
+			!entry.awaitingProject &&
 			!entry.stopping &&
 			!entry.idleExiting &&
 			entry.ending === 0 &&
@@ -1758,7 +1772,7 @@ export const makeProcessSessionRunner = (
 									(entry.child && !entry.listening && !entry.verified)
 								)
 									yield* stop(entry);
-								else detach(entry);
+								else detach(entry, entry.failure);
 								evict(sessionId, entry);
 								candidates.delete(entry);
 								yield* releaseEntryWaiters(entry, Cause.fail(entry.failure));
@@ -1796,8 +1810,9 @@ export const makeProcessSessionRunner = (
 						if (
 							sessionIds &&
 							(!sessionIds.has(registration.sessionId) ||
-								children.get(registration.sessionId)?.runnerId ===
-									registration.runnerId)
+								(children.get(registration.sessionId)?.runnerId ===
+									registration.runnerId &&
+									!children.get(registration.sessionId)?.awaitingProject))
 						)
 							continue;
 						const persisted = sql
@@ -1841,7 +1856,13 @@ export const makeProcessSessionRunner = (
 						const recovery = yield* deps.recoveryForSession?.(
 							registration.sessionId,
 						) ?? Effect.succeed(undefined);
-						if (deps.recoveryForSession && persisted && !recovery) continue;
+						// Recovery also owns runners whose project cannot currently ingest.
+						// Reattach their spool once the project's services become available.
+						if (
+							children.get(registration.sessionId)?.awaitingProject &&
+							recovery
+						)
+							yield* runner.detachSessionEffect(registration.sessionId);
 						const ingestion =
 							recovery?.ingestion ??
 							(deps.recoveryForSession
@@ -1861,6 +1882,8 @@ export const makeProcessSessionRunner = (
 								? { registrationRoot: cleanupRoot ?? configDir }
 								: {}),
 							verified: false,
+							awaitingProject:
+								!!deps.recoveryForSession && !!persisted && !recovery,
 							candidate: abandoned,
 							stopping: false,
 							recovering: true,
@@ -2061,7 +2084,7 @@ export const makeProcessSessionRunner = (
 								return;
 							}
 							const commands =
-								sql && persisted
+								sql && persisted && !entry.awaitingProject
 									? yield* driver
 											.recoverCommands(
 												sql,

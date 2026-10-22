@@ -68,6 +68,14 @@ describe("provider control retry classification", () => {
 			],
 			[
 				{
+					code: "runner_detached",
+					operation: "detach runner",
+					message: "Project released its runner attachment",
+				},
+				true,
+			],
+			[
+				{
 					code: "runner_quarantined",
 					message: "PID still alive",
 					retryable: false,

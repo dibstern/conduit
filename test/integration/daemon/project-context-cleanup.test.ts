@@ -97,6 +97,12 @@ it.each([
 			db.prepare("SELECT id FROM sessions WHERE id = ?").get(sessionId),
 		).toBeUndefined();
 		// A committed control remains after its session projection is deleted.
+		db.prepare(`INSERT INTO command_receipts (command_id, session_id, project_key, status, created_at)
+			VALUES (?, ?, 'process-test', 'side_effect_requested', ?)`).run(
+			commandId,
+			sessionId,
+			Date.now(),
+		);
 		db.prepare(`INSERT INTO provider_command_outbox
 			(request_sequence, command_id, project_key, session_id, provider_id, effect_type,
 			 payload_json, provider_process_id, status, requested_at, updated_at)
@@ -126,13 +132,18 @@ it.each([
 			() => {
 				outcome = read
 					.prepare(
-						"SELECT project_key, status, attempt_count, error_code FROM provider_command_outbox WHERE command_id = ?",
+						`SELECT command.project_key, command.status, command.attempt_count, command.error_code,
+							receipt.status AS receipt_status, receipt.error_code AS receipt_error_code
+						FROM provider_command_outbox command JOIN command_receipts receipt USING (command_id)
+						WHERE command.command_id = ?`,
 					)
 					.get(commandId);
 				expect(outcome).toMatchObject({
 					project_key: "process-test",
 					status: "completed",
 					error_code: null,
+					receipt_status: "side_effect_completed",
+					receipt_error_code: null,
 				});
 			},
 			{ timeout: 10_000 },

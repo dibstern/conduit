@@ -67,6 +67,7 @@ import {
 	ConfigSnapshotTag,
 } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
+import { DaemonOrchestration } from "../Services/daemon-orchestration.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {
 	listArchivedSessions,
@@ -219,6 +220,7 @@ export const RelayFactoryLive = (
 				AccountResourceScopesTag,
 			);
 			const providerAdapters = yield* ProviderAdapters;
+			const orchestration = yield* Effect.serviceOption(DaemonOrchestration);
 			const cursorResources = yield* Effect.serviceOption(
 				CursorAccountResources,
 			);
@@ -566,6 +568,14 @@ export const RelayFactoryLive = (
 											),
 											Context.add(ProviderAdapters, providerAdapters),
 											Context.merge(
+												Option.isSome(orchestration)
+													? Context.make(
+															DaemonOrchestration,
+															orchestration.value,
+														)
+													: Context.empty(),
+											),
+											Context.merge(
 												Option.isSome(cursorResources)
 													? Context.make(
 															CursorAccountResources,
@@ -611,9 +621,9 @@ export const RelayFactoryLive = (
 											),
 											Context.add(PortScannerTag, portScanner),
 											Context.merge(storeContext),
-											Context.merge(daemonServices),
 										)
 										.pipe(
+											Context.merge(daemonServices),
 											Context.merge(
 												Option.isSome(sessionDirectory)
 													? Context.make(

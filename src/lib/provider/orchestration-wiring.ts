@@ -19,6 +19,7 @@ import { SessionWorkspaceSchema } from "../contracts/session-workspace.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { ConfigSnapshotTag } from "../domain/daemon/Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../domain/daemon/Services/daemon-config-ref.js";
+import { DaemonOrchestration } from "../domain/daemon/Services/daemon-orchestration.js";
 import { ProjectContext } from "../domain/daemon/Services/project-context.js";
 import { ProviderAdapters } from "../domain/daemon/Services/provider-adapters.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
@@ -49,7 +50,10 @@ import {
 	type ProviderRegistry,
 	ProviderRegistryTag,
 } from "./provider-registry.js";
-import { SqliteProviderSessionBindingReadModel } from "./provider-session-binding-read-model.js";
+import {
+	type ProviderSessionBindingReadModel,
+	SqliteProviderSessionBindingReadModel,
+} from "./provider-session-binding-read-model.js";
 import type { ProviderCall } from "./types.js";
 
 export interface OrchestrationRuntimeLayerOptions {
@@ -91,81 +95,43 @@ class OrchestrationComponentsTag extends Context.Service<
 	OrchestrationComponents
 >()("OrchestrationComponents") {}
 
-const createOrchestrationComponentsEffect = (
-	options: OrchestrationRuntimeLayerOptions,
-): Effect.Effect<
-	OrchestrationComponents,
-	Error,
-	| Scope.Scope
-	| SqlClient.SqlClient
-	| PersistenceProjectTag
-	| AccountDirectory
-	| ProviderAdapters
-	| SessionWorkspaceTag
-	| ClaudeEventPersistEffectTag
-	| ProviderRuntimeIngestionTag
-	| EventStoreEffectTag
-	| ProjectionRunnerEffectTag
-	| ProviderStateEffectTag
-	| ReadQueryEffectTag
-> =>
+export const makeProviderCallContextResolver = (options: {
+	readonly projectId?: string;
+	readonly workspaceRoot?: string;
+	readonly extraFolders?: readonly string[];
+	readonly shellEnv: NonNullable<OrchestrationRuntimeLayerOptions["shellEnv"]>;
+	readonly prepareShellEnv?: OrchestrationRuntimeLayerOptions["prepareShellEnv"];
+	readonly sessionWorkspace: Pick<
+		import("../domain/relay/Services/session-workspace.js").SessionWorkspace,
+		"get"
+	>;
+	readonly sessionBindingReadModel: ProviderSessionBindingReadModel;
+}) =>
 	Effect.gen(function* () {
-		const { registry } = yield* ProviderAdapters;
-		const configRef = yield* Effect.serviceOption(DaemonConfigRefTag);
-
-		// The relay's persistence SqlClient backs
-		// the session binding read model and durable command receipts, so
-		// orchestration shares the relay's single database connection.
-		const sql = yield* SqlClient.SqlClient;
-		const { projectId } = yield* PersistenceProjectTag;
-		const sessionBindingReadModel = new SqliteProviderSessionBindingReadModel(
-			sql,
-		);
-
-		// Sends use their admitted account snapshot. Other session operations
-		// resolve the historical binding through the in-memory directory.
 		const accountDirectory = yield* AccountDirectory;
-		const sessionWorkspace = yield* SessionWorkspaceTag;
-
-		const persist = yield* ClaudeEventPersistEffectTag;
-		let shellEnv = options.shellEnv;
-		let prepareShellEnv = options.prepareShellEnv;
-		if (!shellEnv) {
-			const resolver = yield* Effect.acquireRelease(
-				Effect.sync(() => new ProjectShellEnvResolver()),
-				(value) => Effect.sync(() => value.close()),
-			);
-			const directory = options.workspaceRoot ?? process.cwd();
-			const snapshot = yield* Effect.serviceOption(ConfigSnapshotTag);
-			const daemonConfig = Option.isSome(snapshot)
-				? yield* snapshot.value.build
-				: undefined;
-			const config =
-				daemonConfig?.projects.find((project) => project.slug === projectId) ??
-				daemonConfig?.projects.find(
-					(project) => resolve(project.path) === resolve(directory),
-				);
-			resolver.register(directory, config?.shellEnv, projectId);
-			shellEnv = (projectDir) => resolver.get(projectDir, projectId);
-			prepareShellEnv = (projectDir) =>
-				resolver.waitUntilReady(projectDir, projectId);
-		}
+		const { sessionWorkspace, sessionBindingReadModel } = options;
 		const read = yield* ReadQueryEffectTag;
 		const projectContexts = yield* Effect.serviceOption(ProjectContext);
 		const projectRoot = options.workspaceRoot ?? process.cwd();
-		const getShellEnv = shellEnv;
-		const prepareEnvironment = prepareShellEnv;
-		const resolveCallContext = (
+		const getShellEnv = options.shellEnv;
+		const prepareEnvironment = options.prepareShellEnv;
+		return (
 			request: ProviderCallRequest,
 		): Effect.Effect<ProviderCall, ProviderInstanceFailure> =>
 			Effect.gen(function* () {
+				const ambient = yield* Effect.serviceOption(PersistenceProjectTag);
+				const projectId =
+					request.projectId ??
+					(Option.isSome(ambient)
+						? ambient.value.projectId
+						: options.projectId);
 				const project = Option.isSome(projectContexts)
 					? yield* (
 							request.projectId
 								? projectContexts.value.forProject(request.projectId)
 								: request.sessionId
 									? projectContexts.value.forSession(request.sessionId)
-									: projectContexts.value.forProject(projectId)
+									: projectContexts.value.forProject(projectId ?? "")
 						).pipe(
 							Effect.catchTag("ProjectNotFound", (cause) =>
 								// Cleanup retains admitted folders when its project has been removed.
@@ -265,8 +231,17 @@ const createOrchestrationComponentsEffect = (
 								: project
 							).shellEnv
 						: getShellEnv(workspaceRoot);
+				const owner = project?.projectId ?? projectId;
+				if (!owner)
+					return yield* Effect.fail(
+						new ProviderInstanceFailure({
+							providerId: account.driver,
+							operation: "resolveCallContext",
+							cause: "A provider call requires its owning project",
+						}),
+					);
 				return Object.freeze({
-					projectId: project?.projectId ?? projectId,
+					projectId: owner,
 					sessionId: request.sessionId,
 					account,
 					workspaceRoot,
@@ -274,16 +249,104 @@ const createOrchestrationComponentsEffect = (
 					shellEnv: Object.freeze({ ...environment }),
 				});
 			}).pipe(
-				Effect.mapError(
-					(cause) =>
-						new ProviderInstanceFailure({
-							providerId:
-								request.account?.driver ?? request.providerId ?? "unknown",
-							operation: "resolveCallContext",
-							cause,
-						}),
+				Effect.mapError((cause) =>
+					cause instanceof ProviderInstanceFailure
+						? cause
+						: new ProviderInstanceFailure({
+								providerId:
+									request.account?.driver ?? request.providerId ?? "unknown",
+								operation: "resolveCallContext",
+								cause,
+							}),
 				),
 			);
+	});
+
+const createOrchestrationComponentsEffect = (
+	options: OrchestrationRuntimeLayerOptions,
+): Effect.Effect<
+	OrchestrationComponents,
+	Error,
+	| Scope.Scope
+	| SqlClient.SqlClient
+	| PersistenceProjectTag
+	| AccountDirectory
+	| ProviderAdapters
+	| SessionWorkspaceTag
+	| ClaudeEventPersistEffectTag
+	| ProviderRuntimeIngestionTag
+	| EventStoreEffectTag
+	| ProjectionRunnerEffectTag
+	| ProviderStateEffectTag
+	| ReadQueryEffectTag
+> =>
+	Effect.gen(function* () {
+		const { registry } = yield* ProviderAdapters;
+		const daemon = yield* Effect.serviceOption(DaemonOrchestration);
+		if (Option.isSome(daemon)) {
+			const openCodeInstance = yield* registry
+				.getInstanceEffect("opencode")
+				.pipe(Effect.orDie);
+			if (!(openCodeInstance instanceof OpenCodeProviderInstance))
+				return yield* Effect.fail(
+					new ProviderInstanceFailure({
+						providerId: "opencode",
+						operation: "createOrchestration",
+						cause: "opencode provider is not an OpenCodeProviderInstance",
+					}),
+				);
+			return { engine: daemon.value.engine, registry, openCodeInstance };
+		}
+		const configRef = yield* Effect.serviceOption(DaemonConfigRefTag);
+
+		// The relay's persistence SqlClient backs
+		// the session binding read model and durable command receipts, so
+		// orchestration shares the relay's single database connection.
+		const sql = yield* SqlClient.SqlClient;
+		const { projectId } = yield* PersistenceProjectTag;
+		const sessionBindingReadModel = new SqliteProviderSessionBindingReadModel(
+			sql,
+		);
+
+		// Sends use their admitted account snapshot. Other session operations
+		// resolve the historical binding through the in-memory directory.
+		const accountDirectory = yield* AccountDirectory;
+		const sessionWorkspace = yield* SessionWorkspaceTag;
+
+		const persist = yield* ClaudeEventPersistEffectTag;
+		let shellEnv = options.shellEnv;
+		let prepareShellEnv = options.prepareShellEnv;
+		if (!shellEnv) {
+			const resolver = yield* Effect.acquireRelease(
+				Effect.sync(() => new ProjectShellEnvResolver()),
+				(value) => Effect.sync(() => value.close()),
+			);
+			const directory = options.workspaceRoot ?? process.cwd();
+			const snapshot = yield* Effect.serviceOption(ConfigSnapshotTag);
+			const daemonConfig = Option.isSome(snapshot)
+				? yield* snapshot.value.build
+				: undefined;
+			const config =
+				daemonConfig?.projects.find((project) => project.slug === projectId) ??
+				daemonConfig?.projects.find(
+					(project) => resolve(project.path) === resolve(directory),
+				);
+			resolver.register(directory, config?.shellEnv, projectId);
+			shellEnv = (projectDir) => resolver.get(projectDir, projectId);
+			prepareShellEnv = (projectDir) =>
+				resolver.waitUntilReady(projectDir, projectId);
+		}
+		const resolveCallContext = yield* makeProviderCallContextResolver({
+			projectId,
+			sessionWorkspace,
+			sessionBindingReadModel,
+			shellEnv,
+			...(prepareShellEnv ? { prepareShellEnv } : {}),
+			...(options.workspaceRoot
+				? { workspaceRoot: options.workspaceRoot }
+				: {}),
+			extraFolders: options.extraFolders ?? [],
+		});
 		// Durable command receipts share the persistence SqlClient with the
 		// session binding read model. `now`/`generateId` are supplied at this wiring edge
 		// (wall clock + random) so core orchestration stays free of Date.now /
@@ -367,7 +430,8 @@ export const makeOrchestrationRuntimeLayer = (
 		OrchestrationComponentsTag,
 		Effect.gen(function* () {
 			const components = yield* createOrchestrationComponentsEffect(options);
-			yield* Effect.addFinalizer(() => components.engine.shutdownEffect());
+			if (Option.isNone(yield* Effect.serviceOption(DaemonOrchestration)))
+				yield* Effect.addFinalizer(() => components.engine.shutdownEffect());
 			return components;
 		}),
 	);
