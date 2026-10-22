@@ -24,6 +24,7 @@ import {
 } from "../events.js";
 import { makeCommitAndSignal } from "./commit-and-signal.js";
 import { EventStoreEffectTag } from "./event-store-effect.js";
+import { heldCatchUpKey } from "./provider-state-effect.js";
 import { isSessionDeleted } from "./session-seeder-effect.js";
 
 export class ClaudeEventPersistEffectError extends Data.TaggedError(
@@ -429,6 +430,9 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 							FROM events WHERE event_id = ${event.eventId} LIMIT 1`;
 						if (existing.length > 0) return;
 						yield* project(yield* eventStore.appendBatch([event]));
+						if (handoff.instanceId)
+							yield* sql`DELETE FROM provider_state WHERE session_id = ${sessionId}
+							AND key = ${heldCatchUpKey(handoff.instanceId)}`;
 					}),
 				);
 			}).pipe(Effect.mapError(mapPersistError("persistHandoffDelivered")));
