@@ -7,6 +7,9 @@
 	import type { BannerConfig } from "../../../types.js";
 	import Banners from "../../overlays/Banners.svelte";
 	import SessionBar from "../SessionBar.svelte";
+	import DebugPanel from "../../debug/DebugPanel.svelte";
+	import { featureFlags } from "../../../stores/feature-flags.svelte.js";
+	import { wsDebugState } from "../../../stores/ws-debug.svelte.js";
 
 	let {
 		width = 393,
@@ -33,3 +36,7 @@
 		<SessionBar {getGoalDetails} />
 	{/if}
 </div>
+
+{#if featureFlags.debug}
+	<DebugPanel visible={wsDebugState.panelOpen} onClose={() => { wsDebugState.panelOpen = false; }} />
+{/if}

@@ -73,7 +73,7 @@ export const PinnedFooterSafeArea: Story = {
 	args: { mode: "footer" },
 	play: async ({ canvasElement }) => {
 		const body = within(canvasElement.ownerDocument.body);
-		const menu = await body.findByRole("menu", { name: "Session actions" });
+		const menu = await body.findByRole("dialog", { name: "Session actions" });
 		const scroller = menu.querySelector<HTMLElement>("[data-sheet-body]");
 		const footer = menu.querySelector<HTMLElement>("[data-sheet-footer]");
 		if (!scroller || !footer)
@@ -88,7 +88,7 @@ export const PinnedFooterSafeArea: Story = {
 		scroller.scrollTop = 300;
 		await expect(scroller.scrollTop).toBeGreaterThan(0);
 		await expect(footer.getBoundingClientRect().top).toBe(top);
-		await expect(body.getByRole("menuitem", { name: "Share" })).toBeVisible();
+		await expect(body.getByRole("button", { name: "Share" })).toBeVisible();
 		scroller.scrollTop = 0;
 	},
 };
@@ -106,7 +106,7 @@ export const KeyboardAndDismissal: Story = {
 			name: "Open session actions",
 		});
 		await userEvent.click(trigger);
-		const menu = await body.findByRole("menu");
+		const menu = await body.findByRole("dialog");
 		await waitFor(() => expect(menu).toHaveFocus());
 		await userEvent.keyboard("{ArrowDown}");
 		await waitFor(() =>
@@ -116,13 +116,21 @@ export const KeyboardAndDismissal: Story = {
 		await waitFor(() =>
 			expect(body.getByRole("menuitem", { name: /Snooze/ })).toHaveFocus(),
 		);
+		await userEvent.keyboard("{Tab}");
+		await expect(body.getByRole("button", { name: "Share" })).toHaveFocus();
+		await userEvent.keyboard("{Tab}{Tab}");
+		await expect(
+			body.getByRole("switch", { name: "Debug panel" }),
+		).toHaveFocus();
+		await userEvent.keyboard("{Shift>}{Tab}{/Shift}");
+		await expect(body.getByRole("button", { name: "Settings" })).toHaveFocus();
 		await userEvent.keyboard("{Escape}");
 		await waitFor(() =>
 			expect(body.queryByRole("menu")).not.toBeInTheDocument(),
 		);
 		await expect(trigger).toHaveFocus();
 		await userEvent.click(trigger);
-		await userEvent.click(await body.findByRole("menuitem", { name: "Share" }));
+		await userEvent.click(await body.findByRole("button", { name: "Share" }));
 		await expect(canvas.getByTestId("sheet-picked")).toHaveTextContent("Share");
 		await waitFor(() =>
 			expect(body.queryByRole("menu")).not.toBeInTheDocument(),

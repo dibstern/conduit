@@ -18,6 +18,8 @@
 	import { featureFlags } from "../../stores/feature-flags.svelte.js";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
+	import MenuCheckboxItem from "../ui/MenuCheckboxItem.svelte";
+	import { wsDebugState } from "../../stores/ws-debug.svelte.js";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 	import { openSettings, toggleDebugPanel } from "./chrome-actions.js";
 	import Banners from "../overlays/Banners.svelte";
@@ -145,14 +147,15 @@
 				</MenuItem>
 				{#if featureFlags.debug}
 					<MenuSeparator />
-					<MenuItem
+					<MenuCheckboxItem
 						title="Toggle debug panel"
 						data-testid="list-overflow-debug"
 						class="min-h-[44px] md:min-h-0"
 						onselect={toggleDebugPanel}
+						checked={wsDebugState.panelOpen}
 					>
 						Debug panel
-					</MenuItem>
+					</MenuCheckboxItem>
 				{/if}
 			</Menu>
 		{:else}

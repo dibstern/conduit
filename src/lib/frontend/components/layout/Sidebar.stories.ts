@@ -338,9 +338,9 @@ export const PhoneOverflow: Story = {
 			within(menu).getByRole("menuitem", { name: "Settings" }),
 		).toBeVisible();
 		await expect(
-			within(menu).getByRole("menuitem", { name: "Debug panel" }),
+			within(menu).getByRole("menuitemcheckbox", { name: "Debug panel" }),
 		).toBeVisible();
-		await expect(within(menu).getAllByRole("menuitem")).toHaveLength(2);
+		await expect(within(menu).getAllByRole("menuitem")).toHaveLength(1);
 	},
 };
 

@@ -401,3 +401,10 @@
 		</div>
 	</div>
 {/if}
+
+<style>
+	/* Keep the panel below the open menu that contains its visibility switch. */
+	:global(body:has([role="menu"][data-state="open"])) .debug-panel {
+		z-index: var(--z-dropdown);
+	}
+</style>
