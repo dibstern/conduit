@@ -675,6 +675,7 @@ export const makeMessageProjector = defineProjector(() => ({
 		"tool.completed",
 		"file.attached",
 		"turn.completed",
+		"message.completed",
 		"turn.notice",
 		"turn.error",
 		"turn.interrupted",
@@ -782,7 +783,11 @@ export const makeMessageProjector = defineProjector(() => ({
 				);
 			// A result keyed by its prompt has no answer of its own. Its
 			// messageId can name the previous answer, whose usage and time stay put.
-			if (isEventType(event, "turn.completed") && event.data.userMessageId)
+			if (
+				(isEventType(event, "turn.completed") ||
+					isEventType(event, "message.completed")) &&
+				event.data.userMessageId
+			)
 				return [];
 			// Conduit facts also apply to settled OpenCode snapshots. Preserve the
 			// part's activity timestamps: judging it is not new agent activity.
@@ -1335,7 +1340,10 @@ export const makeMessageProjector = defineProjector(() => ({
 				);
 			}
 
-			if (isEventType(event, "turn.completed")) {
+			if (
+				isEventType(event, "turn.completed") ||
+				isEventType(event, "message.completed")
+			) {
 				// New Claude completions carry cost deltas, so repeated completions add.
 				// Other providers and historical Claude events retain latest-wins cost.
 				const tokens = event.data.tokens;
@@ -1669,6 +1677,7 @@ export const makeTurnProjector = defineProjector(() => ({
 		"tool.started",
 		"session.status",
 		"turn.completed",
+		"message.completed",
 		"turn.error",
 		"turn.interrupted",
 		"turn.model_resolved",
@@ -1792,7 +1801,11 @@ export const makeTurnProjector = defineProjector(() => ({
 			if (
 				event.metadata.rawSource !== "opencode.rest" &&
 				"messageId" in event.data &&
-				!(isEventType(event, "turn.completed") && event.data.userMessageId)
+				!(
+					(isEventType(event, "turn.completed") ||
+						isEventType(event, "message.completed")) &&
+					event.data.userMessageId
+				)
 			) {
 				const rows = yield* sql<{
 					rest_digest: string | null;
@@ -1925,7 +1938,10 @@ export const makeTurnProjector = defineProjector(() => ({
 				return { sessions: owners(written), messages: ids(written) };
 			}
 
-			if (isEventType(event, "turn.completed")) {
+			if (
+				isEventType(event, "turn.completed") ||
+				isEventType(event, "message.completed")
+			) {
 				const tokens = event.data.tokens;
 				yield* sql`UPDATE turns SET
 					cost = CASE WHEN ${event.data.providerCostTotalUsd !== undefined ? 1 : 0}
@@ -1937,6 +1953,8 @@ export const makeTurnProjector = defineProjector(() => ({
 					AND id = COALESCE(${event.data.userMessageId ?? null},
 						(SELECT turn_id FROM messages WHERE id = ${event.data.messageId}
 						 AND session_id = ${event.sessionId}))`;
+				if (event.type === "message.completed")
+					return { sessions: [event.sessionId], messages: [] };
 			}
 			if (!["pending", "running"].includes(run.status))
 				return { sessions: [event.sessionId], messages: [] };
@@ -2252,8 +2270,7 @@ export const makeInputProjector = defineProjector(() => ({
 			}
 
 			if (isEventType(event, "input.requeued")) {
-				return owners(
-					yield* sql<OwnedRow>`
+				const updated = yield* sql<OwnedRow>`
 						UPDATE pending_inputs SET state = 'queued', version = ${ctx.version},
 							admitted_at = CASE WHEN ${event.metadata.runId ?? null} IS NOT NULL THEN admitted_at
 								ELSE (SELECT COALESCE(MIN(admitted_at), ${event.createdAt}) - 1
@@ -2273,8 +2290,30 @@ export const makeInputProjector = defineProjector(() => ({
 								WHERE session_id = ${event.sessionId} AND type = 'input.sent'
 								AND json_extract(data, '$.inputId') = ${event.data.inputId}
 								AND sequence > ${event.data.sentSequence}))
-						RETURNING session_id`,
-				);
+						RETURNING session_id`;
+				if (updated.length && event.metadata.runId === undefined) {
+					// Separate settlements still return one block in original admission
+					// order. Keep its timestamps just ahead of the oldest admission.
+					yield* sql`WITH recovered AS (
+						SELECT pending.input_id, ROW_NUMBER() OVER (ORDER BY (
+							SELECT MIN(sequence) FROM events WHERE session_id = ${event.sessionId}
+							AND type = 'input.admitted' AND json_extract(data, '$.inputId') = pending.input_id
+						)) AS position
+						FROM pending_inputs pending WHERE pending.session_id = ${event.sessionId}
+						AND pending.state = 'queued' AND EXISTS (
+							SELECT 1 FROM events WHERE session_id = ${event.sessionId} AND type = 'input.requeued'
+							AND json_extract(data, '$.inputId') = pending.input_id AND sequence <= ${event.sequence}
+							AND json_extract(metadata, '$.runId') IS NULL
+						)
+					)
+					UPDATE pending_inputs SET admitted_at = (
+						SELECT MIN(created_at) FROM events WHERE session_id = ${event.sessionId} AND type = 'input.admitted'
+					) - (SELECT COUNT(*) FROM recovered) - 1
+						+ (SELECT position FROM recovered WHERE input_id = pending_inputs.input_id),
+						version = ${ctx.version}
+					WHERE input_id IN (SELECT input_id FROM recovered)`;
+				}
+				return owners(updated);
 			}
 
 			if (

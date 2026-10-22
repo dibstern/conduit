@@ -2,6 +2,7 @@ import { Effect, Exit, Option, Schedule, Scope } from "effect";
 import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
+import { DaemonOrchestration } from "../domain/daemon/Services/daemon-orchestration.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import {
 	type ProviderAdapterProjectContext,
@@ -173,11 +174,15 @@ function acquireStartupServices(inputs: StartupInputs) {
 		};
 		const sharedAdapters = yield* Effect.serviceOption(ProviderAdapters);
 		if (Option.isSome(sharedAdapters)) {
+			yield* orchestration.engine.prepareProjectRecovery(
+				persistenceProject.projectId,
+			);
 			yield* sharedAdapters.value
 				.registerProject(
 					persistenceProject.projectId,
 					yield* Effect.context<ProviderAdapterProjectContext>(),
 					onBackgroundWorkChanged,
+					orchestration.engine.ownsPendingSend.bind(orchestration.engine),
 				)
 				.pipe(Effect.provideService(Scope.Scope, relayManagedRuntime.scope));
 			yield* sharedAdapters.value.recover;
@@ -319,6 +324,10 @@ function acquireStartupServices(inputs: StartupInputs) {
 			sql,
 			"opencode",
 			(id) => accounts.accounts.find((account) => account.id === id)?.driver,
+			undefined,
+			// Removal cannot prove whether an OpenCode send reached the provider.
+			// Reattachment settles retained reservations from provider truth.
+			true,
 		);
 		const readOpenCodeStatuses = (instanceId: string, sessionId: string) =>
 			Effect.gen(function* () {
@@ -543,7 +552,7 @@ function startSseConsumers(
 }
 
 export async function startProjectRelay(inputs: StartupInputs) {
-	const { config, log, layers } = inputs;
+	const { config, layers } = inputs;
 	const { relayManagedRuntime } = layers;
 	try {
 		if (config.signal?.aborted) {
@@ -569,27 +578,30 @@ export async function startProjectRelay(inputs: StartupInputs) {
 						relayManagedRuntime.scope,
 					);
 					yield* (yield* SessionSetupTag).recover;
-					const makeInteractions = yield* makeEventSinkFactory;
-					// Recovery must settle crashed turns before an outbox claim can
-					// resend them. The runtime scope stops this fiber before providers
-					// and persistence are released, including failed startup.
-					yield* Effect.forkIn(
-						services.orchestration.drainSideEffects(makeInteractions).pipe(
-							Effect.catchCause((cause) =>
-								Failure.isInterruptedOnly(cause)
-									? Effect.interrupt
-									: Effect.logError(
-											"Provider command outbox drain failed",
-											cause,
-										),
+					const daemon = yield* Effect.serviceOption(DaemonOrchestration);
+					if (Option.isNone(daemon)) {
+						const makeInteractions = yield* makeEventSinkFactory;
+						// Recovery must settle crashed turns before an outbox claim can
+						// resend them. The runtime scope stops this fiber before providers
+						// and persistence are released, including failed startup.
+						yield* Effect.forkIn(
+							services.orchestration.drainSideEffects(makeInteractions).pipe(
+								Effect.catchCause((cause) =>
+									Failure.isInterruptedOnly(cause)
+										? Effect.interrupt
+										: Effect.logError(
+												"Provider command outbox drain failed",
+												cause,
+											),
+								),
+								// A sweep may wait for whole turns. Keep scanning newly due
+								// sessions while the reactor holds each active session's lease.
+								Effect.forkIn(relayManagedRuntime.scope),
+								Effect.repeat(Schedule.spaced(ENV.outboxDrainIntervalMs)),
 							),
-							// A sweep may wait for whole turns. Keep scanning newly due
-							// sessions while the reactor holds each active session's lease.
-							Effect.forkIn(relayManagedRuntime.scope),
-							Effect.repeat(Schedule.spaced(ENV.outboxDrainIntervalMs)),
-						),
-						relayManagedRuntime.scope,
-					);
+							relayManagedRuntime.scope,
+						);
+					}
 					// Providers are registered and recovered; queued inputs may drain.
 					yield* (yield* SessionInboxTag).start;
 				}).pipe(

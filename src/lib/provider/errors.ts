@@ -47,7 +47,10 @@ export class ProviderInstanceFailure extends Data.TaggedError(
 	readonly code?:
 		| "auth_required"
 		| "provider_process_gone"
-		| "provider_process_unavailable";
+		| "provider_process_unavailable"
+		| "runner_detached"
+		| "project_inactive"
+		| "project_unavailable";
 }> {
 	/** Classify the native adapter failure; unknown errors must not hold controls. */
 	get retryable(): boolean {
@@ -104,6 +107,7 @@ function isTransientProviderError(cause: unknown): boolean {
 			case "UND_ERR_SOCKET":
 			case "runner_idle_exit":
 			case "runner_recovery_abandoned":
+			case "runner_detached":
 				return true;
 		}
 	}

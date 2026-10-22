@@ -16,8 +16,8 @@ interface ContextObservation {
 	shellProof: string;
 }
 
-// Failures: resolving through another project's engine borrows its folders/env;
-// a live engine captures stale project settings; a workspace reset uses its root.
+// Failures: the daemon engine borrows another project's folders/env;
+// it captures stale project settings; a workspace reset uses the wrong root.
 describe("daemon project context at provider call time", () => {
 	let harness: ProcessHarness | undefined;
 	let evidence: Record<string, unknown> = {};
@@ -62,7 +62,7 @@ describe("daemon project context at provider call time", () => {
 		}
 	});
 
-	it("resolves B through A's retained engine and sees B's saved folders on its next call", async () => {
+	it("resolves both projects through the daemon engine and sees B's saved folders on its next call", async () => {
 		const fixture = ProcessHarness.create({ shellEnvProof: true });
 		harness = fixture;
 		writeFileSync(join(fixture.root, "project-context-proof"), "");
@@ -141,6 +141,7 @@ describe("daemon project context at provider call time", () => {
 			.at(-1);
 		evidence = { sessionA, sessionB, before };
 		expect(before).toMatchObject({
+			callerEngine: 1,
 			resolutionEngine: 1,
 			projectId: "project-b",
 			workspaceRoot: projectB,
@@ -148,7 +149,6 @@ describe("daemon project context at provider call time", () => {
 			projectOwner: "project-b",
 			shellProof: "server-cache",
 		});
-		expect(before?.callerEngine).not.toBe(1);
 
 		const saved = await fixture.requestRpc({
 			_tag: "SaveProject",
@@ -164,6 +164,7 @@ describe("daemon project context at provider call time", () => {
 			.at(-1);
 		evidence["after"] = after;
 		expect(after).toMatchObject({
+			callerEngine: 1,
 			resolutionEngine: 1,
 			projectId: "project-b",
 			workspaceRoot: projectB,

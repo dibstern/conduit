@@ -60,6 +60,7 @@ import { AccountDirectory } from "../Services/account-directory.js";
 import { CategorySet } from "../Services/category-set.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
+import { DaemonOrchestration } from "../Services/daemon-orchestration.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {
 	listArchivedSessions,
@@ -206,6 +207,7 @@ export const RelayFactoryLive = (
 		Effect.gen(function* () {
 			const accounts = yield* AccountDirectory;
 			const providerAdapters = yield* Effect.serviceOption(ProviderAdapters);
+			const orchestration = yield* Effect.serviceOption(DaemonOrchestration);
 			const cursorResources = yield* Effect.serviceOption(
 				CursorAccountResources,
 			);
@@ -520,6 +522,11 @@ export const RelayFactoryLive = (
 									).pipe(
 										Context.add(ConfigPersistenceTag, configPersistence),
 										Context.add(AccountDirectory, accounts),
+										Context.merge(
+											Option.isSome(orchestration)
+												? Context.make(DaemonOrchestration, orchestration.value)
+												: Context.empty(),
+										),
 										Context.merge(
 											Option.isSome(providerAdapters)
 												? Context.make(ProviderAdapters, providerAdapters.value)

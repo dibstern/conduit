@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, expect, it, vi } from "vitest";
 import { ProcessHarness } from "../../helpers/process-harness.js";
@@ -14,7 +14,7 @@ afterEach(async () => {
 it.each([
 	"turn",
 	"prewarm",
-] as const)("replays end_session after its session row is gone (%s)", async (activity) => {
+] as const)("settles end_session after its session row is gone (%s)", async (activity) => {
 	const fixture = ProcessHarness.create();
 	harness = fixture;
 	writeFileSync(join(fixture.root, "claude-end-session-failure-fixture"), "");
@@ -40,25 +40,33 @@ it.each([
 	unlinkSync(failure);
 	const db = new Database(fixture.daemonStorePath());
 	const commandId = `deleted-cleanup-${activity}`;
+	const providerProcessId = basename(runner.socketPath);
 	try {
 		expect(
 			db.prepare("SELECT id FROM sessions WHERE id = ?").get(sessionId),
 		).toBeUndefined();
 		// A committed control remains after its session projection is deleted.
+		db.prepare(`INSERT INTO command_receipts (command_id, session_id, project_key, status, created_at)
+			VALUES (?, ?, 'process-test', 'side_effect_requested', ?)`).run(
+			commandId,
+			sessionId,
+			Date.now(),
+		);
 		db.prepare(`INSERT INTO provider_command_outbox
 			(request_sequence, command_id, project_key, session_id, provider_id, effect_type,
 			 payload_json, provider_process_id, status, requested_at, updated_at)
 			VALUES ((SELECT COALESCE(MAX(request_sequence), 0) + 1 FROM provider_command_outbox),
-			 ?, 'process-test', ?, 'claude', 'end_session', ?, 'cleanup-process', 'pending', ?, ?)`).run(
+			 ?, 'process-test', ?, 'claude', 'end_session', ?, ?, 'pending', ?, ?)`).run(
 			commandId,
 			sessionId,
 			JSON.stringify({
 				type: "end_session",
 				commandId,
 				sessionId,
-				providerProcessId: "cleanup-process",
+				providerProcessId,
 				targetProviderId: "claude",
 			}),
+			providerProcessId,
 			Date.now(),
 			Date.now(),
 		);
@@ -73,13 +81,20 @@ it.each([
 			() => {
 				outcome = read
 					.prepare(
-						"SELECT project_key, status, attempt_count, error_code FROM provider_command_outbox WHERE command_id = ?",
+						`SELECT command.project_key, command.status, command.attempt_count, command.error_code,
+							receipt.status AS receipt_status, receipt.error_code AS receipt_error_code
+						FROM provider_command_outbox command JOIN command_receipts receipt USING (command_id)
+						WHERE command.command_id = ?`,
 					)
 					.get(commandId);
 				expect(outcome).toMatchObject({
 					project_key: "process-test",
-					status: "completed",
-					error_code: null,
+					// Startup retires the deleted session's runner, so its fenced control
+					// must settle as gone rather than dispatch to a different process.
+					status: "cancelled",
+					error_code: "provider_process_gone",
+					receipt_status: "side_effect_failed",
+					receipt_error_code: "provider_process_gone",
 				});
 			},
 			{ timeout: 10_000 },

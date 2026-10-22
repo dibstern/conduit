@@ -16,6 +16,7 @@ import {
 	loadDaemonConfigResult,
 } from "../daemon/config-persistence.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
+import { DaemonOrchestration } from "../domain/daemon/Services/daemon-orchestration.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { ProjectContext } from "../domain/daemon/Services/project-context.js";
 import { ProviderAdapters } from "../domain/daemon/Services/provider-adapters.js";
@@ -128,6 +129,173 @@ class OrchestrationComponentsTag extends Context.Service<
 	OrchestrationComponents
 >()("OrchestrationComponents") {}
 
+export const makeProviderCallContextResolver = (options: {
+	readonly projectId?: string;
+	readonly workspaceRoot?: string;
+	readonly extraFolders?: readonly string[];
+	readonly shellEnv: NonNullable<OrchestrationLayerOptions["shellEnv"]>;
+	readonly prepareShellEnv?: OrchestrationLayerOptions["prepareShellEnv"];
+	readonly sessionWorkspace: Pick<
+		import("../domain/relay/Services/session-workspace.js").SessionWorkspace,
+		"get"
+	>;
+	readonly sessionBindingReadModel: ProviderSessionBindingReadModel;
+}) =>
+	Effect.gen(function* () {
+		const accountDirectory = yield* AccountDirectory;
+		const { sessionWorkspace, sessionBindingReadModel } = options;
+		const read = yield* ReadQueryEffectTag;
+		const projectContexts = yield* Effect.serviceOption(ProjectContext);
+		const projectRoot = options.workspaceRoot ?? process.cwd();
+		const getShellEnv = options.shellEnv;
+		const prepareEnvironment = options.prepareShellEnv;
+		return (
+			request: ProviderCallRequest,
+		): Effect.Effect<ProviderCall, ProviderInstanceFailure> =>
+			Effect.gen(function* () {
+				const ambient = yield* Effect.serviceOption(PersistenceProjectTag);
+				const projectId =
+					request.projectId ??
+					(Option.isSome(ambient)
+						? ambient.value.projectId
+						: options.projectId);
+				const project = Option.isSome(projectContexts)
+					? yield* (
+							request.projectId
+								? projectContexts.value.forProject(request.projectId)
+								: request.sessionId
+									? projectContexts.value.forSession(request.sessionId)
+									: projectContexts.value.forProject(projectId ?? "")
+						).pipe(
+							Effect.catchTag("ProjectNotFound", (cause) =>
+								// Cleanup retains admitted folders when its project has been removed.
+								// Launches still require a registered project and current environment.
+								request.projectId &&
+								request.workspaceRoot &&
+								request.extraFolders &&
+								!request.requireRoutableAccount
+									? Effect.succeed({
+											projectId: request.projectId,
+											mainFolder: request.workspaceRoot,
+											extraFolders: request.extraFolders,
+											shellEnv: Object.freeze({}),
+										})
+									: Effect.fail(cause),
+							),
+						)
+					: undefined;
+				const mainFolder = project?.mainFolder ?? projectRoot;
+				const currentAccount = yield* accountDirectory
+					.resolve({
+						_tag: "Id",
+						id:
+							request.account?.id ??
+							request.providerId ??
+							(yield* sessionBindingReadModel.getProviderForSession(
+								request.sessionId,
+							)) ??
+							"opencode",
+					})
+					.pipe(
+						Effect.catchTag("AccountUnroutable", (cause) =>
+							request.account && !request.requireRoutableAccount
+								? Effect.succeed({ ...request.account, env: undefined })
+								: Effect.fail(cause),
+						),
+					);
+				const matches =
+					!request.account ||
+					(currentAccount.id === request.account.id &&
+						currentAccount.driver === request.account.driver);
+				if (request.account && request.requireRoutableAccount && !matches)
+					return yield* Effect.fail(
+						new AccountUnroutable({
+							ref: { _tag: "Id", id: request.account.id },
+						}),
+					);
+				const account = request.account
+					? {
+							...request.account,
+							env: matches ? currentAccount.env : undefined,
+						}
+					: currentAccount;
+				const session = request.sessionId
+					? yield* read.getSession(request.sessionId)
+					: undefined;
+				const workspaceRoot =
+					request.workspaceRoot ??
+					(session
+						? yield* sessionWorkspace.get(
+								request.sessionId,
+								undefined,
+								mainFolder,
+							)
+						: mainFolder);
+				const workspace = session?.workspace
+					? yield* Schema.decodeUnknownEffect(
+							Schema.fromJsonString(SessionWorkspaceSchema),
+						)(session.workspace)
+					: null;
+				const extraFolders =
+					request.extraFolders ??
+					effectiveSessionFolders(
+						[
+							mainFolder,
+							...(project?.extraFolders ?? options.extraFolders ?? []),
+						],
+						workspace,
+					)
+						.map(({ directory }) => directory)
+						.filter((directory) => directory !== workspaceRoot);
+				if (!project && request.prepareShellEnv && prepareEnvironment) {
+					yield* Effect.tryPromise(() =>
+						prepareEnvironment(workspaceRoot),
+					).pipe(
+						Effect.timeoutOption("10 seconds"),
+						Effect.catch(() => Effect.void),
+					);
+				}
+				const environment =
+					project && Option.isSome(projectContexts)
+						? (workspaceRoot !== project.mainFolder || request.prepareShellEnv
+								? yield* projectContexts.value.forProject(project.projectId, {
+										directory: workspaceRoot,
+										prepareShellEnv: request.prepareShellEnv === true,
+									})
+								: project
+							).shellEnv
+						: getShellEnv(workspaceRoot);
+				const owner = project?.projectId ?? projectId;
+				if (!owner)
+					return yield* Effect.fail(
+						new ProviderInstanceFailure({
+							providerId: account.driver,
+							operation: "resolveCallContext",
+							cause: "A provider call requires its owning project",
+						}),
+					);
+				return Object.freeze({
+					projectId: owner,
+					sessionId: request.sessionId,
+					account,
+					workspaceRoot,
+					extraFolders: Object.freeze([...extraFolders]),
+					shellEnv: Object.freeze({ ...environment }),
+				});
+			}).pipe(
+				Effect.mapError((cause) =>
+					cause instanceof ProviderInstanceFailure
+						? cause
+						: new ProviderInstanceFailure({
+								providerId:
+									request.account?.driver ?? request.providerId ?? "unknown",
+								operation: "resolveCallContext",
+								cause,
+							}),
+				),
+			);
+	});
+
 const createOrchestrationComponentsEffect = (
 	options: OrchestrationLayerOptions,
 ): Effect.Effect<
@@ -148,6 +316,18 @@ const createOrchestrationComponentsEffect = (
 > =>
 	Effect.gen(function* () {
 		const sharedAdapters = yield* Effect.serviceOption(ProviderAdapters);
+		const daemon = yield* Effect.serviceOption(DaemonOrchestration);
+		if (Option.isSome(daemon) && Option.isSome(sharedAdapters)) {
+			const registry = sharedAdapters.value.registry;
+			const openCodeInstance = yield* registry
+				.getInstanceEffect("opencode")
+				.pipe(Effect.orDie);
+			if (!(openCodeInstance instanceof OpenCodeProviderInstance))
+				return yield* Effect.die(
+					new Error("opencode provider is not an OpenCodeProviderInstance"),
+				);
+			return { engine: daemon.value.engine, registry, openCodeInstance };
+		}
 		const registry = Option.isSome(sharedAdapters)
 			? sharedAdapters.value.registry
 			: new ProviderRegistry();
@@ -249,140 +429,17 @@ const createOrchestrationComponentsEffect = (
 			prepareShellEnv = (projectDir) =>
 				resolver.waitUntilReady(projectDir, projectId);
 		}
-		const read = yield* ReadQueryEffectTag;
-		const projectContexts = yield* Effect.serviceOption(ProjectContext);
-		const projectRoot = options.workspaceRoot ?? process.cwd();
-		const getShellEnv = shellEnv;
-		const prepareEnvironment = prepareShellEnv;
-		const resolveCallContext = (
-			request: ProviderCallRequest,
-		): Effect.Effect<ProviderCall, ProviderInstanceFailure> =>
-			Effect.gen(function* () {
-				const project = Option.isSome(projectContexts)
-					? yield* (
-							request.projectId
-								? projectContexts.value.forProject(request.projectId)
-								: request.sessionId
-									? projectContexts.value.forSession(request.sessionId)
-									: projectContexts.value.forProject(projectId)
-						).pipe(
-							Effect.catchTag("ProjectNotFound", (cause) =>
-								// Cleanup retains admitted folders when its project has been removed.
-								// Launches still require a registered project and current environment.
-								request.projectId &&
-								request.workspaceRoot &&
-								request.extraFolders &&
-								!request.requireRoutableAccount
-									? Effect.succeed({
-											projectId: request.projectId,
-											mainFolder: request.workspaceRoot,
-											extraFolders: request.extraFolders,
-											shellEnv: Object.freeze({}),
-										})
-									: Effect.fail(cause),
-							),
-						)
-					: undefined;
-				const mainFolder = project?.mainFolder ?? projectRoot;
-				const currentAccount = yield* accountDirectory
-					.resolve({
-						_tag: "Id",
-						id:
-							request.account?.id ??
-							request.providerId ??
-							(yield* sessionBindingReadModel.getProviderForSession(
-								request.sessionId,
-							)) ??
-							"opencode",
-					})
-					.pipe(
-						Effect.catchTag("AccountUnroutable", (cause) =>
-							request.account && !request.requireRoutableAccount
-								? Effect.succeed({ ...request.account, env: undefined })
-								: Effect.fail(cause),
-						),
-					);
-				const matches =
-					!request.account ||
-					(currentAccount.id === request.account.id &&
-						currentAccount.driver === request.account.driver);
-				if (request.account && request.requireRoutableAccount && !matches)
-					return yield* Effect.fail(
-						new AccountUnroutable({
-							ref: { _tag: "Id", id: request.account.id },
-						}),
-					);
-				const account = request.account
-					? {
-							...request.account,
-							env: matches ? currentAccount.env : undefined,
-						}
-					: currentAccount;
-				const session = request.sessionId
-					? yield* read.getSession(request.sessionId)
-					: undefined;
-				const workspaceRoot =
-					request.workspaceRoot ??
-					(session
-						? yield* sessionWorkspace.get(
-								request.sessionId,
-								undefined,
-								mainFolder,
-							)
-						: mainFolder);
-				const workspace = session?.workspace
-					? yield* Schema.decodeUnknownEffect(
-							Schema.fromJsonString(SessionWorkspaceSchema),
-						)(session.workspace)
-					: null;
-				const extraFolders =
-					request.extraFolders ??
-					effectiveSessionFolders(
-						[
-							mainFolder,
-							...(project?.extraFolders ?? options.extraFolders ?? []),
-						],
-						workspace,
-					)
-						.map(({ directory }) => directory)
-						.filter((directory) => directory !== workspaceRoot);
-				if (!project && request.prepareShellEnv && prepareEnvironment) {
-					yield* Effect.tryPromise(() =>
-						prepareEnvironment(workspaceRoot),
-					).pipe(
-						Effect.timeoutOption("10 seconds"),
-						Effect.catch(() => Effect.void),
-					);
-				}
-				const environment =
-					project && Option.isSome(projectContexts)
-						? (workspaceRoot !== project.mainFolder || request.prepareShellEnv
-								? yield* projectContexts.value.forProject(project.projectId, {
-										directory: workspaceRoot,
-										prepareShellEnv: request.prepareShellEnv === true,
-									})
-								: project
-							).shellEnv
-						: getShellEnv(workspaceRoot);
-				return Object.freeze({
-					projectId: project?.projectId ?? projectId,
-					sessionId: request.sessionId,
-					account,
-					workspaceRoot,
-					extraFolders: Object.freeze([...extraFolders]),
-					shellEnv: Object.freeze({ ...environment }),
-				});
-			}).pipe(
-				Effect.mapError(
-					(cause) =>
-						new ProviderInstanceFailure({
-							providerId:
-								request.account?.driver ?? request.providerId ?? "unknown",
-							operation: "resolveCallContext",
-							cause,
-						}),
-				),
-			);
+		const resolveCallContext = yield* makeProviderCallContextResolver({
+			projectId,
+			sessionWorkspace,
+			sessionBindingReadModel,
+			shellEnv,
+			...(prepareShellEnv ? { prepareShellEnv } : {}),
+			...(options.workspaceRoot
+				? { workspaceRoot: options.workspaceRoot }
+				: {}),
+			extraFolders: options.extraFolders ?? [],
+		});
 		if (Option.isNone(sharedAdapters)) {
 			const claudeInstance = yield* ClaudeDriver.create({
 				shellEnv,
@@ -537,7 +594,8 @@ export const makeOrchestrationRuntimeLayer = (
 					? { claudeRunnerFactory: options.claudeRunnerFactory }
 					: {}),
 			});
-			yield* Effect.addFinalizer(() => components.engine.shutdownEffect());
+			if (Option.isNone(yield* Effect.serviceOption(DaemonOrchestration)))
+				yield* Effect.addFinalizer(() => components.engine.shutdownEffect());
 			return components;
 		}),
 	);

@@ -118,6 +118,89 @@ function makeProvider(
 }
 
 describe("ProviderSideEffectReactor", () => {
+	for (const providerId of ["claude", "cursor"])
+		it.effect(`retains a detached ${providerId} send for runner recovery`, () =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedSendTurnOutbox(sql, { providerId });
+				const detached = yield* Deferred.make<void>();
+				let reactor: ProviderSideEffectReactor;
+				const recoverDetachedSession = vi.fn((sessionId: string) =>
+					Effect.sync(() => {
+						expect(sessionId).toBe("session-1");
+						expect(reactor.ownsPendingSend(sessionId, "cmd-1", 10, 1)).toBe(
+							false,
+						);
+					}),
+				);
+				reactor = yield* makeReactor({
+					recoverDetachedSession,
+					registry: new ProviderRegistry([
+						makeProvider(
+							() =>
+								Deferred.succeed(detached, undefined).pipe(
+									Effect.andThen(
+										Effect.fail(
+											new ProviderInstanceFailure({
+												providerId,
+												operation: "detach runner",
+												code: "runner_detached",
+												cause: "Project released its runner attachment",
+											}),
+										),
+									),
+								),
+							providerId,
+						),
+					]),
+				});
+				const worker = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
+				yield* Deferred.await(detached);
+				yield* TestClock.adjust("1 second");
+				expect(recoverDetachedSession).toHaveBeenCalledExactlyOnceWith(
+					"session-1",
+				);
+				expect(
+					yield* sql`SELECT status, error_code, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "running", error_code: null, attempt_count: 1 }]);
+				expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
+					{ status: "side_effect_requested" },
+				]);
+				expect(
+					yield* sql`SELECT status, started_at FROM provider_runs`,
+				).toEqual([{ status: "pending", started_at: null }]);
+				expect(
+					yield* sql`SELECT type FROM events WHERE type = 'turn.error'`,
+				).toEqual([]);
+				expect(reactor.ownsPendingSend("session-1", "cmd-1", 10, 1)).toBe(
+					false,
+				);
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				for (const type of ["run.started", "turn.completed"] as const)
+					yield* ingestion.ingest({
+						eventId: `recovered:${type}`,
+						type,
+						providerId,
+						sessionId: "session-1",
+						runId: "run:cmd-1",
+						providerRefs: {},
+						rawSource: { kind: "test.runner-recovery" },
+						createdAt: 2000,
+						data:
+							type === "run.started"
+								? { inputId: "legacy-user-1", requestedRunId: "run:cmd-1" }
+								: { messageId: "", duration: 1 },
+					});
+				yield* TestClock.adjust("1 second");
+				expect(yield* Fiber.join(worker)).toMatchObject({
+					status: "completed",
+				});
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "completed", attempt_count: 1 }]);
+			}).pipe(Effect.provide(reactorTestLayer)),
+		);
+
 	it.effect(
 		"places a claimed input and its failure before intake atomically",
 		() =>
@@ -1216,6 +1299,71 @@ describe("ProviderSideEffectReactor", () => {
 			expect(ingest).toHaveBeenCalledWith(runtimeEvent);
 			expect(interactions.push).not.toHaveBeenCalled();
 		}).pipe(Effect.provide(reactorTestLayer)),
+	);
+
+	it.effect(
+		"uses the current project sink when a foreground interaction arrives",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedSendTurnOutbox(sql);
+				const sink = () => ({
+					push: vi.fn(() => Effect.void),
+					requestPermission: vi.fn(() =>
+						Effect.succeed<PermissionResponse>({ decision: "once" }),
+					),
+					requestQuestion: vi.fn(() => Effect.succeed({})),
+					resolvePermission: vi.fn(() => Effect.void),
+					resolveQuestion: vi.fn(() => Effect.void),
+					noteActivity: vi.fn(),
+				});
+				const original = sink();
+				const replacement = sink();
+				let current = original;
+				const entered = yield* Deferred.make<void>();
+				const release = yield* Deferred.make<void>();
+				const request = {
+					requestId: "approval-after-replacement",
+					sessionId: "session-1",
+					turnId: "turn-1",
+					providerItemId: "tool-1",
+					toolName: "Bash",
+					toolInput: { command: "pwd" },
+				};
+				const reactor = yield* makeReactor({
+					makeInteractions: () => Effect.sync(() => current),
+					registry: new ProviderRegistry([
+						makeProvider((input) =>
+							Effect.gen(function* () {
+								yield* Deferred.succeed(entered, undefined);
+								yield* Deferred.await(release);
+								yield* input.eventSink.requestPermission(request);
+								return completedTurn;
+							}).pipe(
+								Effect.mapError(
+									(cause) =>
+										new ProviderInstanceFailure({
+											providerId: "claude",
+											operation: "sendTurn",
+											cause,
+										}),
+								),
+							),
+						),
+					]),
+				});
+				const worker = yield* Effect.forkChild(
+					reactor.runCommand("cmd-1", original),
+				);
+				yield* Deferred.await(entered);
+				current = replacement;
+				yield* Deferred.succeed(release, undefined);
+				yield* Fiber.join(worker);
+				expect(replacement.requestPermission).toHaveBeenCalledExactlyOnceWith(
+					request,
+				);
+				expect(original.requestPermission).not.toHaveBeenCalled();
+			}).pipe(Effect.provide(reactorTestLayer)),
 	);
 
 	// A direct waiter must not bypass backoff, and a failed claim must escape

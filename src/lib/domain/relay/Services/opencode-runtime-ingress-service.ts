@@ -1090,7 +1090,11 @@ export class EffectOpenCodeRuntimeIngress
 									${openCodeInputMessageId(command.user_message_id ?? command.command_id)}) AS user_message_id
 								FROM provider_command_outbox outbox JOIN sessions ON sessions.id = outbox.session_id
 								WHERE outbox.project_key = ${this.projectId} AND outbox.command_id = ${command.command_id}
-								AND outbox.status = 'running' AND outbox.attempt_count = ${command.attempt_count}`;
+								AND outbox.request_sequence = ${command.request_sequence}
+								AND outbox.status = ${command.status} AND outbox.attempt_count = ${command.attempt_count}
+								AND (outbox.status = 'running' OR (outbox.status = 'cancelled' AND outbox.error_code = 'project_inactive'
+									AND EXISTS (SELECT 1 FROM provider_runs run WHERE run.id = outbox.run_id
+										AND run.session_id = outbox.session_id AND run.status IN ('pending', 'running'))))`;
 							if (!claim) {
 								yield* requeue;
 								pending.delete(command);
@@ -1153,7 +1157,9 @@ export class EffectOpenCodeRuntimeIngress
 												.sql`SELECT 1 FROM provider_command_outbox outbox
 										JOIN sessions ON sessions.id = outbox.session_id
 										WHERE outbox.project_key = ${this.projectId} AND outbox.command_id = ${command.command_id}
-										AND outbox.status = 'running' AND outbox.attempt_count = ${command.attempt_count}
+										AND outbox.request_sequence = ${command.request_sequence}
+										AND outbox.status = ${command.status} AND outbox.attempt_count = ${command.attempt_count}
+										AND (outbox.status = 'running' OR (outbox.status = 'cancelled' AND outbox.error_code = 'project_inactive'))
 										AND sessions.provider = ${instanceId}
 										AND (SELECT MAX(request_sequence) FROM provider_command_outbox WHERE session_id = ${sessionId} AND effect_type = 'send_turn') = ${claim.latest_sequence}
 										AND (SELECT MAX(request_sequence) FROM provider_command_outbox WHERE session_id = ${sessionId} AND effect_type = 'send_turn' AND status NOT IN ('completed', 'failed')) = ${claim.latest_active_sequence}
@@ -1320,7 +1326,11 @@ export class EffectOpenCodeRuntimeIngress
 									// crash here is covered by the inbox startup requeue sweep.
 									const terminal = yield* this
 										.sql`SELECT 1 FROM provider_command_outbox WHERE project_key = ${this.projectId}
-										AND command_id = ${command.command_id} AND attempt_count = ${command.attempt_count} AND status IN ('completed', 'failed')`;
+										AND command_id = ${command.command_id} AND request_sequence = ${command.request_sequence}
+										AND attempt_count = ${command.attempt_count}
+										AND (status IN ('completed', 'failed') OR (status = 'cancelled' AND error_code = 'project_inactive'
+											AND NOT EXISTS (SELECT 1 FROM provider_runs run WHERE run.id = ${claim.run_id}
+												AND run.session_id = ${sessionId} AND run.status IN ('pending', 'running'))))`;
 									if (!terminal.length) return;
 									yield* requeue;
 									pending.delete(command);

@@ -3,6 +3,7 @@ import {
 	Context,
 	Deferred,
 	Effect,
+	Exit,
 	Fiber,
 	HashMap,
 	Layer,
@@ -13,6 +14,7 @@ import {
 import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import {
 	type ClaudeEventPersistEffect,
 	ClaudeEventPersistEffectError,
@@ -80,6 +82,7 @@ export const makeProviderAdaptersLive = (configDir: string) =>
 				string,
 				{
 					readonly context: Context.Context<ProviderAdapterProjectContext>;
+					ready: boolean;
 					readonly onBackgroundWorkChanged?: (sessionId: string) => void;
 				}
 			>();
@@ -412,8 +415,14 @@ export const makeProviderAdaptersLive = (configDir: string) =>
 					const runners = yield* Effect.try(() =>
 						discoverRunners(entry.project.folders[0], configDir),
 					);
+					// Controls can outlive both their runner and session projection.
+					// Lend their registered project's services before the first drain.
+					const pendingCommands =
+						yield* sql`SELECT 1 FROM provider_command_outbox
+						WHERE project_key = ${projectId} AND status IN ('pending', 'running', 'retryable_failed') LIMIT 1`;
 					return (
 						runners.length > 0 ||
+						pendingCommands.length > 0 ||
 						(yield* hasProviderRecoveryCandidate(
 							entry.project,
 							recoveryProviderIds,
@@ -457,14 +466,72 @@ export const makeProviderAdaptersLive = (configDir: string) =>
 			);
 			return {
 				registry,
+				projectContext: (projectId) =>
+					Option.fromUndefinedOr(
+						borrowed.get(projectId)?.ready
+							? borrowed.get(projectId)?.context
+							: undefined,
+					),
 				recoveryProjects,
 				recover: Fiber.join(recovery),
 				projectFailed,
-				registerProject: (projectId, context, onBackgroundWorkChanged) =>
+				recoverDetachedSession: (sessionId) =>
+					projectBorrows.withPermits(1)(
+						Effect.gen(function* () {
+							const project = yield* projectContext(sessionId);
+							if (!project?.ready) return;
+							const engine = Context.get(
+								project.context,
+								OrchestrationEngineTag,
+							);
+							for (const providerId of registry.listProviders()) {
+								const adapter = registry.getInstance(providerId);
+								if (adapter instanceof RunnerProviderInstance) {
+									const attached = yield* adapter
+										.attachSessionsEffect(
+											[sessionId],
+											recoveryForSession,
+											(...args) => engine.ownsPendingSend(...args),
+										)
+										.pipe(
+											Effect.provideService(SqlClient.SqlClient, sql),
+											Effect.exit,
+										);
+									if (Exit.isFailure(attached)) {
+										if (Failure.isInterruptedOnly(attached.cause))
+											return yield* Effect.interrupt;
+										unavailable.set(
+											project.projectId,
+											"Provider attachment recovery failed",
+										);
+										yield* projectFailed(project.projectId);
+										return yield* Effect.logError(
+											"Detached provider attachment recovery failed",
+											attached.cause,
+										);
+									}
+								}
+							}
+						}).pipe(
+							Effect.catch((cause) =>
+								Effect.logError(
+									"Could not resolve detached session's project",
+									cause,
+								),
+							),
+						),
+					),
+				registerProject: (
+					projectId,
+					context,
+					onBackgroundWorkChanged,
+					ownsPendingSend,
+				) =>
 					projectBorrows.withPermits(1)(
 						Effect.gen(function* () {
 							const project = {
 								context,
+								ready: false,
 								...(onBackgroundWorkChanged ? { onBackgroundWorkChanged } : {}),
 							};
 							borrowed.set(projectId, project);
@@ -497,16 +564,50 @@ export const makeProviderAdaptersLive = (configDir: string) =>
 							if (recovered) {
 								const sessions = yield* sql<{
 									readonly id: string;
-								}>`SELECT id FROM sessions WHERE project_id = ${projectId}`.pipe(
-									Effect.orDie,
-								);
+									readonly awaiting_intake: string | null;
+									readonly request_sequence: number | null;
+									readonly attempt_count: number | null;
+								}>`SELECT sessions.id, command.command_id AS awaiting_intake, command.request_sequence, command.attempt_count
+								FROM sessions LEFT JOIN provider_command_outbox command ON command.request_sequence = (
+									SELECT command.request_sequence FROM provider_command_outbox command JOIN provider_runs run ON run.id = command.run_id
+									WHERE command.session_id = sessions.id AND command.effect_type = 'send_turn'
+										AND command.status = 'running' AND run.status = 'pending' AND run.started_at IS NULL
+										AND NOT EXISTS (
+									SELECT 1 FROM provider_runs started WHERE started.session_id = sessions.id
+										AND started.status IN ('pending', 'running') AND started.started_at IS NOT NULL
+										)
+									ORDER BY command.request_sequence LIMIT 1
+								) WHERE sessions.project_id = ${projectId}`.pipe(Effect.orDie);
 								for (const providerId of registry.listProviders()) {
 									const adapter = registry.getInstance(providerId);
 									if (adapter instanceof RunnerProviderInstance)
 										yield* adapter
 											.attachSessionsEffect(
-												sessions.map(({ id }) => id),
+												// The daemon drain still owns unstarted sends across a
+												// relay gap; replacement must not settle them as orphans.
+												sessions
+													.filter(
+														({
+															id,
+															awaiting_intake,
+															request_sequence,
+															attempt_count,
+														}) =>
+															!(
+																awaiting_intake &&
+																request_sequence !== null &&
+																attempt_count !== null &&
+																ownsPendingSend?.(
+																	id,
+																	awaiting_intake,
+																	request_sequence,
+																	attempt_count,
+																)
+															),
+													)
+													.map(({ id }) => id),
 												recoveryForSession,
+												ownsPendingSend,
 											)
 											.pipe(
 												Effect.provideService(SqlClient.SqlClient, sql),
@@ -514,8 +615,24 @@ export const makeProviderAdaptersLive = (configDir: string) =>
 											);
 								}
 							}
-							yield* projectFailed(projectId);
-						}),
+							// Recovery may use the context above, but the drain can borrow
+							// it only after attachment has finished classifying old commands.
+							project.ready = true;
+						}).pipe(
+							Effect.onExit((exit) =>
+								Effect.gen(function* () {
+									if (
+										Exit.isFailure(exit) &&
+										!Failure.isInterruptedOnly(exit.cause)
+									)
+										unavailable.set(
+											projectId,
+											"Provider attachment recovery failed",
+										);
+									yield* projectFailed(projectId);
+								}),
+							),
+						),
 					),
 			} satisfies ProviderAdapters["Service"];
 		}),

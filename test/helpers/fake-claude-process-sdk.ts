@@ -627,6 +627,7 @@ function query(params: {
 	let taskStopHolding = false;
 	let taskStopHeldRequest: string | undefined;
 	let taskTurnInterrupted = false;
+	let turnInterrupted = false;
 	let closed = false;
 	let promptIndex = 0;
 	let initializationFinished = false;
@@ -924,6 +925,7 @@ function query(params: {
 							.map((block) => block.text)
 							.join("");
 			const request = currentRequest(prompt);
+			turnInterrupted = false;
 			const userUuid = input.uuid ?? randomUUID();
 			if (request === "fail-before-intake")
 				throw new Error("Harness SDK iterator failed before intake");
@@ -1068,7 +1070,11 @@ function query(params: {
 				continue;
 			}
 			// Native resume validation precedes intake, as it does in the CLI.
-			if (request === "load-stream-stop-before-intake" && proof) {
+			if (
+				(request === "load-stream-stop-before-intake" ||
+					request === "relay-replacement-before-intake") &&
+				proof
+			) {
 				mark({ kind: "intake-held", prompt, queryId, inputId: userUuid });
 				while (
 					!existsSync(join(dirname(proof), "release-stop-intake")) &&
@@ -1789,14 +1795,34 @@ function query(params: {
 				}
 				continue;
 			}
-			if (request.startsWith("stall-"))
-				await new Promise<void>((done) => {
-					params.options?.abortController?.signal.addEventListener(
-						"abort",
-						() => done(),
-						{ once: true },
-					);
-				});
+			// These prompts model a query that ends after its interrupted result.
+			if (request.startsWith("stall-")) {
+				while (
+					!closed &&
+					!turnInterrupted &&
+					!params.options?.abortController?.signal.aborted
+				)
+					await new Promise<void>((done) => setTimeout(done, 20));
+				if (closed || params.options?.abortController?.signal.aborted) return;
+				yield {
+					type: "result",
+					subtype: "error_during_execution",
+					uuid: randomUUID(),
+					session_id: sessionId,
+					is_error: true,
+					errors: ["Execution ended"],
+					duration_ms: 0,
+					duration_api_ms: 0,
+					num_turns: 1,
+					stop_reason: null,
+					total_cost_usd: 0,
+					usage: taskStopUsage,
+					modelUsage: {},
+					permission_denials: [],
+					user_message_uuid: userUuid,
+				};
+				return;
+			}
 			const workspaceHintPrefix = "workspace-hint-tools ";
 			const workspaceHintRequest = request
 				.split("\n")
@@ -2207,8 +2233,27 @@ function query(params: {
 			} as unknown as SDKMessage;
 			if (request === "terminal-replay-interrupt") {
 				mark({ kind: "assistant-held", prompt, queryId });
-				while (!closed) await new Promise<void>((done) => setTimeout(done, 20));
-				return;
+				while (!closed && !turnInterrupted)
+					await new Promise<void>((done) => setTimeout(done, 20));
+				if (closed) return;
+				yield {
+					type: "result",
+					subtype: "error_during_execution",
+					uuid: randomUUID(),
+					session_id: sessionId,
+					is_error: true,
+					errors: ["Execution ended"],
+					duration_ms: 0,
+					duration_api_ms: 0,
+					num_turns: 1,
+					stop_reason: null,
+					total_cost_usd: 0,
+					usage: taskStopUsage,
+					modelUsage: {},
+					permission_denials: [],
+					user_message_uuid: userUuid,
+				};
+				continue;
 			}
 			if (request.startsWith("task-stop-foreground"))
 				mark({
@@ -2593,6 +2638,7 @@ function query(params: {
 				throw new Error("Fixture interrupt rejected");
 			}
 			if (taskStopHolding) taskTurnInterrupted = true;
+			turnInterrupted = true;
 			mark({
 				kind: "query-interrupted",
 				queryId,

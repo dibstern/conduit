@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import {
 	Clock,
+	type Context,
 	Data,
 	Duration,
 	Effect,
+	Exit,
 	Fiber,
 	Option,
 	Ref,
@@ -51,6 +53,7 @@ import {
 	sendPreparedClaudeTurn,
 } from "./claude/prepare-turn.js";
 import { ProviderInstanceFailure, ProviderNotRegistered } from "./errors.js";
+import type { EventSinkError } from "./event-sink-errors.js";
 import { backfillLegacyControlAnswers } from "./legacy-control-outbox.js";
 import { ProviderControlPayloadSchema } from "./orchestration-command-contracts.js";
 import type {
@@ -89,6 +92,8 @@ const controlErrorSchema = Schema.Struct({
 			"auth_required",
 			"provider_process_gone",
 			"provider_process_unavailable",
+			"project_inactive",
+			"project_unavailable",
 		]),
 	),
 	causeMessage: Schema.String,
@@ -110,6 +115,7 @@ interface ProviderCommandOutboxRow {
 	readonly run_id: string | null;
 	readonly provider_process_id: string | null;
 	readonly attempt_count: number;
+	readonly status: "pending" | "running" | "retryable_failed";
 }
 
 interface SendTurnOutboxPayload
@@ -190,7 +196,7 @@ type ProviderCommandExecutionError =
 	| ProviderInstanceFailure;
 
 export interface ProviderSideEffectReactorOptions {
-	readonly projectId: string;
+	readonly projectId?: string;
 	readonly sql: SqlClient.SqlClient;
 	readonly registry: ProviderRegistry;
 	readonly ingestion: Pick<ProviderRuntimeIngestion, "ingest" | "ingestBatch">;
@@ -202,6 +208,18 @@ export interface ProviderSideEffectReactorOptions {
 	readonly resolveCallContext?: (
 		request: ProviderCallRequest,
 	) => Effect.Effect<ProviderCall, ProviderInstanceFailure>;
+	readonly isProjectReady?: (
+		projectId: string,
+		sessionId: string,
+	) => Effect.Effect<boolean, ProviderInstanceFailure>;
+	readonly recoverDetachedSession?: (sessionId: string) => Effect.Effect<void>;
+	readonly makeInteractions?: (
+		sessionId: string,
+		driver: string,
+	) => Effect.Effect<EventSink, ProviderInstanceFailure>;
+	readonly projectContext?: (
+		projectId: string,
+	) => Option.Option<Context.Context<never>>;
 	/** Optional deterministic override; defaults to the Effect Clock service. */
 	readonly nowMs?: () => number;
 	readonly retryBackoff?: (failureCount: number) => Duration.Input;
@@ -245,6 +263,7 @@ export class ProviderSideEffectReactor {
 		ProviderCall | undefined
 	>();
 	private readonly executingControls = new Set<string>();
+	private readonly executingSends = new Map<string, ProviderCommandOutboxRow>();
 	private recoveryPrepared = false;
 
 	registerControl(commandId: string, call?: ProviderCall): void {
@@ -259,6 +278,17 @@ export class ProviderSideEffectReactor {
 	private readonly admission = Semaphore.makeUnsafe(1);
 
 	constructor(private readonly options: ProviderSideEffectReactorOptions) {}
+
+	/** Only an executing send, not a refusal lock, owns pending intake. */
+	ownsPendingSend(
+		sessionId: string,
+		commandId: string,
+		requestSequence: number,
+		attemptCount: number,
+	): boolean {
+		const owner = this.executingSends.get(`${requestSequence}:${attemptCount}`);
+		return owner?.session_id === sessionId && owner.command_id === commandId;
+	}
 
 	/** Reserve before commit; the short lock also fences an asynchronous claim. */
 	withLiveCommand<A, E, R>(commandId: string, effect: Effect.Effect<A, E, R>) {
@@ -276,6 +306,39 @@ export class ProviderSideEffectReactor {
 		);
 	}
 
+	/** Runtime imports prepare only their own rows, under the claim lock. */
+	prepareProjectRecovery(
+		projectId: string,
+	): Effect.Effect<void, ProviderCommandStoreFailure> {
+		return this.admission.withPermit(
+			Effect.suspend(() =>
+				this.recoveryPrepared ? this.prepareRecovery(projectId) : Effect.void,
+			),
+		);
+	}
+
+	private prepareRecovery(
+		projectId?: string,
+	): Effect.Effect<void, ProviderCommandStoreFailure> {
+		return Effect.gen({ self: this }, function* () {
+			yield* backfillLegacyControlAnswers(
+				projectId === undefined ? this.options : { ...this.options, projectId },
+			).pipe(Effect.mapError(storeFailure("backfillLegacyAnswers")));
+			// Replay keeps the command id so surviving runners deduplicate delivery.
+			yield* this.options
+				.write(
+					() => this.options.sql`
+				UPDATE provider_command_outbox SET status = 'pending', next_attempt_at = NULL
+				WHERE (${projectId ?? null} IS NULL OR project_key = ${projectId ?? null})
+					AND effect_type <> 'send_turn' AND status = 'running'
+					AND attempt_count < ${maxControlAttempts}
+					AND command_id NOT IN ${this.options.sql.in([...new Set([...this.acceptedControls.keys(), ...this.executingControls])])}
+			`,
+				)
+				.pipe(Effect.mapError(storeFailure("recoverControls")));
+		});
+	}
+
 	drain(
 		makeInteractions?: ProviderCommandInteractionSinkFactory,
 	): Effect.Effect<void, ProviderCommandStoreFailure> {
@@ -283,25 +346,43 @@ export class ProviderSideEffectReactor {
 			yield* this.admission.withPermit(
 				Effect.gen({ self: this }, function* () {
 					if (this.recoveryPrepared) return;
-					yield* backfillLegacyControlAnswers(this.options).pipe(
-						Effect.mapError(storeFailure("backfillLegacyAnswers")),
-					);
-					// A prior daemon may have died after selection or delivery. The
-					// surviving runner deduplicates replay under the same command id.
-					yield* this.options
-						.write(
-							() => this.options
-								.sql`UPDATE provider_command_outbox SET status = 'pending', next_attempt_at = NULL
-					WHERE project_key = ${this.options.projectId} AND effect_type <> 'send_turn' AND status = 'running'
-						AND attempt_count < ${maxControlAttempts}
-						AND command_id NOT IN ${this.options.sql.in([...this.acceptedControls.keys()])}`,
-						)
-						.pipe(Effect.mapError(storeFailure("recoverControls")));
+					yield* this.prepareRecovery(this.options.projectId);
 					this.recoveryPrepared = true;
 				}),
 			);
 			const registered = yield* SessionRollupProjects;
-			if (registered !== undefined) {
+			if (this.options.isProjectReady) {
+				// Sidebar membership hides unavailable projects and is not registration
+				// truth. Include retained send claims that crashed before intake;
+				// neither adapter recovery nor pending selection can settle those.
+				const commands = yield* this.options.sql<ProviderCommandOutboxRow>`
+					SELECT request_sequence, command_id, project_key, session_id, provider_id,
+						effect_type, payload_json, run_id, provider_process_id, attempt_count, status
+					FROM provider_command_outbox
+					WHERE (${this.options.projectId ?? null} IS NULL OR project_key = ${this.options.projectId ?? null})
+						AND status IN ('pending', 'running', 'retryable_failed')
+					ORDER BY request_sequence
+				`.pipe(Effect.mapError(storeFailure("inactiveCommands")));
+				for (const row of commands) {
+					const ready = yield* Effect.result(
+						this.options.isProjectReady(row.project_key, row.session_id),
+					);
+					if (ready._tag === "Failure")
+						yield* this.withDrainSession(
+							row.session_id,
+							this.refuseProjectCommand(row, ready.failure),
+						).pipe(
+							Effect.catchCause((cause) =>
+								Failure.isInterruptedOnly(cause)
+									? Effect.interrupt
+									: Effect.logError(
+											"Provider command project refusal failed",
+											cause,
+										),
+							),
+						);
+				}
+			} else if (registered !== undefined) {
 				// Removed projects retain history but have no executor. Release their
 				// process queue heads before selecting another project's controls.
 				yield* this.options
@@ -322,7 +403,7 @@ export class ProviderSideEffectReactor {
 							for (const row of cancelled)
 								yield* this.options
 									.sql`UPDATE command_receipts SET status = 'side_effect_failed', error_code = 'project_inactive',
-							error = ${JSON.stringify({ _tag: "ProviderInstanceFailure", providerId: row.provider_id, operation: row.effect_type, causeMessage: "The target project is no longer registered" })}, updated_at = ${now}
+							error = ${JSON.stringify({ _tag: "ProviderInstanceFailure", providerId: row.provider_id, operation: row.effect_type, code: "project_inactive", causeMessage: "The target project is no longer registered" })}, updated_at = ${now}
 							WHERE command_id = ${row.command_id} AND project_key = ${row.project_key} AND status = 'side_effect_requested'`;
 						}),
 					)
@@ -344,7 +425,17 @@ export class ProviderSideEffectReactor {
 											0
 										)
 											return;
-										row = (yield* this.nextPendingRequests(head.session_id))[0];
+										const next = (yield* this.nextPendingRequests(
+											head.session_id,
+										))[0];
+										// A refusal can race project recovery and leave its head
+										// unchanged. Defer it to the scheduler's next drain.
+										if (
+											next?.request_sequence === row.request_sequence &&
+											next.attempt_count === row.attempt_count
+										)
+											return;
+										row = next;
 									}
 								}),
 							)
@@ -418,22 +509,42 @@ export class ProviderSideEffectReactor {
 			) {
 				return yield* Effect.fail(result.failure);
 			}
+			if (result._tag === "Success" && result.success === undefined) return 0;
 			if (
 				result._tag === "Success" &&
-				result.success.status === "steer-declined"
+				result.success?.status === "steer-declined"
 			) {
-				const persist = yield* Effect.serviceOption(
-					ClaudeEventPersistEffectTag,
+				yield* this.withProjectContext(
+					row.project_key,
+					Effect.gen({ self: this }, function* () {
+						const persist = yield* Effect.serviceOption(
+							ClaudeEventPersistEffectTag,
+						);
+						if (persist._tag === "Some")
+							yield* requeueFailedSteers(
+								this.options.sql,
+								persist.value,
+								row.session_id,
+								row.command_id,
+							).pipe(Effect.mapError(storeFailure("requeueDeclinedSteer")));
+					}),
 				);
-				if (persist._tag === "Some")
-					yield* requeueFailedSteers(
-						this.options.sql,
-						persist.value,
-						row.session_id,
-						row.command_id,
-					).pipe(Effect.mapError(storeFailure("requeueDeclinedSteer")));
 			}
 			return 1;
+		});
+	}
+
+	/** Resolve short project cleanup borrows after delivery, including replacements. */
+	private withProjectContext<E>(
+		projectId: string,
+		effect: Effect.Effect<void, E>,
+	): Effect.Effect<void, E> {
+		return Effect.suspend(() => {
+			if (!this.options.projectContext) return effect;
+			const context = this.options.projectContext(projectId);
+			return Option.isSome(context)
+				? effect.pipe(Effect.provide(context.value))
+				: Effect.void;
 		});
 	}
 
@@ -444,12 +555,9 @@ export class ProviderSideEffectReactor {
 	 * guard. When the row is no longer pending (already drained), the durable
 	 * receipt supplies the outcome.
 	 *
-	 * `interactions` is the caller's real interaction-capable event sink for the
-	 * same-process dispatch path. Provider output still streams to the durable
-	 * ProviderRuntimeIngestion, but permission/question requests route through
-	 * this sink so Claude tool approvals and `AskUserQuestion` behave exactly as
-	 * the inline path did. Production drains create their sink through the same
-	 * relay factory for unowned commands recovered from a previous process.
+	 * `interactions` supplies the standalone caller's interaction sink. Daemon
+	 * sends use the current project borrow when each request arrives. Provider
+	 * output always streams through durable ProviderRuntimeIngestion.
 	 */
 	runCommand(
 		commandId: string,
@@ -464,7 +572,13 @@ export class ProviderSideEffectReactor {
 					interactions,
 					abortSignal,
 					liveContext,
-				});
+				}).pipe(
+					Effect.flatMap((result) => {
+						if (result !== undefined) return Effect.succeed(result);
+						this.liveCommands.delete(commandId);
+						return this.durableOutcome(commandId);
+					}),
+				);
 				if (row.effect_type !== "send_turn") return yield* delivery;
 				return yield* delivery.pipe(
 					Effect.flatMap((result) =>
@@ -532,11 +646,19 @@ export class ProviderSideEffectReactor {
 							result.failure instanceof ProviderInstanceFailure &&
 							result.failure.code === "provider_process_gone"
 						) {
-							const retire = yield* makeRetireReplacedProcessPrompts;
-							yield* retire(null, {
-								sessionId: claimed.session_id,
-								expiredProcessId: claimed.provider_process_id,
-							}).pipe(Effect.mapError(storeFailure("retireControlProcess")));
+							const expiredProcessId = claimed.provider_process_id;
+							yield* this.withProjectContext(
+								claimed.project_key,
+								Effect.gen(function* () {
+									const retire = yield* makeRetireReplacedProcessPrompts;
+									yield* retire(null, {
+										sessionId: claimed.session_id,
+										expiredProcessId,
+									}).pipe(
+										Effect.mapError(storeFailure("retireControlProcess")),
+									);
+								}),
+							);
 						}
 						const failure =
 							result._tag === "Failure"
@@ -583,14 +705,24 @@ export class ProviderSideEffectReactor {
 			background?: boolean;
 			liveContext?: LiveSendContext | undefined;
 		},
-	): Effect.Effect<TurnResult, ProviderCommandExecutionError> {
-		if (
-			(row.provider_process_id !== null ||
-				row.effect_type === "interrupt_turn") &&
-			row.effect_type !== "send_turn"
-		)
-			return this.executeControlRow(row, options?.background ?? false);
+	): Effect.Effect<TurnResult | undefined, ProviderCommandExecutionError> {
 		return Effect.gen({ self: this }, function* () {
+			if (this.options.isProjectReady) {
+				const active = yield* Effect.result(
+					this.options.isProjectReady(row.project_key, row.session_id),
+				);
+				if (active._tag === "Failure") {
+					yield* this.refuseProjectCommand(row, active.failure);
+					return yield* active.failure;
+				}
+				if (!active.success) return;
+			}
+			if (
+				(row.provider_process_id !== null ||
+					row.effect_type === "interrupt_turn") &&
+				row.effect_type !== "send_turn"
+			)
+				return yield* this.executeControlRow(row, options?.background ?? false);
 			const startedAt = yield* this.currentTimeMillis();
 			// The `pending -> running` update is the exclusive execution claim.
 			// If it changes no rows another executor already claimed this row, so
@@ -675,6 +807,14 @@ export class ProviderSideEffectReactor {
 								}),
 							);
 						}),
+			).pipe(
+				Effect.ensuring(
+					Effect.sync(() =>
+						this.executingSends.delete(
+							`${row.request_sequence}:${row.attempt_count}`,
+						),
+					),
+				),
 			);
 			if (
 				row.effect_type === "send_turn" &&
@@ -691,7 +831,7 @@ export class ProviderSideEffectReactor {
 							if (marked.length) {
 								yield* this.options
 									.sql`UPDATE command_receipts SET error_code = 'delivery_indeterminate'
-						WHERE command_id = ${row.command_id} AND project_key = ${this.options.projectId} AND status = 'side_effect_requested'`;
+						WHERE command_id = ${row.command_id} AND project_key = ${row.project_key} AND status = 'side_effect_requested'`;
 								yield* stamp((version) =>
 									this.options.sql<{
 										id: string;
@@ -707,6 +847,28 @@ export class ProviderSideEffectReactor {
 			}
 			const failure = result._tag === "Failure" ? result.failure : undefined;
 			const turn = result._tag === "Success" ? result.success : undefined;
+			// Keep the durable claim for runner recovery, but release this attempt
+			// and its drain lease so project removal can also settle the command.
+			if (
+				row.effect_type === "send_turn" &&
+				failure instanceof ProviderInstanceFailure &&
+				failure.code === "runner_detached"
+			) {
+				// Ownership is already released. A replacement that skipped this
+				// attempt while it was unwinding now needs to attach its runner.
+				yield* this.options.recoverDetachedSession?.(row.session_id) ??
+					Effect.void;
+				return;
+			}
+			if (failure && this.options.isProjectReady) {
+				const active = yield* Effect.result(
+					this.options.isProjectReady(row.project_key, row.session_id),
+				);
+				if (active._tag === "Failure") {
+					yield* this.refuseProjectCommand(row, active.failure);
+					return yield* active.failure;
+				}
+			}
 			if (
 				failure ||
 				turn?.status === "cancelled" ||
@@ -945,9 +1107,9 @@ export class ProviderSideEffectReactor {
 			const nowMs = yield* this.currentTimeMillis();
 			return yield* this.options.sql<ProviderCommandOutboxRow>`
 			SELECT request_sequence, command_id, project_key, session_id, provider_id,
-			       effect_type, payload_json, run_id, provider_process_id, attempt_count
+			       effect_type, payload_json, run_id, provider_process_id, attempt_count, status
 			FROM provider_command_outbox AS candidate
-			WHERE project_key = ${this.options.projectId}
+			WHERE (${this.options.projectId ?? null} IS NULL OR project_key = ${this.options.projectId ?? null})
 				AND (${sessionId ?? null} IS NULL OR session_id = ${sessionId ?? null})
 				AND (status = 'pending'
 					OR (status = 'retryable_failed' AND next_attempt_at <= ${nowMs})
@@ -989,6 +1151,7 @@ export class ProviderSideEffectReactor {
 		ProviderCommandStoreFailure
 	> {
 		const runId = randomUUID();
+		let ownedKey: string | undefined;
 		return this.options
 			.write((project, stamp) =>
 				Effect.gen({ self: this }, function* () {
@@ -999,7 +1162,7 @@ export class ProviderSideEffectReactor {
 						SELECT 1 FROM provider_runs WHERE id = provider_command_outbox.run_id
 							AND session_id = provider_command_outbox.session_id AND status IN ('pending', 'running')
 					) THEN ${runId} ELSE run_id END
-				WHERE request_sequence = ${row.request_sequence} AND project_key = ${this.options.projectId}
+				WHERE request_sequence = ${row.request_sequence} AND project_key = ${row.project_key}
 					AND (effect_type <> 'send_turn' OR NOT EXISTS (
 						SELECT 1 FROM provider_command_outbox prior JOIN provider_runs run ON run.id = prior.run_id
 						WHERE prior.project_key = provider_command_outbox.project_key AND prior.session_id = provider_command_outbox.session_id
@@ -1016,12 +1179,12 @@ export class ProviderSideEffectReactor {
 					))
 					AND (status = 'pending' OR (status = 'retryable_failed' AND next_attempt_at <= ${updatedAt}))
 				RETURNING request_sequence, command_id, project_key, session_id, provider_id,
-					effect_type, payload_json, run_id, provider_process_id, attempt_count`;
+					effect_type, payload_json, run_id, provider_process_id, attempt_count, status`;
 					if (claimed?.run_id === runId) {
 						const store = yield* makeEventStoreEffect.pipe(
 							Effect.provideService(SqlClient.SqlClient, this.options.sql),
 							Effect.provideService(PersistenceProjectTag, {
-								projectId: this.options.projectId,
+								projectId: row.project_key,
 							}),
 						);
 						yield* project(
@@ -1039,7 +1202,11 @@ export class ProviderSideEffectReactor {
 							]),
 						);
 					}
-					if (claimed?.effect_type === "send_turn")
+					if (claimed?.effect_type === "send_turn") {
+						// Attachment can run during post-commit publication, so expose
+						// the successful claim before committing its running state.
+						ownedKey = `${claimed.request_sequence}:${claimed.attempt_count}`;
+						this.executingSends.set(ownedKey, claimed);
 						yield* stamp((version) =>
 							this.options.sql<{
 								id: string;
@@ -1047,10 +1214,20 @@ export class ProviderSideEffectReactor {
 								Effect.map((rows) => rows.map(({ id }) => id)),
 							),
 						);
+					}
 					return claimed;
 				}),
 			)
-			.pipe(Effect.mapError(storeFailure("markRunning")));
+			.pipe(
+				Effect.onExit((exit) =>
+					Exit.isFailure(exit)
+						? Effect.sync(() => {
+								if (ownedKey) this.executingSends.delete(ownedKey);
+							})
+						: Effect.void,
+				),
+				Effect.mapError(storeFailure("markRunning")),
+			);
 	}
 
 	private runProviderEffect(
@@ -1068,6 +1245,24 @@ export class ProviderSideEffectReactor {
 		| ProviderCommandStoreFailure
 	> {
 		return Effect.gen({ self: this }, function* () {
+			const ready = yield* this.options.isProjectReady?.(
+				row.project_key,
+				row.session_id,
+			) ?? Effect.succeed(true);
+			if (!ready)
+				return yield* Effect.sleep(
+					this.options.outcomePollInterval ?? defaultOutcomePollInterval,
+				).pipe(
+					Effect.andThen(
+						this.runProviderEffect(
+							row,
+							interactions,
+							makeInteractions,
+							abortSignal,
+							liveContext,
+						),
+					),
+				);
 			if (row.provider_process_id !== null && row.effect_type !== "send_turn") {
 				const payload = yield* Effect.try({
 					try: () =>
@@ -1420,8 +1615,15 @@ export class ProviderSideEffectReactor {
 							})
 						: undefined;
 				const shellEnv = liveContext?.shellEnv ?? call?.shellEnv;
-				const interactionSink =
-					interactions ?? makeInteractions?.(payload.sessionId, driver);
+				// Daemon sends can outlive the caller's relay. Resolve its borrow
+				// when each interaction arrives, including after adapter intake.
+				const currentInteractions = this.options.makeInteractions?.(
+					payload.sessionId,
+					driver,
+				);
+				const interactionSink = currentInteractions
+					? undefined
+					: (interactions ?? makeInteractions?.(payload.sessionId, driver));
 				const instanceId = account?.id ?? payload.instanceId ?? row.provider_id;
 				const instance = yield* this.options.registry.getInstanceEffect(driver);
 				const turnKey = {
@@ -1463,7 +1665,10 @@ export class ProviderSideEffectReactor {
 										...(prepared?.handoff ? { handoff: prepared.handoff } : {}),
 									}
 								: {}),
-							eventSink: this.makeReactorEventSink(interactionSink),
+							eventSink: this.makeReactorEventSink(
+								interactionSink,
+								currentInteractions,
+							),
 							abortSignal: abortSignal ?? new AbortController().signal,
 						});
 					});
@@ -1611,9 +1816,9 @@ export class ProviderSideEffectReactor {
 	> {
 		return this.options.sql<ProviderCommandOutboxRow>`
 			SELECT request_sequence, command_id, project_key, session_id, provider_id,
-			       effect_type, payload_json, run_id, provider_process_id, attempt_count
+			       effect_type, payload_json, run_id, provider_process_id, attempt_count, status
 			FROM provider_command_outbox
-			WHERE project_key = ${this.options.projectId}
+			WHERE (${this.options.projectId ?? null} IS NULL OR project_key = ${this.options.projectId ?? null})
 				AND command_id = ${commandId} AND status IN ('pending', 'retryable_failed')
 			ORDER BY request_sequence
 			LIMIT 1`.pipe(
@@ -1645,7 +1850,8 @@ export class ProviderSideEffectReactor {
 					SELECT MAX(request_sequence) FROM provider_command_outbox WHERE command_id = receipt.command_id AND project_key = receipt.project_key)
 			LEFT JOIN provider_runs reservation ON reservation.id = command.run_id AND reservation.session_id = command.session_id
 			LEFT JOIN provider_runs run ON run.id = COALESCE(reservation.joined_into, reservation.id) AND run.session_id = reservation.session_id
-			WHERE receipt.command_id = ${commandId} AND receipt.project_key = ${this.options.projectId}`.pipe(
+			WHERE receipt.command_id = ${commandId}
+				AND (${this.options.projectId ?? null} IS NULL OR receipt.project_key = ${this.options.projectId ?? null})`.pipe(
 			Effect.map((rows) => rows[0]),
 			Effect.mapError(storeFailure("receiptOutcome")),
 		);
@@ -1716,12 +1922,12 @@ export class ProviderSideEffectReactor {
 					UPDATE provider_command_outbox
 					SET status = 'completed', updated_at = ${updatedAt}
 					WHERE request_sequence = ${row.request_sequence}
-						AND project_key = ${this.options.projectId}`,
+						AND project_key = ${row.project_key}`,
 					sql`
 					UPDATE command_receipts
 					SET status = 'side_effect_completed', updated_at = ${updatedAt}
 					WHERE command_id = ${row.command_id}
-						AND project_key = ${this.options.projectId}`,
+						AND project_key = ${row.project_key}`,
 				]),
 			)
 			.pipe(Effect.asVoid, Effect.mapError(storeFailure("markCompleted")));
@@ -1782,13 +1988,13 @@ export class ProviderSideEffectReactor {
 							: null;
 						const changed = yield* this.options
 							.sql`UPDATE provider_command_outbox SET status = ${failure?.code === "provider_process_gone" || failure?.code === "provider_process_unavailable" ? "cancelled" : retryable ? "retryable_failed" : failure ? "failed" : "completed"}, error_code = ${errorCode}, next_attempt_at = ${nextAttemptAt}, updated_at = ${updatedAt}
-				WHERE request_sequence = ${row.request_sequence} AND project_key = ${this.options.projectId}
+				WHERE request_sequence = ${row.request_sequence} AND project_key = ${row.project_key}
 					AND (status = 'running' OR (${row.attempt_count >= maxControlAttempts} AND status IN ('pending', 'retryable_failed')))
 					AND attempt_count = ${row.attempt_count} RETURNING command_id`;
 						if (changed.length) {
 							yield* this.options
 								.sql`UPDATE command_receipts SET status = ${retryable ? "side_effect_requested" : failure ? "side_effect_failed" : "side_effect_completed"}, error_code = ${errorCode}, error = ${errorJson}, updated_at = ${updatedAt}
-				WHERE command_id = ${row.command_id} AND project_key = ${this.options.projectId} AND status = 'side_effect_requested'`;
+				WHERE command_id = ${row.command_id} AND project_key = ${row.project_key} AND status = 'side_effect_requested'`;
 							if (reopened) {
 								const current = yield* this.options
 									.sql`SELECT id FROM pending_approvals WHERE id = ${reopened.event.data.id} AND session_id = ${row.session_id} AND provider_process_id = ${row.provider_process_id} AND status = 'resolved' AND version = ${reopened.version}`;
@@ -1799,7 +2005,7 @@ export class ProviderSideEffectReactor {
 											this.options.sql,
 										),
 										Effect.provideService(PersistenceProjectTag, {
-											projectId: this.options.projectId,
+											projectId: row.project_key,
 										}),
 									);
 									yield* project([yield* store.append(reopened.event)]);
@@ -1941,6 +2147,202 @@ export class ProviderSideEffectReactor {
 		}).pipe(Effect.mapError(storeFailure("readFailedControlPrompt")));
 	}
 
+	/** Missing project services must leave a terminal receipt without ingestion. */
+	private refuseProjectCommand(
+		row: ProviderCommandOutboxRow,
+		failure: ProviderInstanceFailure,
+	): Effect.Effect<void, ProviderCommandStoreFailure> {
+		return Effect.gen({ self: this }, function* () {
+			const code = failure.code ?? providerFailureCode(failure);
+			let runnerAlive: boolean | undefined;
+			if (row.effect_type === "send_turn" && row.status === "running") {
+				const [payload] = yield* this.options.sql<{ driver: string }>`
+					SELECT COALESCE(json_extract(payload_json, '$.account.driver'), provider_id) AS driver
+					FROM provider_command_outbox WHERE request_sequence = ${row.request_sequence}`;
+				const instance = this.options.registry.getInstance(
+					payload?.driver ?? row.provider_id,
+				);
+				runnerAlive = yield* instance?.hasLiveProcessEffect?.(row.session_id) ??
+					Effect.succeed(undefined);
+				if (
+					code === "project_inactive" &&
+					runnerAlive &&
+					instance?.getControlProcessIdEffect
+				) {
+					const owner = yield* Effect.result(
+						instance.getControlProcessIdEffect(row.session_id),
+					);
+					// Quarantined ownership cannot authorize a stop or a synthetic
+					// terminal. Its command can still end without changing the turn.
+					if (owner._tag === "Success" && owner.success) {
+						const ready = yield* Effect.result(
+							this.options.isProjectReady?.(row.project_key, row.session_id) ??
+								Effect.succeed(true),
+						);
+						if (ready._tag === "Success" || ready.failure.code !== code) return;
+						// Retire before committing refusal, so a crash retries retirement.
+						// Provider loss/terminals, rather than the sweep, settle the run.
+						yield* instance
+							.endSessionEffect(row.session_id, undefined, {
+								commandId: `project-inactive:${row.command_id}:${row.attempt_count}`,
+								providerProcessId: owner.success,
+							})
+							.pipe(
+								Effect.catch((cause) =>
+									Effect.logWarning(
+										"Inactive project runner retirement could not be confirmed",
+										cause,
+									),
+								),
+							);
+					}
+				}
+			}
+			return yield* this.options
+				.write((project, stamp) =>
+					Effect.gen({ self: this }, function* () {
+						// Registration can change while native retirement is in flight.
+						const ready = yield* Effect.result(
+							this.options.isProjectReady?.(row.project_key, row.session_id) ??
+								Effect.fail(failure),
+						);
+						if (ready._tag === "Success" || ready.failure.code !== code) return;
+						const now = yield* this.currentTimeMillis();
+						const unstarted =
+							row.effect_type === "send_turn" &&
+							(row.status !== "running" || runnerAlive === false)
+								? ((yield* this.options.sql<{
+										id: string;
+									}>`SELECT id FROM provider_runs
+								WHERE id = ${row.run_id} AND session_id = ${row.session_id}
+									AND status = 'pending' AND started_at IS NULL AND joined_into IS NULL`)[0] ??
+									(row.status !== "running" ? { id: randomUUID() } : undefined))
+								: undefined;
+						// Started work in an unavailable project belongs to its recovery.
+						// Claimed intake is started even before run.started is projected.
+						if (
+							row.effect_type === "send_turn" &&
+							!unstarted &&
+							code === "project_unavailable"
+						)
+							return;
+						const changed = yield* this.options
+							.sql`UPDATE provider_command_outbox
+					SET status = ${code === "project_inactive" ? "cancelled" : "failed"}, error_code = ${code},
+						next_attempt_at = NULL, updated_at = ${now}, run_id = ${unstarted?.id ?? row.run_id}
+					WHERE request_sequence = ${row.request_sequence} AND project_key = ${row.project_key}
+						AND attempt_count = ${row.attempt_count} AND status IN ('pending', 'running', 'retryable_failed')
+					RETURNING command_id`;
+						if (changed.length === 0) return;
+						yield* this.options
+							.sql`UPDATE command_receipts SET status = 'side_effect_failed',
+					error_code = ${code}, error = ${JSON.stringify({
+						_tag: failure._tag,
+						providerId: row.provider_id,
+						operation: row.effect_type,
+						code,
+						causeMessage:
+							failure.cause instanceof Error
+								? failure.cause.message
+								: String(failure.cause),
+					})}, updated_at = ${now}
+					WHERE command_id = ${row.command_id} AND project_key = ${row.project_key}
+						AND status IN ('side_effect_requested', 'side_effect_failed')`;
+						if (unstarted) {
+							const store = yield* makeEventStoreEffect.pipe(
+								Effect.provideService(SqlClient.SqlClient, this.options.sql),
+								Effect.provideService(PersistenceProjectTag, {
+									projectId: row.project_key,
+								}),
+							);
+							// Like execution, refusal reserves a new run for an automatic
+							// retry. The preceding run's terminal must remain unchanged.
+							if (unstarted.id !== row.run_id)
+								yield* project([
+									yield* store.append(
+										canonicalEvent(
+											"run.requested",
+											row.session_id,
+											{ runId: unstarted.id, inputId: row.command_id },
+											{
+												provider: row.provider_id,
+												createdAt: now,
+												metadata: { runId: unstarted.id },
+											},
+										),
+									),
+								]);
+							if (this.options.persistUserMessage) {
+								const payload = yield* this.parseSendTurnPayload(row);
+								const driver = payload.account?.driver ?? row.provider_id;
+								yield* this.options.persistUserMessage(
+									row.session_id,
+									payload.prompt,
+									{
+										project,
+										messageId:
+											payload.continuation?.cutOffMessageId ??
+											this.options.registry
+												.getInstance(driver)
+												?.userMessageIdForInput?.(payload.inputId) ??
+											payload.inputId,
+										inputId: payload.inputId,
+										runId: unstarted.id,
+										provider: driver,
+										...(payload.images ? { images: payload.images } : {}),
+										failure: {
+											message:
+												failure.cause instanceof Error
+													? failure.cause.message
+													: String(failure.cause),
+											code,
+											retryable: false,
+										},
+									},
+								);
+							} else {
+								yield* project([
+									yield* store.append(
+										canonicalEvent(
+											"turn.error",
+											row.session_id,
+											{
+												messageId: `provider-command:${row.command_id}`,
+												error:
+													failure.cause instanceof Error
+														? failure.cause.message
+														: String(failure.cause),
+												code,
+												retryable: false,
+											},
+											{
+												provider: row.provider_id,
+												createdAt: now,
+												metadata: {
+													runId: unstarted.id,
+													commandId: row.command_id,
+												},
+											},
+										),
+									),
+								]);
+							}
+						}
+						yield* stamp((version) =>
+							this.options.sql<{
+								id: string;
+							}>`UPDATE sessions SET version = ${version}
+					WHERE id = ${row.session_id} AND project_id = ${row.project_key} RETURNING id`.pipe(
+								Effect.map((rows) => rows.map(({ id }) => id)),
+							),
+						);
+						this.acceptedControls.delete(row.command_id);
+					}),
+				)
+				.pipe(Effect.mapError(storeFailure("refuseProjectCommand")));
+		}).pipe(Effect.mapError(storeFailure("refuseProjectCommand")));
+	}
+
 	private writeFailure(
 		row: ProviderCommandOutboxRow,
 		retryable: boolean,
@@ -1960,12 +2362,12 @@ export class ProviderSideEffectReactor {
 					    next_attempt_at = ${nextAttemptAt},
 					    updated_at = ${updatedAt}
 					WHERE request_sequence = ${row.request_sequence}
-						AND project_key = ${this.options.projectId}`,
+						AND project_key = ${row.project_key}`,
 			sql`
 					UPDATE command_receipts
 					SET status = 'side_effect_failed', error_code = ${errorCode}, updated_at = ${updatedAt}
 					WHERE command_id = ${row.command_id}
-						AND project_key = ${this.options.projectId}`,
+						AND project_key = ${row.project_key}`,
 		]).pipe(Effect.asVoid);
 		return sql
 			.withTransaction(updates)
@@ -1975,12 +2377,16 @@ export class ProviderSideEffectReactor {
 	/**
 	 * Event sink handed to the provider during execution. Provider OUTPUT always
 	 * streams to the durable ProviderRuntimeIngestion (the mandatory persistence
-	 * seam). INTERACTIONS (permission/question) route through the caller's real
-	 * sink on the same-process dispatch path so Claude tool approvals and
-	 * `AskUserQuestion` resolve. Production drains supply the same relay sink
-	 * factory so recovered commands and background claim winners can also ask.
+	 * seam). Daemon interactions resolve the current project borrow per callback;
+	 * standalone relays use their caller's sink for their own scoped lifetime.
 	 */
-	private makeReactorEventSink(interactions?: EventSink): EventSink {
+	private makeReactorEventSink(
+		interactions?: EventSink,
+		currentInteractions?: Effect.Effect<EventSink, ProviderInstanceFailure>,
+	): EventSink {
+		// Keep each request's ID mapping and detach flag until its waiter settles.
+		const pending = new Set<{ readonly sink: EventSink }>();
+		let detaching = false;
 		// Streamed output bypasses the relay sink, so mark the session alive here
 		// or the relay's processing timeout fires mid-turn on long turns.
 		const push: EventSink["push"] = (event) =>
@@ -1990,43 +2396,106 @@ export class ProviderSideEffectReactor {
 					.ingest(event)
 					.pipe(Effect.asVoid, Effect.mapError(toEventSinkError));
 			});
-		if (!interactions) {
-			return {
-				push,
-				requestPermission: () =>
-					Effect.fail(
-						new ProviderSideEffectInteractionUnsupported({
-							operation: "requestPermission",
-							code: "provider_side_effect_interaction_unsupported",
-						}),
-					),
-				requestQuestion: () =>
-					Effect.fail(
-						new ProviderSideEffectInteractionUnsupported({
-							operation: "requestQuestion",
-							code: "provider_side_effect_interaction_unsupported",
-						}),
-					),
-				resolvePermission: () => Effect.void,
-				resolveQuestion: () => Effect.void,
-			};
-		}
-		const { cancelSessionInteractions, detachInteractions } = interactions;
+		const current: Effect.Effect<EventSink, EventSinkError> =
+			currentInteractions?.pipe(Effect.mapError(toEventSinkError)) ??
+			Effect.succeed(
+				interactions ?? {
+					push,
+					requestPermission: () =>
+						Effect.fail(
+							new ProviderSideEffectInteractionUnsupported({
+								operation: "requestPermission",
+								code: "provider_side_effect_interaction_unsupported",
+							}),
+						),
+					requestQuestion: () =>
+						Effect.fail(
+							new ProviderSideEffectInteractionUnsupported({
+								operation: "requestQuestion",
+								code: "provider_side_effect_interaction_unsupported",
+							}),
+						),
+					resolvePermission: () => Effect.void,
+					resolveQuestion: () => Effect.void,
+				},
+			);
 		return {
 			push,
-			requestPermission: (request) => interactions.requestPermission(request),
-			requestQuestion: (request) => interactions.requestQuestion(request),
+			requestPermission: (request) =>
+				Effect.flatMap(current, (sink) => {
+					const entry = { sink };
+					return Effect.gen(function* () {
+						pending.add(entry);
+						if (detaching) yield* sink.detachInteractions?.() ?? Effect.void;
+						return yield* sink.requestPermission(request);
+					}).pipe(Effect.ensuring(Effect.sync(() => pending.delete(entry))));
+				}),
+			requestQuestion: (request) =>
+				Effect.flatMap(current, (sink) => {
+					const entry = { sink };
+					return Effect.gen(function* () {
+						pending.add(entry);
+						if (detaching) yield* sink.detachInteractions?.() ?? Effect.void;
+						return yield* sink.requestQuestion(request);
+					}).pipe(Effect.ensuring(Effect.sync(() => pending.delete(entry))));
+				}),
 			resolvePermission: (requestId, response) =>
-				interactions.resolvePermission(requestId, response),
+				Effect.suspend(() =>
+					currentInteractions
+						? Effect.forEach(
+								pending,
+								({ sink }) => sink.resolvePermission(requestId, response),
+								{ discard: true },
+							)
+						: (interactions?.resolvePermission(requestId, response) ??
+							Effect.void),
+				),
 			resolveQuestion: (requestId, answers) =>
-				interactions.resolveQuestion(requestId, answers),
-			...(detachInteractions ? { detachInteractions } : {}),
-			...(cancelSessionInteractions
+				Effect.suspend(() =>
+					currentInteractions
+						? Effect.forEach(
+								pending,
+								({ sink }) => sink.resolveQuestion(requestId, answers),
+								{ discard: true },
+							)
+						: (interactions?.resolveQuestion(requestId, answers) ??
+							Effect.void),
+				),
+			...(currentInteractions || interactions?.detachInteractions
+				? {
+						detachInteractions: () =>
+							Effect.suspend(() => {
+								detaching = true;
+								return currentInteractions
+									? Effect.forEach(
+											pending,
+											({ sink }) => sink.detachInteractions?.() ?? Effect.void,
+											{ discard: true },
+										)
+									: (interactions?.detachInteractions?.() ?? Effect.void);
+							}),
+					}
+				: {}),
+			...(currentInteractions || interactions?.cancelSessionInteractions
 				? {
 						cancelSessionInteractions: (
 							reason: string,
 							options?: { readonly recoverQuestions?: boolean },
-						) => cancelSessionInteractions(reason, options),
+						) =>
+							Effect.suspend(() =>
+								currentInteractions
+									? Effect.forEach(
+											pending,
+											({ sink }) =>
+												sink.cancelSessionInteractions?.(reason, options) ??
+												Effect.void,
+											{ discard: true },
+										)
+									: (interactions?.cancelSessionInteractions?.(
+											reason,
+											options,
+										) ?? Effect.void),
+							),
 					}
 				: {}),
 		};
@@ -2042,7 +2511,7 @@ function isRetryableProviderFailure(error: unknown): boolean {
 
 function providerFailureCode(error: unknown): string {
 	if (error instanceof ProviderInstanceFailure) {
-		return providerFailureCode(error.cause);
+		return error.code ?? providerFailureCode(error.cause);
 	}
 	if (isRecord(error)) {
 		const code = error["code"];

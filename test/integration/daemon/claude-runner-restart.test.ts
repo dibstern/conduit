@@ -610,11 +610,11 @@ describe("Claude runners survive server replacement through built dist", () => {
 				(candidate) => candidate.commandId === command.command_id,
 			);
 			if (!binding) throw new Error("Missing original runner binding");
-			// No replay attachment: terminal output stays spooled while the send
-			// settles, reproducing a server that missed the runner's final reply.
+			// No replay attachment: the SDK's interrupted result stays spooled while
+			// the send settles, reproducing a server that missed its terminal output.
 			await Effect.runPromise(
 				direct
-					.commandEffect(randomUUID(), { type: "end-session", sessionId })
+					.commandEffect(randomUUID(), { type: "interrupt", sessionId })
 					.pipe(Effect.timeout("15 seconds")),
 			);
 			cachedIntake = await Effect.runPromise(

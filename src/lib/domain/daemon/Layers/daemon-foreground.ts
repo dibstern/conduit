@@ -47,6 +47,7 @@ import {
 	DaemonHandleTag,
 	type EffectDaemonHandle,
 } from "../Services/daemon-handle.js";
+import { DaemonOrchestration } from "../Services/daemon-orchestration.js";
 import { resolveDefaultStaticDir } from "../Services/daemon-static-dir.js";
 import {
 	type InstanceManagerState,
@@ -219,6 +220,7 @@ type ForegroundRuntimeRequirements =
 	| RelayCacheTag
 	| ShutdownSignalTag
 	| ProviderAdapters
+	| DaemonOrchestration
 	| PersistenceStore;
 
 export async function startForegroundDaemon(
@@ -543,6 +545,7 @@ export async function startForegroundDaemon(
 					},
 				);
 				yield* adapters.recover;
+				yield* (yield* DaemonOrchestration).start;
 				yield* (yield* ConfigPersistenceTag).flush;
 			}),
 		);

@@ -298,12 +298,21 @@ describe("Claude accepted run ownership", () => {
 			query.interrupt = vi.fn(() =>
 				Effect.runPromise(Deferred.await(interruptAck)),
 			);
+		let stoppedTerminals = 0;
 		const sink = createMockEventSink();
 		sink.push = (event) =>
 			Effect.tryPromise({
 				try: () => harness.ingest(event),
 				catch: (cause) => new EventSinkIngestionError({ cause }),
-			}).pipe(Effect.asVoid);
+			}).pipe(
+				Effect.tap(() =>
+					Effect.sync(() => {
+						if (event.type === "turn.interrupted" && event.runId === "run-0")
+							stoppedTerminals++;
+					}),
+				),
+				Effect.asVoid,
+			);
 		const instance = makeTestClaudeProviderInstance({
 			workspaceRoot: "/tmp",
 			queryFactory: ({ prompt }) => {
@@ -437,15 +446,14 @@ describe("Claude accepted run ownership", () => {
 			]);
 			if (lateStoppedResult) {
 				Effect.runSync(Deferred.succeed(stoppedResult, undefined));
-				await vi.waitFor(async () =>
-					expect(
-						(await harness.storedEvents(sessionId)).filter(
-							(event) =>
-								event.type === "turn.interrupted" &&
-								event.metadata?.["runId"] === "run-0",
-						),
-					).toHaveLength(2),
-				);
+				await vi.waitFor(() => expect(stoppedTerminals).toBe(1));
+				expect(
+					(await harness.storedEvents(sessionId)).filter(
+						(event) =>
+							event.type === "turn.interrupted" &&
+							event.metadata?.["runId"] === "run-0",
+					),
+				).toHaveLength(1);
 				expect(
 					await harness.query(
 						"SELECT status FROM provider_runs ORDER BY requested_at",
