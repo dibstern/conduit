@@ -33,8 +33,13 @@ export const makeCodexRunnerDriver = (
 	configDir = DEFAULT_CONFIG_DIR,
 ): RunnerDriverPieces => ({
 	driverKind: "codex",
-	discoverEffect: (directory, account) =>
-		discoverCodexEffect(account, directory ?? workspaceRoot, configDir),
+	discoverEffect: (directory, account, options) =>
+		discoverCodexEffect(
+			account,
+			directory ?? workspaceRoot,
+			configDir,
+			options,
+		),
 	generateTextEffect: (input) => generateCodexText(input, configDir),
 	prepareTurnEffect: (input) =>
 		Effect.gen(function* () {

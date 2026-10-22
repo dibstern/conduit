@@ -79,6 +79,10 @@ const catalogs = new Map<
 		readonly catalog: Omit<DiscoveredCodexAccount, "signedIn">;
 	}
 >();
+const failures = new Map<
+	string,
+	{ readonly expiresAt: number; readonly failure: ProviderInstanceFailure }
+>();
 const authentication = new Map<
 	string,
 	{ readonly fingerprint: string; readonly signedIn: boolean }
@@ -132,6 +136,7 @@ export const discoverCodex = (
 	accountEnv?: NodeJS.ProcessEnv,
 	workspaceRoot?: string,
 	replaceEnvironment = false,
+	options?: { readonly refresh?: boolean },
 ): Effect.Effect<DiscoveredCodexAccount, ProviderInstanceFailure> =>
 	discoveryLock.withPermits(1)(
 		Effect.gen(function* () {
@@ -144,123 +149,137 @@ export const discoverCodex = (
 				{ ...(replaceEnvironment ? {} : process.env), ...accountEnv },
 			);
 			const key = JSON.stringify([codexHome, cwd]);
-			const fingerprint = yield* Effect.try(() =>
-				authFingerprint(codexHome),
-			).pipe(
-				Effect.mapError(
-					(cause) =>
-						new ProviderInstanceFailure({
-							providerId: "codex",
-							operation: "auth metadata",
-							cause,
-						}),
-				),
-			);
-			const auth = authentication.get(codexHome);
-			const cachedAuth = auth?.fingerprint === fingerprint ? auth : undefined;
-			const cached = catalogs.get(key);
-			const catalog =
-				cached && cached.expiresAt > Date.now() ? cached.catalog : undefined;
-			if (cachedAuth && catalog)
-				return { ...catalog, signedIn: cachedAuth.signedIn };
-			const version = authVersions.get(codexHome) ?? 0;
-			const account = yield* Effect.scoped(
-				Effect.gen(function* () {
-					const client = yield* openCodexDiscoveryClient(
-						codexHome,
-						accountEnv,
-						catalog ? "codex-discovery-auth" : "codex-discovery",
-						replaceEnvironment,
-					);
-					const signedIn =
-						cachedAuth?.signedIn ??
-						(yield* client.request(
-							"account/read",
-							{},
-							AccountReadResponseSchema,
-						)).account != null;
-					if (version === (authVersions.get(codexHome) ?? 0))
-						authentication.set(codexHome, { fingerprint, signedIn });
-					if (catalog) return { ...catalog, signedIn };
-					const models: ModelInfo[] = [];
-					let cursor: string | null = null;
-					do {
-						const page: typeof ModelListResponseSchema.Type =
-							yield* client.request(
-								"model/list",
-								{ cursor, limit: 100, includeHidden: true },
-								ModelListResponseSchema,
-							);
-						models.push(
-							...page.data.filter((model) => !model.hidden).map(codexModelInfo),
+			const remembered = failures.get(key);
+			if (!options?.refresh && remembered && remembered.expiresAt > Date.now())
+				return yield* Effect.fail(remembered.failure);
+			return yield* Effect.gen(function* () {
+				const fingerprint = yield* Effect.try(() =>
+					authFingerprint(codexHome),
+				).pipe(
+					Effect.mapError(
+						(cause) =>
+							new ProviderInstanceFailure({
+								providerId: "codex",
+								operation: "auth metadata",
+								cause,
+							}),
+					),
+				);
+				const auth = authentication.get(codexHome);
+				const cachedAuth = auth?.fingerprint === fingerprint ? auth : undefined;
+				const cached = catalogs.get(key);
+				const catalog =
+					cached && cached.expiresAt > Date.now() ? cached.catalog : undefined;
+				if (cachedAuth && catalog)
+					return { ...catalog, signedIn: cachedAuth.signedIn };
+				const version = authVersions.get(codexHome) ?? 0;
+				const account = yield* Effect.scoped(
+					Effect.gen(function* () {
+						const client = yield* openCodexDiscoveryClient(
+							codexHome,
+							accountEnv,
+							catalog ? "codex-discovery-auth" : "codex-discovery",
+							replaceEnvironment,
 						);
-						cursor = page.nextCursor;
-					} while (cursor !== null);
-					const listed = yield* client.request(
-						"skills/list",
-						{ cwds: [cwd] },
-						SkillsListResponseSchema,
-					);
-					const skills: (typeof SkillMetadataSchema.Type)[] = [];
-					for (const entry of listed.data) {
-						for (const error of entry.errors)
-							log.warn("codex.skill_discovery_failed", {
-								cwd: entry.cwd,
-								...error,
-							});
-						for (const descriptor of entry.skills) {
-							const decoded = decodeSkill(descriptor);
-							if (Result.isFailure(decoded)) {
-								log.warn("codex.skill_decode_failed", { cwd: entry.cwd });
-								continue;
-							}
-							const skill = decoded.success;
-							if (!skill.enabled) {
-								log.debug("codex.skill_disabled", {
-									name: skill.name,
-									path: skill.path,
+						const signedIn =
+							cachedAuth?.signedIn ??
+							(yield* client.request(
+								"account/read",
+								{},
+								AccountReadResponseSchema,
+							)).account != null;
+						if (version === (authVersions.get(codexHome) ?? 0))
+							authentication.set(codexHome, { fingerprint, signedIn });
+						if (catalog) return { ...catalog, signedIn };
+						const models: ModelInfo[] = [];
+						let cursor: string | null = null;
+						do {
+							const page: typeof ModelListResponseSchema.Type =
+								yield* client.request(
+									"model/list",
+									{ cursor, limit: 100, includeHidden: true },
+									ModelListResponseSchema,
+								);
+							models.push(
+								...page.data
+									.filter((model) => !model.hidden)
+									.map(codexModelInfo),
+							);
+							cursor = page.nextCursor;
+						} while (cursor !== null);
+						const listed = yield* client.request(
+							"skills/list",
+							{ cwds: [cwd] },
+							SkillsListResponseSchema,
+						);
+						const skills: (typeof SkillMetadataSchema.Type)[] = [];
+						for (const entry of listed.data) {
+							for (const error of entry.errors)
+								log.warn("codex.skill_discovery_failed", {
+									cwd: entry.cwd,
+									...error,
 								});
-								continue;
+							for (const descriptor of entry.skills) {
+								const decoded = decodeSkill(descriptor);
+								if (Result.isFailure(decoded)) {
+									log.warn("codex.skill_decode_failed", { cwd: entry.cwd });
+									continue;
+								}
+								const skill = decoded.success;
+								if (!skill.enabled) {
+									log.debug("codex.skill_disabled", {
+										name: skill.name,
+										path: skill.path,
+									});
+									continue;
+								}
+								skills.push(skill);
 							}
-							skills.push(skill);
 						}
-					}
-					catalogs.set(key, {
-						expiresAt: Date.now() + 30 * 60_000,
-						catalog: { models, skills },
-					});
-					return { signedIn, models, skills };
-				}),
-			).pipe(
-				Effect.timeoutOrElse({
-					duration: "15 seconds",
-					orElse: () => Effect.fail(new Error("Codex discovery timed out")),
-				}),
-				Effect.mapError(
-					(cause) =>
-						new ProviderInstanceFailure({
-							providerId: "codex",
-							operation: "discover",
-							...(cause instanceof CodexVersionUnsupported
-								? { code: "codex_version_unsupported" as const }
-								: {}),
-							cause:
-								cause instanceof CodexVersionUnsupported
-									? new Error(
-											`codex_version_unsupported: Codex ${cause.minimum} or newer is required (found ${cause.found})`,
-										)
-									: cause instanceof AppServerIoError &&
-											cause.cause instanceof Error &&
-											"code" in cause.cause &&
-											cause.cause.code === "ENOENT"
+						catalogs.set(key, {
+							expiresAt: Date.now() + 30 * 60_000,
+							catalog: { models, skills },
+						});
+						return { signedIn, models, skills };
+					}),
+				).pipe(
+					Effect.timeoutOrElse({
+						duration: "15 seconds",
+						orElse: () => Effect.fail(new Error("Codex discovery timed out")),
+					}),
+					Effect.mapError(
+						(cause) =>
+							new ProviderInstanceFailure({
+								providerId: "codex",
+								operation: "discover",
+								...(cause instanceof CodexVersionUnsupported
+									? { code: "codex_version_unsupported" as const }
+									: {}),
+								cause:
+									cause instanceof CodexVersionUnsupported
 										? new Error(
-												"Codex CLI is unavailable. Install Codex and run codex login.",
+												`codex_version_unsupported: Codex ${cause.minimum} or newer is required (found ${cause.found})`,
 											)
-										: cause,
-						}),
+										: cause instanceof AppServerIoError &&
+												cause.cause instanceof Error &&
+												"code" in cause.cause &&
+												cause.cause.code === "ENOENT"
+											? new Error(
+													"Codex CLI is unavailable. Install Codex and run codex login.",
+												)
+											: cause,
+							}),
+					),
+				);
+				return account;
+			}).pipe(
+				Effect.tapError((failure) =>
+					Effect.sync(() => {
+						failures.set(key, { expiresAt: Date.now() + 60_000, failure });
+					}),
 				),
+				Effect.tap(() => Effect.sync(() => failures.delete(key))),
 			);
-			return account;
 		}),
 	);
 
@@ -268,10 +287,11 @@ export const discoverCodexEffect = (
 	account?: Account,
 	workspaceRoot?: string,
 	configDir?: string,
+	options?: { readonly refresh?: boolean },
 ): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> =>
 	prepareCodexAccount(account, configDir).pipe(
 		Effect.flatMap(({ home, env }) =>
-			discoverCodex(home, env, workspaceRoot, true),
+			discoverCodex(home, env, workspaceRoot, true, options),
 		),
 		Effect.flatMap((discovered) =>
 			discovered.signedIn
