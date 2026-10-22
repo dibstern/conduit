@@ -51,6 +51,7 @@ import {
 	DaemonConfigRefTag,
 	makeDaemonConfigFromOptions,
 } from "../domain/daemon/Services/daemon-config-ref.js";
+import { DaemonOrchestration } from "../domain/daemon/Services/daemon-orchestration.js";
 import {
 	MessageSurfacingSettings,
 	makeMessageSurfacingSettings,
@@ -98,7 +99,10 @@ import {
 	DaemonSessionQueryServiceTag,
 } from "../domain/relay/Services/daemon-session-query-service.js";
 import { DirectoryListingServiceLive } from "../domain/relay/Services/directory-listing-service.js";
-import { DraftPreWarmLive } from "../domain/relay/Services/draft-prewarm.js";
+import {
+	DraftPreWarmLive,
+	DraftPreWarmTag,
+} from "../domain/relay/Services/draft-prewarm.js";
 import { HandoffReceiptsLive } from "../domain/relay/Services/handoff-receipts.js";
 import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
 import {
@@ -1039,8 +1043,15 @@ export function createProjectRelayLayers({
 		relayStateWithRecaps,
 	);
 	const translatorLayer = Layer.sync(TranslatorTag, () => createTranslator());
+	const sharedOrchestration = Context.getOption(
+		config.daemonConfigContext ?? Context.empty(),
+		DaemonOrchestration,
+	);
+	const draftPreWarmLayer = Option.isSome(sharedOrchestration)
+		? Layer.sync(DraftPreWarmTag, () => sharedOrchestration.value.drafts)
+		: DraftPreWarmLive;
 	const baseLayers = Layer.provideMerge(
-		Layer.merge(translatorLayer, DraftPreWarmLive),
+		Layer.merge(translatorLayer, draftPreWarmLayer),
 		relayStateServicesAndBridges,
 	);
 	const baseLayersWithProjectionNotifier = Layer.provideMerge(
