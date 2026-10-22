@@ -81,7 +81,7 @@
 						<Icon name="info" size={12} />
 					{/if}
 				</span>
-				<div class="flex-1 min-w-0 break-words">
+				<div class="flex-1 min-w-0">
 					<span>
 						{#if message.errorCode}
 							<span class="font-mono text-xs opacity-70 mr-1.5">{message.errorCode}</span>
