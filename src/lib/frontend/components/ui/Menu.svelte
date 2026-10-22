@@ -115,6 +115,7 @@
 		const onClick = props["onclick"] as ((event: MouseEvent) => void) | undefined;
 		return {
 			...props,
+			...(presentation === "sheet" && footer ? { "aria-haspopup": "dialog" } : {}),
 			// A mouse press opens the sheet at once; its release must not pick the
 			// row that has just slid under the pointer.
 			onpointerdown: (event: PointerEvent) => {
@@ -254,9 +255,20 @@
 					     scrolling body a keyboard target too; Bits intercepts Tab inside the menu.
 					     Svelte cannot see role="menu" through the spread. -->
 					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-					<div {...props} id={contentId} tabindex={0} bind:this={contentNode} onclickcapture={swallowOpeningClick} onpointerdowncapture={(event: PointerEvent) => { openingClickDeadline = 0; (props["onpointerdowncapture"] as ((event: PointerEvent) => void) | undefined)?.(event); }} use:exemptFromBackgroundInert use:dragToDismiss={{ ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
+					<div {...props} role={footer ? "dialog" : "menu"} aria-orientation={footer ? undefined : "vertical"} id={contentId} tabindex={0} bind:this={contentNode} onclickcapture={swallowOpeningClick} onkeydowncapture={(event: KeyboardEvent) => {
+						// Bits dismisses menus on Tab; dialog footers need native button traversal.
+						if (footer && event.key === "Tab") event.stopPropagation();
+						(props["onkeydowncapture"] as ((event: KeyboardEvent) => void) | undefined)?.(event);
+					}} onpointerdowncapture={(event: PointerEvent) => { openingClickDeadline = 0; (props["onpointerdowncapture"] as ((event: PointerEvent) => void) | undefined)?.(event); }} use:exemptFromBackgroundInert use:dragToDismiss={{ ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
 						<SheetChrome {footer} bottomPadding={sheetBottomPadding} class={className} menuBody>
-							{@render children()}
+							{#if footer}
+								<!-- Menu commands and footer switches have different required ARIA parents. -->
+								<div role="menu" aria-label={ariaLabel} aria-orientation="vertical" data-state={open ? "open" : "closed"}>
+									{@render children()}
+								</div>
+							{:else}
+								{@render children()}
+							{/if}
 						</SheetChrome>
 					</div>
 				{/snippet}

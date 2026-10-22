@@ -179,8 +179,20 @@ test.describe("Debug Panel — Desktop Overflow", () => {
 
 		// Re-open from the merged bar.
 		await openMoreActions(page);
+		await expect(
+			page.getByRole("menuitemcheckbox", { name: "Debug panel" }),
+		).toHaveAttribute("aria-checked", "false");
 		await page.locator(DEBUG_BTN).click();
 		await expect(page.locator(DEBUG_PANEL)).toBeVisible();
+		await expect(
+			page.getByRole("menuitemcheckbox", { name: "Debug panel" }),
+		).toHaveAttribute("aria-checked", "true");
+		await expect(page.getByTestId("session-bar-overflow-menu")).toBeVisible();
+		await page.locator(DEBUG_BTN).click();
+		await expect(page.locator(DEBUG_PANEL)).toBeHidden();
+		await expect(
+			page.getByRole("menuitemcheckbox", { name: "Debug panel" }),
+		).toHaveAttribute("aria-checked", "false");
 	});
 });
 

@@ -504,10 +504,13 @@ test.describe("Sidebar Layout — Desktop", () => {
 		const menu = page.getByTestId("session-bar-overflow-menu");
 		await expect(menu).toBeVisible();
 		// The session commands lead; the global actions sit in the footer.
-		const globals = menu.locator('[role="menuitem"][data-testid^="overflow-"]');
+		const globals = menu.locator('[data-testid^="overflow-"]');
 		await expect(globals).toHaveCount(3);
 		for (const [index, name] of ["Share", "Settings", "Debug panel"].entries())
 			await expect(globals.nth(index)).toHaveAccessibleName(name);
+		await expect(
+			menu.getByRole("menuitemcheckbox", { name: "Debug panel" }),
+		).toHaveAttribute("aria-checked", "true");
 		await page.keyboard.press("Escape");
 		await expect(menu).toBeHidden();
 		await expect(more).toBeFocused();
