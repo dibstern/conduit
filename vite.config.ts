@@ -85,6 +85,8 @@ const config = defineConfig({
 		outDir: "../../../dist/frontend",
 		emptyOutDir: true,
 		sourcemap: true,
+		// Gzip size reporting compresses every chunk only to print a number.
+		reportCompressedSize: false,
 		// Tailwind v4's browser floor (all ES2022+). CSS inherits it: an older
 		// target makes Lightning CSS rewrite every oklch colour to hex/lab
 		// fallbacks that gamut-map differently. Storybook only forwards `target`.

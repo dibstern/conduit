@@ -21,7 +21,12 @@ afterEach(() => {
 		rmSync(root, { recursive: true, force: true });
 });
 
-function build(serverOnly = false, failFrontend = false) {
+function build({
+	serverOnly = false,
+	failFrontend = false,
+	failServer = false,
+	requireOverlap = false,
+} = {}) {
 	const root = mkdtempSync(join(tmpdir(), "conduit-build-ready-"));
 	roots.push(root);
 	const bin = join(root, "bin");
@@ -32,13 +37,24 @@ function build(serverOnly = false, failFrontend = false) {
 		join(bin, "pnpm"),
 		`#!/usr/bin/env node
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { setTimeout } from "node:timers/promises";
 const args = process.argv.slice(2);
-if (args[1] === "tsgo") mkdirSync("dist/src/lib", { recursive: true });
+if (args[1] === "tsgo") {
+	mkdirSync("dist/src/lib", { recursive: true });
+	if (process.env.REQUIRE_OVERLAP === "1") {
+		const deadline = Date.now() + 2000;
+		while (!existsSync("frontend-start.json") && Date.now() < deadline) await setTimeout(10);
+		if (!existsSync("frontend-start.json")) process.exit(3);
+	}
+	if (process.env.FAIL_SERVER === "1") process.exit(2);
+}
 if (args[1] === "vite") {
 	writeFileSync("frontend-start.json", JSON.stringify({ ready: existsSync("dist/build-ready.json") }));
 	if (process.env.FAIL_FRONTEND === "1") process.exit(1);
+	await setTimeout(100);
 	mkdirSync("dist/public", { recursive: true });
 	writeFileSync("dist/public/index.html", process.env.CONDUIT_BUILD_ID);
+	writeFileSync("frontend-finished.json", JSON.stringify({ locked: existsSync("dist/.build.lock"), ready: existsSync("dist/build-ready.json") }));
 }
 `,
 		{ mode: 0o755 },
@@ -52,6 +68,8 @@ if (args[1] === "vite") {
 				...process.env,
 				PATH: `${bin}:${process.env["PATH"] ?? ""}`,
 				FAIL_FRONTEND: failFrontend ? "1" : "0",
+				FAIL_SERVER: failServer ? "1" : "0",
+				REQUIRE_OVERLAP: requireOverlap ? "1" : "0",
 			},
 			encoding: "utf8",
 		},
@@ -84,15 +102,30 @@ describe("complete build publication", () => {
 	});
 
 	it("invalidates an old marker without publishing a server-only build", () => {
-		const { root, result, ready } = build(true);
+		const { root, result, ready } = build({ serverOnly: true });
 		expect(result.status, result.stderr).toBe(0);
 		expect(existsSync(ready)).toBe(false);
 		expect(existsSync(join(root, "dist/public/index.html"))).toBe(false);
 	});
 
 	it("keeps a failed frontend build unavailable", () => {
-		const { result, ready } = build(false, true);
+		const { result, ready } = build({ failFrontend: true });
 		expect(result.status).toBe(1);
 		expect(existsSync(ready)).toBe(false);
+	});
+
+	it("runs the independent compilers concurrently", () => {
+		const { result } = build({ requireOverlap: true });
+		expect(result.status, result.stderr).toBe(0);
+	});
+
+	it("holds the lock until the frontend finishes after a server failure", () => {
+		const { root, result, ready } = build({ failServer: true });
+		expect(result.status).toBe(2);
+		expect(existsSync(ready)).toBe(false);
+		expect(
+			JSON.parse(readFileSync(join(root, "frontend-finished.json"), "utf8")),
+		).toEqual({ locked: true, ready: false });
+		expect(existsSync(join(root, "dist/.build.lock"))).toBe(false);
 	});
 });
