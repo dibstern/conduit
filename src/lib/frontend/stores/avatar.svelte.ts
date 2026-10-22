@@ -23,10 +23,14 @@ const stored = (): Avatar | undefined => {
 };
 
 const keep = (avatar: Avatar) => {
-	avatarState.current = avatar;
+	// No macPicture means the daemon couldn't read it this time: keep ours.
+	avatarState.current = {
+		macPicture: avatarState.current.macPicture ?? null,
+		...avatar,
+	};
 	avatarState.loaded = true;
 	try {
-		localStorage.setItem(STORAGE_KEY, JSON.stringify(avatar));
+		localStorage.setItem(STORAGE_KEY, JSON.stringify(avatarState.current));
 	} catch {
 		// Private browsing or a full quota: the next load waits for the daemon.
 	}

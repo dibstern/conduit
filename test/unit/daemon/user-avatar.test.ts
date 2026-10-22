@@ -1,7 +1,9 @@
 // Failure modes: global git name is missing or overridden by a repository/env;
 // old config asks once, a shape seed or other save loses the choice; unavailable
 // or changed account photos break reads; invalid choices persist; failed saves
-// are acknowledged. The adapter must return only a bounded JPEG or none.
+// are acknowledged; a failed photo read is reported as "no picture" and erases
+// the browser's copy. The adapter must return only a bounded JPEG or none, and
+// repeat reads must not rerun the slow lookup.
 
 import { execFileSync } from "node:child_process";
 import {
@@ -185,10 +187,13 @@ describe("user avatar", () => {
 	);
 
 	it.effect(
-		"reads changed pictures each time and keeps an unavailable Mac choice",
+		"reads changed pictures each time, keeps an unavailable Mac choice and omits an unreadable picture",
 		() =>
 			Effect.gen(function* () {
-				let picture = Option.some(new Uint8Array([255, 216, 255, 217]));
+				let picture: Effect.Effect<
+					Option.Option<Uint8Array>,
+					Error
+				> = Effect.succeed(Option.some(new Uint8Array([255, 216, 255, 217])));
 				const context = yield* Layer.build(
 					UserAvatarLive.pipe(
 						Layer.provide(
@@ -201,7 +206,7 @@ describe("user avatar", () => {
 									flush: Effect.void,
 								}),
 								Layer.succeed(AccountPicture, {
-									read: Effect.sync(() => picture),
+									read: Effect.suspend(() => picture),
 								}),
 							),
 						),
@@ -211,11 +216,15 @@ describe("user avatar", () => {
 				expect((yield* avatar.get).macPicture).toBe(
 					"data:image/jpeg;base64,/9j/2Q==",
 				);
-				picture = Option.none();
+				picture = Effect.succeed(Option.none());
 				expect(yield* avatar.get).toMatchObject({
 					choice: { kind: "mac" },
 					macPicture: null,
 				});
+				picture = Effect.fail(new Error("dscl timed out"));
+				const unreadable = yield* avatar.get;
+				expect(unreadable.choice).toEqual({ kind: "mac" });
+				expect(unreadable).not.toHaveProperty("macPicture");
 			}),
 	);
 
@@ -268,12 +277,15 @@ describe("user avatar", () => {
 		).toEqual({ kind: "preset", id: "orb-pink" });
 	});
 
-	it.effect("the platform adapter returns a bounded JPEG or none", () =>
+	it.effect("the platform adapter returns a cached, bounded JPEG or none", () =>
 		Effect.gen(function* () {
-			const picture = yield* AccountPicture.pipe(
-				Effect.flatMap((service) => service.read),
+			const [picture, again] = yield* AccountPicture.pipe(
+				Effect.flatMap((service) =>
+					Effect.all([service.read, service.read], { concurrency: 2 }),
+				),
 				Effect.provide(AccountPictureLive),
 			);
+			expect(again).toBe(picture);
 			if (process.platform !== "darwin")
 				expect(Option.isNone(picture)).toBe(true);
 			if (Option.isSome(picture)) {
