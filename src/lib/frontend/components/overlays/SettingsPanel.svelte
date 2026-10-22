@@ -90,7 +90,7 @@
 		class:phone={sessionViewState.compact}
 		class="settings-panel bg-settings-bg ring-1 ring-border rounded-[16px] shadow-settings-dialog flex flex-col overflow-hidden font-sans leading-[1.5]"
 	>
-		<div class="settings-header shrink-0 bg-settings-rail {sessionViewState.compact ? 'grid grid-cols-[90px_minmax(0,1fr)_90px] items-center px-[8px]' : 'flex h-[52px] items-center px-[12px] pl-[20px] border-b border-settings-separator'}">
+		<div class="settings-header shrink-0 bg-settings-rail {sessionViewState.compact ? 'grid grid-cols-[90px_minmax(0,1fr)_90px] items-center px-[14px]' : 'flex h-[52px] items-center px-[12px] pl-[20px] border-b border-settings-separator'}">
 			{#if listHidden}
 				<Button
 					bind:element={backEl}
@@ -112,7 +112,7 @@
 				{listHidden ? surfacingPage?.title ?? sectionLabel : "Settings"}
 			</h2>
 			{#if sessionViewState.compact && !listHidden}
-				<Button variant="ghost" tone="accent" hoverFill="none" size="content" touchTarget class="min-h-[44px] justify-self-end text-[15px] font-semibold" data-testid="settings-close-btn" ariaLabel="Close settings" onclick={() => onClose?.()}>Done</Button>
+				<Button variant="ghost" tone="accent" hoverFill="none" size="content" class="min-h-[44px] min-w-[44px] justify-self-end text-[15px] font-semibold" data-testid="settings-close-btn" ariaLabel="Close settings" onclick={() => onClose?.()}>Done</Button>
 			{:else if !sessionViewState.compact}
 				<Button iconOnly ariaLabel="Close settings" icon="x" iconSize={13} variant="chip" tone="muted" size="content" class="size-[32px] rounded-[50%]" data-testid="settings-close-btn" onclick={() => onClose?.()} />
 			{:else}
@@ -123,7 +123,7 @@
 		<div class="flex flex-1 min-h-0">
 			<!-- Manual activation on phone keeps arrow keys from pushing a page. -->
 			{#if !listHidden}
-				<div class="shrink-0 overflow-y-auto {sessionViewState.compact ? 'flex-1 px-[14px] pt-[4px] pb-[20px]' : 'w-[172px] px-[8px] py-[10px] border-r border-settings-separator bg-settings-rail'}">
+				<div class="shrink-0 overflow-y-auto {sessionViewState.compact ? 'flex-1 px-[14px] pt-[var(--settings-section-gap)] pb-[20px]' : 'w-[172px] px-[8px] py-[10px] border-r border-settings-separator bg-settings-rail'}">
 					{#if sessionViewState.compact}<AvatarSettings root />{/if}
 					<Tabs
 						value={sessionViewState.compact ? "" : shown}
@@ -195,6 +195,7 @@
 
 <style>
 	.settings-panel {
+		--settings-section-gap: 16px;
 		width: min(720px, calc(100vw - 32px));
 		height: min(600px, round(down, 80dvh, 1px));
 	}
@@ -223,7 +224,7 @@
 		background: var(--color-bg);
 	}
 	.phone .settings-content {
-		padding: 4px 14px 26px;
+		padding: var(--settings-section-gap) 14px 26px;
 	}
 	.phone .settings-main::after {
 		display: none;

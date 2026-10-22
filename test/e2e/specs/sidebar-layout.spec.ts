@@ -1101,12 +1101,13 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(page.getByTestId("session-filter-clear")).toHaveCount(0);
 		await measure("#sidebar");
 		await page.getByTestId("session-filter-chip-needs-you").click();
-		await page.getByTestId("list-bar-overflow").click();
-		await expect(page.getByTestId("list-overflow-settings")).toBeVisible();
-		await expect(page.getByTestId("list-overflow-select")).toHaveCount(0);
-		await expect(page.getByTestId("list-overflow-resume")).toHaveCount(0);
-		await measure("[role=menu]");
-		await page.keyboard.press("Escape");
+		const settingsButton = page.getByTestId("list-bar-settings");
+		await expect(settingsButton).toHaveAccessibleName("Settings");
+		await expect(settingsButton.locator("svg.lucide-settings")).toBeVisible();
+		await settingsButton.click();
+		await expect(page.locator("#settings-panel")).toBeVisible();
+		await page.getByTestId("settings-close-btn").click();
+		await expect(page.locator("#settings-panel")).toHaveCount(0);
 		await page.getByTestId("session-scope-chip").click();
 		await page.getByRole("menuitem", { name: "Add a project…" }).click();
 		const addProject = page.getByRole("dialog", {

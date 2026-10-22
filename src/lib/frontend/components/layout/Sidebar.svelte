@@ -15,11 +15,7 @@
 	import type { SaveProjectResponse } from "../../transport/ws-rpc.js";
 	import { selection } from "../../stores/selection.svelte.js";
 	import { sessionList } from "../../stores/session-list.svelte.js";
-	import { featureFlags } from "../../stores/feature-flags.svelte.js";
-	import Menu from "../ui/Menu.svelte";
-	import MenuItem from "../ui/MenuItem.svelte";
-	import MenuSeparator from "../ui/MenuSeparator.svelte";
-	import { openSettings, toggleDebugPanel } from "./chrome-actions.js";
+	import { openSettings } from "./chrome-actions.js";
 	import Banners from "../overlays/Banners.svelte";
 	import UsageFooterMeter from "./UsageFooterMeter.svelte";
 
@@ -27,7 +23,6 @@
 	let { listScreen = false }: { listScreen?: boolean } = $props();
 
 	let addProjectOpen = $state(false);
-	let listMenuOpen = $state(false);
 	let phoneUsageHeight = $state(0);
 
 	function handleCloseSidebar() {
@@ -114,47 +109,19 @@
 			onclick={handleNewSession}
 		/>
 		{#if sessionViewState.compact}
-			<Menu
-				bind:open={listMenuOpen}
-				ariaLabel="More actions"
-				align="end"
-				data-testid="list-bar-overflow-menu"
-			>
-				{#snippet trigger({ props })}
-					<Button
-						{...props}
-						id="list-bar-more"
-						variant="toolbar"
-						size="content"
-						iconOnly
-						icon="ellipsis"
-						iconSize={17}
-						class="size-[44px] shrink-0 rounded-[8px]"
-						title="More actions"
-						ariaLabel="More actions"
-						data-testid="list-bar-overflow"
-					/>
-				{/snippet}
-				<MenuItem
-					title="Settings"
-					data-testid="list-overflow-settings"
-					class="min-h-[44px] md:min-h-0"
-					onselect={() => openSettings()}
-				>
-					Settings
-				</MenuItem>
-				{#if featureFlags.debug}
-					<MenuSeparator />
-					<MenuItem
-						title="Toggle debug panel"
-						data-testid="list-overflow-debug"
-						class="min-h-[44px] md:min-h-0"
-						onselect={toggleDebugPanel}
-					>
-						Debug panel
-					</MenuItem>
-				{/if}
-			</Menu>
+			<Button
+				id="list-bar-settings"
+				variant="toolbar"
+				size="content"
+				iconOnly
+				icon="settings"
+				iconSize={17}
+				class="size-[44px] shrink-0 rounded-[8px]"
+				title="Settings"
+				ariaLabel="Settings"
+				data-testid="list-bar-settings"
+				onclick={() => openSettings()}
+			/>
 		{:else}
 			<Button
 				id="sidebar-toggle-btn"

@@ -49,7 +49,7 @@
 
 <section
 	{id}
-	class="mt-[16px] first:mt-0 flex flex-col gap-[6px]"
+	class="mt-[var(--settings-section-gap,16px)] first:mt-0 flex flex-col gap-[6px]"
 	aria-labelledby={titleId}
 	data-testid={testId}
 >

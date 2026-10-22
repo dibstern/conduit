@@ -661,6 +661,40 @@ export const sessionPresentationHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "phone session list settings cog",
+		match: /^the phone session list has a 44 pixel Settings cog$/,
+		run: async ({ world }) => {
+			const settings = world.page.getByTestId("list-bar-settings");
+			await expect(settings).toBeVisible();
+			await expect(settings).toHaveAccessibleName("Settings");
+			await expect(settings).toHaveAttribute("title", "Settings");
+			await expect(settings.locator(".lucide-settings")).toBeVisible();
+			const bounds = await settings.boundingBox();
+			expect(bounds?.width).toBe(44);
+			expect(bounds?.height).toBe(44);
+		},
+	},
+	{
+		name: "tap phone session list settings cog",
+		match: /^I tap the phone session list Settings cog$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("list-bar-settings").click();
+		},
+	},
+	{
+		name: "settings section list is open",
+		match: /^settings opens at the section list$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByRole("dialog", { name: "Settings" }),
+			).toBeVisible();
+			await expect(world.page.getByTestId("avatar-change-root")).toBeVisible();
+			await expect(world.page.getByTestId("settings-close-btn")).toHaveText(
+				"Done",
+			);
+		},
+	},
+	{
 		// Geometry as well as the attribute. `data-collapsed` is what the CSS keys
 		// on, so checking it alone would pass a regression where the attribute
 		// flips correctly and the grid template does not — which is exactly the
