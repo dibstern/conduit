@@ -4,6 +4,7 @@ import { Context, Effect, HashMap, Layer, Option, Ref, Schedule } from "effect";
 import { SqlClient } from "effect/sql";
 import * as Failure from "../../../effect/failure-classification.js";
 import { ENV } from "../../../env.js";
+import { createLogger } from "../../../logger.js";
 import { makeUnboundClaudeEventPersistEffect } from "../../../persistence/effect/claude-event-persist-effect.js";
 import { makeUnboundCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import {
@@ -20,17 +21,26 @@ import { ProviderInstanceFailure } from "../../../provider/errors.js";
 import { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
 import { CommandReadModelRepository } from "../../../provider/orchestration-read-model.js";
 import { makeProviderCallContextResolver } from "../../../provider/orchestration-wiring.js";
+import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { SqliteProviderSessionBindingReadModel } from "../../../provider/provider-session-binding-read-model.js";
+import {
+	DraftPreWarmLive,
+	DraftPreWarmTag,
+} from "../../relay/Services/draft-prewarm.js";
 import {
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
 } from "../../relay/Services/provider-runtime-ingestion-service.js";
 import { makeEventSinkFactory } from "../../relay/Services/provider-turn-dispatch.js";
+import { LoggerTag } from "../../relay/Services/services.js";
 import { SessionCommandError } from "../../relay/Services/session-command.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { AccountDirectory } from "../Services/account-directory.js";
 import { DaemonOrchestration } from "../Services/daemon-orchestration.js";
-import { DaemonStoreAvailability } from "../Services/daemon-store-availability.js";
+import {
+	DaemonStoreAvailability,
+	onProjectUnavailable,
+} from "../Services/daemon-store-availability.js";
 import {
 	ProjectRegistryTag,
 	ProjectSaveLockTag,
@@ -250,9 +260,18 @@ export const DaemonOrchestrationLive = Layer.effect(
 			},
 		});
 		yield* Effect.addFinalizer(() => engine.shutdownEffect());
+		const drafts = Context.get(
+			yield* Layer.build(DraftPreWarmLive).pipe(
+				Effect.provideService(ProviderRegistryTag, adapters.registry),
+				Effect.provideService(LoggerTag, createLogger("draft-prewarm")),
+			),
+			DraftPreWarmTag,
+		);
+		yield* onProjectUnavailable(unavailable, drafts.discardProject);
 		let started = false;
 		return {
 			engine,
+			drafts,
 			start: Effect.gen(function* () {
 				yield* adapters.recover;
 				if (started) return;

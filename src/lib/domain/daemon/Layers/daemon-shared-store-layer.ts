@@ -19,7 +19,10 @@ import {
 	projectStorageDir,
 } from "../../../persistence/project-storage.js";
 import { reclaimStore } from "../../../persistence/rewrite-store.js";
-import { DaemonStoreAvailability } from "../Services/daemon-store-availability.js";
+import {
+	DaemonStoreAvailability,
+	markProjectUnavailable,
+} from "../Services/daemon-store-availability.js";
 
 /** Offline preparation and import must finish before any daemon consumer opens SQLite. */
 export const makeDaemonSharedStoreLayer = (
@@ -71,7 +74,8 @@ export const makeDaemonSharedStoreLayer = (
 				// An error means nothing committed. A marker-backed source-changed
 				// result has no error: its history is already imported.
 				if (result.error) {
-					unavailable.set(
+					yield* markProjectUnavailable(
+						unavailable,
 						result.projectId,
 						`History import failed (${result.error.kind})`,
 					);

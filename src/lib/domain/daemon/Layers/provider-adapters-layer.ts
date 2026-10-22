@@ -50,7 +50,10 @@ import { makeProcessingTimeoutHooks } from "../../relay/Services/session-overrid
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { AccountDirectory } from "../Services/account-directory.js";
 import { hasProviderRecoveryCandidate } from "../Services/daemon-session-reader.js";
-import { DaemonStoreAvailability } from "../Services/daemon-store-availability.js";
+import {
+	DaemonStoreAvailability,
+	markProjectUnavailable,
+} from "../Services/daemon-store-availability.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
 import { ProjectRegistryTag } from "../Services/project-registry-service.js";
 import {
@@ -500,7 +503,8 @@ export const makeProviderAdaptersLive = (configDir: string) =>
 									if (Exit.isFailure(attached)) {
 										if (Failure.isInterruptedOnly(attached.cause))
 											return yield* Effect.interrupt;
-										unavailable.set(
+										yield* markProjectUnavailable(
+											unavailable,
 											project.projectId,
 											"Provider attachment recovery failed",
 										);
@@ -625,7 +629,8 @@ export const makeProviderAdaptersLive = (configDir: string) =>
 										Exit.isFailure(exit) &&
 										!Failure.isInterruptedOnly(exit.cause)
 									)
-										unavailable.set(
+										yield* markProjectUnavailable(
+											unavailable,
 											projectId,
 											"Provider attachment recovery failed",
 										);

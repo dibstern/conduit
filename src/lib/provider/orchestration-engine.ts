@@ -1031,7 +1031,7 @@ export class OrchestrationEngine {
 					newlyAccepted &&
 					(command.type === "end_session" ||
 						(command.type === "interrupt_turn" &&
-							command.turnIds === undefined))
+							(command.turnIds === undefined || command.stop !== undefined)))
 				)
 					yield* this.cancelPreWarmPreparationEffect(command.sessionId);
 				const delivery = durable.reactor.runCommand(command.commandId).pipe(
@@ -1387,7 +1387,7 @@ export class OrchestrationEngine {
 		command: InterruptTurnCommand,
 	): Effect.Effect<void, OrchestrationError> {
 		return Effect.gen({ self: this }, function* () {
-			if (command.turnIds === undefined)
+			if (command.turnIds === undefined || command.stop !== undefined)
 				yield* this.cancelPreWarmPreparationEffect(command.sessionId);
 			const providerId = yield* this.requireProviderForSessionEffect(
 				command.sessionId,

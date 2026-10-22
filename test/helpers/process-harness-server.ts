@@ -353,6 +353,37 @@ async function main(): Promise<void> {
 		? join(dist, "src")
 		: fileURLToPath(new URL("../../src", import.meta.url));
 	const extension = dist ? "js" : "ts";
+	if (existsSync(join(root, "hold-draft-launch"))) {
+		const { OrchestrationEngine } = (await import(
+			pathToFileURL(
+				join(codeRoot, "lib/provider", `orchestration-engine.${extension}`),
+			).href
+		)) as typeof import("../../src/lib/provider/orchestration-engine.js");
+		const resolveCall = OrchestrationEngine.prototype.resolveCallContextEffect;
+		Object.assign(OrchestrationEngine.prototype, {
+			resolveCallContextEffect(
+				this: InstanceType<typeof OrchestrationEngine>,
+				request: Parameters<typeof resolveCall>[0],
+			) {
+				const caller = this;
+				return Effect.gen(function* () {
+					const call = yield* resolveCall.call(caller, request);
+					yield* Effect.gen(function* () {
+						const hold = join(root, "hold-draft-launch");
+						if (
+							request.sessionId !== "" ||
+							!existsSync(hold) ||
+							request.workspaceRoot !== readFileSync(hold, "utf8")
+						)
+							return;
+						writeFileSync(join(root, "draft-launch-held"), "");
+						while (existsSync(hold)) yield* Effect.sleep(10);
+					});
+					return call;
+				});
+			},
+		});
+	}
 	if (existsSync(join(root, "thread-read-proof.json"))) {
 		const readProbe = (): { sessionId: string; projectId: string } =>
 			JSON.parse(readFileSync(join(root, "thread-read-proof.json"), "utf8"));
