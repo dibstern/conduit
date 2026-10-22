@@ -7,6 +7,7 @@ import {
 	mockSessionSkills,
 	requireRelayControl,
 	requireRpcControl,
+	settleTransitions,
 } from "./shared.js";
 
 const LOAD = /^\s*([\w:-]+) by (you|agent) in turn (\d+)(, loading)?\s*$/;
@@ -127,6 +128,7 @@ export const sessionSkillsHandlers: StepHandler[] = [
 				`[data-testid="session-skills-row"][data-skill="${match[1]}"]`,
 			);
 			await expect(row).toBeVisible();
+			await settleTransitions(world.page);
 			const box = await row.boundingBox();
 			if (!box) throw new Error("skill row has no touch target");
 			const touch = await world.page.context().newCDPSession(world.page);

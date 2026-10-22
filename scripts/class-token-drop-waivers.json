@@ -1,4 +1,26 @@
 {
+	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: bg-text-dimmer/30,border-b,h-[3px],mt-[10px],w-[34px]": "The phone top sheet replaces the fake 34x3 handle and bottom border with SheetChrome's real 36x5 drag handle, shared colour, spacing and shadow.",
+	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: inset-x-0": {
+		"movedTo": "src/lib/frontend/components/ui/Popover.svelte",
+		"requires": "sheetEdge=\"top\"",
+		"reason": "The shared top sheet positions the phone panel full-width below the measured session header."
+	},
+	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: mx-auto,rounded-b-[22px],rounded-full": {
+		"movedTo": "src/lib/frontend/components/ui/SheetChrome.svelte",
+		"requires": "sheetEdge=\"top\"",
+		"reason": "The shared top sheet owns the bottom corners and centered rounded drag handle."
+	},
+	"src/lib/frontend/components/session/SideThreadsPanel.svelte :: bg-text-dimmer/30,border-b,h-[3px],mt-[10px],w-[34px]": "The phone top sheet replaces the fake 34x3 handle and bottom border with SheetChrome's real 36x5 drag handle, shared colour, spacing and shadow.",
+	"src/lib/frontend/components/session/SideThreadsPanel.svelte :: inset-x-0": {
+		"movedTo": "src/lib/frontend/components/ui/Popover.svelte",
+		"requires": "sheetEdge=\"top\"",
+		"reason": "The shared top sheet positions the phone panel full-width below the measured session header."
+	},
+	"src/lib/frontend/components/session/SideThreadsPanel.svelte :: mx-auto,rounded-b-[22px]": {
+		"movedTo": "src/lib/frontend/components/ui/SheetChrome.svelte",
+		"requires": "sheetEdge=\"top\"",
+		"reason": "The shared top sheet owns the bottom corners and centered drag handle."
+	},
 	"src/lib/frontend/components/chat/QuestionCard.svelte :: mt-[2px]": "Polish B3 aligns each choice control to the label baseline, then centers it on the font x-height with an ex-based transform. The fixed 2px top margin placed controls 2.04px above the measured x-height center and is intentionally removed.",
 	"src/lib/frontend/components/chat/ToolQuestionCard.svelte :: items-start,mt-0.5": "Polish B3 replaces top-aligned circle glyphs and their fixed top margin with baseline-aligned 13px radio or checkbox indicators. An ex-based transform centers each indicator on the label x-height while preserving the row's 6px vertical padding.",
 	"src/lib/frontend/components/session/DraftItem.svelte :: draft-age": "The restyle audit cleanup replaces the duplicate Drafts Mono face and draft-age font shorthand with the app's font-mono and text-mono-xs utilities.",

@@ -38,22 +38,23 @@ function upsertRow(page: Page, row: { id: string } & Record<string, unknown>) {
 }
 
 // Agents with Child Sessions and shells without, more than the list can show.
-const OVERFLOW_TASKS: LiveTask[] = Array.from({ length: 10 }, (_, index) =>
-	index % 2 === 0
-		? {
-				id: `agent-${index}`,
-				type: "local_agent",
-				description: `Investigate the intermittent failure in the checkout flow, part ${index / 2 + 1}`,
-				age: 30 * (12 - index),
-				childSessionId: `claude-subagent-overflow-${index}`,
-			}
-		: {
-				id: `shell-${index}`,
-				type: "local_bash",
-				description: `pnpm vitest run --reporter=verbose test/checkout/part-${index}.test.ts`,
-				age: 30 * (12 - index),
-			},
-);
+const overflowTasks = (count: number): LiveTask[] =>
+	Array.from({ length: count }, (_, index) =>
+		index % 2 === 0
+			? {
+					id: `agent-${index}`,
+					type: "local_agent",
+					description: `Investigate the intermittent failure in the checkout flow, part ${index / 2 + 1}`,
+					age: 30 * (count + 2 - index),
+					childSessionId: `claude-subagent-overflow-${index}`,
+				}
+			: {
+					id: `shell-${index}`,
+					type: "local_bash",
+					description: `pnpm vitest run --reporter=verbose test/checkout/part-${index}.test.ts`,
+					age: 30 * (count + 2 - index),
+				},
+	);
 
 const drawer = (page: Page) => page.getByTestId("task-drawer");
 const panel = (page: Page) => page.getByTestId("background-tasks-panel");
@@ -149,9 +150,10 @@ export const taskDrillInHandlers: StepHandler[] = [
 	},
 	{
 		name: "seed an overflowing task list",
-		match: /^the session has 10 live background tasks with long descriptions$/,
-		run: async ({ world }) => {
-			await setLiveTasks(world.page, OVERFLOW_TASKS);
+		match:
+			/^the session has (\d+) live background tasks with long descriptions$/,
+		run: async ({ world, match }) => {
+			await setLiveTasks(world.page, overflowTasks(Number(match[1])));
 			await expect(
 				world.page.getByTestId("background-tasks-row"),
 			).toBeVisible();

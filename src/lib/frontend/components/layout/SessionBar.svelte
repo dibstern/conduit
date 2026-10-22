@@ -61,7 +61,6 @@
 	import { openSideThreads, sideThreadsPanel } from "../session/side-threads.svelte.js";
 	import { getPinCommand, getPrimaryCommand, getSessionCommands, globalKeyHint, runSessionCommandShortcut, sessionCommandActions, sessionCommandKeys, sessionCommandKeysHint, type SessionCommand } from "../session/session-commands.js";
 	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
-	import { dimThemeColor } from "../../stores/theme.svelte.js";
 	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { chromeMenuActions } from "./chrome-actions.js";
 	import SessionSheetFooter from "../session/SessionSheetFooter.svelte";
@@ -337,10 +336,6 @@
 	}
 
 	let overflowOpen = $state(false);
-	$effect(() => {
-		if (sessionViewState.compact && !goalDetails.open && (tasksPanel.open || sideThreadsPanel.open)) return dimThemeColor();
-		return undefined;
-	});
 	let overflowOpener: HTMLElement | null = null;
 	// A selected phone action may open a dialog or move focus itself.
 	let overflowSelected = false;
@@ -367,10 +362,10 @@
 
 {#if goalDetails.open && detailsGoal}
 	{#if !sessionViewState.compact}<Button variant="scrim-clear" size="content" tabindex={-1} ariaLabel="Close goal details" data-testid="goal-details-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => closeGoalDetails(true)} />{/if}
-{:else if tasksPanel.open && backgroundTasks.length > 0}
-	<Button variant={sessionViewState.compact ? "sheet-scrim" : "scrim-clear"} size="content" tabindex={-1} ariaLabel="Close background tasks" data-testid="background-tasks-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => { tasksPanel.open = false; }} />
-{:else if sideThreadsPanel.open}
-	<Button variant={sessionViewState.compact ? "sheet-scrim" : "scrim-clear"} size="content" tabindex={-1} ariaLabel="Close Side Threads" data-testid="side-threads-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => { sideThreadsPanel.open = false; }} />
+{:else if tasksPanel.open && backgroundTasks.length > 0 && !sessionViewState.compact}
+	<Button variant="scrim-clear" size="content" tabindex={-1} ariaLabel="Close background tasks" data-testid="background-tasks-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => { tasksPanel.open = false; }} />
+{:else if sideThreadsPanel.open && !sessionViewState.compact}
+	<Button variant="scrim-clear" size="content" tabindex={-1} ariaLabel="Close Side Threads" data-testid="side-threads-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => { sideThreadsPanel.open = false; }} />
 {/if}
 
 {#snippet viewCards()}
@@ -384,8 +379,10 @@
 {#snippet overflowMenu()}
 	<Menu
 		bind:open={overflowOpen}
-		onopenchange={(open) => { if (open) overflowSelected = false; }}
+		onopenchange={(open) => { if (open) { overflowSelected = false; if (sessionViewState.compact) forceBarOpen(); } }}
 		presentation={sessionViewState.compact ? "sheet" : "popover"}
+		sheetEdge="top"
+		portalTo={sessionViewState.compact ? "#session-bar" : undefined}
 		appearance="final"
 		class={sessionViewState.compact ? undefined : "w-[340px] max-w-[calc(100vw-16px)]"}
 		ariaLabel="More actions"
@@ -714,7 +711,7 @@
 	{/if}
 
 	{#if sessionViewState.compact && !collapsed && goalShown}
-		<Popover bind:open={goalDetails.open} presentation="sheet" modal initialFocus="content" labelledBy="goal-details-title" id="goal-details" data-testid="goal-details" portalTo="#session-bar" sheetBottomPadding={34} class="px-[20px] pt-[2px] whitespace-normal text-[12px]" sheetScrim={{ portalTo: goalSubtitleEl?.closest("#session-bar")?.parentElement ?? undefined, zIndex: "var(--z-dropdown)", testId: "goal-details-scrim" }}
+		<Popover bind:open={goalDetails.open} presentation="sheet" sheetEdge="top" modal initialFocus="content" labelledBy="goal-details-title" id="goal-details" data-testid="goal-details" portalTo="#session-bar" sheetBottomPadding={34} class="px-[20px] pt-[2px] whitespace-normal text-[12px]" sheetScrim={{ portalTo: goalSubtitleEl?.closest("#session-bar")?.parentElement ?? undefined, zIndex: "var(--z-dropdown)", testId: "goal-details-scrim" }}
 			onopenchange={(open) => { if (open) { goalFocusHandedOff = false; tasksPanel.open = false; sideThreadsPanel.open = false; } }}
 			onCloseAutoFocus={(event) => { if (goalFocusHandedOff) event.preventDefault(); goalFocusHandedOff = false; }}
 		>

@@ -26,6 +26,7 @@
 	import { formatTimeAgo } from "../../utils/format.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import Popover from "../ui/Popover.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import { sessionCommandActions } from "./session-commands.js";
 	import { sideThreadsPanel } from "./side-threads.svelte.js";
@@ -42,7 +43,8 @@
 	}
 </script>
 
-<Surface id="side-threads-panel" data-testid="side-threads-panel" variant={compact ? "plain" : "floating"} radius="none" elevation={compact ? "panel" : "popover"} role="region" aria-label="Side Threads" class="absolute top-full z-[var(--z-popover)] max-h-[70dvh] overflow-y-auto whitespace-normal border-border px-[14px] pt-[12px] pb-[10px] text-[12px] {compact ? 'inset-x-0 rounded-b-[22px] border-b' : 'right-[16px] mt-[8px] w-[440px] max-w-[calc(100%-32px)] rounded-[16px]'}">
+{#snippet panel()}
+<Surface id="side-threads-panel" data-testid="side-threads-panel" variant={compact ? "plain" : "floating"} radius="none" elevation={compact ? "none" : "popover"} role="region" aria-label="Side Threads" class="whitespace-normal border-border px-[14px] pt-[12px] pb-[10px] text-[12px] {compact ? '' : 'absolute top-full z-[var(--z-popover)] max-h-[70dvh] overflow-y-auto right-[16px] mt-[8px] w-[440px] max-w-[calc(100%-32px)] rounded-[16px]'}">
 	<!-- Desktop heads its card in sentence case, like the goal card's "Checks". -->
 	<div class="flex items-center gap-[7px] font-sans text-text-secondary {compact ? 'text-[11px] font-semibold uppercase tracking-[0.08em]' : 'text-[12px] font-medium'}">
 		<Icon name="messages-square" size={13} />{compact ? "Side Threads" : "Side threads"}
@@ -76,5 +78,14 @@
 	{:else}
 		<p data-testid="side-threads-empty" class="m-0 mt-2 text-[11px] leading-[1.45] text-text-muted">No Side Threads yet. Type <span class="font-mono text-text-secondary">$btw</span> and a question to ask one.</p>
 	{/if}
-	{#if compact}<div aria-hidden="true" class="mx-auto mt-[10px] h-[3px] w-[34px] rounded-full bg-text-dimmer/30"></div>{/if}
 </Surface>
+{/snippet}
+
+{#if compact}
+	<Popover bind:open={sideThreadsPanel.open} presentation="sheet" sheetEdge="top" ariaLabel="Side Threads" portalTo="#session-bar" sheetBottomPadding={0} sheetScrim={{ testId: "side-threads-scrim" }}>
+		{#snippet trigger()}{/snippet}
+		{@render panel()}
+	</Popover>
+{:else}
+	{@render panel()}
+{/if}
