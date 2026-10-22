@@ -490,12 +490,22 @@ export const makeSessionProjector = defineProjector(() => ({
 				)
 					return { stamped: [], removed: [], collections: [] };
 				if (event.type === "session.status" && !open) {
-					if (event.data.status === "busy" || event.data.status === "retry")
-						return { stamped: [], removed: [], collections: [] };
 					const newer =
 						yield* sql`SELECT 1 FROM provider_runs WHERE session_id = ${event.sessionId}
 						AND id <> ${runId} AND status IN ('pending', 'running') LIMIT 1`;
 					if (newer.length)
+						return { stamped: [], removed: [], collections: [] };
+					// A background task can wake Claude into a turn on its ended run;
+					// that busy is the only sign it is working. Take it only where
+					// the run's later idle stays a plain status, never dropped as a
+					// second terminal, so it cannot leave the session stuck busy.
+					if (
+						(event.data.status === "busy" || event.data.status === "retry") &&
+						runTerminalStatus(
+							{ type: "session.status", data: { status: "idle" } },
+							event.provider,
+						) !== undefined
+					)
 						return { stamped: [], removed: [], collections: [] };
 				}
 			}
