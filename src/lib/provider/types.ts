@@ -287,6 +287,8 @@ export interface SendTurnInput
 	readonly goalState?: SessionGoalChangedPayload;
 	readonly cumulativeTokens?: number;
 	readonly eventSink: EventSink;
+	/** Config snapshot admitted with the durable turn, including disabled idle exit. */
+	readonly autoSettleAfterDays?: number | null | undefined;
 	readonly abortSignal: AbortSignal;
 	readonly permissionMode?: SessionPermissionMode;
 	/** Session rules enforce the Side Thread's mode. */

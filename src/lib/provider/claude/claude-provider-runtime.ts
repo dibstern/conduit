@@ -38,17 +38,16 @@ import {
 	type Scope,
 	Semaphore,
 } from "effect";
-import { accountsStateFromConfig } from "../../account-directory.js";
+import {
+	type AccountsState,
+	accountsStateFromConfig,
+} from "../../account-directory.js";
 import type { Account } from "../../contracts/account.js";
 import type {
 	ClaudeSDKCommandLifecycleMessage,
 	ClaudeSDKPermissionMode,
 } from "../../contracts/providers/claude-agent-sdk.js";
-import {
-	defaultDaemonConfig,
-	loadDaemonConfigResult,
-	resolveClaudeLaunchConfig,
-} from "../../daemon/config-persistence.js";
+import { defaultDaemonConfig } from "../../daemon/config-persistence.js";
 import { makeAccountResourceScopesLive } from "../../domain/daemon/Layers/account-resource-scopes-layer.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { AccountResourceScopesTag } from "../../domain/daemon/Services/account-resource-scopes.js";
@@ -122,6 +121,7 @@ import { ClaudePermissionBridge } from "./claude-permission-bridge.js";
 import { makeProcessClaudeSessionRunner } from "./claude-process-session-runner.js";
 import { buildClaudeQueryOptions } from "./claude-query-options.js";
 import {
+	claudeLaunchConfigFromAccounts,
 	normalizeClaudeLaunchInput,
 	normalizeClaudeSessionTurn,
 } from "./claude-runner-wire.js";
@@ -231,6 +231,9 @@ export interface ClaudeProviderInstanceDeps {
 		input: import("../../session/background-liveness.js").BackgroundTaskTransition,
 	) => void;
 	readonly daemonConfigDir?: string;
+	readonly accounts?: Effect.Effect<AccountsState>;
+	readonly autoSettleAfterDays?: Effect.Effect<number | null | undefined>;
+	readonly claudeLaunchConfig?: () => import("./claude-sdk-env.js").ClaudeLaunchConfig;
 	readonly projectRootForSession?: NonNullable<
 		import("../runner/runner-provider-instance.js").RunnerProviderInstanceDeps["projectRootForSession"]
 	>;
@@ -261,6 +264,9 @@ export interface ClaudeProviderInstanceDeps {
 export type ClaudeSessionRunnerDeps = Pick<
 	ClaudeProviderInstanceDeps,
 	| "daemonConfigDir"
+	| "accounts"
+	| "autoSettleAfterDays"
+	| "claudeLaunchConfig"
 	| "projectRootForSession"
 	| "recoveryForSession"
 	| "readThread"
@@ -318,19 +324,13 @@ export const makeClaudeProviderRuntime = (
 		const directory = yield* Effect.serviceOption(AccountDirectory);
 		const accounts = Option.isSome(directory)
 			? directory.value.snapshot
-			: Effect.suspend(() =>
-					Effect.fromResult(loadDaemonConfigResult(deps.daemonConfigDir)),
-				).pipe(
-					Effect.catchTag("NotFound", () =>
-						Effect.succeed(defaultDaemonConfig()),
+			: (deps.accounts ??
+				Effect.sync(() =>
+					accountsStateFromConfig(
+						defaultDaemonConfig(),
+						captureClaudeLaunchLogin(process.env),
 					),
-					Effect.map((config) =>
-						accountsStateFromConfig(
-							config,
-							captureClaudeLaunchLogin(process.env),
-						),
-					),
-				);
+				));
 		const shared = yield* Effect.serviceOption(ClaudeAccountScopes);
 		const sharedOwner = yield* Effect.serviceOption(AccountResourceScopesTag);
 		const owner = Option.isSome(sharedOwner)
@@ -414,7 +414,7 @@ export const makeClaudeProviderRuntime = (
 			driver,
 			(emit) =>
 				(deps.runnerFactory ?? makeProcessClaudeSessionRunner)(
-					{ ...deps, capabilitiesService, accountResources },
+					{ ...deps, accounts, capabilitiesService, accountResources },
 					emit,
 				),
 		);
@@ -953,12 +953,11 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				const configDir =
 					selectedAccount?.driver === "claude"
 						? selectedAccount.folder
-						: resolveClaudeLaunchConfig(
-								yield* Effect.suspend(() =>
-									Effect.fromResult(
-										loadDaemonConfigResult(this.deps.daemonConfigDir),
-									),
-								).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null))),
+						: (
+								this.deps.claudeLaunchConfig?.() ??
+								claudeLaunchConfigFromAccounts(
+									yield* this.deps.accounts ?? Effect.succeed(undefined),
+								)
 							).configDir;
 				return yield* discoverCapabilitiesEffect(
 					directory,

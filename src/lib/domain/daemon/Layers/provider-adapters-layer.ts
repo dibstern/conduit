@@ -48,6 +48,7 @@ import { OrchestrationEngineTag } from "../../relay/Services/services.js";
 import { makeProcessingTimeoutHooks } from "../../relay/Services/session-overrides-state.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { AccountDirectory } from "../Services/account-directory.js";
+import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { hasProviderRecoveryCandidate } from "../Services/daemon-session-reader.js";
 import { DaemonStoreAvailability } from "../Services/daemon-store-availability.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
@@ -76,6 +77,7 @@ export const makeProviderAdaptersLive = (
 			const projects = yield* ProjectRegistryTag;
 			const unavailable = yield* DaemonStoreAvailability;
 			const accounts = yield* AccountDirectory;
+			const configRef = yield* DaemonConfigRefTag;
 			const instances = yield* OpenCodeInstancesTag;
 			const activity = yield* SessionActivityTag;
 			const registry = new ProviderRegistry();
@@ -308,6 +310,10 @@ export const makeProviderAdaptersLive = (
 			}
 			registry.registerInstance(
 				yield* ClaudeDriver.create({
+					accounts: accounts.snapshot,
+					autoSettleAfterDays: Ref.get(configRef).pipe(
+						Effect.map((config) => config.autoSettleAfterDays),
+					),
 					daemonConfigDir: configDir,
 					projectRootForSession,
 					recoveryForSession,
@@ -385,6 +391,9 @@ export const makeProviderAdaptersLive = (
 					{
 						daemonConfigDir: configDir,
 						accounts: accounts.snapshot,
+						autoSettleAfterDays: Ref.get(configRef).pipe(
+							Effect.map((config) => config.autoSettleAfterDays),
+						),
 						projectRootForSession,
 						recoveryForSession,
 						persistUserMessage,

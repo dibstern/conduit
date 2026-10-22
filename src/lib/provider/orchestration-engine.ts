@@ -21,6 +21,7 @@ import type { SqlError } from "effect/sql/SqlError";
 
 import { type Account, AccountSchema } from "../contracts/account.js";
 import type { SessionScope } from "../contracts/session-scope.js";
+import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../daemon/config-persistence.js";
 import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
@@ -220,6 +221,7 @@ export interface OrchestrationEngineOptions {
 	readonly defaultClaudeLaunchConfig?: () => ClaudeLaunchConfig;
 	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
 	readonly durableCommands?: DurableCommandStoreOptions;
+	readonly autoSettleAfterDays?: Effect.Effect<number | null | undefined>;
 	readonly resolveCallContext?: (
 		request: ProviderCallRequest,
 	) => Effect.Effect<ProviderCall, ProviderInstanceFailure>;
@@ -282,6 +284,7 @@ export class OrchestrationEngine {
 	private readonly sessionBindingReadModel: ProviderSessionBindingReadModel;
 	private readonly accountDirectory: OrchestrationEngineOptions["accountDirectory"];
 	private readonly resolveCallContext: OrchestrationEngineOptions["resolveCallContext"];
+	private readonly autoSettleAfterDays: OrchestrationEngineOptions["autoSettleAfterDays"];
 	private readonly durable?: DurableCommandRuntime;
 	private readonly controlScope = Scope.makeUnsafe();
 	private readonly inFlightCommands = new Map<
@@ -303,6 +306,7 @@ export class OrchestrationEngine {
 			new InMemoryProviderSessionBindingReadModel();
 		this.accountDirectory = options.accountDirectory;
 		this.resolveCallContext = options.resolveCallContext;
+		this.autoSettleAfterDays = options.autoSettleAfterDays;
 		if (options.durableCommands) {
 			const durable = options.durableCommands;
 			this.durable = {
@@ -644,9 +648,22 @@ export class OrchestrationEngine {
 	private handleSendTurnEffect(
 		command: SendTurnCommand,
 	): Effect.Effect<TurnResult, OrchestrationError> {
-		return this.durable
-			? this.handleDurableSendTurnEffect(command, this.durable)
-			: this.handleInlineSendTurnEffect(command);
+		return Effect.gen({ self: this }, function* () {
+			const days = yield* this.autoSettleAfterDays ?? Effect.succeed(undefined);
+			const admitted = this.autoSettleAfterDays
+				? {
+						...command,
+						input: {
+							...command.input,
+							autoSettleAfterDays:
+								days === undefined ? DEFAULT_AUTO_SETTLE_AFTER_DAYS : days,
+						},
+					}
+				: command;
+			return yield* this.durable
+				? this.handleDurableSendTurnEffect(admitted, this.durable)
+				: this.handleInlineSendTurnEffect(admitted);
+		});
 	}
 
 	private handleDurableControlEffect(

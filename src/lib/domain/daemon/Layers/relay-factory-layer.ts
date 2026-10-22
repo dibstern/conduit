@@ -61,7 +61,10 @@ import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
 import { AccountResourceScopesTag } from "../Services/account-resource-scopes.js";
 import { CategorySet } from "../Services/category-set.js";
-import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
+import {
+	ConfigPersistenceTag,
+	ConfigSnapshotTag,
+} from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {
@@ -99,6 +102,7 @@ import { SessionDirectory } from "../Services/session-directory.js";
 import { Usage } from "../Services/usage.js";
 import { WorktreeCleanupQueueTag } from "../Services/worktree-cleanup-service.js";
 import { WorktreeServiceTag } from "../Services/worktree-service.js";
+import { buildDaemonConfigSnapshot } from "./config-persistence-layer.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
 import { ProjectShellEnvTag } from "./project-shell-env-layer.js";
 
@@ -240,6 +244,17 @@ export const RelayFactoryLive = (
 			const sessionEventBus = yield* SessionEventBusTag;
 			const cleanupQueue = yield* Effect.serviceOption(WorktreeCleanupQueueTag);
 			const configPersistence = yield* ConfigPersistenceTag;
+			const sharedSnapshot = yield* Effect.serviceOption(ConfigSnapshotTag);
+			const configSnapshot = Option.isSome(sharedSnapshot)
+				? sharedSnapshot.value
+				: {
+						build: buildDaemonConfigSnapshot.pipe(
+							Effect.provideService(DaemonConfigRefTag, configRef),
+							Effect.provideService(ProjectRegistryTag, projectRegistry),
+							Effect.provideService(InstanceManagerStateTag, instanceState),
+							Effect.provideService(AccountDirectory, accounts),
+						),
+					};
 			const portScanner = yield* PortScannerTag;
 			const pushManager = yield* PushManagerTag;
 			const openCodeInstances = yield* OpenCodeInstancesTag;
@@ -528,6 +543,7 @@ export const RelayFactoryLive = (
 										configRef,
 									).pipe(
 										Context.add(ConfigPersistenceTag, configPersistence),
+										Context.add(ConfigSnapshotTag, configSnapshot),
 										Context.add(AccountDirectory, accounts),
 										Context.merge(
 											Option.isSome(claudeAccounts)

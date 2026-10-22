@@ -32,7 +32,10 @@ import type { SqlError } from "effect/sql/SqlError";
 import { AuthManager } from "../auth.js";
 import { type GlobalSettingTag, WsRpcError } from "../contracts/ws-rpc.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
-import { ConfigPersistenceTag } from "../domain/daemon/Services/config-persistence-service.js";
+import {
+	ConfigPersistenceTag,
+	ConfigSnapshotTag,
+} from "../domain/daemon/Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../domain/daemon/Services/daemon-config-ref.js";
 import { ProviderAdapters } from "../domain/daemon/Services/provider-adapters.js";
 import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
@@ -777,6 +780,7 @@ export async function createRelayStack(
 				Context.pick(
 					DaemonConfigRefTag,
 					ConfigPersistenceTag,
+					ConfigSnapshotTag,
 					AccountDirectory,
 					SessionActivityTag,
 					ProviderAdapters,

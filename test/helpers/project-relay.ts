@@ -71,19 +71,22 @@ function makeTestAdapterRuntime(config: OwnerConfig) {
 			);
 		}),
 	);
+	const inheritedAccounts = Context.getOption(shared, AccountDirectory);
+	const accountLayer = Option.isSome(inheritedAccounts)
+		? Layer.succeed(AccountDirectory, inheritedAccounts.value)
+		: accounts;
 	const instances = config.openCodeInstances
 		? Layer.succeed(OpenCodeInstancesTag, config.openCodeInstances)
-		: makeStandaloneOpenCodeInstancesLive(config);
-	const inheritedAccounts = Context.getOption(shared, AccountDirectory);
+		: makeStandaloneOpenCodeInstancesLive(config).pipe(
+				Layer.provide(accountLayer),
+			);
 	const inheritedActivity = Context.getOption(shared, SessionActivityTag);
 	const deps = Layer.mergeAll(
 		store,
 		Option.isSome(inheritedActivity)
 			? Layer.succeed(SessionActivityTag, inheritedActivity.value)
 			: Layer.effect(SessionActivityTag, makeSessionActivity),
-		Option.isSome(inheritedAccounts)
-			? Layer.succeed(AccountDirectory, inheritedAccounts.value)
-			: accounts,
+		accountLayer,
 		instances,
 	);
 	return ManagedRuntime.make(

@@ -6,12 +6,9 @@ import {
 	resolveSettings as sdkResolveSettings,
 	tool,
 } from "@anthropic-ai/claude-agent-sdk";
-import { Effect, Result } from "effect";
+import { Effect } from "effect";
 import { z } from "zod";
-import {
-	loadDaemonConfigResult,
-	resolveClaudeLaunchConfig,
-} from "../../daemon/config-persistence.js";
+import { AccountUnroutable } from "../../contracts/limit-recovery.js";
 import { createLogger } from "../../logger.js";
 import { ClaudeRuntimeError } from "../event-sink-errors.js";
 import type {
@@ -38,11 +35,13 @@ import {
 	replayClaudeRunnerFileSettings,
 } from "./claude-runner-settings.js";
 import {
+	claudeLaunchConfigFromAccounts,
 	makeClaudeRunnerWire,
 	normalizeClaudeLaunchInput,
 } from "./claude-runner-wire.js";
 import {
 	applyClaudeSdkProcessLogin,
+	type ClaudeLaunchConfig,
 	makeClaudeSdkEnv,
 	sameClaudeLogin,
 } from "./claude-sdk-env.js";
@@ -101,7 +100,8 @@ export const makeClaudeRunnerLaunch = (
 			| Pick<Options, "settings" | "settingSources">
 			| undefined;
 		let launchInput: ClaudePreWarmSessionInput | undefined;
-		let daemonConfigDir: string | undefined;
+		let defaultLaunch: ClaudeLaunchConfig | null =
+			claudeLaunchConfigFromAccounts();
 		let launchSettings: RunnerSettingsSnapshot["claudeSettingsOverrides"];
 		let resumeSessionId: string | undefined;
 		let sessionRunner: SessionRunner | undefined;
@@ -326,13 +326,13 @@ export const makeClaudeRunnerLaunch = (
 			reportUpgradeState();
 			return query;
 		};
-		const defaultLaunchConfig = () =>
-			resolveClaudeLaunchConfig(
-				Result.getOrElse(loadDaemonConfigResult(daemonConfigDir), (error) => {
-					if (error._tag === "NotFound") return null;
-					throw error;
-				}),
-			);
+		const defaultLaunchConfig = () => {
+			if (defaultLaunch === null)
+				throw new AccountUnroutable({
+					ref: { _tag: "DriverDefault", driver: "claude" },
+				});
+			return defaultLaunch;
+		};
 		const launch: RunnerLaunch = {
 			wire: makeClaudeRunnerWire(defaultLaunchConfig),
 			capabilities: {
@@ -351,9 +351,11 @@ export const makeClaudeRunnerLaunch = (
 			}),
 			makeRunner: (config, emit) =>
 				Effect.gen(function* () {
-					daemonConfigDir = config.daemonConfigDir;
+					if (config.claudeLaunchConfig !== undefined)
+						defaultLaunch = config.claudeLaunchConfig;
 					sessionRunner = yield* makeClaudeSessionRunner(
 						{
+							claudeLaunchConfig: defaultLaunchConfig,
 							...(config.daemonConfigDir !== undefined
 								? { daemonConfigDir: config.daemonConfigDir }
 								: {}),

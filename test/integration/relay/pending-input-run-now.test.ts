@@ -7,8 +7,11 @@ import { SqlClient } from "effect/sql";
 import { describe, expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
-import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import {
+	DaemonConfigRefLive,
+	makeDaemonConfigFromOptions,
+} from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import {
 	type ProviderAdapterProjectContext,
@@ -88,7 +91,7 @@ function signal<T>() {
 // the old turn ending before the abort lands lets a concurrent input start;
 // owner replacement retains an abandoned fence;
 // a rejected abort permanently blocks the next send.
-// A continuation waiting for end_session must not stall another session's queue
+// A continuation waiting for prewarm must not stall another session's queue
 // on the inbox's shared advance consumer.
 describe("Run now through RPC, inbox, durable orchestration and provider adapters", () => {
 	for (const provider of ["claude", "opencode"] as const) {
@@ -114,21 +117,6 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 				: []),
 		] as const)(`${provider}: %s runs the selected input next after Stop`, async (scenario) => {
 			const scratch = mkdtempSync(join(tmpdir(), "conduit-run-now-"));
-			if (
-				scenario === "run-now-during-continuation" ||
-				scenario === "other-queue-during-continuation"
-			)
-				writeFileSync(
-					join(scratch, "daemon.json"),
-					JSON.stringify({
-						...defaultDaemonConfig(),
-						usageLimits: {
-							autoSwitch: true,
-							autoResume: false,
-							order: ["target"],
-						},
-					}),
-				);
 			const sessionId = `run-now-${provider}-${scenario}`;
 			const image =
 				"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6L8AAAAASUVORK5CYII=";
@@ -411,6 +399,21 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 					Layer.mergeAll(
 						persistence,
 						SessionEventBusLive,
+						DaemonConfigRefLive(
+							makeDaemonConfigFromOptions(
+								scenario === "run-now-during-continuation" ||
+									scenario === "other-queue-during-continuation"
+									? {
+											usageLimits: {
+												autoSwitch: true,
+												autoResume: false,
+												warnAt: 80,
+												order: ["target"],
+											},
+										}
+									: {},
+							),
+						),
 						makeProviderRuntimeIngestionLive().pipe(
 							Layer.provide(Layer.merge(persistence, SessionEventBusLive)),
 						),
@@ -432,23 +435,34 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 				Effect.gen(function* () {
 					const wired = yield* getOrchestrationLayer;
 					const dispatch = wired.engine.dispatchEffect.bind(wired.engine);
-					// The continuation's end_session, or the Claude abort the Stop worker
-					// resolved after installing its fence, waits for the test.
-					const [held, started, release] =
-						scenario === "recover-registration-race"
-							? ["interrupt_turn", registrationStarted, releaseRegistration]
-							: ["end_session", continuationEnding, releaseContinuation];
+					// Same-driver switches now warm before dispatch rather than end the session.
+					if (
+						scenario === "run-now-during-continuation" ||
+						scenario === "other-queue-during-continuation"
+					) {
+						const prepare = wired.engine.preparePreWarmSessionEffect.bind(
+							wired.engine,
+						);
+						vi.spyOn(
+							wired.engine,
+							"preparePreWarmSessionEffect",
+						).mockImplementation((sid, preparation) =>
+							sid === sessionId
+								? Effect.promise(async () => {
+										continuationEnding.resolve();
+										await releaseContinuation.promise;
+									}).pipe(Effect.andThen(prepare(sid, preparation)))
+								: prepare(sid, preparation),
+						);
+					}
+					// The Claude abort resolved after installing its fence waits for the test.
 					vi.spyOn(wired.engine, "dispatchEffect").mockImplementation(
 						(command) =>
-							command.type === held &&
-							[
-								"recover-registration-race",
-								"run-now-during-continuation",
-								"other-queue-during-continuation",
-							].includes(scenario)
+							command.type === "interrupt_turn" &&
+							scenario === "recover-registration-race"
 								? Effect.promise(async () => {
-										started.resolve();
-										await release.promise;
+										registrationStarted.resolve();
+										await releaseRegistration.promise;
 									}).pipe(Effect.andThen(dispatch(command)))
 								: dispatch(command),
 					);

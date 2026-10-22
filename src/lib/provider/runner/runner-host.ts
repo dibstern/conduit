@@ -347,7 +347,7 @@ export const runSessionRunner = (
 											process.env["CONDUIT_TEST_RUNNER_IDLE_DAY_MS"]
 											? Number(process.env["CONDUIT_TEST_RUNNER_IDLE_DAY_MS"])
 											: undefined,
-										config.daemonConfigDir,
+										config.autoSettleAfterDays,
 										() =>
 											retiring ||
 											activeCommands > 0 ||
@@ -355,6 +355,7 @@ export const runSessionRunner = (
 											runner?.hasPendingSubagentFinalizers?.(sessionId) ===
 												true ||
 											spool.hasHeldWork,
+										config.daemonConfigDir,
 									);
 								}
 								if (
@@ -541,7 +542,7 @@ export const runSessionRunner = (
 								commandId: message.commandId,
 								sinkId: command.sinkId,
 							});
-							idle?.beginTurn();
+							idle?.beginTurn(command.autoSettleAfterDays);
 						}
 						idle?.activity();
 						activeCommands++;

@@ -111,7 +111,11 @@ export class RunnerProcessError extends Data.TaggedError("RunnerProcessError")<{
 
 interface ProcessRunnerDeps {
 	readonly accountResources?: RunnerProviderInstanceDeps["accountResources"];
+	readonly accounts?: Effect.Effect<
+		import("../../account-directory.js").AccountsState
+	>;
 	readonly daemonConfigDir?: string;
+	readonly autoSettleAfterDays?: Effect.Effect<number | null | undefined>;
 	readonly subagentPollTimeoutMs?: number;
 	readonly projectRootForSession: NonNullable<
 		RunnerProviderInstanceDeps["projectRootForSession"]
@@ -893,6 +897,9 @@ export const makeProcessSessionRunner = (
 						workspaceRoot,
 						...entry.launch,
 						daemonConfigDir: configDir,
+						...(deps.accounts ? { accounts: deps.accounts } : {}),
+						// Replacements use current daemon memory, including changes during replacement.
+						autoSettleAfterDays: deps.autoSettleAfterDays,
 						...(deps.subagentPollTimeoutMs !== undefined
 							? { subagentPollTimeoutMs: deps.subagentPollTimeoutMs }
 							: {}),
@@ -2420,6 +2427,12 @@ export const makeProcessSessionRunner = (
 				let ending: RunnerChild | undefined;
 				let cancelled: Deferred.Deferred<void> | undefined;
 				const execute = Effect.gen(function* () {
+					const autoSettleAfterDays =
+						command.type === "send-turn"
+							? command.input.autoSettleAfterDays !== undefined
+								? command.input.autoSettleAfterDays
+								: yield* deps.autoSettleAfterDays ?? Effect.succeed(undefined)
+							: undefined;
 					if (command.type === "send-turn" && cancelled) {
 						pendingSends.set(command.sinkId, {
 							sessionId: command.input.sessionId,
@@ -2774,6 +2787,7 @@ export const makeProcessSessionRunner = (
 						command.type === "send-turn"
 							? {
 									...command,
+									autoSettleAfterDays,
 									...(entry.upgrade.state?.frozen
 										? driver.snapshotCommandSettings(
 												entry.upgrade.state.snapshot,

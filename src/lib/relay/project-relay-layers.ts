@@ -293,7 +293,7 @@ export class TranslatorTag extends Context.Service<
 export interface RelayRuntime {
 	runtime: ManagedRuntime.ManagedRuntime<
 		RelayRuntimeServices,
-		PersistenceEffectError | DaemonConfigLoadError
+		PersistenceEffectError | DaemonConfigLoadError | Error
 	>;
 	dispose: () => Promise<void>;
 }
@@ -323,7 +323,10 @@ export function createProjectRelayLayers({
 
 	const configLayer = makeProjectRelayConfigLive({ ...config, claudeSdk });
 	const daemonSettingsLayer: Layer.Layer<
-		DaemonConfigRefTag | ConfigPersistenceTag | AccountDirectory,
+		| DaemonConfigRefTag
+		| ConfigPersistenceTag
+		| ConfigSnapshotTag
+		| AccountDirectory,
 		DaemonConfigLoadError
 	> = Layer.unwrap(
 		Effect.gen(function* () {
@@ -331,15 +334,18 @@ export function createProjectRelayLayers({
 			const configRef = Context.getOption(shared, DaemonConfigRefTag);
 			const persistence = Context.getOption(shared, ConfigPersistenceTag);
 			const accountsService = Context.getOption(shared, AccountDirectory);
+			const configSnapshot = Context.getOption(shared, ConfigSnapshotTag);
 			if (
 				Option.isSome(configRef) &&
 				Option.isSome(persistence) &&
-				Option.isSome(accountsService)
+				Option.isSome(accountsService) &&
+				Option.isSome(configSnapshot)
 			) {
 				return Layer.succeedContext(
 					Context.make(DaemonConfigRefTag, configRef.value).pipe(
 						Context.add(ConfigPersistenceTag, persistence.value),
 						Context.add(AccountDirectory, accountsService.value),
+						Context.add(ConfigSnapshotTag, configSnapshot.value),
 						Context.merge(shared),
 					),
 				);
@@ -370,14 +376,7 @@ export function createProjectRelayLayers({
 					return {
 						build: Effect.gen(function* () {
 							const current = yield* Ref.get(configRef);
-							const persisted = yield* Effect.suspend(() =>
-								Effect.fromResult(loadDaemonConfigResult(configDir)),
-							).pipe(
-								Effect.catchTag("NotFound", () =>
-									Effect.succeed(defaultDaemonConfig()),
-								),
-							);
-							const { cursorUsageBinding: _binding, ...unchanged } = persisted;
+							const { cursorUsageBinding: _binding, ...unchanged } = saved;
 							return {
 								...unchanged,
 								...(current.avatar !== undefined && { avatar: current.avatar }),
@@ -606,7 +605,9 @@ export function createProjectRelayLayers({
 			Layer.merge(
 				sharedInstances
 					? Layer.sync(OpenCodeInstancesTag, () => sharedInstances)
-					: makeStandaloneOpenCodeInstancesLive(config),
+					: makeStandaloneOpenCodeInstancesLive(config).pipe(
+							Layer.provide(daemonConfigLayer),
+						),
 				persistenceEffectLayer,
 			),
 		),

@@ -21,7 +21,7 @@
 // reschedules itself, or releasing the hold overrides a later Stop.
 // A pending rewind refuses a future schedule or quota-reset inbox admission;
 // permitting either to schedule must never permit an immediate continuation.
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -48,6 +48,10 @@ import {
 	AccountDirectory,
 	makeAccountDirectory,
 } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
+import {
+	DaemonConfigRefLive,
+	makeDaemonConfigFromOptions,
+} from "../../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { Usage } from "../../../../src/lib/domain/daemon/Services/usage.js";
 import { PersistenceProjectTag } from "../../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -1133,33 +1137,6 @@ for (const scenario of [
 ] as const) {
 	it(`limit policy: ${scenario}`, async () => {
 		const configDir = mkdtempSync(join(tmpdir(), "conduit-limit-policy-"));
-		writeFileSync(
-			join(configDir, "daemon.json"),
-			JSON.stringify({
-				pid: process.pid,
-				port: 0,
-				pinHash: null,
-				tls: false,
-				debug: false,
-				keepAwake: false,
-				projects: [],
-				instances: [
-					{
-						id: "target",
-						name: "Target",
-						driver: "claude",
-						port: 0,
-						managed: false,
-					},
-				],
-				usageLimits: {
-					autoSwitch: scenario !== "off",
-					autoResume: true,
-					warnAt: 80,
-					order: ["target"],
-				},
-			}),
-		);
 		const picked: string[] = [];
 		const probed: string[] = [];
 		const dispatched: string[] = [];
@@ -1449,6 +1426,18 @@ for (const scenario of [
 				}).pipe(
 					Effect.scoped,
 					Effect.provideService(ConfigTag, { ...config, configDir }),
+					Effect.provide(
+						DaemonConfigRefLive(
+							makeDaemonConfigFromOptions({
+								usageLimits: {
+									autoSwitch: scenario !== "off",
+									autoResume: true,
+									warnAt: 80,
+									order: ["target"],
+								},
+							}),
+						),
+					),
 					Effect.provideService(ProviderTurnServiceTag, {
 						holdUserTurnsForAccountSwitch: () => Effect.void,
 						prepareTurnSession: (input) => Effect.succeed(input.sessionId),

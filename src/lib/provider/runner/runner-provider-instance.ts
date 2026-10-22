@@ -12,7 +12,6 @@ import { SqlClient } from "effect/sql";
 import type { AccountsState } from "../../account-directory.js";
 import type { Account } from "../../contracts/account.js";
 import type { KnownProviderDriverKind } from "../../contracts/provider-instance.js";
-import type { DaemonConfigLoadError } from "../../daemon/config-persistence.js";
 import {
 	bindTurnTimelineSink,
 	observeTurnTimelineFrame,
@@ -138,7 +137,8 @@ export interface RunnerProviderInstanceDeps {
 			work: (account: Account) => Effect.Effect<A, E, R>,
 		) => Effect.Effect<A, E | ProviderInstanceFailure, R>;
 	};
-	readonly accounts: Effect.Effect<AccountsState, DaemonConfigLoadError>;
+	readonly accounts: Effect.Effect<AccountsState>;
+	readonly autoSettleAfterDays?: Effect.Effect<number | null | undefined>;
 	readonly daemonConfigDir?: string;
 	readonly projectRootForSession?: (
 		sessionId: string,

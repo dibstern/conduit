@@ -23,7 +23,6 @@ import {
 	StaleSwitch,
 } from "../../../contracts/limit-recovery.js";
 import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
-import { loadDaemonConfigResult } from "../../../daemon/config-persistence.js";
 import { preWarmSession } from "../../../handlers/session-prewarm.js";
 import {
 	type CommitAndSignalFailure,
@@ -48,7 +47,11 @@ import {
 	type ProviderTurnService,
 	ProviderTurnServiceTag,
 } from "./provider-turn-service.js";
-import { ConfigTag, LoggerTag, OrchestrationEngineTag } from "./services.js";
+import {
+	type ConfigTag,
+	LoggerTag,
+	OrchestrationEngineTag,
+} from "./services.js";
 import { applySessionCommand } from "./session-command.js";
 import { SessionInboxTag } from "./session-inbox.js";
 import {
@@ -664,13 +667,7 @@ export const makeContinuation = Effect.gen(function* () {
 		const configRef = yield* Effect.serviceOption(DaemonConfigRefTag);
 		if (configRef._tag === "Some")
 			return (yield* Ref.get(configRef.value)).usageLimits;
-		const config = yield* ConfigTag;
-		return yield* Effect.suspend(() =>
-			Effect.fromResult(loadDaemonConfigResult(config.configDir)),
-		).pipe(
-			Effect.map((loaded) => loaded.usageLimits),
-			Effect.catchTag("NotFound", () => Effect.succeed(undefined)),
-		);
+		return undefined;
 	});
 	const tryAutoSwitch = (sessionId: string) =>
 		Effect.gen(function* () {

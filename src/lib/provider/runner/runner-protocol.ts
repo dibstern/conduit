@@ -96,6 +96,11 @@ export interface RunnerHello {
 		readonly workspaceRoot: string;
 		readonly extraFolders?: readonly string[];
 		readonly daemonConfigDir?: string;
+		/** Null records an unavailable daemon default; absent is legacy compatibility. */
+		readonly claudeLaunchConfig?:
+			| import("../claude/claude-sdk-env.js").ClaudeLaunchConfig
+			| null;
+		readonly autoSettleAfterDays?: number | null | undefined;
 		readonly subagentPollTimeoutMs?: number;
 	};
 }

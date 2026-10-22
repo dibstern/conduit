@@ -20,11 +20,6 @@ import {
 	MANAGED_OPENCODE_ACCOUNT_ID,
 } from "../../../contracts/provider-instance.js";
 import type { OpenCodeConnectionStatus } from "../../../contracts/ws-rpc.js";
-import {
-	defaultDaemonConfig,
-	loadDaemonConfigResult,
-	resolveOpenCodeInstanceUrl,
-} from "../../../daemon/config-persistence.js";
 import { OpenCodeConnectionError } from "../../../errors.js";
 import { instanceIdleTimeoutFromEnv } from "../../../instance/idle-policy.js";
 import { openCodeAuth } from "../../../instance/managed-opencode-process.js";
@@ -38,6 +33,7 @@ import type {
 	InstanceStatus,
 	ProjectRelayConfig,
 } from "../../../types.js";
+import { AccountDirectory } from "../Services/account-directory.js";
 import { subscribeToDaemonEvents } from "../Services/daemon-pubsub.js";
 import {
 	checkInstanceHealth,
@@ -1268,7 +1264,7 @@ export const OpenCodeInstancesLive = makeOpenCodeInstancesLive(
 	},
 );
 
-/** Relay without a daemon: endpoints come from relay config and the daemon config file. */
+/** Relay without a daemon: endpoints use its startup-seeded account directory. */
 export const makeStandaloneOpenCodeInstancesLive = (
 	config: Pick<
 		ProjectRelayConfig,
@@ -1277,16 +1273,10 @@ export const makeStandaloneOpenCodeInstancesLive = (
 ) =>
 	Layer.unwrap(
 		Effect.gen(function* () {
-			const daemonConfig = yield* Effect.suspend(() =>
-				Effect.fromResult(loadDaemonConfigResult(config.configDir)),
-			).pipe(
-				Effect.catchTag("NotFound", () =>
-					Effect.succeed(defaultDaemonConfig()),
-				),
-			);
+			const accounts = yield* AccountDirectory;
 			return makeOpenCodeInstancesLive(
 				(instanceId) =>
-					Effect.sync(() => {
+					Effect.gen(function* () {
 						if (instanceId === MANAGED_OPENCODE_ACCOUNT_ID)
 							return config.opencodeUrl === undefined
 								? undefined
@@ -1296,13 +1286,20 @@ export const makeStandaloneOpenCodeInstancesLive = (
 											? { auth: config.opencodeAuth }
 											: {}),
 									};
-						const url = resolveOpenCodeInstanceUrl(daemonConfig, instanceId);
-						const auth = openCodeAuth(
-							daemonConfig?.instances?.find(({ id }) => id === instanceId)?.env,
+						const account = (yield* accounts.snapshot).accounts.find(
+							({ id }) => id === instanceId,
 						);
-						return url === undefined
-							? undefined
-							: { url, ...(auth ? { auth } : {}) };
+						if (account?.driver === "opencode") {
+							const url =
+								account.managed === true
+									? `http://localhost:${account.port}`
+									: account.url;
+							const auth = openCodeAuth(account.env);
+							return url === undefined
+								? undefined
+								: { url, ...(auth ? { auth } : {}) };
+						}
+						return undefined;
 					}),
 				config.log ? { log: config.log.child("opencode") } : {},
 			);

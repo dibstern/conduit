@@ -1,6 +1,10 @@
 import { Context, Effect, HashMap, Layer, Option, Ref } from "effect";
 import { makeProviderAdaptersLive } from "../../src/lib/domain/daemon/Layers/provider-adapters-layer.js";
 import {
+	DaemonConfigRefTag,
+	makeDaemonConfigFromOptions,
+} from "../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import {
 	type ProjectRegistryState,
 	ProjectRegistryTag,
 } from "../../src/lib/domain/daemon/Services/project-registry-service.js";
@@ -49,6 +53,15 @@ export function makeTestProviderAdaptersLayer(
 	}).pipe(
 		Layer.provideMerge(
 			Layer.mergeAll(
+				Layer.effect(
+					DaemonConfigRefTag,
+					Effect.gen(function* () {
+						const shared = yield* Effect.serviceOption(DaemonConfigRefTag);
+						return Option.isSome(shared)
+							? shared.value
+							: yield* Ref.make(makeDaemonConfigFromOptions({}));
+					}),
+				),
 				Layer.effect(
 					PersistenceStore,
 					Effect.context<PersistenceStoreContext>(),

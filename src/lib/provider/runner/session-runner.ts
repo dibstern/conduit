@@ -38,6 +38,8 @@ export type SessionCommand = (
 	  }
 	| {
 			readonly type: "send-turn";
+			/** Daemon memory snapshot retained until another turn is admitted. */
+			readonly autoSettleAfterDays?: number | null | undefined;
 			/** Ephemeral launch credentials, excluded from durable command inputs. */
 			readonly cursorCredential?: CursorCredential;
 			readonly sinkId: string;

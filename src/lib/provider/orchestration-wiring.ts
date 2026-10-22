@@ -4,15 +4,21 @@
 
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import { Context, Effect, Layer, Option, Schema, type Scope } from "effect";
+import {
+	Context,
+	Effect,
+	Layer,
+	Option,
+	Ref,
+	Schema,
+	type Scope,
+} from "effect";
 import { SqlClient } from "effect/sql";
 import { AccountUnroutable } from "../contracts/limit-recovery.js";
 import { SessionWorkspaceSchema } from "../contracts/session-workspace.js";
-import {
-	type DaemonConfigLoadError,
-	loadDaemonConfigResult,
-} from "../daemon/config-persistence.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
+import { ConfigSnapshotTag } from "../domain/daemon/Services/config-persistence-service.js";
+import { DaemonConfigRefTag } from "../domain/daemon/Services/daemon-config-ref.js";
 import { ProjectContext } from "../domain/daemon/Services/project-context.js";
 import { ProviderAdapters } from "../domain/daemon/Services/provider-adapters.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
@@ -89,7 +95,7 @@ const createOrchestrationComponentsEffect = (
 	options: OrchestrationRuntimeLayerOptions,
 ): Effect.Effect<
 	OrchestrationComponents,
-	DaemonConfigLoadError,
+	Error,
 	| Scope.Scope
 	| SqlClient.SqlClient
 	| PersistenceProjectTag
@@ -105,6 +111,7 @@ const createOrchestrationComponentsEffect = (
 > =>
 	Effect.gen(function* () {
 		const { registry } = yield* ProviderAdapters;
+		const configRef = yield* Effect.serviceOption(DaemonConfigRefTag);
 
 		// The relay's persistence SqlClient backs
 		// the session binding read model and durable command receipts, so
@@ -129,9 +136,10 @@ const createOrchestrationComponentsEffect = (
 				(value) => Effect.sync(() => value.close()),
 			);
 			const directory = options.workspaceRoot ?? process.cwd();
-			const daemonConfig = yield* Effect.suspend(() =>
-				Effect.fromResult(loadDaemonConfigResult(options.configDir)),
-			).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)));
+			const snapshot = yield* Effect.serviceOption(ConfigSnapshotTag);
+			const daemonConfig = Option.isSome(snapshot)
+				? yield* snapshot.value.build
+				: undefined;
 			const config =
 				daemonConfig?.projects.find((project) => project.slug === projectId) ??
 				daemonConfig?.projects.find(
@@ -304,6 +312,11 @@ const createOrchestrationComponentsEffect = (
 		};
 		const engine = new OrchestrationEngine({
 			registry,
+			...(Option.isSome(configRef) && {
+				autoSettleAfterDays: Ref.get(configRef.value).pipe(
+					Effect.map((config) => config.autoSettleAfterDays),
+				),
+			}),
 			accountDirectory,
 			resolveCallContext,
 			...(sessionBindingReadModel != null ? { sessionBindingReadModel } : {}),
@@ -337,7 +350,7 @@ export const makeOrchestrationRuntimeLayer = (
 	options: OrchestrationRuntimeLayerOptions = {},
 ): Layer.Layer<
 	ProviderRegistryTag | OrchestrationEngineTag,
-	DaemonConfigLoadError,
+	Error,
 	| ProviderAdapters
 	| SqlClient.SqlClient
 	| PersistenceProjectTag

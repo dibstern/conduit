@@ -1002,6 +1002,7 @@ describe("built-dist Claude runner lifecycle", () => {
 		await new Promise<void>((done) => setTimeout(done, 500));
 		expect(() => process.kill(first.pid, 0)).not.toThrow();
 		await browser.setAutoSettle(1);
+		await browser.send(sessionId, "admit-active-config-idle-policy");
 		await waitFor(
 			harness,
 			() => {

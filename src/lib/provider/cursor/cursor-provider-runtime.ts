@@ -136,6 +136,12 @@ export function makeCursorProviderRuntime(
 											sinkId,
 											(dispatch) =>
 												Effect.gen(function* () {
+													// Pre-snapshot commands fall back to current daemon memory.
+													const autoSettleAfterDays =
+														input.autoSettleAfterDays !== undefined
+															? input.autoSettleAfterDays
+															: yield* deps.autoSettleAfterDays ??
+																	Effect.succeed(undefined);
 													const credential =
 														resources._tag === "Some"
 															? yield* resources.value
@@ -165,6 +171,7 @@ export function makeCursorProviderRuntime(
 																type: "send-turn",
 																sinkId,
 																aborted: false,
+																autoSettleAfterDays,
 																input,
 																...(credential
 																	? {

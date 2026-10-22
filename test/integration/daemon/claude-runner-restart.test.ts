@@ -187,6 +187,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 			sdkProof(harness).filter((mark) => mark["kind"] === "query"),
 		).toHaveLength(1);
 		await browser.setAutoSettle(1);
+		await browser.send(sessionId, "admit-adopted-idle-policy");
 		await vi.waitFor(
 			() => {
 				expect(
@@ -215,6 +216,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 		await vi.waitFor(() => {
 			const { events, commands } = persisted(harness, sessionId);
 			expect(commands.map(({ status }) => status)).toEqual([
+				"completed",
 				"completed",
 				"completed",
 			]);
