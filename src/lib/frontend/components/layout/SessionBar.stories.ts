@@ -908,6 +908,7 @@ export const NarrowestPhone: Story = {
 const mockInstances: OpenCodeInstance[] = [
 	{
 		id: "inst-personal",
+		colorSlot: 0,
 		driver: "opencode",
 		isDefault: true,
 		name: "Personal",
@@ -919,6 +920,7 @@ const mockInstances: OpenCodeInstance[] = [
 	},
 	{
 		id: "inst-work",
+		colorSlot: 1,
 		driver: "opencode",
 		isDefault: false,
 		name: "Work",

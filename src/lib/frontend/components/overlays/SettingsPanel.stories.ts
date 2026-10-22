@@ -84,6 +84,7 @@ function populateInstances() {
 			{
 				id: "claude",
 				name: "Personal Claude",
+				colorSlot: 0,
 				driver: "claude",
 				isDefault: true,
 				configDir: "~/.claude",
@@ -96,6 +97,7 @@ function populateInstances() {
 			{
 				id: "work-claude",
 				name: "Work Claude",
+				colorSlot: 1,
 				driver: "claude",
 				configDir: "~/.config/claude/work",
 				port: 0,
@@ -107,6 +109,7 @@ function populateInstances() {
 			{
 				id: "instance-local",
 				name: "Local OpenCode",
+				colorSlot: 3,
 				port: 4096,
 				managed: true,
 				status: "healthy",
@@ -116,6 +119,7 @@ function populateInstances() {
 			{
 				id: "instance-discovered",
 				name: "Team sandbox",
+				colorSlot: 4,
 				port: 4102,
 				managed: false,
 				status: "stopped",
@@ -495,6 +499,7 @@ function populateVisibility() {
 			{
 				id: "claude",
 				name: "Personal Claude",
+				colorSlot: 0,
 				driver: "claude",
 				isDefault: true,
 				port: 0,
@@ -763,6 +768,7 @@ export const UsageAccounts: Story = {
 			instances: accounts.map(({ id, name }, index) => ({
 				id,
 				name,
+				colorSlot: index,
 				driver: "claude",
 				isDefault: index === 0,
 				port: 0,

@@ -91,6 +91,7 @@ export const InstanceActions: Story = {
 		instanceState.instances = [
 			{
 				id: "instance-stopped",
+				colorSlot: 0,
 				name: "Primary",
 				port: 4096,
 				managed: true,
@@ -102,6 +103,7 @@ export const InstanceActions: Story = {
 			},
 			{
 				id: "instance-other",
+				colorSlot: 1,
 				name: "Secondary",
 				port: 4097,
 				managed: true,
