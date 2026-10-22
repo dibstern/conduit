@@ -183,6 +183,30 @@ export const sessionSheetsHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "set desktop sidebar",
+		match: /^the desktop sidebar is (open|closed)$/,
+		run: async ({ world, match }) => {
+			const layout = world.page.locator("#layout");
+			if (match[1] === "open")
+				return expect(layout).not.toHaveClass(/sidebar-collapsed/);
+			await world.page.locator("#sidebar-toggle-btn").click();
+			await expect(layout).toHaveClass(/sidebar-collapsed/);
+		},
+	},
+	{
+		name: "assert new draft with desktop sidebar open",
+		match: /^a new draft opens with the desktop sidebar open$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			await expect.poll(() => new URL(page.url()).pathname).toBe("/");
+			await expect(page.getByTestId("draft-empty")).toBeVisible();
+			await expect(page.locator("#layout")).not.toHaveClass(
+				/sidebar-collapsed/,
+			);
+			await expect(page.locator("#sidebar-panel-sessions")).toBeVisible();
+		},
+	},
+	{
 		name: "assert settle keeps open session",
 		match: /^the viewed session stays open$/,
 		run: async ({ world }) => {
