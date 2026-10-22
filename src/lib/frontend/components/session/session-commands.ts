@@ -6,7 +6,6 @@ import {
 	sessionState,
 } from "../../stores/session.svelte.js";
 import { refreshListedSessions } from "../../stores/session-list.svelte.js";
-import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { openSnoozePicker } from "../../stores/snooze-picker.svelte.js";
 import { showToast } from "../../stores/ui.svelte.js";
 import { toastFailure } from "../../transport/rpc-errors.js";
@@ -156,17 +155,11 @@ function refreshSearch(): void {
 async function settle(session: SessionInfo, settled: boolean) {
 	const input = rpcInput(session);
 	if (!input) return;
-	const returnToList =
-		sessionViewState.compact && sessionState.currentId === session.id;
+	const returnToList = sessionState.currentId === session.id;
 	try {
 		await rpc("SetSessionSettled", { ...input, settled });
 		refreshSearch();
-		if (
-			settled &&
-			returnToList &&
-			sessionViewState.compact &&
-			sessionState.currentId === session.id
-		)
+		if (settled && returnToList && sessionState.currentId === session.id)
 			backToSessions();
 		if (settled)
 			showToast(`Moved “${session.title || "New Session"}” to Settled`, {
@@ -230,8 +223,7 @@ async function autoSettle(session: SessionInfo, disabled: boolean) {
 	const input = rpcInput(session);
 	if (!input) return;
 	const wasSettled = session.settledAt != null;
-	const returnToList =
-		sessionViewState.compact && sessionState.currentId === session.id;
+	const returnToList = sessionState.currentId === session.id;
 	try {
 		const outlook = await rpc("SetSessionAutoSettle", { ...input, disabled });
 		refreshSearch();
@@ -240,7 +232,6 @@ async function autoSettle(session: SessionInfo, disabled: boolean) {
 			!disabled &&
 			outlook.kind === "settled" &&
 			returnToList &&
-			sessionViewState.compact &&
 			sessionState.currentId === session.id
 		)
 			backToSessions();
