@@ -7,7 +7,6 @@ import {
 	readFileSync,
 	writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { describe, expect, it, vi } from "vitest";
@@ -59,8 +58,7 @@ describe.skipIf(process.env["CONDUIT_CODEX_LIVE"] !== "1")(
 				const capturePath = join(root, "app-server.jsonl");
 				const modelId =
 					process.env["CONDUIT_CODEX_LIVE_MODEL"] ?? "gpt-6.1-sol";
-				const codexHome =
-					process.env["CODEX_HOME"] ?? join(homedir(), ".codex");
+				const codexHome = process.env["CONDUIT_TEST_REAL_CODEX_HOME"];
 				const evidence: Record<string, unknown> = {
 					modelId,
 					capturePath,

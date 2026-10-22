@@ -3,7 +3,7 @@
 // critical failures are still surfaced.
 
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, vi } from "vitest";
 
@@ -13,6 +13,7 @@ vi.resetModules();
 // Startup capture and legacy SDK/config readers must never inherit a real
 // daemon.json, account folder or home from the reviewer's shell.
 const testEnvironment = mkdtempSync(join(tmpdir(), "conduit-test-env-"));
+const reviewerHome = homedir();
 process.env["HOME"] = join(testEnvironment, "home");
 process.env["CONDUIT_CONFIG_DIR"] = join(testEnvironment, "conduit");
 // Real-SDK E2E runs still need the reviewer's login folder. They read it under
@@ -21,6 +22,11 @@ const reviewerClaudeConfigDir = process.env["CLAUDE_CONFIG_DIR"];
 if (reviewerClaudeConfigDir !== undefined)
 	process.env["CONDUIT_TEST_REAL_CLAUDE_CONFIG_DIR"] = reviewerClaudeConfigDir;
 delete process.env["CLAUDE_CONFIG_DIR"];
+// Likewise for Codex: a daemon started by a test otherwise finds a signed-in
+// Codex and adds a Codex instance while the test asserts on the list.
+process.env["CONDUIT_TEST_REAL_CODEX_HOME"] =
+	process.env["CODEX_HOME"] || join(reviewerHome, ".codex");
+delete process.env["CODEX_HOME"];
 mkdirSync(process.env["HOME"], { recursive: true });
 afterAll(() => rmSync(testEnvironment, { recursive: true, force: true }));
 
