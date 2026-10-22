@@ -223,11 +223,18 @@ export function createComposerDraft(options: {
 		const [next, commands] = step(state, event);
 		state = next;
 		text = state.text;
-		// No key (the phone list) keeps the last draft; a session key ends it.
-		if (state.key)
+		// No key (the phone list) keeps the last draft; a session key ends it, and
+		// so does a send: its emptied text must not offer it as a fresh draft.
+		if (state.key) {
+			const id = draftKeyId(state.key);
 			noteDraftNavigation(
-				"draft" in state.key ? { id: state.key.draft, text: state.text } : null,
+				"draft" in state.key &&
+					!state.inFlight.has(id) &&
+					!state.promoted.has(id)
+					? { id: state.key.draft, text: state.text }
+					: null,
 			);
+		}
 		return { commands, pending: execute(commands) };
 	}
 	try {

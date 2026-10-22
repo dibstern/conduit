@@ -503,6 +503,7 @@ describe("session selection at the browser RPC wire", () => {
 		expect(module.selection.shown).toEqual({
 			kind: "draft",
 			project: "follow-B",
+			draftId: expect.any(String),
 		});
 		module.selection.open("follow-draft-late");
 		expect(module.selection.shown).toEqual({
@@ -568,7 +569,11 @@ describe("session selection at the browser RPC wire", () => {
 		first.resolve({ projectSlug: "B", sessionSlug: null });
 		await settle();
 		expect(attachedProjectState.slug).toBe("C");
-		expect(module.selection.scope).toEqual({ project: "C", sessionId: null });
+		expect(module.selection.scope).toEqual({
+			project: "C",
+			sessionId: null,
+			draftId: expect.any(String),
+		});
 	});
 	it("places a live sidebar session immediately without attach or resolve", async () => {
 		attachedProjectState.slug = "A";
@@ -600,7 +605,6 @@ describe("session selection at the browser RPC wire", () => {
 			schema: 1,
 			sessionId: "saved",
 			project: "A",
-			buildId: "test",
 			protocolVersion: 1,
 			openedAt: 1,
 			snapshot: { _tag: "snapshot", sequence: 1, rows: [], hasMore: false },
@@ -675,7 +679,6 @@ describe("session selection at the browser RPC wire", () => {
 			schema: 1,
 			sessionId: `foreign-saved-${project}`,
 			project: "A",
-			buildId: "test",
 			protocolVersion: 1,
 			openedAt: 1,
 			snapshot: {
