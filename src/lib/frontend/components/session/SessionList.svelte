@@ -135,6 +135,11 @@
 	const searching = $derived(sessionState.searchQuery.trim().length > 0);
 	const settledShelfOpen = $derived(searching || uiState.settledShelfOpen);
 	const snoozedShelfOpen = $derived(searching || uiState.snoozedShelfOpen);
+	const groupsOpen = $derived({
+		pinned: searching || uiState.sessionGroupsOpen.pinned,
+		running: searching || uiState.sessionGroupsOpen.running,
+		idle: searching || uiState.sessionGroupsOpen.idle,
+	});
 	const scope = $derived(getSessionScope());
 	const tree = $derived(grouping === "project" ? buildProjectTree({
 		projects: projectState.projects.filter((project) => scope === null || project.slug === scope),
@@ -144,8 +149,10 @@
 		currentId: sessionState.currentId,
 	}) : null);
 	const visibleRowIds = $derived([
-		...arrangement.pinned.map((session) => session.id),
-		...(tree ? tree.flatMap((node) => node.shown) : arrangement.sections.flatMap((section) => section.sessions)).map((session) => session.id),
+		...(groupsOpen.pinned ? arrangement.pinned.map((session) => session.id) : []),
+		...(tree ? tree.flatMap((node) => node.shown) : arrangement.sections.flatMap((section) =>
+			(section.key === "running" || section.key === "idle") && !groupsOpen[section.key] ? [] : section.sessions,
+		)).map((session) => session.id),
 		...(settledShelfOpen ? arrangement.settled.map((session) => session.id) : []),
 		...(snoozedShelfOpen ? arrangement.snoozed.map((session) => session.id) : []),
 	]);
@@ -515,7 +522,7 @@
 			Pick sessions to act on, then choose an action below.
 		</div>
 	{/if}
-	<SessionListRows {arrangement} {fullArrangement} {settledCount} {tree} {drafts} reorderable={!searching && statusFilter === null && scope === null} {isEmpty} {emptyMessage} {statusFilter} {searching} filteredLength={filtered.length} {snoozedShelfOpen} {settledShelfOpen} {pagerPending} {unavailableProjectLabels} {selectMode} {selectedSessionIds} menuOpenId={ctxMenuSession?.id} {renamingSessionId} {getProjectLabel} {getProjectAccent} oncontextmenu={handleContextMenu} ontoggleselection={handleToggleSelection} onrenamestart={handleCtxRename} onrenameend={handleRenameEnd} />
+	<SessionListRows {arrangement} {fullArrangement} {settledCount} {tree} {drafts} reorderable={!searching && statusFilter === null && scope === null} {isEmpty} {emptyMessage} {statusFilter} {searching} filteredLength={filtered.length} {groupsOpen} {snoozedShelfOpen} {settledShelfOpen} {pagerPending} {unavailableProjectLabels} {selectMode} {selectedSessionIds} menuOpenId={ctxMenuSession?.id} {renamingSessionId} {getProjectLabel} {getProjectAccent} oncontextmenu={handleContextMenu} ontoggleselection={handleToggleSelection} onrenamestart={handleCtxRename} onrenameend={handleRenameEnd} />
 	{#if selectMode}
 		<SessionListBulkBar settleCount={settleEligible.length} snoozeCount={snoozeEligible.length} pinCount={pinEligible.length} {selectionCount} {unpinSelected} {bulkPending} onsettle={() => { void handleBulkChange("settle"); }} onsnooze={handleOpenBulkSnooze} onpin={() => { void handleBulkChange("pin"); }} ondelete={handleBulkDelete} />
 	{/if}

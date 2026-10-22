@@ -145,13 +145,28 @@ function seedFinalSidebar(phone = false, singleAccount = false) {
 	);
 }
 
+function fitSidebarToViewport() {
+	const root = document.getElementById("storybook-root");
+	root?.setAttribute("style", "height:100vh");
+	return () => root?.removeAttribute("style");
+}
+
 export const Final: Story = {
-	beforeEach: () => seedFinalSidebar(),
+	beforeEach: () => {
+		seedFinalSidebar();
+		return fitSidebarToViewport();
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(canvas.getByText("Fix token refresh race")).toBeVisible();
 		await expect(canvas.getByTestId("usage-footer-row-work")).toBeVisible();
 		await expect(canvas.getByTestId("settled-shelf-toggle")).toBeVisible();
+		if (!sessionViewState.compact) {
+			await expect(
+				canvas.getByTestId("usage-footer-settings").getBoundingClientRect()
+					.bottom,
+			).toBeLessThanOrEqual(innerHeight);
+		}
 		await expect(canvas.queryByTitle("Pinned session")).not.toBeInTheDocument();
 		if (!sessionViewState.compact) {
 			const toggle = canvas.getByRole("button", { name: "Close sidebar" });
@@ -210,6 +225,15 @@ export const Final: Story = {
 			await expect(pill.top).toBe(46);
 			await expect(chip.getBoundingClientRect().top - pill.bottom).toBe(8);
 			await expect(getComputedStyle(chip, "::before").minHeight).toBe("44px");
+			const scroller = canvas.getByRole("region", { name: "Sessions" });
+			scroller.scrollTop = scroller.scrollHeight;
+			await expect(
+				canvas.getByTestId("snoozed-shelf-toggle").getBoundingClientRect()
+					.bottom,
+			).toBeLessThanOrEqual(
+				canvas.getByTestId("usage-footer-phone").getBoundingClientRect().top,
+			);
+			scroller.scrollTop = 0;
 		}
 	},
 };
@@ -222,9 +246,7 @@ export const FinalPhone: Story = {
 	beforeEach: () => {
 		seedFinalSidebar(true);
 		// Phone-tall, so the list scrolls under a pinned usage dock as in the app.
-		const root = document.getElementById("storybook-root");
-		root?.setAttribute("style", "height:100vh");
-		return () => root?.removeAttribute("style");
+		return fitSidebarToViewport();
 	},
 };
 export const FinalPhoneLight: Story = {
@@ -351,13 +373,22 @@ export const PhoneOverflowLight: Story = {
 
 export const PhoneSelect: Story = {
 	...Phone,
-	beforeEach: () => seedFinalSidebar(true, true),
+	beforeEach: () => {
+		seedFinalSidebar(true, true);
+		return fitSidebarToViewport();
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(canvas.getByText("Typed session list")).toBeVisible();
 		await userEvent.click(canvas.getByTestId("list-bar-select"));
 		await expect(canvas.getByText("0 selected")).toBeVisible();
 		await expect(canvas.getByTestId("select-bar-delete")).toBeDisabled();
+		for (const action of ["settle", "snooze", "pin", "delete"]) {
+			await expect(
+				canvas.getByTestId(`select-bar-${action}`).getBoundingClientRect()
+					.bottom,
+			).toBeLessThanOrEqual(innerHeight);
+		}
 		await expect(
 			canvas.getByRole("button", { name: "New session" }),
 		).toBeVisible();
