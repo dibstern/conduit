@@ -134,6 +134,101 @@ describe("run terminal ownership", () => {
 			await harness.query("SELECT finish FROM messages WHERE id = 'c'"),
 		).toEqual([{ finish: "interrupted" }]);
 	});
+	// A background task finishing after its run ended wakes Claude into a new
+	// turn under the same run id; that turn's end is new output to read.
+	it("marks a seen session unread when its ended run wakes into another turn", async () => {
+		harness = makeEffectProjectionHarness();
+		await harness.query(
+			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES ('s', 'claude', 'test', 'idle', 1, 1)",
+		);
+		const facts: Array<[string, object]> = [
+			[
+				"message.created",
+				{ messageId: "a", sessionId: "s", role: "user", inputId: "a" },
+			],
+			["run.requested", { runId: "r1", inputId: "a" }],
+			["run.started", { inputId: "a", requestedRunId: "r1" }],
+			[
+				"message.created",
+				{ messageId: "m1", sessionId: "s", role: "assistant" },
+			],
+			["turn.completed", { messageId: "m1" }],
+		];
+		const project = (from: number, batch: Array<[string, object]>) =>
+			harness.reproject(
+				batch.map(
+					([type, data], index) =>
+						({
+							eventId: createEventId(),
+							type,
+							sessionId: "s",
+							projectId: "test-project",
+							provider: "claude",
+							createdAt: from + index,
+							sequence: from + index,
+							streamVersion: from + index,
+							metadata: { runId: "r1" },
+							data,
+						}) as StoredEvent,
+				),
+			);
+		await project(1, facts);
+		await harness.query(
+			"UPDATE sessions SET seen_version = last_turn_end_version WHERE id = 's'",
+		);
+		await project(6, [
+			["session.status", { sessionId: "s", status: "busy" }],
+			[
+				"message.created",
+				{ messageId: "m2", sessionId: "s", role: "assistant" },
+			],
+			["turn.completed", { messageId: "m2" }],
+		]);
+		expect(
+			await harness.query(
+				"SELECT last_turn_end_version, unread FROM sessions WHERE id = 's'",
+			),
+		).toEqual([{ last_turn_end_version: 8, unread: 1 }]);
+	});
+	// OpenCode's idle ends its run, so a second idle on the ended run is
+	// dropped: a late busy taken there would never be lifted.
+	it("keeps an ended OpenCode run's late busy from sticking the session busy", async () => {
+		harness = makeEffectProjectionHarness();
+		await harness.query(
+			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES ('oc', 'opencode', 'test', 'idle', 1, 1)",
+		);
+		const facts: Array<[string, object]> = [
+			[
+				"message.created",
+				{ messageId: "a", sessionId: "oc", role: "user", inputId: "a" },
+			],
+			["run.requested", { runId: "r1", inputId: "a" }],
+			["run.started", { inputId: "a", requestedRunId: "r1" }],
+			["session.status", { sessionId: "oc", status: "idle" }],
+			["session.status", { sessionId: "oc", status: "busy" }],
+			["session.status", { sessionId: "oc", status: "idle" }],
+		];
+		await harness.reproject(
+			facts.map(
+				([type, data], index) =>
+					({
+						eventId: createEventId(),
+						type,
+						sessionId: "oc",
+						projectId: "test-project",
+						provider: "opencode",
+						createdAt: index + 1,
+						sequence: index + 1,
+						streamVersion: index + 1,
+						metadata: { runId: "r1" },
+						data,
+					}) as StoredEvent,
+			),
+		);
+		expect(
+			await harness.query("SELECT status FROM sessions WHERE id = 'oc'"),
+		).toEqual([{ status: "idle" }]);
+	});
 	it("places a delayed acceptance on its already-ended run without touching a newer run", async () => {
 		harness = makeEffectProjectionHarness();
 		await harness.query(
