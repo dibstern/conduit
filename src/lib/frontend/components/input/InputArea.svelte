@@ -126,6 +126,14 @@
 	let pendingDraftSessionMode: Promise<void> | undefined;
 	const draftRoute = $derived(getCurrentRoute());
 	const draftId = $derived(draftRoute.page === "chat" ? draftRoute.draftId : undefined);
+	// Attachments belong to the session or draft they were added in; InputArea
+	// outlives route changes, so drop them when the composer's scope changes.
+	const composerScope = $derived(draftRoute.page === "chat" ? draftRoute.sessionId ?? draftId ?? null : null);
+	$effect(() => {
+		composerScope;
+		pendingAttachments = [];
+		attachmentError = "";
+	});
 	const draftContext = $derived(`${getDraftProject() ?? ""}:${sessionState.currentId ?? ""}:${draftId ?? "session"}`);
 	const sessionModeContext = $derived(`${draftContext}:${sessionState.currentId ? "" : getEffectiveInstanceId()}`);
 	$effect(() => {
