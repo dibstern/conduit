@@ -459,7 +459,7 @@
 		<div class="my-[12px] border-t border-border-chip"></div>
 		{#if stuck}
 			<div data-testid="goal-details-stuck" class="mb-[12px] rounded-[12px] border border-warning/30 bg-warning/5 px-[12px] py-[10px]">
-				<b class="text-[13.5px] font-semibold text-warning">{goal.phase === "paused" ? "Paused while stuck" : `Stuck for ${goalDuration(stuck.lastAt - stuck.since)}`}</b>
+				<b class="text-[13.5px] font-semibold text-warning">{goal.phase === "paused" ? `Paused after ${goalDuration(stuck.lastAt - stuck.since)} stuck` : `Stuck for ${goalDuration(stuck.lastAt - stuck.since)}`}</b>
 				<p class="mt-[3px] mb-0 text-[12.5px] leading-[1.45] text-text-secondary">{goal.phase === "paused" ? `Checks stopped after ${stuck.count} found the same blocker. Resume once it is fixed.` : `${stuck.count} checks in a row found the same blocker.`}</p>
 			</div>
 		{/if}
