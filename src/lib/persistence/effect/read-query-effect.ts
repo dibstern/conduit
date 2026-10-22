@@ -987,13 +987,15 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		yield* Effect.serviceOption(SessionWorkspaceHintStateTag),
 	);
 	// A prompt queued behind a running turn starts working when that turn
-	// ends, not when it was sent: waiting in the queue is not work.
+	// ends, not when it was sent: waiting in the queue is not work. A steer
+	// joins the running turn and settles with it, so it starts when sent.
 	const turnMetadataColumns = sql`
 		CASE WHEN (SELECT provider FROM sessions WHERE id = messages.session_id) = 'claude'
 			THEN turns.cost ELSE NULL END AS turn_cost,
-		MAX(t.requested_at, COALESCE((SELECT MAX(p.completed_at) FROM turns p
-			WHERE p.session_id = t.session_id AND p.requested_at < t.requested_at), 0)
-		) AS turn_started_at,
+		CASE WHEN messages.steered = 1 THEN t.requested_at
+			ELSE MAX(t.requested_at, COALESCE((SELECT MAX(p.completed_at) FROM turns p
+				WHERE p.session_id = t.session_id AND p.requested_at < t.requested_at), 0))
+		END AS turn_started_at,
 		t.completed_at AS turn_completed_at,
 		(SELECT json_group_array(json_object(
 			'id', pa.id, 'from', pa.created_at, 'to', pa.resolved_at

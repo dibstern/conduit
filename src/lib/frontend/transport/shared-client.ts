@@ -36,6 +36,12 @@ import type {
 	SessionDetailEnvelope,
 } from "../../contracts/ws-rpc.js";
 import {
+	wsDebugLogMessage,
+	wsDebugResetMessageCount,
+	wsDebugState,
+} from "../stores/ws-debug.svelte.js";
+import {
+	connectionState,
 	markControlSocketOpen,
 	trackControlSocket,
 } from "./connection-status.svelte.js";
@@ -265,6 +271,56 @@ export const setRedialBuildCheck = (check: () => Promise<void>) => {
 	redialBuildCheck = check;
 };
 
+// Keepalives and per-chunk stream acks would flood the debug panel's ring buffer.
+const UNLOGGED_RPC_FRAMES = new Set(["Ping", "Pong", "Ack"]);
+
+/**
+ * Feed this socket's RPC frames, both directions, to the debug panel while
+ * verbose is on. Replies carry only a request id, so the socket remembers each
+ * request's RPC name to label them.
+ */
+function logRpcFrames(socket: WebSocket, trafficClass: TrafficClass): void {
+	const rpcNames = new Map<string, string>();
+	const log = (arrow: "→" | "←", data: unknown) => {
+		if (!wsDebugState.verboseMessages || typeof data !== "string") return;
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(data);
+		} catch {
+			return;
+		}
+		const frames = (Array.isArray(parsed) ? parsed : [parsed]) as {
+			_tag?: string;
+			id?: string | number;
+			requestId?: string | number;
+			tag?: string;
+		}[];
+		for (const frame of frames) {
+			const tag = frame._tag ?? "?";
+			if (UNLOGGED_RPC_FRAMES.has(tag)) continue;
+			const rawId = frame.id ?? frame.requestId;
+			const id = rawId === undefined ? undefined : String(rawId);
+			if (tag === "Request" && id && frame.tag) rpcNames.set(id, frame.tag);
+			const rpc = id === undefined ? "" : ` ${rpcNames.get(id) ?? `#${id}`}`;
+			if (tag === "Exit" && id !== undefined) rpcNames.delete(id);
+			wsDebugLogMessage(
+				connectionState.status,
+				`${trafficClass} ${arrow} ${tag}${rpc}`,
+				frame,
+			);
+		}
+	};
+	const send = socket.send.bind(socket);
+	socket.send = (data) => {
+		send(data);
+		log("→", data);
+	};
+	socket.addEventListener("message", (event) => log("←", event.data));
+	if (trafficClass === "control") {
+		socket.addEventListener("open", wsDebugResetMessageCount);
+	}
+}
+
 const connectWebSocket: WsRpcConnect = ({ url, trafficClass, wake }) => {
 	let wakeVersion = wake?.version ?? 0;
 	let currentSocket: WebSocket | undefined;
@@ -322,6 +378,7 @@ const connectWebSocket: WsRpcConnect = ({ url, trafficClass, wake }) => {
 							Layer.succeed(Socket.WebSocketConstructor, (url) => {
 								const socket = new globalThis.WebSocket(url);
 								onCreate(socket);
+								logRpcFrames(socket, trafficClass);
 								if (trafficClass === "control") trackControlSocket(socket);
 								return socket;
 							}),

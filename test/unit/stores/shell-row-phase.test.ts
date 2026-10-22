@@ -314,7 +314,7 @@ describe("turn control sends over the browser RPC wire", () => {
 		await expect(sent).resolves.toEqual({ kind: "started" });
 		expect(selection.shown).toEqual(
 			left
-				? { kind: "draft", project: "project-b" }
+				? { kind: "draft", project: "project-b", draftId: expect.any(String) }
 				: { kind: "placed", project: "project-a", sessionId: "redirected" },
 		);
 		selection.open("redirected");
@@ -350,7 +350,11 @@ describe("turn control sends over the browser RPC wire", () => {
 		selection.openDraft("project-b");
 		created({ projectSlug: "project-a", sessionId: "created" });
 		await received();
-		expect(selection.shown).toEqual({ kind: "draft", project: "project-b" });
+		expect(selection.shown).toEqual({
+			kind: "draft",
+			project: "project-b",
+			draftId: expect.any(String),
+		});
 		reply({ ok: true, sessionId: "created", handedOff: true });
 		await sent;
 		selection.open("created");
@@ -388,7 +392,7 @@ describe("turn control sends over the browser RPC wire", () => {
 		await expect(sent).resolves.toEqual({ kind: "started" });
 		expect(selection.shown).toEqual(
 			left
-				? { kind: "draft", project: "project-b" }
+				? { kind: "draft", project: "project-b", draftId: expect.any(String) }
 				: { kind: "placed", project: "project-a", sessionId: "side" },
 		);
 		selection.open("side");
