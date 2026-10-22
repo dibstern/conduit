@@ -557,12 +557,20 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		details["replacement"] = replacement;
 	}, 30_000);
 
-	it("finishes a held turn on the old runner before warming the replacement", async () => {
+	it.each([
+		false,
+		true,
+	])("finishes a held turn on the old runner before warming the replacement, Stop in flight=%s", async (stopping) => {
 		const {
 			harness,
 			details,
 			browser: initial,
-		} = await start("turn-in-flight");
+		} = await start(stopping ? "stop-in-flight" : "turn-in-flight");
+		if (stopping)
+			writeFileSync(
+				join(harness.root, "claude", "conduit-test-hold-stop"),
+				"hold",
+			);
 		const sessionId = await initial.createSession("Uninterrupted upgrade turn");
 		details["sessionId"] = sessionId;
 		const prompt = "upgrade-long-turn";
@@ -577,8 +585,19 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		);
 		const old = runnerFor(harness, sessionId);
 		const oldQuery = queryFor(harness, old.pid);
+		const stop = stopping
+			? Effect.runPromise(
+					initial.rpc.CancelSession({ sessionId, commandId: randomUUID() }),
+				).catch(() => undefined)
+			: undefined;
+		if (stopping)
+			await vi.waitFor(() =>
+				expect(
+					sdkProof(harness).some((mark) => mark.kind === "stop-held"),
+				).toBe(true),
+			);
 		await harness.kill();
-		await pending;
+		await Promise.all([pending, stop]);
 		await harness.restart({ buildId: NEW_BUILD });
 		const browser = await harness.connect(sessionId);
 		await new Promise<void>((done) => setTimeout(done, 150));
@@ -1149,6 +1168,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			}),
 		);
 		await pending;
+		// A resumable native interruption must leave the runner available to upgrade.
+		expect(() => process.kill(old.pid, 0)).not.toThrow();
 		await vi.waitFor(
 			() => {
 				const state = persisted(harness, sessionId);

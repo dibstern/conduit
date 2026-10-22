@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { Context, Effect, Exit, Fiber, Layer, Scope, Stream } from "effect";
 import { RpcTest } from "effect/rpc";
 import { SqlClient } from "effect/sql";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
@@ -25,6 +25,7 @@ import {
 	makeContinuation,
 } from "../../../src/lib/domain/relay/Services/continuation.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
+import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import {
 	ProviderTurnServiceLive,
@@ -71,7 +72,14 @@ import {
 } from "../../helpers/mock-sdk.js";
 import { makeSessionCreatedEvent } from "../../helpers/persistence-factories.js";
 import { makeTestOrchestrationRuntimeLayer as makeOrchestrationRuntimeLayer } from "../../helpers/provider-adapters.js";
+import { writeProviderCommandOutboxProof } from "../../helpers/provider-command-outbox-proof.js";
 import { makeSSEEvent } from "../../helpers/sse-factories.js";
+
+const commandOutboxEvidence: Record<string, unknown>[] = [];
+
+afterAll(() =>
+	writeProviderCommandOutboxProof(import.meta.url, commandOutboxEvidence),
+);
 
 function signal<T>() {
 	let resolve: (value: T) => void = () => {};
@@ -113,9 +121,15 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 						"run-now-during-continuation",
 						"other-queue-during-continuation",
 						"manual-stop-steer",
+						"question-replacement-session-lock",
 					] as const)
 				: []),
 		] as const)(`${provider}: %s runs the selected input next after Stop`, async (scenario) => {
+			const evidence: Record<string, unknown> = {};
+			if (scenario === "question-replacement-session-lock") {
+				Object.assign(evidence, { scenario, passed: false });
+				commandOutboxEvidence.push(evidence);
+			}
 			const scratch = mkdtempSync(join(tmpdir(), "conduit-run-now-"));
 			const sessionId = `run-now-${provider}-${scenario}`;
 			const image =
@@ -144,7 +158,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 			};
 			const stop = async (sid = sessionId, boundTurn?: ActiveTurn) => {
 				if (disposing) return;
-				// OpenCode aborts over HTTP inside the Stop worker, not via the engine.
+				// OpenCode's durable interrupt calls its HTTP client inside the Stop worker.
 				if (
 					provider === "opencode" &&
 					scenario === "recover-registration-race"
@@ -166,7 +180,11 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 					await active.complete(true);
 				}
 			};
-			const api = makeMockOpenCodeAPI();
+			// Durable Stop is fenced to the target process, as real clients identify theirs.
+			const api = Object.assign(makeMockOpenCodeAPI(), {
+				promptProcessId: `opencode:run-now:${sessionId}`,
+				controlReplaySafe: true,
+			});
 			api.session.abort = vi.fn(stop);
 			api.session.prompt = vi.fn(async (sessionId, options) => {
 				const inputId = options.text.split(" ")[0] ?? "";
@@ -319,7 +337,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 							queryTurn = {
 								inputId,
 								complete: async (interrupted = false) => {
-									if (activeTurns.get(querySessionId) === queryTurn)
+									if (activeTurns.get(querySessionId)?.inputId === inputId)
 										activeTurns.delete(querySessionId);
 									result.resolve(interrupted);
 								},
@@ -590,7 +608,6 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 					);
 				}),
 			).pipe(Layer.provideMerge(orchestration));
-			const evidence: Record<string, unknown> = {};
 			try {
 				const running = Effect.runPromise(
 					Effect.gen(function* () {
@@ -607,9 +624,16 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 						yield* Effect.addFinalizer(() =>
 							Effect.gen(function* () {
 								evidence["finalTurns"] =
-									yield* sql`SELECT user_message_id, state FROM turns WHERE session_id = ${sessionId} ORDER BY rowid`;
+									yield* sql`SELECT user_message_id, run_id, state FROM turns WHERE session_id = ${sessionId} ORDER BY rowid`;
 								evidence["finalCommands"] =
 									yield* sql`SELECT command_id, status FROM command_receipts WHERE session_id = ${sessionId}`;
+								evidence["finalControls"] =
+									yield* sql`SELECT command_id, effect_type, provider_process_id, status, error_code,
+										json_extract(payload_json, '$.stop') AS stop_snapshot
+										FROM provider_command_outbox WHERE session_id = ${sessionId} AND effect_type <> 'send_turn'`;
+								if (scenario === "question-replacement-session-lock")
+									evidence["events"] =
+										yield* sql`SELECT sequence, type, data, metadata FROM events WHERE session_id = ${sessionId} ORDER BY sequence`;
 								evidence["finalErrors"] =
 									yield* sql`SELECT type, data FROM events WHERE session_id = ${sessionId} AND type = 'turn.error'`;
 								evidence["finalSession"] =
@@ -642,6 +666,8 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 						for (const inputId of [
 							"manual-stop-send",
 							"manual-stop-steer",
+							"question-replacement-session-lock",
+							"owner-rebuild",
 						].includes(scenario)
 							? ["running"]
 							: ["running", "first", "selected", "last"]) {
@@ -670,6 +696,84 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 								inputId: "selected",
 								interrupt: true,
 							});
+						if (scenario === "question-replacement-session-lock") {
+							const interactions = yield* PendingInteractionServiceTag;
+							yield* interactions.recordQuestionRequest({
+								requestId: "live-question",
+								sessionId,
+								questions: [{ question: "Continue?" }],
+							});
+							const permitHeld = signal<void>();
+							const releasePermit = signal<void>();
+							const questionRead = signal<void>();
+							const listQuestions =
+								interactions.listPendingQuestions.bind(interactions);
+							vi.spyOn(interactions, "listPendingQuestions").mockImplementation(
+								(sid) =>
+									listQuestions(sid).pipe(
+										Effect.tap(() => Effect.sync(() => questionRead.resolve())),
+									),
+							);
+							yield* Effect.addFinalizer(() =>
+								Effect.sync(() => releasePermit.resolve()),
+							);
+							const held = yield* Effect.forkChild(
+								inbox.withSession(
+									sessionId,
+									Effect.sync(() => permitHeld.resolve()).pipe(
+										Effect.andThen(Effect.promise(() => releasePermit.promise)),
+									),
+								),
+							);
+							yield* Effect.promise(() => permitHeld.promise);
+							const replacement = yield* Effect.forkChild(
+								providerTurns.prepareTurnSession({
+									clientId: "question-replacement",
+									commandId: "question-replacement",
+									sessionId,
+								}),
+							);
+							yield* Effect.promise(() => questionRead.promise).pipe(
+								Effect.timeout("3 seconds"),
+							);
+							const cancellation = yield* Effect.forkChild(
+								client.CancelSession({
+									sessionId,
+									commandId: "concurrent-stop",
+								}),
+							);
+							yield* Effect.sleep("30 millis");
+							expect(providerTurns.turnFences(sessionId).stopping).toBe(false);
+							expect(stopRequests).toEqual([]);
+							expect(
+								yield* sql`SELECT command_id FROM provider_command_outbox WHERE session_id = ${sessionId} AND effect_type = 'interrupt_turn'`,
+							).toEqual([]);
+							yield* Effect.sync(() => releasePermit.resolve());
+							yield* Fiber.join(held);
+							yield* awaitCondition(() => stopRequests.length === 1);
+							expect(
+								yield* inbox
+									.withSession(sessionId, Effect.succeed("available"))
+									.pipe(Effect.timeout("500 millis")),
+							).toBe("available");
+							yield* Effect.sync(() => releaseStop.resolve());
+							expect(
+								yield* Fiber.join(replacement).pipe(
+									Effect.timeout("3 seconds"),
+								),
+							).toBe(sessionId);
+							expect(
+								yield* Fiber.join(cancellation).pipe(
+									Effect.timeout("3 seconds"),
+								),
+							).toEqual({ ok: true });
+							expect(stopRequests).toHaveLength(1);
+							expect(
+								yield* sql`SELECT command_id FROM provider_command_outbox WHERE session_id = ${sessionId} AND effect_type = 'interrupt_turn'`,
+							).toHaveLength(1);
+							evidence["questionReplacementSerializedWithStop"] = true;
+							return;
+						}
 						if (
 							scenario === "run-now-during-continuation" ||
 							scenario === "other-queue-during-continuation"
@@ -774,20 +878,39 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 								}).pipe(Effect.timeout("500 millis"));
 								expect(sent).toEqual(["running"]);
 								yield* Effect.sync(() => releaseRegistration.resolve());
+								yield* sql`SELECT 1 FROM provider_command_outbox control
+									JOIN command_receipts receipt ON receipt.command_id = control.command_id
+									WHERE control.session_id = ${sessionId} AND control.effect_type = 'interrupt_turn'
+									AND control.status = 'completed' AND receipt.status = 'side_effect_completed'`.pipe(
+									Effect.delay("1 millis"),
+									Effect.repeat({ until: (rows) => rows.length === 1 }),
+									Effect.timeout("3 seconds"),
+								);
+								expect(stopRequests).toEqual([]);
+								yield* awaitCondition(() => sent.length === 2);
+								expect(providerTurns.turnFences(sessionId).stopping).toBe(
+									false,
+								);
+							} else {
+								yield* awaitCondition(() => stopRequests.length === 1);
+								if (provider === "opencode") {
+									expect(providerTurns.turnFences(sessionId).stopping).toBe(
+										true,
+									);
+									yield* finish();
+								}
+								yield* Effect.sleep("30 millis");
 							}
-							yield* awaitCondition(() => stopRequests.length === 1);
-							if (provider === "opencode") {
-								expect(providerTurns.turnFences(sessionId).stopping).toBe(true);
-								if (scenario !== "recover-registration-race") yield* finish();
-							}
-							yield* Effect.sleep("30 millis");
 							expect(sent).toEqual(
-								provider === "claude" ? ["running", "selected"] : ["running"],
+								scenario === "recover-registration-race"
+									? ["running", "selected"]
+									: ["running"],
 							);
 							yield* Effect.sync(() => releaseStop.resolve());
 							yield* awaitCondition(() => sent.length === 2);
 							expect(sent).toEqual(["running", "selected"]);
 							expect(abortedAtRelease).not.toContain("selected");
+							expect(activeTurns.get(sessionId)?.inputId).toBe("selected");
 							yield* finish();
 							evidence["unfinishedReservationRecovered"] = true;
 							return;
@@ -825,8 +948,12 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 								),
 								ProviderTurnServiceTag,
 							);
-							expect(rebuilt.turnFences(sessionId).stopping).toBe(false);
+							// The original Stop remains durable until its native turn ends.
+							expect(rebuilt.turnFences(sessionId).stopping).toBe(true);
 							if (activeTurns.has(sessionId)) yield* finish();
+							yield* awaitCondition(
+								() => !rebuilt.turnFences(sessionId).stopping,
+							);
 							expect(
 								yield* rebuilt.prepareTurnSession({
 									clientId: "rebuilt-owner",
@@ -890,9 +1017,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 							).toEqual({ ok: true });
 							if (provider === "opencode") yield* finish();
 							yield* Effect.sleep("20 millis");
-							for (const inputId of provider === "claude"
-								? ["first", "last"]
-								: ["selected", "first"])
+							for (const inputId of ["selected", "first"])
 								expect(
 									yield* client["input.cancel"]({ sessionId, inputId }).pipe(
 										Effect.timeout("500 millis"),
@@ -915,14 +1040,8 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 							yield* finish(`${sessionId}-other`);
 							yield* awaitCondition(() => sent.includes("other-next"));
 							yield* finish(`${sessionId}-other`);
-							expect(sent).toEqual(
-								provider === "claude"
-									? ["running", "selected", "other-running", "other-next"]
-									: ["running", "other-running", "other-next"],
-							);
-							expect(providerTurns.turnFences(sessionId).stopping).toBe(
-								provider === "opencode",
-							);
+							expect(sent).toEqual(["running", "other-running", "other-next"]);
+							expect(providerTurns.turnFences(sessionId).stopping).toBe(true);
 							evidence["queueEditableWhileAbortPending"] = true;
 							evidence["otherSessionDrainedWhileAbortPending"] = true;
 							return;
@@ -959,6 +1078,8 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 								activeTurns.get(sessionId)?.inputId === "running"
 							)
 								yield* finish();
+							if (provider === "claude")
+								yield* Effect.sync(() => releaseStop.resolve());
 							if (provider === "opencode")
 								yield* Effect.sleep(STOP_ABORT_WAIT_MS + 100);
 							yield* client["input.submit"]({
@@ -988,14 +1109,13 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 								images: [image],
 								delivery: scenario === "manual-stop-steer" ? "steer" : "queue",
 							}).pipe(Effect.timeout("500 millis"));
-						if (
-							[
-								"natural-completion-race",
-								"slow-run-now",
-								"manual-stop-send",
-								"manual-stop-steer",
-							].includes(scenario)
-						) {
+						const terminalBeforeAcknowledgement = [
+							"natural-completion-race",
+							"slow-run-now",
+							"manual-stop-send",
+							"manual-stop-steer",
+						].includes(scenario);
+						if (terminalBeforeAcknowledgement) {
 							if (activeTurns.get(sessionId)?.inputId === "running")
 								yield* finish();
 							// Cross the former timeout with the old turn already terminal.
@@ -1005,8 +1125,19 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 									: "5100 millis",
 							);
 						} else yield* Effect.sleep("20 millis");
-						if (provider === "claude")
+						if (provider === "claude") {
+							if (!terminalBeforeAcknowledgement) {
+								expect(sent).toEqual(["running"]);
+								yield* Effect.sync(() => releaseStop.resolve());
+							}
 							yield* awaitCondition(() => sent.length === 2);
+							if (terminalBeforeAcknowledgement) {
+								expect(providerTurns.turnFences(sessionId).stopping).toBe(
+									false,
+								);
+								expect(activeTurns.get(sessionId)?.inputId).toBe("selected");
+							}
+						}
 						expect(sent).toEqual(
 							provider === "claude" ? ["running", "selected"] : ["running"],
 						);
@@ -1090,10 +1221,10 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 							sent.map(() => expect.any(String)),
 						);
 						expect(turns[0]?.state).toBe(
-							provider === "claude"
-								? "interrupted"
-								: ["natural-completion-race", "slow-run-now"].includes(scenario)
-									? "completed"
+							["natural-completion-race", "slow-run-now"].includes(scenario)
+								? "completed"
+								: provider === "claude"
+									? "interrupted"
 									: "error",
 						);
 						expect(
@@ -1146,6 +1277,18 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 						Effect.provide(layer),
 						Effect.onExit((exit) =>
 							Effect.sync(() => {
+								if (scenario === "question-replacement-session-lock")
+									Object.assign(evidence, {
+										passed: exit._tag === "Success",
+										outcome: exit._tag,
+										provider,
+										stopRequests,
+										abortedAtRelease,
+										naturalResults,
+										sent,
+										providerInputs,
+										nativeCallCount: stopRequests.length,
+									});
 								mkdirSync("test-results", { recursive: true });
 								writeFileSync(
 									`test-results/aoqb-18-stop-fence-${provider}-${scenario}.json`,

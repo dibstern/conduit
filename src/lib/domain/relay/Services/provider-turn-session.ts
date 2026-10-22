@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Clock, Effect, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import type { Account } from "../../../contracts/account.js";
 import {
@@ -10,12 +10,16 @@ import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-sign
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent, createEventId } from "../../../persistence/events.js";
+import { ProviderInstanceFailure } from "../../../provider/errors.js";
 import {
+	ProviderControlPayloadSchema,
+	STOP_ABORT_WAIT_MS,
+} from "../../../provider/orchestration-command-contracts.js";
+import {
+	legacyStopOwnersQuery,
 	sessionRunOwnersQuery,
-	settleSessionRuns,
 } from "../../../provider/session-run-settlement.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
-import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import {
 	PendingInteractionServiceTag,
 	type PendingQuestion,
@@ -23,6 +27,7 @@ import {
 import { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
 import { CLAUDE_PROVIDER_ID } from "./provider-turn-dispatch.js";
 import type {
+	ProviderTurnService,
 	ProviderTurnServiceInterruptInput,
 	ProviderTurnServicePrepareInput,
 } from "./provider-turn-service.js";
@@ -33,7 +38,8 @@ import {
 } from "./services.js";
 import { SessionManagerServiceTag } from "./session-manager-service.js";
 import { clearProcessingTimeout } from "./session-overrides-state.js";
-import { SessionWorkspaceTag } from "./session-workspace.js";
+
+export { STOP_ABORT_WAIT_MS };
 
 export const completeRecoveredQuestion = (
 	question: PendingQuestion,
@@ -119,6 +125,7 @@ export const completeRecoveredQuestion = (
 
 const resolvePendingClaudeQuestions = (
 	input: ProviderTurnServicePrepareInput,
+	beginStop: ProviderTurnService["beginStop"],
 ) =>
 	Effect.gen(function* () {
 		const pendingInteractionService = yield* PendingInteractionServiceTag;
@@ -138,7 +145,7 @@ const resolvePendingClaudeQuestions = (
 				sessionId: input.sessionId,
 				commandId: `${input.commandId}:interrupt-for-question`,
 			};
-			yield* interruptTurn(stop, yield* prepareStop(stop));
+			yield* yield* beginStop(stop);
 		}
 	});
 
@@ -186,7 +193,10 @@ const materializeOpenCodeSession = (
 		return session.id;
 	});
 
-export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
+export const prepareTurnSession = (
+	input: ProviderTurnServicePrepareInput,
+	beginStop: ProviderTurnService["beginStop"],
+) =>
 	Effect.gen(function* () {
 		const orchestrationEngine = yield* OrchestrationEngineTag;
 		const read = yield* ReadQueryEffectTag;
@@ -213,7 +223,7 @@ export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
 			traits.interactionSink === "permission-asking" &&
 			input.delivery !== "steer"
 		)
-			yield* resolvePendingClaudeQuestions(input);
+			yield* resolvePendingClaudeQuestions(input, beginStop);
 		if (traits.runsOpenCodeServer)
 			return yield* materializeOpenCodeSession(
 				input,
@@ -225,52 +235,72 @@ export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
 		return input.sessionId;
 	});
 
-const interruptLegacyTurn = (input: ProviderTurnServiceInterruptInput) =>
-	Effect.gen(function* () {
-		const log = yield* LoggerTag;
-		const abortResult = yield* Effect.result(
-			Effect.gen(function* () {
-				const read = yield* ReadQueryEffectTag;
-				const row = yield* read.getSession(input.sessionId);
-				if (!row)
-					return yield* Effect.fail(
-						new Error(`Session ${input.sessionId} not found`),
-					);
-				const directory = yield* (yield* SessionWorkspaceTag).get(
-					input.sessionId,
-				);
-				const client = yield* (yield* OpenCodeInstancesTag).use(
-					row.provider,
-					directory,
-				);
-				yield* Effect.tryPromise(() => client.session.abort(input.sessionId));
-			}).pipe(Effect.scoped),
-		);
-		if (abortResult._tag === "Failure") {
-			log.warn(
-				`client=${input.clientId} session=${input.sessionId} Abort failed:`,
-				formatErrorDetail(abortResult.failure),
-			);
-			return yield* Effect.fail(abortResult.failure);
-		}
-		return true;
-	});
-
 export const prepareStop = (input: ProviderTurnServiceInterruptInput) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		const [stored] = yield* sql<{
+			payload_json: string;
+			provider_id: string;
+			requested_at: number;
+		}>`SELECT payload_json, provider_id, requested_at
+			FROM provider_command_outbox WHERE command_id = ${input.commandId} AND session_id = ${input.sessionId}
+			AND effect_type IN ('interrupt_turn', 'end_session')`;
+		const replay = stored
+			? yield* Effect.try({
+					try: () =>
+						Schema.decodeSync(
+							Schema.fromJsonString(ProviderControlPayloadSchema),
+						)(stored.payload_json),
+					catch: (cause) =>
+						new ProviderInstanceFailure({
+							providerId: "conduit",
+							operation: "recoverStop",
+							cause,
+						}),
+				})
+			: undefined;
+		if (
+			(replay?.type === "interrupt_turn" || replay?.type === "end_session") &&
+			replay.stop
+		)
+			return replay.stop;
+		const deadlineAt = (yield* Clock.currentTimeMillis) + STOP_ABORT_WAIT_MS;
 		const commit = yield* makeCommitAndSignal;
 		const store = yield* EventStoreEffectTag;
 		const providerId =
-			yield* (yield* OrchestrationEngineTag).getProviderForSessionEffect(
+			stored?.provider_id ??
+			(yield* (yield* OrchestrationEngineTag).getProviderForSessionEffect(
 				input.sessionId,
-			);
+			));
 		const account = providerId
 			? yield* (yield* AccountDirectory).resolve({ _tag: "Id", id: providerId })
 			: undefined;
 		const keepsPendingSteers = account
 			? PROVIDER_DRIVERS[account.driver].keepsPendingSteersOnInterrupt
 			: false;
+		if (
+			stored &&
+			(replay?.type === "interrupt_turn" || replay?.type === "end_session")
+		) {
+			// A predecessor Stop has no snapshot. Recover only its original inputs,
+			// without recapturing reservations or changing the immutable payload.
+			const turnIds =
+				replay.type === "interrupt_turn" ? (replay.turnIds ?? []) : [];
+			const owners = yield* legacyStopOwnersQuery(
+				sql,
+				input.sessionId,
+				input.commandId,
+			);
+			return {
+				deadlineAt: stored.requested_at + STOP_ABORT_WAIT_MS,
+				owners,
+				turnIds,
+				runnerBacked:
+					account !== undefined &&
+					!PROVIDER_DRIVERS[account.driver].runsOpenCodeServer,
+				retainedSteers: false,
+			};
+		}
 		// Close unused reservations and return handoffs in one transaction,
 		// serialized against the claim UPDATE so the drain cannot steal them.
 		const { owners, retainedSteers } = yield* commit.write((project) =>
@@ -351,6 +381,10 @@ export const prepareStop = (input: ProviderTurnServiceInterruptInput) =>
 			WHERE turn.session_id = ${input.sessionId}
 				AND turn.run_id IN ${sql.in(owners.map(({ runId }) => runId))}`;
 		return {
+			deadlineAt,
+			runnerBacked:
+				account !== undefined &&
+				!PROVIDER_DRIVERS[account.driver].runsOpenCodeServer,
 			owners,
 			retainedSteers,
 			turnIds: [
@@ -372,17 +406,44 @@ export const interruptTurn = (
 		const sql = yield* SqlClient.SqlClient;
 
 		const engine = yield* OrchestrationEngineTag;
+		const [stored] = yield* sql<{
+			payload_json: string;
+		}>`SELECT payload_json FROM provider_command_outbox
+			WHERE command_id = ${input.commandId} AND session_id = ${input.sessionId}
+			AND effect_type IN ('interrupt_turn', 'end_session')`;
+		if (stored) {
+			const payload = yield* Effect.try({
+				try: () =>
+					Schema.decodeSync(
+						Schema.fromJsonString(ProviderControlPayloadSchema),
+					)(stored.payload_json),
+				catch: (cause) =>
+					new ProviderInstanceFailure({
+						providerId: "conduit",
+						operation: "recoverStop",
+						cause,
+					}),
+			});
+			yield* engine.dispatchEffect({ ...payload, commandId: input.commandId });
+			return;
+		}
 		const providerId = yield* engine.getProviderForSessionEffect(
 			input.sessionId,
 		);
 		const account = providerId
 			? yield* (yield* AccountDirectory).resolve({ _tag: "Id", id: providerId })
 			: undefined;
-		if (!account || PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
-			if (!(yield* interruptLegacyTurn(input))) return;
-		} else {
-			if (!PROVIDER_DRIVERS[account.driver].interruptViaEngine) return;
-			const [delivery] = yield* (yield* SqlClient.SqlClient)<{
+		const usesOpenCode =
+			!account || PROVIDER_DRIVERS[account.driver].runsOpenCodeServer;
+		if (
+			account &&
+			!usesOpenCode &&
+			!PROVIDER_DRIVERS[account.driver].interruptViaEngine
+		)
+			return;
+		const fullStop =
+			!usesOpenCode &&
+			(yield* sql<{
 				indeterminate: number;
 			}>`
 				SELECT EXISTS (SELECT 1 FROM provider_command_outbox command
@@ -390,34 +451,28 @@ export const interruptTurn = (
 					WHERE command.session_id = ${input.sessionId} AND command.effect_type = 'send_turn'
 					AND command.status = 'running' AND command.error_code = 'delivery_indeterminate'
 						AND run.id IN ${sql.in(snapshot.owners.map(({ runId }) => runId))}
-					AND run.status IN ('pending', 'running')) AS indeterminate`;
-			const fullStop = delivery?.indeterminate === 1;
-			const interruptResult = yield* Effect.result(
-				engine.dispatchEffect({
-					type: fullStop ? "end_session" : "interrupt_turn",
-					...(!fullStop && snapshot.turnIds.length > 0
-						? { turnIds: snapshot.turnIds }
-						: {}),
-					commandId: input.commandId,
-					sessionId: input.sessionId,
-				}),
-			);
-			if (interruptResult._tag === "Failure") {
-				log.warn(
-					`client=${input.clientId} session=${input.sessionId} engine interrupt_turn failed:`,
-					formatErrorDetail(interruptResult.failure),
-				);
-				return yield* Effect.fail(interruptResult.failure);
-			}
-			// An ordinary turn interrupt keeps the Claude SDK's pending steer alive.
-			if (!fullStop) return;
-		}
-		const ingestion = yield* ProviderRuntimeIngestionTag;
-		yield* settleSessionRuns(
-			sql,
-			input.sessionId,
-			"Stopped by the user",
-			(events) => ingestion.ingestBatch(events),
-			{ owners: snapshot.owners },
+					AND run.status IN ('pending', 'running')) AS indeterminate`)[0]
+				?.indeterminate === 1;
+		const interruptResult = yield* Effect.result(
+			engine.dispatchEffect({
+				type: fullStop ? "end_session" : "interrupt_turn",
+				...(!fullStop ? { turnIds: snapshot.turnIds } : {}),
+				commandId: input.commandId,
+				sessionId: input.sessionId,
+				stop: snapshot,
+			}),
 		);
+		const processGone =
+			interruptResult._tag === "Failure" &&
+			interruptResult.failure._tag === "ProviderInstanceFailure" &&
+			interruptResult.failure.code === "provider_process_gone";
+		if (interruptResult._tag === "Failure" && !processGone) {
+			log.warn(
+				`client=${input.clientId} session=${input.sessionId} engine interrupt_turn failed:`,
+				formatErrorDetail(interruptResult.failure),
+			);
+			return yield* Effect.fail(interruptResult.failure);
+		}
+		// Acknowledgement confirms delivery. Terminals and the runner's
+		// confirmed-exit path own settlement, including a full Stop.
 	});

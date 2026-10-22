@@ -431,6 +431,7 @@ export function createClaudeTraceReplayer(
 				played += 1;
 				const turn = played;
 				let heldBeforeToolResult = false;
+				let resultDelivered = false;
 				interrupted = false;
 				aborted = new AbortController();
 				const current: NonNullable<typeof playing> = {
@@ -551,6 +552,7 @@ export function createClaudeTraceReplayer(
 						message.parent_tool_use_id != null
 					)
 						continue;
+					if (message.type === "result") resultDelivered = true;
 					yield plan.failTurns?.includes(turn - 1) &&
 					message.type === "result" &&
 					message.subtype === "success"
@@ -596,6 +598,32 @@ export function createClaudeTraceReplayer(
 							},
 						);
 				}
+				if (interrupted && !closed.signal.aborted && !resultDelivered)
+					// Like the SDK's resumable query, interrupt() ends this input
+					// with a native result while leaving the prompt stream open.
+					yield decodeClaudeSDKMessage({
+						type: "result",
+						subtype: "error_during_execution",
+						uuid: randomUUID(),
+						session_id: querySessionId,
+						is_error: true,
+						errors: ["Execution ended"],
+						duration_ms: 0,
+						duration_api_ms: 0,
+						num_turns: 1,
+						stop_reason: null,
+						total_cost_usd: 0,
+						usage: {
+							input_tokens: 0,
+							output_tokens: 0,
+							cache_creation_input_tokens: 0,
+							cache_read_input_tokens: 0,
+						},
+						modelUsage: {},
+						permission_denials: [],
+						user_message_uuid: current.sentIds[0],
+						user_message_uuids: current.sentIds,
+					});
 				playing = undefined;
 				if (plan.endAfterTrace) return;
 			}
@@ -603,9 +631,8 @@ export function createClaudeTraceReplayer(
 
 		return Object.assign(replay(), {
 			// A trace's recorded interrupt is answered with the receipt it implies.
-			// Otherwise Stop mid-turn drops the rest of a one-input trace: the
-			// runtime persists turn.interrupted itself and ignores any
-			// post-interrupt result, so no SDK error result is synthesized here.
+			// Otherwise Stop mid-turn replaces the rest of a one-input trace
+			// with the SDK's interrupted result. The receipt alone is not terminal.
 			interrupt: async (): Promise<SDKControlInterruptResponse | undefined> => {
 				const current = playing;
 				if (current && current.asked < current.trace.interrupts) {

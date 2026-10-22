@@ -501,18 +501,6 @@ function startSseConsumers(
 	} = services;
 	return Effect.gen(function* () {
 		const terminal = yield* OpenCodeTerminalServiceTag;
-		const workspace = yield* SessionWorkspaceTag;
-		const instances = yield* OpenCodeInstancesTag;
-		const replyPermission =
-			(instanceId: string) =>
-			(sessionId: string, permissionId: string, response: "once") =>
-				Effect.gen(function* () {
-					const directory = yield* workspace.get(sessionId);
-					const client = yield* instances.use(instanceId, directory);
-					yield* Effect.tryPromise(() =>
-						client.permission.reply(sessionId, permissionId, response),
-					);
-				}).pipe(Effect.scoped);
 		const sseConsumerDeps = {
 			translator,
 			wsHandler,
@@ -521,7 +509,6 @@ function startSseConsumers(
 			}),
 			log: sseLog,
 			pipelineLog,
-			replyPermission: replyPermission(MANAGED_OPENCODE_ACCOUNT_ID),
 			statusPoller,
 			slug: config.slug,
 			providerInstanceId: MANAGED_OPENCODE_ACCOUNT_ID,
@@ -543,7 +530,6 @@ function startSseConsumers(
 					{
 						...sseConsumerDeps,
 						providerInstanceId: instanceId,
-						replyPermission: replyPermission(instanceId),
 					},
 					stream,
 				);

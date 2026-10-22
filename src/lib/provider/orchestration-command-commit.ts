@@ -58,6 +58,7 @@ export class DurableCommandCommitRepository {
 					{
 						providerProcessId: payload.providerProcessId,
 						...(payload.turnIds ? { turnIds: payload.turnIds } : {}),
+						...(payload.stop ? { stop: payload.stop } : {}),
 					},
 					opts,
 				);
@@ -66,7 +67,13 @@ export class DurableCommandCommitRepository {
 				event = canonicalEvent(
 					"session.end_requested",
 					payload.sessionId,
-					{ providerProcessId: payload.providerProcessId },
+					{
+						providerProcessId: payload.providerProcessId,
+						...(payload.stop ? { stop: payload.stop } : {}),
+						...(payload.retireRunIds
+							? { retireRunIds: payload.retireRunIds }
+							: {}),
+					},
 					opts,
 				);
 				break;

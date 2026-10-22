@@ -109,6 +109,7 @@ import {
 	removeProjectFromEffectRegistry,
 	saveProject,
 } from "../Services/project-registry-service.js";
+import { ProviderAdapters } from "../Services/provider-adapters.js";
 import {
 	makeRelayCacheService,
 	type RelayCache,
@@ -344,11 +345,14 @@ export const makePortScannerLive = (
 export const DaemonWiringLive: Layer.Layer<
 	never,
 	never,
-	DaemonEventBusTag | ConfigPersistenceTag
+	DaemonEventBusTag | ConfigPersistenceTag | ProviderAdapters
 > = Layer.effectDiscard(
 	Effect.gen(function* () {
 		const bus = yield* DaemonEventBusTag;
 		const persistence = yield* ConfigPersistenceTag;
+		const adapters = yield* ProviderAdapters;
+		// Drain native terminals while project borrows and their sinks remain live.
+		yield* Effect.addFinalizer(() => adapters.registry.shutdownAllEffect());
 		const sub = yield* PubSub.subscribe(bus);
 
 		yield* Effect.forkScoped(

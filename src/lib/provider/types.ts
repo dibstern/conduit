@@ -53,9 +53,18 @@ export interface PermissionResponse {
 export interface ProviderControlContext {
 	readonly commandId: string;
 	readonly providerProcessId: string;
+	/** Conditional End for the original Stop cohort only. */
+	readonly retireRunIds?: readonly string[];
 	readonly response?: PermissionResponse;
 	readonly operation?: "reply" | "reject";
 }
+
+export type ProviderControlCommandStatus =
+	| "not_received"
+	| "running"
+	| "completed"
+	| "failed"
+	| "gone";
 
 export interface QuestionRequest {
 	readonly requestId: string;
@@ -387,6 +396,17 @@ export interface ProviderNativeSession {
  * - No streamEvents -- instance pushes via EventSink, no output stream needed
  */
 export interface ProviderInstance {
+	/** Liveness includes quarantined runners that cannot accept controls. */
+	readonly hasLiveProcessEffect?: (sessionId: string) => Effect.Effect<boolean>;
+	/** Process identity captured without starting work; refuses unavailable sessions. */
+	readonly getControlProcessIdEffect?: (
+		sessionId: string,
+	) => Effect.Effect<string | undefined, ProviderInstanceFailure>;
+	/** Reconcile a committed command on its original process without starting work. */
+	readonly getControlCommandStatusEffect?: (
+		sessionId: string,
+		control: ProviderControlContext,
+	) => Effect.Effect<ProviderControlCommandStatus, ProviderInstanceFailure>;
 	/** Unique identifier for this provider (e.g. "opencode", "claude") */
 	readonly providerId: string;
 	/** Native identity used for a locally placed input before provider acceptance. */

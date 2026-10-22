@@ -450,6 +450,9 @@ describe("prompt processing timeouts through Effect state", () => {
 		"clears the processing timeout when the active prompt is cancelled",
 		() => {
 			const ws = makeWsHandler();
+			const engine = withDispatchEffect({
+				dispatchEffect: vi.fn(() => Effect.void),
+			});
 			const client = makeHandlerOpenCodeAPI({
 				session: { abort: vi.fn(async () => undefined) },
 			});
@@ -477,7 +480,7 @@ describe("prompt processing timeouts through Effect state", () => {
 				makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
 				Layer.succeed(AgentServiceTag)(makeMockAgentService()),
 				Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
-				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({})),
+				Layer.succeed(OrchestrationEngineTag)(engine),
 			);
 			const layer = Layer.provideMerge(
 				Layer.provideMerge(
@@ -502,6 +505,20 @@ describe("prompt processing timeouts through Effect state", () => {
 				yield* cancelSessionById("client-1", "session-1", "cmd-cancel-test");
 
 				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
+				expect(engine.dispatchEffect).toHaveBeenCalledExactlyOnceWith({
+					type: "interrupt_turn",
+					commandId: "cmd-cancel-test",
+					sessionId: "session-1",
+					turnIds: [],
+					stop: {
+						deadlineAt: 30_000,
+						owners: [],
+						turnIds: [],
+						runnerBacked: false,
+						retainedSteers: false,
+					},
+				});
+				expect(client.session.abort).not.toHaveBeenCalled();
 			}).pipe(
 				Effect.provide(PassThroughSessionInbox, { local: true }),
 				Effect.provide(layer, { local: true }),

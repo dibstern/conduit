@@ -342,7 +342,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 			...(scenario === "uncommitted-ask"
 				? { holdRunnerOutput: "permission-request" as const }
 				: scenario === "committed-answer"
-					? { holdRunnerOutput: "answer-permission" as const }
+					? { holdRunnerOutput: "resolve-permission" as const }
 					: {}),
 		});
 		harnesses.push(harness);
@@ -357,8 +357,10 @@ describe("Claude runners survive server replacement through built dist", () => {
 				: await before.waitFor(
 						(message) => message["type"] === "permission_pending",
 					);
-		if (scenario === "committed-answer" && request)
-			await before.answerApproval(request, "allow_always");
+		const committedAnswer =
+			scenario === "committed-answer" && request
+				? before.answerApproval(request, "allow_always").catch(() => undefined)
+				: undefined;
 		if (scenario === "uncommitted-ask" || scenario === "committed-answer")
 			await vi.waitFor(
 				() =>
@@ -375,6 +377,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 			await harness.waitForExit();
 		} else await harness.kill();
 		await pending;
+		await committedAnswer;
 		expect(existsSync(runner.socketPath)).toBe(true);
 		await harness.restart();
 		const after = await harness.connect(sessionId);
@@ -613,8 +616,25 @@ describe("Claude runners survive server replacement through built dist", () => {
 			// settles, reproducing a server that missed the runner's final reply.
 			await Effect.runPromise(
 				direct
-					.commandEffect(randomUUID(), { type: "end-session", sessionId })
+					.commandEffect(randomUUID(), { type: "interrupt", sessionId })
 					.pipe(Effect.timeout("15 seconds")),
+			);
+			// Interrupt acknowledgement alone is not a terminal. Keep the same
+			// runner alive and wait for its native result to reach the replay spool.
+			await vi.waitFor(() =>
+				expect(
+					readFileSync(`${runner.socketPath}.spool`, "utf8")
+						.split("\n")
+						.filter(Boolean)
+						.some((line) => {
+							const message = JSON.parse(line) as RunnerMessage;
+							return (
+								message.type === "output" &&
+								message.output.type === "event" &&
+								message.output.event.type === "turn.interrupted"
+							);
+						}),
+				).toBe(true),
 			);
 			cachedIntake = await Effect.runPromise(
 				Effect.result(

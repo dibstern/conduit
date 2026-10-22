@@ -55,6 +55,17 @@ function snapshot(harness: ProcessHarness, sessionId: string) {
 					"SELECT status FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
 				)
 				.all(sessionId),
+			ends: db
+				.prepare(
+					"SELECT outbox.command_id, outbox.provider_process_id, outbox.status, outbox.attempt_count, receipt.status AS receipt_status FROM provider_command_outbox outbox JOIN command_receipts receipt ON receipt.command_id = outbox.command_id AND receipt.project_key = outbox.project_key WHERE outbox.session_id = ? AND outbox.effect_type = 'end_session' ORDER BY outbox.request_sequence",
+				)
+				.all(sessionId) as Array<{
+				command_id: string;
+				provider_process_id: string;
+				status: string;
+				attempt_count: number;
+				receipt_status: string;
+			}>,
 			runReservations: (
 				db
 					.prepare(
@@ -446,9 +457,15 @@ describe("Claude runner admission socket probes", () => {
 						Effect.timeout("6 seconds"),
 					);
 					expect(ended).toMatchObject({
-						_tag: "Failure",
-						failure: { code: "runner_idle_exit" },
+						_tag: "Success",
 					});
+					// End succeeds only after the old process has actually stopped.
+					expect(testRunnerAlive(fixture.child.pid ?? 0)).toBe(false);
+					expect(fixture.commands).toEqual([
+						"send-turn",
+						"end-session",
+						"shutdown",
+					]);
 					expect(
 						(yield* Fiber.join(send).pipe(Effect.timeout("10 seconds"))).status,
 					).toBe("accepted");
@@ -887,32 +904,107 @@ describe("built-dist Claude runner lifecycle", () => {
 		});
 		const first = browser.send(sessionId, "before-interrupted-end");
 		void first.catch(() => undefined);
-		await harness.waitForMark((mark) => mark.kind === "runner-hello-pending");
-		const controller = new AbortController();
-		const reload = browser.reloadSession(sessionId, controller.signal).then(
-			() => "completed",
-			() => "interrupted",
+		const hello = await harness.waitForMark(
+			(mark) => mark.kind === "runner-hello-pending",
 		);
-		await harness.waitForMark(
-			(mark) =>
-				mark.kind === "runner-end-selected" && mark.sessionId === sessionId,
-		);
-		controller.abort();
-		expect(await reload).toBe("interrupted");
+		if (hello.kind !== "runner-hello-pending") throw new Error("Missing hello");
+		// Keep readiness blocked while the RPC abort and durable reads run,
+		// independent of how long this loaded machine takes to schedule them.
+		process.kill(hello.pid, "SIGSTOP");
+		let ends: ReturnType<typeof snapshot>["ends"];
+		try {
+			const controller = new AbortController();
+			const reload = browser.reloadSession(sessionId, controller.signal).then(
+				() => "completed",
+				() => "interrupted",
+			);
+			await harness.waitForMark(
+				(mark) =>
+					mark.kind === "runner-end-selected" && mark.sessionId === sessionId,
+			);
+			controller.abort();
+			expect(await reload).toBe("interrupted");
+			// Interrupting the RPC detaches its waiter; the accepted End still owns
+			// admission while it waits for this runner's hello.
+			ends = snapshot(harness, sessionId).ends;
+			expect(ends).toEqual([
+				{
+					command_id: expect.any(String),
+					provider_process_id: expect.any(String),
+					status: "running",
+					attempt_count: 1,
+					receipt_status: "side_effect_requested",
+				},
+			]);
+			expect(
+				harness.marks.filter(
+					(mark) =>
+						mark.kind === "runner-command" && mark.type === "end-session",
+				),
+			).toEqual([]);
+		} finally {
+			process.kill(hello.pid, "SIGCONT");
+		}
 		expect((await first).done["status"]).toBe("idle");
+		const firstCompleted = snapshot(harness, sessionId).events.some(
+			(event) => event.type === "turn.completed",
+		);
 		const runner = started(harness);
+		expect(runner.socketPath.endsWith(`/${ends[0]?.provider_process_id}`)).toBe(
+			true,
+		);
 		const next = await browser.send(sessionId, "after-interrupted-end");
 		expect(next.done["status"]).toBe("idle");
 		expect(next.chunks.join("")).toBe(
 			responseChunks("after-interrupted-end").join(""),
 		);
-		expect(started(harness).pid).toBe(runner.pid);
-		await waitFor(harness, () =>
-			expect(snapshot(harness, sessionId).commands).toEqual([
+		expect(started(harness).pid).not.toBe(runner.pid);
+		expect(() => process.kill(runner.pid, 0)).toThrow();
+		expect(existsSync(runner.socketPath)).toBe(false);
+		expect(() => process.kill(started(harness).pid, 0)).not.toThrow();
+		await waitFor(harness, () => {
+			const state = snapshot(harness, sessionId);
+			expect(state.ends).toEqual([
+				{
+					...ends[0],
+					status: "completed",
+					receipt_status: "side_effect_completed",
+				},
+			]);
+			expect(state.commands).toEqual([
+				{ status: firstCompleted ? "completed" : "failed" },
 				{ status: "completed" },
-				{ status: "completed" },
-			]),
-		);
+			]);
+			expect(state.receipts).toEqual([
+				{
+					status: firstCompleted
+						? "side_effect_completed"
+						: "side_effect_failed",
+				},
+				{ status: "side_effect_completed" },
+			]);
+			expect(state.turns).toEqual([
+				{ state: firstCompleted ? "completed" : "error" },
+				{ state: "completed" },
+			]);
+			expect(state.session).toEqual({ status: "idle" });
+			expect(state.queued).toEqual([]);
+		});
+		expect(
+			harness.marks.filter(
+				(mark) => mark.kind === "runner-command" && mark.type === "end-session",
+			),
+		).toEqual([expect.objectContaining({ commandId: ends[0]?.command_id })]);
+		expect(
+			snapshot(harness, sessionId).events.filter(
+				(event) => event.type === "session.end_requested",
+			),
+		).toEqual([
+			{
+				type: "session.end_requested",
+				data: { providerProcessId: ends[0]?.provider_process_id },
+			},
+		]);
 	});
 
 	it("respawns transparently for a send racing idle exit admission", async () => {

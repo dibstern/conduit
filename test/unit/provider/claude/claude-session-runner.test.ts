@@ -22,6 +22,7 @@ import type {
 } from "../../../../src/lib/provider/runner/session-runner.js";
 import {
 	createMockQuery,
+	makeErrorResult,
 	makeSuccessResult,
 } from "../../../helpers/mock-sdk.js";
 
@@ -345,7 +346,7 @@ describe("in-process Claude session runner", () => {
 						} else {
 							await Effect.runPromise(Deferred.succeed(secondTurn, undefined));
 							await Effect.runPromise(Deferred.await(stop));
-							return;
+							yield makeErrorResult({ errors: ["Interrupted"] });
 						}
 					}
 				})();

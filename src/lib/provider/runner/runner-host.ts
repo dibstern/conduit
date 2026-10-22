@@ -1,6 +1,6 @@
-import { appendFileSync, chmodSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync } from "node:fs";
 import { createServer } from "node:net";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { Deferred, Effect, FiberSet, Scope } from "effect";
 import * as Failure from "../../effect/failure-classification.js";
 import { createLogger } from "../../logger.js";
@@ -519,6 +519,36 @@ export const runSessionRunner = (
 					} else if (message.type === "upgrade-activate") {
 						role = undefined;
 						register();
+					} else if (message.type === "command-status" && greeted && runner) {
+						runFork(
+							Effect.gen(function* () {
+								if (process.env["NODE_ENV"] === "test") {
+									const gate = join(
+										dirname(socketPath),
+										"conduit-test-hold-command-status-reply",
+									);
+									const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
+									if (existsSync(gate) && proof)
+										appendFileSync(
+											proof,
+											`${JSON.stringify({ kind: "runner-command-status-held", commandId: message.commandId, runnerId })}\n`,
+										);
+									while (existsSync(gate)) yield* Effect.sleep("20 millis");
+								}
+								const completed = completedCommands.get(message.commandId);
+								peer.write({
+									type: "command-status-reply",
+									requestId: message.requestId,
+									result: completed
+										? completed.failure
+											? "failed"
+											: "completed"
+										: commands.has(`${message.commandId}:0`)
+											? "running"
+											: "not_received",
+								});
+							}),
+						);
 					} else if (message.type === "command" && runner) {
 						const command = message.command;
 						if (exiting || retirementInputId !== undefined) {
@@ -580,6 +610,15 @@ export const runSessionRunner = (
 									SessionFailure
 								>();
 								commands.set(deduplicationKey, result);
+								const proof =
+									process.env["NODE_ENV"] === "test"
+										? process.env["CONDUIT_TEST_PROCESS_PROOF"]
+										: undefined;
+								if (proof && command.control)
+									appendFileSync(
+										proof,
+										`${JSON.stringify({ kind: "runner-control", commandId: message.commandId, type: command.type, runnerId })}\n`,
+									);
 								if (!runner)
 									return yield* Effect.die("Runner is not initialized");
 								const execution = launch.executeEffect(runner, command);
@@ -605,7 +644,19 @@ export const runSessionRunner = (
 								),
 								Effect.matchCauseEffect({
 									onFailure: (cause) =>
-										Effect.sync(() => {
+										Effect.gen(function* () {
+											if (
+												process.env["NODE_ENV"] === "test" &&
+												command.type === "end-session" &&
+												command.control?.retireRunIds
+											) {
+												const gate = join(
+													dirname(socketPath),
+													"conduit-test-hold-retirement-reply",
+												);
+												while (existsSync(gate))
+													yield* Effect.sleep("20 millis");
+											}
 											completedCommands.set(message.commandId, {
 												commandId: message.commandId,
 												failure: runnerFailure(
@@ -637,6 +688,25 @@ export const runSessionRunner = (
 												commandId: message.commandId,
 												...(result ? { result } : {}),
 											});
+											if (
+												process.env["NODE_ENV"] === "test" &&
+												(command.type === "resolve-permission" ||
+													command.type === "resolve-question")
+											) {
+												const gate = join(
+													dirname(socketPath),
+													"conduit-test-hold-answer-reply",
+												);
+												const held = existsSync(gate);
+												while (existsSync(gate))
+													yield* Effect.sleep("20 millis");
+												const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
+												if (held && proof)
+													appendFileSync(
+														proof,
+														`${JSON.stringify({ kind: "runner-answer-reply-released", commandId: message.commandId, runnerId })}\n`,
+													);
+											}
 											reportUpgradeState();
 											connection?.write({
 												type: "command-reply",

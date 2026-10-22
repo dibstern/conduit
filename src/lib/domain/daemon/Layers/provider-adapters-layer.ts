@@ -141,8 +141,13 @@ export const makeProviderAdaptersLive = (
 									project.context,
 									sessionId,
 								),
-								retirePrompts: (currentProcessId: string | null) =>
-									retire(currentProcessId, { sessionId }).pipe(
+								retirePrompts: (
+									currentProcessId: string | null,
+									options?: Parameters<
+										RunnerRecoveryDependencies["retirePrompts"]
+									>[1],
+								) =>
+									retire(currentProcessId, { sessionId, ...options }).pipe(
 										Effect.provideService(
 											PendingInteractionServiceTag,
 											pending,

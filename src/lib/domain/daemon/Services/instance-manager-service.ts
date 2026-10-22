@@ -708,7 +708,7 @@ export const discoverInstances = Effect.gen(function* () {
 							result.failure.cause instanceof Error
 								? result.failure.cause.message
 								: "Provider discovery failed",
-						...(result.failure.code
+						...(result.failure.code === "auth_required"
 							? { unavailableCode: result.failure.code }
 							: {}),
 					},

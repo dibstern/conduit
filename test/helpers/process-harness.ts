@@ -231,6 +231,7 @@ export class ProcessHarness {
 			| "permission-request"
 			| "question-request"
 			| "answer-permission"
+			| "resolve-permission"
 			| "send-turn",
 		private buildId?: string,
 		private readonly upgradeSinkProof = false,
@@ -598,6 +599,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 				| "permission-request"
 				| "question-request"
 				| "answer-permission"
+				| "resolve-permission"
 				| "send-turn";
 			buildId?: string;
 			upgradeSinkProof?: boolean;

@@ -4,7 +4,7 @@ import { createInterface } from "node:readline";
 import { Effect } from "effect";
 import { BUILD_ID } from "../../build-id.js";
 import { isRecord } from "../../utils.js";
-import type { TurnResult } from "../types.js";
+import type { ProviderControlCommandStatus, TurnResult } from "../types.js";
 import type { RunnerUpgradeState } from "./runner-upgrade.js";
 import type {
 	SessionCommand,
@@ -107,6 +107,12 @@ export interface RunnerHello {
 
 type RunnerReply =
 	| {
+			readonly type: "command-status-reply";
+			readonly requestId: string;
+			readonly result: Exclude<ProviderControlCommandStatus, "gone">;
+			readonly failure?: SessionFailure;
+	  }
+	| {
 			readonly type: "thread-read-reply";
 			readonly requestId: string;
 			readonly result: ThreadReadResult;
@@ -134,6 +140,11 @@ type RunnerReply =
 
 export type RunnerMessage =
 	| RunnerHello
+	| {
+			readonly type: "command-status";
+			readonly requestId: string;
+			readonly commandId: string;
+	  }
 	| {
 			readonly type: "thread-read";
 			readonly requestId: string;
@@ -286,16 +297,19 @@ export class RunnerSocket {
 					message.type === "command-reply" ||
 					message.type === "output-reply" ||
 					message.type === "upgrade-reply" ||
+					message.type === "command-status-reply" ||
 					message.type === "thread-read-reply"
 				) {
 					const key =
-						message.type === "thread-read-reply"
-							? `thread-read:${message.requestId}`
-							: message.type === "upgrade-reply"
-								? `upgrade:${message.requestId}`
-								: message.type === "command-reply"
-									? `command:${message.commandId}`
-									: `output:${message.outputId}`;
+						message.type === "command-status-reply"
+							? `command-status:${message.requestId}`
+							: message.type === "thread-read-reply"
+								? `thread-read:${message.requestId}`
+								: message.type === "upgrade-reply"
+									? `upgrade:${message.requestId}`
+									: message.type === "command-reply"
+										? `command:${message.commandId}`
+										: `output:${message.outputId}`;
 					const reply = this.pending.get(key);
 					if (reply) reply.reply(message);
 					else onMessage(message);
@@ -377,6 +391,20 @@ export class RunnerSocket {
 			commandId,
 			command,
 			...(attempt !== undefined ? { attempt } : {}),
+		});
+	}
+
+	commandStatusEffect(
+		commandId: string,
+	): Effect.Effect<
+		Exclude<ProviderControlCommandStatus, "gone">,
+		SessionFailure
+	> {
+		const requestId = randomUUID();
+		return this.requestEffect(`command-status:${requestId}`, {
+			type: "command-status",
+			requestId,
+			commandId,
 		});
 	}
 

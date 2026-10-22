@@ -1,9 +1,5 @@
 import { Effect } from "effect";
 import type { SqlClient } from "effect/sql";
-import type {
-	PermissionResolvedPayload,
-	QuestionResolvedPayload,
-} from "../../contracts/stored-event.js";
 import {
 	PendingInteractionCancelled,
 	type PendingInteractionService,
@@ -14,7 +10,6 @@ import {
 	createRelayEventSink,
 	type RelayEventSinkDeps,
 } from "../relay-event-sink.js";
-import type { PermissionResponse } from "../types.js";
 
 /** Restore live waiters without appending interactions already in the store. */
 export const makeRecoveredEventSink = (options: {
@@ -40,25 +35,6 @@ export const makeRecoveredEventSink = (options: {
 			beginPermissionRequest: (request) =>
 				Effect.gen(function* () {
 					const waiter = yield* pending.beginPermissionRequest(request);
-					const resolved = yield* sql<{
-						data: string;
-					}>`SELECT data FROM events WHERE session_id = ${sessionId} AND type = 'permission.resolved' AND json_extract(data, '$.id') = ${request.requestId}
-						AND json_extract(metadata, '$.source') IS NOT 'conduit.control-outbox' ORDER BY sequence DESC LIMIT 1`;
-					if (resolved[0]) {
-						const stored = JSON.parse(
-							resolved[0].data,
-						) as PermissionResolvedPayload;
-						const replies = yield* sql<{
-							response_json: string;
-						}>`SELECT response_json FROM claude_runner_permission_replies WHERE session_id = ${sessionId} AND request_id = ${request.requestId}`;
-						const response = replies[0]
-							? (JSON.parse(replies[0].response_json) as PermissionResponse)
-							: { decision: stored.decision };
-						yield* pending.resolvePermissionRequest(
-							request.requestId,
-							response,
-						);
-					}
 					const [row] = yield* sql<{
 						provider_request_id: string | null;
 					}>`SELECT provider_request_id FROM pending_approvals WHERE id = ${request.requestId} AND session_id = ${sessionId}`;
@@ -72,19 +48,6 @@ export const makeRecoveredEventSink = (options: {
 			beginQuestionRequest: (request) =>
 				Effect.gen(function* () {
 					const waiter = yield* pending.beginQuestionRequest(request);
-					const resolved = yield* sql<{
-						data: string;
-					}>`SELECT data FROM events WHERE session_id = ${sessionId} AND type = 'question.resolved' AND json_extract(data, '$.id') = ${request.requestId}
-						AND json_extract(metadata, '$.source') IS NOT 'conduit.control-outbox' ORDER BY sequence DESC LIMIT 1`;
-					if (resolved[0]) {
-						const response = JSON.parse(
-							resolved[0].data,
-						) as QuestionResolvedPayload;
-						yield* pending.resolveQuestionRequest(
-							request.requestId,
-							response.answers,
-						);
-					}
 					const [row] = yield* sql<{
 						provider_request_id: string | null;
 					}>`SELECT provider_request_id FROM pending_approvals WHERE id = ${request.requestId} AND session_id = ${sessionId}`;

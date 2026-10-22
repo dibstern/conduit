@@ -40,6 +40,11 @@ function ownership(harness: ProcessHarness, sessionId: string) {
 					"SELECT command_id, status, run_id FROM provider_command_outbox WHERE session_id = ? ORDER BY request_sequence",
 				)
 				.all(sessionId),
+			receipts: db
+				.prepare(
+					"SELECT command_id, status FROM command_receipts WHERE session_id = ? ORDER BY command_id",
+				)
+				.all(sessionId),
 			inputs: db
 				.prepare(
 					"SELECT input_id, state FROM pending_inputs WHERE session_id = ? ORDER BY input_id",

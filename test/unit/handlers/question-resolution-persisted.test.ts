@@ -11,7 +11,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Layer, Schema, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
@@ -23,13 +23,14 @@ import {
 } from "../../../src/lib/domain/relay/Services/input-drafts.js";
 import {
 	PendingInteractionServiceLive,
-	type PendingInteractionServiceTag,
+	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import type { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
+	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
@@ -44,6 +45,7 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
 	handleAskUserResponse,
+	handlePermissionResponse,
 	handleQuestionReject,
 } from "../../../src/lib/handlers/permissions.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
@@ -56,10 +58,19 @@ import {
 import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/projectors-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { OpenCodeRuntimeEventTranslator } from "../../../src/lib/provider/opencode/opencode-runtime-event-translator.js";
+import type { OrchestrationCommand } from "../../../src/lib/provider/orchestration-engine.js";
+import {
+	ProviderRegistry,
+	ProviderRegistryTag,
+} from "../../../src/lib/provider/provider-registry.js";
 import {
 	emptyProviderRuntimeDomainMapperState,
 	translateProviderRuntimeEventToDomain,
 } from "../../../src/lib/provider/provider-runtime-event-to-domain.js";
+import {
+	PermissionId,
+	type ProviderPermissionUpdate,
+} from "../../../src/lib/shared-types.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	makeMockAgentService,
@@ -68,6 +79,7 @@ import {
 	NoopProviderRuntimeIngestionLive,
 	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
+import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 const SESSION = "session-1";
 const QUESTION = "que-1";
@@ -104,6 +116,7 @@ type HandlerStack =
 	| ProviderTurnServiceTag
 	| ProviderRuntimeIngestionTag
 	| OverridesStateTag
+	| ProviderRegistryTag
 	| SessionInboxTag;
 
 const withHandlerStack = async (
@@ -143,6 +156,7 @@ const withHandlerStack = async (
 		Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()),
 		Layer.succeed(AgentServiceTag)(makeMockAgentService()),
 		NoopProviderRuntimeIngestionLive,
+		Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()),
 		Layer.succeed(ProviderTurnServiceTag)({
 			holdUserTurnsForAccountSwitch: () => Effect.void,
 			prepareTurnSession: (input) => Effect.succeed(input.sessionId),
@@ -192,6 +206,114 @@ const withHandlerStack = async (
 		rmSync(dir, { recursive: true, force: true });
 	}
 };
+
+for (const action of [
+	"answer",
+	"reject",
+	"permission",
+	"recovered-permission",
+] as const) {
+	it(`dispatches a persisted ${action} through the engine without releasing its waiter`, async () => {
+		const client = makeHandlerOpenCodeAPI();
+		const commands: OrchestrationCommand[] = [];
+		const suggestions: ProviderPermissionUpdate[] = [
+			{ type: "setMode", mode: "acceptEdits", destination: "session" },
+			{ type: "setMode", mode: "acceptEdits", destination: "userSettings" },
+		];
+		const engine = withDispatchEffect({
+			dispatchEffect: (command: OrchestrationCommand) =>
+				Effect.sync(() => void commands.push(command)),
+			getProviderForSessionEffect: () => Effect.succeed("opencode"),
+		});
+		await withHandlerStack(client, () =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const pending = yield* PendingInteractionServiceTag;
+				const permission =
+					action === "permission" || action === "recovered-permission";
+				if (permission) {
+					yield* sql`DELETE FROM pending_approvals WHERE id = ${QUESTION}`;
+					const commit = yield* makeCommitAndSignal;
+					yield* commit([
+						canonicalEvent("permission.asked", SESSION, {
+							id: QUESTION,
+							sessionId: SESSION,
+							toolName: "Bash",
+							input: {},
+							permissionSuggestions: suggestions,
+						}),
+					]);
+					if (action === "permission")
+						yield* pending.beginPermissionRequest({
+							requestId: Schema.decodeUnknownSync(PermissionId)(QUESTION),
+							sessionId: SESSION,
+							toolName: "Bash",
+							toolInput: {},
+							permissionSuggestions: suggestions,
+						});
+				} else {
+					yield* pending.beginQuestionRequest({
+						requestId: QUESTION,
+						sessionId: SESSION,
+						questions: [{ question: "which?" }],
+					});
+				}
+				yield* sql`UPDATE pending_approvals SET provider_process_id = 'opencode:original', provider_request_id = 'native-1' WHERE id = ${QUESTION}`;
+				const response: Effect.Effect<
+					void,
+					unknown,
+					HandlerStack | OrchestrationEngineTag | ProviderRegistryTag
+				> = permission
+					? handlePermissionResponse("client-1", {
+							requestId: Schema.decodeUnknownSync(PermissionId)(QUESTION),
+							commandId: "answer-command",
+							decision: "allow_always",
+							permissionDestination: "session",
+						})
+					: action === "reject"
+						? handleQuestionReject("client-1", {
+								toolId: QUESTION,
+								commandId: "answer-command",
+							})
+						: handleAskUserResponse("client-1", {
+								toolId: QUESTION,
+								commandId: "answer-command",
+								answers: { "0": "Yes" },
+							});
+				yield* response.pipe(
+					Effect.provideService(OrchestrationEngineTag, engine),
+				);
+				expect(commands).toEqual([
+					expect.objectContaining({
+						type: permission ? "resolve_permission" : "resolve_question",
+						commandId: "answer-command",
+						sessionId: SESSION,
+						requestId: QUESTION,
+						nativeRequestId: "native-1",
+						providerProcessId: "opencode:original",
+						...(permission
+							? {
+									decision: "always",
+									response: {
+										decision: "always",
+										permissionUpdates: [suggestions[0]],
+									},
+								}
+							: {}),
+						...(action === "reject" ? { operation: "reject" } : {}),
+					}),
+				]);
+				expect(client.question.reply).not.toHaveBeenCalled();
+				expect(client.question.reject).not.toHaveBeenCalled();
+				expect(
+					permission
+						? (yield* pending.listPendingPermissions()).length
+						: (yield* pending.listPendingQuestions()).length,
+				).toBe(action === "recovered-permission" ? 0 : 1);
+			}),
+		);
+	});
+}
 
 it("answering an OpenCode question resolves the row and announces the advance", async () => {
 	const client = makeHandlerOpenCodeAPI({

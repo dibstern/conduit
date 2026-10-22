@@ -60,8 +60,8 @@
 // 17. Unrecorded interrupt: interrupt() arrives during a trace that records
 //    several inputs or an interrupt, and the trace has no further interrupt to
 //    answer it with. interrupt() rejects AND assertComplete() throws. A
-//    one-input trace with no recorded interrupt keeps the synthesized stop
-//    (interrupt() drops the rest of the trace) that Stop scenarios rely on.
+//    one-input trace with no recorded interrupt emits the SDK's interrupted
+//    result for that input before accepting the next prompt.
 //
 // Also pinned: per-message delay, interrupt() ending the current trace, and
 // interrupt() answered with the receipt a trace records.
@@ -700,11 +700,19 @@ describe("createClaudeTraceReplayer", () => {
 		});
 		const iterator = query[Symbol.asyncIterator]();
 
-		prompts.push("interrupted");
+		const inputId = "00000000-0000-4000-8000-000000000001";
+		prompts.push("interrupted", inputId);
 		const first = await iterator.next();
 		expect(first.done).toBe(false);
 		await query.interrupt();
 		prompts.push("next");
+		expect((await iterator.next()).value).toMatchObject({
+			type: "result",
+			subtype: "error_during_execution",
+			is_error: true,
+			user_message_uuid: inputId,
+			user_message_uuids: [inputId],
+		});
 		const next = await readTurn(iterator);
 
 		expect(next).toHaveLength(traceLineCount("pong-thinking-text-turn"));

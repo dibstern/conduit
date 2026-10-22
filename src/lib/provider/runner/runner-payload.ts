@@ -39,7 +39,10 @@ export interface RunnerPayload {
 		sessionId: string,
 		settings: LiveSettings,
 	): Effect.Effect<void, PayloadFailure>;
-	endSession(sessionId: string): Effect.Effect<void, PayloadFailure>;
+	endSession(
+		sessionId: string,
+		retireRunIds?: readonly string[],
+	): Effect.Effect<void, PayloadFailure>;
 
 	prepareTurn?(
 		command: Extract<SessionCommand, { type: "send-turn" }>,

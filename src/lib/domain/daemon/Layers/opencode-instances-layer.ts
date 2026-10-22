@@ -48,6 +48,7 @@ import {
 	stopInstance,
 } from "../Services/instance-manager-service.js";
 import {
+	OpenCodeControlTarget,
 	type OpenCodeInstanceEvent,
 	OpenCodeInstancesTag,
 	OpenCodeUnavailable,
@@ -664,8 +665,31 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						endpoint.instanceId ?? instanceId,
 						endpoint.processIdentity ?? endpoint.url,
 					),
+					controlReplaySafe: endpoint.processIdentity !== undefined,
 				});
 			};
+
+			const matchesControlTarget = (
+				instanceId: string,
+				endpoint: OpenCodeEndpoint | undefined,
+				target: string,
+			): endpoint is OpenCodeEndpoint =>
+				endpoint !== undefined &&
+				endpoint.status !== "stopped" &&
+				(!endpoint.managed || endpoint.status === "healthy") &&
+				!stopping.has(instanceId) &&
+				openCodePromptProcessId(
+					endpoint.instanceId ?? instanceId,
+					endpoint.processIdentity ?? endpoint.url,
+				) === target;
+
+			const processGone = (instanceId: string, target: string) =>
+				new OpenCodeUnavailable({
+					instanceId,
+					reason: "not-running",
+					code: "provider_process_gone",
+					message: `OpenCode process "${target}" is no longer running for instance "${instanceId}"`,
+				});
 
 			const spawnFailed = (instanceId: string, cause: unknown) =>
 				new OpenCodeUnavailable({
@@ -755,10 +779,23 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 				});
 
 			/** Counts a `use` scope as demand, first waiting out a stop in progress. */
-			const hold = (instanceId: string, borrow = false): Effect.Effect<void> =>
+			const hold = (
+				instanceId: string,
+				borrow = false,
+				target?: string,
+			): Effect.Effect<void, OpenCodeUnavailable> =>
 				gate
 					.withPermits(1)(
 						Effect.gen(function* () {
+							if (
+								target !== undefined &&
+								!matchesControlTarget(
+									instanceId,
+									yield* resolveIn(instanceId),
+									target,
+								)
+							)
+								return yield* processGone(instanceId, target);
 							const stop = stopping.get(instanceId);
 							if (stop) return stop;
 							if (!borrow) borrowedStarts.delete(instanceId);
@@ -780,7 +817,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						Effect.flatMap((stop) =>
 							stop
 								? Deferred.await(stop).pipe(
-										Effect.andThen(hold(instanceId, borrow)),
+										Effect.andThen(hold(instanceId, borrow, target)),
 									)
 								: Effect.void,
 						),
@@ -798,13 +835,15 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 
 			const use = (instanceId: string, directory?: string, borrow = false) =>
 				Effect.gen(function* () {
-					yield* Effect.acquireRelease(hold(instanceId, borrow), () =>
+					const target = yield* OpenCodeControlTarget;
+					yield* Effect.acquireRelease(hold(instanceId, borrow, target), () =>
 						release(instanceId),
 					);
 					let endpoint = yield* resolveIn(instanceId);
 					// Not running yet: never started, stopped, or a managed instance
 					// that failed or crashed. External instances are only checked.
 					if (
+						target === undefined &&
 						endpoint &&
 						control &&
 						(endpoint.status === "stopped" ||
@@ -813,16 +852,32 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						yield* start(instanceId, "starting", control.start(instanceId));
 						endpoint = yield* resolveIn(instanceId);
 					}
-					if (!endpoint)
+					if (!endpoint) {
+						if (target !== undefined)
+							return yield* processGone(instanceId, target);
 						return yield* new OpenCodeUnavailable({
 							instanceId,
 							reason: "not-configured",
 							message: `OpenCode instance "${instanceId}" is not configured with a server URL`,
 						});
-					const opened = yield* gate.withPermits(1)(
-						ensureStream(instanceId, endpoint),
+					}
+					const available = endpoint;
+					const selected = yield* gate.withPermits(1)(
+						Effect.gen(function* () {
+							let current = available;
+							if (target !== undefined) {
+								const resolved = yield* resolveIn(instanceId);
+								if (!matchesControlTarget(instanceId, resolved, target))
+									return yield* processGone(instanceId, target);
+								current = resolved;
+							}
+							return {
+								opened: yield* ensureStream(instanceId, current),
+								client: clientFor(current, directory, instanceId),
+							};
+						}),
 					);
-					const client = clientFor(endpoint, directory, instanceId);
+					const { client, opened } = selected;
 					const stream = streams.get(instanceId);
 					if (stream?.source.isConnected()) {
 						setState(instanceId, "connected");
@@ -1120,12 +1175,15 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					Effect.flatMap(resolveId(instanceId), (instanceId) =>
 						gate.withPermits(1)(
 							Effect.gen(function* () {
+								const target = yield* OpenCodeControlTarget;
 								const endpoint = yield* resolveIn(instanceId);
 								if (
 									!endpoint ||
 									endpoint.status === "stopped" ||
 									(endpoint.managed && endpoint.status !== "healthy") ||
-									stopping.has(instanceId)
+									stopping.has(instanceId) ||
+									(target !== undefined &&
+										!matchesControlTarget(instanceId, endpoint, target))
 								)
 									return Option.none();
 								// Check and retain under the stop/idle gate. Register release

@@ -1,6 +1,7 @@
 // Startup cleanup may run after a recovered ask commits but before its waiter
 // registers, or after cleanup snapshots waiters and before registration finishes.
 // Neither ordering may reject the live owner's ask or strand an answered waiter.
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,6 +29,7 @@ import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import { CommandReadModelRepository } from "../../../src/lib/provider/orchestration-read-model.js";
 import {
 	ProviderRegistry,
 	ProviderRegistryTag,
@@ -55,33 +57,56 @@ import {
 const sessionId = "recovered-session";
 const processId = "live-recovered-runner";
 
-function executeEffect(
-	command: Extract<SessionCommand, { type: "send-turn" }>,
-): Effect.Effect<TurnResult, SessionFailure>;
-function executeEffect(
-	command: Exclude<SessionCommand, { type: "send-turn" }>,
-): Effect.Effect<void, SessionFailure>;
-function executeEffect(
-	command: SessionCommand,
-): Effect.Effect<TurnResult | undefined, SessionFailure>;
-function executeEffect(
-	command: SessionCommand,
-	// biome-ignore lint/suspicious/noConfusingVoidType: runner overloads return a turn result or a void control result.
-): Effect.Effect<TurnResult | void, SessionFailure> {
-	return command.type === "shutdown"
-		? Effect.succeed(undefined)
-		: Effect.die("This test does not execute runner commands");
-}
-
 describe("Claude permission ownership during startup cleanup", () => {
 	it.each([
 		"before-registration",
 		"after-snapshot",
 	] as const)("keeps a live ask answerable when cleanup runs %s", async (ordering) => {
 		const root = mkdtempSync(join(tmpdir(), "phis-startup-race-"));
-		// Only process liveness is simulated. The durable ingestion, recovered
-		// callbacks, pending service, cleanup and browser handler are real.
+		const deliveredAnswers: Extract<
+			SessionCommand,
+			{ type: "resolve-permission" }
+		>[] = [];
+		let sink: ReturnType<typeof makeRecoveredEventSink>;
+		function executeEffect(
+			command: Extract<SessionCommand, { type: "send-turn" }>,
+		): Effect.Effect<TurnResult, SessionFailure>;
+		function executeEffect(
+			command: Exclude<SessionCommand, { type: "send-turn" }>,
+		): Effect.Effect<void, SessionFailure>;
+		function executeEffect(
+			command: SessionCommand,
+		): Effect.Effect<TurnResult | undefined, SessionFailure>;
+		function executeEffect(
+			command: SessionCommand,
+			// biome-ignore lint/suspicious/noConfusingVoidType: runner overloads return a turn result or a void control result.
+		): Effect.Effect<TurnResult | void, SessionFailure> {
+			if (command.type === "resolve-permission") {
+				return Effect.gen(function* () {
+					deliveredAnswers.push(command);
+					// RunnerSinkBindings emits this callback before releasing its waiter.
+					yield* sink
+						.resolvePermission(
+							command.requestId,
+							command.control?.response ?? { decision: command.decision },
+						)
+						.pipe(
+							Effect.mapError((cause) => ({
+								operation: "resolvePermission",
+								message: cause.message,
+							})),
+						);
+				});
+			}
+			return command.type === "shutdown"
+				? Effect.succeed(undefined)
+				: Effect.die("This test does not execute runner commands");
+		}
+		// Process liveness and runner output delivery are simulated. The outbox,
+		// recovered sink, pending service, cleanup and browser handler are real.
 		const runner: SessionRunner = {
+			getControlProcessIdEffect: (session) =>
+				Effect.succeed(session === sessionId ? processId : undefined),
 			hasLiveProcessEffect: (session, owner?: string) =>
 				Effect.succeed(
 					session === sessionId && (owner === undefined || owner === processId),
@@ -131,7 +156,7 @@ describe("Claude permission ownership during startup cleanup", () => {
 					const registered = yield* Deferred.make<void>();
 					const snapshotCaptured = yield* Deferred.make<void>();
 					const releaseSnapshot = yield* Deferred.make<void>();
-					const sink = makeRecoveredEventSink({
+					sink = makeRecoveredEventSink({
 						sessionId,
 						sql,
 						ingestion,
@@ -246,8 +271,29 @@ describe("Claude permission ownership during startup cleanup", () => {
 			await runtime.runPromise(Deferred.await(state.registered));
 			expect.soft(cleaned).toBe(0);
 			expect.soft(await runtime.runPromise(readApproval)).toEqual([approval]);
-			const registry = await runtime.runPromise(ProviderRegistryTag);
-			const engine = new OrchestrationEngine({ registry });
+			const engine = await runtime.runPromise(
+				Effect.gen(function* () {
+					const registry = yield* ProviderRegistryTag;
+					const ingestion = yield* ProviderRuntimeIngestionTag;
+					const commit = yield* makeCommitAndSignal;
+					const snapshot = yield* new CommandReadModelRepository(
+						state.sql,
+						"project",
+					).bootstrap();
+					return new OrchestrationEngine({
+						registry,
+						durableCommands: {
+							sql: state.sql,
+							ingestion,
+							snapshot,
+							projectKey: "project",
+							now: Date.now,
+							generateId: randomUUID,
+							write: commit.write,
+						},
+					});
+				}),
+			);
 			engine.bindSession(sessionId, "claude");
 			const answer = handlePermissionResponse("browser", {
 				requestId: PermissionId.make(approval.id),
@@ -267,10 +313,11 @@ describe("Claude permission ownership during startup cleanup", () => {
 			);
 			await runtime.runPromise(answer);
 			await runtime.runPromise(answer);
+			await runtime.runPromise(engine.drainSideEffects());
+			expect(await asking).toEqual(Result.succeed({ decision: "once" }));
 			expect(
 				await runtime.runPromise(state.pending.listPendingPermissions()),
 			).toEqual([]);
-			expect(await asking).toEqual(Result.succeed({ decision: "once" }));
 			expect(await runtime.runPromise(readApproval)).toEqual([
 				{ ...approval, status: "resolved" },
 			]);
@@ -281,6 +328,31 @@ describe("Claude permission ownership during startup cleanup", () => {
 					}>`SELECT COUNT(*) AS count FROM events WHERE type = 'permission.resolved'`,
 				),
 			).toEqual([{ count: 1 }]);
+			expect(deliveredAnswers).toEqual([
+				expect.objectContaining({
+					type: "resolve-permission",
+					sessionId,
+					requestId: "provider-request",
+					decision: "once",
+					control: {
+						commandId: expect.any(String),
+						providerProcessId: processId,
+						response: { decision: "once" },
+					},
+				}),
+			]);
+			expect(
+				await runtime.runPromise(
+					state.sql`SELECT effect_type, provider_process_id, status, attempt_count FROM provider_command_outbox`,
+				),
+			).toEqual([
+				{
+					effect_type: "resolve_permission",
+					provider_process_id: processId,
+					status: "completed",
+					attempt_count: 1,
+				},
+			]);
 		} finally {
 			await finishRequests();
 			await runtime.dispose();

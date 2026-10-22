@@ -495,6 +495,7 @@ export const deleteSession = (
 								sessionId,
 								targetProviderId: capturedInstanceId,
 								...(capturedCall ? { call: capturedCall } : {}),
+								...(account ? { account } : {}),
 								unbind: true,
 							}),
 						),

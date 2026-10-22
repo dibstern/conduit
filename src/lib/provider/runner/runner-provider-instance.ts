@@ -42,6 +42,7 @@ import type {
 	PreWarmSessionInput,
 	ProviderCall,
 	ProviderCapabilities,
+	ProviderControlCommandStatus,
 	ProviderControlContext,
 	ProviderInstance,
 	ProviderNativeSession,
@@ -127,6 +128,10 @@ export interface RunnerRecoveryDependencies {
 	readonly resolveCallContext: OrchestrationEngine["resolveCallContextEffect"];
 	readonly retirePrompts: (
 		currentProcessId: string | null,
+		options?: {
+			readonly expiredProcessId?: string;
+			readonly exceptCommandId?: string;
+		},
 	) => ReturnType<Effect.Success<typeof makeRetireReplacedProcessPrompts>>;
 }
 
@@ -268,6 +273,25 @@ export class RunnerProviderInstance implements ProviderInstance {
 				);
 			}
 			const accounts = yield* this.deps.accounts;
+			const sessions = yield* sql<{
+				id: string;
+				provider: string;
+			}>`SELECT id, provider FROM sessions`;
+			for (const session of sessions) {
+				if (sessionIds && !sessionIds.has(session.id)) continue;
+				const driver =
+					accounts.accounts.find((account) => account.id === session.provider)
+						?.driver ??
+					accounts.deleted.find((account) => account.id === session.provider)
+						?.driver;
+				if (
+					!claimed.has(session.id) &&
+					(driver ?? session.provider) === this.providerId
+				) {
+					const recovery = yield* recoveryForSession(session.id);
+					if (recovery) yield* recovery.retirePrompts(null);
+				}
+			}
 			for (const sessionId of claimed) {
 				if (sessionIds && !sessionIds.has(sessionId)) continue;
 				const native = yield* this.runner.getNativeSessionEffect?.(sessionId) ??
@@ -400,6 +424,9 @@ export class RunnerProviderInstance implements ProviderInstance {
 						providerId: this.providerId,
 						operation: failure.operation,
 						cause: Object.assign(new Error(failure.message), failure),
+						...(failure.code === "provider_process_gone"
+							? { code: failure.code }
+							: {}),
 					}),
 			),
 		);
@@ -427,10 +454,51 @@ export class RunnerProviderInstance implements ProviderInstance {
 		return this.runner.hasLiveProcessEffect(sessionId, processId);
 	}
 
+	getControlProcessIdEffect(
+		sessionId: string,
+	): Effect.Effect<string | undefined, ProviderInstanceFailure> {
+		return Effect.gen({ self: this }, function* () {
+			const failure = yield* this.getSessionFailureEffect(sessionId);
+			if (failure)
+				return yield* new ProviderInstanceFailure({
+					providerId: this.providerId,
+					operation: "getControlProcessId",
+					code: "provider_process_unavailable",
+					cause: new Error(failure.message),
+				});
+			return yield* this.runner.getControlProcessIdEffect?.(sessionId) ??
+				Effect.succeed(undefined);
+		});
+	}
+
 	getSessionFailureEffect(sessionId: string) {
 		return (
 			this.runner.getSessionFailureEffect?.(sessionId) ??
 			Effect.succeed(undefined)
+		);
+	}
+
+	getControlCommandStatusEffect(
+		sessionId: string,
+		control: ProviderControlContext,
+	): Effect.Effect<ProviderControlCommandStatus, ProviderInstanceFailure> {
+		return (
+			this.runner.getControlCommandStatusEffect?.(sessionId, control) ??
+			Effect.fail(
+				sessionFailure(
+					"get control command status",
+					"Runner cannot reconcile commands",
+				),
+			)
+		).pipe(
+			Effect.mapError(
+				(failure) =>
+					new ProviderInstanceFailure({
+						providerId: this.providerId,
+						operation: failure.operation,
+						cause: Object.assign(new Error(failure.message), failure),
+					}),
+			),
 		);
 	}
 
@@ -692,7 +760,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 		sessionId: string,
 		turnIds?: readonly string[],
 		call?: ProviderCall,
-		_control?: ProviderControlContext,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		// A bound Stop must leave a pre-warm for a replacement turn alone.
 		return (
@@ -704,6 +772,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 				this.commandEffect({
 					type: "interrupt",
 					sessionId,
+					...(control ? { control } : {}),
 					...(call ? { call } : {}),
 					...(turnIds !== undefined ? { turnIds } : {}),
 				}),
@@ -730,11 +799,12 @@ export class RunnerProviderInstance implements ProviderInstance {
 		decision: PermissionDecision,
 		_providerProcessId?: string,
 		call?: ProviderCall,
-		_control?: ProviderControlContext,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.commandEffect({
 			type: "resolve-permission",
 			sessionId,
+			...(control ? { control } : {}),
 			...(call ? { call } : {}),
 			requestId,
 			decision,
@@ -745,11 +815,12 @@ export class RunnerProviderInstance implements ProviderInstance {
 		requestId: string,
 		answers: Record<string, unknown>,
 		call?: ProviderCall,
-		_control?: ProviderControlContext,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.commandEffect({
 			type: "resolve-question",
 			sessionId,
+			...(control ? { control } : {}),
 			...(call ? { call } : {}),
 			requestId,
 			answers,
@@ -786,13 +857,14 @@ export class RunnerProviderInstance implements ProviderInstance {
 	endSessionEffect(
 		sessionId: string,
 		call?: ProviderCall,
-		_control?: ProviderControlContext,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return FiberMap.remove(this.preWarmFibers, sessionId).pipe(
 			Effect.andThen(
 				this.commandEffect({
 					type: "end-session",
 					sessionId,
+					...(control ? { control } : {}),
 					...(call ? { call } : {}),
 				}),
 			),
@@ -910,28 +982,11 @@ export class RunnerProviderInstance implements ProviderInstance {
 						? yield* Deferred.make<void>()
 						: undefined;
 					if (registered) this.recoveredRequests.set(requestKey, registered);
+					// Registration and UI waiters belong here; only the outbox delivers answers.
 					const request = Effect.suspend(() =>
 						output.type === "permission-request"
-							? sink.requestPermission(output.request).pipe(
-									Effect.flatMap((response) =>
-										this.runner.executeEffect({
-											type: "answer-permission",
-											sinkId: output.sinkId,
-											requestId: output.request.requestId,
-											response,
-										}),
-									),
-								)
-							: sink.requestQuestion(output.request).pipe(
-									Effect.flatMap((answers) =>
-										this.runner.executeEffect({
-											type: "answer-question",
-											sinkId: output.sinkId,
-											requestId: output.request.requestId,
-											answers,
-										}),
-									),
-								),
+							? sink.requestPermission(output.request).pipe(Effect.asVoid)
+							: sink.requestQuestion(output.request).pipe(Effect.asVoid),
 					);
 					yield* FiberMap.run(
 						this.interactionFibers,
