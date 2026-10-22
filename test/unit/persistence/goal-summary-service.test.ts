@@ -1,5 +1,6 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Fiber, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
@@ -429,16 +430,47 @@ describe("GoalSummaryService", () => {
 		() => {
 			const f = fixture();
 			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const ids = Array.from({ length: 201 }, (_, n) => `goal-${n}`);
+				// Seed read models directly: this tests cache eviction, not event projection.
+				yield* sql.withTransaction(
+					Effect.gen(function* () {
+						yield* sql`INSERT INTO sessions ${sql.insert(
+							ids.map((id) => ({
+								id,
+								project_id: "test-project",
+								provider: "claude",
+								created_at: 1,
+								updated_at: 100,
+								goal_state: JSON.stringify({
+									sessionId: id,
+									goal: { ...goal, iterations: 1, lastReason: reason },
+								}),
+							})),
+						)}`;
+						yield* sql`INSERT INTO session_goal_checks ${sql.insert(
+							ids.map((id) => ({
+								event_id: `check-${id}`,
+								session_id: id,
+								condition: goal.condition,
+								set_at: goal.setAt,
+								iterations: 1,
+								reason,
+								created_at: 100,
+							})),
+						)}`;
+					}),
+				);
 				const service = yield* GoalSummaryServiceTag;
-				for (let n = 0; n < 200; n++) {
-					yield* seed(`goal-${n}`);
-					yield* service.generate(`goal-${n}`);
-				}
-				yield* service.metadata("goal-0");
-				yield* seed("goal-200");
+				for (let n = 0; n < 200; n++) yield* service.generate(`goal-${n}`);
+				expect((yield* service.metadata("goal-0")).summary?.stale).toBe(false);
 				yield* service.generate("goal-200");
 				expect((yield* service.metadata("goal-1")).summary).toBeNull();
 				expect((yield* service.metadata("goal-0")).summary?.stale).toBe(false);
+				expect((yield* service.metadata("goal-200")).summary?.stale).toBe(
+					false,
+				);
+				expect(f.query).toHaveBeenCalledTimes(201);
 			}).pipe(Effect.provide(f.live));
 		},
 	);
