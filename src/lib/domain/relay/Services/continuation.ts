@@ -16,7 +16,10 @@ import type {
 	AccountRef,
 	ClaudeAccount,
 } from "../../../contracts/account.js";
-import { accountLimit } from "../../../contracts/account-limit.js";
+import {
+	type accountLimit,
+	narrowAccountLimit,
+} from "../../../contracts/account-limit.js";
 import {
 	AccountStillLimited,
 	AccountUnavailable,
@@ -132,60 +135,7 @@ const continuationPlanner = (account: Account) => {
 const continuationLimit = (
 	input: Parameters<typeof accountLimit>[0],
 	switched = false,
-) => {
-	let { reading } = input;
-	let recovery = switched ? undefined : input.recovery;
-	if (reading?.harness === "codex") {
-		// Codex allowances are independent buckets, identified by an opaque id.
-		const limitId = input.recovery?.rateLimitType ?? "codex";
-		const windows = reading.windows.filter(
-			(window) => window.limitId === limitId,
-		);
-		const exhausted = windows.filter((window) => window.utilization >= 100);
-		reading = {
-			...reading,
-			windows,
-			status:
-				reading.status === "unknown" || reading.status === "unavailable"
-					? reading.status
-					: exhausted.length > 0
-						? "limited"
-						: "available",
-		};
-		if (reading.status === "limited") {
-			const resets = exhausted.map((window) =>
-				Date.parse(window.resetsAt ?? ""),
-			);
-			// The shared rule has no retry policy for full windows without a reset.
-			if (
-				!resets.some((reset) => Number.isFinite(reset) && reset > input.now) &&
-				resets.some((reset) => !Number.isFinite(reset))
-			)
-				return { reading, limit: { kind: "wait" as const } };
-			if (recovery && resets.length > 0 && resets.every(Number.isFinite))
-				recovery = { ...recovery, resetsAt: Math.max(...resets) / 1000 };
-		} else if (
-			reading.status === "available" &&
-			!reading.stale &&
-			recovery?.limitedAt !== undefined &&
-			reading.readAt > recovery.limitedAt &&
-			!recovery.timeOnly
-		) {
-			// A fresh free allowance clears an opaque Codex limit, including custom
-			// windows. Its id cannot match the shared rule's Claude window kinds.
-			recovery = undefined;
-		}
-	}
-	return {
-		reading,
-		limit: accountLimit({
-			asker: input.asker,
-			now: input.now,
-			...(reading === undefined ? {} : { reading }),
-			...(recovery === undefined ? {} : { recovery }),
-		}),
-	};
-};
+) => narrowAccountLimit(input, switched ? undefined : input.recovery);
 
 /** The confirmation uses the same planner as delivery, without a live runner. */
 export const previewContinuation = (

@@ -449,7 +449,7 @@ describe("Codex usage through the built daemon", () => {
 			});
 			// As in the process continuation tests, use a short sweep and a controlled
 			// reset timestamp rather than fake timers in the parent process.
-			const reset = Math.floor(Date.now() / 1000) + 8;
+			const reset = Math.floor(Date.now() / 1000) + 30;
 			const quotaTrace = fixtureRows("usage-read");
 			const quotaResult = quotaTrace.find(
 				(row) => row.message?.result?.["rateLimitsByLimitId"],
@@ -463,6 +463,25 @@ describe("Codex usage through the built daemon", () => {
 				windowDurationMins: 300,
 				resetsAt: reset + 3600,
 			};
+			writeTrace(usagePath, quotaTrace);
+			expect(await quota(fixture, accountId)).toMatchObject({
+				status: "limited",
+				windows: expect.arrayContaining([
+					expect.objectContaining({ limitId: "codex", utilization: 40 }),
+					expect.objectContaining({ limitId: "codex_spark", utilization: 100 }),
+				]),
+			});
+			// Cache Spark-only exhaustion; subsequent probes reflect the main limit.
+			const primary = {
+				usedPercent: 100,
+				windowDurationMins: 300,
+				resetsAt: reset,
+			};
+			if (!buckets["codex"] || !quotaResult)
+				throw new Error("Missing Codex allowance");
+			buckets["codex"]["primary"] = primary;
+			(quotaResult["rateLimits"] as Record<string, unknown>)["primary"] =
+				primary;
 			writeTrace(usagePath, quotaTrace);
 			const limited = fixtureRows("usage-limit");
 			for (const row of limited) {

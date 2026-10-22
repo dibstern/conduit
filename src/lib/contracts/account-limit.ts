@@ -30,7 +30,7 @@ export function accountLimitWindowLabel(window: UsageWindow | string): string {
 	return "usage limit";
 }
 
-export const accountLimit = (input: {
+const decideAccountLimit = (input: {
 	readonly asker: AccountLimitAsker;
 	readonly reading?: UsageReading;
 	readonly recovery?: LimitRecovery;
@@ -113,3 +113,64 @@ export const accountLimit = (input: {
 			}
 		: { kind: "wait" };
 };
+
+export const narrowAccountLimit = (
+	input: Parameters<typeof decideAccountLimit>[0],
+	recovery: LimitRecovery | undefined,
+) => {
+	let { reading } = input;
+	if (reading?.harness === "codex") {
+		// Codex allowances are independent buckets, identified by an opaque id.
+		const limitId = input.recovery?.rateLimitType ?? "codex";
+		const windows = reading.windows.filter(
+			(window) => window.limitId === limitId,
+		);
+		const exhausted = windows.filter((window) => window.utilization >= 100);
+		reading = {
+			...reading,
+			windows,
+			status:
+				reading.status === "unknown" || reading.status === "unavailable"
+					? reading.status
+					: exhausted.length > 0
+						? "limited"
+						: "available",
+		};
+		if (reading.status === "limited") {
+			const resets = exhausted.map((window) =>
+				Date.parse(window.resetsAt ?? ""),
+			);
+			// The shared rule has no retry policy for full windows without a reset.
+			if (
+				!resets.some((reset) => Number.isFinite(reset) && reset > input.now) &&
+				resets.some((reset) => !Number.isFinite(reset))
+			)
+				return { reading, limit: { kind: "wait" as const } };
+			if (recovery && resets.length > 0 && resets.every(Number.isFinite))
+				recovery = { ...recovery, resetsAt: Math.max(...resets) / 1000 };
+		} else if (
+			reading.status === "available" &&
+			!reading.stale &&
+			recovery?.limitedAt !== undefined &&
+			reading.readAt > recovery.limitedAt &&
+			!recovery.timeOnly
+		) {
+			// A fresh free allowance clears an opaque Codex limit, including custom
+			// windows. Its id cannot match the shared rule's Claude window kinds.
+			recovery = undefined;
+		}
+	}
+	return {
+		reading,
+		limit: decideAccountLimit({
+			asker: input.asker,
+			now: input.now,
+			...(reading === undefined ? {} : { reading }),
+			...(recovery === undefined ? {} : { recovery }),
+		}),
+	};
+};
+
+export const accountLimit = (
+	input: Parameters<typeof decideAccountLimit>[0],
+): AccountLimit => narrowAccountLimit(input, input.recovery).limit;
