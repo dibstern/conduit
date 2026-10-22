@@ -3,6 +3,7 @@ import { expect, fn, userEvent, within } from "storybook/test";
 import { DEFAULT_CATEGORY_SET } from "../../../contracts/category-set.js";
 import type { TurnRecap } from "../../../contracts/turn-recap.js";
 import { type SurfacePart, surfaceTurn } from "../../utils/surface-turn.js";
+import DismissibleSummary from "./__fixtures__/DismissibleSummary.svelte";
 import SurfacingSummary from "./SurfacingSummary.svelte";
 
 const START = 1_800_000_000_000;
@@ -105,6 +106,19 @@ export const WholeTurn: Story = {
 export const WholeTurnLight: Story = {
 	...WholeTurn,
 	globals: { theme: "light" },
+};
+
+/** Long real content exercises native scrolling as well as sheet dismissal. */
+export const DragDismiss: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		versions: [whole],
+		selected: {
+			...whole,
+			text: Array.from({ length: 20 }, () => whole.text).join("\n\n"),
+		},
+	},
+	render: (args) => ({ Component: DismissibleSummary, props: args }),
 };
 export const Stale: Story = {
 	args: { versions: [whole], selected: whole },

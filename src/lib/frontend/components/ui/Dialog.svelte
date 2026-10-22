@@ -26,6 +26,7 @@
 	import { provideDialogTarget } from "./dialog-context.js";
 	import { dimThemeColor } from "../../stores/theme.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
+	import { dragToDismiss } from "../../actions/drag-to-dismiss.js";
 
 	let {
 		open,
@@ -38,6 +39,8 @@
 		returnFocus,
 		initialFocus = "dialog",
 		backdrop = "default",
+		sheetElement = $bindable<HTMLElement | undefined>(),
+		sheetDismissOffset,
 		children,
 	}: {
 		open: boolean;
@@ -56,6 +59,9 @@
 		/** Scrim weight. `dark` for media, `subtle` for large panels that
 		 *  should still show their context. */
 		backdrop?: "default" | "dark" | "subtle";
+		/** The usage dock places this same shell while pulling it open. */
+		sheetElement?: HTMLElement | undefined;
+		sheetDismissOffset?: (() => number) | undefined;
 		children: Snippet;
 	} = $props();
 
@@ -186,7 +192,13 @@
 	onkeydown={handleKeydown}
 >
 	{#if open}
-		{@render children()}
+		{#if placement === "sheet"}
+			<div bind:this={sheetElement} use:dragToDismiss={{ ondismiss: onclose, enabled: dismissible, dismissOffset: sheetDismissOffset }}>
+				{@render children()}
+			</div>
+		{:else}
+			{@render children()}
+		{/if}
 	{/if}
 </dialog>
 

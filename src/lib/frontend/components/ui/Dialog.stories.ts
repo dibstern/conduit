@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, within } from "storybook/test";
 import DialogDemo from "./__fixtures__/DialogDemo.svelte";
+import SheetDismissalDemo from "./__fixtures__/SheetDismissalDemo.svelte";
 
 const meta = {
 	title: "UI/Dialog",
@@ -39,4 +40,8 @@ export const DarkBackdrop: Story = {
 export const SubtleBackdrop: Story = {
 	args: { backdrop: "subtle" },
 	play: assertBackdrop("--color-backdrop-subtle"),
+};
+
+export const SavingSheet: Story = {
+	render: (args) => ({ Component: SheetDismissalDemo, props: args }),
 };

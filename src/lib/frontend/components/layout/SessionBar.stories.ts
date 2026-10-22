@@ -631,6 +631,23 @@ export const GoalDetailsOpenLight: Story = {
 	tags: ["viewport-capture"],
 	globals: { theme: "light" },
 };
+
+export const GoalSheetScrollable: Story = {
+	...GoalDetailsOpen,
+	args: {
+		...GoalDetailsOpen.args,
+		getGoalDetails: async (input: Parameters<typeof getGoalDetails>[0]) => {
+			const details = await getGoalDetails(input);
+			return {
+				...details,
+				checks: details.checks.map((check) => ({
+					...check,
+					reason: Array.from({ length: 20 }, () => check.reason).join(" "),
+				})),
+			};
+		},
+	},
+};
 export const GoalDetailsCheckingLight: Story = {
 	...GoalDetailsChecking,
 	tags: ["viewport-capture"],
@@ -1969,16 +1986,22 @@ function setupSideThreads(rows: readonly Row[]) {
 	};
 }
 
-/** The list must hang under the bar, wholly on screen. */
+/** Phone sheets reach the bottom edge; desktop cards hang under the bar. */
 async function assertSideThreadsPanel(canvasElement: HTMLElement) {
 	const canvas = within(canvasElement);
 	const panel = await canvas.findByTestId("side-threads-panel");
 	await expect(panel).toBeVisible();
 	const box = panel.getBoundingClientRect();
 	const bar = canvas.getByTestId("session-bar").getBoundingClientRect();
-	expect(box.top).toBeGreaterThanOrEqual(bar.bottom - 1);
-	expect(box.left).toBeGreaterThanOrEqual(bar.left);
-	expect(box.right).toBeLessThanOrEqual(bar.right);
+	if (panel.closest("dialog")) {
+		expect(box.bottom).toBe(window.innerHeight);
+		expect(box.left).toBe(0);
+		expect(box.right).toBe(window.innerWidth);
+	} else {
+		expect(box.top).toBeGreaterThanOrEqual(bar.bottom - 1);
+		expect(box.left).toBeGreaterThanOrEqual(bar.left);
+		expect(box.right).toBeLessThanOrEqual(bar.right);
+	}
 	return within(panel);
 }
 
@@ -2019,21 +2042,33 @@ export const SideThreadsOpen: Story = {
 		const theme = document.documentElement.classList.contains("light-theme")
 			? "light"
 			: "dark";
-		expect(
-			getComputedStyle(within(canvasElement).getByTestId("side-threads-scrim"))
-				.backgroundColor,
-		).toBe(theme === "dark" ? "rgba(6, 7, 9, 0.55)" : "rgba(22, 26, 33, 0.34)");
+		const dialog = within(canvasElement).getByTestId("modal-sheet-scrim");
+		expect(getComputedStyle(dialog, "::backdrop").backgroundColor).toBe(
+			theme === "dark" ? "rgba(6, 7, 9, 0.55)" : "rgba(22, 26, 33, 0.34)",
+		);
 		expect(
 			document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
 				?.content,
 		).toBe(theme === "dark" ? "#0b0c0e" : "#b0b1b3");
 		const panel = within(canvasElement).getByTestId("side-threads-panel");
-		const bar = within(canvasElement).getByTestId("session-bar");
-		// The phone sheet spans the bar.
-		expect(panel.getBoundingClientRect().width).toBe(
-			bar.getBoundingClientRect().width,
-		);
+		// The native dialog spans the phone viewport.
+		expect(panel.getBoundingClientRect().width).toBe(window.innerWidth);
 	},
+};
+
+export const SideThreadsScrollable: Story = {
+	tags: ["viewport-capture"],
+	beforeEach: () =>
+		setupSideThreads(
+			Array.from({ length: 30 }, (_, index) => ({
+				id: `scrollable-side-thread-${index}`,
+				title: `Side thread ${index + 1}`,
+				parentID: mockSession.id,
+				sideThread: true,
+				createdAt: sideThreadsNow - (index + 1) * 60_000,
+				updatedAt: sideThreadsNow - (index + 1) * 60_000,
+			})),
+		),
 };
 
 export const DesktopSideThreadsOpen: Story = {
@@ -2086,6 +2121,10 @@ export const SideThreadsClosed: Story = {
 		await userEvent.click(control);
 		await assertSideThreadsPanel(canvasElement);
 		await userEvent.keyboard("{Escape}");
+		// Synthetic keys do not trigger the browser's native dialog cancel event.
+		canvas
+			.getByTestId("modal-sheet-scrim")
+			.dispatchEvent(new Event("cancel", { cancelable: true }));
 		await waitFor(() =>
 			expect(canvas.queryByTestId("side-threads-panel")).toBeNull(),
 		);
