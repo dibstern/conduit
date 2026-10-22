@@ -45,8 +45,13 @@ export interface SessionWorkspace {
 		sessionId: string,
 		branchName: string,
 	) => Effect.Effect<void, WorktreeBranchRenameError | SessionCommandError>;
-	/** Serialize launch-folder reads with draft and fork workspace initialization. */
+	/** Serialize one session's launch-folder reads and workspace initialization. Not reentrant. */
 	readonly withLaunch: <A, E, R>(
+		sessionId: string,
+		effect: Effect.Effect<A, E, R>,
+	) => Effect.Effect<A, E, R>;
+	/** Exclude all session work for shared checkout cleanup or project-wide batches. Never nest with withLaunch. */
+	readonly withProjectLaunch: <A, E, R>(
 		effect: Effect.Effect<A, E, R>,
 	) => Effect.Effect<A, E, R>;
 	readonly get: (
@@ -122,6 +127,7 @@ export const makeSessionOpenCodeClient = Effect.gen(function* () {
 	return (sessionId: string, instanceId?: string, directory?: string) =>
 		Effect.gen(function* () {
 			const target = yield* workspace.withLaunch(
+				sessionId,
 				Effect.gen(function* () {
 					const row = yield* read.getSession(sessionId);
 					const owner = instanceId ?? row?.provider;
@@ -186,6 +192,7 @@ export const recreateSessionWorktrees = (sessionId: string) =>
 		const worktrees = yield* WorktreeServiceTag;
 		const read = yield* ReadQueryEffectTag;
 		const result = yield* workspace.withLaunch(
+			sessionId,
 			Effect.gen(function* () {
 				const row = yield* read.getSession(sessionId);
 				const state =

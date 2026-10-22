@@ -177,6 +177,7 @@ export const resolveSessionFolders = (
 		const savedWorkspace =
 			workspace._tag === "Some" && read._tag === "Some"
 				? yield* workspace.value.withLaunch(
+						session.id,
 						Effect.gen(function* () {
 							const row = yield* read.value.getSession(session.id);
 							if (!row)
@@ -253,10 +254,9 @@ export const resolveSessionFolders = (
 						},
 					),
 				);
-			workspaceRoot = yield* workspace.value.move(
+			workspaceRoot = yield* workspace.value.withLaunch(
 				session.id,
-				config.projectDir,
-				"missing",
+				workspace.value.move(session.id, config.projectDir, "missing"),
 			);
 			state = null;
 		}

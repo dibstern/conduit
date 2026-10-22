@@ -486,8 +486,9 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 							worktrees._tag === "Some"
 								? worktrees.value.withCheckoutUse(create)
 								: create;
+						// A terminal can target any checkout, independently of its browser's session.
 						return yield* workspace._tag === "Some"
-							? workspace.value.withLaunch(spawn)
+							? workspace.value.withProjectLaunch(spawn)
 							: spawn;
 					}),
 				),

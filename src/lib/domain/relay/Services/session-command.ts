@@ -69,7 +69,10 @@ import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js"
 import { OpenCodeSessionCreationGateTag } from "./opencode-runtime-ingress-service.js";
 import { ConfigTag, LoggerTag } from "./services.js";
 import { inheritRead, markSeen } from "./session-attention.js";
-import { setPermissionMode } from "./session-overrides-state.js";
+import {
+	OverridesStateTag,
+	setPermissionMode,
+} from "./session-overrides-state.js";
 import {
 	loadServerSessionPick,
 	resolveServerSessionPick,
@@ -673,7 +676,8 @@ export const forkOpenCodeSession = (
 
 		const commitAndSignal = yield* makeCommitAndSignal;
 		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
-		yield* commitAndSignal.write((project) =>
+		const overrides = yield* Effect.serviceOption(OverridesStateTag);
+		const publish = commitAndSignal.write((project) =>
 			Effect.gen(function* () {
 				yield* applySessionCommand(
 					{
@@ -703,8 +707,15 @@ export const forkOpenCodeSession = (
 					yield* workspace.value.inherit(session.id, parentSessionId, {
 						project,
 					});
+				if (side && overrides._tag === "Some")
+					yield* setPermissionMode(session.id, "ask").pipe(
+						Effect.provideService(OverridesStateTag, overrides.value),
+					);
 			}),
 		);
+		yield* workspace._tag === "Some"
+			? workspace.value.withLaunch(session.id, publish)
+			: publish;
 		const forkPointTimestamp =
 			readQueryOption._tag === "Some"
 				? (yield* readQueryOption.value.getSession(session.id))
@@ -839,10 +850,7 @@ const forkSessionInWorkspace = (
 				OpenCodeSessionCreationGateTag,
 			);
 			const initializedFork = options?.side
-				? fork.pipe(
-						Effect.tap((session) => setPermissionMode(session.id, "ask")),
-						Effect.uninterruptible,
-					)
+				? Effect.uninterruptible(fork)
 				: fork;
 			const forked = yield* creationGate._tag === "Some"
 				? creationGate.value.withPermits(1)(initializedFork)
@@ -1092,7 +1100,7 @@ const forkSessionInWorkspace = (
 		const forkPointEvent = source.boundary.messageId;
 		// Persist the source and cut before announcing the child. Launch preparation
 		// resolves a native transcript or hands off the copied canonical history.
-		const boundary = yield* commitAndSignal.write((project) =>
+		const publish = commitAndSignal.write((project) =>
 			Effect.gen(function* () {
 				yield* requireLiveCreationRefs({
 					sessionId: id,
@@ -1162,6 +1170,9 @@ const forkSessionInWorkspace = (
 				return current.boundary;
 			}),
 		);
+		const boundary = yield* workspace._tag === "Some"
+			? workspace.value.withLaunch(id, publish)
+			: publish;
 		// The copied turns were the parent's to read, so the fork starts seen up
 		// to its last imported turn end rather than with a dot. SessionAttention
 		// caps at the committed turn end, so this has to follow the commit.
@@ -1181,7 +1192,7 @@ const forkSessionInWorkspace = (
 		};
 	});
 
-/** A fork's first launch cannot read its row before workspace inheritance. */
+/** Keep the parent's mapping stable; publication also locks the fresh child. */
 export const forkSession = (
 	parentSessionId: string,
 	options?: {
@@ -1194,6 +1205,6 @@ export const forkSession = (
 		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 		const fork = forkSessionInWorkspace(parentSessionId, options);
 		return yield* workspace._tag === "Some"
-			? workspace.value.withLaunch(fork)
+			? workspace.value.withLaunch(parentSessionId, fork)
 			: fork;
 	}).pipe(Effect.scoped);

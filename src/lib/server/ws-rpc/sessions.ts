@@ -212,10 +212,9 @@ export const sessionsHandlers = {
 		Effect.gen(function* () {
 			const workspace = yield* SessionWorkspaceTag;
 			return {
-				directory: yield* workspace.move(
+				directory: yield* workspace.withLaunch(
 					request.sessionId,
-					request.path,
-					"user",
+					workspace.move(request.sessionId, request.path, "user"),
 				),
 			};
 		}).pipe(
@@ -240,6 +239,7 @@ export const sessionsHandlers = {
 			const config = yield* ConfigTag;
 			const workspace = yield* SessionWorkspaceTag;
 			return yield* workspace.withLaunch(
+				request.sessionId,
 				workspace
 					.move(request.sessionId, config.projectDir, "user")
 					.pipe(Effect.map((directory) => ({ directory }))),
@@ -669,6 +669,7 @@ export const sessionsHandlers = {
 					const worktrees = yield* WorktreeServiceTag;
 					const sessionId = createLocalSessionId();
 					const session = yield* workspace.withLaunch(
+						sessionId,
 						Effect.uninterruptibleMask((restore) =>
 							Effect.gen(function* () {
 								// The id belongs to this launch, but no session exists until Git succeeds.
@@ -730,11 +731,12 @@ export const sessionsHandlers = {
 				const session = yield* Effect.uninterruptibleMask((restore) =>
 					Effect.gen(function* () {
 						const reservedSessionId = yield* takeReservation;
+						const sessionId =
+							reservedSessionId ??
+							(path === undefined ? undefined : createLocalSessionId());
 						const create = createSessionForClient({
 							...options,
-							...(reservedSessionId === undefined
-								? {}
-								: { sessionId: reservedSessionId }),
+							...(sessionId === undefined ? {} : { sessionId }),
 							...(path === undefined
 								? {}
 								: {
@@ -746,7 +748,9 @@ export const sessionsHandlers = {
 									}),
 						});
 						return yield* restore(
-							path === undefined ? create : workspace.withLaunch(create),
+							path === undefined || sessionId === undefined
+								? create
+								: workspace.withLaunch(sessionId, create),
 						).pipe(
 							Effect.onError(() =>
 								reservedSessionId && drafts._tag === "Some"

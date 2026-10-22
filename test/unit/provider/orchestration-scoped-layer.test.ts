@@ -70,7 +70,8 @@ describe("orchestration scoped layer", () => {
 						Layer.succeed(OpenCodeAPITag)(openCodeApi),
 						Layer.succeed(SessionWorkspaceTag)({
 							get: () => Effect.die("Unexpected workspace lookup"),
-							withLaunch: (effect) => effect,
+							withLaunch: (_sessionId, effect) => effect,
+							withProjectLaunch: (effect) => effect,
 							preview: () => Effect.die("Unexpected workspace preview"),
 							renameBranch: () => Effect.die("Unexpected workspace rename"),
 							move: () => Effect.die("Unexpected workspace move"),
