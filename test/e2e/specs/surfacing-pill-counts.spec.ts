@@ -1,5 +1,6 @@
 // Counts must match the messages each level can display, including a live
-// pending verdict. Empty middle levels disappear; Final and All stay reachable.
+// pending verdict. Empty middle levels disappear unless selected; Final and All
+// stay reachable.
 import { DEFAULT_CATEGORY_SET } from "../../../src/lib/contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/message-surfacing.js";
 import type {
@@ -164,13 +165,15 @@ for (const scenario of [
 		await expect(
 			levels.getByRole("radio", { name: "Final", exact: true }),
 		).toBeVisible();
+		// The selected level keeps its pill even when empty, so the reader can see where they are.
+		let selected: string = "Balanced";
 		for (const [name, count] of [
 			["Key", scenario.key],
 			["Balanced", scenario.balanced],
 			["All", scenario.all],
 		] as const) {
 			const pill = levels.getByRole("radio", { name, exact: true });
-			if (name !== "All" && count === 0) {
+			if (name !== "All" && name !== selected && count === 0) {
 				await expect.soft(pill).toHaveCount(0, { timeout: 2000 });
 				continue;
 			}
@@ -178,6 +181,7 @@ for (const scenario of [
 				.soft(pill.locator("small"))
 				.toHaveText(String(count), { timeout: 2000 });
 			await pill.click();
+			selected = name;
 			await expect(
 				page.getByRole("slider", { name: "Surfaced messages" }),
 			).toHaveAttribute("aria-valuemax", String(Math.max(0, count - 1)));
