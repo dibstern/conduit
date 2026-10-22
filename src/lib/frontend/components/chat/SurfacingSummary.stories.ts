@@ -106,6 +106,27 @@ export const WholeTurnLight: Story = {
 	...WholeTurn,
 	globals: { theme: "light" },
 };
+/** A bare URL links like one in the chat; the clause's comma stays prose. */
+export const WithLink: Story = {
+	args: {
+		selected: {
+			...newer,
+			text: "The page went live at https://studio.example.ts.net/review/chat-restyle/differences/, linked from the main review page [#6].",
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const link = within(canvasElement).getByRole("link");
+		await expect(link).toHaveAttribute(
+			"href",
+			"https://studio.example.ts.net/review/chat-restyle/differences/",
+		);
+		await expect(link).toHaveAttribute("target", "_blank");
+	},
+};
+export const WithLinkLight: Story = {
+	...WithLink,
+	globals: { theme: "light" },
+};
 export const Stale: Story = {
 	args: { versions: [whole], selected: whole },
 	play: async ({ canvasElement }) => {

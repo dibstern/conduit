@@ -1071,5 +1071,6 @@
 	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: bg-white/[0.08],border-border/50,px-1.5,py-0.5,space-y-1.5,text-text-dimmer": {
 		"movedTo": "src/lib/frontend/components/overlays/DebugSettingsTab.svelte",
 		"reason": "These class tokens moved intact to DebugSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
-	}
+	},
+	"src/lib/frontend/components/session/SessionListBulkBar.svelte :: pb-[calc(10px+env(safe-area-inset-bottom))]": "The select bar sits above the usage dock, which already clears the home indicator, so the inset here doubled the gap under the actions. The bar keeps a plain pb-2.5; Sidebar.svelte adds the inset back (.clears-home-indicator) when there is no dock."
 }

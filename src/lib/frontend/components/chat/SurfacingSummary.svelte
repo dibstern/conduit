@@ -2,6 +2,7 @@
 	import type { Snippet } from "svelte";
 	import { MediaQuery } from "svelte/reactivity";
 	import { splitCitations } from "../../utils/citations.js";
+	import { splitUrls } from "../../utils/links.js";
 	import type { MessageSurfacingPreferences } from "../../../contracts/message-surfacing.js";
 	import type { TurnRecap } from "../../../contracts/turn-recap.js";
 	import { SURFACE_LABELS, surfaceTime, type SurfaceLevel, type SurfaceTurn } from "../../utils/surface-turn.js";
@@ -169,7 +170,7 @@
 				open={readingOrdinal === message.number} onopenchange={(nextOpen) => nextOpen ? cite(message.number) : closeCitation()}
 				ariaLabel={`Cited message #${message.number}`} side="top" class="max-w-[380px]"
 				onCloseAutoFocus={(event) => { if (handedOff) event.preventDefault(); handedOff = false; }}
-			>{#snippet trigger({ props })}{@render citationButton(message, props)}{/snippet}{@render citationReader()}</Popover>{:else}{@render citationButton(message, { onclick: (event: MouseEvent) => { citationTrigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null; cite(message.number); } })}{/if}{:else if chunk.code}<code>{chunk.text}</code>{:else}{chunk.text}{/if}{/each}</p>
+			>{#snippet trigger({ props })}{@render citationButton(message, props)}{/snippet}{@render citationReader()}</Popover>{:else}{@render citationButton(message, { onclick: (event: MouseEvent) => { citationTrigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null; cite(message.number); } })}{/if}{:else if chunk.code}<code>{chunk.text}</code>{:else}{#each splitUrls(chunk.text) as part, i}{#if i % 2}<a href={part} target="_blank" rel="noopener noreferrer">{part}</a>{:else}{part}{/if}{/each}{/if}{/each}</p>
 			<div class="summary-foot">
 				<span class="mr-auto"><span class="desk-only">{`${selected.model.charAt(0).toUpperCase()}${selected.model.slice(1)} · `}</span>{`${view.numbers.filter(({ number }) => number >= selected.firstOrdinal && number <= selected.lastOrdinal).length} updates`}<span class="desk-only">{` · ${(selected.durationMs / 1000).toFixed(1)}s`}</span>{" · "}<span class="desk-only">{"written at "}</span>{writtenAt(selected)}</span>
 				{#if onquote}<SurfacingReplyActions source="recap-{selected.version}" within={proseEl} onreply={(excerpt) => { if (excerpt) { onquote(excerpt); afterReply(true); } }} />{/if}
@@ -210,6 +211,9 @@
 	.phone-stamp { display:none; }
 	.summary-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
 	.summary-prose { margin:10px 0 0; font-size:14px; line-height:1.65; white-space:pre-wrap; overflow-wrap:anywhere; }
+	/* Matches .md-content a, so a URL reads the same here as in the chat. */
+	.summary-prose a { color:var(--color-accent); text-decoration:none; }
+	.summary-prose a:hover { text-decoration:underline; }
 	.summary-prose code { padding:1px 5px; border-radius:5px; background:var(--color-chip); font:12px var(--font-mono); }
 	.regenerating { opacity:.45; }
 	.summary-prose :global(.recap-cite) { display:inline-flex; align-items:center; justify-content:center; margin-left:2px; padding:0 6px; border-radius:999px; background:var(--color-chip); color:var(--color-text-secondary); font:500 11px/18px var(--font-mono); vertical-align:1px; }

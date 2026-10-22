@@ -211,4 +211,7 @@
 	.clears-home-indicator :global(#session-list-scroller) {
 		padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
 	}
+	.clears-home-indicator :global([data-testid="select-bar"]) {
+		padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+	}
 </style>
