@@ -471,12 +471,12 @@ Scenario Outline: Final hides a live pending message without reading it
   And the surfacing session has a live turn
   When I set the surfacing level to Final
   And a new folded surfacing message awaits its verdict
-  Then Final shows 6 hidden messages and keeps the strip
+  Then Final shows 7 hidden messages and keeps the strip
   And the surfacing head says All read ✓
   And the surfacing axis offers no bulk read
   When the surfacing read clock advances 1500 milliseconds
   Then the surfacing read RPC count is 0
-  And Final shows 6 hidden messages and keeps the strip
+  And Final shows 7 hidden messages and keeps the strip
 
 Examples:
   | viewport |

@@ -39,7 +39,7 @@
 	import PastePreview from "../chat/PastePreview.svelte";
 	import PendingInputTray from "./PendingInputTray.svelte";
 	import { openSideThreads } from "../session/side-threads.svelte.js";
-	import { currentChat, getSessionPhase, isProcessing, registerInputDraft, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
+	import { currentChat, getSessionPhase, isProcessing, registerInputDraft } from "../../stores/chat.svelte.js";
 	import { send, stop, turn as readTurn } from "../../stores/turn.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { approvals } from "../../stores/composer-settings.svelte.js";
@@ -74,7 +74,7 @@
 	import { fade } from "svelte/transition";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { getDriverTraits, instanceState } from "../../stores/instance.svelte.js";
-	import { sessionViewState } from "../../stores/session-view.svelte.js";
+	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast, uiState } from "../../stores/ui.svelte.js";
 	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
@@ -871,7 +871,8 @@
 			}
 			let createdSessionId: string | null = null;
 			const unsentImages = pendingAttachments;
-			if (!isProcessing()) requestScrollOnNextContent();
+			// Sending asks to see the reply, so bring back a reader who drifted up.
+			requestTranscriptFollow();
 			steerRefusal = null;
 			dismissedRefusal = null;
 			const clearOnSend = textOverride === undefined && delivery !== "steer";
