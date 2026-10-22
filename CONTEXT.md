@@ -262,3 +262,60 @@ resets the dismissal. The hint works for writes back to the main checkout too.
 
 The checkout pill shows the folder suggestion with Move and Dismiss actions on
 desktop. Phones show an accessible icon and put both actions in the pill menu.
+
+## Run
+
+A **Run** is one provider execution owned by Conduit, with a stable identity
+separate from the provider's native execution id. A session has at most one
+active Run, which can accept several Run Inputs. Its states are Queued,
+Starting, Running, Interrupting, Settling and Ended; Ended records an outcome
+and a typed reason.
+
+_Avoid_: turn as a synonym for Run. A transcript turn represents one user
+input; several inputs can belong to one Run.
+
+## Run Input
+
+A **Run Input** is one user message associated with a Run, including its native
+message identity when known. Its states are Queued, Delivered, Accepted and
+Declined; delivery alone does not prove provider acceptance.
+
+_Avoid_: Run or turn when the distinction between a message and its execution
+matters.
+
+## Run Effect
+
+A **Run Effect** is a durable instruction produced by a Run Ledger decision
+for a provider executor, such as start, steer, interrupt, close or end. Its
+outcome returns to the ledger as retryable, permanent or delivery-unknown;
+delivery-unknown work requires a probe before any resend.
+
+_Avoid_: outbox command as the domain name. The old command outbox is replaced
+by Run Effects.
+
+## Steer
+
+A **Steer** is a Run Input admitted while a Run is active to redirect that
+same Run. If the provider declines it, the input returns to the inbox queue.
+
+_Avoid_: parallel Run or joined Run. Steering adds input to the one active Run.
+
+## Tombstone
+
+A **Tombstone** is the durable fact that a Run is Ended. Later events carrying
+that Run's id cannot reopen it or change its state. Late accounting (usage,
+cost, token totals) is still recorded against the ended Run's inputs.
+
+_Avoid_: an uncorrelated provider-idle observation or a delivery receipt as
+proof that a Run is Ended.
+
+## Run Ledger
+
+The **Run Ledger** is the sole owner of Run state for every provider, including
+Run Inputs, pending interactions, deadlines and Run Effects. Its verbs are
+admit for new user input, observe for provider events and effect outcomes,
+control for user actions and interaction answers, and settle for process loss,
+expired deadlines or provider-session termination; other lifecycle views derive
+from its decisions.
+
+_Avoid_: runner state or outbox status as an independent authority on a Run.
