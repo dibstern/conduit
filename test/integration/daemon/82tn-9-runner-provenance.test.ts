@@ -14,13 +14,20 @@ import {
 import {
 	makeProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionTag,
 } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
-import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import {
+	makeOverridesStateLive,
+	makeProcessingTimeoutHooks,
+	type OverridesStateTag,
+} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import {
 	makePersistenceProjectLayer,
 	makePersistenceStoreLayer,
 } from "../../../src/lib/persistence/effect/live.js";
+import { makeRetireReplacedProcessPrompts } from "../../../src/lib/persistence/effect/retire-pending-prompts.js";
 import { makeClaudeProviderRuntime } from "../../../src/lib/provider/claude/claude-provider-runtime.js";
 import { settleUnclaimedRunnerCommands } from "../../../src/lib/provider/runner/runner-recovery.js";
 import * as runnerRegistry from "../../../src/lib/provider/runner/runner-registry.js";
@@ -194,23 +201,64 @@ it.each([
 					);
 					// Startup may reclaim the store; open the independent reader afterward.
 					db = new Database(fixture.daemonStorePath(), { readonly: true });
+					const ownerIngestion = yield* Layer.build(
+						makeProviderRuntimeIngestionLive().pipe(
+							Layer.provide(ownerPersistence),
+						),
+					);
+					const ownerPersistenceContext = yield* Layer.build(ownerPersistence);
+					const ownerContext = Context.merge(
+						Context.merge(ownerIngestion, ownerPendingContext),
+						ownerPersistenceContext,
+					);
+					const retire = yield* makeRetireReplacedProcessPrompts.pipe(
+						Effect.provide(ownerContext),
+					);
+					const timeoutContext = yield* Effect.context<OverridesStateTag>();
+					const recoveryForSession = (id: string) =>
+						Effect.succeed(
+							id === sessionA
+								? {
+										projectId: "process-test",
+										ingestion: Context.get(
+											ownerIngestion,
+											ProviderRuntimeIngestionTag,
+										),
+										pending: ownerPending,
+										persist: Context.get(
+											ownerPersistenceContext,
+											ClaudeEventPersistEffectTag,
+										),
+										timeoutHooks: makeProcessingTimeoutHooks(
+											timeoutContext,
+											sessionA,
+										),
+										resolveCallContext: () => Effect.succeed(undefined),
+										retirePrompts: (processId: string | null) =>
+											retire(processId, { sessionId: sessionA }).pipe(
+												Effect.provideService(
+													PendingInteractionServiceTag,
+													ownerPending,
+												),
+											),
+									}
+								: undefined,
+						);
 					const runner = yield* makeClaudeProviderRuntime({
-						workspaceRoot: projectB,
+						projectRootForSession: (id) =>
+							Effect.succeed(id === sessionA ? fixture.projectDir : undefined),
 						daemonConfigDir: fixture.configDir,
 					}).pipe(
 						Effect.provideService(PersistenceProjectTag, {
 							projectId: "project-b",
 						}),
 					);
-					const ownerIngestion = yield* Layer.build(
-						makeProviderRuntimeIngestionLive().pipe(
-							Layer.provide(ownerPersistence),
-						),
-					);
-					yield* runner.recoverRunnerEffect.pipe(
-						Effect.provide(ownerIngestion),
-						Effect.provide(ownerPendingContext),
-					);
+					yield* runner
+						.recoverProjectContextsEffect(recoveryForSession)
+						.pipe(
+							Effect.provide(ownerIngestion),
+							Effect.provide(ownerPendingContext),
+						);
 					expect(yield* runner.hasLiveProcessEffect(sessionA)).toBe(true);
 					expect(yield* runner.hasLiveProcessEffect(sessionB)).toBe(false);
 					expect(commandB()).toEqual(beforeB);
@@ -395,7 +443,8 @@ it("retires prompts through the stored owner when adoption is refused and sends 
 			VALUES ('legacy-question', ${sessionId}, 'question', 'pending', 1),
 				('legacy-permission', ${sessionId}, 'permission', 'pending', 1)`;
 				const runner = yield* makeClaudeProviderRuntime({
-					workspaceRoot: fixture.projectDir,
+					projectRootForSession: (id) =>
+						Effect.succeed(id === sessionId ? fixture.projectDir : undefined),
 					daemonConfigDir: fixture.configDir,
 				});
 				const ownerIngestion = yield* Layer.build(
@@ -417,7 +466,45 @@ it("retires prompts through the stored owner when adoption is refused and sends 
 						questions: [{ question: "Retired?" }],
 					},
 				]);
-				yield* runner.recoverRunnerEffect.pipe(
+				const ownerPersistenceContext = yield* Layer.build(ownerPersistence);
+				const ownerContext = Context.merge(
+					Context.merge(ownerIngestion, ownerPendingContext),
+					ownerPersistenceContext,
+				);
+				const retire = yield* makeRetireReplacedProcessPrompts.pipe(
+					Effect.provide(ownerContext),
+				);
+				const timeoutContext = yield* Effect.context<OverridesStateTag>();
+				const recoveryForSession = (id: string) =>
+					Effect.succeed(
+						id === sessionId
+							? {
+									projectId: "process-test",
+									ingestion: Context.get(
+										ownerIngestion,
+										ProviderRuntimeIngestionTag,
+									),
+									pending: ownerPending,
+									persist: Context.get(
+										ownerPersistenceContext,
+										ClaudeEventPersistEffectTag,
+									),
+									timeoutHooks: makeProcessingTimeoutHooks(
+										timeoutContext,
+										sessionId,
+									),
+									resolveCallContext: () => Effect.succeed(undefined),
+									retirePrompts: (processId: string | null) =>
+										retire(processId, { sessionId }).pipe(
+											Effect.provideService(
+												PendingInteractionServiceTag,
+												ownerPending,
+											),
+										),
+								}
+							: undefined,
+					);
+				yield* runner.recoverProjectContextsEffect(recoveryForSession).pipe(
 					Effect.provide(ownerIngestion),
 					Effect.provide(ownerPendingContext),
 					Effect.provideService(PersistenceProjectTag, {
@@ -434,7 +521,7 @@ it("retires prompts through the stored owner when adoption is refused and sends 
 				]);
 				expect(yield* ownerPending.listPendingQuestions(sessionId)).toEqual([]);
 				// Retrying with an empty registry and no pending SQL rows stays empty.
-				yield* runner.recoverRunnerEffect.pipe(
+				yield* runner.recoverProjectContextsEffect(recoveryForSession).pipe(
 					Effect.provide(ownerIngestion),
 					Effect.provide(ownerPendingContext),
 					Effect.provideService(PersistenceProjectTag, {

@@ -30,12 +30,12 @@ import {
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import {
 	getOrchestrationLayer,
-	makeOrchestrationRuntimeLayer,
-	type OrchestrationLayerOptions,
+	type OrchestrationRuntimeLayerOptions,
 } from "../../../src/lib/provider/orchestration-wiring.js";
 import * as shellEnvironment from "../../../src/lib/provider/project-shell-env.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
+import { makeTestOrchestrationRuntimeLayer as makeOrchestrationRuntimeLayer } from "../../helpers/provider-adapters.js";
 
 let configDir: string;
 const Resolver = shellEnvironment.ProjectShellEnvResolver;
@@ -170,7 +170,9 @@ function makeSharedPersistenceRuntime(
 	);
 }
 
-async function makeScopedOrchestrationView(options: OrchestrationLayerOptions) {
+async function makeScopedOrchestrationView(
+	options: OrchestrationRuntimeLayerOptions & { client: OpenCodeAPI },
+) {
 	const persistence = makePersistenceEffectLayer(":memory:", "test-project");
 	const runtime = ManagedRuntime.make(
 		makeOrchestrationRuntimeLayer({ configDir, ...options }).pipe(
@@ -450,7 +452,10 @@ describe("Orchestration wiring", () => {
 	it("creates provider instances through plain drivers", async () => {
 		const client = makeStubClient();
 		const instance = await Effect.runPromise(
-			OpenCodeDriver.create({ client }).pipe(Effect.scoped),
+			OpenCodeDriver.create({
+				clientForAccount: () => Effect.succeed(client),
+				clientForSession: () => Effect.succeed(client),
+			}).pipe(Effect.scoped),
 		);
 
 		expect(OpenCodeDriver.providerId).toBe("opencode");

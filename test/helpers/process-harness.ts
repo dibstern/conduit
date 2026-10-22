@@ -88,6 +88,16 @@ const TIMEOUT_MS = 15_000;
 // Loaded four-worker runs reached 22.9s. Leave 5s within the 30s hook deadline.
 const STARTUP_TIMEOUT_MS = 25_000;
 
+function remainingTimeout(deadline: number | undefined, timeoutMs?: number) {
+	return Math.max(
+		1,
+		Math.min(
+			timeoutMs ?? (deadline === undefined ? TIMEOUT_MS : Infinity),
+			deadline === undefined ? Infinity : deadline - performance.now(),
+		),
+	);
+}
+
 class BrowserRpc extends Context.Service<
 	BrowserRpc,
 	RpcClient.RpcClient<
@@ -256,6 +266,7 @@ export class ProcessHarness {
 		private readonly opencodeInitiallyIdle = false,
 		private readonly draftPreWarmTtlMs?: number,
 		private readonly managedOpenCodeStopGraceMs?: number,
+		private readonly deadline?: number,
 	) {
 		this.root = realpathSync(mkdtempSync(rootPrefix));
 		this.rpcDiagnostics = new RpcDecodeDiagnostics(
@@ -569,6 +580,8 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			draftPreWarmTtlMs?: number;
 			/** Test-only SIGTERM grace for the fixture-owned managed process group. */
 			managedOpenCodeStopGraceMs?: number;
+			/** Absolute performance.now() deadline shared by startup, RPC and event waits. */
+			deadline?: number;
 			queryInitializationFailures?: number;
 			blockCapabilitiesProbe?: boolean;
 			capabilityModels?: readonly ModelInfo[];
@@ -637,6 +650,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			options.opencodeInitiallyIdle,
 			options.draftPreWarmTtlMs,
 			options.managedOpenCodeStopGraceMs,
+			options.deadline,
 		);
 	}
 
@@ -745,6 +759,11 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 		this.continuationSweepIntervalMs =
 			options.continuationSweepIntervalMs ?? this.continuationSweepIntervalMs;
 		this.logs = "";
+		const runnerStartupTimeoutMs =
+			options.runnerStartupTimeoutMs ??
+			(this.deadline === undefined
+				? undefined
+				: remainingTimeout(this.deadline));
 		if (options.opencodeUrl) this.defaultOpenCodeUrl = options.opencodeUrl;
 		this.opencodeIdleTimeoutMs =
 			options.opencodeIdleTimeoutMs ?? this.opencodeIdleTimeoutMs;
@@ -942,11 +961,11 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 									options.setupTimeoutMs,
 								),
 							}),
-					...(options.runnerStartupTimeoutMs === undefined
+					...(runnerStartupTimeoutMs === undefined
 						? {}
 						: {
 								CONDUIT_TEST_RUNNER_STARTUP_TIMEOUT_MS: String(
-									options.runnerStartupTimeoutMs,
+									runnerStartupTimeoutMs,
 								),
 							}),
 					CONDUIT_TEST_CLAUDE_OPTIONS_FILE: join(
@@ -1163,10 +1182,17 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 		});
 		await new Promise<void>((done, fail) => {
 			let finished = false;
-			const timer = setTimeout(() => {
-				finished = true;
-				fail(new Error(`Server startup timeout\n${this.logs}`));
-			}, options.startupTimeoutMs ?? STARTUP_TIMEOUT_MS);
+			const timer = setTimeout(
+				() => {
+					finished = true;
+					fail(new Error(`Server startup timeout\n${this.logs}`));
+				},
+				remainingTimeout(
+					this.deadline,
+					options.startupTimeoutMs ??
+						(this.deadline === undefined ? STARTUP_TIMEOUT_MS : undefined),
+				),
+			);
 			const onExit = () => {
 				finished = true;
 				clearTimeout(timer);
@@ -1273,18 +1299,30 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			project.slug,
 			undefined,
 			this.rpcDiagnostics,
+			this.deadline,
 		);
 		try {
-			// With no OpenCode listening, relay startup spends one SDK retry
-			// window (~3s) confirming that before it acks. A second window means
-			// startup is calling OpenCode again after learning it is down.
-			const deadline = Date.now() + 5000;
-			while (!this.generations.at(-1)?.fakeSdkActive) {
-				if (Date.now() > deadline)
-					throw new Error(
-						"Fake Claude SDK activation was not acknowledged; refusing to send prompts to this build",
-					);
-				await new Promise<void>((done) => setTimeout(done, 10));
+			// Activation arrives over IPC; polling spent wall time without helping
+			// a cold daemon load its modules on a busy machine.
+			const controller = new AbortController();
+			const timer = setTimeout(
+				() => controller.abort(),
+				remainingTimeout(
+					this.deadline,
+					this.deadline === undefined ? 5000 : undefined,
+				),
+			);
+			try {
+				while (!this.generations.at(-1)?.fakeSdkActive) {
+					await once(child, "message", { signal: controller.signal });
+				}
+			} catch (cause) {
+				throw new Error(
+					"Fake Claude SDK activation was not acknowledged; refusing to send prompts to this build",
+					{ cause },
+				);
+			} finally {
+				clearTimeout(timer);
 			}
 		} finally {
 			await probe.close();
@@ -1524,6 +1562,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			projectSlug,
 			followRows,
 			this.rpcDiagnostics,
+			this.deadline,
 		);
 		this.browsers.push(browser);
 		return browser;
@@ -1563,13 +1602,21 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 		await this.stop(signal, 10_000);
 	}
 
+	/** Bound assertion polls and direct RPCs by the fixture's shared deadline. */
+	remainingTimeMs(timeoutMs?: number): number {
+		return remainingTimeout(this.deadline, timeoutMs);
+	}
+
 	/** Fixture IPC and browser RPC travel independently; wait on the mark itself. */
 	async waitForMark(
 		predicate: (mark: ProcessMark) => boolean,
 		cursor = 0,
 	): Promise<ProcessMark> {
 		const controller = new AbortController();
-		const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+		const timer = setTimeout(
+			() => controller.abort(),
+			remainingTimeout(this.deadline),
+		);
 		try {
 			for (;;) {
 				const mark = this.marks.slice(cursor).find(predicate);
@@ -1759,7 +1806,14 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 		request: R,
 	): ReturnType<typeof sendRpcRequest<R>> {
 		const endpoint = join(this.configDir, "relay.sock");
-		return sendRpcRequest(endpoint, request).catch((error: unknown) => {
+		return sendRpcRequest(
+			endpoint,
+			request,
+			// Teardown must still stop the owned daemon after a test deadline.
+			this.deadline === undefined || request._tag === "Shutdown"
+				? {}
+				: { requestTimeoutMs: remainingTimeout(this.deadline) },
+		).catch((error: unknown) => {
 			if (Schema.isSchemaError(error)) {
 				this.rpcDiagnostics.capture(
 					endpoint,
@@ -2150,6 +2204,7 @@ export class ProcessBrowser {
 		originId: string,
 		private readonly projectSlug: string,
 		private readonly followRows: boolean,
+		private readonly deadline?: number,
 	) {
 		this.originId = originId;
 	}
@@ -2161,6 +2216,7 @@ export class ProcessBrowser {
 		projectSlug = "process-test",
 		followRows = true,
 		diagnostics?: RpcDecodeDiagnostics,
+		deadline?: number,
 	): Promise<ProcessBrowser> {
 		let browser: ProcessBrowser | undefined;
 		let connectionFailure: Error | undefined;
@@ -2173,7 +2229,7 @@ export class ProcessBrowser {
 			diagnostics,
 		);
 		const rpc = await runtime
-			.runPromise(BrowserRpc.pipe(Effect.timeout(TIMEOUT_MS)))
+			.runPromise(BrowserRpc.pipe(Effect.timeout(remainingTimeout(deadline))))
 			.catch(async (error: unknown) => {
 				await runtime.dispose();
 				throw error;
@@ -2184,13 +2240,16 @@ export class ProcessBrowser {
 			originId,
 			projectSlug,
 			followRows,
+			deadline,
 		);
 		if (connectionFailure) browser.fail(connectionFailure);
 		try {
-			await browser.followPtys();
-			await browser.watchApprovals();
-			await browser.watchProjectSettings();
-			await browser.followSessions();
+			await Promise.all([
+				browser.followPtys(),
+				browser.watchApprovals(),
+				browser.watchProjectSettings(),
+				browser.followSessions(),
+			]);
 			if (sessionId) await browser.view(sessionId);
 			return browser;
 		} catch (error) {
@@ -2431,9 +2490,11 @@ export class ProcessBrowser {
 
 	private run<A, E>(
 		effect: Effect.Effect<A, E>,
-		timeoutMs = TIMEOUT_MS,
+		timeoutMs = remainingTimeout(this.deadline),
 	): Promise<A> {
-		return this.runtime.runPromise(effect.pipe(Effect.timeout(timeoutMs)));
+		return this.runtime.runPromise(
+			effect.pipe(Effect.timeout(remainingTimeout(this.deadline, timeoutMs))),
+		);
 	}
 
 	async shutdown(): Promise<void> {
@@ -2647,7 +2708,7 @@ export class ProcessBrowser {
 
 	async preWarmSession(
 		sessionId: string,
-		timeoutMs = TIMEOUT_MS,
+		timeoutMs = remainingTimeout(this.deadline),
 	): Promise<void> {
 		await this.followSession(sessionId);
 		await this.run(this.rpc.PreWarmSession({ sessionId }), timeoutMs);
@@ -2656,7 +2717,7 @@ export class ProcessBrowser {
 	async send(
 		sessionId: string,
 		prompt: string,
-		timeoutMs = TIMEOUT_MS,
+		timeoutMs = remainingTimeout(this.deadline),
 		delivery: "queue" | "steer" = "queue",
 	): Promise<{ chunks: string[]; done: Record<string, unknown> }> {
 		await this.followSession(sessionId);
@@ -2721,7 +2782,7 @@ export class ProcessBrowser {
 	waitForTurnEnd(
 		sessionId: string,
 		cursor = 0,
-		timeoutMs = TIMEOUT_MS,
+		timeoutMs = remainingTimeout(this.deadline),
 		inputId?: string,
 	): Promise<Record<string, unknown>> {
 		const endedBefore = Math.max(
@@ -2847,7 +2908,7 @@ export class ProcessBrowser {
 					originId: this.originId,
 					commandId: randomUUID(),
 				})
-				.pipe(Effect.timeout(TIMEOUT_MS)),
+				.pipe(Effect.timeout(remainingTimeout(this.deadline))),
 			{ signal },
 		);
 	}
@@ -2855,13 +2916,16 @@ export class ProcessBrowser {
 	waitFor(
 		predicate: (message: Record<string, unknown>) => boolean,
 		cursor = 0,
-		timeoutMs = TIMEOUT_MS,
+		timeoutMs = remainingTimeout(this.deadline),
 	): Promise<Record<string, unknown>> {
 		return new Promise((done, fail) => {
-			const timer = setTimeout(() => {
-				this.waiters.delete(check);
-				fail(new Error("Timed out waiting for browser event"));
-			}, timeoutMs);
+			const timer = setTimeout(
+				() => {
+					this.waiters.delete(check);
+					fail(new Error("Timed out waiting for browser event"));
+				},
+				remainingTimeout(this.deadline, timeoutMs),
+			);
 			const check = () => {
 				const frame = this.frames
 					.slice(cursor)

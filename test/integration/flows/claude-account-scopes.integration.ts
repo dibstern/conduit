@@ -93,7 +93,6 @@ it("two Claude accounts sharing a folder probe and resolve settings with their o
 					}),
 			});
 			const instance = yield* makeClaudeProviderRuntime({
-				workspaceRoot: root,
 				daemonConfigDir: root,
 				runnerFactory: makeClaudeSessionRunner,
 			}).pipe(Effect.provideService(ClaudeAccountScopes, scopes));
@@ -186,7 +185,6 @@ it("invalidating Claude A cancels its title query while B on the same folder kee
 			const releases = new Map<string, () => void>();
 			const aborted: string[] = [];
 			const instance = yield* makeClaudeProviderRuntime({
-				workspaceRoot: root,
 				daemonConfigDir: root,
 				runnerFactory: makeClaudeSessionRunner,
 				generateTextQueryFactory: ({ options }) => ({
@@ -310,7 +308,6 @@ it("Claude discovery shares first open, retries a failed open, then closes and r
 					}),
 			});
 			const instance = yield* makeClaudeProviderRuntime({
-				workspaceRoot: root,
 				daemonConfigDir: root,
 				runnerFactory: makeClaudeSessionRunner,
 			}).pipe(Effect.provideService(ClaudeAccountScopes, scopes));
@@ -406,7 +403,6 @@ it("removal during Claude scope open fences a late finalizer before the next gen
 					}),
 			});
 			const instance = yield* makeClaudeProviderRuntime({
-				workspaceRoot: root,
 				daemonConfigDir: root,
 				runnerFactory: makeClaudeSessionRunner,
 			}).pipe(Effect.provideService(ClaudeAccountScopes, scopes));
@@ -459,7 +455,6 @@ it("a removed admission keeps its identity without borrowing the default account
 		Effect.gen(function* () {
 			const directory = yield* AccountDirectory;
 			const instance = yield* makeClaudeProviderRuntime({
-				workspaceRoot: root,
 				daemonConfigDir: root,
 				runnerFactory: makeClaudeSessionRunner,
 				generateTextQueryFactory: ({ options }) => ({
@@ -567,7 +562,6 @@ it("removing a Claude scope aborts its actual in-flight SDK capability probe", a
 					}),
 			});
 			const instance = yield* makeClaudeProviderRuntime({
-				workspaceRoot: root,
 				daemonConfigDir: root,
 				runnerFactory: makeClaudeSessionRunner,
 			}).pipe(Effect.provideService(ClaudeAccountScopes, scopes));
@@ -700,7 +694,7 @@ it("quarantining a Claude reattachment releases its account scope before success
 						Effect.gen(function* () {
 							const runners: SessionRunner[] = [];
 							const instance = yield* makeClaudeProviderRuntime({
-								workspaceRoot: root,
+								projectRootForSession: () => Effect.succeed(root),
 								daemonConfigDir: root,
 								runnerFactory: (deps, emit) =>
 									makeProcessClaudeSessionRunner(deps, emit).pipe(

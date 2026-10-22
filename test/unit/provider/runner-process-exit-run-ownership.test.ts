@@ -178,7 +178,10 @@ it("preserves an unaccepted reservation when idle exit retries on a replacement"
 				recoverCommands: () => Effect.succeed([]),
 			};
 			const runner = yield* makeProcessSessionRunner(
-				{ workspaceRoot: root, daemonConfigDir: root },
+				{
+					projectRootForSession: () => Effect.succeed(root),
+					daemonConfigDir: root,
+				},
 				(output) =>
 					output.type === "event"
 						? ingestion.ingest(output.event).pipe(
@@ -438,7 +441,10 @@ for (const [
 				(2, 'future-command', 'test-project', 's', 'claude', 'send_turn',
 					'future-run', '{"inputId":"future-command"}', 'pending', 0, 2, 2)`;
 				const runner = yield* makeProcessSessionRunner(
-					{ workspaceRoot: root, daemonConfigDir: root },
+					{
+						projectRootForSession: () => Effect.succeed(root),
+						daemonConfigDir: root,
+					},
 					(output) =>
 						Effect.gen(function* () {
 							if (output.type === "event") {

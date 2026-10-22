@@ -141,7 +141,10 @@ it.live.each(["opening", "preparation"] as const)(
 					Effect.sync(() => rmSync(root, { recursive: true, force: true })),
 				);
 				const runner = yield* makeProcessSessionRunner(
-					{ workspaceRoot: root, daemonConfigDir: root },
+					{
+						daemonConfigDir: root,
+						projectRootForSession: () => Effect.succeed(root),
+					},
 					() => Effect.succeed({}),
 					{
 						driverKind: "cursor",

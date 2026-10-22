@@ -66,9 +66,6 @@ function sendFailure(message: string) {
 }
 
 export interface OpenCodeProviderInstanceOptions {
-	readonly client?: OpenCodeAPI;
-	/** Retained for constructor compatibility; directories are resolved per call. */
-	readonly workspaceRoot?: string;
 	readonly configDir?: string;
 	readonly clientForAccount?: (
 		account: OpenCodeAccount,
@@ -77,8 +74,7 @@ export interface OpenCodeProviderInstanceOptions {
 	/**
 	 * Resolve the scoped API client for the OpenCode instance that owns a
 	 * session for callers without a ProviderCall (OpenCode Instances `use`).
-	 * Missing routes fail prompt replies. Other legacy operations may use the
-	 * default client. Unknown or unreachable instances fail without fallback.
+	 * Missing or unreachable routes fail without fallback.
 	 */
 	readonly clientForSession?: (
 		sessionId: string,
@@ -97,7 +93,6 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	readonly providerId = "opencode";
 	readonly userMessageIdForInput = openCodeInputMessageId;
 
-	private readonly client: OpenCodeAPI | undefined;
 	private readonly configDir: string;
 	private readonly clientForSession:
 		| ((
@@ -113,7 +108,6 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	>();
 
 	constructor(options: OpenCodeProviderInstanceOptions) {
-		this.client = options.client;
 		this.configDir = options.configDir ?? DEFAULT_CONFIG_DIR;
 		this.clientForSession = options.clientForSession;
 		this.clientForAccount = options.clientForAccount;
@@ -139,8 +133,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	}
 
 	/**
-	 * Sends retain their admitted account. Other operations resolve the session
-	 * binding; legacy direct callers may use the project-default client.
+	 * Sends retain their admitted account. Other operations resolve the session binding.
 	 */
 	private resolveClientEffect(
 		sessionId: string,
@@ -154,18 +147,15 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 				);
 			if (this.clientForAccount && account.driver === "opencode")
 				return this.clientForAccount(account, directory);
-			if (account.id === MANAGED_OPENCODE_ACCOUNT_ID && this.client)
-				return Effect.succeed(this.client);
 			return Effect.fail(
 				new Error(`OpenCode account "${account.id}" has no client route`),
 			);
 		}
 		const resolve = this.clientForSession;
-		return (resolve ? resolve(sessionId) : Effect.succeed(this.client)).pipe(
+		return (resolve ? resolve(sessionId) : Effect.succeed(undefined)).pipe(
 			Effect.flatMap((client) => {
-				const selected = client ?? this.client;
-				return selected
-					? Effect.succeed(selected)
+				return client
+					? Effect.succeed(client)
 					: Effect.fail(
 							new Error(`OpenCode session "${sessionId}" has no client route`),
 						);

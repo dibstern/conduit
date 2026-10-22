@@ -153,8 +153,8 @@ describe("OpenCode adapter call routing through OpenCode Instances", () => {
 			authHeaders: {},
 		});
 		provider = new OpenCodeProviderInstance({
-			client: defaultClient,
-			workspaceRoot: "/constructor",
+			clientForSession: () => Effect.succeed(defaultClient),
+
 			clientForAccount: (account, directory) =>
 				instances.use(account.id, directory),
 		});
@@ -295,12 +295,8 @@ describe("OpenCode adapter call routing through OpenCode Instances", () => {
 		}
 		const first = calls[0];
 		if (!first) throw new Error("Missing first call");
-		const unrouted = new OpenCodeProviderInstance({
-			client: defaultClient,
-			workspaceRoot: "/constructor",
-		});
+		const unrouted = new OpenCodeProviderInstance({});
 		const unbound = new OpenCodeProviderInstance({
-			client: defaultClient,
 			clientForSession: () => Effect.succeed(undefined),
 		});
 		for (const operation of [
@@ -401,7 +397,6 @@ describe("OpenCode adapter call routing through OpenCode Instances", () => {
 	] as const)("does not reply after interrupting a %s session lookup and allows a fresh attempt", async (reply) => {
 		const instances = await runtime.runPromise(OpenCodeInstancesTag);
 		const bound = new OpenCodeProviderInstance({
-			client: defaultClient,
 			clientForSession: () => instances.use("a", "/projects/one"),
 		});
 		const operation =

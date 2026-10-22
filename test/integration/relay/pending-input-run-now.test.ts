@@ -10,6 +10,10 @@ import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	type ProviderAdapterProjectContext,
+	ProviderAdapters,
+} from "../../../src/lib/domain/daemon/Services/provider-adapters.js";
 import { Usage } from "../../../src/lib/domain/daemon/Services/usage.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
@@ -44,10 +48,7 @@ import { makeClaudeSessionRunner } from "../../../src/lib/provider/claude/claude
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { SDKMessage } from "../../../src/lib/provider/claude/types.js";
 import { ClaudeBoundaryError } from "../../../src/lib/provider/event-sink-errors.js";
-import {
-	getOrchestrationLayer,
-	makeOrchestrationRuntimeLayer,
-} from "../../../src/lib/provider/orchestration-wiring.js";
+import { getOrchestrationLayer } from "../../../src/lib/provider/orchestration-wiring.js";
 import type { SSEEvent } from "../../../src/lib/relay/opencode-events.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
@@ -66,6 +67,7 @@ import {
 	makeSuccessResult,
 } from "../../helpers/mock-sdk.js";
 import { makeSessionCreatedEvent } from "../../helpers/persistence-factories.js";
+import { makeTestOrchestrationRuntimeLayer as makeOrchestrationRuntimeLayer } from "../../helpers/provider-adapters.js";
 import { makeSSEEvent } from "../../helpers/sse-factories.js";
 
 function signal<T>() {
@@ -578,6 +580,12 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 			try {
 				const running = Effect.runPromise(
 					Effect.gen(function* () {
+						const adapters = yield* ProviderAdapters;
+						yield* adapters.registerProject(
+							"test-project",
+							yield* Effect.context<ProviderAdapterProjectContext>(),
+						);
+						yield* adapters.recover;
 						const client = yield* RpcTest.makeClient(WsRpcGroup);
 						const inbox = yield* SessionInboxTag;
 						const providerTurns = yield* ProviderTurnServiceTag;

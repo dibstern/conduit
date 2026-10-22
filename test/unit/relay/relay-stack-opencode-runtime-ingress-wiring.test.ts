@@ -41,7 +41,7 @@ import {
 	currentRunnerOutput,
 	makeRunnerReceiptStore,
 } from "../../../src/lib/provider/runner/runner-receipts.js";
-import { createProjectRelay } from "../../../src/lib/relay/relay-stack.js";
+import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
 interface MockOpenCode {

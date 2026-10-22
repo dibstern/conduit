@@ -230,8 +230,6 @@ export interface ClaudeProviderInstanceDeps {
 	readonly onBackgroundTask?: (
 		input: import("../../session/background-liveness.js").BackgroundTaskTransition,
 	) => void;
-	readonly workspaceRoot: string;
-	readonly extraFolders?: readonly string[];
 	readonly daemonConfigDir?: string;
 	readonly projectRootForSession?: NonNullable<
 		import("../runner/runner-provider-instance.js").RunnerProviderInstanceDeps["projectRootForSession"]
@@ -239,10 +237,6 @@ export interface ClaudeProviderInstanceDeps {
 	readonly recoveryForSession?: NonNullable<
 		import("../runner/runner-provider-instance.js").RunnerProviderInstanceDeps["recoveryForSession"]
 	>;
-	readonly shellEnv?: (
-		directory: string,
-	) => Readonly<Record<string, string | undefined>>;
-	readonly prepareShellEnv?: (directory: string) => Promise<boolean>;
 	readonly claudeSettingsOverrides?: () => Settings | undefined;
 	/** Injectable factory for the SDK's query() function. Defaults to the real SDK. */
 	readonly queryFactory?: (params: {
@@ -266,14 +260,10 @@ export interface ClaudeProviderInstanceDeps {
 
 export type ClaudeSessionRunnerDeps = Pick<
 	ClaudeProviderInstanceDeps,
-	| "workspaceRoot"
-	| "extraFolders"
 	| "daemonConfigDir"
 	| "projectRootForSession"
 	| "recoveryForSession"
 	| "readThread"
-	| "shellEnv"
-	| "prepareShellEnv"
 	| "claudeSettingsOverrides"
 	| "queryFactory"
 	| "subagentSdk"
@@ -702,9 +692,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			yield* this.warmedQueries.preWarmEffect(
 				normalizeClaudeLaunchInput(command.input),
 				command.claudeSettingsOverrides,
-				command.input.shellEnv ??
-					command.shellEnv ??
-					this.deps.shellEnv?.(command.input.workspaceRoot),
+				command.input.shellEnv ?? command.shellEnv,
 				this.getPermissionBridge(),
 				command.settingsSnapshot !== undefined,
 			);
@@ -956,6 +944,11 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		return this.mapProviderFailure(
 			"discover",
 			Effect.gen({ self: this }, function* () {
+				const directory = call?.workspaceRoot ?? workspaceRoot;
+				if (!directory)
+					return yield* Effect.fail(
+						new Error("Claude discovery requires a workspace directory"),
+					);
 				const selectedAccount = call?.account ?? account;
 				const configDir =
 					selectedAccount?.driver === "claude"
@@ -968,7 +961,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 								).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null))),
 							).configDir;
 				return yield* discoverCapabilitiesEffect(
-					call?.workspaceRoot ?? workspaceRoot ?? this.deps.workspaceRoot,
+					directory,
 					this.deps.capabilitiesService,
 					configDir,
 					options,
@@ -1091,8 +1084,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					{
 						...input,
 						root: input.workspaceRoot,
-						shellEnv:
-							input.shellEnv ?? this.deps.shellEnv?.(input.workspaceRoot),
+						shellEnv: input.shellEnv,
 					},
 				) &&
 				!(yield* hasPendingTurn(this.stateRef, sessionId))
@@ -1274,7 +1266,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 							abortController,
 							canUseTool,
 							this.turnSettings.get(input.eventSink),
-							input.shellEnv ?? this.deps.shellEnv?.(input.workspaceRoot),
+							input.shellEnv,
 						),
 					catch: (cause) =>
 						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
@@ -1332,8 +1324,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					login: {
 						...input,
 						root: input.workspaceRoot,
-						shellEnv:
-							input.shellEnv ?? this.deps.shellEnv?.(input.workspaceRoot),
+						shellEnv: input.shellEnv,
 					},
 					instanceId: input.instanceId ?? "claude",
 					nativeThread: launchInput.nativeThread,

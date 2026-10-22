@@ -2828,7 +2828,7 @@ export const claudeSdk: NonNullable<ProjectRelayConfig["claudeSdk"]> = {
 		if (file)
 			appendFileSync(
 				file,
-				`${JSON.stringify({ prompt: params.prompt, cwd: params.options?.cwd })}\n`,
+				`${JSON.stringify({ prompt: params.prompt, cwd: params.options?.cwd, configDir: params.options?.env?.["CLAUDE_CONFIG_DIR"] })}\n`,
 			);
 		const tuning = Schema.decodeUnknownOption(
 			Schema.fromJsonString(

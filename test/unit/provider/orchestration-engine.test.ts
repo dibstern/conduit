@@ -812,12 +812,12 @@ describe("OrchestrationEngine", () => {
 	});
 
 	describe("shutdownEffect", () => {
-		it("delegates to registry.shutdownAllEffect", async () => {
+		it("leaves the daemon's borrowed adapters running", async () => {
 			const shutdownSpy = vi.spyOn(registry, "shutdownAllEffect");
 
 			await Effect.runPromise(engine.shutdownEffect());
 
-			expect(shutdownSpy).toHaveBeenCalledTimes(1);
+			expect(shutdownSpy).not.toHaveBeenCalled();
 		});
 
 		it("clears session bindings", async () => {
@@ -864,7 +864,6 @@ describe("OrchestrationEngine", () => {
 
 			const claudeRegistry = new ProviderRegistry();
 			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});
 			claudeRegistry.registerInstance(instance);
@@ -902,7 +901,6 @@ describe("OrchestrationEngine", () => {
 
 			const claudeRegistry = new ProviderRegistry();
 			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});
 			claudeRegistry.registerInstance(instance);
@@ -969,7 +967,6 @@ describe("OrchestrationEngine", () => {
 
 			const claudeRegistry = new ProviderRegistry();
 			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});
 			claudeRegistry.registerInstance(instance);
@@ -1119,7 +1116,6 @@ describe("OrchestrationEngine", () => {
 
 			const claudeRegistry = new ProviderRegistry();
 			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});
 			claudeRegistry.registerInstance(instance);

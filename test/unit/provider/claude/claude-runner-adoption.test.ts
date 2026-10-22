@@ -222,7 +222,8 @@ describe("Claude runner adoption", () => {
 				Effect.gen(function* () {
 					const runner = yield* makeProcessClaudeSessionRunner(
 						{
-							workspaceRoot: fixture.workspaceRoot,
+							projectRootForSession: () =>
+								Effect.succeed(fixture.workspaceRoot),
 							daemonConfigDir: config.root,
 						},
 						(output) =>
@@ -296,7 +297,8 @@ describe("Claude runner adoption", () => {
 				Effect.gen(function* () {
 					const runner = yield* makeProcessClaudeSessionRunner(
 						{
-							workspaceRoot: fixture.workspaceRoot,
+							projectRootForSession: () =>
+								Effect.succeed(fixture.workspaceRoot),
 							daemonConfigDir: config.root,
 						},
 						() => Effect.succeed({}),
@@ -333,7 +335,8 @@ describe("Claude runner adoption", () => {
 				Effect.gen(function* () {
 					const runner = yield* makeProcessClaudeSessionRunner(
 						{
-							workspaceRoot: fixture.workspaceRoot,
+							projectRootForSession: () =>
+								Effect.succeed(fixture.workspaceRoot),
 							daemonConfigDir: config.root,
 						},
 						() => Effect.succeed({}),
@@ -384,7 +387,8 @@ describe("Claude runner adoption", () => {
 				Effect.gen(function* () {
 					const runner = yield* makeProcessClaudeSessionRunner(
 						{
-							workspaceRoot: fixture.workspaceRoot,
+							projectRootForSession: () =>
+								Effect.succeed(fixture.workspaceRoot),
 							daemonConfigDir: config.root,
 						},
 						() => Effect.succeed({}),
@@ -425,7 +429,8 @@ describe("Claude runner adoption", () => {
 				Effect.gen(function* () {
 					const runner = yield* makeProcessClaudeSessionRunner(
 						{
-							workspaceRoot: fixture.workspaceRoot,
+							projectRootForSession: () =>
+								Effect.succeed(fixture.workspaceRoot),
 							daemonConfigDir: config.root,
 						},
 						() => Effect.succeed({}),

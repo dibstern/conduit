@@ -58,7 +58,6 @@ import type { Logger } from "../logger.js";
 import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { getOrchestrationLayer } from "../provider/orchestration-wiring.js";
-import { RunnerProviderInstance } from "../provider/runner/runner-provider-instance.js";
 import { runningRunnerCommands } from "../provider/runner/runner-recovery.js";
 import { makeWsRpcWebSocketHandler } from "../server/ws-rpc-handler.js";
 import type { ProjectRelayConfig } from "../types.js";
@@ -177,23 +176,15 @@ function acquireStartupServices(inputs: StartupInputs) {
 				),
 			);
 		};
-		const sharedAdapters = yield* Effect.serviceOption(ProviderAdapters);
-		if (Option.isSome(sharedAdapters)) {
-			yield* sharedAdapters.value
-				.registerProject(
-					persistenceProject.projectId,
-					yield* Effect.context<ProviderAdapterProjectContext>(),
-					onBackgroundWorkChanged,
-				)
-				.pipe(Effect.provideService(Scope.Scope, relayManagedRuntime.scope));
-			yield* sharedAdapters.value.recover;
-		} else
-			for (const providerId of orchestration.registry.listProviders()) {
-				const instance =
-					yield* orchestration.registry.getInstanceEffect(providerId);
-				if (instance instanceof RunnerProviderInstance)
-					yield* instance.recoverEffect();
-			}
+		const adapters = yield* ProviderAdapters;
+		yield* adapters
+			.registerProject(
+				persistenceProject.projectId,
+				yield* Effect.context<ProviderAdapterProjectContext>(),
+				onBackgroundWorkChanged,
+			)
+			.pipe(Effect.provideService(Scope.Scope, relayManagedRuntime.scope));
+		yield* adapters.recover;
 		const projectionRunner = yield* ProjectionRunnerEffectTag;
 		if (!(yield* projectionRunner.isRecovered()))
 			yield* projectionRunner.recover();

@@ -138,24 +138,13 @@ export const recoverClaudeRunnerCommands = (
 									`Claude account "${admittedAccountId}" is unavailable for recovery`,
 								),
 							);
-					} else {
-						// Standalone compatibility runtimes still own their environment resolver.
-						const prepareShellEnv = deps.prepareShellEnv;
-						if (prepareShellEnv)
-							yield* Effect.tryPromise(() =>
-								prepareShellEnv(input.workspaceRoot),
-							).pipe(
-								Effect.timeoutOption("10 seconds"),
-								Effect.catch(() => Effect.void),
-							);
 					}
 					// The shared recovery drops a result that arrives while closing.
 					if (closing()) return undefined;
 					const instanceId =
 						call?.account.id ?? input.instanceId ?? row.provider_id;
-					const shellEnv = call
-						? call.shellEnv
-						: (deps.shellEnv?.(input.workspaceRoot) ?? { ...process.env });
+					const shellEnv = call?.shellEnv ??
+						input.shellEnv ?? { ...process.env };
 					const state = yield* makeProviderStateEffect.pipe(
 						Effect.provideService(PersistenceProjectTag, {
 							projectId: row.project_key,

@@ -23,7 +23,6 @@ import {
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
 } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
-import { ConfigTag } from "../../domain/relay/Services/services.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { createLogger } from "../../logger.js";
@@ -112,14 +111,12 @@ export class RunnerProcessError extends Data.TaggedError("RunnerProcessError")<{
 
 interface ProcessRunnerDeps {
 	readonly accountResources?: RunnerProviderInstanceDeps["accountResources"];
-	readonly workspaceRoot: string;
 	readonly daemonConfigDir?: string;
-	readonly projectRootForSession?: RunnerProviderInstanceDeps["projectRootForSession"];
+	readonly subagentPollTimeoutMs?: number;
+	readonly projectRootForSession: NonNullable<
+		RunnerProviderInstanceDeps["projectRootForSession"]
+	>;
 	readonly recoveryForSession?: RunnerProviderInstanceDeps["recoveryForSession"];
-	readonly shellEnv?: (
-		directory: string,
-	) => Readonly<Record<string, string | undefined>>;
-	readonly prepareShellEnv?: (directory: string) => Promise<boolean>;
 }
 
 export interface ProcessRunnerDriver {
@@ -871,361 +868,395 @@ export const makeProcessSessionRunner = (
 		};
 
 		const attach = (sessionId: string, entry: RunnerChild) =>
-			driver.connect({
-				driverKind: driver.driverKind,
-				socketPath: entry.socketPath,
-				sessionId,
-				runnerId: entry.runnerId,
-				...(entry.pid !== undefined ? { pid: entry.pid } : {}),
-				helloTimeoutMs: entry.child ? startupTimeoutMs : 2000,
-				...(entry.candidate ? { preserveRole: true } : {}),
-				deps: { ...deps, ...entry.launch, daemonConfigDir: configDir },
-				...(receipts ? { receipts } : {}),
-				runFork,
-				onOutputCommitted: (output) => {
-					if (
-						output.type === "event" &&
-						output.event.type === "run.started" &&
-						output.event.runId
-					)
-						(entry.ownedRunIds ??= new Set()).add(output.event.runId);
-					observeRunnerTurn(
-						output,
-						"sinkId" in output ? sinks.get(output.sinkId) : undefined,
+			Effect.gen(function* () {
+				const workspaceRoot =
+					entry.launch?.workspaceRoot ??
+					(yield* deps.projectRootForSession(sessionId)) ??
+					// Abandoned runners need only an identity hello before retirement.
+					(entry.candidate ? configDir : undefined);
+				if (!workspaceRoot)
+					return yield* Effect.fail(
+						runnerFailure(
+							"connect runner",
+							`Session ${sessionId} has no registered project`,
+						),
 					);
-				},
-				emit: (received) => {
-					const operation = Effect.suspend(() => {
-						// A retired query's shutdown notices must not clear its replacement.
+				return yield* driver.connect({
+					driverKind: driver.driverKind,
+					socketPath: entry.socketPath,
+					sessionId,
+					runnerId: entry.runnerId,
+					...(entry.pid !== undefined ? { pid: entry.pid } : {}),
+					helloTimeoutMs: entry.child ? startupTimeoutMs : 2000,
+					...(entry.candidate ? { preserveRole: true } : {}),
+					deps: {
+						workspaceRoot,
+						...entry.launch,
+						daemonConfigDir: configDir,
+						...(deps.subagentPollTimeoutMs !== undefined
+							? { subagentPollTimeoutMs: deps.subagentPollTimeoutMs }
+							: {}),
+					},
+					...(receipts ? { receipts } : {}),
+					runFork,
+					onOutputCommitted: (output) => {
 						if (
-							entry.stopping &&
-							children.get(sessionId) !== entry &&
-							(received.type === "background-task" ||
-								received.type === "cancel-interactions" ||
-								(received.type === "event" &&
-									received.event.type === "session.status"))
+							output.type === "event" &&
+							output.event.type === "run.started" &&
+							output.event.runId
 						)
-							return Effect.succeed({});
-						const binding =
-							"sinkId" in received ? sinks.get(received.sinkId) : undefined;
-						if (received.type === "release-sink" && binding?.pending) {
-							binding.releaseRequested = true;
-							return Effect.succeed({});
-						}
-						return emit(received, sessionId).pipe(
-							Effect.tap(() =>
-								Effect.sync(() => {
-									observeRunnerTurn(received, binding);
-									if (received.type === "release-sink")
-										releaseSink(received.sinkId);
-								}),
-							),
+							(entry.ownedRunIds ??= new Set()).add(output.event.runId);
+						observeRunnerTurn(
+							output,
+							"sinkId" in output ? sinks.get(output.sinkId) : undefined,
 						);
-					});
-					return received.type === "ensure-subagent-session"
-						? operation
-						: entry.outputs.withPermits(1)(operation);
-				},
-				onHello: (hello, connection, replay) =>
-					Effect.gen(function* () {
-						entry.verified = true;
-						entry.pid = hello.pid;
-						const ownsEntry = () =>
-							(entry.candidate
-								? candidates.has(entry)
-								: children.get(sessionId) === entry) &&
-							!entry.failure &&
-							!entry.stopping &&
-							!closing;
-						if (ownsEntry() && !connection.closed)
-							entry.connection = connection;
-						const ensureAttached = () =>
-							Effect.suspend(() => {
-								if (
-									ownsEntry() &&
-									entry.connection === connection &&
-									!connection.closed
-								)
-									return Effect.void;
-								connection.destroy();
-								return Effect.fail(
-									runnerFailure(
-										"restore runner",
-										"Runner attachment is no longer active",
-									),
-								);
-							});
-						// Warming candidates have not replaced the active process yet.
-						if (!entry.candidate)
-							yield* lock.withPermits(1)(
-								Effect.gen(function* () {
-									yield* ensureAttached();
-									yield* observeProcess(sessionId, entry);
-									yield* ensureAttached();
-								}),
-							);
-						yield* ensureAttached();
-						entry.pendingSendCommands = hello.sendCommands
-							? new Map(
-									hello.sendCommands.map(({ commandId, attempt }) => [
-										commandId,
-										attempt,
-									]),
-								)
-							: undefined;
-						yield* acknowledgeSends(sessionId, entry, connection);
-						entry.buildId = hello.buildId;
-						entry.stopsTasks = hello.stopsTasks === true;
-						entry.rebindsAccount = hello.rebindsAccount === true;
-						entry.upgrade.state = hello.upgradeState;
-						const restoreAccounts: Effect.Effect<void, SessionFailure>[] = [];
-						for (const binding of entry.candidate
-							? []
-							: (hello.bindings ?? [])) {
-							let inputId: string | undefined;
-							let runId: string | undefined;
-							let messageId = "";
-							let pending = false;
-							let accountId: string | undefined;
-							let activeTurn = false;
-							let turnInputId: string | undefined;
-							if (sql) {
-								const rows = yield* sql<{
-									provider_id: string;
-									input_id: string | null;
-									run_id: string | null;
-									status: string;
-									attempt_count: number;
-									assistant_message_id: string | null;
-									turn_state: string | null;
-									turn_input_id: string | null;
-								}>`SELECT outbox.provider_id, COALESCE(json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS input_id,
-									COALESCE(reservation.joined_into, reservation.id) AS run_id,
-									outbox.status, outbox.attempt_count, turns.assistant_message_id, turns.state AS turn_state, turns.user_message_id AS turn_input_id
-									FROM provider_command_outbox outbox
-									LEFT JOIN provider_runs reservation ON reservation.session_id = outbox.session_id
-										AND reservation.id = outbox.run_id
-									LEFT JOIN turns ON turns.session_id = outbox.session_id
-										AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
-									WHERE outbox.project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId}) AND outbox.command_id = ${binding.commandId ?? binding.sinkId} AND outbox.session_id = ${sessionId}`.pipe(
-									Effect.mapError((cause) =>
-										runnerFailure("restore runner history", cause),
-									),
-								);
-								yield* ensureAttached();
-								const row = rows[0];
-								if (row) {
-									accountId = row.provider_id;
-									turnInputId = row.turn_input_id ?? undefined;
-									activeTurn =
-										row.turn_state === "pending" ||
-										row.turn_state === "running";
-									inputId = row.input_id ?? undefined;
-									runId = row.run_id ?? undefined;
-									// Acknowledged events will not replay after adoption.
-									messageId = row.assistant_message_id ?? "";
-									pending =
-										row.status === "running" &&
-										(binding.sinkId ===
-											runnerSinkId(
-												binding.commandId ?? binding.sinkId,
-												row.attempt_count,
-											) ||
-											(inputId !== undefined &&
-												binding.sinkId ===
-													runnerSinkId(inputId, row.attempt_count)));
-								}
-							}
-							yield* ensureAttached();
-							sinks.set(binding.sinkId, {
-								sessionId,
-								...(inputId ? { inputId } : {}),
-								runId,
-								messageId,
-								pending,
-								accepted: true,
-								releaseRequested: false,
-							});
-							// Historical sinks remain available for output replay, but their
-							// native lifetime ended. Older runners report only the history.
+					},
+					emit: (received) => {
+						const operation = Effect.suspend(() => {
+							// A retired query's shutdown notices must not clear its replacement.
 							if (
-								binding.released === false ||
-								(binding.released === undefined && activeTurn)
-							) {
-								restoreAccounts.push(
+								entry.stopping &&
+								children.get(sessionId) !== entry &&
+								(received.type === "background-task" ||
+									received.type === "cancel-interactions" ||
+									(received.type === "event" &&
+										received.event.type === "session.status"))
+							)
+								return Effect.succeed({});
+							const binding =
+								"sinkId" in received ? sinks.get(received.sinkId) : undefined;
+							if (received.type === "release-sink" && binding?.pending) {
+								binding.releaseRequested = true;
+								return Effect.succeed({});
+							}
+							return emit(received, sessionId).pipe(
+								Effect.tap(() =>
+									Effect.sync(() => {
+										observeRunnerTurn(received, binding);
+										if (received.type === "release-sink")
+											releaseSink(received.sinkId);
+									}),
+								),
+							);
+						});
+						return received.type === "ensure-subagent-session"
+							? operation
+							: entry.outputs.withPermits(1)(operation);
+					},
+					onHello: (hello, connection, replay) =>
+						Effect.gen(function* () {
+							entry.verified = true;
+							entry.pid = hello.pid;
+							const ownsEntry = () =>
+								(entry.candidate
+									? candidates.has(entry)
+									: children.get(sessionId) === entry) &&
+								!entry.failure &&
+								!entry.stopping &&
+								!closing;
+							if (ownsEntry() && !connection.closed)
+								entry.connection = connection;
+							const ensureAttached = () =>
+								Effect.suspend(() => {
+									if (
+										ownsEntry() &&
+										entry.connection === connection &&
+										!connection.closed
+									)
+										return Effect.void;
+									connection.destroy();
+									return Effect.fail(
+										runnerFailure(
+											"restore runner",
+											"Runner attachment is no longer active",
+										),
+									);
+								});
+							// Warming candidates have not replaced the active process yet.
+							if (!entry.candidate)
+								yield* lock.withPermits(1)(
 									Effect.gen(function* () {
 										yield* ensureAttached();
-										const turn = sinks.get(binding.sinkId);
-										if (!turn) return;
-										if (sql && turnInputId) {
-											const rows = yield* sql<{
-												state: string;
-											}>`SELECT state FROM turns
-											WHERE session_id = ${sessionId} AND user_message_id = ${turnInputId}`.pipe(
-												Effect.mapError((cause) =>
-													runnerFailure("restore runner history", cause),
-												),
-											);
-											if (
-												rows[0]?.state !== "pending" &&
-												rows[0]?.state !== "running"
-											)
-												return;
-										}
-										const retained = yield* Effect.result(
-											retainAccount(
-												binding.sinkId,
-												accountId ??
-													hello.upgradeState?.snapshot?.input.account?.id,
-												sessionId,
-												inputId,
-												connection,
-											),
-										);
-										if (retained._tag === "Failure") {
-											if (retained.failure.code !== "account_unavailable")
-												return yield* Effect.fail(retained.failure);
-											yield* failRunnerTurn(
-												(output) => emit(output, sessionId),
-												binding.sinkId,
-												turn,
-												retained.failure,
-												driver.driverKind,
-											);
-											releaseSink(binding.sinkId);
-											runFork(
-												connection
-													.commandEffect(randomUUID(), {
-														type: "interrupt",
-														sessionId,
-														...(inputId ? { turnIds: [inputId] } : {}),
-													})
-													.pipe(Effect.ignore, Effect.asVoid),
-											);
-										}
+										yield* observeProcess(sessionId, entry);
+										yield* ensureAttached();
 									}),
 								);
-							}
-						}
-						for (const pending of entry.candidate
-							? []
-							: (hello.pendingOutputs ?? [])) {
 							yield* ensureAttached();
-							if (pending.sequence <= (hello.acknowledgedSequence ?? 0))
-								yield* emit(pending.output, sessionId);
-						}
-						// A previous-build runner may have completed while the store still
-						// says running. Commit its backlog before checking account demand.
-						if (driver.withAccountScope && restoreAccounts.length > 0) {
-							yield* replay ?? Effect.void;
-							// Replay may settle a command before recovery can install its waiter.
-							if (sql)
-								yield* entry.outputs.withPermits(1)(
-									Effect.gen(function* () {
-										for (const binding of hello.bindings ?? []) {
+							entry.pendingSendCommands = hello.sendCommands
+								? new Map(
+										hello.sendCommands.map(({ commandId, attempt }) => [
+											commandId,
+											attempt,
+										]),
+									)
+								: undefined;
+							yield* acknowledgeSends(sessionId, entry, connection);
+							entry.buildId = hello.buildId;
+							entry.stopsTasks = hello.stopsTasks === true;
+							entry.rebindsAccount = hello.rebindsAccount === true;
+							entry.upgrade.state = hello.upgradeState;
+							const restoreAccounts: Effect.Effect<void, SessionFailure>[] = [];
+							for (const binding of entry.candidate
+								? []
+								: (hello.bindings ?? [])) {
+								let inputId: string | undefined;
+								let runId: string | undefined;
+								let messageId = "";
+								let pending = false;
+								let accountId: string | undefined;
+								let activeTurn = false;
+								let turnInputId: string | undefined;
+								if (sql) {
+									const rows = yield* sql<{
+										provider_id: string;
+										input_id: string | null;
+										run_id: string | null;
+										status: string;
+										attempt_count: number;
+										assistant_message_id: string | null;
+										turn_state: string | null;
+										turn_input_id: string | null;
+									}>`SELECT outbox.provider_id, COALESCE(json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS input_id,
+										COALESCE(reservation.joined_into, reservation.id) AS run_id,
+										outbox.status, outbox.attempt_count, turns.assistant_message_id, turns.state AS turn_state, turns.user_message_id AS turn_input_id
+										FROM provider_command_outbox outbox
+										LEFT JOIN provider_runs reservation ON reservation.session_id = outbox.session_id
+											AND reservation.id = outbox.run_id
+										LEFT JOIN turns ON turns.session_id = outbox.session_id
+											AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
+										WHERE outbox.project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId}) AND outbox.command_id = ${binding.commandId ?? binding.sinkId} AND outbox.session_id = ${sessionId}`.pipe(
+										Effect.mapError((cause) =>
+											runnerFailure("restore runner history", cause),
+										),
+									);
+									yield* ensureAttached();
+									const row = rows[0];
+									if (row) {
+										accountId = row.provider_id;
+										turnInputId = row.turn_input_id ?? undefined;
+										activeTurn =
+											row.turn_state === "pending" ||
+											row.turn_state === "running";
+										inputId = row.input_id ?? undefined;
+										runId = row.run_id ?? undefined;
+										// Acknowledged events will not replay after adoption.
+										messageId = row.assistant_message_id ?? "";
+										pending =
+											row.status === "running" &&
+											(binding.sinkId ===
+												runnerSinkId(
+													binding.commandId ?? binding.sinkId,
+													row.attempt_count,
+												) ||
+												(inputId !== undefined &&
+													binding.sinkId ===
+														runnerSinkId(inputId, row.attempt_count)));
+									}
+								}
+								yield* ensureAttached();
+								sinks.set(binding.sinkId, {
+									sessionId,
+									...(inputId ? { inputId } : {}),
+									runId,
+									messageId,
+									pending,
+									accepted: true,
+									releaseRequested: false,
+								});
+								// Historical sinks remain available for output replay, but their
+								// native lifetime ended. Older runners report only the history.
+								if (
+									binding.released === false ||
+									(binding.released === undefined && activeTurn)
+								) {
+									restoreAccounts.push(
+										Effect.gen(function* () {
+											yield* ensureAttached();
 											const turn = sinks.get(binding.sinkId);
-											if (!turn?.pending) continue;
-											const [command] = yield* sql<{ status: string }>`
-												SELECT status FROM provider_command_outbox
-												WHERE project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId}) AND session_id = ${sessionId}
-													AND command_id = ${binding.commandId ?? binding.sinkId}`.pipe(
-												Effect.mapError((cause) =>
-													runnerFailure("restore runner history", cause),
+											if (!turn) return;
+											if (sql && turnInputId) {
+												const rows = yield* sql<{
+													state: string;
+												}>`SELECT state FROM turns
+												WHERE session_id = ${sessionId} AND user_message_id = ${turnInputId}`.pipe(
+													Effect.mapError((cause) =>
+														runnerFailure("restore runner history", cause),
+													),
+												);
+												if (
+													rows[0]?.state !== "pending" &&
+													rows[0]?.state !== "running"
+												)
+													return;
+											}
+											const retained = yield* Effect.result(
+												retainAccount(
+													binding.sinkId,
+													accountId ??
+														hello.upgradeState?.snapshot?.input.account?.id,
+													sessionId,
+													inputId,
+													connection,
 												),
 											);
-											yield* ensureAttached();
-											if (
-												command?.status !== "completed" &&
-												command?.status !== "failed"
-											)
-												continue;
-											turn.pending = false;
-											if (turn.releaseRequested) {
-												yield* emit(
-													{ type: "release-sink", sinkId: binding.sinkId },
-													sessionId,
+											if (retained._tag === "Failure") {
+												if (retained.failure.code !== "account_unavailable")
+													return yield* Effect.fail(retained.failure);
+												yield* failRunnerTurn(
+													(output) => emit(output, sessionId),
+													binding.sinkId,
+													turn,
+													retained.failure,
+													driver.driverKind,
 												);
 												releaseSink(binding.sinkId);
+												runFork(
+													connection
+														.commandEffect(randomUUID(), {
+															type: "interrupt",
+															sessionId,
+															...(inputId ? { turnIds: [inputId] } : {}),
+														})
+														.pipe(Effect.ignore, Effect.asVoid),
+												);
 											}
+										}),
+									);
+								}
+							}
+							for (const pending of entry.candidate
+								? []
+								: (hello.pendingOutputs ?? [])) {
+								yield* ensureAttached();
+								if (pending.sequence <= (hello.acknowledgedSequence ?? 0))
+									yield* emit(pending.output, sessionId);
+							}
+							// A previous-build runner may have completed while the store still
+							// says running. Commit its backlog before checking account demand.
+							if (driver.withAccountScope && restoreAccounts.length > 0) {
+								yield* replay ?? Effect.void;
+								// Replay may settle a command before recovery can install its waiter.
+								if (sql)
+									yield* entry.outputs.withPermits(1)(
+										Effect.gen(function* () {
+											for (const binding of hello.bindings ?? []) {
+												const turn = sinks.get(binding.sinkId);
+												if (!turn?.pending) continue;
+												const [command] = yield* sql<{ status: string }>`
+													SELECT status FROM provider_command_outbox
+													WHERE project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId}) AND session_id = ${sessionId}
+														AND command_id = ${binding.commandId ?? binding.sinkId}`.pipe(
+													Effect.mapError((cause) =>
+														runnerFailure("restore runner history", cause),
+													),
+												);
+												yield* ensureAttached();
+												if (
+													command?.status !== "completed" &&
+													command?.status !== "failed"
+												)
+													continue;
+												turn.pending = false;
+												if (turn.releaseRequested) {
+													yield* emit(
+														{ type: "release-sink", sinkId: binding.sinkId },
+														sessionId,
+													);
+													releaseSink(binding.sinkId);
+												}
+											}
+										}),
+									);
+							}
+							yield* Effect.all(restoreAccounts, { discard: true });
+							yield* ensureAttached();
+							if (process.env["NODE_ENV"] === "test" && process.connected)
+								process.send?.({
+									channel: "conduit-process-test",
+									kind: "runner-started",
+									sessionId,
+									pid: hello.pid,
+									socketPath: entry.socketPath,
+									buildId: hello.buildId,
+									protocolVersion: hello.protocolVersion,
+								});
+						}),
+					onCommandAccepted: (sinkId) => {
+						const binding = sinks.get(sinkId);
+						if (binding) {
+							binding.accepted = true;
+							if (binding.admission)
+								runFork(Deferred.succeed(binding.admission, undefined));
+						}
+					},
+					onCommandsSettled: (commands) => {
+						runFork(
+							entry.outputs
+								.withPermits(1)(
+									Effect.gen(function* () {
+										for (const { commandId, attempt } of commands) {
+											const pending = entry.pendingSendCommands?.get(commandId);
+											if (pending === undefined || pending > attempt) continue;
+											if (sql) {
+												const rows = yield* sql<{
+													run_id: string | null;
+												}>`SELECT run_id
+											FROM provider_command_outbox WHERE project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId})
+											AND session_id = ${sessionId} AND command_id = ${commandId}
+											AND attempt_count = ${pending}`;
+												for (const row of rows)
+													if (row.run_id)
+														(entry.ownedRunIds ??= new Set()).add(row.run_id);
+											}
+											if (entry.pendingSendCommands?.get(commandId) === pending)
+												entry.pendingSendCommands.delete(commandId);
 										}
 									}),
-								);
-						}
-						yield* Effect.all(restoreAccounts, { discard: true });
-						yield* ensureAttached();
+								)
+								.pipe(
+									Effect.catch((cause) =>
+										Effect.logWarning(
+											"Runner send ownership acknowledgement failed",
+											cause,
+										),
+									),
+								),
+						);
+					},
+					onUpgradeState: (state) => {
+						const snapshot = state.snapshot ?? entry.upgrade.state?.snapshot;
+						// Only snapshots are omitted when unchanged. An omitted cursor is cleared.
+						entry.upgrade.state = {
+							...state,
+							...(snapshot ? { snapshot } : {}),
+						};
+						upgrade(sessionId, entry);
+					},
+					onIdleExit: () => {
+						entry.idleExiting = true;
 						if (process.env["NODE_ENV"] === "test" && process.connected)
 							process.send?.({
 								channel: "conduit-process-test",
-								kind: "runner-started",
-								sessionId,
-								pid: hello.pid,
-								socketPath: entry.socketPath,
-								buildId: hello.buildId,
-								protocolVersion: hello.protocolVersion,
+								kind: "runner-idle-exit-started",
+								pid: entry.pid,
 							});
-					}),
-				onCommandAccepted: (sinkId) => {
-					const binding = sinks.get(sinkId);
-					if (binding) {
-						binding.accepted = true;
-						if (binding.admission)
-							runFork(Deferred.succeed(binding.admission, undefined));
-					}
-				},
-				onCommandsSettled: (commands) => {
-					runFork(
-						entry.outputs
-							.withPermits(1)(
-								Effect.gen(function* () {
-									for (const { commandId, attempt } of commands) {
-										const pending = entry.pendingSendCommands?.get(commandId);
-										if (pending === undefined || pending > attempt) continue;
-										if (sql) {
-											const rows = yield* sql<{
-												run_id: string | null;
-											}>`SELECT run_id
-										FROM provider_command_outbox WHERE project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId})
-										AND session_id = ${sessionId} AND command_id = ${commandId}
-										AND attempt_count = ${pending}`;
-											for (const row of rows)
-												if (row.run_id)
-													(entry.ownedRunIds ??= new Set()).add(row.run_id);
-										}
-										if (entry.pendingSendCommands?.get(commandId) === pending)
-											entry.pendingSendCommands.delete(commandId);
-									}
-								}),
-							)
-							.pipe(
-								Effect.catch((cause) =>
-									Effect.logWarning(
-										"Runner send ownership acknowledgement failed",
-										cause,
-									),
-								),
-							),
-					);
-				},
-				onUpgradeState: (state) => {
-					const snapshot = state.snapshot ?? entry.upgrade.state?.snapshot;
-					// Only snapshots are omitted when unchanged. An omitted cursor is cleared.
-					entry.upgrade.state = { ...state, ...(snapshot ? { snapshot } : {}) };
-					upgrade(sessionId, entry);
-				},
-				onIdleExit: () => {
-					entry.idleExiting = true;
-					if (process.env["NODE_ENV"] === "test" && process.connected)
-						process.send?.({
-							channel: "conduit-process-test",
-							kind: "runner-idle-exit-started",
-							pid: entry.pid,
-						});
-				},
-				onClose: (failure) => failed(sessionId, entry, failure),
+					},
+					onClose: (failure) => failed(sessionId, entry, failure),
+				});
 			});
 
 		const start = (sessionId: string, entry: RunnerChild) =>
 			Effect.gen(function* () {
+				const registrationRoot =
+					entry.registrationRoot ??
+					(yield* deps.projectRootForSession(sessionId));
+				if (!registrationRoot)
+					return yield* Effect.fail(
+						runnerFailure(
+							"spawn runner",
+							`Session ${sessionId} has no registered project`,
+						),
+					);
 				if (Buffer.byteLength(entry.socketPath) >= 104)
 					return yield* Effect.fail(
 						runnerFailure(
@@ -1237,10 +1268,7 @@ export const makeProcessSessionRunner = (
 					try: () => {
 						if (closing || entry.stopping)
 							throw runnerFailure("spawn runner", "Runners are shutting down");
-						prepareRunnerDirectory(
-							entry.registrationRoot ?? deps.workspaceRoot,
-							configDir,
-						);
+						prepareRunnerDirectory(registrationRoot, configDir);
 						const extension = import.meta.url.endsWith(".ts") ? "ts" : "js";
 						// Launch the real absolute file: Cursor finds native helpers in
 						// ancestor node_modules directories of this entry, not its SDK import.
@@ -1266,7 +1294,7 @@ export const makeProcessSessionRunner = (
 									driver.driverKind,
 								],
 								{
-									cwd: entry.launch?.workspaceRoot ?? deps.workspaceRoot,
+									cwd: entry.launch?.workspaceRoot ?? registrationRoot,
 									env: { ...process.env, CONDUIT_CONFIG_DIR: configDir },
 									detached: true,
 									stdio: ["ignore", log, log, "ipc"],
@@ -1392,14 +1420,17 @@ export const makeProcessSessionRunner = (
 
 		const createEntry = (
 			sessionId: string,
-			owner?: Pick<RunnerChild, "ingestion" | "pendingInteractions"> & {
+			owner?: {
 				readonly projectId?: string | undefined;
+				readonly ingestion?: ProviderRuntimeIngestion | undefined;
+				readonly pendingInteractions?: PendingInteractionService | undefined;
 			},
 		): Effect.Effect<RunnerChild, SessionFailure> =>
 			Effect.gen(function* () {
-				const registrationRoot = deps.projectRootForSession
-					? yield* deps.projectRootForSession(sessionId, owner?.projectId)
-					: deps.workspaceRoot;
+				const registrationRoot = yield* deps.projectRootForSession(
+					sessionId,
+					owner?.projectId,
+				);
 				if (!registrationRoot)
 					return yield* Effect.fail(
 						runnerFailure(
@@ -1635,21 +1666,13 @@ export const makeProcessSessionRunner = (
 					const recoveryScope = yield* Effect.serviceOption(
 						PersistenceProjectTag,
 					);
-					const config = yield* Effect.serviceOption(ConfigTag);
 					const recoveryIngestion = yield* Effect.serviceOption(
 						ProviderRuntimeIngestionTag,
 					);
 					const recoveryPending = yield* Effect.serviceOption(
 						PendingInteractionServiceTag,
 					);
-					for (const registration of deps.recoveryForSession
-						? discoverAllRunners(configDir)
-						: discoverRunners(
-								config._tag === "Some"
-									? config.value.projectDir
-									: deps.workspaceRoot,
-								configDir,
-							)) {
+					for (const registration of discoverAllRunners(configDir)) {
 						if ((registration.driverKind ?? "claude") !== driver.driverKind)
 							continue;
 						if (
@@ -2736,41 +2759,6 @@ export const makeProcessSessionRunner = (
 							entry.ending > 0)
 					)
 						return;
-					if (
-						command.type === "send-turn" &&
-						entry.draftPreWarm &&
-						command.input.shellEnv === undefined &&
-						deps.prepareShellEnv
-					) {
-						// Project RPC routing can prune a draft worktree's env cache.
-						// Await its current capture before sampling, just as warming does.
-						const prepareShellEnv = deps.prepareShellEnv;
-						yield* Effect.tryPromise(() =>
-							prepareShellEnv(command.input.workspaceRoot),
-						).pipe(
-							Effect.timeoutOption("10 seconds"),
-							Effect.catchCause((cause) =>
-								Effect.sync(() =>
-									log.debug(
-										`Draft environment readiness failed: ${String(cause)}`,
-									),
-								),
-							),
-						);
-						if (entry.failure) return yield* Effect.fail(entry.failure);
-						if (entry.stopping || entry.ending > 0)
-							return yield* Effect.fail(
-								runnerFailure(command.type, "Runner is ending"),
-							);
-						if (entry.idleExiting)
-							return yield* Effect.fail({
-								...runnerFailure(
-									command.type,
-									"Runner is no longer accepting turns",
-								),
-								code: "runner_idle_exit",
-							});
-					}
 					if (closing)
 						return yield* Effect.fail(
 							runnerFailure(command.type, "Runners are shutting down"),
@@ -2792,8 +2780,7 @@ export const makeProcessSessionRunner = (
 											)
 										: {}),
 									shellEnv: command.input.shellEnv ??
-										command.shellEnv ??
-										deps.shellEnv?.(command.input.workspaceRoot) ?? {
+										command.shellEnv ?? {
 											...process.env,
 										},
 								}
@@ -2801,8 +2788,7 @@ export const makeProcessSessionRunner = (
 								? {
 										...command,
 										shellEnv: command.input.shellEnv ??
-											command.shellEnv ??
-											deps.shellEnv?.(command.input.workspaceRoot) ?? {
+											command.shellEnv ?? {
 												...process.env,
 											},
 									}

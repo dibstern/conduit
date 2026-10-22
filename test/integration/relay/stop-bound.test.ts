@@ -34,10 +34,7 @@ import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { inboxRunStatusQuery } from "../../../src/lib/persistence/inbox-run-status-query.js";
-import {
-	getOrchestrationLayer,
-	makeOrchestrationRuntimeLayer,
-} from "../../../src/lib/provider/orchestration-wiring.js";
+import { getOrchestrationLayer } from "../../../src/lib/provider/orchestration-wiring.js";
 import {
 	MOCK_OPENCODE_GPT4_CATALOG,
 	makeMockAccountDirectory,
@@ -49,6 +46,7 @@ import {
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 import { makeSessionCreatedEvent } from "../../helpers/persistence-factories.js";
+import { makeTestOrchestrationRuntimeLayer as makeOrchestrationRuntimeLayer } from "../../helpers/provider-adapters.js";
 
 const stopLayer = (api: OpenCodeAPI, scratch: string) => {
 	const persistence = makePersistenceEffectLayer(

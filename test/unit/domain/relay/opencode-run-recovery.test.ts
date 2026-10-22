@@ -68,7 +68,9 @@ it.effect(
 			);
 			const directory = yield* (yield* SessionWorkspaceTag).get("s");
 			expect(directory).toBe("/tmp/native-extra");
-			const provider = new OpenCodeProviderInstance({ client });
+			const provider = new OpenCodeProviderInstance({
+				clientForSession: () => Effect.succeed(client),
+			});
 			const send = yield* Effect.forkChild(
 				provider.sendTurnEffect({
 					sessionId: "s",

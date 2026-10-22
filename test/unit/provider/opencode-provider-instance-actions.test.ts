@@ -48,7 +48,6 @@ describe("OpenCodeProviderInstance action methods", () => {
 	beforeEach(() => {
 		client = makeStubClient();
 		instance = new OpenCodeProviderInstance({
-			client,
 			clientForSession: () => Effect.succeed(client),
 		});
 	});
@@ -70,7 +69,6 @@ describe("OpenCodeProviderInstance action methods", () => {
 				},
 			});
 			instance = new OpenCodeProviderInstance({
-				client,
 				clientForSession: () => Effect.succeed(client),
 			});
 
@@ -108,8 +106,6 @@ describe("OpenCodeProviderInstance action methods", () => {
 
 		it("appends session allow rules for 'always' before replying 'once'", async () => {
 			instance = new OpenCodeProviderInstance({
-				client,
-				workspaceRoot: "/workspace",
 				clientForSession: () => Effect.succeed(client),
 			});
 			vi.mocked(client.permission.list).mockResolvedValue([
@@ -259,7 +255,6 @@ describe("OpenCodeProviderInstance action methods", () => {
 				},
 			});
 			instance = new OpenCodeProviderInstance({
-				client,
 				clientForSession: () => Effect.succeed(client),
 			});
 
@@ -336,7 +331,6 @@ describe("OpenCodeProviderInstance action methods", () => {
 				},
 			});
 			instance = new OpenCodeProviderInstance({
-				client,
 				clientForSession: () => Effect.succeed(client),
 			});
 
@@ -364,7 +358,6 @@ describe("OpenCodeProviderInstance action methods", () => {
 		beforeEach(() => {
 			namedClient = makeStubClient();
 			instance = new OpenCodeProviderInstance({
-				client,
 				clientForSession: (sessionId) =>
 					Effect.succeed(sessionId === "bound-s" ? namedClient : undefined),
 			});
@@ -437,7 +430,6 @@ describe("OpenCodeProviderInstance action methods", () => {
 
 		it("fails with a typed error when the named instance cannot be resolved", async () => {
 			instance = new OpenCodeProviderInstance({
-				client,
 				clientForSession: () =>
 					Effect.fail(new Error("instance oc-b unavailable")),
 			});

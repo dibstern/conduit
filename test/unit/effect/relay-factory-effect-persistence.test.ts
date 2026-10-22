@@ -23,6 +23,7 @@ import { InstanceHealthCheckLive } from "../../../src/lib/domain/daemon/Services
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { ProviderAdapters } from "../../../src/lib/domain/daemon/Services/provider-adapters.js";
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import {
 	makeSessionActivity,
@@ -34,6 +35,7 @@ import { ProjectManagementServiceTag } from "../../../src/lib/domain/relay/Servi
 import { ScanServiceTag } from "../../../src/lib/domain/relay/Services/scan-service.js";
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeDaemonStoreTestLayer } from "../../helpers/daemon-rpc.js";
 import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
@@ -46,7 +48,16 @@ vi.mock("../../../src/lib/relay/relay-stack.js", () => ({
 	createProjectRelay: createProjectRelayMock,
 }));
 
+const NoopProviderAdaptersLive = Layer.sync(ProviderAdapters, () => ({
+	registry: new ProviderRegistry(),
+	recoveryProjects: [],
+	registerProject: () => Effect.void,
+	projectFailed: () => Effect.void,
+	recover: Effect.void,
+}));
+
 const NoopAuxiliaryDaemonServices = Layer.mergeAll(
+	NoopProviderAdaptersLive,
 	makeDaemonStoreTestLayer(),
 	Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub()),
 	InstanceHealthCheckLive,
@@ -415,6 +426,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 			Layer.provide(
 				Layer.mergeAll(
 					makeDaemonStoreTestLayer(),
+					NoopProviderAdaptersLive,
 					InstanceHealthCheckLive,
 					DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
 					ConfigPersistenceNoopLive,

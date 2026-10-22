@@ -46,10 +46,8 @@ import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
-import {
-	createProjectRelay,
-	type ProjectRelay,
-} from "../../../src/lib/relay/relay-stack.js";
+import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
+import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
 
 const relayBus = async (relay: ProjectRelay) => {
 	const context = await relay.effectRuntime.runtime.context();

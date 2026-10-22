@@ -27,6 +27,7 @@ import {
 import { makeReadQueryEffect } from "../../../persistence/effect/read-query-effect.js";
 import { makeRetireReplacedProcessPrompts } from "../../../persistence/effect/retire-pending-prompts.js";
 import { ClaudeDriver } from "../../../provider/claude/claude-provider-instance.js";
+import type { ClaudeProviderInstanceDeps } from "../../../provider/claude/claude-provider-runtime.js";
 import { makeClaudeThreadRead } from "../../../provider/claude/claude-thread-read.js";
 import type { ClaudeThreadReadResult } from "../../../provider/claude/types.js";
 import { makeCursorProviderRuntime } from "../../../provider/cursor/cursor-provider-runtime.js";
@@ -59,7 +60,13 @@ import {
 import { SessionActivityTag } from "../Services/session-activity.js";
 
 /** Adapter lifetime belongs to the daemon; project services are scoped borrows. */
-export const makeProviderAdaptersLive = (configDir: string) =>
+export const makeProviderAdaptersLive = (
+	configDir: string,
+	options: {
+		readonly claudeSdk?: Partial<NonNullable<ProjectRelayConfig["claudeSdk"]>>;
+		readonly claudeRunnerFactory?: ClaudeProviderInstanceDeps["runnerFactory"];
+	} = {},
+) =>
 	Layer.effect(
 		ProviderAdapters,
 		Effect.gen(function* () {
@@ -273,7 +280,7 @@ export const makeProviderAdaptersLive = (configDir: string) =>
 					),
 				);
 			};
-			let testSdk: ProjectRelayConfig["claudeSdk"];
+			let testSdk = options.claudeSdk;
 			const testModule = process.env["CONDUIT_TEST_CLAUDE_QUERY_MODULE"];
 			if (process.env["NODE_ENV"] === "test" && process.send && testModule) {
 				const imported: {
@@ -299,11 +306,8 @@ export const makeProviderAdaptersLive = (configDir: string) =>
 							"Process test module must export Claude query, title and fork SDK functions",
 					});
 			}
-			// Explicit ProviderCall values carry directories and accounts. The empty
-			// compatibility root is never selected for a daemon-routed session.
 			registry.registerInstance(
 				yield* ClaudeDriver.create({
-					workspaceRoot: "",
 					daemonConfigDir: configDir,
 					projectRootForSession,
 					recoveryForSession,
@@ -312,16 +316,15 @@ export const makeProviderAdaptersLive = (configDir: string) =>
 					readThread,
 					claudeSettingsOverrides: () =>
 						loadRelaySettings(configDir).claudeSettings,
-					...(testSdk
-						? {
-								queryFactory: testSdk.query,
-								generateTextQueryFactory: testSdk.titleQuery,
-								sessionForkSdk: testSdk.fork,
-								...(testSdk.subagentSdk
-									? { subagentSdk: testSdk.subagentSdk }
-									: {}),
-							}
+					...(options.claudeRunnerFactory
+						? { runnerFactory: options.claudeRunnerFactory }
 						: {}),
+					...(testSdk?.query ? { queryFactory: testSdk.query } : {}),
+					...(testSdk?.titleQuery
+						? { generateTextQueryFactory: testSdk.titleQuery }
+						: {}),
+					...(testSdk?.fork ? { sessionForkSdk: testSdk.fork } : {}),
+					...(testSdk?.subagentSdk ? { subagentSdk: testSdk.subagentSdk } : {}),
 				}),
 			);
 			registry.registerInstance(
@@ -380,7 +383,6 @@ export const makeProviderAdaptersLive = (configDir: string) =>
 			registry.registerInstance(
 				yield* makeCursorProviderRuntime(
 					{
-						workspaceRoot: "",
 						daemonConfigDir: configDir,
 						accounts: accounts.snapshot,
 						projectRootForSession,

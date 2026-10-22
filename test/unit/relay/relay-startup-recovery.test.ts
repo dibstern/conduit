@@ -13,14 +13,12 @@ import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-s
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import {
-	createProjectRelay,
-	type ProjectRelay,
-} from "../../../src/lib/relay/relay-stack.js";
+import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import {
 	makeMockOpenCodeAPI,
 	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
+import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
 
 it.each([
 	"ready",
@@ -151,10 +149,15 @@ it.each([
 				},
 			}),
 		);
-		await vi.waitFor(() => expect(result).toBe("interrupted"), {
-			timeout: 500,
-			interval: 10,
-		});
+		// With fake timers, waitFor only advances fake time by `interval` per check,
+		// so under load it never reaches the reactor's 500 ms outcome poll.
+		await vi.waitFor(
+			async () => {
+				if (readiness === "hung") await vi.advanceTimersByTimeAsync(500);
+				expect(result).toBe("interrupted");
+			},
+			{ timeout: 5_000, interval: 10 },
+		);
 		expect((await send).error?.code).toBe("interrupted");
 		expect(
 			await relay.effectRuntime.runtime.runPromise(

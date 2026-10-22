@@ -10,6 +10,7 @@ import {
 import { Effect, Layer, Option, Ref } from "effect";
 import { expect, vi } from "vitest";
 import { PortScannerTag } from "../../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
+import { makeProviderAdaptersLive } from "../../../src/lib/domain/daemon/Layers/provider-adapters-layer.js";
 import {
 	HttpServerRefTag,
 	RelayFactoryLive,
@@ -35,12 +36,12 @@ import {
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
-import { createProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import { makeDaemonStoreTestLayer } from "../../helpers/daemon-rpc.js";
 import {
 	makeMockAccountDirectory,
 	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
+import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
 
 describe("relay tracing propagation", () => {
 	it.effect(
@@ -98,7 +99,11 @@ describe("relay tracing propagation", () => {
 				}),
 			);
 			const layer = RelayFactoryLive(join(dir, "config")).pipe(
-				Layer.provideMerge(dependencies),
+				Layer.provideMerge(
+					makeProviderAdaptersLive(join(dir, "config")).pipe(
+						Layer.provideMerge(dependencies),
+					),
+				),
 			);
 
 			return Effect.gen(function* () {

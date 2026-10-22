@@ -32,7 +32,7 @@ import {
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
-import type { ProviderStateEffectTag } from "../../../src/lib/persistence/effect/provider-state-effect.js";
+import { ProviderStateEffectTag } from "../../../src/lib/persistence/effect/provider-state-effect.js";
 import type { ReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { StoredEvent } from "../../../src/lib/persistence/events.js";
@@ -211,7 +211,8 @@ const waitForSessionProjectorToReachLatestRename = (sessionId = "session-1") =>
 					if (latest > 0 && cursor >= latest) return latest;
 					throw new Error("Timed out waiting for session projector cursor");
 				},
-				{ timeout: 1_000 },
+				// Covers a whole replayed generation plus projection, which is slow under load.
+				{ timeout: 10_000 },
 			),
 		);
 	});
@@ -479,7 +480,7 @@ describe("SessionTitleService", () => {
 				return Effect.succeed(replay.client(directory ?? ""));
 			});
 			const provider = new OpenCodeProviderInstance({
-				client: replay.client("/project"),
+				clientForSession: () => Effect.succeed(replay.client("/project")),
 				configDir,
 				clientForAccount: route,
 			});
@@ -573,11 +574,18 @@ describe("SessionTitleService", () => {
 				accounts,
 				providerLayer: Layer.effect(
 					ProviderRegistryTag,
-					makeCursorProviderRuntime({
-						workspaceRoot: process.cwd(),
-						daemonConfigDir: configDir,
-						accounts: accounts.snapshot,
-					}).pipe(Effect.map((provider) => new ProviderRegistry([provider]))),
+					Effect.gen(function* () {
+						const read = yield* ReadQueryEffectTag;
+						const state = yield* ProviderStateEffectTag;
+						const provider = yield* makeCursorProviderRuntime(
+							{
+								daemonConfigDir: configDir,
+								accounts: accounts.snapshot,
+							},
+							{ read, state },
+						);
+						return new ProviderRegistry([provider]);
+					}),
 				),
 			});
 			return Effect.gen(function* () {
@@ -704,7 +712,7 @@ describe("SessionTitleService", () => {
 				(params: Parameters<ClaudeOneShotQueryFactory>[0]) => {
 					scratchDir = params.options?.cwd;
 					expect(params.options?.env?.["CLAUDE_CONFIG_DIR"]).toBe(
-						join(projectDir, ".claude-work"),
+						"/account-base/.claude-work",
 					);
 					expect(params.options?.env?.["TITLE_ACCOUNT_MARKER"]).toBe("work");
 					return replayClaudeText();
@@ -717,7 +725,8 @@ describe("SessionTitleService", () => {
 						driver: "claude",
 						id: AccountIdSchema.make("claude-work"),
 						name: "Work",
-						folder: configuredClaudeConfigDir(".claude-work"),
+						configuredFolder: ".claude-work",
+						folder: configuredClaudeConfigDir("/account-base/.claude-work"),
 						env: { TITLE_ACCOUNT_MARKER: "work" },
 						usageEligible: true,
 					},

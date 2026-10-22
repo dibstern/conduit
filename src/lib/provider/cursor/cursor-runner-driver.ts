@@ -269,7 +269,6 @@ export const discoverCursorEffect = (
 	});
 
 export const makeCursorRunnerDriver = (
-	workspaceRoot: string,
 	port?: CursorSdkPort,
 	persistence?: {
 		readonly read: ReadQueryEffect;
@@ -283,12 +282,7 @@ export const makeCursorRunnerDriver = (
 		directory?: string,
 		shellEnv?: Readonly<Record<string, string | undefined>>,
 	) => {
-		const discovery = discoverCursorEffect(
-			port,
-			account,
-			directory ?? workspaceRoot,
-			shellEnv,
-		);
+		const discovery = discoverCursorEffect(port, account, directory, shellEnv);
 		return resources
 			? discovery.pipe(Effect.provideService(CursorAccountResources, resources))
 			: discovery;
@@ -298,7 +292,7 @@ export const makeCursorRunnerDriver = (
 		discoverEffect: (directory, account, _options, call) =>
 			discover(
 				call?.account ?? account,
-				call?.workspaceRoot ?? directory ?? workspaceRoot,
+				call?.workspaceRoot ?? directory,
 				call?.shellEnv,
 			),
 		generateTextEffect: (input) => {

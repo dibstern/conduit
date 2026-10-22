@@ -51,6 +51,18 @@ export const configuredClaudeConfigDir = (path: string): ClaudeConfigDir => ({
 	path,
 });
 
+/** Account folders belong to the daemon's launch cwd, independently of query cwd. */
+export const resolveClaudeAccountFolder = (
+	folder: ClaudeConfigDir,
+): ClaudeConfigDir => ({
+	...folder,
+	path: resolve(
+		folder.path === "~" || folder.path.startsWith("~/")
+			? homedir() + folder.path.slice(1)
+			: folder.path,
+	),
+});
+
 export interface ClaudeLogin {
 	readonly account?: ClaudePreWarmSessionInput["account"];
 	readonly instanceId?: string | undefined;

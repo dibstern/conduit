@@ -2452,7 +2452,12 @@ describe("ProviderTurnService", () => {
 				throw new Error("prompt unavailable");
 			});
 			const registry = new ProviderRegistry();
-			registry.registerInstance(new OpenCodeProviderInstance({ client: api }));
+			registry.registerInstance(
+				new OpenCodeProviderInstance({
+					clientForSession: () => Effect.succeed(api),
+					clientForAccount: () => Effect.succeed(api),
+				}),
+			);
 			const inlineEngine = new OrchestrationEngine({ registry });
 			inlineEngine.bindSession("session-1", "opencode");
 			const dispatchEffect = vi.fn((command: SendTurnCommand) =>

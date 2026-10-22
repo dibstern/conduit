@@ -96,7 +96,7 @@ describe("turn-only Stop interactions", () => {
 				Effect.gen(function* () {
 					const runtime = yield* makeClaudeProviderRuntime({
 						runnerFactory: makeClaudeSessionRunner,
-						workspaceRoot: "/tmp/ws",
+
 						queryFactory: factory,
 					});
 					const input = makeBaseSendTurnInput({
@@ -178,7 +178,7 @@ describe("turn-only Stop interactions", () => {
 					Effect.gen(function* () {
 						const runtime = yield* makeClaudeProviderRuntime({
 							runnerFactory: makeClaudeSessionRunner,
-							workspaceRoot: "/tmp/ws",
+
 							queryFactory: factory,
 						});
 						const input = makeBaseSendTurnInput({

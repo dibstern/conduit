@@ -42,7 +42,7 @@ function setup() {
 		},
 	);
 	const instance = new OpenCodeProviderInstance({
-		client: replay.client("/project"),
+		clientForSession: () => Effect.succeed(replay.client("/project")),
 		configDir,
 		clientForAccount,
 	});
