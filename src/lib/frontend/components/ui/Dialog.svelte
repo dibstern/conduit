@@ -186,6 +186,10 @@
 	onkeydown={handleKeydown}
 >
 	{#if open}
+		<!-- A fullscreen dialog covers #compact-top-edge, and iOS 26 then keeps the
+		     status bar in the colour it had when the dialog opened: a theme switch in
+		     Settings left it dark over a light page. Its own strip is re-read live. -->
+		{#if placement === "fullscreen"}<div class="top-edge-strip" aria-hidden="true"></div>{/if}
 		{@render children()}
 	{/if}
 </dialog>

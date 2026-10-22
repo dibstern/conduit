@@ -1,5 +1,10 @@
 Feature: Phone transcript scrolling
 
+Scenario: A long path in an error notice stays within the phone transcript
+  Given the viewport is a phone
+  And the conduit app is served with the long-path-error mockup
+  Then the transcript does not scroll sideways
+
 Scenario Outline: Jump to latest appears away from the bottom and hides on return
   Given the viewport is a phone
   And the conduit app is served with the long-transcript mockup

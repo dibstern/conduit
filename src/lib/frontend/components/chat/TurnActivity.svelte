@@ -157,7 +157,7 @@
 		return parts.slice(0, Math.max(0, index)).reverse().find((part): part is SurfacePart => part.type === "assistant" && !!part.rawText.trim()) ?? null;
 	}
 	async function explainAsk(pin: SurfacePin) {
-		if (!sessionId || !pin.part.partId || generatingAsk || askExplanations[pin.part.uuid]) return;
+		if (!sessionId || !storeTurnId || !pin.part.partId || generatingAsk || askExplanations[pin.part.uuid]) return;
 		const identity = askIdentity;
 		generatingAsk = pin.part.uuid;
 		askError = null;
@@ -171,7 +171,7 @@
 		}
 	}
 	/** The event store keys a turn by its user message id; turn.id is that row's transcript uuid. */
-	const storeTurnId = $derived(turn.user?.messageId ?? turn.id);
+	const storeTurnId = $derived(turn.storeId ?? turn.user?.messageId);
 	// jsdom has no matchMedia; real browsers always do.
 	const phone = typeof matchMedia === "function" ? new MediaQuery("(max-width: 599px)") : { current: false };
 	let summaryOpen = $state<boolean | null>(null);
@@ -180,7 +180,7 @@
 	let citedOrdinal = $state<number | null>(null);
 	const summarySettings = $derived(surfacingConfig.status.recap);
 	const summariesOn = $derived(surfacingConfig.status.summariesEnabled && summarySettings.model !== "off");
-	const summaryEnabled = $derived(summariesOn && final && !!sessionId);
+	const summaryEnabled = $derived(summariesOn && final && !!sessionId && !!storeTurnId);
 	const summaryLabel = $derived(recap.generating ? "✦ Summarizing…" : "✦ Summary");
 	$effect(() => {
 		const id = storeTurnId;
@@ -188,7 +188,7 @@
 		const active = summaryEnabled;
 		const watch = latestTurn;
 		// A turn can settle while its asynchronous automatic recap is still running.
-		if (active && session) return untrack(() => recap.connect(session, id, watch));
+		if (active && session && id) return untrack(() => recap.connect(session, id, watch));
 		return;
 	});
 	$effect(() => {
@@ -285,7 +285,7 @@
 		generateSummary(recap.retry?.scope ?? (recap.versions.length && summaryNew > 0 ? "new" : "whole"), recap.retry?.sourceVersion);
 	}
 	function generateSummary(scope: "whole" | "new", sourceVersion?: number) {
-		if (!sessionId || !summaryEnabled) return;
+		if (!sessionId || !storeTurnId || !summaryEnabled) return;
 		summaryOpen = true;
 		void recap.generate(sessionId, storeTurnId, scope, sourceVersion);
 	}
@@ -515,7 +515,7 @@
 
 <!-- Phones open the summary from its own row under the strip; wider screens use the head chip. -->
 {#snippet summaryPanel(view: ReturnType<typeof surfaceTurn>, onhover: (ordinal: number | null) => void)}
-	<Button variant="ghost" size="content" align="start" tone="default" touchTarget class="min-[600px]:hidden w-full mt-[10px] h-[38px] rounded-[11px] bg-bg pl-[12px] pr-[8px] gap-[8px] text-[14px] font-medium" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>
+	<Button variant="ghost" size="content" align="start" tone="default" touchTarget class="min-[600px]:hidden w-full mt-[10px] mb-[10px] h-[38px] rounded-[11px] bg-bg pl-[12px] pr-[8px] gap-[8px] text-[14px] font-medium" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>
 		<span class="mr-auto">{summaryLabel}</span>{#if recap.versions.length && summaryNew > 0}<span class="text-accent font-mono text-[12px]">{summaryNew} new</span>{/if}<Icon name="chevron-right" size={14} class="text-text-dimmer" />
 	</Button>
 	<SurfacingSummary versions={recap.versions} selected={recap.current} open={summaryVisible} phone={phone.current} {live} {view}
@@ -595,14 +595,16 @@
 					{/snippet}
 				</SurfacingCard>
 			{:else}
-			<div class="md:mt-[7px]">
+			<!-- The phone strip is a 44px tap target with its 4px bar centred; a summary row
+			     under it overlaps that empty area so it sits midway between bar and card edge. -->
+			<div class="md:mt-[7px] {summaryEnabled ? 'max-[599px]:-mb-[18px]' : ''}">
 				<ActivityStrip {turn} {segment} {final} {now} {running} active={hovered} emphasis={skillSteps}
 					onhover={(index) => { hovered = index; detailsOpen = index !== null; }} onjump={jumpTo} />
 			</div>
 			{#if summaryEnabled}{@render summaryPanel(surface, hoverCitation)}{/if}
 			{/if}
 			{#if onsummarize && !minimised}
-				<Button variant="ghost" size="content" tone="default" align="start" touchTarget class="md:hidden w-full mt-[10px] h-[38px] rounded-[11px] bg-bg pl-[12px] pr-[8px] gap-[8px] text-[14px] font-medium" onclick={onsummarize}>
+				<Button variant="ghost" size="content" tone="default" align="start" touchTarget class="md:hidden w-full -mt-[8px] mb-[10px] h-[38px] rounded-[11px] bg-bg pl-[12px] pr-[8px] gap-[8px] text-[14px] font-medium" onclick={onsummarize}>
 					<span>✦ Summary</span><Icon name="chevron-right" size={14} class="ml-auto text-text-dimmer" />
 				</Button>
 			{/if}
