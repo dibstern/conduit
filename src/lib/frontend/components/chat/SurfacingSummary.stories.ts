@@ -3,6 +3,7 @@ import { expect, fn, userEvent, within } from "storybook/test";
 import { DEFAULT_CATEGORY_SET } from "../../../contracts/category-set.js";
 import type { TurnRecap } from "../../../contracts/turn-recap.js";
 import { type SurfacePart, surfaceTurn } from "../../utils/surface-turn.js";
+import DismissibleSummary from "./__fixtures__/DismissibleSummary.svelte";
 import SurfacingSummary from "./SurfacingSummary.svelte";
 
 const START = 1_800_000_000_000;
@@ -106,12 +107,52 @@ export const WholeTurnLight: Story = {
 	...WholeTurn,
 	globals: { theme: "light" },
 };
+/** A bare URL links like one in the chat; the clause's comma stays prose. */
+export const WithLink: Story = {
+	args: {
+		selected: {
+			...newer,
+			text: "The page went live at https://studio.example.ts.net/review/chat-restyle/differences/, linked from the main review page [#6].",
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const link = within(canvasElement).getByRole("link");
+		await expect(link).toHaveAttribute(
+			"href",
+			"https://studio.example.ts.net/review/chat-restyle/differences/",
+		);
+		await expect(link).toHaveAttribute("target", "_blank");
+	},
+};
+export const WithLinkLight: Story = {
+	...WithLink,
+	globals: { theme: "light" },
+};
+
+/** Long real content exercises native scrolling as well as sheet dismissal. */
+export const DragDismiss: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		versions: [whole],
+		selected: {
+			...whole,
+			text: Array.from({ length: 20 }, () => whole.text).join("\n\n"),
+		},
+	},
+	render: (args) => ({ Component: DismissibleSummary, props: args }),
+};
 export const Stale: Story = {
 	args: { versions: [whole], selected: whole },
 	play: async ({ canvasElement }) => {
 		await expect(
 			within(canvasElement).getByTestId("surfacing-summary-new"),
 		).toHaveTextContent("Summarize 2 new");
+		await expect(
+			canvasElement.querySelector(".summary-prose"),
+		).toHaveTextContent("consumers #1. The phone");
+		await expect(
+			canvasElement.querySelector(".summary-prose"),
+		).not.toHaveTextContent(/#\d+\s+[.,]/);
 	},
 };
 export const StaleLight: Story = { ...Stale, globals: { theme: "light" } };

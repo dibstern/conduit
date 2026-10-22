@@ -2,6 +2,8 @@
 	import { surfacingLevel, type CategorySet } from "../../../contracts/category-set.js";
 	import { MARK_GLYPHS, type SurfacingFeedback } from "../../stores/surfacing-feedback.svelte.js";
 	import { SURFACE_LABELS, type SurfacePin } from "../../utils/surface-turn.js";
+	import { categoryColour } from "../../utils/category-colour.js";
+	import CategoryPill from "../ui/CategoryPill.svelte";
 	import Button from "../ui/Button.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 	let { pin, feedback, categorySet, place = "card" }: { pin: SurfacePin; feedback: SurfacingFeedback; categorySet: CategorySet; place?: string } = $props();
@@ -9,10 +11,6 @@
 	const jev = $derived(surfacingLevel({ probabilities: pin.part.surfacingProbabilities ?? null }, categorySet));
 	const category = $derived(categorySet.categories.find(({ id }) => id === jev.category));
 	const probability = $derived(category ? pin.part.surfacingProbabilities?.[category.id] : undefined);
-	const arithmetic = $derived(
-		category ? `Jev: ${category.glyph} ${category.label}${probability === undefined ? "" : ` · p ${probability.toFixed(2).replace(/^0/, "")} × ${category.weight} = ${Math.round(probability * category.weight)}`}`
-		: `Jev: ${pin.part.surfacingProbabilities ? "Routine" : "Not judged"}`,
-	);
 	const selected = $derived(categorySet.categories.find(({ id }) => id === pending?.mark?.category));
 </script>
 
@@ -23,11 +21,11 @@
 			<strong data-testid="surfacing-mark-prompt">{MARK_GLYPHS[pending.direction]} {pending.direction === "raise" ? "Raise" : pending.direction === "lower" ? "Lower" : "Retype"} #{pin.number ?? "?"}{#if pending.direction === "retype"}{pending.mark ? ` as ${selected?.label ?? "Message"} → ${SURFACE_LABELS[pending.mark.level]}. Why?` : " as…"}{:else}<span class="max-md:hidden">: {SURFACE_LABELS[pin.level]}</span> → {pending.mark ? SURFACE_LABELS[pending.mark.level] : ""}. Why?{/if}</strong>
 			<Button variant="ghost" size="content" tone="muted" class="size-[26px] max-md:size-[32px] rounded-full shrink-0" ariaLabel="Cancel correction" data-testid="surfacing-mark-cancel" disabled={feedback.saving} onclick={() => feedback.cancel()}>✕</Button>
 		</div>
-		<div class="mark-arithmetic">{arithmetic}</div>
+		<div class="mark-arithmetic">Jev: {#if category}{#if category.origin === "builtin"}<CategoryPill {category} plain />{:else}{category.glyph} {category.label}{/if}{#if probability !== undefined} · p {probability.toFixed(2).replace(/^0/, "")} × {category.weight} = {Math.round(probability * category.weight)}{/if}{:else}{pin.part.surfacingProbabilities ? "Routine" : "Not judged"}{/if}</div>
 		<div class="mark-reasons">
 			{#if pending.direction === "retype" && !pending.mark}
 				{#each categorySet.categories.filter(({ retired, id }) => !retired && id !== pin.category) as category (category.id)}
-					<Button variant="ghost" size="content" tone="default" class="mark-chip" data-testid="surfacing-mark-category-{category.id}" onclick={() => feedback.retype(category.id)}>{category.glyph} {category.label}</Button>
+					<Button variant="ghost" size="content" tone={category.origin === "builtin" ? "inherit" : "default"} class="mark-chip {category.origin === 'builtin' ? 'category-chip' : ''}" style={`--category-colour:${categoryColour(category)}`} data-testid="surfacing-mark-category-{category.id}" onclick={() => feedback.retype(category.id)}>{category.glyph} {category.label}</Button>
 				{/each}
 			{:else}
 				{#each feedback.reasons() as reason (reason)}
@@ -51,6 +49,7 @@
 	.mark-reasons { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
 	.mark-reasons :global(.mark-chip),.mark-reasons :global(.mark-input) { display:inline-flex; align-items:center; gap:5px; min-height:26px; padding:0 10px; border-radius:999px; font-size:12.5px; font-weight:500; }
 	.mark-reasons :global(.mark-chip) { background:var(--color-bg); }
+	.mark-reasons :global(.category-chip) { color:var(--category-colour); background:color-mix(in srgb,var(--category-colour) 14%,var(--color-turn-bg)); }
 	.mark-reasons :global(.mark-skip) { background:none; border:1px dashed color-mix(in srgb,var(--color-text) 30%,transparent); }
 	.mark-reasons :global(.mark-input) { box-sizing:border-box; width:160px; max-width:100%; box-shadow:inset 0 0 0 1px var(--color-border); color:var(--color-text); font-weight:400; outline:none; }
 	.mark-reasons :global(.mark-input:focus-visible) { box-shadow:inset 0 0 0 1px var(--color-text); }

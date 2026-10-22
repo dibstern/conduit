@@ -16,6 +16,10 @@ import {
 	bindTurnTimelineSink,
 	observeTurnTimelineFrame,
 } from "../../domain/daemon/Services/turn-timeline.js";
+import {
+	Usage,
+	type UsageService,
+} from "../../domain/daemon/Services/usage.js";
 import type { PendingInteractionService } from "../../domain/relay/Services/pending-interaction-service.js";
 import type {
 	ProviderRuntimeIngestion,
@@ -170,6 +174,7 @@ export const makeRunnerProviderInstance = (
 ): Effect.Effect<RunnerProviderInstance, never, Scope.Scope> =>
 	Effect.gen(function* () {
 		const providerScope = yield* Effect.scope;
+		const usage = Option.getOrUndefined(yield* Effect.serviceOption(Usage));
 		const abortFibers = yield* FiberMap.make<string, void, never>();
 		const interactionFibers = yield* FiberMap.make<string, void, never>();
 		const preWarmFibers = yield* FiberMap.make<
@@ -198,6 +203,7 @@ export const makeRunnerProviderInstance = (
 			accountResourceFibers,
 			providerScope,
 			shutdown,
+			usage,
 		);
 		yield* Effect.addFinalizer(() => shutdown.pipe(Effect.ignore));
 		return instance;
@@ -402,6 +408,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 		>,
 		private readonly providerScope: Scope.Scope,
 		private readonly shutdown: Effect.Effect<void, ProviderInstanceFailure>,
+		private readonly usage?: UsageService,
 	) {
 		this.providerId = driver.driverKind;
 	}
@@ -968,6 +975,14 @@ export class RunnerProviderInstance implements ProviderInstance {
 	): Effect.Effect<SessionOutputReply, SessionFailure> {
 		return Effect.gen({ self: this }, function* () {
 			observeTurnTimelineFrame(output);
+			if (output.type === "account-usage") {
+				yield* this.usage?.update?.(
+					output.accountId,
+					output.harness,
+					output.reading,
+				) ?? Effect.void;
+				return;
+			}
 			if (output.type === "background-task") {
 				this.deps.onBackgroundTask?.(output.transition);
 				return;
@@ -1074,10 +1089,19 @@ export class RunnerProviderInstance implements ProviderInstance {
 							}) ?? Effect.void,
 					).pipe(Effect.catchCause(() => Effect.void));
 				case "cancel-interaction":
-					return yield* FiberMap.remove(
+					yield* FiberMap.remove(
 						this.interactionFibers,
 						`${output.sinkId}:${output.requestId}`,
 					);
+					if (output.kind && sink.withdrawInteraction)
+						yield* sink
+							.withdrawInteraction(output.requestId, output.kind)
+							.pipe(
+								Effect.mapError((cause) =>
+									sessionFailure("withdrawInteraction", cause),
+								),
+							);
+					return;
 				case "release-sink":
 					for (const [key] of Array.from(this.interactionFibers)) {
 						if (key.startsWith(`${output.sinkId}:`)) {

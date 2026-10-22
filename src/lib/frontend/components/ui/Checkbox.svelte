@@ -22,12 +22,14 @@
 		checked?: boolean;
 		/** Standalone invalid flag; a wrapping <Field> also forces it. */
 		invalid?: boolean;
+		variant?: "native" | "settings";
 		class?: string;
 	} & Omit<HTMLInputAttributes, "class" | "type" | "checked" | "aria-invalid">;
 
 	let {
 		checked = $bindable(false),
 		invalid = false,
+		variant = "native",
 		class: className,
 		...rest
 	}: CheckboxProps = $props();
@@ -46,7 +48,7 @@
 	);
 
 	const inputClass = $derived(
-		[CHOICE_BASE_CLASSES, className].filter(Boolean).join(" "),
+		[CHOICE_BASE_CLASSES, variant === "settings" ? "settings-checkbox" : "", className].filter(Boolean).join(" "),
 	);
 </script>
 
@@ -60,3 +62,34 @@
 	aria-describedby={describedBy}
 	required={isRequired || undefined}
 />
+
+<style>
+	.settings-checkbox {
+		appearance: none;
+		width: 16px;
+		height: 16px;
+		border: 1px solid var(--color-border-chip);
+		border-radius: 4px;
+		background: transparent;
+	}
+	/* Preserve the fractional outline below the shared keyboard focus utilities. */
+	@layer components {
+		.settings-checkbox:not(:checked) {
+			box-shadow: inset 0 0 0 0.5px var(--color-border-chip);
+		}
+	}
+	.settings-checkbox:checked {
+		border-color: var(--color-accent);
+		background: var(--color-accent);
+	}
+	.settings-checkbox:checked::after {
+		content: "";
+		display: block;
+		width: 8px;
+		height: 5px;
+		margin: 3px 0 0 3px;
+		border: solid var(--color-bg);
+		border-width: 0 0 2px 2px;
+		transform: rotate(-45deg);
+	}
+</style>

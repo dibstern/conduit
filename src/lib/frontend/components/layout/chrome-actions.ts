@@ -1,10 +1,5 @@
 /**
- * The session bar's global actions, shared by its title and overflow menus.
- *
- * They live here rather than being written twice because each one is a
- * contract with code somewhere else in the app: an event name, or a
- * multi-step sequence. A duplicated event name typo is silent, and a
- * duplicated sequence drifts.
+ * The session bar overflow's global actions.
  */
 
 import { getBrowserClientId } from "../../stores/client-identity.js";
@@ -22,6 +17,7 @@ import {
 	togglePanel as toggleTerminalPanel,
 } from "../../stores/terminal.svelte.js";
 import { composerAccountId } from "../../stores/usage.svelte.js";
+import { wsDebugState } from "../../stores/ws-debug.svelte.js";
 import { failureLine } from "../../transport/rpc-errors.js";
 import { rpc } from "../../transport/ws-rpc-client.js";
 
@@ -68,7 +64,7 @@ export function shareViaQr(): void {
 }
 
 export function toggleDebugPanel(): void {
-	window.dispatchEvent(new CustomEvent("debug:toggle"));
+	wsDebugState.panelOpen = !wsDebugState.panelOpen;
 }
 
 export type ChromeMenuAction = {
@@ -76,6 +72,7 @@ export type ChromeMenuAction = {
 	label: string;
 	shortLabel?: string;
 	tag?: string;
+	checked?: boolean;
 	icon: "share" | "settings" | "bug";
 	run: () => void;
 };
@@ -95,7 +92,7 @@ export function chromeMenuActions(): readonly ChromeMenuAction[] {
 						id: "debug" as const,
 						label: "Debug panel",
 						shortLabel: "Debug",
-						tag: "dev",
+						checked: wsDebugState.panelOpen,
 						icon: "bug" as const,
 						run: toggleDebugPanel,
 					},

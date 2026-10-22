@@ -278,13 +278,22 @@ test("a failed cold attach still reports the failure after the shell reveals its
 	harness,
 }, testInfo) => {
 	let rejectAttach!: (error: WsRpcError) => void;
+	let attachAttempts = 0;
 	const { rpc } = await setup(
 		page,
 		{
-			AttachProject: () =>
-				new Promise<never>((_resolve, reject) => {
+			AttachProject: (payload) => {
+				if (attachAttempts++ > 0)
+					return {
+						projectSlug:
+							("projectSlug" in payload ? payload.projectSlug : null) ??
+							projectSlug,
+						sessionSlug: null,
+					};
+				return new Promise<never>((_resolve, reject) => {
 					rejectAttach = reject;
-				}),
+				});
+			},
 		},
 		[],
 	);
@@ -301,6 +310,12 @@ test("a failed cold attach still reports the failure after the shell reveals its
 			status: "idle",
 			projectSlug: otherProject,
 		},
+		{
+			id: survivor,
+			title: "Survivor",
+			status: "idle",
+			projectSlug,
+		},
 	]);
 	await expect(
 		page.locator(`#session-list [data-session-id="${seed}"]`),
@@ -313,6 +328,10 @@ test("a failed cold attach still reports the failure after the shell reveals its
 		page.getByText("Project is unavailable", { exact: true }),
 	).toBeVisible();
 	await expect(page).toHaveURL(url);
+	await page.evaluate(
+		() =>
+			new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+	);
 	expect(
 		rpc.getRequests().filter(({ tag }) => tag === "AttachProject"),
 	).toEqual([attach]);
@@ -325,6 +344,56 @@ test("a failed cold attach still reports the failure after the shell reveals its
 		`${JSON.stringify({ requests: rpc.getRequests(), route: page.url() }, null, 2)}\n`,
 	);
 	await testInfo.attach("failed-cold-session-attach", { path: output });
+	await page.locator(`#session-list [data-session-id="${survivor}"]`).click();
+	await expect(page.locator("#input")).toHaveValue(`Draft for ${survivor}`);
+	await page.locator(`#session-list [data-session-id="${seed}"]`).click();
+	await expect(page.locator("#input")).toHaveValue("Seed draft");
+	expect(
+		rpc.getRequests().filter(({ tag }) => tag === "AttachProject"),
+	).toHaveLength(3);
+});
+
+test("a cold attach retries after a dropped socket reconnects without navigation", async ({
+	page,
+	harness,
+}, testInfo) => {
+	const { rpc } = await setup(
+		page,
+		{ AttachProject: () => new Promise<never>(() => {}) },
+		[],
+	);
+	const url = `${harness.relayBaseUrl}/s/${seed}`;
+	await page.goto(url);
+	const attach = await rpc.waitForRequest(
+		(request) => request.tag === "AttachProject",
+	);
+	expect(attach.payload).toMatchObject({ sessionId: seed });
+	rpc.setShellRows([
+		{
+			id: seed,
+			title: "Reconnecting session",
+			status: "idle",
+			projectSlug: otherProject,
+		},
+	]);
+	await expect(
+		page.locator(`#session-list [data-session-id="${seed}"]`),
+	).toContainText("Reconnecting session");
+	rpc.setStubs({
+		AttachProject: () => ({ projectSlug: otherProject, sessionSlug: null }),
+	});
+	const connections = rpc.connections;
+	rpc.closeSockets({ code: 1012, reason: "Server restarting" });
+	await expect.poll(() => rpc.connections).toBeGreaterThan(connections);
+	await expect(page.locator("#input")).toHaveValue("Seed draft");
+	await expect(page).toHaveURL(url);
+	expect(
+		rpc.getRequests().filter(({ tag }) => tag === "AttachProject"),
+	).toHaveLength(2);
+	await testInfo.attach("reconnected-cold-session-attach.json", {
+		body: JSON.stringify({ requests: rpc.getRequests(), route: page.url() }),
+		contentType: "application/json",
+	});
 });
 
 test("an unknown session link goes home with a not-found notice", async ({
@@ -1425,7 +1494,9 @@ test("an inbox-queued reply clears guessed working and renders the queued messag
 	await page.locator("#input").fill("Waiting in the inbox");
 	await page.locator("#send").click();
 	await expect(
-		page.getByText("Waiting in the inbox", { exact: true }),
+		page
+			.getByRole("list", { name: "Queued messages", exact: true })
+			.getByText("Waiting in the inbox", { exact: true }),
 	).toBeVisible();
 	await expect(page.locator("#stop")).toBeHidden();
 	await testInfo.attach("queued-without-working", {

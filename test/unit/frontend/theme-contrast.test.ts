@@ -1,11 +1,16 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { BUILTIN_CATEGORIES } from "../../../src/lib/contracts/category-set.js";
 import { XTERM_THEMES } from "../../../src/lib/frontend/utils/xterm-themes.js";
 
 const style = readFileSync(
 	new URL("../../../src/lib/frontend/style.css", import.meta.url),
 	"utf8",
 );
+const darkTheme = Array.from(
+	style.matchAll(/@theme(?:\s+static)?\s*\{([^}]+)\}/g),
+	(match) => match[1],
+).join("\n");
 const surfaces = [
 	"bg",
 	"bg-surface",
@@ -125,20 +130,99 @@ function contrastRatio(foreground: string, background: string | Rgb): number {
 	return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
 }
 
+type Lab = readonly [lightness: number, a: number, b: number];
+
+function labD65(hex: string): Lab {
+	const [r, g, b] = rgb(hex).map((channel) => {
+		const s = channel / 255;
+		return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+	}) as [number, number, number];
+	// sRGB's D65 white stays unadapted: CSS lab() would instead use D50.
+	const f = (value: number) =>
+		value > (6 / 29) ** 3
+			? Math.cbrt(value)
+			: value / (3 * (6 / 29) ** 2) + 4 / 29;
+	const x = f((0.4124564 * r + 0.3575761 * g + 0.1804375 * b) / 0.95047);
+	const y = f(0.2126729 * r + 0.7151522 * g + 0.072175 * b);
+	const z = f((0.0193339 * r + 0.119192 * g + 0.9503041 * b) / 1.08883);
+	return [116 * y - 16, 500 * (x - y), 200 * (y - z)];
+}
+
+// Sharma, Wu and Dalal's reference formula, with kL = kC = kH = 1:
+// https://hajim.rochester.edu/ece/sites/gsharma/ciede2000/dataNprograms/deltaE2000.m
+function deltaE2000([l1, a1, b1]: Lab, [l2, a2, b2]: Lab): number {
+	const meanChroma = (Math.hypot(a1, b1) + Math.hypot(a2, b2)) / 2;
+	const g =
+		0.5 * (1 - Math.sqrt(meanChroma ** 7 / (meanChroma ** 7 + 25 ** 7)));
+	const aPrime1 = (1 + g) * a1;
+	const aPrime2 = (1 + g) * a2;
+	const c1 = Math.hypot(aPrime1, b1);
+	const c2 = Math.hypot(aPrime2, b2);
+	const tau = 2 * Math.PI;
+	const h1 = (Math.atan2(b1, aPrime1) + tau) % tau;
+	const h2 = (Math.atan2(b2, aPrime2) + tau) % tau;
+	const hueDifference = h2 - h1;
+	const deltaHue =
+		c1 * c2 === 0
+			? 0
+			: hueDifference > Math.PI
+				? hueDifference - tau
+				: hueDifference < -Math.PI
+					? hueDifference + tau
+					: hueDifference;
+	let meanHue = (h1 + h2) / 2;
+	if (Math.abs(hueDifference) > Math.PI) meanHue -= Math.PI;
+	if (meanHue < 0) meanHue += tau;
+	if (c1 * c2 === 0) meanHue = h1 + h2;
+	const meanLightness = (l1 + l2) / 2;
+	const meanC = (c1 + c2) / 2;
+	const lightnessOffset = (meanLightness - 50) ** 2;
+	const sL = 1 + (0.015 * lightnessOffset) / Math.sqrt(20 + lightnessOffset);
+	const sC = 1 + 0.045 * meanC;
+	const t =
+		1 -
+		0.17 * Math.cos(meanHue - Math.PI / 6) +
+		0.24 * Math.cos(2 * meanHue) +
+		0.32 * Math.cos(3 * meanHue + Math.PI / 30) -
+		0.2 * Math.cos(4 * meanHue - (63 * Math.PI) / 180);
+	const sH = 1 + 0.015 * meanC * t;
+	const rotation =
+		-Math.sin(
+			(Math.PI / 3) *
+				Math.exp(-((((meanHue * 180) / Math.PI - 275) / 25) ** 2)),
+		) *
+		2 *
+		Math.sqrt(meanC ** 7 / (meanC ** 7 + 25 ** 7));
+	const dL = (l2 - l1) / sL;
+	const dC = (c2 - c1) / sC;
+	const dH = (2 * Math.sqrt(c1 * c2) * Math.sin(deltaHue / 2)) / sH;
+	return Math.sqrt(dL ** 2 + dC ** 2 + dH ** 2 + rotation * dC * dH);
+}
+
+// Published reference pairs cover the blue rotation, zero chroma and hue wrap.
+// https://hajim.rochester.edu/ece/sites/gsharma/ciede2000/dataNprograms/ciede2000testdata.txt
+it.each([
+	[[50, 2.6772, -79.7751], [50, 0, -82.7485], 2.0425],
+	[[50, 0, 0], [50, -1, 2], 2.3669],
+	[[50, -1, 2], [50, 0, 0], 2.3669],
+	[[50, 2.49, -0.001], [50, -2.49, 0.0009], 7.1792],
+	[[50, 2.49, -0.001], [50, -2.49, 0.0011], 7.2195],
+	[[50, 2.5, 0], [73, 25, -18], 27.1492],
+] as const)("CIEDE2000 reference %j to %j is %s", (first, second, expected) => {
+	expect(deltaE2000(first, second)).toBeCloseTo(expected, 4);
+});
+
 describe.each(["dark", "light"] as const)("%s theme contrast", (variant) => {
-	const block = (
+	const block =
 		variant === "dark"
-			? /@theme\s*\{([^}]+)\}/
-			: /:root\.light-theme\s*\{([^}]+)\}/
-	).exec(style)?.[1];
+			? darkTheme
+			: /:root\.light-theme\s*\{([^}]+)\}/.exec(style)?.[1];
 	if (!block)
 		throw new Error(`style.css is missing the ${variant} theme block`);
 	const tokens = Object.fromEntries(
 		// Account identity fills inherit from @theme in the light theme, as in CSS.
 		Array.from(
-			(/@theme\s*\{([^}]+)\}/.exec(style)?.[1] + block).matchAll(
-				/(--[\w-]+):\s*([^;]+);/g,
-			),
+			(darkTheme + block).matchAll(/(--[\w-]+):\s*([^;]+);/g),
 			(match) => [match[1], match[2]?.trim()],
 		),
 	);
@@ -146,8 +230,36 @@ describe.each(["dark", "light"] as const)("%s theme contrast", (variant) => {
 		const property = token.startsWith("--") ? token : `--color-${token}`;
 		const value = tokens[property];
 		if (value === undefined) throw new Error(`${variant} is missing ${token}`);
-		return value;
+		const alias = /^var\((--[\w-]+)\)$/.exec(value)?.[1];
+		return alias ? colour(alias) : value;
 	}
+
+	it.each(
+		BUILTIN_CATEGORIES.map(({ id }) => id),
+	)("%s category ink on its 14%% tint clears the quiet-tier 3:1 floor", (id) => {
+		const ink = colour(`cat-${id}`);
+		for (const base of ["settings-card", "turn-bg"]) {
+			expect(
+				contrastRatio(ink, composite(ink, colour(base), 0.14)),
+				base,
+			).toBeGreaterThanOrEqual(3);
+		}
+	});
+
+	it.each(
+		BUILTIN_CATEGORIES.flatMap(({ id }, index) =>
+			BUILTIN_CATEGORIES.slice(index + 1).map(
+				(other) => [id, other.id] as const,
+			),
+		),
+	)("%s and %s categories differ by at least 12 CIEDE2000", (first, second) => {
+		expect(
+			deltaE2000(
+				labD65(colour(`cat-${first}`)),
+				labD65(colour(`cat-${second}`)),
+			),
+		).toBeGreaterThanOrEqual(12);
+	});
 
 	it("primary capsule ink on accent-bg over chip clears 4.5:1", () => {
 		const capsule = composite(colour("chip"), colour("bg"));

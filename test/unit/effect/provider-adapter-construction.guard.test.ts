@@ -5,10 +5,13 @@ import { describe, expect, it } from "vitest";
 const adapterSources = [
 	"src/lib/provider/claude/claude-provider-instance.ts",
 	"src/lib/provider/claude/claude-provider-runtime.ts",
+	"src/lib/provider/claude/claude-runner-payload.ts",
 	"src/lib/provider/claude/claude-process-session-runner.ts",
 	"src/lib/provider/claude/claude-runner-driver.ts",
 	"src/lib/provider/cursor/cursor-provider-runtime.ts",
 	"src/lib/provider/cursor/cursor-runner-driver.ts",
+	"src/lib/provider/codex/codex-provider-runtime.ts",
+	"src/lib/provider/codex/codex-runner-driver.ts",
 	"src/lib/provider/opencode-provider-instance.ts",
 	"src/lib/provider/runner/runner-provider-instance.ts",
 	"src/lib/provider/runner/process-session-runner.ts",
@@ -128,7 +131,7 @@ describe("daemon-owned provider adapter construction", () => {
 			"makeRunnerProviderInstance",
 		],
 		[
-			"src/lib/provider/claude/claude-provider-runtime.ts",
+			"src/lib/provider/claude/claude-runner-payload.ts",
 			"makeClaudeSessionRunner",
 		],
 	])("rejects workspace context added to %s's %s factory", (path, factory) => {
@@ -189,6 +192,7 @@ describe("daemon-owned provider adapter construction", () => {
 			false,
 		);
 		expect(/makeCursorProviderRuntime\s*\(/.test(wiring)).toBe(false);
+		expect(/makeCodexProviderRuntime\s*\(/.test(wiring)).toBe(false);
 		expect(/serviceOption\(ProviderAdapters\)/.test(wiring)).toBe(false);
 		const startup = readFileSync(
 			"src/lib/relay/project-relay-startup.ts",

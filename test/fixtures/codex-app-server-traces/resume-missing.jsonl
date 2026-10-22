@@ -1,0 +1,12 @@
+{"scenario":"resume-missing","codexVersion":"0.162.1","recordedAt":"2026-10-21T15:15:29.013Z"}
+{"dir":"out","at":0,"message":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"conduit-trace-recorder","version":"1.0.0","title":null},"capabilities":{"experimentalApi":true}}}}
+{"dir":"in","at":42,"message":{"id":1,"result":{"userAgent":"conduit-trace-recorder/0.162.1 (Mac OS 26.6.2; arm64) unknown (conduit-trace-recorder; 1.0.0)","codexHome":"/codex-home","platformFamily":"unix","platformOs":"macos"}}}
+{"dir":"out","at":43,"message":{"jsonrpc":"2.0","method":"initialized"}}
+{"dir":"out","at":44,"message":{"jsonrpc":"2.0","id":2,"method":"thread/resume","params":{"threadId":"019a0000-0000-7000-8000-000000000000"}}}
+{"dir":"in","at":44,"message":{"method":"remoteControl/status/changed","params":{"status":"disabled","serverName":"test-host","installationId":"00000000-0000-0000-0000-000000000000","environmentId":null},"emittedAtMs":1792595729055}}
+{"dir":"in","at":96,"message":{"error":{"code":-32600,"message":"no rollout found for thread id 019a0000-0000-7000-8000-000000000000"},"id":2}}
+{"dir":"out","at":97,"message":{"jsonrpc":"2.0","id":3,"method":"thread/unarchive","params":{"threadId":"019a0000-0000-7000-8000-000000000000"}}}
+{"dir":"in","at":140,"message":{"error":{"code":-32600,"message":"no archived rollout found for thread id 019a0000-0000-7000-8000-000000000000"},"id":3}}
+{"dir":"out","at":140,"message":{"jsonrpc":"2.0","id":4,"method":"thread/resume","params":{"threadId":"019a0000-0000-7000-8000-000000000000"}}}
+{"dir":"in","at":186,"message":{"error":{"code":-32600,"message":"no rollout found for thread id 019a0000-0000-7000-8000-000000000000"},"id":4}}
+{"dir":"exit","at":196,"code":0,"signal":null}

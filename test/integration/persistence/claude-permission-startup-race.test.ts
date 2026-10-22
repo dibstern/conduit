@@ -158,6 +158,7 @@ describe("Claude permission ownership during startup cleanup", () => {
 					const releaseSnapshot = yield* Deferred.make<void>();
 					sink = makeRecoveredEventSink({
 						sessionId,
+						driverKind: "claude",
 						sql,
 						ingestion,
 						pending: {

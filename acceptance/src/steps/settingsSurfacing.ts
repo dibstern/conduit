@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import { surfacingSettingsFixture } from "../../../test/e2e/fixtures/surfacing-settings.js";
+import { closeSettings } from "../../../test/e2e/helpers/settings.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRpcControl } from "./shared.js";
 
@@ -611,7 +612,7 @@ export const settingsSurfacingHandlers: StepHandler[] = [
 			}
 			await page.getByRole("button", { name: "Cancel", exact: true }).click();
 			fixture(page).fillActiveCategories();
-			await page.getByTestId("settings-close-btn").click();
+			await closeSettings(page);
 			await page.evaluate(() =>
 				window.dispatchEvent(
 					new CustomEvent("settings:open", {

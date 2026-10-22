@@ -18,6 +18,74 @@ const OPENCODE_ROW_ID = "row-opencode";
 
 export const sessionRowsHandlers: StepHandler[] = [
 	{
+		name: "seed session groups",
+		match: /^the sidebar has the session group fixture$/,
+		run: async ({ world }) => {
+			const rows: SessionInfo[] = (
+				["pinned", "running", "idle"] as const
+			).flatMap((group) =>
+				Array.from({ length: 3 }, (_, i) => ({
+					id: `${group}-${i}`,
+					accountId: null,
+					projectSlug: "myapp",
+					title: `${group} task ${i + 1}`,
+					status: group === "running" ? "busy" : "idle",
+					attention: group === "running" ? "working" : "idle",
+					...(group === "pinned" ? { pinnedAt: PINNED_CLOCK_MS } : {}),
+				})),
+			);
+			const rpc = requireRpcControl(world.page);
+			rpc.setShellRows(rows);
+			rpc.setStubs({
+				ListDaemonSessions: () => ({
+					sessions: rows,
+					availability: [],
+					hasMore: false,
+					nextCursor: null,
+				}),
+			});
+			const list = world.page.locator("#session-list");
+			if (!(await list.isVisible()))
+				await world.page.getByTestId("session-bar-back").click();
+			await expect(list).toBeVisible();
+		},
+	},
+	{
+		name: "toggle a session group",
+		match: /^I (collapse|expand) the (pinned|running|idle) session group$/,
+		run: async ({ world, match }) => {
+			const toggle = world.page.getByTestId(`${match[2]}-shelf-toggle`);
+			await expect(toggle).toHaveAttribute(
+				"aria-expanded",
+				String(match[1] === "collapse"),
+			);
+			await toggle.click();
+		},
+	},
+	{
+		name: "session group visibility",
+		match:
+			/^the (pinned|running|idle) session group is (collapsed|expanded) with (\d+) rows$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.getByTestId(`${match[1]}-shelf-toggle`),
+			).toHaveAttribute("aria-expanded", String(match[2] === "expanded"));
+			await expect(
+				world.page.locator(`#${match[1]}-shelf-rows .session-item`),
+			).toHaveCount(Number(match[3]));
+		},
+	},
+	{
+		name: "reload session group preferences",
+		match: /^I reload the session group list$/,
+		run: async ({ world }) => {
+			await world.page.reload();
+			await expect(world.page.locator("#layout")).toBeVisible();
+			if (!(await world.page.locator("#session-list").isVisible()))
+				await world.page.getByTestId("session-bar-back").click();
+		},
+	},
+	{
 		name: "seed worktree and Local session rows",
 		match:
 			/^the sidebar has an existing worktree on (.+), a new worktree on (.+) and a Local session on (.+)$/,

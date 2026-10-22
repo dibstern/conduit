@@ -6,7 +6,8 @@
  */
 
 import http from "node:http";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -38,8 +39,21 @@ async function httpStatus(url: string): Promise<number | "ECONNREFUSED"> {
 describe("Relay stack lifecycle (real timers)", () => {
 	let harness: RelayHarness;
 
+	beforeEach(() => {
+		// Use the built-in fallback catalogue without launching a real Claude query.
+		__setProbeOverrideForTesting(async () => ({
+			models: [],
+			commands: [],
+			agents: [],
+		}));
+	});
+
 	afterEach(async () => {
-		await harness?.stop().catch(() => {});
+		try {
+			await harness?.stop().catch(() => {});
+		} finally {
+			__setProbeOverrideForTesting(undefined);
+		}
 	});
 
 	it("stop() shuts down the HTTP server — no more connections accepted", async () => {

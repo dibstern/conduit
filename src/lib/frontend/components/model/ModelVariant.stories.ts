@@ -21,6 +21,7 @@ const fourLevels = ["low", "medium", "high", "max"];
 const fiveLevels = ["low", "medium", "high", "xhigh", "max"];
 const claudeAccount = {
 	id: "claude",
+	colorSlot: 0,
 	name: "Claude",
 	driver: "claude",
 	isDefault: true,

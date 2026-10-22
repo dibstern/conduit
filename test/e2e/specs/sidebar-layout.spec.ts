@@ -3,6 +3,7 @@
 // - Mobile: session list and session are separate routes
 // Uses real relay backed by MockOpenCodeServer.
 
+import { PNG } from "pngjs";
 import { createSession } from "../helpers/e2e-harness.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
@@ -286,7 +287,7 @@ test.describe("Sidebar Layout — Desktop", () => {
 		const terminal = page.getByTestId("views-rail-terminal");
 		const files = page.getByTestId("views-rail-files");
 		await expect(rail).toBeVisible();
-		await expect(rail).toHaveCSS("width", "38px");
+		await expect(rail).toHaveCSS("width", "44px");
 		await page.locator("#session-list .session-item").first().click();
 		await expect(rail).toBeVisible();
 		await expect(page.getByTestId("views-rail-diff")).toBeDisabled();
@@ -400,11 +401,13 @@ test.describe("Sidebar Layout — Desktop", () => {
 			if (await toggle.count()) await toggle.click();
 		}
 		const headings = page.locator(
-			"#session-list-scroller > div.session-group-label",
+			"#session-list-scroller > .session-group-label",
 		);
 		expect(await headings.count()).toBeGreaterThan(0);
 		for (const heading of await headings.all()) {
-			const label = (await heading.locator("span").first().innerText()).trim();
+			const label = (
+				await heading.locator("[data-group-label]").innerText()
+			).trim();
 			expect(label).not.toBe(label.toUpperCase());
 			const renderedRows = await heading.evaluate((element) => {
 				let count = 0;
@@ -502,10 +505,13 @@ test.describe("Sidebar Layout — Desktop", () => {
 		const menu = page.getByTestId("session-bar-overflow-menu");
 		await expect(menu).toBeVisible();
 		// The session commands lead; the global actions sit in the footer.
-		const globals = menu.locator('[role="menuitem"][data-testid^="overflow-"]');
+		const globals = menu.locator('[data-testid^="overflow-"]');
 		await expect(globals).toHaveCount(3);
 		for (const [index, name] of ["Share", "Settings", "Debug panel"].entries())
 			await expect(globals.nth(index)).toHaveAccessibleName(name);
+		await expect(
+			menu.getByRole("menuitemcheckbox", { name: "Debug panel" }),
+		).toHaveAttribute("aria-checked", "true");
 		await page.keyboard.press("Escape");
 		await expect(menu).toBeHidden();
 		await expect(more).toBeFocused();
@@ -524,15 +530,6 @@ test.describe("Sidebar Layout — Desktop", () => {
 			"true",
 		);
 		await expect(page.getByTestId("session-bar-overflow-menu")).toHaveCount(0);
-		await page.setViewportSize({ width: 1440, height: 900 });
-		await page.getByTestId("session-bar-title-menu").click();
-		await expect(page.getByTestId("session-ctx-menu")).toBeVisible();
-		await page.setViewportSize({ width: 393, height: 852 });
-		await expect(page.getByTestId("session-bar")).toHaveAttribute(
-			"data-compact",
-			"true",
-		);
-		await expect(page.getByTestId("session-ctx-menu")).toHaveCount(0);
 	});
 
 	test("desktop bar renders without an open session", async ({
@@ -558,7 +555,7 @@ test.describe("Sidebar Layout — Desktop", () => {
 	}) => {
 		await page.setViewportSize({ width: 800, height: 900 });
 		await new AppPage(page).goto(relayUrl);
-		await page.getByTestId("session-bar-title-menu").click();
+		await page.getByTestId("session-bar-overflow").click();
 		await page.getByTestId("session-ctx-rename").click();
 		const longTitle =
 			"Investigate the long running terminal session across every project and linked worktree";
@@ -629,7 +626,7 @@ test.describe("Sidebar Layout — Mobile", () => {
 		);
 	});
 
-	test("mobile: expanded overflow, collapsed overflow, and title menus use bottom sheets", async ({
+	test("mobile: expanded and collapsed overflow menus use bottom sheets", async ({
 		page,
 		relayUrl,
 	}) => {
@@ -637,7 +634,6 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await new AppPage(page).goto(relayUrl);
 		const bar = page.getByTestId("session-bar");
 		const overflowButton = page.getByTestId("session-bar-island-overflow");
-		const titleChevron = page.getByTestId("session-bar-title-menu");
 		const menu = page.getByTestId("session-bar-island-menu");
 		const before = await bar.boundingBox();
 		await expect(overflowButton).toBeVisible();
@@ -664,24 +660,36 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(menu).toBeHidden();
 		await expect(overflowButton).toBeFocused();
 		await overflowButton.click();
-		await expect(page.getByTestId("menu-sheet-scrim")).not.toHaveClass(
-			/pointer-events-none/,
-		);
-		await page.mouse.click(20, 200);
+		const scrim = page.getByTestId("menu-sheet-scrim");
+		await expect(scrim).not.toHaveClass(/pointer-events-none/);
+		const scrimBox = await scrim.boundingBox();
+		const reopenedSheet = await menu.boundingBox();
+		if (!scrimBox || !reopenedSheet)
+			throw new Error("Sheet or scrim is missing");
+		expect(reopenedSheet.y).toBeGreaterThan(scrimBox.y);
+		const scrimPoint = {
+			x: scrimBox.x + scrimBox.width / 2,
+			y: (scrimBox.y + reopenedSheet.y) / 2,
+		};
+		expect(
+			await scrim.evaluate(
+				(element, point) =>
+					element.contains(document.elementFromPoint(point.x, point.y)),
+				scrimPoint,
+			),
+		).toBe(true);
+		await page.mouse.click(scrimPoint.x, scrimPoint.y);
 		await expect(menu).toBeHidden();
 
-		await titleChevron.click();
-		const titleMenu = page.getByTestId("session-action-sheet");
-		await expect(titleMenu).toBeVisible();
-		await expect(titleMenu.getByTestId("session-ctx-settle")).toBeVisible();
-		await expect(
-			titleMenu.getByRole("group", { name: "Triage" }),
-		).toBeVisible();
+		await overflowButton.click();
+		await expect(menu).toBeVisible();
+		await expect(menu.getByTestId("session-ctx-settle")).toBeVisible();
+		await expect(menu.getByRole("group", { name: "Triage" })).toBeVisible();
 		await page.keyboard.press("Escape");
-		await expect(titleMenu).toBeHidden();
-		await expect(titleChevron).toBeFocused();
-		await titleChevron.click();
-		await titleMenu.getByTestId("session-title-settings").click();
+		await expect(menu).toBeHidden();
+		await expect(overflowButton).toBeFocused();
+		await overflowButton.click();
+		await menu.getByTestId("overflow-settings").click();
 		await expect(page.locator("#settings-panel")).toBeVisible();
 		await page.getByTestId("settings-close-btn").click();
 
@@ -742,45 +750,55 @@ test.describe("Sidebar Layout — Mobile", () => {
 		expect(await bar.boundingBox()).toEqual(collapsedBefore);
 	});
 
-	test("mobile: title menu settles, renames, and opens chrome actions", async ({
+	test("mobile: overflow settles, renames, and opens chrome actions", async ({
 		page,
 		relayUrl,
 	}) => {
 		await page.setViewportSize({ width: 393, height: 852 });
 		await new AppPage(page).goto(relayUrl);
-		const trigger = page.getByTestId("session-bar-title-menu");
-		const sheet = page.getByTestId("session-action-sheet");
+		const sessionId = await page
+			.locator("#session-list .session-item.active")
+			.getAttribute("data-session-id");
+		if (!sessionId) throw new Error("missing open session id");
+		const row = page.locator(
+			`#session-list .session-item[data-session-id="${sessionId}"]`,
+		);
+		const trigger = page.getByTestId("session-bar-island-overflow");
+		const sheet = page.getByTestId("session-bar-island-menu");
 		await trigger.click();
 		await sheet.getByTestId("session-ctx-settle").click();
 		await expect(
 			page.getByRole("status").filter({ hasText: "Moved “" }),
 		).toBeVisible();
+		await expect(page.getByTestId("session-bar")).toBeHidden();
 		await page.getByTestId("toast-action").click();
+		await expect(row).not.toHaveAttribute("aria-label", /^Settled,/);
+		await row.click();
 		await trigger.click();
 		await sheet.getByTestId("session-ctx-rename").click();
 		const input = page.getByRole("textbox", { name: "Session name" });
 		await expect(input).toBeFocused();
-		await input.fill("Renamed from title menu");
+		await input.fill("Renamed from overflow");
 		await input.press("Enter");
 		await expect(page.getByTestId("session-bar-title")).toContainText(
-			"Renamed from title menu",
+			"Renamed from overflow",
 		);
 		await page.reload();
 		await expect(page.getByTestId("session-bar-title")).toContainText(
-			"Renamed from title menu",
+			"Renamed from overflow",
 		);
 		await trigger.click();
-		await sheet.getByTestId("session-title-share").click();
+		await sheet.getByTestId("overflow-share").click();
 		await expect(
 			page.getByRole("heading", { name: "Share Session" }),
 		).toBeVisible();
 		await page.keyboard.press("Escape");
 		await trigger.click();
-		await sheet.getByTestId("session-title-settings").click();
+		await sheet.getByTestId("overflow-settings").click();
 		await expect(page.locator("#settings-panel")).toBeVisible();
 	});
 
-	test("mobile: debug flag adds the title menu Debug action", async ({
+	test("mobile: debug flag adds the overflow Debug action", async ({
 		page,
 		relayUrl,
 	}) => {
@@ -792,8 +810,8 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(panel).toBeVisible();
 		await panel.getByTitle("Close panel").click();
 		await expect(panel).toBeHidden();
-		await page.getByTestId("session-bar-title-menu").click();
-		const debug = page.getByTestId("session-title-debug");
+		await page.getByTestId("session-bar-island-overflow").click();
+		const debug = page.getByTestId("overflow-debug");
 		await expect(debug).toBeVisible();
 		await debug.click();
 		await expect(panel).toBeVisible();
@@ -917,11 +935,9 @@ test.describe("Sidebar Layout — Mobile", () => {
 		const bar = page.getByTestId("session-bar");
 		const overflowButton = page.getByTestId("session-bar-island-overflow");
 		const sheet = page.getByTestId("session-bar-island-menu");
-		const titleMenuButton = page.getByTestId("session-bar-title-menu");
-		await titleMenuButton.click();
-		const actions = page.getByTestId("session-action-sheet");
-		await expect(actions.getByRole("group", { name: "Triage" })).toBeVisible();
-		await actions.getByTestId("session-ctx-rename").click();
+		await overflowButton.click();
+		await expect(sheet.getByRole("group", { name: "Triage" })).toBeVisible();
+		await sheet.getByTestId("session-ctx-rename").click();
 		const longTitle =
 			"Investigate the long running terminal session across every project";
 		await page.getByRole("textbox", { name: "Session name" }).fill(longTitle);
@@ -1089,12 +1105,13 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(page.getByTestId("session-filter-clear")).toHaveCount(0);
 		await measure("#sidebar");
 		await page.getByTestId("session-filter-chip-needs-you").click();
-		await page.getByTestId("list-bar-overflow").click();
-		await expect(page.getByTestId("list-overflow-settings")).toBeVisible();
-		await expect(page.getByTestId("list-overflow-select")).toHaveCount(0);
-		await expect(page.getByTestId("list-overflow-resume")).toHaveCount(0);
-		await measure("[role=menu]");
-		await page.keyboard.press("Escape");
+		const settingsButton = page.getByTestId("list-bar-settings");
+		await expect(settingsButton).toHaveAccessibleName("Settings");
+		await expect(settingsButton.locator("svg.lucide-settings")).toBeVisible();
+		await settingsButton.click();
+		await expect(page.locator("#settings-panel")).toBeVisible();
+		await page.getByTestId("settings-close-btn").click();
+		await expect(page.locator("#settings-panel")).toHaveCount(0);
 		await page.getByTestId("session-scope-chip").click();
 		await page.getByRole("menuitem", { name: "Add a project…" }).click();
 		const addProject = page.getByRole("dialog", {
@@ -1155,14 +1172,14 @@ test.describe("Sidebar Layout — Mobile", () => {
 	test("mobile: list bar titles the list once, with its unsettled count", async ({
 		page,
 		relayUrl,
-	}) => {
+	}, testInfo) => {
 		await new AppPage(page).goto(new URL("/", relayUrl).toString());
 		await expect(
 			page.locator("#session-list .session-item").first(),
 		).toBeVisible();
 
-		await expect(page.getByTestId("list-bar-title")).toHaveText(
-			/^Sessions\s*\d+$/,
+		await expect(page.getByTestId("list-bar-title")).toHaveAccessibleName(
+			/^Sessions \d+$/,
 		);
 		await expect(page.getByTestId("list-bar-title")).toHaveCSS(
 			"font-size",
@@ -1172,6 +1189,22 @@ test.describe("Sidebar Layout — Mobile", () => {
 			"font-weight",
 			"700",
 		);
+		const mark = page.getByTestId("list-bar-mark");
+		await expect(mark).toHaveCSS("border-radius", "7px");
+		const accent = await mark.evaluate(
+			(element) => getComputedStyle(element).backgroundColor,
+		);
+		const image = PNG.sync.read(
+			await mark.screenshot({
+				path: testInfo.outputPath("session-list-mark.png"),
+				scale: "css",
+			}),
+		);
+		expect([image.width, image.height]).toEqual([26, 26]);
+		const topCap = (image.width + Math.floor(image.width / 2)) * 4;
+		expect(
+			`rgb(${Array.from(image.data.subarray(topCap, topCap + 3)).join(", ")})`,
+		).toBe(accent);
 		await expect(page.getByTestId("list-bar-select")).toBeVisible();
 		const compose = page.locator("#sidebar-header #new-session-btn");
 		await expect(compose).toBeVisible();
@@ -1180,9 +1213,9 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(
 			page.locator("#sidebar-header").getByTestId("session-group-button"),
 		).toHaveCount(0);
-		await expect(page.locator("#sidebar").getByText(/^sessions$/i)).toHaveCount(
-			0,
-		);
+		await expect(
+			page.locator("#sidebar").getByRole("heading", { name: /^Sessions \d+$/ }),
+		).toHaveCount(1);
 	});
 
 	test("mobile: focusing search suggests the project scopes and their tokens", async ({

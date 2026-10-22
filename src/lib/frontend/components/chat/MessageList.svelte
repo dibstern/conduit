@@ -369,19 +369,19 @@
 			: undefined,
 	);
 	$effect(() => {
-		if (!processing || chat.loadLifecycle !== "ready" || turns.at(-1)?.user) return;
+		const turn = turns.at(-1);
+		if (!processing || chat.loadLifecycle !== "ready" || !turn || turn.user) return;
 		const sessionId = viewedSessionId;
 		if (!sessionId) return;
-		const key = JSON.stringify([sessionId, turns.at(-1)?.id ?? null]);
+		const key = JSON.stringify([sessionId, turn.id]);
 		if (reportedMissingPrompts.has(key)) return;
 		reportedMissingPrompts.add(key);
-		const lastRow = chat.transcript?.rows.at(-1);
 		const last = chat.messages.at(-1);
 		console.error("[turn-clock] Working session has no prompt to time from", {
 			sessionId,
 			messageCount: chat.messages.length,
-			lastMessageRole: lastRow?.role ?? last?.type ?? null,
-			lastMessageId: lastRow?.id ?? (last && "messageId" in last ? last.messageId ?? last.uuid : last?.uuid) ?? null,
+			lastMessageRole: last?.type ?? null,
+			lastMessageId: (last && "messageId" in last ? last.messageId ?? last.uuid : last?.uuid) ?? null,
 		});
 	});
 	const localPermissions = $derived(getLocalPermissions(viewedSessionId));
@@ -512,6 +512,8 @@
 </script>
 
 <!-- Focusable so keyboard users can scroll it and `u` can target the open session. -->
+<!-- break-words is inherited, so a long path or URL in any row wraps instead of
+     widening the transcript (overflow-y-auto makes overflow-x scroll too). -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
 	id={messagesId}
@@ -519,7 +521,7 @@
 	role="region"
 	aria-label="Transcript"
 	tabindex="0"
-	class="flex-1 overflow-y-auto pt-5 pb-3 relative"
+	class="flex-1 overflow-y-auto pt-5 pb-3 relative break-words"
 	style="-webkit-overflow-scrolling: touch;"
 	bind:this={messagesEl}
 >

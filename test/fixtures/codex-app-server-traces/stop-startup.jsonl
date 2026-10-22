@@ -1,0 +1,6 @@
+{"scenario":"stop-startup","codexVersion":"0.162.1","recordedAt":"2026-10-21T15:15:25.561Z"}
+{"dir":"out","at":4,"message":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"conduit-trace-recorder","version":"1.0.0","title":null},"capabilities":{"experimentalApi":true}}}}
+{"dir":"in","at":101,"message":{"id":1,"result":{"userAgent":"conduit-trace-recorder/0.162.1 (Mac OS 26.6.2; arm64) unknown (conduit-trace-recorder; 1.0.0)","codexHome":"/codex-home","platformFamily":"unix","platformOs":"macos"}}}
+{"dir":"in","at":101,"message":{"method":"remoteControl/status/changed","params":{"status":"disabled","serverName":"test-host","installationId":"00000000-0000-0000-0000-000000000000","environmentId":null},"emittedAtMs":1792595725661}}
+{"dir":"out","at":102,"message":{"jsonrpc":"2.0","method":"initialized"}}
+{"dir":"out","at":103,"message":{"jsonrpc":"2.0","id":2,"method":"thread/start","params":{"cwd":"/workspace","model":"gpt-5.4"}}}

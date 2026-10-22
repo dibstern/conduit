@@ -24,6 +24,9 @@
 <script lang="ts">
 	import { onDestroy, type Snippet } from "svelte";
 	import { provideDialogTarget } from "./dialog-context.js";
+	import { dimThemeColor } from "../../stores/theme.svelte.js";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
+	import { dragToDismiss } from "../../actions/drag-to-dismiss.js";
 
 	let {
 		open,
@@ -36,6 +39,8 @@
 		returnFocus,
 		initialFocus = "dialog",
 		backdrop = "default",
+		sheetElement = $bindable<HTMLElement | undefined>(),
+		sheetDismissOffset,
 		children,
 	}: {
 		open: boolean;
@@ -54,10 +59,17 @@
 		/** Scrim weight. `dark` for media, `subtle` for large panels that
 		 *  should still show their context. */
 		backdrop?: "default" | "dark" | "subtle";
+		/** The usage dock places this same shell while pulling it open. */
+		sheetElement?: HTMLElement | undefined;
+		sheetDismissOffset?: (() => number) | undefined;
 		children: Snippet;
 	} = $props();
 
 	let dialogEl = $state<HTMLDialogElement | null>(null);
+	$effect(() => {
+		if (open && dialogEl && (placement === "sheet" || sessionViewState.compact && placement !== "fullscreen")) return dimThemeColor();
+		return undefined;
+	});
 	provideDialogTarget(() => dialogEl);
 	const tabbableSelector = 'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
@@ -180,7 +192,17 @@
 	onkeydown={handleKeydown}
 >
 	{#if open}
-		{@render children()}
+		<!-- A fullscreen dialog covers #compact-top-edge, and iOS 26 then keeps the
+		     status bar in the colour it had when the dialog opened: a theme switch in
+		     Settings left it dark over a light page. Its own strip is re-read live. -->
+		{#if placement === "fullscreen"}<div class="top-edge-strip" aria-hidden="true"></div>{/if}
+		{#if placement === "sheet"}
+			<div bind:this={sheetElement} use:dragToDismiss={{ ondismiss: onclose, enabled: dismissible, dismissOffset: sheetDismissOffset }}>
+				{@render children()}
+			</div>
+		{:else}
+			{@render children()}
+		{/if}
 	{/if}
 </dialog>
 

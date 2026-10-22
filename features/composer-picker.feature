@@ -57,7 +57,7 @@ Scenario Outline: E1 desktop icons mode uses the existing approvals menu
   When I set approvals to auto
   Then the approvals menu is closed
   And the mode shield names Auto
-  And the mode shield uses the warning tone
+  And the mode shield uses the auto tone
   And the composer region visually matches <baseline> at <threshold> percent
 
 Examples:
@@ -121,7 +121,7 @@ Scenario Outline: C2 limited cards are inert and unknown usage can be selected i
 Examples:
   | tier  | reading     | baseline                   | threshold |
   | wide  | unknown     | composer-picker-account-c2 | 98        |
-  | phone | unavailable | composer-picker-account-c2 | 98        |
+  | phone | unknown     | composer-picker-account-c2 | 98        |
 
 Scenario Outline: C3 five accounts scroll, fade, reveal the selection and support arrow keys
   Given the conduit app is served with the connected mockup
@@ -202,7 +202,7 @@ Scenario Outline: C2 open Claude cards lock current and limited accounts and swi
 Examples:
   | tier  | reading     | baseline                       | threshold |
   | wide  | unknown     | composer-picker-account-c2-open | 98       |
-  | phone | unavailable | composer-picker-account-c2-open | 98       |
+  | phone | unknown     | composer-picker-account-c2-open | 98       |
 
 Scenario Outline: C2 switching from an Account card preserves the project binding and reads fresh quotas
   Given the conduit app is served with the connected mockup

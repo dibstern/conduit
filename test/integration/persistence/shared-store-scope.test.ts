@@ -814,7 +814,8 @@ describe("shared-store relay project scope", () => {
 		const workspace: SessionWorkspaceTag["Service"] = {
 			preview: unused,
 			renameBranch: unused,
-			withLaunch: (effect) => effect,
+			withLaunch: (_sessionId, effect) => effect,
+			withProjectLaunch: (effect) => effect,
 			get: unused,
 			move: unused,
 			inherit: unused,
@@ -1066,7 +1067,7 @@ describe("shared-store relay project scope", () => {
 						readings: Stream.empty,
 						latest: () => Effect.succeed(undefined),
 						turnEnded: () => Effect.void,
-						refresh: () =>
+						refresh: (_options) =>
 							Effect.succeed([usageReading("claude", { status: "available" })]),
 						pickFailover: () => Effect.succeed(undefined),
 					}),

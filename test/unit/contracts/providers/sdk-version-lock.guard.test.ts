@@ -7,6 +7,7 @@ const repoRoot = resolve(import.meta.dirname, "../../../..");
 const readPackageJson = (path: string) =>
 	JSON.parse(readFileSync(path, "utf8")) as {
 		dependencies?: Record<string, string>;
+		devDependencies?: Record<string, string>;
 		optionalDependencies?: Record<string, string>;
 		peerDependencies?: Record<string, string>;
 		version?: string;
@@ -60,6 +61,16 @@ describe("provider SDK version locks", () => {
 		expect(pinnedVersion).toBe("1.19.1");
 	});
 
+	it("pins the OpenCode server tests run to the OpenCode SDK version", () => {
+		const manifest = readPackageJson(resolve(repoRoot, "package.json"));
+		const sdkVersion = manifest.dependencies?.["@opencode-ai/sdk"];
+
+		expect(manifest.devDependencies?.["opencode-ai"]).toBe(sdkVersion);
+		expect(
+			readFileSync(resolve(repoRoot, ".opencode-version"), "utf8").trim(),
+		).toBe(sdkVersion);
+	});
+
 	it("locks the installed Cursor SDK to the pinned optional dependency version", () => {
 		const pinnedVersion = readPackageJson(resolve(repoRoot, "package.json"))
 			.optionalDependencies?.["@cursor/sdk"];
@@ -68,7 +79,7 @@ describe("provider SDK version locks", () => {
 		).version;
 
 		expect(installedVersion).toBe(pinnedVersion);
-		expect(pinnedVersion).toBe("1.0.37");
+		expect(pinnedVersion).toBe("1.0.40");
 	});
 
 	// conduit-test-o6r: @anthropic-ai/sdk is a transitive dep (via the Claude

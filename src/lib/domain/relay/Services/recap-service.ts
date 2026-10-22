@@ -38,6 +38,7 @@ import { SessionEventBusTag } from "./session-event-bus.js";
 
 export class RecapFailure extends Data.TaggedError("RecapFailure")<{
 	readonly message: string;
+	readonly code?: "unknown-turn";
 }> {}
 
 interface RecapTarget {
@@ -168,7 +169,10 @@ export const makeRecapServiceLive = (
 				LEFT JOIN messages u ON u.id = t.user_message_id
 				WHERE t.id = ${target.turnId} AND t.session_id = ${target.sessionId} AND s.project_id = ${store.projectId}`;
 					if (!turn)
-						return yield* new RecapFailure({ message: "Unknown turn" });
+						return yield* new RecapFailure({
+							message: "Unknown turn",
+							code: "unknown-turn",
+						});
 					return turn;
 				});
 			const readVersions = (target: RecapTarget) =>

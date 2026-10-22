@@ -496,6 +496,107 @@ it("falls back to a fresh handoff when a workspace move strands the same-account
 	);
 });
 
+// The SDK runs a slash command only when it opens the prompt, and its arguments
+// are the rest of the text. A catch-up owed to a command waits for the next
+// prose turn, even though the command's own receipt moves past the move.
+it("holds an owed catch-up past a slash command for the next prose turn", async () => {
+	await Effect.runPromise(
+		Effect.gen(function* () {
+			const commit = yield* makeCommitAndSignal;
+			const state = yield* ProviderStateEffectTag;
+			const message = (
+				id: string,
+				role: "user" | "assistant",
+				text: string,
+			) => [
+				canonicalEvent("message.created", "s1", {
+					sessionId: "s1",
+					messageId: id,
+					role,
+				}),
+				canonicalEvent("text.delta", "s1", {
+					messageId: id,
+					partId: `${id}:text`,
+					text,
+				}),
+			];
+			const receipt = () =>
+				state.saveUpdates("s1", [
+					{
+						key: "nativeThread:work",
+						value: JSON.stringify({
+							resumeSessionId: "native-work",
+							configDir: "/accounts/work",
+							firstSequence: 0,
+							deliveredThrough: 0,
+						}),
+					},
+				]);
+			yield* commit([
+				canonicalEvent("session.created", "s1", {
+					sessionId: "s1",
+					title: "Moved",
+					provider: "work",
+				}),
+				...message("first", "user", "Delivered original request"),
+			]);
+			yield* receipt();
+			yield* commit([
+				canonicalEvent("session.workspace_changed", "s1", {
+					sessionId: "s1",
+					cause: "user",
+					path: "/repo",
+					worktrees: {},
+					origin: "existing",
+				}),
+				...message("missed", "assistant", "Undelivered reply"),
+			]);
+			const calls: { prompt: string; handoff?: unknown }[] = [];
+			const send = (userText: string) =>
+				sendPreparedClaudeTurn({
+					sessionId: "s1",
+					instanceId: "work",
+					userText,
+					options: {
+						folderSource: "account",
+						configDir: configuredClaudeConfigDir("/accounts/work"),
+					},
+					send: (prepared) =>
+						Effect.sync((): TurnResult => {
+							calls.push(prepared);
+							return {
+								status: "completed",
+								cost: 0,
+								tokens: { input: 0, output: 0 },
+								durationMs: 0,
+								providerStateUpdates: [],
+							};
+						}),
+				});
+			for (const command of ["/compact keep the test plan", "/review"]) {
+				yield* send(command);
+				// Each command turn completes and advances its receipt past the move.
+				yield* commit(message(`cmd-${calls.length}`, "user", command));
+				yield* receipt();
+			}
+			yield* send("Next request");
+			expect(calls.map((call) => call.prompt.slice(0, 40))).toEqual([
+				"/compact keep the test plan",
+				"/review",
+				"[Conduit context handoff]\nIncluded 3 int",
+			]);
+			expect(calls.slice(0, 2).map((call) => call.handoff)).toEqual([
+				undefined,
+				undefined,
+			]);
+			expect(calls[2]?.prompt).toContain("Undelivered reply");
+			expect(calls[2]?.prompt.endsWith("\n\nNext request")).toBe(true);
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
+	);
+});
+
 it("prepends a hidden still-open note only until Dismiss or a reply, on fresh and resumed turns", async () => {
 	await fc.assert(
 		fc.asyncProperty(

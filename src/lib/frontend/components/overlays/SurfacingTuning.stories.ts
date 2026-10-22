@@ -2,7 +2,10 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { Schema } from "effect";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import { surfacingTuningFixture } from "../../../../../test/e2e/fixtures/surfacing-tuning.js";
-import { CategorySetContentsSchema } from "../../../contracts/category-set.js";
+import {
+	BUILTIN_CATEGORIES,
+	CategorySetContentsSchema,
+} from "../../../contracts/category-set.js";
 import { CategoryTuningHunkSchema } from "../../../contracts/category-tuning.js";
 import {
 	ProposeCategoryTuning,
@@ -40,6 +43,22 @@ const meta = {
 			key: name.startsWith("No Key") ? "none" : "valid",
 			unjudged: name.startsWith("No Key Unjudged"),
 		});
+		if (name.startsWith("All Categories")) {
+			const record = fixture.records[0];
+			if (!record) throw new Error("Missing feedback fixture record");
+			fixture.records.splice(
+				0,
+				fixture.records.length,
+				...BUILTIN_CATEGORIES.map((category, index) => ({
+					...record,
+					partId: `category-colours-${category.id}`,
+					ordinal: index + 1,
+					text: category.criteria.what,
+					probabilities: { [category.id]: 1 },
+					mark: { level: "key" as const, direction: "raise" as const },
+				})),
+			);
+		}
 		if (name.startsWith("Proposing")) fixture.setProposalState("pending");
 		if (name.startsWith("Failed")) fixture.setProposalState("failed");
 		if (name.startsWith("No Changes")) fixture.setProposalState("empty");
@@ -112,6 +131,28 @@ const feedback: Play = async ({ canvasElement }) => {
 		await expect(body.queryAllByTestId("surfacing-ledger-record")).toHaveLength(
 			0,
 		);
+	if (fixture.records.length) {
+		for (const record of body.getAllByTestId("surfacing-ledger-record")) {
+			await expect(record).not.toHaveTextContent(/\batKey\b/);
+		}
+		const tiles = body.getByTestId("surfacing-feedback-tiles");
+		for (const value of tiles.querySelectorAll("b")) {
+			await expect(getComputedStyle(value).color).toBe(
+				getComputedStyle(body.getByRole("heading", { name: "Surfacing" }))
+					.color,
+			);
+		}
+		const groupLabel = body.getByRole("heading", {
+			name: "Jev said → you said",
+		});
+		for (const label of tiles.querySelectorAll(
+			":scope > div > small, :scope > div > span",
+		)) {
+			await expect(getComputedStyle(label).color).toBe(
+				getComputedStyle(groupLabel).color,
+			);
+		}
+	}
 	(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
 };
 const empty: Play = async (context) => {
@@ -160,6 +201,45 @@ const review: Play = async (context) => {
 	await expect(
 		body.getByRole("checkbox", { name: "Include Finding change" }),
 	).toBeChecked();
+	const checkbox = body.getByRole("checkbox", {
+		name: "Include Finding change",
+	});
+	await expect(checkbox.getBoundingClientRect().width).toBe(16);
+	await expect(checkbox.getBoundingClientRect().height).toBe(16);
+	await expect(getComputedStyle(checkbox).appearance).toBe("none");
+	await expect(getComputedStyle(checkbox).borderRadius).toBe("4px");
+	await expect(getComputedStyle(checkbox).backgroundColor).toBe(
+		context.canvasElement.ownerDocument.documentElement.classList.contains(
+			"light-theme",
+		)
+			? "rgb(67, 82, 210)"
+			: "rgb(142, 155, 255)",
+	);
+	await userEvent.click(checkbox);
+	await expect(checkbox).not.toBeChecked();
+	await expect(getComputedStyle(checkbox).backgroundColor).toBe(
+		"rgba(0, 0, 0, 0)",
+	);
+	await expect(getComputedStyle(checkbox).borderTopStyle).toBe("solid");
+	checkbox.blur();
+	const uncheckedShadow = getComputedStyle(checkbox).boxShadow;
+	await expect(getComputedStyle(checkbox).borderTopWidth).toBe("1px");
+	await expect(uncheckedShadow).toContain("0.5px inset");
+	checkbox.focus();
+	await userEvent.tab({ shift: true });
+	await userEvent.tab();
+	await expect(checkbox).toHaveFocus();
+	await expect(checkbox.matches(":focus-visible")).toBe(true);
+	await expect(getComputedStyle(checkbox).boxShadow).not.toBe(uncheckedShadow);
+	await expect(getComputedStyle(checkbox).boxShadow).toContain(
+		"0px 0px 0px 2px",
+	);
+	await userEvent.click(checkbox);
+	await expect(checkbox).toBeChecked();
+	checkbox.blur();
+	const again = body.getByTestId("surfacing-proposal-again");
+	await expect(again.getBoundingClientRect().height).toBe(28);
+	await expect(getComputedStyle(again).borderTopWidth).toBe("0px");
 	await expect(
 		body.getByTestId("surfacing-proposal-hunk-finding-weight"),
 	).toHaveTextContent("40");
@@ -178,6 +258,23 @@ export const FewMarksLight: Story = {
 };
 export const Ledger: Story = { play: feedback };
 export const LedgerLight: Story = { ...Ledger, globals: { theme: "light" } };
+export const AllCategories: Story = {
+	play: async (context) => {
+		await feedback(context);
+		const grid = within(context.canvasElement.ownerDocument.body).getByTestId(
+			"surfacing-feedback-grid",
+		);
+		const glyphs = grid.querySelectorAll("tbody td:first-child [aria-hidden]");
+		await expect(glyphs).toHaveLength(9);
+		await expect(
+			new Set([...glyphs].map((glyph) => getComputedStyle(glyph).color)).size,
+		).toBe(9);
+	},
+};
+export const AllCategoriesLight: Story = {
+	...AllCategories,
+	globals: { theme: "light" },
+};
 export const NoKey: Story = {
 	play: async (context) => {
 		await review(context);

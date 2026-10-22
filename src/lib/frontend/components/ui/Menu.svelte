@@ -10,7 +10,7 @@
 		exemptFromBackgroundInert,
 		registerOpenSurface,
 	} from "./actions/use-background-inert.svelte.js";
-	import { dragToDismiss } from "../../actions/drag-to-dismiss.js";
+	import { dragToDismiss, sheetScrimStyle } from "../../actions/drag-to-dismiss.js";
 	import {
 		FLOATING_MENU_CONTENT_CLASSES,
 		FINAL_MENU_CONTENT_CLASSES,
@@ -19,6 +19,7 @@
 	import { menuDensityContextKey, type MenuDensityContext } from "./menu-context.js";
 	import { getDialogTarget } from "./dialog-context.js";
 	import SheetChrome from "./SheetChrome.svelte";
+	import { dimThemeColor } from "../../stores/theme.svelte.js";
 
 	const SCRIM_ACTIVATION_DELAY_MS = 50;
 
@@ -114,6 +115,7 @@
 		const onClick = props["onclick"] as ((event: MouseEvent) => void) | undefined;
 		return {
 			...props,
+			...(presentation === "sheet" && footer ? { "aria-haspopup": "dialog" } : {}),
 			// A mouse press opens the sheet at once; its release must not pick the
 			// row that has just slid under the pointer.
 			onpointerdown: (event: PointerEvent) => {
@@ -157,6 +159,10 @@
 
 	$effect(() => {
 		if (open) return registerOpenSurface(() => handleOpenChange(false));
+		return undefined;
+	});
+	$effect(() => {
+		if (open && presentation === "sheet") return dimThemeColor();
 		return undefined;
 	});
 	$effect(() => {
@@ -242,16 +248,27 @@
 
 	<DropdownMenu.Portal {...portalProps}>
 		{#if presentation === "sheet"}
-			{#if open}<div aria-hidden="true" data-testid="menu-sheet-scrim" class="fixed inset-0 z-[var(--z-sheet)] bg-backdrop" class:pointer-events-none={!scrimInteractive} style:opacity={1 - scrimFade.progress} style:transition={scrimFade.settling ? "opacity 220ms linear" : undefined} use:exemptFromBackgroundInert></div>{/if}
+			{#if open}<div aria-hidden="true" data-testid="menu-sheet-scrim" class="fixed inset-0 z-[var(--z-sheet)] bg-backdrop" class:pointer-events-none={!scrimInteractive} style={sheetScrimStyle(scrimFade)} use:exemptFromBackgroundInert></div>{/if}
 			<DropdownMenu.ContentStatic {...sheetContentProps}>
 				{#snippet child({ props })}
 					<!-- Keep the bits-ui focus target on the menu shell. SheetChrome gives the
 					     scrolling body a keyboard target too; Bits intercepts Tab inside the menu.
 					     Svelte cannot see role="menu" through the spread. -->
 					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-					<div {...props} id={contentId} tabindex={0} bind:this={contentNode} onclickcapture={swallowOpeningClick} onpointerdowncapture={(event: PointerEvent) => { openingClickDeadline = 0; (props["onpointerdowncapture"] as ((event: PointerEvent) => void) | undefined)?.(event); }} use:exemptFromBackgroundInert use:dragToDismiss={{ ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
+					<div {...props} role={footer ? "dialog" : "menu"} aria-orientation={footer ? undefined : "vertical"} id={contentId} tabindex={0} bind:this={contentNode} onclickcapture={swallowOpeningClick} onkeydowncapture={(event: KeyboardEvent) => {
+						// Bits dismisses menus on Tab; dialog footers need native button traversal.
+						if (footer && event.key === "Tab") event.stopPropagation();
+						(props["onkeydowncapture"] as ((event: KeyboardEvent) => void) | undefined)?.(event);
+					}} onpointerdowncapture={(event: PointerEvent) => { openingClickDeadline = 0; (props["onpointerdowncapture"] as ((event: PointerEvent) => void) | undefined)?.(event); }} use:exemptFromBackgroundInert use:dragToDismiss={{ ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
 						<SheetChrome {footer} bottomPadding={sheetBottomPadding} class={className} menuBody>
-							{@render children()}
+							{#if footer}
+								<!-- Menu commands and footer switches have different required ARIA parents. -->
+								<div role="menu" aria-label={ariaLabel} aria-orientation="vertical" data-state={open ? "open" : "closed"}>
+									{@render children()}
+								</div>
+							{:else}
+								{@render children()}
+							{/if}
 						</SheetChrome>
 					</div>
 				{/snippet}

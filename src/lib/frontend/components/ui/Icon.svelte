@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Component } from 'svelte';
   import {
+    PanelLeft,
     PanelLeftClose,
     PanelLeftOpen,
     Plus,
@@ -99,10 +100,13 @@
     PinOff,
     Brain,
     BookOpen,
+    Book,
     Moon,
     PanelsTopLeft,
     Bot,
     Lock,
+    Globe,
+    Power,
     Workflow,
     Radar,
     Gauge,
@@ -114,11 +118,13 @@
   import ClaudeMark from './marks/ClaudeMark.svelte';
   import OpenCodeMark from './marks/OpenCodeMark.svelte';
   import CursorMark from './marks/CursorMark.svelte';
+  import CodexMark from './marks/CodexMark.svelte';
 
   // Map of kebab-case icon name to Svelte component.
   // Keys match the names used in data-lucide="..." attributes in the vanilla HTML.
   const icons: Record<string, Component> = {
     // Icons actively used in the existing vanilla HTML
+    'panel-left': PanelLeft,
     'panel-left-close': PanelLeftClose,
     'panel-left-open': PanelLeftOpen,
     'plus': Plus,
@@ -226,9 +232,12 @@
     'pin-off': PinOff,
     'brain': Brain,
     'book-open': BookOpen,
+    'book': Book,
     'panels-top-left': PanelsTopLeft,
     'bot': Bot,
     'lock': Lock,
+    'globe': Globe,
+    'power': Power,
     'workflow': Workflow,
     'radar': Radar,
     'gauge': Gauge,
@@ -241,6 +250,7 @@
     'claude': ClaudeMark,
     'opencode': OpenCodeMark,
     'cursor': CursorMark,
+    'codex': CodexMark,
   };
 
   let {

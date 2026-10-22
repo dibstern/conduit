@@ -31,6 +31,7 @@ export type ButtonVariant =
 	| "pill"
 	| "filter"
 	| "field"
+	| "field-token"
 	| "composer-model"
 	| "composer-checkout"
 	| "composer-word"
@@ -41,6 +42,7 @@ export type ButtonVariant =
 	| "goal"
 	| "capsule-primary"
 	| "chip"
+	| "settings"
 	| "menu-trigger"
 	| "scrim"
 	| "sheet-scrim"
@@ -207,10 +209,15 @@ type VariantRecipe = {
 };
 
 export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
+	settings: {
+		chrome: "rounded-full px-[12px] font-medium",
+		tone: TONE_CLASSES.default,
+		hoverFill: HOVER_FILL_CLASSES.text,
+	},
 	"capsule-primary": {
-		chrome: "bg-accent-bg",
-		tone: "text-accent",
-		hoverFill: "hover:bg-accent-bg",
+		chrome: "bg-accent/18",
+		tone: "text-accent-ink",
+		hoverFill: "hover:bg-accent/18",
 	},
 	chip: {
 		chrome: "bg-chip",
@@ -241,7 +248,7 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 		// Keyboard focus rings the summary words, not the full-width tap target.
 		chrome:
 			"group/composer-summary min-w-0 w-full gap-[5px] font-sans text-[12px] font-normal [&:focus-visible]:ring-0",
-		tone: "text-text-muted",
+		tone: "text-text-dimmer",
 		hoverFill: "hover:text-text",
 	},
 	"composer-row": {
@@ -267,15 +274,15 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 		hoverFill: "hover:bg-hover",
 	},
 	"composer-checkout": {
-		chrome: "min-w-0 bg-chip font-mono text-[11.5px] font-normal",
+		chrome: "min-w-0 h-[28px]! bg-chip font-mono text-[11.5px] font-normal",
 		tone: "text-text-secondary",
 		hoverFill: "hover:bg-hover",
 	},
 	"composer-word": {
 		// An offset outline, so focus clears the glyphs and the dotted underline.
 		chrome:
-			"min-w-0 gap-[5px] rounded-[4px] font-sans text-[12px] font-normal underline decoration-dotted decoration-border-chip underline-offset-[4px] [&:focus-visible]:ring-0 [&:focus-visible]:outline-2 [&:focus-visible]:outline-solid [&:focus-visible]:outline-offset-[3px] [&:focus-visible]:outline-text",
-		tone: "text-text-muted",
+			"min-w-0 gap-[5px] rounded-[4px] font-sans text-[12px] font-normal underline decoration-dotted decoration-1 decoration-border-chip underline-offset-[4px] [&:focus-visible]:ring-0 [&:focus-visible]:outline-2 [&:focus-visible]:outline-solid [&:focus-visible]:outline-offset-[3px] [&:focus-visible]:outline-text",
+		tone: "text-text-dimmer",
 		hoverFill: "hover:text-text",
 	},
 	goal: {
@@ -332,6 +339,13 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 			"h-[30px] gap-[3px] rounded-[9px] bg-chip pl-[10px] pr-[7px] text-[12.5px] font-medium",
 		tone: TONE_CLASSES.secondary,
 		hoverFill: "hover:bg-hover",
+	},
+	/** The label inside a shared field pill, beside its separate clear button. */
+	"field-token": {
+		chrome:
+			"h-[30px] gap-[3px] rounded-[9px] pl-[10px] pr-[2px] text-[12.5px] font-medium",
+		tone: TONE_CLASSES.secondary,
+		hoverFill: "",
 	},
 	"ghost-accent": {
 		chrome: "",
@@ -449,9 +463,9 @@ export type ButtonSize =
 	| "touch-icon"
 	| "touch-pill"
 	| "navigation-pill"
+	| "session-navigation"
 	| "phone-navigation"
 	| "phone-header-icon"
-	| "phone-title-menu"
 	| "phone-status"
 	| "phone-task"
 	| "subtitle"
@@ -467,9 +481,11 @@ export type ButtonSize =
 	| "composer-action"
 	| "composer-chip";
 
-/** Shared by disclosure and navigation rows in the transcript's step log. */
-export const TRANSCRIPT_ROW_CLASSES =
-	"flex items-center gap-[8px] w-full min-w-0 min-h-[44px] md:min-h-[28px] py-[3px] px-0 text-[13px] text-left";
+const TOUCH_TARGET_CLASSES =
+	"relative before:absolute before:content-[''] before:left-1/2 before:top-1/2 before:-translate-x-1/2 before:-translate-y-1/2 before:size-full before:min-h-[44px] before:min-w-[44px]";
+
+/** Final's 26px step rows keep a 44px phone target outside the visible row. */
+export const TRANSCRIPT_ROW_CLASSES = `flex items-center gap-[8px] w-full min-w-0 h-[26px] py-0 px-0 text-[12.5px] font-normal text-left ${TOUCH_TARGET_CLASSES} md:before:hidden`;
 
 export type ButtonAlign = keyof typeof ALIGN_CLASSES;
 
@@ -491,9 +507,6 @@ export type ButtonAlign = keyof typeof ALIGN_CLASSES;
 // nine controls dissented on how far a dead button should dim, and none of
 // them could win against a BASE utility. It is now `disabledStyle` — see
 // DISABLED_CLASSES in button-recipes.ts.
-const TOUCH_TARGET_CLASSES =
-	"relative before:absolute before:content-[''] before:left-1/2 before:top-1/2 before:-translate-x-1/2 before:-translate-y-1/2 before:size-full before:min-h-[44px] before:min-w-[44px]";
-
 const BASE_CLASSES =
 	"no-underline cursor-pointer transition-colors " +
 	// Neutral, not accent. An accent ring against an accent-filled button
@@ -514,10 +527,11 @@ const SIZE_CLASSES: Record<
 	"touch-pill": "min-h-[44px] min-w-[44px] rounded-full",
 	"navigation-pill":
 		"min-h-[44px] gap-1.5 pl-1 pr-2 rounded-full text-[13px] font-medium",
+	"session-navigation":
+		"h-[28px] gap-[4px] pl-[4px] pr-[8px] rounded-full text-[13px] font-medium",
 	"phone-navigation":
 		"h-[28px] min-w-[44px] gap-[4px] pl-[4px] pr-[9px] rounded-full text-[13px] font-medium",
 	"phone-header-icon": "size-[30px] rounded-full",
-	"phone-title-menu": "h-[24px] w-[20px] rounded-lg focus-visible:ring-inset",
 	"phone-status": "h-[22px] min-w-[44px] rounded-full focus-visible:ring-inset",
 	"phone-task":
 		"h-[30px] min-w-[44px] gap-[8px] rounded-full focus-visible:ring-inset",
@@ -527,7 +541,7 @@ const SIZE_CLASSES: Record<
 	"card-action": "gap-[6px] rounded-[9px] px-[10px] py-[6px] text-[11.5px]",
 	"phone-card-action":
 		"h-[28px] min-w-[44px] gap-[6px] rounded-full px-[12px] text-[13px]",
-	"command-chip": "h-[24px] rounded-full px-[8px] font-mono text-[11.5px]",
+	"command-chip": "h-[22px] rounded-full px-[8px] font-mono text-[11.5px]",
 	"capsule-segment":
 		"h-[24px] gap-[5px] rounded-full px-[10px] text-[12.5px] font-medium tabular-nums",
 	"phone-capsule-segment":
@@ -637,17 +651,21 @@ export function buttonClasses({
 	className?: string | undefined;
 }>): string {
 	const sizeClasses =
-		size === "composer-action"
-			? `h-[34px] shrink-0 rounded-full gap-[6px] text-[13px] font-semibold ${iconOnly ? "w-[34px]" : "px-[12px]"}`
-			: size !== "sm" && size !== "md"
-				? SIZE_CLASSES[size]
-				: iconOnly
-					? `${size === "sm" ? "h-8 w-8" : "h-9 w-9"} ${SHARED_SIZE_CLASSES}`
-					: size === "sm"
-						? // Literal px from the mockup's `.btn`. `min-h`, not `h`, so a
-							// taller touch target composes without a collision.
-							"min-h-[25px] px-[10px] py-[4px] text-[11.5px] gap-[5px] rounded-[7px] font-normal"
-						: `h-9 px-4 text-sm gap-2 ${SHARED_SIZE_CLASSES}`;
+		variant === "settings"
+			? size === "sm"
+				? "h-[26px] gap-[5px] text-[12.5px]"
+				: "h-[28px] gap-[6px] text-[13px]"
+			: size === "composer-action"
+				? `h-[34px] shrink-0 rounded-full gap-[6px] text-[13px] font-semibold ${iconOnly ? "w-[34px]" : "px-[12px]"}`
+				: size !== "sm" && size !== "md"
+					? SIZE_CLASSES[size]
+					: iconOnly
+						? `${size === "sm" ? "h-8 w-8" : "h-9 w-9"} ${SHARED_SIZE_CLASSES}`
+						: size === "sm"
+							? // Literal px from the mockup's `.btn`. `min-h`, not `h`, so a
+								// taller touch target composes without a collision.
+								"min-h-[25px] px-[10px] py-[4px] text-[11.5px] gap-[5px] rounded-[7px] font-normal"
+							: `h-9 px-4 text-sm gap-2 ${SHARED_SIZE_CLASSES}`;
 
 	/**
 	 * Nearly every variant declares a `hover:bg-*`, and `:hover` keeps matching while a
@@ -677,6 +695,13 @@ export function buttonClasses({
 	const recipe = VARIANT_RECIPES[variant];
 	const assembled = [
 		recipe.chrome,
+		variant === "settings"
+			? tone === "error"
+				? "bg-error/14"
+				: tone === "accent"
+					? "bg-accent/18"
+					: "bg-chip"
+			: "",
 		tone === undefined ? recipe.tone : TONE_CLASSES[tone],
 		hoverFill === undefined ? recipe.hoverFill : HOVER_FILL_CLASSES[hoverFill],
 	]

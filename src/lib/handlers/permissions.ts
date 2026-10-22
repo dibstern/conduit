@@ -4,7 +4,7 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 // Browser ids name Conduit's persisted prompts. OpenCode answers use the
 // provider reference on that row, so questions survive relay restarts.
 
-import { Data, Effect, Option, Schema } from "effect";
+import { Data, Effect, Exit, Option, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import {
 	getProviderDriver,
@@ -13,7 +13,10 @@ import {
 } from "../contracts/provider-instance.js";
 import { WsRpcError } from "../contracts/ws-rpc.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
-import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
+import {
+	PendingInteractionServiceTag,
+	type PendingQuestion,
+} from "../domain/relay/Services/pending-interaction-service.js";
 import { publishGlobalProjectSetting } from "../domain/relay/Services/project-settings.js";
 import { ProviderRuntimeIngestionTag } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
@@ -349,6 +352,80 @@ const announceQuestionResolved = (
 		yield* restartProcessingTimeout(sessionId, runId);
 	});
 
+const resolveAsyncQuestion = <E = never, R = never>(
+	question: PendingQuestion,
+	answers: Record<string, string> | null,
+	sendAnswer: Effect.Effect<unknown, E, R> = Effect.void,
+) =>
+	Effect.gen(function* () {
+		const pendingOption = yield* Effect.serviceOption(
+			PendingInteractionServiceTag,
+		);
+		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+		const eventStore = yield* Effect.serviceOption(EventStoreEffectTag);
+		const projector = yield* Effect.serviceOption(ProjectionRunnerEffectTag);
+		if (
+			Option.isNone(pendingOption) ||
+			Option.isNone(sql) ||
+			Option.isNone(eventStore) ||
+			Option.isNone(projector)
+		)
+			return yield* Effect.fail(
+				new Error("Async question persistence is unavailable"),
+			);
+		const pending = pendingOption.value;
+		const durableAnswers = Object.fromEntries(
+			Object.entries(answers ?? {}).map(([index, answer]) => [
+				index,
+				question.questions[Number(index)]?.isSecret ? "[redacted]" : answer,
+			]),
+		);
+		yield* Effect.acquireUseRelease(
+			pending.resolveQuestionFromBrowser(question.requestId, answers ?? {}),
+			(resolved) =>
+				Option.isNone(resolved)
+					? Effect.void
+					: Effect.gen(function* () {
+							yield* sendAnswer;
+							const commit = yield* makeCommitAndSignal;
+							const events: CanonicalEvent[] = [];
+							if (question.messageId && question.partId) {
+								events.push(
+									canonicalEvent("tool.completed", question.sessionId, {
+										messageId: question.messageId,
+										partId: question.partId,
+										result:
+											answers === null
+												? null
+												: question.questions
+														.map(
+															(item, index) =>
+																`${item.question}\n${durableAnswers[String(index)] ?? ""}`,
+														)
+														.join("\n\n"),
+										duration: 0,
+									}),
+								);
+							}
+							events.push(
+								canonicalEvent("question.resolved", question.sessionId, {
+									id: question.requestId,
+									answers: durableAnswers,
+								}),
+							);
+							yield* commit(events);
+						}).pipe(
+							Effect.provideService(SqlClient.SqlClient, sql.value),
+							Effect.provideService(EventStoreEffectTag, eventStore.value),
+							Effect.provideService(ProjectionRunnerEffectTag, projector.value),
+						),
+			(resolved, exit) =>
+				Option.isSome(resolved) && Exit.isFailure(exit)
+					? pending.recordQuestionRequest(question).pipe(Effect.asVoid)
+					: Effect.void,
+		);
+	});
+
 /**
  * An OpenCode permission the relay timed out with no turn awaiting it: recorded
  * as rejected, which takes its card down. OpenCode itself is not told.
@@ -534,11 +611,13 @@ export const handlePermissionResponse = (
 				permissionDestination != null ? { permissionDestination } : undefined,
 			);
 		if (
-			Option.isNone(resultOption) &&
 			stored?.provider_process_id &&
 			!stored.provider_process_id.startsWith("opencode:")
-		)
-			return yield* expirePrompt(stored);
+		) {
+			if (Option.isNone(resultOption)) return yield* expirePrompt(stored);
+			// The runner sink owns the native reply and durable resolution.
+			return;
+		}
 		const mapped =
 			decision === "allow"
 				? ("once" as const)
@@ -695,6 +774,42 @@ export const handleAskUserResponse = (
 			pendingQuestion?.sessionId ||
 			wsHandler.getClientSession(clientId) ||
 			"";
+		const formatted = formatAnswers(answers);
+		const loggedAnswers = pendingQuestion?.questions.some(
+			(question) => question.isSecret,
+		)
+			? "[redacted]"
+			: formatted;
+		log.info(
+			`client=${clientId} session=${sessionId} answering: ${toolId} payload=${JSON.stringify({ id: toolId, answers: loggedAnswers })}`,
+		);
+		// Codex async questions are answered by a follow-up message, not the provider.
+		if (pendingQuestion?.delivery === "async") {
+			const question = pendingQuestion;
+			return yield* resolveAsyncQuestion(
+				question,
+				answers,
+				Effect.gen(function* () {
+					const input = {
+						clientId,
+						sessionId: question.sessionId,
+						text: question.questions
+							.map(
+								(item, index) =>
+									`${item.question}\n${answers[String(index)] ?? ""}`,
+							)
+							.join("\n\n"),
+						commandId: `async-question:${question.requestId}`,
+					};
+					const sent = yield* sendMessageToSession({
+						...input,
+						delivery: "steer",
+					});
+					if ("refused" in sent)
+						yield* sendMessageToSession({ ...input, delivery: "queue" });
+				}),
+			);
+		}
 		const providerProcessId =
 			stored?.provider_process_id ?? pendingQuestion?.providerProcessId;
 		const nativeRequestId =
@@ -715,25 +830,12 @@ export const handleAskUserResponse = (
 			return;
 		}
 
-		const formatted = formatAnswers(answers);
-
-		log.info(
-			`client=${clientId} session=${sessionId} answering: ${toolId} payload=${JSON.stringify({ id: toolId, answers: formatted })}`,
-		);
-
 		if (pendingInteractionsOption._tag === "Some") {
 			if (
 				stored?.provider_process_id &&
 				!stored.provider_process_id.startsWith("opencode:")
 			) {
-				const pendingQuestions =
-					yield* pendingInteractionsOption.value.listPendingQuestions();
-				if (
-					pendingQuestions.some(
-						(question) => question.requestId === toolId && question.recovered,
-					)
-				)
-					return yield* expirePrompt(stored);
+				if (pendingQuestion?.recovered) return yield* expirePrompt(stored);
 			}
 			const resolvedOption =
 				yield* pendingInteractionsOption.value.resolveQuestionFromBrowser(
@@ -930,6 +1032,9 @@ export const handleQuestionReject = (
 		const nativeRequestId =
 			stored?.provider_request_id ?? pendingQuestion?.providerRequestId;
 		const providerRequestId = nativeRequestId ?? toolId;
+		// Codex async questions are dismissed locally; the provider never waits on them.
+		if (pendingQuestion?.delivery === "async")
+			return yield* resolveAsyncQuestion(pendingQuestion, null);
 		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
 		if (Option.isSome(engineOption)) {
 			const providerId =

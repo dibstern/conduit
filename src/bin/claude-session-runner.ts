@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-import { NodeRuntime } from "@effect/platform-node";
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import { Effect } from "effect";
 import { makeClaudeRunnerLaunch } from "../lib/provider/claude/claude-runner-launch.js";
+import { makeCodexRunnerLaunch } from "../lib/provider/codex/codex-runner-launch.js";
 import { makeCursorRunnerLaunch } from "../lib/provider/cursor/cursor-runner-launch.js";
 import { runSessionRunner } from "../lib/provider/runner/runner-host.js";
 
@@ -9,6 +10,7 @@ import { runSessionRunner } from "../lib/provider/runner/runner-host.js";
 const launches = new Map<string, typeof makeClaudeRunnerLaunch>([
 	["claude", makeClaudeRunnerLaunch],
 	["cursor", makeCursorRunnerLaunch],
+	["codex", makeCodexRunnerLaunch],
 ]);
 
 const main = Effect.gen(function* () {

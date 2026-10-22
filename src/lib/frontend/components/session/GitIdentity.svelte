@@ -208,7 +208,7 @@
 {/snippet}
 
 {#snippet identity()}
-			<span class="relative flex size-[12px] shrink-0 items-center text-text-muted" data-part={git?.worktree ? "worktree" : undefined} data-icon={!git ? "folder" : !git.branch ? "commit" : git.worktree ? "worktree" : "branch"}>
+			<span class="relative flex size-[12px] shrink-0 items-center {presentation === 'word' ? 'text-text-dimmer' : 'text-text-muted'}" data-part={git?.worktree ? "worktree" : undefined} data-icon={!git ? "folder" : !git.branch ? "commit" : git.worktree ? "worktree" : "branch"}>
 				{#if git && !git.branch}
 					<!-- Compose the commit glyph from the existing circle icon. -->
 					<span class="commit-icon"><Icon name="circle" size={4} /></span>
@@ -224,7 +224,7 @@
 			{/if}
 			{#if fit !== "icon"}
 				{#if checkout}
-					<span data-part="branch" class="min-w-0 truncate {git?.branch ? 'text-text-secondary' : 'text-text-muted'}" style:min-width={`${branchFloor}ch`} title={git?.branch ? `Branch: ${checkout}` : `Detached at ${checkout}`}>{checkout}</span>
+					<span data-part="branch" class="min-w-0 truncate {presentation === 'word' ? 'text-text-dimmer' : git?.branch ? 'text-text-secondary' : 'text-text-muted'}" style:min-width={`${branchFloor}ch`} title={git?.branch ? `Branch: ${checkout}` : `Detached at ${checkout}`}>{checkout}</span>
 				{/if}
 				{#if git?.dirty}{@render dirtyMark("shrink-0")}{/if}
 				{#if !phone && upstreamMark}

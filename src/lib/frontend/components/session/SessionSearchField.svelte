@@ -171,19 +171,19 @@
 <svelte:window onkeydown={handleShortcut} />
 
 <div
-	class="relative flex min-h-[44px] items-center gap-[6px] md:min-h-[30px]"
+	class="relative flex h-[30px] items-center gap-[6px]"
 	data-testid="session-search-field"
 	onfocusout={handleFocusOut}
 >
 	<!-- One pill: "All projects ▾" at rest, a removable "conduit ✕" token once
 	     scoped, the same thing `project:conduit` compiles to. -->
-	<span class="flex max-w-[60%] shrink-0 items-center">
+	<span class="flex max-w-[60%] shrink-0 items-center {scope !== null ? 'h-[30px] rounded-[9px] bg-chip pr-[6px]' : ''}">
 	<Menu bind:open={() => pickerOpen, setPickerOpen} ariaLabel="Project scope">
 		{#snippet trigger({ props })}
 			<Button
 				{...props}
 				bind:element={scopeChip}
-				variant="field"
+				variant={scope === null ? "field" : "field-token"}
 				size="content"
 				touchTarget
 				class="min-w-0 font-sans"
@@ -268,7 +268,8 @@
 			variant="toolbar"
 			size="content"
 			touchTarget
-			class="-ml-[3px] mr-[3px] h-[16px] w-[16px] shrink-0 rounded-full"
+			hoverFill="sidebar"
+			class="h-[16px] w-[16px] shrink-0 rounded-full"
 			iconOnly
 			icon="x"
 			iconSize={11}

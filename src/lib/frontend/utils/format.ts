@@ -52,7 +52,7 @@ export function formatTimeAgo(
 export function formatClockTime(timestamp: number | undefined): string {
 	if (timestamp === undefined) return "";
 	return new Date(timestamp).toLocaleTimeString(undefined, {
-		hour: "2-digit",
+		hour: "numeric",
 		minute: "2-digit",
 	});
 }
@@ -61,6 +61,7 @@ export function formatClockTime(timestamp: number | undefined): string {
 export function formatSnoozeTime(
 	until: number | null,
 	now: number = Date.now(),
+	format: "full" | "short" = "full",
 ): string {
 	if (until === null) return "No timer";
 	const date = new Date(until);
@@ -75,12 +76,16 @@ export function formatSnoozeTime(
 	const time = new Intl.DateTimeFormat(undefined, {
 		hour: "numeric",
 		minute: "2-digit",
-	}).format(date);
+	})
+		.format(date)
+		.toLowerCase();
 	if (daysAway === 0) return time;
 	if (daysAway > 0 && daysAway < 7) {
-		return `${date.toLocaleDateString("en", { weekday: "short" })} ${time}`;
+		const weekday = date.toLocaleDateString("en", { weekday: "short" });
+		return format === "short" ? weekday : `${weekday} ${time}`;
 	}
-	return `${date.getDate()} ${date.toLocaleDateString("en", { month: "short" })} ${time}`;
+	const calendarDate = `${date.getDate()} ${date.toLocaleDateString("en", { month: "short" })}`;
+	return format === "short" ? calendarDate : `${calendarDate} ${time}`;
 }
 
 /**

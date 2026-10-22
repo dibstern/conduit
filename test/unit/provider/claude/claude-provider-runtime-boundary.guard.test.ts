@@ -33,12 +33,14 @@ describe("Claude provider runtime boundary", () => {
 
 	it("keeps Claude runtime state Effect-owned", () => {
 		const runtime = source(`${CLAUDE_PROVIDER_DIR}/claude-provider-runtime.ts`);
+		const payload = source(`${CLAUDE_PROVIDER_DIR}/claude-runner-payload.ts`);
 
 		expect(runtime).toContain("ClaudeProviderRuntimeTag");
-		expect(runtime).toContain("Ref.Ref<ClaudeProviderRuntimeState>");
-		expect(runtime).toContain("HashMap.HashMap<string, ClaudeSessionContext>");
-		expect(runtime).toContain("FiberMap.FiberMap<string");
+		expect(payload).toContain("Ref.Ref<ClaudeProviderRuntimeState>");
+		expect(payload).toContain("HashMap.HashMap<string, ClaudeSessionContext>");
+		expect(payload).toContain("FiberMap.FiberMap<string");
 		expect(runtime).not.toContain("streamConsumer");
+		expect(payload).not.toContain("streamConsumer");
 	});
 
 	it("removes stream consumer promises from session context", () => {

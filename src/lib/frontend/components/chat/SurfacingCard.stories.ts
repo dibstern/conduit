@@ -2,7 +2,10 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import { createRawSnippet, tick } from "svelte";
 import { encodeReference } from "../../../composer-references.js";
-import { DEFAULT_CATEGORY_SET } from "../../../contracts/category-set.js";
+import {
+	BUILTIN_CATEGORIES,
+	DEFAULT_CATEGORY_SET,
+} from "../../../contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
 import { setSessionSurfaceLevel } from "../../stores/message-surfacing.svelte.js";
 import type { AssistantMessage } from "../../types.js";
@@ -83,6 +86,7 @@ const activity: ActivityPart[] = descriptions.flatMap(
 const segment: Segment = { activity, reply: [] };
 const turn: Turn = {
 	id: "jev-story-turn",
+	storeId: "jev-story-turn",
 	user: {
 		type: "user",
 		uuid: "jev-story-user",
@@ -180,6 +184,58 @@ export const All: Story = {
 	},
 };
 export const AllLight: Story = { ...All, globals: { theme: "light" } };
+
+const categoryActivity: ActivityPart[] = BUILTIN_CATEGORIES.map(
+	(category, index) => ({
+		type: "assistant",
+		uuid: `category-colours-${category.id}`,
+		messageId: "category-colours",
+		partId: category.id,
+		rawText: category.criteria.what,
+		html: `<p>${category.criteria.what}</p>`,
+		finalized: true,
+		surfacingOrdinal: index + 1,
+		surfacingProbabilities: { [category.id]: 1 },
+		createdAt: START + index * 120_000,
+	}),
+);
+const categorySegment: Segment = { activity: categoryActivity, reply: [] };
+
+export const AllCategories: Story = {
+	args: {
+		turn: { ...turn, segments: [categorySegment] },
+		segment: categorySegment,
+		surfacing: { ...config, status: { ...config.status, defaultLevel: "all" } },
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const colours = new Set<string>();
+		for (const [index, category] of BUILTIN_CATEGORIES.entries()) {
+			await userEvent.click(canvas.getByTestId(`surfacing-pin-${index + 1}`));
+			const card = canvas.getByTestId("surfacing-msg-card");
+			await expect(card).toHaveTextContent(category.label);
+			const glyph = card.querySelector(".type-label .glyph");
+			if (!glyph) throw new Error(`Missing ${category.id} glyph`);
+			const hex = getComputedStyle(canvasElement.ownerDocument.documentElement)
+				.getPropertyValue(`--color-cat-${category.id}`)
+				.trim();
+			const channels = hex
+				.slice(1)
+				.match(/../g)
+				?.map((channel) => parseInt(channel, 16));
+			await expect(getComputedStyle(glyph).color).toBe(
+				`rgb(${channels?.join(", ")})`,
+			);
+			colours.add(getComputedStyle(glyph).color);
+		}
+		await expect(colours.size).toBe(9);
+		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
+	},
+};
+export const AllCategoriesLight: Story = {
+	...AllCategories,
+	globals: { theme: "light" },
+};
 
 // The design's 34-message turn: ordinal, seconds into the turn, category.
 const DESIGN_TURN = (
@@ -364,6 +420,14 @@ export const GroupCited: Story = {
 	args: { ...Dense.args, surfacingRegions: { belowStrip: citation } },
 	play: async (context) => {
 		await Dense.play?.(context);
+		const canvas = within(context.canvasElement);
+		canvas.getByTestId("surfacing-scrub").focus();
+		await userEvent.keyboard(`{Home}${"{ArrowRight}".repeat(21)}`);
+		await expect(canvas.getByTestId("surfacing-msg-card")).toHaveAttribute(
+			"data-ordinal",
+			"22",
+		);
+		canvas.getByTestId("surfacing-scrub").blur();
 		const footnote = within(context.canvasElement).getByTestId(
 			"density-citation",
 		);
@@ -373,6 +437,12 @@ export const GroupCited: Story = {
 			);
 		await userEvent.hover(footnote);
 		await expect(lifted()).toHaveClass(/cited/);
+		const pin = lifted();
+		if (!pin) throw new Error("Missing cited pin");
+		await expect(pin).toHaveClass(/current/);
+		const inverse = new Option().style;
+		inverse.color = getComputedStyle(pin).getPropertyValue("--color-bg");
+		await expect(getComputedStyle(pin).color).toBe(inverse.color);
 		await userEvent.unhover(footnote);
 		await expect(lifted()).toBeNull();
 		footnote.focus();

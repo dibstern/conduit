@@ -1,4 +1,4 @@
-import { Effect, Fiber } from "effect";
+import { Deferred, Effect, Fiber } from "effect";
 import { SqlError, UnknownError } from "effect/sql/SqlError";
 import { describe, expect, it, vi } from "vitest";
 import type {
@@ -438,6 +438,66 @@ describe("createRelayEventSink — permission/question", () => {
 			questionId,
 			{ "0": "Yes" },
 		);
+	});
+
+	it.each([
+		{
+			answers: { "0": "Safe", "1": "private-token", "2": ["private-code"] },
+			stored: { "0": "Safe", "1": "[redacted]", "2": "[redacted]" },
+		},
+		{ answers: { "1": "private-token" }, stored: { "1": "[redacted]" } },
+	])("persists redacted secret answers while returning originals: $answers", async ({
+		answers,
+		stored,
+	}) => {
+		const events: CanonicalEvent[] = [];
+		const deferred = Deferred.makeUnsafe<Record<string, unknown>>();
+		const pendingInteractions = {
+			beginPermissionRequest: () =>
+				Effect.succeed({
+					awaitResponse: Effect.succeed({ decision: "reject" as const }),
+				}),
+			resolvePermissionRequest: () => Effect.succeed(true),
+			beginQuestionRequest: vi.fn((_entry: { requestId: string }) =>
+				Effect.succeed({ awaitAnswers: Deferred.await(deferred) }),
+			),
+			resolveQuestionRequest: (_id: string, reply: Record<string, unknown>) =>
+				Deferred.succeed(deferred, reply),
+		};
+		const sink = createRelayEventSink({
+			sessionId: "ses-1",
+			providerId: "codex",
+			pendingInteractions,
+			persist: {
+				persistEvent: (event) =>
+					Effect.sync(() => {
+						events.push(event);
+					}),
+			},
+		});
+		const original = Object.freeze(answers);
+		const reply = Effect.runPromise(
+			sink.requestQuestion({
+				requestId: "native-question",
+				questions: [
+					{ question: "Route?", header: "Route", options: [] },
+					{ question: "Token?", header: "Token", options: [], isSecret: true },
+					{ question: "Code?", header: "Code", options: [], isSecret: true },
+				],
+			}),
+		);
+		await vi.waitFor(() =>
+			expect(pendingInteractions.beginQuestionRequest).toHaveBeenCalledOnce(),
+		);
+		const id =
+			pendingInteractions.beginQuestionRequest.mock.calls[0]?.[0].requestId;
+		await Effect.runPromise(sink.resolveQuestion(id ?? "", original));
+		await expect(reply).resolves.toBe(original);
+		expect(
+			events.find((event) => event.type === "question.resolved")?.data,
+		).toMatchObject({ answers: stored });
+		expect(JSON.stringify(events)).not.toContain("private-token");
+		expect(JSON.stringify(events)).not.toContain("private-code");
 	});
 
 	it("clears the processing timeout while a question awaits the user", async () => {

@@ -1,4 +1,5 @@
 import { expect } from "@playwright/test";
+import { chooseSettingsOption } from "../../../test/e2e/helpers/settings.js";
 import type { StepHandler } from "../runtime.js";
 import { effortOptions, requireRpcControl } from "./shared.js";
 
@@ -112,6 +113,237 @@ const rowValues = (text: string, separator: string) =>
 
 export const cursorModelParametersHandlers: StepHandler[] = [
 	{
+		name: "assert Cursor effort chip labels",
+		match:
+			/^the Cursor effort chip describes (.+) instead of combination (.+)$/,
+		run: async ({ world, match }) => {
+			const chip = world.page.getByTestId("variant-badge");
+			await expect(chip).toHaveText(match[1] ?? "");
+			await expect(chip).toHaveAttribute(
+				"aria-label",
+				`Effort: ${match[1]}. Open effort options`,
+			);
+			await expect(chip).toHaveAttribute(
+				"title",
+				`Effort ${match[1]}. Ctrl+T to cycle`,
+			);
+			await expect(chip).not.toContainText(match[2] ?? "");
+		},
+	},
+	{
+		name: "assert Cursor phone effort row labels",
+		match: /^the Cursor phone effort row omits combination (.+)$/,
+		run: async ({ world, match }) => {
+			const row = world.page.getByTestId("composer-more-effort");
+			await expect(row).not.toContainText(match[1] ?? "");
+			await expect(row).toHaveAttribute(
+				"aria-label",
+				"Effort: xhigh · Fast. Open effort options",
+			);
+		},
+	},
+	{
+		name: "prepare Cursor title generation combination",
+		match: /^Cursor titles use combination (.+)$/,
+		run: ({ world, match }) => {
+			requireRpcControl(world.page).setProjectSetting({
+				_tag: "titleGeneration",
+				selection: {
+					account: { _tag: "Id", id: "cursor-work" },
+					providerId: "cursor",
+					modelId: "grok-4.7",
+					effort: match[1] ?? "",
+				},
+				status: "unverified",
+			});
+		},
+	},
+	{
+		name: "assert Cursor title model combination RPC",
+		match: /^the Cursor title model saves combination (.+)$/,
+		run: async ({ world, match }) => {
+			const request = await requireRpcControl(world.page).waitForRequest(
+				({ tag, payload }) =>
+					tag === "SetTitleGeneration" &&
+					(payload["selection"] as { effort?: string } | null)?.effort ===
+						match[1],
+			);
+			expect(request.payload["selection"]).toEqual({
+				account: { _tag: "Id", id: "cursor-work" },
+				providerId: "cursor",
+				modelId: "grok-4.7",
+				effort: match[1],
+			});
+			await expect(
+				world.page.getByTestId("title-generation-picker"),
+			).toHaveAttribute("aria-busy", "false");
+		},
+	},
+	{
+		name: "assert Cursor title summary values",
+		match: /^the Cursor title summary shows (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.getByTestId("settings-title-generation-picker"),
+			).toContainText(match[1] ?? "");
+		},
+	},
+	{
+		name: "prepare Cursor default saves",
+		match: /^Cursor defaults can be saved$/,
+		run: ({ world }) => {
+			const rpc = requireRpcControl(world.page);
+			rpc.setProjectSetting({
+				_tag: "harnessDefaults",
+				claude: { status: "missing" },
+				opencode: { status: "missing" },
+				cursor: { status: "missing" },
+			});
+			rpc.setStubs({
+				SetHarnessDefault: ({
+					projectSlug,
+					harness,
+					providerId,
+					modelId,
+					effort = "",
+					contextWindow,
+				}) => ({
+					projectSlug,
+					harness,
+					state: {
+						pick: { providerId, modelId, effort: effort ?? "", contextWindow },
+						status: "ok",
+					},
+				}),
+			});
+		},
+	},
+	{
+		name: "prepare unavailable Cursor default combination",
+		match: /^the saved Cursor default has unavailable combination (.+)$/,
+		run: ({ world, match }) => {
+			requireRpcControl(world.page).setProjectSetting({
+				_tag: "harnessDefaults",
+				claude: { status: "missing" },
+				opencode: { status: "missing" },
+				cursor: {
+					status: "invalid",
+					problem: "EffortNotOffered",
+					pick: {
+						providerId: "cursor",
+						modelId: "grok-4.7",
+						effort: match[1] ?? "",
+						contextWindow: "",
+					},
+				},
+			});
+		},
+	},
+	{
+		name: "assert unavailable Cursor default remains visible",
+		match: /^the saved Cursor combination (.+) is shown as unavailable$/,
+		run: async ({ world, match }) => {
+			const picker = world.page.getByTestId(
+				"settings-harness-default-cursor-unavailable",
+			);
+			await expect(picker).toBeDisabled();
+			await expect(picker).toHaveText(`${match[1]} (unavailable)`);
+		},
+	},
+	{
+		name: "assert unavailable Cursor default parameter choice",
+		match:
+			/^the Cursor default (fast|context) option (\S+) is (disabled|enabled)$/,
+		run: async ({ world, match }) => {
+			await world.page
+				.getByTestId(`settings-harness-default-cursor-${match[1]}`)
+				.click();
+			const option = world.page
+				.getByRole("menuitemradio")
+				.and(world.page.locator(`[data-value="${match[2]}"]`));
+			if (match[3] === "disabled") await expect(option).toBeDisabled();
+			else await expect(option).toBeEnabled();
+			await world.page.keyboard.press("Escape");
+		},
+	},
+	{
+		name: "choose Cursor default model",
+		match: /^I choose (\S+) as the Cursor default model$/,
+		run: async ({ world, match }) => {
+			await chooseSettingsOption(
+				world.page,
+				world.page.getByTestId("settings-harness-default-cursor-model"),
+				`cursor/${match[1]}`,
+			);
+		},
+	},
+	{
+		name: "assert Cursor default parameter selections",
+		match: /^the Cursor default parameter pickers show (.+)$/,
+		run: async ({ world, match }) => {
+			const values = rowValues(match[1] ?? "", ", ");
+			await expect(
+				world.page.locator(
+					'button[data-testid^="settings-harness-default-cursor-"]',
+				),
+			).toHaveCount(Object.keys(values).length + 1);
+			for (const [kind, value] of Object.entries(values)) {
+				const picker = world.page.getByTestId(
+					`settings-harness-default-cursor-${kind}`,
+				);
+				await expect(picker).toBeVisible();
+				await expect(picker).toHaveAttribute("data-value", value);
+				await expect(picker).toHaveAttribute(
+					"aria-label",
+					new RegExp(`^Cursor ${kind[0]?.toUpperCase()}${kind.slice(1)}:`),
+				);
+			}
+		},
+	},
+	{
+		name: "assert Cursor default parameter choices replace combination keys",
+		match: /^the Cursor default (context|effort|fast) picker offers (.+)$/,
+		run: async ({ world, match }) => {
+			await world.page
+				.getByTestId(`settings-harness-default-cursor-${match[1]}`)
+				.click();
+			await expect(world.page.getByRole("menuitemradio")).toHaveText(
+				(match[2] ?? "").split(", "),
+			);
+			await world.page.keyboard.press("Escape");
+		},
+	},
+	{
+		name: "choose Cursor default parameter",
+		match: /^I set Cursor default (context|effort|fast) to (\S+)$/,
+		run: async ({ world, match }) => {
+			const picker = world.page.getByTestId(
+				`settings-harness-default-cursor-${match[1]}`,
+			);
+			await chooseSettingsOption(world.page, picker, match[2] ?? "");
+			await expect(picker).toHaveAttribute("data-value", match[2] ?? "");
+		},
+	},
+	{
+		name: "assert Cursor default combination RPC",
+		match: /^the Cursor default saves combination (.+)$/,
+		run: async ({ world, match }) => {
+			const request = await requireRpcControl(world.page).waitForRequest(
+				(request) =>
+					request.tag === "SetHarnessDefault" &&
+					request.payload["effort"] === match[1],
+			);
+			expect(request.payload).toMatchObject({
+				projectSlug: "myapp",
+				harness: "cursor",
+				providerId: "cursor",
+				modelId: "grok-4.7",
+				effort: match[1],
+				contextWindow: "",
+			});
+		},
+	},
+	{
 		name: "prepare Cursor parameter catalogue",
 		match: /^the Cursor parameter catalogue is ready for (\S+)$/,
 		run: ({ world, match }) => {
@@ -149,7 +381,9 @@ export const cursorModelParametersHandlers: StepHandler[] = [
 						? {
 								projectSlug: "myapp",
 								instanceId: "cursor-work",
-								providers: [],
+								providers: [
+									{ id: "cursor", name: "Cursor", configured: true, models },
+								],
 								active: { provider: "cursor", model: modelId },
 								variant: { variant, variants: choices },
 							}
@@ -178,10 +412,12 @@ export const cursorModelParametersHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert separate Cursor parameter rows",
-		match: /^the Cursor parameter rows offer (.+)$/,
+		match: /^the Cursor (title )?parameter rows offer (.+)$/,
 		run: async ({ world, match }) => {
-			const rows = rowValues(match[1] ?? "", "; ");
-			const picker = world.page.getByTestId("model-picker");
+			const rows = rowValues(match[2] ?? "", "; ");
+			const picker = world.page.getByTestId(
+				match[1] ? "title-generation-picker" : "model-picker",
+			);
 			for (const kind of ["context", "effort", "thinking", "fast"]) {
 				const row = picker.getByTestId(`picker-row-${kind}`);
 				const choices = rows[kind]?.split("/");

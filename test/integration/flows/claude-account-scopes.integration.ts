@@ -150,7 +150,8 @@ it("two Claude accounts sharing a folder probe and resolve settings with their o
 				preview: () => Effect.die("unused"),
 				record: () => Effect.die("unused"),
 				claudeWorktreeState: () => Effect.die("unused"),
-				withLaunch: (effect) => effect,
+				withLaunch: (_sessionId, effect) => effect,
+				withProjectLaunch: (effect) => effect,
 			}),
 			Effect.provide(
 				Layer.mergeAll(
@@ -507,7 +508,8 @@ it("a removed admission keeps its identity without borrowing the default account
 				preview: () => Effect.die("unused"),
 				record: () => Effect.die("unused"),
 				claudeWorktreeState: () => Effect.die("unused"),
-				withLaunch: (effect) => effect,
+				withLaunch: (_sessionId, effect) => effect,
+				withProjectLaunch: (effect) => effect,
 			}),
 			Effect.provideService(
 				ConfigTag,

@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import type { ProjectInfo } from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
+import { closeSettings } from "../helpers/settings.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple" });
@@ -155,19 +156,14 @@ for (const viewport of [
 			harness,
 		}, info) => {
 			await openList(page, harness.relayBaseUrl);
-			// Each layout reaches Settings through a different menu.
-			const listOverflow = page.getByTestId("list-bar-overflow");
-			const titleMenu = page.getByTestId("session-bar-title-menu");
-			const sessionOverflow = page.getByTestId("session-bar-overflow");
-			await expect(
-				listOverflow.or(titleMenu).or(sessionOverflow).first(),
-			).toBeVisible();
-			if (await listOverflow.isVisible()) {
-				await listOverflow.click();
-				await page.getByTestId("list-overflow-settings").click();
-			} else if (await titleMenu.isVisible()) {
-				await titleMenu.click();
-				await page.getByTestId("session-title-settings").click();
+			// Each layout reaches Settings through its visible toolbar.
+			const listSettings = page.getByTestId("list-bar-settings");
+			const sessionOverflow = page
+				.getByTestId("session-bar-overflow")
+				.or(page.getByTestId("session-bar-island-overflow"));
+			await expect(listSettings.or(sessionOverflow).first()).toBeVisible();
+			if (await listSettings.isVisible()) {
+				await listSettings.click();
 			} else {
 				await sessionOverflow.click();
 				await page.getByTestId("overflow-settings").click();
@@ -183,7 +179,7 @@ for (const viewport of [
 				path: info.outputPath("settings.png"),
 				animations: "disabled",
 			});
-			await page.getByTestId("settings-close-btn").click();
+			await closeSettings(page);
 			await page.getByTestId("session-scope-chip").click();
 			const row = page
 				.getByRole("menuitemradio")

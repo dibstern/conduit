@@ -361,6 +361,50 @@ const longTranscriptText = Array.from(
 ).join("\n\n");
 
 export const modelExecutionMockups = {
+	"long-path-error": {
+		transcriptText: "Continue working in the worktree",
+		modelExecution: matchingModelExecution,
+		initMessages: [
+			...modelExecutionInitMessages(
+				"Continue working in the worktree",
+				matchingModelExecution,
+			).filter((message) => message.type !== "mock_transcript_snapshot"),
+			{
+				type: "mock_transcript_snapshot",
+				id: "sess-mockup-001",
+				history: {
+					messages: [
+						{
+							id: "msg-worktree-user",
+							role: "user",
+							time: { created: MOCK_NOW_MS },
+							parts: [
+								{
+									id: "part-worktree-user",
+									type: "text",
+									text: "Continue working in the worktree",
+								},
+							],
+						},
+						{
+							id: "msg-worktree-error",
+							role: "assistant",
+							time: { created: MOCK_NOW_MS + 1 },
+							parts: [
+								{
+									id: "part-worktree-error",
+									type: "error",
+									code: "WORKTREE_MISSING",
+									text: "Worktree missing: /Users/dev/.config/conduit/worktrees/conduit/ses_a40d9485fa0c4bf382a22c694c9643df/conduit-03dc58389647/src/lib/some/deep/path/that/never/breaks",
+								},
+							],
+						},
+					],
+					hasMore: false,
+				},
+			},
+		],
+	},
 	"long-transcript": {
 		transcriptText: longTranscriptText,
 		modelExecution: matchingModelExecution,

@@ -549,7 +549,7 @@ describe("supervised server build updates", () => {
 		);
 		expect(restarted).toEqual({ ok: true });
 		await owned.waitForExit({ keepBrowsersOpen: true });
-		expect(generation.exitCode).toBe(0);
+		expect(generation.exitCode).toBe(75);
 		expect(generation.signal).toBeNull();
 		expect(testRunnerAlive(generation.pid)).toBe(false);
 		expect(testRunnerAlive(runner.pid)).toBe(true);

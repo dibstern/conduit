@@ -65,6 +65,7 @@
 {:else}
 <Menu
 	bind:open
+	appearance="final"
 	presentation={sessionViewState.compact ? "sheet" : "popover"}
 	ariaLabel="Approvals"
 	side="top"
@@ -92,6 +93,7 @@
 				value={option.mode}
 				disabled={approvals.pending}
 				data-testid="permission-mode-option-{option.mode}"
+				class="data-[state=checked]:bg-accent/14 data-[state=checked]:text-text!"
 				onselect={() => { approvals.select(option); open = false; }}
 			>
 				<span class="grid grid-cols-[28px_minmax(0,1fr)] items-center gap-x-1.5">

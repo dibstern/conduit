@@ -1,4 +1,11 @@
-import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import Database from "better-sqlite3";
@@ -173,6 +180,11 @@ describe("Project provenance through the built daemon", () => {
 		if (!harness) return;
 		const fixture = harness;
 		try {
+			evidence["process"] = fixture.proof();
+			const runnerLog = join(fixture.configDir, "runners.log");
+			evidence["runnerLogTail"] = existsSync(runnerLog)
+				? readFileSync(runnerLog).subarray(-8_000).toString()
+				: "";
 			evidence["errors"] =
 				task.result?.errors?.map(({ message }) => message) ?? [];
 			await fixture.dispose();
@@ -258,8 +270,8 @@ describe("Project provenance through the built daemon", () => {
 					{ status: "completed", attempt_count: 1 },
 				]),
 			);
-			const history = provenance(fixture, slug);
-			expect(history.events).toEqual(
+			const manifest = provenance(fixture, slug);
+			expect(manifest.events).toEqual(
 				expect.arrayContaining([
 					{ type: "session.created", project_id: slug, count: 1 },
 					{ type: "permission.asked", project_id: slug, count: 1 },
@@ -269,6 +281,7 @@ describe("Project provenance through the built daemon", () => {
 				]),
 			);
 			await browser.deleteSession(sessionId);
+			// Ending the session on delete is an outbox command too.
 			await vi.waitFor(() => {
 				const commands = outbox(fixture, slug);
 				expect(commands).toHaveLength(4);
@@ -276,15 +289,16 @@ describe("Project provenance through the built daemon", () => {
 					true,
 				);
 			});
-			const manifest = provenance(fixture, slug);
-			for (const table of manifest.tables)
-				for (const row of table.rows)
-					expect(row.project, table.table).toBe(slug);
-			expect(manifest.events).toEqual(
-				expect.arrayContaining([
+			await vi.waitFor(() =>
+				expect(provenance(fixture, slug).events).toEqual([
 					{ type: "session.deleted", project_id: slug, count: 1 },
 				]),
 			);
+			const afterDeletion = provenance(fixture, slug);
+			for (const snapshot of [manifest, afterDeletion])
+				for (const table of snapshot.tables)
+					for (const row of table.rows)
+						expect(row.project, table.table).toBe(slug);
 			for (const command of outbox(fixture, slug)) {
 				expect(
 					fixture.marks.filter(
@@ -303,8 +317,8 @@ describe("Project provenance through the built daemon", () => {
 			expect(approvalExecutions).toBe(1);
 			projects.push({
 				projectId: slug,
-				history: history.events,
 				...manifest,
+				afterDeletion,
 				executions: {
 					send: 2,
 					approve: approvalExecutions,

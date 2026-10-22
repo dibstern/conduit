@@ -12,6 +12,7 @@
 	let open = $state(true);
 	let picked = $state("");
 	let picks = $state(0);
+	let debug = $state(false);
 	let events = $state<Record<string, unknown>[]>([]);
 	const choices = [
 		{ id: "hour", label: "In 1 hour", detail: "10:41" },
@@ -74,7 +75,7 @@
 	<SheetFooter actions={[
 		{ label: "Share", icon: "share", onselect: () => { picked = "share"; } },
 		{ label: "Settings", icon: "settings", onselect: () => { picked = "settings"; } },
-		{ label: "Debug", icon: "bug", tag: "dev", onselect: () => { picked = "debug"; } },
+		{ label: "Debug", ariaLabel: "Debug panel", icon: "bug", checked: debug, onselect: () => { debug = !debug; } },
 	]} />
 {/snippet}
 

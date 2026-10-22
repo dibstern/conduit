@@ -135,7 +135,7 @@ it("persists the existing session title through the daemon process harness", asy
 				{
 					prompt: expect.stringContaining(`<message>\n${message}\n</message>`),
 					cwd: expect.stringContaining(
-						join(harness.configDir, "text-generation/run-"),
+						join(harness.configDir, "text-generation", "run-"),
 					),
 					configDir: join(harness.root, "claude"),
 				},

@@ -1,5 +1,5 @@
 <!-- User transcript row. Preserves .msg-user class.
-     Recognised `/skill` tokens render as the same pill the composer showed while
+     Recognised `/skill` and `$builtin` tokens render as the same pill the composer showed while
      typing; recognition is live (from the current command list), so the pill is
      derived at render rather than snapshotted at send. Typo near-misses that the
      composer underlined stay plain here — the message is already sent.
@@ -39,6 +39,11 @@
 	const commandNames = $derived(
 		new Set(discoveryState.commands.map((c) => c.name)),
 	);
+	// The composer sends a `$builtin` as the `/builtin` providers expect; show it
+	// as typed.
+	const builtinNames = $derived(
+		new Set(discoveryState.commands.filter((c) => c.builtin).map((c) => c.name)),
+	);
 	const segments = $derived(
 		tokenizeSkills(extractDisplayText(message.text), commandNames),
 	);
@@ -46,10 +51,11 @@
 
 <div class="msg-user mx-auto mb-[26px] grid max-w-[820px] grid-cols-[20px_minmax(0,1fr)] gap-x-[8px] px-[14px] md:grid-cols-[28px_minmax(0,1fr)] md:gap-x-[14px] md:px-[32px]" data-uuid={message.uuid}>
 	<AvatarPicker>
-		{#snippet trigger({ props })}<Button {...props} variant="ghost" hoverFill="none" size="content" touchTarget ariaLabel="Change your avatar" class="self-start rounded-full"><UserAvatar size={sessionViewState.compact ? 20 : 28} /></Button>{/snippet}
+		{#snippet trigger({ props })}<Button {...props} variant="ghost" hoverFill="none" size="content" touchTarget ariaLabel="Change your avatar" class="self-start h-[28px] rounded-full"><UserAvatar size={sessionViewState.compact ? 20 : 28} /></Button>{/snippet}
 	</AvatarPicker>
 	<div class="min-w-0 max-md:contents">
-		<div data-testid="user-message-header" class="mb-[2px] flex min-h-[28px] flex-wrap items-center gap-x-[8px] gap-y-[4px]">
+		<!-- Mixed fonts and sizes: share a baseline, with the line centred on the avatar. -->
+		<div data-testid="user-message-header" class="mb-[2px] flex min-h-[28px] flex-wrap content-center items-baseline gap-x-[8px] gap-y-[4px]">
 			<span class="text-[13.5px] font-semibold">You</span>
 			<MessageTime createdAt={message.createdAt} />
 			{#if message.steered}
@@ -68,14 +74,14 @@
 		</div>
 		{#if message.text}
 			<div class="break-words whitespace-pre-wrap text-[15px] leading-[1.65] text-text max-md:col-span-2">
-				{#each segments as seg (seg.key)}{#if seg.kind === "skill"}<span class="skill-pill">{seg.text}</span>{:else}{seg.text}{/if}{/each}
+				{#each segments as seg (seg.key)}{#if seg.kind === "skill"}<span class="skill-pill">{builtinNames.has(seg.text.slice(1)) ? `$${seg.text.slice(1)}` : seg.text}</span>{:else}{seg.text}{/if}{/each}
 			</div>
 		{/if}
 		{#if message.attachments?.length}
 			<div data-testid="user-message-attachments" class="mt-[8px] flex min-w-0 flex-wrap items-start gap-[8px] max-md:col-span-2">
 				{#each message.attachments as attachment (attachment.id)}
 					{#if attachment.mime.startsWith("image/")}
-						<img src={attachment.url} alt={attachment.name} class="size-[96px] rounded-[10px] border border-border bg-bg-raised object-contain" />
+						<img src={attachment.url} alt={attachment.name} class="size-[96px] rounded-[10px] bg-bg-raised object-contain" />
 					{:else}
 						<FileAttachmentChip testid="user-message-file" name={attachment.name} detail={attachment.size === undefined ? attachment.mime : `${attachment.mime} · ${formatFileSize(attachment.size)}`} />
 					{/if}

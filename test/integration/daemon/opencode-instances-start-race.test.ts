@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { createServer, type Server } from "node:http";
-import { Effect, Result as Either } from "effect";
+import { createServer, type Server, type ServerResponse } from "node:http";
+import { Deferred, Effect, Result as Either, Fiber } from "effect";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	makeOpenCodeInstancesLive,
@@ -22,10 +22,36 @@ describe("OpenCode Instances shared start", () => {
 	let endpoint: OpenCodeEndpoint;
 	let starts: number;
 	let replies: number;
+	let health: { status: number; body: string };
+	let holdHealth: boolean;
+	let healthRequested: Deferred.Deferred<ServerResponse>;
+	let streamOpened: Deferred.Deferred<{
+		stream: ServerResponse;
+		closed: Deferred.Deferred<void>;
+	}>;
+	let connectStream: boolean;
+	let streams: ServerResponse[];
+	let requests: {
+		url: string;
+		authorization: string | undefined;
+		directoryHeader: string | string[] | undefined;
+	}[];
 
 	beforeEach(async () => {
+		health = { status: 200, body: JSON.stringify({ healthy: true }) };
+		holdHealth = false;
+		healthRequested = Deferred.makeUnsafe();
+		streamOpened = Deferred.makeUnsafe();
+		connectStream = true;
+		streams = [];
+		requests = [];
 		// Minimal OpenCode: path, health and a live global event stream.
 		server = createServer((req, res) => {
+			requests.push({
+				url: req.url ?? "",
+				authorization: req.headers.authorization,
+				directoryHeader: req.headers["x-opencode-directory"],
+			});
 			if (req.url?.includes("/permissions/") && req.method === "POST") {
 				replies++;
 				res.writeHead(200, { "content-type": "application/json" });
@@ -33,10 +59,26 @@ describe("OpenCode Instances shared start", () => {
 				return;
 			}
 			if (req.url?.startsWith("/global/event")) {
+				streams.push(res);
+				const closed = Deferred.makeUnsafe<void>();
+				res.once("close", () => Deferred.doneUnsafe(closed, Effect.void));
 				res.writeHead(200, { "content-type": "text/event-stream" });
+				res.flushHeaders();
+				Deferred.doneUnsafe(
+					streamOpened,
+					Effect.succeed({ stream: res, closed }),
+				);
+				if (!connectStream) return;
 				res.write(
 					`data: ${JSON.stringify({ payload: { id: "1", type: "server.connected", properties: {} } })}\n\n`,
 				);
+				return;
+			}
+			if (req.url?.startsWith("/global/health")) {
+				Deferred.doneUnsafe(healthRequested, Effect.succeed(res));
+				if (holdHealth) return;
+				res.writeHead(health.status, { "content-type": "application/json" });
+				res.end(health.body);
 				return;
 			}
 			res.writeHead(200, { "content-type": "application/json" });
@@ -44,9 +86,7 @@ describe("OpenCode Instances shared start", () => {
 				JSON.stringify(
 					req.url?.startsWith("/path")
 						? { state: "/", config: "/", worktree: "/", directory: "/race" }
-						: req.url?.startsWith("/global/health")
-							? { healthy: true }
-							: [],
+						: [],
 				),
 			);
 		});
@@ -172,6 +212,114 @@ describe("OpenCode Instances shared start", () => {
 		);
 		results.push({ scenario: "restart-replay-identity", ...clients });
 		expect(clients).toEqual({ managed: true, external: false });
+	});
+
+	it("checks authenticated global health, waits for the stream and returns a directory client", async () => {
+		connectStream = false;
+		endpoint = {
+			...endpoint,
+			managed: false,
+			status: "healthy",
+			auth: { username: "readiness", password: "fixture-password" },
+		};
+		const cwd = await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const { use } = yield* OpenCodeInstancesTag;
+					const pending = yield* Effect.forkChild(use("opencode", "/project"));
+					yield* Deferred.await(healthRequested);
+					const { stream } = yield* Deferred.await(streamOpened);
+					yield* Effect.sync(() => {
+						expect(streams).toHaveLength(1);
+						expect(stream.headersSent).toBe(true);
+						expect(stream.destroyed).toBe(false);
+						expect(pending.pollUnsafe()).toBeUndefined();
+						stream.write(
+							`data: ${JSON.stringify({ payload: { id: "1", type: "server.connected", properties: {} } })}\n\n`,
+						);
+					});
+					const client = yield* Fiber.join(pending);
+					return yield* Effect.tryPromise(() => client.app.path());
+				}),
+			).pipe(Effect.provide(instances())),
+		);
+		const authorization = `Basic ${Buffer.from("readiness:fixture-password").toString("base64")}`;
+		expect(cwd.cwd).toBe("/race");
+		expect(starts).toBe(0);
+		expect(requests.filter(({ url }) => url === "/global/health")).toEqual([
+			{ url: "/global/health", authorization, directoryHeader: undefined },
+		]);
+		expect(requests.find(({ url }) => url.startsWith("/global/event"))).toEqual(
+			{
+				url: "/global/event",
+				authorization,
+				directoryHeader: undefined,
+			},
+		);
+		const pathRequest = requests.find(({ url }) => url.startsWith("/path"));
+		expect(pathRequest?.authorization).toBe(authorization);
+		expect(
+			new URL(pathRequest?.url ?? "", url).searchParams.get("directory"),
+		).toBe("/project");
+		results.push({ scenario: "global-readiness", cwd, starts, requests });
+	});
+
+	it.each([
+		{ name: "unhealthy", status: 200, body: '{"healthy":false}' },
+		{ name: "array", status: 200, body: "[]" },
+		{ name: "non-boolean health", status: 200, body: '{"healthy":"true"}' },
+		{ name: "malformed JSON", status: 200, body: "garbage" },
+		{ name: "HTTP failure", status: 401, body: '{"healthy":true}' },
+	])("rejects $name health and closes the new stream", async (response) => {
+		health = response;
+		holdHealth = true;
+		connectStream = false;
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const { use } = yield* OpenCodeInstancesTag;
+					const pending = yield* Effect.forkChild(
+						Effect.result(use("opencode")),
+					);
+					const healthResponse = yield* Deferred.await(healthRequested);
+					const { stream, closed } = yield* Deferred.await(streamOpened);
+					yield* Effect.sync(() => {
+						expect(streams).toHaveLength(1);
+						expect(stream.headersSent).toBe(true);
+						expect(stream.destroyed).toBe(false);
+						expect(pending.pollUnsafe()).toBeUndefined();
+						healthResponse.writeHead(health.status, {
+							"content-type": "application/json",
+						});
+						healthResponse.end(health.body);
+					});
+					const outcome = yield* Fiber.join(pending);
+					// Both the consumer scope and instances layer stay alive here.
+					yield* Effect.sync(() => {
+						expect(Either.isFailure(outcome) && outcome.failure.reason).toBe(
+							"unreachable",
+						);
+						expect(
+							requests.filter(({ url }) => url === "/global/health"),
+						).toHaveLength(1);
+						expect(requests.some(({ url }) => url.startsWith("/path"))).toBe(
+							false,
+						);
+					});
+					yield* Deferred.await(closed);
+					yield* Effect.sync(() => {
+						expect(stream.destroyed).toBe(true);
+						expect(streams).toHaveLength(1);
+						results.push({
+							scenario: `reject-${response.name}`,
+							outcome,
+							requests,
+							streamsClosed: stream.destroyed,
+						});
+					});
+				}),
+			).pipe(Effect.provide(instances())),
+		);
 	});
 
 	it("spawns once for concurrent first uses and gives both a working client", async () => {

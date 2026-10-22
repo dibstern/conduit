@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import { showToast } from "../../stores/ui.svelte.js";
+import { wsDebugState } from "../../stores/ws-debug.svelte.js";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
 import { connectedSocket, replyRpc } from "../../stories/sockets.js";
 import type { SessionInfo } from "../../types.js";
@@ -127,6 +128,16 @@ function phoneSheet(state: Partial<SessionInfo> = {}): Story {
 		parameters: { viewport: { defaultViewport: "mobile1" } },
 		play: async () => {
 			const menu = await phoneMenu();
+			await waitFor(() =>
+				expect(
+					document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+						?.content,
+				).toBe(
+					document.documentElement.classList.contains("light-theme")
+						? "#b0b1b3"
+						: "#0b0c0e",
+				),
+			);
 			await expect(
 				within(menu).getByTestId("session-sheet-header"),
 			).toBeVisible();
@@ -140,10 +151,59 @@ function phoneSheet(state: Partial<SessionInfo> = {}): Story {
 				name: "Session",
 			});
 			const tiles = within(group).getAllByRole("menuitem");
-			await expect(tiles).toHaveLength(5);
+			await expect(tiles).toHaveLength(6);
+			await expect(
+				within(group).getByTestId("session-ctx-archive"),
+			).toBeVisible();
 			expect(
 				new Set(tiles.map((tile) => tile.getBoundingClientRect().top)).size,
-			).toBe(1);
+			).toBe(2);
+			await expect(
+				within(within(menu).getByTestId("session-ctx-copy-resume")).getByText(
+					"Copy resume",
+					{ exact: true },
+				),
+			).toBeVisible();
+			for (const tile of menu.querySelectorAll<HTMLElement>(
+				"[data-menu-tile]",
+			)) {
+				const primary = tile.querySelector<HTMLElement>(
+					":scope > span:not([aria-hidden])",
+				);
+				if (!primary) throw new Error("Tile primary label is missing");
+				// Wrapped labels must retain their full text without horizontal clipping.
+				expect(primary.scrollWidth).toBeLessThanOrEqual(primary.clientWidth);
+				expect(primary.scrollHeight).toBeLessThanOrEqual(primary.clientHeight);
+				expect(getComputedStyle(primary).textOverflow).not.toBe("ellipsis");
+				const tileBox = tile.getBoundingClientRect();
+				for (const label of tile.querySelectorAll<HTMLElement>(
+					"small, span:not([aria-hidden])",
+				)) {
+					const labelBox = label.getBoundingClientRect();
+					expect(labelBox.left).toBeGreaterThanOrEqual(tileBox.left);
+					expect(labelBox.right).toBeLessThanOrEqual(tileBox.right);
+					expect(labelBox.top).toBeGreaterThanOrEqual(tileBox.top);
+					expect(labelBox.bottom).toBeLessThanOrEqual(tileBox.bottom);
+					if (label !== primary) {
+						expect(labelBox.height).toBeLessThanOrEqual(
+							Number.parseFloat(getComputedStyle(label).lineHeight) ||
+								Number.parseFloat(getComputedStyle(label).fontSize) * 1.5,
+						);
+					}
+				}
+			}
+			const icon = menu.querySelector(
+				'[data-testid="session-sheet-header"] > span svg',
+			);
+			const expectedIcon =
+				state.pinnedAt != null
+					? "pin"
+					: state.snoozedAt != null
+						? "moon"
+						: state.settledAt != null
+							? "check"
+							: "circle-dot";
+			expect(icon).toHaveClass(`lucide-${expectedIcon}`);
 			await expect(
 				within(menu).getByTestId("session-ctx-auto-settle"),
 			).toHaveAttribute(
@@ -235,16 +295,14 @@ export const PhoneWithFooter: Story = {
 	args: { ...PhoneDefault.args, selectable: false, withFooter: true },
 	play: async () => {
 		const menu = await phoneMenu();
-		await expect(within(menu).getByTestId("session-title-share")).toBeVisible();
-		await expect(
-			within(menu).getByTestId("session-title-settings"),
-		).toBeVisible();
-		expect(within(menu).queryByTestId("session-title-debug")).toBeNull();
+		await expect(within(menu).getByTestId("overflow-share")).toBeVisible();
+		await expect(within(menu).getByTestId("overflow-settings")).toBeVisible();
+		expect(within(menu).queryByTestId("overflow-debug")).toBeNull();
 		await expect(
 			within(menu)
 				.getByRole("group", { name: "Session" })
 				.querySelectorAll("[data-menu-tile]"),
-		).toHaveLength(4);
+		).toHaveLength(5);
 	},
 };
 export const PhoneWithFooterLight: Story = {
@@ -310,6 +368,15 @@ export const PhoneSnoozeHolding: Story = {
 		});
 		const time = within(list).getByRole("menuitem", { name: /In 3 hours/ });
 		await waitFor(() => {
+			expect(list.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+				tile.getBoundingClientRect().bottom + 9,
+			);
+			expect(
+				list.getBoundingClientRect().top - tile.getBoundingClientRect().bottom,
+			).toBeLessThanOrEqual(13);
+			expect(list.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+				window.innerHeight,
+			);
 			const target = time.getBoundingClientRect();
 			pointer("pointermove", target.left + 20, target.top + target.height / 2);
 			expect(time).toHaveAttribute("data-followed", "true");
@@ -373,15 +440,32 @@ export const PhoneDebugFooter: Story = {
 	args: { ...PhoneWithFooter.args, debug: true },
 	play: async () => {
 		await phoneMenu();
-		const debug = await within(document.body).findByTestId(
-			"session-title-debug",
-		);
+		const debug = await within(document.body).findByTestId("overflow-debug");
 		await expect(debug).toHaveAccessibleName("Debug panel");
-		await expect(debug).toHaveTextContent(/Debug\s*dev/);
+		await expect(debug).toHaveRole("switch");
+		await expect(debug).toHaveAttribute("aria-checked", "false");
+		await userEvent.click(within(debug).getByText("Debug", { exact: true }));
+		await expect(debug).toHaveAttribute("aria-checked", "true");
+		await expect(await phoneMenu()).toBeVisible();
 	},
 };
 export const PhoneDebugFooterLight: Story = {
 	...PhoneDebugFooter,
+	globals: { theme: "light" },
+};
+export const DesktopDebugMenu: Story = {
+	args: { withFooter: true, debug: true },
+	play: async () => {
+		const debug = await within(document.body).findByRole("menuitemcheckbox", {
+			name: "Debug panel",
+		});
+		await expect(debug).toHaveAttribute("aria-checked", "false");
+		wsDebugState.panelOpen = true;
+		await waitFor(() => expect(debug).toHaveAttribute("aria-checked", "true"));
+	},
+};
+export const DesktopDebugMenuLight: Story = {
+	...DesktopDebugMenu,
 	globals: { theme: "light" },
 };
 export const PhoneDisabledReason: Story = {

@@ -2,6 +2,7 @@
 	import type { Snippet } from "svelte";
 	import { MediaQuery } from "svelte/reactivity";
 	import { splitCitations } from "../../utils/citations.js";
+	import { splitUrls } from "../../utils/links.js";
 	import type { MessageSurfacingPreferences } from "../../../contracts/message-surfacing.js";
 	import type { TurnRecap } from "../../../contracts/turn-recap.js";
 	import { SURFACE_LABELS, surfaceTime, type SurfaceLevel, type SurfaceTurn } from "../../utils/surface-turn.js";
@@ -102,7 +103,7 @@
 </script>
 
 {#snippet citationButton(message: SurfaceTurn["numbers"][number], props: Record<string, unknown>)}
-	<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="recap-cite" data-testid="surfacing-recap-cite-{message.number}" data-unread={!plainCitations && message.part.surfacingRead === false} data-followed={!plainCitations && followed.includes(message.number)} data-ask={!plainCitations && view.openAsk?.uuid === message.part.uuid} ariaLabel={`#${message.number}${!plainCitations && message.part.surfacingRead === false ? ", unread" : ""}`} onpointerenter={() => onhover?.(message.number)} onpointerleave={() => onhover?.(null)} onfocus={() => onhover?.(message.number)} onblur={() => onhover?.(null)}>#{message.number}</Button>
+	<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="recap-cite" style={!plainCitations && message.colour ? `--surface-colour:${message.colour}` : undefined} data-category-colour={!plainCitations && !!message.colour} data-testid="surfacing-recap-cite-{message.number}" data-unread={!plainCitations && message.part.surfacingRead === false} data-followed={!plainCitations && followed.includes(message.number)} data-ask={!plainCitations && view.openAsk?.uuid === message.part.uuid} ariaLabel={`#${message.number}${!plainCitations && message.part.surfacingRead === false ? ", unread" : ""}`} onpointerenter={() => onhover?.(message.number)} onpointerleave={() => onhover?.(null)} onfocus={() => onhover?.(message.number)} onblur={() => onhover?.(null)}>#{message.number}</Button>
 {/snippet}
 
 {#snippet citationReader()}
@@ -157,7 +158,7 @@
 				<p class="summary-error">{error}</p>
 			</div>
 		{:else if generating}
-			<div class="summary-actions"><span class="summary-busy" role="status"><Icon name="loader-circle" size={13} class="animate-spin" />Summarising…</span></div>
+			<div class="summary-actions"><span class="summary-busy" role="status"><Icon name="loader-circle" size={13} class="animate-spin" />Summarizing…</span></div>
 		{:else if newer > 0 && latest || !selected}
 			<div class="summary-actions">
 				<Button variant="accent-soft" size="content" touchTarget class="h-[28px] rounded-full px-[12px] text-[13px] font-medium" data-testid="surfacing-summary-new" onclick={() => ongenerate(latest ? "new" : "whole")}>{latest ? `✦ Summarize ${newer} new · since ${writtenAt(latest)}` : `✦ Summarize ${live ? "so far" : "turn"} · ${view.numbers.length}`}</Button>
@@ -165,21 +166,11 @@
 			</div>
 		{/if}
 		{#if selected}
-			<p class="summary-prose select-text" class:regenerating={generating} bind:this={proseEl}>
-				{#each chunks as chunk}
-					{@const message = chunk.message}
-					{#if message}
-						{#if citationPopover && !plainCitations}
-							<Popover open={readingOrdinal === message.number} onopenchange={(nextOpen) => nextOpen ? cite(message.number) : closeCitation()} ariaLabel={`Cited message #${message.number}`} side="top" class="max-w-[380px]" onCloseAutoFocus={(event) => { if (handedOff) event.preventDefault(); handedOff = false; }}>
-								{#snippet trigger({ props })}{@render citationButton(message, props)}{/snippet}
-								{@render citationReader()}
-							</Popover>
-						{:else}
-							{@render citationButton(message, { onclick: (event: MouseEvent) => { citationTrigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null; cite(message.number); } })}
-						{/if}
-					{:else if chunk.code}<code>{chunk.text}</code>{:else}{chunk.text}{/if}
-				{/each}
-			</p>
+			<p class="summary-prose select-text" class:regenerating={generating} bind:this={proseEl}>{#each chunks as chunk}{@const message = chunk.message}{#if message}{#if citationPopover && !plainCitations}<Popover
+				open={readingOrdinal === message.number} onopenchange={(nextOpen) => nextOpen ? cite(message.number) : closeCitation()}
+				ariaLabel={`Cited message #${message.number}`} side="top" class="max-w-[380px]"
+				onCloseAutoFocus={(event) => { if (handedOff) event.preventDefault(); handedOff = false; }}
+			>{#snippet trigger({ props })}{@render citationButton(message, props)}{/snippet}{@render citationReader()}</Popover>{:else}{@render citationButton(message, { onclick: (event: MouseEvent) => { citationTrigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null; cite(message.number); } })}{/if}{:else if chunk.code}<code>{chunk.text}</code>{:else}{#each splitUrls(chunk.text) as part, i}{#if i % 2}<a href={part} target="_blank" rel="noopener noreferrer">{part}</a>{:else}{part}{/if}{/each}{/if}{/each}</p>
 			<div class="summary-foot">
 				<span class="mr-auto"><span class="desk-only">{`${selected.model.charAt(0).toUpperCase()}${selected.model.slice(1)} · `}</span>{`${view.numbers.filter(({ number }) => number >= selected.firstOrdinal && number <= selected.lastOrdinal).length} updates`}<span class="desk-only">{` · ${(selected.durationMs / 1000).toFixed(1)}s`}</span>{" · "}<span class="desk-only">{"written at "}</span>{writtenAt(selected)}</span>
 				{#if onquote}<SurfacingReplyActions source="recap-{selected.version}" within={proseEl} onreply={(excerpt) => { if (excerpt) { onquote(excerpt); afterReply(true); } }} />{/if}
@@ -220,13 +211,18 @@
 	.phone-stamp { display:none; }
 	.summary-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
 	.summary-prose { margin:10px 0 0; font-size:14px; line-height:1.65; white-space:pre-wrap; overflow-wrap:anywhere; }
+	/* Matches .md-content a, so a URL reads the same here as in the chat. */
+	.summary-prose a { color:var(--color-accent); text-decoration:none; }
+	.summary-prose a:hover { text-decoration:underline; }
 	.summary-prose code { padding:1px 5px; border-radius:5px; background:var(--color-chip); font:12px var(--font-mono); }
 	.regenerating { opacity:.45; }
 	.summary-prose :global(.recap-cite) { display:inline-flex; align-items:center; justify-content:center; margin-left:2px; padding:0 6px; border-radius:999px; background:var(--color-chip); color:var(--color-text-secondary); font:500 11px/18px var(--font-mono); vertical-align:1px; }
-	.summary-prose :global([data-ask="true"]) { background:color-mix(in srgb,var(--color-status-ask) 18%,transparent); color:var(--color-status-ask); }
-	.summary-prose :global([data-unread="true"]:not([data-ask="true"])) { background:color-mix(in srgb,var(--color-accent) 18%,transparent); color:var(--color-accent); }
+	.summary-prose :global([data-category-colour="true"]) { background:color-mix(in srgb,var(--surface-colour) 14%,transparent); color:var(--surface-colour); }
+	.summary-prose :global([data-unread="true"][data-category-colour="true"]) { box-shadow:inset 0 -2px var(--color-accent); }
+	.summary-prose :global([data-unread="true"]:not([data-category-colour="true"]):not([data-ask="true"])) { background:color-mix(in srgb,var(--color-accent) 18%,transparent); color:var(--color-accent); }
 	.summary-prose :global([data-followed="true"]) { outline:1px dashed currentColor; outline-offset:-1px; background:transparent; }
-	.summary-prose :global(.recap-cite:hover), .summary-prose :global(.recap-cite:focus-visible) { background:var(--color-accent); color:var(--color-bg); }
+	.summary-prose :global([data-category-colour="true"]:hover), .summary-prose :global([data-category-colour="true"]:focus-visible) { outline:1px solid currentColor; outline-offset:-1px; }
+	.summary-prose :global(.recap-cite:not([data-category-colour="true"]):hover), .summary-prose :global(.recap-cite:not([data-category-colour="true"]):focus-visible) { background:var(--color-accent); color:var(--color-bg); }
 	.summary-busy { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 12px; border-radius:999px; background:var(--color-chip); color:var(--color-text-secondary); font-size:13px; font-weight:500; }
 	.summary-foot { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:10px; padding-top:9px; border-top:1px solid var(--color-border-subtle); color:var(--color-text-muted); font:11.5px var(--font-mono); }
 	.summary-fail { display:flex; align-items:center; gap:8px; margin-top:10px; color:var(--color-error); font-size:13px; }

@@ -6,6 +6,7 @@
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
 	import TitleGenerationPicker from "../model/TitleGenerationPicker.svelte";
+	import { resolveModelParameters } from "../model/model-parameters.js";
 	import TextButton from "../ui/TextButton.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
@@ -74,7 +75,7 @@
 		const providers = getHarnessDefaultProviders(row.harness);
 		const catalog = catalogFromProviderList(providers);
 		const model = state.pick ? findCatalogModel(row.harness, state.pick, catalog) : undefined;
-		return { ...row, state, providers, model, options: model ? offeredOptions(model) : { efforts: [], contextWindows: [] } };
+		return { ...row, state, providers, model, parameters: resolveModelParameters(model?.parameters, state.pick?.effort), options: model ? offeredOptions(model) : { efforts: [], contextWindows: [] } };
 	}));
 
 	function defaultProblem(state: HarnessDefaultState, harness: Harness, label: string): string {
@@ -204,7 +205,22 @@
 								: [{ value: `${provider.id}/${model.id}`, label: model.name || model.id, group: provider.name || provider.id }])),
 						]}
 					/>
-					{#if pick && row.options.efforts.length > 0}
+					{#if pick && row.model?.parameters}
+						{#if row.parameters.variantUnavailable}
+							<SettingsPicker value={pick.effort} disabled label="{row.label} unavailable parameters"
+								data-testid="settings-harness-default-{row.harness}-unavailable" onvaluechange={() => {}} options={[
+									{ value: pick.effort, label: `${pick.effort} (unavailable)`, disabled: true },
+								]} />
+						{/if}
+						{#each row.parameters.rows as parameter (parameter.id)}
+							<SettingsPicker value={parameter.value} disabled={saving[row.harness]} label="{row.label} {parameter.title}"
+								data-testid="settings-harness-default-{row.harness}-{parameter.kind}" options={parameter.options}
+								onvaluechange={(value) => {
+									const combination = row.parameters.parameterCombination(parameter.id, value);
+									if (combination) void updateDefault(row.harness, "effort", combination.variant);
+								}} />
+						{/each}
+					{:else if pick && row.options.efforts.length > 0}
 						<SettingsPicker value={pick.effort} disabled={saving[row.harness]} label="{row.label} effort"
 							data-testid="settings-harness-default-{row.harness}-effort" onvaluechange={(value) => void updateDefault(row.harness, "effort", value)} options={[
 								{ value: "", label: "Default" },
@@ -212,7 +228,7 @@
 								...row.options.efforts.map((effort) => ({ value: effort, label: effort })),
 							]} />
 					{/if}
-					{#if pick && row.options.contextWindows.length > 0}
+					{#if pick && !row.model?.parameters && row.options.contextWindows.length > 0}
 						<SettingsPicker value={pick.contextWindow} disabled={saving[row.harness]} label="{row.label} context window"
 							data-testid="settings-harness-default-{row.harness}-context" onvaluechange={(value) => void updateDefault(row.harness, "contextWindow", value)} options={[
 								{ value: "", label: "Default" },

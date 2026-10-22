@@ -30,6 +30,11 @@ export interface SessionRowsScope {
 	readonly refreshGit?: boolean;
 }
 
+type SessionListOptions = Omit<
+	NonNullable<Parameters<ReadQueryEffect["listSessionInfos"]>[1]>,
+	"backgroundOf" | "hintDismissals"
+>;
+
 /** The common read path for full lists and versioned sidebar/family windows. */
 export const makeSessionRows = (
 	scope:
@@ -193,24 +198,42 @@ export const makeSessionRows = (
 				);
 			});
 
+		const page = (options?: SessionListOptions) =>
+			sessionScope === undefined
+				? Effect.succeed({ value: [], owners: undefined })
+				: readOwned(
+						readQuery.listSessionInfos(sessionScope, {
+							...options,
+							...overlay,
+						}),
+						(sessions) => sessions,
+					);
+
 		return {
-			list: (
-				options?: Omit<
-					NonNullable<Parameters<ReadQueryEffect["listSessionInfos"]>[1]>,
-					"backgroundOf" | "hintDismissals"
-				>,
-			) =>
+			list: (options?: SessionListOptions) =>
 				sessionScope === undefined
 					? Effect.succeed([])
-					: readOwned(
-							readQuery.listSessionInfos(sessionScope, {
-								...options,
-								...overlay,
-							}),
-							(sessions) => sessions,
-						).pipe(
+					: page(options).pipe(
 							Effect.flatMap(({ value, owners }) => decorate(value, owners)),
 						),
+			/**
+			 * Reads `alongside` in the page's transaction, so it must stay SQL-only.
+			 * Decoration runs git and worktree checks, so it waits for the commit:
+			 * the daemon has one SQL connection and every other query queues behind it.
+			 */
+			listWith: <A, E, R>(
+				options: SessionListOptions | undefined,
+				alongside: Effect.Effect<A, E, R>,
+			) =>
+				sql
+					.withTransaction(Effect.all([alongside, page(options)]))
+					.pipe(
+						Effect.flatMap(([companion, { value, owners }]) =>
+							decorate(value, owners).pipe(
+								Effect.map((sessions) => ({ sessions, companion })),
+							),
+						),
+					),
 			read: (
 				range?: Omit<
 					NonNullable<Parameters<ReadQueryEffect["readSessionList"]>[1]>,

@@ -1,9 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { Effect } from "effect";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
+import { tick } from "svelte";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import type { SessionGoalChangedPayload } from "../../../contracts/stored-event.js";
 import {
+	advanceTurnIfNewMessage,
 	getOrCreateSessionActivity,
 	getOrCreateSessionMessages,
 	phaseToIdle,
@@ -15,6 +17,10 @@ import {
 } from "../../stores/composer-preferences.svelte.js";
 import {
 	applyGetModelsResponse,
+	chooseAgent,
+	chooseContextWindow,
+	chooseModel,
+	choosePermissionMode,
 	chooseVariant,
 	clearDiscoveryState,
 	discoveryState,
@@ -244,6 +250,7 @@ const replyAsk: ReplyReference = {
 	kind: "message",
 	ordinal: 24,
 	category: "Ask",
+	builtinCategory: "ask",
 	glyph: "?",
 	time: "31:02",
 	text: "The phone sidebar baseline shifts 2px because the unread badge now paints before the first frame. Recapture it, or keep the old paint order?",
@@ -341,6 +348,7 @@ export const ReplyMultiple: Story = {
 				kind: "excerpt",
 				ordinal: 18,
 				category: "Decision",
+				builtinCategory: "decision",
 				glyph: "◆",
 				time: "22:40",
 				text: "one subscribeSessionSummaries stream",
@@ -348,10 +356,33 @@ export const ReplyMultiple: Story = {
 		]),
 };
 export const ReplyReferencesPhone: Story = {
+	tags: ["visual-phone-viewport"],
 	globals: { viewport: { value: "mobile1", isRotated: false } },
 	beforeEach: ({ canvasElement }) => setupWords(canvasElement, true),
 	play: async ({ canvasElement }) =>
 		showReferences(canvasElement, [replyAsk], "Claude"),
+};
+
+export const ReplyCustomLookalike: Story = {
+	play: async ({ canvasElement }) => {
+		await showReferences(canvasElement, [
+			{
+				...replyAsk,
+				builtinCategory: undefined,
+				category: "Decision",
+				glyph: "◆",
+			},
+		]);
+		const chip = within(canvasElement).getByTestId("surfacing-ref-token");
+		await expect(getComputedStyle(chip).color).toBe(
+			getComputedStyle(canvasElement.querySelector(".mirror") as HTMLElement)
+				.color,
+		);
+	},
+};
+export const ReplyCustomLookalikeLight: Story = {
+	...ReplyCustomLookalike,
+	globals: { theme: "light" },
 };
 export const ReplyAtomicEditing: Story = {
 	play: async ({ canvasElement }) => {
@@ -433,23 +464,17 @@ export const OverflowingInsert: Story = {
 			});
 		await expectCaretOnLastLineVisible();
 
-		// A mid-word insert that wraps its word onto a new last line: the text
-		// after the caret decides where the caret lands. Pad a final line until
-		// its word sits on the wrap boundary, then grow the word from its middle.
+		// Fixed input straddles the wrap at both viewport widths, independently
+		// of scrollbar gutters. Text after the caret decides where it lands.
 		const word = "bbbbbbbb";
-		document.execCommand("insertText", false, `\n ${word}`);
-		const lineStart = textarea.value.length - word.length - 1;
+		const prefix = "a".repeat(
+			window.matchMedia("(width < 48rem)").matches ? 31 : 78,
+		);
+		document.execCommand("insertText", false, `\n${prefix} ${word}`);
 		const rows = () => mirror.getBoundingClientRect().height;
-		const flush = () => new Promise(requestAnimationFrame);
-		await flush();
+		await new Promise(requestAnimationFrame);
+		await document.fonts.ready;
 		const height = rows();
-		while (rows() === height) {
-			textarea.setSelectionRange(lineStart, lineStart);
-			document.execCommand("insertText", false, "a");
-			await flush();
-		}
-		document.execCommand("delete");
-		await flush();
 		const middle = textarea.value.length - word.length / 2;
 		textarea.setSelectionRange(middle, middle);
 		document.execCommand("insertText", false, "bbbb");
@@ -491,6 +516,7 @@ function setupWords(canvasElement: HTMLElement, phone: boolean) {
 		{
 			id: "claude",
 			name: "personal",
+			colorSlot: 0,
 			driver: "claude",
 			isDefault: true,
 			port: 0,
@@ -558,6 +584,10 @@ function setupWords(canvasElement: HTMLElement, phone: boolean) {
 		variant: "",
 	});
 	getOrCreateSessionMessages(testId).contextPercent = 42;
+	handleAgentList({
+		providerScope: { id: "claude", name: "Claude" },
+		agents: [],
+	});
 	setComposerPreferences({ controls: "words" });
 	return () => {
 		setComposerPreferences({ controls: "icons" });
@@ -599,6 +629,99 @@ export const WordsDesktop: Story = {
 			);
 		}
 		await expect(row).toBeVisible();
+		await canvas.findByTestId(
+			phone ? "composer-words-sheet-trigger" : "composer-word-model",
+		);
+		await document.fonts.ready;
+		const input = canvas.getByRole("textbox", { name: "Message" });
+		await userEvent.type(input, "Rerun the webkit suite");
+		await waitFor(() => {
+			const box = canvasElement
+				.querySelector("#input-row")
+				?.getBoundingClientRect();
+			if (!box) throw new Error("Composer is missing");
+			const centre = box.top + box.height / 2;
+			for (const element of [
+				input,
+				canvasElement.querySelector("#attach-btn"),
+				canvasElement.querySelector("#send"),
+			]) {
+				if (!element) throw new Error("Composer control is missing");
+				const rect = element.getBoundingClientRect();
+				expect(
+					Math.abs(rect.top + rect.height / 2 - centre),
+				).toBeLessThanOrEqual(1);
+			}
+		});
+		await userEvent.clear(input);
+		await expect(row.getBoundingClientRect().height).toBeCloseTo(27, 1);
+		const colourProbe = document.createElement("span");
+		colourProbe.style.color = "var(--color-text-dimmer)";
+		row.append(colourProbe);
+		const dimmer = getComputedStyle(colourProbe).color;
+		colourProbe.remove();
+		await expect(getComputedStyle(row).color).toBe(dimmer);
+		for (const separator of row.querySelectorAll("span[aria-hidden='true']")) {
+			if (separator.textContent?.trim() === "·")
+				await expect(getComputedStyle(separator).color).toBe(dimmer);
+		}
+		const wide = sessionViewState.composerTier === "wide";
+		if (!phone && !wide) {
+			const checkout = canvas.getByTestId("composer-checkout");
+			await expect(checkout.querySelector('[data-part="branch"]')).toBeNull();
+			await expect(
+				checkout.querySelector('[data-icon="worktree"]'),
+			).toBeVisible();
+		}
+		const labels = phone
+			? [
+					...row.querySelectorAll<HTMLElement>(
+						'[data-part="summary"] > span, [data-testid="composer-word-context-usage"]',
+					),
+				].filter(
+					(label) =>
+						label.textContent?.trim() &&
+						!label.querySelector("svg") &&
+						label.getAttribute("aria-hidden") !== "true",
+				)
+			: [
+					"composer-word-account",
+					"composer-word-model",
+					"composer-word-context",
+					"composer-word-effort",
+					"composer-word-approvals",
+					...(wide ? ["composer-checkout"] : []),
+					"composer-word-context-usage",
+				].map((id) => canvas.getByTestId(id));
+		await expect(labels).toHaveLength(phone ? 5 : wide ? 7 : 6);
+		const baselines = labels.map((label) => {
+			const walker = document.createTreeWalker(label, NodeFilter.SHOW_TEXT);
+			let text = walker.nextNode();
+			while (text && !text.textContent?.trim()) text = walker.nextNode();
+			if (!text) throw new Error("Words label is missing");
+			const line = document.createElement("span");
+			const probe = document.createElement("span");
+			probe.style.cssText =
+				"display:inline-block;width:0;height:0;vertical-align:baseline";
+			text.parentNode?.replaceChild(line, text);
+			line.append(text, probe);
+			const baseline = probe.getBoundingClientRect().top;
+			line.replaceWith(text);
+			return baseline;
+		});
+		for (const baseline of baselines)
+			await expect(baseline).toBeCloseTo(baselines[0] ?? 0, 1);
+		for (const label of phone ? [] : labels.slice(0, -1)) {
+			const style = getComputedStyle(label);
+			await expect(style.textDecorationLine).toBe("underline");
+			await expect(style.textDecorationStyle).toBe("dotted");
+			await expect(style.textUnderlineOffset).toBe("4px");
+			await expect(style.textDecorationThickness).toBe("1px");
+		}
+		for (const label of labels) {
+			if (!label.style.color)
+				await expect(getComputedStyle(label).color).toBe(dimmer);
+		}
 		if (phone) {
 			const trigger = await canvas.findByTestId("composer-words-sheet-trigger");
 			await expect(trigger).toHaveTextContent("Sonnet 5");
@@ -778,9 +901,7 @@ export const WordsWorkingDesktop: Story = {
 		await expect(canvas.getByTestId("pending-input-run-now")).toHaveTextContent(
 			"Run now",
 		);
-		await expect(
-			canvas.getByTestId("composer-next-turn-note"),
-		).toHaveTextContent("next turn");
+		await expect(canvas.queryByTestId("composer-next-turn-note")).toBeNull();
 	},
 };
 export const WordsWorkingDesktopLight: Story = {
@@ -1296,6 +1417,7 @@ function narrowComposer(
 					{
 						...mockClaudeAccount,
 						id: "work",
+						colorSlot: 1,
 						name: "work",
 						isDefault: false,
 						usageEligible: true,
@@ -1473,6 +1595,103 @@ export const FinalIconsDesktop: Story = {
 		setComposerPreferences({ controls: "icons" });
 		return cleanup;
 	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await canvas.findByTestId("model-picker-trigger");
+		await document.fonts.ready;
+		const input = canvas.getByRole("textbox", { name: "Message" });
+		const frame = canvasElement.querySelector("#input-row");
+		const sendButton = canvasElement.querySelector("#send");
+		const attach = canvasElement.querySelector("#attach-btn svg");
+		if (!frame || !sendButton || !attach)
+			throw new Error("Composer controls are missing");
+		const phone = sessionViewState.composerTier === "phone";
+		const compactMetrics = phone || matchMedia("(max-width: 767px)").matches;
+		await expect(frame.getBoundingClientRect().height).toBeCloseTo(
+			compactMetrics ? 84.5 : 94.5,
+			1,
+		);
+		if (!phone) {
+			const checkout = canvas
+				.getByTestId("composer-checkout")
+				.getBoundingClientRect();
+			await expect(checkout.height).toBe(28);
+			await expect(
+				sendButton.getBoundingClientRect().left - checkout.right,
+			).toBeCloseTo(8, 1);
+		}
+		await expect(attach.getBoundingClientRect().width).toBe(16);
+		const rowCentre =
+			sendButton.getBoundingClientRect().top +
+			sendButton.getBoundingClientRect().height / 2;
+		const icons = frame.querySelectorAll<SVGSVGElement>(
+			'#attach-btn svg, [data-testid="model-picker-trigger"] svg, [data-testid="permission-mode-badge"] svg, [data-testid="composer-checkout"] svg, #send svg',
+		);
+		for (const icon of icons) {
+			if (!icon.checkVisibility()) continue;
+			const box = icon.getBBox();
+			const centre = new DOMPoint(
+				box.x + box.width / 2,
+				box.y + box.height / 2,
+			).matrixTransform(icon.getScreenCTM() ?? undefined);
+			await expect(Math.abs(centre.y - rowCentre)).toBeLessThanOrEqual(0.5);
+		}
+		const meter = frame.querySelector('[data-testid="effort-meter"]');
+		if (meter?.checkVisibility()) {
+			const bars = [...meter.children].map((bar) =>
+				bar.getBoundingClientRect(),
+			);
+			const centre =
+				(Math.min(...bars.map((bar) => bar.top)) +
+					Math.max(...bars.map((bar) => bar.bottom))) /
+				2;
+			await expect(Math.abs(centre - rowCentre)).toBeLessThanOrEqual(0.5);
+		}
+		const context = document.createElement("canvas").getContext("2d");
+		if (!context) throw new Error("Text metrics are unavailable");
+		const labels = frame.querySelectorAll<HTMLElement>(
+			'.model-label, [data-testid="picker-selected-context"], [data-testid="composer-effort-label"], [data-testid="composer-checkout"] [data-part="project"], [data-testid="composer-checkout"] [data-part="branch"]',
+		);
+		for (const label of labels) {
+			if (!label.checkVisibility()) continue;
+			context.font = getComputedStyle(label).font;
+			const ink = context.measureText("x");
+			const baseline = document.createElement("i");
+			baseline.style.cssText =
+				"display:inline-block;width:0;height:0;padding:0;margin:0;border:0;vertical-align:baseline";
+			label.append(baseline);
+			const centre =
+				baseline.getBoundingClientRect().top +
+				(ink.actualBoundingBoxDescent - ink.actualBoundingBoxAscent) / 2;
+			baseline.remove();
+			await expect(Math.abs(centre - rowCentre)).toBeLessThanOrEqual(0.5);
+		}
+		const dimmer = getComputedStyle(frame)
+			.getPropertyValue("--color-text-dimmer")
+			.trim();
+		const colour = document.createElement("span");
+		colour.style.color = dimmer;
+		frame.append(colour);
+		await expect(getComputedStyle(input, "::placeholder").color).toBe(
+			getComputedStyle(colour).color,
+		);
+		colour.style.color = "var(--color-text-secondary)";
+		await expect(getComputedStyle(attach).color).toBe(
+			getComputedStyle(colour).color,
+		);
+		colour.remove();
+		await expect(getComputedStyle(sendButton).opacity).toBe("0.5");
+		await expect(sendButton).toBeDisabled();
+		await userEvent.click(sendButton);
+		await expect(readTurn().working).toBe(false);
+		await expect(input).toHaveValue("");
+		await userEvent.type(input, "Ready to send");
+		await expect(sendButton).toBeEnabled();
+		await expect(getComputedStyle(sendButton).opacity).toBe("1");
+		await userEvent.clear(input);
+		await expect(sendButton).toBeDisabled();
+		await expect(getComputedStyle(sendButton).opacity).toBe("0.5");
+	},
 };
 export const FinalIconsDesktopLight: Story = {
 	...FinalIconsDesktop,
@@ -1639,11 +1858,13 @@ function setupComposerStage(
 		...instanceState.instances.map((account) => ({
 			...account,
 			name: limited ? "lab" : stage === "usage" ? "work" : "personal",
+			colorSlot: limited ? 2 : stage === "usage" ? 1 : 0,
 			usageEligible: true,
 		})),
 		{
 			...mockClaudeAccount,
 			id: "standby",
+			colorSlot: limited || stage === "usage" ? 0 : 1,
 			name: "personal",
 			isDefault: false,
 			usageEligible: true,
@@ -1653,6 +1874,7 @@ function setupComposerStage(
 					{
 						...mockClaudeAccount,
 						id: "lab",
+						colorSlot: 2,
 						name: "lab",
 						isDefault: false,
 						usageEligible: true,
@@ -1697,7 +1919,13 @@ function setupComposerStage(
 						accountId: "lab",
 						harness: "claude" as const,
 						status: "limited" as const,
-						windows: [],
+						windows: [
+							{
+								kind: "five_hour" as const,
+								utilization: 100,
+								resetsAt: new Date(reset).toISOString(),
+							},
+						],
 						readAt: now,
 						stale: false,
 					},
@@ -1722,6 +1950,7 @@ function setupComposerStage(
 						limitRecovery: {
 							instanceId: "claude",
 							rateLimitType: "five_hour",
+							limitedAt: now - 1,
 							resetsAt: reset / 1000,
 							cutOffMessageId: "composer-limit-turn",
 							rearms: 0,
@@ -1867,7 +2096,7 @@ export const WaitingForReset: Story = {
 	globals: { theme: "dark" },
 	beforeEach: ({ canvasElement }) =>
 		setupComposerStage(canvasElement, "waiting"),
-	play: async ({ canvasElement }) => {
+	play: async ({ canvasElement, parameters }) => {
 		const canvas = within(canvasElement);
 		await expect(canvas.getByTestId("pending-input-waiting")).toHaveTextContent(
 			"Waiting for lab's limit to reset",
@@ -1878,14 +2107,46 @@ export const WaitingForReset: Story = {
 		await expect(canvas.getByTestId("pending-input-send-now")).toBeVisible();
 		await expect(canvas.queryByTestId("usage-limit-strip")).toBeNull();
 		const cancel = canvas.getByTestId("usage-limit-cancel-resume");
-		const actions = cancel.parentElement;
-		if (!actions) throw new Error("Waiting tray actions are missing");
-		await expect(getComputedStyle(cancel).flexGrow).toBe("0");
+		const resetLink = canvas.getByTestId("usage-limit-reset-link");
+		await expect(resetLink).toBeVisible();
+		const actions = resetLink.parentElement;
+		const buttonRow = cancel.parentElement;
+		if (!actions || !buttonRow)
+			throw new Error("Waiting tray actions are missing");
 		const header = canvas.getByTestId("pending-input-waiting");
 		const headerRect = header.getBoundingClientRect();
-		await expect(cancel.getBoundingClientRect().width).toBeLessThan(
-			headerRect.width * 0.7,
-		);
+		if (parameters["phone"]) {
+			const rowRect = buttonRow.getBoundingClientRect();
+			const buttons = [
+				canvas.getByTestId("usage-limit-switch-account"),
+				cancel,
+				canvas.getByTestId("usage-limit-used-reset"),
+			];
+			for (const button of buttons) {
+				await expect(button).toBeVisible();
+				const rect = button.getBoundingClientRect();
+				await expect(rect.left).toBeGreaterThanOrEqual(rowRect.left - 1);
+				await expect(rect.right).toBeLessThanOrEqual(rowRect.right + 1);
+			}
+			await expect(
+				Math.abs(
+					rowRect.left -
+						headerRect.left -
+						Number.parseFloat(getComputedStyle(header).paddingLeft),
+				),
+			).toBeLessThanOrEqual(1);
+			await expect(
+				Math.abs(rowRect.width - actions.getBoundingClientRect().width),
+			).toBeLessThanOrEqual(1);
+			await expect(
+				resetLink.getBoundingClientRect().top,
+			).toBeGreaterThanOrEqual(rowRect.bottom);
+		} else {
+			await expect(getComputedStyle(cancel).flexGrow).toBe("0");
+			await expect(cancel.getBoundingClientRect().width).toBeLessThan(
+				headerRect.width * 0.7,
+			);
+		}
 		await expect(
 			Math.abs(
 				actions.getBoundingClientRect().right -
@@ -1931,7 +2192,7 @@ export const WorkingQueued: Story = {
 		await expect(canvas.getByTestId("pending-input-run-now")).toHaveTextContent(
 			"Run now",
 		);
-		await expect(canvas.getByTestId("composer-next-turn-note")).toBeVisible();
+		await expect(canvas.queryByTestId("composer-next-turn-note")).toBeNull();
 		await expect(
 			canvas.getByRole("button", { name: "Stop generating" }),
 		).toBeVisible();
@@ -1941,6 +2202,125 @@ export const WorkingQueuedLight: Story = {
 	...WorkingQueued,
 	tags: ["viewport-capture"],
 	globals: { theme: "light" },
+};
+
+export const RunningNoChange: Story = { ...WorkingQueued };
+export const RunningNoChangeLight: Story = {
+	...RunningNoChange,
+	globals: { theme: "light" },
+};
+
+export const RunningAfterChange: Story = {
+	...WorkingQueued,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await canvas.findByRole("button", { name: "Stop generating" });
+		await expect(canvas.queryByTestId("composer-next-turn-note")).toBeNull();
+		for (const change of [
+			() => chooseVariant("xhigh"),
+			() => chooseContextWindow("1m"),
+			() => chooseModel({ providerId: "claude", modelId: "claude-opus-5" }),
+			() => chooseAgent("review"),
+			() => choosePermissionMode("plan"),
+		]) {
+			const undo = change();
+			const note = await canvas.findByTestId("composer-next-turn-note");
+			await expect(note).toHaveTextContent(
+				"Model and mode changes apply from the next turn.",
+			);
+			const probe = document.createElement("span");
+			probe.style.color = "var(--color-text-dimmer)";
+			note.append(probe);
+			await expect(getComputedStyle(note).color).toBe(
+				getComputedStyle(probe).color,
+			);
+			probe.remove();
+			undo();
+			await waitFor(() =>
+				expect(canvas.queryByTestId("composer-next-turn-note")).toBeNull(),
+			);
+		}
+		chooseVariant("xhigh");
+		await canvas.findByTestId("composer-next-turn-note");
+		advanceTurnIfNewMessage(
+			getOrCreateSessionActivity(testId),
+			getOrCreateSessionMessages(testId),
+			"next-assistant-row",
+		);
+		await tick();
+		await expect(canvas.getByTestId("composer-next-turn-note")).toBeVisible();
+		openSessionForSetup(null);
+		await tick();
+		await expect(canvas.queryByTestId("composer-next-turn-note")).toBeNull();
+		openSessionForSetup(testId);
+		await canvas.findByTestId("composer-next-turn-note");
+		phaseToIdle(getOrCreateSessionActivity(testId));
+		await waitFor(() =>
+			expect(canvas.queryByTestId("composer-next-turn-note")).toBeNull(),
+		);
+		phaseToProcessing(getOrCreateSessionActivity(testId));
+		await canvas.findByRole("button", { name: "Stop generating" });
+		await expect(canvas.queryByTestId("composer-next-turn-note")).toBeNull();
+		chooseVariant("high");
+		await canvas.findByTestId("composer-next-turn-note");
+		openSessionForSetup(null);
+		await tick();
+		phaseToIdle(getOrCreateSessionActivity(testId));
+		await tick();
+		phaseToProcessing(getOrCreateSessionActivity(testId));
+		await tick();
+		openSessionForSetup(testId);
+		await tick();
+		await expect(canvas.queryByTestId("composer-next-turn-note")).toBeNull();
+		chooseVariant("xhigh");
+		await canvas.findByTestId("composer-next-turn-note");
+	},
+};
+export const RunningAfterChangeLight: Story = {
+	...RunningAfterChange,
+	globals: { theme: "light" },
+};
+
+export const RunningModelLoading: Story = {
+	...WorkingQueued,
+	beforeEach: ({ canvasElement }) => {
+		const cleanup = setupComposerStage(canvasElement, "working");
+		clearDiscoveryState();
+		return cleanup;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await canvas.findByRole("button", { name: "Stop generating" });
+		await expect(canvas.queryByTestId("composer-next-turn-note")).toBeNull();
+		applyGetModelsResponse(
+			{
+				projectSlug: "conduit",
+				instanceId: "claude",
+				providers: [],
+				active: { model: "claude-sonnet-5", provider: "claude" },
+				variant: { variant: "high", variants: ["high", "xhigh"] },
+				contextWindow: {
+					contextWindow: "200k",
+					options: [{ value: "200k", label: "200K", isDefault: true }],
+				},
+				permissionMode: "ask",
+			},
+			testId,
+		);
+		await tick();
+		await expect(canvas.queryByTestId("composer-next-turn-note")).toBeNull();
+		handleAgentList({
+			providerScope: { id: "claude", name: "Claude" },
+			agents: [{ id: "code", name: "code" }],
+			activeAgentId: "code",
+		});
+		await tick();
+		await expect(canvas.queryByTestId("composer-next-turn-note")).toBeNull();
+		chooseVariant("xhigh");
+		await expect(
+			await canvas.findByTestId("composer-next-turn-note"),
+		).toBeVisible();
+	},
 };
 
 export const PausedQueued: Story = {

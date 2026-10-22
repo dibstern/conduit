@@ -1,4 +1,5 @@
 import type { Effect } from "effect";
+import type { UsageHarness } from "../../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
 import type { BackgroundTaskTransition } from "../../session/background-liveness.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
@@ -21,6 +22,7 @@ import type {
 	SendTurnInput,
 	TurnResult,
 } from "../types.js";
+import type { UsageRead } from "../usage-reader.js";
 import type { RunnerSettingsSnapshot } from "./runner-upgrade.js";
 
 /** Provider-Owned Payload fields contain JSON data, as on the event ingress. */
@@ -119,6 +121,12 @@ export type SessionCommand = (
 /** Runtime events and the existing EventSink interaction operations, all data. */
 export type SessionOutput =
 	| {
+			readonly type: "account-usage";
+			readonly accountId: string;
+			readonly harness: UsageHarness;
+			readonly reading: UsageRead;
+	  }
+	| {
 			readonly type: "background-task";
 			readonly transition: BackgroundTaskTransition;
 	  }
@@ -129,7 +137,12 @@ export type SessionOutput =
 					readonly request: PermissionRequest;
 			  }
 			| { readonly type: "question-request"; readonly request: QuestionRequest }
-			| { readonly type: "cancel-interaction"; readonly requestId: string }
+			| {
+					readonly type: "cancel-interaction";
+					readonly requestId: string;
+					/** Persist provider withdrawal if recovery has no interaction fiber. */
+					readonly kind?: "permission" | "question";
+			  }
 			| {
 					readonly type: "resolve-permission";
 					readonly requestId: string;

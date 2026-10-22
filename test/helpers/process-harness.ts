@@ -65,7 +65,10 @@ import type {
 	ProviderAgentInfo,
 } from "../../src/lib/provider/types.js";
 import type { RelaySettings } from "../../src/lib/relay/relay-settings.js";
-import type { PtyInfo } from "../../src/lib/shared-types.js";
+import type {
+	PtyInfo,
+	SessionPermissionMode,
+} from "../../src/lib/shared-types.js";
 import { stopPtyHost } from "../../src/lib/terminal/pty-host-client.js";
 import { isRecord } from "../../src/lib/utils.js";
 import type { ClaudeTraceName } from "../e2e/helpers/claude-trace-replayer.js";
@@ -253,13 +256,13 @@ export class ProcessHarness {
 			/** Pause result delivery until the test writes claude-replay-release. */
 			readonly holdBeforeResult?: boolean;
 			/** Enable relay diagnostics when a replay checks warning logs. */
-			readonly logLevel?: "warn";
+			readonly logLevel?: "warn" | "info";
 		},
 		private readonly claudeCaptureDir?: string,
 		realOpenCode?: string,
 		capabilityAgents?: readonly ProviderAgentInfo[],
 		private continuationSweepIntervalMs?: number,
-		private readonly logLevel?: "warn",
+		private readonly logLevel?: "warn" | "info",
 		relaySettings?: RelaySettings,
 		private readonly respawnOnExit = false,
 		managedOpenCodeId = "managed-test",
@@ -591,7 +594,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			restartProof?: boolean;
 			continuationSweepIntervalMs?: number;
 			/** Enable warning diagnostics for provider lifecycle regressions. */
-			logLevel?: "warn";
+			logLevel?: "warn" | "info";
 			/** Stand in for a login service: respawn exited daemons on the same port. */
 			respawnOnExit?: boolean;
 			holdRunnerAck?: boolean | "place-user-message";
@@ -696,6 +699,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 					| "CONDUIT_TAILSCALE_BIN"
 					| "CONDUIT_BUILD_READY_PATH"
 					| "NODE_OPTIONS"
+					| "OPENCODE_PURE"
 					| "CONDUIT_SERVER_BUILD_ID"
 					| "CONDUIT_SLOW_RPC_MS"
 					| "CONDUIT_TEST_ADVANCE_BUS_CAPACITY"
@@ -707,6 +711,17 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 					| "CONDUIT_TRACE_SESSION"
 					| "CONDUIT_CURSOR_SDK_TRACE"
 					| "CONDUIT_CURSOR_SDK_CAPTURE"
+					| "CONDUIT_CODEX_APP_SERVER_TRACE"
+					| "CONDUIT_TEST_CODEX_TRACE_MAP"
+					| "CONDUIT_TEST_CODEX_TRANSPORTS"
+					| "OPENAI_API_KEY"
+					| "CODEX_API_KEY"
+					| "CODEX_ACCESS_TOKEN"
+					| "CONDUIT_TEST_CODEX_USAGE_TRACE"
+					| "CONDUIT_CODEX_APP_SERVER_TRACE_GATE"
+					| "CONDUIT_CODEX_APP_SERVER_CAPTURE"
+					| "CONDUIT_CODEX_APP_SERVER_TRACE_REPORT"
+					| "CONDUIT_CODEX_BINARY"
 					| "CONDUIT_TEST_CURSOR_CLOSE_DELAY_MS"
 					| "CONDUIT_TEST_CURSOR_DISPOSE_DELAY_MS"
 					| "CONDUIT_TEST_CURSOR_AUTH_STATE"
@@ -799,9 +814,13 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			// Keep CLI smart-default discovery on a reachable, fixture-owned endpoint.
 			const server = createHttpServer(async (request, response) => {
 				const path = request.url?.split("?")[0];
-				const gate = join(this.root, "opencode-path-gated");
-				if (path === "/path" && existsSync(gate)) {
-					writeFileSync(`${gate}-started`, request.url ?? "/path");
+				const gate = join(this.root, "opencode-event-gated");
+				if (
+					request.method === "GET" &&
+					path === "/global/event" &&
+					existsSync(gate)
+				) {
+					writeFileSync(`${gate}-started`, request.url ?? "/global/event");
 					while (!existsSync(`${gate}-release`) && !response.destroyed)
 						await new Promise<void>((done) => setTimeout(done, 10));
 					if (response.destroyed) return;
@@ -1299,7 +1318,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			undefined,
 			undefined,
 			project.slug,
-			undefined,
+			false,
 			this.rpcDiagnostics,
 			this.deadline,
 		);
@@ -1984,8 +2003,9 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			const signalSaveGate = join(this.root, "signal-config-rename-gated");
 			if (existsSync(signalSaveGate))
 				writeFileSync(`${signalSaveGate}-release`, "cleanup");
-			const pathGate = join(this.root, "opencode-path-gated");
-			if (existsSync(pathGate)) writeFileSync(`${pathGate}-release`, "cleanup");
+			const eventGate = join(this.root, "opencode-event-gated");
+			if (existsSync(eventGate))
+				writeFileSync(`${eventGate}-release`, "cleanup");
 			if (this.blockCapabilitiesProbe) {
 				writeFileSync(join(this.root, "capabilities-probe-release"), "release");
 				writeFileSync(
@@ -2009,7 +2029,8 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			failures.push(cause);
 		}
 		try {
-			if (this.generations.length > 0) await this.shutdown();
+			if (this.generations.some(({ pid }) => pid === this.child?.pid))
+				await this.shutdown();
 			else await this.stop("SIGTERM");
 		} catch (cause) {
 			failures.push(cause);
@@ -2588,7 +2609,7 @@ export class ProcessBrowser {
 			modelId?: string;
 			variant?: string;
 			contextWindow?: string;
-			permissionMode?: "ask" | "full";
+			permissionMode?: SessionPermissionMode;
 			worktreePath?: string;
 		} = {},
 	): Promise<string> {
@@ -2643,12 +2664,13 @@ export class ProcessBrowser {
 		};
 	}
 
-	async createPty(): Promise<PtyInfo> {
+	async createPty(accountId?: string): Promise<PtyInfo> {
 		const cursor = this.frames.length;
 		await this.run(
 			this.rpc.CreatePty({
 				projectSlug: this.projectSlug,
 				originId: this.originId,
+				...(accountId ? { accountId } : {}),
 			}),
 		);
 		const message = await this.waitFor(

@@ -501,13 +501,16 @@ export const sessionHandlers = {
 	},
 
 	"session.status": (event) => {
+		// Run completion records activity; repeated idle does not.
 		const startsNewWork =
 			event.data.status === "busy" || event.data.status === "retry";
 		return [
 			{
 				sql: startsNewWork
 					? "UPDATE sessions SET status = ?, updated_at = ?, last_turn_error_at = NULL WHERE id = ?"
-					: "UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?",
+					: event.data.status === "idle"
+						? "UPDATE sessions SET status = ?, updated_at = ? WHERE id = ? AND status <> 'idle'"
+						: "UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?",
 				params: [event.data.status, event.createdAt, event.data.sessionId],
 			},
 		];
@@ -571,9 +574,38 @@ export const sessionHandlers = {
 
 	"session.usage_limited": (event) => [
 		{
-			sql: "UPDATE sessions SET limit_recovery = ?, updated_at = ? WHERE id = ?",
+			// Replies clear Limit Recovery. Use the canonical trail so the guard
+			// also survives a streamed reply, held-only Resume, and replay.
+			sql: `UPDATE sessions SET limit_recovery = json_patch(?, CASE WHEN EXISTS (
+				SELECT 1 FROM events resumed JOIN events limited ON limited.sequence = (
+					SELECT sequence FROM events WHERE session_id = resumed.session_id
+					AND type = 'session.usage_limited' AND sequence < resumed.sequence
+					ORDER BY sequence DESC LIMIT 1
+				)
+				WHERE resumed.sequence = (
+					SELECT sequence FROM events WHERE session_id = ?
+					AND type = 'session.resumed' AND sequence < ?
+					ORDER BY sequence DESC LIMIT 1
+				)
+				AND json_extract(resumed.data, '$.instanceId') = ?
+				AND json_extract(limited.data, '$.instanceId') = ?
+				AND json_extract(limited.data, '$.rateLimitType') = ?
+				AND resumed.created_at < json_extract(limited.data, '$.resetsAt') * 1000
+				AND ? < json_extract(limited.data, '$.resetsAt') * 1000
+			) THEN '{"timeOnly":true}' ELSE '{}' END), updated_at = ? WHERE id = ?`,
 			params: [
-				JSON.stringify({ ...event.data, rearms: 0, continued: false }),
+				JSON.stringify({
+					...event.data,
+					limitedAt: event.createdAt,
+					rearms: 0,
+					continued: false,
+				}),
+				event.sessionId,
+				event.sequence,
+				event.data.instanceId,
+				event.data.instanceId,
+				event.data.rateLimitType,
+				event.createdAt,
 				event.createdAt,
 				event.sessionId,
 			],
@@ -587,7 +619,7 @@ export const sessionHandlers = {
 	],
 	"session.resumed": (event) => [
 		{
-			sql: "UPDATE sessions SET limit_recovery = json_remove(json_set(limit_recovery, '$.continued', json('true')), '$.scheduledAt', '$.auto'), updated_at = ? WHERE id = ? AND provider = ? AND limit_recovery IS NOT NULL",
+			sql: "UPDATE sessions SET limit_recovery = CASE WHEN json_extract(limit_recovery, '$.cutOffMessageId') IS NULL THEN NULL ELSE json_remove(json_set(limit_recovery, '$.continued', json('true')), '$.scheduledAt', '$.auto') END, updated_at = ? WHERE id = ? AND provider = ? AND limit_recovery IS NOT NULL",
 			params: [event.createdAt, event.sessionId, event.data.instanceId],
 		},
 		{
@@ -606,16 +638,22 @@ export const sessionHandlers = {
 		},
 	],
 	"session.resume_scheduled": (event) => {
-		const source = event.metadata.source;
+		const by =
+			event.data.by ??
+			(event.metadata.source === "limit-policy"
+				? "policy"
+				: event.metadata.source === "continuation-sweep"
+					? "sweep"
+					: "user");
 		// A queue can wait for its account's reset without a cut-off turn.
 		const recovery =
 			"COALESCE(limit_recovery, json_object('instanceId', ?, 'rateLimitType', 'usage', 'resetsAt', ?, 'rearms', 0, 'continued', json('false')))";
 		// The limit policy marks its schedule, a user's schedule clears the mark,
 		// and a sweep re-arm keeps whichever one it re-arms.
 		const marked =
-			source === "limit-policy"
+			by === "policy"
 				? `json_set(${recovery}, '$.auto', json('true'))`
-				: source === "continuation-sweep"
+				: by === "sweep"
 					? recovery
 					: `json_remove(${recovery}, '$.auto')`;
 		return [
@@ -626,7 +664,7 @@ export const sessionHandlers = {
 					event.data.instanceId,
 					event.data.at,
 					event.data.at,
-					source === "continuation-sweep" ? 1 : 0,
+					by === "sweep" ? 1 : 0,
 					event.createdAt,
 					event.sessionId,
 					event.data.instanceId,
@@ -732,9 +770,10 @@ export const sessionHandlers = {
 	"permission.asked": (event) => [
 		wakeSession(event.data.sessionId, event.createdAt, "approval"),
 	],
-	"question.asked": (event) => [
-		wakeSession(event.data.sessionId, event.createdAt, "question"),
-	],
+	"question.asked": (event) =>
+		event.data.delivery === "async"
+			? []
+			: [wakeSession(event.data.sessionId, event.createdAt, "question")],
 
 	// (P8) Denormalize last_message_at on the session. Owned by
 	// SessionProjector (not MessageProjector) to keep all session-table

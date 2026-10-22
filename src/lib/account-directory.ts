@@ -7,6 +7,7 @@ import {
 	type AccountListItem,
 	type AccountRef,
 } from "./contracts/account.js";
+import { ACCOUNT_COLOR_SLOT_COUNT } from "./contracts/account-color.js";
 import type { ClaudeConfigDir } from "./contracts/claude-config-dir.js";
 import { AccountUnroutable } from "./contracts/limit-recovery.js";
 import {
@@ -19,6 +20,7 @@ import {
 	PROVIDER_DRIVERS,
 } from "./contracts/provider-instance.js";
 import type { DaemonConfig } from "./daemon/config-persistence.js";
+import { assertNever } from "./utils.js";
 
 export { MANAGED_OPENCODE_ACCOUNT_ID };
 export type { AccountChange } from "./contracts/account.js";
@@ -37,6 +39,36 @@ const accountDriverAlias = (
 		: Object.hasOwn(LEGACY_ACCOUNT_DRIVERS, value)
 			? LEGACY_ACCOUNT_DRIVERS[value]
 			: undefined;
+
+export function nextAccountColorSlot(
+	accounts: readonly { readonly colorSlot?: number | undefined }[],
+): number {
+	const counts = Array<number>(ACCOUNT_COLOR_SLOT_COUNT).fill(0);
+	for (const account of accounts) {
+		if (account.colorSlot !== undefined)
+			counts[account.colorSlot] = (counts[account.colorSlot] ?? 0) + 1;
+	}
+	return counts.indexOf(Math.min(...counts));
+}
+
+export function assignAccountColorSlots<
+	T extends { readonly id: string; readonly colorSlot?: number | undefined },
+>(
+	accounts: readonly T[],
+	reserved: readonly { readonly colorSlot?: number | undefined }[] = [],
+): (T & { colorSlot: number })[] {
+	// Reserve every stored slot before filling gaps, including later config rows.
+	const assigned = [
+		...reserved,
+		...accounts.filter((account) => account.colorSlot !== undefined),
+	];
+	return accounts.map((account) => {
+		const colorSlot = account.colorSlot ?? nextAccountColorSlot(assigned);
+		const result = { ...account, colorSlot };
+		if (account.colorSlot === undefined) assigned.push(result);
+		return result;
+	});
+}
 
 /** Classify wire selections without looking up the current default pointer. */
 export function accountRefFromSelection(selection: {
@@ -84,6 +116,7 @@ export function accountsStateFromInstances(
 	instances: ReadonlyArray<{
 		readonly id: string;
 		readonly name: string;
+		readonly colorSlot?: number | undefined;
 		readonly driver: KnownProviderDriverKind;
 		readonly configDir?: string | undefined;
 		readonly env?: Readonly<Record<string, string>> | undefined;
@@ -102,51 +135,71 @@ export function accountsStateFromInstances(
 		readonly usageOrder?: ReadonlyArray<string> | undefined;
 	} = {},
 ): AccountsState {
-	const accounts = instances.map((instance): Account => {
-		const id = AccountIdSchema.make(instance.id);
-		if (getProviderDriver(instance.driver)?.accountKind === "server")
-			return {
-				driver: "opencode",
-				usageEligible: false,
-				id,
-				name: instance.name,
-				...(instance.managed && instance.id !== MANAGED_OPENCODE_ACCOUNT_ID
-					? { url: `http://localhost:${instance.port ?? 0}` }
-					: instance.url === undefined
-						? {}
-						: { url: instance.url }),
-				port: instance.port ?? 0,
-				managed: instance.managed ?? false,
-				...(instance.env === undefined ? {} : { env: instance.env }),
-				...(instance.configDir === undefined
-					? {}
-					: { configuredFolder: instance.configDir }),
-			};
-		const configuredFolder = instance.configDir?.trim() || undefined;
-		if (instance.driver === "cursor")
-			return {
-				driver: instance.driver,
-				id,
-				name: instance.name,
-				...(configuredFolder === undefined ? {} : { configuredFolder }),
-				...(instance.env === undefined ? {} : { env: instance.env }),
-				usageEligible: Boolean(instance.env?.["CURSOR_AUTH_TOKEN"]?.trim()),
-			};
-		return {
-			driver: "claude",
-			id,
-			name: instance.name,
-			folder:
-				configuredFolder === undefined
-					? launchLogin
-					: { _tag: "Configured", path: configuredFolder },
-			...(configuredFolder === undefined ? {} : { configuredFolder }),
-			...(instance.env === undefined ? {} : { env: instance.env }),
-			usageEligible:
-				!instance.env?.["ANTHROPIC_API_KEY"] &&
-				!instance.env?.["ANTHROPIC_AUTH_TOKEN"],
-		};
-	});
+	const accounts = assignAccountColorSlots(instances).map(
+		(instance): Account => {
+			const id = AccountIdSchema.make(instance.id);
+			const configuredFolder = instance.configDir?.trim() || undefined;
+			switch (instance.driver) {
+				case "opencode":
+					return {
+						driver: "opencode",
+						usageEligible: false,
+						id,
+						name: instance.name,
+						colorSlot: instance.colorSlot,
+						...(instance.managed && instance.id !== MANAGED_OPENCODE_ACCOUNT_ID
+							? { url: `http://localhost:${instance.port ?? 0}` }
+							: instance.url === undefined
+								? {}
+								: { url: instance.url }),
+						port: instance.port ?? 0,
+						managed: instance.managed ?? false,
+						...(instance.env === undefined ? {} : { env: instance.env }),
+						...(instance.configDir === undefined
+							? {}
+							: { configuredFolder: instance.configDir }),
+					};
+				case "cursor":
+					return {
+						driver: instance.driver,
+						id,
+						name: instance.name,
+						colorSlot: instance.colorSlot,
+						...(configuredFolder === undefined ? {} : { configuredFolder }),
+						...(instance.env === undefined ? {} : { env: instance.env }),
+						usageEligible: Boolean(instance.env?.["CURSOR_AUTH_TOKEN"]?.trim()),
+					};
+				case "codex":
+					return {
+						driver: "codex",
+						id,
+						name: instance.name,
+						colorSlot: instance.colorSlot,
+						...(configuredFolder === undefined ? {} : { configuredFolder }),
+						...(instance.env === undefined ? {} : { env: instance.env }),
+						usageEligible: true,
+					};
+				case "claude":
+					return {
+						driver: "claude",
+						id,
+						name: instance.name,
+						colorSlot: instance.colorSlot,
+						folder:
+							configuredFolder === undefined
+								? launchLogin
+								: { _tag: "Configured", path: configuredFolder },
+						...(configuredFolder === undefined ? {} : { configuredFolder }),
+						...(instance.env === undefined ? {} : { env: instance.env }),
+						usageEligible:
+							!instance.env?.["ANTHROPIC_API_KEY"] &&
+							!instance.env?.["ANTHROPIC_AUTH_TOKEN"],
+					};
+				default:
+					return assertNever(instance.driver);
+			}
+		},
+	);
 	return {
 		launchLogin,
 		maxAccounts,
@@ -259,6 +312,7 @@ export function apply(
 				{
 					...input,
 					id: allocated,
+					colorSlot: nextAccountColorSlot(state.accounts),
 					managed:
 						input.managed ??
 						(PROVIDER_DRIVERS[input.driver].runsOpenCodeServer &&
@@ -349,6 +403,7 @@ export function apply(
 		[
 			{
 				id: current.id,
+				colorSlot: current.colorSlot,
 				name,
 				driver,
 				...(configuredFolder === undefined
@@ -449,6 +504,9 @@ export function normalizeAccountConfig(config: DaemonConfig): DaemonConfig {
 	const accounts = accountInstancesFromConfig(config);
 	return {
 		...config,
+		...(config.instances === undefined
+			? {}
+			: { instances: assignAccountColorSlots(config.instances) }),
 		accountDefaults: Records.filterMap(PROVIDER_DRIVERS, (traits, driver) =>
 			traits.defaultAccountSource === "selection"
 				? Result.fromOption(

@@ -35,16 +35,20 @@ export function publicManagedOpenCodeEnv(env?: Record<string, string>) {
 	return visible;
 }
 
-export const openCodeAuth = (env?: Record<string, string>) =>
-	env?.["OPENCODE_SERVER_PASSWORD"]
+export const openCodeAuth = (env?: Record<string, string>) => {
+	const password =
+		env?.["OPENCODE_SERVER_PASSWORD"] ??
+		process.env["OPENCODE_SERVER_PASSWORD"];
+	return password
 		? {
 				username:
-					env["OPENCODE_SERVER_USERNAME"] ??
+					env?.["OPENCODE_SERVER_USERNAME"] ??
 					process.env["OPENCODE_SERVER_USERNAME"] ??
 					"opencode",
-				password: env["OPENCODE_SERVER_PASSWORD"],
+				password,
 			}
 		: undefined;
+};
 
 export const managedOpenCodeEnv = (
 	env?: Record<string, string>,
@@ -105,6 +109,7 @@ export function spawnManagedOpenCode(
 	port: number,
 	env: Record<string, string>,
 	configDir = DEFAULT_CONFIG_DIR,
+	options: { cwd?: string; inheritEnv?: boolean } = {},
 ): Promise<{
 	pid: number;
 	process: ChildProcess;
@@ -126,7 +131,12 @@ export function spawnManagedOpenCode(
 		chmodSync(logPath, 0o600);
 		child = spawn(process.execPath, [supervisorPath, String(port)], {
 			detached: true,
-			env: { ...process.env, ...env, CONDUIT_OPENCODE_CONTROL_TOKEN: token },
+			...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+			env: {
+				...(options.inheritEnv === false ? {} : process.env),
+				...env,
+				CONDUIT_OPENCODE_CONTROL_TOKEN: token,
+			},
 			stdio: ["ignore", fd, fd, "ipc"],
 		});
 	} finally {

@@ -70,7 +70,14 @@ export class TurnRecapState {
 									Stream.suspend(() =>
 										subscriptions.recaps({ sessionId, turnId }),
 									),
-									() => undefined,
+									(status) => {
+										if (
+											!cancelled &&
+											request === this.#request &&
+											status._tag === "failed"
+										)
+											this.error = status.lastError;
+									},
 								).pipe(
 									Stream.takeUntil(
 										(snapshot) => !watch && !snapshot.generating,

@@ -10,6 +10,7 @@ import { PersistenceProjectTag } from "../../domain/persistence/Services/persist
 import { CLAUDE_WORKTREE_EVENTS } from "../../session/claude-worktree-state.js";
 import { isRecord } from "../../utils.js";
 import type { LiveEventType, StoredEvent } from "../events.js";
+import { type Check, detectGoalStuck } from "../goal-stuck-detector.js";
 import {
 	getSessionStatements,
 	isHumanSentMessage,
@@ -489,12 +490,22 @@ export const makeSessionProjector = defineProjector(() => ({
 				)
 					return { stamped: [], removed: [], collections: [] };
 				if (event.type === "session.status" && !open) {
-					if (event.data.status === "busy" || event.data.status === "retry")
-						return { stamped: [], removed: [], collections: [] };
 					const newer =
 						yield* sql`SELECT 1 FROM provider_runs WHERE session_id = ${event.sessionId}
 						AND id <> ${runId} AND status IN ('pending', 'running') LIMIT 1`;
 					if (newer.length)
+						return { stamped: [], removed: [], collections: [] };
+					// A background task can wake Claude into a turn on its ended run;
+					// that busy is the only sign it is working. Take it only where
+					// the run's later idle stays a plain status, never dropped as a
+					// second terminal, so it cannot leave the session stuck busy.
+					if (
+						(event.data.status === "busy" || event.data.status === "retry") &&
+						runTerminalStatus(
+							{ type: "session.status", data: { status: "idle" } },
+							event.provider,
+						) !== undefined
+					)
 						return { stamped: [], removed: [], collections: [] };
 				}
 			}
@@ -622,6 +633,33 @@ export const makeSessionProjector = defineProjector(() => ({
 				event.type === "session.created" && event.data.inheritsHistory === true;
 			if (event.type === "session.created" && inheritsHistory)
 				yield* inheritForkHistory(event, ctx.version);
+			if (event.type === "session.goal_changed") {
+				const goal = event.data.goal;
+				let goalStuck: string | null = null;
+				if (goal) {
+					// Restrict replays to this event's prefix even if later checks
+					// already exist in the materialised history.
+					const checks = yield* sql<Check>`
+						SELECT iterations AS iteration, created_at AS at, reason
+						FROM session_goal_checks WHERE session_id = ${event.data.sessionId}
+						AND set_at = ${goal.setAt} AND condition = ${goal.condition}
+						AND iterations <= ${goal.iterations} ORDER BY iterations ASC`;
+					const { stuck } = detectGoalStuck(checks);
+					const latest = checks.at(-1);
+					const first = stuck
+						? checks.find((check) => check.iteration === stuck.sinceIteration)
+						: undefined;
+					if (stuck && latest && first)
+						goalStuck = JSON.stringify({
+							since: first.at,
+							lastAt: latest.at,
+							count: stuck.count,
+						});
+				}
+				// The session statement above already owns this row's version and
+				// notification; persist the header before that same stamp commits.
+				yield* sql`UPDATE sessions SET goal_stuck = ${goalStuck} WHERE id = ${event.data.sessionId}`;
+			}
 			// Only these two write a parent.
 			if (event.type === "session.created" || event.type === "session.forked")
 				left.push(...(yield* rerootSession(event.data.sessionId, ctx.version)));
@@ -963,6 +1001,15 @@ export const makeMessageProjector = defineProjector(() => ({
 						typeof state === "object" && state !== null && !Array.isArray(state)
 							? state
 							: undefined;
+					// The daemon owns async answers; the runner's snapshot still has
+					// the original unanswered tool output after a user responds.
+					const keepAsyncAnswer = sql`message_parts.tool_name = 'AskUserQuestion'
+						AND json_extract(message_parts.input, '$.delivery') = 'async'
+						AND EXISTS (SELECT 1 FROM pending_approvals pa
+							WHERE pa.session_id = ${event.sessionId} AND pa.type = 'question'
+								AND pa.status = 'resolved' AND json_extract(pa.details, '$.delivery') = 'async'
+								AND json_extract(pa.details, '$.messageId') = excluded.message_id
+								AND json_extract(pa.details, '$.partId') = excluded.id)`;
 					yield* sql`
 						INSERT INTO message_parts
 						(id, message_id, type, text, tool_name, call_id, input, result, result_event_seq, result_bytes,
@@ -980,8 +1027,10 @@ export const makeMessageProjector = defineProjector(() => ({
 						 ${encodeJson(part)}, ${ctx.version})
 						ON CONFLICT (id) DO UPDATE SET
 							type = excluded.type, text = excluded.text, tool_name = excluded.tool_name,
-							call_id = excluded.call_id, input = excluded.input, result = excluded.result,
-							result_event_seq = excluded.result_event_seq, result_bytes = excluded.result_bytes,
+							call_id = excluded.call_id, input = excluded.input,
+							result = CASE WHEN ${keepAsyncAnswer} THEN message_parts.result ELSE excluded.result END,
+							result_event_seq = CASE WHEN ${keepAsyncAnswer} THEN message_parts.result_event_seq ELSE excluded.result_event_seq END,
+							result_bytes = CASE WHEN ${keepAsyncAnswer} THEN message_parts.result_bytes ELSE excluded.result_bytes END,
 							status = excluded.status, duration = NULL, sort_order = excluded.sort_order,
 							created_at = excluded.created_at, updated_at = excluded.updated_at,
 							metadata = excluded.metadata, rest_payload = excluded.rest_payload, version = excluded.version
@@ -1230,6 +1279,9 @@ export const makeMessageProjector = defineProjector(() => ({
 			// name whichever message is streaming when it lands (a background task
 			// finishing after its turn), and that message's refetch misses this part.
 			if (isEventType(event, "tool.running")) {
+				const resumed =
+					getProviderDriver(event.provider)?.reusesSubagentCards === true &&
+					event.data.metadata?.["subagentResumed"] === true;
 				const rows = yield* sql<{ metadata: string | null }>`
 					SELECT metadata FROM message_parts WHERE id = ${event.data.partId}`;
 				const metadata = yield* mergeMetadata(
@@ -1241,9 +1293,13 @@ export const makeMessageProjector = defineProjector(() => ({
 				yield* sql`
 					UPDATE message_parts
 					SET status = CASE
+							WHEN ${resumed} THEN 'running'
 							WHEN status IN ('completed', 'error') THEN status
 							ELSE 'running'
 						END,
+						result = CASE WHEN ${resumed} THEN NULL ELSE result END,
+						result_bytes = CASE WHEN ${resumed} THEN NULL ELSE result_bytes END,
+						result_event_seq = CASE WHEN ${resumed} THEN NULL ELSE result_event_seq END,
 						input = COALESCE(${event.data.input === undefined ? null : encodeJson(event.data.input)}, input),
 						metadata = ${metadata},
 						updated_at = ${event.createdAt},
@@ -1684,6 +1740,15 @@ export const makeTurnProjector = defineProjector(() => ({
 	],
 	project: (event, ctx) =>
 		Effect.gen(function* () {
+			// Codex confirms existing message headers to retain native turn refs.
+			// Replaying those confirmations must not recreate a user turn.
+			if (
+				event.provider === "codex" &&
+				isEventType(event, "message.created") &&
+				(event.metadata.source === "codex.native-turn" ||
+					event.metadata.source === "codex.native-turn.completed")
+			)
+				return { sessions: [], messages: [] };
 			const sql = yield* SqlClient.SqlClient;
 			if (isEventType(event, "run.requested")) {
 				yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
@@ -1801,6 +1866,8 @@ export const makeTurnProjector = defineProjector(() => ({
 			if (
 				event.metadata.rawSource !== "opencode.rest" &&
 				"messageId" in event.data &&
+				// Display snapshots cannot suppress an explicitly owned run terminal.
+				!(runId && runTerminalStatus(event, event.provider)) &&
 				!(
 					(isEventType(event, "turn.completed") ||
 						isEventType(event, "message.completed")) &&
@@ -1956,8 +2023,22 @@ export const makeTurnProjector = defineProjector(() => ({
 				if (event.type === "message.completed")
 					return { sessions: [event.sessionId], messages: [] };
 			}
-			if (!["pending", "running"].includes(run.status))
+			if (!["pending", "running"].includes(run.status)) {
+				// A background task finishing after its run ended wakes Claude into
+				// a new turn under the same run. Its end is new output to read,
+				// unless a newer run owns the session or it repeats a counted reply.
+				if (isEventType(event, "turn.completed"))
+					yield* sql`UPDATE sessions SET updated_at = ${event.createdAt},
+						last_turn_end_version = ${event.streamVersion}
+						WHERE id = ${event.sessionId}
+						AND ${event.streamVersion} > COALESCE(last_turn_end_version, -1)
+						AND NOT EXISTS (SELECT 1 FROM provider_runs WHERE session_id = ${event.sessionId}
+							AND status IN ('pending', 'running'))
+						AND EXISTS (SELECT 1 FROM messages m JOIN provider_runs r ON r.id = ${runId}
+							WHERE m.id = ${event.data.messageId} AND m.session_id = ${event.sessionId}
+							AND m.created_at > r.completed_at)`;
 				return { sessions: [event.sessionId], messages: [] };
+			}
 
 			const terminal = runTerminalStatus(event, event.provider);
 			if (terminal) {

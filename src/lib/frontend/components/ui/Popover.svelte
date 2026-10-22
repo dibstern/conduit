@@ -8,7 +8,8 @@
 	} from "bits-ui";
 	import { type Snippet, tick, untrack } from "svelte";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
-	import { dragToDismiss } from "../../actions/drag-to-dismiss.js";
+	import { dimThemeColor } from "../../stores/theme.svelte.js";
+	import { dragToDismiss, sheetScrimStyle } from "../../actions/drag-to-dismiss.js";
 	import SheetChrome from "./SheetChrome.svelte";
 	import {
 		backgroundInert,
@@ -128,6 +129,10 @@
 	$effect(() => {
 		if (!open || !sheet) scrimFade = { progress: 0, settling: false };
 	});
+	$effect(() => {
+		if (open && sheet) return dimThemeColor();
+		return undefined;
+	});
 
 	const portalProps: PopoverPortalProps = $derived.by(() => {
 		const target = dialogTarget?.() ?? portalTo;
@@ -200,24 +205,21 @@
 {/snippet}
 
 {#snippet scrim()}
-	<button type="button" tabindex="-1" aria-label="Close details" data-testid={sheetScrim?.testId ?? "popover-sheet-scrim"} class="pointer-events-auto fixed inset-0 z-[var(--z-sheet)] border-0 bg-backdrop p-0" style:z-index={sheetScrim?.zIndex} style:opacity={1 - scrimFade.progress} style:transition={scrimFade.settling ? "opacity 220ms linear" : undefined} onclick={() => handleOpenChange(false)} use:exemptFromBackgroundInert></button>
+	<button type="button" tabindex="-1" aria-label="Close details" data-testid={sheetScrim?.testId ?? "popover-sheet-scrim"} class="pointer-events-auto fixed inset-0 z-[var(--z-sheet)] border-0 bg-backdrop p-0" style:z-index={sheetScrim?.zIndex} style={sheetScrimStyle(scrimFade)} onclick={() => handleOpenChange(false)} use:exemptFromBackgroundInert></button>
 {/snippet}
 
 <BitsPopover.Root bind:open onOpenChange={handleOpenChange}>
+	<!-- Keep the trigger, conditional and portal adjacent so citations have no space before punctuation. -->
 	<BitsPopover.Trigger bind:ref={triggerEl}>
 		{#snippet child({ props })}
 			{@render trigger({ props })}
 		{/snippet}
-	</BitsPopover.Trigger>
-
-	{#if sheet && open && sheetEl && sheetScrim?.portalTo !== undefined}
+	</BitsPopover.Trigger>{#if sheet && open && sheetEl && sheetScrim?.portalTo !== undefined}
 		<!-- Register after the modal boundary so the scrim remains interactive. -->
 		<BitsPopover.Portal to={sheetScrim.portalTo}>
 			{@render scrim()}
 		</BitsPopover.Portal>
-	{/if}
-
-	<BitsPopover.Portal {...portalProps}>
+	{/if}<BitsPopover.Portal {...portalProps}>
 		{#if sheet}
 			{#if open && (!modal || sheetEl) && sheetScrim?.portalTo === undefined}{@render scrim()}{/if}
 			<BitsPopover.ContentStatic {...sheetContentProps} bind:ref={sheetEl}>

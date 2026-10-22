@@ -208,6 +208,7 @@ export function runnerHelloFailure(
 			),
 			code: "runner_incompatible",
 		};
+	// Runner builds predating driverKind were all Claude.
 	if (
 		expectedDriverKind !== undefined &&
 		(hello.driverKind ?? "claude") !== expectedDriverKind

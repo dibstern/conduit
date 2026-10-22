@@ -16,6 +16,7 @@
 // Each test gets a fresh MockOpenCodeServer + RelayStack. The relay serves the
 // built frontend from dist/frontend/, so no separate vite preview is needed.
 
+import { mkdirSync } from "node:fs";
 import { test as base, type Page, type WebSocketRoute } from "@playwright/test";
 import { Effect } from "effect";
 import type { OpenCodeInstance } from "../../../src/lib/contracts/ws-rpc.js";
@@ -59,17 +60,37 @@ export const test = base.extend<ReplayFixtures & ReplayOptions>({
 	harness: async (
 		{ recording, claudeReplay, projectDir, daemonSessionQueries },
 		use,
+		testInfo,
 	) => {
-		const harness = await createReplayHarness(recording, {
-			...(claudeReplay ? { claudeReplay } : {}),
-			...(projectDir ? { projectDir } : {}),
-			daemonSessionQueries,
-		});
+		const previousConfigDir = process.env["CLAUDE_CONFIG_DIR"];
+		const replayPlan = claudeReplay
+			? {
+					...claudeReplay,
+					transcriptConfigDir: testInfo.outputPath("claude-config"),
+				}
+			: undefined;
+		if (replayPlan) {
+			mkdirSync(replayPlan.transcriptConfigDir, { recursive: true });
+			process.env["CLAUDE_CONFIG_DIR"] = replayPlan.transcriptConfigDir;
+		}
 		try {
-			await use(harness);
-			harness.claudeReplayer?.assertComplete();
+			const harness = await createReplayHarness(recording, {
+				...(replayPlan ? { claudeReplay: replayPlan } : {}),
+				...(projectDir ? { projectDir } : {}),
+				daemonSessionQueries,
+			});
+			try {
+				await use(harness);
+				harness.claudeReplayer?.assertComplete();
+			} finally {
+				await harness.stop();
+			}
 		} finally {
-			await harness.stop();
+			if (replayPlan) {
+				if (previousConfigDir === undefined)
+					delete process.env["CLAUDE_CONFIG_DIR"];
+				else process.env["CLAUDE_CONFIG_DIR"] = previousConfigDir;
+			}
 		}
 	},
 

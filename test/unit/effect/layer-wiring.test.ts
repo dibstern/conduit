@@ -571,6 +571,7 @@ describe("makeDaemonLive wiring", () => {
 					}),
 					{
 						id: "claude",
+						colorSlot: 1,
 						name: "Claude",
 						driver: "claude",
 						port: 0,

@@ -52,6 +52,7 @@ const connect = (
 ) =>
 	Effect.gen(function* () {
 		const requests = yield* Queue.unbounded<RpcMessage.FromClientEncoded>();
+		const received = yield* Queue.unbounded<RpcMessage.RequestEncoded["id"]>();
 		const responses = yield* Queue.unbounded<RpcMessage.FromServerEncoded>();
 		const warnings = yield* Queue.unbounded<Record<string, unknown>>();
 		const records: Record<string, unknown>[] = [];
@@ -69,7 +70,15 @@ const connect = (
 					Effect.andThen(
 						Effect.forever(
 							Queue.take(requests).pipe(
-								Effect.flatMap((request) => handle(1, request)),
+								Effect.flatMap((request) => {
+									// The wrapped callback stamps server receipt before returning dispatch.
+									const handling = handle(1, request);
+									return request._tag === "Request"
+										? Queue.offer(received, request.id).pipe(
+												Effect.andThen(handling),
+											)
+										: handling;
+								}),
 							),
 						),
 					),
@@ -107,6 +116,7 @@ const connect = (
 		yield* Deferred.await(ready);
 		return {
 			requests,
+			received,
 			responses,
 			warnings,
 			records,
@@ -302,11 +312,25 @@ describe("slow browser RPC warnings", () => {
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
-					const server = yield* connect(() => Effect.sleep("30 millis"), {
-						concurrency: 1,
-					});
+					const firstStarted = yield* Deferred.make<void>();
+					const releaseFirst = yield* Deferred.make<void>();
+					const server = yield* connect(
+						(payload) =>
+							payload.sessionId === "first"
+								? Deferred.succeed(firstStarted, undefined).pipe(
+										Effect.andThen(Deferred.await(releaseFirst)),
+									)
+								: Effect.sleep("30 millis"),
+						{ concurrency: 1 },
+					);
 					yield* server.submit("1", "first");
+					yield* Deferred.await(firstStarted);
 					yield* server.submit("2", "second");
+					expect(yield* Queue.take(server.received)).toBe("1");
+					expect(yield* Queue.take(server.received)).toBe("2");
+					// Start the measured hold only after the second request has arrived.
+					yield* Effect.sleep("30 millis");
+					yield* Deferred.succeed(releaseFirst, undefined);
 					const first = yield* Queue.take(server.warnings);
 					const second = yield* Queue.take(server.warnings);
 					expect(first["requestId"]).toBe("1");

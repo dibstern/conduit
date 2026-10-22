@@ -21,6 +21,7 @@ import {
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
+import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import type { SDKMessage } from "../../../src/lib/provider/claude/types.js";
 import type { OpenCodeRecording } from "../../e2e/fixtures/recorded/types.js";
 import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";
@@ -120,31 +121,44 @@ describe("Integration: OpenCode compaction through the relay", () => {
 	let harness: RelayHarness | undefined;
 
 	beforeEach(() => {
+		// Use the built-in fallback catalogue without launching a real Claude query.
+		__setProbeOverrideForTesting(async () => ({
+			models: [],
+			commands: [],
+			agents: [],
+		}));
 		vi.stubGlobal("window", {
 			history: { pushState: vi.fn(), replaceState: vi.fn() },
 		});
 	});
 
 	afterEach(async ({ task }) => {
-		if (harness && task.result?.errors?.length) {
-			const events = await Effect.runPromise(
-				Effect.gen(function* () {
-					const sql = yield* SqlClient.SqlClient;
-					return yield* sql`SELECT sequence, type, data, metadata FROM events ORDER BY sequence DESC LIMIT 40`;
-				}).pipe(
-					Effect.provide(
-						SqliteClient.layer({ filename: harness.eventsDbPath }),
+		try {
+			if (harness && task.result?.errors?.length) {
+				const events = await Effect.runPromise(
+					Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						return yield* sql`SELECT sequence, type, data, metadata FROM events ORDER BY sequence DESC LIMIT 40`;
+					}).pipe(
+						Effect.provide(
+							SqliteClient.layer({ filename: harness.eventsDbPath }),
+						),
 					),
-				),
-			);
-			saveEvidence("failure-events", events);
+				);
+				saveEvidence("failure-events", events);
+			}
+		} finally {
+			try {
+				await harness?.stop();
+			} finally {
+				__setProbeOverrideForTesting(undefined);
+				harness = undefined;
+				resetChatState();
+				clearDiscoveryState();
+				openSessionForSetup(null);
+				vi.unstubAllGlobals();
+			}
 		}
-		await harness?.stop();
-		harness = undefined;
-		resetChatState();
-		clearDiscoveryState();
-		openSessionForSetup(null);
-		vi.unstubAllGlobals();
 	});
 
 	it.each([

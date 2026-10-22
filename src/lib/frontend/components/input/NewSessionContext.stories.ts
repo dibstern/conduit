@@ -28,6 +28,7 @@ function seed(
 	instanceState.instances = [
 		{
 			id: "folder-provider",
+			colorSlot: 0,
 			name: "Folder provider",
 			driver,
 			isDefault: true,
@@ -377,15 +378,19 @@ export const ExistingWorktreeList: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement.ownerDocument.body);
 		await userEvent.click(canvas.getByTestId("draft-start-chip"));
-		await userEvent.click(
-			canvas.getByRole("menuitem", { name: "Existing worktree" }),
-		);
+		const existing = canvas.getByRole("menuitem", {
+			name: "Existing worktree",
+		});
+		await userEvent.click(existing);
 		await expect(
 			await canvas.findByRole("menuitemradio", { name: /feature\/draft/ }),
 		).toHaveTextContent("/src/app-draft");
 		await expect(
 			canvas.getByRole("menuitemradio", { name: /feature\/docs/ }),
 		).toHaveTextContent("/src/docs-draft");
+		// Keep focus on the command after its asynchronous choices register.
+		existing.focus();
+		await expect(existing).toHaveFocus();
 	},
 };
 

@@ -687,6 +687,7 @@ async function main(): Promise<void> {
 							// Keep a caller alive beyond relay disposal to prove a removed
 							// generation's held permit cannot block its replacement.
 							const hold = workspace.value.withLaunch(
+								request.sessionId,
 								Effect.gen(function* () {
 									writeFileSync(`${gate}-started`, "held");
 									while (!existsSync(`${gate}-release`))
@@ -1444,7 +1445,12 @@ async function main(): Promise<void> {
 		opencodeUrl:
 			process.env["CONDUIT_TEST_OPENCODE_URL"] ?? "http://127.0.0.1:0",
 		keepAwake: false,
-		logLevel: process.env["LOG_LEVEL"] === "warn" ? "warn" : "error",
+		logLevel:
+			process.env["LOG_LEVEL"] === "info"
+				? "info"
+				: process.env["LOG_LEVEL"] === "warn"
+					? "warn"
+					: "error",
 	});
 	daemon = activeDaemon;
 	if (disconnected) {

@@ -47,9 +47,7 @@
 		}
 	});
 
-	const resultErrorClass = $derived(
-		message.isError ? "border-error/30 text-error" : "",
-	);
+	const resultErrorClass = $derived(message.isError ? "text-error" : "text-text-secondary");
 
 	// Tool input summary (subtitle + tags)
 	const toolSummary = $derived(
@@ -60,6 +58,7 @@
 	);
 
 	const bashCommand = $derived(toolCommand(message));
+	const hasLiveOutput = $derived(typeof message.metadata?.['output'] === "string");
 	const movedToBackground = $derived(message.metadata?.['movedToBackground'] === true);
 	const cursorDetail = $derived(typeof message.metadata?.['cursorToolType'] === "string" && (message.metadata['fileChange'] || message.metadata['plan'] || message.metadata['computerUse'] || message.metadata['media'] || message.metadata['output'] !== undefined || ensureCanonical(message.name, message.input).tool === "Unknown"));
 
@@ -83,12 +82,12 @@
 		{expanded} onToggle={handleToggle} class="tool-header">
 	<span class="tool-status-icon shrink-0 text-text-dimmer"><Icon name={icon} size={14} /></span>
 
-	<span class="tool-name shrink-0 text-[13px] font-semibold text-text-secondary select-text">
+	<span class="tool-name shrink-0 text-[12.5px] font-normal text-text-muted select-text">
 		{toolVerb(message, running ? "present" : "past")}
 	</span>
 
 	<span
-		class="tool-desc flex-1 min-w-0 truncate font-mono text-[12.5px] text-text-secondary select-text"
+		class="tool-desc flex-1 min-w-0 truncate font-mono text-mono-code text-text-dimmer select-text"
 	>
 		{descText}
 	</span>
@@ -100,7 +99,7 @@
 			<Badge variant="tag" size="sm" class="font-mono select-text">{tag}</Badge>
 		{/each}
 	{/if}
-	{#if duration !== undefined}<time class="ml-auto shrink-0 font-mono text-[12px] text-text-dimmer">{fmtDuration(duration)}</time>{/if}
+	{#if duration !== undefined}<time class="ml-auto shrink-0 font-mono text-mono-time text-text-dimmer">{fmtDuration(duration)}</time>{/if}
 	{#if running}<BlockGrid cols={4} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
 	{:else if message.status === "error" || message.isError}<span class="shrink-0 text-error"><Icon name="circle-alert" size={12} /></span>{/if}
 	</Disclosure>
@@ -113,15 +112,15 @@
 	</div>
 	{/if}
 
-	{#if expanded && (message.result || bashCommand || cursorDetail)}
-		<ToolFullDetail {message} {...loadDetails && { load: loadDetails }} class="mx-2.5 mt-1 mb-1">
+	{#if expanded && (message.result || bashCommand || hasLiveOutput || cursorDetail)}
+		<ToolFullDetail {message} {...loadDetails && { load: loadDetails }} class="ml-[22px] mr-[4px] mt-1 mb-1">
 			{#snippet children(tool)}
 				{@const command = toolCommand(tool)}
 				<Surface
-					variant="inset"
+					variant="bare"
 					padding="md"
 					radius="md"
-					class="tool-result font-mono text-[12px] leading-[1.6] whitespace-pre-wrap break-all my-[4px] text-text-secondary max-h-[200px] overflow-y-auto select-text {resultErrorClass}"
+					class="tool-result bg-code-bg font-mono text-mono-xs leading-[1.6] whitespace-pre-wrap break-all my-[4px] max-h-[200px] overflow-y-auto select-text {resultErrorClass}"
 				>
 					{#if command}<span class="text-text-muted">$ {command}</span>{#if tool.result}{"\n\n"}{/if}{/if}{#if tool.result}{tool.result}{/if}
 				</Surface>

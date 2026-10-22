@@ -11,7 +11,7 @@
 
 {#if createdAt != null}
 	<time
-		class="text-[12px] font-mono font-normal tabular-nums text-text-dimmer shrink-0"
+		class="text-mono-xs font-mono font-normal tabular-nums text-text-dimmer shrink-0"
 		datetime={new Date(createdAt).toISOString()}>{formatClockTime(createdAt)}</time
 	>
 {/if}

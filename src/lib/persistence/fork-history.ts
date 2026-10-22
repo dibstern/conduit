@@ -165,7 +165,7 @@ export const readForkSource = Effect.fn("fork.readForkSource")(function* (
 					reason:
 						at.messageId !== undefined
 							? "message_not_found"
-							: at.sideThread
+							: at.sideThread && messages.length > 0
 								? "no_completed_turn"
 								: "no_transcript",
 					...(at.messageId !== undefined && { messageId: at.messageId }),

@@ -19,7 +19,6 @@ export const sessionPresentationHandlers: StepHandler[] = [
 				"session-skills-chip",
 				"side-threads-control",
 				"session-bar-settle",
-				"session-bar-title-menu",
 				"session-bar-unread-chip",
 				"session-bar-state-chip",
 				"session-goal-subtitle",
@@ -156,6 +155,29 @@ export const sessionPresentationHandlers: StepHandler[] = [
 			const sign = match[1] === "up" ? -1 : 1;
 			await world.page.locator("#messages").hover();
 			await world.page.mouse.wheel(0, sign * Number(match[2]));
+		},
+	},
+	// DEBUG-touch7: temporary real-touch swipe, remove after diagnosis.
+	{
+		name: "DEBUG-touch7 swipe transcript",
+		match:
+			/^DEBUG I swipe the transcript towards (older|newer) by ([0-9]+) pixels(?: at speed ([0-9]+))?$/,
+		run: async ({ world, match }) => {
+			const box = await world.page.locator("#messages").boundingBox();
+			if (!box) throw new Error("no #messages box");
+			const cdp = await world.page.context().newCDPSession(world.page);
+			await cdp.send("Emulation.setTouchEmulationEnabled", {
+				enabled: true,
+				maxTouchPoints: 1,
+			});
+			await cdp.send("Input.synthesizeScrollGesture", {
+				x: box.x + box.width / 2,
+				y: box.y + box.height / 2,
+				yDistance: (match[1] === "older" ? 1 : -1) * Number(match[2]),
+				gestureSourceType: "touch",
+				speed: Number(match[3] ?? 800),
+			});
+			await world.page.waitForTimeout(400);
 		},
 	},
 	{
@@ -606,6 +628,17 @@ export const sessionPresentationHandlers: StepHandler[] = [
 			) {
 				throw new Error(`desktop overflow actions: ${JSON.stringify(actions)}`);
 			}
+			const resumeLabel = menu.getByText("Copy resume", { exact: true });
+			await expect(resumeLabel).toBeVisible();
+			await expect
+				.poll(() =>
+					resumeLabel.evaluate(
+						(label) =>
+							label.scrollWidth <= label.clientWidth &&
+							label.scrollHeight <= label.clientHeight,
+					),
+				)
+				.toBe(true);
 		},
 	},
 	{
@@ -625,6 +658,40 @@ export const sessionPresentationHandlers: StepHandler[] = [
 			await world.page
 				.locator("#sidebar-panel-sessions")
 				.waitFor({ state: "visible" });
+		},
+	},
+	{
+		name: "phone session list settings cog",
+		match: /^the phone session list has a 44 pixel Settings cog$/,
+		run: async ({ world }) => {
+			const settings = world.page.getByTestId("list-bar-settings");
+			await expect(settings).toBeVisible();
+			await expect(settings).toHaveAccessibleName("Settings");
+			await expect(settings).toHaveAttribute("title", "Settings");
+			await expect(settings.locator(".lucide-settings")).toBeVisible();
+			const bounds = await settings.boundingBox();
+			expect(bounds?.width).toBe(44);
+			expect(bounds?.height).toBe(44);
+		},
+	},
+	{
+		name: "tap phone session list settings cog",
+		match: /^I tap the phone session list Settings cog$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("list-bar-settings").click();
+		},
+	},
+	{
+		name: "settings section list is open",
+		match: /^settings opens at the section list$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByRole("dialog", { name: "Settings" }),
+			).toBeVisible();
+			await expect(world.page.getByTestId("avatar-change-root")).toBeVisible();
+			await expect(world.page.getByTestId("settings-close-btn")).toHaveText(
+				"Done",
+			);
 		},
 	},
 	{

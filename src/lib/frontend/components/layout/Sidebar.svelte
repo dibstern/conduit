@@ -3,6 +3,7 @@
 
 <script lang="ts">
 	import Button from "../ui/Button.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import SessionList from "../session/SessionList.svelte";
 	import {
 		uiState,
@@ -15,11 +16,7 @@
 	import type { SaveProjectResponse } from "../../transport/ws-rpc.js";
 	import { selection } from "../../stores/selection.svelte.js";
 	import { sessionList } from "../../stores/session-list.svelte.js";
-	import { featureFlags } from "../../stores/feature-flags.svelte.js";
-	import Menu from "../ui/Menu.svelte";
-	import MenuItem from "../ui/MenuItem.svelte";
-	import MenuSeparator from "../ui/MenuSeparator.svelte";
-	import { openSettings, toggleDebugPanel } from "./chrome-actions.js";
+	import { openSettings } from "./chrome-actions.js";
 	import Banners from "../overlays/Banners.svelte";
 	import UsageFooterMeter from "./UsageFooterMeter.svelte";
 
@@ -27,7 +24,6 @@
 	let { listScreen = false }: { listScreen?: boolean } = $props();
 
 	let addProjectOpen = $state(false);
-	let listMenuOpen = $state(false);
 	let phoneUsageHeight = $state(0);
 
 	function handleCloseSidebar() {
@@ -71,9 +67,13 @@
 </script>
 
 {#snippet title()}
-	<h1 class="m-0 flex min-w-0 items-baseline gap-[7px] {sessionViewState.compact ? 'text-[22px] font-bold' : 'text-[14px] font-semibold'} tracking-[-0.01em] text-text font-sans" data-testid="list-bar-title">
-		Sessions
-		<span class="font-mono text-[12px] font-normal tabular-nums text-text-dimmer" data-testid="list-bar-count">{openCount}</span>
+	<!-- Paint above the phone's fixed top-edge colour strip, like the header controls. -->
+	<h1 class="relative m-0 flex min-w-0 items-center {sessionViewState.compact ? 'gap-[10px] text-[22px] font-bold' : 'gap-[8px] text-[14px] font-semibold'} tracking-[-0.01em] text-text font-sans" data-testid="list-bar-title">
+		<ConduitMark size={sessionViewState.compact ? "md" : "sm"} data-testid="list-bar-mark" />
+		<span class="flex min-w-0 items-baseline gap-[7px]">
+			<span class="truncate">Sessions</span>
+			<span class="shrink-0 font-mono text-[12px] font-normal tabular-nums text-text-dimmer" data-testid="list-bar-count">{openCount}</span>
+		</span>
 	</h1>
 {/snippet}
 
@@ -114,54 +114,26 @@
 			onclick={handleNewSession}
 		/>
 		{#if sessionViewState.compact}
-			<Menu
-				bind:open={listMenuOpen}
-				ariaLabel="More actions"
-				align="end"
-				data-testid="list-bar-overflow-menu"
-			>
-				{#snippet trigger({ props })}
-					<Button
-						{...props}
-						id="list-bar-more"
-						variant="toolbar"
-						size="content"
-						iconOnly
-						icon="ellipsis"
-						iconSize={17}
-						class="size-[44px] shrink-0 rounded-[8px]"
-						title="More actions"
-						ariaLabel="More actions"
-						data-testid="list-bar-overflow"
-					/>
-				{/snippet}
-				<MenuItem
-					title="Settings"
-					data-testid="list-overflow-settings"
-					class="min-h-[44px] md:min-h-0"
-					onselect={() => openSettings()}
-				>
-					Settings
-				</MenuItem>
-				{#if featureFlags.debug}
-					<MenuSeparator />
-					<MenuItem
-						title="Toggle debug panel"
-						data-testid="list-overflow-debug"
-						class="min-h-[44px] md:min-h-0"
-						onselect={toggleDebugPanel}
-					>
-						Debug panel
-					</MenuItem>
-				{/if}
-			</Menu>
+			<Button
+				id="list-bar-settings"
+				variant="toolbar"
+				size="content"
+				iconOnly
+				icon="settings"
+				iconSize={17}
+				class="size-[44px] shrink-0 rounded-[8px]"
+				title="Settings"
+				ariaLabel="Settings"
+				data-testid="list-bar-settings"
+				onclick={() => openSettings()}
+			/>
 		{:else}
 			<Button
 				id="sidebar-toggle-btn"
 				variant="toolbar"
 				size="content"
 				iconOnly
-				icon="panel-left-close"
+				icon="panel-left"
 				iconSize={18}
 				class="size-[28px] shrink-0 rounded-[8px]"
 				title="Close sidebar"
@@ -210,5 +182,8 @@
 	/* With no usage dock to take the home-indicator inset, the list clears it. */
 	.clears-home-indicator :global(#session-list-scroller) {
 		padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+	}
+	.clears-home-indicator :global([data-testid="select-bar"]) {
+		padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
 	}
 </style>

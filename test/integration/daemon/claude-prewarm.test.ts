@@ -2,13 +2,24 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { it as effectIt } from "@effect/vitest";
 import Database from "better-sqlite3";
-import { Effect, Result as Either } from "effect";
+import { Effect, Result as Either, Layer } from "effect";
+import { TestClock } from "effect/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	defaultDaemonConfig,
 	loadDaemonConfigResult,
 } from "../../../src/lib/daemon/config-persistence.js";
+import {
+	DraftPreWarmLive,
+	DraftPreWarmTag,
+	draftLaunchKey,
+} from "../../../src/lib/domain/relay/Services/draft-prewarm.js";
+import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
+import { createLogger } from "../../../src/lib/logger.js";
+import { ProviderRegistryLive } from "../../../src/lib/provider/provider-registry.js";
+import type { PreWarmSessionInput } from "../../../src/lib/provider/types.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
 import {
@@ -105,7 +116,7 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		persistedModels?: ReturnType<typeof durableCounts>["models"];
 		sharedProbeAttempts?: number;
 	}> = [];
-	afterEach(async (context) => {
+	afterEach(async ({ task }) => {
 		const cleanup: Array<{ pid: number; alive: boolean }> = [];
 		const sdk: Array<
 			{ root: string; marks: ProcessMark[] } | { root: string; error: string }
@@ -137,9 +148,9 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			}
 		} finally {
 			evidence.push({
-				name: context.task.name,
+				name: task.name,
 				assertionErrors:
-					context.task.result?.errors?.map((error) => error.message) ?? [],
+					task.result?.errors?.map((error) => error.message) ?? [],
 				harnesses: harnesses.map((harness) => harness.proof()),
 				cleanup,
 				sdk,
@@ -350,51 +361,84 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		expect(sessionId).not.toBe(runner.sessionId);
 	});
 
-	it("draft pre-warm refresh extends expiry without starting another query or runner", async () => {
-		const ttl = 6000;
-		const { harness, browser } = await start({ draftPreWarmTtlMs: ttl });
-		const draftId = randomUUID();
-		const sleepUntil = (at: number) =>
-			new Promise<void>((done) =>
-				setTimeout(done, Math.max(0, at - Date.now())),
-			);
-		// The reservation lands between sending the first warm and its reply.
-		const reservedAfter = Date.now();
-		await browser.preWarmDraft(draftId);
-		const reservedBefore = Date.now();
-		expect(
-			reservedBefore - reservedAfter,
-			"warm too slow to refresh inside the TTL",
-		).toBeLessThan(ttl - 1500);
-		await vi.waitFor(
-			() =>
-				expect(
-					harness.marks.filter((mark) => mark.kind === "initialization-ready"),
-				).toHaveLength(1),
-			{ timeout: 5000 },
-		);
-		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
-		if (runner?.kind !== "runner-started")
-			throw new Error("Missing refreshable draft runner");
-		// Refresh before the earliest original expiry, then check after the latest one.
-		await sleepUntil(reservedBefore + 1000);
-		await browser.preWarmDraft(draftId);
-		await sleepUntil(reservedBefore + ttl + 500);
-		expect(alive(runner.pid)).toBe(true);
-		expect(
-			harness.marks.filter((mark) => mark.kind === "runner-started"),
-		).toHaveLength(1);
-		expect(harness.marks.filter((mark) => mark.kind === "query")).toHaveLength(
-			1,
-		);
-		const sessionId = await browser.createSession(
-			"Refreshed draft",
-			undefined,
-			"claude",
-			{ draftId },
-		);
-		expect(sessionId).toBe(runner.sessionId);
-	});
+	// Failure cases: the original timer survives refresh, refresh starts another
+	// warm, or adoption loses the reserved session after the original deadline.
+	effectIt.effect(
+		"draft pre-warm refresh extends expiry without starting another query or runner",
+		() =>
+			Effect.gen(function* () {
+				vi.stubEnv("CONDUIT_TEST_DRAFT_PREWARM_TTL_MS", "6000");
+				yield* Effect.addFinalizer(() => Effect.sync(() => vi.unstubAllEnvs()));
+				const wallClock = vi.spyOn(Date, "now").mockReturnValue(0);
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => wallClock.mockRestore()),
+				);
+				const warmed: PreWarmSessionInput[] = [];
+				const ended: string[] = [];
+				const input = {
+					workspaceRoot: "/project",
+					extraFolders: [],
+					providerState: {},
+				};
+				yield* Effect.gen(function* () {
+					const drafts = yield* DraftPreWarmTag;
+					yield* drafts.warm(
+						"origin",
+						"draft",
+						"project",
+						Effect.succeed(input),
+					);
+					wallClock.mockReturnValue(1000);
+					yield* TestClock.adjust(1000);
+					yield* drafts.warm(
+						"origin",
+						"draft",
+						"project",
+						Effect.succeed(input),
+					);
+					wallClock.mockReturnValue(6500);
+					yield* TestClock.adjust(5500);
+					expect(ended).toEqual([]);
+					expect(warmed).toHaveLength(1);
+					expect(
+						yield* drafts.take("origin", "draft", draftLaunchKey(input)),
+					).toBe(warmed[0]?.sessionId);
+				}).pipe(
+					Effect.provide(
+						DraftPreWarmLive.pipe(
+							Layer.provide(
+								Layer.mergeAll(
+									ProviderRegistryLive([
+										{
+											providerId: "claude",
+											discoverEffect: () =>
+												Effect.die("Pre-warm must not discover"),
+											generateTextEffect: () =>
+												Effect.die("Pre-warm must not generate text"),
+											sendTurnEffect: () =>
+												Effect.die("Pre-warm must not send"),
+											preWarmSessionEffect: (request) =>
+												Effect.sync(() => {
+													warmed.push(request);
+												}),
+											interruptTurnEffect: () => Effect.void,
+											resolvePermissionEffect: () => Effect.void,
+											resolveQuestionEffect: () => Effect.void,
+											endSessionEffect: (sessionId) =>
+												Effect.sync(() => {
+													ended.push(sessionId);
+												}),
+											shutdownEffect: () => Effect.void,
+										},
+									]),
+									Layer.succeed(LoggerTag, createLogger("draft-prewarm-test")),
+								),
+							),
+						),
+					),
+				);
+			}),
+	);
 
 	it("draft pre-warm evicts the least recently refreshed reservation when a ninth origin warms", async () => {
 		const { harness, browser } = await start();
@@ -562,13 +606,13 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		);
 		expect(otherId).not.toBe(runner.sessionId);
 		expect(alive(runner.pid)).toBe(true);
-		// The warm reservation is origin-local, but CreateSession's draft claim
-		// is shared across devices (d3c3661c). The losing origin discards its warm.
+		// The warm reservation is origin-local, but the draft claim is shared.
 		await expect(
 			browser.createSession("Owning origin", undefined, "claude", { draftId }),
 		).rejects.toMatchObject({ _tag: "DraftAlreadySent", draftId });
-		await vi.waitFor(() => expect(alive(runner.pid)).toBe(false), {
-			timeout: 5000,
+		await vi.waitFor(() => {
+			expect(alive(runner.pid)).toBe(false);
+			expect(existsSync(runner.socketPath)).toBe(false);
 		});
 		expect(durableCounts(harness, runner.sessionId).status).toBeUndefined();
 		expect(durableCounts(harness, otherId).status).toEqual({ status: "idle" });

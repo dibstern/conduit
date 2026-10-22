@@ -37,13 +37,25 @@ async function connectRpc(relayPort: number) {
 	};
 }
 
-function lastMessageAt(harness: ReplayHarness, sessionId: string): number {
+function lastActivityAt(harness: ReplayHarness, sessionId: string): number {
 	const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
 	try {
-		return Number(
-			db
-				.prepare("SELECT last_message_at FROM sessions WHERE id = ?")
-				.get(sessionId)?.["last_message_at"],
+		const session = db
+			.prepare("SELECT last_message_at FROM sessions WHERE id = ?")
+			.get(sessionId);
+		const turn = db
+			.prepare(
+				`SELECT requested_at, started_at, completed_at FROM turns
+				WHERE session_id = ? ORDER BY requested_at DESC, rowid DESC LIMIT 1`,
+			)
+			.get(sessionId);
+		return Math.max(
+			...[
+				session?.["last_message_at"],
+				turn?.["requested_at"],
+				turn?.["started_at"],
+				turn?.["completed_at"],
+			].map((at) => (typeof at === "number" ? at : Number.NEGATIVE_INFINITY)),
 		);
 	} finally {
 		db.close();
@@ -109,19 +121,18 @@ test("the auto-settle outlook reads the same with or without a viewer", async ({
 
 		// An unread reply holds settlement back; reading it lets the clock run.
 		await Effect.runPromise(client.MarkSessionRead({ sessionId }));
-		// The replayed provider restamps the turn with its recorded, long-past
-		// times a moment after the reply, leaving the last message as the
-		// session's last activity.
-		const at = lastMessageAt(harness, sessionId) + IDLE_WINDOW_MS;
+		// Owned turn completion may be newer than the last recorded message.
+		const at = lastActivityAt(harness, sessionId) + IDLE_WINDOW_MS;
 		const scheduled = { kind: "scheduled", at };
 		await expect.poll(read).toEqual(scheduled);
 		await page.setViewportSize({ width: 393, height: 852 });
 		await page.getByTestId("session-bar-island-overflow").click();
+		const formattedAt = await page.evaluate(formatSnoozeTime, at);
 		await expect(
 			page
 				.getByTestId("session-ctx-auto-settle")
 				.locator("[data-switch-status]"),
-		).toHaveText(`On · settles ${formatSnoozeTime(at)} if left idle`);
+		).toHaveText(`On · settles ${formattedAt} if left idle`);
 		await page.getByTestId("session-sheet-close").click();
 		// The open page holds the sweep back, but not the outlook.
 		expect(await sweep(at + 1)).toBe(0);
@@ -256,7 +267,7 @@ test.describe("phone session state chip", () => {
 		const autoSettle = page.getByTestId("session-bar-auto-settle");
 		await expect(autoSettle).toHaveAttribute("aria-checked", "true");
 		await autoSettle.click();
-		await chip.click();
+		await expect(autoSettle).toBeVisible();
 		await expect(autoSettle).toHaveAttribute("aria-checked", "false");
 		await page.keyboard.press("Escape");
 		await page.getByTestId("session-bar-back").click();

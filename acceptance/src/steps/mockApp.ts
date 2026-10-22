@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import { Schema } from "effect";
+import { nextAccountColorSlot } from "../../../src/lib/account-directory.js";
 import type { ClaudeSettingsOverrides } from "../../../src/lib/contracts/claude-settings.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/message-surfacing.js";
 import {
@@ -284,7 +285,8 @@ export const mockAppHandlers: StepHandler[] = [
 				if (!entry) throw new Error(`Unknown mock Harness: ${label}`);
 				return entry;
 			});
-			const instances = configured.map(([name, driver]) => ({
+			const instances = configured.map(([name, driver], colorSlot) => ({
+				colorSlot,
 				id: driver,
 				name,
 				driver,
@@ -580,6 +582,7 @@ export const mockAppHandlers: StepHandler[] = [
 					id: "claude",
 					name: "Claude",
 					driver: "claude",
+					colorSlot: 0,
 					isDefault: true,
 					usageEligible: true,
 					port: 0,
@@ -592,6 +595,7 @@ export const mockAppHandlers: StepHandler[] = [
 					id: "opencode",
 					name: "OpenCode",
 					driver: "opencode",
+					colorSlot: 3,
 					isDefault: true,
 					port: 4096,
 					managed: true,
@@ -607,9 +611,6 @@ export const mockAppHandlers: StepHandler[] = [
 			 *  GetAgents afterwards returns that harness's agents (mirrors the
 			 *  real server, where the created session is bound to the instance). */
 			let createdSessionInstance: string | undefined;
-			/** Drafts the composer synced, returned when the session is viewed
-			 *  again, the way the daemon restores a draft across a reload. */
-			const syncedDrafts = new Map<string, string>();
 			const sessionInstance = (sessionId: string | undefined) => {
 				const row = rpcControls
 					.get(page)
@@ -682,10 +683,6 @@ export const mockAppHandlers: StepHandler[] = [
 						return next;
 					},
 					ResolveSession: async () => ({ projectSlug: "myapp" }),
-					ViewSession: async ({ sessionId }) => ({
-						ok: true,
-						draft: syncedDrafts.get(String(sessionId)),
-					}),
 					CreateSession: async (payload) => {
 						await new Promise((resolve) =>
 							setTimeout(resolve, createSessionDelays.get(page) ?? 0),
@@ -709,26 +706,6 @@ export const mockAppHandlers: StepHandler[] = [
 						sessionId,
 						...mockDetailPage(page, sessionId, before),
 					}),
-					"input.submit": async ({ sessionId }) => {
-						syncedDrafts.delete(String(sessionId));
-						return {
-							ok: true,
-							sessionId,
-							handedOff: true,
-						};
-					},
-					SyncInputDraft: async ({ key, text, originId }) => {
-						const id = "session" in key ? key.session : key.draft;
-						if (text) syncedDrafts.set(id, text);
-						else syncedDrafts.delete(id);
-						// A reload restores the draft from SubscribeInputDraft, so persist it
-						// there too, as the default mock handler does.
-						rpcControls.get(page)?.sendInputDraft(key, {
-							text,
-							...(originId !== undefined && { from: originId }),
-						});
-						return { ok: true };
-					},
 					SetDefaultPermissionMode: async (payload) => ({
 						projectSlug: "myapp",
 						mode: payload["mode"],
@@ -860,6 +837,14 @@ export const mockAppHandlers: StepHandler[] = [
 						const inst: Record<string, unknown> = {
 							id: instanceSlug(name),
 							name,
+							colorSlot: nextAccountColorSlot(
+								list.map((instance) => ({
+									colorSlot:
+										typeof instance["colorSlot"] === "number"
+											? instance["colorSlot"]
+											: undefined,
+								})),
+							),
 							port: typeof payload["port"] === "number" ? payload["port"] : 0,
 							managed: payload["managed"] === true,
 							status: "healthy",

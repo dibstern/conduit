@@ -66,16 +66,14 @@ const terminalKey = (page: Page, name: string) =>
 	keys(page).getByRole("button", { name, exact: true });
 
 async function openSettings(page: Page): Promise<void> {
-	const listOverflow = page.getByTestId("list-bar-overflow");
-	const titleMenu = page.getByTestId("session-bar-title-menu");
-	if (await listOverflow.isVisible()) {
-		await listOverflow.click();
-		await page.getByTestId("list-overflow-settings").click();
-	} else if (await titleMenu.isVisible()) {
-		await titleMenu.click();
-		await page.getByTestId("session-title-settings").click();
+	const listSettings = page.getByTestId("list-bar-settings");
+	if (await listSettings.isVisible()) {
+		await listSettings.click();
 	} else {
-		await page.getByTestId("session-bar-overflow").click();
+		await page
+			.getByTestId("session-bar-overflow")
+			.or(page.getByTestId("session-bar-island-overflow"))
+			.click();
 		await page.getByTestId("overflow-settings").click();
 	}
 	await expect(page.locator("#settings-panel")).toBeVisible();
@@ -553,6 +551,7 @@ test.describe("Phone row", () => {
 	}
 
 	async function closePhoneSettings(page: Page) {
+		await tap(page, page.getByTestId("settings-back-btn"));
 		await tap(page, page.getByTestId("settings-close-btn"));
 		await expect(page.locator("#settings-panel")).toHaveCount(0);
 		await textarea(page).focus();

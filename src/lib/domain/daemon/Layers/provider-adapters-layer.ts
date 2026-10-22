@@ -32,6 +32,7 @@ import { ClaudeDriver } from "../../../provider/claude/claude-provider-instance.
 import type { ClaudeProviderInstanceDeps } from "../../../provider/claude/claude-provider-runtime.js";
 import { makeClaudeThreadRead } from "../../../provider/claude/claude-thread-read.js";
 import type { ClaudeThreadReadResult } from "../../../provider/claude/types.js";
+import { makeCodexProviderRuntime } from "../../../provider/codex/codex-provider-runtime.js";
 import { makeCursorProviderRuntime } from "../../../provider/cursor/cursor-provider-runtime.js";
 import { OpenCodeDriver } from "../../../provider/opencode-provider-instance.js";
 import type { ProviderCallRequest } from "../../../provider/orchestration-engine.js";
@@ -416,6 +417,21 @@ export const makeProviderAdaptersLive = (
 					{ read, state },
 				),
 			);
+			registry.registerInstance(
+				yield* makeCodexProviderRuntime(
+					{
+						daemonConfigDir: configDir,
+						accounts: accounts.snapshot,
+						autoSettleAfterDays: Ref.get(configRef).pipe(
+							Effect.map((config) => config.autoSettleAfterDays),
+						),
+						projectRootForSession,
+						recoveryForSession,
+						persistUserMessage,
+					},
+					{ read, state, sql },
+				),
+			);
 			const configuredAccounts = yield* accounts.snapshot;
 			// A crash can leave admitted work without a runner registration, even
 			// after its account was removed. Those projects also lend recovery state.
@@ -423,6 +439,7 @@ export const makeProviderAdaptersLive = (
 				...new Set([
 					"claude",
 					"cursor",
+					"codex",
 					MANAGED_OPENCODE_ACCOUNT_ID,
 					...configuredAccounts.accounts.map((account) => account.id),
 					...configuredAccounts.deleted.map((account) => account.id),

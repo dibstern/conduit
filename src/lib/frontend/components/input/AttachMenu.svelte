@@ -59,11 +59,11 @@
 			{...props}
 			variant="ghost"
 			size="composer-icon"
-			tone="inherit"
+			tone="secondary"
 			hoverFill="surface"
 			iconOnly
 			icon="plus"
-			iconSize={18}
+			iconSize={16}
 			touchTarget
 			id="attach-btn"
 			type="button"

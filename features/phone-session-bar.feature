@@ -43,6 +43,107 @@ Scenario: Back returns to the session list
   And the conduit app is served with the long-transcript mockup
   When I tap back to the session list
   Then the session list is open
+  And the phone session list has a 44 pixel Settings cog
+  When I tap the phone session list Settings cog
+  Then settings opens at the section list
+
+Scenario Outline: Settling the open phone session returns to the list only after success
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  And the phone session sheet state is idle
+  And the settle reply is held as success
+  When I settle the open session using <entry>
+  Then the viewed session stays open
+  When the held settle reply is released
+  Then the session list is open
+
+Examples:
+  | entry          |
+  | header         |
+  | overflow       |
+  | shortcut       |
+  | transcript key |
+
+Scenario Outline: A failed settle keeps the open phone session
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  And the phone session sheet state is idle
+  And the settle reply is held as failure
+  When I settle the open session using <entry>
+  Then the viewed session stays open
+  When the held settle reply is released
+  Then the viewed session stays open
+  And settling shows the relay error
+
+Examples:
+  | entry          |
+  | header         |
+  | overflow       |
+  | shortcut       |
+  | transcript key |
+
+Scenario Outline: Settling the open desktop session returns to the list only after success
+  Given the conduit app is served with the long-transcript mockup
+  And the phone session sheet state is idle
+  And the settle reply is held as success
+  When I settle the open session using <entry>
+  Then the viewed session stays open
+  When the held settle reply is released
+  Then the session list is open
+
+Examples:
+  | entry          |
+  | header         |
+  | overflow       |
+  | shortcut       |
+  | transcript key |
+
+Scenario: A delayed settle never leaves a newer phone session
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  And the phone session sheet state is idle
+  And the settle reply is held as success
+  When I settle the open session using header
+  And I open another session while settling
+  And the held settle reply is released
+  Then the viewed session stays open
+
+Scenario Outline: Settling another sidebar session keeps the viewed session open
+  Given the conduit app is served with the long-transcript mockup
+  And the settle reply is held as success
+  When I settle another session using the <entry>
+  And the held settle reply is released
+  Then the viewed session stays open
+
+Examples:
+  | entry    |
+  | row key  |
+  | bulk bar |
+
+Scenario Outline: Settling another phone list session stays in the list
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  And the settle reply is held as success
+  When I tap back to the session list
+  And I settle another session using the <entry>
+  And the held settle reply is released
+  Then the session list is open
+  And no session sheet is open
+
+Examples:
+  | entry          |
+  | phone sheet    |
+  | phone bulk bar |
+
+Scenario: Settling from the phone list keeps a session opened before the reply
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  And the settle reply is held as success
+  When I tap back to the session list
+  And I settle another session using the phone sheet
+  And I open the settling session before the reply
+  And the held settle reply is released
+  Then the viewed session stays open
 
 Scenario: Switching to terminal from the session bar shows the terminal
   Given the viewport is a phone
@@ -107,7 +208,6 @@ Scenario Outline: Every phone session sheet omits an unknown branch
 Examples:
   | entry    |
   | overflow |
-  | chevron  |
   | list     |
 
 # The collapse is a walk through the state machine rather than four separate
@@ -231,7 +331,7 @@ Scenario Outline: Phone session sheets show the shared body for every session st
   And the conduit app is served with the long-transcript mockup
   And the phone session sheet state is <state>
   When I open the overflow session sheet
-  Then the session sheet has the shared grids and 4 Session tiles
+  Then the session sheet has the shared grids and 5 Session tiles
   And the session sheet displays the <state> commands
   And the session sheet footer is overflow with Debug off
   And the auto-settle status line is <line>
@@ -239,8 +339,8 @@ Scenario Outline: Phone session sheets show the shared body for every session st
 
 Examples:
   | state    | theme | line                               | baseline                            | threshold |
-  | idle     | dark  | On · settles Sat 9:41 AM if left idle | session-sheet-idle-dark             | 98        |
-  | idle     | light | On · settles Sat 9:41 AM if left idle | session-sheet-idle-light            | 98        |
+  | idle     | dark  | On · settles Sat 9:41 am if left idle | session-sheet-idle-dark             | 98        |
+  | idle     | light | On · settles Sat 9:41 am if left idle | session-sheet-idle-light            | 98        |
   | unread   | dark  | On · paused while unread           | session-sheet-unread-dark           | 98        |
   | unread   | light | On · paused while unread           | session-sheet-unread-light          | 98        |
   | snoozed  | dark  | On · paused while snoozed          | session-sheet-snoozed-dark          | 98        |
@@ -270,32 +370,15 @@ Examples:
   | dark  | session-sheet-disabled-reason-dark  | 98        |
   | light | session-sheet-disabled-reason-light | 98        |
 
-Scenario Outline: The title chevron sheet shares the body and Debug footer
-  Given the viewport is a phone
-  And the session sheet theme is <theme>
-  And the conduit app is served with the long-transcript mockup
-  And the phone session sheet state is idle
-  And I enable the desktop Debug action
-  When I open the chevron session sheet
-  Then the session sheet has the shared grids and 4 Session tiles
-  And the session sheet footer is chevron with Debug on
-  And the auto-settle status line is On · settles Sat 9:41 AM if left idle
-  And the session-sheet region visually matches <baseline> at <threshold> percent
-
-Examples:
-  | theme | baseline                          | threshold |
-  | dark  | session-sheet-chevron-debug-dark  | 98        |
-  | light | session-sheet-chevron-debug-light | 98        |
-
-Scenario Outline: The session list long-press sheet has five Session tiles and no footer
+Scenario Outline: The session list long-press sheet has six Session tiles and no footer
   Given the viewport is a phone
   And the session sheet theme is <theme>
   And the conduit app is served with the long-transcript mockup
   And the phone session sheet state is idle
   When I open the list session sheet
-  Then the session sheet has the shared grids and 5 Session tiles
+  Then the session sheet has the shared grids and 6 Session tiles
   And the session sheet footer is absent with Debug off
-  And the auto-settle status line is On · settles Sat 9:41 AM if left idle
+  And the auto-settle status line is On · settles Sat 9:41 am if left idle
   And the session-sheet region visually matches <baseline> at <threshold> percent
 
 Examples:

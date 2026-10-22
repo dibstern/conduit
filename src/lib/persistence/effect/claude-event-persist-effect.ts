@@ -35,6 +35,7 @@ import {
 	UnboundEventStoreEffectTag,
 } from "./event-store-effect.js";
 import { runTerminalStatus } from "./projectors-effect.js";
+import { heldCatchUpKey } from "./provider-state-effect.js";
 import { isSessionDeleted } from "./session-seeder-effect.js";
 
 export class ClaudeEventPersistEffectError extends Data.TaggedError(
@@ -67,6 +68,7 @@ export interface ClaudeEventPersistEffect {
 		handoff: SessionHandoffDeliveredPayload,
 		commandId: string,
 		projectId?: string,
+		provider?: string,
 	) => Effect.Effect<void, ClaudeEventPersistFailure>;
 
 	readonly persistEvent: (
@@ -568,7 +570,7 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 			.pipe(Effect.mapError(mapPersistError("persistEvent")));
 
 	const persistHandoffDelivered: ClaudeEventPersistEffect["persistHandoffDelivered"] =
-		(sessionId, handoff, commandId, projectId) =>
+		(sessionId, handoff, commandId, projectId, provider = "claude") =>
 			Effect.gen(function* () {
 				const mismatch = boundProjectMismatch(eventStore.projectId, projectId);
 				if (mismatch) return yield* mismatch;
@@ -578,9 +580,9 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 					sessionId,
 					handoff,
 					{
-						provider: "claude",
+						provider,
 						eventId: Schema.decodeSync(EventId)(
-							`evt_claude_handoff_delivered_${commandId}`,
+							`evt_${provider}_handoff_delivered_${commandId}`,
 						),
 					},
 				);
@@ -594,6 +596,9 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 							FROM events WHERE event_id = ${event.eventId} LIMIT 1`;
 						if (existing.length > 0) return;
 						yield* project(yield* eventStore.appendBatch([event], projectId));
+						if (handoff.instanceId)
+							yield* sql`DELETE FROM provider_state WHERE session_id = ${sessionId}
+							AND key = ${heldCatchUpKey(handoff.instanceId)}`;
 					}),
 				);
 			}).pipe(Effect.mapError(mapPersistError("persistHandoffDelivered")));

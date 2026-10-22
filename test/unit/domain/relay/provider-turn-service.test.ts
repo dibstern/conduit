@@ -527,6 +527,7 @@ describe("ProviderTurnService", () => {
 					id: AccountIdSchema.make("steering-account"),
 					name: "Steering account",
 					driver: "claude",
+					colorSlot: 0,
 					folder: configuredClaudeConfigDir("/tmp/82tn9-current-folder"),
 					usageEligible: false,
 					env: { ANTHROPIC_API_KEY: "synthetic-current-steering-key" },

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, waitFor } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import {
 	applyGetModelsResponse,
 	clearDiscoveryState,
@@ -7,7 +7,10 @@ import {
 	handleHarnessDefaults,
 	handleModelList,
 } from "../../stores/discovery.svelte.js";
-import { clearFileTreeState } from "../../stores/file-tree.svelte.js";
+import {
+	clearFileTreeState,
+	fileTreeState,
+} from "../../stores/file-tree.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
 import {
@@ -19,6 +22,7 @@ import {
 	setFilesOpen,
 	setFilesPaneWidth,
 } from "../../stores/session-view.svelte.js";
+import { setThemeMode } from "../../stores/theme.svelte.js";
 import { openFileViewer, uiState } from "../../stores/ui.svelte.js";
 import {
 	applyGetFileContentResponse,
@@ -31,6 +35,7 @@ import {
 } from "../../stories/mocks.js";
 import { connectedSocket, failRpc } from "../../stories/sockets.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
+import { loadHighlighter } from "../../utils/load-highlighter.js";
 import ChatLayout from "./ChatLayout.svelte";
 
 const claudeModel = {
@@ -180,6 +185,21 @@ export const Default: Story = {
 			// A new session starts on the project's default model.
 			expect(context.canvasElement.textContent).not.toContain("Select model");
 		});
+		if (window.innerWidth >= 768) return;
+		const body = within(context.canvasElement.ownerDocument.body);
+		const settings = body.getByTestId("list-bar-settings");
+		await expect(settings.getBoundingClientRect().width).toBe(44);
+		await expect(settings.getBoundingClientRect().height).toBe(44);
+		await userEvent.click(settings);
+		await expect(body.getByRole("dialog", { name: "Settings" })).toBeVisible();
+		await expect(body.getByTestId("avatar-change-root")).toBeVisible();
+		await userEvent.click(body.getByTestId("settings-close-btn"));
+		await waitFor(() =>
+			expect(body.queryByRole("dialog", { name: "Settings" })).toBeNull(),
+		);
+		(
+			context.canvasElement.ownerDocument.activeElement as HTMLElement | null
+		)?.blur();
 	},
 };
 
@@ -242,6 +262,42 @@ export const SidebarCollapsed: Story = {
 	play: expectSessionVisible,
 };
 
+export const PhoneTopColour: Story = {
+	...SidebarCollapsed,
+	beforeEach: () => {
+		const compact = sessionViewState.compact;
+		uiState.sidebarCollapsed = true;
+		openStorySession();
+		return () => {
+			sessionViewState.compact = compact;
+		};
+	},
+	parameters: { viewport: { defaultViewport: "mobile1" } },
+	play: async (context) => {
+		await expectSessionVisible(context);
+		sessionViewState.compact = true;
+		await waitFor(() => {
+			const strip = context.canvasElement.querySelector("#compact-top-edge");
+			const bar = context.canvasElement.querySelector("#session-bar");
+			expect(strip).not.toBeNull();
+			expect(bar).not.toBeNull();
+			if (!strip || !bar) return;
+			for (const theme of ["dark", "light"] as const) {
+				setThemeMode(theme);
+				const colour = getComputedStyle(strip).backgroundColor;
+				expect(getComputedStyle(bar).backgroundColor).toBe(colour);
+				const meta = document.querySelector<HTMLMetaElement>(
+					'meta[name="theme-color"]',
+				);
+				const resolved = new Option().style;
+				resolved.color = meta?.content ?? "";
+				expect(resolved.color).toBe(colour);
+			}
+		});
+		setThemeMode(context.globals["theme"] === "light" ? "light" : "dark");
+	},
+};
+
 /**
  * Rewind mode is activated AFTER mount, not in `beforeEach`. ChatLayout's connect
  * effect calls `resetProjectUI()`, which sets `rewindActive` back to false, so a
@@ -272,6 +328,8 @@ async function showFilesTree(
 	context: Parameters<NonNullable<Story["play"]>>[0],
 ): Promise<void> {
 	await expectSessionVisible(context);
+	// The isolated layout has no selection runtime to establish a file scope.
+	fileTreeState.scope = "storybook:test-project";
 	setFilesOpen(true);
 	// The pane mounts before its lazily imported panel, which is what listens
 	// for the listing.
@@ -302,28 +360,37 @@ export const FilesPreview: Story = {
 		openStorySession();
 	},
 	play: async (context) => {
+		await loadHighlighter();
 		await showFilesTree(context);
 		openFileViewer("src/lib/project.ts");
-		await waitFor(() => {
-			expect(
-				context.canvasElement.querySelector("#file-viewer"),
-			).not.toBeNull();
-		});
+		await waitFor(
+			() => {
+				expect(
+					context.canvasElement.querySelector("#file-viewer"),
+					"file preview mounted with its workspace scope",
+				).not.toBeNull();
+			},
+			{ timeout: 5000 },
+		);
 		applyGetFileContentResponse({
 			projectSlug: "test-project",
 			path: "src/lib/project.ts",
 			content: mockFileContent,
 		});
-		await waitFor(() => {
-			expect(
-				context.canvasElement.querySelector("#file-viewer code.hljs"),
-			).not.toBeNull();
-			expect(
-				context.canvasElement
-					.querySelector("#files-pane-title + span[title]")
-					?.getAttribute("title"),
-			).toBe("src/lib/project.ts");
-		});
+		await waitFor(
+			() => {
+				expect(
+					context.canvasElement.querySelector("#file-viewer code.hljs"),
+					"file content was received and highlighted",
+				).not.toBeNull();
+				expect(
+					context.canvasElement
+						.querySelector("#files-pane-title + span[title]")
+						?.getAttribute("title"),
+				).toBe("src/lib/project.ts");
+			},
+			{ timeout: 5000 },
+		);
 	},
 };
 

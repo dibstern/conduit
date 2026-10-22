@@ -9,6 +9,29 @@ Scenario: The default mock outlook is deterministic without scenario seeding
   Then the auto-settle status line is On · turned off for all sessions in Settings
   And the session sheet stays open with Auto-settle on
 
+Scenario: Enabling Auto-settle returns to the list when the write reports the open session settled
+  Given the conduit app is served with the long-transcript mockup
+  And the phone session sheet state is auto_off
+  And the auto-settle read returns off
+  And the auto-settle write is held as settled
+  When I open the overflow session sheet
+  And I toggle Auto-settle in the session sheet
+  Then auto-settle is saving with disabled false
+  When the held auto-settle write is released
+  Then the session list is open
+
+Scenario: Enabling Auto-settle on an already settled session keeps the sheet open
+  Given the conduit app is served with the long-transcript mockup
+  And the phone session sheet state is settled
+  And the auto-settle read returns off
+  And the auto-settle write is held as settled
+  When I open the overflow session sheet
+  And I toggle Auto-settle in the session sheet
+  Then auto-settle is saving with disabled false
+  When the held auto-settle write is released
+  Then the session sheet stays open with Auto-settle on
+  And the auto-settle status line is On · session is settled
+
 Scenario Outline: Every server outlook has exact copy
   Given the conduit app is served with the long-transcript mockup
   And the phone session sheet state is idle
@@ -28,7 +51,7 @@ Examples:
   | working           | on      | On · paused while working                    |
   | awaiting-activity | on      | On · waits for new activity                  |
   | due               | on      | On · settles shortly                         |
-  | scheduled         | on      | On · settles Sat 9:41 AM if left idle        |
+  | scheduled         | on      | On · settles Sat 9:41 am if left idle        |
 
 Scenario Outline: Loading preserves the stored flag without guessed copy
   Given the conduit app is served with the long-transcript mockup
@@ -76,8 +99,8 @@ Scenario Outline: Saving is busy and renders the write reply without closing
 
 Examples:
   | state    | before    | after     | disabled | enabled | before_line                        | after_line                         |
-  | idle     | scheduled | off       | true     | off     | On · settles Sat 9:41 AM if left idle | Off · stays until you settle it       |
-  | auto_off | off       | scheduled | false    | on      | Off · stays until you settle it       | On · settles Sat 9:41 AM if left idle |
+  | idle     | scheduled | off       | true     | off     | On · settles Sat 9:41 am if left idle | Off · stays until you settle it       |
+  | auto_off | off       | scheduled | false    | on      | Off · stays until you settle it       | On · settles Sat 9:41 am if left idle |
 
 Scenario: A read that lands while saving is dropped
   Given the conduit app is served with the long-transcript mockup
@@ -114,11 +137,11 @@ Scenario: A failed write preserves the row and shows the existing error toast
   And the auto-settle read returns scheduled
   And the auto-settle write is held as failure
   When I open the overflow session sheet
-  Then the auto-settle status line is On · settles Sat 9:41 AM if left idle
+  Then the auto-settle status line is On · settles Sat 9:41 am if left idle
   When I toggle Auto-settle in the session sheet
   Then auto-settle is saving with disabled true
   When the held auto-settle write is released
-  Then the auto-settle status line is On · settles Sat 9:41 AM if left idle
+  Then the auto-settle status line is On · settles Sat 9:41 am if left idle
   And the session sheet stays open with Auto-settle on
   And auto-settle is interactive
   And the session sheet stays open with the reason pill Couldn't change auto-settle Relay unavailable
@@ -156,7 +179,7 @@ Scenario Outline: Every phone sheet reads and saves the outlook
   And the auto-settle read returns scheduled
   And the auto-settle write is held as off
   When I open the <sheet> session sheet
-  Then the auto-settle status line is On · settles Sat 9:41 AM if left idle
+  Then the auto-settle status line is On · settles Sat 9:41 am if left idle
   When I toggle Auto-settle in the session sheet
   Then auto-settle is saving with disabled true
   When the held auto-settle write is released
@@ -166,5 +189,4 @@ Scenario Outline: Every phone sheet reads and saves the outlook
 Examples:
   | sheet    |
   | overflow |
-  | chevron  |
   | list     |

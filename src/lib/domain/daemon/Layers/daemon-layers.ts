@@ -2,10 +2,8 @@
 // and leaf drainable services (KeepAwake, VersionChecker, StorageMonitor, PortScanner).
 // Finalizers remove process listeners / drain services to prevent leaks in tests.
 
-import {
-	NodeChildProcessSpawner as NodeCommandExecutor,
-	NodeFileSystem,
-} from "@effect/platform-node";
+import * as NodeCommandExecutor from "@effect/platform-node/NodeChildProcessSpawner";
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import {
 	Context,
 	Data,
@@ -875,14 +873,14 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			return InputDraftsLive.pipe(Layer.provide(Layer.succeedContext(store)));
 		}),
 	).pipe(Layer.provideMerge(withProjectContext));
+	// Runner adapters record account usage readings (Codex), so Usage precedes them.
 	const withProviderAdapters = makeProviderAdaptersLive(configDir).pipe(
-		Layer.provideMerge(withInputDrafts),
+		Layer.provideMerge(UsageLive().pipe(Layer.provideMerge(withInputDrafts))),
 	);
 	const withWorktrees = Layer.mergeAll(
 		makeWorktreeLive(configDir, {
 			setupTimeoutMs: ENV.worktreeSetupTimeoutMs,
 		}),
-		UsageLive(),
 		MessageSurfacingSettingsLive,
 	).pipe(Layer.provideMerge(withProviderAdapters));
 	const withSessionWorkspace = Layer.unwrap(

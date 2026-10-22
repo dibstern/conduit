@@ -57,19 +57,65 @@ export const SessionWorkspaceLive = Layer.effect(
 		);
 		const worktreeService = yield* Effect.serviceOption(WorktreeServiceTag);
 		const ownershipServices = yield* Effect.context<SqlClient.SqlClient>();
-		const launches = new Map<string, Semaphore.Semaphore>();
-		const standaloneLaunches = yield* Semaphore.make(1);
-		const withProjectLaunch = <A, E, R>(
+		// Each project has one launch semaphore. A session operation takes one
+		// permit, so sessions run in parallel; project-wide work takes them all.
+		// Keep this finite: Infinity - Infinity would break semaphore accounting.
+		const projectPermits = Number.MAX_SAFE_INTEGER;
+		interface ProjectLaunches {
+			readonly project: Semaphore.Semaphore;
+			readonly sessions: Map<
+				string,
+				{ readonly lock: Semaphore.Semaphore; users: number }
+			>;
+		}
+		const makeLaunches = (): ProjectLaunches => ({
+			project: Semaphore.makeUnsafe(projectPermits),
+			sessions: new Map(),
+		});
+		const launches = new Map<string, ProjectLaunches>();
+		const standaloneLaunches = makeLaunches();
+		const launchesFor = (projectId?: string) => {
+			if (!projectId) return standaloneLaunches;
+			let entry = launches.get(projectId);
+			if (!entry) {
+				entry = makeLaunches();
+				launches.set(projectId, entry);
+			}
+			return entry;
+		};
+		const callerProject = Effect.map(
+			Effect.serviceOption(ConfigTag),
+			(caller) =>
+				caller._tag === "Some"
+					? caller.value.slug
+					: config._tag === "Some"
+						? config.value.slug
+						: undefined,
+		);
+		const withSessionLaunch = <A, E, R>(
+			sessionId: string,
 			effect: Effect.Effect<A, E, R>,
 			projectId?: string,
 		): Effect.Effect<A, E, R> =>
 			Effect.suspend(() => {
-				let launch = projectId ? launches.get(projectId) : standaloneLaunches;
-				if (!launch) {
-					launch = Semaphore.makeUnsafe(1);
-					if (projectId) launches.set(projectId, launch);
-				}
-				return launch.withPermits(1)(effect);
+				const { project, sessions } = launchesFor(projectId);
+				return Effect.acquireUseRelease(
+					Effect.sync(() => {
+						let entry = sessions.get(sessionId);
+						if (!entry) {
+							entry = { lock: Semaphore.makeUnsafe(1), users: 0 };
+							sessions.set(sessionId, entry);
+						}
+						// Count waiters too, including those waiting for the project permit.
+						entry.users++;
+						return entry;
+					}),
+					(entry) => project.withPermits(1)(entry.lock.withPermits(1)(effect)),
+					(entry) =>
+						Effect.sync(() => {
+							if (--entry.users === 0) sessions.delete(sessionId);
+						}),
+				);
 			});
 		const projectFor = (session: string | Account, projectId?: string) =>
 			Effect.gen(function* () {
@@ -449,26 +495,23 @@ export const SessionWorkspaceLive = Layer.effect(
 			);
 		};
 		return {
-			withLaunch: (effect) =>
-				Effect.gen(function* () {
-					const caller = yield* Effect.serviceOption(ConfigTag);
-					return yield* withProjectLaunch(
-						effect,
-						caller._tag === "Some"
-							? caller.value.slug
-							: config._tag === "Some"
-								? config.value.slug
-								: undefined,
-					);
-				}),
-			// Held and queued callers keep the old semaphore. Their completion must
-			// never delete a replacement registration's semaphore for the same slug.
+			withLaunch: (sessionId, effect) =>
+				Effect.flatMap(callerProject, (projectId) =>
+					withSessionLaunch(sessionId, effect, projectId),
+				),
+			withProjectLaunch: (effect) =>
+				Effect.flatMap(callerProject, (projectId) =>
+					launchesFor(projectId).project.withPermits(projectPermits)(effect),
+				),
+			// Held and queued callers keep the old semaphores. Their completion must
+			// never delete a replacement registration's semaphores for the same slug.
 			forgetProject: (projectId) => {
 				launches.delete(projectId);
 			},
 			renameBranch: (sessionId, branchName) =>
 				Effect.flatMap(projectFor(sessionId), ({ projectId }) =>
-					withProjectLaunch(
+					withSessionLaunch(
+						sessionId,
 						Effect.gen(function* () {
 							const {
 								workspace,

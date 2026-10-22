@@ -91,6 +91,13 @@ export async function createE2EHarness(opts?: {
 
 	const staticDir = path.resolve(import.meta.dirname, "../../../dist/frontend");
 	const dbDir = mkdtempSync(path.join(tmpdir(), "e2e-live-relay-"));
+	await saveDaemonConfig(
+		{
+			...defaultDaemonConfig(),
+			avatar: { kind: "initial" },
+		},
+		dbDir,
+	);
 
 	const startStack = (port: number) =>
 		createRelayStack({
@@ -276,14 +283,17 @@ export async function createReplayHarness(
 		{
 			...defaultDaemonConfig(),
 			avatar: { kind: "initial" },
-			...(claudeInstanceId !== undefined && {
+			...(claudeReplayer && {
 				instances: [
 					{
-						id: claudeInstanceId,
-						name: claudeInstanceId,
+						id: claudeInstanceId ?? "claude",
+						name: claudeInstanceId ?? "Claude",
 						port: 0,
 						managed: false,
 						driver: "claude",
+						configDir:
+							options.claudeReplay?.transcriptConfigDir ??
+							path.join(configDir, "claude"),
 					},
 				],
 			}),

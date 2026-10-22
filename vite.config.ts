@@ -85,6 +85,8 @@ const config = defineConfig({
 		outDir: "../../../dist/frontend",
 		emptyOutDir: true,
 		sourcemap: true,
+		// Gzip size reporting compresses every chunk only to print a number.
+		reportCompressedSize: false,
 		// Tailwind v4's browser floor (all ES2022+). CSS inherits it: an older
 		// target makes Lightning CSS rewrite every oklch colour to hex/lab
 		// fallbacks that gamut-map differently. Storybook only forwards `target`.
@@ -121,11 +123,10 @@ const config = defineConfig({
 		// Dev server proxies WS and API to the relay server. dev:all points this
 		// at the server it drives, which may serve HTTPS with a local cert.
 		proxy: {
-			"/ws": { ...relayProxy, ws: true },
-			// Project-specific WebSocket paths (e.g., /p/my-project/ws)
-			// Regex key: Vite interprets keys starting with ^ as RegExp.
-			"^/p/[^/]+/ws": { ...relayProxy, ws: true },
+			"/rpc": { ...relayProxy, ws: true },
 			"/api": relayProxy,
+			// Regex key: Vite treats keys starting with ^ as RegExp.
+			"^/p/[^/]+/api/": relayProxy,
 			"/auth": relayProxy,
 			"/health": relayProxy,
 		},

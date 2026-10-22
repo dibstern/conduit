@@ -883,10 +883,16 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						setState(instanceId, "connected");
 						return client;
 					}
+					const healthClient = clientFor(endpoint, undefined, instanceId);
 					yield* Effect.tryPromise({
-						try: () => client.app.path(),
+						try: (signal) => healthClient.isHealthy(signal),
 						catch: (cause) => cause,
 					}).pipe(
+						Effect.flatMap((healthy) =>
+							healthy
+								? Effect.void
+								: Effect.fail("OpenCode server is not healthy"),
+						),
 						Effect.timeout(CONNECT_TIMEOUT),
 						Effect.mapError((cause) =>
 							unreachable(instanceId, endpoint.url, cause),

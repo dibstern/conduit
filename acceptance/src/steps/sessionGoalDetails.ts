@@ -1,9 +1,13 @@
 import { expect, type Page } from "@playwright/test";
 import type { SessionGoalChangedPayload } from "../../../src/lib/contracts/stored-event.js";
+import type { GoalSummary } from "../../../src/lib/contracts/ws-rpc.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRelayControl, requireRpcControl } from "./shared.js";
 
 const CONDITION = "All 38 scenarios pass";
+const STUCK_SUMMARY =
+	"Merged to main at 03dc05f8 and closed the beads. Blocked on cleanup: worktrees effect4 and mainbase remain because killing their processes (pids 99950, 11588) was denied. Stop them or allow the kill, and the goal can finish.";
+const STUCK_REASON = "Worktree cleanup is blocked by running processes.";
 const goalFixtureTimes = new WeakMap<Page, { setAt: number; now: number }>();
 const fixtureClock = (at: number) =>
 	new Date(at).toLocaleTimeString("en-US", {
@@ -77,7 +81,9 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			const sheet = world.page.getByTestId("goal-details");
 			const active = await sheet.getByTestId("goal-details-pause").count();
-			const actions = active ? ["pause", "edit", "clear"] : ["new", "dismiss"];
+			const actions = active
+				? ["history-toggle", "pause", "edit", "clear"]
+				: ["history-toggle", "new", "dismiss"];
 			await sheet.getByTestId(`goal-details-${actions[0]}`).focus();
 			for (const action of [...actions.slice(1), actions[0]]) {
 				await world.page.keyboard.press("Tab");
@@ -143,7 +149,7 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 	{
 		name: "provide goal details through mocked RPC",
 		match:
-			/^goal details are available for a (working|checking|paused|met) goal$/,
+			/^goal details are available for a (working|checking|paused|met|stuck) goal$/,
 		run: async ({ world, match }) => {
 			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
 			if (!sessionId) throw new Error("Goal details require an open session");
@@ -152,11 +158,19 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 			const setAt = now - 41 * 60_000;
 			goalFixtureTimes.set(world.page, { setAt, now });
 			const goal = {
-				condition: CONDITION,
-				iterations: 3,
+				condition:
+					phase === "stuck"
+						? "Complete conduit-test-16c8 and merge it to main, then clean up the worktree"
+						: CONDITION,
+				iterations: phase === "stuck" ? 196 : 3,
 				setAt,
 				tokensAtStart: 0,
-				lastReason: phase === "checking" ? undefined : CHECKS[2]?.reason,
+				lastReason:
+					phase === "checking"
+						? undefined
+						: phase === "stuck"
+							? STUCK_REASON
+							: CHECKS[2]?.reason,
 			};
 			const facts: SessionGoalChangedPayload =
 				phase === "met"
@@ -175,19 +189,47 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 								: {}),
 						};
 			const rpc = requireRpcControl(world.page);
+			let summary: GoalSummary | null =
+				phase === "stuck"
+					? null
+					: {
+							text:
+								phase === "met"
+									? "All 38 scenarios pass. The visual suite is stable."
+									: "35/38 scenarios pass. The jump-to-live control still fails.",
+							generatedAt: now,
+							stale: false,
+						};
 			rpc.setStubs({
 				GetGoalDetails: () => ({
+					summary,
 					judgeModel: "Sonnet 5",
 					setAt,
-					turnCount: 4,
-					checks: CHECKS.map(({ minutes, reason }, index) => ({
-						iteration: index + 1,
-						turnIndex: index + 1,
-						at: setAt + minutes * 60_000,
-						reason,
-					})),
+					turnCount: phase === "stuck" ? 196 : 4,
+					checks:
+						phase === "stuck"
+							? Array.from({ length: 196 }, (_, index) => ({
+									iteration: index + 1,
+									turnIndex: index + 1,
+									at:
+										index < 3
+											? setAt + (index + 1) * 60_000
+											: now - 25 * 60_000 + (index - 3) * 7_500,
+									reason:
+										index < 3 ? (CHECKS[index]?.reason ?? null) : STUCK_REASON,
+								}))
+							: CHECKS.map(({ minutes, reason }, index) => ({
+									iteration: index + 1,
+									turnIndex: index + 1,
+									at: setAt + minutes * 60_000,
+									reason,
+								})),
 					tokensSinceStart: 1_240_000,
 				}),
+				GenerateGoalSummary: () => {
+					summary = { text: STUCK_SUMMARY, generatedAt: now, stale: false };
+					return summary;
+				},
 			});
 			rpc.setStubs({ CancelSession: () => ({ ok: true }) });
 			// The desktop header renders its title row, and with it the goal
@@ -204,6 +246,15 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 					updatedAt: now,
 					messageCount: 6,
 					goalState: facts,
+					...(phase === "stuck"
+						? {
+								goalStuck: {
+									since: now - 25 * 60_000,
+									lastAt: now - 60_000,
+									count: 193,
+								},
+							}
+						: {}),
 				},
 			]);
 			const relay = requireRelayControl(world.page);
@@ -285,12 +336,126 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "assert stuck goal callout",
+		match: /^the stuck goal explains its repeated blocker$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("session-goal-subtitle"),
+			).toContainText("Stuck");
+			const callout = world.page.getByTestId("goal-details-stuck");
+			await expect(callout).toContainText("Stuck for 24 minutes");
+			await expect(callout).toContainText(
+				"193 checks in a row found the same blocker.",
+			);
+		},
+	},
+	{
+		name: "assert generated goal summary and live announcement",
+		match: /^the goal summary is written on open in a polite live region$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("goal-details-summary"),
+			).toHaveAttribute("aria-live", "polite");
+			await expect(
+				world.page.getByTestId("goal-details-summary-body"),
+			).toHaveText(STUCK_SUMMARY);
+			await expect(
+				world.page.getByTestId("goal-details-summary-label"),
+			).toHaveText(`Summary · ${fixtureClock(fixtureTimes(world.page).now)}`);
+		},
+	},
+	{
+		name: "assert exact goal summary generation calls",
+		match: /^the goal summary has been generated exactly (\d+) times?$/,
+		run: async ({ world, match }) => {
+			const rpc = requireRpcControl(world.page);
+			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
+			await expect
+				.poll(
+					() =>
+						rpc
+							.getRequests()
+							.filter(
+								(request) =>
+									request.tag === "GenerateGoalSummary" &&
+									request.payload["sessionId"] === sessionId,
+							).length,
+				)
+				.toBe(Number(match[1]));
+		},
+	},
+	{
+		name: "assert goal details refetch on reopen",
+		match: /^the goal details have been fetched exactly (\d+) times$/,
+		run: async ({ world, match }) => {
+			await expect
+				.poll(
+					() =>
+						requireRpcControl(world.page)
+							.getRequests()
+							.filter((request) => request.tag === "GetGoalDetails").length,
+				)
+				.toBe(Number(match[1]));
+		},
+	},
+	{
+		name: "assert reopened goal keeps its current summary",
+		match: /^the goal summary remains current without another generation$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("goal-details-summary-body"),
+			).toHaveText(STUCK_SUMMARY);
+			await expect(
+				world.page.getByTestId("goal-details-summary-label"),
+			).toHaveText(`Summary · ${fixtureClock(fixtureTimes(world.page).now)}`);
+			await world.page.evaluate(
+				() =>
+					new Promise<void>((resolve) =>
+						requestAnimationFrame(() => resolve()),
+					),
+			);
+			expect(
+				requireRpcControl(world.page)
+					.getRequests()
+					.filter((request) => request.tag === "GenerateGoalSummary"),
+			).toHaveLength(1);
+		},
+	},
+	{
+		name: "assert goal summary heading",
+		match: /^the goal summary heading reads (Where it stands|How it ended)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page
+					.getByTestId("goal-details-summary")
+					.getByText(match[1] ?? "", { exact: true }),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "assert goal history is initially collapsed",
+		match: /^the goal details history is collapsed$/,
+		run: async ({ world }) => {
+			const history = world.page.getByTestId("goal-details-history-toggle");
+			await expect(history).toHaveRole("button");
+			await expect(history).toHaveAttribute("aria-expanded", "false");
+			await expect(world.page.getByTestId("goal-details-history")).toBeHidden();
+		},
+	},
+	{
+		name: "toggle inline goal history",
+		match: /^I toggle goal details History$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("goal-details-history-toggle").click();
+		},
+	},
+	{
 		name: "assert goal details metadata and tokens",
-		match: /^the goal details metadata describes its start, checks and tokens$/,
+		match: /^the goal details metadata describes its start, judge and tokens$/,
 		run: async ({ world }) => {
 			const metadata = world.page.getByTestId("goal-details-meta");
 			await expect(metadata).toHaveText(
-				`Set ${fixtureClock(fixtureTimes(world.page).setAt)} · 3 checks · Sonnet 5 judges`,
+				`Set ${fixtureClock(fixtureTimes(world.page).setAt)} · Sonnet 5 judges · 1.24M tokens`,
 			);
 			await expect(world.page.getByTestId("goal-details")).toContainText(
 				"1.24M tokens",
@@ -361,13 +526,9 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 			await expect(world.page.getByTestId("goal-details-dismiss")).toHaveText(
 				"Dismiss",
 			);
-			await expect(
-				world.page
-					.getByTestId("goal-details-history")
-					.getByTestId("goal-details-check")
-					.first()
-					.locator("time"),
-			).toHaveText(fixtureClock(fixtureTimes(world.page).now));
+			await expect(world.page.getByTestId("goal-details")).toContainText(
+				`3 checks · met ${fixtureClock(fixtureTimes(world.page).now)}`,
+			);
 			for (const action of ["pause", "resume", "edit", "clear"])
 				await expect(
 					world.page.getByTestId(`goal-details-${action}`),

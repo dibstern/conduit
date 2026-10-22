@@ -4,6 +4,8 @@ export type ReplyReference =
 			kind: "message" | "excerpt";
 			ordinal: number;
 			category: string;
+			/** Stable identity for theme colours; labels and glyphs can belong to custom categories. */
+			builtinCategory?: string | undefined;
 			glyph: string;
 			time: string;
 			text: string;
@@ -47,6 +49,10 @@ function decodeReference(encoded: string): ReplyReference | null {
 				text: value.text,
 				ordinal: value.ordinal,
 				category: value.category,
+				...("builtinCategory" in value &&
+				typeof value.builtinCategory === "string"
+					? { builtinCategory: value.builtinCategory }
+					: {}),
 				glyph: value.glyph,
 				time: value.time,
 			};

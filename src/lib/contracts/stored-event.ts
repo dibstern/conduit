@@ -9,6 +9,7 @@ import { holdingSessionRefs, SessionRef } from "./session-ref-schema.js";
 import {
 	SessionWorkspaceSchema,
 	SessionWorktreeOwnershipSchema,
+	SessionWorktreeOwnershipSnapshotSchema,
 } from "./session-workspace.js";
 
 export const EventId = Schema.String.pipe(Schema.brand("EventId"));
@@ -415,6 +416,7 @@ const CanonicalToolInputSchema = Schema.Union([
 	}),
 	Schema.Struct({
 		tool: Schema.Literal("AskUserQuestion"),
+		delivery: Schema.optionalKey(Schema.Literal("async")),
 		questions: Schema.Unknown.pipe(
 			Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
 		),
@@ -458,6 +460,9 @@ export const PermissionAskedDetailsSchema = Schema.Struct({
 export const QuestionAskedDetailsSchema = Schema.Struct({
 	toolUseId: optionalString,
 	providerId: optionalString,
+	delivery: Schema.optionalKey(Schema.Literal("async")),
+	messageId: optionalString,
+	partId: optionalString,
 });
 
 // The snapshot decoder deliberately validates only identity, role and part
@@ -658,7 +663,14 @@ export const CanonicalEvents = {
 			userMessageId: Schema.optionalKey(Schema.String),
 		}),
 	),
-	"turn.completed": live(CompletionPayloadSchema),
+	"turn.completed": live(
+		Schema.Struct({
+			...CompletionPayloadSchema.fields,
+			continuationKind: Schema.optionalKey(
+				Schema.Literals(["native-thread", "transcript-digest"]),
+			),
+		}),
+	),
 	/** Accounting for a background message after its run's terminal. */
 	"message.completed": live(CompletionPayloadSchema),
 	"turn.notice": live(Schema.Struct({ text: Schema.String })),
@@ -862,6 +874,9 @@ export const CanonicalEvents = {
 	"session.deleted": live(
 		Schema.Struct({
 			sessionId: Schema.String.pipe(SessionRef(false)),
+			worktreeOwnership: Schema.optionalKey(
+				SessionWorktreeOwnershipSnapshotSchema,
+			),
 			/**
 			 * Descendant sessions deleted by the schema cascade, captured BEFORE the
 			 * tombstone persists (afterwards they can no longer be found by parent).
@@ -954,6 +969,9 @@ export const CanonicalEvents = {
 	),
 	"session.handoff_delivered": live(
 		Schema.Struct({
+			continuationKind: Schema.optional(
+				Schema.Literals(["native-thread", "transcript-digest"]),
+			),
 			included: Schema.Number.check(
 				Schema.isInt(),
 				Schema.isGreaterThanOrEqualTo(0),
@@ -995,6 +1013,7 @@ export const CanonicalEvents = {
 	"session.resume_scheduled": live(
 		Schema.Struct({
 			instanceId: Schema.String,
+			by: Schema.optionalKey(Schema.Literals(["user", "policy", "sweep"])),
 			/** Unix seconds, matching the SDK's reset time. */
 			at: Schema.Number.pipe(Schema.check(Schema.isFinite())),
 		}),

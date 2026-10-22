@@ -151,11 +151,11 @@ describe("session triage menu", () => {
 			},
 		);
 		await screen.findByTestId("extra-share");
-		const menu = screen.getByRole("menu");
+		const menu = screen.getByRole(presentation === "sheet" ? "dialog" : "menu");
 		expect(
 			[
 				...menu.querySelectorAll(
-					'[role="menuitem"], [role="menuitemcheckbox"], [role="separator"]',
+					'[role="menuitem"], [role="menuitemcheckbox"], [role="separator"], [role="button"]',
 				),
 			].map((item) => item.getAttribute("data-testid") ?? "divider"),
 		).toEqual(
@@ -166,8 +166,8 @@ describe("session triage menu", () => {
 						"session-ctx-snooze",
 						"session-ctx-pin",
 						"session-ctx-mark-unread",
-						"session-ctx-archive",
 						"session-ctx-auto-settle",
+						"session-ctx-archive",
 						"session-ctx-rename",
 						"session-ctx-fork",
 						"session-ctx-copy-resume",

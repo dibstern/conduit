@@ -1,7 +1,8 @@
 import { Schema } from "effect";
 import { untrack } from "svelte";
-import { SvelteMap } from "svelte/reactivity";
+import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { parseAttachmentDataUrl } from "../../attachment-data-url.js";
+import { accountLimit } from "../../contracts/account-limit.js";
 import { WorkspaceMoveError } from "../../contracts/session-workspace.js";
 import type {
 	InputDelivery,
@@ -20,6 +21,7 @@ import {
 	sessionMessages,
 } from "./chat.svelte.js";
 import { getBrowserClientId } from "./client-identity.js";
+import { clock } from "./clock.svelte.js";
 import {
 	getAvailableInstances,
 	getDraftPick,
@@ -71,7 +73,8 @@ const intents = new SvelteMap<string, Intent>();
 const pendingReplies = new Map<string, Intent>();
 const settledInputs = new Set<string>();
 const refusals = new SvelteMap<string, { readonly reason: SteerBlocker }>();
-let creatingDrafts = $state(0);
+/** Drafts whose CreateSession is in flight, by draft id. */
+const creatingDrafts = new SvelteSet<string | undefined>();
 let dismissTaskStopToast: (() => void) | undefined;
 
 export function turn() {
@@ -89,7 +92,7 @@ export function turn() {
 	return {
 		working:
 			sessionId === null
-				? draft && creatingDrafts > 0
+				? draft && creatingDrafts.has(selection.scope?.draftId)
 				: (getSessionPhase(sessionId) !== "idle" &&
 						findSession(sessionId)?.canStop !== false) ||
 					[...intents.values()].some(
@@ -114,6 +117,10 @@ function predictsHandoff(sessionId: string): boolean {
 	const row = findSession(sessionId);
 	if (!row) return true;
 	const inbox = sessionMessages.get(sessionId)?.transcript;
+	const reading = usageState.readings.find(
+		(reading) => reading.accountId === row.accountId,
+	);
+	const recovery = row.limitRecovery;
 	return (
 		row.status !== "busy" &&
 		row.status !== "retry" &&
@@ -122,14 +129,17 @@ function predictsHandoff(sessionId: string): boolean {
 			(permission) => permission.sessionId === sessionId,
 		) &&
 		!permissionsState.pendingQuestions.some(
-			(question) => question.sessionId === sessionId,
+			(question) =>
+				question.sessionId === sessionId && question.delivery !== "async",
 		) &&
 		!inbox?.pending.length &&
 		!inbox?.paused &&
-		!usageState.readings.some(
-			(reading) =>
-				reading.accountId === row.accountId && reading.status === "limited",
-		)
+		accountLimit({
+			asker: "user",
+			...(reading ? { reading } : {}),
+			...(recovery && !recovery.switched ? { recovery } : {}),
+			now: clock.now,
+		}).kind !== "wait-until"
 	);
 }
 
@@ -255,13 +265,19 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 		}
 		if ("draft" in input) {
 			creating = true;
-			creatingDrafts++;
-			localSends.set(inputId, { sessionId: null, message, opensSession: true });
+			const draftId = from?.draftId;
+			creatingDrafts.add(draftId);
+			localSends.set(inputId, {
+				sessionId: null,
+				draftId,
+				message,
+				opensSession: true,
+			});
 			try {
 				const created = await rpc("CreateSession", input.draft);
 				sessionId = created.sessionId;
 			} finally {
-				creatingDrafts--;
+				creatingDrafts.delete(draftId);
 			}
 			creating = false;
 		} else sessionId = input.sessionId;
@@ -291,7 +307,9 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 		}
 		const sentToSessionId = sessionId;
 		const sentFrom =
-			"draft" in input && from ? { ...from, sessionId: sentToSessionId } : from;
+			"draft" in input && from
+				? { project: from.project, sessionId: sentToSessionId }
+				: from;
 		const reply = await new Promise<
 			Awaited<ReturnType<typeof rpc<"input.submit">>>
 		>((resolve, reject) =>

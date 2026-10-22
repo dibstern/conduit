@@ -3,7 +3,8 @@
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Fiber } from "effect";
+import { Effect, Fiber, ManagedRuntime } from "effect";
+import { TestClock } from "effect/testing";
 import {
 	afterEach,
 	beforeEach,
@@ -1165,6 +1166,8 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		"Stop",
 		"stream-end",
 	] as const)("completes %s before hung reads and bounds all end finalization to the configured deadline", async (ending) => {
+		const clock = ManagedRuntime.make(TestClock.layer());
+		const clockContext = await clock.context();
 		const parentClaudeSessionId = "sdk-parent-final-poll-timeout";
 		const sdkSubagentId = "task-final-poll-timeout";
 		const taskToolUse: SDKPartialAssistantMessage = {
@@ -1285,6 +1288,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 					{ ...deps, onSubagentFinalizationComplete: finalized },
 					emit,
 				).pipe(
+					Effect.provide(clockContext),
 					Effect.tap((created) =>
 						Effect.sync(() => {
 							runner = created;
@@ -1293,7 +1297,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				),
 		});
 		const sink = createMockEventSink();
-		const turnPromise = Effect.runPromise(
+		const turnPromise = clock.runPromise(
 			Effect.result(
 				instance.sendTurnEffect(
 					makeBaseSendTurnInput({
@@ -1304,17 +1308,10 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				),
 			),
 		);
-		let settledTurn: Awaited<typeof turnPromise> | undefined;
-		void turnPromise.then((result) => {
-			settledTurn = result;
-		});
-
 		try {
 			await tasksStarted;
-			await vi.waitFor(
-				() => expect(subagentSdk.getSubagentMessages).toHaveBeenCalledTimes(3),
-				{ timeout: 100, interval: 5 },
-			);
+			await clock.runPromise(TestClock.adjust("10 millis"));
+			expect(subagentSdk.getSubagentMessages).toHaveBeenCalledTimes(3);
 			const ctx = getClaudeRuntimeSessionForTest(
 				instance,
 				"parent-final-poll-timeout",
@@ -1329,19 +1326,12 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				resolve: denyApproval,
 				reject: () => Effect.void,
 			});
-			const startedAt = performance.now();
 			const stop =
 				ending === "Stop"
-					? Effect.runPromise(instance.interruptTurnEffect(ctx.sessionId))
+					? clock.runPromise(instance.interruptTurnEffect(ctx.sessionId))
 					: Promise.resolve(releaseStream());
-			const turnResult = await vi.waitFor(
-				() => {
-					if (!settledTurn)
-						throw new Error("Turn cleanup waited for a transcript");
-					return settledTurn;
-				},
-				{ timeout: 50, interval: 5 },
-			);
+			// Foreground cleanup must finish while every transcript and timeout is pending.
+			const turnResult = await turnPromise;
 			if (ending === "stream-end") expect(turnResult._tag).toBe("Failure");
 			else {
 				expect(turnResult._tag).toBe("Success");
@@ -1350,14 +1340,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 						ending === "Stop" ? "interrupted" : "completed",
 					);
 			}
-			let stopCompleted = false;
-			void stop.then(() => {
-				stopCompleted = true;
-			});
-			await vi.waitFor(() => expect(stopCompleted).toBe(true), {
-				timeout: 50,
-				interval: 5,
-			});
+			await stop;
 			if (ending === "Stop") {
 				expect(denyApproval).toHaveBeenCalledWith("reject");
 				expect(query.interrupt).toHaveBeenCalledOnce();
@@ -1368,26 +1351,15 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 						.mock.calls.some(([event]) => event.type === "turn.interrupted"),
 				).toBe(true);
 			}
-			await vi.waitFor(
-				() => {
-					expect(onBackgroundTask).toHaveBeenCalledWith({
-						sessionId: ctx.sessionId,
-						kind: "session-ended",
-					});
-					expect(runner?.hasPendingSubagentFinalizers?.(ctx.sessionId)).toBe(
-						true,
-					);
-				},
-				{ interval: 5 },
-			);
-			await vi.waitFor(
-				() =>
-					expect(runner?.hasPendingSubagentFinalizers?.(ctx.sessionId)).toBe(
-						false,
-					),
-				{ timeout: 200, interval: 5 },
-			);
-			expect(performance.now() - startedAt).toBeLessThan(200);
+			expect(onBackgroundTask).toHaveBeenCalledWith({
+				sessionId: ctx.sessionId,
+				kind: "session-ended",
+			});
+			await clock.runPromise(TestClock.adjust("99 millis"));
+			expect(runner?.hasPendingSubagentFinalizers?.(ctx.sessionId)).toBe(true);
+			expect(finalized).not.toHaveBeenCalled();
+			await clock.runPromise(TestClock.adjust("1 millis"));
+			expect(runner?.hasPendingSubagentFinalizers?.(ctx.sessionId)).toBe(false);
 			expect(finalized).toHaveBeenCalled();
 			expect(ctx.subagentPollers?.size).toBe(0);
 			// Completing abandoned SDK promises cannot resurrect a feed or emit history.
@@ -1401,6 +1373,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			await releasePendingPolls();
 			await Promise.race([turnPromise.catch(() => undefined), delay(25)]);
 			await Effect.runPromise(instance.shutdownEffect());
+			await clock.dispose();
 		}
 	});
 

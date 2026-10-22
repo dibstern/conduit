@@ -56,7 +56,7 @@ export function failRunnerTurn(
 		messageId: string;
 	},
 	failure: SessionFailure,
-	driverKind = "claude",
+	driverKind: string,
 ) {
 	return Effect.gen(function* () {
 		yield* emit({

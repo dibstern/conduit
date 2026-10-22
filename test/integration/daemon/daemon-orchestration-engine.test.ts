@@ -284,7 +284,7 @@ describe("one daemon orchestration engine", () => {
 				initialRows
 					.slice(0, firstDrain)
 					.filter(({ kind }) => kind === "recovery-end"),
-			).toHaveLength(2);
+			).toHaveLength(3);
 			const extra = join(fixture.root, "added-folder");
 			mkdirSync(extra);
 			const heldId = await submit(
@@ -2399,13 +2399,13 @@ Date.now = () => now() + (existsSync(new URL('./advance-clock', import.meta.url)
 					.filter(({ kind }) => kind === "recovery-start")
 					.map(({ driver }) => driver)
 					.sort(),
-			).toEqual(["claude", "cursor"]);
+			).toEqual(["claude", "codex", "cursor"]);
 			expect(
 				restarted
 					.filter(({ kind }) => kind === "recovery-end")
 					.map(({ driver }) => driver)
 					.sort(),
-			).toEqual(["claude", "cursor"]);
+			).toEqual(["claude", "codex", "cursor"]);
 			expect(
 				restarted.filter(({ kind }) => kind === "engine-observed"),
 			).toHaveLength(1);

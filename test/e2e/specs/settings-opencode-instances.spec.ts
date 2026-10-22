@@ -55,18 +55,13 @@ test("OpenCode instances can be added, edited and removed with no project open",
 			});
 	const proxy = await harness.requestRpc({ _tag: "DetectProxy" });
 	await new AppPage(page).goto(harness.baseUrl);
-	const listOverflow = page.getByTestId("list-bar-overflow");
-	const titleMenu = page.getByTestId("session-bar-title-menu");
-	const sessionOverflow = page.getByTestId("session-bar-overflow");
-	await expect(
-		listOverflow.or(titleMenu).or(sessionOverflow).first(),
-	).toBeVisible();
-	if (await listOverflow.isVisible()) {
-		await listOverflow.click();
-		await page.getByTestId("list-overflow-settings").click();
-	} else if (await titleMenu.isVisible()) {
-		await titleMenu.click();
-		await page.getByTestId("session-title-settings").click();
+	const listSettings = page.getByTestId("list-bar-settings");
+	const sessionOverflow = page
+		.getByTestId("session-bar-overflow")
+		.or(page.getByTestId("session-bar-island-overflow"));
+	await expect(listSettings.or(sessionOverflow).first()).toBeVisible();
+	if (await listSettings.isVisible()) {
+		await listSettings.click();
 	} else {
 		await sessionOverflow.click();
 		await page.getByTestId("overflow-settings").click();

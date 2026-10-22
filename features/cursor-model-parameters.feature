@@ -1,5 +1,64 @@
 Feature: Cursor model parameters have separate picker rows
 
+Scenario: the composer meter counts effort values rather than combinations
+  Given the conduit app is served with the connected mockup
+  And a Cursor account is available with its live models
+  And the harness logo is viewed in the wide tier
+  And the Cursor parameter catalogue is ready for grok-4.7
+  When I start a new session
+  And I open the model picker
+  And I view Harness choices in the picker
+  And I select the Cursor Harness tab in the picker
+  And I view Model choices in the picker
+  And I select model Grok 4.7 in the picker
+  And I choose Cursor values context=500k, effort=xhigh, fast=true in the picker
+  And I close the model picker
+  Then the effort meter has 4 bars with 4 filled
+  And the Cursor effort chip describes Extra high instead of combination 500K · xhigh · Fast
+
+Scenario: the phone composer Effort row omits the context from its value
+  Given the conduit app is served with the connected mockup
+  And a Cursor account is available with its live models
+  And the harness logo is viewed in the phone tier
+  And the composer uses words controls
+  And the Cursor parameter catalogue is ready for grok-4.7
+  When I start a new session
+  And I open the model picker
+  And I view Harness choices in the picker
+  And I select the Cursor Harness tab in the picker
+  And I view Model choices in the picker
+  And I select model Grok 4.7 in the picker
+  And I choose Cursor values context=500k, effort=xhigh, fast=true in the picker
+  And I close the model picker
+  And I open the phone composer sheet
+  Then the phone composer Effort row reads xhigh · Fast
+  And the effort meter has 4 bars with 4 filled
+  And the Cursor phone effort row omits combination 500K · xhigh · Fast
+
+Scenario Outline: title generation exposes every Cursor parameter and preserves other values
+  Given the conduit app is served with the connected mockup
+  And a Cursor account is available with its live models
+  And the harness logo is viewed in the <tier> tier
+  And the Cursor parameter catalogue is ready for grok-4.7
+  And Cursor titles use combination 500K · xhigh · Fast
+  When I open settings to the Models & agents section
+  And I open the title generation picker
+  Then the Cursor title parameter rows offer context=256k/500k; effort=low/medium/high/xhigh; fast=false/true
+  And the Cursor rows show context=500k, effort=xhigh, fast=true
+  When I choose Cursor values context=256k in the picker
+  Then the Cursor title model saves combination 256K · xhigh · Fast
+  And the Cursor rows show context=256k, effort=xhigh, fast=true
+  When I reload title generation settings
+  And I open settings to the Models & agents section
+  Then the Cursor title summary shows Context: 256K · Effort: xhigh · Fast: On
+  When I open the title generation picker
+  Then the Cursor rows show context=256k, effort=xhigh, fast=true
+
+Examples:
+  | tier  |
+  | wide  |
+  | phone |
+
 Scenario Outline: choose Cursor parameters for the first and next turn
   Given the conduit app is served with the connected mockup
   And a Cursor account is available with its live models
@@ -74,3 +133,66 @@ Examples:
   | tier  |
   | wide  |
   | phone |
+
+Scenario: Cursor default model parameters save one combination
+  Given the conduit app is served with the connected mockup
+  And a Cursor account is available with its live models
+  And the Cursor parameter catalogue is ready for grok-4.7
+  And Cursor defaults can be saved
+  When I open settings to the Models & agents section
+  And I choose grok-4.7 as the Cursor default model
+  Then the Cursor default parameter pickers show context=500k, effort=high, fast=false
+  And the Cursor default context picker offers 256K, 500K
+  And the Cursor default effort picker offers low, medium, high, xhigh
+  And the Cursor default fast picker offers Off, On
+  When I set Cursor default context to 256k
+  And I set Cursor default fast to true
+  And I set Cursor default effort to xhigh
+  Then the Cursor default saves combination 256K · xhigh · Fast
+  And the Cursor default parameter pickers show context=256k, effort=xhigh, fast=true
+
+Scenario: Ctrl+T cycles Cursor effort while preserving context and Fast
+  Given the conduit app is served with the connected mockup
+  And a Cursor account is available with its live models
+  And the composer uses words controls
+  And the Cursor parameter catalogue is ready for grok-4.7
+  When I start a new session
+  And I open the model picker
+  And I view Harness choices in the picker
+  And I select the Cursor Harness tab in the picker
+  And I view Model choices in the picker
+  And I select model Grok 4.7 in the picker
+  And I choose Cursor values context=256k, effort=high, fast=true in the picker
+  And I close the model picker
+  Then the Cursor composer stores combination 256K · high · Fast
+  When I cycle effort with Ctrl+T
+  Then the Cursor composer stores combination 256K · xhigh · Fast
+  When I cycle effort with Ctrl+T
+  Then the Cursor composer stores combination 256K · low · Fast
+
+Scenario: Cursor defaults disable unavailable parameter combinations
+  Given the conduit app is served with the connected mockup
+  And a Cursor account is available with its live models
+  And the Cursor parameter catalogue is ready for gpt-5.5
+  And Cursor defaults can be saved
+  When I open settings to the Models & agents section
+  And I choose gpt-5.5 as the Cursor default model
+  Then the Cursor default parameter pickers show context=1m, effort=medium, fast=false
+  And the Cursor default fast option true is disabled
+  When I set Cursor default context to 272k
+  Then the Cursor default fast option true is enabled
+  When I set Cursor default fast to true
+  Then the Cursor default context option 1m is disabled
+  And the Cursor default parameter pickers show context=272k, effort=medium, fast=true
+
+Scenario: an unavailable saved Cursor combination remains visible and can be replaced
+  Given the conduit app is served with the connected mockup
+  And a Cursor account is available with its live models
+  And the Cursor parameter catalogue is ready for grok-4.7
+  And Cursor defaults can be saved
+  And the saved Cursor default has unavailable combination Retired combination
+  When I open settings to the Models & agents section
+  Then the saved Cursor combination Retired combination is shown as unavailable
+  When I set Cursor default effort to low
+  Then the Cursor default saves combination 500K · low
+  And the Cursor default parameter pickers show context=500k, effort=low, fast=false

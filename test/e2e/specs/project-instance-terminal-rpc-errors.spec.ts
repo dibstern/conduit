@@ -85,8 +85,11 @@ async function openChat(page: Page, baseUrl: string, stubs: StubTable) {
 }
 
 async function openServerSettings(page: Page) {
-	await page.getByTestId("session-bar-title-menu").click();
-	await page.getByTestId("session-title-settings").click();
+	await page
+		.getByTestId("session-bar-overflow")
+		.or(page.getByTestId("session-bar-island-overflow"))
+		.click();
+	await page.getByTestId("overflow-settings").click();
 	await page.getByTestId("settings-tab-server").click();
 	await expect(page.getByTestId("server-settings")).toBeVisible();
 }

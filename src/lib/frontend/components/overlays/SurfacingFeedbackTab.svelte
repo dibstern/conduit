@@ -197,7 +197,7 @@
 
 {#if loading}<p role="status">Loading feedback…</p>
 {:else}
-	{#if error}<div role="alert" class="mb-3 flex flex-col items-start gap-2"><SettingsBanner tone="danger">{error}</SettingsBanner><Button size="sm" onclick={() => { void load(); }}>Retry</Button></div>{/if}
+	{#if error}<div role="alert" class="mb-3 flex flex-col items-start gap-2"><SettingsBanner tone="danger">{error}</SettingsBanner><Button variant="settings" size="content" onclick={() => { void load(); }}>Retry</Button></div>{/if}
 	{#if notice}<p role="status" class="mb-3 text-[12.5px] text-success">{notice}</p>{/if}
 	{#if current}
 		{#if proposing}
@@ -221,18 +221,18 @@
 						{@const result = estimate === "failed" ? undefined : estimate}
 						{@const evidence = result?.complete && score?.complete ? changedAgreement(entries, score, result) : []}
 						<div class="hunk" data-testid={`surfacing-proposal-hunk-${hunk.id}`}>
-							<Checkbox aria-label={`Include ${hunk.after.label} change`} checked={selected.includes(hunk.id)} disabled={saving || testing !== null || stale} onchange={(event) => tick(hunk, event.currentTarget.checked)} />
+							<Checkbox variant="settings" aria-label={`Include ${hunk.after.label} change`} checked={selected.includes(hunk.id)} disabled={saving || testing !== null || stale} onchange={(event) => tick(hunk, event.currentTarget.checked)} />
 							<div class="min-w-0 break-words"><CategoryPill category={hunk.after} plain />{#if !hunk.before}{" "}<ins>+ new category</ins>{/if}
 								{#each hunkDiff(hunk).filter((change) => hunk.before || !["Add category", "colour"].includes(change.field)) as change, index}{index ? " · " : " "}{#if change.field === "weight" || change.field === "active"}{change.field === "weight" ? "weight " : ""}{:else}<code>{change.field}</code>{" "}{/if}{#if change.before}<del>{change.before}</del>{" → "}{/if}<ins>{change.before ? (change.after || "removed") : change.field === "weight" ? change.after : `+ ${change.after}`}</ins>{/each}
 							</div>
-							{#if estimate === "failed"}<Button size="sm" data-testid={`surfacing-proposal-retry-${hunk.id}`} disabled={testing !== null || saving || stale} onclick={() => { void testChanges(hunk.id, true); }}>{testing === hunk.id ? "Estimating…" : "Retry estimate"}</Button>
-							{:else if result && result.requiredCalls > 0}<Button size="sm" data-testid={`surfacing-proposal-test-${hunk.id}`} disabled={testing !== null || saving || stale || !result.canTest} onclick={() => { void testChanges(hunk.id); }}>{testing === hunk.id ? "Testing…" : `Test · ${result.requiredCalls} Jev calls`}</Button>
+							{#if estimate === "failed"}<Button variant="settings" size="content" data-testid={`surfacing-proposal-retry-${hunk.id}`} disabled={testing !== null || saving || stale} onclick={() => { void testChanges(hunk.id, true); }}>{testing === hunk.id ? "Estimating…" : "Retry estimate"}</Button>
+							{:else if result && result.requiredCalls > 0}<Button variant="settings" size="content" data-testid={`surfacing-proposal-test-${hunk.id}`} disabled={testing !== null || saving || stale || !result.canTest} onclick={() => { void testChanges(hunk.id); }}>{testing === hunk.id ? "Testing…" : `Test · ${result.requiredCalls} Jev calls`}</Button>
 							{:else if result?.complete}<em>free to score</em>
 							{:else}<em></em>{/if}
 							<p>{hunk.rationale}
 								{#if dependencies[hunk.id]?.length}<br />Needs {dependencies[hunk.id]?.map((other) => `${other.after.label} retired`).join(", ")} to stay within 20 active.{/if}
 								{#if estimate === "failed"}<br /><span role="alert">Could not estimate these changes.</span>
-								{:else if result && !result.complete}<br /><span class="text-text-muted">{result.unavailableReason ?? "Test these criteria to see which corrections they fix or break."}</span>{/if}
+								{:else if result && !result.complete}<br /><span class="text-text-dimmer">{result.unavailableReason ?? "Test these criteria to see which corrections they fix or break."}</span>{/if}
 							</p>
 							{#if result?.complete && score?.complete}
 								<div class="ev"><em>Agreement {score.agree} → {result.agree} / {result.total}</em>{#each evidence as item}<span class={item.fixed ? "y" : "n"} title={`${item.fixed ? "Fixes" : "Breaks"} #${item.entry.ordinal ?? "?"} · ${item.entry.sessionTitle}: ${item.entry.text}`}>#{item.entry.ordinal ?? "?"} {item.fixed ? "✓" : "✗"}</span>{/each}</div>
@@ -241,16 +241,16 @@
 					{/each}
 				</SettingsGroup>
 				{#if candidate && !candidate.complete && candidate.requiredCalls > 0}
-					<div class="mt-[8px] flex flex-wrap items-center gap-x-3 gap-y-2 px-[4px] text-[12px] leading-[1.45] text-text-muted">
+					<div class="mt-[8px] flex flex-wrap items-center gap-x-3 gap-y-2 px-[4px] text-[12px] leading-[1.45] text-text-dimmer">
 						<span class="min-w-0 flex-1">Criteria changes can't be scored until Jev re-judges the sample, which costs {candidate.requiredCalls} Jev calls.</span>
-						<Button size="sm" disabled={testing !== null || saving || stale || !candidate.canTest} onclick={() => { void testChanges("selected"); }}>Test selected · {candidate.requiredCalls} Jev calls</Button>
+						<Button variant="settings" size="content" disabled={testing !== null || saving || stale || !candidate.canTest} onclick={() => { void testChanges("selected"); }}>Test selected · {candidate.requiredCalls} Jev calls</Button>
 					</div>
 				{/if}
 				<div class="sticky bottom-0 z-10 mt-3 flex flex-wrap items-center gap-2 rounded-[12px] bg-settings-bg p-[10px] text-[12.5px] text-text-secondary ring-1 ring-border shadow-settings-dialog">
 					<span class="min-w-0 flex-1 max-md:basis-full"><b class="font-semibold text-text">Unticked</b> changes are avoided next time.</span>
-					<Button size="sm" variant="ghost" data-testid="surfacing-proposal-dismiss" disabled={saving || testing !== null} onclick={dismiss}>Dismiss</Button>
-					<Button size="sm" data-testid="surfacing-proposal-again" disabled={saving || testing !== null || entries.length < 5} onclick={() => { void propose(); }}>Propose again</Button>
-					<Button size="sm" variant="primary" data-testid="surfacing-proposal-apply" disabled={saving || testing !== null || stale || !chosen.length} onclick={() => { void apply(); }}>Apply {chosen.length} {chosen.length === 1 ? "change" : "changes"}</Button>
+					<Button variant="ghost" size="sm" data-testid="surfacing-proposal-dismiss" disabled={saving || testing !== null} onclick={dismiss}>Dismiss</Button>
+					<Button variant="settings" size="content" data-testid="surfacing-proposal-again" disabled={saving || testing !== null || entries.length < 5} onclick={() => { void propose(); }}>Propose again</Button>
+					<Button size="content" variant="settings" tone="accent" data-testid="surfacing-proposal-apply" disabled={saving || testing !== null || stale || !chosen.length} onclick={() => { void apply(); }}>Apply {chosen.length} {chosen.length === 1 ? "change" : "changes"}</Button>
 				</div>
 			</div>
 		{:else}
@@ -261,17 +261,17 @@
 					<div><small>Most raised</small>{#if mostRaised?.raise}<b><CategoryPill category={mostRaised.category} plain /></b><span>{mostRaised.raise} ▲</span>{:else}<b>None yet</b>{/if}</div>
 					<div><small>Most lowered</small>{#if mostLowered?.lower}<b><CategoryPill category={mostLowered.category} plain /></b><span>{mostLowered.lower} ▼</span>{:else}<b>None yet</b>{/if}</div>
 				</div>
-				{#if score && !score.complete}<p class="mt-2 px-[4px] text-[12px] text-text-muted">{score.unavailableReason ?? "Some messages have not been judged. Set a valid TypeSafe key in General to test criteria changes."}</p>{/if}
+				{#if score && !score.complete}<p class="mt-2 px-[4px] text-[12px] text-text-dimmer">{score.unavailableReason ?? "Some messages have not been judged. Set a valid TypeSafe key in General to test criteria changes."}</p>{/if}
 			{/if}
 			<div class="prop" data-testid="surfacing-proposal-status">
 				{#if proposalError}
 					<SettingsBanner role="alert" tone="warning" class="w-full">{proposalError}</SettingsBanner>
-					<Button size="sm" onclick={() => { void propose(); }}>Retry</Button>
+					<Button variant="settings" size="content" onclick={() => { void propose(); }}>Retry</Button>
 				{:else if proposal}
 					<p role="status"><b class="font-semibold text-text">No changes suggested.</b> {proposal.rationale}</p>
-					<div class="flex gap-2"><Button size="sm" variant="ghost" onclick={dismiss}>Dismiss</Button><Button size="sm" onclick={() => { void propose(); }}>Propose again</Button></div>
+					<div class="flex gap-2"><Button variant="ghost" size="sm" onclick={dismiss}>Dismiss</Button><Button variant="settings" size="content" onclick={() => { void propose(); }}>Propose again</Button></div>
 				{:else}
-					<Button variant="primary" size="sm" disabled={entries.length < 5 || clearing !== null} onclick={() => { void propose(); }}><span aria-hidden="true">✦</span> Propose changes</Button>
+					<Button variant="settings" tone="accent" size="content" disabled={entries.length < 5 || clearing !== null} onclick={() => { void propose(); }}><span aria-hidden="true">✦</span> Propose changes</Button>
 					<span>{entries.length < 5 ? `Raise or lower a few messages and Opus can propose fixes. ${entries.length} / 5 marks.` : "Opus reads your marks and the category set, and proposes edits. Nothing changes until you apply."}</span>
 				{/if}
 			</div>
@@ -294,8 +294,8 @@
 						<div class="rec" data-testid="surfacing-ledger-record">
 							<div title={entry.text}><b>#{entry.ordinal ?? "?"}</b> {entry.text || "Message unavailable"}</div>
 							<small>{entry.sessionTitle} · <time datetime={new Date(entry.createdAt).toISOString()}>{new Date(entry.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</time></small>
-							<small title={`Jev: ${jev} → you: ${you}`}>Jev: {jev} → you: {you}{#if agreement != null}{" · "}<span class={agreement === entry.mark.level ? "text-success" : "text-error"}>current set {agreement === entry.mark.level ? "agrees" : "disagrees"}</span>{/if}</small>
-							<Button size="sm" variant="ghost" class="col-start-2 row-span-3 row-start-1 self-center" disabled={clearing !== null || saving || proposing || testing !== null} onclick={() => { void clear(entry); }} ariaLabel={`Clear mark ${entry.ordinal ?? entry.partId}`}>Clear</Button>
+							<small title={`Jev: ${jev} → you: ${you}`}>Jev: {#if entry.probabilities === null}Not judged{:else}{#if category}{#if category.origin === "builtin"}<CategoryPill {category} plain />{:else}{category.glyph} {category.label}{/if} · p {(entry.probabilities[category.id] ?? 0).toFixed(2).replace(/^0/, "")}{:else}Routine{/if} · {LEVELS[answer.level]}{/if} → you: {entry.mark.direction ? `${MARK_GLYPHS[entry.mark.direction]} ` : ""}{#if entry.mark.category}{#if retype}{#if retype.origin === "builtin"}<CategoryPill category={retype} plain />{:else}{retype.glyph} {retype.label}{/if}{:else}{entry.mark.category}{/if}{" at "}{/if}{LEVELS[entry.mark.level]}{entry.mark.reason ? ` · “${entry.mark.reason}”` : ""}{#if agreement != null}{" · "}<span class={agreement === entry.mark.level ? "text-success" : "text-error"}>current set {agreement === entry.mark.level ? "agrees" : "disagrees"}</span>{/if}</small>
+							<Button variant="ghost" size="sm" class="col-start-2 row-span-3 row-start-1 self-center" disabled={clearing !== null || saving || proposing || testing !== null} onclick={() => { void clear(entry); }} ariaLabel={`Clear mark ${entry.ordinal ?? entry.partId}`}>Clear</Button>
 						</div>
 					{/each}
 				</SettingsGroup>
@@ -308,28 +308,28 @@
 	.prop { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 16px; padding: 14px; border-radius: 12px; background: var(--color-settings-card); font-size: 13px; line-height: 1.45; color: var(--color-text-secondary); }
 	.prop:first-child { margin-top: 0; }
 	.prop.run { flex-direction: row; align-items: center; gap: 12px; }
-	.prop small { display: block; margin-top: 2px; font-size: 12px; color: var(--color-text-muted); }
+	.prop small { display: block; margin-top: 2px; font-size: 12px; color: var(--color-text-dimmer); }
 	.shimmer { background: linear-gradient(90deg, var(--color-text-muted) 0%, var(--color-text) 45%, var(--color-text-muted) 90%) 0 0 / 220% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 2.2s linear infinite; }
 	@keyframes shimmer { to { background-position: -220% 0; } }
 	@media (prefers-reduced-motion: reduce) { .shimmer { animation: none; color: var(--color-text); } }
 	.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 	.tiles > div { min-width: 0; padding: 10px; border-radius: 12px; background: var(--color-settings-card); }
-	.tiles small { display: block; font-size: 11.5px; color: var(--color-text-muted); }
-	.tiles b { display: flex; margin-top: 3px; overflow: hidden; font-size: 15px; font-weight: 600; white-space: nowrap; }
-	.tiles span { display: block; margin-top: 2px; overflow: hidden; font-size: 11.5px; color: var(--color-text-muted); white-space: nowrap; text-overflow: ellipsis; }
+	.tiles small { display: block; font-size: 11.5px; color: var(--color-text-dimmer); }
+	.tiles b { display: flex; margin-top: 3px; overflow: hidden; font-size: 15px; font-weight: 600; color: var(--color-text); white-space: nowrap; }
+	.tiles > div > span { display: block; margin-top: 2px; overflow: hidden; font-size: 11.5px; color: var(--color-text-dimmer); white-space: nowrap; text-overflow: ellipsis; }
 	@media (max-width: 767px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 	.grid-table { width: calc(100% - 28px); margin: 2px 14px 6px; border-collapse: collapse; table-layout: fixed; font-size: 13px; color: var(--color-text); }
 	.grid-table th, .grid-table td { height: 30px; padding: 0; text-align: right; }
-	.grid-table th { font-size: 11.5px; font-weight: 400; color: var(--color-text-muted); }
+	.grid-table th { font-size: 11.5px; font-weight: 400; color: var(--color-text-dimmer); }
 	.grid-table td { font: 12.5px var(--font-mono); font-variant-numeric: tabular-nums; }
 	.grid-table :is(th, td):first-child { text-align: left; font: inherit; }
 	.grid-table th:first-child { font-size: 11.5px; }
 	.grid-table th:not(:first-child) { width: 84px; }
-	.grid-table .z { color: var(--color-text-muted); }
+	.grid-table .z { color: var(--color-text-dimmer); }
 	@media (max-width: 767px) { .grid-table th:not(:first-child) { width: 64px; } }
 	.rec { display: grid; color: var(--color-text); grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 9px 8px 9px 14px; font-size: 13px; }
 	.rec > :is(div, small) { grid-column: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.rec small { font-size: 11.5px; color: var(--color-text-muted); }
+	.rec small { font-size: 11.5px; color: var(--color-text-dimmer); }
 	/* Phones keep the verdict line whole so "current set agrees" is never cut off. */
 	@media (max-width: 767px) { .rec > small:last-of-type { white-space: normal; } }
 	.rec b { font-weight: 600; }
@@ -339,7 +339,7 @@
 	.hunk { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; padding: 10px 14px; font-size: 13px; line-height: 1.45; color: var(--color-text); }
 	.hunk > p, .hunk > .ev { grid-column: 2 / -1; margin: 0; }
 	.hunk > p { font-size: 12px; color: var(--color-text-secondary); }
-	.hunk em { font: 11px var(--font-mono); font-style: normal; color: var(--color-text-muted); white-space: nowrap; }
+	.hunk em { font: 11px var(--font-mono); font-style: normal; color: var(--color-text-dimmer); white-space: nowrap; }
 	.hunk del { color: var(--color-error); }
 	.hunk ins { text-decoration: none; color: var(--color-success); }
 	.hunk code { font: 11.5px var(--font-mono); color: var(--color-text-secondary); }

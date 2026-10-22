@@ -27,7 +27,7 @@ import type {
 import {
 	type ClaudeSessionRunnerDeps,
 	makeClaudeSessionRunner,
-} from "./claude-provider-runtime.js";
+} from "./claude-runner-payload.js";
 import {
 	type ClaudeRunnerFileSettings,
 	captureClaudeRunnerFileSettings,

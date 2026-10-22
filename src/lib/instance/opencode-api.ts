@@ -132,6 +132,18 @@ export class OpenCodeAPI {
 		return this._authHeaders;
 	}
 
+	isHealthy(signal: AbortSignal): Promise<boolean> {
+		return this.sdk(
+			"global.health",
+			(data) =>
+				typeof data === "object" &&
+				data !== null &&
+				"healthy" in data &&
+				data.healthy === true,
+			() => this._sdk.global.health({ signal }),
+		);
+	}
+
 	/**
 	 * Execute an SDK call and translate errors.
 	 *

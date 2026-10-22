@@ -58,6 +58,7 @@ const activity: ActivityPart[] = [
 const segment: Segment = { activity, reply: [] };
 const turn: Turn = {
 	id: "marks-turn",
+	storeId: "marks-turn",
 	user: {
 		type: "user",
 		uuid: "marks-user",
@@ -119,6 +120,22 @@ export const RaiseWhy: Story = {
 		await expect(
 			canvas.getAllByTestId("surfacing-mark-reason-chip"),
 		).toHaveLength(3);
+		const pin = canvas
+			.getByTestId("surfacing-pin-26")
+			.querySelector(".pin-chip");
+		const label = canvas
+			.getByTestId("surfacing-msg-card")
+			.querySelector(".type-label");
+		const glyph = label?.querySelector(".glyph");
+		if (!pin || !label || !glyph)
+			throw new Error("Missing Finding pin or type label");
+		const expected = new Option().style;
+		expected.color = getComputedStyle(pin).getPropertyValue(
+			"--color-cat-finding",
+		);
+		await expect(getComputedStyle(pin).backgroundColor).toBe(expected.color);
+		await expect(getComputedStyle(label).color).toBe(expected.color);
+		await expect(getComputedStyle(glyph).color).toBe(expected.color);
 	},
 };
 export const RaiseWhyLight: Story = {

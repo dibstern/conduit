@@ -37,6 +37,7 @@ export type AvatarChoice = typeof AvatarChoiceSchema.Type;
 export const AvatarSchema = Schema.Struct({
 	choice: Schema.NullOr(AvatarChoiceSchema),
 	name: Schema.String,
-	macPicture: Schema.NullOr(Schema.String),
+	/** null: the account has none. Absent: the daemon couldn't read it this time. */
+	macPicture: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 export type Avatar = typeof AvatarSchema.Type;

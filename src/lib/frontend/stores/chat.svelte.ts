@@ -17,6 +17,7 @@ import type {
 import { generateUuid } from "../utils/format.js";
 import { isSubagentToolName } from "../utils/subagent-tools.js";
 import { discoveryState } from "./discovery.svelte.js";
+import { getCurrentRoute } from "./router.svelte.js";
 import { findSession, isBusy, sessionState } from "./session.svelte.js";
 import { refreshSessionSkills } from "./session-skills.svelte.js";
 
@@ -418,8 +419,9 @@ export const historyState = $state({
 });
 
 export type LocalSend = {
-	/** Null while a draft's create is in flight: the draft pane shows it. */
+	/** Null while a draft's create is in flight: that draft's pane shows it. */
 	readonly sessionId: string | null;
+	readonly draftId?: string | undefined;
 	readonly message: UserMessage;
 	/** A draft's first send: it starts its session, so the pane begins with it. */
 	readonly opensSession: boolean;
@@ -429,10 +431,13 @@ export type LocalSend = {
  *  A user message otherwise appears only once the server places it. */
 export const localSends = new SvelteMap<string, LocalSend>();
 
-/** The sends to show in a pane: `null` names the draft itself. */
+/** The sends to show in a pane: `null` names the shown draft. */
 export function localSendsIn(sessionId: string | null): LocalSend[] {
+	const route = getCurrentRoute();
+	const draftId =
+		sessionId === null && route.page === "chat" ? route.draftId : undefined;
 	return [...localSends.values()].filter(
-		(send) => send.sessionId === sessionId,
+		(send) => send.sessionId === sessionId && send.draftId === draftId,
 	);
 }
 

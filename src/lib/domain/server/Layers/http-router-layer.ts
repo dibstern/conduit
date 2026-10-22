@@ -1,9 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import {
-	NodeFileSystem,
-	NodeHttpServer,
-	NodePath,
-} from "@effect/platform-node";
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
+import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
+import * as NodePath from "@effect/platform-node/NodePath";
 import { Context, Effect, HashMap, Layer, Option, Ref, Scope } from "effect";
 import {
 	HttpRouter,

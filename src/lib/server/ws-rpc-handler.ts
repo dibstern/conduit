@@ -522,6 +522,8 @@ export class WsRpcWebSocketHandler implements RpcWebSocketHandlerShape {
 	}
 
 	private onConnection(ws: WebSocket, req: IncomingMessage): void {
+		// Effect resumes paused sockets after attaching its message reader.
+		ws.pause();
 		this.clients.add(ws);
 		ws.on("close", () => this.clients.delete(ws));
 		if (

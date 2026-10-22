@@ -152,7 +152,10 @@ export interface ProcessRunnerDriver {
 	) => Extract<SessionCommand, { type: "pre-warm" }>;
 	readonly snapshotCommandSettings: (
 		snapshot: import("./runner-upgrade.js").RunnerSettingsSnapshot | undefined,
-	) => import("../claude/claude-runner-snapshot.js").RunnerCommandSettings;
+	) => Omit<
+		Extract<SessionCommand, { type: "send-turn" }>,
+		"type" | "sinkId" | "aborted" | "input"
+	>;
 	readonly sameAccountLogin: (
 		a: {
 			readonly configDir: import("./session-runner.js").SessionTurn["configDir"];
@@ -325,6 +328,7 @@ export const stopRegisteredRunners = (
 							Effect.acquireRelease(
 								connectRunner({
 									...registration,
+									// Runner builds predating driverKind were all Claude.
 									driverKind: registration.driverKind ?? "claude",
 									deps: { workspaceRoot, daemonConfigDir: configDir },
 									preserveRole: true,
@@ -346,6 +350,7 @@ export const stopRegisteredRunners = (
 								log.warn(
 									{
 										...registration,
+										// Runner builds predating driverKind were all Claude.
 										driverKind: registration.driverKind ?? "claude",
 										cause: connection.failure,
 									},
@@ -1805,6 +1810,7 @@ export const makeProcessSessionRunner = (
 						PendingInteractionServiceTag,
 					);
 					for (const registration of discoverAllRunners(configDir)) {
+						// Runner builds predating driverKind were all Claude.
 						if ((registration.driverKind ?? "claude") !== driver.driverKind)
 							continue;
 						if (

@@ -5,8 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Ref, type Scope } from "effect";
-import { expect } from "vitest";
+import { expect, onTestFinished, vi } from "vitest";
 import type { DaemonLifecycleContext } from "../../../src/lib/daemon/daemon-lifecycle.js";
+import * as daemonLifecycle from "../../../src/lib/daemon/daemon-lifecycle.js";
 import {
 	makeHttpServerLive,
 	makeOnboardingServerLive,
@@ -325,6 +326,16 @@ describe("makeOnboardingServerLive", () => {
 		() => {
 			return withStaticDir((staticDir) => {
 				const ctx = makeContext();
+				const realStart = daemonLifecycle.startOnboardingServer;
+				const start = vi
+					.spyOn(daemonLifecycle, "startOnboardingServer")
+					.mockImplementation((context, deps, config) => {
+						expect(config.httpsPort).toBe(boundAddress(ctx).port);
+						expect(config.listenPort).toBe(config.httpsPort + 1);
+						// The adjacent port can belong to another process on the host.
+						return realStart(context, deps, { ...config, listenPort: 0 });
+					});
+				onTestFinished(() => start.mockRestore());
 				const configLayer = DaemonConfigRefLive({
 					...baseConfig,
 					host: "127.0.0.1",
@@ -343,6 +354,7 @@ describe("makeOnboardingServerLive", () => {
 
 				return Effect.gen(function* () {
 					const mainPort = boundAddress(ctx).port;
+					expect(start).toHaveBeenCalledOnce();
 					const response = yield* Effect.promise(() =>
 						httpGet(onboardingPort(ctx), "/api/setup-info"),
 					);

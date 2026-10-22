@@ -45,10 +45,19 @@ describe("Claude accepted run ownership", () => {
 			.map((line) => decodeClaudeSDKMessage(JSON.parse(line)) as SDKMessage);
 		const harness = makeEffectProjectionHarness();
 		const events: ProviderRuntimeEvent[] = [];
+		// The sidebar's status while each turn is still running, wake-ups included.
+		const statusBeforeEnd: unknown[] = [];
 		const sink = createMockEventSink();
 		sink.push = (event) =>
 			Effect.tryPromise({
 				try: async () => {
+					if (event.type === "turn.completed" && event.sessionId === sessionId)
+						statusBeforeEnd.push(
+							...(await harness.query(
+								"SELECT status FROM sessions WHERE id = ?",
+								[sessionId],
+							)),
+						);
 					await harness.ingest(event);
 					events.push(event);
 				},
@@ -222,9 +231,13 @@ describe("Claude accepted run ownership", () => {
 					context_tokens: event.data["contextTokens"],
 				})),
 			);
-			const terminal = (await harness.storedEvents(sessionId)).find(
+			const ends = (await harness.storedEvents(sessionId)).filter(
 				(event) => event.type === "turn.completed",
 			);
+			const terminal = ends[0];
+			// Each background result is a reply to read, unless a queued run now
+			// owns the session.
+			const lastEnd = queuedInput ? terminal : ends.at(-1);
 			expect(
 				await harness.query(
 					"SELECT status, completed_at FROM provider_runs WHERE id = ?",
@@ -236,7 +249,16 @@ describe("Claude accepted run ownership", () => {
 					"SELECT last_turn_end_version FROM sessions WHERE id = ?",
 					[sessionId],
 				),
-			).toEqual([{ last_turn_end_version: terminal?.streamVersion }]);
+			).toEqual([{ last_turn_end_version: lastEnd?.streamVersion }]);
+			expect(statusBeforeEnd).toEqual(
+				completions.map(() => ({ status: "busy" })),
+			);
+			if (!queuedInput)
+				expect(
+					await harness.query("SELECT status FROM sessions WHERE id = ?", [
+						sessionId,
+					]),
+				).toEqual([{ status: "idle" }]);
 			if (queuedInput) {
 				expect(
 					await harness.query(
