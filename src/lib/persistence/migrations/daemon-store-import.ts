@@ -148,6 +148,12 @@ const runnerTables: Readonly<Record<string, string>> = {
 		session_id TEXT NOT NULL, request_id TEXT NOT NULL, response_json TEXT NOT NULL,
 		PRIMARY KEY (session_id, request_id))`,
 };
+// Tables older builds created and later stopped using without dropping them.
+// Nothing reads them, so the import leaves them behind instead of rejecting.
+const retiredTables = [
+	// Claude runner reply cache, unused since 74e9745a.
+	"claude_runner_replies",
+];
 const legacySequenceColumns: Readonly<Record<string, readonly string[]>> = {
 	provider_command_sessions: ["last_sequence"],
 	provider_command_turns: ["side_effect_sequence", "result_sequence"],
@@ -276,6 +282,7 @@ function verifyStore(
 				...copiedTables,
 				...singletonTables,
 				...Object.keys(runnerTables),
+				...retiredTables,
 				"_migrations",
 				"sqlite_stat1",
 				"sqlite_stat4",
