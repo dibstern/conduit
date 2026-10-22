@@ -91,7 +91,6 @@ const readProjectSessions = (
 		).pipe(Layer.provideMerge(database));
 
 		const result = yield* Effect.gen(function* () {
-			const sql = yield* SqlClient.SqlClient;
 			const readQuery = yield* ReadQueryEffectTag;
 			const rows = yield* makeSessionRows({
 				slug: projectSlug,
@@ -99,19 +98,13 @@ const readProjectSessions = (
 				gitCache,
 				refreshGit: true,
 			});
-			return yield* sql.withTransaction(
-				Effect.gen(function* () {
-					const settledCount = yield* readQuery.countSettledSessions(
-						{ projectIds: [projectSlug] },
-						options,
-					);
-					const sessions = yield* rows.list(options);
-					return { sessions, settledCount };
-				}),
+			return yield* rows.listWith(
+				options,
+				readQuery.countSettledSessions({ projectIds: [projectSlug] }, options),
 			);
 		}).pipe(Effect.provide(readQueryLayer));
 		return {
-			settledCount: result.settledCount,
+			settledCount: result.companion,
 			sessions: result.sessions.map(
 				(session): ProjectSessionCandidate => ({
 					sortKey: {

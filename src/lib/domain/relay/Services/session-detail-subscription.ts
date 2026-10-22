@@ -35,6 +35,7 @@ import {
 	PAGE_FRAME_BUDGET,
 	PAGE_MESSAGES,
 } from "../../../persistence/session-history-adapter.js";
+import { SERVER_BUILD_ID } from "../../../server/build-update.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeHistoryReconcileTag } from "./opencode-runtime-ingress-service.js";
 import { stream } from "./read-model-subscription.js";
@@ -62,8 +63,10 @@ const partRowId = (messageId: string, partId: string) =>
 	Schema.encodeSync(PartRemovalId)([messageId, partId]);
 
 /**
- * What a {@link ResumePoint} says, readable only here: the store and session
- * that sent the snapshot, and the base a resume from it is checked against.
+ * What a {@link ResumePoint} says, readable only here: the store, session and
+ * server build that sent the snapshot, and the base a resume from it is checked
+ * against. Another build may shape the page differently, so its point gets a
+ * fresh snapshot; the device still draws its saved page while that arrives.
  */
 const ResumePointBody = Schema.StringFromBase64Url.pipe(
 	Schema.decodeTo(
@@ -71,6 +74,7 @@ const ResumePointBody = Schema.StringFromBase64Url.pipe(
 			Schema.Struct({
 				store: Schema.String,
 				session: Schema.String,
+				build: Schema.String,
 				sequence: Schema.Number,
 				cursor: Schema.optionalKey(Schema.NonEmptyString),
 			}),
@@ -140,12 +144,16 @@ export const subscribeSessionDetail = (options: {
 					Option.fromNullishOr(options.resumePoint).pipe(
 						Option.flatMap(Schema.decodeOption(ResumePointBody)),
 					),
-					(body) => body.store === store && body.session === options.sessionId,
+					(body) =>
+						body.store === store &&
+						body.session === options.sessionId &&
+						body.build === SERVER_BUILD_ID,
 				),
 			);
 			// A saved snapshot resumes from the base its point names; a point
-			// this store did not send for this session gets a fresh snapshot.
-			// A client resuming from that very base holds the page as saved.
+			// this store and build did not send for this session gets a fresh
+			// snapshot. A client resuming from that very base holds the page as
+			// saved.
 			const fromSavedPage =
 				point !== undefined && options.resumeFromSequence === point.sequence;
 			const resume =
@@ -385,6 +393,7 @@ export const subscribeSessionDetail = (options: {
 										Schema.encodeSync(ResumePointBody)({
 											store,
 											session: options.sessionId,
+											build: SERVER_BUILD_ID,
 											sequence: envelope.sequence,
 											...(envelope.cursor === undefined
 												? {}

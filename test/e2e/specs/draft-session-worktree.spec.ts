@@ -389,3 +389,71 @@ for (const mode of [
 		});
 	});
 }
+
+test.describe("desktop", () => {
+	test.use({ viewport: { width: 1440, height: 900 } });
+
+	// A slow worktree checkout keeps CreateSession open for tens of seconds.
+	test("New session during a slow creation opens a fresh draft and stays there", async ({
+		page,
+		harness,
+	}) => {
+		const rpc = await openDraft(page, harness.relayBaseUrl);
+		const create = rpc.stubs.CreateSession;
+		if (!create) throw new Error("openDraft stubs CreateSession");
+		let release = () => {};
+		const released = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		rpc.setStubs({
+			CreateSession: async (input) => {
+				await released;
+				return create(input);
+			},
+		});
+		await page.locator("#input").fill("Start in a new worktree");
+		await page.locator("#send").click();
+		await rpc.waitForRequest(({ tag }) => tag === "CreateSession");
+		const sendingUrl = page.url();
+
+		await page.locator("#new-session-btn").click();
+		await expect(page).not.toHaveURL(sendingUrl);
+		await expect(page).toHaveURL(/\/draft\/[^/?]+\?project=e2e-replay$/);
+		const freshUrl = page.url();
+		await expect(page.getByText("Start in a new worktree")).toHaveCount(0);
+		await expect(page.locator("#input")).toHaveValue("");
+		await expect(page.locator("#send")).toBeVisible();
+
+		release();
+		await rpc.waitForRequest(({ tag }) => tag === "input.submit");
+		await expect(page.getByText("Started from draft")).toBeVisible();
+		expect(page.url()).toBe(freshUrl);
+		await expect(page.getByText("Start in a new worktree")).toHaveCount(0);
+	});
+
+	test("a fresh draft can start its own session while another is still creating", async ({
+		page,
+		harness,
+	}) => {
+		const rpc = await openDraft(page, harness.relayBaseUrl);
+		rpc.setStubs({ CreateSession: () => new Promise<never>(() => {}) });
+		await page.locator("#input").fill("First, slow");
+		await page.locator("#send").click();
+		await rpc.waitForRequest(({ tag }) => tag === "CreateSession");
+
+		await page.locator("#new-session-btn").click();
+		await expect(page.locator("#input")).toHaveValue("");
+		await page.locator("#input").fill("Second, meanwhile");
+		await page.locator("#send").click();
+		await expect
+			.poll(() =>
+				rpc
+					.getRequests()
+					.filter(({ tag }) => tag === "CreateSession")
+					.map(({ payload }) => payload["draftText"]),
+			)
+			.toEqual(["First, slow", "Second, meanwhile"]);
+		await expect(page.getByText("Second, meanwhile")).toBeVisible();
+		await expect(page.getByText("First, slow")).toHaveCount(0);
+	});
+});

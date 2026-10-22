@@ -136,9 +136,10 @@ process.exit(result.status ?? 1);`,
 		);
 		const error = await creationError(undefined, {
 			gitExecutable: executable,
-			gitTimeoutMs: 5_000,
+			checkoutTimeoutMs: 5_000,
 		});
 		expect(error.reason).toBe("git-failed");
+		expect(error.message).toBe("Git worktree timed out after 5s");
 		expect(existsSync(timeoutMarker)).toBe(true);
 		expect(existsSync(marker)).toBe(true);
 		assertUnchanged(before);

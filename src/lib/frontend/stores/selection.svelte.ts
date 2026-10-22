@@ -50,7 +50,11 @@ import { closeFileViewer } from "./ui.svelte.js";
 
 export type Shown =
 	| { readonly kind: "none" }
-	| { readonly kind: "draft"; readonly project: string | null }
+	| {
+			readonly kind: "draft";
+			readonly project: string | null;
+			readonly draftId?: string | undefined;
+	  }
 	| { readonly kind: "drawn"; readonly sessionId: string }
 	| { readonly kind: "placing"; readonly sessionId: string }
 	| {
@@ -68,7 +72,12 @@ const placement = new SvelteMap<
 const shown: Shown = $derived.by(() => {
 	const route = getCurrentRoute();
 	if (route.page !== "chat") return { kind: "none" };
-	if (route.draft) return { kind: "draft", project: getDraftProject() };
+	if (route.draft)
+		return {
+			kind: "draft",
+			project: getDraftProject(),
+			draftId: route.draftId,
+		};
 	if (!route.sessionId) return { kind: "none" };
 	const sessionId = route.sessionId;
 	const placed = placement.get(sessionId);
@@ -87,11 +96,17 @@ const shown: Shown = $derived.by(() => {
 const scope = $derived<{
 	readonly project: string;
 	readonly sessionId: string | null;
+	/** Which draft, so work started in one draft never follows into another. */
+	readonly draftId?: string | undefined;
 } | null>(
 	shown.kind === "placed"
 		? { project: shown.project, sessionId: shown.sessionId }
 		: shown.kind === "draft" && shown.project
-			? { project: shown.project, sessionId: null }
+			? {
+					project: shown.project,
+					sessionId: null,
+					draftId: shown.draftId,
+				}
 			: shown.kind === "none" &&
 					getCurrentRoute().page === "chat" &&
 					attachedProjectState.slug
@@ -140,7 +155,11 @@ export const selection = {
 	): void {
 		if (!from) return;
 		placement.set(sessionId, { project: from.project });
-		if (scope?.project !== from.project || scope.sessionId !== from.sessionId)
+		if (
+			scope?.project !== from.project ||
+			scope.sessionId !== from.sessionId ||
+			scope.draftId !== from.draftId
+		)
 			return;
 		if (history === "replace") replaceRoute(`/s/${sessionId}`);
 		else navigate(`/s/${sessionId}`);

@@ -685,7 +685,8 @@
 		return sendMode === "switch" && switchTarget ? sendOnAccount(switchTarget.id, delivery) : sendMessage(undefined, delivery);
 	}
 
-	let creatingSession = false;
+	// One create per draft; another draft may start its own meanwhile.
+	const creatingDrafts = new Set<string | undefined>();
 	let startingSideThread = false;
 	// A retry of the same draft reuses its input id, so a reply lost to a
 	// dropped socket returns the Side Thread it made instead of a second one.
@@ -783,8 +784,9 @@
 
 		const sentFromSessionId = sessionState.currentId;
 		const projectSlug = sentFromSessionId ? findSession(sentFromSessionId)?.projectSlug ?? getCurrentSlug() : getDraftProject();
-		if (!sentFromSessionId && creatingSession) return false;
-		if (!sentFromSessionId) creatingSession = true;
+		const draftId = selection.scope?.draftId;
+		if (!sentFromSessionId && creatingDrafts.has(draftId)) return false;
+		if (!sentFromSessionId) creatingDrafts.add(draftId);
 		try {
 			let draft: Parameters<typeof rpc<"CreateSession">>[1] | undefined;
 			if (!sentFromSessionId) {
@@ -857,7 +859,7 @@
 			}
 			return true;
 		} finally {
-			if (!sentFromSessionId) creatingSession = false;
+			if (!sentFromSessionId) creatingDrafts.delete(draftId);
 		}
 	}
 
