@@ -1,5 +1,5 @@
 <!-- User transcript row. Preserves .msg-user class.
-     Recognised `/skill` tokens render as the same pill the composer showed while
+     Recognised `/skill` and `$builtin` tokens render as the same pill the composer showed while
      typing; recognition is live (from the current command list), so the pill is
      derived at render rather than snapshotted at send. Typo near-misses that the
      composer underlined stay plain here — the message is already sent.
@@ -39,6 +39,11 @@
 	const commandNames = $derived(
 		new Set(discoveryState.commands.map((c) => c.name)),
 	);
+	// The composer sends a `$builtin` as the `/builtin` providers expect; show it
+	// as typed.
+	const builtinNames = $derived(
+		new Set(discoveryState.commands.filter((c) => c.builtin).map((c) => c.name)),
+	);
 	const segments = $derived(
 		tokenizeSkills(extractDisplayText(message.text), commandNames),
 	);
@@ -69,7 +74,7 @@
 		</div>
 		{#if message.text}
 			<div class="break-words whitespace-pre-wrap text-[15px] leading-[1.65] text-text max-md:col-span-2">
-				{#each segments as seg (seg.key)}{#if seg.kind === "skill"}<span class="skill-pill">{seg.text}</span>{:else}{seg.text}{/if}{/each}
+				{#each segments as seg (seg.key)}{#if seg.kind === "skill"}<span class="skill-pill">{builtinNames.has(seg.text.slice(1)) ? `$${seg.text.slice(1)}` : seg.text}</span>{:else}{seg.text}{/if}{/each}
 			</div>
 		{/if}
 		{#if message.attachments?.length}

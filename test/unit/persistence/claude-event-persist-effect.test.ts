@@ -61,6 +61,9 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 						{ metadata: { runId: "handoff-run" }, provider: "claude" },
 					),
 				]);
+				// A catch-up held past a slash command ends only with this delivery.
+				yield* sql`INSERT INTO provider_state (session_id, key, value)
+					VALUES ('handoff', 'claude.heldCatchUp:personal', '0')`;
 				yield* sql`INSERT INTO command_receipts (command_id, session_id, status, created_at, command_type, project_key, fingerprint_hash, fingerprint_version, side_effect_sequence, updated_at)
 					VALUES ('handoff-command', 'handoff', 'side_effect_requested', 1, 'send_turn', 'test-project', 'hash', 1, 1, 1)`;
 				yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, attempt_count, requested_at, updated_at)
@@ -146,6 +149,9 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 								: "side_effect_failed",
 					},
 				]);
+				expect(
+					yield* sql`SELECT value FROM provider_state WHERE key = 'claude.heldCatchUp:personal'`,
+				).toEqual(terminal === "turn.completed" ? [] : [{ value: "0" }]);
 				const receipts =
 					yield* sql`SELECT type, data FROM events WHERE type = 'session.handoff_delivered'`;
 				expect(receipts).toEqual(
