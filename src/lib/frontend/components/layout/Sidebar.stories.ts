@@ -116,17 +116,21 @@ function seedFinalSidebar(phone = false, singleAccount = false) {
 	});
 	applySessionChange({ _tag: "synchronized" });
 	openSessionForSetup("typed", "conduit");
-	const accounts = singleAccount
-		? ["personal"]
-		: ["personal", "work", "lab", "codex"];
-	instanceState.instances = accounts.map((id) => ({
+	const accounts = [
+		{ id: "personal", colorSlot: 0 },
+		{ id: "work", colorSlot: 1 },
+		{ id: "lab", colorSlot: 2 },
+		{ id: "codex", colorSlot: 4 },
+	].filter(({ id }) => !singleAccount || id === "personal");
+	instanceState.instances = accounts.map(({ id, colorSlot }) => ({
 		...mockClaudeAccount,
 		id,
+		colorSlot,
 		name: id,
 		usageEligible: true,
 	}));
 	applyUsageReadings(
-		accounts.map((accountId, i) => ({
+		accounts.map(({ id: accountId }, i) => ({
 			accountId,
 			harness: accountId === "codex" ? ("codex" as const) : ("claude" as const),
 			status:

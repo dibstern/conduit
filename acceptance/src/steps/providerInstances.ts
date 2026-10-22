@@ -8,6 +8,7 @@ import {
 	accountsStateFromInstances,
 	apply,
 	list,
+	nextAccountColorSlot,
 } from "../../../src/lib/account-directory.js";
 import type { UsageLimitsSetting } from "../../../src/lib/contracts/limit-recovery.js";
 import {
@@ -87,6 +88,7 @@ function seedAccountDirectory(page: Page): void {
 			Schema.Struct({
 				id: Schema.String,
 				name: Schema.String,
+				colorSlot: Schema.optional(Schema.Number),
 				driver: KnownProviderDriverKindSchema,
 				configDir: Schema.optional(Schema.String),
 				env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
@@ -134,6 +136,7 @@ function seedAccountDirectory(page: Page): void {
 			...mockInstances.get(page)?.find((row) => row["id"] === account.id),
 			id: account.id,
 			name: account.name,
+			colorSlot: account.colorSlot,
 			driver: account.driver,
 			isDefault: account.isDefault,
 			configDir: account.configuredFolder ?? "",
@@ -346,7 +349,8 @@ export const providerInstancesHandlers: StepHandler[] = [
 				...(mockInstances.get(world.page) ?? []).filter(
 					(instance) => instance["driver"] !== "claude",
 				),
-				...names.map((name) => ({
+				...names.map((name, colorSlot) => ({
+					colorSlot,
 					id: instanceSlug(name),
 					name,
 					driver: "claude",
@@ -1041,9 +1045,18 @@ export const providerInstancesHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const driverName = (match[1] ?? "").toLowerCase();
 			const name = (match[2] ?? "").trim();
+			const existing = mockInstances.get(world.page) ?? [];
 			const inst: Record<string, unknown> = {
 				id: instanceSlug(name),
 				name,
+				colorSlot: nextAccountColorSlot(
+					existing.map((instance) => ({
+						colorSlot:
+							typeof instance["colorSlot"] === "number"
+								? instance["colorSlot"]
+								: undefined,
+					})),
+				),
 				port: driverName === "opencode" ? 4099 : 0,
 				managed: false,
 				status: "healthy",
@@ -1055,7 +1068,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 			};
 			// Seed BOTH the mock RPC store (so edit/remove RPCs stay consistent)
 			// and the live frontend state (via the mocked SubscribeInstances list).
-			const list = [...(mockInstances.get(world.page) ?? []), inst];
+			const list = [...existing, inst];
 			mockInstances.set(world.page, list);
 			seedAccountDirectory(world.page);
 			await requireRelayControl(world.page).sendMessages([
@@ -1098,6 +1111,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 				{
 					id,
 					name: match[1] ?? "",
+					colorSlot: 0,
 					configDir: match[2] ?? "",
 					driver: "claude",
 					isDefault: true,

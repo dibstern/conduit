@@ -836,6 +836,7 @@ export function tagWithSessionId(
 export type InstanceStatus = "starting" | "healthy" | "unhealthy" | "stopped";
 
 export interface OpenCodeInstance {
+	colorSlot?: number;
 	/** Published directory default marker; runtime records need not store it. */
 	isDefault?: boolean;
 	usageEligible?: boolean;

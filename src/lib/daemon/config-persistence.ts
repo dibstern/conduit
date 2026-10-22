@@ -21,6 +21,7 @@ import {
 	resolve as resolveAccount,
 } from "../account-directory.js";
 import { CursorUsageBindingSchema } from "../contracts/account.js";
+import { AccountColorSlotSchema } from "../contracts/account-color.js";
 import {
 	AccountUnroutable,
 	UsageLimitsSettingSchema,
@@ -172,6 +173,7 @@ const DaemonInstanceSchema = Schema.Struct({
 	url: Schema.optionalKey(Schema.String),
 	driver: Schema.optionalKey(KnownProviderDriverKindSchema),
 	configDir: Schema.optionalKey(Schema.String),
+	colorSlot: Schema.optionalKey(AccountColorSlotSchema),
 }).mapFields(Struct.map(Schema.mutableKey));
 
 const DaemonConfigFields = {

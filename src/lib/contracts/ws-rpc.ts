@@ -12,6 +12,7 @@ import {
 	SessionStatusSchema,
 } from "../shared-types.js";
 import { AccountChangeRejected } from "./account.js";
+import { AccountColorSlotSchema } from "./account-color.js";
 import {
 	CategorySetContentsSchema,
 	CategorySetRejected,
@@ -327,6 +328,7 @@ export const InstanceStatusSchema = Schema.Literals([
 export const OpenCodeInstanceSchema = Schema.Struct({
 	id: Schema.String,
 	name: Schema.String,
+	colorSlot: Schema.optional(AccountColorSlotSchema),
 	port: Schema.Number,
 	managed: Schema.Boolean,
 	driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),

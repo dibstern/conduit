@@ -224,6 +224,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 			rpc.setDaemonList("SubscribeInstances", {
 				instances: ids.map((id) => ({
 					id,
+					colorSlot: id === "claude" ? 0 : id === "work" ? 1 : 2,
 					name: id === "claude" ? "Personal" : id === "work" ? "Work" : "Spare",
 					driver: "claude",
 					isDefault: id === "claude",

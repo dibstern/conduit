@@ -498,6 +498,7 @@ function setupWords(canvasElement: HTMLElement, phone: boolean) {
 		{
 			id: "claude",
 			name: "personal",
+			colorSlot: 0,
 			driver: "claude",
 			isDefault: true,
 			port: 0,
@@ -1398,6 +1399,7 @@ function narrowComposer(
 					{
 						...mockClaudeAccount,
 						id: "work",
+						colorSlot: 1,
 						name: "work",
 						isDefault: false,
 						usageEligible: true,
@@ -1838,11 +1840,13 @@ function setupComposerStage(
 		...instanceState.instances.map((account) => ({
 			...account,
 			name: limited ? "lab" : stage === "usage" ? "work" : "personal",
+			colorSlot: limited ? 2 : stage === "usage" ? 1 : 0,
 			usageEligible: true,
 		})),
 		{
 			...mockClaudeAccount,
 			id: "standby",
+			colorSlot: limited || stage === "usage" ? 0 : 1,
 			name: "personal",
 			isDefault: false,
 			usageEligible: true,
@@ -1852,6 +1856,7 @@ function setupComposerStage(
 					{
 						...mockClaudeAccount,
 						id: "lab",
+						colorSlot: 2,
 						name: "lab",
 						isDefault: false,
 						usageEligible: true,

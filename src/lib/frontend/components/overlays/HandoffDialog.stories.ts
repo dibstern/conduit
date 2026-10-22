@@ -1,6 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, within } from "storybook/test";
+import { applyInstanceListResponse } from "../../stores/instance.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
+import { mockClaudeAccount } from "../../stories/mocks.js";
 import HandoffDialog from "./HandoffDialog.svelte";
 
 const meta = {
@@ -20,6 +22,23 @@ const meta = {
 		},
 	},
 	beforeEach: () => {
+		applyInstanceListResponse({
+			instances: [
+				{
+					...mockClaudeAccount,
+					id: "Personal",
+					name: "Personal",
+					colorSlot: 0,
+				},
+				{
+					...mockClaudeAccount,
+					id: "Work",
+					name: "Work",
+					colorSlot: 1,
+					isDefault: false,
+				},
+			],
+		});
 		const compact = sessionViewState.compact;
 		sessionViewState.compact = window.innerWidth < 768;
 		return () => {
