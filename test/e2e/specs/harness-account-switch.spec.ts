@@ -2998,7 +2998,7 @@ for (const behavior of [
 					.poll(() =>
 						harness
 							.claudeOptions()
-							.filter((call) => call.prompt?.endsWith(forkPrompt)),
+							.find((call) => call.prompt?.endsWith(forkPrompt)),
 					)
 					.toBeDefined();
 				const forkCalls = harness
