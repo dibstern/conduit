@@ -3,6 +3,7 @@
 
 <script lang="ts">
 	import Button from "../ui/Button.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import SessionList from "../session/SessionList.svelte";
 	import {
 		uiState,
@@ -66,9 +67,13 @@
 </script>
 
 {#snippet title()}
-	<h1 class="m-0 flex min-w-0 items-baseline gap-[7px] {sessionViewState.compact ? 'text-[22px] font-bold' : 'text-[14px] font-semibold'} tracking-[-0.01em] text-text font-sans" data-testid="list-bar-title">
-		Sessions
-		<span class="font-mono text-[12px] font-normal tabular-nums text-text-dimmer" data-testid="list-bar-count">{openCount}</span>
+	<!-- Paint above the phone's fixed top-edge colour strip, like the header controls. -->
+	<h1 class="relative m-0 flex min-w-0 items-center {sessionViewState.compact ? 'gap-[10px] text-[22px] font-bold' : 'gap-[8px] text-[14px] font-semibold'} tracking-[-0.01em] text-text font-sans" data-testid="list-bar-title">
+		<ConduitMark size={sessionViewState.compact ? "md" : "sm"} data-testid="list-bar-mark" />
+		<span class="flex min-w-0 items-baseline gap-[7px]">
+			<span class="truncate">Sessions</span>
+			<span class="shrink-0 font-mono text-[12px] font-normal tabular-nums text-text-dimmer" data-testid="list-bar-count">{openCount}</span>
+		</span>
 	</h1>
 {/snippet}
 
