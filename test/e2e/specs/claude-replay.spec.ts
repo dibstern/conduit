@@ -2118,7 +2118,7 @@ test.describe("Claude replay lane", () => {
 					]);
 					await expect(s.chat.userMessages).toHaveText([
 						/\bAlpha\b/,
-						/\/compact\b/,
+						/\$compact\b/,
 					]);
 				});
 			});
