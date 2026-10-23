@@ -1,5 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
-import { DESKTOP_VIEWPORT } from "../playwrightDriver.js";
+import { DESKTOP_VIEWPORT, PHONE_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	openComposerMoreSheet,
@@ -56,6 +56,214 @@ const sessionIdOf = (page: Page): string => {
 };
 
 export const composerFinalDesignHandlers: StepHandler[] = [
+	{
+		name: "assert phone footer priority collapse across widths",
+		match:
+			/^the (idle|busy|auto-switch|goal|at-reset) phone footer fits at 320, 393 and 320 pixels$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			const state = match[1] ?? "";
+			const touch = await page.context().newCDPSession(page);
+			await touch.send("Emulation.setTouchEmulationEnabled", {
+				enabled: true,
+				maxTouchPoints: 1,
+			});
+			await touch.detach();
+			await page.evaluate(() => document.fonts.ready);
+			let initialFit: string | undefined;
+			for (const width of [320, 393, 320]) {
+				await world.driver.setViewport(page, { ...PHONE_VIEWPORT, width });
+				expect(page.viewportSize()).toEqual({
+					width,
+					height: PHONE_VIEWPORT.height,
+				});
+				expect(await page.evaluate(() => window.innerWidth)).toBe(width);
+				const layout = page.getByTestId("composer-layout");
+				await expect(layout).toHaveAttribute("data-footer-fit", /\S+/);
+				for (const control of [
+					page.locator("#attach-btn"),
+					layout.getByTestId("model-picker-trigger"),
+					layout.getByTestId("permission-mode-badge"),
+				])
+					await expect(control).toBeVisible();
+				await expect
+					.poll(() =>
+						layout.evaluate((element) => {
+							const frame = document.querySelector("#input-row");
+							const actions = Array.from(
+								element.querySelectorAll<HTMLElement>(
+									'#send, #stop, [data-testid="composer-send-menu-trigger"]',
+								),
+							);
+							if (!frame || !actions.length) return ["Missing footer actions"];
+							const actionBoxes = actions.map((action) =>
+								action.getBoundingClientRect(),
+							);
+							const firstAction = actionBoxes[0];
+							if (!firstAction) return ["Missing Send action"];
+							const controls = Array.from(
+								element.querySelectorAll<HTMLElement>(
+									'#attach-btn, [data-testid="model-picker-trigger"], [data-testid="variant-badge"], [data-testid="permission-mode-badge"]',
+								),
+							);
+							const problems: string[] = [];
+							const targets = controls.flatMap((control) => {
+								if (!control.getClientRects().length) return [];
+								const body = control.getBoundingClientRect();
+								const before = getComputedStyle(control, "::before");
+								const targetWidth = Math.max(
+									body.width,
+									Number.parseFloat(before.minWidth) || 0,
+								);
+								const targetHeight = Math.max(
+									body.height,
+									Number.parseFloat(before.minHeight) || 0,
+								);
+								const clip =
+									Number.parseFloat(
+										control.style.getPropertyValue("--composer-target-clip"),
+									) || 0;
+								const targetLeft = body.x + (body.width - targetWidth) / 2;
+								const target = new DOMRect(
+									targetLeft,
+									body.y + (body.height - targetHeight) / 2,
+									Math.max(body.right, targetLeft + targetWidth - clip) -
+										targetLeft,
+									targetHeight,
+								);
+								const id = control.id || control.dataset["testid"] || "control";
+								if (target.height < 44 || (target.width < 44 && !clip))
+									problems.push(`${id} lost its touch target`);
+								if (
+									Math.abs(
+										body.y +
+											body.height / 2 -
+											firstAction.y -
+											firstAction.height / 2,
+									) > 0.5
+								)
+									problems.push(`${id} wrapped or lost row alignment`);
+								for (const action of actionBoxes) {
+									if (
+										target.left < action.right &&
+										target.right > action.left &&
+										target.top < action.bottom &&
+										target.bottom > action.top
+									)
+										problems.push(`${id} covers an action`);
+								}
+								return [{ id, target }];
+							});
+							for (const [index, current] of targets.entries()) {
+								const previous = targets[index - 1];
+								if (previous && previous.target.right > current.target.left)
+									problems.push(`${current.id} covers another footer target`);
+							}
+							const effort = element.querySelector<HTMLElement>(
+								'[data-testid="variant-badge"]',
+							);
+							const checkout = element.querySelector<HTMLElement>(
+								'[data-testid="composer-checkout"]',
+							);
+							if (targets.length < 3)
+								problems.push("A persistent footer control disappeared");
+							if (element.getAttribute("data-footer-fit") === "effort-hidden") {
+								if (
+									effort?.getClientRects().length ||
+									checkout?.getClientRects().length
+								)
+									problems.push("Effort collapsed before checkout");
+								// Reveal only for this synchronous measurement; the observer sees the restored state.
+								const modelMinimum = element.style.getPropertyValue(
+									"--composer-model-minimum",
+								);
+								const fit = element.getAttribute("data-footer-fit");
+								try {
+									element.style.setProperty("--composer-model-minimum", "88px");
+									element.setAttribute("data-footer-fit", "checkout-hidden");
+									const firstAction = Math.min(
+										...actions.map(
+											(action) => action.getBoundingClientRect().left,
+										),
+									);
+									const wouldOverlap = controls.some((control) => {
+										const body = control.getBoundingClientRect();
+										const targetWidth = Math.max(
+											body.width,
+											Number.parseFloat(
+												getComputedStyle(control, "::before").minWidth,
+											) || 0,
+										);
+										return (
+											body.x + (body.width + targetWidth) / 2 > firstAction
+										);
+									});
+									const wouldOverflow = actions.some(
+										(action) =>
+											action.getBoundingClientRect().right >
+											frame.getBoundingClientRect().right - 4,
+									);
+									if (!wouldOverlap && !wouldOverflow)
+										problems.push("Effort was hidden while it fit");
+								} finally {
+									if (fit === null) element.removeAttribute("data-footer-fit");
+									else element.setAttribute("data-footer-fit", fit);
+									if (modelMinimum)
+										element.style.setProperty(
+											"--composer-model-minimum",
+											modelMinimum,
+										);
+									else element.style.removeProperty("--composer-model-minimum");
+								}
+							} else if (!effort?.getClientRects().length)
+								problems.push("Effort is absent without a fit constraint");
+							if (
+								actionBoxes.some(
+									(action) =>
+										action.right > frame.getBoundingClientRect().right - 4,
+								)
+							)
+								problems.push("Actions overflow the footer gutter");
+							if (document.documentElement.scrollWidth > window.innerWidth)
+								problems.push("Footer causes horizontal scrolling");
+							return problems;
+						}),
+					)
+					.toEqual([]);
+				const fit = await layout.getAttribute("data-footer-fit");
+				if (initialFit === undefined) initialFit = fit ?? "";
+				else if (width === 320) expect(fit).toBe(initialFit);
+				if (width === 393 && state === "idle") {
+					await expect(layout.getByTestId("variant-badge")).toBeVisible();
+					await expect(layout).not.toHaveAttribute(
+						"data-footer-fit",
+						"effort-hidden",
+					);
+				}
+				const send = page.locator("#send");
+				const sendBox = await box(send);
+				expect(sendBox.height).toBe(34);
+				if (state === "goal") await expect(send).toHaveText("Set goal");
+				const options = layout.getByTestId("composer-send-menu-trigger");
+				const hasOptions = state === "auto-switch" || state === "at-reset";
+				if (hasOptions) {
+					const optionsBox = await box(options);
+					expect(optionsBox.width).toBe(28);
+					expect(optionsBox.height).toBe(34);
+					expect(optionsBox.x).toBe(sendBox.x + sendBox.width);
+					await expect(send).toHaveCSS("border-top-right-radius", "0px");
+					await expect(options).toHaveCSS("border-top-left-radius", "0px");
+				} else await expect(options).toHaveCount(0);
+				const stop = page.locator("#stop");
+				if (state === "idle") await expect(stop).toHaveCount(0);
+				else {
+					await expectSquare(stop, 34);
+					const preceding = await box(hasOptions ? options : send);
+					expect((await box(stop)).x - preceding.x - preceding.width).toBe(5);
+				}
+			}
+		},
+	},
 	{
 		name: "assert pinned teal goal command",
 		match: /^the built-in menu pins \$goal first in teal$/,

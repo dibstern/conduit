@@ -1596,10 +1596,18 @@ function phoneTouchBounds(control: Element) {
 		rect.height,
 		target.display === "none" ? 0 : Number.parseFloat(target.minHeight) || 0,
 	);
+	const left = rect.x + (rect.width - width) / 2;
 	return new DOMRect(
-		rect.x + (rect.width - width) / 2,
+		left,
 		rect.y + (rect.height - height) / 2,
-		width,
+		Math.max(
+			rect.right,
+			left +
+				width -
+				(Number.parseFloat(
+					getComputedStyle(control).getPropertyValue("--composer-target-clip"),
+				) || 0),
+		) - left,
 		height,
 	);
 }
@@ -2845,4 +2853,191 @@ export const FinalIconsPhoneActions320: Story = {
 			).toEqual(positions);
 		}
 	},
+};
+
+export const FinalIconsPhonePriorityIdle: Story = {
+	tags: ["viewport-capture"],
+	parameters: { phone: true, footerState: "idle" },
+	beforeEach: ({ canvasElement, parameters }) => {
+		const state = parameters["footerState"];
+		const limited = state === "switch" || state === "at-reset";
+		const cleanup = setupComposerStage(
+			canvasElement,
+			limited ? "limited" : "usage",
+			true,
+		);
+		if (!limited)
+			usageState.readings = usageState.readings.map((reading) => ({
+				...reading,
+				windows: reading.windows.map((window) => ({
+					...window,
+					utilization: 42,
+				})),
+			}));
+		usageState.limits = {
+			...usageState.limits,
+			autoSwitch: state === "switch",
+		};
+		if (state !== "idle") phaseToProcessing(getOrCreateSessionActivity(testId));
+		return cleanup;
+	},
+	play: async ({ canvasElement, parameters }) => {
+		const canvas = within(canvasElement);
+		const state = parameters["footerState"];
+		const input = canvas.getByRole("textbox", { name: "Message" });
+		await userEvent.type(
+			input,
+			state === "goal"
+				? "/goal Keep the footer clear"
+				: "Keep the footer clear",
+		);
+		await document.fonts.ready;
+		const layout = canvas.getByTestId("composer-layout");
+		const effort = canvas.getByTestId("variant-badge");
+		const checkout = canvas.getByTestId("composer-checkout");
+		const maxWidth = canvasElement.style.maxWidth;
+		let initialFit: string | undefined;
+		try {
+			for (const width of [320, 393, 320]) {
+				canvasElement.style.maxWidth = `${width}px`;
+				await new Promise<void>((resolve) =>
+					requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+				);
+				await waitFor(() => {
+					expect(canvasElement.clientWidth).toBe(width);
+					for (const control of [
+						canvasElement.querySelector("#attach-btn"),
+						canvas.getByTestId("model-picker-trigger"),
+						canvas.getByTestId("permission-mode-badge"),
+					])
+						expect(control).toBeVisible();
+					const hidden = layout.dataset["footerFit"] === "effort-hidden";
+					expect(effort.checkVisibility()).toBe(!hidden);
+					if (state === "idle" && width === 393) expect(effort).toBeVisible();
+					if (hidden) {
+						expect(checkout).not.toBeVisible();
+					}
+					const actions = [
+						...canvasElement.querySelectorAll<HTMLElement>(
+							'#send, #stop, [data-testid="composer-send-menu-trigger"]',
+						),
+					].map((action) => action.getBoundingClientRect());
+					const actionStart = Math.min(...actions.map((action) => action.left));
+					const targets = [...controlsForPhone(canvasElement)]
+						.filter((control) => control.checkVisibility())
+						.map(phoneTouchBounds);
+					for (const [index, target] of targets.entries()) {
+						expect(target.height).toBeGreaterThanOrEqual(44);
+						expect(target.width).toBeGreaterThanOrEqual(44);
+						expect(target.right).toBeLessThanOrEqual(actionStart);
+						expect(target.top).toBeCloseTo(targets[0]?.top ?? 0, 1);
+						if (index > 0)
+							expect(target.left).toBeGreaterThanOrEqual(
+								targets[index - 1]?.right ?? 0,
+							);
+					}
+					for (const control of controlsForPhone(canvasElement)) {
+						if (!control.checkVisibility()) continue;
+						const target = phoneTouchBounds(control);
+						expect(
+							document
+								.elementFromPoint(
+									target.right - 1,
+									target.y + target.height / 2,
+								)
+								?.closest("button"),
+						).toBe(control);
+					}
+					for (const action of actions) {
+						expect(action.height).toBe(34);
+						expect(action.top).toBe(actions[0]?.top);
+					}
+					if (state !== "idle") {
+						const stop = canvas
+							.getByRole("button", { name: "Stop generating" })
+							.getBoundingClientRect();
+						expect(stop.width).toBe(34);
+						expect(stop.left - (actions.at(-2)?.right ?? 0)).toBe(5);
+					}
+					if (state === "goal")
+						expect(canvasElement.querySelector("#send")).toHaveTextContent(
+							"Set goal",
+						);
+					if (state === "switch" || state === "at-reset") {
+						const options = canvas
+							.getByTestId("composer-send-menu-trigger")
+							.getBoundingClientRect();
+						expect(options.width).toBe(28);
+						expect(options.left).toBe(actions[0]?.right);
+					}
+					expect(canvasElement.scrollWidth).toBeLessThanOrEqual(
+						canvasElement.clientWidth,
+					);
+				});
+				if (initialFit === undefined) initialFit = layout.dataset["footerFit"];
+				else if (width === 320)
+					expect(layout.dataset["footerFit"]).toBe(initialFit);
+				if (layout.dataset["footerFit"] === "effort-hidden") {
+					const minimum = layout.style.getPropertyValue(
+						"--composer-model-minimum",
+					);
+					try {
+						layout.dataset["footerFit"] = "checkout-hidden";
+						layout.style.setProperty("--composer-model-minimum", "88px");
+						expect(
+							phoneTouchBounds(canvas.getByTestId("permission-mode-badge"))
+								.right,
+						).toBeGreaterThan(
+							canvasElement.querySelector("#send")?.getBoundingClientRect()
+								.left ?? Infinity,
+						);
+					} finally {
+						layout.dataset["footerFit"] = "effort-hidden";
+						layout.style.setProperty("--composer-model-minimum", minimum);
+					}
+				}
+			}
+			await userEvent.click(canvas.getByTestId("model-picker-trigger"));
+			const sheet = await within(document.body).findByTestId(
+				"composer-more-sheet",
+			);
+			await userEvent.click(within(sheet).getByTestId("composer-more-effort"));
+			await expect(
+				await within(document.body).findByTestId("picker-effort-option-high"),
+			).toBeVisible();
+			document
+				.querySelector("dialog[open]")
+				?.dispatchEvent(new Event("cancel", { cancelable: true }));
+			await waitFor(() =>
+				expect(within(document.body).queryByTestId("model-picker")).toBeNull(),
+			);
+			document
+				.querySelector("dialog[open]")
+				?.dispatchEvent(new Event("cancel", { cancelable: true }));
+			await waitFor(() => {
+				expect(
+					within(document.body).queryByTestId("composer-more-sheet"),
+				).toBeNull();
+				expect(getComputedStyle(input).pointerEvents).not.toBe("none");
+			});
+		} finally {
+			canvasElement.style.maxWidth = maxWidth;
+		}
+	},
+};
+export const FinalIconsPhonePriorityBusy: Story = {
+	...FinalIconsPhonePriorityIdle,
+	parameters: { phone: true, footerState: "busy" },
+};
+export const FinalIconsPhonePrioritySwitch: Story = {
+	...FinalIconsPhonePriorityIdle,
+	parameters: { phone: true, footerState: "switch" },
+};
+export const FinalIconsPhonePriorityGoal: Story = {
+	...FinalIconsPhonePriorityIdle,
+	parameters: { phone: true, footerState: "goal" },
+};
+export const FinalIconsPhonePriorityAtReset: Story = {
+	...FinalIconsPhonePriorityIdle,
+	parameters: { phone: true, footerState: "at-reset" },
 };

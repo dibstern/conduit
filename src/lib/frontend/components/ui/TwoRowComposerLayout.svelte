@@ -57,17 +57,16 @@
 				const permission = element.querySelector<HTMLElement>('[data-testid="permission-mode-badge"]');
 				const checkout = element.querySelector<HTMLElement>(".git-pill.compact");
 				if (leading && send && model) {
-					const effortWidth = effort?.getBoundingClientRect().width ?? 0;
-					const fixedWidth = effortWidth + (permission?.getBoundingClientRect().width ?? 0);
+					const effortWidth = effort ? 44 : 0;
+					const permissionWidth = permission?.getBoundingClientRect().width ?? 0;
+					const fixedWidth = effortWidth + permissionWidth;
 					const available = element.clientWidth - leading.offsetWidth - send.offsetWidth - Number.parseFloat(getComputedStyle(send).marginLeft) - 2 * Number.parseFloat(getComputedStyle(element).columnGap);
 					// These budgets never include space recovered by hiding a label.
 					// Otherwise checkout collapsing would make the model name reappear.
 					const checkoutWidth = checkout ? 90 : 0;
-					const fit = available >= fixedWidth + checkoutWidth + 58 ? "labels"
+					let fit = available >= fixedWidth + checkoutWidth + 58 ? "labels"
 						: available >= fixedWidth + checkoutWidth + 44 ? "model-logo"
 						: checkout && available >= fixedWidth + 88 ? "checkout-icon" : "checkout-hidden";
-					element.dataset["footerFit"] = fit;
-					element.style.setProperty("--composer-model-minimum", `${44 + effortWidth}px`);
 					const composer = element.closest<HTMLElement>("#input-area");
 					if (fit === "checkout-hidden" && element.parentElement && composer && composer.clientWidth < 393) {
 						const shortage = Math.min(14, Math.max(0, fixedWidth + 44 - available));
@@ -75,6 +74,13 @@
 						footerStart = Math.min(shortage, Math.max(0, Number.parseFloat(frame.paddingInlineStart) - 4));
 						footerEnd = Math.min(shortage - footerStart, Math.max(0, Number.parseFloat(frame.paddingInlineEnd) - 4));
 					}
+					if (fit === "checkout-hidden" && effort && available + footerStart + footerEnd < fixedWidth + 44) {
+						fit = "effort-hidden";
+						footerStart = 0;
+						footerEnd = 0;
+					}
+					element.dataset["footerFit"] = fit;
+					element.style.setProperty("--composer-model-minimum", `${44 + (fit === "effort-hidden" ? 0 : effortWidth)}px`);
 				}
 			} else {
 				delete element.dataset["footerFit"];
@@ -86,6 +92,23 @@
 			}
 			if (footerStart + footerEnd > 0) element.dataset["footerGutter"] = "borrowed";
 			else delete element.dataset["footerGutter"];
+			if (element.hasAttribute("data-phone-icons")) {
+				const actions = element.querySelector<HTMLElement>('[data-slot="send"]');
+				const actionStart = actions?.getBoundingClientRect().left;
+				for (const control of element.querySelectorAll<HTMLElement>('#attach-btn, .model-btn, [data-testid="variant-badge"], [data-testid="permission-mode-badge"]')) {
+					if (actionStart === undefined || !control.checkVisibility()) continue;
+					const bounds = control.getBoundingClientRect();
+					const target = getComputedStyle(control, "::before");
+					const width = Math.max(bounds.width, Number.parseFloat(target.minWidth) || 0);
+					const overlap = bounds.right + (width - bounds.width) / 2 - actionStart;
+					// Keep the target's height without letting its transparent edge steal Send taps.
+					const clip = overlap > 0 ? `${overlap}px` : "";
+					if (control.style.getPropertyValue("--composer-target-clip") !== clip) {
+						if (clip) control.style.setProperty("--composer-target-clip", clip);
+						else control.style.removeProperty("--composer-target-clip");
+					}
+				}
+			}
 
 			// Bound drafts can change without an input event or a DOM mutation.
 			// Observe this instance's native value setter, and restore it on teardown.
@@ -281,7 +304,10 @@
 	[data-phone-icons]:not([data-footer-fit="labels"]) :global([data-testid="model-chip-chevron"]),
 	[data-phone-icons]:not([data-footer-fit="labels"]) :global([data-testid="picker-selected-context"]) { display: none; }
 	[data-footer-fit="checkout-icon"] { --composer-checkout-width: 44px; }
-	[data-footer-fit="checkout-hidden"] :global(.git-pill.compact) { display: none; }
+	[data-footer-fit="checkout-hidden"] :global(.git-pill.compact),
+	[data-footer-fit="effort-hidden"] :global(.git-pill.compact),
+	[data-footer-fit="effort-hidden"] :global([data-testid="variant-badge"]) { display: none; }
+	[data-phone-icons] :global(button::before) { clip-path: inset(0 var(--composer-target-clip, 0px) 0 0); }
 
 	/* Centre the font's x-height on the icons, rather than its line box.
 	   Geist and Geist Mono have different baseline-to-x-height offsets. */
