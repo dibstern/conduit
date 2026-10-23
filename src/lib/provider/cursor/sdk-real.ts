@@ -12,11 +12,12 @@ import {
 } from "node:fs";
 import { access } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { Redacted } from "effect";
+import type { CursorCredentialEnvelope } from "./cursor-credential.js";
 import { CursorSdkFailure, cursorSdkFailure } from "./sdk-error.js";
 import type {
 	CursorAgent,
 	CursorAgentOptions,
-	CursorCredential,
 	CursorCustomTool,
 	CursorSdkPort,
 	CursorStore,
@@ -98,7 +99,7 @@ export function createRealCursorSdkPort(
 	>();
 	const agentOptions = (
 		options: CursorAgentOptions,
-		credential: CursorCredential,
+		credential: CursorCredentialEnvelope,
 		store: CursorStore,
 		customTools: Readonly<Record<string, CursorCustomTool>> = {},
 	): import("@cursor/sdk").AgentOptions => {
@@ -110,7 +111,7 @@ export function createRealCursorSdkPort(
 			});
 		}
 		return {
-			apiKey: credential.apiKey,
+			apiKey: Redacted.value(credential.apiKey),
 			tools: [...options.tools],
 			disallowedTools: [...options.disallowedTools],
 			local: {
@@ -347,7 +348,7 @@ export function createRealCursorSdkPort(
 		async modelsList(credential) {
 			try {
 				const models = await (await load()).Cursor.models.list({
-					apiKey: credential.apiKey,
+					apiKey: Redacted.value(credential.apiKey),
 				});
 				return models.map(({ id, displayName, parameters, variants }) => ({
 					id,

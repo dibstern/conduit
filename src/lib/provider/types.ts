@@ -155,6 +155,7 @@ export interface TurnTokens {
 }
 
 export type TurnErrorCode =
+	| "turn_unprepared"
 	| "auth_required"
 	| "usage_limited"
 	| "context_overflow"

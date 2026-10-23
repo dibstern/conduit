@@ -44,6 +44,7 @@
 	const reading = $derived(claudeAccounts.readingOf(accountId));
 	const answer = $derived(accountLimit({
 		asker: "automatic",
+		modelId: findSession(sessionId)?.model?.model,
 		...(reading === undefined ? {} : { reading }),
 		recovery: limitRecovery,
 		now: clock.now,

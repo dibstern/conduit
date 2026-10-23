@@ -4,6 +4,7 @@ import { createInterface } from "node:readline";
 import { Effect } from "effect";
 import { BUILD_ID } from "../../build-id.js";
 import { isRecord } from "../../utils.js";
+import type { CursorBackendUrl } from "../cursor/cursor-credential.js";
 import type { ProviderControlCommandStatus, TurnResult } from "../types.js";
 import type { RunnerUpgradeState } from "./runner-upgrade.js";
 import type {
@@ -71,6 +72,7 @@ export interface RunnerHello {
 	readonly rebindsAccount?: true;
 	/** Cursor sends consume the daemon's admitted account credential envelope. */
 	readonly scopedCursorCredentials?: true;
+	readonly cursorBackendUrl?: CursorBackendUrl;
 	readonly taggedConfigDir?: true;
 	readonly bindings?: readonly {
 		readonly sinkId: string;
@@ -191,6 +193,7 @@ export function runnerHelloFailure(
 	hello: RunnerHello,
 	peer: "server" | "runner",
 	expectedDriverKind?: string,
+	expectedCursorBackendUrl?: CursorBackendUrl,
 ): SessionFailure | undefined {
 	if (hello.protocolVersion !== RUNNER_PROTOCOL_VERSION)
 		return {
@@ -209,6 +212,18 @@ export function runnerHelloFailure(
 			code: "runner_incompatible",
 		};
 	// Runner builds predating driverKind were all Claude.
+	if (
+		peer === "runner" &&
+		expectedCursorBackendUrl !== undefined &&
+		hello.cursorBackendUrl !== expectedCursorBackendUrl
+	)
+		return {
+			...runnerFailure(
+				"runner hello",
+				`Cursor runner backend mismatch: runner uses ${hello.cursorBackendUrl ?? "an unreported backend"}, expected ${expectedCursorBackendUrl}`,
+			),
+			code: "runner_incompatible",
+		};
 	if (
 		expectedDriverKind !== undefined &&
 		(hello.driverKind ?? "claude") !== expectedDriverKind
@@ -387,6 +402,29 @@ export class RunnerSocket {
 				),
 				code: "runner_incompatible",
 			});
+		if (
+			this.peerDriverKind === "cursor" &&
+			(command.type === "send-turn" || command.type === "pre-warm")
+		) {
+			const inputEnvironment = {
+				shellEnv: {},
+				...(command.input.account
+					? { account: { ...command.input.account, env: {} } }
+					: {}),
+			};
+			command =
+				command.type === "send-turn"
+					? {
+							...command,
+							shellEnv: {},
+							input: { ...command.input, ...inputEnvironment },
+						}
+					: {
+							...command,
+							shellEnv: {},
+							input: { ...command.input, ...inputEnvironment },
+						};
+		}
 		return this.requestEffect(`command:${commandId}`, {
 			type: "command",
 			commandId,

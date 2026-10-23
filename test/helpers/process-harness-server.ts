@@ -905,8 +905,10 @@ async function main(): Promise<void> {
 							const owner = resources.value;
 							observedOwners.add(owner);
 							const use = owner.use;
-							const observedUse: typeof owner.use = (accountId, work) =>
-								use(accountId, (resource) =>
+							const observedUse: typeof owner.use = (selected, work) => {
+								const accountId =
+									typeof selected === "string" ? selected : "cursor-login-slot";
+								return use(selected, (resource) =>
 									Effect.suspend(() => {
 										let identity = resourceIdentities.get(resource);
 										if (identity === undefined) {
@@ -937,6 +939,7 @@ async function main(): Promise<void> {
 										return work(resource);
 									}),
 								);
+							};
 							Object.assign(owner, { use: observedUse });
 						}),
 					),

@@ -13,13 +13,9 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { it as effectIt } from "@effect/vitest";
-import { Effect, Exit, Fiber, Result } from "effect";
+import { Effect, Exit, Fiber, Redacted, Result } from "effect";
 import { afterEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { AccountIdSchema } from "../../../../src/lib/contracts/account.js";
-import { WsRpcError } from "../../../../src/lib/contracts/ws-rpc.js";
-import type { CursorAccountResources } from "../../../../src/lib/provider/cursor/cursor-account-resources.js";
-import { makeCursorAuth } from "../../../../src/lib/provider/cursor/cursor-auth.js";
-import { resolveCursorCredential } from "../../../../src/lib/provider/cursor/cursor-credential.js";
 import {
 	cursorModelInfo,
 	makeCursorRunnerDriver,
@@ -29,6 +25,10 @@ import type {
 	CursorSdkPort,
 } from "../../../../src/lib/provider/cursor/sdk-port.js";
 import { createTraceCursorSdkPort } from "../../../../src/lib/provider/cursor/sdk-trace-player.js";
+import {
+	cursorAccountResourcesFixture,
+	cursorCredentialFixture,
+} from "../../../helpers/cursor-account-resources-fixture.js";
 
 const trace = resolve("test/fixtures/cursor-sdk-traces/title-generation.jsonl");
 const captured = readFileSync(trace, "utf8")
@@ -53,14 +53,23 @@ const input = {
 	prompt: "Fix login redirect loop",
 };
 const roots: string[] = [];
-function setup() {
+function setup(loggedIn = true) {
 	const root = mkdtempSync(join(tmpdir(), "cursor-title-replay-"));
 	roots.push(root);
 	const port = createTraceCursorSdkPort(trace);
 	return {
 		root,
 		port,
-		driver: makeCursorRunnerDriver(port, undefined, root),
+		driver: makeCursorRunnerDriver(
+			cursorAccountResourcesFixture(
+				port,
+				loggedIn
+					? { _tag: "Ready", credential: cursorCredentialFixture() }
+					: { _tag: "LoggedOut" },
+			),
+			undefined,
+			root,
+		),
 	};
 }
 function observe(
@@ -134,31 +143,21 @@ describe("Cursor ephemeral text generation with captured SDK traffic", () => {
 						vi.spyOn(sdk, "modelsList");
 						ports.set(id, sdk);
 					}
-					const auth = yield* makeCursorAuth(() => Effect.void, {
-						port: shared,
-						env: {},
-					});
-					const resources: CursorAccountResources["Service"] = {
-						use: (id, work) => {
+					const resources = cursorAccountResourcesFixture(
+						(id) => {
 							const sdk = ports.get(id);
 							if (!sdk) throw new Error(`Unexpected account ${id}`);
-							return work({
-								sdk,
-								auth,
-								credential: Effect.tryPromise({
-									try: () => resolveCursorCredential(sdk, {}),
-									catch: () =>
-										new WsRpcError({ message: "Credential lookup failed" }),
-								}),
-							});
+							return sdk;
 						},
-					};
-					const driver = makeCursorRunnerDriver(
-						shared,
-						undefined,
-						root,
-						resources,
+						(id) =>
+							loggedIn || id !== account.id
+								? {
+										_tag: "Ready",
+										credential: cursorCredentialFixture(`[REDACTED:${id}]`),
+									}
+								: { _tag: "LoggedOut" },
 					);
+					const driver = makeCursorRunnerDriver(resources, undefined, root);
 					for (const id of loggedIn ? ports.keys() : [account.id]) {
 						const sdk = ports.get(id);
 						if (!sdk) throw new Error(`Missing account ${id}`);
@@ -170,14 +169,30 @@ describe("Cursor ephemeral text generation with captured SDK traffic", () => {
 						);
 						if (loggedIn) {
 							expect(Result.getOrThrow(result)).toBe(reply);
-							expect(sdk.modelsList).toHaveBeenCalledWith(
-								expect.objectContaining({ apiKey: `[REDACTED:${id}]` }),
-							);
-							expect(sdk.createAgent).toHaveBeenCalledWith(
-								expect.anything(),
-								expect.objectContaining({ apiKey: `[REDACTED:${id}]` }),
-								expect.anything(),
-							);
+							const expectedKey = `[REDACTED:${id}]`;
+							const fingerprint =
+								cursorCredentialFixture(expectedKey).fingerprint;
+							expect(
+								vi.mocked(sdk.modelsList).mock.calls.map(([credential]) => ({
+									apiKey: Redacted.value(credential.apiKey),
+									fingerprint: credential.fingerprint,
+								})),
+							).toEqual([{ apiKey: expectedKey, fingerprint }]);
+							expect(
+								vi
+									.mocked(sdk.createAgent)
+									.mock.calls.map(([options, credential]) => ({
+										apiKey: Redacted.value(credential.apiKey),
+										fingerprint: credential.fingerprint,
+										agentFingerprint: options.credentialFingerprint,
+									})),
+							).toEqual([
+								{
+									apiKey: expectedKey,
+									fingerprint,
+									agentFingerprint: fingerprint,
+								},
+							]);
 							expectClean(root, sdk);
 						} else {
 							expect(Result.isFailure(result)).toBe(true);
@@ -250,11 +265,9 @@ describe("Cursor ephemeral text generation with captured SDK traffic", () => {
 	it("preserves an explicitly selected captured variant", async () => {
 		const { root, port, driver } = setup();
 		const observed = observe(port);
-		const models = await port.modelsList({
-			source: "environment",
-			apiKey: "[REDACTED]",
-			fingerprint: "replay",
-		});
+		const models = await port.modelsList(
+			cursorCredentialFixture("[REDACTED]", "environment"),
+		);
 		const model = models.find(({ id }) => id === "gpt-5.4");
 		if (!model) throw new Error("Missing captured GPT model");
 		const info = cursorModelInfo(model);
@@ -420,7 +433,7 @@ describe("Cursor ephemeral text generation with captured SDK traffic", () => {
 		"account",
 		"auth",
 	] as const)("rejects an unavailable %s without creating an agent", async (kind) => {
-		const { port, driver } = setup();
+		const { port, driver } = setup(kind !== "auth");
 		observe(port);
 		const request = {
 			...input,

@@ -684,7 +684,7 @@ test.describe("Claude Side Threads", () => {
 			await app.sendMessage(text);
 			await expect(
 				page.getByText(
-					"This session has no Claude transcript yet. Send a message first.",
+					"This session has no messages yet. Send a message first.",
 					{ exact: true },
 				),
 			).toBeVisible();

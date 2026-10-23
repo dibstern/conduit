@@ -525,6 +525,7 @@ export const makeContinuation = Effect.gen(function* () {
 									const { reading, limit } = continuationLimit(
 										{
 											asker: due ? "automatic" : "user",
+											modelId: session.model_id ?? undefined,
 											...(decision === undefined ? {} : { reading: decision }),
 											...(recovery === null ? {} : { recovery }),
 											now: due
@@ -824,7 +825,8 @@ export const makeContinuation = Effect.gen(function* () {
 			if (!usageLimits?.autoSwitch) return false;
 			const rows = yield* sql<{
 				limit_recovery: string | null;
-			}>`SELECT limit_recovery FROM sessions WHERE id = ${sessionId}`;
+				model_id: string | null;
+			}>`SELECT limit_recovery, model_id FROM sessions WHERE id = ${sessionId}`;
 			const value = rows[0]?.limit_recovery;
 			const recovery = value == null ? null : decodeRecovery(value);
 			if (!recovery || recovery.continued) return false;
@@ -848,7 +850,10 @@ export const makeContinuation = Effect.gen(function* () {
 			)
 				return false;
 			const usage = yield* Usage;
-			const instanceId = yield* usage.pickFailover(recovery.instanceId);
+			const instanceId = yield* usage.pickFailover(
+				recovery.instanceId,
+				rows[0]?.model_id ?? undefined,
+			);
 			if (instanceId === undefined) return false;
 			yield* requestContinuation(
 				sessionId,
@@ -867,7 +872,8 @@ export const makeContinuation = Effect.gen(function* () {
 			if (!usageLimits?.autoResume) return false;
 			const rows = yield* sql<{
 				limit_recovery: string | null;
-			}>`SELECT limit_recovery FROM sessions WHERE id = ${sessionId}`;
+				model_id: string | null;
+			}>`SELECT limit_recovery, model_id FROM sessions WHERE id = ${sessionId}`;
 			const value = rows[0]?.limit_recovery;
 			const recovery = value == null ? null : decodeRecovery(value);
 			if (!recovery || recovery.continued || recovery.scheduledAt !== undefined)
@@ -877,6 +883,7 @@ export const makeContinuation = Effect.gen(function* () {
 			const reading = yield* usage.latest(recovery.instanceId);
 			const { limit } = continuationLimit({
 				asker: "automatic",
+				modelId: rows[0]?.model_id ?? undefined,
 				...(reading === undefined ? {} : { reading }),
 				recovery,
 				now,

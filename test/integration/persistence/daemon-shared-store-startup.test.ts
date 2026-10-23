@@ -81,7 +81,10 @@ import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-que
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import * as importer from "../../../src/lib/persistence/migrations/daemon-store-import.js";
 import { daemonStorePath } from "../../../src/lib/persistence/project-storage.js";
+import { CursorAccountResources } from "../../../src/lib/provider/cursor/cursor-account-resources.js";
+import { createCursorSdkPort } from "../../../src/lib/provider/cursor/cursor-sdk.js";
 import type { StoredProject } from "../../../src/lib/types.js";
+import { cursorAccountResourcesFixture } from "../../helpers/cursor-account-resources-fixture.js";
 import { daemonStoreManifest } from "../../helpers/daemon-store-import-manifest.js";
 import {
 	makeMockAccountDirectory,
@@ -196,6 +199,9 @@ function startup(root: string, projects: readonly StoredProject[]) {
 							registry,
 							directory,
 							Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+							Layer.succeed(CursorAccountResources)(
+								cursorAccountResourcesFixture(createCursorSdkPort()),
+							),
 							Layer.effect(SessionActivityTag, makeSessionActivity),
 							DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
 							makeOpenCodeRuntimeStateLive(),
