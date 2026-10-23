@@ -1076,9 +1076,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				);
 				expect(missing._tag).toBe("Failure");
 				if (missing._tag === "Failure")
-					expect(String(missing.failure)).toContain(
-						"has no Claude transcript yet",
-					);
+					expect(String(missing.failure)).toContain("has no messages yet");
 				expect(forkSession).not.toHaveBeenCalled();
 				expect(query).not.toHaveBeenCalled();
 				if (usesCanonicalHistory) expect(readTranscript).not.toHaveBeenCalled();
