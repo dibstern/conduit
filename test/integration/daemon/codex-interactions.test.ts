@@ -2,14 +2,24 @@
 // decisions, an unanswered callback blocks notifications, restart loses it, or
 // async questions block, expire at turn end, or answer through native callbacks.
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	writeFileSync,
+} from "node:fs";
+import { createConnection, createServer, type Socket } from "node:net";
 import { join, resolve } from "node:path";
+import { createInterface } from "node:readline";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PROVIDER_DRIVERS } from "../../../src/lib/contracts/provider-instance.js";
 import type { AppServerTraceReport } from "../../../src/lib/provider/codex/app-server/trace-player.js";
+import type { RunnerMessage } from "../../../src/lib/provider/runner/runner-protocol.js";
+import { discoverRunners } from "../../../src/lib/provider/runner/runner-registry.js";
 import type { SessionPermissionMode } from "../../../src/lib/shared-types.js";
 import {
 	codexModels,
@@ -116,6 +126,109 @@ describe("Codex interactions through the real daemon and detached runner", () =>
 	let reportPath = "";
 	let gatePath = "";
 	let evidence: Record<string, unknown> = {};
+	let proxy: Awaited<ReturnType<typeof interceptAnswer>> | undefined;
+
+	// Failure modes: lose resolution output after native delivery, or restart with
+	// an accepted answer that never reached the runner. Gate wire events, not time.
+	async function interceptAnswer(
+		fixture: ProcessHarness,
+		direction: "command" | "output",
+	) {
+		const [runner] = discoverRunners(fixture.projectDir, fixture.configDir);
+		expect(runner).toBeDefined();
+		if (!runner) return undefined;
+		const upstreamPath = `${runner.socketPath}u`;
+		renameSync(runner.socketPath, upstreamPath);
+		let signalIntercepted!: () => void;
+		const intercepted = new Promise<void>((resolve) => {
+			signalIntercepted = resolve;
+		});
+		const sockets = new Set<Socket>();
+		let blocking = true;
+		const server = createServer((downstream) => {
+			const upstream = createConnection(upstreamPath);
+			for (const socket of [downstream, upstream]) {
+				sockets.add(socket);
+				socket.on("error", () => socket.destroy());
+				socket.on("close", () => {
+					sockets.delete(socket);
+					downstream.destroy();
+					upstream.destroy();
+				});
+			}
+			for (const [source, target, lane] of [
+				[downstream, upstream, "command"],
+				[upstream, downstream, "output"],
+			] as const) {
+				let held = false;
+				createInterface({ input: source }).on("line", (line) => {
+					const message: RunnerMessage = JSON.parse(line);
+					if (
+						blocking &&
+						lane === direction &&
+						((message.type === "command" &&
+							message.command.type === "resolve-question") ||
+							(message.type === "output" &&
+								message.output.type === "resolve-question"))
+					) {
+						held = true;
+						signalIntercepted();
+					}
+					if (!held) target.write(`${line}\n`);
+				});
+			}
+		});
+		await new Promise<void>((resolve, reject) => {
+			server.once("error", reject);
+			server.listen(runner.socketPath, resolve);
+		});
+		return {
+			intercepted,
+			reconnect() {
+				blocking = false;
+				for (const socket of sockets) socket.destroy();
+			},
+			async close() {
+				for (const socket of sockets) socket.destroy();
+				await new Promise<void>((resolve) => server.close(() => resolve()));
+			},
+		};
+	}
+
+	function assertNoSecret(fixture: ProcessHarness, id: string, secret: string) {
+		const stored = sessionRows(fixture, id);
+		const leakingTables = Object.entries(stored)
+			.filter(([, tableRows]) => JSON.stringify(tableRows).includes(secret))
+			.map(([name]) => name);
+		const spoolLeaks = discoverRunners(
+			fixture.projectDir,
+			fixture.configDir,
+		).map((runner) => {
+			const spool = `${runner.socketPath}.spool`;
+			return existsSync(spool) && readFileSync(spool, "utf8").includes(secret);
+		});
+		const logLeaks = [
+			join(artifactRoot, "daemon.log"),
+			join(fixture.configDir, "runners.log"),
+		].map(
+			(path) => existsSync(path) && readFileSync(path, "utf8").includes(secret),
+		);
+		evidence["secretExposure"] = {
+			rowCounts: Object.fromEntries(
+				Object.entries(stored).map(([name, tableRows]) => [
+					name,
+					tableRows.length,
+				]),
+			),
+			leakingTables,
+			spoolLeaks,
+			logLeaks,
+		};
+		expect(leakingTables).toEqual([]);
+		expect(spoolLeaks).not.toContain(true);
+		expect(logLeaks).not.toContain(true);
+		return stored;
+	}
 
 	function writeTrace(trace: TraceRow[]) {
 		writeFileSync(
@@ -293,6 +406,8 @@ describe("Codex interactions through the real daemon and detached runner", () =>
 			}
 			expect(fixture.remainingRunnerPids()).toEqual([]);
 		} finally {
+			await proxy?.close();
+			proxy = undefined;
 			writeFileSync(
 				join(artifactRoot, "events.json"),
 				`${JSON.stringify(state ?? {}, null, 2)}\n`,
@@ -306,6 +421,152 @@ describe("Codex interactions through the real daemon and detached runner", () =>
 			sessionId = undefined;
 		}
 	});
+
+	it(
+		"coalesces overlapping secret answers with the same command id",
+		async () => {
+			const { fixture, browser, id, trace } = await start(
+				"secret-overlap",
+				"question-blocking",
+				"plan",
+			);
+			const card = await pending(browser, id, "question");
+			const command = {
+				projectSlug: "process-test",
+				originId: browser.originId,
+				commandId: randomUUID(),
+				toolId: String(card["toolId"]),
+				answers: { "0": "Safe", "1": "overlap-secret" },
+			};
+			const results = await Effect.runPromise(
+				Effect.all(
+					[
+						browser.rpc.AnswerQuestion(command),
+						browser.rpc.AnswerQuestion(command),
+					],
+					{ concurrency: 2 },
+				).pipe(Effect.timeout("10 seconds")),
+			);
+			expect(results).toEqual([{ ok: true }, { ok: true }]);
+			await completed(fixture, id);
+			assertReply(serverRequest(trace, QUESTION).id, {
+				answers: {
+					plan: { answers: ["Safe"] },
+					secret: { answers: ["overlap-secret"] },
+				},
+			});
+			const stored = assertNoSecret(fixture, id, "overlap-secret");
+			expect(
+				stored["provider_command_outbox"]?.filter(
+					(row) => row["command_id"] === command.commandId,
+				),
+			).toHaveLength(1);
+			evidence["completedCalls"] = results.length;
+		},
+		TIMEOUT * 2,
+	);
+
+	it.each(["output", "command"] as const)(
+		"recovers a secret answer interrupted at runner %s",
+		async (direction) => {
+			const { fixture, browser, id, trace, restartOptions } = await start(
+				`secret-interrupted-${direction}`,
+				"question-blocking",
+				"plan",
+			);
+			const card = await pending(browser, id, "question");
+			await fixture.kill();
+			proxy = await interceptAnswer(fixture, direction);
+			expect(proxy).toBeDefined();
+			writeTrace(discoveryTrace());
+			writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+			await fixture.restart(restartOptions);
+			const after = await fixture.connect(id);
+			await after.waitFor(
+				(message) => message["type"] === "question_pending",
+				0,
+				TIMEOUT,
+			);
+			const commandId = randomUUID();
+			const answer = Effect.runPromiseExit(
+				after.rpc.AnswerQuestion({
+					projectSlug: "process-test",
+					originId: after.originId,
+					commandId,
+					toolId: String(card["toolId"]),
+					answers: { "0": "Safe", "1": "interrupted-secret" },
+				}),
+			);
+			await proxy?.intercepted;
+			assertNoSecret(fixture, id, "interrupted-secret");
+			await fixture.kill();
+			await answer;
+			proxy?.reconnect();
+			await fixture.restart(restartOptions);
+			const recovered = await fixture.connect(id);
+			if (direction === "command") {
+				const expired = await recovered.waitFor(
+					(message) => message["type"] === "question_pending",
+					0,
+					TIMEOUT,
+				);
+				const expiredState = sessionRows(fixture, id);
+				expect(
+					expiredState["command_receipts"]?.find(
+						(row) => row["command_id"] === commandId,
+					),
+				).toMatchObject({
+					status: "side_effect_failed",
+					error_code: "secret_answer_expired",
+				});
+				expect(
+					expiredState["pending_approvals"]?.find(
+						(row) => row["id"] === card["toolId"],
+					),
+				).toMatchObject({ status: "pending" });
+				evidence["expiredOutbox"] = expiredState[
+					"provider_command_outbox"
+				]?.find((row) => row["command_id"] === commandId);
+				expect(JSON.stringify(await recovered.history(id))).toContain(
+					"re-enter",
+				);
+				expect(
+					await Effect.runPromise(
+						recovered.rpc.AnswerQuestion({
+							projectSlug: "process-test",
+							originId: recovered.originId,
+							commandId: randomUUID(),
+							toolId: String(expired["toolId"]),
+							answers: { "0": "Safe", "1": "interrupted-secret" },
+						}),
+					),
+				).toEqual({ ok: true });
+			}
+			await completed(fixture, id);
+			assertReply(serverRequest(trace, QUESTION).id, {
+				answers: {
+					plan: { answers: ["Safe"] },
+					secret: { answers: ["interrupted-secret"] },
+				},
+			});
+			const stored = assertNoSecret(fixture, id, "interrupted-secret");
+			expect(
+				stored["pending_approvals"]?.find(
+					(row) => row["id"] === card["toolId"],
+				),
+			).toMatchObject({
+				status: "resolved",
+				decision: JSON.stringify({ "0": "Safe", "1": "[redacted]" }),
+			});
+			const resolutions = snapshot(fixture, id).events.filter(
+				({ type }) => type === "question.resolved",
+			);
+			expect(resolutions).toHaveLength(direction === "output" ? 1 : 2);
+			evidence["canonicalResolutionCount"] = resolutions.length;
+			evidence["expiredCommands"] = direction === "command" ? 1 : 0;
+		},
+		TIMEOUT * 3,
+	);
 
 	it(
 		"keeps an async question non-blocking across turn end, daemon restart and runner restart",
