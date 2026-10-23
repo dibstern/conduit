@@ -122,6 +122,69 @@ svg.lucide{width:14px;height:14px;stroke-width:2}
 .gauge.big{flex:1 1 auto;min-width:90px;max-width:280px;height:6px}
 /* 7 gutter */
 .gut{margin:6px 0 0 19px;padding-left:8px;border-left:1px solid var(--border)}
+/* round 3 */
+:root{--ask:light-dark(#b45309,#ff9f0a);--decision:light-dark(#255fcb,#689cff);--risk:light-dark(#c0267f,#f469c4);--finding:light-dark(#087f76,#2bb5ab);--milestone:light-dark(#127136,#3ecf8e)}
+.ct{color:var(--dim);font:11px "Geist Mono",monospace;margin-left:4px}
+.chip{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:99px;font:500 11.5px "Geist Mono",monospace;flex:none}
+.chip.ask{background:color-mix(in srgb,var(--ask) 18%,transparent);color:var(--ask)}
+.chip.unr{background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--accent)}
+.phone .hl .ph.jh{display:none}
+.mdot{position:absolute;top:2px;left:var(--x);width:7px;height:7px;border-radius:50%;background:var(--c);transform:translate(-50%,-50%);box-shadow:0 0 0 1.5px var(--turn-bg)}
+.mdot.ring::after{content:"";position:absolute;inset:-4px;border:1px solid var(--c);border-radius:50%;opacity:.55}
+.stripw.pins{margin-top:32px}
+.pin{position:absolute;bottom:100%;left:var(--x);transform:translateX(-50%);display:flex;flex-direction:column;align-items:center}
+.pin .pc{display:flex;align-items:center;gap:3px;height:19px;padding:0 6px;border-radius:99px;background:var(--chip);font:500 11px "Geist Mono",monospace;color:var(--text2);white-space:nowrap}
+.pin .pc b{color:var(--c);font-weight:600}
+.pin.on .pc{background:color-mix(in srgb,var(--c) 22%,transparent);color:var(--text);box-shadow:0 0 0 1px var(--c)}
+.pin .ps{width:1px;height:6px;background:var(--border)}
+.phone .pin .n{display:none}
+.mb{display:inline-flex;align-items:center;gap:3px;height:18px;padding:0 6px;border-radius:6px;font:600 11px "Geist Mono",monospace;color:var(--c);background:color-mix(in srgb,var(--c) 15%,transparent);flex:none}
+.hov{padding-bottom:78px}
+.cur{position:absolute;top:-4px;left:var(--x);width:2px;height:12px;margin-left:-1px;border-radius:1px;background:var(--text)}
+.caret{position:absolute;top:11px;left:var(--x);width:11px;height:11px;margin-left:-5.5px;background:var(--raised);border-left:1px solid var(--border);border-top:1px solid var(--border);transform:rotate(45deg);z-index:3}
+.pop{position:absolute;top:16px;--w:min(400px,100%);width:var(--w);left:clamp(0px,calc(var(--x) - var(--w) * .3),calc(100% - var(--w)));z-index:2;background:var(--raised);border:1px solid var(--border);border-radius:10px;box-shadow:0 10px 28px -10px light-dark(rgba(0,0,0,.25),rgba(0,0,0,.75));padding:6px 8px 6px}
+.pl{display:flex;align-items:center;gap:6px;padding:2px 0;white-space:nowrap;min-width:0}
+.pl .v2{color:var(--text2)}
+.pl .ptx{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.pl .ptx.mono{font-size:12px;color:var(--dim)}
+.pl .pat{margin-left:auto;padding-left:8px;font:11.5px "Geist Mono",monospace;color:var(--dim);flex:none}
+.perr{font-size:12px;color:var(--error);flex:none}
+.pfine{font-size:11.5px;color:var(--dim);padding-top:3px}
+.pnl{border:1px solid var(--border);border-radius:14px;background:var(--bg)}
+.pnl>.top{background:var(--turn-bg);padding:10px 12px}
+.pnl>:first-child{border-radius:13px 13px 0 0}
+.pnl>:last-child{border-radius:0 0 13px 13px}
+.pnl>:only-child{border-radius:13px}
+.pbody.jb{padding:10px}
+.tabrow{margin-top:12px}
+.phone .tabrow .seg,.phone .lvrow .seg{display:flex;width:100%}
+.phone .tabrow .seg>span,.phone .lvrow .seg>span{flex:1 1 auto;text-align:center;padding:3px 4px}
+.seg .dv{flex:0 0 1px!important;padding:0!important;margin:4px 1px;background:var(--border);border-radius:0}
+.jc{background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:10px 12px 8px}
+.card .jc{margin-top:10px}
+.jc.ask{border-color:color-mix(in srgb,var(--ask) 65%,transparent)}
+.jtop{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.tag{font:600 11px Geist,sans-serif;padding:3px 7px;border-radius:6px;color:var(--c);background:color-mix(in srgb,var(--c) 16%,transparent)}
+.jmeta{margin-left:auto;font:11.5px "Geist Mono",monospace;color:var(--dim)}
+.jtx{font-size:13.5px;line-height:1.5;margin:8px 0 9px}
+.jact{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.btn{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 9px;border-radius:8px;background:var(--chip);font-size:12px;color:var(--text2);white-space:nowrap}
+.btn.on{background:var(--sel);color:var(--text);box-shadow:0 0 0 1px var(--border)}
+.nav{margin-left:auto;display:flex;gap:2px;color:var(--dim)}
+.nav span{display:flex;width:24px;height:24px;align-items:center;justify-content:center}
+.phone .jact .rt{display:none}
+.lvrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px;font:11.5px "Geist Mono",monospace;color:var(--dim)}
+.lvrow .seg{margin-left:auto}
+.phone .lvrow .t{display:none}
+.phone .seg.dial .ct{display:none}
+.drawer{margin:0 10px;background:var(--raised);border:1px solid var(--border);border-top:0;border-radius:0 0 12px 12px;box-shadow:0 14px 28px -14px light-dark(rgba(0,0,0,.25),rgba(0,0,0,.75));padding:8px 6px 6px}
+.phone .drawer{margin:0 6px}
+.dtop{display:flex;align-items:center;gap:8px;padding:0 4px 8px;border-bottom:1px solid var(--border);margin-bottom:4px}
+.ftabs{display:flex;align-items:stretch;background:var(--turn-bg);border-top:1px solid var(--border);padding:0 6px;min-height:38px}
+.ftab{display:flex;align-items:center;padding:0 10px;font:500 12px Geist,sans-serif;color:var(--text2)}
+.ftab.on{color:var(--text);box-shadow:inset 0 2px 0 var(--accent)}
+.phone .ftab{padding:0 8px}
+.fright{margin-left:auto;display:flex;align-items:center;gap:6px;padding-right:6px;font:12px "Geist Mono",monospace;color:var(--text2);white-space:nowrap}
 </style>
 <script>
 const K={skill:['sparkles','--other','Loaded'],think:['brain','--thinking','Thought'],read:['file-text','--explore','Read'],search:['search','--explore','Searched'],edit:['pencil','--edit','Edited'],bash:['terminal','--shell','Ran'],msg:['message-square','--textc','']};
@@ -238,10 +301,7 @@ D.table=p=>{
   card({open:1})+`<div class="tbl">${th}${STEPS.map(s=>tr(s)).join('')}${foot()}</div>`,
   ['','“At” is time into the turn, so a skill is a moment, not a span','totals are the table’s footer row']);
 };
-D.sheet=p=>{
- const tabs=on=>`<span class="seg"><span class="${on==='s'?'on':''}">Steps<span class="ct">12</span></span><span class="${on==='u'?'on':''}">Usage</span></span>`;
- const top=(o,on)=>p?`${head(o)}${strip(o.live?LIVE:STEPS,{live:o.live})}<div style="margin-top:10px">${tabs(on)}</div>`:`${head({...o,right:tabs(on)})}${strip(o.live?LIVE:STEPS,{live:o.live})}`;
- const usage=`<div class="usage">
+const USAGE=`<div class="usage">
   <div><div class="uk">Cost</div><div class="uv">$0.4123</div></div>
   <div><div class="uk">Tokens</div><div class="uv">1.2M in · 18k out</div></div>
   <div class="uw"><div class="uk">Context at end</div><div class="uv" style="display:flex;align-items:center;gap:10px"><span class="gauge big"><b></b></span><span style="white-space:nowrap">41% · 82k / 200k</span></div></div>
@@ -249,6 +309,10 @@ D.sheet=p=>{
   <div class="uw"><div class="uk">Worth a look</div>
    <div class="ul">${ico('circle-alert','--error')}<span>1 failed step · <span class="mono" style="font-size:12px">pnpm check</span></span><span class="at">at 1:20</span></div>
    <div class="ul">${ico('minimize','--text2')}<span>Context compacted · 141k saved</span><span class="at">at 3:00</span></div></div></div>`;
+D.sheet=p=>{
+ const tabs=on=>`<span class="seg"><span class="${on==='s'?'on':''}">Steps<span class="ct">12</span></span><span class="${on==='u'?'on':''}">Usage</span></span>`;
+ const top=(o,on)=>p?`${head(o)}${strip(o.live?LIVE:STEPS,{live:o.live})}<div style="margin-top:10px">${tabs(on)}</div>`:`${head({...o,right:tabs(on)})}${strip(o.live?LIVE:STEPS,{live:o.live})}`;
+ const usage=USAGE;
  return three(
   `<div class="card">${head({})}${strip(STEPS)}</div>`,
   `<div class="sheet">${top({live:1},'s')}<div class="sbody">${earlier()}${ticker({skill:'event'})}</div></div>`,
@@ -272,15 +336,163 @@ D.today=p=>{
   `<div class="card">${head({open:1})}${strip(STEPS)}</div><div class="log">${STEPS.map(s=>row(s)).join('')}${foot()}</div>`,
   ['','the footer reads as the next step','“✦ 2 skills” reads as step 13']);
 };
+/* ---------- round 3: panel × sheet × Jev × strip popover ---------- */
+const M={
+ 1:{n:1,c:'--finding',g:'●',tag:'Finding',at:'0:08',text:'The footer reuses the row indent and icon, so it reads as a step.'},
+ 2:{n:2,c:'--ask',g:'?',tag:'Ask',at:'1:10',ask:1,text:'Keep a skill counter at all, or only mark skills where they loaded? <b>I’ll carry on with the second for now.</b>'},
+ 3:{n:3,c:'--decision',g:'◆',tag:'Decision',at:'1:58',text:'Treating each skill load as an event with a name and a time, not a span.'},
+ 4:{n:4,c:'--risk',g:'!',tag:'Risk',at:'3:02',text:'Compaction dropped my notes on ActivityRow, so I re-read it before editing.'},
+ 5:{n:5,c:'--milestone',g:'●',tag:'Done',at:'4:10',text:'Both drafts are on the tsp page, with every state on desktop and phone.'}};
+const LV={final:[5],key:[2,4,5],balanced:[2,3,4,5],all:[1,2,3,4,5]};
+const msg=(n,d,w)=>({k:'msg',m:n,text:M[n].text,at:M[n].at,d,w});
+const STEPS2=[
+ STEPS[0],STEPS[1],STEPS[2],STEPS[3],STEPS[4],msg(1,'3s',6),msg(2,'2s',4),
+ {k:'skill',subj:'brainstorm',d:'290ms',w:1,at:'1:12'},
+ {k:'edit',subj:'chat/TurnActivity.svelte',d:'1s',w:5,at:'1:13'},
+ {k:'bash',subj:'pnpm check',d:'38s',w:18,fail:1,at:'1:20'},
+ msg(3,'2s',3),
+ {k:'bash',subj:'pnpm check',d:'41s',w:20,at:'2:01'},
+ {k:'compact',at:'3:00'},msg(4,'2s',3),
+ {k:'edit',subj:'chat/ActivityRow.svelte',d:'900ms',w:6,at:'3:58'},msg(5,'2s',3)];
+const LIVE2=STEPS2.slice(0,12);
+const mb=m=>`<span class="mb" style="--c:var(${m.c})">${m.g} ${m.n}</span>`;
+const lu=n=>`<i data-lucide="${n}"></i>`;
+function row2(s,o={}){
+ if(!s.m)return row(s,{...o,skill:'event'});
+ return `<div class="row">${mb(M[s.m])}<span class="msg" style="font-style:normal">${s.text.replace(/<\/?b>/g,'')}</span><time>${s.d}</time></div>`;
+}
+const ticker2=()=>LIVE2.slice(-3).map((s,i)=>row2(s,{live:i===2})).join('');
+function popover(steps,i,x,live){
+ const s=steps[i];const real=steps.filter(t=>t.k!=='compact');
+ let line,fine;
+ if(s.m){const m=M[s.m];line=`${mb(m)}<span class="ptx">${m.text.replace(/<\/?b>/g,'')}</span><span class="pat">${s.at}</span>`;fine=m.ask?'<span style="color:var(--ask)">Needs reply</span> · click to open':'Click to open';}
+ else{const [n,c,v]=K[s.k];const run=live&&i===steps.length-1;
+  line=`${ico(n,s.fail?'--fail':run?'--accent':c)}<span class="v2">${run?'Running':v}</span><span class="ptx mono">${s.subj}</span><span class="dur">${run?'31s so far':s.d}</span>${s.fail?'<span class="perr">failed</span>':''}<span class="pat">${s.at}</span>`;
+  fine=`Step ${real.indexOf(s)+1}${live?'':' of '+real.length} · click to open it in the log`;}
+ return `<span class="cur" style="--x:${x}%"></span><span class="caret" style="--x:${x}%"></span><div class="pop" style="--x:${x}%"><div class="pl">${line}</div><div class="pfine">${fine}</div></div>`;
+}
+function strip2(steps,o={}){
+ const tot=steps.reduce((a,s)=>a+(s.w||0),0);let acc=0;const xs=[];
+ const segs=steps.map((s,i)=>{
+  if(s.k==='compact'){xs.push(acc/tot*100);return '<i class="seam"></i>';}
+  xs.push((acc+s.w/2)/tot*100);acc+=s.w;
+  const live=o.live&&i===steps.length-1;
+  return `<i class="${live?'live':''}" style="flex:${s.w} 1 0;background:var(${s.fail?'--fail':live?'--accent':K[s.k][1]})"></i>`}).join('');
+ const ms=steps.map((s,i)=>s.m?{...M[s.m],x:xs[i]}:null).filter(Boolean);
+ const dots=o.dots?ms.map(m=>`<span class="mdot ${m.ask?'ring':''}" style="--x:${m.x}%;--c:var(${m.c})"></span>`).join(''):'';
+ const pins=o.pins?ms.filter(m=>o.pins.includes(m.n)).map(m=>`<span class="pin ${m.n===o.pinOn?'on':''}" style="--x:${m.x}%;--c:var(${m.c})"><span class="pc"><b>${m.g}</b><span class="n">${m.n}</span></span><span class="ps"></span></span>`).join(''):'';
+ const hv=o.hover!=null?popover(steps,o.hover,xs[o.hover],o.live):'';
+ return `<div class="stripw ${o.pins?'pins':''}"><div class="strip">${segs}</div>${dots}${pins}${hv}</div>`;
+}
+function headJ(o={}){
+ const lead=o.live?`<span class="spin">${lu('loader-circle')}</span><span class="w">Working</span><span class="dur">1m 31s</span>`
+  :`<span class="chev">${lu(o.open?'chevron-down':'chevron-right')}</span><span class="w">Worked</span><span class="dur">4m 12s</span>`;
+ return `<div class="hl">${lead}<span class="ph jh">· ${PHRASE} · 2 skills</span><span class="chip ask">? #2</span><span class="chip unr">${o.live?2:3} unread</span>${o.right?`<span class="hr">${o.right}</span>`:''}</div>`;
+}
+const lv=(on,steps)=>`<span class="seg ${steps?'dial':''}">${[['final','Final'],['key','Key'],['balanced','Balanced'],['all','All']].map(([k,l])=>`<span class="${on===k?'on':''}">${l}<span class="ct">${LV[k].length}</span></span>`).join('')}${steps?`<span class="dv"></span><span class="${on==='steps'?'on':''}">Steps<span class="ct">15</span></span>`:''}</span>`;
+const lvrow=(on,extra='',end='4:12',dial=0)=>`<div class="lvrow"><span class="t">0:00</span>${lv(on,dial)}<span class="t">${end}</span>${extra}</div>`;
+function jev(m,pos,live){
+ return `<div class="jc ${m.ask?'ask':''}"><div class="jtop"><span class="tag" style="--c:var(${m.c})">${m.g} ${m.tag}</span>${m.ask?'<span class="tag" style="--c:var(--ask)">Needs reply</span>':''}${live?'<span class="tag" style="--c:var(--accent)">Following latest</span>':''}<span class="jmeta">#${m.n} · ${m.at} · ${pos}</span></div><div class="jtx">${m.text}</div><div class="jact"><span class="btn">${lu('reply')}Reply</span><span class="btn">${lu('arrow-down')}Lower</span><span class="btn rt">${lu('repeat-2')}Retype</span><span class="nav"><span>${lu('chevron-left')}</span><span>${lu('chevron-right')}</span><span>${lu('x')}</span></span></div></div>`;
+}
+const tabs3=(on,live)=>`<span class="seg"><span class="${on==='m'?'on':''}">Messages<span class="ct">${live?3:5}</span></span><span class="${on==='s'?'on':''}">Steps<span class="ct">${live?11:15}</span></span><span class="${on==='u'?'on':''}">Usage</span></span>`;
+const allRows=()=>STEPS2.map(s=>row2(s)).join('');
+
+D.popover=p=>{
+ const card=(o,steps,i)=>`<div class="hov"><div class="card">${headJ(o)}${strip2(steps,{live:o.live,dots:1,hover:i})}</div></div>`;
+ return state('Hovering a step',card({},STEPS2,9),'the failed check')
+  +state('Hovering a message',card({},STEPS2,6),'the open Ask; click opens it')
+  +state('Live, hovering the running step',card({live:1},LIVE2,11));
+};
+D.ptabs=p=>{
+ const top=(o,on)=>{const t=on?tabs3(on,o.live):'';
+  return `<div class="top">${headJ({...o,right:p?'':t})}${strip2(o.live?LIVE2:STEPS2,{live:o.live,dots:on!=='m',pins:on==='m'?LV.all:null,pinOn:2,hover:o.hover})}${p&&t?`<div class="tabrow">${t}</div>`:''}</div>`};
+ const body=(on,o)=>on==='m'?`<div class="pbody jb">${jev(M[2],'2/5')}${lvrow('all')}</div>`
+  :on==='u'?`<div class="pbody">${USAGE}</div>`
+  :`<div class="pbody">${o.live?earlier(9)+ticker2():allRows()}</div>`;
+ const P=(o,on)=>`<div class="pnl">${top(o,on)}${on?body(on,o):''}</div>`;
+ return state('Collapsed',`<div class="hov">${P({hover:6})}</div>`,'hovering the Ask on the strip')
+  +state('Live',P({live:1},'s'),'opens on Steps while work runs')
+  +state('Expanded',P({open:1},'m'),'opens on Messages once the turn ends; pins replace the dots')
+  +state('Expanded, Steps tab',P({open:1},'s'),'messages sit in the log as badged rows')
+  +state('Expanded, Usage tab',P({open:1},'u'));
+};
+D.jevsheet=p=>{
+ const stepsBtn=open=>`<span class="btn ${open?'on':''}" style="font-family:Geist,sans-serif">${lu('list')}Steps<span class="ct">15</span></span>`;
+ const drawer=(live,inner)=>`<div class="drawer"><div class="dtop"><span class="seg"><span class="on">Steps<span class="ct">${live?11:15}</span></span><span>Usage</span></span></div>${inner}</div>`;
+ return state('Collapsed',`<div class="hov"><div class="card">${headJ({})}${strip2(STEPS2,{dots:1,hover:9})}</div></div>`,'Jev minimised; hovering the failed check')
+  +state('Live',`<div class="card">${headJ({live:1})}${jev(M[3],'3/3',1)}${strip2(LIVE2,{live:1,pins:LV.all,pinOn:3})}${lvrow('all',p?'':stepsBtn(1),'1:31')}</div>${drawer(1,earlier(9)+ticker2())}`,'the drawer follows the work under the latest message')
+  +state('Expanded',`<div class="card">${headJ({open:1})}${jev(M[2],'2/5')}${strip2(STEPS2,{pins:LV.all,pinOn:2})}${lvrow('all',p?'':stepsBtn(1))}</div>${drawer(0,allRows())}`,'messages stay in the card; raw steps pull out underneath');
+};
+D.ftabs=p=>{
+ const foot=(on,live)=>`<div class="ftabs">${[['m','Messages',live?3:5],['s','Steps',live?11:15],['u','Usage','']].map(([k,l,c])=>`<span class="ftab ${on===k?'on':''}">${l}${c!==''?`<span class="ct">${c}</span>`:''}</span>`).join('')}<span class="fright">${live?'$0.21':p?'$0.41':'$0.4123 · ctx <span class="gauge"><b></b></span> 41%'}</span></div>`;
+ const top=(o,on)=>`<div class="top">${headJ(o)}${strip2(o.live?LIVE2:STEPS2,{live:o.live,dots:on!=='m',pins:on==='m'?LV.all:null,pinOn:2,hover:o.hover})}</div>`;
+ return state('Collapsed',`<div class="pnl">${top({})}${foot()}</div>`,'the tab bar is always there')
+  +state('Collapsed, hovering the Ask',`<div class="hov"><div class="pnl">${top({hover:6})}${foot()}</div></div>`,'the popover covers the tabs while it shows')
+  +state('Live',`<div class="pnl">${top({live:1},'s')}<div class="pbody">${earlier(9)+ticker2()}</div>${foot('s',1)}</div>`)
+  +state('Expanded',`<div class="pnl">${top({open:1},'m')}<div class="pbody jb">${jev(M[2],'2/5')}${lvrow('all')}</div>${foot('m')}</div>`,'the accent edge points up at what it opened');
+};
+D.dial=p=>{
+ const top=(o,on)=>{const pins=on&&on!=='steps'?LV[on]:null;
+  return `<div class="top">${headJ(o)}${strip2(o.live?LIVE2:STEPS2,{live:o.live,dots:!pins,pins,pinOn:2,hover:o.hover})}${on?lvrow(on,'',o.live?'1:31':'4:12',1):''}</div>`};
+ const foot=live=>`<div class="pfoot">${live?'':'<span class="pill err">1 failed</span>'}<span class="${p?'mrow':'mright'}">${live?LIVEBILL:BILL}</span></div>`;
+ return state('Collapsed',`<div class="hov"><div class="pnl">${top({hover:9})}</div></div>`,'hovering the failed check')
+  +state('Live',`<div class="pnl">${top({live:1},'steps')}<div class="pbody">${earlier(9)+ticker2()}</div>${foot(1)}</div>`,'the dial sits on Steps while work runs')
+  +state('Expanded, at Key',`<div class="pnl">${top({open:1},'key')}<div class="pbody jb">${jev(M[2],'1/3')}</div>${foot()}</div>`,'once done it returns to your saved level')
+  +state('Expanded, at Steps',`<div class="pnl">${top({open:1},'steps')}<div class="pbody">${allRows()}</div>${foot()}</div>`,'one more stop on the same dial: everything');
+};
 function show(key,phone){if(phone)document.body.classList.add('phone');const d=document.createElement('div');d.innerHTML=D[key](!!phone);document.body.prepend(d);lucide.createIcons();}
 </script>
 </tsp-shared>
 
-<p><strong>You're right: skill chapters can't be known.</strong> Nothing links a step to a skill. Today's code guesses: <code>skillChapters</code> (<code>utils/turns.ts:742</code>) says a skill "governs" from its load until the next skill loads or the turn ends. But a loaded skill stays in context for the rest of the session. Two can apply at once, and the model can load one and then ignore it. So the "1m 12s in · 3m 0s" timing in today's skills list, and the strip highlight it drives, are guesses too.</p>
+<p><strong>Round 3: four ways to combine One panel (2) and Raised sheet (6), with Jev and the strip popover built in.</strong> Skills stay events everywhere. Every direction shows Collapsed, Live and Expanded on desktop and phone. Round 2 is at the bottom, collapsed.</p>
 
-<p><strong>What we can honestly show:</strong> a skill load is an <em>event</em>, with a name and a time. Every design below treats it that way and drops the span. The <code>✦ N skills</code> toggle goes everywhere.</p>
+<p><strong>What I took as "the timeline popover":</strong> the hover card on the strip. Today there are two of them: the head tooltip (hovered step plus turn totals) and Jev's minimised peek (nearest message). Section P merges them, and every direction uses it. Tell me if you meant something else.</p>
 
-<p><strong>Each direction below shows Collapsed, Live and Expanded, on desktop and phone.</strong> Sections 2, 3 and 6 answer your container question: a single panel, a recessed tray, and a raised sheet. Sections 4 and 5 change how the log is structured. Sections 1 and 7 change only where the summary lives.</p>
+<p><strong>Sample turn:</strong> 4m 12s, 15 steps, 2 skill loads, 1 failed check, 1 compaction, and 5 surfaced messages, one of them an open Ask.</p>
+
+<tsp-section title="P · One strip popover (used by every direction)">
+<p><strong>One popover, showing whatever is under the pointer.</strong> A step shows verb, subject, duration and time into the turn. A message shows its badge and text, and clicking opens it. <strong>Turn totals leave the popover:</strong> they don't change with where you hover, so they move to Usage or the footer. <strong>Phone:</strong> press and drag on the strip to scrub, lift to open.</p>
+<tsp-grid min="360">
+<tsp-card n="P" name="Strip popover, desktop" why="Replaces both today's head tooltip and Jev's peek." width="820" wide><script>show('popover')</script></tsp-card>
+<tsp-card n="P" name="Strip popover, phone" why="Full width under the strip, caret on the touch point." width="390"><script>show('popover',1)</script></tsp-card>
+</tsp-grid>
+</tsp-section>
+
+<tsp-section title="A · Tabbed panel (Jev as a tab)">
+<p><strong>Container:</strong> 2's bordered panel. <strong>Tabs from 6:</strong> Messages · Steps · Usage, in the head (under the strip on phone). <strong>Jev</strong> is the Messages tab, and numbered pins replace the strip dots while it's open. <strong>Default tab:</strong> Steps while live, Messages once done. <strong>Jev off:</strong> the Messages tab goes and this is 6 inside 2's border.</p>
+<tsp-grid min="360">
+<tsp-card n="A" name="Tabbed panel, desktop" why="The most familiar shape: one box, three views." width="820" wide><script>show('ptabs')</script></tsp-card>
+<tsp-card n="A" name="Tabbed panel, phone" why="Tabs go full width under the strip." width="390"><script>show('ptabs',1)</script></tsp-card>
+</tsp-grid>
+</tsp-section>
+
+<tsp-section title="B · Jev on top, steps drawer underneath">
+<p><strong>Jev is not a tab here.</strong> Messages are what you read, so they stay in the card as they do today. <strong>Raw steps</strong> pull out from under the card as a raised drawer, with 6's lift and 2's attachment, and Steps · Usage tabs. <strong>Opener:</strong> the Steps button in the level row, or a click on the strip. <strong>Jev off:</strong> the card is the plain head and the drawer is 6's sheet.</p>
+<tsp-grid min="360">
+<tsp-card n="B" name="Jev + drawer, desktop" why="An open Ask is never hidden behind a tab." width="820" wide><script>show('jevsheet')</script></tsp-card>
+<tsp-card n="B" name="Jev + drawer, phone" why="The Steps button drops on phone; tap the strip instead." width="390"><script>show('jevsheet',1)</script></tsp-card>
+</tsp-grid>
+</tsp-section>
+
+<tsp-section title="C · Footer tab bar">
+<p><strong>2's footer bar becomes the tab bar.</strong> It's a control, so it can't pass for a step, and it carries the cost on the right. <strong>Always visible, even collapsed:</strong> one click to any view. <strong>Cost:</strong> every collapsed turn grows by about 38px. <strong>Jev off:</strong> Steps · Usage only.</p>
+<tsp-grid min="360">
+<tsp-card n="C" name="Footer tabs, desktop" why="The tab underline sits on top, pointing at what it opened." width="820" wide><script>show('ftabs')</script></tsp-card>
+<tsp-card n="C" name="Footer tabs, phone" why="Cost shortens to dollars; tabs stay." width="390"><script>show('ftabs',1)</script></tsp-card>
+</tsp-grid>
+</tsp-section>
+
+<tsp-section title="D · One dial (novel)">
+<p><strong>Jev's level row gains a fifth stop: Steps.</strong> It stays under the strip, where Jev's levels live today. Final, Key, Balanced and All filter messages. Steps shows everything, with messages badged in place. This works because messages already are steps (the text parts), so it's one control instead of tabs plus levels. <strong>Usage:</strong> 2's footer bar. <strong>Jev off:</strong> the dial goes and this is exactly 2.</p>
+<tsp-grid min="360">
+<tsp-card n="D" name="One dial, desktop" why="Removes a concept instead of adding one." width="820" wide><script>show('dial')</script></tsp-card>
+<tsp-card n="D" name="One dial, phone" why="Counts drop from the dial on phone; the pins carry them." width="390"><script>show('dial',1)</script></tsp-card>
+</tsp-grid>
+</tsp-section>
+
+<p><strong>My lean: D.</strong> It removes a concept, and with Jev off it falls back to 2, the one you liked. <strong>Safe pick: A</strong>, the most familiar. <strong>B</strong> if an open Ask should never sit behind a tab.</p>
+
+<p><strong>Round 2, for reference:</strong> sections 0 to 7 below.</p>
 
 <tsp-section title="0 · Today (reference)" closed>
 <tsp-grid min="360">
@@ -289,7 +501,7 @@ function show(key,phone){if(phone)document.body.classList.add('phone');const d=d
 </tsp-grid>
 </tsp-section>
 
-<tsp-section title="1 · Head ledger (your pick, refined)">
+<tsp-section title="1 · Head ledger (your pick, refined)" closed>
 <p><strong>Skills:</strong> named pills in the head card, with diamonds on the strip where each loaded. <strong>Bill:</strong> head card, right of the pills. <strong>Log:</strong> steps only; a skill row says "Skill", not "Loaded", and has no duration, since loading takes milliseconds and the number means nothing.</p>
 <tsp-grid min="360">
 <tsp-card n="1" name="Head ledger, desktop" why="Everything about the turn sits in the card; everything below it is a step." width="820" wide><script>show('ledger')</script></tsp-card>
@@ -297,7 +509,7 @@ function show(key,phone){if(phone)document.body.classList.add('phone');const d=d
 </tsp-grid>
 </tsp-section>
 
-<tsp-section title="2 · One panel">
+<tsp-section title="2 · One panel" closed>
 <p><strong>Container:</strong> the head card and the log become one bordered panel. The log is its body, the bill is its footer bar. <strong>Skills:</strong> inline event pills where they loaded, plus "2 skills" in the sentence.</p>
 <tsp-grid min="360">
 <tsp-card n="2" name="One panel, desktop" why="The border answers “does this belong to the turn?” and the footer bar can't be mistaken for a row." width="820" wide><script>show('panel')</script></tsp-card>
@@ -305,7 +517,7 @@ function show(key,phone){if(phone)document.body.classList.add('phone');const d=d
 </tsp-grid>
 </tsp-section>
 
-<tsp-section title="3 · Recessed tray">
+<tsp-section title="3 · Recessed tray" closed>
 <p><strong>Container:</strong> the log opens as a sunken tray inside the head card, like a drawer pulled out. The raw output looks lower and quieter than the summary above it. <strong>Skills:</strong> labelled diamonds on the strip. <strong>Bill:</strong> cost in the head, full bill at the bottom of the tray.</p>
 <tsp-grid min="360">
 <tsp-card n="3" name="Recessed tray, desktop" why="Raw steps read as machine output, set apart from the prose around them." width="820" wide><script>show('well')</script></tsp-card>
@@ -313,7 +525,7 @@ function show(key,phone){if(phone)document.body.classList.add('phone');const d=d
 </tsp-grid>
 </tsp-section>
 
-<tsp-section title="4 · Timeline rail">
+<tsp-section title="4 · Timeline rail" closed>
 <p><strong>Structure:</strong> steps hang off a vertical rail. A coloured dot replaces each icon, a diamond marks a skill load, and the rail ends in a "Done" node that carries the bill. <strong>No container</strong>: the rail does the grouping.</p>
 <tsp-grid min="360">
 <tsp-card n="4" name="Timeline rail, desktop" why="A skill is a point on the line, which is exactly what we know about it." width="820" wide><script>show('rail')</script></tsp-card>
@@ -321,7 +533,7 @@ function show(key,phone){if(phone)document.body.classList.add('phone');const d=d
 </tsp-grid>
 </tsp-section>
 
-<tsp-section title="5 · Ledger table">
+<tsp-section title="5 · Ledger table" closed>
 <p><strong>Structure:</strong> a bordered table, with columns for time into the turn, kind, step, and how long it took. Totals are the footer row. Most "raw" of the set, and best for scanning when things happened.</p>
 <tsp-grid min="360">
 <tsp-card n="5" name="Ledger table, desktop" why="The “At” column puts skills, failures and the compaction on one clock." width="820" wide><script>show('table')</script></tsp-card>
@@ -329,7 +541,7 @@ function show(key,phone){if(phone)document.body.classList.add('phone');const d=d
 </tsp-grid>
 </tsp-section>
 
-<tsp-section title="6 · Raised sheet with tabs">
+<tsp-section title="6 · Raised sheet with tabs" closed>
 <p><strong>Container:</strong> opening lifts the card into a raised sheet with two tabs. <strong>Steps</strong> holds only steps. <strong>Usage</strong> collects everything that isn't a step: cost, tokens, context, skills (with load times), failures and compactions. Has a fourth state for the Usage tab.</p>
 <tsp-grid min="360">
 <tsp-card n="6" name="Raised sheet, desktop" why="The cleanest split: the metadata gets a real home instead of a footer." width="820" wide><script>show('sheet')</script></tsp-card>
@@ -337,7 +549,7 @@ function show(key,phone){if(phone)document.body.classList.add('phone');const d=d
 </tsp-grid>
 </tsp-section>
 
-<tsp-section title="7 · Hairline gutter (minimal)">
+<tsp-section title="7 · Hairline gutter (minimal)" closed>
 <p><strong>Container:</strong> none. A hairline drops from the card and the log hangs off it. <strong>Skills:</strong> in the sentence and as "Skill" rows. <strong>Bill:</strong> just the cost, top right; the rest on hover. The smallest change that still fixes the bug.</p>
 <tsp-grid min="360">
 <tsp-card n="7" name="Hairline gutter, desktop" why="Nothing follows the last step, so nothing can pass for one." width="820" wide><script>show('gutter')</script></tsp-card>
