@@ -276,7 +276,7 @@ export class CursorTurnEvents {
 			const label = name ?? args["description"] ?? args["agentId"];
 			if (typeof label === "string") this.questionSources.set(callId, label);
 		} else if (parent) {
-			// 1.0.37 reports the parent in callback context.sessionId. Task's
+			// The SDK reports the parent in callback context.sessionId. Task's
 			// nested call ID, rather than that context, identifies the asker.
 			this.questionSources.set(callId, parent);
 		}

@@ -247,8 +247,8 @@ export function createRealCursorSdkPort(
 			getUsage: () => call("agent.getUsage", () => agent.getUsage()),
 			close() {
 				return (closed ??= (async () => {
-					// close() releases its lease without awaiting it in 1.0.37.
-					// Await disposal first so store teardown cannot race that release.
+					// close() does not await its lease release; dispose first so store
+					// teardown cannot race it.
 					await agent[Symbol.asyncDispose]();
 					agent.close();
 				})());
@@ -319,8 +319,8 @@ export function createRealCursorSdkPort(
 			const operation = (async () => {
 				const sdk = await load();
 				const store = await credentialStore();
-				// SDK 1.0.37 aborts polling, but does not check the signal while
-				// minting/saving. Keep cancelled flows from replacing the SDK login.
+				// The SDK stops polling on abort but not while minting or saving, so
+				// the store below keeps a cancelled flow from replacing the login.
 				await sdk.Cursor.auth.login({
 					...options,
 					store: {
@@ -454,8 +454,8 @@ export function createRealCursorSdkPort(
 				throw cursorSdkFailure("sandbox.prime", cause);
 			});
 			try {
-				// 1.0.37 initializes executors lazily. Its checked internal method
-				// primes the sandbox without sending a hidden, billable prompt.
+				// Executors start lazily. This checked internal method primes the
+				// sandbox without sending a hidden, billable prompt.
 				if (
 					!("getExecutor" in agent) ||
 					typeof agent.getExecutor !== "function"
